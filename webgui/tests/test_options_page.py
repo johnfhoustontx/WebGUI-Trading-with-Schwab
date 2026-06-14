@@ -4,7 +4,7 @@ Cover the pure transforms (signal dicts -> table rows/columns) and that the
 page exposes a render() entrypoint. The NiceGUI rendering itself is exercised
 by the shell smoke run; here we keep the data marshalling honest.
 """
-import pages.options as options
+import pages.options.scanner as options
 
 SAMPLE = {
     "symbol": "SPY",

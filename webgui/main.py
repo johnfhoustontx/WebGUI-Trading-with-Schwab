@@ -81,8 +81,8 @@ def _stub(title: str, blurb: str) -> None:
 @ui.page("/")
 def options_page() -> None:
     with _layout("/", "Options"):
-        from pages import options
-        options.render()
+        from pages.options import scanner
+        scanner.render()
 
 
 @ui.page("/sentiment")
