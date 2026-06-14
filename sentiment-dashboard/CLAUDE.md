@@ -48,18 +48,24 @@ SentimentDashboard\sentiment_bridge.json             (legacy mirror)
 External consumers: Options Scanner regime_filter, Blueprint Analyzer.
 ```
 
-## Component catalog (6 components, v4.2)
+## Component catalog (5 components, v4.3)
 
 Source of truth: `scoring/__init__.py:WEIGHTS`. Mirror here for reference.
+Weights sum to 100%.
 
 | Component | Weight | Module | Notes |
 |---|---|---|---|
 | VIX Complex | 20% | `scoring/vix.py:score_complex` | Internal blend of three sub-scores: Term 50%, VIX1D 33%, Slope 17%. Sub-scores still displayed on VIX tab but no longer enter composite directly. |
-| Put/Call | 15% | `scoring/put_call.py` | CBOE $CPCE (Equity) primary. |
+| Put/Call (sectors) | 20% | `scoring/put_call.py` | **v4.3:** cap-weighted per-sector Put/Call from option chains (was 15% market $CPCE). Scored via the same `PC_THRESHOLDS`. |
 | Breadth | 20% | `scoring/breadth.py` | NYSE A/D ratio + % above 50 DMA + H/L. |
 | Rotation | 15% | `scoring/rotation.py` | Blended day/3d/week cyclical-vs-defensive (40/40/20). |
-| Sector Performance | 25% | `scoring/sector_perf.py` | S&P cap-weighted daily move across 11 GICS sectors. Cap weights in `sentiment_dashboard.SP500_SECTOR_WEIGHTS`. |
-| Credit Pulse | 5% | `scoring/credit_pulse.py` | HYG/IEI z-score (60%) + HYG vs 50d MA (40%). 60d cache. |
+| Sector Performance | 25% | `scoring/sector_perf.py` | S&P cap-weighted daily move across 11 GICS sectors. Cap weights in `sectors_ref.SP500_SECTOR_WEIGHTS`. |
+
+**Credit Pulse removed from the composite (v4.3).** Its 5% was reallocated to
+Put/Call (15% → 20%). `scoring/credit_pulse.py` (HYG/IEI z-score 60% + HYG vs
+50d MA 40%, 60d cache) and `history_backfill.py` still **compute** a
+`credit_pulse` score for display/back-compat, but it is no longer in `WEIGHTS`
+and does not enter the confidence-weighted blend.
 
 ## Trend regime (v4.1)
 
