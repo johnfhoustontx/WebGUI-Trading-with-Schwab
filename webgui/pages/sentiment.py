@@ -23,6 +23,11 @@ CLR_FLAT = "#9e9e9e"
 CLR_CYAN = "#3fb6c7"
 LINE_COLOR = "#42a5f5"
 
+# In-process cache so navigating away/back repaints instantly without re-fetch.
+# Single-user app (see root CLAUDE.md); lost on server restart.
+_CACHE = {"snaps": None, "spy": None, "sector": None,
+          "expanded": set(), "industry": {}}
+
 # (component_scores key, display name, weight or None if out of composite)
 COMPONENTS = [
     ("vix_complex", "VIX Complex", WEIGHTS.get("vix_complex")),
@@ -461,7 +466,13 @@ def render():
 
     from pages.options.svg import speedometer_svg
 
-    state = {"snaps": [], "spy": [], "sector": None}
+    state = {
+        "snaps": _CACHE["snaps"] or [],
+        "spy": _CACHE["spy"] or [],
+        "sector": _CACHE["sector"],
+        "expanded": set(_CACHE["expanded"]),
+        "industry": dict(_CACHE["industry"]),
+    }
 
     with ui.row().classes("items-center gap-3 w-full"):
         ui.label("Market Sentiment").classes("text-h6")
@@ -643,6 +654,7 @@ def render():
         sec_spinner.visible = True
         try:
             state["sector"] = await ng_run.io_bound(_load_sector_perf, state["spy"])
+            _CACHE["sector"] = state["sector"]
             _apply_sectors()
         except Exception as e:  # noqa: BLE001
             ui.notify(f"Sector load failed: {e}", type="negative")
@@ -661,6 +673,7 @@ def render():
         try:
             snaps, spy = await ng_run.io_bound(_load_snapshots)
             state["snaps"], state["spy"] = snaps, spy
+            _CACHE["snaps"], _CACHE["spy"] = snaps, spy
             _apply()
         except Exception as e:  # noqa: BLE001
             ui.notify(f"Sentiment load failed: {e}", type="negative")
@@ -670,5 +683,11 @@ def render():
         if with_sectors:
             await load_sectors()
 
-    ui.timer(0.1, lambda: load(with_sectors=True), once=True)
-    ui.timer(120.0, load)
+    # Instant repaint from cache on revisit; first-ever visit fetches.
+    if state["snaps"]:
+        _apply()
+    if state["sector"]:
+        _apply_sectors()
+    if not state["snaps"]:
+        ui.timer(0.1, lambda: load(with_sectors=True), once=True)
+    ui.timer(300.0, load)   # composite-only auto-refresh (was 120s)
