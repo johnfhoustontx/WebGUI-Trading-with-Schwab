@@ -8,7 +8,7 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-06-14 (Phase 2 shell + full Options section incl. Gamma/Simulator built; **Sentiment page built** — composite gauge + component table + 5 tiles + 30d history/rolling-avgs + trend regime + **Sector & Industry Performance** (Day/Week/Month %, P/C, RRG, rotation banner), reusing `history_backfill` + `scoring.rotation`/`sector_perf`; 113 webgui tests green; Trade/Portfolio/Driver pages still stubs — next session. See "webgui development notes" below.)
+**Last updated:** 2026-06-14 (Phase 2 shell + full Options section incl. Gamma/Simulator built; **Sentiment page built** — composite gauge + component table + 5 tiles + 30d history/rolling-avgs + trend regime + **Sector & Industry Performance** (Day/Week/Month %, P/C, RRG, rotation banner), reusing `history_backfill` + `scoring.rotation`/`sector_perf`; 116 webgui tests green; Trade/Portfolio/Driver pages still stubs — next session. See "webgui development notes" below.)
 
 ## What this project is
 
@@ -91,7 +91,7 @@ Routes:
 | `/options/swing` | Swing Scanner | built |
 | `/options/gamma` | Gamma (GEX/Charm/DEX/Vanna bars + flip/walls + intraday heatmap) | built |
 | `/options/simulator` | Simulator (What-if + IV-shock; Replay TODO) | built |
-| `/sentiment` | Sentiment (composite gauge + bias, component table w/ Contrib, 5 summary tiles, 30d history + 5d/20d rolling avgs + velocity/divergence, trend regime, **Sector & Industry Performance** table w/ Day/Week/Month %, P/C, RRG + rotation banner) | built |
+| `/sentiment` | Sentiment (composite gauge + bias, component table w/ Contrib, 5 summary tiles, 30d history + 5d/20d rolling avgs + velocity/divergence, trend regime, **Sector & Industry Performance** table w/ Day/Week/Month %, P/C, RRG + rotation banner + **expandable industries**; **persists across navigation**) | built |
 | `/trade` `/portfolio` `/driver` | other apps | **stubs** |
 
 The `pages/options/` subpackage shares `header.py` (compact quotes/VIX/sentiment
@@ -156,7 +156,7 @@ Preview tool (start `webgui`, screenshot). Restart the preview after code change
 to pick them up. To drive Quasar inputs from the preview, set the native value +
 dispatch `input`/`change`/`blur` events.
 
-**Tests:** `cd webgui && ..\.venv\Scripts\python -m pytest -q` (113 green as of
+**Tests:** `cd webgui && ..\.venv\Scripts\python -m pytest -q` (116 green as of
 this writing). TDD pure functions; smoke-verify `render()` with a screenshot.
 
 **Environment quirks to expect:**
@@ -179,17 +179,22 @@ composite), 5 summary **tiles** (Modifier/Bias/Signal/Yesterday/Change), 30d Plo
 history + 5d/20d rolling averages + velocity/divergence, trend-regime badge, and the
 **Sector & Industry Performance** table (11 sectors × Day/Week/Month %, P/C ratio,
 RRG quadrant; per-cell colored) with a rotation banner (`scoring.rotation.
-compute_rotation`) + "% green | Cap-wtd | Score" summary. The sector load
-(`_load_sector_perf`, ~24 proxy calls incl. 11 `/chains` for P/C) runs on initial
-load + manual Refresh; the 120s auto-timer is composite-only (so `/chains` can't
-stack). Verified against the live proxy to match the source dashboard exactly
-(82% green | Cap-wtd +0.70% | Score 7.8/10). Designs/plans:
-[base design](docs/plans/2026-06-14-sentiment-page-design.md) /
-[sector-perf design](docs/plans/2026-06-14-sentiment-sector-perf-design.md) /
-[plan](docs/plans/2026-06-14-sentiment-sector-perf-plan.md).
-**Follow-ups:** expandable **industry** sub-rows (lazy per-sector fetch + tree);
-live *intraday* composite (page shows last completed session; intraday-live needs
-porting the tk quote-fetch path).
+compute_rotation`) + "% green | Cap-wtd | Score" summary. Each sector **expands**
+into its industry sub-rows (▷ toggle or Expand/Collapse All; lazy-fetched via
+`_load_industries` + cached; industries show Day/Week/Month % only, P/C+RRG blank).
+The sector load (`_load_sector_perf`, ~24 proxy calls incl. 11 `/chains` for P/C)
+runs on initial load + manual Refresh; the **300s** auto-timer is composite-only
+(so `/chains` can't stack). The page **persists across navigation** via a
+module-level `_CACHE` (single-user) — returning to the tab repaints instantly from
+cache (incl. expanded sectors), no re-fetch. Verified against the live proxy to
+match the source dashboard exactly (82% green | Cap-wtd +0.70% | Score 7.8/10; real
+industry rows on expand). Designs/plans:
+[base](docs/plans/2026-06-14-sentiment-page-design.md) /
+[sector-perf](docs/plans/2026-06-14-sentiment-sector-perf-design.md) /
+[persistence+industries](docs/plans/2026-06-14-sentiment-persistence-industries-design.md)
+(+ matching `-plan.md` files).
+**Follow-up:** live *intraday* composite (page shows last completed session;
+intraday-live needs porting the tk quote-fetch path).
 
 **Next session — remaining pages (Phase 3.3–3.5 of the webgui plan):**
 - **Trade** (`/trade`): `trade-analyzer/src/analysis` — symbol → MTF analysis +
@@ -268,7 +273,7 @@ cd sentiment-dashboard ; python -m pytest tests
 cd trade-analyzer      ; python -m pytest .
 cd portfolio-analyzer  ; python -m pytest tests
 cd claude-driver       ; python -m pytest .
-cd webgui              ; python -m pytest .   # 113 tests: transforms + shell smoke
+cd webgui              ; python -m pytest .   # 116 tests: transforms + shell smoke
 ```
 
 - **options-scanner** has ~2 known date-relative failing tests carried over from
