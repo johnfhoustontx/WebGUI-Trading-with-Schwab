@@ -371,7 +371,10 @@ def component_table_rows(snapshot, rotation_value=None, sector_value=None):
         "vix_complex": (snapshot.get("volatility") or {}).get("interpretation"),
         "put_call": (snapshot.get("options") or {}).get("pc_equity"),
         "breadth": (snapshot.get("breadth") or {}).get("interpretation"),
-        "rotation": rotation_value or (snapshot.get("rotation") or {}).get("interpretation"),
+        # Rotation Value is the dual-momentum "Cyc rank …" string once the
+        # sector load completes; before that show "—" rather than the
+        # snapshot's raw-float interp ("Day 5.3064999… · …").
+        "rotation": rotation_value or "—",
         "sector_perf": sector_value,
     }
     rows = []
@@ -429,7 +432,7 @@ def render():
         ui.space()
         spinner = ui.spinner(size="sm")
         spinner.visible = False
-        ui.button(icon="refresh", on_click=lambda: load()).props("flat round")
+        ui.button(icon="refresh", on_click=lambda: load(with_sectors=True)).props("flat round")
 
     gauge_box = ui.html("").classes("q-mt-sm")
     bias_lbl = ui.label("").classes("text-h6")
@@ -595,6 +598,11 @@ def render():
             _render_components(state["snaps"][-1], rotation_value, sector_value)
 
     async def load_sectors():
+        # Re-entrancy guard: the sector fetch (~24 proxy calls incl. /chains)
+        # can outlast a refresh interval; never stack a second one.
+        if state.get("loading_sectors"):
+            return
+        state["loading_sectors"] = True
         sec_spinner.visible = True
         try:
             state["sector"] = await ng_run.io_bound(_load_sector_perf, state["spy"])
@@ -603,18 +611,27 @@ def render():
             ui.notify(f"Sector load failed: {e}", type="negative")
         finally:
             sec_spinner.visible = False
+            state["loading_sectors"] = False
 
-    async def load():
+    async def load(with_sectors=False):
+        # Composite refresh. Sectors are loaded only on initial load and on
+        # explicit Refresh — the 120s auto-timer is composite-only so the
+        # heavy /chains fetch can't stack on a slow proxy.
+        if state.get("loading"):
+            return
+        state["loading"] = True
         spinner.visible = True
         try:
             snaps, spy = await ng_run.io_bound(_load_snapshots)
             state["snaps"], state["spy"] = snaps, spy
             _apply()
-            await load_sectors()
         except Exception as e:  # noqa: BLE001
             ui.notify(f"Sentiment load failed: {e}", type="negative")
         finally:
             spinner.visible = False
+            state["loading"] = False
+        if with_sectors:
+            await load_sectors()
 
-    ui.timer(0.1, load, once=True)
+    ui.timer(0.1, lambda: load(with_sectors=True), once=True)
     ui.timer(120.0, load)
