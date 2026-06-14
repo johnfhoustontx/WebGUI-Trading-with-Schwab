@@ -62,8 +62,8 @@ def load_sectors_data(xlsx_path=SECTORS_XLSX):
         sector_order.append(sector_name)
 
     industries_by_sector = {}
-    seen_industry = set()
-    seen_etf = set()
+    seen_industry = set()  # (sector, industry) — keep first ETF only
+    seen_etf = set()       # global ETF dedupe (e.g. MJ in Staples + Health)
     for i, row in enumerate(wb["Industries"].iter_rows(values_only=True)):
         if i == 0 or not row or not row[0]:
             continue

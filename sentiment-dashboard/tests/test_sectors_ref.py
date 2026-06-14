@@ -23,3 +23,11 @@ def test_weights_sum_about_100():
 def test_missing_workbook_returns_empty():
     rows = sectors_ref.load_sectors_data(xlsx_path="does_not_exist.xlsx")
     assert rows == []
+
+
+def test_industry_rows_present_and_etfs_unique():
+    rows = sectors_ref.load_sectors_data()
+    industries = [r for r in rows if r.get("kind") == "industry"]
+    assert industries, "expected some industry rows"
+    etfs = [r["etf"] for r in industries if r.get("etf")]
+    assert len(etfs) == len(set(etfs)), "industry ETFs must be de-duped"
