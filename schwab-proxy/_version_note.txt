@@ -1,0 +1,8 @@
+"""
+schwab_proxy.py - Centralized Schwab API proxy with token management
+Exposes market data AND trader API endpoints for the Claude_is_the_Driver system.
+
+Endpoints:
+  Marketdata:  /health, /quote, /quotes, /chains, /pricehistory, /passthrough
+  Trader:      /accounts, /orders/{account_hash}
+"""
