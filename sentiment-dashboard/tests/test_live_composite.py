@@ -57,3 +57,24 @@ def test_build_bridge_payload_roundtrips_through_bridge(tmp_path):
     reread = json.loads(out.read_text())
     assert reread["composite_score"] == 6.0
     assert reread["schema_version"]
+
+
+class _FakeDF:
+    def __init__(self, closes): self._c = closes
+    def __getitem__(self, k): return self
+    def tolist(self): return self._c
+
+class _FakeClient:
+    def get_quote(self, s): return {"last": 18.0} if s == "$VIX" else {"last": 1.5}
+    def get_quotes(self, syms): return {s: {"last": 17.0, "change_pct": 0.5} for s in syms}
+    def get_daily_history(self, s, months=12):
+        return _FakeDF([100.0 + i for i in range(80)])
+    def _request(self, ep, params=None): return None
+
+def test_compute_live_smoke():
+    import sectors_ref
+    sd = sectors_ref.load_sectors_data()
+    snap = L.compute_live(_FakeClient(), sd)
+    assert 0 <= float(snap["composite"]["total_score"]) <= 10
+    assert set(["vix_complex","put_call","breadth","rotation","sector_perf"]) \
+        <= set(snap["component_scores"])
