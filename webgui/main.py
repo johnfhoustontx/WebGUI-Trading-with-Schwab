@@ -81,7 +81,8 @@ def _stub(title: str, blurb: str) -> None:
 @ui.page("/")
 def options_page() -> None:
     with _layout("/", "Options"):
-        _stub("Options Scanner", "GEX levels, scanner results table, and signal detail.")
+        from pages import options
+        options.render()
 
 
 @ui.page("/sentiment")
