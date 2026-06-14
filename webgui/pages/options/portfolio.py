@@ -106,16 +106,22 @@ def render():
 
     ui.label("Paper Portfolio").classes("text-h5")
 
-    with ui.row().classes("items-center gap-2 flex-wrap"):
+    with ui.row().classes("items-center gap-2 flex-wrap w-full"):
         ui.button("Reload", icon="refresh", on_click=lambda: _load())
-        ui.button("Run entry cycle", icon="login",
-                  on_click=lambda: _cycle("entry")).props("outline")
-        ui.button("Run manage cycle", icon="manage_accounts",
-                  on_click=lambda: _cycle("manage")).props("outline")
-        ui.button("Reset account", icon="restart_alt",
-                  on_click=lambda: _reset()).props("flat color=negative")
+        ui.button("Run entry cycle", icon="login", on_click=lambda: _cycle("entry")) \
+            .props("outline") \
+            .tooltip("Simulate auto-entry: scan open captured signals and open paper "
+                     "positions for the eligible ones (fills via the paper broker).")
+        ui.button("Run manage cycle", icon="manage_accounts", on_click=lambda: _cycle("manage")) \
+            .props("outline") \
+            .tooltip("Simulate auto-management: reprice open positions and auto-close any "
+                     "that hit their target/stop.")
         spinner = ui.spinner(size="lg")
         spinner.visible = False
+        ui.space()
+        ui.button("Reset", icon="restart_alt", on_click=lambda: _reset()) \
+            .props("flat dense size=sm color=negative") \
+            .tooltip("Reset the paper account to a starting balance.")
     status = ui.label("").classes("opacity-70")
 
     cards_box = ui.row().classes("gap-3 flex-wrap")

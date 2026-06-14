@@ -18,7 +18,7 @@ if str(OPTIONS_SCANNER) not in sys.path:
 
 from scanner_engine import run_full_scan  # noqa: E402
 
-from . import detail, header  # noqa: E402
+from . import detail, handoff, header  # noqa: E402
 
 
 def _round(value, ndigits=2):
@@ -41,10 +41,12 @@ def signal_columns():
         ("composite_score", "Score"),
         ("grade", "Grade"),
     ]
-    return [
+    cols = [
         {"name": field, "label": label, "field": field, "sortable": True, "align": "left"}
         for field, label in spec
     ]
+    cols.append({"name": "actions", "label": "", "field": "actions", "align": "center"})
+    return cols
 
 
 def signal_rows(signals):
@@ -117,8 +119,10 @@ def render():
         if sig:
             detail_panel.update(sig)
 
-    table_0dte.on("rowClick", _select)
-    table_swing.on("rowClick", _select)
+    for _t in (table_0dte, table_swing):
+        _t.on("rowClick", _select)
+        # per-row buttons: Send to Calculator / Send to Paper trade
+        handoff.add_row_actions(_t, lambda row: by_id.get(row.get("id")))
 
     def _populate(results):
         by_id.clear()
@@ -140,11 +144,17 @@ def render():
         scan_btn.disable()
         spinner.visible = True
         status.text = "Scanning… (a few seconds)"
+
+        def _run():
+            from . import engines
+            with engines.options_scoring():  # guard scoring name collision
+                return run_full_scan(proxy.schwab_py_client)
+
         try:
-            results = await run.io_bound(run_full_scan, proxy.schwab_py_client)
+            results = await run.io_bound(_run)
         except Exception as exc:  # surface, don't crash the page
             ui.notify(f"Scan failed: {exc}", type="negative")
-            status.text = "Scan failed."
+            status.text = f"Scan failed: {exc}"
             return
         finally:
             spinner.visible = False

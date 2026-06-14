@@ -300,6 +300,8 @@ def render():
     _ensure_engine_path()
     import options_calculator as oc
 
+    from . import handoff
+
     ui.label("Calculator").classes("text-h5")
 
     leg_inputs: dict = {}
@@ -498,3 +500,58 @@ def render():
             return
         _render_summary(summary_box, summary)
         _render_grid(grid_box, eval_dates, pnl_data, spot)
+
+    def _prefill(sig):
+        """Populate inputs from a scanner/swing signal (Send to Calculator)."""
+        t = sig.get("type")
+        if t in LEG_SPECS:
+            strategy_sel.value = t
+        rebuild_legs()
+        sym = (sig.get("symbol") or "").replace("$", "")
+        if sym:
+            symbol_in.value = sym
+        price = sig.get("underlying_price")
+        if price:
+            price_in.value = round(price, 2)
+            lo, hi = oc.generate_price_range(price)
+            rmin_in.value = round(lo, 2)
+            rmax_in.value = round(hi, 2)
+        exp = sig.get("expiration")
+        if exp:
+            expiry_sel.options = [exp]
+            expiry_sel.value = exp
+            expiry_sel.update()
+        iv = sig.get("short_iv")
+        if iv:
+            iv_in.value = round(iv, 1)
+
+        def setleg(key, strike, mark):
+            info = leg_inputs.get(key)
+            if not info or strike in (None, 0):
+                return
+            info["strike"].options = [float(strike)]
+            info["strike"].value = float(strike)
+            info["strike"].update()
+            if mark:
+                info["premium"].value = round(mark, 2)
+
+        if t == "PCS":
+            setleg("short_put", sig.get("short_strike"), sig.get("short_mark"))
+            setleg("long_put", sig.get("long_strike"), sig.get("long_mark"))
+        elif t == "CCS":
+            setleg("short_call", sig.get("short_strike"), sig.get("short_mark"))
+            setleg("long_call", sig.get("long_strike"), sig.get("long_mark"))
+        elif t == "IC":
+            setleg("short_put", sig.get("short_strike"), sig.get("short_mark"))
+            setleg("long_put", sig.get("long_strike"), sig.get("long_mark"))
+            setleg("short_call", sig.get("call_short"), sig.get("call_short_mark"))
+            setleg("long_call", sig.get("call_long"), sig.get("call_long_mark"))
+        try:
+            do_calc()
+        except Exception:
+            pass
+        ui.notify(f"Loaded {sym} {t} from scanner.", type="positive")
+
+    _pending = handoff.take_pending_calculator()
+    if _pending:
+        _prefill(_pending)

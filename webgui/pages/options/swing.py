@@ -31,10 +31,11 @@ def _swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     import datetime as dt
 
     import scanner_engine as se
-    import scoring
     from iv_analysis import run_iv_analysis
 
     import proxy
+
+    from . import engines
 
     today = dt.date.today()
     chain = se.fetch_option_chain(client, symbol, from_date=today,
@@ -50,7 +51,9 @@ def _swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
                                 call_d_min, call_d_max, min_cr_pct, "SWING",
                                 spot=spot, daily_expected_move=dem)
     signals = list(spreads) + list(se.build_iron_condors(spreads))
-    scoring.score_all_signals(signals, {symbol: iv}, {symbol: tech})
+    with engines.options_scoring():  # guard scoring name collision
+        import scoring
+        scoring.score_all_signals(signals, {symbol: iv}, {symbol: tech})
     return assign_ids(signals, symbol)
 
 
@@ -60,7 +63,7 @@ def render():
 
     import proxy
 
-    from . import detail, scanner
+    from . import detail, handoff, scanner
 
     ui.label("Swing Scanner").classes("text-h5")
 
@@ -93,6 +96,8 @@ def render():
             detail_panel.update(sig)
 
     table.on("rowClick", _select)
+    # per-row buttons: Send to Calculator / Send to Paper trade
+    handoff.add_row_actions(table, lambda row: by_id.get(row.get("id")))
 
     async def do_scan():
         scan_btn.disable()
