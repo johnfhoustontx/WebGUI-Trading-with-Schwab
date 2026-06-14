@@ -38,11 +38,11 @@ def _layout(active: str, title: str):
 
     Yields the content container the page should populate.
     """
-    with ui.header().classes("items-center justify-between"):
-        ui.label("Schwab Trading").classes("text-lg font-bold")
-        ui.label(title).classes("text-base opacity-80")
-
-    with ui.left_drawer(bordered=True).classes("gap-1"):
+    # Drawer starts open and is toggleable via the header menu button, so the
+    # nav stays reachable at any viewport width (Quasar hides it as an overlay
+    # below the layout breakpoint otherwise).
+    drawer = ui.left_drawer(value=True, bordered=True).classes("gap-1").props("behavior=desktop")
+    with drawer:
         for path, label, icon in NAV:
             classes = "w-full no-underline rounded px-3 py-2 items-center"
             if path == active:
@@ -51,6 +51,12 @@ def _layout(active: str, title: str):
                 with ui.row().classes("items-center gap-3 w-full"):
                     ui.icon(icon)
                     ui.label(label)
+
+    with ui.header().classes("items-center justify-between"):
+        with ui.row().classes("items-center gap-2"):
+            ui.button(icon="menu", on_click=drawer.toggle).props("flat round color=white")
+            ui.label("Schwab Trading").classes("text-lg font-bold")
+        ui.label(title).classes("text-base opacity-80")
 
     with ui.column().classes("w-full p-4 gap-3") as content:
         health = proxy.health()
@@ -103,4 +109,4 @@ def driver_page() -> None:
 
 
 if __name__ in {"__main__", "__mp_main__"}:
-    ui.run(port=NICEGUI_PORT, title="Schwab Trading", reload=False, show=False)
+    ui.run(port=NICEGUI_PORT, title="Schwab Trading", dark=True, reload=False, show=False)
