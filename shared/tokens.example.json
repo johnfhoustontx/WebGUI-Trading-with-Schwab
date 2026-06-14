@@ -1,0 +1,8 @@
+{
+  "AccessToken": "REPLACE_ME",
+  "RefreshToken": "REPLACE_ME",
+  "ExpiresIn": 0,
+  "TokenType": "Bearer",
+  "ExpiresAt": "REPLACE_ME",
+  "RefreshTokenExpiresAt": "REPLACE_ME"
+}

@@ -1,0 +1,104 @@
+{
+  "source": "SentimentDashboard",
+  "version": "REPLACE_ME",
+  "generated_at": "",
+  "date": "",
+  "composite_score": 0.0,
+  "regime": "",
+  "bias": "",
+  "position_size_modifier": "1.00x",
+  "contrarian_signal": "",
+  "momentum": "",
+  "rolling_averages": {
+    "5d": 0.0,
+    "20d": 0.0
+  },
+  "component_scores": {
+    "vix_complex": 0.0,
+    "vix": 0.0,
+    "vix_term": 0.0,
+    "vix1d": 0.0,
+    "term_slope": 0.0,
+    "put_call": 0.0,
+    "breadth": 0.0,
+    "flow": 0.0,
+    "rotation": 0.0,
+    "sector": 0.0,
+    "sector_perf": 0.0,
+    "credit_pulse": 0.0
+  },
+  "component_confidence": {
+    "vix_complex": 0.0,
+    "put_call": 0.0,
+    "breadth": 0.0,
+    "rotation": 0.0,
+    "sector_perf": 0.0,
+    "vix_term": 0.0,
+    "sector": 0.0,
+    "vix1d": 0.0,
+    "term_slope": 0.0,
+    "credit_pulse": 0.0
+  },
+  "aggregate_confidence": 0.0,
+  "weights": {
+    "vix_complex": 0.0,
+    "put_call": 0.0,
+    "breadth": 0.0,
+    "rotation": 0.0,
+    "sector_perf": 0.0
+  },
+  "velocity": {
+    "roc_3d": 0.0,
+    "roc_5d": 0.0,
+    "z_20d": 0.0,
+    "regime_break": false
+  },
+  "divergence_flag": "",
+  "raw_data": {
+    "vix_level": 0.0,
+    "vix_term": "",
+    "vix_ma": 0.0,
+    "vix1d": 0.0,
+    "vix9d": 0.0,
+    "pc_equity": 0.0,
+    "pc_index": 0.0,
+    "credit_state": null,
+    "hyg_lqd_spread_pct": 0.0
+  },
+  "sector_breakdown": [
+    {
+      "sector": "",
+      "etf": "",
+      "day_pct": 0.0
+    }
+  ],
+  "rotation_detail": {
+    "method": "",
+    "crash_active": false,
+    "cyc_avg_rank": 0.0,
+    "def_avg_rank": 0.0,
+    "rank_spread": 0.0,
+    "cash_return_pct": 0.0,
+    "irx_yield_pct": 0.0,
+    "top_etf": "",
+    "top_return_63d": 0.0,
+    "ranks": {},
+    "returns_63d": {},
+    "quadrants": {}
+  },
+  "trend_regime": {
+    "state": "",
+    "label": "",
+    "description": "",
+    "raw_state": "",
+    "days_in_state": 0,
+    "spy_close": 0.0,
+    "sma_50": 0.0,
+    "sma_200": 0.0,
+    "sma_200_slope_pct": 0.0,
+    "drawdown_pct": 0.0,
+    "confidence": 0.0,
+    "published_at": ""
+  },
+  "schema_version": "4.2"
+}
