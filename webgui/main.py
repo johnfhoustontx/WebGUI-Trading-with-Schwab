@@ -22,14 +22,35 @@ from nicegui import ui  # noqa: E402
 import proxy  # noqa: E402
 from repo_paths import NICEGUI_PORT  # noqa: E402
 
-# (route, label, material icon) — order = nav order. Options is the home page.
-NAV = [
-    ("/", "Options", "candlestick_chart"),
+# Options is an expandable group; each child is its own route. (route, label, icon)
+OPTIONS_CHILDREN = [
+    ("/", "Scanner", "radar"),
+    ("/options/paper", "Paper Trades", "request_quote"),
+    ("/options/captured", "Captured Signals", "bookmark"),
+    ("/options/portfolio", "Paper Portfolio", "account_balance_wallet"),
+    ("/options/calculator", "Calculator", "calculate"),
+    ("/options/swing", "Swing Scanner", "swap_vert"),
+    ("/options/gamma", "Gamma", "stacked_line_chart"),
+    ("/options/simulator", "Simulator", "science"),
+]
+
+# Flat top-level items (non-Options apps). (route, label, icon)
+FLAT_NAV = [
     ("/sentiment", "Sentiment", "insights"),
     ("/trade", "Trade", "analytics"),
     ("/portfolio", "Portfolio", "account_balance"),
     ("/driver", "Driver", "smart_toy"),
 ]
+
+
+def _nav_link(path: str, label: str, icon: str, active: str) -> None:
+    classes = "w-full no-underline rounded px-3 py-2 items-center"
+    if path == active:
+        classes += " bg-primary text-white"
+    with ui.link(target=path).classes(classes):
+        with ui.row().classes("items-center gap-3 w-full"):
+            ui.icon(icon)
+            ui.label(label)
 
 
 @contextmanager
@@ -43,14 +64,12 @@ def _layout(active: str, title: str):
     # below the layout breakpoint otherwise).
     drawer = ui.left_drawer(value=True, bordered=True).classes("gap-1").props("behavior=desktop")
     with drawer:
-        for path, label, icon in NAV:
-            classes = "w-full no-underline rounded px-3 py-2 items-center"
-            if path == active:
-                classes += " bg-primary text-white"
-            with ui.link(target=path).classes(classes):
-                with ui.row().classes("items-center gap-3 w-full"):
-                    ui.icon(icon)
-                    ui.label(label)
+        options_active = active == "/" or active.startswith("/options")
+        with ui.expansion("Options", icon="candlestick_chart", value=options_active).classes("w-full"):
+            for path, label, icon in OPTIONS_CHILDREN:
+                _nav_link(path, label, icon, active)
+        for path, label, icon in FLAT_NAV:
+            _nav_link(path, label, icon, active)
 
     with ui.header().classes("items-center justify-between"):
         with ui.row().classes("items-center gap-2"):
@@ -79,10 +98,59 @@ def _stub(title: str, blurb: str) -> None:
 
 
 @ui.page("/")
-def options_page() -> None:
-    with _layout("/", "Options"):
+def options_scanner_page() -> None:
+    with _layout("/", "Options · Scanner"):
         from pages.options import scanner
         scanner.render()
+
+
+@ui.page("/options/paper")
+def options_paper_page() -> None:
+    with _layout("/options/paper", "Options · Paper Trades"):
+        from pages.options import paper
+        paper.render()
+
+
+@ui.page("/options/captured")
+def options_captured_page() -> None:
+    with _layout("/options/captured", "Options · Captured Signals"):
+        from pages.options import captured
+        captured.render()
+
+
+@ui.page("/options/portfolio")
+def options_portfolio_page() -> None:
+    with _layout("/options/portfolio", "Options · Paper Portfolio"):
+        from pages.options import portfolio
+        portfolio.render()
+
+
+@ui.page("/options/calculator")
+def options_calculator_page() -> None:
+    with _layout("/options/calculator", "Options · Calculator"):
+        from pages.options import calculator
+        calculator.render()
+
+
+@ui.page("/options/swing")
+def options_swing_page() -> None:
+    with _layout("/options/swing", "Options · Swing Scanner"):
+        from pages.options import swing
+        swing.render()
+
+
+@ui.page("/options/gamma")
+def options_gamma_page() -> None:
+    with _layout("/options/gamma", "Options · Gamma"):
+        from pages.options import gamma
+        gamma.render()
+
+
+@ui.page("/options/simulator")
+def options_simulator_page() -> None:
+    with _layout("/options/simulator", "Options · Simulator"):
+        from pages.options import simulator
+        simulator.render()
 
 
 @ui.page("/sentiment")

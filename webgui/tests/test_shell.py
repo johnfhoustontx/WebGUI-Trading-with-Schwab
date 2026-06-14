@@ -6,12 +6,17 @@ NiceGUI page registry; they do NOT start the server.
 from nicegui import Client
 
 
-def test_shell_registers_five_pages():
-    """The shell registers one route per feature page."""
+def test_shell_registers_all_pages():
+    """The shell registers the Options child routes plus the flat feature pages."""
     import main  # noqa: F401  -- importing registers the @ui.page routes
 
     routes = set(Client.page_routes.values())
-    for path in ("/", "/sentiment", "/trade", "/portfolio", "/driver"):
+    expected = (
+        "/", "/options/paper", "/options/captured", "/options/portfolio",
+        "/options/calculator", "/options/swing", "/options/gamma",
+        "/options/simulator", "/sentiment", "/trade", "/portfolio", "/driver",
+    )
+    for path in expected:
         assert path in routes, f"missing page route {path}; have {sorted(routes)}"
 
 
