@@ -270,6 +270,43 @@ def rotation_banner(rot):
     return regime, color, detail
 
 
+def sector_industry_etfs(sector_data, sector_name):
+    """Industry ETF symbols under a sector (kind=='industry', valid etf)."""
+    out = []
+    for r in sector_data:
+        if r.get("kind") != "industry" or r.get("sector") != sector_name:
+            continue
+        etf = r.get("etf")
+        if etf and etf != "n/a" and len(str(etf)) <= 6:
+            out.append(etf)
+    return out
+
+
+def industry_rows(sector_data, sector_name, ind_quotes, ind_trends):
+    """Indented rows for a sector's industries: day/week/month % only
+    (pcr/rrg blank — industry option volume is too thin)."""
+    rows = []
+    for r in sector_data:
+        if r.get("kind") != "industry" or r.get("sector") != sector_name:
+            continue
+        etf = r.get("etf")
+        if not (etf and etf != "n/a" and len(str(etf)) <= 6):
+            continue
+        q = (ind_quotes or {}).get(etf) or {}
+        t = (ind_trends or {}).get(etf) or {}
+        rows.append({
+            "label": r.get("label") or etf,
+            "etf": etf,
+            "desc": r.get("name") or "",
+            "day": q.get("change_pct"),
+            "week": t.get("week_pct"),
+            "month": t.get("month_pct"),
+            "pcr": None, "rrg": None,
+            "is_industry": True,
+        })
+    return rows
+
+
 def _load_snapshots(days=35):
     """Off-thread: full scoring path via the copied backfill engine.
     Returns (snapshots, spy_closes)."""

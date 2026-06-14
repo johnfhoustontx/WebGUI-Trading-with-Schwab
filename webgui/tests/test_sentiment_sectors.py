@@ -147,3 +147,26 @@ def test_rolling_averages_label():
     assert label in ("Rising", "Falling", "Stable")
     rising = S.rolling_averages([4.0] * 19 + [9.0] * 6)
     assert rising[2] == "Rising"
+
+
+def test_sector_industry_etfs():
+    etfs = S.sector_industry_etfs(_sector_data(), "Information Technology")
+    assert etfs == ["SMH"]
+    assert S.sector_industry_etfs(_sector_data(), "Utilities") == []
+
+
+def test_industry_rows_built():
+    quotes = {"SMH": {"change_pct": 2.5}}
+    trends = {"SMH": {"week_pct": 4.0, "month_pct": 9.0}}
+    rows = S.industry_rows(_sector_data(), "Information Technology", quotes, trends)
+    assert len(rows) == 1
+    r = rows[0]
+    assert r["etf"] == "SMH" and r["day"] == 2.5 and r["week"] == 4.0 and r["month"] == 9.0
+    assert r["pcr"] is None and r["rrg"] is None
+    assert r["label"] == "Semis"
+    assert r.get("is_industry") is True
+
+
+def test_industry_rows_missing_data_blank():
+    rows = S.industry_rows(_sector_data(), "Information Technology", {}, {})
+    assert rows[0]["day"] is None and rows[0]["week"] is None and rows[0]["month"] is None
