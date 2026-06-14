@@ -156,7 +156,8 @@ def options_simulator_page() -> None:
 @ui.page("/sentiment")
 def sentiment_page() -> None:
     with _layout("/sentiment", "Sentiment"):
-        _stub("Market Sentiment", "Composite score, sub-scores, and sector rotation.")
+        from pages import sentiment
+        sentiment.render()
 
 
 @ui.page("/trade")

@@ -123,3 +123,119 @@ def commit_trend_regime(spy_closes, lookback_days=trend_regime.HYSTERESIS_DAYS +
         committed, history = trend_regime.commit_state(raw, history, committed)
     days = 1
     return result, (committed or result.state), days
+
+
+def _load_snapshots(days=35):
+    """Off-thread: full scoring path via the copied backfill engine.
+    Returns (snapshots, spy_closes)."""
+    import proxy
+    import sectors_ref
+    from history_backfill import backfill_history
+
+    sector_data = sectors_ref.load_sectors_data()
+    snaps, _stats = backfill_history(proxy.schwab_client, sector_data, [], days=days)
+    spy_df = proxy.schwab_client.get_daily_history("SPY", months=12)
+    spy_closes = (
+        [float(c) for c in spy_df["close"].tolist()]
+        if spy_df is not None else []
+    )
+    return snaps, spy_closes
+
+
+def render():
+    import nicegui.run as ng_run
+    from nicegui import ui
+
+    from pages.options.svg import speedometer_svg, gradient_bar_svg
+
+    state = {"snaps": [], "spy": []}
+
+    with ui.row().classes("items-center gap-3 w-full"):
+        ui.label("Market Sentiment").classes("text-h6")
+        date_lbl = ui.label("").classes("opacity-70 text-sm")
+        ui.space()
+        spinner = ui.spinner(size="sm")
+        spinner.visible = False
+        ui.button(icon="refresh", on_click=lambda: load()).props("flat round")
+
+    gauge_box = ui.html("").classes("q-mt-sm")
+    bias_lbl = ui.label("").classes("text-h6")
+    sub_lbl = ui.label("").classes("opacity-80")
+    comp_box = ui.column().classes("w-full q-gutter-xs q-mt-md")
+    ui.separator().classes("q-my-md")
+    ui.label("30-Day History").classes("text-subtitle1")
+    hist_plot = ui.plotly(build_history_figure([])).classes("w-full")
+    vel_lbl = ui.label("").classes("opacity-80 text-sm")
+    flag_lbl = ui.label("").classes("text-negative text-sm")
+    div_lbl = ui.label("").classes("text-warning text-sm")
+    ui.separator().classes("q-my-md")
+    ui.label("Market Trend Regime").classes("text-subtitle1")
+    regime_badge = ui.badge("").classes("text-subtitle2 q-pa-sm")
+    regime_desc = ui.label("").classes("opacity-80 text-sm")
+    regime_detail = ui.label("").classes("opacity-60 text-xs")
+
+    def _render_components(latest):
+        comp_box.clear()
+        scores = latest.get("component_scores") or {}
+        confs = latest.get("component_confidence") or {}
+        with comp_box:
+            for key, name, w in COMPONENTS:
+                s = _safe_float(scores.get(key))
+                c = _safe_float(confs.get(key))
+                with ui.row().classes("items-center w-full no-wrap gap-3"):
+                    ui.label(name).classes("text-sm").style("width:110px")
+                    ui.label(f"{s:.1f}").classes("text-sm text-bold").style("width:34px")
+                    ui.html(gradient_bar_svg(s * 10.0))
+                    tag = (f"w {w*100:.0f}%" if w else "out of composite")
+                    ui.label(tag).classes("opacity-60 text-xs").style("width:120px")
+                    ui.label(f"conf {c:.0%}").classes("opacity-60 text-xs")
+
+    def _apply():
+        snaps = state["snaps"]
+        if not snaps:
+            bias_lbl.text = "No data"
+            return
+        latest = snaps[-1]
+        comp = latest.get("composite") or {}
+        total = _safe_float(comp.get("total_score"))
+        date_lbl.text = f"as of {latest.get('date')} (last completed session)"
+        gauge_box.content = speedometer_svg(gauge_score(total), comp.get("bias", ""),
+                                            width=220, height=140)
+        bias_lbl.text = f"{total:.2f} · {comp.get('bias', '')}"
+        bias_lbl.style(f"color:{bias_color(comp.get('bias'))}")
+        sub_lbl.text = (f"size {comp.get('size_modifier', '—')} · "
+                        f"agg conf {_safe_float(comp.get('aggregate_confidence')):.0%}")
+        _render_components(latest)
+        hist_plot.update_figure(build_history_figure(snaps))
+        _dates, scores = composite_series(snaps[:-1])
+        line, flag = velocity_line(scores, total)
+        vel_lbl.text = line
+        flag_lbl.text = flag
+        div_lbl.text = scoring_composite.divergence(divergence_named(latest)) or ""
+        if state["spy"]:
+            tr, committed, days = commit_trend_regime(state["spy"])
+            green = {"bull_trend", "pullback_in_bull"}
+            red = {"bear_rally", "bear_trend"}
+            color = CLR_GREEN if committed in green else (
+                CLR_RED if committed in red else CLR_YELLOW)
+            regime_badge.text = trend_regime.STATE_LABELS[committed]
+            regime_badge.style(f"background-color:{color};color:#111")
+            regime_desc.text = trend_regime.STATE_DESCRIPTIONS[committed]
+            regime_detail.text = (
+                f"SPY {tr.spy_close:.2f} · 50d {tr.sma_50:.2f} · 200d {tr.sma_200:.2f} "
+                f"· slope {tr.sma_200_slope_pct:+.2f}% · dd {tr.drawdown_pct:+.1f}% "
+                f"· conf {tr.confidence:.0%}")
+
+    async def load():
+        spinner.visible = True
+        try:
+            snaps, spy = await ng_run.io_bound(_load_snapshots)
+            state["snaps"], state["spy"] = snaps, spy
+            _apply()
+        except Exception as e:  # noqa: BLE001
+            ui.notify(f"Sentiment load failed: {e}", type="negative")
+        finally:
+            spinner.visible = False
+
+    ui.timer(0.1, load, once=True)
+    ui.timer(120.0, load)
