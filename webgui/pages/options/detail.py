@@ -183,10 +183,34 @@ class _Handle:
             _build(signal)
 
 
-def render():
-    """Build the (empty) detail panel; returns a handle with update()/clear()."""
-    ui.label("Trade detail").classes("text-subtitle1 font-bold")
-    container = ui.column().classes("w-full gap-2")
-    with container:
-        ui.label(_PLACEHOLDER).classes("opacity-60")
+def render(width: int = 360):
+    """Build the collapsible detail panel; returns a handle with update()/clear().
+
+    The panel owns its own column so it can collapse to a thin strip (reclaiming
+    horizontal space) and expand again via the header toggle.
+    """
+    col = ui.column().classes("shrink-0 gap-1").style(f"width: {width}px")
+    with col:
+        with ui.row().classes("items-center justify-between w-full no-wrap"):
+            title = ui.label("Trade detail").classes("text-subtitle1 font-bold")
+            toggle_btn = ui.button(icon="last_page").props("flat round dense") \
+                .tooltip("Collapse panel")
+        container = ui.column().classes("w-full gap-2")
+        with container:
+            ui.label(_PLACEHOLDER).classes("opacity-60")
+
+    state = {"open": True}
+
+    def toggle():
+        state["open"] = not state["open"]
+        container.visible = state["open"]
+        title.visible = state["open"]
+        if state["open"]:
+            col.style(f"width: {width}px")
+            toggle_btn.props("icon=last_page").tooltip("Collapse panel")
+        else:
+            col.style("width: 44px")
+            toggle_btn.props("icon=first_page").tooltip("Expand panel")
+
+    toggle_btn.on_click(toggle)
     return _Handle(container)

@@ -107,8 +107,7 @@ def render():
                     table_0dte = ui.table(columns=signal_columns(), rows=[], row_key="id").classes("w-full")
                 with ui.tab_panel(tab_swing):
                     table_swing = ui.table(columns=signal_columns(), rows=[], row_key="id").classes("w-full")
-        with ui.column().classes("w-96 shrink-0"):
-            detail_panel = detail.render()
+        detail_panel = detail.render()
 
     by_id: dict = {}
 
