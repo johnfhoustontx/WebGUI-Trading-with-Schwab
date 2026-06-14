@@ -75,17 +75,10 @@ def signal_rows(signals):
     return rows
 
 
-def _vix_strip(container, results):
+def _scan_meta_strip(container, results):
+    """Post-scan info NOT already shown by the header strip (term + timestamp)."""
     container.clear()
     with container:
-        vix = results.get("vix")
-        if vix is not None:
-            ui.label(f"VIX {vix:.2f}").classes("text-subtitle1 font-bold")
-        regime = results.get("vix_regime") or {}
-        if regime.get("label"):
-            badge = ui.badge(regime["label"]).classes("text-sm")
-            if regime.get("color"):
-                badge.style(f"background-color: {regime['color']}")
         term = results.get("vix_term_structure") or {}
         if term.get("structure"):
             ui.label(f"Term: {term['structure']}").classes("opacity-70")
@@ -105,7 +98,7 @@ def render():
                 spinner = ui.spinner(size="lg")
                 spinner.visible = False
                 status = ui.label("").classes("opacity-70")
-            vix_strip = ui.row().classes("gap-4 items-center")
+            meta_strip = ui.row().classes("gap-4 items-center")
             with ui.tabs() as tabs:
                 tab_0dte = ui.tab("0-DTE")
                 tab_swing = ui.tab("Swing")
@@ -133,7 +126,7 @@ def render():
         for s in (results.get("signals_0dte") or []) + (results.get("signals_swing") or []):
             if s.get("id"):
                 by_id[s["id"]] = s
-        _vix_strip(vix_strip, results)
+        _scan_meta_strip(meta_strip, results)
         table_0dte.rows = signal_rows(results.get("signals_0dte"))
         table_swing.rows = signal_rows(results.get("signals_swing"))
         table_0dte.update()
