@@ -374,7 +374,7 @@ def render():
             analyze_btn.enable()
         with ui.dialog() as dlg, ui.card().classes("min-w-[640px]"):
             ui.label("GEX analysis prompt (SPX / SPY / QQQ)").classes("text-h6")
-            ta = ui.textarea(value=prompt).props("readonly outlined").classes("w-full").style("min-height:55vh")
+            ta = ui.textarea(value=prompt).props('readonly outlined input-style="min-height:55vh"').classes("w-full")
             with ui.row():
                 ui.button("Copy", icon="content_copy",
                           on_click=lambda: ui.clipboard.write(ta.value)).props("flat")
