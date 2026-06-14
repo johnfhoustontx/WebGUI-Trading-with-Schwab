@@ -20,6 +20,10 @@ from scanner_engine import run_full_scan  # noqa: E402
 
 from . import detail, handoff, header  # noqa: E402
 
+# Last scan results, cached at module level so they persist across page
+# navigation (single-user app; the page is rebuilt on every visit).
+_LAST_RESULTS: dict = {"data": None}
+
 
 def _round(value, ndigits=2):
     return round(value, ndigits) if isinstance(value, (int, float)) else value
@@ -124,7 +128,7 @@ def render():
         # per-row buttons: Send to Calculator / Send to Paper trade
         handoff.add_row_actions(_t, lambda row: by_id.get(row.get("id")))
 
-    def _populate(results):
+    def _populate(results, *, notify=True, remember=True):
         by_id.clear()
         for s in (results.get("signals_0dte") or []) + (results.get("signals_swing") or []):
             if s.get("id"):
@@ -137,8 +141,11 @@ def render():
         n = len(table_0dte.rows) + len(table_swing.rows)
         errs = results.get("errors") or []
         status.text = f"{n} signals." + (f" {len(errs)} errors." if errs else "")
-        for w in (results.get("warnings") or []):
-            ui.notify(w, type="warning")
+        if remember:
+            _LAST_RESULTS["data"] = results
+        if notify:
+            for w in (results.get("warnings") or []):
+                ui.notify(w, type="warning")
 
     async def do_scan():
         scan_btn.disable()
@@ -162,3 +169,7 @@ def render():
         _populate(results)
 
     scan_btn.on_click(do_scan)
+
+    # Restore the last scan when returning to the page (no re-notify of warnings).
+    if _LAST_RESULTS["data"] is not None:
+        _populate(_LAST_RESULTS["data"], notify=False, remember=False)
