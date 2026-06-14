@@ -8,7 +8,7 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-06-14 (Phase 2 shell + full Options section incl. Gamma/Simulator built, 76 webgui tests green; Sentiment/Trade/Portfolio/Driver pages still stubs — next session. See "webgui development notes" below.)
+**Last updated:** 2026-06-14 (Phase 2 shell + full Options section incl. Gamma/Simulator built; **Sentiment page built** (composite gauge + components + 30d history + trend regime, reusing `history_backfill`); 89 webgui tests green; Trade/Portfolio/Driver pages still stubs — next session. See "webgui development notes" below.)
 
 ## What this project is
 
@@ -57,7 +57,7 @@ client and market data through `http://127.0.0.1:8100`.
 |------------------------|------------------------------------------------------------|------------------|
 | `schwab-proxy/`        | Central Schwab API gateway / token manager. **Start FIRST.**| backend, :8100   |
 | `options-scanner/`     | GEX/options scanner engines, scoring, paper engine, simulator. | engines only (Dash UI dropped) |
-| `sentiment-dashboard/` | Market sentiment `scoring/` + bridge + headless snapshot.   | engines only (UI dropped) |
+| `sentiment-dashboard/` | Market sentiment `scoring/` + `history_backfill` + bridge + headless snapshot + `sectors_ref.py` (non-tk workbook loader). | ported to NiceGUI `/sentiment` |
 | `trade-analyzer/`      | `src/analysis` — fundamentals, recommendation, scoring, sector. | engines only (Tk UI dropped) |
 | `portfolio-analyzer/`  | `src/` — sector breakdown, vs-sector perf, live streaming.  | engines only (Tk UI dropped) |
 | `claude-driver/`       | Morning/intraday orchestration + order approval logic.      | engines only (approval UI to be NiceGUI) |
@@ -91,7 +91,8 @@ Routes:
 | `/options/swing` | Swing Scanner | built |
 | `/options/gamma` | Gamma (GEX/Charm/DEX/Vanna bars + flip/walls + intraday heatmap) | built |
 | `/options/simulator` | Simulator (What-if + IV-shock; Replay TODO) | built |
-| `/sentiment` `/trade` `/portfolio` `/driver` | other apps | **stubs** |
+| `/sentiment` | Sentiment (composite gauge + bias, component breakdown, 30d history + velocity/divergence, trend regime) | built |
+| `/trade` `/portfolio` `/driver` | other apps | **stubs** |
 
 The `pages/options/` subpackage shares `header.py` (compact quotes/VIX/sentiment
 strip), `detail.py` (collapsible Trade detail panel, reused by all signal
@@ -143,7 +144,7 @@ Preview tool (start `webgui`, screenshot). Restart the preview after code change
 to pick them up. To drive Quasar inputs from the preview, set the native value +
 dispatch `input`/`change`/`blur` events.
 
-**Tests:** `cd webgui && ..\.venv\Scripts\python -m pytest -q` (76 green as of
+**Tests:** `cd webgui && ..\.venv\Scripts\python -m pytest -q` (89 green as of
 this writing). TDD pure functions; smoke-verify `render()` with a screenshot.
 
 **Environment quirks to expect:**
@@ -156,10 +157,18 @@ this writing). TDD pure functions; smoke-verify `render()` with a screenshot.
   **gitignored** (`data/`), like the real secrets — a fresh clone degrades to
   base symbols. Same applies to the paper-trading DBs (start empty).
 
-**Next session — remaining pages (Phase 3.2–3.5 of the webgui plan):**
-- **Sentiment** (`/sentiment`): port `sentiment-dashboard/scoring/` + `bridge.py`
-  + `headless_snapshot.py`; composite + sub-scores (breadth, put/call, vix,
-  rotation, credit) + sector rotation. Source UI: `sentiment_dashboard.py`.
+**Sentiment (`/sentiment`) — DONE.** `webgui/pages/sentiment.py` reuses the
+copied `history_backfill.backfill_history(...)` engine (latest completed-session
+composite + 30d history) + `scoring` (`composite.velocity/divergence`,
+`trend_regime.classify/commit_state`) + the ported `sectors_ref.load_sectors_data`.
+Sections: composite speedometer + bias, 6-component breakdown (credit_pulse shown
+"out of composite" per v4.3 `WEIGHTS`), 30d Plotly history + velocity/divergence,
+trend-regime badge. Design/plan: [`docs/plans/2026-06-14-sentiment-page-design.md`](docs/plans/2026-06-14-sentiment-page-design.md)
+/ [`-plan.md`](docs/plans/2026-06-14-sentiment-page-plan.md). **Follow-up:** live
+*intraday* composite (the page shows the last completed session; intraday-live
+needs porting the tk quote-fetch path) and the sector-rotation RRG detail panel.
+
+**Next session — remaining pages (Phase 3.3–3.5 of the webgui plan):**
 - **Trade** (`/trade`): `trade-analyzer/src/analysis` — symbol → MTF analysis +
   position/investor verdicts + fundamentals. Source UI: `trade_analyzer.py`.
 - **Portfolio** (`/portfolio`): `portfolio-analyzer/src` — sector breakdown,
@@ -236,7 +245,7 @@ cd sentiment-dashboard ; python -m pytest tests
 cd trade-analyzer      ; python -m pytest .
 cd portfolio-analyzer  ; python -m pytest tests
 cd claude-driver       ; python -m pytest .
-cd webgui              ; python -m pytest .   # 76 tests: transforms + shell smoke
+cd webgui              ; python -m pytest .   # 89 tests: transforms + shell smoke
 ```
 
 - **options-scanner** has ~2 known date-relative failing tests carried over from
