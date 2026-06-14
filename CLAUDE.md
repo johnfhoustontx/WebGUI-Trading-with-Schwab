@@ -8,7 +8,7 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-06-14 (Phase 0–1: backend copied, NiceGUI app not yet built)
+**Last updated:** 2026-06-14 (Phase 2 shell + full Options section built; Sentiment/Trade/Portfolio/Driver pages still stubs)
 
 ## What this project is
 
@@ -63,12 +63,41 @@ client and market data through `http://127.0.0.1:8100`.
 | `claude-driver/`       | Morning/intraday orchestration + order approval logic.      | engines only (approval UI to be NiceGUI) |
 | `shared/`              | `analysis_lib/` shared library + secret templates/values.   | library          |
 | `tools/`               | `check_env.py`, `db_admin.py` maintenance utilities.        | CLI              |
-| `webgui/`              | **NEW** NiceGUI multi-page front-end (not yet built).       | the new UI, :8500 |
+| `webgui/`              | **NEW** NiceGUI multi-page front-end. Shell + Options section built. | the new UI, :8500 |
 
 > The old UI entrypoints (`dashboard.py`, `sentiment_dashboard.py`,
 > `trade_analyzer.py`, `portfolio_analyzer.py`, the React `frontend/dist`) were
 > **not copied**. When porting a feature to NiceGUI, read those from the source
 > repo `D:\Trading With Schwab` for reference.
+
+## webgui structure (NiceGUI app)
+
+`webgui/main.py` is the server + nav shell: a left-nav with an expandable
+**Options** group plus flat Sentiment / Trade / Portfolio / Driver items. Pages
+live in `webgui/pages/`; each leaf exposes `render()` called inside the shell
+`_layout`. `webgui/proxy.py` wraps `schwab-proxy/proxy_client.py` and adds
+`health()`. Pure transforms / SVG builders are unit-tested (`webgui/tests/`);
+heavy engine calls run off-thread via `nicegui.run.io_bound`.
+
+Routes:
+
+| Route | Page | Status |
+|-------|------|--------|
+| `/` | Options · Scanner (0-4 / 5-15 DTE, two-pane + detail panel) | built |
+| `/options/paper` | Paper Trades | built |
+| `/options/captured` | Captured Signals | built |
+| `/options/portfolio` | Paper Portfolio (paper account) | built |
+| `/options/calculator` | Calculator (summary tiles + P&L heatmap) | built |
+| `/options/swing` | Swing Scanner | built |
+| `/options/gamma` | Gamma | **stub** (port `gamma_tool.py`) |
+| `/options/simulator` | Simulator | **stub** (port `options_simulator/`) |
+| `/sentiment` `/trade` `/portfolio` `/driver` | other apps | **stubs** |
+
+The `pages/options/` subpackage shares `header.py` (compact quotes/VIX/sentiment
+strip), `detail.py` (collapsible Trade detail panel, reused by all signal
+tables), and `svg.py` (speedometer / gradient-bar / range-marker SVG). Options
+design + plan: [`docs/plans/2026-06-14-options-section-expansion-design.md`](docs/plans/2026-06-14-options-section-expansion-design.md)
+/ [`-plan.md`](docs/plans/2026-06-14-options-section-expansion-plan.md).
 
 ## Paths and ports: `repo_paths.py` + `config/ports.toml`
 
