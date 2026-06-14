@@ -1,0 +1,55 @@
+# ============================================================================
+# Trading With Schwab — consolidated (aggregate) requirements
+# ============================================================================
+# This is the UNION of the dependencies of all four apps in the monorepo.
+# Install it once into a single venv to run the whole stack:
+#     pip install -r requirements.txt
+#
+# Each app keeps its own requirements.txt (do not delete them). Today only
+# claude-driver/requirements.txt is populated; options-scanner's is empty and
+# schwab-proxy / sentiment-dashboard have none, so the entries below are the
+# union of claude-driver's pins plus the third-party packages the other apps
+# import at runtime.
+#
+# De-dup rule applied: where the same package was constrained differently, the
+# higher / looser constraint is kept and the dropped one is noted inline.
+# Sources: P=schwab-proxy  O=options-scanner  S=sentiment-dashboard  D=claude-driver
+# ----------------------------------------------------------------------------
+
+# --- Web / API server (P, O, D) ---
+fastapi>=0.111.0          # was: fastapi (unpinned) in schwab-proxy, options-scanner
+uvicorn>=0.31.1           # was: uvicorn (unpinned) in schwab-proxy, options-scanner
+
+# --- HTTP client (P, O, S, D) ---
+requests>=2.31.0          # was: requests==2.31.0 in claude-driver (loosened to >= for the others)
+httpx                     # async HTTP client used by the FastAPI services (P, O)
+
+# --- Schwab API SDK (P, O, S) ---
+schwab-py                 # provides the `schwab` package (auth, streaming)
+
+# --- Data / numerics (O, S, D) ---
+pandas>=2.0.0
+numpy>=1.24.0
+scipy                     # options-scanner: scipy.stats.norm (Black-Scholes)
+
+# --- Plotting / imaging / UI (O, S) ---
+matplotlib                # options-scanner Tk charts
+Pillow                    # PIL — image generation/rendering (provides the `PIL` package)
+
+# --- Spreadsheet I/O (S) ---
+openpyxl                  # sentiment-dashboard: reads Sectors_Industries_ETFs.xlsx
+
+# --- Windows desktop notifications (O, S) ---
+winotify                  # toast notifications (provides the `winotify` package)
+
+# --- Market data (optional / legacy) ---
+yfinance                  # still imported by some analysis paths; optional fallback data source
+
+# --- Scheduling (D) ---
+apscheduler==3.10.4
+
+# --- Web GUI (NEW: this repo's NiceGUI front-end) ---
+nicegui>=2.0.0            # single multi-page web UI replacing the old Dash/React/Tk UIs
+
+# --- Testing (P, O, S, D) ---
+pytest
