@@ -13,6 +13,8 @@ if str(SENTIMENT) not in sys.path:
 from scoring import WEIGHTS  # noqa: E402
 from scoring import composite as scoring_composite  # noqa: E402
 from scoring import trend_regime as trend_regime  # noqa: E402
+from scoring import sector_perf as scoring_sector  # noqa: E402
+from scoring import rotation as scoring_rotation    # noqa: E402
 
 CLR_GREEN = "#66bb6a"
 CLR_RED = "#ef5350"
@@ -191,6 +193,81 @@ def week_month_from_closes(closes):
     return (_pct_change_n(closes, 3),
             _pct_change_n(closes, 5),
             _pct_change_n(closes, 21))
+
+
+def sector_table_rows(sector_data, quotes, trends, pcr, quadrants):
+    """Build display rows for the sectors, sorted by Day % desc (None last)."""
+    rows = []
+    for r in sector_data:
+        if r.get("kind") != "sector":
+            continue
+        etf = r.get("etf")
+        q = (quotes or {}).get(etf) or {}
+        t = (trends or {}).get(etf) or {}
+        rows.append({
+            "sector": r.get("sector") or r.get("label"),
+            "etf": etf,
+            "desc": r.get("name") or "",
+            "day": q.get("change_pct"),
+            "week": t.get("week_pct"),
+            "month": t.get("month_pct"),
+            "pcr": (pcr or {}).get(etf),
+            "rrg": (quadrants or {}).get(etf),
+        })
+    rows.sort(key=lambda r: (r["day"] is None, -(r["day"] or 0.0)))
+    return rows
+
+
+def sector_summary(sector_data, quotes):
+    """'{pct_up}% green | Cap-wtd {wpct} | Score {score}/10' (mirrors source)."""
+    pcts = []
+    for r in sector_data:
+        if r.get("kind") != "sector":
+            continue
+        q = (quotes or {}).get(r.get("etf")) or {}
+        p = q.get("change_pct")
+        if p is not None:
+            pcts.append(p)
+    if not pcts:
+        return "No sector data returned"
+    pct_up = sum(1 for p in pcts if p > 0) / len(pcts) * 100
+    wpct, _ = scoring_sector.weighted_sector_pct(sector_data, quotes)
+    wpct_str = f"{wpct:+.2f}%" if wpct is not None else "—"
+    score = scoring_sector.sectors_score(sector_data, quotes)
+    return f"{pct_up:.0f}% green | Cap-wtd {wpct_str} | Score {score:.1f}/10"
+
+
+def rotation_banner(rot):
+    """(regime, color, detail) from a compute_rotation() dict (or None).
+    Mirrors source _update_rotation_banner: day -> 3d -> week fallback."""
+    if not rot:
+        return "—", CLR_FLAT, "Refresh sector data to compute rotation"
+    if rot.get("day_spread") is not None:
+        tf, spread = "day", rot["day_spread"]
+    elif rot.get("3d_spread") is not None:
+        tf, spread = "3d", rot["3d_spread"]
+    elif rot.get("week_spread") is not None:
+        tf, spread = "week", rot["week_spread"]
+    else:
+        return "—", CLR_FLAT, "Refresh sector data to compute rotation"
+    if spread >= 1.0:
+        regime, color = "STRONG RISK-ON", CLR_GREEN
+    elif spread >= 0.3:
+        regime, color = "RISK-ON", CLR_GREEN
+    elif spread <= -1.0:
+        regime, color = "STRONG RISK-OFF", CLR_RED
+    elif spread <= -0.3:
+        regime, color = "RISK-OFF", CLR_RED
+    else:
+        regime, color = "MIXED", CLR_YELLOW
+    cyc, dfn = rot.get(f"{tf}_cyc"), rot.get(f"{tf}_def")
+    top = rot.get(f"{tf}_top3") or []
+    bot = rot.get(f"{tf}_bot3") or []
+    cyc_s = f"{cyc:+.2f}%" if cyc is not None else "—"
+    def_s = f"{dfn:+.2f}%" if dfn is not None else "—"
+    detail = (f"{tf.upper()}: Cyc {cyc_s} vs Def {def_s} (spread {spread:+.2f}%)"
+              f"  ▲ {', '.join(top[:2]) or '—'}  ▼ {', '.join(bot[-2:]) or '—'}")
+    return regime, color, detail
 
 
 def _load_snapshots(days=35):

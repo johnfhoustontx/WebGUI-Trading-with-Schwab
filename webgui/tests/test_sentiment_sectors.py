@@ -46,3 +46,54 @@ def test_week_month_from_closes():
 def test_week_month_short_series_returns_none():
     d3, wk, mo = S.week_month_from_closes([1.0, 2.0])
     assert d3 is None and wk is None and mo is None
+
+
+def _sector_data():
+    return [
+        {"kind": "sector", "sector": "Information Technology", "label": "Information Technology",
+         "etf": "XLK", "name": "Software, semis", "sp_weight": 32.53},
+        {"kind": "sector", "sector": "Utilities", "label": "Utilities",
+         "etf": "XLU", "name": "Electric, gas", "sp_weight": 2.09},
+        {"kind": "industry", "sector": "Information Technology", "label": "Semis",
+         "etf": "SMH", "name": "Semiconductors", "sp_weight": 0.0},
+    ]
+
+
+def test_sector_table_rows_built_and_sorted():
+    quotes = {"XLK": {"change_pct": 1.0}, "XLU": {"change_pct": 2.0}}
+    trends = {"XLK": {"week_pct": 3.0, "month_pct": 5.0},
+              "XLU": {"week_pct": -1.0, "month_pct": 0.5}}
+    pcr = {"XLK": 0.80, "XLU": 1.20}
+    quads = {"XLK": "Leading", "XLU": "Lagging"}
+    rows = S.sector_table_rows(_sector_data(), quotes, trends, pcr, quads)
+    assert [r["etf"] for r in rows] == ["XLU", "XLK"]   # only sectors, day% desc
+    xlk = next(r for r in rows if r["etf"] == "XLK")
+    assert xlk["sector"] == "Information Technology"
+    assert xlk["day"] == 1.0 and xlk["week"] == 3.0 and xlk["month"] == 5.0
+    assert xlk["pcr"] == 0.80 and xlk["rrg"] == "Leading"
+
+
+def test_sector_summary_line():
+    quotes = {"XLK": {"change_pct": 1.0}, "XLU": {"change_pct": -0.5}}
+    line = S.sector_summary(_sector_data(), quotes)
+    assert "% green" in line and "Cap-wtd" in line and "/10" in line
+
+
+def test_rotation_banner_regimes():
+    assert S.rotation_banner({"day_spread": 1.5})[0] == "STRONG RISK-ON"
+    assert S.rotation_banner({"day_spread": 0.5})[0] == "RISK-ON"
+    assert S.rotation_banner({"day_spread": -0.5})[0] == "RISK-OFF"
+    assert S.rotation_banner({"day_spread": -1.5})[0] == "STRONG RISK-OFF"
+    assert S.rotation_banner({"day_spread": 0.0})[0] == "MIXED"
+    assert S.rotation_banner({})[0] == "—"
+    assert S.rotation_banner(None)[0] == "—"
+
+
+def test_rotation_banner_color_and_detail():
+    regime, color, detail = S.rotation_banner({
+        "day_spread": 0.5, "day_cyc": 0.7, "day_def": 0.2,
+        "day_top3": ["Tech", "Financials", "Energy"],
+        "day_bot3": ["Staples", "Utilities", "Health Care"]})
+    assert color == S.CLR_GREEN
+    assert detail.startswith("DAY:")
+    assert "Tech" in detail and "Utilities" in detail
