@@ -6,6 +6,8 @@ two signal tables. Row selection drives the shared Trade detail panel
 in the engine; this module only marshals results into NiceGUI widgets.
 """
 import sys
+from datetime import date as _date, time as _time
+from zoneinfo import ZoneInfo
 
 from nicegui import run, ui
 
@@ -21,8 +23,88 @@ from scanner_engine import run_full_scan  # noqa: E402
 from . import detail, handoff, header  # noqa: E402
 
 # Last scan results, cached at module level so they persist across page
-# navigation (single-user app; the page is rebuilt on every visit).
-_LAST_RESULTS: dict = {"data": None}
+# navigation and so the server-side auto-scan can push fresh data to open pages.
+# ``version`` bumps on every update so a page's refresh timer knows to repaint.
+_LAST_RESULTS: dict = {"data": None, "version": 0}
+
+# Auto-scan state (server-side scheduler). Trading window + cadence mirror the
+# legacy scanner: 08:00–15:15 CT, every 15 min, trading days only. The schedule
+# logic is replicated here (not imported from the legacy `scanner` CLI) to avoid
+# dragging its heavy import chain — and the cross-app module-name collisions — in.
+_AUTOSCAN: dict = {"started": False, "last_slot": None}
+
+_CT = ZoneInfo("America/Chicago")
+_SCAN_START = (8, 0)    # 08:00 CT
+_SCAN_END = (15, 15)    # 15:15 CT
+# US market holidays 2026 (keep in sync with options-scanner/scanner.py Config.HOLIDAYS)
+_HOLIDAYS = {
+    _date(2026, 1, 1), _date(2026, 1, 19), _date(2026, 2, 16), _date(2026, 4, 3),
+    _date(2026, 5, 25), _date(2026, 7, 3), _date(2026, 9, 7),
+    _date(2026, 11, 26), _date(2026, 12, 25),
+}
+
+
+def _is_trading_day(now):
+    return now.weekday() < 5 and now.date() not in _HOLIDAYS
+
+
+def _is_market_hours(now):
+    t = now.time()
+    return _time(*_SCAN_START) <= t <= _time(*_SCAN_END)
+
+
+def _store_results(results):
+    _LAST_RESULTS["data"] = results
+    _LAST_RESULTS["version"] = _LAST_RESULTS.get("version", 0) + 1
+
+
+def _slot_key(now):
+    return (now.date().isoformat(), now.hour, now.minute // 15)
+
+
+def autoscan_due(now, last_slot):
+    """(should_scan, slot_key): True at most once per 15-min slot, only on a
+    trading day within the 08:00–15:15 CT window."""
+    if not (_is_trading_day(now) and _is_market_hours(now)):
+        return (False, last_slot)
+    slot = _slot_key(now)
+    return (slot != last_slot, slot)
+
+
+def _market_now():
+    import datetime as _dt
+    return _dt.datetime.now(_CT)
+
+
+def _run_scan_sync():
+    from . import engines
+    with engines.options_scoring():  # guard scoring name collision
+        return run_full_scan(proxy.schwab_py_client)
+
+
+async def _autoscan_loop():
+    import asyncio
+    loop = asyncio.get_event_loop()
+    while True:
+        try:
+            now = _market_now()
+            due, slot = autoscan_due(now, _AUTOSCAN["last_slot"])
+            if due:
+                _AUTOSCAN["last_slot"] = slot
+                results = await loop.run_in_executor(None, _run_scan_sync)
+                _store_results(results)
+        except Exception:
+            pass  # never let the scheduler die
+        await asyncio.sleep(30)
+
+
+def start_autoscan():
+    """Start the server-side 15-min auto-scan loop (idempotent)."""
+    import asyncio
+    if _AUTOSCAN["started"]:
+        return
+    _AUTOSCAN["started"] = True
+    asyncio.create_task(_autoscan_loop())
 
 
 def _round(value, ndigits=2):
@@ -104,6 +186,7 @@ def render():
                 spinner = ui.spinner(size="lg")
                 spinner.visible = False
                 status = ui.label("").classes("opacity-70")
+                auto_lbl = ui.label("").classes("opacity-60 text-sm")
             meta_strip = ui.row().classes("gap-4 items-center")
             with ui.tabs() as tabs:
                 tab_0dte = ui.tab("0-DTE")
@@ -142,7 +225,7 @@ def render():
         errs = results.get("errors") or []
         status.text = f"{n} signals." + (f" {len(errs)} errors." if errs else "")
         if remember:
-            _LAST_RESULTS["data"] = results
+            _store_results(results)
         if notify:
             for w in (results.get("warnings") or []):
                 ui.notify(w, type="warning")
@@ -171,5 +254,19 @@ def render():
     scan_btn.on_click(do_scan)
 
     # Restore the last scan when returning to the page (no re-notify of warnings).
+    seen = {"version": _LAST_RESULTS.get("version", 0)}
     if _LAST_RESULTS["data"] is not None:
         _populate(_LAST_RESULTS["data"], notify=False, remember=False)
+
+    def _tick():
+        # Repaint when the server-side auto-scan (or another tab) refreshed data.
+        if _LAST_RESULTS.get("version", 0) != seen["version"] and _LAST_RESULTS["data"]:
+            seen["version"] = _LAST_RESULTS["version"]
+            _populate(_LAST_RESULTS["data"], notify=False, remember=False)
+        now = _market_now()
+        in_window = _is_trading_day(now) and _is_market_hours(now)
+        auto_lbl.text = ("Auto-scan: every 15 min (market open)" if in_window
+                         else "Auto-scan: idle (outside 08:00–15:15 CT)")
+
+    _tick()
+    ui.timer(20.0, _tick)

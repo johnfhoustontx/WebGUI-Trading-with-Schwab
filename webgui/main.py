@@ -17,10 +17,17 @@ for _p in (str(_REPO_ROOT), str(_REPO_ROOT / "webgui")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from nicegui import ui  # noqa: E402
+from nicegui import app, ui  # noqa: E402
 
 import proxy  # noqa: E402
 from repo_paths import NICEGUI_PORT  # noqa: E402
+
+
+@app.on_startup
+def _start_options_autoscan() -> None:
+    """Start the server-side 15-min auto-scan (08:00–15:15 CT, trading days)."""
+    from pages.options import scanner
+    scanner.start_autoscan()
 
 # Options is an expandable group; each child is its own route. (route, label, icon)
 OPTIONS_CHILDREN = [
