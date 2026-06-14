@@ -8,7 +8,7 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-06-14 (Phase 2 shell + full Options section built; Sentiment/Trade/Portfolio/Driver pages still stubs)
+**Last updated:** 2026-06-14 (Phase 2 shell + full Options section incl. Gamma/Simulator built; Sentiment/Trade/Portfolio/Driver pages still stubs)
 
 ## What this project is
 
@@ -89,8 +89,8 @@ Routes:
 | `/options/portfolio` | Paper Portfolio (paper account) | built |
 | `/options/calculator` | Calculator (summary tiles + P&L heatmap) | built |
 | `/options/swing` | Swing Scanner | built |
-| `/options/gamma` | Gamma | **stub** (port `gamma_tool.py`) |
-| `/options/simulator` | Simulator | **stub** (port `options_simulator/`) |
+| `/options/gamma` | Gamma (GEX/Charm/DEX/Vanna bars + flip/walls + intraday heatmap) | built |
+| `/options/simulator` | Simulator (What-if + IV-shock; Replay TODO) | built |
 | `/sentiment` `/trade` `/portfolio` `/driver` | other apps | **stubs** |
 
 The `pages/options/` subpackage shares `header.py` (compact quotes/VIX/sentiment
