@@ -109,6 +109,41 @@ def heatmap_figure(rows, view="GEX"):
     }
 
 
+# Scoped explain CSS (rules only). Injected via ui.add_css for the in-app dialog
+# (NiceGUI strips <style> from ui.html) and inlined into the downloadable doc.
+EXPLAIN_CSS = """
+.gx-explain{font-family:'Segoe UI',system-ui,sans-serif;color:#e6e6e6;line-height:1.55;max-width:920px;}
+.gx-explain .gx-title{font-size:1.55rem;font-weight:700;color:#ffffff;margin:.1em 0 .05em;}
+.gx-explain .gx-sub{opacity:.7;font-size:.9rem;margin:0 0 1.1em;}
+.gx-explain h2{font-size:1.15rem;color:#90caf9;margin:1.4em 0 .35em;
+  border-bottom:1px solid #3a3a3a;padding-bottom:5px;letter-spacing:.3px;}
+.gx-explain h3{font-size:1rem;color:#ffd54f;margin:1em 0 .25em;}
+.gx-explain p{font-size:.92rem;margin:.3em 0;}
+.gx-explain ul{margin:.3em 0 .7em 1.3em;padding:0;}
+.gx-explain li{font-size:.92rem;margin:.2em 0;}
+.gx-explain hr{border:0;border-top:1px solid #333;margin:1.1em 0;}
+.gx-explain .footer{opacity:.65;font-size:.82rem;font-style:italic;}
+"""
+
+
+def wrap_explain(symbol, body_html, full=False):
+    """Wrap explain body HTML in the scoped ``gx-explain`` container.
+
+    full=False -> fragment for inline injection (page provides CSS via add_css).
+    full=True  -> standalone HTML document with the CSS inlined (for download).
+    """
+    inner = (f'<div class="gx-explain">'
+             f'<div class="gx-title">Gamma Tool Explain — {symbol}</div>'
+             f'<div class="gx-sub">Dealer-positioning read across GEX, Charm, DEX and Vanna.</div>'
+             f"{body_html}</div>")
+    if not full:
+        return inner
+    return (f'<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">'
+            f"<title>Gamma Tool Explain — {symbol}</title>"
+            f"<style>body{{background:#1b1b1b;margin:0;padding:24px;}}{EXPLAIN_CSS}</style>"
+            f"</head><body>{inner}</body></html>")
+
+
 def term_heatmap(term_grid):
     """Plotly heatmap dict for the Term view (net GEX by expiry × strike).
 
@@ -162,6 +197,7 @@ def render():
     except Exception:  # pragma: no cover
         evaluate_regime = lambda: {"active": False}  # noqa: E731
 
+    ui.add_css(EXPLAIN_CSS)  # scoped styles for the Explain dialog (ui.html strips <style>)
     ui.label("Gamma").classes("text-h5")
 
     state: dict = {"results": None, "spot": None, "symbol": None}
@@ -309,23 +345,26 @@ def render():
             return
         try:
             txt = gt.build_explain_html_text(_explain_ctx())
-            html = html_render.render_explain_html(txt, None, state["symbol"])
+            pinch = html_render.pinch_section_html(None) or (
+                "<h2>Dealer Pinch — Vanna/Charm Exhaustion</h2>"
+                "<p>No pinch data yet — waiting for the first market-data fetch.</p>")
+            body = html_render.linkify(pinch + "\n" + html_render.explain_to_html(txt))
         except Exception as exc:
             ui.notify(f"Explain failed: {exc}", type="negative")
             return
+        fragment = wrap_explain(state["symbol"], body, full=False)
+        document = wrap_explain(state["symbol"], body, full=True)
         with ui.dialog().props("maximized") as dlg, ui.card().classes("w-full h-full"):
             with ui.row().classes("justify-between w-full items-center"):
                 ui.label(f"Explain — {state['symbol']}").classes("text-h6")
                 with ui.row():
                     ui.button("Download", icon="download",
-                              on_click=lambda: ui.download.content(html, "explain.html")).props("flat")
+                              on_click=lambda: ui.download.content(document, "explain.html")).props("flat")
                     ui.button("Close", on_click=dlg.close).props("flat")
-            # Render the explain document inside a white scroll panel (NiceGUI strips
-            # <iframe>, so inject the HTML directly).
             with ui.element("div").classes("w-full").style(
-                    "background:#fff;color:#111;max-height:85vh;overflow:auto;"
-                    "padding:16px;border-radius:6px;"):
-                ui.html(html)
+                    "background:#1b1b1b;max-height:85vh;overflow:auto;"
+                    "padding:20px;border-radius:6px;"):
+                ui.html(fragment)
         dlg.open()
 
     def _blocks_for(symbol, chain):

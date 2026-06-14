@@ -58,6 +58,15 @@ def test_term_heatmap_empty():
     assert gamma.term_heatmap({})["data"][0]["z"] == []
 
 
+def test_wrap_explain_fragment_and_document():
+    body = "<h2>GAMMA EXPOSURE (GEX)</h2><p>hi</p>"
+    frag = gamma.wrap_explain("$SPX", body, full=False)
+    assert "gx-explain" in frag and body in frag and "$SPX" in frag
+    assert not frag.lstrip().startswith("<!DOCTYPE")
+    doc = gamma.wrap_explain("$SPX", body, full=True)
+    assert doc.lstrip().startswith("<!DOCTYPE") and body in doc
+
+
 def test_summary_text_mentions_spot_and_flip():
     txt = gamma.summary_text({"spot": 450.0, "flip": 449.5, "net_total": 1234.0,
                               "strike_count": 3}, "GEX")
