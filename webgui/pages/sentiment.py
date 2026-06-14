@@ -345,14 +345,15 @@ def _load_snapshots(days=35):
     return snaps, spy_closes
 
 
-def _load_industries(etfs):
-    """Off-thread: quotes + week/month trends for a list of industry ETFs."""
+def _load_industries(etfs, spy_closes):
+    """Off-thread: quotes + week/month trends + P/C + RRG for industry ETFs."""
     import proxy
+    from datetime import date, timedelta
     try:
         quotes = proxy.schwab_client.get_quotes(list(etfs)) or {}
     except Exception:
         quotes = {}
-    trends = {}
+    trends, closes = {}, {}
     for etf in etfs:
         try:
             df = proxy.schwab_client.get_daily_history(etf, months=3)
@@ -361,9 +362,25 @@ def _load_industries(etfs):
         if df is None:
             continue
         cl = [float(c) for c in df["close"].tolist()]
+        closes[etf] = cl
         d3, wk, mo = week_month_from_closes(cl)
         trends[etf] = {"day3_pct": d3, "week_pct": wk, "month_pct": mo}
-    return {"quotes": quotes, "trends": trends}
+    pcr = {}
+    today_iso = date.today().isoformat()
+    to_iso = (date.today() + timedelta(days=30)).isoformat()
+    for etf in etfs:
+        try:
+            chain = proxy.schwab_client._request("/chains", params={
+                "symbol": etf, "contractType": "ALL", "range": "NTM",
+                "strikeCount": 50, "fromDate": today_iso, "toDate": to_iso})
+        except Exception:
+            chain = None
+        v = pcr_from_chain(chain)
+        if v is not None:
+            pcr[etf] = v
+    quads = scoring_rotation.compute_rrg_quadrants(closes, spy_closes or [],
+                                                   rs_window=50, mom_window=20)
+    return {"quotes": quotes, "trends": trends, "pcr": pcr, "quadrants": quads}
 
 
 def _load_sector_perf(spy_closes):
@@ -686,7 +703,7 @@ def render():
                             ui.label("").style("width:24px")
                             ui.label("loading…").style("width:140px")
                     else:
-                        for ir in industry_rows(sd, sector_name, ind["quotes"], ind["trends"]):
+                        for ir in industry_rows(sd, sector_name, ind["quotes"], ind["trends"], ind.get("pcr"), ind.get("quadrants")):
                             with ui.row().classes("items-center w-full no-wrap gap-2 text-xs"):
                                 ui.label("").style("width:24px")
                                 ui.label(str(ir["label"] or "")).style(
@@ -699,22 +716,25 @@ def render():
                                     v = ir[fld]
                                     ui.label(f"{v:+.2f}%" if v is not None else "—") \
                                         .style(f"width:70px;color:{pct_color(v)}")
-                                ui.label("").style("width:56px")
-                                ui.label("").style("width:90px")
+                                pv = ir["pcr"]
+                                ui.label(f"{pv:.2f}" if pv is not None else "").style(
+                                    f"width:56px;color:{pcr_color(pv)}")
+                                rv = ir["rrg"]
+                                ui.label(str(rv or "")).style(f"width:90px;color:{rrg_color(rv)}")
 
     async def _ensure_industry(sector_name):
         if sector_name in state["industry"]:
             return
         etfs = sector_industry_etfs(state["sector"]["sector_data"], sector_name)
         if not etfs:
-            state["industry"][sector_name] = {"quotes": {}, "trends": {}}
+            state["industry"][sector_name] = {"quotes": {}, "trends": {}, "pcr": {}, "quadrants": {}}
         else:
             sec_spinner.visible = True
             try:
-                state["industry"][sector_name] = await ng_run.io_bound(_load_industries, etfs)
+                state["industry"][sector_name] = await ng_run.io_bound(_load_industries, etfs, state["spy"])
             except Exception as e:  # noqa: BLE001
                 ui.notify(f"Industry load failed: {e}", type="negative")
-                state["industry"][sector_name] = {"quotes": {}, "trends": {}}
+                state["industry"][sector_name] = {"quotes": {}, "trends": {}, "pcr": {}, "quadrants": {}}
             finally:
                 sec_spinner.visible = False
         _CACHE["industry"][sector_name] = state["industry"][sector_name]
