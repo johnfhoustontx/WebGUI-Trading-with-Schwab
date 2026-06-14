@@ -177,14 +177,20 @@ def render():
         dlg.open()
 
     def _run_cycle(kind):
+        from . import engines
         now_date = dt.date.today().isoformat()
-        if kind == "entry":
-            signals = signal_db.get_open_signals_with_latest_mark()
-            paper_engine.run_entry_cycle(proxy.schwab_py_client, now_date, signals)
-        else:
-            paper_engine.run_manage_cycle(proxy.schwab_py_client, now_date)
+        with engines.options_scoring():  # guard scoring name collision
+            if kind == "entry":
+                signals = signal_db.get_open_signals_with_latest_mark()
+                paper_engine.run_entry_cycle(proxy.schwab_py_client, now_date, signals)
+            else:
+                paper_engine.run_manage_cycle(proxy.schwab_py_client, now_date)
 
     async def _cycle(kind):
+        if paper_account_db.get_account() is None:
+            ui.notify("No paper account yet — click Reset to initialize it first.",
+                      type="warning")
+            return
         spinner.visible = True
         status.text = f"Running {kind} cycle…"
         try:
