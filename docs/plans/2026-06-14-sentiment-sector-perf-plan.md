@@ -627,8 +627,19 @@ git commit -m "docs: sentiment sector-perf section built"
 
 ## Gotchas
 
-- Confirm `compute_rotation` output keys before finalizing `rotation_banner`
-  (read `scoring/rotation.py:38-132`).
+- **`scoring` module-name collision (IMPORTANT — see root CLAUDE.md).**
+  options-scanner ships a top-level `scoring.py` that clashes with
+  sentiment-dashboard's `scoring/` package in `sys.modules`. The existing
+  sentiment page already imports `from scoring import WEIGHTS, composite,
+  trend_regime` EAGERLY at module load (binds the name once) — add the new
+  `from scoring import rotation as scoring_rotation` / `sector_perf as
+  scoring_sector` to that SAME top-level block. **Do NOT** put any
+  `from scoring import …` inside `_load_sector_perf` or any function (a lazy
+  import in the io_bound thread could resolve to options' `scoring.py` if an
+  Options page was visited first). Reference the top-level bindings only.
+- Confirm `compute_rotation` output keys (verified: returns `day_spread`,
+  `day_cyc`, `day_def`, `day_top3`, `day_bot3`, `3d_*`, `week_*`, or `None`
+  when empty — `rotation_banner` already handles falsy input).
 - `_request`/`get_quotes`/`get_quote` return shapes: verify in `proxy_client.py`.
 - `ui.table` per-cell color: use a `body-cell-<col>` slot or fall back to manual
   `ui.row`s (11 rows — cheap).
