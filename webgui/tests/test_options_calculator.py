@@ -48,6 +48,38 @@ def test_formatters():
     assert calc.fmt_dollar(None) == "—"
 
 
+def test_extract_atm_iv_picks_closest_strike():
+    chain = {"callExpDateMap": {"2026-06-19:4": {
+        "445.0": [{"volatility": 20.0}],
+        "450.0": [{"volatility": 18.5}],
+        "455.0": [{"volatility": 22.0}],
+    }}}
+    assert calc.extract_atm_iv(chain, 450.0) == 18.5
+
+
+def test_extract_atm_iv_normalizes_decimal_vol():
+    chain = {"callExpDateMap": {"e": {"450.0": [{"volatility": 0.185}]}}}
+    assert abs(calc.extract_atm_iv(chain, 450.0) - 18.5) < 1e-6
+
+
+def test_extract_atm_iv_none_when_empty():
+    assert calc.extract_atm_iv({}, 450.0) is None
+    assert calc.extract_atm_iv(None, 450.0) is None
+
+
+def test_extract_atm_iv_filters_by_expiry():
+    chain = {"callExpDateMap": {
+        "2026-06-15:1": {"742.0": [{"volatility": 80.0}]},
+        "2026-06-19:5": {"742.0": [{"volatility": 18.0}]},
+    }}
+    assert calc.extract_atm_iv(chain, 742.0, expiry="2026-06-19") == 18.0
+
+
+def test_api_symbol_maps_spx():
+    assert calc.api_symbol("SPX") == "$SPX"
+    assert calc.api_symbol("spy") == "SPY"
+
+
 def test_leg_specs_cover_strategies():
     for strat in ("PCS", "CCS", "IC", "LONG_PUT", "NAKED_CALL"):
         assert strat in calc.LEG_SPECS

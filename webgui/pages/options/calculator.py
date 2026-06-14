@@ -79,6 +79,74 @@ def fmt_pct(v):
     return f"{v:+.1f}%" if isinstance(v, (int, float)) else "—"
 
 
+def api_symbol(symbol):
+    """Map a user symbol to the Schwab API form ($SPX for SPX index)."""
+    s = (symbol or "").strip().upper()
+    return "$SPX" if s == "SPX" else s
+
+
+def extract_atm_iv(chain, spot, expiry=None):
+    """ATM implied vol (as a percentage) from an option-chain payload.
+
+    Picks the contract whose strike is closest to ``spot`` and reads its
+    ``volatility`` (Schwab returns it as a percentage or a decimal — normalize).
+    When ``expiry`` is given, only contracts under that expiry are considered
+    (chain exp keys look like ``"2026-06-19:5"``). Returns None if no usable
+    volatility is found.
+    """
+    if not isinstance(chain, dict) or not isinstance(spot, (int, float)):
+        return None
+    exp_iso = None
+    if expiry is not None:
+        exp_iso = expiry.isoformat() if hasattr(expiry, "isoformat") else str(expiry)
+    best_diff = float("inf")
+    best = None
+    for map_key in ("callExpDateMap", "putExpDateMap"):
+        for exp_key, strikes in (chain.get(map_key) or {}).items():
+            if exp_iso and exp_key.split(":")[0] != exp_iso:
+                continue
+            for strike_str, contracts in (strikes or {}).items():
+                try:
+                    strike = float(strike_str)
+                except (ValueError, TypeError):
+                    continue
+                if not (isinstance(contracts, list) and contracts):
+                    continue
+                vol = contracts[0].get("volatility")
+                if vol is None:
+                    continue
+                diff = abs(strike - spot)
+                if diff < best_diff:
+                    best_diff = diff
+                    best = vol if vol < 5.0 else vol / 100.0
+    return None if best is None else best * 100.0
+
+
+def _has_contracts(chain):
+    return bool(chain and (chain.get("callExpDateMap") or chain.get("putExpDateMap")))
+
+
+def _fetch_chain(api_sym, raw_sym, expiry):
+    """Fetch the option chain covering ``expiry``, retrying with the raw symbol.
+
+    The proxy returns empty exp-maps for a single-day from/to range, so we pull
+    today..expiry (the caller filters to the target expiry when extracting IV).
+    """
+    import datetime as dt
+
+    import scanner_engine as se
+
+    import proxy
+
+    today = dt.date.today()
+    chain = se.fetch_option_chain(proxy.schwab_py_client, api_sym,
+                                  from_date=today, to_date=expiry)
+    if not _has_contracts(chain) or (chain and chain.get("status") == "FAILED"):
+        chain = se.fetch_option_chain(proxy.schwab_py_client, raw_sym,
+                                      from_date=today, to_date=expiry)
+    return chain
+
+
 # class -> (background, foreground) for the heatmap cells (dark palette).
 _CELL_COLORS = {
     "p1": ("#0d2814", "#81c784"), "p2": ("#12381b", "#a5d6a7"),
@@ -168,7 +236,9 @@ def render():
     """Build the Calculator page: inputs form + summary tiles + P&L heatmap."""
     import datetime as dt
 
-    from nicegui import ui
+    from nicegui import run, ui
+
+    import proxy
 
     _ensure_engine_path()
     import options_calculator as oc
@@ -179,12 +249,14 @@ def render():
 
     with ui.row().classes("gap-3 items-end flex-wrap"):
         strategy_sel = ui.select(list(LEG_SPECS.keys()), value="PCS", label="Strategy").classes("w-36")
-        ui.input("Symbol", value="SPY").classes("w-24")  # display-only context
+        symbol_in = ui.input("Symbol", value="SPY").classes("w-24")
         price_in = ui.number("Price", value=100.0, format="%.2f").classes("w-28")
+        ui.button("Get Price", icon="download", on_click=lambda: fetch_price()).props("dense")
         expiry_in = ui.input("Expiry (YYYY-MM-DD)",
                              value=str(dt.date.today() + dt.timedelta(days=7))).classes("w-44")
         contracts_in = ui.number("Contracts", value=1, min=1, max=100).classes("w-24")
         iv_in = ui.number("IV %", value=20.0, format="%.1f").classes("w-24")
+        ui.button("Fetch IV", icon="download", on_click=lambda: fetch_iv()).props("dense")
         ivchg_in = ui.number("IV Δ %", value=0.0, format="%.1f").classes("w-24")
         rate_in = ui.number("Rate %", value=4.5, format="%.2f").classes("w-24")
 
@@ -209,6 +281,58 @@ def render():
 
     rebuild_legs()
     strategy_sel.on_value_change(lambda e: rebuild_legs())
+
+    async def fetch_price():
+        sym = (symbol_in.value or "").strip().upper()
+        if not sym:
+            ui.notify("Enter a symbol first.", type="warning")
+            return
+        api = api_symbol(sym)
+        try:
+            resp = await run.io_bound(proxy.schwab_py_client.get_quotes, [api])
+            data = resp.json() if getattr(resp, "status_code", None) == 200 else None
+        except Exception as exc:
+            ui.notify(f"Price fetch failed: {exc}", type="negative")
+            return
+        info = (data or {}).get(api, {})
+        q = info.get("quote", info.get("reference", info)) if isinstance(info, dict) else {}
+        price = q.get("lastPrice") if isinstance(q, dict) else None
+        if not price:
+            ui.notify(f"No price returned for {sym}.", type="warning")
+            return
+        price_in.value = round(price, 2)
+        lo, hi = oc.generate_price_range(price)
+        rmin_in.value = round(lo, 2)
+        rmax_in.value = round(hi, 2)
+        ui.notify(f"{sym} {price:.2f}", type="positive")
+
+    async def fetch_iv():
+        sym = (symbol_in.value or "").strip().upper()
+        if not sym or not (expiry_in.value or "").strip() or not price_in.value:
+            ui.notify("Fill Symbol, Expiry, and Price first.", type="warning")
+            return
+        try:
+            expiry = dt.date.fromisoformat(expiry_in.value.strip())
+            spot = float(price_in.value)
+        except Exception as exc:
+            ui.notify(f"Bad expiry/price: {exc}", type="negative")
+            return
+        try:
+            chain = await run.io_bound(_fetch_chain, api_symbol(sym), sym, expiry)
+        except Exception as exc:
+            ui.notify(f"IV fetch failed: {exc}", type="negative")
+            return
+        iv = extract_atm_iv(chain, spot, expiry=expiry)
+        approx = False
+        if iv is None:
+            iv = extract_atm_iv(chain, spot)  # nearest listed expiry
+            approx = iv is not None
+        if iv is None:
+            ui.notify(f"No ATM IV for {sym} {expiry}.", type="warning")
+            return
+        iv_in.value = round(iv, 1)
+        suffix = " (nearest listed expiry)" if approx else ""
+        ui.notify(f"ATM IV {iv:.1f}%{suffix}", type="positive")
 
     ui.button("Calculate", icon="calculate", on_click=lambda: do_calc())
     summary_box = ui.row().classes("gap-3 flex-wrap")
