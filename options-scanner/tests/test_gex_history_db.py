@@ -1,0 +1,311 @@
+import sqlite3
+import time
+import pytest
+from pathlib import Path
+import gex_history_db as db
+
+
+def test_init_schema_creates_tables():
+    conn = sqlite3.connect(":memory:")
+    db.init_schema(conn)
+    cur = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='snapshots'"
+    )
+    assert cur.fetchone() is not None
+    cur = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_snap_today'"
+    )
+    assert cur.fetchone() is not None
+
+
+def test_init_schema_is_idempotent():
+    conn = sqlite3.connect(":memory:")
+    db.init_schema(conn)
+    db.init_schema(conn)  # must not raise
+
+
+def test_connect_creates_file(tmp_path, monkeypatch):
+    dbpath = tmp_path / "test.db"
+    monkeypatch.setattr(db, "DB_PATH", dbpath)
+    conn = db.connect()
+    assert dbpath.exists()
+    conn.close()
+
+
+def test_connect_read_only_rejects_write(tmp_path, monkeypatch):
+    dbpath = tmp_path / "test.db"
+    monkeypatch.setattr(db, "DB_PATH", dbpath)
+    rw = db.connect()
+    db.init_schema(rw)
+    rw.close()
+    ro = db.connect(read_only=True)
+    with pytest.raises(sqlite3.OperationalError):
+        ro.execute(
+            "INSERT INTO snapshots(symbol,view,ts) VALUES ('X','gex',1)"
+        )
+        ro.commit()
+    ro.close()
+
+
+def test_connect_read_only_missing_file_raises(tmp_path, monkeypatch):
+    dbpath = tmp_path / "missing.db"
+    monkeypatch.setattr(db, "DB_PATH", dbpath)
+    with pytest.raises(sqlite3.OperationalError):
+        db.connect(read_only=True)
+
+
+def test_insert_snapshot_roundtrip(tmp_path, monkeypatch):
+    dbpath = tmp_path / "t.db"
+    monkeypatch.setattr(db, "DB_PATH", dbpath)
+    conn = db.connect()
+    db.init_schema(conn)
+    ts = int(time.time())
+    summary = {
+        "ts": ts, "spot": 5000.0, "flip": 4995.0,
+        "top_pos_strike": 5010.0, "top_neg_strike": 4980.0,
+        "net_total": 1.23e9,
+    }
+    grid = {"4990": {"call": 1.0, "put": -0.5, "net": 0.5}}
+    db.insert_snapshot(conn, "SPX", "gex", summary, grid, dte=2)
+    rows = db.load_today(conn, "SPX", "gex")
+    assert len(rows) == 1
+    row = rows[0]
+    assert row[0] == ts
+    assert row[1] == 5000.0
+    assert row[2] == 4995.0
+
+
+def test_insert_replace_on_duplicate_ts(tmp_path, monkeypatch):
+    dbpath = tmp_path / "t.db"
+    monkeypatch.setattr(db, "DB_PATH", dbpath)
+    conn = db.connect()
+    db.init_schema(conn)
+    ts = int(time.time())
+    s1 = {"ts": ts, "spot": 100.0, "flip": None,
+          "top_pos_strike": None, "top_neg_strike": None, "net_total": None}
+    s2 = dict(s1, spot=200.0)
+    db.insert_snapshot(conn, "SPY", "gex", s1, {}, dte=1)
+    db.insert_snapshot(conn, "SPY", "gex", s2, {}, dte=1)
+    rows = db.load_today(conn, "SPY", "gex")
+    assert len(rows) == 1
+    assert rows[0][1] == 200.0
+
+
+def test_load_today_filters_by_symbol_and_view(tmp_path, monkeypatch):
+    dbpath = tmp_path / "t.db"
+    monkeypatch.setattr(db, "DB_PATH", dbpath)
+    conn = db.connect()
+    db.init_schema(conn)
+    now = int(time.time())
+    summary = lambda ts, spot=100.0: {
+        "ts": ts, "spot": spot, "flip": None,
+        "top_pos_strike": None, "top_neg_strike": None, "net_total": None,
+    }
+    db.insert_snapshot(conn, "SPY", "gex",   summary(now),     {}, 1)
+    db.insert_snapshot(conn, "SPY", "charm", summary(now),     {}, 1)
+    db.insert_snapshot(conn, "QQQ", "gex",   summary(now),     {}, 1)
+    assert len(db.load_today(conn, "SPY", "gex")) == 1
+    assert len(db.load_today(conn, "SPY", "charm")) == 1
+    assert len(db.load_today(conn, "QQQ", "gex")) == 1
+    assert len(db.load_today(conn, "QQQ", "charm")) == 0
+
+
+def test_load_today_orders_by_ts(tmp_path, monkeypatch):
+    dbpath = tmp_path / "t.db"
+    monkeypatch.setattr(db, "DB_PATH", dbpath)
+    conn = db.connect()
+    db.init_schema(conn)
+    now = int(time.time())
+    make = lambda ts: {"ts": ts, "spot": float(ts), "flip": None,
+                       "top_pos_strike": None, "top_neg_strike": None,
+                       "net_total": None}
+    db.insert_snapshot(conn, "SPY", "gex", make(now + 10), {}, 1)
+    db.insert_snapshot(conn, "SPY", "gex", make(now),      {}, 1)
+    db.insert_snapshot(conn, "SPY", "gex", make(now + 5),  {}, 1)
+    rows = db.load_today(conn, "SPY", "gex")
+    assert [r[0] for r in rows] == [now, now + 5, now + 10]
+
+
+def test_purge_old_deletes_prior_days(tmp_path, monkeypatch):
+    dbpath = tmp_path / "t.db"
+    monkeypatch.setattr(db, "DB_PATH", dbpath)
+    conn = db.connect()
+    db.init_schema(conn)
+    now = int(time.time())
+    yesterday = now - 86400 * 2
+    make = lambda ts: {"ts": ts, "spot": 1.0, "flip": None,
+                       "top_pos_strike": None, "top_neg_strike": None,
+                       "net_total": None}
+    db.insert_snapshot(conn, "SPY", "gex", make(yesterday), {}, 1)
+    db.insert_snapshot(conn, "SPY", "gex", make(now),       {}, 1)
+    db.purge_old(conn)
+    rows = conn.execute("SELECT ts FROM snapshots").fetchall()
+    assert len(rows) == 1
+    assert rows[0][0] == now
+
+
+def test_last_snapshot_age_fresh(tmp_path, monkeypatch):
+    dbpath = tmp_path / "t.db"
+    monkeypatch.setattr(db, "DB_PATH", dbpath)
+    conn = db.connect()
+    db.init_schema(conn)
+    ts = int(time.time()) - 120
+    db.insert_snapshot(
+        conn, "SPY", "gex",
+        {"ts": ts, "spot": 1.0, "flip": None,
+         "top_pos_strike": None, "top_neg_strike": None, "net_total": None},
+        {}, 1,
+    )
+    age, last_ts = db.last_snapshot_age(conn, "SPY", "gex")
+    assert last_ts == ts
+    assert 115 <= age <= 130
+
+
+def test_load_today_with_grid_decodes_json(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    ts = int(time.time())
+    summary = {"ts": ts, "spot": 100.0, "flip": 99.0,
+               "top_pos_strike": 110.0, "top_neg_strike": 95.0,
+               "net_total": 1.0}
+    # JSON stringifies dict keys. Loader must return float-keyed dicts so
+    # downstream numeric logic (GammaEngine.group_gex) works.
+    grid = {100.0: {"call": 0.5, "put": -0.25, "net": 0.25}}
+    db.insert_snapshot(conn, "SPY", "gex", summary, grid, dte=1)
+    rows = db.load_today_with_grid(conn, "SPY", "gex")
+    assert len(rows) == 1
+    assert rows[0][6] == grid
+    assert all(isinstance(k, float) for k in rows[0][6].keys())
+
+
+def test_load_today_with_grid_empty_when_no_json(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    summary = {"ts": int(time.time()), "spot": None, "flip": None,
+               "top_pos_strike": None, "top_neg_strike": None,
+               "net_total": None}
+    db.insert_snapshot(conn, "SPY", "gex", summary, {}, dte=1)
+    rows = db.load_today_with_grid(conn, "SPY", "gex")
+    assert rows[0][6] == {}
+
+
+def test_last_snapshot_age_no_data(tmp_path, monkeypatch):
+    dbpath = tmp_path / "t.db"
+    monkeypatch.setattr(db, "DB_PATH", dbpath)
+    conn = db.connect()
+    db.init_schema(conn)
+    age, last_ts = db.last_snapshot_age(conn, "SPY", "gex")
+    assert age is None
+    assert last_ts is None
+
+
+def test_insert_snapshot_stores_0dte_fields(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    db.insert_snapshot(
+        conn, "$SPX", "dex",
+        {
+            "ts": 1_700_000_000, "spot": 5000.0, "flip": 4995.0,
+            "top_pos_strike": 5010.0, "top_neg_strike": 4980.0,
+            "net_total": 1.0e9,
+            "net_delta_0dte": -1.2e9,
+            "projected_net_delta_close": -0.87e9,
+            "hedge_pressure": 3.3e8,
+        },
+        {5000.0: {"call": 1.0, "put": -0.5, "net": 0.5}},
+        0,
+    )
+    row = conn.execute(
+        "SELECT net_delta_0dte, projected_net_delta_close, hedge_pressure "
+        "FROM snapshots WHERE view = 'dex'"
+    ).fetchone()
+    assert row == (-1.2e9, -0.87e9, 3.3e8)
+
+
+def test_insert_snapshot_null_0dte_fields(tmp_path, monkeypatch):
+    """When chain has no 0-DTE contracts, the three fields must be NULL, not 0."""
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    db.insert_snapshot(
+        conn, "VIX", "dex",
+        {"ts": 1_700_000_000, "spot": 18.0, "flip": None,
+         "top_pos_strike": None, "top_neg_strike": None, "net_total": 0.0,
+         "net_delta_0dte": None,
+         "projected_net_delta_close": None,
+         "hedge_pressure": None},
+        {}, 7,
+    )
+    row = conn.execute(
+        "SELECT net_delta_0dte, projected_net_delta_close, hedge_pressure "
+        "FROM snapshots WHERE symbol = 'VIX'"
+    ).fetchone()
+    assert row == (None, None, None)
+
+
+def test_init_schema_backfills_legacy_db(tmp_path, monkeypatch):
+    """A DB created before the 0-DTE columns existed must get them via ALTER TABLE.
+
+    This exercises the PRAGMA table_info + ADD COLUMN branch of init_schema,
+    which is the path production DBs will hit on first run after the upgrade.
+    A second init_schema call must be a no-op.
+    """
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "legacy.db")
+    conn = db.connect()
+    # Simulate the pre-migration schema (no 0-DTE columns).
+    conn.executescript(
+        """
+        CREATE TABLE snapshots (
+            symbol          TEXT    NOT NULL,
+            view            TEXT    NOT NULL,
+            ts              INTEGER NOT NULL,
+            spot            REAL,
+            flip            REAL,
+            top_pos_strike  REAL,
+            top_neg_strike  REAL,
+            net_total       REAL,
+            dte             INTEGER,
+            gex_json        TEXT,
+            PRIMARY KEY (symbol, view, ts)
+        );
+        """
+    )
+    db.init_schema(conn)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(snapshots)")}
+    assert {"net_delta_0dte", "projected_net_delta_close", "hedge_pressure"} <= cols
+
+    # Second call must be idempotent (no duplicate ALTER, no exception).
+    db.init_schema(conn)
+    cols_after = {r[1] for r in conn.execute("PRAGMA table_info(snapshots)")}
+    assert cols_after == cols
+
+
+def test_first_snapshot_today_returns_earliest(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+
+    import time as _time
+    # Three snapshots today at different seconds; earliest must win.
+    base = int(_time.time()) - 3600
+    for offset, spot in [(600, 5000.0), (0, 4998.0), (1200, 5002.0)]:
+        db.insert_snapshot(
+            conn, "$SPX", "dex",
+            {"ts": base + offset, "spot": spot, "flip": None,
+             "top_pos_strike": None, "top_neg_strike": None, "net_total": 0.0},
+            {5000.0: {"call": 1.0, "put": -0.5, "net": 0.5}},
+            0,
+        )
+    grid = db.first_snapshot_today(conn, "$SPX", "dex")
+    # The "earliest" snapshot is offset 0 (spot 4998) — its grid should come back.
+    assert grid == {5000.0: {"call": 1.0, "put": -0.5, "net": 0.5}}
+
+
+def test_first_snapshot_today_empty(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    assert db.first_snapshot_today(conn, "$SPX", "dex") == {}

@@ -1,0 +1,15 @@
+__pycache__/
+.pytest_cache/
+*.pyc
+*.pyo
+.env
+frontend/node_modules/
+frontend/dist/
+logs/
+data/
+.claude/
+gex_history.db
+gex_history.db-journal
+gex_history.db-wal
+gex_history.db-shm
+config_notifications.py
