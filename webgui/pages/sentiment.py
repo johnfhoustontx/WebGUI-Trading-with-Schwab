@@ -27,7 +27,8 @@ LINE_COLOR = "#42a5f5"
 # Single-user app (see root CLAUDE.md); lost on server restart.
 _CACHE = {"snaps": None, "spy": None, "sector": None,
           "expanded": set(), "industry": {},
-          "composite_at": None, "sector_at": None}
+          "composite_at": None, "sector_at": None,
+          "proxy_up": None}
 
 # (component_scores key, display name, weight or None if out of composite)
 COMPONENTS = [
@@ -346,6 +347,15 @@ def _load_snapshots(days=35):
     return snaps, spy_closes
 
 
+def _proxy_up():
+    """Best-effort proxy reachability (run off-thread)."""
+    import proxy
+    try:
+        return bool(proxy.health().get("up"))
+    except Exception:
+        return False
+
+
 def _load_industries(etfs, spy_closes):
     """Off-thread: quotes + week/month trends + P/C + RRG for industry ETFs."""
     import proxy
@@ -537,6 +547,7 @@ def render():
         "industry": dict(_CACHE["industry"]),
         "composite_at": _CACHE.get("composite_at"),
         "sector_at": _CACHE.get("sector_at"),
+        "proxy_up": _CACHE.get("proxy_up"),
     }
 
     with ui.row().classes("items-center gap-3 w-full"):
@@ -822,7 +833,6 @@ def render():
 
     from datetime import datetime, timedelta
     def _render_status():
-        import proxy
         parts = []
         ca = state.get("composite_at")
         if ca:
@@ -831,11 +841,8 @@ def render():
         sa = state.get("sector_at")
         if sa:
             parts.append(f"Sectors {sa.strftime('%H:%M:%S')}")
-        try:
-            up = proxy.health().get("up")
-        except Exception:
-            up = None
-        parts.append(f"Proxy: {'connected' if up else 'down'}")
+        up = state.get("proxy_up")
+        parts.append(f"Proxy: {'connected' if up else ('—' if up is None else 'down')}")
         status_lbl.text = "   ·   ".join(parts) if parts else "Loading…"
 
     async def load(with_sectors=False):
@@ -853,8 +860,11 @@ def render():
             _apply()
             state["composite_at"] = datetime.now()
             _CACHE["composite_at"] = state["composite_at"]
+            state["proxy_up"] = await ng_run.io_bound(_proxy_up)
+            _CACHE["proxy_up"] = state["proxy_up"]
             _render_status()
         except Exception as e:  # noqa: BLE001
+            state["proxy_up"] = False
             ui.notify(f"Sentiment load failed: {e}", type="negative")
         finally:
             spinner.visible = False
