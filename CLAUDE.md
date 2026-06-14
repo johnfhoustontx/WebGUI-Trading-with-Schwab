@@ -117,6 +117,18 @@ the repo root + `webgui` on `sys.path` for tests. The proxy client is
 `proxy.schwab_py_client` (schwab-py compatible) and `proxy.schwab_client`
 (SchwabClient compatible).
 
+> **Cross-app module-name collisions (IMPORTANT, bitten us).** Putting multiple
+> app dirs on `sys.path` means same-named top-level modules clash process-wide
+> (one `sys.modules` entry wins). Known clashes: **`scoring`** (options-scanner
+> `scoring.py` vs sentiment-dashboard `scoring/` package) and **`notifier`**.
+> Once the Sentiment page loads, `import scoring` resolves to sentiment's, which
+> broke `scanner_engine.run_full_scan`'s lazy `from scoring import …`. Mitigation:
+> `pages/options/engines.py` `options_scoring()` context manager pins the options
+> `scoring` for the duration of an options engine call and restores after — used
+> in `scanner.py`/`swing.py`. When wiring Trade/Portfolio/Driver, watch for the
+> same trap (e.g. `notifier`); prefer importing engine deps eagerly at module
+> load (binds the name once) and/or wrap lazy engine calls similarly.
+
 **Structure for testability.** Keep pure transforms/figure-builders as
 module-level functions (TDD them with sample dicts); keep `render()` thin
 (widgets + wiring). Heavy/blocking engine calls go through
