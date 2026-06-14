@@ -1,0 +1,15 @@
+# Approximate current S&P 500 GICS sector weights (fractions, sum ~= 1.0).
+# Editable static benchmark for portfolio comparison #2 (my weights vs benchmark).
+# Sector names match the names produced by sector classification.
+[weights]
+Technology = 0.30
+Financials = 0.13
+Healthcare = 0.12
+"Consumer Discretionary" = 0.11
+"Communication Services" = 0.09
+Industrials = 0.08
+"Consumer Staples" = 0.06
+Energy = 0.04
+Utilities = 0.025
+"Real Estate" = 0.022
+Materials = 0.023

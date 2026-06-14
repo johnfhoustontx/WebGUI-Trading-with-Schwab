@@ -1,0 +1,23 @@
+# trade-analyzer — runtime + test dependencies
+#
+# Schwab market data is fetched through schwab-proxy (repo_paths.PROXY_URL).
+# This app does NOT authenticate to Schwab directly, so no OAuth/SSL-bundling
+# libraries are required.
+
+# Data
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Proxy HTTP client
+requests>=2.31.0
+
+# GUI + candlestick chart popups
+customtkinter>=5.2.0
+pillow>=10.0.0
+mplfinance>=0.12.9
+
+# Sector/industry peer screening (Schwab has no equivalent)
+finvizfinance>=0.14.0
+
+# Testing
+pytest>=8.0.0
