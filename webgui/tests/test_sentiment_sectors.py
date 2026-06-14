@@ -126,6 +126,8 @@ def test_component_table_rows_contrib():
     assert abs(vix["contrib"] - 0.20 * 4 * 1.0) < 1e-9     # w*s*conf
     assert by["Sector Perf"]["value"] == "+0.70%"
     assert by["Put/Call"]["value"] == "0.860"
+    rows2 = S.component_table_rows(_full_snap(6.81, sector_perf=7.6), sector_value="+0.70%")
+    assert next(r for r in rows2 if r["name"] == "Sector Perf")["score"] == 7.6
 
 
 def test_tiles_from_score_band():
@@ -170,3 +172,26 @@ def test_industry_rows_built():
 def test_industry_rows_missing_data_blank():
     rows = S.industry_rows(_sector_data(), "Information Technology", {}, {})
     assert rows[0]["day"] is None and rows[0]["week"] is None and rows[0]["month"] is None
+
+
+def test_industry_rows_with_pcr_rrg():
+    quotes = {"SMH": {"change_pct": 2.5}}
+    trends = {"SMH": {"week_pct": 4.0, "month_pct": 9.0}}
+    pcr = {"SMH": 0.92}
+    quads = {"SMH": "Leading"}
+    rows = S.industry_rows(_sector_data(), "Information Technology", quotes, trends, pcr, quads)
+    assert rows[0]["pcr"] == 0.92 and rows[0]["rrg"] == "Leading"
+
+
+def test_industry_rows_blank_when_no_pcr_rrg():
+    rows = S.industry_rows(_sector_data(), "Information Technology", {}, {})
+    assert rows[0]["pcr"] is None and rows[0]["rrg"] is None
+
+
+def test_traffic_color_bands():
+    assert S.traffic_color(7.0) == S.CLR_GREEN
+    assert S.traffic_color(6.5) == S.CLR_GREEN
+    assert S.traffic_color(3.0) == S.CLR_RED
+    assert S.traffic_color(4.5) == S.CLR_RED
+    assert S.traffic_color(5.5) == S.CLR_YELLOW
+    assert S.traffic_color("bad") == S.CLR_YELLOW

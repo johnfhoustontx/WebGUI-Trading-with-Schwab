@@ -46,6 +46,17 @@ def _safe_float(v, default=0.0):
         return default
 
 
+def traffic_color(total):
+    """Composite traffic-light band for tile backgrounds.
+    >=6.5 green, <=4.5 red, else amber. Mirrors source _update_metric_card_colors."""
+    v = _safe_float(total, 5.0)
+    if v >= 6.5:
+        return CLR_GREEN
+    if v <= 4.5:
+        return CLR_RED
+    return CLR_YELLOW
+
+
 def gauge_score(total):
     """0-10 composite -> 0-100 for the svg speedometer."""
     return max(0.0, min(100.0, _safe_float(total) * 10.0))
@@ -109,10 +120,14 @@ def build_history_figure(snapshots):
         "layout": {
             "margin": {"l": 36, "r": 12, "t": 8, "b": 28},
             "height": 220,
-            "yaxis": {"range": [0, 10], "title": "Composite"},
             "template": "plotly_dark",
             "paper_bgcolor": "rgba(0,0,0,0)",
             "plot_bgcolor": "rgba(0,0,0,0)",
+            "xaxis": {"gridcolor": "rgba(255,255,255,0.06)", "zeroline": False,
+                      "linecolor": "rgba(255,255,255,0.15)", "nticks": 6},
+            "yaxis": {"range": [0, 10], "title": "Composite",
+                      "gridcolor": "rgba(255,255,255,0.06)", "zeroline": False,
+                      "linecolor": "rgba(255,255,255,0.15)"},
         },
     }
 
@@ -287,7 +302,7 @@ def sector_industry_etfs(sector_data, sector_name):
     return out
 
 
-def industry_rows(sector_data, sector_name, ind_quotes, ind_trends):
+def industry_rows(sector_data, sector_name, ind_quotes, ind_trends, ind_pcr=None, ind_quadrants=None):
     """Indented rows for a sector's industries: day/week/month % only
     (pcr/rrg blank — industry option volume is too thin)."""
     rows = []
@@ -306,7 +321,8 @@ def industry_rows(sector_data, sector_name, ind_quotes, ind_trends):
             "day": q.get("change_pct"),
             "week": t.get("week_pct"),
             "month": t.get("month_pct"),
-            "pcr": None, "rrg": None,
+            "pcr": (ind_pcr or {}).get(etf),
+            "rrg": (ind_quadrants or {}).get(etf),
             "is_industry": True,
         })
     return rows
@@ -449,7 +465,7 @@ def component_table_rows(snapshot, rotation_value=None, sector_value=None):
         rows.append({
             "key": key, "name": name,
             "value": value_src.get(key) or "—",
-            "score": int(s),
+            "score": s,
             "weight": f"{int(w * 100)}%",
             "conf": f"{int(c * 100)}%",
             "contrib": w * s * c,
