@@ -26,7 +26,8 @@ LINE_COLOR = "#42a5f5"
 # In-process cache so navigating away/back repaints instantly without re-fetch.
 # Single-user app (see root CLAUDE.md); lost on server restart.
 _CACHE = {"snaps": None, "spy": None, "sector": None,
-          "expanded": set(), "industry": {}}
+          "expanded": set(), "industry": {},
+          "composite_at": None, "sector_at": None}
 
 # (component_scores key, display name, weight or None if out of composite)
 COMPONENTS = [
@@ -518,6 +519,14 @@ def render():
     import nicegui.run as ng_run
     from nicegui import ui
 
+    ui.add_css('''
+    .sent-sectors .secrow { border-bottom: 1px solid rgba(255,255,255,0.05); }
+    .sent-sectors .secrow:hover { background: rgba(255,255,255,0.04); }
+    .sent-sectors .secrow > div { border-right: 1px solid rgba(255,255,255,0.04); }
+    .sent-sectors .secrow > div:last-child { border-right: none; }
+    .sent-sectors .indrow { background: rgba(255,255,255,0.02); }
+    ''')
+
     from pages.options.svg import speedometer_svg
 
     state = {
@@ -526,6 +535,8 @@ def render():
         "sector": _CACHE["sector"],
         "expanded": set(_CACHE["expanded"]),
         "industry": dict(_CACHE["industry"]),
+        "composite_at": _CACHE.get("composite_at"),
+        "sector_at": _CACHE.get("sector_at"),
     }
 
     with ui.row().classes("items-center gap-3 w-full"):
@@ -536,21 +547,30 @@ def render():
         spinner.visible = False
         ui.button(icon="refresh", on_click=lambda: load(with_sectors=True)).props("flat round")
 
-    gauge_box = ui.html("").classes("q-mt-sm")
-    bias_lbl = ui.label("").classes("text-h6")
-    sub_lbl = ui.label("").classes("opacity-80")
+    with ui.row().classes("w-full no-wrap items-start gap-6"):
+        with ui.column().classes("items-start").style("min-width:280px"):
+            gauge_box = ui.html("").classes("q-mt-sm")
+            bias_lbl = ui.label("").classes("text-h6")
+            sub_lbl = ui.label("").classes("opacity-80")
+            ui.separator().classes("q-my-sm")
+            ui.label("Market Trend").classes("opacity-60 text-xs")
+            regime_badge = ui.badge("").classes("text-subtitle2 q-pa-sm")
+            regime_desc = ui.label("").classes("opacity-80 text-sm")
+            regime_detail = ui.label("").classes("opacity-60 text-xs")
+        comp_box = ui.column().classes("q-gutter-xs").style("flex:1")
 
     # Signal tiles
-    tile_lbls = {}
+    tile_lbls, tile_cards = {}, {}
     TILE_DEFS = [("modifier", "MODIFIER"), ("bias", "BIAS"), ("signal", "SIGNAL"),
                  ("yesterday", "YESTERDAY"), ("change", "CHANGE")]
     with ui.row().classes("w-full no-wrap gap-2 q-mt-sm"):
         for tkey, tlabel in TILE_DEFS:
-            with ui.card().classes("q-pa-sm items-center").style("min-width:96px;flex:1"):
-                ui.label(tlabel).classes("opacity-60 text-xs")
-                tile_lbls[tkey] = ui.label("—").classes("text-bold text-subtitle1")
+            c = ui.card().classes("q-pa-xs items-center").style("min-width:72px;flex:1")
+            with c:
+                ui.label(tlabel).classes("text-xs").style("color:#111")
+                tile_lbls[tkey] = ui.label("—").classes("text-bold").style("color:#111")
+            tile_cards[tkey] = c
 
-    comp_box = ui.column().classes("w-full q-gutter-xs q-mt-md")
     ui.separator().classes("q-my-md")
     ui.label("30-Day History").classes("text-subtitle1")
     hist_plot = ui.plotly(build_history_figure([])).classes("w-full")
@@ -558,11 +578,6 @@ def render():
     vel_lbl = ui.label("").classes("opacity-80 text-sm")
     flag_lbl = ui.label("").classes("text-negative text-sm")
     div_lbl = ui.label("").classes("text-warning text-sm")
-    ui.separator().classes("q-my-md")
-    ui.label("Market Trend Regime").classes("text-subtitle1")
-    regime_badge = ui.badge("").classes("text-subtitle2 q-pa-sm")
-    regime_desc = ui.label("").classes("opacity-80 text-sm")
-    regime_detail = ui.label("").classes("opacity-60 text-xs")
 
     # Sector & Industry Performance
     ui.separator().classes("q-my-md")
@@ -576,7 +591,7 @@ def render():
         sec_spinner.visible = False
         summary_lbl = ui.label("").classes("opacity-80 text-sm")
     rotation_lbl = ui.label("").classes("text-sm")
-    sector_box = ui.column().classes("w-full q-gutter-xs q-mt-sm")
+    sector_box = ui.column().classes("w-full q-gutter-none q-mt-sm sent-sectors")
 
     SEC_COLS = [("sector", "Sector", 140), ("etf", "ETF", 50),
                 ("desc", "Description", 200), ("day", "Day %", 70),
@@ -593,7 +608,6 @@ def render():
                 ui.label("Score").style("width:50px")
                 ui.label("Weight").style("width:60px")
                 ui.label("Conf").style("width:50px")
-                ui.label("Contrib").style("width:60px")
             for r in rows:
                 sc = r["score"]
                 sc_color = (CLR_GREEN if sc >= 7 else
@@ -603,11 +617,10 @@ def render():
                     ui.label(str(r["value"])).classes("text-sm").style(
                         "width:140px;overflow:hidden;text-overflow:ellipsis;"
                         "white-space:nowrap")
-                    ui.label(str(sc)).classes("text-sm text-bold").style(
+                    ui.label(f"{sc:.2f}").classes("text-sm text-bold").style(
                         f"width:50px;color:{sc_color}")
                     ui.label(r["weight"]).classes("text-sm").style("width:60px")
                     ui.label(r["conf"]).classes("text-sm").style("width:50px")
-                    ui.label(f"{r['contrib']:.2f}").classes("text-sm").style("width:60px")
 
     def _comp_context():
         """(rotation_value, sector_value) from loaded sector data, or (None, None)."""
@@ -638,8 +651,10 @@ def render():
         if len(snaps) >= 2:
             prev_total = (snaps[-2].get("composite") or {}).get("total_score")
         t = tiles(latest, prev_total)
+        band = traffic_color(total)
         for tkey, _tlabel in TILE_DEFS:
             tile_lbls[tkey].text = t[tkey]
+            tile_cards[tkey].style(f"background-color:{band}")
         rotation_value, sector_value = _comp_context()
         _render_components(latest, rotation_value, sector_value)
         hist_plot.update_figure(build_history_figure(snaps))
@@ -675,18 +690,21 @@ def render():
             with ui.row().classes("items-center w-full no-wrap gap-2 opacity-60 text-xs"):
                 ui.label("").style("width:24px")
                 for _f, hdr, w in SEC_COLS:
-                    ui.label(hdr).style(f"width:{w}px")
+                    if _f == "desc":
+                        ui.label(hdr).style("flex:1;min-width:160px")
+                    else:
+                        ui.label(hdr).style(f"width:{w}px")
             for r in rows:
                 sector_name = r["sector"]
                 expanded = sector_name in state["expanded"]
-                with ui.row().classes("items-center w-full no-wrap gap-2 text-sm"):
+                with ui.row().classes("items-center w-full no-wrap gap-2 text-sm secrow"):
                     ui.icon("keyboard_arrow_down" if expanded else "keyboard_arrow_right") \
                         .classes("cursor-pointer").style("width:24px") \
                         .on("click", lambda _e, s=sector_name: _toggle_sector(s))
                     ui.label(str(sector_name or "")).style("width:140px")
                     ui.label(str(r["etf"] or "")).style("width:50px")
                     ui.label(str(r["desc"] or "")).style(
-                        "width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap")
+                        "flex:1;min-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap")
                     for fld in ("day", "week", "month"):
                         v = r[fld]
                         ui.label(f"{v:+.2f}%" if v is not None else "—") \
@@ -704,13 +722,13 @@ def render():
                             ui.label("loading…").style("width:140px")
                     else:
                         for ir in industry_rows(sd, sector_name, ind["quotes"], ind["trends"], ind.get("pcr"), ind.get("quadrants")):
-                            with ui.row().classes("items-center w-full no-wrap gap-2 text-xs"):
+                            with ui.row().classes("items-center w-full no-wrap gap-2 text-xs secrow indrow"):
                                 ui.label("").style("width:24px")
                                 ui.label(str(ir["label"] or "")).style(
                                     "width:140px;padding-left:14px;opacity:0.85")
                                 ui.label(str(ir["etf"] or "")).style("width:50px")
                                 ui.label(str(ir["desc"] or "")).style(
-                                    "width:200px;overflow:hidden;text-overflow:ellipsis;"
+                                    "flex:1;min-width:160px;overflow:hidden;text-overflow:ellipsis;"
                                     "white-space:nowrap;opacity:0.8")
                                 for fld in ("day", "week", "month"):
                                     v = ir[fld]
@@ -793,11 +811,32 @@ def render():
             state["sector"] = await ng_run.io_bound(_load_sector_perf, state["spy"])
             _CACHE["sector"] = state["sector"]
             _apply_sectors()
+            state["sector_at"] = datetime.now()
+            _CACHE["sector_at"] = state["sector_at"]
+            _render_status()
         except Exception as e:  # noqa: BLE001
             ui.notify(f"Sector load failed: {e}", type="negative")
         finally:
             sec_spinner.visible = False
             state["loading_sectors"] = False
+
+    from datetime import datetime, timedelta
+    def _render_status():
+        import proxy
+        parts = []
+        ca = state.get("composite_at")
+        if ca:
+            parts.append(f"Updated {ca.strftime('%H:%M:%S')}")
+            parts.append(f"Next ~{(ca + timedelta(seconds=300)).strftime('%H:%M')}")
+        sa = state.get("sector_at")
+        if sa:
+            parts.append(f"Sectors {sa.strftime('%H:%M:%S')}")
+        try:
+            up = proxy.health().get("up")
+        except Exception:
+            up = None
+        parts.append(f"Proxy: {'connected' if up else 'down'}")
+        status_lbl.text = "   ·   ".join(parts) if parts else "Loading…"
 
     async def load(with_sectors=False):
         # Composite refresh. Sectors are loaded only on initial load and on
@@ -812,6 +851,9 @@ def render():
             state["snaps"], state["spy"] = snaps, spy
             _CACHE["snaps"], _CACHE["spy"] = snaps, spy
             _apply()
+            state["composite_at"] = datetime.now()
+            _CACHE["composite_at"] = state["composite_at"]
+            _render_status()
         except Exception as e:  # noqa: BLE001
             ui.notify(f"Sentiment load failed: {e}", type="negative")
         finally:
@@ -820,11 +862,16 @@ def render():
         if with_sectors:
             await load_sectors()
 
+    ui.separator().classes("q-my-sm")
+    status_lbl = ui.label("Loading…").classes("opacity-60 text-xs w-full")
+
     # Instant repaint from cache on revisit; first-ever visit fetches.
     if state["snaps"]:
         _apply()
     if state["sector"]:
         _apply_sectors()
+    _render_status()
     if not state["snaps"]:
         ui.timer(0.1, lambda: load(with_sectors=True), once=True)
     ui.timer(300.0, load)   # composite-only auto-refresh (was 120s)
+    ui.timer(15.0, _render_status)
