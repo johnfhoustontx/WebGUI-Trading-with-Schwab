@@ -122,6 +122,39 @@ def extract_atm_iv(chain, spot, expiry=None):
     return None if best is None else best * 100.0
 
 
+def extract_premium(chain, option_type, strike, expiry=None):
+    """Premium for one leg (mark, else bid/ask mid) from the chain.
+
+    Matches the strike within 0.51 in the call/put map for ``option_type``.
+    When ``expiry`` is given, only that expiry is considered. None if not found.
+    """
+    if not isinstance(chain, dict) or not isinstance(strike, (int, float)):
+        return None
+    exp_iso = None
+    if expiry is not None:
+        exp_iso = expiry.isoformat() if hasattr(expiry, "isoformat") else str(expiry)
+    map_key = "callExpDateMap" if option_type == "call" else "putExpDateMap"
+    for exp_key, strikes in (chain.get(map_key) or {}).items():
+        if exp_iso and exp_key.split(":")[0] != exp_iso:
+            continue
+        for strike_str, contracts in (strikes or {}).items():
+            try:
+                sk = float(strike_str)
+            except (ValueError, TypeError):
+                continue
+            if abs(sk - strike) < 0.51 and isinstance(contracts, list) and contracts:
+                c = contracts[0]
+                mark = c.get("mark")
+                if mark and mark > 0:
+                    return mark
+                bid = c.get("bid", 0) or 0
+                ask = c.get("ask", 0) or 0
+                if bid > 0 and ask > 0:
+                    return (bid + ask) / 2.0
+                return None
+    return None
+
+
 def _has_contracts(chain):
     return bool(chain and (chain.get("callExpDateMap") or chain.get("putExpDateMap")))
 
@@ -251,12 +284,14 @@ def render():
         strategy_sel = ui.select(list(LEG_SPECS.keys()), value="PCS", label="Strategy").classes("w-36")
         symbol_in = ui.input("Symbol", value="SPY").classes("w-24")
         price_in = ui.number("Price", value=100.0, format="%.2f").classes("w-28")
-        ui.button("Get Price", icon="download", on_click=lambda: fetch_price()).props("dense")
+        ui.button("price", icon="download", on_click=lambda: fetch_price()) \
+            .props("flat dense size=sm").tooltip("Fetch last price")
         expiry_in = ui.input("Expiry (YYYY-MM-DD)",
                              value=str(dt.date.today() + dt.timedelta(days=7))).classes("w-44")
         contracts_in = ui.number("Contracts", value=1, min=1, max=100).classes("w-24")
         iv_in = ui.number("IV %", value=20.0, format="%.1f").classes("w-24")
-        ui.button("Fetch IV", icon="download", on_click=lambda: fetch_iv()).props("dense")
+        ui.button("IV", icon="download", on_click=lambda: fetch_iv()) \
+            .props("flat dense size=sm").tooltip("Fetch ATM IV for the expiry")
         ivchg_in = ui.number("IV Δ %", value=0.0, format="%.1f").classes("w-24")
         rate_in = ui.number("Rate %", value=4.5, format="%.2f").classes("w-24")
 
@@ -279,8 +314,47 @@ def render():
                     leg_inputs[key] = {"strike": sin, "premium": pin,
                                        "option_type": otype, "side": side}
 
+    ui.button("Fetch premiums", icon="download", on_click=lambda: fetch_premiums()) \
+        .props("flat dense size=sm").tooltip("Fill leg premiums from the chain (strikes required)")
+
     rebuild_legs()
     strategy_sel.on_value_change(lambda e: rebuild_legs())
+
+    async def fetch_premiums():
+        sym = (symbol_in.value or "").strip().upper()
+        if not sym or not (expiry_in.value or "").strip():
+            ui.notify("Fill Symbol and Expiry first.", type="warning")
+            return
+        legs = []
+        for info in leg_inputs.values():
+            if not info["strike"].value:
+                ui.notify("Fill in all leg strikes first.", type="warning")
+                return
+            legs.append((info, float(info["strike"].value)))
+        try:
+            expiry = dt.date.fromisoformat(expiry_in.value.strip())
+        except Exception as exc:
+            ui.notify(f"Bad expiry: {exc}", type="negative")
+            return
+        try:
+            chain = await run.io_bound(_fetch_chain, api_symbol(sym), sym, expiry)
+        except Exception as exc:
+            ui.notify(f"Chain fetch failed: {exc}", type="negative")
+            return
+        filled, missing = 0, []
+        for info, strike in legs:
+            prem = extract_premium(chain, info["option_type"], strike, expiry=expiry)
+            if prem is None:
+                prem = extract_premium(chain, info["option_type"], strike)
+            if prem is not None:
+                info["premium"].value = round(prem, 2)
+                filled += 1
+            else:
+                missing.append(f"{info['option_type']} @ {strike:g}")
+        if filled:
+            ui.notify(f"Filled {filled} premium(s).", type="positive")
+        if missing:
+            ui.notify("No premium for: " + ", ".join(missing), type="warning")
 
     async def fetch_price():
         sym = (symbol_in.value or "").strip().upper()

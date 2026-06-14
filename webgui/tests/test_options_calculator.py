@@ -75,6 +75,33 @@ def test_extract_atm_iv_filters_by_expiry():
     assert calc.extract_atm_iv(chain, 742.0, expiry="2026-06-19") == 18.0
 
 
+CHAIN_PREM = {
+    "callExpDateMap": {"2026-06-18:4": {"450.0": [{"mark": 1.25, "bid": 1.2, "ask": 1.3}]}},
+    "putExpDateMap": {"2026-06-18:4": {"445.0": [{"mark": 0, "bid": 0.06, "ask": 0.10}]}},
+}
+
+
+def test_extract_premium_uses_mark():
+    assert calc.extract_premium(CHAIN_PREM, "call", 450.0) == 1.25
+
+
+def test_extract_premium_falls_back_to_mid():
+    assert abs(calc.extract_premium(CHAIN_PREM, "put", 445.0) - 0.08) < 1e-9
+
+
+def test_extract_premium_strike_tolerance():
+    assert calc.extract_premium(CHAIN_PREM, "call", 450.3) == 1.25
+
+
+def test_extract_premium_none_when_missing():
+    assert calc.extract_premium(CHAIN_PREM, "call", 999) is None
+
+
+def test_extract_premium_expiry_filter():
+    assert calc.extract_premium(CHAIN_PREM, "call", 450.0, expiry="2026-06-18") == 1.25
+    assert calc.extract_premium(CHAIN_PREM, "call", 450.0, expiry="2026-06-19") is None
+
+
 def test_api_symbol_maps_spx():
     assert calc.api_symbol("SPX") == "$SPX"
     assert calc.api_symbol("spy") == "SPY"
