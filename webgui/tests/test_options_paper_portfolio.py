@@ -1,0 +1,53 @@
+"""Tests for the Paper Portfolio pure transforms."""
+from pages.options import portfolio
+
+SNAP = {
+    "equity": 25100.0, "cash": 24000.0, "buying_power_reserved": 1000.0,
+    "open_unrealized": 100.0, "session_pnl": 50.0, "realized_pnl": 75.0,
+    "open_count": 2, "halted": False,
+}
+
+POS = {
+    "position_id": 1, "symbol": "SPY", "strategy": "PCS", "short_strike": 450,
+    "long_strike": 445, "expiration": "2026-06-19", "quantity": 2,
+    "entry_credit": 0.34, "max_loss_total": 932.0, "current_value": 0.2,
+    "unrealized_pnl": 28.0, "status": "OPEN",
+}
+
+ORD = {
+    "order_id": 10, "ts": "2026-06-10T10:00:00", "side": "SELL", "symbol": "SPY",
+    "quantity": 2, "order_type": "LIMIT", "fill_price": 0.34, "status": "FILLED",
+    "reject_reason": None,
+}
+
+
+def test_account_cards_labels_and_values():
+    cards = portfolio.account_cards(SNAP)
+    labels = {c[0] for c in cards}
+    assert {"Equity", "Cash", "Session P&L", "Open"} <= labels
+    equity = dict((c[0], c[1]) for c in cards)["Equity"]
+    assert "25,100" in equity
+
+
+def test_account_cards_engine_status():
+    halted = dict((c[0], c[1]) for c in portfolio.account_cards({**SNAP, "halted": True}))
+    assert halted["Engine"] == "HALTED"
+
+
+def test_position_rows_maps_and_keeps_id():
+    rows = portfolio.position_rows([POS])
+    assert rows[0]["id"] == 1
+    assert rows[0]["symbol"] == "SPY"
+    assert rows[0]["unrealized_pnl"] == 28.0
+
+
+def test_order_rows_maps():
+    rows = portfolio.order_rows([ORD])
+    assert rows[0]["order_id"] == 10
+    assert rows[0]["side"] == "SELL"
+    assert rows[0]["fill_price"] == 0.34
+
+
+def test_columns_present():
+    assert {c["field"] for c in portfolio.position_columns()} >= {"symbol", "unrealized_pnl", "status"}
+    assert {c["field"] for c in portfolio.order_columns()} >= {"side", "fill_price", "status"}
