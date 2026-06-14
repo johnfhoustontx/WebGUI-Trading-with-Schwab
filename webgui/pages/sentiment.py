@@ -17,6 +17,8 @@ from scoring import trend_regime as trend_regime  # noqa: E402
 CLR_GREEN = "#66bb6a"
 CLR_RED = "#ef5350"
 CLR_YELLOW = "#ffd54f"
+CLR_FLAT = "#9e9e9e"
+CLR_CYAN = "#3fb6c7"
 LINE_COLOR = "#42a5f5"
 
 # (component_scores key, display name, weight or None if out of composite)
@@ -123,6 +125,72 @@ def commit_trend_regime(spy_closes, lookback_days=trend_regime.HYSTERESIS_DAYS +
         committed, history = trend_regime.commit_state(raw, history, committed)
     days = 1
     return result, (committed or result.state), days
+
+
+def pct_color(pct):
+    """Green up / red down / gray flat (|pct| < 0.05)."""
+    if pct is None or abs(float(pct)) < 0.05:
+        return CLR_FLAT
+    return CLR_GREEN if float(pct) > 0 else CLR_RED
+
+
+def pcr_color(pcr):
+    """<0.95 call-dominated green, >1.05 put-dominated red, else flat."""
+    if pcr is None or float(pcr) <= 0:
+        return CLR_FLAT
+    if float(pcr) < 0.95:
+        return CLR_GREEN
+    if float(pcr) > 1.05:
+        return CLR_RED
+    return CLR_FLAT
+
+
+def rrg_color(quadrant):
+    return {
+        "Leading": CLR_GREEN, "Improving": CLR_CYAN,
+        "Weakening": CLR_YELLOW, "Lagging": CLR_RED,
+    }.get(quadrant, CLR_FLAT)
+
+
+def pcr_from_chain(chain):
+    """Sum put vs call totalVolume from a Schwab /chains payload -> ratio.
+    Returns None when no chain or zero call volume. Ported from source
+    sentiment_dashboard.py:2939-2953."""
+    if not chain:
+        return None
+    pv = cv = 0
+    for strikes in (chain.get("putExpDateMap") or {}).values():
+        for contracts in strikes.values():
+            for c in contracts:
+                v = c.get("totalVolume", 0) or 0
+                if v > 0:
+                    pv += v
+    for strikes in (chain.get("callExpDateMap") or {}).values():
+        for contracts in strikes.values():
+            for c in contracts:
+                v = c.get("totalVolume", 0) or 0
+                if v > 0:
+                    cv += v
+    return round(pv / cv, 3) if cv > 0 else None
+
+
+def _pct_change_n(closes, n):
+    """%-change from n sessions ago to last close, or None. Mirrors source
+    _pct_change_n (uses close[-(n+1)])."""
+    if not closes or len(closes) < n + 1:
+        return None
+    prev = float(closes[-(n + 1)])
+    last = float(closes[-1])
+    if prev == 0:
+        return None
+    return (last - prev) / prev * 100.0
+
+
+def week_month_from_closes(closes):
+    """(day3_pct, week_pct, month_pct) from a daily-close list (n=3/5/21)."""
+    return (_pct_change_n(closes, 3),
+            _pct_change_n(closes, 5),
+            _pct_change_n(closes, 21))
 
 
 def _load_snapshots(days=35):
