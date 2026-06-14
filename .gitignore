@@ -34,5 +34,8 @@ desktop.ini
 # Git worktrees
 .worktrees/
 
+# Claude Code machine-local settings
+.claude/settings.local.json
+
 # portfolio-analyzer runtime trade store
 portfolio-analyzer/data/
