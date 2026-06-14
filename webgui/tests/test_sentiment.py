@@ -73,3 +73,17 @@ def test_commit_trend_regime_returns_state():
 def test_commit_trend_regime_short_series_is_range():
     tr, committed, days = S.commit_trend_regime([100.0, 101.0])
     assert committed == "range"
+
+
+def test_commit_trend_regime_holds_on_single_bar_flip():
+    # Long healthy uptrend -> trailing raw + committed state is bull_trend.
+    base = [100.0 + i * 0.5 for i in range(260)]
+    assert S.commit_trend_regime(base)[1] == "bull_trend"
+    # Append exactly ONE bar that drops sharply below the 50DMA, flipping
+    # the latest raw classify away from bull_trend. With HYSTERESIS_DAYS=2,
+    # a single non-confirmed bar must NOT flip the committed state.
+    series = base + [200.0]
+    tr, committed, _ = S.commit_trend_regime(series)
+    assert tr.state != "bull_trend"      # raw verdict flipped (range)
+    assert committed == "bull_trend"     # hysteresis held the committed state
+    assert tr.state != committed
