@@ -102,6 +102,24 @@ def test_extract_premium_expiry_filter():
     assert calc.extract_premium(CHAIN_PREM, "call", 450.0, expiry="2026-06-19") is None
 
 
+CHAIN_SEL = {
+    "callExpDateMap": {"2026-06-18:4": {"450.0": [{}], "455.0": [{}]}},
+    "putExpDateMap": {"2026-06-18:4": {"445.0": [{}]}, "2026-06-22:8": {"440.0": [{}]}},
+}
+
+
+def test_chain_expiries_sorted_unique():
+    assert calc.chain_expiries(CHAIN_SEL) == ["2026-06-18", "2026-06-22"]
+    assert calc.chain_expiries({}) == []
+
+
+def test_chain_strikes_by_expiry_and_kind():
+    assert calc.chain_strikes(CHAIN_SEL, "2026-06-18", "call") == [450.0, 455.0]
+    assert calc.chain_strikes(CHAIN_SEL, "2026-06-18", "put") == [445.0]
+    assert calc.chain_strikes(CHAIN_SEL, "2026-06-22", "put") == [440.0]
+    assert calc.chain_strikes(CHAIN_SEL, "2026-06-18", "put") != [440.0]
+
+
 def test_api_symbol_maps_spx():
     assert calc.api_symbol("SPX") == "$SPX"
     assert calc.api_symbol("spy") == "SPY"

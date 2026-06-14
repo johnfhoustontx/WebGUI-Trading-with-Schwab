@@ -155,6 +155,30 @@ def extract_premium(chain, option_type, strike, expiry=None):
     return None
 
 
+def chain_expiries(chain):
+    """Sorted unique expiry strings (YYYY-MM-DD) from an option-chain payload."""
+    out = set()
+    for map_key in ("callExpDateMap", "putExpDateMap"):
+        for exp_key in (chain or {}).get(map_key) or {}:
+            out.add(exp_key.split(":")[0])
+    return sorted(out)
+
+
+def chain_strikes(chain, expiry, option_type):
+    """Sorted strikes for one expiry + option_type (call/put)."""
+    map_key = "callExpDateMap" if option_type == "call" else "putExpDateMap"
+    out = set()
+    for exp_key, strikes in ((chain or {}).get(map_key) or {}).items():
+        if exp_key.split(":")[0] != str(expiry):
+            continue
+        for s in strikes or {}:
+            try:
+                out.add(float(s))
+            except (ValueError, TypeError):
+                continue
+    return sorted(out)
+
+
 def _has_contracts(chain):
     return bool(chain and (chain.get("callExpDateMap") or chain.get("putExpDateMap")))
 
@@ -284,10 +308,9 @@ def render():
         strategy_sel = ui.select(list(LEG_SPECS.keys()), value="PCS", label="Strategy").classes("w-36")
         symbol_in = ui.input("Symbol", value="SPY").classes("w-24")
         price_in = ui.number("Price", value=100.0, format="%.2f").classes("w-28")
-        ui.button("price", icon="download", on_click=lambda: fetch_price()) \
-            .props("flat dense size=sm").tooltip("Fetch last price")
-        expiry_in = ui.input("Expiry (YYYY-MM-DD)",
-                             value=str(dt.date.today() + dt.timedelta(days=7))).classes("w-44")
+        ui.button("load", icon="download", on_click=lambda: load_symbol()) \
+            .props("flat dense size=sm").tooltip("Load price + expiries/strikes from the chain")
+        expiry_sel = ui.select([], label="Expiry").classes("w-44")
         contracts_in = ui.number("Contracts", value=1, min=1, max=100).classes("w-24")
         iv_in = ui.number("IV %", value=20.0, format="%.1f").classes("w-24")
         ui.button("IV", icon="download", on_click=lambda: fetch_iv()) \
@@ -301,6 +324,20 @@ def render():
         rpct_in = ui.number("Range %", value=5.0, format="%.1f").classes("w-24")
 
     leg_box = ui.column().classes("gap-2")
+    state = {"chain": None}
+
+    def _sync_strikes():
+        chain = state.get("chain")
+        if not chain or not expiry_sel.value:
+            return
+        spot = float(price_in.value or 0)
+        for info in leg_inputs.values():
+            strikes = chain_strikes(chain, expiry_sel.value, info["option_type"])
+            sel = info["strike"]
+            sel.options = strikes
+            if strikes and sel.value not in strikes:
+                sel.value = min(strikes, key=lambda s: abs(s - spot)) if spot else strikes[0]
+            sel.update()
 
     def rebuild_legs():
         leg_box.clear()
@@ -309,38 +346,42 @@ def render():
             for key, label, otype, side in LEG_SPECS[strategy_sel.value]:
                 with ui.row().classes("items-end gap-2"):
                     ui.label(label).classes("w-44 text-sm")
-                    sin = ui.number("Strike", value=0.0, format="%.2f").classes("w-28")
+                    sin = ui.select([], label="Strike").classes("w-28")
                     pin = ui.number("Premium", value=0.0, format="%.2f").classes("w-28")
                     leg_inputs[key] = {"strike": sin, "premium": pin,
                                        "option_type": otype, "side": side}
+        _sync_strikes()
 
     ui.button("Fetch premiums", icon="download", on_click=lambda: fetch_premiums()) \
         .props("flat dense size=sm").tooltip("Fill leg premiums from the chain (strikes required)")
 
     rebuild_legs()
     strategy_sel.on_value_change(lambda e: rebuild_legs())
+    expiry_sel.on_value_change(lambda e: _sync_strikes())
 
     async def fetch_premiums():
         sym = (symbol_in.value or "").strip().upper()
-        if not sym or not (expiry_in.value or "").strip():
-            ui.notify("Fill Symbol and Expiry first.", type="warning")
+        if not sym or not expiry_sel.value:
+            ui.notify("Load symbol + pick an Expiry first.", type="warning")
             return
         legs = []
         for info in leg_inputs.values():
             if not info["strike"].value:
-                ui.notify("Fill in all leg strikes first.", type="warning")
+                ui.notify("Pick all leg strikes first.", type="warning")
                 return
             legs.append((info, float(info["strike"].value)))
         try:
-            expiry = dt.date.fromisoformat(expiry_in.value.strip())
+            expiry = dt.date.fromisoformat(str(expiry_sel.value))
         except Exception as exc:
             ui.notify(f"Bad expiry: {exc}", type="negative")
             return
-        try:
-            chain = await run.io_bound(_fetch_chain, api_symbol(sym), sym, expiry)
-        except Exception as exc:
-            ui.notify(f"Chain fetch failed: {exc}", type="negative")
-            return
+        chain = state.get("chain")
+        if chain is None:
+            try:
+                chain = await run.io_bound(_fetch_chain, api_symbol(sym), sym, expiry)
+            except Exception as exc:
+                ui.notify(f"Chain fetch failed: {exc}", type="negative")
+                return
         filled, missing = 0, []
         for info, strike in legs:
             prem = extract_premium(chain, info["option_type"], strike, expiry=expiry)
@@ -356,46 +397,62 @@ def render():
         if missing:
             ui.notify("No premium for: " + ", ".join(missing), type="warning")
 
-    async def fetch_price():
+    def _load_symbol_data(api):
+        qresp = proxy.schwab_py_client.get_quotes([api])
+        quote = qresp.json() if getattr(qresp, "status_code", None) == 200 else {}
+        cresp = proxy.schwab_py_client.get_option_chain(
+            api, contract_type="ALL", from_date=dt.date.today(),
+            to_date=dt.date.today() + dt.timedelta(days=60))
+        chain = cresp.json() if getattr(cresp, "status_code", None) == 200 else None
+        return quote, chain
+
+    async def load_symbol():
         sym = (symbol_in.value or "").strip().upper()
         if not sym:
             ui.notify("Enter a symbol first.", type="warning")
             return
         api = api_symbol(sym)
         try:
-            resp = await run.io_bound(proxy.schwab_py_client.get_quotes, [api])
-            data = resp.json() if getattr(resp, "status_code", None) == 200 else None
+            quote, chain = await run.io_bound(_load_symbol_data, api)
         except Exception as exc:
-            ui.notify(f"Price fetch failed: {exc}", type="negative")
+            ui.notify(f"Load failed: {exc}", type="negative")
             return
-        info = (data or {}).get(api, {})
+        info = (quote or {}).get(api, {})
         q = info.get("quote", info.get("reference", info)) if isinstance(info, dict) else {}
         price = q.get("lastPrice") if isinstance(q, dict) else None
-        if not price:
-            ui.notify(f"No price returned for {sym}.", type="warning")
-            return
-        price_in.value = round(price, 2)
-        lo, hi = oc.generate_price_range(price)
-        rmin_in.value = round(lo, 2)
-        rmax_in.value = round(hi, 2)
-        ui.notify(f"{sym} {price:.2f}", type="positive")
+        if price:
+            price_in.value = round(price, 2)
+            lo, hi = oc.generate_price_range(price)
+            rmin_in.value = round(lo, 2)
+            rmax_in.value = round(hi, 2)
+        state["chain"] = chain
+        exps = chain_expiries(chain or {})
+        expiry_sel.options = exps
+        if exps and expiry_sel.value not in exps:
+            expiry_sel.value = exps[0]
+        expiry_sel.update()
+        _sync_strikes()
+        msg = f"{sym}: {len(exps)} expiries" + (f", {price:.2f}" if price else "")
+        ui.notify(msg, type="positive" if exps else "warning")
 
     async def fetch_iv():
         sym = (symbol_in.value or "").strip().upper()
-        if not sym or not (expiry_in.value or "").strip() or not price_in.value:
-            ui.notify("Fill Symbol, Expiry, and Price first.", type="warning")
+        if not sym or not expiry_sel.value or not price_in.value:
+            ui.notify("Load symbol + pick Expiry (Price required).", type="warning")
             return
         try:
-            expiry = dt.date.fromisoformat(expiry_in.value.strip())
+            expiry = dt.date.fromisoformat(str(expiry_sel.value))
             spot = float(price_in.value)
         except Exception as exc:
             ui.notify(f"Bad expiry/price: {exc}", type="negative")
             return
-        try:
-            chain = await run.io_bound(_fetch_chain, api_symbol(sym), sym, expiry)
-        except Exception as exc:
-            ui.notify(f"IV fetch failed: {exc}", type="negative")
-            return
+        chain = state.get("chain")
+        if chain is None:
+            try:
+                chain = await run.io_bound(_fetch_chain, api_symbol(sym), sym, expiry)
+            except Exception as exc:
+                ui.notify(f"IV fetch failed: {exc}", type="negative")
+                return
         iv = extract_atm_iv(chain, spot, expiry=expiry)
         approx = False
         if iv is None:
@@ -420,7 +477,7 @@ def render():
             rate = float(rate_in.value) / 100.0
             ivadj = float(ivchg_in.value) / 100.0
             qty = int(contracts_in.value or 1)
-            expiry = dt.date.fromisoformat(expiry_in.value.strip())
+            expiry = dt.date.fromisoformat(str(expiry_sel.value))
             today = dt.date.today()
             legs = [{"strike": float(info["strike"].value),
                      "premium": float(info["premium"].value),
