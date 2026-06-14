@@ -287,6 +287,72 @@ def _load_snapshots(days=35):
     return snaps, spy_closes
 
 
+def _signal_band(score):
+    """(size_modifier, bias, signal) — mirrors source _update_position_modifier."""
+    if score >= 9:
+        return "1.25x", "Long", "Strong Bull"
+    if score >= 7:
+        return "1.10x", "Long", "Bullish"
+    if score >= 5:
+        return "1.00x", "Neutral", "Neutral"
+    if score >= 3:
+        return "0.85x", "Cautious", "Bearish"
+    return "0.70x", "Short", "Strong Bear"
+
+
+def component_table_rows(snapshot, rotation_value=None, sector_value=None):
+    """Rows for the in-composite components: name/value/score/weight/conf/contrib.
+    Scores/confs come from the snapshot so Contrib reconciles to the composite."""
+    scores = snapshot.get("component_scores") or {}
+    confs = snapshot.get("component_confidence") or {}
+    value_src = {
+        "vix_complex": (snapshot.get("volatility") or {}).get("interpretation"),
+        "put_call": (snapshot.get("options") or {}).get("pc_equity"),
+        "breadth": (snapshot.get("breadth") or {}).get("interpretation"),
+        "rotation": rotation_value or (snapshot.get("rotation") or {}).get("interpretation"),
+        "sector_perf": sector_value,
+    }
+    rows = []
+    for key, name, w in COMPONENTS:
+        if not w:                      # skip out-of-composite (credit_pulse)
+            continue
+        s = _safe_float(scores.get(key))
+        c = _safe_float(confs.get(key))
+        rows.append({
+            "key": key, "name": name,
+            "value": value_src.get(key) or "—",
+            "score": int(s),
+            "weight": f"{int(w * 100)}%",
+            "conf": f"{int(c * 100)}%",
+            "contrib": w * s * c,
+        })
+    return rows
+
+
+def tiles(latest, prev_total):
+    comp = latest.get("composite") or {}
+    total = _safe_float(comp.get("total_score"))
+    size, bias, signal = _signal_band(total)
+    if prev_total is None:
+        yest, change = "—", "—"
+    else:
+        yest = f"{_safe_float(prev_total):.2f}"
+        change = f"{total - _safe_float(prev_total):+.2f}"
+    return {"modifier": size, "bias": bias, "signal": signal,
+            "yesterday": yest, "change": change}
+
+
+def rolling_averages(prior_scores):
+    """(a5, a20, label) — Rising/Falling/Stable from 5d vs 20d means."""
+    s = [x for x in prior_scores if x and x > 0]
+    if not s:
+        return 0.0, 0.0, "Stable"
+    a5 = sum(s[-5:]) / len(s[-5:])
+    a20 = sum(s[-20:]) / len(s[-20:])
+    label = "Rising" if a5 > a20 + 0.3 else ("Falling" if a5 < a20 - 0.3 else "Stable")
+    return round(a5, 2), round(a20, 2), label
+
+
 def render():
     import nicegui.run as ng_run
     from nicegui import ui

@@ -97,3 +97,53 @@ def test_rotation_banner_color_and_detail():
     assert color == S.CLR_GREEN
     assert detail.startswith("DAY:")
     assert "Tech" in detail and "Utilities" in detail
+
+
+def _full_snap(total, **comp):
+    base = {"vix_complex": 4, "put_call": 8, "breadth": 7,
+            "rotation": 7, "sector_perf": 8, "credit_pulse": 6}
+    base.update(comp)
+    return {
+        "date": "2026-06-12",
+        "composite": {"total_score": f"{total:.2f}", "bias": "Neutral",
+                      "size_modifier": "1.00x", "aggregate_confidence": 0.8},
+        "component_scores": base,
+        "component_confidence": {k: 1.0 for k in base},
+        "volatility": {"interpretation": "term backwardation"},
+        "options": {"pc_equity": "0.860"},
+        "breadth": {"interpretation": "Advancing"},
+        "rotation": {"interpretation": "Day 7 · 3d 6 · Wk 7"},
+    }
+
+
+def test_component_table_rows_contrib():
+    rows = S.component_table_rows(_full_snap(6.81), rotation_value=None,
+                                  sector_value="+0.70%")
+    by = {r["name"]: r for r in rows}
+    assert "Credit Pulse" not in by          # out-of-composite excluded
+    vix = by["VIX Complex"]
+    assert vix["score"] == 4 and vix["weight"] == "20%"
+    assert abs(vix["contrib"] - 0.20 * 4 * 1.0) < 1e-9     # w*s*conf
+    assert by["Sector Perf"]["value"] == "+0.70%"
+    assert by["Put/Call"]["value"] == "0.860"
+
+
+def test_tiles_from_score_band():
+    t = S.tiles(_full_snap(6.81), prev_total=6.81)
+    # 6.81 is in the >=5 band -> 1.00x / Neutral / Neutral
+    assert t["modifier"] == "1.00x" and t["bias"] == "Neutral" and t["signal"] == "Neutral"
+    assert t["yesterday"] == "6.81"
+    assert t["change"] == "+0.00"
+
+
+def test_tiles_strong_bands():
+    assert S.tiles(_full_snap(9.2), None)["signal"] == "Strong Bull"
+    assert S.tiles(_full_snap(2.0), None)["signal"] == "Strong Bear"
+    assert S.tiles(_full_snap(2.0), None)["yesterday"] == "—"
+
+
+def test_rolling_averages_label():
+    a5, a20, label = S.rolling_averages([5.0] * 4 + [6.0])
+    assert label in ("Rising", "Falling", "Stable")
+    rising = S.rolling_averages([4.0] * 19 + [9.0] * 6)
+    assert rising[2] == "Rising"
