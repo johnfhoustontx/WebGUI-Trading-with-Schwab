@@ -1,0 +1,91 @@
+{
+  "_comment": "Pre-refactor regression oracle for the v3.9 scoring math. Captured manually because the live dashboard requires a Schwab session that is not available in CI. Each entry below records the inputs and the score expected from sentiment_dashboard.py BEFORE the scoring/ extraction. The Task 2 tests assert that the extracted pure functions reproduce these numbers exactly.",
+  "schema_version": "3.9",
+  "cases": {
+    "vix_term": {
+      "inputs": {"vix": 17.0, "vix_ma": 18.0},
+      "ratio": 0.9444444444444444,
+      "raw_score": 8.888888888888889,
+      "expected_score": 9,
+      "expected_confidence": 1.0
+    },
+    "vix_term_no_ma_contango": {
+      "inputs": {"vix": 17.0, "vix_ma": 0, "vix_term_regime": "Contango"},
+      "expected_score": 8,
+      "expected_confidence": 0.7071067811865476
+    },
+    "vix_term_neutral": {
+      "inputs": {"vix": 19.0, "vix_ma": 19.0},
+      "ratio": 1.0,
+      "raw_score": 5.5,
+      "expected_score": 6,
+      "expected_confidence": 1.0
+    },
+    "vix_term_stress": {
+      "_note": "raw_score = 3.5 lives in the [1.05, 1.15) stress band; the integer result depends on float repr of 22/20 so the test asserts band membership (3 or 4), not an exact value.",
+      "inputs": {"vix": 22.0, "vix_ma": 20.0},
+      "ratio": 1.1,
+      "raw_score": 3.5,
+      "expected_score": 3,
+      "expected_confidence": 1.0
+    },
+    "vix1d": {
+      "inputs": {"vix1d": 15.5, "vix": 17.0},
+      "ratio": 0.9117647058823529,
+      "raw_score": 5.3176470588235296,
+      "expected_score": 5,
+      "expected_confidence": 1.0
+    },
+    "vix1d_missing": {
+      "inputs": {"vix1d": 0, "vix": 17.0},
+      "expected_score": 0,
+      "expected_confidence": 0.0
+    },
+    "term_slope": {
+      "inputs": {"vix9d": 16.0, "vix": 17.0},
+      "slope": 0.9411764705882353,
+      "raw_score": 5.264705882352941,
+      "expected_score": 5,
+      "expected_confidence": 1.0
+    },
+    "put_call_call_dominant": {
+      "inputs": {"pc": 0.85, "pc_ma": 0, "skew": "Normal"},
+      "expected_score": 8,
+      "expected_confidence": 0.5773502691896257
+    },
+    "put_call_with_ma_and_skew": {
+      "inputs": {"pc": 0.85, "pc_ma": 1.0, "skew": "Inverted"},
+      "expected_score": 9,
+      "expected_confidence": 1.0
+    },
+    "put_call_missing": {
+      "inputs": {"pc": 0, "pc_ma": 0, "skew": "Normal"},
+      "expected_score": 0,
+      "expected_confidence": 0.0
+    },
+    "breadth_pct_only": {
+      "inputs": {
+        "pct_above_50": "60", "ad": "Neutral", "highs": 0, "lows": 0,
+        "breadth_ratio": null, "breadth_numeric": null
+      },
+      "expected_score": 6,
+      "expected_confidence": 0.5
+    },
+    "breadth_ratio_only": {
+      "inputs": {
+        "pct_above_50": "", "ad": "Neutral", "highs": 0, "lows": 0,
+        "breadth_ratio": 2.0, "breadth_numeric": null
+      },
+      "expected_score": 8,
+      "expected_confidence": 0.5
+    },
+    "breadth_missing": {
+      "inputs": {
+        "pct_above_50": "", "ad": "Neutral", "highs": 0, "lows": 0,
+        "breadth_ratio": null, "breadth_numeric": null
+      },
+      "expected_score": 0,
+      "expected_confidence": 0.0
+    }
+  }
+}
