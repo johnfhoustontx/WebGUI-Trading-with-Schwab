@@ -115,8 +115,98 @@ def summary_text(summary, view):
     return "  ·  ".join(parts)
 
 
+# view name -> (tuple index from calc_all_from_chain, engine view string)
+_VIEWS = {"GEX": (0, "gex"), "Charm": (1, "charm"), "DEX": (2, "dex"), "Vanna": (3, "vanna")}
+
+
 def render():
-    from nicegui import ui
+    import datetime as dt
+
+    from nicegui import run, ui
+
+    import proxy
+    import gamma_tool as gt
+
     ui.label("Gamma").classes("text-h5")
-    ui.label("GEX / Charm / DEX / Vanna exposure + intraday heatmap.").classes("opacity-70")
-    ui.label("(render wired in Task G2)").classes("text-sm opacity-50")
+
+    state: dict = {"results": None, "spot": None, "symbol": None}
+
+    with ui.row().classes("items-center gap-3 flex-wrap"):
+        symbol_in = ui.input("Symbol", value="SPY").classes("w-28")
+        fetch_btn = ui.button("Fetch", icon="download")
+        view_toggle = ui.toggle(list(_VIEWS), value="GEX")
+        spinner = ui.spinner(size="lg")
+        spinner.visible = False
+    summary_lbl = ui.label("").classes("opacity-70 text-sm")
+    pressure_box = ui.row().classes("gap-3 items-center")
+    chart_box = ui.column().classes("w-full")
+
+    def _walls(view, data):
+        if view == "GEX":
+            return gt.get_gex_walls(data, top_n=5)
+        if view == "DEX":
+            return gt.get_dex_walls(data, top_n=5)
+        return []
+
+    def _render_view():
+        results = state["results"]
+        if not results:
+            return
+        view = view_toggle.value
+        idx, vstr = _VIEWS[view]
+        data = results[idx]
+        spot = data.get("spot") or state["spot"]
+        summary = gt.GammaEngine().snapshot_summary(data, vstr)
+        flip = summary.get("flip")
+        walls = _walls(view, data)
+        chart_box.clear()
+        with chart_box:
+            ui.plotly(bar_figure(data, spot, view=view, walls=walls, flip=flip)).classes("w-full")
+        summary_lbl.text = summary_text({**summary, "strike_count": data.get("strike_count")}, view)
+
+        pressure_box.clear()
+        if view == "DEX":
+            with pressure_box:
+                hp = data.get("hedge_pressure")
+                if hp is None:
+                    ui.label("0-DTE hedge pressure: n/a (nearest expiry is not 0-DTE)").classes("opacity-60 text-sm")
+                else:
+                    def tile(label, val, color="#bdbdbd"):
+                        with ui.card().classes("p-2"):
+                            ui.label(label).classes("text-xs opacity-60")
+                            ui.label(f"{val:,.0f}").classes("text-base font-bold").style(f"color:{color}")
+                    tile("Net Δ now", data.get("net_delta_0dte") or 0)
+                    tile("Projected close", data.get("projected_net_delta_close") or 0)
+                    tile("Hedge pressure", hp, "#66bb6a" if hp >= 0 else "#ef5350")
+
+    async def do_fetch():
+        sym = (symbol_in.value or "").strip().upper()
+        if not sym:
+            ui.notify("Enter a symbol first.", type="warning")
+            return
+        fetch_btn.disable()
+        spinner.visible = True
+        try:
+            def _f():
+                resp = proxy.schwab_py_client.get_option_chain(
+                    sym, contract_type="ALL", from_date=dt.date.today(),
+                    to_date=dt.date.today() + dt.timedelta(days=7))
+                chain = resp.json() if getattr(resp, "status_code", None) == 200 else None
+                return gt.GammaEngine().calc_all_from_chain(chain) if chain else None
+            results = await run.io_bound(_f)
+        except Exception as exc:
+            ui.notify(f"Fetch failed: {exc}", type="negative")
+            return
+        finally:
+            spinner.visible = False
+            fetch_btn.enable()
+        if not results:
+            ui.notify(f"No chain data for {sym}.", type="warning")
+            return
+        state["results"] = results
+        state["spot"] = results[0].get("spot")
+        state["symbol"] = sym
+        _render_view()
+
+    fetch_btn.on_click(do_fetch)
+    view_toggle.on_value_change(lambda e: _render_view())
