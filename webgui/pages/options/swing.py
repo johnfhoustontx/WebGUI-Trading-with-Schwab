@@ -12,6 +12,11 @@ if str(OPTIONS_SCANNER) not in sys.path:
     sys.path.insert(0, str(OPTIONS_SCANNER))
 
 
+def pct_to_fraction(value):
+    """Convert a percent UI value to a fraction (screen_spreads wants 0.10, not 10)."""
+    return float(value) / 100.0
+
+
 def assign_ids(signals, symbol):
     """Ensure each signal has a unique ``id`` (for detail lookup)."""
     for i, s in enumerate(signals or []):
@@ -35,7 +40,7 @@ def _swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     chain = se.fetch_option_chain(client, symbol, from_date=today,
                                   to_date=today + dt.timedelta(days=dte_max + 2))
     quote = proxy.schwab_client.get_quote(symbol) or {}
-    spot = quote.get("last")
+    spot = quote.get("last") or chain.get("underlyingPrice")
     hist = se.fetch_price_history(client, symbol)
     tech = se.calc_technicals(hist) if hist is not None else {}
     iv = run_iv_analysis(client, symbol, price=spot, hist=hist, chain=chain) or {}
@@ -99,7 +104,7 @@ def render():
                 int(dte_min.value), int(dte_max.value),
                 float(put_dmin.value), float(put_dmax.value),
                 float(call_dmin.value), float(call_dmax.value),
-                float(mincr.value), proxy.schwab_py_client)
+                pct_to_fraction(mincr.value), proxy.schwab_py_client)
         except Exception as exc:
             ui.notify(f"Scan failed: {exc}", type="negative")
             status.text = "Scan failed."
