@@ -18,6 +18,8 @@ if str(OPTIONS_SCANNER) not in sys.path:
 
 from scanner_engine import run_full_scan  # noqa: E402
 
+from . import detail, header  # noqa: E402
+
 
 def _round(value, ndigits=2):
     return round(value, ndigits) if isinstance(value, (int, float)) else value
@@ -93,27 +95,44 @@ def _vix_strip(container, results):
 
 
 def render():
-    """Build the Options scanner page body (called inside the shell layout)."""
-    ui.label("Options Scanner").classes("text-h5")
+    """Build the Options scanner page body (two-pane: tables + detail panel)."""
+    with ui.row().classes("w-full no-wrap gap-4 items-start"):
+        with ui.column().classes("flex-grow min-w-0"):
+            header.render()
+            ui.label("Options Scanner").classes("text-h5")
+            with ui.row().classes("items-center gap-3"):
+                scan_btn = ui.button("Run scan", icon="play_arrow")
+                spinner = ui.spinner(size="lg")
+                spinner.visible = False
+                status = ui.label("").classes("opacity-70")
+            vix_strip = ui.row().classes("gap-4 items-center")
+            with ui.tabs() as tabs:
+                tab_0dte = ui.tab("0-DTE")
+                tab_swing = ui.tab("Swing")
+            with ui.tab_panels(tabs, value=tab_0dte).classes("w-full"):
+                with ui.tab_panel(tab_0dte):
+                    table_0dte = ui.table(columns=signal_columns(), rows=[], row_key="id").classes("w-full")
+                with ui.tab_panel(tab_swing):
+                    table_swing = ui.table(columns=signal_columns(), rows=[], row_key="id").classes("w-full")
+        with ui.column().classes("w-96 shrink-0"):
+            detail_panel = detail.render()
 
-    with ui.row().classes("items-center gap-3"):
-        scan_btn = ui.button("Run scan", icon="play_arrow")
-        spinner = ui.spinner(size="lg")
-        spinner.visible = False
-        status = ui.label("").classes("opacity-70")
+    by_id: dict = {}
 
-    vix_strip = ui.row().classes("gap-4 items-center")
+    def _select(event):
+        row = event.args[1] if isinstance(event.args, list) and len(event.args) > 1 else event.args
+        sig = by_id.get(row.get("id")) if isinstance(row, dict) else None
+        if sig:
+            detail_panel.update(sig)
 
-    with ui.tabs() as tabs:
-        tab_0dte = ui.tab("0-DTE")
-        tab_swing = ui.tab("Swing")
-    with ui.tab_panels(tabs, value=tab_0dte).classes("w-full"):
-        with ui.tab_panel(tab_0dte):
-            table_0dte = ui.table(columns=signal_columns(), rows=[], row_key="id").classes("w-full")
-        with ui.tab_panel(tab_swing):
-            table_swing = ui.table(columns=signal_columns(), rows=[], row_key="id").classes("w-full")
+    table_0dte.on("rowClick", _select)
+    table_swing.on("rowClick", _select)
 
     def _populate(results):
+        by_id.clear()
+        for s in (results.get("signals_0dte") or []) + (results.get("signals_swing") or []):
+            if s.get("id"):
+                by_id[s["id"]] = s
         _vix_strip(vix_strip, results)
         table_0dte.rows = signal_rows(results.get("signals_0dte"))
         table_swing.rows = signal_rows(results.get("signals_swing"))

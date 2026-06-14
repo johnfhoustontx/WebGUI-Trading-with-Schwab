@@ -49,6 +49,11 @@ def test_signal_rows_handles_missing_fields():
     assert rows[0]["symbol"] == "X"
 
 
+def test_signal_rows_keep_id_for_detail():
+    rows = options.signal_rows([{"symbol": "SPY", "id": "SPY_PCS_1"}])
+    assert rows[0]["id"] == "SPY_PCS_1"
+
+
 def test_signal_rows_sorted_by_score_desc():
     rows = options.signal_rows([
         {"symbol": "LO", "composite_score": 10},
