@@ -329,6 +329,27 @@ def _load_snapshots(days=35):
     return snaps, spy_closes
 
 
+def _load_industries(etfs):
+    """Off-thread: quotes + week/month trends for a list of industry ETFs."""
+    import proxy
+    try:
+        quotes = proxy.schwab_client.get_quotes(list(etfs)) or {}
+    except Exception:
+        quotes = {}
+    trends = {}
+    for etf in etfs:
+        try:
+            df = proxy.schwab_client.get_daily_history(etf, months=3)
+        except Exception:
+            df = None
+        if df is None:
+            continue
+        cl = [float(c) for c in df["close"].tolist()]
+        d3, wk, mo = week_month_from_closes(cl)
+        trends[etf] = {"day3_pct": d3, "week_pct": wk, "month_pct": mo}
+    return {"quotes": quotes, "trends": trends}
+
+
 def _load_sector_perf(spy_closes):
     """Off-thread: fetch sector quotes + history + P/C, compute rotation/RRG.
     Returns a dict the page renders. spy_closes reused from the composite load."""
@@ -516,6 +537,8 @@ def render():
     with ui.row().classes("items-center gap-3 w-full"):
         ui.button("Refresh", icon="refresh",
                   on_click=lambda: load_sectors()).props("flat dense")
+        ui.button("Expand All", on_click=lambda: _expand_all()).props("flat dense")
+        ui.button("Collapse All", on_click=lambda: _collapse_all()).props("flat dense")
         sec_spinner = ui.spinner(size="sm")
         sec_spinner.visible = False
         summary_lbl = ui.label("").classes("opacity-80 text-sm")
@@ -608,6 +631,106 @@ def render():
                 f"· slope {tr.sma_200_slope_pct:+.2f}% · dd {tr.drawdown_pct:+.1f}% "
                 f"· conf {tr.confidence:.0%}")
 
+    def _render_sector_table():
+        sec = state["sector"]
+        if not sec:
+            return
+        sd = sec["sector_data"]
+        rows = sector_table_rows(sd, sec["quotes"], sec["trends"], sec["pcr"], sec["quadrants"])
+        sector_box.clear()
+        with sector_box:
+            with ui.row().classes("items-center w-full no-wrap gap-2 opacity-60 text-xs"):
+                ui.label("").style("width:24px")
+                for _f, hdr, w in SEC_COLS:
+                    ui.label(hdr).style(f"width:{w}px")
+            for r in rows:
+                sector_name = r["sector"]
+                expanded = sector_name in state["expanded"]
+                with ui.row().classes("items-center w-full no-wrap gap-2 text-sm"):
+                    ui.icon("keyboard_arrow_down" if expanded else "keyboard_arrow_right") \
+                        .classes("cursor-pointer").style("width:24px") \
+                        .on("click", lambda _e, s=sector_name: _toggle_sector(s))
+                    ui.label(str(sector_name or "")).style("width:140px")
+                    ui.label(str(r["etf"] or "")).style("width:50px")
+                    ui.label(str(r["desc"] or "")).style(
+                        "width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap")
+                    for fld in ("day", "week", "month"):
+                        v = r[fld]
+                        ui.label(f"{v:+.2f}%" if v is not None else "—") \
+                            .style(f"width:70px;color:{pct_color(v)}")
+                    pv = r["pcr"]
+                    ui.label(f"{pv:.2f}" if pv is not None else "").style(
+                        f"width:56px;color:{pcr_color(pv)}")
+                    rv = r["rrg"]
+                    ui.label(str(rv or "")).style(f"width:90px;color:{rrg_color(rv)}")
+                if expanded:
+                    ind = state["industry"].get(sector_name)
+                    if ind is None:
+                        with ui.row().classes("items-center w-full no-wrap gap-2 text-xs opacity-60"):
+                            ui.label("").style("width:24px")
+                            ui.label("loading…").style("width:140px")
+                    else:
+                        for ir in industry_rows(sd, sector_name, ind["quotes"], ind["trends"]):
+                            with ui.row().classes("items-center w-full no-wrap gap-2 text-xs"):
+                                ui.label("").style("width:24px")
+                                ui.label(str(ir["label"] or "")).style(
+                                    "width:140px;padding-left:14px;opacity:0.85")
+                                ui.label(str(ir["etf"] or "")).style("width:50px")
+                                ui.label(str(ir["desc"] or "")).style(
+                                    "width:200px;overflow:hidden;text-overflow:ellipsis;"
+                                    "white-space:nowrap;opacity:0.8")
+                                for fld in ("day", "week", "month"):
+                                    v = ir[fld]
+                                    ui.label(f"{v:+.2f}%" if v is not None else "—") \
+                                        .style(f"width:70px;color:{pct_color(v)}")
+                                ui.label("").style("width:56px")
+                                ui.label("").style("width:90px")
+
+    async def _ensure_industry(sector_name):
+        if sector_name in state["industry"]:
+            return
+        etfs = sector_industry_etfs(state["sector"]["sector_data"], sector_name)
+        if not etfs:
+            state["industry"][sector_name] = {"quotes": {}, "trends": {}}
+        else:
+            sec_spinner.visible = True
+            try:
+                state["industry"][sector_name] = await ng_run.io_bound(_load_industries, etfs)
+            except Exception as e:  # noqa: BLE001
+                ui.notify(f"Industry load failed: {e}", type="negative")
+                state["industry"][sector_name] = {"quotes": {}, "trends": {}}
+            finally:
+                sec_spinner.visible = False
+        _CACHE["industry"][sector_name] = state["industry"][sector_name]
+
+    async def _toggle_sector(sector_name):
+        if sector_name in state["expanded"]:
+            state["expanded"].discard(sector_name)
+        else:
+            state["expanded"].add(sector_name)
+            _render_sector_table()           # show "loading…" immediately
+            await _ensure_industry(sector_name)
+        _CACHE["expanded"] = set(state["expanded"])
+        _render_sector_table()
+
+    async def _expand_all():
+        if not state["sector"]:
+            return
+        for r in sector_table_rows(state["sector"]["sector_data"], state["sector"]["quotes"],
+                                   state["sector"]["trends"], state["sector"]["pcr"],
+                                   state["sector"]["quadrants"]):
+            state["expanded"].add(r["sector"])
+        _render_sector_table()
+        for s in list(state["expanded"]):
+            await _ensure_industry(s)
+        _CACHE["expanded"] = set(state["expanded"])
+        _render_sector_table()
+
+    def _collapse_all():
+        state["expanded"].clear()
+        _CACHE["expanded"] = set()
+        _render_sector_table()
+
     def _apply_sectors():
         sec = state["sector"]
         if not sec:
@@ -617,29 +740,7 @@ def render():
         regime, color, detail = rotation_banner(sec["rotation"])
         rotation_lbl.text = f"{regime} — {detail}"
         rotation_lbl.style(f"color:{color}")
-        rows = sector_table_rows(sd, quotes, sec["trends"], sec["pcr"],
-                                 sec["quadrants"])
-        sector_box.clear()
-        with sector_box:
-            with ui.row().classes("items-center w-full no-wrap gap-2 opacity-60 text-xs"):
-                for _f, hdr, w in SEC_COLS:
-                    ui.label(hdr).style(f"width:{w}px")
-            for r in rows:
-                with ui.row().classes("items-center w-full no-wrap gap-2 text-sm"):
-                    ui.label(str(r["sector"] or "")).style("width:140px")
-                    ui.label(str(r["etf"] or "")).style("width:50px")
-                    ui.label(str(r["desc"] or "")).style(
-                        "width:200px;overflow:hidden;text-overflow:ellipsis;"
-                        "white-space:nowrap")
-                    for fld in ("day", "week", "month"):
-                        v = r[fld]
-                        txt = f"{v:+.2f}%" if v is not None else "—"
-                        ui.label(txt).style(f"width:70px;color:{pct_color(v)}")
-                    pv = r["pcr"]
-                    ui.label(f"{pv:.2f}" if pv is not None else "").style(
-                        f"width:56px;color:{pcr_color(pv)}")
-                    rv = r["rrg"]
-                    ui.label(str(rv or "")).style(f"width:90px;color:{rrg_color(rv)}")
+        _render_sector_table()
         # refill rotation/sector Value cells in the component table now loaded
         if state["snaps"]:
             rotation_value, sector_value = _comp_context()
@@ -664,7 +765,7 @@ def render():
 
     async def load(with_sectors=False):
         # Composite refresh. Sectors are loaded only on initial load and on
-        # explicit Refresh — the 120s auto-timer is composite-only so the
+        # explicit Refresh — the 300s auto-timer is composite-only so the
         # heavy /chains fetch can't stack on a slow proxy.
         if state.get("loading"):
             return
