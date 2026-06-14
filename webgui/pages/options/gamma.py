@@ -63,7 +63,7 @@ def bar_figure(data, spot, view="GEX", walls=None, flip=None, pct=0.02):
         "layout": {
             "title": f"{view} by strike",
             "xaxis": {"title": view, "zeroline": True},
-            "yaxis": {"title": "Strike"},
+            "yaxis": {"title": "Strike", "range": [spot * 0.95, spot * 1.05]},
             "shapes": shapes,
             "margin": {"l": 60, "r": 20, "t": 40, "b": 40},
             "showlegend": False,
@@ -155,6 +155,12 @@ def render():
 
     import proxy
     import gamma_tool as gt
+    import html_render
+
+    try:
+        from regime_filter import evaluate_regime
+    except Exception:  # pragma: no cover
+        evaluate_regime = lambda: {"active": False}  # noqa: E731
 
     ui.label("Gamma").classes("text-h5")
 
@@ -164,6 +170,8 @@ def render():
         symbol_in = ui.input("Symbol", value="$SPX").classes("w-28")
         fetch_btn = ui.button("Refresh now", icon="refresh")
         view_toggle = ui.toggle(list(_VIEWS) + ["Term"], value="GEX")
+        explain_btn = ui.button("Explain", icon="help").props("outline")
+        analyze_btn = ui.button("Analyze", icon="psychology").props("outline")
         spinner = ui.spinner(size="lg")
         spinner.visible = False
         countdown_lbl = ui.label("").classes("opacity-60 text-sm")
@@ -253,10 +261,13 @@ def render():
                 chain = resp.json() if getattr(resp, "status_code", None) == 200 else None
                 if not chain:
                     return None
-                return chain, gt.GammaEngine().calc_all_from_chain(chain)
+                eng = gt.GammaEngine()
+                res = eng.calc_all_from_chain(chain)
+                return chain, res, eng._last_dte
             fetched = await run.io_bound(_f)
             results = fetched[1] if fetched else None
             state["chain"] = fetched[0] if fetched else None
+            state["dte"] = fetched[2] if fetched else None
         except Exception as exc:
             ui.notify(f"Fetch failed: {exc}", type="negative")
             return
@@ -278,7 +289,101 @@ def render():
             state["countdown"] = 120
         countdown_lbl.text = f"Next refresh: {state['countdown'] // 60}:{state['countdown'] % 60:02d}"
 
+    def _explain_ctx():
+        gex, charm, dex, vanna = state["results"]
+        try:
+            regime = evaluate_regime() or {"active": False}
+        except Exception:
+            regime = {"active": False}
+        return {
+            "symbol": state["symbol"], "spot": state["spot"], "dte": state.get("dte"),
+            "gex_summary": gt.GammaEngine.snapshot_summary(gex, "gex"),
+            "charm_summary": gt.GammaEngine.snapshot_summary(charm, "charm"),
+            "dex_summary": gt.GammaEngine.snapshot_summary(dex, "dex"),
+            "sentiment": regime,
+        }
+
+    def do_explain():
+        if not state.get("results"):
+            ui.notify("Fetch first.", type="warning")
+            return
+        try:
+            txt = gt.build_explain_html_text(_explain_ctx())
+            html = html_render.render_explain_html(txt, None, state["symbol"])
+        except Exception as exc:
+            ui.notify(f"Explain failed: {exc}", type="negative")
+            return
+        with ui.dialog().props("maximized") as dlg, ui.card().classes("w-full h-full"):
+            with ui.row().classes("justify-between w-full items-center"):
+                ui.label(f"Explain — {state['symbol']}").classes("text-h6")
+                with ui.row():
+                    ui.button("Download", icon="download",
+                              on_click=lambda: ui.download.content(html, "explain.html")).props("flat")
+                    ui.button("Close", on_click=dlg.close).props("flat")
+            # Render the explain document inside a white scroll panel (NiceGUI strips
+            # <iframe>, so inject the HTML directly).
+            with ui.element("div").classes("w-full").style(
+                    "background:#fff;color:#111;max-height:85vh;overflow:auto;"
+                    "padding:16px;border-radius:6px;"):
+                ui.html(html)
+        dlg.open()
+
+    def _blocks_for(symbol, chain):
+        eng = gt.GammaEngine()
+        res = eng.calc_all_from_chain(chain)
+        if not res:
+            return None
+        gex, charm, dex, vanna = res
+        try:
+            em = eng.calc_expected_move_from_chain(chain)
+        except Exception:
+            em = None
+        dte = eng._last_dte
+
+        def bd(snap, view):
+            if not snap:
+                return None
+            return gt.build_analysis_dict(snap, view, symbol, dte,
+                                          expected_move=em, grouping=1, chain=chain)
+        return {"gex": bd(gex, "gex"), "charm": bd(charm, "charm"),
+                "dex": bd(dex, "dex"), "vanna": bd(vanna, "vanna")}
+
+    def _analyze_prompt():
+        blocks = {}
+        for key, sym in (("spx", "$SPX"), ("spy", "SPY"), ("qqq", "QQQ")):
+            try:
+                resp = proxy.schwab_py_client.get_option_chain(
+                    sym, contract_type="ALL", from_date=dt.date.today(),
+                    to_date=dt.date.today() + dt.timedelta(days=7))
+                chain = resp.json() if getattr(resp, "status_code", None) == 200 else None
+                blocks[key] = _blocks_for(sym, chain) if chain else None
+            except Exception:
+                blocks[key] = None
+        return gt.build_summary_prompt_bundled(blocks["spx"], blocks["spy"], blocks["qqq"])
+
+    async def do_analyze():
+        analyze_btn.disable()
+        spinner.visible = True
+        try:
+            prompt = await run.io_bound(_analyze_prompt)
+        except Exception as exc:
+            ui.notify(f"Analyze failed: {exc}", type="negative")
+            return
+        finally:
+            spinner.visible = False
+            analyze_btn.enable()
+        with ui.dialog() as dlg, ui.card().classes("min-w-[640px]"):
+            ui.label("GEX analysis prompt (SPX / SPY / QQQ)").classes("text-h6")
+            ta = ui.textarea(value=prompt).props("readonly outlined").classes("w-full").style("min-height:55vh")
+            with ui.row():
+                ui.button("Copy", icon="content_copy",
+                          on_click=lambda: ui.clipboard.write(ta.value)).props("flat")
+                ui.button("Close", on_click=dlg.close).props("flat")
+        dlg.open()
+
     fetch_btn.on_click(do_fetch)
+    explain_btn.on_click(do_explain)
+    analyze_btn.on_click(do_analyze)
     view_toggle.on_value_change(lambda e: _render_view())
 
     state["countdown"] = 120
