@@ -38,6 +38,12 @@ def test_heatmap_matrix_empty():
     assert gamma.heatmap_matrix([])["z"] == []
 
 
+def test_heatmap_matrix_formats_epoch_ts():
+    rows = [(1718370600, 450, None, None, None, 0, {448.0: 5})]
+    x = gamma.heatmap_matrix(rows)["x"][0]
+    assert isinstance(x, str) and ":" in x
+
+
 def test_summary_text_mentions_spot_and_flip():
     txt = gamma.summary_text({"spot": 450.0, "flip": 449.5, "net_total": 1234.0,
                               "strike_count": 3}, "GEX")

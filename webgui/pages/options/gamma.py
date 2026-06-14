@@ -71,6 +71,14 @@ def bar_figure(data, spot, view="GEX", walls=None, flip=None, pct=0.02):
     }
 
 
+def _fmt_ts(value):
+    """Format an epoch-seconds timestamp as HH:MM; pass strings through."""
+    if isinstance(value, (int, float)):
+        import datetime as dt
+        return dt.datetime.fromtimestamp(value).strftime("%H:%M")
+    return str(value)
+
+
 def heatmap_matrix(rows):
     """(x=times, y=strikes, z=[y][x]) from gex_history rows.
 
@@ -79,7 +87,7 @@ def heatmap_matrix(rows):
     """
     if not rows:
         return {"x": [], "y": [], "z": []}
-    x = [r[0] for r in rows]
+    x = [_fmt_ts(r[0]) for r in rows]
     grids = [r[6] or {} for r in rows]
     strikes = sorted({s for g in grids for s in g})
     z = [[g.get(s) for g in grids] for s in strikes]
@@ -139,7 +147,17 @@ def render():
         spinner.visible = False
     summary_lbl = ui.label("").classes("opacity-70 text-sm")
     pressure_box = ui.row().classes("gap-3 items-center")
-    chart_box = ui.column().classes("w-full")
+    with ui.row().classes("w-full no-wrap gap-4 items-start"):
+        chart_box = ui.column().classes("flex-grow min-w-0")
+        heatmap_box = ui.column().classes("flex-grow min-w-0")
+
+    def _load_history(symbol, vstr):
+        import gex_history_db as gh
+        try:
+            conn = gh.connect(read_only=True)
+            return gh.load_today_with_grid(conn, symbol, vstr)
+        except Exception:
+            return []
 
     def _walls(view, data):
         if view == "GEX":
@@ -163,6 +181,15 @@ def render():
         with chart_box:
             ui.plotly(bar_figure(data, spot, view=view, walls=walls, flip=flip)).classes("w-full")
         summary_lbl.text = summary_text({**summary, "strike_count": data.get("strike_count")}, view)
+
+        rows = _load_history(state["symbol"], vstr)
+        heatmap_box.clear()
+        with heatmap_box:
+            if rows:
+                ui.plotly(heatmap_figure(rows, view)).classes("w-full")
+            else:
+                ui.label("No intraday snapshots yet (history collector not running).") \
+                    .classes("opacity-60 text-sm")
 
         pressure_box.clear()
         if view == "DEX":
