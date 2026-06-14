@@ -140,11 +140,12 @@ def render():
     state: dict = {"results": None, "spot": None, "symbol": None}
 
     with ui.row().classes("items-center gap-3 flex-wrap"):
-        symbol_in = ui.input("Symbol", value="SPY").classes("w-28")
-        fetch_btn = ui.button("Fetch", icon="download")
+        symbol_in = ui.input("Symbol", value="$SPX").classes("w-28")
+        fetch_btn = ui.button("Refresh now", icon="refresh")
         view_toggle = ui.toggle(list(_VIEWS), value="GEX")
         spinner = ui.spinner(size="lg")
         spinner.visible = False
+        countdown_lbl = ui.label("").classes("opacity-60 text-sm")
     summary_lbl = ui.label("").classes("opacity-70 text-sm")
     pressure_box = ui.row().classes("gap-3 items-center")
     with ui.row().classes("w-full no-wrap gap-4 items-start"):
@@ -233,7 +234,19 @@ def render():
         state["results"] = results
         state["spot"] = results[0].get("spot")
         state["symbol"] = sym
+        state["countdown"] = 120
         _render_view()
+
+    def _tick():
+        state["countdown"] = state.get("countdown", 120) - 1
+        if state["countdown"] < 0:
+            state["countdown"] = 120
+        countdown_lbl.text = f"Next refresh: {state['countdown'] // 60}:{state['countdown'] % 60:02d}"
 
     fetch_btn.on_click(do_fetch)
     view_toggle.on_value_change(lambda e: _render_view())
+
+    state["countdown"] = 120
+    ui.timer(1.0, _tick)              # countdown display
+    ui.timer(120.0, do_fetch)         # auto-refresh every 120s
+    ui.timer(0.1, do_fetch, once=True)  # autoload on open
