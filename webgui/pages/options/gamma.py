@@ -109,6 +109,27 @@ def heatmap_figure(rows, view="GEX"):
     }
 
 
+def term_heatmap(term_grid):
+    """Plotly heatmap dict for the Term view (net GEX by expiry × strike).
+
+    Strikes with all-zero net across expirations are dropped.
+    """
+    grid = term_grid or {}
+    exps = grid.get("expirations") or []
+    cells = grid.get("cells") or {}
+    strikes = sorted({k for exp in exps for k, v in (cells.get(exp) or {}).items()
+                      if (v or {}).get("net_gex_usd")})
+    z = [[((cells.get(exp) or {}).get(s) or {}).get("net_gex_usd") for exp in exps]
+         for s in strikes]
+    return {
+        "data": [{"type": "heatmap", "x": exps, "y": strikes, "z": z,
+                  "colorscale": "RdYlGn", "zmid": 0}],
+        "layout": {"title": "Term structure (net GEX by expiry × strike)",
+                   "xaxis": {"title": "Expiration"}, "yaxis": {"title": "Strike"},
+                   "margin": {"l": 60, "r": 20, "t": 40, "b": 60}},
+    }
+
+
 def summary_text(summary, view):
     s = summary or {}
     parts = [f"{view}"]
@@ -142,7 +163,7 @@ def render():
     with ui.row().classes("items-center gap-3 flex-wrap"):
         symbol_in = ui.input("Symbol", value="$SPX").classes("w-28")
         fetch_btn = ui.button("Refresh now", icon="refresh")
-        view_toggle = ui.toggle(list(_VIEWS), value="GEX")
+        view_toggle = ui.toggle(list(_VIEWS) + ["Term"], value="GEX")
         spinner = ui.spinner(size="lg")
         spinner.visible = False
         countdown_lbl = ui.label("").classes("opacity-60 text-sm")
@@ -172,6 +193,16 @@ def render():
         if not results:
             return
         view = view_toggle.value
+        if view == "Term":
+            pressure_box.clear()
+            heatmap_box.clear()
+            chart_box.clear()
+            tg = gt.GammaEngine().compute_term_grid(state.get("chain")) if state.get("chain") else {}
+            with chart_box:
+                ui.plotly(term_heatmap(tg)).classes("w-full")
+            summary_lbl.text = summary_text(
+                {"spot": state.get("spot"), "strike_count": None}, "Term")
+            return
         idx, vstr = _VIEWS[view]
         data = results[idx]
         spot = data.get("spot") or state["spot"]
@@ -220,8 +251,12 @@ def render():
                     sym, contract_type="ALL", from_date=dt.date.today(),
                     to_date=dt.date.today() + dt.timedelta(days=7))
                 chain = resp.json() if getattr(resp, "status_code", None) == 200 else None
-                return gt.GammaEngine().calc_all_from_chain(chain) if chain else None
-            results = await run.io_bound(_f)
+                if not chain:
+                    return None
+                return chain, gt.GammaEngine().calc_all_from_chain(chain)
+            fetched = await run.io_bound(_f)
+            results = fetched[1] if fetched else None
+            state["chain"] = fetched[0] if fetched else None
         except Exception as exc:
             ui.notify(f"Fetch failed: {exc}", type="negative")
             return

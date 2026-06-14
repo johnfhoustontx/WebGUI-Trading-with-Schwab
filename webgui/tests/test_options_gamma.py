@@ -44,6 +44,20 @@ def test_heatmap_matrix_formats_epoch_ts():
     assert isinstance(x, str) and ":" in x
 
 
+def test_term_heatmap_axes_and_zero_filter():
+    tg = {"underlying_price": 450.0, "expirations": ["2026-06-18", "2026-06-19"],
+          "cells": {"2026-06-18": {450.0: {"net_gex_usd": 5}},
+                    "2026-06-19": {450.0: {"net_gex_usd": -3}, 451.0: {"net_gex_usd": 0}}}}
+    fig = gamma.term_heatmap(tg)
+    assert fig["data"][0]["x"] == ["2026-06-18", "2026-06-19"]
+    assert 450.0 in fig["data"][0]["y"]
+    assert 451.0 not in fig["data"][0]["y"]   # all-zero strike filtered out
+
+
+def test_term_heatmap_empty():
+    assert gamma.term_heatmap({})["data"][0]["z"] == []
+
+
 def test_summary_text_mentions_spot_and_flip():
     txt = gamma.summary_text({"spot": 450.0, "flip": 449.5, "net_total": 1234.0,
                               "strike_count": 3}, "GEX")
