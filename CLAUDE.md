@@ -8,7 +8,7 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-06-14 (Phase 2 shell + full Options section incl. Gamma/Simulator built; Sentiment/Trade/Portfolio/Driver pages still stubs)
+**Last updated:** 2026-06-14 (Phase 2 shell + full Options section incl. Gamma/Simulator built, 76 webgui tests green; Sentiment/Trade/Portfolio/Driver pages still stubs — next session. See "webgui development notes" below.)
 
 ## What this project is
 
@@ -98,6 +98,79 @@ strip), `detail.py` (collapsible Trade detail panel, reused by all signal
 tables), and `svg.py` (speedometer / gradient-bar / range-marker SVG). Options
 design + plan: [`docs/plans/2026-06-14-options-section-expansion-design.md`](docs/plans/2026-06-14-options-section-expansion-design.md)
 / [`-plan.md`](docs/plans/2026-06-14-options-section-expansion-plan.md).
+Gamma/Simulator: [`docs/plans/2026-06-14-gamma-simulator-design.md`](docs/plans/2026-06-14-gamma-simulator-design.md) / [`-plan.md`](docs/plans/2026-06-14-gamma-simulator-plan.md).
+
+## webgui development notes (read before adding a page)
+
+**Page pattern.** Add a leaf module `webgui/pages/<name>.py` exposing `render()`.
+In `webgui/main.py`, add a `@ui.page("/route")` that does `with _layout(active,
+title): from pages import <name>; <name>.render()`, and add the item to `NAV`
+(flat) — `_layout` handles header, drawer, and the proxy-down banner. Register
+the route in `test_shell.py`'s expected set.
+
+**Import an app's engine (sys.path glue).** App folders have hyphens / no package
+init, so a page adds the app dir to `sys.path` then imports the module by name —
+e.g. `from repo_paths import TRADE_ANALYZER; sys.path.insert(0,
+str(TRADE_ANALYZER))` then `import <engine>`. `webgui/conftest.py` already puts
+the repo root + `webgui` on `sys.path` for tests. The proxy client is
+`proxy.schwab_py_client` (schwab-py compatible) and `proxy.schwab_client`
+(SchwabClient compatible).
+
+**Structure for testability.** Keep pure transforms/figure-builders as
+module-level functions (TDD them with sample dicts); keep `render()` thin
+(widgets + wiring). Heavy/blocking engine calls go through
+`await nicegui.run.io_bound(fn, ...)` with a spinner + try/except → `ui.notify`.
+
+**NiceGUI gotchas (learned, costly):**
+- `ui.html(...)` **strips `<style>` and `<iframe>`**. For CSS use `ui.add_css(css)`
+  (rules only, scope with a class); render HTML *fragments*, not full documents.
+  See `pages/options/gamma.py` Explain (`EXPLAIN_CSS` + `wrap_explain`).
+- Charts: `ui.plotly(fig_dict)` where `fig_dict={"data":[...],"layout":{...}}`;
+  build the dict in a pure function so it's unit-testable. Heatmaps/bars used in
+  Gamma; curves/bars in Simulator.
+- Tables: `ui.table(columns=[{name,label,field,...}], rows=[...], row_key="id")`;
+  selection via `selection="single"` + `table.selected`; row click via
+  `table.on("rowClick", handler)` where `event.args[1]` is the row dict.
+- Number/select/slider/toggle fire `on_value_change`. Set values with
+  `el.value = ...; el.update()`. Auto-refresh + autoload via `ui.timer(secs, fn)`
+  and `ui.timer(0.1, fn, once=True)` (see Gamma).
+- A page is built per request inside `_layout`; keep page state in a local dict
+  closure, not module globals.
+
+**Verify in the browser.** `.claude/launch.json` defines the `webgui` dev server
+on **:8500** (`autoPort:false` — the NiceGUI port is fixed). Use the Claude
+Preview tool (start `webgui`, screenshot). Restart the preview after code changes
+to pick them up. To drive Quasar inputs from the preview, set the native value +
+dispatch `input`/`change`/`blur` events.
+
+**Tests:** `cd webgui && ..\.venv\Scripts\python -m pytest -q` (76 green as of
+this writing). TDD pure functions; smoke-verify `render()` with a screenshot.
+
+**Environment quirks to expect:**
+- The proxy on `:8100` may be the *source* repo's proxy (its `/health`
+  `token_file` points at `D:\Trading With Schwab\...`). Fine for reading data;
+  just know live data isn't this repo's proxy.
+- Weekend / off-hours → sparse 0-DTE option data (e.g. "no non-zero GEX within
+  ±2%", swing scans returning 0). Not a bug.
+- `options-scanner/data/Top 20.xlsx` (scanner watchlist) is present locally but
+  **gitignored** (`data/`), like the real secrets — a fresh clone degrades to
+  base symbols. Same applies to the paper-trading DBs (start empty).
+
+**Next session — remaining pages (Phase 3.2–3.5 of the webgui plan):**
+- **Sentiment** (`/sentiment`): port `sentiment-dashboard/scoring/` + `bridge.py`
+  + `headless_snapshot.py`; composite + sub-scores (breadth, put/call, vix,
+  rotation, credit) + sector rotation. Source UI: `sentiment_dashboard.py`.
+- **Trade** (`/trade`): `trade-analyzer/src/analysis` — symbol → MTF analysis +
+  position/investor verdicts + fundamentals. Source UI: `trade_analyzer.py`.
+- **Portfolio** (`/portfolio`): `portfolio-analyzer/src` — sector breakdown,
+  vs-sector performance, **live streaming** via `ui.timer` polling the proxy
+  stream. Source UI: `portfolio_analyzer.py`.
+- **Driver** (`/driver`): `claude-driver/approval_server.py` +
+  `morning_agent.py` — orchestration controls + order approval queue.
+- Reuse the page pattern above; verify each engine function's real signature in
+  the copied module before wiring (explorations of source can drift from copy).
+- Optional follow-ups: Simulator **Replay** tab; the Gamma intraday-heatmap
+  **collector** process (the page only reads `gex_history_db`).
 
 ## Paths and ports: `repo_paths.py` + `config/ports.toml`
 
@@ -163,7 +236,7 @@ cd sentiment-dashboard ; python -m pytest tests
 cd trade-analyzer      ; python -m pytest .
 cd portfolio-analyzer  ; python -m pytest tests
 cd claude-driver       ; python -m pytest .
-cd webgui              ; python -m pytest .   # smoke tests (once built)
+cd webgui              ; python -m pytest .   # 76 tests: transforms + shell smoke
 ```
 
 - **options-scanner** has ~2 known date-relative failing tests carried over from
