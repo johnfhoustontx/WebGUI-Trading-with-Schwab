@@ -11,7 +11,9 @@ Cache views (split by concern, mirroring the page's single ``_CACHE``):
 
 * ``cache:sentiment:composite`` → ``{"live", "composite_at", "proxy_up"}``
 * ``cache:sentiment:history``   → ``{"snaps", "spy"}``
-* ``cache:sentiment:sectors``   → ``{"sector", "sector_at"}`` (with_sectors only)
+* ``cache:sentiment:sectors``   → ``{"sector", "industries", "sector_at"}``
+  (with_sectors only; ``industries`` maps each sector name → its precomputed
+  industry sub-rows so the GUI renders them on expand without a proxy call)
 
 Kept synchronous: it calls blocking ``compute`` functions and the scaffold's
 consumer loop awaits the result only if it is awaitable.
@@ -30,6 +32,46 @@ CACHE_SECTORS = "cache:sentiment:sectors"
 
 EVENT_COMPOSITE = "events:sentiment:composite"
 EVENT_SECTORS = "events:sentiment:sectors"
+
+
+def _sector_industry_etfs(sector_data, sector_name):
+    """Industry ETF symbols under one sector — mirrors the GUI's
+    ``webgui/pages/sentiment.py:sector_industry_etfs`` (kind=='industry',
+    matching sector, valid etf: not 'n/a', <=6 chars)."""
+    out = []
+    for r in sector_data or []:
+        if r.get("kind") != "industry" or r.get("sector") != sector_name:
+            continue
+        etf = r.get("etf")
+        if etf and etf != "n/a" and len(str(etf)) <= 6:
+            out.append(etf)
+    return out
+
+
+def _load_all_industries(sector, spy):
+    """Precompute every sector's industry sub-rows so the GUI can render them
+    on expand without ever calling the proxy. Enumerates sector names + their
+    industry ETFs from ``sector['sector_data']`` (the same shape the GUI's
+    expand handler reads), then ``compute.load_industries`` once per sector.
+
+    Returns ``{sector_name: rows}``. Any failure is non-fatal — returns ``{}``
+    so the sectors view is still cached with the sector payload intact.
+    """
+    industries = {}
+    try:
+        sector_data = (sector or {}).get("sector_data") or []
+        for r in sector_data:
+            if r.get("kind") != "sector":
+                continue
+            name = r.get("sector") or r.get("label")
+            if not name:
+                continue
+            etfs = _sector_industry_etfs(sector_data, name)
+            industries[name] = compute.load_industries(etfs, spy)
+    except Exception:  # noqa: BLE001 — industries are best-effort.
+        log.exception("industry precompute failed")
+        return {}
+    return industries
 
 
 def _composite_gate(live, snaps):
@@ -74,8 +116,10 @@ def refresh(bus, with_sectors: bool = False) -> None:
     if with_sectors:
         try:
             sector = compute.load_sector_perf(spy)
+            industries = _load_all_industries(sector, spy)
             v = bus.cache_set(CACHE_SECTORS, {
                 "sector": sector,
+                "industries": industries,
                 "sector_at": now_iso,
             })
             bus.publish(EVENT_SECTORS, {"version": v})

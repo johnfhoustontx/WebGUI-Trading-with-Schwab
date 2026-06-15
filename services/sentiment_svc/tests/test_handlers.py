@@ -25,8 +25,8 @@ def _fake_live(total="7.80", bias="Long"):
 
 
 def _patch_compute(monkeypatch, *, live, snaps, spy, sector=None,
-                   proxy_up=True):
-    calls = {"bridge": 0, "sector_perf": 0}
+                   proxy_up=True, industries_fn=None):
+    calls = {"bridge": 0, "sector_perf": 0, "industries": []}
     monkeypatch.setattr(handlers.compute, "load_snapshots",
                         lambda *a, **k: (snaps, spy))
     monkeypatch.setattr(handlers.compute, "load_live", lambda *a, **k: live)
@@ -37,6 +37,13 @@ def _patch_compute(monkeypatch, *, live, snaps, spy, sector=None,
         return sector
 
     monkeypatch.setattr(handlers.compute, "load_sector_perf", _sector_perf)
+
+    def _default_industries(etfs, _spy):
+        calls["industries"].append(list(etfs))
+        return {"quotes": {}, "trends": {}, "pcr": {}, "quadrants": {}}
+
+    monkeypatch.setattr(handlers.compute, "load_industries",
+                        industries_fn or _default_industries)
 
     def _bridge(*a, **k):
         calls["bridge"] += 1
@@ -88,8 +95,86 @@ def test_refresh_with_sectors_writes_sector_view(monkeypatch):
     assert sec is not None
     assert sec.payload["sector"] == sector
     assert "sector_at" in sec.payload
+    # Empty sector_data -> no sectors to enumerate -> empty industries view.
+    assert sec.payload["industries"] == {}
     assert msg is not None and "version" in msg
     assert calls["sector_perf"] == 1
+    assert calls["bridge"] == 1
+
+
+def _sector_with_industries():
+    """A sector dict shaped like ``compute.load_sector_perf`` output whose
+    ``sector_data`` carries sector rows + their industry sub-rows (the same
+    shape ``webgui/pages/sentiment.py:sector_industry_etfs`` enumerates)."""
+    return {
+        "sector_data": [
+            {"kind": "sector", "sector": "Technology", "label": "Tech",
+             "etf": "XLK", "name": "Technology"},
+            {"kind": "industry", "sector": "Technology", "label": "Semis",
+             "etf": "SMH", "name": "Semiconductors"},
+            {"kind": "industry", "sector": "Technology", "label": "Software",
+             "etf": "IGV", "name": "Software"},
+            {"kind": "sector", "sector": "Energy", "label": "Energy",
+             "etf": "XLE", "name": "Energy"},
+            {"kind": "industry", "sector": "Energy", "label": "Oil",
+             "etf": "XOP", "name": "Oil & Gas E&P"},
+            # invalid industry etfs must be skipped (n/a / too long)
+            {"kind": "industry", "sector": "Energy", "label": "Bad",
+             "etf": "n/a", "name": "skip"},
+            {"kind": "industry", "sector": "Energy", "label": "Long",
+             "etf": "TOOLONG", "name": "skip"},
+        ],
+        "quotes": {}, "dual": {},
+    }
+
+
+def test_refresh_with_sectors_includes_industries(monkeypatch):
+    bus = Bus(fake=True)
+    sector = _sector_with_industries()
+
+    rows_by_call = []
+
+    def _industries(etfs, _spy):
+        etfs = list(etfs)
+        rows_by_call.append(etfs)
+        return [{"etf": e} for e in etfs]  # fake rows, distinct per call
+
+    calls = _patch_compute(monkeypatch, live=_fake_live(),
+                           snaps=[{"x": 1}], spy=[1.0], sector=sector,
+                           industries_fn=_industries)
+
+    handlers.refresh(bus, with_sectors=True)
+
+    sec = bus.cache_get("cache:sentiment:sectors")
+    assert sec is not None
+    assert sec.payload["sector"] == sector
+    inds = sec.payload["industries"]
+    assert set(inds.keys()) == {"Technology", "Energy"}
+    assert inds["Technology"] == [{"etf": "SMH"}, {"etf": "IGV"}]
+    assert inds["Energy"] == [{"etf": "XOP"}]  # n/a + TOOLONG skipped
+    # load_industries called once per sector.
+    assert rows_by_call == [["SMH", "IGV"], ["XOP"]]
+    assert calls["sector_perf"] == 1
+    assert calls["bridge"] == 1
+
+
+def test_industries_failure_non_fatal(monkeypatch):
+    bus = Bus(fake=True)
+    sector = _sector_with_industries()
+
+    def _boom(_etfs, _spy):
+        raise RuntimeError("industry load exploded")
+
+    calls = _patch_compute(monkeypatch, live=_fake_live(),
+                           snaps=[{"x": 1}], spy=[1.0], sector=sector,
+                           industries_fn=_boom)
+
+    handlers.refresh(bus, with_sectors=True)  # must not raise
+
+    sec = bus.cache_get("cache:sentiment:sectors")
+    assert sec is not None
+    assert sec.payload["sector"] == sector
+    assert sec.payload["industries"] == {}
     assert calls["bridge"] == 1
 
 
