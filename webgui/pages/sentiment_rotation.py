@@ -98,3 +98,123 @@ def rrg_scatter_figure(a):
             ],
         },
     }
+
+
+import datetime as _dt
+
+# Static-ish data: cache the assessment; recompute only on manual Refresh.
+_ROTATION_CACHE = {"assessment": None, "at": None}
+
+
+def _compute():
+    """Off-thread: fetch aligned frame via the engine + build the assessment.
+    Returns (assessment|None, error_str|None)."""
+    symbols = [rotation_tool.BENCHMARK] + list(rotation_tool.SECTOR_ETFS)
+    frame, missing = rotation_tool.build_aligned_frame(symbols)
+    if frame is None:
+        return None, "No data from proxy (is schwab-proxy running?)"
+    a = rotation_tool.build_assessment(frame, _dt.date.today().isoformat())
+    if a is None or not a.get("sectors"):
+        return None, (f"Insufficient daily history (need {rotation_tool.MIN_BARS} "
+                      f"aligned bars).")
+    return a, None
+
+
+def _sector_weights():
+    import sectors_ref
+    return {r["etf"]: r.get("sp_weight", 0.0)
+            for r in sectors_ref.load_sectors_data()
+            if r.get("kind") == "sector" and r.get("etf")}
+
+
+def render():
+    import nicegui.run as ng_run
+    from nicegui import ui
+
+    weights = _sector_weights()
+
+    with ui.row().classes("items-center gap-3 w-full"):
+        ui.label("Sector Rotation").classes("text-h6")
+        ui.label("RRG vs SPY").classes("opacity-60 text-sm")
+        as_of = ui.label("").classes("opacity-70 text-sm")
+        ui.space()
+        spinner = ui.spinner(size="sm"); spinner.visible = False
+        ui.button("Refresh", icon="refresh", on_click=lambda: load(force=True)).props("flat dense")
+
+    headline_lbl = ui.label("").classes("text-subtitle1 text-bold")
+    detail_lbl = ui.label("").classes("opacity-70 text-sm")
+    msg_lbl = ui.label("").classes("text-warning text-sm")
+    cols_box = ui.row().classes("w-full no-wrap gap-6 q-mt-sm")
+    ui.label("Full Quadrant Map (sorted by RS-Momentum)").classes("text-subtitle2 q-mt-md")
+    table_box = ui.column().classes("w-full q-gutter-none")
+    ui.label("RRG").classes("text-subtitle2 q-mt-md")
+    rrg_box = ui.column().classes("w-full")
+    ui.label("Pairing is ordinal — strongest relative-selling vs strongest "
+             "relative-buying pressure, not literal cash flow.").classes("opacity-50 text-xs q-mt-sm")
+
+    QCOLS = [("name", "Sector", 150), ("etf", "ETF", 55), ("rs_ratio", "RS-Ratio", 90),
+             ("rs_momentum", "RS-Mom", 90), ("quadrant", "Quadrant", 110),
+             ("direction", "Dir", 60)]
+
+    def _render(a):
+        regime, color, text, detail = headline_parts(a)
+        as_of.text = f"as of {a.get('date')}"
+        headline_lbl.text = f"{regime} — {text}"
+        headline_lbl.style(f"color:{color}")
+        detail_lbl.text = detail
+        msg_lbl.text = ""
+        cols_box.clear()
+        with cols_box:
+            for side, title, tcolor in (("rotating_from", "ROTATING FROM", CLR_RED),
+                                        ("rotating_into", "ROTATING INTO", CLR_GREEN)):
+                rows, total = side_rows(a, side, weights)
+                with ui.column().classes("items-start").style("flex:1"):
+                    ui.label(f"{title}  ·  {total:.0f}% of S&P").style(f"color:{tcolor}").classes("text-bold text-sm")
+                    for r in rows:
+                        with ui.row().classes("items-center w-full no-wrap gap-2 text-sm"):
+                            ui.label(f"{r['name']} ({r['quadrant']})").style("flex:1")
+                            ui.label(f"{r['weight']:.1f}%" if r['weight'] else "").classes("opacity-70")
+        table_box.clear()
+        with table_box:
+            with ui.row().classes("items-center w-full no-wrap gap-2 opacity-60 text-xs"):
+                for _f, hdr, w in QCOLS:
+                    ui.label(hdr).style(f"width:{w}px")
+            for r in rotation_rows(a):
+                with ui.row().classes("items-center w-full no-wrap gap-2 text-sm").style(f"color:{r['color']}"):
+                    ui.label(str(r.get("name") or "")).style("width:150px")
+                    ui.label(str(r.get("etf") or "")).style("width:55px")
+                    ui.label(f"{r.get('rs_ratio'):.2f}").style("width:90px")
+                    ui.label(f"{r.get('rs_momentum'):.2f}").style("width:90px")
+                    ui.label(str(r.get("quadrant") or "")).style("width:110px")
+                    ui.label(str(r.get("direction") or "")).style("width:60px")
+        rrg_box.clear()
+        with rrg_box:
+            ui.plotly(rrg_scatter_figure(a)).classes("w-full")
+
+    def _paint_cached():
+        a = _ROTATION_CACHE["assessment"]
+        if a:
+            _render(a)
+            return True
+        return False
+
+    async def load(force=False):
+        if not force and _paint_cached():
+            return
+        spinner.visible = True
+        try:
+            a, err = await ng_run.io_bound(_compute)
+            if a:
+                _ROTATION_CACHE["assessment"] = a
+                _ROTATION_CACHE["at"] = _dt.datetime.now()
+                _render(a)
+            else:
+                msg_lbl.text = err or "No rotation data."
+        except Exception as e:  # noqa: BLE001
+            ui.notify(f"Rotation load failed: {e}", type="negative")
+        finally:
+            spinner.visible = False
+
+    # Paint cache instantly if present; otherwise compute once (no auto-refresh).
+    if not _paint_cached():
+        ui.timer(0.1, lambda: load(force=True), once=True)
