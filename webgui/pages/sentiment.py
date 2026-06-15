@@ -534,6 +534,90 @@ def rolling_averages(prior_scores):
     return round(a5, 2), round(a20, 2), label
 
 
+def build_and_write_bridge(snaps, spy, live, sector):
+    """Build the bridge payload from cache/state data and write it. Defensive."""
+    try:
+        import bridge
+        from datetime import datetime, timezone
+        latest = live or (snaps[-1] if snaps else None)
+        if not latest:
+            return
+        prior = composite_series(snaps or [])[1]
+        trend = None
+        if spy:
+            tr, committed, _d = commit_trend_regime(spy)
+            trend = {"state": committed, "label": trend_regime.STATE_LABELS[committed],
+                     "description": trend_regime.STATE_DESCRIPTIONS[committed],
+                     "raw_state": tr.state, "spy_close": round(tr.spy_close, 4),
+                     "sma_50": round(tr.sma_50, 4), "sma_200": round(tr.sma_200, 4),
+                     "sma_200_slope_pct": round(tr.sma_200_slope_pct, 4),
+                     "drawdown_pct": round(tr.drawdown_pct, 4), "confidence": round(tr.confidence, 3)}
+        sec_arg = None
+        if sector:
+            sec_arg = {"sector_data": sector.get("sector_data"),
+                       "quotes": sector.get("quotes"), "dual": sector.get("dual")}
+        payload = build_bridge_payload(latest, prior, spy or [],
+                                       datetime.now(timezone.utc).isoformat(),
+                                       sector=sec_arg, trend=trend)
+        bridge.write_bridge(payload)
+    except Exception:
+        pass
+
+
+_BG = {"started": False, "refreshing": False}
+
+
+def _refresh_cache_sync(with_sectors=False):
+    """Synchronous cache update (run in an executor). Updates _CACHE + bridge.
+    No NiceGUI/page UI access — safe with zero clients."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    snaps, spy = _load_snapshots()
+    _CACHE["snaps"], _CACHE["spy"] = snaps, spy
+    live = _load_live() if is_rth(datetime.now(ZoneInfo("America/Chicago"))) else None
+    _CACHE["live"] = live
+    if with_sectors:
+        try:
+            _CACHE["sector"] = _load_sector_perf(spy)
+        except Exception:
+            pass
+    _CACHE["composite_at"] = datetime.now()
+    _CACHE["proxy_up"] = _proxy_up()
+    build_and_write_bridge(snaps, spy, live, _CACHE.get("sector"))
+
+
+async def refresh_cache(with_sectors=False):
+    """Off-thread cache refresh; never raises; non-reentrant."""
+    if _BG["refreshing"]:
+        return
+    _BG["refreshing"] = True
+    try:
+        import asyncio
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, _refresh_cache_sync, with_sectors)
+    except Exception:
+        pass
+    finally:
+        _BG["refreshing"] = False
+
+
+async def _bg_loop():
+    import asyncio
+    await refresh_cache(with_sectors=True)
+    while True:
+        await asyncio.sleep(120)
+        await refresh_cache(with_sectors=False)
+
+
+def start_background_refresh():
+    """Start the 120s server-side refresher (idempotent). Call once at startup."""
+    import asyncio
+    if _BG["started"]:
+        return
+    _BG["started"] = True
+    asyncio.create_task(_bg_loop())
+
+
 def render():
     import nicegui.run as ng_run
     from nicegui import ui
@@ -654,33 +738,8 @@ def render():
         return rotation_value, sector_value
 
     def _publish_bridge():
-        try:
-            import bridge
-            from datetime import datetime, timezone
-            latest = state.get("live") or (state["snaps"][-1] if state["snaps"] else None)
-            if not latest:
-                return
-            prior = composite_series(state["snaps"])[1]
-            trend = None
-            if state["spy"]:
-                tr, committed, _d = commit_trend_regime(state["spy"])
-                trend = {"state": committed, "label": trend_regime.STATE_LABELS[committed],
-                         "description": trend_regime.STATE_DESCRIPTIONS[committed],
-                         "raw_state": tr.state, "spy_close": round(tr.spy_close, 4),
-                         "sma_50": round(tr.sma_50, 4), "sma_200": round(tr.sma_200, 4),
-                         "sma_200_slope_pct": round(tr.sma_200_slope_pct, 4),
-                         "drawdown_pct": round(tr.drawdown_pct, 4), "confidence": round(tr.confidence, 3)}
-            sector = state.get("sector")
-            sec_arg = None
-            if sector:
-                sec_arg = {"sector_data": sector["sector_data"], "quotes": sector["quotes"],
-                           "dual": sector.get("dual")}
-            payload = build_bridge_payload(latest, prior, state["spy"],
-                                           datetime.now(timezone.utc).isoformat(),
-                                           sector=sec_arg, trend=trend)
-            bridge.write_bridge(payload)
-        except Exception:
-            pass
+        build_and_write_bridge(state.get("snaps"), state.get("spy"),
+                               state.get("live"), state.get("sector"))
 
     def _apply():
         live = state.get("live")
