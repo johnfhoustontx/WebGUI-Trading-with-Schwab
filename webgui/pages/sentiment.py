@@ -813,14 +813,15 @@ def render():
             for r in rows:
                 sector_name = r["sector"]
                 expanded = sector_name in state["expanded"]
+                dc = pct_color(r["day"])  # name/etf/desc share the Day % color
                 with ui.row().classes("items-center w-full no-wrap gap-2 text-sm secrow"):
                     ui.icon("keyboard_arrow_down" if expanded else "keyboard_arrow_right") \
                         .classes("cursor-pointer").style("width:24px") \
                         .on("click", lambda _e, s=sector_name: _toggle_sector(s))
-                    ui.label(str(sector_name or "")).style("width:140px")
-                    ui.label(str(r["etf"] or "")).style("width:50px")
+                    ui.label(str(sector_name or "")).style(f"width:140px;color:{dc}")
+                    ui.label(str(r["etf"] or "")).style(f"width:50px;color:{dc}")
                     ui.label(str(r["desc"] or "")).style(
-                        "flex:1;min-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap")
+                        f"flex:1;min-width:160px;color:{dc};overflow:hidden;text-overflow:ellipsis;white-space:nowrap")
                     for fld in ("day", "week", "month"):
                         v = r[fld]
                         ui.label(f"{v:+.2f}%" if v is not None else "—") \
@@ -838,13 +839,14 @@ def render():
                             ui.label("loading…").style("width:140px")
                     else:
                         for ir in industry_rows(sd, sector_name, ind["quotes"], ind["trends"], ind.get("pcr"), ind.get("quadrants")):
+                            idc = pct_color(ir["day"])  # industry name/etf/desc share its Day % color
                             with ui.row().classes("items-center w-full no-wrap gap-2 text-xs secrow indrow"):
                                 ui.label("").style("width:24px")
                                 ui.label(str(ir["label"] or "")).style(
-                                    "width:140px;padding-left:14px;opacity:0.85")
-                                ui.label(str(ir["etf"] or "")).style("width:50px")
+                                    f"width:140px;padding-left:14px;color:{idc};opacity:0.85")
+                                ui.label(str(ir["etf"] or "")).style(f"width:50px;color:{idc}")
                                 ui.label(str(ir["desc"] or "")).style(
-                                    "flex:1;min-width:160px;overflow:hidden;text-overflow:ellipsis;"
+                                    f"flex:1;min-width:160px;color:{idc};overflow:hidden;text-overflow:ellipsis;"
                                     "white-space:nowrap;opacity:0.8")
                                 for fld in ("day", "week", "month"):
                                     v = ir[fld]

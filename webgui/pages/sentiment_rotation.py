@@ -146,10 +146,14 @@ def render():
     detail_lbl = ui.label("").classes("opacity-70 text-sm")
     msg_lbl = ui.label("").classes("text-warning text-sm")
     cols_box = ui.row().classes("w-full no-wrap gap-6 q-mt-sm")
-    ui.label("Full Quadrant Map (sorted by RS-Momentum)").classes("text-subtitle2 q-mt-md")
-    table_box = ui.column().classes("w-full q-gutter-none")
-    ui.label("RRG").classes("text-subtitle2 q-mt-md")
-    rrg_box = ui.column().classes("w-full")
+    # Quadrant map (left) + RRG scatter (right), side by side.
+    with ui.row().classes("w-full no-wrap gap-6 items-start q-mt-md"):
+        with ui.column().style("flex:1;min-width:0"):
+            ui.label("Full Quadrant Map (sorted by RS-Momentum)").classes("text-subtitle2")
+            table_box = ui.column().classes("w-full q-gutter-none")
+        with ui.column().style("flex:1;min-width:0"):
+            ui.label("RRG").classes("text-subtitle2")
+            rrg_box = ui.column().classes("w-full")
     ui.label("Pairing is ordinal — strongest relative-selling vs strongest "
              "relative-buying pressure, not literal cash flow.").classes("opacity-50 text-xs q-mt-sm")
 
@@ -172,8 +176,10 @@ def render():
                 with ui.column().classes("items-start").style("flex:1"):
                     ui.label(f"{title}  ·  {total:.0f}% of S&P").style(f"color:{tcolor}").classes("text-bold text-sm")
                     for r in rows:
-                        with ui.row().classes("items-center w-full no-wrap gap-2 text-sm"):
-                            ui.label(f"{r['name']} ({r['quadrant']})").style("flex:1")
+                        with ui.row().classes("items-center no-wrap gap-1 text-sm"):
+                            ui.label(str(r["name"] or ""))
+                            ui.label(f"({r['quadrant']})").style(
+                                f"color:{quadrant_color(r['quadrant'])}")
                             ui.label(f"{r['weight']:.1f}%" if r['weight'] else "").classes("opacity-70")
         table_box.clear()
         with table_box:
