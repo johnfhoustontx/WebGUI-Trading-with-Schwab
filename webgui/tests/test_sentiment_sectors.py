@@ -34,6 +34,16 @@ def test_pcr_from_chain_sums_volume():
     assert S.pcr_from_chain({"callExpDateMap": {}}) is None  # cv == 0
 
 
+def test_is_rth():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    ct = ZoneInfo("America/Chicago")
+    assert S.is_rth(datetime(2026, 6, 15, 10, 0, tzinfo=ct))      # Mon 10:00
+    assert not S.is_rth(datetime(2026, 6, 15, 7, 0, tzinfo=ct))   # Mon pre-open
+    assert not S.is_rth(datetime(2026, 6, 15, 15, 30, tzinfo=ct)) # Mon post-close
+    assert not S.is_rth(datetime(2026, 6, 14, 10, 0, tzinfo=ct))  # Sunday
+
+
 def test_week_month_from_closes():
     closes = [float(i) for i in range(1, 31)]   # 1..30, last=30.0
     d3, wk, mo = S.week_month_from_closes(closes)

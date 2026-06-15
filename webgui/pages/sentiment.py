@@ -15,6 +15,9 @@ from scoring import composite as scoring_composite  # noqa: E402
 from scoring import trend_regime as trend_regime  # noqa: E402
 from scoring import sector_perf as scoring_sector  # noqa: E402
 from scoring import rotation as scoring_rotation    # noqa: E402
+import live_composite  # noqa: E402,F401  (eager: pins module; never lazy)
+from live_composite import (  # noqa: E402
+    signal_band, compute_live, build_bridge_payload)
 
 CLR_GREEN = "#66bb6a"
 CLR_RED = "#ef5350"
@@ -25,7 +28,7 @@ LINE_COLOR = "#42a5f5"
 
 # In-process cache so navigating away/back repaints instantly without re-fetch.
 # Single-user app (see root CLAUDE.md); lost on server restart.
-_CACHE = {"snaps": None, "spy": None, "sector": None,
+_CACHE = {"snaps": None, "spy": None, "sector": None, "live": None,
           "expanded": set(), "industry": {},
           "composite_at": None, "sector_at": None,
           "proxy_up": None}
@@ -330,6 +333,25 @@ def industry_rows(sector_data, sector_name, ind_quotes, ind_trends, ind_pcr=None
     return rows
 
 
+def is_rth(now):
+    """True if `now` (a tz-aware America/Chicago datetime) is within regular
+    trading hours (Mon–Fri 08:30–15:00 CT)."""
+    if now.weekday() >= 5:
+        return False
+    hm = (now.hour, now.minute)
+    return (8, 30) <= hm < (15, 0)
+
+
+def _load_live():
+    """Off-thread: live intraday composite snapshot (or None on failure)."""
+    import proxy, sectors_ref
+    try:
+        sd = sectors_ref.load_sectors_data()
+        return compute_live(proxy.schwab_client, sd)
+    except Exception:
+        return None
+
+
 def _load_snapshots(days=35):
     """Off-thread: full scoring path via the copied backfill engine.
     Returns (snapshots, spy_closes)."""
@@ -456,19 +478,6 @@ def _load_sector_perf(spy_closes):
             "pcr": pcr, "quadrants": quads, "dual": dual, "rotation": rot}
 
 
-def _signal_band(score):
-    """(size_modifier, bias, signal) — mirrors source _update_position_modifier."""
-    if score >= 9:
-        return "1.25x", "Long", "Strong Bull"
-    if score >= 7:
-        return "1.10x", "Long", "Bullish"
-    if score >= 5:
-        return "1.00x", "Neutral", "Neutral"
-    if score >= 3:
-        return "0.85x", "Cautious", "Bearish"
-    return "0.70x", "Short", "Strong Bear"
-
-
 def component_table_rows(snapshot, rotation_value=None, sector_value=None):
     """Rows for the in-composite components: name/value/score/weight/conf/contrib.
     Scores/confs come from the snapshot so Contrib reconciles to the composite."""
@@ -504,7 +513,7 @@ def component_table_rows(snapshot, rotation_value=None, sector_value=None):
 def tiles(latest, prev_total):
     comp = latest.get("composite") or {}
     total = _safe_float(comp.get("total_score"))
-    size, bias, signal = _signal_band(total)
+    size, bias, signal = signal_band(total)
     if prev_total is None:
         yest, change = "—", "—"
     else:
@@ -543,6 +552,7 @@ def render():
         "snaps": _CACHE["snaps"] or [],
         "spy": _CACHE["spy"] or [],
         "sector": _CACHE["sector"],
+        "live": _CACHE.get("live"),
         "expanded": set(_CACHE["expanded"]),
         "industry": dict(_CACHE["industry"]),
         "composite_at": _CACHE.get("composite_at"),
@@ -643,24 +653,58 @@ def render():
         sector_value = f"{wpct:+.2f}%" if wpct is not None else None
         return rotation_value, sector_value
 
+    def _publish_bridge():
+        try:
+            import bridge
+            from datetime import datetime, timezone
+            latest = state.get("live") or (state["snaps"][-1] if state["snaps"] else None)
+            if not latest:
+                return
+            prior = composite_series(state["snaps"])[1]
+            trend = None
+            if state["spy"]:
+                tr, committed, _d = commit_trend_regime(state["spy"])
+                trend = {"state": committed, "label": trend_regime.STATE_LABELS[committed],
+                         "description": trend_regime.STATE_DESCRIPTIONS[committed],
+                         "raw_state": tr.state, "spy_close": round(tr.spy_close, 4),
+                         "sma_50": round(tr.sma_50, 4), "sma_200": round(tr.sma_200, 4),
+                         "sma_200_slope_pct": round(tr.sma_200_slope_pct, 4),
+                         "drawdown_pct": round(tr.drawdown_pct, 4), "confidence": round(tr.confidence, 3)}
+            sector = state.get("sector")
+            sec_arg = None
+            if sector:
+                sec_arg = {"sector_data": sector["sector_data"], "quotes": sector["quotes"],
+                           "dual": sector.get("dual")}
+            payload = build_bridge_payload(latest, prior, state["spy"],
+                                           datetime.now(timezone.utc).isoformat(),
+                                           sector=sec_arg, trend=trend)
+            bridge.write_bridge(payload)
+        except Exception:
+            pass
+
     def _apply():
+        live = state.get("live")
         snaps = state["snaps"]
-        if not snaps:
+        if not live and not snaps:
             bias_lbl.text = "No data"
             return
-        latest = snaps[-1]
+        latest = live or snaps[-1]
         comp = latest.get("composite") or {}
         total = _safe_float(comp.get("total_score"))
-        date_lbl.text = f"as of {latest.get('date')} (last completed session)"
+        date_lbl.text = (f"as of {latest.get('date')} (live intraday)" if live
+                         else f"as of {latest.get('date')} (last completed session)")
         gauge_box.content = speedometer_svg(gauge_score(total), comp.get("bias", ""),
                                             width=220, height=140)
         bias_lbl.text = f"{total:.2f} · {comp.get('bias', '')}"
         bias_lbl.style(f"color:{bias_color(comp.get('bias'))}")
         sub_lbl.text = (f"size {comp.get('size_modifier', '—')} · "
                         f"agg conf {_safe_float(comp.get('aggregate_confidence')):.0%}")
-        prev_total = None
-        if len(snaps) >= 2:
-            prev_total = (snaps[-2].get("composite") or {}).get("total_score")
+        # Prior series: when showing live, today=live and the prior series is
+        # the full backfill (all completed sessions); when showing backfill,
+        # exclude the last (it's "today").
+        prior_scores = (composite_series(snaps)[1] if live
+                        else composite_series(snaps[:-1])[1])
+        prev_total = prior_scores[-1] if prior_scores else None
         t = tiles(latest, prev_total)
         band = traffic_color(total)
         for tkey, _tlabel in TILE_DEFS:
@@ -669,10 +713,9 @@ def render():
         rotation_value, sector_value = _comp_context()
         _render_components(latest, rotation_value, sector_value)
         hist_plot.update_figure(build_history_figure(snaps))
-        _dates, scores = composite_series(snaps[:-1])
-        a5, a20, label = rolling_averages(scores)
+        a5, a20, label = rolling_averages(prior_scores)
         roll_lbl.text = f"5d: {a5:.2f}   20d: {a20:.2f}   {label}"
-        line, flag = velocity_line(scores, total)
+        line, flag = velocity_line(prior_scores, total)
         vel_lbl.text = line
         flag_lbl.text = flag
         div_lbl.text = scoring_composite.divergence(divergence_named(latest)) or ""
@@ -689,6 +732,7 @@ def render():
                 f"SPY {tr.spy_close:.2f} · 50d {tr.sma_50:.2f} · 200d {tr.sma_200:.2f} "
                 f"· slope {tr.sma_200_slope_pct:+.2f}% · dd {tr.drawdown_pct:+.1f}% "
                 f"· conf {tr.confidence:.0%}")
+        _publish_bridge()
 
     def _render_sector_table():
         sec = state["sector"]
@@ -807,9 +851,11 @@ def render():
         rotation_lbl.style(f"color:{color}")
         _render_sector_table()
         # refill rotation/sector Value cells in the component table now loaded
-        if state["snaps"]:
+        if state["snaps"] or state.get("live"):
             rotation_value, sector_value = _comp_context()
-            _render_components(state["snaps"][-1], rotation_value, sector_value)
+            latest = state.get("live") or state["snaps"][-1]
+            _render_components(latest, rotation_value, sector_value)
+        _publish_bridge()
 
     async def load_sectors():
         # Re-entrancy guard: the sector fetch (~24 proxy calls incl. /chains)
@@ -857,6 +903,14 @@ def render():
             snaps, spy = await ng_run.io_bound(_load_snapshots)
             state["snaps"], state["spy"] = snaps, spy
             _CACHE["snaps"], _CACHE["spy"] = snaps, spy
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            if is_rth(datetime.now(ZoneInfo("America/Chicago"))):
+                live = await ng_run.io_bound(_load_live)
+            else:
+                live = None
+            state["live"] = live
+            _CACHE["live"] = live
             _apply()
             state["composite_at"] = datetime.now()
             _CACHE["composite_at"] = state["composite_at"]
