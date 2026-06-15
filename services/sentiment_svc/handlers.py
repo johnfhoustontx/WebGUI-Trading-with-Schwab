@@ -117,6 +117,7 @@ def refresh(bus, with_sectors: bool = False) -> None:
         "live": live,
         "composite_at": now_iso,
         "proxy_up": compute.proxy_up(),
+        "derived": compute.derive_composite_extras(live, snaps, spy),
     })
     bus.publish(EVENT_COMPOSITE, {"version": version})
 
@@ -131,6 +132,7 @@ def refresh(bus, with_sectors: bool = False) -> None:
                 "sector": sector,
                 "industries": industries,
                 "sector_at": now_iso,
+                "summary": compute.derive_sector_summary(sector),
             })
             bus.publish(EVENT_SECTORS, {"version": v})
         except Exception:  # noqa: BLE001 — sector failure must not abort refresh.

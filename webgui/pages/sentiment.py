@@ -1,36 +1,28 @@
 """Sentiment page — composite gauge + components + 30d history + trend regime.
 
-Tier-3 reader: this page holds **no engine calls and no refresh loop**. It reads
-three cache views off the Redis bus (published by ``services/sentiment_svc``) and
-renders them with the pure display transforms in this module:
+Tier-3 reader: this page holds **no engine calls, no refresh loop, and no app
+``scoring``/``live_composite`` imports**. All scoring-derived values (component
+weights, size/bias/signal band, velocity, divergence, trend regime, cap-weighted
+sector pct/score) are computed in ``services/sentiment_svc`` — the only process
+where ``import scoring`` resolves to sentiment's package rather than the
+options-scanner ``scoring.py`` (the documented cross-app collision). The service
+places them in the cache; this page only **formats** them. Cache views read:
 
-* ``sentiment:composite`` → ``{"live", "composite_at", "proxy_up"}``
+* ``sentiment:composite`` → ``{"live", "composite_at", "proxy_up", "derived"}``
+  where ``derived`` = ``{"weights", "size", "bias", "signal", "velocity",
+  "divergence", "trend"}`` (see ``compute.derive_composite_extras``).
 * ``sentiment:history``   → ``{"snaps", "spy"}``
-* ``sentiment:sectors``   → ``{"sector", "industries", "sector_at"}``
+* ``sentiment:sectors``   → ``{"sector", "industries", "sector_at", "summary"}``
+  where ``summary`` = ``{"wpct", "score"}`` (see ``compute.derive_sector_summary``).
 
-The pure transforms (``traffic_color``, ``composite_series``, ``commit_trend_regime``,
-table/figure builders, …) are unit-tested. ``render()`` wires widgets, a Refresh
-button that enqueues a ``cmd:sentiment`` command, and a fetch-free version-poll
-``ui.timer`` that repaints when the bus cache version changes.
+The pure display transforms (``traffic_color``, ``composite_series`` for the
+history figure, table/figure builders, …) are unit-tested. ``render()`` wires
+widgets, a Refresh button that enqueues a ``cmd:sentiment`` command, and a
+fetch-free version-poll ``ui.timer`` that repaints when the bus cache version
+changes.
 """
-import sys
-
-from repo_paths import SENTIMENT
-
-if str(SENTIMENT) not in sys.path:
-    sys.path.insert(0, str(SENTIMENT))
-
-# Scoring imports used by the KEPT pure transforms below (velocity/divergence,
-# trend-regime hysteresis replay, cap-weighted sector pct). These are pure
-# functions over data; no proxy/engine calls happen at import.
-from scoring import WEIGHTS  # noqa: E402
-from scoring import composite as scoring_composite  # noqa: E402
-from scoring import trend_regime as trend_regime  # noqa: E402
-from scoring import sector_perf as scoring_sector  # noqa: E402
-from live_composite import signal_band  # noqa: E402  (pure score-band -> labels)
-
-import bus_client  # noqa: E402
-from pages.ui_guard import guard, guard_async  # noqa: E402
+import bus_client
+from pages.ui_guard import guard, guard_async
 
 CLR_GREEN = "#66bb6a"
 CLR_RED = "#ef5350"
@@ -39,14 +31,17 @@ CLR_FLAT = "#9e9e9e"
 CLR_CYAN = "#3fb6c7"
 LINE_COLOR = "#42a5f5"
 
-# (component_scores key, display name, weight or None if out of composite)
+# (component_scores key, display name). Weights are NO LONGER baked from app
+# ``scoring`` at import — they arrive at render time via the cached
+# ``derived["weights"]`` (computed in the service). A component with no weight
+# in that dict (or weight 0) is treated as out-of-composite (e.g. credit_pulse).
 COMPONENTS = [
-    ("vix_complex", "VIX Complex", WEIGHTS.get("vix_complex")),
-    ("put_call",    "Put/Call (sectors)", WEIGHTS.get("put_call")),
-    ("breadth",     "Market Breadth",     WEIGHTS.get("breadth")),
-    ("rotation",    "Rotation",    WEIGHTS.get("rotation")),
-    ("sector_perf", "Sector Performance", WEIGHTS.get("sector_perf")),
-    ("credit_pulse", "Credit Pulse", WEIGHTS.get("credit_pulse")),
+    ("vix_complex", "VIX Complex"),
+    ("put_call",    "Put/Call (sectors)"),
+    ("breadth",     "Market Breadth"),
+    ("rotation",    "Rotation"),
+    ("sector_perf", "Sector Performance"),
+    ("credit_pulse", "Credit Pulse"),
 ]
 
 
@@ -93,31 +88,6 @@ def composite_series(snapshots):
     return dates, scores
 
 
-def velocity_line(prior_scores, today_score):
-    """(text, flag) from scoring.composite.velocity."""
-    v = scoring_composite.velocity(list(prior_scores), _safe_float(today_score))
-    roc3, roc5, z = v["roc_3d"], v["roc_5d"], v["z_20d"]
-    parts = [
-        f"3d ROC: {roc3:+.2f}" if roc3 is not None else "3d ROC: —",
-        f"5d ROC: {roc5:+.2f}" if roc5 is not None else "5d ROC: —",
-        f"20d Z: {z:+.2f}" if z is not None else "20d Z: —",
-    ]
-    flag = f"REGIME BREAK: {z:+.2f}σ from 20d mean" if v["regime_break"] else ""
-    return " | ".join(parts), flag
-
-
-def divergence_named(snapshot):
-    """[(display_name, score)] for confident, scored components."""
-    scores = snapshot.get("component_scores") or {}
-    confs = snapshot.get("component_confidence") or {}
-    out = []
-    for key, name, _w in COMPONENTS:
-        s = _safe_float(scores.get(key))
-        if s > 0 and _safe_float(confs.get(key)) > 0:
-            out.append((name, s))
-    return out
-
-
 def build_history_figure(snapshots):
     """Plotly fig dict: composite over time."""
     dates, scores = composite_series(snapshots)
@@ -141,23 +111,6 @@ def build_history_figure(snapshots):
                       "linecolor": "rgba(255,255,255,0.15)"},
         },
     }
-
-
-def commit_trend_regime(spy_closes, lookback_days=trend_regime.HYSTERESIS_DAYS + 1):
-    """Replay classify + commit_state over the last sessions for faithful
-    hysteresis without persisted state. Returns (result, committed, days)."""
-    closes = list(spy_closes)
-    result = trend_regime.classify(closes)
-    committed = None
-    history = []
-    n = len(closes)
-    span = min(lookback_days, max(1, n - trend_regime.MIN_BARS_PARTIAL))
-    for back in range(span - 1, -1, -1):
-        sub = closes[: n - back] if back else closes
-        raw = trend_regime.classify(sub).state
-        committed, history = trend_regime.commit_state(raw, history, committed)
-    days = 1
-    return result, (committed or result.state), days
 
 
 def pct_color(pct):
@@ -248,8 +201,12 @@ def sector_table_rows(sector_data, quotes, trends, pcr, quadrants):
     return rows
 
 
-def sector_summary(sector_data, quotes):
-    """'{pct_up}% green | Cap-wtd {wpct} | Score {score}/10' (mirrors source)."""
+def sector_summary(sector_data, quotes, summary=None):
+    """'{pct_up}% green | Cap-wtd {wpct} | Score {score}/10' (mirrors source).
+
+    ``pct_up`` is computed here from quotes (pure). The cap-weighted pct and
+    sector score come from the service-computed ``summary`` dict
+    (``{"wpct", "score"}``); when absent (cold cache) they render as '—'/0.0."""
     pcts = []
     for r in sector_data:
         if r.get("kind") != "sector":
@@ -261,9 +218,10 @@ def sector_summary(sector_data, quotes):
     if not pcts:
         return "No sector data returned"
     pct_up = sum(1 for p in pcts if p > 0) / len(pcts) * 100
-    wpct, _ = scoring_sector.weighted_sector_pct(sector_data, quotes)
+    summary = summary or {}
+    wpct = summary.get("wpct")
     wpct_str = f"{wpct:+.2f}%" if wpct is not None else "—"
-    score = scoring_sector.sectors_score(sector_data, quotes)
+    score = _safe_float(summary.get("score"))
     return f"{pct_up:.0f}% green | Cap-wtd {wpct_str} | Score {score:.1f}/10"
 
 
@@ -334,11 +292,17 @@ def is_rth(now):
     return (8, 30) <= hm < (15, 0)
 
 
-def component_table_rows(snapshot, rotation_value=None, sector_value=None):
+def component_table_rows(snapshot, weights=None, rotation_value=None, sector_value=None):
     """Rows for the in-composite components: name/value/score/weight/conf/contrib.
-    Scores/confs come from the snapshot so Contrib reconciles to the composite."""
+    Scores/confs come from the snapshot so Contrib reconciles to the composite.
+
+    ``weights`` is the service-computed ``derived["weights"]`` dict (component
+    key -> weight). A component absent from it (or weight 0/None) is treated as
+    out-of-composite and skipped (e.g. credit_pulse). When ``weights`` is None
+    (cold cache) no rows are produced."""
     scores = snapshot.get("component_scores") or {}
     confs = snapshot.get("component_confidence") or {}
+    weights = weights or {}
     value_src = {
         "vix_complex": (snapshot.get("volatility") or {}).get("interpretation"),
         "put_call": (snapshot.get("options") or {}).get("pc_equity"),
@@ -350,7 +314,8 @@ def component_table_rows(snapshot, rotation_value=None, sector_value=None):
         "sector_perf": sector_value,
     }
     rows = []
-    for key, name, w in COMPONENTS:
+    for key, name in COMPONENTS:
+        w = weights.get(key)
         if not w:                      # skip out-of-composite (credit_pulse)
             continue
         s = _safe_float(scores.get(key))
@@ -366,10 +331,15 @@ def component_table_rows(snapshot, rotation_value=None, sector_value=None):
     return rows
 
 
-def tiles(latest, prev_total):
+def tiles(latest, prev_total, band=None):
+    """Signal tiles. ``band`` = service-computed ``(size, bias, signal)`` from
+    ``derived`` (size_modifier/bias/signal); when absent, those three show '—'."""
     comp = latest.get("composite") or {}
     total = _safe_float(comp.get("total_score"))
-    size, bias, signal = signal_band(total)
+    if band:
+        size, bias, signal = band
+    else:
+        size, bias, signal = "—", "—", "—"
     if prev_total is None:
         yest, change = "—", "—"
     else:
@@ -441,17 +411,22 @@ def render():
         state["live"] = composite.get("live")
         state["composite_at"] = composite.get("composite_at")
         state["proxy_up"] = composite.get("proxy_up")
+        # Scoring-derived values (weights/size/bias/signal/velocity/divergence/
+        # trend) computed in the service; the page only formats them.
+        state["derived"] = composite.get("derived") or {}
         state["snaps"] = history.get("snaps") or []
         state["spy"] = history.get("spy") or []
         state["sector"] = sectors.get("sector")
         state["industries"] = sectors.get("industries") or {}
         state["sector_at"] = sectors.get("sector_at")
+        # Cap-weighted sector pct/score, computed in the service.
+        state["sector_summary"] = sectors.get("summary") or {}
 
     # Page-local UI state (per render closure; expanded set is page-local, not
     # module-global, per webgui conventions).
     state = {
         "snaps": [], "spy": [], "sector": None, "live": None,
-        "industries": {}, "expanded": set(),
+        "industries": {}, "expanded": set(), "derived": {}, "sector_summary": {},
         "composite_at": None, "sector_at": None, "proxy_up": None,
         # last-seen bus cache versions for the fetch-free repaint timer
         "comp_ver": None, "sec_ver": None,
@@ -517,7 +492,8 @@ def render():
 
     def _render_components(latest, rotation_value=None, sector_value=None):
         comp_box.clear()
-        rows = component_table_rows(latest, rotation_value, sector_value)
+        weights = (state.get("derived") or {}).get("weights")
+        rows = component_table_rows(latest, weights, rotation_value, sector_value)
         with comp_box:
             with ui.row().classes("items-center w-full no-wrap gap-3 opacity-60 text-xs"):
                 ui.label("Component").style("width:110px")
@@ -540,12 +516,14 @@ def render():
                     ui.label(r["conf"]).classes("text-sm").style("width:50px")
 
     def _comp_context():
-        """(rotation_value, sector_value) from loaded sector data, or (None, None)."""
+        """(rotation_value, sector_value) from loaded sector data, or (None, None).
+        ``sector_value`` (cap-weighted pct) comes from the service-computed
+        sector summary; ``rotation_value`` is the dual-momentum interp string."""
         sec = state["sector"]
         if not sec:
             return None, None
         rotation_value = (sec.get("dual") or {}).get("interp")
-        wpct, _ = scoring_sector.weighted_sector_pct(sec["sector_data"], sec["quotes"])
+        wpct = (state.get("sector_summary") or {}).get("wpct")
         sector_value = f"{wpct:+.2f}%" if wpct is not None else None
         return rotation_value, sector_value
 
@@ -579,7 +557,12 @@ def render():
         prior_scores = (composite_series(snaps)[1] if live
                         else composite_series(snaps[:-1])[1])
         prev_total = prior_scores[-1] if prior_scores else None
-        t = tiles(latest, prev_total)
+        derived = state.get("derived") or {}
+        band_labels = None
+        if derived.get("size") is not None:
+            band_labels = (derived.get("size", "—"), derived.get("bias", "—"),
+                           derived.get("signal", "—"))
+        t = tiles(latest, prev_total, band_labels)
         band = traffic_color(total)
         for tkey, _tlabel in TILE_DEFS:
             tile_lbls[tkey].text = t[tkey]
@@ -589,23 +572,27 @@ def render():
         hist_plot.update_figure(build_history_figure(snaps))
         a5, a20, label = rolling_averages(prior_scores)
         roll_lbl.text = f"5d: {a5:.2f}   20d: {a20:.2f}   {label}"
-        line, flag = velocity_line(prior_scores, total)
-        vel_lbl.text = line
-        flag_lbl.text = flag
-        div_lbl.text = scoring_composite.divergence(divergence_named(latest)) or ""
-        if state["spy"]:
-            tr, committed, days = commit_trend_regime(state["spy"])
+        vel = derived.get("velocity") or {}
+        vel_lbl.text = vel.get("text", "")
+        flag_lbl.text = vel.get("flag", "")
+        div_lbl.text = derived.get("divergence", "") or ""
+        trend = derived.get("trend")
+        if trend:
+            committed = trend.get("state")
             green = {"bull_trend", "pullback_in_bull"}
             red = {"bear_rally", "bear_trend"}
             color = CLR_GREEN if committed in green else (
                 CLR_RED if committed in red else CLR_YELLOW)
-            regime_badge.text = trend_regime.STATE_LABELS[committed]
+            regime_badge.text = trend.get("label", "")
             regime_badge.style(f"background-color:{color};color:#111")
-            regime_desc.text = trend_regime.STATE_DESCRIPTIONS[committed]
+            regime_desc.text = trend.get("description", "")
             regime_detail.text = (
-                f"SPY {tr.spy_close:.2f} · 50d {tr.sma_50:.2f} · 200d {tr.sma_200:.2f} "
-                f"· slope {tr.sma_200_slope_pct:+.2f}% · dd {tr.drawdown_pct:+.1f}% "
-                f"· conf {tr.confidence:.0%}")
+                f"SPY {_safe_float(trend.get('spy_close')):.2f} · "
+                f"50d {_safe_float(trend.get('sma_50')):.2f} · "
+                f"200d {_safe_float(trend.get('sma_200')):.2f} "
+                f"· slope {_safe_float(trend.get('sma_200_slope_pct')):+.2f}% "
+                f"· dd {_safe_float(trend.get('drawdown_pct')):+.1f}% "
+                f"· conf {_safe_float(trend.get('confidence')):.0%}")
 
     def _render_sector_table():
         sec = state["sector"]
@@ -706,7 +693,7 @@ def render():
             _render_sector_table()
             return
         sd, quotes = sec["sector_data"], sec["quotes"]
-        summary_lbl.text = sector_summary(sd, quotes)
+        summary_lbl.text = sector_summary(sd, quotes, state.get("sector_summary"))
         regime, color, detail = rotation_banner(sec["rotation"])
         rotation_lbl.text = f"{regime} — {detail}"
         rotation_lbl.style(f"color:{color}")

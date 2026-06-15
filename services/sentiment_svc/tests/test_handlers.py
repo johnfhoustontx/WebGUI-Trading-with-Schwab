@@ -49,6 +49,16 @@ def _patch_compute(monkeypatch, *, live, snaps, spy, sector=None,
         calls["bridge"] += 1
 
     monkeypatch.setattr(handlers.compute, "build_and_write_bridge", _bridge)
+
+    # Stub the scoring-derive helpers (real ones tested in test_compute.py).
+    monkeypatch.setattr(handlers.compute, "derive_composite_extras",
+                        lambda *a, **k: {
+                            "weights": {"vix_complex": 0.20}, "size": "1.00x",
+                            "bias": "Neutral", "signal": "Neutral",
+                            "velocity": {"text": "3d ROC: —", "flag": ""},
+                            "divergence": "", "trend": None})
+    monkeypatch.setattr(handlers.compute, "derive_sector_summary",
+                        lambda sector: {"wpct": 0.70, "score": 7.8})
     return calls
 
 
@@ -69,6 +79,10 @@ def test_refresh_caches_composite_and_publishes(monkeypatch):
     assert comp.payload["live"] == live
     assert comp.payload["proxy_up"] is True
     assert "composite_at" in comp.payload
+    # Scoring-derived extras attached for the GUI to format.
+    derived = comp.payload["derived"]
+    assert set(derived) == {"weights", "size", "bias", "signal",
+                            "velocity", "divergence", "trend"}
     assert msg is not None and "version" in msg
 
     hist = bus.cache_get("cache:sentiment:history")
@@ -95,6 +109,8 @@ def test_refresh_with_sectors_writes_sector_view(monkeypatch):
     assert sec is not None
     assert sec.payload["sector"] == sector
     assert "sector_at" in sec.payload
+    # Service-computed cap-weighted summary attached for the GUI.
+    assert sec.payload["summary"] == {"wpct": 0.70, "score": 7.8}
     # Empty sector_data -> no sectors to enumerate -> empty industries view.
     assert sec.payload["industries"] == {}
     assert msg is not None and "version" in msg

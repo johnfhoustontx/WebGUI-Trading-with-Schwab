@@ -85,8 +85,16 @@ def test_sector_table_rows_built_and_sorted():
 
 def test_sector_summary_line():
     quotes = {"XLK": {"change_pct": 1.0}, "XLU": {"change_pct": -0.5}}
-    line = S.sector_summary(_sector_data(), quotes)
-    assert "% green" in line and "Cap-wtd" in line and "/10" in line
+    # wpct/score now come from the service-computed summary dict.
+    summary = {"wpct": 0.70, "score": 7.8}
+    line = S.sector_summary(_sector_data(), quotes, summary)
+    assert "% green" in line and "Cap-wtd +0.70%" in line and "7.8/10" in line
+
+
+def test_sector_summary_cold_cache_placeholders():
+    quotes = {"XLK": {"change_pct": 1.0}, "XLU": {"change_pct": -0.5}}
+    line = S.sector_summary(_sector_data(), quotes, None)  # no service summary
+    assert "Cap-wtd —" in line and "0.0/10" in line
 
 
 def test_rotation_banner_regimes():
@@ -126,32 +134,46 @@ def _full_snap(total, **comp):
     }
 
 
+# v4.3 weights (credit_pulse out of composite) — mirrors the service-computed
+# derived["weights"] dict now passed to the page transform.
+_WEIGHTS = {"vix_complex": 0.20, "put_call": 0.20, "breadth": 0.20,
+            "rotation": 0.15, "sector_perf": 0.25}
+
+
 def test_component_table_rows_contrib():
-    rows = S.component_table_rows(_full_snap(6.81), rotation_value=None,
+    rows = S.component_table_rows(_full_snap(6.81), _WEIGHTS, rotation_value=None,
                                   sector_value="+0.70%")
     by = {r["name"]: r for r in rows}
-    assert "Credit Pulse" not in by          # out-of-composite excluded
+    assert "Credit Pulse" not in by          # not in weights -> excluded
     vix = by["VIX Complex"]
     assert vix["score"] == 4 and vix["weight"] == "20%"
     assert abs(vix["contrib"] - 0.20 * 4 * 1.0) < 1e-9     # w*s*conf
     assert by["Sector Performance"]["value"] == "+0.70%"
     assert by["Put/Call (sectors)"]["value"] == "0.860"
-    rows2 = S.component_table_rows(_full_snap(6.81, sector_perf=7.6), sector_value="+0.70%")
+    rows2 = S.component_table_rows(_full_snap(6.81, sector_perf=7.6), _WEIGHTS,
+                                   sector_value="+0.70%")
     assert next(r for r in rows2 if r["name"] == "Sector Performance")["score"] == 7.6
 
 
-def test_tiles_from_score_band():
-    t = S.tiles(_full_snap(6.81), prev_total=6.81)
-    # 6.81 is in the >=5 band -> 1.00x / Neutral / Neutral
+def test_component_table_rows_cold_cache_empty():
+    # No weights (cold cache) -> no rows produced (graceful-empty).
+    assert S.component_table_rows(_full_snap(6.81), None) == []
+
+
+def test_tiles_uses_service_band():
+    # size/bias/signal now arrive from the service-computed derived band.
+    t = S.tiles(_full_snap(6.81), prev_total=6.81,
+                band=("1.00x", "Neutral", "Neutral"))
     assert t["modifier"] == "1.00x" and t["bias"] == "Neutral" and t["signal"] == "Neutral"
     assert t["yesterday"] == "6.81"
     assert t["change"] == "+0.00"
 
 
-def test_tiles_strong_bands():
-    assert S.tiles(_full_snap(9.2), None)["signal"] == "Strong Bull"
-    assert S.tiles(_full_snap(2.0), None)["signal"] == "Strong Bear"
-    assert S.tiles(_full_snap(2.0), None)["yesterday"] == "—"
+def test_tiles_cold_cache_placeholders():
+    # No band (cold cache) -> size/bias/signal show '—'.
+    t = S.tiles(_full_snap(6.81), None)
+    assert t["modifier"] == "—" and t["bias"] == "—" and t["signal"] == "—"
+    assert t["yesterday"] == "—"
 
 
 def test_rolling_averages_label():

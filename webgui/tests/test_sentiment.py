@@ -36,26 +36,6 @@ def test_composite_series_filters_zeros_and_blanks():
     assert dates == ["2026-06-01", "2026-06-03"]
 
 
-def test_velocity_line_formats_and_flags():
-    scores = [5.0, 5.1, 5.0, 5.2, 5.1]
-    line, flag = S.velocity_line(scores, today_score=8.0)
-    assert "3d ROC" in line and "20d Z" in line
-    assert "REGIME BREAK" in flag
-
-
-def test_velocity_line_insufficient_history():
-    line, flag = S.velocity_line([], today_score=5.0)
-    assert "—" in line
-    assert flag == ""
-
-
-def test_divergence_named_extracts_confident_components():
-    snap = _snap("2026-06-03", 6.0, vix_complex=9, sector_perf=2)
-    named = S.divergence_named(snap)
-    names = [n for n, _ in named]
-    assert "VIX Complex" in names and "Sector Performance" in names
-
-
 def test_build_history_figure_shape():
     snaps = [_snap("2026-06-01", 6.0), _snap("2026-06-02", 7.0)]
     fig = S.build_history_figure(snaps)
@@ -63,31 +43,20 @@ def test_build_history_figure_shape():
     assert fig["data"][0]["y"] == [6.0, 7.0]
 
 
-def test_commit_trend_regime_returns_state():
-    closes = [100.0 + i * 0.5 for i in range(260)]
-    tr, committed, days = S.commit_trend_regime(closes)
-    assert committed in {"bull_trend", "pullback_in_bull", "range",
-                         "bear_rally", "bear_trend"}
-    assert days >= 1
-
-
-def test_commit_trend_regime_short_series_is_range():
-    tr, committed, days = S.commit_trend_regime([100.0, 101.0])
-    assert committed == "range"
-
-
-def test_commit_trend_regime_holds_on_single_bar_flip():
-    # Long healthy uptrend -> trailing raw + committed state is bull_trend.
-    base = [100.0 + i * 0.5 for i in range(260)]
-    assert S.commit_trend_regime(base)[1] == "bull_trend"
-    # Append exactly ONE bar that drops sharply below the 50DMA, flipping
-    # the latest raw classify away from bull_trend. With HYSTERESIS_DAYS=2,
-    # a single non-confirmed bar must NOT flip the committed state.
-    series = base + [200.0]
-    tr, committed, _ = S.commit_trend_regime(series)
-    assert tr.state != "bull_trend"      # raw verdict flipped (range)
-    assert committed == "bull_trend"     # hysteresis held the committed state
-    assert tr.state != committed
+def test_page_imports_no_app_scoring():
+    """Regression for the cross-app ``scoring`` collision: the page module must
+    NOT carry any app ``scoring``/``live_composite``/trend_regime references —
+    those now live only in the service. Importing the page (even with options'
+    ``scoring`` already bound process-wide) must not need ``WEIGHTS``."""
+    assert not hasattr(S, "scoring_composite")
+    assert not hasattr(S, "scoring_sector")
+    assert not hasattr(S, "signal_band")
+    assert not hasattr(S, "trend_regime")
+    assert not hasattr(S, "WEIGHTS")
+    # Removed scoring-glue helpers are gone (computed in the service now).
+    assert not hasattr(S, "velocity_line")
+    assert not hasattr(S, "divergence_named")
+    assert not hasattr(S, "commit_trend_regime")
 
 
 def test_render_graceful_empty_cache():

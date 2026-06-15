@@ -32,6 +32,18 @@ import live_composite  # noqa: E402,F401  (eager: pins module; never lazy)
 from live_composite import (  # noqa: E402
     signal_band, compute_live, build_bridge_payload)  # noqa: F401
 
+# (component_scores key, display name) — mirrors the page's COMPONENTS minus
+# the weight (weights now flow to the GUI via the derived payload). Used to
+# build divergence-named pairs in the same order the page formats them.
+COMPONENTS = [
+    ("vix_complex", "VIX Complex"),
+    ("put_call", "Put/Call (sectors)"),
+    ("breadth", "Market Breadth"),
+    ("rotation", "Rotation"),
+    ("sector_perf", "Sector Performance"),
+    ("credit_pulse", "Credit Pulse"),
+]
+
 
 def _safe_float(v, default=0.0):
     try:
@@ -246,6 +258,122 @@ def load_sector_perf(spy_closes):
             "pcr": pcr, "quadrants": quads, "dual": dual, "rotation": rot}
 
 
+def build_trend_dict(spy):
+    """Trend-regime dict from SPY closes, or None. Shared by the bridge
+    dual-write and the GUI-facing derived payload (single source of truth so
+    the two never drift). Defensive: any failure (or empty ``spy``) -> None."""
+    try:
+        if not spy:
+            return None
+        tr, committed, days = commit_trend_regime(spy)
+        return {
+            "state": committed,
+            "label": trend_regime.STATE_LABELS[committed],
+            "description": trend_regime.STATE_DESCRIPTIONS[committed],
+            "raw_state": tr.state,
+            "spy_close": round(tr.spy_close, 4),
+            "sma_50": round(tr.sma_50, 4),
+            "sma_200": round(tr.sma_200, 4),
+            "sma_200_slope_pct": round(tr.sma_200_slope_pct, 4),
+            "drawdown_pct": round(tr.drawdown_pct, 4),
+            "confidence": round(tr.confidence, 3),
+            "days": days,
+        }
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _divergence_named(snapshot):
+    """[(display_name, score)] for confident, scored components — mirrors the
+    page's ``divergence_named`` (in-composite + credit_pulse, name order)."""
+    scores = (snapshot or {}).get("component_scores") or {}
+    confs = (snapshot or {}).get("component_confidence") or {}
+    out = []
+    for key, name in COMPONENTS:
+        s = _safe_float(scores.get(key))
+        if s > 0 and _safe_float(confs.get(key)) > 0:
+            out.append((name, s))
+    return out
+
+
+def derive_composite_extras(live, snaps, spy):
+    """Scoring-derived values for the GUI's composite view.
+
+    Computes weights / size-bias-signal / velocity / divergence / trend from
+    the same inputs the page used to derive inline (now centralized in this
+    process where ``scoring`` resolves to sentiment's package). Defensive: any
+    sub-failure yields a safe default (trend=None, velocity empty, …) without
+    raising, so a partial compute never aborts the refresh.
+    """
+    latest = live or (snaps[-1] if snaps else None)
+    total = _safe_float((latest or {}).get("composite", {}).get("total_score"))
+
+    try:
+        size, bias, signal = signal_band(total)
+    except Exception:  # noqa: BLE001
+        size, bias, signal = "—", "", ""
+
+    # Prior composite series: when showing live, today=live and the prior
+    # series is the full backfill; when showing backfill, exclude the last
+    # (it's "today"). Mirrors the page's L579 prior_scores derivation.
+    try:
+        prior_scores = (composite_series(snaps or [])[1] if live
+                        else composite_series((snaps or [])[:-1])[1])
+    except Exception:  # noqa: BLE001
+        prior_scores = []
+
+    velocity = {"text": "", "flag": ""}
+    try:
+        v = scoring_composite.velocity(list(prior_scores), total)
+        roc3, roc5, z = v["roc_3d"], v["roc_5d"], v["z_20d"]
+        parts = [
+            f"3d ROC: {roc3:+.2f}" if roc3 is not None else "3d ROC: —",
+            f"5d ROC: {roc5:+.2f}" if roc5 is not None else "5d ROC: —",
+            f"20d Z: {z:+.2f}" if z is not None else "20d Z: —",
+        ]
+        velocity = {
+            "text": " | ".join(parts),
+            "flag": (f"REGIME BREAK: {z:+.2f}σ from 20d mean"
+                     if v["regime_break"] else ""),
+        }
+    except Exception:  # noqa: BLE001
+        velocity = {"text": "", "flag": ""}
+
+    divergence = ""
+    try:
+        divergence = scoring_composite.divergence(_divergence_named(latest)) or ""
+    except Exception:  # noqa: BLE001
+        divergence = ""
+
+    return {
+        "weights": dict(WEIGHTS),
+        "size": size,
+        "bias": bias,
+        "signal": signal,
+        "velocity": velocity,
+        "divergence": divergence,
+        "trend": build_trend_dict(spy),
+    }
+
+
+def derive_sector_summary(sector):
+    """Cap-weighted-pct + sector score for the GUI's sector summary line.
+    Defensive: missing sector / scoring failure -> safe defaults."""
+    if not sector:
+        return {"wpct": None, "score": 0.0}
+    sd = sector.get("sector_data")
+    quotes = sector.get("quotes")
+    try:
+        wpct, _ = scoring_sector.weighted_sector_pct(sd, quotes)
+    except Exception:  # noqa: BLE001
+        wpct = None
+    try:
+        score = scoring_sector.sectors_score(sd, quotes)
+    except Exception:  # noqa: BLE001
+        score = 0.0
+    return {"wpct": wpct, "score": score}
+
+
 def build_and_write_bridge(snaps, spy, live, sector):
     """Build the bridge payload from cache/state data and write it. Defensive."""
     try:
@@ -255,15 +383,7 @@ def build_and_write_bridge(snaps, spy, live, sector):
         if not latest:
             return
         prior = composite_series(snaps or [])[1]
-        trend = None
-        if spy:
-            tr, committed, _d = commit_trend_regime(spy)
-            trend = {"state": committed, "label": trend_regime.STATE_LABELS[committed],
-                     "description": trend_regime.STATE_DESCRIPTIONS[committed],
-                     "raw_state": tr.state, "spy_close": round(tr.spy_close, 4),
-                     "sma_50": round(tr.sma_50, 4), "sma_200": round(tr.sma_200, 4),
-                     "sma_200_slope_pct": round(tr.sma_200_slope_pct, 4),
-                     "drawdown_pct": round(tr.drawdown_pct, 4), "confidence": round(tr.confidence, 3)}
+        trend = build_trend_dict(spy)
         sec_arg = None
         if sector:
             sec_arg = {"sector_data": sector.get("sector_data"),
