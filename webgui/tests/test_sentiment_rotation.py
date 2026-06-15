@@ -1,4 +1,6 @@
-"""Pure-transform tests for the Sector Rotation page."""
+"""Pure-transform + Tier-3-reader tests for the Sector Rotation page."""
+import inspect
+
 from pages import sentiment_rotation as R
 
 
@@ -27,10 +29,22 @@ def test_quadrant_color():
 
 
 def test_headline_parts():
-    regime, color, text, detail = R.headline_parts(_assessment())
+    regime, color, text, detail = R.headline_parts(_assessment(), 1.5)
     assert regime == "Risk-ON" and color == R.CLR_GREEN
     assert "Cyclicals leading" in text
     assert "spread" in detail and "+2.1" in detail
+    assert "threshold ±1.5" in detail
+
+
+def test_headline_parts_threshold_param_and_default():
+    # Explicit threshold flows through to the detail string.
+    _, _, _, detail = R.headline_parts(_assessment(), 2.0)
+    assert "threshold ±2.0" in detail
+    # None / omitted -> falls back to DEFAULT_RISK_THRESHOLD (no engine import).
+    _, _, _, detail_none = R.headline_parts(_assessment(), None)
+    assert f"threshold ±{R.DEFAULT_RISK_THRESHOLD}" in detail_none
+    _, _, _, detail_default = R.headline_parts(_assessment())
+    assert f"threshold ±{R.DEFAULT_RISK_THRESHOLD}" in detail_default
 
 
 def test_side_rows():
@@ -56,3 +70,32 @@ def test_rrg_scatter_figure_shape():
     assert set(fig["data"][0]["x"]) == {101.5, 98.0}      # rs_ratio
     # crosshair reference lines at 100/100 present as shapes
     assert any(s.get("type") == "line" for s in fig["layout"].get("shapes", []))
+
+
+def test_page_has_no_engine_glue():
+    """Regression: the migrated page must not re-introduce the sentiment-engine
+    imports / sys.path glue (the source of the cross-app ``scoring`` collision)."""
+    src = inspect.getsource(R)
+    assert "sector_rotation_assessment" not in src
+    assert "sectors_ref" not in src
+    assert "rotation_tool" not in src
+    assert "from repo_paths import SENTIMENT" not in src
+    assert "import sys" not in src
+    assert "sys.path" not in src
+    # The page reads the bus instead of holding a compute path.
+    assert "_compute" not in src
+    assert "_sector_weights" not in src
+    assert "_ROTATION_CACHE" not in src
+
+
+def test_render_graceful_empty():
+    """render() must paint a waiting placeholder without crashing when the bus
+    cache is cold (service not running). Mirrors test_sentiment.py: render inside
+    a slot context (a card) to exercise the widget wiring + initial paint."""
+    import bus_client
+    from nicegui import ui
+
+    bus_client.reset()  # fresh empty fakeredis cache (no service writes)
+    assert bus_client.read("sentiment:rotation") is None  # confirm empty
+    with ui.card():
+        R.render()  # must not raise

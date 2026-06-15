@@ -29,9 +29,11 @@ log = logging.getLogger(__name__)
 CACHE_COMPOSITE = "cache:sentiment:composite"
 CACHE_HISTORY = "cache:sentiment:history"
 CACHE_SECTORS = "cache:sentiment:sectors"
+CACHE_ROTATION = "cache:sentiment:rotation"
 
 EVENT_COMPOSITE = "events:sentiment:composite"
 EVENT_SECTORS = "events:sentiment:sectors"
+EVENT_ROTATION = "events:sentiment:rotation"
 
 
 def _sector_industry_etfs(sector_data, sector_name):
@@ -146,7 +148,40 @@ def refresh(bus, with_sectors: bool = False) -> None:
         log.exception("bridge dual-write failed")
 
 
+def refresh_rotation(bus) -> None:
+    """Compute the sector-rotation assessment + S&P weights and cache them.
+
+    Writes ``cache:sentiment:rotation`` ->
+    ``{"assessment", "weights", "risk_threshold", "error"}`` and publishes
+    ``events:sentiment:rotation``. Wrapped defensively: a compute failure caches
+    an error payload (so the GUI shows a message) rather than crashing."""
+    try:
+        a, err = compute.rotation_assessment()
+    except Exception as exc:  # noqa: BLE001 — surface as a cached error, don't crash.
+        log.exception("rotation assessment failed")
+        a, err = None, f"Rotation compute failed: {exc}"
+    try:
+        weights = compute.rotation_weights() or {}
+    except Exception:  # noqa: BLE001 — weights are non-essential; degrade to {}.
+        log.exception("rotation weights failed")
+        weights = {}
+    try:
+        risk_threshold = compute.rotation_risk_threshold()
+    except Exception:  # noqa: BLE001
+        risk_threshold = None
+    version = bus.cache_set(CACHE_ROTATION, {
+        "assessment": a,
+        "weights": weights,
+        "risk_threshold": risk_threshold,
+        "error": err,
+    })
+    bus.publish(EVENT_ROTATION, {"version": version})
+
+
 def handle_command(bus, command) -> None:
-    """Dispatch a ``cmd:sentiment`` command. ``refresh`` → full refresh; else no-op."""
+    """Dispatch a ``cmd:sentiment`` command. ``refresh`` → full refresh,
+    ``refresh_rotation`` → rotation-only refresh; else no-op."""
     if command.type == "refresh":
         refresh(bus, with_sectors=True)
+    elif command.type == "refresh_rotation":
+        refresh_rotation(bus)

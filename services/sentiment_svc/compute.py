@@ -374,6 +374,43 @@ def derive_sector_summary(sector):
     return {"wpct": wpct, "score": score}
 
 
+def rotation_assessment():
+    """Off-thread: RRG-vs-SPY sector-rotation assessment via the copied engine.
+
+    Ported verbatim from the page's former ``_compute()``. Returns
+    ``(assessment|None, error_str|None)``. ``sector_rotation_assessment`` is
+    imported lazily here (it does heavy frame work) — in the sentiment service
+    process ``import scoring`` already resolves to sentiment's package, so this
+    carries no cross-app-collision risk."""
+    import sector_rotation_assessment as rotation_tool
+    from datetime import date
+    symbols = [rotation_tool.BENCHMARK] + list(rotation_tool.SECTOR_ETFS)
+    frame, _missing = rotation_tool.build_aligned_frame(symbols)
+    if frame is None:
+        return None, "No data from proxy (is schwab-proxy running?)"
+    a = rotation_tool.build_assessment(frame, date.today().isoformat())
+    if a is None or not a.get("sectors"):
+        return None, (f"Insufficient daily history (need {rotation_tool.MIN_BARS} "
+                      f"aligned bars).")
+    return a, None
+
+
+def rotation_weights():
+    """``{etf: sp_weight}`` for sector rows — ported from the page's
+    ``_sector_weights()`` (reuses the module's ``sectors_ref`` import)."""
+    import sectors_ref
+    return {r["etf"]: r.get("sp_weight", 0.0)
+            for r in sectors_ref.load_sectors_data()
+            if r.get("kind") == "sector" and r.get("etf")}
+
+
+def rotation_risk_threshold():
+    """The engine's ``RISK_THRESHOLD`` so the GUI can render the headline
+    detail without importing the engine."""
+    import sector_rotation_assessment as rotation_tool
+    return rotation_tool.RISK_THRESHOLD
+
+
 def build_and_write_bridge(snaps, spy, live, sector):
     """Build the bridge payload from cache/state data and write it. Defensive."""
     try:

@@ -1,24 +1,32 @@
 """Sector Rotation page — RRG-vs-SPY assessment (under Sentiment).
 
-Thin NiceGUI layer over the copied ``sector_rotation_assessment`` engine.
-Pure builders here are unit-tested; ``render()`` (Task 2) wires widgets.
-Data is fairly static: cached module-level, manual Refresh only.
+Tier-3 reader: this page holds **no engine calls and no app ``scoring`` import**.
+The assessment, S&P weights and risk threshold are computed in
+``services/sentiment_svc`` (the only process where ``import scoring`` resolves to
+sentiment's package rather than the options-scanner ``scoring.py`` — the
+documented cross-app collision). The service caches them; this page only
+**formats** them. Cache view read:
+
+* ``sentiment:rotation`` → ``{"assessment", "weights", "risk_threshold", "error"}``
+  (see ``services/sentiment_svc/handlers.refresh_rotation``).
+
+Pure builders (``quadrant_color``, ``headline_parts``, ``side_rows``,
+``rotation_rows``, ``rrg_scatter_figure``) are unit-tested. ``render()`` wires
+widgets, a Refresh button that enqueues a ``cmd:sentiment`` ``refresh_rotation``
+command, and a fetch-free version-poll ``ui.timer`` that repaints when the bus
+cache version changes.
 """
-import sys
-
-from repo_paths import SENTIMENT
-
-if str(SENTIMENT) not in sys.path:
-    sys.path.insert(0, str(SENTIMENT))
-
-import sector_rotation_assessment as rotation_tool  # noqa: E402
-from pages.ui_guard import guard_async  # noqa: E402
+import bus_client
+from pages.ui_guard import guard, guard_async  # noqa: F401
 
 CLR_GREEN = "#66bb6a"
 CLR_RED = "#ef5350"
 CLR_YELLOW = "#ffd54f"
 CLR_CYAN = "#3fb6c7"
 CLR_FLAT = "#9e9e9e"
+
+# Fallback when the service-supplied risk threshold is absent (cold cache).
+DEFAULT_RISK_THRESHOLD = 1.5
 
 _QUAD_COLOR = {"Leading": CLR_GREEN, "Improving": CLR_CYAN,
                "Weakening": CLR_YELLOW, "Lagging": CLR_RED}
@@ -32,16 +40,21 @@ def _regime_color(regime):
     return {"Risk-ON": CLR_GREEN, "Risk-OFF": CLR_RED}.get(regime, CLR_YELLOW)
 
 
-def headline_parts(a):
-    """(regime, color, text, detail) from an assessment dict."""
+def headline_parts(a, risk_threshold=DEFAULT_RISK_THRESHOLD):
+    """(regime, color, text, detail) from an assessment dict.
+
+    ``risk_threshold`` arrives from the service-cached value (the engine's
+    ``RISK_THRESHOLD``); it falls back to ``DEFAULT_RISK_THRESHOLD`` so the page
+    never needs to import the engine."""
     h = a.get("headline") or {}
     regime = h.get("regime", "—")
     text = h.get("text", "")
     spread = h.get("spread")
+    rt = risk_threshold if risk_threshold is not None else DEFAULT_RISK_THRESHOLD
     if spread is not None:
         detail = (f"cyclical RS-Mom {h.get('cyclical_mom_mean', 0):.2f} vs "
                   f"defensive {h.get('defensive_mom_mean', 0):.2f} "
-                  f"(spread {spread:+.1f}; threshold ±{rotation_tool.RISK_THRESHOLD})")
+                  f"(spread {spread:+.1f}; threshold ±{rt})")
     else:
         detail = ""
     return regime, _regime_color(regime), text, detail
@@ -101,46 +114,18 @@ def rrg_scatter_figure(a):
     }
 
 
-import datetime as _dt
-
-# Static-ish data: cache the assessment; recompute only on manual Refresh.
-_ROTATION_CACHE = {"assessment": None, "at": None}
-
-
-def _compute():
-    """Off-thread: fetch aligned frame via the engine + build the assessment.
-    Returns (assessment|None, error_str|None)."""
-    symbols = [rotation_tool.BENCHMARK] + list(rotation_tool.SECTOR_ETFS)
-    frame, missing = rotation_tool.build_aligned_frame(symbols)
-    if frame is None:
-        return None, "No data from proxy (is schwab-proxy running?)"
-    a = rotation_tool.build_assessment(frame, _dt.date.today().isoformat())
-    if a is None or not a.get("sectors"):
-        return None, (f"Insufficient daily history (need {rotation_tool.MIN_BARS} "
-                      f"aligned bars).")
-    return a, None
-
-
-def _sector_weights():
-    import sectors_ref
-    return {r["etf"]: r.get("sp_weight", 0.0)
-            for r in sectors_ref.load_sectors_data()
-            if r.get("kind") == "sector" and r.get("etf")}
-
-
 def render():
-    import nicegui.run as ng_run
     from nicegui import ui
 
-    weights = _sector_weights()
+    state = {"ver": None}
 
     with ui.row().classes("items-center gap-3 w-full"):
         ui.label("Sector Rotation").classes("text-h6")
         ui.label("RRG vs SPY").classes("opacity-60 text-sm")
         as_of = ui.label("").classes("opacity-70 text-sm")
         ui.space()
-        spinner = ui.spinner(size="sm"); spinner.visible = False
-        ui.button("Refresh", icon="refresh", on_click=lambda: load(force=True)).props("flat dense")
+        ui.button("Refresh", icon="refresh",
+                  on_click=lambda: _request_refresh()).props("flat dense")
 
     headline_lbl = ui.label("").classes("text-subtitle1 text-bold")
     detail_lbl = ui.label("").classes("opacity-70 text-sm")
@@ -161,8 +146,8 @@ def render():
              ("rs_momentum", "RS-Mom", 90), ("quadrant", "Quadrant", 110),
              ("direction", "Dir", 60)]
 
-    def _render(a):
-        regime, color, text, detail = headline_parts(a)
+    def _render(a, weights, risk_threshold):
+        regime, color, text, detail = headline_parts(a, risk_threshold)
         as_of.text = f"as of {a.get('date')}"
         headline_lbl.text = f"{regime} — {text}"
         headline_lbl.style(f"color:{color}")
@@ -198,31 +183,40 @@ def render():
         with rrg_box:
             ui.plotly(rrg_scatter_figure(a)).classes("w-full")
 
-    def _paint_cached():
-        a = _ROTATION_CACHE["assessment"]
+    @guard
+    def _apply():
+        rot = bus_client.read("sentiment:rotation") or {}
+        a = rot.get("assessment")
+        weights = rot.get("weights") or {}
+        rt = rot.get("risk_threshold")
+        err = rot.get("error")
         if a:
-            _render(a)
-            return True
-        return False
+            _render(a, weights, rt)
+        elif err:
+            as_of.text = ""
+            headline_lbl.text = ""
+            detail_lbl.text = ""
+            msg_lbl.text = err
+        else:
+            as_of.text = ""
+            headline_lbl.text = "Waiting for sentiment service…"
+            detail_lbl.text = ""
+            msg_lbl.text = ""
 
-    @guard_async
-    async def load(force=False):
-        if not force and _paint_cached():
+    @guard
+    def _request_refresh():
+        bus_client.request("sentiment", {"type": "refresh_rotation"})
+        ui.notify("Refresh requested")
+
+    @guard
+    def _maybe_repaint():
+        # Fetch-free: repaint only when the bus cache version changes.
+        ver = bus_client.read_version("sentiment:rotation")
+        if ver == state["ver"]:
             return
-        spinner.visible = True
-        try:
-            a, err = await ng_run.io_bound(_compute)
-            if a:
-                _ROTATION_CACHE["assessment"] = a
-                _ROTATION_CACHE["at"] = _dt.datetime.now()
-                _render(a)
-            else:
-                msg_lbl.text = err or "No rotation data."
-        except Exception as e:  # noqa: BLE001
-            ui.notify(f"Rotation load failed: {e}", type="negative")
-        finally:
-            spinner.visible = False
+        state["ver"] = ver
+        _apply()
 
-    # Paint cache instantly if present; otherwise compute once (no auto-refresh).
-    if not _paint_cached():
-        ui.timer(0.1, lambda: load(force=True), once=True)
+    state["ver"] = bus_client.read_version("sentiment:rotation")
+    _apply()
+    ui.timer(2.0, _maybe_repaint)

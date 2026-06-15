@@ -262,3 +262,86 @@ def test_handle_command_refresh_triggers_full_refresh(monkeypatch):
 
     handlers.handle_command(bus, Command(type="bogus"))
     assert seen["calls"] == [True]  # unknown type -> no-op
+
+
+# --- rotation refresh ---------------------------------------------------------
+
+def _rotation_assessment():
+    return {
+        "date": "2026-06-15",
+        "headline": {"regime": "Risk-ON", "text": "Cyclicals leading",
+                     "spread": 2.1, "cyclical_mom_mean": 101.2,
+                     "defensive_mom_mean": 99.1},
+        "sectors": [{"name": "Technology", "etf": "XLK", "rs_ratio": 101.5,
+                     "rs_momentum": 102.0, "quadrant": "Leading",
+                     "direction": "INTO"}],
+        "rotating_from": [], "rotating_into": [],
+    }
+
+
+def test_refresh_rotation_caches_and_publishes(monkeypatch):
+    bus = Bus(fake=True)
+    a = _rotation_assessment()
+    weights = {"XLK": 32.5, "XLU": 2.1}
+    monkeypatch.setattr(handlers.compute, "rotation_assessment",
+                        lambda: (a, None))
+    monkeypatch.setattr(handlers.compute, "rotation_weights", lambda: weights)
+    monkeypatch.setattr(handlers.compute, "rotation_risk_threshold", lambda: 1.5)
+
+    sub = bus.subscribe("events:sentiment:rotation")
+    handlers.refresh_rotation(bus)
+    msg = sub.get_message(timeout=1.0)
+    sub.close()
+
+    rot = bus.cache_get("cache:sentiment:rotation")
+    assert rot is not None
+    assert rot.payload["assessment"] == a
+    assert rot.payload["weights"] == weights
+    assert rot.payload["risk_threshold"] == 1.5
+    assert rot.payload["error"] is None
+    assert msg is not None and "version" in msg
+
+
+def test_refresh_rotation_caches_error(monkeypatch):
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "rotation_assessment",
+                        lambda: (None, "No data from proxy (is schwab-proxy running?)"))
+    monkeypatch.setattr(handlers.compute, "rotation_weights", lambda: {})
+    monkeypatch.setattr(handlers.compute, "rotation_risk_threshold", lambda: 1.5)
+
+    handlers.refresh_rotation(bus)  # must not raise
+
+    rot = bus.cache_get("cache:sentiment:rotation")
+    assert rot is not None
+    assert rot.payload["assessment"] is None
+    assert rot.payload["error"] == "No data from proxy (is schwab-proxy running?)"
+    assert rot.payload["weights"] == {}
+
+
+def test_refresh_rotation_survives_compute_exception(monkeypatch):
+    bus = Bus(fake=True)
+
+    def _boom():
+        raise RuntimeError("engine exploded")
+
+    monkeypatch.setattr(handlers.compute, "rotation_assessment", _boom)
+    monkeypatch.setattr(handlers.compute, "rotation_weights", lambda: {})
+    monkeypatch.setattr(handlers.compute, "rotation_risk_threshold", lambda: 1.5)
+
+    handlers.refresh_rotation(bus)  # must not raise
+
+    rot = bus.cache_get("cache:sentiment:rotation")
+    assert rot is not None
+    assert rot.payload["assessment"] is None
+    assert "engine exploded" in (rot.payload["error"] or "")
+
+
+def test_handle_command_refresh_rotation(monkeypatch):
+    bus = Bus(fake=True)
+    seen = {"rot": 0}
+    monkeypatch.setattr(handlers, "refresh_rotation",
+                        lambda b: seen.__setitem__("rot", seen["rot"] + 1))
+    monkeypatch.setattr(handlers, "refresh", lambda *a, **k: None)
+
+    handlers.handle_command(bus, Command(type="refresh_rotation"))
+    assert seen["rot"] == 1

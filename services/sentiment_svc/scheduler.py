@@ -21,6 +21,13 @@ async def loop(bus):
     """
     loop_ = asyncio.get_event_loop()
     await loop_.run_in_executor(None, handlers.refresh, bus, True)
+    # One-shot rotation refresh at startup so the (manual-refresh-only) Sector
+    # Rotation page has data on first load. Guarded so a failure can't kill the
+    # loop; NOT polled (rotation is static-ish).
+    try:
+        await loop_.run_in_executor(None, handlers.refresh_rotation, bus)
+    except Exception:  # noqa: BLE001
+        pass
     while True:
         await asyncio.sleep(REFRESH_INTERVAL_SEC)
         await loop_.run_in_executor(None, handlers.refresh, bus, False)
