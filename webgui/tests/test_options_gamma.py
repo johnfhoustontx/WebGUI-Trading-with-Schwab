@@ -25,6 +25,19 @@ def test_bar_figure_is_plotly_dict():
     assert "data" in fig and "layout" in fig
 
 
+def test_bar_figure_yaxis_hugs_visible_bars_and_is_tall():
+    # spot*0.95..1.05 would be 427.5..472.5; visible bars only span 448..452
+    fig = gamma.bar_figure(GEX, 450.0, view="GEX", pct=0.02)
+    lo, hi = fig["layout"]["yaxis"]["range"]
+    assert lo > 440.0 and hi < 460.0          # tight to the bars, not spot*0.95/1.05
+    assert lo <= 448.0 and hi >= 452.0        # outermost bars not clipped
+    assert fig["layout"]["height"] >= 600     # fills the lower screen
+
+
+def test_bar_yrange_empty_falls_back_to_spot_band():
+    assert gamma.bar_yrange([], 450.0) == [450.0 * 0.98, 450.0 * 1.02]
+
+
 def test_heatmap_matrix_from_history():
     rows = [("09:30", 450, None, None, None, 0, {448.0: 5, 450.0: -3}),
             ("09:35", 450, None, None, None, 0, {448.0: 7, 450.0: -1})]
@@ -36,6 +49,17 @@ def test_heatmap_matrix_from_history():
 
 def test_heatmap_matrix_empty():
     assert gamma.heatmap_matrix([])["z"] == []
+
+
+def test_heatmap_matrix_extracts_net_from_cell_dicts():
+    # gex_history grids map strike -> {call, put, net}; z must be the net number.
+    rows = [("09:30", 450, None, None, None, 0,
+             {740.0: {"call": 1, "put": -3, "net": -2},
+              9999.0: {"call": 0, "put": 0, "net": 0}})]
+    m = gamma.heatmap_matrix(rows)
+    assert 740.0 in m["y"]
+    assert 9999.0 not in m["y"]          # all-zero-net strike filtered out
+    assert m["z"][0][0] == -2            # net extracted, not the dict
 
 
 def test_heatmap_matrix_formats_epoch_ts():

@@ -47,7 +47,21 @@ def _hline(value, color, dash=None):
             "yref": "y", "y0": value, "y1": value, "line": line}
 
 
-def bar_figure(data, spot, view="GEX", walls=None, flip=None, pct=0.02):
+def bar_yrange(strikes, spot, pad_frac=0.04):
+    """Y-axis [lo, hi] tight to the strikes that actually have bars.
+
+    Pads the strike span by ``pad_frac`` so the outermost bars aren't clipped.
+    Falls back to a narrow band around spot when there are no bars.
+    """
+    if not strikes:
+        return [spot * 0.98, spot * 1.02]
+    lo, hi = min(strikes), max(strikes)
+    span = hi - lo
+    pad = span * pad_frac if span else max(spot * 0.002, 1.0)
+    return [lo - pad, hi + pad]
+
+
+def bar_figure(data, spot, view="GEX", walls=None, flip=None, pct=0.02, height=680):
     """Plotly horizontal-bar figure dict for one view."""
     b = bars_from_gex(data, spot, pct)
     shapes = [_hline(spot, SPOT_COLOR)]
@@ -65,10 +79,13 @@ def bar_figure(data, spot, view="GEX", walls=None, flip=None, pct=0.02):
         "layout": {
             "title": f"{view} by strike",
             "xaxis": {"title": view, "zeroline": True},
-            "yaxis": {"title": "Strike", "range": [spot * 0.95, spot * 1.05]},
+            "yaxis": {"title": "Strike", "range": bar_yrange(b["strikes"], spot),
+                      "autorange": False},
             "shapes": shapes,
             "margin": {"l": 60, "r": 20, "t": 40, "b": 40},
             "showlegend": False,
+            "height": height,
+            "autosize": True,
         },
     }
 
@@ -81,22 +98,31 @@ def _fmt_ts(value):
     return str(value)
 
 
+def _cell_net(cell):
+    """Net value from a grid cell — handles both {call,put,net} dicts and bare numbers."""
+    if isinstance(cell, dict):
+        return cell.get("net")
+    return cell
+
+
 def heatmap_matrix(rows):
-    """(x=times, y=strikes, z=[y][x]) from gex_history rows.
+    """(x=times, y=strikes, z=[y][x]) of net exposure from gex_history rows.
 
     Each row is (ts, spot, flip, top_pos, top_neg, net_total, grid_dict) where
-    grid_dict maps strike->value.
+    grid_dict maps strike -> {call, put, net} (or a bare net number). Strikes
+    whose net is zero across every snapshot are dropped (keeps the heatmap on the
+    active strikes near spot instead of the full 3000–9800 chain).
     """
     if not rows:
         return {"x": [], "y": [], "z": []}
     x = [_fmt_ts(r[0]) for r in rows]
     grids = [r[6] or {} for r in rows]
-    strikes = sorted({s for g in grids for s in g})
-    z = [[g.get(s) for g in grids] for s in strikes]
+    strikes = sorted({s for g in grids for s, cell in g.items() if _cell_net(cell)})
+    z = [[_cell_net(g.get(s) or {}) for g in grids] for s in strikes]
     return {"x": x, "y": strikes, "z": z}
 
 
-def heatmap_figure(rows, view="GEX"):
+def heatmap_figure(rows, view="GEX", height=680):
     m = heatmap_matrix(rows)
     return {
         "data": [{
@@ -107,6 +133,7 @@ def heatmap_figure(rows, view="GEX"):
             "title": f"{view} intraday (strike × time)",
             "xaxis": {"title": "Time"}, "yaxis": {"title": "Strike"},
             "margin": {"l": 60, "r": 20, "t": 40, "b": 40},
+            "height": height, "autosize": True,
         },
     }
 
@@ -163,7 +190,8 @@ def term_heatmap(term_grid):
                   "colorscale": "RdYlGn", "zmid": 0}],
         "layout": {"title": "Term structure (net GEX by expiry × strike)",
                    "xaxis": {"title": "Expiration"}, "yaxis": {"title": "Strike"},
-                   "margin": {"l": 60, "r": 20, "t": 40, "b": 60}},
+                   "margin": {"l": 60, "r": 20, "t": 40, "b": 60},
+                   "height": 680, "autosize": True},
     }
 
 
