@@ -22,6 +22,22 @@ EVENT_SCAN = "events:options:scan"
 CACHE_HEADER = "cache:options:header"
 EVENT_HEADER = "events:options:header"
 
+CACHE_SWING = "cache:options:swing"
+EVENT_SWING = "events:options:swing"
+
+# Defaults mirror the page's input defaults (symbol SPY, 5-30 DTE, the put/call
+# delta gates, min credit 10% -> 0.10 fraction). The page sends the fraction.
+_SWING_DEFAULTS = {
+    "symbol": "SPY",
+    "dte_min": 5,
+    "dte_max": 30,
+    "put_d_min": -0.20,
+    "put_d_max": -0.10,
+    "call_d_min": 0.10,
+    "call_d_max": 0.20,
+    "min_cr_fraction": 0.10,
+}
+
 # The six fields ScanResult validates — we project the engine dict onto exactly
 # these (dropping the extra keys the GUI ignores). ``.get`` with a default of
 # the field's container type keeps missing optional keys from crashing, while
@@ -63,7 +79,29 @@ def refresh_header(bus) -> None:
     bus.publish(EVENT_HEADER, {"version": version})
 
 
+def swing_scan(bus, args: dict) -> None:
+    """Run a user-parameterized swing scan, cache the result, publish an event.
+
+    On-demand only (not scheduled): the GUI Swing page enqueues a ``swing_scan``
+    command with the user's inputs in ``args``; we extract them (falling back to
+    the page-default for any missing key), call ``compute.swing_scan`` with the
+    raw client objects, and cache the signal list (plus the symbol + original
+    args, for the page to display/debug) under ``cache:options:swing``.
+
+    No ScanResult gate: this is a flat signal list (not the dual-list scan
+    contract), and the page reads ``payload["signals"]`` directly."""
+    args = args or {}
+    params = {k: args.get(k, default) for k, default in _SWING_DEFAULTS.items()}
+    signals = compute.swing_scan(**params)
+    payload = {"signals": signals, "symbol": params["symbol"], "params": args}
+    version = bus.cache_set(CACHE_SWING, payload)
+    bus.publish(EVENT_SWING, {"version": version})
+
+
 def handle_command(bus, command) -> None:
-    """Dispatch a ``cmd:options`` command. ``rescan`` → full rescan; else no-op."""
+    """Dispatch a ``cmd:options`` command. ``rescan`` → full rescan;
+    ``swing_scan`` → on-demand parameterized swing scan; else no-op."""
     if command.type == "rescan":
         rescan(bus)
+    elif command.type == "swing_scan":
+        swing_scan(bus, command.args)

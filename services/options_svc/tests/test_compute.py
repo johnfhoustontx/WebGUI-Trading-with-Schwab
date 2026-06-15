@@ -33,6 +33,70 @@ def test_compute_no_scoring_guard():
     assert not hasattr(compute, "options_scoring")
 
 
+# ── Swing scan (moved from webgui/pages/options/swing.py) ────────────────────
+def test_assign_ids_adds_unique_ids():
+    out = compute.assign_ids([{"symbol": "MU"}, {"symbol": "MU"}], "MU")
+    ids = [s["id"] for s in out]
+    assert len(set(ids)) == 2
+    assert all(i.startswith("MU") for i in ids)
+
+
+def test_assign_ids_preserves_existing():
+    assert compute.assign_ids([{"symbol": "MU", "id": "keep"}], "MU")[0]["id"] == "keep"
+
+
+def test_swing_scan_pipeline_wiring(monkeypatch):
+    """The swing pipeline calls each engine step with the right clients/args and
+    scores directly (no ``options_scoring`` guard)."""
+    calls = {}
+
+    chain = {"underlyingPrice": 540.0}
+    monkeypatch.setattr(compute.se, "fetch_option_chain",
+                        lambda client, symbol, from_date=None, to_date=None: (
+                            calls.__setitem__("chain_client", client), chain)[1])
+    monkeypatch.setattr(compute._proxy.schwab_client, "get_quote",
+                        lambda symbol: (calls.__setitem__("quote_symbol", symbol),
+                                        {"last": 541.0})[1])
+    monkeypatch.setattr(compute.se, "fetch_price_history",
+                        lambda client, symbol: {"hist": True})
+    monkeypatch.setattr(compute.se, "calc_technicals", lambda hist: {"rsi": 50})
+    monkeypatch.setattr(compute, "run_iv_analysis",
+                        lambda client, symbol, price=None, hist=None, chain=None: (
+                            calls.__setitem__("iv_price", price),
+                            {"expected_moves": {"daily": {"move_dollars": 3.2}}})[1])
+
+    def _screen(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
+                call_d_min, call_d_max, min_cr, kind, spot=None, daily_expected_move=None):
+        calls["screen"] = dict(min_cr=min_cr, kind=kind, spot=spot,
+                               dem=daily_expected_move)
+        return [{"symbol": symbol, "type": "PCS", "short_strike": 530}]
+
+    monkeypatch.setattr(compute.se, "screen_spreads", _screen)
+    monkeypatch.setattr(compute.se, "build_iron_condors", lambda spreads: [])
+
+    # ``scoring`` is imported lazily inside swing_scan; patch the module object in
+    # sys.modules so the in-function ``import scoring`` resolves to this fake (no
+    # collision-guard ceremony — the service binds options-scanner's scoring).
+    import sys as _sys
+    import types as _types
+    fake_scoring = _types.SimpleNamespace(
+        score_all_signals=lambda signals, ivs, techs: calls.__setitem__("scored", True))
+    monkeypatch.setitem(_sys.modules, "scoring", fake_scoring)
+
+    out = compute.swing_scan("SPY", 5, 30, -0.20, -0.10, 0.10, 0.20, 0.10)
+
+    assert calls["chain_client"] is compute._proxy.schwab_py_client
+    assert calls["quote_symbol"] == "SPY"
+    assert calls["iv_price"] == 541.0          # quote.last wins over chain price
+    assert calls["screen"]["min_cr"] == 0.10   # passed as a fraction, not %
+    assert calls["screen"]["kind"] == "SWING"
+    assert calls["screen"]["spot"] == 541.0
+    assert calls["screen"]["dem"] == 3.2
+    assert calls["scored"] is True
+    # assign_ids ran -> signal has a unique id.
+    assert out and out[0]["id"].startswith("SPY")
+
+
 # ── Header helpers (moved from webgui/tests/test_options_header.py) ──────────
 def test_sentiment_dot_no_data_when_inactive():
     assert compute.sentiment_dot({"active": False})[1] == "No data"

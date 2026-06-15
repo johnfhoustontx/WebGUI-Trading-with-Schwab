@@ -21,8 +21,10 @@ from repo_paths import OPTIONS_SCANNER
 if str(OPTIONS_SCANNER) not in sys.path:
     sys.path.insert(0, str(OPTIONS_SCANNER))
 
+import scanner_engine as se  # noqa: E402
 from scanner_engine import run_full_scan, vix_regime  # noqa: E402
 from regime_filter import evaluate_regime  # noqa: E402
+from iv_analysis import run_iv_analysis  # noqa: E402
 
 from services import _proxy  # noqa: E402
 
@@ -35,6 +37,68 @@ def run_scan() -> dict:
     propagate — the handler catches it (matching the sentiment compute, whose
     loaders likewise let the handler own error handling)."""
     return run_full_scan(_proxy.schwab_py_client)
+
+
+# ── Swing scan (ported from webgui/pages/options/swing.py `_swing_scan`) ─────
+# A user-parameterized on-demand credit-spread scan. The pipeline is ported
+# VERBATIM from the page (same engine calls, same arg order, same two-client
+# usage). ``min_cr_fraction`` arrives already converted percent→fraction by the
+# page (``pct_to_fraction``); the service is given the fraction directly.
+
+
+def assign_ids(signals, symbol):
+    """Ensure each signal has a unique ``id`` (for detail lookup). Pure."""
+    for i, s in enumerate(signals or []):
+        if not s.get("id"):
+            s["id"] = f"{symbol}_{i}_{s.get('type','')}_{s.get('short_strike','')}"
+    return signals
+
+
+def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
+               call_d_min, call_d_max, min_cr_fraction) -> list:
+    """Run the swing scan pipeline; returns scored signals (list of dicts).
+
+    Two-client usage mirrors the page exactly: ``_proxy.schwab_py_client`` is the
+    schwab-py-compatible client passed into the engine calls, while
+    ``_proxy.schwab_client.get_quote(symbol)`` (SchwabClient-compatible) fetches
+    the quote. ``min_cr_fraction`` is already a fraction.
+
+    The page wrapped ``scoring.score_all_signals`` in an ``options_scoring()``
+    collision guard because the GUI process also loads the sentiment ``scoring``
+    package. This service process loads NO sentiment code, so ``import scoring``
+    binds options-scanner's ``scoring.py`` unambiguously — the guard is
+    intentionally NOT ported and ``score_all_signals`` is called directly.
+
+    ``scoring`` is imported lazily here (not at module top) to avoid binding the
+    process-wide ``sys.modules['scoring']`` to options-scanner's module merely by
+    importing this module — that matters only for the *combined* test run where
+    all services share one process and the sentiment service also imports its own
+    ``scoring`` package. In the real (process-isolated) service, the lazy import
+    still resolves to options-scanner's ``scoring.py``. Mirrors ``run_full_scan``,
+    which likewise imports ``scoring`` lazily.
+    """
+    import datetime as dt
+
+    import scoring
+
+    client = _proxy.schwab_py_client
+
+    today = dt.date.today()
+    chain = se.fetch_option_chain(client, symbol, from_date=today,
+                                  to_date=today + dt.timedelta(days=dte_max + 2))
+    quote = _proxy.schwab_client.get_quote(symbol) or {}
+    spot = quote.get("last") or chain.get("underlyingPrice")
+    hist = se.fetch_price_history(client, symbol)
+    tech = se.calc_technicals(hist) if hist is not None else {}
+    iv = run_iv_analysis(client, symbol, price=spot, hist=hist, chain=chain) or {}
+    dem = ((iv.get("expected_moves") or {}).get("daily") or {}).get("move_dollars")
+
+    spreads = se.screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
+                                call_d_min, call_d_max, min_cr_fraction, "SWING",
+                                spot=spot, daily_expected_move=dem)
+    signals = list(spreads) + list(se.build_iron_condors(spreads))
+    scoring.score_all_signals(signals, {symbol: iv}, {symbol: tech})
+    return assign_ids(signals, symbol)
 
 
 # ── Header strip (ported from webgui/pages/options/header.py) ───────────────

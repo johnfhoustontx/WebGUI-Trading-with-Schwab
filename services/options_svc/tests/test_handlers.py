@@ -106,3 +106,66 @@ def test_handle_command_rescan(monkeypatch):
 
     handlers.handle_command(bus, Command(type="bogus"))
     assert seen["calls"] == 1  # unknown type -> no-op
+
+
+# ── Swing scan (on-demand) ───────────────────────────────────────────────────
+def _fake_swing_signals():
+    return [
+        {"id": "SPY_0_PCS_530", "symbol": "SPY", "type": "PCS", "composite_score": 8.4},
+        {"id": "SPY_1_CCS_560", "symbol": "SPY", "type": "CCS", "composite_score": 7.1},
+    ]
+
+
+def test_swing_scan_command(monkeypatch):
+    bus = Bus(fake=True)
+    signals = _fake_swing_signals()
+    seen = {"params": None}
+
+    def _rec(**params):
+        seen["params"] = params
+        return signals
+
+    monkeypatch.setattr(handlers.compute, "swing_scan", _rec)
+
+    args = {
+        "symbol": "SPY", "dte_min": 5, "dte_max": 30,
+        "put_d_min": -0.20, "put_d_max": -0.10,
+        "call_d_min": 0.10, "call_d_max": 0.20,
+        "min_cr_fraction": 0.10,
+    }
+    sub = bus.subscribe("events:options:swing")
+    handlers.handle_command(bus, Command(type="swing_scan", args=args))
+    msg = sub.get_message(timeout=1.0)
+    sub.close()
+
+    # compute called with the args from the command (already a fraction).
+    assert seen["params"] == args
+
+    env = bus.cache_get("cache:options:swing")
+    assert env is not None
+    payload = env.payload
+    assert payload["signals"] == signals
+    assert payload["symbol"] == "SPY"
+    assert payload["params"] == args
+    # Event published with the cache_set version.
+    assert msg is not None and msg.get("version") == env.version
+
+
+def test_swing_scan_uses_defaults_for_missing_args(monkeypatch):
+    bus = Bus(fake=True)
+    seen = {"params": None}
+
+    def _rec(**params):
+        seen["params"] = params
+        return []
+
+    monkeypatch.setattr(handlers.compute, "swing_scan", _rec)
+
+    # Only a symbol given -> the rest fall back to page-default params.
+    handlers.swing_scan(bus, {"symbol": "QQQ"})
+    assert seen["params"]["symbol"] == "QQQ"
+    assert seen["params"]["dte_min"] == 5
+    assert seen["params"]["min_cr_fraction"] == 0.10
+    # Even with no signals, the (empty) result is cached + published.
+    env = bus.cache_get("cache:options:swing")
+    assert env is not None and env.payload["signals"] == []
