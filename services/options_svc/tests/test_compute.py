@@ -31,3 +31,94 @@ def test_run_scan_calls_engine(monkeypatch):
 def test_compute_no_scoring_guard():
     # The options_scoring() collision guard must NOT be ported here.
     assert not hasattr(compute, "options_scoring")
+
+
+# ── Header helpers (moved from webgui/tests/test_options_header.py) ──────────
+def test_sentiment_dot_no_data_when_inactive():
+    assert compute.sentiment_dot({"active": False})[1] == "No data"
+    assert compute.sentiment_dot(None)[1] == "No data"
+
+
+def test_sentiment_dot_bullish_when_ccs_blocked():
+    assert compute.sentiment_dot(
+        {"active": True, "allow_ccs": False, "allow_pcs": True})[1] == "Bullish"
+
+
+def test_sentiment_dot_bearish_when_pcs_blocked():
+    assert compute.sentiment_dot(
+        {"active": True, "allow_ccs": True, "allow_pcs": False})[1] == "Bearish"
+
+
+def test_sentiment_dot_neutral_when_both_allowed():
+    assert compute.sentiment_dot(
+        {"active": True, "allow_ccs": True, "allow_pcs": True})[1] == "Neutral"
+
+
+def test_quote_last_extracts_last_price():
+    raw = {"SPY": {"quote": {"lastPrice": 742.36}}}
+    assert compute.quote_last(raw, "SPY") == 742.36
+
+
+def test_quote_last_missing_returns_none():
+    assert compute.quote_last({}, "SPY") is None
+    assert compute.quote_last(None, "SPY") is None
+
+
+class _FakeQuotesResp:
+    def __init__(self, data):
+        self._data = data
+
+    def json(self):
+        return self._data
+
+
+def test_refresh_header_shape(monkeypatch):
+    raw = {
+        "$SPX": {"quote": {"lastPrice": 5400.12}},
+        "SPY": {"quote": {"lastPrice": 742.36}},
+        "QQQ": {"quote": {"lastPrice": 480.0}},
+        "$VIX": {"quote": {"lastPrice": 14.2}},
+    }
+    monkeypatch.setattr(compute._proxy.schwab_py_client, "get_quotes",
+                        lambda syms: _FakeQuotesResp(raw))
+    monkeypatch.setattr(compute, "vix_regime",
+                        lambda v: {"label": "Calm", "color": "#1D9E75"})
+    monkeypatch.setattr(compute, "evaluate_regime",
+                        lambda: {"active": True, "allow_ccs": True, "allow_pcs": True})
+
+    out = compute.refresh_header()
+    assert out["prices"] == {"$SPX": 5400.12, "SPY": 742.36, "QQQ": 480.0}
+    assert out["vix"] == 14.2
+    assert out["vix_regime"] == {"label": "Calm", "color": "#1D9E75"}
+    assert out["sentiment"] == {"color": "#EFC347", "label": "Neutral"}  # neutral dot
+
+
+def test_refresh_header_quotes_failure_is_blank(monkeypatch):
+    def _boom(syms):
+        raise RuntimeError("proxy down")
+
+    monkeypatch.setattr(compute._proxy.schwab_py_client, "get_quotes", _boom)
+    monkeypatch.setattr(compute, "evaluate_regime", lambda: None)
+
+    out = compute.refresh_header()
+    assert out["prices"] == {"$SPX": None, "SPY": None, "QQQ": None}
+    assert out["vix"] is None
+    assert out["vix_regime"] == {}
+    # No active regime -> no-data dot.
+    assert out["sentiment"] == {"color": "#666666", "label": "No data"}
+
+
+def test_refresh_header_sentiment_failure_is_no_data(monkeypatch):
+    raw = {"$VIX": {"quote": {"lastPrice": 22.0}}}
+    monkeypatch.setattr(compute._proxy.schwab_py_client, "get_quotes",
+                        lambda syms: _FakeQuotesResp(raw))
+    monkeypatch.setattr(compute, "vix_regime", lambda v: {"label": "Elevated"})
+
+    def _boom():
+        raise RuntimeError("bridge missing")
+
+    monkeypatch.setattr(compute, "evaluate_regime", _boom)
+
+    out = compute.refresh_header()
+    assert out["vix"] == 22.0
+    assert out["sentiment"] == {"color": "#666666", "label": "No data"}

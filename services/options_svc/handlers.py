@@ -19,6 +19,9 @@ from shared.contracts.options import ScanResult
 CACHE_SCAN = "cache:options:scan"
 EVENT_SCAN = "events:options:scan"
 
+CACHE_HEADER = "cache:options:header"
+EVENT_HEADER = "events:options:header"
+
 # The six fields ScanResult validates — we project the engine dict onto exactly
 # these (dropping the extra keys the GUI ignores). ``.get`` with a default of
 # the field's container type keeps missing optional keys from crashing, while
@@ -45,6 +48,19 @@ def rescan(bus) -> None:
     # One cache view holds the whole result (both signal lists + metadata).
     version = bus.cache_set(CACHE_SCAN, scan.model_dump())
     bus.publish(EVENT_SCAN, {"version": version})
+
+
+def refresh_header(bus) -> None:
+    """Compute the compact header view and publish it to the bus.
+
+    No strict contract: the header view is a small, loosely-shaped read-only dict
+    (prices + vix + regime + sentiment dot) that only the header strip consumes,
+    so a Pydantic gate would be ceremony with no payoff (YAGNI). ``refresh_header``
+    is already fully defensive — it never returns a malformed shape — which is the
+    invariant the ScanResult gate exists to enforce for the heavier scan path."""
+    data = compute.refresh_header()
+    version = bus.cache_set(CACHE_HEADER, data)
+    bus.publish(EVENT_HEADER, {"version": version})
 
 
 def handle_command(bus, command) -> None:

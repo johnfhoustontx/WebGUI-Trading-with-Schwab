@@ -70,6 +70,27 @@ def test_rescan_gate_rejects_malformed(monkeypatch):
     assert bus.cache_get("cache:options:scan") is None
 
 
+def test_refresh_header_caches_and_publishes(monkeypatch):
+    bus = Bus(fake=True)
+    view = {
+        "prices": {"$SPX": 5400.0, "SPY": 742.0, "QQQ": 480.0},
+        "vix": 14.2,
+        "vix_regime": {"label": "Calm", "color": "#1D9E75"},
+        "sentiment": {"color": "#EFC347", "label": "Neutral"},
+    }
+    monkeypatch.setattr(handlers.compute, "refresh_header", lambda: view)
+
+    sub = bus.subscribe("events:options:header")
+    handlers.refresh_header(bus)
+    msg = sub.get_message(timeout=1.0)
+    sub.close()
+
+    env = bus.cache_get("cache:options:header")
+    assert env is not None
+    assert env.payload == view
+    assert msg is not None and msg.get("version") == env.version
+
+
 def test_handle_command_rescan(monkeypatch):
     bus = Bus(fake=True)
     seen = {"calls": 0}

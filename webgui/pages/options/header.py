@@ -1,50 +1,20 @@
 """Compact Options header strip: SPX/SPY/QQQ + VIX/regime + sentiment dot.
 
-Cheap data (one quotes call + a file-read for sentiment), refreshed on a timer.
-Not a full scan. Pure helpers (sentiment_dot, quote_last) are unit-tested.
-"""
-import sys
+Tier-3 reader: this strip holds **no proxy/engine call**. The options service
+computes the whole header view (quotes + VIX regime + sentiment dot) each 30 s
+and writes it to the Redis bus under ``cache:options:header``; this strip only
+**reads** that payload and paints it. The pure helpers (``sentiment_dot``,
+``quote_last``, ``vix_regime``) now live in ``services/options_svc/compute.py``.
 
+Cache view read: ``options:header`` → ``{prices:{$SPX,SPY,QQQ}, vix,
+vix_regime:{label,color}, sentiment:{color,label}}``. Graceful-empty: paint
+"—"/blank when the service is cold. A fetch-free version-poll ``ui.timer``
+repaints when the bus cache version changes.
+"""
+import bus_client
 from nicegui import ui
 
-import proxy
-from repo_paths import OPTIONS_SCANNER
-
-if str(OPTIONS_SCANNER) not in sys.path:
-    sys.path.insert(0, str(OPTIONS_SCANNER))
-
-from scanner_engine import vix_regime  # noqa: E402
-from regime_filter import evaluate_regime  # noqa: E402
-from pages.ui_guard import guard  # noqa: E402
-
-SYMBOLS = ["$SPX", "SPY", "QQQ", "$VIX"]
-
-_DOT_NO_DATA = ("#666666", "No data")
-_DOT_BULLISH = ("#1D9E75", "Bullish")
-_DOT_BEARISH = ("#E24B4A", "Bearish")
-_DOT_NEUTRAL = ("#EFC347", "Neutral")
-
-
-def sentiment_dot(regime):
-    """(color, label) for the sentiment indicator from an evaluate_regime() dict."""
-    if not regime or not regime.get("active"):
-        return _DOT_NO_DATA
-    if not regime.get("allow_ccs"):
-        return _DOT_BULLISH      # CCS blocked -> market biased up
-    if not regime.get("allow_pcs"):
-        return _DOT_BEARISH      # PCS blocked -> market biased down
-    return _DOT_NEUTRAL
-
-
-def quote_last(raw, symbol):
-    """Extract lastPrice for a symbol from a proxy /quotes payload; None if absent."""
-    if not isinstance(raw, dict):
-        return None
-    info = raw.get(symbol)
-    if not isinstance(info, dict):
-        return None
-    q = info.get("quote", info.get("reference", info))
-    return q.get("lastPrice") if isinstance(q, dict) else None
+from pages.ui_guard import guard
 
 
 def _fmt_price(v):
@@ -52,7 +22,8 @@ def _fmt_price(v):
 
 
 def render():
-    """Build the header strip; returns a refresh() the caller can also timer."""
+    """Build the header strip; returns a repaint() callable (call contract kept
+    for callers like scanner.py/swing.py, which currently ignore it)."""
     with ui.row().classes("items-center gap-4 w-full q-pa-sm rounded bg-grey-9"):
         price_lbls = {s: ui.label(f"{s} —") for s in ("$SPX", "SPY", "QQQ")}
         vix_lbl = ui.label("VIX —").classes("font-bold")
@@ -61,28 +32,36 @@ def render():
         dot = ui.icon("circle").classes("text-xs")
         sent_lbl = ui.label("").classes("text-sm")
 
-    @guard
-    def refresh():
-        try:
-            raw = proxy.schwab_py_client.get_quotes(SYMBOLS).json() or {}
-        except Exception:
-            raw = {}
-        for s in ("$SPX", "SPY", "QQQ"):
-            price_lbls[s].text = f"{s} {_fmt_price(quote_last(raw, s))}"
-        vix = quote_last(raw, "$VIX")
-        vix_lbl.text = f"VIX {_fmt_price(vix)}"
-        if isinstance(vix, (int, float)):
-            reg = vix_regime(vix) or {}
-            regime_badge.text = reg.get("label", "")
-            if reg.get("color"):
-                regime_badge.style(f"background-color:{reg['color']}")
-        try:
-            color, label = sentiment_dot(evaluate_regime())
-        except Exception:
-            color, label = _DOT_NO_DATA
-        dot.style(f"color:{color}")
-        sent_lbl.text = label
+    # Last-seen bus cache version for the fetch-free repaint timer.
+    seen = {"version": None}
 
-    refresh()
-    ui.timer(30.0, refresh)
-    return refresh
+    def _paint(hdr):
+        hdr = hdr or {}
+        prices = hdr.get("prices") or {}
+        for s in ("$SPX", "SPY", "QQQ"):
+            price_lbls[s].text = f"{s} {_fmt_price(prices.get(s))}"
+        vix_lbl.text = f"VIX {_fmt_price(hdr.get('vix'))}"
+        reg = hdr.get("vix_regime") or {}
+        regime_badge.text = reg.get("label", "")
+        if reg.get("color"):
+            regime_badge.style(f"background-color:{reg['color']}")
+        sent = hdr.get("sentiment") or {}
+        dot.style(f"color:{sent.get('color', '#666666')}")
+        sent_lbl.text = sent.get("label", "")
+
+    # Initial paint from the bus cache (graceful-empty if the service is cold).
+    seen["version"] = bus_client.read_version("options:header")
+    _paint(bus_client.read("options:header") or {})
+
+    @guard
+    def _maybe_repaint():
+        # Fetch-free: compare the bus cache version to the last-painted one and
+        # only re-read + repaint on change. The service bumps it each ~30s tick.
+        version = bus_client.read_version("options:header")
+        if version == seen["version"]:
+            return
+        seen["version"] = version
+        _paint(bus_client.read("options:header") or {})
+
+    ui.timer(5.0, _maybe_repaint)
+    return _maybe_repaint

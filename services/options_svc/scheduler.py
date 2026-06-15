@@ -63,12 +63,23 @@ POLL_INTERVAL_SEC = 30  # check the slot every 30s (mirrors the page's autoscan 
 
 
 async def loop(bus):
-    """Server-side 15-min auto-scan: on each trading-day 15-min slot within
-    08:00-15:15 CT, run one rescan. Mirrors the page's former _autoscan_loop.
-    Runs the BLOCKING rescan in an executor so the event loop stays responsive."""
+    """Server-side 15-min auto-scan + per-tick header refresh.
+
+    Each 30 s tick: refresh the compact header view (quotes + VIX regime +
+    sentiment dot) — its natural cadence — then, on each trading-day 15-min slot
+    within 08:00-15:15 CT, run one rescan. Mirrors the page's former
+    _autoscan_loop. Both BLOCKING calls run in an executor so the event loop stays
+    responsive. Each is independently guarded so one failure can't kill the loop
+    or skip the other."""
     loop_ = asyncio.get_event_loop()
     last_slot = None
     while True:
+        # Header refresh runs EVERY tick (the header's ~30s cadence), guarded so a
+        # quotes/sentiment hiccup never stalls the autoscan below or the loop.
+        try:
+            await loop_.run_in_executor(None, handlers.refresh_header, bus)
+        except Exception:
+            pass
         try:
             now = _market_now()
             due, slot = autoscan_due(now, last_slot)
