@@ -242,6 +242,92 @@ def test_paper_entry_manage_short_circuit_when_no_account(monkeypatch):
     assert calls["refresh"] == 2  # both still refresh so the page shows no-account
 
 
+# ── Paper trades ledger (Task 2.6c-2) ────────────────────────────────────────
+def _fake_trades_view():
+    return {"trades": [
+        {"trade_id": "T1", "symbol": "SPY", "status": "OPEN"},
+        {"trade_id": "T2", "symbol": "QQQ", "status": "CLOSED"},
+    ]}
+
+
+def test_refresh_paper_trades_caches_publishes(monkeypatch):
+    bus = Bus(fake=True)
+    view = _fake_trades_view()
+    monkeypatch.setattr(handlers.compute, "paper_trades_view", lambda: view)
+
+    sub = bus.subscribe("events:options:paper_trades")
+    handlers.refresh_paper_trades(bus)
+    msg = sub.get_message(timeout=1.0)
+    sub.close()
+
+    env = bus.cache_get("cache:options:paper_trades")
+    assert env is not None
+    assert env.payload == view
+    assert msg is not None and msg.get("version") == env.version
+
+
+def test_paper_lifecycle_commands(monkeypatch):
+    """paper_close/paper_delete/paper_delete_closed call the right compute fn +
+    refresh the ledger view."""
+    bus = Bus(fake=True)
+    calls = {"close": None, "delete": None, "delete_closed": 0, "refresh": 0}
+
+    monkeypatch.setattr(handlers.compute, "close_paper",
+                        lambda tid, debit: calls.__setitem__("close", (tid, debit)))
+    monkeypatch.setattr(handlers.compute, "delete_paper",
+                        lambda tid: calls.__setitem__("delete", tid))
+    monkeypatch.setattr(handlers.compute, "delete_closed_paper",
+                        lambda: calls.__setitem__("delete_closed",
+                                                  calls["delete_closed"] + 1))
+
+    def _count_refresh(b):
+        assert b is bus
+        calls["refresh"] += 1
+
+    monkeypatch.setattr(handlers, "refresh_paper_trades", _count_refresh)
+
+    # paper_reload -> just refresh.
+    handlers.handle_command(bus, Command(type="paper_reload"))
+    assert calls["refresh"] == 1
+
+    # paper_close -> close with (trade_id, debit) + refresh.
+    handlers.handle_command(bus, Command(
+        type="paper_close", args={"trade_id": "T1", "debit": 0.45}))
+    assert calls["close"] == ("T1", 0.45) and calls["refresh"] == 2
+
+    # paper_delete -> delete by id + refresh.
+    handlers.handle_command(bus, Command(type="paper_delete", args={"trade_id": "T2"}))
+    assert calls["delete"] == "T2" and calls["refresh"] == 3
+
+    # paper_delete_closed -> delete-all-closed + refresh.
+    handlers.handle_command(bus, Command(type="paper_delete_closed"))
+    assert calls["delete_closed"] == 1 and calls["refresh"] == 4
+
+
+def test_paper_analyze_caches_result(monkeypatch):
+    """paper_analyze caches cache:options:paper_analyze + publishes (no ledger refresh)."""
+    bus = Bus(fake=True)
+    res = {"trade_id": "T1", "symbol": "SPY", "action": "HOLD"}
+    seen = {"tid": None}
+
+    def _analyze(tid):
+        seen["tid"] = tid
+        return res
+
+    monkeypatch.setattr(handlers.compute, "analyze_paper", _analyze)
+
+    sub = bus.subscribe("events:options:paper_analyze")
+    handlers.handle_command(bus, Command(type="paper_analyze", args={"trade_id": "T1"}))
+    msg = sub.get_message(timeout=1.0)
+    sub.close()
+
+    assert seen["tid"] == "T1"
+    env = bus.cache_get("cache:options:paper_analyze")
+    assert env is not None
+    assert env.payload == res
+    assert msg is not None and msg.get("version") == env.version
+
+
 def test_swing_scan_uses_defaults_for_missing_args(monkeypatch):
     bus = Bus(fake=True)
     seen = {"params": None}

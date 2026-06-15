@@ -81,6 +81,14 @@ async def loop(bus):
         await loop_.run_in_executor(None, handlers.refresh_paper_account, bus)
     except Exception:
         pass
+    # One-shot startup refresh of the paper-trade ledger so the Paper Trades page
+    # has data on first load. The ledger only changes on user actions
+    # (reload/close/delete/delete-all commands re-publish it), so it is NOT polled
+    # every tick. Guarded so a cold DB never stops the loop from starting.
+    try:
+        await loop_.run_in_executor(None, handlers.refresh_paper_trades, bus)
+    except Exception:
+        pass
     while True:
         # Header refresh runs EVERY tick (the header's ~30s cadence), guarded so a
         # quotes/sentiment hiccup never stalls the autoscan below or the loop.

@@ -188,6 +188,86 @@ def has_paper_account() -> bool:
     return paper_account_db.get_account() is not None
 
 
+# ── Paper trades ledger (ported from webgui/pages/options/paper.py) ─────────
+# The page read the paper-trade ledger directly (``paper_trader.get_all_trades``)
+# and ran the close/delete/delete-all/analyze actions itself. Those reads +
+# actions now live here so the GUI tier only reads the cached view and enqueues
+# commands.
+#
+# LAZY IMPORTS (IMPORTANT): ``paper_trader``/``trade_analyzer`` may pull in
+# options-scanner's ``scoring`` transitively. Importing them at module top would
+# bind the process-wide ``sys.modules['scoring']`` merely by importing this
+# module — which breaks the sentiment service's ``scoring`` package in the
+# *combined* pytest run (all services share one process). So both are imported
+# LAZILY inside each function. ``analyze_trade`` is called with
+# ``_proxy.schwab_py_client`` (mirrors the page).
+
+
+def paper_trades_view() -> dict:
+    """Read the paper-trade ledger view: ``{"trades": [...]}``.
+
+    Defensively guarded → ``{"trades": []}`` on any failure, mirroring the page's
+    per-read try/except. The GUI tier reads this cached view directly."""
+    import paper_trader
+
+    try:
+        return {"trades": paper_trader.get_all_trades()}
+    except Exception:
+        return {"trades": []}
+
+
+def _find_trade(trade_id):
+    """Look up a ledger trade dict by ``trade_id`` (None if absent)."""
+    import paper_trader
+
+    return next((t for t in paper_trader.get_all_trades()
+                 if t.get("trade_id") == trade_id), None)
+
+
+def close_paper(trade_id, debit: float) -> None:
+    """Close a paper trade at ``debit`` (per spread). No-op if the trade is gone.
+
+    Mirrors the page: find the trade, ``close_paper_trade`` to compute the closed
+    dict, then ``update_trade`` to persist it."""
+    import paper_trader
+
+    t = _find_trade(trade_id)
+    if t:
+        closed = paper_trader.close_paper_trade(t, float(debit), "MANUAL_CLOSE")
+        paper_trader.update_trade(trade_id, closed)
+
+
+def delete_paper(trade_id) -> None:
+    """Delete a paper trade by id. Mirrors the page's delete."""
+    import paper_trader
+
+    paper_trader.delete_trade(trade_id)
+
+
+def delete_closed_paper() -> None:
+    """Delete all closed/expired paper trades. Mirrors the page's delete-all-closed."""
+    import paper_trader
+
+    paper_trader.delete_closed_trades()
+
+
+def analyze_paper(trade_id) -> dict:
+    """Analyze a paper trade (live Greeks) → ``{trade_id, symbol, action}``.
+
+    Defensive throughout: a missing trade / malformed verdict degrades to a
+    well-formed dict with ``action`` ``"—"``. Uses ``_proxy.schwab_py_client``
+    (mirrors the page)."""
+    import trade_analyzer
+
+    t = _find_trade(trade_id)
+    result = trade_analyzer.analyze_trade(_proxy.schwab_py_client, t, None)
+    return {
+        "trade_id": trade_id,
+        "symbol": t.get("symbol") if t else None,
+        "action": ((result or {}).get("verdict") or {}).get("action", "—"),
+    }
+
+
 # ── Header strip (ported from webgui/pages/options/header.py) ───────────────
 # These were the GUI's header helpers; they're pure and now run here so the GUI
 # tier reads the whole header view from the bus (no proxy/engine call). As with

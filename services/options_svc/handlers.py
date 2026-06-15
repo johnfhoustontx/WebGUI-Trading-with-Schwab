@@ -28,6 +28,12 @@ EVENT_SWING = "events:options:swing"
 CACHE_PAPER = "cache:options:paper_account"
 EVENT_PAPER = "events:options:paper_account"
 
+CACHE_PAPER_TRADES = "cache:options:paper_trades"
+EVENT_PAPER_TRADES = "events:options:paper_trades"
+
+CACHE_PAPER_ANALYZE = "cache:options:paper_analyze"
+EVENT_PAPER_ANALYZE = "events:options:paper_analyze"
+
 # Defaults mirror the page's input defaults (symbol SPY, 5-30 DTE, the put/call
 # delta gates, min credit 10% -> 0.10 fraction). The page sends the fraction.
 _SWING_DEFAULTS = {
@@ -112,12 +118,26 @@ def refresh_paper_account(bus) -> None:
     bus.publish(EVENT_PAPER, {"version": version})
 
 
+def refresh_paper_trades(bus) -> None:
+    """Read the paper-trade ledger view and publish it to the bus.
+
+    No strict contract: the view is a loosely-shaped read-only dict
+    (``{"trades": [...]}``) that only the Paper Trades page consumes, and
+    ``compute.paper_trades_view`` is already fully defensive."""
+    data = compute.paper_trades_view()
+    version = bus.cache_set(CACHE_PAPER_TRADES, data)
+    bus.publish(EVENT_PAPER_TRADES, {"version": version})
+
+
 def handle_command(bus, command) -> None:
     """Dispatch a ``cmd:options`` command. ``rescan`` → full rescan;
     ``swing_scan`` → on-demand parameterized swing scan; ``refresh_paper`` →
     re-read the paper account; ``paper_entry``/``paper_manage`` → run the cycle
     (guarded on an existing account) then refresh; ``paper_reset`` → reset the
-    account then refresh; else no-op."""
+    account then refresh; ``paper_reload`` → re-read the trade ledger;
+    ``paper_close``/``paper_delete``/``paper_delete_closed`` → run the lifecycle
+    action then refresh the ledger; ``paper_analyze`` → analyze the selected
+    trade, cache the result + publish; else no-op."""
     if command.type == "rescan":
         rescan(bus)
     elif command.type == "swing_scan":
@@ -137,3 +157,19 @@ def handle_command(bus, command) -> None:
     elif command.type == "paper_reset":
         compute.reset_paper_account(float(command.args.get("starting_balance", 25000.0)))
         refresh_paper_account(bus)
+    elif command.type == "paper_reload":
+        refresh_paper_trades(bus)
+    elif command.type == "paper_close":
+        compute.close_paper(command.args.get("trade_id"),
+                            command.args.get("debit", 0.0))
+        refresh_paper_trades(bus)
+    elif command.type == "paper_delete":
+        compute.delete_paper(command.args.get("trade_id"))
+        refresh_paper_trades(bus)
+    elif command.type == "paper_delete_closed":
+        compute.delete_closed_paper()
+        refresh_paper_trades(bus)
+    elif command.type == "paper_analyze":
+        res = compute.analyze_paper(command.args.get("trade_id"))
+        version = bus.cache_set(CACHE_PAPER_ANALYZE, res)
+        bus.publish(EVENT_PAPER_ANALYZE, {"version": version})

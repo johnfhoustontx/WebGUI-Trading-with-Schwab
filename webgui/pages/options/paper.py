@@ -1,16 +1,25 @@
-"""Paper Trades page.
+"""Paper Trades page (Tier-3 reader).
 
-Lists the paper-trade ledger (``paper_trader.get_all_trades``) with the shared
-Trade detail panel. Actions: close (debit dialog), delete, delete-all-closed,
-and analyze (live Greeks via ``trade_analyzer.analyze_trade``). Lifecycle logic
-lives in the engines; this module marshals + wires.
+Lists the paper-trade ledger with the shared Trade detail panel. This page holds
+**no engine/proxy/DB call**: the ledger read and the close/delete/delete-all/
+analyze actions live in
+``services/options_svc/compute`` + ``handlers``; the service writes the ledger
+view under ``cache:options:paper_trades`` and re-publishes it after every action.
+This page only **reads** that payload and formats it, and enqueues commands
+(``paper_reload`` / ``paper_close`` / ``paper_delete`` / ``paper_delete_closed`` /
+``paper_analyze``) onto the Redis bus.
+
+A fetch-free version-poll ``ui.timer`` repaints the ledger when its bus cache
+version changes; a second watch on ``options:paper_analyze`` surfaces the analyze
+result via ``ui.notify`` when it lands. Dialogs (the close debit input) stay
+client-side (input collection only). Graceful-empty when the service is cold.
 """
-import sys
+import bus_client
+from nicegui import ui
 
-from repo_paths import OPTIONS_SCANNER
+from pages.ui_guard import guard
 
-if str(OPTIONS_SCANNER) not in sys.path:
-    sys.path.insert(0, str(OPTIONS_SCANNER))
+from . import detail
 
 
 def _round(value, ndigits=2):
@@ -75,15 +84,7 @@ def synth_from_trade(trade):
 
 
 def render():
-    """Paper Trades page: ledger table (left) + shared detail panel (right)."""
-    from nicegui import run, ui
-
-    import proxy
-    import paper_trader
-    import trade_analyzer
-
-    from . import detail
-
+    """Paper Trades page: ledger table (left) + shared detail panel (right), bus-fed."""
     ui.label("Paper Trades").classes("text-h5")
 
     raw_by_id: dict = {}
@@ -91,7 +92,7 @@ def render():
     with ui.row().classes("w-full no-wrap gap-4 items-start"):
         with ui.column().classes("flex-grow min-w-0"):
             with ui.row().classes("items-center gap-2 flex-wrap"):
-                ui.button("Reload", icon="refresh", on_click=lambda: _load())
+                ui.button("Reload", icon="refresh", on_click=lambda: _reload())
                 ui.button("Close selected", icon="check_circle",
                           on_click=lambda: _close()).props("outline")
                 ui.button("Analyze selected", icon="biotech",
@@ -100,26 +101,28 @@ def render():
                           on_click=lambda: _delete()).props("outline color=negative")
                 ui.button("Delete all closed", icon="delete_sweep",
                           on_click=lambda: _delete_closed()).props("flat color=negative")
-                spinner = ui.spinner(size="lg")
-                spinner.visible = False
             status = ui.label("").classes("opacity-70")
             table = ui.table(columns=paper_columns(), rows=[], row_key="id",
                              selection="single").classes("w-full")
         detail_panel = detail.render()
 
-    def _load():
-        try:
-            trades = paper_trader.get_all_trades()
-        except Exception as exc:
-            ui.notify(f"DB read failed: {exc}", type="negative")
-            trades = []
+    # Last-seen bus cache versions for the fetch-free repaint/notify timers.
+    seen = {"trades": None, "analyze": None}
+
+    def _populate(pt):
+        """Paint the ledger table from the cached paper-trades view."""
+        pt = pt or {}
+        trades = pt.get("trades") or []
         raw_by_id.clear()
         for t in trades:
             if t.get("trade_id"):
                 raw_by_id[t["trade_id"]] = t
         table.rows = paper_rows(trades)
         table.update()
-        status.text = f"{len(table.rows)} trades."
+        if not pt:
+            status.text = ""
+        else:
+            status.text = f"{len(table.rows)} trades."
 
     def _select(event):
         row = event.args[1] if isinstance(event.args, list) and len(event.args) > 1 else event.args
@@ -135,6 +138,13 @@ def render():
             return None
         return raw_by_id.get(table.selected[0].get("id"))
 
+    @guard
+    def _reload():
+        bus_client.request("options", {"type": "paper_reload"})
+        ui.notify("Reloading paper trades…")
+        status.text = "Reloading…"
+
+    @guard
     def _close():
         t = _selected_trade()
         if not t:
@@ -144,56 +154,64 @@ def render():
             debit = ui.number("Exit debit (per spread)", value=0.0, format="%.2f")
 
             def confirm():
-                try:
-                    closed = paper_trader.close_paper_trade(t, float(debit.value), "MANUAL_CLOSE")
-                    paper_trader.update_trade(t.get("trade_id"), closed)
-                except Exception as exc:
-                    ui.notify(f"Close failed: {exc}", type="negative")
-                    return
+                bus_client.request("options", {
+                    "type": "paper_close",
+                    "args": {"trade_id": t.get("trade_id"), "debit": float(debit.value)},
+                })
                 dlg.close()
-                ui.notify("Trade closed.", type="positive")
-                _load()
+                ui.notify("Close requested.", type="positive")
+                status.text = "Closing…"
 
             with ui.row():
                 ui.button("Confirm", on_click=confirm).props("color=negative")
                 ui.button("Cancel", on_click=dlg.close).props("flat")
         dlg.open()
 
+    @guard
     def _delete():
         t = _selected_trade()
         if not t:
             return
-        try:
-            paper_trader.delete_trade(t.get("trade_id"))
-        except Exception as exc:
-            ui.notify(f"Delete failed: {exc}", type="negative")
-            return
-        ui.notify("Trade deleted.", type="positive")
-        _load()
+        bus_client.request("options",
+                           {"type": "paper_delete", "args": {"trade_id": t.get("trade_id")}})
+        ui.notify("Delete requested.", type="positive")
+        status.text = "Deleting…"
 
+    @guard
     def _delete_closed():
-        try:
-            paper_trader.delete_closed_trades()
-        except Exception as exc:
-            ui.notify(f"Delete failed: {exc}", type="negative")
-            return
-        ui.notify("Closed trades deleted.", type="positive")
-        _load()
+        bus_client.request("options", {"type": "paper_delete_closed"})
+        ui.notify("Delete-all-closed requested.", type="positive")
+        status.text = "Deleting closed…"
 
-    async def _analyze():
+    @guard
+    def _analyze():
         t = _selected_trade()
         if not t:
             return
-        spinner.visible = True
-        try:
-            result = await run.io_bound(trade_analyzer.analyze_trade, proxy.schwab_py_client, t, None)
-        except Exception as exc:
-            ui.notify(f"Analyze failed: {exc}", type="negative")
-            return
-        finally:
-            spinner.visible = False
-        verdict = (result or {}).get("verdict", {}) if isinstance(result, dict) else {}
-        action = verdict.get("action", "—")
-        ui.notify(f"{t.get('symbol')}: {action}", type="info")
+        bus_client.request("options",
+                           {"type": "paper_analyze", "args": {"trade_id": t.get("trade_id")}})
+        ui.notify(f"Analyzing {t.get('symbol')}…")
+        status.text = "Analyzing…"
 
-    _load()
+    # Initial paint from the bus cache (graceful-empty if the service is cold).
+    seen["trades"] = bus_client.read_version("options:paper_trades")
+    seen["analyze"] = bus_client.read_version("options:paper_analyze")
+    _populate(bus_client.read("options:paper_trades") or {})
+
+    @guard
+    def _maybe_repaint():
+        # Fetch-free: only re-read + repaint the ledger when its version changes
+        # (the service bumps it after reload/close/delete/delete-all). Also watch
+        # the analyze view and surface its result via notify when it lands.
+        version = bus_client.read_version("options:paper_trades")
+        if version != seen["trades"]:
+            seen["trades"] = version
+            _populate(bus_client.read("options:paper_trades") or {})
+
+        av = bus_client.read_version("options:paper_analyze")
+        if av != seen["analyze"]:
+            seen["analyze"] = av
+            res = bus_client.read("options:paper_analyze") or {}
+            ui.notify(f"{res.get('symbol')}: {res.get('action', '—')}", type="info")
+
+    ui.timer(2.0, _maybe_repaint)

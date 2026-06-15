@@ -194,6 +194,118 @@ def test_reset_and_has_account(monkeypatch):
     assert compute.has_paper_account() is False
 
 
+# ── Paper trades ledger (moved from webgui/pages/options/paper.py) ──────────
+def test_paper_trades_view_shape(monkeypatch):
+    import sys as _sys
+    import types as _types
+
+    trades = [{"trade_id": "T1", "symbol": "SPY"}]
+    fake_pt = _types.SimpleNamespace(get_all_trades=lambda: trades)
+    monkeypatch.setitem(_sys.modules, "paper_trader", fake_pt)
+
+    assert compute.paper_trades_view() == {"trades": trades}
+
+
+def test_paper_trades_view_defensive_on_failure(monkeypatch):
+    import sys as _sys
+    import types as _types
+
+    def _boom():
+        raise RuntimeError("db cold")
+
+    monkeypatch.setitem(_sys.modules, "paper_trader",
+                        _types.SimpleNamespace(get_all_trades=_boom))
+    assert compute.paper_trades_view() == {"trades": []}
+
+
+def test_find_trade_matches_by_id(monkeypatch):
+    import sys as _sys
+    import types as _types
+
+    trades = [{"trade_id": "T1"}, {"trade_id": "T2"}]
+    monkeypatch.setitem(_sys.modules, "paper_trader",
+                        _types.SimpleNamespace(get_all_trades=lambda: trades))
+    assert compute._find_trade("T2") == {"trade_id": "T2"}
+    assert compute._find_trade("nope") is None
+
+
+def test_close_paper_persists_closed_dict(monkeypatch):
+    import sys as _sys
+    import types as _types
+
+    seen = {}
+    trade = {"trade_id": "T1", "symbol": "SPY"}
+    fake_pt = _types.SimpleNamespace(
+        get_all_trades=lambda: [trade],
+        close_paper_trade=lambda t, debit, reason: (
+            seen.__setitem__("close", (t, debit, reason)), {"closed": True})[1],
+        update_trade=lambda tid, closed: seen.__setitem__("update", (tid, closed)))
+    monkeypatch.setitem(_sys.modules, "paper_trader", fake_pt)
+
+    compute.close_paper("T1", 0.45)
+    assert seen["close"] == (trade, 0.45, "MANUAL_CLOSE")
+    assert seen["update"] == ("T1", {"closed": True})
+
+
+def test_close_paper_noop_when_trade_missing(monkeypatch):
+    import sys as _sys
+    import types as _types
+
+    seen = {"update": 0}
+    fake_pt = _types.SimpleNamespace(
+        get_all_trades=lambda: [],
+        close_paper_trade=lambda *a: {},
+        update_trade=lambda *a: seen.__setitem__("update", seen["update"] + 1))
+    monkeypatch.setitem(_sys.modules, "paper_trader", fake_pt)
+
+    compute.close_paper("missing", 1.0)
+    assert seen["update"] == 0
+
+
+def test_delete_and_delete_closed(monkeypatch):
+    import sys as _sys
+    import types as _types
+
+    seen = {}
+    fake_pt = _types.SimpleNamespace(
+        delete_trade=lambda tid: seen.__setitem__("delete", tid),
+        delete_closed_trades=lambda: seen.__setitem__("delete_closed", True))
+    monkeypatch.setitem(_sys.modules, "paper_trader", fake_pt)
+
+    compute.delete_paper("T9")
+    compute.delete_closed_paper()
+    assert seen["delete"] == "T9"
+    assert seen["delete_closed"] is True
+
+
+def test_analyze_paper_extracts_verdict_action(monkeypatch):
+    import sys as _sys
+    import types as _types
+
+    trade = {"trade_id": "T1", "symbol": "SPY"}
+    monkeypatch.setitem(_sys.modules, "paper_trader",
+                        _types.SimpleNamespace(get_all_trades=lambda: [trade]))
+    fake_ta = _types.SimpleNamespace(
+        analyze_trade=lambda client, t, iv: {"verdict": {"action": "CLOSE"}})
+    monkeypatch.setitem(_sys.modules, "trade_analyzer", fake_ta)
+
+    out = compute.analyze_paper("T1")
+    assert out == {"trade_id": "T1", "symbol": "SPY", "action": "CLOSE"}
+
+
+def test_analyze_paper_defensive_on_missing_verdict(monkeypatch):
+    import sys as _sys
+    import types as _types
+
+    monkeypatch.setitem(_sys.modules, "paper_trader",
+                        _types.SimpleNamespace(get_all_trades=lambda: []))
+    monkeypatch.setitem(_sys.modules, "trade_analyzer",
+                        _types.SimpleNamespace(analyze_trade=lambda c, t, i: None))
+
+    out = compute.analyze_paper("gone")
+    assert out == {"trade_id": "gone", "symbol": None, "action": "—"}
+
+
 # ── Header helpers (moved from webgui/tests/test_options_header.py) ──────────
 def test_sentiment_dot_no_data_when_inactive():
     assert compute.sentiment_dot({"active": False})[1] == "No data"
