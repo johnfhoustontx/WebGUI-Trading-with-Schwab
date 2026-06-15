@@ -40,16 +40,19 @@ MAX_BRIDGE_AGE_HOURS = 36
 
 # trend_regime.state -> side vote ("bull" blocks CCS, "bear" blocks PCS,
 # None means no trend vote). "lean_*" states only contribute if sentiment
-# also agrees (which is the existing AND rule).
+# also agrees (the AND rule below), and can't satisfy the double-hard block
+# under low confidence / divergence.
+#
+# Keys MUST match the classifier's 5 states exactly
+# (sentiment-dashboard/scoring/trend_regime.py STATE_LABELS). Confirmed trends
+# are hard votes; the two counter-/intermediate states (a pullback within a
+# bull, a counter-trend bounce within a bear) are soft leans; range is neutral.
 _TREND_STATE_VOTE = {
-    "bull_trend": "bull",
-    "bear_trend": "bear",
-    "recovery": "lean_bull",
+    "bull_trend":       "bull",
     "pullback_in_bull": "lean_bull",
-    "bounce_in_bear": "lean_bear",
-    "distribution": "lean_bear",
-    "neutral": None,
-    "chop": None,
+    "range":            None,
+    "bear_rally":       "lean_bear",
+    "bear_trend":       "bear",
 }
 
 

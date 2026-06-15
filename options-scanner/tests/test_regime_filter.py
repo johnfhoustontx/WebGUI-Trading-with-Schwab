@@ -8,6 +8,37 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import regime_filter as rf
 
 
+def test_trend_state_vote_matches_classifier_states():
+    """_TREND_STATE_VOTE must key on exactly the 5 states the classifier emits
+    (scoring/trend_regime.py STATE_LABELS): bull_trend, pullback_in_bull, range,
+    bear_rally, bear_trend — no dead keys. Confirmed trends are hard votes; the
+    two counter-/intermediate states are soft leans; range is neutral."""
+    assert set(rf._TREND_STATE_VOTE) == {
+        "bull_trend", "pullback_in_bull", "range", "bear_rally", "bear_trend"}
+    assert rf._TREND_STATE_VOTE["bull_trend"] == "bull"
+    assert rf._TREND_STATE_VOTE["bear_trend"] == "bear"
+    assert rf._TREND_STATE_VOTE["pullback_in_bull"] == "lean_bull"
+    assert rf._TREND_STATE_VOTE["bear_rally"] == "lean_bear"
+    assert rf._TREND_STATE_VOTE["range"] is None
+    for dead in ("recovery", "bounce_in_bear", "distribution", "neutral", "chop"):
+        assert dead not in rf._TREND_STATE_VOTE
+
+
+def test_bear_rally_with_bearish_sentiment_blocks_pcs():
+    """bear_rally (lean_bear) + hard bearish sentiment agree → PCS blocked."""
+    out = rf.evaluate_regime(
+        bridge=_bridge(score=2.0, bias="short", trend_state="bear_rally"))
+    assert out["allow_pcs"] is False
+    assert out["allow_ccs"] is True
+
+
+def test_range_trend_does_not_block_alone():
+    """range casts no trend vote → sentiment alone can't tighten a side."""
+    out = rf.evaluate_regime(
+        bridge=_bridge(score=7.5, bias="long", trend_state="range"))
+    assert out["allow_ccs"] is True and out["allow_pcs"] is True
+
+
 def _bridge(score=5.0, bias="neutral", age_hours=0,
             trend_state="neutral", trend_confidence=1.0,
             aggregate_confidence=0.9, divergence_flag=None):
