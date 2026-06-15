@@ -37,10 +37,10 @@ _CACHE = {"snaps": None, "spy": None, "sector": None, "live": None,
 # (component_scores key, display name, weight or None if out of composite)
 COMPONENTS = [
     ("vix_complex", "VIX Complex", WEIGHTS.get("vix_complex")),
-    ("put_call",    "Put/Call",    WEIGHTS.get("put_call")),
-    ("breadth",     "Breadth",     WEIGHTS.get("breadth")),
+    ("put_call",    "Put/Call (sectors)", WEIGHTS.get("put_call")),
+    ("breadth",     "Market Breadth",     WEIGHTS.get("breadth")),
     ("rotation",    "Rotation",    WEIGHTS.get("rotation")),
-    ("sector_perf", "Sector Perf", WEIGHTS.get("sector_perf")),
+    ("sector_perf", "Sector Performance", WEIGHTS.get("sector_perf")),
     ("credit_pulse", "Credit Pulse", WEIGHTS.get("credit_pulse")),
 ]
 
@@ -575,7 +575,7 @@ def _refresh_cache_sync(with_sectors=False):
     from zoneinfo import ZoneInfo
     snaps, spy = _load_snapshots()
     _CACHE["snaps"], _CACHE["spy"] = snaps, spy
-    live = _load_live() if is_rth(datetime.now(ZoneInfo("America/Chicago"))) else None
+    live = _load_live()  # always live (v4.3 sector-P/C + dual-momentum); matches legacy
     _CACHE["live"] = live
     if with_sectors:
         try:
@@ -752,8 +752,14 @@ def render():
         latest = live or snaps[-1]
         comp = latest.get("composite") or {}
         total = _safe_float(comp.get("total_score"))
-        date_lbl.text = (f"as of {latest.get('date')} (live intraday)" if live
-                         else f"as of {latest.get('date')} (last completed session)")
+        if live:
+            from datetime import datetime as _dt2
+            from zoneinfo import ZoneInfo as _ZI
+            _rth = is_rth(_dt2.now(_ZI("America/Chicago")))
+            date_lbl.text = (f"as of {latest.get('date')} (live intraday)" if _rth
+                             else f"as of {latest.get('date')} (latest — market closed)")
+        else:
+            date_lbl.text = f"as of {latest.get('date')} (last completed session)"
         gauge_box.content = speedometer_svg(gauge_score(total), comp.get("bias", ""),
                                             width=220, height=140)
         bias_lbl.text = f"{total:.2f} · {comp.get('bias', '')}"
@@ -973,11 +979,7 @@ def render():
             state["snaps"], state["spy"] = snaps, spy
             _CACHE["snaps"], _CACHE["spy"] = snaps, spy
             from datetime import datetime
-            from zoneinfo import ZoneInfo
-            if is_rth(datetime.now(ZoneInfo("America/Chicago"))):
-                live = await ng_run.io_bound(_load_live)
-            else:
-                live = None
+            live = await ng_run.io_bound(_load_live)  # always live; matches legacy v4.3
             state["live"] = live
             _CACHE["live"] = live
             _apply()

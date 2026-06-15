@@ -283,7 +283,8 @@ def compute_live(schwab, sector_data, prior_vix1d=0.0, prior_sector_trends=None)
                       "size_modifier": modifier, "aggregate_confidence": round(agg, 3)},
         "component_scores": {**scores, "credit_pulse": 0.0},
         "component_confidence": {**{k: round(v, 3) for k, v in confs.items()}, "credit_pulse": 0.0},
-        "volatility": {"interpretation": vix_complex.interp},
+        "volatility": {"interpretation":
+                       f"T{int(term.score)}-1D{int(v1d_r.score)}-S{int(slope.score)}"},
         "options": {"pc_equity": "", "interpretation": pc_res.interp},
         "breadth": {"interpretation": br.interp},
         "rotation": {"interpretation": dual.get("interp", "")},

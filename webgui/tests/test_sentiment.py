@@ -52,7 +52,7 @@ def test_divergence_named_extracts_confident_components():
     snap = _snap("2026-06-03", 6.0, vix_complex=9, sector_perf=2)
     named = S.divergence_named(snap)
     names = [n for n, _ in named]
-    assert "VIX Complex" in names and "Sector Perf" in names
+    assert "VIX Complex" in names and "Sector Performance" in names
 
 
 def test_build_history_figure_shape():

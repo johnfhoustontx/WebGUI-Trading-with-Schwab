@@ -213,11 +213,21 @@ publish `shared/sentiment_bridge.json` (consumed by `options-scanner/regime_filt
 The **GEX collector** (`options-scanner/gex_collector.py`) publishes the bridge each
 5-min cycle via a **subprocess** (`publish_bridge.py`, sentiment dir on `sys.path[0]`
 to dodge the `scoring` package-vs-module collision) — independent of the webgui. The
-webgui page uses the live composite during RTH (`is_rth`, Mon–Fri 08:30–15:00 CT),
-falling back to the backfill last-session snapshot off-hours, and also publishes the
-bridge on each load. Verified live: collector/page write a fresh bridge (score 6.73,
-bullish, bull_trend) and `regime_filter.evaluate_regime()` reads it. Design/plan:
-[live-bridge](docs/plans/2026-06-14-live-sentiment-bridge-design.md) (+ `-plan.md`).
+webgui page's **headline always uses the live composite** (`compute_live`; the
+`is_rth` flag now only labels the date as "live intraday" vs "latest — market
+closed"), falling back to the backfill snapshot only if the live compute fails;
+**backfill feeds only the 30-day history chart**. This keeps the web matched to
+the legacy v4.3 methodology around the clock — Put/Call uses cap-weighted sector
+P/C (not `$CPCE`) and Rotation uses dual-momentum (not the blended `compute_rotation`);
+off-hours, Put/Call/Breadth may read 0 when there's no option/market volume, exactly
+as the legacy "Fetch Live" does. Component labels match the legacy
+("Put/Call (sectors)", "Market Breadth", "Sector Performance"; VIX value `T{t}-1D{d}-S{s}`).
+The page also publishes the bridge on each load. Verified live: `compute_live`
+reproduces the legacy component scores (VIX T8-1D1-S3=5, Breadth 10, Rotation 7
+dual-momentum) and `regime_filter.evaluate_regime()` reads the written bridge.
+Design/plans: [live-bridge](docs/plans/2026-06-14-live-sentiment-bridge-design.md) +
+[web/legacy reconcile](docs/plans/2026-06-15-sentiment-web-legacy-reconcile-design.md)
+(+ `-plan.md` files).
 
 **Next session — remaining pages (Phase 3.3–3.5 of the webgui plan):**
 - **Trade** (`/trade`): `trade-analyzer/src/analysis` — symbol → MTF analysis +

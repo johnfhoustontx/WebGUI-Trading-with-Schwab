@@ -134,10 +134,10 @@ def test_component_table_rows_contrib():
     vix = by["VIX Complex"]
     assert vix["score"] == 4 and vix["weight"] == "20%"
     assert abs(vix["contrib"] - 0.20 * 4 * 1.0) < 1e-9     # w*s*conf
-    assert by["Sector Perf"]["value"] == "+0.70%"
-    assert by["Put/Call"]["value"] == "0.860"
+    assert by["Sector Performance"]["value"] == "+0.70%"
+    assert by["Put/Call (sectors)"]["value"] == "0.860"
     rows2 = S.component_table_rows(_full_snap(6.81, sector_perf=7.6), sector_value="+0.70%")
-    assert next(r for r in rows2 if r["name"] == "Sector Perf")["score"] == 7.6
+    assert next(r for r in rows2 if r["name"] == "Sector Performance")["score"] == 7.6
 
 
 def test_tiles_from_score_band():
