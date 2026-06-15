@@ -32,6 +32,15 @@ sentiment-dashboard, and claude-driver all fetch market data through it.
 | `perf_writer.py`     | Writes trade-performance events + IV snapshots.                 |
 | `stream_bridge.py`   | `schwab.streaming` LEVELONE_OPTIONS subscription bridge.        |
 
+## Logging
+
+`logs/schwab_proxy.log` holds the full INFO stream. A dedicated
+`logs/errors.log` captures **ERROR/CRITICAL only**, via a
+`TimedRotatingFileHandler` that rotates **weekly (Monday)** and keeps
+`backupCount=4` weeks before auto-deleting the oldest — effectively a weekly
+purge. Both handlers plus the console are wired in the `logging.basicConfig`
+block at the top of `schwab_proxy.py`.
+
 ## Configuration & secrets
 
 Reads `shared/appsettings.json` (Schwab API keys) and `shared/tokens.json`

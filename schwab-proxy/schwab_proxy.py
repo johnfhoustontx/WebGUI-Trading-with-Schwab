@@ -31,6 +31,7 @@ import time
 import base64
 import asyncio
 import logging
+from logging.handlers import TimedRotatingFileHandler
 import sqlite3
 import threading
 import pathlib
@@ -64,6 +65,25 @@ import stream_bridge
 LOG_DIR = Path(__file__).parent / "logs"
 LOG_DIR.mkdir(exist_ok=True)
 
+# Dedicated ERROR-only log, rotated weekly on Monday. backupCount=4 keeps ~4
+# weeks of history and auto-deletes the oldest file on each rotation, so the
+# errors.log* family never grows unbounded — effectively a weekly purge. The
+# active file is `errors.log`; rotated files get a `.YYYY-MM-DD` suffix.
+_error_handler = TimedRotatingFileHandler(
+    LOG_DIR / "errors.log",
+    when="W0",          # rotate weekly, Monday
+    interval=1,
+    backupCount=4,
+    encoding="utf-8",
+)
+_error_handler.setLevel(logging.ERROR)  # only ERROR/CRITICAL land here
+_error_handler.setFormatter(
+    logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",  # full date — rotated files span days
+    )
+)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
@@ -71,6 +91,7 @@ logging.basicConfig(
     handlers=[
         logging.FileHandler(LOG_DIR / "schwab_proxy.log"),
         logging.StreamHandler(),
+        _error_handler,
     ],
 )
 logger = logging.getLogger("schwab_proxy")
