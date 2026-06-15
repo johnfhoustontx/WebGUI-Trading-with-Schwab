@@ -3,9 +3,17 @@ options_analytics = 8200
 approval = 8300
 dashboard_frontend = 5173
 nicegui = 8500
+memurai = 6379
 
 [ml_servers]
 MES = 8000
 MNQ = 8001
 ES  = 8004
 NQ  = 8005
+
+[services]
+sentiment = 8210
+options   = 8211
+portfolio = 8212
+trade     = 8213
+driver    = 8214

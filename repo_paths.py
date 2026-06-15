@@ -26,3 +26,7 @@ APPROVAL_PORT    = _ports["approval"]
 NICEGUI_PORT     = _ports["nicegui"]
 NICEGUI_URL      = f"http://127.0.0.1:{NICEGUI_PORT}"
 ML_SERVER_URLS   = {k: f"http://127.0.0.1:{v}" for k, v in _ports["ml_servers"].items()}
+MEMURAI_PORT  = _ports["memurai"]
+MEMURAI_URL   = f"redis://127.0.0.1:{MEMURAI_PORT}/0"
+SERVICE_PORTS = dict(_ports["services"])
+SERVICE_URLS  = {k: f"http://127.0.0.1:{v}" for k, v in SERVICE_PORTS.items()}
