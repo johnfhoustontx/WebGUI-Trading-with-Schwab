@@ -36,3 +36,21 @@ def test_command_stream_enqueue_consume_ack():
     b.ack("cmd:test", "g", msg_id)
     # after ack, a fresh read for the same group returns no pending new messages
     assert b.consume_commands("cmd:test", group="g", consumer="c", block_ms=50) == []
+
+
+def test_get_message_timeout_returns_none():
+    b = Bus(fake=True)
+    sub = b.subscribe("events:test:idle")
+    assert sub.get_message(timeout=0.05) is None
+
+
+def test_consume_twice_exercises_busygroup_branch():
+    b = Bus(fake=True)
+    b.enqueue_command("cmd:test2", {"type": "a"})
+    first = b.consume_commands("cmd:test2", group="g", consumer="c", block_ms=50)
+    assert len(first) == 1
+    b.ack("cmd:test2", "g", first[0][0])
+    # second call re-enters group creation (BUSYGROUP swallowed) and finds nothing new
+    b.enqueue_command("cmd:test2", {"type": "b"})
+    second = b.consume_commands("cmd:test2", group="g", consumer="c", block_ms=50)
+    assert len(second) == 1 and second[0][1].type == "b"

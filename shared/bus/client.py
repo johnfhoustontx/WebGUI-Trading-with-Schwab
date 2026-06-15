@@ -2,8 +2,10 @@
 
 ``Bus`` provides three things over a single Redis (or Memurai) connection:
 
-* a **versioned cache** (``cache_set`` / ``cache_get``) — each write bumps an
-  atomic ``INCR`` version counter and stores a :class:`CacheEnvelope`;
+* a **versioned cache** (``cache_set`` / ``cache_get``) — each write bumps a
+  version counter (``INCR``) then stores a :class:`CacheEnvelope`. The ``INCR``
+  is atomic; the INCR+SET pair is best-effort (not a single transaction) —
+  acceptable for the single-user app;
 * **pub/sub** (``publish`` / ``subscribe``) for fan-out notifications;
 * a **Redis Streams command queue** (``enqueue_command`` / ``consume_commands``
   / ``ack``) with consumer groups.
@@ -52,6 +54,17 @@ class _Subscription:
             if raw.get("type") == "message":
                 return json.loads(raw["data"])
             # subscribe/unsubscribe confirmation — keep waiting.
+
+    def close(self) -> None:
+        """Unsubscribe and release the underlying pubsub connection."""
+        self._pubsub.unsubscribe()
+        self._pubsub.close()
+
+    def __enter__(self) -> "_Subscription":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
 
 
 class Bus:
