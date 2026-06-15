@@ -12,6 +12,7 @@ if str(SENTIMENT) not in sys.path:
     sys.path.insert(0, str(SENTIMENT))
 
 import sector_rotation_assessment as rotation_tool  # noqa: E402
+from pages.ui_guard import guard_async  # noqa: E402
 
 CLR_GREEN = "#66bb6a"
 CLR_RED = "#ef5350"
@@ -198,6 +199,7 @@ def render():
             return True
         return False
 
+    @guard_async
     async def load(force=False):
         if not force and _paint_cached():
             return

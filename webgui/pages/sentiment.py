@@ -18,6 +18,7 @@ from scoring import rotation as scoring_rotation    # noqa: E402
 import live_composite  # noqa: E402,F401  (eager: pins module; never lazy)
 from live_composite import (  # noqa: E402
     signal_band, compute_live, build_bridge_payload)
+from pages.ui_guard import guard, guard_async  # noqa: E402
 
 CLR_GREEN = "#66bb6a"
 CLR_RED = "#ef5350"
@@ -872,6 +873,7 @@ def render():
                 sec_spinner.visible = False
         _CACHE["industry"][sector_name] = state["industry"][sector_name]
 
+    @guard_async
     async def _toggle_sector(sector_name):
         if sector_name in state["expanded"]:
             state["expanded"].discard(sector_name)
@@ -882,6 +884,7 @@ def render():
         _CACHE["expanded"] = set(state["expanded"])
         _render_sector_table()
 
+    @guard_async
     async def _expand_all():
         if not state["sector"]:
             return
@@ -895,6 +898,7 @@ def render():
         _CACHE["expanded"] = set(state["expanded"])
         _render_sector_table()
 
+    @guard
     def _collapse_all():
         state["expanded"].clear()
         _CACHE["expanded"] = set()
@@ -917,6 +921,7 @@ def render():
             _render_components(latest, rotation_value, sector_value)
         _publish_bridge()
 
+    @guard_async
     async def load_sectors():
         # Re-entrancy guard: the sector fetch (~24 proxy calls incl. /chains)
         # can outlast a refresh interval; never stack a second one.
@@ -938,6 +943,7 @@ def render():
             state["loading_sectors"] = False
 
     from datetime import datetime, timedelta
+    @guard
     def _render_status():
         parts = []
         ca = state.get("composite_at")
@@ -951,6 +957,7 @@ def render():
         parts.append(f"Proxy: {'connected' if up else ('—' if up is None else 'down')}")
         status_lbl.text = "   ·   ".join(parts) if parts else "Loading…"
 
+    @guard_async
     async def load(with_sectors=False):
         # Manual Refresh path (explicit user action). Auto-refresh is handled
         # server-side by the 120s background task (refresh_cache); the page
@@ -986,6 +993,7 @@ def render():
         if with_sectors:
             await load_sectors()
 
+    @guard
     def _repaint_from_cache():
         # Re-seed only the DATA keys from the module cache (NOT expanded/industry,
         # so the user's open expansions survive a repaint) and re-apply — no fetch.
