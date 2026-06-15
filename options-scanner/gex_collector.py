@@ -420,11 +420,22 @@ def _init_logging():
 
 def _build_live_deps():
     """Construct production client + engine. Kept separate so tests don't trip
-    on Schwab auth when importing the module."""
-    from dashboard import init_client
-    client = init_client()
+    on Schwab auth when importing the module.
+
+    This webgui repo has no ``dashboard.py`` (the old Tk UI was not copied), so
+    the Schwab client is resolved through the schwab-proxy — the canonical
+    client source for every app in this repo — rather than dashboard.init_client.
+    """
+    import pathlib
+    import sys as _sys
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    for _p in (str(repo_root), str(repo_root / "schwab-proxy")):
+        if _p not in _sys.path:
+            _sys.path.insert(0, _p)
+    from proxy_client import SchwabPyProxyClient
+    client = SchwabPyProxyClient()
     if client is None:
-        raise RuntimeError("Schwab client init failed - check token / appsettings")
+        raise RuntimeError("Schwab proxy client init failed - is the proxy on :8100 up?")
     engine = GammaEngine()
     return client, engine
 
