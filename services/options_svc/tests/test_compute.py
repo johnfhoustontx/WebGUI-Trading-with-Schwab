@@ -229,6 +229,32 @@ def test_find_trade_matches_by_id(monkeypatch):
     assert compute._find_trade("nope") is None
 
 
+def test_create_paper_trade_creates_then_adds(monkeypatch):
+    """create_paper_trade builds the trade via paper_trader.create_paper_trade,
+    persists it via add_trade (in that order), and returns the created trade."""
+    import sys as _sys
+    import types as _types
+
+    order = []
+    trade = {"trade_id": "T9", "symbol": "SPY"}
+    signal = {"symbol": "SPY", "type": "PCS"}
+
+    def _create(sig, qty):
+        order.append(("create", sig, qty))
+        return trade
+
+    def _add(t):
+        order.append(("add", t))
+
+    monkeypatch.setitem(_sys.modules, "paper_trader",
+                        _types.SimpleNamespace(create_paper_trade=_create, add_trade=_add))
+
+    out = compute.create_paper_trade(signal, 2)
+    assert out is trade
+    # create runs before add, with the signal + qty; add gets the created trade.
+    assert order == [("create", signal, 2), ("add", trade)]
+
+
 def test_close_paper_persists_closed_dict(monkeypatch):
     import sys as _sys
     import types as _types

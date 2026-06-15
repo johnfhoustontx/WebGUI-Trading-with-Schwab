@@ -304,6 +304,49 @@ def test_paper_lifecycle_commands(monkeypatch):
     assert calls["delete_closed"] == 1 and calls["refresh"] == 4
 
 
+def test_paper_create_command(monkeypatch):
+    """paper_create calls compute.create_paper_trade with (signal, qty) then
+    refreshes the Paper Trades ledger view (so the new trade shows up)."""
+    bus = Bus(fake=True)
+    seen = {"create": None}
+    view = _fake_trades_view()
+
+    monkeypatch.setattr(handlers.compute, "create_paper_trade",
+                        lambda signal, qty: seen.__setitem__("create", (signal, qty)))
+    # paper_create refreshes the real ledger view -> stub the underlying compute
+    # read so refresh_paper_trades caches a deterministic payload.
+    monkeypatch.setattr(handlers.compute, "paper_trades_view", lambda: view)
+
+    sub = bus.subscribe("events:options:paper_trades")
+    signal = {"symbol": "SPY", "type": "PCS", "short_strike": 530}
+    handlers.handle_command(bus, Command(
+        type="paper_create", args={"signal": signal, "qty": 2}))
+    msg = sub.get_message(timeout=1.0)
+    sub.close()
+
+    # compute.create_paper_trade got the signal + qty from the command.
+    assert seen["create"] == (signal, 2)
+    # The ledger view was refreshed (cache written + event published).
+    env = bus.cache_get("cache:options:paper_trades")
+    assert env is not None
+    assert env.payload == view
+    assert msg is not None and msg.get("version") == env.version
+
+
+def test_paper_create_defaults_qty(monkeypatch):
+    """paper_create with no qty arg defaults to 1."""
+    bus = Bus(fake=True)
+    seen = {"create": None}
+
+    monkeypatch.setattr(handlers.compute, "create_paper_trade",
+                        lambda signal, qty: seen.__setitem__("create", (signal, qty)))
+    monkeypatch.setattr(handlers.compute, "paper_trades_view", lambda: {"trades": []})
+
+    signal = {"symbol": "QQQ", "type": "CCS"}
+    handlers.handle_command(bus, Command(type="paper_create", args={"signal": signal}))
+    assert seen["create"] == (signal, 1)
+
+
 def test_paper_analyze_caches_result(monkeypatch):
     """paper_analyze caches cache:options:paper_analyze + publishes (no ledger refresh)."""
     bus = Bus(fake=True)

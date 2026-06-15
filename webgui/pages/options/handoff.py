@@ -4,15 +4,14 @@ Lets the Scanner / Swing Scanner send a selected signal to the Calculator
 (prefill) or create a Paper Trade from it — mirroring the legacy right-click
 menu. Single-user app, so a module-level stash is fine for the calculator
 hand-off across the page navigation.
-"""
-import sys
 
+Paper-trade creation no longer imports the options engine: it enqueues a
+``paper_create`` command on the options service bus (Tier 2 → Tier 3), mirroring
+the other migrated pages — so this module is fully engine-free.
+"""
 from nicegui import ui
 
-from repo_paths import OPTIONS_SCANNER
-
-if str(OPTIONS_SCANNER) not in sys.path:
-    sys.path.insert(0, str(OPTIONS_SCANNER))
+import bus_client
 
 _pending = {"calculator": None}
 
@@ -40,7 +39,6 @@ def send_to_paper(signal):
     if not signal:
         ui.notify("Select a signal first.", type="warning")
         return
-    import paper_trader
 
     with ui.dialog() as dlg, ui.card():
         ui.label(f"Paper trade {signal.get('symbol')} {signal.get('type')} "
@@ -48,14 +46,16 @@ def send_to_paper(signal):
         qty = ui.number("Quantity", value=1, min=1, max=100)
 
         def confirm():
-            try:
-                trade = paper_trader.create_paper_trade(signal, int(qty.value or 1))
-                paper_trader.add_trade(trade)
-            except Exception as exc:
-                ui.notify(f"Paper trade failed: {exc}", type="negative")
-                return
+            # Engine-free: enqueue a paper_create command for the options service
+            # to build + persist the trade (then refresh the Paper Trades ledger
+            # view). The signal dict is a plain dict of strings/numbers, so it is
+            # JSON-serializable onto the command stream.
+            bus_client.request("options", {
+                "type": "paper_create",
+                "args": {"signal": signal, "qty": int(qty.value or 1)},
+            })
+            ui.notify("Paper trade requested.", type="positive")
             dlg.close()
-            ui.notify(f"Paper trade {trade['trade_id']} created.", type="positive")
 
         with ui.row():
             ui.button("Create", on_click=confirm).props("color=primary")

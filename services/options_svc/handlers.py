@@ -188,7 +188,9 @@ def handle_command(bus, command) -> None:
     ``swing_scan`` → on-demand parameterized swing scan; ``refresh_paper`` →
     re-read the paper account; ``paper_entry``/``paper_manage`` → run the cycle
     (guarded on an existing account) then refresh; ``paper_reset`` → reset the
-    account then refresh; ``paper_reload`` → re-read the trade ledger;
+    account then refresh; ``paper_create`` (args signal, qty) → create + persist a
+    paper trade from a signal then refresh the ledger; ``paper_reload`` → re-read
+    the trade ledger;
     ``paper_close``/``paper_delete``/``paper_delete_closed`` → run the lifecycle
     action then refresh the ledger; ``paper_analyze`` → analyze the selected
     trade, cache the result + publish; ``captured_reload`` → re-read open signals;
@@ -223,6 +225,10 @@ def handle_command(bus, command) -> None:
     elif command.type == "paper_reset":
         compute.reset_paper_account(float(command.args.get("starting_balance", 25000.0)))
         refresh_paper_account(bus)
+    elif command.type == "paper_create":
+        compute.create_paper_trade(command.args.get("signal"),
+                                   command.args.get("qty", 1))
+        refresh_paper_trades(bus)
     elif command.type == "paper_reload":
         refresh_paper_trades(bus)
     elif command.type == "paper_close":

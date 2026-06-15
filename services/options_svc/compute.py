@@ -216,6 +216,20 @@ def paper_trades_view() -> dict:
         return {"trades": []}
 
 
+def create_paper_trade(signal: dict, qty: int) -> dict:
+    """Create + persist a paper trade from a scanner/swing ``signal``.
+
+    Mirrors the page's ``handoff.send_to_paper`` engine calls VERBATIM:
+    ``paper_trader.create_paper_trade(signal, qty)`` builds the trade dict, then
+    ``paper_trader.add_trade`` persists it to the ledger. Returns the created
+    trade dict (so the handler can surface its ``trade_id`` if it ever wants to)."""
+    import paper_trader
+
+    trade = paper_trader.create_paper_trade(signal, int(qty))
+    paper_trader.add_trade(trade)
+    return trade
+
+
 def _find_trade(trade_id):
     """Look up a ledger trade dict by ``trade_id`` (None if absent)."""
     import paper_trader
