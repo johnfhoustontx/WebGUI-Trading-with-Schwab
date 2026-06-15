@@ -57,7 +57,7 @@ client and market data through `http://127.0.0.1:8100`.
 |------------------------|------------------------------------------------------------|------------------|
 | `schwab-proxy/`        | Central Schwab API gateway / token manager. **Start FIRST.**| backend, :8100   |
 | `options-scanner/`     | GEX/options scanner engines, scoring, paper engine, simulator. | engines only (Dash UI dropped) |
-| `sentiment-dashboard/` | Market sentiment `scoring/` + `history_backfill` + bridge + headless snapshot + `sectors_ref.py` (non-tk workbook loader). | ported to NiceGUI `/sentiment` |
+| `sentiment-dashboard/` | Market sentiment `scoring/` + `history_backfill` + `live_composite.py` (live intraday composite + bridge payload) + `publish_bridge.py` (headless bridge writer) + bridge + `sectors_ref.py`. | ported to NiceGUI `/sentiment` |
 | `trade-analyzer/`      | `src/analysis` — fundamentals, recommendation, scoring, sector. | engines only (Tk UI dropped) |
 | `portfolio-analyzer/`  | `src/` — sector breakdown, vs-sector perf, live streaming.  | engines only (Tk UI dropped) |
 | `claude-driver/`       | Morning/intraday orchestration + order approval logic.      | engines only (approval UI to be NiceGUI) |
@@ -198,8 +198,19 @@ industry rows on expand). Designs/plans:
 [sector-perf](docs/plans/2026-06-14-sentiment-sector-perf-design.md) /
 [persistence+industries](docs/plans/2026-06-14-sentiment-persistence-industries-design.md)
 (+ matching `-plan.md` files).
-**Follow-up:** live *intraday* composite (page shows last completed session;
-intraday-live needs porting the tk quote-fetch path).
+**Live intraday + bridge (DONE).** `sentiment-dashboard/live_composite.py`
+`compute_live(schwab, sector_data)` computes a **live** composite from current
+quotes reusing the pure scoring modules (the live analog of
+`history_backfill._score_one_day`); `build_bridge_payload(...)` + `bridge.write_bridge`
+publish `shared/sentiment_bridge.json` (consumed by `options-scanner/regime_filter`).
+The **GEX collector** (`options-scanner/gex_collector.py`) publishes the bridge each
+5-min cycle via a **subprocess** (`publish_bridge.py`, sentiment dir on `sys.path[0]`
+to dodge the `scoring` package-vs-module collision) — independent of the webgui. The
+webgui page uses the live composite during RTH (`is_rth`, Mon–Fri 08:30–15:00 CT),
+falling back to the backfill last-session snapshot off-hours, and also publishes the
+bridge on each load. Verified live: collector/page write a fresh bridge (score 6.73,
+bullish, bull_trend) and `regime_filter.evaluate_regime()` reads it. Design/plan:
+[live-bridge](docs/plans/2026-06-14-live-sentiment-bridge-design.md) (+ `-plan.md`).
 
 **Next session — remaining pages (Phase 3.3–3.5 of the webgui plan):**
 - **Trade** (`/trade`): `trade-analyzer/src/analysis` — symbol → MTF analysis +

@@ -190,6 +190,8 @@ The tkinter UI is not unit-tested. Verify UI changes manually by launching `Laun
 |---|---|
 | `sentiment_dashboard.py` | UI shell. ~3500 lines after extraction. |
 | `bridge.py` | Bridge writer + schema version + paths. |
+| `live_composite.py` | **Live intraday composite** (`compute_live` — current quotes → the pure scoring modules, the live analog of `history_backfill._score_one_day`) + `signal_band` + `build_bridge_payload` + `publish_bridge`. Shared by the webgui page and the GEX collector. No tk. |
+| `publish_bridge.py` | Standalone headless entry: `compute_live` → write `shared/sentiment_bridge.json`. Run by the GEX collector each cycle in a subprocess (sentiment dir on `sys.path[0]` so `import scoring` resolves to this package, not options-scanner's `scoring.py`). |
 | `scoring/` | All scoring logic. Pure functions. |
 | `tests/` | pytest suite. Includes `fixtures/bridge_v39_snapshot.json` regression oracle. |
 | `Launch_Dashboard.bat` | Windows launcher. |
