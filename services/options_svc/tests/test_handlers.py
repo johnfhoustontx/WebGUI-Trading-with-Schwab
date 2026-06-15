@@ -151,6 +151,97 @@ def test_swing_scan_command(monkeypatch):
     assert msg is not None and msg.get("version") == env.version
 
 
+# ── Paper account (Task 2.6c-1) ──────────────────────────────────────────────
+def _fake_paper_view():
+    return {
+        "snapshot": {"equity": 25100.0, "cash": 24000.0, "open_count": 2,
+                     "halted": False},
+        "positions": [{"position_id": 1, "symbol": "SPY"}],
+        "orders": [{"order_id": 10, "symbol": "SPY", "status": "FILLED"}],
+        "has_account": True,
+    }
+
+
+def test_refresh_paper_account_caches_and_publishes(monkeypatch):
+    bus = Bus(fake=True)
+    view = _fake_paper_view()
+    monkeypatch.setattr(handlers.compute, "paper_account_view", lambda: view)
+
+    sub = bus.subscribe("events:options:paper_account")
+    handlers.refresh_paper_account(bus)
+    msg = sub.get_message(timeout=1.0)
+    sub.close()
+
+    env = bus.cache_get("cache:options:paper_account")
+    assert env is not None
+    assert env.payload == view
+    assert msg is not None and msg.get("version") == env.version
+
+
+def test_paper_command_dispatch(monkeypatch):
+    """Each paper command calls the right compute fn + refreshes the cache view."""
+    bus = Bus(fake=True)
+    calls = {"refresh": 0, "entry": 0, "manage": 0, "reset": None,
+             "has_account": True}
+
+    monkeypatch.setattr(handlers.compute, "paper_account_view", _fake_paper_view)
+    monkeypatch.setattr(handlers.compute, "has_paper_account",
+                        lambda: calls["has_account"])
+    monkeypatch.setattr(handlers.compute, "run_entry_cycle",
+                        lambda: calls.__setitem__("entry", calls["entry"] + 1))
+    monkeypatch.setattr(handlers.compute, "run_manage_cycle",
+                        lambda: calls.__setitem__("manage", calls["manage"] + 1))
+    monkeypatch.setattr(handlers.compute, "reset_paper_account",
+                        lambda bal: calls.__setitem__("reset", bal))
+
+    def _count_refresh(b):
+        assert b is bus
+        calls["refresh"] += 1
+
+    monkeypatch.setattr(handlers, "refresh_paper_account", _count_refresh)
+
+    # refresh_paper -> just refresh.
+    handlers.handle_command(bus, Command(type="refresh_paper"))
+    assert calls["refresh"] == 1
+
+    # paper_entry (account present) -> entry cycle + refresh.
+    handlers.handle_command(bus, Command(type="paper_entry"))
+    assert calls["entry"] == 1 and calls["refresh"] == 2
+
+    # paper_manage (account present) -> manage cycle + refresh.
+    handlers.handle_command(bus, Command(type="paper_manage"))
+    assert calls["manage"] == 1 and calls["refresh"] == 3
+
+    # paper_reset -> reset with the given balance + refresh.
+    handlers.handle_command(bus, Command(type="paper_reset",
+                                         args={"starting_balance": 50000.0}))
+    assert calls["reset"] == 50000.0 and calls["refresh"] == 4
+
+    # paper_reset with no args -> default balance.
+    handlers.handle_command(bus, Command(type="paper_reset"))
+    assert calls["reset"] == 25000.0 and calls["refresh"] == 5
+
+
+def test_paper_entry_manage_short_circuit_when_no_account(monkeypatch):
+    """With no account, entry/manage do NOT run the cycle — they just refresh."""
+    bus = Bus(fake=True)
+    calls = {"entry": 0, "manage": 0, "refresh": 0}
+
+    monkeypatch.setattr(handlers.compute, "has_paper_account", lambda: False)
+    monkeypatch.setattr(handlers.compute, "run_entry_cycle",
+                        lambda: calls.__setitem__("entry", calls["entry"] + 1))
+    monkeypatch.setattr(handlers.compute, "run_manage_cycle",
+                        lambda: calls.__setitem__("manage", calls["manage"] + 1))
+    monkeypatch.setattr(handlers, "refresh_paper_account",
+                        lambda b: calls.__setitem__("refresh", calls["refresh"] + 1))
+
+    handlers.handle_command(bus, Command(type="paper_entry"))
+    handlers.handle_command(bus, Command(type="paper_manage"))
+
+    assert calls["entry"] == 0 and calls["manage"] == 0
+    assert calls["refresh"] == 2  # both still refresh so the page shows no-account
+
+
 def test_swing_scan_uses_defaults_for_missing_args(monkeypatch):
     bus = Bus(fake=True)
     seen = {"params": None}

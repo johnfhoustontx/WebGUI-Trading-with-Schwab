@@ -97,6 +97,103 @@ def test_swing_scan_pipeline_wiring(monkeypatch):
     assert out and out[0]["id"].startswith("SPY")
 
 
+# ── Paper account (moved from webgui/pages/options/portfolio.py) ────────────
+def test_paper_account_view_shape(monkeypatch):
+    """``paper_account_view`` assembles snapshot + positions + orders + flag from
+    the lazily-imported paper modules, with the right args."""
+    import sys as _sys
+    import types as _types
+
+    seen = {}
+    fake_engine = _types.SimpleNamespace(
+        account_snapshot=lambda: {"equity": 25100.0})
+    fake_db = _types.SimpleNamespace(
+        fetch_open_positions=lambda db: (seen.__setitem__("pos_db", db),
+                                         [{"position_id": 1}])[1],
+        fetch_orders=lambda db, limit=None, status=None: (
+            seen.__setitem__("ord", (db, limit, status)), [{"order_id": 10}])[1],
+        get_account=lambda: {"id": 1})
+    monkeypatch.setitem(_sys.modules, "paper_engine", fake_engine)
+    monkeypatch.setitem(_sys.modules, "paper_account_db", fake_db)
+
+    out = compute.paper_account_view()
+    assert out["snapshot"] == {"equity": 25100.0}
+    assert out["positions"] == [{"position_id": 1}]
+    assert out["orders"] == [{"order_id": 10}]
+    assert out["has_account"] is True
+    assert seen["pos_db"] is None
+    assert seen["ord"] == (None, 100, "FILLED")  # fetch_orders(None, limit=100, status="FILLED")
+
+
+def test_paper_account_view_defensive_on_failure(monkeypatch):
+    """Each sub-read failure degrades gracefully: snapshot→None, lists→[], flag→False."""
+    import sys as _sys
+    import types as _types
+
+    def _boom(*a, **k):
+        raise RuntimeError("db cold")
+
+    fake_engine = _types.SimpleNamespace(account_snapshot=_boom)
+    fake_db = _types.SimpleNamespace(
+        fetch_open_positions=_boom, fetch_orders=_boom, get_account=_boom)
+    monkeypatch.setitem(_sys.modules, "paper_engine", fake_engine)
+    monkeypatch.setitem(_sys.modules, "paper_account_db", fake_db)
+
+    out = compute.paper_account_view()
+    assert out == {"snapshot": None, "positions": [], "orders": [],
+                   "has_account": False}
+
+
+def test_run_entry_cycle_calls_engine_with_signals(monkeypatch):
+    import sys as _sys
+    import types as _types
+
+    seen = {}
+    fake_engine = _types.SimpleNamespace(
+        run_entry_cycle=lambda client, date_iso, signals: seen.update(
+            client=client, date=date_iso, signals=signals))
+    fake_signal_db = _types.SimpleNamespace(
+        get_open_signals_with_latest_mark=lambda: [{"id": "s1"}])
+    monkeypatch.setitem(_sys.modules, "paper_engine", fake_engine)
+    monkeypatch.setitem(_sys.modules, "signal_db", fake_signal_db)
+
+    compute.run_entry_cycle()
+    assert seen["client"] is compute._proxy.schwab_py_client
+    assert seen["signals"] == [{"id": "s1"}]
+    assert isinstance(seen["date"], str) and len(seen["date"]) == 10  # YYYY-MM-DD
+
+
+def test_run_manage_cycle_calls_engine(monkeypatch):
+    import sys as _sys
+    import types as _types
+
+    seen = {}
+    fake_engine = _types.SimpleNamespace(
+        run_manage_cycle=lambda client, date_iso: seen.update(
+            client=client, date=date_iso))
+    monkeypatch.setitem(_sys.modules, "paper_engine", fake_engine)
+
+    compute.run_manage_cycle()
+    assert seen["client"] is compute._proxy.schwab_py_client
+    assert isinstance(seen["date"], str) and len(seen["date"]) == 10
+
+
+def test_reset_and_has_account(monkeypatch):
+    import sys as _sys
+    import types as _types
+
+    seen = {}
+    fake_db = _types.SimpleNamespace(
+        reset_account=lambda starting_balance=None: seen.__setitem__(
+            "bal", starting_balance),
+        get_account=lambda: None)
+    monkeypatch.setitem(_sys.modules, "paper_account_db", fake_db)
+
+    compute.reset_paper_account(50000.0)
+    assert seen["bal"] == 50000.0
+    assert compute.has_paper_account() is False
+
+
 # ── Header helpers (moved from webgui/tests/test_options_header.py) ──────────
 def test_sentiment_dot_no_data_when_inactive():
     assert compute.sentiment_dot({"active": False})[1] == "No data"

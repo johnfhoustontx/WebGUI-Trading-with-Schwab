@@ -25,6 +25,9 @@ EVENT_HEADER = "events:options:header"
 CACHE_SWING = "cache:options:swing"
 EVENT_SWING = "events:options:swing"
 
+CACHE_PAPER = "cache:options:paper_account"
+EVENT_PAPER = "events:options:paper_account"
+
 # Defaults mirror the page's input defaults (symbol SPY, 5-30 DTE, the put/call
 # delta gates, min credit 10% -> 0.10 fraction). The page sends the fraction.
 _SWING_DEFAULTS = {
@@ -98,10 +101,39 @@ def swing_scan(bus, args: dict) -> None:
     bus.publish(EVENT_SWING, {"version": version})
 
 
+def refresh_paper_account(bus) -> None:
+    """Read the paper account view and publish it to the bus.
+
+    No strict contract: the view is a loosely-shaped read-only dict (snapshot +
+    positions + orders + has_account flag) that only the Paper Portfolio page
+    consumes, and ``compute.paper_account_view`` is already fully defensive."""
+    data = compute.paper_account_view()
+    version = bus.cache_set(CACHE_PAPER, data)
+    bus.publish(EVENT_PAPER, {"version": version})
+
+
 def handle_command(bus, command) -> None:
     """Dispatch a ``cmd:options`` command. ``rescan`` → full rescan;
-    ``swing_scan`` → on-demand parameterized swing scan; else no-op."""
+    ``swing_scan`` → on-demand parameterized swing scan; ``refresh_paper`` →
+    re-read the paper account; ``paper_entry``/``paper_manage`` → run the cycle
+    (guarded on an existing account) then refresh; ``paper_reset`` → reset the
+    account then refresh; else no-op."""
     if command.type == "rescan":
         rescan(bus)
     elif command.type == "swing_scan":
         swing_scan(bus, command.args)
+    elif command.type == "refresh_paper":
+        refresh_paper_account(bus)
+    elif command.type == "paper_entry":
+        # No account -> don't run the cycle; refresh so the page shows the
+        # no-account state.
+        if compute.has_paper_account():
+            compute.run_entry_cycle()
+        refresh_paper_account(bus)
+    elif command.type == "paper_manage":
+        if compute.has_paper_account():
+            compute.run_manage_cycle()
+        refresh_paper_account(bus)
+    elif command.type == "paper_reset":
+        compute.reset_paper_account(float(command.args.get("starting_balance", 25000.0)))
+        refresh_paper_account(bus)

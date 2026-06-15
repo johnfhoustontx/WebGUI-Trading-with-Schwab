@@ -73,6 +73,14 @@ async def loop(bus):
     or skip the other."""
     loop_ = asyncio.get_event_loop()
     last_slot = None
+    # One-shot startup refresh so the Paper Portfolio page has data on first
+    # load. The paper account only changes on user actions (entry/manage/reset
+    # commands re-publish it), so it is NOT polled every tick. Guarded so a
+    # cold DB / missing account never stops the loop from starting.
+    try:
+        await loop_.run_in_executor(None, handlers.refresh_paper_account, bus)
+    except Exception:
+        pass
     while True:
         # Header refresh runs EVERY tick (the header's ~30s cadence), guarded so a
         # quotes/sentiment hiccup never stalls the autoscan below or the loop.

@@ -1,16 +1,22 @@
-"""Paper Portfolio page.
+"""Paper Portfolio page (Tier-3 reader).
 
-Paper-account snapshot cards (``paper_engine.account_snapshot``), open positions
-(``paper_account_db.fetch_open_positions``), and the fills log
-(``fetch_orders``). Actions: reset account, run entry/manage cycle (off-thread).
-Engine owns the cycles; this module marshals + wires.
+This page holds **no engine/proxy/DB call**. The paper-account reads
+(snapshot + open positions + fills) and the entry/manage/reset actions live in
+``services/options_svc/compute`` + ``handlers``; the service writes the account
+view under ``cache:options:paper_account`` and re-publishes it after every
+action. This page only **reads** that payload and formats it, and enqueues
+commands (``refresh_paper`` / ``paper_entry`` / ``paper_manage`` /
+``paper_reset``) onto the Redis bus.
+
+The cross-app ``scoring`` collision guard is gone (the service process loads no
+sentiment code; the page does no engine call). A fetch-free version-poll
+``ui.timer`` repaints when the bus cache version changes (graceful-empty when
+the service is cold / no account exists yet).
 """
-import sys
+import bus_client
+from nicegui import ui
 
-from repo_paths import OPTIONS_SCANNER
-
-if str(OPTIONS_SCANNER) not in sys.path:
-    sys.path.insert(0, str(OPTIONS_SCANNER))
+from pages.ui_guard import guard
 
 
 def _round(value, ndigits=2):
@@ -94,20 +100,11 @@ def order_rows(orders):
 
 
 def render():
-    """Paper Portfolio page: account cards + positions + fills log."""
-    import datetime as dt
-
-    from nicegui import run, ui
-
-    import proxy
-    import paper_account_db
-    import paper_engine
-    import signal_db
-
+    """Paper Portfolio page: account cards + positions + fills log (bus-fed)."""
     ui.label("Paper Portfolio").classes("text-h5")
 
     with ui.row().classes("items-center gap-2 flex-wrap w-full"):
-        ui.button("Reload", icon="refresh", on_click=lambda: _load())
+        ui.button("Reload", icon="refresh", on_click=lambda: _reload())
         ui.button("Run entry cycle", icon="login", on_click=lambda: _cycle("entry")) \
             .props("outline") \
             .tooltip("Simulate auto-entry: scan open captured signals and open paper "
@@ -116,8 +113,6 @@ def render():
             .props("outline") \
             .tooltip("Simulate auto-management: reprice open positions and auto-close any "
                      "that hit their target/stop.")
-        spinner = ui.spinner(size="lg")
-        spinner.visible = False
         ui.space()
         ui.button("Reset", icon="restart_alt", on_click=lambda: _reset()) \
             .props("flat dense size=sm color=negative") \
@@ -130,77 +125,78 @@ def render():
     ui.label("Fills log (last 100)").classes("text-subtitle1 mt-2")
     ord_table = ui.table(columns=order_columns(), rows=[], row_key="order_id").classes("w-full")
 
-    def _load():
+    # Last-seen bus cache version for the fetch-free repaint timer.
+    seen = {"version": None}
+
+    def _populate(pa):
+        """Paint the cards + tables from the cached paper-account view."""
+        pa = pa or {}
+        snap = pa.get("snapshot")
+        has_account = pa.get("has_account")
         cards_box.clear()
-        try:
-            snap = paper_engine.account_snapshot()
-        except Exception:
-            snap = None
         with cards_box:
-            if snap is None:
-                ui.label("No paper account yet — use Reset account to initialize.").classes("opacity-70")
+            if not pa or snap is None or has_account is False:
+                ui.label("No paper account yet — use Reset to initialize.") \
+                    .classes("opacity-70")
             else:
                 for label, value in account_cards(snap):
                     with ui.card().classes("p-2 min-w-[110px]"):
                         ui.label(label).classes("text-xs opacity-60")
                         ui.label(value).classes("text-base font-bold")
-        try:
-            pos_table.rows = position_rows(paper_account_db.fetch_open_positions(None))
-        except Exception:
-            pos_table.rows = []
-        try:
-            ord_table.rows = order_rows(paper_account_db.fetch_orders(None, limit=100, status="FILLED"))
-        except Exception:
-            ord_table.rows = []
+        pos_table.rows = position_rows(pa.get("positions"))
+        ord_table.rows = order_rows(pa.get("orders"))
         pos_table.update()
         ord_table.update()
-        status.text = f"{len(pos_table.rows)} open positions, {len(ord_table.rows)} fills."
+        if not pa:
+            status.text = ""
+        else:
+            status.text = f"{len(pos_table.rows)} open positions, {len(ord_table.rows)} fills."
 
+    @guard
+    def _reload():
+        bus_client.request("options", {"type": "refresh_paper"})
+        ui.notify("Reloading paper account…")
+        status.text = "Reloading…"
+
+    @guard
+    def _cycle(kind):
+        cmd = "paper_entry" if kind == "entry" else "paper_manage"
+        bus_client.request("options", {"type": cmd})
+        ui.notify(f"Running {kind} cycle…")
+        status.text = f"Running {kind} cycle…"
+
+    @guard
     def _reset():
         with ui.dialog() as dlg, ui.card():
             ui.label("Reset paper account?").classes("text-subtitle1")
             bal = ui.number("Starting balance", value=25000.0, format="%.2f")
 
             def confirm():
-                try:
-                    paper_account_db.reset_account(starting_balance=float(bal.value))
-                except Exception as exc:
-                    ui.notify(f"Reset failed: {exc}", type="negative")
-                    return
+                bus_client.request(
+                    "options",
+                    {"type": "paper_reset", "args": {"starting_balance": float(bal.value)}})
                 dlg.close()
-                ui.notify("Paper account reset.", type="positive")
-                _load()
+                ui.notify("Paper account reset requested.", type="positive")
+                status.text = "Resetting…"
 
             with ui.row():
                 ui.button("Confirm", on_click=confirm).props("color=negative")
                 ui.button("Cancel", on_click=dlg.close).props("flat")
         dlg.open()
 
-    def _run_cycle(kind):
-        from . import engines
-        now_date = dt.date.today().isoformat()
-        with engines.options_scoring():  # guard scoring name collision
-            if kind == "entry":
-                signals = signal_db.get_open_signals_with_latest_mark()
-                paper_engine.run_entry_cycle(proxy.schwab_py_client, now_date, signals)
-            else:
-                paper_engine.run_manage_cycle(proxy.schwab_py_client, now_date)
+    # Initial paint from the bus cache (graceful-empty if the service is cold).
+    seen["version"] = bus_client.read_version("options:paper_account")
+    _populate(bus_client.read("options:paper_account") or {})
 
-    async def _cycle(kind):
-        if paper_account_db.get_account() is None:
-            ui.notify("No paper account yet — click Reset to initialize it first.",
-                      type="warning")
+    @guard
+    def _maybe_repaint():
+        # Fetch-free: compare the bus cache version to the last-painted one and
+        # only re-read + repaint on change. The service bumps it after every
+        # paper action (refresh/entry/manage/reset).
+        version = bus_client.read_version("options:paper_account")
+        if version == seen["version"]:
             return
-        spinner.visible = True
-        status.text = f"Running {kind} cycle…"
-        try:
-            await run.io_bound(_run_cycle, kind)
-        except Exception as exc:
-            ui.notify(f"{kind} cycle failed: {exc}", type="negative")
-            return
-        finally:
-            spinner.visible = False
-        ui.notify(f"{kind} cycle complete.", type="positive")
-        _load()
+        seen["version"] = version
+        _populate(bus_client.read("options:paper_account") or {})
 
-    _load()
+    ui.timer(2.0, _maybe_repaint)

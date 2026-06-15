@@ -101,6 +101,93 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     return assign_ids(signals, symbol)
 
 
+# ── Paper account (ported from webgui/pages/options/portfolio.py) ───────────
+# The page read the paper account directly (snapshot + open positions + fills)
+# and ran the entry/manage/reset actions itself. Those reads + actions now live
+# here so the GUI tier only reads the cached view and enqueues commands.
+#
+# LAZY IMPORTS (IMPORTANT): ``paper_engine`` pulls in options-scanner's
+# ``scoring`` module. Importing it at module top would bind the process-wide
+# ``sys.modules['scoring']`` to options-scanner's ``scoring.py`` merely by
+# importing this module — which breaks the sentiment service's ``scoring``
+# package in the *combined* pytest run (all services share one process). So
+# ``paper_engine``/``paper_account_db``/``signal_db`` are imported LAZILY inside
+# each function. The page's ``options_scoring()`` collision guard is therefore
+# NOT ported (process-isolated service; lazy ``import scoring`` happens inside
+# ``paper_engine`` and resolves to options-scanner's unambiguously).
+
+
+def paper_account_view() -> dict:
+    """Read the paper account view: snapshot + open positions + fills + flag.
+
+    Each sub-read is defensively guarded (snapshot→None, lists→[] on failure),
+    mirroring the page's per-read try/except. ``has_account`` lets the GUI show
+    the no-account state without a separate read."""
+    import paper_account_db
+    import paper_engine
+
+    try:
+        snapshot = paper_engine.account_snapshot()
+    except Exception:
+        snapshot = None
+    try:
+        positions = paper_account_db.fetch_open_positions(None)
+    except Exception:
+        positions = []
+    try:
+        orders = paper_account_db.fetch_orders(None, limit=100, status="FILLED")
+    except Exception:
+        orders = []
+    try:
+        has_account = paper_account_db.get_account() is not None
+    except Exception:
+        has_account = False
+
+    return {
+        "snapshot": snapshot,
+        "positions": positions,
+        "orders": orders,
+        "has_account": has_account,
+    }
+
+
+def run_entry_cycle() -> None:
+    """Run the paper auto-entry cycle: scan open captured signals, open positions.
+
+    No ``options_scoring()`` guard (process-isolated; the lazy ``import scoring``
+    happens inside ``paper_engine``). Mirrors the page's entry branch."""
+    import datetime as dt
+
+    import paper_engine
+    import signal_db
+
+    signals = signal_db.get_open_signals_with_latest_mark()
+    paper_engine.run_entry_cycle(_proxy.schwab_py_client, dt.date.today().isoformat(), signals)
+
+
+def run_manage_cycle() -> None:
+    """Run the paper auto-management cycle: reprice + auto-close hits. Mirrors the page."""
+    import datetime as dt
+
+    import paper_engine
+
+    paper_engine.run_manage_cycle(_proxy.schwab_py_client, dt.date.today().isoformat())
+
+
+def reset_paper_account(starting_balance: float) -> None:
+    """Reset the paper account to ``starting_balance``. Mirrors the page's reset."""
+    import paper_account_db
+
+    paper_account_db.reset_account(starting_balance=starting_balance)
+
+
+def has_paper_account() -> bool:
+    """True if a paper account exists (entry/manage short-circuit on False)."""
+    import paper_account_db
+
+    return paper_account_db.get_account() is not None
+
+
 # ── Header strip (ported from webgui/pages/options/header.py) ───────────────
 # These were the GUI's header helpers; they're pure and now run here so the GUI
 # tier reads the whole header view from the bus (no proxy/engine call). As with

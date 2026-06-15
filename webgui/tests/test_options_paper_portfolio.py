@@ -1,4 +1,6 @@
-"""Tests for the Paper Portfolio pure transforms."""
+"""Tests for the Paper Portfolio pure transforms + bus-reader migration."""
+import inspect
+
 from pages.options import portfolio
 
 SNAP = {
@@ -51,3 +53,35 @@ def test_order_rows_maps():
 def test_columns_present():
     assert {c["field"] for c in portfolio.position_columns()} >= {"symbol", "unrealized_pnl", "status"}
     assert {c["field"] for c in portfolio.order_columns()} >= {"side", "fill_price", "status"}
+
+
+# ── Migration regression: the page does NO engine/proxy/DB call ──────────────
+def test_page_imports_no_engine_or_proxy():
+    """The page must not import the engine/proxy/DB or use the scoring guard —
+    those reads/actions moved to the options service (Task 2.6c-1)."""
+    src = inspect.getsource(portfolio)
+    for forbidden in ("paper_engine", "paper_account_db", "signal_db",
+                      "options_scoring", "import proxy", "OPTIONS_SCANNER",
+                      "engines"):
+        assert forbidden not in src, f"portfolio.py still references {forbidden!r}"
+
+
+def test_no_engine_attrs_on_module():
+    """No engine/proxy modules leaked onto the page namespace."""
+    for attr in ("paper_engine", "paper_account_db", "signal_db", "proxy"):
+        assert not hasattr(portfolio, attr)
+
+
+def test_render_graceful_empty(monkeypatch):
+    """render() paints the no-account state from an empty bus cache without error."""
+    import bus_client
+
+    monkeypatch.setattr(bus_client, "read", lambda view: None)
+    monkeypatch.setattr(bus_client, "read_version", lambda view: None)
+
+    # render() builds NiceGUI widgets; a bare call needs a slot context. We assert
+    # it runs end-to-end against an empty cache (graceful-empty) inside one.
+    from nicegui import ui
+
+    with ui.card():  # provide a parent slot for the widgets
+        portfolio.render()
