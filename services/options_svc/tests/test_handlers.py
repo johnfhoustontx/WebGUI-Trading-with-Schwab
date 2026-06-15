@@ -328,6 +328,84 @@ def test_paper_analyze_caches_result(monkeypatch):
     assert msg is not None and msg.get("version") == env.version
 
 
+# ── Captured signals (Task 2.6c-3) ───────────────────────────────────────────
+def _fake_captured_view():
+    return {"signals": [
+        {"signal_id": "X1", "symbol": "SPY", "status": "OPEN"},
+        {"signal_id": "X2", "symbol": "QQQ", "status": "OPEN"},
+    ]}
+
+
+def test_refresh_captured_caches_publishes(monkeypatch):
+    bus = Bus(fake=True)
+    view = _fake_captured_view()
+    monkeypatch.setattr(handlers.compute, "captured_view", lambda: view)
+
+    sub = bus.subscribe("events:options:captured")
+    handlers.refresh_captured(bus)
+    msg = sub.get_message(timeout=1.0)
+    sub.close()
+
+    env = bus.cache_get("cache:options:captured")
+    assert env is not None
+    assert env.payload == view
+    assert msg is not None and msg.get("version") == env.version
+
+
+def test_captured_reprice_caches_signals_and_flags(monkeypatch):
+    """captured_reprice caches BOTH the repriced signal list and the flags list,
+    each under its own view, and publishes both events."""
+    bus = Bus(fake=True)
+    repriced = [{"signal_id": "X1", "symbol": "SPY", "unrealized_pnl": 12.0}]
+    flags = [{"symbol": "SPY", "code": "MONEY_STOP"}]
+    monkeypatch.setattr(handlers.compute, "reprice_captured",
+                        lambda: {"signals": repriced, "flags": flags})
+
+    sub = bus.subscribe("events:options:captured")
+    fsub = bus.subscribe("events:options:captured_flags")
+    handlers.handle_command(bus, Command(type="captured_reprice"))
+    msg = sub.get_message(timeout=1.0)
+    fmsg = fsub.get_message(timeout=1.0)
+    sub.close()
+    fsub.close()
+
+    env = bus.cache_get("cache:options:captured")
+    assert env is not None
+    assert env.payload == {"signals": repriced}
+    assert msg is not None and msg.get("version") == env.version
+
+    fenv = bus.cache_get("cache:options:captured_flags")
+    assert fenv is not None
+    assert fenv.payload == {"flags": flags}
+    assert fmsg is not None and fmsg.get("version") == fenv.version
+
+
+def test_captured_close_then_refresh(monkeypatch):
+    """captured_close calls compute.close_captured with (signal_id, exit_val,
+    reason) then refreshes the signals view."""
+    bus = Bus(fake=True)
+    calls = {"close": None, "refresh": 0}
+
+    monkeypatch.setattr(handlers.compute, "close_captured",
+                        lambda sid, ev, rsn: calls.__setitem__("close", (sid, ev, rsn)))
+
+    def _count_refresh(b):
+        assert b is bus
+        calls["refresh"] += 1
+
+    monkeypatch.setattr(handlers, "refresh_captured", _count_refresh)
+
+    # captured_reload -> just refresh.
+    handlers.handle_command(bus, Command(type="captured_reload"))
+    assert calls["refresh"] == 1
+
+    # captured_close -> close with (signal_id, exit_val, reason) + refresh.
+    handlers.handle_command(bus, Command(type="captured_close", args={
+        "signal_id": "X1", "exit_val": 0.42, "reason": "TOOK_PROFIT"}))
+    assert calls["close"] == ("X1", 0.42, "TOOK_PROFIT")
+    assert calls["refresh"] == 2
+
+
 def test_swing_scan_uses_defaults_for_missing_args(monkeypatch):
     bus = Bus(fake=True)
     seen = {"params": None}

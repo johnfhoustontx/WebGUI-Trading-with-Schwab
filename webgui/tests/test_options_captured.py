@@ -1,4 +1,15 @@
-"""Tests for the Captured Signals pure transforms."""
+"""Tests for the Captured Signals page (Tier-3 reader).
+
+The open-signals read (``signal_db.get_open_signals_with_latest_mark``) and the
+reprice-marks + manual-close actions moved to ``services/options_svc/compute`` +
+``handlers`` — see that service's tests. The page now only reads the signals view
+from the Redis bus and enqueues commands, so it must import NO engine / proxy /
+scoring code. The pure transforms (``captured_columns``/``captured_rows``/
+``synth_from_captured``/``_round``) stay on the page and are unit-tested here.
+"""
+import inspect
+
+import bus_client
 from pages.options import captured
 
 SAMPLE = {
@@ -40,3 +51,30 @@ def test_synth_from_captured_for_detail_panel():
 def test_synth_from_captured_falls_back_to_entry_score():
     s = captured.synth_from_captured({"signal_id": "Z", "entry_score": 55})
     assert s["composite_score"] == 55
+
+
+def test_render_callable():
+    assert callable(captured.render)
+
+
+def test_page_imports_no_engine_or_proxy():
+    """Regression: the Tier-3 page must not pull in engine / proxy / scoring code."""
+    for attr in ("proxy", "signal_db", "signal_repricer", "signal_recommender",
+                 "OPTIONS_SCANNER", "sys"):
+        assert not hasattr(captured, attr), f"captured.py still references {attr}"
+    # Also guard the literal import lines so the strings never creep back.
+    src = inspect.getsource(captured)
+    for forbidden in ("signal_db", "signal_repricer", "signal_recommender",
+                      "OPTIONS_SCANNER", "import proxy", "import sys"):
+        assert forbidden not in src, f"captured.py must not reference {forbidden!r}"
+
+
+def test_render_graceful_empty_cache():
+    """render() must paint without crashing when the bus cache is empty
+    (options service cold) — the Tier-3 graceful-empty path."""
+    from nicegui import ui
+
+    bus_client.reset()  # fresh empty fakeredis cache (no service writes)
+    assert bus_client.read("options:captured") is None  # confirm empty
+    with ui.card():
+        captured.render()  # must not raise

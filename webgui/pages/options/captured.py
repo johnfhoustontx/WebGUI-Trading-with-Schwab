@@ -1,17 +1,26 @@
-"""Captured Signals page.
+"""Captured Signals page (Tier-3 reader).
 
-Lists open signals (from ``signal_db``) with live marks, score drift, and
-recommendations, alongside the shared Trade detail panel. "Refresh marks"
-reprices each open signal off-thread (read-only display update); "Close
-selected" records a manual outcome. Reprice/recommend logic lives in the
-engines; this module marshals + wires.
+Lists open signals with live marks, score drift, and recommendations, alongside
+the shared Trade detail panel. This page holds **no engine/proxy/DB call**: the
+open-signals read and the reprice-marks + manual-close actions live in
+``services/options_svc/compute`` + ``handlers``; the service writes the signals
+view under ``cache:options:captured`` and re-publishes it after every action,
+and the flags from a reprice under ``cache:options:captured_flags``. This page
+only **reads** those payloads and formats them, and enqueues commands
+(``captured_reload`` / ``captured_reprice`` / ``captured_close``) onto the Redis
+bus.
+
+A fetch-free version-poll ``ui.timer`` repaints the table when its bus cache
+version changes; a second watch on ``options:captured_flags`` surfaces stop/target
+hits via ``ui.notify`` when they land. The close dialog stays client-side (input
+collection only). Graceful-empty when the service is cold.
 """
-import sys
+import bus_client
+from nicegui import ui
 
-from repo_paths import OPTIONS_SCANNER
+from pages.ui_guard import guard
 
-if str(OPTIONS_SCANNER) not in sys.path:
-    sys.path.insert(0, str(OPTIONS_SCANNER))
+from . import detail
 
 
 def _round(value, ndigits=2):
@@ -31,7 +40,7 @@ def captured_columns():
 
 
 def captured_rows(signals):
-    """Display rows from signal_db.get_open_signals_with_latest_mark() output."""
+    """Display rows from the open-signals view (cache:options:captured)."""
     rows = []
     for s in signals or []:
         rows.append({
@@ -84,18 +93,7 @@ def synth_from_captured(row):
 
 
 def render():
-    """Captured Signals page: table (left) + shared detail panel (right)."""
-    import datetime as dt
-
-    from nicegui import run, ui
-
-    import proxy
-    import signal_db
-    import signal_recommender
-    import signal_repricer
-
-    from . import detail
-
+    """Captured Signals page: table (left) + shared detail panel (right), bus-fed."""
     ui.label("Captured Signals").classes("text-h5")
 
     raw_by_id: dict = {}
@@ -103,29 +101,30 @@ def render():
     with ui.row().classes("w-full no-wrap gap-4 items-start"):
         with ui.column().classes("flex-grow min-w-0"):
             with ui.row().classes("items-center gap-3"):
-                refresh_btn = ui.button("Reload", icon="refresh")
-                marks_btn = ui.button("Refresh marks (live)", icon="published_with_changes")
-                close_btn = ui.button("Close selected", icon="check_circle").props("outline")
-                spinner = ui.spinner(size="lg")
-                spinner.visible = False
+                ui.button("Reload", icon="refresh", on_click=lambda: _reload())
+                ui.button("Refresh marks (live)", icon="published_with_changes",
+                          on_click=lambda: _reprice())
+                ui.button("Close selected", icon="check_circle",
+                          on_click=lambda: _close()).props("outline")
                 status = ui.label("").classes("opacity-70")
             table = ui.table(columns=captured_columns(), rows=[], row_key="id",
                              selection="single").classes("w-full")
         detail_panel = detail.render()
 
-    def _load():
-        try:
-            sigs = signal_db.get_open_signals_with_latest_mark()
-        except Exception as exc:
-            ui.notify(f"DB read failed: {exc}", type="negative")
-            sigs = []
+    # Last-seen bus cache versions for the fetch-free repaint/notify timers.
+    seen = {"captured": None, "flags": None}
+
+    def _populate(cap):
+        """Paint the signals table from the cached captured view."""
+        cap = cap or {}
+        sigs = cap.get("signals") or []
         raw_by_id.clear()
         for s in sigs:
             if s.get("signal_id"):
                 raw_by_id[s["signal_id"]] = s
         table.rows = captured_rows(sigs)
         table.update()
-        status.text = f"{len(table.rows)} open signals."
+        status.text = f"{len(table.rows)} open signals." if cap else ""
 
     def _select(event):
         row = event.args[1] if isinstance(event.args, list) and len(event.args) > 1 else event.args
@@ -135,53 +134,20 @@ def render():
 
     table.on("rowClick", _select)
 
-    def _reprice_all(rows, client):
-        now = dt.datetime.now(dt.timezone.utc)
-        updates = {}
-        flagged = []
-        for r in rows:
-            try:
-                rep = signal_repricer.reprice_swing(r, client)
-                mark = signal_recommender.build_mark(r, rep, now)
-            except Exception:
-                continue
-            if not mark:
-                continue
-            updates[r.get("signal_id")] = mark
-            code = (mark.get("recommendation_code") or "").upper()
-            if code in ("TARGET_HIT", "MONEY_STOP", "DELTA_STOP", "TIME_STOP"):
-                flagged.append((r.get("symbol"), code))
-        return updates, flagged
+    @guard
+    def _reload():
+        bus_client.request("options", {"type": "captured_reload"})
+        ui.notify("Reloading captured signals…")
+        status.text = "Reloading…"
 
-    async def do_marks():
-        if not table.rows:
-            return
-        marks_btn.disable()
-        spinner.visible = True
-        status.text = "Repricing open signals…"
-        try:
-            updates, flagged = await run.io_bound(_reprice_all, list(raw_by_id.values()),
-                                                  proxy.schwab_py_client)
-        except Exception as exc:
-            ui.notify(f"Reprice failed: {exc}", type="negative")
-            return
-        finally:
-            spinner.visible = False
-            marks_btn.enable()
-        for row in table.rows:
-            m = updates.get(row["id"])
-            if not m:
-                continue
-            row["unrealized_pnl"] = _round(m.get("unrealized_pnl"))
-            row["current_score"] = m.get("current_score")
-            row["score_drift"] = m.get("score_drift")
-            row["recommendation"] = m.get("recommendation") or row["recommendation"]
-        table.update()
-        status.text = f"Repriced {len(updates)} signals."
-        for sym, code in flagged:
-            ui.notify(f"{sym}: {code} — consider closing", type="warning")
+    @guard
+    def _reprice():
+        bus_client.request("options", {"type": "captured_reprice"})
+        ui.notify("Repricing open signals…")
+        status.text = "Repricing…"
 
-    def do_close():
+    @guard
+    def _close():
         sel = table.selected
         if not sel:
             ui.notify("Select a signal first.", type="warning")
@@ -193,22 +159,41 @@ def render():
             reason = ui.input("Reason", value="MANUAL_CLOSE")
 
             def confirm():
-                try:
-                    signal_db.close_signal_manually(row["id"], float(exit_val.value),
-                                                    reason.value or "MANUAL_CLOSE")
-                except Exception as exc:
-                    ui.notify(f"Close failed: {exc}", type="negative")
-                    return
+                bus_client.request("options", {
+                    "type": "captured_close",
+                    "args": {"signal_id": row["id"], "exit_val": float(exit_val.value),
+                             "reason": reason.value or "MANUAL_CLOSE"},
+                })
                 dlg.close()
-                ui.notify("Signal closed.", type="positive")
-                _load()
+                ui.notify("Close requested.", type="positive")
+                status.text = "Closing…"
 
             with ui.row():
                 ui.button("Confirm", on_click=confirm).props("color=negative")
                 ui.button("Cancel", on_click=dlg.close).props("flat")
         dlg.open()
 
-    refresh_btn.on_click(_load)
-    marks_btn.on_click(do_marks)
-    close_btn.on_click(do_close)
-    _load()
+    # Initial paint from the bus cache (graceful-empty if the service is cold).
+    seen["captured"] = bus_client.read_version("options:captured")
+    seen["flags"] = bus_client.read_version("options:captured_flags")
+    _populate(bus_client.read("options:captured") or {})
+
+    @guard
+    def _maybe_repaint():
+        # Fetch-free: only re-read + repaint the table when its version changes
+        # (the service bumps it after reload/reprice/close). Also watch the flags
+        # view and notify each stop/target hit via ui.notify when it lands.
+        version = bus_client.read_version("options:captured")
+        if version != seen["captured"]:
+            seen["captured"] = version
+            _populate(bus_client.read("options:captured") or {})
+
+        fv = bus_client.read_version("options:captured_flags")
+        if fv != seen["flags"]:
+            seen["flags"] = fv
+            flags = (bus_client.read("options:captured_flags") or {}).get("flags") or []
+            for f in flags:
+                ui.notify(f"{f.get('symbol')}: {f.get('code')} — consider closing",
+                          type="warning")
+
+    ui.timer(2.0, _maybe_repaint)

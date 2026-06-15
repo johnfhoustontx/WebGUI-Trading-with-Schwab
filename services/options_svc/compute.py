@@ -268,6 +268,85 @@ def analyze_paper(trade_id) -> dict:
     }
 
 
+# ── Captured signals (ported from webgui/pages/options/captured.py) ─────────
+# The page read open signals directly (``signal_db.get_open_signals_with_latest_mark``)
+# and ran the reprice-marks + manual-close actions itself. Those reads + actions
+# now live here so the GUI tier only reads the cached view and enqueues commands.
+#
+# LAZY IMPORTS (IMPORTANT): ``signal_db``/``signal_repricer``/``signal_recommender``
+# can pull in options-scanner's ``scoring`` transitively. Importing them at module
+# top would bind the process-wide ``sys.modules['scoring']`` merely by importing
+# this module — which breaks the sentiment service's ``scoring`` package in the
+# *combined* pytest run (all services share one process). So all three are
+# imported LAZILY inside each function. ``reprice_swing`` is called with
+# ``_proxy.schwab_py_client`` (mirrors the page).
+
+_STOP_CODES = ("TARGET_HIT", "MONEY_STOP", "DELTA_STOP", "TIME_STOP")
+
+
+def captured_view() -> dict:
+    """Read the open-signals view: ``{"signals": [...]}``.
+
+    Defensively guarded → ``{"signals": []}`` on any failure, mirroring the
+    page's per-read try/except. The GUI tier reads this cached view directly."""
+    import signal_db
+
+    try:
+        return {"signals": signal_db.get_open_signals_with_latest_mark()}
+    except Exception:
+        return {"signals": []}
+
+
+def reprice_captured() -> dict:
+    """Reprice all open signals; merge mark fields into the rows + collect flags.
+
+    Ports the page's ``_reprice_all`` loop into compute: for each open signal,
+    reprice + build a mark, merge the mark's display fields into the signal dict
+    (``unrealized_pnl``/``current_score``/``score_drift``/``recommendation`` — NOT
+    persisted), and flag any signal whose recommendation code is one of the four
+    stop/target codes. Defensive per-signal (continue on failure). Returns
+    ``{"signals": [...repriced...], "flags": [{"symbol","code"}, ...]}``."""
+    import datetime as dt
+
+    import signal_db
+    import signal_recommender
+    import signal_repricer
+
+    try:
+        sigs = signal_db.get_open_signals_with_latest_mark()
+    except Exception:
+        sigs = []
+
+    now = dt.datetime.now(dt.timezone.utc)
+    flags = []
+    for r in sigs:
+        try:
+            rep = signal_repricer.reprice_swing(r, _proxy.schwab_py_client)
+            mark = signal_recommender.build_mark(r, rep, now)
+        except Exception:
+            continue
+        if not mark:
+            continue
+        # Merge the mark's display fields into the row (mirrors the page; not
+        # persisted — the GUI reads these off the cached repriced list).
+        r["unrealized_pnl"] = mark.get("unrealized_pnl")
+        r["current_score"] = mark.get("current_score")
+        r["score_drift"] = mark.get("score_drift")
+        if mark.get("recommendation") is not None:
+            r["recommendation"] = mark.get("recommendation")
+        code = (mark.get("recommendation_code") or "").upper()
+        if code in _STOP_CODES:
+            flags.append({"symbol": r.get("symbol"), "code": code})
+    return {"signals": sigs, "flags": flags}
+
+
+def close_captured(signal_id, exit_val: float, reason: str) -> None:
+    """Manually close a captured signal at ``exit_val``. Mirrors the page's close."""
+    import signal_db
+
+    signal_db.close_signal_manually(signal_id, float(exit_val), reason or "MANUAL_CLOSE")
+
+
 # ── Header strip (ported from webgui/pages/options/header.py) ───────────────
 # These were the GUI's header helpers; they're pure and now run here so the GUI
 # tier reads the whole header view from the bus (no proxy/engine call). As with

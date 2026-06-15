@@ -89,6 +89,14 @@ async def loop(bus):
         await loop_.run_in_executor(None, handlers.refresh_paper_trades, bus)
     except Exception:
         pass
+    # One-shot startup refresh of the open captured-signals view so the Captured
+    # Signals page has data on first load. The signal set only changes on user
+    # actions (reload/reprice/close commands re-publish it), so it is NOT polled
+    # every tick. Guarded so a cold DB never stops the loop from starting.
+    try:
+        await loop_.run_in_executor(None, handlers.refresh_captured, bus)
+    except Exception:
+        pass
     while True:
         # Header refresh runs EVERY tick (the header's ~30s cadence), guarded so a
         # quotes/sentiment hiccup never stalls the autoscan below or the loop.

@@ -34,6 +34,12 @@ EVENT_PAPER_TRADES = "events:options:paper_trades"
 CACHE_PAPER_ANALYZE = "cache:options:paper_analyze"
 EVENT_PAPER_ANALYZE = "events:options:paper_analyze"
 
+CACHE_CAPTURED = "cache:options:captured"
+EVENT_CAPTURED = "events:options:captured"
+
+CACHE_CAPTURED_FLAGS = "cache:options:captured_flags"
+EVENT_CAPTURED_FLAGS = "events:options:captured_flags"
+
 # Defaults mirror the page's input defaults (symbol SPY, 5-30 DTE, the put/call
 # delta gates, min credit 10% -> 0.10 fraction). The page sends the fraction.
 _SWING_DEFAULTS = {
@@ -129,6 +135,17 @@ def refresh_paper_trades(bus) -> None:
     bus.publish(EVENT_PAPER_TRADES, {"version": version})
 
 
+def refresh_captured(bus) -> None:
+    """Read the open-signals view and publish it to the bus.
+
+    No strict contract: the view is a loosely-shaped read-only dict
+    (``{"signals": [...]}``) that only the Captured Signals page consumes, and
+    ``compute.captured_view`` is already fully defensive."""
+    data = compute.captured_view()
+    version = bus.cache_set(CACHE_CAPTURED, data)
+    bus.publish(EVENT_CAPTURED, {"version": version})
+
+
 def handle_command(bus, command) -> None:
     """Dispatch a ``cmd:options`` command. ``rescan`` → full rescan;
     ``swing_scan`` → on-demand parameterized swing scan; ``refresh_paper`` →
@@ -137,7 +154,10 @@ def handle_command(bus, command) -> None:
     account then refresh; ``paper_reload`` → re-read the trade ledger;
     ``paper_close``/``paper_delete``/``paper_delete_closed`` → run the lifecycle
     action then refresh the ledger; ``paper_analyze`` → analyze the selected
-    trade, cache the result + publish; else no-op."""
+    trade, cache the result + publish; ``captured_reload`` → re-read open signals;
+    ``captured_reprice`` → reprice all open signals, cache the repriced list +
+    flags (two views) + publish both; ``captured_close`` → manually close a signal
+    then refresh; else no-op."""
     if command.type == "rescan":
         rescan(bus)
     elif command.type == "swing_scan":
@@ -173,3 +193,18 @@ def handle_command(bus, command) -> None:
         res = compute.analyze_paper(command.args.get("trade_id"))
         version = bus.cache_set(CACHE_PAPER_ANALYZE, res)
         bus.publish(EVENT_PAPER_ANALYZE, {"version": version})
+    elif command.type == "captured_reload":
+        refresh_captured(bus)
+    elif command.type == "captured_reprice":
+        res = compute.reprice_captured()
+        # Cache the repriced signal list (so the table shows fresh marks) +
+        # the flags list (so the page can notify) under separate views.
+        ver = bus.cache_set(CACHE_CAPTURED, {"signals": res["signals"]})
+        bus.publish(EVENT_CAPTURED, {"version": ver})
+        fver = bus.cache_set(CACHE_CAPTURED_FLAGS, {"flags": res["flags"]})
+        bus.publish(EVENT_CAPTURED_FLAGS, {"version": fver})
+    elif command.type == "captured_close":
+        compute.close_captured(command.args.get("signal_id"),
+                               command.args.get("exit_val", 0.0),
+                               command.args.get("reason", "MANUAL_CLOSE"))
+        refresh_captured(bus)

@@ -306,6 +306,103 @@ def test_analyze_paper_defensive_on_missing_verdict(monkeypatch):
     assert out == {"trade_id": "gone", "symbol": None, "action": "—"}
 
 
+# ── Captured signals (moved from webgui/pages/options/captured.py) ──────────
+def test_captured_view_shape(monkeypatch):
+    import sys as _sys
+    import types as _types
+
+    sigs = [{"signal_id": "X1", "symbol": "SPY"}]
+    monkeypatch.setitem(_sys.modules, "signal_db",
+                        _types.SimpleNamespace(get_open_signals_with_latest_mark=lambda: sigs))
+    assert compute.captured_view() == {"signals": sigs}
+
+
+def test_captured_view_defensive_on_failure(monkeypatch):
+    import sys as _sys
+    import types as _types
+
+    def _boom():
+        raise RuntimeError("db cold")
+
+    monkeypatch.setitem(_sys.modules, "signal_db",
+                        _types.SimpleNamespace(get_open_signals_with_latest_mark=_boom))
+    assert compute.captured_view() == {"signals": []}
+
+
+def test_reprice_captured_merges_marks_and_flags(monkeypatch):
+    """reprice_captured reprices each open signal, merges the mark's display
+    fields into the row, and flags the four stop/target codes."""
+    import sys as _sys
+    import types as _types
+
+    sigs = [
+        {"signal_id": "X1", "symbol": "SPY", "recommendation": "HOLD"},
+        {"signal_id": "X2", "symbol": "QQQ", "recommendation": "HOLD"},
+    ]
+    monkeypatch.setitem(_sys.modules, "signal_db",
+                        _types.SimpleNamespace(get_open_signals_with_latest_mark=lambda: sigs))
+    monkeypatch.setitem(_sys.modules, "signal_repricer",
+                        _types.SimpleNamespace(reprice_swing=lambda r, c: {"rep": r["signal_id"]}))
+
+    marks = {
+        "X1": {"unrealized_pnl": 12.0, "current_score": 68, "score_drift": -4,
+               "recommendation": "HOLD", "recommendation_code": "HOLD"},
+        "X2": {"unrealized_pnl": -30.0, "current_score": 40, "score_drift": -20,
+               "recommendation": "CLOSE", "recommendation_code": "money_stop"},
+    }
+    monkeypatch.setitem(_sys.modules, "signal_recommender",
+                        _types.SimpleNamespace(build_mark=lambda r, rep, now: marks[r["signal_id"]]))
+
+    out = compute.reprice_captured()
+    by_id = {s["signal_id"]: s for s in out["signals"]}
+    # Mark display fields merged into the rows.
+    assert by_id["X1"]["unrealized_pnl"] == 12.0
+    assert by_id["X1"]["current_score"] == 68
+    assert by_id["X2"]["score_drift"] == -20
+    assert by_id["X2"]["recommendation"] == "CLOSE"
+    # Only the stop/target code is flagged (case-insensitive).
+    assert out["flags"] == [{"symbol": "QQQ", "code": "MONEY_STOP"}]
+
+
+def test_reprice_captured_skips_failed_signal(monkeypatch):
+    """A per-signal reprice failure is skipped (continue), not fatal."""
+    import sys as _sys
+    import types as _types
+
+    sigs = [{"signal_id": "X1", "symbol": "SPY"}, {"signal_id": "X2", "symbol": "QQQ"}]
+    monkeypatch.setitem(_sys.modules, "signal_db",
+                        _types.SimpleNamespace(get_open_signals_with_latest_mark=lambda: sigs))
+
+    def _reprice(r, c):
+        if r["signal_id"] == "X1":
+            raise RuntimeError("no chain")
+        return {"ok": True}
+
+    monkeypatch.setitem(_sys.modules, "signal_repricer",
+                        _types.SimpleNamespace(reprice_swing=_reprice))
+    monkeypatch.setitem(_sys.modules, "signal_recommender",
+                        _types.SimpleNamespace(build_mark=lambda r, rep, now: {
+                            "unrealized_pnl": 1.0, "recommendation_code": "TARGET_HIT"}))
+
+    out = compute.reprice_captured()
+    # Both signals returned, but only X2 was repriced + flagged.
+    assert {s["signal_id"] for s in out["signals"]} == {"X1", "X2"}
+    assert out["flags"] == [{"symbol": "QQQ", "code": "TARGET_HIT"}]
+
+
+def test_close_captured_calls_close_signal_manually(monkeypatch):
+    import sys as _sys
+    import types as _types
+
+    seen = {}
+    monkeypatch.setitem(_sys.modules, "signal_db", _types.SimpleNamespace(
+        close_signal_manually=lambda sid, ev, rsn: seen.__setitem__("args", (sid, ev, rsn))))
+
+    compute.close_captured("X1", "0.45", "")
+    # exit_val coerced to float; blank reason -> MANUAL_CLOSE default.
+    assert seen["args"] == ("X1", 0.45, "MANUAL_CLOSE")
+
+
 # ── Header helpers (moved from webgui/tests/test_options_header.py) ──────────
 def test_sentiment_dot_no_data_when_inactive():
     assert compute.sentiment_dot({"active": False})[1] == "No data"
