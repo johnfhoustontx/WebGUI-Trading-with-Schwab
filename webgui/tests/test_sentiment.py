@@ -1,4 +1,5 @@
 """Pure-transform tests for the Sentiment page."""
+import bus_client
 from pages import sentiment as S
 
 
@@ -87,3 +88,18 @@ def test_commit_trend_regime_holds_on_single_bar_flip():
     assert tr.state != "bull_trend"      # raw verdict flipped (range)
     assert committed == "bull_trend"     # hysteresis held the committed state
     assert tr.state != committed
+
+
+def test_render_graceful_empty_cache():
+    """render() must paint without crashing when the bus cache is empty
+    (service not running / cold start) — the Tier-3 graceful-empty path.
+
+    The webgui suite has no NiceGUI User fixture; rendering inside a slot
+    context (a card) is enough to exercise the widget wiring + initial paint.
+    """
+    from nicegui import ui
+
+    bus_client.reset()  # fresh empty fakeredis cache (no service writes)
+    assert bus_client.read("sentiment:composite") is None  # confirm empty
+    with ui.card():
+        S.render()  # must not raise

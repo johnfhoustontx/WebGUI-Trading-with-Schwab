@@ -161,12 +161,6 @@ def test_rolling_averages_label():
     assert rising[2] == "Rising"
 
 
-def test_sector_industry_etfs():
-    etfs = S.sector_industry_etfs(_sector_data(), "Information Technology")
-    assert etfs == ["SMH"]
-    assert S.sector_industry_etfs(_sector_data(), "Utilities") == []
-
-
 def test_industry_rows_built():
     quotes = {"SMH": {"change_pct": 2.5}}
     trends = {"SMH": {"week_pct": 4.0, "month_pct": 9.0}}
@@ -205,45 +199,3 @@ def test_traffic_color_bands():
     assert S.traffic_color(4.5) == S.CLR_RED
     assert S.traffic_color(5.5) == S.CLR_YELLOW
     assert S.traffic_color("bad") == S.CLR_YELLOW
-
-
-def test_refresh_cache_sync_populates_cache(monkeypatch):
-    """_refresh_cache_sync updates _CACHE off any UI (loaders + bridge stubbed)."""
-    snap = _full_snap(6.81)
-    monkeypatch.setattr(S, "_load_snapshots", lambda *a, **k: ([snap], [1.0, 2.0]))
-    monkeypatch.setattr(S, "_load_live", lambda *a, **k: None)
-    monkeypatch.setattr(S, "is_rth", lambda now: False)
-    monkeypatch.setattr(S, "_load_sector_perf", lambda spy: {"sector_data": [], "quotes": {}})
-    monkeypatch.setattr(S, "_proxy_up", lambda: True)
-    wrote = {}
-    monkeypatch.setattr(S, "build_and_write_bridge",
-                        lambda snaps, spy, live, sector: wrote.update(
-                            {"snaps": snaps, "spy": spy, "live": live, "sector": sector}))
-    S._refresh_cache_sync(with_sectors=True)
-    assert S._CACHE["snaps"] == [snap]
-    assert S._CACHE["spy"] == [1.0, 2.0]
-    assert S._CACHE["live"] is None
-    assert S._CACHE["sector"] == {"sector_data": [], "quotes": {}}
-    assert S._CACHE["proxy_up"] is True
-    assert S._CACHE["composite_at"] is not None
-    assert wrote["snaps"] == [snap] and wrote["live"] is None
-
-
-def test_start_background_refresh_idempotent(monkeypatch):
-    """start_background_refresh creates the loop task exactly once."""
-    import asyncio
-    calls = {"n": 0}
-
-    def _fake_create_task(coro):
-        calls["n"] += 1
-        coro.close()  # avoid "coroutine never awaited" warning
-
-    monkeypatch.setattr(asyncio, "create_task", _fake_create_task)
-    S._BG["started"] = False
-    try:
-        S.start_background_refresh()
-        S.start_background_refresh()
-        assert calls["n"] == 1
-        assert S._BG["started"] is True
-    finally:
-        S._BG["started"] = False

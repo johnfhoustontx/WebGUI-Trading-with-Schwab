@@ -1,7 +1,17 @@
 """Sentiment page — composite gauge + components + 30d history + trend regime.
 
-Thin NiceGUI layer over the copied ``history_backfill`` + ``scoring`` engines.
-Pure transforms here are unit-tested; ``render()`` wires widgets + timers.
+Tier-3 reader: this page holds **no engine calls and no refresh loop**. It reads
+three cache views off the Redis bus (published by ``services/sentiment_svc``) and
+renders them with the pure display transforms in this module:
+
+* ``sentiment:composite`` → ``{"live", "composite_at", "proxy_up"}``
+* ``sentiment:history``   → ``{"snaps", "spy"}``
+* ``sentiment:sectors``   → ``{"sector", "industries", "sector_at"}``
+
+The pure transforms (``traffic_color``, ``composite_series``, ``commit_trend_regime``,
+table/figure builders, …) are unit-tested. ``render()`` wires widgets, a Refresh
+button that enqueues a ``cmd:sentiment`` command, and a fetch-free version-poll
+``ui.timer`` that repaints when the bus cache version changes.
 """
 import sys
 
@@ -10,14 +20,16 @@ from repo_paths import SENTIMENT
 if str(SENTIMENT) not in sys.path:
     sys.path.insert(0, str(SENTIMENT))
 
+# Scoring imports used by the KEPT pure transforms below (velocity/divergence,
+# trend-regime hysteresis replay, cap-weighted sector pct). These are pure
+# functions over data; no proxy/engine calls happen at import.
 from scoring import WEIGHTS  # noqa: E402
 from scoring import composite as scoring_composite  # noqa: E402
 from scoring import trend_regime as trend_regime  # noqa: E402
 from scoring import sector_perf as scoring_sector  # noqa: E402
-from scoring import rotation as scoring_rotation    # noqa: E402
-import live_composite  # noqa: E402,F401  (eager: pins module; never lazy)
-from live_composite import (  # noqa: E402
-    signal_band, compute_live, build_bridge_payload)
+from live_composite import signal_band  # noqa: E402  (pure score-band -> labels)
+
+import bus_client  # noqa: E402
 from pages.ui_guard import guard, guard_async  # noqa: E402
 
 CLR_GREEN = "#66bb6a"
@@ -26,13 +38,6 @@ CLR_YELLOW = "#ffd54f"
 CLR_FLAT = "#9e9e9e"
 CLR_CYAN = "#3fb6c7"
 LINE_COLOR = "#42a5f5"
-
-# In-process cache so navigating away/back repaints instantly without re-fetch.
-# Single-user app (see root CLAUDE.md); lost on server restart.
-_CACHE = {"snaps": None, "spy": None, "sector": None, "live": None,
-          "expanded": set(), "industry": {},
-          "composite_at": None, "sector_at": None,
-          "proxy_up": None}
 
 # (component_scores key, display name, weight or None if out of composite)
 COMPONENTS = [
@@ -182,8 +187,8 @@ def rrg_color(quadrant):
 
 def pcr_from_chain(chain):
     """Sum put vs call totalVolume from a Schwab /chains payload -> ratio.
-    Returns None when no chain or zero call volume. Ported from source
-    sentiment_dashboard.py:2939-2953."""
+    Returns None when no chain or zero call volume. Pure transform retained
+    for display/test parity (chain fetching itself lives in the service)."""
     if not chain:
         return None
     pv = cv = 0
@@ -203,8 +208,7 @@ def pcr_from_chain(chain):
 
 
 def _pct_change_n(closes, n):
-    """%-change from n sessions ago to last close, or None. Mirrors source
-    _pct_change_n (uses close[-(n+1)])."""
+    """%-change from n sessions ago to last close, or None."""
     if not closes or len(closes) < n + 1:
         return None
     prev = float(closes[-(n + 1)])
@@ -296,21 +300,8 @@ def rotation_banner(rot):
     return regime, color, detail
 
 
-def sector_industry_etfs(sector_data, sector_name):
-    """Industry ETF symbols under a sector (kind=='industry', valid etf)."""
-    out = []
-    for r in sector_data:
-        if r.get("kind") != "industry" or r.get("sector") != sector_name:
-            continue
-        etf = r.get("etf")
-        if etf and etf != "n/a" and len(str(etf)) <= 6:
-            out.append(etf)
-    return out
-
-
 def industry_rows(sector_data, sector_name, ind_quotes, ind_trends, ind_pcr=None, ind_quadrants=None):
-    """Indented rows for a sector's industries: day/week/month % only
-    (pcr/rrg blank — industry option volume is too thin)."""
+    """Indented rows for a sector's industries: day/week/month % + pcr/rrg."""
     rows = []
     for r in sector_data:
         if r.get("kind") != "industry" or r.get("sector") != sector_name:
@@ -341,142 +332,6 @@ def is_rth(now):
         return False
     hm = (now.hour, now.minute)
     return (8, 30) <= hm < (15, 0)
-
-
-def _load_live():
-    """Off-thread: live intraday composite snapshot (or None on failure)."""
-    import proxy, sectors_ref
-    try:
-        sd = sectors_ref.load_sectors_data()
-        return compute_live(proxy.schwab_client, sd)
-    except Exception:
-        return None
-
-
-def _load_snapshots(days=35):
-    """Off-thread: full scoring path via the copied backfill engine.
-    Returns (snapshots, spy_closes)."""
-    import proxy
-    import sectors_ref
-    from history_backfill import backfill_history
-
-    sector_data = sectors_ref.load_sectors_data()
-    snaps, _stats = backfill_history(proxy.schwab_client, sector_data, [], days=days)
-    spy_df = proxy.schwab_client.get_daily_history("SPY", months=12)
-    spy_closes = (
-        [float(c) for c in spy_df["close"].tolist()]
-        if spy_df is not None else []
-    )
-    return snaps, spy_closes
-
-
-def _proxy_up():
-    """Best-effort proxy reachability (run off-thread)."""
-    import proxy
-    try:
-        return bool(proxy.health().get("up"))
-    except Exception:
-        return False
-
-
-def _load_industries(etfs, spy_closes):
-    """Off-thread: quotes + week/month trends + P/C + RRG for industry ETFs."""
-    import proxy
-    from datetime import date, timedelta
-    try:
-        quotes = proxy.schwab_client.get_quotes(list(etfs)) or {}
-    except Exception:
-        quotes = {}
-    trends, closes = {}, {}
-    for etf in etfs:
-        try:
-            df = proxy.schwab_client.get_daily_history(etf, months=3)
-        except Exception:
-            df = None
-        if df is None:
-            continue
-        cl = [float(c) for c in df["close"].tolist()]
-        closes[etf] = cl
-        d3, wk, mo = week_month_from_closes(cl)
-        trends[etf] = {"day3_pct": d3, "week_pct": wk, "month_pct": mo}
-    pcr = {}
-    today_iso = date.today().isoformat()
-    to_iso = (date.today() + timedelta(days=30)).isoformat()
-    for etf in etfs:
-        try:
-            chain = proxy.schwab_client._request("/chains", params={
-                "symbol": etf, "contractType": "ALL", "range": "NTM",
-                "strikeCount": 50, "fromDate": today_iso, "toDate": to_iso})
-        except Exception:
-            chain = None
-        v = pcr_from_chain(chain)
-        if v is not None:
-            pcr[etf] = v
-    quads = scoring_rotation.compute_rrg_quadrants(closes, spy_closes or [],
-                                                   rs_window=50, mom_window=20)
-    return {"quotes": quotes, "trends": trends, "pcr": pcr, "quadrants": quads}
-
-
-def _load_sector_perf(spy_closes):
-    """Off-thread: fetch sector quotes + history + P/C, compute rotation/RRG.
-    Returns a dict the page renders. spy_closes reused from the composite load."""
-    import proxy
-    import sectors_ref
-    from datetime import date, timedelta
-
-    sd = sectors_ref.load_sectors_data()
-    etfs = [r["etf"] for r in sd if r.get("kind") == "sector" and r.get("etf")]
-
-    try:
-        quotes = proxy.schwab_client.get_quotes(etfs) or {}
-    except Exception:
-        quotes = {}
-
-    trends, closes = {}, {}
-    for etf in etfs:
-        try:
-            df = proxy.schwab_client.get_daily_history(etf, months=3)
-        except Exception:
-            df = None
-        if df is None:
-            continue
-        cl = [float(c) for c in df["close"].tolist()]
-        closes[etf] = cl
-        d3, wk, mo = week_month_from_closes(cl)
-        trends[etf] = {"day3_pct": d3, "week_pct": wk, "month_pct": mo}
-
-    pcr = {}
-    today_iso = date.today().isoformat()
-    to_iso = (date.today() + timedelta(days=30)).isoformat()
-    for etf in etfs:
-        try:
-            chain = proxy.schwab_client._request("/chains", params={
-                "symbol": etf, "contractType": "ALL", "range": "NTM",
-                "strikeCount": 50, "fromDate": today_iso, "toDate": to_iso})
-        except Exception:
-            chain = None
-        v = pcr_from_chain(chain)
-        if v is not None:
-            pcr[etf] = v
-
-    try:
-        irx_q = proxy.schwab_client.get_quote("$IRX") or {}
-        irx = irx_q.get("last") if isinstance(irx_q, dict) else None
-    except Exception:
-        irx = None
-
-    quads = scoring_rotation.compute_rrg_quadrants(closes, spy_closes or [],
-                                                   rs_window=50, mom_window=20)
-    sp_weights = {r["etf"]: r.get("sp_weight", 0.0)
-                  for r in sd if r.get("kind") == "sector" and r.get("etf")}
-    try:
-        dual = scoring_rotation.compute_dual_momentum(closes, sp_weights, irx,
-                                                      lookback_days=63)
-    except Exception:
-        dual = {}
-    rot = scoring_rotation.compute_rotation(sd, trends, quotes)
-    return {"sector_data": sd, "quotes": quotes, "trends": trends,
-            "pcr": pcr, "quadrants": quads, "dual": dual, "rotation": rot}
 
 
 def component_table_rows(snapshot, rotation_value=None, sector_value=None):
@@ -535,93 +390,35 @@ def rolling_averages(prior_scores):
     return round(a5, 2), round(a20, 2), label
 
 
-def build_and_write_bridge(snaps, spy, live, sector):
-    """Build the bridge payload from cache/state data and write it. Defensive."""
-    try:
-        import bridge
-        from datetime import datetime, timezone
-        latest = live or (snaps[-1] if snaps else None)
-        if not latest:
-            return
-        prior = composite_series(snaps or [])[1]
-        trend = None
-        if spy:
-            tr, committed, _d = commit_trend_regime(spy)
-            trend = {"state": committed, "label": trend_regime.STATE_LABELS[committed],
-                     "description": trend_regime.STATE_DESCRIPTIONS[committed],
-                     "raw_state": tr.state, "spy_close": round(tr.spy_close, 4),
-                     "sma_50": round(tr.sma_50, 4), "sma_200": round(tr.sma_200, 4),
-                     "sma_200_slope_pct": round(tr.sma_200_slope_pct, 4),
-                     "drawdown_pct": round(tr.drawdown_pct, 4), "confidence": round(tr.confidence, 3)}
-        sec_arg = None
-        if sector:
-            sec_arg = {"sector_data": sector.get("sector_data"),
-                       "quotes": sector.get("quotes"), "dual": sector.get("dual")}
-        payload = build_bridge_payload(latest, prior, spy or [],
-                                       datetime.now(timezone.utc).isoformat(),
-                                       sector=sec_arg, trend=trend)
-        bridge.write_bridge(payload)
-    except Exception:
-        pass
-
-
-_BG = {"started": False, "refreshing": False}
-
-
-def _refresh_cache_sync(with_sectors=False):
-    """Synchronous cache update (run in an executor). Updates _CACHE + bridge.
-    No NiceGUI/page UI access — safe with zero clients."""
+def _parse_iso(value):
+    """Parse an ISO timestamp string -> datetime, or None. Tolerant of a
+    trailing 'Z' and of already-datetime inputs (returns them unchanged)."""
+    if value is None:
+        return None
     from datetime import datetime
-    from zoneinfo import ZoneInfo
-    snaps, spy = _load_snapshots()
-    _CACHE["snaps"], _CACHE["spy"] = snaps, spy
-    live = _load_live()  # always live (v4.3 sector-P/C + dual-momentum); matches legacy
-    _CACHE["live"] = live
-    if with_sectors:
-        try:
-            _CACHE["sector"] = _load_sector_perf(spy)
-            _CACHE["sector_at"] = datetime.now()
-        except Exception:
-            pass
-    _CACHE["composite_at"] = datetime.now()
-    _CACHE["proxy_up"] = _proxy_up()
-    build_and_write_bridge(snaps, spy, live, _CACHE.get("sector"))
-
-
-async def refresh_cache(with_sectors=False):
-    """Off-thread cache refresh; never raises; non-reentrant."""
-    if _BG["refreshing"]:
-        return
-    _BG["refreshing"] = True
+    if isinstance(value, datetime):
+        return value
     try:
-        import asyncio
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, _refresh_cache_sync, with_sectors)
-    except Exception:
-        pass
-    finally:
-        _BG["refreshing"] = False
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
 
 
-async def _bg_loop():
-    import asyncio
-    await refresh_cache(with_sectors=True)
-    while True:
-        await asyncio.sleep(120)
-        await refresh_cache(with_sectors=False)
-
-
-def start_background_refresh():
-    """Start the 120s server-side refresher (idempotent). Call once at startup."""
-    import asyncio
-    if _BG["started"]:
-        return
-    _BG["started"] = True
-    asyncio.create_task(_bg_loop())
+def _fmt_time(value):
+    """ISO timestamp (or datetime) -> local 'HH:MM:SS', or '' on failure."""
+    dt = _parse_iso(value)
+    if dt is None:
+        return ""
+    try:
+        from datetime import timezone
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(tz=None).replace(tzinfo=None)
+        return dt.strftime("%H:%M:%S")
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def render():
-    import nicegui.run as ng_run
     from nicegui import ui
 
     ui.add_css('''
@@ -634,25 +431,40 @@ def render():
 
     from pages.options.svg import speedometer_svg
 
+    def _read_cache():
+        """Pull the three sentiment cache views off the bus into ``state``.
+        Graceful-empty: any missing view yields empty data (page renders a
+        waiting placeholder rather than crashing)."""
+        composite = bus_client.read("sentiment:composite") or {}
+        history = bus_client.read("sentiment:history") or {}
+        sectors = bus_client.read("sentiment:sectors") or {}
+        state["live"] = composite.get("live")
+        state["composite_at"] = composite.get("composite_at")
+        state["proxy_up"] = composite.get("proxy_up")
+        state["snaps"] = history.get("snaps") or []
+        state["spy"] = history.get("spy") or []
+        state["sector"] = sectors.get("sector")
+        state["industries"] = sectors.get("industries") or {}
+        state["sector_at"] = sectors.get("sector_at")
+
+    # Page-local UI state (per render closure; expanded set is page-local, not
+    # module-global, per webgui conventions).
     state = {
-        "snaps": _CACHE["snaps"] or [],
-        "spy": _CACHE["spy"] or [],
-        "sector": _CACHE["sector"],
-        "live": _CACHE.get("live"),
-        "expanded": set(_CACHE["expanded"]),
-        "industry": dict(_CACHE["industry"]),
-        "composite_at": _CACHE.get("composite_at"),
-        "sector_at": _CACHE.get("sector_at"),
-        "proxy_up": _CACHE.get("proxy_up"),
+        "snaps": [], "spy": [], "sector": None, "live": None,
+        "industries": {}, "expanded": set(),
+        "composite_at": None, "sector_at": None, "proxy_up": None,
+        # last-seen bus cache versions for the fetch-free repaint timer
+        "comp_ver": None, "sec_ver": None,
     }
+    _read_cache()
+    state["comp_ver"] = bus_client.read_version("sentiment:composite")
+    state["sec_ver"] = bus_client.read_version("sentiment:sectors")
 
     with ui.row().classes("items-center gap-3 w-full"):
         ui.label("Market Sentiment").classes("text-h6")
         date_lbl = ui.label("").classes("opacity-70 text-sm")
         ui.space()
-        spinner = ui.spinner(size="sm")
-        spinner.visible = False
-        ui.button(icon="refresh", on_click=lambda: load(with_sectors=True)).props("flat round")
+        ui.button(icon="refresh", on_click=lambda: _request_refresh()).props("flat round")
 
     with ui.row().classes("w-full no-wrap items-start gap-6"):
         with ui.column().classes("items-start").style("min-width:280px"):
@@ -691,11 +503,9 @@ def render():
     ui.label("Sector & Industry Performance").classes("text-subtitle1")
     with ui.row().classes("items-center gap-3 w-full"):
         ui.button("Refresh", icon="refresh",
-                  on_click=lambda: load_sectors()).props("flat dense")
+                  on_click=lambda: _request_refresh()).props("flat dense")
         ui.button("Expand All", on_click=lambda: _expand_all()).props("flat dense")
         ui.button("Collapse All", on_click=lambda: _collapse_all()).props("flat dense")
-        sec_spinner = ui.spinner(size="sm")
-        sec_spinner.visible = False
         summary_lbl = ui.label("").classes("opacity-80 text-sm")
     rotation_lbl = ui.label("").classes("text-sm")
     sector_box = ui.column().classes("w-full q-gutter-none q-mt-sm sent-sectors")
@@ -739,15 +549,12 @@ def render():
         sector_value = f"{wpct:+.2f}%" if wpct is not None else None
         return rotation_value, sector_value
 
-    def _publish_bridge():
-        build_and_write_bridge(state.get("snaps"), state.get("spy"),
-                               state.get("live"), state.get("sector"))
-
     def _apply():
         live = state.get("live")
         snaps = state["snaps"]
         if not live and not snaps:
-            bias_lbl.text = "No data"
+            bias_lbl.text = "Waiting for sentiment service…"
+            date_lbl.text = ""
             return
         latest = live or snaps[-1]
         comp = latest.get("composite") or {}
@@ -799,15 +606,16 @@ def render():
                 f"SPY {tr.spy_close:.2f} · 50d {tr.sma_50:.2f} · 200d {tr.sma_200:.2f} "
                 f"· slope {tr.sma_200_slope_pct:+.2f}% · dd {tr.drawdown_pct:+.1f}% "
                 f"· conf {tr.confidence:.0%}")
-        _publish_bridge()
 
     def _render_sector_table():
         sec = state["sector"]
+        sector_box.clear()
         if not sec:
+            with sector_box:
+                ui.label("Waiting for sentiment service…").classes("opacity-60 text-sm")
             return
         sd = sec["sector_data"]
         rows = sector_table_rows(sd, sec["quotes"], sec["trends"], sec["pcr"], sec["quadrants"])
-        sector_box.clear()
         with sector_box:
             with ui.row().classes("items-center w-full no-wrap gap-2 opacity-60 text-xs"):
                 ui.label("").style("width:24px")
@@ -838,13 +646,16 @@ def render():
                     rv = r["rrg"]
                     ui.label(str(rv or "")).style(f"width:90px;color:{rrg_color(rv)}")
                 if expanded:
-                    ind = state["industry"].get(sector_name)
-                    if ind is None:
+                    # Industries come PRECOMPUTED in the sectors cache view
+                    # ({"quotes","trends","pcr","quadrants"} per sector name) —
+                    # no proxy call here.
+                    ind = (state["industries"] or {}).get(sector_name)
+                    if not ind:
                         with ui.row().classes("items-center w-full no-wrap gap-2 text-xs opacity-60"):
                             ui.label("").style("width:24px")
-                            ui.label("loading…").style("width:140px")
+                            ui.label("no industry data").style("width:200px")
                     else:
-                        for ir in industry_rows(sd, sector_name, ind["quotes"], ind["trends"], ind.get("pcr"), ind.get("quadrants")):
+                        for ir in industry_rows(sd, sector_name, ind.get("quotes"), ind.get("trends"), ind.get("pcr"), ind.get("quadrants")):
                             idc = pct_color(ir["day"])  # industry name/etf/desc share its Day % color
                             with ui.row().classes("items-center w-full no-wrap gap-2 text-xs secrow indrow"):
                                 ui.label("").style("width:24px")
@@ -864,36 +675,16 @@ def render():
                                 rv = ir["rrg"]
                                 ui.label(str(rv or "")).style(f"width:90px;color:{rrg_color(rv)}")
 
-    async def _ensure_industry(sector_name):
-        if sector_name in state["industry"]:
-            return
-        etfs = sector_industry_etfs(state["sector"]["sector_data"], sector_name)
-        if not etfs:
-            state["industry"][sector_name] = {"quotes": {}, "trends": {}, "pcr": {}, "quadrants": {}}
-        else:
-            sec_spinner.visible = True
-            try:
-                state["industry"][sector_name] = await ng_run.io_bound(_load_industries, etfs, state["spy"])
-            except Exception as e:  # noqa: BLE001
-                ui.notify(f"Industry load failed: {e}", type="negative")
-                state["industry"][sector_name] = {"quotes": {}, "trends": {}, "pcr": {}, "quadrants": {}}
-            finally:
-                sec_spinner.visible = False
-        _CACHE["industry"][sector_name] = state["industry"][sector_name]
-
-    @guard_async
-    async def _toggle_sector(sector_name):
+    @guard
+    def _toggle_sector(sector_name):
         if sector_name in state["expanded"]:
             state["expanded"].discard(sector_name)
         else:
             state["expanded"].add(sector_name)
-            _render_sector_table()           # show "loading…" immediately
-            await _ensure_industry(sector_name)
-        _CACHE["expanded"] = set(state["expanded"])
         _render_sector_table()
 
-    @guard_async
-    async def _expand_all():
+    @guard
+    def _expand_all():
         if not state["sector"]:
             return
         for r in sector_table_rows(state["sector"]["sector_data"], state["sector"]["quotes"],
@@ -901,20 +692,18 @@ def render():
                                    state["sector"]["quadrants"]):
             state["expanded"].add(r["sector"])
         _render_sector_table()
-        for s in list(state["expanded"]):
-            await _ensure_industry(s)
-        _CACHE["expanded"] = set(state["expanded"])
-        _render_sector_table()
 
     @guard
     def _collapse_all():
         state["expanded"].clear()
-        _CACHE["expanded"] = set()
         _render_sector_table()
 
     def _apply_sectors():
         sec = state["sector"]
         if not sec:
+            summary_lbl.text = ""
+            rotation_lbl.text = ""
+            _render_sector_table()
             return
         sd, quotes = sec["sector_data"], sec["quotes"]
         summary_lbl.text = sector_summary(sd, quotes)
@@ -927,100 +716,52 @@ def render():
             rotation_value, sector_value = _comp_context()
             latest = state.get("live") or state["snaps"][-1]
             _render_components(latest, rotation_value, sector_value)
-        _publish_bridge()
 
-    @guard_async
-    async def load_sectors():
-        # Re-entrancy guard: the sector fetch (~24 proxy calls incl. /chains)
-        # can outlast a refresh interval; never stack a second one.
-        if state.get("loading_sectors"):
-            return
-        state["loading_sectors"] = True
-        sec_spinner.visible = True
-        try:
-            state["sector"] = await ng_run.io_bound(_load_sector_perf, state["spy"])
-            _CACHE["sector"] = state["sector"]
-            _apply_sectors()
-            state["sector_at"] = datetime.now()
-            _CACHE["sector_at"] = state["sector_at"]
-            _render_status()
-        except Exception as e:  # noqa: BLE001
-            ui.notify(f"Sector load failed: {e}", type="negative")
-        finally:
-            sec_spinner.visible = False
-            state["loading_sectors"] = False
+    @guard
+    def _request_refresh():
+        bus_client.request("sentiment", {"type": "refresh"})
+        ui.notify("Refresh requested")
 
-    from datetime import datetime, timedelta
+    from datetime import timedelta
     @guard
     def _render_status():
         parts = []
-        ca = state.get("composite_at")
+        ca = _parse_iso(state.get("composite_at"))
         if ca:
-            parts.append(f"Updated {ca.strftime('%H:%M:%S')}")
-            parts.append(f"Next ~{(ca + timedelta(seconds=300)).strftime('%H:%M')}")
+            parts.append(f"Updated {_fmt_time(ca)}")
+            parts.append(f"Next ~{_fmt_time(ca + timedelta(seconds=120))[:5]}")
         sa = state.get("sector_at")
-        if sa:
-            parts.append(f"Sectors {sa.strftime('%H:%M:%S')}")
+        sa_str = _fmt_time(sa)
+        if sa_str:
+            parts.append(f"Sectors {sa_str}")
         up = state.get("proxy_up")
         parts.append(f"Proxy: {'connected' if up else ('—' if up is None else 'down')}")
-        status_lbl.text = "   ·   ".join(parts) if parts else "Loading…"
-
-    @guard_async
-    async def load(with_sectors=False):
-        # Manual Refresh path (explicit user action). Auto-refresh is handled
-        # server-side by the 120s background task (refresh_cache); the page
-        # itself only repaints from _CACHE and never auto-fetches on activation.
-        if state.get("loading"):
-            return
-        state["loading"] = True
-        spinner.visible = True
-        try:
-            snaps, spy = await ng_run.io_bound(_load_snapshots)
-            state["snaps"], state["spy"] = snaps, spy
-            _CACHE["snaps"], _CACHE["spy"] = snaps, spy
-            from datetime import datetime
-            live = await ng_run.io_bound(_load_live)  # always live; matches legacy v4.3
-            state["live"] = live
-            _CACHE["live"] = live
-            _apply()
-            state["composite_at"] = datetime.now()
-            _CACHE["composite_at"] = state["composite_at"]
-            state["proxy_up"] = await ng_run.io_bound(_proxy_up)
-            _CACHE["proxy_up"] = state["proxy_up"]
-            _render_status()
-        except Exception as e:  # noqa: BLE001
-            state["proxy_up"] = False
-            ui.notify(f"Sentiment load failed: {e}", type="negative")
-        finally:
-            spinner.visible = False
-            state["loading"] = False
-        if with_sectors:
-            await load_sectors()
+        status_lbl.text = "   ·   ".join(parts) if parts else "Waiting for sentiment service…"
 
     @guard
-    def _repaint_from_cache():
-        # Re-seed only the DATA keys from the module cache (NOT expanded/industry,
-        # so the user's open expansions survive a repaint) and re-apply — no fetch.
-        state["snaps"] = _CACHE.get("snaps") or []
-        state["spy"] = _CACHE.get("spy") or []
-        for k in ("live", "sector", "composite_at", "sector_at", "proxy_up"):
-            state[k] = _CACHE.get(k)
+    def _maybe_repaint():
+        # Fetch-free: compare the bus cache versions to the last-painted ones and
+        # only re-read + repaint on change. Mirrors the previous version-poll
+        # pattern but tracks the Redis bus version instead of an in-process cache.
+        comp_ver = bus_client.read_version("sentiment:composite")
+        sec_ver = bus_client.read_version("sentiment:sectors")
+        if comp_ver == state["comp_ver"] and sec_ver == state["sec_ver"]:
+            return
+        state["comp_ver"] = comp_ver
+        state["sec_ver"] = sec_ver
+        _read_cache()
         _apply()
         _apply_sectors()
         _render_status()
 
     ui.separator().classes("q-my-sm")
-    status_lbl = ui.label("Loading…").classes("opacity-60 text-xs w-full")
+    status_lbl = ui.label("Waiting for sentiment service…").classes("opacity-60 text-xs w-full")
 
-    # Instant repaint from cache on revisit; first-ever visit fetches.
-    if state["snaps"]:
-        _apply()
-    if state["sector"]:
-        _apply_sectors()
+    # Initial paint from the bus cache (graceful-empty if the service is cold).
+    _apply()
+    _apply_sectors()
     _render_status()
-    # No fetch on activation: paint from the module cache (refreshed every 120s
-    # by the server-side background task). A quick one-shot catches the startup
-    # refresh if the page was opened during the cold-start window.
-    ui.timer(5.0, _repaint_from_cache, once=True)
-    ui.timer(120.0, _repaint_from_cache)
-    ui.timer(15.0, _render_status)
+    # Fetch-free version-poll repaint: tracks the service's cache writes without
+    # any engine call. The page never fetches; the Refresh button enqueues a
+    # command for the service to recompute.
+    ui.timer(2.0, _maybe_repaint)
