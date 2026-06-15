@@ -51,5 +51,10 @@ apscheduler==3.10.4
 # --- Web GUI (NEW: this repo's NiceGUI front-end) ---
 nicegui>=2.0.0            # single multi-page web UI replacing the old Dash/React/Tk UIs
 
+# --- Storage / communication backbone (NEW: 3-tier) ---
+redis>=5.0                # Redis client (talks to a local Memurai server on Windows)
+fakeredis>=2.20           # in-memory Redis for pytest (tests need no live server)
+pydantic>=2.0             # typed payload contracts shared between tiers (also pulled in transitively by fastapi; pinned explicitly here)
+
 # --- Testing (P, O, S, D) ---
 pytest
