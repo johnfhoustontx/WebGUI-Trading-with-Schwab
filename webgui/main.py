@@ -23,14 +23,10 @@ import proxy  # noqa: E402
 from repo_paths import NICEGUI_PORT  # noqa: E402
 
 
-@app.on_startup
-def _start_options_autoscan() -> None:
-    """Start the server-side 15-min auto-scan (08:00–15:15 CT, trading days)."""
-    from pages.options import scanner
-    scanner.start_autoscan()
-
-# Sentiment refresh now lives in services/sentiment_svc (Tier 2); the GUI reads
-# the Redis bus cache and enqueues refresh commands instead of refreshing itself.
+# Options scanning + auto-scan now live in services/options_svc (Tier 2): the
+# service owns the engine and the 08:00–15:15 CT schedule, writes results to the
+# Redis bus, and the GUI reads the cache + enqueues rescan commands. Sentiment
+# refresh likewise lives in services/sentiment_svc.
 
 # Options is an expandable group; each child is its own route. (route, label, icon)
 OPTIONS_CHILDREN = [

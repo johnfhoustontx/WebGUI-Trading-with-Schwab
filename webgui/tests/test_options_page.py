@@ -4,6 +4,7 @@ Cover the pure transforms (signal dicts -> table rows/columns) and that the
 page exposes a render() entrypoint. The NiceGUI rendering itself is exercised
 by the shell smoke run; here we keep the data marshalling honest.
 """
+import bus_client
 import pages.options.scanner as options
 
 SAMPLE = {
@@ -60,3 +61,30 @@ def test_signal_rows_sorted_by_score_desc():
         {"symbol": "HI", "composite_score": 90},
     ])
     assert [r["symbol"] for r in rows] == ["HI", "LO"]
+
+
+def test_page_imports_no_engine_or_autoscan():
+    """Regression: the page is a Tier-3 reader — the engine import, the
+    in-process result cache, and the auto-scan scheduler all moved to
+    services/options_svc. None of their symbols may remain on the module."""
+    assert not hasattr(options, "run_full_scan")
+    assert not hasattr(options, "_LAST_RESULTS")
+    assert not hasattr(options, "start_autoscan")
+    assert not hasattr(options, "autoscan_due")
+    assert not hasattr(options, "_run_scan_sync")
+    assert not hasattr(options, "_autoscan_loop")
+
+
+def test_render_graceful_empty_cache():
+    """render() must paint without crashing when the bus cache is empty
+    (options service not running / cold start) — the Tier-3 graceful-empty path.
+
+    The webgui suite has no NiceGUI User fixture; rendering inside a slot
+    context (a card) is enough to exercise the widget wiring + initial paint.
+    """
+    from nicegui import ui
+
+    bus_client.reset()  # fresh empty fakeredis cache (no service writes)
+    assert bus_client.read("options:scan") is None  # confirm empty
+    with ui.card():
+        options.render()  # must not raise
