@@ -1,9 +1,26 @@
-"""Options strategy Calculator page.
+"""Options strategy Calculator page (Tier-3 reader).
 
 Faithful port of the Tk calculator's two visuals: a colored summary-tile panel
 (``calc_summary``) and a colored P&L heatmap grid (``calc_spread_pnl``: price ×
-eval-date pairs of $ and %). Math lives in ``options_calculator``; this module
-marshals + colors. Pure transforms (banding, grid mapping, formatting) are
+eval-date pairs of $ and %).
+
+This page holds **no engine call**: the symbol quote + option-chain fetch and the
+options-calculator math (summary tiles + P&L grid) live in
+``services/options_svc/compute`` (``calc_load_symbol``/``calc_compute``). The
+option chain is a plain JSON dict, so it round-trips through the bus cache; the
+page keeps its PURE chain-extractors (``extract_atm_iv``/``extract_premium``/
+``chain_expiries``/``chain_strikes``) and runs them LOCALLY on the cached chain.
+
+Interaction model:
+
+* **load** → enqueue ``calc_load``; a version-poll on ``options:calc_chain``
+  populates price/range/expiries/strikes from the cached chain dict.
+* **IV** / **Fetch premiums** operate LOCALLY on the cached chain (no command).
+* **Calculate** → enqueue ``calc_compute`` with the form params; a version-poll on
+  ``options:calc_result`` repaints the summary tiles + P&L grid from the cached
+  ``{summary, eval_labels, pnl_data}``.
+
+Pure transforms (banding, grid mapping, formatting, chain extractors) are
 unit-tested; ``render()`` wires the form + visuals.
 """
 import math
@@ -183,27 +200,6 @@ def _has_contracts(chain):
     return bool(chain and (chain.get("callExpDateMap") or chain.get("putExpDateMap")))
 
 
-def _fetch_chain(api_sym, raw_sym, expiry):
-    """Fetch the option chain covering ``expiry``, retrying with the raw symbol.
-
-    The proxy returns empty exp-maps for a single-day from/to range, so we pull
-    today..expiry (the caller filters to the target expiry when extracting IV).
-    """
-    import datetime as dt
-
-    import scanner_engine as se
-
-    import proxy
-
-    today = dt.date.today()
-    chain = se.fetch_option_chain(proxy.schwab_py_client, api_sym,
-                                  from_date=today, to_date=expiry)
-    if not _has_contracts(chain) or (chain and chain.get("status") == "FAILED"):
-        chain = se.fetch_option_chain(proxy.schwab_py_client, raw_sym,
-                                      from_date=today, to_date=expiry)
-    return chain
-
-
 # class -> (background, foreground) for the heatmap cells (dark palette).
 _CELL_COLORS = {
     "p1": ("#0d2814", "#81c784"), "p2": ("#12381b", "#a5d6a7"),
@@ -214,13 +210,6 @@ _CELL_COLORS = {
     "l5": ("#8b0000", "#ffffff"),
     "neutral": ("#2a2a2a", "#bdbdbd"),
 }
-
-
-def _ensure_engine_path():
-    import sys
-    from repo_paths import OPTIONS_SCANNER
-    if str(OPTIONS_SCANNER) not in sys.path:
-        sys.path.insert(0, str(OPTIONS_SCANNER))
 
 
 def _render_summary(box, summary):
@@ -246,7 +235,7 @@ def _render_summary(box, summary):
         tile("Prob of Profit", f"{summary.get('pop', 0):.1f}%", "#bdbdbd")
 
 
-def _render_grid(box, eval_dates, pnl_data, spot):
+def _render_grid(box, eval_labels, pnl_data, spot):
     from nicegui import ui
 
     box.clear()
@@ -256,7 +245,10 @@ def _render_grid(box, eval_dates, pnl_data, spot):
             ui.label("No P&L data.").classes("opacity-60")
         return
     g_max, g_min = grid_extremes(pnl_data)
-    labels = eval_date_labels(eval_dates)
+    # ``eval_labels`` arrive pre-formatted (MM/DD strings) from the service;
+    # ``eval_date_labels`` is harmless here (str()'s strings) and keeps the page
+    # robust if date objects are ever passed.
+    labels = eval_date_labels(eval_labels)
     cur_idx = min(range(len(rows)), key=lambda i: abs((rows[i]["price"] or 0) - spot))
 
     th = ['<th style="position:sticky;left:0;top:0;background:#1d1d1d;z-index:2;'
@@ -290,15 +282,19 @@ def _render_grid(box, eval_dates, pnl_data, spot):
 
 
 def render():
-    """Build the Calculator page: inputs form + summary tiles + P&L heatmap."""
+    """Build the Calculator page: inputs form + summary tiles + P&L heatmap.
+
+    No engine call here — ``load`` enqueues ``calc_load`` and ``Calculate``
+    enqueues ``calc_compute``; version-polls on the two cache views paint the
+    chain selectors and the summary/grid. IV + Fetch premiums run the pure
+    chain-extractors LOCALLY on the cached chain dict."""
     import datetime as dt
 
-    from nicegui import run, ui
+    from nicegui import ui
 
-    import proxy
+    import bus_client
 
-    _ensure_engine_path()
-    import options_calculator as oc
+    from pages.ui_guard import guard
 
     from . import handoff
 
@@ -326,7 +322,14 @@ def render():
         rpct_in = ui.number("Range %", value=5.0, format="%.1f").classes("w-24")
 
     leg_box = ui.column().classes("gap-2")
-    state = {"chain": None}
+    # Page state (local closure, not module globals — built per request).
+    state = {
+        "chain": None,        # last calc_load chain dict (pure-extracted locally)
+        "result": None,       # last calc_result payload (summary/labels/grid)
+        "chain_ver": None,    # last-seen calc_chain cache version
+        "result_ver": None,   # last-seen calc_result cache version
+        "calc_spot": None,    # spot used for the last enqueued compute (grid marker)
+    }
 
     def _sync_strikes():
         chain = state.get("chain")
@@ -361,10 +364,15 @@ def render():
     strategy_sel.on_value_change(lambda e: rebuild_legs())
     expiry_sel.on_value_change(lambda e: _sync_strikes())
 
-    async def fetch_premiums():
-        sym = (symbol_in.value or "").strip().upper()
-        if not sym or not expiry_sel.value:
+    @guard
+    def fetch_premiums():
+        """Fill leg premiums from the CACHED chain (pure ``extract_premium``)."""
+        if not expiry_sel.value:
             ui.notify("Load symbol + pick an Expiry first.", type="warning")
+            return
+        chain = state.get("chain")
+        if chain is None:
+            ui.notify("Load symbol first.", type="warning")
             return
         legs = []
         for info in leg_inputs.values():
@@ -377,13 +385,6 @@ def render():
         except Exception as exc:
             ui.notify(f"Bad expiry: {exc}", type="negative")
             return
-        chain = state.get("chain")
-        if chain is None:
-            try:
-                chain = await run.io_bound(_fetch_chain, api_symbol(sym), sym, expiry)
-            except Exception as exc:
-                ui.notify(f"Chain fetch failed: {exc}", type="negative")
-                return
         filled, missing = 0, []
         for info, strike in legs:
             prem = extract_premium(chain, info["option_type"], strike, expiry=expiry)
@@ -399,48 +400,26 @@ def render():
         if missing:
             ui.notify("No premium for: " + ", ".join(missing), type="warning")
 
-    def _load_symbol_data(api):
-        qresp = proxy.schwab_py_client.get_quotes([api])
-        quote = qresp.json() if getattr(qresp, "status_code", None) == 200 else {}
-        cresp = proxy.schwab_py_client.get_option_chain(
-            api, contract_type="ALL", from_date=dt.date.today(),
-            to_date=dt.date.today() + dt.timedelta(days=60))
-        chain = cresp.json() if getattr(cresp, "status_code", None) == 200 else None
-        return quote, chain
-
-    async def load_symbol():
+    @guard
+    def load_symbol():
+        """Enqueue a ``calc_load`` for the symbol; the version-poll applies it."""
         sym = (symbol_in.value or "").strip().upper()
         if not sym:
             ui.notify("Enter a symbol first.", type="warning")
             return
-        api = api_symbol(sym)
-        try:
-            quote, chain = await run.io_bound(_load_symbol_data, api)
-        except Exception as exc:
-            ui.notify(f"Load failed: {exc}", type="negative")
-            return
-        info = (quote or {}).get(api, {})
-        q = info.get("quote", info.get("reference", info)) if isinstance(info, dict) else {}
-        price = q.get("lastPrice") if isinstance(q, dict) else None
-        if price:
-            price_in.value = round(price, 2)
-            lo, hi = oc.generate_price_range(price)
-            rmin_in.value = round(lo, 2)
-            rmax_in.value = round(hi, 2)
-        state["chain"] = chain
-        exps = chain_expiries(chain or {})
-        expiry_sel.options = exps
-        if exps and expiry_sel.value not in exps:
-            expiry_sel.value = exps[0]
-        expiry_sel.update()
-        _sync_strikes()
-        msg = f"{sym}: {len(exps)} expiries" + (f", {price:.2f}" if price else "")
-        ui.notify(msg, type="positive" if exps else "warning")
+        bus_client.request("options", {"type": "calc_load", "args": {"symbol": sym}})
+        ui.notify(f"Loading {sym}…", type="info")
 
-    async def fetch_iv():
+    @guard
+    def fetch_iv():
+        """Read ATM IV from the CACHED chain (pure ``extract_atm_iv``)."""
         sym = (symbol_in.value or "").strip().upper()
         if not sym or not expiry_sel.value or not price_in.value:
             ui.notify("Load symbol + pick Expiry (Price required).", type="warning")
+            return
+        chain = state.get("chain")
+        if chain is None:
+            ui.notify("Load symbol first.", type="warning")
             return
         try:
             expiry = dt.date.fromisoformat(str(expiry_sel.value))
@@ -448,13 +427,6 @@ def render():
         except Exception as exc:
             ui.notify(f"Bad expiry/price: {exc}", type="negative")
             return
-        chain = state.get("chain")
-        if chain is None:
-            try:
-                chain = await run.io_bound(_fetch_chain, api_symbol(sym), sym, expiry)
-            except Exception as exc:
-                ui.notify(f"IV fetch failed: {exc}", type="negative")
-                return
         iv = extract_atm_iv(chain, spot, expiry=expiry)
         approx = False
         if iv is None:
@@ -471,38 +443,100 @@ def render():
     summary_box = ui.row().classes("gap-3 flex-wrap")
     grid_box = ui.column().classes("w-full")
 
+    @guard
     def do_calc():
+        """Build the params dict and enqueue ``calc_compute``; the version-poll
+        paints the summary tiles + P&L grid from the cached result."""
         try:
-            strategy = strategy_sel.value
             spot = float(price_in.value)
-            iv = float(iv_in.value) / 100.0
-            rate = float(rate_in.value) / 100.0
-            ivadj = float(ivchg_in.value) / 100.0
             qty = int(contracts_in.value or 1)
-            expiry = dt.date.fromisoformat(str(expiry_sel.value))
-            today = dt.date.today()
-            legs = [{"strike": float(info["strike"].value),
-                     "premium": float(info["premium"].value),
-                     "option_type": info["option_type"],
-                     "side": info["side"], "qty": qty}
-                    for info in leg_inputs.values()]
-            T = max((expiry - today).days, 0) / 365.0 or 1 / 365.0
-            summary = oc.calc_summary(legs, strategy, spot, r=rate, iv=iv, T=T)
-            eval_dates = oc.generate_eval_dates(today, expiry)
-            if rmin_in.value and rmax_in.value and rmax_in.value > rmin_in.value:
-                price_range = (float(rmin_in.value), float(rmax_in.value))
-            else:
-                price_range = oc.generate_price_range(spot, pct=float(rpct_in.value or 5) / 100.0)
-            pnl_data = oc.calc_spread_pnl(legs, spot, iv, rate, eval_dates, price_range,
-                                          expiry, iv_adjustment=ivadj)
+            params = {
+                "strategy": strategy_sel.value,
+                "spot": spot,
+                "iv": float(iv_in.value) / 100.0,
+                "rate": float(rate_in.value) / 100.0,
+                "ivadj": float(ivchg_in.value) / 100.0,
+                "qty": qty,
+                "expiry": str(expiry_sel.value),
+                "legs": [{"strike": float(info["strike"].value),
+                          "premium": float(info["premium"].value),
+                          "option_type": info["option_type"],
+                          "side": info["side"], "qty": qty}
+                         for info in leg_inputs.values()],
+                "range_min": float(rmin_in.value or 0),
+                "range_max": float(rmax_in.value or 0),
+                "range_pct": float(rpct_in.value or 5) / 100.0,
+            }
+            dt.date.fromisoformat(params["expiry"])  # validate before enqueue
         except Exception as exc:
             ui.notify(f"Calc failed: {exc}", type="negative")
             return
-        _render_summary(summary_box, summary)
-        _render_grid(grid_box, eval_dates, pnl_data, spot)
+        state["calc_spot"] = spot
+        bus_client.request("options", {"type": "calc_compute", "args": params})
+        ui.notify("Calculating…", type="info")
+
+    # ── version-poll repaint (fetch-free) ────────────────────────────────────
+    def _apply_chain(cc):
+        cc = cc or {}
+        state["chain"] = cc.get("chain")
+        if cc.get("price"):
+            price_in.value = round(cc["price"], 2)
+        if cc.get("range_lo") or cc.get("range_hi"):
+            rmin_in.value = round(cc.get("range_lo") or 0, 2)
+            rmax_in.value = round(cc.get("range_hi") or 0, 2)
+        exps = chain_expiries(state["chain"] or {})
+        expiry_sel.options = exps
+        if exps and expiry_sel.value not in exps:
+            expiry_sel.value = exps[0]
+        expiry_sel.update()
+        _sync_strikes()
+        if cc.get("symbol") is not None:
+            price = cc.get("price")
+            msg = f"{cc['symbol']}: {len(exps)} expiries" + (f", {price:.2f}" if price else "")
+            ui.notify(msg, type="positive" if exps else "warning")
+
+    def _apply_result(result):
+        state["result"] = result or None
+        if not result:
+            return
+        spot = state.get("calc_spot")
+        if spot is None:
+            spot = float(price_in.value or 0)
+        _render_summary(summary_box, result.get("summary") or {})
+        _render_grid(grid_box, result.get("eval_labels") or [],
+                     result.get("pnl_data") or [], spot)
+
+    @guard
+    def _poll_chain():
+        version = bus_client.read_version("options:calc_chain")
+        if version == state["chain_ver"]:
+            return
+        state["chain_ver"] = version
+        _apply_chain(bus_client.read("options:calc_chain"))
+
+    @guard
+    def _poll_result():
+        version = bus_client.read_version("options:calc_result")
+        if version == state["result_ver"]:
+            return
+        state["result_ver"] = version
+        _apply_result(bus_client.read("options:calc_result"))
+
+    # Initial paint (graceful-empty when the service is cold). Track the current
+    # versions WITHOUT applying stale cached chain/result so a fresh page doesn't
+    # adopt a previous symbol's chain or grid; the user drives load/Calculate.
+    state["chain_ver"] = bus_client.read_version("options:calc_chain")
+    state["result_ver"] = bus_client.read_version("options:calc_result")
+
+    ui.timer(1.0, _poll_chain)
+    ui.timer(1.0, _poll_result)
 
     def _prefill(sig):
-        """Populate inputs from a scanner/swing signal (Send to Calculator)."""
+        """Populate inputs from a scanner/swing signal (Send to Calculator).
+
+        Note: ``oc.generate_price_range`` is gone from the page, so the Range
+        min/max are NOT pre-filled here (left at 0/0); ``calc_compute`` falls back
+        to ``generate_price_range`` server-side at the Range %."""
         t = sig.get("type")
         if t in LEG_SPECS:
             strategy_sel.value = t
@@ -513,9 +547,6 @@ def render():
         price = sig.get("underlying_price")
         if price:
             price_in.value = round(price, 2)
-            lo, hi = oc.generate_price_range(price)
-            rmin_in.value = round(lo, 2)
-            rmax_in.value = round(hi, 2)
         exp = sig.get("expiration")
         if exp:
             expiry_sel.options = [exp]

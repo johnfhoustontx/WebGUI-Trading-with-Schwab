@@ -55,6 +55,12 @@ EVENT_SIM_META = "events:options:sim_meta"
 CACHE_SIM_RESULT = "cache:options:sim_result"
 EVENT_SIM_RESULT = "events:options:sim_result"
 
+CACHE_CALC_CHAIN = "cache:options:calc_chain"
+EVENT_CALC_CHAIN = "events:options:calc_chain"
+
+CACHE_CALC_RESULT = "cache:options:calc_result"
+EVENT_CALC_RESULT = "events:options:calc_result"
+
 # Defaults mirror the page's input defaults (symbol SPY, 5-30 DTE, the put/call
 # delta gates, min credit 10% -> 0.10 fraction). The page sends the fraction.
 _SWING_DEFAULTS = {
@@ -194,6 +200,9 @@ def handle_command(bus, command) -> None:
     publish; ``sim_fetch`` (args symbol) → fetch the simulator ChainSnapshot
     (stashed in-process), cache the selector meta + publish; ``sim_run`` (args
     symbol/expiry/kind/strike/direction/dt/mult) → compute both sweeps, cache the
+    result + publish; ``calc_load`` (args symbol) → fetch the quote + option chain,
+    cache the loader payload (chain dict + price + range) + publish; ``calc_compute``
+    (args = the calc params dict) → run the summary + P&L grid math, cache the
     result + publish; else no-op."""
     if command.type == "rescan":
         rescan(bus)
@@ -266,3 +275,11 @@ def handle_command(bus, command) -> None:
             a.get("direction"), a.get("dt"), a.get("mult"))
         version = bus.cache_set(CACHE_SIM_RESULT, result)
         bus.publish(EVENT_SIM_RESULT, {"version": version})
+    elif command.type == "calc_load":
+        cc = compute.calc_load_symbol(command.args.get("symbol", "SPY"))
+        version = bus.cache_set(CACHE_CALC_CHAIN, cc)
+        bus.publish(EVENT_CALC_CHAIN, {"version": version})
+    elif command.type == "calc_compute":
+        result = compute.calc_compute(**(command.args or {}))
+        version = bus.cache_set(CACHE_CALC_RESULT, result)
+        bus.publish(EVENT_CALC_RESULT, {"version": version})

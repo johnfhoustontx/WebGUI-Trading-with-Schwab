@@ -130,3 +130,57 @@ def test_leg_specs_cover_strategies():
         assert strat in calc.LEG_SPECS
     assert len(calc.LEG_SPECS["IC"]) == 4
     assert len(calc.LEG_SPECS["PCS"]) == 2
+
+
+# ── Tier-3 migration regression (Task 2.6h) ──────────────────────────────────
+def test_calculator_holds_no_engine_imports():
+    """The chain-fetch + options_calculator math moved to the options service;
+    the page must no longer import the proxy or any options-scanner engine."""
+    import inspect
+
+    src = inspect.getsource(calc)
+    for forbidden in ("scanner_engine", "options_calculator", "import proxy",
+                      "OPTIONS_SCANNER", "_ensure_engine_path"):
+        assert forbidden not in src, f"calculator.py still references {forbidden!r}"
+
+
+def test_render_grid_takes_preformatted_labels():
+    """``_render_grid`` now consumes pre-formatted MM/DD label STRINGS (no date
+    objects); a graceful-empty grid renders a 'No P&L data.' note."""
+    import types
+
+    captured = {"html": None, "label": None}
+
+    class _FakeBox:
+        def clear(self):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    fake_ui = types.SimpleNamespace(
+        html=lambda h: (captured.__setitem__("html", h),
+                        types.SimpleNamespace(classes=lambda *a: None))[1],
+        label=lambda t: (captured.__setitem__("label", t),
+                         types.SimpleNamespace(classes=lambda *a: None))[1])
+
+    import sys
+    real_nicegui = sys.modules.get("nicegui")
+    sys.modules["nicegui"] = types.SimpleNamespace(ui=fake_ui)
+    try:
+        # Empty grid -> "No P&L data." note (no exception).
+        calc._render_grid(_FakeBox(), ["06/18", "06/19"], [], 450.0)
+        assert captured["label"] == "No P&L data."
+
+        # Populated grid -> the pre-formatted labels appear verbatim in the HTML.
+        pnl = [{"price": 450.0, "pnl": [10, -5], "pnl_pct": [2.0, -1.0]}]
+        calc._render_grid(_FakeBox(), ["06/18", "06/19"], pnl, 450.0)
+        assert "06/18 $" in captured["html"] and "06/19 $" in captured["html"]
+    finally:
+        if real_nicegui is not None:
+            sys.modules["nicegui"] = real_nicegui
+        else:
+            del sys.modules["nicegui"]

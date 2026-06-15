@@ -625,6 +625,88 @@ def gamma_analyze() -> dict:
     return {"prompt": prompt}
 
 
+# ── Calculator (ported from webgui/pages/options/calculator.py) ──────────────
+# The page used to fetch the symbol quote + option chain itself and run the
+# ``options_calculator`` math (summary tiles + P&L grid) on every Calculate. Both
+# the FETCH (``calc_load_symbol``, mirroring the page's ``_load_symbol_data``)
+# and the MATH (``calc_compute``, porting ``do_calc`` verbatim) now run here so
+# the GUI tier only reads the cached chain dict + result and enqueues commands.
+#
+# The option chain is a plain JSON dict (``resp.json()``) so it round-trips
+# through the cache fine; the page keeps its PURE chain-extractors (extract_atm_iv
+# /extract_premium/chain_expiries/chain_strikes) and runs them on the cached dict.
+#
+# LAZY IMPORTS (IMPORTANT): ``options_calculator`` is imported lazily inside each
+# function — merely importing this module never drags the calculator engine into
+# the process, keeping the combined pytest run clean (mirrors the other compute
+# fns).
+
+
+def calc_load_symbol(symbol) -> dict:
+    """Fetch the quote + option chain for ``symbol`` → JSON-safe loader payload.
+
+    Mirrors the page's ``_load_symbol_data`` + ``load_symbol``: map the symbol to
+    its Schwab API form ($SPX for SPX), pull the quote (lastPrice) and the
+    today→+60d ``ALL`` chain, then compute the default price range via
+    ``oc.generate_price_range``. Returns ``{"symbol", "api", "price", "range_lo",
+    "range_hi", "chain"}`` — ``chain`` is the raw JSON dict the page extracts from
+    locally. Defensive: a non-200 quote/chain degrades to ``{}``/None."""
+    import datetime as dt
+
+    import options_calculator as oc
+
+    api = "$SPX" if symbol.upper() == "SPX" else symbol.upper()
+
+    qresp = _proxy.schwab_py_client.get_quotes([api])
+    quote = qresp.json() if getattr(qresp, "status_code", None) == 200 else {}
+    cresp = _proxy.schwab_py_client.get_option_chain(
+        api, contract_type="ALL", from_date=dt.date.today(),
+        to_date=dt.date.today() + dt.timedelta(days=60))
+    chain = cresp.json() if getattr(cresp, "status_code", None) == 200 else None
+
+    info = (quote or {}).get(api, {})
+    q = info.get("quote", info.get("reference", info)) if isinstance(info, dict) else {}
+    price = q.get("lastPrice") if isinstance(q, dict) else None
+
+    lo, hi = oc.generate_price_range(price) if price else (0.0, 0.0)
+    return {"symbol": symbol, "api": api, "price": price,
+            "range_lo": lo, "range_hi": hi, "chain": chain}
+
+
+def calc_compute(strategy, spot, iv, rate, ivadj, qty, expiry, legs,
+                 range_min, range_max, range_pct) -> dict:
+    """Run the calculator math → ``{"summary", "eval_labels", "pnl_data"}``.
+
+    Ports the page's ``do_calc`` math VERBATIM: time-to-expiry in years (clamped
+    ≥ 1 day), the ``calc_summary`` tiles, the ``generate_eval_dates`` columns, the
+    price range (explicit min/max when valid, else ``generate_price_range`` at
+    ``range_pct``), and the ``calc_spread_pnl`` grid. ``expiry`` arrives as an ISO
+    string (parsed with ``date.fromisoformat``). Eval dates are PRE-FORMATTED to
+    ``MM/DD`` strings server-side so the page's grid header needs no date objects.
+
+    ``legs``/``summary``/``pnl_data`` are JSON-safe (dicts/lists of numbers)."""
+    import datetime as dt
+
+    import options_calculator as oc
+
+    expiry_date = dt.date.fromisoformat(str(expiry))
+    today = dt.date.today()
+
+    T = max((expiry_date - today).days, 0) / 365.0 or 1 / 365.0
+    summary = oc.calc_summary(legs, strategy, spot, r=rate, iv=iv, T=T)
+    eval_dates = oc.generate_eval_dates(today, expiry_date)
+    if range_min and range_max and range_max > range_min:
+        price_range = (range_min, range_max)
+    else:
+        price_range = oc.generate_price_range(spot, pct=range_pct)
+    pnl_data = oc.calc_spread_pnl(legs, spot, iv, rate, eval_dates, price_range,
+                                  expiry_date, iv_adjustment=ivadj)
+
+    eval_labels = [d.strftime("%m/%d") if hasattr(d, "strftime") else str(d)
+                   for d in eval_dates]
+    return {"summary": summary, "eval_labels": eval_labels, "pnl_data": pnl_data}
+
+
 # ── Simulator (ported from webgui/pages/options/simulator.py) ────────────────
 # The What-if price sweep + IV-shock simulator. The page used to fetch a
 # ChainSnapshot OBJECT and call the pure ``options_simulator`` engines over it on

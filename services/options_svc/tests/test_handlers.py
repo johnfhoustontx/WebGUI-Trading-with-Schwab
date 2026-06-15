@@ -577,6 +577,62 @@ def test_sim_run_command_caches_result(monkeypatch):
     assert msg is not None and msg.get("version") == env.version
 
 
+# ── Calculator (Task 2.6h) ───────────────────────────────────────────────────
+def test_calc_load_command_caches_chain(monkeypatch):
+    bus = Bus(fake=True)
+    cc = {"symbol": "SPY", "api": "SPY", "price": 450.0,
+          "range_lo": 427.5, "range_hi": 472.5,
+          "chain": {"callExpDateMap": {"2026-06-19:4": {"450.0": [{"mark": 1.0}]}}}}
+    seen = {"symbol": None}
+
+    def _rec(symbol):
+        seen["symbol"] = symbol
+        return cc
+
+    monkeypatch.setattr(handlers.compute, "calc_load_symbol", _rec)
+
+    sub = bus.subscribe("events:options:calc_chain")
+    handlers.handle_command(bus, Command(type="calc_load", args={"symbol": "SPY"}))
+    msg = sub.get_message(timeout=1.0)
+    sub.close()
+
+    assert seen["symbol"] == "SPY"
+    env = bus.cache_get("cache:options:calc_chain")
+    assert env is not None
+    assert env.payload == cc
+    assert msg is not None and msg.get("version") == env.version
+
+
+def test_calc_compute_command_caches_result(monkeypatch):
+    bus = Bus(fake=True)
+    result = {"summary": {"max_loss": 100.0},
+              "eval_labels": ["06/18", "06/19"],
+              "pnl_data": [{"price": 450.0, "pnl": [10, -5], "pnl_pct": [2.0, -1.0]}]}
+    seen = {"args": None}
+
+    def _rec(**args):
+        seen["args"] = args
+        return result
+
+    monkeypatch.setattr(handlers.compute, "calc_compute", _rec)
+
+    args = {"strategy": "PCS", "spot": 450.0, "iv": 0.18, "rate": 0.045,
+            "ivadj": 0.0, "qty": 1, "expiry": "2026-06-19",
+            "legs": [{"strike": 445.0, "premium": 0.5, "option_type": "put",
+                      "side": "short", "qty": 1}],
+            "range_min": 0.0, "range_max": 0.0, "range_pct": 0.05}
+    sub = bus.subscribe("events:options:calc_result")
+    handlers.handle_command(bus, Command(type="calc_compute", args=args))
+    msg = sub.get_message(timeout=1.0)
+    sub.close()
+
+    assert seen["args"] == args  # full params dict splatted into compute.calc_compute
+    env = bus.cache_get("cache:options:calc_result")
+    assert env is not None
+    assert env.payload == result
+    assert msg is not None and msg.get("version") == env.version
+
+
 def test_swing_scan_uses_defaults_for_missing_args(monkeypatch):
     bus = Bus(fake=True)
     seen = {"params": None}

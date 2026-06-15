@@ -736,6 +736,123 @@ def test_sim_run_empty_when_contract_missing(monkeypatch):
     assert compute.sim_run("SPY", "2026-06-19", "call", 999, "buy", 5, 1.5) == {}
 
 
+# ── Calculator (moved from webgui/pages/options/calculator.py) ───────────────
+class _FakeCalcResp:
+    def __init__(self, data, status=200):
+        self._data = data
+        self.status_code = status
+
+    def json(self):
+        return self._data
+
+
+def _patch_calc_oc(monkeypatch, **fns):
+    """Stub the lazily-imported ``options_calculator`` module."""
+    import sys as _sys
+    import types as _types
+
+    fake_oc = _types.SimpleNamespace(**fns)
+    monkeypatch.setitem(_sys.modules, "options_calculator", fake_oc)
+    return fake_oc
+
+
+def test_calc_load_returns_chain_price_range(monkeypatch):
+    quote = {"SPY": {"quote": {"lastPrice": 450.0}}}
+    chain = {"callExpDateMap": {"2026-06-19:4": {"450.0": [{"mark": 1.0}]}}}
+    seen = {}
+
+    monkeypatch.setattr(compute._proxy.schwab_py_client, "get_quotes",
+                        lambda syms: (seen.__setitem__("qsyms", syms),
+                                      _FakeCalcResp(quote))[1])
+    monkeypatch.setattr(compute._proxy.schwab_py_client, "get_option_chain",
+                        lambda *a, **k: (seen.__setitem__("chain_args", (a, k)),
+                                         _FakeCalcResp(chain))[1])
+    _patch_calc_oc(monkeypatch, generate_price_range=lambda p: (p * 0.95, p * 1.05))
+
+    out = compute.calc_load_symbol("spy")
+    assert out["symbol"] == "spy"
+    assert out["api"] == "SPY"
+    assert out["price"] == 450.0
+    assert out["range_lo"] == 450.0 * 0.95
+    assert out["range_hi"] == 450.0 * 1.05
+    assert out["chain"] == chain
+    assert seen["qsyms"] == ["SPY"]  # quote fetched for the API symbol
+
+
+def test_calc_load_maps_spx_and_handles_no_price(monkeypatch):
+    monkeypatch.setattr(compute._proxy.schwab_py_client, "get_quotes",
+                        lambda syms: _FakeCalcResp({}))  # no quote for $SPX
+    monkeypatch.setattr(compute._proxy.schwab_py_client, "get_option_chain",
+                        lambda *a, **k: _FakeCalcResp(None, status=500))  # chain failed
+    called = {"range": 0}
+    _patch_calc_oc(monkeypatch,
+                   generate_price_range=lambda p: (called.__setitem__("range", 1), (0, 0))[1])
+
+    out = compute.calc_load_symbol("SPX")
+    assert out["api"] == "$SPX"
+    assert out["price"] is None
+    assert out["range_lo"] == 0.0 and out["range_hi"] == 0.0
+    assert out["chain"] is None
+    assert called["range"] == 0  # generate_price_range NOT called when no price
+
+
+def test_calc_compute_returns_summary_grid_labels(monkeypatch):
+    import datetime as dt
+
+    seen = {}
+
+    def _summary(legs, strategy, spot, r=None, iv=None, T=None):
+        seen["summary"] = dict(strategy=strategy, spot=spot, r=r, iv=iv, T=T, legs=legs)
+        return {"max_loss": 100.0, "max_profit": 50.0}
+
+    def _eval_dates(today, expiry):
+        seen["eval"] = (today, expiry)
+        return [dt.date(2026, 6, 18), dt.date(2026, 6, 19)]
+
+    def _spread_pnl(legs, spot, iv, r, eval_dates, price_range, expiry, iv_adjustment=0.0):
+        seen["pnl"] = dict(iv=iv, r=r, price_range=price_range, iv_adj=iv_adjustment)
+        return [{"price": 450.0, "pnl": [10, -5], "pnl_pct": [2.0, -1.0]}]
+
+    _patch_calc_oc(monkeypatch, calc_summary=_summary,
+                   generate_eval_dates=_eval_dates, calc_spread_pnl=_spread_pnl,
+                   generate_price_range=lambda spot, pct=0.05: (spot * (1 - pct),
+                                                                spot * (1 + pct)))
+
+    legs = [{"strike": 445.0, "premium": 0.5, "option_type": "put",
+             "side": "short", "qty": 1}]
+    out = compute.calc_compute(
+        strategy="PCS", spot=450.0, iv=0.18, rate=0.045, ivadj=0.0, qty=1,
+        expiry="2026-06-19", legs=legs, range_min=0.0, range_max=0.0, range_pct=0.05)
+
+    assert out["summary"] == {"max_loss": 100.0, "max_profit": 50.0}
+    # Eval dates pre-formatted to MM/DD strings server-side.
+    assert out["eval_labels"] == ["06/18", "06/19"]
+    assert out["pnl_data"][0]["pnl"] == [10, -5]
+    # Math wired through: rate->r, iv passed, range falls back to generate_price_range.
+    assert seen["summary"]["r"] == 0.045 and seen["summary"]["iv"] == 0.18
+    assert seen["pnl"]["price_range"] == (450.0 * 0.95, 450.0 * 1.05)
+    assert seen["eval"][1] == dt.date(2026, 6, 19)
+
+
+def test_calc_compute_uses_explicit_range_when_valid(monkeypatch):
+    import datetime as dt
+
+    seen = {}
+    _patch_calc_oc(
+        monkeypatch,
+        calc_summary=lambda *a, **k: {},
+        generate_eval_dates=lambda t, e: [dt.date(2026, 6, 19)],
+        generate_price_range=lambda *a, **k: (0.0, 0.0),  # would lose if called
+        calc_spread_pnl=lambda legs, spot, iv, r, ed, pr, exp, iv_adjustment=0.0: (
+            seen.__setitem__("pr", pr), [])[1])
+
+    compute.calc_compute(strategy="PCS", spot=450.0, iv=0.18, rate=0.045, ivadj=0.0,
+                         qty=1, expiry="2026-06-19", legs=[], range_min=440.0,
+                         range_max=460.0, range_pct=0.05)
+    # Explicit (min, max) used since max > min.
+    assert seen["pr"] == (440.0, 460.0)
+
+
 def test_refresh_header_sentiment_failure_is_no_data(monkeypatch):
     raw = {"$VIX": {"quote": {"lastPrice": 22.0}}}
     monkeypatch.setattr(compute._proxy.schwab_py_client, "get_quotes",
