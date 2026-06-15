@@ -47,9 +47,14 @@ OPTIONS_CHILDREN = [
     ("/options/simulator", "Simulator", "science"),
 ]
 
+# Sentiment is an expandable group; each child is its own route. (route, label, icon)
+SENTIMENT_CHILDREN = [
+    ("/sentiment", "Sentiment", "insights"),
+    ("/sentiment/rotation", "Sector Rotation", "donut_large"),
+]
+
 # Flat top-level items (non-Options apps). (route, label, icon)
 FLAT_NAV = [
-    ("/sentiment", "Sentiment", "insights"),
     ("/trade", "Trade", "analytics"),
     ("/portfolio", "Portfolio", "account_balance"),
     ("/driver", "Driver", "smart_toy"),
@@ -80,6 +85,10 @@ def _layout(active: str, title: str):
         options_active = active == "/" or active.startswith("/options")
         with ui.expansion("Options", icon="candlestick_chart", value=options_active).classes("w-full"):
             for path, label, icon in OPTIONS_CHILDREN:
+                _nav_link(path, label, icon, active)
+        sentiment_active = active.startswith("/sentiment")
+        with ui.expansion("Sentiment", icon="insights", value=sentiment_active).classes("w-full"):
+            for path, label, icon in SENTIMENT_CHILDREN:
                 _nav_link(path, label, icon, active)
         for path, label, icon in FLAT_NAV:
             _nav_link(path, label, icon, active)
@@ -171,6 +180,13 @@ def sentiment_page() -> None:
     with _layout("/sentiment", "Sentiment"):
         from pages import sentiment
         sentiment.render()
+
+
+@ui.page("/sentiment/rotation")
+def sentiment_rotation_page() -> None:
+    with _layout("/sentiment/rotation", "Sector Rotation"):
+        from pages import sentiment_rotation
+        sentiment_rotation.render()
 
 
 @ui.page("/trade")
