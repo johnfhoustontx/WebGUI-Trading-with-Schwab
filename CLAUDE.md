@@ -8,7 +8,7 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-06-14 (Phase 2 shell + full Options section incl. Gamma/Simulator built; **Sentiment page built** — composite gauge + component table + 5 tiles + 30d history/rolling-avgs + trend regime + **Sector & Industry Performance** (Day/Week/Month %, P/C, RRG, rotation banner), reusing `history_backfill` + `scoring.rotation`/`sector_perf`; 127 webgui tests green; Trade/Portfolio/Driver pages still stubs — next session. See "webgui development notes" below.)
+**Last updated:** 2026-06-15 (**3-tier architecture re-design approved** — whole-monorepo split into GUI / per-domain processing services / Redis-Memurai storage+comm backbone, migrated strangler-fig starting with Sentiment; see "Planned 3-tier architecture" below + [design doc](docs/plans/2026-06-15-three-tier-architecture-design.md). Prior state: Phase 2 shell + full Options section incl. Gamma/Simulator built; **Sentiment page built** — composite gauge + component table + 5 tiles + 30d history/rolling-avgs + trend regime + **Sector & Industry Performance** (Day/Week/Month %, P/C, RRG, rotation banner), reusing `history_backfill` + `scoring.rotation`/`sector_perf`; 127 webgui tests green; Trade/Portfolio/Driver pages still stubs. See "webgui development notes" below.)
 
 ## What this project is
 
@@ -50,6 +50,35 @@ schwab-proxy (:8100)  ──HTTP──>  webgui NiceGUI app (:8500)
 
 **The proxy must be running first.** All feature backends resolve their Schwab
 client and market data through `http://127.0.0.1:8100`.
+
+## Planned 3-tier architecture (approved 2026-06-15 — migrating)
+
+The monorepo is being re-tiered (strangler-fig) into three **physically separate**
+tiers over a **Redis (Memurai) backbone**. Until a domain is migrated it keeps the
+in-process model above; check the design doc for current step status. Target shape:
+
+```
+TIER 1 GUI         webgui/ NiceGUI (:8500) — render() only; reads Redis cache on
+                   page build, subscribes to pub/sub for repaints, enqueues commands.
+                   No engine imports, no Schwab calls, no sys.path glue.
+        ▲ cache read / subscribe          │ commands
+TIER 3 STORE+COMM  Memurai (:6379): cache:{domain}:{view} (replaces _CACHE/_LAST_RESULTS),
+                   events:{domain}:{view} pub/sub (replaces bridge file + version polling),
+                   cmd:{domain} Redis Streams (GUI→service RPC). shared/contracts/ (typed
+                   payloads = the API) + shared/bus/ (redis-py wrapper, fakeredis under pytest).
+                   On-disk DBs unchanged. sentiment_bridge.json kept as dual-write shim.
+        ▲ publish                          │ consume
+TIER 2 PROCESSING  services/{domain}_svc FastAPI (options/sentiment/trade/portfolio/driver):
+                   each imports ONLY its engines, owns its scheduler/auto-scan + command
+                   consumer, validates+caches+publishes. Separate processes ⇒ the scoring/
+                   notifier sys.path collision class CANNOT occur (options_scoring() guard is
+                   DELETED, not ported). Calls schwab-proxy (:8100) for data.
+```
+
+**Migration order:** Sentiment (reference) → Options → Portfolio → Trade → Driver →
+retire shims (regime_filter reads Redis; drop bridge file). New ports to add:
+`memurai=6379` + one per service (~8210–8214). `start_all` order: Memurai → proxy →
+services → webgui. Full design: [3-tier design doc](docs/plans/2026-06-15-three-tier-architecture-design.md).
 
 ## Folder map (what was copied in)
 
@@ -320,5 +349,6 @@ claude-driver addresses them over HTTP; this repo does not contain or start them
 
 ## Design / plan docs
 
+- [`docs/plans/2026-06-15-three-tier-architecture-design.md`](docs/plans/2026-06-15-three-tier-architecture-design.md) — **3-tier re-architecture** (GUI / per-domain services / Redis-Memurai backbone)
 - [`docs/plans/2026-06-14-nicegui-webgui-design.md`](docs/plans/2026-06-14-nicegui-webgui-design.md)
 - [`docs/plans/2026-06-14-nicegui-webgui-plan.md`](docs/plans/2026-06-14-nicegui-webgui-plan.md)
