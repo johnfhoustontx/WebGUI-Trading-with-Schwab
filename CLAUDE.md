@@ -312,16 +312,32 @@ gitignored. **Never commit real keys, tokens, or account numbers.**
 
 ## Running
 
+The simplest path is `start_all.bat` (Memurai check → proxy → sentiment_svc → GEX
+collector → web gui, opening the browser). Manual order:
+
 ```powershell
 # 1. Activate the venv
 .\.venv\Scripts\Activate.ps1
 
-# 2. Start the proxy FIRST (waits to bind :8100)
+# 2. Memurai (Redis backbone) must be running on :6379 — it installs as a native
+#    Windows service; start it from services.msc if needed. (3-tier cache/pub-sub/commands.)
+
+# 3. Start the proxy (waits to bind :8100) — everything reads market data through it
 python schwab-proxy\schwab_proxy.py
 
-# 3. In another terminal, start the NiceGUI app  (once webgui/ exists)
+# 4. Start the migrated domain services (each owns its refresh/scheduling; publishes to Redis).
+#    Sentiment is migrated; others land as Phase 2+ proceeds.
+python services\sentiment_svc\app.py      # :8210
+
+# 5. In another terminal, start the NiceGUI app (reads cache:* from Redis; no engine imports)
 python webgui\main.py      # serves http://127.0.0.1:8500
 ```
+
+> **3-tier note:** Once a domain is migrated, the web GUI no longer computes anything
+> for it — its **service must be running** (and Memurai up) or the page shows a
+> "Waiting for … service" placeholder. Sentiment is migrated (`services/sentiment_svc`);
+> see the "Planned 3-tier architecture" section. Until a domain is migrated it still
+> runs in-process in the GUI as before.
 
 ## Tests
 

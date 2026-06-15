@@ -12,11 +12,27 @@ if not exist "%PY%" (
 
 echo ============================================
 echo   Schwab Trading - launching services
+echo   memurai       redis://127.0.0.1:6379  (storage/comm backbone)
 echo   proxy         http://127.0.0.1:8100
+echo   sentiment_svc http://127.0.0.1:8210
 echo   web gui       http://127.0.0.1:8500
 echo   gex collector (5-min snapshots + bridge)
 echo ============================================
 echo.
+
+REM --- 0. Memurai (Redis backbone) must be running for the 3-tier services ---
+REM     Memurai installs as a native Windows service on :6379 (start it from services.msc
+REM     if this check fails). The sentiment service + GUI use it as the cache/pub-sub/command bus.
+echo Checking Memurai (Redis) on :6379...
+powershell -NoProfile -Command "try{(New-Object Net.Sockets.TcpClient).Connect('127.0.0.1',6379);exit 0}catch{exit 1}" >nul 2>&1
+if errorlevel 1 (
+    echo   WARNING: Memurai not reachable on :6379. Start the "Memurai" Windows service,
+    echo            then re-run. The 3-tier services ^(sentiment_svc, web gui^) need it.
+    echo.
+) else (
+    echo   Memurai is up.
+    echo.
+)
 
 REM --- 1. schwab-proxy (must be up first; everything else reads market data through it) ---
 echo Starting schwab-proxy in a new window (keep it open)...
@@ -30,7 +46,14 @@ if errorlevel 1 goto waitproxy
 echo Proxy is up.
 echo.
 
-REM --- 2. GEX collector (options-scanner): 5-min GEX snapshots + sentiment-bridge publish ---
+REM --- 2. sentiment service (:8210): owns the 120s sentiment refresh + publishes cache/bridge ---
+REM     Tier-2 processing service. Computes the composite via sentiment-dashboard engines and
+REM     writes cache:sentiment:* + events to Memurai; the web GUI reads from there.
+echo Starting sentiment service in a new window...
+start "Sentiment Service (:8210)" cmd /k ""%PY%" services\sentiment_svc\app.py"
+echo.
+
+REM --- 3. GEX collector (options-scanner): 5-min GEX snapshots + sentiment-bridge publish ---
 REM     Stands down if the gamma tool already owns data\gex_collector.lock; exits past ~15:20 CT.
 echo Starting GEX collector in a new window...
 start "GEX Collector" cmd /k "cd /d "%~dp0options-scanner" ^&^& "%PY%" gex_collector.py"
@@ -54,9 +77,11 @@ start "" "http://127.0.0.1:8500"
 
 echo.
 echo ============================================
-echo   All services started. Three windows are
-echo   running: proxy, GEX collector, web gui.
-echo   Close those windows to stop the services.
+echo   All services started. Four windows are
+echo   running: proxy, sentiment service, GEX
+echo   collector, web gui. (Memurai runs as a
+echo   Windows service.) Close those windows to
+echo   stop the services.
 echo ============================================
 echo.
 echo This launcher window can be closed.
