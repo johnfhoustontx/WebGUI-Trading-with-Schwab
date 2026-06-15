@@ -289,6 +289,21 @@ def poll_term_once(client, engine, conn, ts_iso: str = None, lock=None) -> None:
         log.error("Term poll failed for %s: %s", TERM_SYMBOL, e)
 
 
+def _publish_sentiment_bridge():
+    """Best-effort: publish the sentiment bridge in a clean subprocess. Never raises."""
+    try:
+        import subprocess, sys, pathlib
+        root = pathlib.Path(__file__).resolve().parents[1]
+        if str(root) not in sys.path:
+            sys.path.insert(0, str(root))
+        from repo_paths import SENTIMENT
+        script = SENTIMENT / "publish_bridge.py"
+        subprocess.run([sys.executable, str(script)], timeout=150,
+                       capture_output=True)
+    except Exception:
+        log.exception("sentiment bridge publish failed; continuing")
+
+
 def _default_clock():
     return datetime.now(TZ)
 
@@ -337,6 +352,10 @@ def run_collector_loop(client, engine, conn, *, stop_event=None,
             log.exception(
                 "Poll failed at %s; continuing to next boundary",
                 now.strftime("%H:%M:%S"))
+        try:
+            _publish_sentiment_bridge()
+        except Exception:
+            log.exception("sentiment hook crashed; continuing")
 
 
 def main(

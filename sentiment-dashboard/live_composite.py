@@ -290,3 +290,53 @@ def compute_live(schwab, sector_data, prior_vix1d=0.0, prior_sector_trends=None)
         "_sector_runtime": {"sector_data": sector_data, "quotes": last_quotes, "dual": dual, "closes": closes},
         "_vix1d": v1d,
     }
+
+
+def _resolve_proxy_client():
+    import sys, pathlib
+    root = pathlib.Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(root))
+    from repo_paths import SCHWAB_PROXY, PROXY_URL
+    if str(SCHWAB_PROXY) not in sys.path:
+        sys.path.insert(0, str(SCHWAB_PROXY))
+    from proxy_client import SchwabProxyClient
+    return SchwabProxyClient(PROXY_URL)
+
+
+def publish_bridge(schwab=None):
+    """Compute the live composite and write shared/sentiment_bridge.json.
+    Self-contained + defensive; returns the payload or None on failure."""
+    try:
+        import sectors_ref
+        from scoring import trend_regime as _tr
+        import bridge
+        if schwab is None:
+            schwab = _resolve_proxy_client()
+        sd = sectors_ref.load_sectors_data()
+        snap = compute_live(schwab, sd)
+        sector_rt = snap.pop("_sector_runtime", None)
+        # trend regime from SPY 12mo
+        spy_closes = []
+        try:
+            df = schwab.get_daily_history("SPY", months=12)
+            spy_closes = [float(c) for c in df["close"].tolist()] if df is not None else []
+        except Exception:
+            pass
+        trend = None
+        if spy_closes:
+            r = _tr.classify(spy_closes)
+            trend = {"state": r.state, "label": r.label, "description": r.description,
+                     "raw_state": r.state, "spy_close": round(r.spy_close, 4),
+                     "sma_50": round(r.sma_50, 4), "sma_200": round(r.sma_200, 4),
+                     "sma_200_slope_pct": round(r.sma_200_slope_pct, 4),
+                     "drawdown_pct": round(r.drawdown_pct, 4), "confidence": round(r.confidence, 3)}
+        gen = datetime.now(timezone.utc).isoformat()
+        payload = build_bridge_payload(snap, history_scores=[], spy_closes=spy_closes,
+                                       generated_at=gen, sector=sector_rt, trend=trend)
+        bridge.write_bridge(payload)
+        logger.info("sentiment bridge published: score=%s regime=%s",
+                    payload.get("composite_score"), payload.get("regime"))
+        return payload
+    except Exception:
+        logger.exception("publish_bridge failed")
+        return None

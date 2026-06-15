@@ -457,3 +457,12 @@ def test_make_heartbeat_poll_polls_and_touches_lock(tmp_path, monkeypatch):
     data = json.loads(lock.read_text())
     assert data["owner"] == "ME" and data["source"] == "gamma_tool"
     assert data["heartbeat"] > 1000
+
+
+def test_sentiment_hook_never_raises(monkeypatch):
+    import gex_collector as gc
+    # Force the subprocess call to raise; the helper must swallow it.
+    import subprocess
+    monkeypatch.setattr(subprocess, "run",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    gc._publish_sentiment_bridge()   # must NOT raise
