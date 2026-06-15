@@ -326,8 +326,9 @@ collector → web gui, opening the browser). Manual order:
 python schwab-proxy\schwab_proxy.py
 
 # 4. Start the migrated domain services (each owns its refresh/scheduling; publishes to Redis).
-#    Sentiment is migrated; others land as Phase 2+ proceeds.
-python services\sentiment_svc\app.py      # :8210
+#    Sentiment + Options are migrated; Portfolio/Trade/Driver land as Phase 3+ proceeds.
+python services\sentiment_svc\app.py      # :8210  (composite + rotation)
+python services\options_svc\app.py        # :8211  (scan/swing/header/gamma/paper/captured/calculator)
 
 # 5. In another terminal, start the NiceGUI app (reads cache:* from Redis; no engine imports)
 python webgui\main.py      # serves http://127.0.0.1:8500
@@ -335,9 +336,11 @@ python webgui\main.py      # serves http://127.0.0.1:8500
 
 > **3-tier note:** Once a domain is migrated, the web GUI no longer computes anything
 > for it — its **service must be running** (and Memurai up) or the page shows a
-> "Waiting for … service" placeholder. Sentiment is migrated (`services/sentiment_svc`);
-> see the "Planned 3-tier architecture" section. Until a domain is migrated it still
-> runs in-process in the GUI as before.
+> "Waiting for … service" placeholder. **Sentiment and the entire Options section are
+> migrated** (`services/sentiment_svc`, `services/options_svc`); the webgui now imports
+> ONLY `nicegui` + `shared.bus` + `shared.contracts` — no app engines, so the documented
+> `scoring`/`notifier` cross-app collision can no longer occur. See the "Planned 3-tier
+> architecture" section. Until a domain is migrated it still runs in-process in the GUI.
 
 ## Tests
 
