@@ -8,7 +8,7 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-06-14 (Phase 2 shell + full Options section incl. Gamma/Simulator built; **Sentiment page built** — composite gauge + component table + 5 tiles + 30d history/rolling-avgs + trend regime + **Sector & Industry Performance** (Day/Week/Month %, P/C, RRG, rotation banner), reusing `history_backfill` + `scoring.rotation`/`sector_perf`; 119 webgui tests green; Trade/Portfolio/Driver pages still stubs — next session. See "webgui development notes" below.)
+**Last updated:** 2026-06-14 (Phase 2 shell + full Options section incl. Gamma/Simulator built; **Sentiment page built** — composite gauge + component table + 5 tiles + 30d history/rolling-avgs + trend regime + **Sector & Industry Performance** (Day/Week/Month %, P/C, RRG, rotation banner), reusing `history_backfill` + `scoring.rotation`/`sector_perf`; 122 webgui tests green; Trade/Portfolio/Driver pages still stubs — next session. See "webgui development notes" below.)
 
 ## What this project is
 
@@ -91,7 +91,7 @@ Routes:
 | `/options/swing` | Swing Scanner | built |
 | `/options/gamma` | Gamma (GEX/Charm/DEX/Vanna bars + flip/walls + intraday heatmap) | built |
 | `/options/simulator` | Simulator (What-if + IV-shock; Replay TODO) | built |
-| `/sentiment` | Sentiment (two-column top: gauge+regime / component table; traffic-light tiles; 30d history + rolling avgs; full-width **Sector & Industry Performance** w/ Day/Week/Month %, P/C, RRG, rotation banner, **expandable industries w/ P/C+RRG**; bottom status bar; **persists across navigation**) | built |
+| `/sentiment` | Sentiment (two-column top: gauge+regime / component table; traffic-light tiles; 30d history + rolling avgs; full-width **Sector & Industry Performance** w/ Day/Week/Month %, P/C, RRG, rotation banner, **expandable industries w/ P/C+RRG**; bottom status bar; **persists across navigation**; **server-side 120s auto-refresh + bridge publish, tab-independent**) | built |
 | `/trade` `/portfolio` `/driver` | other apps | **stubs** |
 
 The `pages/options/` subpackage shares `header.py` (compact quotes/VIX/sentiment
@@ -156,7 +156,7 @@ Preview tool (start `webgui`, screenshot). Restart the preview after code change
 to pick them up. To drive Quasar inputs from the preview, set the native value +
 dispatch `input`/`change`/`blur` events.
 
-**Tests:** `cd webgui && ..\.venv\Scripts\python -m pytest -q` (119 green as of
+**Tests:** `cd webgui && ..\.venv\Scripts\python -m pytest -q` (122 green as of
 this writing). TDD pure functions; smoke-verify `render()` with a screenshot.
 
 **Environment quirks to expect:**
@@ -188,10 +188,15 @@ bottom **status bar** (Updated/Next/Sectors/Proxy — proxy checked off-thread i
 sub-rows (▷ toggle or Expand/Collapse All; lazy-fetched via `_load_industries` +
 cached; industries show Day/Week/Month % **and P/C + RRG**).
 The sector load (`_load_sector_perf`, ~24 proxy calls incl. 11 `/chains` for P/C)
-runs on initial load + manual Refresh; the **300s** auto-timer is composite-only
-(so `/chains` can't stack). The page **persists across navigation** via a
-module-level `_CACHE` (single-user) — returning to the tab repaints instantly from
-cache (incl. expanded sectors), no re-fetch. Verified against the live proxy to
+runs at startup + on manual Refresh. **Auto-refresh is server-side and
+tab-independent:** a module-level background task (`start_background_refresh` →
+`refresh_cache`, started from `main.py` `@app.on_startup`, mirroring
+`scanner.start_autoscan`) updates `_CACHE` (composite-only) **and republishes the
+bridge every 120 s** regardless of any open/active tab — even with no browser open.
+The page **never fetches on activation**: it paints from `_CACHE` instantly and a
+fetch-free `ui.timer(120, _repaint_from_cache)` tracks the background cache;
+**manual Refresh** is the only page-driven fetch. Persists across navigation via
+`_CACHE` (single-user), incl. expanded sectors. Verified against the live proxy to
 match the source dashboard exactly (82% green | Cap-wtd +0.70% | Score 7.8/10; real
 industry rows on expand). Designs/plans:
 [base](docs/plans/2026-06-14-sentiment-page-design.md) /
@@ -289,7 +294,7 @@ cd sentiment-dashboard ; python -m pytest tests
 cd trade-analyzer      ; python -m pytest .
 cd portfolio-analyzer  ; python -m pytest tests
 cd claude-driver       ; python -m pytest .
-cd webgui              ; python -m pytest .   # 119 tests: transforms + shell smoke
+cd webgui              ; python -m pytest .   # 122 tests: transforms + shell smoke
 ```
 
 - **options-scanner** has ~2 known date-relative failing tests carried over from

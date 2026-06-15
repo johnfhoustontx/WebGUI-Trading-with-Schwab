@@ -952,9 +952,9 @@ def render():
         status_lbl.text = "   ·   ".join(parts) if parts else "Loading…"
 
     async def load(with_sectors=False):
-        # Composite refresh. Sectors are loaded only on initial load and on
-        # explicit Refresh — the 300s auto-timer is composite-only so the
-        # heavy /chains fetch can't stack on a slow proxy.
+        # Manual Refresh path (explicit user action). Auto-refresh is handled
+        # server-side by the 120s background task (refresh_cache); the page
+        # itself only repaints from _CACHE and never auto-fetches on activation.
         if state.get("loading"):
             return
         state["loading"] = True
