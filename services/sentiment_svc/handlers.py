@@ -54,23 +54,33 @@ def _load_all_industries(sector, spy):
     industry ETFs from ``sector['sector_data']`` (the same shape the GUI's
     expand handler reads), then ``compute.load_industries`` once per sector.
 
-    Returns ``{sector_name: rows}``. Any failure is non-fatal — returns ``{}``
-    so the sectors view is still cached with the sector payload intact.
+    Returns ``{sector_name: rows}``. Resilience is **per-sector**: a failure
+    computing one sector's industries logs and skips THAT sector only (its
+    entry is omitted), while the other sectors still populate. An outer guard
+    protects the enumeration of sector names itself, so a malformed ``sector``
+    dict yields ``{}`` rather than raising.
     """
     industries = {}
     try:
         sector_data = (sector or {}).get("sector_data") or []
+        names = []
         for r in sector_data:
             if r.get("kind") != "sector":
                 continue
             name = r.get("sector") or r.get("label")
-            if not name:
-                continue
+            if name:
+                names.append(name)
+    except Exception:  # noqa: BLE001 — malformed sector dict -> empty view.
+        log.exception("industry precompute enumeration failed")
+        return {}
+
+    for name in names:
+        try:
             etfs = _sector_industry_etfs(sector_data, name)
             industries[name] = compute.load_industries(etfs, spy)
-    except Exception:  # noqa: BLE001 — industries are best-effort.
-        log.exception("industry precompute failed")
-        return {}
+        except Exception:  # noqa: BLE001 — one sector's failure must not zero the rest.
+            log.exception("industry precompute failed for sector %s", name)
+            continue
     return industries
 
 

@@ -174,7 +174,36 @@ def test_industries_failure_non_fatal(monkeypatch):
     sec = bus.cache_get("cache:sentiment:sectors")
     assert sec is not None
     assert sec.payload["sector"] == sector
+    # Every sector fails -> industries view is empty (per-sector skips).
     assert sec.payload["industries"] == {}
+    assert calls["bridge"] == 1
+
+
+def test_industries_failure_per_sector_resilient(monkeypatch):
+    """One sector's industry compute exploding skips THAT sector only; the
+    other sector still populates."""
+    bus = Bus(fake=True)
+    sector = _sector_with_industries()  # Technology -> [SMH, IGV], Energy -> [XOP]
+
+    def _selective(etfs, _spy):
+        etfs = list(etfs)
+        if etfs == ["XOP"]:  # Energy's ETF list -> blow up only here
+            raise RuntimeError("energy industry load exploded")
+        return [{"etf": e} for e in etfs]
+
+    calls = _patch_compute(monkeypatch, live=_fake_live(),
+                           snaps=[{"x": 1}], spy=[1.0], sector=sector,
+                           industries_fn=_selective)
+
+    handlers.refresh(bus, with_sectors=True)  # must not raise
+
+    sec = bus.cache_get("cache:sentiment:sectors")
+    assert sec is not None
+    assert sec.payload["sector"] == sector
+    inds = sec.payload["industries"]
+    # Technology still present; Energy skipped (omitted) on its failure.
+    assert inds == {"Technology": [{"etf": "SMH"}, {"etf": "IGV"}]}
+    assert "Energy" not in inds
     assert calls["bridge"] == 1
 
 
