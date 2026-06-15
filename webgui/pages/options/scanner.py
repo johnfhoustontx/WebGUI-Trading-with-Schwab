@@ -18,6 +18,8 @@ from repo_paths import OPTIONS_SCANNER
 if str(OPTIONS_SCANNER) not in sys.path:
     sys.path.insert(0, str(OPTIONS_SCANNER))
 
+from pages.ui_guard import guard, guard_async  # noqa: E402
+
 from scanner_engine import run_full_scan  # noqa: E402
 
 from . import detail, handoff, header  # noqa: E402
@@ -230,6 +232,7 @@ def render():
             for w in (results.get("warnings") or []):
                 ui.notify(w, type="warning")
 
+    @guard_async
     async def do_scan():
         scan_btn.disable()
         spinner.visible = True
@@ -258,6 +261,7 @@ def render():
     if _LAST_RESULTS["data"] is not None:
         _populate(_LAST_RESULTS["data"], notify=False, remember=False)
 
+    @guard
     def _tick():
         # Repaint when the server-side auto-scan (or another tab) refreshed data.
         if _LAST_RESULTS.get("version", 0) != seen["version"] and _LAST_RESULTS["data"]:

@@ -15,6 +15,7 @@ if str(OPTIONS_SCANNER) not in sys.path:
 
 from scanner_engine import vix_regime  # noqa: E402
 from regime_filter import evaluate_regime  # noqa: E402
+from pages.ui_guard import guard  # noqa: E402
 
 SYMBOLS = ["$SPX", "SPY", "QQQ", "$VIX"]
 
@@ -60,6 +61,7 @@ def render():
         dot = ui.icon("circle").classes("text-xs")
         sent_lbl = ui.label("").classes("text-sm")
 
+    @guard
     def refresh():
         try:
             raw = proxy.schwab_py_client.get_quotes(SYMBOLS).json() or {}

@@ -12,6 +12,8 @@ from repo_paths import OPTIONS_SCANNER
 if str(OPTIONS_SCANNER) not in sys.path:
     sys.path.insert(0, str(OPTIONS_SCANNER))
 
+from pages.ui_guard import guard, guard_async  # noqa: E402
+
 POS_COLOR = "#66bb6a"
 NEG_COLOR = "#ef5350"
 SPOT_COLOR = "#ffd54f"
@@ -282,6 +284,7 @@ def render():
                     tile("Projected close", data.get("projected_net_delta_close") or 0)
                     tile("Hedge pressure", hp, "#66bb6a" if hp >= 0 else "#ef5350")
 
+    @guard_async
     async def do_fetch():
         sym = (symbol_in.value or "").strip().upper()
         if not sym:
@@ -319,6 +322,7 @@ def render():
         state["countdown"] = 120
         _render_view()
 
+    @guard
     def _tick():
         state["countdown"] = state.get("countdown", 120) - 1
         if state["countdown"] < 0:
@@ -400,6 +404,7 @@ def render():
                 blocks[key] = None
         return gt.build_summary_prompt_bundled(blocks["spx"], blocks["spy"], blocks["qqq"])
 
+    @guard_async
     async def do_analyze():
         analyze_btn.disable()
         spinner.visible = True
