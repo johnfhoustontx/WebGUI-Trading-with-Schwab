@@ -609,6 +609,133 @@ def test_refresh_header_quotes_failure_is_blank(monkeypatch):
     assert out["sentiment"] == {"color": "#666666", "label": "No data"}
 
 
+# ── Simulator (moved from webgui/pages/options/simulator.py) ─────────────────
+class _SimRow:
+    def __init__(self, expiry, kind, strike):
+        self.expiry, self.kind, self.strike = expiry, kind, strike
+
+
+class _SimSnap:
+    def __init__(self, symbol, spot, contracts):
+        self.symbol, self.spot, self.contracts = symbol, spot, contracts
+
+
+def test_expiries_of_dedupes_sorted():
+    snap = _SimSnap("SPY", 450.0, [
+        _SimRow("2026-06-19", "call", 450), _SimRow("2026-06-18", "call", 455),
+        _SimRow("2026-06-19", "put", 445)])
+    assert compute.expiries_of(snap) == ["2026-06-18", "2026-06-19"]
+
+
+def test_strikes_of_filters_by_expiry_and_kind():
+    snap = _SimSnap("SPY", 450.0, [
+        _SimRow("2026-06-19", "call", 450), _SimRow("2026-06-19", "put", 445),
+        _SimRow("2026-06-18", "call", 460)])
+    assert compute.strikes_of(snap, "2026-06-19", "call") == [450]
+    assert compute.strikes_of(snap, "2026-06-19", "put") == [445]
+
+
+def test_find_contract_matches_by_triple():
+    c = _SimRow("2026-06-19", "call", 450)
+    snap = _SimSnap("SPY", 450.0, [c, _SimRow("2026-06-19", "put", 445)])
+    assert compute.find_contract(snap, "2026-06-19", "call", 450) is c
+    assert compute.find_contract(snap, "2026-06-19", "call", 999) is None
+
+
+def _patch_sim(monkeypatch, snap):
+    """Stub the lazily-imported ``options_simulator.data``/``.engine`` modules."""
+    import sys as _sys
+    import types as _types
+
+    fake_data = _types.SimpleNamespace(
+        fetch_snapshot=lambda client, symbol: snap)
+
+    class _FakeDF:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def to_dict(self, orient):
+            return self._rows
+
+    class _WhatIf:
+        def __init__(self, s):
+            pass
+
+        def sweep(self, c, s_range, t_days):
+            return _FakeDF([{"S": float(s), "theo_price": float(s) - 100.0}
+                            for s in s_range])
+
+    class _Shock:
+        def __init__(self, s):
+            pass
+
+        def sweep(self, c, mults):
+            return _FakeDF([{"theo_price": 1.0 * m, "delta": 0.5, "gamma": 0.02,
+                             "theta": -0.1, "vega": 0.3} for m in mults])
+
+    fake_engine = _types.SimpleNamespace(
+        Position=_types.SimpleNamespace(
+            single=lambda contract, direction, symbol: ("pos", contract, direction, symbol)),
+        WhatIfEngine=_WhatIf,
+        IVShockEngine=_Shock,
+        # aggregate_position just applies per_leg_fn to the (single) contract.
+        aggregate_position=lambda pos, fn: fn(pos[1]))
+    monkeypatch.setitem(_sys.modules, "options_simulator", _types.ModuleType("options_simulator"))
+    monkeypatch.setitem(_sys.modules, "options_simulator.data", fake_data)
+    monkeypatch.setitem(_sys.modules, "options_simulator.engine", fake_engine)
+
+
+def test_sim_fetch_stores_snapshot_and_returns_meta(monkeypatch):
+    snap = _SimSnap("SPY", 450.0, [
+        _SimRow("2026-06-19", "call", 450), _SimRow("2026-06-19", "put", 445),
+        _SimRow("2026-06-18", "call", 460)])
+    _patch_sim(monkeypatch, snap)
+    compute._SIM_SNAPSHOTS.clear()
+
+    meta = compute.sim_fetch("SPY")
+    assert meta["symbol"] == "SPY"
+    assert meta["spot"] == 450.0
+    assert meta["n_contracts"] == 3
+    assert meta["expiries"] == ["2026-06-18", "2026-06-19"]
+    assert meta["strikes"]["2026-06-19"] == {"call": [450], "put": [445]}
+    assert meta["strikes"]["2026-06-18"] == {"call": [460], "put": []}
+    # Snapshot stashed in-process for sim_run.
+    assert compute._SIM_SNAPSHOTS["SPY"] is snap
+
+
+def test_sim_run_returns_whatif_and_ivshock(monkeypatch):
+    snap = _SimSnap("SPY", 450.0, [_SimRow("2026-06-19", "call", 450)])
+    _patch_sim(monkeypatch, snap)
+    compute._SIM_SNAPSHOTS.clear()
+    compute._SIM_SNAPSHOTS["SPY"] = snap
+
+    out = compute.sim_run("SPY", "2026-06-19", "call", 450, "buy", 5, 1.5)
+    assert out["spot"] == 450.0
+    # What-if: 81-point sweep, each a plain dict with S + theo_price.
+    assert len(out["whatif_rows"]) == 81
+    assert out["whatif_rows"][0]["S"] == 450.0 * 0.8
+    assert out["whatif_rows"][-1]["S"] == 450.0 * 1.2
+    # IV-shock: base (×1.0) + shock (×1.5).
+    assert out["ivshock"]["base"]["theo_price"] == 1.0
+    assert out["ivshock"]["shock"]["theo_price"] == 1.5
+
+
+def test_sim_run_empty_when_no_snapshot(monkeypatch):
+    _patch_sim(monkeypatch, _SimSnap("SPY", 450.0, []))
+    compute._SIM_SNAPSHOTS.clear()
+    # No snapshot stashed for QQQ -> empty (page prompts a re-fetch).
+    assert compute.sim_run("QQQ", "2026-06-19", "call", 450, "buy", 5, 1.5) == {}
+
+
+def test_sim_run_empty_when_contract_missing(monkeypatch):
+    snap = _SimSnap("SPY", 450.0, [_SimRow("2026-06-19", "call", 450)])
+    _patch_sim(monkeypatch, snap)
+    compute._SIM_SNAPSHOTS.clear()
+    compute._SIM_SNAPSHOTS["SPY"] = snap
+    # Strike not in the snapshot -> empty (page prompts a selection).
+    assert compute.sim_run("SPY", "2026-06-19", "call", 999, "buy", 5, 1.5) == {}
+
+
 def test_refresh_header_sentiment_failure_is_no_data(monkeypatch):
     raw = {"$VIX": {"quote": {"lastPrice": 22.0}}}
     monkeypatch.setattr(compute._proxy.schwab_py_client, "get_quotes",

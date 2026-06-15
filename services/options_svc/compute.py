@@ -623,3 +623,116 @@ def gamma_analyze() -> dict:
             blocks[key] = None
     prompt = gt.build_summary_prompt_bundled(blocks["spx"], blocks["spy"], blocks["qqq"])
     return {"prompt": prompt}
+
+
+# ── Simulator (ported from webgui/pages/options/simulator.py) ────────────────
+# The What-if price sweep + IV-shock simulator. The page used to fetch a
+# ChainSnapshot OBJECT and call the pure ``options_simulator`` engines over it on
+# every selector/slider change. That snapshot is a Python object (not
+# JSON-serializable as a whole), so it stays IN-PROCESS here: ``sim_fetch`` pulls
+# it once and stashes it in ``_SIM_SNAPSHOTS`` (symbol → snapshot); ``sim_run``
+# looks it up by symbol and computes both sweeps, returning only JSON-safe rows.
+# Single-user, single-process service, so a module-level dict is fine.
+#
+# LAZY IMPORTS (IMPORTANT): ``options_simulator.data``/``.engine`` (and numpy)
+# are imported lazily inside the functions, mirroring the other compute fns — so
+# merely importing this module never drags the simulator engine (and its deps)
+# into the process, keeping the combined pytest run clean.
+
+# symbol -> ChainSnapshot object (in-process; never serialized whole).
+_SIM_SNAPSHOTS: dict = {}
+
+
+def expiries_of(snapshot):
+    """Sorted unique expiries (as ISO strings) in the snapshot. (Moved from page.)"""
+    return sorted({str(c.expiry) for c in getattr(snapshot, "contracts", []) or []})
+
+
+def strikes_of(snapshot, expiry, kind):
+    """Sorted unique strikes for an expiry + kind (call/put). (Moved from page.)"""
+    out = {c.strike for c in getattr(snapshot, "contracts", []) or []
+           if str(c.expiry) == str(expiry) and c.kind == kind}
+    return sorted(out)
+
+
+def find_contract(snapshot, expiry, kind, strike):
+    """Find the matching ContractRow (None if absent). (Moved from page.)"""
+    for c in getattr(snapshot, "contracts", []) or []:
+        if str(c.expiry) == str(expiry) and c.kind == kind and c.strike == strike:
+            return c
+    return None
+
+
+def _sim_records(df):
+    """Normalize a DataFrame or list-of-dicts to a list of dict rows.
+
+    Mirrors the page's ``_records`` so the what-if sweep is returned as a plain
+    JSON-safe list of dict rows the page paints from."""
+    if hasattr(df, "to_dict"):
+        return df.to_dict("records")
+    return list(df or [])
+
+
+def sim_fetch(symbol: str) -> dict:
+    """Fetch the ChainSnapshot for ``symbol``, stash it in-process, return meta.
+
+    The whole snapshot is a Python object (price-history series + ContractRow
+    list) and is NOT JSON-serializable as a unit, so it stays in
+    ``_SIM_SNAPSHOTS`` keyed by symbol. We return only the page-selector metadata
+    the GUI needs to populate its expiry/strike dropdowns: spot, contract count,
+    the sorted expiries, and a nested ``strikes`` map (expiry → {call, put}).
+    Computing the full nested strike map up front (vs. a per-(expiry,kind)
+    follow-up command) keeps selector changes instant on the page with no extra
+    round-trip — the per-symbol cost is one pass over the contracts list."""
+    from options_simulator import data as sdata
+
+    snap = sdata.fetch_snapshot(_proxy.schwab_py_client, symbol)
+    _SIM_SNAPSHOTS[symbol] = snap
+    exps = expiries_of(snap)
+    return {
+        "symbol": snap.symbol,
+        "spot": snap.spot,
+        "n_contracts": len(snap.contracts),
+        "expiries": exps,
+        "strikes": {exp: {"call": strikes_of(snap, exp, "call"),
+                          "put": strikes_of(snap, exp, "put")}
+                    for exp in exps},
+    }
+
+
+def sim_run(symbol, expiry, kind, strike, direction, dt, mult) -> dict:
+    """Compute BOTH simulator sweeps for the selected contract → JSON-safe dict.
+
+    Ports the page's render logic verbatim: the what-if sweep over an 81-point
+    ±20% price range at ``dt`` days-to-event, and the IV-shock base-vs-shock pair
+    at ``[1.0, mult]``. The snapshot is looked up by symbol from the in-process
+    stash; a missing snapshot (service restarted / never fetched) → ``{}`` so the
+    page can prompt a re-fetch, and a missing contract → ``{}`` (page prompts a
+    selection). Returns ``{"spot", "whatif_rows", "ivshock"}`` where ``ivshock``
+    is ``{"base", "shock"}`` (or None if the engine returned <2 rows)."""
+    from options_simulator import engine as seng
+    import numpy as np
+
+    snap = _SIM_SNAPSHOTS.get(symbol)
+    if snap is None:
+        return {}
+    contract = find_contract(snap, expiry, kind, strike)
+    if contract is None:
+        return {}
+
+    pos = seng.Position.single(contract, direction, snap.symbol)
+
+    # What-if: 81-point ±20% underlying sweep at ``dt`` days (clamp 0 → 0.01).
+    s_range = np.linspace(snap.spot * 0.8, snap.spot * 1.2, 81)
+    whatif_eng = seng.WhatIfEngine(snap)
+    wdf = seng.aggregate_position(
+        pos, lambda c: whatif_eng.sweep(c, s_range, float(dt) or 0.01))
+    whatif_rows = _sim_records(wdf)
+
+    # IV-shock: base (×1.0) vs shock (×mult).
+    shock_eng = seng.IVShockEngine(snap)
+    sdf = seng.aggregate_position(pos, lambda c: shock_eng.sweep(c, [1.0, float(mult)]))
+    rows = sdf.to_dict("records") if hasattr(sdf, "to_dict") else list(sdf or [])
+    ivshock = {"base": rows[0], "shock": rows[1]} if len(rows) >= 2 else None
+
+    return {"spot": snap.spot, "whatif_rows": whatif_rows, "ivshock": ivshock}

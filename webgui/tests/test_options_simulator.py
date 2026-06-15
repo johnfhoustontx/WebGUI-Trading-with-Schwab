@@ -1,15 +1,11 @@
-"""Tests for the Simulator page pure figure/transform builders."""
+"""Tests for the Simulator page pure figure/transform builders + Tier-3 wiring.
+
+The ChainSnapshot fetch + sweep engines moved to ``services/options_svc/compute``
+(``sim_fetch``/``sim_run``); the page now renders from the Redis cache and drives
+compute via commands. The snapshot-object helpers (``expiries_of``/``strikes_of``/
+``find_contract``) moved to the service, so their tests live in the service suite.
+"""
 from pages.options import simulator as sim
-
-
-class _Row:
-    def __init__(self, expiry, kind, strike):
-        self.expiry, self.kind, self.strike = expiry, kind, strike
-
-
-class _Snap:
-    def __init__(self, contracts):
-        self.contracts = contracts
 
 
 def test_whatif_figure_is_plotly_dict():
@@ -18,6 +14,14 @@ def test_whatif_figure_is_plotly_dict():
     assert "data" in fig and "layout" in fig
     xs = fig["data"][0]["x"]
     assert xs[0] == 440 and xs[-1] == 460
+    # target_s adds a second vline shape (baseline + spot + target).
+    assert len(fig["layout"]["shapes"]) == 3
+
+
+def test_whatif_figure_no_target_omits_overlay():
+    fig = sim.whatif_figure([{"S": 1, "theo_price": 2}], spot=1.0)
+    # Only the zero baseline + spot line — no ΔS overlay.
+    assert len(fig["layout"]["shapes"]) == 2
 
 
 def test_ivshock_figure_two_series():
@@ -27,14 +31,48 @@ def test_ivshock_figure_two_series():
     assert "data" in fig and len(fig["data"]) == 2
 
 
-def test_expiries_of_dedupes_sorted():
-    snap = _Snap([_Row("2026-06-19", "call", 450), _Row("2026-06-18", "call", 455),
-                  _Row("2026-06-19", "put", 445)])
-    assert sim.expiries_of(snap) == ["2026-06-18", "2026-06-19"]
+def test_records_normalizes_df_and_list():
+    class _DF:
+        def to_dict(self, orient):
+            return [{"S": 1}]
+
+    assert sim._records(_DF()) == [{"S": 1}]
+    assert sim._records([{"S": 2}]) == [{"S": 2}]
+    assert sim._records(None) == []
 
 
-def test_strikes_of_filters_by_expiry_and_kind():
-    snap = _Snap([_Row("2026-06-19", "call", 450), _Row("2026-06-19", "put", 445),
-                  _Row("2026-06-18", "call", 460)])
-    assert sim.strikes_of(snap, "2026-06-19", "call") == [450]
-    assert sim.strikes_of(snap, "2026-06-19", "put") == [445]
+def test_vline_shape_fields():
+    line = sim._vline(450.0, "#fff", dash="dash")
+    assert line["x0"] == 450.0 and line["x1"] == 450.0
+    assert line["line"]["dash"] == "dash"
+
+
+def test_simulator_module_imports_no_engine_or_proxy():
+    """Regression: the page must NOT import the engine, proxy, numpy, or splice
+    OPTIONS_SCANNER onto sys.path — all of that moved into the options service."""
+    import pathlib
+
+    src = pathlib.Path(sim.__file__).read_text(encoding="utf-8")
+    for forbidden in ("options_simulator", "import proxy", "OPTIONS_SCANNER",
+                      "import numpy"):
+        assert forbidden not in src, f"simulator.py must not reference {forbidden!r}"
+
+
+def test_render_callable():
+    assert callable(sim.render)
+
+
+def test_render_graceful_empty_cache():
+    """render() must paint without crashing when the bus cache is empty
+    (options service cold) — the Tier-3 graceful-empty path. Mirrors the swing
+    page test: rendering inside a slot context exercises the widget wiring + the
+    initial fetch-free paint (no meta → fetch prompt, no result → select prompt).
+    """
+    import bus_client
+    from nicegui import ui
+
+    bus_client.reset()  # fresh empty fakeredis cache (no service writes)
+    assert bus_client.read("options:sim_meta") is None
+    assert bus_client.read("options:sim_result") is None
+    with ui.card():
+        sim.render()  # must not raise

@@ -1,16 +1,32 @@
-"""Simulator page — What-if price sweep + IV-shock.
+"""Simulator page (Tier-3 reader) — What-if price sweep + IV-shock.
 
-Calls the pure ``options_simulator`` engines over a fetched ChainSnapshot and
-renders Plotly figures. Figure/transform builders are pure (unit-tested);
-``render()`` wires the fetch + contract selector + tabs (Task S2/S3). Replay is
-a deferred follow-up.
+This page holds **no engine call**: the ChainSnapshot fetch + both sweep engines
+(``WhatIfEngine``/``IVShockEngine`` over the snapshot) live in
+``services/options_svc/compute`` (``sim_fetch``/``sim_run``). The snapshot is a
+Python object that can't be JSON-serialized whole, so it stays in-process in the
+service; this page only ever sees the JSON-safe selector **meta** and the
+computed **sweep rows**.
+
+Interaction model:
+
+* **Fetch snapshot** → enqueue ``sim_fetch``; a version-poll on
+  ``options:sim_meta`` populates the expiry/strike selectors.
+* A selector change (expiry/kind/strike/dir) or a Δt / IV-mult **slider** change
+  → enqueue ``sim_run`` with the current widget params; a version-poll on
+  ``options:sim_result`` repaints both figures from the cached rows.
+* The **ΔS** slider is purely a CLIENT-SIDE overlay line on the what-if chart
+  (``target_s = spot*(1+ΔS/100)``) — it NEVER enqueues a command.
+
+Sliders fire on every drag step, so ``sim_run`` is **debounced**: a slider change
+only stashes the latest params; a short ``ui.timer`` flushes the most recent
+params at most ~every 0.4 s. Selector changes enqueue immediately (they're
+discrete). The pure figure builders (``whatif_figure``/``ivshock_figure`` +
+``_records``/``_vline``) are unit-tested.
 """
-import sys
+import bus_client
+from nicegui import ui
 
-from repo_paths import OPTIONS_SCANNER
-
-if str(OPTIONS_SCANNER) not in sys.path:
-    sys.path.insert(0, str(OPTIONS_SCANNER))
+from pages.ui_guard import guard
 
 SPOT_COLOR = "#ffd54f"
 TARGET_COLOR = "#42a5f5"
@@ -77,44 +93,23 @@ def ivshock_figure(base, shock, mult=1.5):
     }
 
 
-def expiries_of(snapshot):
-    """Sorted unique expiries (as ISO strings) in the snapshot."""
-    return sorted({str(c.expiry) for c in getattr(snapshot, "contracts", []) or []})
-
-
-def strikes_of(snapshot, expiry, kind):
-    """Sorted unique strikes for an expiry + kind (call/put)."""
-    out = {c.strike for c in getattr(snapshot, "contracts", []) or []
-           if str(c.expiry) == str(expiry) and c.kind == kind}
-    return sorted(out)
-
-
-def find_contract(snapshot, expiry, kind, strike):
-    for c in getattr(snapshot, "contracts", []) or []:
-        if str(c.expiry) == str(expiry) and c.kind == kind and c.strike == strike:
-            return c
-    return None
-
-
 def render():
-    import numpy as np
-
-    from nicegui import run, ui
-
-    import proxy
-    from options_simulator import data as sdata
-    from options_simulator import engine as seng
-
+    """Simulator page: fetch button + contract selector + What-if / IV-shock tabs."""
     ui.label("Simulator").classes("text-h5")
 
-    state: dict = {"snap": None, "contract": None}
+    # Page state (local closure, not module globals — built per request).
+    state: dict = {
+        "meta": None,        # last sim_meta payload (selector source)
+        "result": None,      # last sim_result payload (sweep rows)
+        "meta_ver": None,    # last-seen sim_meta cache version
+        "result_ver": None,  # last-seen sim_result cache version
+        "pending": None,     # latest sim_run params awaiting the debounce flush
+    }
 
     with ui.row().classes("items-center gap-3 flex-wrap"):
         symbol_in = ui.input("Symbol", value="SPY").classes("w-28")
         fetch_btn = ui.button("Fetch snapshot", icon="download")
-        spinner = ui.spinner(size="lg")
-        spinner.visible = False
-        status = ui.label("").classes("opacity-70 text-sm")
+        status = ui.label("Fetch a snapshot to begin.").classes("opacity-70 text-sm")
 
     with ui.row().classes("items-end gap-3 flex-wrap"):
         expiry_sel = ui.select([], label="Expiry").classes("w-40")
@@ -139,90 +134,151 @@ def render():
                 mult_slider = ui.slider(min=0.5, max=3.0, step=0.1, value=1.5).classes("w-64")
             ivshock_box = ui.column().classes("w-full")
 
+    # ── selector population from meta ────────────────────────────────────────
+    def _strikes_for(expiry, kind):
+        meta = state["meta"] or {}
+        return ((meta.get("strikes") or {}).get(str(expiry)) or {}).get(kind) or []
+
     def _sync_strikes():
-        if not state["snap"]:
-            return
-        strikes = strikes_of(state["snap"], expiry_sel.value, kind_tog.value)
+        strikes = _strikes_for(expiry_sel.value, kind_tog.value)
         strike_sel.options = strikes
+        spot = (state["meta"] or {}).get("spot") or 0
         if strikes and strike_sel.value not in strikes:
-            strike_sel.value = min(strikes, key=lambda s: abs(s - (state["snap"].spot or 0)))
+            strike_sel.value = min(strikes, key=lambda s: abs(s - spot))
         strike_sel.update()
 
-    def _resolve_contract():
-        snap = state["snap"]
-        if not snap or strike_sel.value is None:
-            state["contract"] = None
-            return
-        state["contract"] = find_contract(snap, expiry_sel.value, kind_tog.value, strike_sel.value)
-
-    def _render_whatif():
-        snap, contract = state["snap"], state["contract"]
+    # ── render figures from the cached sweep result ──────────────────────────
+    def _render_figures():
         ds_lbl.text = f"ΔS {ds_slider.value:+g}%"
         dt_lbl.text = f"Δt {dt_slider.value:g}d"
-        whatif_box.clear()
-        if not (snap and contract):
-            return
-        spot = snap.spot
-        target_s = spot * (1 + ds_slider.value / 100.0)
-        s_range = np.linspace(spot * 0.8, spot * 1.2, 81)
-        pos = seng.Position.single(contract, dir_tog.value, snap.symbol)
-        eng = seng.WhatIfEngine(snap)
-        df = seng.aggregate_position(pos, lambda c: eng.sweep(c, s_range, float(dt_slider.value) or 0.01))
-        with whatif_box:
-            ui.plotly(whatif_figure(df, spot, target_s)).classes("w-full")
-
-    def _render_ivshock():
-        snap, contract = state["snap"], state["contract"]
         mult = float(mult_slider.value)
         mult_lbl.text = f"IV ×{mult:g}"
+
+        result = state["result"]
+        whatif_box.clear()
         ivshock_box.clear()
-        if not (snap and contract):
+        if not result:
+            with whatif_box:
+                ui.label("Select a contract to run the sweep.").classes("opacity-70")
             return
-        pos = seng.Position.single(contract, dir_tog.value, snap.symbol)
-        eng = seng.IVShockEngine(snap)
-        df = seng.aggregate_position(pos, lambda c: eng.sweep(c, [1.0, mult]))
-        rows = df.to_dict("records")
-        if len(rows) < 2:
+
+        spot = result.get("spot")
+        # ΔS is a CLIENT-SIDE overlay line only — no command, computed here.
+        target_s = spot * (1 + ds_slider.value / 100.0) if spot is not None else None
+        with whatif_box:
+            ui.plotly(whatif_figure(result.get("whatif_rows") or [], spot,
+                                    target_s)).classes("w-full")
+        shock = result.get("ivshock")
+        if shock:
+            with ivshock_box:
+                ui.plotly(ivshock_figure(shock["base"], shock["shock"], mult)).classes("w-full")
+
+    # ── command enqueue (sim_run) ────────────────────────────────────────────
+    def _current_params():
+        if not state["meta"] or strike_sel.value is None:
+            return None
+        return {
+            "symbol": (state["meta"].get("symbol") or symbol_in.value or "").upper(),
+            "expiry": expiry_sel.value,
+            "kind": kind_tog.value,
+            "strike": strike_sel.value,
+            "direction": dir_tog.value,
+            "dt": float(dt_slider.value),
+            "mult": float(mult_slider.value),
+        }
+
+    @guard
+    def _enqueue_run():
+        """Enqueue a sim_run immediately (used for discrete selector changes)."""
+        params = _current_params()
+        if params is None:
             return
-        with ivshock_box:
-            ui.plotly(ivshock_figure(rows[0], rows[1], mult)).classes("w-full")
+        bus_client.request("options", {"type": "sim_run", "args": params})
 
-    def _on_selection():
-        _resolve_contract()
-        _render_whatif()
-        _render_ivshock()
+    @guard
+    def _slider_changed():
+        """Sliders fire often during drag → stash latest params; the debounce
+        timer flushes the most recent at most ~every 0.4s. Also repaint the ΔS
+        overlay immediately (client-side, no command needed)."""
+        params = _current_params()
+        if params is not None:
+            state["pending"] = params
+        # ΔS only moves the overlay; mult/dt labels update on the next repaint.
+        ds_lbl.text = f"ΔS {ds_slider.value:+g}%"
+        _render_figures()
 
-    async def do_fetch():
+    @guard
+    def _flush_pending():
+        if state["pending"] is not None:
+            bus_client.request("options", {"type": "sim_run", "args": state["pending"]})
+            state["pending"] = None
+
+    def _on_selector():
+        _sync_strikes()
+        _enqueue_run()
+
+    # ── fetch ────────────────────────────────────────────────────────────────
+    @guard
+    def _request_fetch():
         sym = (symbol_in.value or "").strip().upper()
         if not sym:
             ui.notify("Enter a symbol first.", type="warning")
             return
-        fetch_btn.disable()
-        spinner.visible = True
+        bus_client.request("options", {"type": "sim_fetch", "args": {"symbol": sym}})
         status.text = "Fetching snapshot…"
-        try:
-            snap = await run.io_bound(sdata.fetch_snapshot, proxy.schwab_py_client, sym)
-        except Exception as exc:
-            ui.notify(f"Fetch failed: {exc}", type="negative")
-            status.text = "Fetch failed."
-            return
-        finally:
-            spinner.visible = False
-            fetch_btn.enable()
-        state["snap"] = snap
-        exps = expiries_of(snap)
-        expiry_sel.options = exps
-        expiry_sel.value = exps[0] if exps else None
-        expiry_sel.update()
-        status.text = f"{snap.symbol} spot {snap.spot:,.2f} · {len(snap.contracts)} contracts"
-        _sync_strikes()
-        _on_selection()
 
-    fetch_btn.on_click(do_fetch)
-    expiry_sel.on_value_change(lambda e: (_sync_strikes(), _on_selection()))
-    kind_tog.on_value_change(lambda e: (_sync_strikes(), _on_selection()))
-    strike_sel.on_value_change(lambda e: _on_selection())
-    dir_tog.on_value_change(lambda e: _on_selection())
-    ds_slider.on_value_change(lambda e: _render_whatif())
-    dt_slider.on_value_change(lambda e: _render_whatif())
-    mult_slider.on_value_change(lambda e: _render_ivshock())
+    fetch_btn.on_click(_request_fetch)
+    expiry_sel.on_value_change(lambda e: _on_selector())
+    kind_tog.on_value_change(lambda e: _on_selector())
+    strike_sel.on_value_change(lambda e: _enqueue_run())
+    dir_tog.on_value_change(lambda e: _enqueue_run())
+    # ΔS is client-side only (overlay) — re-render, never enqueue.
+    ds_slider.on_value_change(lambda e: (_render_figures()))
+    # Δt + IV-mult drive the sweep → debounced enqueue.
+    dt_slider.on_value_change(lambda e: _slider_changed())
+    mult_slider.on_value_change(lambda e: _slider_changed())
+
+    # ── version-poll repaint (fetch-free) ────────────────────────────────────
+    def _apply_meta(meta):
+        state["meta"] = meta or None
+        exps = (meta or {}).get("expiries") or []
+        expiry_sel.options = exps
+        if exps and expiry_sel.value not in exps:
+            expiry_sel.value = exps[0]
+        expiry_sel.update()
+        _sync_strikes()
+        if meta:
+            status.text = (f"{meta.get('symbol')} spot {meta.get('spot'):,.2f} · "
+                           f"{meta.get('n_contracts')} contracts")
+            # Kick off the first sweep for the auto-selected contract.
+            _enqueue_run()
+
+    @guard
+    def _poll_meta():
+        version = bus_client.read_version("options:sim_meta")
+        if version == state["meta_ver"]:
+            return
+        state["meta_ver"] = version
+        _apply_meta(bus_client.read("options:sim_meta"))
+
+    @guard
+    def _poll_result():
+        version = bus_client.read_version("options:sim_result")
+        if version == state["result_ver"]:
+            return
+        state["result_ver"] = version
+        state["result"] = bus_client.read("options:sim_result") or None
+        _render_figures()
+
+    # Initial paint (graceful-empty when the service is cold).
+    state["meta_ver"] = bus_client.read_version("options:sim_meta")
+    state["meta"] = bus_client.read("options:sim_meta")
+    if state["meta"]:
+        _apply_meta(state["meta"])
+    state["result_ver"] = bus_client.read_version("options:sim_result")
+    state["result"] = bus_client.read("options:sim_result") or None
+    _render_figures()
+
+    ui.timer(2.0, _poll_meta)
+    ui.timer(2.0, _poll_result)
+    ui.timer(0.4, _flush_pending)  # debounce flush for slider-driven sweeps

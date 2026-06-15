@@ -524,6 +524,59 @@ def test_gamma_analyze_command(monkeypatch):
     assert msg is not None and msg.get("version") == env.version
 
 
+# ── Simulator (Task 2.6e) ────────────────────────────────────────────────────
+def test_sim_fetch_command_caches_meta(monkeypatch):
+    bus = Bus(fake=True)
+    meta = {"symbol": "SPY", "spot": 450.0, "n_contracts": 3,
+            "expiries": ["2026-06-19"],
+            "strikes": {"2026-06-19": {"call": [450], "put": [445]}}}
+    seen = {"symbol": None}
+
+    def _rec(symbol):
+        seen["symbol"] = symbol
+        return meta
+
+    monkeypatch.setattr(handlers.compute, "sim_fetch", _rec)
+
+    sub = bus.subscribe("events:options:sim_meta")
+    handlers.handle_command(bus, Command(type="sim_fetch", args={"symbol": "SPY"}))
+    msg = sub.get_message(timeout=1.0)
+    sub.close()
+
+    assert seen["symbol"] == "SPY"
+    env = bus.cache_get("cache:options:sim_meta")
+    assert env is not None
+    assert env.payload == meta
+    assert msg is not None and msg.get("version") == env.version
+
+
+def test_sim_run_command_caches_result(monkeypatch):
+    bus = Bus(fake=True)
+    result = {"spot": 450.0,
+              "whatif_rows": [{"S": 360.0, "theo_price": -90.0}],
+              "ivshock": {"base": {"theo_price": 1.0}, "shock": {"theo_price": 1.5}}}
+    seen = {"args": None}
+
+    def _rec(symbol, expiry, kind, strike, direction, dt, mult):
+        seen["args"] = (symbol, expiry, kind, strike, direction, dt, mult)
+        return result
+
+    monkeypatch.setattr(handlers.compute, "sim_run", _rec)
+
+    args = {"symbol": "SPY", "expiry": "2026-06-19", "kind": "call",
+            "strike": 450, "direction": "buy", "dt": 5, "mult": 1.5}
+    sub = bus.subscribe("events:options:sim_result")
+    handlers.handle_command(bus, Command(type="sim_run", args=args))
+    msg = sub.get_message(timeout=1.0)
+    sub.close()
+
+    assert seen["args"] == ("SPY", "2026-06-19", "call", 450, "buy", 5, 1.5)
+    env = bus.cache_get("cache:options:sim_result")
+    assert env is not None
+    assert env.payload == result
+    assert msg is not None and msg.get("version") == env.version
+
+
 def test_swing_scan_uses_defaults_for_missing_args(monkeypatch):
     bus = Bus(fake=True)
     seen = {"params": None}

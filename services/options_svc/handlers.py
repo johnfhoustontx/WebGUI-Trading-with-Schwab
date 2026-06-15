@@ -49,6 +49,12 @@ EVENT_GAMMA_EXPLAIN = "events:options:gamma_explain"
 CACHE_GAMMA_ANALYZE = "cache:options:gamma_analyze"
 EVENT_GAMMA_ANALYZE = "events:options:gamma_analyze"
 
+CACHE_SIM_META = "cache:options:sim_meta"
+EVENT_SIM_META = "events:options:sim_meta"
+
+CACHE_SIM_RESULT = "cache:options:sim_result"
+EVENT_SIM_RESULT = "events:options:sim_result"
+
 # Defaults mirror the page's input defaults (symbol SPY, 5-30 DTE, the put/call
 # delta gates, min credit 10% -> 0.10 fraction). The page sends the fraction.
 _SWING_DEFAULTS = {
@@ -185,7 +191,10 @@ def handle_command(bus, command) -> None:
     then refresh; ``gamma_refresh`` (args symbol, default ``$SPX``) → recompute the
     Gamma snapshot; ``gamma_explain`` (args symbol) → build the Explain body, cache
     + publish; ``gamma_analyze`` → build the bundled SPX/SPY/QQQ prompt, cache +
-    publish; else no-op."""
+    publish; ``sim_fetch`` (args symbol) → fetch the simulator ChainSnapshot
+    (stashed in-process), cache the selector meta + publish; ``sim_run`` (args
+    symbol/expiry/kind/strike/direction/dt/mult) → compute both sweeps, cache the
+    result + publish; else no-op."""
     if command.type == "rescan":
         rescan(bus)
     elif command.type == "swing_scan":
@@ -246,3 +255,14 @@ def handle_command(bus, command) -> None:
         res = compute.gamma_analyze()
         version = bus.cache_set(CACHE_GAMMA_ANALYZE, res)
         bus.publish(EVENT_GAMMA_ANALYZE, {"version": version})
+    elif command.type == "sim_fetch":
+        meta = compute.sim_fetch(command.args.get("symbol", "SPY"))
+        version = bus.cache_set(CACHE_SIM_META, meta)
+        bus.publish(EVENT_SIM_META, {"version": version})
+    elif command.type == "sim_run":
+        a = command.args or {}
+        result = compute.sim_run(
+            a.get("symbol"), a.get("expiry"), a.get("kind"), a.get("strike"),
+            a.get("direction"), a.get("dt"), a.get("mult"))
+        version = bus.cache_set(CACHE_SIM_RESULT, result)
+        bus.publish(EVENT_SIM_RESULT, {"version": version})
