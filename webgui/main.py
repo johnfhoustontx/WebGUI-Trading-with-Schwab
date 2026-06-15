@@ -29,6 +29,12 @@ def _start_options_autoscan() -> None:
     from pages.options import scanner
     scanner.start_autoscan()
 
+@app.on_startup
+def _start_sentiment_refresh() -> None:
+    """Start the server-side 120s sentiment cache+bridge refresher."""
+    from pages import sentiment
+    sentiment.start_background_refresh()
+
 # Options is an expandable group; each child is its own route. (route, label, icon)
 OPTIONS_CHILDREN = [
     ("/", "Scanner", "radar"),

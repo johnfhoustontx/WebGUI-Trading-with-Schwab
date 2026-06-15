@@ -579,6 +579,7 @@ def _refresh_cache_sync(with_sectors=False):
     if with_sectors:
         try:
             _CACHE["sector"] = _load_sector_perf(spy)
+            _CACHE["sector_at"] = datetime.now()
         except Exception:
             pass
     _CACHE["composite_at"] = datetime.now()
@@ -985,6 +986,17 @@ def render():
         if with_sectors:
             await load_sectors()
 
+    def _repaint_from_cache():
+        # Re-seed only the DATA keys from the module cache (NOT expanded/industry,
+        # so the user's open expansions survive a repaint) and re-apply — no fetch.
+        state["snaps"] = _CACHE.get("snaps") or []
+        state["spy"] = _CACHE.get("spy") or []
+        for k in ("live", "sector", "composite_at", "sector_at", "proxy_up"):
+            state[k] = _CACHE.get(k)
+        _apply()
+        _apply_sectors()
+        _render_status()
+
     ui.separator().classes("q-my-sm")
     status_lbl = ui.label("Loading…").classes("opacity-60 text-xs w-full")
 
@@ -994,7 +1006,9 @@ def render():
     if state["sector"]:
         _apply_sectors()
     _render_status()
-    if not state["snaps"]:
-        ui.timer(0.1, lambda: load(with_sectors=True), once=True)
-    ui.timer(300.0, load)   # composite-only auto-refresh (was 120s)
+    # No fetch on activation: paint from the module cache (refreshed every 120s
+    # by the server-side background task). A quick one-shot catches the startup
+    # refresh if the page was opened during the cold-start window.
+    ui.timer(5.0, _repaint_from_cache, once=True)
+    ui.timer(120.0, _repaint_from_cache)
     ui.timer(15.0, _render_status)
