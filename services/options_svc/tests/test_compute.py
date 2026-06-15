@@ -403,6 +403,137 @@ def test_close_captured_calls_close_signal_manually(monkeypatch):
     assert seen["args"] == ("X1", 0.45, "MANUAL_CLOSE")
 
 
+# ── Gamma (moved from webgui/pages/options/gamma.py) ─────────────────────────
+class _FakeChainResp:
+    status_code = 200
+
+    def __init__(self, data):
+        self._data = data
+
+    def json(self):
+        return self._data
+
+
+class _FakeEngine:
+    """Stand-in for GammaEngine: returns canned view dicts (key under "gex")."""
+    _last_dte = 0
+
+    def calc_all_from_chain(self, chain):
+        gex = {"spot": 5400.0, "gex": {5400.0: {"call": 1, "put": -1, "net": 0.5}},
+               "strike_count": 1}
+        charm = {"spot": 5400.0, "gex": {5400.0: {"net": 0.2}}, "strike_count": 1}
+        dex = {"spot": 5400.0, "gex": {5400.0: {"net": 0.3}}, "strike_count": 1,
+               "net_delta_0dte": 10.0, "projected_net_delta_close": 5.0,
+               "hedge_pressure": -5.0}
+        vanna = {"spot": 5400.0, "gex": {5400.0: {"net": 0.1}}, "strike_count": 1}
+        return gex, charm, dex, vanna
+
+    def snapshot_summary(self, data, view):
+        return {"spot": data.get("spot"), "flip": 5399.5, "net_total": 1.0}
+
+    def compute_term_grid(self, chain):
+        return {"expirations": ["2026-06-18"], "cells": {}}
+
+
+def _patch_gamma(monkeypatch, *, chain=None, walls=None, history=None):
+    import sys as _sys
+    import types as _types
+
+    fake_gt = _types.SimpleNamespace(
+        GammaEngine=_FakeEngine,
+        get_gex_walls=lambda data, top_n=5: (walls or [5400.0]),
+        get_dex_walls=lambda data, top_n=5: (walls or [5400.0]))
+    fake_gh = _types.SimpleNamespace(
+        connect=lambda read_only=False: object(),
+        load_today_with_grid=lambda conn, symbol, view: (history or []))
+    monkeypatch.setitem(_sys.modules, "gamma_tool", fake_gt)
+    monkeypatch.setitem(_sys.modules, "gex_history_db", fake_gh)
+    monkeypatch.setattr(compute._proxy.schwab_py_client, "get_option_chain",
+                        lambda *a, **k: _FakeChainResp(
+                            chain if chain is not None else {"underlyingPrice": 5400.0}))
+
+
+def test_gamma_snapshot_builds_views_and_term(monkeypatch):
+    _patch_gamma(monkeypatch, history=[(1, 2, 3, 4, 5, 6, {5400.0: {"net": 1}})])
+
+    snap = compute.gamma_snapshot("$SPX")
+    assert snap["symbol"] == "$SPX"
+    assert snap["spot"] == 5400.0
+    assert snap["dte"] == 0
+    # All four views present, each keyed with its strike dict under data["gex"].
+    assert set(snap["views"]) == {"GEX", "Charm", "DEX", "Vanna"}
+    gexv = snap["views"]["GEX"]
+    assert gexv["data"]["gex"] == {5400.0: {"call": 1, "put": -1, "net": 0.5}}
+    assert gexv["walls"] == [5400.0]
+    assert gexv["flip"] == 5399.5
+    assert gexv["history"] and gexv["history"][0][6] == {5400.0: {"net": 1}}
+    # DEX carries the hedge tiles.
+    assert snap["views"]["DEX"]["hedge"] == {
+        "net_delta_0dte": 10.0, "projected_net_delta_close": 5.0,
+        "hedge_pressure": -5.0}
+    assert snap["term"] == {"expirations": ["2026-06-18"], "cells": {}}
+
+
+def test_gamma_snapshot_none_when_chain_fetch_fails(monkeypatch):
+    _patch_gamma(monkeypatch)
+
+    class _Bad:
+        status_code = 500
+
+        def json(self):
+            return {}
+
+    monkeypatch.setattr(compute._proxy.schwab_py_client, "get_option_chain",
+                        lambda *a, **k: _Bad())
+    assert compute.gamma_snapshot("$SPX") is None
+
+
+def test_gamma_explain_returns_body(monkeypatch):
+    import sys as _sys
+    import types as _types
+
+    _patch_gamma(monkeypatch)
+    # gamma_tool needs the explain text builder + snapshot_summary staticmethod.
+    fake_gt = _sys.modules["gamma_tool"]
+    _FakeEngine.snapshot_summary = staticmethod(lambda data, view: {"spot": 5400.0})
+    fake_gt.build_explain_html_text = lambda ctx: "EXPLAIN TEXT"
+    monkeypatch.setitem(_sys.modules, "html_render", _types.SimpleNamespace(
+        pinch_section_html=lambda s: "",
+        explain_to_html=lambda t: f"<p>{t}</p>",
+        linkify=lambda h: h))
+    monkeypatch.setitem(_sys.modules, "regime_filter",
+                        _types.SimpleNamespace(evaluate_regime=lambda: {"active": False}))
+
+    out = compute.gamma_explain("$SPX")
+    assert out["symbol"] == "$SPX"
+    assert "EXPLAIN TEXT" in out["body"]
+    # Restore the instance-method snapshot_summary for other tests.
+    del _FakeEngine.snapshot_summary
+
+
+def test_gamma_analyze_bundles_three_symbols(monkeypatch):
+    import sys as _sys
+
+    _patch_gamma(monkeypatch)
+    fake_gt = _sys.modules["gamma_tool"]
+    _FakeEngine.calc_expected_move_from_chain = lambda self, chain: 12.0
+    fake_gt.build_analysis_dict = lambda snap, view, symbol, dte, **k: {
+        "view": view, "symbol": symbol}
+    seen = {"args": None}
+
+    def _bundle(spx, spy, qqq, **k):
+        seen["args"] = (spx, spy, qqq)
+        return "BUNDLED PROMPT"
+
+    fake_gt.build_summary_prompt_bundled = _bundle
+
+    out = compute.gamma_analyze()
+    assert out == {"prompt": "BUNDLED PROMPT"}
+    # All three symbol bundles built (non-None).
+    assert all(b is not None for b in seen["args"])
+    del _FakeEngine.calc_expected_move_from_chain
+
+
 # ── Header helpers (moved from webgui/tests/test_options_header.py) ──────────
 def test_sentiment_dot_no_data_when_inactive():
     assert compute.sentiment_dot({"active": False})[1] == "No data"

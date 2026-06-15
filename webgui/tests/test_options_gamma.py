@@ -1,4 +1,15 @@
-"""Tests for the Gamma page pure figure/transform builders."""
+"""Tests for the Gamma page pure figure/transform builders + Tier-3 wiring.
+
+The engine work (live chain fetch + GammaEngine compute + history grids + the
+Explain/Analyze text) moved to ``services/options_svc/compute`` — see that
+service's tests. The page now reads a cached snapshot from the Redis bus and
+drives refresh/explain/analyze via commands, so it must import NO engine / proxy
+code. The pure figure/transform builders below stay unchanged + unit-tested.
+"""
+import inspect
+import json
+
+import bus_client
 from pages.options import gamma
 
 GEX = {"spot": 450.0, "gex": {
@@ -95,3 +106,62 @@ def test_summary_text_mentions_spot_and_flip():
     txt = gamma.summary_text({"spot": 450.0, "flip": 449.5, "net_total": 1234.0,
                               "strike_count": 3}, "GEX")
     assert "450" in txt and "449.5" in txt
+
+
+# ── Tier-3 wiring (Task 2.6d) ────────────────────────────────────────────────
+def test_refloat_keys_casts_string_keys_to_float():
+    out = gamma._refloat_keys({"448.0": {"net": 1}, "450.0": {"net": -2}})
+    assert set(out) == {448.0, 450.0}
+    assert all(isinstance(k, float) for k in out)
+    assert out[448.0] == {"net": 1}
+
+
+def test_refloat_keys_idempotent_and_tolerant():
+    # Already-float keys pass through; non-castable keys are kept as-is.
+    assert gamma._refloat_keys({450.0: 1}) == {450.0: 1}
+    assert gamma._refloat_keys({"x": 1}) == {"x": 1}
+    assert gamma._refloat_keys(None) == {}
+
+
+def test_json_roundtrip_then_refloat_reproduces_bars():
+    """A JSON round-trip stringifies float keys; re-floating restores correct bars.
+
+    Proves the page's normalization keeps the pure ``bars_from_gex`` builder
+    working over a Redis-stored (JSON) snapshot."""
+    data = {"spot": 450.0, "gex": {
+        448.0: {"call": 100.0, "put": -40.0, "net": 60.0},
+        450.0: {"call": 200.0, "put": -250.0, "net": -50.0},
+        452.0: {"call": 30.0, "put": -10.0, "net": 20.0},
+    }}
+    reloaded = json.loads(json.dumps(data))           # float keys -> strings
+    assert all(isinstance(k, str) for k in reloaded["gex"])  # confirm stringified
+    fixed = {"spot": reloaded["spot"], "gex": gamma._refloat_keys(reloaded["gex"])}
+    b = gamma.bars_from_gex(fixed, 450.0, pct=0.01)
+    assert b["strikes"] == [448.0, 450.0, 452.0]      # numeric, sorted, in range
+    assert b["nets"] == [60.0, -50.0, 20.0]
+
+
+def test_render_callable():
+    assert callable(gamma.render)
+
+
+def test_page_imports_no_engine_or_proxy():
+    """Regression: the Tier-3 page must not pull in engine / proxy code."""
+    for attr in ("proxy", "gamma_tool", "gex_history_db", "html_render",
+                 "regime_filter", "OPTIONS_SCANNER", "sys"):
+        assert not hasattr(gamma, attr), f"gamma.py still references {attr}"
+    src = inspect.getsource(gamma)
+    for forbidden in ("gamma_tool", "gex_history_db", "html_render",
+                      "regime_filter", "import proxy", "OPTIONS_SCANNER"):
+        assert forbidden not in src, f"gamma.py must not reference {forbidden!r}"
+
+
+def test_render_graceful_empty_cache():
+    """render() must paint without crashing when the bus cache is empty (service
+    cold) — the Tier-3 graceful-empty path."""
+    from nicegui import ui
+
+    bus_client.reset()  # fresh empty fakeredis cache (no service writes)
+    assert bus_client.read("options:gamma") is None  # confirm empty
+    with ui.card():
+        gamma.render()  # must not raise

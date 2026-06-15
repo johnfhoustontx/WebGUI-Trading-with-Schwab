@@ -97,6 +97,14 @@ async def loop(bus):
         await loop_.run_in_executor(None, handlers.refresh_captured, bus)
     except Exception:
         pass
+    # One-shot startup refresh of the Gamma snapshot ($SPX default) so the Gamma
+    # page has data on first load. The page drives subsequent refreshes by
+    # enqueuing ``gamma_refresh`` with the current symbol (its own 120s timer), so
+    # it is NOT polled here. Guarded so a cold proxy never stops the loop starting.
+    try:
+        await loop_.run_in_executor(None, handlers.refresh_gamma, bus, "$SPX")
+    except Exception:
+        pass
     while True:
         # Header refresh runs EVERY tick (the header's ~30s cadence), guarded so a
         # quotes/sentiment hiccup never stalls the autoscan below or the loop.

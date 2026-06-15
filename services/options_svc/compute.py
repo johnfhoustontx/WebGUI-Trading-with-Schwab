@@ -410,3 +410,216 @@ def refresh_header() -> dict:
         "vix_regime": regime,
         "sentiment": {"color": dot_color, "label": dot_label},
     }
+
+
+# ── Gamma (ported from webgui/pages/options/gamma.py) ───────────────────────
+# The heaviest options page: a live option-chain fetch + GammaEngine compute
+# (GEX/Charm/DEX/Vanna) + per-view summary/walls/history grids + a term grid +
+# the Explain document + the multi-symbol Analyze prompt. All of it now runs
+# here so the GUI tier only reads a cached snapshot and enqueues commands.
+#
+# LAZY IMPORTS (IMPORTANT): ``gamma_tool``/``gex_history_db``/``html_render``/
+# ``regime_filter`` can pull options-scanner's ``scoring`` (and other heavy
+# deps) transitively. Importing them at module top would bind the process-wide
+# ``sys.modules['scoring']`` to options-scanner's ``scoring.py`` merely by
+# importing this module — which breaks the sentiment service's ``scoring``
+# package in the *combined* pytest run (all services share one process). So each
+# is imported LAZILY inside the functions below.
+
+# view name -> (tuple index from calc_all_from_chain, engine view string).
+# Mirrors the page's _VIEWS; the page keeps its own copy for the figure builders.
+_GAMMA_VIEWS = {"GEX": (0, "gex"), "Charm": (1, "charm"),
+                "DEX": (2, "dex"), "Vanna": (3, "vanna")}
+
+
+def _gamma_fetch_chain(symbol):
+    """Fetch the option chain for ``symbol`` (today → +7d). None on non-200/empty.
+
+    Mirrors the page's ``do_fetch``/``_analyze_prompt`` chain pull exactly."""
+    import datetime as dt
+
+    resp = _proxy.schwab_py_client.get_option_chain(
+        symbol, contract_type="ALL", from_date=dt.date.today(),
+        to_date=dt.date.today() + dt.timedelta(days=7))
+    return resp.json() if getattr(resp, "status_code", None) == 200 else None
+
+
+def gamma_snapshot(symbol: str) -> dict | None:
+    """Fetch + compute the full Gamma snapshot for ``symbol``.
+
+    Returns a JSON-serializable dict the GUI paints from:
+
+        {"symbol", "spot", "dte",
+         "views": {"GEX"/"Charm"/"DEX"/"Vanna": {
+             "data": <per-strike dict>, "summary": {...}, "walls": [...],
+             "flip": <float|None>, "history": [<rows>], ["hedge": {...}]}},
+         "term": <term_grid>}
+
+    Returns None if the chain fetch fails or GammaEngine can't compute — the
+    handler caches a graceful-empty view in that case. Per-view sub-failures are
+    defensive (a single view degrades to empty fields) so one bad view never
+    aborts the whole snapshot.
+
+    The per-strike ``data`` dicts have FLOAT keys; once cached as JSON those keys
+    round-trip to STRINGS, so the GUI re-floats them before feeding the pure
+    figure builders (``gamma._refloat_keys``)."""
+    import gamma_tool as gt
+    import gex_history_db as gh
+
+    chain = _gamma_fetch_chain(symbol)
+    if not chain:
+        return None
+
+    eng = gt.GammaEngine()
+    res = eng.calc_all_from_chain(chain)
+    if not res:
+        return None
+    gex, charm, dex, vanna = res
+    by_index = {0: gex, 1: charm, 2: dex, 3: vanna}
+    dte = eng._last_dte
+    spot = (gex or {}).get("spot")
+
+    def _walls(vname, data):
+        try:
+            if vname == "GEX":
+                return gt.get_gex_walls(data, top_n=5)
+            if vname == "DEX":
+                return gt.get_dex_walls(data, top_n=5)
+        except Exception:
+            return []
+        return []
+
+    def _history(vstr):
+        try:
+            conn = gh.connect(read_only=True)
+            return gh.load_today_with_grid(conn, symbol, vstr)
+        except Exception:
+            return []
+
+    views = {}
+    for vname, (idx, vstr) in _GAMMA_VIEWS.items():
+        data = by_index.get(idx) or {}
+        try:
+            summary = eng.snapshot_summary(data, vstr)
+        except Exception:
+            summary = {}
+        entry = {
+            "data": data,
+            "summary": summary,
+            "walls": _walls(vname, data),
+            "flip": (summary or {}).get("flip"),
+            "history": _history(vstr),
+        }
+        if vname == "DEX":
+            entry["hedge"] = {
+                "net_delta_0dte": data.get("net_delta_0dte"),
+                "projected_net_delta_close": data.get("projected_net_delta_close"),
+                "hedge_pressure": data.get("hedge_pressure"),
+            }
+        views[vname] = entry
+
+    try:
+        term = eng.compute_term_grid(chain)
+    except Exception:
+        term = {}
+
+    return {"symbol": symbol, "spot": spot, "dte": dte,
+            "views": views, "term": term}
+
+
+def gamma_explain(symbol: str) -> dict:
+    """Build the Explain document body for ``symbol`` → ``{"symbol", "body"}``.
+
+    Re-fetches + recomputes the chain (Explain needs the live GEX/Charm/DEX
+    summaries + DTE), assembles the ``build_explain_html_text`` context (mirroring
+    the page's ``_explain_ctx``), renders it through ``html_render`` (pinch section
+    + linkified explain HTML), and returns the inner HTML ``body``. The PAGE wraps
+    this in its pure ``wrap_explain`` container (fragment + downloadable document).
+
+    Defensive: a fetch/compute failure yields a body explaining no data is
+    available, so the GUI always has something to show."""
+    import gamma_tool as gt
+    import html_render
+
+    try:
+        from regime_filter import evaluate_regime
+    except Exception:
+        evaluate_regime = lambda: {"active": False}  # noqa: E731
+
+    chain = _gamma_fetch_chain(symbol)
+    if not chain:
+        return {"symbol": symbol, "body": "<p>No chain data available.</p>"}
+
+    eng = gt.GammaEngine()
+    res = eng.calc_all_from_chain(chain)
+    if not res:
+        return {"symbol": symbol, "body": "<p>No chain data available.</p>"}
+    gex, charm, dex, vanna = res
+    dte = eng._last_dte
+    spot = (gex or {}).get("spot")
+
+    try:
+        regime = evaluate_regime() or {"active": False}
+    except Exception:
+        regime = {"active": False}
+
+    ctx = {
+        "symbol": symbol, "spot": spot, "dte": dte,
+        "gex_summary": gt.GammaEngine.snapshot_summary(gex, "gex"),
+        "charm_summary": gt.GammaEngine.snapshot_summary(charm, "charm"),
+        "dex_summary": gt.GammaEngine.snapshot_summary(dex, "dex"),
+        "sentiment": regime,
+    }
+    txt = gt.build_explain_html_text(ctx)
+    pinch = html_render.pinch_section_html(None) or (
+        "<h2>Dealer Pinch — Vanna/Charm Exhaustion</h2>"
+        "<p>No pinch data yet — waiting for the first market-data fetch.</p>")
+    body = html_render.linkify(pinch + "\n" + html_render.explain_to_html(txt))
+    return {"symbol": symbol, "body": body}
+
+
+def _gamma_blocks_for(symbol, chain):
+    """Build the per-view analysis blocks for one symbol (ported from the page).
+
+    Returns ``{"gex","charm","dex","vanna"}`` analysis dicts (or None for a view
+    with no snapshot), or None if the chain can't be computed."""
+    import gamma_tool as gt
+
+    eng = gt.GammaEngine()
+    res = eng.calc_all_from_chain(chain)
+    if not res:
+        return None
+    gex, charm, dex, vanna = res
+    try:
+        em = eng.calc_expected_move_from_chain(chain)
+    except Exception:
+        em = None
+    dte = eng._last_dte
+
+    def bd(snap, view):
+        if not snap:
+            return None
+        return gt.build_analysis_dict(snap, view, symbol, dte,
+                                      expected_move=em, grouping=1, chain=chain)
+
+    return {"gex": bd(gex, "gex"), "charm": bd(charm, "charm"),
+            "dex": bd(dex, "dex"), "vanna": bd(vanna, "vanna")}
+
+
+def gamma_analyze() -> dict:
+    """Build the bundled SPX/SPY/QQQ Analyze prompt → ``{"prompt": <text>}``.
+
+    Ports the page's ``_analyze_prompt``: fetch each of $SPX/SPY/QQQ, build its
+    analysis blocks (defensive per-symbol → None on failure), then bundle them
+    via ``build_summary_prompt_bundled``."""
+    import gamma_tool as gt
+
+    blocks = {}
+    for key, sym in (("spx", "$SPX"), ("spy", "SPY"), ("qqq", "QQQ")):
+        try:
+            chain = _gamma_fetch_chain(sym)
+            blocks[key] = _gamma_blocks_for(sym, chain) if chain else None
+        except Exception:
+            blocks[key] = None
+    prompt = gt.build_summary_prompt_bundled(blocks["spx"], blocks["spy"], blocks["qqq"])
+    return {"prompt": prompt}

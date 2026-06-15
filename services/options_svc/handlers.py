@@ -40,6 +40,15 @@ EVENT_CAPTURED = "events:options:captured"
 CACHE_CAPTURED_FLAGS = "cache:options:captured_flags"
 EVENT_CAPTURED_FLAGS = "events:options:captured_flags"
 
+CACHE_GAMMA = "cache:options:gamma"
+EVENT_GAMMA = "events:options:gamma"
+
+CACHE_GAMMA_EXPLAIN = "cache:options:gamma_explain"
+EVENT_GAMMA_EXPLAIN = "events:options:gamma_explain"
+
+CACHE_GAMMA_ANALYZE = "cache:options:gamma_analyze"
+EVENT_GAMMA_ANALYZE = "events:options:gamma_analyze"
+
 # Defaults mirror the page's input defaults (symbol SPY, 5-30 DTE, the put/call
 # delta gates, min credit 10% -> 0.10 fraction). The page sends the fraction.
 _SWING_DEFAULTS = {
@@ -146,6 +155,22 @@ def refresh_captured(bus) -> None:
     bus.publish(EVENT_CAPTURED, {"version": version})
 
 
+def refresh_gamma(bus, symbol="$SPX") -> None:
+    """Compute the Gamma snapshot for ``symbol``, cache it, publish an event.
+
+    No strict contract: the snapshot is a loosely-shaped read-only dict (per-view
+    data/summary/walls/flip/history + term grid) that only the Gamma page
+    consumes, and ``compute.gamma_snapshot`` is defensive. When the chain fetch
+    fails it returns None — we cache a graceful-empty view (``{"symbol", views:{}}``)
+    so the page shows a "no data" state instead of staling on a prior symbol's
+    snapshot."""
+    snap = compute.gamma_snapshot(symbol)
+    if snap is None:
+        snap = {"symbol": symbol, "spot": None, "dte": None, "views": {}, "term": {}}
+    version = bus.cache_set(CACHE_GAMMA, snap)
+    bus.publish(EVENT_GAMMA, {"version": version})
+
+
 def handle_command(bus, command) -> None:
     """Dispatch a ``cmd:options`` command. ``rescan`` → full rescan;
     ``swing_scan`` → on-demand parameterized swing scan; ``refresh_paper`` →
@@ -157,7 +182,10 @@ def handle_command(bus, command) -> None:
     trade, cache the result + publish; ``captured_reload`` → re-read open signals;
     ``captured_reprice`` → reprice all open signals, cache the repriced list +
     flags (two views) + publish both; ``captured_close`` → manually close a signal
-    then refresh; else no-op."""
+    then refresh; ``gamma_refresh`` (args symbol, default ``$SPX``) → recompute the
+    Gamma snapshot; ``gamma_explain`` (args symbol) → build the Explain body, cache
+    + publish; ``gamma_analyze`` → build the bundled SPX/SPY/QQQ prompt, cache +
+    publish; else no-op."""
     if command.type == "rescan":
         rescan(bus)
     elif command.type == "swing_scan":
@@ -208,3 +236,13 @@ def handle_command(bus, command) -> None:
                                command.args.get("exit_val", 0.0),
                                command.args.get("reason", "MANUAL_CLOSE"))
         refresh_captured(bus)
+    elif command.type == "gamma_refresh":
+        refresh_gamma(bus, command.args.get("symbol", "$SPX"))
+    elif command.type == "gamma_explain":
+        res = compute.gamma_explain(command.args.get("symbol", "$SPX"))
+        version = bus.cache_set(CACHE_GAMMA_EXPLAIN, res)
+        bus.publish(EVENT_GAMMA_EXPLAIN, {"version": version})
+    elif command.type == "gamma_analyze":
+        res = compute.gamma_analyze()
+        version = bus.cache_set(CACHE_GAMMA_ANALYZE, res)
+        bus.publish(EVENT_GAMMA_ANALYZE, {"version": version})

@@ -1,24 +1,48 @@
 """Gamma page — GEX / Charm / DEX / Vanna exposure + intraday heatmap.
 
-Calls ``gamma_tool.GammaEngine`` (pure compute over a live option chain) and
-renders horizontal bar charts + an intraday strike×time heatmap with NiceGUI
-``ui.plotly``. Figure/transform builders are pure (unit-tested); ``render()``
-wires the controls (Task G2/G3).
+Tier-3 reader: this page holds **no engine call**. The live option-chain fetch +
+GammaEngine compute (GEX/Charm/DEX/Vanna) + per-view summary/walls/history grids +
+term grid + the Explain document + the Analyze prompt all live in the options
+service compute module and are published to the Redis bus by the service
+(``cache:options:gamma`` + ``cache:options:gamma_explain`` + ``cache:options:gamma_analyze``).
+This page **reads** those cached snapshots and renders them, and drives refresh/
+explain/analyze by **enqueuing commands** (``gamma_refresh``/``gamma_explain``/
+``gamma_analyze``). The figure/transform builders below stay pure + unit-tested.
+
+JSON-key gotcha (load-bearing): the per-strike ``data`` dicts (gex/charm/dex/vanna,
+keyed by ``strike_float``) and the history rows' grid dict (tuple index 6) have
+FLOAT keys. Redis stores the snapshot as JSON, so those float keys round-trip to
+STRINGS. The pure builders (``bars_from_gex`` sorts + numeric-compares strikes;
+``heatmap_matrix`` sorts strikes) require float keys — so the page re-floats them
+via ``_refloat_keys`` BEFORE feeding the builders. The builders stay unchanged.
 """
-import sys
-
-from repo_paths import OPTIONS_SCANNER
-
-if str(OPTIONS_SCANNER) not in sys.path:
-    sys.path.insert(0, str(OPTIONS_SCANNER))
-
-from pages.ui_guard import guard, guard_async  # noqa: E402
+from pages.ui_guard import guard, guard_async
 
 POS_COLOR = "#66bb6a"
 NEG_COLOR = "#ef5350"
 SPOT_COLOR = "#ffd54f"
 FLIP_COLOR = "#42a5f5"
 WALL_COLOR = "#b39ddb"
+
+
+def _refloat_keys(d):
+    """Cast a dict's keys back to float (JSON round-trips float keys → strings).
+
+    The service's per-strike dicts (``{strike_float: {call,put,net}}``) and the
+    history rows' grid dicts are stored in Redis as JSON, which stringifies dict
+    keys. The pure builders (``bars_from_gex``/``heatmap_matrix``) sort + numeric-
+    compare strikes and so REQUIRE float keys. This re-floats them, tolerating
+    already-float keys (idempotent) and non-castable keys (passed through). Values
+    are untouched. Non-dict input → ``{}``."""
+    if not isinstance(d, dict):
+        return {}
+    out = {}
+    for k, v in d.items():
+        try:
+            out[float(k)] = v
+        except (TypeError, ValueError):
+            out[k] = v
+    return out
 
 
 def bars_from_gex(data, spot, pct=0.02):
@@ -214,23 +238,16 @@ _VIEWS = {"GEX": (0, "gex"), "Charm": (1, "charm"), "DEX": (2, "dex"), "Vanna": 
 
 
 def render():
-    import datetime as dt
-
-    from nicegui import run, ui
-
-    import proxy
-    import gamma_tool as gt
-    import html_render
-
-    try:
-        from regime_filter import evaluate_regime
-    except Exception:  # pragma: no cover
-        evaluate_regime = lambda: {"active": False}  # noqa: E731
+    import bus_client
+    from nicegui import ui
 
     ui.add_css(EXPLAIN_CSS)  # scoped styles for the Explain dialog (ui.html strips <style>)
     ui.label("Gamma").classes("text-h5")
 
-    state: dict = {"results": None, "spot": None, "symbol": None}
+    # state["snap"] is the cached snapshot from the bus (None until first read).
+    state: dict = {"snap": None, "countdown": 120}
+    # Last-seen bus cache versions for the fetch-free repaint/dialog timers.
+    seen = {"gamma": None, "explain": None, "analyze": None}
 
     with ui.row().classes("items-center gap-3 flex-wrap"):
         symbol_in = ui.input("Symbol", value="$SPX").classes("w-28")
@@ -238,8 +255,6 @@ def render():
         view_toggle = ui.toggle(list(_VIEWS) + ["Term"], value="GEX")
         explain_btn = ui.button("Explain", icon="help").props("outline")
         analyze_btn = ui.button("Analyze", icon="psychology").props("outline")
-        spinner = ui.spinner(size="lg")
-        spinner.visible = False
         countdown_lbl = ui.label("").classes("opacity-60 text-sm")
     summary_lbl = ui.label("").classes("opacity-70 text-sm")
     pressure_box = ui.row().classes("gap-3 items-center")
@@ -247,49 +262,55 @@ def render():
         chart_box = ui.column().classes("flex-grow min-w-0")
         heatmap_box = ui.column().classes("flex-grow min-w-0")
 
-    def _load_history(symbol, vstr):
-        import gex_history_db as gh
-        try:
-            conn = gh.connect(read_only=True)
-            return gh.load_today_with_grid(conn, symbol, vstr)
-        except Exception:
-            return []
-
-    def _walls(view, data):
-        if view == "GEX":
-            return gt.get_gex_walls(data, top_n=5)
-        if view == "DEX":
-            return gt.get_dex_walls(data, top_n=5)
-        return []
+    def _current_symbol():
+        return (symbol_in.value or "").strip().upper()
 
     def _render_view():
-        results = state["results"]
-        if not results:
-            return
-        view = view_toggle.value
-        if view == "Term":
-            pressure_box.clear()
-            heatmap_box.clear()
-            chart_box.clear()
-            tg = gt.GammaEngine().compute_term_grid(state.get("chain")) if state.get("chain") else {}
-            with chart_box:
-                ui.plotly(term_heatmap(tg)).classes("w-full")
-            summary_lbl.text = summary_text(
-                {"spot": state.get("spot"), "strike_count": None}, "Term")
-            return
-        idx, vstr = _VIEWS[view]
-        data = results[idx]
-        spot = data.get("spot") or state["spot"]
-        summary = gt.GammaEngine().snapshot_summary(data, vstr)
-        flip = summary.get("flip")
-        walls = _walls(view, data)
+        """Paint the active view from the cached snapshot (no fetch)."""
+        snap = state["snap"]
         chart_box.clear()
-        with chart_box:
-            ui.plotly(bar_figure(data, spot, view=view, walls=walls, flip=flip)).classes("w-full")
-        summary_lbl.text = summary_text({**summary, "strike_count": data.get("strike_count")}, view)
-
-        rows = _load_history(state["symbol"], vstr)
         heatmap_box.clear()
+        pressure_box.clear()
+        if not snap:
+            with chart_box:
+                ui.label("Fetch a symbol… (no snapshot yet).").classes("opacity-60 text-sm")
+            summary_lbl.text = ""
+            return
+
+        view = view_toggle.value
+        spot = snap.get("spot")
+        if view == "Term":
+            with chart_box:
+                ui.plotly(term_heatmap(snap.get("term") or {})).classes("w-full")
+            summary_lbl.text = summary_text({"spot": spot, "strike_count": None}, "Term")
+            return
+
+        entry = (snap.get("views") or {}).get(view) or {}
+        # Every view's result dict keys its per-strike map under "gex" (GammaEngine
+        # uses "gex" for charm/dex/vanna too). The figure builders read
+        # ``data["gex"]``, whose keys JSON-stringified in Redis — re-float them
+        # before the builders sort + numeric-compare strikes.
+        raw = entry.get("data") if isinstance(entry.get("data"), dict) else {}
+        data = {"spot": raw.get("spot"),
+                "strike_count": raw.get("strike_count"),
+                "gex": _refloat_keys(raw.get("gex"))}
+        view_spot = data.get("spot") or spot
+        summary = entry.get("summary") or {}
+        flip = entry.get("flip")
+        walls = entry.get("walls") or []
+
+        with chart_box:
+            ui.plotly(bar_figure(data, view_spot, view=view, walls=walls, flip=flip)).classes("w-full")
+        summary_lbl.text = summary_text(
+            {**summary, "strike_count": data.get("strike_count")}, view)
+
+        # History rows: index-6 grid dict needs its keys re-floated too.
+        rows = []
+        for r in (entry.get("history") or []):
+            r = list(r)
+            if len(r) > 6:
+                r[6] = _refloat_keys(r[6])
+            rows.append(tuple(r))
         with heatmap_box:
             if rows:
                 ui.plotly(heatmap_figure(rows, view)).classes("w-full")
@@ -297,10 +318,10 @@ def render():
                 ui.label("No intraday snapshots yet (history collector not running).") \
                     .classes("opacity-60 text-sm")
 
-        pressure_box.clear()
         if view == "DEX":
+            hedge = entry.get("hedge") or {}
             with pressure_box:
-                hp = data.get("hedge_pressure")
+                hp = hedge.get("hedge_pressure")
                 if hp is None:
                     ui.label("0-DTE hedge pressure: n/a (nearest expiry is not 0-DTE)").classes("opacity-60 text-sm")
                 else:
@@ -308,47 +329,28 @@ def render():
                         with ui.card().classes("p-2"):
                             ui.label(label).classes("text-xs opacity-60")
                             ui.label(f"{val:,.0f}").classes("text-base font-bold").style(f"color:{color}")
-                    tile("Net Δ now", data.get("net_delta_0dte") or 0)
-                    tile("Projected close", data.get("projected_net_delta_close") or 0)
+                    tile("Net Δ now", hedge.get("net_delta_0dte") or 0)
+                    tile("Projected close", hedge.get("projected_net_delta_close") or 0)
                     tile("Hedge pressure", hp, "#66bb6a" if hp >= 0 else "#ef5350")
 
-    @guard_async
-    async def do_fetch():
-        sym = (symbol_in.value or "").strip().upper()
+    @guard
+    def _request_refresh():
+        sym = _current_symbol()
         if not sym:
             ui.notify("Enter a symbol first.", type="warning")
             return
-        fetch_btn.disable()
-        spinner.visible = True
-        try:
-            def _f():
-                resp = proxy.schwab_py_client.get_option_chain(
-                    sym, contract_type="ALL", from_date=dt.date.today(),
-                    to_date=dt.date.today() + dt.timedelta(days=7))
-                chain = resp.json() if getattr(resp, "status_code", None) == 200 else None
-                if not chain:
-                    return None
-                eng = gt.GammaEngine()
-                res = eng.calc_all_from_chain(chain)
-                return chain, res, eng._last_dte
-            fetched = await run.io_bound(_f)
-            results = fetched[1] if fetched else None
-            state["chain"] = fetched[0] if fetched else None
-            state["dte"] = fetched[2] if fetched else None
-        except Exception as exc:
-            ui.notify(f"Fetch failed: {exc}", type="negative")
-            return
-        finally:
-            spinner.visible = False
-            fetch_btn.enable()
-        if not results:
-            ui.notify(f"No chain data for {sym}.", type="warning")
-            return
-        state["results"] = results
-        state["spot"] = results[0].get("spot")
-        state["symbol"] = sym
+        bus_client.request("options", {"type": "gamma_refresh", "args": {"symbol": sym}})
+        ui.notify(f"Gamma refresh requested for {sym}")
         state["countdown"] = 120
-        _render_view()
+
+    @guard
+    def _auto_refresh():
+        # Fetch-free on the page side: enqueue a refresh for the current symbol;
+        # the service recomputes + republishes and the version-poll repaints.
+        sym = _current_symbol()
+        if sym:
+            bus_client.request("options", {"type": "gamma_refresh", "args": {"symbol": sym}})
+        state["countdown"] = 120
 
     @guard
     def _tick():
@@ -357,38 +359,25 @@ def render():
             state["countdown"] = 120
         countdown_lbl.text = f"Next refresh: {state['countdown'] // 60}:{state['countdown'] % 60:02d}"
 
-    def _explain_ctx():
-        gex, charm, dex, vanna = state["results"]
-        try:
-            regime = evaluate_regime() or {"active": False}
-        except Exception:
-            regime = {"active": False}
-        return {
-            "symbol": state["symbol"], "spot": state["spot"], "dte": state.get("dte"),
-            "gex_summary": gt.GammaEngine.snapshot_summary(gex, "gex"),
-            "charm_summary": gt.GammaEngine.snapshot_summary(charm, "charm"),
-            "dex_summary": gt.GammaEngine.snapshot_summary(dex, "dex"),
-            "sentiment": regime,
-        }
+    @guard
+    def _maybe_repaint():
+        # Fetch-free: re-read + repaint only when the bus cache version changes
+        # (the service bumps it when a requested gamma_refresh finishes).
+        version = bus_client.read_version("options:gamma")
+        if version == seen["gamma"]:
+            return
+        seen["gamma"] = version
+        state["snap"] = bus_client.read("options:gamma") or None
+        _render_view()
 
-    def do_explain():
-        if not state.get("results"):
-            ui.notify("Fetch first.", type="warning")
-            return
-        try:
-            txt = gt.build_explain_html_text(_explain_ctx())
-            pinch = html_render.pinch_section_html(None) or (
-                "<h2>Dealer Pinch — Vanna/Charm Exhaustion</h2>"
-                "<p>No pinch data yet — waiting for the first market-data fetch.</p>")
-            body = html_render.linkify(pinch + "\n" + html_render.explain_to_html(txt))
-        except Exception as exc:
-            ui.notify(f"Explain failed: {exc}", type="negative")
-            return
-        fragment = wrap_explain(state["symbol"], body, full=False)
-        document = wrap_explain(state["symbol"], body, full=True)
+    def _open_explain_dialog(res):
+        symbol = (res or {}).get("symbol") or _current_symbol()
+        body = (res or {}).get("body") or "<p>No explain data.</p>"
+        fragment = wrap_explain(symbol, body, full=False)
+        document = wrap_explain(symbol, body, full=True)
         with ui.dialog().props("maximized") as dlg, ui.card().classes("w-full h-full"):
             with ui.row().classes("justify-between w-full items-center"):
-                ui.label(f"Explain — {state['symbol']}").classes("text-h6")
+                ui.label(f"Explain — {symbol}").classes("text-h6")
                 with ui.row():
                     ui.button("Download", icon="download",
                               on_click=lambda: ui.download.content(document, "explain.html")).props("flat")
@@ -399,51 +388,27 @@ def render():
                 ui.html(fragment)
         dlg.open()
 
-    def _blocks_for(symbol, chain):
-        eng = gt.GammaEngine()
-        res = eng.calc_all_from_chain(chain)
-        if not res:
-            return None
-        gex, charm, dex, vanna = res
-        try:
-            em = eng.calc_expected_move_from_chain(chain)
-        except Exception:
-            em = None
-        dte = eng._last_dte
-
-        def bd(snap, view):
-            if not snap:
-                return None
-            return gt.build_analysis_dict(snap, view, symbol, dte,
-                                          expected_move=em, grouping=1, chain=chain)
-        return {"gex": bd(gex, "gex"), "charm": bd(charm, "charm"),
-                "dex": bd(dex, "dex"), "vanna": bd(vanna, "vanna")}
-
-    def _analyze_prompt():
-        blocks = {}
-        for key, sym in (("spx", "$SPX"), ("spy", "SPY"), ("qqq", "QQQ")):
-            try:
-                resp = proxy.schwab_py_client.get_option_chain(
-                    sym, contract_type="ALL", from_date=dt.date.today(),
-                    to_date=dt.date.today() + dt.timedelta(days=7))
-                chain = resp.json() if getattr(resp, "status_code", None) == 200 else None
-                blocks[key] = _blocks_for(sym, chain) if chain else None
-            except Exception:
-                blocks[key] = None
-        return gt.build_summary_prompt_bundled(blocks["spx"], blocks["spy"], blocks["qqq"])
-
-    @guard_async
-    async def do_analyze():
-        analyze_btn.disable()
-        spinner.visible = True
-        try:
-            prompt = await run.io_bound(_analyze_prompt)
-        except Exception as exc:
-            ui.notify(f"Analyze failed: {exc}", type="negative")
+    @guard
+    def _request_explain():
+        sym = _current_symbol()
+        if not sym:
+            ui.notify("Enter a symbol first.", type="warning")
             return
-        finally:
-            spinner.visible = False
-            analyze_btn.enable()
+        bus_client.request("options", {"type": "gamma_explain", "args": {"symbol": sym}})
+        ui.notify("Explain requested…")
+
+    @guard
+    def _watch_explain():
+        # The initial version was captured at render time, so any change here is a
+        # fresh, user-requested result → open the dialog.
+        version = bus_client.read_version("options:gamma_explain")
+        if version is None or version == seen["explain"]:
+            return
+        seen["explain"] = version
+        _open_explain_dialog(bus_client.read("options:gamma_explain") or {})
+
+    def _open_analyze_dialog(res):
+        prompt = (res or {}).get("prompt") or "(no prompt)"
         with ui.dialog() as dlg, ui.card().classes("min-w-[640px]"):
             ui.label("GEX analysis prompt (SPX / SPY / QQQ)").classes("text-h6")
             ta = ui.textarea(value=prompt).props('readonly outlined input-style="min-height:55vh"').classes("w-full")
@@ -453,12 +418,33 @@ def render():
                 ui.button("Close", on_click=dlg.close).props("flat")
         dlg.open()
 
-    fetch_btn.on_click(do_fetch)
-    explain_btn.on_click(do_explain)
-    analyze_btn.on_click(do_analyze)
+    @guard
+    def _request_analyze():
+        bus_client.request("options", {"type": "gamma_analyze"})
+        ui.notify("Analyze requested…")
+
+    @guard
+    def _watch_analyze():
+        version = bus_client.read_version("options:gamma_analyze")
+        if version is None or version == seen["analyze"]:
+            return
+        seen["analyze"] = version
+        _open_analyze_dialog(bus_client.read("options:gamma_analyze") or {})
+
+    fetch_btn.on_click(_request_refresh)
+    explain_btn.on_click(_request_explain)
+    analyze_btn.on_click(_request_analyze)
     view_toggle.on_value_change(lambda e: _render_view())
 
-    state["countdown"] = 120
-    ui.timer(1.0, _tick)              # countdown display
-    ui.timer(120.0, do_fetch)         # auto-refresh every 120s
-    ui.timer(0.1, do_fetch, once=True)  # autoload on open
+    # Initial paint from the bus cache (graceful-empty if the service is cold).
+    seen["gamma"] = bus_client.read_version("options:gamma")
+    seen["explain"] = bus_client.read_version("options:gamma_explain")
+    seen["analyze"] = bus_client.read_version("options:gamma_analyze")
+    state["snap"] = bus_client.read("options:gamma") or None
+    _render_view()
+
+    ui.timer(1.0, _tick)                 # countdown display (no fetch)
+    ui.timer(2.0, _maybe_repaint)        # version-poll repaint from cache
+    ui.timer(2.0, _watch_explain)        # open Explain dialog on new result
+    ui.timer(2.0, _watch_analyze)        # open Analyze dialog on new result
+    ui.timer(120.0, _auto_refresh)       # enqueue a refresh every 120s

@@ -406,6 +406,124 @@ def test_captured_close_then_refresh(monkeypatch):
     assert calls["refresh"] == 2
 
 
+# ── Gamma (Task 2.6d) ────────────────────────────────────────────────────────
+def _fake_gamma_snapshot():
+    return {
+        "symbol": "$SPX", "spot": 5400.0, "dte": 0,
+        "views": {
+            "GEX": {"data": {"spot": 5400.0, "gex": {"5400.0": {"net": 1.0}},
+                             "strike_count": 1},
+                    "summary": {"spot": 5400.0, "flip": 5399.5, "net_total": 1.0},
+                    "walls": [5400.0], "flip": 5399.5, "history": []},
+            "DEX": {"data": {"spot": 5400.0, "gex": {}, "strike_count": 0},
+                    "summary": {}, "walls": [], "flip": None, "history": [],
+                    "hedge": {"net_delta_0dte": 10.0,
+                              "projected_net_delta_close": 5.0,
+                              "hedge_pressure": -5.0}},
+        },
+        "term": {"expirations": [], "cells": {}},
+    }
+
+
+def test_refresh_gamma_caches_publishes(monkeypatch):
+    bus = Bus(fake=True)
+    snap = _fake_gamma_snapshot()
+    seen = {"symbol": None}
+
+    def _rec(symbol):
+        seen["symbol"] = symbol
+        return snap
+
+    monkeypatch.setattr(handlers.compute, "gamma_snapshot", _rec)
+
+    sub = bus.subscribe("events:options:gamma")
+    handlers.refresh_gamma(bus, "$SPX")
+    msg = sub.get_message(timeout=1.0)
+    sub.close()
+
+    assert seen["symbol"] == "$SPX"
+    env = bus.cache_get("cache:options:gamma")
+    assert env is not None
+    assert env.payload == snap
+    assert msg is not None and msg.get("version") == env.version
+
+
+def test_refresh_gamma_caches_empty_when_none(monkeypatch):
+    """A None snapshot (chain fetch failed) caches a graceful-empty view."""
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "gamma_snapshot", lambda s: None)
+
+    handlers.refresh_gamma(bus, "QQQ")
+    env = bus.cache_get("cache:options:gamma")
+    assert env is not None
+    assert env.payload["symbol"] == "QQQ"
+    assert env.payload["views"] == {}
+
+
+def test_gamma_refresh_command(monkeypatch):
+    bus = Bus(fake=True)
+    seen = {"calls": []}
+
+    def _rec(b, symbol="$SPX"):
+        assert b is bus
+        seen["calls"].append(symbol)
+
+    monkeypatch.setattr(handlers, "refresh_gamma", _rec)
+
+    handlers.handle_command(bus, Command(type="gamma_refresh", args={"symbol": "SPY"}))
+    assert seen["calls"] == ["SPY"]
+
+    # No symbol arg -> default $SPX.
+    handlers.handle_command(bus, Command(type="gamma_refresh"))
+    assert seen["calls"] == ["SPY", "$SPX"]
+
+
+def test_gamma_explain_command(monkeypatch):
+    bus = Bus(fake=True)
+    res = {"symbol": "$SPX", "body": "<h2>GEX</h2><p>hi</p>"}
+    seen = {"symbol": None}
+
+    def _explain(symbol):
+        seen["symbol"] = symbol
+        return res
+
+    monkeypatch.setattr(handlers.compute, "gamma_explain", _explain)
+
+    sub = bus.subscribe("events:options:gamma_explain")
+    handlers.handle_command(bus, Command(type="gamma_explain", args={"symbol": "$SPX"}))
+    msg = sub.get_message(timeout=1.0)
+    sub.close()
+
+    assert seen["symbol"] == "$SPX"
+    env = bus.cache_get("cache:options:gamma_explain")
+    assert env is not None
+    assert env.payload == res
+    assert msg is not None and msg.get("version") == env.version
+
+
+def test_gamma_analyze_command(monkeypatch):
+    bus = Bus(fake=True)
+    res = {"prompt": "Analyze SPX/SPY/QQQ…"}
+    seen = {"called": 0}
+
+    def _analyze():
+        seen["called"] += 1
+        return res
+
+    monkeypatch.setattr(handlers.compute, "gamma_analyze", _analyze)
+
+    sub = bus.subscribe("events:options:gamma_analyze")
+    handlers.handle_command(bus, Command(type="gamma_analyze"))
+    msg = sub.get_message(timeout=1.0)
+    sub.close()
+
+    assert seen["called"] == 1
+    env = bus.cache_get("cache:options:gamma_analyze")
+    assert env is not None
+    assert env.payload == res
+    assert msg is not None and msg.get("version") == env.version
+
+
 def test_swing_scan_uses_defaults_for_missing_args(monkeypatch):
     bus = Bus(fake=True)
     seen = {"params": None}
