@@ -8,7 +8,7 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-06-14 (Phase 2 shell + full Options section incl. Gamma/Simulator built; **Sentiment page built** — composite gauge + component table + 5 tiles + 30d history/rolling-avgs + trend regime + **Sector & Industry Performance** (Day/Week/Month %, P/C, RRG, rotation banner), reusing `history_backfill` + `scoring.rotation`/`sector_perf`; 122 webgui tests green; Trade/Portfolio/Driver pages still stubs — next session. See "webgui development notes" below.)
+**Last updated:** 2026-06-14 (Phase 2 shell + full Options section incl. Gamma/Simulator built; **Sentiment page built** — composite gauge + component table + 5 tiles + 30d history/rolling-avgs + trend regime + **Sector & Industry Performance** (Day/Week/Month %, P/C, RRG, rotation banner), reusing `history_backfill` + `scoring.rotation`/`sector_perf`; 127 webgui tests green; Trade/Portfolio/Driver pages still stubs — next session. See "webgui development notes" below.)
 
 ## What this project is
 
@@ -72,8 +72,9 @@ client and market data through `http://127.0.0.1:8100`.
 
 ## webgui structure (NiceGUI app)
 
-`webgui/main.py` is the server + nav shell: a left-nav with an expandable
-**Options** group plus flat Sentiment / Trade / Portfolio / Driver items. Pages
+`webgui/main.py` is the server + nav shell: a left-nav with expandable
+**Options** and **Sentiment** groups (Sentiment children: Sentiment dashboard +
+Sector Rotation) plus flat Trade / Portfolio / Driver items. Pages
 live in `webgui/pages/`; each leaf exposes `render()` called inside the shell
 `_layout`. `webgui/proxy.py` wraps `schwab-proxy/proxy_client.py` and adds
 `health()`. Pure transforms / SVG builders are unit-tested (`webgui/tests/`);
@@ -92,6 +93,7 @@ Routes:
 | `/options/gamma` | Gamma (GEX/Charm/DEX/Vanna bars + flip/walls + intraday heatmap) | built |
 | `/options/simulator` | Simulator (What-if + IV-shock; Replay TODO) | built |
 | `/sentiment` | Sentiment (two-column top: gauge+regime / component table; traffic-light tiles; 30d history + rolling avgs; full-width **Sector & Industry Performance** w/ Day/Week/Month %, P/C, RRG, rotation banner, **expandable industries w/ P/C+RRG**; bottom status bar; **persists across navigation**; **server-side 120s auto-refresh + bridge publish, tab-independent**) | built |
+| `/sentiment/rotation` | Sector Rotation (RRG-vs-SPY: Risk-ON/OFF headline + spread, ROTATING FROM/INTO w/ S&P weights, quadrant-map table, **RRG scatter**; reuses `sector_rotation_assessment`; cached, **manual Refresh only**) | built |
 | `/trade` `/portfolio` `/driver` | other apps | **stubs** |
 
 The `pages/options/` subpackage shares `header.py` (compact quotes/VIX/sentiment
@@ -156,7 +158,7 @@ Preview tool (start `webgui`, screenshot). Restart the preview after code change
 to pick them up. To drive Quasar inputs from the preview, set the native value +
 dispatch `input`/`change`/`blur` events.
 
-**Tests:** `cd webgui && ..\.venv\Scripts\python -m pytest -q` (122 green as of
+**Tests:** `cd webgui && ..\.venv\Scripts\python -m pytest -q` (127 green as of
 this writing). TDD pure functions; smoke-verify `render()` with a screenshot.
 
 **Environment quirks to expect:**
@@ -294,7 +296,7 @@ cd sentiment-dashboard ; python -m pytest tests
 cd trade-analyzer      ; python -m pytest .
 cd portfolio-analyzer  ; python -m pytest tests
 cd claude-driver       ; python -m pytest .
-cd webgui              ; python -m pytest .   # 122 tests: transforms + shell smoke
+cd webgui              ; python -m pytest .   # 127 tests: transforms + shell smoke
 ```
 
 - **options-scanner** has ~2 known date-relative failing tests carried over from
