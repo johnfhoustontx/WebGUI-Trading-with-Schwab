@@ -298,8 +298,13 @@ def _publish_sentiment_bridge():
             sys.path.insert(0, str(root))
         from repo_paths import SENTIMENT
         script = SENTIMENT / "publish_bridge.py"
-        subprocess.run([sys.executable, str(script)], timeout=150,
-                       capture_output=True)
+        result = subprocess.run([sys.executable, str(script)], timeout=150,
+                                capture_output=True)
+        if result.returncode == 0:
+            log.info("sentiment bridge published")
+        else:
+            log.warning("sentiment publish exited %s: %s", result.returncode,
+                        (result.stderr or b'')[-300:].decode('utf-8', 'replace'))
     except Exception:
         log.exception("sentiment bridge publish failed; continuing")
 
