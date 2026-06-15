@@ -1,0 +1,55 @@
+"""Tests for webgui/bus_client.py — the GUI-side bus client.
+
+Single-user, process-wide lazy Bus singleton. Under pytest the Bus auto-selects
+fakeredis (PYTEST_CURRENT_TEST is set), so these need no live Memurai. The
+singleton is what lets the EventListener thread and the test's publish share one
+fakeredis instance — separate FakeStrictRedis objects do NOT share pub/sub state.
+"""
+import time
+
+import bus_client
+
+
+def setup_function(_fn):
+    """Force a fresh fakeredis-backed Bus per test so state does not leak."""
+    bus_client.reset()
+
+
+def test_read_returns_payload_or_none():
+    assert bus_client.read("sentiment:composite") is None
+
+    bus_client.bus().cache_set("cache:sentiment:composite", {"live": {"x": 1}})
+
+    assert bus_client.read("sentiment:composite") == {"live": {"x": 1}}
+    assert bus_client.read_version("sentiment:composite") == 1
+
+
+def test_request_enqueues_command():
+    bus_client.request("sentiment", {"type": "refresh"})
+
+    cmds = bus_client.bus().consume_commands(
+        "cmd:sentiment", group="g", consumer="c", block_ms=50
+    )
+    assert cmds[0][1].type == "refresh"
+
+
+def test_on_event_fires_callback_on_publish():
+    got = []
+    listener = bus_client.on_event(
+        "events:sentiment:composite", lambda v: got.append(v)
+    )
+    try:
+        # Give the daemon thread a moment to subscribe before publishing.
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and not listener.subscribed:
+            time.sleep(0.02)
+
+        bus_client.bus().publish("events:sentiment:composite", {"version": 7})
+
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline and not got:
+            time.sleep(0.02)
+
+        assert got == [7]
+    finally:
+        listener.stop()
