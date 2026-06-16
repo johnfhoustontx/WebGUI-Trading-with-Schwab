@@ -80,22 +80,57 @@ def rotation_rows(a):
     return out
 
 
+def _hex_to_rgba(hex_color, alpha):
+    """'#66bb6a' + 0.28 -> 'rgba(102, 187, 106, 0.28)'."""
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"rgba({r}, {g}, {b}, {alpha})"
+
+
+def _tail_trace(sec):
+    """Faded 'meteor' trail for one sector, or None if it has no usable tail.
+
+    Oldest -> newest; marker opacity/size ramp up toward the current point so
+    the head end is brightest. Colored by the sector's current quadrant."""
+    tail = sec.get("tail") or []
+    if len(tail) < 2:
+        return None
+    xs = [p["rs_ratio"] for p in tail]
+    ys = [p["rs_momentum"] for p in tail]
+    color = quadrant_color(sec.get("quadrant"))
+    n = len(tail)
+    # Ramp oldest (faint/small) -> newest (bright/larger).
+    opacity = [round(0.12 + 0.73 * i / (n - 1), 3) for i in range(n)]
+    size = [round(3.0 + 3.0 * i / (n - 1), 2) for i in range(n)]
+    return {
+        "type": "scatter", "mode": "lines+markers",
+        "x": xs, "y": ys,
+        "line": {"color": _hex_to_rgba(color, 0.28), "width": 1.5,
+                 "shape": "spline"},
+        "marker": {"color": color, "size": size, "opacity": opacity},
+        "hoverinfo": "skip", "showlegend": False,
+    }
+
+
 def rrg_scatter_figure(a):
-    """Plotly RRG scatter: x=RS-Ratio, y=RS-Momentum, dot per sector, 100/100 lines."""
+    """Plotly RRG scatter: faded 30-day meteor tail per sector + current dot,
+    100/100 crosshair lines. Tails render behind the labeled head dots."""
     secs = a.get("sectors") or []
     xs = [s.get("rs_ratio") for s in secs]
     ys = [s.get("rs_momentum") for s in secs]
     colors = [quadrant_color(s.get("quadrant")) for s in secs]
     labels = [s.get("etf") for s in secs]
     line = {"color": "rgba(255,255,255,0.25)", "width": 1}
+    head = {
+        "type": "scatter", "mode": "markers+text",
+        "x": xs, "y": ys, "text": labels, "textposition": "top center",
+        "marker": {"size": 12, "color": colors},
+        "hovertext": [f"{s.get('name')} — {s.get('quadrant')}" for s in secs],
+        "hoverinfo": "text",
+    }
+    tails = [t for t in (_tail_trace(s) for s in secs) if t is not None]
     return {
-        "data": [{
-            "type": "scatter", "mode": "markers+text",
-            "x": xs, "y": ys, "text": labels, "textposition": "top center",
-            "marker": {"size": 12, "color": colors},
-            "hovertext": [f"{s.get('name')} — {s.get('quadrant')}" for s in secs],
-            "hoverinfo": "text",
-        }],
+        "data": [*tails, head],
         "layout": {
             "margin": {"l": 44, "r": 12, "t": 8, "b": 36}, "height": 360,
             "template": "plotly_dark",

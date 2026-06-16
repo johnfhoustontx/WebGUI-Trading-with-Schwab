@@ -11,9 +11,15 @@ def _assessment():
                      "spread": 2.1, "cyclical_mom_mean": 101.2, "defensive_mom_mean": 99.1},
         "sectors": [
             {"name": "Technology", "etf": "XLK", "rs_ratio": 101.5, "rs_momentum": 102.0,
-             "quadrant": "Leading", "direction": "INTO"},
+             "quadrant": "Leading", "direction": "INTO",
+             "tail": [{"rs_ratio": 100.2, "rs_momentum": 99.5},
+                      {"rs_ratio": 100.9, "rs_momentum": 100.8},
+                      {"rs_ratio": 101.5, "rs_momentum": 102.0}]},
             {"name": "Utilities", "etf": "XLU", "rs_ratio": 98.0, "rs_momentum": 97.0,
-             "quadrant": "Lagging", "direction": "FROM"},
+             "quadrant": "Lagging", "direction": "FROM",
+             "tail": [{"rs_ratio": 99.1, "rs_momentum": 99.0},
+                      {"rs_ratio": 98.5, "rs_momentum": 98.0},
+                      {"rs_ratio": 98.0, "rs_momentum": 97.0}]},
         ],
         "rotating_from": [{"name": "Utilities", "etf": "XLU", "quadrant": "Lagging"}],
         "rotating_into": [{"name": "Technology", "etf": "XLK", "quadrant": "Leading"}],
@@ -63,13 +69,54 @@ def test_rotation_rows_sorted_and_colored():
     assert rows[0]["rs_ratio"] == 101.5
 
 
+def _head_trace(fig):
+    return next(t for t in fig["data"] if t.get("mode") == "markers+text")
+
+
 def test_rrg_scatter_figure_shape():
     fig = R.rrg_scatter_figure(_assessment())
-    assert fig["data"][0]["type"] == "scatter"
-    assert fig["data"][0]["mode"].startswith("markers")
-    assert set(fig["data"][0]["x"]) == {101.5, 98.0}      # rs_ratio
+    head = _head_trace(fig)
+    assert head["type"] == "scatter"
+    assert head["mode"].startswith("markers")
+    assert set(head["x"]) == {101.5, 98.0}      # rs_ratio (heads)
     # crosshair reference lines at 100/100 present as shapes
     assert any(s.get("type") == "line" for s in fig["layout"].get("shapes", []))
+
+
+def test_rrg_scatter_has_meteor_tail_per_sector():
+    fig = R.rrg_scatter_figure(_assessment())
+    head = _head_trace(fig)
+    tails = [t for t in fig["data"]
+             if t is not head and t.get("mode") == "lines+markers"]
+    assert len(tails) == 2                       # one per sector with a tail
+    # Tails render BEHIND the head trace (head is last).
+    assert fig["data"][-1] is head
+    xlk_tail = next(t for t in tails if t["x"][-1] == 101.5)
+    # Trail follows the sector's path, oldest -> newest, ending at the head.
+    assert xlk_tail["x"] == [100.2, 100.9, 101.5]
+    assert xlk_tail["y"] == [99.5, 100.8, 102.0]
+    # Meteor fade: marker opacity ramps up toward the newest point.
+    op = xlk_tail["marker"]["opacity"]
+    assert op == sorted(op) and op[0] < op[-1]
+    # Quadrant color (Leading -> green) on the markers; faint rgba line.
+    assert xlk_tail["marker"]["color"] == R.CLR_GREEN
+    assert xlk_tail["line"]["color"].startswith("rgba(")
+    assert xlk_tail.get("showlegend") is False
+    assert xlk_tail.get("hoverinfo") == "skip"
+
+
+def test_rrg_scatter_handles_missing_tail():
+    a = _assessment()
+    for s in a["sectors"]:
+        s.pop("tail", None)
+    fig = R.rrg_scatter_figure(a)
+    # No tail traces, but the head trace + crosshairs still render.
+    assert all(t.get("mode") != "lines+markers" for t in fig["data"])
+    assert _head_trace(fig)["x"]
+
+
+def test_hex_to_rgba_helper():
+    assert R._hex_to_rgba(R.CLR_GREEN, 0.28) == "rgba(102, 187, 106, 0.28)"
 
 
 def test_page_has_no_engine_glue():
