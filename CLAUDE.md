@@ -290,6 +290,37 @@ fallback). NOTE: this path does NOT republish the sentiment bridge (the old coll
 loop did); `sentiment_svc` already republishes the bridge every 120 s, so the bridge
 is unaffected.
 
+**Options GUI polish batch (DONE — 2026-06-16).** A set of UI/UX fixes across the
+Options section (design/plan:
+[design](docs/plans/2026-06-16-options-gui-polish-design.md) /
+[plan](docs/plans/2026-06-16-options-gui-polish-plan.md)):
+- **Nav dropdowns persist** across navigation — `webgui/main.py` stores each
+  `ui.expansion` open/closed state in a module-level `_NAV_OPEN` dict (single-user,
+  like `_CACHE`); first visit still auto-opens the active group.
+- **Scanner**: signals colored by quality via `score_zone_color` (zones match the
+  speedometer) on a `body-cell-composite_score` slot; the VIX term label is plain
+  English via `term_text` ("VIX term: Contango (near-term calm) · as of 1:32 PM");
+  newly-appeared signals get a **NEW** badge via a session diff (`mark_new`,
+  page-side, resets on reload — both 0-DTE + Swing tables).
+- **Paper Trades**: the detail panel now re-renders for the selected row on each
+  data refresh (`paper.py` tracks `sel_id`, re-calls `detail_panel.update`).
+- **Captured Signals**: drift shown as `x.xx` (numeric value kept for sort, a
+  `body-cell-score_drift` slot renders `toFixed(2)`); rows colored by
+  recommendation (`rec_color`: HOLD amber / TAKE_PROFIT green / CUT red).
+- **Calculator**: P&L grid range is symmetric about spot and widened to span the
+  strikes — `compute.symmetric_price_range` in `calc_compute` (engine untouched).
+- **Symbol inputs auto-select on focus** (calculator/gamma/simulator/swing) via the
+  shared `webgui/pages/options/inputs.py` `select_all_on_focus` helper.
+- **Gamma status bar**: `compute.gex_status_view` (collector status via
+  `gex_status.classify_collector_status` + `gex_history_db.last_snapshot_age`, plus
+  last/next 5-min scan within 08:30–15:20 CT, reusing the scheduler's `_GEX_*`
+  constants) is published each 30 s tick by `handlers.publish_gex_status`
+  (`cache:options:gex_status`); `gamma.py` shows **Collector / Last scan / Next scan**
+  alongside the existing "Next refresh" countdown.
+- Pure transforms are unit-tested (webgui + options_svc suites). **Still TODO
+  (separate design):** streaming-driven paper-position repricing (today repricing
+  is manual-only via the Paper Portfolio "Run Manage Cycle" button).
+
 ## Paths and ports: `repo_paths.py` + `config/ports.toml`
 
 `repo_paths.py` at the repo root is the single source of truth for cross-app
