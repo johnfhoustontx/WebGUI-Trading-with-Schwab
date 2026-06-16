@@ -54,6 +54,33 @@ def _fmt(v, nd=1):
     return "—" if v is None else f"{v:.{nd}f}"
 
 
+def _pct(v):
+    return "—" if v is None else f"{v * 100:.1f}%"
+
+
+def fundamentals_rows(f):
+    """(label, value) pairs for the fundamentals card; '—' for missing values.
+
+    Growth/ROE are stored as fractions and shown as percents; margin trend and
+    days-to-earnings render only when present.
+    """
+    if not f:
+        return []
+    rows = [
+        ("P/E", _fmt(f.get("pe_ratio"), 1)),
+        ("PEG", _fmt(f.get("peg_ratio"), 2)),
+        ("Rev growth", _pct(f.get("rev_growth_ttm"))),
+        ("EPS growth", _pct(f.get("eps_growth_ttm"))),
+        ("ROE", _pct(f.get("roe"))),
+    ]
+    me = f.get("margin_expanding")
+    rows.append(("Margins", "expanding" if me else "contracting" if me is False else "—"))
+    dte = f.get("days_to_earnings")
+    if dte is not None:
+        rows.append(("Earnings in", f"{dte}d"))
+    return rows
+
+
 def momentum_rows(m):
     """(label, value) pairs for the momentum strip; '—' for missing values."""
     if not m:
@@ -171,6 +198,14 @@ def render():
                     ui.label(label).classes("text-sm opacity-80")
                     ui.label(value).classes("text-sm text-weight-medium")
 
+    def _fundamentals_card(fundamentals):
+        with ui.card().classes("flex-1 min-w-[200px]"):
+            ui.label("Fundamentals").classes("text-subtitle2 opacity-70")
+            for label, value in fundamentals_rows(fundamentals):
+                with ui.row().classes("items-center gap-2 w-full justify-between"):
+                    ui.label(label).classes("text-sm opacity-80")
+                    ui.label(value).classes("text-sm text-weight-medium")
+
     def _sector_card(sector):
         sector = sector or {}
         strength = sector.get("strength") or {}
@@ -208,10 +243,12 @@ def render():
                     _alignment_card(res.get("ema_alignment"))
                     _momentum_card(res.get("momentum"))
                     _sector_card(res.get("sector"))
+                    if res.get("fundamentals_available"):
+                        _fundamentals_card(res.get("fundamentals"))
                 if not res.get("fundamentals_available"):
-                    ui.label("Fundamentals not wired — the Investor verdict uses "
-                             "technicals + relative strength only and degrades to "
-                             "HOLD on insufficient data.").classes("text-xs opacity-60")
+                    ui.label("Fundamentals unavailable for this symbol — the "
+                             "Investor verdict degrades to HOLD on insufficient "
+                             "data.").classes("text-xs opacity-60")
 
     def _status_for(res):
         if not res:

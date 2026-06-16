@@ -17,18 +17,21 @@ Because ``trade_svc`` runs in its own process, pinning ``technical``/``config``/
 ``src`` as top-level modules cannot collide with the other domains' engines (the
 same isolation ``sentiment_svc`` relies on for ``scoring``).
 
-**Fundamentals are not wired (MVP).** This repo has no fundamentals feed (the
-Schwab proxy exposes none; ``finvizfinance`` is not installed), so an empty
-``Fundamentals`` is passed and ``InvestorVerdict`` degrades to an
-"Insufficient fundamental data" HOLD. Wiring a feed (a proxy ``/instruments``
-fundamentals endpoint + ``parse_schwab_fundamentals``) is a clean follow-up.
+**Fundamentals** come from the proxy ``/instruments?projection=fundamental``
+endpoint (``_proxy.schwab_client.get_fundamentals``) parsed by
+``parse_schwab_fundamentals``. When sufficient (≥3 of P/E, rev growth, EPS
+growth, ROE) the ``InvestorVerdict`` runs on real data and
+``fundamentals_available`` is True; when the fetch fails or the data is thin it
+degrades to an "Insufficient fundamental data" HOLD. The instruments payload has
+no next-earnings date, so the Position earnings gate cannot fire (``days_to_
+earnings`` is None).
 
 Every engine-call function is defensive: per the page/service convention it
 catches and degrades (returns ``None`` / an ``errors`` payload) rather than
 raising, so one bad symbol can never crash the service.
 """
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import numpy as np
 import pandas as pd
@@ -44,7 +47,7 @@ if str(TRADE_ANALYZER) not in sys.path:
     sys.path.insert(0, str(TRADE_ANALYZER))
 
 import technical  # noqa: E402  (shared indicator lib, imported standalone to dodge the package __init__)
-from src.analysis.fundamentals import Fundamentals  # noqa: E402
+from src.analysis.fundamentals import Fundamentals, parse_schwab_fundamentals  # noqa: E402
 from src.analysis.recommendation import (  # noqa: E402
     InvestorInputs, InvestorVerdict, PositionInputs, PositionVerdict)
 from src.analysis.sector_strength import (  # noqa: E402
@@ -187,6 +190,37 @@ def _neutral_sector_strength():
                           sector_above_50ema=True, rs_3m_percentile=0.5)
 
 
+def _fetch_fundamentals(symbol):
+    """Fetch + parse Schwab fundamentals for ``symbol`` → ``Fundamentals``.
+
+    Defensive: a proxy/parse failure returns an empty ``Fundamentals`` (so the
+    Investor verdict degrades to insufficient-data HOLD) rather than raising.
+    """
+    try:
+        raw = _proxy.schwab_client.get_fundamentals(symbol)
+    except Exception:
+        raw = None
+    if not raw:
+        return Fundamentals()
+    try:
+        return parse_schwab_fundamentals({"fundamental": raw}, as_of=date.today().isoformat())
+    except Exception:
+        return Fundamentals()
+
+
+def _fundamentals_dict(f):
+    """JSON-safe view of the fundamentals the page surfaces on the Investor card."""
+    return {
+        "pe_ratio": f.pe_ratio,
+        "peg_ratio": f.peg_ratio,
+        "rev_growth_ttm": f.rev_growth_ttm,
+        "eps_growth_ttm": f.eps_growth_ttm,
+        "roe": f.roe,
+        "margin_expanding": f.margin_expanding,
+        "days_to_earnings": f.days_to_earnings,
+    }
+
+
 def _sector_strength_dict(ss):
     return {
         "score": ss.score,
@@ -256,8 +290,8 @@ def analyze(symbol):
     else:
         ss = _neutral_sector_strength()
 
-    # Fundamentals not wired (MVP) -> InvestorVerdict degrades to HOLD.
-    fundamentals = Fundamentals()
+    # Fundamentals from the Schwab proxy (empty -> InvestorVerdict degrades to HOLD).
+    fundamentals = _fetch_fundamentals(symbol)
 
     spy_for_pos = spy if spy is not None and not spy.empty else daily
     vwap_val = float(vwap) if vwap else float(daily["close"].iloc[-1])
@@ -311,7 +345,8 @@ def analyze(symbol):
                    "strength": _sector_strength_dict(ss)},
         "position_verdict": position_verdict,
         "investor_verdict": investor_verdict,
-        "fundamentals_available": False,
+        "fundamentals": _fundamentals_dict(fundamentals),
+        "fundamentals_available": fundamentals.is_sufficient(),
         "timestamp": _now_iso(),
         "errors": [],
     }

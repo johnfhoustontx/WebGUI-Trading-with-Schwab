@@ -34,12 +34,18 @@ _UNSET = object()
 
 
 class FakeClient:
-    """Stand-in for ``_proxy.schwab_client`` returning synthetic data."""
+    """Stand-in for ``_proxy.schwab_client`` returning synthetic data.
 
-    def __init__(self, quote_last=120.0, quote=_UNSET):
+    The analyzed symbol gets a strong uptrend; SPY and the sector ETFs (symbols
+    starting ``XL``) get a mild uptrend, so the analyzed symbol outperforms on
+    relative strength (drives the RS-vs-SPY/sector factors positive).
+    """
+
+    def __init__(self, quote_last=120.0, quote=_UNSET, fundamentals=None):
         self.quote_last = quote_last
         self._quote = ({"last": quote_last, "symbol": "TEST", "volume": 5_000_000}
                        if quote is _UNSET else quote)
+        self._fundamentals = fundamentals
 
     def get_quote(self, symbol):
         if self._quote is None:
@@ -48,13 +54,18 @@ class FakeClient:
         q.setdefault("symbol", symbol)
         return q
 
+    def get_fundamentals(self, symbol):
+        return self._fundamentals
+
     def _request(self, endpoint, params):
+        sym = params.get("symbol", "")
+        drift = 0.0003 if (sym == "SPY" or sym.startswith("XL")) else 0.004
         if params.get("frequencyType") == "daily":
             return {"candles": _candles(300, step_ms=86_400_000,
-                                        base=self.quote_last)}
+                                        base=self.quote_last, drift=drift)}
         # intraday 5-min bars spread across a few days
         return {"candles": _candles(200, step_ms=300_000,
-                                    base=self.quote_last)}
+                                    base=self.quote_last, drift=drift)}
 
 
 def _patch(monkeypatch, client):
@@ -120,6 +131,57 @@ def test_analyze_result_is_contract_valid(monkeypatch):
     ta = TradeAnalysis(**{k: res.get(k) for k in TradeAnalysis.model_fields
                           if k in res})
     assert TradeAnalysis.from_json(ta.to_json()).symbol == "MSFT"
+
+
+def test_analyze_without_fundamentals_degrades_to_hold(monkeypatch):
+    """No fundamentals feed -> InvestorVerdict insufficient-data HOLD, flag False."""
+    _patch(monkeypatch, FakeClient(quote_last=120.0))  # get_fundamentals -> None
+    res = compute.analyze("AAPL")
+    assert res["fundamentals_available"] is False
+    assert res["investor_verdict"]["verdict"] == "HOLD"
+    assert "Insufficient fundamental data" in res["investor_verdict"]["top_reasons"]
+    # Display view present but empty of real values.
+    assert res["fundamentals"]["pe_ratio"] is None
+
+
+def test_analyze_with_fundamentals_runs_investor(monkeypatch):
+    """Sufficient Schwab fundamentals -> InvestorVerdict runs on real data."""
+    strong = {
+        "peRatio": 28.0, "pegRatio": 0.8, "revChangeTTM": 20.0,
+        "epsChangePercentTTM": 25.0, "returnOnEquity": 30.0,
+        "operatingMarginTTM": 25.0, "operatingMarginMRQ": 28.0,
+    }
+    _patch(monkeypatch, FakeClient(quote_last=120.0, fundamentals=strong))
+    res = compute.analyze("AAPL")
+
+    assert res["fundamentals_available"] is True
+    iv = res["investor_verdict"]
+    # Real computation, not the insufficient-data shortcut.
+    assert iv["breakdown"]
+    assert "Insufficient fundamental data" not in iv["top_reasons"]
+    assert iv["gates_triggered"] != ["No fundamentals"]
+    assert iv["verdict"] == "BUY"  # strong fundamentals + RS outperformance
+
+    # Display dict carries the parsed (percent->fraction) values.
+    fd = res["fundamentals"]
+    assert fd["pe_ratio"] == 28.0
+    assert abs(fd["rev_growth_ttm"] - 0.20) < 1e-9
+    assert abs(fd["eps_growth_ttm"] - 0.25) < 1e-9
+    assert abs(fd["roe"] - 0.30) < 1e-9
+    assert fd["margin_expanding"] is True
+
+
+def test_analyze_fundamentals_fetch_failure_degrades(monkeypatch):
+    """A get_fundamentals exception must degrade to insufficient, not raise."""
+    class BoomFund(FakeClient):
+        def get_fundamentals(self, symbol):
+            raise RuntimeError("instruments endpoint down")
+
+    _patch(monkeypatch, BoomFund(quote_last=120.0))
+    res = compute.analyze("AAPL")
+    assert res["errors"] == []  # analysis still succeeds
+    assert res["fundamentals_available"] is False
+    assert res["investor_verdict"]["verdict"] == "HOLD"
 
 
 def test_analyze_empty_symbol_returns_none(monkeypatch):

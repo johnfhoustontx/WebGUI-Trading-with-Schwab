@@ -71,5 +71,34 @@ def test_alignment_rows():
     ]
 
 
+def test_fundamentals_rows_formats_percents_and_margin():
+    rows = dict(trade.fundamentals_rows({
+        "pe_ratio": 28.0, "peg_ratio": 0.8, "rev_growth_ttm": 0.20,
+        "eps_growth_ttm": 0.25, "roe": 1.41, "margin_expanding": True,
+        "days_to_earnings": None,
+    }))
+    assert rows["P/E"] == "28.0"
+    assert rows["PEG"] == "0.80"
+    assert rows["Rev growth"] == "20.0%"
+    assert rows["ROE"] == "141.0%"
+    assert rows["Margins"] == "expanding"
+    assert "Earnings in" not in rows  # None days-to-earnings omitted
+
+
+def test_fundamentals_rows_missing_and_contracting():
+    rows = dict(trade.fundamentals_rows({
+        "pe_ratio": None, "margin_expanding": False, "days_to_earnings": 12,
+    }))
+    assert rows["P/E"] == "—"
+    assert rows["Rev growth"] == "—"
+    assert rows["Margins"] == "contracting"
+    assert rows["Earnings in"] == "12d"
+
+
+def test_fundamentals_rows_empty():
+    assert trade.fundamentals_rows({}) == []
+    assert trade.fundamentals_rows(None) == []
+
+
 def test_render_is_callable():
     assert callable(trade.render)

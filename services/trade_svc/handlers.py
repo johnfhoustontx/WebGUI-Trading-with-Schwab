@@ -38,6 +38,7 @@ _FIELDS = {
     "sector": {},
     "position_verdict": {},
     "investor_verdict": {},
+    "fundamentals": {},
     "fundamentals_available": False,
     "timestamp": None,
     "errors": [],
