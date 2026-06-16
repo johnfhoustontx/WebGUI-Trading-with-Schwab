@@ -123,6 +123,12 @@ def render():
                 <q-badge :style="`background:${props.row._rec_color};color:#111`" :label="props.value"/>
               </q-td>
             ''')
+            # Drift shown as x.xx; value stays numeric so the column still sorts.
+            table.add_slot('body-cell-score_drift', r'''
+              <q-td :props="props">
+                {{ props.value == null ? '' : Number(props.value).toFixed(2) }}
+              </q-td>
+            ''')
         detail_panel = detail.render()
 
     # Last-seen bus cache versions for the fetch-free repaint/notify timers.
