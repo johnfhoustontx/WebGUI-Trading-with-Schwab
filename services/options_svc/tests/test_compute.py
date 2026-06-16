@@ -1019,8 +1019,10 @@ def test_gex_status_view_in_window(monkeypatch):
     assert out["status_label"] == "OK"
     assert out["status_color"] == "green"
     assert out["age_seconds"] == 120
+    # last_ts=1781530800 is 8:40 AM CT (formatted via _fmt_clock).
+    assert out["last_scan"] == "8:40 AM"
     # Next 5-min boundary strictly after 10:02 within the window → 10:05.
-    assert isinstance(out["next_scan"], str) and out["next_scan"]
+    assert out["next_scan"] == "10:05 AM"
 
 
 def test_gex_status_view_after_window_no_next(monkeypatch):
@@ -1033,3 +1035,29 @@ def test_gex_status_view_after_window_no_next(monkeypatch):
 
     out = compute.gex_status_view(now=now)
     assert out["next_scan"] is None
+
+
+def test_gex_next_scan_boundaries():
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+
+    CT = ZoneInfo("America/Chicago")
+
+    def ct(h, m):
+        return _dt.datetime(2026, 6, 15, h, m, tzinfo=CT)
+
+    # Before the window → the window-start slot (08:30) that day.
+    before = compute._gex_next_scan(ct(7, 0))
+    assert before is not None
+    assert (before.hour, before.minute) == (8, 30)
+
+    # Inside the window → next 5-min boundary strictly after now.
+    inside = compute._gex_next_scan(ct(10, 2))
+    assert inside is not None
+    assert (inside.hour, inside.minute) == (10, 5)
+
+    # Exactly at the stop boundary (15:20) → None.
+    assert compute._gex_next_scan(ct(15, 20)) is None
+
+    # Just before stop where the next boundary would be >= stop → None.
+    assert compute._gex_next_scan(ct(15, 18)) is None

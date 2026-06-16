@@ -596,23 +596,33 @@ def _gex_next_scan(now):
     """Next 5-min GEX-collection boundary strictly after ``now`` within the
     08:30–15:20 CT window, or None if ``now`` is past the window end.
 
-    Mirrors the scheduler's ``_GEX_START``/``_GEX_STOP``/``_GEX_INTERVAL_MIN``
+    Reuses the scheduler's ``_GEX_START``/``_GEX_STOP``/``_GEX_INTERVAL_MIN``
     cadence (08:30–15:20 CT, every 5 min). Returns a CT-aware datetime or None.
     Before 08:30 → the window's first slot (08:30 today). At/after 15:20 → None.
+
+    The ``scheduler`` import is LAZY (inside the function) on purpose: ``scheduler``
+    imports ``handlers`` which imports this module, so importing ``scheduler`` at
+    module top would be a circular import.
     """
     import datetime as _dt
 
-    start = now.replace(hour=8, minute=30, second=0, microsecond=0)
-    stop = now.replace(hour=15, minute=20, second=0, microsecond=0)
+    from services.options_svc import scheduler as _sched
+
+    start_h, start_m = _sched._GEX_START
+    stop_h, stop_m = _sched._GEX_STOP
+    step = _sched._GEX_INTERVAL_MIN
+
+    start = now.replace(hour=start_h, minute=start_m, second=0, microsecond=0)
+    stop = now.replace(hour=stop_h, minute=stop_m, second=0, microsecond=0)
     if now < start:
         return start
     if now >= stop:
         return None
-    # Round up to the next 5-min boundary strictly after now.
+    # Round up to the next ``step``-min boundary strictly after now.
     floored = now.replace(second=0, microsecond=0)
-    nxt = floored + _dt.timedelta(minutes=5 - (floored.minute % 5))
+    nxt = floored + _dt.timedelta(minutes=step - (floored.minute % step))
     if nxt <= now:
-        nxt = nxt + _dt.timedelta(minutes=5)
+        nxt = nxt + _dt.timedelta(minutes=step)
     if nxt >= stop:
         return None
     return nxt
