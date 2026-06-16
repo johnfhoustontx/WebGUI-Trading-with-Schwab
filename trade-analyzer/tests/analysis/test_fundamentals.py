@@ -87,6 +87,61 @@ class TestParseSchwabFundamentals:
         assert f.is_sufficient() is True
 
 
+class TestParseSchwabRealInstrumentPayload:
+    """The REAL Schwab /instruments?projection=fundamental shape (captured live).
+
+    Schwab uses ``revChangeTTM``/``epsChangePercentTTM`` in PERCENT units,
+    ``returnOnEquity`` in PERCENT, ``operatingMarginTTM``/``MRQ`` instead of
+    YoY, and omits earnings date / EPS surprises / guidance / FCF. The parser is
+    a superset: it reads these real fields (percent->fraction) while still
+    honoring the legacy speculative names tested above.
+    """
+
+    def _aapl(self):
+        return {"fundamental": {
+            "symbol": "AAPL", "peRatio": 35.93383, "pegRatio": 1.71939,
+            "returnOnEquity": 141.4705, "revChangeTTM": 12.7573,
+            "epsChangePercentTTM": 22.6973,
+            "operatingMarginTTM": 27.1518, "operatingMarginMRQ": 26.6027,
+            "epsTTM": 8.24905,
+        }}
+
+    def test_real_payload_maps_and_converts_units(self):
+        f = parse_schwab_fundamentals(self._aapl(), as_of="2026-06-16")
+        assert f.pe_ratio == 35.93383
+        assert f.peg_ratio == 1.71939
+        assert abs(f.rev_growth_ttm - 0.127573) < 1e-9   # percent -> fraction
+        assert abs(f.eps_growth_ttm - 0.226973) < 1e-9
+        assert abs(f.roe - 1.414705) < 1e-9              # 141.47% -> 1.4147
+        # MRQ (26.60) < TTM (27.15) -> not expanding
+        assert f.margin_expanding is False
+
+    def test_real_payload_is_sufficient(self):
+        assert parse_schwab_fundamentals(self._aapl(), as_of="2026-06-16").is_sufficient() is True
+
+    def test_real_payload_missing_optionals_are_none(self):
+        f = parse_schwab_fundamentals(self._aapl(), as_of="2026-06-16")
+        assert f.fcf is None
+        assert f.eps_surprises is None and f.last_eps_surprise is None
+        assert f.guidance is None
+        assert f.days_to_earnings is None  # not in the instruments payload
+
+    def test_margin_expanding_when_mrq_above_ttm(self):
+        payload = {"fundamental": {"operatingMarginTTM": 20.0, "operatingMarginMRQ": 24.0}}
+        assert parse_schwab_fundamentals(payload, as_of="2026-06-16").margin_expanding is True
+
+    def test_low_roe_percent_still_divided(self):
+        # A 12% ROE comes back as 12.0 (percent) -> 0.12 (fraction).
+        payload = {"fundamental": {"returnOnEquity": 12.0}}
+        f = parse_schwab_fundamentals(payload, as_of="2026-06-16")
+        assert abs(f.roe - 0.12) < 1e-9
+
+    def test_legacy_fraction_roe_preserved(self):
+        # Legacy speculative payloads passed ROE as a fraction (<=2); keep as-is.
+        payload = {"fundamental": {"returnOnEquity": 0.21}}
+        assert parse_schwab_fundamentals(payload, as_of="2026-06-16").roe == 0.21
+
+
 class TestParseFinvizFundamentals:
     def test_well_formed_dict(self):
         fund = {

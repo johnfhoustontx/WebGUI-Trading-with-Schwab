@@ -33,11 +33,42 @@ def _parse_iso_date(s: str) -> date:
     return date(int(y), int(m), int(d))
 
 
+def _pct_to_fraction(v):
+    """Schwab change/margin fields are percents (12.76 -> 0.1276)."""
+    return v / 100.0 if v is not None else None
+
+
+def _roe_to_fraction(v):
+    """Normalize ROE to a fraction.
+
+    Schwab's ``/instruments`` fundamental returns ROE as a PERCENT (e.g. 141.47
+    for AAPL); the legacy speculative payloads passed a fraction (e.g. 0.21).
+    Heuristic: a magnitude above 2 (i.e. >200% if it were a fraction) can only
+    be a percent, so divide; otherwise treat it as an already-normalized
+    fraction. (Trade-off: a genuine 0–2% percent ROE is left as-is — a rare edge
+    that does not change its scoring tier.)
+    """
+    if v is None:
+        return None
+    return v / 100.0 if abs(v) > 2 else v
+
+
 def parse_schwab_fundamentals(payload: Optional[dict], as_of: str) -> Fundamentals:
     """Parse a Schwab fundamentals payload into a Fundamentals dataclass.
 
     payload: full Schwab response dict; relevant data lives at payload["fundamental"].
     as_of: ISO date string ("YYYY-MM-DD") used to compute days_to_earnings.
+
+    Superset parser: the PRIMARY source is the real Schwab
+    ``/instruments?projection=fundamental`` shape (``revChangeTTM`` /
+    ``epsChangePercentTTM`` in percent, ``returnOnEquity`` in percent,
+    ``operatingMarginTTM`` vs ``operatingMarginMRQ``), with the legacy
+    speculative field names (``revGrowthTTM`` / ``epsGrowthTTM`` as fractions,
+    ``operatingMargin`` / ``operatingMarginYoy``, ``epsSurprises``,
+    ``guidanceDirection``, ``nextEarningsDate``) kept as fallbacks. The real
+    instruments payload omits earnings date / EPS surprises / guidance / FCF, so
+    those degrade to None (the InvestorVerdict tolerates it; the earnings gate
+    simply does not fire).
 
     On None/empty payload, returns an all-None Fundamentals.
     """
@@ -48,22 +79,37 @@ def parse_schwab_fundamentals(payload: Optional[dict], as_of: str) -> Fundamenta
     if not fund:
         return Fundamentals()
 
-    # Margin expanding: only set when both present
+    # Growth: prefer the real Schwab percent fields, fall back to legacy fractions.
+    if fund.get("revChangeTTM") is not None:
+        rev_growth = _pct_to_fraction(fund.get("revChangeTTM"))
+    else:
+        rev_growth = fund.get("revGrowthTTM")
+    if fund.get("epsChangePercentTTM") is not None:
+        eps_growth = _pct_to_fraction(fund.get("epsChangePercentTTM"))
+    else:
+        eps_growth = fund.get("epsGrowthTTM")
+
+    # Margin expanding: real Schwab exposes TTM vs MRQ (latest quarter); the
+    # legacy shape used current vs YoY. Only set when a pair is present.
+    op_ttm = fund.get("operatingMarginTTM")
+    op_mrq = fund.get("operatingMarginMRQ")
     op_margin = fund.get("operatingMargin")
     op_margin_yoy = fund.get("operatingMarginYoy")
-    if op_margin is not None and op_margin_yoy is not None:
+    if op_ttm is not None and op_mrq is not None:
+        margin_expanding = op_mrq > op_ttm
+    elif op_margin is not None and op_margin_yoy is not None:
         margin_expanding = op_margin > op_margin_yoy
     else:
         margin_expanding = None
 
-    # EPS surprises
+    # EPS surprises (not in the instruments payload -> None)
     eps_surprises = fund.get("epsSurprises")
     if eps_surprises:
         last_eps_surprise = eps_surprises[-1]
     else:
         last_eps_surprise = None
 
-    # Days to earnings
+    # Days to earnings (not in the instruments payload -> None)
     days_to_earnings: Optional[int] = None
     next_earnings = fund.get("nextEarningsDate")
     if next_earnings:
@@ -77,9 +123,9 @@ def parse_schwab_fundamentals(payload: Optional[dict], as_of: str) -> Fundamenta
     return Fundamentals(
         pe_ratio=fund.get("peRatio"),
         peg_ratio=fund.get("pegRatio"),
-        rev_growth_ttm=fund.get("revGrowthTTM"),
-        eps_growth_ttm=fund.get("epsGrowthTTM"),
-        roe=fund.get("returnOnEquity"),
+        rev_growth_ttm=rev_growth,
+        eps_growth_ttm=eps_growth,
+        roe=_roe_to_fraction(fund.get("returnOnEquity")),
         margin_expanding=margin_expanding,
         fcf=fund.get("freeCashFlow"),
         eps_surprises=eps_surprises,
