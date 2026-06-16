@@ -122,7 +122,7 @@ Routes:
 | `/options/gamma` | Gamma (GEX/Charm/DEX/Vanna bars + flip/walls + intraday heatmap) | built |
 | `/options/simulator` | Simulator (What-if + IV-shock; Replay TODO) | built |
 | `/sentiment` | Sentiment (two-column top: gauge+regime / component table; traffic-light tiles; 30d history + rolling avgs; full-width **Sector & Industry Performance** w/ Day/Week/Month %, P/C, RRG, rotation banner, **expandable industries w/ P/C+RRG**; bottom status bar; **persists across navigation**; **server-side 120s auto-refresh + bridge publish, tab-independent**) | built |
-| `/sentiment/rotation` | Sector Rotation (RRG-vs-SPY: Risk-ON/OFF headline + spread, ROTATING FROM/INTO w/ S&P weights, quadrant-map table, **RRG scatter**; reuses `sector_rotation_assessment`; cached, **manual Refresh only**) | built |
+| `/sentiment/rotation` | Sector Rotation (RRG-vs-SPY: Risk-ON/OFF headline + spread, tight ROTATING FROM/INTO w/ S&P weights, quadrant-map table, **RRG scatter w/ faded 30-trading-day "meteor tails"** per sector — engine `assess_sector` now retains a `tail` of the last `TAIL_LENGTH=30` RS-Ratio/RS-Mom points, quadrant-colored, head brightest; reuses `sector_rotation_assessment`; cached, **manual Refresh only**) | built |
 | `/trade` `/portfolio` `/driver` | other apps | **stubs** |
 
 The `pages/options/` subpackage shares `header.py` (compact quotes/VIX/sentiment

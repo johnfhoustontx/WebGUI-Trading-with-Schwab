@@ -165,7 +165,7 @@ def render():
     headline_lbl = ui.label("").classes("text-subtitle1 text-bold")
     detail_lbl = ui.label("").classes("opacity-70 text-sm")
     msg_lbl = ui.label("").classes("text-warning text-sm")
-    cols_box = ui.row().classes("w-full no-wrap gap-6 q-mt-sm")
+    cols_box = ui.row().classes("no-wrap items-start gap-8 q-mt-sm")
     # Quadrant map (left) + RRG scatter (right), side by side.
     with ui.row().classes("w-full no-wrap gap-6 items-start q-mt-md"):
         with ui.column().style("flex:1;min-width:0"):
@@ -193,7 +193,7 @@ def render():
             for side, title, tcolor in (("rotating_from", "ROTATING FROM", CLR_RED),
                                         ("rotating_into", "ROTATING INTO", CLR_GREEN)):
                 rows, total = side_rows(a, side, weights)
-                with ui.column().classes("items-start").style("flex:1"):
+                with ui.column().classes("items-start"):
                     ui.label(f"{title}  ·  {total:.0f}% of S&P").style(f"color:{tcolor}").classes("text-bold text-sm")
                     for r in rows:
                         with ui.row().classes("items-center no-wrap gap-1 text-sm"):
