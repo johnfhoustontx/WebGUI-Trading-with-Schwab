@@ -682,6 +682,7 @@ def analyze_trade(client, trade, iv_data=None):
         "market": {
             "price_change": round(price_change, 2),
             "price_change_pct": round(price_change_pct, 2),
+            "atm_iv": atm_iv,
             "iv_rank_now": iv_rank_now,
             "iv_expanding": iv_expanding,
             "em_1sd_daily": em_daily,

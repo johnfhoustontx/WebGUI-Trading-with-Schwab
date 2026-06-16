@@ -265,20 +265,53 @@ def delete_closed_paper() -> None:
     paper_trader.delete_closed_trades()
 
 
-def analyze_paper(trade_id) -> dict:
-    """Analyze a paper trade (live Greeks) → ``{trade_id, symbol, action}``.
+def _analyze_detail(result) -> dict | None:
+    """Map a ``trade_analyzer.analyze_trade`` result onto the detail-panel field
+    names (live Greeks/IV/breakeven/underlying/PoP). None when there's no result."""
+    if not result:
+        return None
+    cur = (result.get("greeks") or {}).get("current") or {}
+    market = result.get("market") or {}
+    pos = result.get("position") or {}
+    delta = cur.get("delta")
+    atm_iv = market.get("atm_iv")
+    return {
+        "short_delta": delta,
+        "net_theta": cur.get("theta"),
+        "net_vega": cur.get("vega"),
+        "short_iv": atm_iv,
+        "current_iv": atm_iv,
+        "iv_rank": market.get("iv_rank_now"),
+        "breakeven": (result.get("profit_target") or {}).get("breakeven"),
+        "underlying_price": pos.get("underlying_now"),
+        "dte": pos.get("dte_remaining"),
+        "unrealized_pnl": pos.get("unrealized_pnl"),
+        # PoP ≈ 1 − |live short-leg delta|.
+        "pop_pct": round((1.0 - abs(delta)) * 100, 1) if isinstance(delta, (int, float)) and delta else None,
+    }
 
-    Defensive throughout: a missing trade / malformed verdict degrades to a
-    well-formed dict with ``action`` ``"—"``. Uses ``_proxy.schwab_py_client``
-    (mirrors the page)."""
+
+def analyze_paper(trade_id) -> dict:
+    """Analyze a paper trade (live Greeks/IV) → ``{trade_id, symbol, action, detail}``.
+
+    ``detail`` carries the live values mapped onto the detail-panel field names
+    (see ``_analyze_detail``) so the GUI can overlay them on the stored view.
+    Defensive throughout: a missing trade, malformed verdict, OR a RuntimeError
+    from ``analyze_trade`` (raised when live data can't be fetched — after-hours /
+    no chain) degrades to ``action="—"``, ``detail=None``. Uses
+    ``_proxy.schwab_py_client`` (mirrors the page)."""
     import trade_analyzer
 
     t = _find_trade(trade_id)
-    result = trade_analyzer.analyze_trade(_proxy.schwab_py_client, t, None)
+    try:
+        result = trade_analyzer.analyze_trade(_proxy.schwab_py_client, t, None)
+    except Exception:
+        result = None
     return {
         "trade_id": trade_id,
         "symbol": t.get("symbol") if t else None,
         "action": ((result or {}).get("verdict") or {}).get("action", "—"),
+        "detail": _analyze_detail(result),
     }
 
 

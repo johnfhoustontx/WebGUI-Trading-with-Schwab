@@ -98,6 +98,20 @@ def test_synth_breakeven_non_numeric_is_none():
     assert paper.synth_from_trade({"symbol": "X"})["breakeven"] is None
 
 
+def test_merge_detail_overlays_non_none_only():
+    base = {"short_delta": None, "breakeven": 1.0, "x": 5}
+    merged = paper.merge_detail(base, {"short_delta": -0.3, "breakeven": None, "y": 9})
+    assert merged["short_delta"] == -0.3     # live value overlaid
+    assert merged["breakeven"] == 1.0        # None in detail does NOT clobber base
+    assert merged["x"] == 5 and merged["y"] == 9
+    assert base["short_delta"] is None       # base not mutated
+
+
+def test_merge_detail_none_or_empty_returns_base_copy():
+    assert paper.merge_detail({"a": 1}, None) == {"a": 1}
+    assert paper.merge_detail({"a": 1}, {}) == {"a": 1}
+
+
 def test_render_callable():
     assert callable(paper.render)
 

@@ -119,12 +119,25 @@ def synth_from_trade(trade):
     }
 
 
+def merge_detail(base, detail):
+    """Overlay non-None live-analyze ``detail`` fields onto a synth signal dict.
+
+    Returns a NEW dict (base is not mutated); a None field in ``detail`` never
+    clobbers the stored value, so missing live data keeps the entry-time view."""
+    out = dict(base or {})
+    for k, v in (detail or {}).items():
+        if v is not None:
+            out[k] = v
+    return out
+
+
 def render():
     """Paper Trades page: ledger table (left) + shared detail panel (right), bus-fed."""
     ui.label("Paper Trades").classes("text-h5")
 
     raw_by_id: dict = {}
-    state = {"sel_id": None}
+    # sel_id: selected trade; live: {trade_id: live-analyze detail} overlay cache.
+    state = {"sel_id": None, "live": {}}
 
     with ui.row().classes("w-full no-wrap gap-4 items-start"):
         with ui.column().classes("flex-grow min-w-0"):
@@ -146,6 +159,22 @@ def render():
     # Last-seen bus cache versions for the fetch-free repaint/notify timers.
     seen = {"trades": None, "analyze": None}
 
+    def _render_detail(trade):
+        """Paint the detail panel for ``trade``: stored synth view + any cached
+        live-analyze overlay for that trade."""
+        if not trade:
+            detail_panel.clear()
+            return
+        base = synth_from_trade(trade)
+        live = state["live"].get(trade.get("trade_id"))
+        detail_panel.update(merge_detail(base, live))
+
+    @guard
+    def _request_analyze(trade_id, symbol=""):
+        bus_client.request("options",
+                           {"type": "paper_analyze", "args": {"trade_id": trade_id}})
+        status.text = f"Analyzing {symbol} live…" if symbol else "Analyzing live…"
+
     def _populate(pt):
         """Paint the ledger table from the cached paper-trades view."""
         pt = pt or {}
@@ -156,10 +185,11 @@ def render():
                 raw_by_id[t["trade_id"]] = t
         table.rows = paper_rows(trades)
         table.update()
-        # Keep the open detail panel in sync with the freshly-cached trades.
+        # Keep the open detail panel in sync with the freshly-cached trades
+        # (preserving any live-analyze overlay for the selected trade).
         sel = state.get("sel_id")
         if sel and sel in raw_by_id:
-            detail_panel.update(synth_from_trade(raw_by_id[sel]))
+            _render_detail(raw_by_id[sel])
         elif sel:
             detail_panel.clear()  # selected trade no longer present
         if not pt:
@@ -172,7 +202,8 @@ def render():
         t = raw_by_id.get(row.get("id")) if isinstance(row, dict) else None
         if t:
             state["sel_id"] = t.get("trade_id")
-            detail_panel.update(synth_from_trade(t))
+            _render_detail(t)                     # instant stored-data view
+            _request_analyze(t.get("trade_id"), t.get("symbol", ""))  # live overlay
 
     table.on("rowClick", _select)
 
@@ -256,6 +287,14 @@ def render():
         if av != seen["analyze"]:
             seen["analyze"] = av
             res = bus_client.read("options:paper_analyze") or {}
-            ui.notify(f"{res.get('symbol')}: {res.get('action', '—')}", type="info")
+            tid, det = res.get("trade_id"), res.get("detail")
+            if tid and det:
+                state["live"][tid] = det              # cache the live overlay
+            # Re-render with the live overlay if it's for the selected trade.
+            if tid and tid == state.get("sel_id") and tid in raw_by_id:
+                _render_detail(raw_by_id[tid])
+            status.text = f"{len(table.rows)} trades." if table.rows else ""
+            note = "" if det else " (live data unavailable)"
+            ui.notify(f"{res.get('symbol')}: {res.get('action', '—')}{note}", type="info")
 
     ui.timer(2.0, _maybe_repaint)

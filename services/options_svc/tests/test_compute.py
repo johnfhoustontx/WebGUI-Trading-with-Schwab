@@ -316,7 +316,37 @@ def test_analyze_paper_extracts_verdict_action(monkeypatch):
     monkeypatch.setitem(_sys.modules, "trade_analyzer", fake_ta)
 
     out = compute.analyze_paper("T1")
-    assert out == {"trade_id": "T1", "symbol": "SPY", "action": "CLOSE"}
+    assert out["trade_id"] == "T1" and out["symbol"] == "SPY"
+    assert out["action"] == "CLOSE"
+
+
+def test_analyze_paper_maps_live_detail(monkeypatch):
+    """The live analyze output is mapped to the detail-panel field names."""
+    import sys as _sys
+    import types as _types
+
+    trade = {"trade_id": "T1", "symbol": "SPY"}
+    monkeypatch.setitem(_sys.modules, "paper_trader",
+                        _types.SimpleNamespace(get_all_trades=lambda: [trade]))
+    result = {
+        "verdict": {"action": "HOLD"},
+        "greeks": {"current": {"delta": -0.30, "theta": -0.05, "vega": 0.12}},
+        "market": {"atm_iv": 22.5, "iv_rank_now": 40},
+        "profit_target": {"breakeven": 448.0},
+        "position": {"underlying_now": 452.1, "dte_remaining": 3,
+                     "unrealized_pnl": 12.0},
+    }
+    monkeypatch.setitem(_sys.modules, "trade_analyzer",
+                        _types.SimpleNamespace(analyze_trade=lambda c, t, i: result))
+
+    out = compute.analyze_paper("T1")
+    d = out["detail"]
+    assert d["short_delta"] == -0.30 and d["net_theta"] == -0.05 and d["net_vega"] == 0.12
+    assert d["short_iv"] == 22.5 and d["current_iv"] == 22.5 and d["iv_rank"] == 40
+    assert d["breakeven"] == 448.0
+    assert d["underlying_price"] == 452.1 and d["dte"] == 3
+    assert d["unrealized_pnl"] == 12.0
+    assert d["pop_pct"] == 70.0          # (1 - |−0.30|) * 100
 
 
 def test_analyze_paper_defensive_on_missing_verdict(monkeypatch):
@@ -329,7 +359,28 @@ def test_analyze_paper_defensive_on_missing_verdict(monkeypatch):
                         _types.SimpleNamespace(analyze_trade=lambda c, t, i: None))
 
     out = compute.analyze_paper("gone")
-    assert out == {"trade_id": "gone", "symbol": None, "action": "—"}
+    assert out["trade_id"] == "gone" and out["symbol"] is None
+    assert out["action"] == "—" and out["detail"] is None
+
+
+def test_analyze_paper_guards_runtimeerror_no_live_data(monkeypatch):
+    """analyze_trade raises when live data can't be fetched -> graceful empty."""
+    import sys as _sys
+    import types as _types
+
+    trade = {"trade_id": "T2", "symbol": "QQQ"}
+    monkeypatch.setitem(_sys.modules, "paper_trader",
+                        _types.SimpleNamespace(get_all_trades=lambda: [trade]))
+
+    def _boom(c, t, i):
+        raise RuntimeError("live data cannot be fetched")
+
+    monkeypatch.setitem(_sys.modules, "trade_analyzer",
+                        _types.SimpleNamespace(analyze_trade=_boom))
+
+    out = compute.analyze_paper("T2")
+    assert out["trade_id"] == "T2" and out["symbol"] == "QQQ"
+    assert out["action"] == "—" and out["detail"] is None
 
 
 # ── Captured signals (moved from webgui/pages/options/captured.py) ──────────
