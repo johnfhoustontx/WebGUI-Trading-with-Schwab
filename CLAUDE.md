@@ -119,7 +119,7 @@ Routes:
 | `/options/portfolio` | Paper Portfolio (paper account) | built |
 | `/options/calculator` | Calculator (summary tiles + P&L heatmap) | built |
 | `/options/swing` | Swing Scanner | built |
-| `/options/gamma` | Gamma (GEX/Charm/DEX/Vanna bars + flip/walls + intraday heatmap) | built |
+| `/options/gamma` | Gamma (GEX/Charm/DEX/Vanna bars + flip/**single Call+Put walls** + intraday heatmap; bar/heatmap **width split grows with session** snapshot count; **flicker-free** in-place Plotly updates) | built |
 | `/options/simulator` | Simulator (What-if + IV-shock; Replay TODO) | built |
 | `/sentiment` | Sentiment (two-column top: gauge+regime / component table; traffic-light tiles; 30d history + rolling avgs; full-width **Sector & Industry Performance** w/ Day/Week/Month %, P/C, RRG, rotation banner, **expandable industries w/ P/C+RRG**; bottom status bar; **persists across navigation**; **server-side 120s auto-refresh + bridge publish, tab-independent**) | built |
 | `/sentiment/rotation` | Sector Rotation (RRG-vs-SPY: Risk-ON/OFF headline + spread, tight ROTATING FROM/INTO w/ S&P weights, quadrant-map table, **RRG scatter w/ faded 30-trading-day "meteor tails"** per sector — engine `assess_sector` now retains a `tail` of the last `TAIL_LENGTH=30` RS-Ratio/RS-Mom points, quadrant-colored, head brightest; reuses `sector_rotation_assessment`; cached, **manual Refresh only**) | built |
@@ -320,6 +320,26 @@ Options section (design/plan:
 - Pure transforms are unit-tested (webgui + options_svc suites). **Still TODO
   (separate design):** streaming-driven paper-position repricing (today repricing
   is manual-only via the Paper Portfolio "Run Manage Cycle" button).
+
+**Gamma panels / walls / flicker batch (DONE — 2026-06-16).** Four fixes from a
+live-screenshot review (design/plan:
+[design](docs/plans/2026-06-16-gamma-panels-walls-flicker-design.md) /
+[plan](docs/plans/2026-06-16-gamma-panels-walls-flicker-plan.md)):
+- **Proportional panels**: `gamma.panel_flex(n_cols)` sets the bar/heatmap column
+  flex ratio from the intraday snapshot count (heat fraction lerps 0.28→0.70 over
+  ~82 five-min slots), so the heatmap expands and the bars shrink as the session
+  fills in. Term view → bars full width, heatmap hidden.
+- **GAMMA dead space**: `gamma.significant_strikes(bars, frac=0.03)` feeds the
+  shared y-range from strikes with |net| ≥ 3 % of peak, cropping GEX's near-zero
+  edge strikes (other views were already tight). Both panels share the range.
+- **Flicker**: the two `ui.plotly` elements are now created **once** and updated
+  via `update_figure` (Plotly.react diff); `_render_view` no longer
+  `clear()`s/rebuilds the canvas. Message labels toggle via `set_visibility`.
+- **Single walls**: `services/options_svc/compute.gamma_walls` returns one Put +
+  one Call wall via the engine's `get_directional_walls` (call = max-call-GEX
+  strike above spot, put = most-negative-put-GEX below) instead of the old
+  `get_gex_walls`/`get_dex_walls` top-5; the page renders them unchanged. DEX
+  per-strike map remapped `dex`→`gex` for the picker.
 
 ## Paths and ports: `repo_paths.py` + `config/ports.toml`
 
