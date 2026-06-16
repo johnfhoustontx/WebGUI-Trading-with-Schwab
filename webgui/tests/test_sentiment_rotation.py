@@ -105,6 +105,13 @@ def test_rrg_scatter_has_meteor_tail_per_sector():
     assert xlk_tail.get("hoverinfo") == "skip"
 
 
+def test_rrg_scatter_no_legend_leak():
+    # With 12 traces, every trace must opt out of the legend so Plotly does
+    # not auto-show a stray "trace N" entry for the head.
+    fig = R.rrg_scatter_figure(_assessment())
+    assert all(t.get("showlegend") is False for t in fig["data"])
+
+
 def test_rrg_scatter_handles_missing_tail():
     a = _assessment()
     for s in a["sectors"]:

@@ -126,7 +126,7 @@ def rrg_scatter_figure(a):
         "x": xs, "y": ys, "text": labels, "textposition": "top center",
         "marker": {"size": 12, "color": colors},
         "hovertext": [f"{s.get('name')} — {s.get('quadrant')}" for s in secs],
-        "hoverinfo": "text",
+        "hoverinfo": "text", "showlegend": False,
     }
     tails = [t for t in (_tail_trace(s) for s in secs) if t is not None]
     return {
