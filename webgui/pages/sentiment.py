@@ -68,6 +68,33 @@ def gauge_score(total):
     return max(0.0, min(100.0, _safe_float(total) * 10.0))
 
 
+def _clamp(v, lo, hi):
+    return max(lo, min(hi, v))
+
+
+# Market Trend regime -> speedometer anchor (0-100 "bullishness").
+_TREND_ANCHORS = {"bull_trend": 85.0, "pullback_in_bull": 65.0, "range": 50.0,
+                  "bear_rally": 35.0, "bear_trend": 15.0}
+
+# Short dial captions (the full label shows beneath the gauge).
+_TREND_SHORT = {"bull_trend": "BULL", "pullback_in_bull": "PULLBACK",
+                "range": "RANGE", "bear_rally": "BEAR RALLY", "bear_trend": "BEAR"}
+
+
+def trend_gauge_value(trend):
+    """0-100 needle for the Market Trend speedometer (hybrid).
+
+    Anchored by regime so the needle stays in the matching color zone
+    (bear=red … bull=green), then nudged within the band by the 200d slope and
+    drawdown so it reflects strength: ``anchor + clamp(slope%*50, ±8) +
+    clamp(dd%*0.3, ±5)``, clamped to [0,100]. Unknown/missing trend -> 50."""
+    t = trend or {}
+    anchor = _TREND_ANCHORS.get(t.get("state"), 50.0)
+    nudge = (_clamp(_safe_float(t.get("sma_200_slope_pct")) * 50.0, -8.0, 8.0)
+             + _clamp(_safe_float(t.get("drawdown_pct")) * 0.3, -5.0, 5.0))
+    return _clamp(anchor + nudge, 0.0, 100.0)
+
+
 def bias_color(bias):
     b = (bias or "").lower()
     if "bull" in b:
@@ -441,37 +468,49 @@ def render():
         ui.space()
         ui.button(icon="refresh", on_click=lambda: _request_refresh()).props("flat round")
 
-    with ui.row().classes("w-full no-wrap items-start gap-6"):
-        with ui.column().classes("items-start").style("min-width:280px"):
+    tile_lbls, tile_cards = {}, {}
+    # 2x2 signal matrix (Modifier dropped per design).
+    TILE_DEFS = [("bias", "BIAS"), ("signal", "SIGNAL"),
+                 ("yesterday", "YESTERDAY"), ("change", "CHANGE")]
+    with ui.row().classes("w-full items-start gap-6 flex-wrap"):
+        # ① Market Sentiment — composite speedometer + press-and-hold Components popup
+        with ui.column().classes("items-center").style("min-width:210px"):
             gauge_box = ui.html("").classes("q-mt-sm")
             bias_lbl = ui.label("").classes("text-h6")
-            sub_lbl = ui.label("").classes("opacity-80")
-            ui.separator().classes("q-my-sm")
+            sub_lbl = ui.label("").classes("opacity-80 text-sm")
+            with ui.button("Components", icon="table_view").props("flat dense") as comp_btn:
+                with ui.menu().props("no-parent-event") as comp_menu:
+                    comp_box = ui.column().classes("q-pa-md").style("min-width:520px")
+            # Press-and-hold: shown while the mouse button is down, closed on release.
+            comp_btn.on("mousedown", lambda: comp_menu.open())
+            comp_btn.on("mouseup", lambda: comp_menu.close())
+            comp_btn.on("mouseleave", lambda: comp_menu.close())
+        # ② Market Trend — speedometer (hybrid needle) + label/description/detail
+        with ui.column().classes("items-center").style("min-width:210px"):
             ui.label("Market Trend").classes("opacity-60 text-xs")
-            regime_badge = ui.badge("").classes("text-subtitle2 q-pa-sm")
-            regime_desc = ui.label("").classes("opacity-80 text-sm")
-            regime_detail = ui.label("").classes("opacity-60 text-xs")
-        comp_box = ui.column().classes("q-gutter-xs").style("flex:1")
-
-    # Signal tiles
-    tile_lbls, tile_cards = {}, {}
-    TILE_DEFS = [("modifier", "MODIFIER"), ("bias", "BIAS"), ("signal", "SIGNAL"),
-                 ("yesterday", "YESTERDAY"), ("change", "CHANGE")]
-    with ui.row().classes("w-full no-wrap gap-2 q-mt-sm"):
-        for tkey, tlabel in TILE_DEFS:
-            c = ui.card().classes("q-pa-xs items-center").style("min-width:72px;flex:1")
-            with c:
-                ui.label(tlabel).classes("text-xs").style("color:#111")
-                tile_lbls[tkey] = ui.label("—").classes("text-bold").style("color:#111")
-            tile_cards[tkey] = c
+            trend_gauge_box = ui.html("").classes("q-mt-sm")
+            regime_badge = ui.label("").classes("text-subtitle1 text-bold")
+            regime_desc = ui.label("").classes("opacity-80 text-sm text-center")
+            regime_detail = ui.label("").classes("opacity-60 text-xs text-center")
+        # ③ Bias 2x2 matrix
+        with ui.column().classes("items-start"):
+            ui.label("Signals").classes("opacity-60 text-xs")
+            with ui.grid(columns=2).classes("gap-2"):
+                for tkey, tlabel in TILE_DEFS:
+                    c = ui.card().classes("q-pa-sm items-center").style("min-width:96px")
+                    with c:
+                        ui.label(tlabel).classes("text-xs").style("color:#111")
+                        tile_lbls[tkey] = ui.label("—").classes("text-bold").style("color:#111")
+                    tile_cards[tkey] = c
 
     ui.separator().classes("q-my-md")
-    ui.label("30-Day History").classes("text-subtitle1")
-    hist_plot = ui.plotly(build_history_figure([])).classes("w-full")
-    roll_lbl = ui.label("").classes("opacity-70 text-sm")
-    vel_lbl = ui.label("").classes("opacity-80 text-sm")
-    flag_lbl = ui.label("").classes("text-negative text-sm")
-    div_lbl = ui.label("").classes("text-warning text-sm")
+    # 30-Day History — collapsible, collapsed by default.
+    with ui.expansion("30-Day History", icon="show_chart", value=False).classes("w-full"):
+        hist_plot = ui.plotly(build_history_figure([])).classes("w-full")
+        roll_lbl = ui.label("").classes("opacity-70 text-sm")
+        vel_lbl = ui.label("").classes("opacity-80 text-sm")
+        flag_lbl = ui.label("").classes("text-negative text-sm")
+        div_lbl = ui.label("").classes("text-warning text-sm")
 
     # Sector & Industry Performance
     ui.separator().classes("q-my-md")
@@ -546,7 +585,7 @@ def render():
         else:
             date_lbl.text = f"as of {latest.get('date')} (last completed session)"
         gauge_box.content = speedometer_svg(gauge_score(total), comp.get("bias", ""),
-                                            width=220, height=140)
+                                            width=200, height=130)
         bias_lbl.text = f"{total:.2f} · {comp.get('bias', '')}"
         bias_lbl.style(f"color:{bias_color(comp.get('bias'))}")
         sub_lbl.text = (f"size {comp.get('size_modifier', '—')} · "
@@ -583,8 +622,11 @@ def render():
             red = {"bear_rally", "bear_trend"}
             color = CLR_GREEN if committed in green else (
                 CLR_RED if committed in red else CLR_YELLOW)
+            trend_gauge_box.content = speedometer_svg(
+                trend_gauge_value(trend), _TREND_SHORT.get(committed, "—"),
+                width=200, height=130)
             regime_badge.text = trend.get("label", "")
-            regime_badge.style(f"background-color:{color};color:#111")
+            regime_badge.style(f"color:{color}")
             regime_desc.text = trend.get("description", "")
             regime_detail.text = (
                 f"SPY {_safe_float(trend.get('spy_close')):.2f} · "
@@ -593,6 +635,11 @@ def render():
                 f"· slope {_safe_float(trend.get('sma_200_slope_pct')):+.2f}% "
                 f"· dd {_safe_float(trend.get('drawdown_pct')):+.1f}% "
                 f"· conf {_safe_float(trend.get('confidence')):.0%}")
+        else:
+            trend_gauge_box.content = speedometer_svg(50.0, "—", width=200, height=130)
+            regime_badge.text = ""
+            regime_desc.text = ""
+            regime_detail.text = ""
 
     def _render_sector_table():
         sec = state["sector"]

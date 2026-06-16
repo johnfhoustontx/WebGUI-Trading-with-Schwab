@@ -28,6 +28,34 @@ def test_bias_color_buckets():
     assert S.bias_color("Neutral") == S.CLR_YELLOW
 
 
+# ── Market Trend speedometer (hybrid: state anchor + slope/drawdown nudge) ────
+def test_trend_gauge_value_bull_high_bear_low():
+    bull = S.trend_gauge_value({"state": "bull_trend",
+                                "sma_200_slope_pct": 0.1, "drawdown_pct": -2.0})
+    bear = S.trend_gauge_value({"state": "bear_trend",
+                                "sma_200_slope_pct": -0.2, "drawdown_pct": -15.0})
+    assert bull > 75          # green zone
+    assert bear < 40          # red zone
+
+
+def test_trend_gauge_value_range_mid_and_default():
+    assert abs(S.trend_gauge_value(
+        {"state": "range", "sma_200_slope_pct": 0, "drawdown_pct": 0}) - 50.0) < 1e-9
+    assert S.trend_gauge_value({}) == 50.0       # unknown state -> mid
+    assert S.trend_gauge_value(None) == 50.0
+
+
+def test_trend_gauge_value_nudge_bounded_and_clamped():
+    # Extreme inputs: nudge is capped (slope ±8, dd ±5) and value clamps to [0,100].
+    v = S.trend_gauge_value({"state": "bull_trend",
+                             "sma_200_slope_pct": 99, "drawdown_pct": -99})
+    assert v == 88.0          # 85 + clamp(+8) + clamp(-5)
+    lo = S.trend_gauge_value({"state": "bear_trend",
+                              "sma_200_slope_pct": -99, "drawdown_pct": -99})
+    assert lo == 2.0          # 15 + clamp(-8) + clamp(-5)
+    assert 0.0 <= v <= 100.0 and 0.0 <= lo <= 100.0
+
+
 def test_composite_series_filters_zeros_and_blanks():
     snaps = [_snap("2026-06-01", 6.0), _snap("2026-06-02", 0.0),
              _snap("2026-06-03", 7.0)]
