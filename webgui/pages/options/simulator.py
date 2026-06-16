@@ -28,6 +28,8 @@ from nicegui import ui
 
 from pages.ui_guard import guard
 
+from .inputs import select_all_on_focus
+
 SPOT_COLOR = "#ffd54f"
 TARGET_COLOR = "#42a5f5"
 BASE_COLOR = "#42a5f5"
@@ -107,7 +109,7 @@ def render():
     }
 
     with ui.row().classes("items-center gap-3 flex-wrap"):
-        symbol_in = ui.input("Symbol", value="SPY").classes("w-28")
+        symbol_in = select_all_on_focus(ui.input("Symbol", value="SPY").classes("w-28"))
         fetch_btn = ui.button("Fetch snapshot", icon="download")
         status = ui.label("Fetch a snapshot to begin.").classes("opacity-70 text-sm")
 

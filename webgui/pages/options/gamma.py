@@ -18,6 +18,8 @@ via ``_refloat_keys`` BEFORE feeding the builders. The builders stay unchanged.
 """
 from pages.ui_guard import guard, guard_async
 
+from .inputs import select_all_on_focus
+
 POS_COLOR = "#66bb6a"
 NEG_COLOR = "#ef5350"
 SPOT_COLOR = "#ffd54f"
@@ -250,7 +252,7 @@ def render():
     seen = {"gamma": None, "explain": None, "analyze": None}
 
     with ui.row().classes("items-center gap-3 flex-wrap"):
-        symbol_in = ui.input("Symbol", value="$SPX").classes("w-28")
+        symbol_in = select_all_on_focus(ui.input("Symbol", value="$SPX").classes("w-28"))
         fetch_btn = ui.button("Refresh now", icon="refresh")
         view_toggle = ui.toggle(list(_VIEWS) + ["Term"], value="GEX")
         explain_btn = ui.button("Explain", icon="help").props("outline")

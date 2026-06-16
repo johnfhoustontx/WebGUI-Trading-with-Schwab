@@ -25,6 +25,8 @@ unit-tested; ``render()`` wires the form + visuals.
 """
 import math
 
+from .inputs import select_all_on_focus
+
 # (key, label, option_type, side) per strategy — mirrors dashboard leg inputs.
 LEG_SPECS = {
     "PCS": [("short_put", "Short Put (write)", "put", "short"),
@@ -304,7 +306,7 @@ def render():
 
     with ui.row().classes("gap-3 items-end flex-wrap"):
         strategy_sel = ui.select(list(LEG_SPECS.keys()), value="PCS", label="Strategy").classes("w-36")
-        symbol_in = ui.input("Symbol", value="SPY").classes("w-24")
+        symbol_in = select_all_on_focus(ui.input("Symbol", value="SPY").classes("w-24"))
         price_in = ui.number("Price", value=100.0, format="%.2f").classes("w-28")
         ui.button("load", icon="download", on_click=lambda: load_symbol()) \
             .props("flat dense size=sm").tooltip("Load price + expiries/strikes from the chain")

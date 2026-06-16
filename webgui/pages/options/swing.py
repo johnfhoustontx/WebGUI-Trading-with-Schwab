@@ -19,6 +19,8 @@ from nicegui import ui
 
 from pages.ui_guard import guard
 
+from .inputs import select_all_on_focus
+
 from . import detail, handoff, scanner
 
 
@@ -34,7 +36,7 @@ def render():
     with ui.row().classes("w-full no-wrap gap-4 items-start"):
         with ui.column().classes("flex-grow min-w-0"):
             with ui.row().classes("items-end gap-2 flex-wrap"):
-                symbol_in = ui.input("Symbol", value="SPY").classes("w-28")
+                symbol_in = select_all_on_focus(ui.input("Symbol", value="SPY").classes("w-28"))
                 dte_min = ui.number("DTE min", value=5, min=0).classes("w-24")
                 dte_max = ui.number("DTE max", value=30, min=1).classes("w-24")
                 put_dmin = ui.number("Put Δ min", value=-0.20, format="%.2f").classes("w-24")
