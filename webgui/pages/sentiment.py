@@ -462,19 +462,23 @@ def render():
     state["comp_ver"] = bus_client.read_version("sentiment:composite")
     state["sec_ver"] = bus_client.read_version("sentiment:sectors")
 
-    with ui.row().classes("items-center gap-3 w-full"):
-        ui.label("Market Sentiment").classes("text-h6")
-        date_lbl = ui.label("").classes("opacity-70 text-sm")
+    # Top bar: "as of …" date + a small 3D refresh button, right-aligned. The
+    # section titles now live per-column (all the same h6 size) below.
+    with ui.row().classes("items-center w-full"):
         ui.space()
-        ui.button(icon="refresh", on_click=lambda: _request_refresh()).props("flat round")
+        date_lbl = ui.label("").classes("opacity-70 text-sm")
+        ui.button(icon="refresh", on_click=lambda: _request_refresh()) \
+            .props("round dense push color=primary size=sm").classes("q-ml-sm")
 
     tile_lbls, tile_cards = {}, {}
     # 2x2 signal matrix (Modifier dropped per design).
     TILE_DEFS = [("bias", "BIAS"), ("signal", "SIGNAL"),
                  ("yesterday", "YESTERDAY"), ("change", "CHANGE")]
-    with ui.row().classes("w-full items-start gap-6 flex-wrap"):
+    # Three evenly-distributed, top-aligned columns with matching h6 headers.
+    with ui.row().classes("w-full items-start justify-around gap-6 flex-wrap"):
         # ① Market Sentiment — composite speedometer + press-and-hold Components popup
         with ui.column().classes("items-center").style("min-width:210px"):
+            ui.label("Market Sentiment").classes("text-h6")
             gauge_box = ui.html("").classes("q-mt-sm")
             bias_lbl = ui.label("").classes("text-h6")
             sub_lbl = ui.label("").classes("opacity-80 text-sm")
@@ -485,17 +489,23 @@ def render():
             comp_btn.on("mousedown", lambda: comp_menu.open())
             comp_btn.on("mouseup", lambda: comp_menu.close())
             comp_btn.on("mouseleave", lambda: comp_menu.close())
-        # ② Market Trend — speedometer (hybrid needle) + label/description/detail
+        # ② Market Trend — speedometer (hybrid needle) + label/desc + detail popup
         with ui.column().classes("items-center").style("min-width:210px"):
-            ui.label("Market Trend").classes("opacity-60 text-xs")
+            ui.label("Market Trend").classes("text-h6")
             trend_gauge_box = ui.html("").classes("q-mt-sm")
             regime_badge = ui.label("").classes("text-subtitle1 text-bold")
             regime_desc = ui.label("").classes("opacity-80 text-sm text-center")
-            regime_detail = ui.label("").classes("opacity-60 text-xs text-center")
-        # ③ Bias 2x2 matrix
-        with ui.column().classes("items-start"):
-            ui.label("Signals").classes("opacity-60 text-xs")
-            with ui.grid(columns=2).classes("gap-2"):
+            with ui.button("Trend Detail", icon="insights").props("flat dense") as trend_btn:
+                with ui.menu().props("no-parent-event") as trend_menu:
+                    regime_detail = ui.label("").classes("q-pa-md text-sm") \
+                        .style("max-width:360px")
+            trend_btn.on("mousedown", lambda: trend_menu.open())
+            trend_btn.on("mouseup", lambda: trend_menu.close())
+            trend_btn.on("mouseleave", lambda: trend_menu.close())
+        # ③ Signals — 2x2 matrix
+        with ui.column().classes("items-center").style("min-width:210px"):
+            ui.label("Signals").classes("text-h6")
+            with ui.grid(columns=2).classes("gap-2 q-mt-sm"):
                 for tkey, tlabel in TILE_DEFS:
                     c = ui.card().classes("q-pa-sm items-center").style("min-width:96px")
                     with c:
@@ -588,8 +598,7 @@ def render():
                                             width=200, height=130)
         bias_lbl.text = f"{total:.2f} · {comp.get('bias', '')}"
         bias_lbl.style(f"color:{bias_color(comp.get('bias'))}")
-        sub_lbl.text = (f"size {comp.get('size_modifier', '—')} · "
-                        f"agg conf {_safe_float(comp.get('aggregate_confidence')):.0%}")
+        sub_lbl.text = f"Confidence {_safe_float(comp.get('aggregate_confidence')):.0%}"
         # Prior series: when showing live, today=live and the prior series is
         # the full backfill (all completed sessions); when showing backfill,
         # exclude the last (it's "today").
