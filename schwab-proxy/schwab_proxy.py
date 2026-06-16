@@ -1374,8 +1374,15 @@ async def stream_quotes(symbols: str = Query(...)):
 #############################################
 
 if __name__ == "__main__":
+    # Pass the app OBJECT, not the "schwab_proxy:app" import string. The string
+    # form makes uvicorn import this module a SECOND time (it is already loaded
+    # as __main__), which re-runs the top-level logging setup and creates a
+    # DUPLICATE TimedRotatingFileHandler on errors.log. Two open handles on the
+    # same file make the weekly rollover's os.rename fail on Windows with
+    # "[WinError 32] file in use". The object form (valid since reload=False and
+    # no workers) loads the module once → one handler → rollover succeeds.
     uvicorn.run(
-        "schwab_proxy:app",
+        app,
         host="127.0.0.1",
         port=PROXY_PORT,
         reload=False,
