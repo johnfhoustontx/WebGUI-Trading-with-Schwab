@@ -555,6 +555,27 @@ def get_price_history(
     return result["data"]
 
 
+@app.get("/instruments")
+def get_instruments(
+    symbol: str,
+    projection: str = "fundamental",
+):
+    """Schwab marketdata /instruments lookup (default projection=fundamental).
+
+    With ``projection=fundamental`` Schwab returns
+    ``{"instruments": [{"fundamental": {...}, "symbol", "description", ...}]}``.
+    The Trade service uses this to fetch P/E, growth, ROE, margins, etc. for the
+    Investor verdict. Other projections (``symbol-search``, ``desc-search``, …)
+    pass through unchanged.
+    """
+    result = token_mgr.api_request(
+        "/instruments", params={"symbol": symbol, "projection": projection}
+    )
+    if result["status_code"] != 200:
+        raise HTTPException(status_code=result["status_code"], detail=result["error"])
+    return result["data"]
+
+
 @app.get("/passthrough")
 def passthrough(endpoint: str, params: Optional[str] = None):
     """Generic passthrough for any Schwab marketdata endpoint."""

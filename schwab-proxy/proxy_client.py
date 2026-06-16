@@ -305,3 +305,20 @@ class SchwabProxyClient:
     def _request(self, endpoint: str, params: Optional[Dict] = None) -> Optional[Dict]:
         """Generic pass-through (used for /chains in SPX P/C calculation)."""
         return self._proxy_get(endpoint, params=params)
+
+    def get_fundamentals(self, symbol: str) -> Optional[Dict]:
+        """Fetch Schwab fundamentals for a symbol (the inner ``fundamental`` dict).
+
+        Calls the proxy ``/instruments?projection=fundamental`` endpoint and
+        unwraps ``instruments[0].fundamental`` (P/E, growth, ROE, margins, …),
+        or returns None if the proxy/Schwab gave nothing usable. Used by the
+        Trade service's Investor verdict.
+        """
+        data = self._proxy_get("/instruments",
+                               params={"symbol": symbol, "projection": "fundamental"})
+        if not data:
+            return None
+        instruments = data.get("instruments") or []
+        if not instruments:
+            return None
+        return instruments[0].get("fundamental")
