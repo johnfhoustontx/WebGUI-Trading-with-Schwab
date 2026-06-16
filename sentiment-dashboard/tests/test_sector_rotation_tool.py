@@ -61,3 +61,23 @@ def test_assess_from_close_series_full_year_depth():
     a = rt.assess_from_close_series(sectors, bench, "2026-06-08")
     assert a is not None
     assert len(a["sectors"]) == 11
+
+
+def test_assess_from_close_series_includes_tail():
+    sectors, bench = _synthetic_closes()
+    a = rt.assess_from_close_series(sectors, bench, "2026-06-08")
+    assert a is not None
+    for s in a["sectors"]:
+        tail = s.get("tail")
+        assert isinstance(tail, list) and tail, f"{s['etf']} missing tail"
+        # At most TAIL_LENGTH points, oldest -> newest.
+        assert len(tail) <= rt.TAIL_LENGTH
+        # Each point carries the same keys as the head reading.
+        assert set(tail[0]) == {"rs_ratio", "rs_momentum"}
+        # The newest tail point equals the current head reading.
+        assert tail[-1]["rs_ratio"] == s["rs_ratio"]
+        assert tail[-1]["rs_momentum"] == s["rs_momentum"]
+
+
+def test_tail_length_constant_is_30():
+    assert rt.TAIL_LENGTH == 30
