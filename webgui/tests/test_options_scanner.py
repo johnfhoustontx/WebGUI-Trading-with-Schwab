@@ -66,3 +66,25 @@ def test_term_text_backwardation_no_timestamp():
 def test_term_text_empty_and_unknown():
     assert scanner.term_text({}, None) == ""
     assert scanner.term_text({"structure": "UNKNOWN"}, None) == ""
+
+
+def _sig(symbol, **kw):
+    base = {"symbol": symbol, "type": "PCS", "short_strike": 100,
+            "long_strike": 95, "expiration": "2026-06-19"}
+    base.update(kw)
+    return base
+
+
+def test_mark_new_first_load_marks_nothing():
+    keys, rows = scanner.mark_new([_sig("AAA")], set())
+    assert rows[0]["_new"] is False
+    assert keys == {scanner._sig_key(_sig("AAA"))}
+
+
+def test_mark_new_flags_only_unseen():
+    prev = {scanner._sig_key(_sig("AAA"))}
+    keys, rows = scanner.mark_new([_sig("AAA"), _sig("BBB")], prev)
+    by_sym = {r["symbol"]: r for r in rows}
+    assert by_sym["AAA"]["_new"] is False
+    assert by_sym["BBB"]["_new"] is True
+    assert keys == {scanner._sig_key(_sig("AAA")), scanner._sig_key(_sig("BBB"))}

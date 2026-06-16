@@ -101,6 +101,24 @@ def signal_rows(signals):
     return rows
 
 
+def _sig_key(r):
+    """Stable identity for a signal row across scans (symbol + legs + expiry)."""
+    return f'{r.get("symbol")}|{r.get("type")}|{r.get("short_strike")}|{r.get("long_strike")}|{r.get("expiration")}'
+
+
+def mark_new(rows, prev_keys):
+    """Stamp each row with _new=True if its key wasn't in prev_keys.
+
+    On first load (prev_keys empty/falsy) nothing is marked new.
+    Returns (current_keys_set, rows).
+    """
+    keys = {_sig_key(r) for r in rows}
+    first = not prev_keys
+    for r in rows:
+        r["_new"] = (not first) and _sig_key(r) not in prev_keys
+    return keys, rows
+
+
 _TERM_PHRASES = {
     "CONTANGO": "Contango (near-term calm)",
     "BACKWARDATION": "Backwardation (near-term stress)",
@@ -168,8 +186,10 @@ def render():
         detail_panel = detail.render()
 
     by_id: dict = {}
-    # Last-seen bus cache version for the fetch-free repaint timer.
+    # Last-seen bus cache version for the fetch-free repaint timer +
+    # the set of signal keys seen so far this session (for the NEW badge).
     seen = {"version": None}
+    state = {"seen_keys": set()}
 
     def _select(event):
         row = event.args[1] if isinstance(event.args, list) and len(event.args) > 1 else event.args
@@ -187,6 +207,13 @@ def render():
             <q-badge :style="`background:${props.row._score_color};color:#111`" :label="props.value ?? '—'"/>
           </q-td>
         ''')
+        # Flag signals that newly appeared since the previous scan this session.
+        _t.add_slot('body-cell-symbol', r'''
+          <q-td :props="props">
+            {{ props.value }}
+            <q-badge v-if="props.row._new" color="primary" label="NEW" class="q-ml-xs"/>
+          </q-td>
+        ''')
 
     def _populate(results, *, notify=True):
         """Paint the tables + detail map + meta strip from a scan-result dict."""
@@ -196,8 +223,16 @@ def render():
             if s.get("id"):
                 by_id[s["id"]] = s
         _scan_meta_strip(meta_strip, results)
-        table_0dte.rows = signal_rows(results.get("signals_0dte"))
-        table_swing.rows = signal_rows(results.get("signals_swing"))
+        rows_0dte = signal_rows(results.get("signals_0dte"))
+        rows_swing = signal_rows(results.get("signals_swing"))
+        # Diff BOTH lists against the SAME prior key set, then store the union so
+        # a signal present last scan isn't re-flagged in either table.
+        prev = state.get("seen_keys") or set()
+        k0, rows_0dte = mark_new(rows_0dte, prev)
+        k1, rows_swing = mark_new(rows_swing, prev)
+        state["seen_keys"] = k0 | k1
+        table_0dte.rows = rows_0dte
+        table_swing.rows = rows_swing
         table_0dte.update()
         table_swing.update()
         n = len(table_0dte.rows) + len(table_swing.rows)
