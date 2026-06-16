@@ -860,6 +860,42 @@ def test_calc_compute_returns_summary_grid_labels(monkeypatch):
     assert seen["eval"][1] == dt.date(2026, 6, 19)
 
 
+def test_symmetric_price_range_widens_to_include_strikes():
+    lo, hi = compute.symmetric_price_range(100.0, [92.0, 108.0], pct=0.05)
+    assert round((lo + hi) / 2, 6) == 100.0
+    assert lo <= 92.0 and hi >= 108.0
+
+
+def test_symmetric_price_range_keeps_default_band_when_strikes_inside():
+    assert compute.symmetric_price_range(100.0, [99.0, 101.0], pct=0.05) == (95.0, 105.0)
+
+
+def test_symmetric_price_range_ignores_none_strikes():
+    assert compute.symmetric_price_range(100.0, [None], pct=0.1) == (90.0, 110.0)
+
+
+def test_calc_compute_passes_symmetric_range_spanning_strikes(monkeypatch):
+    import datetime as dt
+
+    seen = {}
+    _patch_calc_oc(
+        monkeypatch,
+        calc_summary=lambda *a, **k: {},
+        generate_eval_dates=lambda t, e: [dt.date(2026, 6, 19)],
+        generate_price_range=lambda *a, **k: (0.0, 0.0),  # should NOT be used
+        calc_spread_pnl=lambda legs, spot, iv, r, ed, pr, exp, iv_adjustment=0.0: (
+            seen.__setitem__("pr", pr), [])[1])
+
+    # Long strike (430) is > 5% below spot (450) → band must widen to include it.
+    legs = [{"strike": 445.0, "side": "short"}, {"strike": 430.0, "side": "long"}]
+    compute.calc_compute(strategy="PCS", spot=450.0, iv=0.18, rate=0.045, ivadj=0.0,
+                         qty=1, expiry="2026-06-19", legs=legs, range_min=0.0,
+                         range_max=0.0, range_pct=0.05)
+    lo, hi = seen["pr"]
+    assert round((lo + hi) / 2, 6) == 450.0       # symmetric about spot
+    assert lo <= 430.0 and hi >= 445.0            # strikes in view
+
+
 def test_calc_compute_uses_explicit_range_when_valid(monkeypatch):
     import datetime as dt
 

@@ -687,14 +687,25 @@ def calc_load_symbol(symbol) -> dict:
             "range_lo": lo, "range_hi": hi, "chain": chain}
 
 
+def symmetric_price_range(spot, strikes, pct=0.05):
+    """Price range symmetric about spot, widened to include all strikes.
+    Returns (low, high) with midpoint == spot."""
+    half = spot * pct
+    for k in strikes or []:
+        if k is not None:
+            half = max(half, abs(k - spot))
+    return (round(spot - half, 2), round(spot + half, 2))
+
+
 def calc_compute(strategy, spot, iv, rate, ivadj, qty, expiry, legs,
                  range_min, range_max, range_pct) -> dict:
     """Run the calculator math → ``{"summary", "eval_labels", "pnl_data"}``.
 
     Ports the page's ``do_calc`` math VERBATIM: time-to-expiry in years (clamped
     ≥ 1 day), the ``calc_summary`` tiles, the ``generate_eval_dates`` columns, the
-    price range (explicit min/max when valid, else ``generate_price_range`` at
-    ``range_pct``), and the ``calc_spread_pnl`` grid. ``expiry`` arrives as an ISO
+    price range (explicit min/max when valid, else ``symmetric_price_range`` —
+    symmetric about spot, widened to span all leg strikes — at ``range_pct``),
+    and the ``calc_spread_pnl`` grid. ``expiry`` arrives as an ISO
     string (parsed with ``date.fromisoformat``). Eval dates are PRE-FORMATTED to
     ``MM/DD`` strings server-side so the page's grid header needs no date objects.
 
@@ -712,7 +723,11 @@ def calc_compute(strategy, spot, iv, rate, ivadj, qty, expiry, legs,
     if range_min and range_max and range_max > range_min:
         price_range = (range_min, range_max)
     else:
-        price_range = oc.generate_price_range(spot, pct=range_pct)
+        # Symmetric about spot (spot dead-center), widened so every leg's strike
+        # falls inside the grid. Replaces ``oc.generate_price_range`` (which could
+        # render asymmetrically / clip the strikes) — engine math is unchanged.
+        strikes = [leg.get("strike") for leg in (legs or [])]
+        price_range = symmetric_price_range(spot, strikes, pct=range_pct)
     pnl_data = oc.calc_spread_pnl(legs, spot, iv, rate, eval_dates, price_range,
                                   expiry_date, iv_adjustment=ivadj)
 
