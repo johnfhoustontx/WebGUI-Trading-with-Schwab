@@ -249,7 +249,7 @@ def render():
     # state["snap"] is the cached snapshot from the bus (None until first read).
     state: dict = {"snap": None, "countdown": 120}
     # Last-seen bus cache versions for the fetch-free repaint/dialog timers.
-    seen = {"gamma": None, "explain": None, "analyze": None}
+    seen = {"gamma": None, "explain": None, "analyze": None, "status": None}
 
     with ui.row().classes("items-center gap-3 flex-wrap"):
         symbol_in = select_all_on_focus(ui.input("Symbol", value="$SPX").classes("w-28"))
@@ -258,6 +258,14 @@ def render():
         explain_btn = ui.button("Explain", icon="help").props("outline")
         analyze_btn = ui.button("Analyze", icon="psychology").props("outline")
         countdown_lbl = ui.label("").classes("opacity-60 text-sm")
+    # Collector status bar: status dot/text (colored) + last/next scan times.
+    # Read-only view published by the options service (cache:options:gex_status);
+    # version-polled like gamma/explain/analyze below. Sits alongside (does NOT
+    # replace) the "Next refresh" countdown above.
+    with ui.row().classes("items-center gap-4 flex-wrap"):
+        status_lbl = ui.label("").classes("text-sm font-medium")
+        last_scan_lbl = ui.label("Last scan —").classes("opacity-60 text-sm")
+        next_scan_lbl = ui.label("Next scan —").classes("opacity-60 text-sm")
     summary_lbl = ui.label("").classes("opacity-70 text-sm")
     pressure_box = ui.row().classes("gap-3 items-center")
     with ui.row().classes("w-full no-wrap gap-4 items-start"):
@@ -372,6 +380,26 @@ def render():
         state["snap"] = bus_client.read("options:gamma") or None
         _render_view()
 
+    def _paint_status(st):
+        """Paint the collector status bar from a gex_status view dict (or None)."""
+        st = st or {}
+        label = st.get("status_label") or "Collector status unknown"
+        color = st.get("status_color") or "#666666"
+        status_lbl.text = label
+        status_lbl.style(f"color:{color}")
+        last_scan_lbl.text = f"Last scan {st.get('last_scan') or '—'}"
+        next_scan_lbl.text = f"Next scan {st.get('next_scan') or '—'}"
+
+    @guard
+    def _maybe_repaint_status():
+        # Fetch-free: re-read + repaint the status bar only when the bus cache
+        # version changes (the service republishes it every scheduler tick).
+        version = bus_client.read_version("options:gex_status")
+        if version == seen["status"]:
+            return
+        seen["status"] = version
+        _paint_status(bus_client.read("options:gex_status"))
+
     def _open_explain_dialog(res):
         symbol = (res or {}).get("symbol") or _current_symbol()
         body = (res or {}).get("body") or "<p>No explain data.</p>"
@@ -442,11 +470,14 @@ def render():
     seen["gamma"] = bus_client.read_version("options:gamma")
     seen["explain"] = bus_client.read_version("options:gamma_explain")
     seen["analyze"] = bus_client.read_version("options:gamma_analyze")
+    seen["status"] = bus_client.read_version("options:gex_status")
     state["snap"] = bus_client.read("options:gamma") or None
     _render_view()
+    _paint_status(bus_client.read("options:gex_status"))
 
     ui.timer(1.0, _tick)                 # countdown display (no fetch)
     ui.timer(2.0, _maybe_repaint)        # version-poll repaint from cache
+    ui.timer(2.0, _maybe_repaint_status) # version-poll status bar from cache
     ui.timer(2.0, _watch_explain)        # open Explain dialog on new result
     ui.timer(2.0, _watch_analyze)        # open Analyze dialog on new result
     ui.timer(120.0, _auto_refresh)       # enqueue a refresh every 120s

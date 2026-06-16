@@ -136,11 +136,25 @@ async def loop(bus):
         await loop_.run_in_executor(None, handlers.refresh_gamma, bus, "$SPX")
     except Exception:
         pass
+    # One-shot startup publish of the GEX-collector status view so the Gamma
+    # page's status bar has data on first load. Refreshed every tick below.
+    # Guarded so a cold DB never stops the loop from starting.
+    try:
+        await loop_.run_in_executor(None, handlers.publish_gex_status, bus)
+    except Exception:
+        pass
     while True:
         # Header refresh runs EVERY tick (the header's ~30s cadence), guarded so a
         # quotes/sentiment hiccup never stalls the autoscan below or the loop.
         try:
             await loop_.run_in_executor(None, handlers.refresh_header, bus)
+        except Exception:
+            pass
+        # GEX-collector status view refresh runs EVERY tick (so the Gamma page's
+        # status bar tracks last/next-scan + collector health live), independently
+        # guarded so a status read hiccup never stalls the autoscan or the loop.
+        try:
+            await loop_.run_in_executor(None, handlers.publish_gex_status, bus)
         except Exception:
             pass
         try:

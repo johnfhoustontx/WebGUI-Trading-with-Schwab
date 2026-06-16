@@ -704,3 +704,23 @@ def test_collect_gex_history_calls_compute(monkeypatch):
                         lambda: called.__setitem__("v", True))
     handlers.collect_gex_history(bus=None)
     assert called["v"] is True
+
+
+def test_publish_gex_status_caches_and_publishes(monkeypatch):
+    """publish_gex_status caches compute.gex_status_view() under
+    cache:options:gex_status and publishes a version event."""
+    bus = Bus(fake=True)
+    sentinel = {"status_label": "OK", "status_color": "green",
+                "last_scan": "10:00 AM", "next_scan": "10:05 AM",
+                "age_seconds": 120}
+    monkeypatch.setattr(handlers.compute, "gex_status_view", lambda: sentinel)
+
+    sub = bus.subscribe("events:options:gex_status")
+    handlers.publish_gex_status(bus)
+    msg = sub.get_message(timeout=1.0)
+    sub.close()
+
+    env = bus.cache_get("cache:options:gex_status")
+    assert env is not None
+    assert env.payload == sentinel
+    assert msg is not None and msg.get("version") == env.version

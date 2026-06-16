@@ -61,6 +61,9 @@ EVENT_CALC_CHAIN = "events:options:calc_chain"
 CACHE_CALC_RESULT = "cache:options:calc_result"
 EVENT_CALC_RESULT = "events:options:calc_result"
 
+CACHE_GEX_STATUS = "cache:options:gex_status"
+EVENT_GEX_STATUS = "events:options:gex_status"
+
 # Defaults mirror the page's input defaults (symbol SPY, 5-30 DTE, the put/call
 # delta gates, min credit 10% -> 0.10 fraction). The page sends the fraction.
 _SWING_DEFAULTS = {
@@ -196,6 +199,19 @@ def collect_gex_history(bus=None) -> None:
     refreshers. Guarded by the caller; ``compute.collect_gex_snapshots`` is
     itself defensive (per-symbol failures are logged, not raised)."""
     compute.collect_gex_snapshots()
+
+
+def publish_gex_status(bus) -> None:
+    """Compute the GEX-collector status view and publish it to the bus.
+
+    No strict contract: the view is a small read-only dict (collector status
+    label/color + last/next scan times) that only the Gamma page's status bar
+    consumes, and ``compute.gex_status_view`` is already fully defensive (any
+    failure degrades to a safe default dict). Called once at startup and on each
+    scheduler tick so the page's status bar tracks collector health live."""
+    data = compute.gex_status_view()
+    version = bus.cache_set(CACHE_GEX_STATUS, data)
+    bus.publish(EVENT_GEX_STATUS, {"version": version})
 
 
 def handle_command(bus, command) -> None:

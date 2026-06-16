@@ -592,6 +592,87 @@ def collect_gex_snapshots() -> int:
     return len(gc.SYMBOLS)
 
 
+def _gex_next_scan(now):
+    """Next 5-min GEX-collection boundary strictly after ``now`` within the
+    08:30–15:20 CT window, or None if ``now`` is past the window end.
+
+    Mirrors the scheduler's ``_GEX_START``/``_GEX_STOP``/``_GEX_INTERVAL_MIN``
+    cadence (08:30–15:20 CT, every 5 min). Returns a CT-aware datetime or None.
+    Before 08:30 → the window's first slot (08:30 today). At/after 15:20 → None.
+    """
+    import datetime as _dt
+
+    start = now.replace(hour=8, minute=30, second=0, microsecond=0)
+    stop = now.replace(hour=15, minute=20, second=0, microsecond=0)
+    if now < start:
+        return start
+    if now >= stop:
+        return None
+    # Round up to the next 5-min boundary strictly after now.
+    floored = now.replace(second=0, microsecond=0)
+    nxt = floored + _dt.timedelta(minutes=5 - (floored.minute % 5))
+    if nxt <= now:
+        nxt = nxt + _dt.timedelta(minutes=5)
+    if nxt >= stop:
+        return None
+    return nxt
+
+
+def _fmt_clock(d):
+    """Format a datetime as a short local clock string (e.g. ``9:05 AM``)."""
+    return d.strftime("%I:%M %p").lstrip("0")
+
+
+def gex_status_view(now=None) -> dict:
+    """Build the GEX-collector status view the Gamma page's status bar reads.
+
+    Returns ``{"status_label", "status_color", "last_scan", "next_scan",
+    "age_seconds"}`` — all JSON-serializable. ``status_label``/``status_color``
+    come from options-scanner's ``gex_status.classify_collector_status`` over the
+    latest ``$SPX``/``gex`` snapshot age (read-only DB open). ``last_scan`` is the
+    last snapshot's local clock time (None if no data); ``next_scan`` is the next
+    5-min collection boundary within the 08:30–15:20 CT window (None outside it).
+
+    Fully defensive: any failure (DB locked/missing, import error) degrades to a
+    safe default dict so the page's status bar never breaks."""
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+
+    try:
+        if now is None:
+            now = _dt.datetime.now(ZoneInfo("America/Chicago"))
+
+        import gex_history_db as gh
+        import gex_status as gs
+
+        conn = gh.connect(read_only=True)
+        try:
+            age, last_ts = gh.last_snapshot_age(conn, "$SPX", "gex")
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        has_data = last_ts is not None
+        label, color = gs.classify_collector_status(age, now, has_data, last_ts)
+
+        last_scan = None
+        if last_ts is not None:
+            last_scan = _fmt_clock(
+                _dt.datetime.fromtimestamp(last_ts, ZoneInfo("America/Chicago")))
+
+        nxt = _gex_next_scan(now)
+        next_scan = _fmt_clock(nxt) if nxt is not None else None
+
+        return {"status_label": label, "status_color": color,
+                "last_scan": last_scan, "next_scan": next_scan,
+                "age_seconds": age}
+    except Exception:
+        return {"status_label": "Collector status unknown",
+                "status_color": "#666666", "last_scan": None,
+                "next_scan": None, "age_seconds": None}
+
+
 def gamma_explain(symbol: str) -> dict:
     """Build the Explain document body for ``symbol`` → ``{"symbol", "body"}``.
 

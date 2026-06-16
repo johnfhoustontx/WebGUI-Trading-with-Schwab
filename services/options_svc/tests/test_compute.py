@@ -983,3 +983,53 @@ def test_collect_gex_snapshots_defers_when_lock_held(monkeypatch):
     n = compute.collect_gex_snapshots()
     assert calls["poll"] is False    # a fresh foreign collector owns the lock
     assert n == 0
+
+
+# ── GEX collector status view ───────────────────────────────────────────────
+# gex_status_view reuses options-scanner's gex_status.classify_collector_status
+# over the latest $SPX/gex snapshot age (read-only). We fake the lazily-imported
+# gex_status + gex_history_db modules so nothing touches the on-disk DB.
+
+def _fake_status_modules(monkeypatch, *, age=120, last_ts=1781530800,
+                         label="OK", color="green"):
+    import sys as _sys
+    import types as _types
+
+    fake_status = _types.SimpleNamespace(
+        classify_collector_status=lambda a, now, has, lt: (label, color))
+    fake_gh = _types.SimpleNamespace(
+        connect=lambda read_only=False: object(),
+        last_snapshot_age=lambda conn, symbol, view: (age, last_ts))
+    monkeypatch.setitem(_sys.modules, "gex_status", fake_status)
+    monkeypatch.setitem(_sys.modules, "gex_history_db", fake_gh)
+
+
+def test_gex_status_view_in_window(monkeypatch):
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+
+    _fake_status_modules(monkeypatch, age=120, last_ts=1781530800,
+                         label="OK", color="green")
+    # A weekday inside the 08:30–15:20 CT window.
+    now = _dt.datetime(2026, 6, 15, 10, 2, tzinfo=ZoneInfo("America/Chicago"))
+
+    out = compute.gex_status_view(now=now)
+    assert set(out) == {"status_label", "status_color", "last_scan",
+                        "next_scan", "age_seconds"}
+    assert out["status_label"] == "OK"
+    assert out["status_color"] == "green"
+    assert out["age_seconds"] == 120
+    # Next 5-min boundary strictly after 10:02 within the window → 10:05.
+    assert isinstance(out["next_scan"], str) and out["next_scan"]
+
+
+def test_gex_status_view_after_window_no_next(monkeypatch):
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+
+    _fake_status_modules(monkeypatch, label="idle", color="gray")
+    # After 15:20 CT → no next scan.
+    now = _dt.datetime(2026, 6, 15, 15, 30, tzinfo=ZoneInfo("America/Chicago"))
+
+    out = compute.gex_status_view(now=now)
+    assert out["next_scan"] is None
