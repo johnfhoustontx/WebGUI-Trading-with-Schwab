@@ -65,20 +65,56 @@ def paper_rows(trades):
     return rows
 
 
+def _num(v):
+    """Coerce to float, or None — handles values stored as strings (e.g. breakeven)."""
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _dte_from_expiration(exp):
+    """Days from today to the expiration ISO date; None if unparseable."""
+    try:
+        import datetime as dt
+        return (dt.date.fromisoformat(str(exp)[:10]) - dt.date.today()).days
+    except (TypeError, ValueError):
+        return None
+
+
 def synth_from_trade(trade):
-    """Detail-panel signal dict from a paper-trade dict."""
+    """Detail-panel signal dict from a paper-trade dict.
+
+    Maps the calculated fields the trade ALREADY stores (breakeven [stored as a
+    string], the entry greeks, underlying, width) — which the detail panel reads
+    — plus live DTE from the expiration and a delta-approximation PoP. Fields the
+    trade never captured at entry (IV, composite score) stay absent, so the panel
+    shows '—' rather than a fabricated value."""
     t = trade or {}
+    delta = _num(t.get("short_delta"))
+    entry_vega = _num(t.get("entry_vega"))
+    # PoP ≈ 1 − |short-leg delta| (standard quick estimate). Skip the stored 0
+    # default (a signal that lacked delta) so we never show a false 100%.
+    pop = round((1.0 - abs(delta)) * 100, 1) if delta else None
     return {
         "symbol": t.get("symbol", ""),
         "type": t.get("strategy", ""),
         "trade_type": t.get("trade_type", ""),
-        "credit": t.get("entry_credit"),
-        "max_loss": t.get("max_loss_total"),
+        "credit": _num(t.get("entry_credit")),
+        "max_loss": _num(t.get("max_loss_total")),
         "expiration": t.get("expiration", ""),
         "short_strike": t.get("short_strike"),
         "long_strike": t.get("long_strike"),
         "call_short": t.get("call_short"),
         "call_long": t.get("call_long"),
+        "width": _num(t.get("width")),
+        "breakeven": _num(t.get("breakeven")),
+        "dte": _dte_from_expiration(t.get("expiration")),
+        "short_delta": delta,
+        "net_theta": _num(t.get("net_theta")),
+        "net_vega": (-entry_vega) if entry_vega is not None else None,
+        "underlying_price": _num(t.get("underlying_at_entry")),
+        "pop_pct": pop,
         "id": t.get("trade_id"),
     }
 

@@ -53,6 +53,51 @@ def test_synth_from_trade_for_detail():
     assert s["short_strike"] == 450
 
 
+# ── Calculated-field mapping (the detail panel reads these) ──────────────────
+import datetime as _dt  # noqa: E402
+
+RICH_TRADE = {
+    "trade_id": "T9", "symbol": "INTC", "strategy": "PCS", "trade_type": "0-DTE",
+    "expiration": "2030-01-01", "short_strike": 130.0, "long_strike": 129.0,
+    "width": 1.0, "entry_credit": 0.55, "max_loss_total": 45.0,
+    "breakeven": "129.45",            # stored as a STRING by paper_trader
+    "short_delta": -0.5, "net_theta": -0.016, "entry_vega": 0.2,
+    "underlying_at_entry": 129.06,
+}
+
+
+def test_synth_maps_stored_calculated_fields():
+    s = paper.synth_from_trade(RICH_TRADE)
+    assert s["breakeven"] == 129.45          # coerced from the stored string
+    assert s["short_delta"] == -0.5
+    assert s["net_theta"] == -0.016
+    assert s["net_vega"] == -0.2             # reconstructed from -entry_vega
+    assert s["underlying_price"] == 129.06
+    assert s["width"] == 1.0
+
+
+def test_synth_computes_live_dte_from_expiration():
+    s = paper.synth_from_trade(RICH_TRADE)
+    assert s["dte"] == (_dt.date(2030, 1, 1) - _dt.date.today()).days
+
+
+def test_synth_pop_from_short_delta():
+    # PoP ≈ (1 − |short delta|) × 100
+    assert paper.synth_from_trade(RICH_TRADE)["pop_pct"] == 50.0
+
+
+def test_synth_pop_none_when_delta_absent_or_zero():
+    # short_delta == 0 is the stored default for a signal that lacked delta —
+    # must NOT become a false 100% PoP.
+    assert paper.synth_from_trade({"symbol": "X", "short_delta": 0})["pop_pct"] is None
+    assert paper.synth_from_trade({"symbol": "X"})["pop_pct"] is None
+
+
+def test_synth_breakeven_non_numeric_is_none():
+    assert paper.synth_from_trade({"symbol": "X", "breakeven": ""})["breakeven"] is None
+    assert paper.synth_from_trade({"symbol": "X"})["breakeven"] is None
+
+
 def test_render_callable():
     assert callable(paper.render)
 
