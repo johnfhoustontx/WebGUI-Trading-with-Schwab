@@ -491,6 +491,27 @@ def _gamma_fetch_chain(symbol):
     return resp.json() if getattr(resp, "status_code", None) == 200 else None
 
 
+def gamma_walls(vname, data, spot):
+    """[put_wall, call_wall] strikes for GEX/DEX (one per side), else [].
+
+    Reuses the engine's directional-wall picker (call wall = strike > spot with
+    largest call GEX; put wall = strike < spot with most-negative put GEX). The
+    DEX per-strike map is keyed 'dex', so it is remapped to 'gex' for the picker.
+    Defensive: any failure degrades to []. ``gamma_tool`` is imported lazily (see
+    the LAZY IMPORTS note above)."""
+    import gamma_tool as gt
+    try:
+        if vname == "GEX":
+            w = gt.get_directional_walls(data, spot)
+        elif vname == "DEX":
+            w = gt.get_directional_walls({"gex": (data or {}).get("dex")}, spot)
+        else:
+            return []
+    except Exception:
+        return []
+    return [s for s in (w.get("put_wall"), w.get("call_wall")) if s is not None]
+
+
 def gamma_snapshot(symbol: str) -> dict | None:
     """Fetch + compute the full Gamma snapshot for ``symbol``.
 
@@ -527,14 +548,7 @@ def gamma_snapshot(symbol: str) -> dict | None:
     spot = (gex or {}).get("spot")
 
     def _walls(vname, data):
-        try:
-            if vname == "GEX":
-                return gt.get_gex_walls(data, top_n=5)
-            if vname == "DEX":
-                return gt.get_dex_walls(data, top_n=5)
-        except Exception:
-            return []
-        return []
+        return gamma_walls(vname, data, spot)
 
     def _history(vstr):
         try:

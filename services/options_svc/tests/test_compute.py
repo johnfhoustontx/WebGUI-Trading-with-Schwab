@@ -516,10 +516,20 @@ def _patch_gamma(monkeypatch, *, chain=None, walls=None, history=None):
     import sys as _sys
     import types as _types
 
+    def _fake_directional_walls(gex_data, spot):
+        grid = (gex_data or {}).get("gex") or {}
+        above = [(s, v.get("call", 0.0)) for s, v in grid.items() if s > spot]
+        below = [(s, v.get("put", 0.0)) for s, v in grid.items() if s < spot]
+        out = {"call_wall": None, "put_wall": None}
+        if above:
+            out["call_wall"] = max(above, key=lambda sv: sv[1])[0]
+        if below:
+            out["put_wall"] = min(below, key=lambda sv: sv[1])[0]
+        return out
+
     fake_gt = _types.SimpleNamespace(
         GammaEngine=_FakeEngine,
-        get_gex_walls=lambda data, top_n=5: (walls or [5400.0]),
-        get_dex_walls=lambda data, top_n=5: (walls or [5400.0]))
+        get_directional_walls=_fake_directional_walls)
     fake_gh = _types.SimpleNamespace(
         connect=lambda read_only=False: object(),
         load_today_with_grid=lambda conn, symbol, view: (history or []))
@@ -541,7 +551,9 @@ def test_gamma_snapshot_builds_views_and_term(monkeypatch):
     assert set(snap["views"]) == {"GEX", "Charm", "DEX", "Vanna"}
     gexv = snap["views"]["GEX"]
     assert gexv["data"]["gex"] == {5400.0: {"call": 1, "put": -1, "net": 0.5}}
-    assert gexv["walls"] == [5400.0]
+    # One-each walls now come from get_directional_walls; the canned single
+    # at-spot strike has no strike above/below spot -> no directional walls.
+    assert gexv["walls"] == []
     assert gexv["flip"] == 5399.5
     assert gexv["history"] and gexv["history"][0][6] == {5400.0: {"net": 1}}
     # DEX carries the hedge tiles.
@@ -1112,3 +1124,31 @@ def test_gex_next_scan_boundaries():
 
     # Just before stop where the next boundary would be >= stop → None.
     assert compute._gex_next_scan(ct(15, 18)) is None
+
+
+def test_gamma_walls_one_each_side_for_gex():
+    data = {"spot": 450.0, "gex": {
+        440.0: {"call": 10.0,  "put": -900.0, "net": -890.0},  # put wall (below)
+        448.0: {"call": 50.0,  "put": -100.0, "net": -50.0},
+        452.0: {"call": 700.0, "put": -20.0,  "net": 680.0},   # call wall (above)
+        460.0: {"call": 120.0, "put": -5.0,   "net": 115.0},
+    }}
+    walls = compute.gamma_walls("GEX", data, 450.0)
+    assert walls == [440.0, 452.0]            # [put_wall (<spot), call_wall (>=spot)]
+
+
+def test_gamma_walls_dex_uses_dex_key():
+    data = {"spot": 100.0, "dex": {
+        95.0:  {"call": 1.0,   "put": -500.0, "net": -499.0},  # put wall
+        105.0: {"call": 800.0, "put": -1.0,   "net": 799.0},   # call wall
+    }}
+    assert compute.gamma_walls("DEX", data, 100.0) == [95.0, 105.0]
+
+
+def test_gamma_walls_single_side_and_empty():
+    # Only strikes above spot -> just the call wall.
+    above_only = {"spot": 450.0, "gex": {452.0: {"call": 9.0, "put": -1.0, "net": 8.0}}}
+    assert compute.gamma_walls("GEX", above_only, 450.0) == [452.0]
+    # Charm/Vanna never get walls; empty data -> [].
+    assert compute.gamma_walls("Charm", above_only, 450.0) == []
+    assert compute.gamma_walls("GEX", {"spot": 450.0, "gex": {}}, 450.0) == []
