@@ -30,6 +30,24 @@ def _round(value, ndigits=2):
     return round(value, ndigits) if isinstance(value, (int, float)) else value
 
 
+# Quality zones for the composite score (match the speedometer in svg.py /
+# the colors in detail.py): <40 RED, <55 AMBER, <75 BLUE, else GREEN.
+RED, AMBER, BLUE, GREEN = "#ef5350", "#ffa726", "#42a5f5", "#66bb6a"
+
+
+def score_zone_color(score):
+    """Hex color for a composite score by quality zone (None -> grey)."""
+    if score is None:
+        return "#666666"
+    if score < 40:
+        return RED
+    if score < 55:
+        return AMBER
+    if score < 75:
+        return BLUE
+    return GREEN
+
+
 def signal_columns():
     """ui.table column defs for a signal table."""
     spec = [
@@ -75,6 +93,7 @@ def signal_rows(signals):
             "rr_pct": _round(s.get("rr_pct"), 1),
             "pop_pct": _round(s.get("pop_pct"), 1),
             "composite_score": s.get("composite_score"),
+            "_score_color": score_zone_color(s.get("composite_score")),
             "grade": s.get("grade", ""),
         })
     rows.sort(key=lambda r: (r["composite_score"] is not None, r["composite_score"] or 0),
@@ -135,6 +154,12 @@ def render():
         _t.on("rowClick", _select)
         # per-row buttons: Send to Calculator / Send to Paper trade
         handoff.add_row_actions(_t, lambda row: by_id.get(row.get("id")))
+        # Render the composite score as a quality-colored chip.
+        _t.add_slot('body-cell-composite_score', r'''
+          <q-td :props="props">
+            <q-badge :style="`background:${props.row._score_color};color:#111`" :label="props.value ?? '—'"/>
+          </q-td>
+        ''')
 
     def _populate(results, *, notify=True):
         """Paint the tables + detail map + meta strip from a scan-result dict."""
