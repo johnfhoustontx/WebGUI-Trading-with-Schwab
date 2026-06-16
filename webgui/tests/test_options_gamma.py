@@ -258,6 +258,18 @@ def test_render_callable():
     assert callable(gamma.render)
 
 
+def test_render_view_updates_in_place_not_clear():
+    """Regression: the flicker fix means _render_view must NOT tear down the
+    Plotly elements every repaint. It should update figures in place and must not
+    call chart_box.clear()/heatmap_box.clear() (which rebuilt the canvas)."""
+    src = inspect.getsource(gamma.render)
+    assert "update_figure" in src
+    assert "chart_box.clear()" not in src
+    assert "heatmap_box.clear()" not in src
+    assert "panel_flex" in src           # proportional split is wired
+    assert "significant_strikes" in src  # tight y-range is wired
+
+
 def test_page_imports_no_engine_or_proxy():
     """Regression: the Tier-3 page must not pull in engine / proxy code."""
     for attr in ("proxy", "gamma_tool", "gex_history_db", "html_render",

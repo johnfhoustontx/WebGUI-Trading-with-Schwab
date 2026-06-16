@@ -284,6 +284,11 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None):
     }
 
 
+def _empty_fig(height=680):
+    """Minimal dark-themed empty figure for first paint / hidden state."""
+    return {"data": [], "layout": _apply_dark({"height": height, "autosize": True})}
+
+
 # Scoped explain CSS (rules only). Injected via ui.add_css for the in-app dialog
 # (NiceGUI strips <style> from ui.html) and inlined into the downloadable doc.
 EXPLAIN_CSS = """
@@ -400,30 +405,64 @@ def render():
         next_scan_lbl = ui.label("Next scan —").classes("opacity-60 text-sm")
     summary_lbl = ui.label("").classes("opacity-70 text-sm")
     pressure_box = ui.row().classes("gap-3 items-center")
+    # Persistent panels: the Plotly elements are created ONCE and updated in
+    # place (update_figure) on every repaint — rebuilding them each time tore
+    # down the canvas and caused the regeneration flicker. Message labels are
+    # toggled via set_visibility. Column flex weights are set per-render from the
+    # intraday snapshot count (panel_flex) so the heatmap grows / bars shrink
+    # through the session.
     with ui.row().classes("w-full no-wrap gap-4 items-start"):
-        chart_box = ui.column().classes("flex-grow min-w-0")
-        heatmap_box = ui.column().classes("flex-grow min-w-0")
+        chart_box = ui.column().classes("min-w-0").style("flex: 0.5 1 0%")
+        with chart_box:
+            chart_plot = ui.plotly(_empty_fig()).classes("w-full")
+            chart_msg = ui.label("Fetch a symbol… (no snapshot yet).") \
+                .classes("opacity-60 text-sm")
+        heatmap_box = ui.column().classes("min-w-0").style("flex: 0.5 1 0%")
+        with heatmap_box:
+            heat_plot = ui.plotly(_empty_fig()).classes("w-full")
+            heat_msg = ui.label("").classes("opacity-60 text-sm")
 
     def _current_symbol():
         return (symbol_in.value or "").strip().upper()
 
+    def _apply_flex(n_cols, term=False):
+        """Set the bar/heatmap column widths. Term → bars full width (no heatmap);
+        otherwise proportional to the intraday snapshot count (panel_flex)."""
+        if term:
+            chart_box.style("flex: 1 1 0%")
+            heatmap_box.style("flex: 0 0 0px")
+            heatmap_box.set_visibility(False)
+            return
+        heatmap_box.set_visibility(True)
+        bar_w, heat_w = panel_flex(n_cols)
+        chart_box.style(f"flex: {bar_w} 1 0%")
+        heatmap_box.style(f"flex: {heat_w} 1 0%")
+
     def _render_view():
-        """Paint the active view from the cached snapshot (no fetch)."""
+        """Paint the active view from the cached snapshot (no fetch, no teardown).
+
+        The Plotly elements persist across repaints and are updated in place via
+        update_figure (Plotly.react diff) so the charts don't flicker."""
         snap = state["snap"]
-        chart_box.clear()
-        heatmap_box.clear()
         pressure_box.clear()
         if not snap:
-            with chart_box:
-                ui.label("Fetch a symbol… (no snapshot yet).").classes("opacity-60 text-sm")
+            chart_plot.set_visibility(False)
+            heat_plot.set_visibility(False)
+            heat_msg.set_visibility(False)
+            chart_msg.text = "Fetch a symbol… (no snapshot yet)."
+            chart_msg.set_visibility(True)
             summary_lbl.text = ""
             return
+        chart_msg.set_visibility(False)
 
         view = view_toggle.value
         spot = snap.get("spot")
         if view == "Term":
-            with chart_box:
-                ui.plotly(term_heatmap(snap.get("term") or {})).classes("w-full")
+            chart_plot.update_figure(term_heatmap(snap.get("term") or {}))
+            chart_plot.set_visibility(True)
+            heat_plot.set_visibility(False)
+            heat_msg.set_visibility(False)
+            _apply_flex(0, term=True)
             summary_lbl.text = summary_text({"spot": spot, "strike_count": None}, "Term")
             return
 
@@ -442,11 +481,13 @@ def render():
         walls = entry.get("walls") or []
 
         # One shared near-spot strike range so the bar chart and the intraday
-        # heatmap line up vertically (axis alignment).
-        yr = bar_yrange(bars_from_gex(data, view_spot)["strikes"], view_spot)
-        with chart_box:
-            ui.plotly(bar_figure(data, view_spot, view=view, walls=walls, flip=flip,
-                                 yrange=yr)).classes("w-full")
+        # heatmap line up vertically (axis alignment). Tight to the strikes that
+        # actually have visible bars (drops near-zero edge strikes → no GAMMA
+        # dead space).
+        yr = bar_yrange(significant_strikes(bars_from_gex(data, view_spot)), view_spot)
+        chart_plot.update_figure(
+            bar_figure(data, view_spot, view=view, walls=walls, flip=flip, yrange=yr))
+        chart_plot.set_visibility(True)
         summary_lbl.text = summary_text(
             {**summary, "strike_count": data.get("strike_count")}, _view_label(view))
 
@@ -457,12 +498,15 @@ def render():
             if len(r) > 6:
                 r[6] = _refloat_keys(r[6])
             rows.append(tuple(r))
-        with heatmap_box:
-            if rows:
-                ui.plotly(heatmap_figure(rows, view, yrange=yr)).classes("w-full")
-            else:
-                ui.label("No intraday snapshots yet (history collector not running).") \
-                    .classes("opacity-60 text-sm")
+        if rows:
+            heat_plot.update_figure(heatmap_figure(rows, view, yrange=yr))
+            heat_plot.set_visibility(True)
+            heat_msg.set_visibility(False)
+        else:
+            heat_plot.set_visibility(False)
+            heat_msg.text = "No intraday snapshots yet (history collector not running)."
+            heat_msg.set_visibility(True)
+        _apply_flex(len(rows))
 
         if view == "DEX":
             hedge = entry.get("hedge") or {}
