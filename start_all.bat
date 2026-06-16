@@ -16,6 +16,7 @@ echo   memurai       redis://127.0.0.1:6379  (storage/comm backbone)
 echo   proxy         http://127.0.0.1:8100
 echo   sentiment_svc http://127.0.0.1:8210
 echo   options_svc   http://127.0.0.1:8211  (incl. 5-min GEX history collection)
+echo   trade_svc     http://127.0.0.1:8213  (on-demand symbol analysis)
 echo   web gui       http://127.0.0.1:8500
 echo ============================================
 echo.
@@ -68,6 +69,14 @@ REM     started here. options-scanner\gex_collector.py remains a MANUAL fallback
 REM     (run it standalone if options_svc is down); its advisory lock makes it
 REM     defer to the service when both are up.
 
+REM --- 4b. trade service (:8213): on-demand single-symbol analysis ---
+REM     Tier-2 processing service. No scheduler — the web GUI Trade page enqueues
+REM     an "analyze" command on cmd:trade and the service computes the MTF
+REM     verdicts and writes cache:trade:analysis + event for the page to read.
+echo Starting trade service in a new window...
+start "Trade Service (:8213)" cmd /k ""%PY%" services\trade_svc\app.py"
+echo.
+
 REM --- 5. NiceGUI web app (:8500) ---
 echo Starting NiceGUI web app on :8500 in a new window...
 start "Schwab Web GUI (:8500)" cmd /k ""%PY%" webgui\main.py"
@@ -86,11 +95,11 @@ start "" "http://127.0.0.1:8500"
 
 echo.
 echo ============================================
-echo   All services started. Four windows are
+echo   All services started. Five windows are
 echo   running: proxy, sentiment service, options
-echo   service (incl. GEX collection), web gui.
-echo   (Memurai runs as a Windows service.) Close
-echo   those windows to stop the services.
+echo   service (incl. GEX collection), trade
+echo   service, web gui. (Memurai runs as a Windows
+echo   service.) Close those windows to stop them.
 echo ============================================
 echo.
 echo This launcher window can be closed.

@@ -1,0 +1,257 @@
+"""Trade page (Tier-3 reader) — single-symbol MTF analysis + Buy/Hold/Sell verdicts.
+
+This page holds **no engine call**: the full orchestration (fetch MTF data,
+compute indicators, score the Position/Investor verdict engines) lives in
+``services/trade_svc/compute`` (``analyze``). The page enqueues an ``analyze``
+command and renders the cached ``TradeAnalysis`` result.
+
+Interaction model:
+
+* **Analyze** (button or Enter) → enqueue ``{"type":"analyze","args":{"symbol":…}}``
+  on ``cmd:trade``; a version-poll on ``trade:analysis`` repaints from the cache.
+
+The result persists across navigation (single-user, like the other pages): a
+prior analysis paints instantly on revisit. The pure display builders
+(``verdict_color``/``momentum_rows``/``breakdown_rows``/``alignment_rows``) are
+unit-tested.
+
+Fundamentals are not wired (MVP): the Investor verdict uses technicals/RS only
+and degrades to "Insufficient fundamental data → HOLD" — a note flags this.
+"""
+import bus_client
+from nicegui import ui
+
+from pages.ui_guard import guard
+
+from .options.inputs import select_all_on_focus
+
+BUY_COLOR = "#2e7d32"
+HOLD_COLOR = "#f9a825"
+SELL_COLOR = "#c62828"
+
+
+def verdict_color(verdict):
+    """Green BUY / amber HOLD / red SELL (HOLD is the default for anything else)."""
+    v = (verdict or "").upper()
+    if v == "BUY":
+        return BUY_COLOR
+    if v == "SELL":
+        return SELL_COLOR
+    return HOLD_COLOR
+
+
+def bias_color(bias):
+    """Color a BULLISH/BEARISH/NEUTRAL bias label."""
+    b = (bias or "").upper()
+    if b == "BULLISH":
+        return BUY_COLOR
+    if b == "BEARISH":
+        return SELL_COLOR
+    return HOLD_COLOR
+
+
+def _fmt(v, nd=1):
+    return "—" if v is None else f"{v:.{nd}f}"
+
+
+def momentum_rows(m):
+    """(label, value) pairs for the momentum strip; '—' for missing values."""
+    if not m:
+        return []
+    return [
+        ("RSI", _fmt(m.get("rsi"))),
+        ("ADX", _fmt(m.get("adx"))),
+        ("MACD hist", _fmt(m.get("macd_hist"), 3)),
+        ("VWAP", _fmt(m.get("vwap"), 2)),
+        ("Rel Vol", _fmt(m.get("relative_volume"), 2)),
+    ]
+
+
+def breakdown_rows(verdict):
+    """Factor-breakdown rows for a verdict's contribution table."""
+    rows = []
+    for b in (verdict or {}).get("breakdown", []):
+        rows.append({
+            "factor": b.get("factor", ""),
+            "weight": b.get("weight", 0),
+            "raw_score": b.get("raw_score", 0),
+            "contribution": round(float(b.get("contribution", 0.0)), 1),
+        })
+    return rows
+
+
+def alignment_rows(ema):
+    """(timeframe, status) rows for the multi-timeframe EMA-alignment table."""
+    rows = []
+    for tf in (ema or {}).get("timeframes", []):
+        rows.append({"timeframe": tf.get("timeframe", ""),
+                     "status": tf.get("status", "")})
+    return rows
+
+
+_BREAKDOWN_COLS = [
+    {"name": "factor", "label": "Factor", "field": "factor", "align": "left"},
+    {"name": "weight", "label": "Wt", "field": "weight"},
+    {"name": "raw_score", "label": "Raw", "field": "raw_score"},
+    {"name": "contribution", "label": "Contrib", "field": "contribution"},
+]
+
+
+def render():
+    """Trade page: symbol input + Analyze button + verdict/MTF/momentum cards."""
+    ui.label("Trade Analyzer").classes("text-h5")
+
+    # Page state (local closure, not module globals — built per request).
+    state = {"result": None, "ver": None}
+
+    with ui.row().classes("items-center gap-3 flex-wrap"):
+        symbol_in = select_all_on_focus(ui.input("Symbol", value="AAPL").classes("w-32"))
+        analyze_btn = ui.button("Analyze", icon="analytics")
+        status = ui.label("Enter a symbol and click Analyze.").classes("opacity-70 text-sm")
+
+    results = ui.column().classes("w-full gap-3")
+
+    # ── card builders (widgets; pull from the pure transforms above) ──────────
+    def _header(res):
+        with ui.card().classes("w-full"):
+            with ui.row().classes("items-center gap-4 flex-wrap"):
+                ui.label(res.get("symbol", "")).classes("text-h5")
+                desc = res.get("description")
+                if desc and desc != res.get("symbol"):
+                    ui.label(desc).classes("opacity-70")
+                price = res.get("price")
+                if price is not None:
+                    ui.label(f"${price:,.2f}").classes("text-h6")
+                bias = res.get("bias")
+                if bias:
+                    ui.label(bias).classes("text-weight-bold px-2 rounded") \
+                        .style(f"color:{bias_color(bias)}")
+                vol = res.get("volume")
+                if vol:
+                    ui.label(f"Vol {vol:,}").classes("opacity-60 text-sm")
+
+    def _verdict_card(title, verdict):
+        verdict = verdict or {}
+        with ui.card().classes("flex-1 min-w-[280px]"):
+            ui.label(title).classes("text-subtitle2 opacity-70")
+            with ui.row().classes("items-baseline gap-3"):
+                ui.label(verdict.get("verdict", "—")).classes("text-h4 text-weight-bold") \
+                    .style(f"color:{verdict_color(verdict.get('verdict'))}")
+                ui.label(f"score {verdict.get('score', 0):+d}"
+                         if isinstance(verdict.get("score"), int)
+                         else "").classes("opacity-70")
+            for r in verdict.get("top_reasons", []):
+                ui.label(f"• {r}").classes("text-sm opacity-80")
+            for g in verdict.get("gates_triggered", []):
+                ui.label(f"⛔ {g}").classes("text-xs").style(f"color:{SELL_COLOR}")
+            rows = breakdown_rows(verdict)
+            if rows:
+                with ui.expansion("Factor breakdown").classes("w-full"):
+                    ui.table(columns=_BREAKDOWN_COLS, rows=rows,
+                             row_key="factor").classes("w-full").props("dense")
+
+    def _alignment_card(ema):
+        ema = ema or {}
+        with ui.card().classes("flex-1 min-w-[220px]"):
+            ui.label("MTF EMA alignment").classes("text-subtitle2 opacity-70")
+            pct = ema.get("alignment_percentage")
+            ui.label(f"{pct:+.0f}%" if pct is not None else "—") \
+                .classes("text-h6").style(f"color:{bias_color(ema.get('bias'))}")
+            for r in alignment_rows(ema):
+                with ui.row().classes("items-center gap-2 w-full justify-between"):
+                    ui.label(r["timeframe"]).classes("text-sm opacity-80")
+                    ui.label(r["status"]).classes("text-xs") \
+                        .style(f"color:{bias_color(r['status'])}")
+
+    def _momentum_card(m):
+        with ui.card().classes("flex-1 min-w-[200px]"):
+            ui.label("Momentum").classes("text-subtitle2 opacity-70")
+            for label, value in momentum_rows(m):
+                with ui.row().classes("items-center gap-2 w-full justify-between"):
+                    ui.label(label).classes("text-sm opacity-80")
+                    ui.label(value).classes("text-sm text-weight-medium")
+
+    def _sector_card(sector):
+        sector = sector or {}
+        strength = sector.get("strength") or {}
+        with ui.card().classes("flex-1 min-w-[200px]"):
+            ui.label("Sector").classes("text-subtitle2 opacity-70")
+            name = sector.get("name") or "Unknown"
+            etf = sector.get("etf")
+            ui.label(f"{name}" + (f" ({etf})" if etf else "")).classes("text-sm")
+            sc = strength.get("score")
+            if sc is not None:
+                ui.label(f"Strength {sc:+d}").classes("text-h6") \
+                    .style(f"color:{BUY_COLOR if sc > 0 else SELL_COLOR if sc < 0 else HOLD_COLOR}")
+            if strength.get("in_confirmed_downtrend"):
+                ui.label("Confirmed downtrend").classes("text-xs").style(f"color:{SELL_COLOR}")
+
+    def _render_results():
+        results.clear()
+        res = state["result"]
+        with results:
+            if not res:
+                ui.label("No analysis yet — enter a symbol and click Analyze.") \
+                    .classes("opacity-70")
+                return
+            if res.get("errors"):
+                with ui.row().classes("w-full bg-red-2 text-red-10 rounded p-3 "
+                                      "items-center gap-2"):
+                    ui.icon("warning")
+                    ui.label("; ".join(res["errors"]))
+            _header(res)
+            if res.get("position_verdict") or res.get("investor_verdict"):
+                with ui.row().classes("w-full gap-3 items-stretch flex-wrap"):
+                    _verdict_card("Position · 1–8 wk", res.get("position_verdict"))
+                    _verdict_card("Investor · months+", res.get("investor_verdict"))
+                with ui.row().classes("w-full gap-3 items-stretch flex-wrap"):
+                    _alignment_card(res.get("ema_alignment"))
+                    _momentum_card(res.get("momentum"))
+                    _sector_card(res.get("sector"))
+                if not res.get("fundamentals_available"):
+                    ui.label("Fundamentals not wired — the Investor verdict uses "
+                             "technicals + relative strength only and degrades to "
+                             "HOLD on insufficient data.").classes("text-xs opacity-60")
+
+    def _status_for(res):
+        if not res:
+            return "Enter a symbol and click Analyze."
+        sym = res.get("symbol", "")
+        if res.get("errors"):
+            return f"{sym}: {res['errors'][0]}"
+        price = res.get("price")
+        pv = (res.get("position_verdict") or {}).get("verdict", "—")
+        iv = (res.get("investor_verdict") or {}).get("verdict", "—")
+        px = f" · ${price:,.2f}" if price is not None else ""
+        return f"{sym}{px} · Position {pv} / Investor {iv}"
+
+    # ── command enqueue ───────────────────────────────────────────────────────
+    @guard
+    def _request_analyze():
+        sym = (symbol_in.value or "").strip().upper()
+        if not sym:
+            ui.notify("Enter a symbol first.", type="warning")
+            return
+        bus_client.request("trade", {"type": "analyze", "args": {"symbol": sym}})
+        status.text = f"Analyzing {sym}…"
+
+    analyze_btn.on_click(_request_analyze)
+    symbol_in.on("keydown.enter", lambda e: _request_analyze())
+
+    # ── version-poll repaint (fetch-free) ─────────────────────────────────────
+    @guard
+    def _poll():
+        version = bus_client.read_version("trade:analysis")
+        if version == state["ver"]:
+            return
+        state["ver"] = version
+        state["result"] = bus_client.read("trade:analysis") or None
+        _render_results()
+        status.text = _status_for(state["result"])
+
+    # Initial paint (graceful-empty when the service is cold / no prior analysis).
+    state["ver"] = bus_client.read_version("trade:analysis")
+    state["result"] = bus_client.read("trade:analysis") or None
+    _render_results()
+    status.text = _status_for(state["result"])
+    ui.timer(2.0, _poll)

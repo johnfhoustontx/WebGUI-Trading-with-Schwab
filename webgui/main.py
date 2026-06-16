@@ -196,7 +196,8 @@ def sentiment_rotation_page() -> None:
 @ui.page("/trade")
 def trade_page() -> None:
     with _layout("/trade", "Trade"):
-        _stub("Trade Analyzer", "Symbol MTF analysis, verdicts, and fundamentals.")
+        from pages import trade
+        trade.render()
 
 
 @ui.page("/portfolio")

@@ -123,7 +123,8 @@ Routes:
 | `/options/simulator` | Simulator (What-if + IV-shock; Replay TODO) | built |
 | `/sentiment` | Sentiment (two-column top: gauge+regime / component table; traffic-light tiles; 30d history + rolling avgs; full-width **Sector & Industry Performance** w/ Day/Week/Month %, P/C, RRG, rotation banner, **expandable industries w/ P/C+RRG**; bottom status bar; **persists across navigation**; **server-side 120s auto-refresh + bridge publish, tab-independent**) | built |
 | `/sentiment/rotation` | Sector Rotation (RRG-vs-SPY: Risk-ON/OFF headline + spread, tight ROTATING FROM/INTO w/ S&P weights, quadrant-map table, **RRG scatter w/ faded 30-trading-day "meteor tails"** per sector — engine `assess_sector` now retains a `tail` of the last `TAIL_LENGTH=30` RS-Ratio/RS-Mom points, quadrant-colored, head brightest; reuses `sector_rotation_assessment`; cached, **manual Refresh only**) | built |
-| `/trade` `/portfolio` `/driver` | other apps | **stubs** |
+| `/trade` | Trade (on-demand single-symbol analysis: **Position (1–8wk)** + **Investor (months+)** Buy/Hold/Sell verdicts w/ score + top reasons + hard gates + expandable factor breakdown; **MTF EMA alignment** (per-timeframe); momentum strip (RSI/ADX/MACD/VWAP/RelVol); sector strength; persists across nav. **Fundamentals not wired (MVP)** → Investor degrades to insufficient-data HOLD) | built |
+| `/portfolio` `/driver` | other apps | **stubs** |
 
 The `pages/options/` subpackage shares `header.py` (compact quotes/VIX/sentiment
 strip), `detail.py` (collapsible Trade detail panel, reused by all signal
@@ -259,8 +260,8 @@ Design/plans: [live-bridge](docs/plans/2026-06-14-live-sentiment-bridge-design.m
 (+ `-plan.md` files).
 
 **Next session — remaining pages (Phase 3.3–3.5 of the webgui plan):**
-- **Trade** (`/trade`): `trade-analyzer/src/analysis` — symbol → MTF analysis +
-  position/investor verdicts + fundamentals. Source UI: `trade_analyzer.py`.
+- **Trade** (`/trade`): **DONE — 2026-06-16 (3-tier, `services/trade_svc` :8213).**
+  See "Trade page (`/trade`) — DONE" below.
 - **Portfolio** (`/portfolio`): `portfolio-analyzer/src` — sector breakdown,
   vs-sector performance, **live streaming** via `ui.timer` polling the proxy
   stream. Source UI: `portfolio_analyzer.py`.
@@ -341,6 +342,47 @@ live-screenshot review (design/plan:
   `get_gex_walls`/`get_dex_walls` top-5; the page renders them unchanged. DEX
   per-strike map remapped `dex`→`gex` for the picker.
 
+**Trade page (`/trade`) — DONE (2026-06-16, born 3-tier — Phase 4).** The Trade
+Analyzer was built directly on the 3-tier model (no in-process stage). New
+service `services/trade_svc` (:8213, `SERVICE_PORTS["trade"]`), **on-demand only
+(no scheduler)** — the page enqueues an `analyze` command on `cmd:trade`; the
+service computes and writes `cache:trade:analysis` (one latest-result view, like
+sim/calc) + publishes `events:trade:analysis`; the page version-polls and
+repaints (persists across nav). Pieces:
+- **Contract** `shared/contracts/trade.py:TradeAnalysis` — validates the analyze
+  envelope (symbol + verdict/momentum/sector sub-dicts) before caching.
+- **`trade_svc/compute.analyze(symbol)`** ports the legacy desktop
+  `trade_analyzer.py` `analyze()` flow (the un-copied orchestration): fetch MTF
+  data via the proxy (`_proxy.schwab_client`; 1/5/15/60-min + daily, SPY +
+  sector-ETF daily), compute indicators **reusing `shared/analysis_lib/technical`**
+  (`calculate_ema_alignment`/`calculate_rsi`/`calculate_adx`/`calculate_macd`/
+  `calculate_vwap`/`calculate_relative_volume`/`calculate_volume_profile`), build
+  `PositionInputs`/`InvestorInputs`, and score the copied
+  `trade-analyzer/src/analysis/recommendation` verdict engines. **Defensive**
+  (degrades to an `errors` payload, never raises). `technical` is imported
+  **standalone** (its dir on `sys.path`) to dodge the `shared.analysis_lib`
+  package `__init__` (which eagerly imports a broken `schwab_client`); safe
+  because the service is its own process (same isolation `sentiment_svc` uses for
+  `scoring`). Symbol→sector via a built-in large-cap map (`_SYMBOL_SECTOR`) with a
+  **neutral** SectorStrength fallback when unknown.
+- **`trade_svc/handlers.analyze`** runs compute → `TradeAnalysis` gate → cache +
+  publish; `handle_command` dispatches `analyze`. **`trade_svc/app.py`** =
+  `make_app("trade", command_handler=…)` (no scheduler).
+- **Page** `webgui/pages/trade.py`: symbol input (+Enter) → Analyze; renders a
+  header (symbol/price/bias/vol), two verdict cards (verdict colored BUY-green/
+  HOLD-amber/SELL-red, score, top reasons, ⛔ hard gates, expandable factor
+  breakdown table), MTF-alignment card, momentum strip, sector card. Pure builders
+  (`verdict_color`/`bias_color`/`momentum_rows`/`breakdown_rows`/`alignment_rows`)
+  unit-tested in `webgui/tests/test_trade.py`.
+- **Fundamentals NOT wired (MVP decision).** No source exists in-repo (proxy has
+  no fundamentals endpoint; `finvizfinance` not installed), so an empty
+  `Fundamentals` is passed → `InvestorVerdict` degrades to an "Insufficient
+  fundamental data" HOLD (the page notes this). `fundamentals_available=False`.
+  **Follow-up:** add a Schwab `/instruments?projection=fundamental` proxy endpoint
+  + use the existing `parse_schwab_fundamentals`, then flip the flag.
+- Tests: `services/trade_svc/tests` (compute/handler/app) + `webgui/tests/test_trade.py`.
+  Design/plan: Phase 4 of the [3-tier plan](docs/plans/2026-06-15-three-tier-architecture-plan.md).
+
 ## Paths and ports: `repo_paths.py` + `config/ports.toml`
 
 `repo_paths.py` at the repo root is the single source of truth for cross-app
@@ -396,10 +438,11 @@ options_svc → web gui, opening the browser). Manual order:
 python schwab-proxy\schwab_proxy.py
 
 # 4. Start the migrated domain services (each owns its refresh/scheduling; publishes to Redis).
-#    Sentiment + Options are migrated; Portfolio/Trade/Driver land as Phase 3+ proceeds.
+#    Sentiment + Options + Trade are migrated; Portfolio/Driver land as Phase 3+ proceeds.
 python services\sentiment_svc\app.py      # :8210  (composite + rotation)
 python services\options_svc\app.py        # :8211  (scan/swing/header/gamma/paper/captured/calculator
                                           #          + 5-min intraday GEX history collection, 08:30–15:20 CT)
+python services\trade_svc\app.py          # :8213  (on-demand symbol analysis: MTF + Position/Investor verdicts)
 
 # 5. In another terminal, start the NiceGUI app (reads cache:* from Redis; no engine imports)
 python webgui\main.py      # serves http://127.0.0.1:8500
@@ -407,8 +450,9 @@ python webgui\main.py      # serves http://127.0.0.1:8500
 
 > **3-tier note:** Once a domain is migrated, the web GUI no longer computes anything
 > for it — its **service must be running** (and Memurai up) or the page shows a
-> "Waiting for … service" placeholder. **Sentiment and the entire Options section are
-> migrated** (`services/sentiment_svc`, `services/options_svc`); the webgui now imports
+> "Waiting for … service" placeholder. **Sentiment, the entire Options section, and
+> Trade are migrated** (`services/sentiment_svc`, `services/options_svc`,
+> `services/trade_svc`); the webgui now imports
 > ONLY `nicegui` + `shared.bus` + `shared.contracts` — no app engines, so the documented
 > `scoring`/`notifier` cross-app collision can no longer occur. See the "Planned 3-tier
 > architecture" section. Until a domain is migrated it still runs in-process in the GUI.
