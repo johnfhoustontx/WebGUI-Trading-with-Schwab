@@ -53,6 +53,9 @@ FLAT_NAV = [
     ("/driver", "Driver", "smart_toy"),
 ]
 
+# Persisted left-nav expansion state (single-user); None/absent = use active-route default.
+_NAV_OPEN: dict[str, bool] = {}
+
 
 def _nav_link(path: str, label: str, icon: str, active: str) -> None:
     classes = "w-full no-underline rounded px-3 py-2 items-center"
@@ -76,11 +79,19 @@ def _layout(active: str, title: str):
     drawer = ui.left_drawer(value=True, bordered=True).classes("gap-1").props("behavior=desktop")
     with drawer:
         options_active = active == "/" or active.startswith("/options")
-        with ui.expansion("Options", icon="candlestick_chart", value=options_active).classes("w-full"):
+        options_exp = ui.expansion(
+            "Options", icon="candlestick_chart", value=_NAV_OPEN.get("Options", options_active)
+        ).classes("w-full")
+        options_exp.on_value_change(lambda e: _NAV_OPEN.__setitem__("Options", e.value))
+        with options_exp:
             for path, label, icon in OPTIONS_CHILDREN:
                 _nav_link(path, label, icon, active)
         sentiment_active = active.startswith("/sentiment")
-        with ui.expansion("Sentiment", icon="insights", value=sentiment_active).classes("w-full"):
+        sentiment_exp = ui.expansion(
+            "Sentiment", icon="insights", value=_NAV_OPEN.get("Sentiment", sentiment_active)
+        ).classes("w-full")
+        sentiment_exp.on_value_change(lambda e: _NAV_OPEN.__setitem__("Sentiment", e.value))
+        with sentiment_exp:
             for path, label, icon in SENTIMENT_CHILDREN:
                 _nav_link(path, label, icon, active)
         for path, label, icon in FLAT_NAV:
