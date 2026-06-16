@@ -101,16 +101,43 @@ def signal_rows(signals):
     return rows
 
 
+_TERM_PHRASES = {
+    "CONTANGO": "Contango (near-term calm)",
+    "BACKWARDATION": "Backwardation (near-term stress)",
+    "MIXED": "Mixed term structure",
+}
+
+
+def _short_time(iso):
+    """ISO timestamp -> short local time like '1:32 PM'; '' on failure/None."""
+    if not iso:
+        return ""
+    try:
+        import datetime as dt
+        t = dt.datetime.fromisoformat(iso)
+        return t.strftime("%I:%M %p").lstrip("0")
+    except Exception:
+        return ""
+
+
+def term_text(term, ts):
+    """Plain-English VIX term-structure label, '' if unknown/missing."""
+    structure = (term or {}).get("structure")
+    if not structure or structure == "UNKNOWN":
+        return ""
+    phrase = _TERM_PHRASES.get(structure, structure.title())
+    when = _short_time(ts)
+    tail = f" · as of {when}" if when else ""
+    return f"VIX term: {phrase}{tail}"
+
+
 def _scan_meta_strip(container, results):
     """Post-scan info NOT already shown by the header strip (term + timestamp)."""
     container.clear()
     with container:
-        term = results.get("vix_term_structure") or {}
-        if term.get("structure"):
-            ui.label(f"Term: {term['structure']}").classes("opacity-70")
-        ts = results.get("timestamp")
-        if ts:
-            ui.label(f"as of {ts}").classes("opacity-50 text-sm")
+        text = term_text(results.get("vix_term_structure"), results.get("timestamp"))
+        if text:
+            ui.label(text).classes("opacity-70 text-sm")
 
 
 def render():

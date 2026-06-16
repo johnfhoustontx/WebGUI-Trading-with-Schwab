@@ -48,3 +48,21 @@ def test_signal_rows_stamp_score_color():
     assert by_sym["HI"]["_score_color"] == scanner.GREEN
     assert by_sym["LO"]["_score_color"] == scanner.RED
     assert by_sym["NA"]["_score_color"] == "#666666"
+
+
+def test_term_text_contango_with_time():
+    out = scanner.term_text({"structure": "CONTANGO"}, "2026-06-15T13:32:56-05:00")
+    assert "Contango" in out
+    assert "1:32" in out
+    assert "as of" in out
+
+
+def test_term_text_backwardation_no_timestamp():
+    assert scanner.term_text({"structure": "BACKWARDATION"}, None) == (
+        "VIX term: Backwardation (near-term stress)"
+    )
+
+
+def test_term_text_empty_and_unknown():
+    assert scanner.term_text({}, None) == ""
+    assert scanner.term_text({"structure": "UNKNOWN"}, None) == ""
