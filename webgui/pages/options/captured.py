@@ -27,6 +27,14 @@ def _round(value, ndigits=2):
     return round(value, ndigits) if isinstance(value, (int, float)) else value
 
 
+REC_RED, REC_AMBER, REC_GREEN = "#ef5350", "#ffa726", "#66bb6a"
+
+
+def rec_color(rec):
+    """Recommendation -> badge color (green take-profit / red cut / amber hold)."""
+    return {"TAKE_PROFIT": REC_GREEN, "CUT": REC_RED, "HOLD": REC_AMBER}.get(rec, "#666666")
+
+
 def captured_columns():
     spec = [
         ("symbol", "Symbol"), ("strategy", "Strat"), ("mode", "Mode"),
@@ -55,10 +63,11 @@ def captured_rows(signals):
             "unrealized_pnl": _round(s.get("unrealized_pnl")),
             "entry_score": s.get("entry_score"),
             "current_score": s.get("current_score"),
-            "score_drift": s.get("score_drift"),
+            "score_drift": _round(s.get("score_drift")),
             "grade": s.get("entry_grade", ""),
             "recommendation": s.get("recommendation") or "HOLD",
             "status": s.get("status", ""),
+            "_rec_color": rec_color(s.get("recommendation") or "HOLD"),
         })
     return rows
 
@@ -109,6 +118,11 @@ def render():
                 status = ui.label("").classes("opacity-70")
             table = ui.table(columns=captured_columns(), rows=[], row_key="id",
                              selection="single").classes("w-full")
+            table.add_slot('body-cell-recommendation', r'''
+              <q-td :props="props">
+                <q-badge :style="`background:${props.row._rec_color};color:#111`" :label="props.value"/>
+              </q-td>
+            ''')
         detail_panel = detail.render()
 
     # Last-seen bus cache versions for the fetch-free repaint/notify timers.

@@ -53,6 +53,44 @@ def test_synth_from_captured_falls_back_to_entry_score():
     assert s["composite_score"] == 55
 
 
+def test_drift_rounded_to_two_decimals():
+    assert captured.captured_rows([{"score_drift": 1.23456}])[0]["score_drift"] == 1.23
+
+
+def test_drift_preserves_whole_float():
+    assert captured.captured_rows([{"score_drift": -4.0}])[0]["score_drift"] == -4.0
+
+
+def test_drift_none_preserved():
+    assert captured.captured_rows([{}])[0]["score_drift"] is None
+
+
+def test_rec_color_take_profit_is_green():
+    assert captured.rec_color("TAKE_PROFIT") == captured.REC_GREEN
+
+
+def test_rec_color_cut_is_red():
+    assert captured.rec_color("CUT") == captured.REC_RED
+
+
+def test_rec_color_hold_is_amber():
+    assert captured.rec_color("HOLD") == captured.REC_AMBER
+
+
+def test_rec_color_unknown_is_grey():
+    assert captured.rec_color("WHATEVER") == "#666666"
+
+
+def test_row_stamps_rec_color_for_cut():
+    row = captured.captured_rows([{"recommendation": "CUT"}])[0]
+    assert row["_rec_color"] == captured.REC_RED
+
+
+def test_row_defaults_rec_color_to_amber_when_missing():
+    row = captured.captured_rows([{}])[0]
+    assert row["_rec_color"] == captured.REC_AMBER
+
+
 def test_render_callable():
     assert callable(captured.render)
 
