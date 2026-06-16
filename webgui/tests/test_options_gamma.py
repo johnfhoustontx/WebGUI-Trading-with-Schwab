@@ -49,6 +49,38 @@ def test_bar_yrange_empty_falls_back_to_spot_band():
     assert gamma.bar_yrange([], 450.0) == [450.0 * 0.98, 450.0 * 1.02]
 
 
+def test_panel_flex_endpoints_and_monotonic():
+    bar0, heat0 = gamma.panel_flex(0)
+    assert heat0 == 0.28 and round(bar0 + heat0, 4) == 1.0      # session start: bars wide
+    barf, heatf = gamma.panel_flex(82)
+    assert heatf == 0.70 and round(barf + heatf, 4) == 1.0      # full session: heat wide
+    # clamps past a full session
+    assert gamma.panel_flex(200) == gamma.panel_flex(82)
+    # heat fraction is non-decreasing with more snapshots
+    heats = [gamma.panel_flex(n)[1] for n in range(0, 90, 10)]
+    assert heats == sorted(heats)
+    # midpoint is between the endpoints
+    _, heat_mid = gamma.panel_flex(41)
+    assert 0.28 < heat_mid < 0.70
+
+
+def test_significant_strikes_crops_near_zero_tails():
+    bars = {"strikes": [440.0, 448.0, 450.0, 452.0, 460.0],
+            "nets": [5.0, 600.0, -900.0, 500.0, 8.0]}   # tails ≈ 0 vs 900 peak
+    assert gamma.significant_strikes(bars, frac=0.03) == [448.0, 450.0, 452.0]
+
+
+def test_significant_strikes_noop_when_all_significant():
+    bars = {"strikes": [448.0, 450.0, 452.0], "nets": [600.0, -900.0, 500.0]}
+    assert gamma.significant_strikes(bars, frac=0.03) == [448.0, 450.0, 452.0]
+
+
+def test_significant_strikes_all_zero_returns_all():
+    bars = {"strikes": [448.0, 450.0], "nets": [0.0, 0.0]}
+    assert gamma.significant_strikes(bars) == [448.0, 450.0]
+    assert gamma.significant_strikes({"strikes": [], "nets": []}) == []
+
+
 def test_heatmap_matrix_from_history():
     rows = [("09:30", 450, None, None, None, 0, {448.0: 5, 450.0: -3}),
             ("09:35", 450, None, None, None, 0, {448.0: 7, 450.0: -1})]

@@ -122,6 +122,20 @@ def _refloat_keys(d):
     return out
 
 
+def significant_strikes(bars, frac=0.03):
+    """Strikes whose |net| ≥ frac·peak — drops near-zero edge strikes so the
+    y-range crops to where the bars are actually visible (fixes GAMMA dead space).
+
+    ``bars`` is a bars_from_gex(...) dict. Returns every strike when the peak is
+    zero (nothing to crop)."""
+    strikes, nets = bars.get("strikes") or [], bars.get("nets") or []
+    peak = max((abs(n) for n in nets), default=0.0)
+    if peak <= 0:
+        return list(strikes)
+    thr = peak * frac
+    return [s for s, n in zip(strikes, nets) if abs(n) >= thr]
+
+
 def bars_from_gex(data, spot, pct=0.02):
     """Per-strike net exposure within ±pct of spot, ascending by strike."""
     gex = (data or {}).get("gex") or {}
@@ -160,6 +174,17 @@ def bar_yrange(strikes, spot, pad_frac=0.04):
     span = hi - lo
     pad = span * pad_frac if span else max(spot * 0.002, 1.0)
     return [lo - pad, hi + pad]
+
+
+def panel_flex(n_cols, full_cols=82, min_heat=0.28, max_heat=0.70):
+    """(bar_weight, heat_weight) flex ratio from intraday snapshot count.
+
+    full_cols ≈ five-minute slots in an 08:30–15:20 CT session. The heatmap
+    fraction lerps min_heat→max_heat with session progress so the heatmap grows
+    and the bars shrink as the day fills in; bars take the remainder."""
+    p = 0.0 if full_cols <= 0 else max(0.0, min(1.0, n_cols / full_cols))
+    heat = min_heat + (max_heat - min_heat) * p
+    return round(1.0 - heat, 4), round(heat, 4)
 
 
 def bar_figure(data, spot, view="GEX", walls=None, flip=None, pct=0.02, height=680,
