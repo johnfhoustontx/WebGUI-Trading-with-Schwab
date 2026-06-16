@@ -88,6 +88,7 @@ def render():
     ui.label("Paper Trades").classes("text-h5")
 
     raw_by_id: dict = {}
+    state = {"sel_id": None}
 
     with ui.row().classes("w-full no-wrap gap-4 items-start"):
         with ui.column().classes("flex-grow min-w-0"):
@@ -119,6 +120,12 @@ def render():
                 raw_by_id[t["trade_id"]] = t
         table.rows = paper_rows(trades)
         table.update()
+        # Keep the open detail panel in sync with the freshly-cached trades.
+        sel = state.get("sel_id")
+        if sel and sel in raw_by_id:
+            detail_panel.update(synth_from_trade(raw_by_id[sel]))
+        elif sel:
+            detail_panel.clear()  # selected trade no longer present
         if not pt:
             status.text = ""
         else:
@@ -128,6 +135,7 @@ def render():
         row = event.args[1] if isinstance(event.args, list) and len(event.args) > 1 else event.args
         t = raw_by_id.get(row.get("id")) if isinstance(row, dict) else None
         if t:
+            state["sel_id"] = t.get("trade_id")
             detail_panel.update(synth_from_trade(t))
 
     table.on("rowClick", _select)
