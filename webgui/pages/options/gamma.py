@@ -26,6 +26,81 @@ SPOT_COLOR = "#ffd54f"
 FLIP_COLOR = "#42a5f5"
 WALL_COLOR = "#b39ddb"
 
+# Dark theme for all charts (matches the app's dark shell).
+DARK_BG = "#1b1b1b"
+GRID = "#333333"
+FONT = "#e6e6e6"
+HOVER = {"bgcolor": "#222222", "bordercolor": "#444444", "font": {"size": 11, "color": FONT}}
+
+# Friendlier toggle/title labels: GEX→GAMMA, DEX→DELTA (internal view keys + the
+# engine/cache strings stay "GEX"/"DEX" — only the display label changes).
+_VIEW_LABELS = {"GEX": "GAMMA", "DEX": "DELTA"}
+
+
+def _view_label(view):
+    """Display label for a view (GEX→GAMMA, DEX→DELTA; others unchanged)."""
+    return _VIEW_LABELS.get(view, view)
+
+
+def _apply_dark(layout):
+    """Inject the dark theme into a Plotly layout dict (in place); returns it.
+
+    Sets dark paper/plot backgrounds + light font, and subtle grid/zero/line
+    colors on both axes (existing axis keys like title/range are preserved)."""
+    layout.setdefault("paper_bgcolor", DARK_BG)
+    layout.setdefault("plot_bgcolor", DARK_BG)
+    layout.setdefault("font", {"color": FONT})
+    for ax in ("xaxis", "yaxis"):
+        a = layout.setdefault(ax, {})
+        a.setdefault("gridcolor", GRID)
+        a.setdefault("zerolinecolor", "#555555")
+        a.setdefault("linecolor", "#555555")
+    return layout
+
+
+def _darker(hexc, factor=0.55):
+    """Return a darker shade of a ``#rrggbb`` color (for the beveled bar border)."""
+    h = hexc.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return "#%02x%02x%02x" % (int(r * factor), int(g * factor), int(b * factor))
+
+
+def line_annotations(spot, flip, walls):
+    """Right-edge text labels for the reference lines (Spot / Gamma flip / walls).
+
+    Walls are labeled by side: ``Call wall`` (strike ≥ spot, resistance) or
+    ``Put wall`` (strike < spot, support). Returns a list of Plotly annotation
+    dicts anchored to the right edge of the plot."""
+    anns = []
+
+    def _ann(y, text, color):
+        return {"xref": "paper", "x": 1.0, "xanchor": "right",
+                "yref": "y", "y": y, "yanchor": "bottom",
+                "text": text, "showarrow": False,
+                "font": {"color": color, "size": 10},
+                "bgcolor": "rgba(0,0,0,0.45)"}
+
+    if spot is not None:
+        anns.append(_ann(spot, f"Spot {spot:g}", SPOT_COLOR))
+    if flip is not None:
+        anns.append(_ann(flip, f"Gamma flip {flip:g}", FLIP_COLOR))
+    for w in (walls or []):
+        side = "Call wall" if (spot is None or w >= spot) else "Put wall"
+        anns.append(_ann(w, f"{side} {w:g}", WALL_COLOR))
+    return anns
+
+
+def _robust_zmax(z, q=0.95):
+    """Symmetric color clamp for a heatmap z-grid: the ``q`` percentile of |net|.
+
+    Using a high percentile (not the raw max) keeps a few extreme strikes from
+    washing out the mid-range colors. Returns None when there's no non-zero data."""
+    vals = sorted(abs(v) for row in (z or []) for v in row if v)
+    if not vals:
+        return None
+    idx = min(len(vals) - 1, int(q * (len(vals) - 1)))
+    return vals[idx] or vals[-1]
+
 
 def _refloat_keys(d):
     """Cast a dict's keys back to float (JSON round-trips float keys → strings).
@@ -87,32 +162,42 @@ def bar_yrange(strikes, spot, pad_frac=0.04):
     return [lo - pad, hi + pad]
 
 
-def bar_figure(data, spot, view="GEX", walls=None, flip=None, pct=0.02, height=680):
-    """Plotly horizontal-bar figure dict for one view."""
+def bar_figure(data, spot, view="GEX", walls=None, flip=None, pct=0.02, height=680,
+               yrange=None):
+    """Plotly horizontal-bar figure dict for one view (dark, beveled, labeled).
+
+    ``yrange`` (when given) overrides the auto near-spot window — used to align
+    the bar chart's strike axis with the intraday heatmap's."""
     b = bars_from_gex(data, spot, pct)
+    label = _view_label(view)
     shapes = [_hline(spot, SPOT_COLOR)]
     if flip is not None:
         shapes.append(_hline(flip, FLIP_COLOR, dash="dash"))
     for w in (walls or []):
         shapes.append(_hline(w, WALL_COLOR, dash="dot"))
+    layout = {
+        "title": f"{label} by strike",
+        "xaxis": {"title": label, "zeroline": True},
+        "yaxis": {"title": "Strike",
+                  "range": yrange if yrange is not None else bar_yrange(b["strikes"], spot),
+                  "autorange": False},
+        "shapes": shapes,
+        "annotations": line_annotations(spot, flip, walls),
+        "margin": {"l": 60, "r": 20, "t": 40, "b": 40},
+        "showlegend": False,
+        "height": height,
+        "autosize": True,
+    }
     return {
         "data": [{
             "type": "bar", "orientation": "h",
             "x": b["nets"], "y": b["strikes"],
-            "marker": {"color": b["colors"]},
+            # Beveled look: fill + a darker per-bar border.
+            "marker": {"color": b["colors"],
+                       "line": {"color": [_darker(c) for c in b["colors"]], "width": 1}},
             "hovertext": b["hovers"], "hoverinfo": "text",
         }],
-        "layout": {
-            "title": f"{view} by strike",
-            "xaxis": {"title": view, "zeroline": True},
-            "yaxis": {"title": "Strike", "range": bar_yrange(b["strikes"], spot),
-                      "autorange": False},
-            "shapes": shapes,
-            "margin": {"l": 60, "r": 20, "t": 40, "b": 40},
-            "showlegend": False,
-            "height": height,
-            "autosize": True,
-        },
+        "layout": _apply_dark(layout),
     }
 
 
@@ -148,19 +233,29 @@ def heatmap_matrix(rows):
     return {"x": x, "y": strikes, "z": z}
 
 
-def heatmap_figure(rows, view="GEX", height=680):
+def heatmap_figure(rows, view="GEX", height=680, yrange=None):
+    """Intraday strike×time heatmap (dark, cell separators, concise hover).
+
+    ``yrange`` (when given) sets the Strike axis range so it aligns with the
+    bar chart's near-spot window."""
     m = heatmap_matrix(rows)
+    yaxis = {"title": "Strike"}
+    if yrange is not None:
+        yaxis["range"] = yrange
     return {
         "data": [{
             "type": "heatmap", "x": m["x"], "y": m["y"], "z": m["z"],
             "colorscale": "RdYlGn", "zmid": 0,
+            "xgap": 1, "ygap": 1,                       # faint cell separators
+            "hovertemplate": "Strike %{y} · %{x}<br>net %{z:,.0f}<extra></extra>",
         }],
-        "layout": {
-            "title": f"{view} intraday (strike × time)",
-            "xaxis": {"title": "Time"}, "yaxis": {"title": "Strike"},
+        "layout": _apply_dark({
+            "title": f"{_view_label(view)} intraday (strike × time)",
+            "xaxis": {"title": "Time"}, "yaxis": yaxis,
             "margin": {"l": 60, "r": 20, "t": 40, "b": 40},
             "height": height, "autosize": True,
-        },
+            "hoverlabel": HOVER,
+        }),
     }
 
 
@@ -211,13 +306,24 @@ def term_heatmap(term_grid):
                       if (v or {}).get("net_gex_usd")})
     z = [[((cells.get(exp) or {}).get(s) or {}).get("net_gex_usd") for exp in exps]
          for s in strikes]
+    trace = {"type": "heatmap", "x": exps, "y": strikes, "z": z,
+             "colorscale": "RdYlGn", "zmid": 0,
+             "xgap": 1, "ygap": 1,                      # faint cell separators
+             "hovertemplate": "Strike %{y} · %{x}<br>net %{z:,.0f}<extra></extra>"}
+    # Boost contrast: clamp the color scale symmetrically to a robust max so a few
+    # extreme strikes don't wash out the mid-range cells.
+    zmax = _robust_zmax(z)
+    if zmax is not None:
+        trace["zmin"], trace["zmax"] = -zmax, zmax
     return {
-        "data": [{"type": "heatmap", "x": exps, "y": strikes, "z": z,
-                  "colorscale": "RdYlGn", "zmid": 0}],
-        "layout": {"title": "Term structure (net GEX by expiry × strike)",
-                   "xaxis": {"title": "Expiration"}, "yaxis": {"title": "Strike"},
-                   "margin": {"l": 60, "r": 20, "t": 40, "b": 60},
-                   "height": 680, "autosize": True},
+        "data": [trace],
+        "layout": _apply_dark({
+            "title": "Term structure (net GEX by expiry × strike)",
+            "xaxis": {"title": "Expiration"}, "yaxis": {"title": "Strike"},
+            "margin": {"l": 60, "r": 20, "t": 40, "b": 60},
+            "height": 680, "autosize": True,
+            "hoverlabel": HOVER,
+        }),
     }
 
 
@@ -254,7 +360,8 @@ def render():
     with ui.row().classes("items-center gap-3 flex-wrap"):
         symbol_in = select_all_on_focus(ui.input("Symbol", value="$SPX").classes("w-28"))
         fetch_btn = ui.button("Refresh now", icon="refresh")
-        view_toggle = ui.toggle(list(_VIEWS) + ["Term"], value="GEX")
+        view_toggle = ui.toggle({v: _view_label(v) for v in list(_VIEWS) + ["Term"]},
+                                 value="GEX")
         explain_btn = ui.button("Explain", icon="help").props("outline")
         analyze_btn = ui.button("Analyze", icon="psychology").props("outline")
         countdown_lbl = ui.label("").classes("opacity-60 text-sm")
@@ -309,10 +416,14 @@ def render():
         flip = entry.get("flip")
         walls = entry.get("walls") or []
 
+        # One shared near-spot strike range so the bar chart and the intraday
+        # heatmap line up vertically (axis alignment).
+        yr = bar_yrange(bars_from_gex(data, view_spot)["strikes"], view_spot)
         with chart_box:
-            ui.plotly(bar_figure(data, view_spot, view=view, walls=walls, flip=flip)).classes("w-full")
+            ui.plotly(bar_figure(data, view_spot, view=view, walls=walls, flip=flip,
+                                 yrange=yr)).classes("w-full")
         summary_lbl.text = summary_text(
-            {**summary, "strike_count": data.get("strike_count")}, view)
+            {**summary, "strike_count": data.get("strike_count")}, _view_label(view))
 
         # History rows: index-6 grid dict needs its keys re-floated too.
         rows = []
@@ -323,7 +434,7 @@ def render():
             rows.append(tuple(r))
         with heatmap_box:
             if rows:
-                ui.plotly(heatmap_figure(rows, view)).classes("w-full")
+                ui.plotly(heatmap_figure(rows, view, yrange=yr)).classes("w-full")
             else:
                 ui.label("No intraday snapshots yet (history collector not running).") \
                     .classes("opacity-60 text-sm")

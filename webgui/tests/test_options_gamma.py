@@ -141,6 +141,87 @@ def test_json_roundtrip_then_refloat_reproduces_bars():
     assert b["nets"] == [60.0, -50.0, 20.0]
 
 
+# ── Charts refresh (2026-06-16): dark theme, beveled bars, line labels,
+#    relabeled views, heatmap separators/contrast ──────────────────────────────
+def test_view_label_renames_gex_and_dex():
+    assert gamma._view_label("GEX") == "GAMMA"
+    assert gamma._view_label("DEX") == "DELTA"
+    assert gamma._view_label("Charm") == "Charm"
+    assert gamma._view_label("Term") == "Term"
+
+
+def test_dark_layout_sets_dark_backgrounds():
+    layout = gamma._apply_dark({"xaxis": {"title": "x"}, "yaxis": {}})
+    assert layout["paper_bgcolor"] == gamma.DARK_BG
+    assert layout["plot_bgcolor"] == gamma.DARK_BG
+    assert layout["font"]["color"] == gamma.FONT
+    assert layout["xaxis"]["title"] == "x"          # existing keys preserved
+    assert "gridcolor" in layout["xaxis"]
+
+
+def test_bar_figure_is_dark_and_beveled_with_friendly_title():
+    fig = gamma.bar_figure(GEX, 450.0, view="GEX", walls=[452.0], flip=449.5, pct=0.02)
+    assert fig["layout"]["paper_bgcolor"] == gamma.DARK_BG
+    marker = fig["data"][0]["marker"]
+    assert "line" in marker and marker["line"]["width"] >= 1   # beveled border
+    assert isinstance(marker["line"]["color"], list)           # per-bar darker shade
+    assert "GAMMA" in fig["layout"]["title"]                   # friendly label, not "GEX"
+
+
+def test_line_annotations_label_spot_flip_and_call_put_walls():
+    anns = gamma.line_annotations(450.0, 449.0, [455.0, 445.0])
+    texts = [a["text"] for a in anns]
+    assert any(t.startswith("Spot") for t in texts)
+    assert any("Gamma flip" in t for t in texts)
+    assert any("Call wall" in t for t in texts)   # 455 >= spot
+    assert any("Put wall" in t for t in texts)    # 445 < spot
+
+
+def test_bar_figure_includes_reference_line_annotations():
+    fig = gamma.bar_figure(GEX, 450.0, view="GEX", walls=[452.0], flip=449.5, pct=0.02)
+    texts = [a["text"] for a in fig["layout"].get("annotations", [])]
+    assert any(t.startswith("Spot") for t in texts)
+
+
+def test_bar_figure_accepts_explicit_yrange():
+    fig = gamma.bar_figure(GEX, 450.0, view="GEX", pct=0.02, yrange=[400.0, 500.0])
+    assert fig["layout"]["yaxis"]["range"] == [400.0, 500.0]
+
+
+def test_darker_returns_a_darker_hex():
+    assert gamma._darker("#66bb6a") != "#66bb6a"
+    assert gamma._darker("#66bb6a").startswith("#") and len(gamma._darker("#66bb6a")) == 7
+
+
+def test_heatmap_figure_dark_with_cell_separators_and_concise_hover():
+    rows = [("09:30", 450, None, None, None, 0, {448.0: 5, 450.0: -3})]
+    fig = gamma.heatmap_figure(rows, "GEX", yrange=[440.0, 460.0])
+    d, lay = fig["data"][0], fig["layout"]
+    assert d["xgap"] == 1 and d["ygap"] == 1            # faint cell separators
+    assert "hovertemplate" in d                          # concise hover
+    assert lay["paper_bgcolor"] == gamma.DARK_BG
+    assert lay["yaxis"]["range"] == [440.0, 460.0]       # aligned to bars
+
+
+def test_term_heatmap_dark_separators_and_contrast():
+    tg = {"underlying_price": 450.0, "expirations": ["2026-06-18"],
+          "cells": {"2026-06-18": {450.0: {"net_gex_usd": 5},
+                                   460.0: {"net_gex_usd": -200}}}}
+    fig = gamma.term_heatmap(tg)
+    d, lay = fig["data"][0], fig["layout"]
+    assert d["xgap"] == 1 and d["ygap"] == 1
+    assert lay["paper_bgcolor"] == gamma.DARK_BG
+    # symmetric contrast clamp present
+    assert d.get("zmax") is not None and d.get("zmin") == -d["zmax"]
+
+
+def test_robust_zmax_ignores_none_and_returns_positive():
+    z = [[None, 5], [-3, None], [200, 1]]
+    zmax = gamma._robust_zmax(z)
+    assert zmax is not None and zmax > 0
+    assert gamma._robust_zmax([[None], []]) is None
+
+
 def test_render_callable():
     assert callable(gamma.render)
 
