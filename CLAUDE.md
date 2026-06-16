@@ -123,7 +123,7 @@ Routes:
 | `/options/simulator` | Simulator (What-if + IV-shock; Replay TODO) | built |
 | `/sentiment` | Sentiment (two-column top: gauge+regime / component table; traffic-light tiles; 30d history + rolling avgs; full-width **Sector & Industry Performance** w/ Day/Week/Month %, P/C, RRG, rotation banner, **expandable industries w/ P/C+RRG**; bottom status bar; **persists across navigation**; **server-side 120s auto-refresh + bridge publish, tab-independent**) | built |
 | `/sentiment/rotation` | Sector Rotation (RRG-vs-SPY: Risk-ON/OFF headline + spread, tight ROTATING FROM/INTO w/ S&P weights, quadrant-map table, **RRG scatter w/ faded 30-trading-day "meteor tails"** per sector — engine `assess_sector` now retains a `tail` of the last `TAIL_LENGTH=30` RS-Ratio/RS-Mom points, quadrant-colored, head brightest; reuses `sector_rotation_assessment`; cached, **manual Refresh only**) | built |
-| `/trade` | Trade (on-demand single-symbol analysis: **Position (1–8wk)** + **Investor (months+)** Buy/Hold/Sell verdicts w/ score + top reasons + hard gates + expandable factor breakdown; **MTF EMA alignment** (per-timeframe); momentum strip (RSI/ADX/MACD/VWAP/RelVol); sector strength; persists across nav. **Fundamentals not wired (MVP)** → Investor degrades to insufficient-data HOLD) | built |
+| `/trade` | Trade (on-demand single-symbol analysis: **Position (1–8wk)** + **Investor (months+)** Buy/Hold/Sell verdicts w/ score + top reasons + hard gates + expandable factor breakdown; **MTF EMA alignment** (per-timeframe); momentum strip (RSI/ADX/MACD/VWAP/RelVol); sector strength; **Fundamentals card** (P/E/PEG/growth/ROE/margins via proxy `/instruments`); persists across nav) | built |
 | `/portfolio` `/driver` | other apps | **stubs** |
 
 The `pages/options/` subpackage shares `header.py` (compact quotes/VIX/sentiment
@@ -374,12 +374,22 @@ repaints (persists across nav). Pieces:
   breakdown table), MTF-alignment card, momentum strip, sector card. Pure builders
   (`verdict_color`/`bias_color`/`momentum_rows`/`breakdown_rows`/`alignment_rows`)
   unit-tested in `webgui/tests/test_trade.py`.
-- **Fundamentals NOT wired (MVP decision).** No source exists in-repo (proxy has
-  no fundamentals endpoint; `finvizfinance` not installed), so an empty
-  `Fundamentals` is passed → `InvestorVerdict` degrades to an "Insufficient
-  fundamental data" HOLD (the page notes this). `fundamentals_available=False`.
-  **Follow-up:** add a Schwab `/instruments?projection=fundamental` proxy endpoint
-  + use the existing `parse_schwab_fundamentals`, then flip the flag.
+- **Fundamentals wired via the proxy (2026-06-16).** `compute.analyze` fetches
+  Schwab fundamentals through a new proxy endpoint
+  `GET /instruments?symbol=X&projection=fundamental`
+  (`SchwabProxyClient.get_fundamentals` → unwraps `instruments[0].fundamental`)
+  and parses them with `parse_schwab_fundamentals`. `InvestorVerdict` now runs on
+  real data and `fundamentals_available` = `Fundamentals.is_sufficient()`; the
+  page shows a **Fundamentals card** (P/E, PEG, rev/EPS growth, ROE, margin
+  trend) when available, else the insufficient-data note. **Parser is a superset**
+  (`trade-analyzer/src/analysis/fundamentals.py`): the *real* Schwab fields
+  (`revChangeTTM`/`epsChangePercentTTM` in percent→fraction, `returnOnEquity` as
+  percent via a `>2` magnitude heuristic, `operatingMarginTTM` vs `MRQ` for the
+  margin trend) are primary, the legacy speculative names are fallback (all old
+  tests stay green). The instruments payload has **no** next-earnings date / EPS
+  surprises / guidance / FCF, so those degrade to None (the Position earnings gate
+  never fires; `days_to_earnings` is None). Fetch is defensive — a proxy/parse
+  failure degrades to insufficient-data HOLD, never raises.
 - Tests: `services/trade_svc/tests` (compute/handler/app) + `webgui/tests/test_trade.py`.
   Design/plan: Phase 4 of the [3-tier plan](docs/plans/2026-06-15-three-tier-architecture-plan.md).
 

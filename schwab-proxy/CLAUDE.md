@@ -18,8 +18,9 @@ sentiment-dashboard, and claude-driver all fetch market data through it.
 - Serves on `http://127.0.0.1:8100` (`PROXY_URL` / `PROXY_PORT` from
   `repo_paths.py`).
 - Key endpoints: `/health`, `/quote`, `/quotes`, `/chains`, `/pricehistory`,
-  `/accounts`, `/orders/{account_hash}`, and the trade-stream tracker
-  (`/track`, `/untrack`).
+  `/instruments` (fundamentals; `projection=fundamental` → P/E, growth, ROE,
+  margins — used by trade_svc), `/accounts`, `/orders/{account_hash}`, and the
+  trade-stream tracker (`/track`, `/untrack`).
 
 ## Key files
 
