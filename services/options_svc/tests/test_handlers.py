@@ -694,3 +694,13 @@ def test_swing_scan_uses_defaults_for_missing_args(monkeypatch):
     # Even with no signals, the (empty) result is cached + published.
     env = bus.cache_get("cache:options:swing")
     assert env is not None and env.payload["signals"] == []
+
+
+def test_collect_gex_history_calls_compute(monkeypatch):
+    """The handler delegates to compute.collect_gex_snapshots (a pure write to
+    the on-disk history store; no Redis cache view to publish)."""
+    called = {"v": False}
+    monkeypatch.setattr(handlers.compute, "collect_gex_snapshots",
+                        lambda: called.__setitem__("v", True))
+    handlers.collect_gex_history(bus=None)
+    assert called["v"] is True

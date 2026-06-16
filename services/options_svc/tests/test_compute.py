@@ -929,3 +929,57 @@ def test_refresh_header_sentiment_failure_is_no_data(monkeypatch):
     out = compute.refresh_header()
     assert out["vix"] == 22.0
     assert out["sentiment"] == {"color": "#666666", "label": "No data"}
+
+
+# ── Intraday GEX history collection ─────────────────────────────────────────
+# collect_gex_snapshots reuses options-scanner's gex_collector.poll_once. We
+# fake the lazily-imported gex_collector/gamma_tool/gex_history_db modules so
+# nothing touches a live proxy or the on-disk DB.
+
+def _fake_gex_modules(monkeypatch, *, lock_ok=True):
+    import sys as _sys
+    import types as _types
+
+    calls = {"poll": False, "touched": False, "closed": False,
+             "client": None, "engine": None, "conn": None}
+
+    class _Conn:
+        def close(self):
+            calls["closed"] = True
+
+    def _poll(client, engine, conn, lock=None):
+        calls.update(poll=True, client=client, engine=engine, conn=conn)
+
+    fake_gc = _types.SimpleNamespace(
+        LOCK_PATH="LOCK", SYMBOLS=["$SPX", "SPY"],
+        acquire_collector_lock=lambda path, **kw: lock_ok,
+        touch_lock=lambda path, **kw: calls.update(touched=True),
+        ensure_file_logging=lambda *a, **k: None,
+        poll_once=_poll,
+        log=_types.SimpleNamespace(info=lambda *a, **k: None),
+    )
+    fake_gh = _types.SimpleNamespace(connect=lambda: _Conn(),
+                                     init_schema=lambda conn: None)
+    fake_gt = _types.SimpleNamespace(GammaEngine=lambda: "ENGINE")
+    monkeypatch.setitem(_sys.modules, "gex_collector", fake_gc)
+    monkeypatch.setitem(_sys.modules, "gex_history_db", fake_gh)
+    monkeypatch.setitem(_sys.modules, "gamma_tool", fake_gt)
+    return calls
+
+
+def test_collect_gex_snapshots_polls_with_proxy_client(monkeypatch):
+    calls = _fake_gex_modules(monkeypatch, lock_ok=True)
+    n = compute.collect_gex_snapshots()
+    assert calls["poll"] is True
+    assert calls["client"] is _proxy.schwab_py_client   # shared proxy client
+    assert calls["engine"] == "ENGINE"
+    assert calls["closed"] is True                       # write conn always closed
+    assert calls["touched"] is True                      # lock heartbeat refreshed
+    assert n == 2                                         # len(SYMBOLS)
+
+
+def test_collect_gex_snapshots_defers_when_lock_held(monkeypatch):
+    calls = _fake_gex_modules(monkeypatch, lock_ok=False)
+    n = compute.collect_gex_snapshots()
+    assert calls["poll"] is False    # a fresh foreign collector owns the lock
+    assert n == 0

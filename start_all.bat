@@ -15,9 +15,8 @@ echo   Schwab Trading - launching services
 echo   memurai       redis://127.0.0.1:6379  (storage/comm backbone)
 echo   proxy         http://127.0.0.1:8100
 echo   sentiment_svc http://127.0.0.1:8210
-echo   options_svc   http://127.0.0.1:8211
+echo   options_svc   http://127.0.0.1:8211  (incl. 5-min GEX history collection)
 echo   web gui       http://127.0.0.1:8500
-echo   gex collector (5-min snapshots + bridge)
 echo ============================================
 echo.
 
@@ -62,11 +61,12 @@ echo Starting options service in a new window...
 start "Options Service (:8211)" cmd /k ""%PY%" services\options_svc\app.py"
 echo.
 
-REM --- 4. GEX collector (options-scanner): 5-min GEX snapshots + sentiment-bridge publish ---
-REM     Stands down if the gamma tool already owns data\gex_collector.lock; exits past ~15:20 CT.
-echo Starting GEX collector in a new window...
-start "GEX Collector" cmd /k "cd /d "%~dp0options-scanner" ^&^& "%PY%" gex_collector.py"
-echo.
+REM --- 4. GEX history collection now runs INSIDE options_svc (step 3) ---
+REM     The options service owns intraday GEX snapshot collection (5-min slots,
+REM     08:30-15:20 CT) via its scheduler, so no separate collector window is
+REM     started here. options-scanner\gex_collector.py remains a MANUAL fallback
+REM     (run it standalone if options_svc is down); its advisory lock makes it
+REM     defer to the service when both are up.
 
 REM --- 5. NiceGUI web app (:8500) ---
 echo Starting NiceGUI web app on :8500 in a new window...
@@ -86,11 +86,11 @@ start "" "http://127.0.0.1:8500"
 
 echo.
 echo ============================================
-echo   All services started. Five windows are
+echo   All services started. Four windows are
 echo   running: proxy, sentiment service, options
-echo   service, GEX collector, web gui. (Memurai
-echo   runs as a Windows service.) Close those
-echo   windows to stop the services.
+echo   service (incl. GEX collection), web gui.
+echo   (Memurai runs as a Windows service.) Close
+echo   those windows to stop the services.
 echo ============================================
 echo.
 echo This launcher window can be closed.

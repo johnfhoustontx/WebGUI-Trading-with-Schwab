@@ -183,6 +183,21 @@ def refresh_gamma(bus, symbol="$SPX") -> None:
     bus.publish(EVENT_GAMMA, {"version": version})
 
 
+def collect_gex_history(bus=None) -> None:
+    """Write one round of intraday GEX/Charm/DEX/Vanna (+term) snapshots.
+
+    Tier-2 owner of intraday history collection — replaces the standalone
+    ``gex_collector.py`` window so collection runs whenever this service is up
+    (driven by ``scheduler.gex_due`` on a 5-min cadence within market hours).
+    This is a pure write to the on-disk Tier-3 history store
+    (``gex_history.db``); the Gamma page reads that history live on its own
+    refresh, so there is no Redis cache view to publish here. ``bus`` is accepted
+    only for handler-signature uniformity with the other scheduler-invoked
+    refreshers. Guarded by the caller; ``compute.collect_gex_snapshots`` is
+    itself defensive (per-symbol failures are logged, not raised)."""
+    compute.collect_gex_snapshots()
+
+
 def handle_command(bus, command) -> None:
     """Dispatch a ``cmd:options`` command. ``rescan`` → full rescan;
     ``swing_scan`` → on-demand parameterized swing scan; ``refresh_paper`` →

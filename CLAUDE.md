@@ -268,8 +268,27 @@ Design/plans: [live-bridge](docs/plans/2026-06-14-live-sentiment-bridge-design.m
   `morning_agent.py` — orchestration controls + order approval queue.
 - Reuse the page pattern above; verify each engine function's real signature in
   the copied module before wiring (explorations of source can drift from copy).
-- Optional follow-ups: Simulator **Replay** tab; the Gamma intraday-heatmap
-  **collector** process (the page only reads `gex_history_db`).
+- Optional follow-ups: Simulator **Replay** tab. (The Gamma intraday-heatmap
+  **collector** now runs inside `options_svc` — see below — so the heatmap
+  populates all session whenever the service is up.)
+
+**Gamma intraday-heatmap collection (DONE — 2026-06-15).** Intraday GEX history
+(`gex_history.db`, read by the Gamma strike×time heatmap) is now collected by the
+**options service** itself, not a separate window. `services/options_svc/scheduler.py`
+`gex_due()` fires once per 5-min slot within 08:30–15:20 CT on trading days (mirrors
+`gex_collector`'s window/cadence); the tick runs `handlers.collect_gex_history` →
+`compute.collect_gex_snapshots`, which reuses `options-scanner/gex_collector.poll_once`
+(engine compute + `gex_history_db.insert_snapshot`) VERBATIM with the shared
+`_proxy.schwab_py_client`. It takes the collector's advisory lock
+(`data/gex_collector.lock`) so a manually-run standalone `gex_collector.py` defers.
+**Root cause this fixed:** previously the only writer was the standalone
+`gex_collector.py` window launched by `start_all.bat`; when that window died
+(closed / sleep / double-launch lock contention) collection stopped silently and the
+heatmap froze at the first snapshots ("no data past the first hour"). `start_all.bat`
+no longer launches a separate collector window (the standalone script remains a manual
+fallback). NOTE: this path does NOT republish the sentiment bridge (the old collector
+loop did); `sentiment_svc` already republishes the bridge every 120 s, so the bridge
+is unaffected.
 
 ## Paths and ports: `repo_paths.py` + `config/ports.toml`
 
@@ -312,8 +331,8 @@ gitignored. **Never commit real keys, tokens, or account numbers.**
 
 ## Running
 
-The simplest path is `start_all.bat` (Memurai check → proxy → sentiment_svc → GEX
-collector → web gui, opening the browser). Manual order:
+The simplest path is `start_all.bat` (Memurai check → proxy → sentiment_svc →
+options_svc → web gui, opening the browser). Manual order:
 
 ```powershell
 # 1. Activate the venv
@@ -328,7 +347,8 @@ python schwab-proxy\schwab_proxy.py
 # 4. Start the migrated domain services (each owns its refresh/scheduling; publishes to Redis).
 #    Sentiment + Options are migrated; Portfolio/Trade/Driver land as Phase 3+ proceeds.
 python services\sentiment_svc\app.py      # :8210  (composite + rotation)
-python services\options_svc\app.py        # :8211  (scan/swing/header/gamma/paper/captured/calculator)
+python services\options_svc\app.py        # :8211  (scan/swing/header/gamma/paper/captured/calculator
+                                          #          + 5-min intraday GEX history collection, 08:30–15:20 CT)
 
 # 5. In another terminal, start the NiceGUI app (reads cache:* from Redis; no engine imports)
 python webgui\main.py      # serves http://127.0.0.1:8500

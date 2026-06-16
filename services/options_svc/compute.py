@@ -541,6 +541,57 @@ def gamma_snapshot(symbol: str) -> dict | None:
             "views": views, "term": term}
 
 
+# ── Intraday GEX history collection (Tier-2 owner) ──────────────────────────
+# The Gamma page's strike×time heatmap reads gex_history.db. That DB used to be
+# written ONLY by the standalone options-scanner/gex_collector.py process,
+# launched in its own console window by start_all.bat. When that window died
+# (closed, machine sleep, or lock contention from a double launch) collection
+# silently stopped and the heatmap froze at the first snapshots — "no data past
+# the first hour". The always-on options service now owns collection: the
+# scheduler calls this on every 5-min slot within market hours, so history
+# accrues for the whole session whenever the service is up.
+
+def collect_gex_snapshots() -> int:
+    """Fetch + persist one snapshot round (GEX/Charm/DEX/Vanna + term) for the
+    tracked symbols. Returns ``len(gex_collector.SYMBOLS)``, or ``0`` when a
+    fresh foreign collector owns the advisory lock (we defer).
+
+    Reuses options-scanner's ``gex_collector.poll_once`` (engine compute +
+    ``gex_history_db.insert_snapshot``) VERBATIM so the snapshot schema + symbol
+    list stay in ONE place. The schwab-py client comes from the shared proxy
+    accessor (mirrors ``run_scan``/``gamma_snapshot``); the GammaEngine + write
+    connection are built here. The collector's own advisory lock
+    (``data/gex_collector.lock``) makes any still-running standalone
+    ``gex_collector.py`` defer to this service, so only one writer runs.
+    Lazy imports (like ``gamma_snapshot``) keep module import light + dodge the
+    cross-app name collisions documented in the root CLAUDE.md."""
+    import os
+    import time
+
+    import gex_collector as gc
+
+    gc.ensure_file_logging()  # poll warnings/errors land in gex_collector.log
+    owner = f"options_svc:pid:{os.getpid()}"
+    if not gc.acquire_collector_lock(gc.LOCK_PATH, source="options_svc",
+                                     owner=owner, now=int(time.time())):
+        gc.log.info("Another collector owns the lock; options_svc deferring.")
+        return 0
+
+    import gamma_tool as gt
+    import gex_history_db as gh
+
+    conn = gh.connect()
+    try:
+        gh.init_schema(conn)
+        gc.log.info("Polling GEX history (options_svc)")
+        gc.poll_once(_proxy.schwab_py_client, gt.GammaEngine(), conn)
+        gc.touch_lock(gc.LOCK_PATH, source="options_svc", owner=owner,
+                      now=int(time.time()))
+    finally:
+        conn.close()
+    return len(gc.SYMBOLS)
+
+
 def gamma_explain(symbol: str) -> dict:
     """Build the Explain document body for ``symbol`` → ``{"symbol", "body"}``.
 
