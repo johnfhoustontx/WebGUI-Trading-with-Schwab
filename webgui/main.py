@@ -23,6 +23,11 @@ from nicegui import app, ui  # noqa: E402
 import proxy  # noqa: E402
 from repo_paths import NICEGUI_PORT  # noqa: E402
 
+# Serve bundled static assets (alert sounds) at /static.
+_STATIC_DIR = _REPO_ROOT / "webgui" / "static"
+if _STATIC_DIR.is_dir():
+    app.add_static_files("/static", str(_STATIC_DIR))
+
 _EXPLAIN_EMPTY = (
     "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">"
     "<title>Gamma Explain</title></head>"
