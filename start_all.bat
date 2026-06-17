@@ -16,7 +16,9 @@ echo   memurai       redis://127.0.0.1:6379  (storage/comm backbone)
 echo   proxy         http://127.0.0.1:8100
 echo   sentiment_svc http://127.0.0.1:8210
 echo   options_svc   http://127.0.0.1:8211  (incl. 5-min GEX history collection)
+echo   portfolio_svc http://127.0.0.1:8212  (sector breakdown + live-streaming P&L)
 echo   trade_svc     http://127.0.0.1:8213  (on-demand symbol analysis)
+echo   driver_svc    http://127.0.0.1:8214  (morning-agent order-approval queue)
 echo   web gui       http://127.0.0.1:8500
 echo ============================================
 echo.
@@ -69,12 +71,31 @@ REM     started here. options-scanner\gex_collector.py remains a MANUAL fallback
 REM     (run it standalone if options_svc is down); its advisory lock makes it
 REM     defer to the service when both are up.
 
+REM --- 4a. portfolio service (:8212): sector breakdown + live-streaming P&L ---
+REM     Tier-2 processing service. Builds the portfolio model (sector breakdown,
+REM     vs-sector perf, per-symbol baselines) from portfolio-analyzer engines,
+REM     consumes the proxy SSE quote stream, and republishes cache:portfolio:positions
+REM     on each tick; the web GUI reads from there and drives refresh via cmd:portfolio.
+echo Starting portfolio service in a new window...
+start "Portfolio Service (:8212)" cmd /k ""%PY%" services\portfolio_svc\app.py"
+echo.
+
 REM --- 4b. trade service (:8213): on-demand single-symbol analysis ---
 REM     Tier-2 processing service. No scheduler — the web GUI Trade page enqueues
 REM     an "analyze" command on cmd:trade and the service computes the MTF
 REM     verdicts and writes cache:trade:analysis + event for the page to read.
 echo Starting trade service in a new window...
 start "Trade Service (:8213)" cmd /k ""%PY%" services\trade_svc\app.py"
+echo.
+
+REM --- 4c. driver service (:8214): morning-agent order-approval queue ---
+REM     Tier-2 processing service. Runs the morning pipeline once/day at 09:28 ET
+REM     (grade the day + propose trades) and on-demand via cmd:driver; writes
+REM     cache:driver:approvals + cache:driver:performance to Memurai. The web GUI
+REM     reads from there and drives run/approve/skip via cmd:driver. Approvals
+REM     execute through order_executor with config.PAPER_TRADE=True (SIMULATED).
+echo Starting driver service in a new window...
+start "Driver Service (:8214)" cmd /k ""%PY%" services\driver_svc\app.py"
 echo.
 
 REM --- 5. NiceGUI web app (:8500) ---
@@ -95,11 +116,12 @@ start "" "http://127.0.0.1:8500"
 
 echo.
 echo ============================================
-echo   All services started. Five windows are
+echo   All services started. Seven windows are
 echo   running: proxy, sentiment service, options
-echo   service (incl. GEX collection), trade
-echo   service, web gui. (Memurai runs as a Windows
-echo   service.) Close those windows to stop them.
+echo   service (incl. GEX collection), portfolio
+echo   service, trade service, driver service, web
+echo   gui. (Memurai runs as a Windows service.)
+echo   Close those windows to stop them.
 echo ============================================
 echo.
 echo This launcher window can be closed.

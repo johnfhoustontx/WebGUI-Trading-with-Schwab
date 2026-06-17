@@ -8,7 +8,15 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-06-15 (**3-tier architecture re-design approved** — whole-monorepo split into GUI / per-domain processing services / Redis-Memurai storage+comm backbone, migrated strangler-fig starting with Sentiment; see "Planned 3-tier architecture" below + [design doc](docs/plans/2026-06-15-three-tier-architecture-design.md). Prior state: Phase 2 shell + full Options section incl. Gamma/Simulator built; **Sentiment page built** — composite gauge + component table + 5 tiles + 30d history/rolling-avgs + trend regime + **Sector & Industry Performance** (Day/Week/Month %, P/C, RRG, rotation banner), reusing `history_backfill` + `scoring.rotation`/`sector_perf`; 127 webgui tests green; Trade/Portfolio/Driver pages still stubs. See "webgui development notes" below.)
+**Last updated:** 2026-06-16 (**3-tier migration — Phase 3 Portfolio DONE**:
+`services/portfolio_svc` (:8212) + the `/portfolio` page built natively 3-tier
+(Holdings / Sectors / Performance + advisory suggestions + **live-streaming P&L**
+via the service's proxy SSE consumer). **All five domains are now migrated**
+(Sentiment, Options, Portfolio, Trade, Driver) — every page reads Redis and the
+webgui imports only `nicegui` + `shared.bus` + `shared.contracts`. 236 webgui +
+20 portfolio_svc tests green. Remaining: Phase 6 retire-shims (`regime_filter`
+reads Redis; drop the bridge dual-write). See "Portfolio page (`/portfolio`) —
+DONE" + "Planned 3-tier architecture" below.)
 
 ## What this project is
 
@@ -124,7 +132,8 @@ Routes:
 | `/sentiment` | Sentiment (two-column top: gauge+regime / component table; traffic-light tiles; 30d history + rolling avgs; full-width **Sector & Industry Performance** w/ Day/Week/Month %, P/C, RRG, rotation banner, **expandable industries w/ P/C+RRG**; bottom status bar; **persists across navigation**; **server-side 120s auto-refresh + bridge publish, tab-independent**) | built |
 | `/sentiment/rotation` | Sector Rotation (RRG-vs-SPY: Risk-ON/OFF headline + spread, tight ROTATING FROM/INTO w/ S&P weights, quadrant-map table, **RRG scatter w/ faded 30-trading-day "meteor tails"** per sector — engine `assess_sector` now retains a `tail` of the last `TAIL_LENGTH=30` RS-Ratio/RS-Mom points, quadrant-colored, head brightest; reuses `sector_rotation_assessment`; cached, **manual Refresh only**) | built |
 | `/trade` | Trade (on-demand single-symbol analysis: **Position (1–8wk)** + **Investor (months+)** Buy/Hold/Sell verdicts w/ score + top reasons + hard gates + expandable factor breakdown; **MTF EMA alignment** (per-timeframe); momentum strip (RSI/ADX/MACD/VWAP/RelVol); sector strength; **Fundamentals card** (P/E/PEG/growth/ROE/margins via proxy `/instruments`); persists across nav) | built |
-| `/portfolio` `/driver` | other apps | **stubs** |
+| `/driver` | Driver (morning-agent **order-approval queue**: Run morning agent → graded day + proposed trades; **APPROVE** (confirm dialog) / **SKIP**; conditions strip + grade rationale; **Performance** view (win-rate / P&L-by-bucket + trade table). 09:28-ET scheduler fires the run unattended. Orders execute via `order_executor` with `PAPER_TRADE=True` → **simulated**) | built |
+| `/portfolio` | Portfolio (3-tier, `services/portfolio_svc` :8212: **Holdings / Sectors / Performance** tabs over the portfolio model — sector breakdown, vs-sector RS, since-purchase excess, benchmark over/under-weight, tailwind; **Performance** scorecard (return/capital/risk/entry grades + composite + ann. return + drawdown) with a per-position **advisory suggestions** detail pane; **live-streaming P&L** via the service's proxy SSE consumer republishing each tick; proxy/stream status bar; persists across nav) | built |
 
 The `pages/options/` subpackage shares `header.py` (compact quotes/VIX/sentiment
 strip), `detail.py` (collapsible Trade detail panel, reused by all signal
@@ -262,11 +271,10 @@ Design/plans: [live-bridge](docs/plans/2026-06-14-live-sentiment-bridge-design.m
 **Next session — remaining pages (Phase 3.3–3.5 of the webgui plan):**
 - **Trade** (`/trade`): **DONE — 2026-06-16 (3-tier, `services/trade_svc` :8213).**
   See "Trade page (`/trade`) — DONE" below.
-- **Portfolio** (`/portfolio`): `portfolio-analyzer/src` — sector breakdown,
-  vs-sector performance, **live streaming** via `ui.timer` polling the proxy
-  stream. Source UI: `portfolio_analyzer.py`.
-- **Driver** (`/driver`): `claude-driver/approval_server.py` +
-  `morning_agent.py` — orchestration controls + order approval queue.
+- **Portfolio** (`/portfolio`): **DONE — 2026-06-16 (3-tier, `services/portfolio_svc`
+  :8212).** See "Portfolio page (`/portfolio`) — DONE" below.
+- **Driver** (`/driver`): **DONE — 2026-06-16 (3-tier, `services/driver_svc` :8214).**
+  See "Driver page (`/driver`) — DONE" below.
 - Reuse the page pattern above; verify each engine function's real signature in
   the copied module before wiring (explorations of source can drift from copy).
 - Optional follow-ups: Simulator **Replay** tab. (The Gamma intraday-heatmap
@@ -393,6 +401,99 @@ repaints (persists across nav). Pieces:
 - Tests: `services/trade_svc/tests` (compute/handler/app) + `webgui/tests/test_trade.py`.
   Design/plan: Phase 4 of the [3-tier plan](docs/plans/2026-06-15-three-tier-architecture-plan.md).
 
+**Driver page (`/driver`) — DONE (2026-06-16, born 3-tier — Phase 5).** The
+order-approval queue was built directly on the 3-tier model. New service
+`services/driver_svc` (:8214, `SERVICE_PORTS["driver"]`), **scheduled (09:28 ET)
++ command-driven**. The order-approval queue is a Redis Streams flow: the morning
+pipeline produces a *pending* approval cached at `cache:driver:approvals`; the
+GUI APPROVE/SKIP buttons enqueue `cmd:driver` commands the consumer acts on.
+Pieces:
+- **Contracts** `shared/contracts/driver.py`: `ApprovalState` (the
+  pending/decided morning payload — grade, grade_reasons, conditions, pnl, a
+  loose `proposed_trades: list[dict]`, status pending/no_trade/error/approved/
+  skipped, decision, results, reasons, error) + `PerfReport` (summary + trades).
+  Validate the envelope shape before caching, like `ScanResult`/`TradeAnalysis`.
+- **`driver_svc/compute`** ports the legacy `morning_agent.run_morning_agent()`
+  orchestration **minus** its side effects (no `pending_trade.json` write, no
+  HTTP post to the :8300 approval server): `run_morning()` calls the SAME
+  building blocks (`check_service_health`/`fetch_all_ml_signals`/
+  `fetch_gex_snapshot`/`fetch_market_conditions`/`fetch_current_pnl`/`grade_day`
+  → `trade_selector.select_trades`) and **returns** the payload; `execute()` →
+  `order_executor.execute_trades` (**`config.PAPER_TRADE=True` → simulated**, not
+  modified); `build_perf_report()` → `perf_report.build_report`. All **defensive**
+  (degrade to an `error`/empty payload, never raise). claude-driver engines are
+  imported **standalone** (its dir on `sys.path`) — safe because the service is
+  its own process (same isolation `sentiment_svc`/`trade_svc` use; note: importing
+  both `driver_svc` and `trade_svc` engines in **one** process re-triggers the
+  documented `config` module-name collision, so run service test suites **per
+  folder**, never `pytest services` over all of them).
+- **`driver_svc/handlers`**: `run`→cache pending approval; `approve`→**only if
+  still pending**, `execute` the proposed trades + re-cache as `approved` w/
+  results; `skip`→mark skipped; `perf`→cache `cache:driver:performance`. Each
+  validates + caches + publishes an event. **`driver_svc/scheduler`**:
+  `morning_due(now, last_run_date)` fires `run_morning` once/day at/after 09:28 ET
+  on weekdays (holiday short-circuit lives in `compute.run_morning`) + keeps the
+  perf view warm; **the scheduler NEVER executes orders** (only an explicit
+  `approve` does). **`driver_svc/app`** = `make_app("driver", scheduler=loop,
+  command_handler=…)`.
+- **Page** `webgui/pages/driver.py`: Run-morning-agent + Refresh-performance
+  buttons; an approval card (grade chip, conditions strip, grade rationale,
+  per-bucket proposed-trade cards) with **APPROVE (confirm dialog)** / **SKIP**
+  when pending, else a decision banner (approved/skipped/no_trade/error); a
+  Performance section (summary line + trade table). Version-polls
+  `driver:approvals` + `driver:performance`; persists across nav. Pure builders
+  (`grade_color`/`status_text`/`condition_rows`/`proposed_trade_lines`/`perf_*`)
+  unit-tested in `webgui/tests/test_driver.py`.
+- Tests: `services/driver_svc/tests` (compute/handlers/scheduler/app) +
+  `webgui/tests/test_driver.py`. Design/plan: Phase 5 of the
+  [3-tier plan](docs/plans/2026-06-15-three-tier-architecture-plan.md).
+
+**Portfolio page (`/portfolio`) — DONE (2026-06-16, born 3-tier — Phase 3).** The
+stub Portfolio page was built directly on the 3-tier model. New service
+`services/portfolio_svc` (:8212, `SERVICE_PORTS["portfolio"]`), **scheduled +
+command-driven** — uniquely it keeps a **live model in memory** that a background
+SSE consumer updates tick-by-tick. Pieces:
+- **Contract** `shared/contracts/portfolio.py:PortfolioModel` (one view,
+  `cache:portfolio:positions`): display-ready `holdings_rows` / `sector_rows` /
+  `performance_rows` (already formatted by the engine `view_model` in Tier 2),
+  the per-symbol `suggestions` map, and `proxy_up`/`streaming` meta. Validates the
+  envelope shape before caching, like the other domain contracts.
+- **`portfolio_svc/compute`** reuses `portfolio-analyzer/src` **verbatim**:
+  `build_portfolio` (sector breakdown + the four comparisons: vs-sector RS,
+  benchmark over/under-weight, since-purchase excess, tailwind), `compute_baseline`
+  (slow per-EQUITY history stats — ports the desktop `_compute_baselines` worker),
+  `evaluate_portfolio` + `suggest` (the live scorecard + advisory rules), and the
+  app's `view_model` formatters. **Formatting lives in Tier 2** (`format_payload`)
+  so the GUI stays a thin renderer. `src` is imported **standalone** (PORTFOLIO_ANALYZER
+  on `sys.path`) — safe because the service is its own process (note: `portfolio-analyzer`
+  AND `trade-analyzer` BOTH expose a top-level `src` package, so they collide if
+  imported in one process — another reason to run service suites **per folder**).
+  All functions defensive (degrade, never raise).
+- **`portfolio_svc/state`** holds the in-memory `PortfolioState` singleton (raw
+  model + baselines + `dirty`/`rebuild_requested` flags + a lock) shared by the
+  scheduler thread and the command handler.
+- **`portfolio_svc/handlers`**: `rebuild` (proxy health → daily trade sync →
+  `build_portfolio` → baselines into state → publish), `publish_current` (re-format
+  the current state + cache+publish — called on each throttled tick), `handle_command`
+  (`refresh` → sets `rebuild_requested` for the scheduler, which owns the stream
+  restart). **`portfolio_svc/scheduler`**: builds the model, runs a background SSE
+  worker (`compute.make_data().stream_quotes` → `apply_tick` to the shared model),
+  and a 2 s publish loop that republishes when ticks are pending + does a full
+  rebuild every ~10 min or on a pending refresh (restarting the stream on fresh
+  holdings). Pure `rebuild_due`/`apply_tick_to_state` are unit-tested. **`portfolio_svc/app`**
+  = `make_app("portfolio", scheduler=loop, command_handler=…)`.
+- **Page** `webgui/pages/portfolio.py`: Refresh button + proxy/stream status bar;
+  **Holdings / Sectors / Performance** tabs (`ui.table` rendering the cached display
+  rows directly); the Performance tab adds a suggestion detail pane (row click →
+  full advisory reasons). Version-polls `portfolio:positions` (live P&L via the
+  service's per-tick republish); persists across nav. Pure builders
+  (`proxy_status`/`stream_status`/`suggestion_text`/`status_line` + column defs)
+  unit-tested in `webgui/tests/test_portfolio.py`. (Removed the now-orphaned
+  `main.py:_stub` — Portfolio was the last stub page.)
+- Tests: `services/portfolio_svc/tests` (compute/handlers/scheduler/app, 20) +
+  `webgui/tests/test_portfolio.py` (8). Design/plan: Phase 3 of the
+  [3-tier plan](docs/plans/2026-06-15-three-tier-architecture-plan.md).
+
 ## Paths and ports: `repo_paths.py` + `config/ports.toml`
 
 `repo_paths.py` at the repo root is the single source of truth for cross-app
@@ -435,7 +536,8 @@ gitignored. **Never commit real keys, tokens, or account numbers.**
 ## Running
 
 The simplest path is `start_all.bat` (Memurai check → proxy → sentiment_svc →
-options_svc → web gui, opening the browser). Manual order:
+options_svc → portfolio_svc → trade_svc → driver_svc → web gui, opening the
+browser). Manual order:
 
 ```powershell
 # 1. Activate the venv
@@ -448,11 +550,14 @@ options_svc → web gui, opening the browser). Manual order:
 python schwab-proxy\schwab_proxy.py
 
 # 4. Start the migrated domain services (each owns its refresh/scheduling; publishes to Redis).
-#    Sentiment + Options + Trade are migrated; Portfolio/Driver land as Phase 3+ proceeds.
+#    Sentiment + Options + Portfolio + Trade + Driver are all migrated.
 python services\sentiment_svc\app.py      # :8210  (composite + rotation)
 python services\options_svc\app.py        # :8211  (scan/swing/header/gamma/paper/captured/calculator
                                           #          + 5-min intraday GEX history collection, 08:30–15:20 CT)
+python services\portfolio_svc\app.py      # :8212  (sector breakdown + vs-sector perf + live-streaming P&L)
 python services\trade_svc\app.py          # :8213  (on-demand symbol analysis: MTF + Position/Investor verdicts)
+python services\driver_svc\app.py         # :8214  (morning-agent order-approval queue: 09:28-ET run + approve/skip;
+                                          #          orders simulated — config.PAPER_TRADE=True)
 
 # 5. In another terminal, start the NiceGUI app (reads cache:* from Redis; no engine imports)
 python webgui\main.py      # serves http://127.0.0.1:8500
@@ -460,12 +565,13 @@ python webgui\main.py      # serves http://127.0.0.1:8500
 
 > **3-tier note:** Once a domain is migrated, the web GUI no longer computes anything
 > for it — its **service must be running** (and Memurai up) or the page shows a
-> "Waiting for … service" placeholder. **Sentiment, the entire Options section, and
-> Trade are migrated** (`services/sentiment_svc`, `services/options_svc`,
-> `services/trade_svc`); the webgui now imports
+> "Waiting for … service" placeholder. **Sentiment, the entire Options section,
+> Portfolio, Trade, and Driver are migrated** (`services/sentiment_svc`,
+> `services/options_svc`, `services/portfolio_svc`, `services/trade_svc`,
+> `services/driver_svc`) — **every page now reads Redis**; the webgui imports
 > ONLY `nicegui` + `shared.bus` + `shared.contracts` — no app engines, so the documented
 > `scoring`/`notifier` cross-app collision can no longer occur. See the "Planned 3-tier
-> architecture" section. Until a domain is migrated it still runs in-process in the GUI.
+> architecture" section.
 
 ## Tests
 
@@ -479,7 +585,21 @@ cd sentiment-dashboard ; python -m pytest tests
 cd trade-analyzer      ; python -m pytest .
 cd portfolio-analyzer  ; python -m pytest tests
 cd claude-driver       ; python -m pytest .
-cd webgui              ; python -m pytest .   # 127 tests: transforms + shell smoke
+cd webgui              ; python -m pytest .   # 236 tests: transforms + shell smoke
+```
+
+The 3-tier services run per folder from the repo root (NOT `pytest services` over
+all of them — that puts multiple hyphenated app dirs on `sys.path` at once and
+re-triggers the documented `config`/`scoring`/`notifier` module-name collisions):
+
+```powershell
+# from the repo root, one service at a time
+.venv\Scripts\python -m pytest services\sentiment_svc   # 24
+.venv\Scripts\python -m pytest services\options_svc     # 100
+.venv\Scripts\python -m pytest services\portfolio_svc   # 20
+.venv\Scripts\python -m pytest services\trade_svc       # 19
+.venv\Scripts\python -m pytest services\driver_svc      # 26
+.venv\Scripts\python -m pytest shared\contracts         # 21 (no app-dir imports — safe together)
 ```
 
 - **options-scanner** has ~2 known date-relative failing tests carried over from
