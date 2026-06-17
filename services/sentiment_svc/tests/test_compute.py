@@ -55,7 +55,7 @@ def test_derive_composite_extras_shape_and_values():
     out = compute.derive_composite_extras(live, snaps, spy)
 
     assert set(out) == {"weights", "size", "bias", "signal",
-                        "velocity", "divergence", "trend"}
+                        "velocity", "divergence", "trend", "trend_30d_ago"}
     # weights = sentiment v4.3 WEIGHTS (credit_pulse excluded, sums to 1.0).
     assert abs(sum(out["weights"].values()) - 1.0) < 1e-9
     assert "credit_pulse" not in out["weights"]
@@ -106,6 +106,24 @@ def test_derive_sector_summary_values():
 def test_derive_sector_summary_defensive():
     out = compute.derive_sector_summary(None)
     assert out == {"wpct": None, "score": 0.0}
+
+
+def test_derive_composite_extras_includes_trend_30d_ago():
+    # 260 rising closes -> a valid regime; [:-30] still has >200 bars.
+    spy = [100.0 + i * 0.5 for i in range(260)]
+    snaps = [{"composite": {"total_score": "6.00"}}]
+    out = compute.derive_composite_extras(live=None, snaps=snaps, spy=spy)
+    assert "trend" in out and "trend_30d_ago" in out
+    t30 = out["trend_30d_ago"]
+    assert t30 is not None and t30.get("state") in {
+        "bull_trend", "pullback_in_bull", "range", "bear_rally", "bear_trend"}
+    assert "sma_200_slope_pct" in t30 and "drawdown_pct" in t30
+
+
+def test_derive_composite_extras_trend_30d_ago_degrades_on_short_spy():
+    spy = [100.0 + i for i in range(40)]  # < 30 + MIN_BARS_PARTIAL -> use full spy
+    out = compute.derive_composite_extras(live=None, snaps=[], spy=spy)
+    assert "trend_30d_ago" in out   # present (may be None), never raises
 
 
 def test_compute_imports_clean():

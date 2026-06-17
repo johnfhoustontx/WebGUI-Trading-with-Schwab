@@ -345,6 +345,14 @@ def derive_composite_extras(live, snaps, spy):
     except Exception:  # noqa: BLE001
         divergence = ""
 
+    # ~30-sessions-ago regime for the Market Trend "30d ago" GUI gauge. The
+    # webgui can't classify (no scoring engine), so compute + publish it here.
+    # Degrade to the current regime when there isn't enough pre-window history.
+    back = 30
+    spy_30 = (spy[:-back] if (spy and len(spy) > back + trend_regime.MIN_BARS_PARTIAL)
+              else spy)
+    trend_30d_ago = build_trend_dict(spy_30)
+
     return {
         "weights": dict(WEIGHTS),
         "size": size,
@@ -353,6 +361,7 @@ def derive_composite_extras(live, snaps, spy):
         "velocity": velocity,
         "divergence": divergence,
         "trend": build_trend_dict(spy),
+        "trend_30d_ago": trend_30d_ago,
     }
 
 
