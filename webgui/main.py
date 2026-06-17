@@ -117,12 +117,6 @@ def _layout(active: str, title: str):
         yield content
 
 
-def _stub(title: str, blurb: str) -> None:
-    ui.label(title).classes("text-h5")
-    ui.label(blurb).classes("opacity-70")
-    ui.label("(page under construction — Phase 3)").classes("text-sm opacity-50")
-
-
 @ui.page("/")
 def options_scanner_page() -> None:
     with _layout("/", "Options · Scanner"):
@@ -203,13 +197,15 @@ def trade_page() -> None:
 @ui.page("/portfolio")
 def portfolio_page() -> None:
     with _layout("/portfolio", "Portfolio"):
-        _stub("Portfolio Analyzer", "Sector breakdown, vs-sector performance, live streaming.")
+        from pages import portfolio
+        portfolio.render()
 
 
 @ui.page("/driver")
 def driver_page() -> None:
     with _layout("/driver", "Driver"):
-        _stub("Claude Driver", "Orchestration controls and the order approval queue.")
+        from pages import driver
+        driver.render()
 
 
 if __name__ in {"__main__", "__mp_main__"}:
