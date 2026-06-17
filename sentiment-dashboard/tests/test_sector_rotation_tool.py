@@ -63,21 +63,39 @@ def test_assess_from_close_series_full_year_depth():
     assert len(a["sectors"]) == 11
 
 
-def test_assess_from_close_series_includes_tail():
+def test_assess_from_close_series_includes_sampled_tail():
     sectors, bench = _synthetic_closes()
     a = rt.assess_from_close_series(sectors, bench, "2026-06-08")
     assert a is not None
     for s in a["sectors"]:
         tail = s.get("tail")
         assert isinstance(tail, list) and tail, f"{s['etf']} missing tail"
-        # At most TAIL_LENGTH points, oldest -> newest.
+        # At most TAIL_LENGTH plotted points.
         assert len(tail) <= rt.TAIL_LENGTH
-        # Each point carries the same keys as the head reading.
+        # Same keys as the head reading; newest point == current head.
         assert set(tail[0]) == {"rs_ratio", "rs_momentum"}
-        # The newest tail point equals the current head reading.
         assert tail[-1]["rs_ratio"] == s["rs_ratio"]
         assert tail[-1]["rs_momentum"] == s["rs_momentum"]
 
 
-def test_tail_length_constant_is_30():
-    assert rt.TAIL_LENGTH == 30
+def test_tail_constants():
+    assert rt.TAIL_LENGTH == 12
+    assert rt.TAIL_STRIDE == 2
+
+
+def test_tail_samples_every_other_point():
+    sectors, bench = _synthetic_closes(n=200)
+    import pandas as pd
+    bench_s = pd.Series([float(c) for c in bench[-200:]])
+    etf = next(iter(rt.SECTOR_ETFS))
+    sec_s = pd.Series([float(c) for c in sectors[etf][-200:]])
+    rs_ratio = rt.compute_rs_ratio(sec_s, bench_s)
+    rs_mom = rt.compute_rs_momentum(rs_ratio)
+    paired = pd.DataFrame({"ratio": rs_ratio, "mom": rs_mom}).dropna().reset_index(drop=True)
+    expected = paired.iloc[::-1].iloc[::rt.TAIL_STRIDE].iloc[:rt.TAIL_LENGTH].iloc[::-1]
+    a = rt.assess_from_close_series(sectors, bench, "2026-06-08")
+    got = next(s for s in a["sectors"] if s["etf"] == etf)["tail"]
+    assert len(got) == len(expected)
+    assert got[-1]["rs_ratio"] == round(float(expected["ratio"].iloc[-1]), 2)
+    # spacing: the gap between the last two plotted ratios matches the stride-2 source.
+    assert got[-2]["rs_ratio"] == round(float(expected["ratio"].iloc[-2]), 2)

@@ -70,9 +70,11 @@ MIN_BARS = 2 * NORM_WINDOW + MOM_WINDOW - 1
 
 BENCHMARK = "SPY"
 
-# Meteor-tail length: how many trailing daily RRG points to retain per sector
-# for the RRG scatter trail (oldest -> newest, last == current reading).
-TAIL_LENGTH = 30
+# Meteor-tail: how many trailing daily RRG points to PLOT per sector and the day
+# stride between them (every other day → spans ~24 trading days with 12 points;
+# oldest -> newest, last == current reading).
+TAIL_LENGTH = 12
+TAIL_STRIDE = 2
 
 # 11 GICS sector SPDR ETFs → display names (no '$' prefix on ETFs).
 SECTOR_ETFS = {
@@ -265,10 +267,10 @@ def assess_sector(etf, sector_close, bench_close):
     ratio_val = float(paired["ratio"].iloc[-1])
     mom_val = float(paired["mom"].iloc[-1])
     quadrant = classify_quadrant(ratio_val, mom_val)
-    tail_df = paired.tail(TAIL_LENGTH)
+    sampled = paired.iloc[::-1].iloc[::TAIL_STRIDE].iloc[:TAIL_LENGTH].iloc[::-1]
     tail = [
         {"rs_ratio": round(float(r), 2), "rs_momentum": round(float(m), 2)}
-        for r, m in zip(tail_df["ratio"], tail_df["mom"])
+        for r, m in zip(sampled["ratio"], sampled["mom"])
     ]
     return {
         "etf": etf,
