@@ -111,11 +111,28 @@ services → webgui. Full design: [3-tier design doc](docs/plans/2026-06-15-thre
 
 `webgui/main.py` is the server + nav shell: a left-nav with expandable
 **Options** and **Sentiment** groups (Sentiment children: Sentiment dashboard +
-Sector Rotation) plus flat Trade / Portfolio / Driver items. Pages
+Sector Rotation) plus flat Trade / Portfolio / Driver / **Settings** items. Pages
 live in `webgui/pages/`; each leaf exposes `render()` called inside the shell
 `_layout`. `webgui/proxy.py` wraps `schwab-proxy/proxy_client.py` and adds
 `health()`. Pure transforms / SVG builders are unit-tested (`webgui/tests/`);
 heavy engine calls run off-thread via `nicegui.run.io_bound`.
+
+**App-wide alerts + nav badges (DONE — 2026-06-17).** `_layout` mounts a hidden
+`<audio>` + a `ui.timer(2s)` watcher (`alerts.py` pure helpers + `main._run_watcher`)
+that runs on **every** page: it chimes a bundled WAV (`webgui/static/sounds/{chime,
+bell,ping}.wav`, served at `/static`) — and optionally fires a desktop
+`Notification` — on new qualifying scanner signals (gated by enable/market-hours/
+min-score in `app_settings`), and maintains red count badges on **Scanner** (new
+signal keys), **Captured Signals**, and **Driver** (pending approval) nav items
+(`_NAV_BADGES`, single-user like `_NAV_OPEN`; cleared when you open that page).
+GUI prefs persist via `webgui/app_settings.py` → `webgui/data/settings.json`
+(gitignored; regenerates from `DEFAULTS`). The **Settings** page (`/settings`,
+`pages/settings.py`) binds the alert toggles/sound/volume/market-hours/min-score +
+desktop-notification controls. The drawer is restyled (`.nav-drawer` CSS: active
+pill, hover, right-aligned badges, title block). Browsers block autoplay until a
+user gesture — clicking any nav link or **Test sound** unlocks it. Design/plan:
+[design](docs/plans/2026-06-17-scanner-alerts-settings-badges-design.md) /
+[plan](docs/plans/2026-06-17-scanner-alerts-settings-badges-plan.md).
 
 Routes:
 
@@ -133,6 +150,7 @@ Routes:
 | `/sentiment/rotation` | Sector Rotation (RRG-vs-SPY: Risk-ON/OFF headline + spread; **top row** = quadrant-map table (left) + tight ROTATING FROM/INTO w/ S&P weights (right); **full-width RRG below** w/ per-sector "meteor tails" — engine `assess_sector` retains a `tail` of `TAIL_LENGTH=12` RS-Ratio/RS-Mom points sampled every `TAIL_STRIDE=2` days; page draws **one trace per sector** (faded trail line + single bright head dot) and **hover-isolates** a sector (`plotly_hover`/`unhover` → `run_plot_method('restyle')` dims the rest); reuses `sector_rotation_assessment`; cached, **manual Refresh only**) | built |
 | `/trade` | Trade (on-demand single-symbol analysis: **Position (1–8wk)** + **Investor (months+)** Buy/Hold/Sell verdicts w/ score + top reasons + hard gates + expandable factor breakdown; **MTF EMA alignment** (per-timeframe); momentum strip (RSI/ADX/MACD/VWAP/RelVol); sector strength; **Fundamentals card** (P/E/PEG/growth/ROE/margins via proxy `/instruments`); persists across nav) | built |
 | `/driver` | Driver (morning-agent **order-approval queue**: Run morning agent → graded day + proposed trades; **APPROVE** (confirm dialog) / **SKIP**; conditions strip + grade rationale; **Performance** view (win-rate / P&L-by-bucket + trade table). 09:28-ET scheduler fires the run unattended. Orders execute via `order_executor` with `PAPER_TRADE=True` → **simulated**) | built |
+| `/settings` | Settings (GUI prefs via `app_settings`: scanner **audio alert** on/off + sound + volume, only-during-market-hours, min-score-to-alert; desktop-notification toggle + permission grant + Test sound. Extensible — first batch) | built |
 | `/portfolio` | Portfolio (3-tier, `services/portfolio_svc` :8212: **Holdings / Sectors / Performance** tabs over the portfolio model — sector breakdown, vs-sector RS, since-purchase excess, benchmark over/under-weight, tailwind; **Performance** scorecard (return/capital/risk/entry grades + composite + ann. return + drawdown) with a per-position **advisory suggestions** detail pane; **live-streaming P&L** via the service's proxy SSE consumer republishing each tick; proxy/stream status bar; persists across nav) | built |
 
 The `pages/options/` subpackage shares `header.py` (compact quotes/VIX/sentiment
