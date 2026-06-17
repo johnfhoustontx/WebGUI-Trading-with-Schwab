@@ -69,45 +69,41 @@ def test_rotation_rows_sorted_and_colored():
     assert rows[0]["rs_ratio"] == 101.5
 
 
-def _head_trace(fig):
-    return next(t for t in fig["data"] if t.get("mode") == "markers+text")
+def _sector_traces(fig):
+    return [t for t in fig["data"] if t.get("mode") == "lines+markers+text"]
 
 
-def test_rrg_scatter_figure_shape():
+def test_rrg_scatter_one_trace_per_sector():
     fig = R.rrg_scatter_figure(_assessment())
-    head = _head_trace(fig)
-    assert head["type"] == "scatter"
-    assert head["mode"].startswith("markers")
-    assert set(head["x"]) == {101.5, 98.0}      # rs_ratio (heads)
+    traces = _sector_traces(fig)
+    assert len(traces) == 2                       # one trace per sector
+    # curveNumber/order maps to the sectors order.
+    assert traces[0]["x"][-1] == 101.5 and traces[1]["x"][-1] == 98.0
     # crosshair reference lines at 100/100 present as shapes
     assert any(s.get("type") == "line" for s in fig["layout"].get("shapes", []))
+    # hovermode closest so the line/head is hoverable
+    assert fig["layout"].get("hovermode") == "closest"
 
 
-def test_rrg_scatter_has_meteor_tail_per_sector():
+def test_rrg_scatter_line_plus_single_head_dot():
     fig = R.rrg_scatter_figure(_assessment())
-    head = _head_trace(fig)
-    tails = [t for t in fig["data"]
-             if t is not head and t.get("mode") == "lines+markers"]
-    assert len(tails) == 2                       # one per sector with a tail
-    # Tails render BEHIND the head trace (head is last).
-    assert fig["data"][-1] is head
-    xlk_tail = next(t for t in tails if t["x"][-1] == 101.5)
-    # Trail follows the sector's path, oldest -> newest, ending at the head.
-    assert xlk_tail["x"] == [100.2, 100.9, 101.5]
-    assert xlk_tail["y"] == [99.5, 100.8, 102.0]
-    # Meteor fade: marker opacity ramps up toward the newest point.
-    op = xlk_tail["marker"]["opacity"]
-    assert op == sorted(op) and op[0] < op[-1]
-    # Quadrant color (Leading -> green) on the markers; faint rgba line.
-    assert xlk_tail["marker"]["color"] == R.CLR_GREEN
-    assert xlk_tail["line"]["color"].startswith("rgba(")
-    assert xlk_tail.get("showlegend") is False
-    assert xlk_tail.get("hoverinfo") == "skip"
+    xlk = next(t for t in _sector_traces(fig) if t["x"][-1] == 101.5)
+    # Trail follows the path, oldest -> newest, ending at the head.
+    assert xlk["x"] == [100.2, 100.9, 101.5]
+    assert xlk["y"] == [99.5, 100.8, 102.0]
+    # Only the LAST marker (head) is visible; trail markers are invisible.
+    op = xlk["marker"]["opacity"]
+    assert op[-1] == 1.0 and all(o == 0.0 for o in op[:-1])
+    sz = xlk["marker"]["size"]
+    assert sz[-1] >= 10 and all(s == 0.0 for s in sz[:-1])
+    # Label only on the head; quadrant color; faint rgba line.
+    assert xlk["text"][-1] == "XLK" and all(t == "" for t in xlk["text"][:-1])
+    assert xlk["marker"]["color"] == R.CLR_GREEN
+    assert xlk["line"]["color"].startswith("rgba(")
+    assert xlk.get("showlegend") is False
 
 
 def test_rrg_scatter_no_legend_leak():
-    # With 12 traces, every trace must opt out of the legend so Plotly does
-    # not auto-show a stray "trace N" entry for the head.
     fig = R.rrg_scatter_figure(_assessment())
     assert all(t.get("showlegend") is False for t in fig["data"])
 
@@ -117,9 +113,19 @@ def test_rrg_scatter_handles_missing_tail():
     for s in a["sectors"]:
         s.pop("tail", None)
     fig = R.rrg_scatter_figure(a)
-    # No tail traces, but the head trace + crosshairs still render.
-    assert all(t.get("mode") != "lines+markers" for t in fig["data"])
-    assert _head_trace(fig)["x"]
+    traces = _sector_traces(fig)
+    assert len(traces) == 2                       # single-point head trace each
+    xlk = next(t for t in traces if t["x"] == [101.5])
+    assert xlk["y"] == [102.0]
+    assert xlk["marker"]["opacity"][-1] == 1.0
+
+
+def test_focus_opacities():
+    assert R._focus_opacities(3, 1) == [0.12, 1.0, 0.12]
+    assert R._focus_opacities(3, 0, dim=0.2) == [1.0, 0.2, 0.2]
+    # out-of-range / None -> all visible (restore on unhover)
+    assert R._focus_opacities(3, None) == [1.0, 1.0, 1.0]
+    assert R._focus_opacities(3, 9) == [1.0, 1.0, 1.0]
 
 
 def test_hex_to_rgba_helper():

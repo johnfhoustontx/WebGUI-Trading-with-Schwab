@@ -87,53 +87,57 @@ def _hex_to_rgba(hex_color, alpha):
     return f"rgba({r}, {g}, {b}, {alpha})"
 
 
-def _tail_trace(sec):
-    """Faded 'meteor' trail for one sector, or None if it has no usable tail.
-
-    Oldest -> newest; marker opacity/size ramp up toward the current point so
-    the head end is brightest. Colored by the sector's current quadrant."""
+def _sector_trace(sec):
+    """One RRG trace for a sector: a faded trail line + a single bright head dot
+    (the current point), labeled with the ETF. Built from the sampled tail; falls
+    back to a single head point when the sector has no tail."""
     tail = sec.get("tail") or []
-    if len(tail) < 2:
-        return None
-    xs = [p["rs_ratio"] for p in tail]
-    ys = [p["rs_momentum"] for p in tail]
     color = quadrant_color(sec.get("quadrant"))
-    n = len(tail)
-    # Ramp oldest (faint/small) -> newest (bright/larger).
-    opacity = [round(0.12 + 0.73 * i / (n - 1), 3) for i in range(n)]
-    size = [round(3.0 + 3.0 * i / (n - 1), 2) for i in range(n)]
+    if tail:
+        xs = [p["rs_ratio"] for p in tail]
+        ys = [p["rs_momentum"] for p in tail]
+    else:
+        r, m = sec.get("rs_ratio"), sec.get("rs_momentum")
+        if r is None or m is None:
+            return None
+        xs, ys = [r], [m]
+    n = len(xs)
     return {
-        "type": "scatter", "mode": "lines+markers",
+        "type": "scatter", "mode": "lines+markers+text",
         "x": xs, "y": ys,
-        "line": {"color": _hex_to_rgba(color, 0.28), "width": 1.5,
-                 "shape": "spline"},
-        "marker": {"color": color, "size": size, "opacity": opacity},
-        "hoverinfo": "skip", "showlegend": False,
+        "line": {"color": _hex_to_rgba(color, 0.4), "width": 1.6, "shape": "spline"},
+        "marker": {"color": color,
+                   "size": [0.0] * (n - 1) + [13],
+                   "opacity": [0.0] * (n - 1) + [1.0]},
+        "text": [""] * (n - 1) + [sec.get("etf") or ""],
+        "textposition": "top center", "textfont": {"size": 10},
+        "hovertemplate": (f"{sec.get('name')} ({sec.get('etf')}) — "
+                          f"{sec.get('quadrant')}<br>RS-Ratio %{{x:.2f}} · "
+                          f"RS-Mom %{{y:.2f}}<extra></extra>"),
+        "showlegend": False,
     }
+
+
+def _focus_opacities(n, focus, dim=0.12):
+    """Trace-opacity list: 1.0 for the ``focus`` trace, ``dim`` for the rest.
+    Returns all-1.0 when ``focus`` is None / out of range (restore on unhover)."""
+    if focus is None or not (0 <= focus < n):
+        return [1.0] * n
+    return [1.0 if i == focus else dim for i in range(n)]
 
 
 def rrg_scatter_figure(a):
-    """Plotly RRG scatter: faded 30-day meteor tail per sector + current dot,
-    100/100 crosshair lines. Tails render behind the labeled head dots."""
+    """Plotly RRG scatter: one trace per sector (faded trail line + a single head
+    dot), 100/100 crosshair lines, hovermode closest so each sector is hoverable.
+    Trace order matches the sectors order so ``curveNumber == sector index``."""
     secs = a.get("sectors") or []
-    xs = [s.get("rs_ratio") for s in secs]
-    ys = [s.get("rs_momentum") for s in secs]
-    colors = [quadrant_color(s.get("quadrant")) for s in secs]
-    labels = [s.get("etf") for s in secs]
+    traces = [t for t in (_sector_trace(s) for s in secs) if t is not None]
     line = {"color": "rgba(255,255,255,0.25)", "width": 1}
-    head = {
-        "type": "scatter", "mode": "markers+text",
-        "x": xs, "y": ys, "text": labels, "textposition": "top center",
-        "marker": {"size": 12, "color": colors},
-        "hovertext": [f"{s.get('name')} — {s.get('quadrant')}" for s in secs],
-        "hoverinfo": "text", "showlegend": False,
-    }
-    tails = [t for t in (_tail_trace(s) for s in secs) if t is not None]
     return {
-        "data": [*tails, head],
+        "data": traces,
         "layout": {
-            "margin": {"l": 44, "r": 12, "t": 8, "b": 36}, "height": 360,
-            "template": "plotly_dark",
+            "margin": {"l": 44, "r": 12, "t": 8, "b": 36}, "height": 560,
+            "template": "plotly_dark", "hovermode": "closest",
             "paper_bgcolor": "rgba(0,0,0,0)", "plot_bgcolor": "rgba(0,0,0,0)",
             "xaxis": {"title": "RS-Ratio", "zeroline": False,
                       "gridcolor": "rgba(255,255,255,0.06)"},
