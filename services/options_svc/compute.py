@@ -730,35 +730,83 @@ def gex_status_view(now=None) -> dict:
                 "next_scan": None, "age_seconds": None}
 
 
-def gamma_explain(symbol: str) -> dict:
-    """Build the Explain document body for ``symbol`` → ``{"symbol", "body"}``.
+def build_gamma_read(symbol, spot, gex_summary, charm_summary, dex_summary,
+                     vanna_summary, walls, regime):
+    """Map the gamma-engine summaries + walls + sentiment → a GammaRead.
 
-    Re-fetches + recomputes the chain (Explain needs the live GEX/Charm/DEX
-    summaries + DTE), assembles the ``build_explain_html_text`` context (mirroring
-    the page's ``_explain_ctx``), renders it through ``html_render`` (pinch section
-    + linkified explain HTML), and returns the inner HTML ``body``. The PAGE wraps
-    this in its pure ``wrap_explain`` container (fragment + downloadable document).
+    Pure: numbers in, ``gamma_infographic.GammaRead`` out. Missing levels fall
+    back to spot so the infographic's axis math never sees ``None``; missing
+    sentiment uses neutral defaults; a missing Vanna net leaves ``vex`` None so
+    the card renders 'awaiting data'."""
+    from gamma_infographic import GammaRead
 
-    Defensive: a fetch/compute failure yields a body explaining no data is
-    available, so the GUI always has something to show."""
+    s = spot if isinstance(spot, (int, float)) else 0.0
+    gx, ch, dx, vn = (gex_summary or {}), (charm_summary or {}), (dex_summary or {}), (vanna_summary or {})
+    reg, walls = (regime or {}), (walls or {})
+
+    def _lvl(v):
+        return v if isinstance(v, (int, float)) else s
+
+    def _num(v, default=None):
+        return v if isinstance(v, (int, float)) else default
+
+    score = reg.get("composite_score")
+    score = int(round(score)) if isinstance(score, (int, float)) else 6
+    conf = reg.get("aggregate_confidence")
+    conf = int(round(conf)) if isinstance(conf, (int, float)) else 100
+    trend = reg.get("bias") or reg.get("trend_state") or "neutral"
+
+    return GammaRead(
+        spot=s,
+        call_wall=_lvl(walls.get("call_wall")),
+        put_wall=_lvl(walls.get("put_wall")),
+        gamma_flip=_lvl(gx.get("flip")),
+        charm_flip=_lvl(ch.get("flip")),
+        charm_max_pos=_lvl(ch.get("top_pos_strike")),
+        charm_max_neg=_lvl(ch.get("top_neg_strike")),
+        dex_flow_usd=_num(dx.get("net_total"), 0.0),
+        vex_notional_usd=_num(vn.get("net_total")),
+        sentiment_score=score,
+        sentiment_trend=str(trend),
+        sentiment_confidence=conf,
+        symbol=symbol,
+    )
+
+
+def gamma_explain(symbol: str, style: str = "terminal") -> dict:
+    """Build the Explain **infographic** for ``symbol`` → ``{"symbol", "html"}``.
+
+    Re-fetches + recomputes the chain, maps the GEX/Charm/DEX/Vanna summaries +
+    directional walls + sentiment into a ``gamma_infographic.GammaRead`` and
+    renders a self-contained HTML infographic (the GUI serves it in a new browser
+    tab via a raw HTMLResponse route — so the doc's own CSS/fonts apply).
+
+    Defensive: a fetch/compute failure yields a minimal standalone page so the
+    GUI always has something to show."""
+    import gamma_infographic
     import gamma_tool as gt
-    import html_render
 
     try:
         from regime_filter import evaluate_regime
     except Exception:
         evaluate_regime = lambda: {"active": False}  # noqa: E731
 
+    def _fallback(msg):
+        return {"symbol": symbol,
+                "html": ("<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+                         f"<title>{symbol} — Gamma Read</title></head>"
+                         "<body style=\"font-family:system-ui,sans-serif;background:#0c0f15;"
+                         "color:#e9edf3;padding:40px;\">"
+                         f"<h2>{symbol} — Gamma Read</h2><p>{msg}</p></body></html>")}
+
     chain = _gamma_fetch_chain(symbol)
     if not chain:
-        return {"symbol": symbol, "body": "<p>No chain data available.</p>"}
-
+        return _fallback("No chain data available.")
     eng = gt.GammaEngine()
     res = eng.calc_all_from_chain(chain)
     if not res:
-        return {"symbol": symbol, "body": "<p>No chain data available.</p>"}
+        return _fallback("No chain data available.")
     gex, charm, dex, vanna = res
-    dte = eng._last_dte
     spot = (gex or {}).get("spot")
 
     try:
@@ -766,19 +814,19 @@ def gamma_explain(symbol: str) -> dict:
     except Exception:
         regime = {"active": False}
 
-    ctx = {
-        "symbol": symbol, "spot": spot, "dte": dte,
-        "gex_summary": gt.GammaEngine.snapshot_summary(gex, "gex"),
-        "charm_summary": gt.GammaEngine.snapshot_summary(charm, "charm"),
-        "dex_summary": gt.GammaEngine.snapshot_summary(dex, "dex"),
-        "sentiment": regime,
-    }
-    txt = gt.build_explain_html_text(ctx)
-    pinch = html_render.pinch_section_html(None) or (
-        "<h2>Dealer Pinch — Vanna/Charm Exhaustion</h2>"
-        "<p>No pinch data yet — waiting for the first market-data fetch.</p>")
-    body = html_render.linkify(pinch + "\n" + html_render.explain_to_html(txt))
-    return {"symbol": symbol, "body": body}
+    walls = gt.get_directional_walls(gex, spot)
+    read = build_gamma_read(
+        symbol, spot,
+        gt.GammaEngine.snapshot_summary(gex, "gex"),
+        gt.GammaEngine.snapshot_summary(charm, "charm"),
+        gt.GammaEngine.snapshot_summary(dex, "dex"),
+        gt.GammaEngine.snapshot_summary(vanna, "vanna"),
+        walls, regime)
+    try:
+        html = gamma_infographic.render_infographic(read, style=style)
+    except Exception as exc:  # never let a render glitch break the command
+        return _fallback(f"Infographic render failed: {exc}")
+    return {"symbol": symbol, "html": html}
 
 
 def _gamma_blocks_for(symbol, chain):

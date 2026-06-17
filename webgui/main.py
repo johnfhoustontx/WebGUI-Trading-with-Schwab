@@ -17,10 +17,37 @@ for _p in (str(_REPO_ROOT), str(_REPO_ROOT / "webgui")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+from fastapi.responses import HTMLResponse  # noqa: E402
 from nicegui import app, ui  # noqa: E402
 
 import proxy  # noqa: E402
 from repo_paths import NICEGUI_PORT  # noqa: E402
+
+_EXPLAIN_EMPTY = (
+    "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+    "<title>Gamma Explain</title></head>"
+    "<body style=\"font-family:system-ui,sans-serif;background:#0c0f15;color:#e9edf3;padding:40px;\">"
+    "<h3>No Gamma Explain generated yet</h3>"
+    "<p>Open the Gamma page and click <b>Explain</b> first.</p></body></html>")
+
+
+def explain_html(payload):
+    """Standalone infographic HTML from the cached gamma_explain payload (or a
+    friendly placeholder)."""
+    html = (payload or {}).get("html")
+    return html if isinstance(html, str) and html.strip() else _EXPLAIN_EMPTY
+
+
+@app.get("/options/explain")
+def _serve_explain():
+    """Serve the latest Gamma Explain infographic as a raw standalone page.
+
+    Reads straight from the Redis bus cache (written by options_svc) and returns
+    a raw HTMLResponse so the document's own <style>/fonts apply — NiceGUI's
+    ``ui.html`` would strip them. Opened in a new browser tab from the Gamma page.
+    """
+    import bus_client
+    return HTMLResponse(explain_html(bus_client.read("options:gamma_explain")))
 
 
 # Options scanning + auto-scan now live in services/options_svc (Tier 2): the

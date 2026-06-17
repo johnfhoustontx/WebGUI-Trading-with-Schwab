@@ -580,24 +580,6 @@ def render():
         seen["status"] = version
         _paint_status(bus_client.read("options:gex_status"))
 
-    def _open_explain_dialog(res):
-        symbol = (res or {}).get("symbol") or _current_symbol()
-        body = (res or {}).get("body") or "<p>No explain data.</p>"
-        fragment = wrap_explain(symbol, body, full=False)
-        document = wrap_explain(symbol, body, full=True)
-        with ui.dialog().props("maximized") as dlg, ui.card().classes("w-full h-full"):
-            with ui.row().classes("justify-between w-full items-center"):
-                ui.label(f"Explain — {symbol}").classes("text-h6")
-                with ui.row():
-                    ui.button("Download", icon="download",
-                              on_click=lambda: ui.download.content(document, "explain.html")).props("flat")
-                    ui.button("Close", on_click=dlg.close).props("flat")
-            with ui.element("div").classes("w-full").style(
-                    "background:#1b1b1b;max-height:85vh;overflow:auto;"
-                    "padding:20px;border-radius:6px;"):
-                ui.html(fragment)
-        dlg.open()
-
     @guard
     def _request_explain():
         sym = _current_symbol()
@@ -605,17 +587,19 @@ def render():
             ui.notify("Enter a symbol first.", type="warning")
             return
         bus_client.request("options", {"type": "gamma_explain", "args": {"symbol": sym}})
-        ui.notify("Explain requested…")
+        ui.notify("Building Explain infographic… opening in a new tab.")
 
     @guard
     def _watch_explain():
         # The initial version was captured at render time, so any change here is a
-        # fresh, user-requested result → open the dialog.
+        # fresh, user-requested infographic → open it in a new browser tab. The
+        # /options/explain route serves the cached standalone HTML (raw, so its own
+        # CSS/fonts apply). ?v= busts the browser cache so each click shows the latest.
         version = bus_client.read_version("options:gamma_explain")
         if version is None or version == seen["explain"]:
             return
         seen["explain"] = version
-        _open_explain_dialog(bus_client.read("options:gamma_explain") or {})
+        ui.navigate.to(f"/options/explain?v={version}", new_tab=True)
 
     def _open_analyze_dialog(res):
         prompt = (res or {}).get("prompt") or "(no prompt)"

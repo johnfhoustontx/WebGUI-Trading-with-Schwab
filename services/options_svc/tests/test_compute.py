@@ -577,26 +577,52 @@ def test_gamma_snapshot_none_when_chain_fetch_fails(monkeypatch):
     assert compute.gamma_snapshot("$SPX") is None
 
 
-def test_gamma_explain_returns_body(monkeypatch):
+def test_build_gamma_read_maps_and_falls_back():
+    read = compute.build_gamma_read(
+        "$SPX", spot=5400.0,
+        gex_summary={"flip": 5395.0},
+        charm_summary={"flip": 5402.0, "top_pos_strike": 5380.0, "top_neg_strike": 5450.0},
+        dex_summary={"net_total": 1.6e9},
+        vanna_summary={"net_total": 0.85e9},
+        walls={"call_wall": 5470.0, "put_wall": None},  # None -> spot fallback
+        regime={"active": True, "composite_score": 7, "bias": "bull_trend",
+                "aggregate_confidence": 80})
+    assert read.spot == 5400.0
+    assert read.call_wall == 5470.0
+    assert read.put_wall == 5400.0          # missing wall falls back to spot
+    assert read.gamma_flip == 5395.0
+    assert read.charm_flip == 5402.0
+    assert (read.charm_max_pos, read.charm_max_neg) == (5380.0, 5450.0)
+    assert read.dex_flow_usd == 1.6e9
+    assert read.vex_notional_usd == 0.85e9
+    assert read.sentiment_score == 7
+    assert read.sentiment_trend == "bull_trend"
+    assert read.sentiment_confidence == 80
+
+
+def test_build_gamma_read_defaults_when_inactive():
+    read = compute.build_gamma_read("$SPX", 5400.0, {}, {}, {}, {}, {}, {"active": False})
+    assert read.sentiment_score == 6          # neutral default
+    assert read.vex_notional_usd is None      # no vanna net -> 'awaiting data'
+    assert read.gamma_flip == 5400.0          # missing flip -> spot
+
+
+def test_gamma_explain_returns_infographic_html(monkeypatch):
     import sys as _sys
     import types as _types
 
     _patch_gamma(monkeypatch)
-    # gamma_tool needs the explain text builder + snapshot_summary staticmethod.
-    fake_gt = _sys.modules["gamma_tool"]
-    _FakeEngine.snapshot_summary = staticmethod(lambda data, view: {"spot": 5400.0})
-    fake_gt.build_explain_html_text = lambda ctx: "EXPLAIN TEXT"
-    monkeypatch.setitem(_sys.modules, "html_render", _types.SimpleNamespace(
-        pinch_section_html=lambda s: "",
-        explain_to_html=lambda t: f"<p>{t}</p>",
-        linkify=lambda h: h))
+    _FakeEngine.snapshot_summary = staticmethod(lambda data, view: {
+        "spot": 5400.0, "flip": 5399.5,
+        "top_pos_strike": 5380.0, "top_neg_strike": 5450.0, "net_total": 1.0})
     monkeypatch.setitem(_sys.modules, "regime_filter",
                         _types.SimpleNamespace(evaluate_regime=lambda: {"active": False}))
 
     out = compute.gamma_explain("$SPX")
     assert out["symbol"] == "$SPX"
-    assert "EXPLAIN TEXT" in out["body"]
-    # Restore the instance-method snapshot_summary for other tests.
+    assert "body" not in out                       # no longer the prose body
+    assert out["html"].lstrip().startswith("<!DOCTYPE html")
+    assert "SPX" in out["html"]                    # rendered the infographic doc
     del _FakeEngine.snapshot_summary
 
 
