@@ -361,6 +361,32 @@ font-family:var(--mono);font-weight:600;font-size:.78rem;letter-spacing:1px;colo
 .foot{margin-top:18px;text-align:center;font-family:var(--mono);font-size:.66rem;letter-spacing:1px;color:var(--txt-dim);}
 .foot span{color:var(--spot);}
 @media (prefers-reduced-motion:reduce){.spot-mark::before{animation:none;}}
+/* horizontal Level Map (across the top) + signal grid below */
+.lmap-card{background:linear-gradient(180deg,var(--card),var(--ink-2));border:1px solid var(--line);border-radius:16px;padding:18px 22px 14px;margin-bottom:18px;}
+.lmap-card .ttl{font-family:var(--mono);font-size:.7rem;letter-spacing:2px;text-transform:uppercase;color:var(--txt-mid);margin-bottom:2px;}
+.lmap-card .sub{font-size:.74rem;color:var(--txt-dim);margin-bottom:36px;}
+.lmap{position:relative;height:104px;margin:0 12px;}
+.lmap-axis{position:absolute;left:0;right:0;top:52px;height:2px;background:linear-gradient(90deg,transparent,var(--line) 4%,var(--line) 96%,transparent);}
+.lzone-pin{position:absolute;top:46px;height:14px;border-radius:3px;background:linear-gradient(90deg,rgba(245,185,66,.05),rgba(245,185,66,.12),rgba(245,185,66,.05));border-left:1px dashed rgba(245,185,66,.25);border-right:1px dashed rgba(245,185,66,.25);}
+.lzone-neg{position:absolute;top:46px;height:14px;border-radius:3px 0 0 3px;background:linear-gradient(90deg,rgba(232,99,90,.20),transparent);}
+.lzlab{position:absolute;font-family:var(--mono);font-size:.58rem;letter-spacing:1.5px;text-transform:uppercase;top:68px;opacity:.85;}
+.lm{position:absolute;top:53px;transform:translateX(-50%);}
+.lm .stem{position:absolute;left:50%;width:2px;transform:translateX(-50%);background:var(--line);}
+.lm.up .stem{bottom:0;height:24px;}.lm.dn .stem{top:0;height:24px;}
+.lm .lab{position:absolute;left:50%;transform:translateX(-50%);white-space:nowrap;text-align:center;}
+.lm.up .lab{bottom:28px;}.lm.dn .lab{top:28px;}
+.lm .px{font-family:var(--mono);font-weight:600;font-size:.82rem;display:block;}
+.lm .nm{font-family:var(--mono);font-size:.56rem;letter-spacing:1px;text-transform:uppercase;color:var(--txt-dim);display:block;}
+.lm.call .px,.lm.call .nm{color:var(--res);}.lm.call .stem{background:var(--res);box-shadow:0 0 10px rgba(232,99,90,.4);}
+.lm.put .px,.lm.put .nm{color:var(--sup);}.lm.put .stem{background:var(--sup);box-shadow:0 0 10px rgba(55,192,138,.4);}
+.lm.flip .px,.lm.flip .nm{color:var(--flip);}.lm.flip .stem{background:var(--flip);}
+.lm.pinch .px,.lm.pinch .nm{color:var(--pinch);}.lm.pinch .stem{background:var(--pinch);}
+.lm.minor .px{color:var(--txt-dim);font-weight:500;font-size:.74rem;}.lm.minor .nm{color:var(--txt-dim);}.lm.minor .stem{height:16px !important;background:var(--line-soft);}
+.lspot{position:absolute;top:53px;transform:translate(-50%,-50%);z-index:5;}
+.lspot .ring{width:16px;height:16px;border-radius:50%;background:var(--spot);box-shadow:0 0 0 4px rgba(245,185,66,.16),0 0 14px rgba(245,185,66,.5);margin:0 auto;}
+.lspot .lab{position:absolute;left:50%;top:12px;transform:translateX(-50%);font-family:var(--mono);font-weight:700;font-size:.78rem;color:var(--spot);background:var(--ink);padding:0 4px;white-space:nowrap;}
+.sig-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;}
+@media (max-width:760px){.sig-grid{grid-template-columns:1fr;}}
 """
 
 _CSS_DESKNOTE = """
@@ -577,11 +603,13 @@ def _render_terminal(c: Dict) -> str:
         )
     # pin-zone label only when no pinch magnet sits in the zone; otherwise the magnet labels it
     pin_zone_lab = '' if c['pinch_present'] else (
-        f'<div class="zone-lab" style="bottom:{c["pin_lo"]+c["pin_width"]/2}%;right:14px;color:var(--spot);">Pin zone</div>'
+        f'<div class="lzlab" style="left:{c["pin_lo"]+c["pin_width"]/2}%;transform:translateX(-50%);'
+        f'color:var(--spot);">Pin zone</div>'
     )
     pinch_marker = (
-        f'<div class="lv pinch" style="bottom:{c["p_pinch"]}%;"><div class="bar"></div>'
-        f'<div class="px">{c["pinch_strike_str"]}</div><div class="tag">Pinch magnet</div></div>'
+        f'<div class="lm pinch up" style="left:{c["p_pinch"]}%;"><div class="stem"></div>'
+        f'<div class="lab"><span class="px">{c["pinch_strike_str"]}</span>'
+        f'<span class="nm">Pinch</span></div></div>'
     ) if c['pinch_present'] else ''
     body = f"""<div class="wrap">
   <header class="head">
@@ -595,26 +623,25 @@ def _render_terminal(c: Dict) -> str:
       <div class="meta">VIX <b>{c['vix_str']}</b> &nbsp;\u00b7&nbsp; Sentiment <b>{c['sentiment_score']}/10 {c['sentiment_trend']}</b></div>
     </div>
   </header>
-  <div class="grid">
-    <section class="ladder-card">
-      <div class="ttl">Level Map</div>
-      <div class="sub">Walls, flips &amp; decay strikes \u00b7 {c['axis_lo']}\u2013{c['axis_hi']}</div>
-      <div class="ladder">
-        <div class="axis"></div>
-        <div class="zone zone-pin" style="bottom:{c['pin_lo']}%;height:{c['pin_width']}%;"></div>
-        <div class="zone zone-neg" style="bottom:0;height:{c['neg_width']}%;"></div>
-        <div class="zone-lab" style="bottom:3%;left:14px;color:var(--res);">Neg-\u03b3 \u00b7 accelerates</div>
-        {pin_zone_lab}
-        <div class="lv minor" style="bottom:{c['p_cmax_neg']}%;"><div class="bar"></div><div class="px">{c['charm_max_neg']}</div><div class="tag">max \u2212charm</div></div>
-        <div class="lv major call" style="bottom:{c['p_call']}%;"><div class="bar"></div><div class="px">{c['call_wall']}</div><div class="tag">Call wall \u00b7 R</div></div>
-        <div class="lv major put" style="bottom:{c['p_put']}%;"><div class="bar"></div><div class="px">{c['put_wall']}</div><div class="tag">Put wall \u00b7 S</div></div>
-        {pinch_marker}
-        <div class="lv major flip" style="bottom:{c['p_flip']}%;"><div class="bar"></div><div class="px">{c['gamma_flip']}</div><div class="tag">Gamma flip</div></div>
-        <div class="lv minor" style="bottom:{c['p_cmax_pos']}%;"><div class="bar"></div><div class="px">{c['charm_max_pos']}</div><div class="tag">max +charm</div></div>
-        <div class="spot-mark" style="bottom:{c['p_spot']}%;">{c['spot']} spot</div>
-      </div>
-    </section>
-    <section class="signals">
+  <section class="lmap-card">
+    <div class="ttl">Level Map</div>
+    <div class="sub">Walls, flips &amp; decay strikes \u00b7 {c['axis_lo']}\u2013{c['axis_hi']}</div>
+    <div class="lmap">
+      <div class="lmap-axis"></div>
+      <div class="lzone-pin" style="left:{c['pin_lo']}%;width:{c['pin_width']}%;"></div>
+      <div class="lzone-neg" style="left:0;width:{c['neg_width']}%;"></div>
+      <div class="lzlab" style="left:1%;color:var(--res);">Neg-\u03b3 \u00b7 accelerates</div>
+      {pin_zone_lab}
+      <div class="lm minor up" style="left:{c['p_cmax_neg']}%;"><div class="stem"></div><div class="lab"><span class="px">{c['charm_max_neg']}</span><span class="nm">max \u2212charm</span></div></div>
+      <div class="lm call up" style="left:{c['p_call']}%;"><div class="stem"></div><div class="lab"><span class="px">{c['call_wall']}</span><span class="nm">Call wall \u00b7 R</span></div></div>
+      <div class="lm put dn" style="left:{c['p_put']}%;"><div class="stem"></div><div class="lab"><span class="px">{c['put_wall']}</span><span class="nm">Put wall \u00b7 S</span></div></div>
+      <div class="lm flip dn" style="left:{c['p_flip']}%;"><div class="stem"></div><div class="lab"><span class="px">{c['gamma_flip']}</span><span class="nm">Gamma flip</span></div></div>
+      {pinch_marker}
+      <div class="lm minor dn" style="left:{c['p_cmax_pos']}%;"><div class="stem"></div><div class="lab"><span class="px">{c['charm_max_pos']}</span><span class="nm">max +charm</span></div></div>
+      <div class="lspot" style="left:{c['p_spot']}%;"><div class="ring"></div><div class="lab">{c['spot']} spot</div></div>
+    </div>
+  </section>
+  <section class="sig-grid">
       <article class="sig {c['gex_lean_class']}">
         <div class="sig-head"><div class="sig-name">Gamma Exposure <span>GEX</span></div>
           <div class="lean {c['gex_lean_class']}">{c['gex_lean_text']}</div></div>
@@ -645,8 +672,7 @@ def _render_terminal(c: Dict) -> str:
         <div class="play"><span class="t">Play</span> &nbsp;{'Favor the long side.' if c['flow_class']=='sup' else 'Respect the supply.'} <span class="risk">Watch the projected EOD flip \u2014 once hedge pressure crosses zero the {'tailwind turns headwind' if c['flow_class']=='sup' else 'pressure lifts'}.</span></div>
       </article>
       {vanna_card}
-    </section>
-  </div>
+  </section>
   <div class="senti" style="margin-top:18px;">
     <div class="gauge"><div class="num">{c['sentiment_score']}<small>/10</small></div>
       <div class="bars">{_sentiment_bars(c['sentiment_score'])}</div></div>
