@@ -13,7 +13,7 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 (Holdings / Sectors / Performance + advisory suggestions + **live-streaming P&L**
 via the service's proxy SSE consumer). **All five domains are now migrated**
 (Sentiment, Options, Portfolio, Trade, Driver) — every page reads Redis and the
-webgui imports only `nicegui` + `shared.bus` + `shared.contracts`. 236 webgui +
+webgui imports only `nicegui` + `shared.bus` + `shared.contracts`. 239 webgui +
 20 portfolio_svc tests green. Remaining: Phase 6 retire-shims (`regime_filter`
 reads Redis; drop the bridge dual-write). See "Portfolio page (`/portfolio`) —
 DONE" + "Planned 3-tier architecture" below.)
@@ -129,7 +129,7 @@ Routes:
 | `/options/swing` | Swing Scanner | built |
 | `/options/gamma` | Gamma (GEX/Charm/DEX/Vanna bars + flip/**single Call+Put walls** + intraday heatmap; bar/heatmap **width split grows with session** snapshot count; **flicker-free** in-place Plotly updates) | built |
 | `/options/simulator` | Simulator (What-if + IV-shock; Replay TODO) | built |
-| `/sentiment` | Sentiment (two-column top: gauge+regime / component table; traffic-light tiles; 30d history + rolling avgs; full-width **Sector & Industry Performance** w/ Day/Week/Month %, P/C, RRG, rotation banner, **expandable industries w/ P/C+RRG**; bottom status bar; **persists across navigation**; **server-side 120s auto-refresh + bridge publish, tab-independent**) | built |
+| `/sentiment` | Sentiment (two-column top: **dual** Sentiment gauges (Today + 30-Day Avg) + **dual** Market Trend gauges (Today + ~30d Ago) / component table; traffic-light tiles; 30d history + rolling avgs; full-width **Sector & Industry Performance** w/ Day/Week/Month %, P/C, RRG, rotation banner, **expandable industries w/ P/C+RRG**; bottom status bar; **persists across navigation**; **server-side 120s auto-refresh + bridge publish, tab-independent**) | built |
 | `/sentiment/rotation` | Sector Rotation (RRG-vs-SPY: Risk-ON/OFF headline + spread; **top row** = quadrant-map table (left) + tight ROTATING FROM/INTO w/ S&P weights (right); **full-width RRG below** w/ per-sector "meteor tails" — engine `assess_sector` retains a `tail` of `TAIL_LENGTH=12` RS-Ratio/RS-Mom points sampled every `TAIL_STRIDE=2` days; page draws **one trace per sector** (faded trail line + single bright head dot) and **hover-isolates** a sector (`plotly_hover`/`unhover` → `run_plot_method('restyle')` dims the rest); reuses `sector_rotation_assessment`; cached, **manual Refresh only**) | built |
 | `/trade` | Trade (on-demand single-symbol analysis: **Position (1–8wk)** + **Investor (months+)** Buy/Hold/Sell verdicts w/ score + top reasons + hard gates + expandable factor breakdown; **MTF EMA alignment** (per-timeframe); momentum strip (RSI/ADX/MACD/VWAP/RelVol); sector strength; **Fundamentals card** (P/E/PEG/growth/ROE/margins via proxy `/instruments`); persists across nav) | built |
 | `/driver` | Driver (morning-agent **order-approval queue**: Run morning agent → graded day + proposed trades; **APPROVE** (confirm dialog) / **SKIP**; conditions strip + grade rationale; **Performance** view (win-rate / P&L-by-bucket + trade table). 09:28-ET scheduler fires the run unattended. Orders execute via `order_executor` with `PAPER_TRADE=True` → **simulated**) | built |
@@ -214,8 +214,13 @@ this writing). TDD pure functions; smoke-verify `render()` with a screenshot.
 copied `history_backfill.backfill_history(...)` engine (latest completed-session
 composite + 30d history) + `scoring` (`composite.velocity/divergence`,
 `trend_regime.classify/commit_state`) + the ported `sectors_ref.load_sectors_data`.
-**Layout:** a two-column top region — left: speedometer + bias + size/conf with the
-**Market Trend regime** blended beneath it; right: the component **table**
+**Layout:** a two-column top region — left: **two** Market Sentiment speedometers
+(**Today** `gauge_score(total)` + **30-Day Avg** `gauge_score(sentiment_30d_avg(snaps))`,
+the avg = page-side mean of the history composites) + bias + size/conf; right: **two**
+**Market Trend** speedometers (**Today** + **~30d Ago**, both via `trend_gauge_value`
+off the regime anchor + slope/dd nudge) — the 30d-ago value is `derived["trend_30d_ago"]`
+**published by `sentiment_svc`** (`build_trend_dict(spy[:-30])`; the page can't classify,
+no scoring engine) — with the regime badge/desc beneath; then the component **table**
 (Value/Score[2dp]/Weight/Conf — Contrib computed for reconciliation but not shown;
 credit_pulse excluded per v4.3 `WEIGHTS`). Then 5 summary **tiles**
 (Modifier/Bias/Signal/Yesterday/Change) sized down with a **traffic-light background**
@@ -585,7 +590,7 @@ cd sentiment-dashboard ; python -m pytest tests
 cd trade-analyzer      ; python -m pytest .
 cd portfolio-analyzer  ; python -m pytest tests
 cd claude-driver       ; python -m pytest .
-cd webgui              ; python -m pytest .   # 236 tests: transforms + shell smoke
+cd webgui              ; python -m pytest .   # 239 tests: transforms + shell smoke
 ```
 
 The 3-tier services run per folder from the repo root (NOT `pytest services` over
@@ -594,7 +599,7 @@ re-triggers the documented `config`/`scoring`/`notifier` module-name collisions)
 
 ```powershell
 # from the repo root, one service at a time
-.venv\Scripts\python -m pytest services\sentiment_svc   # 24
+.venv\Scripts\python -m pytest services\sentiment_svc   # 26
 .venv\Scripts\python -m pytest services\options_svc     # 100
 .venv\Scripts\python -m pytest services\portfolio_svc   # 20
 .venv\Scripts\python -m pytest services\trade_svc       # 19
