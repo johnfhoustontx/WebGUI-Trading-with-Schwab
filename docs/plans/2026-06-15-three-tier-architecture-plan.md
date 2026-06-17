@@ -398,10 +398,20 @@ run order. Commit — `chore(launchers): start sentiment_svc between proxy and w
   symbol entry → `{"type":"analyze","args":{"symbol":"AAPL"}}` command → `cache:trade:{symbol}` +
   event. Watch for the `notifier` module-name clash — isolated by the separate process, but verify.
 
-### PHASE 5 — Driver (`services/driver_svc`, :8214) — stub page, born 3-tier
+### PHASE 5 — Driver (`services/driver_svc`, :8214) — stub page, born 3-tier — **DONE (2026-06-16)**
 - **Engines:** `claude-driver/approval_server.py` + `morning_agent.py`. The order-approval queue is
   a natural Redis Streams flow: driver publishes pending orders to `cache:driver:approvals` + event;
   GUI approve/reject buttons enqueue `cmd:driver` commands the consumer acts on.
+- **Built as:** contracts `ApprovalState`/`PerfReport` (`shared/contracts/driver.py`); `driver_svc/compute`
+  ports `morning_agent.run_morning_agent`'s orchestration minus its file-write/HTTP-post side effects
+  (`run_morning`/`execute`/`build_perf_report`, all defensive); `driver_svc/handlers` (`run`/`approve`/
+  `skip`/`perf` → `cache:driver:approvals` + `cache:driver:performance`); `driver_svc/scheduler`
+  (`morning_due` once/day at 09:28 ET — never executes orders); `driver_svc/app`
+  (`make_app("driver", scheduler, command_handler)`); page `webgui/pages/driver.py` (approval queue
+  w/ APPROVE confirm-dialog / SKIP + Performance view). `order_executor` runs with `config.PAPER_TRADE=True`
+  → simulated. Tests: `services/driver_svc/tests` (26) + `webgui/tests/test_driver.py`. Note: run service
+  suites **per folder** — importing driver_svc + trade_svc engines in one process re-triggers the `config`
+  module-name collision.
 
 ---
 

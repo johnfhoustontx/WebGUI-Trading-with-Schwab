@@ -39,3 +39,6 @@ desktop.ini
 
 # portfolio-analyzer runtime trade store
 portfolio-analyzer/data/
+
+# claude-driver runtime state (paper trade log + pending-trade payload)
+claude-driver/data/
