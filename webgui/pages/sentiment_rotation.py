@@ -169,17 +169,18 @@ def render():
     headline_lbl = ui.label("").classes("text-subtitle1 text-bold")
     detail_lbl = ui.label("").classes("opacity-70 text-sm")
     msg_lbl = ui.label("").classes("text-warning text-sm")
-    cols_box = ui.row().classes("no-wrap items-start gap-8 q-mt-sm")
-    # Quadrant map (left) + RRG scatter (right), side by side.
+    # Top: Full Quadrant Map (left) + ROTATING FROM/INTO (right).
     with ui.row().classes("w-full no-wrap gap-6 items-start q-mt-md"):
-        with ui.column().style("flex:1;min-width:0"):
+        with ui.column().style("flex:1.4;min-width:0"):
             ui.label("Full Quadrant Map (sorted by RS-Momentum)").classes("text-subtitle2")
             table_box = ui.column().classes("w-full q-gutter-none")
         with ui.column().style("flex:1;min-width:0"):
-            ui.label("RRG").classes("text-subtitle2")
-            rrg_box = ui.column().classes("w-full")
+            cols_box = ui.row().classes("no-wrap items-start gap-8 w-full")
     ui.label("Pairing is ordinal — strongest relative-selling vs strongest "
              "relative-buying pressure, not literal cash flow.").classes("opacity-50 text-xs q-mt-sm")
+    # Below: the RRG spans the full width.
+    ui.label("RRG").classes("text-subtitle2 q-mt-md")
+    rrg_box = ui.column().classes("w-full")
 
     QCOLS = [("name", "Sector", 150), ("etf", "ETF", 55), ("rs_ratio", "RS-Ratio", 90),
              ("rs_momentum", "RS-Mom", 90), ("quadrant", "Quadrant", 110),
@@ -219,8 +220,25 @@ def render():
                     ui.label(str(r.get("quadrant") or "")).style("width:110px")
                     ui.label(str(r.get("direction") or "")).style("width:60px")
         rrg_box.clear()
+        fig = rrg_scatter_figure(a)
+        n = len(fig["data"])
         with rrg_box:
-            ui.plotly(rrg_scatter_figure(a)).classes("w-full")
+            plot = ui.plotly(fig).classes("w-full")
+
+        # Hover-isolate: brighten the hovered sector, dim the rest (client-side
+        # restyle, no figure rebuild). curveNumber == sector index (one trace each).
+        def _on_hover(e):
+            pts = (getattr(e, "args", None) or {}).get("points") or []
+            cn = pts[0].get("curveNumber") if pts else None
+            plot.run_plot_method("restyle", {"opacity": _focus_opacities(n, cn)},
+                                 list(range(n)))
+
+        def _on_unhover(e):
+            plot.run_plot_method("restyle", {"opacity": _focus_opacities(n, None)},
+                                 list(range(n)))
+
+        plot.on("plotly_hover", _on_hover)
+        plot.on("plotly_unhover", _on_unhover)
 
     @guard
     def _apply():

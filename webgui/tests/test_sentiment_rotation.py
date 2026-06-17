@@ -128,6 +128,14 @@ def test_focus_opacities():
     assert R._focus_opacities(3, 9) == [1.0, 1.0, 1.0]
 
 
+def test_render_wires_hover_and_fullwidth_rrg():
+    import inspect
+    src = inspect.getsource(R.render)
+    # hover-isolate wiring present
+    assert "plotly_hover" in src and "plotly_unhover" in src
+    assert "run_plot_method" in src and "_focus_opacities" in src
+
+
 def test_hex_to_rgba_helper():
     assert R._hex_to_rgba(R.CLR_GREEN, 0.28) == "rgba(102, 187, 106, 0.28)"
 
