@@ -115,6 +115,12 @@ def composite_series(snapshots):
     return dates, scores
 
 
+def sentiment_30d_avg(snaps):
+    """Mean composite over the backfill history (0.0 if none). Pure."""
+    scores = composite_series(snaps or [])[1]
+    return round(sum(scores) / len(scores), 2) if scores else 0.0
+
+
 def build_history_figure(snapshots):
     """Plotly fig dict: composite over time."""
     dates, scores = composite_series(snapshots)
@@ -479,7 +485,13 @@ def render():
         # ① Market Sentiment — composite speedometer + press-and-hold Components popup
         with ui.column().classes("items-center").style("min-width:210px"):
             ui.label("Market Sentiment").classes("text-h6")
-            gauge_box = ui.html("").classes("q-mt-sm")
+            with ui.row().classes("items-end justify-center gap-4 no-wrap"):
+                with ui.column().classes("items-center"):
+                    ui.label("Today").classes("opacity-60 text-xs")
+                    gauge_box = ui.html("").classes("q-mt-xs")
+                with ui.column().classes("items-center"):
+                    ui.label("30-Day Avg").classes("opacity-60 text-xs")
+                    gauge_avg_box = ui.html("").classes("q-mt-xs")
             bias_lbl = ui.label("").classes("text-h6")
             sub_lbl = ui.label("").classes("opacity-80 text-sm")
             with ui.button("Components", icon="table_view").props("flat dense") as comp_btn:
@@ -492,7 +504,13 @@ def render():
         # ② Market Trend — speedometer (hybrid needle) + label/desc + detail popup
         with ui.column().classes("items-center").style("min-width:210px"):
             ui.label("Market Trend").classes("text-h6")
-            trend_gauge_box = ui.html("").classes("q-mt-sm")
+            with ui.row().classes("items-end justify-center gap-4 no-wrap"):
+                with ui.column().classes("items-center"):
+                    ui.label("Today").classes("opacity-60 text-xs")
+                    trend_gauge_box = ui.html("").classes("q-mt-xs")
+                with ui.column().classes("items-center"):
+                    ui.label("~30d Ago").classes("opacity-60 text-xs")
+                    trend_gauge_30_box = ui.html("").classes("q-mt-xs")
             regime_badge = ui.label("").classes("text-subtitle1 text-bold")
             regime_desc = ui.label("").classes("opacity-80 text-sm text-center")
             with ui.button("Trend Detail", icon="insights").props("flat dense") as trend_btn:
@@ -595,7 +613,10 @@ def render():
         else:
             date_lbl.text = f"as of {latest.get('date')} (last completed session)"
         gauge_box.content = speedometer_svg(gauge_score(total), comp.get("bias", ""),
-                                            width=200, height=130)
+                                            width=150, height=100)
+        avg = sentiment_30d_avg(state["snaps"])
+        gauge_avg_box.content = speedometer_svg(gauge_score(avg), f"{avg:.2f}",
+                                                width=150, height=100)
         bias_lbl.text = f"{total:.2f} · {comp.get('bias', '')}"
         bias_lbl.style(f"color:{bias_color(comp.get('bias'))}")
         sub_lbl.text = f"Confidence {_safe_float(comp.get('aggregate_confidence')):.0%}"
@@ -633,7 +654,7 @@ def render():
                 CLR_RED if committed in red else CLR_YELLOW)
             trend_gauge_box.content = speedometer_svg(
                 trend_gauge_value(trend), _TREND_SHORT.get(committed, "—"),
-                width=200, height=130)
+                width=150, height=100)
             regime_badge.text = trend.get("label", "")
             regime_badge.style(f"color:{color}")
             regime_desc.text = trend.get("description", "")
@@ -645,10 +666,17 @@ def render():
                 f"· dd {_safe_float(trend.get('drawdown_pct')):+.1f}% "
                 f"· conf {_safe_float(trend.get('confidence')):.0%}")
         else:
-            trend_gauge_box.content = speedometer_svg(50.0, "—", width=200, height=130)
+            trend_gauge_box.content = speedometer_svg(50.0, "—", width=150, height=100)
             regime_badge.text = ""
             regime_desc.text = ""
             regime_detail.text = ""
+        t30 = (state.get("derived") or {}).get("trend_30d_ago")
+        if t30:
+            trend_gauge_30_box.content = speedometer_svg(
+                trend_gauge_value(t30), _TREND_SHORT.get(t30.get("state"), "—"),
+                width=150, height=100)
+        else:
+            trend_gauge_30_box.content = speedometer_svg(50.0, "—", width=150, height=100)
 
     def _render_sector_table():
         sec = state["sector"]

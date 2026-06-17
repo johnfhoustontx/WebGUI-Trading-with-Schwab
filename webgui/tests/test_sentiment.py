@@ -100,3 +100,12 @@ def test_render_graceful_empty_cache():
     assert bus_client.read("sentiment:composite") is None  # confirm empty
     with ui.card():
         S.render()  # must not raise
+
+
+def test_sentiment_30d_avg():
+    from pages import sentiment as S
+    snaps = [{"composite": {"total_score": "6.0"}},
+             {"composite": {"total_score": "0.0"}},   # zero filtered out
+             {"composite": {"total_score": "8.0"}}]
+    assert S.sentiment_30d_avg(snaps) == 7.0          # mean(6,8)
+    assert S.sentiment_30d_avg([]) == 0.0
