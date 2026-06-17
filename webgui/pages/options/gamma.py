@@ -23,6 +23,8 @@ from .inputs import select_all_on_focus
 POS_COLOR = "#66bb6a"
 NEG_COLOR = "#ef5350"
 SPOT_COLOR = "#ffd54f"
+PRICE_LINE = "#0a1f44"          # dark navy — spot track overlaid on the heatmap
+HEATMAP_SEP = "#4d4d4d"         # softer (lighter) cell-separator mesh on the heatmap
 FLIP_COLOR = "#42a5f5"
 WALL_COLOR = "#b39ddb"
 
@@ -250,12 +252,13 @@ def heatmap_matrix(rows):
     active strikes near spot instead of the full 3000–9800 chain).
     """
     if not rows:
-        return {"x": [], "y": [], "z": []}
+        return {"x": [], "y": [], "z": [], "spots": []}
     x = [_fmt_ts(r[0]) for r in rows]
+    spots = [r[1] if isinstance(r[1], (int, float)) else None for r in rows]
     grids = [r[6] or {} for r in rows]
     strikes = sorted({s for g in grids for s, cell in g.items() if _cell_net(cell)})
     z = [[_cell_net(g.get(s) or {}) for g in grids] for s in strikes]
-    return {"x": x, "y": strikes, "z": z}
+    return {"x": x, "y": strikes, "z": z, "spots": spots}
 
 
 def heatmap_figure(rows, view="GEX", height=680, yrange=None):
@@ -267,18 +270,33 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None):
     yaxis = {"title": "Strike"}
     if yrange is not None:
         yaxis["range"] = yrange
+    data = [{
+        "type": "heatmap", "x": m["x"], "y": m["y"], "z": m["z"],
+        "colorscale": "RdYlGn", "zmid": 0,
+        "xgap": 1, "ygap": 1,                       # faint cell separators
+        "hovertemplate": "Strike %{y} · %{x}<br>net %{z:,.0f}<extra></extra>",
+    }]
+    spots = m.get("spots") or []
+    if any(s is not None for s in spots):
+        # Underlying price track over the session, on the shared Strike axis.
+        data.append({
+            "type": "scatter", "mode": "lines+markers", "name": "Spot",
+            "x": m["x"], "y": spots,
+            "line": {"color": PRICE_LINE, "width": 2},
+            "marker": {"color": PRICE_LINE, "size": 4},
+            "hovertemplate": "Spot %{y:,.2f} · %{x}<extra></extra>",
+        })
     return {
-        "data": [{
-            "type": "heatmap", "x": m["x"], "y": m["y"], "z": m["z"],
-            "colorscale": "RdYlGn", "zmid": 0,
-            "xgap": 1, "ygap": 1,                       # faint cell separators
-            "hovertemplate": "Strike %{y} · %{x}<br>net %{z:,.0f}<extra></extra>",
-        }],
+        "data": data,
         "layout": _apply_dark({
             "title": f"{_view_label(view)} intraday (strike × time)",
             "xaxis": {"title": "Time"}, "yaxis": yaxis,
+            # Lighter cell-separator mesh: the xgap/ygap reveal this colour, so a
+            # mid-grey reads as a soft grid instead of the harsh near-black gaps.
+            "plot_bgcolor": HEATMAP_SEP,
             "margin": {"l": 60, "r": 20, "t": 40, "b": 40},
             "height": height, "autosize": True,
+            "showlegend": False,
             "hoverlabel": HOVER,
         }),
     }
@@ -350,6 +368,7 @@ def term_heatmap(term_grid):
         "layout": _apply_dark({
             "title": "Term structure (net GEX by expiry × strike)",
             "xaxis": {"title": "Expiration"}, "yaxis": {"title": "Strike"},
+            "plot_bgcolor": HEATMAP_SEP,                 # softer cell-separator mesh
             "margin": {"l": 60, "r": 20, "t": 40, "b": 60},
             "height": 680, "autosize": True,
             "hoverlabel": HOVER,

@@ -94,6 +94,23 @@ def test_heatmap_matrix_empty():
     assert gamma.heatmap_matrix([])["z"] == []
 
 
+def test_heatmap_matrix_includes_spots():
+    rows = [("09:30", 450.0, None, None, None, 0, {449.0: {"net": 5}}),
+            ("09:35", 451.5, None, None, None, 0, {449.0: {"net": 7}})]
+    assert gamma.heatmap_matrix(rows)["spots"] == [450.0, 451.5]
+
+
+def test_heatmap_figure_overlays_spot_line():
+    rows = [("09:30", 450.0, None, None, None, 0, {449.0: {"net": 5}}),
+            ("09:35", 451.5, None, None, None, 0, {449.0: {"net": 7}})]
+    fig = gamma.heatmap_figure(rows, "GEX")
+    types = [t["type"] for t in fig["data"]]
+    assert "heatmap" in types and "scatter" in types
+    spot_trace = next(t for t in fig["data"] if t["type"] == "scatter")
+    assert spot_trace["y"] == [450.0, 451.5]
+    assert spot_trace["x"] == ["09:30", "09:35"]
+
+
 def test_heatmap_matrix_extracts_net_from_cell_dicts():
     # gex_history grids map strike -> {call, put, net}; z must be the net number.
     rows = [("09:30", 450, None, None, None, 0,
