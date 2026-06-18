@@ -1215,3 +1215,26 @@ def test_gamma_walls_single_side_and_empty():
     # Charm/Vanna never get walls; empty data -> [].
     assert compute.gamma_walls("Charm", above_only, 450.0) == []
     assert compute.gamma_walls("GEX", {"spot": 450.0, "gex": {}}, 450.0) == []
+
+
+# ── Gamma dropdown symbol universe ──────────────────────────────────────────
+
+def test_gamma_symbol_options_excludes_vix_spx_first(monkeypatch):
+    import sys as _sys
+    import types as _types
+    fake_gc = _types.SimpleNamespace(
+        collection_symbols=lambda: ["$SPX", "$VIX", "SPY", "QQQ", "NVDA"])
+    monkeypatch.setitem(_sys.modules, "gex_collector", fake_gc)
+    out = compute.gamma_symbol_options()
+    assert out[0] == "$SPX"
+    assert "$VIX" not in out
+    assert out == ["$SPX", "SPY", "QQQ", "NVDA"]
+
+
+def test_gamma_symbol_options_defensive(monkeypatch):
+    import sys as _sys
+    import types as _types
+    fake_gc = _types.SimpleNamespace(
+        collection_symbols=lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setitem(_sys.modules, "gex_collector", fake_gc)
+    assert compute.gamma_symbol_options() == ["$SPX", "SPY", "QQQ"]

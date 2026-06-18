@@ -869,6 +869,18 @@ def gamma_explain(symbol: str, style: str = "terminal") -> dict:
     return {"symbol": symbol, "html": html}
 
 
+def gamma_symbol_options() -> list:
+    """Dropdown universe for the Gamma page: the collected symbols minus ``$VIX``
+    ($SPX first). $VIX is still collected (sentiment bridge) but isn't a useful
+    Gamma selection. Defensive: any failure → the index trio so the page always
+    gets a usable list. ``gex_collector`` is imported lazily (see LAZY IMPORTS)."""
+    try:
+        import gex_collector as gc
+        return [s for s in gc.collection_symbols() if s != "$VIX"]
+    except Exception:
+        return ["$SPX", "SPY", "QQQ"]
+
+
 def _gamma_blocks_for(symbol, chain):
     """Build the per-view analysis blocks for one symbol (ported from the page).
 
