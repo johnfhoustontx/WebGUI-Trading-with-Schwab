@@ -91,6 +91,42 @@ def test_row_defaults_rec_color_to_amber_when_missing():
     assert row["_rec_color"] == captured.REC_AMBER
 
 
+def test_pnl_color_profit_is_green():
+    assert captured.pnl_color(12.0) == captured.PNL_GREEN
+
+
+def test_pnl_color_loss_is_red():
+    assert captured.pnl_color(-5.0) == captured.PNL_RED
+
+
+def test_pnl_color_zero_or_missing_is_blank():
+    assert captured.pnl_color(0) == ""
+    assert captured.pnl_color(None) == ""
+    assert captured.pnl_color("x") == ""
+
+
+def test_row_stamps_pnl_color():
+    assert captured.captured_rows([{"unrealized_pnl": 3.0}])[0]["_pnl_color"] == captured.PNL_GREEN
+    assert captured.captured_rows([{"unrealized_pnl": -3.0}])[0]["_pnl_color"] == captured.PNL_RED
+
+
+def test_fmt_opened_iso_to_date_and_hhmm():
+    assert captured.fmt_opened("2026-06-17T13:49:49.898534-05:00") == "2026-06-17 13:49"
+
+
+def test_fmt_opened_blank_when_missing():
+    assert captured.fmt_opened(None) == ""
+    assert captured.fmt_opened("") == ""
+
+
+def test_opened_column_present_and_populated():
+    fields = {c["field"] for c in captured.captured_columns()}
+    assert "opened" in fields
+    row = captured.captured_rows([{"signal_id": "X1", "first_seen_ts":
+                                   "2026-06-17T13:49:49.898534-05:00"}])[0]
+    assert row["opened"] == "2026-06-17 13:49"
+
+
 def test_render_callable():
     assert callable(captured.render)
 

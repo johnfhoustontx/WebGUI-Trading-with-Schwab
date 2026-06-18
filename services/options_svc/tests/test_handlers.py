@@ -222,6 +222,33 @@ def test_paper_command_dispatch(monkeypatch):
     assert calls["reset"] == 25000.0 and calls["refresh"] == 5
 
 
+def test_run_manage_and_refresh_runs_cycle_when_account_present(monkeypatch):
+    """The shared auto-manage helper runs the cycle (account present) + refreshes."""
+    bus = Bus(fake=True)
+    calls = {"manage": 0, "refresh": 0}
+    monkeypatch.setattr(handlers.compute, "has_paper_account", lambda: True)
+    monkeypatch.setattr(handlers.compute, "run_manage_cycle",
+                        lambda: calls.__setitem__("manage", calls["manage"] + 1))
+    monkeypatch.setattr(handlers, "refresh_paper_account",
+                        lambda b: calls.__setitem__("refresh", calls["refresh"] + 1))
+
+    handlers.run_manage_and_refresh(bus)
+    assert calls["manage"] == 1 and calls["refresh"] == 1
+
+
+def test_run_manage_and_refresh_skips_cycle_when_no_account(monkeypatch):
+    bus = Bus(fake=True)
+    calls = {"manage": 0, "refresh": 0}
+    monkeypatch.setattr(handlers.compute, "has_paper_account", lambda: False)
+    monkeypatch.setattr(handlers.compute, "run_manage_cycle",
+                        lambda: calls.__setitem__("manage", calls["manage"] + 1))
+    monkeypatch.setattr(handlers, "refresh_paper_account",
+                        lambda b: calls.__setitem__("refresh", calls["refresh"] + 1))
+
+    handlers.run_manage_and_refresh(bus)
+    assert calls["manage"] == 0 and calls["refresh"] == 1
+
+
 def test_paper_entry_manage_short_circuit_when_no_account(monkeypatch):
     """With no account, entry/manage do NOT run the cycle — they just refresh."""
     bus = Bus(fake=True)

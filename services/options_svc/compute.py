@@ -291,27 +291,66 @@ def _analyze_detail(result) -> dict | None:
     }
 
 
+def _expiry_note(trade) -> str | None:
+    """Return a human note when ``trade``'s option has already expired, else None.
+
+    An expired expiration has no live option chain on Schwab, so
+    ``trade_analyzer.analyze_trade`` raises ``No option chain for …`` for it.
+    Detecting this up front lets the GUI show a clear "expired — no live chain"
+    note instead of a vague failure, and skips a pointless proxy round-trip.
+    Unparseable/missing expirations return None (let the live path try)."""
+    import datetime as _dt
+
+    exp = (trade or {}).get("expiration")
+    try:
+        exp_d = _dt.date.fromisoformat(str(exp)[:10])
+    except (TypeError, ValueError):
+        return None
+    if exp_d < _dt.date.today():
+        return f"Expired {exp_d.isoformat()} — no live option chain to analyze"
+    return None
+
+
 def analyze_paper(trade_id) -> dict:
-    """Analyze a paper trade (live Greeks/IV) → ``{trade_id, symbol, action, detail}``.
+    """Analyze a paper trade (live Greeks/IV) → ``{trade_id, symbol, action, detail, note}``.
 
     ``detail`` carries the live values mapped onto the detail-panel field names
     (see ``_analyze_detail``) so the GUI can overlay them on the stored view.
-    Defensive throughout: a missing trade, malformed verdict, OR a RuntimeError
-    from ``analyze_trade`` (raised when live data can't be fetched — after-hours /
-    no chain) degrades to ``action="—"``, ``detail=None``. Uses
-    ``_proxy.schwab_py_client`` (mirrors the page)."""
+    ``note`` is None on success, else a human-readable reason the live analysis
+    couldn't run — so the GUI can say *why* instead of a vague "live data
+    unavailable":
+
+    * trade not found → ``"Trade not found"``;
+    * the option already expired (no live chain exists) → ``action="EXPIRED"`` +
+      an expiry note, WITHOUT calling the engine (avoids a doomed proxy fetch);
+    * any other live-fetch failure (after-hours / no chain / RuntimeError from
+      ``analyze_trade``) → the exception text, ``action="—"``, ``detail=None``.
+
+    Uses ``_proxy.schwab_py_client`` (mirrors the page)."""
     import trade_analyzer
 
     t = _find_trade(trade_id)
+    if t is None:
+        return {"trade_id": trade_id, "symbol": None, "action": "—",
+                "detail": None, "note": "Trade not found"}
+
+    expired = _expiry_note(t)
+    if expired:
+        return {"trade_id": trade_id, "symbol": t.get("symbol"),
+                "action": "EXPIRED", "detail": None, "note": expired}
+
+    note = None
     try:
         result = trade_analyzer.analyze_trade(_proxy.schwab_py_client, t, None)
-    except Exception:
+    except Exception as exc:
         result = None
+        note = f"Live data unavailable: {exc}"
     return {
         "trade_id": trade_id,
-        "symbol": t.get("symbol") if t else None,
+        "symbol": t.get("symbol"),
         "action": ((result or {}).get("verdict") or {}).get("action", "—"),
         "detail": _analyze_detail(result),
+        "note": note,
     }
 
 

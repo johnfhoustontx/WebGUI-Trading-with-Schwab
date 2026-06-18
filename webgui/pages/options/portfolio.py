@@ -111,8 +111,9 @@ def render():
                      "positions for the eligible ones (fills via the paper broker).")
         ui.button("Run manage cycle", icon="manage_accounts", on_click=lambda: _cycle("manage")) \
             .props("outline") \
-            .tooltip("Simulate auto-management: reprice open positions and auto-close any "
-                     "that hit their target/stop.")
+            .tooltip("Reprice open positions and auto-close any that hit their target/stop. "
+                     "Runs automatically every 5 min during market hours; this button forces "
+                     "an immediate run.")
         ui.space()
         ui.button("Reset", icon="restart_alt", on_click=lambda: _reset()) \
             .props("flat dense size=sm color=negative") \

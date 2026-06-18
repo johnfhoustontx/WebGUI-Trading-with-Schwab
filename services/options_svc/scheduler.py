@@ -88,6 +88,29 @@ def gex_due(now, last_slot):
     return (slot != last_slot, slot)
 
 
+# ── Paper auto-manage cadence ───────────────────────────────────────────────
+# The Paper Portfolio page used to require a manual "Run manage cycle" click to
+# reprice open paper positions and auto-close target/stop hits. The always-on
+# service now runs that cycle automatically on a fixed cadence within market
+# hours so the paper account stays current (and hits close) with no page open —
+# mirrors gex_due/autoscan_due on its own interval/window (the trading window).
+_MANAGE_INTERVAL_MIN = 5    # auto-manage every 5 min within market hours
+
+
+def _manage_slot_key(now):
+    return (now.date().isoformat(), now.hour, now.minute // _MANAGE_INTERVAL_MIN)
+
+
+def manage_due(now, last_slot):
+    """(should_manage, slot): True at most once per 5-min slot, only on a
+    trading day within the 08:00–15:15 CT window. Drives the paper auto-manage
+    cycle so open paper positions are repriced + auto-closed unattended."""
+    if not (_is_trading_day(now) and _is_market_hours(now)):
+        return (False, last_slot)
+    slot = _manage_slot_key(now)
+    return (slot != last_slot, slot)
+
+
 # ── Scheduler loop ─────────────────────────────────────────────────────────
 POLL_INTERVAL_SEC = 30  # check the slot every 30s (mirrors the page's autoscan loop cadence)
 
@@ -104,6 +127,7 @@ async def loop(bus):
     loop_ = asyncio.get_event_loop()
     last_slot = None
     last_gex_slot = None  # 5-min GEX history-collection slot (see gex_due)
+    last_manage_slot = None  # 5-min paper auto-manage slot (see manage_due)
     # One-shot startup refresh so the Paper Portfolio page has data on first
     # load. The paper account only changes on user actions (entry/manage/reset
     # commands re-publish it), so it is NOT polled every tick. Guarded so a
@@ -176,6 +200,19 @@ async def loop(bus):
             if g_due:
                 last_gex_slot = g_slot
                 await loop_.run_in_executor(None, handlers.collect_gex_history, bus)
+        except Exception:
+            pass
+        # Paper auto-manage — reprice open paper positions + auto-close hits on
+        # each 5-min slot within market hours (replaces the manual-only "Run
+        # manage cycle" button; the button still works for on-demand runs). The
+        # blocking cycle (proxy reprice) runs in the executor; independently
+        # guarded so a failure never skips the work above or kills the loop.
+        try:
+            now = _market_now()
+            m_due, m_slot = manage_due(now, last_manage_slot)
+            if m_due:
+                last_manage_slot = m_slot
+                await loop_.run_in_executor(None, handlers.run_manage_and_refresh, bus)
         except Exception:
             pass
         await asyncio.sleep(POLL_INTERVAL_SEC)

@@ -294,7 +294,11 @@ def render():
             if tid and tid == state.get("sel_id") and tid in raw_by_id:
                 _render_detail(raw_by_id[tid])
             status.text = f"{len(table.rows)} trades." if table.rows else ""
-            note = "" if det else " (live data unavailable)"
-            ui.notify(f"{res.get('symbol')}: {res.get('action', '—')}{note}", type="info")
+            # Prefer the service's specific reason (e.g. "Expired … — no live
+            # option chain") over a vague generic; fall back only if absent.
+            reason = res.get("note") or ("" if det else "live data unavailable")
+            suffix = f" — {reason}" if reason else ""
+            ntype = "warning" if (reason and not det) else "info"
+            ui.notify(f"{res.get('symbol')}: {res.get('action', '—')}{suffix}", type=ntype)
 
     ui.timer(2.0, _maybe_repaint)

@@ -381,6 +381,42 @@ def test_analyze_paper_guards_runtimeerror_no_live_data(monkeypatch):
     out = compute.analyze_paper("T2")
     assert out["trade_id"] == "T2" and out["symbol"] == "QQQ"
     assert out["action"] == "—" and out["detail"] is None
+    assert "live data cannot be fetched" in (out.get("note") or "")
+
+
+def test_analyze_paper_expired_trade_skips_engine_with_note(monkeypatch):
+    """An already-expired option has no live chain -> EXPIRED + note, no engine call."""
+    import sys as _sys
+    import types as _types
+
+    trade = {"trade_id": "T3", "symbol": "MRVL", "expiration": "2020-01-01"}
+    monkeypatch.setitem(_sys.modules, "paper_trader",
+                        _types.SimpleNamespace(get_all_trades=lambda: [trade]))
+
+    def _should_not_run(c, t, i):
+        raise AssertionError("analyze_trade must not be called for expired trades")
+
+    monkeypatch.setitem(_sys.modules, "trade_analyzer",
+                        _types.SimpleNamespace(analyze_trade=_should_not_run))
+
+    out = compute.analyze_paper("T3")
+    assert out["action"] == "EXPIRED" and out["detail"] is None
+    assert "Expired 2020-01-01" in out["note"]
+
+
+def test_analyze_paper_note_none_on_success(monkeypatch):
+    import sys as _sys
+    import types as _types
+
+    trade = {"trade_id": "T1", "symbol": "SPY"}
+    monkeypatch.setitem(_sys.modules, "paper_trader",
+                        _types.SimpleNamespace(get_all_trades=lambda: [trade]))
+    monkeypatch.setitem(_sys.modules, "trade_analyzer",
+                        _types.SimpleNamespace(
+                            analyze_trade=lambda c, t, i: {"verdict": {"action": "HOLD"}}))
+
+    out = compute.analyze_paper("T1")
+    assert out["action"] == "HOLD" and out["note"] is None
 
 
 # ── Captured signals (moved from webgui/pages/options/captured.py) ──────────

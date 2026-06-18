@@ -28,6 +28,8 @@ def _round(value, ndigits=2):
 
 
 REC_RED, REC_AMBER, REC_GREEN = "#ef5350", "#ffa726", "#66bb6a"
+# Profit/loss cell colors (green in profit, red in loss).
+PNL_GREEN, PNL_RED = "#66bb6a", "#ef5350"
 
 
 def rec_color(rec):
@@ -35,11 +37,37 @@ def rec_color(rec):
     return {"TAKE_PROFIT": REC_GREEN, "CUT": REC_RED, "HOLD": REC_AMBER}.get(rec, "#666666")
 
 
+def pnl_color(value):
+    """P&L -> text color: green when in profit (>0), red when in loss (<0).
+
+    Returns '' for zero / missing / non-numeric so those render uncolored."""
+    if isinstance(value, (int, float)):
+        if value > 0:
+            return PNL_GREEN
+        if value < 0:
+            return PNL_RED
+    return ""
+
+
+def fmt_opened(ts):
+    """Format a captured signal's ``first_seen_ts`` as ``'YYYY-MM-DD HH:MM'``.
+
+    ``first_seen_ts`` is an ISO timestamp written at capture (e.g.
+    ``'2026-06-17T13:49:49.898534-05:00'``). We show the local date + HH:MM the
+    signal was opened. Returns '' when absent/unparseable."""
+    if not ts:
+        return ""
+    s = str(ts)
+    if "T" in s and len(s) >= 16:
+        return f"{s[:10]} {s[11:16]}"
+    return s[:16]
+
+
 def captured_columns():
     spec = [
         ("symbol", "Symbol"), ("strategy", "Strat"), ("mode", "Mode"),
-        ("expiration", "Exp"), ("dte", "DTE"), ("credit", "Credit"),
-        ("max_loss", "Risk"), ("unrealized_pnl", "P&L"),
+        ("opened", "Opened"), ("expiration", "Exp"), ("dte", "DTE"),
+        ("credit", "Credit"), ("max_loss", "Risk"), ("unrealized_pnl", "P&L"),
         ("entry_score", "Entry"), ("current_score", "Cur"), ("score_drift", "Drift"),
         ("grade", "Grade"), ("recommendation", "Rec"), ("status", "Status"),
     ]
@@ -56,6 +84,7 @@ def captured_rows(signals):
             "symbol": s.get("symbol", ""),
             "strategy": s.get("strategy", ""),
             "mode": s.get("mode", ""),
+            "opened": fmt_opened(s.get("first_seen_ts")),
             "expiration": s.get("expiration", ""),
             "dte": s.get("dte_at_entry"),
             "credit": _round(s.get("entry_credit")),
@@ -68,6 +97,7 @@ def captured_rows(signals):
             "recommendation": s.get("recommendation") or "HOLD",
             "status": s.get("status", ""),
             "_rec_color": rec_color(s.get("recommendation") or "HOLD"),
+            "_pnl_color": pnl_color(s.get("unrealized_pnl")),
         })
     return rows
 
@@ -106,6 +136,12 @@ def render():
     ui.label("Captured Signals").classes("text-h5")
 
     raw_by_id: dict = {}
+    # sel_id: the signal the user clicked (drives the detail panel AND the action
+    # buttons). Clicking a row body fires rowClick but does NOT tick Quasar's
+    # selection control, so a button reading only ``table.selected`` would act on
+    # nothing — the "Close selected does nothing" bug. We track the clicked row
+    # here and also sync ``table.selected`` so either gesture works.
+    state = {"sel_id": None}
 
     with ui.row().classes("w-full no-wrap gap-4 items-start"):
         with ui.column().classes("flex-grow min-w-0"):
@@ -129,6 +165,14 @@ def render():
                 {{ props.value == null ? '' : Number(props.value).toFixed(2) }}
               </q-td>
             ''')
+            # P&L colored green in profit / red in loss (value stays numeric to sort).
+            table.add_slot('body-cell-unrealized_pnl', r'''
+              <q-td :props="props">
+                <span :style="`color:${props.row._pnl_color};font-weight:600`">
+                  {{ props.value == null ? '' : props.value }}
+                </span>
+              </q-td>
+            ''')
         detail_panel = detail.render()
 
     # Last-seen bus cache versions for the fetch-free repaint/notify timers.
@@ -143,6 +187,10 @@ def render():
             if s.get("signal_id"):
                 raw_by_id[s["signal_id"]] = s
         table.rows = captured_rows(sigs)
+        # Drop a stale selection (e.g. the signal we just closed is gone).
+        if state.get("sel_id") not in raw_by_id:
+            state["sel_id"] = None
+            table.selected = []
         table.update()
         status.text = f"{len(table.rows)} open signals." if cap else ""
 
@@ -150,9 +198,25 @@ def render():
         row = event.args[1] if isinstance(event.args, list) and len(event.args) > 1 else event.args
         sig = raw_by_id.get(row.get("id")) if isinstance(row, dict) else None
         if sig:
+            state["sel_id"] = sig.get("signal_id")
+            # Sync Quasar's selection so the clicked row is highlighted AND
+            # ``table.selected`` reflects it.
+            if isinstance(row, dict):
+                table.selected = [row]
+                table.update()
             detail_panel.update(synth_from_captured(sig))
 
     table.on("rowClick", _select)
+
+    def _selected_signal():
+        """The raw signal dict the user is acting on: the clicked row first, then
+        any ticked ``table.selected`` row. None when nothing is selected."""
+        sid = state.get("sel_id")
+        if sid and sid in raw_by_id:
+            return raw_by_id[sid]
+        if table.selected:
+            return raw_by_id.get(table.selected[0].get("id"))
+        return None
 
     @guard
     def _reload():
@@ -168,20 +232,20 @@ def render():
 
     @guard
     def _close():
-        sel = table.selected
-        if not sel:
+        sig = _selected_signal()
+        if not sig:
             ui.notify("Select a signal first.", type="warning")
             return
-        row = sel[0]
+        signal_id = sig.get("signal_id")
         with ui.dialog() as dlg, ui.card():
-            ui.label(f"Close {row.get('symbol')} {row.get('strategy')}").classes("text-subtitle1")
+            ui.label(f"Close {sig.get('symbol')} {sig.get('strategy')}").classes("text-subtitle1")
             exit_val = ui.number("Exit value (spread debit)", value=0.0, format="%.2f")
             reason = ui.input("Reason", value="MANUAL_CLOSE")
 
             def confirm():
                 bus_client.request("options", {
                     "type": "captured_close",
-                    "args": {"signal_id": row["id"], "exit_val": float(exit_val.value),
+                    "args": {"signal_id": signal_id, "exit_val": float(exit_val.value),
                              "reason": reason.value or "MANUAL_CLOSE"},
                 })
                 dlg.close()

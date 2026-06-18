@@ -55,3 +55,42 @@ def test_gex_due_holiday():
     # 2026-07-03 is in scheduler._HOLIDAYS.
     due, _ = scheduler.gex_due(_ct(2026, 7, 3, 9, 0), None)
     assert due is False
+
+
+# ── manage_due (paper auto-manage cadence) ──────────────────────────────────
+def test_manage_due_first_tick_in_window():
+    due, slot = scheduler.manage_due(_ct(2026, 6, 15, 9, 0), None)
+    assert due is True and slot is not None
+
+
+def test_manage_due_not_repeated_within_same_5min_slot():
+    _, slot = scheduler.manage_due(_ct(2026, 6, 15, 9, 0), None)
+    due2, slot2 = scheduler.manage_due(_ct(2026, 6, 15, 9, 3), slot)
+    assert due2 is False and slot2 == slot
+
+
+def test_manage_due_fires_on_next_5min_slot():
+    _, slot = scheduler.manage_due(_ct(2026, 6, 15, 9, 2), None)
+    due, slot2 = scheduler.manage_due(_ct(2026, 6, 15, 9, 6), slot)
+    assert due is True and slot2 != slot
+
+
+def test_manage_due_before_market_open():
+    due, _ = scheduler.manage_due(_ct(2026, 6, 15, 7, 30), None)
+    assert due is False
+
+
+def test_manage_due_after_market_close():
+    due, _ = scheduler.manage_due(_ct(2026, 6, 15, 15, 30), None)
+    assert due is False
+
+
+def test_manage_due_weekend():
+    # 2026-06-13 is a Saturday.
+    due, _ = scheduler.manage_due(_ct(2026, 6, 13, 9, 0), None)
+    assert due is False
+
+
+def test_manage_due_holiday():
+    due, _ = scheduler.manage_due(_ct(2026, 7, 3, 9, 0), None)
+    assert due is False

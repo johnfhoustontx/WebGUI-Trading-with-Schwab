@@ -148,6 +148,19 @@ def refresh_paper_account(bus) -> None:
     bus.publish(EVENT_PAPER, {"version": version})
 
 
+def run_manage_and_refresh(bus) -> None:
+    """Run the paper auto-manage cycle (reprice open positions + auto-close
+    target/stop hits) then republish the paper account view.
+
+    Guarded on an existing account — with no account it just refreshes so the
+    page shows the no-account state. Shared by the ``paper_manage`` command
+    (manual button) and the scheduler's auto-manage tick (``scheduler.manage_due``)
+    so both run identical logic."""
+    if compute.has_paper_account():
+        compute.run_manage_cycle()
+    refresh_paper_account(bus)
+
+
 def refresh_paper_trades(bus) -> None:
     """Read the paper-trade ledger view and publish it to the bus.
 
@@ -250,9 +263,7 @@ def handle_command(bus, command) -> None:
             compute.run_entry_cycle()
         refresh_paper_account(bus)
     elif command.type == "paper_manage":
-        if compute.has_paper_account():
-            compute.run_manage_cycle()
-        refresh_paper_account(bus)
+        run_manage_and_refresh(bus)
     elif command.type == "paper_reset":
         compute.reset_paper_account(float(command.args.get("starting_balance", 25000.0)))
         refresh_paper_account(bus)
