@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 TZ = ZoneInfo("America/Chicago")
 MARKET_OPEN  = dtime(8, 30)
 MARKET_CLOSE = dtime(15, 20)
-STALE_AFTER_SEC = 600  # 2 x poll interval
+STALE_AFTER_SEC = 240  # 2 x poll interval (2 min)
 FIRST_POLL_GRACE = dtime(8, 35)
 
 

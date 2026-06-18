@@ -1,7 +1,7 @@
 """Tests for the options service scheduler's GEX-collection cadence.
 
 ``gex_due`` mirrors ``autoscan_due`` but on the gex_collector cadence/window
-(5-min slots within 08:30–15:20 CT on trading days) so intraday history is
+(2-min slots within 08:30–15:20 CT on trading days) so intraday history is
 written whenever this always-on service is up — replacing the fragile standalone
 gex_collector.py window. Pure schedule logic, tested with fixed CT datetimes.
 """
@@ -23,15 +23,15 @@ def test_gex_due_first_tick_in_window():
     assert due is True and slot is not None
 
 
-def test_gex_due_not_repeated_within_same_5min_slot():
-    due, slot = scheduler.gex_due(_ct(2026, 6, 15, 8, 41), None)
-    due2, slot2 = scheduler.gex_due(_ct(2026, 6, 15, 8, 43), slot)
-    assert due2 is False and slot2 == slot   # 08:40–08:44 is one slot
+def test_gex_due_not_repeated_within_same_2min_slot():
+    due, slot = scheduler.gex_due(_ct(2026, 6, 15, 8, 40), None)
+    due2, slot2 = scheduler.gex_due(_ct(2026, 6, 15, 8, 41), slot)
+    assert due2 is False and slot2 == slot   # 08:40–08:41 is one slot
 
 
-def test_gex_due_fires_on_next_5min_slot():
+def test_gex_due_fires_on_next_2min_slot():
     _, slot = scheduler.gex_due(_ct(2026, 6, 15, 8, 42), None)
-    due, slot2 = scheduler.gex_due(_ct(2026, 6, 15, 8, 46), slot)
+    due, slot2 = scheduler.gex_due(_ct(2026, 6, 15, 8, 44), slot)
     assert due is True and slot2 != slot
 
 

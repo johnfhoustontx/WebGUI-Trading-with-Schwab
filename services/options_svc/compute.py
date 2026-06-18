@@ -679,11 +679,11 @@ def collect_gex_snapshots() -> int:
 
 
 def _gex_next_scan(now):
-    """Next 5-min GEX-collection boundary strictly after ``now`` within the
+    """Next 2-min GEX-collection boundary strictly after ``now`` within the
     08:30–15:20 CT window, or None if ``now`` is past the window end.
 
     Reuses the scheduler's ``_GEX_START``/``_GEX_STOP``/``_GEX_INTERVAL_MIN``
-    cadence (08:30–15:20 CT, every 5 min). Returns a CT-aware datetime or None.
+    cadence (08:30–15:20 CT, every 2 min). Returns a CT-aware datetime or None.
     Before 08:30 → the window's first slot (08:30 today). At/after 15:20 → None.
 
     The ``scheduler`` import is LAZY (inside the function) on purpose: ``scheduler``

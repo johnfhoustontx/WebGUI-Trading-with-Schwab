@@ -11,19 +11,19 @@ def test_next_boundary_mid_interval():
     tz = ZoneInfo("America/Chicago")
     now = datetime(2026, 4, 13, 10, 2, 30, tzinfo=tz)
     target = gc.next_boundary(now)
-    assert target == datetime(2026, 4, 13, 10, 5, 0, tzinfo=tz)
+    assert target == datetime(2026, 4, 13, 10, 4, 0, tzinfo=tz)
 
 
 def test_next_boundary_on_boundary_rolls_forward():
     tz = ZoneInfo("America/Chicago")
-    now = datetime(2026, 4, 13, 10, 5, 0, tzinfo=tz)
+    now = datetime(2026, 4, 13, 10, 4, 0, tzinfo=tz)
     target = gc.next_boundary(now)
-    assert target == datetime(2026, 4, 13, 10, 10, 0, tzinfo=tz)
+    assert target == datetime(2026, 4, 13, 10, 6, 0, tzinfo=tz)
 
 
 def test_next_boundary_rolls_over_hour():
     tz = ZoneInfo("America/Chicago")
-    now = datetime(2026, 4, 13, 10, 57, 0, tzinfo=tz)
+    now = datetime(2026, 4, 13, 10, 58, 0, tzinfo=tz)
     target = gc.next_boundary(now)
     assert target == datetime(2026, 4, 13, 11, 0, 0, tzinfo=tz)
 
@@ -108,7 +108,7 @@ def test_poll_once_writes_all_symbols(tmp_path, monkeypatch):
     chain = {"symbol": "X"}
     client = _make_client({s: chain for s in gc.SYMBOLS})
     engine = _make_engine()
-    gc.poll_once(client, engine, conn)
+    gc.poll_once(client, engine, conn, symbols=gc.SYMBOLS)
     rows = conn.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0]
     assert rows == 12
 
@@ -140,7 +140,7 @@ def test_poll_once_continues_on_symbol_failure(tmp_path, monkeypatch, caplog):
     engine = _make_engine()
 
     with caplog.at_level(logging.ERROR, logger="gex_collector"):
-        gc.poll_once(client, engine, conn)
+        gc.poll_once(client, engine, conn, symbols=gc.SYMBOLS)
 
     rows = conn.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0]
     assert rows == 9
@@ -172,7 +172,7 @@ def test_poll_once_skips_empty_chain(tmp_path, monkeypatch, caplog):
     engine = _make_engine()
 
     with caplog.at_level(logging.WARNING, logger="gex_collector"):
-        gc.poll_once(client, engine, conn)
+        gc.poll_once(client, engine, conn, symbols=gc.SYMBOLS)
 
     rows = conn.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0]
     assert rows == 9
@@ -237,8 +237,8 @@ def test_poll_once_ts_snapped_to_boundary(tmp_path, monkeypatch):
     chain = {"sym": "X"}
     client = _make_client({s: chain for s in gc.SYMBOLS})
     engine = _make_engine()
-    gc.poll_once(client, engine, conn)
-    # All ts values should be divisible by POLL_INTERVAL_MIN*60 (300)
+    gc.poll_once(client, engine, conn, symbols=gc.SYMBOLS)
+    # All ts values should be divisible by POLL_INTERVAL_MIN*60 (120)
     tss = [r[0] for r in conn.execute("SELECT DISTINCT ts FROM snapshots").fetchall()]
     assert all(t % (gc.POLL_INTERVAL_MIN * 60) == 0 for t in tss)
     # All 4 symbols x 2 views should share the SAME ts (same poll cycle)

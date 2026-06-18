@@ -67,7 +67,7 @@ def _market_now():
 # constants above are ported verbatim rather than imported.
 _GEX_START = (8, 30)     # gex_collector.START_HOUR/START_MIN
 _GEX_STOP = (15, 20)     # gex_collector.STOP_HOUR/STOP_MIN
-_GEX_INTERVAL_MIN = 5    # gex_collector.POLL_INTERVAL_MIN
+_GEX_INTERVAL_MIN = 2    # gex_collector.POLL_INTERVAL_MIN
 
 
 def _in_gex_window(now):
@@ -79,7 +79,7 @@ def _gex_slot_key(now):
 
 
 def gex_due(now, last_slot):
-    """(should_collect, slot): True at most once per 5-min slot, only on a
+    """(should_collect, slot): True at most once per 2-min slot, only on a
     trading day within the 08:30–15:20 CT GEX-collection window. Mirrors
     ``autoscan_due`` on the gex_collector cadence/window."""
     if not (_is_trading_day(now) and _in_gex_window(now)):
@@ -126,7 +126,7 @@ async def loop(bus):
     or skip the other."""
     loop_ = asyncio.get_event_loop()
     last_slot = None
-    last_gex_slot = None  # 5-min GEX history-collection slot (see gex_due)
+    last_gex_slot = None  # 2-min GEX history-collection slot (see gex_due)
     last_manage_slot = None  # 5-min paper auto-manage slot (see manage_due)
     # One-shot startup refresh so the Paper Portfolio page has data on first
     # load. The paper account only changes on user actions (entry/manage/reset
@@ -189,7 +189,7 @@ async def loop(bus):
                 await loop_.run_in_executor(None, handlers.rescan, bus)
         except Exception:
             pass  # never let the scheduler die
-        # Intraday GEX history collection — write a snapshot round on each 5-min
+        # Intraday GEX history collection — write a snapshot round on each 2-min
         # slot within market hours so the Gamma heatmap keeps populating all
         # session (replaces the standalone gex_collector window). The blocking
         # poll (~4 chains) runs in the executor; independently guarded so a poll

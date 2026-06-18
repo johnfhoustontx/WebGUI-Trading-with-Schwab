@@ -24,7 +24,7 @@ import gex_history_db as db
 
 TZ = ZoneInfo("America/Chicago")
 SYMBOLS = ["$SPX", "$VIX", "SPY", "QQQ"]
-POLL_INTERVAL_MIN = 5
+POLL_INTERVAL_MIN = 2
 START_HOUR, START_MIN = 8, 30
 STOP_HOUR, STOP_MIN = 15, 20
 
@@ -55,7 +55,7 @@ def collection_symbols():
 
 LOCK_PATH = Path(__file__).parent / "data" / "gex_collector.lock"
 # Derived from POLL_INTERVAL_MIN (defined above) so it can't silently drift if
-# the poll interval changes. == 600 at POLL_INTERVAL_MIN=5.
+# the poll interval changes. == 240 at POLL_INTERVAL_MIN=2.
 LOCK_TTL_SEC = POLL_INTERVAL_MIN * 60 * 2  # 2 poll intervals; matches gex_status.STALE_AFTER_SEC
 
 
