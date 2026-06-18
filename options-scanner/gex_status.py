@@ -8,7 +8,9 @@ TZ = ZoneInfo("America/Chicago")
 MARKET_OPEN  = dtime(8, 30)
 MARKET_CLOSE = dtime(15, 20)
 STALE_AFTER_SEC = 240  # 2 x poll interval (2 min)
-FIRST_POLL_GRACE = dtime(8, 35)
+# Grace before "no data" reads as a dead collector: the first snapshot lands ~one
+# poll interval after open (08:30 + ~2 min), so 08:33 covers it with a small buffer.
+FIRST_POLL_GRACE = dtime(8, 33)
 
 
 def _fmt_age(sec: int) -> str:
