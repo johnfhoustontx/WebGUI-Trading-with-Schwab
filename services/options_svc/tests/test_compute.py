@@ -1077,6 +1077,7 @@ def _fake_gex_modules(monkeypatch, *, lock_ok=True):
 
     fake_gc = _types.SimpleNamespace(
         LOCK_PATH="LOCK", SYMBOLS=["$SPX", "SPY"],
+        collection_symbols=lambda: ["$SPX", "SPY", "NVDA"],
         acquire_collector_lock=lambda path, **kw: lock_ok,
         touch_lock=lambda path, **kw: calls.update(touched=True),
         ensure_file_logging=lambda *a, **k: None,
@@ -1100,7 +1101,7 @@ def test_collect_gex_snapshots_polls_with_proxy_client(monkeypatch):
     assert calls["engine"] == "ENGINE"
     assert calls["closed"] is True                       # write conn always closed
     assert calls["touched"] is True                      # lock heartbeat refreshed
-    assert n == 2                                         # len(SYMBOLS)
+    assert n == 3                                         # len(collection_symbols())
 
 
 def test_collect_gex_snapshots_defers_when_lock_held(monkeypatch):

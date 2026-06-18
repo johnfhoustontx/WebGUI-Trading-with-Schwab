@@ -639,8 +639,9 @@ def gamma_snapshot(symbol: str) -> dict | None:
 
 def collect_gex_snapshots() -> int:
     """Fetch + persist one snapshot round (GEX/Charm/DEX/Vanna + term) for the
-    tracked symbols. Returns ``len(gex_collector.SYMBOLS)``, or ``0`` when a
-    fresh foreign collector owns the advisory lock (we defer).
+    tracked symbols. Returns ``len(gex_collector.collection_symbols())`` (the
+    dynamic collection universe), or ``0`` when a fresh foreign collector owns
+    the advisory lock (we defer).
 
     Reuses options-scanner's ``gex_collector.poll_once`` (engine compute +
     ``gex_history_db.insert_snapshot``) VERBATIM so the snapshot schema + symbol
@@ -675,7 +676,7 @@ def collect_gex_snapshots() -> int:
                       now=int(time.time()))
     finally:
         conn.close()
-    return len(gc.SYMBOLS)
+    return len(gc.collection_symbols())
 
 
 def _gex_next_scan(now):
