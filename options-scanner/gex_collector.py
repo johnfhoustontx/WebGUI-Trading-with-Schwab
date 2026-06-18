@@ -30,6 +30,29 @@ STOP_HOUR, STOP_MIN = 15, 20
 
 log = logging.getLogger("gex_collector")
 
+
+def collection_symbols():
+    """Dynamic collection universe: the index base (SYMBOLS) unioned with the
+    scan watchlist (BASE ∪ Top 20.xlsx), deduped + order-preserving.
+
+    SYMBOLS is listed FIRST so ``$VIX`` (absent from the watchlist) is always
+    retained. Defensive: any watchlist import/read failure falls back to the
+    static SYMBOLS so a poll never crashes over the watchlist."""
+    try:
+        import watchlist
+        extra = watchlist.get_scan_symbols()
+    except Exception:
+        log.warning("watchlist unavailable; collecting index base only",
+                    exc_info=True)
+        return list(SYMBOLS)
+    out, seen = [], set()
+    for s in list(SYMBOLS) + list(extra or []):
+        if s and s not in seen:
+            seen.add(s)
+            out.append(s)
+    return out
+
+
 LOCK_PATH = Path(__file__).parent / "data" / "gex_collector.lock"
 # Derived from POLL_INTERVAL_MIN (defined above) so it can't silently drift if
 # the poll interval changes. == 600 at POLL_INTERVAL_MIN=5.
