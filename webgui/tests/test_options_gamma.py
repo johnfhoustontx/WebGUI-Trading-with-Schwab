@@ -109,6 +109,30 @@ def test_heatmap_figure_overlays_spot_line():
     spot_trace = next(t for t in fig["data"] if t["type"] == "scatter")
     assert spot_trace["y"] == [450.0, 451.5]
     assert spot_trace["x"] == ["09:30", "09:35"]
+    # Price line is a clean line — no marker dots.
+    assert spot_trace["mode"] == "lines"
+    assert "marker" not in spot_trace
+
+
+def test_heatmap_figure_time_labels_not_clipped():
+    # Time labels are rotated + dense; automargin + a taller bottom margin keep
+    # them from being cut off at the bottom edge.
+    rows = [("09:30", 450.0, None, None, None, 0, {449.0: {"net": 5}})]
+    lay = gamma.heatmap_figure(rows, "GEX")["layout"]
+    assert lay["xaxis"]["automargin"] is True
+    assert lay["margin"]["b"] >= 60
+
+
+def test_union_range_includes_values_with_padding():
+    # Spot path 470..510 falls outside a [498, 512] strike window; the unioned
+    # range must cover the full path so the heatmap price line isn't clipped.
+    lo, hi = gamma.union_range([498.0, 512.0], [505.0, 470.0, 509.0])
+    assert lo <= 470.0 and hi >= 512.0
+
+
+def test_union_range_noop_without_values():
+    assert gamma.union_range([498.0, 512.0], []) == [498.0, 512.0]
+    assert gamma.union_range([498.0, 512.0], [None, "x"]) == [498.0, 512.0]
 
 
 def test_heatmap_matrix_extracts_net_from_cell_dicts():

@@ -162,6 +162,23 @@ def _hline(value, color, dash=None):
             "yref": "y", "y0": value, "y1": value, "line": line}
 
 
+def union_range(yrange, values, pad_frac=0.01):
+    """Expand a ``[lo, hi]`` y-range to include all numeric ``values`` (e.g. the
+    intraday spot path), with a small pad so an extreme point isn't flush to the
+    edge. Returns ``yrange`` unchanged when there are no numeric values.
+
+    Used so the heatmap's overlaid spot-price line is never clipped when the
+    underlying drifted outside the near-spot strike window the bars/heatmap share."""
+    nums = [v for v in (values or []) if isinstance(v, (int, float))]
+    if not nums:
+        return yrange
+    lo, hi = yrange
+    lo2, hi2 = min(lo, min(nums)), max(hi, max(nums))
+    span = hi2 - lo2
+    pad = span * pad_frac if span else 0.0
+    return [lo2 - pad, hi2 + pad]
+
+
 def bar_yrange(strikes, spot, pad_frac=0.04):
     """Y-axis [lo, hi] tight to the strikes that actually have bars.
 
@@ -278,21 +295,22 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None):
     if any(s is not None for s in spots):
         # Underlying price track over the session, on the shared Strike axis.
         data.append({
-            "type": "scatter", "mode": "lines+markers", "name": "Spot",
+            "type": "scatter", "mode": "lines", "name": "Spot",
             "x": m["x"], "y": spots,
             "line": {"color": PRICE_LINE, "width": 2},
-            "marker": {"color": PRICE_LINE, "size": 4},
             "hovertemplate": "Spot %{y:,.2f} · %{x}<extra></extra>",
         })
     return {
         "data": data,
         "layout": _apply_dark({
             "title": f"{_view_label(view)} intraday (strike × time)",
-            "xaxis": {"title": "Time"}, "yaxis": yaxis,
+            # automargin lets Plotly grow the bottom margin to fit the rotated,
+            # dense time labels so they aren't clipped at the bottom edge.
+            "xaxis": {"title": "Time", "automargin": True}, "yaxis": yaxis,
             # Lighter cell-separator mesh: the xgap/ygap reveal this colour, so a
             # mid-grey reads as a soft grid instead of the harsh near-black gaps.
             "plot_bgcolor": HEATMAP_SEP,
-            "margin": {"l": 60, "r": 20, "t": 40, "b": 40},
+            "margin": {"l": 60, "r": 20, "t": 40, "b": 60},
             "height": height, "autosize": True,
             "showlegend": False,
             "hoverlabel": HOVER,
@@ -520,24 +538,29 @@ def render():
         flip = entry.get("flip")
         walls = entry.get("walls") or []
 
-        # One shared near-spot strike range so the bar chart and the intraday
-        # heatmap line up vertically (axis alignment). Tight to the strikes that
-        # actually have visible bars (drops near-zero edge strikes → no GAMMA
-        # dead space).
-        yr = bar_yrange(significant_strikes(bars_from_gex(data, view_spot)), view_spot)
-        chart_plot.update_figure(
-            bar_figure(data, view_spot, view=view, walls=walls, flip=flip, yrange=yr))
-        chart_plot.set_visibility(True)
-        summary_lbl.text = summary_text(
-            {**summary, "strike_count": data.get("strike_count")}, _view_label(view))
-
-        # History rows: index-6 grid dict needs its keys re-floated too.
+        # History rows first (index-6 grid dict needs its keys re-floated too): the
+        # intraday spot path (index 1) feeds the shared y-range below.
         rows = []
         for r in (entry.get("history") or []):
             r = list(r)
             if len(r) > 6:
                 r[6] = _refloat_keys(r[6])
             rows.append(tuple(r))
+        spot_path = [r[1] for r in rows if len(r) > 1 and isinstance(r[1], (int, float))]
+
+        # One shared near-spot strike range so the bar chart and the intraday
+        # heatmap line up vertically (axis alignment). Tight to the strikes that
+        # actually have visible bars (drops near-zero edge strikes → no GAMMA
+        # dead space), then widened to include the intraday spot path so the
+        # heatmap's price line isn't clipped when price drifted out of that window.
+        yr = bar_yrange(significant_strikes(bars_from_gex(data, view_spot)), view_spot)
+        yr = union_range(yr, spot_path)
+        chart_plot.update_figure(
+            bar_figure(data, view_spot, view=view, walls=walls, flip=flip, yrange=yr))
+        chart_plot.set_visibility(True)
+        summary_lbl.text = summary_text(
+            {**summary, "strike_count": data.get("strike_count")}, _view_label(view))
+
         if rows:
             heat_plot.update_figure(heatmap_figure(rows, view, yrange=yr))
             heat_plot.set_visibility(True)
