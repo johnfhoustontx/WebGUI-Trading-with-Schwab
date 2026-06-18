@@ -354,7 +354,9 @@ def test_poll_once_acquires_client_lock_around_fetch(tmp_path, monkeypatch):
 
     # Patch the term poll to a no-op so we only measure poll_once's own calls
     monkeypatch.setattr(gc, "poll_term_once", lambda *a, **k: None)
-    gc.poll_once(client, engine, conn, lock=TrackLock())
+    # Pin the universe to the index base so the count is deterministic
+    # (poll_once now defaults to the dynamic collection_symbols() watchlist).
+    gc.poll_once(client, engine, conn, lock=TrackLock(), symbols=gc.SYMBOLS)
     # One acquire/release per symbol fetched
     assert events.count("acquire") == len(gc.SYMBOLS)
     assert events.count("release") == len(gc.SYMBOLS)

@@ -166,16 +166,21 @@ def _maybe_lock(lock):
     return lock if lock is not None else contextlib.nullcontext()
 
 
-def poll_once(client, engine, conn, lock=None) -> None:
-    """Fetch + store one snapshot per SYMBOL. Per-symbol exceptions are logged,
-    not propagated, so one bad symbol doesn't kill the whole poll."""
+def poll_once(client, engine, conn, lock=None, symbols=None) -> None:
+    """Fetch + store one snapshot per symbol. Per-symbol exceptions are logged,
+    not propagated, so one bad symbol doesn't kill the whole poll.
+
+    ``symbols`` defaults to ``collection_symbols()`` (the index base unioned
+    with the scan watchlist)."""
+    if symbols is None:
+        symbols = collection_symbols()
     now = datetime.now(TZ)
     # snap down to nearest POLL_INTERVAL_MIN boundary so all rows in one poll
     # cycle share the same ts (idempotent re-runs replace, don't duplicate).
     snapped_min = (now.minute // POLL_INTERVAL_MIN) * POLL_INTERVAL_MIN
     ts_boundary = int(now.replace(minute=snapped_min, second=0, microsecond=0).timestamp())
     today = now.date()
-    for symbol in SYMBOLS:
+    for symbol in symbols:
         try:
             with _maybe_lock(lock):
                 r = client.get_option_chain(
