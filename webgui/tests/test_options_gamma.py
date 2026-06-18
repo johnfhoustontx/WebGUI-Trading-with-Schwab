@@ -52,15 +52,15 @@ def test_bar_yrange_empty_falls_back_to_spot_band():
 def test_panel_flex_endpoints_and_monotonic():
     bar0, heat0 = gamma.panel_flex(0)
     assert heat0 == 0.28 and round(bar0 + heat0, 4) == 1.0      # session start: bars wide
-    barf, heatf = gamma.panel_flex(82)
+    barf, heatf = gamma.panel_flex(205)
     assert heatf == 0.70 and round(barf + heatf, 4) == 1.0      # full session: heat wide
     # clamps past a full session
-    assert gamma.panel_flex(200) == gamma.panel_flex(82)
+    assert gamma.panel_flex(300) == gamma.panel_flex(205)
     # heat fraction is non-decreasing with more snapshots
-    heats = [gamma.panel_flex(n)[1] for n in range(0, 90, 10)]
+    heats = [gamma.panel_flex(n)[1] for n in range(0, 210, 20)]
     assert heats == sorted(heats)
     # midpoint is between the endpoints
-    _, heat_mid = gamma.panel_flex(41)
+    _, heat_mid = gamma.panel_flex(102)
     assert 0.28 < heat_mid < 0.70
 
 
@@ -307,3 +307,20 @@ def test_render_graceful_empty_cache():
     assert bus_client.read("options:gamma") is None  # confirm empty
     with ui.card():
         gamma.render()  # must not raise
+
+
+def test_symbol_options_default_present_and_first():
+    out = gamma.symbol_options({"symbols": ["SPY", "$SPX", "NVDA"]})
+    assert out[0] == "$SPX"          # $SPX always first
+    assert out == ["$SPX", "SPY", "NVDA"]
+
+
+def test_symbol_options_cold_fallback():
+    assert gamma.symbol_options(None) == ["$SPX", "SPY", "QQQ"]
+    assert gamma.symbol_options({}) == ["$SPX", "SPY", "QQQ"]
+
+
+def test_symbol_options_injects_missing_default():
+    out = gamma.symbol_options({"symbols": ["SPY", "QQQ"]})
+    assert out[0] == "$SPX"
+    assert "SPY" in out and "QQQ" in out

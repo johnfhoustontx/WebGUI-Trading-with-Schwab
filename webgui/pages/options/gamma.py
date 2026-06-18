@@ -18,8 +18,6 @@ via ``_refloat_keys`` BEFORE feeding the builders. The builders stay unchanged.
 """
 from pages.ui_guard import guard, guard_async
 
-from .inputs import select_all_on_focus
-
 POS_COLOR = "#66bb6a"
 NEG_COLOR = "#ef5350"
 SPOT_COLOR = "#ffd54f"
@@ -178,10 +176,10 @@ def bar_yrange(strikes, spot, pad_frac=0.04):
     return [lo - pad, hi + pad]
 
 
-def panel_flex(n_cols, full_cols=82, min_heat=0.28, max_heat=0.70):
+def panel_flex(n_cols, full_cols=205, min_heat=0.28, max_heat=0.70):
     """(bar_weight, heat_weight) flex ratio from intraday snapshot count.
 
-    full_cols ≈ five-minute slots in an 08:30–15:20 CT session. The heatmap
+    full_cols ≈ two-minute slots in an 08:30–15:20 CT session. The heatmap
     fraction lerps min_heat→max_heat with session progress so the heatmap grows
     and the bars shrink as the day fills in; bars take the remainder."""
     p = 0.0 if full_cols <= 0 else max(0.0, min(1.0, n_cols / full_cols))
@@ -393,6 +391,27 @@ def summary_text(summary, view):
 # view name -> (tuple index from calc_all_from_chain, engine view string)
 _VIEWS = {"GEX": (0, "gex"), "Charm": (1, "charm"), "DEX": (2, "dex"), "Vanna": (3, "vanna")}
 
+_DEFAULT_SYMBOL = "$SPX"
+_FALLBACK_SYMBOLS = ["$SPX", "SPY", "QQQ"]
+
+
+def symbol_options(cached):
+    """Dropdown option list from the cached gamma_symbols view.
+
+    ``cached`` is ``{"symbols":[...]}`` (or None when the bus is cold). Returns a
+    list with ``$SPX`` guaranteed present and FIRST (so it's the default), order
+    otherwise preserved. Cold/empty → the index-trio fallback."""
+    syms = (cached or {}).get("symbols") if isinstance(cached, dict) else None
+    if not syms:
+        return list(_FALLBACK_SYMBOLS)
+    ordered = [_DEFAULT_SYMBOL] + [s for s in syms if s != _DEFAULT_SYMBOL]
+    out, seen = [], set()
+    for s in ordered:
+        if s not in seen:
+            seen.add(s)
+            out.append(s)
+    return out
+
 
 def render():
     import bus_client
@@ -407,7 +426,9 @@ def render():
     seen = {"gamma": None, "explain": None, "analyze": None, "status": None}
 
     with ui.row().classes("items-center gap-3 flex-wrap"):
-        symbol_in = select_all_on_focus(ui.input("Symbol", value="$SPX").classes("w-28"))
+        _sym_opts = symbol_options(bus_client.read("options:gamma_symbols"))
+        symbol_in = ui.select(_sym_opts, value=_DEFAULT_SYMBOL,
+                              with_input=True, label="Symbol").classes("w-40")
         fetch_btn = ui.button("Refresh now", icon="refresh")
         view_toggle = ui.toggle({v: _view_label(v) for v in list(_VIEWS) + ["Term"]},
                                  value="GEX")
