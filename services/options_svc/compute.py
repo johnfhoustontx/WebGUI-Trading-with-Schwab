@@ -634,7 +634,7 @@ def gamma_snapshot(symbol: str) -> dict | None:
 # (closed, machine sleep, or lock contention from a double launch) collection
 # silently stopped and the heatmap froze at the first snapshots — "no data past
 # the first hour". The always-on options service now owns collection: the
-# scheduler calls this on every 5-min slot within market hours, so history
+# scheduler calls this on every 2-min slot within market hours, so history
 # accrues for the whole session whenever the service is up.
 
 def collect_gex_snapshots() -> int:

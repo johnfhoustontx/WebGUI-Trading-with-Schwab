@@ -94,3 +94,18 @@ def test_manage_due_weekend():
 def test_manage_due_holiday():
     due, _ = scheduler.manage_due(_ct(2026, 7, 3, 9, 0), None)
     assert due is False
+
+
+# ── Cadence-mirror drift guard ──────────────────────────────────────────────
+# The GEX-collection cadence is intentionally mirrored (not imported) between the
+# standalone collector and this Tier-2 scheduler to keep the scheduler's import
+# light (see scheduler.py's _GEX_* comment). Mirrors drift silently, so assert the
+# two interval constants — and the staleness threshold — stay in lockstep. This is
+# the only safety net the half-edit hazard has.
+def test_gex_interval_mirrors_collector():
+    import gex_collector
+    import gex_status
+
+    assert scheduler._GEX_INTERVAL_MIN == gex_collector.POLL_INTERVAL_MIN
+    # Staleness threshold == 2 poll intervals (in seconds).
+    assert gex_status.STALE_AFTER_SEC == gex_collector.POLL_INTERVAL_MIN * 60 * 2
