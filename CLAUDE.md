@@ -144,7 +144,7 @@ Routes:
 | `/options/portfolio` | Paper Portfolio (paper account) | built |
 | `/options/calculator` | Calculator (summary tiles + P&L heatmap) | built |
 | `/options/swing` | Swing Scanner | built |
-| `/options/gamma` | Gamma (GEX/Charm/DEX/Vanna bars + flip/**single Call+Put walls** + intraday heatmap; bar/heatmap **width split grows with session** snapshot count; **flicker-free** in-place Plotly updates) | built |
+| `/options/gamma` | Gamma (GEX/Charm/DEX/Vanna bars + flip/**single Call+Put walls** + intraday heatmap; bar/heatmap **width split grows with session** snapshot count; **flicker-free** in-place Plotly updates; **symbol is a dropdown** — default `$SPX`, populated from the collected universe (watchlist minus `$VIX`) via `cache:options:gamma_symbols`; Explain works per-selected-symbol) | built |
 | `/options/simulator` | Simulator (What-if + IV-shock; Replay TODO) | built |
 | `/sentiment` | Sentiment (two-column top: **dual** Sentiment gauges (Today + 30-Day Avg) + **dual** Market Trend gauges (Today + ~30d Ago) / component table; traffic-light tiles; 30d history + rolling avgs; full-width **Sector & Industry Performance** w/ Day/Week/Month %, P/C, RRG, rotation banner, **expandable industries w/ P/C+RRG**; bottom status bar; **persists across navigation**; **server-side 120s auto-refresh + bridge publish, tab-independent**) | built |
 | `/sentiment/rotation` | Sector Rotation (RRG-vs-SPY: Risk-ON/OFF headline + spread; **top row** = quadrant-map table (left) + tight ROTATING FROM/INTO w/ S&P weights (right); **full-width RRG below** w/ per-sector "meteor tails" — engine `assess_sector` retains a `tail` of `TAIL_LENGTH=12` RS-Ratio/RS-Mom points sampled every `TAIL_STRIDE=2` days; page draws **one trace per sector** (faded trail line + single bright head dot) and **hover-isolates** a sector (`plotly_hover`/`unhover` → `run_plot_method('restyle')` dims the rest); reuses `sector_rotation_assessment`; cached, **manual Refresh only**) | built |
@@ -304,15 +304,27 @@ Design/plans: [live-bridge](docs/plans/2026-06-14-live-sentiment-bridge-design.m
   **collector** now runs inside `options_svc` — see below — so the heatmap
   populates all session whenever the service is up.)
 
-**Gamma intraday-heatmap collection (DONE — 2026-06-15).** Intraday GEX history
+**Gamma intraday-heatmap collection (DONE — 2026-06-15; expanded 2026-06-18).** Intraday GEX history
 (`gex_history.db`, read by the Gamma strike×time heatmap) is now collected by the
 **options service** itself, not a separate window. `services/options_svc/scheduler.py`
-`gex_due()` fires once per 5-min slot within 08:30–15:20 CT on trading days (mirrors
+`gex_due()` fires once per 2-min slot within 08:30–15:20 CT on trading days (mirrors
 `gex_collector`'s window/cadence); the tick runs `handlers.collect_gex_history` →
 `compute.collect_gex_snapshots`, which reuses `options-scanner/gex_collector.poll_once`
 (engine compute + `gex_history_db.insert_snapshot`) VERBATIM with the shared
 `_proxy.schwab_py_client`. It takes the collector's advisory lock
 (`data/gex_collector.lock`) so a manually-run standalone `gex_collector.py` defers.
+**Symbol universe + cadence (2026-06-18):** `poll_once` iterates
+`gex_collector.collection_symbols()` = the index base (`$SPX`/`$VIX`/`SPY`/`QQQ`) ∪
+`watchlist.get_scan_symbols()` (`Top 20.xlsx`), deduped/order-preserving, defensive
+fallback to the base on watchlist failure — so the heatmap has live data for every
+watchlist symbol. The poll interval dropped **5→2 min** (`POLL_INTERVAL_MIN=2`,
+`scheduler._GEX_INTERVAL_MIN=2`, `gex_status.STALE_AFTER_SEC=240` — a
+`test_scheduler.py` drift-guard asserts these stay in lockstep). The Gamma page's
+symbol **dropdown** reads `cache:options:gamma_symbols` (= collected universe minus
+`$VIX`, `$SPX` first), published once at scheduler startup by
+`handlers.publish_gamma_symbols`. Term-structure collection stays SPX-only. Design/plan:
+[design](docs/plans/2026-06-18-gex-watchlist-gamma-dropdown-design.md) /
+[plan](docs/plans/2026-06-18-gex-watchlist-gamma-dropdown-plan.md).
 **Root cause this fixed:** previously the only writer was the standalone
 `gex_collector.py` window launched by `start_all.bat`; when that window died
 (closed / sleep / double-launch lock contention) collection stopped silently and the
