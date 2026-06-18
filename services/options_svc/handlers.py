@@ -49,6 +49,9 @@ EVENT_GAMMA_EXPLAIN = "events:options:gamma_explain"
 CACHE_GAMMA_ANALYZE = "cache:options:gamma_analyze"
 EVENT_GAMMA_ANALYZE = "events:options:gamma_analyze"
 
+CACHE_GAMMA_SYMBOLS = "cache:options:gamma_symbols"
+EVENT_GAMMA_SYMBOLS = "events:options:gamma_symbols"
+
 CACHE_SIM_META = "cache:options:sim_meta"
 EVENT_SIM_META = "events:options:sim_meta"
 
@@ -225,6 +228,16 @@ def publish_gex_status(bus) -> None:
     data = compute.gex_status_view()
     version = bus.cache_set(CACHE_GEX_STATUS, data)
     bus.publish(EVENT_GEX_STATUS, {"version": version})
+
+
+def publish_gamma_symbols(bus) -> None:
+    """Compute the Gamma dropdown universe (collected symbols minus $VIX) and
+    publish it to the bus so the Tier-3 Gamma page can populate its symbol
+    dropdown without importing any engine. No strict contract: a small read-only
+    ``{"symbols":[...]}`` dict; ``compute.gamma_symbol_options`` is defensive."""
+    data = {"symbols": compute.gamma_symbol_options()}
+    version = bus.cache_set(CACHE_GAMMA_SYMBOLS, data)
+    bus.publish(EVENT_GAMMA_SYMBOLS, {"version": version})
 
 
 def handle_command(bus, command) -> None:

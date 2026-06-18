@@ -751,3 +751,20 @@ def test_publish_gex_status_caches_and_publishes(monkeypatch):
     assert env is not None
     assert env.payload == sentinel
     assert msg is not None and msg.get("version") == env.version
+
+
+def test_publish_gamma_symbols_caches_and_publishes(monkeypatch):
+    """publish_gamma_symbols caches cache:options:gamma_symbols ({"symbols":[...]})
+    and publishes a version event."""
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "gamma_symbol_options",
+                        lambda: ["$SPX", "SPY", "NVDA"])
+    sub = bus.subscribe("events:options:gamma_symbols")
+    handlers.publish_gamma_symbols(bus)
+    msg = sub.get_message(timeout=1.0)
+    sub.close()
+
+    env = bus.cache_get("cache:options:gamma_symbols")
+    assert env is not None
+    assert env.payload == {"symbols": ["$SPX", "SPY", "NVDA"]}
+    assert msg is not None and msg.get("version") == env.version

@@ -160,6 +160,13 @@ async def loop(bus):
         await loop_.run_in_executor(None, handlers.refresh_gamma, bus, "$SPX")
     except Exception:
         pass
+    # One-shot startup publish of the Gamma dropdown symbol universe (collected
+    # symbols minus $VIX) so the Gamma page's dropdown is populated on first load.
+    # The watchlist rarely changes mid-session; a service restart republishes.
+    try:
+        await loop_.run_in_executor(None, handlers.publish_gamma_symbols, bus)
+    except Exception:
+        pass
     # One-shot startup publish of the GEX-collector status view so the Gamma
     # page's status bar has data on first load. Refreshed every tick below.
     # Guarded so a cold DB never stops the loop from starting.
