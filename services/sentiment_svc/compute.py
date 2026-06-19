@@ -302,6 +302,12 @@ def build_trend_dict(spy):
 _CYCLICAL = {"XLK", "XLY", "XLF", "XLI", "XLB", "XLE", "XLC"}
 _DEFENSIVE = {"XLP", "XLU", "XLV", "XLRE"}
 
+# %-spread that maps cyclical-vs-defensive leadership to the full ±1 of
+# ``cyc_def_spread``. Intraday day-moves are small (~1% = decisive); month-moves
+# are ~3× larger, so the structural gauge uses a wider scale.
+_CYC_DEF_SCALE_INTRADAY = 1.0
+_CYC_DEF_SCALE_30D = 3.0
+
 # Sentinel so an OMITTED ``compute_30d_trend`` arg fetches internally, while an
 # explicit ``None`` (caller has no data) stays neutral rather than re-fetching.
 _FETCH = object()
@@ -418,7 +424,7 @@ def compute_intraday_trend(schwab, sector_data=None, prior_history=None,
                    if etf in _DEFENSIVE and p is not None]
             if cyc and dfn:
                 cyc_def_spread = intraday_trend._clamp(
-                    (_mean(cyc) - _mean(dfn)) / 1.0, -1, 1)
+                    (_mean(cyc) - _mean(dfn)) / _CYC_DEF_SCALE_INTRADAY, -1, 1)
             else:
                 cyc_def_spread = None
             sector = intraday_trend.score_sector_participation(
@@ -474,7 +480,6 @@ def compute_intraday_trend(schwab, sector_data=None, prior_history=None,
                                "sector": sector.confidence,
                                "vix": vix_sub.confidence},
             "state_history": hist,
-            "smoothed_in": prev_smoothed,
         }
     except Exception:  # noqa: BLE001 — never raise into the refresh path.
         return _neutral_trend()
@@ -539,7 +544,7 @@ def compute_30d_trend(spy_daily_df=_FETCH, sector_month_pcts=_FETCH) -> dict:
                    if etf in _DEFENSIVE and p is not None]
             if cyc and dfn:
                 cyc_def_spread = intraday_trend._clamp(
-                    (_mean(cyc) - _mean(dfn)) / 3.0, -1, 1)
+                    (_mean(cyc) - _mean(dfn)) / _CYC_DEF_SCALE_30D, -1, 1)
             else:
                 cyc_def_spread = None
             sector = intraday_trend.score_sector_participation(
