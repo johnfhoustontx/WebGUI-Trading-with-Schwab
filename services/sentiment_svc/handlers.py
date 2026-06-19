@@ -19,12 +19,50 @@ Kept synchronous: it calls blocking ``compute`` functions and the scaffold's
 consumer loop awaits the result only if it is awaitable.
 """
 import logging
+import time
 from datetime import datetime, timezone
 
-from services.sentiment_svc import compute
+from services.sentiment_svc import compute, scheduler
 from shared.contracts.sentiment import CompositeSnapshot
 
 log = logging.getLogger(__name__)
+
+# Persisted directional Market-Trend state (single-process service, single-user).
+# ``last_ts`` is a monotonic timestamp gating the 15-min recompute; ``history`` /
+# ``committed`` / ``smoothed`` thread the hysteresis + EMA state across reads;
+# ``trend`` / ``trend_30d`` are the latest computed payloads reused on gated
+# (non-recompute) refreshes so every composite write carries a trend.
+_TREND = {"last_ts": None, "history": [], "committed": None, "smoothed": None,
+          "trend": None, "trend_30d": None}
+
+
+def _maybe_recompute_trend():
+    """Recompute the directional Market Trend if the 15-min gate is due.
+
+    Threads persisted hysteresis/smoothing state through ``compute_intraday_trend``
+    and refreshes the cached payloads in ``_TREND``. Defensive — a recompute
+    failure logs and leaves the prior cached trend in place (never aborts refresh).
+    """
+    from services import _proxy
+    now = time.monotonic()
+    if not scheduler.trend_due(now, _TREND["last_ts"]):
+        return
+    try:
+        t = compute.compute_intraday_trend(
+            _proxy.schwab_client,
+            prior_history=_TREND["history"],
+            prior_committed=_TREND["committed"],
+            prev_smoothed=_TREND["smoothed"])
+        t30 = compute.compute_30d_trend()
+        _TREND.update(
+            last_ts=now,
+            history=t.get("state_history", []),
+            committed=t.get("state"),
+            smoothed=t.get("smoothed_score"),
+            trend=t,
+            trend_30d=t30)
+    except Exception:  # noqa: BLE001 — recompute failure must not abort refresh.
+        log.exception("intraday trend recompute failed")
 
 CACHE_COMPOSITE = "cache:sentiment:composite"
 CACHE_HISTORY = "cache:sentiment:history"
@@ -113,13 +151,18 @@ def refresh(bus, with_sectors: bool = False) -> None:
     # Validation gate — fail loudly if the composite shape drifts.
     _composite_gate(live, snaps)
 
+    # 15-min directional Market-Trend recompute (gated + state persisted).
+    _maybe_recompute_trend()
+
     now_iso = datetime.now(timezone.utc).isoformat()
 
     version = bus.cache_set(CACHE_COMPOSITE, {
         "live": live,
         "composite_at": now_iso,
         "proxy_up": compute.proxy_up(),
-        "derived": compute.derive_composite_extras(live, snaps, spy),
+        "derived": compute.derive_composite_extras(
+            live, snaps, spy,
+            trend=_TREND["trend"], trend_30d=_TREND["trend_30d"]),
     })
     bus.publish(EVENT_COMPOSITE, {"version": version})
 

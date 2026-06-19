@@ -50,6 +50,14 @@ def _patch_compute(monkeypatch, *, live, snaps, spy, sector=None,
 
     monkeypatch.setattr(handlers.compute, "build_and_write_bridge", _bridge)
 
+    # Stub the directional-trend recompute so existing tests never touch a live
+    # proxy (the gating/persistence is exercised in the Phase-4 tests below).
+    monkeypatch.setattr(handlers.compute, "compute_intraday_trend",
+                        lambda *a, **k: {"state": "range",
+                                         "state_history": [], "smoothed_score": 50.0})
+    monkeypatch.setattr(handlers.compute, "compute_30d_trend",
+                        lambda *a, **k: {"state": "range"})
+
     # Stub the scoring-derive helpers (real ones tested in test_compute.py).
     monkeypatch.setattr(handlers.compute, "derive_composite_extras",
                         lambda *a, **k: {
@@ -334,6 +342,95 @@ def test_refresh_rotation_survives_compute_exception(monkeypatch):
     assert rot is not None
     assert rot.payload["assessment"] is None
     assert "engine exploded" in (rot.payload["error"] or "")
+
+
+# --- 15-min trend recompute gating (Phase 4) ----------------------------------
+
+def _reset_trend():
+    handlers._TREND.update(last_ts=None, history=[], committed=None,
+                           smoothed=None, trend=None, trend_30d=None)
+
+
+def test_refresh_recomputes_trend_first_call_then_gates(monkeypatch):
+    """First refresh recomputes the directional trend (and the sentinel lands in
+    derived.trend); an immediate second refresh (clock unchanged) does NOT
+    recompute but still writes the cached trend into the composite payload."""
+    _reset_trend()
+    bus = Bus(fake=True)
+    _patch_compute(monkeypatch, live=_fake_live(),
+                   snaps=[{"date": "2026-06-15",
+                           "composite": {"total_score": "7.80"}}], spy=[1.0])
+
+    # Real derive (the stub above replaces it) — restore so trend threads through.
+    def _derive(live, snaps, spy, trend=None, trend_30d=None):
+        return {"weights": {}, "size": "", "bias": "", "signal": "",
+                "velocity": {"text": "", "flag": ""}, "divergence": "",
+                "trend": trend, "trend_30d_ago": trend_30d}
+    monkeypatch.setattr(handlers.compute, "derive_composite_extras", _derive)
+
+    calls = {"intraday": 0, "thirty": 0}
+    sentinel = {"state": "bull_trend", "smoothed_score": 88.0,
+                "state_history": ["bull_trend"], "marker": "intraday"}
+    sentinel30 = {"state": "bull_trend", "marker": "30d"}
+
+    def _intraday(*a, **k):
+        calls["intraday"] += 1
+        return sentinel
+
+    def _thirty(*a, **k):
+        calls["thirty"] += 1
+        return sentinel30
+
+    monkeypatch.setattr(handlers.compute, "compute_intraday_trend", _intraday)
+    monkeypatch.setattr(handlers.compute, "compute_30d_trend", _thirty)
+
+    # Freeze the monotonic clock so the second call is within the 15-min window.
+    monkeypatch.setattr(handlers.time, "monotonic", lambda: 1000.0)
+
+    handlers.refresh(bus, with_sectors=False)
+    assert calls["intraday"] == 1 and calls["thirty"] == 1
+    comp = bus.cache_get("cache:sentiment:composite")
+    assert comp.payload["derived"]["trend"] == sentinel
+    assert comp.payload["derived"]["trend_30d_ago"] == sentinel30
+    # state persisted for the next hysteresis read.
+    assert handlers._TREND["committed"] == "bull_trend"
+    assert handlers._TREND["history"] == ["bull_trend"]
+    assert handlers._TREND["smoothed"] == 88.0
+
+    # Second refresh, clock unchanged -> NOT due -> no recompute, cached trend used.
+    handlers.refresh(bus, with_sectors=False)
+    assert calls["intraday"] == 1 and calls["thirty"] == 1  # still 1
+    comp2 = bus.cache_get("cache:sentiment:composite")
+    assert comp2.payload["derived"]["trend"] == sentinel
+    _reset_trend()
+
+
+def test_refresh_trend_recompute_failure_non_fatal(monkeypatch):
+    """A blowup in the trend recompute is logged and does not abort the refresh
+    (the composite still caches with whatever trend was last held — None)."""
+    _reset_trend()
+    bus = Bus(fake=True)
+    _patch_compute(monkeypatch, live=_fake_live(), snaps=[{"x": 1}], spy=[1.0])
+
+    def _derive(live, snaps, spy, trend=None, trend_30d=None):
+        return {"weights": {}, "size": "", "bias": "", "signal": "",
+                "velocity": {"text": "", "flag": ""}, "divergence": "",
+                "trend": trend, "trend_30d_ago": trend_30d}
+    monkeypatch.setattr(handlers.compute, "derive_composite_extras", _derive)
+
+    def _boom(*a, **k):
+        raise RuntimeError("trend exploded")
+
+    monkeypatch.setattr(handlers.compute, "compute_intraday_trend", _boom)
+    monkeypatch.setattr(handlers.compute, "compute_30d_trend", lambda *a, **k: {})
+    monkeypatch.setattr(handlers.time, "monotonic", lambda: 5000.0)
+
+    handlers.refresh(bus, with_sectors=False)  # must not raise
+
+    comp = bus.cache_get("cache:sentiment:composite")
+    assert comp is not None
+    assert comp.payload["derived"]["trend"] is None
+    _reset_trend()
 
 
 def test_handle_command_refresh_rotation(monkeypatch):
