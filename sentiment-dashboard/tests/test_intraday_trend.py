@@ -76,3 +76,27 @@ def test_sector_broad_red_defensive_lead():
 def test_sector_no_data():
     s = score_sector_participation(n_green=0, n_total=0, cyc_def_spread=None)
     assert s.confidence == 0.0 and s.score == 50.0
+
+
+from scoring.intraday_trend import score_vix_context, vol_confidence_factor
+
+
+def test_vix_low_and_falling_bullish():
+    s = score_vix_context(vix=12, vix_change_pct=-6, vix1d=11, vix9d=14)
+    assert s.score > 65
+
+
+def test_vix_high_and_spiking_bearish():
+    s = score_vix_context(vix=30, vix_change_pct=8, vix1d=34, vix9d=28)
+    assert s.score < 35
+
+
+def test_vix_missing():
+    s = score_vix_context(vix=0, vix_change_pct=0, vix1d=0, vix9d=0)
+    assert s.confidence == 0.0
+
+
+def test_vol_confidence_factor_damps_on_spike():
+    assert vol_confidence_factor(0) == 1.0
+    assert vol_confidence_factor(15) < 0.7
+    assert vol_confidence_factor(-10) == 1.0

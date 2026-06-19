@@ -66,3 +66,22 @@ def score_sector_participation(n_green, n_total, cyc_def_spread) -> TrendSub:
     direction = 0.6 * participation + 0.4 * lead
     return TrendSub(score=round(_clamp(50 + 50 * direction, 0, 100), 2),
                     confidence=round(_clamp(n_total / 11.0, 0, 1), 3))
+
+
+def score_vix_context(vix, vix_change_pct, vix1d, vix9d) -> TrendSub:
+    if not vix or vix <= 0:
+        return TrendSub(score=50.0, confidence=0.0)
+    lvl = _clamp((20.0 - vix) / 10.0, -1, 1)
+    chg = _clamp(-vix_change_pct / 5.0, -1, 1)
+    term = _clamp((vix - vix1d) / 2.0, -1, 1) if vix1d else 0.0
+    direction = 0.4 * lvl + 0.4 * chg + 0.2 * term
+    return TrendSub(score=round(_clamp(50 + 50 * direction, 0, 100), 2),
+                    confidence=1.0)
+
+
+def vol_confidence_factor(vix_change_pct) -> float:
+    """Global confidence multiplier: a sharp VIX *spike* makes any trend read less
+    reliable. Falling/flat VIX -> 1.0. -0.04 per % of spike, floored at 0.4."""
+    if vix_change_pct <= 0:
+        return 1.0
+    return round(_clamp(1.0 - 0.04 * vix_change_pct, 0.4, 1.0), 3)
