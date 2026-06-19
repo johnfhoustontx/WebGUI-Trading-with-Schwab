@@ -31,18 +31,19 @@ def test_bars_from_gex_excludes_out_of_band():
     assert b["strikes"] == [450.0]
 
 
-def test_bar_figure_is_plotly_dict():
+def test_bar_figure_is_highcharts_dict():
     fig = gamma.bar_figure(GEX, 450.0, view="GEX", walls=[450.0], flip=449.5, pct=0.02)
-    assert "data" in fig and "layout" in fig
+    assert "series" in fig and fig["chart"]["type"] == "bar"
 
 
-def test_bar_figure_yaxis_hugs_visible_bars_and_is_tall():
+def test_bar_figure_strike_axis_hugs_visible_bars_and_is_tall():
+    # In a Highcharts bar chart the STRIKE axis is xAxis (vertical).
     # spot*0.95..1.05 would be 427.5..472.5; visible bars only span 448..452
     fig = gamma.bar_figure(GEX, 450.0, view="GEX", pct=0.02)
-    lo, hi = fig["layout"]["yaxis"]["range"]
+    lo, hi = fig["xAxis"]["min"], fig["xAxis"]["max"]
     assert lo > 440.0 and hi < 460.0          # tight to the bars, not spot*0.95/1.05
     assert lo <= 448.0 and hi >= 452.0        # outermost bars not clipped
-    assert fig["layout"]["height"] >= 600     # fills the lower screen
+    assert fig["chart"]["height"] >= 600      # fills the lower screen
 
 
 def test_bar_yrange_empty_falls_back_to_spot_band():
@@ -104,23 +105,23 @@ def test_heatmap_figure_overlays_spot_line():
     rows = [("09:30", 450.0, None, None, None, 0, {449.0: {"net": 5}}),
             ("09:35", 451.5, None, None, None, 0, {449.0: {"net": 7}})]
     fig = gamma.heatmap_figure(rows, "GEX")
-    types = [t["type"] for t in fig["data"]]
-    assert "heatmap" in types and "scatter" in types
-    spot_trace = next(t for t in fig["data"] if t["type"] == "scatter")
-    assert spot_trace["y"] == [450.0, 451.5]
-    assert spot_trace["x"] == ["09:30", "09:35"]
-    # Price line is a clean line — no marker dots.
-    assert spot_trace["mode"] == "lines"
-    assert "marker" not in spot_trace
+    types = [s["type"] for s in fig["series"]]
+    assert "heatmap" in types and "line" in types
+    spot = next(s for s in fig["series"] if s["type"] == "line")
+    assert [p[1] for p in spot["data"]] == [450.0, 451.5]   # y = spot prices
+    assert [p[0] for p in spot["data"]] == [0, 1]            # x = time category index
+    # Price line is a clean line on its own axis — no marker dots, no colorAxis.
+    assert spot["marker"]["enabled"] is False
+    assert spot["colorAxis"] is False
 
 
 def test_heatmap_figure_time_labels_not_clipped():
-    # Time labels are rotated + dense; automargin + a taller bottom margin keep
-    # them from being cut off at the bottom edge.
+    # Time labels are dense; rotating them + a taller bottom margin keep them from
+    # being cut off at the bottom edge.
     rows = [("09:30", 450.0, None, None, None, 0, {449.0: {"net": 5}})]
-    lay = gamma.heatmap_figure(rows, "GEX")["layout"]
-    assert lay["xaxis"]["automargin"] is True
-    assert lay["margin"]["b"] >= 60
+    fig = gamma.heatmap_figure(rows, "GEX")
+    assert fig["xAxis"]["labels"]["rotation"] == -45
+    assert fig["chart"]["marginBottom"] >= 60
 
 
 def test_union_range_includes_values_with_padding():
@@ -157,13 +158,13 @@ def test_term_heatmap_axes_and_zero_filter():
           "cells": {"2026-06-18": {450.0: {"net_gex_usd": 5}},
                     "2026-06-19": {450.0: {"net_gex_usd": -3}, 451.0: {"net_gex_usd": 0}}}}
     fig = gamma.term_heatmap(tg)
-    assert fig["data"][0]["x"] == ["2026-06-18", "2026-06-19"]
-    assert 450.0 in fig["data"][0]["y"]
-    assert 451.0 not in fig["data"][0]["y"]   # all-zero strike filtered out
+    assert fig["xAxis"]["categories"] == ["2026-06-18", "2026-06-19"]
+    assert "450" in fig["yAxis"]["categories"]
+    assert "451" not in fig["yAxis"]["categories"]   # all-zero strike filtered out
 
 
 def test_term_heatmap_empty():
-    assert gamma.term_heatmap({})["data"][0]["z"] == []
+    assert gamma.term_heatmap({})["series"][0]["data"] == []
 
 
 def test_wrap_explain_fragment_and_document():
@@ -223,22 +224,21 @@ def test_view_label_renames_gex_and_dex():
     assert gamma._view_label("Term") == "Term"
 
 
-def test_dark_layout_sets_dark_backgrounds():
-    layout = gamma._apply_dark({"xaxis": {"title": "x"}, "yaxis": {}})
-    assert layout["paper_bgcolor"] == gamma.DARK_BG
-    assert layout["plot_bgcolor"] == gamma.DARK_BG
-    assert layout["font"]["color"] == gamma.FONT
-    assert layout["xaxis"]["title"] == "x"          # existing keys preserved
-    assert "gridcolor" in layout["xaxis"]
+def test_base_chart_sets_dark_background():
+    fig = gamma._base_chart("bar", 680)
+    assert fig["chart"]["backgroundColor"] == gamma.DARK_BG
+    assert fig["accessibility"]["enabled"] is False
+    assert gamma._dark_axis("x")["title"]["text"] == "x"
+    assert gamma._dark_axis()["gridLineColor"] == gamma.GRID
 
 
 def test_bar_figure_is_dark_and_beveled_with_friendly_title():
     fig = gamma.bar_figure(GEX, 450.0, view="GEX", walls=[452.0], flip=449.5, pct=0.02)
-    assert fig["layout"]["paper_bgcolor"] == gamma.DARK_BG
-    marker = fig["data"][0]["marker"]
-    assert "line" in marker and marker["line"]["width"] >= 1   # beveled border
-    assert isinstance(marker["line"]["color"], list)           # per-bar darker shade
-    assert "GAMMA" in fig["layout"]["title"]                   # friendly label, not "GEX"
+    assert fig["chart"]["backgroundColor"] == gamma.DARK_BG
+    pt = fig["series"][0]["data"][0]
+    assert pt["borderWidth"] >= 1 and pt["borderColor"]        # beveled per-bar border
+    assert pt["borderColor"] != pt["color"]                    # darker shade
+    assert "GAMMA" in fig["title"]["text"]                     # friendly label, not "GEX"
 
 
 def test_line_annotations_label_spot_flip_and_call_put_walls():
@@ -250,15 +250,16 @@ def test_line_annotations_label_spot_flip_and_call_put_walls():
     assert any("Put wall" in t for t in texts)    # 445 < spot
 
 
-def test_bar_figure_includes_reference_line_annotations():
+def test_bar_figure_includes_reference_line_plotlines():
     fig = gamma.bar_figure(GEX, 450.0, view="GEX", walls=[452.0], flip=449.5, pct=0.02)
-    texts = [a["text"] for a in fig["layout"].get("annotations", [])]
+    texts = [pl["label"]["text"] for pl in fig["xAxis"]["plotLines"]]
     assert any(t.startswith("Spot") for t in texts)
+    assert any("Gamma flip" in t for t in texts)
 
 
 def test_bar_figure_accepts_explicit_yrange():
     fig = gamma.bar_figure(GEX, 450.0, view="GEX", pct=0.02, yrange=[400.0, 500.0])
-    assert fig["layout"]["yaxis"]["range"] == [400.0, 500.0]
+    assert [fig["xAxis"]["min"], fig["xAxis"]["max"]] == [400.0, 500.0]
 
 
 def test_darker_returns_a_darker_hex():
@@ -269,11 +270,11 @@ def test_darker_returns_a_darker_hex():
 def test_heatmap_figure_dark_with_cell_separators_and_concise_hover():
     rows = [("09:30", 450, None, None, None, 0, {448.0: 5, 450.0: -3})]
     fig = gamma.heatmap_figure(rows, "GEX", yrange=[440.0, 460.0])
-    d, lay = fig["data"][0], fig["layout"]
-    assert d["xgap"] == 1 and d["ygap"] == 1            # faint cell separators
-    assert "hovertemplate" in d                          # concise hover
-    assert lay["paper_bgcolor"] == gamma.DARK_BG
-    assert lay["yaxis"]["range"] == [440.0, 460.0]       # aligned to bars
+    hm = next(s for s in fig["series"] if s["type"] == "heatmap")
+    assert hm["borderWidth"] == 1                        # faint cell separators
+    assert "pointFormat" in hm["tooltip"]                # concise hover
+    assert fig["chart"]["backgroundColor"] == gamma.DARK_BG
+    assert [fig["yAxis"]["min"], fig["yAxis"]["max"]] == [440.0, 460.0]   # aligned to bars
 
 
 def test_term_heatmap_dark_separators_and_contrast():
@@ -281,11 +282,12 @@ def test_term_heatmap_dark_separators_and_contrast():
           "cells": {"2026-06-18": {450.0: {"net_gex_usd": 5},
                                    460.0: {"net_gex_usd": -200}}}}
     fig = gamma.term_heatmap(tg)
-    d, lay = fig["data"][0], fig["layout"]
-    assert d["xgap"] == 1 and d["ygap"] == 1
-    assert lay["paper_bgcolor"] == gamma.DARK_BG
-    # symmetric contrast clamp present
-    assert d.get("zmax") is not None and d.get("zmin") == -d["zmax"]
+    hm = fig["series"][0]
+    assert hm["borderWidth"] == 1
+    assert fig["chart"]["backgroundColor"] == gamma.DARK_BG
+    # symmetric contrast clamp present on the color axis
+    ca = fig["colorAxis"]
+    assert ca.get("max") is not None and ca.get("min") == -ca["max"]
 
 
 def test_robust_zmax_ignores_none_and_returns_positive():
@@ -304,8 +306,9 @@ def test_render_view_updates_in_place_not_clear():
     Plotly elements every repaint. It should update figures in place and must not
     call chart_box.clear()/heatmap_box.clear() (which rebuilt the canvas)."""
     src = inspect.getsource(gamma.render)
-    assert "update_figure" in src
-    assert "chart_box.clear()" not in src
+    assert "_set_figure" in src           # in-place Highcharts update (no teardown)
+    assert "_set_chart" in src            # kind-aware recreate for the bar<->Term switch
+    assert "chart_box.clear()" not in src   # never tear down the whole panel/messages
     assert "heatmap_box.clear()" not in src
     assert "panel_flex" in src           # proportional split is wired
     assert "significant_strikes" in src  # tight y-range is wired

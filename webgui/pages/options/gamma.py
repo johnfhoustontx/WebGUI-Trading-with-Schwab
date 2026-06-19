@@ -36,26 +36,52 @@ HOVER = {"bgcolor": "#222222", "bordercolor": "#444444", "font": {"size": 11, "c
 # engine/cache strings stay "GEX"/"DEX" — only the display label changes).
 _VIEW_LABELS = {"GEX": "GAMMA", "DEX": "DELTA"}
 
+# Diverging RdYlGn color-axis stops (replicates Plotly's "RdYlGn" colorscale) for
+# the heatmaps: deep red (most negative net) → yellow (zero) → deep green.
+RDYLGN_STOPS = [
+    [0.00, "#a50026"], [0.12, "#d73027"], [0.25, "#f46d43"], [0.38, "#fdae61"],
+    [0.50, "#ffffbf"], [0.62, "#a6d96a"], [0.75, "#66bd63"], [0.88, "#1a9850"],
+    [1.00, "#006837"],
+]
+
+
+def _dark_axis(title=None):
+    """Shared dark-theme axis options (grid/line/label colors + optional title)."""
+    ax = {"gridLineColor": GRID, "lineColor": "#555555",
+          "labels": {"style": {"color": FONT}}}
+    if title is not None:
+        ax["title"] = {"text": title, "style": {"color": FONT}}
+    return ax
+
+
+def _base_chart(chart_type, height):
+    """Common Highcharts scaffolding (dark bg, no credits/a11y/legend)."""
+    return {
+        "chart": {"type": chart_type, "backgroundColor": DARK_BG, "height": height,
+                  "spacingTop": 8, "style": {"fontFamily": "inherit"}},
+        "credits": {"enabled": False},
+        "accessibility": {"enabled": False},
+        "legend": {"enabled": False},
+    }
+
+
+def _strike_plotline(value, color, dash, text):
+    """A reference plotLine across the strike axis, labeled at its right edge."""
+    return {"value": value, "color": color, "width": 2, "dashStyle": dash, "zIndex": 5,
+            "label": {"text": text, "align": "right", "x": -4,
+                      "style": {"color": color, "fontSize": "10px"}}}
+
+
+def _strike_step(strikes):
+    """Row height for a linear strike axis = smallest positive gap between strikes
+    (so heatmap cells tile without gaps/overlap); falls back to 1.0."""
+    diffs = [b - a for a, b in zip(strikes, strikes[1:]) if b > a]
+    return min(diffs) if diffs else 1.0
+
 
 def _view_label(view):
     """Display label for a view (GEX→GAMMA, DEX→DELTA; others unchanged)."""
     return _VIEW_LABELS.get(view, view)
-
-
-def _apply_dark(layout):
-    """Inject the dark theme into a Plotly layout dict (in place); returns it.
-
-    Sets dark paper/plot backgrounds + light font, and subtle grid/zero/line
-    colors on both axes (existing axis keys like title/range are preserved)."""
-    layout.setdefault("paper_bgcolor", DARK_BG)
-    layout.setdefault("plot_bgcolor", DARK_BG)
-    layout.setdefault("font", {"color": FONT})
-    for ax in ("xaxis", "yaxis"):
-        a = layout.setdefault(ax, {})
-        a.setdefault("gridcolor", GRID)
-        a.setdefault("zerolinecolor", "#555555")
-        a.setdefault("linecolor", "#555555")
-    return layout
 
 
 def _darker(hexc, factor=0.55):
@@ -66,27 +92,19 @@ def _darker(hexc, factor=0.55):
 
 
 def line_annotations(spot, flip, walls):
-    """Right-edge text labels for the reference lines (Spot / Gamma flip / walls).
+    """Reference-line labels (Spot / Gamma flip / walls) as ``{value, text, color}``.
 
     Walls are labeled by side: ``Call wall`` (strike ≥ spot, resistance) or
-    ``Put wall`` (strike < spot, support). Returns a list of Plotly annotation
-    dicts anchored to the right edge of the plot."""
+    ``Put wall`` (strike < spot, support). Consumed by ``bar_figure`` to build the
+    strike-axis plotLine labels."""
     anns = []
-
-    def _ann(y, text, color):
-        return {"xref": "paper", "x": 1.0, "xanchor": "right",
-                "yref": "y", "y": y, "yanchor": "bottom",
-                "text": text, "showarrow": False,
-                "font": {"color": color, "size": 10},
-                "bgcolor": "rgba(0,0,0,0.45)"}
-
     if spot is not None:
-        anns.append(_ann(spot, f"Spot {spot:g}", SPOT_COLOR))
+        anns.append({"value": spot, "text": f"Spot {spot:g}", "color": SPOT_COLOR})
     if flip is not None:
-        anns.append(_ann(flip, f"Gamma flip {flip:g}", FLIP_COLOR))
+        anns.append({"value": flip, "text": f"Gamma flip {flip:g}", "color": FLIP_COLOR})
     for w in (walls or []):
         side = "Call wall" if (spot is None or w >= spot) else "Put wall"
-        anns.append(_ann(w, f"{side} {w:g}", WALL_COLOR))
+        anns.append({"value": w, "text": f"{side} {w:g}", "color": WALL_COLOR})
     return anns
 
 
@@ -154,14 +172,6 @@ def bars_from_gex(data, spot, pct=0.02):
     return {"strikes": strikes, "nets": nets, "colors": colors, "hovers": hovers}
 
 
-def _hline(value, color, dash=None):
-    line = {"color": color, "width": 2}
-    if dash:
-        line["dash"] = dash
-    return {"type": "line", "xref": "paper", "x0": 0, "x1": 1,
-            "yref": "y", "y0": value, "y1": value, "line": line}
-
-
 def union_range(yrange, values, pad_frac=0.01):
     """Expand a ``[lo, hi]`` y-range to include all numeric ``values`` (e.g. the
     intraday spot path), with a small pad so an extreme point isn't flush to the
@@ -206,41 +216,43 @@ def panel_flex(n_cols, full_cols=205, min_heat=0.28, max_heat=0.70):
 
 def bar_figure(data, spot, view="GEX", walls=None, flip=None, pct=0.02, height=680,
                yrange=None):
-    """Plotly horizontal-bar figure dict for one view (dark, beveled, labeled).
+    """Highcharts horizontal-bar options for one view (dark, beveled, labeled).
 
-    ``yrange`` (when given) overrides the auto near-spot window — used to align
-    the bar chart's strike axis with the intraday heatmap's."""
+    In a Highcharts ``bar`` chart the category axis (``xAxis``) is vertical, so the
+    STRIKE axis is ``xAxis`` (linear, with the spot/flip/wall reference plotLines)
+    and the exposure axis is ``yAxis``. ``yrange`` (when given) overrides the auto
+    near-spot window — used to align the strike axis with the intraday heatmap's."""
     b = bars_from_gex(data, spot, pct)
     label = _view_label(view)
-    shapes = [_hline(spot, SPOT_COLOR)]
-    if flip is not None:
-        shapes.append(_hline(flip, FLIP_COLOR, dash="dash"))
-    for w in (walls or []):
-        shapes.append(_hline(w, WALL_COLOR, dash="dot"))
-    layout = {
-        "title": f"{label} by strike",
-        "xaxis": {"title": label, "zeroline": True},
-        "yaxis": {"title": "Strike",
-                  "range": yrange if yrange is not None else bar_yrange(b["strikes"], spot),
-                  "autorange": False},
-        "shapes": shapes,
-        "annotations": line_annotations(spot, flip, walls),
-        "margin": {"l": 60, "r": 20, "t": 40, "b": 40},
-        "showlegend": False,
-        "height": height,
-        "autosize": True,
-    }
-    return {
-        "data": [{
-            "type": "bar", "orientation": "h",
-            "x": b["nets"], "y": b["strikes"],
-            # Beveled look: fill + a darker per-bar border.
-            "marker": {"color": b["colors"],
-                       "line": {"color": [_darker(c) for c in b["colors"]], "width": 1}},
-            "hovertext": b["hovers"], "hoverinfo": "text",
-        }],
-        "layout": _apply_dark(layout),
-    }
+    yr = yrange if yrange is not None else bar_yrange(b["strikes"], spot)
+    points = [{"x": s, "y": n, "color": c,
+               "borderColor": _darker(c), "borderWidth": 1,
+               "custom": {"hover": h}}
+              for s, n, c, h in zip(b["strikes"], b["nets"], b["colors"], b["hovers"])]
+    plotlines = [_strike_plotline(a["value"],
+                                  a["color"],
+                                  "Solid" if a["text"].startswith("Spot") else
+                                  ("Dash" if "flip" in a["text"] else "Dot"),
+                                  a["text"])
+                 for a in line_annotations(spot, flip, walls)]
+    fig = _base_chart("bar", height)
+    fig.update({
+        "title": {"text": f"{label} by strike", "style": {"color": FONT}},
+        # A Highcharts bar chart reverses its xAxis by default (low strike at top);
+        # reversed=False restores high strikes at the TOP, matching the heatmap's
+        # linear strike axis so the two panels line up.
+        "xAxis": {**_dark_axis("Strike"), "min": yr[0], "max": yr[1],
+                  "reversed": False, "plotLines": plotlines},
+        "yAxis": {**_dark_axis(label),
+                  "plotLines": [{"value": 0, "color": "#777777", "width": 1, "zIndex": 3}]},
+        "tooltip": {"backgroundColor": "#222222", "borderColor": "#444444",
+                    "style": {"color": FONT, "fontSize": "11px"},
+                    "headerFormat": "", "pointFormat": "{point.custom.hover}"},
+        "plotOptions": {"bar": {"pointPadding": 0.04, "groupPadding": 0,
+                                "borderRadius": 0}},
+        "series": [{"type": "bar", "name": label, "data": points, "colorByPoint": False}],
+    })
+    return fig
 
 
 def _fmt_ts(value):
@@ -276,51 +288,73 @@ def heatmap_matrix(rows):
     return {"x": x, "y": strikes, "z": z, "spots": spots}
 
 
-def heatmap_figure(rows, view="GEX", height=680, yrange=None):
-    """Intraday strike×time heatmap (dark, cell separators, concise hover).
+def _coloraxis(zmax):
+    """Diverging RdYlGn color axis, symmetric about zero (so net 0 = yellow)."""
+    ca = {"stops": RDYLGN_STOPS, "labels": {"enabled": False}}
+    if zmax:
+        ca["min"], ca["max"] = -zmax, zmax
+    return ca
 
-    ``yrange`` (when given) sets the Strike axis range so it aligns with the
-    bar chart's near-spot window."""
+
+def heatmap_figure(rows, view="GEX", height=680, yrange=None):
+    """Intraday strike×time Highcharts heatmap (dark, cell separators, concise
+    hover) with the underlying spot-price line overlaid on the same (linear)
+    strike axis. ``yrange`` (when given) sets the Strike axis range so it aligns
+    with the bar chart's near-spot window."""
     m = heatmap_matrix(rows)
-    yaxis = {"title": "Strike"}
-    if yrange is not None:
-        yaxis["range"] = yrange
-    data = [{
-        "type": "heatmap", "x": m["x"], "y": m["y"], "z": m["z"],
-        "colorscale": "RdYlGn", "zmid": 0,
-        "xgap": 1, "ygap": 1,                       # faint cell separators
-        "hovertemplate": "Strike %{y} · %{x}<br>net %{z:,.0f}<extra></extra>",
-    }]
+    times, strikes, z = m["x"], m["y"], m["z"]
+    # Heatmap points [time_index, strike_value, net]: x is the time category index,
+    # y is the ACTUAL strike (linear axis) so the continuous spot line overlays.
+    data = [[xi, strikes[yi], z[yi][xi]]
+            for yi in range(len(strikes)) for xi in range(len(times))
+            if z[yi][xi] is not None]
+    zmax = max((abs(v) for row in z for v in row if v is not None), default=0) or None
+    series = [{"type": "heatmap", "name": "net", "data": data,
+               "colsize": 1, "rowsize": _strike_step(strikes),
+               "borderWidth": 1, "borderColor": HEATMAP_SEP,
+               "tooltip": {"headerFormat": "",
+                           "pointFormat": "Strike {point.y} · net {point.value:,.0f}"}}]
     spots = m.get("spots") or []
     if any(s is not None for s in spots):
-        # Underlying price track over the session, on the shared Strike axis.
-        data.append({
-            "type": "scatter", "mode": "lines", "name": "Spot",
-            "x": m["x"], "y": spots,
-            "line": {"color": PRICE_LINE, "width": 2},
-            "hovertemplate": "Spot %{y:,.2f} · %{x}<extra></extra>",
-        })
-    return {
-        "data": data,
-        "layout": _apply_dark({
-            "title": f"{_view_label(view)} intraday (strike × time)",
-            # automargin lets Plotly grow the bottom margin to fit the rotated,
-            # dense time labels so they aren't clipped at the bottom edge.
-            "xaxis": {"title": "Time", "automargin": True}, "yaxis": yaxis,
-            # Lighter cell-separator mesh: the xgap/ygap reveal this colour, so a
-            # mid-grey reads as a soft grid instead of the harsh near-black gaps.
-            "plot_bgcolor": HEATMAP_SEP,
-            "margin": {"l": 60, "r": 20, "t": 40, "b": 60},
-            "height": height, "autosize": True,
-            "showlegend": False,
-            "hoverlabel": HOVER,
-        }),
-    }
+        # Underlying price track over the session, on the shared Strike axis. A
+        # line series ignores the colorAxis, so it isn't recolored by net value.
+        spot_pts = [[xi, sp] for xi, sp in enumerate(spots) if isinstance(sp, (int, float))]
+        series.append({"type": "line", "name": "Spot", "data": spot_pts,
+                       "color": PRICE_LINE, "lineWidth": 2, "marker": {"enabled": False},
+                       "colorAxis": False, "enableMouseTracking": True,
+                       "tooltip": {"headerFormat": "", "pointFormat": "Spot {point.y:,.2f}"}})
+    yaxis = {**_dark_axis("Strike")}
+    if yrange is not None:
+        yaxis["min"], yaxis["max"] = yrange[0], yrange[1]
+    fig = _base_chart("heatmap", height)
+    fig["chart"]["plotBackgroundColor"] = HEATMAP_SEP   # soft cell-separator mesh
+    fig["chart"]["marginBottom"] = 64                   # room for rotated time labels
+    fig.update({
+        "title": {"text": f"{_view_label(view)} intraday (strike × time)",
+                  "style": {"color": FONT}},
+        "xAxis": {**_dark_axis("Time"), "categories": times,
+                  "labels": {"rotation": -45, "style": {"color": FONT}}},
+        "yAxis": yaxis,
+        "colorAxis": _coloraxis(zmax),
+        "series": series,
+    })
+    return fig
 
 
 def _empty_fig(height=680):
-    """Minimal dark-themed empty figure for first paint / hidden state."""
-    return {"data": [], "layout": _apply_dark({"height": height, "autosize": True})}
+    """Minimal dark-themed empty Highcharts options for first paint / hidden state."""
+    fig = _base_chart("bar", height)
+    fig["title"] = {"text": None}
+    fig["series"] = []
+    return fig
+
+
+def _set_figure(element, fig):
+    """Update a persistent ``ui.highchart`` in place (Highcharts diffs the new
+    options internally → no canvas teardown, no flicker), mirroring the old
+    Plotly ``update_figure`` contract."""
+    element.options = fig
+    element.update()
 
 
 # Scoped explain CSS (rules only). Injected via ui.add_css for the in-app dialog
@@ -359,9 +393,11 @@ def wrap_explain(symbol, body_html, full=False):
 
 
 def term_heatmap(term_grid):
-    """Plotly heatmap dict for the Term view (net GEX by expiry × strike).
+    """Highcharts heatmap options for the Term view (net GEX by expiry × strike).
 
-    Strikes with all-zero net across expirations are dropped.
+    Strikes with all-zero net across expirations are dropped. Both axes are
+    categorical (no overlay), and the color scale is clamped symmetrically to a
+    robust max so a few extreme strikes don't wash out the mid-range cells.
     """
     grid = term_grid or {}
     exps = grid.get("expirations") or []
@@ -370,26 +406,23 @@ def term_heatmap(term_grid):
                       if (v or {}).get("net_gex_usd")})
     z = [[((cells.get(exp) or {}).get(s) or {}).get("net_gex_usd") for exp in exps]
          for s in strikes]
-    trace = {"type": "heatmap", "x": exps, "y": strikes, "z": z,
-             "colorscale": "RdYlGn", "zmid": 0,
-             "xgap": 1, "ygap": 1,                      # faint cell separators
-             "hovertemplate": "Strike %{y} · %{x}<br>net %{z:,.0f}<extra></extra>"}
-    # Boost contrast: clamp the color scale symmetrically to a robust max so a few
-    # extreme strikes don't wash out the mid-range cells.
-    zmax = _robust_zmax(z)
-    if zmax is not None:
-        trace["zmin"], trace["zmax"] = -zmax, zmax
-    return {
-        "data": [trace],
-        "layout": _apply_dark({
-            "title": "Term structure (net GEX by expiry × strike)",
-            "xaxis": {"title": "Expiration"}, "yaxis": {"title": "Strike"},
-            "plot_bgcolor": HEATMAP_SEP,                 # softer cell-separator mesh
-            "margin": {"l": 60, "r": 20, "t": 40, "b": 60},
-            "height": 680, "autosize": True,
-            "hoverlabel": HOVER,
-        }),
-    }
+    data = [[xi, yi, z[yi][xi]]
+            for yi in range(len(strikes)) for xi in range(len(exps))
+            if z[yi][xi] is not None]
+    fig = _base_chart("heatmap", 680)
+    fig["chart"]["plotBackgroundColor"] = HEATMAP_SEP
+    fig.update({
+        "title": {"text": "Term structure (net GEX by expiry × strike)",
+                  "style": {"color": FONT}},
+        "xAxis": {**_dark_axis("Expiration"), "categories": exps},
+        "yAxis": {**_dark_axis("Strike"), "categories": [f"{s:g}" for s in strikes]},
+        "colorAxis": _coloraxis(_robust_zmax(z)),
+        "series": [{"type": "heatmap", "name": "net", "data": data,
+                    "borderWidth": 1, "borderColor": HEATMAP_SEP,
+                    "tooltip": {"headerFormat": "",
+                                "pointFormat": "net {point.value:,.0f}"}}],
+    })
+    return fig
 
 
 def summary_text(summary, view):
@@ -472,12 +505,19 @@ def render():
     with ui.row().classes("w-full no-wrap gap-4 items-start"):
         chart_box = ui.column().classes("min-w-0").style("flex: 0.5 1 0%")
         with chart_box:
-            chart_plot = ui.plotly(_empty_fig()).classes("w-full")
+            # chart_plot switches kind (bar <-> Term heatmap). Highcharts'
+            # chart.update() leaks plotLines/colorAxis across a type switch, so the
+            # element lives in its own container and is RECREATED on kind-change
+            # (see _set_chart); same-kind repaints update in place (flicker-free).
+            chart_plot_box = ui.column().classes("w-full q-gutter-none")
+            with chart_plot_box:
+                state["chart_el"] = ui.highchart(_empty_fig(), extras=["heatmap"]).classes("w-full")
+            state["chart_kind"] = "bar"
             chart_msg = ui.label("Fetch a symbol… (no snapshot yet).") \
                 .classes("opacity-60 text-sm")
         heatmap_box = ui.column().classes("min-w-0").style("flex: 0.5 1 0%")
         with heatmap_box:
-            heat_plot = ui.plotly(_empty_fig()).classes("w-full")
+            heat_plot = ui.highchart(_empty_fig(), extras=["heatmap"]).classes("w-full")
             heat_msg = ui.label("").classes("opacity-60 text-sm")
 
     def _current_symbol():
@@ -496,6 +536,21 @@ def render():
         chart_box.style(f"flex: {bar_w} 1 0%")
         heatmap_box.style(f"flex: {heat_w} 1 0%")
 
+    def _set_chart(fig):
+        """Paint chart_plot: update in place when the chart KIND is unchanged
+        (the common bar->bar repaint, flicker-free), but RECREATE the element when
+        the kind changes (bar <-> Term heatmap) so stale plotLines/colorAxis from
+        the previous type don't leak through Highcharts' merge-based update."""
+        kind = fig["chart"]["type"]
+        if state.get("chart_kind") != kind:
+            chart_plot_box.clear()
+            with chart_plot_box:
+                state["chart_el"] = ui.highchart(fig, extras=["heatmap"]).classes("w-full")
+            state["chart_kind"] = kind
+        else:
+            _set_figure(state["chart_el"], fig)
+        return state["chart_el"]
+
     def _render_view():
         """Paint the active view from the cached snapshot (no fetch, no teardown).
 
@@ -504,7 +559,7 @@ def render():
         snap = state["snap"]
         pressure_box.clear()
         if not snap:
-            chart_plot.set_visibility(False)
+            state["chart_el"].set_visibility(False)
             heat_plot.set_visibility(False)
             heat_msg.set_visibility(False)
             chart_msg.text = "Fetch a symbol… (no snapshot yet)."
@@ -516,8 +571,8 @@ def render():
         view = view_toggle.value
         spot = snap.get("spot")
         if view == "Term":
-            chart_plot.update_figure(term_heatmap(snap.get("term") or {}))
-            chart_plot.set_visibility(True)
+            _set_chart(term_heatmap(snap.get("term") or {}))
+            state["chart_el"].set_visibility(True)
             heat_plot.set_visibility(False)
             heat_msg.set_visibility(False)
             _apply_flex(0, term=True)
@@ -555,14 +610,13 @@ def render():
         # heatmap's price line isn't clipped when price drifted out of that window.
         yr = bar_yrange(significant_strikes(bars_from_gex(data, view_spot)), view_spot)
         yr = union_range(yr, spot_path)
-        chart_plot.update_figure(
-            bar_figure(data, view_spot, view=view, walls=walls, flip=flip, yrange=yr))
-        chart_plot.set_visibility(True)
+        _set_chart(bar_figure(data, view_spot, view=view, walls=walls, flip=flip, yrange=yr))
+        state["chart_el"].set_visibility(True)
         summary_lbl.text = summary_text(
             {**summary, "strike_count": data.get("strike_count")}, _view_label(view))
 
         if rows:
-            heat_plot.update_figure(heatmap_figure(rows, view, yrange=yr))
+            _set_figure(heat_plot, heatmap_figure(rows, view, yrange=yr))
             heat_plot.set_visibility(True)
             heat_msg.set_visibility(False)
         else:
