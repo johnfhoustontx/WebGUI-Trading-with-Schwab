@@ -288,12 +288,19 @@ def analyze(symbol):
     rel_vol, today_vol = technical.calculate_relative_volume(intraday)
     vp = technical.calculate_volume_profile(intraday)
 
-    # MACD on daily; "prev" histogram = MACD on the series minus the last bar.
-    macd_hist = float(technical.calculate_macd(daily).get("histogram", 0.0))
-    if len(daily) > 1:
-        macd_prev = float(technical.calculate_macd(daily.iloc[:-1]).get("histogram", 0.0))
+    # MACD on daily — compute the histogram series ONCE and read the last two
+    # values (was two calculate_macd calls = four EMA passes; now two).
+    macd_series = technical.macd_histogram_series(daily)
+    if macd_series is None:
+        macd_hist = macd_prev = 0.0
     else:
-        macd_prev = macd_hist
+        last = macd_series.iloc[-1]
+        macd_hist = float(last) if not pd.isna(last) else 0.0
+        if len(macd_series) > 1:
+            prev = macd_series.iloc[-2]
+            macd_prev = float(prev) if not pd.isna(prev) else 0.0
+        else:
+            macd_prev = macd_hist
 
     # Sector strength from the symbol's sector ETF vs SPY (neutral if unknown);
     # sector_hist + fundamentals were fetched concurrently above.

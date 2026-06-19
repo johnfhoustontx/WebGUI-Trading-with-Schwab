@@ -41,19 +41,21 @@ def calculate_ema(df: pd.DataFrame, period: int) -> Optional[pd.Series]:
     if df is None or len(df) < period:
         return None
     
-    closes = df['close'].values
+    closes = df['close'].to_numpy(dtype=float)
+    n = len(closes)
     multiplier = 2.0 / (period + 1)
-    
-    ema_values = np.zeros(len(closes))
-    ema_values[:period] = np.nan
-    
-    # Seed with SMA of first 'period' bars
-    ema_values[period - 1] = np.mean(closes[:period])
-    
-    # Calculate EMA recursively
-    for i in range(period, len(closes)):
-        ema_values[i] = (closes[i] * multiplier) + (ema_values[i-1] * (1 - multiplier))
-    
+
+    ema_values = np.full(n, np.nan)
+    # Seed with the SMA of the first `period` bars, then apply the EMA recurrence.
+    # Vectorized via pandas .ewm (C-level) instead of a Python bar-by-bar loop:
+    # feeding [seed, closes[period:]] through ewm(alpha, adjust=False) reproduces
+    # y0=seed, y[i]=closes[i]*m + y[i-1]*(1-m) exactly — identical values, no loop.
+    seq = np.empty(n - period + 1)
+    seq[0] = np.mean(closes[:period])
+    seq[1:] = closes[period:]
+    ema_values[period - 1:] = (
+        pd.Series(seq).ewm(alpha=multiplier, adjust=False).mean().to_numpy())
+
     return pd.Series(ema_values, index=df.index)
 
 
@@ -196,12 +198,40 @@ def calculate_macd(
     macd_line = ema_fast - ema_slow
     signal_line = macd_line.ewm(span=signal, adjust=False).mean()
     histogram = macd_line - signal_line
-    
+
     return {
         'macd': float(macd_line.iloc[-1]) if not pd.isna(macd_line.iloc[-1]) else 0,
         'signal': float(signal_line.iloc[-1]) if not pd.isna(signal_line.iloc[-1]) else 0,
         'histogram': float(histogram.iloc[-1]) if not pd.isna(histogram.iloc[-1]) else 0,
     }
+
+
+def macd_histogram_series(
+    df: pd.DataFrame,
+    fast: int = 12,
+    slow: int = 26,
+    signal: int = 9,
+) -> Optional[pd.Series]:
+    """Full MACD histogram Series (macd_line − signal_line), or None if too short.
+
+    Computing the series once lets a caller read the last TWO histogram values
+    without recomputing MACD on a truncated copy of the frame. Because the EMAs
+    use an ``adjust=False`` recurrence (value at i depends only on bars ≤ i), the
+    series' ``iloc[-2]`` equals ``calculate_macd(df.iloc[:-1])['histogram']`` —
+    so it's a drop-in for the old two-call pattern. NOTE the exact equivalence for
+    ``iloc[-2]`` requires ``len(df) >= slow + signal + 1`` (so the truncated frame
+    is also sufficient); at exactly ``slow + signal`` the old two-call returned 0
+    for the prev value while this returns the true histogram. The only caller
+    (trade analyze) gates ``len(daily) >= 50``, so it is always well past that."""
+    if df is None or len(df) < slow + signal:
+        return None
+    ema_fast = calculate_ema(df, fast)
+    ema_slow = calculate_ema(df, slow)
+    if ema_fast is None or ema_slow is None:
+        return None
+    macd_line = ema_fast - ema_slow
+    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
+    return macd_line - signal_line
 
 
 #############################################
@@ -287,12 +317,12 @@ def calculate_volume_profile(
     bins = np.linspace(price_min, price_max, num_bins + 1)
     bin_centers = (bins[:-1] + bins[1:]) / 2
     
-    volume_at_price = np.zeros(num_bins)
-    for _, row in df.iterrows():
-        for i in range(num_bins):
-            if bins[i] <= row['close'] <= bins[i + 1]:
-                volume_at_price[i] += row['volume']
-                break
+    # Vectorized bucketing: assign each bar's volume to its price bin in one pass
+    # (np.digitize + np.bincount) instead of an O(bars × bins) nested Python loop.
+    closes = df['close'].to_numpy(dtype=float)
+    volumes = df['volume'].to_numpy(dtype=float)
+    idx = np.clip(np.digitize(closes, bins) - 1, 0, num_bins - 1)
+    volume_at_price = np.bincount(idx, weights=volumes, minlength=num_bins)
     
     # Point of Control - highest volume price
     poc_idx = np.argmax(volume_at_price)
