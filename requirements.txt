@@ -49,7 +49,11 @@ yfinance                  # still imported by some analysis paths; optional fall
 apscheduler==3.10.4
 
 # --- Web GUI (NEW: this repo's NiceGUI front-end) ---
-nicegui>=2.0.0            # single multi-page web UI replacing the old Dash/React/Tk UIs
+nicegui[highcharts]>=2.0.0   # single multi-page web UI replacing the old Dash/React/Tk UIs.
+                             # [highcharts] = optional interactive Highcharts element (ui.highchart,
+                             # drag-and-drop points) shipped separately as nicegui-highcharts due to
+                             # Highcharts' license. PERSONAL/NON-COMMERCIAL USE ONLY (Highcharts is
+                             # free for personal use; commercial use requires a paid license).
 
 # --- Storage / communication backbone (NEW: 3-tier) ---
 redis>=5.0                # Redis client (talks to a local Memurai server on Windows)
