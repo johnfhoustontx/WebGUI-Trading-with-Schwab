@@ -521,14 +521,14 @@ def render():
                     ui.label("Today").classes("opacity-60 text-xs")
                     trend_gauge_box = ui.html("").classes("q-mt-xs")
                 with ui.column().classes("items-center"):
-                    ui.label("~30d Ago").classes("opacity-60 text-xs")
+                    ui.label("30-Day").classes("opacity-60 text-xs")
                     trend_gauge_30_box = ui.html("").classes("q-mt-xs")
             regime_badge = ui.label("").classes("text-subtitle1 text-bold")
             regime_desc = ui.label("").classes("opacity-80 text-sm text-center")
             with ui.button("Trend Detail", icon="insights").props("flat dense") as trend_btn:
                 with ui.menu().props("no-parent-event") as trend_menu:
-                    regime_detail = ui.label("").classes("q-pa-md text-sm") \
-                        .style("max-width:360px")
+                    trend_detail_box = ui.column().classes("q-pa-md text-sm") \
+                        .style("min-width:240px")
             trend_btn.on("mousedown", lambda: trend_menu.open())
             trend_btn.on("mouseup", lambda: trend_menu.close())
             trend_btn.on("mouseleave", lambda: trend_menu.close())
@@ -670,18 +670,22 @@ def render():
             regime_badge.text = trend.get("label", "")
             regime_badge.style(f"color:{color}")
             regime_desc.text = trend.get("description", "")
-            regime_detail.text = (
-                f"SPY {_safe_float(trend.get('spy_close')):.2f} · "
-                f"50d {_safe_float(trend.get('sma_50')):.2f} · "
-                f"200d {_safe_float(trend.get('sma_200')):.2f} "
-                f"· slope {_safe_float(trend.get('sma_200_slope_pct')):+.2f}% "
-                f"· dd {_safe_float(trend.get('drawdown_pct')):+.1f}% "
-                f"· conf {_safe_float(trend.get('confidence')):.0%}")
+            trend_detail_box.clear()
+            with trend_detail_box:
+                ui.label(
+                    f"Trend score {trend_gauge_value(trend):.0f} · "
+                    f"conf {_safe_float(trend.get('confidence')):.0%}"
+                ).classes("text-bold")
+                for r in trend_subscore_rows(trend):
+                    ui.label(f"{r['name']} ({r['weight']}): {r['score']}  "
+                             f"conf {r['conf']}").classes("text-sm")
         else:
             trend_gauge_box.content = speedometer_svg(50.0, "—", width=150, height=100)
             regime_badge.text = ""
             regime_desc.text = ""
-            regime_detail.text = ""
+            trend_detail_box.clear()
+            with trend_detail_box:
+                ui.label("—").classes("text-sm")
         t30 = (state.get("derived") or {}).get("trend_30d_ago")
         if t30:
             trend_gauge_30_box.content = speedometer_svg(
