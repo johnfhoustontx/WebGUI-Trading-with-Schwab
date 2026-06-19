@@ -64,12 +64,66 @@ def traffic_color(total):
 
 
 def gauge_score(total):
-    """0-10 composite -> 0-100 for the svg speedometer."""
+    """0-10 composite -> 0-100 for the speedometer gauge."""
     return max(0.0, min(100.0, _safe_float(total) * 10.0))
 
 
 def _clamp(v, lo, hi):
     return max(lo, min(hi, v))
+
+
+# Value-mapped fill color for the solid-gauge arc. Stops are duplicated at the
+# zone thresholds (40/55/75) so the fill color flips crisply at the same points
+# the legacy SVG speedometer's colored zones did (red/amber/blue/green), rather
+# than blending — keeping the read consistent with the old needle gauge.
+GAUGE_STOPS = [
+    [0.00, CLR_RED], [0.3999, CLR_RED],
+    [0.40, CLR_YELLOW], [0.5499, CLR_YELLOW],
+    [0.55, LINE_COLOR], [0.7499, LINE_COLOR],
+    [0.75, CLR_GREEN], [1.00, CLR_GREEN],
+]
+_GAUGE_INNER = "72%"   # arc thickness (shared by the pane track + the series)
+
+
+def _esc(text):
+    """Minimal HTML escape so a label can't break the dataLabel format string."""
+    return (str(text or "").replace("&", "&amp;")
+            .replace("<", "&lt;").replace(">", "&gt;"))
+
+
+def gauge_figure(value, label, height=120):
+    """Highcharts semicircular **solid-gauge**: an arc filled to ``value`` (0-100)
+    whose color is value-mapped (red→amber→blue→green, flipping at 40/55/75 like
+    the legacy zones), over a faint track, with the integer value + ``label`` text
+    in the center. Requires the ``solid-gauge`` module (load via
+    ``ui.highchart(..., extras=["solid-gauge"])``)."""
+    v = _clamp(_safe_float(value), 0.0, 100.0)
+    # Display int(v) (truncates, matching the legacy SVG) baked into the format;
+    # the series data keeps the true float so the arc fills precisely.
+    fmt = (f'<div style="text-align:center;line-height:1.05">'
+           f'<span style="font-size:20px;font-weight:bold;color:#fff">{int(v)}</span>'
+           f'<br><span style="font-size:11px;color:#bdbdbd">{_esc(label)}</span></div>')
+    labels = {"useHTML": True, "borderWidth": 0, "y": -18, "format": fmt}
+    return {
+        "chart": {"type": "solidgauge", "backgroundColor": "transparent",
+                  "height": height, "margin": [0, 0, 0, 0], "spacing": [0, 0, 0, 0]},
+        "title": {"text": None},
+        "credits": {"enabled": False},
+        "accessibility": {"enabled": False},
+        "tooltip": {"enabled": False},
+        "pane": {"startAngle": -90, "endAngle": 90,
+                 "center": ["50%", "82%"], "size": "150%",
+                 "background": [{"outerRadius": "100%", "innerRadius": _GAUGE_INNER,
+                                 "backgroundColor": "#2f2f2f", "borderWidth": 0,
+                                 "shape": "arc"}]},
+        "yAxis": {"min": 0, "max": 100, "lineWidth": 0, "tickWidth": 0,
+                  "minorTickWidth": 0, "tickPositions": [],
+                  "labels": {"enabled": False}, "stops": GAUGE_STOPS},
+        "plotOptions": {"solidgauge": {"innerRadius": _GAUGE_INNER, "rounded": False,
+                                       "dataLabels": labels}},
+        "series": [{"type": "solidgauge", "data": [v], "name": "value",
+                    "dataLabels": labels}],
+    }
 
 
 # Short dial captions (the full label shows beneath the gauge).
@@ -134,27 +188,35 @@ def sentiment_30d_avg(snaps):
 
 
 def build_history_figure(snapshots):
-    """Plotly fig dict: composite over time."""
+    """Highcharts options dict: composite over time (line)."""
     dates, scores = composite_series(snapshots)
+    axis_label = {"style": {"color": "#bdbdbd"}}
     return {
-        "data": [{
-            "type": "scatter", "mode": "lines+markers",
-            "x": dates, "y": scores,
-            "line": {"color": LINE_COLOR, "width": 2},
-            "name": "Composite",
-        }],
-        "layout": {
-            "margin": {"l": 36, "r": 12, "t": 8, "b": 28},
-            "height": 220,
-            "template": "plotly_dark",
-            "paper_bgcolor": "rgba(0,0,0,0)",
-            "plot_bgcolor": "rgba(0,0,0,0)",
-            "xaxis": {"gridcolor": "rgba(255,255,255,0.06)", "zeroline": False,
-                      "linecolor": "rgba(255,255,255,0.15)", "nticks": 6},
-            "yaxis": {"range": [0, 10], "title": "Composite",
-                      "gridcolor": "rgba(255,255,255,0.06)", "zeroline": False,
-                      "linecolor": "rgba(255,255,255,0.15)"},
+        "chart": {"type": "line", "backgroundColor": "transparent",
+                  "height": 220, "spacing": [8, 12, 8, 0]},
+        "title": {"text": None},
+        "credits": {"enabled": False},
+        "accessibility": {"enabled": False},
+        "legend": {"enabled": False},
+        "xAxis": {
+            "categories": dates,
+            "tickAmount": 6,
+            "lineColor": "rgba(255,255,255,0.15)",
+            "gridLineColor": "rgba(255,255,255,0.06)",
+            "labels": axis_label,
         },
+        "yAxis": {
+            "min": 0, "max": 10,
+            "title": {"text": "Composite", "style": {"color": "#bdbdbd"}},
+            "gridLineColor": "rgba(255,255,255,0.06)",
+            "labels": axis_label,
+        },
+        "tooltip": {"pointFormat": "Composite: <b>{point.y:.2f}</b>"},
+        "series": [{
+            "name": "Composite", "type": "line", "data": scores,
+            "color": LINE_COLOR, "lineWidth": 2,
+            "marker": {"enabled": True, "radius": 3},
+        }],
     }
 
 
@@ -444,8 +506,6 @@ def render():
     .sent-sectors .indrow { background: rgba(255,255,255,0.02); }
     ''')
 
-    from pages.options.svg import speedometer_svg
-
     def _read_cache():
         """Pull the three sentiment cache views off the bus into ``state``.
         Graceful-empty: any missing view yields empty data (page renders a
@@ -500,10 +560,14 @@ def render():
             with ui.row().classes("items-end justify-center gap-4 no-wrap"):
                 with ui.column().classes("items-center"):
                     ui.label("Today").classes("opacity-60 text-xs")
-                    gauge_box = ui.html("").classes("q-mt-xs")
+                    gauge_box = ui.highchart(gauge_figure(50.0, "—"),
+                                             extras=["solid-gauge"]) \
+                        .classes("q-mt-xs").style("width:170px;height:120px")
                 with ui.column().classes("items-center"):
                     ui.label("30-Day Avg").classes("opacity-60 text-xs")
-                    gauge_avg_box = ui.html("").classes("q-mt-xs")
+                    gauge_avg_box = ui.highchart(gauge_figure(50.0, "—"),
+                                                 extras=["solid-gauge"]) \
+                        .classes("q-mt-xs").style("width:170px;height:120px")
             bias_lbl = ui.label("").classes("text-h6")
             sub_lbl = ui.label("").classes("opacity-80 text-sm")
             with ui.button("Components", icon="table_view").props("flat dense") as comp_btn:
@@ -519,10 +583,14 @@ def render():
             with ui.row().classes("items-end justify-center gap-4 no-wrap"):
                 with ui.column().classes("items-center"):
                     ui.label("Today").classes("opacity-60 text-xs")
-                    trend_gauge_box = ui.html("").classes("q-mt-xs")
+                    trend_gauge_box = ui.highchart(gauge_figure(50.0, "—"),
+                                                   extras=["solid-gauge"]) \
+                        .classes("q-mt-xs").style("width:170px;height:120px")
                 with ui.column().classes("items-center"):
                     ui.label("30-Day").classes("opacity-60 text-xs")
-                    trend_gauge_30_box = ui.html("").classes("q-mt-xs")
+                    trend_gauge_30_box = ui.highchart(gauge_figure(50.0, "—"),
+                                                      extras=["solid-gauge"]) \
+                        .classes("q-mt-xs").style("width:170px;height:120px")
             regime_badge = ui.label("").classes("text-subtitle1 text-bold")
             regime_desc = ui.label("").classes("opacity-80 text-sm text-center")
             with ui.button("Trend Detail", icon="insights").props("flat dense") as trend_btn:
@@ -546,7 +614,7 @@ def render():
     ui.separator().classes("q-my-md")
     # 30-Day History — collapsible, collapsed by default.
     with ui.expansion("30-Day History", icon="show_chart", value=False).classes("w-full"):
-        hist_plot = ui.plotly(build_history_figure([])).classes("w-full")
+        hist_plot = ui.highchart(build_history_figure([])).classes("w-full")
         roll_lbl = ui.label("").classes("opacity-70 text-sm")
         vel_lbl = ui.label("").classes("opacity-80 text-sm")
         flag_lbl = ui.label("").classes("text-negative text-sm")
@@ -624,11 +692,11 @@ def render():
                              else f"as of {latest.get('date')} (latest — market closed)")
         else:
             date_lbl.text = f"as of {latest.get('date')} (last completed session)"
-        gauge_box.content = speedometer_svg(gauge_score(total), comp.get("bias", ""),
-                                            width=150, height=100)
+        gauge_box.options = gauge_figure(gauge_score(total), comp.get("bias", ""))
+        gauge_box.update()
         avg = sentiment_30d_avg(state["snaps"])
-        gauge_avg_box.content = speedometer_svg(gauge_score(avg), f"{avg:.2f}",
-                                                width=150, height=100)
+        gauge_avg_box.options = gauge_figure(gauge_score(avg), f"{avg:.2f}")
+        gauge_avg_box.update()
         bias_lbl.text = f"{total:.2f} · {comp.get('bias', '')}"
         bias_lbl.style(f"color:{bias_color(comp.get('bias'))}")
         sub_lbl.text = f"Confidence {_safe_float(comp.get('aggregate_confidence')):.0%}"
@@ -650,7 +718,8 @@ def render():
             tile_cards[tkey].style(f"background-color:{band}")
         rotation_value, sector_value = _comp_context()
         _render_components(latest, rotation_value, sector_value)
-        hist_plot.update_figure(build_history_figure(snaps))
+        hist_plot.options = build_history_figure(snaps)
+        hist_plot.update()
         a5, a20, label = rolling_averages(prior_scores)
         roll_lbl.text = f"5d: {a5:.2f}   20d: {a20:.2f}   {label}"
         vel = derived.get("velocity") or {}
@@ -664,9 +733,9 @@ def render():
             red = {"bear_rally", "bear_trend"}
             color = CLR_GREEN if committed in green else (
                 CLR_RED if committed in red else CLR_YELLOW)
-            trend_gauge_box.content = speedometer_svg(
-                trend_gauge_value(trend), _TREND_SHORT.get(committed, "—"),
-                width=150, height=100)
+            trend_gauge_box.options = gauge_figure(
+                trend_gauge_value(trend), _TREND_SHORT.get(committed, "—"))
+            trend_gauge_box.update()
             regime_badge.text = trend.get("label", "")
             regime_badge.style(f"color:{color}")
             regime_desc.text = trend.get("description", "")
@@ -680,7 +749,8 @@ def render():
                     ui.label(f"{r['name']} ({r['weight']}): {r['score']}  "
                              f"conf {r['conf']}").classes("text-sm")
         else:
-            trend_gauge_box.content = speedometer_svg(50.0, "—", width=150, height=100)
+            trend_gauge_box.options = gauge_figure(50.0, "—")
+            trend_gauge_box.update()
             regime_badge.text = ""
             regime_desc.text = ""
             trend_detail_box.clear()
@@ -688,11 +758,12 @@ def render():
                 ui.label("—").classes("text-sm")
         t30 = (state.get("derived") or {}).get("trend_30d_ago")
         if t30:
-            trend_gauge_30_box.content = speedometer_svg(
-                trend_gauge_value(t30), _TREND_SHORT.get(t30.get("state"), "—"),
-                width=150, height=100)
+            trend_gauge_30_box.options = gauge_figure(
+                trend_gauge_value(t30), _TREND_SHORT.get(t30.get("state"), "—"))
+            trend_gauge_30_box.update()
         else:
-            trend_gauge_30_box.content = speedometer_svg(50.0, "—", width=150, height=100)
+            trend_gauge_30_box.options = gauge_figure(50.0, "—")
+            trend_gauge_30_box.update()
 
     def _render_sector_table():
         sec = state["sector"]

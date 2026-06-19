@@ -70,42 +70,48 @@ def test_rotation_rows_sorted_and_colored():
 
 
 def _sector_traces(fig):
-    return [t for t in fig["data"] if t.get("mode") == "lines+markers+text"]
+    return [t for t in fig["series"] if t.get("type") == "spline"]
+
+
+def _head(trace):
+    return trace["data"][-1]
 
 
 def test_rrg_scatter_one_trace_per_sector():
     fig = R.rrg_scatter_figure(_assessment())
     traces = _sector_traces(fig)
-    assert len(traces) == 2                       # one trace per sector
-    # curveNumber/order maps to the sectors order.
-    assert traces[0]["x"][-1] == 101.5 and traces[1]["x"][-1] == 98.0
-    # crosshair reference lines at 100/100 present as shapes
-    assert any(s.get("type") == "line" for s in fig["layout"].get("shapes", []))
-    # hovermode closest so the line/head is hoverable
-    assert fig["layout"].get("hovermode") == "closest"
+    assert len(traces) == 2                       # one series per sector
+    # series order maps to the sectors order (head = current point).
+    assert _head(traces[0])["x"] == 101.5 and _head(traces[1])["x"] == 98.0
+    # crosshair reference lines at 100/100 present as plotLines on both axes
+    assert any(pl.get("value") == 100 for pl in fig["xAxis"]["plotLines"])
+    assert any(pl.get("value") == 100 for pl in fig["yAxis"]["plotLines"])
+    # native hover-isolation: other series dim (no plotly event round-trip)
+    assert fig["plotOptions"]["series"]["states"]["inactive"]["opacity"] < 1.0
+    assert fig["accessibility"]["enabled"] is False
 
 
 def test_rrg_scatter_line_plus_single_head_dot():
     fig = R.rrg_scatter_figure(_assessment())
-    xlk = next(t for t in _sector_traces(fig) if t["x"][-1] == 101.5)
+    xlk = next(t for t in _sector_traces(fig) if _head(t)["x"] == 101.5)
     # Trail follows the path, oldest -> newest, ending at the head.
-    assert xlk["x"] == [100.2, 100.9, 101.5]
-    assert xlk["y"] == [99.5, 100.8, 102.0]
-    # Only the LAST marker (head) is visible; trail markers are invisible.
-    op = xlk["marker"]["opacity"]
-    assert op[-1] == 1.0 and all(o == 0.0 for o in op[:-1])
-    sz = xlk["marker"]["size"]
-    assert sz[-1] >= 10 and all(s == 0.0 for s in sz[:-1])
-    # Label only on the head; quadrant color; faint rgba line.
-    assert xlk["text"][-1] == "XLK" and all(t == "" for t in xlk["text"][:-1])
-    assert xlk["marker"]["color"] == R.CLR_GREEN
-    assert xlk["line"]["color"].startswith("rgba(")
-    assert xlk.get("showlegend") is False
+    assert [p["x"] for p in xlk["data"]] == [100.2, 100.9, 101.5]
+    assert [p["y"] for p in xlk["data"]] == [99.5, 100.8, 102.0]
+    # Only the LAST point (head) has an enabled marker; trail markers off.
+    head = _head(xlk)
+    assert head["marker"]["enabled"] is True and head["marker"]["radius"] >= 6
+    assert all(p["marker"]["enabled"] is False for p in xlk["data"][:-1])
+    # Label only on the head; quadrant color; faint rgba trail line.
+    assert head["dataLabels"]["format"] == "XLK"
+    assert all("dataLabels" not in p for p in xlk["data"][:-1])
+    assert head["marker"]["fillColor"] == R.CLR_GREEN
+    assert xlk["color"].startswith("rgba(")
+    assert xlk.get("showInLegend") is False
 
 
 def test_rrg_scatter_no_legend_leak():
     fig = R.rrg_scatter_figure(_assessment())
-    assert all(t.get("showlegend") is False for t in fig["data"])
+    assert all(t.get("showInLegend") is False for t in fig["series"])
 
 
 def test_rrg_scatter_handles_missing_tail():
@@ -114,26 +120,20 @@ def test_rrg_scatter_handles_missing_tail():
         s.pop("tail", None)
     fig = R.rrg_scatter_figure(a)
     traces = _sector_traces(fig)
-    assert len(traces) == 2                       # single-point head trace each
-    xlk = next(t for t in traces if t["x"] == [101.5])
-    assert xlk["y"] == [102.0]
-    assert xlk["marker"]["opacity"][-1] == 1.0
+    assert len(traces) == 2                       # single-point head series each
+    xlk = next(t for t in traces if [p["x"] for p in t["data"]] == [101.5])
+    assert [p["y"] for p in xlk["data"]] == [102.0]
+    assert _head(xlk)["marker"]["enabled"] is True
 
 
-def test_focus_opacities():
-    assert R._focus_opacities(3, 1) == [0.12, 1.0, 0.12]
-    assert R._focus_opacities(3, 0, dim=0.2) == [1.0, 0.2, 0.2]
-    # out-of-range / None -> all visible (restore on unhover)
-    assert R._focus_opacities(3, None) == [1.0, 1.0, 1.0]
-    assert R._focus_opacities(3, 9) == [1.0, 1.0, 1.0]
-
-
-def test_render_wires_hover_and_fullwidth_rrg():
+def test_render_uses_native_hover_dimming():
     import inspect
     src = inspect.getsource(R.render)
-    # hover-isolate wiring present
-    assert "plotly_hover" in src and "plotly_unhover" in src
-    assert "run_plot_method" in src and "_focus_opacities" in src
+    # The plotly hover round-trip is gone — dimming is native Highcharts
+    # (plotOptions.series.states.inactive), so no event wiring remains.
+    assert "plotly_hover" not in src and "plotly_unhover" not in src
+    assert "run_plot_method" not in src
+    assert "ui.highchart" in src
 
 
 def test_hex_to_rgba_helper():

@@ -8,27 +8,30 @@ compute via commands. The snapshot-object helpers (``expiries_of``/``strikes_of`
 from pages.options import simulator as sim
 
 
-def test_whatif_figure_is_plotly_dict():
+def test_whatif_figure_highcharts_dict():
     df = [{"S": 440, "theo_price": -50}, {"S": 450, "theo_price": 0}, {"S": 460, "theo_price": 80}]
     fig = sim.whatif_figure(df, spot=450.0, target_s=455.0)
-    assert "data" in fig and "layout" in fig
-    xs = fig["data"][0]["x"]
-    assert xs[0] == 440 and xs[-1] == 460
-    # target_s adds a second vline shape (baseline + spot + target).
-    assert len(fig["layout"]["shapes"]) == 3
+    assert "series" in fig
+    data = fig["series"][0]["data"]
+    assert data[0][0] == 440 and data[-1][0] == 460       # [x, y] pairs
+    # spot + target are vertical plotLines on xAxis; zero baseline on yAxis.
+    assert len(fig["xAxis"]["plotLines"]) == 2
+    assert len(fig["yAxis"]["plotLines"]) == 1
+    assert fig["accessibility"]["enabled"] is False
 
 
 def test_whatif_figure_no_target_omits_overlay():
     fig = sim.whatif_figure([{"S": 1, "theo_price": 2}], spot=1.0)
-    # Only the zero baseline + spot line — no ΔS overlay.
-    assert len(fig["layout"]["shapes"]) == 2
+    # Spot line only (no ΔS overlay) + the zero baseline.
+    assert len(fig["xAxis"]["plotLines"]) == 1
+    assert len(fig["yAxis"]["plotLines"]) == 1
 
 
 def test_ivshock_figure_two_series():
     base = {"theo_price": 1.0, "delta": 0.5, "gamma": 0.02, "theta": -0.1, "vega": 0.3}
     shock = {"theo_price": 1.6, "delta": 0.55, "gamma": 0.018, "theta": -0.12, "vega": 0.45}
     fig = sim.ivshock_figure(base, shock, mult=1.5)
-    assert "data" in fig and len(fig["data"]) == 2
+    assert len(fig["series"]) == 2 and fig["chart"]["type"] == "column"
 
 
 def test_records_normalizes_df_and_list():
@@ -41,10 +44,10 @@ def test_records_normalizes_df_and_list():
     assert sim._records(None) == []
 
 
-def test_vline_shape_fields():
-    line = sim._vline(450.0, "#fff", dash="dash")
-    assert line["x0"] == 450.0 and line["x1"] == 450.0
-    assert line["line"]["dash"] == "dash"
+def test_plotline_fields():
+    pl = sim._plotline(450.0, "#fff", dash="Dash")
+    assert pl["value"] == 450.0
+    assert pl["dashStyle"] == "Dash"
 
 
 def test_simulator_module_imports_no_engine_or_proxy():

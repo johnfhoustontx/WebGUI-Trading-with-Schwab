@@ -88,9 +88,13 @@ def _hex_to_rgba(hex_color, alpha):
 
 
 def _sector_trace(sec):
-    """One RRG trace for a sector: a faded trail line + a single bright head dot
-    (the current point), labeled with the ETF. Built from the sampled tail; falls
-    back to a single head point when the sector has no tail."""
+    """One RRG series for a sector: a faded trail line (spline) + a single bright
+    head marker (the current point), labeled with the ETF. Built from the sampled
+    tail; falls back to a single head point when the sector has no tail.
+
+    Returned as a Highcharts series: the series ``color`` is the faded trail-line
+    rgba; only the head point carries an enabled marker (bright quadrant fill) and
+    a dataLabel."""
     tail = sec.get("tail") or []
     color = quadrant_color(sec.get("quadrant"))
     if tail:
@@ -102,54 +106,64 @@ def _sector_trace(sec):
             return None
         xs, ys = [r], [m]
     n = len(xs)
+    data = []
+    for i, (x, y) in enumerate(zip(xs, ys)):
+        if i == n - 1:                                   # head = current point
+            data.append({
+                "x": x, "y": y,
+                "marker": {"enabled": True, "radius": 7,
+                           "fillColor": color, "lineColor": color},
+                "dataLabels": {"enabled": True, "format": sec.get("etf") or "",
+                               "verticalAlign": "bottom", "y": -6,
+                               "style": {"fontSize": "10px", "color": "#e6e6e6",
+                                         "textOutline": "none"}},
+            })
+        else:                                            # trail point: no marker
+            data.append({"x": x, "y": y, "marker": {"enabled": False}})
     return {
-        "type": "scatter", "mode": "lines+markers+text",
-        "x": xs, "y": ys,
-        "line": {"color": _hex_to_rgba(color, 0.4), "width": 1.6, "shape": "spline"},
-        "marker": {"color": color,
-                   "size": [0.0] * (n - 1) + [13],
-                   "opacity": [0.0] * (n - 1) + [1.0]},
-        "text": [""] * (n - 1) + [sec.get("etf") or ""],
-        "textposition": "top center", "textfont": {"size": 10},
-        "hovertemplate": (f"{sec.get('name')} ({sec.get('etf')}) — "
-                          f"{sec.get('quadrant')}<br>RS-Ratio %{{x:.2f}} · "
-                          f"RS-Mom %{{y:.2f}}<extra></extra>"),
-        "showlegend": False,
+        "type": "spline",
+        "name": f"{sec.get('name')} ({sec.get('etf')})",
+        "color": _hex_to_rgba(color, 0.4),               # faded trail line
+        "lineWidth": 1.6,
+        "marker": {"enabled": False},
+        "data": data,
+        "showInLegend": False,
+        "custom": {"quadrant": sec.get("quadrant")},
+        "tooltip": {"headerFormat": "",
+                    "pointFormat": (f"{sec.get('name')} ({sec.get('etf')}) — "
+                                    f"{sec.get('quadrant')}<br>RS-Ratio "
+                                    "{point.x:.2f} · RS-Mom {point.y:.2f}")},
     }
 
 
-def _focus_opacities(n, focus, dim=0.12):
-    """Trace-opacity list: 1.0 for the ``focus`` trace, ``dim`` for the rest.
-    Returns all-1.0 when ``focus`` is None / out of range (restore on unhover)."""
-    if focus is None or not (0 <= focus < n):
-        return [1.0] * n
-    return [1.0 if i == focus else dim for i in range(n)]
-
-
 def rrg_scatter_figure(a):
-    """Plotly RRG scatter: one trace per sector (faded trail line + a single head
-    dot), 100/100 crosshair lines, hovermode closest so each sector is hoverable.
-    Trace order matches the sectors order so ``curveNumber == sector index``."""
+    """Highcharts RRG: one spline series per sector (faded trail + single head
+    dot), 100/100 crosshair plotLines, and native hover-isolation (hovering one
+    sector dims the rest via ``states.inactive``). Series order matches the
+    sectors order."""
     secs = a.get("sectors") or []
-    traces = [t for t in (_sector_trace(s) for s in secs) if t is not None]
-    line = {"color": "rgba(255,255,255,0.25)", "width": 1}
+    series = [t for t in (_sector_trace(s) for s in secs) if t is not None]
+    cross = {"value": 100, "color": "rgba(255,255,255,0.25)", "width": 1, "zIndex": 1}
+    axis = {"gridLineColor": "rgba(255,255,255,0.06)",
+            "lineColor": "rgba(255,255,255,0.15)",
+            "labels": {"style": {"color": "#bdbdbd"}}}
     return {
-        "data": traces,
-        "layout": {
-            "margin": {"l": 44, "r": 12, "t": 8, "b": 36}, "height": 560,
-            "template": "plotly_dark", "hovermode": "closest",
-            "paper_bgcolor": "rgba(0,0,0,0)", "plot_bgcolor": "rgba(0,0,0,0)",
-            "xaxis": {"title": "RS-Ratio", "zeroline": False,
-                      "gridcolor": "rgba(255,255,255,0.06)"},
-            "yaxis": {"title": "RS-Momentum", "zeroline": False,
-                      "gridcolor": "rgba(255,255,255,0.06)"},
-            "shapes": [
-                {"type": "line", "xref": "x", "yref": "paper", "x0": 100, "x1": 100,
-                 "y0": 0, "y1": 1, "line": line},
-                {"type": "line", "xref": "paper", "yref": "y", "x0": 0, "x1": 1,
-                 "y0": 100, "y1": 100, "line": line},
-            ],
-        },
+        "chart": {"type": "spline", "backgroundColor": "transparent",
+                  "height": 560, "spacing": [8, 12, 36, 8]},
+        "title": {"text": None},
+        "credits": {"enabled": False},
+        "accessibility": {"enabled": False},
+        # NB: the per-sector trails are 2D paths (x = RS-Ratio wanders, not
+        # monotonic), so Highcharts logs advisory warning #15 (unsorted data).
+        # Benign — splines render in data order, which is the temporal trail.
+        "legend": {"enabled": False},
+        "xAxis": {**axis, "title": {"text": "RS-Ratio", "style": {"color": "#bdbdbd"}},
+                  "plotLines": [cross]},
+        "yAxis": {**axis, "title": {"text": "RS-Momentum", "style": {"color": "#bdbdbd"}},
+                  "plotLines": [cross]},
+        # Native hover-isolation: hovering one series dims all others.
+        "plotOptions": {"series": {"states": {"inactive": {"opacity": 0.12}}}},
+        "series": series,
     }
 
 
@@ -220,25 +234,10 @@ def render():
                     ui.label(str(r.get("quadrant") or "")).style("width:110px")
                     ui.label(str(r.get("direction") or "")).style("width:60px")
         rrg_box.clear()
-        fig = rrg_scatter_figure(a)
-        n = len(fig["data"])
         with rrg_box:
-            plot = ui.plotly(fig).classes("w-full")
-
-        # Hover-isolate: brighten the hovered sector, dim the rest (client-side
-        # restyle, no figure rebuild). curveNumber == sector index (one trace each).
-        def _on_hover(e):
-            pts = (getattr(e, "args", None) or {}).get("points") or []
-            cn = pts[0].get("curveNumber") if pts else None
-            plot.run_plot_method("restyle", {"opacity": _focus_opacities(n, cn)},
-                                 list(range(n)))
-
-        def _on_unhover(e):
-            plot.run_plot_method("restyle", {"opacity": _focus_opacities(n, None)},
-                                 list(range(n)))
-
-        plot.on("plotly_hover", _on_hover)
-        plot.on("plotly_unhover", _on_unhover)
+            # Hover-isolation is native (states.inactive in the figure) — no
+            # client→server hover round-trip to wire.
+            ui.highchart(rrg_scatter_figure(a)).classes("w-full")
 
     @guard
     def _apply():

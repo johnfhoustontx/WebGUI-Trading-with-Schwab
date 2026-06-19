@@ -21,7 +21,8 @@ Sliders fire on every drag step, so ``sim_run`` is **debounced**: a slider chang
 only stashes the latest params; a short ``ui.timer`` flushes the most recent
 params at most ~every 0.4 s. Selector changes enqueue immediately (they're
 discrete). The pure figure builders (``whatif_figure``/``ivshock_figure`` +
-``_records``/``_vline``) are unit-tested.
+``_records``/``_plotline``) are unit-tested. Charts render via Highcharts
+(``ui.highchart``).
 """
 import bus_client
 from nicegui import ui
@@ -43,38 +44,43 @@ def _records(df):
     return list(df or [])
 
 
-def _vline(x, color, dash=None):
-    line = {"color": color, "width": 2}
+def _plotline(value, color, dash=None, width=2):
+    """Highcharts plotLine dict (vertical on an xAxis, horizontal on a yAxis)."""
+    pl = {"value": value, "color": color, "width": width, "zIndex": 3}
     if dash:
-        line["dash"] = dash
-    return {"type": "line", "yref": "paper", "y0": 0, "y1": 1,
-            "xref": "x", "x0": x, "x1": x, "line": line}
+        pl["dashStyle"] = dash
+    return pl
+
+
+_DARK_AXIS = {"labels": {"style": {"color": "#bdbdbd"}},
+              "gridLineColor": "rgba(255,255,255,0.06)",
+              "lineColor": "rgba(255,255,255,0.15)"}
 
 
 def whatif_figure(df, spot, target_s=None):
-    """Plotly curve of underlying price (S) vs position theo price."""
+    """Highcharts curve of underlying price (S) vs position theo price."""
     rows = _records(df)
-    xs = [r["S"] for r in rows]
-    ys = [r["theo_price"] for r in rows]
-    shapes = [
-        {"type": "line", "xref": "paper", "x0": 0, "x1": 1, "yref": "y",
-         "y0": 0, "y1": 0, "line": {"color": "#888", "width": 1, "dash": "dash"}},
-        _vline(spot, SPOT_COLOR),
-    ]
+    data = [[r["S"], r["theo_price"]] for r in rows]
+    xplotlines = [_plotline(spot, SPOT_COLOR)]
     if target_s is not None:
-        shapes.append(_vline(target_s, TARGET_COLOR, dash="dash"))
+        xplotlines.append(_plotline(target_s, TARGET_COLOR, dash="Dash"))
+    yplotlines = [_plotline(0, "#888888", dash="Dash", width=1)]  # zero baseline
     return {
-        "data": [{"type": "scatter", "mode": "lines", "x": xs, "y": ys,
-                  "line": {"color": "#66bb6a"}, "name": "Theo"}],
-        "layout": {"title": "What-if: price sweep",
-                   "xaxis": {"title": "Underlying"}, "yaxis": {"title": "Theo price"},
-                   "shapes": shapes, "showlegend": False,
-                   "margin": {"l": 60, "r": 20, "t": 40, "b": 40}},
+        "chart": {"type": "line", "backgroundColor": "transparent"},
+        "title": {"text": "What-if: price sweep", "style": {"color": "#e6e6e6"}},
+        "credits": {"enabled": False},
+        "accessibility": {"enabled": False},
+        "legend": {"enabled": False},
+        "xAxis": {**_DARK_AXIS, "title": {"text": "Underlying"}, "plotLines": xplotlines},
+        "yAxis": {**_DARK_AXIS, "title": {"text": "Theo price"}, "plotLines": yplotlines},
+        "tooltip": {"pointFormat": "S {point.x:g} → theo <b>{point.y:.2f}</b>"},
+        "series": [{"name": "Theo", "type": "line", "data": data,
+                    "color": "#66bb6a", "marker": {"enabled": False}}],
     }
 
 
 def ivshock_figure(base, shock, mult=1.5):
-    """Grouped base-vs-shock bars across the key metrics."""
+    """Grouped base-vs-shock columns across the key metrics."""
     cats = ["Price", "Delta", "Gamma×100", "Theta", "Vega"]
 
     def vals(row):
@@ -82,16 +88,18 @@ def ivshock_figure(base, shock, mult=1.5):
                 (row.get("gamma", 0) or 0) * 100, row.get("theta", 0), row.get("vega", 0)]
 
     return {
-        "data": [
-            {"type": "bar", "name": "base (×1.0)", "x": cats, "y": vals(base),
-             "marker": {"color": BASE_COLOR}},
-            {"type": "bar", "name": f"shock (×{mult:g})", "x": cats, "y": vals(shock),
-             "marker": {"color": SHOCK_COLOR}},
+        "chart": {"type": "column", "backgroundColor": "transparent"},
+        "title": {"text": "IV shock", "style": {"color": "#e6e6e6"}},
+        "credits": {"enabled": False},
+        "accessibility": {"enabled": False},
+        "legend": {"enabled": True, "itemStyle": {"color": "#bdbdbd"}},
+        "xAxis": {**_DARK_AXIS, "categories": cats},
+        "yAxis": {**_DARK_AXIS, "title": {"text": "Value"}},
+        "plotOptions": {"column": {"grouping": True, "borderWidth": 0}},
+        "series": [
+            {"name": "base (×1.0)", "type": "column", "data": vals(base), "color": BASE_COLOR},
+            {"name": f"shock (×{mult:g})", "type": "column", "data": vals(shock), "color": SHOCK_COLOR},
         ],
-        "layout": {"title": "IV shock", "barmode": "group",
-                   "xaxis": {"title": "", "categoryarray": cats},
-                   "yaxis": {"title": "Value"},
-                   "margin": {"l": 60, "r": 20, "t": 40, "b": 40}},
     }
 
 
@@ -168,12 +176,12 @@ def render():
         # ΔS is a CLIENT-SIDE overlay line only — no command, computed here.
         target_s = spot * (1 + ds_slider.value / 100.0) if spot is not None else None
         with whatif_box:
-            ui.plotly(whatif_figure(result.get("whatif_rows") or [], spot,
-                                    target_s)).classes("w-full")
+            ui.highchart(whatif_figure(result.get("whatif_rows") or [], spot,
+                                       target_s)).classes("w-full")
         shock = result.get("ivshock")
         if shock:
             with ivshock_box:
-                ui.plotly(ivshock_figure(shock["base"], shock["shock"], mult)).classes("w-full")
+                ui.highchart(ivshock_figure(shock["base"], shock["shock"], mult)).classes("w-full")
 
     # ── command enqueue (sim_run) ────────────────────────────────────────────
     def _current_params():
