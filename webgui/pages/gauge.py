@@ -2,24 +2,22 @@
 Market Trend, and Trade-detail panels.
 
 A semicircular **solid-gauge**: an arc filled to ``value`` (0-100) whose color is
-value-mapped (red→amber→blue→green, flipping at the 40/55/75 thresholds the legacy
-SVG speedometer used), over a faint track, with the integer value + ``label`` text
-in the center. Requires the ``solid-gauge`` module — render via
+value-mapped with a smooth red→yellow→green gradient (interpolated by the value),
+over a faint track, with the integer value + ``label`` text in the center.
+Requires the ``solid-gauge`` module — render via
 ``ui.highchart(gauge_figure(...), extras=["solid-gauge"])``. Pure + unit-tested.
 """
 _RED = "#ef5350"
 _AMBER = "#ffd54f"
-_BLUE = "#42a5f5"
 _GREEN = "#66bb6a"
 
-# Value-mapped fill-color stops, duplicated at the zone thresholds (40/55/75) so
-# the color flips crisply at the same points the legacy speedometer's colored
-# zones did (rather than blending) — keeping the read consistent.
+# Value-mapped fill color: a smooth red -> yellow -> green ramp. Highcharts
+# interpolates the fill color from the value's position along these stops, so a
+# low score reads red, mid yellow, high green (no discrete zone flips).
 GAUGE_STOPS = [
-    [0.00, _RED], [0.3999, _RED],
-    [0.40, _AMBER], [0.5499, _AMBER],
-    [0.55, _BLUE], [0.7499, _BLUE],
-    [0.75, _GREEN], [1.00, _GREEN],
+    [0.00, _RED],
+    [0.50, _AMBER],
+    [1.00, _GREEN],
 ]
 _GAUGE_INNER = "72%"   # arc thickness (shared by the pane track + the series)
 

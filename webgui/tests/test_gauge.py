@@ -9,10 +9,14 @@ def test_gauge_figure_solidgauge_value_and_color_stops():
     fig = gauge.gauge_figure(76.0, "Long")
     assert fig["chart"]["type"] == "solidgauge"
     assert fig["series"][0]["data"] == [76.0]
-    # Value-mapped fill color: stops anchored at the zone thresholds (40/55/75)
-    # so the fill flips color where the legacy SVG speedometer's zones did.
-    positions = [round(p, 4) for p, _c in fig["yAxis"]["stops"]]
-    assert 0.40 in positions and 0.55 in positions and 0.75 in positions
+    # Smooth value-mapped fill: a continuous red -> yellow -> green ramp that
+    # Highcharts interpolates between (no discrete zone flips).
+    stops = fig["yAxis"]["stops"]
+    positions = [round(p, 4) for p, _c in stops]
+    assert positions[0] == 0.0 and positions[-1] == 1.0   # spans the full range
+    assert 0.5 in positions                                # yellow at the midpoint
+    assert positions == sorted(positions)                  # monotonic, no duplicates
+    assert len(positions) == len(set(positions))           # crisp-flip dupes removed
     assert "Long" in fig["series"][0]["dataLabels"]["format"]
     assert fig["accessibility"]["enabled"] is False
     assert fig["pane"]["startAngle"] == -90 and fig["pane"]["endAngle"] == 90
