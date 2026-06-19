@@ -19,3 +19,18 @@ class TrendSub:
 
 def _clamp(v, lo, hi):
     return max(lo, min(hi, v))
+
+
+def score_price(alignment_pct, price_vs_vwap_pct, macd_hist, rsi, adx,
+                n_timeframes) -> TrendSub:
+    """0-100 from MTF EMA alignment (dominant), VWAP, MACD sign, RSI; ADX scales
+    how far the needle leaves 50 (strong trend -> extremes, chop -> ~50)."""
+    a = _clamp(alignment_pct / 100.0, -1.0, 1.0)
+    v = _clamp(price_vs_vwap_pct / 0.5, -1.0, 1.0)
+    m = 1.0 if macd_hist > 0 else -1.0 if macd_hist < 0 else 0.0
+    r = _clamp((rsi - 50.0) / 20.0, -1.0, 1.0)
+    direction = 0.5 * a + 0.2 * v + 0.15 * m + 0.15 * r
+    adx_factor = _clamp(adx / 40.0, 0.3, 1.0)
+    score = _clamp(50.0 + 50.0 * direction * adx_factor, 0.0, 100.0)
+    confidence = _clamp(n_timeframes / 3.0, 0.0, 1.0)
+    return TrendSub(score=round(score, 2), confidence=round(confidence, 3))

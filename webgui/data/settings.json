@@ -1,0 +1,8 @@
+{
+  "alert_enabled": true,
+  "alert_sound": "chime",
+  "alert_volume": 1,
+  "alert_market_hours_only": true,
+  "alert_min_score": 0,
+  "desktop_notifications": true
+}
