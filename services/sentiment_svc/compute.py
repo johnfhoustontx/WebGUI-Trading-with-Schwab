@@ -372,11 +372,14 @@ def compute_intraday_trend(schwab, sector_data=None, prior_history=None,
             if not frames:
                 price = intraday_trend.TrendSub(50.0, 0.0)
             else:
-                ref = frames.get("15min") or next(iter(frames.values()))
+                # Explicit membership — a DataFrame in a boolean `or` raises
+                # "truth value is ambiguous" (silently zeroed the 45% price input).
+                ref = frames["15min"] if "15min" in frames \
+                    else next(iter(frames.values()))
                 price_now = float(ref["close"].iloc[-1])
                 align = technical.calculate_ema_alignment(frames, price_now)
                 align_pct = float(align.get("alignment_percentage", 0.0))
-                df15 = frames.get("15min") or ref
+                df15 = frames["15min"] if "15min" in frames else ref
                 vwap = technical.calculate_vwap(df15)
                 vwap_pct = ((price_now - vwap) / vwap * 100.0) if vwap else 0.0
                 hist = technical.macd_histogram_series(df15)

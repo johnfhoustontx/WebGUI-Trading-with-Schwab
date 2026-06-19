@@ -246,6 +246,10 @@ def test_compute_intraday_trend_shape_and_bull():
     assert out["state"] in {"bull_trend", "pullback_in_bull"}
     assert set(out["sub_scores"]) == {"price", "breadth", "sector", "vix"}
     assert set(out["sub_confidence"]) == {"price", "breadth", "sector", "vix"}
+    # The 45% price input must actually contribute — a DataFrame in a boolean
+    # `or` used to raise "truth value ambiguous", silently zeroing this block.
+    assert out["sub_confidence"]["price"] > 0.0
+    assert out["sub_scores"]["price"] > 50.0   # rising tape -> bullish price score
 
 
 def test_compute_intraday_trend_defensive_no_data():
