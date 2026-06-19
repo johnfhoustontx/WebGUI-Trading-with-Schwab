@@ -76,6 +76,11 @@ def _clamp(v, lo, hi):
 _TREND_SHORT = {"bull_trend": "BULL", "pullback_in_bull": "PULLBACK",
                 "range": "RANGE", "bear_rally": "BEAR RALLY", "bear_trend": "BEAR"}
 
+# Market Trend sub-score display metadata (name + weight). Mirrors the service's
+# TREND_WEIGHTS — kept local so the page imports no engine (3-tier rule).
+_TREND_SUB_META = [("price", "Price / MTF", "45%"), ("breadth", "Breadth", "25%"),
+                   ("sector", "Sector", "20%"), ("vix", "VIX", "10%")]
+
 
 def trend_gauge_value(trend):
     """0-100 needle = the intraday trend score directly (smoothed if present)."""
@@ -84,6 +89,22 @@ def trend_gauge_value(trend):
     if v is None:
         return 50.0
     return _clamp(_safe_float(v, 50.0), 0.0, 100.0)
+
+
+def trend_subscore_rows(trend):
+    """Display rows [{name, score, weight, conf}] for the Market Trend sub-score
+    popup; skips sub-scores absent from the payload (e.g. the 30-day variant has
+    only price+sector)."""
+    t = trend or {}
+    scores = t.get("sub_scores") or {}
+    confs = t.get("sub_confidence") or {}
+    rows = []
+    for key, name, weight in _TREND_SUB_META:
+        if key not in scores:
+            continue
+        rows.append({"name": name, "score": f"{_safe_float(scores.get(key)):.1f}",
+                     "weight": weight, "conf": f"{_safe_float(confs.get(key)):.2f}"})
+    return rows
 
 
 def bias_color(bias):

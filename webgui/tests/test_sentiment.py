@@ -38,6 +38,22 @@ def test_trend_gauge_value_uses_score_directly():
     assert S.trend_gauge_value({"score": 150}) == 100.0                        # clamped
 
 
+def test_trend_subscore_rows():
+    rows = S.trend_subscore_rows({
+        "sub_scores": {"price": 88, "breadth": 80, "sector": 82, "vix": 70},
+        "sub_confidence": {"price": 1.0, "breadth": 0.9, "sector": 1.0, "vix": 1.0}})
+    assert len(rows) == 4
+    assert {"name": "Price / MTF", "score": "88.0", "weight": "45%", "conf": "1.00"} in rows
+
+
+def test_trend_subscore_rows_skips_missing_and_handles_empty():
+    assert S.trend_subscore_rows(None) == []
+    assert S.trend_subscore_rows({}) == []
+    rows = S.trend_subscore_rows({"sub_scores": {"price": 60, "sector": 55}})  # 30d shape
+    assert [r["name"] for r in rows] == ["Price / MTF", "Sector"]
+    assert rows[0]["conf"] == "0.00"   # missing sub_confidence -> 0.00
+
+
 def test_composite_series_filters_zeros_and_blanks():
     snaps = [_snap("2026-06-01", 6.0), _snap("2026-06-02", 0.0),
              _snap("2026-06-03", 7.0)]
