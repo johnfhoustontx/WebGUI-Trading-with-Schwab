@@ -8,12 +8,24 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-06-18 (**EOD Report page DONE**: new `/eod` + `/eod/detail`
+**Last updated:** 2026-06-19 (**end-to-end audit pass**: corrected doc drift —
+full `config/ports.toml` (memurai + ml_servers + services 8210–8214), the
+`pages/options/handoff.py` + `pages/ui_guard.py` shared helpers, the Sentiment
+3-column / 2×2-tile layout, the proxy `/pricehistory` 404-flood fix, and paper
+auto-manage (no longer "manual-only"); added a **"Performance characteristics &
+known hotspots"** section from an efficiency audit. Prior same-day: **System
+Status page DONE**: new `/status` pure-webgui
+page probes every tier — Memurai PING, schwab-proxy `/health`, the five domain
+services' `/health` (:8210–8214), and webgui itself — into an overall up/down
+banner + per-component cards, plus a **published-data-freshness** table (each
+domain's latest cache version + age, flagging scheduled views gone stale). 304
+webgui tests green. See "System Status page (`/status`) — DONE" below.
+Prior — 2026-06-18 (**EOD Report page DONE**: new `/eod` + `/eod/detail`
 pure-webgui pages aggregate the collected `options:*` + `driver:*` caches into a
 **Summary** rollup + **Detailed** report, with a **Generate** button that snapshots
 the caches into standalone `summary.html`/`detail.html` archived under
 `webgui/data/eod/<date>/` (in-app view + dated archive + `/eod/file` raw serving).
-285 webgui tests green. See "EOD Report page (`/eod` + `/eod/detail`) — DONE" below.
+See "EOD Report page (`/eod` + `/eod/detail`) — DONE" below.
 Prior: **3-tier migration — all five domains migrated** (Sentiment, Options,
 Portfolio, Trade, Driver) — every page reads Redis and the webgui imports only
 `nicegui` + `shared.bus` + `shared.contracts`. Remaining: Phase 6 retire-shims
@@ -111,8 +123,9 @@ services → webgui. Full design: [3-tier design doc](docs/plans/2026-06-15-thre
 ## webgui structure (NiceGUI app)
 
 `webgui/main.py` is the server + nav shell: a left-nav with expandable
-**Options** and **Sentiment** groups (Sentiment children: Sentiment dashboard +
-Sector Rotation) plus flat Trade / Portfolio / Driver / **Settings** items. Pages
+**Options**, **Sentiment**, and **More** groups (Sentiment children: Sentiment
+dashboard + Sector Rotation; **More** children: EOD Report + System Status +
+Settings + Terminate) plus flat Trade / Portfolio / Driver items. Pages
 live in `webgui/pages/`; each leaf exposes `render()` called inside the shell
 `_layout`. `webgui/proxy.py` wraps `schwab-proxy/proxy_client.py` and adds
 `health()`. Pure transforms / SVG builders are unit-tested (`webgui/tests/`);
@@ -154,13 +167,27 @@ Routes:
 | `/settings` | Settings (GUI prefs via `app_settings`: scanner **audio alert** on/off + sound + volume, only-during-market-hours, min-score-to-alert; desktop-notification toggle + permission grant + Test sound. Extensible — first batch) | built |
 | `/portfolio` | Portfolio (3-tier, `services/portfolio_svc` :8212: **Holdings / Sectors / Performance** tabs over the portfolio model — sector breakdown, vs-sector RS, since-purchase excess, benchmark over/under-weight, tailwind; **Performance** scorecard (return/capital/risk/entry grades + composite + ann. return + drawdown) with a per-position **advisory suggestions** detail pane; **live-streaming P&L** via the service's proxy SSE consumer republishing each tick; proxy/stream status bar; persists across nav) | built |
 | `/eod` · `/eod/detail` | EOD Report (pure-webgui aggregator: **Summary** rollup tiles + **Detailed** drill-down tables over the collected `options:*` + `driver:*` caches; **Generate** snapshots the caches → standalone `summary.html` + `detail.html` archived under `webgui/data/eod/<date>/`; in-app view + dated archive list; `/eod/file` serves archived files raw) | built |
+| `/status` | System Status (pure-webgui health board: overall up/down banner + per-component cards probing **Memurai** PING, **schwab-proxy** `/health`, the **five domain services** `/health`, and **webgui** itself; plus a **published-data-freshness** table — each domain's cache version + age, flagging stale scheduled views; **per-component Restart button on offline cards** — proxy/services relaunch via `tools\restart_one.bat`, Memurai via `Start-Service`; off-thread sweep, auto-refresh 15 s + manual) | built |
+| `/terminate` | Terminate (guarded "stop the whole local stack" page: red **Stop all services** button behind a confirm dialog → spawns `stop_all.bat` detached via `cmd /c start`, which kills the proxy + 5 services + this web app by listening port; **Memurai is left running**; the page goes unresponsive after confirm, by design) | built |
 
 The `pages/options/` subpackage shares `header.py` (compact quotes/VIX/sentiment
 strip), `detail.py` (collapsible Trade detail panel, reused by all signal
-tables), and `svg.py` (speedometer / gradient-bar / range-marker SVG). Options
-design + plan: [`docs/plans/2026-06-14-options-section-expansion-design.md`](docs/plans/2026-06-14-options-section-expansion-design.md)
+tables), `svg.py` (speedometer / gradient-bar / range-marker SVG), `inputs.py`
+(`select_all_on_focus` symbol-input helper), and **`handoff.py`** (cross-page
+signal hand-off — Scanner/Swing "Send to Calculator" via a module-level `_pending`
+stash + "Send to Paper trade" which enqueues a `paper_create` command on
+`cmd:options`, plus the shared `add_row_actions` per-row action-button slot;
+engine-free). Options design + plan: [`docs/plans/2026-06-14-options-section-expansion-design.md`](docs/plans/2026-06-14-options-section-expansion-design.md)
 / [`-plan.md`](docs/plans/2026-06-14-options-section-expansion-plan.md).
 Gamma/Simulator: [`docs/plans/2026-06-14-gamma-simulator-design.md`](docs/plans/2026-06-14-gamma-simulator-design.md) / [`-plan.md`](docs/plans/2026-06-14-gamma-simulator-plan.md).
+
+**`pages/ui_guard.py` (cross-cutting, load-bearing — used by ~15 pages).** Provides
+`guard` / `guard_async` decorators that make a NiceGUI callback a clean no-op when
+the owning client/slot has been deleted (browser tab navigated away / closed /
+reconnected) — swallowing the `RuntimeError('… has been deleted.')` that `ui.timer`
+and post-`await` event handlers otherwise raise (and that NiceGUI's `handle_exception`
+re-raises, doubling the noise). Wrap every timer callback and `on_click`/`.on(...)`
+handler that mutates page widgets in it.
 
 ## webgui development notes (read before adding a page)
 
@@ -229,6 +256,12 @@ this writing). TDD pure functions; smoke-verify `render()` with a screenshot.
 - `options-scanner/data/Top 20.xlsx` (scanner watchlist) is present locally but
   **gitignored** (`data/`), like the real secrets — a fresh clone degrades to
   base symbols. Same applies to the paper-trading DBs (start empty).
+- **Proxy `/pricehistory` (fixed 2026-06-19):** `schwab_proxy.get_price_history`
+  now calls `/pricehistory?symbol=…` directly (symbol is a query param). The old
+  code tried `/{symbol}/pricehistory` first — a guaranteed 404 that `api_request`
+  retried `MAX_RETRIES`× with backoff, flooding `errors.log` (~99% of all ERRORs)
+  and wasting ~0.75 s/fetch. If you see a `D:\Trading With Schwab` source-repo proxy
+  still on `:8100`, it may not have this fix.
 
 **Sentiment (`/sentiment`) — DONE.** `webgui/pages/sentiment.py` reuses the
 copied `history_backfill.backfill_history(...)` engine (latest completed-session
@@ -240,12 +273,16 @@ the avg = page-side mean of the history composites) + bias + size/conf; right: *
 **Market Trend** speedometers (**Today** + **~30d Ago**, both via `trend_gauge_value`
 off the regime anchor + slope/dd nudge) — the 30d-ago value is `derived["trend_30d_ago"]`
 **published by `sentiment_svc`** (`build_trend_dict(spy[:-30])`; the page can't classify,
-no scoring engine) — with the regime badge/desc beneath; then the component **table**
-(Value/Score[2dp]/Weight/Conf — Contrib computed for reconciliation but not shown;
-credit_pulse excluded per v4.3 `WEIGHTS`). Then 5 summary **tiles**
-(Modifier/Bias/Signal/Yesterday/Change) sized down with a **traffic-light background**
-(`traffic_color(total)`), a 30d Plotly history (soft grid) + 5d/20d rolling averages
-+ velocity/divergence, the full-width **Sector & Industry Performance** table
+no scoring engine) — with the regime badge/desc beneath. The top region is now
+**three columns** (Market Sentiment / Market Trend / Signals); the component
+**table** (Value/Score[2dp]/Weight/Conf — Contrib computed for reconciliation but
+not shown; credit_pulse excluded per v4.3 `WEIGHTS`) and the Trend detail are
+**press-and-hold popups** (`ui.menu().props("no-parent-event")`), not always-visible
+columns. The Signals column is a **2×2 four-tile matrix** (`TILE_DEFS` =
+**Bias/Signal/Yesterday/Change** — Modifier dropped per design) with a
+**traffic-light background** (`traffic_color(total)`). Below that, a **collapsed**
+`ui.expansion("30-Day History")` holds the 30d Plotly history (soft grid) + 5d/20d
+rolling averages + velocity/divergence, then the full-width **Sector & Industry Performance** table
 (11 sectors × Day/Week/Month %, P/C, RRG; per-cell colored; subtle gridlines + row
 hover via a `.sent-sectors` `ui.add_css` block) with a rotation banner
 (`scoring.rotation.compute_rotation`) + "% green | Cap-wtd | Score" summary, and a
@@ -363,9 +400,16 @@ Options section (design/plan:
   constants) is published each 30 s tick by `handlers.publish_gex_status`
   (`cache:options:gex_status`); `gamma.py` shows **Collector / Last scan / Next scan**
   alongside the existing "Next refresh" countdown.
-- Pure transforms are unit-tested (webgui + options_svc suites). **Still TODO
-  (separate design):** streaming-driven paper-position repricing (today repricing
-  is manual-only via the Paper Portfolio "Run Manage Cycle" button).
+- Pure transforms are unit-tested (webgui + options_svc suites).
+
+> **Paper auto-manage (DONE — supersedes the old "manual-only" TODO).** The
+> `options_svc` scheduler now reprices + auto-closes paper positions on its own:
+> `manage_due` fires `run_manage_and_refresh` every **5 min** within market hours
+> (`scheduler.py:97,104,219`), so the Paper Portfolio updates unattended. The
+> "Run Manage Cycle" button is now a manual trigger of the same cycle, not the only
+> path. (Tick cadence reference: each 30 s scheduler tick also runs
+> `refresh_header` + `publish_gex_status`; the 2-min GEX collect and 5-min manage
+> are slot-gated within 08:30–15:20 CT.)
 
 **Gamma panels / walls / flicker batch (DONE — 2026-06-16).** Four fixes from a
 live-screenshot review (design/plan:
@@ -566,6 +610,43 @@ only `nicegui` + `shared.bus` + `shared.contracts`). Pieces:
   [design](docs/plans/2026-06-18-eod-report-design.md) /
   [plan](docs/plans/2026-06-18-eod-report-plan.md).
 
+**System Status page (`/status`) — DONE (2026-06-19).** A **pure-webgui** at-a-glance
+health board (no new service/port). It honors the 3-tier import rule — `webgui/pages/status.py`
+imports only `nicegui` + `bus_client`/`proxy` + `repo_paths`. Pieces:
+- **Component sweep.** `component_targets()` enumerates the 8 components from
+  `repo_paths` (Memurai :6379, schwab-proxy :8100, the five services :8210–8214 via
+  `SERVICE_URLS`, webgui itself). `_probe_one` checks each by `kind`: **memurai** →
+  `bus_client.ping()` (new helper: `bus()._r.ping()`, never raises); **proxy** →
+  `proxy.health()` (also surfaces `token_loaded`); **service** → HTTP `GET /health`
+  (the `make_app` scaffold's probe, `{"up": True}`); **self** → always up. The whole
+  sweep runs off-thread via `nicegui.run.io_bound` (short 2.5 s per-probe timeout so a
+  dead component fails fast). `overall_status` rolls the results into a green/red/grey
+  banner naming any down components.
+- **Data-freshness table.** Below the cards, per-domain rows read each representative
+  cache view's version + ts (new `bus_client.read_meta(view)` → `(version, ts)`) and
+  show `age_text` + a STALE flag for **scheduled** views older than 600 s (`is_stale`);
+  **on-demand** views (trade/driver) are never flagged. This distinguishes "service
+  answers /health" from "service is actively publishing".
+- **Per-component Restart (2026-06-19).** Each **offline** component card grows a
+  **Restart** button (proxy + the five services + Memurai; never the webgui — it
+  can't restart itself, and its card is always "up"). `restart_spec(target)` maps a
+  component to how it restarts — a **script** spec (proxy / service: free the port
+  then launch the venv python on the entry script; services pass `wait_port=8100`
+  so they wait for the proxy) or a **service** spec (Memurai → `Start-Service`).
+  `restart_command(spec)` builds the argv: a script spec spawns its own console
+  via `cmd /c start … cmd /k call tools\restart_one.bat <kill_port> <wait_port>
+  <script>` (detached, live logs); `restart_one.bat` taskkills the port's LISTENING
+  owner (clears a wedged process) then hands off to `wait_and_run.bat`. The page's
+  click handler spawns it, toasts, and schedules a 7s re-sweep. Verified live: a
+  Restart click on the proxy bound :8100 within ~1s and the card flipped to Online.
+- **Wiring.** `("/status", "System Status", "monitor_heart")` in the **More** nav
+  group; `@ui.page("/status")` → `status.render()`; `/status` added to
+  `test_shell.py`. Auto-refresh `ui.timer(15s)` + manual Refresh button (with
+  spinner + re-entrancy guard). Pure builders (`component_targets`/`status_word`/
+  `status_color`/`status_icon`/`overall_status`/`age_text`/`is_stale`/`freshness_row`
+  + `restart_spec`/`restart_command`) unit-tested in `webgui/tests/test_status.py`
+  (27); render + live restart verified by screenshot.
+
 ## Paths and ports: `repo_paths.py` + `config/ports.toml`
 
 `repo_paths.py` at the repo root is the single source of truth for cross-app
@@ -585,7 +666,21 @@ proxy = 8100
 options_analytics = 8200
 approval = 8300
 dashboard_frontend = 5173
-nicegui = 8500            # NEW: the NiceGUI app
+nicegui = 8500            # the NiceGUI app
+memurai = 6379            # Redis backbone (Tier 3)
+
+[ml_servers]              # external processes — not started by this repo
+MES = 8000
+MNQ = 8001
+ES  = 8004
+NQ  = 8005
+
+[services]                # Tier-2 domain services (repo_paths → SERVICE_PORTS/SERVICE_URLS)
+sentiment = 8210
+options   = 8211
+portfolio = 8212
+trade     = 8213
+driver    = 8214
 ```
 
 **Rule: never hard-code `D:\` paths or port numbers in the apps.** Add them to
@@ -609,7 +704,29 @@ gitignored. **Never commit real keys, tokens, or account numbers.**
 
 The simplest path is `start_all.bat` (Memurai check → proxy → sentiment_svc →
 options_svc → portfolio_svc → trade_svc → driver_svc → web gui, opening the
-browser). Manual order:
+browser). It opens the proxy + 5 services + web gui in **7 separate console
+windows**.
+
+**One-window alternative — `start_all_wt.bat`** (requires Windows Terminal):
+launches the same 7 processes as **7 tabs in a single Windows Terminal window**
+(live logs preserved, but far less desktop clutter). The processes stay 7
+separate OS processes — required, since merging services into one Python process
+would re-introduce the `config`/`scoring`/`notifier`/`src` top-level
+module-name collisions the 3-tier split exists to prevent. Each tab waits for the
+proxy (:8100) before starting via `tools\wait_and_run.bat <wait_port|0> <script>`
+(the proxy tab passes `0` to start immediately), preserving the same ordering as
+the multi-window launcher; tabs run under `cmd /k` so they stay open with live
+output. Close the window (or a tab) to stop the services.
+
+**Stopping — `stop_all.bat`** (also reachable from the GUI's **More → Terminate**
+page): runs `tools\stop_all.py`, which reads the ports from `repo_paths` and kills
+whatever is LISTENING on the proxy + 5 service ports + the web GUI (web GUI last).
+**Memurai (:6379) is intentionally left running** — it's a shared Windows service,
+not something this repo starts. The Terminate button spawns the batch fully
+detached (`cmd /c start`) so it isn't in the web app's process tree (it taskkills
+the web app itself, so a child would otherwise kill itself mid-run).
+
+Manual order:
 
 ```powershell
 # 1. Activate the venv
@@ -645,6 +762,103 @@ python webgui\main.py      # serves http://127.0.0.1:8500
 > `scoring`/`notifier` cross-app collision can no longer occur. See the "Planned 3-tier
 > architecture" section.
 
+## Performance characteristics & known hotspots
+
+Single-user, localhost Memurai — so most of these are *tolerable today* but are the
+real levers if a page feels sluggish or a service churns CPU/network. Audited
+2026-06-19; ranked by impact. Fix the High items first if optimizing.
+
+**Costing model (important, non-obvious):** `bus_client.read_version()` /
+`read_meta()` are **NOT** cheap probes — `Bus.cache_get` does a full Redis `GET`
+**plus a full JSON deserialize of the entire payload envelope** (`shared/bus/client.py`).
+So a "fetch-free version-poll" `ui.timer` still pays GET+deserialize every tick; it
+only avoids the DOM re-render. There is no version-only fast path. Likewise
+`Bus.cache_set` embeds the version (from `INCR`) inside the stored envelope, so the
+`SET` can't be folded into the `INCR` round-trip — but `cache_set(key, payload,
+event=…, skip_unchanged=…)` now (a) **skips the whole write + publish when the
+payload is byte-identical** to what's stored (`skip_unchanged=True` → no `INCR`, no
+`SET`, no publish, version unchanged → GUI poller doesn't repaint), and (b) pipelines
+the `SET`+`PUBLISH` into one round-trip when `event` is given. The options_svc header
++ gex_status republishers use this. Other periodic republishers (sentiment 120 s,
+portfolio per-tick, driver perf) still bump unconditionally — opt them in the same way
+if they prove chatty.
+
+**HIGH — webgui event-loop pressure (runs on *every* page):**
+- The app-wide 2 s alert watcher (`main._run_watcher` + `_recompute_badges`) does
+  ~5 Redis reads/tick (and re-reads `options:scan` twice), plus a synchronous
+  `app_settings.load()` **disk read** when a qualifying signal exists — all on the
+  event loop. On an open Scanner page this stacks with the page's own `options:scan`
+  poll → ~3 deserializes of the largest payload every 2 s. *Levers:* read each cache
+  once/tick and pass it down; cache `app_settings` in memory (invalidate on save).
+- Every page navigation calls `proxy.health()` (blocking `requests.get`, 3 s timeout)
+  + 4–5 badge Redis reads **before first paint** — a slow/unreachable proxy stalls
+  every page up to 3 s. *Lever:* move `proxy.health()` off-thread / cache it a few
+  seconds (like `/status` and the Sentiment status bar already do).
+- `pages/options/gamma.py` runs **four** separate 2 s version-polls
+  (gamma/explain/analyze/status) → 4 full deserializes every 2 s on that page.
+  *Lever:* coalesce into one tick. (`status.py` is the model citizen — its blocking
+  sweep goes through `nicegui.run.io_bound`; most other pages poll on the event loop.)
+
+**HIGH — service-side serial proxy fan-out (biggest wall-clock wins):** *(FIXED
+2026-06-19)* These I/O-bound proxy loops now fan out concurrently via
+`services/_parallel.py:parallel_map` (services) / an inline `ThreadPoolExecutor`
+(engine files). The proxy rate-limiter only *spaces* upstream calls ~0.2 s apart
+(it does **not** hold a lock across the Schwab round-trip — see `schwab_proxy.py:
+_rate_limit`), so concurrent calls genuinely overlap; pools are kept ≤8.
+- Sentiment sector load — the 11 `get_daily_history` + 11 `/chains` loops in
+  `sentiment_svc/compute.load_sector_perf` + `load_industries` (extracted to shared
+  `_fetch_closes`/`_fetch_pcr` helpers), and the per-sector chains+history loops in
+  `live_composite.compute_live`. *(The `_load_all_industries` outer per-sector loop
+  stays serial — each iteration's inner fetches are now concurrent; flatten later if
+  needed.)*
+- Portfolio — `portfolio_svc/compute.compute_baselines` (per-symbol) and the
+  `build_portfolio` holdings build (`portfolio-analyzer/src/portfolio.py`) fan out
+  concurrently. **Plus:** baselines now recompute only when
+  `compute.baseline_signature` (equity holdings + entries + day) changes — the
+  periodic 10-min rebuild reuses cached baselines when nothing changed (`state.
+  baseline_sig`), instead of re-fetching ~2N histories every cycle.
+- Trade analyze — `_fetch_timeframes` (5 timeframes) and the independent
+  SPY + sector-ETF + fundamentals fetches in `analyze` now run concurrently
+  (after the early daily-sufficiency gate, so output is unchanged).
+
+**HIGH — service-side per-tick churn (runs 24/7, no browser needed):** *(FIXED
+2026-06-19)* `options_svc` `refresh_header` (a `get_quotes` proxy call + bridge read)
++ `publish_gex_status` (SQLite read) used to run on **every 30 s tick with no
+market-hours gate** → ~2 proxy calls + 1 DB open + 2 cache writes every 30 s, all
+day/all weekend. Now gated by `scheduler.periodic_refresh_due` — every tick during
+market hours, throttled to once per `_OFFHOURS_INTERVAL_MIN` (5 min) off-hours/
+weekends — **and** both use `cache_set(skip_unchanged=True)` so an unchanged view
+writes/publishes nothing. The remaining per-tick proxy/DB churn outside market hours
+is ~1/10th of before. *(Other services' serial fan-outs below are still open.)*
+
+**MEDIUM — engine compute:**
+- `shared/analysis_lib/technical.calculate_ema` uses a Python bar-by-bar loop, not
+  `.ewm()` — called ~15×/trade analysis (3 periods × 5 timeframes), plus inside MACD
+  (and MACD is computed twice on the daily series). *Lever:* `series.ewm(span=…,
+  adjust=False).mean()`; compute MACD once and read `[-1]`/`[-2]`.
+- `volume_profile` nests `.iterrows()` × bins (O(bars×bins)). *Lever:* `np.digitize` +
+  `np.bincount`.
+- `shared/bus.consume_commands` calls `xgroup_create` on **every** 50 ms poll (extra
+  round-trip + swallowed `BUSYGROUP` exception) across all 5 services — the hottest
+  bus path. *Lever:* create the group once at consumer startup.
+- Static files re-read every cycle: `Top 20.xlsx` (every 2-min GEX poll) and the
+  sectors-ref workbook (4× per 120 s sentiment cycle). *Lever:* mtime-keyed cache.
+- `schwab_proxy.trader_request` (`/accounts`, `/positions`, `/orders`) uses bare
+  `requests.*` → a fresh TLS handshake per call; the marketdata path correctly reuses
+  `token_mgr.session`. *Lever:* route trader calls through the pooled session too.
+- `gex_history_db.load_today` filters with `DATE(ts,'unixepoch','localtime') =
+  DATE('now')` (non-sargable). *Lever:* compute the day's unix `[start,end)` in Python
+  and use `ts >= ? AND ts < ?`. Also: a fresh SQLite connection is opened per Gamma
+  read; reuse one read-only connection per worker.
+
+**Already done right (don't "fix"):** all data pages version-gate repaints; Gamma and
+Sentiment charts use `update_figure` (Plotly.react diff, no flicker); `ui_guard`
+suppresses dead-client callback noise; portfolio's SSE loop only republishes on a
+`dirty` flag; the Redis connection and the marketdata Schwab session are pooled
+singletons. **Hygiene:** the untracked `*.log.err` files (565 KB) are stale manual
+stderr captures (mostly "proxy was down" noise) — safe to delete; consider
+`.gitignore`-ing `*.log.err`.
+
 ## Tests
 
 Each app's tests run from **inside that app folder** (entrypoints add the repo
@@ -657,7 +871,7 @@ cd sentiment-dashboard ; python -m pytest tests
 cd trade-analyzer      ; python -m pytest .
 cd portfolio-analyzer  ; python -m pytest tests
 cd claude-driver       ; python -m pytest .
-cd webgui              ; python -m pytest .   # 239 tests: transforms + shell smoke
+cd webgui              ; python -m pytest .   # 304 tests: transforms + shell smoke
 ```
 
 The 3-tier services run per folder from the repo root (NOT `pytest services` over
