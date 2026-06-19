@@ -31,3 +31,11 @@ def test_factor_rows_missing_values_default_zero():
 def test_render_returns_handle_with_update():
     # render() needs a NiceGUI context; just assert the API surface exists.
     assert callable(detail.render)
+
+
+def test_detail_header_uses_highcharts_gauge_not_svg_speedometer():
+    import inspect
+    src = inspect.getsource(detail)
+    # The composite-score header is the shared Highcharts solid-gauge now.
+    assert "gauge_figure" in src
+    assert "speedometer_svg" not in src

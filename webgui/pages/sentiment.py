@@ -22,6 +22,7 @@ fetch-free version-poll ``ui.timer`` that repaints when the bus cache version
 changes.
 """
 import bus_client
+from pages.gauge import gauge_figure  # noqa: F401  (re-export; used by render)
 from pages.ui_guard import guard, guard_async
 
 CLR_GREEN = "#66bb6a"
@@ -70,60 +71,6 @@ def gauge_score(total):
 
 def _clamp(v, lo, hi):
     return max(lo, min(hi, v))
-
-
-# Value-mapped fill color for the solid-gauge arc. Stops are duplicated at the
-# zone thresholds (40/55/75) so the fill color flips crisply at the same points
-# the legacy SVG speedometer's colored zones did (red/amber/blue/green), rather
-# than blending — keeping the read consistent with the old needle gauge.
-GAUGE_STOPS = [
-    [0.00, CLR_RED], [0.3999, CLR_RED],
-    [0.40, CLR_YELLOW], [0.5499, CLR_YELLOW],
-    [0.55, LINE_COLOR], [0.7499, LINE_COLOR],
-    [0.75, CLR_GREEN], [1.00, CLR_GREEN],
-]
-_GAUGE_INNER = "72%"   # arc thickness (shared by the pane track + the series)
-
-
-def _esc(text):
-    """Minimal HTML escape so a label can't break the dataLabel format string."""
-    return (str(text or "").replace("&", "&amp;")
-            .replace("<", "&lt;").replace(">", "&gt;"))
-
-
-def gauge_figure(value, label, height=120):
-    """Highcharts semicircular **solid-gauge**: an arc filled to ``value`` (0-100)
-    whose color is value-mapped (red→amber→blue→green, flipping at 40/55/75 like
-    the legacy zones), over a faint track, with the integer value + ``label`` text
-    in the center. Requires the ``solid-gauge`` module (load via
-    ``ui.highchart(..., extras=["solid-gauge"])``)."""
-    v = _clamp(_safe_float(value), 0.0, 100.0)
-    # Display int(v) (truncates, matching the legacy SVG) baked into the format;
-    # the series data keeps the true float so the arc fills precisely.
-    fmt = (f'<div style="text-align:center;line-height:1.05">'
-           f'<span style="font-size:20px;font-weight:bold;color:#fff">{int(v)}</span>'
-           f'<br><span style="font-size:11px;color:#bdbdbd">{_esc(label)}</span></div>')
-    labels = {"useHTML": True, "borderWidth": 0, "y": -18, "format": fmt}
-    return {
-        "chart": {"type": "solidgauge", "backgroundColor": "transparent",
-                  "height": height, "margin": [0, 0, 0, 0], "spacing": [0, 0, 0, 0]},
-        "title": {"text": None},
-        "credits": {"enabled": False},
-        "accessibility": {"enabled": False},
-        "tooltip": {"enabled": False},
-        "pane": {"startAngle": -90, "endAngle": 90,
-                 "center": ["50%", "82%"], "size": "150%",
-                 "background": [{"outerRadius": "100%", "innerRadius": _GAUGE_INNER,
-                                 "backgroundColor": "#2f2f2f", "borderWidth": 0,
-                                 "shape": "arc"}]},
-        "yAxis": {"min": 0, "max": 100, "lineWidth": 0, "tickWidth": 0,
-                  "minorTickWidth": 0, "tickPositions": [],
-                  "labels": {"enabled": False}, "stops": GAUGE_STOPS},
-        "plotOptions": {"solidgauge": {"innerRadius": _GAUGE_INNER, "rounded": False,
-                                       "dataLabels": labels}},
-        "series": [{"type": "solidgauge", "data": [v], "name": "value",
-                    "dataLabels": labels}],
-    }
 
 
 # Short dial captions (the full label shows beneath the gauge).

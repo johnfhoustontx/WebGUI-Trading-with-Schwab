@@ -1,13 +1,21 @@
 """Shared, persistent Trade detail panel.
 
 One panel, reused by every signal table (scanner, captured, paper, swing). Each
-table synthesizes a signal-like dict and calls ``handle.update(signal)``; the
-panel rebuilds with a speedometer header, 2x2 tiles, and five cards (Trade Info,
-Greeks, Composite Score factor bars, IV Analysis, Expected Move). Graphics come
-from ``svg.py``. Robust to missing keys (fields vary by trade type / source).
+table synthesizes a signal-like dict and calls ``handle.update(signal)``. The
+**header** (signal title + composite-score speedometer + 2x2 tiles) is built ONCE
+in ``render()`` and updated in place; the five cards (Trade Info, Greeks, Composite
+Score factor bars, IV Analysis, Expected Move) rebuild per selection. The
+speedometer is the shared Highcharts solid-gauge (``gauge.py``); the factor/IV bars
++ range markers are SVG (``svg.py``). Robust to missing keys (fields vary by trade
+type / source).
+
+The gauge is persistent (not recreated per selection) so the Highcharts ESM is
+registered at initial page render — a gauge added only on selection, on a page
+with no other chart at load, fails with "Failed to resolve module specifier".
 """
 from nicegui import ui
 
+from ..gauge import gauge_figure
 from . import svg
 
 GREEN = "#66bb6a"
@@ -22,6 +30,15 @@ FACTOR_LABELS = [
 ]
 
 _PLACEHOLDER = "Select a signal to view details…"
+
+# 2x2 header tiles: (key, label, value-fn, color-fn).
+_TILES = [
+    ("credit", "Credit", lambda s: _money(s.get("credit")), lambda s: GREEN),
+    ("pop", "PoP", lambda s: _pct(s.get("pop_pct")), lambda s: pop_color(s.get("pop_pct"))),
+    ("breakeven", "Breakeven", lambda s: _money(s.get("breakeven")), lambda s: NEUTRAL),
+    ("dte", "DTE", lambda s: (f"{s.get('dte')} days" if s.get("dte") is not None else "—"),
+     lambda s: NEUTRAL),
+]
 
 
 def pop_color(pop):
@@ -56,10 +73,16 @@ def _pct(v):
     return f"{v:.1f}%" if isinstance(v, (int, float)) else "—"
 
 
-def _tile(label, value, color):
+def _signal_title(s):
+    return " · ".join(x for x in (s.get("symbol", ""), s.get("type", ""),
+                                  s.get("trade_type", "")) if x) or "Signal"
+
+
+def _tile_slot(label):
+    """A header tile (label + value); returns the value label to update in place."""
     with ui.card().classes("p-2 min-w-[92px]"):
         ui.label(label).classes("text-xs opacity-60")
-        ui.label(value).classes("text-base font-bold").style(f"color:{color}")
+        return ui.label("—").classes("text-base font-bold")
 
 
 def _kv(label, value, color=None):
@@ -81,20 +104,8 @@ def _strikes_text(s):
     return f"${sk} - ${lk}{wtxt}"
 
 
-def _build(s):
-    title = " · ".join(x for x in (s.get("symbol", ""), s.get("type", ""),
-                                   s.get("trade_type", "")) if x)
-    ui.label(title or "Signal").classes("text-subtitle1 font-bold")
-
-    with ui.row().classes("items-center gap-3 w-full no-wrap"):
-        ui.html(svg.speedometer_svg(s.get("composite_score") or 0, s.get("grade", "")))
-        with ui.grid(columns=2).classes("gap-2"):
-            _tile("Credit", _money(s.get("credit")), GREEN)
-            _tile("PoP", _pct(s.get("pop_pct")), pop_color(s.get("pop_pct")))
-            _tile("Breakeven", _money(s.get("breakeven")), NEUTRAL)
-            dte = s.get("dte")
-            _tile("DTE", f"{dte} days" if dte is not None else "—", NEUTRAL)
-
+def _build_cards(s):
+    """Build the five expansion cards (run inside the cleared body container)."""
     # Card 1 — Trade Info
     with ui.expansion("Trade Info", value=True).classes("w-full"):
         _kv("Expiration", f"{s.get('expiration','—')} ({s.get('dte','?')} DTE)")
@@ -166,21 +177,38 @@ def _greek(label, value, fmt="{:.3f}", color=None):
 
 
 class _Handle:
-    def __init__(self, container):
-        self._container = container
+    def __init__(self, state, header, sig_title, gauge_el, tiles, body):
+        self._state = state          # shared with the collapse toggle
+        self._header = header        # persistent header (title + gauge + tiles)
+        self._sig_title = sig_title
+        self._gauge = gauge_el
+        self._tiles = tiles          # {key: value-label}
+        self._body = body            # cleared + rebuilt per selection
 
     def clear(self):
-        self._container.clear()
-        with self._container:
+        self._state["has_signal"] = False
+        self._header.set_visibility(False)
+        self._body.clear()
+        with self._body:
             ui.label(_PLACEHOLDER).classes("opacity-60")
 
     def update(self, signal):
-        self._container.clear()
         if not signal:
             self.clear()
             return
-        with self._container:
-            _build(signal)
+        s = signal
+        self._state["has_signal"] = True
+        self._header.set_visibility(self._state["open"])
+        self._sig_title.text = _signal_title(s)
+        self._gauge.options = gauge_figure(s.get("composite_score") or 0, s.get("grade", ""))
+        self._gauge.update()
+        for key, _label, value_fn, color_fn in _TILES:
+            lbl = self._tiles[key]
+            lbl.text = value_fn(s)
+            lbl.style(f"color:{color_fn(s)}")
+        self._body.clear()
+        with self._body:
+            _build_cards(s)
 
 
 def render(width: int = 360):
@@ -195,16 +223,30 @@ def render(width: int = 360):
             title = ui.label("Trade detail").classes("text-subtitle1 font-bold")
             toggle_btn = ui.button(icon="last_page").props("flat round dense") \
                 .tooltip("Collapse panel")
-        container = ui.column().classes("w-full gap-2")
-        with container:
+        # Persistent signal header (built once → registers the Highcharts ESM at
+        # page load; updated in place per selection). Hidden until a signal lands.
+        header = ui.column().classes("w-full gap-1")
+        tiles = {}
+        with header:
+            sig_title = ui.label("").classes("text-subtitle1 font-bold")
+            with ui.row().classes("items-center gap-3 w-full no-wrap"):
+                gauge_el = ui.highchart(gauge_figure(0, ""), extras=["solid-gauge"]) \
+                    .classes("shrink-0").style("width:150px;height:104px")
+                with ui.grid(columns=2).classes("gap-2"):
+                    for key, label, _vf, _cf in _TILES:
+                        tiles[key] = _tile_slot(label)
+        header.set_visibility(False)
+        body = ui.column().classes("w-full gap-2")
+        with body:
             ui.label(_PLACEHOLDER).classes("opacity-60")
 
-    state = {"open": True}
+    state = {"open": True, "has_signal": False}
 
     def toggle():
         state["open"] = not state["open"]
-        container.visible = state["open"]
         title.visible = state["open"]
+        body.visible = state["open"]
+        header.visible = state["open"] and state["has_signal"]
         if state["open"]:
             col.style(f"width: {width}px")
             toggle_btn.props("icon=last_page").tooltip("Collapse panel")
@@ -213,4 +255,4 @@ def render(width: int = 360):
             toggle_btn.props("icon=first_page").tooltip("Expand panel")
 
     toggle_btn.on_click(toggle)
-    return _Handle(container)
+    return _Handle(state, header, sig_title, gauge_el, tiles, body)
