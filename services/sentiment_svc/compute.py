@@ -18,20 +18,31 @@ empty) exactly as in the page — that behavior is preserved verbatim.
 """
 import sys
 
-from repo_paths import SENTIMENT
+from repo_paths import SENTIMENT, SHARED
 from services._parallel import parallel_map
 
 if str(SENTIMENT) not in sys.path:
     sys.path.insert(0, str(SENTIMENT))
+
+# ``technical`` (the shared indicator lib) is imported standalone — its dir on
+# ``sys.path`` — to dodge the ``shared.analysis_lib`` package ``__init__`` (which
+# eagerly imports a broken ``schwab_client``). Safe here because the sentiment
+# service runs in its own process (the same isolation ``trade_svc`` relies on).
+_ANALYSIS_LIB = SHARED / "analysis_lib"
+if str(_ANALYSIS_LIB) not in sys.path:
+    sys.path.insert(0, str(_ANALYSIS_LIB))
 
 from scoring import WEIGHTS  # noqa: E402,F401
 from scoring import composite as scoring_composite  # noqa: E402,F401
 from scoring import trend_regime as trend_regime  # noqa: E402
 from scoring import sector_perf as scoring_sector  # noqa: E402,F401
 from scoring import rotation as scoring_rotation    # noqa: E402
+from scoring import intraday_trend  # noqa: E402
 import live_composite  # noqa: E402,F401  (eager: pins module; never lazy)
 from live_composite import (  # noqa: E402
-    signal_band, compute_live, build_bridge_payload)  # noqa: F401
+    signal_band, compute_live, build_bridge_payload,
+    _BREADTH, _last, _VIX_SYMS)  # noqa: F401
+import technical  # noqa: E402  (shared indicator lib, standalone import)
 
 # (component_scores key, display name) — mirrors the page's COMPONENTS minus
 # the weight (weights now flow to the GUI via the derived payload). Used to
@@ -285,6 +296,293 @@ def build_trend_dict(spy):
         return None
 
 
+# ── intraday directional Market Trend (Phase 3) ──────────────────────────────
+# Cyclical vs defensive sector ETFs (SPDR symbols, as in sectors_ref rows) for
+# the leadership spread that feeds ``score_sector_participation``.
+_CYCLICAL = {"XLK", "XLY", "XLF", "XLI", "XLB", "XLE", "XLC"}
+_DEFENSIVE = {"XLP", "XLU", "XLV", "XLRE"}
+
+# Sentinel so an OMITTED ``compute_30d_trend`` arg fetches internally, while an
+# explicit ``None`` (caller has no data) stays neutral rather than re-fetching.
+_FETCH = object()
+
+
+def _neutral_trend():
+    """Neutral directional-trend dict (score 50, conf 0, ``range`` state).
+
+    Returned when there is no trend computed yet, or as the catastrophic-failure
+    fallback of ``compute_intraday_trend`` — so the GUI always sees a valid,
+    fully-shaped trend payload."""
+    return {
+        "score": 50.0,
+        "smoothed_score": 50.0,
+        "state": "range",
+        "raw_state": "range",
+        "label": trend_regime.STATE_LABELS["range"],
+        "description": trend_regime.STATE_DESCRIPTIONS["range"],
+        "confidence": 0.0,
+        "sub_scores": {"price": 50.0, "breadth": 50.0, "sector": 50.0, "vix": 50.0},
+        "sub_confidence": {"price": 0.0, "breadth": 0.0, "sector": 0.0, "vix": 0.0},
+        "state_history": [],
+    }
+
+
+def _mean(seq):
+    seq = [v for v in seq if v is not None]
+    return (sum(seq) / len(seq)) if seq else None
+
+
+def compute_intraday_trend(schwab, sector_data=None, prior_history=None,
+                           prior_committed=None, prev_smoothed=None) -> dict:
+    """Live 0-100 *directional* Market Trend from intraday proxy data.
+
+    Blends four sub-scores (price MTF/VWAP/MACD/RSI, breadth, sector
+    participation, VIX context) via ``intraday_trend.blend_trend``, EMA-smooths
+    the needle, and runs the 2-day hysteresis state machine (reusing
+    ``trend_regime.commit_state``) so the published state is sticky.
+
+    Each sub-block is defensive: on failure that sub-score becomes
+    ``TrendSub(50, 0)`` and drops out of the confidence-weighted blend. An
+    outer guard returns a fully-shaped neutral dict on catastrophic failure."""
+    try:
+        # sector ETF universe
+        try:
+            if sector_data is None:
+                import sectors_ref
+                sector_data = sectors_ref.load_sectors_data()
+            sector_etfs = [r["etf"] for r in (sector_data or [])
+                           if r.get("kind") == "sector" and r.get("etf")]
+        except Exception:  # noqa: BLE001
+            sector_etfs = []
+
+        # 1) PRICE — MTF EMA alignment + VWAP + MACD + RSI/ADX on intraday frames.
+        try:
+            frames = {}
+            for key, df in (("5min", _safe_intraday(schwab, "SPY", 5, 10)),
+                            ("15min", _safe_intraday(schwab, "SPY", 15, 10)),
+                            ("1day", _safe_daily(schwab, "SPY", 12))):
+                if df is not None and len(df) >= 50:
+                    frames[key] = df
+            if not frames:
+                price = intraday_trend.TrendSub(50.0, 0.0)
+            else:
+                ref = frames.get("15min") or next(iter(frames.values()))
+                price_now = float(ref["close"].iloc[-1])
+                align = technical.calculate_ema_alignment(frames, price_now)
+                align_pct = float(align.get("alignment_percentage", 0.0))
+                df15 = frames.get("15min") or ref
+                vwap = technical.calculate_vwap(df15)
+                vwap_pct = ((price_now - vwap) / vwap * 100.0) if vwap else 0.0
+                hist = technical.macd_histogram_series(df15)
+                macd_hist = (float(hist.iloc[-1])
+                             if hist is not None and len(hist) else 0.0)
+                rsi = float(technical.calculate_rsi(df15))
+                adx = float(technical.calculate_adx(df15))
+                price = intraday_trend.score_price(
+                    align_pct, vwap_pct, macd_hist, rsi, adx,
+                    n_timeframes=len(frames))
+        except Exception:  # noqa: BLE001
+            price = intraday_trend.TrendSub(50.0, 0.0)
+
+        # 2) BREADTH — A/D, % above 50DMA, new highs/lows.
+        try:
+            bq = schwab.get_quotes(
+                [s for v in _BREADTH.values() for s in v]) or {}
+
+            def _first(group):
+                for sym in _BREADTH[group]:
+                    v = _last(bq.get(sym))
+                    if v is not None:
+                        return v
+                return None
+            advn, decn = _first("advn"), _first("decn")
+            net_ad = ((advn - decn) / (advn + decn)
+                      if (advn and decn and (advn + decn) > 0) else None)
+            pct50 = _first("pct50")
+            highs = _first("nyhgh") or 0
+            lows = _first("nylow") or 0
+            breadth = intraday_trend.score_breadth_dir(net_ad, pct50, highs, lows)
+        except Exception:  # noqa: BLE001
+            breadth = intraday_trend.TrendSub(50.0, 0.0)
+
+        # 3) SECTOR — participation + cyclical/defensive leadership.
+        try:
+            sq = schwab.get_quotes(sector_etfs) or {}
+            pcts = {etf: (sq.get(etf) or {}).get("change_pct")
+                    for etf in sector_etfs}
+            n_green = sum(1 for p in pcts.values() if p is not None and p > 0)
+            n_total = sum(1 for p in pcts.values() if p is not None)
+            cyc = [p for etf, p in pcts.items()
+                   if etf in _CYCLICAL and p is not None]
+            dfn = [p for etf, p in pcts.items()
+                   if etf in _DEFENSIVE and p is not None]
+            if cyc and dfn:
+                cyc_def_spread = intraday_trend._clamp(
+                    (_mean(cyc) - _mean(dfn)) / 1.0, -1, 1)
+            else:
+                cyc_def_spread = None
+            sector = intraday_trend.score_sector_participation(
+                n_green, n_total, cyc_def_spread)
+        except Exception:  # noqa: BLE001
+            sector = intraday_trend.TrendSub(50.0, 0.0)
+
+        # 4) VIX context.
+        vix_change_pct = 0.0
+        try:
+            vq = schwab.get_quotes(_VIX_SYMS) or {}
+            vix = _last(schwab.get_quote("$VIX")) or 0.0
+            try:
+                vdf = _safe_daily(schwab, "$VIX", 1)
+                if vdf is not None and len(vdf) >= 2:
+                    prev = float(vdf["close"].iloc[-2])
+                    vix_change_pct = ((vix - prev) / prev * 100.0) if prev else 0.0
+            except Exception:  # noqa: BLE001
+                vix_change_pct = 0.0
+            v1d = _last(vq.get("$VIX1D")) or 0.0
+            v9d = _last(vq.get("$VIX9D")) or 0.0
+            vix_sub = intraday_trend.score_vix_context(
+                vix, vix_change_pct, v1d, v9d)
+        except Exception:  # noqa: BLE001
+            vix_sub = intraday_trend.TrendSub(50.0, 0.0)
+
+        # 5) BLEND + volatility damper.
+        scores = {"price": price.score, "breadth": breadth.score,
+                  "sector": sector.score, "vix": vix_sub.score}
+        confs = {"price": price.confidence, "breadth": breadth.confidence,
+                 "sector": sector.confidence, "vix": vix_sub.confidence}
+        raw_score, agg = intraday_trend.blend_trend(scores, confs)
+        agg = round(agg * intraday_trend.vol_confidence_factor(vix_change_pct), 3)
+
+        # 6) SMOOTH + hysteresis state.
+        smoothed = intraday_trend.ema_smooth(prev_smoothed, raw_score, span=3)
+        raw_state = intraday_trend.score_to_state(smoothed)
+        committed, hist = trend_regime.commit_state(
+            raw_state, prior_history or [], prior_committed)
+
+        return {
+            "score": raw_score,
+            "smoothed_score": smoothed,
+            "state": committed,
+            "raw_state": raw_state,
+            "label": trend_regime.STATE_LABELS[committed],
+            "description": trend_regime.STATE_DESCRIPTIONS[committed],
+            "confidence": agg,
+            "sub_scores": {"price": price.score, "breadth": breadth.score,
+                           "sector": sector.score, "vix": vix_sub.score},
+            "sub_confidence": {"price": price.confidence,
+                               "breadth": breadth.confidence,
+                               "sector": sector.confidence,
+                               "vix": vix_sub.confidence},
+            "state_history": hist,
+            "smoothed_in": prev_smoothed,
+        }
+    except Exception:  # noqa: BLE001 — never raise into the refresh path.
+        return _neutral_trend()
+
+
+def _safe_intraday(schwab, symbol, minutes, days):
+    try:
+        return schwab.get_intraday_history(symbol, minutes=minutes, days=days)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _safe_daily(schwab, symbol, months):
+    try:
+        return schwab.get_daily_history(symbol, months=months)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def compute_30d_trend(spy_daily_df=_FETCH, sector_month_pcts=_FETCH) -> dict:
+    """~30-day *structural* directional trend (price structure + sector breadth).
+
+    The daily-horizon analog of ``compute_intraday_trend`` for the GUI's "30-Day
+    Avg" Market-Trend gauge: no intraday VWAP, no breadth/VIX, no smoothing or
+    hysteresis. When an argument is OMITTED it is fetched internally (so the
+    function is self-contained); passing an explicit ``None`` / ``{}`` means the
+    caller has no data and the corresponding sub-score degrades to neutral.
+    Defensive: a catastrophic failure returns a neutral dict."""
+    try:
+        if spy_daily_df is _FETCH:
+            from services import _proxy
+            spy_daily_df = _safe_daily(_proxy.schwab_client, "SPY", 12)
+        if sector_month_pcts is _FETCH:
+            sector_month_pcts = _fetch_sector_month_pcts()
+
+        # PRICE — daily structural alignment + RSI/ADX/MACD (no VWAP at this horizon).
+        if spy_daily_df is None or len(spy_daily_df) < 50:
+            price = intraday_trend.TrendSub(50.0, 0.0)
+        else:
+            frames = {"1day": spy_daily_df}
+            price_now = float(spy_daily_df["close"].iloc[-1])
+            align = technical.calculate_ema_alignment(frames, price_now)
+            align_pct = float(align.get("alignment_percentage", 0.0))
+            hist = technical.macd_histogram_series(spy_daily_df)
+            macd_hist = (float(hist.iloc[-1])
+                         if hist is not None and len(hist) else 0.0)
+            rsi = float(technical.calculate_rsi(spy_daily_df))
+            adx = float(technical.calculate_adx(spy_daily_df))
+            price = intraday_trend.score_price(
+                align_pct, 0.0, macd_hist, rsi, adx, n_timeframes=1)
+
+        # SECTOR — participation + cyc/def leadership from month-% moves.
+        pcts = sector_month_pcts or {}
+        if not pcts:
+            sector = intraday_trend.TrendSub(50.0, 0.0)
+        else:
+            n_green = sum(1 for p in pcts.values() if p is not None and p > 0)
+            n_total = sum(1 for p in pcts.values() if p is not None)
+            cyc = [p for etf, p in pcts.items()
+                   if etf in _CYCLICAL and p is not None]
+            dfn = [p for etf, p in pcts.items()
+                   if etf in _DEFENSIVE and p is not None]
+            if cyc and dfn:
+                cyc_def_spread = intraday_trend._clamp(
+                    (_mean(cyc) - _mean(dfn)) / 3.0, -1, 1)
+            else:
+                cyc_def_spread = None
+            sector = intraday_trend.score_sector_participation(
+                n_green, n_total, cyc_def_spread)
+
+        scores = {"price": price.score, "sector": sector.score}
+        confs = {"price": price.confidence, "sector": sector.confidence}
+        score, agg = intraday_trend.blend_trend(scores, confs)
+        state = intraday_trend.score_to_state(score)
+        return {
+            "score": score,
+            "state": state,
+            "label": trend_regime.STATE_LABELS[state],
+            "description": trend_regime.STATE_DESCRIPTIONS[state],
+            "confidence": agg,
+            "sub_scores": {"price": price.score, "sector": sector.score},
+        }
+    except Exception:  # noqa: BLE001
+        return {
+            "score": 50.0,
+            "state": "range",
+            "label": trend_regime.STATE_LABELS["range"],
+            "description": trend_regime.STATE_DESCRIPTIONS["range"],
+            "confidence": 0.0,
+            "sub_scores": {"price": 50.0, "sector": 50.0},
+        }
+
+
+def _fetch_sector_month_pcts():
+    """``{etf: month_pct}`` for the sector ETFs (used by compute_30d_trend when
+    no override is passed). Defensive: returns ``{}`` on any failure."""
+    try:
+        import sectors_ref
+        from services import _proxy
+        sd = sectors_ref.load_sectors_data()
+        etfs = [r["etf"] for r in sd
+                if r.get("kind") == "sector" and r.get("etf")]
+        _closes, trends = _fetch_closes(etfs, months=3)
+        return {etf: t.get("month_pct") for etf, t in trends.items()}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def _divergence_named(snapshot):
     """[(display_name, score)] for confident, scored components — mirrors the
     page's ``divergence_named`` (in-composite + credit_pulse, name order)."""
@@ -298,14 +596,17 @@ def _divergence_named(snapshot):
     return out
 
 
-def derive_composite_extras(live, snaps, spy):
+def derive_composite_extras(live, snaps, spy, trend=None, trend_30d=None):
     """Scoring-derived values for the GUI's composite view.
 
-    Computes weights / size-bias-signal / velocity / divergence / trend from
-    the same inputs the page used to derive inline (now centralized in this
-    process where ``scoring`` resolves to sentiment's package). Defensive: any
-    sub-failure yields a safe default (trend=None, velocity empty, …) without
-    raising, so a partial compute never aborts the refresh.
+    Computes weights / size-bias-signal / velocity / divergence from the same
+    inputs the page used to derive inline (now centralized in this process where
+    ``scoring`` resolves to sentiment's package). The ``trend`` / ``trend_30d``
+    directional Market-Trend payloads are now computed on a 15-min cadence in
+    ``handlers.refresh`` and threaded in here; when absent (None) a neutral
+    placeholder is supplied so the GUI always has a fully-shaped trend. Defensive:
+    any sub-failure yields a safe default without raising, so a partial compute
+    never aborts the refresh.
     """
     latest = live or (snaps[-1] if snaps else None)
     total = _safe_float((latest or {}).get("composite", {}).get("total_score"))
@@ -347,14 +648,6 @@ def derive_composite_extras(live, snaps, spy):
     except Exception:  # noqa: BLE001
         divergence = ""
 
-    # ~30-sessions-ago regime for the Market Trend "30d ago" GUI gauge. The
-    # webgui can't classify (no scoring engine), so compute + publish it here.
-    # Degrade to the current regime when there isn't enough pre-window history.
-    back = 30
-    spy_30 = (spy[:-back] if (spy and len(spy) > back + trend_regime.MIN_BARS_PARTIAL)
-              else spy)
-    trend_30d_ago = build_trend_dict(spy_30)
-
     return {
         "weights": dict(WEIGHTS),
         "size": size,
@@ -362,8 +655,8 @@ def derive_composite_extras(live, snaps, spy):
         "signal": signal,
         "velocity": velocity,
         "divergence": divergence,
-        "trend": build_trend_dict(spy),
-        "trend_30d_ago": trend_30d_ago,
+        "trend": trend if trend is not None else _neutral_trend(),
+        "trend_30d_ago": trend_30d if trend_30d is not None else _neutral_trend(),
     }
 
 

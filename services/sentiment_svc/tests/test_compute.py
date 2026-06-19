@@ -5,6 +5,8 @@ monkeypatching the proxy accessor so nothing requires a live proxy.
 """
 import sys
 
+import pandas as pd
+
 from services import _proxy
 from services.sentiment_svc import compute
 
@@ -66,19 +68,21 @@ def test_derive_composite_extras_shape_and_values():
     assert "3d ROC" in out["velocity"]["text"] and "20d Z" in out["velocity"]["text"]
     # vix 9 vs sector_perf 2 -> >=4 spread -> a divergence label.
     assert "DIVERGENCE" in out["divergence"]
-    # trend dict mirrors build_trend_dict (state/label/days/...).
+    # trend defaults to the neutral directional dict when none is threaded in.
     tr = out["trend"]
     assert tr is not None
     assert tr["state"] in {"bull_trend", "pullback_in_bull", "range",
                            "bear_rally", "bear_trend"}
-    assert {"label", "description", "raw_state", "spy_close", "sma_50",
-            "sma_200", "confidence", "days"} <= set(tr)
+    assert {"label", "description", "raw_state", "score", "smoothed_score",
+            "confidence", "sub_scores"} <= set(tr)
 
 
 def test_derive_composite_extras_defensive_no_spy():
-    """No spy -> trend None; minimal snaps -> velocity dashes, no crash."""
+    """No trend threaded in -> neutral 'range' placeholder; minimal snaps ->
+    velocity dashes, no crash."""
     out = compute.derive_composite_extras(None, [], [])
-    assert out["trend"] is None
+    assert out["trend"]["state"] == "range"
+    assert out["trend_30d_ago"]["state"] == "range"
     assert out["divergence"] == ""
     assert out["velocity"]["flag"] == ""
     assert isinstance(out["weights"], dict)
@@ -109,21 +113,158 @@ def test_derive_sector_summary_defensive():
 
 
 def test_derive_composite_extras_includes_trend_30d_ago():
-    # 260 rising closes -> a valid regime; [:-30] still has >200 bars.
-    spy = [100.0 + i * 0.5 for i in range(260)]
     snaps = [{"composite": {"total_score": "6.00"}}]
-    out = compute.derive_composite_extras(live=None, snaps=snaps, spy=spy)
+    out = compute.derive_composite_extras(live=None, snaps=snaps, spy=[])
     assert "trend" in out and "trend_30d_ago" in out
     t30 = out["trend_30d_ago"]
     assert t30 is not None and t30.get("state") in {
         "bull_trend", "pullback_in_bull", "range", "bear_rally", "bear_trend"}
-    assert "sma_200_slope_pct" in t30 and "drawdown_pct" in t30
+    # neutral placeholder shape (directional, not the daily build_trend_dict).
+    assert "sub_scores" in t30
 
 
-def test_derive_composite_extras_trend_30d_ago_degrades_on_short_spy():
-    spy = [100.0 + i for i in range(40)]  # < 30 + MIN_BARS_PARTIAL -> use full spy
-    out = compute.derive_composite_extras(live=None, snaps=[], spy=spy)
-    assert "trend_30d_ago" in out   # present (may be None), never raises
+def test_derive_composite_extras_trend_30d_passes_through():
+    t30 = {"state": "bull_trend", "score": 90.0, "marker": "verbatim30"}
+    out = compute.derive_composite_extras(live=None, snaps=[], spy=[],
+                                          trend_30d=t30)
+    assert out["trend_30d_ago"] == t30
+
+
+# --- intraday trend (Phase 3) -------------------------------------------------
+
+_TREND_STATES = {"bull_trend", "pullback_in_bull", "range",
+                 "bear_rally", "bear_trend"}
+
+
+def _bars(n, start, step, vol=1_000_000):
+    """A synthetic OHLCV DataFrame of ``n`` rising (step>0) / falling bars."""
+    closes = [start + i * step for i in range(n)]
+    return pd.DataFrame({
+        "open": closes,
+        "high": [c + abs(step) for c in closes],
+        "low": [c - abs(step) for c in closes],
+        "close": closes,
+        "volume": [vol] * n,
+        "datetime": pd.date_range("2026-06-01", periods=n, freq="5min"),
+    })
+
+
+class _FakeBullSchwab:
+    """Canned bullish market: rising bars, advn>decn, low/falling VIX, green
+    cyclical sectors. Every method returns data (no failures)."""
+
+    def get_intraday_history(self, symbol, minutes=15, days=1):
+        if symbol == "SPY":
+            return _bars(120, 500.0, 0.5)
+        return _bars(120, 100.0, 0.2)
+
+    def get_daily_history(self, symbol, months=12):
+        if symbol == "$VIX":
+            # last close lower than prior -> falling VIX
+            return _bars(60, 20.0, -0.05)
+        return _bars(260, 400.0, 0.6)
+
+    def get_quote(self, symbol):
+        if symbol == "$VIX":
+            return {"last": 14.0}
+        return {"last": 1.0}
+
+    def get_quotes(self, symbols):
+        out = {}
+        for s in symbols:
+            if s in ("$ADVN",):
+                out[s] = {"last": 2400.0}
+            elif s in ("$DECN",):
+                out[s] = {"last": 600.0}
+            elif s in ("$NYHGH", "$NYHGH.X", "$NEWH"):
+                out[s] = {"last": 300.0}
+            elif s in ("$NYLOW", "$NYLOW.X", "$NEWL"):
+                out[s] = {"last": 40.0}
+            elif s in ("$SPXA50R", "$NYA50R", "$MMFI"):
+                out[s] = {"last": 72.0}
+            elif s in ("$VIX1D",):
+                out[s] = {"last": 13.0}
+            elif s in ("$VIX9D",):
+                out[s] = {"last": 15.0}
+            else:
+                # sector / industry ETFs -> green day move
+                out[s] = {"last": 100.0, "change_pct": 1.2}
+        return out
+
+
+class _FakeDeadSchwab:
+    """Every method raises or returns None (proxy down / no data)."""
+
+    def get_intraday_history(self, *a, **k):
+        raise RuntimeError("dead")
+
+    def get_daily_history(self, *a, **k):
+        return None
+
+    def get_quote(self, *a, **k):
+        raise RuntimeError("dead")
+
+    def get_quotes(self, *a, **k):
+        return None
+
+
+def test_compute_intraday_trend_shape_and_bull():
+    out = compute.compute_intraday_trend(_FakeBullSchwab())
+    for k in ("score", "smoothed_score", "state", "label", "description",
+              "sub_scores", "sub_confidence", "confidence"):
+        assert k in out, f"missing key {k}"
+    assert 0.0 <= out["score"] <= 100.0
+    assert out["score"] > 60.0
+    assert out["state"] in {"bull_trend", "pullback_in_bull"}
+    assert set(out["sub_scores"]) == {"price", "breadth", "sector", "vix"}
+    assert set(out["sub_confidence"]) == {"price", "breadth", "sector", "vix"}
+
+
+def test_compute_intraday_trend_defensive_no_data():
+    out = compute.compute_intraday_trend(_FakeDeadSchwab())
+    assert out["score"] == 50.0
+    assert out["confidence"] == 0.0
+    assert out["state"] == "range"
+    assert set(out["sub_scores"]) == {"price", "breadth", "sector", "vix"}
+
+
+def test_compute_intraday_trend_hysteresis_threads_state():
+    """A single bull read does NOT flip a prior committed 'range' (2-day
+    hysteresis): commit_state needs HYSTERESIS_DAYS matching raws to flip."""
+    out = compute.compute_intraday_trend(
+        _FakeBullSchwab(), prior_history=["range"], prior_committed="range")
+    # committed state stays 'range' on the first divergent read.
+    assert out["state"] == "range"
+    # raw_state reflects the fresh (bullish) classification.
+    assert out["raw_state"] in {"bull_trend", "pullback_in_bull"}
+    # the rolling history was advanced by commit_state.
+    assert out["state_history"] and out["state_history"][-1] == out["raw_state"]
+
+
+# --- 30-day structural trend (Phase 3) ----------------------------------------
+
+def test_compute_30d_trend_from_daily():
+    spy = _bars(260, 400.0, 0.6)  # steadily rising daily closes
+    months = {"XLK": 4.0, "XLF": 3.0, "XLY": 2.5, "XLP": -0.5, "XLU": -1.0}
+    out = compute.compute_30d_trend(spy, months)
+    for k in ("score", "state", "label", "description", "confidence",
+              "sub_scores"):
+        assert k in out
+    assert out["score"] > 60.0
+    assert out["state"] in {"bull_trend", "pullback_in_bull", "range"}
+    assert set(out["sub_scores"]) == {"price", "sector"}
+
+
+def test_compute_30d_trend_insufficient_data():
+    out = compute.compute_30d_trend(None, {})
+    assert out["score"] == 50.0
+    assert out["state"] == "range"
+
+
+def test_derive_composite_extras_passes_through_trend():
+    trend = {"state": "bull_trend", "score": 88.0, "marker": "verbatim"}
+    out = compute.derive_composite_extras(None, [], [], trend=trend)
+    assert out["trend"] == trend
 
 
 def test_compute_imports_clean():
