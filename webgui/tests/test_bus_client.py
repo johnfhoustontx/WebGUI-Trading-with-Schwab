@@ -24,6 +24,21 @@ def test_read_returns_payload_or_none():
     assert bus_client.read_version("sentiment:composite") == 1
 
 
+def test_read_full_returns_payload_and_version():
+    assert bus_client.read_full("driver:approvals") == (None, None)
+    bus_client.bus().cache_set("cache:driver:approvals", {"status": "pending"})
+    assert bus_client.read_full("driver:approvals") == ({"status": "pending"}, 1)
+
+
+def test_read_versions_batches_views():
+    bus_client.bus().cache_set("cache:options:gamma", {"x": 1})
+    bus_client.bus().cache_set("cache:options:gex_status", {"x": 1})
+    bus_client.bus().cache_set("cache:options:gex_status", {"x": 2})
+    out = bus_client.read_versions(
+        ["options:gamma", "options:gex_status", "options:absent"])
+    assert out == {"options:gamma": 1, "options:gex_status": 2, "options:absent": None}
+
+
 def test_request_enqueues_command():
     bus_client.request("sentiment", {"type": "refresh"})
 

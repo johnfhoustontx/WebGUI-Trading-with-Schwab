@@ -77,6 +77,7 @@ class Bus:
             import redis
 
             self._r = redis.Redis.from_url(url or MEMURAI_URL, decode_responses=True)
+        self._groups: set = set()  # (stream, group) consumer groups already ensured
 
     # --- versioned cache -------------------------------------------------
     def cache_set(
@@ -128,6 +129,29 @@ class Bus:
             return None
         return CacheEnvelope.from_json(raw)
 
+    def cache_version(self, key: str) -> int | None:
+        """Read just the version counter (``{key}:ver``) — NO payload deserialize.
+
+        ``cache_set`` keeps this counter in lockstep with the stored envelope's
+        ``version`` (INCR on every write, untouched when ``skip_unchanged`` skips).
+        A cheap change-probe for version-poll timers: ``GET`` a tiny int instead
+        of fetching + JSON-deserializing the whole payload envelope."""
+        v = self._r.get(f"{key}:ver")
+        return int(v) if v is not None else None
+
+    def cache_versions(self, keys) -> dict:
+        """Pipelined :meth:`cache_version` for many keys → ``{key: int|None}``.
+
+        One round-trip for the whole batch (e.g. the Gamma page's four views)."""
+        keys = list(keys)
+        if not keys:
+            return {}
+        pipe = self._r.pipeline()
+        for k in keys:
+            pipe.get(f"{k}:ver")
+        vals = pipe.execute()
+        return {k: (int(v) if v is not None else None) for k, v in zip(keys, vals)}
+
     # --- pub/sub ---------------------------------------------------------
     def publish(self, channel: str, message: dict) -> None:
         self._r.publish(channel, json.dumps(message))
@@ -150,11 +174,18 @@ class Bus:
         block_ms: int = 50,
         count: int = 10,
     ) -> list[tuple[str, Command]]:
-        try:
-            self._r.xgroup_create(stream, group, id="0", mkstream=True)
-        except Exception as exc:  # BUSYGROUP — group already exists.
-            if "BUSYGROUP" not in str(exc):
-                raise
+        # Ensure the consumer group exists ONCE per (stream, group) for this Bus,
+        # not on every poll. consume_commands runs in a tight ~50ms loop in each
+        # of the 5 services; the old per-poll xgroup_create was an extra round-trip
+        # + a swallowed BUSYGROUP exception on every single poll.
+        gk = (stream, group)
+        if gk not in self._groups:
+            try:
+                self._r.xgroup_create(stream, group, id="0", mkstream=True)
+            except Exception as exc:  # BUSYGROUP — group already exists.
+                if "BUSYGROUP" not in str(exc):
+                    raise
+            self._groups.add(gk)
         resp = self._r.xreadgroup(
             groupname=group,
             consumername=consumer,

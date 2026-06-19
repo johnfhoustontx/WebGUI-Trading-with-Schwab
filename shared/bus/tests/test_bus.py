@@ -60,6 +60,42 @@ def test_cache_set_skip_unchanged_does_not_publish():
     assert v == 1 and idle is None  # unchanged -> neither INCR nor publish
 
 
+def test_cache_version_reads_counter_without_payload():
+    b = Bus(fake=True)
+    assert b.cache_version("cache:test:v") is None  # absent
+    b.cache_set("cache:test:v", {"big": "payload"})
+    b.cache_set("cache:test:v", {"big": "payload2"})
+    assert b.cache_version("cache:test:v") == 2  # matches envelope version
+
+
+def test_cache_versions_pipelined_batch():
+    b = Bus(fake=True)
+    b.cache_set("cache:a", {"x": 1})
+    b.cache_set("cache:b", {"x": 1})
+    b.cache_set("cache:b", {"x": 2})
+    out = b.cache_versions(["cache:a", "cache:b", "cache:missing"])
+    assert out == {"cache:a": 1, "cache:b": 2, "cache:missing": None}
+
+
+def test_cache_versions_empty():
+    assert Bus(fake=True).cache_versions([]) == {}
+
+
+def test_consume_creates_group_once(monkeypatch):
+    b = Bus(fake=True)
+    calls = {"n": 0}
+    orig = b._r.xgroup_create
+
+    def counting(*a, **k):
+        calls["n"] += 1
+        return orig(*a, **k)
+
+    monkeypatch.setattr(b._r, "xgroup_create", counting)
+    b.consume_commands("cmd:once", "g", "c", block_ms=10)
+    b.consume_commands("cmd:once", "g", "c", block_ms=10)
+    assert calls["n"] == 1  # group ensured once, not per poll
+
+
 def test_publish_subscribe_roundtrip():
     b = Bus(fake=True)
     sub = b.subscribe("events:test:x")

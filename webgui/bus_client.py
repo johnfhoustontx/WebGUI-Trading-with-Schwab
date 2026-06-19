@@ -54,14 +54,35 @@ def read(view):
     return env.payload if env else None
 
 
+def read_full(view):
+    """Return ``(payload, version)`` for a view in ONE cache read, or ``(None, None)``.
+
+    For callers that need both the payload and its version (e.g. a nav-badge that
+    checks both a status field and whether the version advanced) — avoids a second
+    round-trip vs ``read`` + ``read_version``.
+    """
+    env = bus().cache_get(f"cache:{view}")
+    return (env.payload, env.version) if env else (None, None)
+
+
 def read_version(view):
     """Return the cache version int for a view, or None if absent.
 
-    Cheap change-detection helper for a fetch-free ``ui.timer``: compare the
-    version to the last painted one and only repaint/read the payload on change.
+    Cheap change-detection helper for a fetch-free ``ui.timer``: reads only the
+    ``{key}:ver`` counter (a tiny int) — NOT the full payload envelope — so a
+    version-poll that finds no change costs one ``GET`` and zero JSON parsing.
     """
-    env = bus().cache_get(f"cache:{view}")
-    return env.version if env else None
+    return bus().cache_version(f"cache:{view}")
+
+
+def read_versions(views):
+    """Pipelined :func:`read_version` for many views → ``{view: int|None}``.
+
+    One Redis round-trip for the whole batch — used by pages that poll several
+    views on one timer (e.g. Gamma's gamma / gex_status / explain / analyze)."""
+    views = list(views)
+    raw = bus().cache_versions([f"cache:{v}" for v in views])
+    return {v: raw.get(f"cache:{v}") for v in views}
 
 
 def read_meta(view):

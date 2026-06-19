@@ -613,10 +613,9 @@ def render():
         countdown_lbl.text = f"Next refresh: {state['countdown'] // 60}:{state['countdown'] % 60:02d}"
 
     @guard
-    def _maybe_repaint():
+    def _maybe_repaint(version):
         # Fetch-free: re-read + repaint only when the bus cache version changes
         # (the service bumps it when a requested gamma_refresh finishes).
-        version = bus_client.read_version("options:gamma")
         if version == seen["gamma"]:
             return
         seen["gamma"] = version
@@ -634,10 +633,9 @@ def render():
         next_scan_lbl.text = f"Next scan {st.get('next_scan') or '—'}"
 
     @guard
-    def _maybe_repaint_status():
+    def _maybe_repaint_status(version):
         # Fetch-free: re-read + repaint the status bar only when the bus cache
         # version changes (the service republishes it every scheduler tick).
-        version = bus_client.read_version("options:gex_status")
         if version == seen["status"]:
             return
         seen["status"] = version
@@ -653,12 +651,11 @@ def render():
         ui.notify("Building Explain infographic… opening in a new tab.")
 
     @guard
-    def _watch_explain():
+    def _watch_explain(version):
         # The initial version was captured at render time, so any change here is a
         # fresh, user-requested infographic → open it in a new browser tab. The
         # /options/explain route serves the cached standalone HTML (raw, so its own
         # CSS/fonts apply). ?v= busts the browser cache so each click shows the latest.
-        version = bus_client.read_version("options:gamma_explain")
         if version is None or version == seen["explain"]:
             return
         seen["explain"] = version
@@ -681,12 +678,24 @@ def render():
         ui.notify("Analyze requested…")
 
     @guard
-    def _watch_analyze():
-        version = bus_client.read_version("options:gamma_analyze")
+    def _watch_analyze(version):
         if version is None or version == seen["analyze"]:
             return
         seen["analyze"] = version
         _open_analyze_dialog(bus_client.read("options:gamma_analyze") or {})
+
+    @guard
+    def _poll():
+        # One coalesced 2s tick: read all four view versions in a single pipelined
+        # round-trip (cheap :ver counters, no payload deserialize) and dispatch only
+        # the views that changed — replaces four separate 2s version-poll timers.
+        v = bus_client.read_versions([
+            "options:gamma", "options:gex_status",
+            "options:gamma_explain", "options:gamma_analyze"])
+        _maybe_repaint(v["options:gamma"])
+        _maybe_repaint_status(v["options:gex_status"])
+        _watch_explain(v["options:gamma_explain"])
+        _watch_analyze(v["options:gamma_analyze"])
 
     fetch_btn.on_click(_request_refresh)
     explain_btn.on_click(_request_explain)
@@ -703,8 +712,5 @@ def render():
     _paint_status(bus_client.read("options:gex_status"))
 
     ui.timer(1.0, _tick)                 # countdown display (no fetch)
-    ui.timer(2.0, _maybe_repaint)        # version-poll repaint from cache
-    ui.timer(2.0, _maybe_repaint_status) # version-poll status bar from cache
-    ui.timer(2.0, _watch_explain)        # open Explain dialog on new result
-    ui.timer(2.0, _watch_analyze)        # open Analyze dialog on new result
+    ui.timer(2.0, _poll)                 # one coalesced version-poll for all 4 views
     ui.timer(120.0, _auto_refresh)       # enqueue a refresh every 120s
