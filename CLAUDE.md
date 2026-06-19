@@ -8,7 +8,19 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-06-19 (**intraday Market Trend redesign**: the Sentiment tab's
+**Last updated:** 2026-06-19 (**charting migrated Plotly/SVG → Highcharts**: every
+webgui chart + gauge now renders via `nicegui-highcharts` (`ui.highchart`), not
+`ui.plotly`/inline-SVG. Pure builders return Highcharts option dicts; in-place updates
+are `el.options = fig; el.update()` (replaces `update_figure`). The Sentiment / Trend /
+Trade-detail speedometers are the shared **`webgui/pages/gauge.py`** angular gauge
+(painted red→yellow→green rainbow face + needle). Key gotchas now in the "NiceGUI
+gotchas" section: the `gauge` type needs NO `extras` (auto-loads via `loadMore`;
+`extras=["highcharts-more"]` throws), `solid-gauge`/`heatmap` ARE valid extras, a
+dynamically-added chart needs a chart already present at first render (ESM import map),
+`bar` axis is reversed by default, and `chart.update()` leaks config across a
+series-type switch (recreate on kind-change). `plotly` was never a Python dependency.
+322 webgui tests green; verified live. Branch `Using_Highcharts`.
+Prior — 2026-06-19 (**intraday Market Trend redesign**: the Sentiment tab's
 Market Trend gauge is now a responsive **directional 0–100 score** recomputed every
 15 min — Price/MTF 45% + Breadth 25% + Sector 20% + VIX 10%, confidence-weighted,
 EMA-smoothed needle, 5-state mapped (range widened to 30–70) onto the bridge with
@@ -62,6 +74,7 @@ does not import from it or depend on it at runtime.
 | Layer            | Technology                                                        |
 |------------------|-------------------------------------------------------------------|
 | Web GUI          | **NiceGUI** (`>=2.0`) — single multi-page app, Python-only        |
+| Charts / gauges  | **Highcharts** via `nicegui[highcharts]` (`ui.highchart`) — all webgui charts + gauges |
 | API gateway      | FastAPI + uvicorn (`schwab-proxy`)                                |
 | Brokerage SDK    | `schwab-py` (`schwab` package) — auth, market data, streaming     |
 | Data / numerics  | pandas, numpy, scipy                                              |
@@ -174,10 +187,10 @@ Routes:
 | `/options/portfolio` | Paper Portfolio (paper account) | built |
 | `/options/calculator` | Calculator (summary tiles + P&L heatmap) | built |
 | `/options/swing` | Swing Scanner | built |
-| `/options/gamma` | Gamma (GEX/Charm/DEX/Vanna bars + flip/**single Call+Put walls** + intraday heatmap; bar/heatmap **width split grows with session** snapshot count; **flicker-free** in-place Plotly updates; **symbol is a dropdown** — default `$SPX`, populated from the collected universe (watchlist minus `$VIX`) via `cache:options:gamma_symbols`; Explain works per-selected-symbol) | built |
+| `/options/gamma` | Gamma (GEX/Charm/DEX/Vanna bars + flip/**single Call+Put walls** + intraday heatmap; bar/heatmap **width split grows with session** snapshot count; **flicker-free** in-place Highcharts updates; **symbol is a dropdown** — default `$SPX`, populated from the collected universe (watchlist minus `$VIX`) via `cache:options:gamma_symbols`; Explain works per-selected-symbol) | built |
 | `/options/simulator` | Simulator (What-if + IV-shock; Replay TODO) | built |
 | `/sentiment` | Sentiment (two-column top: **dual** Sentiment gauges (Today + 30-Day Avg) + **dual** Market Trend gauges (Today live-intraday + 30-Day structural — directional 0–100 score, 15-min cadence) / component table; traffic-light tiles; 30d history + rolling avgs; full-width **Sector & Industry Performance** w/ Day/Week/Month %, P/C, RRG, rotation banner, **expandable industries w/ P/C+RRG**; bottom status bar; **persists across navigation**; **server-side 120s auto-refresh + bridge publish, tab-independent**) | built |
-| `/sentiment/rotation` | Sector Rotation (RRG-vs-SPY: Risk-ON/OFF headline + spread; **top row** = quadrant-map table (left) + tight ROTATING FROM/INTO w/ S&P weights (right); **full-width RRG below** w/ per-sector "meteor tails" — engine `assess_sector` retains a `tail` of `TAIL_LENGTH=12` RS-Ratio/RS-Mom points sampled every `TAIL_STRIDE=2` days; page draws **one trace per sector** (faded trail line + single bright head dot) and **hover-isolates** a sector (`plotly_hover`/`unhover` → `run_plot_method('restyle')` dims the rest); reuses `sector_rotation_assessment`; cached, **manual Refresh only**) | built |
+| `/sentiment/rotation` | Sector Rotation (RRG-vs-SPY: Risk-ON/OFF headline + spread; **top row** = quadrant-map table (left) + tight ROTATING FROM/INTO w/ S&P weights (right); **full-width RRG below** w/ per-sector "meteor tails" — engine `assess_sector` retains a `tail` of `TAIL_LENGTH=12` RS-Ratio/RS-Mom points sampled every `TAIL_STRIDE=2` days; page draws **one spline series per sector** (faded trail line + single bright head dot) and **hover-isolates** a sector via native Highcharts `plotOptions.series.states.inactive` (hovering one dims the rest — no client round-trip); reuses `sector_rotation_assessment`; cached, **manual Refresh only**) | built |
 | `/trade` | Trade (on-demand single-symbol analysis: **Position (1–8wk)** + **Investor (months+)** Buy/Hold/Sell verdicts w/ score + top reasons + hard gates + expandable factor breakdown; **MTF EMA alignment** (per-timeframe); momentum strip (RSI/ADX/MACD/VWAP/RelVol); sector strength; **Fundamentals card** (P/E/PEG/growth/ROE/margins via proxy `/instruments`); persists across nav) | built |
 | `/driver` | Driver (morning-agent **order-approval queue**: Run morning agent → graded day + proposed trades; **APPROVE** (confirm dialog) / **SKIP**; conditions strip + grade rationale; **Performance** view (win-rate / P&L-by-bucket + trade table). 09:28-ET scheduler fires the run unattended. Orders execute via `order_executor` with `PAPER_TRADE=True` → **simulated**) | built |
 | `/settings` | Settings (GUI prefs via `app_settings`: scanner **audio alert** on/off + sound + volume, only-during-market-hours, min-score-to-alert; desktop-notification toggle + permission grant + Test sound. Extensible — first batch) | built |
@@ -188,7 +201,8 @@ Routes:
 
 The `pages/options/` subpackage shares `header.py` (compact quotes/VIX/sentiment
 strip), `detail.py` (collapsible Trade detail panel, reused by all signal
-tables), `svg.py` (speedometer / gradient-bar / range-marker SVG), `inputs.py`
+tables), `svg.py` (gradient-bar / range-marker SVG — the composite-score
+speedometer is now the shared Highcharts gauge in `pages/gauge.py`), `inputs.py`
 (`select_all_on_focus` symbol-input helper), and **`handoff.py`** (cross-page
 signal hand-off — Scanner/Swing "Send to Calculator" via a module-level `_pending`
 stash + "Send to Paper trade" which enqueues a `paper_create` command on
@@ -242,9 +256,24 @@ module-level functions (TDD them with sample dicts); keep `render()` thin
 - `ui.html(...)` **strips `<style>` and `<iframe>`**. For CSS use `ui.add_css(css)`
   (rules only, scope with a class); render HTML *fragments*, not full documents.
   See `pages/options/gamma.py` Explain (`EXPLAIN_CSS` + `wrap_explain`).
-- Charts: `ui.plotly(fig_dict)` where `fig_dict={"data":[...],"layout":{...}}`;
-  build the dict in a pure function so it's unit-testable. Heatmaps/bars used in
-  Gamma; curves/bars in Simulator.
+- Charts: **Highcharts** via `ui.highchart(options)` (the `nicegui-highcharts`
+  element) — NOT Plotly. Build the options dict in a pure function so it's
+  unit-testable; update in place with `el.options = fig; el.update()` (replaces the
+  old `update_figure`). Gauges are the shared `pages/gauge.py` angular gauge
+  (painted red→yellow→green rainbow face + needle). Heatmaps/bars in Gamma,
+  line/column in Simulator, spline RRG in Sector Rotation, history line in Sentiment.
+  **Gotchas (cost real time):** the `gauge` type auto-loads via `loadMore`, so pass
+  NO `extras` — `extras=["highcharts-more"]` THROWS; `solid-gauge`/`heatmap` ARE
+  valid explicit extras (both bundled). A `ui.highchart` added DYNAMICALLY on a page
+  with no chart at first render fails `Failed to resolve module specifier
+  nicegui-highcharts` (the ESM import map is set at initial render) — keep a chart
+  present at page build (e.g. a persistent element, as `detail.py` does). A
+  Highcharts `bar` reverses its xAxis by default (`reversed:False` = high values at
+  top). `chart.update()` MERGES options, so a series-TYPE switch leaks the old type's
+  plotLines/colorAxis — RECREATE the element on kind-change (bar↔heatmap), don't
+  update in place (see `gamma._set_chart`). `accessibility.enabled:False` silences
+  the a11y-module console nag (house pattern). (`plotly` was never a Python dep —
+  `ui.plotly(dict)` rendered via bundled plotly.js.)
 - Tables: `ui.table(columns=[{name,label,field,...}], rows=[...], row_key="id")`;
   selection via `selection="single"` + `table.selected`; row click via
   `table.on("rowClick", handler)` where `event.args[1]` is the row dict.
@@ -300,7 +329,7 @@ not shown; credit_pulse excluded per v4.3 `WEIGHTS`) and the Trend detail are
 columns. The Signals column is a **2×2 four-tile matrix** (`TILE_DEFS` =
 **Bias/Signal/Yesterday/Change** — Modifier dropped per design) with a
 **traffic-light background** (`traffic_color(total)`). Below that, a **collapsed**
-`ui.expansion("30-Day History")` holds the 30d Plotly history (soft grid) + 5d/20d
+`ui.expansion("30-Day History")` holds the 30d Highcharts history (soft grid) + 5d/20d
 rolling averages + velocity/divergence, then the full-width **Sector & Industry Performance** table
 (11 sectors × Day/Week/Month %, P/C, RRG; per-cell colored; subtle gridlines + row
 hover via a `.sent-sectors` `ui.add_css` block) with a rotation banner
@@ -475,9 +504,10 @@ live-screenshot review (design/plan:
 - **GAMMA dead space**: `gamma.significant_strikes(bars, frac=0.03)` feeds the
   shared y-range from strikes with |net| ≥ 3 % of peak, cropping GEX's near-zero
   edge strikes (other views were already tight). Both panels share the range.
-- **Flicker**: the two `ui.plotly` elements are now created **once** and updated
-  via `update_figure` (Plotly.react diff); `_render_view` no longer
+- **Flicker**: the two Highcharts elements are created **once** and updated in
+  place (`el.options = …; el.update()`); `_render_view` no longer
   `clear()`s/rebuilds the canvas. Message labels toggle via `set_visibility`.
+  (Now `ui.highchart`; the bar↔Term kind switch recreates via `_set_chart`.)
 - **Single walls**: `services/options_svc/compute.gamma_walls` returns one Put +
   one Call wall via the engine's `get_directional_walls` (call = max-call-GEX
   strike above spot, put = most-negative-put-GEX below) instead of the old
@@ -907,7 +937,7 @@ is ~1/10th of before. *(Other services' serial fan-outs below are still open.)*
   deliberately left as a fresh connect per read.)*
 
 **Already done right (don't "fix"):** all data pages version-gate repaints; Gamma and
-Sentiment charts use `update_figure` (Plotly.react diff, no flicker); `ui_guard`
+Sentiment charts update Highcharts in place (`el.options=…; el.update()`, no flicker); `ui_guard`
 suppresses dead-client callback noise; portfolio's SSE loop only republishes on a
 `dirty` flag; the Redis connection and the marketdata Schwab session are pooled
 singletons. **Hygiene:** stale `*.log.err` manual stderr captures are now
