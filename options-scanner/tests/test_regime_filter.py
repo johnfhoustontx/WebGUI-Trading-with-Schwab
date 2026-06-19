@@ -69,6 +69,27 @@ def test_stale_bridge_treated_as_inactive():
     assert out["active"] is False
 
 
+def test_evaluate_regime_reads_intraday_trend_fields():
+    """The bridge's trend_regime block now carries the intraday model's additive
+    trend_score/sub_scores fields alongside state/confidence/sma_*. Those extra
+    fields must not break consumption — regime_filter still reads ``state`` and
+    behaves exactly as for a confident bull trend (CCS blocked)."""
+    bridge = _bridge(score=7.5, bias="long", trend_state="bull_trend")
+    # overlay the new additive fields the sentiment service now publishes
+    bridge["trend_regime"].update({
+        "trend_score": 84.0,
+        "sub_scores": {"price": 88, "breadth": 70, "sector": 65, "vix": 55},
+        "label": "Bull Trend", "raw_state": "bull_trend",
+        "spy_close": 500.0, "sma_50": 480.0, "sma_200": 450.0,
+        "sma_200_slope_pct": 0.3, "drawdown_pct": -1.0,
+    })
+    out = rf.evaluate_regime(bridge=bridge)
+    assert out["active"] is True
+    assert out["trend_state"] == "bull_trend"
+    assert out["allow_ccs"] is False
+    assert out["allow_pcs"] is True
+
+
 def test_bullish_score_and_bull_trend_blocks_ccs():
     out = rf.evaluate_regime(bridge=_bridge(
         score=7.5, bias="long", trend_state="bull_trend"
