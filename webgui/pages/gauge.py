@@ -57,8 +57,11 @@ def gauge_figure(value, label, height=120):
         "credits": {"enabled": False},
         "accessibility": {"enabled": False},
         "tooltip": {"enabled": False},
+        # size is a % of min(plotWidth, plotHeight); the elements are wider than
+        # tall, so keep it ≤ width/height (~1.4) or the semicircle's ends clip on
+        # the left/right. 128% leaves a small margin at the widest panel.
         "pane": {"startAngle": -90, "endAngle": 90,
-                 "center": ["50%", "82%"], "size": "150%",
+                 "center": ["50%", "78%"], "size": "128%",
                  "background": [{"outerRadius": "100%", "innerRadius": _GAUGE_INNER,
                                  "backgroundColor": "#2f2f2f", "borderWidth": 0,
                                  "shape": "arc"}]},

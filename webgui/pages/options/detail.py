@@ -200,7 +200,8 @@ class _Handle:
         self._state["has_signal"] = True
         self._header.set_visibility(self._state["open"])
         self._sig_title.text = _signal_title(s)
-        self._gauge.options = gauge_figure(s.get("composite_score") or 0, s.get("grade", ""))
+        self._gauge.options = gauge_figure(s.get("composite_score") or 0,
+                                           s.get("grade", ""), height=104)
         self._gauge.update()
         for key, _label, value_fn, color_fn in _TILES:
             lbl = self._tiles[key]
@@ -230,8 +231,9 @@ def render(width: int = 360):
         with header:
             sig_title = ui.label("").classes("text-subtitle1 font-bold")
             with ui.row().classes("items-center gap-3 w-full no-wrap"):
-                gauge_el = ui.highchart(gauge_figure(0, ""), extras=["solid-gauge"]) \
-                    .classes("shrink-0").style("width:150px;height:104px")
+                gauge_el = ui.highchart(gauge_figure(0, "", height=104),
+                                        extras=["solid-gauge"]) \
+                    .classes("shrink-0").style("width:160px;height:104px")
                 with ui.grid(columns=2).classes("gap-2"):
                     for key, label, _vf, _cf in _TILES:
                         tiles[key] = _tile_slot(label)
