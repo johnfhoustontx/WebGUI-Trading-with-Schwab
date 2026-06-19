@@ -33,13 +33,39 @@ DEFENSIVE_SECTORS = {
 }
 
 
+# The workbook is static reference data but load_sectors_data() is called several
+# times per sentiment refresh — cache the parsed rows, re-reading only when the
+# file mtime changes (mirrors watchlist.get_scan_symbols). Single-entry by path.
+_cache = {"path": None, "mtime": None, "data": None}
+
+
+def reset_cache():
+    """Drop the cached rows so the next load re-reads the workbook (test helper)."""
+    _cache.update(path=None, mtime=None, data=None)
+
+
 def load_sectors_data(xlsx_path=SECTORS_XLSX):
-    """Load sector / industry / ETF rows from the reference workbook.
+    """Load sector / industry / ETF rows from the reference workbook (mtime-cached).
 
     Returns a list of dicts in display order:
         {kind: 'sector'|'industry', sector, label, etf, name, notes, sp_weight}
     Returns [] if the workbook or openpyxl is unavailable.
     """
+    key = str(xlsx_path)
+    try:
+        mtime = Path(xlsx_path).stat().st_mtime
+    except OSError:
+        mtime = None
+    if (_cache["data"] is not None and _cache["path"] == key
+            and _cache["mtime"] == mtime and mtime is not None):
+        return _cache["data"]
+    data = _load_sectors_data_uncached(xlsx_path)
+    if mtime is not None:  # only cache successful, stat-able loads
+        _cache.update(path=key, mtime=mtime, data=data)
+    return data
+
+
+def _load_sectors_data_uncached(xlsx_path):
     try:
         import openpyxl
     except ImportError:

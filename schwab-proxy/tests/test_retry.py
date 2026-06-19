@@ -99,6 +99,25 @@ def test_api_request_no_retry_on_success(monkeypatch):
 
 # -------------------------------------------------------------- trader_request
 
+class _TraderSession:
+    """Stand-in for token_mgr.session (trader_request now uses the pooled session)."""
+
+    def __init__(self, counters, get_responses, post_responses):
+        self._c = counters
+        self._get = get_responses
+        self._post = post_responses
+
+    def get(self, url, headers=None, timeout=None):
+        self._c["get"] += 1
+        seq = self._get or [_FakeResp(200, data=[{"hashValue": "h"}], text="x")]
+        return seq[min(self._c["get"] - 1, len(seq) - 1)]
+
+    def post(self, url, headers=None, json=None, timeout=None):
+        self._c["post"] += 1
+        seq = self._post or [_FakeResp(201, data={"ok": True}, text="x")]
+        return seq[min(self._c["post"] - 1, len(seq) - 1)]
+
+
 class _TraderTokenMgr:
     tokens = {"AccessToken": "tok"}
     _lock = __import__("threading").Lock()
@@ -111,21 +130,10 @@ class _TraderTokenMgr:
 
 
 def _wire_trader(monkeypatch, get_responses=None, post_responses=None):
-    monkeypatch.setattr(schwab_proxy, "token_mgr", _TraderTokenMgr(), raising=False)
     counters = {"get": 0, "post": 0}
-
-    def fake_get(url, headers=None, timeout=None):
-        counters["get"] += 1
-        seq = get_responses or [_FakeResp(200, data=[{"hashValue": "h"}], text="x")]
-        return seq[min(counters["get"] - 1, len(seq) - 1)]
-
-    def fake_post(url, headers=None, json=None, timeout=None):
-        counters["post"] += 1
-        seq = post_responses or [_FakeResp(201, data={"ok": True}, text="x")]
-        return seq[min(counters["post"] - 1, len(seq) - 1)]
-
-    monkeypatch.setattr(schwab_proxy.requests, "get", fake_get)
-    monkeypatch.setattr(schwab_proxy.requests, "post", fake_post)
+    tm = _TraderTokenMgr()
+    tm.session = _TraderSession(counters, get_responses, post_responses)
+    monkeypatch.setattr(schwab_proxy, "token_mgr", tm, raising=False)
     return counters
 
 

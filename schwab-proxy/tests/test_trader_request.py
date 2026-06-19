@@ -23,31 +23,33 @@ class _FakeResp:
         return self._data
 
 
+class _FakeSession:
+    """Stand-in for token_mgr.session — trader_request now uses the pooled session."""
+
+    def __init__(self, capture):
+        self._cap = capture
+
+    def get(self, url, headers=None, timeout=None):
+        self._cap.update(method="GET", headers=headers, url=url)
+        return _FakeResp(200, [{"hashValue": "h"}])
+
+    def post(self, url, headers=None, json=None, timeout=None):
+        self._cap.update(method="POST", headers=headers, json=json, url=url)
+        return _FakeResp(201, {"ok": True})
+
+
 class _FakeTokenMgr:
     tokens = {"AccessToken": "tok"}
+
+    def __init__(self, capture):
+        self.session = _FakeSession(capture)
 
     def ensure_valid_token(self):
         pass
 
 
 def _wire(monkeypatch, capture):
-    monkeypatch.setattr(schwab_proxy, "token_mgr", _FakeTokenMgr(), raising=False)
-
-    def fake_get(url, headers=None, timeout=None):
-        capture["method"] = "GET"
-        capture["headers"] = headers
-        capture["url"] = url
-        return _FakeResp(200, [{"hashValue": "h"}])
-
-    def fake_post(url, headers=None, json=None, timeout=None):
-        capture["method"] = "POST"
-        capture["headers"] = headers
-        capture["json"] = json
-        capture["url"] = url
-        return _FakeResp(201, {"ok": True})
-
-    monkeypatch.setattr(schwab_proxy.requests, "get", fake_get)
-    monkeypatch.setattr(schwab_proxy.requests, "post", fake_post)
+    monkeypatch.setattr(schwab_proxy, "token_mgr", _FakeTokenMgr(capture), raising=False)
 
 
 def test_trader_get_omits_content_type(monkeypatch):

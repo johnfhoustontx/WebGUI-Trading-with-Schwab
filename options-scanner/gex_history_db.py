@@ -1,6 +1,7 @@
 """SQLite persistence for intraday GEX/Charm snapshots."""
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import sqlite3
 import time
@@ -8,6 +9,25 @@ from pathlib import Path
 from typing import Iterable, Tuple
 
 DB_PATH = Path(__file__).parent / "gex_history.db"
+
+
+def _today_local_unix_range() -> tuple[int, int]:
+    """``[start, end)`` unix seconds spanning the current LOCAL calendar day.
+
+    Lets today-filters use a sargable ``ts >= ? AND ts < ?`` range (the index on
+    ``ts`` applies) instead of ``DATE(ts,'unixepoch','localtime') = DATE('now')``,
+    which wraps ``ts`` in a function and so can't use the index.
+
+    NOTE: uses the current fixed local UTC offset; on the two DST-transition days
+    the [start,end) edge can differ by an hour from SQLite's DST-aware
+    ``DATE(...,'localtime')``. Immaterial here — GEX snapshots only exist 08:30–
+    15:20 CT, never near the 02:00/midnight boundary, so no row is ever classified
+    differently."""
+    now = _dt.datetime.now().astimezone()
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    tomorrow = (start + _dt.timedelta(days=1)).replace(
+        hour=0, minute=0, second=0, microsecond=0)
+    return int(start.timestamp()), int(tomorrow.timestamp())
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS snapshots (
@@ -177,16 +197,17 @@ def load_today(
 
     Rows: (ts, spot, flip, top_pos_strike, top_neg_strike, net_total).
     """
+    start, end = _today_local_unix_range()
     cur = conn.execute(
         """
         SELECT ts, spot, flip, top_pos_strike, top_neg_strike, net_total
           FROM snapshots
          WHERE symbol = ?
            AND view   = ?
-           AND DATE(ts, 'unixepoch', 'localtime') = DATE('now', 'localtime')
+           AND ts >= ? AND ts < ?
          ORDER BY ts ASC
         """,
-        (symbol, view),
+        (symbol, view, start, end),
     )
     return cur.fetchall()
 
@@ -202,16 +223,17 @@ def load_today_with_grid(
                      net_total, gex_grid) tuples. gex_grid is the decoded
     JSON dict or {} if NULL.
     """
+    start, end = _today_local_unix_range()
     cur = conn.execute(
         """
         SELECT ts, spot, flip, top_pos_strike, top_neg_strike, net_total, gex_json
           FROM snapshots
          WHERE symbol = ?
            AND view   = ?
-           AND DATE(ts, 'unixepoch', 'localtime') = DATE('now', 'localtime')
+           AND ts >= ? AND ts < ?
          ORDER BY ts ASC
         """,
-        (symbol, view),
+        (symbol, view, start, end),
     )
     out = []
     for row in cur.fetchall():

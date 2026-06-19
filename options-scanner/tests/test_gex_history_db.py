@@ -110,6 +110,27 @@ def test_load_today_filters_by_symbol_and_view(tmp_path, monkeypatch):
     assert len(db.load_today(conn, "QQQ", "charm")) == 0
 
 
+def test_load_today_excludes_other_days(tmp_path, monkeypatch):
+    """Only today's (local-date) snapshots come back — the sargable ts-range
+    filter must match the old DATE(ts,'unixepoch','localtime') behavior."""
+    dbpath = tmp_path / "t.db"
+    monkeypatch.setattr(db, "DB_PATH", dbpath)
+    conn = db.connect()
+    db.init_schema(conn)
+    now = int(time.time())
+    summary = lambda ts, spot: {
+        "ts": ts, "spot": spot, "flip": None,
+        "top_pos_strike": None, "top_neg_strike": None, "net_total": None,
+    }
+    db.insert_snapshot(conn, "SPY", "gex", summary(now, 1.0), {}, 1)
+    db.insert_snapshot(conn, "SPY", "gex", summary(now - 2 * 86400, 2.0), {}, 1)  # 2 days ago
+    db.insert_snapshot(conn, "SPY", "gex", summary(now - 5 * 86400, 3.0), {}, 1)  # 5 days ago
+    rows = db.load_today(conn, "SPY", "gex")
+    assert len(rows) == 1 and rows[0][1] == 1.0
+    grid_rows = db.load_today_with_grid(conn, "SPY", "gex")
+    assert len(grid_rows) == 1 and grid_rows[0][1] == 1.0
+
+
 def test_load_today_orders_by_ts(tmp_path, monkeypatch):
     dbpath = tmp_path / "t.db"
     monkeypatch.setattr(db, "DB_PATH", dbpath)

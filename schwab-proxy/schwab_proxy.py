@@ -623,17 +623,21 @@ def trader_request(method: str, endpoint: str, json_body: dict = None) -> dict:
     # fast with a single attempt, exactly as before.
     attempts = MAX_RETRIES if is_get else 1
     result: dict = {"status_code": 502, "data": None, "error": "no attempt made"}
+    # Reuse the TokenManager's pooled Session (keep-alive to api.schwabapi.com)
+    # instead of bare requests.* — the marketdata path already does, so the trader
+    # path no longer pays a fresh TLS handshake per /accounts/positions/orders call.
+    session = token_mgr.session
     for attempt in range(attempts):
         try:
-            resp = (requests.get(url, headers=headers, timeout=30) if is_get
-                    else requests.post(url, headers=headers, json=json_body, timeout=30))
+            resp = (session.get(url, headers=headers, timeout=30) if is_get
+                    else session.post(url, headers=headers, json=json_body, timeout=30))
             if resp.status_code == 401:
                 logger.warning("Trader API 401 — refreshing token and retrying")
                 with token_mgr._lock:
                     token_mgr._refresh()
                 headers["Authorization"] = f'Bearer {token_mgr.tokens["AccessToken"]}'
-                resp = (requests.get(url, headers=headers, timeout=30) if is_get
-                        else requests.post(url, headers=headers, json=json_body, timeout=30))
+                resp = (session.get(url, headers=headers, timeout=30) if is_get
+                        else session.post(url, headers=headers, json=json_body, timeout=30))
             if resp.status_code in (200, 201):
                 return {"status_code": resp.status_code, "data": resp.json() if resp.text else {}, "error": None}
             logger.error(f"Trader API {resp.status_code}: {resp.text[:300]}")

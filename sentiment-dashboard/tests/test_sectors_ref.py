@@ -25,6 +25,23 @@ def test_missing_workbook_returns_empty():
     assert rows == []
 
 
+def test_load_sectors_data_caches_by_mtime(monkeypatch):
+    import openpyxl
+    sectors_ref.reset_cache()
+    calls = {"n": 0}
+    orig = openpyxl.load_workbook
+
+    def counting(*a, **k):
+        calls["n"] += 1
+        return orig(*a, **k)
+
+    monkeypatch.setattr(openpyxl, "load_workbook", counting)
+    r1 = sectors_ref.load_sectors_data()
+    r2 = sectors_ref.load_sectors_data()
+    assert r1 == r2
+    assert calls["n"] == 1  # workbook parsed once; second call served from cache
+
+
 def test_industry_rows_present_and_etfs_unique():
     rows = sectors_ref.load_sectors_data()
     industries = [r for r in rows if r.get("kind") == "industry"]
