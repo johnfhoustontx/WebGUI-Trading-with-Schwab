@@ -302,6 +302,19 @@ class SchwabProxyClient:
         df["datetime"] = pd.to_datetime(df["datetime"], unit="ms")
         return df
 
+    def get_intraday_history(self, symbol: str, minutes: int = 15, days: int = 1):
+        """Intraday minute-bar OHLCV history -> pandas DataFrame or None."""
+        import pandas as pd
+        data = self._proxy_get("/pricehistory", params={
+            "symbol": symbol, "periodType": "day", "period": days,
+            "frequencyType": "minute", "frequency": minutes,
+        })
+        if not data or not data.get("candles"):
+            return None
+        df = pd.DataFrame(data["candles"])
+        df["datetime"] = pd.to_datetime(df["datetime"], unit="ms")
+        return df
+
     def _request(self, endpoint: str, params: Optional[Dict] = None) -> Optional[Dict]:
         """Generic pass-through (used for /chains in SPX P/C calculation)."""
         return self._proxy_get(endpoint, params=params)
