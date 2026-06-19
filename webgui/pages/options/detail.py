@@ -5,9 +5,9 @@ table synthesizes a signal-like dict and calls ``handle.update(signal)``. The
 **header** (signal title + composite-score speedometer + 2x2 tiles) is built ONCE
 in ``render()`` and updated in place; the five cards (Trade Info, Greeks, Composite
 Score factor bars, IV Analysis, Expected Move) rebuild per selection. The
-speedometer is the shared Highcharts solid-gauge (``gauge.py``); the factor/IV bars
-+ range markers are SVG (``svg.py``). Robust to missing keys (fields vary by trade
-type / source).
+speedometer is the shared Highcharts angular gauge (``gauge.py`` — painted
+rainbow face + needle); the factor/IV bars + range markers are SVG (``svg.py``).
+Robust to missing keys (fields vary by trade type / source).
 
 The gauge is persistent (not recreated per selection) so the Highcharts ESM is
 registered at initial page render — a gauge added only on selection, on a page
@@ -231,8 +231,7 @@ def render(width: int = 360):
         with header:
             sig_title = ui.label("").classes("text-subtitle1 font-bold")
             with ui.row().classes("items-center gap-3 w-full no-wrap"):
-                gauge_el = ui.highchart(gauge_figure(0, "", height=104),
-                                        extras=["solid-gauge"]) \
+                gauge_el = ui.highchart(gauge_figure(0, "", height=104)) \
                     .classes("shrink-0").style("width:160px;height:104px")
                 with ui.grid(columns=2).classes("gap-2"):
                     for key, label, _vf, _cf in _TILES:

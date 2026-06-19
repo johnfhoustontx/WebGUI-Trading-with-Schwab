@@ -5,18 +5,26 @@ The speedometer used by the Sentiment, Market Trend, and Trade-detail panels.
 from pages import gauge
 
 
-def test_gauge_figure_solidgauge_value_and_color_stops():
+def _rgb(hexc):
+    h = hexc.lstrip("#")
+    return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+
+def test_gauge_figure_rainbow_face_and_needle():
     fig = gauge.gauge_figure(76.0, "Long")
-    assert fig["chart"]["type"] == "solidgauge"
-    assert fig["series"][0]["data"] == [76.0]
-    # Smooth value-mapped fill: a continuous red -> yellow -> green ramp that
-    # Highcharts interpolates between (no discrete zone flips).
-    stops = fig["yAxis"]["stops"]
-    positions = [round(p, 4) for p, _c in stops]
-    assert positions[0] == 0.0 and positions[-1] == 1.0   # spans the full range
-    assert 0.5 in positions                                # yellow at the midpoint
-    assert positions == sorted(positions)                  # monotonic, no duplicates
-    assert len(positions) == len(set(positions))           # crisp-flip dupes removed
+    assert fig["chart"]["type"] == "gauge"            # angular gauge (needle)
+    assert fig["series"][0]["data"] == [76.0]         # needle position
+    # The arc FACE is painted as a red -> yellow -> green rainbow: many graduated
+    # plotBands spanning the full range (a smooth sweep, not 4 discrete zones).
+    bands = fig["yAxis"]["plotBands"]
+    assert len(bands) >= 20
+    assert bands[0]["from"] == 0 and bands[-1]["to"] == 100
+    r0, rN = _rgb(bands[0]["color"]), _rgb(bands[-1]["color"])
+    assert r0[0] > r0[1]            # left end reddish (R > G)
+    assert rN[1] > rN[0]            # right end greenish (G > R)
+    mid = _rgb(bands[len(bands) // 2]["color"])
+    assert mid[0] > 180 and mid[1] > 180 and mid[2] < 150   # middle yellow-ish
+    assert fig["plotOptions"]["gauge"]["dial"]        # needle present
     assert "Long" in fig["series"][0]["dataLabels"]["format"]
     assert fig["accessibility"]["enabled"] is False
     assert fig["pane"]["startAngle"] == -90 and fig["pane"]["endAngle"] == 90

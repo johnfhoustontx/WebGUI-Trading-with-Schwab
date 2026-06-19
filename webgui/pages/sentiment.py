@@ -507,13 +507,11 @@ def render():
             with ui.row().classes("items-end justify-center gap-4 no-wrap"):
                 with ui.column().classes("items-center"):
                     ui.label("Today").classes("opacity-60 text-xs")
-                    gauge_box = ui.highchart(gauge_figure(50.0, "—"),
-                                             extras=["solid-gauge"]) \
+                    gauge_box = ui.highchart(gauge_figure(50.0, "—")) \
                         .classes("q-mt-xs").style("width:170px;height:120px")
                 with ui.column().classes("items-center"):
                     ui.label("30-Day Avg").classes("opacity-60 text-xs")
-                    gauge_avg_box = ui.highchart(gauge_figure(50.0, "—"),
-                                                 extras=["solid-gauge"]) \
+                    gauge_avg_box = ui.highchart(gauge_figure(50.0, "—")) \
                         .classes("q-mt-xs").style("width:170px;height:120px")
             bias_lbl = ui.label("").classes("text-h6")
             sub_lbl = ui.label("").classes("opacity-80 text-sm")
@@ -530,13 +528,11 @@ def render():
             with ui.row().classes("items-end justify-center gap-4 no-wrap"):
                 with ui.column().classes("items-center"):
                     ui.label("Today").classes("opacity-60 text-xs")
-                    trend_gauge_box = ui.highchart(gauge_figure(50.0, "—"),
-                                                   extras=["solid-gauge"]) \
+                    trend_gauge_box = ui.highchart(gauge_figure(50.0, "—")) \
                         .classes("q-mt-xs").style("width:170px;height:120px")
                 with ui.column().classes("items-center"):
                     ui.label("30-Day").classes("opacity-60 text-xs")
-                    trend_gauge_30_box = ui.highchart(gauge_figure(50.0, "—"),
-                                                      extras=["solid-gauge"]) \
+                    trend_gauge_30_box = ui.highchart(gauge_figure(50.0, "—")) \
                         .classes("q-mt-xs").style("width:170px;height:120px")
             regime_badge = ui.label("").classes("text-subtitle1 text-bold")
             regime_desc = ui.label("").classes("opacity-80 text-sm text-center")
