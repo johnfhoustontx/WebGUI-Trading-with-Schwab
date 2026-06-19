@@ -720,7 +720,29 @@ def rotation_risk_threshold():
     return rotation_tool.RISK_THRESHOLD
 
 
-def build_and_write_bridge(snaps, spy, live, sector):
+def _bridge_trend(intraday, spy):
+    """Bridge trend_regime dict: the intraday model's directional state/confidence
+    + trend_score/sub_scores, merged onto the DAILY classify dict's structural
+    sma_*/drawdown/spy_close (kept for the additive-only bridge contract). Falls
+    back to the daily dict when no intraday trend is available, so the bridge
+    always carries a valid 5-state ``state`` for regime_filter."""
+    daily = build_trend_dict(spy) or {}
+    if not intraday or not intraday.get("state"):
+        return daily or None
+    merged = dict(daily)
+    merged.update({
+        "state": intraday.get("state"),
+        "label": intraday.get("label"),
+        "description": intraday.get("description"),
+        "raw_state": intraday.get("raw_state"),
+        "confidence": intraday.get("confidence"),
+        "trend_score": intraday.get("smoothed_score", intraday.get("score")),
+        "sub_scores": intraday.get("sub_scores"),
+    })
+    return merged
+
+
+def build_and_write_bridge(snaps, spy, live, sector, trend=None):
     """Build the bridge payload from cache/state data and write it. Defensive."""
     try:
         import bridge
@@ -729,7 +751,7 @@ def build_and_write_bridge(snaps, spy, live, sector):
         if not latest:
             return
         prior = composite_series(snaps or [])[1]
-        trend = build_trend_dict(spy)
+        trend = _bridge_trend(trend, spy)
         sec_arg = None
         if sector:
             sec_arg = {"sector_data": sector.get("sector_data"),

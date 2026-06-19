@@ -93,6 +93,34 @@ def test_build_trend_dict_none_on_empty():
     assert compute.build_trend_dict(None) is None
 
 
+def test_bridge_trend_merges_intraday_over_daily(monkeypatch):
+    """``_bridge_trend`` overlays the intraday model's directional state +
+    trend_score/sub_scores onto the daily classify dict's structural sma_*."""
+    monkeypatch.setattr(compute, "build_trend_dict",
+                        lambda spy: {"state": "range", "sma_50": 480.0,
+                                     "sma_200": 450.0, "spy_close": 500.0,
+                                     "confidence": 0.4})
+    intraday = {"state": "bull_trend", "label": "Bull Trend", "description": "x",
+                "raw_state": "bull_trend", "confidence": 0.9,
+                "smoothed_score": 84.0, "sub_scores": {"price": 88}}
+    merged = compute._bridge_trend(intraday, spy=[1.0, 2.0])
+    assert merged["state"] == "bull_trend"
+    assert merged["trend_score"] == 84.0
+    assert merged["sub_scores"] == {"price": 88}
+    assert merged["confidence"] == 0.9
+    # structural fields preserved from the daily dict
+    assert merged["sma_50"] == 480.0
+    assert merged["spy_close"] == 500.0
+
+
+def test_bridge_trend_falls_back_to_daily_when_no_intraday(monkeypatch):
+    daily = {"state": "range", "sma_50": 480.0, "confidence": 0.4}
+    monkeypatch.setattr(compute, "build_trend_dict", lambda spy: dict(daily))
+    assert compute._bridge_trend(None, spy=[1.0]) == daily
+    # an intraday dict with no state also falls back
+    assert compute._bridge_trend({"confidence": 0.9}, spy=[1.0]) == daily
+
+
 def test_derive_sector_summary_values():
     sd = [
         {"kind": "sector", "sector": "Tech", "etf": "XLK",

@@ -128,6 +128,8 @@ def build_bridge_payload(snapshot, history_scores, spy_closes, generated_at,
             "spy_close": trend.get("spy_close"), "sma_50": trend.get("sma_50"),
             "sma_200": trend.get("sma_200"), "sma_200_slope_pct": trend.get("sma_200_slope_pct"),
             "drawdown_pct": trend.get("drawdown_pct"), "confidence": trend.get("confidence"),
+            "trend_score": trend.get("trend_score"),
+            "sub_scores": trend.get("sub_scores"),
         }
     if sector:
         bd = []

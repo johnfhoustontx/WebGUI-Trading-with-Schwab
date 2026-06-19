@@ -59,6 +59,42 @@ def test_build_bridge_payload_roundtrips_through_bridge(tmp_path):
     assert reread["schema_version"]
 
 
+def test_bridge_trend_regime_additive_fields():
+    """The trend block carries the new additive trend_score/sub_scores while
+    keeping the daily structural sma_* fields (additive-only contract)."""
+    trend = {
+        "state": "bull_trend", "label": "Bull Trend", "description": "x",
+        "raw_state": "bull_trend", "spy_close": 500.0, "sma_50": 480.0,
+        "sma_200": 450.0, "sma_200_slope_pct": 0.3, "drawdown_pct": -1.0,
+        "confidence": 0.9, "trend_score": 84.0, "sub_scores": {"price": 88},
+    }
+    p = L.build_bridge_payload(_snap(6.81), [6.0], [], "x", trend=trend)
+    tr = p["trend_regime"]
+    assert tr["state"] == "bull_trend"
+    assert tr["trend_score"] == 84.0
+    assert tr["sub_scores"] == {"price": 88}
+    # back-compat structural field still present
+    assert tr["sma_50"] == 480.0
+    assert tr["confidence"] == 0.9
+
+
+def test_bridge_trend_regime_without_new_fields_is_valid():
+    """A daily-only trend dict (no trend_score/sub_scores) still yields a valid
+    trend_regime block — the new keys degrade to None, no KeyError."""
+    trend = {
+        "state": "range", "label": "Range", "description": "x",
+        "raw_state": "range", "spy_close": 500.0, "sma_50": 480.0,
+        "sma_200": 450.0, "sma_200_slope_pct": 0.1, "drawdown_pct": -2.0,
+        "confidence": 0.5,
+    }
+    p = L.build_bridge_payload(_snap(5.0), [5.0], [], "x", trend=trend)
+    tr = p["trend_regime"]
+    assert tr["state"] == "range"
+    assert tr["trend_score"] is None
+    assert tr["sub_scores"] is None
+    assert tr["sma_50"] == 480.0
+
+
 class _FakeDF:
     def __init__(self, closes): self._c = closes
     def __getitem__(self, k): return self

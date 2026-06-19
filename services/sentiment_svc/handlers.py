@@ -193,7 +193,7 @@ def refresh(bus, with_sectors: bool = False) -> None:
 
     # Always dual-write the legacy bridge (defensive — never abort on failure).
     try:
-        compute.build_and_write_bridge(snaps, spy, live, sector)
+        compute.build_and_write_bridge(snaps, spy, live, sector, trend=_TREND["trend"])
     except Exception:  # noqa: BLE001
         log.exception("bridge dual-write failed")
 
