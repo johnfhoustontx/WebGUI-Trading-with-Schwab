@@ -42,3 +42,6 @@ portfolio-analyzer/data/
 
 # claude-driver runtime state (paper trade log + pending-trade payload)
 claude-driver/data/
+
+# Stale manual stderr/stdout redirect captures from ad-hoc restarts
+*.log.err
