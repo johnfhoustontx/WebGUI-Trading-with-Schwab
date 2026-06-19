@@ -72,27 +72,18 @@ def _clamp(v, lo, hi):
     return max(lo, min(hi, v))
 
 
-# Market Trend regime -> speedometer anchor (0-100 "bullishness").
-_TREND_ANCHORS = {"bull_trend": 85.0, "pullback_in_bull": 65.0, "range": 50.0,
-                  "bear_rally": 35.0, "bear_trend": 15.0}
-
 # Short dial captions (the full label shows beneath the gauge).
 _TREND_SHORT = {"bull_trend": "BULL", "pullback_in_bull": "PULLBACK",
                 "range": "RANGE", "bear_rally": "BEAR RALLY", "bear_trend": "BEAR"}
 
 
 def trend_gauge_value(trend):
-    """0-100 needle for the Market Trend speedometer (hybrid).
-
-    Anchored by regime so the needle stays in the matching color zone
-    (bear=red … bull=green), then nudged within the band by the 200d slope and
-    drawdown so it reflects strength: ``anchor + clamp(slope%*50, ±8) +
-    clamp(dd%*0.3, ±5)``, clamped to [0,100]. Unknown/missing trend -> 50."""
+    """0-100 needle = the intraday trend score directly (smoothed if present)."""
     t = trend or {}
-    anchor = _TREND_ANCHORS.get(t.get("state"), 50.0)
-    nudge = (_clamp(_safe_float(t.get("sma_200_slope_pct")) * 50.0, -8.0, 8.0)
-             + _clamp(_safe_float(t.get("drawdown_pct")) * 0.3, -5.0, 5.0))
-    return _clamp(anchor + nudge, 0.0, 100.0)
+    v = t.get("smoothed_score", t.get("score"))
+    if v is None:
+        return 50.0
+    return _clamp(_safe_float(v, 50.0), 0.0, 100.0)
 
 
 def bias_color(bias):
