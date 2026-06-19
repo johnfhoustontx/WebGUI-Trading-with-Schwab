@@ -126,3 +126,27 @@ def test_blend_low_conf_cannot_dominate():
 def test_blend_no_confidence_defaults_neutral():
     score, conf = blend_trend({"price": 90}, {"price": 0.0})
     assert score == 50.0 and conf == 0.0
+
+
+from scoring.intraday_trend import score_to_state, ema_smooth
+
+
+def test_band_edges():
+    assert score_to_state(85) == "bull_trend"
+    assert score_to_state(80) == "bull_trend"
+    assert score_to_state(75) == "pullback_in_bull"
+    assert score_to_state(70) == "pullback_in_bull"
+    assert score_to_state(50) == "range"
+    assert score_to_state(30) == "range"
+    assert score_to_state(25) == "bear_rally"
+    assert score_to_state(20) == "bear_rally"
+    assert score_to_state(10) == "bear_trend"
+
+
+def test_ema_smooth_first_value_passthrough():
+    assert ema_smooth(None, 70.0, span=3) == 70.0
+
+
+def test_ema_smooth_moves_toward_new():
+    out = ema_smooth(50.0, 80.0, span=3)
+    assert out == 65.0

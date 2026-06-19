@@ -103,3 +103,24 @@ def blend_trend(scores, confs, weights=None):
     if den <= 0:
         return 50.0, 0.0
     return round(num / den, 2), round(den, 3)
+
+
+def score_to_state(score):
+    if score >= 80:
+        return "bull_trend"
+    if score >= 70:
+        return "pullback_in_bull"
+    if score >= 30:
+        return "range"
+    if score >= 20:
+        return "bear_rally"
+    return "bear_trend"
+
+
+def ema_smooth(prev, new, span=3):
+    """EMA-smooth the published needle (~2-3 fifteen-min reads). prev None ->
+    passthrough."""
+    if prev is None:
+        return round(float(new), 2)
+    alpha = 2.0 / (span + 1.0)
+    return round(alpha * float(new) + (1 - alpha) * float(prev), 2)
