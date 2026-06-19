@@ -81,6 +81,24 @@ def _serve_explain():
     return HTMLResponse(explain_html(bus_client.read("options:gamma_explain")))
 
 
+@app.get("/eod/file")
+def _serve_eod_file(date: str, which: str = "summary"):
+    """Serve an archived EOD report file (summary.html / detail.html) raw, so its
+    own <style> applies — NiceGUI's ``ui.html`` would strip it."""
+    import re
+    from pathlib import Path
+
+    from pages import eod
+    if which not in ("summary", "detail") or not re.match(r"^\d{4}-\d{2}-\d{2}$", date):
+        return HTMLResponse("<h1>Not found</h1>", status_code=404)
+    path = Path(eod.ARCHIVE_ROOT) / date / f"{which}.html"
+    if not path.is_file():
+        return HTMLResponse(
+            "<h1>No report for that date — click Generate first.</h1>",
+            status_code=404)
+    return HTMLResponse(path.read_text(encoding="utf-8"))
+
+
 # Options scanning + auto-scan now live in services/options_svc (Tier 2): the
 # service owns the engine and the 08:00–15:15 CT schedule, writes results to the
 # Redis bus, and the GUI reads the cache + enqueues rescan commands. Sentiment
@@ -109,6 +127,7 @@ FLAT_NAV = [
     ("/trade", "Trade", "analytics"),
     ("/portfolio", "Portfolio", "account_balance"),
     ("/driver", "Driver", "smart_toy"),
+    ("/eod", "EOD Report", "summarize"),
     ("/settings", "Settings", "settings"),
 ]
 
@@ -357,6 +376,20 @@ def driver_page() -> None:
     with _layout("/driver", "Driver"):
         from pages import driver
         driver.render()
+
+
+@ui.page("/eod")
+def eod_page() -> None:
+    with _layout("/eod", "EOD Report"):
+        from pages import eod
+        eod.render()
+
+
+@ui.page("/eod/detail")
+def eod_detail_page() -> None:
+    with _layout("/eod", "EOD Report — Detail"):
+        from pages import eod
+        eod.render_detail()
 
 
 @ui.page("/settings")
