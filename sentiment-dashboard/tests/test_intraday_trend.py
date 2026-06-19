@@ -58,3 +58,21 @@ def test_breadth_strong_negative():
 def test_breadth_missing_data():
     s = score_breadth_dir(net_ad=None, pct_above_50=None, new_highs=0, new_lows=0)
     assert s.confidence == 0.0 and s.score == 50.0
+
+
+from scoring.intraday_trend import score_sector_participation
+
+
+def test_sector_broad_green_cyclical_lead():
+    s = score_sector_participation(n_green=10, n_total=11, cyc_def_spread=1.0)
+    assert s.score > 75 and s.confidence > 0.9
+
+
+def test_sector_broad_red_defensive_lead():
+    s = score_sector_participation(n_green=1, n_total=11, cyc_def_spread=-1.0)
+    assert s.score < 25
+
+
+def test_sector_no_data():
+    s = score_sector_participation(n_green=0, n_total=0, cyc_def_spread=None)
+    assert s.confidence == 0.0 and s.score == 50.0

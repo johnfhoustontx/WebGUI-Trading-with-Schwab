@@ -54,3 +54,15 @@ def score_breadth_dir(net_ad, pct_above_50, new_highs, new_lows) -> TrendSub:
     confidence = _clamp(sum(weights), 0.0, 1.0)
     return TrendSub(score=round(_clamp(50 + 50 * direction, 0, 100), 2),
                     confidence=round(confidence, 3))
+
+
+def score_sector_participation(n_green, n_total, cyc_def_spread) -> TrendSub:
+    """Breadth of sector participation + cyclical-vs-defensive leadership.
+    cyc_def_spread in ~[-1,1] (cyclicals leading positive)."""
+    if not n_total:
+        return TrendSub(score=50.0, confidence=0.0)
+    participation = (n_green / n_total - 0.5) * 2.0
+    lead = _clamp(cyc_def_spread, -1, 1) if cyc_def_spread is not None else 0.0
+    direction = 0.6 * participation + 0.4 * lead
+    return TrendSub(score=round(_clamp(50 + 50 * direction, 0, 100), 2),
+                    confidence=round(_clamp(n_total / 11.0, 0, 1), 3))
