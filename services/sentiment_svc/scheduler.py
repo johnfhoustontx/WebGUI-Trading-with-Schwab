@@ -11,6 +11,15 @@ import asyncio
 from services.sentiment_svc import handlers
 
 REFRESH_INTERVAL_SEC = 120
+TREND_INTERVAL_SEC = 900   # 15 minutes — directional Market Trend recompute cadence
+
+
+def trend_due(now, last):
+    """True when the 15-min directional-trend recompute is due.
+
+    ``last`` is the monotonic timestamp of the last recompute (None on cold
+    start). Pure so the gate is unit-testable; the refresh path owns the clock."""
+    return last is None or (now - last) >= TREND_INTERVAL_SEC
 
 
 async def loop(bus):
