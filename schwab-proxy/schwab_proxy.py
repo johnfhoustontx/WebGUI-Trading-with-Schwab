@@ -547,9 +547,13 @@ def get_price_history(
         "frequencyType": frequencyType, "frequency": frequency,
         "needExtendedHoursData": str(needExtendedHoursData).lower(),
     }
-    result = token_mgr.api_request(f"/{symbol}/pricehistory", params=params)
-    if result["status_code"] == 404:
-        result = token_mgr.api_request("/pricehistory", params=params)
+    # Schwab's price-history endpoint is /pricehistory?symbol=… — the symbol lives
+    # in the query string (already in ``params``), not the path. A prior
+    # ``/{symbol}/pricehistory`` first-attempt was a guaranteed 404 that fell back
+    # to this same call: it 404'd on every fetch, and ``api_request`` retried each
+    # 404 MAX_RETRIES times with backoff — flooding errors.log (~99% of all ERRORs)
+    # and wasting ~0.75s of retry sleep per fetch. Call the correct endpoint once.
+    result = token_mgr.api_request("/pricehistory", params=params)
     if result["status_code"] != 200:
         raise HTTPException(status_code=result["status_code"], detail=result["error"])
     return result["data"]
