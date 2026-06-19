@@ -100,3 +100,29 @@ def test_vol_confidence_factor_damps_on_spike():
     assert vol_confidence_factor(0) == 1.0
     assert vol_confidence_factor(15) < 0.7
     assert vol_confidence_factor(-10) == 1.0
+
+
+from scoring.intraday_trend import blend_trend, TREND_WEIGHTS
+
+
+def test_trend_weights_sum_to_one():
+    assert abs(sum(TREND_WEIGHTS.values()) - 1.0) < 1e-9
+
+
+def test_blend_all_bull():
+    scores = {"price": 90, "breadth": 80, "sector": 85, "vix": 70}
+    confs = {"price": 1.0, "breadth": 1.0, "sector": 1.0, "vix": 1.0}
+    score, conf = blend_trend(scores, confs)
+    assert 80 <= score <= 90 and conf == 1.0
+
+
+def test_blend_low_conf_cannot_dominate():
+    scores = {"price": 0, "breadth": 60, "sector": 60, "vix": 60}
+    confs = {"price": 0.01, "breadth": 1.0, "sector": 1.0, "vix": 1.0}
+    score, _ = blend_trend(scores, confs)
+    assert score > 55
+
+
+def test_blend_no_confidence_defaults_neutral():
+    score, conf = blend_trend({"price": 90}, {"price": 0.0})
+    assert score == 50.0 and conf == 0.0

@@ -85,3 +85,21 @@ def vol_confidence_factor(vix_change_pct) -> float:
     if vix_change_pct <= 0:
         return 1.0
     return round(_clamp(1.0 - 0.04 * vix_change_pct, 0.4, 1.0), 3)
+
+
+TREND_WEIGHTS = {"price": 0.45, "breadth": 0.25, "sector": 0.20, "vix": 0.10}
+
+
+def blend_trend(scores, confs, weights=None):
+    """Confidence-weighted blend -> (score_0_100, aggregate_confidence).
+    Mirrors scoring/composite.blend. den==0 -> neutral 50.0, conf 0.0."""
+    weights = weights or TREND_WEIGHTS
+    num = den = 0.0
+    for k, w in weights.items():
+        c = float(confs.get(k, 0.0) or 0.0)
+        s = float(scores.get(k, 50.0) or 50.0)
+        num += w * s * c
+        den += w * c
+    if den <= 0:
+        return 50.0, 0.0
+    return round(num / den, 2), round(den, 3)
