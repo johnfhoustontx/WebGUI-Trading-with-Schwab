@@ -496,12 +496,11 @@ def render():
         next_scan_lbl = ui.label("Next scan —").classes("opacity-60 text-sm")
     summary_lbl = ui.label("").classes("opacity-70 text-sm")
     pressure_box = ui.row().classes("gap-3 items-center")
-    # Persistent panels: the Plotly elements are created ONCE and updated in
-    # place (update_figure) on every repaint — rebuilding them each time tore
-    # down the canvas and caused the regeneration flicker. Message labels are
-    # toggled via set_visibility. Column flex weights are set per-render from the
-    # intraday snapshot count (panel_flex) so the heatmap grows / bars shrink
-    # through the session.
+    # Persistent panels: the Highcharts elements are created ONCE and updated in
+    # place on every repaint (Highcharts diffs the new options) — rebuilding them
+    # each time would flash. Message labels are toggled via set_visibility. Column
+    # flex weights are set per-render from the intraday snapshot count (panel_flex)
+    # so the heatmap grows / bars shrink through the session.
     with ui.row().classes("w-full no-wrap gap-4 items-start"):
         chart_box = ui.column().classes("min-w-0").style("flex: 0.5 1 0%")
         with chart_box:
@@ -554,8 +553,8 @@ def render():
     def _render_view():
         """Paint the active view from the cached snapshot (no fetch, no teardown).
 
-        The Plotly elements persist across repaints and are updated in place via
-        update_figure (Plotly.react diff) so the charts don't flicker."""
+        The Highcharts elements persist across repaints and are updated in place
+        (via _set_figure / _set_chart) so the charts don't flicker."""
         snap = state["snap"]
         pressure_box.clear()
         if not snap:
