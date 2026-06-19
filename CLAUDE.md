@@ -8,15 +8,16 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-06-16 (**3-tier migration — Phase 3 Portfolio DONE**:
-`services/portfolio_svc` (:8212) + the `/portfolio` page built natively 3-tier
-(Holdings / Sectors / Performance + advisory suggestions + **live-streaming P&L**
-via the service's proxy SSE consumer). **All five domains are now migrated**
-(Sentiment, Options, Portfolio, Trade, Driver) — every page reads Redis and the
-webgui imports only `nicegui` + `shared.bus` + `shared.contracts`. 239 webgui +
-20 portfolio_svc tests green. Remaining: Phase 6 retire-shims (`regime_filter`
-reads Redis; drop the bridge dual-write). See "Portfolio page (`/portfolio`) —
-DONE" + "Planned 3-tier architecture" below.)
+**Last updated:** 2026-06-18 (**EOD Report page DONE**: new `/eod` + `/eod/detail`
+pure-webgui pages aggregate the collected `options:*` + `driver:*` caches into a
+**Summary** rollup + **Detailed** report, with a **Generate** button that snapshots
+the caches into standalone `summary.html`/`detail.html` archived under
+`webgui/data/eod/<date>/` (in-app view + dated archive + `/eod/file` raw serving).
+285 webgui tests green. See "EOD Report page (`/eod` + `/eod/detail`) — DONE" below.
+Prior: **3-tier migration — all five domains migrated** (Sentiment, Options,
+Portfolio, Trade, Driver) — every page reads Redis and the webgui imports only
+`nicegui` + `shared.bus` + `shared.contracts`. Remaining: Phase 6 retire-shims
+(`regime_filter` reads Redis; drop the bridge dual-write).)
 
 ## What this project is
 
@@ -152,6 +153,7 @@ Routes:
 | `/driver` | Driver (morning-agent **order-approval queue**: Run morning agent → graded day + proposed trades; **APPROVE** (confirm dialog) / **SKIP**; conditions strip + grade rationale; **Performance** view (win-rate / P&L-by-bucket + trade table). 09:28-ET scheduler fires the run unattended. Orders execute via `order_executor` with `PAPER_TRADE=True` → **simulated**) | built |
 | `/settings` | Settings (GUI prefs via `app_settings`: scanner **audio alert** on/off + sound + volume, only-during-market-hours, min-score-to-alert; desktop-notification toggle + permission grant + Test sound. Extensible — first batch) | built |
 | `/portfolio` | Portfolio (3-tier, `services/portfolio_svc` :8212: **Holdings / Sectors / Performance** tabs over the portfolio model — sector breakdown, vs-sector RS, since-purchase excess, benchmark over/under-weight, tailwind; **Performance** scorecard (return/capital/risk/entry grades + composite + ann. return + drawdown) with a per-position **advisory suggestions** detail pane; **live-streaming P&L** via the service's proxy SSE consumer republishing each tick; proxy/stream status bar; persists across nav) | built |
+| `/eod` · `/eod/detail` | EOD Report (pure-webgui aggregator: **Summary** rollup tiles + **Detailed** drill-down tables over the collected `options:*` + `driver:*` caches; **Generate** snapshots the caches → standalone `summary.html` + `detail.html` archived under `webgui/data/eod/<date>/`; in-app view + dated archive list; `/eod/file` serves archived files raw) | built |
 
 The `pages/options/` subpackage shares `header.py` (compact quotes/VIX/sentiment
 strip), `detail.py` (collapsible Trade detail panel, reused by all signal
@@ -528,6 +530,41 @@ SSE consumer updates tick-by-tick. Pieces:
 - Tests: `services/portfolio_svc/tests` (compute/handlers/scheduler/app, 20) +
   `webgui/tests/test_portfolio.py` (8). Design/plan: Phase 3 of the
   [3-tier plan](docs/plans/2026-06-15-three-tier-architecture-plan.md).
+
+**EOD Report page (`/eod` + `/eod/detail`) — DONE (2026-06-18).** A **pure-webgui**
+end-of-day report — no new service/port. It reads the caches the existing services
+already publish (`options:scan` / `options:captured` / `options:paper_trades` /
+`options:paper_account` + `driver:approvals` / `driver:performance`) and rolls them
+into a **Summary** (tiles: paper session P&L, scanner/captured/paper counts, driver
+grade/status/win-rate) and a **Detailed** report (full tables per section). Scope is
+**Options activity + Driver** only (portfolio/sentiment intentionally excluded).
+Built entirely in `webgui/pages/eod.py` — honors the 3-tier rule (webgui imports
+only `nicegui` + `shared.bus` + `shared.contracts`). Pieces:
+- **Single-source body.** Pure builders produce one HTML **fragment** + a scoped
+  `EOD_CSS` string (mirrors the `gamma.py` Explain pattern — `ui.html` strips
+  `<style>`, so CSS goes through `ui.add_css` in-app and is inlined into the file
+  on export). `summary_fragment(snap, detail_href)` / `detail_fragment(snap)` +
+  per-section builders (`captured_section` / `paper_section` / `scanner_section` /
+  `driver_section`) are all **defensive** (missing/empty cache → a "No data" note,
+  never raises) and unit-tested in `webgui/tests/test_eod.py` (16).
+- **Generate + archive.** The **Generate** button calls `generate()` →
+  `read_snapshot()` (snapshots the live caches) → `wrap_document(...)` wraps the
+  same fragment+CSS into standalone `<html>` docs → `write_archive(...)` writes
+  `summary.html` + `detail.html` into `webgui/data/eod/<CT-date>/` (gitignored, like
+  the rest of `webgui/data/`; same date overwrites). The summary page lists past
+  archived dates (`archive_dates`, newest first). The **in-file** summary→detail
+  link is the relative `detail.html`; the **in-app** link is the route `/eod/detail`
+  (the fragment takes the link target as a parameter — the only in-app/file diff).
+- **File serving.** `main.py` adds `@app.get("/eod/file")` (mirrors
+  `/options/explain`): returns an archived file as a raw `HTMLResponse` so its own
+  `<style>` applies. The page's "Open summary/detail file" buttons + archive links
+  open it in a new tab.
+- **Wiring.** `("/eod", "EOD Report", "summarize")` in `FLAT_NAV`; `@ui.page("/eod")`
+  → `eod.render()` and `@ui.page("/eod/detail")` → `eod.render_detail()` (both active
+  `/eod` so the nav item highlights on detail too); `/eod` + `/eod/detail` added to
+  `test_shell.py`. Design/plan:
+  [design](docs/plans/2026-06-18-eod-report-design.md) /
+  [plan](docs/plans/2026-06-18-eod-report-plan.md).
 
 ## Paths and ports: `repo_paths.py` + `config/ports.toml`
 
