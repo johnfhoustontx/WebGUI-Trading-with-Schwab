@@ -17,9 +17,13 @@ DEFAULTS = {
 
 _PATH = pathlib.Path(__file__).resolve().parent / "data" / "settings.json"
 
+# Single-user, single-process: the only writer is set() (the Settings page), so an
+# in-memory cache is safe and lets the 2s alert watcher read settings without a
+# disk read every tick. Invalidated by set() (updates it) and reset_cache() (tests).
+_cache = {"data": None}
 
-def load():
-    """Full settings dict: file values merged over DEFAULTS; DEFAULTS on any error."""
+
+def _load_from_disk():
     try:
         raw = json.loads(_PATH.read_text())
         if not isinstance(raw, dict):
@@ -27,6 +31,22 @@ def load():
         return {**DEFAULTS, **raw}
     except Exception:
         return dict(DEFAULTS)
+
+
+def load():
+    """Full settings dict: file values merged over DEFAULTS; DEFAULTS on any error.
+
+    Cached in memory after the first read (see ``_cache``); a fresh copy is
+    returned each call so callers can't mutate the cache.
+    """
+    if _cache["data"] is None:
+        _cache["data"] = _load_from_disk()
+    return dict(_cache["data"])
+
+
+def reset_cache():
+    """Drop the in-memory cache so the next ``load()`` re-reads disk (test helper)."""
+    _cache["data"] = None
 
 
 def get(key):
@@ -40,9 +60,10 @@ def all():
 
 
 def set(key, value):
-    """Persist one setting (writes the full merged dict back to disk)."""
+    """Persist one setting (writes the full merged dict back to disk + cache)."""
     data = load()
     data[key] = value
     _PATH.parent.mkdir(parents=True, exist_ok=True)
     _PATH.write_text(json.dumps(data, indent=2))
+    _cache["data"] = data  # keep the in-memory cache in lockstep with disk
     return data

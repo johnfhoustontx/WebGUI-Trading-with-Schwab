@@ -18,9 +18,10 @@ for _p in (str(_REPO_ROOT), str(_REPO_ROOT / "webgui")):
         sys.path.insert(0, _p)
 
 from fastapi.responses import HTMLResponse  # noqa: E402
-from nicegui import app, ui  # noqa: E402
+from nicegui import app, run, ui  # noqa: E402
 
 import datetime as _dt  # noqa: E402
+import time as _time  # noqa: E402
 from zoneinfo import ZoneInfo as _ZoneInfo  # noqa: E402
 
 import alerts  # noqa: E402
@@ -150,6 +151,27 @@ _ALERT_STATE: dict = {
 }
 _badge_refs: dict = {}
 
+# proxy.health() is shown as a down-banner on EVERY page build. The call is a
+# blocking HTTP GET with a 3s timeout — without caching, every navigation paid it
+# before first paint (and stalled up to 3s if the proxy was unreachable). Memoize
+# it for a few seconds across pages; the 2s watcher tick re-warms it off-thread.
+_HEALTH_TTL_SEC = 4.0
+_health_cache: dict = {"data": None, "ts": 0.0}
+
+
+def cached_health() -> dict:
+    """proxy.health() memoized for _HEALTH_TTL_SEC across page builds (never raises)."""
+    now = _time.monotonic()
+    if _health_cache["data"] is None or now - _health_cache["ts"] >= _HEALTH_TTL_SEC:
+        _refresh_health()
+    return _health_cache["data"]
+
+
+def _refresh_health() -> None:
+    """Probe the proxy and update the health cache (blocking — run off-thread)."""
+    _health_cache["data"] = proxy.health()
+    _health_cache["ts"] = _time.monotonic()
+
 # Modernized drawer styling (scoped to .nav-drawer).
 _NAV_CSS = """
 .nav-drawer .q-item, .nav-drawer a.nav-link { border-radius: 10px; }
@@ -175,40 +197,50 @@ def _acknowledge(active: str) -> None:
     _recompute_badges()
 
 
-def _recompute_badges() -> None:
-    """Refresh _NAV_BADGES from the current bus state (idempotent)."""
-    scan = bus_client.read("options:scan") or {}
+def _recompute_badges(scan=None) -> None:
+    """Refresh _NAV_BADGES from the current bus state (idempotent).
+
+    ``scan`` may be passed in by a caller that already read ``options:scan`` this
+    tick, so the (potentially large) scan payload isn't deserialized twice.
+    """
+    if scan is None:
+        scan = bus_client.read("options:scan") or {}
     _NAV_BADGES["/"] = alerts.unread_count(
         alerts.scanner_keys(scan), _ALERT_STATE["acked_scan"])
-    cap_ver = bus_client.read_version("options:captured")
+    cap_ver = bus_client.read_version("options:captured")  # cheap :ver probe
     _NAV_BADGES["/options/captured"] = 1 if (
         cap_ver is not None and cap_ver != _ALERT_STATE["captured_seen"]) else 0
-    drv = bus_client.read("driver:approvals") or {}
-    drv_ver = bus_client.read_version("driver:approvals")
+    drv, drv_ver = bus_client.read_full("driver:approvals")  # payload+version, one read
+    drv = drv or {}
     _NAV_BADGES["/driver"] = 1 if (
         drv.get("status") == "pending" and drv_ver != _ALERT_STATE["driver_seen"]) else 0
 
 
-def _run_watcher() -> None:
-    """One watcher tick: recompute badges + fire alerts on new qualifying signals."""
-    scan = bus_client.read("options:scan") or {}
+def _watcher_compute():
+    """Off-thread part of a watcher tick: read the bus once, recompute badges, and
+    DECIDE whether to alert. Returns an alert tuple ``(sound, volume, desktop, n)``
+    or None. Does NO UI work (safe to run via ``run.io_bound``) — the caller fires
+    the chime/notification on the UI thread.
+    """
+    scan = bus_client.read("options:scan") or {}   # read ONCE; passed to badges below
+    keys = alerts.scanner_keys(scan)
     # Seed on the first tick so pre-existing signals don't alert on launch.
     if _ALERT_STATE["alerted_init"] is None:
-        _ALERT_STATE["alerted"] = alerts.scanner_keys(scan)
+        _ALERT_STATE["alerted"] = keys
         _ALERT_STATE["alerted_init"] = True
-        _recompute_badges()
-        return
-    _recompute_badges()
-    s = app_settings.load()
+        _recompute_badges(scan)
+        return None
+    _recompute_badges(scan)
+    s = app_settings.load()                        # in-memory cached (no disk hit)
     q = alerts.qualifying_new(scan, _ALERT_STATE["alerted"], s["alert_min_score"])
     now = _dt.datetime.now(tz=_CT)
+    decision = None
     if alerts.should_alert(s, q, now):
-        play_alert(s["alert_sound"], s["alert_volume"])
-        if s.get("desktop_notifications"):
-            notify_desktop("New scanner signal",
-                           f"{len(q)} new signal(s) meet your criteria.")
+        decision = (s["alert_sound"], s["alert_volume"],
+                    bool(s.get("desktop_notifications")), len(q))
     # Mark everything currently present as alerted so each signal chimes once.
-    _ALERT_STATE["alerted"] |= alerts.scanner_keys(scan)
+    _ALERT_STATE["alerted"] |= keys
+    return decision
 
 
 def _nav_link(path: str, label: str, icon: str, active: str) -> None:
@@ -278,8 +310,17 @@ def _layout(active: str, title: str):
     # alert/badge watcher on every page so the chime fires regardless of route.
     _acknowledge(active)
 
-    def _tick():
-        _run_watcher()
+    async def _tick():
+        # Run the blocking bus reads + the proxy health re-warm OFF the event loop;
+        # then do the (UI-thread-only) chime + badge updates back here after await.
+        decision = await run.io_bound(_watcher_compute)
+        await run.io_bound(_refresh_health)
+        if decision:
+            sound, volume, desktop, n = decision
+            play_alert(sound, volume)
+            if desktop:
+                notify_desktop("New scanner signal",
+                               f"{n} new signal(s) meet your criteria.")
         for route, badge in _badge_refs.items():
             n = _NAV_BADGES.get(route, 0)
             badge.text = str(n) if n else ""
@@ -288,7 +329,7 @@ def _layout(active: str, title: str):
     ui.timer(2.0, _tick)
 
     with ui.column().classes("w-full p-4 gap-3") as content:
-        health = proxy.health()
+        health = cached_health()  # memoized — no blocking HTTP on every navigation
         if not health.get("up"):
             with ui.row().classes(
                 "w-full bg-red-2 text-red-10 rounded p-3 items-center gap-2"
