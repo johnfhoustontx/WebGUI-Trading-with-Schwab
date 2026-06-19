@@ -8,7 +8,14 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-06-19 (**end-to-end audit pass**: corrected doc drift —
+**Last updated:** 2026-06-19 (**perf-fix batch 2**: implemented the remaining High +
+all Medium audit items — webgui health-cache + off-thread/de-duped alert watcher +
+in-memory `app_settings` cache, Gamma's four polls coalesced into one cheap pipelined
+`read_versions`, `Bus` cheap `:ver` version reads + `consume_commands` group-create
+once, `technical` EMA/MACD/volume-profile vectorized, `sectors_ref` mtime-cache,
+trader-path pooled session, sargable `gex_history_db` today-query. All suites green
+(2 pre-existing sentiment-dashboard UI-import fails aside). Prior same-day: **perf-fix
+batch 1** + **end-to-end audit pass**: corrected doc drift —
 full `config/ports.toml` (memurai + ml_servers + services 8210–8214), the
 `pages/options/handoff.py` + `pages/ui_guard.py` shared helpers, the Sentiment
 3-column / 2×2-tile layout, the proxy `/pricehistory` 404-flood fix, and paper
@@ -244,7 +251,7 @@ Preview tool (start `webgui`, screenshot). Restart the preview after code change
 to pick them up. To drive Quasar inputs from the preview, set the native value +
 dispatch `input`/`change`/`blur` events.
 
-**Tests:** `cd webgui && ..\.venv\Scripts\python -m pytest -q` (127 green as of
+**Tests:** `cd webgui && ..\.venv\Scripts\python -m pytest -q` (319 green as of
 this writing). TDD pure functions; smoke-verify `render()` with a screenshot.
 
 **Environment quirks to expect:**
@@ -768,36 +775,36 @@ Single-user, localhost Memurai — so most of these are *tolerable today* but ar
 real levers if a page feels sluggish or a service churns CPU/network. Audited
 2026-06-19; ranked by impact. Fix the High items first if optimizing.
 
-**Costing model (important, non-obvious):** `bus_client.read_version()` /
-`read_meta()` are **NOT** cheap probes — `Bus.cache_get` does a full Redis `GET`
-**plus a full JSON deserialize of the entire payload envelope** (`shared/bus/client.py`).
-So a "fetch-free version-poll" `ui.timer` still pays GET+deserialize every tick; it
-only avoids the DOM re-render. There is no version-only fast path. Likewise
-`Bus.cache_set` embeds the version (from `INCR`) inside the stored envelope, so the
-`SET` can't be folded into the `INCR` round-trip — but `cache_set(key, payload,
-event=…, skip_unchanged=…)` now (a) **skips the whole write + publish when the
-payload is byte-identical** to what's stored (`skip_unchanged=True` → no `INCR`, no
-`SET`, no publish, version unchanged → GUI poller doesn't repaint), and (b) pipelines
-the `SET`+`PUBLISH` into one round-trip when `event` is given. The options_svc header
-+ gex_status republishers use this. Other periodic republishers (sentiment 120 s,
-portfolio per-tick, driver perf) still bump unconditionally — opt them in the same way
-if they prove chatty.
+**Costing model (important, non-obvious):** the version is stored in a SEPARATE
+tiny Redis key (`{key}:ver`, `INCR`'d by `cache_set`), so version-polls are now
+**cheap probes** — `bus_client.read_version()` → `Bus.cache_version()` reads just
+that int (no payload deserialize); `read_versions()`/`Bus.cache_versions()` batch
+many in one pipelined round-trip (use it when a page polls several views — e.g.
+Gamma). `read()`/`read_full()` still deserialize the full envelope (use only when
+you actually need the payload). `Bus.cache_set(key, payload, event=…, skip_unchanged=…)`
+(a) **skips the whole write + publish when the payload is byte-identical**
+(`skip_unchanged=True` → no `INCR`/`SET`/publish, version unchanged → GUI poller
+doesn't repaint), and (b) pipelines `SET`+`PUBLISH` into one round-trip when `event`
+is given. The `SET` can't fold into the `INCR` (the envelope still embeds the version
+for `cache_get`). options_svc header + gex_status use `skip_unchanged`; other periodic
+republishers (sentiment 120 s, portfolio per-tick, driver perf) still bump
+unconditionally — opt them in the same way if they prove chatty.
 
-**HIGH — webgui event-loop pressure (runs on *every* page):**
-- The app-wide 2 s alert watcher (`main._run_watcher` + `_recompute_badges`) does
-  ~5 Redis reads/tick (and re-reads `options:scan` twice), plus a synchronous
-  `app_settings.load()` **disk read** when a qualifying signal exists — all on the
-  event loop. On an open Scanner page this stacks with the page's own `options:scan`
-  poll → ~3 deserializes of the largest payload every 2 s. *Levers:* read each cache
-  once/tick and pass it down; cache `app_settings` in memory (invalidate on save).
-- Every page navigation calls `proxy.health()` (blocking `requests.get`, 3 s timeout)
-  + 4–5 badge Redis reads **before first paint** — a slow/unreachable proxy stalls
-  every page up to 3 s. *Lever:* move `proxy.health()` off-thread / cache it a few
-  seconds (like `/status` and the Sentiment status bar already do).
-- `pages/options/gamma.py` runs **four** separate 2 s version-polls
-  (gamma/explain/analyze/status) → 4 full deserializes every 2 s on that page.
-  *Lever:* coalesce into one tick. (`status.py` is the model citizen — its blocking
-  sweep goes through `nicegui.run.io_bound`; most other pages poll on the event loop.)
+**HIGH — webgui event-loop pressure (runs on *every* page):** *(FIXED 2026-06-19)*
+- The app-wide 2 s watcher now runs its blocking bus reads **off the event loop**
+  (`main._tick` is async → `run.io_bound(_watcher_compute)`); `_watcher_compute`
+  reads `options:scan` **once** and passes it to `_recompute_badges(scan)` (no double
+  read), reads the driver badge via `bus_client.read_full` (payload+version in one
+  read), and uses the **in-memory-cached** `app_settings.load()` (no per-tick disk
+  read; invalidated on `set()`). Badge/chime UI work happens back on the UI thread
+  after the await.
+- `proxy.health()` is memoized for `_HEALTH_TTL_SEC` (`main.cached_health`) and
+  re-warmed off-thread by the watcher tick, so a navigation no longer makes a blocking
+  3 s-timeout HTTP call before first paint.
+- `pages/options/gamma.py` coalesced its **four** 2 s version-polls into **one**
+  `_poll` that reads all four versions in a single pipelined `read_versions(...)` call
+  (cheap `:ver` counters) and dispatches only the changed views. (`status.py` remains
+  the model citizen — blocking sweep via `nicegui.run.io_bound`.)
 
 **HIGH — service-side serial proxy fan-out (biggest wall-clock wins):** *(FIXED
 2026-06-19)* These I/O-bound proxy loops now fan out concurrently via
@@ -831,33 +838,34 @@ weekends — **and** both use `cache_set(skip_unchanged=True)` so an unchanged v
 writes/publishes nothing. The remaining per-tick proxy/DB churn outside market hours
 is ~1/10th of before. *(Other services' serial fan-outs below are still open.)*
 
-**MEDIUM — engine compute:**
-- `shared/analysis_lib/technical.calculate_ema` uses a Python bar-by-bar loop, not
-  `.ewm()` — called ~15×/trade analysis (3 periods × 5 timeframes), plus inside MACD
-  (and MACD is computed twice on the daily series). *Lever:* `series.ewm(span=…,
-  adjust=False).mean()`; compute MACD once and read `[-1]`/`[-2]`.
-- `volume_profile` nests `.iterrows()` × bins (O(bars×bins)). *Lever:* `np.digitize` +
-  `np.bincount`.
-- `shared/bus.consume_commands` calls `xgroup_create` on **every** 50 ms poll (extra
-  round-trip + swallowed `BUSYGROUP` exception) across all 5 services — the hottest
-  bus path. *Lever:* create the group once at consumer startup.
-- Static files re-read every cycle: `Top 20.xlsx` (every 2-min GEX poll) and the
-  sectors-ref workbook (4× per 120 s sentiment cycle). *Lever:* mtime-keyed cache.
-- `schwab_proxy.trader_request` (`/accounts`, `/positions`, `/orders`) uses bare
-  `requests.*` → a fresh TLS handshake per call; the marketdata path correctly reuses
-  `token_mgr.session`. *Lever:* route trader calls through the pooled session too.
-- `gex_history_db.load_today` filters with `DATE(ts,'unixepoch','localtime') =
-  DATE('now')` (non-sargable). *Lever:* compute the day's unix `[start,end)` in Python
-  and use `ts >= ? AND ts < ?`. Also: a fresh SQLite connection is opened per Gamma
-  read; reuse one read-only connection per worker.
+**MEDIUM — engine compute:** *(all FIXED 2026-06-19)*
+- `shared/analysis_lib/technical.calculate_ema` is vectorized via `.ewm` (SMA seed +
+  `ewm(alpha, adjust=False)` from the seed = the former loop's exact values, no Python
+  loop). `macd_histogram_series` computes the histogram once; trade analyze reads
+  `[-1]`/`[-2]` from it (was two `calculate_macd` calls = 4 EMA passes → 2).
+  `volume_profile` buckets via `np.digitize`+`np.bincount` (was O(bars×bins) nested
+  `iterrows`). Characterization tests pin numeric equivalence
+  (`services/trade_svc/tests/test_technical.py`).
+- `shared/bus.consume_commands` creates the consumer group **once** per (stream, group)
+  per Bus (`self._groups`), not on every ~50 ms poll.
+- Static workbooks: `sectors_ref.load_sectors_data` is now mtime-cached (`reset_cache()`
+  for tests). (`watchlist.get_scan_symbols` was already mtime-cached — the `Top 20.xlsx`
+  GEX-poll read only `stat()`s, never re-parsed.)
+- `schwab_proxy.trader_request` routes through the pooled `token_mgr.session` (was bare
+  `requests.*` → fresh TLS per `/accounts`/`/positions`/`/orders` call).
+- `gex_history_db.load_today` / `load_today_with_grid` use a sargable
+  `ts >= ? AND ts < ?` range (`_today_local_unix_range()`) so the `ts` index applies,
+  instead of `DATE(ts,'unixepoch','localtime')=DATE('now')`. *(Not done: per-worker
+  SQLite connection reuse — opening a read-only connection is sub-ms and sharing one
+  across the service's executor threads would need `check_same_thread=False`+locking;
+  deliberately left as a fresh connect per read.)*
 
 **Already done right (don't "fix"):** all data pages version-gate repaints; Gamma and
 Sentiment charts use `update_figure` (Plotly.react diff, no flicker); `ui_guard`
 suppresses dead-client callback noise; portfolio's SSE loop only republishes on a
 `dirty` flag; the Redis connection and the marketdata Schwab session are pooled
-singletons. **Hygiene:** the untracked `*.log.err` files (565 KB) are stale manual
-stderr captures (mostly "proxy was down" noise) — safe to delete; consider
-`.gitignore`-ing `*.log.err`.
+singletons. **Hygiene:** stale `*.log.err` manual stderr captures are now
+`.gitignore`-d (and the old ones removed).
 
 ## Tests
 
@@ -871,7 +879,7 @@ cd sentiment-dashboard ; python -m pytest tests
 cd trade-analyzer      ; python -m pytest .
 cd portfolio-analyzer  ; python -m pytest tests
 cd claude-driver       ; python -m pytest .
-cd webgui              ; python -m pytest .   # 304 tests: transforms + shell smoke
+cd webgui              ; python -m pytest .   # 319 tests: transforms + shell smoke
 ```
 
 The 3-tier services run per folder from the repo root (NOT `pytest services` over
@@ -881,10 +889,11 @@ re-triggers the documented `config`/`scoring`/`notifier` module-name collisions)
 ```powershell
 # from the repo root, one service at a time
 .venv\Scripts\python -m pytest services\sentiment_svc   # 26
-.venv\Scripts\python -m pytest services\options_svc     # 100
-.venv\Scripts\python -m pytest services\portfolio_svc   # 20
-.venv\Scripts\python -m pytest services\trade_svc       # 19
+.venv\Scripts\python -m pytest services\options_svc     # 124
+.venv\Scripts\python -m pytest services\portfolio_svc   # 27
+.venv\Scripts\python -m pytest services\trade_svc       # 24
 .venv\Scripts\python -m pytest services\driver_svc      # 26
+.venv\Scripts\python -m pytest shared\bus               # 15
 .venv\Scripts\python -m pytest shared\contracts         # 21 (no app-dir imports — safe together)
 ```
 
