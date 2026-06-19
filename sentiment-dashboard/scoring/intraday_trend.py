@@ -18,7 +18,8 @@ class TrendSub:
 
 
 def _clamp(v, lo, hi):
-    return max(lo, min(hi, v))
+    # Always float so TrendSub.score is uniformly float (it gets JSON-serialized).
+    return float(max(lo, min(hi, v)))
 
 
 def score_price(alignment_pct, price_vs_vwap_pct, macd_hist, rsi, adx,
