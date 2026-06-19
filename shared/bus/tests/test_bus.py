@@ -18,6 +18,48 @@ def test_cache_get_missing_returns_none():
     assert b.cache_get("cache:test:absent") is None
 
 
+def test_cache_set_skip_unchanged_does_not_bump_version():
+    b = Bus(fake=True)
+    v1 = b.cache_set("cache:test:s", {"n": 1})
+    v2 = b.cache_set("cache:test:s", {"n": 1}, skip_unchanged=True)
+    assert v1 == 1 and v2 == 1  # identical payload -> no INCR
+    assert b.cache_get("cache:test:s").version == 1
+
+
+def test_cache_set_skip_unchanged_bumps_when_changed():
+    b = Bus(fake=True)
+    b.cache_set("cache:test:s2", {"n": 1})
+    v2 = b.cache_set("cache:test:s2", {"n": 2}, skip_unchanged=True)
+    assert v2 == 2
+    assert b.cache_get("cache:test:s2").payload == {"n": 2}
+
+
+def test_cache_set_skip_unchanged_writes_when_absent():
+    b = Bus(fake=True)
+    v = b.cache_set("cache:test:s3", {"n": 1}, skip_unchanged=True)
+    assert v == 1
+    assert b.cache_get("cache:test:s3").payload == {"n": 1}
+
+
+def test_cache_set_publishes_event_on_change():
+    b = Bus(fake=True)
+    sub = b.subscribe("events:test:e")
+    v = b.cache_set("cache:test:e", {"n": 1}, event="events:test:e")
+    msg = sub.get_message(timeout=1.0)
+    sub.close()
+    assert msg == {"version": v}
+
+
+def test_cache_set_skip_unchanged_does_not_publish():
+    b = Bus(fake=True)
+    b.cache_set("cache:test:e2", {"n": 1}, event="events:test:e2", skip_unchanged=True)
+    sub = b.subscribe("events:test:e2")  # subscribe AFTER the first (changed) publish
+    v = b.cache_set("cache:test:e2", {"n": 1}, event="events:test:e2", skip_unchanged=True)
+    idle = sub.get_message(timeout=0.1)
+    sub.close()
+    assert v == 1 and idle is None  # unchanged -> neither INCR nor publish
+
+
 def test_publish_subscribe_roundtrip():
     b = Bus(fake=True)
     sub = b.subscribe("events:test:x")

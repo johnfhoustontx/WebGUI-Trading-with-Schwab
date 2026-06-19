@@ -96,6 +96,42 @@ def test_manage_due_holiday():
     assert due is False
 
 
+# ── periodic_refresh_due (header + gex_status per-tick gating) ───────────────
+# During market hours the header/status refresh every tick; off-hours/weekends
+# they throttle to a longer interval so the service stops making proxy + SQLite +
+# Redis calls every 30s, 24/7, with no browser open.
+def test_periodic_refresh_due_every_tick_in_market_hours():
+    # Same last_slot on consecutive market-hours ticks -> always due.
+    due1, slot1 = scheduler.periodic_refresh_due(_ct(2026, 6, 15, 10, 0), "x")
+    due2, slot2 = scheduler.periodic_refresh_due(_ct(2026, 6, 15, 10, 0), slot1)
+    assert due1 is True and due2 is True
+
+
+def test_periodic_refresh_due_offhours_first_tick():
+    due, slot = scheduler.periodic_refresh_due(_ct(2026, 6, 15, 20, 0), None)
+    assert due is True and slot is not None
+
+
+def test_periodic_refresh_due_offhours_throttled_within_slot():
+    _, slot = scheduler.periodic_refresh_due(_ct(2026, 6, 15, 20, 0), None)
+    due2, slot2 = scheduler.periodic_refresh_due(_ct(2026, 6, 15, 20, 2), slot)
+    assert due2 is False and slot2 == slot  # 20:00-20:02 share one 5-min slot
+
+
+def test_periodic_refresh_due_offhours_fires_next_slot():
+    _, slot = scheduler.periodic_refresh_due(_ct(2026, 6, 15, 20, 2), None)
+    due, slot2 = scheduler.periodic_refresh_due(_ct(2026, 6, 15, 20, 6), slot)
+    assert due is True and slot2 != slot
+
+
+def test_periodic_refresh_due_weekend_throttled():
+    # Saturday 10:00 — not a trading day, so the off-hours throttle applies even
+    # though the clock time is within the market-hours window.
+    _, slot = scheduler.periodic_refresh_due(_ct(2026, 6, 13, 10, 0), None)
+    due2, slot2 = scheduler.periodic_refresh_due(_ct(2026, 6, 13, 10, 1), slot)
+    assert due2 is False and slot2 == slot
+
+
 # ── Cadence-mirror drift guard ──────────────────────────────────────────────
 # The GEX-collection cadence is intentionally mirrored (not imported) between the
 # standalone collector and this Tier-2 scheduler to keep the scheduler's import

@@ -117,8 +117,10 @@ def refresh_header(bus) -> None:
     is already fully defensive — it never returns a malformed shape — which is the
     invariant the ScanResult gate exists to enforce for the heavier scan path."""
     data = compute.refresh_header()
-    version = bus.cache_set(CACHE_HEADER, data)
-    bus.publish(EVENT_HEADER, {"version": version})
+    # Per-tick republisher: skip the version bump + publish when quotes/regime are
+    # byte-identical to the last write, so an unchanged header doesn't wake the
+    # GUI's version-poller into a needless repaint.
+    bus.cache_set(CACHE_HEADER, data, event=EVENT_HEADER, skip_unchanged=True)
 
 
 def swing_scan(bus, args: dict) -> None:
@@ -226,8 +228,9 @@ def publish_gex_status(bus) -> None:
     failure degrades to a safe default dict). Called once at startup and on each
     scheduler tick so the page's status bar tracks collector health live."""
     data = compute.gex_status_view()
-    version = bus.cache_set(CACHE_GEX_STATUS, data)
-    bus.publish(EVENT_GEX_STATUS, {"version": version})
+    # Per-tick republisher: skip the version bump + publish when the status view
+    # is unchanged (e.g. off-hours), so it doesn't wake the GUI poller needlessly.
+    bus.cache_set(CACHE_GEX_STATUS, data, event=EVENT_GEX_STATUS, skip_unchanged=True)
 
 
 def publish_gamma_symbols(bus) -> None:

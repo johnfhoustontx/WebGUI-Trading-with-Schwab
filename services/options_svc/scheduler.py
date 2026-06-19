@@ -111,23 +111,50 @@ def manage_due(now, last_slot):
     return (slot != last_slot, slot)
 
 
+# ── Per-tick refresh gating (header + GEX status) ───────────────────────────
+# refresh_header (a proxy quotes call + bridge read) and publish_gex_status (a
+# SQLite read + cache write) used to run on EVERY 30 s tick, 24/7 — making proxy
+# calls + DB opens + Redis writes all night and all weekend with no browser open.
+# Gate them: every tick during market hours (their natural ~30 s cadence), but
+# only once per _OFFHOURS_INTERVAL_MIN slot off-hours/weekends/holidays — enough
+# to keep the header/status current for a service started off-hours, without the
+# round-the-clock churn.
+_OFFHOURS_INTERVAL_MIN = 5
+
+
+def periodic_refresh_due(now, last_slot):
+    """(should_refresh, slot) for the per-tick header + GEX-status refreshes.
+
+    Trading day within market hours → always True (refresh every tick), slot
+    unchanged. Otherwise → True at most once per _OFFHOURS_INTERVAL_MIN-minute
+    slot (so the first off-hours tick still refreshes, then throttles)."""
+    if _is_trading_day(now) and _is_market_hours(now):
+        return (True, last_slot)
+    slot = (now.date().isoformat(), now.hour, now.minute // _OFFHOURS_INTERVAL_MIN)
+    return (slot != last_slot, slot)
+
+
 # ── Scheduler loop ─────────────────────────────────────────────────────────
 POLL_INTERVAL_SEC = 30  # check the slot every 30s (mirrors the page's autoscan loop cadence)
 
 
 async def loop(bus):
-    """Server-side 15-min auto-scan + per-tick header refresh.
+    """Server-side 15-min auto-scan + gated header/GEX-status refresh.
 
     Each 30 s tick: refresh the compact header view (quotes + VIX regime +
-    sentiment dot) — its natural cadence — then, on each trading-day 15-min slot
-    within 08:00-15:15 CT, run one rescan. Mirrors the page's former
-    _autoscan_loop. Both BLOCKING calls run in an executor so the event loop stays
-    responsive. Each is independently guarded so one failure can't kill the loop
-    or skip the other."""
+    sentiment dot) + GEX-status view — every tick during market hours, throttled
+    to every _OFFHOURS_INTERVAL_MIN off-hours (see periodic_refresh_due) so the
+    service stops the round-the-clock proxy/SQLite/Redis churn — then, on each
+    trading-day 15-min slot within 08:00-15:15 CT, run one rescan (plus 2-min GEX
+    collection + 5-min paper auto-manage on their own windows). Mirrors the page's
+    former _autoscan_loop. The BLOCKING calls run in an executor so the event loop
+    stays responsive. Each is independently guarded so one failure can't kill the
+    loop or skip the others."""
     loop_ = asyncio.get_event_loop()
     last_slot = None
     last_gex_slot = None  # 2-min GEX history-collection slot (see gex_due)
     last_manage_slot = None  # 5-min paper auto-manage slot (see manage_due)
+    last_periodic_slot = None  # header + gex_status throttle slot (see periodic_refresh_due)
     # One-shot startup refresh so the Paper Portfolio page has data on first
     # load. The paper account only changes on user actions (entry/manage/reset
     # commands re-publish it), so it is NOT polled every tick. Guarded so a
@@ -175,21 +202,26 @@ async def loop(bus):
     except Exception:
         pass
     while True:
-        # Header refresh runs EVERY tick (the header's ~30s cadence), guarded so a
-        # quotes/sentiment hiccup never stalls the autoscan below or the loop.
+        now = _market_now()  # one clock read per tick, reused by every gate below
+        # Header + GEX-status refresh: every tick during market hours (their natural
+        # ~30s cadence), throttled to every _OFFHOURS_INTERVAL_MIN off-hours so the
+        # service stops making proxy/SQLite/Redis calls round the clock. Each is
+        # independently guarded so one hiccup never stalls the other or the loop.
         try:
-            await loop_.run_in_executor(None, handlers.refresh_header, bus)
+            p_due, p_slot = periodic_refresh_due(now, last_periodic_slot)
+            last_periodic_slot = p_slot
+            if p_due:
+                try:
+                    await loop_.run_in_executor(None, handlers.refresh_header, bus)
+                except Exception:
+                    pass
+                try:
+                    await loop_.run_in_executor(None, handlers.publish_gex_status, bus)
+                except Exception:
+                    pass
         except Exception:
             pass
-        # GEX-collector status view refresh runs EVERY tick (so the Gamma page's
-        # status bar tracks last/next-scan + collector health live), independently
-        # guarded so a status read hiccup never stalls the autoscan or the loop.
         try:
-            await loop_.run_in_executor(None, handlers.publish_gex_status, bus)
-        except Exception:
-            pass
-        try:
-            now = _market_now()
             due, slot = autoscan_due(now, last_slot)
             if due:
                 last_slot = slot
@@ -202,7 +234,6 @@ async def loop(bus):
         # poll (~4 chains) runs in the executor; independently guarded so a poll
         # failure never skips the autoscan above or kills the loop.
         try:
-            now = _market_now()
             g_due, g_slot = gex_due(now, last_gex_slot)
             if g_due:
                 last_gex_slot = g_slot
@@ -215,7 +246,6 @@ async def loop(bus):
         # blocking cycle (proxy reprice) runs in the executor; independently
         # guarded so a failure never skips the work above or kills the loop.
         try:
-            now = _market_now()
             m_due, m_slot = manage_due(now, last_manage_slot)
             if m_due:
                 last_manage_slot = m_slot

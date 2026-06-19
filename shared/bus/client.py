@@ -79,14 +79,47 @@ class Bus:
             self._r = redis.Redis.from_url(url or MEMURAI_URL, decode_responses=True)
 
     # --- versioned cache -------------------------------------------------
-    def cache_set(self, key: str, payload: dict) -> int:
+    def cache_set(
+        self,
+        key: str,
+        payload: dict,
+        event: str | None = None,
+        skip_unchanged: bool = False,
+    ) -> int:
+        """Write ``payload`` under ``key`` and return its version.
+
+        ``skip_unchanged`` — for periodic republishers (e.g. the options
+        header / GEX-status ticks). When set, if the currently-stored payload is
+        byte-identical to ``payload`` the write is skipped entirely: no ``INCR``,
+        no ``SET``, and no event publish, returning the existing version. This
+        stops unchanged data from bumping the version and waking every GUI
+        version-poller into a needless repaint.
+
+        ``event`` — when given, the change event ``{"version": …}`` is published
+        on that channel **as part of the same write** (pipelined with the
+        ``SET``, one round trip), and is likewise skipped when ``skip_unchanged``
+        short-circuits. (The ``INCR`` stays a separate call because its result is
+        embedded in the stored envelope, so the ``SET`` value depends on it.)
+        Callers that publish themselves can omit ``event`` — behaviour is then
+        identical to the original two-line set+publish.
+        """
+        if skip_unchanged:
+            current = self.cache_get(key)
+            if current is not None and current.payload == payload:
+                return current.version
         version = self._r.incr(f"{key}:ver")
         env = CacheEnvelope(
             version=version,
             ts=datetime.now(timezone.utc).isoformat(),
             payload=payload,
         )
-        self._r.set(key, env.to_json())
+        if event is not None:
+            pipe = self._r.pipeline()
+            pipe.set(key, env.to_json())
+            pipe.publish(event, json.dumps({"version": version}))
+            pipe.execute()
+        else:
+            self._r.set(key, env.to_json())
         return version
 
     def cache_get(self, key: str) -> CacheEnvelope | None:

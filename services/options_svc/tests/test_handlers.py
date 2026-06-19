@@ -91,6 +91,21 @@ def test_refresh_header_caches_and_publishes(monkeypatch):
     assert msg is not None and msg.get("version") == env.version
 
 
+def test_refresh_header_skips_unchanged(monkeypatch):
+    """An identical per-tick header view must NOT bump the version (no needless
+    GUI repaint). Changed data still bumps."""
+    bus = Bus(fake=True)
+    view = {"prices": {"$SPX": 5400.0}, "vix": 14.2}
+    monkeypatch.setattr(handlers.compute, "refresh_header", lambda: view)
+    handlers.refresh_header(bus)
+    v1 = bus.cache_get("cache:options:header").version
+    handlers.refresh_header(bus)  # identical compute output -> skip
+    assert bus.cache_get("cache:options:header").version == v1
+    monkeypatch.setattr(handlers.compute, "refresh_header", lambda: {"prices": {"$SPX": 5401.0}})
+    handlers.refresh_header(bus)  # changed -> bump
+    assert bus.cache_get("cache:options:header").version == v1 + 1
+
+
 def test_handle_command_rescan(monkeypatch):
     bus = Bus(fake=True)
     seen = {"calls": 0}
@@ -751,6 +766,17 @@ def test_publish_gex_status_caches_and_publishes(monkeypatch):
     assert env is not None
     assert env.payload == sentinel
     assert msg is not None and msg.get("version") == env.version
+
+
+def test_publish_gex_status_skips_unchanged(monkeypatch):
+    """An identical per-tick GEX-status view must NOT bump the version."""
+    bus = Bus(fake=True)
+    sentinel = {"status_label": "OK", "next_scan": "10:05 AM"}
+    monkeypatch.setattr(handlers.compute, "gex_status_view", lambda: sentinel)
+    handlers.publish_gex_status(bus)
+    v1 = bus.cache_get("cache:options:gex_status").version
+    handlers.publish_gex_status(bus)  # identical -> skip
+    assert bus.cache_get("cache:options:gex_status").version == v1
 
 
 def test_publish_gamma_symbols_caches_and_publishes(monkeypatch):
