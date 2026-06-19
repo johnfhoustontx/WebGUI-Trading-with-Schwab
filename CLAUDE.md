@@ -8,7 +8,16 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-06-19 (**perf-fix batch 2**: implemented the remaining High +
+**Last updated:** 2026-06-19 (**intraday Market Trend redesign**: the Sentiment tab's
+Market Trend gauge is now a responsive **directional 0–100 score** recomputed every
+15 min — Price/MTF 45% + Breadth 25% + Sector 20% + VIX 10%, confidence-weighted,
+EMA-smoothed needle, 5-state mapped (range widened to 30–70) onto the bridge with
+2-read hysteresis so `regime_filter` is unchanged. New pure
+`sentiment-dashboard/scoring/intraday_trend.py` + `services/sentiment_svc/compute.py`
+`compute_intraday_trend`/`compute_30d_trend` + 15-min gated/persisted refresh +
+additive bridge fields (`trend_score`/`sub_scores`, daily `sma_*` kept). Second gauge
+is now the **30-Day structural** trend. See "Intraday Market Trend model" below.
+Prior — 2026-06-19 (**perf-fix batch 2**: implemented the remaining High +
 all Medium audit items — webgui health-cache + off-thread/de-duped alert watcher +
 in-memory `app_settings` cache, Gamma's four polls coalesced into one cheap pipelined
 `read_versions`, `Bus` cheap `:ver` version reads + `consume_commands` group-create
@@ -167,7 +176,7 @@ Routes:
 | `/options/swing` | Swing Scanner | built |
 | `/options/gamma` | Gamma (GEX/Charm/DEX/Vanna bars + flip/**single Call+Put walls** + intraday heatmap; bar/heatmap **width split grows with session** snapshot count; **flicker-free** in-place Plotly updates; **symbol is a dropdown** — default `$SPX`, populated from the collected universe (watchlist minus `$VIX`) via `cache:options:gamma_symbols`; Explain works per-selected-symbol) | built |
 | `/options/simulator` | Simulator (What-if + IV-shock; Replay TODO) | built |
-| `/sentiment` | Sentiment (two-column top: **dual** Sentiment gauges (Today + 30-Day Avg) + **dual** Market Trend gauges (Today + ~30d Ago) / component table; traffic-light tiles; 30d history + rolling avgs; full-width **Sector & Industry Performance** w/ Day/Week/Month %, P/C, RRG, rotation banner, **expandable industries w/ P/C+RRG**; bottom status bar; **persists across navigation**; **server-side 120s auto-refresh + bridge publish, tab-independent**) | built |
+| `/sentiment` | Sentiment (two-column top: **dual** Sentiment gauges (Today + 30-Day Avg) + **dual** Market Trend gauges (Today live-intraday + 30-Day structural — directional 0–100 score, 15-min cadence) / component table; traffic-light tiles; 30d history + rolling avgs; full-width **Sector & Industry Performance** w/ Day/Week/Month %, P/C, RRG, rotation banner, **expandable industries w/ P/C+RRG**; bottom status bar; **persists across navigation**; **server-side 120s auto-refresh + bridge publish, tab-independent**) | built |
 | `/sentiment/rotation` | Sector Rotation (RRG-vs-SPY: Risk-ON/OFF headline + spread; **top row** = quadrant-map table (left) + tight ROTATING FROM/INTO w/ S&P weights (right); **full-width RRG below** w/ per-sector "meteor tails" — engine `assess_sector` retains a `tail` of `TAIL_LENGTH=12` RS-Ratio/RS-Mom points sampled every `TAIL_STRIDE=2` days; page draws **one trace per sector** (faded trail line + single bright head dot) and **hover-isolates** a sector (`plotly_hover`/`unhover` → `run_plot_method('restyle')` dims the rest); reuses `sector_rotation_assessment`; cached, **manual Refresh only**) | built |
 | `/trade` | Trade (on-demand single-symbol analysis: **Position (1–8wk)** + **Investor (months+)** Buy/Hold/Sell verdicts w/ score + top reasons + hard gates + expandable factor breakdown; **MTF EMA alignment** (per-timeframe); momentum strip (RSI/ADX/MACD/VWAP/RelVol); sector strength; **Fundamentals card** (P/E/PEG/growth/ROE/margins via proxy `/instruments`); persists across nav) | built |
 | `/driver` | Driver (morning-agent **order-approval queue**: Run morning agent → graded day + proposed trades; **APPROVE** (confirm dialog) / **SKIP**; conditions strip + grade rationale; **Performance** view (win-rate / P&L-by-bucket + trade table). 09:28-ET scheduler fires the run unattended. Orders execute via `order_executor` with `PAPER_TRADE=True` → **simulated**) | built |
@@ -277,10 +286,13 @@ composite + 30d history) + `scoring` (`composite.velocity/divergence`,
 **Layout:** a two-column top region — left: **two** Market Sentiment speedometers
 (**Today** `gauge_score(total)` + **30-Day Avg** `gauge_score(sentiment_30d_avg(snaps))`,
 the avg = page-side mean of the history composites) + bias + size/conf; right: **two**
-**Market Trend** speedometers (**Today** + **~30d Ago**, both via `trend_gauge_value`
-off the regime anchor + slope/dd nudge) — the 30d-ago value is `derived["trend_30d_ago"]`
-**published by `sentiment_svc`** (`build_trend_dict(spy[:-30])`; the page can't classify,
-no scoring engine) — with the regime badge/desc beneath. The top region is now
+**Market Trend** speedometers (**Today** + **30-Day**, both via `trend_gauge_value`,
+which now returns the directional 0–100 trend **score directly** — no anchor/nudge).
+Both values come from `derived["trend"]` / `derived["trend_30d_ago"]` **published by
+`sentiment_svc`** via the new **intraday Market Trend model** (see the dedicated
+section below) — with the regime badge/desc beneath and a **TREND DETAIL**
+press-and-hold popup showing the four sub-scores (Price/Breadth/Sector/VIX) +
+confidences (`trend_subscore_rows`). The top region is now
 **three columns** (Market Sentiment / Market Trend / Signals); the component
 **table** (Value/Score[2dp]/Weight/Conf — Contrib computed for reconciliation but
 not shown; credit_pulse excluded per v4.3 `WEIGHTS`) and the Trend detail are
@@ -313,6 +325,40 @@ industry rows on expand). Designs/plans:
 [sector-perf](docs/plans/2026-06-14-sentiment-sector-perf-design.md) /
 [persistence+industries](docs/plans/2026-06-14-sentiment-persistence-industries-design.md)
 (+ matching `-plan.md` files).
+**Intraday Market Trend model (DONE — 2026-06-19).** The Market Trend panel is
+driven by a **directional 0–100 score** (50 = neutral, 100 = max bull) recomputed
+**every 15 min**, replacing the old slow daily 5-state SPY classifier. Pieces:
+- **Pure scoring** `sentiment-dashboard/scoring/intraday_trend.py` (scalar in/out, no
+  I/O): four directional sub-scores — `score_price` (45%: MTF EMA alignment + VWAP +
+  MACD/RSI, **ADX-scaled** so chop hugs 50), `score_breadth_dir` (25%: A/D + %>50DMA +
+  H/L), `score_sector_participation` (20%: # green + cyclical-vs-defensive day%-spread),
+  `score_vix_context` (10%: level/change/term) + `vol_confidence_factor` (a VIX-spike
+  damper on aggregate confidence) — blended by `blend_trend` (confidence-weighted, same
+  idiom as `composite.blend`). `score_to_state` maps the score → the existing 5-state
+  vocabulary (**80 bull / 70 pullback / 30–70 range / 20 bear_rally / bear**); hysteresis
+  reuses `trend_regime.commit_state` (2 reads to flip). `TrendSub` is a local float
+  dataclass (NOT the int-only `ScoreResult`).
+- **Service compute** `services/sentiment_svc/compute.py`: `compute_intraday_trend`
+  (fetches SPY intraday 5/15-min + daily via the proxy's new
+  `get_intraday_history`, breadth/sector/VIX quotes — reuses `live_composite._BREADTH/_last/
+  _VIX_SYMS` and standalone `technical`) and `compute_30d_trend` (daily structural analog
+  for the **second gauge**, price + sector only). Both defensive → neutral on any failure.
+- **15-min cadence + persisted state** in `handlers.refresh` via the module-level
+  `_TREND` holder (lock-guarded; `scheduler.trend_due`/`TREND_INTERVAL_SEC=900`): the
+  EMA-smoothing + hysteresis state thread across reads; the held trend rides inside the
+  existing `cache:sentiment:composite` `derived.trend`/`derived.trend_30d_ago` (no new
+  Redis key).
+- **Bridge** (`live_composite.build_bridge_payload` + `compute._bridge_trend`): the
+  intraday `state`/`confidence` + additive `trend_score`/`sub_scores` are merged onto the
+  daily `classify` `sma_*`/`drawdown` (kept for the additive-only contract). `regime_filter`
+  reads `state`/`confidence` unchanged (state strings + vote map identical). The standalone
+  `publish_bridge` GEX path stays on the daily classify.
+- **Page** `webgui/pages/sentiment.py`: `trend_gauge_value` returns the score directly;
+  `trend_subscore_rows` feeds the TREND DETAIL popup. Verified live end-to-end (compute →
+  Redis → bridge → rendered gauges + popup). Design/plan:
+  [design](docs/plans/2026-06-19-intraday-market-trend-redesign-design.md) /
+  [plan](docs/plans/2026-06-19-intraday-market-trend-redesign-plan.md).
+
 **Live intraday + bridge (DONE).** `sentiment-dashboard/live_composite.py`
 `compute_live(schwab, sector_data)` computes a **live** composite from current
 quotes reusing the pure scoring modules (the live analog of

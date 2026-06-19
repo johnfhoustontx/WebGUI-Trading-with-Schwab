@@ -69,6 +69,16 @@ and does not enter the confidence-weighted blend.
 
 ## Trend regime (v4.1)
 
+> **Superseded for the webgui/bridge by the intraday Market Trend model
+> (2026-06-19).** The webgui Sentiment tab and the bridge `trend_regime.state`
+> are now driven by the directional **0–100 intraday trend score**
+> (`scoring/intraday_trend.py` + `services/sentiment_svc/compute.py:compute_intraday_trend`,
+> 15-min cadence, 5-state mapped). The daily `trend_regime.classify` below is still
+> used to fill the **back-compat** `sma_*`/`drawdown` bridge fields (merged in
+> `compute._bridge_trend`) and remains the engine the legacy tk app would use. See the
+> root `CLAUDE.md` "Intraday Market Trend model" section + the
+> `docs/plans/2026-06-19-intraday-market-trend-redesign-*.md` design/plan.
+
 Independent of the sentiment composite. SPY-based 5-state classifier
 published in the bridge as the top-level `trend_regime` block so Options
 Scanner can switch scan recipes on it.
