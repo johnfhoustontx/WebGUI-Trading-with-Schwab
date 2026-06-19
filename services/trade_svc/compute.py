@@ -38,6 +38,7 @@ import pandas as pd
 
 from repo_paths import TRADE_ANALYZER
 from services import _proxy
+from services._parallel import parallel_map
 
 # ── isolated engine imports (separate process — no cross-app name collision) ──
 _ANALYSIS_LIB = TRADE_ANALYZER.parent / "shared" / "analysis_lib"
@@ -153,10 +154,15 @@ def _price_history(symbol, period_type, period, freq_type, freq):
 
 
 def _fetch_timeframes(symbol):
-    """Fetch every configured timeframe; skip any that come back empty."""
+    """Fetch every configured timeframe concurrently; skip any that come back
+    empty. The per-timeframe pulls are independent, I/O-bound proxy calls, so a
+    thread pool overlaps them instead of serializing ~5 round-trips."""
+    def _one(item):
+        tf, (pt, p, ft, f) = item
+        return tf, _price_history(symbol, pt, p, ft, f)
+
     out = {}
-    for tf, (pt, p, ft, f) in _TIMEFRAME_PARAMS.items():
-        df = _price_history(symbol, pt, p, ft, f)
+    for tf, df in parallel_map(_one, list(_TIMEFRAME_PARAMS.items())):
         if df is not None and not df.empty:
             out[tf] = df
     return out
@@ -257,7 +263,16 @@ def analyze(symbol):
                 "errors": ["Insufficient daily history for analysis"],
                 "timestamp": _now_iso()}
 
-    spy = _price_history("SPY", "year", 1, "daily", 1)
+    # SPY history, the symbol's sector-ETF history, and fundamentals are three
+    # independent, I/O-bound proxy fetches — run them concurrently rather than
+    # serially. ``resolve_sector`` is a local lookup (no I/O). Each underlying
+    # fetch is already defensive (degrades to None / empty Fundamentals).
+    sect = resolve_sector(symbol)
+    spy, sector_hist, fundamentals = parallel_map(lambda fn: fn(), [
+        lambda: _price_history("SPY", "year", 1, "daily", 1),
+        lambda: _price_history(sect["etf"], "year", 1, "daily", 1) if sect["etf"] else None,
+        lambda: _fetch_fundamentals(symbol),
+    ])
 
     # Multi-timeframe EMA alignment (weighted across the fetched timeframes).
     align = technical.calculate_ema_alignment(data, price)
@@ -280,18 +295,12 @@ def analyze(symbol):
     else:
         macd_prev = macd_hist
 
-    # Sector strength from the symbol's sector ETF vs SPY (neutral if unknown).
-    sect = resolve_sector(symbol)
-    sector_hist = None
-    if sect["etf"]:
-        sector_hist = _price_history(sect["etf"], "year", 1, "daily", 1)
+    # Sector strength from the symbol's sector ETF vs SPY (neutral if unknown);
+    # sector_hist + fundamentals were fetched concurrently above.
     if sector_hist is not None and spy is not None and not spy.empty:
         ss = compute_sector_strength(sector_hist, spy)
     else:
         ss = _neutral_sector_strength()
-
-    # Fundamentals from the Schwab proxy (empty -> InvestorVerdict degrades to HOLD).
-    fundamentals = _fetch_fundamentals(symbol)
 
     spy_for_pos = spy if spy is not None and not spy.empty else daily
     vwap_val = float(vwap) if vwap else float(daily["close"].iloc[-1])

@@ -19,6 +19,7 @@ empty) exactly as in the page — that behavior is preserved verbatim.
 import sys
 
 from repo_paths import SENTIMENT
+from services._parallel import parallel_map
 
 if str(SENTIMENT) not in sys.path:
     sys.path.insert(0, str(SENTIMENT))
@@ -158,39 +159,64 @@ def proxy_up():
         return False
 
 
-def load_industries(etfs, spy_closes):
-    """Off-thread: quotes + week/month trends + P/C + RRG for industry ETFs."""
+def _fetch_closes(etfs, months):
+    """Concurrent per-ETF daily-history fetch → ({etf: closes}, {etf: trends}).
+
+    The per-ETF history pulls are independent, I/O-bound proxy calls, so they run
+    in a thread pool instead of serializing one round-trip per ETF. Each fetch is
+    defensive (a failed/empty ETF is simply omitted), matching the prior serial
+    loop's per-ETF ``try/except`` + ``continue``. Order of completion doesn't
+    matter — results are keyed by ETF."""
     from services import _proxy
-    from datetime import date, timedelta
-    try:
-        quotes = _proxy.schwab_client.get_quotes(list(etfs)) or {}
-    except Exception:
-        quotes = {}
-    trends, closes = {}, {}
-    for etf in etfs:
+
+    def _one(etf):
         try:
-            df = _proxy.schwab_client.get_daily_history(etf, months=3)
+            return etf, _proxy.schwab_client.get_daily_history(etf, months=months)
         except Exception:
-            df = None
+            return etf, None
+
+    closes, trends = {}, {}
+    for etf, df in parallel_map(_one, list(etfs)):
         if df is None:
             continue
         cl = [float(c) for c in df["close"].tolist()]
         closes[etf] = cl
         d3, wk, mo = week_month_from_closes(cl)
         trends[etf] = {"day3_pct": d3, "week_pct": wk, "month_pct": mo}
-    pcr = {}
+    return closes, trends
+
+
+def _fetch_pcr(etfs):
+    """Concurrent per-ETF ``/chains`` fetch → {etf: put/call ratio}.
+
+    Independent, I/O-bound proxy calls run in a thread pool; each is defensive
+    (a failed chain / missing ratio is omitted), matching the prior serial loop."""
+    from services import _proxy
+    from datetime import date, timedelta
     today_iso = date.today().isoformat()
     to_iso = (date.today() + timedelta(days=30)).isoformat()
-    for etf in etfs:
+
+    def _one(etf):
         try:
             chain = _proxy.schwab_client._request("/chains", params={
                 "symbol": etf, "contractType": "ALL", "range": "NTM",
                 "strikeCount": 50, "fromDate": today_iso, "toDate": to_iso})
         except Exception:
             chain = None
-        v = pcr_from_chain(chain)
-        if v is not None:
-            pcr[etf] = v
+        return etf, pcr_from_chain(chain)
+
+    return {etf: v for etf, v in parallel_map(_one, list(etfs)) if v is not None}
+
+
+def load_industries(etfs, spy_closes):
+    """Off-thread: quotes + week/month trends + P/C + RRG for industry ETFs."""
+    from services import _proxy
+    try:
+        quotes = _proxy.schwab_client.get_quotes(list(etfs)) or {}
+    except Exception:
+        quotes = {}
+    closes, trends = _fetch_closes(etfs, months=3)
+    pcr = _fetch_pcr(etfs)
     quads = scoring_rotation.compute_rrg_quadrants(closes, spy_closes or [],
                                                    rs_window=50, mom_window=20)
     return {"quotes": quotes, "trends": trends, "pcr": pcr, "quadrants": quads}
@@ -201,7 +227,6 @@ def load_sector_perf(spy_closes):
     Returns a dict the page renders. spy_closes reused from the composite load."""
     from services import _proxy
     import sectors_ref
-    from datetime import date, timedelta
 
     sd = sectors_ref.load_sectors_data()
     etfs = [r["etf"] for r in sd if r.get("kind") == "sector" and r.get("etf")]
@@ -211,32 +236,9 @@ def load_sector_perf(spy_closes):
     except Exception:
         quotes = {}
 
-    trends, closes = {}, {}
-    for etf in etfs:
-        try:
-            df = _proxy.schwab_client.get_daily_history(etf, months=3)
-        except Exception:
-            df = None
-        if df is None:
-            continue
-        cl = [float(c) for c in df["close"].tolist()]
-        closes[etf] = cl
-        d3, wk, mo = week_month_from_closes(cl)
-        trends[etf] = {"day3_pct": d3, "week_pct": wk, "month_pct": mo}
-
-    pcr = {}
-    today_iso = date.today().isoformat()
-    to_iso = (date.today() + timedelta(days=30)).isoformat()
-    for etf in etfs:
-        try:
-            chain = _proxy.schwab_client._request("/chains", params={
-                "symbol": etf, "contractType": "ALL", "range": "NTM",
-                "strikeCount": 50, "fromDate": today_iso, "toDate": to_iso})
-        except Exception:
-            chain = None
-        v = pcr_from_chain(chain)
-        if v is not None:
-            pcr[etf] = v
+    # Per-ETF history + /chains both fan out concurrently (was 11+11 serial calls).
+    closes, trends = _fetch_closes(etfs, months=3)
+    pcr = _fetch_pcr(etfs)
 
     try:
         irx_q = _proxy.schwab_client.get_quote("$IRX") or {}

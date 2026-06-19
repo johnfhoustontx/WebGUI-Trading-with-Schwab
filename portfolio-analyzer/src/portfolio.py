@@ -16,6 +16,8 @@ The four comparisons (see ``src.sectors``):
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 from src.sectors import (
     classify_positions,
     sector_weights,
@@ -85,9 +87,17 @@ def build_portfolio(
 
     entries = weighted_avg_entry(trades)
 
-    holdings = [
-        _build_holding(row, data, entries, months) for row in classified
-    ]
+    # Each EQUITY holding does up to 2 independent, I/O-bound history fetches via
+    # ``data`` — build them concurrently (order preserved) so the model build no
+    # longer serializes ~2N proxy round-trips. ``data`` (the proxy client) is
+    # safe for concurrent reads; a thin/options-only portfolio just falls back to
+    # the single-threaded path.
+    if len(classified) > 1:
+        with ThreadPoolExecutor(max_workers=min(8, len(classified))) as ex:
+            holdings = list(ex.map(
+                lambda row: _build_holding(row, data, entries, months), classified))
+    else:
+        holdings = [_build_holding(row, data, entries, months) for row in classified]
     sectors = _build_sectors(classified, benchmark, ranker)
     return {"holdings": holdings, "sectors": sectors}
 

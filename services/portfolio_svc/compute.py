@@ -28,6 +28,7 @@ from datetime import datetime as _dt, timezone
 
 from repo_paths import PORTFOLIO_ANALYZER
 from services import _proxy
+from services._parallel import parallel_map
 
 # ── isolated engine imports (separate process — no cross-app name collision) ──
 if str(PORTFOLIO_ANALYZER) not in sys.path:
@@ -116,15 +117,49 @@ def build_raw_model(data, trades, *, benchmark=None, ranker=None, classify=None)
         return {"holdings": [], "sectors": []}, [f"Failed to build portfolio: {exc}"]
 
 
+def baseline_signature(model, trades, day=None):
+    """A comparable signature of the inputs that determine the baselines.
+
+    Baselines (the slow per-symbol history pass) only need recomputing when the
+    set of EQUITY holdings (symbol + sector ETF), the cost-weighted entries, or
+    the calendar day changes — NOT on every periodic rebuild. ``rebuild`` reuses
+    the cached baselines when this is unchanged, eliminating the ~2N+1 serial
+    history fetches the 10-min rebuild used to make unconditionally. The day is
+    included so history-derived baselines still refresh at least daily even when
+    holdings are static. Defensive — malformed inputs degrade to a best-effort
+    signature rather than raising."""
+    if day is None:
+        day = datetime.date.today().isoformat()
+    try:
+        holdings = tuple(sorted(
+            (h.get("symbol"), h.get("sector_etf"))
+            for h in (model.get("holdings") or [])
+            if h.get("asset_type") == "EQUITY" and h.get("symbol")
+        ))
+    except Exception:  # noqa: BLE001
+        holdings = ()
+    try:
+        entries = weighted_avg_entry(trades or [])
+        entry_sig = tuple(sorted(
+            (sym, round(float(e.get("avg_price") or 0.0), 4),
+             e.get("entry_date"), round(float(e.get("total_quantity") or 0.0), 4))
+            for sym, e in entries.items()
+        ))
+    except Exception:  # noqa: BLE001
+        entry_sig = ()
+    return (day, holdings, entry_sig)
+
+
 def compute_baselines(data, model, trades) -> dict:
     """SLOW per-EQUITY baseline pass (history-derived stats), defensively.
 
     Ports the desktop ``_compute_baselines``: fetch daily history for each
     symbol + its sector ETF (SPY once), look up the trade-store entry, and run
     ``compute_baseline``. Per-symbol failures degrade to a missing baseline
-    rather than failing the lot.
+    rather than failing the lot. The per-symbol fetches (each ~2 proxy calls) run
+    concurrently — they are independent and I/O-bound — so a portfolio of N
+    equities no longer serializes ~2N round-trips.
     """
-    baselines: dict = {}
     try:
         entries = weighted_avg_entry(trades or [])
     except Exception:  # noqa: BLE001 — a bad store row must not kill the pass.
@@ -134,22 +169,24 @@ def compute_baselines(data, model, trades) -> dict:
     except Exception:  # noqa: BLE001 — proxy hiccup: spy_ret degrades to None.
         spy_df = None
 
-    for holding in model.get("holdings") or []:
-        if holding.get("asset_type") != "EQUITY":
-            continue
+    equities = [h for h in (model.get("holdings") or [])
+                if h.get("asset_type") == "EQUITY" and h.get("symbol")]
+
+    def _one(holding):
+        """(symbol, baseline) for one equity, or None on any per-symbol failure."""
         symbol = holding.get("symbol")
-        if not symbol:
-            continue
         try:
             stock_df = data.get_daily_history(symbol)
             sector_etf = holding.get("sector_etf")
             sector_df = (data.get_daily_history(sector_etf)
                          if sector_etf else None)
-            baselines[symbol] = compute_baseline(
-                holding, stock_df, sector_df, spy_df, entries.get(symbol))
+            return (symbol, compute_baseline(
+                holding, stock_df, sector_df, spy_df, entries.get(symbol)))
         except Exception:  # noqa: BLE001 — skip this symbol, keep the rest.
-            continue
-    return baselines
+            return None
+
+    return {sym: bl for sym, bl in
+            (r for r in parallel_map(_one, equities) if r is not None)}
 
 
 def _thresholds() -> Thresholds:

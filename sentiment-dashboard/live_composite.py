@@ -7,6 +7,7 @@ history_backfill._score_one_day). No tk imports.
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 from scoring import WEIGHTS
@@ -19,6 +20,17 @@ from scoring import sector_perf as _sector
 from scoring.types import ScoreResult
 
 logger = logging.getLogger(__name__)
+
+
+def _pmap(fn, items, workers=6):
+    # Concurrent, order-preserving map for the I/O-bound per-sector proxy fan-out
+    # (the proxy rate-limiter only spaces calls, so concurrency overlaps them).
+    items = list(items)
+    if not items:
+        return []
+    with ThreadPoolExecutor(max_workers=min(workers, len(items))) as ex:
+        return list(ex.map(fn, items))
+
 
 # Component display order + back-compat: which keys go in the bridge.
 _BRIDGE_COMPONENTS = ("vix_complex", "put_call", "breadth", "rotation", "sector_perf")
@@ -234,30 +246,32 @@ def compute_live(schwab, sector_data, prior_vix1d=0.0, prior_sector_trends=None)
         if pct is not None:
             last_quotes[etf] = {"change_pct": pct}
 
-    # --- per-sector P/C from /chains -> put_call ---
+    # --- per-sector P/C from /chains -> put_call (fetched concurrently) ---
     from datetime import date, timedelta
-    pcr = {}
     today_iso = date.today().isoformat()
     to_iso = (date.today() + timedelta(days=30)).isoformat()
-    for etf in sectors:
+
+    def _chain(etf):
         try:
             chain = schwab._request("/chains", params={
                 "symbol": etf, "contractType": "ALL", "range": "NTM",
                 "strikeCount": 50, "fromDate": today_iso, "toDate": to_iso})
         except Exception:
             chain = None
-        v = _pcr_from_chain(chain)
-        if v is not None:
-            pcr[etf] = v
+        return etf, _pcr_from_chain(chain)
+
+    pcr = {etf: v for etf, v in _pmap(_chain, sectors) if v is not None}
     pc_res = _pc.score_sector_weighted(pcr, sp_weights)
 
     # --- sector close history -> dual momentum (rotation) + sector_perf ---
-    closes = {}
-    for etf in sectors:
+    def _hist(etf):
         try:
-            df = schwab.get_daily_history(etf, months=12)
+            return etf, schwab.get_daily_history(etf, months=12)
         except Exception:
-            df = None
+            return etf, None
+
+    closes = {}
+    for etf, df in _pmap(_hist, sectors):
         if df is not None:
             cl = [float(c) for c in df["close"].tolist()]
             if len(cl) >= 64:

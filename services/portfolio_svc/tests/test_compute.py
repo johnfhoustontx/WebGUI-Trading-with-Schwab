@@ -59,6 +59,52 @@ def _hist(closes):
                          "low": closes, "close": closes, "volume": [1000] * n})
 
 
+# --- baseline_signature (recompute-only-when-changed) ----------------------
+
+def _eq_holding(symbol="AAPL", etf="XLK"):
+    return {"symbol": symbol, "sector_etf": etf, "asset_type": "EQUITY"}
+
+
+_BUY = {"instruction": "BUY", "symbol": "AAPL", "quantity": 10, "price": 150.0,
+        "trade_date": "2026-01-02"}
+
+
+def test_baseline_signature_stable_for_same_inputs():
+    model = {"holdings": [_eq_holding()], "sectors": []}
+    s1 = compute.baseline_signature(model, [_BUY], day="2026-06-19")
+    s2 = compute.baseline_signature(model, [dict(_BUY)], day="2026-06-19")
+    assert s1 == s2
+
+
+def test_baseline_signature_changes_on_new_holding():
+    base = {"holdings": [_eq_holding()], "sectors": []}
+    more = {"holdings": [_eq_holding(), _eq_holding("MSFT", "XLK")], "sectors": []}
+    assert (compute.baseline_signature(base, [_BUY], day="2026-06-19")
+            != compute.baseline_signature(more, [_BUY], day="2026-06-19"))
+
+
+def test_baseline_signature_changes_on_new_trade():
+    model = {"holdings": [_eq_holding()], "sectors": []}
+    extra = dict(_BUY, quantity=5, trade_date="2026-02-02")
+    assert (compute.baseline_signature(model, [_BUY], day="2026-06-19")
+            != compute.baseline_signature(model, [_BUY, extra], day="2026-06-19"))
+
+
+def test_baseline_signature_changes_on_day():
+    model = {"holdings": [_eq_holding()], "sectors": []}
+    assert (compute.baseline_signature(model, [_BUY], day="2026-06-19")
+            != compute.baseline_signature(model, [_BUY], day="2026-06-20"))
+
+
+def test_baseline_signature_ignores_non_equity():
+    eq = {"holdings": [_eq_holding()], "sectors": []}
+    plus_opt = {"holdings": [_eq_holding(),
+                             {"symbol": "AAPL_OPT", "asset_type": "OPTION"}],
+                "sectors": []}
+    assert (compute.baseline_signature(eq, [_BUY], day="2026-06-19")
+            == compute.baseline_signature(plus_opt, [_BUY], day="2026-06-19"))
+
+
 # --- format_payload --------------------------------------------------------
 
 def test_format_payload_builds_display_rows():

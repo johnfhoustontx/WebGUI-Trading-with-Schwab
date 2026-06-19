@@ -83,6 +83,51 @@ def test_rebuild_happy(monkeypatch):
     assert pm.holdings_rows[0]["symbol"] == "AAPL"
 
 
+def _patch_rebuild_compute(monkeypatch, baselines_counter, sig_seq):
+    """Wire compute so rebuild runs offline; baselines_counter counts compute
+    calls, sig_seq supplies the signature returned on each rebuild."""
+    monkeypatch.setattr(handlers.compute, "make_data", lambda: object())
+    monkeypatch.setattr(handlers.compute, "proxy_up", lambda: True)
+    monkeypatch.setattr(handlers.compute, "load_trades", lambda data: [])
+    monkeypatch.setattr(handlers.compute, "build_raw_model",
+                        lambda data, trades: (_model(), []))
+
+    def _baselines(data, model, trades):
+        baselines_counter["n"] += 1
+        return {"AAPL": {"v": baselines_counter["n"]}}
+
+    monkeypatch.setattr(handlers.compute, "compute_baselines", _baselines)
+    sigs = iter(sig_seq)
+    monkeypatch.setattr(handlers.compute, "baseline_signature",
+                        lambda model, trades: next(sigs))
+
+
+def test_rebuild_reuses_baselines_when_signature_unchanged(monkeypatch):
+    bus = Bus(fake=True)
+    state = PortfolioState()
+    counter = {"n": 0}
+    _patch_rebuild_compute(monkeypatch, counter, ["SIG", "SIG"])
+
+    handlers.rebuild(bus, state)
+    handlers.rebuild(bus, state)
+
+    assert counter["n"] == 1  # second rebuild reused the cached baselines
+    assert state.baselines == {"AAPL": {"v": 1}}
+
+
+def test_rebuild_recomputes_baselines_when_signature_changes(monkeypatch):
+    bus = Bus(fake=True)
+    state = PortfolioState()
+    counter = {"n": 0}
+    _patch_rebuild_compute(monkeypatch, counter, ["SIG-A", "SIG-B"])
+
+    handlers.rebuild(bus, state)
+    handlers.rebuild(bus, state)
+
+    assert counter["n"] == 2  # holdings/trades changed -> recomputed
+    assert state.baselines == {"AAPL": {"v": 2}}
+
+
 def test_handle_command_refresh_sets_flag():
     from services.portfolio_svc import state as state_mod
 

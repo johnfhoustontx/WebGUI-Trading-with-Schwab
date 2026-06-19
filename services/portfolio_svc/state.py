@@ -18,6 +18,7 @@ class PortfolioState:
     def __init__(self):
         self.raw_model = {"holdings": [], "sectors": []}
         self.baselines = {}
+        self.baseline_sig = None        # signature of the inputs baselines were built from
         self.trades = []
         self.proxy_up = False
         self.streaming = False

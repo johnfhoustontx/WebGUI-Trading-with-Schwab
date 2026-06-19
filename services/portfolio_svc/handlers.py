@@ -58,10 +58,22 @@ def rebuild(bus, state) -> None:
 
     trades = compute.load_trades(data)
     model, errs = compute.build_raw_model(data, trades)
-    baselines = compute.compute_baselines(data, model, trades)
+    # Baselines are the slow per-symbol history pass (~2N proxy calls). Recompute
+    # them only when the holdings/trades/day signature changed — otherwise reuse
+    # the cached ones, so the periodic 10-min rebuild stops re-fetching unchanged
+    # history every cycle.
+    sig = compute.baseline_signature(model, trades)
+    with state.lock:
+        prev_sig = state.baseline_sig
+        prev_baselines = state.baselines
+    if sig == prev_sig and prev_baselines:
+        baselines = prev_baselines
+    else:
+        baselines = compute.compute_baselines(data, model, trades)
     with state.lock:
         state.raw_model = model
         state.baselines = baselines
+        state.baseline_sig = sig
         state.trades = trades
         state.proxy_up = True
         state.errors = errs
