@@ -40,3 +40,21 @@ def test_score_price_missing_data_low_conf():
     s = score_price(alignment_pct=0, price_vs_vwap_pct=0, macd_hist=0,
                     rsi=50, adx=20, n_timeframes=0)
     assert s.confidence == 0.0
+
+
+from scoring.intraday_trend import score_breadth_dir
+
+
+def test_breadth_strong_positive():
+    s = score_breadth_dir(net_ad=0.8, pct_above_50=80, new_highs=300, new_lows=20)
+    assert s.score > 75 and s.confidence > 0
+
+
+def test_breadth_strong_negative():
+    s = score_breadth_dir(net_ad=-0.8, pct_above_50=20, new_highs=20, new_lows=300)
+    assert s.score < 25
+
+
+def test_breadth_missing_data():
+    s = score_breadth_dir(net_ad=None, pct_above_50=None, new_highs=0, new_lows=0)
+    assert s.confidence == 0.0 and s.score == 50.0
