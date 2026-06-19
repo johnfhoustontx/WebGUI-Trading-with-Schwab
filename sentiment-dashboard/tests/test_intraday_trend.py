@@ -150,3 +150,15 @@ def test_ema_smooth_first_value_passthrough():
 def test_ema_smooth_moves_toward_new():
     out = ema_smooth(50.0, 80.0, span=3)
     assert out == 65.0
+
+
+from scoring.trend_regime import commit_state
+
+
+def test_commit_state_needs_two_reads_to_flip():
+    committed, hist = commit_state("range", [], None)
+    assert committed == "range"
+    committed, hist = commit_state("bull_trend", hist, committed)
+    assert committed == "range"
+    committed, hist = commit_state("bull_trend", hist, committed)
+    assert committed == "bull_trend"
