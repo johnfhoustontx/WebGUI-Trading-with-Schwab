@@ -127,8 +127,14 @@ FLAT_NAV = [
     ("/trade", "Trade", "analytics"),
     ("/portfolio", "Portfolio", "account_balance"),
     ("/driver", "Driver", "smart_toy"),
+]
+
+# "More" is an expandable group for reports / diagnostics / config. (route, label, icon)
+MORE_CHILDREN = [
     ("/eod", "EOD Report", "summarize"),
+    ("/status", "System Status", "monitor_heart"),
     ("/settings", "Settings", "settings"),
+    ("/terminate", "Terminate", "power_settings_new"),
 ]
 
 # Persisted left-nav expansion state (single-user); None/absent = use active-route default.
@@ -250,6 +256,14 @@ def _layout(active: str, title: str):
                 _nav_link(path, label, icon, active)
         for path, label, icon in FLAT_NAV:
             _nav_link(path, label, icon, active)
+        more_active = active in {p for p, _, _ in MORE_CHILDREN}
+        more_exp = ui.expansion(
+            "More", icon="more_horiz", value=_NAV_OPEN.get("More", more_active)
+        ).classes("w-full")
+        more_exp.on_value_change(lambda e: _NAV_OPEN.__setitem__("More", e.value))
+        with more_exp:
+            for path, label, icon in MORE_CHILDREN:
+                _nav_link(path, label, icon, active)
 
     with ui.header().classes("items-center justify-between"):
         with ui.row().classes("items-center gap-2"):
@@ -392,11 +406,25 @@ def eod_detail_page() -> None:
         eod.render_detail()
 
 
+@ui.page("/status")
+def status_page() -> None:
+    with _layout("/status", "System Status"):
+        from pages import status
+        status.render()
+
+
 @ui.page("/settings")
 def settings_page() -> None:
     with _layout("/settings", "Settings"):
         from pages import settings
         settings.render()
+
+
+@ui.page("/terminate")
+def terminate_page() -> None:
+    with _layout("/terminate", "Terminate"):
+        from pages import terminate
+        terminate.render()
 
 
 if __name__ in {"__main__", "__mp_main__"}:

@@ -64,6 +64,29 @@ def read_version(view):
     return env.version if env else None
 
 
+def read_meta(view):
+    """Return ``(version, ts)`` for a view, or ``(None, None)`` if absent.
+
+    ``ts`` is the ISO-8601 UTC timestamp the publishing service stamped on the
+    cache write (``CacheEnvelope.ts``). Used by the System Status page to show
+    how fresh each domain's published data is.
+    """
+    env = bus().cache_get(f"cache:{view}")
+    return (env.version, env.ts) if env else (None, None)
+
+
+def ping():
+    """Return True if the Redis/Memurai backbone answers a PING, else False.
+
+    Never raises — a down/unreachable backend yields False. Used by the System
+    Status page to report Tier-3 (Memurai) health.
+    """
+    try:
+        return bool(bus()._r.ping())
+    except Exception:
+        return False
+
+
 def request(domain, command):
     """Enqueue a command dict (e.g. {'type':'refresh'}) onto ``f'cmd:{domain}'``.
 

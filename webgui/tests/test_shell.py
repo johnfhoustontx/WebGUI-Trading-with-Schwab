@@ -16,7 +16,7 @@ def test_shell_registers_all_pages():
         "/options/calculator", "/options/swing", "/options/gamma",
         "/options/simulator", "/sentiment", "/sentiment/rotation",
         "/trade", "/portfolio", "/driver", "/settings",
-        "/eod", "/eod/detail",
+        "/eod", "/eod/detail", "/status", "/terminate",
     )
     for path in expected:
         assert path in routes, f"missing page route {path}; have {sorted(routes)}"
