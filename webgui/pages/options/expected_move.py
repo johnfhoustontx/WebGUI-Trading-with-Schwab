@@ -77,7 +77,7 @@ def expected_move_figure(payload, timeframe="daily"):
         "scrollbar": {"enabled": False},
         "xAxis": {**_DARK_AXIS, "type": "datetime",
                   "crosshair": {"label": {"enabled": True,
-                                          "format": "{value:%b %e, %Y}"},
+                                          "format": "{value:%Y-%m-%d}"},
                                 "snap": False}},
         "yAxis": {**_DARK_AXIS, "title": {"text": "Price"}, "opposite": False,
                   "crosshair": {"label": {"enabled": True,
