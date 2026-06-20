@@ -364,6 +364,7 @@ def handle_command(bus, command) -> None:
     elif command.type == "expected_move":
         a = command.args or {}
         res = compute.compute_expected_move(
-            a.get("symbol"), a.get("expiry"), a.get("legs") or [])
+            a.get("symbol"), a.get("expiry"), a.get("legs") or [],
+            a.get("lookback", "auto"))
         version = bus.cache_set(CACHE_EXPECTED_MOVE, res)
         bus.publish(EVENT_EXPECTED_MOVE, {"version": version})

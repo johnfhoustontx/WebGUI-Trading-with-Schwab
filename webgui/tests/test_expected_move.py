@@ -75,6 +75,13 @@ def test_expected_move_figure_handles_empty_payload():
     assert fig["series"] == [] or all(not s.get("data") for s in fig["series"])
 
 
+def test_em_lookback_options_has_auto_and_overrides():
+    opts = em.em_lookback_options()
+    assert opts["auto"].startswith("Auto")
+    for key in ("1mo", "3mo", "6mo", "1y"):
+        assert key in opts
+
+
 def test_render_callable():
     assert callable(em.render)
 

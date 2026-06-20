@@ -39,6 +39,22 @@ def test_em_cone_empty_on_bad_inputs():
     assert compute.em_cone(100.0, 0.2, 0, 0) == {"upper": [], "lower": []}
 
 
+def test_em_lookback_spec_auto():
+    assert compute.em_lookback_spec(1)["mode"] == "intraday"
+    assert compute.em_lookback_spec(2)["mode"] == "intraday"
+    d = compute.em_lookback_spec(15)
+    assert d["mode"] == "daily" and d["bars"] == 45      # 3×15
+    assert compute.em_lookback_spec(3)["bars"] == 20     # clamp floor (3×3=9 → 20)
+    assert compute.em_lookback_spec(200)["bars"] == 252  # clamp cap
+
+
+def test_em_lookback_spec_override():
+    assert compute.em_lookback_spec(15, "6mo")["bars"] == 130
+    assert compute.em_lookback_spec(15, "1y")["bars"] == 252
+    # Unknown override falls back to auto.
+    assert compute.em_lookback_spec(15, "bogus") == compute.em_lookback_spec(15)
+
+
 class _Resp:
     def __init__(self, data):
         self._data = data
@@ -141,7 +157,8 @@ class _Cmd:
 
 def test_expected_move_command_caches_view(monkeypatch):
     monkeypatch.setattr(compute, "compute_expected_move",
-                        lambda s, e, legs: {"symbol": s, "expiry": e, "legs": legs,
+                        lambda s, e, legs, lookback="auto": {"symbol": s, "expiry": e,
+                                            "legs": legs, "lookback": {"key": lookback},
                                             "error": None, "candles": [[1, 1, 1, 1, 1]]})
     bus = Bus()
     handlers.handle_command(bus, _Cmd("expected_move",

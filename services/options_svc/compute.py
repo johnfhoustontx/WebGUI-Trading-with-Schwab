@@ -1381,10 +1381,73 @@ def _now_iso():
     return dt.datetime.now(dt.timezone.utc).isoformat()
 
 
-_EM_HISTORY_BARS = 130  # ~6 months of trading days
+_EM_HISTORY_BARS = 130  # ~6 months of trading days (legacy default / "6mo" override)
+
+_EM_OVERRIDES = {
+    "1mo": {"mode": "daily", "months": 1,  "bars": 21,  "label": "daily · 1mo"},
+    "3mo": {"mode": "daily", "months": 3,  "bars": 63,  "label": "daily · 3mo"},
+    "6mo": {"mode": "daily", "months": 6,  "bars": 130, "label": "daily · 6mo"},
+    "1y":  {"mode": "daily", "months": 12, "bars": 252, "label": "daily · 1y"},
+}
 
 
-def compute_expected_move(symbol, expiry, legs) -> dict:
+def em_lookback_spec(dte, override="auto") -> dict:
+    """Map ``(dte, override)`` → a trailing-history spec for Expected Move.
+
+    ``override`` of ``"auto"`` (or unknown) gives a window ≈ **3× DTE** trading
+    days behind the forward cone: very short DTE (≤2) switches to intraday
+    candles, otherwise daily clamped to [20, 252] bars. Known override keys force
+    a fixed daily window (1mo/3mo/6mo/1y). Returns a dict with ``mode``
+    ('daily'|'intraday') plus the params the fetch needs and a ``label``."""
+    import math
+    if override and override != "auto" and override in _EM_OVERRIDES:
+        return dict(_EM_OVERRIDES[override])
+    try:
+        dte = int(dte)
+    except (TypeError, ValueError):
+        dte = 15
+    if dte <= 2:
+        return {"mode": "intraday", "minutes": 30, "days": 3, "label": "30-min · 3d"}
+    bars = min(252, max(20, 3 * dte))
+    return {"mode": "daily", "months": max(1, math.ceil(bars / 21)), "bars": bars,
+            "label": f"daily · {bars}d"}
+
+
+def _fetch_em_candles(symbol, spec):
+    """Fetch OHLC candles ([[ts_ms, o, h, l, c], …]) for an EM ``spec``.
+
+    Intraday specs use the flexible ``get_intraday_history``; daily specs reuse
+    ``get_price_history_every_day`` (1-yr daily) sliced to the last ``bars`` rows
+    (same partial-bar filtering as before). Defensive: returns ``[]`` on failure."""
+    try:
+        if spec.get("mode") == "intraday":
+            import pandas as pd
+            df = _proxy.schwab_client.get_intraday_history(
+                symbol, minutes=spec["minutes"], days=spec["days"])
+            if df is None or len(df) == 0:
+                return []
+            out = []
+            for _, row in df.iterrows():
+                ts = int(pd.Timestamp(row["datetime"]).timestamp() * 1000)
+                if None in (row.get("open"), row.get("high"), row.get("low"), row.get("close")):
+                    continue
+                out.append([ts, row["open"], row["high"], row["low"], row["close"]])
+            out.sort(key=lambda r: r[0])
+            return out
+        cresp = _proxy.schwab_py_client.get_price_history_every_day(symbol)
+        raw = cresp.json().get("candles", []) if getattr(cresp, "status_code", None) == 200 else []
+        candles = [[int(c["datetime"]), c["open"], c["high"], c["low"], c["close"]]
+                   for c in raw
+                   if c.get("datetime") is not None
+                   and c.get("open") is not None and c.get("high") is not None
+                   and c.get("low") is not None and c.get("close") is not None]
+        candles.sort(key=lambda r: r[0])
+        return candles[-int(spec.get("bars", _EM_HISTORY_BARS)):]
+    except Exception:
+        return []
+
+
+def compute_expected_move(symbol, expiry, legs, lookback="auto") -> dict:
     """Build the Expected Move payload for a symbol/expiry/legs (defensive).
 
     Fetches ~6mo daily candles + the option chain, derives ATM IV for ``expiry``
@@ -1394,7 +1457,8 @@ def compute_expected_move(symbol, expiry, legs) -> dict:
 
     base = {"symbol": symbol, "expiry": expiry, "spot": None, "atm_iv": None,
             "dte": None, "candles": [], "em_upper": [], "em_lower": [],
-            "legs": legs or [], "generated_at": _now_iso(), "error": None}
+            "legs": legs or [], "generated_at": _now_iso(),
+            "lookback": {"label": "", "key": lookback or "auto"}, "error": None}
     try:
         api = "$SPX" if (symbol or "").upper() == "SPX" else (symbol or "").upper()
         if not api:
@@ -1402,25 +1466,23 @@ def compute_expected_move(symbol, expiry, legs) -> dict:
             return base
         today = dt.date.today()
 
-        cresp = _proxy.schwab_py_client.get_price_history_every_day(api)
-        raw = cresp.json().get("candles", []) if getattr(cresp, "status_code", None) == 200 else []
-        candles = [[int(c["datetime"]), c["open"], c["high"], c["low"], c["close"]]
-                   for c in raw
-                   if c.get("datetime") is not None
-                   and c.get("open") is not None and c.get("high") is not None
-                   and c.get("low") is not None and c.get("close") is not None]
-        candles.sort(key=lambda r: r[0])
-        candles = candles[-_EM_HISTORY_BARS:]
-        if not candles:
-            base["error"] = f"No price history for {api}."
-            return base
-        base["candles"] = candles
-
+        # Parse the expiry first — the trailing-history window is DTE-aware.
         try:
             exp_date = dt.date.fromisoformat(str(expiry))
         except Exception:
             base["error"] = f"Bad expiry: {expiry!r}."
             return base
+        dte = (exp_date - today).days
+        base["dte"] = dte
+        spec = em_lookback_spec(dte, lookback)
+        base["lookback"] = {"label": spec.get("label", ""), "key": lookback or "auto"}
+
+        candles = _fetch_em_candles(api, spec)
+        if not candles:
+            base["error"] = f"No price history for {api}."
+            return base
+        base["candles"] = candles
+
         oresp = _proxy.schwab_py_client.get_option_chain(
             api, contract_type="ALL", from_date=today, to_date=exp_date)
         chain = oresp.json() if getattr(oresp, "status_code", None) == 200 else None
@@ -1436,8 +1498,6 @@ def compute_expected_move(symbol, expiry, legs) -> dict:
         atm_iv = atm_iv_from_chain(chain or {}, spot, expiry=str(expiry))
         base["atm_iv"] = atm_iv
 
-        dte = (exp_date - today).days
-        base["dte"] = dte
         if atm_iv is None:
             base["error"] = f"No ATM IV for {api} {expiry}."
             return base

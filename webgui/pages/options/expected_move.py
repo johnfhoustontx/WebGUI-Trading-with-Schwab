@@ -27,6 +27,22 @@ _DARK_AXIS = {"labels": {"style": {"color": "#bdbdbd"}},
               "gridLineColor": "rgba(255,255,255,0.06)",
               "lineColor": "rgba(255,255,255,0.15)"}
 
+# Expected Move trailing-history override menu (key → label). "auto" lets the
+# service size the window to ~3× DTE (short DTE → intraday); the rest force a
+# fixed daily window.
+EM_LOOKBACKS = [
+    ("auto", "Auto (≈3× DTE)"),
+    ("1mo", "Daily · 1mo"),
+    ("3mo", "Daily · 3mo"),
+    ("6mo", "Daily · 6mo"),
+    ("1y", "Daily · 1y"),
+]
+
+
+def em_lookback_options():
+    """{key: label} dict for the Expected Move look-back ui.select."""
+    return {key: label for key, label in EM_LOOKBACKS}
+
 
 def leg_lines(legs):
     """yAxis plotLines for each leg: short solid / long dashed, put/call colored."""
@@ -120,20 +136,24 @@ def render():
 
     ui.label("Expected Move").classes("text-h5")
 
-    state = {"ver": None}
+    state = {"ver": None, "last": None}
 
     with ui.row().classes("items-end gap-3 flex-wrap"):
         symbol_in = select_all_on_focus(ui.input("Symbol", value="SPY").classes("w-28"))
         expiry_in = ui.input("Expiry (YYYY-MM-DD)").classes("w-44")
         strike_in = ui.number("Strike (optional)", format="%.2f").classes("w-36")
         type_tog = ui.toggle(["put", "call"], value="put")
+        lookback_sel = ui.select(em_lookback_options(), value="auto",
+                                 label="Look-back").classes("w-40")
         draw_btn = ui.button("Draw", icon="show_chart")
         status = ui.label("").classes("opacity-70 text-sm")
 
     chart = ui.highchart(expected_move_figure({}), extras=["stock"]).classes("w-full")
 
     def _repaint(payload):
-        status.text = (payload or {}).get("error") or ""
+        err = (payload or {}).get("error")
+        spec = ((payload or {}).get("lookback") or {}).get("label") or ""
+        status.text = err or (f"Look-back: {spec}" if spec else "")
         chart.options = expected_move_figure(payload or {})
         chart.update()
 
@@ -142,7 +162,10 @@ def render():
         if not payload or not payload.get("symbol") or not payload.get("expiry"):
             ui.notify("Symbol + expiry required.", type="warning")
             return
-        bus_client.request("options", {"type": "expected_move", "args": payload})
+        # Remember the query (sans look-back) so a look-back change can re-run it.
+        state["last"] = {k: payload.get(k) for k in ("symbol", "expiry", "legs")}
+        args = {**payload, "lookback": lookback_sel.value}
+        bus_client.request("options", {"type": "expected_move", "args": args})
         status.text = f"Computing expected move for {payload['symbol']}…"
 
     @guard
@@ -154,7 +177,13 @@ def render():
         _enqueue({"symbol": (symbol_in.value or "").replace("$", "").upper(),
                   "expiry": (expiry_in.value or "").strip(), "legs": legs})
 
+    @guard
+    def _lookback_changed():
+        if state.get("last"):
+            _enqueue(state["last"])
+
     draw_btn.on_click(_draw)
+    lookback_sel.on_value_change(lambda e: _lookback_changed())
 
     @guard
     def _poll():
