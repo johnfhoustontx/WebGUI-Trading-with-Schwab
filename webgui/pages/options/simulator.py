@@ -106,8 +106,70 @@ def ivshock_figure(base, shock, mult=1.5):
     }
 
 
+_GREEK_PANELS = ["delta", "gamma", "theta", "vega", "rho"]
+_PANEL_TITLES = ["Price", "Delta", "Gamma", "Theta", "Vega", "Rho"]
+CURSOR_COLOR = "#ef5350"
+PRICE_COLOR = "#66bb6a"
+GREEK_COLOR = "#42a5f5"
+
+
+def replay_figure(trace, cursor=None):
+    """Stacked price + 5-Greek replay chart over an integer (gap-compressed) x.
+
+    One Highcharts element with six stacked yAxes sharing the integer x-axis
+    (overnight/weekend breaks already collapsed by ``compute.sim_replay``).
+    Session boundaries render as dashed xAxis plotLines; ``cursor`` (an int
+    x-index) draws one more vertical plotLine — the client-side scrub cursor. The
+    x-axis stays NUMERIC (dates live in the tooltip / tick labels) to avoid the
+    datetime-crosshair epoch-ms gotcha. Returns an empty-but-valid chart when
+    ``trace`` is missing."""
+    trace = trace or {}
+    x = trace.get("x") or []
+    prices = trace.get("prices") or []
+    greeks = trace.get("greeks") or {}
+    sessions = trace.get("sessions") or []
+
+    panels = ["price"] + _GREEK_PANELS
+    n = len(panels)
+    gap = 3                                  # % vertical gap between panels
+    h = (100 - gap * (n - 1)) / n
+    yaxes, series = [], []
+    for i, (panel, title) in enumerate(zip(panels, _PANEL_TITLES)):
+        top = i * (h + gap)
+        yaxes.append({**_DARK_AXIS,
+                      "title": {"text": title, "style": {"color": "#bdbdbd"}},
+                      "top": f"{top}%", "height": f"{h}%", "offset": 0,
+                      "lineWidth": 1})
+        col = prices if panel == "price" else (greeks.get(panel) or [])
+        data = [[xi, v] for xi, v in zip(x, col)]
+        series.append({"name": title, "type": "line", "yAxis": i, "data": data,
+                       "color": PRICE_COLOR if panel == "price" else GREEK_COLOR,
+                       "marker": {"enabled": False}})
+
+    # Dashed session boundaries (skip the first session's start) + scrub cursor.
+    xplotlines = [_plotline(s["start"] - 0.5, "#777777", dash="Dot", width=1)
+                  for s in sessions[1:]]
+    if cursor is not None:
+        xplotlines.append(_plotline(cursor, CURSOR_COLOR, width=1))
+
+    return {
+        "chart": {"height": 600, "backgroundColor": "transparent"},
+        "title": {"text": f"Replay — {trace.get('resolution', '')}".rstrip(" —"),
+                  "style": {"color": "#e6e6e6"}},
+        "credits": {"enabled": False},
+        "accessibility": {"enabled": False},
+        "legend": {"enabled": False},
+        "xAxis": {**_DARK_AXIS, "plotLines": xplotlines,
+                  "labels": {"style": {"color": "#bdbdbd"}}},
+        "yAxis": yaxes,
+        "tooltip": {"shared": True},
+        "plotOptions": {"series": {"animation": False}},
+        "series": series,
+    }
+
+
 def render():
-    """Simulator page: fetch button + contract selector + What-if / IV-shock tabs."""
+    """Simulator page: fetch button + contract selector + Replay / What-if / IV-shock tabs."""
     ui.label("Simulator").classes("text-h5")
 
     # Page state (local closure, not module globals — built per request).

@@ -34,6 +34,49 @@ def test_ivshock_figure_two_series():
     assert len(fig["series"]) == 2 and fig["chart"]["type"] == "column"
 
 
+def test_replay_figure_stacks_price_and_greeks():
+    trace = {
+        "spot": 452.0,
+        "timestamps": ["2026-06-18T09:30:00", "2026-06-18T09:31:00"],
+        "x": [0, 1],
+        "prices": [450.0, 451.0],
+        "greeks": {"delta": [0.5, 0.55], "gamma": [0.01, 0.01],
+                   "theta": [-0.1, -0.1], "vega": [0.2, 0.2], "rho": [0.05, 0.05]},
+        "gaps": [], "sessions": [{"start": 0, "end": 2, "date": "2026-06-18"}],
+        "ticks": {"pos": [0, 1], "labels": ["09:30", "09:31"]},
+        "resolution": "2 bars, 1-min × 1 sessions",
+    }
+    fig = sim.replay_figure(trace, cursor=1)
+    # 6 stacked series (price + 5 greeks) over 6 stacked yAxes.
+    assert len(fig["series"]) == 6
+    assert len(fig["yAxis"]) == 6
+    # Each greek series points at its own yAxis index.
+    assert [s["yAxis"] for s in fig["series"]] == [0, 1, 2, 3, 4, 5]
+    assert fig["series"][0]["data"] == [[0, 450.0], [1, 451.0]]
+    # Scrub cursor present as an xAxis plotLine at the cursor index.
+    assert any(pl["value"] == 1 for pl in fig["xAxis"]["plotLines"])
+
+
+def test_replay_figure_draws_session_boundaries():
+    trace = {
+        "x": [0, 1, 2, 3], "prices": [1, 2, 3, 4],
+        "greeks": {g: [0, 0, 0, 0] for g in ("delta", "gamma", "theta", "vega", "rho")},
+        "sessions": [{"start": 0, "end": 2, "date": "2026-06-18"},
+                     {"start": 2, "end": 4, "date": "2026-06-19"}],
+        "resolution": "x",
+    }
+    fig = sim.replay_figure(trace, cursor=None)
+    # Boundary before the 2nd session (start 2 -> plotLine at 1.5); no cursor line.
+    assert any(pl["value"] == 1.5 for pl in fig["xAxis"]["plotLines"])
+    assert not any(pl.get("color") == sim.CURSOR_COLOR for pl in fig["xAxis"]["plotLines"])
+
+
+def test_replay_figure_empty_trace_is_safe():
+    fig = sim.replay_figure({}, cursor=0)
+    assert len(fig["series"]) == 6
+    assert all(s["data"] == [] for s in fig["series"])
+
+
 def test_records_normalizes_df_and_list():
     class _DF:
         def to_dict(self, orient):
