@@ -718,9 +718,11 @@ cone for a given option strike/expiration. Reached via a **new-browser-tab hando
 button on Scanner, Paper Trades, Captured Signals, and Calculator (or standalone from
 the Options nav with manual symbol+expiry). Pieces:
 - **Compute (Tier 2, `services/options_svc/compute.py`):** `compute_expected_move(symbol,
-  expiry, legs)` fetches ~6-mo daily candles (`get_price_history_every_day`, capped to
-  the most-recent `_EM_HISTORY_BARS=130`, partial bars skipped), the option chain, and
-  spot (live quote else last close), then derives ATM IV for the expiry
+  expiry, legs, lookback="auto")` fetches a **DTE-aware** trailing-history window
+  (`em_lookback_spec` → `_fetch_em_candles`: auto ≈ **3× DTE** trading days clamped to
+  [20, 252], short DTE ≤2 → intraday 30-min; or a fixed `1mo`/`3mo`/`6mo`/`1y` override —
+  replaces the old fixed `_EM_HISTORY_BARS=130`, partial bars skipped), the option chain,
+  and spot (live quote else last close), then derives ATM IV for the expiry
   (`atm_iv_from_chain` — nearest-strike `volatility`, percent→decimal, exact-then-nearest
   fallback) and the cone (`em_cone`: one point/day, `width(t)=spot·atm_iv·√(t/365)`,
   anchored at spot). Fully defensive — returns a JSON-safe dict with `error` set on any
@@ -732,7 +734,9 @@ the Options nav with manual symbol+expiry). Pieces:
   **candlestick** via `extras=["stock"]` + Upper/Lower EM dashed line series + datetime
   xAxis + x/y `crosshair.label` boxes) and `leg_lines` (yAxis plotLines: short solid /
   long dashed, put-red/call-blue) are unit-tested. One persistent `ui.highchart` built at
-  render (ESM-import-map gotcha), updated in place; `@guard` on handlers.
+  render (ESM-import-map gotcha), updated in place; `@guard` on handlers. A **Look-back**
+  dropdown (`em_lookback_options`: Auto≈3×DTE / 1mo / 3mo / 6mo / 1y) re-runs the last
+  query with the chosen window; the active spec label shows in the status line.
 - **Handoff (`handoff.py`):** `signal_to_em_payload(signal)` normalizes a scanner/captured/
   paper signal dict → `{symbol, expiry, legs}` (per-type strikes via `_EM_LEG_FIELDS`);
   `send_to_expected_move` stashes (`_pending["expected_move"]`) + opens the page in a new
@@ -750,14 +754,19 @@ IV-shock) was migrated to the 3-tier model. The in-process `ChainSnapshot` that
 along the underlying's recent path by the existing pure
 `options_simulator.ReplayEngine`. Pieces:
 - **Compute (Tier 2, `services/options_svc/compute.py`):** `sim_replay(symbol,
-  expiry, kind, strike, direction)` runs `ReplayEngine.full_trace` via
-  `aggregate_position`, then ports the legacy window's **gap-compression /
+  expiry, kind, strike, direction, lookback="auto")` runs `ReplayEngine.full_trace`
+  via `aggregate_position`, then ports the legacy window's **gap-compression /
   session** layout (overnight/weekend breaks collapsed onto a consecutive integer
   x-axis; `gaps`/`sessions`/`ticks`/`resolution`) into a **JSON-safe** dict
-  (`x`/`prices`/`greeks{delta,gamma,theta,vega,rho}`/`timestamps`). Defensive:
+  (`x`/`prices`/`greeks{delta,gamma,theta,vega,rho}`/`timestamps`/`lookback`). The
+  re-priced path is a **DTE-aware** window fetched here (`replay_lookback_spec` →
+  `_fetch_replay_history` via the proxy: 0-DTE → 1-min/1d · ≤5 → 5-min/3d · ≤15 →
+  5-min/5d · >15 → daily/~½×DTE; or a fixed override key), **NOT** the snapshot's
+  fixed 2-day history — the expiry/DTE is only known at replay time. Defensive:
   `{}` on missing snapshot/contract, `{"error": …}` on IV≤0 / no price history.
   It is a **separate command/cache view** from `sim_run` (replay depends only on
-  the contract selector, NOT the dt/mult sliders — so slider drags stay cheap).
+  the contract selector + look-back, NOT the dt/mult sliders — so slider drags
+  stay cheap).
 - **Command/cache (`handlers.py`):** the `sim_replay` command →
   `cache:options:sim_replay` + `events:options:sim_replay`.
 - **Page (`webgui/pages/options/simulator.py`):** a third **Replay** tab (now the
@@ -766,11 +775,15 @@ along the underlying's recent path by the existing pure
   session boundaries are dashed xAxis plotLines and the **scrub slider** is a
   client-side cursor plotLine (no command — same idiom as the ΔS overlay). The
   x-axis stays NUMERIC (dates in the tooltip / readout) to sidestep the datetime
-  crosshair epoch-ms gotcha. Built once at render (ESM import-map gotcha), updated
-  in place; version-polls `options:sim_replay`; enqueues only on contract-selector
-  changes. Pure builders unit-tested; verified live end-to-end (SPY → 62-bar
-  1-min trace → rendered 6-panel stack). Plan:
-  [plan](docs/plans/2026-06-20-simulator-replay-tab-plan.md).
+  crosshair epoch-ms gotcha; the hover tooltip is capped at **2 decimals**
+  (`tooltip.valueDecimals`). A **Look-back** dropdown (`lookback_options`: Auto-by-DTE
+  / 1-min·1d / 5-min·3d / 5-min·5d / 15-min·10d / Daily·20d) overrides the DTE-driven
+  window; the active spec label shows in the cursor readout. Built once at render
+  (ESM import-map gotcha), updated in place; version-polls `options:sim_replay`;
+  enqueues only on contract-selector / look-back changes. Pure builders unit-tested;
+  verified live end-to-end (SPY → 62-bar 1-min trace → rendered 6-panel stack). Plans:
+  [replay](docs/plans/2026-06-20-simulator-replay-tab-plan.md) /
+  [DTE look-back](docs/plans/2026-06-20-dte-aware-lookback-plan.md).
 
 **System Status page (`/status`) — DONE (2026-06-19).** A **pure-webgui** at-a-glance
 health board (no new service/port). It honors the 3-tier import rule — `webgui/pages/status.py`
