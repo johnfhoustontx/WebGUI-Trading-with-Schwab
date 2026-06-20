@@ -1174,3 +1174,30 @@ def atm_iv_from_chain(chain, spot, expiry=None):
         return best
 
     return _scan(True) if (exp_iso and _scan(True) is not None) else _scan(False)
+
+
+_DAY_MS = 86_400_000
+
+
+def em_cone(spot, atm_iv, dte, start_ts_ms):
+    """Forward expected-move cone points anchored at ``spot`` on ``start_ts_ms``.
+
+    Returns {"upper": [[ts_ms, v], ...], "lower": [...]} with one point per
+    calendar day t = 0..dte. width(t) = spot * atm_iv * sqrt(t/365). Empty dict
+    values on non-positive dte or missing spot/iv (defensive — never raises)."""
+    import math
+    if not isinstance(spot, (int, float)) or not isinstance(atm_iv, (int, float)):
+        return {"upper": [], "lower": []}
+    try:
+        dte = int(dte)
+    except (TypeError, ValueError):
+        return {"upper": [], "lower": []}
+    if dte <= 0 or atm_iv < 0:
+        return {"upper": [], "lower": []}
+    upper, lower = [], []
+    for t in range(dte + 1):
+        ts = int(start_ts_ms) + t * _DAY_MS
+        width = spot * atm_iv * math.sqrt(t / 365.0)
+        upper.append([ts, spot + width])
+        lower.append([ts, spot - width])
+    return {"upper": upper, "lower": lower}

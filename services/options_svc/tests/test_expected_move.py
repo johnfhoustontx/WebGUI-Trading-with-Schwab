@@ -15,3 +15,23 @@ def test_atm_iv_picks_nearest_strike_and_normalizes_percent():
 
 def test_atm_iv_none_when_no_contracts():
     assert compute.atm_iv_from_chain({}, spot=100.0, expiry="2026-07-18") is None
+
+
+import math
+
+
+def test_em_cone_widens_as_sqrt_time():
+    cone = compute.em_cone(spot=100.0, atm_iv=0.20, dte=5, start_ts_ms=0)
+    upper, lower = cone["upper"], cone["lower"]
+    assert len(upper) == 6 and len(lower) == 6
+    assert upper[0][1] == 100.0 and lower[0][1] == 100.0
+    w3 = 100.0 * 0.20 * math.sqrt(3 / 365)
+    assert abs(upper[3][1] - (100.0 + w3)) < 1e-9
+    assert abs(lower[3][1] - (100.0 - w3)) < 1e-9
+    assert upper[1][0] - upper[0][0] == 86_400_000
+
+
+def test_em_cone_empty_on_bad_inputs():
+    assert compute.em_cone(None, 0.2, 5, 0) == {"upper": [], "lower": []}
+    assert compute.em_cone(100.0, None, 5, 0) == {"upper": [], "lower": []}
+    assert compute.em_cone(100.0, 0.2, 0, 0) == {"upper": [], "lower": []}
