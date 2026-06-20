@@ -58,6 +58,9 @@ EVENT_SIM_META = "events:options:sim_meta"
 CACHE_SIM_RESULT = "cache:options:sim_result"
 EVENT_SIM_RESULT = "events:options:sim_result"
 
+CACHE_SIM_REPLAY = "cache:options:sim_replay"
+EVENT_SIM_REPLAY = "events:options:sim_replay"
+
 CACHE_CALC_CHAIN = "cache:options:calc_chain"
 EVENT_CALC_CHAIN = "events:options:calc_chain"
 
@@ -343,6 +346,13 @@ def handle_command(bus, command) -> None:
             a.get("direction"), a.get("dt"), a.get("mult"))
         version = bus.cache_set(CACHE_SIM_RESULT, result)
         bus.publish(EVENT_SIM_RESULT, {"version": version})
+    elif command.type == "sim_replay":
+        a = command.args or {}
+        res = compute.sim_replay(
+            a.get("symbol"), a.get("expiry"), a.get("kind"),
+            a.get("strike"), a.get("direction"))
+        version = bus.cache_set(CACHE_SIM_REPLAY, res)
+        bus.publish(EVENT_SIM_REPLAY, {"version": version})
     elif command.type == "calc_load":
         cc = compute.calc_load_symbol(command.args.get("symbol", "SPY"))
         version = bus.cache_set(CACHE_CALC_CHAIN, cc)
