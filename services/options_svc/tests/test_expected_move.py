@@ -96,3 +96,24 @@ def test_compute_expected_move_error_on_no_history(monkeypatch):
     monkeypatch.setattr(compute._proxy, "schwab_client", _SC())
     out = compute.compute_expected_move("SPY", "2026-07-18", [])
     assert out["error"]
+
+
+from shared.bus import Bus
+from services.options_svc import handlers
+
+
+class _Cmd:
+    def __init__(self, type, args):
+        self.type = type
+        self.args = args
+
+
+def test_expected_move_command_caches_view(monkeypatch):
+    monkeypatch.setattr(compute, "compute_expected_move",
+                        lambda s, e, legs: {"symbol": s, "expiry": e, "legs": legs,
+                                            "error": None, "candles": [[1, 1, 1, 1, 1]]})
+    bus = Bus()
+    handlers.handle_command(bus, _Cmd("expected_move",
+                            {"symbol": "SPY", "expiry": "2026-07-18", "legs": []}))
+    env = bus.cache_get(handlers.CACHE_EXPECTED_MOVE)
+    assert env.payload["symbol"] == "SPY"

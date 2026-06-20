@@ -67,6 +67,9 @@ EVENT_CALC_RESULT = "events:options:calc_result"
 CACHE_GEX_STATUS = "cache:options:gex_status"
 EVENT_GEX_STATUS = "events:options:gex_status"
 
+CACHE_EXPECTED_MOVE = "cache:options:expected_move"
+EVENT_EXPECTED_MOVE = "events:options:expected_move"
+
 # Defaults mirror the page's input defaults (symbol SPY, 5-30 DTE, the put/call
 # delta gates, min credit 10% -> 0.10 fraction). The page sends the fraction.
 _SWING_DEFAULTS = {
@@ -265,7 +268,8 @@ def handle_command(bus, command) -> None:
     result + publish; ``calc_load`` (args symbol) → fetch the quote + option chain,
     cache the loader payload (chain dict + price + range) + publish; ``calc_compute``
     (args = the calc params dict) → run the summary + P&L grid math, cache the
-    result + publish; else no-op."""
+    result + publish; ``expected_move`` (args symbol/expiry/legs) → build the
+    expected-move cone payload, cache the result + publish; else no-op."""
     if command.type == "rescan":
         rescan(bus)
     elif command.type == "swing_scan":
@@ -347,3 +351,9 @@ def handle_command(bus, command) -> None:
         result = compute.calc_compute(**(command.args or {}))
         version = bus.cache_set(CACHE_CALC_RESULT, result)
         bus.publish(EVENT_CALC_RESULT, {"version": version})
+    elif command.type == "expected_move":
+        a = command.args or {}
+        res = compute.compute_expected_move(
+            a.get("symbol"), a.get("expiry"), a.get("legs") or [])
+        version = bus.cache_set(CACHE_EXPECTED_MOVE, res)
+        bus.publish(EVENT_EXPECTED_MOVE, {"version": version})
