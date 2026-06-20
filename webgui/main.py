@@ -115,6 +115,7 @@ OPTIONS_CHILDREN = [
     ("/options/swing", "Swing Scanner", "swap_vert"),
     ("/options/gamma", "Gamma", "stacked_line_chart"),
     ("/options/simulator", "Simulator", "science"),
+    ("/options/expected-move", "Expected Move", "candlestick_chart"),
 ]
 
 # Sentiment is an expandable group; each child is its own route. (route, label, icon)
@@ -396,6 +397,13 @@ def options_simulator_page() -> None:
     with _layout("/options/simulator", "Options · Simulator"):
         from pages.options import simulator
         simulator.render()
+
+
+@ui.page("/options/expected-move")
+def options_expected_move_page() -> None:
+    with _layout("/options/expected-move", "Options · Expected Move"):
+        from pages.options import expected_move
+        expected_move.render()
 
 
 @ui.page("/sentiment")
