@@ -19,6 +19,25 @@ def clear_chain_cache():
     _chain_cache.clear()
 
 
+def _is_expired(expiration, today=None):
+    """True when `expiration` is strictly before `today` (no live chain exists).
+
+    Schwab 400s on a chain request for a past expiration, so re-pricing an
+    already-expired trade just burns an API call (and time) every cycle. Mirrors
+    the proxy's /track guard: today's 0-DTE (`expiration == today`) is NOT expired
+    and still prices. Malformed / missing expirations return False so the normal
+    live path still runs. `today` is injectable for tests; defaults to local date.
+    """
+    if today is None:
+        today = datetime.date.today()
+    try:
+        exp = (expiration if isinstance(expiration, datetime.date)
+               else datetime.date.fromisoformat(str(expiration)[:10]))
+    except (TypeError, ValueError):
+        return False
+    return exp < today
+
+
 def intrinsic_value(trade, settlement):
     """Return (per-contract value, realized PnL dollars) at settlement."""
     strat = trade["strategy"]
@@ -99,8 +118,22 @@ def _leg_bid_ask(leg_map, strike):
     return None, None, None
 
 
-def reprice_swing(trade, client):
-    """Return a dict with current_value, unrealized_pnl, etc. Never raises."""
+def reprice_swing(trade, client, today=None):
+    """Return a dict with current_value, unrealized_pnl, etc. Never raises.
+
+    An already-expired trade has no live option chain (Schwab 400s on a past
+    expiration), so the chain fetch is skipped entirely and an unpriceable mark
+    (`error="expired"`) is returned — saving a doomed API call every reprice
+    cycle. Downstream (`signal_recommender.build_mark`, `eod_report`) treats any
+    truthy `error` the same, so this matches the prior failed-fetch behavior."""
+    if _is_expired(trade.get("expiration"), today):
+        log.info("reprice_swing: %s exp %s already expired — skipping chain fetch",
+                 trade.get("symbol"), trade.get("expiration"))
+        return {
+            "current_value": None, "unrealized_pnl": None, "pnl_pct_of_credit": None,
+            "current_underlying": None, "current_short_delta": None,
+            "error": "expired",
+        }
     try:
         chain = _fetch_chain(client, trade["symbol"], trade["expiration"])
         if chain is None:

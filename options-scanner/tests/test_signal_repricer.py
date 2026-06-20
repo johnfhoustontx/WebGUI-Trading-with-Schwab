@@ -2,6 +2,10 @@ import datetime
 
 import signal_repricer
 
+# A clearly-future expiration so the expiry guard (reprice_swing skips the chain
+# fetch for past expirations) never trips on the pricing-math tests below.
+_FUTURE_EXP = (datetime.date.today() + datetime.timedelta(days=30)).isoformat()
+
 
 class _FakeResp:
     status_code = 200
@@ -103,7 +107,7 @@ def test_intrinsic_ic_both_wings_safe():
 
 def test_reprice_swing_from_mock_chain(monkeypatch):
     t = {"strategy": "PCS", "symbol": "QQQ", "short_strike": 590, "long_strike": 585,
-         "expiration": "2026-04-24", "entry_credit": 1.30,
+         "expiration": _FUTURE_EXP, "entry_credit": 1.30,
          "call_short": None, "call_long": None}
 
     def fake_chain(client, sym, exp):
@@ -128,7 +132,7 @@ def test_reprice_swing_from_mock_chain(monkeypatch):
 
 def test_reprice_swing_ccs_from_mock_chain(monkeypatch):
     t = {"strategy": "CCS", "symbol": "QQQ", "short_strike": 620, "long_strike": 625,
-         "expiration": "2026-04-24", "entry_credit": 0.80,
+         "expiration": _FUTURE_EXP, "entry_credit": 0.80,
          "call_short": None, "call_long": None}
 
     def fake_chain(client, sym, exp):
@@ -146,7 +150,7 @@ def test_reprice_swing_ccs_from_mock_chain(monkeypatch):
 
 def test_reprice_swing_ic_from_mock_chain(monkeypatch):
     t = {"strategy": "IC", "symbol": "QQQ", "short_strike": 590, "long_strike": 585,
-         "call_short": 610, "call_long": 615, "expiration": "2026-04-24",
+         "call_short": 610, "call_long": 615, "expiration": _FUTURE_EXP,
          "entry_credit": 1.50}
 
     def fake_chain(client, sym, exp):
@@ -171,7 +175,7 @@ def test_reprice_swing_ic_from_mock_chain(monkeypatch):
 
 def test_reprice_swing_api_failure_returns_error(monkeypatch):
     t = {"strategy": "PCS", "symbol": "QQQ", "short_strike": 590, "long_strike": 585,
-         "expiration": "2026-04-24", "entry_credit": 1.30,
+         "expiration": _FUTURE_EXP, "entry_credit": 1.30,
          "call_short": None, "call_long": None}
 
     def boom(*a, **kw):
@@ -184,7 +188,7 @@ def test_reprice_swing_api_failure_returns_error(monkeypatch):
 
 def test_reprice_swing_missing_leg_quotes_returns_error(monkeypatch):
     t = {"strategy": "PCS", "symbol": "QQQ", "short_strike": 590, "long_strike": 585,
-         "expiration": "2026-04-24", "entry_credit": 1.30,
+         "expiration": _FUTURE_EXP, "entry_credit": 1.30,
          "call_short": None, "call_long": None}
 
     def fake_chain(client, sym, exp):
@@ -196,6 +200,72 @@ def test_reprice_swing_missing_leg_quotes_returns_error(monkeypatch):
     result = signal_repricer.reprice_swing(t, client=object())
     assert result["current_value"] is None
     assert result["error"] == "repricing failed"
+
+
+# ── Expired-trade guard: no live chain exists for a past expiration, so skip
+#    the Schwab chain fetch entirely (Schwab 400s on it) instead of burning an
+#    API call every reprice cycle. Mirrors the proxy's /track guard.
+
+def test_is_expired_past_present_future():
+    today = datetime.date(2026, 6, 20)
+    assert signal_repricer._is_expired("2026-06-19", today=today) is True
+    assert signal_repricer._is_expired("2026-06-20", today=today) is False  # 0-DTE still live
+    assert signal_repricer._is_expired("2026-06-21", today=today) is False
+
+
+def test_is_expired_accepts_date_object():
+    today = datetime.date(2026, 6, 20)
+    assert signal_repricer._is_expired(datetime.date(2026, 6, 1), today=today) is True
+
+
+def test_is_expired_malformed_returns_false():
+    # Unparseable / missing -> not expired, so the normal live path still runs.
+    assert signal_repricer._is_expired("not-a-date") is False
+    assert signal_repricer._is_expired(None) is False
+
+
+def test_reprice_swing_expired_skips_chain_fetch(monkeypatch):
+    """An expired trade must NOT call the chain API; it returns an unpriceable
+    'expired' mark (downstream build_mark treats any truthy error the same)."""
+    t = {"strategy": "PCS", "symbol": "QQQ", "short_strike": 590, "long_strike": 585,
+         "expiration": "2026-04-24", "entry_credit": 1.30,
+         "call_short": None, "call_long": None}
+
+    calls = []
+    monkeypatch.setattr(signal_repricer, "_fetch_chain",
+                        lambda *a, **kw: calls.append(a) or {})
+
+    result = signal_repricer.reprice_swing(t, client=object(),
+                                           today=datetime.date(2026, 6, 20))
+
+    assert calls == []                          # the chain fetch was skipped
+    assert result["current_value"] is None
+    assert result["unrealized_pnl"] is None
+    assert result["current_underlying"] is None
+    assert result["error"] == "expired"
+
+
+def test_reprice_swing_today_expiration_still_fetches(monkeypatch):
+    """0-DTE (expiration == today) is NOT expired — the chain is still fetched."""
+    t = {"strategy": "PCS", "symbol": "QQQ", "short_strike": 590, "long_strike": 585,
+         "expiration": "2026-06-20", "entry_credit": 1.30,
+         "call_short": None, "call_long": None}
+
+    calls = []
+
+    def fake_chain(client, sym, exp):
+        calls.append((sym, exp))
+        return {"putExpDateMap": {"2026-06-20:0": {
+            "590.0": [{"bid": 0.45, "ask": 0.55, "delta": -0.12}],
+            "585.0": [{"bid": 0.15, "ask": 0.25, "delta": -0.05}],
+        }}, "underlying": {"last": 600.0}}
+    monkeypatch.setattr(signal_repricer, "_fetch_chain", fake_chain)
+
+    result = signal_repricer.reprice_swing(t, client=object(),
+                                           today=datetime.date(2026, 6, 20))
+
+    assert calls == [("QQQ", "2026-06-20")]     # fetched
+    assert result["error"] is None
 
 
 def test_leg_bid_ask_reads_two_sided_quote():
