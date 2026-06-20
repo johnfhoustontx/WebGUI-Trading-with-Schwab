@@ -189,6 +189,7 @@ Routes:
 | `/options/swing` | Swing Scanner | built |
 | `/options/gamma` | Gamma (GEX/Charm/DEX/Vanna bars + flip/**single Call+Put walls** + intraday heatmap; bar/heatmap **width split grows with session** snapshot count; **flicker-free** in-place Highcharts updates; **symbol is a dropdown** — default `$SPX`, populated from the collected universe (watchlist minus `$VIX`) via `cache:options:gamma_symbols`; Explain works per-selected-symbol) | built |
 | `/options/simulator` | Simulator (What-if + IV-shock; Replay TODO) | built |
+| `/options/expected-move` | Expected Move (candlestick price history (6-mo daily) + forward **ATM-IV expected-move cone** to the option's expiration (green/red dashed, √-time fan) + leg **strike lines** (short solid / long dashed, put/call colored) + axis **crosshair** w/ Date(X)+Price(Y) label boxes; opened in a **new browser tab** via stash-handoff from Scanner/Paper/Captured/Calculator, or standalone w/ symbol+expiry input) | built |
 | `/sentiment` | Sentiment (two-column top: **dual** Sentiment gauges (Today + 30-Day Avg) + **dual** Market Trend gauges (Today live-intraday + 30-Day structural — directional 0–100 score, 15-min cadence) / component table; traffic-light tiles; 30d history + rolling avgs; full-width **Sector & Industry Performance** w/ Day/Week/Month %, P/C, RRG, rotation banner, **expandable industries w/ P/C+RRG**; bottom status bar; **persists across navigation**; **server-side 120s auto-refresh + bridge publish, tab-independent**) | built |
 | `/sentiment/rotation` | Sector Rotation (RRG-vs-SPY: Risk-ON/OFF headline + spread; **top row** = quadrant-map table (left) + tight ROTATING FROM/INTO w/ S&P weights (right); **full-width RRG below** w/ per-sector "meteor tails" — engine `assess_sector` retains a `tail` of `TAIL_LENGTH=12` RS-Ratio/RS-Mom points sampled every `TAIL_STRIDE=2` days; page draws **one spline series per sector** (faded trail line + single bright head dot) and **hover-isolates** a sector via native Highcharts `plotOptions.series.states.inactive` (hovering one dims the rest — no client round-trip); reuses `sector_rotation_assessment`; cached, **manual Refresh only**) | built |
 | `/trade` | Trade (on-demand single-symbol analysis: **Position (1–8wk)** + **Investor (months+)** Buy/Hold/Sell verdicts w/ score + top reasons + hard gates + expandable factor breakdown; **MTF EMA alignment** (per-timeframe); momentum strip (RSI/ADX/MACD/VWAP/RelVol); sector strength; **Fundamentals card** (P/E/PEG/growth/ROE/margins via proxy `/instruments`); persists across nav) | built |
@@ -196,7 +197,7 @@ Routes:
 | `/settings` | Settings (GUI prefs via `app_settings`: scanner **audio alert** on/off + sound + volume, only-during-market-hours, min-score-to-alert; desktop-notification toggle + permission grant + Test sound. Extensible — first batch) | built |
 | `/portfolio` | Portfolio (3-tier, `services/portfolio_svc` :8212: **Holdings / Sectors / Performance** tabs over the portfolio model — sector breakdown, vs-sector RS, since-purchase excess, benchmark over/under-weight, tailwind; **Performance** scorecard (return/capital/risk/entry grades + composite + ann. return + drawdown) with a per-position **advisory suggestions** detail pane; **live-streaming P&L** via the service's proxy SSE consumer republishing each tick; proxy/stream status bar; persists across nav) | built |
 | `/eod` · `/eod/detail` | EOD Report (pure-webgui aggregator: **Summary** rollup tiles + **Detailed** drill-down tables over the collected `options:*` + `driver:*` caches; **Generate** snapshots the caches → standalone `summary.html` + `detail.html` archived under `webgui/data/eod/<date>/`; in-app view + dated archive list; `/eod/file` serves archived files raw) | built |
-| `/status` | System Status (pure-webgui health board: overall up/down banner + per-component cards probing **Memurai** PING, **schwab-proxy** `/health`, the **five domain services** `/health`, and **webgui** itself; plus a **published-data-freshness** table — each domain's cache version + age, flagging stale scheduled views; **per-component Restart button on offline cards** — proxy/services relaunch via `tools\restart_one.bat`, Memurai via `Start-Service`; off-thread sweep, auto-refresh 15 s + manual) | built |
+| `/status` | System Status (pure-webgui health board: overall up/down banner + per-component cards probing **Memurai** PING, **schwab-proxy** `/health`, **Schwab Authorization** (OAuth token state, with an **Authorize** button → proxy `/auth`), the **five domain services** `/health`, and **webgui** itself; plus a **published-data-freshness** table — each domain's cache version + age, flagging stale scheduled views; **per-component Restart button on offline cards** — proxy/services relaunch via `tools\restart_one.bat`, Memurai via `Start-Service`; off-thread sweep, auto-refresh 15 s + manual) | built |
 | `/terminate` | Terminate (guarded "stop the whole local stack" page: red **Stop all services** button behind a confirm dialog → spawns `stop_all.bat` detached via `cmd /c start`, which kills the proxy + 5 services + this web app by listening port; **Memurai is left running**; the page goes unresponsive after confirm, by design) | built |
 
 The `pages/options/` subpackage shares `header.py` (compact quotes/VIX/sentiment
@@ -264,7 +265,17 @@ module-level functions (TDD them with sample dicts); keep `render()` thin
   line/column in Simulator, spline RRG in Sector Rotation, history line in Sentiment.
   **Gotchas (cost real time):** the `gauge` type auto-loads via `loadMore`, so pass
   NO `extras` — `extras=["highcharts-more"]` THROWS; `solid-gauge`/`heatmap` ARE
-  valid explicit extras (both bundled). A `ui.highchart` added DYNAMICALLY on a page
+  valid explicit extras (both bundled). **Candlestick** is a Highcharts **Stock**
+  series — pass `extras=["stock"]` (the `stock` module is bundled; it enables the
+  candlestick/ohlc series + axis `crosshair.label` boxes). **Crosshair gotcha (cost
+  hours):** the **datetime X-axis** `crosshair.label` box renders the RAW epoch-ms
+  value and IGNORES both `label.format` (date tokens) AND a `label.formatter` function
+  — verified on a plain `chart` AND `stockChart` (the formatter, shippable via NiceGUI's
+  `:`-prefixed dynamic-property → `new Function`, IS attached + returns the right date
+  but Highcharts never calls it). A NUMERIC y-axis crosshair label DOES honor `format`
+  (e.g. `{value:.2f}`). So: keep the X crosshair LINE but disable its label box, show
+  price on the Y label, put the DATE in the tooltip header (`tooltip.xDateFormat`) —
+  see `pages/options/expected_move.py`. A `ui.highchart` added DYNAMICALLY on a page
   with no chart at first render fails `Failed to resolve module specifier
   nicegui-highcharts` (the ESM import map is set at initial render) — keep a chart
   present at page build (e.g. a persistent element, as `detail.py` does). A
@@ -693,18 +704,61 @@ only `nicegui` + `shared.bus` + `shared.contracts`). Pieces:
   [design](docs/plans/2026-06-18-eod-report-design.md) /
   [plan](docs/plans/2026-06-18-eod-report-plan.md).
 
+**Expected Move page (`/options/expected-move`) — DONE (2026-06-20).** A standalone
+Tier-3 page that charts a symbol's recent price action plus a forward expected-move
+cone for a given option strike/expiration. Reached via a **new-browser-tab handoff**
+button on Scanner, Paper Trades, Captured Signals, and Calculator (or standalone from
+the Options nav with manual symbol+expiry). Pieces:
+- **Compute (Tier 2, `services/options_svc/compute.py`):** `compute_expected_move(symbol,
+  expiry, legs)` fetches ~6-mo daily candles (`get_price_history_every_day`, capped to
+  the most-recent `_EM_HISTORY_BARS=130`, partial bars skipped), the option chain, and
+  spot (live quote else last close), then derives ATM IV for the expiry
+  (`atm_iv_from_chain` — nearest-strike `volatility`, percent→decimal, exact-then-nearest
+  fallback) and the cone (`em_cone`: one point/day, `width(t)=spot·atm_iv·√(t/365)`,
+  anchored at spot). Fully defensive — returns a JSON-safe dict with `error` set on any
+  failure (candles still drawn even when IV is unavailable). On-demand only.
+- **Command/cache (`handlers.py`):** the `expected_move` command → `cache:options:expected_move`
+  + `events:options:expected_move` (one latest-result view, like `calc_result`/`sim_result`).
+- **Page (`webgui/pages/options/expected_move.py`):** engine-free reader — enqueues the
+  command and version-polls the view. Pure builders `expected_move_figure` (Highcharts
+  **candlestick** via `extras=["stock"]` + Upper/Lower EM dashed line series + datetime
+  xAxis + x/y `crosshair.label` boxes) and `leg_lines` (yAxis plotLines: short solid /
+  long dashed, put-red/call-blue) are unit-tested. One persistent `ui.highchart` built at
+  render (ESM-import-map gotcha), updated in place; `@guard` on handlers.
+- **Handoff (`handoff.py`):** `signal_to_em_payload(signal)` normalizes a scanner/captured/
+  paper signal dict → `{symbol, expiry, legs}` (per-type strikes via `_EM_LEG_FIELDS`);
+  `send_to_expected_move` stashes (`_pending["expected_move"]`) + opens the page in a new
+  tab. Scanner/Swing keep the shared 3-button `add_row_actions`; Paper/Captured use the
+  Expected-Move-only `add_expected_move_action` (their rows map via `synth_from_trade`/
+  `synth_from_captured`, which expose `strategy`→`type`); Calculator builds the payload
+  from its `leg_inputs`. Design/plan:
+  [design](docs/plans/2026-06-20-expected-move-page-design.md) /
+  [plan](docs/plans/2026-06-20-expected-move-page.md).
+
 **System Status page (`/status`) — DONE (2026-06-19).** A **pure-webgui** at-a-glance
 health board (no new service/port). It honors the 3-tier import rule — `webgui/pages/status.py`
 imports only `nicegui` + `bus_client`/`proxy` + `repo_paths`. Pieces:
-- **Component sweep.** `component_targets()` enumerates the 8 components from
-  `repo_paths` (Memurai :6379, schwab-proxy :8100, the five services :8210–8214 via
-  `SERVICE_URLS`, webgui itself). `_probe_one` checks each by `kind`: **memurai** →
+- **Component sweep.** `component_targets()` enumerates the components from
+  `repo_paths` (Memurai :6379, schwab-proxy :8100, **Schwab Authorization** (the
+  proxy's OAuth token state), the five services :8210–8214 via `SERVICE_URLS`,
+  webgui itself). `_probe_one` checks each by `kind`: **memurai** →
   `bus_client.ping()` (new helper: `bus()._r.ping()`, never raises); **proxy** →
-  `proxy.health()` (also surfaces `token_loaded`); **service** → HTTP `GET /health`
-  (the `make_app` scaffold's probe, `{"up": True}`); **self** → always up. The whole
-  sweep runs off-thread via `nicegui.run.io_bound` (short 2.5 s per-probe timeout so a
-  dead component fails fast). `overall_status` rolls the results into a green/red/grey
-  banner naming any down components.
+  `proxy.health()`; **auth** → `auth_status(proxy.health())` reads `has_token`/
+  `token_expired`/`refresh_token_expired` (access-token-expired is still "authorized"
+  since the proxy auto-refreshes; only a missing token or **expired refresh token**
+  is red); **service** → HTTP `GET /health` (the `make_app` scaffold's probe,
+  `{"up": True}`); **self** → always up. `_sweep` fetches `proxy.health()` **once**
+  and shares it with both the proxy + auth cards. The whole sweep runs off-thread
+  via `nicegui.run.io_bound` (short 2.5 s per-probe timeout so a dead component fails
+  fast). `overall_status` rolls the results into a green/red/grey banner naming any
+  down components.
+- **Schwab Authorization card (2026-06-19).** Surfaces OAuth token validity
+  separately from "is the proxy process up". When the proxy is reachable the card
+  shows an **Authorize** / **Re-authorize** button (`AUTH_URL = {PROXY_URL}/auth`)
+  that opens the proxy's OAuth re-login page (`GET /auth`) in a new tab via
+  `ui.navigate.to(..., new_tab=True)`; when the proxy is down the card is grey
+  ("can't check"). The card is **not** restartable (`restart_spec` → None) — its
+  action is the login link, not a process relaunch.
 - **Data-freshness table.** Below the cards, per-domain rows read each representative
   cache view's version + ts (new `bus_client.read_meta(view)` → `(version, ts)`) and
   show `age_text` + a STALE flag for **scheduled** views older than 600 s (`is_stale`);
@@ -727,8 +781,9 @@ imports only `nicegui` + `bus_client`/`proxy` + `repo_paths`. Pieces:
   `test_shell.py`. Auto-refresh `ui.timer(15s)` + manual Refresh button (with
   spinner + re-entrancy guard). Pure builders (`component_targets`/`status_word`/
   `status_color`/`status_icon`/`overall_status`/`age_text`/`is_stale`/`freshness_row`
-  + `restart_spec`/`restart_command`) unit-tested in `webgui/tests/test_status.py`
-  (27); render + live restart verified by screenshot.
+  + `restart_spec`/`restart_command` + `auth_status`) unit-tested in
+  `webgui/tests/test_status.py` (34); render + live restart + live auth-card
+  verified by screenshot.
 
 ## Paths and ports: `repo_paths.py` + `config/ports.toml`
 
