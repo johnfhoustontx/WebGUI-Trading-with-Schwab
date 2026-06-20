@@ -20,7 +20,7 @@ from nicegui import ui
 
 from pages.ui_guard import guard
 
-from . import detail
+from . import detail, handoff
 
 
 def _round(value, ndigits=2):
@@ -71,8 +71,10 @@ def captured_columns():
         ("entry_score", "Entry"), ("current_score", "Cur"), ("score_drift", "Drift"),
         ("grade", "Grade"), ("recommendation", "Rec"), ("status", "Status"),
     ]
-    return [{"name": f, "label": lbl, "field": f, "sortable": True, "align": "left"}
+    cols = [{"name": f, "label": lbl, "field": f, "sortable": True, "align": "left"}
             for f, lbl in spec]
+    cols.append({"name": "actions", "label": "", "field": "actions", "align": "center"})
+    return cols
 
 
 def captured_rows(signals):
@@ -207,6 +209,12 @@ def render():
             detail_panel.update(synth_from_captured(sig))
 
     table.on("rowClick", _select)
+
+    # Per-row Expected Move (+ Calculator / Paper) buttons. ``synth_from_captured``
+    # maps the raw captured signal to a signal-shaped dict (``type``/``expiration``/
+    # ``*_strike``) that ``signal_to_em_payload`` understands.
+    handoff.add_row_actions(
+        table, lambda row: synth_from_captured(raw_by_id.get(row.get("id"))))
 
     def _selected_signal():
         """The raw signal dict the user is acting on: the clicked row first, then

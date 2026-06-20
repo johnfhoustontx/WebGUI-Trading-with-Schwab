@@ -57,6 +57,25 @@ def test_drift_rounded_to_two_decimals():
     assert captured.captured_rows([{"score_drift": 1.23456}])[0]["score_drift"] == 1.23
 
 
+def test_captured_columns_include_actions():
+    """The per-row action column (Calculator / Paper / Expected Move) is present."""
+    fields = {c["field"] for c in captured.captured_columns()}
+    assert "actions" in fields
+
+
+def test_synth_from_captured_is_em_payload_compatible():
+    """synth_from_captured -> signal_to_em_payload yields a populated EM payload."""
+    from pages.options import handoff
+
+    payload = handoff.signal_to_em_payload(captured.synth_from_captured(SAMPLE))
+    assert payload["symbol"] == "SPY"
+    assert payload["expiry"] == "2026-06-19"
+    assert payload["legs"] == [
+        {"strike": 450.0, "option_type": "put", "side": "short"},
+        {"strike": 445.0, "option_type": "put", "side": "long"},
+    ]
+
+
 def test_drift_preserves_whole_float():
     assert captured.captured_rows([{"score_drift": -4.0}])[0]["score_drift"] == -4.0
 
