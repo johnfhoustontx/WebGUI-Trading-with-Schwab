@@ -1136,3 +1136,41 @@ def sim_run(symbol, expiry, kind, strike, direction, dt, mult) -> dict:
     ivshock = {"base": rows[0], "shock": rows[1]} if len(rows) >= 2 else None
 
     return {"spot": snap.spot, "whatif_rows": whatif_rows, "ivshock": ivshock}
+
+
+def atm_iv_from_chain(chain, spot, expiry=None):
+    """ATM implied vol (DECIMAL, e.g. 0.18) for ``expiry`` from a chain payload.
+
+    Picks the contract whose strike is closest to ``spot`` and reads its
+    ``volatility`` (Schwab returns a percent or a decimal — normalize to decimal).
+    When ``expiry`` (YYYY-MM-DD) is given, only that expiry is considered. Falls
+    back to the nearest listed expiry if the exact one has no usable vol. Returns
+    None if no volatility is found. Mirrors webgui calculator.extract_atm_iv but
+    returns a decimal (not a percent)."""
+    if not isinstance(chain, dict) or not isinstance(spot, (int, float)):
+        return None
+    exp_iso = str(expiry) if expiry is not None else None
+
+    def _scan(require_exp):
+        best_diff, best = float("inf"), None
+        for map_key in ("callExpDateMap", "putExpDateMap"):
+            for exp_key, strikes in (chain.get(map_key) or {}).items():
+                if require_exp and exp_iso and exp_key.split(":")[0] != exp_iso:
+                    continue
+                for strike_str, contracts in (strikes or {}).items():
+                    try:
+                        strike = float(strike_str)
+                    except (ValueError, TypeError):
+                        continue
+                    if not (isinstance(contracts, list) and contracts):
+                        continue
+                    vol = contracts[0].get("volatility")
+                    if vol is None:
+                        continue
+                    diff = abs(strike - spot)
+                    if diff < best_diff:
+                        best_diff = diff
+                        best = vol if vol < 5.0 else vol / 100.0
+        return best
+
+    return _scan(True) if (exp_iso and _scan(True) is not None) else _scan(False)
