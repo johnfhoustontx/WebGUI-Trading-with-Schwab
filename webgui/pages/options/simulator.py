@@ -74,6 +74,8 @@ def whatif_figure(df, spot, target_s=None):
         "xAxis": {**_DARK_AXIS, "title": {"text": "Underlying"}, "plotLines": xplotlines},
         "yAxis": {**_DARK_AXIS, "title": {"text": "Theo price"}, "plotLines": yplotlines},
         "tooltip": {"pointFormat": "S {point.x:g} → theo <b>{point.y:.2f}</b>"},
+        # Smooth transition when the chart is updated in place on a slider change.
+        "plotOptions": {"series": {"animation": {"duration": 500}}},
         "series": [{"name": "Theo", "type": "line", "data": data,
                     "color": "#66bb6a", "marker": {"enabled": False}}],
     }
@@ -95,7 +97,8 @@ def ivshock_figure(base, shock, mult=1.5):
         "legend": {"enabled": True, "itemStyle": {"color": "#bdbdbd"}},
         "xAxis": {**_DARK_AXIS, "categories": cats},
         "yAxis": {**_DARK_AXIS, "title": {"text": "Value"}},
-        "plotOptions": {"column": {"grouping": True, "borderWidth": 0}},
+        "plotOptions": {"column": {"grouping": True, "borderWidth": 0},
+                        "series": {"animation": {"duration": 500}}},
         "series": [
             {"name": "base (×1.0)", "type": "column", "data": vals(base), "color": BASE_COLOR},
             {"name": f"shock (×{mult:g})", "type": "column", "data": vals(shock), "color": SHOCK_COLOR},
@@ -137,12 +140,17 @@ def render():
                 ds_slider = ui.slider(min=-20, max=20, value=0).classes("w-48")
                 dt_lbl = ui.label("Δt 5d")
                 dt_slider = ui.slider(min=0, max=30, value=5).classes("w-48")
-            whatif_box = ui.column().classes("w-full")
+            # Persistent charts built ONCE (present at first render for the ESM
+            # import map) and updated in place so slider changes ANIMATE instead of
+            # flickering through a clear()/recreate. Empty-state label toggled
+            # alongside until the first sweep result arrives.
+            whatif_empty = ui.label("Select a contract to run the sweep.").classes("opacity-70")
+            whatif_chart = ui.highchart(whatif_figure([], 0)).classes("w-full")
         with ui.tab_panel(tab_ivshock):
             with ui.row().classes("items-center gap-4 w-full"):
                 mult_lbl = ui.label("IV ×1.5")
                 mult_slider = ui.slider(min=0.5, max=3.0, step=0.1, value=1.5).classes("w-64")
-            ivshock_box = ui.column().classes("w-full")
+            ivshock_chart = ui.highchart(ivshock_figure({}, {}, 1.5)).classes("w-full")
 
     # ── selector population from meta ────────────────────────────────────────
     def _strikes_for(expiry, kind):
@@ -165,23 +173,23 @@ def render():
         mult_lbl.text = f"IV ×{mult:g}"
 
         result = state["result"]
-        whatif_box.clear()
-        ivshock_box.clear()
         if not result:
-            with whatif_box:
-                ui.label("Select a contract to run the sweep.").classes("opacity-70")
+            whatif_empty.set_visibility(True)
+            whatif_chart.set_visibility(False)
             return
+        whatif_empty.set_visibility(False)
+        whatif_chart.set_visibility(True)
 
         spot = result.get("spot")
         # ΔS is a CLIENT-SIDE overlay line only — no command, computed here.
         target_s = spot * (1 + ds_slider.value / 100.0) if spot is not None else None
-        with whatif_box:
-            ui.highchart(whatif_figure(result.get("whatif_rows") or [], spot,
-                                       target_s)).classes("w-full")
+        # Update in place so Highcharts animates the transition (no clear/recreate).
+        whatif_chart.options = whatif_figure(result.get("whatif_rows") or [], spot, target_s)
+        whatif_chart.update()
         shock = result.get("ivshock")
         if shock:
-            with ivshock_box:
-                ui.highchart(ivshock_figure(shock["base"], shock["shock"], mult)).classes("w-full")
+            ivshock_chart.options = ivshock_figure(shock["base"], shock["shock"], mult)
+            ivshock_chart.update()
 
     # ── command enqueue (sim_run) ────────────────────────────────────────────
     def _current_params():
