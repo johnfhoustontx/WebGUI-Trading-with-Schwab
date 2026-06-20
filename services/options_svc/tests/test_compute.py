@@ -888,8 +888,9 @@ def test_sim_run_empty_when_contract_missing(monkeypatch):
 
 
 def _real_replay_snapshot(symbol, iv=0.20, index=None, prices=None):
-    """Build a REAL ChainSnapshot (with price_history) using the engine classes,
-    so sim_replay exercises the actual ReplayEngine + gap/session logic."""
+    """Build a REAL ChainSnapshot using the engine classes (its ``price_history``
+    is now ignored by ``sim_replay`` — the history is fetched from the proxy — but
+    the snapshot still supplies the contract/spot/r)."""
     import sys as _sys, datetime as _dt
     from repo_paths import OPTIONS_SCANNER
     _sys.path.insert(0, str(OPTIONS_SCANNER))
@@ -900,19 +901,44 @@ def _real_replay_snapshot(symbol, iv=0.20, index=None, prices=None):
         index = ["2026-06-18 09:30", "2026-06-18 09:31", "2026-06-18 09:32"]
     if prices is None:
         prices = [450.0, 451.0, 452.0]
-    hist = pd.Series(prices, index=pd.to_datetime(index))
     contract = seng.ContractRow(strike=450.0, kind="call", bid=1.0, ask=1.2,
                                 mid=1.1, iv=iv, expiry=_dt.date(2026, 6, 26))
     return seng.ChainSnapshot(spot=prices[-1],
                               as_of=_dt.datetime(2026, 6, 18, 9, 32), r=0.04,
                               symbol=symbol, contracts=[contract],
-                              price_history=hist)
+                              price_history=pd.Series(dtype=float))
+
+
+def _patch_replay_history(monkeypatch, index, prices, calls=None):
+    """Monkeypatch ``compute._proxy.schwab_client`` to return the given path from
+    BOTH intraday + daily fetches, so ``sim_replay`` gets a deterministic history
+    regardless of which DTE tier today's date lands on."""
+    import pandas as pd, types
+    dframe = pd.DataFrame({"datetime": pd.to_datetime(index), "close": list(prices)})
+
+    def _intraday(symbol, minutes, days):
+        if calls is not None:
+            calls["intraday"] = (symbol, minutes, days)
+        return dframe
+
+    def _daily(symbol, months):
+        if calls is not None:
+            calls["daily"] = (symbol, months)
+        return dframe
+
+    monkeypatch.setattr(compute._proxy, "schwab_client",
+                        types.SimpleNamespace(get_intraday_history=_intraday,
+                                              get_daily_history=_daily))
 
 
 def test_sim_replay_builds_jsonsafe_trace(monkeypatch):
     import json
     compute._SIM_SNAPSHOTS.clear()
     compute._SIM_SNAPSHOTS["SPY"] = _real_replay_snapshot("SPY")
+    _patch_replay_history(
+        monkeypatch,
+        ["2026-06-18 09:30", "2026-06-18 09:31", "2026-06-18 09:32"],
+        [450.0, 451.0, 452.0])
 
     out = compute.sim_replay("SPY", "2026-06-26", "call", 450.0, "buy")
     assert out["spot"] == 452.0
@@ -925,10 +951,11 @@ def test_sim_replay_builds_jsonsafe_trace(monkeypatch):
     assert out["gaps"] == []                       # single session, no overnight gap
     assert len(out["sessions"]) == 1
     assert out["sessions"][0]["date"] == "2026-06-18"
+    assert out["lookback"]["key"] == "auto"
     json.dumps(out)                                # JSON-serializable end to end
 
 
-def test_sim_replay_detects_overnight_gap():
+def test_sim_replay_detects_overnight_gap(monkeypatch):
     import pandas as pd
     compute._SIM_SNAPSHOTS.clear()
     # Two realistic 1-min sessions a day apart: the median bar spacing is ~60s,
@@ -937,10 +964,45 @@ def test_sim_replay_detects_overnight_gap():
     s2 = pd.date_range("2026-06-19 09:30", periods=5, freq="1min")
     idx = list(s1) + list(s2)
     prices = [450.0 + i for i in range(len(idx))]
-    compute._SIM_SNAPSHOTS["SPY"] = _real_replay_snapshot("SPY", index=idx, prices=prices)
+    compute._SIM_SNAPSHOTS["SPY"] = _real_replay_snapshot("SPY")
+    _patch_replay_history(monkeypatch, idx, prices)
     out = compute.sim_replay("SPY", "2026-06-26", "call", 450.0, "buy")
     assert out["gaps"] == [5]                       # boundary before the 6th bar
     assert [s["date"] for s in out["sessions"]] == ["2026-06-18", "2026-06-19"]
+
+
+def test_sim_replay_override_uses_fixed_window(monkeypatch):
+    compute._SIM_SNAPSHOTS.clear()
+    compute._SIM_SNAPSHOTS["SPY"] = _real_replay_snapshot("SPY")
+    calls = {}
+    _patch_replay_history(
+        monkeypatch,
+        ["2026-06-18 09:30", "2026-06-18 09:35", "2026-06-18 09:40"],
+        [450.0, 451.0, 452.0], calls=calls)
+    out = compute.sim_replay("SPY", "2026-06-26", "call", 450.0, "buy",
+                             lookback="15m_10d")
+    assert calls["intraday"][1] == 15              # minutes from the override
+    assert calls["intraday"][2] == 10              # days from the override
+    assert out["lookback"]["label"] == "15-min · 10d"
+    assert out["lookback"]["key"] == "15m_10d"
+
+
+def test_replay_lookback_spec_auto_tiers():
+    assert compute.replay_lookback_spec(0)["minutes"] == 1
+    assert compute.replay_lookback_spec(0)["days"] == 1
+    assert compute.replay_lookback_spec(3)["minutes"] == 5
+    assert compute.replay_lookback_spec(3)["days"] == 3
+    assert compute.replay_lookback_spec(15)["days"] == 5
+    big = compute.replay_lookback_spec(30)
+    assert big["freq_type"] == "daily" and big["bars"] == 15
+
+
+def test_replay_lookback_spec_override_keys():
+    assert compute.replay_lookback_spec(99, "1m_1d")["minutes"] == 1
+    assert compute.replay_lookback_spec(0, "15m_10d")["minutes"] == 15
+    assert compute.replay_lookback_spec(0, "1d_20d")["freq_type"] == "daily"
+    # Unknown override falls back to auto.
+    assert compute.replay_lookback_spec(0, "bogus") == compute.replay_lookback_spec(0)
 
 
 def test_sim_replay_missing_snapshot_returns_empty():

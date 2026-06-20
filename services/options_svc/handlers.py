@@ -350,7 +350,7 @@ def handle_command(bus, command) -> None:
         a = command.args or {}
         res = compute.sim_replay(
             a.get("symbol"), a.get("expiry"), a.get("kind"),
-            a.get("strike"), a.get("direction"))
+            a.get("strike"), a.get("direction"), a.get("lookback", "auto"))
         version = bus.cache_set(CACHE_SIM_REPLAY, res)
         bus.publish(EVENT_SIM_REPLAY, {"version": version})
     elif command.type == "calc_load":

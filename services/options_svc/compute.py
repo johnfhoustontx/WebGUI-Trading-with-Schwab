@@ -1138,21 +1138,62 @@ def sim_run(symbol, expiry, kind, strike, direction, dt, mult) -> dict:
     return {"spot": snap.spot, "whatif_rows": whatif_rows, "ivshock": ivshock}
 
 
-def sim_replay(symbol, expiry, kind, strike, direction) -> dict:
+_REPLAY_OVERRIDES = {
+    "1m_1d":   {"freq_type": "minute", "minutes": 1,  "days": 1,  "label": "1-min · 1d"},
+    "5m_3d":   {"freq_type": "minute", "minutes": 5,  "days": 3,  "label": "5-min · 3d"},
+    "5m_5d":   {"freq_type": "minute", "minutes": 5,  "days": 5,  "label": "5-min · 5d"},
+    "15m_10d": {"freq_type": "minute", "minutes": 15, "days": 10, "label": "15-min · 10d"},
+    "1d_20d":  {"freq_type": "daily",  "months": 1,   "bars": 20, "label": "daily · 20d"},
+}
+
+
+def replay_lookback_spec(dte, override="auto") -> dict:
+    """Map ``(dte, override)`` → a price-history fetch spec for the Replay path.
+
+    ``override`` of ``"auto"`` (or any unknown key) uses the DTE tiers
+    (0 → 1-min/1d · ≤5 → 5-min/3d · ≤15 → 5-min/5d · >15 → daily/~½×DTE); any
+    known override key selects a fixed window. Always returns a dict with
+    ``freq_type`` ('minute'|'daily') plus the params the fetch helper needs
+    (``minutes``/``days`` for intraday, ``months``/``bars`` for daily) and a
+    human ``label``."""
+    import math
+    if override and override != "auto" and override in _REPLAY_OVERRIDES:
+        return dict(_REPLAY_OVERRIDES[override])
+    try:
+        dte = int(dte)
+    except (TypeError, ValueError):
+        dte = 15
+    if dte <= 0:
+        return {"freq_type": "minute", "minutes": 1, "days": 1, "label": "1-min · 1d"}
+    if dte <= 5:
+        return {"freq_type": "minute", "minutes": 5, "days": 3, "label": "5-min · 3d"}
+    if dte <= 15:
+        return {"freq_type": "minute", "minutes": 5, "days": 5, "label": "5-min · 5d"}
+    bars = math.ceil(dte / 2)
+    months = max(1, math.ceil(bars / 21))
+    return {"freq_type": "daily", "months": months, "bars": bars,
+            "label": f"daily · {bars}d"}
+
+
+def sim_replay(symbol, expiry, kind, strike, direction, lookback="auto") -> dict:
     """Re-price the selected contract along the underlying's recent price path.
 
-    Ports the legacy Tk Replay tab: ``ReplayEngine.full_trace`` over the
-    snapshot's ``price_history`` (already fetched by ``sim_fetch``), plus the
-    gap-compression / session-boundary layout the page needs to draw a clean
-    integer x-axis (overnight/weekend breaks collapsed onto consecutive indices).
+    Ports the legacy Tk Replay tab: ``ReplayEngine.full_trace`` over a price
+    path, plus the gap-compression / session-boundary layout the page needs to
+    draw a clean integer x-axis (overnight/weekend breaks collapsed onto
+    consecutive indices). The path is a **DTE-aware** window fetched here
+    (``replay_lookback_spec`` → ``_fetch_replay_history``), NOT the snapshot's
+    fixed 2-day history — the expiry/DTE is only known at replay time, and
+    ``lookback`` ('auto' or an override key) lets the page widen/narrow it.
     Returns a JSON-safe dict; ``{}`` if the snapshot/contract is missing (page
     prompts a re-fetch / selection), or ``{"error": ...}`` if IV is unavailable
-    or there's no price history (mirrors the Tk "IV unavailable" / "no price
-    history" guards). Replay depends ONLY on the contract selector — not the
-    dt/mult sliders — so it is its own command/cache view, separate from
-    ``sim_run`` (keeps slider-driven sweeps cheap)."""
+    or there's no price history. Replay depends ONLY on the contract selector +
+    look-back — not the dt/mult sliders — so it is its own command/cache view,
+    separate from ``sim_run`` (keeps slider-driven sweeps cheap)."""
     from options_simulator import engine as seng
     import numpy as np
+    import dataclasses
+    import datetime as dt
 
     snap = _SIM_SNAPSHOTS.get(symbol)
     if snap is None:
@@ -1163,11 +1204,23 @@ def sim_replay(symbol, expiry, kind, strike, direction) -> dict:
     if contract.iv <= 0:
         return {"error": "IV unavailable - cannot simulate"}
 
+    # DTE-aware history window (fetched here, not the snapshot's fixed 2-day path).
+    try:
+        dte = (contract.expiry - dt.date.today()).days
+    except Exception:
+        dte = 15
+    spec = replay_lookback_spec(dte, lookback)
+    hist = _fetch_replay_history(snap.symbol, spec)
+    if hist is None or hist.empty:
+        return {"error": "Replay unavailable - no price history"}
+
+    # Re-price along the fetched path (shallow-copy the snapshot's history so the
+    # cached snapshot is untouched).
+    snap_path = dataclasses.replace(snap, price_history=hist)
     pos = seng.Position.single(contract, direction, snap.symbol)
     trace = seng.aggregate_position(
-        pos, lambda c: seng.ReplayEngine(snap).full_trace(c))
-    hist = snap.price_history
-    if trace is None or trace.empty or hist.empty:
+        pos, lambda c: seng.ReplayEngine(snap_path).full_trace(c))
+    if trace is None or trace.empty:
         return {"error": "Replay unavailable - no price history"}
 
     # Compress overnight/weekend gaps onto an integer x-axis: a "gap" is any
@@ -1226,7 +1279,32 @@ def sim_replay(symbol, expiry, kind, strike, direction) -> dict:
         "sessions": sessions,
         "ticks": ticks,
         "resolution": resolution,
+        "lookback": {"label": spec.get("label", ""), "key": lookback or "auto"},
     }
+
+
+def _fetch_replay_history(symbol, spec):
+    """Fetch a price-history Series for a Replay ``spec`` (from
+    ``replay_lookback_spec``) via the flexible proxy client. Intraday specs use
+    ``get_intraday_history(minutes, days)``; daily specs use
+    ``get_daily_history(months)`` sliced to the last ``bars`` rows. Defensive:
+    returns an EMPTY Series on any failure (caller degrades to an error payload)."""
+    import pandas as pd
+    sc = _proxy.schwab_client
+    try:
+        if spec.get("freq_type") == "minute":
+            df = sc.get_intraday_history(symbol, minutes=spec["minutes"], days=spec["days"])
+        else:
+            df = sc.get_daily_history(symbol, months=spec.get("months", 1))
+        if df is None or len(df) == 0:
+            return pd.Series(dtype=float)
+        series = pd.Series(df["close"].values, index=pd.to_datetime(df["datetime"]))
+        bars = spec.get("bars")
+        if bars:
+            series = series.iloc[-int(bars):]
+        return series
+    except Exception:
+        return pd.Series(dtype=float)
 
 
 def atm_iv_from_chain(chain, spot, expiry=None):

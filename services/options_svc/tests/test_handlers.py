@@ -797,18 +797,25 @@ def test_publish_gamma_symbols_caches_and_publishes(monkeypatch):
 
 
 def test_handle_command_sim_replay(monkeypatch):
-    """sim_replay dispatches compute.sim_replay -> caches + publishes the view."""
+    """sim_replay dispatches compute.sim_replay (forwarding lookback) -> caches +
+    publishes the view."""
     bus = Bus(fake=True)
-    monkeypatch.setattr(handlers.compute, "sim_replay",
-                        lambda *a: {"spot": 1.0, "x": [0], "prices": [1.0]})
+    seen = {}
+
+    def _fake(symbol, expiry, kind, strike, direction, lookback="auto"):
+        seen["lookback"] = lookback
+        return {"spot": 1.0, "x": [0], "prices": [1.0]}
+
+    monkeypatch.setattr(handlers.compute, "sim_replay", _fake)
     sub = bus.subscribe(handlers.EVENT_SIM_REPLAY)
     handlers.handle_command(bus, Command(type="sim_replay", args={
         "symbol": "SPY", "expiry": "2026-06-26", "kind": "call",
-        "strike": 450.0, "direction": "buy"}))
+        "strike": 450.0, "direction": "buy", "lookback": "5m_3d"}))
     msg = sub.get_message(timeout=1.0)
     sub.close()
 
     env = bus.cache_get(handlers.CACHE_SIM_REPLAY)
     assert env is not None
     assert env.payload["spot"] == 1.0
+    assert seen["lookback"] == "5m_3d"
     assert msg is not None and msg.get("version") == env.version
