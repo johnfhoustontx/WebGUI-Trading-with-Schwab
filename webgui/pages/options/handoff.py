@@ -13,8 +13,7 @@ from nicegui import ui
 
 import bus_client
 
-_pending = {"calculator": None}
-_pending["expected_move"] = None  # extend the existing module-level stash
+_pending = {"calculator": None, "expected_move": None}
 
 
 # Per signal-type: list of (field_name, option_type, side) for the strike legs.

@@ -84,3 +84,35 @@ def test_render_graceful_empty_cache():
     assert bus_client.read("options:expected_move") is None
     with ui.card():
         em.render()  # must not raise
+
+
+def test_pending_expected_move_round_trip():
+    handoff.set_pending_expected_move({"symbol": "SPY"})
+    assert handoff.take_pending_expected_move() == {"symbol": "SPY"}
+    assert handoff.take_pending_expected_move() is None  # one-shot clear
+
+
+def test_send_to_expected_move_navigates(monkeypatch):
+    calls = {}
+    monkeypatch.setattr(
+        handoff.ui, "navigate",
+        type("N", (), {"to": staticmethod(
+            lambda *a, **k: calls.setdefault("to", (a, k)))}))
+    monkeypatch.setattr(handoff.ui, "notify", lambda *a, **k: None)
+    handoff.send_to_expected_move(
+        {"symbol": "SPY", "expiry": "2026-07-18", "legs": []})
+    assert calls["to"][0][0] == "/options/expected-move"
+    assert calls["to"][1].get("new_tab") is True
+    assert handoff.take_pending_expected_move()["symbol"] == "SPY"  # stashed
+
+
+def test_send_to_expected_move_no_symbol_does_not_navigate(monkeypatch):
+    calls = {}
+    monkeypatch.setattr(
+        handoff.ui, "navigate",
+        type("N", (), {"to": staticmethod(
+            lambda *a, **k: calls.setdefault("to", True))}))
+    monkeypatch.setattr(handoff.ui, "notify", lambda *a, **k: None)
+    handoff.send_to_expected_move({"symbol": "", "legs": []})
+    assert "to" not in calls  # warned, did not navigate
+    handoff.take_pending_expected_move()  # clean up stash
