@@ -26,8 +26,10 @@ def test_em_cone_widens_as_sqrt_time():
     assert len(upper) == 6 and len(lower) == 6
     assert upper[0][1] == 100.0 and lower[0][1] == 100.0
     w3 = 100.0 * 0.20 * math.sqrt(3 / 365)
-    assert abs(upper[3][1] - (100.0 + w3)) < 1e-9
-    assert abs(lower[3][1] - (100.0 - w3)) < 1e-9
+    # Cone values are rounded to 2 decimals (price levels).
+    assert upper[3][1] == round(100.0 + w3, 2)
+    assert lower[3][1] == round(100.0 - w3, 2)
+    assert upper[3][1] == round(upper[3][1], 2)  # no more than 2dp
     assert upper[1][0] - upper[0][0] == 86_400_000
 
 

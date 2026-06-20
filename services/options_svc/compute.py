@@ -1202,8 +1202,8 @@ def em_cone(spot, atm_iv, dte, start_ts_ms):
     for t in range(dte + 1):
         ts = int(start_ts_ms) + t * _DAY_MS
         width = spot * atm_iv * math.sqrt(t / 365.0)
-        upper.append([ts, spot + width])
-        lower.append([ts, spot - width])
+        upper.append([ts, round(spot + width, 2)])
+        lower.append([ts, round(spot - width, 2)])
     return {"upper": upper, "lower": lower}
 
 
