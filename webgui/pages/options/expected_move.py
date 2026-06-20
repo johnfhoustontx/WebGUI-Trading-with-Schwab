@@ -93,7 +93,10 @@ def expected_move_figure(payload, timeframe="daily"):
                                 "snap": False},
                   "plotLines": leg_lines(p.get("legs"))},
         # Shared tooltip carries the DATE (header) + OHLC at the cursor on hover.
-        "tooltip": {"shared": True, "xDateFormat": "%a, %b %e, %Y"},
+        # valueDecimals=2 limits the EM/price values to 2 decimals in the tooltip
+        # regardless of the underlying float precision.
+        "tooltip": {"shared": True, "xDateFormat": "%a, %b %e, %Y",
+                    "valueDecimals": 2},
         "series": series,
     }
 
