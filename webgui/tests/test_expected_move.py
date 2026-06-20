@@ -58,6 +58,8 @@ def test_expected_move_figure_series_and_crosshair():
     assert fig["series"][0]["data"][0] == [1, 100, 101, 99, 100]
     assert fig["xAxis"]["type"] == "datetime"
     assert fig["xAxis"]["crosshair"]["label"]["enabled"] is True
+    # X crosshair label must render a DATE, not the raw epoch-ms value.
+    assert "%" in fig["xAxis"]["crosshair"]["label"]["format"]
     assert fig["yAxis"]["crosshair"]["label"]["enabled"] is True
     assert any(s.get("dashStyle") == "Dash" for s in fig["series"] if s["type"] == "line")
     assert len(fig["yAxis"]["plotLines"]) == 2
