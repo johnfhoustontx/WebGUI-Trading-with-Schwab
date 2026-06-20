@@ -8,7 +8,13 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-06-19 (**charting migrated Plotly/SVG → Highcharts**: every
+**Last updated:** 2026-06-20 (**Simulator Replay tab migrated**: the third legacy
+Tk simulator tab (`Replay`) now lives in the 3-tier webgui alongside What-if /
+IV-shock — new `compute.sim_replay` + `sim_replay` command +
+`cache:options:sim_replay` + a stacked price+5-Greek Highcharts panel with a
+client-side scrub cursor. 353 webgui + 137 options_svc tests green; verified live
+(SPY 62-bar trace). Branch `Using_Highcharts`. See "Simulator Replay tab" below.)
+Prior — 2026-06-19 (**charting migrated Plotly/SVG → Highcharts**: every
 webgui chart + gauge now renders via `nicegui-highcharts` (`ui.highchart`), not
 `ui.plotly`/inline-SVG. Pure builders return Highcharts option dicts; in-place updates
 are `el.options = fig; el.update()` (replaces `update_figure`). The Sentiment / Trend /
@@ -188,7 +194,7 @@ Routes:
 | `/options/calculator` | Calculator (summary tiles + P&L heatmap) | built |
 | `/options/swing` | Swing Scanner | built |
 | `/options/gamma` | Gamma (GEX/Charm/DEX/Vanna bars + flip/**single Call+Put walls** + intraday heatmap; bar/heatmap **width split grows with session** snapshot count; **flicker-free** in-place Highcharts updates; **symbol is a dropdown** — default `$SPX`, populated from the collected universe (watchlist minus `$VIX`) via `cache:options:gamma_symbols`; Explain works per-selected-symbol) | built |
-| `/options/simulator` | Simulator (What-if + IV-shock; Replay TODO) | built |
+| `/options/simulator` | Simulator (all three legacy tabs: **Replay** (re-prices the contract along the underlying's recent path → stacked price + 5-Greek panels over a gap-compressed integer x-axis w/ a client-side scrub cursor) + What-if + IV-shock) | built |
 | `/options/expected-move` | Expected Move (candlestick price history (6-mo daily) + forward **ATM-IV expected-move cone** to the option's expiration (green/red dashed, √-time fan) + leg **strike lines** (short solid / long dashed, put/call colored) + axis **crosshair** w/ Date(X)+Price(Y) label boxes; opened in a **new browser tab** via stash-handoff from Scanner/Paper/Captured/Calculator, or standalone w/ symbol+expiry input) | built |
 | `/sentiment` | Sentiment (two-column top: **dual** Sentiment gauges (Today + 30-Day Avg) + **dual** Market Trend gauges (Today live-intraday + 30-Day structural — directional 0–100 score, 15-min cadence) / component table; traffic-light tiles; 30d history + rolling avgs; full-width **Sector & Industry Performance** w/ Day/Week/Month %, P/C, RRG, rotation banner, **expandable industries w/ P/C+RRG**; bottom status bar; **persists across navigation**; **server-side 120s auto-refresh + bridge publish, tab-independent**) | built |
 | `/sentiment/rotation` | Sector Rotation (RRG-vs-SPY: Risk-ON/OFF headline + spread; **top row** = quadrant-map table (left) + tight ROTATING FROM/INTO w/ S&P weights (right); **full-width RRG below** w/ per-sector "meteor tails" — engine `assess_sector` retains a `tail` of `TAIL_LENGTH=12` RS-Ratio/RS-Mom points sampled every `TAIL_STRIDE=2` days; page draws **one spline series per sector** (faded trail line + single bright head dot) and **hover-isolates** a sector via native Highcharts `plotOptions.series.states.inactive` (hovering one dims the rest — no client round-trip); reuses `sector_rotation_assessment`; cached, **manual Refresh only**) | built |
@@ -432,9 +438,11 @@ Design/plans: [live-bridge](docs/plans/2026-06-14-live-sentiment-bridge-design.m
   See "Driver page (`/driver`) — DONE" below.
 - Reuse the page pattern above; verify each engine function's real signature in
   the copied module before wiring (explorations of source can drift from copy).
-- Optional follow-ups: Simulator **Replay** tab. (The Gamma intraday-heatmap
-  **collector** now runs inside `options_svc` — see below — so the heatmap
-  populates all session whenever the service is up.)
+- Optional follow-ups: (none outstanding for the Simulator — the **Replay** tab
+  was migrated 2026-06-20: `compute.sim_replay` + `sim_replay` command +
+  `cache:options:sim_replay` + the page's Replay tab. See "Simulator Replay tab"
+  below.) (The Gamma intraday-heatmap **collector** now runs inside `options_svc`
+  — see below — so the heatmap populates all session whenever the service is up.)
 
 **Gamma intraday-heatmap collection (DONE — 2026-06-15; expanded 2026-06-18).** Intraday GEX history
 (`gex_history.db`, read by the Gamma strike×time heatmap) is now collected by the
@@ -734,6 +742,35 @@ the Options nav with manual symbol+expiry). Pieces:
   from its `leg_inputs`. Design/plan:
   [design](docs/plans/2026-06-20-expected-move-page-design.md) /
   [plan](docs/plans/2026-06-20-expected-move-page.md).
+
+**Simulator Replay tab (`/options/simulator`) — DONE (2026-06-20).** The third
+legacy Tk simulator tab (`Replay`, alongside the already-migrated What-if /
+IV-shock) was migrated to the 3-tier model. The in-process `ChainSnapshot` that
+`sim_fetch` already stashes (and which carries `price_history`) is re-priced
+along the underlying's recent path by the existing pure
+`options_simulator.ReplayEngine`. Pieces:
+- **Compute (Tier 2, `services/options_svc/compute.py`):** `sim_replay(symbol,
+  expiry, kind, strike, direction)` runs `ReplayEngine.full_trace` via
+  `aggregate_position`, then ports the legacy window's **gap-compression /
+  session** layout (overnight/weekend breaks collapsed onto a consecutive integer
+  x-axis; `gaps`/`sessions`/`ticks`/`resolution`) into a **JSON-safe** dict
+  (`x`/`prices`/`greeks{delta,gamma,theta,vega,rho}`/`timestamps`). Defensive:
+  `{}` on missing snapshot/contract, `{"error": …}` on IV≤0 / no price history.
+  It is a **separate command/cache view** from `sim_run` (replay depends only on
+  the contract selector, NOT the dt/mult sliders — so slider drags stay cheap).
+- **Command/cache (`handlers.py`):** the `sim_replay` command →
+  `cache:options:sim_replay` + `events:options:sim_replay`.
+- **Page (`webgui/pages/options/simulator.py`):** a third **Replay** tab (now the
+  default). Pure builder `replay_figure(trace, cursor)` draws ONE Highcharts
+  element with **6 stacked yAxes** (Price + 5 Greeks) over the integer x-axis;
+  session boundaries are dashed xAxis plotLines and the **scrub slider** is a
+  client-side cursor plotLine (no command — same idiom as the ΔS overlay). The
+  x-axis stays NUMERIC (dates in the tooltip / readout) to sidestep the datetime
+  crosshair epoch-ms gotcha. Built once at render (ESM import-map gotcha), updated
+  in place; version-polls `options:sim_replay`; enqueues only on contract-selector
+  changes. Pure builders unit-tested; verified live end-to-end (SPY → 62-bar
+  1-min trace → rendered 6-panel stack). Plan:
+  [plan](docs/plans/2026-06-20-simulator-replay-tab-plan.md).
 
 **System Status page (`/status`) — DONE (2026-06-19).** A **pure-webgui** at-a-glance
 health board (no new service/port). It honors the 3-tier import rule — `webgui/pages/status.py`
