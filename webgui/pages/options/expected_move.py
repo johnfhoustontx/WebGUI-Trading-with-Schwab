@@ -85,5 +85,79 @@ def expected_move_figure(payload, timeframe="daily"):
     }
 
 
-def render():  # fleshed out in the next task
-    pass
+def render():
+    """Build the Expected Move page: input row + persistent candlestick chart.
+
+    Handoff flow: a stashed payload (from Scanner/Paper/Captured/Calculator) is
+    consumed once on load and its command enqueued immediately. Standalone flow:
+    the user types a symbol + expiry (+ optional strike) and clicks Draw."""
+    import datetime as dt
+
+    from nicegui import ui
+
+    import bus_client
+
+    from pages.ui_guard import guard
+
+    from . import handoff
+    from .inputs import select_all_on_focus
+
+    ui.label("Expected Move").classes("text-h5")
+
+    state = {"ver": None}
+
+    with ui.row().classes("items-end gap-3 flex-wrap"):
+        symbol_in = select_all_on_focus(ui.input("Symbol", value="SPY").classes("w-28"))
+        expiry_in = ui.input("Expiry (YYYY-MM-DD)").classes("w-44")
+        strike_in = ui.number("Strike (optional)", format="%.2f").classes("w-36")
+        type_tog = ui.toggle(["put", "call"], value="put")
+        draw_btn = ui.button("Draw", icon="show_chart")
+        status = ui.label("").classes("opacity-70 text-sm")
+
+    chart = ui.highchart(expected_move_figure({}), extras=["stock"]).classes("w-full")
+
+    def _repaint(payload):
+        status.text = (payload or {}).get("error") or ""
+        chart.options = expected_move_figure(payload or {})
+        chart.update()
+
+    @guard
+    def _enqueue(payload):
+        if not payload or not payload.get("symbol") or not payload.get("expiry"):
+            ui.notify("Symbol + expiry required.", type="warning")
+            return
+        bus_client.request("options", {"type": "expected_move", "args": payload})
+        status.text = f"Computing expected move for {payload['symbol']}…"
+
+    @guard
+    def _draw():
+        legs = []
+        if strike_in.value:
+            legs = [{"strike": float(strike_in.value),
+                     "option_type": type_tog.value, "side": "short"}]
+        _enqueue({"symbol": (symbol_in.value or "").replace("$", "").upper(),
+                  "expiry": (expiry_in.value or "").strip(), "legs": legs})
+
+    draw_btn.on_click(_draw)
+
+    @guard
+    def _poll():
+        version = bus_client.read_version("options:expected_move")
+        if version == state["ver"]:
+            return
+        state["ver"] = version
+        _repaint(bus_client.read("options:expected_move"))
+
+    pending = handoff.take_pending_expected_move()
+    if pending:
+        symbol_in.value = pending.get("symbol") or symbol_in.value
+        if pending.get("expiry"):
+            expiry_in.value = pending["expiry"]
+        state["ver"] = bus_client.read_version("options:expected_move")
+        _enqueue(pending)
+    else:
+        if not expiry_in.value:
+            expiry_in.value = (dt.date.today() + dt.timedelta(days=30)).isoformat()
+        state["ver"] = bus_client.read_version("options:expected_move")
+
+    ui.timer(1.0, _poll)

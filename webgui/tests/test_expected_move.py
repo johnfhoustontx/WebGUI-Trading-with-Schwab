@@ -66,3 +66,21 @@ def test_expected_move_figure_series_and_crosshair():
 def test_expected_move_figure_handles_empty_payload():
     fig = em.expected_move_figure({})
     assert fig["series"] == [] or all(not s.get("data") for s in fig["series"])
+
+
+def test_render_callable():
+    assert callable(em.render)
+
+
+def test_render_graceful_empty_cache():
+    """render() must paint without crashing when the bus cache is empty
+    (options service cold) — the Tier-3 graceful-empty path. Rendering inside a
+    slot context exercises the widget wiring + the initial fetch-free paint.
+    """
+    import bus_client
+    from nicegui import ui
+
+    bus_client.reset()  # fresh empty fakeredis cache (no service writes)
+    assert bus_client.read("options:expected_move") is None
+    with ui.card():
+        em.render()  # must not raise
