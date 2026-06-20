@@ -112,6 +112,19 @@ def test_merge_detail_none_or_empty_returns_base_copy():
     assert paper.merge_detail({"a": 1}, {}) == {"a": 1}
 
 
+def test_paper_columns_include_actions():
+    assert "actions" in {c["field"] for c in paper.paper_columns()}
+
+
+def test_synth_from_trade_is_em_payload_compatible():
+    from pages.options import handoff
+    trade = {"trade_id": "t1", "strategy": "PCS", "symbol": "SPY",
+             "expiration": "2026-07-18", "short_strike": 540, "long_strike": 535}
+    payload = handoff.signal_to_em_payload(paper.synth_from_trade(trade))
+    assert payload["symbol"] == "SPY"
+    assert payload["legs"][0] == {"strike": 540.0, "option_type": "put", "side": "short"}
+
+
 def test_render_callable():
     assert callable(paper.render)
 

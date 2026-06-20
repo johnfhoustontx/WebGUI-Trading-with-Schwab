@@ -111,6 +111,12 @@ def test_actions_slot_has_expected_move_button():
     assert "show_chart" in handoff._ACTIONS_SLOT
 
 
+def test_em_action_slot_is_expected_move_only():
+    assert "to_em" in handoff._EM_ACTION_SLOT
+    assert "to_calc" not in handoff._EM_ACTION_SLOT
+    assert "to_paper" not in handoff._EM_ACTION_SLOT
+
+
 def test_send_to_expected_move_no_symbol_does_not_navigate(monkeypatch):
     calls = {}
     monkeypatch.setattr(

@@ -210,10 +210,11 @@ def render():
 
     table.on("rowClick", _select)
 
-    # Per-row Expected Move (+ Calculator / Paper) buttons. ``synth_from_captured``
-    # maps the raw captured signal to a signal-shaped dict (``type``/``expiration``/
-    # ``*_strike``) that ``signal_to_em_payload`` understands.
-    handoff.add_row_actions(
+    # Per-row Expected Move button only (Calculator / Paper actions don't belong
+    # on the captured-signals table). ``synth_from_captured`` maps the raw captured
+    # signal to a signal-shaped dict (``type``/``expiration``/``*_strike``) that
+    # ``signal_to_em_payload`` understands.
+    handoff.add_expected_move_action(
         table, lambda row: synth_from_captured(raw_by_id.get(row.get("id"))))
 
     def _selected_signal():

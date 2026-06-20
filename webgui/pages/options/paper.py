@@ -208,10 +208,11 @@ def render():
             _request_analyze(t.get("trade_id"), t.get("symbol", ""))  # live overlay
 
     table.on("rowClick", _select)
-    # Per-row Expected Move (+ Calculator / Paper) buttons. ``synth_from_trade``
-    # maps the raw paper trade to a signal-shaped dict (``type``/``expiration``/
-    # ``*_strike``) that ``signal_to_em_payload`` understands.
-    handoff.add_row_actions(
+    # Per-row Expected Move button only (Calculator / Paper actions don't belong
+    # on a paper-trade ledger). ``synth_from_trade`` maps the raw paper trade to a
+    # signal-shaped dict (``type``/``expiration``/``*_strike``) that
+    # ``signal_to_em_payload`` understands.
+    handoff.add_expected_move_action(
         table, lambda row: synth_from_trade(raw_by_id.get(row.get("id"))))
 
     def _selected_trade():
