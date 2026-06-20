@@ -21,7 +21,7 @@ def test_component_targets_covers_every_tier():
 def test_component_targets_have_required_fields():
     for t in status.component_targets():
         assert set(t) >= {"key", "label", "tier", "kind", "url"}
-        assert t["kind"] in {"memurai", "proxy", "service", "self"}
+        assert t["kind"] in {"memurai", "proxy", "service", "self", "auth"}
 
 
 def test_memurai_is_tier3_and_proxy_tier1():
@@ -175,10 +175,12 @@ def test_restart_spec_self_is_none():
     assert status.restart_spec(_target("webgui", "self")) is None
 
 
-def test_every_component_target_is_restartable_except_webgui():
+def test_every_component_target_is_restartable_except_webgui_and_auth():
+    # The webgui can't restart itself; the auth card's action is Authorize (a
+    # link to /auth), not a process restart — neither has a restart spec.
     for t in status.component_targets():
         spec = status.restart_spec(t)
-        if t["kind"] == "self":
+        if t["kind"] in ("self", "auth"):
             assert spec is None
         else:
             assert spec is not None, f"{t['key']} should be restartable"
@@ -203,3 +205,58 @@ def test_restart_command_service_uses_powershell():
 
 def test_restart_command_none_passthrough():
     assert status.restart_command(None) is None
+
+
+# --- Schwab Authorization -----------------------------------------------------
+def test_auth_target_present_and_links_to_auth_page():
+    by_key = {t["key"]: t for t in status.component_targets()}
+    assert "schwab_auth" in by_key
+    t = by_key["schwab_auth"]
+    assert t["kind"] == "auth"
+    assert t["url"].endswith("/auth")
+    assert status.AUTH_URL.endswith(":8100/auth")
+
+
+def test_auth_status_proxy_down_is_unknown():
+    up, detail = status.auth_status({"up": False})
+    assert up is None
+    assert "proxy down" in detail
+    # None-health also unknown (never raises).
+    assert status.auth_status(None)[0] is None
+
+
+def test_auth_status_no_token_needs_auth():
+    up, detail = status.auth_status({"up": True, "has_token": False})
+    assert up is False
+    assert "authorization required" in detail
+
+
+def test_auth_status_refresh_expired_needs_reauth():
+    up, detail = status.auth_status({
+        "up": True, "has_token": True, "refresh_token_expired": True,
+        "token_expired": True})
+    assert up is False
+    assert "re-authorization required" in detail
+
+
+def test_auth_status_access_expired_but_refresh_ok_is_authorized():
+    # Access token expired but refresh valid → proxy auto-refreshes → still up.
+    up, detail = status.auth_status({
+        "up": True, "has_token": True, "refresh_token_expired": False,
+        "token_expired": True})
+    assert up is True
+    assert "auto-refresh" in detail
+
+
+def test_auth_status_fully_valid_is_authorized():
+    up, detail = status.auth_status({
+        "up": True, "has_token": True, "refresh_token_expired": False,
+        "token_expired": False})
+    assert up is True
+    assert "authorized" in detail
+
+
+def test_auth_is_not_restartable():
+    # The auth card's action is Authorize (a link), not a process restart.
+    auth_target = {"key": "schwab_auth", "kind": "auth"}
+    assert status.restart_spec(auth_target) is None

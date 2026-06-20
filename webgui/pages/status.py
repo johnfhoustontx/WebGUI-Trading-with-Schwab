@@ -43,6 +43,10 @@ from repo_paths import (
 # Service-probe timeout — short so a dead service fails fast on the status sweep.
 _HTTP_TIMEOUT = 2.5
 
+# Schwab OAuth re-login page served by the proxy (Step-1/2/3 login flow). Opened
+# in a new tab by the "Authorize" button on the Schwab Authorization card.
+AUTH_URL = f"{PROXY_URL}/auth"
+
 # A domain's published cache is considered "stale" past this age (services that
 # publish on a timer should refresh well inside this). Trade is on-demand, so its
 # row is allowed to be old without flagging.
@@ -66,13 +70,16 @@ def component_targets():
 
     Each entry is ``{"key", "label", "tier", "kind", "url"}``. ``kind`` drives
     how the probe is performed: ``memurai`` (Redis ping), ``proxy`` /
-    ``service`` (HTTP ``/health``), ``self`` (the webgui, always up).
+    ``service`` (HTTP ``/health``), ``auth`` (Schwab OAuth token validity, read
+    from the proxy ``/health``), ``self`` (the webgui, always up).
     """
     targets = [
         {"key": "memurai", "label": "Memurai (Redis backbone)", "tier": "Tier 3",
          "kind": "memurai", "url": f"redis://127.0.0.1:{MEMURAI_PORT}"},
         {"key": "proxy", "label": "schwab-proxy (market data / auth)",
          "tier": "Tier 1", "kind": "proxy", "url": PROXY_URL},
+        {"key": "schwab_auth", "label": "Schwab Authorization (OAuth)",
+         "tier": "Tier 1", "kind": "auth", "url": AUTH_URL},
     ]
     svc_labels = {
         "sentiment": "sentiment_svc (composite + rotation)",
@@ -187,6 +194,26 @@ def freshness_row(label, view, version, ts, now, scheduled):
     }
 
 
+def auth_status(health):
+    """Map a proxy ``/health`` dict to ``(up, detail)`` for the Schwab Auth card.
+
+    * ``up=None`` — can't tell (proxy down / no health) → grey, not counted.
+    * ``up=False`` — manual re-auth needed: no token, or the **refresh** token is
+      expired (the proxy can't silently recover from that).
+    * ``up=True`` — authorized. An expired **access** token is still ``True`` because
+      the proxy auto-refreshes it from a valid refresh token.
+    """
+    if not health or not health.get("up"):
+        return (None, "proxy down — can't check authorization")
+    if not health.get("has_token"):
+        return (False, "no token — authorization required")
+    if health.get("refresh_token_expired"):
+        return (False, "refresh token expired — re-authorization required")
+    if health.get("token_expired"):
+        return (True, "access token expired — proxy auto-refreshes")
+    return (True, "authorized — token valid")
+
+
 # ── restart (pure spec/command builders + thin spawn) ────────────────────────
 def restart_spec(target):
     """How to (re)start a component, or ``None`` if it can't be restarted here.
@@ -243,8 +270,12 @@ def _do_restart(target):
 
 
 # ── network / redis probes (thin, screenshot-verified) ───────────────────────
-def _probe_one(target):
-    """Probe a single component target → a result dict with ``up`` + ``detail``."""
+def _probe_one(target, proxy_health=None):
+    """Probe a single component target → a result dict with ``up`` + ``detail``.
+
+    ``proxy_health`` lets the caller pass a single shared ``proxy.health()`` result
+    so the ``proxy`` and ``auth`` cards don't each pay the HTTP round-trip.
+    """
     kind = target["kind"]
     out = dict(target)
     try:
@@ -254,15 +285,17 @@ def _probe_one(target):
             up = bus_client.ping()
             out.update(up=up, detail="PING ok" if up else "no PING response")
         elif kind == "proxy":
-            h = proxy.health()
+            h = proxy_health if proxy_health is not None else proxy.health()
             up = bool(h.get("up"))
             if up:
-                tok = h.get("token_loaded")
-                detail = "healthy" + ("" if tok is None else
-                                      f" · token {'loaded' if tok else 'MISSING'}")
+                detail = "healthy"
             else:
                 sc = h.get("status_code")
                 detail = f"HTTP {sc}" if sc else "unreachable"
+            out.update(up=up, detail=detail)
+        elif kind == "auth":
+            h = proxy_health if proxy_health is not None else proxy.health()
+            up, detail = auth_status(h)
             out.update(up=up, detail=detail)
         else:  # service
             resp = requests.get(f"{target['url']}/health", timeout=_HTTP_TIMEOUT)
@@ -274,8 +307,12 @@ def _probe_one(target):
 
 
 def _sweep():
-    """Probe every component (blocking) → list of result dicts. Runs off-thread."""
-    return [_probe_one(t) for t in component_targets()]
+    """Probe every component (blocking) → list of result dicts. Runs off-thread.
+
+    ``proxy.health()`` is fetched once and shared by the proxy + auth cards.
+    """
+    health = proxy.health()
+    return [_probe_one(t, proxy_health=health) for t in component_targets()]
 
 
 # ── render ───────────────────────────────────────────────────────────────────
@@ -327,8 +364,14 @@ def render():
                             ui.label(r["label"]).classes("font-medium")
                             ui.label(f"{r['tier']} · {r['url']}").classes(
                                 "text-xs opacity-60")
-                        # Restart button — only when offline and restartable.
-                        if up is False and restart_spec(r) is not None:
+                        # Action button: Authorize (auth card, proxy reachable) or
+                        # Restart (any other offline + restartable component).
+                        if r.get("kind") == "auth" and up is not None:
+                            ui.button(
+                                "Re-authorize" if up else "Authorize", icon="login",
+                                on_click=lambda: ui.navigate.to(AUTH_URL, new_tab=True)) \
+                                .props("size=sm color=warning outline").classes("ml-auto")
+                        elif up is False and restart_spec(r) is not None:
                             ui.button("Restart", icon="restart_alt",
                                       on_click=lambda t=r: _restart_clicked(t)) \
                                 .props("size=sm color=warning outline").classes("ml-auto")
