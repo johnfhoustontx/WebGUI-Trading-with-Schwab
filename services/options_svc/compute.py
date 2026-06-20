@@ -1173,7 +1173,11 @@ def atm_iv_from_chain(chain, spot, expiry=None):
                         best = vol if vol < 5.0 else vol / 100.0
         return best
 
-    return _scan(True) if (exp_iso and _scan(True) is not None) else _scan(False)
+    if exp_iso:
+        exact = _scan(True)
+        if exact is not None:
+            return exact
+    return _scan(False)
 
 
 _DAY_MS = 86_400_000
@@ -1227,12 +1231,15 @@ def compute_expected_move(symbol, expiry, legs) -> dict:
         if not api:
             base["error"] = "No symbol."
             return base
+        today = dt.date.today()
 
         cresp = _proxy.schwab_py_client.get_price_history_every_day(api)
         raw = cresp.json().get("candles", []) if getattr(cresp, "status_code", None) == 200 else []
         candles = [[int(c["datetime"]), c["open"], c["high"], c["low"], c["close"]]
                    for c in raw
-                   if c.get("datetime") is not None and c.get("close") is not None]
+                   if c.get("datetime") is not None
+                   and c.get("open") is not None and c.get("high") is not None
+                   and c.get("low") is not None and c.get("close") is not None]
         candles.sort(key=lambda r: r[0])
         candles = candles[-_EM_HISTORY_BARS:]
         if not candles:
@@ -1246,7 +1253,7 @@ def compute_expected_move(symbol, expiry, legs) -> dict:
             base["error"] = f"Bad expiry: {expiry!r}."
             return base
         oresp = _proxy.schwab_py_client.get_option_chain(
-            api, contract_type="ALL", from_date=dt.date.today(), to_date=exp_date)
+            api, contract_type="ALL", from_date=today, to_date=exp_date)
         chain = oresp.json() if getattr(oresp, "status_code", None) == 200 else None
 
         spot = None
@@ -1260,7 +1267,7 @@ def compute_expected_move(symbol, expiry, legs) -> dict:
         atm_iv = atm_iv_from_chain(chain or {}, spot, expiry=str(expiry))
         base["atm_iv"] = atm_iv
 
-        dte = (exp_date - dt.date.today()).days
+        dte = (exp_date - today).days
         base["dte"] = dte
         if atm_iv is None:
             base["error"] = f"No ATM IV for {api} {expiry}."

@@ -98,6 +98,35 @@ def test_compute_expected_move_error_on_no_history(monkeypatch):
     assert out["error"]
 
 
+def test_compute_expected_move_skips_partial_candle(monkeypatch):
+    good = [{"datetime": 1_700_000_000_000 + i * compute._DAY_MS,
+             "open": 100, "high": 101, "low": 99, "close": 100 + i}
+            for i in range(5)]
+    partial = {"datetime": 1_700_000_000_000 + 99 * compute._DAY_MS,
+               "close": 150}  # missing open/high/low
+    raw = good + [partial]
+    chain = {"callExpDateMap": {"2026-07-18:28": {"100.0": [{"volatility": 20.0}]}}}
+
+    class _PY:
+        def get_price_history_every_day(self, sym):
+            return _Resp({"candles": raw})
+
+        def get_option_chain(self, sym, **kw):
+            return _Resp(chain)
+
+    class _SC:
+        def get_quote(self, sym):
+            return {"last": 100.0}
+
+    monkeypatch.setattr(compute._proxy, "schwab_py_client", _PY())
+    monkeypatch.setattr(compute._proxy, "schwab_client", _SC())
+
+    out = compute.compute_expected_move("SPY", "2026-07-18", [])
+    assert out["error"] is None
+    assert len(out["candles"]) == 5            # the partial bar was skipped
+    assert all(len(row) == 5 for row in out["candles"])
+
+
 from shared.bus import Bus
 from services.options_svc import handlers
 
