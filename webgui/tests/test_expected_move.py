@@ -57,10 +57,14 @@ def test_expected_move_figure_series_and_crosshair():
     assert "candlestick" in types
     assert fig["series"][0]["data"][0] == [1, 100, 101, 99, 100]
     assert fig["xAxis"]["type"] == "datetime"
-    assert fig["xAxis"]["crosshair"]["label"]["enabled"] is True
-    # X crosshair label must render a DATE, not the raw epoch-ms value.
-    assert "%" in fig["xAxis"]["crosshair"]["label"]["format"]
+    # X crosshair keeps the vertical LINE but drops its (raw-ms) label box; the
+    # DATE is shown via the tooltip header instead (Highcharts won't date-format
+    # the datetime X crosshair label in this build).
+    assert fig["xAxis"]["crosshair"]["label"]["enabled"] is False
+    assert "%" in fig["tooltip"]["xDateFormat"]      # date in the tooltip header
+    # Y crosshair shows a PRICE label box.
     assert fig["yAxis"]["crosshair"]["label"]["enabled"] is True
+    assert "value" in fig["yAxis"]["crosshair"]["label"]["format"]
     assert any(s.get("dashStyle") == "Dash" for s in fig["series"] if s["type"] == "line")
     assert len(fig["yAxis"]["plotLines"]) == 2
 

@@ -16,6 +16,13 @@ EM_DOWN_COLOR = "#ef5350"
 PUT_COLOR = "#ef9a9a"
 CALL_COLOR = "#90caf9"
 
+# Crosshair date readout note: this Highcharts build renders the datetime X-axis
+# crosshair LABEL box as the raw epoch-ms value and ignores both ``label.format``
+# (date tokens) and a ``label.formatter`` function (verified on plain chart AND
+# stockChart). So we keep the X crosshair LINE but disable its (raw-ms) label box,
+# show the PRICE on the Y crosshair label, and put the DATE in the shared tooltip
+# header (``tooltip.xDateFormat``) which appears at the cursor on hover.
+
 _DARK_AXIS = {"labels": {"style": {"color": "#bdbdbd"}},
               "gridLineColor": "rgba(255,255,255,0.06)",
               "lineColor": "rgba(255,255,255,0.15)"}
@@ -75,16 +82,18 @@ def expected_move_figure(payload, timeframe="daily"):
         "rangeSelector": {"enabled": False},
         "navigator": {"enabled": False},
         "scrollbar": {"enabled": False},
+        # X crosshair: keep the vertical line, drop the (raw-ms) label box — the
+        # date is shown in the tooltip header instead (see note above).
         "xAxis": {**_DARK_AXIS, "type": "datetime",
-                  "crosshair": {"label": {"enabled": True,
-                                          "format": "{value:%Y-%m-%d}"},
-                                "snap": False}},
+                  "crosshair": {"label": {"enabled": False}, "snap": False}},
+        # Y crosshair: line + a 2dp PRICE label box.
         "yAxis": {**_DARK_AXIS, "title": {"text": "Price"}, "opposite": False,
                   "crosshair": {"label": {"enabled": True,
                                           "format": "{value:.2f}"},
                                 "snap": False},
                   "plotLines": leg_lines(p.get("legs"))},
-        "tooltip": {"shared": True},
+        # Shared tooltip carries the DATE (header) + OHLC at the cursor on hover.
+        "tooltip": {"shared": True, "xDateFormat": "%a, %b %e, %Y"},
         "series": series,
     }
 
