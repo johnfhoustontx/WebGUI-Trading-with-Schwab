@@ -8,12 +8,21 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-06-20 (**Simulator Replay tab migrated**: the third legacy
+**Last updated:** 2026-06-20 (**Replay + Expected Move look-back, DTE-aware**: the
+Simulator Replay path and the Expected Move trailing history now size to the
+selected contract's **DTE** (Replay tiers 1-min/1d → daily/~½×DTE; EM ≈ **3× DTE**)
+with an **auto + manual-override** look-back dropdown on each tab. EM also
+**collapses non-trading-day gaps** — renders via `ui.highchart(type="stockChart")`
+→ ordinal x-axis + a trading-day-only `em_cone` (reuses `scheduler._HOLIDAYS`) — and
+the Replay hover tooltip is capped at 2dp. 356 webgui + 145 options_svc tests green;
+verified live. Branch `Using_Highcharts`. See "Simulator Replay tab" + "Expected
+Move page".)
+Prior — 2026-06-20 (**Simulator Replay tab migrated**: the third legacy
 Tk simulator tab (`Replay`) now lives in the 3-tier webgui alongside What-if /
 IV-shock — new `compute.sim_replay` + `sim_replay` command +
 `cache:options:sim_replay` + a stacked price+5-Greek Highcharts panel with a
-client-side scrub cursor. 353 webgui + 137 options_svc tests green; verified live
-(SPY 62-bar trace). Branch `Using_Highcharts`. See "Simulator Replay tab" below.)
+client-side scrub cursor. Verified live (SPY 62-bar trace). See "Simulator Replay
+tab" below.)
 Prior — 2026-06-19 (**charting migrated Plotly/SVG → Highcharts**: every
 webgui chart + gauge now renders via `nicegui-highcharts` (`ui.highchart`), not
 `ui.plotly`/inline-SVG. Pure builders return Highcharts option dicts; in-place updates
@@ -281,7 +290,14 @@ module-level functions (TDD them with sample dicts); keep `render()` thin
   but Highcharts never calls it). A NUMERIC y-axis crosshair label DOES honor `format`
   (e.g. `{value:.2f}`). So: keep the X crosshair LINE but disable its label box, show
   price on the Y label, put the DATE in the tooltip header (`tooltip.xDateFormat`) —
-  see `pages/options/expected_move.py`. A `ui.highchart` added DYNAMICALLY on a page
+  see `pages/options/expected_move.py`. **`ui.highchart` accepts `type=`** ("chart"
+  default / "stockChart" / "mapChart") → renders `Highcharts.stockChart` etc. (the
+  JS does `Highcharts[this.type]`); `chart.update()` still applies in place. Use
+  `type="stockChart"` for an **ordinal x-axis** that COLLAPSES non-trading-day gaps
+  (weekends/holidays) in candlestick data automatically with NO calendar — but a
+  forward series you generate yourself (e.g. the EM cone) must ALSO omit non-trading
+  days or ordinal re-opens the gap (see `expected_move.py` + `compute.em_cone(...,
+  trading_days_only=True)`). A `ui.highchart` added DYNAMICALLY on a page
   with no chart at first render fails `Failed to resolve module specifier
   nicegui-highcharts` (the ESM import map is set at initial render) — keep a chart
   present at page build (e.g. a persistent element, as `detail.py` does). A
@@ -304,7 +320,19 @@ module-level functions (TDD them with sample dicts); keep `render()` thin
 on **:8500** (`autoPort:false` — the NiceGUI port is fixed). Use the Claude
 Preview tool (start `webgui`, screenshot). Restart the preview after code changes
 to pick them up. To drive Quasar inputs from the preview, set the native value +
-dispatch `input`/`change`/`blur` events.
+dispatch `input`/`change`/`blur` events. **Caveats (seen):** the **screenshot**
+tool TIMES OUT on heavy multi-panel Highcharts pages (e.g. the Replay 6-panel
+stack) — it works on lighter single-chart pages (EM); when it hangs, verify via
+DOM `preview_eval` (read `.highcharts-series`/axis geometry) instead. A **Quasar
+`q-slider` can't be driven by synthetic mouse/pointer/keyboard events** (no native
+input) — assert slider→handler wiring with a unit test, not the preview. For
+3-tier pages, the most reliable end-to-end check is **Redis-driven**: enqueue a
+command with `Bus().enqueue_command("cmd:<domain>", {...})` and read the result
+with `Bus().cache_get("cache:<domain>:<view>")` — bypasses the browser entirely.
+Service code changes require **restarting that service** (the running one is
+stale); the proxy's REST market data works even when `/health` shows
+`token_expired:true` (auto-refresh) — only a missing/expired **refresh** token is
+fatal.
 
 **Tests:** `cd webgui && ..\.venv\Scripts\python -m pytest -q` (319 green as of
 this writing). TDD pure functions; smoke-verify `render()` with a screenshot.
