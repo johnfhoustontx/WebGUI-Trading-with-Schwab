@@ -1201,3 +1201,75 @@ def em_cone(spot, atm_iv, dte, start_ts_ms):
         upper.append([ts, spot + width])
         lower.append([ts, spot - width])
     return {"upper": upper, "lower": lower}
+
+
+def _now_iso():
+    import datetime as dt
+    return dt.datetime.now(dt.timezone.utc).isoformat()
+
+
+_EM_HISTORY_BARS = 130  # ~6 months of trading days
+
+
+def compute_expected_move(symbol, expiry, legs) -> dict:
+    """Build the Expected Move payload for a symbol/expiry/legs (defensive).
+
+    Fetches ~6mo daily candles + the option chain, derives ATM IV for ``expiry``
+    and the spot, and builds the forward cone. Always returns a JSON-safe dict;
+    on any failure ``error`` is set and the data fields are empty."""
+    import datetime as dt
+
+    base = {"symbol": symbol, "expiry": expiry, "spot": None, "atm_iv": None,
+            "dte": None, "candles": [], "em_upper": [], "em_lower": [],
+            "legs": legs or [], "generated_at": _now_iso(), "error": None}
+    try:
+        api = "$SPX" if (symbol or "").upper() == "SPX" else (symbol or "").upper()
+        if not api:
+            base["error"] = "No symbol."
+            return base
+
+        cresp = _proxy.schwab_py_client.get_price_history_every_day(api)
+        raw = cresp.json().get("candles", []) if getattr(cresp, "status_code", None) == 200 else []
+        candles = [[int(c["datetime"]), c["open"], c["high"], c["low"], c["close"]]
+                   for c in raw
+                   if c.get("datetime") is not None and c.get("close") is not None]
+        candles.sort(key=lambda r: r[0])
+        candles = candles[-_EM_HISTORY_BARS:]
+        if not candles:
+            base["error"] = f"No price history for {api}."
+            return base
+        base["candles"] = candles
+
+        try:
+            exp_date = dt.date.fromisoformat(str(expiry))
+        except Exception:
+            base["error"] = f"Bad expiry: {expiry!r}."
+            return base
+        oresp = _proxy.schwab_py_client.get_option_chain(
+            api, contract_type="ALL", from_date=dt.date.today(), to_date=exp_date)
+        chain = oresp.json() if getattr(oresp, "status_code", None) == 200 else None
+
+        spot = None
+        q = _proxy.schwab_client.get_quote(api) or {}
+        if isinstance(q, dict):
+            spot = q.get("last")
+        if not spot:
+            spot = candles[-1][4]
+        base["spot"] = spot
+
+        atm_iv = atm_iv_from_chain(chain or {}, spot, expiry=str(expiry))
+        base["atm_iv"] = atm_iv
+
+        dte = (exp_date - dt.date.today()).days
+        base["dte"] = dte
+        if atm_iv is None:
+            base["error"] = f"No ATM IV for {api} {expiry}."
+            return base
+
+        cone = em_cone(spot, atm_iv, dte, candles[-1][0])
+        base["em_upper"] = cone["upper"]
+        base["em_lower"] = cone["lower"]
+        return base
+    except Exception as exc:
+        base["error"] = f"{type(exc).__name__}: {exc}"
+        return base
