@@ -887,6 +887,74 @@ def test_sim_run_empty_when_contract_missing(monkeypatch):
     assert compute.sim_run("SPY", "2026-06-19", "call", 999, "buy", 5, 1.5) == {}
 
 
+def _real_replay_snapshot(symbol, iv=0.20, index=None, prices=None):
+    """Build a REAL ChainSnapshot (with price_history) using the engine classes,
+    so sim_replay exercises the actual ReplayEngine + gap/session logic."""
+    import sys as _sys, datetime as _dt
+    from repo_paths import OPTIONS_SCANNER
+    _sys.path.insert(0, str(OPTIONS_SCANNER))
+    from options_simulator import engine as seng
+    import pandas as pd
+
+    if index is None:
+        index = ["2026-06-18 09:30", "2026-06-18 09:31", "2026-06-18 09:32"]
+    if prices is None:
+        prices = [450.0, 451.0, 452.0]
+    hist = pd.Series(prices, index=pd.to_datetime(index))
+    contract = seng.ContractRow(strike=450.0, kind="call", bid=1.0, ask=1.2,
+                                mid=1.1, iv=iv, expiry=_dt.date(2026, 6, 26))
+    return seng.ChainSnapshot(spot=prices[-1],
+                              as_of=_dt.datetime(2026, 6, 18, 9, 32), r=0.04,
+                              symbol=symbol, contracts=[contract],
+                              price_history=hist)
+
+
+def test_sim_replay_builds_jsonsafe_trace(monkeypatch):
+    import json
+    compute._SIM_SNAPSHOTS.clear()
+    compute._SIM_SNAPSHOTS["SPY"] = _real_replay_snapshot("SPY")
+
+    out = compute.sim_replay("SPY", "2026-06-26", "call", 450.0, "buy")
+    assert out["spot"] == 452.0
+    assert out["timestamps"] == ["2026-06-18T09:30:00", "2026-06-18T09:31:00",
+                                 "2026-06-18T09:32:00"]
+    assert out["prices"] == [450.0, 451.0, 452.0]
+    assert set(out["greeks"]) == {"delta", "gamma", "theta", "vega", "rho"}
+    assert len(out["greeks"]["delta"]) == 3
+    assert out["x"] == [0, 1, 2]
+    assert out["gaps"] == []                       # single session, no overnight gap
+    assert len(out["sessions"]) == 1
+    assert out["sessions"][0]["date"] == "2026-06-18"
+    json.dumps(out)                                # JSON-serializable end to end
+
+
+def test_sim_replay_detects_overnight_gap():
+    import pandas as pd
+    compute._SIM_SNAPSHOTS.clear()
+    # Two realistic 1-min sessions a day apart: the median bar spacing is ~60s,
+    # so the overnight break (>1h) registers as a single gap between them.
+    s1 = pd.date_range("2026-06-18 09:30", periods=5, freq="1min")
+    s2 = pd.date_range("2026-06-19 09:30", periods=5, freq="1min")
+    idx = list(s1) + list(s2)
+    prices = [450.0 + i for i in range(len(idx))]
+    compute._SIM_SNAPSHOTS["SPY"] = _real_replay_snapshot("SPY", index=idx, prices=prices)
+    out = compute.sim_replay("SPY", "2026-06-26", "call", 450.0, "buy")
+    assert out["gaps"] == [5]                       # boundary before the 6th bar
+    assert [s["date"] for s in out["sessions"]] == ["2026-06-18", "2026-06-19"]
+
+
+def test_sim_replay_missing_snapshot_returns_empty():
+    compute._SIM_SNAPSHOTS.pop("NOPE", None)
+    assert compute.sim_replay("NOPE", "2026-06-26", "call", 1.0, "buy") == {}
+
+
+def test_sim_replay_zero_iv_degrades():
+    compute._SIM_SNAPSHOTS.clear()
+    compute._SIM_SNAPSHOTS["ZIV"] = _real_replay_snapshot("ZIV", iv=0.0)
+    out = compute.sim_replay("ZIV", "2026-06-26", "call", 450.0, "buy")
+    assert out.get("error")
+
+
 # ── Calculator (moved from webgui/pages/options/calculator.py) ───────────────
 class _FakeCalcResp:
     def __init__(self, data, status=200):

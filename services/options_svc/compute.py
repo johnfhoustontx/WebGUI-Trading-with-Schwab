@@ -1138,6 +1138,97 @@ def sim_run(symbol, expiry, kind, strike, direction, dt, mult) -> dict:
     return {"spot": snap.spot, "whatif_rows": whatif_rows, "ivshock": ivshock}
 
 
+def sim_replay(symbol, expiry, kind, strike, direction) -> dict:
+    """Re-price the selected contract along the underlying's recent price path.
+
+    Ports the legacy Tk Replay tab: ``ReplayEngine.full_trace`` over the
+    snapshot's ``price_history`` (already fetched by ``sim_fetch``), plus the
+    gap-compression / session-boundary layout the page needs to draw a clean
+    integer x-axis (overnight/weekend breaks collapsed onto consecutive indices).
+    Returns a JSON-safe dict; ``{}`` if the snapshot/contract is missing (page
+    prompts a re-fetch / selection), or ``{"error": ...}`` if IV is unavailable
+    or there's no price history (mirrors the Tk "IV unavailable" / "no price
+    history" guards). Replay depends ONLY on the contract selector — not the
+    dt/mult sliders — so it is its own command/cache view, separate from
+    ``sim_run`` (keeps slider-driven sweeps cheap)."""
+    from options_simulator import engine as seng
+    import numpy as np
+
+    snap = _SIM_SNAPSHOTS.get(symbol)
+    if snap is None:
+        return {}
+    contract = find_contract(snap, expiry, kind, strike)
+    if contract is None:
+        return {}
+    if contract.iv <= 0:
+        return {"error": "IV unavailable - cannot simulate"}
+
+    pos = seng.Position.single(contract, direction, snap.symbol)
+    trace = seng.aggregate_position(
+        pos, lambda c: seng.ReplayEngine(snap).full_trace(c))
+    hist = snap.price_history
+    if trace is None or trace.empty or hist.empty:
+        return {"error": "Replay unavailable - no price history"}
+
+    # Compress overnight/weekend gaps onto an integer x-axis: a "gap" is any
+    # inter-bar interval bigger than ~3× the typical bar spacing (≥1h), exactly
+    # as the legacy window did.
+    if len(hist) >= 2:
+        deltas = (hist.index[1:] - hist.index[:-1]).total_seconds()
+        median_delta_s = float(np.median(deltas))
+        gap_threshold_s = max(median_delta_s * 3, 60 * 60)
+        gap_indices = [i + 1 for i, d in enumerate(deltas) if d > gap_threshold_s]
+    else:
+        median_delta_s = 0.0
+        gap_indices = []
+
+    sessions = []
+    starts = [0] + gap_indices
+    ends = gap_indices + [len(hist)]
+    for s, e in zip(starts, ends):
+        if e > s:
+            sessions.append({"start": int(s), "end": int(e),
+                             "date": hist.index[s].strftime("%Y-%m-%d")})
+
+    sessions_n = len(gap_indices) + 1 if len(hist) else 0
+    if len(hist) >= 2:
+        if median_delta_s < 120:
+            resolution = f"{len(hist)} bars, 1-min × {sessions_n} sessions"
+        elif median_delta_s < 3600:
+            resolution = (f"{len(hist)} bars, {int(round(median_delta_s/60))}-min "
+                          f"× {sessions_n} sessions")
+        else:
+            span_days = (hist.index[-1] - hist.index[0]).days or 1
+            resolution = f"{len(hist)} bars, ~{span_days}d daily"
+    else:
+        resolution = f"{len(hist)} bar"
+
+    # Up to 8 HH:MM ticks spread across the integer axis (time-of-day cue).
+    if len(hist) >= 4:
+        tick_pos = np.linspace(0, len(hist) - 1, min(8, len(hist))).astype(int)
+        ticks = {"pos": [int(i) for i in tick_pos],
+                 "labels": [hist.index[int(i)].strftime("%H:%M") for i in tick_pos]}
+    else:
+        ticks = {"pos": list(range(len(hist))),
+                 "labels": [hist.index[i].strftime("%H:%M") for i in range(len(hist))]}
+
+    def _f(seq):
+        return [float(v) for v in seq]
+
+    return {
+        "spot": snap.spot,
+        "timestamps": [ts.isoformat() for ts in hist.index],
+        "x": list(range(len(hist))),
+        "prices": _f(hist.values),
+        "greeks": {g: _f(trace[g].values)
+                   for g in ("delta", "gamma", "theta", "vega", "rho")},
+        "gaps": [int(i) for i in gap_indices],
+        "sessions": sessions,
+        "ticks": ticks,
+        "resolution": resolution,
+    }
+
+
 def atm_iv_from_chain(chain, spot, expiry=None):
     """ATM implied vol (DECIMAL, e.g. 0.18) for ``expiry`` from a chain payload.
 
