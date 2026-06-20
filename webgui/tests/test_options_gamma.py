@@ -50,6 +50,39 @@ def test_bar_yrange_empty_falls_back_to_spot_band():
     assert gamma.bar_yrange([], 450.0) == [450.0 * 0.98, 450.0 * 1.02]
 
 
+# ── spot=None resilience (regression: weekend/off-hours snapshots can have
+#    spot=None → the near-spot band math must not raise NoneType*float) ─────────
+def test_bars_from_gex_none_spot_returns_empty():
+    b = gamma.bars_from_gex(GEX, None)
+    assert b == {"strikes": [], "nets": [], "colors": [], "hovers": []}
+
+
+def test_bar_yrange_none_spot_does_not_raise():
+    assert isinstance(gamma.bar_yrange([], None), list)
+    assert isinstance(gamma.bar_yrange([450.0], None), list)   # single strike, span 0
+
+
+def test_bar_figure_none_spot_does_not_raise():
+    fig = gamma.bar_figure(GEX, None, view="GEX")
+    assert fig["chart"]["type"] == "bar" and "series" in fig
+
+
+def test_render_no_crash_when_spot_missing():
+    """Regression: a cached gamma snapshot with spot=None (e.g. market closed /
+    sparse off-hours chain) must not 500 the page — the near-spot band math is
+    skipped and a message is shown instead."""
+    from nicegui import ui
+
+    bus_client.reset()
+    snap = {"symbol": "$SPX", "spot": None, "dte": 0,
+            "views": {"GEX": {"data": {"spot": None, "strike_count": 0, "gex": {}},
+                              "summary": {}, "walls": [], "flip": None, "history": []}},
+            "term": {}}
+    bus_client.bus().cache_set("cache:options:gamma", snap)
+    with ui.card():
+        gamma.render()  # must not raise
+
+
 def test_panel_flex_endpoints_and_monotonic():
     bar0, heat0 = gamma.panel_flex(0)
     assert heat0 == 0.28 and round(bar0 + heat0, 4) == 1.0      # session start: bars wide

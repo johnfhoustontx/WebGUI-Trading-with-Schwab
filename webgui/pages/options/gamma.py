@@ -155,8 +155,14 @@ def significant_strikes(bars, frac=0.03):
 
 
 def bars_from_gex(data, spot, pct=0.02):
-    """Per-strike net exposure within ±pct of spot, ascending by strike."""
+    """Per-strike net exposure within ±pct of spot, ascending by strike.
+
+    Returns empty bars when ``spot`` is missing (e.g. a weekend/off-hours snapshot
+    with no underlying price) so the near-spot band math never does ``None * pct``.
+    """
     gex = (data or {}).get("gex") or {}
+    if not isinstance(spot, (int, float)):
+        return {"strikes": [], "nets": [], "colors": [], "hovers": []}
     lo, hi = spot * (1 - pct), spot * (1 + pct)
     strikes, nets, colors, hovers = [], [], [], []
     for strike in sorted(gex):
@@ -195,11 +201,12 @@ def bar_yrange(strikes, spot, pad_frac=0.04):
     Pads the strike span by ``pad_frac`` so the outermost bars aren't clipped.
     Falls back to a narrow band around spot when there are no bars.
     """
+    spot_ok = isinstance(spot, (int, float))
     if not strikes:
-        return [spot * 0.98, spot * 1.02]
+        return [spot * 0.98, spot * 1.02] if spot_ok else [0.0, 1.0]
     lo, hi = min(strikes), max(strikes)
     span = hi - lo
-    pad = span * pad_frac if span else max(spot * 0.002, 1.0)
+    pad = span * pad_frac if span else (max(spot * 0.002, 1.0) if spot_ok else 1.0)
     return [lo - pad, hi + pad]
 
 
@@ -588,6 +595,19 @@ def render():
                 "strike_count": raw.get("strike_count"),
                 "gex": _refloat_keys(raw.get("gex"))}
         view_spot = data.get("spot") or spot
+        if not isinstance(view_spot, (int, float)):
+            # No usable underlying price (e.g. market closed / sparse off-hours
+            # chain) — the near-spot bar/heatmap window can't be computed. Show a
+            # message instead of crashing on the spot*pct band math.
+            state["chart_el"].set_visibility(False)
+            heat_plot.set_visibility(False)
+            heat_msg.set_visibility(False)
+            sym = snap.get("symbol") or _current_symbol()
+            chart_msg.text = (f"No spot price for {sym} yet "
+                              "(market closed or sparse data) — try Refresh during market hours.")
+            chart_msg.set_visibility(True)
+            summary_lbl.text = ""
+            return
         summary = entry.get("summary") or {}
         flip = entry.get("flip")
         walls = entry.get("walls") or []
