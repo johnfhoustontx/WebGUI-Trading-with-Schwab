@@ -14,6 +14,61 @@ from nicegui import ui
 import bus_client
 
 _pending = {"calculator": None}
+_pending["expected_move"] = None  # extend the existing module-level stash
+
+
+# Per signal-type: list of (field_name, option_type, side) for the strike legs.
+_EM_LEG_FIELDS = {
+    "PCS":        [("short_strike", "put",  "short"), ("long_strike", "put",  "long")],
+    "CCS":        [("short_strike", "call", "short"), ("long_strike", "call", "long")],
+    "IC":         [("short_strike", "put",  "short"), ("long_strike", "put",  "long"),
+                   ("call_short",   "call", "short"), ("call_long",   "call", "long")],
+    "LONG_PUT":   [("long_strike",  "put",  "long")],
+    "NAKED_PUT":  [("short_strike", "put",  "short")],
+    "LONG_CALL":  [("long_strike",  "call", "long")],
+    "NAKED_CALL": [("short_strike", "call", "short")],
+}
+
+
+def _legs_from_fields(sig, specs):
+    legs = []
+    for field, otype, side in specs:
+        v = sig.get(field)
+        if v in (None, 0, ""):
+            continue
+        try:
+            legs.append({"strike": float(v), "option_type": otype, "side": side})
+        except (TypeError, ValueError):
+            continue
+    return legs
+
+
+def signal_to_em_payload(signal):
+    """Normalize a scanner/captured/paper signal dict to {symbol, expiry, legs}."""
+    sig = signal or {}
+    symbol = (sig.get("symbol") or "").replace("$", "").upper()
+    expiry = sig.get("expiration") or sig.get("expiry")
+    specs = _EM_LEG_FIELDS.get(sig.get("type"), [])
+    return {"symbol": symbol, "expiry": expiry, "legs": _legs_from_fields(sig, specs)}
+
+
+def set_pending_expected_move(payload):
+    _pending["expected_move"] = payload
+
+
+def take_pending_expected_move():
+    p = _pending.get("expected_move")
+    _pending["expected_move"] = None
+    return p
+
+
+def send_to_expected_move(payload):
+    """Stash the payload and open the Expected Move page in a NEW browser tab."""
+    if not payload or not payload.get("symbol"):
+        ui.notify("No symbol for expected move.", type="warning")
+        return
+    set_pending_expected_move(payload)
+    ui.navigate.to("/options/expected-move", new_tab=True)
 
 
 def set_pending_calculator(signal):
