@@ -100,7 +100,10 @@ def expected_move_figure(payload, timeframe="daily"):
         "scrollbar": {"enabled": False},
         # X crosshair: keep the vertical line, drop the (raw-ms) label box — the
         # date is shown in the tooltip header instead (see note above).
-        "xAxis": {**_DARK_AXIS, "type": "datetime",
+        # ordinal=True (the stockChart default, set explicitly) collapses
+        # non-trading days (weekends/holidays) so there are no blank gaps — the
+        # candles + trading-day-only cone render contiguously.
+        "xAxis": {**_DARK_AXIS, "type": "datetime", "ordinal": True,
                   "crosshair": {"label": {"enabled": False}, "snap": False}},
         # Y crosshair: line + a 2dp PRICE label box.
         "yAxis": {**_DARK_AXIS, "title": {"text": "Price"}, "opposite": False,
@@ -148,7 +151,10 @@ def render():
         draw_btn = ui.button("Draw", icon="show_chart")
         status = ui.label("").classes("opacity-70 text-sm")
 
-    chart = ui.highchart(expected_move_figure({}), extras=["stock"]).classes("w-full")
+    # stockChart gives an ordinal x-axis (collapses non-trading-day gaps); the
+    # stock module also provides candlestick + crosshair label boxes.
+    chart = ui.highchart(expected_move_figure({}), type="stockChart",
+                         extras=["stock"]).classes("w-full")
 
     def _repaint(payload):
         err = (payload or {}).get("error")

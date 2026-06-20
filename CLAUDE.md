@@ -737,6 +737,11 @@ the Options nav with manual symbol+expiry). Pieces:
   render (ESM-import-map gotcha), updated in place; `@guard` on handlers. A **Look-back**
   dropdown (`em_lookback_options`: Auto≈3×DTE / 1mo / 3mo / 6mo / 1y) re-runs the last
   query with the chosen window; the active spec label shows in the status line.
+  **No blank non-trading-day gaps:** the chart renders via `ui.highchart(...,
+  type="stockChart")` so the x-axis is **ordinal** (`xAxis.ordinal:True`) — weekend/
+  holiday gaps in the historical candles collapse automatically — and the forward
+  cone (`em_cone(..., holidays=scheduler._HOLIDAYS, trading_days_only=True)`) omits
+  weekend/holiday points so it lines up contiguously with the candles.
 - **Handoff (`handoff.py`):** `signal_to_em_payload(signal)` normalizes a scanner/captured/
   paper signal dict → `{symbol, expiry, legs}` (per-type strikes via `_EM_LEG_FIELDS`);
   `send_to_expected_move` stashes (`_pending["expected_move"]`) + opens the page in a new

@@ -1352,13 +1352,18 @@ def atm_iv_from_chain(chain, spot, expiry=None):
 _DAY_MS = 86_400_000
 
 
-def em_cone(spot, atm_iv, dte, start_ts_ms):
+def em_cone(spot, atm_iv, dte, start_ts_ms, holidays=None, trading_days_only=False):
     """Forward expected-move cone points anchored at ``spot`` on ``start_ts_ms``.
 
-    Returns {"upper": [[ts_ms, v], ...], "lower": [...]} with one point per
-    calendar day t = 0..dte. width(t) = spot * atm_iv * sqrt(t/365). Empty dict
-    values on non-positive dte or missing spot/iv (defensive — never raises)."""
+    Returns {"upper": [[ts_ms, v], ...], "lower": [...]} with one point per day
+    t = 0..dte. width(t) = spot * atm_iv * sqrt(t/365) (calendar-day √-time, so
+    the envelope is correct). When ``trading_days_only`` is set, **non-trading
+    days (weekends + any dates in ``holidays``) are omitted** so the cone lines up
+    with the candles on an ordinal (gap-collapsed) axis — the anchor t=0 is always
+    kept. Empty dict values on non-positive dte or missing spot/iv (defensive —
+    never raises)."""
     import math
+    import datetime as _dt
     if not isinstance(spot, (int, float)) or not isinstance(atm_iv, (int, float)):
         return {"upper": [], "lower": []}
     try:
@@ -1367,8 +1372,14 @@ def em_cone(spot, atm_iv, dte, start_ts_ms):
         return {"upper": [], "lower": []}
     if dte <= 0 or atm_iv < 0:
         return {"upper": [], "lower": []}
+    holidays = holidays or set()
+    start_date = _dt.datetime.fromtimestamp(int(start_ts_ms) / 1000).date()
     upper, lower = [], []
     for t in range(dte + 1):
+        if trading_days_only and t > 0:
+            d = start_date + _dt.timedelta(days=t)
+            if d.weekday() >= 5 or d in holidays:
+                continue
         ts = int(start_ts_ms) + t * _DAY_MS
         width = spot * atm_iv * math.sqrt(t / 365.0)
         upper.append([ts, round(spot + width, 2)])
@@ -1502,7 +1513,14 @@ def compute_expected_move(symbol, expiry, legs, lookback="auto") -> dict:
             base["error"] = f"No ATM IV for {api} {expiry}."
             return base
 
-        cone = em_cone(spot, atm_iv, dte, candles[-1][0])
+        # Trading-day-only cone (skip weekends/holidays) so it lines up with the
+        # candles on the page's ordinal axis — no blank non-trading gaps.
+        try:
+            from services.options_svc.scheduler import _HOLIDAYS as _mkt_holidays
+        except Exception:
+            _mkt_holidays = set()
+        cone = em_cone(spot, atm_iv, dte, candles[-1][0],
+                       holidays=_mkt_holidays, trading_days_only=True)
         base["em_upper"] = cone["upper"]
         base["em_lower"] = cone["lower"]
         return base

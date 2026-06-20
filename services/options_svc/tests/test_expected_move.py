@@ -39,6 +39,37 @@ def test_em_cone_empty_on_bad_inputs():
     assert compute.em_cone(100.0, 0.2, 0, 0) == {"upper": [], "lower": []}
 
 
+def test_em_cone_skips_weekends_when_trading_only():
+    import datetime as dt
+    # Friday 2026-06-19 anchor; the next two days are the weekend.
+    start = int(dt.datetime(2026, 6, 19).timestamp() * 1000)
+    cone = compute.em_cone(100.0, 0.20, 5, start, trading_days_only=True)
+    # Days Fri(0) Sat(1) Sun(2) Mon(3) Tue(4) Wed(5) -> keep 0,3,4,5 = 4 points.
+    assert len(cone["upper"]) == 4
+    assert cone["upper"][0][1] == 100.0          # anchor kept at spot
+    # The kept timestamps are Fri, Mon, Tue, Wed (no Sat/Sun).
+    kept = [dt.datetime.fromtimestamp(ts / 1000).date() for ts, _ in cone["upper"]]
+    assert dt.date(2026, 6, 20) not in kept and dt.date(2026, 6, 21) not in kept
+
+
+def test_em_cone_skips_holidays_when_trading_only():
+    import datetime as dt
+    # Thursday 2026-07-02 anchor; 2026-07-03 is a market holiday.
+    start = int(dt.datetime(2026, 7, 2).timestamp() * 1000)
+    cone = compute.em_cone(100.0, 0.20, 5, start, holidays={dt.date(2026, 7, 3)},
+                           trading_days_only=True)
+    kept = [dt.datetime.fromtimestamp(ts / 1000).date() for ts, _ in cone["upper"]]
+    assert dt.date(2026, 7, 3) not in kept       # holiday dropped
+    assert dt.date(2026, 7, 4) not in kept       # Saturday dropped
+    assert dt.date(2026, 7, 6) in kept           # Monday kept
+
+
+def test_em_cone_default_keeps_all_calendar_days():
+    # Without trading_days_only, behaviour is unchanged (all calendar days).
+    cone = compute.em_cone(100.0, 0.20, 5, 0)
+    assert len(cone["upper"]) == 6
+
+
 def test_em_lookback_spec_auto():
     assert compute.em_lookback_spec(1)["mode"] == "intraday"
     assert compute.em_lookback_spec(2)["mode"] == "intraday"

@@ -57,6 +57,8 @@ def test_expected_move_figure_series_and_crosshair():
     assert "candlestick" in types
     assert fig["series"][0]["data"][0] == [1, 100, 101, 99, 100]
     assert fig["xAxis"]["type"] == "datetime"
+    # Ordinal axis collapses non-trading-day gaps (no blank weekend/holiday candles).
+    assert fig["xAxis"]["ordinal"] is True
     # X crosshair keeps the vertical LINE but drops its (raw-ms) label box; the
     # DATE is shown via the tooltip header instead (Highcharts won't date-format
     # the datetime X crosshair label in this build).
