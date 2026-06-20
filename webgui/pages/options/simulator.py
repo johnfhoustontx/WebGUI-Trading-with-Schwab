@@ -179,6 +179,8 @@ def render():
         "meta_ver": None,    # last-seen sim_meta cache version
         "result_ver": None,  # last-seen sim_result cache version
         "pending": None,     # latest sim_run params awaiting the debounce flush
+        "replay": None,      # last sim_replay payload (price/Greek trace)
+        "replay_ver": None,  # last-seen sim_replay cache version
     }
 
     with ui.row().classes("items-center gap-3 flex-wrap"):
@@ -193,9 +195,19 @@ def render():
         dir_tog = ui.toggle(["buy", "sell"], value="buy")
 
     with ui.tabs() as tabs:
+        tab_replay = ui.tab("Replay")
         tab_whatif = ui.tab("What-if")
         tab_ivshock = ui.tab("IV shock")
-    with ui.tab_panels(tabs, value=tab_whatif).classes("w-full"):
+    with ui.tab_panels(tabs, value=tab_replay).classes("w-full"):
+        with ui.tab_panel(tab_replay):
+            with ui.row().classes("items-center gap-4 w-full"):
+                scrub_lbl = ui.label("Cursor —")
+                scrub_slider = ui.slider(min=0, max=1, value=0).classes("w-96")
+            # Persistent chart built ONCE (present at first render for the ESM
+            # import map) and updated in place. Empty-state label toggled until
+            # the first replay trace arrives.
+            replay_empty = ui.label("Select a contract to run the replay.").classes("opacity-70")
+            replay_chart = ui.highchart(replay_figure({}, None)).classes("w-full")
         with ui.tab_panel(tab_whatif):
             with ui.row().classes("items-center gap-4 w-full"):
                 ds_lbl = ui.label("ΔS 0%")
@@ -253,6 +265,25 @@ def render():
             ivshock_chart.options = ivshock_figure(shock["base"], shock["shock"], mult)
             ivshock_chart.update()
 
+    # ── render the replay trace + client-side scrub cursor ───────────────────
+    def _render_replay():
+        tr = state["replay"]
+        if not tr or tr.get("error") or not tr.get("x"):
+            replay_empty.text = (tr or {}).get("error") or "Select a contract to run the replay."
+            replay_empty.set_visibility(True)
+            replay_chart.set_visibility(False)
+            return
+        replay_empty.set_visibility(False)
+        replay_chart.set_visibility(True)
+        n = len(tr["x"])
+        scrub_slider.max = max(n - 1, 1)
+        cur = int(min(max(scrub_slider.value, 0), n - 1))
+        ts = tr["timestamps"][cur] if cur < len(tr.get("timestamps") or []) else ""
+        scrub_lbl.text = f"Cursor {ts.replace('T', ' ')}" if ts else "Cursor —"
+        # Update in place (chart already present for the ESM import map).
+        replay_chart.options = replay_figure(tr, cursor=cur)
+        replay_chart.update()
+
     # ── command enqueue (sim_run) ────────────────────────────────────────────
     def _current_params():
         if not state["meta"] or strike_sel.value is None:
@@ -276,6 +307,18 @@ def render():
         bus_client.request("options", {"type": "sim_run", "args": params})
 
     @guard
+    def _enqueue_replay():
+        """Enqueue a sim_replay — fires ONLY on discrete contract-selector
+        changes (not the dt/mult sliders), since the replay trace depends only on
+        the selected contract."""
+        if not state["meta"] or strike_sel.value is None:
+            return
+        bus_client.request("options", {"type": "sim_replay", "args": {
+            "symbol": (state["meta"].get("symbol") or symbol_in.value or "").upper(),
+            "expiry": expiry_sel.value, "kind": kind_tog.value,
+            "strike": strike_sel.value, "direction": dir_tog.value}})
+
+    @guard
     def _slider_changed():
         """Sliders fire often during drag → stash latest params; the debounce
         timer flushes the most recent at most ~every 0.4s. Also repaint the ΔS
@@ -296,6 +339,7 @@ def render():
     def _on_selector():
         _sync_strikes()
         _enqueue_run()
+        _enqueue_replay()
 
     # ── fetch ────────────────────────────────────────────────────────────────
     @guard
@@ -310,13 +354,15 @@ def render():
     fetch_btn.on_click(_request_fetch)
     expiry_sel.on_value_change(lambda e: _on_selector())
     kind_tog.on_value_change(lambda e: _on_selector())
-    strike_sel.on_value_change(lambda e: _enqueue_run())
-    dir_tog.on_value_change(lambda e: _enqueue_run())
+    strike_sel.on_value_change(lambda e: (_enqueue_run(), _enqueue_replay()))
+    dir_tog.on_value_change(lambda e: (_enqueue_run(), _enqueue_replay()))
     # ΔS is client-side only (overlay) — re-render, never enqueue.
     ds_slider.on_value_change(lambda e: (_render_figures()))
     # Δt + IV-mult drive the sweep → debounced enqueue.
     dt_slider.on_value_change(lambda e: _slider_changed())
     mult_slider.on_value_change(lambda e: _slider_changed())
+    # The scrub cursor is client-side only — move the cursor, never enqueue.
+    scrub_slider.on_value_change(lambda e: _render_replay())
 
     # ── version-poll repaint (fetch-free) ────────────────────────────────────
     def _apply_meta(meta):
@@ -330,8 +376,9 @@ def render():
         if meta:
             status.text = (f"{meta.get('symbol')} spot {meta.get('spot'):,.2f} · "
                            f"{meta.get('n_contracts')} contracts")
-            # Kick off the first sweep for the auto-selected contract.
+            # Kick off the first sweep + replay for the auto-selected contract.
             _enqueue_run()
+            _enqueue_replay()
 
     @guard
     def _poll_meta():
@@ -350,6 +397,15 @@ def render():
         state["result"] = bus_client.read("options:sim_result") or None
         _render_figures()
 
+    @guard
+    def _poll_replay():
+        version = bus_client.read_version("options:sim_replay")
+        if version == state["replay_ver"]:
+            return
+        state["replay_ver"] = version
+        state["replay"] = bus_client.read("options:sim_replay") or None
+        _render_replay()
+
     # Initial paint (graceful-empty when the service is cold).
     state["meta_ver"] = bus_client.read_version("options:sim_meta")
     state["meta"] = bus_client.read("options:sim_meta")
@@ -358,7 +414,11 @@ def render():
     state["result_ver"] = bus_client.read_version("options:sim_result")
     state["result"] = bus_client.read("options:sim_result") or None
     _render_figures()
+    state["replay_ver"] = bus_client.read_version("options:sim_replay")
+    state["replay"] = bus_client.read("options:sim_replay") or None
+    _render_replay()
 
     ui.timer(2.0, _poll_meta)
     ui.timer(2.0, _poll_result)
+    ui.timer(2.0, _poll_replay)
     ui.timer(0.4, _flush_pending)  # debounce flush for slider-driven sweeps
