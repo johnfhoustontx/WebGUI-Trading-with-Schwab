@@ -112,6 +112,22 @@ CURSOR_COLOR = "#ef5350"
 PRICE_COLOR = "#66bb6a"
 GREEK_COLOR = "#42a5f5"
 
+# Replay look-back override menu (key → label). "auto" lets the service pick the
+# window from the selected contract's DTE; the rest force a fixed window.
+REPLAY_LOOKBACKS = [
+    ("auto", "Auto (by DTE)"),
+    ("1m_1d", "1-min · 1d"),
+    ("5m_3d", "5-min · 3d"),
+    ("5m_5d", "5-min · 5d"),
+    ("15m_10d", "15-min · 10d"),
+    ("1d_20d", "Daily · 20d"),
+]
+
+
+def lookback_options():
+    """{key: label} dict for the Replay look-back ui.select."""
+    return {key: label for key, label in REPLAY_LOOKBACKS}
+
 
 def replay_figure(trace, cursor=None):
     """Stacked price + 5-Greek replay chart over an integer (gap-compressed) x.
@@ -202,8 +218,10 @@ def render():
     with ui.tab_panels(tabs, value=tab_replay).classes("w-full"):
         with ui.tab_panel(tab_replay):
             with ui.row().classes("items-center gap-4 w-full"):
+                lookback_sel = ui.select(lookback_options(), value="auto",
+                                         label="Look-back").classes("w-44")
                 scrub_lbl = ui.label("Cursor —")
-                scrub_slider = ui.slider(min=0, max=1, value=0).classes("w-96")
+                scrub_slider = ui.slider(min=0, max=1, value=0).classes("w-80")
             # Persistent chart built ONCE (present at first render for the ESM
             # import map) and updated in place. Empty-state label toggled until
             # the first replay trace arrives.
@@ -280,7 +298,9 @@ def render():
         scrub_slider.max = max(n - 1, 1)
         cur = int(min(max(scrub_slider.value, 0), n - 1))
         ts = tr["timestamps"][cur] if cur < len(tr.get("timestamps") or []) else ""
-        scrub_lbl.text = f"Cursor {ts.replace('T', ' ')}" if ts else "Cursor —"
+        spec_lbl = (tr.get("lookback") or {}).get("label") or ""
+        cursor_txt = f"Cursor {ts.replace('T', ' ')}" if ts else "Cursor —"
+        scrub_lbl.text = f"{cursor_txt}   ·   {spec_lbl}" if spec_lbl else cursor_txt
         # Update in place (chart already present for the ESM import map).
         replay_chart.options = replay_figure(tr, cursor=cur)
         replay_chart.update()
@@ -317,7 +337,8 @@ def render():
         bus_client.request("options", {"type": "sim_replay", "args": {
             "symbol": (state["meta"].get("symbol") or symbol_in.value or "").upper(),
             "expiry": expiry_sel.value, "kind": kind_tog.value,
-            "strike": strike_sel.value, "direction": dir_tog.value}})
+            "strike": strike_sel.value, "direction": dir_tog.value,
+            "lookback": lookback_sel.value}})
 
     @guard
     def _slider_changed():
@@ -364,6 +385,8 @@ def render():
     mult_slider.on_value_change(lambda e: _slider_changed())
     # The scrub cursor is client-side only — move the cursor, never enqueue.
     scrub_slider.on_value_change(lambda e: _render_replay())
+    # Look-back override re-runs the replay with a different window.
+    lookback_sel.on_value_change(lambda e: _enqueue_replay())
 
     # ── version-poll repaint (fetch-free) ────────────────────────────────────
     def _apply_meta(meta):

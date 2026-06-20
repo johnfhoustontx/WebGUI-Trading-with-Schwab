@@ -77,6 +77,14 @@ def test_replay_figure_empty_trace_is_safe():
     assert all(s["data"] == [] for s in fig["series"])
 
 
+def test_lookback_options_has_auto_and_overrides():
+    opts = sim.lookback_options()
+    assert opts["auto"] == "Auto (by DTE)"
+    # The override keys must match the service-side override keys.
+    for key in ("1m_1d", "5m_3d", "5m_5d", "15m_10d", "1d_20d"):
+        assert key in opts
+
+
 def test_replay_figure_tooltip_limits_decimals():
     # Hover readout must not show raw float precision (e.g. 0.4879016861546994).
     trace = {"x": [0, 1], "prices": [450.0, 451.0],
