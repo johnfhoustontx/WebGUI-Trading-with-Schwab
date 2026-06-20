@@ -28,3 +28,41 @@ def test_signal_to_em_payload_strips_dollar_symbol():
     out = handoff.signal_to_em_payload(sig)
     assert out["symbol"] == "SPX"
     assert out["legs"] == [{"strike": 5400.0, "option_type": "call", "side": "long"}]
+
+
+from pages.options import expected_move as em
+
+
+def _payload():
+    return {
+        "symbol": "SPY", "expiry": "2026-07-18", "spot": 100.0, "atm_iv": 0.2, "dte": 5,
+        "candles": [[1, 100, 101, 99, 100], [2, 100, 102, 99, 101]],
+        "em_upper": [[2, 100.0], [3, 101.0]],
+        "em_lower": [[2, 100.0], [3, 99.0]],
+        "legs": [{"strike": 540.0, "option_type": "put", "side": "short"},
+                 {"strike": 535.0, "option_type": "put", "side": "long"}],
+        "error": None,
+    }
+
+
+def test_leg_lines_short_solid_long_dashed():
+    lines = em.leg_lines(_payload()["legs"])
+    assert lines[0]["value"] == 540.0 and "dashStyle" not in lines[0]
+    assert lines[1]["value"] == 535.0 and lines[1]["dashStyle"] == "Dash"
+
+
+def test_expected_move_figure_series_and_crosshair():
+    fig = em.expected_move_figure(_payload())
+    types = {s["type"] for s in fig["series"]}
+    assert "candlestick" in types
+    assert fig["series"][0]["data"][0] == [1, 100, 101, 99, 100]
+    assert fig["xAxis"]["type"] == "datetime"
+    assert fig["xAxis"]["crosshair"]["label"]["enabled"] is True
+    assert fig["yAxis"]["crosshair"]["label"]["enabled"] is True
+    assert any(s.get("dashStyle") == "Dash" for s in fig["series"] if s["type"] == "line")
+    assert len(fig["yAxis"]["plotLines"]) == 2
+
+
+def test_expected_move_figure_handles_empty_payload():
+    fig = em.expected_move_figure({})
+    assert fig["series"] == [] or all(not s.get("data") for s in fig["series"])
