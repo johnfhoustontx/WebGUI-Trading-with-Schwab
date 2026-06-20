@@ -129,6 +129,10 @@ _ACTIONS_SLOT = """
          @click.stop="() => $parent.$emit('to_paper', props.row)">
     <q-tooltip>Send to Paper trade</q-tooltip>
   </q-btn>
+  <q-btn dense flat round size="sm" icon="show_chart" color="accent"
+         @click.stop="() => $parent.$emit('to_em', props.row)">
+    <q-tooltip>Expected Move</q-tooltip>
+  </q-btn>
 </q-td>
 """
 
@@ -141,3 +145,4 @@ def add_row_actions(table, get_signal):
     table.add_slot("body-cell-actions", _ACTIONS_SLOT)
     table.on("to_calc", lambda e: send_to_calculator(get_signal(e.args)))
     table.on("to_paper", lambda e: send_to_paper(get_signal(e.args)))
+    table.on("to_em", lambda e: send_to_expected_move(signal_to_em_payload(get_signal(e.args))))

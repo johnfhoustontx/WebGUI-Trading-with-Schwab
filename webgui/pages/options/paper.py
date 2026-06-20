@@ -19,7 +19,7 @@ from nicegui import ui
 
 from pages.ui_guard import guard
 
-from . import detail
+from . import detail, handoff
 
 
 def _round(value, ndigits=2):
@@ -33,8 +33,10 @@ def paper_columns():
         ("entry_credit_total", "Credit$"), ("max_loss_total", "Risk$"),
         ("realized_pnl", "P&L$"), ("status", "Status"), ("entry_time", "Entry"),
     ]
-    return [{"name": f, "label": lbl, "field": f, "sortable": True, "align": "left"}
+    cols = [{"name": f, "label": lbl, "field": f, "sortable": True, "align": "left"}
             for f, lbl in spec]
+    cols.append({"name": "actions", "label": "", "field": "actions", "align": "center"})
+    return cols
 
 
 def _strikes(t):
@@ -206,6 +208,11 @@ def render():
             _request_analyze(t.get("trade_id"), t.get("symbol", ""))  # live overlay
 
     table.on("rowClick", _select)
+    # Per-row Expected Move (+ Calculator / Paper) buttons. ``synth_from_trade``
+    # maps the raw paper trade to a signal-shaped dict (``type``/``expiration``/
+    # ``*_strike``) that ``signal_to_em_payload`` understands.
+    handoff.add_row_actions(
+        table, lambda row: synth_from_trade(raw_by_id.get(row.get("id"))))
 
     def _selected_trade():
         if not table.selected:

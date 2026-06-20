@@ -106,6 +106,11 @@ def test_send_to_expected_move_navigates(monkeypatch):
     assert handoff.take_pending_expected_move()["symbol"] == "SPY"  # stashed
 
 
+def test_actions_slot_has_expected_move_button():
+    assert "to_em" in handoff._ACTIONS_SLOT
+    assert "show_chart" in handoff._ACTIONS_SLOT
+
+
 def test_send_to_expected_move_no_symbol_does_not_navigate(monkeypatch):
     calls = {}
     monkeypatch.setattr(

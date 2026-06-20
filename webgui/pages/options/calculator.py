@@ -441,7 +441,10 @@ def render():
         suffix = " (nearest listed expiry)" if approx else ""
         ui.notify(f"ATM IV {iv:.1f}%{suffix}", type="positive")
 
-    ui.button("Calculate", icon="calculate", on_click=lambda: do_calc())
+    with ui.row().classes("items-center gap-2"):
+        ui.button("Calculate", icon="calculate", on_click=lambda: do_calc())
+        ui.button("Expected Move", icon="show_chart", on_click=lambda: send_to_em()) \
+            .props("flat dense size=sm").tooltip("Chart the expected move for these legs")
     summary_box = ui.row().classes("gap-3 flex-wrap")
     grid_box = ui.column().classes("w-full")
 
@@ -476,6 +479,16 @@ def render():
         state["calc_spot"] = spot
         bus_client.request("options", {"type": "calc_compute", "args": params})
         ui.notify("Calculating…", type="info")
+
+    @guard
+    def send_to_em():
+        """Chart the expected move for the current legs (opens a new tab)."""
+        legs = [{"strike": float(info["strike"].value), "option_type": info["option_type"],
+                 "side": info["side"]}
+                for info in leg_inputs.values() if info["strike"].value]
+        handoff.send_to_expected_move({
+            "symbol": (symbol_in.value or "").replace("$", "").upper(),
+            "expiry": str(expiry_sel.value or ""), "legs": legs})
 
     # ── version-poll repaint (fetch-free) ────────────────────────────────────
     def _apply_chain(cc):
