@@ -77,6 +77,15 @@ def test_replay_figure_empty_trace_is_safe():
     assert all(s["data"] == [] for s in fig["series"])
 
 
+def test_replay_figure_tooltip_limits_decimals():
+    # Hover readout must not show raw float precision (e.g. 0.4879016861546994).
+    trace = {"x": [0, 1], "prices": [450.0, 451.0],
+             "greeks": {g: [0.0, 0.0] for g in ("delta", "gamma", "theta", "vega", "rho")},
+             "sessions": [], "resolution": "x"}
+    fig = sim.replay_figure(trace, cursor=0)
+    assert fig["tooltip"]["valueDecimals"] == 2
+
+
 def test_records_normalizes_df_and_list():
     class _DF:
         def to_dict(self, orient):

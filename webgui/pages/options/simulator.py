@@ -162,7 +162,8 @@ def replay_figure(trace, cursor=None):
         "xAxis": {**_DARK_AXIS, "plotLines": xplotlines,
                   "labels": {"style": {"color": "#bdbdbd"}}},
         "yAxis": yaxes,
-        "tooltip": {"shared": True},
+        # valueDecimals caps the hover readout at 2dp (raw float precision is noise).
+        "tooltip": {"shared": True, "valueDecimals": 2},
         "plotOptions": {"series": {"animation": False}},
         "series": series,
     }
