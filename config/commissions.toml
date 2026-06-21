@@ -1,0 +1,10 @@
+# Schwab standard commissions. Per the 2026 Pricing Guide.
+# Passthrough exchange/regulatory fees default to 0 — set per product when known.
+[options]        # per contract, applied PER LEG, on open AND close
+equity = 0.65
+index = 0.65
+index_exchange_fee = 0.00   # Cboe proprietary index-option fee (SPX/VIX/OEX)
+
+[futures]        # per contract, PER SIDE
+standard = 2.25
+exchange_fee = 0.00
