@@ -415,3 +415,89 @@ def apply_inverted(db_path, position, candidate, broker=None):
     guard lets the dispatcher refuse it cleanly without mutating anything."""
     return _result(False, "inverted", position.get("position_id"),
                    error="inverted is advisory-only — place manually")
+
+
+#############################################
+# DISPATCHER — re-price (stale guard) then route to the matching primitive
+#############################################
+
+# action -> primitive
+_APPLY = {
+    "close": apply_close,
+    "partial_close": apply_partial_close,
+    "narrow": apply_narrow,
+    "convert_ic": apply_convert_ic,
+    "convert_butterfly": apply_convert_butterfly,
+    "roll_down": apply_roll,
+    "roll_out": apply_roll,
+    "roll_down_out": apply_roll,
+    "inverted": apply_inverted,   # returns ok=False (advisory)
+}
+
+# Actions the engine emits as advice only — never auto-applied. `inverted` has a
+# dedicated primitive (clean refusal), so it is dispatched normally; the rest are
+# refused up front by the dispatcher.
+_ADVISORY_ACTIONS = {"inverted", "broken_wing", "futures_hedge"}
+
+
+def _reprice_candidate_net(candidate, price_leg):
+    """Re-price the candidate's est_fill_legs via price_leg and return the fresh
+    net_cash, or None if any leg is now unpriceable. A leg's cash sign follows
+    its side: SELL = +credit, BUY = -debit. Commission is taken from the
+    candidate unchanged (rates are fixed)."""
+    legs = candidate.get("est_fill_legs") or []
+    if not legs:
+        # no tradeable legs to reprice (e.g. close uses current_value, advisory) ->
+        # signal "cannot reprice from legs"; caller treats as no-drift.
+        return None
+    gross = 0.0
+    for lg in legs:
+        px = price_leg(lg.get("symbol") or candidate.get("symbol"),
+                       lg.get("expiry"), lg.get("right"), lg.get("strike"))
+        if px is None:
+            return None
+        qty = lg.get("qty") or 1
+        sign = 1.0 if (lg.get("side") == "SELL") else -1.0
+        gross += sign * px * MULTIPLIER * qty
+    return round(gross - abs(candidate.get("commission", 0.0)), 2)
+
+
+def apply_adjustment(db_path, position, candidate, price_leg=None, broker=None,
+                     tolerance=0.15):
+    """Re-price (stale guard) then dispatch to the matching apply primitive.
+
+    Returns the primitive's result dict, or a stale/error result without mutating.
+
+    `tolerance` is a FRACTION (0.15 = 15 %): if the live-repriced net_cash drifts
+    more than this from the candidate's net_cash, the adjustment is ABORTED as
+    stale (re-review) and nothing is mutated. The drift denominator is floored at
+    1.0 so a near-zero candidate net_cash can't blow up the comparison.
+    """
+    action = candidate.get("action")
+    if action in _ADVISORY_ACTIONS and action != "inverted":
+        return {"ok": False, "action": action,
+                "error": f"{action} is advisory-only — place manually",
+                "position_id": position.get("position_id")}
+    if not _is_open(position):
+        return {"ok": False, "action": action, "stale": True,
+                "error": "position no longer open",
+                "position_id": position.get("position_id")}
+    fn = _APPLY.get(action)
+    if fn is None:
+        return {"ok": False, "action": action, "error": "unknown action",
+                "position_id": position.get("position_id")}
+
+    # Stale-price re-check (only when we can reprice from legs)
+    if price_leg is not None:
+        fresh_net = _reprice_candidate_net(candidate, price_leg)
+        if fresh_net is not None:
+            old_net = candidate.get("net_cash", 0.0)
+            denom = max(1.0, abs(old_net))
+            if abs(fresh_net - old_net) / denom > tolerance:
+                return {"ok": False, "action": action, "stale": True,
+                        "error": f"prices moved (was {old_net}, now {fresh_net}) — re-review",
+                        "position_id": position.get("position_id"),
+                        "fresh_net_cash": fresh_net}
+            # within tolerance: refresh the candidate economics to the live numbers
+            candidate = {**candidate, "net_cash": fresh_net}
+    return fn(db_path, position, candidate, broker=broker)

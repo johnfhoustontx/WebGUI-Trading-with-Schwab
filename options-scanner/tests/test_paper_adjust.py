@@ -350,3 +350,131 @@ def test_primitives_refuse_non_open_position(tmp_path):
     # nothing mutated
     assert pdb.get_account(db)["cash"] == cash0
     assert pdb.list_adjustments(db, pid) == []
+
+
+#############################################
+# apply_adjustment — dispatcher + stale-price guard
+#############################################
+
+def test_apply_adjustment_dispatches_close(tmp_path):
+    """A close candidate (no est_fill_legs -> no reprice) on an OPEN position
+    runs the close primitive and the position ends CLOSED."""
+    db = _seed_account(tmp_path)
+    pid = _seed_position(db)
+    pos = _pos(db, pid)
+    cand = {"action": "close", "gross_cash": -60.0, "commission": 2.60,
+            "net_cash": -62.60, "est_fill_legs": []}
+    res = pa.apply_adjustment(db, pos, cand)
+
+    assert res["ok"] is True
+    assert res["action"] == "close"
+    assert _pos(db, pid)["status"] == "CLOSED"
+    rows = pdb.list_adjustments(db, pid)
+    assert len(rows) == 1 and rows[0]["action"] == "close"
+
+
+def test_apply_adjustment_stale_aborts(tmp_path):
+    """A convert_ic candidate priced at net_cash=120 whose legs reprice far away
+    (fresh_net ~ -50) -> stale abort, NO mutation."""
+    db = _seed_account(tmp_path)
+    pid = _seed_position(db)
+    pos = _pos(db, pid)
+    cand = {"action": "convert_ic", "gross_cash": 122.60, "commission": 2.60,
+            "net_cash": 120.0, "new_max_loss": 720.0,
+            "est_fill_legs": [_leg("SELL", "CALL", 510.0, qty=2),
+                              _leg("BUY", "CALL", 515.0, qty=2)]}
+    acct0 = pdb.get_account(db)
+    cash0 = acct0["cash"]
+    bp0 = acct0["buying_power_reserved"]
+
+    # price_leg makes the legs reprice wildly: SELL 510 -> 0.10, BUY 515 -> 0.35
+    #   gross = (+0.10 - 0.35) * 100 * 2 = -50; net = -50 - 2.60 = -52.60
+    def price_leg(symbol, expiry, right, strike):
+        return {510.0: 0.10, 515.0: 0.35}.get(strike)
+
+    res = pa.apply_adjustment(db, pos, cand, price_leg=price_leg)
+
+    assert res["ok"] is False
+    assert res["stale"] is True
+    assert res["fresh_net_cash"] == -52.60
+    # NO mutation
+    p = _pos(db, pid)
+    assert p["status"] == "OPEN"
+    assert p["strategy"] == "PCS"
+    acct = pdb.get_account(db)
+    assert acct["cash"] == cash0
+    assert acct["buying_power_reserved"] == bp0
+    assert pdb.list_adjustments(db, pid) == []
+
+
+def test_apply_adjustment_within_tolerance_executes(tmp_path):
+    """Same convert_ic, but the legs reprice within 15% of net_cash -> the
+    primitive runs (strategy becomes IC) using the FRESH net_cash."""
+    db = _seed_account(tmp_path)
+    pid = _seed_position(db)
+    pos = _pos(db, pid)
+    cash0 = pdb.get_account(db)["cash"]
+    # candidate net_cash 120; fresh reprice -> within 15%
+    cand = {"action": "convert_ic", "gross_cash": 122.60, "commission": 2.60,
+            "net_cash": 120.0, "new_max_loss": 720.0,
+            "est_fill_legs": [_leg("SELL", "CALL", 510.0, qty=2),
+                              _leg("BUY", "CALL", 515.0, qty=2)]}
+
+    # SELL 510 @ 0.90, BUY 515 @ 0.30 -> gross (0.90 - 0.30)*100*2 = 120
+    #   fresh_net = 120 - 2.60 = 117.40  (1.4 off 120 => 1.2% < 15%)
+    def price_leg(symbol, expiry, right, strike):
+        return {510.0: 0.90, 515.0: 0.30}.get(strike)
+
+    res = pa.apply_adjustment(db, pos, cand, price_leg=price_leg)
+
+    assert res["ok"] is True
+    p = _pos(db, pid)
+    assert p["status"] == "OPEN"
+    assert p["strategy"] == "IC"
+    assert p["call_short"] == 510.0
+    assert p["call_long"] == 515.0
+    # the FRESH net_cash (117.40) was realized, not the stale 120.0
+    acct = pdb.get_account(db)
+    # cash: net credit (+117.40) + released BP delta (800-720=80)
+    assert acct["cash"] == round(cash0 + 117.40 + 80.0, 2)
+    rows = pdb.list_adjustments(db, pid)
+    assert len(rows) == 1 and rows[0]["action"] == "convert_ic"
+
+
+def test_apply_adjustment_refuses_advisory(tmp_path):
+    """A broken_wing (advisory-only) candidate -> ok False, no mutation."""
+    db = _seed_account(tmp_path)
+    pid = _seed_position(db)
+    pos = _pos(db, pid)
+    cash0 = pdb.get_account(db)["cash"]
+    cand = {"action": "broken_wing", "net_cash": 0.0, "est_fill_legs": []}
+    res = pa.apply_adjustment(db, pos, cand)
+
+    assert res["ok"] is False
+    assert "advisory" in res["error"].lower()
+    # no mutation
+    assert _pos(db, pid)["status"] == "OPEN"
+    assert pdb.get_account(db)["cash"] == cash0
+    assert pdb.list_adjustments(db, pid) == []
+
+
+def test_apply_adjustment_refuses_non_open(tmp_path):
+    """A candidate against a CLOSED position -> ok False, stale True."""
+    db = _seed_account(tmp_path)
+    pid = _seed_position(db)
+    pdb.close_position(db, pid, exit_debit=0.2, exit_order_id=None,
+                       realized_pnl=120.0, exit_reason="x", exit_ts="t",
+                       status="CLOSED")
+    pos = _pos(db, pid)
+    cash0 = pdb.get_account(db)["cash"]
+    cand = {"action": "narrow", "gross_cash": -100.0, "commission": 2.6,
+            "net_cash": -102.6, "new_width": 2.0, "new_max_loss": 600.0,
+            "est_fill_legs": [_leg("BUY", "PUT", 498.0)]}
+    res = pa.apply_adjustment(db, pos, cand)
+
+    assert res["ok"] is False
+    assert res["stale"] is True
+    assert "no longer open" in res["error"].lower()
+    # no mutation
+    assert pdb.get_account(db)["cash"] == cash0
+    assert pdb.list_adjustments(db, pid) == []
