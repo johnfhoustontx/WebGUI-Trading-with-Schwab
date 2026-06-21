@@ -73,6 +73,11 @@ EVENT_GEX_STATUS = "events:options:gex_status"
 CACHE_EXPECTED_MOVE = "cache:options:expected_move"
 EVENT_EXPECTED_MOVE = "events:options:expected_move"
 
+CACHE_RESCUE = "cache:options:rescue"            # per-id: f"{CACHE_RESCUE}:{position_id}"
+CACHE_RESCUE_SUMMARY = "cache:options:rescue_summary"
+EVENT_RESCUE = "events:options:rescue"
+EVENT_RESCUE_SUMMARY = "events:options:rescue_summary"
+
 # Defaults mirror the page's input defaults (symbol SPY, 5-30 DTE, the put/call
 # delta gates, min credit 10% -> 0.10 fraction). The page sends the fraction.
 _SWING_DEFAULTS = {
@@ -148,15 +153,62 @@ def swing_scan(bus, args: dict) -> None:
     bus.publish(EVENT_SWING, {"version": version})
 
 
+def _coerce_pid(pid):
+    """Coerce a position id to int for overlay lookup (rows/keys may be int or
+    str). Returns None when it can't be coerced (so the lookup falls back to
+    the 'ok' default)."""
+    try:
+        return int(pid)
+    except (TypeError, ValueError):
+        return None
+
+
+def _apply_rescue_overlay(data) -> None:
+    """Tag each open-position row in the paper-account view with ``rescue_state``
+    + ``heat`` from ``compute.assess_open_positions`` (cheap — stored marks only,
+    no chain fetch). Mutates ``data["positions"]`` in place. Fully defensive: any
+    failure leaves the view unchanged so the core paper refresh still publishes.
+
+    ``per_position`` is keyed by ``position_id`` (possibly int); the row's
+    ``position_id`` field may be int or str — both are coerced to int to match."""
+    try:
+        per_position = compute.assess_open_positions().get("per_position", {}) or {}
+        # Re-key by int so an int-row / str-row id both resolve.
+        overlay = {_coerce_pid(k): v for k, v in per_position.items()}
+        for row in data.get("positions") or []:
+            entry = overlay.get(_coerce_pid(row.get("position_id"))) or {}
+            row["rescue_state"] = entry.get("state", "ok")
+            row["heat"] = entry.get("heat", 0.0)
+    except Exception:
+        # Never let the overlay break the core paper-account publish.
+        pass
+
+
 def refresh_paper_account(bus) -> None:
-    """Read the paper account view and publish it to the bus.
+    """Read the paper account view, tag rows with the rescue overlay, publish it.
 
     No strict contract: the view is a loosely-shaped read-only dict (snapshot +
     positions + orders + has_account flag) that only the Paper Portfolio page
-    consumes, and ``compute.paper_account_view`` is already fully defensive."""
+    consumes, and ``compute.paper_account_view`` is already fully defensive. The
+    overlay ADDS ``rescue_state``/``heat`` per position row (Task 6.2) without
+    changing the existing view shape."""
     data = compute.paper_account_view()
+    _apply_rescue_overlay(data)
     version = bus.cache_set(CACHE_PAPER, data)
     bus.publish(EVENT_PAPER, {"version": version})
+
+
+def publish_rescue_summary(bus) -> None:
+    """Publish the small rescue summary view for the nav badge (Task 6.2).
+
+    Reuses ``compute.assess_open_positions`` (cheap — stored marks only) and
+    caches its ``summary`` (``n_tested``/``n_critical``/``position_ids``) under
+    ``cache:options:rescue_summary``, skipping the version bump when unchanged so
+    an idle manage tick doesn't wake the GUI's badge poller."""
+    res = compute.assess_open_positions()
+    summary = res.get("summary", {"n_tested": 0, "n_critical": 0, "position_ids": []})
+    bus.cache_set(CACHE_RESCUE_SUMMARY, summary,
+                  event=EVENT_RESCUE_SUMMARY, skip_unchanged=True)
 
 
 def run_manage_and_refresh(bus) -> None:
@@ -170,6 +222,12 @@ def run_manage_and_refresh(bus) -> None:
     if compute.has_paper_account():
         compute.run_manage_cycle()
     refresh_paper_account(bus)
+    # Piggyback the manage tick (no new cadence): publish the rescue summary for
+    # the nav badge. Defensive so it never blocks the core paper refresh.
+    try:
+        publish_rescue_summary(bus)
+    except Exception:
+        pass
 
 
 def refresh_paper_trades(bus) -> None:
