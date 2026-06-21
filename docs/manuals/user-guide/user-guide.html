@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebGUI Trading with Schwab — User Guide</title>
+<style>
+:root {
+  --ink: #1a2230; --muted: #5b6678; --line: #d8dee9; --soft: #eef2f7;
+  --accent: #2e6db4; --accent-soft: #eaf2fb; --code-bg: #f4f6fa;
+  --pos: #1f8a4c; --neg: #c0392b; --warn: #b9770e;
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: var(--ink); line-height: 1.62; margin: 0; background: #fbfcfe;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 980px; margin: 0 auto; padding: 48px 32px 96px; }
+.titleblock { border-bottom: 3px solid var(--accent); padding-bottom: 18px; margin-bottom: 8px; }
+.titleblock h1 { font-size: 2.1rem; margin: 0 0 4px; letter-spacing: -0.01em; }
+.titleblock .sub { font-size: 1.2rem; color: var(--accent); font-weight: 600; }
+.titleblock .meta { color: var(--muted); font-size: 0.85rem; margin-top: 8px; }
+h1 { font-size: 1.7rem; margin: 2.4em 0 0.6em; padding-top: 0.3em; border-top: 1px solid var(--line); }
+h2 { font-size: 1.32rem; margin: 1.8em 0 0.5em; color: #16243a; }
+h3 { font-size: 1.08rem; margin: 1.4em 0 0.4em; color: #243450; }
+h4 { font-size: 0.98rem; margin: 1.2em 0 0.3em; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+p { margin: 0.6em 0; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+ul, ol { margin: 0.5em 0 0.9em; padding-left: 1.5em; }
+li { margin: 0.25em 0; }
+code { font-family: "SF Mono", Consolas, "Roboto Mono", monospace; font-size: 0.86em;
+       background: var(--code-bg); padding: 1px 5px; border-radius: 4px; color: #344; }
+pre { background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px;
+      padding: 14px 16px; overflow-x: auto; font-size: 0.85rem; line-height: 1.5; }
+pre code { background: none; padding: 0; }
+table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 0.9rem; }
+th, td { border: 1px solid var(--line); padding: 7px 11px; text-align: left; vertical-align: top; }
+th { background: var(--accent-soft); font-weight: 600; }
+tr:nth-child(even) td { background: var(--soft); }
+blockquote { margin: 1em 0; padding: 6px 16px; border-left: 4px solid var(--accent);
+             background: var(--accent-soft); color: #2a3a52; border-radius: 0 6px 6px 0; }
+blockquote p { margin: 0.3em 0; }
+hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
+.toc { background: #fff; border: 1px solid var(--line); border-radius: 10px;
+       padding: 12px 22px; margin: 22px 0 8px; }
+.toc > ul { margin: 0.3em 0; }
+.toc ul { list-style: none; padding-left: 1.1em; }
+.toc > ul { padding-left: 0.4em; }
+.toc a { color: var(--ink); }
+@media print {
+  body { background: #fff; }
+  .wrap { max-width: none; padding: 0; }
+  h1 { page-break-before: auto; }
+  pre, table, blockquote { page-break-inside: avoid; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="titleblock">
+  <h1>WebGUI Trading with Schwab</h1>
+  <div class="sub">User Guide</div>
+  <div class="meta">WebGUI Trading with Schwab · Generated 2026-06-21</div>
+</div>
+<div class="toc"><span class="toctitle">Contents</span><ul>
+<li><a href="#introduction">Introduction</a></li>
+<li><a href="#getting-started">Getting Started</a><ul>
+<li><a href="#starting-the-application">Starting the application</a></li>
+<li><a href="#what-runs-behind-the-scenes">What runs behind the scenes</a></li>
+<li><a href="#the-proxy-down-banner">The proxy-down banner</a></li>
+<li><a href="#waiting-for-service-placeholders">"Waiting for … service" placeholders</a></li>
+<li><a href="#stopping-everything">Stopping everything</a></li>
+</ul>
+</li>
+<li><a href="#the-interface">The Interface</a><ul>
+<li><a href="#layout">Layout</a></li>
+<li><a href="#navigation-groups">Navigation groups</a></li>
+<li><a href="#alert-badges-and-chimes">Alert badges and chimes</a></li>
+</ul>
+</li>
+<li><a href="#options">Options</a><ul>
+<li><a href="#scanner">Scanner</a></li>
+<li><a href="#swing-scanner">Swing Scanner</a></li>
+<li><a href="#calculator">Calculator</a></li>
+<li><a href="#gamma">Gamma</a></li>
+<li><a href="#simulator">Simulator</a></li>
+<li><a href="#expected-move">Expected Move</a></li>
+<li><a href="#paper-trades">Paper Trades</a></li>
+<li><a href="#captured-signals">Captured Signals</a></li>
+<li><a href="#paper-portfolio">Paper Portfolio</a></li>
+<li><a href="#cross-page-actions">Cross-page actions</a></li>
+</ul>
+</li>
+<li><a href="#sentiment">Sentiment</a><ul>
+<li><a href="#sentiment-dashboard">Sentiment dashboard</a></li>
+<li><a href="#sector-rotation">Sector Rotation</a></li>
+</ul>
+</li>
+<li><a href="#trade">Trade</a></li>
+<li><a href="#portfolio">Portfolio</a></li>
+<li><a href="#driver">Driver</a></li>
+<li><a href="#reports-system">Reports &amp; System</a><ul>
+<li><a href="#eod-report">EOD Report</a></li>
+<li><a href="#system-status">System Status</a></li>
+<li><a href="#settings">Settings</a></li>
+<li><a href="#terminate">Terminate</a></li>
+</ul>
+</li>
+<li><a href="#faq-troubleshooting">FAQ &amp; Troubleshooting</a></li>
+</ul>
+</div>
+<h1 id="introduction">Introduction</h1>
+<p><strong>WebGUI Trading with Schwab</strong> is a single, browser-based control center for a
+Charles Schwab options-and-equities trading workflow. It replaces a collection of
+older desktop and dashboard tools with one web app you open in your browser at
+<strong>http://127.0.0.1:8500</strong>.</p>
+<p>From this one interface you can:</p>
+<ul>
+<li><strong>Scan</strong> for 0-DTE and swing options credit-spread opportunities and see each
+  candidate scored 0–100 for quality.</li>
+<li><strong>Analyze</strong> a single ticker for a position (1–8 week) and investor (months+)
+  Buy / Hold / Sell verdict.</li>
+<li><strong>Model</strong> options trades — a P&amp;L calculator, an expected-move chart, a
+  Black-Scholes "what-if" simulator, and a dealer-gamma (GEX) view.</li>
+<li><strong>Track</strong> paper trades and captured signals, with automatic management.</li>
+<li><strong>Read the market's mood</strong> through a sentiment composite, market-trend gauges,
+  and a sector-rotation map.</li>
+<li><strong>Review</strong> your live brokerage portfolio and an end-of-day report.</li>
+<li><strong>Approve</strong> the morning trading agent's proposed orders.</li>
+</ul>
+<blockquote>
+<p><strong>This is a single-user, local application.</strong> It runs on your own machine and
+talks to Schwab through a local gateway. There are no accounts to log into in
+the web app itself.</p>
+</blockquote>
+<hr />
+<h1 id="getting-started">Getting Started</h1>
+<h2 id="starting-the-application">Starting the application</h2>
+<p>The app is made of several background services plus the web interface. Start them
+all together with one of the launcher scripts in the project root:</p>
+<table>
+<thead>
+<tr>
+<th>Launcher</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>start_all.bat</code></td>
+<td>Opens the gateway, the five domain services, and the web app in <strong>seven separate console windows</strong>, then opens your browser.</td>
+</tr>
+<tr>
+<td><code>start_all_wt.bat</code></td>
+<td>Same seven processes, but as <strong>seven tabs in one Windows Terminal window</strong> (less desktop clutter; requires Windows Terminal).</td>
+</tr>
+</tbody>
+</table>
+<p>After the windows finish loading, the app is available at:</p>
+<pre><code>http://127.0.0.1:8500
+</code></pre>
+<p>The browser usually opens automatically. If it does not, open that address
+yourself.</p>
+<h2 id="what-runs-behind-the-scenes">What runs behind the scenes</h2>
+<p>You don't interact with these directly, but it helps to know they exist:</p>
+<ul>
+<li><strong>Schwab gateway (proxy)</strong> — handles the Schwab connection and market data.
+  Everything else depends on it. <strong>It must be running first</strong> (the launcher
+  handles ordering for you).</li>
+<li><strong>Five domain services</strong> — Sentiment, Options, Portfolio, Trade, and Driver.
+  Each one powers its matching page(s).</li>
+<li><strong>Memurai (Redis)</strong> — a local data backbone the services and the web app share.</li>
+</ul>
+<h2 id="the-proxy-down-banner">The proxy-down banner</h2>
+<p>If you ever see a <strong>red banner</strong> across the top of every page saying the proxy is
+unreachable, the Schwab gateway isn't running or has stopped. Live data won't load
+until it's back. Use the <strong>System Status</strong> page (under <strong>More</strong>) to check and
+restart components.</p>
+<h2 id="waiting-for-service-placeholders">"Waiting for … service" placeholders</h2>
+<p>Each page is powered by its service. If a page shows a <em>"Waiting for … service"</em>
+message, that service hasn't started or has stopped. Start the full stack with a
+launcher, or restart the specific service from the <strong>System Status</strong> page.</p>
+<h2 id="stopping-everything">Stopping everything</h2>
+<p>Use <strong>More → Terminate</strong> inside the app, or run <code>stop_all.bat</code>. This stops the
+gateway, the five services, and the web app. (Memurai is intentionally left
+running — it's a shared Windows service.)</p>
+<hr />
+<h1 id="the-interface">The Interface</h1>
+<h2 id="layout">Layout</h2>
+<p>Every page shares the same frame:</p>
+<ul>
+<li>A <strong>left navigation drawer</strong> with expandable groups and flat items.</li>
+<li>A <strong>header</strong> at the top with a menu toggle and the current page title.</li>
+<li>The <strong>page content</strong> in the main area.</li>
+</ul>
+<h2 id="navigation-groups">Navigation groups</h2>
+<table>
+<thead>
+<tr>
+<th>Group</th>
+<th>Pages</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Options</strong> (expandable)</td>
+<td>Scanner · Paper Trades · Captured Signals · Paper Portfolio · Calculator · Swing Scanner · Gamma · Simulator · Expected Move</td>
+</tr>
+<tr>
+<td><strong>Sentiment</strong> (expandable)</td>
+<td>Sentiment · Sector Rotation</td>
+</tr>
+<tr>
+<td><strong>Trade</strong> (flat)</td>
+<td>Trade</td>
+</tr>
+<tr>
+<td><strong>Portfolio</strong> (flat)</td>
+<td>Portfolio</td>
+</tr>
+<tr>
+<td><strong>Driver</strong> (flat)</td>
+<td>Driver</td>
+</tr>
+<tr>
+<td><strong>More</strong> (expandable)</td>
+<td>EOD Report · System Status · Settings · Terminate</td>
+</tr>
+</tbody>
+</table>
+<p>The group containing the page you're on opens automatically, and the drawer
+remembers which groups you left open as you move around.</p>
+<h2 id="alert-badges-and-chimes">Alert badges and chimes</h2>
+<p>A small background watcher runs on <strong>every</strong> page. When new qualifying scanner
+signals appear it can:</p>
+<ul>
+<li>Play a <strong>chime</strong> (a bundled sound), and optionally</li>
+<li>Fire a <strong>desktop notification</strong>.</li>
+</ul>
+<p>It also shows red <strong>count badges</strong> on three nav items:</p>
+<ul>
+<li><strong>Scanner</strong> — number of brand-new signals.</li>
+<li><strong>Captured Signals</strong> — new captures.</li>
+<li><strong>Driver</strong> — a pending order approval.</li>
+</ul>
+<p>Opening that page clears its badge.</p>
+<blockquote>
+<p><strong>Browser sound is blocked until you interact with the page.</strong> Click any nav
+link, or use <strong>Test sound</strong> on the Settings page, to unlock audio for the
+session.</p>
+</blockquote>
+<p>You control all of this on the <strong>Settings</strong> page (see <em>Reports &amp; System</em>).</p>
+<hr />
+<h1 id="options">Options</h1>
+<p>The Options section is the heart of the app. All Options pages share a common
+<strong>signal detail panel</strong> and a few cross-page action buttons.</p>
+<h2 id="scanner">Scanner</h2>
+<p><strong>Route:</strong> the home page (<code>/</code>).</p>
+<p>The Scanner continuously looks for credit-spread opportunities and lists them in a
+two-pane layout.</p>
+<p><strong>Left pane — the signal list:</strong></p>
+<ul>
+<li>A <strong>Scan</strong> button (re-runs the scan) and a status line ("N signals").</li>
+<li>Two tabs: <strong>0-DTE</strong> and <strong>Swing</strong>.</li>
+<li>A table of candidate signals. Columns include Symbol, Type, Expiration, DTE,
+  Short/Long strikes, Credit, Max Loss, Risk/Reward %, Probability of Profit %,
+  a color-coded <strong>Score</strong> chip, and a letter <strong>Grade</strong>.</li>
+<li>A plain-English <strong>VIX term</strong> label (for example, <em>"VIX term: Contango (near-term
+  calm) · as of 1:32 PM"</em>).</li>
+<li>Brand-new signals get a <strong>NEW</strong> badge.</li>
+</ul>
+<p><strong>Right pane — the detail panel:</strong> click any row to see its full breakdown
+(credit, max loss, DTE, delta, theta, IV rank, and more).</p>
+<p><strong>Per-row action buttons</strong> (also see <em>Cross-page actions</em> below):</p>
+<ul>
+<li><strong>Send to Calculator</strong> — open the P&amp;L Calculator pre-filled with this trade.</li>
+<li><strong>Send to Paper Trade</strong> — create a paper trade from this signal.</li>
+<li><strong>Expected Move</strong> — open the Expected Move chart for this trade in a new tab.</li>
+</ul>
+<p>The list refreshes itself automatically; you rarely need to press <strong>Scan</strong>.</p>
+<h2 id="swing-scanner">Swing Scanner</h2>
+<p><strong>Route:</strong> <code>/options/swing</code>.</p>
+<p>A focused, on-demand scan for one symbol over a swing horizon. Enter the
+parameters and press <strong>Scan</strong>:</p>
+<ul>
+<li><strong>Symbol</strong></li>
+<li><strong>DTE</strong> min / max (days to expiration)</li>
+<li><strong>Put Δ</strong> and <strong>Call Δ</strong> min / max (delta bands for strike selection)</li>
+<li><strong>Min credit %</strong></li>
+</ul>
+<p>Results appear in the same signal table (with the same Score chip, Grade, and the
+three per-row action buttons) and detail panel as the Scanner.</p>
+<h2 id="calculator">Calculator</h2>
+<p><strong>Route:</strong> <code>/options/calculator</code>.</p>
+<p>An options P&amp;L calculator with a price/time heat map.</p>
+<p><strong>Inputs:</strong></p>
+<ul>
+<li><strong>Strategy</strong> — PCS (put credit spread), CCS (call credit spread), IC (iron
+  condor), LONG_PUT, NAKED_PUT, LONG_CALL, NAKED_CALL.</li>
+<li><strong>Symbol</strong> and <strong>spot price</strong>, plus a <strong>Load</strong> button that pulls the live chain,
+  current price, a price range, and the list of expirations.</li>
+<li><strong>Expiry</strong>, <strong>Contracts</strong>, <strong>IV %</strong> (with an <strong>IV</strong> button that reads the
+  at-the-money IV from the chain), an <strong>IV Δ %</strong> shock, and a <strong>Rate %</strong>.</li>
+<li>A <strong>leg section</strong> that adapts to the strategy: for each leg, pick a <strong>Strike</strong>
+  and enter (or <strong>Fetch</strong>) a <strong>Premium</strong>.</li>
+<li><strong>Range min / max</strong> and <strong>Range %</strong> controlling the heat map's price span.</li>
+</ul>
+<p><strong>Outputs (after pressing Calculate):</strong></p>
+<ul>
+<li><strong>Summary tiles</strong> — entry credit/debit, max risk, max return, return-on-risk %,
+  break-even(s), and probability of profit.</li>
+<li>A <strong>P&amp;L heat map</strong> — rows are price points, columns are evaluation dates, each
+  cell shows the dollar P&amp;L and % return, shaded green (profit) to red (loss). The
+  current spot row is highlighted.</li>
+</ul>
+<p>If you arrived here via <strong>Send to Calculator</strong> from a signal table, the form is
+pre-filled and the calculation runs automatically.</p>
+<h2 id="gamma">Gamma</h2>
+<p><strong>Route:</strong> <code>/options/gamma</code>.</p>
+<p>A dealer-positioning view built from the options chain — gamma exposure (GEX) and
+related measures.</p>
+<p><strong>Controls:</strong></p>
+<ul>
+<li>A <strong>Symbol</strong> dropdown (default <code>$SPX</code>; the list is the collected watchlist).</li>
+<li><strong>Refresh now</strong>, an <strong>Explain</strong> button, an <strong>Analyze</strong> button, and a <strong>Next
+  refresh</strong> countdown.</li>
+<li>A <strong>view toggle</strong>: <strong>GEX / Charm / DEX / Vanna / Term</strong>.</li>
+</ul>
+<p><strong>Status row:</strong> a collector status dot, last-scan and next-scan times, and a one-
+line summary (spot, strike count, net exposure).</p>
+<p><strong>Panels:</strong></p>
+<ul>
+<li><strong>Left</strong> — a horizontal bar chart of net exposure by strike near spot, with the
+  spot line, a gamma-flip line, and call/put <strong>wall</strong> lines. (In <strong>Term</strong> view this
+  becomes a full-width expiry × strike heat map.)</li>
+<li><strong>Right</strong> — an <strong>intraday heat map</strong> of strike × time, colored from red
+  (negative) through yellow to green (positive), with the spot price overlaid.</li>
+</ul>
+<p><strong>Explain</strong> opens an infographic that interprets the current positioning;
+<strong>Analyze</strong> produces a copyable analysis prompt for the index symbols. The view
+refreshes automatically every two minutes; switching views is instant and doesn't
+re-fetch.</p>
+<h2 id="simulator">Simulator</h2>
+<p><strong>Route:</strong> <code>/options/simulator</code>.</p>
+<p>Re-prices a single option contract under different scenarios using Black-Scholes.
+Start by entering a <strong>Symbol</strong> and pressing <strong>Fetch snapshot</strong>, then choose a
+contract with the <strong>Expiry</strong>, <strong>Kind</strong> (call/put), <strong>Strike</strong>, and <strong>Direction</strong>
+(buy/sell) selectors. Three tabs:</p>
+<ul>
+<li><strong>Replay</strong> (default) — re-prices the contract along the underlying's recent price
+  path and shows a <strong>six-panel stack</strong> (price plus Delta, Gamma, Theta, Vega, Rho).
+  A <strong>scrub slider</strong> moves a cursor through the trace; a <strong>Look-back</strong> dropdown
+  controls how far back the path runs (Auto by DTE, or fixed windows).</li>
+<li><strong>What-if</strong> — a <strong>ΔS</strong> slider (instant client-side price overlay) and a <strong>Δt</strong>
+  slider (days forward) that re-prices the contract; an IV-shock comparison bar
+  chart appears below.</li>
+<li><strong>IV Shock</strong> — an <strong>IV multiplier</strong> slider compares the contract at base IV vs
+  shocked IV across Price, Delta, Gamma, Theta, and Vega.</li>
+</ul>
+<h2 id="expected-move">Expected Move</h2>
+<p><strong>Route:</strong> <code>/options/expected-move</code>.</p>
+<p>Charts a symbol's recent price action with a forward <strong>expected-move cone</strong> out to
+an option's expiration.</p>
+<p><strong>Inputs:</strong> <strong>Symbol</strong>, <strong>Expiry</strong> (YYYY-MM-DD), an optional <strong>Strike</strong> with a
+put/call toggle, and a <strong>Look-back</strong> dropdown (Auto ≈ 3× DTE, or 1mo / 3mo / 6mo /
+1y). Press <strong>Draw</strong>.</p>
+<p><strong>The chart</strong> is a daily candlestick with:</p>
+<ul>
+<li>Dashed <strong>upper/lower expected-move</strong> bands fanning out to expiration.</li>
+<li><strong>Leg strike lines</strong> if you provided strikes (short = solid, long = dashed;
+  put = red, call = blue), each labeled.</li>
+<li>A price crosshair and a date-aware tooltip. Non-trading days are collapsed so
+  there are no blank weekend gaps.</li>
+</ul>
+<p>You usually reach this page through the <strong>Expected Move</strong> button on a signal row
+(it opens in a new browser tab, pre-filled and drawn).</p>
+<h2 id="paper-trades">Paper Trades</h2>
+<p><strong>Route:</strong> <code>/options/paper</code>.</p>
+<p>A manual paper-trading ledger.</p>
+<ul>
+<li><strong>Action buttons:</strong> Reload, <strong>Close selected</strong> (enter an exit debit), <strong>Analyze
+  selected</strong> (live Greeks + P&amp;L overlay), <strong>Delete selected</strong>, <strong>Delete all
+  closed</strong>.</li>
+<li><strong>Table:</strong> Trade ID, Symbol, Strategy, Strikes, Expiration, Qty, Entry Credit,
+  Max Loss, P&amp;L, Status, Entry Time.</li>
+<li>Click a row to load its <strong>detail panel</strong>; the app automatically runs a live
+  analysis and overlays current Greeks and P&amp;L.</li>
+<li>Each row also has an <strong>Expected Move</strong> button.</li>
+</ul>
+<h2 id="captured-signals">Captured Signals</h2>
+<p><strong>Route:</strong> <code>/options/captured</code>.</p>
+<p>Signals the system has "captured" to track over time, with live re-pricing.</p>
+<ul>
+<li><strong>Action buttons:</strong> Reload, <strong>Refresh marks (live)</strong> (re-price all open
+  signals), <strong>Close selected</strong> (enter an exit value and reason).</li>
+<li><strong>Table:</strong> Symbol, Strategy, Mode, Opened, Expiration, DTE, Entry Credit, Entry
+  Risk, P&amp;L (green/red), Entry Score, Current Score, <strong>Score Drift</strong>, Grade, and a
+  color-coded <strong>Recommendation</strong> (green TAKE_PROFIT / red CUT / amber HOLD).</li>
+<li>Click a row for its detail panel (entry vs current score, recommendation,
+  unrealized P&amp;L).</li>
+<li>When a tracked signal hits a stop or target, the page raises a notification.</li>
+</ul>
+<h2 id="paper-portfolio">Paper Portfolio</h2>
+<p><strong>Route:</strong> <code>/options/portfolio</code>.</p>
+<p>The account view for the automated paper-trading engine.</p>
+<ul>
+<li><strong>Account cards:</strong> Equity, Cash, Buying-power reserved, Session P&amp;L, Total P&amp;L,
+  Open count, and engine status (RUNNING / HALTED).</li>
+<li><strong>Action buttons:</strong> Reload, <strong>Run entry cycle</strong> (open positions for eligible
+  captured signals), <strong>Run manage cycle</strong> (re-price and auto-close), <strong>Reset</strong>
+  (set a new starting balance).</li>
+<li><strong>Open Positions</strong> table and a <strong>Fills log</strong> (last 100 orders).</li>
+</ul>
+<blockquote>
+<p>The manage cycle also runs automatically every 5 minutes during market hours, so
+the paper portfolio updates on its own — the buttons are manual triggers.</p>
+</blockquote>
+<h2 id="cross-page-actions">Cross-page actions</h2>
+<p>Three buttons appear on signal rows across the Options section:</p>
+<table>
+<thead>
+<tr>
+<th>Action</th>
+<th>Available on</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Send to Calculator</strong></td>
+<td>Scanner, Swing Scanner</td>
+<td>Opens the Calculator pre-filled (strategy, symbol, expiry, strikes, premiums, IV) and runs it.</td>
+</tr>
+<tr>
+<td><strong>Send to Paper Trade</strong></td>
+<td>Scanner, Swing Scanner</td>
+<td>Asks for a quantity, then creates a paper trade. Stays on the current page.</td>
+</tr>
+<tr>
+<td><strong>Expected Move</strong></td>
+<td>Scanner, Swing, Paper Trades, Captured, Calculator</td>
+<td>Opens the Expected Move chart in a new browser tab, pre-filled and drawn.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h1 id="sentiment">Sentiment</h1>
+<h2 id="sentiment-dashboard">Sentiment dashboard</h2>
+<p><strong>Route:</strong> <code>/sentiment</code>.</p>
+<p>A market-mood overview that updates on its own (about every two minutes) whether or
+not the page is open.</p>
+<ul>
+<li><strong>Two Market Sentiment gauges</strong> — <strong>Today</strong> and <strong>30-Day Average</strong> — showing a
+  0–10 contrarian composite (higher = more fear/opportunity), with a regime label.</li>
+<li><strong>Two Market Trend gauges</strong> — <strong>Today</strong> (live intraday) and <strong>30-Day</strong>
+  (structural) — a directional 0–100 trend score. A press-and-hold <strong>Trend Detail</strong>
+  popup breaks the score into Price / Breadth / Sector / VIX sub-scores.</li>
+<li>A <strong>component breakdown</strong> (press-and-hold popup): each component's value, score,
+  weight, and confidence.</li>
+<li>A <strong>2×2 signal matrix</strong> (Bias / Signal / Yesterday / Change) over a traffic-light
+  background.</li>
+<li>A collapsible <strong>30-Day History</strong> chart with rolling averages.</li>
+<li>A full-width <strong>Sector &amp; Industry Performance</strong> table — 11 sectors with Day / Week
+  / Month %, Put/Call, and an RRG reading; each sector <strong>expands</strong> into its
+  industries. A rotation banner and a green/cap-weighted/score summary sit above it.</li>
+<li>A status bar (Updated / Next / Sectors / Proxy).</li>
+</ul>
+<p>Press <strong>Refresh</strong> for an immediate update.</p>
+<h2 id="sector-rotation">Sector Rotation</h2>
+<p><strong>Route:</strong> <code>/sentiment/rotation</code>.</p>
+<p>A Relative-Rotation-Graph (RRG) view of the 11 sectors against the S&amp;P 500.</p>
+<ul>
+<li>A <strong>headline</strong> — Risk-ON / Risk-OFF, an assessment line, and the cyclical-vs-
+  defensive spread.</li>
+<li><strong>Rotating From / Into</strong> columns showing which sectors are leaving and entering
+  leadership, with each sector's S&amp;P weight.</li>
+<li>A <strong>quadrant map</strong> table sorted by momentum.</li>
+<li>A full-width <strong>RRG scatter</strong> with one "meteor-tail" trail per sector (a faded
+  history line plus a bright current dot). Hovering a sector dims the others.</li>
+</ul>
+<p>This page refreshes <strong>only when you press Refresh</strong>.</p>
+<hr />
+<h1 id="trade">Trade</h1>
+<p><strong>Route:</strong> <code>/trade</code>.</p>
+<p>On-demand analysis of a single symbol. Type a <strong>Symbol</strong> and press <strong>Analyze</strong>.</p>
+<ul>
+<li>A <strong>header</strong> with the symbol, price, bias, and volume.</li>
+<li><strong>Two verdict cards</strong> — <strong>Position</strong> (1–8 weeks) and <strong>Investor</strong> (months+) —
+  each showing a Buy / Hold / Sell verdict (color-coded), a score, the top reasons,
+  any hard "gates" that fired, and an expandable factor breakdown.</li>
+<li>An <strong>MTF EMA Alignment</strong> card (per-timeframe trend agreement: Daily, 4H, 1H, 15m,
+  5m, 1m).</li>
+<li>A <strong>Momentum</strong> strip (RSI, ADX, MACD histogram, VWAP, relative volume).</li>
+<li>A <strong>Sector</strong> card and, when available, a <strong>Fundamentals</strong> card (P/E, PEG, revenue
+  &amp; EPS growth, ROE, margin trend).</li>
+</ul>
+<p>The analysis persists as you navigate away and back.</p>
+<hr />
+<h1 id="portfolio">Portfolio</h1>
+<p><strong>Route:</strong> <code>/portfolio</code>.</p>
+<p>Your live Schwab portfolio, with sector context and a performance scorecard.</p>
+<ul>
+<li>A <strong>status bar</strong> — Refresh button, proxy up/down, live-stream on/off, holding
+  count.</li>
+<li><strong>Holdings</strong> tab — Symbol, Sector, Qty, Market Value, Day P/L, Total P/L,
+  vs-Sector relative strength, and since-purchase excess. P&amp;L cells are color-coded
+  and update live.</li>
+<li><strong>Sectors</strong> tab — your sector weights vs the benchmark, plus a tailwind reading.</li>
+<li><strong>Performance</strong> tab — per-position letter grades (Return / Capital / Risk /
+  Entry), a composite, annualized return, vs-sector, and drawdown. Click a row to
+  see its <strong>advisory suggestions</strong> below the table.</li>
+</ul>
+<p>P&amp;L streams live tick-by-tick; press <strong>Refresh</strong> to rebuild sectors and grades.</p>
+<hr />
+<h1 id="driver">Driver</h1>
+<p><strong>Route:</strong> <code>/driver</code>.</p>
+<p>The morning trading agent's <strong>order-approval queue</strong>. Orders are <strong>simulated</strong>
+(paper) — nothing is sent to a live brokerage account from here.</p>
+<ul>
+<li><strong>Run morning agent</strong> grades the day and proposes trades; <strong>Refresh
+  performance</strong> rebuilds the performance view.</li>
+<li>When a run is pending you'll see a <strong>grade card</strong>, a <strong>conditions strip</strong> (VIX,
+  SPX, VIX1D, P&amp;L today/week), and <strong>proposed-trade cards</strong> (bucket, structure,
+  instrument, strikes, contracts, max risk, ML signal/confidence).</li>
+<li><strong>APPROVE</strong> (behind a confirmation dialog) executes the proposed trades as
+  simulated orders; <strong>SKIP</strong> declines them.</li>
+<li>A <strong>Performance</strong> section shows win rate, realized P&amp;L, and a per-trade table.</li>
+</ul>
+<p>The morning run also fires automatically once each weekday at <strong>09:28 ET</strong> — you
+just approve or skip the result.</p>
+<hr />
+<h1 id="reports-system">Reports &amp; System</h1>
+<h2 id="eod-report">EOD Report</h2>
+<p><strong>Route:</strong> <code>/eod</code> (with a <code>/eod/detail</code> drill-down).</p>
+<p>An end-of-day rollup of the day's Options activity and the Driver.</p>
+<ul>
+<li>A <strong>Summary</strong> with per-domain one-liners (scanner counts, captured signals, paper
+  session P&amp;L, Driver grade/status).</li>
+<li><strong>Sections</strong> for Scanner, Captured, Paper, and Driver with their tables.</li>
+<li>A <strong>Generate</strong> button snapshots the current data into standalone HTML files
+  archived by date under <code>webgui/data/eod/&lt;date&gt;/</code>. Past dates are listed for
+  reopening, and archived files can be served raw.</li>
+</ul>
+<h2 id="system-status">System Status</h2>
+<p><strong>Route:</strong> <code>/status</code> (under <strong>More</strong>).</p>
+<p>A health board for the whole stack.</p>
+<ul>
+<li>An <strong>overall banner</strong> — green (all up), red (naming what's down), or grey
+  (checking).</li>
+<li>A <strong>component grid</strong> — Memurai, the Schwab gateway, <strong>Schwab Authorization</strong>, the
+  five services, and the web app itself, each with Online/Offline and its tier.</li>
+<li>A <strong>Schwab Authorization</strong> card with an <strong>Authorize</strong> button that opens the
+  gateway's OAuth login in a new tab (use this if your Schwab token has expired).</li>
+<li>A <strong>data-freshness</strong> table showing each domain's latest update age, flagging
+  scheduled data that has gone stale.</li>
+<li><strong>Offline</strong> components show a <strong>Restart</strong> button. The board re-checks every few
+  seconds and on demand.</li>
+</ul>
+<h2 id="settings">Settings</h2>
+<p><strong>Route:</strong> <code>/settings</code> (under <strong>More</strong>).</p>
+<p>Preferences for the alert system (saved on your machine, no login):</p>
+<ul>
+<li><strong>Scanner Alerts</strong> — enable the audio alert, pick the sound (chime / bell /
+  ping), a <strong>Test sound</strong> button, a <strong>Volume</strong> slider, an <strong>only during market
+  hours</strong> toggle, and a <strong>minimum score to alert</strong>.</li>
+<li><strong>Desktop Notifications</strong> — enable desktop notifications and grant the browser
+  permission.</li>
+</ul>
+<blockquote>
+<p>Clicking <strong>Test sound</strong> also unlocks browser audio for the session.</p>
+</blockquote>
+<h2 id="terminate">Terminate</h2>
+<p><strong>Route:</strong> <code>/terminate</code> (under <strong>More</strong>).</p>
+<p>A guarded "stop the whole local stack" page. The red <strong>Stop all services</strong> button
+(behind a confirmation) stops the gateway, the five services, and the web app.</p>
+<blockquote>
+<p><strong>This also stops the page you're on</strong> — it will become unresponsive right after
+you confirm, by design. Memurai is left running. Re-launch with <code>start_all.bat</code>
+or <code>start_all_wt.bat</code>.</p>
+</blockquote>
+<hr />
+<h1 id="faq-troubleshooting">FAQ &amp; Troubleshooting</h1>
+<p><strong>A red "proxy unreachable" banner is on every page.</strong>
+The Schwab gateway isn't running. Open <strong>More → System Status</strong>, check the
+schwab-proxy card, and use its <strong>Restart</strong> button — or relaunch the whole stack.</p>
+<p><strong>A page says "Waiting for … service."</strong>
+That page's service isn't running. Restart it from <strong>System Status</strong>, or relaunch
+the stack.</p>
+<p><strong>Scans return nothing, or Gamma shows "no data."</strong>
+On weekends and outside market hours, options data is sparse and 0-DTE scans
+legitimately return few or no signals. This is expected, not a failure.</p>
+<p><strong>No alert sound plays.</strong>
+Browsers block audio until you interact with the page. Click a nav link or press
+<strong>Test sound</strong> on the Settings page. Also confirm the alert toggle is on, the
+volume is up, and (if enabled) that you're within market hours and above the
+minimum score.</p>
+<p><strong>The Status page flags data as STALE.</strong>
+A scheduled view hasn't updated recently — usually because its service stopped.
+Restart that service. On-demand views (Trade, Driver) are never flagged stale.</p>
+<p><strong>Schwab Authorization shows as not authorized / expired.</strong>
+Open <strong>System Status → Schwab Authorization → Authorize</strong> to re-run the OAuth
+login in a new tab.</p>
+<p><strong>My live portfolio P&amp;L isn't moving.</strong>
+Check the Portfolio status bar: if the live-stream indicator is off or the proxy is
+down, ticks aren't arriving. Press <strong>Refresh</strong>, and verify the gateway on the
+Status page.</p>
+</div>
+</body>
+</html>

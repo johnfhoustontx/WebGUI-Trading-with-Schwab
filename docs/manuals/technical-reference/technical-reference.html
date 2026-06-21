@@ -1,0 +1,1006 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebGUI Trading with Schwab — Technical Reference</title>
+<style>
+:root {
+  --ink: #1a2230; --muted: #5b6678; --line: #d8dee9; --soft: #eef2f7;
+  --accent: #2e6db4; --accent-soft: #eaf2fb; --code-bg: #f4f6fa;
+  --pos: #1f8a4c; --neg: #c0392b; --warn: #b9770e;
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: var(--ink); line-height: 1.62; margin: 0; background: #fbfcfe;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 980px; margin: 0 auto; padding: 48px 32px 96px; }
+.titleblock { border-bottom: 3px solid var(--accent); padding-bottom: 18px; margin-bottom: 8px; }
+.titleblock h1 { font-size: 2.1rem; margin: 0 0 4px; letter-spacing: -0.01em; }
+.titleblock .sub { font-size: 1.2rem; color: var(--accent); font-weight: 600; }
+.titleblock .meta { color: var(--muted); font-size: 0.85rem; margin-top: 8px; }
+h1 { font-size: 1.7rem; margin: 2.4em 0 0.6em; padding-top: 0.3em; border-top: 1px solid var(--line); }
+h2 { font-size: 1.32rem; margin: 1.8em 0 0.5em; color: #16243a; }
+h3 { font-size: 1.08rem; margin: 1.4em 0 0.4em; color: #243450; }
+h4 { font-size: 0.98rem; margin: 1.2em 0 0.3em; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+p { margin: 0.6em 0; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+ul, ol { margin: 0.5em 0 0.9em; padding-left: 1.5em; }
+li { margin: 0.25em 0; }
+code { font-family: "SF Mono", Consolas, "Roboto Mono", monospace; font-size: 0.86em;
+       background: var(--code-bg); padding: 1px 5px; border-radius: 4px; color: #344; }
+pre { background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px;
+      padding: 14px 16px; overflow-x: auto; font-size: 0.85rem; line-height: 1.5; }
+pre code { background: none; padding: 0; }
+table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 0.9rem; }
+th, td { border: 1px solid var(--line); padding: 7px 11px; text-align: left; vertical-align: top; }
+th { background: var(--accent-soft); font-weight: 600; }
+tr:nth-child(even) td { background: var(--soft); }
+blockquote { margin: 1em 0; padding: 6px 16px; border-left: 4px solid var(--accent);
+             background: var(--accent-soft); color: #2a3a52; border-radius: 0 6px 6px 0; }
+blockquote p { margin: 0.3em 0; }
+hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
+.toc { background: #fff; border: 1px solid var(--line); border-radius: 10px;
+       padding: 12px 22px; margin: 22px 0 8px; }
+.toc > ul { margin: 0.3em 0; }
+.toc ul { list-style: none; padding-left: 1.1em; }
+.toc > ul { padding-left: 0.4em; }
+.toc a { color: var(--ink); }
+@media print {
+  body { background: #fff; }
+  .wrap { max-width: none; padding: 0; }
+  h1 { page-break-before: auto; }
+  pre, table, blockquote { page-break-inside: avoid; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="titleblock">
+  <h1>WebGUI Trading with Schwab</h1>
+  <div class="sub">Technical Reference</div>
+  <div class="meta">WebGUI Trading with Schwab · Generated 2026-06-21</div>
+</div>
+<div class="toc"><span class="toctitle">Contents</span><ul>
+<li><a href="#about-this-document">About this document</a></li>
+<li><a href="#architecture-overview">Architecture Overview</a><ul>
+<li><a href="#the-three-tiers">The three tiers</a></li>
+<li><a href="#process-map-and-ports">Process map and ports</a></li>
+<li><a href="#data-flow-one-request">Data flow (one request)</a></li>
+<li><a href="#folder-map">Folder map</a></li>
+<li><a href="#scoring-conventions-shared-idioms">Scoring conventions (shared idioms)</a></li>
+</ul>
+</li>
+<li><a href="#sentiment-calculations">Sentiment Calculations</a><ul>
+<li><a href="#composite-blend">Composite blend</a></li>
+<li><a href="#vix-complex">VIX Complex</a></li>
+<li><a href="#putcall">Put/Call</a></li>
+<li><a href="#breadth">Breadth</a></li>
+<li><a href="#rotation">Rotation</a></li>
+<li><a href="#sector-performance">Sector Performance</a></li>
+<li><a href="#velocity-and-divergence">Velocity and divergence</a></li>
+<li><a href="#intraday-market-trend-directional-0100">Intraday Market Trend (directional 0–100)</a></li>
+<li><a href="#daily-trend-regime-state-machine">Daily trend-regime state machine</a></li>
+</ul>
+</li>
+<li><a href="#options-scoring">Options Scoring</a><ul>
+<li><a href="#composite-0100-score">Composite 0–100 score</a></li>
+<li><a href="#factor-normalizers">Factor normalizers</a></li>
+<li><a href="#expected-move-and-iv-analysis">Expected move and IV analysis</a></li>
+</ul>
+</li>
+<li><a href="#technical-indicators">Technical Indicators</a></li>
+<li><a href="#trade-analyzer">Trade Analyzer</a><ul>
+<li><a href="#technical-primitives">Technical primitives</a></li>
+<li><a href="#fundamental-primitives">Fundamental primitives</a></li>
+<li><a href="#fundamentals-parsing">Fundamentals parsing</a></li>
+</ul>
+</li>
+<li><a href="#portfolio-analytics">Portfolio Analytics</a></li>
+<li><a href="#black-scholes-the-simulator">Black-Scholes &amp; the Simulator</a><ul>
+<li><a href="#pricing-and-greeks">Pricing and Greeks</a></li>
+<li><a href="#spread-metrics-and-pl-grid">Spread metrics and P&amp;L grid</a></li>
+<li><a href="#simulator-engines">Simulator engines</a></li>
+</ul>
+</li>
+<li><a href="#gex-gamma">GEX / Gamma</a><ul>
+<li><a href="#per-strike-gamma-exposure-gex">Per-strike gamma exposure (GEX)</a></li>
+<li><a href="#dealer-delta-exposure-dex-and-projection">Dealer delta exposure (DEX) and projection</a></li>
+<li><a href="#directional-walls">Directional walls</a></li>
+<li><a href="#intraday-collection">Intraday collection</a></li>
+</ul>
+</li>
+<li><a href="#constants-appendix">Constants Appendix</a><ul>
+<li><a href="#service-cadences">Service cadences</a></li>
+</ul>
+</li>
+</ul>
+</div>
+<h1 id="about-this-document">About this document</h1>
+<p>This is the <strong>calculation and architecture reference</strong> for the WebGUI Trading
+with Schwab stack. It documents <em>how every number is derived</em> — the formulas,
+weights, thresholds, lookback windows, and cadences used across the sentiment,
+options, trade, and portfolio engines.</p>
+<p>It is an <strong>offline maintainer reference</strong>, not an end-user guide. For task-oriented
+usage see the <em>User Guide</em>; for the inter-service integration surface see the
+<em>API / Developer Reference</em>.</p>
+<blockquote>
+<p><strong>Source-of-truth note.</strong> Constants in this document were read from the code
+(file paths are given throughout). Where a value lives in a single canonical
+place — e.g. <code>sentiment-dashboard/scoring/__init__.py:WEIGHTS</code> — that file
+governs; if you change it there, update this document.</p>
+</blockquote>
+<hr />
+<h1 id="architecture-overview">Architecture Overview</h1>
+<h2 id="the-three-tiers">The three tiers</h2>
+<p>The stack is split into three physically separate tiers communicating over a local
+Redis (Memurai) backbone. No two Tier-2 services talk to each other directly.</p>
+<pre><code>TIER 1  GUI         webgui/ NiceGUI app (:8500). Renders pages, reads Redis cache,
+                    subscribes to events, enqueues commands. No engine imports.
+   ▲ cache read / subscribe                │ commands
+TIER 3  STORE+COMM  Memurai (:6379): cache:{domain}:{view}, events:{domain}:{view}
+                    pub/sub, cmd:{domain} command streams. shared/contracts (typed
+                    payloads) + shared/bus (redis wrapper).
+   ▲ publish                               │ consume
+TIER 2  SERVICES    services/{domain}_svc FastAPI (sentiment/options/portfolio/
+                    trade/driver). Each imports only its engines, owns its
+                    scheduler + command consumer, validates + caches + publishes.
+                    Calls schwab-proxy (:8100) for market data.
+</code></pre>
+<h2 id="process-map-and-ports">Process map and ports</h2>
+<table>
+<thead>
+<tr>
+<th>Process</th>
+<th>Port</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>schwab-proxy</td>
+<td>8100</td>
+<td>Schwab auth/token manager + market-data gateway. Start first.</td>
+</tr>
+<tr>
+<td>Memurai (Redis)</td>
+<td>6379</td>
+<td>Cache, pub/sub, command streams.</td>
+</tr>
+<tr>
+<td>sentiment_svc</td>
+<td>8210</td>
+<td>Sentiment composite, trend, rotation.</td>
+</tr>
+<tr>
+<td>options_svc</td>
+<td>8211</td>
+<td>Scans, paper trading, gamma, calculator, simulator, expected move.</td>
+</tr>
+<tr>
+<td>portfolio_svc</td>
+<td>8212</td>
+<td>Holdings, sectors, performance, live P&amp;L stream.</td>
+</tr>
+<tr>
+<td>trade_svc</td>
+<td>8213</td>
+<td>On-demand single-symbol analysis.</td>
+</tr>
+<tr>
+<td>driver_svc</td>
+<td>8214</td>
+<td>Morning order-approval pipeline.</td>
+</tr>
+<tr>
+<td>webgui</td>
+<td>8500</td>
+<td>The web UI.</td>
+</tr>
+</tbody>
+</table>
+<p>Ports come from <code>config/ports.toml</code> via <code>repo_paths.py</code> — never hard-coded.</p>
+<h2 id="data-flow-one-request">Data flow (one request)</h2>
+<ol>
+<li>The GUI enqueues a command on <code>cmd:{domain}</code> (a Redis Stream).</li>
+<li>The owning service's consumer loop drains the stream and dispatches to a handler.</li>
+<li>The handler calls its <strong>compute</strong> layer (the engines), which fetches market data
+   from the proxy and computes a result.</li>
+<li>The result is validated against a <strong>contract</strong>, written to <code>cache:{domain}:{view}</code>
+   (which increments a version counter), and an event is published on
+   <code>events:{domain}:{view}</code>.</li>
+<li>The GUI's version-poll timer sees the new version, reads the cache, and repaints.</li>
+</ol>
+<h2 id="folder-map">Folder map</h2>
+<table>
+<thead>
+<tr>
+<th>Folder</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>schwab-proxy/</code></td>
+<td>Schwab gateway / token manager.</td>
+</tr>
+<tr>
+<td><code>options-scanner/</code></td>
+<td>GEX/options engines, scoring, paper engine, simulator, IV analysis.</td>
+</tr>
+<tr>
+<td><code>sentiment-dashboard/</code></td>
+<td>Sentiment <code>scoring/</code> package + live composite + bridge.</td>
+</tr>
+<tr>
+<td><code>trade-analyzer/</code></td>
+<td><code>src/analysis</code> — recommendation, scoring, fundamentals, sector.</td>
+</tr>
+<tr>
+<td><code>portfolio-analyzer/</code></td>
+<td><code>src/</code> — sector breakdown, comparisons, evaluation.</td>
+</tr>
+<tr>
+<td><code>claude-driver/</code></td>
+<td>Morning orchestration + order approval logic.</td>
+</tr>
+<tr>
+<td><code>shared/</code></td>
+<td><code>analysis_lib/</code> (technical, market data), <code>contracts/</code>, <code>bus/</code>.</td>
+</tr>
+<tr>
+<td><code>services/</code></td>
+<td>The five Tier-2 domain services.</td>
+</tr>
+<tr>
+<td><code>webgui/</code></td>
+<td>The NiceGUI front end.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="scoring-conventions-shared-idioms">Scoring conventions (shared idioms)</h2>
+<ul>
+<li><strong>Sentiment scores</strong> are integers <strong>1–10, contrarian</strong> (10 = max fear /
+  opportunity, 1 = max greed / risk). <code>0</code> means "input undefined".</li>
+<li><strong>Confidence</strong> is a float in <code>[0.0, 1.0]</code>. Missing data → <code>0.0</code>; partial →
+  fractional (often <code>sqrt(fields_present / fields_possible)</code>).</li>
+<li><strong>Composites are confidence-weighted</strong>, never a plain weighted average, so a
+  low-confidence component cannot dominate.</li>
+<li>Piecewise mappings use <strong>narrow neutral bands</strong> (≈0.95–1.05 of normal) so small
+  moves through a breakpoint produce a visible change.</li>
+</ul>
+<hr />
+<h1 id="sentiment-calculations">Sentiment Calculations</h1>
+<p>All sentiment scoring lives in <code>sentiment-dashboard/scoring/</code> (pure functions, no
+I/O). The single source of truth for component weights is
+<code>scoring/__init__.py:WEIGHTS</code>.</p>
+<h2 id="composite-blend">Composite blend</h2>
+<p><strong>File:</strong> <code>scoring/composite.py</code> · <code>blend(scores, confs, weights)</code></p>
+<p>The master composite is a confidence-weighted blend of five components:</p>
+<pre><code>composite             = Σ(wᵢ · scoreᵢ · confᵢ) / Σ(wᵢ · confᵢ)
+aggregate_confidence  = Σ(wᵢ · confᵢ)
+</code></pre>
+<p><strong>Component weights</strong> (<code>scoring/__init__.py:WEIGHTS</code>, sum = 1.0):</p>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Weight</th>
+<th>Module</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>VIX Complex</td>
+<td>0.20</td>
+<td><code>vix.py</code></td>
+</tr>
+<tr>
+<td>Put/Call (cap-weighted sectors)</td>
+<td>0.20</td>
+<td><code>put_call.py</code></td>
+</tr>
+<tr>
+<td>Breadth</td>
+<td>0.20</td>
+<td><code>breadth.py</code></td>
+</tr>
+<tr>
+<td>Rotation</td>
+<td>0.15</td>
+<td><code>rotation.py</code></td>
+</tr>
+<tr>
+<td>Sector Performance</td>
+<td>0.25</td>
+<td><code>sector_perf.py</code></td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>Credit Pulse was removed from the composite (v4.3)</strong> and its 5% reallocated to
+Put/Call. <code>credit_pulse.py</code> still <em>computes</em> a score for display, but it is not
+in <code>WEIGHTS</code> and does not enter the blend.</p>
+</blockquote>
+<h2 id="vix-complex">VIX Complex</h2>
+<p><strong>File:</strong> <code>scoring/vix.py</code> · <code>score_complex(...)</code></p>
+<p>The 20% VIX slot is itself a blend of three sub-scores
+(<code>VIX_SUB_WEIGHTS</code> in <code>scoring/__init__.py</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Sub-score</th>
+<th>Sub-weight</th>
+<th>Input</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Term structure</td>
+<td>0.50</td>
+<td>VIX vs its 10-day MA</td>
+</tr>
+<tr>
+<td>VIX1D</td>
+<td>0.33</td>
+<td>VIX1D vs VIX</td>
+</tr>
+<tr>
+<td>Term slope</td>
+<td>0.17</td>
+<td>VIX9D vs VIX</td>
+</tr>
+</tbody>
+</table>
+<p>Each sub-score is a <strong>piecewise mapping of a ratio to a 1–10 score</strong>, with a narrow
+neutral band around 1.0.</p>
+<p><strong>Term structure</strong> — <code>score_term(vix, vix_ma)</code> on <code>ratio = vix / vix_ma</code>:</p>
+<pre><code>ratio &lt; 0.85          -&gt; 10.0   (deep contango, calm)
+0.85 &lt;= ratio &lt; 0.95  -&gt; 7.0 + (ratio-0.85)/0.10 * 2.0
+0.95 &lt;= ratio &lt; 1.05  -&gt; 5.0 + (ratio-0.95)/0.10 * 1.0   (neutral band)
+1.05 &lt;= ratio &lt; 1.15  -&gt; 4.0 - (ratio-1.05)/0.10 * 1.0
+1.15 &lt;= ratio &lt; 1.30  -&gt; 2.0 - (ratio-1.15)/0.15 * 1.0
+ratio &gt;= 1.30         -&gt; 1.0    (backwardation, stress)
+</code></pre>
+<p><strong>VIX1D</strong> — <code>score_vix1d(vix1d, vix)</code> on <code>ratio = vix1d / vix</code>: same shape with
+breakpoints 0.80 / 0.88 / 0.98 / 1.05 / 1.15.</p>
+<p><strong>Term slope</strong> — <code>score_term_slope(vix9d, vix)</code> on <code>slope = vix9d / vix</code>:
+breakpoints 0.85 / 0.92 / 1.00 / 1.05.</p>
+<h2 id="putcall">Put/Call</h2>
+<p><strong>File:</strong> <code>scoring/put_call.py</code></p>
+<p>The composite uses <strong>cap-weighted per-sector</strong> put/call ratios
+(<code>score_sector_weighted</code>):</p>
+<pre><code>blended_pcr = Σ(pcr_etf · weight_etf) / Σ(weight_etf)        # S&amp;P cap weights
+score       = interpolate(PC_THRESHOLDS, blended_pcr)        # clamp 1..10
+confidence  = sqrt(sectors_used / sectors_possible)
+</code></pre>
+<p><code>PC_THRESHOLDS</code> (ratio, score) — interpolated linearly between points; higher P/C
+(more fear) scores higher:</p>
+<pre><code>[(1.3, 1), (1.1, 2), (0.9, 5), (0.7, 8), (0.0, 10)]
+</code></pre>
+<p>The single-market variant <code>score(pc_equity, pc_ma, skew)</code> adds ±1 adjustments for
+P/C spikes/leans (current vs 10-day MA crossing ±15%) and for an Elevated/Inverted
+skew categorical.</p>
+<h2 id="breadth">Breadth</h2>
+<p><strong>File:</strong> <code>scoring/breadth.py</code> · <code>score(...)</code></p>
+<p>Blends an advance/decline reading with the percent of stocks above their 50-day MA.</p>
+<p><code>BREADTH_THRESHOLDS</code> (% above 50DMA, score): <code>[(75,10),(65,8),(55,6),(45,5),(35,3),(0,1)]</code>.</p>
+<p><strong>A/D ratio</strong> (<code>advance / decline</code>) maps piecewise:</p>
+<pre><code>&gt;=4.0 -&gt; 10   &gt;=3.0 -&gt; 9   &gt;=2.0 -&gt; 8   &gt;=1.5 -&gt; 7   &gt;=1.15 -&gt; 6
+&gt;=0.87 -&gt; 5   &gt;=0.67 -&gt; 4  &gt;=0.50 -&gt; 3  &gt;=0.33 -&gt; 2  &lt;0.33 -&gt; 1
+</code></pre>
+<p><strong>Blend:</strong> when both are present, <code>score = 0.7 · ad_score + 0.3 · dma_score</code>; a new
+highs/lows ratio nudges ±1. Confidence ≈ <code>sqrt(fields_present / 4)</code>.</p>
+<h2 id="rotation">Rotation</h2>
+<p><strong>File:</strong> <code>scoring/rotation.py</code></p>
+<p>Two paths exist:</p>
+<ul>
+<li><strong>Legacy / display</strong> (<code>score_fallback</code>, and the tk app's day/3d/week blend at
+  40/40/20) — base 5 with categorical adjustments.</li>
+<li><strong>Live composite</strong> uses <strong>dual momentum with a crash filter</strong>
+  (<code>compute_dual_momentum</code>), the more robust path used by <code>live_composite.py</code>.</li>
+</ul>
+<p><strong>Dual momentum</strong> (<code>lookback_days = 63</code>):</p>
+<pre><code>return_etf  = close[-1] / close[-63] - 1
+cash_return = (1 + irx_yield_pct/100) ^ (63/252) - 1     # 13-week T-bill, $IRX
+</code></pre>
+<ul>
+<li><strong>Crash filter:</strong> if the <em>top</em> sector's trailing return is below the cash return,
+  the regime is risk-off and <code>score = 1</code>.</li>
+<li><strong>Otherwise:</strong> rank sectors by trailing return; compute the average rank of
+  cyclical vs defensive ETFs; <code>rank_spread = def_avg_rank − cyc_avg_rank</code>
+  (positive = defensives leading = risk-off); <code>score = clip(5.0 + rank_spread, 1, 10)</code>.</li>
+<li><strong>Confidence:</strong> <code>sqrt((returns_available / possible) · irx_present)</code> where
+  <code>irx_present</code> is 1.0 with a live $IRX yield, else 0.5.</li>
+</ul>
+<p><strong>RRG quadrants</strong> (<code>compute_rrg_quadrants</code>, <code>rs_window=50</code>, <code>mom_window=20</code>) — used
+by the Sector Rotation page:</p>
+<pre><code>RS              = sector_close / benchmark_close          # per bar
+RS_strength     = 100 · RS_today / mean(RS, last 50)
+RS_momentum     = 100 · RS_today / RS_(20 bars ago)
+</code></pre>
+<p>Quadrants: <strong>Leading</strong> (strength≥100, mom≥100), <strong>Weakening</strong> (≥100, &lt;100),
+<strong>Lagging</strong> (&lt;100, &lt;100), <strong>Improving</strong> (&lt;100, ≥100).</p>
+<h2 id="sector-performance">Sector Performance</h2>
+<p><strong>File:</strong> <code>scoring/sector_perf.py</code></p>
+<p>Cap-weighted daily move across the 11 GICS sectors, mapped to a 1–10 score:</p>
+<pre><code>cap_wtd_return = Σ(sector_daily_return · sector_cap_weight)
+</code></pre>
+<p>Mapping (return → score): <code>+2.0% → 10</code>, <code>+1.5 → 9</code>, <code>+1.0 → 8</code>, <code>+0.5 → 7</code>,
+<code>0..+0.5 → 6</code>, <code>-0.5..0 → 5</code>, <code>-1.0..-0.5 → 4</code>, <code>-1.0 → 3</code>, <code>-1.5 → 2</code>, <code>≤-2.0 → 1</code>.
+Cap weights live in <code>sectors_ref.SP500_SECTOR_WEIGHTS</code>.</p>
+<h2 id="velocity-and-divergence">Velocity and divergence</h2>
+<p><strong>File:</strong> <code>scoring/composite.py</code></p>
+<p><strong>Velocity</strong> (<code>velocity(history_scores, today)</code>):</p>
+<pre><code>roc_3d = today - scores[-3]
+roc_5d = today - scores[-5]
+z_20d  = (today - mean(scores[-20:])) / std(scores[-20:])
+regime_break = abs(z_20d) &gt; 1.5
+</code></pre>
+<p><strong>Divergence</strong> (<code>divergence(named_scores)</code>): of the components with score &gt; 0, if
+<code>max_score − min_score ≥ 4</code>, flag a low-conviction divergence between the highest
+and lowest components.</p>
+<h2 id="intraday-market-trend-directional-0100">Intraday Market Trend (directional 0–100)</h2>
+<p><strong>File:</strong> <code>scoring/intraday_trend.py</code></p>
+<p>A directional 0–100 trend score (50 = neutral, 100 = max bull) recomputed every
+15 minutes, blended from four sub-scores by <code>TREND_WEIGHTS</code>:</p>
+<pre><code>TREND_WEIGHTS = {price: 0.45, breadth: 0.25, sector: 0.20, vix: 0.10}
+</code></pre>
+<p>Each sub-score returns <code>TrendSub(score, confidence)</code>; <code>blend_trend</code> combines them
+confidence-weighted (same idiom as the composite), and <code>score_to_state</code> maps the
+result to the five-state vocabulary used by the regime bridge.</p>
+<p><strong>Price</strong> — <code>score_price(alignment_pct, price_vs_vwap_pct, macd_hist, rsi, adx, n_timeframes)</code>:</p>
+<pre><code>align = alignment_pct / 100
+vwap  = clamp(price_vs_vwap_pct / 0.5, -1, 1)
+macd  = sign(macd_hist)
+rsi   = (rsi - 50) / 20
+direction = 0.50·align + 0.20·vwap + 0.15·macd + 0.15·rsi
+adx_factor = clip(adx / 40, 0.3, 1.0)               # chop hugs 50
+score = clamp(50 + 50·direction·adx_factor, 0, 100)
+confidence = clip(n_timeframes / 3, 0, 1)
+</code></pre>
+<p><strong>Breadth</strong> — <code>score_breadth_dir(net_ad, pct_above_50, new_highs, new_lows)</code>:
+weighted blend (0.4 / 0.4 / 0.2) of normalized net A/D, <code>(pct−50)/50</code>, and
+<code>(highs−lows)/(highs+lows)</code>; <code>score = 50 + 50·direction</code>; confidence = sum of the
+weights actually used.</p>
+<p><strong>Sector</strong> — <code>score_sector_participation(n_green, n_total, cyc_def_spread)</code>:
+<code>participation = (n_green/n_total − 0.5)·2</code>; <code>direction = 0.6·participation +
+0.4·cyc_def_spread</code>; confidence = <code>clip(n_total/11, 0, 1)</code>.</p>
+<p><strong>VIX</strong> — <code>score_vix_context(vix, vix_change_pct, vix1d, vix9d)</code>:
+<code>lvl = clip((20−vix)/10, −1, 1)</code>, <code>chg = clip(−vix_change_pct/5, −1, 1)</code>,
+<code>term = clip((vix−vix1d)/2, −1, 1)</code>; <code>direction = 0.4·lvl + 0.4·chg + 0.2·term</code>;
+confidence = 1.0.</p>
+<p><strong>Volatility damper</strong> — <code>vol_confidence_factor(vix_change_pct)</code>: a sharp VIX spike
+lowers aggregate confidence: <code>clip(1 − 0.04·vix_change_pct, 0.4, 1.0)</code> for positive
+changes, else 1.0.</p>
+<h2 id="daily-trend-regime-state-machine">Daily trend-regime state machine</h2>
+<p><strong>File:</strong> <code>scoring/trend_regime.py</code></p>
+<p>A SPY-based five-state classifier (independent of the composite) used to fill the
+back-compat <code>sma_*</code>/<code>drawdown</code> bridge fields. Constants:</p>
+<pre><code>BULL_DD_MAX       = -5.0     # max drawdown from 252d peak for &quot;bull&quot;
+PULLBACK_DD_MAX   = -12.0
+BEAR_RALLY_DD_MIN = -10.0
+SLOPE_BULL_MIN    =  0.05    # 200-DMA slope %, bull
+SLOPE_BEAR_MAX    = -0.05
+SLOPE_WINDOW      = 20
+HYSTERESIS_DAYS   = 2
+</code></pre>
+<p>Inputs are SPY daily closes. It computes <code>sma50</code>, <code>sma200</code>, the 20-bar slope of the
+200-DMA (as %), and the 252-day drawdown, then classifies:</p>
+<pre><code>close &gt; sma50 &gt; sma200  and slope &gt; 0.05  and dd &gt; -5   -&gt; bull_trend
+close &lt;= sma50, sma50 &gt; sma200, slope &gt; 0, dd &gt; -12     -&gt; pullback_in_bull
+close &lt; sma50 &lt; sma200  and slope &lt; -0.05               -&gt; bear_trend
+close &gt; sma50, slope &lt; 0, dd &lt; -10                      -&gt; bear_rally
+otherwise                                               -&gt; range
+</code></pre>
+<p><code>commit_state</code> requires the raw state to repeat for <code>HYSTERESIS_DAYS</code> before
+flipping. Confidence: 0.0 below 50 bars, 0.5 from 50–200, 1.0 at ≥200 bars.</p>
+<hr />
+<h1 id="options-scoring">Options Scoring</h1>
+<p><strong>File:</strong> <code>options-scanner/scoring.py</code></p>
+<h2 id="composite-0100-score">Composite 0–100 score</h2>
+<p>Each signal gets a 0–100 quality score: a weighted sum of eleven normalized factors
+(<code>DEFAULT_WEIGHTS</code>, sum = 100):</p>
+<table>
+<thead>
+<tr>
+<th>Factor</th>
+<th>Weight</th>
+<th>Group</th>
+<th>Normalizer</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Risk/Reward</td>
+<td>15</td>
+<td>Value</td>
+<td><code>norm_rr</code></td>
+</tr>
+<tr>
+<td>Probability of Profit</td>
+<td>10</td>
+<td>Value</td>
+<td><code>norm_pop</code></td>
+</tr>
+<tr>
+<td>Theta efficiency</td>
+<td>10</td>
+<td>Value</td>
+<td><code>norm_theta</code></td>
+</tr>
+<tr>
+<td>IV Rank</td>
+<td>12</td>
+<td>Context</td>
+<td><code>norm_iv_rank</code></td>
+</tr>
+<tr>
+<td>IV/HV ratio</td>
+<td>10</td>
+<td>Context</td>
+<td><code>norm_iv_hv_ratio</code></td>
+</tr>
+<tr>
+<td>Vega risk</td>
+<td>8</td>
+<td>Context</td>
+<td><code>norm_vega_risk</code></td>
+</tr>
+<tr>
+<td>Expected-move buffer</td>
+<td>12</td>
+<td>Context</td>
+<td><code>norm_em_buffer</code></td>
+</tr>
+<tr>
+<td>Liquidity</td>
+<td>5</td>
+<td>Execution</td>
+<td><code>norm_liquidity</code></td>
+</tr>
+<tr>
+<td>Trend alignment</td>
+<td>10</td>
+<td>Execution</td>
+<td><code>score_trend</code></td>
+</tr>
+<tr>
+<td>GEX wall proximity</td>
+<td>4</td>
+<td>Execution</td>
+<td><code>norm_gex_proximity</code></td>
+</tr>
+<tr>
+<td>DEX wall proximity</td>
+<td>4</td>
+<td>Execution</td>
+<td><code>norm_dex_proximity</code></td>
+</tr>
+</tbody>
+</table>
+<pre><code>score = Σ(weightᵢ · normalized_factorᵢ) / 100
+</code></pre>
+<h2 id="factor-normalizers">Factor normalizers</h2>
+<p><strong>Risk/Reward</strong> — <code>norm_rr(rr_pct)</code>: <code>min(100, rr_pct / 50 · 100)</code> (50%+ R:R → 100).</p>
+<p><strong>Probability of Profit</strong> — <code>norm_pop(pop_pct)</code>: <code>min(100, (pop_pct − 50) / 45 · 100)</code>
+(PoP 50% → 0, 95%+ → 100).</p>
+<p><strong>Theta efficiency</strong> — <code>norm_theta(net_theta, max_loss, all_theta_efficiencies)</code>:
+<code>efficiency = |net_theta| / max_loss · 100</code> (daily decay as % of risk). Normalized
+by <strong>percentile rank</strong> among all candidates when peer data exists, else linearly:
+<code>min(100, efficiency / 0.5 · 100)</code>.</p>
+<p><strong>IV Rank</strong> — <code>norm_iv_rank(iv_rank)</code>: pass-through clamped to <code>[0, 100]</code>.</p>
+<p><strong>IV/HV ratio</strong> — <code>norm_iv_hv_ratio(iv_hv)</code>: <code>(iv_hv − 0.5) / 1.0 · 100</code>, clamped
+(ratio 0.5 → 0, 1.0 → 50, 1.5+ → 100). Rewards IV richer than realized vol.</p>
+<p><strong>Vega risk</strong> — <code>norm_vega_risk(net_vega, max_loss, iv_rank)</code>: penalizes vega
+exposure in low-IV regimes:</p>
+<pre><code>vega_exposure = |net_vega| / max_loss            # typically 0.001..0.05
+vega_score    = max(0, min(100, (1 - vega_exposure/0.05)·100))
+score         = 0.6·vega_score + 0.4·(iv_rank/100·100)
+</code></pre>
+<p><strong>Expected-move buffer</strong> — <code>norm_em_buffer(short_strike, underlying, em_1sd, spread_type)</code>:
+how far the short strike sits outside the ±1σ expected move.</p>
+<pre><code>distance  = underlying - short_strike   (PCS) | short_strike - underlying (CCS)
+em_ratio  = distance / em_1sd
+em_ratio &lt;= 0  -&gt; 0                              (short strike ITM/ATM)
+0 &lt; em_ratio&lt;1 -&gt; em_ratio · 50                  (inside EM, penalized)
+em_ratio &gt;= 1  -&gt; min(100, 50 + (em_ratio-1)·50) (outside EM, rewarded)
+</code></pre>
+<p><strong>Liquidity</strong> — <code>norm_liquidity(bid, ask, mark)</code>: <code>spread_pct = (ask−bid)/mark·100</code>;
+<code>max(0, min(100, (1 − spread_pct/5)·100))</code> (≤1% spread → 100, ≥5% → 0).</p>
+<p><strong>Trend alignment</strong> — <code>score_trend(...)</code>: market regime maps to ±10, normalized to
+<code>[0, 100]</code>.</p>
+<p><strong>GEX / DEX wall proximity</strong> — <code>norm_gex_proximity</code> / <code>norm_dex_proximity</code>: distance
+of the short strike to the nearest wall as % of spot; <code>min(100, min_dist_pct / 1.0 ·
+100)</code> (≥1% away → 100, at the wall → 0).</p>
+<h2 id="expected-move-and-iv-analysis">Expected move and IV analysis</h2>
+<p><strong>File:</strong> <code>options-scanner/iv_analysis.py</code></p>
+<p><strong>Expected move</strong> — <code>calc_expected_move(price, iv_pct, dte)</code>:</p>
+<pre><code>em_1sd = price · (iv_pct/100) · sqrt(max(dte, 0.25) / 365)
+</code></pre>
+<p>Returns the 1σ dollar/percent move plus ±1σ and ±2σ bands.
+<code>calc_expected_moves(price, iv_pct)</code> returns daily/weekly/monthly variants.</p>
+<p><strong>IV Rank &amp; percentile</strong> — <code>calc_iv_rank_percentile(current_iv, hv_series, lookback_days=252)</code>:
+compares current ATM IV to the trailing 252-day <strong>HV-30</strong> distribution (a realized-
+vol proxy):</p>
+<pre><code>vol_rank       = (current_iv - hv_low_52w) / (hv_high_52w - hv_low_52w) · 100
+vol_percentile = (# days with hv &lt; current_iv) / total_days · 100
+</code></pre>
+<p>Returned under both <code>iv_*</code> (legacy) and <code>hv_*</code> (honest) keys.</p>
+<p><strong>Historical volatility</strong> — <code>calc_historical_vol_series(candles, window=30)</code>:
+rolling 30-day std of daily log returns, annualized: <code>std · sqrt(252) · 100</code>.</p>
+<hr />
+<h1 id="technical-indicators">Technical Indicators</h1>
+<p><strong>File:</strong> <code>shared/analysis_lib/technical.py</code>. All operate on OHLCV DataFrames.</p>
+<p><strong>EMA</strong> — <code>calculate_ema(df, period)</code>:</p>
+<pre><code>multiplier = 2 / (period + 1)
+EMA[t]     = close[t]·multiplier + EMA[t-1]·(1 - multiplier)
+</code></pre>
+<p>Seeded with the SMA of the first <code>period</code> bars; implemented vectorized via
+<code>ewm(alpha=multiplier, adjust=False)</code>.</p>
+<p><strong>RSI</strong> — <code>calculate_rsi(df, period=14)</code>:</p>
+<pre><code>avg_gain = EMA(gains, 14);  avg_loss = EMA(losses, 14)
+RSI = 100 - 100 / (1 + avg_gain/avg_loss)
+</code></pre>
+<p>Defaults to 50.0 on insufficient data. Reference bands: oversold 30, overbought 70.</p>
+<p><strong>ADX</strong> — <code>calculate_adx(df, period=14)</code>:</p>
+<pre><code>+DI = 100 · EMA(+DM, 14) / EMA(TR, 14)
+-DI = 100 · EMA(-DM, 14) / EMA(TR, 14)
+DX  = 100 · |+DI - -DI| / (+DI + -DI)
+ADX = EMA(DX, 14)
+</code></pre>
+<p>(TR = true range; +DM/−DM = directional movement.) &gt;25 ≈ strong trend.</p>
+<p><strong>MACD</strong> — <code>calculate_macd(df, fast=12, slow=26, signal=9)</code>:</p>
+<pre><code>macd_line   = EMA(close,12) - EMA(close,26)
+signal_line = EMA(macd_line, 9)
+histogram   = macd_line - signal_line
+</code></pre>
+<p><code>macd_histogram_series(df)</code> returns the full histogram series (so callers can read
+the prior bar for acceleration).</p>
+<p><strong>VWAP</strong> — <code>calculate_vwap(df)</code>:</p>
+<pre><code>typical = (high + low + close) / 3
+vwap    = cumsum(typical · volume) / cumsum(volume)
+</code></pre>
+<p><strong>Relative volume</strong> — <code>calculate_relative_volume(df, period=20)</code>:
+<code>today_volume / mean(prior period volume)</code>, returned with today's raw volume.</p>
+<p><strong>Volume profile</strong> — <code>calculate_volume_profile(df, num_bins=20)</code>: buckets closes
+into 20 price bins by volume (vectorized via <code>digitize</code>/<code>bincount</code>), returning the
+<strong>POC</strong> (highest-volume bin), and the <strong>VAH/VAL</strong> bounding the 70% value area.</p>
+<hr />
+<h1 id="trade-analyzer">Trade Analyzer</h1>
+<p><strong>File:</strong> <code>trade-analyzer/src/analysis/scoring.py</code>. Each primitive returns an
+integer in <code>[−100, +100]</code>; verdict engines blend them into Position and Investor
+Buy/Hold/Sell verdicts.</p>
+<h2 id="technical-primitives">Technical primitives</h2>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Mapping (abridged)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>score_rsi(rsi)</code></td>
+<td>&lt;30 → −90, 30–40 → −60, 40–50 → −20, 50–60 → 60, 60–70 → 30, 70+ → −20</td>
+</tr>
+<tr>
+<td><code>score_adx_directional(adx, ema_slope)</code></td>
+<td>sign = EMA slope; ≥25 → 100·sign, ≥20 → 60·sign, ≥15 → 30·sign, else 0</td>
+</tr>
+<tr>
+<td><code>score_macd(hist, hist_prev)</code></td>
+<td>up&amp;rising → 80, up&amp;falling → 30, down&amp;rising → −20, down&amp;falling → −80</td>
+</tr>
+<tr>
+<td><code>score_relative_volume(rv, ema_slope)</code></td>
+<td>&gt;1.5 → 60·sign, ≥1.0 → 20·sign, &lt;0.7 → −30</td>
+</tr>
+<tr>
+<td><code>score_vwap(price, vwap)</code></td>
+<td>far above → 60/30, far below → −80/−40 by % distance</td>
+</tr>
+<tr>
+<td><code>score_volume_profile_location(price, vp)</code></td>
+<td>at POC → 0, in value area above POC → 50, below VAL → −60</td>
+</tr>
+<tr>
+<td><code>score_relative_strength_percentile(p)</code></td>
+<td><code>round((p − 0.5)·200)</code>, clamped ±100</td>
+</tr>
+<tr>
+<td><code>score_distance_from_52wk_high(d)</code></td>
+<td>≤5% → 60, ≤15% → 20, ≤30% → −20, &gt;30% → −60</td>
+</tr>
+</tbody>
+</table>
+<h2 id="fundamental-primitives">Fundamental primitives</h2>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Mapping</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>score_pe_vs_sector(pe, sector_median)</code></td>
+<td>ratio ≤0.7 → 60, ≤1.0 → 30, ≤1.3 → −10, &gt;1.3 → −50</td>
+</tr>
+<tr>
+<td><code>score_peg(peg)</code></td>
+<td>&lt;1 → 40, ≤2 → 0, &gt;2 → −40</td>
+</tr>
+<tr>
+<td><code>score_growth_metric(g)</code></td>
+<td>&gt;0.15 → 80, ≥0.05 → 30, ≥0 → 0, ≥−0.05 → −30, else −80</td>
+</tr>
+<tr>
+<td><code>score_roe(roe)</code></td>
+<td>&gt;0.15 → 60, ≥0.05 → 20, else −40</td>
+</tr>
+<tr>
+<td><code>score_earnings_surprise_streak(s)</code></td>
+<td>≥4 beats &gt;5% → 80, last miss &lt;0% → −60, else 0</td>
+</tr>
+<tr>
+<td><code>score_guidance_direction(d)</code></td>
+<td>RAISED → 40, LOWERED/CUT → −60, else 0</td>
+</tr>
+</tbody>
+</table>
+<h2 id="fundamentals-parsing">Fundamentals parsing</h2>
+<p><strong>File:</strong> <code>trade-analyzer/src/analysis/fundamentals.py</code>. The Schwab
+<code>/instruments?projection=fundamental</code> payload is parsed as a <strong>superset</strong>: the real
+Schwab fields are primary (<code>revChangeTTM</code>/<code>epsChangePercentTTM</code> as percent →
+fraction; <code>returnOnEquity</code> as percent via a <code>&gt;2</code> magnitude heuristic;
+<code>operatingMarginTTM</code> vs <code>MRQ</code> for the margin trend), with legacy speculative names
+as fallback. Fields the payload does not carry (next-earnings date, EPS surprises,
+guidance, FCF) degrade to <code>None</code>, so those gates simply never fire.</p>
+<hr />
+<h1 id="portfolio-analytics">Portfolio Analytics</h1>
+<p><strong>File:</strong> <code>portfolio-analyzer/src/</code>.</p>
+<p><strong>Position classification</strong> (<code>sectors.classify_positions</code>): each position is tagged
+with a sector and sector ETF (futures are bucketed as "Futures" and excluded from
+normal classification).</p>
+<p><strong>Sector weights</strong> (<code>sectors.sector_weights</code>): market value by sector over the
+<strong>absolute-value</strong> total, so shorts don't distort weights:</p>
+<pre><code>weight_sector = Σ(market_value in sector) / Σ|market_value|
+</code></pre>
+<p><strong>vs Benchmark</strong> (<code>weights_vs_benchmark</code>): <code>my_weight[sector] − benchmark[sector]</code>
+(positive = overweight).</p>
+<p><strong>Holding vs sector RS</strong> (<code>holding_vs_sector</code>): the stock's trailing return vs its
+sector ETF over several lookbacks (100 = parity), via
+<code>shared/analysis_lib/sector_analysis.calculate_stock_vs_sector_rs</code>.</p>
+<p><strong>Since-purchase excess</strong> (<code>since_purchase_vs_sector</code>): <code>stock_return −
+sector_return</code> since entry.</p>
+<p><strong>RRG quadrants</strong> (<code>compute_rrg_quadrants</code>, <code>rs_window=50</code>, <code>mom_window=20</code>): same
+quadrant rule as the sentiment RRG.</p>
+<p><strong>Evaluation</strong> (<code>evaluation.py</code>): a split-speed scorecard — slow <strong>baselines</strong>
+(relative-strength percentile, technical and fundamental scores) computed at load
+and refreshed on a cadence, plus a fast <strong>live</strong> P&amp;L/tailwind update per tick —
+producing per-position letter grades (Return / Capital / Risk / Entry), a composite,
+annualized return, and drawdown, with advisory suggestions.</p>
+<hr />
+<h1 id="black-scholes-the-simulator">Black-Scholes &amp; the Simulator</h1>
+<p><strong>File:</strong> <code>options-scanner/options_calculator.py</code>.</p>
+<h2 id="pricing-and-greeks">Pricing and Greeks</h2>
+<pre><code>d1 = [ln(S/K) + (r + σ²/2)·T] / (σ·√T)
+d2 = d1 - σ·√T
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Greek / price</th>
+<th>Call</th>
+<th>Put</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Price</td>
+<td><code>S·N(d1) − K·e^(−rT)·N(d2)</code></td>
+<td><code>K·e^(−rT)·N(−d2) − S·N(−d1)</code></td>
+</tr>
+<tr>
+<td>Delta</td>
+<td><code>N(d1)</code></td>
+<td><code>N(d1) − 1</code></td>
+</tr>
+<tr>
+<td>Gamma</td>
+<td><code>n(d1) / (S·σ·√T)</code></td>
+<td>same</td>
+</tr>
+<tr>
+<td>Theta (per day)</td>
+<td><code>[−S·n(d1)·σ/(2√T) − r·K·e^(−rT)·N(d2)] / 365</code></td>
+<td>put sign on the second term</td>
+</tr>
+<tr>
+<td>Charm</td>
+<td><code>−n(d1)·[2rT − d2·σ√T] / (2T·σ√T)</code></td>
+<td>call value <code>+ r·e^(−rT)</code></td>
+</tr>
+<tr>
+<td>Vanna</td>
+<td><code>−n(d1)·d2/σ / 100</code> (per 1 vol point)</td>
+<td>same</td>
+</tr>
+</tbody>
+</table>
+<p>(<code>N</code> = standard-normal CDF, <code>n</code> = its PDF.) At/after expiration (T ≤ 0), price is
+intrinsic value and second-order Greeks are 0.</p>
+<h2 id="spread-metrics-and-pl-grid">Spread metrics and P&amp;L grid</h2>
+<p><code>calc_summary(legs, strategy, spot, r, iv, T)</code> returns credit/debit, max
+profit/loss, break-even(s), strike width, and probability of profit.</p>
+<p><code>calc_spread_pnl(legs, spot, iv, rate, eval_dates, price_range, expiry_date, iv_adjustment=0)</code>
+re-prices every leg via Black-Scholes at each (price point × evaluation date) and
+sums P&amp;L into the grid that drives the Calculator heat map. An <code>iv_adjustment</code>
+shifts IV at every point for shock scenarios.</p>
+<h2 id="simulator-engines">Simulator engines</h2>
+<p><strong>File:</strong> <code>options-scanner/options_simulator/</code>.</p>
+<ul>
+<li><strong>What-if</strong> (<code>WhatIfEngine</code>) — freezes time <code>days_elapsed</code> forward and sweeps an
+  81-point ±20% price range, decomposing P&amp;L by Delta/Gamma/Theta/Vega.</li>
+<li><strong>IV shock</strong> (<code>IVShockEngine</code>) — compares the contract at base IV vs <code>IV × mult</code>.</li>
+<li><strong>Replay</strong> (<code>ReplayEngine.full_trace</code>) — steps the contract bar-by-bar along the
+  underlying's recent path, re-pricing and computing all Greeks at each bar. The
+  service (<code>compute.sim_replay</code>) wraps this and compresses overnight/weekend gaps
+  onto a consecutive integer x-axis for the six-panel chart.</li>
+</ul>
+<hr />
+<h1 id="gex-gamma">GEX / Gamma</h1>
+<p><strong>File:</strong> <code>options-scanner/gamma_tool.py</code>.</p>
+<h2 id="per-strike-gamma-exposure-gex">Per-strike gamma exposure (GEX)</h2>
+<p>The standard GEX contribution per strike (calls positive, puts negative):</p>
+<pre><code>GEX_strike = gamma · open_interest · 100 · spot²
+</code></pre>
+<p>In code (<code>gamma_tool.py</code>) the per-strike value is computed as
+<code>gamma · OI · 100 · spot · spot · 0.01</code> (the <code>· 0.01</code> scales the result for
+display). A <strong>Volume</strong> variant substitutes total volume for open interest. The
+engine returns, per strike, the call, put, and net values.</p>
+<h2 id="dealer-delta-exposure-dex-and-projection">Dealer delta exposure (DEX) and projection</h2>
+<p>The DEX/hedge panel sums <code>OI · delta · contract_multiplier · spot</code> across strikes
+for the current and a projected delta, surfacing net-delta-now vs projected-close
+hedging pressure.</p>
+<h2 id="directional-walls">Directional walls</h2>
+<p><code>get_directional_walls(gex_dict, spot)</code> returns one <strong>put wall</strong> (the strike below
+spot with the largest put GEX) and one <strong>call wall</strong> (the strike above spot with the
+largest call GEX) — the single-wall pair the Gamma page draws.</p>
+<h2 id="intraday-collection">Intraday collection</h2>
+<p>The options service collects GEX snapshots every 2 minutes within 08:30–15:20 CT on
+trading days (reusing the standalone collector's <code>poll_once</code>) into <code>gex_history.db</code>,
+which feeds the strike × time heat map. The universe is the index base
+(<code>$SPX</code>/<code>$VIX</code>/<code>SPY</code>/<code>QQQ</code>) plus the watchlist.</p>
+<hr />
+<h1 id="constants-appendix">Constants Appendix</h1>
+<p>A consolidated table of the load-bearing constants. The cited file governs.</p>
+<table>
+<thead>
+<tr>
+<th>Constant / set</th>
+<th>Value</th>
+<th>Where</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Composite weights</td>
+<td>vix 0.20, put_call 0.20, breadth 0.20, rotation 0.15, sector_perf 0.25</td>
+<td><code>scoring/__init__.py:WEIGHTS</code></td>
+</tr>
+<tr>
+<td>VIX sub-weights</td>
+<td>term 0.50, vix1d 0.33, slope 0.17</td>
+<td><code>scoring/__init__.py:VIX_SUB_WEIGHTS</code></td>
+</tr>
+<tr>
+<td>Trend weights</td>
+<td>price 0.45, breadth 0.25, sector 0.20, vix 0.10</td>
+<td><code>intraday_trend.py:TREND_WEIGHTS</code></td>
+</tr>
+<tr>
+<td>Put/Call thresholds</td>
+<td>(1.3,1)(1.1,2)(0.9,5)(0.7,8)(0.0,10)</td>
+<td><code>put_call.py:PC_THRESHOLDS</code></td>
+</tr>
+<tr>
+<td>Breadth %&gt;50DMA thresholds</td>
+<td>(75,10)(65,8)(55,6)(45,5)(35,3)(0,1)</td>
+<td><code>breadth.py:BREADTH_THRESHOLDS</code></td>
+</tr>
+<tr>
+<td>Rotation lookback</td>
+<td>63 trading days; cash via $IRX</td>
+<td><code>rotation.py</code></td>
+</tr>
+<tr>
+<td>RRG windows</td>
+<td>rs_window 50, mom_window 20</td>
+<td><code>rotation.py</code> / <code>portfolio/sectors.py</code></td>
+</tr>
+<tr>
+<td>Trend-regime constants</td>
+<td>bull dd −5, pullback dd −12, bear-rally dd −10, slope ±0.05, hysteresis 2</td>
+<td><code>trend_regime.py</code></td>
+</tr>
+<tr>
+<td>Options score weights</td>
+<td>rr15 pop10 theta10 iv12 iv_hv10 vega8 em12 liq5 trend10 gex4 dex4 (=100)</td>
+<td><code>options-scanner/scoring.py:DEFAULT_WEIGHTS</code></td>
+</tr>
+<tr>
+<td>Expected move</td>
+<td><code>price·(iv/100)·sqrt(max(dte,0.25)/365)</code></td>
+<td><code>iv_analysis.py:calc_expected_move</code></td>
+</tr>
+<tr>
+<td>IV rank lookback</td>
+<td>252 trading days (HV-30 distribution)</td>
+<td><code>iv_analysis.py</code></td>
+</tr>
+<tr>
+<td>HV window</td>
+<td>30-day rolling, ann. ×sqrt(252)</td>
+<td><code>iv_analysis.py</code></td>
+</tr>
+<tr>
+<td>EMA / RSI / ADX / MACD</td>
+<td>14 / 14 / 14 / (12,26,9)</td>
+<td><code>shared/analysis_lib/technical.py</code></td>
+</tr>
+<tr>
+<td>Relative volume / vol profile</td>
+<td>period 20 / 20 bins, 70% value area</td>
+<td><code>technical.py</code></td>
+</tr>
+<tr>
+<td>GEX per strike</td>
+<td><code>gamma·OI·100·spot²</code> (calls +, puts −)</td>
+<td><code>gamma_tool.py</code></td>
+</tr>
+<tr>
+<td>Trade primitives range</td>
+<td>integer −100..+100</td>
+<td><code>trade-analyzer/src/analysis/scoring.py</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="service-cadences">Service cadences</h2>
+<table>
+<thead>
+<tr>
+<th>Service</th>
+<th>Cadence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>sentiment_svc</td>
+<td>Composite refresh every 120 s; trend recompute gated to 15 min; rotation at startup / on demand.</td>
+</tr>
+<tr>
+<td>options_svc</td>
+<td>Auto-scan 15-min slots (08:00–15:15 CT); GEX collect 2-min slots (08:30–15:20 CT); paper auto-manage every 5 min in market hours; header tick each 30 s (skip-unchanged).</td>
+</tr>
+<tr>
+<td>portfolio_svc</td>
+<td>Live SSE ticks; throttled publish ≤ every 2 s; full rebuild every 10 min or on demand.</td>
+</tr>
+<tr>
+<td>trade_svc</td>
+<td>On-demand only (no scheduler).</td>
+</tr>
+<tr>
+<td>driver_svc</td>
+<td>Morning run once/day at 09:28 ET; perf refresh ≈ every 5 min.</td>
+</tr>
+</tbody>
+</table>
+</div>
+</body>
+</html>

@@ -1,0 +1,865 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebGUI Trading with Schwab — API / Developer Reference</title>
+<style>
+:root {
+  --ink: #1a2230; --muted: #5b6678; --line: #d8dee9; --soft: #eef2f7;
+  --accent: #2e6db4; --accent-soft: #eaf2fb; --code-bg: #f4f6fa;
+  --pos: #1f8a4c; --neg: #c0392b; --warn: #b9770e;
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: var(--ink); line-height: 1.62; margin: 0; background: #fbfcfe;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 980px; margin: 0 auto; padding: 48px 32px 96px; }
+.titleblock { border-bottom: 3px solid var(--accent); padding-bottom: 18px; margin-bottom: 8px; }
+.titleblock h1 { font-size: 2.1rem; margin: 0 0 4px; letter-spacing: -0.01em; }
+.titleblock .sub { font-size: 1.2rem; color: var(--accent); font-weight: 600; }
+.titleblock .meta { color: var(--muted); font-size: 0.85rem; margin-top: 8px; }
+h1 { font-size: 1.7rem; margin: 2.4em 0 0.6em; padding-top: 0.3em; border-top: 1px solid var(--line); }
+h2 { font-size: 1.32rem; margin: 1.8em 0 0.5em; color: #16243a; }
+h3 { font-size: 1.08rem; margin: 1.4em 0 0.4em; color: #243450; }
+h4 { font-size: 0.98rem; margin: 1.2em 0 0.3em; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+p { margin: 0.6em 0; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+ul, ol { margin: 0.5em 0 0.9em; padding-left: 1.5em; }
+li { margin: 0.25em 0; }
+code { font-family: "SF Mono", Consolas, "Roboto Mono", monospace; font-size: 0.86em;
+       background: var(--code-bg); padding: 1px 5px; border-radius: 4px; color: #344; }
+pre { background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px;
+      padding: 14px 16px; overflow-x: auto; font-size: 0.85rem; line-height: 1.5; }
+pre code { background: none; padding: 0; }
+table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 0.9rem; }
+th, td { border: 1px solid var(--line); padding: 7px 11px; text-align: left; vertical-align: top; }
+th { background: var(--accent-soft); font-weight: 600; }
+tr:nth-child(even) td { background: var(--soft); }
+blockquote { margin: 1em 0; padding: 6px 16px; border-left: 4px solid var(--accent);
+             background: var(--accent-soft); color: #2a3a52; border-radius: 0 6px 6px 0; }
+blockquote p { margin: 0.3em 0; }
+hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
+.toc { background: #fff; border: 1px solid var(--line); border-radius: 10px;
+       padding: 12px 22px; margin: 22px 0 8px; }
+.toc > ul { margin: 0.3em 0; }
+.toc ul { list-style: none; padding-left: 1.1em; }
+.toc > ul { padding-left: 0.4em; }
+.toc a { color: var(--ink); }
+@media print {
+  body { background: #fff; }
+  .wrap { max-width: none; padding: 0; }
+  h1 { page-break-before: auto; }
+  pre, table, blockquote { page-break-inside: avoid; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="titleblock">
+  <h1>WebGUI Trading with Schwab</h1>
+  <div class="sub">API / Developer Reference</div>
+  <div class="meta">WebGUI Trading with Schwab · Generated 2026-06-21</div>
+</div>
+<div class="toc"><span class="toctitle">Contents</span><ul>
+<li><a href="#about-this-document">About this document</a></li>
+<li><a href="#3-tier-overview">3-Tier Overview</a></li>
+<li><a href="#bus-redis-api">Bus / Redis API</a><ul>
+<li><a href="#key-naming-conventions">Key naming conventions</a></li>
+<li><a href="#cache-methods">Cache methods</a></li>
+<li><a href="#pubsub">Pub/sub</a></li>
+<li><a href="#command-streams">Command streams</a></li>
+</ul>
+</li>
+<li><a href="#contracts">Contracts</a><ul>
+<li><a href="#envelope-types-envelopepy">Envelope types (envelope.py)</a></li>
+<li><a href="#domain-contracts">Domain contracts</a></li>
+</ul>
+</li>
+<li><a href="#per-service-reference">Per-Service Reference</a><ul>
+<li><a href="#sentiment-service-8210">Sentiment service — :8210</a></li>
+<li><a href="#options-service-8211">Options service — :8211</a></li>
+<li><a href="#portfolio-service-8212">Portfolio service — :8212</a></li>
+<li><a href="#trade-service-8213">Trade service — :8213</a></li>
+<li><a href="#driver-service-8214">Driver service — :8214</a></li>
+</ul>
+</li>
+<li><a href="#schwab-proxy">Schwab Proxy</a><ul>
+<li><a href="#health-auth">Health &amp; auth</a></li>
+<li><a href="#market-data">Market data</a></li>
+<li><a href="#trader-api">Trader API</a></li>
+<li><a href="#trade-stream-tracker">Trade-stream tracker</a></li>
+</ul>
+</li>
+<li><a href="#cache-key-index">Cache Key Index</a></li>
+<li><a href="#service-scaffold">Service Scaffold</a></li>
+<li><a href="#end-to-end-flow-example">End-to-End Flow Example</a></li>
+<li><a href="#ports-paths">Ports &amp; Paths</a></li>
+</ul>
+</div>
+<h1 id="about-this-document">About this document</h1>
+<p>This is the <strong>integration reference</strong> for the WebGUI Trading with Schwab 3-tier
+architecture: the contracts, the Redis bus API, each service's commands and
+published views, and the Schwab proxy's HTTP surface. It is aimed at developers
+extending the stack or wiring a new client to it.</p>
+<p>For the math behind the cached payloads, see the <em>Technical Reference</em>; for the
+end-user view, see the <em>User Guide</em>.</p>
+<hr />
+<h1 id="3-tier-overview">3-Tier Overview</h1>
+<pre><code>TIER 1  GUI (webgui, :8500)  ──enqueue command──▶  cmd:{domain}  (Redis Stream)
+        ▲                                                  │
+        │  read cache / subscribe events                   ▼
+TIER 3  Redis (Memurai, :6379)  ◀──cache_set + publish──  TIER 2  services
+        ▲                                                  │
+        │                                                  ▼  market data
+        └──────────────  schwab-proxy (:8100)  ◀───────────┘
+</code></pre>
+<p><strong>Rules of the model:</strong></p>
+<ul>
+<li>The GUI imports only <code>nicegui</code> + <code>shared.bus</code> + <code>shared.contracts</code>. It never
+  imports an engine, never calls Schwab, and never computes domain results.</li>
+<li>Services never call each other. They communicate only by reading/writing Redis.</li>
+<li>All market data flows through the proxy; no service holds Schwab credentials.</li>
+<li>Every cache write <strong>increments a version counter</strong>; the GUI polls versions
+  cheaply and only re-reads the payload when the version changes.</li>
+</ul>
+<hr />
+<h1 id="bus-redis-api">Bus / Redis API</h1>
+<p><strong>File:</strong> <code>shared/bus/client.py</code>. The <code>Bus</code> class wraps redis-py (and <code>fakeredis</code>
+under pytest). Connection from <code>repo_paths.MEMURAI_URL</code> (default
+<code>redis://127.0.0.1:6379/0</code>).</p>
+<h2 id="key-naming-conventions">Key naming conventions</h2>
+<table>
+<thead>
+<tr>
+<th>Pattern</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cache:{domain}:{view}</code></td>
+<td>Versioned cache key holding a <code>CacheEnvelope</code>.</td>
+</tr>
+<tr>
+<td><code>cache:{domain}:{view}:ver</code></td>
+<td>Integer version counter, <code>INCR</code>'d by <code>cache_set</code>.</td>
+</tr>
+<tr>
+<td><code>events:{domain}:{view}</code></td>
+<td>Pub/sub channel; messages are <code>{"version": int}</code>.</td>
+</tr>
+<tr>
+<td><code>cmd:{domain}</code></td>
+<td>Redis Stream of commands (GUI → service RPC).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="cache-methods">Cache methods</h2>
+<p><strong><code>cache_set(key, payload, event=None, skip_unchanged=False) -&gt; int</code></strong>
+Atomically increments <code>{key}:ver</code>, stores a <code>CacheEnvelope</code> (version + ISO ts +
+payload) at <code>key</code>, and returns the new version.
+- <code>event</code> — when given, publishes <code>{"version": v}</code> on that channel in the same
+  pipeline.
+- <code>skip_unchanged=True</code> — if the payload is byte-identical to what's stored, the
+  whole write <em>and</em> publish are skipped (no version bump, so GUI pollers don't
+  repaint). Used by tick republishers (header, GEX status).</p>
+<p><strong><code>cache_get(key) -&gt; CacheEnvelope | None</code></strong> — deserializes the full envelope.</p>
+<p><strong><code>cache_version(key) -&gt; int | None</code></strong> — reads only the <code>:ver</code> counter (cheap; no
+payload deserialize). This is what GUI poll timers use.</p>
+<p><strong><code>cache_versions(keys) -&gt; dict</code></strong> — pipelined <code>cache_version</code> for many keys in one
+round-trip (use when a page polls several views).</p>
+<h2 id="pubsub">Pub/sub</h2>
+<p><strong><code>publish(channel, message) -&gt; None</code></strong> — JSON-publish a dict.</p>
+<p><strong><code>subscribe(channel)</code></strong> — context manager yielding a subscription;
+<code>sub.get_message(timeout)</code> returns a decoded dict or <code>None</code>.</p>
+<pre><code class="language-python">with bus.subscribe(&quot;events:sentiment:composite&quot;) as sub:
+    msg = sub.get_message(timeout=5.0)   # {&quot;version&quot;: 42} or None
+</code></pre>
+<h2 id="command-streams">Command streams</h2>
+<p><strong><code>enqueue_command(stream, command) -&gt; str</code></strong> — validates <code>command</code> as a <code>Command</code>
+(<code>{type, args}</code>) and <code>XADD</code>s it to the stream; returns the message id.</p>
+<p><strong><code>consume_commands(stream, group, consumer, block_ms=50, count=10) -&gt; list[(msg_id, Command)]</code></strong>
+— reads up to <code>count</code> pending messages for a consumer group, blocking up to
+<code>block_ms</code>. The consumer group is auto-created on first call.</p>
+<p><strong><code>ack(stream, group, msg_id) -&gt; None</code></strong> — acknowledges a message (the service
+scaffold auto-acks after the handler returns).</p>
+<hr />
+<h1 id="contracts">Contracts</h1>
+<p><strong>Folder:</strong> <code>shared/contracts/</code>. Pydantic models validated <strong>before</strong> <code>cache_set</code>,
+so gross shape drift fails loudly. The strictly-typed domain contracts are below;
+several options/sentiment views are validated defensively in compute rather than by
+a contract (listed in <em>Cache Key Index</em>).</p>
+<h2 id="envelope-types-envelopepy">Envelope types (<code>envelope.py</code>)</h2>
+<table>
+<thead>
+<tr>
+<th>Class</th>
+<th>Fields</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>CacheEnvelope</code></td>
+<td><code>version: int</code>, <code>ts: str</code> (ISO), <code>payload: dict</code></td>
+</tr>
+<tr>
+<td><code>Command</code></td>
+<td><code>type: str</code>, <code>args: dict = {}</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="domain-contracts">Domain contracts</h2>
+<table>
+<thead>
+<tr>
+<th>Class</th>
+<th>File</th>
+<th>Cache key</th>
+<th>Key fields</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ScanResult</code></td>
+<td><code>options.py</code></td>
+<td><code>cache:options:scan</code></td>
+<td><code>signals_0dte[]</code>, <code>signals_swing[]</code>, <code>vix_term_structure{}</code>, <code>timestamp</code>, <code>errors[]</code>, <code>warnings[]</code></td>
+</tr>
+<tr>
+<td><code>TradeAnalysis</code></td>
+<td><code>trade.py</code></td>
+<td><code>cache:trade:analysis</code></td>
+<td><code>symbol</code>, <code>description</code>, <code>price</code>, <code>volume</code>, <code>bias</code>, <code>ema_alignment{}</code>, <code>momentum{}</code>, <code>volume_profile{}</code>, <code>sector{}</code>, <code>position_verdict{}</code>, <code>investor_verdict{}</code>, <code>fundamentals{}</code>, <code>fundamentals_available</code>, <code>timestamp</code>, <code>errors[]</code></td>
+</tr>
+<tr>
+<td><code>PortfolioModel</code></td>
+<td><code>portfolio.py</code></td>
+<td><code>cache:portfolio:positions</code></td>
+<td><code>holdings_rows[]</code>, <code>sector_rows[]</code>, <code>performance_rows[]</code>, <code>suggestions{}</code>, <code>proxy_up</code>, <code>streaming</code>, <code>errors[]</code>, <code>timestamp</code></td>
+</tr>
+<tr>
+<td><code>ApprovalState</code></td>
+<td><code>driver.py</code></td>
+<td><code>cache:driver:approvals</code></td>
+<td><code>date</code>, <code>grade</code>, <code>grade_reasons[]</code>, <code>conditions{}</code>, <code>pnl_today</code>, <code>pnl_week</code>, <code>proposed_trades[]</code>, <code>status</code>, <code>decision</code>, <code>results[]</code>, <code>reasons[]</code>, <code>error</code>, <code>timestamp</code></td>
+</tr>
+<tr>
+<td><code>PerfReport</code></td>
+<td><code>driver.py</code></td>
+<td><code>cache:driver:performance</code></td>
+<td><code>summary{}</code>, <code>trades[]</code>, <code>timestamp</code></td>
+</tr>
+<tr>
+<td><code>CompositeSnapshot</code></td>
+<td><code>sentiment.py</code></td>
+<td>(validation only)</td>
+<td><code>total: float</code>, <code>bias: str</code>, <code>components{}</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h1 id="per-service-reference">Per-Service Reference</h1>
+<p>Each service is an async FastAPI app built by <code>services/_scaffold.py:make_app</code>,
+which provides the lifespan, the command-consumer loop, and a <code>GET /health</code>
+endpoint returning <code>{"domain": ..., "up": true}</code>.</p>
+<h2 id="sentiment-service-8210">Sentiment service — :8210</h2>
+<p><strong>Entry:</strong> <code>services/sentiment_svc/app.py</code>. <strong>Scheduler:</strong> full refresh at startup,
+composite-only every 120 s, trend recompute gated to 15 min, rotation at startup.</p>
+<p><strong>Commands (<code>cmd:sentiment</code>):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Args</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>refresh</code></td>
+<td>—</td>
+<td>Full refresh: load snapshots + live data, recompute trend if due; publish composite, history, sectors.</td>
+</tr>
+<tr>
+<td><code>refresh_rotation</code></td>
+<td>—</td>
+<td>Rotation assessment + S&amp;P weights + risk threshold.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Published views:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Cache key</th>
+<th>Event</th>
+<th>Payload</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cache:sentiment:composite</code></td>
+<td><code>events:sentiment:composite</code></td>
+<td><code>{live, composite_at, proxy_up, derived}</code></td>
+</tr>
+<tr>
+<td><code>cache:sentiment:history</code></td>
+<td>(none)</td>
+<td><code>{snaps[], spy[]}</code></td>
+</tr>
+<tr>
+<td><code>cache:sentiment:sectors</code></td>
+<td><code>events:sentiment:sectors</code></td>
+<td><code>{sector, industries, sector_at, summary}</code></td>
+</tr>
+<tr>
+<td><code>cache:sentiment:rotation</code></td>
+<td><code>events:sentiment:rotation</code></td>
+<td><code>{assessment, weights, risk_threshold, error}</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="options-service-8211">Options service — :8211</h2>
+<p><strong>Entry:</strong> <code>services/options_svc/app.py</code>. <strong>Scheduler:</strong> auto-scan (15-min slots,
+08:00–15:15 CT), GEX collection (2-min slots, 08:30–15:20 CT), paper auto-manage
+(5 min in market hours), header tick (each 30 s, skip-unchanged).</p>
+<p><strong>Commands (<code>cmd:options</code>):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Args</th>
+<th>Published view</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rescan</code></td>
+<td>—</td>
+<td><code>cache:options:scan</code></td>
+</tr>
+<tr>
+<td><code>swing_scan</code></td>
+<td><code>{symbol, dte_min, dte_max, put_d_min, put_d_max, call_d_min, call_d_max, min_cr_fraction}</code></td>
+<td><code>cache:options:swing</code></td>
+</tr>
+<tr>
+<td><code>refresh_paper</code></td>
+<td>—</td>
+<td><code>cache:options:paper_account</code></td>
+</tr>
+<tr>
+<td><code>paper_entry</code></td>
+<td>—</td>
+<td><code>cache:options:paper_account</code></td>
+</tr>
+<tr>
+<td><code>paper_manage</code></td>
+<td>—</td>
+<td><code>cache:options:paper_account</code></td>
+</tr>
+<tr>
+<td><code>paper_reset</code></td>
+<td><code>{starting_balance}</code></td>
+<td><code>cache:options:paper_account</code></td>
+</tr>
+<tr>
+<td><code>paper_create</code></td>
+<td><code>{signal, qty}</code></td>
+<td><code>cache:options:paper_trades</code></td>
+</tr>
+<tr>
+<td><code>paper_reload</code></td>
+<td>—</td>
+<td><code>cache:options:paper_trades</code></td>
+</tr>
+<tr>
+<td><code>paper_close</code></td>
+<td><code>{trade_id, debit}</code></td>
+<td><code>cache:options:paper_trades</code></td>
+</tr>
+<tr>
+<td><code>paper_delete</code></td>
+<td><code>{trade_id}</code></td>
+<td><code>cache:options:paper_trades</code></td>
+</tr>
+<tr>
+<td><code>paper_delete_closed</code></td>
+<td>—</td>
+<td><code>cache:options:paper_trades</code></td>
+</tr>
+<tr>
+<td><code>paper_analyze</code></td>
+<td><code>{trade_id}</code></td>
+<td><code>cache:options:paper_analyze</code></td>
+</tr>
+<tr>
+<td><code>captured_reload</code></td>
+<td>—</td>
+<td><code>cache:options:captured</code></td>
+</tr>
+<tr>
+<td><code>captured_reprice</code></td>
+<td>—</td>
+<td><code>cache:options:captured</code> + <code>cache:options:captured_flags</code></td>
+</tr>
+<tr>
+<td><code>captured_close</code></td>
+<td><code>{signal_id, exit_val, reason}</code></td>
+<td><code>cache:options:captured</code></td>
+</tr>
+<tr>
+<td><code>gamma_refresh</code></td>
+<td><code>{symbol}</code></td>
+<td><code>cache:options:gamma</code></td>
+</tr>
+<tr>
+<td><code>gamma_explain</code></td>
+<td><code>{symbol}</code></td>
+<td><code>cache:options:gamma_explain</code></td>
+</tr>
+<tr>
+<td><code>gamma_analyze</code></td>
+<td>—</td>
+<td><code>cache:options:gamma_analyze</code></td>
+</tr>
+<tr>
+<td><code>sim_fetch</code></td>
+<td><code>{symbol}</code></td>
+<td><code>cache:options:sim_meta</code></td>
+</tr>
+<tr>
+<td><code>sim_run</code></td>
+<td><code>{symbol, expiry, kind, strike, direction, dt, mult}</code></td>
+<td><code>cache:options:sim_result</code></td>
+</tr>
+<tr>
+<td><code>sim_replay</code></td>
+<td><code>{symbol, expiry, kind, strike, direction, lookback}</code></td>
+<td><code>cache:options:sim_replay</code></td>
+</tr>
+<tr>
+<td><code>calc_load</code></td>
+<td><code>{symbol}</code></td>
+<td><code>cache:options:calc_chain</code></td>
+</tr>
+<tr>
+<td><code>calc_compute</code></td>
+<td><code>{...calc params}</code></td>
+<td><code>cache:options:calc_result</code></td>
+</tr>
+<tr>
+<td><code>expected_move</code></td>
+<td><code>{symbol, expiry, legs[], lookback}</code></td>
+<td><code>cache:options:expected_move</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Scheduled (not command-driven):</strong> <code>rescan</code> (auto-scan window), <code>refresh_header</code>
+(per tick, skip-unchanged), <code>collect_gex_snapshots</code> + <code>publish_gex_status</code> +
+<code>publish_gamma_symbols</code> (GEX window), <code>run_manage_and_refresh</code> (paper-manage window).</p>
+<h2 id="portfolio-service-8212">Portfolio service — :8212</h2>
+<p><strong>Entry:</strong> <code>services/portfolio_svc/app.py</code>. <strong>Scheduler:</strong> initial rebuild + SSE
+quote-stream worker; throttled publish ≤ every 2 s while ticks pending; full rebuild
+every 10 min or on a queued refresh.</p>
+<p><strong>Commands (<code>cmd:portfolio</code>):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Args</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>refresh</code></td>
+<td>—</td>
+<td>Sets <code>state.rebuild_requested</code>; the scheduler performs the rebuild and restarts the stream.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Published view:</strong> <code>cache:portfolio:positions</code> / <code>events:portfolio:positions</code> →
+the <code>PortfolioModel</code> contract.</p>
+<h2 id="trade-service-8213">Trade service — :8213</h2>
+<p><strong>Entry:</strong> <code>services/trade_svc/app.py</code>. <strong>Scheduler:</strong> none (on-demand only).</p>
+<p><strong>Commands (<code>cmd:trade</code>):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Args</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>analyze</code></td>
+<td><code>{symbol}</code></td>
+<td>MTF technical + fundamental analysis → <code>cache:trade:analysis</code>.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="driver-service-8214">Driver service — :8214</h2>
+<p><strong>Entry:</strong> <code>services/driver_svc/app.py</code>. <strong>Scheduler:</strong> morning pipeline once/day at
+09:28 ET; perf refresh ≈ every 5 min. The scheduler <strong>never executes orders</strong> — only
+an explicit <code>approve</code> does.</p>
+<p><strong>Commands (<code>cmd:driver</code>):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Args</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>run</code></td>
+<td>—</td>
+<td>Run the morning pipeline → cache a <em>pending</em> <code>ApprovalState</code>.</td>
+</tr>
+<tr>
+<td><code>approve</code></td>
+<td>—</td>
+<td>If still pending, execute the proposed trades (simulated, <code>PAPER_TRADE=True</code>), re-cache as <code>approved</code> with results.</td>
+</tr>
+<tr>
+<td><code>skip</code></td>
+<td>—</td>
+<td>Mark the cached approval <code>skipped</code>.</td>
+</tr>
+<tr>
+<td><code>perf</code></td>
+<td>—</td>
+<td>Recompute the <code>PerfReport</code> → <code>cache:driver:performance</code>.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h1 id="schwab-proxy">Schwab Proxy</h1>
+<p><strong>Entry:</strong> <code>schwab-proxy/schwab_proxy.py</code>, port <strong>8100</strong>. Central token manager +
+HTTP gateway. GET market-data and Trader calls are rate-limited (~200 ms spacing)
+and retried up to 3× with backoff (0.25 / 0.5 / 1.0 s); order POSTs are <strong>single
+attempt</strong> (never duplicate a submitted order).</p>
+<h2 id="health-auth">Health &amp; auth</h2>
+<table>
+<thead>
+<tr>
+<th>Endpoint</th>
+<th>Method</th>
+<th>Returns</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/health</code></td>
+<td>GET</td>
+<td><code>{status, has_token, token_expired, refresh_token_expired, token_file, timestamp}</code></td>
+</tr>
+<tr>
+<td><code>/auth</code></td>
+<td>GET</td>
+<td>HTML OAuth login page</td>
+</tr>
+<tr>
+<td><code>/auth/callback</code></td>
+<td>GET</td>
+<td>Exchanges the OAuth <code>code</code>/<code>url</code> for tokens</td>
+</tr>
+</tbody>
+</table>
+<h2 id="market-data">Market data</h2>
+<table>
+<thead>
+<tr>
+<th>Endpoint</th>
+<th>Params</th>
+<th>Returns</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/quote</code></td>
+<td><code>symbol</code></td>
+<td>Single quote</td>
+</tr>
+<tr>
+<td><code>/quotes</code></td>
+<td><code>symbols</code> (comma-sep)</td>
+<td>Quotes array</td>
+</tr>
+<tr>
+<td><code>/chains</code></td>
+<td><code>symbol, contractType, range, fromDate?, toDate?, strikeCount?</code></td>
+<td>Options chain</td>
+</tr>
+<tr>
+<td><code>/pricehistory</code></td>
+<td><code>symbol, periodType, period, frequencyType, frequency, needExtendedHoursData</code></td>
+<td>Price bars</td>
+</tr>
+<tr>
+<td><code>/instruments</code></td>
+<td><code>symbol, projection</code> (e.g. <code>fundamental</code>)</td>
+<td><code>{instruments:[{fundamental, symbol, description, ...}]}</code></td>
+</tr>
+<tr>
+<td><code>/passthrough</code></td>
+<td><code>endpoint, params</code></td>
+<td>Generic marketdata fallback</td>
+</tr>
+</tbody>
+</table>
+<p>All return <code>{status_code, data, error}</code>.</p>
+<h2 id="trader-api">Trader API</h2>
+<table>
+<thead>
+<tr>
+<th>Endpoint</th>
+<th>Method</th>
+<th>Returns</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/accounts</code></td>
+<td>GET</td>
+<td><code>[{hashValue, accountNumber, ...}]</code></td>
+</tr>
+<tr>
+<td><code>/positions/{account_hash}</code></td>
+<td>GET</td>
+<td>Normalized positions (net qty; options carry underlying)</td>
+</tr>
+<tr>
+<td><code>/transactions/{account_hash}</code></td>
+<td>GET (<code>start_date, end_date</code>)</td>
+<td>Normalized TRADE transactions</td>
+</tr>
+<tr>
+<td><code>/orders/{account_hash}</code></td>
+<td>POST (Schwab order body)</td>
+<td><code>{status: "submitted", status_code, data}</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="trade-stream-tracker">Trade-stream tracker</h2>
+<p>Daemon threads register paper trades and stream option ticks (degrade gracefully if
+streaming fails).</p>
+<table>
+<thead>
+<tr>
+<th>Endpoint</th>
+<th>Method</th>
+<th>Body</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/track</code></td>
+<td>POST</td>
+<td><code>{trade_id, symbol, strategy, expiration, quantity, entry_credit, short_strike, long_strike, call_short, call_long, target_mid, stop_mid}</code></td>
+</tr>
+<tr>
+<td><code>/untrack</code></td>
+<td>POST</td>
+<td><code>{trade_id}</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h1 id="cache-key-index">Cache Key Index</h1>
+<p>Every Redis key by domain. Views without a strict contract are validated
+defensively in compute.</p>
+<p><strong>Sentiment:</strong></p>
+<pre><code>cache:sentiment:composite      events:sentiment:composite
+cache:sentiment:history        (no event)
+cache:sentiment:sectors        events:sentiment:sectors
+cache:sentiment:rotation       events:sentiment:rotation
+cmd:sentiment
+</code></pre>
+<p><strong>Options:</strong></p>
+<pre><code>cache:options:scan             events:options:scan          (ScanResult contract)
+cache:options:header           events:options:header
+cache:options:swing            events:options:swing
+cache:options:paper_account    events:options:paper_account
+cache:options:paper_trades     events:options:paper_trades
+cache:options:paper_analyze    events:options:paper_analyze
+cache:options:captured         events:options:captured
+cache:options:captured_flags   events:options:captured_flags
+cache:options:gamma            events:options:gamma
+cache:options:gamma_explain    events:options:gamma_explain
+cache:options:gamma_analyze    events:options:gamma_analyze
+cache:options:gamma_symbols    events:options:gamma_symbols
+cache:options:sim_meta         events:options:sim_meta
+cache:options:sim_result       events:options:sim_result
+cache:options:sim_replay       events:options:sim_replay
+cache:options:calc_chain       events:options:calc_chain
+cache:options:calc_result      events:options:calc_result
+cache:options:gex_status       events:options:gex_status
+cache:options:expected_move    events:options:expected_move
+cmd:options
+</code></pre>
+<p><strong>Trade / Portfolio / Driver:</strong></p>
+<pre><code>cache:trade:analysis           events:trade:analysis          (TradeAnalysis)
+cache:portfolio:positions      events:portfolio:positions     (PortfolioModel)
+cache:driver:approvals         events:driver:approvals        (ApprovalState)
+cache:driver:performance       events:driver:performance      (PerfReport)
+cmd:trade   cmd:portfolio   cmd:driver
+</code></pre>
+<hr />
+<h1 id="service-scaffold">Service Scaffold</h1>
+<p><strong>File:</strong> <code>services/_scaffold.py</code>. Each service is one call:</p>
+<pre><code class="language-python">app = make_app(
+    &quot;trade&quot;,
+    scheduler=scheduler.loop,              # optional async def loop(bus)
+    command_handler=handlers.handle_command,  # optional callable(bus, command)
+)
+</code></pre>
+<p>The scaffold provides:</p>
+<ol>
+<li><strong>Lifespan</strong> — creates the <code>Bus</code> (Redis, or <code>fakeredis</code> under pytest), spawns the
+   scheduler task and the command-consumer loop, and cancels both on shutdown.</li>
+<li><strong>Command consumer</strong> — <code>consume_commands("cmd:{domain}", group="{domain}-svc",
+   consumer="c1")</code>, blocking 50 ms per poll, up to 10 messages per batch; dispatches
+   to the handler via an executor; acks after the handler returns; swallows and logs
+   handler exceptions.</li>
+<li><strong>Health</strong> — <code>GET /health</code> → <code>{"domain": ..., "up": true}</code>.</li>
+</ol>
+<blockquote>
+<p><strong>Process isolation matters.</strong> Several app folders expose same-named top-level
+modules (<code>config</code>, <code>scoring</code>, <code>notifier</code>, <code>src</code>). Running two service test suites
+in one process re-triggers those collisions — run service suites <strong>one folder at a
+time</strong>.</p>
+</blockquote>
+<hr />
+<h1 id="end-to-end-flow-example">End-to-End Flow Example</h1>
+<p><strong>User clicks "Analyze SPY" on the Trade page:</strong></p>
+<ol>
+<li>GUI: <code>bus.enqueue_command("cmd:trade", {"type": "analyze", "args": {"symbol": "SPY"}})</code>.</li>
+<li>The command lands in Redis Stream <code>cmd:trade</code>; the consumer group <code>trade-svc</code>
+   is auto-created on first poll.</li>
+<li>The trade service consumer reads it and dispatches to
+   <code>handlers.handle_command(bus, command)</code>.</li>
+<li>The handler runs <code>compute.analyze("SPY")</code> → a result dict (price, bias, momentum,
+   verdicts, fundamentals, errors).</li>
+<li>The dict is projected onto the <code>TradeAnalysis</code> contract (defaults filled, types
+   validated).</li>
+<li><code>bus.cache_set("cache:trade:analysis", payload, event="events:trade:analysis")</code>
+   increments <code>cache:trade:analysis:ver</code>, stores the envelope, publishes the version.</li>
+<li>The message is acked.</li>
+<li>The GUI's 1 s version-poll sees the new version, reads <code>cache:trade:analysis</code>, and
+   repaints the verdict cards.</li>
+</ol>
+<p>A developer can drive this entire path headlessly — bypassing the browser — with:</p>
+<pre><code class="language-python">from shared.bus import Bus
+bus = Bus()
+bus.enqueue_command(&quot;cmd:trade&quot;, {&quot;type&quot;: &quot;analyze&quot;, &quot;args&quot;: {&quot;symbol&quot;: &quot;SPY&quot;}})
+# ...wait briefly...
+env = bus.cache_get(&quot;cache:trade:analysis&quot;)
+print(env.payload)
+</code></pre>
+<hr />
+<h1 id="ports-paths">Ports &amp; Paths</h1>
+<p><code>repo_paths.py</code> (reading <code>config/ports.toml</code>) is the single source of truth — never
+hard-code ports or <code>D:\</code> paths.</p>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Port</th>
+<th><code>repo_paths</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>schwab-proxy</td>
+<td>8100</td>
+<td><code>PROXY_PORT</code> / <code>PROXY_URL</code></td>
+</tr>
+<tr>
+<td>Memurai (Redis)</td>
+<td>6379</td>
+<td><code>MEMURAI_PORT</code> / <code>MEMURAI_URL</code></td>
+</tr>
+<tr>
+<td>sentiment_svc</td>
+<td>8210</td>
+<td><code>SERVICE_PORTS["sentiment"]</code> / <code>SERVICE_URLS["sentiment"]</code></td>
+</tr>
+<tr>
+<td>options_svc</td>
+<td>8211</td>
+<td><code>SERVICE_PORTS["options"]</code></td>
+</tr>
+<tr>
+<td>portfolio_svc</td>
+<td>8212</td>
+<td><code>SERVICE_PORTS["portfolio"]</code></td>
+</tr>
+<tr>
+<td>trade_svc</td>
+<td>8213</td>
+<td><code>SERVICE_PORTS["trade"]</code></td>
+</tr>
+<tr>
+<td>driver_svc</td>
+<td>8214</td>
+<td><code>SERVICE_PORTS["driver"]</code></td>
+</tr>
+<tr>
+<td>webgui (NiceGUI)</td>
+<td>8500</td>
+<td><code>NICEGUI_PORT</code> / <code>NICEGUI_URL</code></td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>The <code>dashboard_frontend = 5173</code> entry in <code>config/ports.toml</code> belongs to the retired
+React frontend and is <strong>not</strong> used by this app. The web GUI is on <strong>8500</strong>.</p>
+</blockquote>
+<p><strong>Key paths:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Path</th>
+<th>Holds</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>shared/appsettings.json</code></td>
+<td>Schwab API keys</td>
+<td>gitignored (template <code>*.example.json</code>)</td>
+</tr>
+<tr>
+<td><code>shared/tokens.json</code></td>
+<td>Schwab OAuth tokens</td>
+<td>gitignored</td>
+</tr>
+<tr>
+<td><code>schwab-proxy/proxy_tokens.json</code></td>
+<td>Proxy runtime tokens</td>
+<td>gitignored</td>
+</tr>
+<tr>
+<td><code>shared/sentiment_bridge.json</code></td>
+<td>Sentiment bridge (legacy shim)</td>
+<td>gitignored</td>
+</tr>
+<tr>
+<td><code>repo_paths.REPO_ROOT</code></td>
+<td>Repo root</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+</div>
+</body>
+</html>

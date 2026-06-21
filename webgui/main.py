@@ -27,6 +27,7 @@ from zoneinfo import ZoneInfo as _ZoneInfo  # noqa: E402
 import alerts  # noqa: E402
 import app_settings  # noqa: E402
 import bus_client  # noqa: E402
+import page_help  # noqa: E402
 import proxy  # noqa: E402
 from repo_paths import NICEGUI_PORT  # noqa: E402
 
@@ -100,6 +101,23 @@ def _serve_eod_file(date: str, which: str = "summary"):
     return HTMLResponse(path.read_text(encoding="utf-8"))
 
 
+@app.get("/manuals/file")
+def _serve_manual(name: str):
+    """Serve a generated online manual (self-contained HTML) raw, so its own
+    embedded <style> applies — NiceGUI's ``ui.html`` would strip it. ``name`` is a
+    whitelist key into ``pages.manuals.MANUALS`` (no path traversal)."""
+    from pages import manuals
+    entry = manuals.MANUALS.get(name)
+    if entry is None:
+        return HTMLResponse("<h1>Unknown manual</h1>", status_code=404)
+    path = _REPO_ROOT / "docs" / "manuals" / entry["file"]
+    if not path.is_file():
+        return HTMLResponse(
+            "<h1>Manual not built yet — run docs/manuals/build_docs.py.</h1>",
+            status_code=404)
+    return HTMLResponse(path.read_text(encoding="utf-8"))
+
+
 # Options scanning + auto-scan now live in services/options_svc (Tier 2): the
 # service owns the engine and the 08:00–15:15 CT schedule, writes results to the
 # Redis bus, and the GUI reads the cache + enqueues rescan commands. Sentiment
@@ -132,11 +150,17 @@ FLAT_NAV = [
 ]
 
 # "More" is an expandable group for reports / diagnostics / config. (route, label, icon)
+# Settings is itself a nested sub-group (its children render indented beneath it).
 MORE_CHILDREN = [
     ("/eod", "EOD Report", "summarize"),
     ("/status", "System Status", "monitor_heart"),
     ("/settings", "Settings", "settings"),
     ("/terminate", "Terminate", "power_settings_new"),
+]
+
+# Sub-menu items nested under the Settings entry. (route, label, icon)
+SETTINGS_CHILDREN = [
+    ("/manuals", "User Manuals", "menu_book"),
 ]
 
 # Persisted left-nav expansion state (single-user); None/absent = use active-route default.
@@ -183,6 +207,18 @@ _NAV_CSS = """
 .nav-drawer .nav-badge { margin-left: auto; }
 .nav-title { font-weight: 700; letter-spacing: .04em; font-size: .8rem;
              padding: 4px 12px 10px; opacity: .55; }
+.nav-drawer .nav-subgroup .q-expansion-item__content { padding-left: 14px; }
+/* Page-help "?" — tucked into the bottom-right corner of the header banner. */
+.help-fab { position: absolute; right: 6px; bottom: 2px; z-index: 2300; }
+.help-fab .help-btn { font-size: 11px; min-height: 0; min-width: 0; }
+.help-fab .help-btn .q-btn__content { padding: 3px; }
+.q-tooltip.help-tip { background: #1e2735; color: #e7edf5; font-size: .82rem;
+    line-height: 1.5; padding: 12px 16px; border: 1px solid rgba(255,255,255,.14);
+    border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,.45); }
+.q-tooltip.help-tip strong { color: #fff; }
+.q-tooltip.help-tip p { margin: .4em 0; }
+.q-tooltip.help-tip ul { padding-left: 1.15em; margin: .35em 0; }
+.q-tooltip.help-tip li { margin: .2em 0; }
 """
 
 
@@ -256,6 +292,26 @@ def _nav_link(path: str, label: str, icon: str, active: str) -> None:
             _badge_refs[path] = badge
 
 
+def _settings_group(active: str) -> None:
+    """Render Settings as a nested sub-group: the header is the real /settings nav
+    link (native navigation), and only the caret toggles the sub-menu, beneath
+    which SETTINGS_CHILDREN (e.g. User Manuals) render indented.
+
+    ``expand-icon-toggle`` confines the toggle to the caret so a header click
+    follows the link instead of expanding.
+    """
+    settings_active = active == "/settings" or active in {p for p, _, _ in SETTINGS_CHILDREN}
+    exp = ui.expansion(
+        value=_NAV_OPEN.get("Settings", settings_active)
+    ).classes("w-full nav-subgroup").props("expand-icon-toggle dense")
+    exp.on_value_change(lambda e: _NAV_OPEN.__setitem__("Settings", e.value))
+    with exp.add_slot("header"):
+        _nav_link("/settings", "Settings", "settings", active)
+    with exp:
+        for path, label, icon in SETTINGS_CHILDREN:
+            _nav_link(path, label, icon, active)
+
+
 @contextmanager
 def _layout(active: str, title: str):
     """Render shared chrome (header, nav drawer, proxy banner).
@@ -289,20 +345,36 @@ def _layout(active: str, title: str):
                 _nav_link(path, label, icon, active)
         for path, label, icon in FLAT_NAV:
             _nav_link(path, label, icon, active)
-        more_active = active in {p for p, _, _ in MORE_CHILDREN}
+        more_paths = {p for p, _, _ in MORE_CHILDREN} | {p for p, _, _ in SETTINGS_CHILDREN}
+        more_active = active in more_paths
         more_exp = ui.expansion(
             "More", icon="more_horiz", value=_NAV_OPEN.get("More", more_active)
         ).classes("w-full")
         more_exp.on_value_change(lambda e: _NAV_OPEN.__setitem__("More", e.value))
         with more_exp:
             for path, label, icon in MORE_CHILDREN:
-                _nav_link(path, label, icon, active)
+                if path == "/settings":
+                    _settings_group(active)
+                else:
+                    _nav_link(path, label, icon, active)
 
     with ui.header().classes("items-center justify-between"):
         with ui.row().classes("items-center gap-2"):
             ui.button(icon="menu", on_click=drawer.toggle).props("flat round color=white")
             ui.label("Schwab Trading").classes("text-lg font-bold")
         ui.label(title).classes("text-base opacity-80")
+
+        # Small "?" tucked into the bottom-right corner of the header banner. Hover
+        # for a plain-language "idiot's guide" to THIS page (keyed by route).
+        with ui.element("div").classes("help-fab"):
+            with ui.button(icon="help").props("round size=xs color=blue").classes("help-btn"):
+                # Quote the multi-word anchor/self values — NiceGUI .props() splits on
+                # spaces, so unquoted "bottom right" would be mis-parsed. This pins the
+                # popup's top-right corner just under the "?" (extends down-left).
+                with ui.tooltip().props(
+                    'max-width=480px anchor="bottom right" self="top right"'
+                ).classes("help-tip"):
+                    ui.markdown(page_help.help_md(active)).classes("text-left")
 
     # Hidden audio element used by play_alert (one per page/client).
     ui.html('<audio id="alert-audio" preload="auto"></audio>')
@@ -467,6 +539,13 @@ def settings_page() -> None:
     with _layout("/settings", "Settings"):
         from pages import settings
         settings.render()
+
+
+@ui.page("/manuals")
+def manuals_page() -> None:
+    with _layout("/manuals", "User Manuals"):
+        from pages import manuals
+        manuals.render()
 
 
 @ui.page("/terminate")
