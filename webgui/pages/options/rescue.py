@@ -246,7 +246,277 @@ def summary_line(advisory):
     return f"{prefix}{head} — {state} · heat {heat_s} · {n} rescue {opt_word}"
 
 
-def render():  # pragma: no cover - wired in Task 7.2
-    """Render the Rescue page (NiceGUI). Implemented in Task 7.2."""
-    from nicegui import ui  # noqa: F401  (lazy import — keeps builders app-free)
-    ui.label("Rescue page — coming in Task 7.2")
+# ── render-only helpers ──────────────────────────────────────────────────────
+def at_risk_columns():
+    """Column defs for the at-risk ui.table."""
+    return [
+        {"name": "symbol", "label": "Symbol", "field": "symbol", "align": "left"},
+        {"name": "strategy", "label": "Strategy", "field": "strategy", "align": "left"},
+        {"name": "strikes", "label": "Strikes", "field": "strikes", "align": "left"},
+        {"name": "dte", "label": "DTE", "field": "dte", "align": "right"},
+        {"name": "underlying_vs_short", "label": "Under vs Short",
+         "field": "underlying_vs_short", "align": "left"},
+        {"name": "short_delta", "label": "Δ short", "field": "short_delta", "align": "right"},
+        {"name": "pnl", "label": "P&L", "field": "pnl", "align": "right"},
+        {"name": "heat", "label": "Heat", "field": "heat", "align": "right"},
+        {"name": "state", "label": "State", "field": "state", "align": "left"},
+    ]
+
+
+def _table_rows(rows):
+    """Add an ``_heat_color`` field (consumed by the body-cell-heat slot) + an
+    ``id``-keyed row each ui.table row needs."""
+    out = []
+    for r in rows:
+        out.append({**r, "_heat_color": heat_color(r.get("heat"))})
+    return out
+
+
+def render():
+    """Render the Rescue page (NiceGUI).
+
+    Tier-3 reader: version-polls ``options:paper_account`` + ``options:captured``
+    for the at-risk board, enqueues a ``rescue`` command on row-click, and
+    version-polls the per-id ``options:rescue:<id>`` advisory view to paint the
+    ranked candidate cards. Mirrors ``simulator.py`` / ``paper.py`` idioms
+    (``bus_client.request`` / ``read`` / ``read_version`` + ``@guard``)."""
+    import bus_client
+    from nicegui import ui
+
+    from pages.ui_guard import guard
+
+    # Page state (local closure, not module globals — built per request).
+    state: dict = {
+        "paper": None, "paper_ver": None,
+        "captured": None, "captured_ver": None,
+        "selected_id": None, "selected_source": None,
+        "advisory": None, "advisory_ver": None,
+        "rows_by_id": {},          # id -> raw display row (for source/symbol)
+    }
+
+    ui.label("Rescue").classes("text-h5")
+
+    # ── waiting-for-service placeholder ──────────────────────────────────────
+    waiting = ui.label("Waiting for options service…").classes("opacity-70")
+
+    with ui.column().classes("w-full gap-4") as body:
+        with ui.card().classes("w-full"):
+            ui.label("At-risk positions").classes("text-subtitle1")
+            at_risk_tbl = ui.table(columns=at_risk_columns(), rows=[],
+                                   row_key="id").classes("w-full")
+            # Color the heat cell by zone (same idiom as scanner's composite_score).
+            at_risk_tbl.add_slot("body-cell-heat", r"""
+              <q-td :props="props">
+                <q-badge :style="`background:${props.row._heat_color};color:#111`"
+                         :label="props.value ?? '—'"/>
+              </q-td>
+            """)
+            at_risk_empty = ui.label("No tested or critical positions right now.") \
+                .classes("opacity-70")
+
+        with ui.card().classes("w-full"):
+            with ui.row().classes("items-center gap-3 w-full"):
+                advisory_head = ui.label("Select an at-risk position to see rescue options.") \
+                    .classes("text-subtitle1")
+                advisory_spinner = ui.spinner(size="sm")
+                advisory_spinner.set_visibility(False)
+            # Persistent chart present at first render (ESM import-map gotcha):
+            # a minimal payoff placeholder kept around so any later in-place update
+            # works. We keep it lightweight (rationale: don't over-invest).
+            payoff_chart = ui.highchart(_payoff_figure(None)).classes("w-full")
+            payoff_chart.set_visibility(False)
+            cards_col = ui.column().classes("w-full gap-3")
+
+    # ── at-risk board ────────────────────────────────────────────────────────
+    def _render_at_risk():
+        rows = at_risk_rows(state["paper"], state["captured"])
+        state["rows_by_id"] = {r["id"]: r for r in rows}
+        at_risk_tbl.rows = _table_rows(rows)
+        at_risk_tbl.update()
+        at_risk_empty.set_visibility(not rows)
+
+    @guard
+    def _select(event):
+        row = (event.args[1] if isinstance(event.args, list) and len(event.args) > 1
+               else event.args)
+        if not isinstance(row, dict):
+            return
+        rid = row.get("id")
+        src = state["rows_by_id"].get(rid, {})
+        state["selected_id"] = rid
+        state["selected_source"] = src.get("source")
+        advisory_head.text = f"Computing rescue options for {src.get('symbol') or rid}…"
+        advisory_spinner.set_visibility(True)
+        cards_col.clear()
+        payoff_chart.set_visibility(False)
+        # Enqueue the rescue command — args shape matches handlers'
+        # command.args["position_id"].
+        bus_client.request("options", {"type": "rescue",
+                                       "args": {"position_id": rid}})
+
+    at_risk_tbl.on("rowClick", _select)
+
+    # ── advisory + candidate cards ───────────────────────────────────────────
+    def _confirm_apply(candidate):
+        @guard
+        def _do():
+            with ui.dialog() as dlg, ui.card():
+                ui.label(f"Apply rescue: {candidate.get('title') or 'this action'}?")
+                ui.label("This dispatches a (simulated) paper adjustment.") \
+                    .classes("opacity-70 text-sm")
+                with ui.row().classes("justify-end gap-2 w-full"):
+                    ui.button("Cancel", on_click=dlg.close).props("flat")
+
+                    @guard
+                    def _go():
+                        dlg.close()
+                        adv = state["advisory"] or {}
+                        cand = candidate.get("_raw") or {}
+                        bus_client.request("options", {"type": "rescue_apply", "args": {
+                            "position_id": adv.get("position_id") or state["selected_id"],
+                            "candidate": cand}})
+                        ui.notify("Applying rescue…")
+                        advisory_spinner.set_visibility(True)
+
+                    ui.button("Apply", on_click=_go).props("color=primary")
+            dlg.open()
+        return _do
+
+    def _render_cards():
+        adv = state["advisory"]
+        cards_col.clear()
+        if not adv:
+            advisory_head.text = "Select an at-risk position to see rescue options."
+            payoff_chart.set_visibility(False)
+            return
+        advisory_head.text = summary_line(adv)
+        cards = candidate_card_rows(adv)
+        # candidate_card_rows strips the raw candidate; re-pair so Apply can send it.
+        raw_cands = adv.get("candidates") or []
+        if adv.get("error") or not cards:
+            payoff_chart.set_visibility(False)
+            with cards_col:
+                ui.label(adv.get("error") or "No rescue candidates available.") \
+                    .classes("opacity-70")
+            return
+        for i, card in enumerate(cards):
+            raw = raw_cands[i] if i < len(raw_cands) else {}
+            card = {**card, "_raw": raw}
+            _render_one_card(card)
+
+    def _render_one_card(card):
+        with cards_col:
+            with ui.card().classes("w-full"):
+                with ui.row().classes("items-center gap-3 w-full"):
+                    ui.label(card["title"]).classes("text-subtitle1")
+                    if card.get("score") is not None:
+                        ui.badge(f"score {card['score']:g}"
+                                 if isinstance(card["score"], (int, float))
+                                 else f"score {card['score']}").props("color=primary")
+                    ui.space()
+                    if card["apply_kind"] == "execute":
+                        ui.button("Apply", icon="play_arrow",
+                                  on_click=_confirm_apply(card)).props("color=primary")
+                    else:
+                        ui.label("manual — place yourself").classes("opacity-70 text-sm")
+                # Gross / commission / net cash line (cash_text colors).
+                with ui.row().classes("items-center gap-4"):
+                    for lbl, key in (("Gross", "gross_text"), ("Comm", "commission_text"),
+                                     ("Net", "net_text")):
+                        cell = card[key]
+                        with ui.row().classes("items-center gap-1"):
+                            ui.label(f"{lbl}:").classes("opacity-70 text-sm")
+                            ui.label(cell["text"]).style(f"color:{cell['color']}")
+                if card["metrics"]:
+                    with ui.row().classes("gap-4 flex-wrap"):
+                        for m in card["metrics"]:
+                            ui.label(m).classes("text-sm")
+                if card["legs"]:
+                    with ui.column().classes("gap-0"):
+                        for leg in card["legs"]:
+                            ui.label(leg).classes("text-sm font-mono")
+                for r in card["rationale"]:
+                    ui.label(f"• {r}").classes("text-sm opacity-80")
+                if card["context"]:
+                    with ui.row().classes("gap-1 flex-wrap"):
+                        for c in card["context"]:
+                            ui.badge(str(c)).props("outline color=grey")
+                for w in card["warnings"]:
+                    ui.badge(str(w)).props("color=red")
+
+    def _notify_apply_result(adv):
+        res = (adv or {}).get("apply_result")
+        if not res:
+            return
+        if res.get("ok"):
+            ui.notify("Rescue applied ✓", type="positive")
+        elif res.get("stale"):
+            ui.notify("Prices moved — re-review", type="warning")
+        else:
+            ui.notify(f"Apply failed: {res.get('error') or 'unknown'}", type="negative")
+
+    # ── version-poll repaint (fetch-free) ────────────────────────────────────
+    @guard
+    def _poll_boards():
+        pv = bus_client.read_version("options:paper_account")
+        cv = bus_client.read_version("options:captured")
+        absent = pv is None and cv is None
+        waiting.set_visibility(absent)
+        body.set_visibility(not absent)
+        changed = False
+        if pv != state["paper_ver"]:
+            state["paper_ver"] = pv
+            state["paper"] = bus_client.read("options:paper_account")
+            changed = True
+        if cv != state["captured_ver"]:
+            state["captured_ver"] = cv
+            state["captured"] = bus_client.read("options:captured")
+            changed = True
+        if changed:
+            _render_at_risk()
+
+    @guard
+    def _poll_advisory():
+        rid = state["selected_id"]
+        if rid is None:
+            return
+        ver = bus_client.read_version(f"options:rescue:{rid}")
+        if ver == state["advisory_ver"]:
+            return
+        state["advisory_ver"] = ver
+        adv = bus_client.read(f"options:rescue:{rid}")
+        state["advisory"] = adv or None
+        advisory_spinner.set_visibility(False)
+        _render_cards()
+        _notify_apply_result(adv)
+
+    # Initial paint (graceful-empty when the service is cold).
+    state["paper_ver"] = bus_client.read_version("options:paper_account")
+    state["captured_ver"] = bus_client.read_version("options:captured")
+    state["paper"] = bus_client.read("options:paper_account")
+    state["captured"] = bus_client.read("options:captured")
+    _absent = state["paper_ver"] is None and state["captured_ver"] is None
+    waiting.set_visibility(_absent)
+    body.set_visibility(not _absent)
+    _render_at_risk()
+
+    ui.timer(2.0, _poll_boards)
+    ui.timer(2.0, _poll_advisory)
+
+
+def _payoff_figure(_unused):
+    """Minimal placeholder payoff chart.
+
+    A persistent ``ui.highchart`` must exist at first render so any dynamically
+    added/updated chart on the page resolves the ESM import map (documented
+    gotcha). We don't draw a real payoff curve yet — kept intentionally minimal."""
+    return {
+        "chart": {"type": "line", "backgroundColor": "transparent", "height": 240},
+        "title": {"text": "", "style": {"color": "#e6e6e6"}},
+        "credits": {"enabled": False},
+        "accessibility": {"enabled": False},
+        "legend": {"enabled": False},
+        "xAxis": {"labels": {"style": {"color": "#bdbdbd"}}},
+        "yAxis": {"title": {"text": ""}, "labels": {"style": {"color": "#bdbdbd"}}},
+        "series": [],
+    }
