@@ -83,6 +83,30 @@ def _apply_net_cash(db_path, candidate):
         paper_account_db.realize_pnl(db_path, net)
 
 
+def _reconcile_bp(db_path, old_ml, new_ml):
+    """Keep reserved buying power equal to the position's current max_loss_total.
+
+    At entry the engine reserves max_loss_total; at close it releases the same
+    amount. Any primitive that REWRITES max_loss_total (old_ml -> new_ml) must
+    move reserved BP by the delta so the invariant
+    `buying_power_reserved == max_loss_total` still holds (otherwise the wrong
+    amount is released at close, stranding/over-releasing BP).
+
+    delta = old_ml - new_ml:
+      delta > 0 (max loss shrank)  -> release  (cash += delta, reserved -= delta)
+      delta < 0 (max loss grew)    -> reserve  (cash -= -delta, reserved += -delta)
+    This is SEPARATE from _apply_net_cash (the actual premium flow); both are
+    correct and independent. No-op when max_loss_total is unchanged/unknown.
+    """
+    if old_ml is None or new_ml is None:
+        return
+    delta = round(old_ml - new_ml, 2)
+    if delta > 0:
+        paper_account_db.release_buying_power(db_path, delta)
+    elif delta < 0:
+        paper_account_db.reserve_buying_power(db_path, -delta)
+
+
 def _leg_strike(candidate, side, right):
     """First est_fill_leg matching side+right (e.g. the BUY PUT = new long)."""
     for lg in _legs(candidate):
@@ -183,6 +207,11 @@ def apply_narrow(db_path, position, candidate, broker=None):
     new_ml = candidate.get("new_max_loss")
 
     _apply_net_cash(db_path, candidate)   # narrow is a net debit
+    # Reconcile reserved buying power so it tracks the new max_loss_total.
+    # Narrowing shrinks width so new_ml <= old_ml; the delta releases BP
+    # (cash += delta, reserved -= delta). Done independently of the net-cash
+    # premium flow above. (Same pattern as apply_partial_close.)
+    _reconcile_bp(db_path, position.get("max_loss_total"), new_ml)
     fields = {"last_mark_ts": datetime.now(TZ).isoformat()}
     if new_long is not None:
         fields["long_strike"] = new_long
@@ -229,6 +258,10 @@ def _apply_convert(db_path, position, candidate, action):
         fields["max_loss_total"] = new_ml
 
     _apply_net_cash(db_path, candidate)   # convert collects a net credit
+    # Reconcile reserved BP to the new max_loss_total. Converts usually LOWER
+    # max loss (credit collected) -> release; an edge-case increase reserves
+    # more. Handled both directions by _reconcile_bp. Independent of net_cash.
+    _reconcile_bp(db_path, position.get("max_loss_total"), new_ml)
     paper_account_db.update_position_mark(db_path, position["position_id"], **fields)
     _record(db_path, position, candidate)
     log.info("RESCUE %s pos=%s -> IC max_loss=%s",
