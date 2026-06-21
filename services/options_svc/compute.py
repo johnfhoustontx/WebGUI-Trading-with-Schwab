@@ -1726,6 +1726,19 @@ def compute_rescue(position_id) -> dict:
             underlying = None
             short_delta = pos.get("current_short_delta")
 
+        # 2. gamma context (defensive → None). Fetched BEFORE building the mark
+        # so its live ``spot`` can stand in as the underlying when reprice could
+        # not supply one (off-hours / a momentary quote gap) — the rescue
+        # engine's PRIMARY trigger is underlying-vs-short-strike proximity, so a
+        # missing underlying would silently degrade detection.
+        try:
+            snap = gamma_snapshot(symbol)
+        except Exception:
+            snap = None
+        if not underlying and isinstance(snap, dict) and (snap.get("spot") or 0) > 0:
+            underlying = snap["spot"]
+        gex = _gex_from_snapshot(snap)
+
         dte = _rescue_dte(pos.get("expiration"))
         mark = {
             "underlying": underlying,
@@ -1742,13 +1755,6 @@ def compute_rescue(position_id) -> dict:
             "current_short_delta": short_delta,
             "dte": dte,
         }
-
-        # 2. gamma context (defensive → None).
-        try:
-            snap = gamma_snapshot(symbol)
-        except Exception:
-            snap = None
-        gex = _gex_from_snapshot(snap)
 
         # 3. regime context (defensive → None).
         regime = _rescue_regime()

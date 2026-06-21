@@ -165,6 +165,37 @@ def test_compute_rescue_drops_one_bad_candidate_not_whole_advisory(monkeypatch):
     assert "close" in actions and "roll_down" not in actions
 
 
+def test_compute_rescue_falls_back_to_snapshot_spot(monkeypatch):
+    # reprice supplies NO underlying (off-hours / quote gap) but a valid
+    # value/delta; the gamma snapshot's live ``spot`` must fill it in.
+    _patch_happy(monkeypatch, reprice={
+        "current_value": 2.50, "unrealized_pnl": -300.0,
+        "current_underlying": 0.0, "current_short_delta": 0.35,
+        "error": None,
+    })
+    monkeypatch.setattr(compute, "gamma_snapshot",
+                        lambda symbol: {"spot": 126.0, "views": {
+                            "GEX": {"flip": 130.0, "walls": [120.0, 132.0]}}})
+    result = compute.compute_rescue(7)
+    assert result.get("error") is None
+    assert result["mark"]["underlying"] == 126.0
+
+
+def test_compute_rescue_reprice_underlying_wins_over_snapshot(monkeypatch):
+    # when reprice DOES provide a real underlying it must win over snap spot.
+    _patch_happy(monkeypatch, reprice={
+        "current_value": 2.50, "unrealized_pnl": -300.0,
+        "current_underlying": 501.0, "current_short_delta": 0.35,
+        "error": None,
+    })
+    monkeypatch.setattr(compute, "gamma_snapshot",
+                        lambda symbol: {"spot": 126.0, "views": {
+                            "GEX": {"flip": 130.0, "walls": [120.0, 132.0]}}})
+    result = compute.compute_rescue(7)
+    assert result.get("error") is None
+    assert result["mark"]["underlying"] == 501.0
+
+
 # ── assess_open_positions ────────────────────────────────────────────────────
 
 def test_assess_open_positions_counts(monkeypatch):
