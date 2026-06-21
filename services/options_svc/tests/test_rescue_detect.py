@@ -45,3 +45,27 @@ def test_gex_below_flip_raises_heat():
         _pos(), _mark(current_underlying=501.0, current_short_delta=0.28),
         gex={"flip": 505.0, "put_wall": 490.0}, regime=None)
     assert hot["heat"] > base["heat"]
+
+
+def test_call_side_through_short_strike_is_critical():
+    # CCS: danger is the underlying rising THROUGH the short call.
+    r = rescue.assess_position_risk(
+        _pos(strategy="CCS", short_strike=500.0, long_strike=505.0),
+        _mark(current_underlying=502.0, current_short_delta=0.50,
+              unrealized_pnl=-250.0, dte=10),
+        gex=None, regime=None)
+    assert r["state"] == "critical"
+    assert r["heat"] >= 75
+
+
+def test_short_resting_on_put_wall_lowers_heat():
+    # Same setup, but the short strike sits on the put wall -> bounce more likely.
+    near = rescue.assess_position_risk(
+        _pos(short_strike=500.0),
+        _mark(current_underlying=501.0, current_short_delta=0.28),
+        gex={"flip": 495.0, "put_wall": 500.0}, regime=None)  # wall == short, no below-flip bonus
+    off = rescue.assess_position_risk(
+        _pos(short_strike=500.0),
+        _mark(current_underlying=501.0, current_short_delta=0.28),
+        gex={"flip": 495.0, "put_wall": 480.0}, regime=None)  # wall far away
+    assert near["heat"] < off["heat"]
