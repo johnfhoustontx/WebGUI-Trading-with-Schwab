@@ -686,3 +686,38 @@ def build_futures_hedge(position, mark, price_leg, ctx) -> dict | None:
                       f"touching the spread."],
         "warnings": [],
     }
+
+
+#############################################
+# ORCHESTRATOR (pure)
+#############################################
+
+_BUILDERS = [build_close, build_partial_close, build_narrow, build_convert_ic,
+             build_convert_butterfly, build_broken_wing, build_roll_down,
+             build_roll_out, build_roll_down_out, build_inverted, build_futures_hedge]
+
+
+def rescue_candidates(position, mark, price_leg, gex=None, regime=None,
+                      underlying=None) -> list[dict]:
+    """Build, annotate, score, and rank every applicable rescue action. Pure;
+    never raises (a failing builder is dropped)."""
+    ctx = strategic_context(position, gex, regime,
+                            underlying or mark.get("current_underlying"))
+    out = []
+    for fn in _BUILDERS:
+        try:
+            c = fn(position, mark, price_leg, ctx)
+        except Exception:
+            c = None
+        if not c:
+            continue
+        c.setdefault("context", list(ctx["notes"]))
+        if ctx.get("assignment_risk") and "assignment" not in " ".join(c.get("warnings", [])).lower():
+            c.setdefault("warnings", []).append("Assignment risk on this instrument.")
+        if c.get("net_cash", 0.0) < 0 and "debit" not in " ".join(c.get("warnings", [])).lower():
+            c.setdefault("warnings", []).append("Net debit — costs money to apply.")
+        c["score"] = score_candidate(c, position.get("max_loss_total"),
+                                     mark.get("current_short_delta"), ctx)
+        out.append(c)
+    out.sort(key=lambda x: x["score"], reverse=True)
+    return out
