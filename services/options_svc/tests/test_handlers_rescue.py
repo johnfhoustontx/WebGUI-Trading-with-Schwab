@@ -7,9 +7,20 @@ view for the nav badge. We monkeypatch ``compute.assess_open_positions`` +
 ``compute.paper_account_view`` so nothing touches a live proxy, and use a
 fakeredis ``Bus(fake=True)`` (same style as ``test_handlers.py``).
 """
+import types
+
 from shared.bus import Bus
 from shared.contracts.envelope import Command
 from services.options_svc import handlers
+
+
+def _stub_paper_adjust(monkeypatch, apply_fn):
+    """Install a fake ``paper_adjust`` module exposing ``apply_adjustment``.
+
+    ``handlers.paper_adjust`` is lazily imported (None until first real use), so
+    tests inject a stub module + reset the cached attr afterward."""
+    monkeypatch.setattr(handlers, "paper_adjust",
+                        types.SimpleNamespace(apply_adjustment=apply_fn))
 
 
 def test_refresh_paper_adds_rescue_overlay(monkeypatch):
@@ -138,3 +149,167 @@ def test_run_manage_and_refresh_summary_failure_non_fatal(monkeypatch):
 
     handlers.run_manage_and_refresh(bus)  # must not raise
     assert calls["refresh"] == 1
+
+
+# ── rescue / rescue_apply command handlers (Task 6.3) ───────────────────────
+
+_SAMPLE_ADVISORY = {
+    "position_id": 5,
+    "symbol": "SPY",
+    "strategy": "PCS",
+    "state": "tested",
+    "heat": 0.6,
+    "mark": {"underlying": 500.0, "current_value": 1.2,
+             "unrealized_pnl": -30.0, "short_delta": -0.4, "dte": 3},
+    "context": [],
+    "candidates": [],
+    "ts": "2026-06-21T00:00:00+00:00",
+}
+
+
+def test_run_rescue_caches_advisory(monkeypatch):
+    """run_rescue caches compute_rescue's advisory under cache:options:rescue:<id>
+    and publishes a version+position_id event."""
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "compute_rescue",
+                        lambda pid: dict(_SAMPLE_ADVISORY, position_id=pid))
+
+    sub = bus.subscribe(handlers.EVENT_RESCUE)
+    handlers.run_rescue(bus, 5)
+    msg = sub.get_message(timeout=1.0)
+    sub.close()
+
+    env = bus.cache_get(f"{handlers.CACHE_RESCUE}:5")
+    assert env is not None
+    assert env.payload["position_id"] == 5
+    assert env.payload["symbol"] == "SPY"
+    assert msg is not None
+    assert msg.get("version") == env.version
+    assert msg.get("position_id") == 5
+
+
+def test_rescue_apply_success_refreshes(monkeypatch):
+    """A successful apply refreshes the paper view and re-caches the advisory with
+    apply_result.ok True attached."""
+    bus = Bus(fake=True)
+    calls = {"refresh": 0}
+    monkeypatch.setattr(handlers.compute, "_load_position",
+                        lambda pid: {"position_id": pid, "symbol": "SPY",
+                                     "status": "OPEN"})
+    monkeypatch.setattr(handlers.compute, "_make_leg_pricer",
+                        lambda sym: (lambda *a, **k: 1.0))
+    monkeypatch.setattr(handlers.compute, "compute_rescue",
+                        lambda pid: dict(_SAMPLE_ADVISORY, position_id=pid))
+    monkeypatch.setattr(handlers, "refresh_paper_account",
+                        lambda b: calls.__setitem__("refresh", calls["refresh"] + 1))
+    _stub_paper_adjust(monkeypatch,
+                       lambda db, pos, cand, **kw: {"ok": True, "action": "convert_ic",
+                                                    "position_id": 5})
+
+    handlers.run_rescue_apply(bus, 5, {"action": "convert_ic"})
+
+    assert calls["refresh"] == 1
+    env = bus.cache_get(f"{handlers.CACHE_RESCUE}:5")
+    assert env is not None
+    assert env.payload["apply_result"]["ok"] is True
+    assert env.payload["apply_result"]["action"] == "convert_ic"
+
+
+def test_rescue_apply_stale_surfaces(monkeypatch):
+    """A stale apply does NOT refresh the paper view; the cached advisory carries
+    the stale apply_result so the GUI sees why it didn't apply."""
+    bus = Bus(fake=True)
+    calls = {"refresh": 0}
+    monkeypatch.setattr(handlers.compute, "_load_position",
+                        lambda pid: {"position_id": pid, "symbol": "SPY",
+                                     "status": "OPEN"})
+    monkeypatch.setattr(handlers.compute, "_make_leg_pricer",
+                        lambda sym: (lambda *a, **k: 1.0))
+    monkeypatch.setattr(handlers.compute, "compute_rescue",
+                        lambda pid: dict(_SAMPLE_ADVISORY, position_id=pid))
+    monkeypatch.setattr(handlers, "refresh_paper_account",
+                        lambda b: calls.__setitem__("refresh", calls["refresh"] + 1))
+    _stub_paper_adjust(monkeypatch,
+                       lambda db, pos, cand, **kw: {"ok": False, "stale": True,
+                                                    "error": "prices moved",
+                                                    "position_id": 5})
+
+    handlers.run_rescue_apply(bus, 5, {"action": "narrow"})
+
+    assert calls["refresh"] == 0  # no mutation/refresh on a stale abort
+    env = bus.cache_get(f"{handlers.CACHE_RESCUE}:5")
+    assert env is not None
+    assert env.payload["apply_result"]["stale"] is True
+    assert env.payload["apply_result"]["ok"] is False
+
+
+def test_rescue_apply_refuses_non_paper_position(monkeypatch):
+    """A non-paper / captured-signal / bogus id (not in paper_account_db ->
+    _load_position returns None) is refused cleanly with an error advisory and no
+    apply/refresh."""
+    bus = Bus(fake=True)
+    calls = {"refresh": 0, "apply": 0}
+    monkeypatch.setattr(handlers.compute, "_load_position", lambda pid: None)
+    monkeypatch.setattr(handlers, "refresh_paper_account",
+                        lambda b: calls.__setitem__("refresh", calls["refresh"] + 1))
+    _stub_paper_adjust(monkeypatch,
+                       lambda *a, **k: calls.__setitem__("apply", calls["apply"] + 1))
+
+    handlers.run_rescue_apply(bus, 999, {"action": "narrow"})
+
+    assert calls == {"refresh": 0, "apply": 0}  # nothing mutated
+    env = bus.cache_get(f"{handlers.CACHE_RESCUE}:999")
+    assert env is not None
+    assert env.payload["error"]
+    assert env.payload["apply_result"]["ok"] is False
+
+
+def test_rescue_apply_closed_position_minimal_advisory(monkeypatch):
+    """When the apply closes/rolls the position, the recomputed advisory returns
+    position-not-found; the handler caches a minimal advisory still carrying the
+    apply_result."""
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "_load_position",
+                        lambda pid: {"position_id": pid, "symbol": "SPY",
+                                     "status": "OPEN"})
+    monkeypatch.setattr(handlers.compute, "_make_leg_pricer",
+                        lambda sym: (lambda *a, **k: 1.0))
+    monkeypatch.setattr(handlers, "refresh_paper_account", lambda b: None)
+    # After a successful close, compute_rescue can't find the position anymore.
+    monkeypatch.setattr(handlers.compute, "compute_rescue",
+                        lambda pid: {"error": "position not found"})
+    _stub_paper_adjust(monkeypatch,
+                       lambda db, pos, cand, **kw: {"ok": True, "action": "close",
+                                                    "position_id": 5, "realized": 42.0})
+
+    handlers.run_rescue_apply(bus, 5, {"action": "close"})
+
+    env = bus.cache_get(f"{handlers.CACHE_RESCUE}:5")
+    assert env is not None
+    assert env.payload["position_id"] == 5
+    assert env.payload["apply_result"]["ok"] is True
+    assert env.payload["apply_result"]["realized"] == 42.0
+
+
+def test_handle_command_dispatches_rescue(monkeypatch):
+    """handle_command routes a 'rescue' command (int-coerced position_id) to
+    run_rescue."""
+    bus = Bus(fake=True)
+    seen = {}
+    monkeypatch.setattr(handlers, "run_rescue",
+                        lambda b, pid: seen.__setitem__("pid", pid))
+    handlers.handle_command(bus, Command(type="rescue", args={"position_id": "7"}))
+    assert seen == {"pid": 7}  # coerced to int
+
+
+def test_handle_command_dispatches_rescue_apply(monkeypatch):
+    """handle_command routes a 'rescue_apply' command to run_rescue_apply with the
+    int position_id + candidate dict."""
+    bus = Bus(fake=True)
+    seen = {}
+    monkeypatch.setattr(handlers, "run_rescue_apply",
+                        lambda b, pid, cand: seen.update(pid=pid, cand=cand))
+    handlers.handle_command(bus, Command(
+        type="rescue_apply",
+        args={"position_id": "5", "candidate": {"action": "narrow"}}))
+    assert seen == {"pid": 5, "cand": {"action": "narrow"}}

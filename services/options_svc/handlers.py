@@ -16,6 +16,28 @@ Kept synchronous: the scaffold's consumer loop handles sync handlers.
 from services.options_svc import compute
 from shared.contracts.options import ScanResult
 
+# ``paper_adjust`` (the rescue-apply primitives) lives in options-scanner and
+# transitively pulls in ``paper_engine`` → ``scoring``. Importing it at module top
+# would (a) require options-scanner on ``sys.path`` before ``compute`` adds it, and
+# (b) bind the process-wide ``sys.modules['scoring']`` to options-scanner's module
+# merely by importing this module — which breaks the sentiment service's ``scoring``
+# package in the *combined* pytest run (all services share one process). So it is
+# imported LAZILY inside ``run_rescue_apply`` (mirrors ``compute``'s lazy-import
+# convention for ``paper_engine``/``paper_account_db``/``signal_db``). ``compute``
+# (imported above) has already put OPTIONS_SCANNER on ``sys.path`` by the time the
+# handler runs, so the lazy import resolves. The module attribute is created on
+# first use so tests can ``monkeypatch.setattr(handlers, "paper_adjust", ...)``.
+paper_adjust = None
+
+
+def _paper_adjust():
+    """Lazy-import + cache the ``paper_adjust`` engine module (see note above)."""
+    global paper_adjust
+    if paper_adjust is None:
+        import paper_adjust as _pa
+        paper_adjust = _pa
+    return paper_adjust
+
 CACHE_SCAN = "cache:options:scan"
 EVENT_SCAN = "events:options:scan"
 
@@ -307,6 +329,91 @@ def publish_gamma_symbols(bus) -> None:
     bus.publish(EVENT_GAMMA_SYMBOLS, {"version": version})
 
 
+def run_rescue(bus, position_id) -> None:
+    """Compute the ranked rescue advisory for ONE paper position and cache it.
+
+    On-demand only (the GUI's per-position Rescue button enqueues a ``rescue``
+    command). ``compute.compute_rescue`` is fully defensive — it returns a
+    ``RescueAdvisory``-shaped dict, or ``{"error": ...}`` on any failure, never
+    raising — so the GUI always sees a payload (an advisory or an error note)
+    rather than hanging on a missing cache view. Cached per-id under
+    ``cache:options:rescue:<position_id>``."""
+    adv = compute.compute_rescue(position_id)
+    key = f"{CACHE_RESCUE}:{position_id}"
+    version = bus.cache_set(key, adv)
+    bus.publish(EVENT_RESCUE, {"version": version, "position_id": position_id})
+
+
+def run_rescue_apply(bus, position_id, candidate) -> None:
+    """Execute an approved rescue candidate against a paper position.
+
+    Flow:
+      1. Load the position via the SAME loader ``compute_rescue`` uses
+         (``compute._load_position`` → ``paper_account_db``). If it isn't a real
+         OPEN paper position (None / not found — covers captured-signal ids and
+         bogus ids, which never live in ``paper_account_db``) we cache an advisory
+         carrying an error note and return WITHOUT mutating anything.
+      2. Reprice-and-dispatch via ``paper_adjust.apply_adjustment`` with a live
+         leg pricer (``compute._make_leg_pricer``) — its built-in stale-price
+         guard aborts (``stale``) without mutating when prices have drifted.
+      3. On a stale/failed apply, re-cache the (unchanged) advisory with the apply
+         result attached so the GUI sees *why* it didn't apply. On success, refresh
+         the paper view, then re-cache the advisory (now reflecting the adjusted /
+         closed position) with the apply result attached.
+
+    Fully defensive: any unexpected failure caches a minimal error advisory so the
+    GUI poller isn't left hanging, never raising into the command consumer."""
+    key = f"{CACHE_RESCUE}:{position_id}"
+    try:
+        pos = compute._load_position(position_id)
+        if not pos:
+            # Not a paper position (captured-signal / bogus id) — refuse cleanly.
+            adv = {
+                "position_id": position_id,
+                "error": "not a paper position (cannot apply rescue)",
+                "apply_result": {
+                    "ok": False,
+                    "error": "position not found — only open paper positions can be rescued",
+                    "position_id": position_id,
+                },
+            }
+            version = bus.cache_set(key, adv)
+            bus.publish(EVENT_RESCUE, {"version": version, "position_id": position_id})
+            return
+
+        symbol = pos.get("symbol")
+        price_leg = compute._make_leg_pricer(symbol)
+        result = _paper_adjust().apply_adjustment(
+            None, pos, candidate, price_leg=price_leg)
+
+        ok = bool(result.get("ok"))
+        if ok:
+            # The position changed — refresh the paper view so the page + nav badge
+            # reflect the adjustment/close, then recompute the advisory.
+            refresh_paper_account(bus)
+
+        # Recompute the advisory against the (now current) position. If the apply
+        # closed/rolled it, compute_rescue returns position-not-found — fall back
+        # to a minimal advisory so the GUI still gets the apply result.
+        adv = compute.compute_rescue(position_id)
+        if not isinstance(adv, dict) or adv.get("error"):
+            adv = {"position_id": position_id, "error": (adv or {}).get("error")
+                   if isinstance(adv, dict) else "advisory unavailable"}
+        adv["apply_result"] = result
+
+        version = bus.cache_set(key, adv)
+        bus.publish(EVENT_RESCUE, {"version": version, "position_id": position_id})
+    except Exception as e:
+        # Never let a bad apply kill the consumer; surface the error to the GUI.
+        adv = {
+            "position_id": position_id,
+            "error": f"{type(e).__name__}: {e}",
+            "apply_result": {"ok": False, "error": str(e), "position_id": position_id},
+        }
+        version = bus.cache_set(key, adv)
+        bus.publish(EVENT_RESCUE, {"version": version, "position_id": position_id})
+
+
 def handle_command(bus, command) -> None:
     """Dispatch a ``cmd:options`` command. ``rescan`` → full rescan;
     ``swing_scan`` → on-demand parameterized swing scan; ``refresh_paper`` →
@@ -330,7 +437,11 @@ def handle_command(bus, command) -> None:
     cache the loader payload (chain dict + price + range) + publish; ``calc_compute``
     (args = the calc params dict) → run the summary + P&L grid math, cache the
     result + publish; ``expected_move`` (args symbol/expiry/legs) → build the
-    expected-move cone payload, cache the result + publish; else no-op."""
+    expected-move cone payload, cache the result + publish; ``rescue`` (args
+    position_id) → compute the ranked rescue advisory for one paper position, cache
+    per-id + publish; ``rescue_apply`` (args position_id, candidate) → execute the
+    approved candidate against the paper position (stale-price guarded), refresh the
+    paper view + re-cache the advisory; else no-op."""
     if command.type == "rescan":
         rescan(bus)
     elif command.type == "swing_scan":
@@ -426,3 +537,8 @@ def handle_command(bus, command) -> None:
             a.get("lookback", "auto"))
         version = bus.cache_set(CACHE_EXPECTED_MOVE, res)
         bus.publish(EVENT_EXPECTED_MOVE, {"version": version})
+    elif command.type == "rescue":
+        run_rescue(bus, int(command.args["position_id"]))
+    elif command.type == "rescue_apply":
+        run_rescue_apply(bus, int(command.args["position_id"]),
+                         command.args["candidate"])
