@@ -216,3 +216,473 @@ def score_candidate(candidate, old_max_loss, old_short_delta, ctx) -> float:
         score += 2   # capital preservation is always available
 
     return round(max(0.0, min(100.0, score)), 1)
+
+
+#############################################
+# CANDIDATE BUILDERS (pure)
+#############################################
+#
+# Each builder is build_<action>(position, mark, price_leg, ctx) -> dict | None.
+# Returns a uniform candidate dict (shaped like RescueCandidate) or None when the
+# action is not applicable / cannot be priced. Never raises — returns None on
+# missing data / None prices; the orchestrator wraps calls in try/except.
+#
+# price_leg(symbol, expiry, right, strike) -> per-contract mid for ONE option leg
+# (right is "PUT"|"CALL"), or None if unpriceable.
+
+from services.options_svc.commission import commission_for, futures_commission  # noqa: E402
+
+
+def _spread_max_loss_dollars(width, qty, total_credit_dollars) -> float:
+    """Defined-risk spread max loss in dollars: width*100*qty - total net credit."""
+    return round(max(0.0, width * 100 * qty - total_credit_dollars), 2)
+
+
+def _add_days(expiry, n) -> str:
+    try:
+        d = _dt.date.fromisoformat(str(expiry)[:10])
+        return (d + _dt.timedelta(days=n)).isoformat()
+    except Exception:
+        return expiry
+
+
+def _leg(side, right, strike, expiry, qty, price):
+    return {"side": side, "right": right, "strike": strike,
+            "expiry": expiry, "qty": qty, "price": price}
+
+
+def build_close(position, mark, price_leg, ctx) -> dict | None:
+    qty = position.get("quantity") or 1
+    sym = position["symbol"]
+    cv = mark.get("current_value")
+    if cv is None:
+        return None
+    gross = -round(cv * 100 * qty, 2)
+    commission = commission_for(2, sym, qty)
+    return {
+        "action": "close",
+        "label": "Close now (systematic stop)",
+        "apply_kind": "execute",
+        "gross_cash": gross,
+        "commission": commission,
+        "net_cash": round(gross - commission, 2),
+        "new_max_loss": 0.0,
+        "new_short_delta": 0.0,
+        "new_width": None,
+        "new_expiry": None,
+        "dte_after": mark.get("dte"),
+        "est_fill_legs": [],
+        "rationale": ["Locks the current loss, removes all further risk."],
+        "warnings": [],
+    }
+
+
+def build_partial_close(position, mark, price_leg, ctx) -> dict | None:
+    qty = position.get("quantity") or 1
+    if qty <= 1:
+        return None
+    sym = position["symbol"]
+    cv = mark.get("current_value")
+    if cv is None:
+        return None
+    cur_delta = mark.get("current_short_delta")
+    w = position.get("width") or abs(position["short_strike"] - position["long_strike"])
+    old_ml = position.get("max_loss_total") or w * 100 * qty
+    close_qty = qty // 2
+    remaining = qty - close_qty
+    gross = -round(cv * 100 * close_qty, 2)
+    commission = commission_for(2, sym, close_qty)
+    new_max_loss = round(old_ml * remaining / qty, 2)
+    return {
+        "action": "partial_close",
+        "label": f"Close {close_qty} of {qty} contracts (scale down)",
+        "apply_kind": "execute",
+        "gross_cash": gross,
+        "commission": commission,
+        "net_cash": round(gross - commission, 2),
+        "new_max_loss": new_max_loss,
+        "new_short_delta": cur_delta,
+        "new_width": None,
+        "new_expiry": None,
+        "dte_after": mark.get("dte"),
+        "est_fill_legs": [],
+        "rationale": [f"Sheds {close_qty}/{qty} of the position; "
+                      f"max loss falls to ${new_max_loss:.0f}."],
+        "warnings": [],
+    }
+
+
+def build_narrow(position, mark, price_leg, ctx) -> dict | None:
+    strategy = position.get("strategy")
+    if strategy not in ("PCS", "CCS"):
+        return None
+    qty = position.get("quantity") or 1
+    sym = position["symbol"]
+    expiry = position["expiration"]
+    w = position.get("width") or abs(position["short_strike"] - position["long_strike"])
+    if w <= 1:
+        return None
+    cur_delta = mark.get("current_short_delta")
+    entry_credit_d = (position.get("entry_credit") or 0) * 100 * qty
+    old_long = position["long_strike"]
+    if strategy == "PCS":
+        right = "PUT"
+        new_long = position["short_strike"] - round(w / 2)
+    else:  # CCS
+        right = "CALL"
+        new_long = position["short_strike"] + round(w / 2)
+    p_old = price_leg(sym, expiry, right, old_long)
+    p_new = price_leg(sym, expiry, right, new_long)
+    if p_old is None or p_new is None:
+        return None
+    gross = round((p_old - p_new) * 100 * qty, 2)   # sell old long(+), buy closer long(-)
+    commission = commission_for(2, sym, qty)
+    new_width = abs(position["short_strike"] - new_long)
+    total_credit = entry_credit_d + gross
+    new_max_loss = _spread_max_loss_dollars(new_width, qty, total_credit)
+    return {
+        "action": "narrow",
+        "label": "Narrow the spread",
+        "apply_kind": "execute",
+        "gross_cash": gross,
+        "commission": commission,
+        "net_cash": round(gross - commission, 2),
+        "new_max_loss": new_max_loss,
+        "new_short_delta": cur_delta,
+        "new_width": new_width,
+        "new_expiry": expiry,
+        "dte_after": mark.get("dte"),
+        "est_fill_legs": [
+            _leg("SELL", right, old_long, expiry, qty, p_old),
+            _leg("BUY", right, new_long, expiry, qty, p_new),
+        ],
+        "rationale": [f"Width {w:g}->{new_width:g}; locks a small loss but caps "
+                      f"catastrophic loss at ${new_max_loss:.0f}."],
+        "warnings": [],
+    }
+
+
+def build_convert_ic(position, mark, price_leg, ctx) -> dict | None:
+    strategy = position.get("strategy")
+    if strategy not in ("PCS", "CCS"):
+        return None
+    qty = position.get("quantity") or 1
+    sym = position["symbol"]
+    expiry = position["expiration"]
+    w = position.get("width") or abs(position["short_strike"] - position["long_strike"])
+    und = mark.get("current_underlying")
+    old_ml = position.get("max_loss_total") or w * 100 * qty
+    cur_delta = mark.get("current_short_delta")
+    base = und if und is not None else position["short_strike"]
+    if strategy == "PCS":   # add call spread above
+        dist = max(abs(base - position["short_strike"]), base * 0.01)
+        call_short = round(base + dist)
+        call_long = call_short + w
+        right, s1, l1 = "CALL", call_short, call_long
+    else:  # CCS — add put spread below
+        dist = max(abs(position["short_strike"] - base), base * 0.01)
+        put_short = round(base - dist)
+        put_long = put_short - w
+        right, s1, l1 = "PUT", put_short, put_long
+    ps = price_leg(sym, expiry, right, s1)
+    pl = price_leg(sym, expiry, right, l1)
+    if ps is None or pl is None:
+        return None
+    credit_pc = max(0.0, ps - pl)
+    gross = round(credit_pc * 100 * qty, 2)
+    commission = commission_for(2, sym, qty)
+    new_max_loss = round(max(0.0, old_ml - gross), 2)
+    return {
+        "action": "convert_ic",
+        "label": "Convert to Iron Condor",
+        "apply_kind": "execute",
+        "gross_cash": gross,
+        "commission": commission,
+        "net_cash": round(gross - commission, 2),
+        "new_max_loss": new_max_loss,
+        "new_short_delta": cur_delta,
+        "new_width": w,
+        "new_expiry": expiry,
+        "dte_after": mark.get("dte"),
+        "est_fill_legs": [
+            _leg("SELL", right, s1, expiry, qty, ps),
+            _leg("BUY", right, l1, expiry, qty, pl),
+        ],
+        "rationale": [f"Collects ${gross:.0f} credit on the untested side, cuts max "
+                      f"loss to ${new_max_loss:.0f}, flattens delta."],
+        "warnings": ["Caps the upside / adds opposite-side risk on a sharp reversal."],
+    }
+
+
+def build_convert_butterfly(position, mark, price_leg, ctx) -> dict | None:
+    strategy = position.get("strategy")
+    if strategy not in ("PCS", "CCS"):
+        return None
+    qty = position.get("quantity") or 1
+    sym = position["symbol"]
+    expiry = position["expiration"]
+    w = position.get("width") or abs(position["short_strike"] - position["long_strike"])
+    old_ml = position.get("max_loss_total") or w * 100 * qty
+    cur_delta = mark.get("current_short_delta")
+    short = position["short_strike"]
+    if strategy == "PCS":
+        right, s1, l1 = "CALL", short, short + w
+    else:  # CCS
+        right, s1, l1 = "PUT", short, short - w
+    ps = price_leg(sym, expiry, right, s1)
+    pl = price_leg(sym, expiry, right, l1)
+    if ps is None or pl is None:
+        return None
+    credit_pc = max(0.0, ps - pl)
+    gross = round(credit_pc * 100 * qty, 2)
+    commission = commission_for(2, sym, qty)
+    new_max_loss = round(max(0.0, old_ml - gross), 2)
+    return {
+        "action": "convert_butterfly",
+        "label": "Convert to Iron Butterfly",
+        "apply_kind": "execute",
+        "gross_cash": gross,
+        "commission": commission,
+        "net_cash": round(gross - commission, 2),
+        "new_max_loss": new_max_loss,
+        "new_short_delta": cur_delta,
+        "new_width": w,
+        "new_expiry": expiry,
+        "dte_after": mark.get("dte"),
+        "est_fill_legs": [
+            _leg("SELL", right, s1, expiry, qty, ps),
+            _leg("BUY", right, l1, expiry, qty, pl),
+        ],
+        "rationale": [f"Richer ATM credit (${gross:.0f}); tighter profit zone "
+                      f"centered near {s1:g}."],
+        "warnings": [f"Profits only if price pins near {s1:g}."],
+    }
+
+
+def build_roll_down(position, mark, price_leg, ctx) -> dict | None:
+    strategy = position.get("strategy")
+    if strategy not in ("PCS", "CCS"):
+        return None
+    qty = position.get("quantity") or 1
+    sym = position["symbol"]
+    expiry = position["expiration"]
+    w = position.get("width") or abs(position["short_strike"] - position["long_strike"])
+    cv = mark.get("current_value")
+    if cv is None:
+        return None
+    entry_credit_d = (position.get("entry_credit") or 0) * 100 * qty
+    if strategy == "PCS":
+        right = "PUT"
+        new_short = position["short_strike"] - round(w)
+        new_long = new_short - w
+    else:  # CCS
+        right = "CALL"
+        new_short = position["short_strike"] + round(w)
+        new_long = new_short + w
+    ns = price_leg(sym, expiry, right, new_short)
+    nl = price_leg(sym, expiry, right, new_long)
+    if ns is None or nl is None:
+        return None
+    credit_new_pc = max(0.0, ns - nl)
+    gross = round((-cv + credit_new_pc) * 100 * qty, 2)
+    commission = commission_for(4, sym, qty)
+    total_credit = entry_credit_d + gross
+    new_max_loss = _spread_max_loss_dollars(w, qty, total_credit)
+    return {
+        "action": "roll_down",
+        "label": "Roll down (same expiry)",
+        "apply_kind": "execute",
+        "gross_cash": gross,
+        "commission": commission,
+        "net_cash": round(gross - commission, 2),
+        "new_max_loss": new_max_loss,
+        "new_short_delta": None,
+        "new_width": w,
+        "new_expiry": expiry,
+        "dte_after": mark.get("dte"),
+        "est_fill_legs": [
+            _leg("BUY", right, position["short_strike"], expiry, qty,
+                 price_leg(sym, expiry, right, position["short_strike"])),
+            _leg("SELL", right, position["long_strike"], expiry, qty,
+                 price_leg(sym, expiry, right, position["long_strike"])),
+            _leg("SELL", right, new_short, expiry, qty, ns),
+            _leg("BUY", right, new_long, expiry, qty, nl),
+        ],
+        "rationale": [f"Closes the tested spread (-${cv * 100 * qty:.0f}) and reopens "
+                      f"at {new_short:g}/{new_long:g} for ${credit_new_pc * 100 * qty:.0f}; "
+                      f"net ${gross:.0f}."],
+        "warnings": [],
+    }
+
+
+def build_roll_out(position, mark, price_leg, ctx) -> dict | None:
+    strategy = position.get("strategy")
+    if strategy not in ("PCS", "CCS", "IC"):
+        return None
+    qty = position.get("quantity") or 1
+    sym = position["symbol"]
+    expiry = position["expiration"]
+    w = position.get("width") or abs(position["short_strike"] - position["long_strike"])
+    cv = mark.get("current_value")
+    if cv is None:
+        return None
+    cur_delta = mark.get("current_short_delta")
+    is_put = strategy in ("PCS", "IC")
+    entry_credit_d = (position.get("entry_credit") or 0) * 100 * qty
+    new_expiry = _add_days(expiry, 30)
+    right = "PUT" if is_put else "CALL"
+    ns = price_leg(sym, new_expiry, right, position["short_strike"])
+    nl = price_leg(sym, new_expiry, right, position["long_strike"])
+    if ns is None or nl is None:
+        return None
+    credit_new_pc = max(0.0, ns - nl)
+    gross = round((-cv + credit_new_pc) * 100 * qty, 2)
+    commission = commission_for(4, sym, qty)
+    total_credit = entry_credit_d + gross
+    new_max_loss = _spread_max_loss_dollars(w, qty, total_credit)
+    return {
+        "action": "roll_out",
+        "label": "Roll out (more time)",
+        "apply_kind": "execute",
+        "gross_cash": gross,
+        "commission": commission,
+        "net_cash": round(gross - commission, 2),
+        "new_max_loss": new_max_loss,
+        "new_short_delta": cur_delta,
+        "new_width": w,
+        "new_expiry": new_expiry,
+        "dte_after": (mark.get("dte") or 0) + 30,
+        "est_fill_legs": [
+            _leg("SELL", right, position["short_strike"], new_expiry, qty, ns),
+            _leg("BUY", right, position["long_strike"], new_expiry, qty, nl),
+        ],
+        "rationale": [f"Same strikes, +30 days for ${gross:.0f} net; gives the trade "
+                      f"time to recover."],
+        "warnings": (["IC rolled as a put-side estimate."] if strategy == "IC" else []),
+    }
+
+
+def build_roll_down_out(position, mark, price_leg, ctx) -> dict | None:
+    strategy = position.get("strategy")
+    if strategy not in ("PCS", "CCS"):
+        return None
+    qty = position.get("quantity") or 1
+    sym = position["symbol"]
+    expiry = position["expiration"]
+    w = position.get("width") or abs(position["short_strike"] - position["long_strike"])
+    cv = mark.get("current_value")
+    if cv is None:
+        return None
+    entry_credit_d = (position.get("entry_credit") or 0) * 100 * qty
+    new_expiry = _add_days(expiry, 30)
+    if strategy == "PCS":
+        right = "PUT"
+        new_short = position["short_strike"] - round(w)
+        new_long = new_short - w
+    else:  # CCS
+        right = "CALL"
+        new_short = position["short_strike"] + round(w)
+        new_long = new_short + w
+    ns = price_leg(sym, new_expiry, right, new_short)
+    nl = price_leg(sym, new_expiry, right, new_long)
+    if ns is None or nl is None:
+        return None
+    credit_new_pc = max(0.0, ns - nl)
+    gross = round((-cv + credit_new_pc) * 100 * qty, 2)
+    commission = commission_for(4, sym, qty)
+    total_credit = entry_credit_d + gross
+    new_max_loss = _spread_max_loss_dollars(w, qty, total_credit)
+    return {
+        "action": "roll_down_out",
+        "label": "Roll down & out",
+        "apply_kind": "execute",
+        "gross_cash": gross,
+        "commission": commission,
+        "net_cash": round(gross - commission, 2),
+        "new_max_loss": new_max_loss,
+        "new_short_delta": None,
+        "new_width": w,
+        "new_expiry": new_expiry,
+        "dte_after": (mark.get("dte") or 0) + 30,
+        "est_fill_legs": [
+            _leg("SELL", right, new_short, new_expiry, qty, ns),
+            _leg("BUY", right, new_long, new_expiry, qty, nl),
+        ],
+        "rationale": [f"Reopens at {new_short:g}/{new_long:g}, +30 days, for "
+                      f"${gross:.0f} net; widens breakeven and buys time."],
+        "warnings": [],
+    }
+
+
+def build_inverted(position, mark, price_leg, ctx) -> dict | None:
+    if position.get("strategy") != "IC":
+        return None
+    return {
+        "action": "inverted",
+        "label": "Go inverted (manual)",
+        "apply_kind": "advisory",
+        "gross_cash": 0.0,
+        "commission": 0.0,
+        "net_cash": 0.0,
+        "new_max_loss": None,
+        "new_short_delta": None,
+        "new_width": None,
+        "new_expiry": None,
+        "dte_after": mark.get("dte"),
+        "est_fill_legs": [],
+        "rationale": ["Roll the untested call side DOWN past the put short to collect "
+                      "width-beating credit. Discretionary strike selection — shown as "
+                      "guidance; place manually."],
+        "warnings": ["Sharp reversal puts the inverted short calls at risk."],
+    }
+
+
+def build_broken_wing(position, mark, price_leg, ctx) -> dict | None:
+    if position.get("strategy") not in ("PCS", "CCS"):
+        return None
+    return {
+        "action": "broken_wing",
+        "label": "Broken-wing butterfly (manual)",
+        "apply_kind": "advisory",
+        "gross_cash": 0.0,
+        "commission": 0.0,
+        "net_cash": 0.0,
+        "new_max_loss": None,
+        "new_short_delta": None,
+        "new_width": None,
+        "new_expiry": None,
+        "dte_after": mark.get("dte"),
+        "est_fill_legs": [],
+        "rationale": ["Add an unequal-wing butterfly to vacuum premium and cut "
+                      "downside, often for a credit. Optimal wings are discretionary — "
+                      "shown as guidance; place manually."],
+        "warnings": [],
+    }
+
+
+def build_futures_hedge(position, mark, price_leg, ctx) -> dict | None:
+    if ctx.get("kind") not in ("index", "futures"):
+        return None
+    qty = position.get("quantity") or 1
+    cur_delta = mark.get("current_short_delta")
+    net_delta_shares = round((cur_delta or 0.0) * 100 * qty)
+    n = max(1, round(abs(net_delta_shares) / 5))
+    commission = futures_commission(n)
+    return {
+        "action": "futures_hedge",
+        "label": "Delta hedge with futures",
+        "apply_kind": "advisory",
+        "gross_cash": 0.0,
+        "commission": commission,
+        "net_cash": round(-commission, 2),
+        "new_max_loss": None,
+        "new_short_delta": None,
+        "new_width": None,
+        "new_expiry": None,
+        "dte_after": mark.get("dte"),
+        "est_fill_legs": [],
+        "rationale": [f"Net position delta ~= {net_delta_shares} share-equivalents; "
+                      f"trade ~{n} micro futures (e.g. /MES, $5/pt) to flatten without "
+                      f"touching the spread."],
+        "warnings": [],
+    }
