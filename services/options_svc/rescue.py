@@ -114,3 +114,64 @@ def assess_position_risk(position, mark, gex=None, regime=None, today=None) -> d
 
     heat = max(0.0, min(100.0, heat))
     return {"state": state, "heat": round(heat, 1), "dte": dte}
+
+
+_FUTURES_PREFIXES = ("/ES", "/NQ", "/MES", "/MNQ", "/RTY", "/YM")
+
+
+def _instrument_kind(symbol: str) -> str:
+    s = (symbol or "").upper()
+    if s.startswith("/"):
+        return "futures"
+    from services.options_svc.commission import is_index_symbol
+    return "index" if is_index_symbol(s) else "equity"
+
+
+def strategic_context(position, gex=None, regime=None, underlying=None) -> dict:
+    """Market-structure annotation: dealer gamma, regime, settlement mechanics.
+    Returns notes[] + boolean flags used as ranking modifiers (never hard gates)."""
+    notes: list[str] = []
+    kind = _instrument_kind(position.get("symbol", ""))
+    short = position.get("short_strike")
+    is_put = position.get("strategy") in ("PCS", "IC")
+
+    negative_gamma = False
+    near_wall = False
+    if gex:
+        flip = gex.get("flip")
+        if flip and underlying is not None:
+            if (is_put and underlying < flip) or ((not is_put) and underlying > flip):
+                negative_gamma = True
+                notes.append(f"Short side is past the gamma flip ({flip:g}) — "
+                             f"negative gamma, vol likely to expand; rolling here is risky.")
+        wall = gex.get("put_wall") if is_put else gex.get("call_wall")
+        if wall and short and abs(short - wall) / short <= 0.01:
+            near_wall = True
+            notes.append(f"Short strike rests near a {'put' if is_put else 'call'} "
+                         f"wall ({wall:g}) — a bounce is statistically more likely.")
+
+    assignment_risk = False
+    if kind == "index":
+        notes.append("Index option (European, cash-settled): no early-assignment risk; "
+                     "holding to expiration is structurally safe from assignment.")
+    elif kind == "futures":
+        deep_itm = short and underlying is not None and (
+            (is_put and underlying < short) or ((not is_put) and underlying > short))
+        assignment_risk = bool(deep_itm)
+        if deep_itm:
+            notes.append("Futures option (American): short is ITM — early assignment / "
+                         "futures-contract delivery is possible.")
+        else:
+            notes.append("Futures option (American): assignment possible if the short goes ITM.")
+    else:
+        assignment_risk = True
+        notes.append("Equity/ETF option (American): early assignment possible near "
+                     "ex-dividend or when deep ITM.")
+
+    if regime:
+        ts = (regime.get("trend_state") or "")
+        if ts:
+            notes.append(f"Regime: {ts} (confidence {regime.get('trend_confidence', 0):.0%}).")
+
+    return {"notes": notes, "negative_gamma": negative_gamma,
+            "near_wall": near_wall, "assignment_risk": assignment_risk, "kind": kind}
