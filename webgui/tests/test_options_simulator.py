@@ -34,6 +34,17 @@ def test_ivshock_figure_two_series():
     assert len(fig["series"]) == 2 and fig["chart"]["type"] == "column"
 
 
+def test_whatif_and_ivshock_figures_set_explicit_height():
+    # These charts mount inside INACTIVE tab panels (default tab is Replay). NiceGUI's
+    # highchart only reflows once at mount and never re-measures, so a chart that
+    # mounts in a 0-height (display:none) panel must carry an explicit height or it
+    # collapses to title-height when the tab is finally shown (the IV-shock bug).
+    wf = sim.whatif_figure([{"S": 1, "theo_price": 2}], spot=1.0)
+    iv = sim.ivshock_figure({"theo_price": 1.0}, {"theo_price": 1.2}, mult=1.5)
+    assert isinstance(wf["chart"].get("height"), (int, float)) and wf["chart"]["height"] >= 300
+    assert isinstance(iv["chart"].get("height"), (int, float)) and iv["chart"]["height"] >= 300
+
+
 def test_replay_figure_stacks_price_and_greeks():
     trace = {
         "spot": 452.0,

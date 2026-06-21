@@ -272,6 +272,18 @@ module-level functions (TDD them with sample dicts); keep `render()` thin
 - `ui.html(...)` **strips `<style>` and `<iframe>`**. For CSS use `ui.add_css(css)`
   (rules only, scope with a class); render HTML *fragments*, not full documents.
   See `pages/options/gamma.py` Explain (`EXPLAIN_CSS` + `wrap_explain`).
+- **`ui.highchart` inside an inactive `ui.tab_panel` COLLAPSES (cost: the IV-shock
+  bug).** The `nicegui-highcharts` Vue component reflows **once** at `mounted()` and
+  has **NO ResizeObserver** (`update()` calls `chart.update()`, which does NOT resize
+  to the container). A chart that mounts while its tab is hidden (`display:none`)
+  measures a 0×0 container and renders collapsed (title-height, ~600px wide) and
+  never recovers when the tab is shown. Fix: (a) give the figure an **explicit
+  `chart.height`** (so it never depends on container measurement — the default-active
+  Replay tab's chart already did, the hidden What-if/IV-shock didn't), AND (b) on
+  `tabs.on_value_change`, **reflow** each chart after the panel is visible:
+  `ui.timer(0.05, lambda: ui.run_javascript(f"getElement({el.id})?.chart?.reflow()"),
+  once=True)` (`getElement(id)` → the Vue component; `.chart` is the Highcharts
+  instance). See `pages/options/simulator.py`.
 - Charts: **Highcharts** via `ui.highchart(options)` (the `nicegui-highcharts`
   element) — NOT Plotly. Build the options dict in a pure function so it's
   unit-testable; update in place with `el.options = fig; el.update()` (replaces the

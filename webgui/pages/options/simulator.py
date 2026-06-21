@@ -66,7 +66,11 @@ def whatif_figure(df, spot, target_s=None):
         xplotlines.append(_plotline(target_s, TARGET_COLOR, dash="Dash"))
     yplotlines = [_plotline(0, "#888888", dash="Dash", width=1)]  # zero baseline
     return {
-        "chart": {"type": "line", "backgroundColor": "transparent"},
+        # Explicit height: this chart mounts inside an inactive tab panel, and
+        # NiceGUI's highchart only reflows once at mount (no ResizeObserver). Without
+        # a fixed height it measures the hidden 0-height container and collapses to
+        # title-height when the tab is shown.
+        "chart": {"type": "line", "backgroundColor": "transparent", "height": 420},
         "title": {"text": "What-if: price sweep", "style": {"color": "#e6e6e6"}},
         "credits": {"enabled": False},
         "accessibility": {"enabled": False},
@@ -90,7 +94,9 @@ def ivshock_figure(base, shock, mult=1.5):
                 (row.get("gamma", 0) or 0) * 100, row.get("theta", 0), row.get("vega", 0)]
 
     return {
-        "chart": {"type": "column", "backgroundColor": "transparent"},
+        # Explicit height (see whatif_figure): this chart mounts in an inactive tab
+        # panel and would otherwise collapse to title-height — the IV-shock bug.
+        "chart": {"type": "column", "backgroundColor": "transparent", "height": 420},
         "title": {"text": "IV shock", "style": {"color": "#e6e6e6"}},
         "credits": {"enabled": False},
         "accessibility": {"enabled": False},
@@ -372,6 +378,18 @@ def render():
             return
         bus_client.request("options", {"type": "sim_fetch", "args": {"symbol": sym}})
         status.text = "Fetching snapshot…"
+
+    @guard
+    def _reflow_charts():
+        # Charts created inside an inactive tab panel measure a hidden (0×0)
+        # container at mount, and NiceGUI's highchart never re-measures afterwards
+        # (one reflow at mount, no ResizeObserver). When a tab becomes visible, ask
+        # each chart to reflow so it picks up the now-real container width/height.
+        for el in (replay_chart, whatif_chart, ivshock_chart):
+            ui.run_javascript(f"getElement({el.id})?.chart?.reflow()")
+
+    # Reflow after the newly-selected panel has actually become visible.
+    tabs.on_value_change(lambda e: ui.timer(0.05, _reflow_charts, once=True))
 
     fetch_btn.on_click(_request_fetch)
     expiry_sel.on_value_change(lambda e: _on_selector())
