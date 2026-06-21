@@ -84,6 +84,18 @@ the ±1 standard-deviation cone.
 - **Look-back** — how much history to show. A wider cone means higher implied
   volatility.
 """,
+    "/options/rescue": """
+**Rescue — the simple version**
+
+Flags credit spreads that are **in trouble** and offers ways to fix them.
+
+- **At-risk board** — paper positions scored **tested** or **critical**, ranked by
+  a 0–100 **heat** (green = calm, red = danger).
+- **Click a row** to see ranked **rescue options** — roll, widen, or close — each
+  with its cash cost/credit and the new risk numbers.
+- **Apply** dispatches a (simulated) paper adjustment. The board refreshes itself
+  as positions are re-priced.
+""",
     "/options/paper": """
 **Paper Trades — the simple version**
 

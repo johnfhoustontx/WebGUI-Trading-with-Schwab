@@ -14,7 +14,7 @@ def test_shell_registers_all_pages():
     expected = (
         "/", "/options/paper", "/options/captured", "/options/portfolio",
         "/options/calculator", "/options/swing", "/options/gamma",
-        "/options/simulator", "/options/expected-move",
+        "/options/simulator", "/options/expected-move", "/options/rescue",
         "/sentiment", "/sentiment/rotation",
         "/trade", "/portfolio", "/driver", "/settings",
         "/eod", "/eod/detail", "/status", "/manuals", "/terminate",

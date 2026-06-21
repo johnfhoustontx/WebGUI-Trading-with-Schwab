@@ -134,6 +134,7 @@ OPTIONS_CHILDREN = [
     ("/options/gamma", "Gamma", "stacked_line_chart"),
     ("/options/simulator", "Simulator", "science"),
     ("/options/expected-move", "Expected Move", "candlestick_chart"),
+    ("/options/rescue", "Rescue", "healing"),
 ]
 
 # Sentiment is an expandable group; each child is its own route. (route, label, icon)
@@ -172,7 +173,7 @@ _NAV_OPEN: dict[str, bool] = {}
 _NAV_BADGES: dict[str, int] = {}
 _ALERT_STATE: dict = {
     "acked_scan": set(), "alerted": set(), "alerted_init": None,
-    "captured_seen": None, "driver_seen": None,
+    "captured_seen": None, "driver_seen": None, "rescue_seen": None,
 }
 _badge_refs: dict = {}
 
@@ -231,6 +232,10 @@ def _acknowledge(active: str) -> None:
         _ALERT_STATE["captured_seen"] = bus_client.read_version("options:captured")
     elif active == "/driver":
         _ALERT_STATE["driver_seen"] = bus_client.read_version("driver:approvals")
+    elif active == "/options/rescue":
+        # Acknowledge the current rescue-summary version so the badge clears on
+        # open and only re-appears when the manage cycle publishes a new summary.
+        _ALERT_STATE["rescue_seen"] = bus_client.read_version("options:rescue_summary")
     _recompute_badges()
 
 
@@ -251,6 +256,14 @@ def _recompute_badges(scan=None) -> None:
     drv = drv or {}
     _NAV_BADGES["/driver"] = 1 if (
         drv.get("status") == "pending" and drv_ver != _ALERT_STATE["driver_seen"]) else 0
+    # Rescue: count of at-risk paper positions (tested + critical) from the small
+    # rescue_summary view. Cleared on open (version acknowledged), so the count
+    # only re-appears when the manage cycle republishes a changed summary.
+    rescue, rescue_ver = bus_client.read_full("options:rescue_summary")
+    rescue = rescue or {}
+    n_rescue = int(rescue.get("n_tested", 0) or 0) + int(rescue.get("n_critical", 0) or 0)
+    _NAV_BADGES["/options/rescue"] = n_rescue if (
+        n_rescue and rescue_ver != _ALERT_STATE["rescue_seen"]) else 0
 
 
 def _watcher_compute():
@@ -476,6 +489,13 @@ def options_expected_move_page() -> None:
     with _layout("/options/expected-move", "Options · Expected Move"):
         from pages.options import expected_move
         expected_move.render()
+
+
+@ui.page("/options/rescue")
+def options_rescue_page() -> None:
+    with _layout("/options/rescue", "Options · Rescue"):
+        from pages.options import rescue
+        rescue.render()
 
 
 @ui.page("/sentiment")

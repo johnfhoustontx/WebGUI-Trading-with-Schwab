@@ -20,6 +20,21 @@ from nicegui import ui
 from pages.ui_guard import guard
 
 from . import detail, handoff
+from .rescue import heat_color
+
+# rescue_state values that mark a trade at-risk (tested/critical). The manage-cycle
+# rescue overlay tags the paper *account* positions view; the paper-trades ledger
+# this page renders carries no rescue_state in the common case, so this highlight
+# is a safe no-op unless a trade row is explicitly flagged.
+_AT_RISK_STATES = ("tested", "critical")
+
+
+def rescue_highlight(state, heat):
+    """Left-border color for an at-risk row, or '' (no tint) otherwise.
+
+    Defensive: a missing/None ``state`` yields no highlight, so normal rows look
+    unchanged."""
+    return heat_color(heat) if state in _AT_RISK_STATES else ""
 
 
 def _round(value, ndigits=2):
@@ -63,6 +78,9 @@ def paper_rows(trades):
             "realized_pnl": _round(t.get("realized_pnl")),
             "status": t.get("status", ""),
             "entry_time": (t.get("entry_time") or "")[:19],
+            # At-risk rescue tint (left border on the symbol cell). Safe no-op
+            # when the trade carries no rescue_state (the usual case).
+            "_rescue_color": rescue_highlight(t.get("rescue_state"), t.get("heat")),
         })
     return rows
 
@@ -156,6 +174,19 @@ def render():
             status = ui.label("").classes("opacity-70")
             table = ui.table(columns=paper_columns(), rows=[], row_key="id",
                              selection="single").classes("w-full")
+            # Symbol cell gets a colored left-border + faint tint when the row is
+            # at-risk (rescue_state tested/critical). Plain cell otherwise.
+            table.add_slot('body-cell-symbol', r'''
+              <q-td :props="props">
+                <span v-if="props.row._rescue_color"
+                      :style="`border-left:4px solid ${props.row._rescue_color};
+                               padding-left:6px;
+                               background:${props.row._rescue_color}22`">
+                  {{ props.value }}
+                </span>
+                <span v-else>{{ props.value }}</span>
+              </q-td>
+            ''')
         detail_panel = detail.render()
 
     # Last-seen bus cache versions for the fetch-free repaint/notify timers.

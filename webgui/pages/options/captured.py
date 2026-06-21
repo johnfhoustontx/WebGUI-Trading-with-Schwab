@@ -21,6 +21,21 @@ from nicegui import ui
 from pages.ui_guard import guard
 
 from . import detail, handoff
+from .rescue import heat_color
+
+# rescue_state values that mark a signal at-risk (tested/critical). Captured
+# signals are advisory-only and the manage-cycle rescue overlay only tags paper
+# *account* positions, so captured rows usually carry NO rescue_state — this
+# highlight is therefore a safe no-op here unless a signal is explicitly flagged.
+_AT_RISK_STATES = ("tested", "critical")
+
+
+def rescue_highlight(state, heat):
+    """Left-border color for an at-risk row, or '' (no tint) otherwise.
+
+    Defensive: a missing/None ``state`` (the common case for captured signals)
+    yields no highlight, so this never changes the look of normal rows."""
+    return heat_color(heat) if state in _AT_RISK_STATES else ""
 
 
 def _round(value, ndigits=2):
@@ -100,6 +115,9 @@ def captured_rows(signals):
             "status": s.get("status", ""),
             "_rec_color": rec_color(s.get("recommendation") or "HOLD"),
             "_pnl_color": pnl_color(s.get("unrealized_pnl")),
+            # At-risk rescue tint (left border on the symbol cell). Safe no-op
+            # when the signal carries no rescue_state (the usual case).
+            "_rescue_color": rescue_highlight(s.get("rescue_state"), s.get("heat")),
         })
     return rows
 
@@ -156,6 +174,19 @@ def render():
                 status = ui.label("").classes("opacity-70")
             table = ui.table(columns=captured_columns(), rows=[], row_key="id",
                              selection="single").classes("w-full")
+            # Symbol cell gets a colored left-border + faint tint when the row is
+            # at-risk (rescue_state tested/critical). Plain cell otherwise.
+            table.add_slot('body-cell-symbol', r'''
+              <q-td :props="props">
+                <span v-if="props.row._rescue_color"
+                      :style="`border-left:4px solid ${props.row._rescue_color};
+                               padding-left:6px;
+                               background:${props.row._rescue_color}22`">
+                  {{ props.value }}
+                </span>
+                <span v-else>{{ props.value }}</span>
+              </q-td>
+            ''')
             table.add_slot('body-cell-recommendation', r'''
               <q-td :props="props">
                 <q-badge :style="`background:${props.row._rec_color};color:#111`" :label="props.value"/>
