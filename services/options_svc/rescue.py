@@ -175,3 +175,44 @@ def strategic_context(position, gex=None, regime=None, underlying=None) -> dict:
 
     return {"notes": notes, "negative_gamma": negative_gamma,
             "near_wall": near_wall, "assignment_risk": assignment_risk, "kind": kind}
+
+
+_ROLL_ACTIONS = {"roll_down", "roll_out", "roll_down_out", "inverted"}
+
+
+def score_candidate(candidate, old_max_loss, old_short_delta, ctx) -> float:
+    """0-100 desirability. Priority: max-loss reduction per net $ spent, delta
+    flattening, credit-vs-debit, GEX/regime fit, breakeven. Pure."""
+    c = candidate if isinstance(candidate, dict) else candidate.model_dump()
+    score = 50.0
+
+    # 1. max-loss reduction (per net dollar spent when it costs money)
+    new_ml = c.get("new_max_loss")
+    if new_ml is not None and old_max_loss:
+        reduction = (old_max_loss - new_ml) / old_max_loss   # fraction
+        score += 30 * max(-1.0, min(1.0, reduction))
+        spent = max(0.0, -c.get("net_cash", 0.0)) + abs(c.get("commission", 0.0))
+        if spent > 0 and old_max_loss - new_ml > 0:
+            efficiency = (old_max_loss - new_ml) / spent
+            score += min(10.0, efficiency / 5.0)
+
+    # 2. delta flattening
+    nd = c.get("new_short_delta")
+    if nd is not None and old_short_delta:
+        score += 15 * max(-1.0, min(1.0, (abs(old_short_delta) - abs(nd)) / abs(old_short_delta)))
+
+    # 3. credit vs debit (net of commission)
+    net = c.get("net_cash", 0.0)
+    score += 8 if net >= 0 else -12   # never roll for a debit just to save it
+
+    # 4. GEX/regime fit
+    if c.get("action") in _ROLL_ACTIONS and ctx.get("negative_gamma"):
+        score -= 12
+    if c.get("action") in _ROLL_ACTIONS and ctx.get("near_wall"):
+        score += 6
+
+    # 5. breakeven improvement handled via max_loss/delta; small tilt for closes
+    if c.get("action") == "close":
+        score += 2   # capital preservation is always available
+
+    return round(max(0.0, min(100.0, score)), 1)
