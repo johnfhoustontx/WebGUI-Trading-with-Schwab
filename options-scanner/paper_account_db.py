@@ -77,10 +77,25 @@ CREATE TABLE IF NOT EXISTS paper_positions (
     current_value REAL,
     unrealized_pnl REAL,
     current_short_delta REAL,
-    last_mark_ts TEXT
+    last_mark_ts TEXT,
+    parent_position_id INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_positions_status ON paper_positions(status);
 CREATE INDEX IF NOT EXISTS idx_positions_signal ON paper_positions(signal_id);
+
+CREATE TABLE IF NOT EXISTS position_adjustments (
+    adjustment_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    position_id INTEGER,
+    parent_position_id INTEGER,
+    action TEXT,
+    legs TEXT,            -- JSON
+    gross_cash REAL,
+    commission REAL,
+    net_cash REAL,
+    reason TEXT,
+    ts TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_adj_position ON position_adjustments(position_id);
 """
 
 _initialised: set = set()
@@ -99,6 +114,10 @@ def init_db(db_path=None):
     try:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript(SCHEMA)
+        # idempotent migration for older DBs
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(paper_positions)")}
+        if "parent_position_id" not in cols:
+            conn.execute("ALTER TABLE paper_positions ADD COLUMN parent_position_id INTEGER")
         conn.commit()
     finally:
         conn.close()
@@ -387,6 +406,52 @@ def open_unrealized(db_path):
         return float(r["u"])
     finally:
         conn.close()
+
+
+#############################################
+# POSITION ADJUSTMENTS (rescue)
+#############################################
+
+def insert_adjustment(db_path, position_id, action, legs=None, gross_cash=0.0,
+                      commission=0.0, net_cash=0.0, reason="", ts=None,
+                      parent_position_id=None):
+    """Record one rescue adjustment. legs is a list[dict] (JSON-encoded)."""
+    import json, datetime
+    if ts is None:
+        ts = datetime.datetime.now().isoformat(timespec="seconds")
+    conn = connect(db_path)
+    try:
+        cur = conn.execute(
+            "INSERT INTO position_adjustments (position_id, parent_position_id, "
+            "action, legs, gross_cash, commission, net_cash, reason, ts) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (position_id, parent_position_id, action, json.dumps(legs or []),
+             gross_cash, commission, net_cash, reason, ts))
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def list_adjustments(db_path, position_id):
+    """Return adjustment rows for a position (newest first), legs JSON-decoded."""
+    import json
+    conn = connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT * FROM position_adjustments WHERE position_id = ? "
+            "ORDER BY adjustment_id DESC", (position_id,)).fetchall()
+    finally:
+        conn.close()
+    out = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["legs"] = json.loads(d.get("legs") or "[]")
+        except Exception:
+            d["legs"] = []
+        out.append(d)
+    return out
 
 
 #############################################
