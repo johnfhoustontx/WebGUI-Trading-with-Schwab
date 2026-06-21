@@ -3,7 +3,7 @@
 [options]        # per contract, applied PER LEG, on open AND close
 equity = 0.65
 index = 0.65
-index_exchange_fee = 0.00   # Cboe proprietary index-option fee (SPX/VIX/OEX)
+index_exchange_fee = 0.00   # per-contract exchange passthrough; applied to ALL index roots in commission._INDEX_ROOTS (SPX/VIX/OEX/NDX/RUT/XSP/DJX) — split per-root before setting a nonzero value
 
 [futures]        # per contract, PER SIDE
 standard = 2.25

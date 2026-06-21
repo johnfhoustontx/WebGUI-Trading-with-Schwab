@@ -32,3 +32,11 @@ def test_zero_legs_is_free():
 
 def test_futures_round_turn_per_side():
     assert c.futures_commission(qty=2) == pytest.approx(2 * 2.25 * 2)
+
+
+def test_index_path_uses_real_config():
+    # With the shipped config (index_exchange_fee = 0.00) the index branch
+    # reads real rates and equals the equity cost. Pins the $-strip + _INDEX_ROOTS
+    # membership against committed config, not a monkeypatched table.
+    assert c.commission_for(legs=2, symbol="$SPX", qty=1) == pytest.approx(1.30)
+    assert c.commission_for(legs=2, symbol="$VIX", qty=1) == pytest.approx(1.30)
