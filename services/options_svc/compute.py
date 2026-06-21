@@ -1764,6 +1764,15 @@ def compute_rescue(position_id) -> dict:
         if candidates and candidates[0].get("context"):
             context = list(candidates[0]["context"])
 
+        # Construct candidates per-item so ONE malformed candidate (e.g. a None
+        # leg price slipping past a builder) can't sink the whole advisory.
+        valid = []
+        for c in candidates:
+            try:
+                valid.append(RescueCandidate(**c))
+            except Exception:
+                continue   # drop a malformed candidate rather than losing the rest
+
         adv = RescueAdvisory(
             position_id=position_id,
             symbol=symbol,
@@ -1772,7 +1781,7 @@ def compute_rescue(position_id) -> dict:
             heat=risk.get("heat", 0.0),
             mark=RescueMark(**mark),
             context=context,
-            candidates=[RescueCandidate(**c) for c in candidates],
+            candidates=valid,
             ts=_rescue_dt.datetime.now(_rescue_dt.timezone.utc).isoformat(),
         )
         return adv.model_dump()

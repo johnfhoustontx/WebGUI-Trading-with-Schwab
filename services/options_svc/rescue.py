@@ -247,8 +247,13 @@ def _add_days(expiry, n) -> str:
 
 
 def _leg(side, right, strike, expiry, qty, price):
-    return {"side": side, "right": right, "strike": strike,
-            "expiry": expiry, "qty": qty, "price": price}
+    # est_fill_legs prices are display-only (the economics use ``cv`` / the
+    # guarded ns/nl/etc., not these per-leg values). Coalesce a missing
+    # (unpriceable, illiquid) leg price to 0.0 so the RescueLeg contract — whose
+    # ``price`` is a non-Optional float — can always be constructed. A None here
+    # otherwise raises a pydantic ValidationError that sinks the WHOLE advisory.
+    return {"side": side, "right": right, "strike": strike, "expiry": expiry,
+            "qty": qty, "price": float(price) if price is not None else 0.0}
 
 
 def build_close(position, mark, price_leg, ctx) -> dict | None:

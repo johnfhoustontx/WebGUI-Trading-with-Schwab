@@ -143,6 +143,28 @@ def test_compute_rescue_gamma_none_ok(monkeypatch):
     RescueAdvisory(**result)
 
 
+def test_compute_rescue_drops_one_bad_candidate_not_whole_advisory(monkeypatch):
+    # one valid candidate + one invalid (None leg price) -> advisory still
+    # returns the valid one (per-candidate construction = defense in depth).
+    _patch_happy(monkeypatch)
+
+    def _candidates(*a, **k):
+        return [
+            {"action": "close", "label": "Close", "apply_kind": "execute",
+             "gross_cash": -100.0, "commission": 1.3, "net_cash": -101.3},
+            {"action": "roll_down", "label": "Roll", "apply_kind": "execute",
+             "gross_cash": 0.0, "commission": 2.6, "net_cash": -2.6,
+             "est_fill_legs": [{"side": "BUY", "right": "PUT",
+                                "strike": 500.0, "price": None}]},
+        ]
+
+    monkeypatch.setattr(compute, "_rescue_candidates", _candidates)
+    result = compute.compute_rescue(7)
+    assert "error" not in result or result.get("candidates")
+    actions = [c["action"] for c in result["candidates"]]
+    assert "close" in actions and "roll_down" not in actions
+
+
 # ── assess_open_positions ────────────────────────────────────────────────────
 
 def test_assess_open_positions_counts(monkeypatch):

@@ -184,6 +184,22 @@ def test_roll_down_none_when_unpriceable():
     assert rescue.build_roll_down(_pos(), _mark(), _dead_pricer, ctx={}) is None
 
 
+def test_roll_down_old_leg_unpriceable_still_valid_candidate():
+    # pricer returns None for the OLD short (illiquid) but prices everything else.
+    # build_roll_down prices the CLOSE legs (old short/long) inline; an illiquid
+    # one-sided strike -> None must NOT land a None price in est_fill_legs.
+    # (new_short = 500 - round(10) = 490, new_long = 480 -> distinct from olds.)
+    def pricer(sym, expiry, right, strike):
+        return None if strike == 500.0 else 1.00
+    c = rescue.build_roll_down(_pos(short_strike=500.0, long_strike=490.0, width=10.0),
+                               _mark(current_value=2.50), pricer, ctx={})
+    assert c is not None
+    # no est_fill_leg carries a None price -> the contract can be constructed
+    from shared.contracts.options import RescueCandidate
+    RescueCandidate(**c)   # must NOT raise
+    assert all(l.get("price") is not None for l in c["est_fill_legs"])
+
+
 # --------------------------------------------------------------------------- #
 # build_roll_out
 # --------------------------------------------------------------------------- #
