@@ -18,3 +18,59 @@ class ScanResult(_Base):
     timestamp: str | None = None
     errors: list = []
     warnings: list = []
+
+
+class RescueLeg(_Base):
+    side: str = ""        # "BUY" | "SELL"
+    right: str = ""       # "PUT" | "CALL"
+    strike: float = 0.0
+    expiry: str | None = None
+    qty: int = 0
+    price: float = 0.0
+
+
+class RescueCandidate(_Base):
+    """One ranked rescue action with full economics (commission-inclusive)."""
+    action: str                     # close | partial_close | narrow | convert_ic |
+                                    # convert_butterfly | broken_wing | roll_down |
+                                    # roll_out | roll_down_out | inverted | futures_hedge
+    label: str
+    applies: bool = True
+    apply_kind: str = "execute"     # "execute" | "advisory"
+    gross_cash: float = 0.0         # credit (+) / debit (-) before fees
+    commission: float = 0.0
+    net_cash: float = 0.0           # gross_cash - commission
+    new_max_loss: float | None = None
+    new_breakeven: float | None = None
+    new_short_delta: float | None = None
+    new_width: float | None = None
+    new_expiry: str | None = None
+    dte_after: int | None = None
+    est_fill_legs: list[RescueLeg] = []
+    rationale: list[str] = []
+    context: list[str] = []
+    warnings: list[str] = []
+    score: float = 0.0
+
+
+class RescueMark(_Base):
+    underlying: float | None = None
+    current_value: float | None = None
+    unrealized_pnl: float | None = None
+    short_delta: float | None = None
+    dte: int | None = None
+
+
+class RescueAdvisory(_Base):
+    """cache:options:rescue:<position_id> — ranked rescue menu for one position."""
+    position_id: int
+    symbol: str
+    strategy: str
+    state: str = "ok"               # ok | watch | tested | critical
+    heat: float = 0.0
+    mark: RescueMark = RescueMark()
+    context: list[str] = []
+    candidates: list[RescueCandidate] = []
+    priced_from_version: int | None = None
+    ts: str | None = None
+    error: str | None = None
