@@ -1527,3 +1527,298 @@ def compute_expected_move(symbol, expiry, legs, lookback="auto") -> dict:
     except Exception as exc:
         base["error"] = f"{type(exc).__name__}: {exc}"
         return base
+
+
+# ── Rescue advisory integration (Task 6.1) ──────────────────────────────────
+# Wires the pure ``rescue`` engine (services/options_svc/rescue.py) to the live
+# data path: load a paper position, reprice it to a mark (reusing the same
+# ``signal_repricer.reprice_swing`` the manage cycle / captured view use), pull
+# gamma + regime context, then call the engine's ``rescue_candidates`` +
+# ``assess_position_risk``. compute_rescue + assess_open_positions are FULLY
+# DEFENSIVE — they never raise (return {"error": ...} / empty aggregates).
+#
+# ``reprice_swing`` is imported as a MODULE-LEVEL alias (not lazy) so it is a
+# monkeypatch target in tests; it lives in options-scanner which is already on
+# sys.path (module top). It pulls ``fill_model`` transitively but NOT
+# ``scoring``, so binding it at import is safe in this isolated service process.
+from services.options_svc import rescue as _rescue  # noqa: E402
+_rescue_candidates = _rescue.rescue_candidates
+_assess_position_risk = _rescue.assess_position_risk
+from shared.contracts.options import (  # noqa: E402
+    RescueAdvisory, RescueCandidate, RescueMark)
+
+import datetime as _rescue_dt  # noqa: E402
+
+# Aliased at module level so it stays a monkeypatch seam. (signal_repricer pulls
+# fill_model only; binding here does not touch options-scanner ``scoring``.)
+import signal_repricer as _signal_repricer  # noqa: E402
+reprice_swing = _signal_repricer.reprice_swing
+
+
+def _fetch_chain_for_expiry(symbol, expiry):
+    """Fetch the option chain for ONE expiry (from_date == to_date == expiry).
+
+    Mirrors ``signal_repricer._fetch_chain`` (a single-expiry pull) using the
+    shared proxy client so the leg pricer can price both the position's own
+    expiry AND a forward expiry (current+30d) the roll builders request.
+    Defensive: returns None on any failure / non-200."""
+    try:
+        exp_date = (_rescue_dt.date.fromisoformat(str(expiry)[:10])
+                    if expiry is not None else None)
+        if exp_date is None:
+            return None
+        resp = _proxy.schwab_py_client.get_option_chain(
+            symbol, contract_type="ALL", from_date=exp_date, to_date=exp_date)
+        return resp.json() if getattr(resp, "status_code", None) == 200 else None
+    except Exception:
+        return None
+
+
+def _leg_mid_from_chain(chain, right, strike):
+    """Per-contract mid (bid+ask)/2 for one leg in a chain payload, else None.
+
+    ``right`` is "PUT"|"CALL". Scans the matching exp-date map (any expiry in the
+    single-expiry chain) for the strike key (Schwab keys strikes as "500.0").
+    Returns None if missing / one-sided (bid<=0 or ask<=0)."""
+    if not isinstance(chain, dict) or strike is None:
+        return None
+    map_key = "putExpDateMap" if str(right).upper() == "PUT" else "callExpDateMap"
+    key = f"{float(strike):.1f}"
+    for _exp_key, strikes in (chain.get(map_key) or {}).items():
+        contracts = (strikes or {}).get(key)
+        if contracts:
+            ctr = contracts[0]
+            bid = ctr.get("bid", 0) or 0
+            ask = ctr.get("ask", 0) or 0
+            if bid <= 0 or ask <= 0:
+                return None
+            return (bid + ask) / 2
+    return None
+
+
+def _make_leg_pricer(symbol):
+    """Return ``price_leg(symbol, expiry, right, strike) -> float | None``.
+
+    Backed by the per-expiry chain fetch. The chain for each requested expiry is
+    fetched once and cached inside the closure, so repeated leg lookups (and the
+    roll builders' forward expiry = current+30d) refetch at most once per expiry.
+    Fully defensive — None on any miss / fetch failure."""
+    cache: dict[str, dict | None] = {}
+
+    def price_leg(_sym, expiry, right, strike):
+        ek = str(expiry)[:10]
+        if ek not in cache:
+            cache[ek] = _fetch_chain_for_expiry(symbol, expiry)
+        chain = cache[ek]
+        if chain is None:
+            return None
+        return _leg_mid_from_chain(chain, right, strike)
+
+    return price_leg
+
+
+def _load_position(position_id):
+    """Load ONE paper position (or captured-signal-as-position) by id, or None.
+
+    paper_account_db has no get-by-id, so we filter ``fetch_all_positions``.
+    Lazy import (paper_account_db pulls no ``scoring``, but keep the house lazy
+    pattern). Defensive: None on any failure / not found."""
+    try:
+        import paper_account_db
+        for r in paper_account_db.fetch_all_positions(None):
+            if r.get("position_id") == position_id:
+                return r
+    except Exception:
+        return None
+    return None
+
+
+def _load_open_positions():
+    """All OPEN paper positions (list of dicts). [] on failure."""
+    try:
+        import paper_account_db
+        return paper_account_db.fetch_open_positions(None)
+    except Exception:
+        return []
+
+
+def _rescue_regime():
+    """Build a {trend_state, trend_confidence} dict from the sentiment bridge.
+
+    Reuses ``regime_filter.evaluate_regime`` (eagerly imported at module top),
+    which reads the sentiment bridge file and exposes ``trend_state`` +
+    ``trend_confidence``. Returns None if unavailable — rescue handles None."""
+    try:
+        reg = evaluate_regime() or {}
+        ts = reg.get("trend_state")
+        if ts is None:
+            return None
+        return {"trend_state": ts, "trend_confidence": reg.get("trend_confidence") or 0.0}
+    except Exception:
+        return None
+
+
+def _gex_from_snapshot(snap):
+    """Extract {flip, put_wall, call_wall} from a gamma_snapshot() GEX view.
+
+    The snapshot's ``views["GEX"]`` carries ``flip`` and ``walls`` =
+    [put_wall, call_wall] (one per side). Returns None if unavailable."""
+    if not isinstance(snap, dict):
+        return None
+    gex = (snap.get("views") or {}).get("GEX") or {}
+    walls = gex.get("walls") or []
+    put_wall = walls[0] if len(walls) >= 1 else None
+    call_wall = walls[1] if len(walls) >= 2 else None
+    if gex.get("flip") is None and put_wall is None and call_wall is None:
+        return None
+    return {"flip": gex.get("flip"), "put_wall": put_wall, "call_wall": call_wall}
+
+
+def _rescue_dte(expiration):
+    try:
+        exp = _rescue_dt.date.fromisoformat(str(expiration)[:10])
+        return (exp - _rescue_dt.date.today()).days
+    except Exception:
+        return None
+
+
+def compute_rescue(position_id) -> dict:
+    """Build the ranked rescue advisory for ONE paper position.
+
+    Loads the position, reprices it to a ``mark`` (live via reprice_swing,
+    falling back to the position's stored mark fields if reprice fails), pulls
+    gamma + regime context, and runs the pure rescue engine. Returns a dict
+    shaped like (and validated by) the ``RescueAdvisory`` contract; on ANY
+    failure returns ``{"error": "..."}``. Never raises."""
+    try:
+        pos = _load_position(position_id)
+        if not pos:
+            return {"error": "position not found"}
+
+        symbol = pos.get("symbol")
+        strategy = pos.get("strategy") or ""
+
+        # 1. mark — live reprice (defensive), else stored fields.
+        trade = {
+            "symbol": symbol,
+            "strategy": strategy,
+            "short_strike": pos.get("short_strike"),
+            "long_strike": pos.get("long_strike"),
+            "call_short": pos.get("call_short"),
+            "call_long": pos.get("call_long"),
+            "entry_credit": pos.get("entry_credit") or 0.0,
+            "expiration": pos.get("expiration"),
+        }
+        rep = None
+        try:
+            rep = reprice_swing(trade, _proxy.schwab_py_client)
+        except Exception:
+            rep = None
+        if rep and not rep.get("error"):
+            current_value = rep.get("current_value")
+            unrealized_pnl = rep.get("unrealized_pnl")
+            underlying = rep.get("current_underlying")
+            short_delta = rep.get("current_short_delta")
+        else:
+            # fall back to the position's already-stored marks
+            current_value = pos.get("current_value")
+            unrealized_pnl = pos.get("unrealized_pnl")
+            underlying = None
+            short_delta = pos.get("current_short_delta")
+
+        dte = _rescue_dte(pos.get("expiration"))
+        mark = {
+            "underlying": underlying,
+            "current_value": current_value,
+            "unrealized_pnl": unrealized_pnl,
+            "short_delta": short_delta,
+            "dte": dte,
+        }
+        # rescue engine uses ``current_underlying`` / ``current_short_delta`` keys.
+        engine_mark = {
+            "current_underlying": underlying,
+            "current_value": current_value,
+            "unrealized_pnl": unrealized_pnl,
+            "current_short_delta": short_delta,
+            "dte": dte,
+        }
+
+        # 2. gamma context (defensive → None).
+        try:
+            snap = gamma_snapshot(symbol)
+        except Exception:
+            snap = None
+        gex = _gex_from_snapshot(snap)
+
+        # 3. regime context (defensive → None).
+        regime = _rescue_regime()
+
+        # 4. engine.
+        price_leg = _make_leg_pricer(symbol)
+        candidates = _rescue_candidates(pos, engine_mark, price_leg, gex, regime,
+                                        underlying=underlying)
+        risk = _assess_position_risk(pos, engine_mark, gex, regime)
+
+        # context = the engine notes (carried on candidates[0].context), else [].
+        context = []
+        if candidates and candidates[0].get("context"):
+            context = list(candidates[0]["context"])
+
+        adv = RescueAdvisory(
+            position_id=position_id,
+            symbol=symbol,
+            strategy=strategy,
+            state=risk.get("state", "ok"),
+            heat=risk.get("heat", 0.0),
+            mark=RescueMark(**mark),
+            context=context,
+            candidates=[RescueCandidate(**c) for c in candidates],
+            ts=_rescue_dt.datetime.now(_rescue_dt.timezone.utc).isoformat(),
+        )
+        return adv.model_dump()
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {e}"}
+
+
+def assess_open_positions() -> dict:
+    """Cheap risk pass over all OPEN paper positions using STORED marks only.
+
+    No chain / gamma fetch — uses each position's already-stored
+    current_underlying-equivalent (``current_value``/``unrealized_pnl``/
+    ``current_short_delta``) fields. Returns
+    ``{"per_position": {id: {state, heat}}, "summary": {n_tested, n_critical,
+    position_ids}}``. Never raises."""
+    per_position: dict = {}
+    tested_ids: list = []
+    n_critical = 0
+    try:
+        positions = _load_open_positions()
+    except Exception:
+        positions = []
+    for pos in positions or []:
+        try:
+            pid = pos.get("position_id")
+            mark = {
+                "current_underlying": pos.get("current_underlying"),
+                "current_value": pos.get("current_value"),
+                "unrealized_pnl": pos.get("unrealized_pnl"),
+                "current_short_delta": pos.get("current_short_delta"),
+                "dte": _rescue_dte(pos.get("expiration")),
+            }
+            risk = _assess_position_risk(pos, mark, gex=None, regime=None)
+            state = risk.get("state", "ok")
+            per_position[pid] = {"state": state, "heat": risk.get("heat", 0.0)}
+            if state in ("tested", "critical"):
+                tested_ids.append(pid)
+            if state == "critical":
+                n_critical += 1
+        except Exception:
+            continue
+    return {
+        "per_position": per_position,
+        "summary": {
+            "n_tested": len(tested_ids),
+            "n_critical": n_critical,
+            "position_ids": tested_ids,
+        },
+    }
