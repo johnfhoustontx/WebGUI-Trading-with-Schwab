@@ -8,7 +8,22 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-06-20 (**Replay + Expected Move look-back, DTE-aware**: the
+**Last updated:** 2026-06-21 (**Rescue Tested Trades DONE**: new `/options/rescue`
+page + an advisory/one-click-apply rescue feature for tested credit spreads (PCS/CCS/
+IC). Hybrid arch ("Approach C"): cheap at-risk detection rides the existing 5-min
+manage cycle (tags paper-account rows with `rescue_state`/`heat` + publishes
+`cache:options:rescue_summary` for a nav badge); the ranked candidate menu is computed
+on-demand via a `rescue` command → `cache:options:rescue:<position_id>`; apply executes
+via new paper-engine primitives behind a stale-price guard. New PURE engine
+`services/options_svc/rescue.py` (11 candidate builders + risk/context/scoring),
+`compute.compute_rescue`, `handlers.rescue`/`rescue_apply` + summary overlay,
+`options-scanner/paper_adjust.py` (apply primitives + dispatcher), `paper_account_db`
+`position_adjustments` table + `parent_position_id` col, `config/commissions.toml`
+(commission source of truth), `RescueAdvisory`/`RescueCandidate` contracts.
+shared/contracts 24 + options_svc 226 + webgui 372 green; options-scanner 1056 (12
+pre-existing fails). Verified live (real INTC paper positions). Branch
+`Using_Highcharts`. See "Rescue tested trades" below.)
+Prior — 2026-06-20 (**Replay + Expected Move look-back, DTE-aware**: the
 Simulator Replay path and the Expected Move trailing history now size to the
 selected contract's **DTE** (Replay tiers 1-min/1d → daily/~½×DTE; EM ≈ **3× DTE**)
 with an **auto + manual-override** look-back dropdown on each tab. EM also
@@ -205,6 +220,7 @@ Routes:
 | `/options/gamma` | Gamma (GEX/Charm/DEX/Vanna bars + flip/**single Call+Put walls** + intraday heatmap; bar/heatmap **width split grows with session** snapshot count; **flicker-free** in-place Highcharts updates; **symbol is a dropdown** — default `$SPX`, populated from the collected universe (watchlist minus `$VIX`) via `cache:options:gamma_symbols`; Explain works per-selected-symbol) | built |
 | `/options/simulator` | Simulator (all three legacy tabs: **Replay** (re-prices the contract along the underlying's recent path → stacked price + 5-Greek panels over a gap-compressed integer x-axis w/ a client-side scrub cursor) + What-if + IV-shock) | built |
 | `/options/expected-move` | Expected Move (candlestick price history (6-mo daily) + forward **ATM-IV expected-move cone** to the option's expiration (green/red dashed, √-time fan) + leg **strike lines** (short solid / long dashed, put/call colored) + axis **crosshair** w/ Date(X)+Price(Y) label boxes; opened in a **new browser tab** via stash-handoff from Scanner/Paper/Captured/Calculator, or standalone w/ symbol+expiry input) | built |
+| `/options/rescue` | Rescue (at-risk credit spreads (PCS/CCS/IC) → **at-risk table** (paper+captured, heat-colored) → select a position → ranked **commission-aware adjustment menu**: close / partial-close / narrow / convert-IC / butterfly / roll-down/out/down-out / broken-wing / inverted / futures-hedge; each card shows gross/commission/net + metrics + legs + rationale + strategic context + warnings + score; execute cards have **Apply → confirm → `rescue_apply`** behind a stale-price guard, advisory cards show "manual"; nav badge from `cache:options:rescue_summary`) | built |
 | `/sentiment` | Sentiment (two-column top: **dual** Sentiment gauges (Today + 30-Day Avg) + **dual** Market Trend gauges (Today live-intraday + 30-Day structural — directional 0–100 score, 15-min cadence) / component table; traffic-light tiles; 30d history + rolling avgs; full-width **Sector & Industry Performance** w/ Day/Week/Month %, P/C, RRG, rotation banner, **expandable industries w/ P/C+RRG**; bottom status bar; **persists across navigation**; **server-side 120s auto-refresh + bridge publish, tab-independent**) | built |
 | `/sentiment/rotation` | Sector Rotation (RRG-vs-SPY: Risk-ON/OFF headline + spread; **top row** = quadrant-map table (left) + tight ROTATING FROM/INTO w/ S&P weights (right); **full-width RRG below** w/ per-sector "meteor tails" — engine `assess_sector` retains a `tail` of `TAIL_LENGTH=12` RS-Ratio/RS-Mom points sampled every `TAIL_STRIDE=2` days; page draws **one spline series per sector** (faded trail line + single bright head dot) and **hover-isolates** a sector via native Highcharts `plotOptions.series.states.inactive` (hovering one dims the rest — no client round-trip); reuses `sector_rotation_assessment`; cached, **manual Refresh only**) | built |
 | `/trade` | Trade (on-demand single-symbol analysis: **Position (1–8wk)** + **Investor (months+)** Buy/Hold/Sell verdicts w/ score + top reasons + hard gates + expandable factor breakdown; **MTF EMA alignment** (per-timeframe); momentum strip (RSI/ADX/MACD/VWAP/RelVol); sector strength; **Fundamentals card** (P/E/PEG/growth/ROE/margins via proxy `/instruments`); persists across nav) | built |
@@ -880,6 +896,64 @@ imports only `nicegui` + `bus_client`/`proxy` + `repo_paths`. Pieces:
   `webgui/tests/test_status.py` (34); render + live restart + live auth-card
   verified by screenshot.
 
+**Rescue tested trades (`/options/rescue`) — DONE (2026-06-21).** An advisory +
+one-click-apply rescue feature for **tested credit spreads** (PCS/CCS/IC). Architecture
+is **"Approach C (hybrid)"**: cheap **at-risk detection** rides the existing 5-min
+manage cycle (tags paper-account rows + publishes a summary for a nav badge), while the
+expensive **ranked candidate menu** is computed **on-demand** via a command, and **apply**
+executes through new paper-engine primitives behind a stale-price guard. Pieces:
+- **Commission source of truth** `config/commissions.toml` — Schwab standard rates
+  (options **$0.65/contract per leg**, futures $2.25/side, index-exchange-fee passthrough);
+  loaded by `services/options_svc/commission.py` (`commission_for`/`futures_commission`/
+  `is_index_symbol`). **Rule: don't hard-code rates** — add them here.
+- **Contracts** `shared/contracts/options.py`: new `RescueAdvisory` + `RescueCandidate`
+  (+ `RescueLeg`/`RescueMark`) — validate the advisory envelope before caching.
+- **PURE engine** `services/options_svc/rescue.py`: `assess_position_risk` (ok/watch/
+  tested/critical + 0-100 **heat**, thresholds mirror the manage-cycle stops),
+  `strategic_context` (dealer-gamma/regime/settlement notes+flags), **11 candidate
+  builders** (close, partial_close, narrow, convert_ic, convert_butterfly, broken_wing
+  [advisory], roll_down, roll_out, roll_down_out, inverted [advisory], futures_hedge
+  [advisory]), `score_candidate` (max-loss-reduction-per-net-$ + delta + credit-vs-debit
+  penalty + GEX/regime modifiers), and the `rescue_candidates` orchestrator (ranks +
+  attaches context/warnings; **per-item construction** so one bad candidate can't sink
+  the advisory).
+- **Compute (Tier 2)** `services/options_svc/compute.py`: `compute_rescue(position_id)`
+  (loads the position, reprices via `signal_repricer.reprice_swing`, fills underlying from
+  the `gamma_snapshot` spot when the live quote is missing off-hours, pulls regime from the
+  sentiment bridge, runs the engine, returns a contract-validated dict — fully defensive),
+  `assess_open_positions()` (cheap stored-marks pass for the badge), `_make_leg_pricer(symbol)`
+  (per-expiry chain-mid pricer).
+- **Handlers** `services/options_svc/handlers.py`: the manage-cycle overlay merges
+  `rescue_state`/`heat` onto the paper-account view; `publish_rescue_summary`; `rescue` +
+  `rescue_apply` command handlers (`rescue_apply` refuses non-paper/captured ids and **never
+  mutates on a stale re-price**). Cache keys: `cache:options:rescue:<position_id>` (one
+  per-position advisory) + `cache:options:rescue_summary` (n_tested + n_critical for the badge).
+- **Apply primitives** `options-scanner/paper_adjust.py` (NEW): `apply_close`/
+  `apply_partial_close`/`apply_narrow`/`apply_convert_ic`/`apply_convert_butterfly`/
+  `apply_roll`/`apply_inverted` mutate the paper DB inside the existing cash/buying-power
+  mechanism (reconciling reserved BP to the new max-loss), write an audit row, and the
+  `apply_adjustment` dispatcher re-prices the candidate legs and **aborts without mutation**
+  if economics drifted > tolerance or the position isn't OPEN. `options-scanner/
+  paper_account_db.py` grows a `position_adjustments` audit table + a `parent_position_id`
+  column on `paper_positions` (linked rolls) + `insert_adjustment`/`list_adjustments`.
+- **Page** `webgui/pages/options/rescue.py` (Tier-1, engine-free): `render()` + pure builders
+  (`heat_color`/`at_risk_rows`/`candidate_card_rows`/`cash_text`/`summary_line`) — an at-risk
+  table (paper+captured, heat-colored) → select a position → enqueues `rescue` → version-polls
+  `cache:options:rescue:<id>` → ranked candidate cards (execute cards Apply→confirm→
+  `rescue_apply`; advisory cards show "manual"). One persistent `ui.highchart` (ESM-import-map
+  gotcha); `@guard` on handlers; degrades to a waiting-for-service placeholder.
+- **Wiring** `webgui/main.py`: `("/options/rescue", "Rescue", "healing")` in the Options nav
+  group + `@ui.page("/options/rescue")` route + a red count badge (key `/options/rescue`) fed
+  from `cache:options:rescue_summary`, cleared on page open; `/options/rescue` in
+  `test_shell.py`; a `webgui/page_help.py` guide entry.
+- **Known limitation (follow-up):** the at-risk **row highlights** were wired into `paper.py`
+  (paper_trades ledger) + `captured.py` per the plan, but the `rescue_state`/`heat` overlay
+  actually lands on `cache:options:paper_account` (rendered by `/options/portfolio`), so those
+  two highlights are currently **dormant** — the primary at-risk surfaces (the Rescue page table
+  + nav badge) work correctly.
+- Design/plan: [design](docs/plans/2026-06-21-rescue-tested-trades-design.md) /
+  [plan](docs/plans/2026-06-21-rescue-tested-trades-plan.md).
+
 ## Paths and ports: `repo_paths.py` + `config/ports.toml`
 
 `repo_paths.py` at the repo root is the single source of truth for cross-app
@@ -918,6 +992,11 @@ driver    = 8214
 
 **Rule: never hard-code `D:\` paths or port numbers in the apps.** Add them to
 `repo_paths.py` / `config/ports.toml` and import them.
+
+`config/commissions.toml` is the single source of truth for **commission rates**
+(Schwab standard: options $0.65/contract per leg, futures $2.25/side, index-exchange-fee
+passthrough), loaded by `services/options_svc/commission.py` (used by the Rescue
+candidate menu). **Rule: don't hard-code commission rates** — add them here.
 
 ## Secrets
 
