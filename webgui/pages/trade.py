@@ -139,10 +139,10 @@ def markov_metric_rows(mk):
     rows = []
     for h in mk.get("horizons", []):
         rows.append({
-            "horizon": f"{h['n']}d",
-            "p_buy": f"{round(h['p_buy'] * 100)}%",
-            "p_sell": f"{round(h['p_sell'] * 100)}%",
-            "e_score": f"{h['e_score']:+.0f}",
+            "horizon": f"{h.get('n', '?')}d",
+            "p_buy": f"{round(h.get('p_buy', 0) * 100)}%",
+            "p_sell": f"{round(h.get('p_sell', 0) * 100)}%",
+            "e_score": f"{h.get('e_score', 0):+.0f}",
         })
     return rows
 
@@ -181,9 +181,9 @@ def markov_forecast_figure(mk):
         now[cb] = 1.0
     dists = [now] + [h["dist"] for h in mk["horizons"]]
     series = [{
-        "name": labels[b],
+        "name": labels[b] if b < len(labels) else "?",
         "color": _MK_AREA_COLORS[b],
-        "data": [round(d[b], 4) for d in dists],
+        "data": [round(d[b] if b < len(d) else 0.0, 4) for d in dists],
     } for b in range(5)]
     return {
         **base,

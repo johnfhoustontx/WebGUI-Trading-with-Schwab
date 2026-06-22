@@ -144,3 +144,24 @@ def test_markov_builders_tolerate_none():
     assert trade.markov_metric_rows(None) == []
     assert trade.markov_drift_row(None) is None
     assert trade.markov_forecast_figure(None)["series"] == []
+
+
+def test_markov_empty_horizons():
+    mk = {"current_band": 2, "band_labels": ["a", "b", "c", "d", "e"], "horizons": []}
+    assert trade.markov_metric_rows(mk) == []
+    fig = trade.markov_forecast_figure(mk)
+    assert fig["xAxis"]["categories"] == ["now"]
+    assert all(len(s["data"]) == 1 for s in fig["series"])
+
+
+def test_markov_band_out_of_range():
+    chip = trade.markov_band_chip({"current_band": 9,
+                                   "band_labels": ["a", "b", "c", "d", "e"]})
+    assert chip["label"] == "?"
+
+
+def test_markov_figure_category_data_alignment():
+    fig = trade.markov_forecast_figure(_MK)  # _MK is the existing fixture in this file
+    assert fig["xAxis"]["categories"] == ["now", "5d", "10d", "20d"]
+    assert len(fig["series"]) == 5
+    assert all(len(s["data"]) == 4 for s in fig["series"])
