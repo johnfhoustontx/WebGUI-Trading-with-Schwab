@@ -408,9 +408,12 @@ def term_heatmap(term_grid):
     """
     grid = term_grid or {}
     exps = grid.get("expirations") or []
-    cells = grid.get("cells") or {}
+    raw_cells = grid.get("cells") or {}
+    # Strike keys round-trip to STRINGS through Redis JSON; re-float per expiry so the
+    # numeric sort + ``{s:g}`` labels below work (idempotent for already-float keys).
+    cells = {exp: _refloat_keys(raw_cells.get(exp) or {}) for exp in exps}
     strikes = sorted({k for exp in exps for k, v in (cells.get(exp) or {}).items()
-                      if (v or {}).get("net_gex_usd")})
+                      if isinstance(k, (int, float)) and (v or {}).get("net_gex_usd")})
     z = [[((cells.get(exp) or {}).get(s) or {}).get("net_gex_usd") for exp in exps]
          for s in strikes]
     data = [[xi, yi, z[yi][xi]]

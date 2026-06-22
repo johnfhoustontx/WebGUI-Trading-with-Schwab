@@ -200,6 +200,19 @@ def test_term_heatmap_empty():
     assert gamma.term_heatmap({})["series"][0]["data"] == []
 
 
+def test_term_heatmap_handles_json_string_strike_keys():
+    # Strike keys round-trip to STRINGS through Redis JSON. term_heatmap must
+    # numeric-sort + label them (not crash on f"{s:g}", not sort lexically).
+    tg = {"expirations": ["2026-06-18", "2026-06-19"],
+          "cells": {"2026-06-18": {"450.0": {"net_gex_usd": 5}, "1000.0": {"net_gex_usd": 9}},
+                    "2026-06-19": {"450.0": {"net_gex_usd": -3}, "451.0": {"net_gex_usd": 0}}}}
+    fig = gamma.term_heatmap(tg)
+    cats = fig["yAxis"]["categories"]
+    assert cats == ["450", "1000"]          # numeric order, not lexical "1000" < "450"
+    assert "451" not in cats                 # all-zero strike still filtered
+    assert any(p[2] == 9 for p in fig["series"][0]["data"])   # net value looked up by re-floated key
+
+
 def test_wrap_explain_fragment_and_document():
     body = "<h2>GAMMA EXPOSURE (GEX)</h2><p>hi</p>"
     frag = gamma.wrap_explain("$SPX", body, full=False)
