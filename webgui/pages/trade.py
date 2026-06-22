@@ -159,6 +159,17 @@ def markov_drift_row(mk):
     }
 
 
+def position_headline(pv, mk):
+    """Headline score for the Position card: the Markov-adjusted score when a
+    markov block is present (with the base score + tilt exposed for a subtitle),
+    else the plain base score. Does NOT change the BUY/HOLD/SELL verdict label."""
+    base = int(round((pv or {}).get("score", 0)))
+    if not mk:
+        return {"score": base, "base": base, "tilt": ""}
+    adj = int(round(mk.get("markov_adjusted_score", base)))
+    return {"score": adj, "base": base, "tilt": f"{mk.get('tilt', 0):+.0f}"}
+
+
 def markov_forecast_figure(mk):
     """Highcharts stacked-area option dict: band probability over horizon.
 
@@ -247,16 +258,25 @@ def render():
                 if vol:
                     ui.label(f"Vol {vol:,}").classes("opacity-60 text-sm")
 
-    def _verdict_card(title, verdict):
+    def _verdict_card(title, verdict, mk=None):
         verdict = verdict or {}
+        # When a Markov block is present, headline the adjusted score (base + tilt
+        # in a subtitle). The verdict WORD/color are unchanged — never re-derived.
+        head = position_headline(verdict, mk) if mk else None
         with ui.card().classes("flex-1 min-w-[280px]"):
             ui.label(title).classes("text-subtitle2 opacity-70")
             with ui.row().classes("items-baseline gap-3"):
                 ui.label(verdict.get("verdict", "—")).classes("text-h4 text-weight-bold") \
                     .style(f"color:{verdict_color(verdict.get('verdict'))}")
-                ui.label(f"score {verdict.get('score', 0):+d}"
-                         if isinstance(verdict.get("score"), int)
-                         else "").classes("opacity-70")
+                if head and isinstance(verdict.get("score"), int):
+                    ui.label(f"score {head['score']:+d}").classes("opacity-70")
+                else:
+                    ui.label(f"score {verdict.get('score', 0):+d}"
+                             if isinstance(verdict.get("score"), int)
+                             else "").classes("opacity-70")
+            if head and head["tilt"] and isinstance(verdict.get("score"), int):
+                ui.label(f"base {head['base']:+d} · Markov {head['tilt']}") \
+                    .classes("text-xs opacity-60")
             for r in verdict.get("top_reasons", []):
                 ui.label(f"• {r}").classes("text-sm opacity-80")
             for g in verdict.get("gates_triggered", []):
@@ -327,7 +347,7 @@ def render():
             _header(res)
             if res.get("position_verdict") or res.get("investor_verdict"):
                 with ui.row().classes("w-full gap-3 items-stretch flex-wrap"):
-                    _verdict_card("Position · 1–8 wk", res.get("position_verdict"))
+                    _verdict_card("Position · 1–8 wk", res.get("position_verdict"), res.get("markov"))
                     _verdict_card("Investor · months+", res.get("investor_verdict"))
                 with ui.row().classes("w-full gap-3 items-stretch flex-wrap"):
                     _alignment_card(res.get("ema_alignment"))

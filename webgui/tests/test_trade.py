@@ -165,3 +165,15 @@ def test_markov_figure_category_data_alignment():
     assert fig["xAxis"]["categories"] == ["now", "5d", "10d", "20d"]
     assert len(fig["series"]) == 5
     assert all(len(s["data"]) == 4 for s in fig["series"])
+
+
+def test_position_headline_prefers_markov():
+    pv = {"verdict": "HOLD", "score": 38}
+    mk = {"markov_adjusted_score": 44.0, "tilt": 6.0}
+    head = trade.position_headline(pv, mk)
+    assert head["score"] == 44 and head["base"] == 38 and "+6" in head["tilt"]
+
+
+def test_position_headline_no_markov():
+    head = trade.position_headline({"verdict": "BUY", "score": 41}, None)
+    assert head["score"] == 41 and head["base"] == 41 and head["tilt"] == ""
