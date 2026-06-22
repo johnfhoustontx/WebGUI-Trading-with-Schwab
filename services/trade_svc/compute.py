@@ -220,7 +220,7 @@ def _rsi_series(close, period=14):
     gain = delta.where(delta > 0, 0.0).rolling(period).mean()
     loss = (-delta.where(delta < 0, 0.0)).rolling(period).mean()
     rs = gain / loss.replace(0, 1e-4)
-    return 100 - (100 / (1 + rs))
+    return (100 - (100 / (1 + rs))).where(close.notna())
 
 
 def _adx_series(daily, period=14):
@@ -271,8 +271,10 @@ def reconstruct_daily_composite(daily, spy, sector_hist):
     """
     try:
         if daily is None or len(daily) < 60:
-            idx = None if daily is None else daily.index
-            return pd.Series([np.nan] * (0 if daily is None else len(daily)), index=idx)
+            if daily is None:
+                return pd.Series([], dtype=float)
+            idx = daily["datetime"] if "datetime" in daily.columns else daily.index
+            return pd.Series([np.nan] * len(daily), index=idx)
         d = daily.copy()
         if "datetime" in d.columns:
             d = d.set_index("datetime")
@@ -283,6 +285,9 @@ def reconstruct_daily_composite(daily, spy, sector_hist):
         ema_score = (above * 2 - 1) * 100
         slope = np.where(ema_score.to_numpy() >= 0, 1, -1)
 
+        # ADX + EMA-alignment tiers are inlined (vectorized) rather than calling
+        # the scalar _scoring primitives; keep the 15/20/25→30/60/100 ADX tiers
+        # in sync with scoring.score_adx_directional if that ever changes.
         adx = _adx_series(d)
         adx_score = pd.Series(0.0, index=close.index)
         adx_score = (adx_score.mask(adx >= 15, 30.0)
@@ -293,10 +298,10 @@ def reconstruct_daily_composite(daily, spy, sector_hist):
         rsi_score = rsi.map(lambda v: _scoring.score_rsi(float(v)) if pd.notna(v) else 0)
 
         macd_line = _ema_series(close, 12) - _ema_series(close, 26)
-        hist = macd_line - macd_line.ewm(span=9, adjust=False).mean()
+        macd_hist = macd_line - macd_line.ewm(span=9, adjust=False).mean()
         macd_score = pd.Series(
             [_scoring.score_macd(float(h), float(p)) if pd.notna(h) and pd.notna(p) else 0
-             for h, p in zip(hist, hist.shift())], index=close.index)
+             for h, p in zip(macd_hist, macd_hist.shift())], index=close.index)
 
         vol = d["volume"].astype(float)
         rel = vol / vol.rolling(20).mean().replace(0, 1e-4)
@@ -322,6 +327,12 @@ def reconstruct_daily_composite(daily, spy, sector_hist):
                     + rel_score * w["rel_vol"] + dist_score * w["dist52"]
                     + rs3 * w["rs3m"] + rs6 * w["rs6m"] + sec_score * w["sector"])
         composite = (weighted / _MK_WEIGHT_SUM).clip(-100, 100)
+        # A bar with a missing close is NOT an observation: null it so the Markov
+        # chain breaks there (a data hole must never read as a bearish state).
+        # (Bars immediately AFTER a hole may be marginally contaminated via the
+        # rolling/ewm windows — acceptable: daily equity history is gap-free in
+        # practice; the hole bars themselves are correctly excluded.)
+        composite = composite.where(close.notna())
         if len(composite) > _MK_WARMUP:
             composite.iloc[:_MK_WARMUP] = np.nan
         return composite

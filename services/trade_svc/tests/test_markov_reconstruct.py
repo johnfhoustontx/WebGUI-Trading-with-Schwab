@@ -45,8 +45,36 @@ def test_reconstruct_handles_short_history():
 
 
 def test_reconstruct_defensive_on_garbage():
-    # a malformed frame must not raise — returns an (empty) Series
     bad = pd.DataFrame({"datetime": pd.date_range("2024-01-01", periods=70),
                         "close": [float("nan")] * 70})
     s = compute.reconstruct_daily_composite(bad, None, None)
     assert isinstance(s, pd.Series)
+
+
+def test_reconstruct_all_nan_frame_is_not_a_signal():
+    n = 80
+    idx = pd.date_range("2024-01-01", periods=n, freq="B")
+    allnan = pd.DataFrame({"datetime": idx, "open": [np.nan] * n, "high": [np.nan] * n,
+                           "low": [np.nan] * n, "close": [np.nan] * n,
+                           "volume": [np.nan] * n})
+    s = compute.reconstruct_daily_composite(allnan, None, None)
+    valid = s.dropna()
+    # all-NaN input must NOT produce a confident (bearish) score
+    assert valid.empty or (valid.abs() < 1.0).all()
+
+
+def test_reconstruct_data_hole_is_excluded():
+    daily = _synthetic_daily(n=300, drift=0.4, seed=5)
+    daily.loc[150:159, "close"] = np.nan  # a 10-bar data hole
+    s = compute.reconstruct_daily_composite(daily, None, None)
+    # the hole bars are not observations -> NaN (chain breaks), not bearish states
+    assert s.iloc[150:160].isna().all()
+
+
+def test_reconstruct_date_misaligned_spy_stays_in_range():
+    sym = _synthetic_daily(n=300, seed=6)
+    # SPY shorter and starting later -> date alignment (not positional) must hold
+    spy = _synthetic_daily(n=220, seed=7)
+    spy["datetime"] = pd.date_range("2024-03-01", periods=220, freq="B")
+    s = compute.reconstruct_daily_composite(sym, spy, None).dropna()
+    assert not s.empty and s.between(-100.0, 100.0).all()
