@@ -946,11 +946,13 @@ executes through new paper-engine primitives behind a stale-price guard. Pieces:
   group + `@ui.page("/options/rescue")` route + a red count badge (key `/options/rescue`) fed
   from `cache:options:rescue_summary`, cleared on page open; `/options/rescue` in
   `test_shell.py`; a `webgui/page_help.py` guide entry.
-- **Known limitation (follow-up):** the at-risk **row highlights** were wired into `paper.py`
-  (paper_trades ledger) + `captured.py` per the plan, but the `rescue_state`/`heat` overlay
-  actually lands on `cache:options:paper_account` (rendered by `/options/portfolio`), so those
-  two highlights are currently **dormant** — the primary at-risk surfaces (the Rescue page table
-  + nav badge) work correctly.
+- **At-risk row highlights:** the `rescue_state`/`heat` overlay lands on
+  `cache:options:paper_account`, so the heat-colored at-risk row tint is wired on the **Paper
+  Portfolio** page (`/options/portfolio`, `pages/options/portfolio.py` `rescue_highlight` +
+  `body-cell-symbol` slot) — live there. The earlier-wired tints in `paper.py` (paper_trades
+  ledger) + `captured.py` render different views that don't carry the overlay, so they stay
+  **dormant no-ops** (kept defensively; captured is forward-compatible if signals are ever
+  flagged). Primary at-risk surfaces (Rescue page table + nav badge) work regardless.
 - Design/plan: [design](docs/plans/2026-06-21-rescue-tested-trades-design.md) /
   [plan](docs/plans/2026-06-21-rescue-tested-trades-plan.md).
 

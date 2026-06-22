@@ -43,6 +43,27 @@ def test_position_rows_maps_and_keeps_id():
     assert rows[0]["unrealized_pnl"] == 28.0
 
 
+def test_rescue_highlight_zones():
+    # at-risk states return a heat color; healthy/unknown states return ''.
+    assert portfolio.rescue_highlight("critical", 90) == portfolio.heat_color(90)
+    assert portfolio.rescue_highlight("tested", 60) == portfolio.heat_color(60)
+    assert portfolio.rescue_highlight("watch", 40) == ""
+    assert portfolio.rescue_highlight("ok", 0) == ""
+    assert portfolio.rescue_highlight(None, None) == ""
+
+
+def test_position_rows_healthy_has_no_rescue_tint():
+    # POS carries no rescue_state -> no highlight (safe no-op for normal rows).
+    assert portfolio.position_rows([POS])[0]["_rescue_color"] == ""
+
+
+def test_position_rows_at_risk_gets_heat_tint():
+    tested = {**POS, "rescue_state": "critical", "heat": 88.0}
+    row = portfolio.position_rows([tested])[0]
+    assert row["_rescue_color"] == portfolio.heat_color(88.0)
+    assert row["_rescue_color"]  # non-empty
+
+
 def test_order_rows_maps():
     rows = portfolio.order_rows([ORD])
     assert rows[0]["order_id"] == 10

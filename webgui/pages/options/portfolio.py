@@ -18,6 +18,22 @@ from nicegui import ui
 
 from pages.ui_guard import guard
 
+from .rescue import heat_color
+
+# rescue_state values that mark a position at-risk. The options_svc manage cycle
+# tags THIS view (cache:options:paper_account) with rescue_state/heat via
+# handlers._apply_rescue_overlay, so the highlight is live here (unlike the
+# paper-trades ledger / captured views, where the overlay is absent).
+_AT_RISK_STATES = ("tested", "critical")
+
+
+def rescue_highlight(state, heat):
+    """Heat color for an at-risk row's symbol cell, or '' (no tint) otherwise.
+
+    Defensive: a missing/None ``state`` yields no highlight, so healthy rows look
+    unchanged."""
+    return heat_color(heat) if state in _AT_RISK_STATES else ""
+
 
 def _round(value, ndigits=2):
     return round(value, ndigits) if isinstance(value, (int, float)) else value
@@ -68,6 +84,10 @@ def position_rows(positions):
             "current_value": _round(p.get("current_value")),
             "unrealized_pnl": _round(p.get("unrealized_pnl")),
             "status": p.get("status", ""),
+            # At-risk rescue tint on the symbol cell (left border + faint fill),
+            # fed from the manage-cycle rescue overlay on this view. Safe no-op
+            # ('') when the position is healthy / carries no rescue_state.
+            "_rescue_color": rescue_highlight(p.get("rescue_state"), p.get("heat")),
         })
     return rows
 
@@ -123,6 +143,19 @@ def render():
     cards_box = ui.row().classes("gap-3 flex-wrap")
     ui.label("Open positions").classes("text-subtitle1 mt-2")
     pos_table = ui.table(columns=position_columns(), rows=[], row_key="id").classes("w-full")
+    # Symbol cell gets a colored left-border + faint tint when the position is
+    # at-risk (rescue_state tested/critical, from the manage-cycle overlay).
+    pos_table.add_slot('body-cell-symbol', r'''
+      <q-td :props="props">
+        <span v-if="props.row._rescue_color"
+              :style="`border-left:4px solid ${props.row._rescue_color};
+                       padding-left:6px;
+                       background:${props.row._rescue_color}22`">
+          {{ props.value }}
+        </span>
+        <span v-else>{{ props.value }}</span>
+      </q-td>
+    ''')
     ui.label("Fills log (last 100)").classes("text-subtitle1 mt-2")
     ord_table = ui.table(columns=order_columns(), rows=[], row_key="order_id").classes("w-full")
 
