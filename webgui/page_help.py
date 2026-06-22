@@ -155,7 +155,13 @@ Shows which sectors money is rotating **into** or **out of**, vs the S&P 500.
 A **Buy / Hold / Sell** read on a single stock, for two horizons.
 
 - **Position (1–8 weeks)** vs **Investor (months+)** verdicts, each with a score
-  and its top reasons.
+  and its top reasons. These sit side-by-side with the **Markov Forecast** as three
+  equal cards.
+- **Markov Forecast** — looks at where the Position score has historically *travelled*
+  and forecasts where it's likely to head: the colored bars show the odds of drifting
+  toward **BUY** or **SELL** over the next 5 / 10 / 20 days, and a small **tilt** nudges
+  the Position score up or down (the Buy/Hold/Sell **word** itself never changes — the
+  tilt is advisory).
 - **Hard gates (⛔)** — deal-breakers that override the score.
 - **MTF alignment / Momentum / Fundamentals** — the evidence behind the verdict.
 - Type a symbol and press **Analyze**.

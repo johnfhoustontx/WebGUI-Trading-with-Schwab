@@ -550,6 +550,71 @@ fraction; `returnOnEquity` as percent via a `>2` magnitude heuristic;
 as fallback. Fields the payload does not carry (next-earnings date, EPS surprises,
 guidance, FCF) degrade to `None`, so those gates simply never fire.
 
+## Markov 2.0 forecast (Position)
+
+**Files:** `trade-analyzer/src/analysis/markov.py` (pure math) +
+`services/trade_svc/compute.py` (reconstruction, prior, wiring). A probabilistic
+forward layer on the **Position** composite score, rendered as the third card in the
+verdict row.
+
+**States — 5 score bands** anchored at the verdict's decision boundaries
+(`classify_band`):
+
+| Band | Composite-score range | Verdict zone |
+|------|-----------------------|--------------|
+| 0 Strong-Bear | [−100, −40) | SELL |
+| 1 Weak-Bear | [−40, −15) | HOLD |
+| 2 Neutral | [−15, +15) | HOLD |
+| 3 Weak-Bull | [+15, +40) | HOLD |
+| 4 Strong-Bull | [+40, +100] | BUY |
+
+**Markov base score (`composite_daily`).** The live verdict mixes intraday-only
+factors (intraday VWAP, intraday relative volume, multi-timeframe EMA alignment) that
+cannot be reconstructed for past bars, so the chain instead runs on a parallel
+**daily-only** composite computed identically for every historical bar and for "now"
+(`reconstruct_daily_composite`): EMA-alignment (price vs the daily 12/21/50/200 EMA
+stack), ADX (directional), RSI, MACD, daily relative volume, distance-from-252-day-
+high, RS vs SPY (63d/126d), and sector-ETF-vs-SPY RS — the daily-reconstructable
+subset of the Position factors, weights renormalized to a 100-point scale. A bar with
+a missing close is excluded (it is not an observation).
+
+**Transition matrix — hybrid (per-symbol + pooled prior).** Day-to-day band
+transitions over ~1 yr of `composite_daily` form a 5×5 count matrix `C_sym`
+(`count_matrix`). Each row is Bayesian-shrunk toward a pooled prior via a
+Dirichlet-multinomial blend (`shrink`, α = 30):
+
+```
+P[i,j] = (C_sym[i,j] + α · Prior[i,j]) / (Σ_j C_sym[i,j] + α)
+```
+
+The **pooled prior** (`build_pooled_prior` / `get_prior`) aggregates band transitions
+across a curated 17-symbol universe, row-normalized (`pooled_prior`); it is cached at
+`cache:trade:markov_prior` and rebuilt lazily once per day (uniform fallback on
+failure).
+
+**Forecast** (`forecast`). From the current band, the n-step distribution is
+`dist₀ · Pⁿ` (`project`) for n = 5 / 10 / 20 trading days, yielding **P(BUY)** =
+P(band 4), **P(SELL)** = P(band 0), and **E[score]** = Σ midpoint·prob over band
+midpoints `[−70, −27.5, 0, +27.5, +70]`. The row's self-transition probability is the
+**persistence**; the **stationary** (long-run) distribution is found by power
+iteration (robust to reducible chains).
+
+**Drift tilt** (`drift_tilt`, `row_confidence`). The expected forward move drives a
+bounded, confidence-weighted adjustment to the displayed score:
+
+```
+drift      = E[score @ 10d] − composite_daily_now
+confidence = n / (n + 40)            # n = observed transitions out of the current band
+tilt       = clip(0.5 · drift, −12, +12) · confidence
+markov_adjusted_score = clip(composite_full + tilt, −100, +100)
+```
+
+`composite_full` is the live (intraday-enriched) Position score. **No feedback by
+construction:** the chain is built only from `composite_daily`, so the tilt added to
+`composite_full` can never feed back into the matrix. The tilt moves the **score**
+only — the Buy/Hold/Sell **label** is never re-derived from it. Every step is
+defensive: any failure yields no Markov block and the verdict is unchanged.
+
 ---
 
 # Portfolio Analytics

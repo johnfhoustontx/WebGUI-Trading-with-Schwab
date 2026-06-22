@@ -62,7 +62,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <h1>WebGUI Trading with Schwab</h1>
   <div class="sub">API / Developer Reference</div>
-  <div class="meta">WebGUI Trading with Schwab · Generated 2026-06-21</div>
+  <div class="meta">WebGUI Trading with Schwab · Generated 2026-06-22</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a></li>
@@ -233,7 +233,7 @@ a contract (listed in <em>Cache Key Index</em>).</p>
 <td><code>TradeAnalysis</code></td>
 <td><code>trade.py</code></td>
 <td><code>cache:trade:analysis</code></td>
-<td><code>symbol</code>, <code>description</code>, <code>price</code>, <code>volume</code>, <code>bias</code>, <code>ema_alignment{}</code>, <code>momentum{}</code>, <code>volume_profile{}</code>, <code>sector{}</code>, <code>position_verdict{}</code>, <code>investor_verdict{}</code>, <code>fundamentals{}</code>, <code>fundamentals_available</code>, <code>timestamp</code>, <code>errors[]</code></td>
+<td><code>symbol</code>, <code>description</code>, <code>price</code>, <code>volume</code>, <code>bias</code>, <code>ema_alignment{}</code>, <code>momentum{}</code>, <code>volume_profile{}</code>, <code>sector{}</code>, <code>position_verdict{}</code>, <code>investor_verdict{}</code>, <code>fundamentals{}</code>, <code>fundamentals_available</code>, <code>markov{}</code> (optional), <code>timestamp</code>, <code>errors[]</code></td>
 </tr>
 <tr>
 <td><code>PortfolioModel</code></td>
@@ -525,7 +525,29 @@ the <code>PortfolioModel</code> contract.</p>
 <tr>
 <td><code>analyze</code></td>
 <td><code>{symbol}</code></td>
-<td>MTF technical + fundamental analysis → <code>cache:trade:analysis</code>.</td>
+<td>MTF technical + fundamental analysis, plus the <strong>Markov 2.0</strong> forecast (5-band composite-score chain → band-probability forecast + bounded drift tilt) → <code>cache:trade:analysis</code>.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Published views:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Cache key</th>
+<th>Event</th>
+<th>Payload</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cache:trade:analysis</code></td>
+<td><code>events:trade:analysis</code></td>
+<td><code>TradeAnalysis</code> — verdicts + momentum + sector + fundamentals + the optional <code>markov</code> forecast block.</td>
+</tr>
+<tr>
+<td><code>cache:trade:markov_prior</code></td>
+<td>—</td>
+<td>Pooled Markov transition prior <code>{matrix[5][5], date, n_symbols}</code>; rebuilt lazily once/day and read by <code>analyze</code> (internal memoization — no event).</td>
 </tr>
 </tbody>
 </table>

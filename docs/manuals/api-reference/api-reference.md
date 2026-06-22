@@ -114,7 +114,7 @@ a contract (listed in *Cache Key Index*).
 | Class | File | Cache key | Key fields |
 |-------|------|-----------|-----------|
 | `ScanResult` | `options.py` | `cache:options:scan` | `signals_0dte[]`, `signals_swing[]`, `vix_term_structure{}`, `timestamp`, `errors[]`, `warnings[]` |
-| `TradeAnalysis` | `trade.py` | `cache:trade:analysis` | `symbol`, `description`, `price`, `volume`, `bias`, `ema_alignment{}`, `momentum{}`, `volume_profile{}`, `sector{}`, `position_verdict{}`, `investor_verdict{}`, `fundamentals{}`, `fundamentals_available`, `timestamp`, `errors[]` |
+| `TradeAnalysis` | `trade.py` | `cache:trade:analysis` | `symbol`, `description`, `price`, `volume`, `bias`, `ema_alignment{}`, `momentum{}`, `volume_profile{}`, `sector{}`, `position_verdict{}`, `investor_verdict{}`, `fundamentals{}`, `fundamentals_available`, `markov{}` (optional), `timestamp`, `errors[]` |
 | `PortfolioModel` | `portfolio.py` | `cache:portfolio:positions` | `holdings_rows[]`, `sector_rows[]`, `performance_rows[]`, `suggestions{}`, `proxy_up`, `streaming`, `errors[]`, `timestamp` |
 | `ApprovalState` | `driver.py` | `cache:driver:approvals` | `date`, `grade`, `grade_reasons[]`, `conditions{}`, `pnl_today`, `pnl_week`, `proposed_trades[]`, `status`, `decision`, `results[]`, `reasons[]`, `error`, `timestamp` |
 | `PerfReport` | `driver.py` | `cache:driver:performance` | `summary{}`, `trades[]`, `timestamp` |
@@ -218,7 +218,14 @@ the `PortfolioModel` contract.
 
 | Type | Args | Effect |
 |------|------|--------|
-| `analyze` | `{symbol}` | MTF technical + fundamental analysis → `cache:trade:analysis`. |
+| `analyze` | `{symbol}` | MTF technical + fundamental analysis, plus the **Markov 2.0** forecast (5-band composite-score chain → band-probability forecast + bounded drift tilt) → `cache:trade:analysis`. |
+
+**Published views:**
+
+| Cache key | Event | Payload |
+|-----------|-------|---------|
+| `cache:trade:analysis` | `events:trade:analysis` | `TradeAnalysis` — verdicts + momentum + sector + fundamentals + the optional `markov` forecast block. |
+| `cache:trade:markov_prior` | — | Pooled Markov transition prior `{matrix[5][5], date, n_symbols}`; rebuilt lazily once/day and read by `analyze` (internal memoization — no event). |
 
 ## Driver service — :8214
 

@@ -8,7 +8,7 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-06-21 (**Markov 2.0 (Trade Analyzer) DONE**: the `/trade`
+**Last updated:** 2026-06-22 (**Markov 2.0 (Trade Analyzer) DONE**: the `/trade`
 **Position** verdict gains a probabilistic forward layer — the composite score is
 discretized into **5 bands** (edges = the ±40 BUY/SELL cuts + ±15 neutral); a
 per-symbol day-to-day transition matrix is **Bayesian-shrunk** toward a pooled
@@ -19,9 +19,10 @@ P(BUY)/P(SELL)/E[score]. New PURE engine `trade-analyzer/src/analysis/markov.py`
 reconstructable) + `build_pooled_prior`/`get_prior` (cached
 `cache:trade:markov_prior`, lazy daily) + `build_markov_block` wired **defensively**
 into `analyze()`; an additive optional `markov` block on the `TradeAnalysis`
-contract; a **Markov Forecast card** (stacked-area band-probability chart +
-per-horizon metrics + a bounded **±12pt confidence-weighted drift tilt** surfaced as
-a `markov_adjusted_score` Position headline — **verdict label unchanged**). No
+contract; a **Markov Forecast card** — the third **equal-width frame in the verdict row**
+alongside Position/Investor — (stacked-area band-probability chart + per-horizon
+metrics + a bounded **±12pt confidence-weighted drift tilt** surfaced as a
+`markov_adjusted_score` Position headline — **verdict label unchanged**). No
 feedback by construction (chain on `composite_daily`, tilt on `composite_full`).
 trade-analyzer 215 + trade_svc 40 + contracts 26 + webgui 385 green; verified live
 (AAPL). Branch `Using_Highcharts`. See "Markov 2.0 (Trade page)" below.)
@@ -240,7 +241,7 @@ Routes:
 | `/options/rescue` | Rescue (at-risk credit spreads (PCS/CCS/IC) → **at-risk table** (paper+captured, heat-colored) → select a position → ranked **commission-aware adjustment menu**: close / partial-close / narrow / convert-IC / butterfly / roll-down/out/down-out / broken-wing / inverted / futures-hedge; each card shows gross/commission/net + metrics + legs + rationale + strategic context + warnings + score; execute cards have **Apply → confirm → `rescue_apply`** behind a stale-price guard, advisory cards show "manual"; nav badge from `cache:options:rescue_summary`) | built |
 | `/sentiment` | Sentiment (two-column top: **dual** Sentiment gauges (Today + 30-Day Avg) + **dual** Market Trend gauges (Today live-intraday + 30-Day structural — directional 0–100 score, 15-min cadence) / component table; traffic-light tiles; 30d history + rolling avgs; full-width **Sector & Industry Performance** w/ Day/Week/Month %, P/C, RRG, rotation banner, **expandable industries w/ P/C+RRG**; bottom status bar; **persists across navigation**; **server-side 120s auto-refresh + bridge publish, tab-independent**) | built |
 | `/sentiment/rotation` | Sector Rotation (RRG-vs-SPY: Risk-ON/OFF headline + spread; **top row** = quadrant-map table (left) + tight ROTATING FROM/INTO w/ S&P weights (right); **full-width RRG below** w/ per-sector "meteor tails" — engine `assess_sector` retains a `tail` of `TAIL_LENGTH=12` RS-Ratio/RS-Mom points sampled every `TAIL_STRIDE=2` days; page draws **one spline series per sector** (faded trail line + single bright head dot) and **hover-isolates** a sector via native Highcharts `plotOptions.series.states.inactive` (hovering one dims the rest — no client round-trip); reuses `sector_rotation_assessment`; cached, **manual Refresh only**) | built |
-| `/trade` | Trade (on-demand single-symbol analysis: **Position (1–8wk)** + **Investor (months+)** Buy/Hold/Sell verdicts w/ score + top reasons + hard gates + expandable factor breakdown; **MTF EMA alignment** (per-timeframe); momentum strip (RSI/ADX/MACD/VWAP/RelVol); sector strength; **Fundamentals card** (P/E/PEG/growth/ROE/margins via proxy `/instruments`); **Markov Forecast card** (5-band composite-score Markov chain → stacked-area band-probability forecast + P(BUY)/P(SELL)/E[score] at 5/10/20d + a bounded confidence-weighted drift-tilt `markov_adjusted_score` headline, verdict label unchanged); persists across nav) | built |
+| `/trade` | Trade (on-demand single-symbol analysis: **Position (1–8wk)** + **Investor (months+)** Buy/Hold/Sell verdicts w/ score + top reasons + hard gates + expandable factor breakdown; **MTF EMA alignment** (per-timeframe); momentum strip (RSI/ADX/MACD/VWAP/RelVol); sector strength; **Fundamentals card** (P/E/PEG/growth/ROE/margins via proxy `/instruments`); **Markov Forecast card** (third **equal-width frame in the verdict row**, alongside Position + Investor: 5-band composite-score Markov chain → stacked-area band-probability forecast + P(BUY)/P(SELL)/E[score] at 5/10/20d + a bounded confidence-weighted drift-tilt `markov_adjusted_score` headline, verdict label unchanged); persists across nav) | built |
 | `/driver` | Driver (morning-agent **order-approval queue**: Run morning agent → graded day + proposed trades; **APPROVE** (confirm dialog) / **SKIP**; conditions strip + grade rationale; **Performance** view (win-rate / P&L-by-bucket + trade table). 09:28-ET scheduler fires the run unattended. Orders execute via `order_executor` with `PAPER_TRADE=True` → **simulated**) | built |
 | `/settings` | Settings (GUI prefs via `app_settings`: scanner **audio alert** on/off + sound + volume, only-during-market-hours, min-score-to-alert; desktop-notification toggle + permission grant + Test sound. Extensible — first batch) | built |
 | `/portfolio` | Portfolio (3-tier, `services/portfolio_svc` :8212: **Holdings / Sectors / Performance** tabs over the portfolio model — sector breakdown, vs-sector RS, since-purchase excess, benchmark over/under-weight, tailwind; **Performance** scorecard (return/capital/risk/entry grades + composite + ann. return + drawdown) with a per-position **advisory suggestions** detail pane; **live-streaming P&L** via the service's proxy SSE consumer republishing each tick; proxy/stream status bar; persists across nav) | built |
@@ -683,14 +684,20 @@ label is untouched). Pieces:
 - **Wiring:** `build_markov_block` runs **defensively** inside `compute.analyze()`
   (any failure → `markov: None`, verdict unchanged) and rides an additive optional
   `markov` block on the `TradeAnalysis` contract → `cache:trade:analysis`.
-- **Page** `webgui/pages/trade.py`: a **persistent** Markov Forecast card (built once at
-  render per the ESM-import-map gotcha; explicit `chart.height` + reflow-on-show; updated
-  in place) — a band chip, a stacked-area band-probability-over-horizon chart
-  (now/5/10/20d), per-horizon P(BUY)/P(SELL)/E[score], and a drift/tilt line; the Position
-  card headline shows the `markov_adjusted_score` (with a `base … · Markov …` subtitle) —
-  **the BUY/HOLD/SELL label is unchanged** (the tilt is advisory on the score). Pure
+- **Page** `webgui/pages/trade.py`: the Markov Forecast card sits in the **verdict row as
+  the third equal-width card** alongside **Position · 1–8 wk** and **Investor · months+**
+  (all `flex-1 min-w-[280px]`, `items-stretch` — three equal frames in one row, wrapping on
+  narrow screens). The row and its three cards are **persistent** and the two verdict cards
+  are **refilled in place** (`_fill_verdict_card`) so the Markov card's Highcharts element
+  is never destroyed by a `clear()` (it's built once per the ESM-import-map gotcha, with an
+  explicit `chart.height` + reflow-on-show, updated in place). The card holds a band chip, a
+  stacked-area band-probability-over-horizon chart (now/5/10/20d), per-horizon
+  P(BUY)/P(SELL)/E[score], and a drift/tilt/persistence line; the Position card headline
+  shows the `markov_adjusted_score` (with a `base … · Markov …` subtitle) — **the
+  BUY/HOLD/SELL label is unchanged** (the tilt is advisory on the score). When `markov` is
+  absent the card hides and the row falls back to Position + Investor (two equal cards). Pure
   builders (`markov_band_chip`/`markov_metric_rows`/`markov_drift_row`/
-  `markov_forecast_figure`/`position_headline`) unit-tested. Hidden when `markov` is absent.
+  `markov_forecast_figure`/`position_headline`) unit-tested.
 - Design/plan: [design](docs/plans/2026-06-21-markov-trade-analyzer-design.md) /
   [plan](docs/plans/2026-06-21-markov-trade-analyzer.md).
 

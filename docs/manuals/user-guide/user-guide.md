@@ -444,9 +444,20 @@ This page refreshes **only when you press Refresh**.
 On-demand analysis of a single symbol. Type a **Symbol** and press **Analyze**.
 
 - A **header** with the symbol, price, bias, and volume.
-- **Two verdict cards** — **Position** (1–8 weeks) and **Investor** (months+) —
-  each showing a Buy / Hold / Sell verdict (color-coded), a score, the top reasons,
-  any hard "gates" that fired, and an expandable factor breakdown.
+- **Three equal-width cards in one row** — **Position** (1–8 weeks), **Investor**
+  (months+), and **Markov Forecast**:
+  - **Position** and **Investor** each show a Buy / Hold / Sell verdict (color-coded),
+    a score, the top reasons, any hard "gates" that fired, and an expandable factor
+    breakdown.
+  - **Markov Forecast** projects where the Position score is likely to head. It shows
+    the current **regime band** (Strong-Bear … Strong-Bull), a stacked-area chart of the
+    **probability of being in each band** at +5 / +10 / +20 trading days, the per-horizon
+    **P(BUY) / P(SELL) / expected score** and band **persistence**, and a **drift / tilt**
+    line. The tilt is a small, bounded adjustment (±12 points) added to the **Position**
+    card's headline score — shown as `base … · Markov …` — so the Position score reflects
+    the forecast while the **Buy / Hold / Sell word never changes** (the tilt is advisory).
+    The card appears only when there is enough price history; otherwise the row falls back
+    to the two verdict cards.
 - An **MTF EMA Alignment** card (per-timeframe trend agreement: Daily, 4H, 1H, 15m,
   5m, 1m).
 - A **Momentum** strip (RSI, ADX, MACD histogram, VWAP, relative volume).

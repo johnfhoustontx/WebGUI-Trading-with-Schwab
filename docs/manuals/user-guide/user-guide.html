@@ -62,7 +62,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <h1>WebGUI Trading with Schwab</h1>
   <div class="sub">User Guide</div>
-  <div class="meta">WebGUI Trading with Schwab · Generated 2026-06-21</div>
+  <div class="meta">WebGUI Trading with Schwab · Generated 2026-06-22</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -541,9 +541,20 @@ not the page is open.</p>
 <p>On-demand analysis of a single symbol. Type a <strong>Symbol</strong> and press <strong>Analyze</strong>.</p>
 <ul>
 <li>A <strong>header</strong> with the symbol, price, bias, and volume.</li>
-<li><strong>Two verdict cards</strong> — <strong>Position</strong> (1–8 weeks) and <strong>Investor</strong> (months+) —
-  each showing a Buy / Hold / Sell verdict (color-coded), a score, the top reasons,
-  any hard "gates" that fired, and an expandable factor breakdown.</li>
+<li><strong>Three equal-width cards in one row</strong> — <strong>Position</strong> (1–8 weeks), <strong>Investor</strong>
+  (months+), and <strong>Markov Forecast</strong>:</li>
+<li><strong>Position</strong> and <strong>Investor</strong> each show a Buy / Hold / Sell verdict (color-coded),
+    a score, the top reasons, any hard "gates" that fired, and an expandable factor
+    breakdown.</li>
+<li><strong>Markov Forecast</strong> projects where the Position score is likely to head. It shows
+    the current <strong>regime band</strong> (Strong-Bear … Strong-Bull), a stacked-area chart of the
+    <strong>probability of being in each band</strong> at +5 / +10 / +20 trading days, the per-horizon
+    <strong>P(BUY) / P(SELL) / expected score</strong> and band <strong>persistence</strong>, and a <strong>drift / tilt</strong>
+    line. The tilt is a small, bounded adjustment (±12 points) added to the <strong>Position</strong>
+    card's headline score — shown as <code>base … · Markov …</code> — so the Position score reflects
+    the forecast while the <strong>Buy / Hold / Sell word never changes</strong> (the tilt is advisory).
+    The card appears only when there is enough price history; otherwise the row falls back
+    to the two verdict cards.</li>
 <li>An <strong>MTF EMA Alignment</strong> card (per-timeframe trend agreement: Daily, 4H, 1H, 15m,
   5m, 1m).</li>
 <li>A <strong>Momentum</strong> strip (RSI, ADX, MACD histogram, VWAP, relative volume).</li>

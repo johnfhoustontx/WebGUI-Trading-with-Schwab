@@ -62,7 +62,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <h1>WebGUI Trading with Schwab</h1>
   <div class="sub">Technical Reference</div>
-  <div class="meta">WebGUI Trading with Schwab · Generated 2026-06-21</div>
+  <div class="meta">WebGUI Trading with Schwab · Generated 2026-06-22</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a></li>
@@ -97,6 +97,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#technical-primitives">Technical primitives</a></li>
 <li><a href="#fundamental-primitives">Fundamental primitives</a></li>
 <li><a href="#fundamentals-parsing">Fundamentals parsing</a></li>
+<li><a href="#markov-20-forecast-position">Markov 2.0 forecast (Position)</a></li>
 </ul>
 </li>
 <li><a href="#portfolio-analytics">Portfolio Analytics</a></li>
@@ -769,6 +770,86 @@ fraction; <code>returnOnEquity</code> as percent via a <code>&gt;2</code> magnit
 <code>operatingMarginTTM</code> vs <code>MRQ</code> for the margin trend), with legacy speculative names
 as fallback. Fields the payload does not carry (next-earnings date, EPS surprises,
 guidance, FCF) degrade to <code>None</code>, so those gates simply never fire.</p>
+<h2 id="markov-20-forecast-position">Markov 2.0 forecast (Position)</h2>
+<p><strong>Files:</strong> <code>trade-analyzer/src/analysis/markov.py</code> (pure math) +
+<code>services/trade_svc/compute.py</code> (reconstruction, prior, wiring). A probabilistic
+forward layer on the <strong>Position</strong> composite score, rendered as the third card in the
+verdict row.</p>
+<p><strong>States — 5 score bands</strong> anchored at the verdict's decision boundaries
+(<code>classify_band</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Band</th>
+<th>Composite-score range</th>
+<th>Verdict zone</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0 Strong-Bear</td>
+<td>[−100, −40)</td>
+<td>SELL</td>
+</tr>
+<tr>
+<td>1 Weak-Bear</td>
+<td>[−40, −15)</td>
+<td>HOLD</td>
+</tr>
+<tr>
+<td>2 Neutral</td>
+<td>[−15, +15)</td>
+<td>HOLD</td>
+</tr>
+<tr>
+<td>3 Weak-Bull</td>
+<td>[+15, +40)</td>
+<td>HOLD</td>
+</tr>
+<tr>
+<td>4 Strong-Bull</td>
+<td>[+40, +100]</td>
+<td>BUY</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Markov base score (<code>composite_daily</code>).</strong> The live verdict mixes intraday-only
+factors (intraday VWAP, intraday relative volume, multi-timeframe EMA alignment) that
+cannot be reconstructed for past bars, so the chain instead runs on a parallel
+<strong>daily-only</strong> composite computed identically for every historical bar and for "now"
+(<code>reconstruct_daily_composite</code>): EMA-alignment (price vs the daily 12/21/50/200 EMA
+stack), ADX (directional), RSI, MACD, daily relative volume, distance-from-252-day-
+high, RS vs SPY (63d/126d), and sector-ETF-vs-SPY RS — the daily-reconstructable
+subset of the Position factors, weights renormalized to a 100-point scale. A bar with
+a missing close is excluded (it is not an observation).</p>
+<p><strong>Transition matrix — hybrid (per-symbol + pooled prior).</strong> Day-to-day band
+transitions over ~1 yr of <code>composite_daily</code> form a 5×5 count matrix <code>C_sym</code>
+(<code>count_matrix</code>). Each row is Bayesian-shrunk toward a pooled prior via a
+Dirichlet-multinomial blend (<code>shrink</code>, α = 30):</p>
+<pre><code>P[i,j] = (C_sym[i,j] + α · Prior[i,j]) / (Σ_j C_sym[i,j] + α)
+</code></pre>
+<p>The <strong>pooled prior</strong> (<code>build_pooled_prior</code> / <code>get_prior</code>) aggregates band transitions
+across a curated 17-symbol universe, row-normalized (<code>pooled_prior</code>); it is cached at
+<code>cache:trade:markov_prior</code> and rebuilt lazily once per day (uniform fallback on
+failure).</p>
+<p><strong>Forecast</strong> (<code>forecast</code>). From the current band, the n-step distribution is
+<code>dist₀ · Pⁿ</code> (<code>project</code>) for n = 5 / 10 / 20 trading days, yielding <strong>P(BUY)</strong> =
+P(band 4), <strong>P(SELL)</strong> = P(band 0), and <strong>E[score]</strong> = Σ midpoint·prob over band
+midpoints <code>[−70, −27.5, 0, +27.5, +70]</code>. The row's self-transition probability is the
+<strong>persistence</strong>; the <strong>stationary</strong> (long-run) distribution is found by power
+iteration (robust to reducible chains).</p>
+<p><strong>Drift tilt</strong> (<code>drift_tilt</code>, <code>row_confidence</code>). The expected forward move drives a
+bounded, confidence-weighted adjustment to the displayed score:</p>
+<pre><code>drift      = E[score @ 10d] − composite_daily_now
+confidence = n / (n + 40)            # n = observed transitions out of the current band
+tilt       = clip(0.5 · drift, −12, +12) · confidence
+markov_adjusted_score = clip(composite_full + tilt, −100, +100)
+</code></pre>
+<p><code>composite_full</code> is the live (intraday-enriched) Position score. <strong>No feedback by
+construction:</strong> the chain is built only from <code>composite_daily</code>, so the tilt added to
+<code>composite_full</code> can never feed back into the matrix. The tilt moves the <strong>score</strong>
+only — the Buy/Hold/Sell <strong>label</strong> is never re-derived from it. Every step is
+defensive: any failure yields no Markov block and the verdict is unchanged.</p>
 <hr />
 <h1 id="portfolio-analytics">Portfolio Analytics</h1>
 <p><strong>File:</strong> <code>portfolio-analyzer/src/</code>.</p>
