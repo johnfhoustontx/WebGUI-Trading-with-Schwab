@@ -1014,6 +1014,20 @@ executes through new paper-engine primitives behind a stale-price guard. Pieces:
   ledger) + `captured.py` render different views that don't carry the overlay, so they stay
   **dormant no-ops** (kept defensively; captured is forward-compatible if signals are ever
   flagged). Primary at-risk surfaces (Rescue page table + nav badge) work regardless.
+- **Captured CUT signals as advisory candidates (2026-06-22).** A captured signal whose
+  `recommendation` is **CUT** (a money/delta/time loss stop — not `TARGET_HIT`) is now an
+  **advisory** rescue candidate. `compute.reprice_captured` tags each signal row with
+  `rescue_state`/`heat` via `assess_position_risk`, **escalating a CUT to at least `tested`**
+  (heat floored ≥60) so it lands on the rescue board; `compute_rescue(position_id, source=
+  "captured")` loads the signal via `signal_db.get_signal`, runs the engine, and **forces every
+  candidate `apply_kind="advisory"`** (a captured signal has no executable paper position — the
+  cards show the roll/convert/close mechanics + economics for *manual* placement, no Apply). The
+  `rescue` command carries an optional `source` arg (paper|captured; paper id coerced to int,
+  captured passes the string `signal_id`); `RescueAdvisory` gained `source` + a `position_id:
+  int | str`. The page (`at_risk_rows` keyed by `signal_id`, row-select passes `source`) surfaces
+  them. Apply safety is enforced at three layers (forced-advisory cards · `rescue_apply` refuses
+  non-paper ids · the apply branch int-coerces). The nav **badge stays paper-only** (captured
+  CUTs show on the board, not the badge). Design: [captured-signals](docs/plans/2026-06-22-rescue-captured-signals-design.md).
 - Design/plan: [design](docs/plans/2026-06-21-rescue-tested-trades-design.md) /
   [plan](docs/plans/2026-06-21-rescue-tested-trades-plan.md).
 

@@ -377,9 +377,11 @@ changing anything and tells you **"prices moved — re-review."** Rolls close th
 position and open a new, linked one. Every applied adjustment is recorded in an audit
 log.
 
-> **Captured signals are advisory-only.** They appear in the at-risk table and get a
-> full candidate menu, but they have no Apply button — there's no paper position to
-> mutate. Use the menu as guidance and place the adjustment yourself.
+> **Captured signals are advisory-only.** A captured signal that turns at-risk — for
+> example one showing a **CUT** recommendation (a money/delta/time stop) — appears in the
+> at-risk table and gets a full candidate menu, but it has **no Apply button** (there's no
+> paper position to mutate). Use the menu as guidance and place the adjustment yourself.
+> Captured signals do **not** add to the Rescue nav badge (that counts paper positions).
 
 ## Cross-page actions
 
