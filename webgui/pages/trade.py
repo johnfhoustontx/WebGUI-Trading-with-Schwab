@@ -155,6 +155,7 @@ def markov_drift_row(mk):
         "drift": f"{mk.get('drift', 0):+.0f}",
         "tilt": f"{mk.get('tilt', 0):+.0f}",
         "confidence": f"{round(mk.get('confidence', 0) * 100)}%",
+        "persistence": f"{round(mk.get('persistence', 0) * 100)}%",
         "adjusted": f"{mk.get('markov_adjusted_score', 0):.0f}",
     }
 
@@ -375,7 +376,8 @@ def render():
                     .style(f"background:{chip['color']}")
             dr = markov_drift_row(mk)
             if dr:
-                ui.label(f"drift {dr['drift']} · tilt {dr['tilt']} · conf {dr['confidence']}") \
+                ui.label(f"drift {dr['drift']} · tilt {dr['tilt']} · conf "
+                         f"{dr['confidence']} · persist {dr['persistence']}") \
                     .classes("text-sm opacity-80")
                 ui.label(f"adj score {dr['adjusted']}").classes("text-sm text-weight-medium")
             pv = mk.get("prior_version")

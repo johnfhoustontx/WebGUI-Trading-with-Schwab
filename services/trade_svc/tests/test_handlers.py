@@ -30,6 +30,18 @@ def _fake_result(symbol="AAPL"):
                              "top_reasons": ["Insufficient fundamental data"],
                              "gates_triggered": ["No fundamentals"]},
         "fundamentals_available": False,
+        "markov": {
+            "current_band": 3,
+            "band_labels": ["Strong-Bear", "Weak-Bear", "Neutral",
+                            "Weak-Bull", "Strong-Bull"],
+            "transition_row": [0.05, 0.1, 0.2, 0.45, 0.2], "persistence": 0.45,
+            "stationary": [0.2, 0.2, 0.2, 0.2, 0.2],
+            "horizons": [{"n": 10, "dist": [0.05, 0.1, 0.15, 0.4, 0.3],
+                          "p_buy": 0.3, "p_sell": 0.05, "e_score": 28.0}],
+            "drift": 8.0, "tilt": 6.0, "confidence": 0.7,
+            "composite_daily": 24.0, "markov_adjusted_score": 31.0,
+            "prior_version": "2026-06-21",
+        },
         "timestamp": "2026-06-16T12:00:00Z", "errors": [],
     }
 
@@ -51,6 +63,11 @@ def test_analyze_caches_and_publishes(monkeypatch):
     assert ta.symbol == "AAPL"
     assert ta.position_verdict["verdict"] == "BUY"
     assert ta.fundamentals_available is False
+    # the markov block survives the full analyze → _FIELDS projection →
+    # TradeAnalysis validation → cache_set → cache_get → from_json round-trip
+    assert ta.markov is not None
+    assert ta.markov["current_band"] == 3
+    assert ta.markov["markov_adjusted_score"] == 31.0
     assert msg is not None and "version" in msg
 
 

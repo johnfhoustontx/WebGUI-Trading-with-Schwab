@@ -131,6 +131,7 @@ def test_markov_metric_rows():
 def test_markov_drift_row():
     r = trade.markov_drift_row(_MK)
     assert "+6" in r["tilt"] and "44" in r["adjusted"]
+    assert r["persistence"] == "45%"
 
 
 def test_markov_forecast_figure_shape():
