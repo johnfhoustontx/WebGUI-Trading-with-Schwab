@@ -48,6 +48,7 @@ if str(TRADE_ANALYZER) not in sys.path:
     sys.path.insert(0, str(TRADE_ANALYZER))
 
 import technical  # noqa: E402  (shared indicator lib, imported standalone to dodge the package __init__)
+from src.analysis import markov as _markov  # noqa: E402
 from src.analysis import scoring as _scoring  # noqa: E402  (src.analysis.scoring — namespaced, not the colliding top-level `scoring`)
 from src.analysis.fundamentals import Fundamentals, parse_schwab_fundamentals  # noqa: E402
 from src.analysis.recommendation import (  # noqa: E402
@@ -340,6 +341,139 @@ def reconstruct_daily_composite(daily, spy, sector_hist):
         return pd.Series([], dtype=float)
 
 
+# ── Markov pooled prior (Task 3.2) ───────────────────────────────────────────
+# A universe-wide pooled transition prior is the shrinkage target for each
+# symbol's own (often thin) transition matrix. It is rebuilt lazily at most once
+# per day and cached in Redis; analyze() reads it via get_prior().
+_PRIOR_KEY = "cache:trade:markov_prior"
+# A curated, sector-diverse universe for the pooled transition prior. Kept small
+# (~17) so the once-daily rebuild is fast; ~500 daily transitions/symbol is ample
+# for a 5x5 matrix.
+_MK_UNIVERSE = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "JPM", "BAC",
+                "UNH", "JNJ", "XOM", "CVX", "HD", "WMT", "CAT", "SPY", "QQQ"]
+
+_BUS = None
+
+
+def _bus():
+    """Lazy module-level Bus singleton (the prior cache is the only thing in
+    compute that touches Redis directly; analyze() is on-demand so one shared
+    connection is fine)."""
+    global _BUS
+    if _BUS is None:
+        from shared.bus import Bus
+        _BUS = Bus()
+    return _BUS
+
+
+def _today_ct_str():
+    return date.today().isoformat()
+
+
+def _symbol_band_series(sym):
+    """Daily composite -> band index Series for one universe symbol (or None).
+
+    Self-contained (fetches its own daily/SPY/sector history) so it is trivially
+    mockable in tests. Defensive: thin/missing history -> None.
+    """
+    daily = _price_history(sym, "year", 2, "daily", 1)
+    if daily is None or len(daily) < 220:
+        return None
+    spy = daily if sym == "SPY" else _price_history("SPY", "year", 2, "daily", 1)
+    sect = resolve_sector(sym)
+    sector_hist = _price_history(sect["etf"], "year", 2, "daily", 1) if sect["etf"] else None
+    comp = reconstruct_daily_composite(daily, spy, sector_hist).dropna()
+    if comp.empty:
+        return None
+    return comp.map(_markov.classify_band)
+
+
+def build_pooled_prior(universe):
+    """Sum band transitions across the universe -> (prior matrix, n_symbols)."""
+    C = np.zeros((5, 5))
+    n = 0
+    results = parallel_map(lambda s: (s, _symbol_band_series(s)), list(universe))
+    for _sym, bands in results:
+        if bands is None or getattr(bands, "empty", True):
+            continue
+        C += _markov.count_matrix([int(b) for b in bands])
+        n += 1
+    return _markov.pooled_prior(C), n
+
+
+def _read_prior_cache():
+    try:
+        env = _bus().cache_get(_PRIOR_KEY)
+        return env.payload if env else None
+    except Exception:
+        return None
+
+
+def _write_prior_cache(matrix, n):
+    try:
+        _bus().cache_set(_PRIOR_KEY, {
+            "matrix": [[float(x) for x in row] for row in matrix],
+            "date": _today_ct_str(), "n_symbols": int(n)})
+    except Exception:
+        pass
+
+
+def get_prior():
+    """(prior matrix ndarray, version-string). Lazy: reuse today's cached prior;
+    else rebuild from the universe and cache it; uniform fallback on failure."""
+    cached = _read_prior_cache()
+    if cached and cached.get("date") == _today_ct_str() and cached.get("matrix"):
+        return np.array(cached["matrix"], dtype=float), cached["date"]
+    try:
+        matrix, n = build_pooled_prior(_MK_UNIVERSE)
+        _write_prior_cache(matrix, n)
+        return matrix, _today_ct_str()
+    except Exception:
+        return np.full((5, 5), 0.2), "uniform"
+
+
+# ── Markov forecast block (Task 3.3) ─────────────────────────────────────────
+_MK_HORIZONS = [5, 10, 20]
+_MK_DRIFT_HORIZON = 10
+_MK_ALPHA = 30.0
+_MK_K = 0.5
+_MK_MAX_PTS = 12.0
+
+
+def build_markov_block(band_series, composite_daily_now, composite_full):
+    """Markov forecast + tilt for one symbol from its band-index series, or None
+    if it can't be built (too few observations / any error)."""
+    try:
+        bands = band_series.dropna()
+        if bands.empty or len(bands) < 30:
+            return None
+        prior, version = get_prior()
+        C_sym = _markov.count_matrix([int(b) for b in bands])
+        P = _markov.shrink(C_sym, prior, alpha=_MK_ALPHA)
+        current = _markov.classify_band(composite_daily_now)
+        fc = _markov.forecast(P, current, _MK_HORIZONS)
+        conf = _markov.row_confidence(C_sym[current])
+        tilt = _markov.drift_tilt(fc, composite_daily_now, _MK_DRIFT_HORIZON,
+                                  k=_MK_K, max_pts=_MK_MAX_PTS, confidence=conf)
+        h = next(x for x in fc["horizons"] if x["n"] == _MK_DRIFT_HORIZON)
+        return {
+            "current_band": current,
+            "band_labels": _markov.BAND_LABELS,
+            "transition_row": fc["transition_row"],
+            "persistence": fc["persistence"],
+            "stationary": fc["stationary"],
+            "horizons": fc["horizons"],
+            "drift": float(h["e_score"] - composite_daily_now),
+            "tilt": float(tilt),
+            "confidence": float(conf),
+            "composite_daily": float(composite_daily_now),
+            "markov_adjusted_score": float(np.clip(composite_full + tilt, -100, 100)),
+            "prior_version": version,
+        }
+    except Exception:
+        return None
+
+
 def _fetch_fundamentals(symbol):
     """Fetch + parse Schwab fundamentals for ``symbol`` → ``Fundamentals``.
 
@@ -468,6 +602,21 @@ def analyze(symbol):
         position_verdict = {"verdict": "HOLD", "score": 0, "breakdown": [],
                             "top_reasons": [], "gates_triggered": [f"error: {exc}"]}
 
+    # Markov 2.0 forecast + drift tilt (defensive: failure -> no block, verdict
+    # unchanged). The chain is built from composite_daily (which never contains
+    # the tilt), so adding the tilt to the verdict score cannot feed back.
+    markov_block = None
+    try:
+        _comp_series = reconstruct_daily_composite(daily, spy, sector_hist)
+        _valid = _comp_series.dropna()
+        if not _valid.empty:
+            _bands = _valid.map(_markov.classify_band)
+            markov_block = build_markov_block(
+                _bands, float(_valid.iloc[-1]),
+                float(position_verdict.get("score", 0)))
+    except Exception:
+        markov_block = None
+
     sym_close = daily["close"]
     spy_close = spy["close"] if spy is not None and not spy.empty else None
     sect_close = sector_hist["close"] if sector_hist is not None else None
@@ -505,6 +654,7 @@ def analyze(symbol):
                    "strength": _sector_strength_dict(ss)},
         "position_verdict": position_verdict,
         "investor_verdict": investor_verdict,
+        "markov": markov_block,
         "fundamentals": _fundamentals_dict(fundamentals),
         "fundamentals_available": fundamentals.is_sufficient(),
         "timestamp": _now_iso(),
