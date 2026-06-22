@@ -227,18 +227,27 @@ def render():
         analyze_btn = ui.button("Analyze", icon="analytics")
         status = ui.label("Enter a symbol and click Analyze.").classes("opacity-70 text-sm")
 
-    results = ui.column().classes("w-full gap-3")
-
-    # Persistent Markov Forecast card — created ONCE at page build so the
-    # Highcharts ESM import map is present (a chart added later on a chart-less
-    # page fails to resolve `nicegui-highcharts`); updated in place on repaint.
-    markov_card = ui.card().classes("w-full")
-    with markov_card:
-        ui.label("Markov Forecast · composite-score regime").classes("text-subtitle2 opacity-70")
-        markov_head = ui.row().classes("items-center gap-4 flex-wrap")
-        markov_metrics = ui.row().classes("gap-6 flex-wrap")
-        markov_chart = ui.highchart(markov_forecast_figure(None)).classes("w-full")
+    # Layout: a top area (error banner + header), then a single verdict ROW of
+    # three EQUAL-width cards (Position · Investor · Markov Forecast), then a
+    # bottom area (MTF/momentum/sector). results_top/bottom are cleared+rebuilt on
+    # repaint; the verdict row and its three cards are PERSISTENT — the Markov card
+    # holds a Highcharts element that must exist at first render (a chart added
+    # later on a chart-less page fails to resolve `nicegui-highcharts`) and must
+    # not be destroyed by a clear(), so the verdict cards are refilled in place.
+    results_top = ui.column().classes("w-full gap-3")
+    verdict_row = ui.row().classes("w-full gap-3 items-stretch flex-wrap")
+    with verdict_row:
+        position_card = ui.card().classes("flex-1 min-w-[280px]")
+        investor_card = ui.card().classes("flex-1 min-w-[280px]")
+        markov_card = ui.card().classes("flex-1 min-w-[280px]")
+        with markov_card:
+            ui.label("Markov Forecast · composite-score regime").classes("text-subtitle2 opacity-70")
+            markov_head = ui.row().classes("items-center gap-3 flex-wrap")
+            markov_metrics = ui.row().classes("gap-4 flex-wrap")
+            markov_chart = ui.highchart(markov_forecast_figure(None)).classes("w-full")
+    verdict_row.set_visibility(False)
     markov_card.set_visibility(False)
+    results_bottom = ui.column().classes("w-full gap-3")
 
     # ── card builders (widgets; pull from the pure transforms above) ──────────
     def _header(res):
@@ -259,12 +268,15 @@ def render():
                 if vol:
                     ui.label(f"Vol {vol:,}").classes("opacity-60 text-sm")
 
-    def _verdict_card(title, verdict, mk=None):
+    def _fill_verdict_card(card, title, verdict, mk=None):
+        # Refill a PERSISTENT verdict card in place (clear+rebuild its contents) so
+        # it can share the verdict row with the persistent Markov chart card.
+        card.clear()
         verdict = verdict or {}
         # When a Markov block is present, headline the adjusted score (base + tilt
         # in a subtitle). The verdict WORD/color are unchanged — never re-derived.
         head = position_headline(verdict, mk) if mk else None
-        with ui.card().classes("flex-1 min-w-[280px]"):
+        with card:
             ui.label(title).classes("text-subtitle2 opacity-70")
             with ui.row().classes("items-baseline gap-3"):
                 ui.label(verdict.get("verdict", "—")).classes("text-h4 text-weight-bold") \
@@ -333,23 +345,32 @@ def render():
                 ui.label("Confirmed downtrend").classes("text-xs").style(f"color:{SELL_COLOR}")
 
     def _render_results():
-        results.clear()
         res = state["result"]
-        with results:
-            if not res:
+        results_top.clear()
+        results_bottom.clear()
+        if not res:
+            verdict_row.set_visibility(False)
+            with results_top:
                 ui.label("No analysis yet — enter a symbol and click Analyze.") \
                     .classes("opacity-70")
-                return
+            return
+        with results_top:
             if res.get("errors"):
                 with ui.row().classes("w-full bg-red-2 text-red-10 rounded p-3 "
                                       "items-center gap-2"):
                     ui.icon("warning")
                     ui.label("; ".join(res["errors"]))
             _header(res)
-            if res.get("position_verdict") or res.get("investor_verdict"):
-                with ui.row().classes("w-full gap-3 items-stretch flex-wrap"):
-                    _verdict_card("Position · 1–8 wk", res.get("position_verdict"), res.get("markov"))
-                    _verdict_card("Investor · months+", res.get("investor_verdict"))
+        has_verdict = bool(res.get("position_verdict") or res.get("investor_verdict"))
+        verdict_row.set_visibility(has_verdict)
+        if has_verdict:
+            # Three EQUAL-width cards in one row: Position · Investor · Markov.
+            # (The Markov card's own visibility is managed by _update_markov.)
+            _fill_verdict_card(position_card, "Position · 1–8 wk",
+                               res.get("position_verdict"), res.get("markov"))
+            _fill_verdict_card(investor_card, "Investor · months+",
+                               res.get("investor_verdict"))
+            with results_bottom:
                 with ui.row().classes("w-full gap-3 items-stretch flex-wrap"):
                     _alignment_card(res.get("ema_alignment"))
                     _momentum_card(res.get("momentum"))
