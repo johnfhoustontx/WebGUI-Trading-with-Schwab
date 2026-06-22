@@ -33,3 +33,4 @@ class TradeAnalysis(_Base):
     fundamentals_available: bool = False
     timestamp: str | None = None
     errors: list = []
+    markov: dict | None = None

@@ -46,3 +46,19 @@ def test_tradeanalysis_requires_symbol():
 def test_tradeanalysis_rejects_wrong_type():
     with pytest.raises(Exception):
         TradeAnalysis.from_json('{"symbol": "SPY", "ema_alignment": "not-a-dict"}')
+
+
+def test_trade_accepts_payload_without_markov():
+    t = TradeAnalysis(symbol="AAPL")
+    assert t.markov is None
+
+
+def test_trade_accepts_payload_with_markov():
+    t = TradeAnalysis(symbol="AAPL", markov={
+        "current_band": 3, "band_labels": ["a"], "transition_row": [0.2] * 5,
+        "horizons": [{"n": 10, "dist": [0.2] * 5, "p_buy": 0.3, "p_sell": 0.1,
+                      "e_score": 12.0}],
+        "drift": 8.0, "tilt": 6.0, "markov_adjusted_score": 46.0,
+        "confidence": 0.7, "prior_version": "2026-06-21",
+    })
+    assert t.markov["current_band"] == 3
