@@ -455,7 +455,8 @@ def build_markov_block(band_series, composite_daily_now, composite_full):
         conf = _markov.row_confidence(C_sym[current])
         tilt = _markov.drift_tilt(fc, composite_daily_now, _MK_DRIFT_HORIZON,
                                   k=_MK_K, max_pts=_MK_MAX_PTS, confidence=conf)
-        h = next(x for x in fc["horizons"] if x["n"] == _MK_DRIFT_HORIZON)
+        h = next((x for x in fc["horizons"] if x["n"] == _MK_DRIFT_HORIZON), None)
+        drift = float(h["e_score"] - composite_daily_now) if h else 0.0
         return {
             "current_band": current,
             "band_labels": _markov.BAND_LABELS,
@@ -463,7 +464,7 @@ def build_markov_block(band_series, composite_daily_now, composite_full):
             "persistence": fc["persistence"],
             "stationary": fc["stationary"],
             "horizons": fc["horizons"],
-            "drift": float(h["e_score"] - composite_daily_now),
+            "drift": drift,
             "tilt": float(tilt),
             "confidence": float(conf),
             "composite_daily": float(composite_daily_now),

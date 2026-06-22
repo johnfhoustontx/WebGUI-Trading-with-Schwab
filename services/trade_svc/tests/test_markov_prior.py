@@ -47,3 +47,30 @@ def test_get_prior_rebuilds_when_stale(monkeypatch):
     monkeypatch.setattr(compute, "_write_prior_cache", lambda m, n: None)
     P, ver = compute.get_prior()
     assert calls["n"] == 1  # stale -> rebuilt
+
+
+def test_build_pooled_prior_all_missing_is_uniform(monkeypatch):
+    # proxy-down: every symbol returns None -> (uniform matrix, 0), no raise
+    monkeypatch.setattr(compute, "_symbol_band_series", lambda sym: None)
+    prior, n = compute.build_pooled_prior(["X", "Y", "Z"])
+    assert n == 0
+    np.testing.assert_allclose(prior.sum(axis=1), 1.0)
+    np.testing.assert_allclose(prior, np.full((5, 5), 0.2))
+
+
+def test_get_prior_uniform_fallback_on_build_error(monkeypatch):
+    # build raises -> get_prior degrades to a uniform prior, version "uniform",
+    # and does NOT write the cache (so it isn't poisoned with a bad prior)
+    monkeypatch.setattr(compute, "_read_prior_cache", lambda: None)
+
+    def boom(_u):
+        raise RuntimeError("proxy down")
+
+    monkeypatch.setattr(compute, "build_pooled_prior", boom)
+    writes = {"n": 0}
+    monkeypatch.setattr(compute, "_write_prior_cache",
+                        lambda m, n: writes.__setitem__("n", writes["n"] + 1))
+    P, ver = compute.get_prior()
+    np.testing.assert_allclose(P, np.full((5, 5), 0.2))
+    assert ver == "uniform"
+    assert writes["n"] == 0

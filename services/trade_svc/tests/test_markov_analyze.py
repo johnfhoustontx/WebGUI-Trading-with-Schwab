@@ -30,3 +30,14 @@ def test_build_markov_block_degrades_on_thin_series(monkeypatch):
 def test_handler_fields_include_markov():
     from services.trade_svc import handlers
     assert "markov" in handlers._FIELDS
+
+
+def test_markov_adjusted_score_is_full_plus_tilt(monkeypatch):
+    # markov_adjusted_score must equal clip(composite_full + tilt) exactly
+    monkeypatch.setattr(compute, "get_prior", lambda: (np.full((5, 5), 0.2), "test"))
+    monkeypatch.setattr(compute._markov, "drift_tilt", lambda *a, **k: 5.0)
+    bands = pd.Series([2, 2, 3, 3, 4, 3, 3, 4] * 30, dtype=float)
+    block = compute.build_markov_block(bands, composite_daily_now=25.0,
+                                       composite_full=38.0)
+    assert block["tilt"] == 5.0
+    assert block["markov_adjusted_score"] == 43.0  # clip(38 + 5)
