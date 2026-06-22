@@ -76,6 +76,25 @@ def test_at_risk_rows_captured_no_state_excluded():
     assert rows == []
 
 
+def test_at_risk_rows_captured_cut_included_keyed_by_signal_id():
+    # A captured signal flagged at-risk (e.g. CUT escalated to tested) appears on
+    # the board, sourced 'captured' and keyed by signal_id (not symbol).
+    captured = {"signals": [{
+        "signal_id": "AAPL_0_PCS_150", "symbol": "AAPL", "type": "PCS",
+        "short_strike": 150, "long_strike": 145, "expiration": "2026-07-18",
+        "current_short_delta": -0.35, "unrealized_pnl": -60.0,
+        "rescue_state": "tested", "heat": 60.0,
+    }]}
+    rows = rescue.at_risk_rows({"positions": []}, captured)
+    assert len(rows) == 1
+    r = rows[0]
+    assert r["id"] == "AAPL_0_PCS_150"   # signal_id, not the symbol
+    assert r["source"] == "captured"
+    assert r["strategy"] == "PCS"
+    assert r["state"] == "tested"
+    assert r["heat"] == 60.0
+
+
 def test_cash_text_credit_debit_zero():
     cr = rescue.cash_text(120.0)
     assert cr["text"] == "+$120"

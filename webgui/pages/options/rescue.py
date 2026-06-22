@@ -96,7 +96,7 @@ def at_risk_rows(paper_view, captured_view):
         if state not in _AT_RISK_STATES:
             continue
         rows.append(_row_from(sig, source="captured",
-                              id_field="position_id", strategy_field="strategy",
+                              id_field="signal_id", strategy_field="strategy",
                               alt_strategy_field="type"))
 
     rows.sort(key=lambda r: r["heat"], reverse=True)
@@ -350,9 +350,11 @@ def render():
         cards_col.clear()
         payoff_chart.set_visibility(False)
         # Enqueue the rescue command — args shape matches handlers'
-        # command.args["position_id"].
+        # command.args["position_id"]. ``source`` routes paper vs captured
+        # (captured → advisory-only menu, no Apply).
         bus_client.request("options", {"type": "rescue",
-                                       "args": {"position_id": rid}})
+                                       "args": {"position_id": rid,
+                                                "source": state["selected_source"] or "paper"}})
 
     at_risk_tbl.on("rowClick", _select)
 
