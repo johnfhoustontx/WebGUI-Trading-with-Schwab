@@ -715,6 +715,46 @@ def test_gamma_snapshot_builds_views_and_term(monkeypatch):
     assert snap["term"] == {"expirations": ["2026-06-18"], "cells": {}}
 
 
+def _chain_with_exps(*dates):
+    """Minimal chain whose call/put maps carry the given expiration dates."""
+    cm = {f"{d}:7": {"100.0": [{}]} for d in dates}
+    return {"underlyingPrice": 100.0, "callExpDateMap": cm, "putExpDateMap": cm}
+
+
+def test_count_expirations_counts_distinct_dates():
+    chain = _chain_with_exps("2026-06-26", "2026-07-02", "2026-06-26")
+    assert compute._count_expirations(chain) == 2
+    assert compute._count_expirations({}) == 0
+    assert compute._count_expirations(None) == 0
+
+
+def test_term_chain_reuses_base_when_it_already_has_enough(monkeypatch):
+    base = _chain_with_exps("2026-06-23", "2026-06-24", "2026-06-25",
+                            "2026-06-26", "2026-06-29")  # index: 5 daily expiries
+    calls = []
+    monkeypatch.setattr(compute._proxy.schwab_py_client, "get_option_chain",
+                        lambda *a, **k: calls.append(1) or _FakeChainResp({}))
+    out = compute._term_chain("$SPX", base, n_exp=5)
+    assert out is base          # reused — no widening
+    assert calls == []          # and no extra fetch
+
+
+def test_term_chain_widens_for_weekly_or_monthly_names(monkeypatch):
+    base = _chain_with_exps("2026-06-26")     # only 1 weekly in the 7-day window
+    wide = _chain_with_exps("2026-06-26", "2026-07-31", "2026-08-31",
+                            "2026-09-30", "2026-10-31")   # 5 monthlies once widened
+    windows = []
+
+    def _fake(symbol, contract_type=None, from_date=None, to_date=None, **k):
+        windows.append((to_date - from_date).days)
+        return _FakeChainResp(wide)
+
+    monkeypatch.setattr(compute._proxy.schwab_py_client, "get_option_chain", _fake)
+    out = compute._term_chain("PLTR", base, n_exp=5)
+    assert compute._count_expirations(out) >= 5   # got the 5 expirations
+    assert windows                                # widened beyond the base window
+
+
 def test_gamma_snapshot_none_when_chain_fetch_fails(monkeypatch):
     _patch_gamma(monkeypatch)
 

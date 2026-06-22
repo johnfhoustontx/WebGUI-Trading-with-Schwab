@@ -582,6 +582,57 @@ def _gamma_fetch_chain(symbol):
     return resp.json() if getattr(resp, "status_code", None) == 200 else None
 
 
+# Term-structure view wants the next ~5 expirations. The GEX/Charm/DEX/Vanna
+# views only need the nearest expiry, so the cheap 7-day _gamma_fetch_chain
+# window is right for them — but it misses expirations for weekly/monthly-only
+# names. _term_chain widens by EXPIRATION COUNT (not a fixed day window, which
+# breaks across daily/weekly/monthly cadences): reuse the base chain when it
+# already covers n_exp expirations (indices, with daily expiries), else fetch
+# progressively wider windows until enough expirations appear.
+_TERM_N_EXP = 5
+_TERM_WINDOWS = (45, 160, 300)   # calendar-day windows: ~6 weeklies / ~5 monthlies
+
+
+def _count_expirations(chain) -> int:
+    """Number of distinct expiration dates in a chain's call/put maps."""
+    if not chain:
+        return 0
+    dates = set()
+    for mp in ((chain.get("callExpDateMap") or {}), (chain.get("putExpDateMap") or {})):
+        for key in mp:
+            dates.add(str(key).split(":", 1)[0])
+    return len(dates)
+
+
+def _term_chain(symbol, base_chain, n_exp: int = _TERM_N_EXP):
+    """Return a chain covering at least ``n_exp`` expirations for the Term view.
+
+    Reuses ``base_chain`` (the nearest-expiry GEX fetch) when it already covers
+    n_exp expirations — true for indices with daily expirations. For weekly/
+    monthly-only names it widens the fetch window step by step until n_exp
+    expirations are present (or the widest window is reached), so the Term grid
+    shows 5 expirations regardless of the symbol's cadence. Defensive: a failed
+    widen keeps the best chain so far (never fewer expirations than the base)."""
+    import datetime as dt
+
+    best = base_chain
+    if _count_expirations(best) >= n_exp:
+        return best
+    today = dt.date.today()
+    for days in _TERM_WINDOWS:
+        resp = _proxy.schwab_py_client.get_option_chain(
+            symbol, contract_type="ALL", from_date=today,
+            to_date=today + dt.timedelta(days=days))
+        if getattr(resp, "status_code", None) != 200:
+            continue
+        chain = resp.json()
+        if _count_expirations(chain) > _count_expirations(best):
+            best = chain
+        if _count_expirations(best) >= n_exp:
+            break
+    return best
+
+
 def gamma_walls(vname, data, spot):
     """[put_wall, call_wall] strikes for GEX/DEX (one per side), else [].
 
@@ -671,7 +722,10 @@ def gamma_snapshot(symbol: str) -> dict | None:
         views[vname] = entry
 
     try:
-        term = eng.compute_term_grid(chain)
+        # The Term view wants the next 5 expirations regardless of the symbol's
+        # expiration cadence; widen the chain beyond the nearest-expiry GEX window
+        # only when the base chain doesn't already cover them (see _term_chain).
+        term = eng.compute_term_grid(_term_chain(symbol, chain))
     except Exception:
         term = {}
 
