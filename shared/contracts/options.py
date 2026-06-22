@@ -63,7 +63,8 @@ class RescueMark(_Base):
 
 class RescueAdvisory(_Base):
     """cache:options:rescue:<position_id> — ranked rescue menu for one position."""
-    position_id: int
+    position_id: int | str          # paper id (int) | captured signal_id (str)
+    source: str = "paper"           # "paper" | "captured" (captured = advisory-only)
     symbol: str
     strategy: str
     state: str = "ok"               # ok | watch | tested | critical

@@ -172,7 +172,7 @@ def test_run_rescue_caches_advisory(monkeypatch):
     and publishes a version+position_id event."""
     bus = Bus(fake=True)
     monkeypatch.setattr(handlers.compute, "compute_rescue",
-                        lambda pid: dict(_SAMPLE_ADVISORY, position_id=pid))
+                        lambda pid, source="paper": dict(_SAMPLE_ADVISORY, position_id=pid))
 
     sub = bus.subscribe(handlers.EVENT_RESCUE)
     handlers.run_rescue(bus, 5)
@@ -186,6 +186,23 @@ def test_run_rescue_caches_advisory(monkeypatch):
     assert msg is not None
     assert msg.get("version") == env.version
     assert msg.get("position_id") == 5
+
+
+def test_run_rescue_passes_source_and_caches_str_id(monkeypatch):
+    """run_rescue forwards the source arg to compute_rescue and caches under the
+    string signal_id key for a captured advisory."""
+    bus = Bus(fake=True)
+    seen = {}
+    monkeypatch.setattr(handlers.compute, "compute_rescue",
+                        lambda pid, source="paper": seen.update(pid=pid, source=source)
+                        or dict(_SAMPLE_ADVISORY, position_id=pid, source=source))
+
+    handlers.run_rescue(bus, "SIG1", source="captured")
+    assert seen == {"pid": "SIG1", "source": "captured"}
+    env = bus.cache_get(f"{handlers.CACHE_RESCUE}:SIG1")
+    assert env is not None
+    assert env.payload["position_id"] == "SIG1"
+    assert env.payload["source"] == "captured"
 
 
 def test_rescue_apply_success_refreshes(monkeypatch):
@@ -292,14 +309,27 @@ def test_rescue_apply_closed_position_minimal_advisory(monkeypatch):
 
 
 def test_handle_command_dispatches_rescue(monkeypatch):
-    """handle_command routes a 'rescue' command (int-coerced position_id) to
-    run_rescue."""
+    """handle_command routes a 'rescue' command (paper: int-coerced position_id) to
+    run_rescue with source='paper'."""
     bus = Bus(fake=True)
     seen = {}
     monkeypatch.setattr(handlers, "run_rescue",
-                        lambda b, pid: seen.__setitem__("pid", pid))
+                        lambda b, pid, source="paper": seen.update(pid=pid, source=source))
     handlers.handle_command(bus, Command(type="rescue", args={"position_id": "7"}))
-    assert seen == {"pid": 7}  # coerced to int
+    assert seen == {"pid": 7, "source": "paper"}  # coerced to int, default source
+
+
+def test_handle_command_dispatches_rescue_captured(monkeypatch):
+    """A captured 'rescue' command keeps the string signal_id and routes
+    source='captured' through to run_rescue (no int coercion)."""
+    bus = Bus(fake=True)
+    seen = {}
+    monkeypatch.setattr(handlers, "run_rescue",
+                        lambda b, pid, source="paper": seen.update(pid=pid, source=source))
+    handlers.handle_command(bus, Command(
+        type="rescue",
+        args={"position_id": "AAPL_0_PCS_500", "source": "captured"}))
+    assert seen == {"pid": "AAPL_0_PCS_500", "source": "captured"}
 
 
 def test_handle_command_dispatches_rescue_apply(monkeypatch):

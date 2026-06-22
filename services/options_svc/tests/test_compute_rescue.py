@@ -196,6 +196,83 @@ def test_compute_rescue_reprice_underlying_wins_over_snapshot(monkeypatch):
     assert result["mark"]["underlying"] == 501.0
 
 
+# ── compute_rescue(source="captured") ────────────────────────────────────────
+
+def _captured_signal(**kw):
+    base = dict(signal_id="SIG1", scanner_type="swing", symbol="SPY",
+                strategy="PCS", short_strike=500.0, long_strike=495.0,
+                call_short=None, call_long=None, width=5.0,
+                expiration="2099-07-31", entry_credit=1.00, quantity=2)
+    base.update(kw)
+    return base
+
+
+def _patch_captured_happy(monkeypatch, signal=None, reprice=None):
+    signal = signal if signal is not None else _captured_signal()
+    reprice = reprice if reprice is not None else {
+        "current_value": 2.50, "unrealized_pnl": -300.0,
+        "current_underlying": 501.0, "current_short_delta": 0.35,
+        "error": None,
+    }
+    import sys as _sys
+    import types as _types
+    monkeypatch.setitem(_sys.modules, "signal_db",
+                        _types.SimpleNamespace(get_signal=lambda sid: signal))
+    monkeypatch.setattr(compute, "reprice_swing", lambda trade, client, today=None: reprice)
+    monkeypatch.setattr(compute, "gamma_snapshot",
+                        lambda symbol: {"spot": 501.0, "views": {
+                            "GEX": {"flip": 505.0, "walls": [490.0, 510.0]}}})
+    monkeypatch.setattr(compute, "_rescue_regime", lambda: None)
+    monkeypatch.setattr(compute, "_make_leg_pricer", lambda symbol: (lambda *a, **k: 1.0))
+
+
+def test_compute_rescue_captured_advisory_only(monkeypatch):
+    _patch_captured_happy(monkeypatch)
+    result = compute.compute_rescue("SIG1", source="captured")
+    assert result.get("error") is None
+    adv = RescueAdvisory(**result)
+    assert adv.position_id == "SIG1"
+    assert adv.source == "captured"
+    assert adv.symbol == "SPY"
+    assert adv.candidates, "expected non-empty candidate list"
+    # EVERY candidate is advisory (no executable paper position).
+    assert all(c.apply_kind == "advisory" for c in adv.candidates)
+
+
+def test_compute_rescue_captured_signal_not_found(monkeypatch):
+    import sys as _sys
+    import types as _types
+    monkeypatch.setitem(_sys.modules, "signal_db",
+                        _types.SimpleNamespace(get_signal=lambda sid: None))
+    result = compute.compute_rescue("nope", source="captured")
+    assert "error" in result and result["error"]
+
+
+def test_compute_rescue_captured_strategy_from_type(monkeypatch):
+    """A signal carrying only ``type`` (no ``strategy``) maps to strategy."""
+    sig = _captured_signal(strategy=None)
+    sig["type"] = "CCS"
+    sig["short_strike"] = 500.0
+    sig["long_strike"] = 505.0
+    sig["call_short"] = 500.0
+    sig["call_long"] = 505.0
+    _patch_captured_happy(monkeypatch, signal=sig)
+    result = compute.compute_rescue("SIG1", source="captured")
+    assert result.get("error") is None
+    adv = RescueAdvisory(**result)
+    assert adv.strategy == "CCS"
+
+
+def test_compute_rescue_paper_path_unchanged_source_paper(monkeypatch):
+    """The default paper path still works and carries source='paper'."""
+    _patch_happy(monkeypatch)
+    result = compute.compute_rescue(7)
+    assert result.get("error") is None
+    adv = RescueAdvisory(**result)
+    assert adv.position_id == 7
+    assert adv.source == "paper"
+
+
 # ── assess_open_positions ────────────────────────────────────────────────────
 
 def test_assess_open_positions_counts(monkeypatch):

@@ -423,7 +423,59 @@ def reprice_captured() -> dict:
         code = (mark.get("recommendation_code") or "").upper()
         if code in _STOP_CODES:
             flags.append({"symbol": r.get("symbol"), "code": code})
+        # Attach a rescue assessment so captured CUT signals can surface on the
+        # Rescue board. Fully defensive: any failure leaves the row untagged and
+        # never breaks the reprice loop.
+        try:
+            _attach_rescue_assessment(r, rep, mark)
+        except Exception:
+            pass
     return {"signals": sigs, "flags": flags}
+
+
+# Loss-stop codes that mark a captured signal as a genuine CUT (a TARGET_HIT is a
+# winner → TAKE_PROFIT, NOT a CUT). Kept separate from ``_STOP_CODES`` (which
+# includes TARGET_HIT for the flag list above).
+_LOSS_STOP_CODES = ("MONEY_STOP", "DELTA_STOP", "TIME_STOP")
+_CUT_HEAT_FLOOR = 60.0
+
+
+def _attach_rescue_assessment(r, rep, mark) -> None:
+    """Tag a captured-signal row with ``rescue_state`` + ``heat`` (in place).
+
+    Runs the pure rescue engine over an engine-mark built from the reprice +
+    the signal's static fields, then **escalates** a CUT (any of the three loss
+    stops) to at least ``tested`` with a sensible heat floor so a CUT always
+    lands on the Rescue board regardless of borderline heat math. Captured
+    signals carry their type in ``strategy`` (PCS/CCS/IC); fall back to ``type``
+    if that's all the row has. Caller wraps this defensively."""
+    rep = rep or {}
+    engine_mark = {
+        "current_underlying": rep.get("current_underlying"),
+        "current_value": rep.get("current_value"),
+        "unrealized_pnl": (mark or {}).get("unrealized_pnl"),
+        "current_short_delta": rep.get("current_short_delta"),
+        "dte": _rescue_dte(r.get("expiration")),
+    }
+    # assess_position_risk reads position.get("strategy"); ensure it's present
+    # without destructively renaming an existing ``type`` field on the row.
+    pos = r if r.get("strategy") else {**r, "strategy": r.get("type")}
+    risk = _assess_position_risk(pos, engine_mark, gex=None, regime=None)
+    state = risk.get("state", "ok")
+    heat = float(risk.get("heat", 0.0) or 0.0)
+
+    rec = ((mark or {}).get("recommendation") or "").upper()
+    code = ((mark or {}).get("recommendation_code") or "").upper()
+    if rec == "CUT" or code in _LOSS_STOP_CODES:
+        # A CUT always lands on the board: escalate to at least ``tested`` (never
+        # downgrade a ``critical``) and floor the heat so borderline math can't
+        # hide it.
+        if state not in ("tested", "critical"):
+            state = "tested"
+        heat = max(heat, _CUT_HEAT_FLOOR)
+
+    r["rescue_state"] = state
+    r["heat"] = heat
 
 
 def close_captured(signal_id, exit_val: float, reason: str) -> None:
@@ -1682,18 +1734,78 @@ def _rescue_dte(expiration):
         return None
 
 
-def compute_rescue(position_id) -> dict:
-    """Build the ranked rescue advisory for ONE paper position.
+def _load_captured_as_position(signal_id):
+    """Load a captured signal by id and shape it like a paper position, or None.
 
-    Loads the position, reprices it to a ``mark`` (live via reprice_swing,
-    falling back to the position's stored mark fields if reprice fails), pulls
-    gamma + regime context, and runs the pure rescue engine. Returns a dict
-    shaped like (and validated by) the ``RescueAdvisory`` contract; on ANY
-    failure returns ``{"error": "..."}``. Never raises."""
+    Captured signals live in ``signal_db`` (a SELECT * row), not
+    ``paper_account_db``. We map the relevant fields onto the position-like dict
+    the rescue engine expects: ``strategy`` from the signal ``strategy`` (else
+    ``type``); short/long + call legs; expiration; entry_credit; quantity
+    (default 1); and a ``max_loss_total`` derived from the spread width when the
+    signal doesn't carry one. Lazy import (mirrors the house pattern). Defensive:
+    None on any failure / not found."""
     try:
-        pos = _load_position(position_id)
-        if not pos:
-            return {"error": "position not found"}
+        import signal_db
+        sig = signal_db.get_signal(signal_id)
+    except Exception:
+        return None
+    if not sig:
+        return None
+    strategy = sig.get("strategy") or sig.get("type") or ""
+    short = sig.get("short_strike")
+    long = sig.get("long_strike")
+    qty = sig.get("quantity") or 1
+    max_loss = sig.get("max_loss_total")
+    if max_loss is None:
+        width = sig.get("width")
+        if width is None and short is not None and long is not None:
+            try:
+                width = abs(float(short) - float(long))
+            except Exception:
+                width = None
+        if width is not None:
+            try:
+                max_loss = abs(float(width)) * 100 * qty
+            except Exception:
+                max_loss = None
+    return {
+        "position_id": signal_id,
+        "symbol": sig.get("symbol"),
+        "strategy": strategy,
+        "short_strike": short,
+        "long_strike": long,
+        "call_short": sig.get("call_short"),
+        "call_long": sig.get("call_long"),
+        "expiration": sig.get("expiration"),
+        "entry_credit": sig.get("entry_credit") or 0.0,
+        "quantity": qty,
+        "max_loss_total": max_loss,
+    }
+
+
+def compute_rescue(position_id, source: str = "paper") -> dict:
+    """Build the ranked rescue advisory for ONE position (paper or captured).
+
+    ``source="paper"`` (default): loads a real paper position from
+    ``paper_account_db`` and returns an advisory whose execute candidates have a
+    one-click Apply. ``source="captured"``: loads the captured signal by id
+    (``signal_db.get_signal``), shapes it like a position, and forces EVERY
+    candidate to ``apply_kind="advisory"`` (a captured signal has no executable
+    paper position). Both paths reprice to a ``mark`` (live via reprice_swing,
+    falling back to stored fields / the gamma snapshot's spot), pull gamma +
+    regime context, and run the pure rescue engine. Returns a dict shaped like
+    (and validated by) the ``RescueAdvisory`` contract; on ANY failure returns
+    ``{"error": "..."}``. Never raises."""
+    try:
+        captured = (source == "captured")
+        if captured:
+            pos = _load_captured_as_position(position_id)
+            if not pos:
+                return {"error": "signal not found"}
+        else:
+            pos = _load_position(position_id)
+            if not pos:
+                return {"error": "position not found"}
 
         symbol = pos.get("symbol")
         strategy = pos.get("strategy") or ""
@@ -1775,12 +1887,17 @@ def compute_rescue(position_id) -> dict:
         valid = []
         for c in candidates:
             try:
+                if captured:
+                    # A captured signal has no executable paper position — every
+                    # candidate is advisory-only (the GUI shows no Apply button).
+                    c = {**c, "apply_kind": "advisory", "applies": False}
                 valid.append(RescueCandidate(**c))
             except Exception:
                 continue   # drop a malformed candidate rather than losing the rest
 
         adv = RescueAdvisory(
             position_id=position_id,
+            source=source,
             symbol=symbol,
             strategy=strategy,
             state=risk.get("state", "ok"),

@@ -329,16 +329,19 @@ def publish_gamma_symbols(bus) -> None:
     bus.publish(EVENT_GAMMA_SYMBOLS, {"version": version})
 
 
-def run_rescue(bus, position_id) -> None:
-    """Compute the ranked rescue advisory for ONE paper position and cache it.
+def run_rescue(bus, position_id, source: str = "paper") -> None:
+    """Compute the ranked rescue advisory for ONE position and cache it.
 
     On-demand only (the GUI's per-position Rescue button enqueues a ``rescue``
-    command). ``compute.compute_rescue`` is fully defensive — it returns a
+    command). ``source`` selects the data path: ``"paper"`` (default, int
+    position_id) loads a real paper position; ``"captured"`` (string signal_id)
+    loads a captured signal and returns advisory-only candidates.
+    ``compute.compute_rescue`` is fully defensive — it returns a
     ``RescueAdvisory``-shaped dict, or ``{"error": ...}`` on any failure, never
     raising — so the GUI always sees a payload (an advisory or an error note)
     rather than hanging on a missing cache view. Cached per-id under
-    ``cache:options:rescue:<position_id>``."""
-    adv = compute.compute_rescue(position_id)
+    ``cache:options:rescue:<position_id>`` (the string signal_id works as a key)."""
+    adv = compute.compute_rescue(position_id, source)
     key = f"{CACHE_RESCUE}:{position_id}"
     version = bus.cache_set(key, adv)
     bus.publish(EVENT_RESCUE, {"version": version, "position_id": position_id})
@@ -538,7 +541,14 @@ def handle_command(bus, command) -> None:
         version = bus.cache_set(CACHE_EXPECTED_MOVE, res)
         bus.publish(EVENT_EXPECTED_MOVE, {"version": version})
     elif command.type == "rescue":
-        run_rescue(bus, int(command.args["position_id"]))
+        # position_id may be a paper int OR a captured signal_id string. Coerce
+        # to int only for the paper path (the paper loader expects an int id); a
+        # captured signal_id is passed through as-is.
+        source = command.args.get("source", "paper")
+        pid = command.args["position_id"]
+        if source == "paper":
+            pid = int(pid)
+        run_rescue(bus, pid, source)
     elif command.type == "rescue_apply":
         run_rescue_apply(bus, int(command.args["position_id"]),
                          command.args["candidate"])

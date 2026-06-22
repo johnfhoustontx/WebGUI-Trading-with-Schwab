@@ -503,6 +503,122 @@ def test_reprice_captured_skips_failed_signal(monkeypatch):
     assert out["flags"] == [{"symbol": "QQQ", "code": "TARGET_HIT"}]
 
 
+# ── captured rescue detection (C2) ──────────────────────────────────────────
+def _patch_reprice_seams(monkeypatch, sigs, marks):
+    """Install signal_db / signal_repricer / signal_recommender stubs so
+    reprice_captured runs offline. ``marks`` is keyed by signal_id."""
+    import sys as _sys
+    import types as _types
+    monkeypatch.setitem(_sys.modules, "signal_db",
+                        _types.SimpleNamespace(
+                            get_open_signals_with_latest_mark=lambda: sigs))
+    monkeypatch.setitem(_sys.modules, "signal_repricer",
+                        _types.SimpleNamespace(
+                            reprice_swing=lambda r, c: {
+                                "current_underlying": 500.5,
+                                "current_value": 2.5,
+                                "current_short_delta": 0.40,
+                                "error": None,
+                            }))
+    monkeypatch.setitem(_sys.modules, "signal_recommender",
+                        _types.SimpleNamespace(
+                            build_mark=lambda r, rep, now: marks[r["signal_id"]]))
+
+
+def test_reprice_captured_tags_rescue_state_and_heat(monkeypatch):
+    """Every repriced signal gets rescue_state + heat attached."""
+    sigs = [{"signal_id": "X1", "symbol": "SPY", "strategy": "PCS",
+             "short_strike": 500.0, "long_strike": 495.0,
+             "expiration": "2099-07-31", "entry_credit": 1.0, "recommendation": "HOLD"}]
+    marks = {"X1": {"unrealized_pnl": 5.0, "recommendation": "HOLD",
+                    "recommendation_code": "HOLD"}}
+    _patch_reprice_seams(monkeypatch, sigs, marks)
+    out = compute.reprice_captured()
+    row = out["signals"][0]
+    assert "rescue_state" in row
+    assert "heat" in row
+    assert isinstance(row["heat"], float)
+
+
+def test_reprice_captured_escalates_cut_to_tested(monkeypatch):
+    """A CUT recommendation escalates rescue_state to at least 'tested' and
+    floors heat at 60, even when the raw assessment would be milder."""
+    sigs = [{"signal_id": "X1", "symbol": "SPY", "strategy": "PCS",
+             "short_strike": 500.0, "long_strike": 495.0,
+             "expiration": "2099-07-31", "entry_credit": 1.0,
+             "recommendation": "HOLD"}]
+    # Mark says CUT via the recommendation field (loss stop).
+    marks = {"X1": {"unrealized_pnl": -50.0, "recommendation": "CUT",
+                    "recommendation_code": "TIME_STOP"}}
+    _patch_reprice_seams(monkeypatch, sigs, marks)
+    out = compute.reprice_captured()
+    row = out["signals"][0]
+    assert row["rescue_state"] == "tested"
+    assert row["heat"] >= 60.0
+
+
+def test_reprice_captured_escalates_on_loss_stop_code(monkeypatch):
+    """A loss-stop recommendation_code (no explicit CUT label) still escalates."""
+    sigs = [{"signal_id": "X1", "symbol": "QQQ", "strategy": "IC",
+             "short_strike": 400.0, "long_strike": 395.0,
+             "expiration": "2099-07-31", "entry_credit": 0.8,
+             "recommendation": "HOLD"}]
+    marks = {"X1": {"unrealized_pnl": -90.0, "recommendation": "HOLD",
+                    "recommendation_code": "MONEY_STOP"}}
+    _patch_reprice_seams(monkeypatch, sigs, marks)
+    out = compute.reprice_captured()
+    row = out["signals"][0]
+    assert row["rescue_state"] == "tested"
+    assert row["heat"] >= 60.0
+
+
+def test_reprice_captured_hold_not_escalated(monkeypatch):
+    """A benign HOLD signal is NOT escalated to tested by the CUT logic."""
+    sigs = [{"signal_id": "X1", "symbol": "SPY", "strategy": "PCS",
+             "short_strike": 480.0, "long_strike": 475.0,
+             "expiration": "2099-07-31", "entry_credit": 1.0,
+             "recommendation": "HOLD"}]
+    # Far OTM, tiny delta, profit -> assessment stays ok/watch.
+    marks = {"X1": {"unrealized_pnl": 20.0, "recommendation": "HOLD",
+                    "recommendation_code": "HOLD"}}
+
+    def _reprice(r, c):
+        return {"current_underlying": 510.0, "current_value": 0.3,
+                "current_short_delta": 0.05, "error": None}
+
+    import sys as _sys
+    import types as _types
+    monkeypatch.setitem(_sys.modules, "signal_db",
+                        _types.SimpleNamespace(
+                            get_open_signals_with_latest_mark=lambda: sigs))
+    monkeypatch.setitem(_sys.modules, "signal_repricer",
+                        _types.SimpleNamespace(reprice_swing=_reprice))
+    monkeypatch.setitem(_sys.modules, "signal_recommender",
+                        _types.SimpleNamespace(build_mark=lambda r, rep, now: marks[r["signal_id"]]))
+    out = compute.reprice_captured()
+    row = out["signals"][0]
+    assert row["rescue_state"] != "tested"
+
+
+def test_reprice_captured_detection_defensive(monkeypatch):
+    """If the rescue assessment raises, the row is still returned (untagged) and
+    the reprice loop is not broken."""
+    sigs = [{"signal_id": "X1", "symbol": "SPY", "strategy": "PCS",
+             "short_strike": 500.0, "expiration": "2099-07-31",
+             "entry_credit": 1.0, "recommendation": "CUT"}]
+    marks = {"X1": {"unrealized_pnl": -50.0, "recommendation": "CUT",
+                    "recommendation_code": "TIME_STOP"}}
+    _patch_reprice_seams(monkeypatch, sigs, marks)
+
+    def _boom(*a, **k):
+        raise RuntimeError("assess exploded")
+
+    monkeypatch.setattr(compute, "_assess_position_risk", _boom)
+    out = compute.reprice_captured()
+    # Row still returned; not crashed.
+    assert out["signals"][0]["signal_id"] == "X1"
+
+
 def test_close_captured_calls_close_signal_manually(monkeypatch):
     import sys as _sys
     import types as _types
