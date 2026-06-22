@@ -48,6 +48,7 @@ if str(TRADE_ANALYZER) not in sys.path:
     sys.path.insert(0, str(TRADE_ANALYZER))
 
 import technical  # noqa: E402  (shared indicator lib, imported standalone to dodge the package __init__)
+from src.analysis import scoring as _scoring  # noqa: E402  (src.analysis.scoring — namespaced, not the colliding top-level `scoring`)
 from src.analysis.fundamentals import Fundamentals, parse_schwab_fundamentals  # noqa: E402
 from src.analysis.recommendation import (  # noqa: E402
     InvestorInputs, InvestorVerdict, PositionInputs, PositionVerdict)
@@ -194,6 +195,138 @@ def resolve_sector(symbol):
 def _neutral_sector_strength():
     return SectorStrength(score=0, in_confirmed_downtrend=False,
                           sector_above_50ema=True, rs_3m_percentile=0.5)
+
+
+# ── Markov base-score reconstruction (Task 2.1) ──────────────────────────────
+# Per-bar daily-only composite score the Markov chain learns from. Uses ONLY the
+# nine daily-reconstructable factors (drops the intraday-only vwap/volume_profile
+# the live verdict adds), renormalized to a [-100, 100] scale. Vectorized — full
+# pandas Series, no per-bar Python loop over history — and defensive (any failure
+# returns an empty Series so Markov simply won't run).
+_MK_WEIGHTS = {
+    "ema": 20, "adx": 10, "rsi": 10, "macd": 10, "rel_vol": 5,
+    "dist52": 5, "rs3m": 10, "rs6m": 10, "sector": 10,
+}
+_MK_WEIGHT_SUM = sum(_MK_WEIGHTS.values())  # 90
+_MK_WARMUP = 50  # null the warmup region before long windows are seeded
+
+
+def _ema_series(close, span):
+    return close.ewm(span=span, adjust=False).mean()
+
+
+def _rsi_series(close, period=14):
+    delta = close.diff()
+    gain = delta.where(delta > 0, 0.0).rolling(period).mean()
+    loss = (-delta.where(delta < 0, 0.0)).rolling(period).mean()
+    rs = gain / loss.replace(0, 1e-4)
+    return 100 - (100 / (1 + rs))
+
+
+def _adx_series(daily, period=14):
+    """Approximate Wilder ADX as a Series (mirrors technical.calculate_adx; an
+    approximate ADX is fine for the reconstructed base score)."""
+    high, low, close = daily["high"], daily["low"], daily["close"]
+    up = high.diff()
+    down = -low.diff()
+    plus_dm = (((up > down) & (up > 0)) * up.clip(lower=0)).fillna(0.0)
+    minus_dm = (((down > up) & (down > 0)) * down.clip(lower=0)).fillna(0.0)
+    tr = pd.concat([(high - low), (high - close.shift()).abs(),
+                    (low - close.shift()).abs()], axis=1).max(axis=1)
+    atr = tr.rolling(period).mean().replace(0, 1e-4)
+    plus_di = 100 * plus_dm.rolling(period).mean() / atr
+    minus_di = 100 * minus_dm.rolling(period).mean() / atr
+    dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, 1e-4)
+    return dx.rolling(period).mean()
+
+
+def _aligned_close(hist, target_index):
+    """Datetime-aligned close for a reference history, reindexed onto the target
+    (symbol) datetime index with forward-fill; None when unavailable. This makes
+    RS line up by DATE, not by integer position (SPY/sector may differ in length
+    or start date from the symbol)."""
+    if hist is None or getattr(hist, "empty", True) or "datetime" not in hist.columns:
+        return None
+    s = hist.set_index("datetime")["close"].astype(float)
+    return s.reindex(target_index).ffill()
+
+
+def _rs_score_series(sym_close, ref_close, lookback):
+    """Per-bar RS percentile (sym vs ref over ``lookback``) -> score series; neutral
+    (0) where the reference is missing or the window isn't filled yet."""
+    if ref_close is None:
+        return pd.Series(0.0, index=sym_close.index)
+    sym_ret = sym_close / sym_close.shift(lookback) - 1
+    ref_ret = ref_close / ref_close.shift(lookback) - 1
+    pct = (0.5 + (sym_ret - ref_ret) / 0.40).clip(0.0, 1.0).fillna(0.5)
+    return pct.map(lambda p: _scoring.score_relative_strength_percentile(float(p)))
+
+
+def reconstruct_daily_composite(daily, spy, sector_hist):
+    """Per-bar daily-only composite score Series (the Markov base score).
+
+    Uses only daily-reconstructable factors (renormalized to 100); returns an
+    all-NaN Series when history is too short, and an empty Series on any error
+    (Markov simply won't run). Vectorized — no per-bar Python loop over history.
+    """
+    try:
+        if daily is None or len(daily) < 60:
+            idx = None if daily is None else daily.index
+            return pd.Series([np.nan] * (0 if daily is None else len(daily)), index=idx)
+        d = daily.copy()
+        if "datetime" in d.columns:
+            d = d.set_index("datetime")
+        close = d["close"].astype(float)
+
+        emas = [_ema_series(close, p) for p in (12, 21, 50, 200)]
+        above = sum((close > e).astype(float) for e in emas) / len(emas)
+        ema_score = (above * 2 - 1) * 100
+        slope = np.where(ema_score.to_numpy() >= 0, 1, -1)
+
+        adx = _adx_series(d)
+        adx_score = pd.Series(0.0, index=close.index)
+        adx_score = (adx_score.mask(adx >= 15, 30.0)
+                              .mask(adx >= 20, 60.0)
+                              .mask(adx >= 25, 100.0)) * slope
+
+        rsi = _rsi_series(close)
+        rsi_score = rsi.map(lambda v: _scoring.score_rsi(float(v)) if pd.notna(v) else 0)
+
+        macd_line = _ema_series(close, 12) - _ema_series(close, 26)
+        hist = macd_line - macd_line.ewm(span=9, adjust=False).mean()
+        macd_score = pd.Series(
+            [_scoring.score_macd(float(h), float(p)) if pd.notna(h) and pd.notna(p) else 0
+             for h, p in zip(hist, hist.shift())], index=close.index)
+
+        vol = d["volume"].astype(float)
+        rel = vol / vol.rolling(20).mean().replace(0, 1e-4)
+        rel_score = pd.Series(
+            [_scoring.score_relative_volume(float(r), s) if pd.notna(r) else 0
+             for r, s in zip(rel, slope)], index=close.index)
+
+        roll_high = close.rolling(252, min_periods=20).max()
+        dist = (roll_high - close) / roll_high.replace(0, np.nan)
+        dist_score = dist.map(
+            lambda x: _scoring.score_distance_from_52wk_high(float(x)) if pd.notna(x) else 0)
+
+        spy_close = _aligned_close(spy, close.index)
+        sec_close = _aligned_close(sector_hist, close.index)
+        rs3 = _rs_score_series(close, spy_close, 63)
+        rs6 = _rs_score_series(close, spy_close, 126)
+        sec_score = _rs_score_series(sec_close, spy_close, 63) if sec_close is not None \
+            else pd.Series(0.0, index=close.index)
+
+        w = _MK_WEIGHTS
+        weighted = (ema_score * w["ema"] + adx_score * w["adx"]
+                    + rsi_score * w["rsi"] + macd_score * w["macd"]
+                    + rel_score * w["rel_vol"] + dist_score * w["dist52"]
+                    + rs3 * w["rs3m"] + rs6 * w["rs6m"] + sec_score * w["sector"])
+        composite = (weighted / _MK_WEIGHT_SUM).clip(-100, 100)
+        if len(composite) > _MK_WARMUP:
+            composite.iloc[:_MK_WARMUP] = np.nan
+        return composite
+    except Exception:
+        return pd.Series([], dtype=float)
 
 
 def _fetch_fundamentals(symbol):
