@@ -125,3 +125,62 @@ def test_row_confidence_monotonic():
     lo = markov.row_confidence(np.array([0, 0, 2, 0, 0]), kappa=40.0)
     hi = markov.row_confidence(np.array([0, 0, 200, 0, 0]), kappa=40.0)
     assert 0.0 <= lo < hi <= 1.0
+
+
+def test_stationary_doubly_stochastic_is_uniform():
+    # a doubly-stochastic matrix has the uniform stationary distribution
+    P = np.full((5, 5), 0.2)
+    s = markov._stationary(P)
+    np.testing.assert_allclose(s, np.full(5, 0.2), atol=1e-6)
+
+
+def test_stationary_is_a_genuine_fixed_point():
+    prior = np.full((5, 5), 0.2)
+    C = np.zeros((5, 5)); C[1] = [0, 5, 3, 0, 0]; C[3] = [0, 0, 2, 6, 4]
+    P = markov.shrink(C, prior, alpha=8.0)
+    s = markov._stationary(P)
+    assert (s >= 0).all()
+    np.testing.assert_allclose(s.sum(), 1.0, atol=1e-9)
+    np.testing.assert_allclose(s @ P, s, atol=1e-6)  # d·P = d
+
+
+def test_stationary_reducible_returns_valid_distribution():
+    # reducible chain (absorbing 0,1,2; {3,4} an internal class) -> the old
+    # abs()-of-eigenvector path could corrupt this; power iteration must still
+    # return a valid, non-negative, sum-1 fixed point.
+    P = np.array([
+        [1, 0, 0, 0, 0],
+        [0, 1, 0, 0, 0],
+        [0, 0, 1, 0, 0],
+        [0, 0, 0, 0.5, 0.5],
+        [0, 0, 0, 0.5, 0.5],
+    ], dtype=float)
+    s = markov._stationary(P)
+    assert (s >= 0).all() and np.isfinite(s).all()
+    np.testing.assert_allclose(s.sum(), 1.0, atol=1e-9)
+    np.testing.assert_allclose(s @ P, s, atol=1e-6)
+
+
+def test_stationary_bad_input_falls_back_uniform():
+    bad = np.full((5, 5), np.nan)
+    np.testing.assert_allclose(markov._stationary(bad), np.full(5, 0.2))
+
+
+def test_project_rejects_nonpositive_horizon():
+    P = np.full((5, 5), 0.2)
+    with pytest.raises(ValueError):
+        markov.project(P, np.eye(5)[2], 0)
+    with pytest.raises(ValueError):
+        markov.project(P, np.eye(5)[2], -3)
+
+
+def test_forecast_skips_nonpositive_horizons():
+    P = np.full((5, 5), 0.2)
+    fc = markov.forecast(P, current_band=2, horizons=[0, 5, -1, 10])
+    assert [h["n"] for h in fc["horizons"]] == [5, 10]
+
+
+def test_drift_tilt_missing_horizon_is_zero():
+    fc = {"horizons": [{"n": 5, "e_score": 50.0}]}
+    assert markov.drift_tilt(fc, 0.0, horizon=999, k=1.0, max_pts=12.0, confidence=1.0) == 0.0
+    assert markov.drift_tilt({}, 0.0, horizon=10) == 0.0

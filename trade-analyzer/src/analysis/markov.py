@@ -72,34 +72,43 @@ def shrink(C_sym: np.ndarray, prior: np.ndarray, alpha: float = 30.0) -> np.ndar
 
 def project(P: np.ndarray, dist0: np.ndarray, n: int) -> np.ndarray:
     """Distribution after n steps: dist0 @ P^n."""
+    if int(n) < 1:
+        raise ValueError("project horizon n must be >= 1")
     Pn = np.linalg.matrix_power(np.array(P, dtype=float), int(n))
     return np.array(dist0, dtype=float) @ Pn
 
 
 def _stationary(P: np.ndarray) -> np.ndarray:
-    """Long-run stationary distribution (left eigenvector for eigenvalue 1),
-    falling back to power-iteration / uniform if the solve is ill-conditioned."""
-    P = np.array(P, dtype=float)
-    try:
-        vals, vecs = np.linalg.eig(P.T)
-        idx = int(np.argmin(np.abs(vals - 1.0)))
-        v = np.abs(np.real(vecs[:, idx]))
-        s = v.sum()
-        if s > 0:
-            return v / s
-    except Exception:
-        pass
-    d = np.full(N_BANDS, 1.0 / N_BANDS)
-    for _ in range(1000):
-        d = d @ P
-    s = d.sum()
-    return d / s if s > 0 else np.full(N_BANDS, 1.0 / N_BANDS)
+    """Long-run stationary distribution via power iteration.
+
+    Robust to the reducible/degenerate cases an eigen-decomposition mishandles:
+    it returns a genuine non-negative, sum-1 fixed point d ≈ d·P for the
+    (aperiodic, shrinkage-regularized) matrices this module produces, and falls
+    back to uniform on malformed input (wrong shape / non-finite values).
+    """
+    P = np.asarray(P, dtype=float)
+    uniform = np.full(N_BANDS, 1.0 / N_BANDS)
+    if P.shape != (N_BANDS, N_BANDS) or not np.all(np.isfinite(P)):
+        return uniform
+    d = uniform.copy()
+    for _ in range(2000):
+        nxt = d @ P
+        s = nxt.sum()
+        if s <= 0 or not np.all(np.isfinite(nxt)):
+            return uniform
+        nxt = nxt / s
+        if np.max(np.abs(nxt - d)) < 1e-12:
+            return nxt
+        d = nxt
+    return d
 
 
 def forecast(P: np.ndarray, current_band: int, horizons: List[int]) -> dict:
     """Forecast band distribution + derived metrics from the current band."""
+    P = np.asarray(P, dtype=float)
     mids = np.array(BAND_MIDPOINTS)
     dist0 = np.eye(N_BANDS)[int(current_band)]
+    horizons = [int(n) for n in horizons if int(n) >= 1]
     hs = []
     for n in horizons:
         d = project(P, dist0, n)
@@ -112,8 +121,8 @@ def forecast(P: np.ndarray, current_band: int, horizons: List[int]) -> dict:
         })
     return {
         "current_band": int(current_band),
-        "transition_row": [float(x) for x in np.array(P)[int(current_band)]],
-        "persistence": float(np.array(P)[int(current_band), int(current_band)]),
+        "transition_row": [float(x) for x in P[int(current_band)]],
+        "persistence": float(P[int(current_band), int(current_band)]),
         "horizons": hs,
         "stationary": [float(x) for x in _stationary(P)],
     }
@@ -122,8 +131,8 @@ def forecast(P: np.ndarray, current_band: int, horizons: List[int]) -> dict:
 def row_confidence(row_counts: np.ndarray, kappa: float = 40.0) -> float:
     """Confidence in the current band's transition row from its effective sample
     size: n/(n+kappa) -> 0 when unseen, ->1 with many observations."""
-    n = float(np.asarray(row_counts, dtype=float).sum())
-    return float(n / (n + kappa)) if n >= 0 else 0.0
+    n = max(0.0, float(np.asarray(row_counts, dtype=float).sum()))
+    return float(n / (n + kappa))
 
 
 def drift_tilt(forecast_dict: dict, composite_daily_now: float, horizon: int,
