@@ -102,3 +102,45 @@ def test_fundamentals_rows_empty():
 
 def test_render_is_callable():
     assert callable(trade.render)
+
+
+_MK = {
+    "current_band": 3, "band_labels": ["Strong-Bear", "Weak-Bear", "Neutral",
+                                       "Weak-Bull", "Strong-Bull"],
+    "transition_row": [0.05, 0.1, 0.2, 0.45, 0.2], "persistence": 0.45,
+    "horizons": [
+        {"n": 5, "dist": [0.05, 0.1, 0.2, 0.4, 0.25], "p_buy": 0.25, "p_sell": 0.05, "e_score": 22.0},
+        {"n": 10, "dist": [0.05, 0.1, 0.15, 0.4, 0.3], "p_buy": 0.30, "p_sell": 0.05, "e_score": 28.0},
+        {"n": 20, "dist": [0.05, 0.1, 0.15, 0.35, 0.35], "p_buy": 0.35, "p_sell": 0.05, "e_score": 32.0},
+    ],
+    "drift": 8.0, "tilt": 6.0, "confidence": 0.7,
+    "markov_adjusted_score": 44.0, "composite_daily": 24.0, "prior_version": "2026-06-21",
+}
+
+
+def test_markov_band_chip():
+    assert trade.markov_band_chip(_MK)["label"] == "Weak-Bull"
+
+
+def test_markov_metric_rows():
+    rows = trade.markov_metric_rows(_MK)
+    r10 = next(r for r in rows if r["horizon"] == "10d")
+    assert r10["p_buy"] == "30%"
+
+
+def test_markov_drift_row():
+    r = trade.markov_drift_row(_MK)
+    assert "+6" in r["tilt"] and "44" in r["adjusted"]
+
+
+def test_markov_forecast_figure_shape():
+    fig = trade.markov_forecast_figure(_MK)
+    assert fig["chart"]["type"] == "area"
+    assert len(fig["series"]) == 5
+
+
+def test_markov_builders_tolerate_none():
+    assert trade.markov_band_chip(None) is None
+    assert trade.markov_metric_rows(None) == []
+    assert trade.markov_drift_row(None) is None
+    assert trade.markov_forecast_figure(None)["series"] == []

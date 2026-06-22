@@ -116,6 +116,85 @@ def alignment_rows(ema):
     return rows
 
 
+_MK_BAND_COLORS = ["#c0392b", "#e67e22", "#7f8c8d", "#27ae60", "#1e8449"]
+# stacked-area band fill colors (neutral grey lighter than the chip's grey)
+_MK_AREA_COLORS = ["#c0392b", "#e67e22", "#bdc3c7", "#27ae60", "#1e8449"]
+
+
+def markov_band_chip(mk):
+    """{'label','color'} for the current Markov band, or None when no block."""
+    if not mk:
+        return None
+    i = mk.get("current_band", 2)
+    labels = mk.get("band_labels") or ["?"] * 5
+    color = _MK_BAND_COLORS[i] if 0 <= i < len(_MK_BAND_COLORS) else "#7f8c8d"
+    label = labels[i] if 0 <= i < len(labels) else "?"
+    return {"label": label, "color": color}
+
+
+def markov_metric_rows(mk):
+    """Per-horizon metric rows: horizon / P(buy) / P(sell) / E[score]."""
+    if not mk:
+        return []
+    rows = []
+    for h in mk.get("horizons", []):
+        rows.append({
+            "horizon": f"{h['n']}d",
+            "p_buy": f"{round(h['p_buy'] * 100)}%",
+            "p_sell": f"{round(h['p_sell'] * 100)}%",
+            "e_score": f"{h['e_score']:+.0f}",
+        })
+    return rows
+
+
+def markov_drift_row(mk):
+    """Formatted drift/tilt/confidence/adjusted-score strings, or None."""
+    if not mk:
+        return None
+    return {
+        "drift": f"{mk.get('drift', 0):+.0f}",
+        "tilt": f"{mk.get('tilt', 0):+.0f}",
+        "confidence": f"{round(mk.get('confidence', 0) * 100)}%",
+        "adjusted": f"{mk.get('markov_adjusted_score', 0):.0f}",
+    }
+
+
+def markov_forecast_figure(mk):
+    """Highcharts stacked-area option dict: band probability over horizon.
+
+    Tolerates None (returns an empty-but-valid figure with an explicit height so
+    the persistent chart element renders at a stable size before data arrives)."""
+    base = {
+        "accessibility": {"enabled": False},
+        "chart": {"type": "area", "height": 260},
+        "title": {"text": None},
+        "credits": {"enabled": False},
+        "legend": {"enabled": True},
+    }
+    if not mk:
+        return {**base, "series": []}
+    labels = mk.get("band_labels") or ["?"] * 5
+    cats = ["now"] + [f"{h['n']}d" for h in mk["horizons"]]
+    now = [0.0] * 5
+    cb = mk.get("current_band", 2)
+    if 0 <= cb < 5:
+        now[cb] = 1.0
+    dists = [now] + [h["dist"] for h in mk["horizons"]]
+    series = [{
+        "name": labels[b],
+        "color": _MK_AREA_COLORS[b],
+        "data": [round(d[b], 4) for d in dists],
+    } for b in range(5)]
+    return {
+        **base,
+        "xAxis": {"categories": cats},
+        "yAxis": {"min": 0, "max": 1, "title": {"text": "P(band)"},
+                  "labels": {"format": "{value:.0%}"}},
+        "plotOptions": {"area": {"stacking": "percent", "marker": {"enabled": False}}},
+        "series": series,
+    }
+
+
 _BREAKDOWN_COLS = [
     {"name": "factor", "label": "Factor", "field": "factor", "align": "left"},
     {"name": "weight", "label": "Wt", "field": "weight"},
@@ -137,6 +216,17 @@ def render():
         status = ui.label("Enter a symbol and click Analyze.").classes("opacity-70 text-sm")
 
     results = ui.column().classes("w-full gap-3")
+
+    # Persistent Markov Forecast card — created ONCE at page build so the
+    # Highcharts ESM import map is present (a chart added later on a chart-less
+    # page fails to resolve `nicegui-highcharts`); updated in place on repaint.
+    markov_card = ui.card().classes("w-full")
+    with markov_card:
+        ui.label("Markov Forecast · composite-score regime").classes("text-subtitle2 opacity-70")
+        markov_head = ui.row().classes("items-center gap-4 flex-wrap")
+        markov_metrics = ui.row().classes("gap-6 flex-wrap")
+        markov_chart = ui.highchart(markov_forecast_figure(None)).classes("w-full")
+    markov_card.set_visibility(False)
 
     # ── card builders (widgets; pull from the pure transforms above) ──────────
     def _header(res):
@@ -250,6 +340,41 @@ def render():
                              "Investor verdict degrades to HOLD on insufficient "
                              "data.").classes("text-xs opacity-60")
 
+    @guard
+    def _update_markov(res):
+        mk = (res or {}).get("markov")
+        if not mk:
+            markov_card.set_visibility(False)
+            return
+        markov_card.set_visibility(True)
+        markov_head.clear()
+        with markov_head:
+            chip = markov_band_chip(mk)
+            if chip:
+                ui.label(chip["label"]).classes("text-weight-bold px-2 py-1 rounded text-white") \
+                    .style(f"background:{chip['color']}")
+            dr = markov_drift_row(mk)
+            if dr:
+                ui.label(f"drift {dr['drift']} · tilt {dr['tilt']} · conf {dr['confidence']}") \
+                    .classes("text-sm opacity-80")
+                ui.label(f"adj score {dr['adjusted']}").classes("text-sm text-weight-medium")
+            pv = mk.get("prior_version")
+            if pv:
+                ui.label(f"prior {pv}").classes("text-xs opacity-50")
+        markov_metrics.clear()
+        with markov_metrics:
+            for r in markov_metric_rows(mk):
+                with ui.column().classes("items-center gap-0"):
+                    ui.label(r["horizon"]).classes("text-xs opacity-60")
+                    ui.label(f"E {r['e_score']}").classes("text-h6")
+                    ui.label(f"↑{r['p_buy']} ↓{r['p_sell']}").classes("text-xs opacity-80")
+        markov_chart.options = markov_forecast_figure(mk)
+        markov_chart.update()
+        # reflow after the (possibly previously-hidden) chart is visible so it
+        # doesn't render collapsed (no ResizeObserver in nicegui-highcharts).
+        ui.timer(0.05, lambda: ui.run_javascript(
+            f"getElement({markov_chart.id})?.chart?.reflow()"), once=True)
+
     def _status_for(res):
         if not res:
             return "Enter a symbol and click Analyze."
@@ -284,11 +409,13 @@ def render():
         state["ver"] = version
         state["result"] = bus_client.read("trade:analysis") or None
         _render_results()
+        _update_markov(state["result"])
         status.text = _status_for(state["result"])
 
     # Initial paint (graceful-empty when the service is cold / no prior analysis).
     state["ver"] = bus_client.read_version("trade:analysis")
     state["result"] = bus_client.read("trade:analysis") or None
     _render_results()
+    _update_markov(state["result"])
     status.text = _status_for(state["result"])
     ui.timer(2.0, _poll)
