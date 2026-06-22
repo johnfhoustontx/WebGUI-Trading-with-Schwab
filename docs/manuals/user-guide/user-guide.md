@@ -323,6 +323,64 @@ The account view for the automated paper-trading engine.
 > The manage cycle also runs automatically every 5 minutes during market hours, so
 > the paper portfolio updates on its own — the buttons are manual triggers.
 
+## Rescue
+
+**Route:** `/options/rescue`.
+
+An advisory **and** one-click-apply tool for **tested credit spreads** — put credit
+spreads (PCS), call credit spreads (CCS), and iron condors (IC) — that have moved
+against you. It tells you whether a position is in trouble and offers a ranked menu
+of concrete ways to fix it, with the commission-adjusted cash and risk of each.
+
+**The at-risk table** (top of the page) lists every paper position and captured
+signal the system has flagged as **tested** or **critical**, heat-colored and sorted
+by **heat** (a 0–100 danger score — higher is more urgent). A position earns its
+heat from how close the underlying is to the short strike, the short-leg delta, P&L
+versus the credit taken in, days to expiration, and dealer-gamma / market-regime
+context. Detection rides the paper engine's 5-minute manage cycle, so the table
+stays current on its own.
+
+**A red badge** on the **Rescue** nav item shows how many positions are currently
+tested or critical. Opening the page clears it.
+
+**Select a row** to load its **rescue candidate menu** — a ranked set of cards, each
+a different way to adjust the position:
+
+- **Close** or **partial-close** the spread.
+- **Narrow** it (roll the long leg in toward the short).
+- **Convert** a one-sided spread to an **Iron Condor** or **Iron Butterfly**.
+- **Roll** the spread **down**, **out** (later expiry), or **down-and-out**.
+- Advisory-only ideas: **broken-wing**, **inverted**, and a **futures hedge**.
+
+**Reading a candidate card:**
+
+- The **action label** and a **score** (higher = the engine likes it more).
+- **Gross / commission / net** cash — what the adjustment brings in or costs before
+  fees, the Schwab commission, and the net after fees. Commissions are real Schwab
+  rates and are built into the ranking, so an action that only works by paying a
+  debit is penalized.
+- New **max-loss**, **breakeven**, **short-delta**, **width**, and **expiry** for the
+  position after the adjustment.
+- The **option legs** the adjustment would trade.
+- A **rationale**, **strategic-context** notes (the dealer-gamma read — e.g. rolling
+  below the gamma flip is risky, resting on a put wall favors a bounce — how it fits
+  the current regime, and settlement mechanics: index spreads are European,
+  cash-settled with no early assignment; equity/futures spreads are American and
+  carry assignment risk when in-the-money), and any **warnings**.
+
+**Applying an adjustment.** Cards that the engine can execute show an **Apply**
+button (behind a confirmation). Advisory cards (broken-wing, inverted, futures hedge)
+instead say **"manual — place it yourself."** When you Apply, the app re-prices the
+candidate's legs live and **only proceeds if the economics still hold**; if prices
+have moved past tolerance, or the position is no longer open, it aborts without
+changing anything and tells you **"prices moved — re-review."** Rolls close the old
+position and open a new, linked one. Every applied adjustment is recorded in an audit
+log.
+
+> **Captured signals are advisory-only.** They appear in the at-risk table and get a
+> full candidate menu, but they have no Apply button — there's no paper position to
+> mutate. Use the menu as guidance and place the adjustment yourself.
+
 ## Cross-page actions
 
 Three buttons appear on signal rows across the Options section:

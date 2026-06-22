@@ -119,6 +119,8 @@ a contract (listed in *Cache Key Index*).
 | `ApprovalState` | `driver.py` | `cache:driver:approvals` | `date`, `grade`, `grade_reasons[]`, `conditions{}`, `pnl_today`, `pnl_week`, `proposed_trades[]`, `status`, `decision`, `results[]`, `reasons[]`, `error`, `timestamp` |
 | `PerfReport` | `driver.py` | `cache:driver:performance` | `summary{}`, `trades[]`, `timestamp` |
 | `CompositeSnapshot` | `sentiment.py` | (validation only) | `total: float`, `bias: str`, `components{}` |
+| `RescueAdvisory` | `options.py` | `cache:options:rescue:<position_id>` | `position_id`, `symbol`, `strategy`, `state`, `heat`, `mark`, `context[]`, `candidates[]`, `error` |
+| `RescueCandidate` | `options.py` | (embedded in `RescueAdvisory.candidates`) | `action`, `label`, `apply_kind` (`execute`\|`advisory`), `gross_cash`, `commission`, `net_cash`, `new_max_loss`, `breakeven`, `short_delta`, `width`, `expiry`, `dte_after`, `est_fill_legs[]`, `rationale[]`, `context[]`, `warnings[]`, `score` |
 
 ---
 
@@ -183,10 +185,15 @@ composite-only every 120 s, trend recompute gated to 15 min, rotation at startup
 | `calc_load` | `{symbol}` | `cache:options:calc_chain` |
 | `calc_compute` | `{...calc params}` | `cache:options:calc_result` |
 | `expected_move` | `{symbol, expiry, legs[], lookback}` | `cache:options:expected_move` |
+| `rescue` | `{position_id}` | `cache:options:rescue:<position_id>` |
+| `rescue_apply` | `{position_id, candidate}` | `cache:options:rescue:<position_id>` |
 
 **Scheduled (not command-driven):** `rescan` (auto-scan window), `refresh_header`
 (per tick, skip-unchanged), `collect_gex_snapshots` + `publish_gex_status` +
 `publish_gamma_symbols` (GEX window), `run_manage_and_refresh` (paper-manage window).
+The paper-manage cycle also overlays `rescue_state` / `heat` onto
+`cache:options:paper_account` and publishes `cache:options:rescue_summary` (tested +
+critical counts) for the nav badge.
 
 ## Portfolio service — :8212
 
@@ -316,6 +323,8 @@ cache:options:calc_chain       events:options:calc_chain
 cache:options:calc_result      events:options:calc_result
 cache:options:gex_status       events:options:gex_status
 cache:options:expected_move    events:options:expected_move
+cache:options:rescue:<position_id>   events:options:rescue:<position_id>   (RescueAdvisory contract)
+cache:options:rescue_summary   events:options:rescue_summary
 cmd:options
 ```
 

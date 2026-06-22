@@ -673,6 +673,134 @@ which feeds the strike × time heat map. The universe is the index base
 
 ---
 
+# Rescue Tested Trades
+
+**Files:** `services/options_svc/rescue.py` (pure engine), `commission.py`,
+`compute.compute_rescue` / `compute.assess_open_positions`, and the apply primitives
+in `options-scanner/paper_adjust.py`.
+
+The Rescue feature detects credit spreads (PCS/CCS/IC) that have moved against the
+position and proposes a ranked, commission-aware menu of adjustments. The
+architecture is **hybrid ("Approach C")** — cheap detection rides an existing loop,
+while the expensive ranked menu and the apply are on-demand:
+
+| Phase | Where it runs | Output |
+|-------|---------------|--------|
+| **Detection** (state + heat) | The 5-min paper manage cycle | Tags `cache:options:paper_account` rows with `rescue_state` / `heat`; publishes `cache:options:rescue_summary` (counts) for the nav badge. |
+| **Ranked menu** | On demand (`rescue` command) | `cache:options:rescue:<position_id>` — the per-position advisory. |
+| **Apply** | On demand (`rescue_apply` command) | Mutates the paper account behind a stale-price guard; writes an audit row. |
+
+## Detection model
+
+**File:** `rescue.py` · `assess_position_risk(...)`.
+
+Each open spread is graded on a four-state ladder and assigned a **0–100 heat**:
+
+```
+ok  →  watch  →  tested  →  critical
+```
+
+The thresholds mirror the manage-cycle stops. Heat is driven by:
+
+- **Short-strike proximity** — how close the underlying is to the short strike
+  (the dominant input; ITM short = high heat).
+- **Short delta** — the short leg's delta as an assignment-probability proxy.
+- **P&L vs credit** — current loss as a fraction of the credit originally taken in.
+- **DTE** — less time to recover raises heat.
+- **GEX / regime modifiers** — sitting below the dealer **gamma flip** or pinned at a
+  **put wall** adjusts heat; the market regime (from the sentiment bridge) nudges it.
+
+`assess_open_positions()` is the **cheap** pass used for the badge: it reuses each
+position's stored marks (no fresh chain fetch) to compute state/heat for every open
+paper position, and `compute_rescue` does the **expensive** per-position pass (live
+reprice + full candidate construction).
+
+## Strategic context
+
+**File:** `rescue.py` · `strategic_context(...)`. Independent of any single
+candidate, this annotates the advisory with three reads (notes + boolean flags):
+
+- **Dealer gamma** — rolling *below* the gamma flip is flagged risky (dealers sell
+  into weakness, accelerating moves); resting *on a put wall* favors a bounce.
+- **Regime fit** — whether the spread's direction aligns with the current trend
+  regime.
+- **Settlement mechanics** — **index** options are **European, cash-settled** (no
+  early assignment); **equity / futures** options are **American** and carry
+  assignment risk when in-the-money. (`commission.is_index_symbol` classifies.)
+
+## Candidate builders and economics
+
+`rescue_candidates(...)` orchestrates eleven candidate builders, constructing each
+**independently** so one bad candidate can't sink the whole advisory:
+
+| Builder | Apply kind | Idea |
+|---------|-----------|------|
+| `close` | execute | Buy back the whole spread now. |
+| `partial_close` | execute | Close part of the size. |
+| `narrow` | execute | Roll the long leg in toward the short (cuts width and max loss). |
+| `convert_ic` | execute | Add the opposite-side spread → Iron Condor. |
+| `convert_butterfly` | execute | Tighten to an Iron Butterfly. |
+| `roll_down` | execute | Roll the spread down (same expiry). |
+| `roll_out` | execute | Roll to a later expiry for more time. |
+| `roll_down_out` | execute | Roll both down and out. |
+| `broken_wing` | advisory | Asymmetric-width repair (place manually). |
+| `inverted` | advisory | Invert the strikes (place manually). |
+| `futures_hedge` | advisory | Offsetting futures position (place manually). |
+
+**Commission-aware economics.** Commissions come from `config/commissions.toml` via
+`commission.py` (`commission_for` / `futures_commission` / `is_index_symbol`) — never
+hard-coded. Schwab standard rates: listed equity/ETF options **$0.65/contract per
+leg**, index options $0.65 + a Cboe exchange-fee passthrough, futures **$2.25/contract
+per side**, letting a leg expire **$0**. Each candidate reports `gross_cash` (before
+fees), `commission`, and `net_cash` (after).
+
+The **max loss** of a credit spread (used for both the post-adjustment metric and BP
+reconciliation) follows the standard idiom:
+
+```
+max_loss = width · 100 · qty − net_credit          # net_credit = credit taken in net of commission
+```
+
+(`_spread_max_loss` in `rescue.py`.) The candidate's `new_max_loss` is recomputed for
+the adjusted legs.
+
+## Scoring and ranking
+
+**File:** `rescue.py` · `score_candidate(...)`. Candidates are ranked by, in priority
+order:
+
+1. **Max-loss reduction per net dollar** — the dominant term; how much risk each net
+   dollar removes (or, for credit actions, adds while reducing risk).
+2. **Delta** — preferring adjustments that flatten directional exposure.
+3. **Debit penalty** — debit actions are penalized, encoding *"never roll for a debit
+   just to save it."*
+4. **GEX / regime modifiers** — the same gamma-flip / put-wall / regime reads that
+   feed heat nudge the score.
+
+## Apply and the stale-price guard
+
+**File:** `options-scanner/paper_adjust.py`. The `rescue_apply` handler dispatches to
+`apply_adjustment`, which routes to the per-action primitive (`apply_close`,
+`apply_partial_close`, `apply_narrow`, `apply_convert_ic`, `apply_convert_butterfly`,
+`apply_roll`, `apply_inverted`).
+
+Before mutating anything, `apply_adjustment` **re-prices the candidate's legs live**
+and:
+
+- **Aborts without mutation** if the position is no longer `OPEN`, or if the
+  re-priced economics have **drifted past tolerance** from what the candidate
+  promised (the GUI surfaces *"prices moved — re-review"*).
+- Otherwise mutates the paper DB inside the existing cash / buying-power mechanism,
+  **reconciling reserved BP** to the position's new max loss.
+
+**Rolls** close the old position and open a new one linked via the
+`parent_position_id` column. Every applied adjustment writes an audit row to the
+`position_adjustments` table (`paper_account_db.insert_adjustment` /
+`list_adjustments`). `rescue_apply` refuses non-paper ids — **captured signals are
+advisory-only** (no paper position to mutate).
+
+---
+
 # Constants Appendix
 
 A consolidated table of the load-bearing constants. The cited file governs.
@@ -705,3 +833,16 @@ A consolidated table of the load-bearing constants. The cited file governs.
 | portfolio_svc | Live SSE ticks; throttled publish ≤ every 2 s; full rebuild every 10 min or on demand. |
 | trade_svc | On-demand only (no scheduler). |
 | driver_svc | Morning run once/day at 09:28 ET; perf refresh ≈ every 5 min. |
+
+## Commissions
+
+Source of truth: `config/commissions.toml`, loaded by
+`services/options_svc/commission.py` — never hard-coded. Used by the Rescue
+candidate menu's net-cash and ranking.
+
+| Instrument | Rate |
+|------------|------|
+| Listed equity / ETF options | $0.65 / contract per leg |
+| Index options | $0.65 / contract per leg + Cboe exchange-fee passthrough |
+| Futures | $2.25 / contract per side |
+| Let a leg expire | $0 |

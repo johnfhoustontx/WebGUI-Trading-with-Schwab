@@ -90,6 +90,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#paper-trades">Paper Trades</a></li>
 <li><a href="#captured-signals">Captured Signals</a></li>
 <li><a href="#paper-portfolio">Paper Portfolio</a></li>
+<li><a href="#rescue">Rescue</a></li>
 <li><a href="#cross-page-actions">Cross-page actions</a></li>
 </ul>
 </li>
@@ -416,6 +417,59 @@ put/call toggle, and a <strong>Look-back</strong> dropdown (Auto ≈ 3× DTE, or
 <blockquote>
 <p>The manage cycle also runs automatically every 5 minutes during market hours, so
 the paper portfolio updates on its own — the buttons are manual triggers.</p>
+</blockquote>
+<h2 id="rescue">Rescue</h2>
+<p><strong>Route:</strong> <code>/options/rescue</code>.</p>
+<p>An advisory <strong>and</strong> one-click-apply tool for <strong>tested credit spreads</strong> — put credit
+spreads (PCS), call credit spreads (CCS), and iron condors (IC) — that have moved
+against you. It tells you whether a position is in trouble and offers a ranked menu
+of concrete ways to fix it, with the commission-adjusted cash and risk of each.</p>
+<p><strong>The at-risk table</strong> (top of the page) lists every paper position and captured
+signal the system has flagged as <strong>tested</strong> or <strong>critical</strong>, heat-colored and sorted
+by <strong>heat</strong> (a 0–100 danger score — higher is more urgent). A position earns its
+heat from how close the underlying is to the short strike, the short-leg delta, P&amp;L
+versus the credit taken in, days to expiration, and dealer-gamma / market-regime
+context. Detection rides the paper engine's 5-minute manage cycle, so the table
+stays current on its own.</p>
+<p><strong>A red badge</strong> on the <strong>Rescue</strong> nav item shows how many positions are currently
+tested or critical. Opening the page clears it.</p>
+<p><strong>Select a row</strong> to load its <strong>rescue candidate menu</strong> — a ranked set of cards, each
+a different way to adjust the position:</p>
+<ul>
+<li><strong>Close</strong> or <strong>partial-close</strong> the spread.</li>
+<li><strong>Narrow</strong> it (roll the long leg in toward the short).</li>
+<li><strong>Convert</strong> a one-sided spread to an <strong>Iron Condor</strong> or <strong>Iron Butterfly</strong>.</li>
+<li><strong>Roll</strong> the spread <strong>down</strong>, <strong>out</strong> (later expiry), or <strong>down-and-out</strong>.</li>
+<li>Advisory-only ideas: <strong>broken-wing</strong>, <strong>inverted</strong>, and a <strong>futures hedge</strong>.</li>
+</ul>
+<p><strong>Reading a candidate card:</strong></p>
+<ul>
+<li>The <strong>action label</strong> and a <strong>score</strong> (higher = the engine likes it more).</li>
+<li><strong>Gross / commission / net</strong> cash — what the adjustment brings in or costs before
+  fees, the Schwab commission, and the net after fees. Commissions are real Schwab
+  rates and are built into the ranking, so an action that only works by paying a
+  debit is penalized.</li>
+<li>New <strong>max-loss</strong>, <strong>breakeven</strong>, <strong>short-delta</strong>, <strong>width</strong>, and <strong>expiry</strong> for the
+  position after the adjustment.</li>
+<li>The <strong>option legs</strong> the adjustment would trade.</li>
+<li>A <strong>rationale</strong>, <strong>strategic-context</strong> notes (the dealer-gamma read — e.g. rolling
+  below the gamma flip is risky, resting on a put wall favors a bounce — how it fits
+  the current regime, and settlement mechanics: index spreads are European,
+  cash-settled with no early assignment; equity/futures spreads are American and
+  carry assignment risk when in-the-money), and any <strong>warnings</strong>.</li>
+</ul>
+<p><strong>Applying an adjustment.</strong> Cards that the engine can execute show an <strong>Apply</strong>
+button (behind a confirmation). Advisory cards (broken-wing, inverted, futures hedge)
+instead say <strong>"manual — place it yourself."</strong> When you Apply, the app re-prices the
+candidate's legs live and <strong>only proceeds if the economics still hold</strong>; if prices
+have moved past tolerance, or the position is no longer open, it aborts without
+changing anything and tells you <strong>"prices moved — re-review."</strong> Rolls close the old
+position and open a new, linked one. Every applied adjustment is recorded in an audit
+log.</p>
+<blockquote>
+<p><strong>Captured signals are advisory-only.</strong> They appear in the at-risk table and get a
+full candidate menu, but they have no Apply button — there's no paper position to
+mutate. Use the menu as guidance and place the adjustment yourself.</p>
 </blockquote>
 <h2 id="cross-page-actions">Cross-page actions</h2>
 <p>Three buttons appear on signal rows across the Options section:</p>

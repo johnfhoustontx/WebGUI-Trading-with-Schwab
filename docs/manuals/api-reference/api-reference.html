@@ -259,6 +259,18 @@ a contract (listed in <em>Cache Key Index</em>).</p>
 <td>(validation only)</td>
 <td><code>total: float</code>, <code>bias: str</code>, <code>components{}</code></td>
 </tr>
+<tr>
+<td><code>RescueAdvisory</code></td>
+<td><code>options.py</code></td>
+<td><code>cache:options:rescue:&lt;position_id&gt;</code></td>
+<td><code>position_id</code>, <code>symbol</code>, <code>strategy</code>, <code>state</code>, <code>heat</code>, <code>mark</code>, <code>context[]</code>, <code>candidates[]</code>, <code>error</code></td>
+</tr>
+<tr>
+<td><code>RescueCandidate</code></td>
+<td><code>options.py</code></td>
+<td>(embedded in <code>RescueAdvisory.candidates</code>)</td>
+<td><code>action</code>, <code>label</code>, <code>apply_kind</code> (<code>execute</code>|<code>advisory</code>), <code>gross_cash</code>, <code>commission</code>, <code>net_cash</code>, <code>new_max_loss</code>, <code>breakeven</code>, <code>short_delta</code>, <code>width</code>, <code>expiry</code>, <code>dte_after</code>, <code>est_fill_legs[]</code>, <code>rationale[]</code>, <code>context[]</code>, <code>warnings[]</code>, <code>score</code></td>
+</tr>
 </tbody>
 </table>
 <hr />
@@ -457,11 +469,24 @@ composite-only every 120 s, trend recompute gated to 15 min, rotation at startup
 <td><code>{symbol, expiry, legs[], lookback}</code></td>
 <td><code>cache:options:expected_move</code></td>
 </tr>
+<tr>
+<td><code>rescue</code></td>
+<td><code>{position_id}</code></td>
+<td><code>cache:options:rescue:&lt;position_id&gt;</code></td>
+</tr>
+<tr>
+<td><code>rescue_apply</code></td>
+<td><code>{position_id, candidate}</code></td>
+<td><code>cache:options:rescue:&lt;position_id&gt;</code></td>
+</tr>
 </tbody>
 </table>
 <p><strong>Scheduled (not command-driven):</strong> <code>rescan</code> (auto-scan window), <code>refresh_header</code>
 (per tick, skip-unchanged), <code>collect_gex_snapshots</code> + <code>publish_gex_status</code> +
-<code>publish_gamma_symbols</code> (GEX window), <code>run_manage_and_refresh</code> (paper-manage window).</p>
+<code>publish_gamma_symbols</code> (GEX window), <code>run_manage_and_refresh</code> (paper-manage window).
+The paper-manage cycle also overlays <code>rescue_state</code> / <code>heat</code> onto
+<code>cache:options:paper_account</code> and publishes <code>cache:options:rescue_summary</code> (tested +
+critical counts) for the nav badge.</p>
 <h2 id="portfolio-service-8212">Portfolio service — :8212</h2>
 <p><strong>Entry:</strong> <code>services/portfolio_svc/app.py</code>. <strong>Scheduler:</strong> initial rebuild + SSE
 quote-stream worker; throttled publish ≤ every 2 s while ticks pending; full rebuild
@@ -703,6 +728,8 @@ cache:options:calc_chain       events:options:calc_chain
 cache:options:calc_result      events:options:calc_result
 cache:options:gex_status       events:options:gex_status
 cache:options:expected_move    events:options:expected_move
+cache:options:rescue:&lt;position_id&gt;   events:options:rescue:&lt;position_id&gt;   (RescueAdvisory contract)
+cache:options:rescue_summary   events:options:rescue_summary
 cmd:options
 </code></pre>
 <p><strong>Trade / Portfolio / Driver:</strong></p>
