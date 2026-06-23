@@ -729,9 +729,26 @@ def generate_price_range(spot, pct=0.05):
     return (low, high)
 
 
+def _leg_expiry_years(leg, expiry_date=None):
+    """Leg's CURRENT (now) time-to-expiry in years from its own ``expiry``
+    (4pm-close convention, /365, never negative). None if the leg has no
+    ``expiry`` (caller then falls back to the column T)."""
+    import datetime as _dt
+    e = leg.get("expiry")
+    if not e:
+        return None
+    try:
+        d = _dt.date.fromisoformat(str(e))
+    except (TypeError, ValueError):
+        return None
+    close = _dt.datetime(d.year, d.month, d.day, 16)
+    now = _dt.datetime.now()
+    return max((close - now).total_seconds(), 0.0) / (365 * 86400)
+
+
 def calc_spread_pnl(legs, spot, iv, r, eval_dates, price_range,
                     expiry_date, iv_adjustment=0.0, rows_per_side=30,
-                    eval_times=None):
+                    eval_times=None, per_leg_expiry=False):
     """
     Calculate P&L grid for a spread across prices and dates.
 
@@ -811,6 +828,9 @@ def calc_spread_pnl(legs, spot, iv, r, eval_dates, price_range,
             eval_date_d = eval_date.date() if isinstance(eval_date, datetime) else eval_date
             col_times.append(max((expiry_date - eval_date_d).days / 365.0, 0.0))
 
+    t0 = col_times[0] if col_times else 0.0
+    leg_t0 = [(_leg_expiry_years(l) if per_leg_expiry else None) for l in legs]
+
     results = []
 
     for price in price_steps:
@@ -820,12 +840,14 @@ def calc_spread_pnl(legs, spot, iv, r, eval_dates, price_range,
         for T in col_times:
             # Calculate current position value
             position_value = 0.0
-            for leg in legs:
+            for li, leg in enumerate(legs):
                 qty = leg.get("qty", 1)
                 opt_type = leg["option_type"].lower()
                 strike = leg["strike"]
 
-                current_price = bs_price(price, strike, T, r, adjusted_iv, opt_type)
+                base = leg_t0[li]
+                t_leg = T if base is None else max(base - (t0 - T), 0.0)
+                current_price = bs_price(price, strike, t_leg, r, adjusted_iv, opt_type)
 
                 if leg["side"] == "long":
                     # Long position: we own it, positive value
