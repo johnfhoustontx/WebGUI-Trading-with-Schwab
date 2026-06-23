@@ -51,21 +51,17 @@ CALC_CSS = """
 .calc-btn-3d.calc-go.q-btn:active{box-shadow:0 1px 0 0 #1f5e2a,0 2px 4px rgba(0,0,0,.45);}
 """
 
-# (key, label, option_type, side) per strategy — mirrors dashboard leg inputs.
-LEG_SPECS = {
-    "PCS": [("short_put", "Short Put (write)", "put", "short"),
-            ("long_put", "Long Put (buy)", "put", "long")],
-    "CCS": [("short_call", "Short Call (write)", "call", "short"),
-            ("long_call", "Long Call (buy)", "call", "long")],
-    "IC": [("short_put", "Short Put (write)", "put", "short"),
-           ("long_put", "Long Put (buy)", "put", "long"),
-           ("short_call", "Short Call (write)", "call", "short"),
-           ("long_call", "Long Call (buy)", "call", "long")],
-    "LONG_PUT": [("long_put", "Long Put (buy)", "put", "long")],
-    "NAKED_PUT": [("short_put", "Short Put (sell)", "put", "short")],
-    "LONG_CALL": [("long_call", "Long Call (buy)", "call", "long")],
-    "NAKED_CALL": [("short_call", "Short Call (sell)", "call", "short")],
-}
+def strategy_options():
+    """Flat list of strategy codes for the dropdown, in ``STRATEGY_GROUPS`` order.
+
+    The editable leg-editor (``pages.options.strategies``) is the single source of
+    truth for the strategy table, so the Calculator + Simulator never drift. Codes
+    span singles / verticals / condors / butterflies / calendars; the analytic
+    summary path is auto-selected per code in the Tier-2 ``calc_compute``.
+    """
+    from . import strategies as S
+
+    return [code for _label, codes in S.STRATEGY_GROUPS for code in codes]
 
 
 def _band(frac):
@@ -323,11 +319,11 @@ def render():
     from pages.ui_guard import guard
 
     from . import handoff
+    from . import leg_editor
 
     ui.add_css(CALC_CSS)
     ui.label("Calculator").classes("text-h5")
 
-    leg_inputs: dict = {}
     # Page state (local closure, not module globals — built per request).
     state = {
         "chain": None,        # last calc_load chain dict (pure-extracted locally)
@@ -336,6 +332,7 @@ def render():
         "result_ver": None,   # last-seen calc_result cache version
         "iv_ver": None,       # last-seen calc_iv cache version
         "calc_spot": None,    # spot used for the last enqueued compute (grid marker)
+        "pending_legs": None,  # legs copied in from the Simulator, applied on chain load
     }
 
     # Two columns: inputs (vertical) on the LEFT, P&L matrix on the RIGHT. The
@@ -346,8 +343,8 @@ def render():
             # Line 1: Strategy + Symbol  ·  Load (right edge)
             with ui.row().classes("w-full items-end justify-between gap-3 no-wrap"):
                 with ui.row().classes("items-end gap-3"):
-                    strategy_sel = ui.select(list(LEG_SPECS.keys()), value="PCS",
-                                             label="Strategy").classes("w-36")
+                    strategy_sel = ui.select(strategy_options(), value="PCS",
+                                             label="Strategy").classes("w-48")
                     symbol_in = select_all_on_focus(ui.input("Symbol", value="SPY").classes("w-28"))
                 ui.button("Load", icon="download", on_click=lambda: load_symbol()) \
                     .props("dense no-caps").classes("calc-btn-3d w-40") \
@@ -378,78 +375,79 @@ def render():
                     .props("dense no-caps").classes("calc-btn-3d w-40") \
                     .tooltip("Fill leg premiums from the chain (strikes required)")
             # Primary actions
-            with ui.row().classes("items-center gap-3 pt-1"):
+            with ui.row().classes("items-center gap-3 pt-1 flex-wrap"):
                 ui.button("Calculate", icon="calculate", on_click=lambda: do_calc()) \
                     .props("no-caps").classes("calc-btn-3d calc-go")
                 ui.button("Expected Move", icon="show_chart", on_click=lambda: send_to_em()) \
                     .props("no-caps").classes("calc-btn-3d") \
                     .tooltip("Chart the expected move for these legs")
+                ui.button("Copy to Simulator", icon="science",
+                          on_click=lambda: handoff.send_to_simulator(
+                              leg_editor.legs_to_payload(
+                                  (symbol_in.value or "").replace("$", "").upper(),
+                                  editor.get_legs(), keep_premium=False))) \
+                    .props("no-caps").classes("calc-btn-3d") \
+                    .tooltip("Open these legs in the Simulator")
         # RIGHT: P&L matrix (summary tiles + heatmap grid)
         with ui.column().classes("flex-1 min-w-0 gap-3"):
             summary_box = ui.row().classes("gap-3 flex-wrap")
             grid_box = ui.column().classes("w-full")
 
-    def _sync_strikes():
-        chain = state.get("chain")
-        if not chain or not expiry_sel.value:
-            return
-        spot = float(price_in.value or 0)
-        for info in leg_inputs.values():
-            strikes = chain_strikes(chain, expiry_sel.value, info["option_type"])
-            sel = info["strike"]
-            sel.options = strikes
-            if strikes and sel.value not in strikes:
-                sel.value = min(strikes, key=lambda s: abs(s - spot)) if spot else strikes[0]
-            sel.update()
+    # ── editable multi-leg editor (shared with the Simulator) ────────────────
+    # Strike/expiry options come from the cached chain; the editor owns the legs
+    # (add/remove/edit) and tracks a ``dirty`` flag (any manual edit ⇒ the summary
+    # routes through the generic numeric path with strategy="CUSTOM").
+    def _strikes_for(expiry, otype):
+        chain = state.get("chain") or {}
+        if expiry:
+            return chain_strikes(chain, expiry, otype)
+        # Union across expiries — used by apply_template before a per-leg expiry
+        # is set, and by the editor's pre-load empty state.
+        out = set()
+        for e in chain_expiries(chain):
+            out.update(chain_strikes(chain, e, otype))
+        return sorted(out)
 
-    def rebuild_legs():
-        leg_box.clear()
-        leg_inputs.clear()
-        with leg_box:
-            for key, label, otype, side in LEG_SPECS[strategy_sel.value]:
-                with ui.row().classes("items-end gap-2"):
-                    ui.label(label).classes("w-44 text-sm")
-                    sin = ui.select([], label="Strike").classes("w-28")
-                    pin = ui.number("Premium", value=0.0, format="%.2f").classes("w-28")
-                    leg_inputs[key] = {"strike": sin, "premium": pin,
-                                       "option_type": otype, "side": side}
-        _sync_strikes()
+    def _expiries_for():
+        return chain_expiries(state.get("chain") or {})
 
-    rebuild_legs()
-    strategy_sel.on_value_change(lambda e: rebuild_legs())
-    expiry_sel.on_value_change(lambda e: _sync_strikes())
+    editor = leg_editor.build_leg_editor(
+        leg_box, strikes_for=_strikes_for, expiries_for=_expiries_for,
+        show_premium=True, on_change=lambda: None,
+        spot_getter=lambda: float(price_in.value or 0))
+
+    # Seed the default template (PCS). Tolerates empty strikes/expiries pre-load.
+    editor.apply_template(strategy_sel.value)
+    strategy_sel.on_value_change(lambda e: editor.apply_template(strategy_sel.value))
 
     @guard
     def fetch_premiums():
-        """Fill leg premiums from the CACHED chain (pure ``extract_premium``)."""
-        if not expiry_sel.value:
-            ui.notify("Load symbol + pick an Expiry first.", type="warning")
-            return
+        """Fill leg premiums from the CACHED chain (pure ``extract_premium``).
+
+        Each leg is priced at its OWN expiry (falling back to the primary Expiry
+        select, then to a no-expiry strike match). The filled legs are written back
+        via ``editor.set_legs`` so the premium fields repaint."""
         chain = state.get("chain")
         if chain is None:
             ui.notify("Load symbol first.", type="warning")
             return
-        legs = []
-        for info in leg_inputs.values():
-            if not info["strike"].value:
-                ui.notify("Pick all leg strikes first.", type="warning")
-                return
-            legs.append((info, float(info["strike"].value)))
-        try:
-            expiry = dt.date.fromisoformat(str(expiry_sel.value))
-        except Exception as exc:
-            ui.notify(f"Bad expiry: {exc}", type="negative")
+        legs = editor.get_legs()
+        if any(l.get("strike") is None for l in legs):
+            ui.notify("Pick all leg strikes first.", type="warning")
             return
         filled, missing = 0, []
-        for info, strike in legs:
-            prem = extract_premium(chain, info["option_type"], strike, expiry=expiry)
+        for leg in legs:
+            strike = float(leg["strike"])
+            leg_exp = leg.get("expiry") or expiry_sel.value
+            prem = extract_premium(chain, leg["option_type"], strike, expiry=leg_exp)
             if prem is None:
-                prem = extract_premium(chain, info["option_type"], strike)
+                prem = extract_premium(chain, leg["option_type"], strike)
             if prem is not None:
-                info["premium"].value = round(prem, 2)
+                leg["premium"] = round(prem, 2)
                 filled += 1
             else:
-                missing.append(f"{info['option_type']} @ {strike:g}")
+                missing.append(f"{leg['option_type']} @ {strike:g}")
+        editor.set_legs(legs)
         if filled:
             ui.notify(f"Filled {filled} premium(s).", type="positive")
         if missing:
@@ -491,18 +489,18 @@ def render():
         # have a chosen strike + a mark in the cached chain.
         primary = None  # (strike, option_type, mark)
         best = float("inf")
-        for info in leg_inputs.values():
-            sv = info["strike"].value
+        for leg in editor.get_legs():
+            sv = leg.get("strike")
             if not sv:
                 continue
             strike = float(sv)
-            mark = (extract_premium(chain, info["option_type"], strike, expiry=expiry)
-                    or extract_premium(chain, info["option_type"], strike))
+            mark = (extract_premium(chain, leg["option_type"], strike, expiry=expiry)
+                    or extract_premium(chain, leg["option_type"], strike))
             if mark is None:
                 continue
             d = abs(strike - spot)
             if d < best:
-                best, primary = d, (strike, info["option_type"], mark)
+                best, primary = d, (strike, leg["option_type"], mark)
         if primary is not None:
             strike, otype, mark = primary
             bus_client.request("options", {"type": "calc_iv", "args": {
@@ -528,23 +526,40 @@ def render():
     @guard
     def do_calc():
         """Build the params dict and enqueue ``calc_compute``; the version-poll
-        paints the summary tiles + P&L grid from the cached result."""
+        paints the summary tiles + P&L grid from the cached result.
+
+        Each leg carries its OWN expiry + qty (so calendars/diagonals price each
+        leg correctly and ``calc_compute`` derives the grid horizon from the front
+        leg). When the user has edited the legs (``editor.is_dirty()``) the summary
+        routes through the generic numeric path (``strategy="CUSTOM"``); otherwise
+        the selected strategy code drives the analytic path where supported."""
+        legs = editor.get_legs()
+        if not legs:
+            ui.notify("Add at least one leg first.", type="warning")
+            return
+        if any(l.get("strike") is None for l in legs):
+            ui.notify("Pick all leg strikes first.", type="warning")
+            return
         try:
             spot = float(price_in.value)
-            qty = int(contracts_in.value or 1)
+            page_qty = int(contracts_in.value or 1)
+            page_exp = str(expiry_sel.value)
+            strat = strategy_sel.value if not editor.is_dirty() else "CUSTOM"
             params = {
-                "strategy": strategy_sel.value,
+                "strategy": strat,
                 "spot": spot,
                 "iv": float(iv_in.value) / 100.0,
                 "rate": float(rate_in.value) / 100.0,
                 "ivadj": float(ivchg_in.value) / 100.0,
-                "qty": qty,
-                "expiry": str(expiry_sel.value),
-                "legs": [{"strike": float(info["strike"].value),
-                          "premium": float(info["premium"].value),
-                          "option_type": info["option_type"],
-                          "side": info["side"], "qty": qty}
-                         for info in leg_inputs.values()],
+                "qty": page_qty,
+                "expiry": page_exp,
+                "legs": [{"strike": float(l["strike"]),
+                          "premium": float(l["premium"] or 0),
+                          "option_type": l["option_type"],
+                          "side": l["side"],
+                          "qty": int(l.get("qty", 1) or 1),
+                          "expiry": l.get("expiry") or page_exp}
+                         for l in legs],
                 "range_min": float(rmin_in.value or 0),
                 "range_max": float(rmax_in.value or 0),
                 "range_pct": float(rpct_in.value or 5) / 100.0,
@@ -560,9 +575,9 @@ def render():
     @guard
     def send_to_em():
         """Chart the expected move for the current legs (opens a new tab)."""
-        legs = [{"strike": float(info["strike"].value), "option_type": info["option_type"],
-                 "side": info["side"]}
-                for info in leg_inputs.values() if info["strike"].value]
+        legs = [{"strike": float(l["strike"]), "option_type": l["option_type"],
+                 "side": l["side"]}
+                for l in editor.get_legs() if l.get("strike") is not None]
         handoff.send_to_expected_move({
             "symbol": (symbol_in.value or "").replace("$", "").upper(),
             "expiry": str(expiry_sel.value or ""), "legs": legs})
@@ -581,7 +596,19 @@ def render():
         if exps and expiry_sel.value not in exps:
             expiry_sel.value = exps[0]
         expiry_sel.update()
-        _sync_strikes()
+        # Repopulate the per-leg expiry/strike selects from the freshly-loaded
+        # chain. Pending legs copied in from the Simulator win; otherwise, when the
+        # user hasn't touched the legs, re-seed the template so strikes snap to the
+        # real ladder (preserves the old Load → strikes-ready behavior).
+        pending = state.pop("pending_legs", None)
+        if pending:
+            editor.set_legs(pending)
+            fetch_premiums()
+            do_calc()
+        elif not editor.is_dirty():
+            editor.apply_template(strategy_sel.value)
+        else:
+            editor.refresh_options()
         if cc.get("symbol") is not None:
             price = cc.get("price")
             msg = f"{cc['symbol']}: {len(exps)} expiries" + (f", {price:.2f}" if price else "")
@@ -647,16 +674,32 @@ def render():
     ui.timer(1.0, _poll_result)
     ui.timer(1.0, _poll_iv)
 
+    # Per signal-type: leg specs as (option_type, side, strike_field, mark_field).
+    # Mirrors the legacy ``setleg`` wiring (PCS/CCS/IC); the strikes/marks come
+    # straight off the scanner signal dict.
+    _PREFILL_LEGS = {
+        "PCS": [("put", "short", "short_strike", "short_mark"),
+                ("put", "long", "long_strike", "long_mark")],
+        "CCS": [("call", "short", "short_strike", "short_mark"),
+                ("call", "long", "long_strike", "long_mark")],
+        "IC": [("put", "short", "short_strike", "short_mark"),
+               ("put", "long", "long_strike", "long_mark"),
+               ("call", "short", "call_short", "call_short_mark"),
+               ("call", "long", "call_long", "call_long_mark")],
+    }
+
     def _prefill(sig):
         """Populate inputs from a scanner/swing signal (Send to Calculator).
+
+        Builds the legs from the signal's strike/mark fields and pushes them onto
+        the shared leg-editor (each leg at the signal's expiry, qty 1).
 
         Note: ``oc.generate_price_range`` is gone from the page, so the Range
         min/max are NOT pre-filled here (left at 0/0); ``calc_compute`` falls back
         to ``generate_price_range`` server-side at the Range %."""
         t = sig.get("type")
-        if t in LEG_SPECS:
-            strategy_sel.value = t
-        rebuild_legs()
+        if t in strategy_options():
+            strategy_sel.value = t        # also re-seeds the template via on_change
         sym = (sig.get("symbol") or "").replace("$", "")
         if sym:
             symbol_in.value = sym
@@ -672,27 +715,17 @@ def render():
         if iv:
             iv_in.value = round(iv, 1)
 
-        def setleg(key, strike, mark):
-            info = leg_inputs.get(key)
-            if not info or strike in (None, 0):
-                return
-            info["strike"].options = [float(strike)]
-            info["strike"].value = float(strike)
-            info["strike"].update()
-            if mark:
-                info["premium"].value = round(mark, 2)
-
-        if t == "PCS":
-            setleg("short_put", sig.get("short_strike"), sig.get("short_mark"))
-            setleg("long_put", sig.get("long_strike"), sig.get("long_mark"))
-        elif t == "CCS":
-            setleg("short_call", sig.get("short_strike"), sig.get("short_mark"))
-            setleg("long_call", sig.get("long_strike"), sig.get("long_mark"))
-        elif t == "IC":
-            setleg("short_put", sig.get("short_strike"), sig.get("short_mark"))
-            setleg("long_put", sig.get("long_strike"), sig.get("long_mark"))
-            setleg("short_call", sig.get("call_short"), sig.get("call_short_mark"))
-            setleg("long_call", sig.get("call_long"), sig.get("call_long_mark"))
+        legs = []
+        for otype, side, strike_field, mark_field in _PREFILL_LEGS.get(t, []):
+            strike = sig.get(strike_field)
+            if strike in (None, 0, ""):
+                continue
+            mark = sig.get(mark_field)
+            legs.append({"option_type": otype, "side": side,
+                         "strike": float(strike), "expiry": exp, "qty": 1,
+                         "premium": round(mark, 2) if mark else None})
+        if legs:
+            editor.set_legs(legs)
         try:
             do_calc()
         except Exception:
@@ -702,3 +735,11 @@ def render():
     _pending = handoff.take_pending_calculator()
     if _pending:
         _prefill(_pending)
+
+    # Legs copied in from the Simulator: stash them and load the symbol; the legs
+    # are applied once the chain arrives (see ``_apply_chain``'s pending path).
+    _legs_in = handoff.take_pending_calculator_legs()
+    if _legs_in:
+        symbol_in.value = _legs_in.get("symbol") or symbol_in.value
+        state["pending_legs"] = _legs_in.get("legs") or []
+        load_symbol()   # enqueue calc_load; legs applied when the chain arrives

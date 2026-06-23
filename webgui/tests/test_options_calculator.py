@@ -125,11 +125,18 @@ def test_api_symbol_maps_spx():
     assert calc.api_symbol("spy") == "SPY"
 
 
-def test_leg_specs_cover_strategies():
+def test_strategy_options_cover_strategies():
+    """The strategy dropdown (now sourced from the shared ``strategies`` module's
+    groups) exposes the core codes; the templates carry the right leg counts."""
+    from pages.options import strategies as S
+
+    opts = calc.strategy_options()
     for strat in ("PCS", "CCS", "IC", "LONG_PUT", "NAKED_CALL"):
-        assert strat in calc.LEG_SPECS
-    assert len(calc.LEG_SPECS["IC"]) == 4
-    assert len(calc.LEG_SPECS["PCS"]) == 2
+        assert strat in opts
+    # New multi-leg strategies are now offered too (butterflies / calendars).
+    assert "BUTTERFLY_CALL" in opts and "CALENDAR_CALL" in opts
+    assert len(S.STRATEGY_TEMPLATES["IC"]) == 4
+    assert len(S.STRATEGY_TEMPLATES["PCS"]) == 2
 
 
 # ── Tier-3 migration regression (Task 2.6h) ──────────────────────────────────
@@ -184,3 +191,23 @@ def test_render_grid_takes_preformatted_labels():
             sys.modules["nicegui"] = real_nicegui
         else:
             del sys.modules["nicegui"]
+
+
+def test_render_callable():
+    assert callable(calc.render)
+
+
+def test_render_graceful_empty_cache():
+    """render() must paint without crashing when the bus cache is empty (options
+    service cold) — the Tier-3 graceful-empty path. Mirrors the swing/simulator
+    page tests: rendering inside a slot context exercises the widget wiring + the
+    initial fetch-free paint, including mounting the shared leg-editor (PCS default
+    template) against an empty chain (no strikes/expiries yet)."""
+    import bus_client
+    from nicegui import ui
+
+    bus_client.reset()  # fresh empty fakeredis cache (no service writes)
+    assert bus_client.read("options:calc_chain") is None
+    assert bus_client.read("options:calc_result") is None
+    with ui.card():
+        calc.render()  # must not raise
