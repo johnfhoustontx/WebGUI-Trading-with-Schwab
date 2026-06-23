@@ -150,3 +150,26 @@ def test_render_graceful_empty_cache():
     assert bus_client.read("options:sim_result") is None
     with ui.card():
         sim.render()  # must not raise
+
+
+def test_render_with_warm_meta_seeds_strategy_editor():
+    """render() with a warm sim_meta snapshot must mount the strategy dropdown +
+    leg editor and seed the default (PCS) template against the cached strikes/
+    expiries WITHOUT raising — exercises the _apply_meta editor-population path +
+    the option-type→``kind`` leg-payload mapping (the cold-cache test skips both
+    since no meta arrives)."""
+    import bus_client
+    from nicegui import ui
+
+    bus_client.reset()
+    meta = {
+        "symbol": "SPY", "spot": 450.0, "n_contracts": 12,
+        "expiries": ["2026-06-26", "2026-07-03"],
+        "strikes": {
+            "2026-06-26": {"call": [445.0, 450.0, 455.0], "put": [445.0, 450.0, 455.0]},
+            "2026-07-03": {"call": [445.0, 450.0, 455.0], "put": [445.0, 450.0, 455.0]},
+        },
+    }
+    bus_client.bus().cache_set("cache:options:sim_meta", meta)
+    with ui.card():
+        sim.render()  # must not raise (editor seeded from the warm meta)

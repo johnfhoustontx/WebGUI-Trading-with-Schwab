@@ -10,19 +10,25 @@ computed **sweep rows**.
 Interaction model:
 
 * **Fetch snapshot** → enqueue ``sim_fetch``; a version-poll on
-  ``options:sim_meta`` populates the expiry/strike selectors.
-* A selector change (expiry/kind/strike/dir) or a Δt / IV-mult **slider** change
-  → enqueue ``sim_run`` with the current widget params; a version-poll on
-  ``options:sim_result`` repaints both figures from the cached rows.
+  ``options:sim_meta`` populates the **leg editor** (the shared multi-leg editor
+  from ``pages.options.leg_editor``) — its per-leg expiry/strike selects pull
+  from the cached meta.
+* Picking a **strategy** (the dropdown) or any **leg edit** (add/remove/type/
+  side/strike/expiry/qty) → enqueue both ``sim_run`` + ``sim_replay`` with the
+  current legs (discrete, immediate); a version-poll on ``options:sim_result`` /
+  ``options:sim_replay`` repaints the figures from the cached rows.
+* A Δt / IV-mult **slider** change → enqueue ``sim_run``; the What-if ``dt`` is
+  ELAPSED days from now (per-leg decay).
 * The **ΔS** slider is purely a CLIENT-SIDE overlay line on the what-if chart
   (``target_s = spot*(1+ΔS/100)``) — it NEVER enqueues a command.
 
 Sliders fire on every drag step, so ``sim_run`` is **debounced**: a slider change
 only stashes the latest params; a short ``ui.timer`` flushes the most recent
-params at most ~every 0.4 s. Selector changes enqueue immediately (they're
+params at most ~every 0.4 s. Strategy/leg edits enqueue immediately (they're
 discrete). The pure figure builders (``whatif_figure``/``ivshock_figure`` +
 ``_records``/``_plotline``) are unit-tested. Charts render via Highcharts
-(``ui.highchart``).
+(``ui.highchart``). The leg payload sent to the SIMULATOR commands uses ``kind``
+(NOT ``option_type``) — the editor returns ``option_type``, so it is mapped.
 """
 import bus_client
 from nicegui import ui
@@ -192,7 +198,11 @@ def replay_figure(trace, cursor=None):
 
 
 def render():
-    """Simulator page: fetch button + contract selector + Replay / What-if / IV-shock tabs."""
+    """Simulator page: fetch + strategy/leg editor + Replay / What-if / IV-shock tabs."""
+    from . import handoff
+    from . import leg_editor
+    from . import strategies as S
+
     ui.label("Simulator").classes("text-h5")
 
     # Page state (local closure, not module globals — built per request).
@@ -209,13 +219,22 @@ def render():
     with ui.row().classes("items-center gap-3 flex-wrap"):
         symbol_in = select_all_on_focus(ui.input("Symbol", value="SPY").classes("w-28"))
         fetch_btn = ui.button("Fetch snapshot", icon="download")
+        ui.button("Copy to Calculator", icon="calculate",
+                  on_click=lambda: handoff.send_to_calculator_legs(
+                      leg_editor.legs_to_payload(
+                          (state.get("meta") or {}).get("symbol")
+                          or symbol_in.value or "",
+                          editor.get_legs(), keep_premium=False)))
         status = ui.label("Fetch a snapshot to begin.").classes("opacity-70 text-sm")
 
+    # Strategy template dropdown (flat code list, STRATEGY_GROUPS order) + the
+    # shared multi-leg editor. ``show_premium=False`` — the simulator prices each
+    # leg from the chain's IV, so there is no manual premium input.
+    _STRATEGY_CODES = [code for _label, codes in S.STRATEGY_GROUPS for code in codes]
     with ui.row().classes("items-end gap-3 flex-wrap"):
-        expiry_sel = ui.select([], label="Expiry").classes("w-40")
-        kind_tog = ui.toggle(["call", "put"], value="call")
-        strike_sel = ui.select([], label="Strike").classes("w-32")
-        dir_tog = ui.toggle(["buy", "sell"], value="buy")
+        strategy_sel = ui.select(_STRATEGY_CODES, value="PCS",
+                                 label="Strategy").classes("w-48")
+    legs_box = ui.column().classes("gap-2")
 
     with ui.tabs() as tabs:
         tab_replay = ui.tab("Replay")
@@ -237,7 +256,8 @@ def render():
             with ui.row().classes("items-center gap-4 w-full"):
                 ds_lbl = ui.label("ΔS 0%")
                 ds_slider = ui.slider(min=-20, max=20, value=0).classes("w-48")
-                dt_lbl = ui.label("Δt 5d")
+                dt_lbl = ui.label("Δt 5d elapsed").tooltip(
+                    "Calendar days elapsed from now (per-leg time decay)")
                 dt_slider = ui.slider(min=0, max=30, value=5).classes("w-48")
             # Persistent charts built ONCE (present at first render for the ESM
             # import map) and updated in place so slider changes ANIMATE instead of
@@ -251,23 +271,38 @@ def render():
                 mult_slider = ui.slider(min=0.5, max=3.0, step=0.1, value=1.5).classes("w-64")
             ivshock_chart = ui.highchart(ivshock_figure({}, {}, 1.5)).classes("w-full")
 
-    # ── selector population from meta ────────────────────────────────────────
-    def _strikes_for(expiry, kind):
-        meta = state["meta"] or {}
-        return ((meta.get("strikes") or {}).get(str(expiry)) or {}).get(kind) or []
+    # ── leg editor mounted with meta-backed option sources ───────────────────
+    # Strikes/expiries come from the cached sim_meta snapshot (``strikes`` is a
+    # nested {expiry: {call:[...], put:[...]}} map). When no expiry is set yet we
+    # union strikes across expiries (used by apply_template before a per-leg expiry
+    # is chosen).
+    def _strikes_for(expiry, otype):
+        sm = ((state.get("meta") or {}).get("strikes") or {})
+        if expiry:
+            return (sm.get(str(expiry)) or {}).get(otype) or []
+        out = set()
+        for e in (state.get("meta") or {}).get("expiries") or []:
+            out.update((sm.get(str(e)) or {}).get(otype) or [])
+        return sorted(out)
 
-    def _sync_strikes():
-        strikes = _strikes_for(expiry_sel.value, kind_tog.value)
-        strike_sel.options = strikes
-        spot = (state["meta"] or {}).get("spot") or 0
-        if strikes and strike_sel.value not in strikes:
-            strike_sel.value = min(strikes, key=lambda s: abs(s - spot))
-        strike_sel.update()
+    def _expiries_for():
+        return (state.get("meta") or {}).get("expiries") or []
+
+    editor = leg_editor.build_leg_editor(
+        legs_box, strikes_for=_strikes_for, expiries_for=_expiries_for,
+        show_premium=False, on_change=lambda: _on_legs_changed(),
+        spot_getter=lambda: (state.get("meta") or {}).get("spot") or 0)
+
+    # Seed the default template (PCS) so a cold page shows the strategy's legs
+    # immediately. Tolerates empty strikes/expiries pre-fetch; strikes snap to the
+    # real ladder once a snapshot arrives (see ``_apply_meta``). ``apply_template``
+    # → ``set_legs`` does NOT fire ``on_change``, so no premature command enqueues.
+    editor.apply_template(strategy_sel.value)
 
     # ── render figures from the cached sweep result ──────────────────────────
     def _render_figures():
         ds_lbl.text = f"ΔS {ds_slider.value:+g}%"
-        dt_lbl.text = f"Δt {dt_slider.value:g}d"
+        dt_lbl.text = f"Δt {dt_slider.value:g}d elapsed"
         mult = float(mult_slider.value)
         mult_lbl.text = f"IV ×{mult:g}"
 
@@ -311,23 +346,36 @@ def render():
         replay_chart.options = replay_figure(tr, cursor=cur)
         replay_chart.update()
 
-    # ── command enqueue (sim_run) ────────────────────────────────────────────
+    # ── command enqueue (sim_run / sim_replay) ───────────────────────────────
+    def _sym():
+        return ((state.get("meta") or {}).get("symbol") or symbol_in.value or "").upper()
+
+    def _legs_payload():
+        """Editor legs → the SIMULATOR leg shape. NOTE: the simulator commands key
+        the option type as ``kind`` (NOT ``option_type``) — map it here. Legs with
+        no chosen strike are skipped."""
+        legs = []
+        for l in editor.get_legs():
+            if l.get("strike") is None:
+                continue
+            legs.append({"kind": l["option_type"], "strike": float(l["strike"]),
+                         "expiry": l.get("expiry"), "side": l["side"],
+                         "qty": int(l.get("qty", 1) or 1)})
+        return legs
+
     def _current_params():
-        if not state["meta"] or strike_sel.value is None:
+        if not state.get("meta") or not _legs_payload():
             return None
         return {
-            "symbol": (state["meta"].get("symbol") or symbol_in.value or "").upper(),
-            "expiry": expiry_sel.value,
-            "kind": kind_tog.value,
-            "strike": strike_sel.value,
-            "direction": dir_tog.value,
+            "symbol": _sym(),
+            "legs": _legs_payload(),
             "dt": float(dt_slider.value),
             "mult": float(mult_slider.value),
         }
 
     @guard
     def _enqueue_run():
-        """Enqueue a sim_run immediately (used for discrete selector changes)."""
+        """Enqueue a sim_run immediately (used for discrete strategy/leg edits)."""
         params = _current_params()
         if params is None:
             return
@@ -335,16 +383,20 @@ def render():
 
     @guard
     def _enqueue_replay():
-        """Enqueue a sim_replay — fires ONLY on discrete contract-selector
+        """Enqueue a sim_replay — fires on discrete strategy/leg edits + look-back
         changes (not the dt/mult sliders), since the replay trace depends only on
-        the selected contract."""
-        if not state["meta"] or strike_sel.value is None:
+        the legs + the look-back window."""
+        if not state.get("meta") or not _legs_payload():
             return
         bus_client.request("options", {"type": "sim_replay", "args": {
-            "symbol": (state["meta"].get("symbol") or symbol_in.value or "").upper(),
-            "expiry": expiry_sel.value, "kind": kind_tog.value,
-            "strike": strike_sel.value, "direction": dir_tog.value,
+            "symbol": _sym(), "legs": _legs_payload(),
             "lookback": lookback_sel.value}})
+
+    def _on_legs_changed():
+        """A strategy pick or any leg edit changes both the sweep + the replay —
+        enqueue both immediately (discrete, like the old selector path)."""
+        _enqueue_run()
+        _enqueue_replay()
 
     @guard
     def _slider_changed():
@@ -363,11 +415,6 @@ def render():
         if state["pending"] is not None:
             bus_client.request("options", {"type": "sim_run", "args": state["pending"]})
             state["pending"] = None
-
-    def _on_selector():
-        _sync_strikes()
-        _enqueue_run()
-        _enqueue_replay()
 
     # ── fetch ────────────────────────────────────────────────────────────────
     @guard
@@ -392,10 +439,9 @@ def render():
     tabs.on_value_change(lambda e: ui.timer(0.05, _reflow_charts, once=True))
 
     fetch_btn.on_click(_request_fetch)
-    expiry_sel.on_value_change(lambda e: _on_selector())
-    kind_tog.on_value_change(lambda e: _on_selector())
-    strike_sel.on_value_change(lambda e: (_enqueue_run(), _enqueue_replay()))
-    dir_tog.on_value_change(lambda e: (_enqueue_run(), _enqueue_replay()))
+    # Strategy pick → re-seed the editor from the template, then enqueue both runs.
+    strategy_sel.on_value_change(
+        lambda e: (editor.apply_template(strategy_sel.value), _on_legs_changed()))
     # ΔS is client-side only (overlay) — re-render, never enqueue.
     ds_slider.on_value_change(lambda e: (_render_figures()))
     # Δt + IV-mult drive the sweep → debounced enqueue.
@@ -409,16 +455,24 @@ def render():
     # ── version-poll repaint (fetch-free) ────────────────────────────────────
     def _apply_meta(meta):
         state["meta"] = meta or None
-        exps = (meta or {}).get("expiries") or []
-        expiry_sel.options = exps
-        if exps and expiry_sel.value not in exps:
-            expiry_sel.value = exps[0]
-        expiry_sel.update()
-        _sync_strikes()
+        # Repopulate the editor's per-leg expiry/strike selects from the new
+        # snapshot. Pending legs copied in from the Calculator win; else when the
+        # user hasn't touched the legs, re-seed the template so strikes snap to the
+        # real ladder (mirrors the calculator's chain-load behavior); else just
+        # refresh the option lists (preserve in-progress edits).
+        pending = state.pop("pending_legs", None)
+        if pending:
+            editor.set_legs(pending)
+        elif not editor.is_dirty():
+            editor.apply_template(strategy_sel.value)
+        else:
+            editor.refresh_options()
         if meta:
-            status.text = (f"{meta.get('symbol')} spot {meta.get('spot'):,.2f} · "
+            spot = meta.get("spot")
+            spot_txt = f"{spot:,.2f}" if isinstance(spot, (int, float)) else "—"
+            status.text = (f"{meta.get('symbol')} spot {spot_txt} · "
                            f"{meta.get('n_contracts')} contracts")
-            # Kick off the first sweep + replay for the auto-selected contract.
+            # Kick off the first sweep + replay for the current legs.
             _enqueue_run()
             _enqueue_replay()
 
@@ -464,3 +518,11 @@ def render():
     ui.timer(2.0, _poll_result)
     ui.timer(2.0, _poll_replay)
     ui.timer(0.4, _flush_pending)  # debounce flush for slider-driven sweeps
+
+    # Legs copied in from the Calculator: stash them + fetch the snapshot; the legs
+    # are applied once the meta arrives (see ``_apply_meta``'s pending path).
+    p = handoff.take_pending_simulator()
+    if p:
+        symbol_in.value = p.get("symbol") or symbol_in.value
+        state["pending_legs"] = p.get("legs") or []
+        _request_fetch()   # enqueue sim_fetch; legs applied when the meta arrives
