@@ -80,12 +80,14 @@ def expected_move_figure(payload, timeframe="daily"):
         "color": DOWN_COLOR, "upColor": UP_COLOR,
         "lineColor": DOWN_COLOR, "upLineColor": UP_COLOR,
     }]
+    # spline (not line) so the sqrt-time cone renders as a smooth parabola through
+    # the (sparse, trading-day) points instead of straight segments.
     if em_upper:
-        series.append({"type": "line", "name": "Upper EM", "data": em_upper,
+        series.append({"type": "spline", "name": "Upper EM", "data": em_upper,
                        "color": EM_UP_COLOR, "dashStyle": "Dash",
                        "marker": {"enabled": False}})
     if em_lower:
-        series.append({"type": "line", "name": "Lower EM", "data": em_lower,
+        series.append({"type": "spline", "name": "Lower EM", "data": em_lower,
                        "color": EM_DOWN_COLOR, "dashStyle": "Dash",
                        "marker": {"enabled": False}})
 

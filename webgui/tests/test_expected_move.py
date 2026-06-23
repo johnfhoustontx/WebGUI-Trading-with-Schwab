@@ -68,7 +68,7 @@ def test_expected_move_figure_series_and_crosshair():
     # Y crosshair shows a PRICE label box.
     assert fig["yAxis"]["crosshair"]["label"]["enabled"] is True
     assert "value" in fig["yAxis"]["crosshair"]["label"]["format"]
-    assert any(s.get("dashStyle") == "Dash" for s in fig["series"] if s["type"] == "line")
+    assert any(s.get("dashStyle") == "Dash" for s in fig["series"] if s["type"] == "spline")
     assert len(fig["yAxis"]["plotLines"]) == 2
 
 
