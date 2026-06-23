@@ -13,7 +13,8 @@ from nicegui import ui
 
 import bus_client
 
-_pending = {"calculator": None, "expected_move": None}
+_pending = {"calculator": None, "expected_move": None,
+            "simulator": None, "calculator_legs": None}
 
 
 # Per signal-type: list of (field_name, option_type, side) for the strike legs.
@@ -86,6 +87,47 @@ def send_to_calculator(signal):
         ui.notify("Select a signal first.", type="warning")
         return
     set_pending_calculator(signal)
+    ui.navigate.to("/options/calculator")
+
+
+def set_pending_simulator(payload):
+    _pending["simulator"] = payload
+
+
+def take_pending_simulator():
+    """Return and clear the pending simulator leg payload (one-shot)."""
+    p = _pending.get("simulator")
+    _pending["simulator"] = None
+    return p
+
+
+def send_to_simulator(payload):
+    """Stash a {symbol, legs} payload and open the Simulator page."""
+    if not payload or not payload.get("symbol"):
+        ui.notify("No legs to copy.", type="warning")
+        return
+    set_pending_simulator(payload)
+    ui.navigate.to("/options/simulator")
+
+
+def set_pending_calculator_legs(payload):
+    _pending["calculator_legs"] = payload
+
+
+def take_pending_calculator_legs():
+    """Return and clear the pending calculator leg payload (one-shot). Separate
+    from the scanner-signal ``calculator`` stash."""
+    p = _pending.get("calculator_legs")
+    _pending["calculator_legs"] = None
+    return p
+
+
+def send_to_calculator_legs(payload):
+    """Stash a {symbol, legs} payload and open the Calculator page."""
+    if not payload or not payload.get("symbol"):
+        ui.notify("No legs to copy.", type="warning")
+        return
+    set_pending_calculator_legs(payload)
     ui.navigate.to("/options/calculator")
 
 
