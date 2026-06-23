@@ -1316,36 +1316,62 @@ def sim_fetch(symbol: str) -> dict:
     }
 
 
-def sim_run(symbol, expiry, kind, strike, direction, dt, mult) -> dict:
-    """Compute BOTH simulator sweeps for the selected contract → JSON-safe dict.
+def sim_run(symbol, expiry=None, kind=None, strike=None, direction=None,
+            dt=5.0, mult=1.5, legs=None) -> dict:
+    """Compute What-if + IV-shock for a position (single OR multi-leg) → JSON-safe.
 
-    Ports the page's render logic verbatim: the what-if sweep over an 81-point
-    ±20% price range at ``dt`` days-to-event, and the IV-shock base-vs-shock pair
-    at ``[1.0, mult]``. The snapshot is looked up by symbol from the in-process
-    stash; a missing snapshot (service restarted / never fetched) → ``{}`` so the
-    page can prompt a re-fetch, and a missing contract → ``{}`` (page prompts a
-    selection). Returns ``{"spot", "whatif_rows", "ivshock"}`` where ``ivshock``
-    is ``{"base", "shock"}`` (or None if the engine returned <2 rows)."""
+    ``legs`` (preferred) is a list of {kind, strike, expiry, side, qty}; when
+    omitted the legacy single-contract args (expiry/kind/strike/direction) build a
+    one-leg list (back-compat). The What-if sweep advances each leg by ``dt``
+    ELAPSED days from now (per-leg decay → calendars are correct); IV-shock + the
+    engine already price each leg at its own expiry. Missing snapshot/contract →
+    {} (page prompts a re-fetch / selection)."""
     from options_simulator import engine as seng
     import numpy as np
+    import datetime as _dt
 
     snap = _SIM_SNAPSHOTS.get(symbol)
     if snap is None:
         return {}
-    contract = find_contract(snap, expiry, kind, strike)
-    if contract is None:
+
+    if legs is None:
+        if expiry is None or kind is None or strike is None:
+            return {}
+        legs = [{"kind": kind, "strike": strike, "expiry": expiry,
+                 "side": "long" if (direction or "buy") == "buy" else "short",
+                 "qty": 1}]
+    if not legs:
         return {}
 
-    pos = seng.Position.single(contract, direction, snap.symbol)
+    resolved = []  # (ContractRow, sign, ratio)
+    for leg in legs:
+        c = find_contract(snap, leg.get("expiry"), leg.get("kind"), leg.get("strike"))
+        if c is None:
+            return {}
+        sign = +1 if leg.get("side", "long") == "long" else -1
+        resolved.append((c, sign, int(leg.get("qty", 1))))
+    pos = seng.Position.from_legs(resolved, label=f"{snap.symbol} {len(resolved)}-leg")
 
-    # What-if: 81-point ±20% underlying sweep at ``dt`` days (clamp 0 → 0.01).
+    today = _dt.date.today()
+
+    def _forward_days(c):
+        """Each leg's days-to-expiry AFTER ``dt`` elapsed days from now (>=0.01).
+        Tolerates a string or date ``expiry`` (test doubles use strings)."""
+        exp = c.expiry
+        if isinstance(exp, str):
+            try:
+                exp = _dt.date.fromisoformat(exp[:10])
+            except ValueError:
+                return max(float(dt), 0.01)
+        dte_now = max((exp - today).days, 0)
+        return max(dte_now - float(dt), 0.01)
+
     s_range = np.linspace(snap.spot * 0.8, snap.spot * 1.2, 81)
     whatif_eng = seng.WhatIfEngine(snap)
     wdf = seng.aggregate_position(
-        pos, lambda c: whatif_eng.sweep(c, s_range, float(dt) or 0.01))
+        pos, lambda c: whatif_eng.sweep(c, s_range, _forward_days(c)))
     whatif_rows = _sim_records(wdf)
 
-    # IV-shock: base (×1.0) vs shock (×mult).
     shock_eng = seng.IVShockEngine(snap)
     sdf = seng.aggregate_position(pos, lambda c: shock_eng.sweep(c, [1.0, float(mult)]))
     rows = sdf.to_dict("records") if hasattr(sdf, "to_dict") else list(sdf or [])

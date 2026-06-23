@@ -986,13 +986,29 @@ def _patch_sim(monkeypatch, snap):
             return _FakeDF([{"theo_price": 1.0 * m, "delta": 0.5, "gamma": 0.02,
                              "theta": -0.1, "vega": 0.3} for m in mults])
 
+    def _from_legs(legs, label):
+        # Mirror the engine's Position.from_legs: wrap each (contract, sign, ratio)
+        # in a leg namespace so aggregate_position can reach .legs[*].contract.
+        return _types.SimpleNamespace(
+            legs=[_types.SimpleNamespace(contract=c, sign=int(s), ratio=int(r))
+                  for c, s, r in legs],
+            label=label)
+
+    def _aggregate(pos, fn):
+        # Robust to both the legacy single() tuple and the from_legs namespace:
+        # apply per_leg_fn to the first leg's contract (single-leg shape is what
+        # the existing assertions pin; the new multileg test only checks shape).
+        if hasattr(pos, "legs"):
+            return fn(pos.legs[0].contract)
+        return fn(pos[1])
+
     fake_engine = _types.SimpleNamespace(
         Position=_types.SimpleNamespace(
-            single=lambda contract, direction, symbol: ("pos", contract, direction, symbol)),
+            single=lambda contract, direction, symbol: ("pos", contract, direction, symbol),
+            from_legs=_from_legs),
         WhatIfEngine=_WhatIf,
         IVShockEngine=_Shock,
-        # aggregate_position just applies per_leg_fn to the (single) contract.
-        aggregate_position=lambda pos, fn: fn(pos[1]))
+        aggregate_position=_aggregate)
     monkeypatch.setitem(_sys.modules, "options_simulator", _types.ModuleType("options_simulator"))
     monkeypatch.setitem(_sys.modules, "options_simulator.data", fake_data)
     monkeypatch.setitem(_sys.modules, "options_simulator.engine", fake_engine)
@@ -1047,6 +1063,29 @@ def test_sim_run_empty_when_contract_missing(monkeypatch):
     compute._SIM_SNAPSHOTS["SPY"] = snap
     # Strike not in the snapshot -> empty (page prompts a selection).
     assert compute.sim_run("SPY", "2026-06-19", "call", 999, "buy", 5, 1.5) == {}
+
+
+def test_sim_run_multileg_put_spread(monkeypatch):
+    """The new ``legs=`` path builds a multi-leg Position (short 95P / long 90P)
+    and returns the same What-if + IV-shock shape as the single-leg path."""
+    from datetime import date, timedelta
+
+    exp = (date.today() + timedelta(days=10)).isoformat()
+    snap = _SimSnap("TEST", 100.0,
+                    [_SimRow(exp, "put", 95), _SimRow(exp, "put", 90)])
+    _patch_sim(monkeypatch, snap)
+    compute._SIM_SNAPSHOTS.clear()
+    compute._SIM_SNAPSHOTS["TEST"] = snap
+
+    out = compute.sim_run(
+        "TEST",
+        legs=[{"kind": "put", "strike": 95, "expiry": exp, "side": "short", "qty": 1},
+              {"kind": "put", "strike": 90, "expiry": exp, "side": "long", "qty": 1}],
+        dt=0.0, mult=1.5)
+    assert out["spot"] == 100.0
+    assert len(out["whatif_rows"]) == 81
+    assert "S" in out["whatif_rows"][0]
+    assert out["ivshock"] and "base" in out["ivshock"] and "shock" in out["ivshock"]
 
 
 def _real_replay_snapshot(symbol, iv=0.20, index=None, prices=None):
