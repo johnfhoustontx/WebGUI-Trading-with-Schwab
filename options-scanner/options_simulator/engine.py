@@ -23,6 +23,7 @@ class ContractRow:
 class Leg:
     contract: ContractRow
     sign: int  # +1 = long (bought), -1 = short (sold)
+    ratio: int = 1  # per-leg contract multiple (butterfly body = 2)
 
 
 @dataclass
@@ -75,6 +76,12 @@ class Position:
             label=label,
         )
 
+    @classmethod
+    def from_legs(cls, legs, label: str) -> "Position":
+        """Build from an iterable of (contract, sign, ratio) tuples."""
+        return cls(legs=[Leg(contract=c, sign=int(s), ratio=int(r))
+                         for c, s, r in legs], label=label)
+
 
 _GREEK_COLS = ["theo_price", "delta", "gamma", "theta", "vega", "rho"]
 
@@ -92,9 +99,10 @@ def aggregate_position(position: Position, per_leg_fn) -> pd.DataFrame:
         if df is None or df.empty:
             return df if df is not None else pd.DataFrame()
         signed = df.copy()
+        scale = leg.sign * leg.ratio
         for col in _GREEK_COLS:
             if col in signed.columns:
-                signed[col] = signed[col] * leg.sign
+                signed[col] = signed[col] * scale
         if agg is None:
             agg = signed
         else:
