@@ -566,6 +566,96 @@ def calc_summary(legs, strategy, spot, r=0.045, iv=0.20, T=None):
     }
 
 
+def calc_summary_generic(legs, spot, r=0.045, iv=0.20, T=None):
+    """Numeric summary for ANY leg set (incl. butterfly/condor/calendar).
+
+    Evaluates net position P&L across a dense price grid at the FRONT-leg
+    expiry (calendars price the back leg via BS at its remaining T) and reads
+    max-profit / max-loss / breakevens off that curve. PoP = risk-neutral
+    lognormal probability mass over the profitable price region.
+    """
+    import math
+    if T is None or T <= 0:
+        T = 1.0 / 365.0
+
+    # Entry net credit (short premium - long premium), scaled.
+    entry_credit = 0.0
+    for leg in legs:
+        q = leg.get("qty", 1)
+        amt = leg["premium"] * q * 100
+        entry_credit += amt if leg["side"] == "short" else -amt
+
+    # Front (nearest) expiry sets the horizon; each leg keeps its own remaining T.
+    leg_t0, front_t0 = [], None
+    for leg in legs:
+        t = _leg_expiry_years(leg)
+        leg_t0.append(t)
+        if t is not None:
+            front_t0 = t if front_t0 is None else min(front_t0, t)
+
+    def _leg_T(i):
+        t = leg_t0[i]
+        if t is None or front_t0 is None:
+            return 0.0                 # same-expiry set -> expiration payoff
+        return max(t - front_t0, 0.0)
+
+    lo, hi = spot * 0.5, spot * 1.5
+    n = 601
+    xs = [lo + (hi - lo) * k / (n - 1) for k in range(n)]
+    pnl = []
+    for S in xs:
+        val = 0.0
+        for i, leg in enumerate(legs):
+            q = leg.get("qty", 1)
+            price = bs_price(S, leg["strike"], _leg_T(i), r, max(iv, 0.01),
+                             leg["option_type"].lower())
+            val += price * q * 100 * (1 if leg["side"] == "long" else -1)
+        pnl.append(entry_credit + val)
+
+    max_profit = max(pnl)
+    max_loss_signed = min(pnl)
+    max_loss = abs(max_loss_signed) if max_loss_signed < 0 else 0.0
+
+    # Breakevens: linear-interpolated zero-crossings of the P&L curve.
+    bes = []
+    for k in range(1, n):
+        a, b = pnl[k - 1], pnl[k]
+        if (a <= 0 < b) or (a >= 0 > b):
+            x0, x1 = xs[k - 1], xs[k]
+            bes.append(round(x0 + (x1 - x0) * (0 - a) / (b - a), 2))
+
+    ror = (max_profit / max_loss * 100) if max_loss > 0 else 0.0
+
+    # PoP: risk-neutral lognormal mass over the profitable region (P&L > 0).
+    mu = math.log(spot) + (r - 0.5 * iv * iv) * T
+    sd = iv * math.sqrt(T)
+
+    def _cdf_S(x):
+        return norm_cdf((math.log(x) - mu) / sd) if x > 0 and sd > 0 else 0.0
+
+    pop = 0.0
+    prev_prof = pnl[0] > 0
+    seg_start = xs[0]
+    for k in range(1, n):
+        prof = pnl[k] > 0
+        if prof != prev_prof:
+            if prev_prof:
+                pop += _cdf_S(xs[k]) - _cdf_S(seg_start)
+            seg_start = xs[k]
+            prev_prof = prof
+    if prev_prof:
+        pop += _cdf_S(xs[-1]) - _cdf_S(seg_start)
+
+    return {
+        "entry_credit": round(entry_credit, 2),
+        "max_profit": round(max_profit, 2),
+        "max_loss": round(max_loss, 2),
+        "breakevens": sorted(bes),
+        "return_on_risk": round(ror, 2),
+        "pop": round(max(0.0, min(100.0, pop * 100.0)), 2),
+    }
+
+
 #############################################
 # PROBABILITY OF PROFIT
 #############################################

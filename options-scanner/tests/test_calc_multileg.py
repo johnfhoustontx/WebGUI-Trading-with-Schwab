@@ -30,3 +30,26 @@ def test_single_expiry_unchanged_when_per_leg_off():
     b = oc.calc_spread_pnl(legs, 100, 0.2, 0.04, None, (90, 110), date(2026, 7, 17),
                            eval_times=[0.02, 0.0], per_leg_expiry=True)
     assert a == b   # legs without 'expiry' -> column T unchanged, identical output
+
+
+def test_generic_summary_long_call_butterfly():
+    # 95/100/105 call fly, 1-2-1. Defined-risk: max loss ~ net debit,
+    # max profit at the body, two breakevens between the wings.
+    legs = [
+        {"strike": 95, "option_type": "call", "side": "long", "premium": 6.0, "qty": 1},
+        {"strike": 100, "option_type": "call", "side": "short", "premium": 3.0, "qty": 2},
+        {"strike": 105, "option_type": "call", "side": "long", "premium": 1.5, "qty": 1},
+    ]
+    s = oc.calc_summary_generic(legs, spot=100, r=0.04, iv=0.25, T=0.05)
+    assert abs(s["max_loss"] - 150) < 25
+    assert 300 < s["max_profit"] < 400
+    assert len(s["breakevens"]) == 2
+    assert 95 < s["breakevens"][0] < 100 < s["breakevens"][1] < 105
+    assert 0 <= s["pop"] <= 100
+
+
+def test_generic_summary_keys():
+    legs = [{"strike": 100, "option_type": "call", "side": "long", "premium": 2, "qty": 1}]
+    s = oc.calc_summary_generic(legs, 100, 0.04, 0.2, 0.05)
+    assert set(s) >= {"entry_credit", "max_profit", "max_loss",
+                      "breakevens", "return_on_risk", "pop"}
