@@ -693,8 +693,9 @@ def test_sim_run_command_caches_result(monkeypatch):
               "ivshock": {"base": {"theo_price": 1.0}, "shock": {"theo_price": 1.5}}}
     seen = {"args": None}
 
-    def _rec(symbol, expiry, kind, strike, direction, dt, mult):
+    def _rec(symbol, expiry, kind, strike, direction, dt, mult, legs=None):
         seen["args"] = (symbol, expiry, kind, strike, direction, dt, mult)
+        seen["legs"] = legs
         return result
 
     monkeypatch.setattr(handlers.compute, "sim_run", _rec)
@@ -707,10 +708,32 @@ def test_sim_run_command_caches_result(monkeypatch):
     sub.close()
 
     assert seen["args"] == ("SPY", "2026-06-19", "call", 450, "buy", 5, 1.5)
+    assert seen["legs"] is None
     env = bus.cache_get("cache:options:sim_result")
     assert env is not None
     assert env.payload == result
     assert msg is not None and msg.get("version") == env.version
+
+
+def test_sim_run_command_threads_legs(monkeypatch):
+    bus = Bus(fake=True)
+    seen = {}
+
+    def _rec(symbol, expiry=None, kind=None, strike=None, direction=None,
+             dt=5.0, mult=1.5, legs=None):
+        seen["legs"] = legs
+        seen["symbol"] = symbol
+        return {"spot": 100.0, "whatif_rows": [{"S": 80.0}], "ivshock": None}
+
+    monkeypatch.setattr(handlers.compute, "sim_run", _rec)
+    legs = [{"kind": "put", "strike": 95, "expiry": "2026-07-17", "side": "short", "qty": 1},
+            {"kind": "put", "strike": 90, "expiry": "2026-07-17", "side": "long", "qty": 1}]
+    handlers.handle_command(bus, Command(type="sim_run",
+                                         args={"symbol": "SPY", "legs": legs, "dt": 3, "mult": 1.5}))
+    assert seen["symbol"] == "SPY"
+    assert seen["legs"] == legs
+    env = bus.cache_get("cache:options:sim_result")
+    assert env is not None
 
 
 # ── Calculator (Task 2.6h) ───────────────────────────────────────────────────
@@ -877,8 +900,9 @@ def test_handle_command_sim_replay(monkeypatch):
     bus = Bus(fake=True)
     seen = {}
 
-    def _fake(symbol, expiry, kind, strike, direction, lookback="auto"):
+    def _fake(symbol, expiry, kind, strike, direction, lookback="auto", legs=None):
         seen["lookback"] = lookback
+        seen["legs"] = legs
         return {"spot": 1.0, "x": [0], "prices": [1.0]}
 
     monkeypatch.setattr(handlers.compute, "sim_replay", _fake)
@@ -893,4 +917,5 @@ def test_handle_command_sim_replay(monkeypatch):
     assert env is not None
     assert env.payload["spot"] == 1.0
     assert seen["lookback"] == "5m_3d"
+    assert seen["legs"] is None
     assert msg is not None and msg.get("version") == env.version

@@ -543,14 +543,16 @@ def handle_command(bus, command) -> None:
         a = command.args or {}
         result = compute.sim_run(
             a.get("symbol"), a.get("expiry"), a.get("kind"), a.get("strike"),
-            a.get("direction"), a.get("dt"), a.get("mult"))
+            a.get("direction"), a.get("dt", 5.0), a.get("mult", 1.5),
+            legs=a.get("legs"))
         version = bus.cache_set(CACHE_SIM_RESULT, result)
         bus.publish(EVENT_SIM_RESULT, {"version": version})
     elif command.type == "sim_replay":
         a = command.args or {}
         res = compute.sim_replay(
             a.get("symbol"), a.get("expiry"), a.get("kind"),
-            a.get("strike"), a.get("direction"), a.get("lookback", "auto"))
+            a.get("strike"), a.get("direction"), a.get("lookback", "auto"),
+            legs=a.get("legs"))
         version = bus.cache_set(CACHE_SIM_REPLAY, res)
         bus.publish(EVENT_SIM_REPLAY, {"version": version})
     elif command.type == "calc_load":
