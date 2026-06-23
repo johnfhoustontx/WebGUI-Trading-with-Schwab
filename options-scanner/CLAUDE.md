@@ -124,6 +124,18 @@ to visualize price decay, time decay, and all five Greeks interactively.
 - **What-if mode** — freeze time, sweep underlying price ±20%, show Delta/Gamma interaction
 - **IV shock mode** — spike or crush implied volatility; shows Vega dominance on IV crush
 
+> **Multi-leg (2026-06-23):** `options_simulator/engine.py` prices arbitrary
+> multi-leg positions — `Position(legs=[Leg(contract, sign, ratio), ...])` +
+> `aggregate_position` scale each leg's Greeks by `sign * ratio` (the `ratio`
+> field, default 1, lets a **butterfly body** trade at 2×; build via
+> `Position.from_legs([(contract, sign, ratio), ...], label)`). The webgui
+> Simulator + Calculator drive this with a shared strategy/leg editor (verticals,
+> condors, butterflies, **calendars/diagonals** with per-leg expiry). The
+> per-leg time treatment lives in the webgui options service
+> (`services/options_svc/compute.sim_run` — per-leg **elapsed** What-if decay —
+> and `calc_spread_pnl(per_leg_expiry=True)` / `calc_summary_generic`); see the
+> root `CLAUDE.md` "Multi-leg Simulator + Calculator" entry.
+
 ---
 
 ## File Structure

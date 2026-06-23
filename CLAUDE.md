@@ -8,7 +8,34 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-06-22 (**Markov 2.0 (Trade Analyzer) DONE**: the `/trade`
+**Last updated:** 2026-06-23 (**Multi-leg Simulator + Calculator DONE**: the
+`/options/simulator` and `/options/calculator` pages now build, price, and analyze
+**multi-leg strategies** — verticals (credit *and* debit), condors (iron +
+all-same), butterflies (long 1-2-1 + iron), and **calendars/diagonals** (per-leg
+expiry) — with **editable legs** and a **copy-legs button both ways**
+(Simulator ↔ Calculator); existing singles + PCS/CCS/IC stay. New shared **pure**
+`webgui/pages/options/strategies.py` (normalized leg dict + `STRATEGY_TEMPLATES`/
+`STRATEGY_GROUPS` + `build_default_legs` + analytic-vs-numeric `summary_code`) and
+`webgui/pages/options/leg_editor.py` (one parameterized editable leg-table widget
+both pages mount — `state['legs']` is the source of truth so re-renders never lose
+edits; each page injects its own `strikes_for`/`expiries_for` + `show_premium`).
+Engine `options_simulator/engine.py` gains `Leg.ratio` (+ `Position.from_legs`) so
+`aggregate_position` scales each leg by `sign*ratio` (butterfly body = 2×). Calc
+engine: `calc_spread_pnl(per_leg_expiry=True)` prices each leg at its own
+time-to-expiry (calendars) + new `calc_summary_generic` (numeric max-P/L /
+breakevens / PoP off the value-at-front-expiry curve) for butterfly/condor/
+calendar/`CUSTOM`; `compute.calc_compute` routes analytic (PCS/CCS/IC/singles) vs
+generic and runs the grid to the **front (nearest) leg expiry**. `compute.sim_run`
+(per-leg **elapsed** What-if Δt — a deliberate change from absolute-DTE, fixes
+calendars) + `compute.sim_replay` are now **multi-leg** (back-compat with the old
+single-contract args); `handlers` forward a `legs` arg; `handoff.py` adds the
+`simulator`/`calculator_legs` stashes + `send_to_simulator`/`send_to_calculator_legs`.
+options-scanner engine+calc + options_svc 252 + webgui 419 green; verified live
+(SPY calendar `sim_run`/`sim_replay` 234-bar trace + an iron butterfly with exact
+`max_loss=2300`/`breakevens=[727,741]`). Branch `Using_Highcharts`. Design/plan:
+[design](docs/plans/2026-06-23-simulator-calculator-multileg-strategies-design.md) /
+[plan](docs/plans/2026-06-23-simulator-calculator-multileg-strategies-plan.md).)
+Prior — 2026-06-22 (**Markov 2.0 (Trade Analyzer) DONE**: the `/trade`
 **Position** verdict gains a probabilistic forward layer — the composite score is
 discretized into **5 bands** (edges = the ±40 BUY/SELL cuts + ±15 neutral); a
 per-symbol day-to-day transition matrix is **Bayesian-shrunk** toward a pooled
@@ -233,10 +260,10 @@ Routes:
 | `/options/paper` | Paper Trades | built |
 | `/options/captured` | Captured Signals | built |
 | `/options/portfolio` | Paper Portfolio (paper account) | built |
-| `/options/calculator` | Calculator (summary tiles + P&L heatmap; **intraday time-to-expiry** — the grid's first column is **"Now"** (current mark-to-market value, priced at calendar hours-to-4pm-ET /365) and the last is **"Exp"** (expiration payoff), fixing 0DTE which previously showed only the payoff everywhere; summary tiles + PoP also use the intraday "Now" T (was an `or 1/365` clamp that over-priced 0DTE ~20×); the **IV** button **implies IV from the traded contract's mark** ThinkorSwim-style via a `calc_iv` command → `cache:options:calc_iv` (`compute.calc_iv` → engine `implied_vol` bisection), falling back to ATM chain `volatility` pre-strike-pick) | built |
+| `/options/calculator` | Calculator (summary tiles + P&L heatmap; **intraday time-to-expiry** — the grid's first column is **"Now"** (current mark-to-market value, priced at calendar hours-to-4pm-ET /365) and the last is **"Exp"** (expiration payoff), fixing 0DTE which previously showed only the payoff everywhere; summary tiles + PoP also use the intraday "Now" T (was an `or 1/365` clamp that over-priced 0DTE ~20×); the **IV** button **implies IV from the traded contract's mark** ThinkorSwim-style via a `calc_iv` command → `cache:options:calc_iv` (`compute.calc_iv` → engine `implied_vol` bisection), falling back to ATM chain `volatility` pre-strike-pick; **multi-leg strategy builder** — a Strategy dropdown (singles + verticals credit/debit + condors iron/all-same + butterflies long/iron + calendars/diagonals) over the shared **editable leg-editor** (`leg_editor.py`: per-leg kind/side/strike/expiry/qty + Add/Remove), per-leg expiry so **calendars** price each leg at its own T, a **generic-numeric summary** for non-PCS/CCS/IC structures, and a **Copy to Simulator** button) | built |
 | `/options/swing` | Swing Scanner | built |
 | `/options/gamma` | Gamma (GEX/Charm/DEX/Vanna bars + flip/**single Call+Put walls** + intraday heatmap; bar/heatmap **width split grows with session** snapshot count; **flicker-free** in-place Highcharts updates; **symbol is a dropdown** — default `$SPX`, populated from the collected universe (watchlist minus `$VIX`) via `cache:options:gamma_symbols`; Explain works per-selected-symbol) | built |
-| `/options/simulator` | Simulator (all three legacy tabs: **Replay** (re-prices the contract along the underlying's recent path → stacked price + 5-Greek panels over a gap-compressed integer x-axis w/ a client-side scrub cursor) + What-if + IV-shock) | built |
+| `/options/simulator` | Simulator (**multi-leg strategy builder** — a Strategy dropdown over the shared **editable leg-editor** (`leg_editor.py`) replaces the old single-contract selector — driving all three legacy tabs: **Replay** (re-prices the **netted** position along the underlying's recent path → stacked price + 5-Greek panels over a gap-compressed integer x-axis w/ a client-side scrub cursor) + What-if (Δt is now **elapsed** days from now, per-leg decay → **calendars** correct) + IV-shock; **Copy to Calculator** button) | built |
 | `/options/expected-move` | Expected Move (candlestick price history (6-mo daily) + forward **ATM-IV expected-move cone** to the option's expiration (green/red dashed, √-time fan) + leg **strike lines** (short solid / long dashed, put/call colored) + axis **crosshair** w/ Date(X)+Price(Y) label boxes; opened in a **new browser tab** via stash-handoff from Scanner/Paper/Captured/Calculator, or standalone w/ symbol+expiry input) | built |
 | `/options/rescue` | Rescue (at-risk credit spreads (PCS/CCS/IC) → **at-risk table** (paper+captured, heat-colored) → select a position → ranked **commission-aware adjustment menu**: close / partial-close / narrow / convert-IC / butterfly / roll-down/out/down-out / broken-wing / inverted / futures-hedge; each card shows gross/commission/net + metrics + legs + rationale + strategic context + warnings + score; execute cards have **Apply → confirm → `rescue_apply`** behind a stale-price guard, advisory cards show "manual"; nav badge from `cache:options:rescue_summary`) | built |
 | `/sentiment` | Sentiment (two-column top: **dual** Sentiment gauges (Today + 30-Day Avg) + **dual** Market Trend gauges (Today live-intraday + 30-Day structural — directional 0–100 score, 15-min cadence) / component table; traffic-light tiles; 30d history + rolling avgs; full-width **Sector & Industry Performance** w/ Day/Week/Month %, P/C, RRG, rotation banner, **expandable industries w/ P/C+RRG**; bottom status bar; **persists across navigation**; **server-side 120s auto-refresh + bridge publish, tab-independent**) | built |
@@ -253,11 +280,18 @@ The `pages/options/` subpackage shares `header.py` (compact quotes/VIX/sentiment
 strip), `detail.py` (collapsible Trade detail panel, reused by all signal
 tables), `svg.py` (gradient-bar / range-marker SVG — the composite-score
 speedometer is now the shared Highcharts gauge in `pages/gauge.py`), `inputs.py`
-(`select_all_on_focus` symbol-input helper), and **`handoff.py`** (cross-page
+(`select_all_on_focus` symbol-input helper), **`strategies.py`** (PURE shared
+strategy/leg model — the normalized leg dict + `STRATEGY_TEMPLATES`/`STRATEGY_GROUPS`
++ `build_default_legs` + analytic-vs-numeric `summary_code`; imported by **both** the
+Calculator and Simulator so templates never drift), **`leg_editor.py`** (the shared
+**editable multi-leg-table widget** both pages mount — `state['legs']` is the source
+of truth, each page injects its own `strikes_for`/`expiries_for` + `show_premium`),
+and **`handoff.py`** (cross-page
 signal hand-off — Scanner/Swing "Send to Calculator" via a module-level `_pending`
 stash + "Send to Paper trade" which enqueues a `paper_create` command on
-`cmd:options`, plus the shared `add_row_actions` per-row action-button slot;
-engine-free). Options design + plan: [`docs/plans/2026-06-14-options-section-expansion-design.md`](docs/plans/2026-06-14-options-section-expansion-design.md)
+`cmd:options`, plus the shared `add_row_actions` per-row action-button slot, **and the
+Simulator↔Calculator leg-copy stashes** (`send_to_simulator`/`send_to_calculator_legs`
++ `take_pending_simulator`/`take_pending_calculator_legs`); engine-free). Options design + plan: [`docs/plans/2026-06-14-options-section-expansion-design.md`](docs/plans/2026-06-14-options-section-expansion-design.md)
 / [`-plan.md`](docs/plans/2026-06-14-options-section-expansion-plan.md).
 Gamma/Simulator: [`docs/plans/2026-06-14-gamma-simulator-design.md`](docs/plans/2026-06-14-gamma-simulator-design.md) / [`-plan.md`](docs/plans/2026-06-14-gamma-simulator-plan.md).
 
