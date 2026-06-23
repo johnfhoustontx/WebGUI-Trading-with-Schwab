@@ -62,7 +62,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <h1>WebGUI Trading with Schwab</h1>
   <div class="sub">API / Developer Reference</div>
-  <div class="meta">WebGUI Trading with Schwab · Generated 2026-06-22</div>
+  <div class="meta">WebGUI Trading with Schwab · Generated 2026-06-23</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a></li>
@@ -446,12 +446,12 @@ composite-only every 120 s, trend recompute gated to 15 min, rotation at startup
 </tr>
 <tr>
 <td><code>sim_run</code></td>
-<td><code>{symbol, expiry, kind, strike, direction, dt, mult}</code></td>
+<td><code>{symbol, legs[], dt, mult}</code> (legs: <code>{kind, strike, expiry, side, qty}</code>; legacy <code>{expiry, kind, strike, direction}</code> single-leg args still accepted)</td>
 <td><code>cache:options:sim_result</code></td>
 </tr>
 <tr>
 <td><code>sim_replay</code></td>
-<td><code>{symbol, expiry, kind, strike, direction, lookback}</code></td>
+<td><code>{symbol, legs[], lookback}</code> (same multi-leg shape; legacy single-leg args still accepted)</td>
 <td><code>cache:options:sim_replay</code></td>
 </tr>
 <tr>
@@ -461,7 +461,7 @@ composite-only every 120 s, trend recompute gated to 15 min, rotation at startup
 </tr>
 <tr>
 <td><code>calc_compute</code></td>
-<td><code>{...calc params}</code></td>
+<td><code>{strategy, spot, iv, rate, ivadj, qty, expiry, legs[], range_*}</code> (each leg carries its own <code>expiry</code>/<code>qty</code>; <code>strategy="CUSTOM"</code> or any non-PCS/CCS/IC/single code → generic numeric summary)</td>
 <td><code>cache:options:calc_result</code></td>
 </tr>
 <tr>

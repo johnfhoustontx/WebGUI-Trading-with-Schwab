@@ -181,30 +181,42 @@ three per-row action buttons) and detail panel as the Scanner.
 
 **Route:** `/options/calculator`.
 
-An options P&L calculator with a price/time heat map.
+An options P&L calculator for **any multi-leg structure**, with a price/time heat map.
 
 **Inputs:**
 
-- **Strategy** — PCS (put credit spread), CCS (call credit spread), IC (iron
-  condor), LONG_PUT, NAKED_PUT, LONG_CALL, NAKED_CALL.
+- **Strategy** — a template menu grouped into **Singles** (long/naked call/put),
+  **Verticals** (PCS/CCS credit + call/put debit spreads), **Condors** (iron condor +
+  all-call/all-put condor), **Butterflies** (call/put long 1-2-1 + iron butterfly), and
+  **Calendars** (call/put calendar + diagonal). Picking one fills the leg editor with
+  sensible at-the-money strikes.
 - **Symbol** and **spot price**, plus a **Load** button that pulls the live chain,
   current price, a price range, and the list of expirations.
 - **Expiry**, **Contracts**, **IV %** (with an **IV** button that reads the
   at-the-money IV from the chain), an **IV Δ %** shock, and a **Rate %**.
-- A **leg section** that adapts to the strategy: for each leg, pick a **Strike**
-  and enter (or **Fetch**) a **Premium**.
+- An **editable leg editor** — one row per leg with **Type** (call/put), **Side**
+  (long/short), **Strike**, **Expiry**, and **Qty**, plus **Add leg** and a remove
+  button. Each leg carries its **own expiry** (so **calendars/diagonals** price each
+  leg on its own clock) and its own quantity (so a 1-2-1 butterfly body trades at 2×).
+  **Fetch Premiums** fills each leg's premium from the chain.
 - **Range min / max** and **Range %** controlling the heat map's price span.
 
 **Outputs (after pressing Calculate):**
 
 - **Summary tiles** — entry credit/debit, max risk, max return, return-on-risk %,
-  break-even(s), and probability of profit.
+  break-even(s), and probability of profit. The credit-spread/iron-condor metrics use
+  the exact closed-form formulas; **butterflies, calendars, and other structures** are
+  measured numerically off the value-at-expiration curve (max profit/loss + every
+  break-even crossing).
 - A **P&L heat map** — rows are price points, columns are evaluation dates, each
   cell shows the dollar P&L and % return, shaded green (profit) to red (loss). The
   current spot row is highlighted.
 
 If you arrived here via **Send to Calculator** from a signal table, the form is
-pre-filled and the calculation runs automatically.
+pre-filled and the calculation runs automatically. **Copy to Simulator** sends the
+current legs straight to the Simulator (and the Simulator's **Copy to Calculator**
+brings them back), so you can move a structure between P&L tiles and the
+scenario/Greeks views without re-entering it.
 
 ## Gamma
 
@@ -240,20 +252,27 @@ re-fetch.
 
 **Route:** `/options/simulator`.
 
-Re-prices a single option contract under different scenarios using Black-Scholes.
-Start by entering a **Symbol** and pressing **Fetch snapshot**, then choose a
-contract with the **Expiry**, **Kind** (call/put), **Strike**, and **Direction**
-(buy/sell) selectors. Three tabs:
+Re-prices a **multi-leg** option position under different scenarios using
+Black-Scholes. Start by entering a **Symbol** and pressing **Fetch snapshot**, then
+pick a **Strategy** (the same template menu as the Calculator — singles, verticals,
+condors, butterflies, calendars/diagonals) and adjust the **legs** in the editor —
+each row has **Type** (call/put), **Side** (long/short), **Strike**, **Expiry**, and
+**Qty**, with **Add leg** / remove. Every tab below operates on the **netted**
+position (all legs summed). Three tabs:
 
-- **Replay** (default) — re-prices the contract along the underlying's recent price
+- **Replay** (default) — re-prices the position along the underlying's recent price
   path and shows a **six-panel stack** (price plus Delta, Gamma, Theta, Vega, Rho).
   A **scrub slider** moves a cursor through the trace; a **Look-back** dropdown
   controls how far back the path runs (Auto by DTE, or fixed windows).
 - **What-if** — a **ΔS** slider (instant client-side price overlay) and a **Δt**
-  slider (days forward) that re-prices the contract; an IV-shock comparison bar
-  chart appears below.
-- **IV Shock** — an **IV multiplier** slider compares the contract at base IV vs
+  slider that fast-forwards **elapsed** days from now; each leg decays on its **own**
+  clock, so a **calendar's** back leg correctly keeps its time value while the front
+  leg expires. An IV-shock comparison bar chart appears below.
+- **IV Shock** — an **IV multiplier** slider compares the position at base IV vs
   shocked IV across Price, Delta, Gamma, Theta, and Vega.
+
+**Copy to Calculator** sends the current legs to the Calculator for the P&L tiles +
+heat map (the Calculator's **Copy to Simulator** brings them back).
 
 ## Expected Move
 

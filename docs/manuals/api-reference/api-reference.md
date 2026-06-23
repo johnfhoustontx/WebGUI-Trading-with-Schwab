@@ -180,10 +180,10 @@ composite-only every 120 s, trend recompute gated to 15 min, rotation at startup
 | `gamma_explain` | `{symbol}` | `cache:options:gamma_explain` |
 | `gamma_analyze` | — | `cache:options:gamma_analyze` |
 | `sim_fetch` | `{symbol}` | `cache:options:sim_meta` |
-| `sim_run` | `{symbol, expiry, kind, strike, direction, dt, mult}` | `cache:options:sim_result` |
-| `sim_replay` | `{symbol, expiry, kind, strike, direction, lookback}` | `cache:options:sim_replay` |
+| `sim_run` | `{symbol, legs[], dt, mult}` (legs: `{kind, strike, expiry, side, qty}`; legacy `{expiry, kind, strike, direction}` single-leg args still accepted) | `cache:options:sim_result` |
+| `sim_replay` | `{symbol, legs[], lookback}` (same multi-leg shape; legacy single-leg args still accepted) | `cache:options:sim_replay` |
 | `calc_load` | `{symbol}` | `cache:options:calc_chain` |
-| `calc_compute` | `{...calc params}` | `cache:options:calc_result` |
+| `calc_compute` | `{strategy, spot, iv, rate, ivadj, qty, expiry, legs[], range_*}` (each leg carries its own `expiry`/`qty`; `strategy="CUSTOM"` or any non-PCS/CCS/IC/single code → generic numeric summary) | `cache:options:calc_result` |
 | `expected_move` | `{symbol, expiry, legs[], lookback}` | `cache:options:expected_move` |
 | `rescue` | `{position_id}` | `cache:options:rescue:<position_id>` |
 | `rescue_apply` | `{position_id, candidate}` | `cache:options:rescue:<position_id>` |

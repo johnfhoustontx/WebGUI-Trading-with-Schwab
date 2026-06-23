@@ -62,7 +62,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <h1>WebGUI Trading with Schwab</h1>
   <div class="sub">User Guide</div>
-  <div class="meta">WebGUI Trading with Schwab · Generated 2026-06-22</div>
+  <div class="meta">WebGUI Trading with Schwab · Generated 2026-06-23</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -295,29 +295,41 @@ parameters and press <strong>Scan</strong>:</p>
 three per-row action buttons) and detail panel as the Scanner.</p>
 <h2 id="calculator">Calculator</h2>
 <p><strong>Route:</strong> <code>/options/calculator</code>.</p>
-<p>An options P&amp;L calculator with a price/time heat map.</p>
+<p>An options P&amp;L calculator for <strong>any multi-leg structure</strong>, with a price/time heat map.</p>
 <p><strong>Inputs:</strong></p>
 <ul>
-<li><strong>Strategy</strong> — PCS (put credit spread), CCS (call credit spread), IC (iron
-  condor), LONG_PUT, NAKED_PUT, LONG_CALL, NAKED_CALL.</li>
+<li><strong>Strategy</strong> — a template menu grouped into <strong>Singles</strong> (long/naked call/put),
+  <strong>Verticals</strong> (PCS/CCS credit + call/put debit spreads), <strong>Condors</strong> (iron condor +
+  all-call/all-put condor), <strong>Butterflies</strong> (call/put long 1-2-1 + iron butterfly), and
+  <strong>Calendars</strong> (call/put calendar + diagonal). Picking one fills the leg editor with
+  sensible at-the-money strikes.</li>
 <li><strong>Symbol</strong> and <strong>spot price</strong>, plus a <strong>Load</strong> button that pulls the live chain,
   current price, a price range, and the list of expirations.</li>
 <li><strong>Expiry</strong>, <strong>Contracts</strong>, <strong>IV %</strong> (with an <strong>IV</strong> button that reads the
   at-the-money IV from the chain), an <strong>IV Δ %</strong> shock, and a <strong>Rate %</strong>.</li>
-<li>A <strong>leg section</strong> that adapts to the strategy: for each leg, pick a <strong>Strike</strong>
-  and enter (or <strong>Fetch</strong>) a <strong>Premium</strong>.</li>
+<li>An <strong>editable leg editor</strong> — one row per leg with <strong>Type</strong> (call/put), <strong>Side</strong>
+  (long/short), <strong>Strike</strong>, <strong>Expiry</strong>, and <strong>Qty</strong>, plus <strong>Add leg</strong> and a remove
+  button. Each leg carries its <strong>own expiry</strong> (so <strong>calendars/diagonals</strong> price each
+  leg on its own clock) and its own quantity (so a 1-2-1 butterfly body trades at 2×).
+  <strong>Fetch Premiums</strong> fills each leg's premium from the chain.</li>
 <li><strong>Range min / max</strong> and <strong>Range %</strong> controlling the heat map's price span.</li>
 </ul>
 <p><strong>Outputs (after pressing Calculate):</strong></p>
 <ul>
 <li><strong>Summary tiles</strong> — entry credit/debit, max risk, max return, return-on-risk %,
-  break-even(s), and probability of profit.</li>
+  break-even(s), and probability of profit. The credit-spread/iron-condor metrics use
+  the exact closed-form formulas; <strong>butterflies, calendars, and other structures</strong> are
+  measured numerically off the value-at-expiration curve (max profit/loss + every
+  break-even crossing).</li>
 <li>A <strong>P&amp;L heat map</strong> — rows are price points, columns are evaluation dates, each
   cell shows the dollar P&amp;L and % return, shaded green (profit) to red (loss). The
   current spot row is highlighted.</li>
 </ul>
 <p>If you arrived here via <strong>Send to Calculator</strong> from a signal table, the form is
-pre-filled and the calculation runs automatically.</p>
+pre-filled and the calculation runs automatically. <strong>Copy to Simulator</strong> sends the
+current legs straight to the Simulator (and the Simulator's <strong>Copy to Calculator</strong>
+brings them back), so you can move a structure between P&amp;L tiles and the
+scenario/Greeks views without re-entering it.</p>
 <h2 id="gamma">Gamma</h2>
 <p><strong>Route:</strong> <code>/options/gamma</code>.</p>
 <p>A dealer-positioning view built from the options chain — gamma exposure (GEX) and
@@ -345,21 +357,27 @@ refreshes automatically every two minutes; switching views is instant and doesn'
 re-fetch.</p>
 <h2 id="simulator">Simulator</h2>
 <p><strong>Route:</strong> <code>/options/simulator</code>.</p>
-<p>Re-prices a single option contract under different scenarios using Black-Scholes.
-Start by entering a <strong>Symbol</strong> and pressing <strong>Fetch snapshot</strong>, then choose a
-contract with the <strong>Expiry</strong>, <strong>Kind</strong> (call/put), <strong>Strike</strong>, and <strong>Direction</strong>
-(buy/sell) selectors. Three tabs:</p>
+<p>Re-prices a <strong>multi-leg</strong> option position under different scenarios using
+Black-Scholes. Start by entering a <strong>Symbol</strong> and pressing <strong>Fetch snapshot</strong>, then
+pick a <strong>Strategy</strong> (the same template menu as the Calculator — singles, verticals,
+condors, butterflies, calendars/diagonals) and adjust the <strong>legs</strong> in the editor —
+each row has <strong>Type</strong> (call/put), <strong>Side</strong> (long/short), <strong>Strike</strong>, <strong>Expiry</strong>, and
+<strong>Qty</strong>, with <strong>Add leg</strong> / remove. Every tab below operates on the <strong>netted</strong>
+position (all legs summed). Three tabs:</p>
 <ul>
-<li><strong>Replay</strong> (default) — re-prices the contract along the underlying's recent price
+<li><strong>Replay</strong> (default) — re-prices the position along the underlying's recent price
   path and shows a <strong>six-panel stack</strong> (price plus Delta, Gamma, Theta, Vega, Rho).
   A <strong>scrub slider</strong> moves a cursor through the trace; a <strong>Look-back</strong> dropdown
   controls how far back the path runs (Auto by DTE, or fixed windows).</li>
 <li><strong>What-if</strong> — a <strong>ΔS</strong> slider (instant client-side price overlay) and a <strong>Δt</strong>
-  slider (days forward) that re-prices the contract; an IV-shock comparison bar
-  chart appears below.</li>
-<li><strong>IV Shock</strong> — an <strong>IV multiplier</strong> slider compares the contract at base IV vs
+  slider that fast-forwards <strong>elapsed</strong> days from now; each leg decays on its <strong>own</strong>
+  clock, so a <strong>calendar's</strong> back leg correctly keeps its time value while the front
+  leg expires. An IV-shock comparison bar chart appears below.</li>
+<li><strong>IV Shock</strong> — an <strong>IV multiplier</strong> slider compares the position at base IV vs
   shocked IV across Price, Delta, Gamma, Theta, and Vega.</li>
 </ul>
+<p><strong>Copy to Calculator</strong> sends the current legs to the Calculator for the P&amp;L tiles +
+heat map (the Calculator's <strong>Copy to Simulator</strong> brings them back).</p>
 <h2 id="expected-move">Expected Move</h2>
 <p><strong>Route:</strong> <code>/options/expected-move</code>.</p>
 <p>Charts a symbol's recent price action with a forward <strong>expected-move cone</strong> out to

@@ -35,16 +35,20 @@ Like the Scanner, but you set the hunt parameters for one symbol over several da
     "/options/calculator": """
 **Calculator — the simple version**
 
-Shows the profit/loss of an options trade **before** you place it.
+Shows the profit/loss of an options trade **before** you place it — any
+**multi-leg** structure.
 
-- **Strategy + legs** — pick the structure and strikes; **Load**/**Fetch** pull
+- **Strategy** — pick a template (single, vertical, **iron condor**, **butterfly**,
+  **calendar/diagonal**…) and the **leg editor** fills in. Add, remove, or edit legs
+  freely — each has its own strike, **expiry**, and quantity. **Load**/**Fetch** pull
   live prices.
 - **IV %, IV Δ, Rate** — volatility and interest assumptions. Higher IV = pricier
   options and wider P&L swings.
 - **Calculate** builds the **summary tiles** (max risk/return, breakeven,
   probability) and a **heat map** of P&L by price (rows) and date (columns) —
-  green = profit, red = loss.
-- Widening the strikes raises the credit you collect but also the max loss.
+  green = profit, red = loss. Calendars price each leg at its own expiry.
+- **Copy to Simulator** sends the exact legs across. Widening strikes raises the
+  credit you collect but also the max loss.
 """,
     "/options/gamma": """
 **Gamma — the simple version**
@@ -62,14 +66,17 @@ accelerate price.
     "/options/simulator": """
 **Simulator — the simple version**
 
-Re-prices **one** option contract under different what-ifs (Black-Scholes model).
+Re-prices a **multi-leg** option position under different what-ifs (Black-Scholes).
 
-- **Fetch snapshot**, then choose expiry / strike / call-put / buy-sell.
-- **Replay** — how the contract would have behaved along recent price moves.
-- **What-if (ΔS / Δt)** — slide the underlying price or fast-forward days and watch
-  the price and the Greeks change.
+- **Fetch snapshot**, then pick a **Strategy** and adjust the **legs** (kind / side /
+  strike / expiry / qty) — singles, spreads, condors, butterflies, calendars.
+- **Replay** — how the whole position would have behaved along recent price moves.
+- **What-if (ΔS / Δt)** — slide the underlying price or fast-forward **elapsed** days;
+  each leg decays on its own clock, so calendars behave correctly. Watch the price
+  and Greeks change.
 - **IV Shock** — multiply volatility to see vega risk. More time or volatility =
   more option value.
+- **Copy to Calculator** sends the exact legs across for the P&L tiles + heat map.
 """,
     "/options/expected-move": """
 **Expected Move — the simple version**

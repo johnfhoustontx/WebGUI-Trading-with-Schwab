@@ -679,24 +679,52 @@ intrinsic value and second-order Greeks are 0.
 ## Spread metrics and P&L grid
 
 `calc_summary(legs, strategy, spot, r, iv, T)` returns credit/debit, max
-profit/loss, break-even(s), strike width, and probability of profit.
+profit/loss, break-even(s), strike width, and probability of profit — closed-form
+for `PCS`/`CCS`/`IC` and the four single-leg strategies.
 
-`calc_spread_pnl(legs, spot, iv, rate, eval_dates, price_range, expiry_date, iv_adjustment=0)`
+`calc_summary_generic(legs, spot, r, iv, T)` covers **any other structure**
+(butterfly, condor, calendar, diagonal, or a hand-edited set): it evaluates net P&L
+across a 601-point price grid at the **front (nearest) leg expiry** — calendars price
+the back leg via Black-Scholes at its remaining `T` — and reads **max profit/loss** as
+the curve's extremes, **break-evens** as its zero-crossings, and **PoP** as the
+risk-neutral lognormal mass over the profitable region (same at-expiration convention
+as the analytic path). The service `compute.calc_compute` routes to the analytic
+function when the strategy code is one of the seven closed-form cases and the legs
+still match that template, else to the generic one (via `strategies.summary_code`).
+
+`calc_spread_pnl(legs, spot, iv, rate, eval_dates, price_range, expiry_date, iv_adjustment=0, per_leg_expiry=False)`
 re-prices every leg via Black-Scholes at each (price point × evaluation date) and
 sums P&L into the grid that drives the Calculator heat map. An `iv_adjustment`
-shifts IV at every point for shock scenarios.
+shifts IV at every point for shock scenarios. With `per_leg_expiry=True` each leg is
+priced at **its own** time-to-expiry per column (`t_leg = leg_T0 − elapsed`), so a
+**calendar/diagonal** shows the back leg retaining value at the front-leg expiry;
+legs that omit an `expiry` fall back to the column `T` (single-expiry output is
+byte-identical to the legacy path).
 
 ## Simulator engines
 
 **File:** `options-scanner/options_simulator/`.
 
-- **What-if** (`WhatIfEngine`) — freezes time `days_elapsed` forward and sweeps an
-  81-point ±20% price range, decomposing P&L by Delta/Gamma/Theta/Vega.
-- **IV shock** (`IVShockEngine`) — compares the contract at base IV vs `IV × mult`.
-- **Replay** (`ReplayEngine.full_trace`) — steps the contract bar-by-bar along the
+Positions are **multi-leg**: `Position(legs=[Leg(contract, sign, ratio), …])`, and
+`aggregate_position` runs the per-leg pricer then scales each leg's Greeks by
+`sign · ratio` before summing — the `ratio` field (default 1) lets a 1-2-1
+**butterfly body** trade at 2×. `Position.from_legs([(contract, sign, ratio), …])`
+builds one from resolved contracts.
+
+- **What-if** (`WhatIfEngine`) — sweeps an 81-point ±20% price range. The service
+  `compute.sim_run` advances **each leg by `Δt` elapsed days from now**
+  (`t_leg = max(leg_DTE − Δt, …)`), so same-expiry structures decay together while a
+  **calendar** decays each leg on its own clock.
+- **IV shock** (`IVShockEngine`) — compares the position at base IV vs `IV × mult`
+  (each leg already priced at its own expiry).
+- **Replay** (`ReplayEngine.full_trace`) — steps the position bar-by-bar along the
   underlying's recent path, re-pricing and computing all Greeks at each bar. The
   service (`compute.sim_replay`) wraps this and compresses overnight/weekend gaps
   onto a consecutive integer x-axis for the six-panel chart.
+
+Both `compute.sim_run` and `compute.sim_replay` take a `legs` list (each
+`{kind, strike, expiry, side, qty}`) and remain **backward-compatible** with the
+legacy single-contract positional arguments.
 
 ---
 
