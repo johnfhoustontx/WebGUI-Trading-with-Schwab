@@ -59,6 +59,19 @@ def test_summary_code_shape_and_expiry_based():
     assert S.summary_code("IRON_CONDOR" if False else "IC", S.build_default_legs("IC", 100, strikes, ["2026-07-17"])) == "IC"
 
 
+def test_summary_code_mismatched_leg_count_is_custom():
+    # The copy-from-Simulator case: a butterfly/calendar is pasted into the
+    # Calculator while the strategy dropdown still reads an analytic code (e.g.
+    # "PCS"). The leg COUNT (or expiry count) won't match the PCS template, so the
+    # summary must route to the generic numeric path, NOT the analytic PCS formula.
+    strikes = [90, 95, 100, 105, 110]
+    fly = S.build_default_legs("BUTTERFLY_CALL", 100, strikes, ["2026-07-17"])
+    assert len(fly) == 3
+    assert S.summary_code("PCS", fly) == "CUSTOM"        # 3 legs != PCS's 2
+    cal = S.build_default_legs("CALENDAR_CALL", 100, strikes, ["2026-07-17", "2026-08-21"])
+    assert S.summary_code("CCS", cal) == "CUSTOM"        # two expiries
+
+
 def test_strategy_groups_reference_real_templates():
     for _label, codes in S.STRATEGY_GROUPS:
         for c in codes:

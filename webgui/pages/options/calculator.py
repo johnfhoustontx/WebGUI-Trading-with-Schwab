@@ -544,7 +544,12 @@ def render():
             spot = float(price_in.value)
             page_qty = int(contracts_in.value or 1)
             page_exp = str(expiry_sel.value)
-            strat = strategy_sel.value if not editor.is_dirty() else "CUSTOM"
+            # Route to the analytic summary only when the legs still MATCH the selected
+            # template (shape + single expiry) AND are untouched; a copied structure
+            # (e.g. a butterfly pasted in while the dropdown still reads "PCS") or an
+            # edited one falls to the generic numeric summary. summary_code is the
+            # single source of truth for this routing (shared with the Simulator).
+            strat = S.summary_code(strategy_sel.value, legs) if not editor.is_dirty() else "CUSTOM"
             params = {
                 "strategy": strat,
                 "spot": spot,
