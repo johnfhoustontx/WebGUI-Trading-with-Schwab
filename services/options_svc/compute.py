@@ -1417,21 +1417,27 @@ def replay_lookback_spec(dte, override="auto") -> dict:
             "label": f"daily · {bars}d"}
 
 
-def sim_replay(symbol, expiry, kind, strike, direction, lookback="auto") -> dict:
-    """Re-price the selected contract along the underlying's recent price path.
+def sim_replay(symbol, expiry=None, kind=None, strike=None, direction=None,
+               lookback="auto", legs=None) -> dict:
+    """Re-price a position (single OR multi-leg) along the underlying's recent path.
 
     Ports the legacy Tk Replay tab: ``ReplayEngine.full_trace`` over a price
     path, plus the gap-compression / session-boundary layout the page needs to
     draw a clean integer x-axis (overnight/weekend breaks collapsed onto
-    consecutive indices). The path is a **DTE-aware** window fetched here
-    (``replay_lookback_spec`` → ``_fetch_replay_history``), NOT the snapshot's
-    fixed 2-day history — the expiry/DTE is only known at replay time, and
-    ``lookback`` ('auto' or an override key) lets the page widen/narrow it.
-    Returns a JSON-safe dict; ``{}`` if the snapshot/contract is missing (page
-    prompts a re-fetch / selection), or ``{"error": ...}`` if IV is unavailable
-    or there's no price history. Replay depends ONLY on the contract selector +
-    look-back — not the dt/mult sliders — so it is its own command/cache view,
-    separate from ``sim_run`` (keeps slider-driven sweeps cheap)."""
+    consecutive indices). ``legs`` (preferred) is a list of
+    {kind, strike, expiry, side, qty}; when omitted the legacy single-contract
+    args (expiry/kind/strike/direction) build a one-leg list (back-compat). The
+    legs are netted by ``aggregate_position`` into one trace. The path is a
+    **DTE-aware** window fetched here (``replay_lookback_spec`` →
+    ``_fetch_replay_history``), NOT the snapshot's fixed 2-day history — the
+    expiry/DTE is only known at replay time, and ``lookback`` ('auto' or an
+    override key) lets the page widen/narrow it (the window is sized to the
+    NEAREST leg expiry). Returns a JSON-safe dict; ``{}`` if the snapshot/contract
+    is missing (page prompts a re-fetch / selection), or ``{"error": ...}`` if IV
+    is unavailable or there's no price history. Replay depends ONLY on the
+    contract selector + look-back — not the dt/mult sliders — so it is its own
+    command/cache view, separate from ``sim_run`` (keeps slider-driven sweeps
+    cheap)."""
     from options_simulator import engine as seng
     import numpy as np
     import dataclasses
@@ -1440,17 +1446,37 @@ def sim_replay(symbol, expiry, kind, strike, direction, lookback="auto") -> dict
     snap = _SIM_SNAPSHOTS.get(symbol)
     if snap is None:
         return {}
-    contract = find_contract(snap, expiry, kind, strike)
-    if contract is None:
+
+    if legs is None:
+        if expiry is None or kind is None or strike is None:
+            return {}
+        legs = [{"kind": kind, "strike": strike, "expiry": expiry,
+                 "side": "long" if (direction or "buy") == "buy" else "short",
+                 "qty": 1}]
+    if not legs:
         return {}
-    if contract.iv <= 0:
+
+    resolved = []  # (ContractRow, sign, ratio)
+    for leg in legs:
+        c = find_contract(snap, leg.get("expiry"), leg.get("kind"), leg.get("strike"))
+        if c is None:
+            return {}
+        sign = +1 if leg.get("side", "long") == "long" else -1
+        resolved.append((c, sign, int(leg.get("qty", 1))))
+    if any(c.iv <= 0 for c, _, _ in resolved):
         return {"error": "IV unavailable - cannot simulate"}
 
-    # DTE-aware history window (fetched here, not the snapshot's fixed 2-day path).
-    try:
-        dte = (contract.expiry - dt.date.today()).days
-    except Exception:
-        dte = 15
+    # DTE-aware history window (fetched here, not the snapshot's fixed 2-day path),
+    # sized to the NEAREST leg expiry.
+    def _dte(c):
+        exp = c.expiry
+        if isinstance(exp, str):
+            try:
+                exp = dt.date.fromisoformat(exp[:10])
+            except ValueError:
+                return 15
+        return (exp - dt.date.today()).days
+    dte = min(_dte(c) for c, _, _ in resolved)
     spec = replay_lookback_spec(dte, lookback)
     hist = _fetch_replay_history(snap.symbol, spec)
     if hist is None or hist.empty:
@@ -1459,7 +1485,7 @@ def sim_replay(symbol, expiry, kind, strike, direction, lookback="auto") -> dict
     # Re-price along the fetched path (shallow-copy the snapshot's history so the
     # cached snapshot is untouched).
     snap_path = dataclasses.replace(snap, price_history=hist)
-    pos = seng.Position.single(contract, direction, snap.symbol)
+    pos = seng.Position.from_legs(resolved, label=f"{snap.symbol} {len(resolved)}-leg")
     trace = seng.aggregate_position(
         pos, lambda c: seng.ReplayEngine(snap_path).full_trace(c))
     if trace is None or trace.empty:

@@ -1088,10 +1088,14 @@ def test_sim_run_multileg_put_spread(monkeypatch):
     assert out["ivshock"] and "base" in out["ivshock"] and "shock" in out["ivshock"]
 
 
-def _real_replay_snapshot(symbol, iv=0.20, index=None, prices=None):
+def _real_replay_snapshot(symbol, iv=0.20, index=None, prices=None, contracts=None):
     """Build a REAL ChainSnapshot using the engine classes (its ``price_history``
     is now ignored by ``sim_replay`` — the history is fetched from the proxy — but
-    the snapshot still supplies the contract/spot/r)."""
+    the snapshot still supplies the contract/spot/r).
+
+    By default the snapshot carries a single 450-call ContractRow (existing
+    single-leg callers rely on this). Pass ``contracts`` (a list of real
+    ``ContractRow``s) to override it for the multi-leg path."""
     import sys as _sys, datetime as _dt
     from repo_paths import OPTIONS_SCANNER
     _sys.path.insert(0, str(OPTIONS_SCANNER))
@@ -1102,11 +1106,12 @@ def _real_replay_snapshot(symbol, iv=0.20, index=None, prices=None):
         index = ["2026-06-18 09:30", "2026-06-18 09:31", "2026-06-18 09:32"]
     if prices is None:
         prices = [450.0, 451.0, 452.0]
-    contract = seng.ContractRow(strike=450.0, kind="call", bid=1.0, ask=1.2,
-                                mid=1.1, iv=iv, expiry=_dt.date(2026, 6, 26))
+    if contracts is None:
+        contracts = [seng.ContractRow(strike=450.0, kind="call", bid=1.0, ask=1.2,
+                                      mid=1.1, iv=iv, expiry=_dt.date(2026, 6, 26))]
     return seng.ChainSnapshot(spot=prices[-1],
                               as_of=_dt.datetime(2026, 6, 18, 9, 32), r=0.04,
-                              symbol=symbol, contracts=[contract],
+                              symbol=symbol, contracts=contracts,
                               price_history=pd.Series(dtype=float))
 
 
@@ -1216,6 +1221,40 @@ def test_sim_replay_zero_iv_degrades():
     compute._SIM_SNAPSHOTS["ZIV"] = _real_replay_snapshot("ZIV", iv=0.0)
     out = compute.sim_replay("ZIV", "2026-06-26", "call", 450.0, "buy")
     assert out.get("error")
+
+
+def test_sim_replay_multileg_put_spread(monkeypatch):
+    """The new ``legs=`` path re-prices a multi-leg position (short 95P /
+    long 90P) along the underlying's path through the REAL engine, netting the
+    two legs into one trace with the same JSON-safe shape as the single-leg
+    path."""
+    import datetime as _dt
+    from repo_paths import OPTIONS_SCANNER
+    import sys as _sys
+    _sys.path.insert(0, str(OPTIONS_SCANNER))
+    from options_simulator import engine as seng
+
+    exp = _dt.date(2026, 7, 17)
+    contracts = [
+        seng.ContractRow(strike=95.0, kind="put", bid=1.0, ask=1.2, mid=1.1,
+                         iv=0.25, expiry=exp),
+        seng.ContractRow(strike=90.0, kind="put", bid=0.4, ask=0.6, mid=0.5,
+                         iv=0.30, expiry=exp),
+    ]
+    compute._SIM_SNAPSHOTS.clear()
+    compute._SIM_SNAPSHOTS["SPY"] = _real_replay_snapshot(
+        "SPY", prices=[100.0, 99.0, 98.0], contracts=contracts)
+    _patch_replay_history(
+        monkeypatch,
+        ["2026-06-18 09:30", "2026-06-18 09:31", "2026-06-18 09:32"],
+        [100.0, 99.0, 98.0])
+
+    out = compute.sim_replay("SPY", legs=[
+        {"kind": "put", "strike": 95, "expiry": "2026-07-17", "side": "short", "qty": 1},
+        {"kind": "put", "strike": 90, "expiry": "2026-07-17", "side": "long", "qty": 1}])
+    assert out.get("x") and out.get("prices")
+    assert len(out["greeks"]["delta"]) == len(out["prices"])
+    assert "error" not in out
 
 
 # ── Calculator (moved from webgui/pages/options/calculator.py) ───────────────
