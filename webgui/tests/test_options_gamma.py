@@ -148,6 +148,26 @@ def test_heatmap_figure_overlays_spot_line():
     assert spot["colorAxis"] is False
 
 
+def test_heatmap_figure_crops_data_to_yrange():
+    # Charm/DEX/Vanna are non-zero across the whole chain (~250 strikes) but the
+    # panel only shows the near-spot yrange. Off-window cells must NOT be emitted
+    # (perf: ~45k points → ~GEX-sized). Strikes 100/900 are out of [440,460].
+    rows = [("09:30", 450.0, None, None, None, 0,
+             {100.0: {"net": 7}, 450.0: {"net": 5}, 900.0: {"net": -9}})]
+    fig = gamma.heatmap_figure(rows, "Charm", yrange=[440.0, 460.0])
+    hm = next(s for s in fig["series"] if s["type"] == "heatmap")
+    assert {p[1] for p in hm["data"]} == {450.0}      # only the in-window strike
+    # color axis is clamped to the visible cell, not the off-window extreme (9)
+    assert fig["colorAxis"]["max"] == 5
+
+
+def test_heatmap_figure_no_yrange_keeps_all_strikes():
+    rows = [("09:30", 450.0, None, None, None, 0, {100.0: {"net": 7}, 900.0: {"net": -9}})]
+    fig = gamma.heatmap_figure(rows, "Charm")
+    hm = next(s for s in fig["series"] if s["type"] == "heatmap")
+    assert {p[1] for p in hm["data"]} == {100.0, 900.0}
+
+
 def test_heatmap_figure_time_labels_not_clipped():
     # Time labels are dense; rotating them + a taller bottom margin keep them from
     # being cut off at the bottom edge.

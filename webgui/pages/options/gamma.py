@@ -310,12 +310,23 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None):
     with the bar chart's near-spot window."""
     m = heatmap_matrix(rows)
     times, strikes, z = m["x"], m["y"], m["z"]
+    # Only build cells for strikes within the visible ``yrange`` window. GEX net is
+    # ~0 away from spot (heatmap_matrix already drops those), but Charm/DEX/Vanna
+    # are non-zero across the WHOLE chain (~250 strikes) — emitting all of them is
+    # ~45k points to serialize + render every repaint when only the near-spot
+    # window shows. Cropping here keeps every view as light as GEX.
+    if yrange is not None:
+        lo, hi = yrange
+        vis = [yi for yi in range(len(strikes)) if lo <= strikes[yi] <= hi]
+    else:
+        vis = list(range(len(strikes)))
     # Heatmap points [time_index, strike_value, net]: x is the time category index,
     # y is the ACTUAL strike (linear axis) so the continuous spot line overlays.
     data = [[xi, strikes[yi], z[yi][xi]]
-            for yi in range(len(strikes)) for xi in range(len(times))
+            for yi in vis for xi in range(len(times))
             if z[yi][xi] is not None]
-    zmax = max((abs(v) for row in z for v in row if v is not None), default=0) or None
+    zmax = max((abs(z[yi][xi]) for yi in vis for xi in range(len(times))
+                if z[yi][xi] is not None), default=0) or None
     series = [{"type": "heatmap", "name": "net", "data": data,
                "colsize": 1, "rowsize": _strike_step(strikes),
                "borderWidth": 1, "borderColor": HEATMAP_SEP,
