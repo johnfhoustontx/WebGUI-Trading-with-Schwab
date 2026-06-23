@@ -73,10 +73,18 @@ def _strike_plotline(value, color, dash, text):
 
 
 def _strike_step(strikes):
-    """Row height for a linear strike axis = smallest positive gap between strikes
-    (so heatmap cells tile without gaps/overlap); falls back to 1.0."""
+    """Row height for a linear strike axis = the MEDIAN positive gap between
+    consecutive strikes (so heatmap cells tile to FILL the panel).
+
+    Using the median, not the minimum: a chain that mixes spacings — e.g. 1.0
+    strikes near the money among 2.5 strikes elsewhere (QCOM, SPCX, …) — would,
+    under the minimum, get 1.0-tall rows separated by ~1.5 of dead space (thin,
+    uneven rows). The median row height tiles the majority spacing densely (like
+    $SPX's uniform grid); the few finer strikes just overlap slightly. Falls back
+    to 1.0 when there are no gaps."""
+    import statistics
     diffs = [b - a for a, b in zip(strikes, strikes[1:]) if b > a]
-    return min(diffs) if diffs else 1.0
+    return statistics.median(diffs) if diffs else 1.0
 
 
 def _view_label(view):
@@ -140,33 +148,41 @@ def _refloat_keys(d):
     return out
 
 
-def significant_strikes(bars, frac=0.03):
-    """Strikes whose |net| ≥ frac·peak — drops near-zero edge strikes so the
-    y-range crops to where the bars are actually visible (fixes GAMMA dead space).
-
-    ``bars`` is a bars_from_gex(...) dict. Returns every strike when the peak is
-    zero (nothing to crop)."""
-    strikes, nets = bars.get("strikes") or [], bars.get("nets") or []
-    peak = max((abs(n) for n in nets), default=0.0)
-    if peak <= 0:
-        return list(strikes)
-    thr = peak * frac
-    return [s for s, n in zip(strikes, nets) if abs(n) >= thr]
+N_SIDE = 20  # strikes shown on each side of spot (bars + heatmap window)
 
 
-def bars_from_gex(data, spot, pct=0.02):
-    """Per-strike net exposure within ±pct of spot, ascending by strike.
+def strikes_around(strikes, spot, n_side=N_SIDE):
+    """The nearest ``n_side`` strikes at/below spot + ``n_side`` strictly above.
 
-    Returns empty bars when ``spot`` is missing (e.g. a weekend/off-hours snapshot
-    with no underlying price) so the near-spot band math never does ``None * pct``.
+    A FIXED COUNT (not a ±% band) so the bar/heatmap window holds a consistent
+    number of strikes through the day — the candles/cells stay the same size as
+    spot drifts. Lower-priced names with fewer listed strikes naturally get a
+    smaller window (slicing just returns what exists). Returns sorted floats; an
+    unusable spot returns all numeric strikes sorted."""
+    s = sorted(set(x for x in (strikes or []) if isinstance(x, (int, float))))
+    if not isinstance(spot, (int, float)):
+        return s
+    below = [x for x in s if x < spot][-n_side:]   # n nearest strictly below spot
+    above = [x for x in s if x > spot][:n_side]     # n nearest strictly above spot
+    at = [x for x in s if x == spot]                # the at-spot strike, if listed
+    return below + at + above
+
+
+def bars_from_gex(data, spot, n_side=N_SIDE):
+    """Per-strike net exposure for the ``n_side``-each-side window around spot.
+
+    A fixed strike COUNT (see ``strikes_around``) — not a ±% band — so the bar
+    count (hence candle width) is consistent through the session. Returns empty
+    bars when ``spot`` is missing (e.g. a weekend/off-hours snapshot with no
+    underlying price).
     """
     gex = (data or {}).get("gex") or {}
     if not isinstance(spot, (int, float)):
         return {"strikes": [], "nets": [], "colors": [], "hovers": []}
-    lo, hi = spot * (1 - pct), spot * (1 + pct)
+    window = set(strikes_around(gex.keys(), spot, n_side))
     strikes, nets, colors, hovers = [], [], [], []
     for strike in sorted(gex):
-        if not (lo <= strike <= hi):
+        if strike not in window:
             continue
         cell = gex[strike] or {}
         net = cell.get("net", 0.0)
@@ -221,7 +237,7 @@ def panel_flex(n_cols, full_cols=205, min_heat=0.28, max_heat=0.70):
     return round(1.0 - heat, 4), round(heat, 4)
 
 
-def bar_figure(data, spot, view="GEX", walls=None, flip=None, pct=0.02, height=680,
+def bar_figure(data, spot, view="GEX", walls=None, flip=None, n_side=N_SIDE, height=680,
                yrange=None):
     """Highcharts horizontal-bar options for one view (dark, beveled, labeled).
 
@@ -229,7 +245,7 @@ def bar_figure(data, spot, view="GEX", walls=None, flip=None, pct=0.02, height=6
     STRIKE axis is ``xAxis`` (linear, with the spot/flip/wall reference plotLines)
     and the exposure axis is ``yAxis``. ``yrange`` (when given) overrides the auto
     near-spot window — used to align the strike axis with the intraday heatmap's."""
-    b = bars_from_gex(data, spot, pct)
+    b = bars_from_gex(data, spot, n_side)
     label = _view_label(view)
     yr = yrange if yrange is not None else bar_yrange(b["strikes"], spot)
     points = [{"x": s, "y": n, "color": c,
@@ -327,8 +343,11 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None):
             if z[yi][xi] is not None]
     zmax = max((abs(z[yi][xi]) for yi in vis for xi in range(len(times))
                 if z[yi][xi] is not None), default=0) or None
+    # Row height from the VISIBLE strikes' typical spacing (median gap) so cells
+    # tile the window densely regardless of off-window strike spacing.
+    rowsize = _strike_step([strikes[yi] for yi in vis])
     series = [{"type": "heatmap", "name": "net", "data": data,
-               "colsize": 1, "rowsize": _strike_step(strikes),
+               "colsize": 1, "rowsize": rowsize,
                "borderWidth": 1, "borderColor": HEATMAP_SEP,
                "tooltip": {"headerFormat": "",
                            "pointFormat": "Strike {point.y} · net {point.value:,.0f}"}}]
@@ -636,12 +655,12 @@ def render():
             rows.append(tuple(r))
         spot_path = [r[1] for r in rows if len(r) > 1 and isinstance(r[1], (int, float))]
 
-        # One shared near-spot strike range so the bar chart and the intraday
-        # heatmap line up vertically (axis alignment). Tight to the strikes that
-        # actually have visible bars (drops near-zero edge strikes → no GAMMA
-        # dead space), then widened to include the intraday spot path so the
-        # heatmap's price line isn't clipped when price drifted out of that window.
-        yr = bar_yrange(significant_strikes(bars_from_gex(data, view_spot)), view_spot)
+        # One shared strike range so the bar chart and the intraday heatmap line up
+        # vertically (axis alignment). Spans the FIXED ±N_SIDE-strike window around
+        # spot (consistent bar/cell count + size through the day), then widened to
+        # include the intraday spot path so the heatmap's price line isn't clipped
+        # when price drifted out of that window.
+        yr = bar_yrange(bars_from_gex(data, view_spot)["strikes"], view_spot)
         yr = union_range(yr, spot_path)
         _set_chart(bar_figure(data, view_spot, view=view, walls=walls, flip=flip, yrange=yr))
         state["chart_el"].set_visibility(True)
@@ -706,7 +725,14 @@ def render():
         if version == seen["gamma"]:
             return
         seen["gamma"] = version
-        state["snap"] = bus_client.read("options:gamma") or None
+        snap = bus_client.read("options:gamma") or None
+        # Only adopt a snapshot for the symbol currently selected — a foreign
+        # publish (e.g. the service's one-shot $SPX startup refresh) must NOT
+        # revert the displayed symbol out from under the user.
+        want = _current_symbol()
+        if snap and want and (snap.get("symbol") or "").upper() != want:
+            return
+        state["snap"] = snap
         _render_view()
 
     def _paint_status(st):
@@ -784,6 +810,23 @@ def render():
         _watch_explain(v["options:gamma_explain"])
         _watch_analyze(v["options:gamma_analyze"])
 
+    def _set_symbol(sym):
+        """Point the dropdown at ``sym`` (adding it to the options if the universe
+        doesn't list it). Caller wires on_value_change AFTER the initial set so
+        this programmatic sync doesn't enqueue a spurious refresh."""
+        if not sym:
+            return
+        if sym not in symbol_in.options:
+            symbol_in.options = list(symbol_in.options) + [sym]
+        symbol_in.value = sym
+        symbol_in.update()
+
+    @guard
+    def _on_symbol_change():
+        # Selecting a symbol switches to it immediately (no need to click Refresh
+        # now) and keeps the cache in lockstep with the dropdown.
+        _request_refresh()
+
     fetch_btn.on_click(_request_refresh)
     explain_btn.on_click(_request_explain)
     analyze_btn.on_click(_request_analyze)
@@ -795,6 +838,11 @@ def render():
     seen["analyze"] = bus_client.read_version("options:gamma_analyze")
     seen["status"] = bus_client.read_version("options:gex_status")
     state["snap"] = bus_client.read("options:gamma") or None
+    # Sync the dropdown to the symbol actually in the cache so a page (re)build
+    # doesn't show $SPX while another symbol's data is displayed (which a later
+    # refresh would then revert to $SPX). Done BEFORE wiring on_value_change.
+    _set_symbol((state["snap"] or {}).get("symbol"))
+    symbol_in.on_value_change(lambda e: _on_symbol_change())
     _render_view()
     _paint_status(bus_client.read("options:gex_status"))
 

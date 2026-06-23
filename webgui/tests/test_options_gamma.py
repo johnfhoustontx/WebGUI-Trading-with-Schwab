@@ -20,26 +20,36 @@ GEX = {"spot": 450.0, "gex": {
 
 
 def test_bars_from_gex_filters_band_and_sorts():
-    b = gamma.bars_from_gex(GEX, 450.0, pct=0.01)
+    b = gamma.bars_from_gex(GEX, 450.0)
     assert b["strikes"] == [448.0, 450.0, 452.0]
     assert b["nets"] == [60.0, -50.0, 20.0]
     assert b["colors"][1] != b["colors"][0]
 
 
-def test_bars_from_gex_excludes_out_of_band():
-    b = gamma.bars_from_gex(GEX, 450.0, pct=0.001)
-    assert b["strikes"] == [450.0]
+def test_strikes_around_fixed_count_each_side():
+    # A FIXED count each side (not a ±% band) → consistent bar/cell size all day.
+    strikes = [float(s) for s in range(100, 201, 5)]   # 100,105,...,200 (21 strikes)
+    w = gamma.strikes_around(strikes, 150.0, n_side=3)
+    assert w == [135.0, 140.0, 145.0, 150.0, 155.0, 160.0, 165.0]  # 3 ≤spot + 3 >spot
+    # Lower-priced / sparse names just get what exists (smaller window, no error).
+    assert gamma.strikes_around([10.0, 12.5, 15.0], 12.5, n_side=20) == [10.0, 12.5, 15.0]
+
+
+def test_bars_from_gex_limits_to_n_side_window():
+    big = {"spot": 150.0, "gex": {float(s): {"net": 1.0} for s in range(100, 201, 5)}}
+    b = gamma.bars_from_gex(big, 150.0, n_side=2)
+    assert b["strikes"] == [140.0, 145.0, 150.0, 155.0, 160.0]   # 2 each side + spot
 
 
 def test_bar_figure_is_highcharts_dict():
-    fig = gamma.bar_figure(GEX, 450.0, view="GEX", walls=[450.0], flip=449.5, pct=0.02)
+    fig = gamma.bar_figure(GEX, 450.0, view="GEX", walls=[450.0], flip=449.5)
     assert "series" in fig and fig["chart"]["type"] == "bar"
 
 
 def test_bar_figure_strike_axis_hugs_visible_bars_and_is_tall():
     # In a Highcharts bar chart the STRIKE axis is xAxis (vertical).
-    # spot*0.95..1.05 would be 427.5..472.5; visible bars only span 448..452
-    fig = gamma.bar_figure(GEX, 450.0, view="GEX", pct=0.02)
+    # The window spans the bars (448..452), padded — not spot*0.95/1.05.
+    fig = gamma.bar_figure(GEX, 450.0, view="GEX")
     lo, hi = fig["xAxis"]["min"], fig["xAxis"]["max"]
     assert lo > 440.0 and hi < 460.0          # tight to the bars, not spot*0.95/1.05
     assert lo <= 448.0 and hi >= 452.0        # outermost bars not clipped
@@ -98,21 +108,6 @@ def test_panel_flex_endpoints_and_monotonic():
     assert 0.28 < heat_mid < 0.70
 
 
-def test_significant_strikes_crops_near_zero_tails():
-    bars = {"strikes": [440.0, 448.0, 450.0, 452.0, 460.0],
-            "nets": [5.0, 600.0, -900.0, 500.0, 8.0]}   # tails ≈ 0 vs 900 peak
-    assert gamma.significant_strikes(bars, frac=0.03) == [448.0, 450.0, 452.0]
-
-
-def test_significant_strikes_noop_when_all_significant():
-    bars = {"strikes": [448.0, 450.0, 452.0], "nets": [600.0, -900.0, 500.0]}
-    assert gamma.significant_strikes(bars, frac=0.03) == [448.0, 450.0, 452.0]
-
-
-def test_significant_strikes_all_zero_returns_all():
-    bars = {"strikes": [448.0, 450.0], "nets": [0.0, 0.0]}
-    assert gamma.significant_strikes(bars) == [448.0, 450.0]
-    assert gamma.significant_strikes({"strikes": [], "nets": []}) == []
 
 
 def test_heatmap_matrix_from_history():
@@ -159,6 +154,27 @@ def test_heatmap_figure_crops_data_to_yrange():
     assert {p[1] for p in hm["data"]} == {450.0}      # only the in-window strike
     # color axis is clamped to the visible cell, not the off-window extreme (9)
     assert fig["colorAxis"]["max"] == 5
+
+
+def test_strike_step_uses_median_gap_not_min():
+    # Mixed spacing (fine strikes near money among coarser ones): the row height
+    # must be the MEDIAN gap (2.5) so cells fill the panel, NOT the min (1.0)
+    # which leaves thin rows + dead space (the QCOM/SPCX bug).
+    strikes = [100.0, 101.0, 102.0, 104.5, 107.0, 109.5, 112.0]  # gaps: 1,1,2.5,2.5,2.5,2.5
+    assert gamma._strike_step(strikes) == 2.5
+    assert gamma._strike_step([100.0, 105.0, 110.0]) == 5.0       # uniform → that gap
+    assert gamma._strike_step([100.0]) == 1.0                     # no gaps → fallback
+
+
+def test_heatmap_figure_rowsize_from_visible_window_median():
+    # Off-window coarse strikes (10-apart) must not inflate rowsize; within the
+    # window strikes are 2.5 apart → rowsize 2.5 (dense, $SPX-like).
+    grid = {200.0: {"net": 5}, 202.5: {"net": -3}, 205.0: {"net": 4},
+            207.5: {"net": -2}, 260.0: {"net": 9}, 320.0: {"net": -9}}
+    rows = [("09:30", 203.0, None, None, None, 0, grid)]
+    fig = gamma.heatmap_figure(rows, "GEX", yrange=[198.0, 210.0])
+    hm = next(s for s in fig["series"] if s["type"] == "heatmap")
+    assert hm["rowsize"] == 2.5
 
 
 def test_heatmap_figure_no_yrange_keeps_all_strikes():
@@ -276,7 +292,7 @@ def test_json_roundtrip_then_refloat_reproduces_bars():
     reloaded = json.loads(json.dumps(data))           # float keys -> strings
     assert all(isinstance(k, str) for k in reloaded["gex"])  # confirm stringified
     fixed = {"spot": reloaded["spot"], "gex": gamma._refloat_keys(reloaded["gex"])}
-    b = gamma.bars_from_gex(fixed, 450.0, pct=0.01)
+    b = gamma.bars_from_gex(fixed, 450.0)
     assert b["strikes"] == [448.0, 450.0, 452.0]      # numeric, sorted, in range
     assert b["nets"] == [60.0, -50.0, 20.0]
 
@@ -299,7 +315,7 @@ def test_base_chart_sets_dark_background():
 
 
 def test_bar_figure_is_dark_and_beveled_with_friendly_title():
-    fig = gamma.bar_figure(GEX, 450.0, view="GEX", walls=[452.0], flip=449.5, pct=0.02)
+    fig = gamma.bar_figure(GEX, 450.0, view="GEX", walls=[452.0], flip=449.5)
     assert fig["chart"]["backgroundColor"] == gamma.DARK_BG
     pt = fig["series"][0]["data"][0]
     assert pt["borderWidth"] >= 1 and pt["borderColor"]        # beveled per-bar border
@@ -317,14 +333,14 @@ def test_line_annotations_label_spot_flip_and_call_put_walls():
 
 
 def test_bar_figure_includes_reference_line_plotlines():
-    fig = gamma.bar_figure(GEX, 450.0, view="GEX", walls=[452.0], flip=449.5, pct=0.02)
+    fig = gamma.bar_figure(GEX, 450.0, view="GEX", walls=[452.0], flip=449.5)
     texts = [pl["label"]["text"] for pl in fig["xAxis"]["plotLines"]]
     assert any(t.startswith("Spot") for t in texts)
     assert any("Gamma flip" in t for t in texts)
 
 
 def test_bar_figure_accepts_explicit_yrange():
-    fig = gamma.bar_figure(GEX, 450.0, view="GEX", pct=0.02, yrange=[400.0, 500.0])
+    fig = gamma.bar_figure(GEX, 450.0, view="GEX", yrange=[400.0, 500.0])
     assert [fig["xAxis"]["min"], fig["xAxis"]["max"]] == [400.0, 500.0]
 
 
@@ -377,7 +393,19 @@ def test_render_view_updates_in_place_not_clear():
     assert "chart_box.clear()" not in src   # never tear down the whole panel/messages
     assert "heatmap_box.clear()" not in src
     assert "panel_flex" in src           # proportional split is wired
-    assert "significant_strikes" in src  # tight y-range is wired
+    assert "bar_yrange" in src           # fixed ±N_SIDE window y-range is wired
+
+
+def test_render_syncs_symbol_and_guards_foreign_snapshots():
+    """Regression: the dropdown must sync to the cached snapshot's symbol on build,
+    and a repaint must ignore a snapshot whose symbol != the selected one — so a
+    refresh (or the service's $SPX startup publish) can't revert the displayed
+    symbol."""
+    src = inspect.getsource(gamma.render)
+    assert "_set_symbol" in src                       # dropdown synced to cache symbol
+    assert "on_value_change(lambda e: _on_symbol_change" in src   # select → refresh
+    # repaint guard: snapshot symbol must match the current dropdown
+    assert 'snap.get("symbol")' in src and "_current_symbol()" in src
 
 
 def test_page_imports_no_engine_or_proxy():
