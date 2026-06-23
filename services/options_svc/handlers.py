@@ -89,6 +89,9 @@ EVENT_CALC_CHAIN = "events:options:calc_chain"
 CACHE_CALC_RESULT = "cache:options:calc_result"
 EVENT_CALC_RESULT = "events:options:calc_result"
 
+CACHE_CALC_IV = "cache:options:calc_iv"
+EVENT_CALC_IV = "events:options:calc_iv"
+
 CACHE_GEX_STATUS = "cache:options:gex_status"
 EVENT_GEX_STATUS = "events:options:gex_status"
 
@@ -274,6 +277,26 @@ def refresh_captured(bus) -> None:
     bus.publish(EVENT_CAPTURED, {"version": version})
 
 
+def remove_closed_from_captured(bus, signal_id) -> None:
+    """Republish the captured view with one signal removed, PRESERVING live marks.
+
+    Used after a manual close instead of ``refresh_captured``: it drops just the
+    closed ``signal_id`` from the CURRENT cached view (which may carry the live
+    marks merged by a prior ``captured_reprice`` / "Refresh marks (live)") and
+    republishes. This keeps the remaining rows' live marks intact — closing one
+    trade no longer reverts the whole table to the persisted (pre-refresh) view.
+    Falls back to a full persisted ``refresh_captured`` when no cached view exists
+    yet (cold start), so the table is still correct."""
+    env = bus.cache_get(CACHE_CAPTURED)
+    if env is None or not isinstance(env.payload, dict):
+        refresh_captured(bus)
+        return
+    signals = env.payload.get("signals") or []
+    kept = [s for s in signals if s.get("signal_id") != signal_id]
+    version = bus.cache_set(CACHE_CAPTURED, {"signals": kept})
+    bus.publish(EVENT_CAPTURED, {"version": version})
+
+
 def refresh_gamma(bus, symbol="$SPX") -> None:
     """Compute the Gamma snapshot for ``symbol``, cache it, publish an event.
 
@@ -439,7 +462,9 @@ def handle_command(bus, command) -> None:
     result + publish; ``calc_load`` (args symbol) → fetch the quote + option chain,
     cache the loader payload (chain dict + price + range) + publish; ``calc_compute``
     (args = the calc params dict) → run the summary + P&L grid math, cache the
-    result + publish; ``expected_move`` (args symbol/expiry/legs) → build the
+    result + publish; ``calc_iv`` (args spot/strike/option_type/mark/expiry/rate) →
+    imply IV from the option mark at the intraday time-to-expiry, cache + publish;
+    ``expected_move`` (args symbol/expiry/legs) → build the
     expected-move cone payload, cache the result + publish; ``rescue`` (args
     position_id) → compute the ranked rescue advisory for one paper position, cache
     per-id + publish; ``rescue_apply`` (args position_id, candidate) → execute the
@@ -493,10 +518,13 @@ def handle_command(bus, command) -> None:
         fver = bus.cache_set(CACHE_CAPTURED_FLAGS, {"flags": res["flags"]})
         bus.publish(EVENT_CAPTURED_FLAGS, {"version": fver})
     elif command.type == "captured_close":
-        compute.close_captured(command.args.get("signal_id"),
+        sid = command.args.get("signal_id")
+        compute.close_captured(sid,
                                command.args.get("exit_val", 0.0),
                                command.args.get("reason", "MANUAL_CLOSE"))
-        refresh_captured(bus)
+        # Drop ONLY the closed signal from the cached view, preserving the live
+        # marks on the remaining rows (don't revert to the persisted view).
+        remove_closed_from_captured(bus, sid)
     elif command.type == "gamma_refresh":
         refresh_gamma(bus, command.args.get("symbol", "$SPX"))
     elif command.type == "gamma_explain":
@@ -533,6 +561,13 @@ def handle_command(bus, command) -> None:
         result = compute.calc_compute(**(command.args or {}))
         version = bus.cache_set(CACHE_CALC_RESULT, result)
         bus.publish(EVENT_CALC_RESULT, {"version": version})
+    elif command.type == "calc_iv":
+        a = command.args or {}
+        res = compute.calc_iv(a.get("spot"), a.get("strike"),
+                              a.get("option_type"), a.get("mark"),
+                              a.get("expiry"), a.get("rate", 0.045))
+        version = bus.cache_set(CACHE_CALC_IV, res)
+        bus.publish(EVENT_CALC_IV, {"version": version})
     elif command.type == "expected_move":
         a = command.args or {}
         res = compute.compute_expected_move(

@@ -484,11 +484,62 @@ def test_captured_close_then_refresh(monkeypatch):
     handlers.handle_command(bus, Command(type="captured_reload"))
     assert calls["refresh"] == 1
 
-    # captured_close -> close with (signal_id, exit_val, reason) + refresh.
+    # captured_close -> close with (signal_id, exit_val, reason) + republish.
     handlers.handle_command(bus, Command(type="captured_close", args={
         "signal_id": "X1", "exit_val": 0.42, "reason": "TOOK_PROFIT"}))
     assert calls["close"] == ("X1", 0.42, "TOOK_PROFIT")
+    # Cache was empty (mock refresh didn't populate it) -> the close republish
+    # falls back to a full persisted refresh.
     assert calls["refresh"] == 2
+
+
+def test_captured_close_preserves_live_marks_and_removes_closed(monkeypatch):
+    """After 'Refresh marks (live)', closing a trade must drop ONLY the closed
+    signal and KEEP the live marks on the remaining rows — not revert to the
+    persisted view.
+
+    Reproduces the reported bug: captured_close republished
+    ``compute.captured_view()`` (the persisted view, which has no live marks),
+    wiping the just-refreshed marks and snapping the table back to its
+    pre-refresh state."""
+    bus = Bus(fake=True)
+    # The cache AS IT LOOKS right after 'Refresh marks (live)' — live marks merged.
+    live = {"signals": [
+        {"signal_id": "X1", "symbol": "SPY", "current_value": 0.20,
+         "current_score": 68, "recommendation": "CUT"},
+        {"signal_id": "X2", "symbol": "QQQ", "current_value": 0.50,
+         "current_score": 70, "recommendation": "HOLD"},
+    ]}
+    bus.cache_set("cache:options:captured", live)
+    # The DB flip is covered by signal_db tests; here close is a no-op. The
+    # PERSISTED view (if it were wrongly consulted) carries NO live marks.
+    monkeypatch.setattr(handlers.compute, "close_captured", lambda *a, **k: None)
+    monkeypatch.setattr(handlers.compute, "captured_view",
+                        lambda: {"signals": [{"signal_id": "X2", "symbol": "QQQ"}]})
+
+    handlers.handle_command(bus, Command(type="captured_close", args={
+        "signal_id": "X1", "exit_val": 0.10, "reason": "MANUAL_CLOSE"}))
+
+    payload = bus.cache_get("cache:options:captured").payload
+    assert [s["signal_id"] for s in payload["signals"]] == ["X2"]   # closed row gone
+    x2 = payload["signals"][0]
+    assert x2.get("current_value") == 0.50                          # live marks KEPT
+    assert x2.get("current_score") == 70
+
+
+def test_captured_close_falls_back_to_persisted_when_cache_cold(monkeypatch):
+    """With no cached captured view yet, close falls back to the persisted view so
+    the table is still correct (the closed signal is already excluded there)."""
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "close_captured", lambda *a, **k: None)
+    monkeypatch.setattr(handlers.compute, "captured_view",
+                        lambda: {"signals": [{"signal_id": "X2", "symbol": "QQQ"}]})
+
+    handlers.handle_command(bus, Command(type="captured_close", args={
+        "signal_id": "X1", "exit_val": 0.0, "reason": "MANUAL_CLOSE"}))
+
+    payload = bus.cache_get("cache:options:captured").payload
+    assert [s["signal_id"] for s in payload["signals"]] == ["X2"]
 
 
 # ── Gamma (Task 2.6d) ────────────────────────────────────────────────────────
@@ -715,6 +766,30 @@ def test_calc_compute_command_caches_result(monkeypatch):
     env = bus.cache_get("cache:options:calc_result")
     assert env is not None
     assert env.payload == result
+    assert msg is not None and msg.get("version") == env.version
+
+
+def test_calc_iv_command_caches_implied_iv(monkeypatch):
+    bus = Bus(fake=True)
+    seen = {"args": None}
+
+    def _rec(spot, strike, option_type, mark, expiry, rate=0.045):
+        seen["args"] = (spot, strike, option_type, mark, expiry, rate)
+        return {"iv": 38.3, "strike": strike, "option_type": option_type,
+                "mark": mark, "T": 0.0003, "error": None}
+
+    monkeypatch.setattr(handlers.compute, "calc_iv", _rec)
+
+    args = {"spot": 718.82, "strike": 725.0, "option_type": "call",
+            "mark": 0.19, "expiry": "2026-06-23", "rate": 0.045}
+    sub = bus.subscribe("events:options:calc_iv")
+    handlers.handle_command(bus, Command(type="calc_iv", args=args))
+    msg = sub.get_message(timeout=1.0)
+    sub.close()
+
+    assert seen["args"] == (718.82, 725.0, "call", 0.19, "2026-06-23", 0.045)
+    env = bus.cache_get("cache:options:calc_iv")
+    assert env is not None and env.payload["iv"] == 38.3
     assert msg is not None and msg.get("version") == env.version
 
 

@@ -82,6 +82,38 @@ def bs_price(S, K, T, r, sigma, option_type):
         return K * math.exp(-r * T) * norm_cdf(-d2) - S * norm_cdf(-d1)
 
 
+def implied_vol(price, S, K, T, r, option_type, lo=1e-4, hi=5.0, iters=100):
+    """
+    Implied volatility back-solved from an option price via bisection on bs_price.
+
+    bs_price is monotonically increasing in sigma, so bisection is robust and
+    needs no derivative. ToS-style: pass an *intraday* T (e.g. hours-to-close/365)
+    and the option *mark* to reproduce the broker's displayed IV at 0DTE.
+
+    Returns None (rather than a misleading number) when the price carries no
+    implied time value: non-positive price/spot/strike, T <= 0 (expired), a price
+    at or below intrinsic, or a price unreachable within [lo, hi].
+    """
+    option_type = option_type.lower()
+    if (price is None or price <= 0 or T is None or T <= 0
+            or S is None or S <= 0 or K is None or K <= 0):
+        return None
+    intrinsic = max(S - K, 0.0) if option_type == "call" else max(K - S, 0.0)
+    if price <= intrinsic + 1e-9:
+        return None
+    # Price must be bracketed by [bs_price(lo), bs_price(hi)] for bisection.
+    if bs_price(S, K, T, r, hi, option_type) < price:
+        return None
+    a, b = lo, hi
+    for _ in range(iters):
+        mid = 0.5 * (a + b)
+        if bs_price(S, K, T, r, mid, option_type) < price:
+            a = mid
+        else:
+            b = mid
+    return 0.5 * (a + b)
+
+
 def bs_delta(S, K, T, r, sigma, option_type):
     """
     Black-Scholes delta.
@@ -698,7 +730,8 @@ def generate_price_range(spot, pct=0.05):
 
 
 def calc_spread_pnl(legs, spot, iv, r, eval_dates, price_range,
-                    expiry_date, iv_adjustment=0.0, rows_per_side=30):
+                    expiry_date, iv_adjustment=0.0, rows_per_side=30,
+                    eval_times=None):
     """
     Calculate P&L grid for a spread across prices and dates.
 
@@ -713,9 +746,16 @@ def calc_spread_pnl(legs, spot, iv, r, eval_dates, price_range,
         expiry_date   - Expiration date (date object)
         iv_adjustment - Additive IV shift (default 0.0)
         rows_per_side - Max rows above/below spot (default 30)
+        eval_times    - Optional list of explicit time-to-expiry values (years),
+                        one per column. When given it OVERRIDES the calendar-day
+                        ``(expiry - eval_date).days`` math entirely and defines the
+                        number of columns — this is how the caller injects an
+                        intraday "Now" column (fractional day) and an expiration
+                        column (T=0) for 0DTE. ``eval_dates`` is ignored for timing
+                        when ``eval_times`` is supplied.
 
     Returns list of dicts: {price: float, pnl: [floats], pnl_pct: [floats]}
-        Each pnl/pnl_pct list has one value per eval_date.
+        Each pnl/pnl_pct list has one value per column.
     """
     if isinstance(expiry_date, datetime):
         expiry_date = expiry_date.date()
@@ -761,22 +801,23 @@ def calc_spread_pnl(legs, spot, iv, r, eval_dates, price_range,
             price_steps.append(round(p, 2))
             p += step
 
+    # Per-column time-to-expiry (years). Explicit ``eval_times`` (intraday "Now"
+    # + expiration) win; otherwise fall back to the legacy calendar-day math.
+    if eval_times is not None:
+        col_times = [max(float(t), 0.0) for t in eval_times]
+    else:
+        col_times = []
+        for eval_date in eval_dates:
+            eval_date_d = eval_date.date() if isinstance(eval_date, datetime) else eval_date
+            col_times.append(max((expiry_date - eval_date_d).days / 365.0, 0.0))
+
     results = []
 
     for price in price_steps:
         pnl_list = []
         pnl_pct_list = []
 
-        for eval_date in eval_dates:
-            if isinstance(eval_date, datetime):
-                eval_date_d = eval_date.date()
-            else:
-                eval_date_d = eval_date
-
-            # Time to expiration in years from eval_date
-            days_to_exp = (expiry_date - eval_date_d).days
-            T = max(days_to_exp / 365.0, 0.0)
-
+        for T in col_times:
             # Calculate current position value
             position_value = 0.0
             for leg in legs:

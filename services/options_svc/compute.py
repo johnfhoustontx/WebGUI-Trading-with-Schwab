@@ -415,6 +415,7 @@ def reprice_captured() -> dict:
             continue
         # Merge the mark's display fields into the row (mirrors the page; not
         # persisted — the GUI reads these off the cached repriced list).
+        r["current_value"] = mark.get("current_value")   # current option price (spread mark)
         r["unrealized_pnl"] = mark.get("unrealized_pnl")
         r["current_score"] = mark.get("current_score")
         r["score_drift"] = mark.get("score_drift")
@@ -1092,29 +1093,114 @@ def symmetric_price_range(spot, strikes, pct=0.05):
     return (round(spot - half, 2), round(spot + half, 2))
 
 
+# ── intraday time-to-expiry (the 0DTE fix) ───────────────────────────────────
+# Options stop trading at the 4:00pm ET close (QQQ/SPY/equities and PM-settled
+# 0DTE index weeklys). Time-to-expiry is the CALENDAR span from now to that close
+# in years (/365 — the same convention bs_price/calc_summary already use, and the
+# one ThinkorSwim implies IV under). Using calendar ``.days`` instead collapses to
+# 0 on expiration day (intrinsic-only) or a bogus full day — the calculator bug.
+from zoneinfo import ZoneInfo as _ZoneInfo  # noqa: E402
+
+_MARKET_TZ = _ZoneInfo("America/New_York")
+_EXPIRY_CLOSE_HOUR = 16  # 4:00pm ET
+_YEAR_SECONDS = 365.0 * 24.0 * 3600.0
+
+
+def _expiry_settlement(expiry_date):
+    """The 4:00pm ET settlement datetime (tz-aware) for an expiry date."""
+    import datetime as dt
+
+    return dt.datetime(expiry_date.year, expiry_date.month, expiry_date.day,
+                       _EXPIRY_CLOSE_HOUR, 0, 0, tzinfo=_MARKET_TZ)
+
+
+def _year_fraction(start_dt, end_dt):
+    """Calendar years from start to end (never negative), /365."""
+    return max((end_dt - start_dt).total_seconds(), 0.0) / _YEAR_SECONDS
+
+
+def time_to_expiry_years(now_dt, expiry_date):
+    """Years from ``now_dt`` (tz-aware) to the expiry's 4:00pm ET close, /365.
+
+    Sub-day resolution: 3 hours before the close on expiry day → ~3/24/365, not 0;
+    after the close → 0. Multi-day → calendar days + today's fraction."""
+    return _year_fraction(now_dt, _expiry_settlement(expiry_date))
+
+
+def calc_iv(spot, strike, option_type, mark, expiry, rate=0.045, now=None) -> dict:
+    """Imply IV (percent) from an option ``mark`` at the intraday time-to-expiry.
+
+    ToS-style: solve Black-Scholes for sigma given the contract's current mark and
+    the calendar time from *now* to the 4:00pm ET close on ``expiry``. This is what
+    reproduces ThinkorSwim's per-contract IV at 0DTE (where IV is acutely sensitive
+    to the time basis). Returns ``{"iv", "strike", "option_type", "mark", "T",
+    "error"}``; ``iv`` is None with a reason when it can't be solved (expired, mark
+    at/below intrinsic, missing inputs). Fully defensive — never raises."""
+    import datetime as dt
+
+    import options_calculator as oc
+
+    try:
+        expiry_date = dt.date.fromisoformat(str(expiry))
+    except Exception:
+        return {"iv": None, "strike": strike, "option_type": option_type,
+                "mark": mark, "T": None, "error": "bad expiry"}
+    if now is None:
+        now = dt.datetime.now(_MARKET_TZ)
+    T = time_to_expiry_years(now, expiry_date)
+    iv = None
+    if spot and strike and mark and option_type:
+        try:
+            iv = oc.implied_vol(float(mark), float(spot), float(strike), T,
+                                float(rate), str(option_type))
+        except Exception:
+            iv = None
+    return {"iv": round(iv * 100.0, 2) if iv is not None else None,
+            "strike": strike, "option_type": option_type, "mark": mark, "T": T,
+            "error": None if iv is not None else "could not imply IV from mark"}
+
+
 def calc_compute(strategy, spot, iv, rate, ivadj, qty, expiry, legs,
-                 range_min, range_max, range_pct) -> dict:
+                 range_min, range_max, range_pct, now=None) -> dict:
     """Run the calculator math → ``{"summary", "eval_labels", "pnl_data"}``.
 
-    Ports the page's ``do_calc`` math VERBATIM: time-to-expiry in years (clamped
-    ≥ 1 day), the ``calc_summary`` tiles, the ``generate_eval_dates`` columns, the
-    price range (explicit min/max when valid, else ``symmetric_price_range`` —
-    symmetric about spot, widened to span all leg strikes — at ``range_pct``),
-    and the ``calc_spread_pnl`` grid. ``expiry`` arrives as an ISO
-    string (parsed with ``date.fromisoformat``). Eval dates are PRE-FORMATTED to
-    ``MM/DD`` strings server-side so the page's grid header needs no date objects.
+    Time-to-expiry is INTRADAY (calendar seconds to the 4:00pm ET close on the
+    expiry date, /365 — see ``time_to_expiry_years``), not calendar ``.days``. The
+    P&L grid's FIRST column is **"Now"** (priced at that live intraday T → current
+    value, the user-visible fix), each subsequent ``generate_eval_dates`` column is
+    that future date's close, and the last column is the **expiration payoff**
+    (T=0; labeled ``"Exp"`` for a 0DTE where now and expiry share the date). The
+    ``calc_summary`` tiles (incl. PoP) also use the intraday "Now" T rather than the
+    old ``or 1/365`` clamp, which over-priced 0DTE ~20×.
 
-    ``legs``/``summary``/``pnl_data`` are JSON-safe (dicts/lists of numbers)."""
+    The price range is explicit min/max when valid, else ``symmetric_price_range``
+    (symmetric about spot, widened to span all leg strikes) at ``range_pct``.
+    ``expiry`` arrives as an ISO string. Labels are pre-formatted strings so the
+    page's grid header needs no date objects. ``summary``/``pnl_data`` are JSON-safe."""
     import datetime as dt
 
     import options_calculator as oc
 
     expiry_date = dt.date.fromisoformat(str(expiry))
     today = dt.date.today()
+    if now is None:
+        now = dt.datetime.now(_MARKET_TZ)
 
-    T = max((expiry_date - today).days, 0) / 365.0 or 1 / 365.0
-    summary = oc.calc_summary(legs, strategy, spot, r=rate, iv=iv, T=T)
-    eval_dates = oc.generate_eval_dates(today, expiry_date)
+    settlement = _expiry_settlement(expiry_date)
+    t_now = time_to_expiry_years(now, expiry_date)
+    summary = oc.calc_summary(legs, strategy, spot, r=rate, iv=iv, T=t_now)
+
+    # Columns: intraday "Now" (current value) + each future eval date at its close
+    # + the expiration payoff. ``generate_eval_dates`` returns [today, …, expiry];
+    # "Now" replaces the today slot, the rest keep MM/DD labels (expiry → T=0). For
+    # a 0DTE that loop is empty, so append an explicit "Exp" (T=0) payoff column.
+    columns = [("Now", t_now)]
+    for d in oc.generate_eval_dates(today, expiry_date)[1:]:
+        columns.append((d.strftime("%m/%d"), _year_fraction(_expiry_settlement(d),
+                                                             settlement)))
+    if expiry_date == today:
+        columns.append(("Exp", 0.0))
+
     if range_min and range_max and range_max > range_min:
         price_range = (range_min, range_max)
     else:
@@ -1123,11 +1209,12 @@ def calc_compute(strategy, spot, iv, rate, ivadj, qty, expiry, legs,
         # render asymmetrically / clip the strikes) — engine math is unchanged.
         strikes = [leg.get("strike") for leg in (legs or [])]
         price_range = symmetric_price_range(spot, strikes, pct=range_pct)
-    pnl_data = oc.calc_spread_pnl(legs, spot, iv, rate, eval_dates, price_range,
-                                  expiry_date, iv_adjustment=ivadj)
 
-    eval_labels = [d.strftime("%m/%d") if hasattr(d, "strftime") else str(d)
-                   for d in eval_dates]
+    eval_labels = [lab for lab, _ in columns]
+    eval_times = [t for _, t in columns]
+    pnl_data = oc.calc_spread_pnl(legs, spot, iv, rate, [None] * len(columns),
+                                  price_range, expiry_date, iv_adjustment=ivadj,
+                                  eval_times=eval_times)
     return {"summary": summary, "eval_labels": eval_labels, "pnl_data": pnl_data}
 
 

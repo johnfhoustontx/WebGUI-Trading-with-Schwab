@@ -334,6 +334,7 @@ def render():
         "result": None,       # last calc_result payload (summary/labels/grid)
         "chain_ver": None,    # last-seen calc_chain cache version
         "result_ver": None,   # last-seen calc_result cache version
+        "iv_ver": None,       # last-seen calc_iv cache version
         "calc_spot": None,    # spot used for the last enqueued compute (grid marker)
     }
 
@@ -466,7 +467,10 @@ def render():
 
     @guard
     def fetch_iv():
-        """Read ATM IV from the CACHED chain (pure ``extract_atm_iv``)."""
+        """Imply IV (ThinkorSwim-style) from the traded contract's live mark at the
+        intraday time-to-expiry — the service solves Black-Scholes for sigma (async;
+        the ``calc_iv`` poll fills the field). Falls back to the cached chain's ATM
+        ``volatility`` when no leg strike/mark is available yet (pre-selection)."""
         sym = (symbol_in.value or "").strip().upper()
         if not sym or not expiry_sel.value or not price_in.value:
             ui.notify("Load symbol + pick Expiry (Price required).", type="warning")
@@ -481,6 +485,34 @@ def render():
         except Exception as exc:
             ui.notify(f"Bad expiry/price: {exc}", type="negative")
             return
+
+        # Prefer implying IV from the traded contract's mark (matches ToS). Pick the
+        # leg whose strike is nearest spot (the most liquid mark) among legs that
+        # have a chosen strike + a mark in the cached chain.
+        primary = None  # (strike, option_type, mark)
+        best = float("inf")
+        for info in leg_inputs.values():
+            sv = info["strike"].value
+            if not sv:
+                continue
+            strike = float(sv)
+            mark = (extract_premium(chain, info["option_type"], strike, expiry=expiry)
+                    or extract_premium(chain, info["option_type"], strike))
+            if mark is None:
+                continue
+            d = abs(strike - spot)
+            if d < best:
+                best, primary = d, (strike, info["option_type"], mark)
+        if primary is not None:
+            strike, otype, mark = primary
+            bus_client.request("options", {"type": "calc_iv", "args": {
+                "spot": spot, "strike": strike, "option_type": otype, "mark": mark,
+                "expiry": str(expiry), "rate": float(rate_in.value or 4.5) / 100.0}})
+            ui.notify(f"Implying IV from {otype} {strike:g} mark {mark:.2f}…",
+                      type="info")
+            return
+
+        # Fallback: ATM volatility straight from the cached chain (pre-strike pick).
         iv = extract_atm_iv(chain, spot, expiry=expiry)
         approx = False
         if iv is None:
@@ -566,6 +598,20 @@ def render():
         _render_grid(grid_box, result.get("eval_labels") or [],
                      result.get("pnl_data") or [], spot)
 
+    def _apply_iv(res):
+        """Fill the IV field from a ``calc_iv`` result (implied from the mark)."""
+        res = res or {}
+        iv = res.get("iv")
+        if iv is not None:
+            iv_in.value = round(iv, 1)
+            sk = res.get("strike")
+            sk_txt = f"{sk:g}" if isinstance(sk, (int, float)) else sk
+            ui.notify(f"Implied IV {iv:.1f}% ({res.get('option_type')} {sk_txt})",
+                      type="positive")
+        elif res.get("error"):
+            ui.notify(f"Couldn't imply IV ({res['error']}). Enter it manually.",
+                      type="warning")
+
     @guard
     def _poll_chain():
         version = bus_client.read_version("options:calc_chain")
@@ -582,14 +628,24 @@ def render():
         state["result_ver"] = version
         _apply_result(bus_client.read("options:calc_result"))
 
+    @guard
+    def _poll_iv():
+        version = bus_client.read_version("options:calc_iv")
+        if version == state["iv_ver"]:
+            return
+        state["iv_ver"] = version
+        _apply_iv(bus_client.read("options:calc_iv"))
+
     # Initial paint (graceful-empty when the service is cold). Track the current
     # versions WITHOUT applying stale cached chain/result so a fresh page doesn't
     # adopt a previous symbol's chain or grid; the user drives load/Calculate.
     state["chain_ver"] = bus_client.read_version("options:calc_chain")
     state["result_ver"] = bus_client.read_version("options:calc_result")
+    state["iv_ver"] = bus_client.read_version("options:calc_iv")
 
     ui.timer(1.0, _poll_chain)
     ui.timer(1.0, _poll_result)
+    ui.timer(1.0, _poll_iv)
 
     def _prefill(sig):
         """Populate inputs from a scanner/swing signal (Send to Calculator).

@@ -233,7 +233,7 @@ Routes:
 | `/options/paper` | Paper Trades | built |
 | `/options/captured` | Captured Signals | built |
 | `/options/portfolio` | Paper Portfolio (paper account) | built |
-| `/options/calculator` | Calculator (summary tiles + P&L heatmap) | built |
+| `/options/calculator` | Calculator (summary tiles + P&L heatmap; **intraday time-to-expiry** — the grid's first column is **"Now"** (current mark-to-market value, priced at calendar hours-to-4pm-ET /365) and the last is **"Exp"** (expiration payoff), fixing 0DTE which previously showed only the payoff everywhere; summary tiles + PoP also use the intraday "Now" T (was an `or 1/365` clamp that over-priced 0DTE ~20×); the **IV** button **implies IV from the traded contract's mark** ThinkorSwim-style via a `calc_iv` command → `cache:options:calc_iv` (`compute.calc_iv` → engine `implied_vol` bisection), falling back to ATM chain `volatility` pre-strike-pick) | built |
 | `/options/swing` | Swing Scanner | built |
 | `/options/gamma` | Gamma (GEX/Charm/DEX/Vanna bars + flip/**single Call+Put walls** + intraday heatmap; bar/heatmap **width split grows with session** snapshot count; **flicker-free** in-place Highcharts updates; **symbol is a dropdown** — default `$SPX`, populated from the collected universe (watchlist minus `$VIX`) via `cache:options:gamma_symbols`; Explain works per-selected-symbol) | built |
 | `/options/simulator` | Simulator (all three legacy tabs: **Replay** (re-prices the contract along the underlying's recent path → stacked price + 5-Greek panels over a gap-compressed integer x-axis w/ a client-side scrub cursor) + What-if + IV-shock) | built |

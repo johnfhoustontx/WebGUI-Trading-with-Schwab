@@ -9,6 +9,8 @@ Also asserts the ``options_scoring()`` collision guard (used in the GUI's
 process loads no sentiment code, so ``import scoring`` resolves to
 options-scanner's unambiguously and the guard is unnecessary.
 """
+import pytest
+
 from services import _proxy
 from services.options_svc import compute
 
@@ -459,8 +461,10 @@ def test_reprice_captured_merges_marks_and_flags(monkeypatch):
 
     marks = {
         "X1": {"unrealized_pnl": 12.0, "current_score": 68, "score_drift": -4,
+               "current_value": 0.20,
                "recommendation": "HOLD", "recommendation_code": "HOLD"},
         "X2": {"unrealized_pnl": -30.0, "current_score": 40, "score_drift": -20,
+               "current_value": 6.00,
                "recommendation": "CLOSE", "recommendation_code": "money_stop"},
     }
     monkeypatch.setitem(_sys.modules, "signal_recommender",
@@ -471,7 +475,9 @@ def test_reprice_captured_merges_marks_and_flags(monkeypatch):
     # Mark display fields merged into the rows.
     assert by_id["X1"]["unrealized_pnl"] == 12.0
     assert by_id["X1"]["current_score"] == 68
+    assert by_id["X1"]["current_value"] == 0.20    # current option price surfaced
     assert by_id["X2"]["score_drift"] == -20
+    assert by_id["X2"]["current_value"] == 6.00
     assert by_id["X2"]["recommendation"] == "CLOSE"
     # Only the stop/target code is flagged (case-insensitive).
     assert out["flags"] == [{"symbol": "QQQ", "code": "MONEY_STOP"}]
@@ -1246,8 +1252,10 @@ def test_calc_compute_returns_summary_grid_labels(monkeypatch):
         seen["eval"] = (today, expiry)
         return [dt.date(2026, 6, 18), dt.date(2026, 6, 19)]
 
-    def _spread_pnl(legs, spot, iv, r, eval_dates, price_range, expiry, iv_adjustment=0.0):
-        seen["pnl"] = dict(iv=iv, r=r, price_range=price_range, iv_adj=iv_adjustment)
+    def _spread_pnl(legs, spot, iv, r, eval_dates, price_range, expiry,
+                    iv_adjustment=0.0, eval_times=None):
+        seen["pnl"] = dict(iv=iv, r=r, price_range=price_range, iv_adj=iv_adjustment,
+                           eval_times=eval_times)
         return [{"price": 450.0, "pnl": [10, -5], "pnl_pct": [2.0, -1.0]}]
 
     _patch_calc_oc(monkeypatch, calc_summary=_summary,
@@ -1262,9 +1270,12 @@ def test_calc_compute_returns_summary_grid_labels(monkeypatch):
         expiry="2026-06-19", legs=legs, range_min=0.0, range_max=0.0, range_pct=0.05)
 
     assert out["summary"] == {"max_loss": 100.0, "max_profit": 50.0}
-    # Eval dates pre-formatted to MM/DD strings server-side.
-    assert out["eval_labels"] == ["06/18", "06/19"]
+    # First column is the intraday "Now"; subsequent eval dates keep MM/DD labels.
+    assert out["eval_labels"] == ["Now", "06/19"]
     assert out["pnl_data"][0]["pnl"] == [10, -5]
+    # Intraday time-to-expiry threaded to the engine (one per column).
+    assert seen["pnl"]["eval_times"] is not None
+    assert len(seen["pnl"]["eval_times"]) == 2
     # Math wired through: rate->r, iv passed, range falls back to generate_price_range.
     assert seen["summary"]["r"] == 0.045 and seen["summary"]["iv"] == 0.18
     assert seen["pnl"]["price_range"] == (450.0 * 0.95, 450.0 * 1.05)
@@ -1294,8 +1305,8 @@ def test_calc_compute_passes_symmetric_range_spanning_strikes(monkeypatch):
         calc_summary=lambda *a, **k: {},
         generate_eval_dates=lambda t, e: [dt.date(2026, 6, 19)],
         generate_price_range=lambda *a, **k: (0.0, 0.0),  # should NOT be used
-        calc_spread_pnl=lambda legs, spot, iv, r, ed, pr, exp, iv_adjustment=0.0: (
-            seen.__setitem__("pr", pr), [])[1])
+        calc_spread_pnl=lambda legs, spot, iv, r, ed, pr, exp, iv_adjustment=0.0,
+        eval_times=None: (seen.__setitem__("pr", pr), [])[1])
 
     # Long strike (430) is > 5% below spot (450) → band must widen to include it.
     legs = [{"strike": 445.0, "side": "short"}, {"strike": 430.0, "side": "long"}]
@@ -1316,14 +1327,113 @@ def test_calc_compute_uses_explicit_range_when_valid(monkeypatch):
         calc_summary=lambda *a, **k: {},
         generate_eval_dates=lambda t, e: [dt.date(2026, 6, 19)],
         generate_price_range=lambda *a, **k: (0.0, 0.0),  # would lose if called
-        calc_spread_pnl=lambda legs, spot, iv, r, ed, pr, exp, iv_adjustment=0.0: (
-            seen.__setitem__("pr", pr), [])[1])
+        calc_spread_pnl=lambda legs, spot, iv, r, ed, pr, exp, iv_adjustment=0.0,
+        eval_times=None: (seen.__setitem__("pr", pr), [])[1])
 
     compute.calc_compute(strategy="PCS", spot=450.0, iv=0.18, rate=0.045, ivadj=0.0,
                          qty=1, expiry="2026-06-19", legs=[], range_min=440.0,
                          range_max=460.0, range_pct=0.05)
     # Explicit (min, max) used since max > min.
     assert seen["pr"] == (440.0, 460.0)
+
+
+# ── intraday time-to-expiry + 0DTE current-P&L (the calculator bug fix) ───────
+def _et(y, m, d, hh, mm=0):
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+    return dt.datetime(y, m, d, hh, mm, tzinfo=ZoneInfo("America/New_York"))
+
+
+def test_time_to_expiry_years_intraday_and_after_close():
+    import datetime as dt
+
+    expiry = dt.date(2026, 6, 23)
+    # 1:00pm ET on expiry day → 3 hours to the 4:00pm ET close.
+    T = compute.time_to_expiry_years(_et(2026, 6, 23, 13), expiry)
+    assert T == pytest.approx(3.0 / 24 / 365, rel=1e-6)
+    # After the close on expiry day → expired (T = 0), never negative.
+    assert compute.time_to_expiry_years(_et(2026, 6, 23, 16, 30), expiry) == 0.0
+    # Multi-day: ~2 days + 3 hours of remaining time.
+    T2 = compute.time_to_expiry_years(_et(2026, 6, 21, 13), expiry)
+    assert T2 == pytest.approx((2 * 24 + 3) / 24 / 365, rel=1e-6)
+
+
+def test_calc_iv_implies_iv_from_mark(monkeypatch):
+    # Real options_calculator (no stub): QQQ 725C, mark 0.19, ~2.45h to 4pmET → ~38%.
+    res = compute.calc_iv(spot=718.82, strike=725.0, option_type="call",
+                          mark=0.19, expiry="2026-06-23", rate=0.045,
+                          now=_et(2026, 6, 23, 13, 33))  # ≈2.45h to close
+    assert res["error"] is None
+    assert 36.0 < res["iv"] < 40.0          # ≈ ThinkorSwim's 38.3%
+    assert res["strike"] == 725.0
+
+
+def test_calc_iv_degrades_when_unsolvable():
+    # After the close (T=0) there is no implied vol — return None + a reason.
+    res = compute.calc_iv(spot=718.82, strike=725.0, option_type="call",
+                          mark=0.19, expiry="2026-06-23", rate=0.045,
+                          now=_et(2026, 6, 23, 17, 0))
+    assert res["iv"] is None and res["error"]
+
+
+def test_calc_compute_0dte_now_column_shows_current_pnl():
+    """The regression: on expiration day the matrix must show CURRENT value in the
+    'Now' column (time value intact), not the expiration payoff. Real engine."""
+    import datetime as dt
+
+    import options_calculator as oc
+
+    today = dt.date.today()
+    T_now = 6.0 / 24 / 365
+    spot = 100.0
+    prem = oc.bs_price(spot, 100.0, T_now, 0.045, 0.30, "call")  # ATM premium @ T_now
+    legs = [{"strike": 100.0, "premium": prem, "option_type": "call",
+             "side": "long", "qty": 1}]
+    now = dt.datetime.combine(today, dt.time(10, 0),
+                              tzinfo=__import__("zoneinfo").ZoneInfo("America/New_York"))
+    out = compute.calc_compute(
+        strategy="LONG_CALL", spot=spot, iv=0.30, rate=0.045, ivadj=0.0, qty=1,
+        expiry=today.isoformat(), legs=legs, range_min=0.0, range_max=0.0,
+        range_pct=0.05, now=now)
+
+    # Columns: an intraday "Now" + the expiration payoff.
+    assert out["eval_labels"][0] == "Now"
+    assert out["eval_labels"][-1] == "Exp"
+    spot_row = min(out["pnl_data"], key=lambda r: abs(r["price"] - spot))
+    now_pnl, exp_pnl = spot_row["pnl"][0], spot_row["pnl"][-1]
+    # 'Now' at spot ≈ break-even (still holds its premium); 'Exp' = full loss.
+    assert abs(now_pnl) < 2.0
+    assert exp_pnl == pytest.approx(-prem * 100, abs=0.5)
+    assert now_pnl > exp_pnl   # today's value is NOT the expiration payoff
+
+
+def test_calc_compute_multiday_builds_now_and_future_columns(monkeypatch):
+    import datetime as dt
+
+    seen = {}
+    _patch_calc_oc(
+        monkeypatch,
+        calc_summary=lambda *a, **k: (seen.__setitem__("T", k.get("T")), {})[1],
+        generate_eval_dates=lambda t, e: [t, t + dt.timedelta(days=2), e],
+        generate_price_range=lambda *a, **k: (0.0, 0.0),
+        calc_spread_pnl=lambda legs, spot, iv, r, ed, pr, exp, iv_adjustment=0.0,
+        eval_times=None: (seen.__setitem__("times", eval_times), [])[1])
+
+    today = dt.date.today()
+    expiry = today + dt.timedelta(days=4)
+    now = dt.datetime.combine(today, dt.time(10, 0),
+                              tzinfo=__import__("zoneinfo").ZoneInfo("America/New_York"))
+    out = compute.calc_compute(
+        strategy="LONG_CALL", spot=100.0, iv=0.30, rate=0.045, ivadj=0.0, qty=1,
+        expiry=expiry.isoformat(), legs=[{"strike": 100.0}], range_min=0.0,
+        range_max=0.0, range_pct=0.05, now=now)
+
+    # "Now" replaces today's slot; future dates keep MM/DD; expiry column T == 0.
+    assert out["eval_labels"][0] == "Now"
+    assert out["eval_labels"][-1] == expiry.strftime("%m/%d")
+    assert seen["times"][0] > 0 and seen["times"][-1] == 0.0
+    # Summary priced at the intraday "Now" T (NOT the old 1/365 clamp).
+    assert seen["T"] == pytest.approx(seen["times"][0], rel=1e-9)
 
 
 def test_refresh_header_sentiment_failure_is_no_data(monkeypatch):
