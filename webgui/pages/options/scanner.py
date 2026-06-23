@@ -13,17 +13,18 @@ Cache view read: ``options:scan`` → ``ScanResult.model_dump()`` with keys
 warnings}`` (see ``shared/contracts/options.py`` + ``services/options_svc``).
 
 The pure display transforms (``signal_columns``, ``signal_rows``,
-``_scan_meta_strip``, ``_round``) are unit-tested. ``render()`` wires the
-two-pane widgets (tables + shared Trade detail panel), a "Run scan" button that
-enqueues a ``cmd:options`` command, and a fetch-free version-poll ``ui.timer``
-that repaints when the bus cache version changes.
+``compute_new_keys``, ``status_line``, ``_round``) are unit-tested. ``render()``
+wires the two-pane widgets (tables + shared Trade detail panel), a small "Run
+scan" button that enqueues a ``cmd:options`` command, a slim bottom status bar,
+and a fetch-free version-poll ``ui.timer`` that repaints when the bus cache
+version changes.
 """
 import bus_client
 from nicegui import ui
 
 from pages.ui_guard import guard
 
-from . import detail, handoff, header
+from . import detail, handoff
 
 
 def _round(value, ndigits=2):
@@ -48,15 +49,46 @@ def score_zone_color(score):
     return GREEN
 
 
+def _short_exp(exp):
+    """Compact an ISO expiration 'YYYY-MM-DD' -> 'MM/DD' (the DTE column already
+    shows the day count). Returns the value unchanged if not a parseable ISO date."""
+    s = str(exp or "")
+    if len(s) >= 10 and s[4] == "-" and s[7] == "-":
+        return f"{s[5:7]}/{s[8:10]}"
+    return s
+
+
+def _fmt_k(v):
+    """Strike -> compact string: drop a trailing '.0' on whole numbers (1085.0 ->
+    '1085'), keep fractional strikes (1085.5), '?' when missing."""
+    if v is None:
+        return "?"
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    return str(v)
+
+
+def _strikes_text(s):
+    """One compact 'Strikes' cell. Iron condors show both put + call pairs; other
+    spreads show short/long. '—' when strikes are absent."""
+    if (s.get("type") == "IC") or (s.get("call_short") is not None):
+        return (f"P{_fmt_k(s.get('short_strike'))}/{_fmt_k(s.get('long_strike'))} "
+                f"C{_fmt_k(s.get('call_short'))}/{_fmt_k(s.get('call_long'))}")
+    sk, lk = s.get("short_strike"), s.get("long_strike")
+    return f"{_fmt_k(sk)}/{_fmt_k(lk)}" if sk is not None else "—"
+
+
 def signal_columns():
-    """ui.table column defs for a signal table."""
+    """ui.table column defs for a signal table.
+
+    Short + Long are merged into one compact 'Strikes' column and the expiration
+    is shown MM/DD so the right-hand columns (Score/Grade/actions) fit."""
     spec = [
         ("symbol", "Symbol"),
         ("type", "Type"),
         ("expiration", "Exp"),
         ("dte", "DTE"),
-        ("short_strike", "Short"),
-        ("long_strike", "Long"),
+        ("strikes", "Strikes"),
         ("credit", "Credit"),
         ("max_loss", "Max Loss"),
         ("rr_pct", "R/R %"),
@@ -84,10 +116,9 @@ def signal_rows(signals):
             "id": s.get("id"),
             "symbol": s.get("symbol", ""),
             "type": s.get("type", ""),
-            "expiration": s.get("expiration", ""),
+            "expiration": _short_exp(s.get("expiration")),
             "dte": s.get("dte"),
-            "short_strike": s.get("short_strike"),
-            "long_strike": s.get("long_strike"),
+            "strikes": _strikes_text(s),
             "credit": _round(s.get("credit")),
             "max_loss": _round(s.get("max_loss")),
             "rr_pct": _round(s.get("rr_pct"), 1),
@@ -106,24 +137,41 @@ def _sig_key(r):
     return f'{r.get("symbol")}|{r.get("type")}|{r.get("short_strike")}|{r.get("long_strike")}|{r.get("expiration")}'
 
 
-def mark_new(rows, prev_keys):
-    """Stamp each row with _new=True if its key wasn't in prev_keys.
+# NEW-signal tracking tied to the scan VERSION (not the page session). Stored at
+# module level (single-user, like _NAV_OPEN/_CACHE) so the "new since last scan"
+# markers PERSIST across navigation / page rebuilds and only recompute when a
+# fresh scan lands. {version, prev_keys: that scan's keys, new_keys: new vs the
+# scan before it}.
+_NEW = {"version": None, "prev_keys": set(), "new_keys": set()}
 
-    On first load (prev_keys empty/falsy) nothing is marked new.
-    Returns (current_keys_set, rows).
-    """
-    keys = {_sig_key(r) for r in rows}
-    first = not prev_keys
+
+def _reset_new_state():
+    """Clear the module-level NEW tracker (test seam / fresh session)."""
+    _NEW.update(version=None, prev_keys=set(), new_keys=set())
+
+
+def compute_new_keys(version, current_keys):
+    """Signal keys that are NEW vs the previous scan, memoized by scan version.
+
+    Returns the SAME set on repeated calls for one ``version`` (so the markers
+    survive navigation / page rebuilds), and recomputes only when ``version``
+    changes. The first scan ever (and a cold/None version) marks nothing.
+    ``current_keys`` is the union of both tables' keys for this scan."""
+    if version is None:
+        return set()
+    if version == _NEW["version"]:
+        return _NEW["new_keys"]
+    first = _NEW["version"] is None
+    new_keys = set() if first else (set(current_keys) - _NEW["prev_keys"])
+    _NEW.update(version=version, prev_keys=set(current_keys), new_keys=new_keys)
+    return new_keys
+
+
+def stamp_new(rows, new_keys):
+    """Stamp each row with ``_new`` = (its signal key is in ``new_keys``)."""
     for r in rows:
-        r["_new"] = (not first) and _sig_key(r) not in prev_keys
-    return keys, rows
-
-
-_TERM_PHRASES = {
-    "CONTANGO": "Contango (near-term calm)",
-    "BACKWARDATION": "Backwardation (near-term stress)",
-    "MIXED": "Mixed term structure",
-}
+        r["_new"] = _sig_key(r) in new_keys
+    return rows
 
 
 def _short_time(iso):
@@ -138,24 +186,34 @@ def _short_time(iso):
         return ""
 
 
-def term_text(term, ts):
-    """Plain-English VIX term-structure label, '' if unknown/missing."""
-    structure = (term or {}).get("structure")
-    if not structure or structure == "UNKNOWN":
-        return ""
-    phrase = _TERM_PHRASES.get(structure, structure.title())
-    when = _short_time(ts)
-    tail = f" · as of {when}" if when else ""
-    return f"VIX term: {phrase}{tail}"
+def status_line(results):
+    """Slim bottom status-bar text: last-scan time + signal count (+ errors).
+
+    Replaces the old top auto-scan / VIX-term lines — the page's only chrome is
+    now this single line at the bottom. Empty results (service cold) -> a waiting
+    note."""
+    results = results or {}
+    if not results:
+        return "Waiting for options service…"
+    n = len(results.get("signals_0dte") or []) + len(results.get("signals_swing") or [])
+    parts = []
+    when = _short_time(results.get("timestamp"))
+    if when:
+        parts.append(f"Last scan {when}")
+    parts.append(f"{n} signals")
+    errs = results.get("errors") or []
+    if errs:
+        parts.append(f"{len(errs)} errors")
+    parts.append("auto-scans every 15 min")
+    return " · ".join(parts)
 
 
-def _scan_meta_strip(container, results):
-    """Post-scan info NOT already shown by the header strip (term + timestamp)."""
-    container.clear()
-    with container:
-        text = term_text(results.get("vix_term_structure"), results.get("timestamp"))
-        if text:
-            ui.label(text).classes("opacity-70 text-sm")
+# Compact the signal tables (dense + tight cell padding) so the right-hand
+# columns (R/R %, PoP %, Score, Grade, actions) stay visible. Scoped to
+# .scan-table so it never leaks to other tables.
+SCAN_CSS = '''
+.scan-table td, .scan-table th { padding: 2px 4px; }
+'''
 
 
 def render():
@@ -165,31 +223,32 @@ def render():
     service owns the engine + the auto-scan schedule. Graceful-empty: when the
     service is cold (no cache) the page paints empty tables + a waiting status.
     """
+    ui.add_css(SCAN_CSS)  # compact signal-table columns
     with ui.row().classes("w-full no-wrap gap-4 items-start"):
         with ui.column().classes("flex-grow min-w-0"):
-            header.render()
-            ui.label("Options Scanner").classes("text-h5")
-            with ui.row().classes("items-center gap-3"):
-                scan_btn = ui.button("Run scan", icon="play_arrow")
-                status = ui.label("").classes("opacity-70")
-                auto_lbl = ui.label("Auto-scan: handled by options service").classes(
-                    "opacity-60 text-sm")
-            meta_strip = ui.row().classes("gap-4 items-center")
+            # Top chrome removed (market strip + title + auto-scan/VIX-term lines):
+            # just a small Run scan button, the tabs, and a slim bottom status bar.
+            scan_btn = ui.button("Run scan", icon="play_arrow").props("dense outline")
             with ui.tabs() as tabs:
                 tab_0dte = ui.tab("0-DTE")
                 tab_swing = ui.tab("Swing")
             with ui.tab_panels(tabs, value=tab_0dte).classes("w-full"):
                 with ui.tab_panel(tab_0dte):
-                    table_0dte = ui.table(columns=signal_columns(), rows=[], row_key="id").classes("w-full")
+                    table_0dte = ui.table(columns=signal_columns(), rows=[],
+                                          row_key="id").classes("w-full scan-table").props("dense")
                 with ui.tab_panel(tab_swing):
-                    table_swing = ui.table(columns=signal_columns(), rows=[], row_key="id").classes("w-full")
-        detail_panel = detail.render()
+                    table_swing = ui.table(columns=signal_columns(), rows=[],
+                                           row_key="id").classes("w-full scan-table").props("dense")
+            # Slim bottom status bar: last scan + counts + cadence.
+            status = ui.label("").classes("opacity-60 text-sm q-mt-sm")
+        # Narrower detail panel here (vs the 360px default) so the compacted
+        # signal table has room to show all columns without horizontal scroll.
+        detail_panel = detail.render(width=290)
 
     by_id: dict = {}
-    # Last-seen bus cache version for the fetch-free repaint timer +
-    # the set of signal keys seen so far this session (for the NEW badge).
+    # Last-seen bus cache version for the fetch-free repaint timer. (NEW-signal
+    # tracking lives at module level so it persists across navigation.)
     seen = {"version": None}
-    state = {"seen_keys": set()}
 
     def _select(event):
         row = event.args[1] if isinstance(event.args, list) and len(event.args) > 1 else event.args
@@ -207,40 +266,36 @@ def render():
             <q-badge :style="`background:${props.row._score_color};color:#111`" :label="props.value ?? '—'"/>
           </q-td>
         ''')
-        # Flag signals that newly appeared since the previous scan this session.
+        # Small, persistent "new" tag on signals that appeared since the last scan.
         _t.add_slot('body-cell-symbol', r'''
           <q-td :props="props">
             {{ props.value }}
-            <q-badge v-if="props.row._new" color="primary" label="NEW" class="q-ml-xs"/>
+            <q-badge v-if="props.row._new" label="new" class="q-ml-xs"
+                     style="font-size:9px;padding:0 4px;background:#1565c0;color:#fff"/>
           </q-td>
         ''')
 
-    def _populate(results, *, notify=True):
-        """Paint the tables + detail map + meta strip from a scan-result dict."""
+    def _populate(results, version=None, *, notify=True):
+        """Paint the tables + detail map + bottom status from a scan-result dict."""
         results = results or {}
         by_id.clear()
         for s in (results.get("signals_0dte") or []) + (results.get("signals_swing") or []):
             if s.get("id"):
                 by_id[s["id"]] = s
-        _scan_meta_strip(meta_strip, results)
         rows_0dte = signal_rows(results.get("signals_0dte"))
         rows_swing = signal_rows(results.get("signals_swing"))
-        # Diff BOTH lists against the SAME prior key set, then store the union so
-        # a signal present last scan isn't re-flagged in either table.
-        prev = state.get("seen_keys") or set()
-        k0, rows_0dte = mark_new(rows_0dte, prev)
-        k1, rows_swing = mark_new(rows_swing, prev)
-        state["seen_keys"] = k0 | k1
+        # NEW markers are tied to the scan VERSION (module-level), so they persist
+        # across navigation and only recompute when a fresh scan lands. Diff BOTH
+        # tables against the same prior-scan key set (their union).
+        keys = {_sig_key(r) for r in rows_0dte} | {_sig_key(r) for r in rows_swing}
+        new_keys = compute_new_keys(version, keys)
+        stamp_new(rows_0dte, new_keys)
+        stamp_new(rows_swing, new_keys)
         table_0dte.rows = rows_0dte
         table_swing.rows = rows_swing
         table_0dte.update()
         table_swing.update()
-        n = len(table_0dte.rows) + len(table_swing.rows)
-        errs = results.get("errors") or []
-        if not results:
-            status.text = "Waiting for options service…"
-        else:
-            status.text = f"{n} signals." + (f" {len(errs)} errors." if errs else "")
+        status.text = status_line(results)
         if notify:
             for w in (results.get("warnings") or []):
                 ui.notify(w, type="warning")
@@ -255,7 +310,7 @@ def render():
     # Initial paint from the bus cache (graceful-empty if the service is cold).
     scan = bus_client.read("options:scan") or {}
     seen["version"] = bus_client.read_version("options:scan")
-    _populate(scan, notify=False)
+    _populate(scan, version=seen["version"], notify=False)
 
     @guard
     def _maybe_repaint():
@@ -266,6 +321,6 @@ def render():
         if version == seen["version"]:
             return
         seen["version"] = version
-        _populate(bus_client.read("options:scan") or {}, notify=False)
+        _populate(bus_client.read("options:scan") or {}, version=version, notify=False)
 
     ui.timer(2.0, _maybe_repaint)

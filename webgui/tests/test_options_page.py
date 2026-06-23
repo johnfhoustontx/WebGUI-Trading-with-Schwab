@@ -41,7 +41,7 @@ def test_signal_rows_maps_fields():
     assert r["type"] == "PCS"
     assert r["grade"] == "A"
     assert r["composite_score"] == 72
-    assert "450" in str(r["short_strike"])
+    assert r["strikes"] == "450/445"          # Short/Long merged into one column
 
 
 def test_signal_rows_handles_missing_fields():
