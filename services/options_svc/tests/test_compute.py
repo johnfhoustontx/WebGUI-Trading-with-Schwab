@@ -1253,7 +1253,7 @@ def test_calc_compute_returns_summary_grid_labels(monkeypatch):
         return [dt.date(2026, 6, 18), dt.date(2026, 6, 19)]
 
     def _spread_pnl(legs, spot, iv, r, eval_dates, price_range, expiry,
-                    iv_adjustment=0.0, eval_times=None):
+                    iv_adjustment=0.0, eval_times=None, per_leg_expiry=False):
         seen["pnl"] = dict(iv=iv, r=r, price_range=price_range, iv_adj=iv_adjustment,
                            eval_times=eval_times)
         return [{"price": 450.0, "pnl": [10, -5], "pnl_pct": [2.0, -1.0]}]
@@ -1306,7 +1306,7 @@ def test_calc_compute_passes_symmetric_range_spanning_strikes(monkeypatch):
         generate_eval_dates=lambda t, e: [dt.date(2026, 6, 19)],
         generate_price_range=lambda *a, **k: (0.0, 0.0),  # should NOT be used
         calc_spread_pnl=lambda legs, spot, iv, r, ed, pr, exp, iv_adjustment=0.0,
-        eval_times=None: (seen.__setitem__("pr", pr), [])[1])
+        eval_times=None, per_leg_expiry=False: (seen.__setitem__("pr", pr), [])[1])
 
     # Long strike (430) is > 5% below spot (450) → band must widen to include it.
     legs = [{"strike": 445.0, "side": "short"}, {"strike": 430.0, "side": "long"}]
@@ -1328,7 +1328,7 @@ def test_calc_compute_uses_explicit_range_when_valid(monkeypatch):
         generate_eval_dates=lambda t, e: [dt.date(2026, 6, 19)],
         generate_price_range=lambda *a, **k: (0.0, 0.0),  # would lose if called
         calc_spread_pnl=lambda legs, spot, iv, r, ed, pr, exp, iv_adjustment=0.0,
-        eval_times=None: (seen.__setitem__("pr", pr), [])[1])
+        eval_times=None, per_leg_expiry=False: (seen.__setitem__("pr", pr), [])[1])
 
     compute.calc_compute(strategy="PCS", spot=450.0, iv=0.18, rate=0.045, ivadj=0.0,
                          qty=1, expiry="2026-06-19", legs=[], range_min=440.0,
@@ -1417,7 +1417,7 @@ def test_calc_compute_multiday_builds_now_and_future_columns(monkeypatch):
         generate_eval_dates=lambda t, e: [t, t + dt.timedelta(days=2), e],
         generate_price_range=lambda *a, **k: (0.0, 0.0),
         calc_spread_pnl=lambda legs, spot, iv, r, ed, pr, exp, iv_adjustment=0.0,
-        eval_times=None: (seen.__setitem__("times", eval_times), [])[1])
+        eval_times=None, per_leg_expiry=False: (seen.__setitem__("times", eval_times), [])[1])
 
     today = dt.date.today()
     expiry = today + dt.timedelta(days=4)
@@ -1634,3 +1634,19 @@ def test_gamma_symbol_options_defensive(monkeypatch):
         collection_symbols=lambda: (_ for _ in ()).throw(RuntimeError("boom")))
     monkeypatch.setitem(_sys.modules, "gex_collector", fake_gc)
     assert compute.gamma_symbol_options() == ["$SPX", "SPY", "QQQ"]
+
+
+def test_calc_compute_butterfly_uses_generic_summary():
+    import datetime as dt
+    exp = (dt.date.today() + dt.timedelta(days=20)).isoformat()
+    legs = [
+        {"strike": 95, "option_type": "call", "side": "long", "premium": 6.0, "qty": 1, "expiry": exp},
+        {"strike": 100, "option_type": "call", "side": "short", "premium": 3.0, "qty": 2, "expiry": exp},
+        {"strike": 105, "option_type": "call", "side": "long", "premium": 1.5, "qty": 1, "expiry": exp},
+    ]
+    out = compute.calc_compute(strategy="CUSTOM", spot=100, iv=0.25, rate=0.04,
+                               ivadj=0.0, qty=1, expiry=exp, legs=legs,
+                               range_min=0, range_max=0, range_pct=0.10)
+    s = out["summary"]
+    assert s["max_loss"] > 0 and s["max_profit"] > 0
+    assert len(s["breakevens"]) == 2

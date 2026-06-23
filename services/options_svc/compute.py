@@ -1083,6 +1083,12 @@ def calc_load_symbol(symbol) -> dict:
             "range_lo": lo, "range_hi": hi, "chain": chain}
 
 
+# Strategy codes the analytic ``calc_summary`` handles exactly; everything else
+# (butterfly/condor/calendar/diagonal/CUSTOM) uses the numeric generic summary.
+_CALC_ANALYTIC_CODES = {"PCS", "CCS", "IC",
+                        "LONG_CALL", "LONG_PUT", "NAKED_CALL", "NAKED_PUT"}
+
+
 def symmetric_price_range(spot, strikes, pct=0.05):
     """Price range symmetric about spot, widened to include all strikes.
     Returns (low, high) with midpoint == spot."""
@@ -1182,13 +1188,30 @@ def calc_compute(strategy, spot, iv, rate, ivadj, qty, expiry, legs,
     import options_calculator as oc
 
     expiry_date = dt.date.fromisoformat(str(expiry))
+    # Calendars/diagonals carry per-leg expiries; the grid horizon + columns use
+    # the FRONT (nearest) leg expiry. Same-expiry strategies are unchanged
+    # (min == the page expiry), and legs without an 'expiry' leave it untouched.
+    leg_exps = []
+    for _l in (legs or []):
+        _e = _l.get("expiry")
+        if _e:
+            try:
+                leg_exps.append(dt.date.fromisoformat(str(_e)))
+            except (TypeError, ValueError):
+                pass
+    if leg_exps:
+        expiry_date = min(leg_exps)
     today = dt.date.today()
     if now is None:
         now = dt.datetime.now(_MARKET_TZ)
 
     settlement = _expiry_settlement(expiry_date)
     t_now = time_to_expiry_years(now, expiry_date)
-    summary = oc.calc_summary(legs, strategy, spot, r=rate, iv=iv, T=t_now)
+    code = strategy if strategy in _CALC_ANALYTIC_CODES else "CUSTOM"
+    if code == "CUSTOM":
+        summary = oc.calc_summary_generic(legs, spot, r=rate, iv=iv, T=t_now)
+    else:
+        summary = oc.calc_summary(legs, code, spot, r=rate, iv=iv, T=t_now)
 
     # Columns: intraday "Now" (current value) + each future eval date at its close
     # + the expiration payoff. ``generate_eval_dates`` returns [today, …, expiry];
@@ -1214,7 +1237,7 @@ def calc_compute(strategy, spot, iv, rate, ivadj, qty, expiry, legs,
     eval_times = [t for _, t in columns]
     pnl_data = oc.calc_spread_pnl(legs, spot, iv, rate, [None] * len(columns),
                                   price_range, expiry_date, iv_adjustment=ivadj,
-                                  eval_times=eval_times)
+                                  eval_times=eval_times, per_leg_expiry=True)
     return {"summary": summary, "eval_labels": eval_labels, "pnl_data": pnl_data}
 
 
