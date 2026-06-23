@@ -38,6 +38,18 @@ def test_paper_rows_handles_missing():
     assert rows[0]["id"] == "T2"
 
 
+def test_paper_rows_entry_time_drops_iso_t():
+    # "2026-06-10T10:00:00+00:00" -> "2026-06-10 10:00:00" (no 'T', seconds only).
+    assert paper.paper_rows([TRADE])[0]["entry_time"] == "2026-06-10 10:00:00"
+    assert paper.paper_rows([{"trade_id": "X"}])[0]["entry_time"] == ""
+
+
+def test_paper_columns_hide_id_but_row_keeps_it():
+    # trade_id is internal (row_key + lookups) and must NOT be a visible column.
+    assert "trade_id" not in {c["field"] for c in paper.paper_columns()}
+    assert paper.paper_rows([TRADE])[0]["trade_id"] == "T1"   # still on the row
+
+
 def test_strikes_iron_condor_vs_spread():
     assert paper._strikes(TRADE) == "450/445"
     ic = {"strategy": "IC", "short_strike": 450, "long_strike": 445,

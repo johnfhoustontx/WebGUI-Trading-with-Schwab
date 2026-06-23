@@ -28,6 +28,31 @@ from .rescue import heat_color
 # is a safe no-op unless a trade row is explicitly flagged.
 _AT_RISK_STATES = ("tested", "critical")
 
+# Paper-ledger styling (injected via ui.add_css — ui.html strips <style>):
+#  • compact rows to match the Scanner table (dense + tight padding);
+#  • fixed header with a scrollable body (sticky thead + bounded scroll area);
+#  • solid 3D action buttons (blue default, red ``pt-danger`` for deletes).
+PAPER_CSS = """
+.paper-table td, .paper-table th { padding: 2px 6px; font-size: 13px; }
+.paper-table .q-table__middle { max-height: 62vh; }
+.paper-table thead tr th {
+  position: sticky; top: 0; z-index: 2; background: #1d1d1d;
+}
+.pt-btn.q-btn{
+  background:linear-gradient(180deg,#5aa0e6 0%,#3a7bc0 55%,#316eac 100%)!important;
+  color:#fff!important;border-radius:7px;font-weight:600;min-height:34px;
+  box-shadow:0 4px 0 0 #244e78,0 6px 10px rgba(0,0,0,.4);
+  transition:transform .06s ease,box-shadow .06s ease,filter .12s ease;
+}
+.pt-btn.q-btn:hover{filter:brightness(1.08);}
+.pt-btn.q-btn:active{transform:translateY(4px);box-shadow:0 1px 0 0 #244e78,0 2px 4px rgba(0,0,0,.4);}
+.pt-btn.pt-danger.q-btn{
+  background:linear-gradient(180deg,#ef6b6b 0%,#d33f3f 55%,#b53030 100%)!important;
+  box-shadow:0 4px 0 0 #7a1f1f,0 6px 10px rgba(0,0,0,.4);
+}
+.pt-btn.pt-danger.q-btn:active{box-shadow:0 1px 0 0 #7a1f1f,0 2px 4px rgba(0,0,0,.4);}
+"""
+
 
 def rescue_highlight(state, heat):
     """Left-border color for an at-risk row, or '' (no tint) otherwise.
@@ -42,8 +67,10 @@ def _round(value, ndigits=2):
 
 
 def paper_columns():
+    # trade_id is kept on each row (row_key + internal lookups) but is NOT a
+    # visible column — it's an internal id, not trader-facing.
     spec = [
-        ("trade_id", "ID"), ("symbol", "Symbol"), ("strategy", "Strat"),
+        ("symbol", "Symbol"), ("strategy", "Strat"),
         ("strikes", "Strikes"), ("expiration", "Exp"), ("quantity", "Qty"),
         ("entry_credit_total", "Credit$"), ("max_loss_total", "Risk$"),
         ("realized_pnl", "P&L$"), ("status", "Status"), ("entry_time", "Entry"),
@@ -77,7 +104,8 @@ def paper_rows(trades):
             "max_loss_total": _round(t.get("max_loss_total")),
             "realized_pnl": _round(t.get("realized_pnl")),
             "status": t.get("status", ""),
-            "entry_time": (t.get("entry_time") or "")[:19],
+            # Trim to seconds and show "YYYY-MM-DD HH:MM:SS" (drop the ISO 'T').
+            "entry_time": (t.get("entry_time") or "")[:19].replace("T", " "),
             # At-risk rescue tint (left border on the symbol cell). Safe no-op
             # when the trade carries no rescue_state (the usual case).
             "_rescue_color": rescue_highlight(t.get("rescue_state"), t.get("heat")),
@@ -153,27 +181,22 @@ def merge_detail(base, detail):
 
 def render():
     """Paper Trades page: ledger table (left) + shared detail panel (right), bus-fed."""
+    ui.add_css(PAPER_CSS)
     ui.label("Paper Trades").classes("text-h5")
 
     raw_by_id: dict = {}
-    # sel_id: selected trade; live: {trade_id: live-analyze detail} overlay cache.
+    # sel_id: selected trade (set by row click — no checkbox); live: {trade_id:
+    # live-analyze detail} overlay cache.
     state = {"sel_id": None, "live": {}}
 
     with ui.row().classes("w-full no-wrap gap-4 items-start"):
         with ui.column().classes("flex-grow min-w-0"):
-            with ui.row().classes("items-center gap-2 flex-wrap"):
-                ui.button("Reload", icon="refresh", on_click=lambda: _reload())
-                ui.button("Close selected", icon="check_circle",
-                          on_click=lambda: _close()).props("outline")
-                ui.button("Analyze selected", icon="biotech",
-                          on_click=lambda: _analyze()).props("outline")
-                ui.button("Delete selected", icon="delete",
-                          on_click=lambda: _delete()).props("outline color=negative")
-                ui.button("Delete all closed", icon="delete_sweep",
-                          on_click=lambda: _delete_closed()).props("flat color=negative")
             status = ui.label("").classes("opacity-70")
-            table = ui.table(columns=paper_columns(), rows=[], row_key="id",
-                             selection="single").classes("w-full")
+            # No selection checkbox — clicking a row selects it (drives the detail
+            # panel + the action buttons below). dense + .paper-table = Scanner-like
+            # compact rows with a fixed header over a scrolling body.
+            table = ui.table(columns=paper_columns(), rows=[], row_key="id") \
+                .classes("w-full paper-table").props("dense")
             # Symbol cell gets a colored left-border + faint tint when the row is
             # at-risk (rescue_state tested/critical). Plain cell otherwise.
             table.add_slot('body-cell-symbol', r'''
@@ -187,6 +210,18 @@ def render():
                 <span v-else>{{ props.value }}</span>
               </q-td>
             ''')
+            # Action buttons live BELOW the table (solid 3D).
+            with ui.row().classes("items-center gap-3 flex-wrap q-mt-md"):
+                ui.button("Reload", icon="refresh",
+                          on_click=lambda: _reload()).props("no-caps").classes("pt-btn")
+                ui.button("Close", icon="check_circle",
+                          on_click=lambda: _close()).props("no-caps").classes("pt-btn")
+                ui.button("Analyze", icon="biotech",
+                          on_click=lambda: _analyze()).props("no-caps").classes("pt-btn")
+                ui.button("Delete", icon="delete",
+                          on_click=lambda: _delete()).props("no-caps").classes("pt-btn pt-danger")
+                ui.button("Delete all closed", icon="delete_sweep",
+                          on_click=lambda: _delete_closed()).props("no-caps").classes("pt-btn pt-danger")
         detail_panel = detail.render()
 
     # Last-seen bus cache versions for the fetch-free repaint/notify timers.
@@ -247,10 +282,12 @@ def render():
         table, lambda row: synth_from_trade(raw_by_id.get(row.get("id"))))
 
     def _selected_trade():
-        if not table.selected:
-            ui.notify("Select a trade first.", type="warning")
+        # Selection is driven by row click (no checkbox) → state["sel_id"].
+        sid = state.get("sel_id")
+        if not sid or sid not in raw_by_id:
+            ui.notify("Click a trade row first.", type="warning")
             return None
-        return raw_by_id.get(table.selected[0].get("id"))
+        return raw_by_id.get(sid)
 
     @guard
     def _reload():
