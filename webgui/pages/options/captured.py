@@ -52,6 +52,21 @@ def rec_color(rec):
     return {"TAKE_PROFIT": REC_GREEN, "CUT": REC_RED, "HOLD": REC_AMBER}.get(rec, "#666666")
 
 
+# Scoped to .captured-table so it never leaks into the rest of the app. Sticky
+# header (visible while the body scrolls), a bounded body height so the horizontal
+# scrollbar sits at the bottom of the table viewport — reachable without scrolling
+# past 100+ rows — and tight cell padding to compress the inter-column space.
+# #1d1d1d matches the app's dark theme (same as the calculator sticky header).
+CAPTURED_CSS = '''
+.captured-table .q-table__middle { max-height: 70vh; }
+.captured-table thead tr th {
+  position: sticky; top: 0; z-index: 2;
+  background-color: #1d1d1d;
+}
+.captured-table td, .captured-table th { padding: 4px 8px; }
+'''
+
+
 def pnl_color(value):
     """P&L -> text color: green when in profit (>0), red when in loss (<0).
 
@@ -79,12 +94,16 @@ def fmt_opened(ts):
 
 
 def captured_columns():
+    # Rec leads (left of Symbol). The Entry/Current/Drift score columns and the
+    # redundant Status column are dropped — a closed signal leaves the table, so
+    # every visible row is OPEN. "Cur Price" is the live spread mark (current
+    # option price), shown next to the entry Credit for an at-a-glance comparison.
     spec = [
+        ("recommendation", "Rec"),
         ("symbol", "Symbol"), ("strategy", "Strat"), ("mode", "Mode"),
         ("opened", "Opened"), ("expiration", "Exp"), ("dte", "DTE"),
-        ("credit", "Credit"), ("max_loss", "Risk"), ("unrealized_pnl", "P&L"),
-        ("entry_score", "Entry"), ("current_score", "Cur"), ("score_drift", "Drift"),
-        ("grade", "Grade"), ("recommendation", "Rec"), ("status", "Status"),
+        ("credit", "Credit"), ("current_value", "Cur Price"),
+        ("max_loss", "Risk"), ("unrealized_pnl", "P&L"), ("grade", "Grade"),
     ]
     cols = [{"name": f, "label": lbl, "field": f, "sortable": True, "align": "left"}
             for f, lbl in spec]
@@ -98,6 +117,7 @@ def captured_rows(signals):
     for s in signals or []:
         rows.append({
             "id": s.get("signal_id"),
+            "recommendation": s.get("recommendation") or "HOLD",
             "symbol": s.get("symbol", ""),
             "strategy": s.get("strategy", ""),
             "mode": s.get("mode", ""),
@@ -105,14 +125,11 @@ def captured_rows(signals):
             "expiration": s.get("expiration", ""),
             "dte": s.get("dte_at_entry"),
             "credit": _round(s.get("entry_credit")),
+            # Current option price = the live spread mark (what it'd cost to close).
+            "current_value": _round(s.get("current_value")),
             "max_loss": _round(s.get("entry_max_loss")),
             "unrealized_pnl": _round(s.get("unrealized_pnl")),
-            "entry_score": s.get("entry_score"),
-            "current_score": s.get("current_score"),
-            "score_drift": _round(s.get("score_drift")),
             "grade": s.get("entry_grade", ""),
-            "recommendation": s.get("recommendation") or "HOLD",
-            "status": s.get("status", ""),
             "_rec_color": rec_color(s.get("recommendation") or "HOLD"),
             "_pnl_color": pnl_color(s.get("unrealized_pnl")),
             # At-risk rescue tint (left border on the symbol cell). Safe no-op
@@ -154,13 +171,12 @@ def synth_from_captured(row):
 def render():
     """Captured Signals page: table (left) + shared detail panel (right), bus-fed."""
     ui.label("Captured Signals").classes("text-h5")
+    ui.add_css(CAPTURED_CSS)  # sticky header + bounded height + compact columns
 
     raw_by_id: dict = {}
-    # sel_id: the signal the user clicked (drives the detail panel AND the action
-    # buttons). Clicking a row body fires rowClick but does NOT tick Quasar's
-    # selection control, so a button reading only ``table.selected`` would act on
-    # nothing — the "Close selected does nothing" bug. We track the clicked row
-    # here and also sync ``table.selected`` so either gesture works.
+    # sel_id: the signal the user clicked. There is no selection checkbox, so the
+    # clicked row IS the selection — it drives the detail panel, the Rec-cell
+    # highlight, and the "Close selected" action.
     state = {"sel_id": None}
 
     with ui.row().classes("w-full no-wrap gap-4 items-start"):
@@ -172,10 +188,11 @@ def render():
                 ui.button("Close selected", icon="check_circle",
                           on_click=lambda: _close()).props("outline")
                 status = ui.label("").classes("opacity-70")
-            table = ui.table(columns=captured_columns(), rows=[], row_key="id",
-                             selection="single").classes("w-full")
-            # Symbol cell gets a colored left-border + faint tint when the row is
-            # at-risk (rescue_state tested/critical). Plain cell otherwise.
+            table = ui.table(columns=captured_columns(), rows=[],
+                             row_key="id").classes("w-full captured-table").props("dense")
+            # No selection checkbox: clicking a row selects it (detail panel +
+            # Close-selected) and the Rec cell shows a blue left-accent. The symbol
+            # cell keeps the at-risk rescue tint (tested/critical); plain otherwise.
             table.add_slot('body-cell-symbol', r'''
               <q-td :props="props">
                 <span v-if="props.row._rescue_color"
@@ -187,13 +204,16 @@ def render():
                 <span v-else>{{ props.value }}</span>
               </q-td>
             ''')
+            # Rec badge (first column) — a blue left-accent marks the selected row.
             table.add_slot('body-cell-recommendation', r'''
-              <q-td :props="props">
+              <q-td :props="props"
+                    :style="props.row._selected
+                            ? 'border-left:4px solid #42a5f5; background:#42a5f522' : ''">
                 <q-badge :style="`background:${props.row._rec_color};color:#111`" :label="props.value"/>
               </q-td>
             ''')
-            # Drift shown as x.xx; value stays numeric so the column still sorts.
-            table.add_slot('body-cell-score_drift', r'''
+            # Current price (live spread mark) shown to 2dp; numeric so it sorts.
+            table.add_slot('body-cell-current_value', r'''
               <q-td :props="props">
                 {{ props.value == null ? '' : Number(props.value).toFixed(2) }}
               </q-td>
@@ -211,6 +231,13 @@ def render():
     # Last-seen bus cache versions for the fetch-free repaint/notify timers.
     seen = {"captured": None, "flags": None}
 
+    def _apply_selection():
+        """Stamp ``_selected`` on each row so the Rec cell highlights the row the
+        user clicked — the one ``Close selected`` will act on."""
+        sel = state.get("sel_id")
+        for row in table.rows:
+            row["_selected"] = (row.get("id") == sel)
+
     def _populate(cap):
         """Paint the signals table from the cached captured view."""
         cap = cap or {}
@@ -223,7 +250,7 @@ def render():
         # Drop a stale selection (e.g. the signal we just closed is gone).
         if state.get("sel_id") not in raw_by_id:
             state["sel_id"] = None
-            table.selected = []
+        _apply_selection()
         table.update()
         status.text = f"{len(table.rows)} open signals." if cap else ""
 
@@ -232,11 +259,8 @@ def render():
         sig = raw_by_id.get(row.get("id")) if isinstance(row, dict) else None
         if sig:
             state["sel_id"] = sig.get("signal_id")
-            # Sync Quasar's selection so the clicked row is highlighted AND
-            # ``table.selected`` reflects it.
-            if isinstance(row, dict):
-                table.selected = [row]
-                table.update()
+            _apply_selection()      # highlight the clicked row (Rec-cell accent)
+            table.update()
             detail_panel.update(synth_from_captured(sig))
 
     table.on("rowClick", _select)
@@ -249,14 +273,10 @@ def render():
         table, lambda row: synth_from_captured(raw_by_id.get(row.get("id"))))
 
     def _selected_signal():
-        """The raw signal dict the user is acting on: the clicked row first, then
-        any ticked ``table.selected`` row. None when nothing is selected."""
+        """The raw signal dict the user is acting on (the clicked/highlighted row),
+        or None when nothing is selected."""
         sid = state.get("sel_id")
-        if sid and sid in raw_by_id:
-            return raw_by_id[sid]
-        if table.selected:
-            return raw_by_id.get(table.selected[0].get("id"))
-        return None
+        return raw_by_id[sid] if sid and sid in raw_by_id else None
 
     @guard
     def _reload():

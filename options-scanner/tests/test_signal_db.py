@@ -191,6 +191,7 @@ def test_get_open_signals_with_latest_mark_picks_newest(tmp_path):
     assert len(rows) == 1
     assert rows[0]["unrealized_pnl"] == 50
     assert rows[0]["current_score"] == 72
+    assert rows[0]["current_value"] == 0.5      # latest mark's spread value (cur option price)
     assert rows[0]["recommendation"] == "TAKE"
     assert rows[0]["last_mark_ts"] == "2026-05-26T11:00:00"
 

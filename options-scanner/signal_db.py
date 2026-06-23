@@ -291,6 +291,7 @@ def get_open_signals_with_latest_mark(db_path=DEFAULT_DB_PATH):
     try:
         cur = conn.execute("""
             SELECT s.*,
+                   m.current_value        AS current_value,
                    m.unrealized_pnl       AS unrealized_pnl,
                    m.current_score        AS current_score,
                    m.score_drift          AS score_drift,

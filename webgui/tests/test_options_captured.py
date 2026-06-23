@@ -15,8 +15,8 @@ from pages.options import captured
 SAMPLE = {
     "signal_id": "X1", "symbol": "SPY", "strategy": "PCS", "mode": "PREMIUM",
     "expiration": "2026-06-19", "dte_at_entry": 4, "entry_credit": 0.34,
-    "entry_max_loss": 4.66, "unrealized_pnl": 12.0, "entry_score": 72,
-    "current_score": 68, "score_drift": -4, "entry_grade": "A",
+    "entry_max_loss": 4.66, "unrealized_pnl": 12.0, "current_value": 0.20,
+    "entry_score": 72, "current_score": 68, "score_drift": -4, "entry_grade": "A",
     "recommendation": "HOLD", "status": "OPEN",
     "short_strike": 450, "long_strike": 445, "width": 5,
     "entry_short_delta": -0.25, "entry_net_theta": 0.04, "entry_iv_rank": 40,
@@ -25,14 +25,36 @@ SAMPLE = {
 
 def test_captured_columns_have_keys():
     fields = {c["field"] for c in captured.captured_columns()}
-    assert {"symbol", "strategy", "current_score", "recommendation", "status"} <= fields
+    assert {"recommendation", "symbol", "strategy", "current_value",
+            "unrealized_pnl", "grade"} <= fields
+
+
+def test_captured_columns_drop_score_and_status():
+    """The Entry/Current/Drift score columns + the redundant Status column are gone
+    (a closed signal leaves the table, so Status is always 'OPEN')."""
+    fields = {c["field"] for c in captured.captured_columns()}
+    assert {"entry_score", "current_score", "score_drift", "status"}.isdisjoint(fields)
+
+
+def test_recommendation_is_first_column():
+    """Rec moves to the leftmost column — left of Symbol."""
+    fields = [c["field"] for c in captured.captured_columns()]
+    assert fields[0] == "recommendation"
+    assert fields.index("recommendation") < fields.index("symbol")
 
 
 def test_captured_rows_maps_and_keeps_id():
     rows = captured.captured_rows([SAMPLE])
     assert rows[0]["id"] == "X1"
-    assert rows[0]["current_score"] == 68
     assert rows[0]["symbol"] == "SPY"
+    assert rows[0]["current_value"] == 0.20      # current option price (spread mark)
+
+
+def test_captured_rows_omit_score_and_status_fields():
+    """Display rows no longer carry the dropped score/status fields."""
+    row = captured.captured_rows([SAMPLE])[0]
+    for gone in ("entry_score", "current_score", "score_drift", "status"):
+        assert gone not in row
 
 
 def test_captured_rows_defaults_recommendation_hold():
@@ -53,8 +75,8 @@ def test_synth_from_captured_falls_back_to_entry_score():
     assert s["composite_score"] == 55
 
 
-def test_drift_rounded_to_two_decimals():
-    assert captured.captured_rows([{"score_drift": 1.23456}])[0]["score_drift"] == 1.23
+def test_current_value_rounded_to_two_decimals():
+    assert captured.captured_rows([{"current_value": 0.234567}])[0]["current_value"] == 0.23
 
 
 def test_captured_columns_include_actions():
@@ -76,12 +98,12 @@ def test_synth_from_captured_is_em_payload_compatible():
     ]
 
 
-def test_drift_preserves_whole_float():
-    assert captured.captured_rows([{"score_drift": -4.0}])[0]["score_drift"] == -4.0
+def test_current_value_preserves_whole_float():
+    assert captured.captured_rows([{"current_value": 2.0}])[0]["current_value"] == 2.0
 
 
-def test_drift_none_preserved():
-    assert captured.captured_rows([{}])[0]["score_drift"] is None
+def test_current_value_none_preserved():
+    assert captured.captured_rows([{}])[0]["current_value"] is None
 
 
 def test_rec_color_take_profit_is_green():
