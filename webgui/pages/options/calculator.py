@@ -27,6 +27,30 @@ import math
 
 from .inputs import select_all_on_focus
 
+# 3D / beveled button styling for the Calculator action buttons (Load / IV /
+# Fetch Premiums and Calculate / Expected Move). Scoped to ``.calc-btn-3d`` and
+# injected via ui.add_css (ui.html strips <style>). ``.calc-go`` is the green
+# accent for the primary Calculate action. The raised look = a hard bottom shadow
+# (the "lip"); pressing translates down and shrinks the lip.
+CALC_CSS = """
+.calc-btn-3d.q-btn{
+  background:linear-gradient(180deg,#5aa0e6 0%,#3a7bc0 55%,#316eac 100%)!important;
+  color:#fff!important;border-radius:7px;font-weight:600;min-height:36px;
+  box-shadow:0 4px 0 0 #244e78,0 6px 10px rgba(0,0,0,.45);
+  transition:transform .06s ease,box-shadow .06s ease,filter .12s ease;
+}
+.calc-btn-3d.q-btn:hover{filter:brightness(1.08);}
+.calc-btn-3d.q-btn:active{
+  transform:translateY(4px);
+  box-shadow:0 1px 0 0 #244e78,0 2px 4px rgba(0,0,0,.45);
+}
+.calc-btn-3d.calc-go.q-btn{
+  background:linear-gradient(180deg,#5cc46a 0%,#3da64f 55%,#338a43 100%)!important;
+  box-shadow:0 4px 0 0 #1f5e2a,0 6px 10px rgba(0,0,0,.45);
+}
+.calc-btn-3d.calc-go.q-btn:active{box-shadow:0 1px 0 0 #1f5e2a,0 2px 4px rgba(0,0,0,.45);}
+"""
+
 # (key, label, option_type, side) per strategy — mirrors dashboard leg inputs.
 LEG_SPECS = {
     "PCS": [("short_put", "Short Put (write)", "put", "short"),
@@ -300,30 +324,10 @@ def render():
 
     from . import handoff
 
+    ui.add_css(CALC_CSS)
     ui.label("Calculator").classes("text-h5")
 
     leg_inputs: dict = {}
-
-    with ui.row().classes("gap-3 items-end flex-wrap"):
-        strategy_sel = ui.select(list(LEG_SPECS.keys()), value="PCS", label="Strategy").classes("w-36")
-        symbol_in = select_all_on_focus(ui.input("Symbol", value="SPY").classes("w-24"))
-        price_in = ui.number("Price", value=100.0, format="%.2f").classes("w-28")
-        ui.button("load", icon="download", on_click=lambda: load_symbol()) \
-            .props("flat dense size=sm").tooltip("Load price + expiries/strikes from the chain")
-        expiry_sel = ui.select([], label="Expiry").classes("w-44")
-        contracts_in = ui.number("Contracts", value=1, min=1, max=100).classes("w-24")
-        iv_in = ui.number("IV %", value=20.0, format="%.1f").classes("w-24")
-        ui.button("IV", icon="download", on_click=lambda: fetch_iv()) \
-            .props("flat dense size=sm").tooltip("Fetch ATM IV for the expiry")
-        ivchg_in = ui.number("IV Δ %", value=0.0, format="%.1f").classes("w-24")
-        rate_in = ui.number("Rate %", value=4.5, format="%.2f").classes("w-24")
-
-    with ui.row().classes("gap-3 items-end flex-wrap"):
-        rmin_in = ui.number("Range min", value=0.0, format="%.2f").classes("w-28")
-        rmax_in = ui.number("Range max", value=0.0, format="%.2f").classes("w-28")
-        rpct_in = ui.number("Range %", value=5.0, format="%.1f").classes("w-24")
-
-    leg_box = ui.column().classes("gap-2")
     # Page state (local closure, not module globals — built per request).
     state = {
         "chain": None,        # last calc_load chain dict (pure-extracted locally)
@@ -332,6 +336,57 @@ def render():
         "result_ver": None,   # last-seen calc_result cache version
         "calc_spot": None,    # spot used for the last enqueued compute (grid marker)
     }
+
+    # Two columns: inputs (vertical) on the LEFT, P&L matrix on the RIGHT. The
+    # Load / IV / Fetch-Premiums buttons sit at the right edge of their input
+    # sections (fixed width → vertically aligned); all action buttons are 3D.
+    with ui.row().classes("w-full no-wrap gap-6 items-start"):
+        with ui.column().classes("gap-3 shrink-0").style("width:620px"):
+            # Line 1: Strategy + Symbol  ·  Load (right edge)
+            with ui.row().classes("w-full items-end justify-between gap-3 no-wrap"):
+                with ui.row().classes("items-end gap-3"):
+                    strategy_sel = ui.select(list(LEG_SPECS.keys()), value="PCS",
+                                             label="Strategy").classes("w-36")
+                    symbol_in = select_all_on_focus(ui.input("Symbol", value="SPY").classes("w-28"))
+                ui.button("Load", icon="download", on_click=lambda: load_symbol()) \
+                    .props("dense no-caps").classes("calc-btn-3d w-40") \
+                    .tooltip("Load price + expiries/strikes from the chain")
+            # Line 2 (new line below Strategy/Symbol): Expiry, Contracts, IV%  ·  IV
+            with ui.row().classes("w-full items-end justify-between gap-3 no-wrap"):
+                with ui.row().classes("items-end gap-3"):
+                    expiry_sel = ui.select([], label="Expiry").classes("w-44")
+                    contracts_in = ui.number("Contracts", value=1, min=1, max=100).classes("w-24")
+                    iv_in = ui.number("IV %", value=20.0, format="%.1f").classes("w-24")
+                ui.button("IV", icon="download", on_click=lambda: fetch_iv()) \
+                    .props("dense no-caps").classes("calc-btn-3d w-40") \
+                    .tooltip("Fetch ATM IV for the expiry")
+            # Line 3: Price, IV Δ%, Rate%
+            with ui.row().classes("items-end gap-3"):
+                price_in = ui.number("Price", value=100.0, format="%.2f").classes("w-28")
+                ivchg_in = ui.number("IV Δ %", value=0.0, format="%.1f").classes("w-24")
+                rate_in = ui.number("Rate %", value=4.5, format="%.2f").classes("w-24")
+            # Line 4: price-range controls
+            with ui.row().classes("items-end gap-3"):
+                rmin_in = ui.number("Range min", value=0.0, format="%.2f").classes("w-28")
+                rmax_in = ui.number("Range max", value=0.0, format="%.2f").classes("w-28")
+                rpct_in = ui.number("Range %", value=5.0, format="%.1f").classes("w-24")
+            # Legs  ·  Fetch premiums (right edge, aligned with Load / IV)
+            with ui.row().classes("w-full items-start justify-between gap-3 no-wrap"):
+                leg_box = ui.column().classes("gap-2")
+                ui.button("Fetch Premiums", icon="download", on_click=lambda: fetch_premiums()) \
+                    .props("dense no-caps").classes("calc-btn-3d w-40") \
+                    .tooltip("Fill leg premiums from the chain (strikes required)")
+            # Primary actions
+            with ui.row().classes("items-center gap-3 pt-1"):
+                ui.button("Calculate", icon="calculate", on_click=lambda: do_calc()) \
+                    .props("no-caps").classes("calc-btn-3d calc-go")
+                ui.button("Expected Move", icon="show_chart", on_click=lambda: send_to_em()) \
+                    .props("no-caps").classes("calc-btn-3d") \
+                    .tooltip("Chart the expected move for these legs")
+        # RIGHT: P&L matrix (summary tiles + heatmap grid)
+        with ui.column().classes("flex-1 min-w-0 gap-3"):
+            summary_box = ui.row().classes("gap-3 flex-wrap")
+            grid_box = ui.column().classes("w-full")
 
     def _sync_strikes():
         chain = state.get("chain")
@@ -358,9 +413,6 @@ def render():
                     leg_inputs[key] = {"strike": sin, "premium": pin,
                                        "option_type": otype, "side": side}
         _sync_strikes()
-
-    ui.button("Fetch premiums", icon="download", on_click=lambda: fetch_premiums()) \
-        .props("flat dense size=sm").tooltip("Fill leg premiums from the chain (strikes required)")
 
     rebuild_legs()
     strategy_sel.on_value_change(lambda e: rebuild_legs())
@@ -440,13 +492,6 @@ def render():
         iv_in.value = round(iv, 1)
         suffix = " (nearest listed expiry)" if approx else ""
         ui.notify(f"ATM IV {iv:.1f}%{suffix}", type="positive")
-
-    with ui.row().classes("items-center gap-2"):
-        ui.button("Calculate", icon="calculate", on_click=lambda: do_calc())
-        ui.button("Expected Move", icon="show_chart", on_click=lambda: send_to_em()) \
-            .props("flat dense size=sm").tooltip("Chart the expected move for these legs")
-    summary_box = ui.row().classes("gap-3 flex-wrap")
-    grid_box = ui.column().classes("w-full")
 
     @guard
     def do_calc():
