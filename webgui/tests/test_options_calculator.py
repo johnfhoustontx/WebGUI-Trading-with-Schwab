@@ -228,3 +228,22 @@ def test_render_graceful_empty_cache():
     assert bus_client.read("options:calc_result") is None
     with ui.card():
         calc.render()  # must not raise
+
+
+def test_strikes_window_n_either_side_of_spot():
+    xs = list(range(1, 101))          # strikes 1..100
+    # 3 strikes ≤ spot (48,49,50) + 3 strikes > spot (51,52,53).
+    assert calc.strikes_window(xs, 50.4, 3) == [48.0, 49.0, 50.0, 51.0, 52.0, 53.0]
+    assert calc.strikes_window(xs, 50.0, 2) == [49.0, 50.0, 51.0, 52.0]
+
+
+def test_strikes_window_edges_and_empty():
+    xs = list(range(1, 101))
+    assert calc.strikes_window([], 50, 5) == []
+    assert calc.strikes_window(xs, None, 5) == []
+    assert calc.strikes_window(xs, 0, 3) == [1.0, 2.0, 3.0]       # spot below all → first n above
+    assert calc.strikes_window(xs, 999, 2) == [99.0, 100.0]       # spot above all → last n below
+
+
+def test_strikes_window_dedups_and_ignores_junk():
+    assert calc.strikes_window([100, 100, 105, None, "x", 95], 100, 5) == [95.0, 100.0, 105.0]

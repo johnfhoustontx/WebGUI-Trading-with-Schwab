@@ -341,6 +341,19 @@ def _render_grid(box, eval_labels, pnl_data, spot):
         ui.timer(0.12, lambda: ui.run_javascript(_CENTER_SPOT_JS), once=True)
 
 
+def strikes_window(strikes, spot, n):
+    """The P&L grid's price rows: the ``n`` strikes ≤ spot plus the ``n`` strikes
+    > spot (strictly ±n around spot — far-OTM legs beyond it fall off the grid).
+
+    Junk / non-numeric strikes are ignored and duplicates collapsed."""
+    xs = sorted({float(s) for s in (strikes or []) if isinstance(s, (int, float))})
+    if not xs or spot is None:
+        return []
+    below = [s for s in xs if s <= spot][-n:]
+    above = [s for s in xs if s > spot][:n]
+    return below + above
+
+
 def render():
     """Build the Calculator page: inputs form + summary tiles + P&L heatmap.
 
@@ -399,17 +412,11 @@ def render():
                             rate_in = ui.number("Rate %", value=4.5, format="%.2f").classes("w-24")
                             ivchg_in = ui.number("IV Δ %", value=0.0, format="%.1f").classes("w-24")
                         with ui.row().classes("items-end gap-4 flex-wrap"):
-                            rmin_in = ui.number("Range min", value=0.0, format="%.2f").classes("w-28")
-                            rmax_in = ui.number("Range max", value=0.0, format="%.2f").classes("w-28")
-                            # Range % — value sits BESIDE the heading (the slider's
-                            # always-on bubble used to obscure the label).
-                            with ui.column().classes("gap-1 pt-1"):
-                                with ui.row().classes("items-baseline gap-2 no-wrap"):
-                                    ui.label("Range %").classes("calc-eyebrow")
-                                    rpct_val = ui.label("5%").classes("text-xs").style("color:#9fb0d4")
-                                rpct_in = ui.slider(min=0, max=50, step=0.5, value=5).classes("w-44")
-                                rpct_in.on_value_change(
-                                    lambda e: rpct_val.set_text(f"{float(rpct_in.value or 0):g}%"))
+                            # The P&L grid spans ±N real chain strikes around spot
+                            # (replaces the old Range min/max/%). See ``strikes_window``.
+                            nstrikes_in = ui.number("Number of strikes", value=24, min=1,
+                                                    max=200, format="%.0f").classes("w-40") \
+                                .tooltip("Strikes shown either side of spot in the P&L grid")
                     with ui.column().classes("shrink-0 gap-3").style("width:170px"):
                         ui.button("Load", icon="cloud_upload", color=None, on_click=lambda: load_symbol()) \
                             .props("no-caps").classes("cv2-btn w-full").tooltip("Load price + expiries/strikes")
@@ -638,9 +645,14 @@ def render():
                           "qty": int(l.get("qty", 1) or 1),
                           "expiry": l.get("expiry") or page_exp}
                          for l in legs],
-                "range_min": float(rmin_in.value or 0),
-                "range_max": float(rmax_in.value or 0),
-                "range_pct": float(rpct_in.value or 5) / 100.0,
+                "num_strikes": int(nstrikes_in.value or 24),
+                # Grid rows = the ±N real chain strikes around spot (front-expiry
+                # ladder, union of calls+puts). None when no chain yet → engine
+                # falls back to its even-step ±N heuristic.
+                "price_rows": strikes_window(
+                    sorted(set(_strikes_for(expiry_sel.value, "call"))
+                           | set(_strikes_for(expiry_sel.value, "put"))),
+                    spot, int(nstrikes_in.value or 24)) or None,
             }
             dt.date.fromisoformat(params["expiry"])  # validate before enqueue
         except Exception as exc:
@@ -666,9 +678,6 @@ def render():
         state["chain"] = cc.get("chain")
         if cc.get("price"):
             price_in.value = round(cc["price"], 2)
-        if cc.get("range_lo") or cc.get("range_hi"):
-            rmin_in.value = round(cc.get("range_lo") or 0, 2)
-            rmax_in.value = round(cc.get("range_hi") or 0, 2)
         exps = chain_expiries(state["chain"] or {})
         expiry_sel.options = exps
         if exps and expiry_sel.value not in exps:
