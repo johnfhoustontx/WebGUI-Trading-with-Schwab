@@ -38,6 +38,37 @@ def legs_to_payload(symbol, legs, keep_premium=True):
             "legs": normalize_legs(legs, keep_premium=keep_premium)}
 
 
+def coerce_strike(value, options):
+    """Snap ``value`` to a member of ``options`` (nearest numeric), or None.
+
+    NiceGUI's ``ui.select`` raises ``ValueError: Invalid value`` for a value not in
+    its options, so every strike handed to a strike select MUST be one of its
+    options. A strike from a different expiry's chain (the cross-expiry default-leg
+    ladder) or a leg copied in from the Simulator is snapped to the nearest
+    available strike; with no options it clears to None."""
+    if not options:
+        return None
+    if value in options:
+        return value
+    if value is None:
+        return None
+    try:
+        return min(options, key=lambda o: abs(o - value))
+    except TypeError:
+        return options[0]
+
+
+def coerce_choice(value, options):
+    """Return ``value`` if it's in ``options``, else the first option (or None).
+
+    For non-numeric selects (expiry) where 'nearest' isn't meaningful — keeps the
+    leg functional rather than crashing the select on an absent value."""
+    options = options or []
+    if value in options:
+        return value
+    return options[0] if options else None
+
+
 def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
                      on_change=lambda: None, spot_getter=lambda: 0.0):
     """Mount the editor into ``container``. Returns a handle with
@@ -67,17 +98,28 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
 
     def _render():
         container.clear()
+        exps = expiries_for() or []
         with container:
             for i, leg in enumerate(state["legs"]):
+                # Coerce the leg's expiry + strike into the AVAILABLE options FIRST —
+                # ui.select raises ValueError on a value not in its options (a default
+                # leg placed off the cross-expiry strike union, or a leg copied in from
+                # the Simulator, can carry a strike/expiry absent from this expiry's
+                # chain). Write the coerced values back to state so get_legs() matches
+                # the display. (Not an edit → no dirty flag.)
+                e_val = coerce_choice(leg.get("expiry"), exps)
+                leg["expiry"] = e_val
+                s_opts = strikes_for(e_val, leg.get("option_type")) or []
+                s_val = coerce_strike(leg.get("strike"), s_opts)
+                leg["strike"] = s_val
                 with ui.row().classes("items-end gap-2 no-wrap"):
                     ui.select(["call", "put"], value=leg.get("option_type"), label="Type") \
                         .classes("w-24").on_value_change(lambda e, i=i: _set_field(i, "option_type", e.value))
                     ui.select(["long", "short"], value=leg.get("side"), label="Side") \
                         .classes("w-24").on_value_change(lambda e, i=i: _set_field(i, "side", e.value))
-                    ui.select(expiries_for() or [], value=leg.get("expiry"), label="Expiry") \
+                    ui.select(exps, value=e_val, label="Expiry") \
                         .classes("w-40").on_value_change(lambda e, i=i: _set_field(i, "expiry", e.value))
-                    sw = ui.select(strikes_for(leg.get("expiry"), leg.get("option_type")) or [],
-                                   value=leg.get("strike"), label="Strike").classes("w-28")
+                    sw = ui.select(s_opts, value=s_val, label="Strike").classes("w-28")
                     sw.on_value_change(lambda e, i=i: _set_field(i, "strike", e.value))
                     leg["_strike_widget"] = sw
                     ui.number("Qty", value=leg.get("qty", 1), min=1, max=100, format="%.0f") \
@@ -110,8 +152,15 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
         return normalize_legs(state["legs"])    # strips _strike_widget
 
     def apply_template(name):
-        legs = S.build_default_legs(name, spot_getter() or 0,
-                                    strikes_for(None, "call") or [], expiries_for() or [])
+        # Place default strikes off the NEAR expiry's real strikes (not the
+        # cross-expiry union), so condor/butterfly wings land on strikes that
+        # actually exist for that expiry — distinct, and valid at render time (the
+        # union can include strikes absent from the chosen expiry, e.g. a 737.5 from
+        # another expiry that isn't in a 0DTE integer chain).
+        exps = expiries_for() or []
+        near = exps[0] if exps else None
+        placement = (strikes_for(near, "call") if near else strikes_for(None, "call")) or []
+        legs = S.build_default_legs(name, spot_getter() or 0, placement, exps)
         set_legs(legs)
 
     def refresh_options():
