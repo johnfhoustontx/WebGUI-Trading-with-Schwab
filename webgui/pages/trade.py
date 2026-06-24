@@ -116,6 +116,27 @@ def alignment_rows(ema):
     return rows
 
 
+def seed_symbol(result):
+    """The symbol to pre-fill the input on (re)build: the last analyzed symbol from
+    the persisted cache result, else the AAPL default (so revisiting the page shows
+    the symbol that matches the displayed analysis)."""
+    sym = (result or {}).get("symbol")
+    return sym if sym else "AAPL"
+
+
+def should_request(symbol, last_requested, since_seconds):
+    """True when an analyze request should fire for ``symbol``.
+
+    Non-empty, AND (the symbol changed since the last request OR enough time has
+    passed). The time guard collapses the blur-then-click double fire — clicking
+    Analyze blurs the field first, so blur + click would otherwise enqueue twice —
+    while still allowing a deliberate same-symbol refresh seconds later."""
+    s = (symbol or "").strip().upper()
+    if not s:
+        return False
+    return s != (last_requested or "") or since_seconds >= 1.0
+
+
 _MK_BAND_COLORS = ["#c0392b", "#e67e22", "#7f8c8d", "#27ae60", "#1e8449"]
 # stacked-area band fill colors (neutral grey lighter than the chip's grey)
 _MK_AREA_COLORS = ["#c0392b", "#e67e22", "#bdc3c7", "#27ae60", "#1e8449"]

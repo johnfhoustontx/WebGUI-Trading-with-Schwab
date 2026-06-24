@@ -202,6 +202,22 @@ def test_markov_figure_falls_back_to_horizons_without_trajectory():
     assert all(len(s["data"]) == 4 for s in fig["series"])
 
 
+def test_seed_symbol():
+    assert trade.seed_symbol({"symbol": "TSLA"}) == "TSLA"
+    assert trade.seed_symbol(None) == "AAPL"
+    assert trade.seed_symbol({}) == "AAPL"
+
+
+def test_should_request():
+    # changed symbol fires immediately; an identical repeat within the window is
+    # deduped (collapses the blur-then-click double fire); a repeat after the
+    # window is a deliberate refresh; empty never fires.
+    assert trade.should_request("TSLA", "AAPL", 0.1) is True
+    assert trade.should_request("tsla", "TSLA", 0.1) is False
+    assert trade.should_request("TSLA", "TSLA", 2.0) is True
+    assert trade.should_request("   ", "AAPL", 9.0) is False
+
+
 def test_markov_figure_differs_by_current_band():
     # Regression guard for "looks the same regardless of score": a bullish vs a
     # bearish near-term trajectory must produce different early series data.
