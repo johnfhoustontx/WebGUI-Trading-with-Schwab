@@ -187,7 +187,9 @@ def test_render_grid_takes_preformatted_labels():
         html=lambda h: (captured.__setitem__("html", h),
                         types.SimpleNamespace(classes=lambda *a: None))[1],
         label=lambda t: (captured.__setitem__("label", t),
-                         types.SimpleNamespace(classes=lambda *a: None))[1])
+                         types.SimpleNamespace(classes=lambda *a: None))[1],
+        timer=lambda *a, **k: None,            # spot-row centering (no-op in test)
+        run_javascript=lambda *a, **k: None)
 
     import sys
     real_nicegui = sys.modules.get("nicegui")

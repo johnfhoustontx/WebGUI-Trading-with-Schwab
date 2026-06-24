@@ -311,6 +311,19 @@ _CELL_COLORS = {
     "neutral": ("#2a2a2a", "#bdbdbd"),
 }
 
+# Scroll the P&L grid so the current-spot row sits in the MIDDLE of the scroll
+# viewport (the grid is spot-centered but opens scrolled to the top, hiding spot).
+# Scrolls only the grid container, never the page.
+_CENTER_SPOT_JS = """
+(() => {
+  const sc = document.getElementById('calc-grid-scroll');
+  const row = document.getElementById('calc-spot-row');
+  if (!sc || !row) return;
+  const sr = sc.getBoundingClientRect(), rr = row.getBoundingClientRect();
+  sc.scrollTop += (rr.top - sr.top) - (sc.clientHeight / 2) + (rr.height / 2);
+})()
+"""
+
 
 def _render_summary(box, summary):
     from nicegui import ui
@@ -371,14 +384,17 @@ def _render_grid(box, eval_labels, pnl_data, spot):
                      f'font-family:monospace;')
             cells.append(f'<td style="{style}">{fmt_dollar(c["pnl"])}</td>')
             cells.append(f'<td style="{style}">{fmt_pct(c["pnl_pct"])}</td>')
-        trs.append("<tr>" + "".join(cells) + "</tr>")
+        tr_open = '<tr id="calc-spot-row">' if i == cur_idx else "<tr>"
+        trs.append(tr_open + "".join(cells) + "</tr>")
 
-    html = ('<div style="max-height:480px;overflow:auto;border:1px solid #333;">'
+    html = ('<div id="calc-grid-scroll" style="max-height:480px;overflow:auto;border:1px solid #333;">'
             '<table style="border-collapse:collapse;font-size:12px;">'
             f'<thead><tr>{"".join(th)}</tr></thead>'
             f'<tbody>{"".join(trs)}</tbody></table></div>')
     with box:
         ui.html(html).classes("w-full")
+        # Centre the spot row in the viewport once the DOM has painted.
+        ui.timer(0.12, lambda: ui.run_javascript(_CENTER_SPOT_JS), once=True)
 
 
 def render():
