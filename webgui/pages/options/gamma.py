@@ -21,7 +21,7 @@ from pages.ui_guard import guard, guard_async
 POS_COLOR = "#66bb6a"
 NEG_COLOR = "#ef5350"
 SPOT_COLOR = "#ffd54f"
-PRICE_LINE = "#0a1f44"          # dark navy — spot track overlaid on the heatmap
+PRICE_LINE = "#f5f5f5"          # off-white — spot track overlaid on the dark heatmap
 HEATMAP_SEP = "#4d4d4d"         # softer (lighter) cell-separator mesh on the heatmap
 FLIP_COLOR = "#42a5f5"
 WALL_COLOR = "#b39ddb"
@@ -36,12 +36,18 @@ HOVER = {"bgcolor": "#222222", "bordercolor": "#444444", "font": {"size": 11, "c
 # engine/cache strings stay "GEX"/"DEX" — only the display label changes).
 _VIEW_LABELS = {"GEX": "GAMMA", "DEX": "DELTA"}
 
-# Diverging RdYlGn color-axis stops (replicates Plotly's "RdYlGn" colorscale) for
-# the heatmaps: deep red (most negative net) → yellow (zero) → deep green.
-RDYLGN_STOPS = [
-    [0.00, "#a50026"], [0.12, "#d73027"], [0.25, "#f46d43"], [0.38, "#fdae61"],
-    [0.50, "#ffffbf"], [0.62, "#a6d96a"], [0.75, "#66bd63"], [0.88, "#1a9850"],
-    [1.00, "#006837"],
+# Dark diverging color-axis stops: the heatmap blends into the dark page (like the
+# candlestick chart) — net ≈ 0 fades to TRANSPARENT (the background shows through),
+# strong negative glows red, strong positive glows green. (rgba alpha is honored by
+# the interpolated heatmap image.) Replaces the old light RdYlGn (yellow-at-zero).
+HEAT_STOPS = [
+    [0.00, "rgba(239,83,80,0.95)"],   # most-negative net → strong red
+    [0.30, "rgba(239,83,80,0.45)"],
+    [0.48, "rgba(239,83,80,0.0)"],
+    [0.50, "rgba(0,0,0,0.0)"],         # zero → transparent (dark page shows through)
+    [0.52, "rgba(102,187,106,0.0)"],
+    [0.70, "rgba(102,187,106,0.45)"],
+    [1.00, "rgba(102,187,106,0.95)"],  # most-positive net → strong green
 ]
 
 
@@ -313,7 +319,7 @@ def heatmap_matrix(rows):
 
 def _coloraxis(zmax):
     """Diverging RdYlGn color axis, symmetric about zero (so net 0 = yellow)."""
-    ca = {"stops": RDYLGN_STOPS, "labels": {"enabled": False}}
+    ca = {"stops": HEAT_STOPS, "labels": {"enabled": False}}
     if zmax:
         ca["min"], ca["max"] = -zmax, zmax
     return ca
@@ -346,9 +352,12 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None):
     # Row height from the VISIBLE strikes' typical spacing (median gap) so cells
     # tile the window densely regardless of off-window strike spacing.
     rowsize = _strike_step([strikes[yi] for yi in vis])
+    # Blended look: interpolation renders one smooth image (no per-cell borders or
+    # separator mesh); states.inactive disabled so nothing fades on hover/click.
+    no_fade = {"inactive": {"enabled": False}, "hover": {"enabled": False}}
     series = [{"type": "heatmap", "name": "net", "data": data,
                "colsize": 1, "rowsize": rowsize,
-               "borderWidth": 1, "borderColor": HEATMAP_SEP,
+               "interpolation": True, "borderWidth": 0, "states": no_fade,
                "tooltip": {"headerFormat": "",
                            "pointFormat": "Strike {point.y} · net {point.value:,.0f}"}}]
     spots = m.get("spots") or []
@@ -358,14 +367,18 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None):
         spot_pts = [[xi, sp] for xi, sp in enumerate(spots) if isinstance(sp, (int, float))]
         series.append({"type": "line", "name": "Spot", "data": spot_pts,
                        "color": PRICE_LINE, "lineWidth": 2, "marker": {"enabled": False},
-                       "colorAxis": False, "enableMouseTracking": True,
+                       "colorAxis": False, "enableMouseTracking": True, "states": no_fade,
                        "tooltip": {"headerFormat": "", "pointFormat": "Spot {point.y:,.2f}"}})
     yaxis = {**_dark_axis("Strike")}
     if yrange is not None:
         yaxis["min"], yaxis["max"] = yrange[0], yrange[1]
     fig = _base_chart("heatmap", height)
-    fig["chart"]["plotBackgroundColor"] = HEATMAP_SEP   # soft cell-separator mesh
+    fig["chart"]["backgroundColor"] = "transparent"     # same as the candlestick graph
     fig["chart"]["marginBottom"] = 64                   # room for rotated time labels
+    # Click-only tooltip hook must be on whatever options the element MOUNTS with —
+    # _render_view overwrites the init fig's options before the client mounts, so
+    # carry the load hook here too (load fires once at mount; harmless on updates).
+    fig["chart"]["events"] = {":load": _HEAT_CLICK_TOOLTIP_JS}
     fig.update({
         "title": {"text": f"{_view_label(view)} intraday (strike × time)",
                   "style": {"color": FONT}},
@@ -375,6 +388,37 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None):
         "colorAxis": _coloraxis(zmax),
         "series": series,
     })
+    return fig
+
+
+# Make the heatmap + spot-line tooltip CLICK-ONLY (no hover text): a chart.events
+# .load hook gates Highcharts' tooltip.refresh so hover never shows it, and a
+# container click re-runs Highcharts' own nearest-point logic (works for the
+# interpolated heatmap AND the line) for that one refresh. Shipped as a NiceGUI
+# ``:``-dynamic-property → ``new Function``. Installed ONCE at element creation
+# (load fires once); it survives in-place option updates because heatmap_figure
+# never re-sets the global tooltip or chart.events.
+_HEAT_CLICK_TOOLTIP_JS = (
+    "function(){var c=this;if(!c.tooltip)return;"
+    "var orig=c.tooltip.refresh.bind(c.tooltip),allow=false;"
+    "c.tooltip.refresh=function(p){if(allow)orig(p);};"
+    "c.container.addEventListener('click',function(ev){"
+    "var e=c.pointer.normalize(ev);allow=true;"
+    "try{c.pointer.runPointActions(e);}finally{allow=false;}});}"
+)
+
+
+def _heat_init_fig(height=680):
+    """Initial (empty) heatmap element options + the click-only-tooltip load hook.
+
+    The heatmap element is persistent (created once, updated in place), and
+    ``chart.events.load`` only fires at creation — so the click-only hook must be
+    present on the element's FIRST figure, not added later by heatmap_figure."""
+    fig = _base_chart("heatmap", height)
+    fig["title"] = {"text": None}
+    fig["series"] = []
+    fig["tooltip"] = {"enabled": True}      # needed so chart.tooltip exists for click
+    fig["chart"]["events"] = {":load": _HEAT_CLICK_TOOLTIP_JS}
     return fig
 
 
@@ -449,8 +493,13 @@ def term_heatmap(term_grid):
     data = [[xi, yi, z[yi][xi]]
             for yi in range(len(strikes)) for xi in range(len(exps))
             if z[yi][xi] is not None]
+    no_fade = {"inactive": {"enabled": False}, "hover": {"enabled": False}}
     fig = _base_chart("heatmap", 680)
-    fig["chart"]["plotBackgroundColor"] = HEATMAP_SEP
+    fig["chart"]["backgroundColor"] = "transparent"     # same as the candlestick graph
+    # Blended + click-only tooltip, same as the intraday heatmap. The Term view is
+    # painted on chart_el (recreated on the bar↔Term kind switch), so the load hook
+    # rides this figure and fires on that recreation.
+    fig["chart"]["events"] = {":load": _HEAT_CLICK_TOOLTIP_JS}
     fig.update({
         "title": {"text": "Term structure (net GEX by expiry × strike)",
                   "style": {"color": FONT}},
@@ -458,7 +507,7 @@ def term_heatmap(term_grid):
         "yAxis": {**_dark_axis("Strike"), "categories": [f"{s:g}" for s in strikes]},
         "colorAxis": _coloraxis(_robust_zmax(z)),
         "series": [{"type": "heatmap", "name": "net", "data": data,
-                    "borderWidth": 1, "borderColor": HEATMAP_SEP,
+                    "interpolation": True, "borderWidth": 0, "states": no_fade,
                     "tooltip": {"headerFormat": "",
                                 "pointFormat": "net {point.value:,.0f}"}}],
     })
@@ -556,7 +605,9 @@ def render():
                 .classes("opacity-60 text-sm")
         heatmap_box = ui.column().classes("min-w-0").style("flex: 0.5 1 0%")
         with heatmap_box:
-            heat_plot = ui.highchart(_empty_fig(), extras=["heatmap"]).classes("w-full")
+            # Created with the heatmap init fig so the click-only-tooltip load hook
+            # is installed at creation (load fires once); updated in place after.
+            heat_plot = ui.highchart(_heat_init_fig(), extras=["heatmap"]).classes("w-full")
             heat_msg = ui.label("").classes("opacity-60 text-sm")
 
     def _current_symbol():

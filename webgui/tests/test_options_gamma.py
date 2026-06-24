@@ -349,24 +349,72 @@ def test_darker_returns_a_darker_hex():
     assert gamma._darker("#66bb6a").startswith("#") and len(gamma._darker("#66bb6a")) == 7
 
 
-def test_heatmap_figure_dark_with_cell_separators_and_concise_hover():
+def test_heatmap_figure_blended_no_lines_no_fade():
     rows = [("09:30", 450, None, None, None, 0, {448.0: 5, 450.0: -3})]
     fig = gamma.heatmap_figure(rows, "GEX", yrange=[440.0, 460.0])
     hm = next(s for s in fig["series"] if s["type"] == "heatmap")
-    assert hm["borderWidth"] == 1                        # faint cell separators
-    assert "pointFormat" in hm["tooltip"]                # concise hover
-    assert fig["chart"]["backgroundColor"] == gamma.DARK_BG
+    # Blended: interpolated image, no cell borders, no separator mesh.
+    assert hm["interpolation"] is True and hm["borderWidth"] == 0
+    assert "plotBackgroundColor" not in fig["chart"]
+    # No fade on hover/click.
+    assert hm["states"]["inactive"]["enabled"] is False
+    assert "pointFormat" in hm["tooltip"]                # value text (shown on click)
+    # Transparent background (same as the candlestick graph); zero fades out.
+    assert fig["chart"]["backgroundColor"] == "transparent"
     assert [fig["yAxis"]["min"], fig["yAxis"]["max"]] == [440.0, 460.0]   # aligned to bars
 
 
-def test_term_heatmap_dark_separators_and_contrast():
+def test_heat_colorscale_is_dark_with_transparent_zero():
+    # Diverging dark scale: zero (stop 0.50) fades to transparent so the dark page
+    # shows through; the extremes are red (neg) and green (pos).
+    mid = next(s for s in gamma.HEAT_STOPS if s[0] == 0.50)
+    assert mid[1] in ("rgba(0,0,0,0.0)", "rgba(0,0,0,0)")
+    assert "239,83,80" in gamma.HEAT_STOPS[0][1]          # most-negative → red
+    assert "102,187,106" in gamma.HEAT_STOPS[-1][1]       # most-positive → green
+
+
+def test_spot_line_is_off_white():
+    assert gamma.PRICE_LINE.lower() in ("#f5f5f5", "#ffffff", "#fafafa")
+
+
+def test_heatmap_figure_spot_line_not_faded():
+    rows = [("09:30", 450.0, None, None, None, 0, {449.0: {"net": 5}}),
+            ("09:35", 451.5, None, None, None, 0, {449.0: {"net": 7}})]
+    fig = gamma.heatmap_figure(rows, "GEX")
+    line = next(s for s in fig["series"] if s["type"] == "line")
+    assert line["states"]["inactive"]["enabled"] is False
+
+
+def test_heat_init_fig_has_click_only_tooltip_hook():
+    fig = gamma._heat_init_fig()
+    assert fig["tooltip"]["enabled"] is True
+    # The load hook (shipped as a :-dynamic function) gates the tooltip to clicks.
+    load = fig["chart"]["events"][":load"]
+    assert "runPointActions" in load and "addEventListener('click'" in load
+
+
+def test_heatmap_figure_carries_click_only_hook():
+    # The hook must be on the figure the element actually MOUNTS with (render
+    # overwrites the init fig before mount), so heatmap_figure carries it too.
+    rows = [("09:30", 450, None, None, None, 0, {448.0: 5, 450.0: -3})]
+    fig = gamma.heatmap_figure(rows, "GEX", yrange=[440.0, 460.0])
+    assert ":load" in fig["chart"]["events"]
+    assert "runPointActions" in fig["chart"]["events"][":load"]
+
+
+def test_term_heatmap_blended_and_dark_contrast():
     tg = {"underlying_price": 450.0, "expirations": ["2026-06-18"],
           "cells": {"2026-06-18": {450.0: {"net_gex_usd": 5},
                                    460.0: {"net_gex_usd": -200}}}}
     fig = gamma.term_heatmap(tg)
     hm = fig["series"][0]
-    assert hm["borderWidth"] == 1
-    assert fig["chart"]["backgroundColor"] == gamma.DARK_BG
+    # Blended like the intraday heatmap: interpolated, no borders, no fade.
+    assert hm["interpolation"] is True and hm["borderWidth"] == 0
+    assert hm["states"]["inactive"]["enabled"] is False
+    assert fig["chart"]["backgroundColor"] == "transparent"
+    assert "plotBackgroundColor" not in fig["chart"]
+    # click-only tooltip hook present (Term paints on the recreated chart_el)
+    assert "runPointActions" in fig["chart"]["events"][":load"]
     # symmetric contrast clamp present on the color axis
     ca = fig["colorAxis"]
     assert ca.get("max") is not None and ca.get("min") == -ca["max"]
