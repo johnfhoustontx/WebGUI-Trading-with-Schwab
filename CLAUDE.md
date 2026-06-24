@@ -291,7 +291,17 @@ signal hand-off — Scanner/Swing "Send to Calculator" via a module-level `_pend
 stash + "Send to Paper trade" which enqueues a `paper_create` command on
 `cmd:options`, plus the shared `add_row_actions` per-row action-button slot, **and the
 Simulator↔Calculator leg-copy stashes** (`send_to_simulator`/`send_to_calculator_legs`
-+ `take_pending_simulator`/`take_pending_calculator_legs`); engine-free). Options design + plan: [`docs/plans/2026-06-14-options-section-expansion-design.md`](docs/plans/2026-06-14-options-section-expansion-design.md)
++ `take_pending_simulator`/`take_pending_calculator_legs`); engine-free),
+**`strategy_menu.py`** (the shared cascading **Strategy picker** — a
+`ui.select`-compatible button → nested family→variant Quasar submenu driven by
+`strategies.STRATEGY_MENU`/`strategy_label`; both pages mount it so the picker
+never drifts; `boxed=True` styles the trigger for the navy theme), and
+**`theme.py`** (the shared dark-navy **"dashboard" theme** — one page-scoped
+`DASHBOARD_CSS` string the Calculator **and** Simulator both inject and wrap in
+`.calc-v2`: filled navy input boxes, bordered `calc-card`s, `cv2-btn`/
+`cv2-btn-primary` buttons, boxed Strategy button, header-table legs, dark
+transparent tabs so the dark Highcharts panels sit on the navy, and the
+teleported `strat-menu-navy` popup — so the two pages never drift). Options design + plan: [`docs/plans/2026-06-14-options-section-expansion-design.md`](docs/plans/2026-06-14-options-section-expansion-design.md)
 / [`-plan.md`](docs/plans/2026-06-14-options-section-expansion-plan.md).
 Gamma/Simulator: [`docs/plans/2026-06-14-gamma-simulator-design.md`](docs/plans/2026-06-14-gamma-simulator-design.md) / [`-plan.md`](docs/plans/2026-06-14-gamma-simulator-plan.md).
 

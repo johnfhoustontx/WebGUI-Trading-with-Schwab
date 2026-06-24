@@ -36,6 +36,9 @@ from nicegui import ui
 from pages.ui_guard import guard
 
 from .inputs import select_all_on_focus
+# Shared dark-navy "dashboard" theme (same CSS the Calculator injects, so the two
+# pages never drift).
+from .theme import DASHBOARD_CSS
 
 SPOT_COLOR = "#ffd54f"
 TARGET_COLOR = "#42a5f5"
@@ -204,7 +207,7 @@ def render():
     from . import strategies as S
     from . import strategy_menu
 
-    ui.label("Simulator").classes("text-h5")
+    ui.add_css(DASHBOARD_CSS)
 
     # Page state (local closure, not module globals — built per request).
     state: dict = {
@@ -217,58 +220,73 @@ def render():
         "replay_ver": None,  # last-seen sim_replay cache version
     }
 
-    with ui.row().classes("items-center gap-3 flex-wrap"):
-        symbol_in = select_all_on_focus(ui.input("Symbol", value="SPY").classes("w-28"))
-        fetch_btn = ui.button("Fetch snapshot", icon="download")
-        ui.button("Copy to Calculator", icon="calculate",
-                  on_click=lambda: handoff.send_to_calculator_legs(
-                      leg_editor.legs_to_payload(
-                          (state.get("meta") or {}).get("symbol")
-                          or symbol_in.value or "",
-                          editor.get_legs(), keep_premium=False)))
-        status = ui.label("Fetch a snapshot to begin.").classes("opacity-70 text-sm")
+    # ── Dark "dashboard" shell (page-scoped, .calc-v2) — the SAME navy theme as the
+    # Calculator (shared ``theme.py``), wrapping the Simulator's existing structure
+    # in three cards: controls, strategy+legs, and the tabbed chart panel. The
+    # Highcharts panels are already dark-transparent, so they sit on the navy. ──────
+    with ui.column().classes("calc-v2 w-full gap-4"):
+        ui.label("Simulator").classes("text-h6").style("color:#eaf0fb")
 
-    # Cascading Strategy picker (family → variant) + the shared multi-leg editor.
-    # ``show_premium=False`` — the simulator prices each leg from the chain's IV,
-    # so there is no manual premium input.
-    with ui.row().classes("items-end gap-3 flex-wrap"):
-        strategy_sel = strategy_menu.build_strategy_menu(value="PCS", classes="w-48")
-    legs_box = ui.column().classes("gap-2")
+        # Controls card: symbol + fetch + copy + status.
+        with ui.column().classes("calc-card w-full gap-3"):
+            with ui.row().classes("items-end gap-4 flex-wrap"):
+                symbol_in = select_all_on_focus(ui.input("Symbol", value="SPY").classes("w-40"))
+                fetch_btn = ui.button("Fetch snapshot", icon="download", color=None) \
+                    .props("no-caps").classes("cv2-btn-primary")
+                ui.button("Copy to Calculator", icon="calculate", color=None,
+                          on_click=lambda: handoff.send_to_calculator_legs(
+                              leg_editor.legs_to_payload(
+                                  (state.get("meta") or {}).get("symbol")
+                                  or symbol_in.value or "",
+                                  editor.get_legs(), keep_premium=False))) \
+                    .props("no-caps").classes("cv2-btn")
+            status = ui.label("Fetch a snapshot to begin.").classes("calc-eyebrow")
 
-    with ui.tabs() as tabs:
-        tab_replay = ui.tab("Replay")
-        tab_whatif = ui.tab("What-if")
-        tab_ivshock = ui.tab("IV shock")
-    with ui.tab_panels(tabs, value=tab_replay).classes("w-full"):
-        with ui.tab_panel(tab_replay):
-            with ui.row().classes("items-center gap-4 w-full"):
-                lookback_sel = ui.select(lookback_options(), value="auto",
-                                         label="Look-back").classes("w-44")
-                scrub_lbl = ui.label("Cursor —")
-                scrub_slider = ui.slider(min=0, max=1, value=0).classes("w-80")
-            # Persistent chart built ONCE (present at first render for the ESM
-            # import map) and updated in place. Empty-state label toggled until
-            # the first replay trace arrives.
-            replay_empty = ui.label("Select a contract to run the replay.").classes("opacity-70")
-            replay_chart = ui.highchart(replay_figure({}, None)).classes("w-full")
-        with ui.tab_panel(tab_whatif):
-            with ui.row().classes("items-center gap-4 w-full"):
-                ds_lbl = ui.label("ΔS 0%")
-                ds_slider = ui.slider(min=-20, max=20, value=0).classes("w-48")
-                dt_lbl = ui.label("Δt 5d elapsed").tooltip(
-                    "Calendar days elapsed from now (per-leg time decay)")
-                dt_slider = ui.slider(min=0, max=30, value=5).classes("w-48")
-            # Persistent charts built ONCE (present at first render for the ESM
-            # import map) and updated in place so slider changes ANIMATE instead of
-            # flickering through a clear()/recreate. Empty-state label toggled
-            # alongside until the first sweep result arrives.
-            whatif_empty = ui.label("Select a contract to run the sweep.").classes("opacity-70")
-            whatif_chart = ui.highchart(whatif_figure([], 0)).classes("w-full")
-        with ui.tab_panel(tab_ivshock):
-            with ui.row().classes("items-center gap-4 w-full"):
-                mult_lbl = ui.label("IV ×1.5")
-                mult_slider = ui.slider(min=0.5, max=3.0, step=0.1, value=1.5).classes("w-64")
-            ivshock_chart = ui.highchart(ivshock_figure({}, {}, 1.5)).classes("w-full")
+        # Strategy + legs card. Cascading Strategy picker (family → variant, boxed to
+        # match the navy inputs) + the shared multi-leg editor (header table).
+        # ``show_premium=False`` — the simulator prices each leg from the chain's IV,
+        # so there is no manual premium input.
+        with ui.column().classes("calc-card w-full gap-3"):
+            with ui.row().classes("items-end gap-3 flex-wrap"):
+                strategy_sel = strategy_menu.build_strategy_menu(value="PCS", classes="w-52", boxed=True)
+            legs_box = ui.column().classes("gap-2 w-full")
+
+        # Tabbed chart card: Replay / What-if / IV-shock.
+        with ui.column().classes("calc-card w-full gap-2"):
+            with ui.tabs() as tabs:
+                tab_replay = ui.tab("Replay")
+                tab_whatif = ui.tab("What-if")
+                tab_ivshock = ui.tab("IV shock")
+            with ui.tab_panels(tabs, value=tab_replay).classes("w-full"):
+                with ui.tab_panel(tab_replay):
+                    with ui.row().classes("items-center gap-4 w-full"):
+                        lookback_sel = ui.select(lookback_options(), value="auto",
+                                                 label="Look-back").classes("w-44")
+                        scrub_lbl = ui.label("Cursor —")
+                        scrub_slider = ui.slider(min=0, max=1, value=0).classes("w-80")
+                    # Persistent chart built ONCE (present at first render for the ESM
+                    # import map) and updated in place. Empty-state label toggled until
+                    # the first replay trace arrives.
+                    replay_empty = ui.label("Select a contract to run the replay.").classes("opacity-70")
+                    replay_chart = ui.highchart(replay_figure({}, None)).classes("w-full")
+                with ui.tab_panel(tab_whatif):
+                    with ui.row().classes("items-center gap-4 w-full"):
+                        ds_lbl = ui.label("ΔS 0%")
+                        ds_slider = ui.slider(min=-20, max=20, value=0).classes("w-48")
+                        dt_lbl = ui.label("Δt 5d elapsed").tooltip(
+                            "Calendar days elapsed from now (per-leg time decay)")
+                        dt_slider = ui.slider(min=0, max=30, value=5).classes("w-48")
+                    # Persistent charts built ONCE (present at first render for the ESM
+                    # import map) and updated in place so slider changes ANIMATE instead
+                    # of flickering through a clear()/recreate. Empty-state label toggled
+                    # alongside until the first sweep result arrives.
+                    whatif_empty = ui.label("Select a contract to run the sweep.").classes("opacity-70")
+                    whatif_chart = ui.highchart(whatif_figure([], 0)).classes("w-full")
+                with ui.tab_panel(tab_ivshock):
+                    with ui.row().classes("items-center gap-4 w-full"):
+                        mult_lbl = ui.label("IV ×1.5")
+                        mult_slider = ui.slider(min=0.5, max=3.0, step=0.1, value=1.5).classes("w-64")
+                    ivshock_chart = ui.highchart(ivshock_figure({}, {}, 1.5)).classes("w-full")
 
     # ── leg editor mounted with meta-backed option sources ───────────────────
     # Strikes/expiries come from the cached sim_meta snapshot (``strikes`` is a
@@ -289,7 +307,7 @@ def render():
 
     editor = leg_editor.build_leg_editor(
         legs_box, strikes_for=_strikes_for, expiries_for=_expiries_for,
-        show_premium=False, on_change=lambda: _on_legs_changed(),
+        show_premium=False, on_change=lambda: _on_legs_changed(), header=True,
         spot_getter=lambda: (state.get("meta") or {}).get("spot") or 0)
 
     # Seed the default template (PCS) so a cold page shows the strategy's legs

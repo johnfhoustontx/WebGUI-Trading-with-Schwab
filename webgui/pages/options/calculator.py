@@ -26,6 +26,9 @@ unit-tested; ``render()`` wires the form + visuals.
 import math
 
 from .inputs import select_all_on_focus
+# Shared dark-navy "dashboard" theme (Calculator + Simulator inject the SAME CSS so
+# the look never drifts). Kept under its historical name here.
+from .theme import DASHBOARD_CSS as CALC_V2_CSS
 
 # 3D / beveled button styling for the Calculator action buttons (Load / IV /
 # Fetch Premiums and Calculate / Expected Move). Scoped to ``.calc-btn-3d`` and
@@ -51,65 +54,6 @@ CALC_CSS = """
 .calc-btn-3d.calc-go.q-btn:active{box-shadow:0 1px 0 0 #1f5e2a,0 2px 4px rgba(0,0,0,.45);}
 """
 
-# Dark-navy "dashboard" restyle, page-scoped under .calc-v2 (Calculator only for
-# now; promotable app-wide later). Converts NiceGUI's standard underline fields to
-# filled navy boxes, draws bordered cards, and styles the outline / primary buttons.
-CALC_V2_CSS = """
-.calc-v2{
-  background:radial-gradient(130% 90% at 50% -20%,#16243f 0%,#0c1424 55%,#0a0f1c 100%);
-  border:1px solid #1d2942;border-radius:14px;padding:18px 20px 22px;
-}
-.calc-v2 .calc-card{
-  background:#101a30;border:1px solid #213152;border-radius:12px;padding:14px 16px;
-}
-.calc-v2 .calc-eyebrow{color:#8794b4;font-size:12px;letter-spacing:.02em;}
-/* Boxed dark inputs — restyle the standard q-field control into a filled box. */
-.calc-v2 .q-field__control{
-  background:#0c1426;border:1px solid #243353;border-radius:8px;padding:0 10px;min-height:40px;
-}
-.calc-v2 .q-field__control:before,.calc-v2 .q-field__control:after{border:0!important;}
-.calc-v2 .q-field--focused .q-field__control{
-  border-color:#3b82f6;box-shadow:0 0 0 2px rgba(59,130,246,.28);
-}
-.calc-v2 .q-field__label{color:#7f8db0;}
-.calc-v2 .q-field__native,.calc-v2 .q-field__native input,
-.calc-v2 .q-field__native textarea,.calc-v2 .q-field__native span{color:#e7edf8!important;}
-.calc-v2 .q-field__append .q-icon,.calc-v2 .q-field__prepend .q-icon{color:#8794b4;}
-/* Leg table header row */
-.calc-v2 .leg-head{color:#7f8db0;font-size:12px;padding:0 2px 4px;}
-/* Buttons */
-.calc-v2 .cv2-btn.q-btn{
-  background:#15213b!important;color:#cdd8ee!important;border:1px solid #2a3a5c;
-  border-radius:9px;min-height:40px;font-weight:500;
-}
-.calc-v2 .cv2-btn.q-btn:hover{background:#1b2950!important;}
-.calc-v2 .cv2-btn-primary.q-btn{
-  background:#2563eb!important;color:#fff!important;border-radius:9px;min-height:40px;font-weight:600;
-}
-.calc-v2 .cv2-btn-primary.q-btn:hover{background:#1d4fd1!important;}
-/* Strategy menu button — match the boxed navy inputs (drop the blue outline). */
-.calc-v2 .strategy-menu-btn.q-btn{
-  background:#0c1426!important;border:1px solid #243353!important;color:#e7edf8!important;
-  border-radius:8px;min-height:40px;font-weight:400;padding:0 6px 0 12px;
-}
-.calc-v2 .strategy-menu-btn.q-btn:hover{border-color:#3b82f6!important;}
-.calc-v2 .strategy-menu-btn .q-btn__content{justify-content:space-between;flex:1;text-transform:none;}
-.calc-v2 .strategy-menu-btn .q-icon{color:#8794b4;}
-/* Centered strike value in the leg table. */
-.calc-v2 .leg-strike .q-field__native{justify-content:center;text-align:center;}
-/* Cascading Strategy menu popup — teleported to <body>, so NOT under .calc-v2.
-   Theme it to match the navy cards. */
-.strat-menu-navy.q-menu{
-  background:#101a30!important;border:1px solid #213152;
-  box-shadow:0 10px 28px rgba(0,0,0,.55);border-radius:10px;
-}
-.strat-menu-navy .q-item{color:#e7edf8;border-radius:6px;}
-.strat-menu-navy .q-item__section,.strat-menu-navy .q-item__label{color:#e7edf8;}
-.strat-menu-navy .q-item:hover,
-.strat-menu-navy .q-item--active,
-.strat-menu-navy .q-item.q-manuallyfocused{background:#1b2950!important;}
-.strat-menu-navy .q-icon{color:#8794b4;}
-"""
 
 def strategy_options():
     """Flat list of strategy codes for the dropdown, in ``STRATEGY_GROUPS`` order.
