@@ -34,10 +34,14 @@ class StrategyMenu:
                 self.button = ui.button(S.strategy_label(value)) \
                     .props("no-caps outline icon-right=arrow_drop_down dense") \
                     .classes("w-full strategy-menu-btn")
+            # The menu popups are teleported to <body> (outside any page wrapper), so
+            # a page can't reach them with scoped CSS. In ``boxed`` mode we tag every
+            # menu with ``strat-menu-navy`` for the page to theme globally.
+            menu_cls = "strat-menu-navy" if boxed else ""
             with self.button:
                 # Top-level menu opens under the button; each family row carries a
                 # nested submenu that Quasar opens to the side on hover.
-                self._menu = ui.menu().props('anchor="bottom left" self="top left"')
+                self._menu = ui.menu().props('anchor="bottom left" self="top left"').classes(menu_cls)
                 with self._menu:
                     for family, variants in S.STRATEGY_MENU:
                         with ui.item().props("clickable"):
@@ -45,7 +49,7 @@ class StrategyMenu:
                                 ui.label(family)
                             with ui.item_section().props("side"):
                                 ui.icon("chevron_right").classes("opacity-60")
-                            with ui.menu().props('anchor="top end" self="top start"'):
+                            with ui.menu().props('anchor="top end" self="top start"').classes(menu_cls):
                                 for vlabel, vcode in variants:
                                     ui.menu_item(
                                         vlabel, auto_close=False,

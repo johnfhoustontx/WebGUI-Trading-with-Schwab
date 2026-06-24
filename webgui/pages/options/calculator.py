@@ -97,6 +97,18 @@ CALC_V2_CSS = """
 .calc-v2 .strategy-menu-btn .q-icon{color:#8794b4;}
 /* Centered strike value in the leg table. */
 .calc-v2 .leg-strike .q-field__native{justify-content:center;text-align:center;}
+/* Cascading Strategy menu popup — teleported to <body>, so NOT under .calc-v2.
+   Theme it to match the navy cards. */
+.strat-menu-navy.q-menu{
+  background:#101a30!important;border:1px solid #213152;
+  box-shadow:0 10px 28px rgba(0,0,0,.55);border-radius:10px;
+}
+.strat-menu-navy .q-item{color:#e7edf8;border-radius:6px;}
+.strat-menu-navy .q-item__section,.strat-menu-navy .q-item__label{color:#e7edf8;}
+.strat-menu-navy .q-item:hover,
+.strat-menu-navy .q-item--active,
+.strat-menu-navy .q-item.q-manuallyfocused{background:#1b2950!important;}
+.strat-menu-navy .q-icon{color:#8794b4;}
 """
 
 def strategy_options():
