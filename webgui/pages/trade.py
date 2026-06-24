@@ -18,6 +18,8 @@ unit-tested.
 Fundamentals are not wired (MVP): the Investor verdict uses technicals/RS only
 and degrades to "Insufficient fundamental data → HOLD" — a note flags this.
 """
+import time
+
 import bus_client
 from nicegui import ui
 
@@ -254,8 +256,14 @@ def render():
     """Trade page: symbol input + Analyze button + verdict/MTF/momentum cards."""
     ui.add_css(DASHBOARD_CSS)
 
-    # Page state (local closure, not module globals — built per request).
+    # Page state (local closure, not module globals — built per request). Read any
+    # prior cached analysis up-front so the symbol field can seed to the LAST
+    # analyzed symbol (the result itself persists across navigation via the cache).
     state = {"result": None, "ver": None, "last_requested": None, "last_ts": 0.0}
+    state["ver"] = bus_client.read_version("trade:analysis")
+    state["result"] = bus_client.read("trade:analysis") or None
+    seed = seed_symbol(state["result"])
+    state["last_requested"] = seed
 
     # Dark-navy "dashboard" shell (page-scoped, .calc-v2) — the SAME shared theme the
     # Calculator/Simulator inject, wrapping the controls + result areas.
@@ -263,7 +271,7 @@ def render():
         ui.label("Trade Analyzer").classes("text-h6").style("color:#eaf0fb")
 
         with ui.row().classes("items-center gap-3 flex-wrap"):
-            symbol_in = select_all_on_focus(ui.input("Symbol", value="AAPL").classes("w-32"))
+            symbol_in = select_all_on_focus(ui.input("Symbol", value=seed).classes("w-32"))
             analyze_btn = ui.button("Analyze", icon="analytics", color=None) \
                 .props("no-caps").classes("cv2-btn-primary")
             status = ui.label("Enter a symbol and click Analyze.").classes("calc-eyebrow")
@@ -478,13 +486,18 @@ def render():
     def _request_analyze():
         sym = (symbol_in.value or "").strip().upper()
         if not sym:
-            ui.notify("Enter a symbol first.", type="warning")
             return
+        if not should_request(sym, state["last_requested"],
+                              time.monotonic() - state["last_ts"]):
+            return
+        state["last_requested"] = sym
+        state["last_ts"] = time.monotonic()
         bus_client.request("trade", {"type": "analyze", "args": {"symbol": sym}})
         status.text = f"Analyzing {sym}…"
 
     analyze_btn.on_click(_request_analyze)
     symbol_in.on("keydown.enter", lambda e: _request_analyze())
+    symbol_in.on("blur", lambda e: _request_analyze())  # tab-out = Analyze
 
     # ── version-poll repaint (fetch-free) ─────────────────────────────────────
     @guard
@@ -499,8 +512,7 @@ def render():
         status.text = _status_for(state["result"])
 
     # Initial paint (graceful-empty when the service is cold / no prior analysis).
-    state["ver"] = bus_client.read_version("trade:analysis")
-    state["result"] = bus_client.read("trade:analysis") or None
+    # The cache was already read up-front (to seed the symbol field), so just paint.
     _render_results()
     _update_markov(state["result"])
     status.text = _status_for(state["result"])
