@@ -8,7 +8,34 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-06-24 (**App theme rollout + What-if payoff**: the dark-navy
+**Last updated:** 2026-06-24 (**Trade Analyzer theme + Markov near-term fix**: the
+`/trade` page now wears the shared dark-navy **"dashboard" theme** (`ui.add_css(
+DASHBOARD_CSS)` + `.calc-v2` wrap from `webgui/pages/options/theme.py`; header +
+verdict + secondary cards are `calc-card`s, the Analyze button is `cv2-btn-primary`).
+**Dead space removed**: the verdict row switched `items-stretch` → **`items-start`**
+so the short Position/Investor cards size to content instead of stretching to the tall
+Markov card (verified live: 308/276px vs the Markov card's 453px — was ~150-180px of
+empty bottom each). **Markov chart fix** for "looks the same for every symbol": the
+5/10/20d forecast **converges to the bull-leaning pooled-prior stationary within
+~10 days** (only the near term is score-specific), so `trade_svc.compute.build_markov_block`
+now emits an **additive** dense **`trajectory`** (`_MK_TRAJECTORY_HORIZONS=[1,2,3,5,10,20]`,
+reusing the tested `forecast()`) and `trade.markov_forecast_figure` plots it
+(`now→1d→2d→3d→5d→10d→20d`, falling back to `horizons` for back-compat) — the
+score-specific early path is now visible (verified live: XOM Strong-Bear opens
+red-dominated, INTC Strong-Bull green-dominated, NVDA between). The chart is
+dark-themed (transparent bg, light axes, fixed `{value}%` y-axis). **`horizons`
+(5/10/20d cards), `drift`, `tilt`, `markov_adjusted_score` are unchanged** — the
+trajectory is chart-only, the verdict label/score math untouched. **Tab-out =
+Analyze**: a **`focusout`** handler (NOT `blur` — NiceGUI binds to the q-input ROOT
+and `blur` doesn't bubble there, same reason `select_all_on_focus` uses `focusin`)
+fires Analyze, deduped via `should_request` (collapses the blur-then-click double
+fire). **Last analyzed symbol persists** across navigation: the input seeds from the
+cached `trade:analysis` result's `symbol`. webgui 435 + trade_svc 41 green; verified
+live end-to-end (themed render, dense chart, tab-out analyze, symbol persistence).
+Branch `Using_Highcharts`. Design/plan:
+[design](docs/plans/2026-06-24-trade-analyzer-theme-layout-markov-design.md) /
+[plan](docs/plans/2026-06-24-trade-analyzer-theme-layout-markov-plan.md).)
+Prior — 2026-06-24 (**App theme rollout + What-if payoff**: the dark-navy
 **"dashboard" theme** is now **shared, not Calculator-only** — extracted to
 **`webgui/pages/options/theme.py`** (`DASHBOARD_CSS`, scoped under `.calc-v2`) and
 injected by **both** the Calculator **and** the Simulator (`ui.add_css(DASHBOARD_CSS)`
@@ -288,7 +315,7 @@ Routes:
 | `/options/rescue` | Rescue (at-risk credit spreads (PCS/CCS/IC) → **at-risk table** (paper+captured, heat-colored) → select a position → ranked **commission-aware adjustment menu**: close / partial-close / narrow / convert-IC / butterfly / roll-down/out/down-out / broken-wing / inverted / futures-hedge; each card shows gross/commission/net + metrics + legs + rationale + strategic context + warnings + score; execute cards have **Apply → confirm → `rescue_apply`** behind a stale-price guard, advisory cards show "manual"; nav badge from `cache:options:rescue_summary`) | built |
 | `/sentiment` | Sentiment (two-column top: **dual** Sentiment gauges (Today + 30-Day Avg) + **dual** Market Trend gauges (Today live-intraday + 30-Day structural — directional 0–100 score, 15-min cadence) / component table; traffic-light tiles; 30d history + rolling avgs; full-width **Sector & Industry Performance** w/ Day/Week/Month %, P/C, RRG, rotation banner, **expandable industries w/ P/C+RRG**; bottom status bar; **persists across navigation**; **server-side 120s auto-refresh + bridge publish, tab-independent**) | built |
 | `/sentiment/rotation` | Sector Rotation (RRG-vs-SPY: Risk-ON/OFF headline + spread; **top row** = quadrant-map table (left) + tight ROTATING FROM/INTO w/ S&P weights (right); **full-width RRG below** w/ per-sector "meteor tails" — engine `assess_sector` retains a `tail` of `TAIL_LENGTH=12` RS-Ratio/RS-Mom points sampled every `TAIL_STRIDE=2` days; page draws **one spline series per sector** (faded trail line + single bright head dot) and **hover-isolates** a sector via native Highcharts `plotOptions.series.states.inactive` (hovering one dims the rest — no client round-trip); reuses `sector_rotation_assessment`; cached, **manual Refresh only**) | built |
-| `/trade` | Trade (on-demand single-symbol analysis: **Position (1–8wk)** + **Investor (months+)** Buy/Hold/Sell verdicts w/ score + top reasons + hard gates + expandable factor breakdown; **MTF EMA alignment** (per-timeframe); momentum strip (RSI/ADX/MACD/VWAP/RelVol); sector strength; **Fundamentals card** (P/E/PEG/growth/ROE/margins via proxy `/instruments`); **Markov Forecast card** (third **equal-width frame in the verdict row**, alongside Position + Investor: 5-band composite-score Markov chain → stacked-area band-probability forecast + P(BUY)/P(SELL)/E[score] at 5/10/20d + a bounded confidence-weighted drift-tilt `markov_adjusted_score` headline, verdict label unchanged); persists across nav) | built |
+| `/trade` | Trade (on-demand single-symbol analysis: **Position (1–8wk)** + **Investor (months+)** Buy/Hold/Sell verdicts w/ score + top reasons + hard gates + expandable factor breakdown; **MTF EMA alignment** (per-timeframe); momentum strip (RSI/ADX/MACD/VWAP/RelVol); sector strength; **Fundamentals card** (P/E/PEG/growth/ROE/margins via proxy `/instruments`); **Markov Forecast card** (third **equal-width frame in the verdict row**, alongside Position + Investor: 5-band composite-score Markov chain → stacked-area band-probability forecast + P(BUY)/P(SELL)/E[score] at 5/10/20d + a bounded confidence-weighted drift-tilt `markov_adjusted_score` headline, verdict label unchanged; **chart plots the dense near-term `trajectory` now/1/2/3/5/10/20d** so it differs by score — the 5/10/20d tail converges to the bull-leaning prior stationary; chart is dark-navy themed); **dark-navy "dashboard" theme** (`.calc-v2` via shared `theme.py`, `items-start` compact cards); **tab-out (`focusout`) = Analyze** (deduped); **persists last analyzed symbol** + analysis across nav) | built |
 | `/driver` | Driver (morning-agent **order-approval queue**: Run morning agent → graded day + proposed trades; **APPROVE** (confirm dialog) / **SKIP**; conditions strip + grade rationale; **Performance** view (win-rate / P&L-by-bucket + trade table). 09:28-ET scheduler fires the run unattended. Orders execute via `order_executor` with `PAPER_TRADE=True` → **simulated**) | built |
 | `/settings` | Settings (GUI prefs via `app_settings`: scanner **audio alert** on/off + sound + volume, only-during-market-hours, min-score-to-alert; desktop-notification toggle + permission grant + Test sound. Extensible — first batch) | built |
 | `/portfolio` | Portfolio (3-tier, `services/portfolio_svc` :8212: **Holdings / Sectors / Performance** tabs over the portfolio model — sector breakdown, vs-sector RS, since-purchase excess, benchmark over/under-weight, tailwind; **Performance** scorecard (return/capital/risk/entry grades + composite + ann. return + drawdown) with a per-position **advisory suggestions** detail pane; **live-streaming P&L** via the service's proxy SSE consumer republishing each tick; proxy/stream status bar; persists across nav) | built |
