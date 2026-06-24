@@ -351,6 +351,7 @@ def render():
         "iv_ver": None,       # last-seen calc_iv cache version
         "calc_spot": None,    # spot used for the last enqueued compute (grid marker)
         "pending_legs": None,  # legs copied in from the Simulator, applied on chain load
+        "contracts": 1,       # last-applied Contracts count (drives per-leg qty scaling)
     }
 
     # Two columns: inputs (vertical) on the LEFT, P&L matrix on the RIGHT. The
@@ -386,14 +387,16 @@ def render():
                 rmin_in = ui.number("Range min", value=0.0, format="%.2f").classes("w-28")
                 rmax_in = ui.number("Range max", value=0.0, format="%.2f").classes("w-28")
                 rpct_in = ui.number("Range %", value=5.0, format="%.1f").classes("w-24")
-            # Legs  ·  Fetch premiums (right edge, aligned with Load / IV)
-            with ui.row().classes("w-full items-start justify-between gap-3 no-wrap"):
-                leg_box = ui.column().classes("gap-2")
-                ui.button("Fetch Premiums", icon="download", on_click=lambda: fetch_premiums()) \
-                    .props("dense no-caps").classes("calc-btn-3d w-40") \
-                    .tooltip("Fill leg premiums from the chain (strikes required)")
-            # Primary actions
+            # Legs — the editable multi-leg editor mounts into leg_box below. It's
+            # full-width within the left column (was sharing a justify-between row
+            # with Fetch Premiums, which pushed that button over the P&L matrix as
+            # the editor widened to 6 columns).
+            leg_box = ui.column().classes("gap-2 w-full")
+            # Primary actions (Fetch Premiums fills leg premiums, so it leads here).
             with ui.row().classes("items-center gap-3 pt-1 flex-wrap"):
+                ui.button("Fetch Premiums", icon="download", on_click=lambda: fetch_premiums()) \
+                    .props("no-caps").classes("calc-btn-3d") \
+                    .tooltip("Fill leg premiums from the chain (strikes required)")
                 ui.button("Calculate", icon="calculate", on_click=lambda: do_calc()) \
                     .props("no-caps").classes("calc-btn-3d calc-go")
                 ui.button("Expected Move", icon="show_chart", on_click=lambda: send_to_em()) \
@@ -434,9 +437,40 @@ def render():
         show_premium=True, on_change=lambda: None,
         spot_getter=lambda: float(price_in.value or 0))
 
+    def _scale_leg_qty(factor):
+        """Multiply every leg's qty by ``factor`` (RATIO-preserving) and re-render —
+        how the page-level Contracts count flows onto the legs (a 1-2-1 butterfly
+        scales to 10-20-10, not flattened)."""
+        if factor == 1:
+            return
+        legs = editor.get_legs()
+        if not legs:
+            return
+        for leg in legs:
+            leg["qty"] = max(1, round(int(leg.get("qty", 1) or 1) * factor))
+        editor.set_legs(legs)
+
+    def _seed_template():
+        """Apply the selected template (legs = its ratios) then scale by the current
+        Contracts so the legs reflect the position size from the start."""
+        editor.apply_template(strategy_sel.value)
+        _scale_leg_qty(max(1, int(contracts_in.value or 1)))
+
     # Seed the default template (PCS). Tolerates empty strikes/expiries pre-load.
-    editor.apply_template(strategy_sel.value)
-    strategy_sel.on_value_change(lambda e: editor.apply_template(strategy_sel.value))
+    _seed_template()
+    strategy_sel.on_value_change(lambda e: _seed_template())
+
+    @guard
+    def _on_contracts_change():
+        """Contracts is the position-size multiplier: scale all legs by new/old so
+        changing it from 1 → 10 takes every leg's qty up 10× (ratios preserved)."""
+        new = max(1, int(contracts_in.value or 1))
+        old = state.get("contracts") or 1
+        if new != old:
+            _scale_leg_qty(new / old)
+        state["contracts"] = new
+
+    contracts_in.on_value_change(lambda e: _on_contracts_change())
 
     @guard
     def fetch_premiums():
@@ -626,7 +660,7 @@ def render():
             fetch_premiums()
             do_calc()
         elif not editor.is_dirty():
-            editor.apply_template(strategy_sel.value)
+            _seed_template()   # re-seed (template ratios × Contracts), snap strikes
         else:
             editor.refresh_options()
         if cc.get("symbol") is not None:
