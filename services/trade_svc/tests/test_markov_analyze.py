@@ -41,3 +41,18 @@ def test_markov_adjusted_score_is_full_plus_tilt(monkeypatch):
                                        composite_full=38.0)
     assert block["tilt"] == 5.0
     assert block["markov_adjusted_score"] == 43.0  # clip(38 + 5)
+
+
+def test_build_markov_block_has_dense_trajectory(monkeypatch):
+    # The chart needs denser near-term horizons than the metric cards. The block
+    # must carry an additive `trajectory` (1/2/3/5/10/20d) while `horizons`
+    # (the cards/tilt source) stays 5/10/20 and the tilt math is unchanged.
+    monkeypatch.setattr(compute, "get_prior",
+                        lambda: (np.full((5, 5), 0.2), "test"))
+    bands = pd.Series([2, 2, 3, 3, 4, 3, 3, 4] * 30, dtype=float)
+    block = compute.build_markov_block(bands, composite_daily_now=25.0,
+                                       composite_full=38.0)
+    assert [h["n"] for h in block["horizons"]] == [5, 10, 20]
+    assert [t["n"] for t in block["trajectory"]] == [1, 2, 3, 5, 10, 20]
+    assert all(len(t["dist"]) == 5 for t in block["trajectory"])
+    assert all(abs(sum(t["dist"]) - 1.0) < 1e-6 for t in block["trajectory"])

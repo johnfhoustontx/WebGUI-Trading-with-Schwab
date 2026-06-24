@@ -434,6 +434,11 @@ def get_prior():
 
 # ── Markov forecast block (Task 3.3) ─────────────────────────────────────────
 _MK_HORIZONS = [5, 10, 20]
+# Denser near-term horizons for the CHART ONLY. The 5/10/20d forecast converges to
+# the (bull-leaning) prior stationary, so the chart looked identical for every
+# symbol; the near-term transient is the score-specific part. This does NOT feed the
+# tilt (still horizon _MK_DRIFT_HORIZON) or the metric cards (still _MK_HORIZONS).
+_MK_TRAJECTORY_HORIZONS = [1, 2, 3, 5, 10, 20]
 _MK_DRIFT_HORIZON = 10
 _MK_ALPHA = 30.0
 _MK_K = 0.5
@@ -452,6 +457,7 @@ def build_markov_block(band_series, composite_daily_now, composite_full):
         P = _markov.shrink(C_sym, prior, alpha=_MK_ALPHA)
         current = _markov.classify_band(composite_daily_now)
         fc = _markov.forecast(P, current, _MK_HORIZONS)
+        traj = _markov.forecast(P, current, _MK_TRAJECTORY_HORIZONS)["horizons"]
         conf = _markov.row_confidence(C_sym[current])
         tilt = _markov.drift_tilt(fc, composite_daily_now, _MK_DRIFT_HORIZON,
                                   k=_MK_K, max_pts=_MK_MAX_PTS, confidence=conf)
@@ -464,6 +470,7 @@ def build_markov_block(band_series, composite_daily_now, composite_full):
             "persistence": fc["persistence"],
             "stationary": fc["stationary"],
             "horizons": fc["horizons"],
+            "trajectory": [{"n": h["n"], "dist": h["dist"]} for h in traj],
             "drift": drift,
             "tilt": float(tilt),
             "confidence": float(conf),
