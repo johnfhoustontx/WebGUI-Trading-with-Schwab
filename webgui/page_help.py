@@ -56,12 +56,17 @@ Shows the profit/loss of an options trade **before** you place it — any
 Shows where option **dealers** must buy or sell to stay hedged — which can pin or
 accelerate price.
 
-- **Symbol dropdown** — pick the index or stock.
+- **Symbol dropdown** — pick the index or stock. The page **remembers** your last
+  symbol when you come back, and switching symbols refreshes automatically.
 - **GEX / Charm / DEX / Vanna / Term** — different lenses on dealer positioning;
   the **walls** mark likely support/resistance.
-- **Heat map** — how that positioning shifts through the trading day.
+- **Bars + heat map** — show ±20 strikes around spot, so the size stays steady as
+  the day moves. **Press and hold** the left mouse button on the heat map to read a
+  strike's value (it follows the cursor while held); plain hovering shows nothing.
 - Positive gamma → price tends to **stick** near the walls; negative gamma →
   moves get **amplified**. Auto-refreshes every 2 minutes.
+- After the close the **last session's** chart stays on screen until midnight
+  (Friday's holds through the weekend), then clears for the next trading day.
 """,
     "/options/simulator": """
 **Simulator — the simple version**

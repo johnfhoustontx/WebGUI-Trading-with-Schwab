@@ -8,7 +8,41 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-06-24 (**Calc "Number of strikes" + Calc/Sim state persistence**:
+**Last updated:** 2026-06-24 (**Gamma page overhaul — persistence, fixed strike
+window, blended heatmaps**: a batch of `/options/gamma` fixes. **(1) Symbol no
+longer reverts to `$SPX` on refresh** — the page reads one shared
+`cache:options:gamma`, so the **dropdown syncs to the cached snapshot's symbol on
+build**, a repaint **ignores any snapshot whose symbol ≠ the selected one** (so the
+service's one-shot `$SPX` startup publish can't clobber it), and **selecting a symbol
+auto-refreshes** it (`gamma._set_symbol`/`_on_symbol_change` + the `_maybe_repaint`
+guard). **(2) Fixed ±N strike window** (`gamma.strikes_around`, N_SIDE=20) for the
+bars **and** heatmap instead of a ±% band, so the candle/cell count — hence size —
+stays consistent through the day; the heatmap `rowsize` is the **median** visible-
+strike gap (not the min) so mixed-spacing names (QCOM/SPCX: 1.0 strikes among 2.5)
+tile densely like `$SPX` (`_strike_step`). **(3) Heatmap cropped to the visible
+near-spot window** before building cells — Charm/DEX/Vanna are non-zero across the
+whole chain, so this cut ~45k→~2.4k points (~19×). **(4) Off-hours persistence** —
+the candles + heatmap stay on the **last session's** data until the **next trading
+day's midnight CT**, then clear (Fri persists through the weekend / holidays until
+the pre-session midnight): `scheduler.active_session_date()`/`gamma_cleared()` +
+`gex_history_db.load_date_with_grid(date)`; `compute.gamma_snapshot` returns empty
+in the overnight cleared window and loads the **active session date** for the
+heatmap (service-side; the DB retains prior rows). **(5) Blended heatmaps** — both
+the intraday **and Term** heatmaps render as a smooth **interpolated** image (no
+cell borders / separator mesh), a **dark diverging colorscale** (`HEAT_STOPS`: net
+≈ 0 fades to **transparent** so the dark page shows through, like the candlestick
+chart; strong −/+ glow red/green), a **transparent** chart background, an
+**off-white** (`#f5f5f5`) spot line, **no fade** on hover (`states.inactive`/`hover`
+disabled), and a **press-and-hold tooltip** — a `chart.events.load` hook
+(`_HEAT_PRESS_TOOLTIP_JS`) gates Highcharts' `tooltip.refresh` so the popup shows
+**only while the left button is held** (mousedown → show + follow the cursor;
+mouseup → hide); plain hover shows nothing. **(6) Term view bugfixes** — re-floats
+JSON-stringified strike keys + widens the chain fetch to the **next 5 expirations
+regardless of cadence** (`compute._term_chain`/`_count_expirations`, so weekly/
+monthly-only names show 5 columns, not 1). **(7)** an off-hours `spot=None` snapshot
+no longer 500s the page. webgui 455 + options_svc 256 green; verified live. Branch
+`Using_Highcharts`.)
+Prior — 2026-06-24 (**Calc "Number of strikes" + Calc/Sim state persistence**:
 two changes. **(1)** The Calculator's **Range min/max/%** controls are replaced by a single
 **Number of strikes** input (default 24): the P&L grid now draws **±N real chain strikes
 around spot** (strictly — a far-OTM leg can fall off; raise N to see it). New pure
@@ -355,7 +389,7 @@ Routes:
 | `/options/portfolio` | Paper Portfolio (paper account) | built |
 | `/options/calculator` | Calculator (summary tiles + P&L heatmap — grid rows = **±N real chain strikes around spot** via the **Number of strikes** input (default 24, strictly around spot; `strikes_window`→`price_rows`); **intraday time-to-expiry** — the grid's first column is **"Now"** (current mark-to-market value, priced at calendar hours-to-4pm-ET /365) and the last is **"Exp"** (expiration payoff), fixing 0DTE which previously showed only the payoff everywhere; summary tiles + PoP also use the intraday "Now" T (was an `or 1/365` clamp that over-priced 0DTE ~20×); the **IV** button **implies IV from the traded contract's mark** ThinkorSwim-style via a `calc_iv` command → `cache:options:calc_iv` (`compute.calc_iv` → engine `implied_vol` bisection), falling back to ATM chain `volatility` pre-strike-pick; **multi-leg strategy builder** — a Strategy dropdown (singles + verticals credit/debit + condors iron/all-same + butterflies long/iron + calendars/diagonals) over the shared **editable leg-editor** (`leg_editor.py`: per-leg kind/side/strike/expiry/qty + Add/Remove), per-leg expiry so **calendars** price each leg at its own T, a **generic-numeric summary** for non-PCS/CCS/IC structures, and a **Copy to Simulator** button; **persists full UI state across navigation** (symbol/strategy/legs/fields/Number-of-strikes) + **auto-refreshes on return** via a single-user module snapshot — `page_state.py`) | built |
 | `/options/swing` | Swing Scanner | built |
-| `/options/gamma` | Gamma (GEX/Charm/DEX/Vanna bars + flip/**single Call+Put walls** + intraday heatmap; bar/heatmap **width split grows with session** snapshot count; **flicker-free** in-place Highcharts updates; **symbol is a dropdown** — default `$SPX`, populated from the collected universe (watchlist minus `$VIX`) via `cache:options:gamma_symbols`; Explain works per-selected-symbol) | built |
+| `/options/gamma` | Gamma (GEX/Charm/DEX/Vanna bars + flip/**single Call+Put walls** + intraday heatmap; **fixed ±20-strike window** around spot for bars+heatmap (`strikes_around`, consistent candle/cell size all day; heatmap `rowsize`=median gap; heatmap cropped to the window); **blended interpolated heatmaps** (intraday **and Term**) — smooth image, no lines, dark `HEAT_STOPS` colorscale (zero→transparent like the candlestick chart), transparent bg, off-white spot line, no fade, **press-and-hold tooltip** (`_HEAT_PRESS_TOOLTIP_JS`); bar/heatmap **width split grows with session** snapshot count; **flicker-free** in-place Highcharts updates; **symbol is a dropdown** — default `$SPX`, populated from the collected universe (watchlist minus `$VIX`) via `cache:options:gamma_symbols`, **syncs to the cached symbol on build + selecting auto-refreshes + repaints ignore foreign-symbol snapshots** (no revert to `$SPX`); Term shows the **next 5 expirations regardless of cadence** (`_term_chain`); **off-hours persistence** — last session's candles+heatmap held until the next trading day's midnight CT (`active_session_date`/`gamma_cleared` + `load_date_with_grid`); off-hours `spot=None` degrades gracefully; Explain works per-selected-symbol) | built |
 | `/options/simulator` | Simulator (**multi-leg strategy builder** — a Strategy dropdown over the shared **editable leg-editor** (`leg_editor.py`) replaces the old single-contract selector — driving all three legacy tabs: **Replay** (re-prices the **netted** position along the underlying's recent path → stacked price + 5-Greek panels over a gap-compressed integer x-axis w/ a client-side scrub cursor) + What-if (a **dollar profit/loss payoff from entry**: P/L = position value (×100 contract multiplier) minus the **entry mark** (`whatif_baseline` = value at spot *now*) — so profit caps at the net credit, loss floors at width−credit, **matching the Calculator** — with a green profit fill above / red loss fill below breakeven (area `threshold:0` + `color`/`negativeColor`) + faint Profit/Loss washes + labels; Δt is **elapsed** days from now, per-leg decay → **calendars** correct, theta visible as Δt slides) + IV-shock; **Copy to Calculator** button; **dark-navy dashboard theme** via shared `theme.py`; **persists full UI state across navigation** (symbol/strategy/legs/sliders/active tab) + **auto-refreshes on return** via a single-user module snapshot — `page_state.py`) | built |
 | `/options/expected-move` | Expected Move (candlestick price history (6-mo daily) + forward **ATM-IV expected-move cone** to the option's expiration (green/red dashed, √-time fan) + leg **strike lines** (short solid / long dashed, put/call colored) + axis **crosshair** w/ Date(X)+Price(Y) label boxes; opened in a **new browser tab** via stash-handoff from Scanner/Paper/Captured/Calculator, or standalone w/ symbol+expiry input) | built |
 | `/options/rescue` | Rescue (at-risk credit spreads (PCS/CCS/IC) → **at-risk table** (paper+captured, heat-colored) → select a position → ranked **commission-aware adjustment menu**: close / partial-close / narrow / convert-IC / butterfly / roll-down/out/down-out / broken-wing / inverted / futures-hedge; each card shows gross/commission/net + metrics + legs + rationale + strategic context + warnings + score; execute cards have **Apply → confirm → `rescue_apply`** behind a stale-price guard, advisory cards show "manual"; nav badge from `cache:options:rescue_summary`) | built |
@@ -533,6 +567,28 @@ module-level functions (TDD them with sample dicts); keep `render()` thin
   `accessibility.enabled:False` silences
   the a11y-module console nag (house pattern). (`plotly` was never a Python dep —
   `ui.plotly(dict)` rendered via bundled plotly.js.)
+- **Blended heatmap + colorAxis alpha:** `series.interpolation:True` (Highcharts 12,
+  in the bundled `heatmap` module) renders the heatmap as ONE smooth interpolated
+  `<image>` (no per-cell `<rect>`s, so no borders/separator mesh) — the "blended"
+  look. **colorAxis `stops` honor rgba alpha** through the interpolated image, so a
+  `rgba(...,0)` stop at the zero-point makes net≈0 fade to transparent and the dark
+  page shows through (`gamma.HEAT_STOPS` + `chart.backgroundColor:"transparent"`).
+  Drop `plotBackgroundColor` (the mesh) and set `borderWidth:0`. **`states:{inactive:
+  {enabled:False},hover:{enabled:False}}`** stops the hover-dim/fade.
+- **Tooltip ONLY on press-and-hold (or click), not hover** (the `nicegui-highcharts`
+  way): you can't do it purely in config, and the component **clobbers**
+  `plotOptions.series.point.events.click` (it wires its own `pointClick` `$emit`). The
+  trick (`gamma._HEAT_PRESS_TOOLTIP_JS`, shipped as a `:`-dynamic `chart.events.load`
+  function): monkeypatch `chart.tooltip.refresh` to a gated no-op, then a container
+  `mousedown` opens the gate + `runPointActions` shows the point under the cursor
+  (Highcharts' own mousemove keeps it following while held), and a `document`
+  `mouseup` closes the gate + `tooltip.hide(0)`. **Gotcha:** `chart.events.load` fires
+  ONCE at element creation, and a persistent `ui.highchart` (created with one fig,
+  then `el.options=…` BEFORE the client mounts) mounts with the LAST-set options — so
+  the load hook must be on the figure the element actually mounts with (carry it in
+  the figure BUILDER, e.g. `heatmap_figure`/`term_heatmap`, not just the init fig).
+  Don't re-set the global `tooltip`/`chart.events` on in-place updates or you rebuild
+  the tooltip and lose the runtime monkeypatch.
 - Tables: `ui.table(columns=[{name,label,field,...}], rows=[...], row_key="id")`;
   selection via `selection="single"` + `table.selected`; row click via
   `table.on("rowClick", handler)` where `event.args[1]` is the row dict.
@@ -727,6 +783,22 @@ no longer launches a separate collector window (the standalone script remains a 
 fallback). NOTE: this path does NOT republish the sentiment bridge (the old collector
 loop did); `sentiment_svc` already republishes the bridge every 120 s, so the bridge
 is unaffected.
+**Off-hours display persistence (2026-06-24).** Collection still stops at ~15:20 CT,
+but the Gamma **display** now holds the last session's candles + heatmap until the
+**next trading day's midnight CT**, then clears (Fri persists through the weekend /
+holidays until the pre-session midnight). Pure helpers
+`scheduler.active_session_date(now)` (today if a trading day, else the most recent
+prior trading day) + `scheduler.gamma_cleared(now)` (True in the overnight 00:00–
+08:30 CT window of a trading day) drive it; `gex_history_db.load_date_with_grid(conn,
+symbol, view, date)` loads a prior session's rows by explicit local date
+(`load_today_with_grid` now delegates to it). `compute.gamma_snapshot` returns
+`None` (→ handler caches a graceful-empty view) in the cleared window and loads the
+**active session date** for the heatmap; the candles re-compute from the live chain
+(which off-hours returns the last session's data). DB-backed, so it survives a
+service restart. **Term-structure** collection stays SPX-only, but the Gamma page's
+**Term view** fetches the **next 5 expirations regardless of cadence** at render
+(`compute._term_chain` widens the chain window — weekly/monthly-only names show 5
+columns, not 1).
 
 **Options GUI polish batch (DONE — 2026-06-16).** A set of UI/UX fixes across the
 Options section (design/plan:
