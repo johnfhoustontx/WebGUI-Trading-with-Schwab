@@ -375,10 +375,10 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None):
     fig = _base_chart("heatmap", height)
     fig["chart"]["backgroundColor"] = "transparent"     # same as the candlestick graph
     fig["chart"]["marginBottom"] = 64                   # room for rotated time labels
-    # Click-only tooltip hook must be on whatever options the element MOUNTS with —
-    # _render_view overwrites the init fig's options before the client mounts, so
-    # carry the load hook here too (load fires once at mount; harmless on updates).
-    fig["chart"]["events"] = {":load": _HEAT_CLICK_TOOLTIP_JS}
+    # Press-and-hold tooltip hook must be on whatever options the element MOUNTS
+    # with — _render_view overwrites the init fig's options before the client
+    # mounts, so carry the load hook here too (load fires once at mount).
+    fig["chart"]["events"] = {":load": _HEAT_PRESS_TOOLTIP_JS}
     fig.update({
         "title": {"text": f"{_view_label(view)} intraday (strike × time)",
                   "style": {"color": FONT}},
@@ -391,34 +391,39 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None):
     return fig
 
 
-# Make the heatmap + spot-line tooltip CLICK-ONLY (no hover text): a chart.events
-# .load hook gates Highcharts' tooltip.refresh so hover never shows it, and a
-# container click re-runs Highcharts' own nearest-point logic (works for the
-# interpolated heatmap AND the line) for that one refresh. Shipped as a NiceGUI
-# ``:``-dynamic-property → ``new Function``. Installed ONCE at element creation
-# (load fires once); it survives in-place option updates because heatmap_figure
-# never re-sets the global tooltip or chart.events.
-_HEAT_CLICK_TOOLTIP_JS = (
+# Make the heatmap + spot-line tooltip PRESS-AND-HOLD (no hover text): a chart
+# .events.load hook gates Highcharts' tooltip.refresh so it only paints while the
+# left mouse button is held. On mousedown we flip the gate on and show the point
+# under the cursor; while held, Highcharts' own mousemove → runPointActions →
+# refresh keeps the popup following the cursor (works for the interpolated heatmap
+# AND the line); on mouseup (anywhere) we hide it and gate off again. Plain hover
+# shows nothing. Shipped as a NiceGUI ``:``-dynamic-property → ``new Function``;
+# installed ONCE at element creation (load fires once) and survives in-place option
+# updates (heatmap_figure never re-sets the global tooltip or chart.events). The
+# held-guard makes the document mouseup listener a no-op for a destroyed chart.
+_HEAT_PRESS_TOOLTIP_JS = (
     "function(){var c=this;if(!c.tooltip)return;"
-    "var orig=c.tooltip.refresh.bind(c.tooltip),allow=false;"
-    "c.tooltip.refresh=function(p){if(allow)orig(p);};"
-    "c.container.addEventListener('click',function(ev){"
-    "var e=c.pointer.normalize(ev);allow=true;"
-    "try{c.pointer.runPointActions(e);}finally{allow=false;}});}"
+    "var orig=c.tooltip.refresh.bind(c.tooltip),held=false;"
+    "c.tooltip.refresh=function(p){if(held)orig(p);};"
+    "c.container.addEventListener('mousedown',function(ev){"
+    "if(ev.button!==0)return;held=true;"
+    "c.pointer.runPointActions(c.pointer.normalize(ev));});"
+    "document.addEventListener('mouseup',function(){"
+    "if(held){held=false;if(c.tooltip)c.tooltip.hide(0);}});}"
 )
 
 
 def _heat_init_fig(height=680):
-    """Initial (empty) heatmap element options + the click-only-tooltip load hook.
+    """Initial (empty) heatmap element options + the press-and-hold-tooltip load hook.
 
     The heatmap element is persistent (created once, updated in place), and
-    ``chart.events.load`` only fires at creation — so the click-only hook must be
-    present on the element's FIRST figure, not added later by heatmap_figure."""
+    ``chart.events.load`` only fires at creation — so the hook must be present on
+    the element's FIRST figure, not added later by heatmap_figure."""
     fig = _base_chart("heatmap", height)
     fig["title"] = {"text": None}
     fig["series"] = []
-    fig["tooltip"] = {"enabled": True}      # needed so chart.tooltip exists for click
-    fig["chart"]["events"] = {":load": _HEAT_CLICK_TOOLTIP_JS}
+    fig["tooltip"] = {"enabled": True}      # needed so chart.tooltip exists for press
+    fig["chart"]["events"] = {":load": _HEAT_PRESS_TOOLTIP_JS}
     return fig
 
 
@@ -496,10 +501,10 @@ def term_heatmap(term_grid):
     no_fade = {"inactive": {"enabled": False}, "hover": {"enabled": False}}
     fig = _base_chart("heatmap", 680)
     fig["chart"]["backgroundColor"] = "transparent"     # same as the candlestick graph
-    # Blended + click-only tooltip, same as the intraday heatmap. The Term view is
-    # painted on chart_el (recreated on the bar↔Term kind switch), so the load hook
-    # rides this figure and fires on that recreation.
-    fig["chart"]["events"] = {":load": _HEAT_CLICK_TOOLTIP_JS}
+    # Blended + press-and-hold tooltip, same as the intraday heatmap. The Term view
+    # is painted on chart_el (recreated on the bar↔Term kind switch), so the load
+    # hook rides this figure and fires on that recreation.
+    fig["chart"]["events"] = {":load": _HEAT_PRESS_TOOLTIP_JS}
     fig.update({
         "title": {"text": "Term structure (net GEX by expiry × strike)",
                   "style": {"color": FONT}},
@@ -605,8 +610,8 @@ def render():
                 .classes("opacity-60 text-sm")
         heatmap_box = ui.column().classes("min-w-0").style("flex: 0.5 1 0%")
         with heatmap_box:
-            # Created with the heatmap init fig so the click-only-tooltip load hook
-            # is installed at creation (load fires once); updated in place after.
+            # Created with the heatmap init fig so the press-and-hold-tooltip load
+            # hook is installed at creation (load fires once); updated in place after.
             heat_plot = ui.highchart(_heat_init_fig(), extras=["heatmap"]).classes("w-full")
             heat_msg = ui.label("").classes("opacity-60 text-sm")
 

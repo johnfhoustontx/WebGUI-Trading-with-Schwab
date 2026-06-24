@@ -385,21 +385,23 @@ def test_heatmap_figure_spot_line_not_faded():
     assert line["states"]["inactive"]["enabled"] is False
 
 
-def test_heat_init_fig_has_click_only_tooltip_hook():
+def test_heat_init_fig_has_press_and_hold_tooltip_hook():
     fig = gamma._heat_init_fig()
     assert fig["tooltip"]["enabled"] is True
-    # The load hook (shipped as a :-dynamic function) gates the tooltip to clicks.
+    # Press-and-hold: shown on mousedown, hidden on mouseup; gated via runPointActions.
     load = fig["chart"]["events"][":load"]
-    assert "runPointActions" in load and "addEventListener('click'" in load
+    assert "runPointActions" in load
+    assert "'mousedown'" in load and "'mouseup'" in load
 
 
-def test_heatmap_figure_carries_click_only_hook():
+def test_heatmap_figure_carries_press_and_hold_hook():
     # The hook must be on the figure the element actually MOUNTS with (render
     # overwrites the init fig before mount), so heatmap_figure carries it too.
     rows = [("09:30", 450, None, None, None, 0, {448.0: 5, 450.0: -3})]
     fig = gamma.heatmap_figure(rows, "GEX", yrange=[440.0, 460.0])
     assert ":load" in fig["chart"]["events"]
-    assert "runPointActions" in fig["chart"]["events"][":load"]
+    load = fig["chart"]["events"][":load"]
+    assert "'mousedown'" in load and "'mouseup'" in load
 
 
 def test_term_heatmap_blended_and_dark_contrast():
@@ -413,8 +415,8 @@ def test_term_heatmap_blended_and_dark_contrast():
     assert hm["states"]["inactive"]["enabled"] is False
     assert fig["chart"]["backgroundColor"] == "transparent"
     assert "plotBackgroundColor" not in fig["chart"]
-    # click-only tooltip hook present (Term paints on the recreated chart_el)
-    assert "runPointActions" in fig["chart"]["events"][":load"]
+    # press-and-hold tooltip hook present (Term paints on the recreated chart_el)
+    assert "'mousedown'" in fig["chart"]["events"][":load"]
     # symmetric contrast clamp present on the color axis
     ca = fig["colorAxis"]
     assert ca.get("max") is not None and ca.get("min") == -ca["max"]
