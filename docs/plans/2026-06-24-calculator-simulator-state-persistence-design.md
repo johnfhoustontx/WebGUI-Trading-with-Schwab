@@ -58,8 +58,8 @@ _LAST_SIM: dict | None = None
 ### Captured state
 
 - **Calculator** `_LAST_CALC`: `symbol`, `strategy`, `legs[]` (full leg dicts),
-  `iv`, `rate`, `ivadj`, `contracts`, `price`, `range_min`, `range_max`,
-  `range_pct`, `expiry`.
+  `iv`, `rate`, `ivadj`, `contracts`, `price`, `num_strikes`, `expiry`. (The old
+  `range_*` controls are replaced by `num_strikes` — see the addendum below.)
 - **Simulator** `_LAST_SIM`: `symbol`, `strategy`, `legs[]`, `dt`, `mult`,
   `lookback`, `ds`, `active_tab`.
 
@@ -112,6 +112,41 @@ dict write (no command, no Redis).
 
 Only `webgui/pages/options/calculator.py` + `webgui/pages/options/simulator.py`
 (+ `webgui/tests/`). **No** service, contract, or engine changes — purely GUI-tier.
+
+## Addendum (2026-06-24): Calculator range → "Number of strikes"
+
+Folded in before implementation. The Calculator's **Range min / Range max / Range %**
+controls are replaced by a single **Number of strikes** input (default **24**,
+configurable), and the P&L grid's price rows become **24 actual chain strikes either
+side of spot**.
+
+**Confirmed decisions**
+- **Rows = actual chain strikes** — each grid row is a real option strike from the
+  loaded chain: the `n` strikes ≤ spot plus the `n` strikes > spot (spacing follows
+  the real ladder). When no chain is loaded yet, fall back to the engine's existing
+  even-step heuristic over ±`n` rows so the grid still renders.
+- **Strictly ±`n` around spot** — the count is the zoom. The grid is **not** widened
+  to keep far-OTM legs visible (today's `symmetric_price_range` leg-widening is
+  dropped for this page); a leg beyond ±`n` strikes falls off until the user raises
+  the count.
+
+**Mechanics**
+- Pure `strikes_window(strikes, spot, n)` (page-side) → the ±`n` strike list around
+  spot, computed from the cached chain's front-expiry ladder (union of call+put
+  strikes).
+- Engine `options-scanner/options_calculator.py:calc_spread_pnl` gains a
+  `price_rows=None` parameter: when provided it is used verbatim as the grid rows
+  (sorted/deduped/rounded), bypassing the heuristic step-gen; absent → existing
+  `price_range`/`rows_per_side` behavior (the fallback). Additive + back-compat.
+- Service `services/options_svc/compute.py:calc_compute` takes `num_strikes`
+  (default 24) + optional `price_rows`, replacing `range_min`/`range_max`/
+  `range_pct`; it forwards `price_rows` to the engine, falling back to
+  `rows_per_side=num_strikes` over a wide-open `price_range` when `price_rows` is
+  absent. `handlers.calc_compute` forwards the new args.
+
+**Effect on persistence**: simplifies it — there is no longer a range overwrite in
+`_apply_chain` to gate, so the `restore_pending` range-gate is unnecessary;
+`_CALC_KEYS` carries `num_strikes` instead of the three `range_*` fields.
 
 ## Non-goals (YAGNI)
 
