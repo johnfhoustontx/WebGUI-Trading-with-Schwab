@@ -64,6 +64,24 @@ def strategy_options():
     return [code for _label, codes in S.STRATEGY_GROUPS for code in codes]
 
 
+def _summary_strategy(strategy_code, legs, dirty):
+    """The strategy code to send to ``calc_compute`` for summary routing.
+
+    The analytic summary (PCS/CCS/IC/singles) is used only when the legs are
+    untouched AND still MATCH the selected template (shape + single expiry); an
+    edited structure, or one copied in while the dropdown reads a different code,
+    falls to the generic numeric summary (``"CUSTOM"``). ``summary_code`` (shared
+    with the Simulator) is the single source of truth for the match check.
+
+    NB: imports ``strategies`` itself — the page's only ``strategies`` alias is a
+    local inside ``strategy_options``, so referencing it inline in ``do_calc``
+    raised ``NameError: name 'S' is not defined`` on Calculate."""
+    if dirty:
+        return "CUSTOM"
+    from . import strategies as S
+    return S.summary_code(strategy_code, legs)
+
+
 def _band(frac):
     """Map a 0..1 magnitude fraction to a 1..5 shade band."""
     frac = max(0.0, min(1.0, frac))
@@ -544,12 +562,9 @@ def render():
             spot = float(price_in.value)
             page_qty = int(contracts_in.value or 1)
             page_exp = str(expiry_sel.value)
-            # Route to the analytic summary only when the legs still MATCH the selected
-            # template (shape + single expiry) AND are untouched; a copied structure
-            # (e.g. a butterfly pasted in while the dropdown still reads "PCS") or an
-            # edited one falls to the generic numeric summary. summary_code is the
-            # single source of truth for this routing (shared with the Simulator).
-            strat = S.summary_code(strategy_sel.value, legs) if not editor.is_dirty() else "CUSTOM"
+            # Route analytic vs generic summary (see _summary_strategy): a copied
+            # or edited structure falls to the generic numeric summary.
+            strat = _summary_strategy(strategy_sel.value, legs, editor.is_dirty())
             params = {
                 "strategy": strat,
                 "spot": spot,

@@ -139,6 +139,21 @@ def test_strategy_options_cover_strategies():
     assert len(S.STRATEGY_TEMPLATES["PCS"]) == 2
 
 
+def test_summary_strategy_routes_and_imports_strategies():
+    """do_calc routes the summary strategy code through this helper. Regression:
+    the helper must import ``strategies`` itself — the only ``strategies`` alias on
+    the page lived inside ``strategy_options``, so an inline reference in do_calc
+    raised ``NameError: name 'S' is not defined`` on Calculate."""
+    from pages.options import strategies as S
+
+    strikes = [90, 95, 100, 105, 110]
+    pcs = S.build_default_legs("PCS", 100, strikes, ["2026-07-17"])
+    assert calc._summary_strategy("PCS", pcs, dirty=False) == "PCS"     # clean canonical
+    assert calc._summary_strategy("PCS", pcs, dirty=True) == "CUSTOM"   # edited -> generic
+    condor = S.build_default_legs("CONDOR_CALL", 100, strikes, ["2026-07-17"])
+    assert calc._summary_strategy("CONDOR_CALL", condor, dirty=False) == "CUSTOM"
+
+
 # ── Tier-3 migration regression (Task 2.6h) ──────────────────────────────────
 def test_calculator_holds_no_engine_imports():
     """The chain-fetch + options_calculator math moved to the options service;
