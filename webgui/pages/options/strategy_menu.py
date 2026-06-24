@@ -17,14 +17,23 @@ from . import strategies as S
 class StrategyMenu:
     """Cascading Strategy picker with a ui.select-compatible interface."""
 
-    def __init__(self, value="PCS", *, classes=""):
+    def __init__(self, value="PCS", *, classes="", boxed=False):
         self._value = value
         self._handlers = []
 
         with ui.column().classes("gap-0 " + classes):
             ui.label("Strategy").classes("text-xs opacity-60")
-            self.button = ui.button(S.strategy_label(value)) \
-                .props("no-caps outline icon-right=arrow_drop_down dense").classes("w-full")
+            # ``boxed`` (Calculator): drop the Quasar outline + color so a page can
+            # style the button like its input boxes (the outline forces a transparent
+            # background that page CSS can't override). Default keeps the outline look.
+            if boxed:
+                self.button = ui.button(S.strategy_label(value), color=None) \
+                    .props("no-caps icon-right=arrow_drop_down dense") \
+                    .classes("w-full strategy-menu-btn")
+            else:
+                self.button = ui.button(S.strategy_label(value)) \
+                    .props("no-caps outline icon-right=arrow_drop_down dense") \
+                    .classes("w-full strategy-menu-btn")
             with self.button:
                 # Top-level menu opens under the button; each family row carries a
                 # nested submenu that Quasar opens to the side on hover.
@@ -70,6 +79,9 @@ class StrategyMenu:
                 handler()        # tolerate a no-arg handler
 
 
-def build_strategy_menu(value="PCS", *, classes=""):
-    """Mount a cascading Strategy picker and return its ui.select-compatible handle."""
-    return StrategyMenu(value, classes=classes)
+def build_strategy_menu(value="PCS", *, classes="", boxed=False):
+    """Mount a cascading Strategy picker and return its ui.select-compatible handle.
+
+    ``boxed=True`` renders an input-box-styled trigger (for the Calculator's dark
+    theme); the default keeps the outline-button look."""
+    return StrategyMenu(value, classes=classes, boxed=boxed)

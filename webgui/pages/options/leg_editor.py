@@ -136,7 +136,7 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
                         .classes("w-24").on_value_change(lambda e, i=i: _set_field(i, "side", e.value))
                     ui.select(exps, value=e_val, label=lab("Expiry")) \
                         .classes("w-40").on_value_change(lambda e, i=i: _set_field(i, "expiry", e.value))
-                    sw = ui.select(s_opts, value=s_val, label=lab("Strike")).classes("w-24")
+                    sw = ui.select(s_opts, value=s_val, label=lab("Strike")).classes("w-24 leg-strike")
                     sw.on_value_change(lambda e, i=i: _set_field(i, "strike", e.value))
                     leg["_strike_widget"] = sw
                     ui.number(lab("Qty"), value=leg.get("qty", 1), min=1, max=100, format="%.0f") \
@@ -144,8 +144,8 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
                     if show_premium:
                         ui.number(lab("Premium"), value=leg.get("premium") or 0.0, format="%.2f") \
                             .classes("w-20").on_value_change(lambda e, i=i: _set_field(i, "premium", e.value))
-                    ui.button(icon="close", on_click=lambda e, i=i: _remove(i)) \
-                        .props("flat dense round").tooltip("Remove leg")
+                    ui.button(icon="delete", on_click=lambda e, i=i: _remove(i)) \
+                        .props("flat dense round").classes("w-10").tooltip("Remove leg")
             ui.button("Add leg", icon="add", on_click=lambda e: _add()).props("flat dense")
 
     def _add():

@@ -87,6 +87,16 @@ CALC_V2_CSS = """
   background:#2563eb!important;color:#fff!important;border-radius:9px;min-height:40px;font-weight:600;
 }
 .calc-v2 .cv2-btn-primary.q-btn:hover{background:#1d4fd1!important;}
+/* Strategy menu button — match the boxed navy inputs (drop the blue outline). */
+.calc-v2 .strategy-menu-btn.q-btn{
+  background:#0c1426!important;border:1px solid #243353!important;color:#e7edf8!important;
+  border-radius:8px;min-height:40px;font-weight:400;padding:0 6px 0 12px;
+}
+.calc-v2 .strategy-menu-btn.q-btn:hover{border-color:#3b82f6!important;}
+.calc-v2 .strategy-menu-btn .q-btn__content{justify-content:space-between;flex:1;text-transform:none;}
+.calc-v2 .strategy-menu-btn .q-icon{color:#8794b4;}
+/* Centered strike value in the leg table. */
+.calc-v2 .leg-strike .q-field__native{justify-content:center;text-align:center;}
 """
 
 def strategy_options():
@@ -394,32 +404,47 @@ def render():
     }
 
     # ── Dark "dashboard" layout (page-scoped, .calc-v2). The functional widgets
-    # keep their names; only arrangement + styling change. Right stack = Load / IV /
-    # Calculate; bottom row = Fetch Premiums / Expected Move / Copy to Simulator. ──
+    # keep their names. LEFT = input section (inputs card + Load/IV/Calculate stack,
+    # legs, bottom actions); RIGHT = the P&L matrix, which h-scrolls so it never
+    # overlaps the inputs. ───────────────────────────────────────────────────────
     with ui.column().classes("calc-v2 w-full gap-4"):
         ui.label("Options Strategy Calculator").classes("text-h6").style("color:#eaf0fb")
         with ui.row().classes("items-end gap-4 flex-wrap"):
-            strategy_sel = strategy_menu.build_strategy_menu(value="PCS", classes="w-52")
+            strategy_sel = strategy_menu.build_strategy_menu(value="PCS", classes="w-52", boxed=True)
             symbol_in = select_all_on_focus(ui.input("Symbol", value="SPY").classes("w-40"))
         with ui.row().classes("w-full items-start gap-4 no-wrap"):
-            with ui.column().classes("flex-1 min-w-0 gap-4"):
-                # Inputs card
-                with ui.column().classes("calc-card w-full gap-3"):
-                    with ui.row().classes("items-end gap-4 flex-wrap"):
-                        expiry_sel = ui.select([], label="Expiry").classes("w-40")
-                        contracts_in = ui.number("Contracts", value=1, min=1, max=100).classes("w-28")
-                        iv_in = ui.number("IV %", value=20.0, format="%.1f").classes("w-24")
-                    with ui.row().classes("items-end gap-4 flex-wrap"):
-                        price_in = ui.number("Price", value=100.0, format="%.2f").classes("w-32")
-                        rate_in = ui.number("Rate %", value=4.5, format="%.2f").classes("w-24")
-                        ivchg_in = ui.number("IV Δ %", value=0.0, format="%.1f").classes("w-24")
-                    with ui.row().classes("items-end gap-4 flex-wrap"):
-                        rmin_in = ui.number("Range min", value=0.0, format="%.2f").classes("w-28")
-                        rmax_in = ui.number("Range max", value=0.0, format="%.2f").classes("w-28")
-                        with ui.column().classes("gap-0"):
-                            ui.label("Range %").classes("calc-eyebrow")
-                            rpct_in = ui.slider(min=0, max=50, step=0.5, value=5) \
-                                .props("label-always").classes("w-44")
+            # LEFT: input section (fixed width so the legs table never collides with
+            # the matrix beside it).
+            with ui.column().classes("shrink-0 gap-4").style("width:720px"):
+                with ui.row().classes("w-full items-start gap-4 no-wrap"):
+                    with ui.column().classes("calc-card flex-1 min-w-0 gap-3"):
+                        with ui.row().classes("items-end gap-4 flex-wrap"):
+                            expiry_sel = ui.select([], label="Expiry").classes("w-40")
+                            contracts_in = ui.number("Contracts", value=1, min=1, max=100).classes("w-28")
+                            iv_in = ui.number("IV %", value=20.0, format="%.1f").classes("w-24")
+                        with ui.row().classes("items-end gap-4 flex-wrap"):
+                            price_in = ui.number("Price", value=100.0, format="%.2f").classes("w-32")
+                            rate_in = ui.number("Rate %", value=4.5, format="%.2f").classes("w-24")
+                            ivchg_in = ui.number("IV Δ %", value=0.0, format="%.1f").classes("w-24")
+                        with ui.row().classes("items-end gap-4 flex-wrap"):
+                            rmin_in = ui.number("Range min", value=0.0, format="%.2f").classes("w-28")
+                            rmax_in = ui.number("Range max", value=0.0, format="%.2f").classes("w-28")
+                            # Range % — value sits BESIDE the heading (the slider's
+                            # always-on bubble used to obscure the label).
+                            with ui.column().classes("gap-1 pt-1"):
+                                with ui.row().classes("items-baseline gap-2 no-wrap"):
+                                    ui.label("Range %").classes("calc-eyebrow")
+                                    rpct_val = ui.label("5%").classes("text-xs").style("color:#9fb0d4")
+                                rpct_in = ui.slider(min=0, max=50, step=0.5, value=5).classes("w-44")
+                                rpct_in.on_value_change(
+                                    lambda e: rpct_val.set_text(f"{float(rpct_in.value or 0):g}%"))
+                    with ui.column().classes("shrink-0 gap-3").style("width:170px"):
+                        ui.button("Load", icon="cloud_upload", color=None, on_click=lambda: load_symbol()) \
+                            .props("no-caps").classes("cv2-btn w-full").tooltip("Load price + expiries/strikes")
+                        ui.button("IV Update", icon="trending_up", color=None, on_click=lambda: fetch_iv()) \
+                            .props("no-caps").classes("cv2-btn w-full").tooltip("Fetch / imply IV for the expiry")
+                        ui.button("Calculate", icon="calculate", color=None, on_click=lambda: do_calc()) \
+                            .props("no-caps").classes("cv2-btn-primary w-full")
                 # Legs card (header-table editor)
                 with ui.column().classes("calc-card w-full gap-2"):
                     leg_box = ui.column().classes("gap-2 w-full")
@@ -435,18 +460,11 @@ def render():
                                       (symbol_in.value or "").replace("$", "").upper(),
                                       editor.get_legs(), keep_premium=False))) \
                         .props("no-caps").classes("cv2-btn").tooltip("Open these legs in the Simulator")
-            # Right action stack
-            with ui.column().classes("shrink-0 gap-3").style("width:190px"):
-                ui.button("Load", icon="cloud_upload", color=None, on_click=lambda: load_symbol()) \
-                    .props("no-caps").classes("cv2-btn w-full").tooltip("Load price + expiries/strikes")
-                ui.button("IV Update", icon="trending_up", color=None, on_click=lambda: fetch_iv()) \
-                    .props("no-caps").classes("cv2-btn w-full").tooltip("Fetch / imply IV for the expiry")
-                ui.button("Calculate", icon="calculate", color=None, on_click=lambda: do_calc()) \
-                    .props("no-caps").classes("cv2-btn-primary w-full")
-        # Results card (summary tiles + P&L grid), full width
-        with ui.column().classes("calc-card w-full gap-3"):
-            summary_box = ui.row().classes("gap-3 flex-wrap")
-            grid_box = ui.column().classes("w-full")
+            # RIGHT: P&L matrix. min-w-0 + the grid's own overflow lets it h-scroll
+            # instead of pushing into the inputs.
+            with ui.column().classes("calc-card flex-1 min-w-0 gap-3 self-stretch"):
+                summary_box = ui.row().classes("gap-3 flex-wrap")
+                grid_box = ui.column().classes("w-full")
 
     # ── editable multi-leg editor (shared with the Simulator) ────────────────
     # Strike/expiry options come from the cached chain; the editor owns the legs
