@@ -202,6 +202,7 @@ def render():
     from . import handoff
     from . import leg_editor
     from . import strategies as S
+    from . import strategy_menu
 
     ui.label("Simulator").classes("text-h5")
 
@@ -227,13 +228,11 @@ def render():
                           editor.get_legs(), keep_premium=False)))
         status = ui.label("Fetch a snapshot to begin.").classes("opacity-70 text-sm")
 
-    # Strategy template dropdown (flat code list, STRATEGY_GROUPS order) + the
-    # shared multi-leg editor. ``show_premium=False`` — the simulator prices each
-    # leg from the chain's IV, so there is no manual premium input.
-    _STRATEGY_CODES = [code for _label, codes in S.STRATEGY_GROUPS for code in codes]
+    # Cascading Strategy picker (family → variant) + the shared multi-leg editor.
+    # ``show_premium=False`` — the simulator prices each leg from the chain's IV,
+    # so there is no manual premium input.
     with ui.row().classes("items-end gap-3 flex-wrap"):
-        strategy_sel = ui.select(_STRATEGY_CODES, value="PCS",
-                                 label="Strategy").classes("w-48")
+        strategy_sel = strategy_menu.build_strategy_menu(value="PCS", classes="w-48")
     legs_box = ui.column().classes("gap-2")
 
     with ui.tabs() as tabs:

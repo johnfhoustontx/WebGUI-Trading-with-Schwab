@@ -338,6 +338,7 @@ def render():
 
     from . import handoff
     from . import leg_editor
+    from . import strategy_menu
 
     ui.add_css(CALC_CSS)
     ui.label("Calculator").classes("text-h5")
@@ -362,8 +363,7 @@ def render():
             # Line 1: Strategy + Symbol  ·  Load (right edge)
             with ui.row().classes("w-full items-end justify-between gap-3 no-wrap"):
                 with ui.row().classes("items-end gap-3"):
-                    strategy_sel = ui.select(strategy_options(), value="PCS",
-                                             label="Strategy").classes("w-48")
+                    strategy_sel = strategy_menu.build_strategy_menu(value="PCS", classes="w-48")
                     symbol_in = select_all_on_focus(ui.input("Symbol", value="SPY").classes("w-28"))
                 ui.button("Load", icon="download", on_click=lambda: load_symbol()) \
                     .props("dense no-caps").classes("calc-btn-3d w-40") \

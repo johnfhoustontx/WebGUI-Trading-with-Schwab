@@ -57,6 +57,33 @@ STRATEGY_GROUPS = [
     ("Calendars", ["CALENDAR_CALL", "CALENDAR_PUT", "DIAGONAL_CALL", "DIAGONAL_PUT"]),
 ]
 
+# Cascading Strategy menu: (family label, [(variant label, code), …]). The display
+# hierarchy for the Calculator + Simulator strategy picker — a finer split of
+# STRATEGY_GROUPS (verticals → credit/debit, calendars → calendar/diagonal). Single
+# source of truth for the menu + strategy_label(); covers every STRATEGY_TEMPLATES code.
+STRATEGY_MENU = [
+    ("Single", [("Long call", "LONG_CALL"), ("Long put", "LONG_PUT"),
+                ("Short call", "NAKED_CALL"), ("Short put", "NAKED_PUT")]),
+    ("Credit spread", [("Call", "CCS"), ("Put", "PCS")]),
+    ("Debit spread", [("Call", "VERT_CALL_DEBIT"), ("Put", "VERT_PUT_DEBIT")]),
+    ("Condor", [("Iron", "IC"), ("Call", "CONDOR_CALL"), ("Put", "CONDOR_PUT")]),
+    ("Butterfly", [("Call", "BUTTERFLY_CALL"), ("Put", "BUTTERFLY_PUT"),
+                   ("Iron", "IRON_BUTTERFLY")]),
+    ("Calendar", [("Call", "CALENDAR_CALL"), ("Put", "CALENDAR_PUT")]),
+    ("Diagonal", [("Call", "DIAGONAL_CALL"), ("Put", "DIAGONAL_PUT")]),
+]
+
+
+def strategy_label(code):
+    """Display label for a strategy code: 'PCS' → 'Credit spread · put',
+    'LONG_CALL' → 'Long call'. Falls back to the code itself."""
+    for family, variants in STRATEGY_MENU:
+        for vlabel, vcode in variants:
+            if vcode == code:
+                return vlabel if family == "Single" else f"{family} · {vlabel.lower()}"
+    return code
+
+
 # Strategy codes the calculator can summarize ANALYTICALLY (exact legacy path).
 _ANALYTIC_CODES = {"PCS", "CCS", "IC", "LONG_CALL", "LONG_PUT", "NAKED_CALL", "NAKED_PUT"}
 

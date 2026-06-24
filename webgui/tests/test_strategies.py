@@ -76,3 +76,18 @@ def test_strategy_groups_reference_real_templates():
     for _label, codes in S.STRATEGY_GROUPS:
         for c in codes:
             assert c in S.STRATEGY_TEMPLATES, c
+
+
+def test_strategy_menu_covers_every_template_once():
+    codes = [code for _f, variants in S.STRATEGY_MENU for _v, code in variants]
+    assert len(codes) == len(set(codes)), "duplicate code in STRATEGY_MENU"
+    assert set(codes) == set(S.STRATEGY_TEMPLATES), "menu must cover all templates exactly"
+
+
+def test_strategy_label():
+    assert S.strategy_label("PCS") == "Credit spread · put"
+    assert S.strategy_label("CCS") == "Credit spread · call"
+    assert S.strategy_label("LONG_CALL") == "Long call"
+    assert S.strategy_label("IC") == "Condor · iron"
+    assert S.strategy_label("DIAGONAL_PUT") == "Diagonal · put"
+    assert S.strategy_label("WHat") == "WHat"   # unknown → itself
