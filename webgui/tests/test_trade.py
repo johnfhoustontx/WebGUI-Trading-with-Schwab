@@ -178,3 +178,40 @@ def test_position_headline_prefers_markov():
 def test_position_headline_no_markov():
     head = trade.position_headline({"verdict": "BUY", "score": 41}, None)
     assert head["score"] == 41 and head["base"] == 41 and head["tilt"] == ""
+
+
+def test_markov_figure_uses_dense_trajectory():
+    mk = dict(_MK, trajectory=[
+        {"n": 1, "dist": [0.00, 0.00, 0.10, 0.60, 0.30]},
+        {"n": 2, "dist": [0.00, 0.05, 0.15, 0.50, 0.30]},
+        {"n": 3, "dist": [0.05, 0.05, 0.20, 0.45, 0.25]},
+        {"n": 5, "dist": [0.05, 0.10, 0.20, 0.40, 0.25]},
+        {"n": 10, "dist": [0.05, 0.10, 0.15, 0.40, 0.30]},
+        {"n": 20, "dist": [0.05, 0.10, 0.15, 0.35, 0.35]},
+    ])
+    fig = trade.markov_forecast_figure(mk)
+    assert fig["xAxis"]["categories"] == ["now", "1d", "2d", "3d", "5d", "10d", "20d"]
+    assert all(len(s["data"]) == 7 for s in fig["series"])
+    assert fig["chart"]["backgroundColor"] == "transparent"  # dark theme
+
+
+def test_markov_figure_falls_back_to_horizons_without_trajectory():
+    # Back-compat: an older block with only `horizons` still renders 5/10/20.
+    fig = trade.markov_forecast_figure(_MK)
+    assert fig["xAxis"]["categories"] == ["now", "5d", "10d", "20d"]
+    assert all(len(s["data"]) == 4 for s in fig["series"])
+
+
+def test_markov_figure_differs_by_current_band():
+    # Regression guard for "looks the same regardless of score": a bullish vs a
+    # bearish near-term trajectory must produce different early series data.
+    labels = _MK["band_labels"]
+    bull = trade.markov_forecast_figure(
+        {"current_band": 4, "band_labels": labels,
+         "trajectory": [{"n": 1, "dist": [0.0, 0.0, 0.1, 0.3, 0.6]}]})
+    bear = trade.markov_forecast_figure(
+        {"current_band": 0, "band_labels": labels,
+         "trajectory": [{"n": 1, "dist": [0.6, 0.3, 0.1, 0.0, 0.0]}]})
+    assert bull["series"][4]["data"][0] == 1.0   # now one-hot at band 4 (Strong-Bull)
+    assert bear["series"][0]["data"][0] == 1.0   # now one-hot at band 0 (Strong-Bear)
+    assert bull["series"][4]["data"] != bear["series"][4]["data"]

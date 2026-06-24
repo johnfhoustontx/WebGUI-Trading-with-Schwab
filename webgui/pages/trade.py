@@ -119,6 +119,9 @@ def alignment_rows(ema):
 _MK_BAND_COLORS = ["#c0392b", "#e67e22", "#7f8c8d", "#27ae60", "#1e8449"]
 # stacked-area band fill colors (neutral grey lighter than the chip's grey)
 _MK_AREA_COLORS = ["#c0392b", "#e67e22", "#bdc3c7", "#27ae60", "#1e8449"]
+# Dark-navy chart styling (matches the dashboard theme the Calculator/Simulator share).
+_MK_AXIS_STYLE = {"color": "#bdbdbd"}
+_MK_GRID_COLOR = "rgba(255,255,255,0.08)"
 
 
 def markov_band_chip(mk):
@@ -174,24 +177,32 @@ def position_headline(pv, mk):
 def markov_forecast_figure(mk):
     """Highcharts stacked-area option dict: band probability over horizon.
 
-    Tolerates None (returns an empty-but-valid figure with an explicit height so
-    the persistent chart element renders at a stable size before data arrives)."""
+    Plots the DENSE near-term trajectory (now/1/2/3/5/10/20d from ``mk['trajectory']``,
+    falling back to the sparse ``mk['horizons']`` when absent) so the score-specific
+    early path is visible — the 10d/20d tail converges to the prior stationary and is
+    near-identical across symbols, which made the chart look the same for every stock.
+    Dark-navy themed (transparent bg, light axes) so it sits on the dashboard navy.
+
+    Tolerates None (returns an empty-but-valid figure with an explicit height so the
+    persistent chart element renders at a stable size before data arrives)."""
     base = {
         "accessibility": {"enabled": False},
-        "chart": {"type": "area", "height": 260},
+        "chart": {"type": "area", "height": 200, "backgroundColor": "transparent"},
         "title": {"text": None},
         "credits": {"enabled": False},
-        "legend": {"enabled": True},
+        "legend": {"enabled": True, "itemStyle": {"color": "#cdd8ee"},
+                   "itemHoverStyle": {"color": "#ffffff"}},
     }
     if not mk:
         return {**base, "series": []}
     labels = mk.get("band_labels") or ["?"] * 5
-    cats = ["now"] + [f"{h['n']}d" for h in mk["horizons"]]
+    points = mk.get("trajectory") or mk.get("horizons") or []
+    cats = ["now"] + [f"{h['n']}d" for h in points]
     now = [0.0] * 5
     cb = mk.get("current_band", 2)
     if 0 <= cb < 5:
         now[cb] = 1.0
-    dists = [now] + [h["dist"] for h in mk["horizons"]]
+    dists = [now] + [h["dist"] for h in points]
     series = [{
         "name": labels[b] if b < len(labels) else "?",
         "color": _MK_AREA_COLORS[b],
@@ -199,9 +210,11 @@ def markov_forecast_figure(mk):
     } for b in range(5)]
     return {
         **base,
-        "xAxis": {"categories": cats},
-        "yAxis": {"min": 0, "max": 1, "title": {"text": "P(band)"},
-                  "labels": {"format": "{value:.0%}"}},
+        "xAxis": {"categories": cats, "labels": {"style": _MK_AXIS_STYLE},
+                  "lineColor": _MK_GRID_COLOR, "tickColor": _MK_GRID_COLOR},
+        "yAxis": {"min": 0, "max": 100, "title": {"text": "P(band)", "style": _MK_AXIS_STYLE},
+                  "labels": {"format": "{value}%", "style": _MK_AXIS_STYLE},
+                  "gridLineColor": _MK_GRID_COLOR},
         "plotOptions": {"area": {"stacking": "percent", "marker": {"enabled": False}}},
         "series": series,
     }
