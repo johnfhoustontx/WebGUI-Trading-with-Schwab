@@ -24,6 +24,7 @@ from nicegui import ui
 from pages.ui_guard import guard
 
 from .options.inputs import select_all_on_focus
+from .options.theme import DASHBOARD_CSS
 
 BUY_COLOR = "#2e7d32"
 HOLD_COLOR = "#f9a825"
@@ -251,41 +252,49 @@ _BREAKDOWN_COLS = [
 
 def render():
     """Trade page: symbol input + Analyze button + verdict/MTF/momentum cards."""
-    ui.label("Trade Analyzer").classes("text-h5")
+    ui.add_css(DASHBOARD_CSS)
 
     # Page state (local closure, not module globals — built per request).
-    state = {"result": None, "ver": None}
+    state = {"result": None, "ver": None, "last_requested": None, "last_ts": 0.0}
 
-    with ui.row().classes("items-center gap-3 flex-wrap"):
-        symbol_in = select_all_on_focus(ui.input("Symbol", value="AAPL").classes("w-32"))
-        analyze_btn = ui.button("Analyze", icon="analytics")
-        status = ui.label("Enter a symbol and click Analyze.").classes("opacity-70 text-sm")
+    # Dark-navy "dashboard" shell (page-scoped, .calc-v2) — the SAME shared theme the
+    # Calculator/Simulator inject, wrapping the controls + result areas.
+    with ui.column().classes("calc-v2 w-full gap-3"):
+        ui.label("Trade Analyzer").classes("text-h6").style("color:#eaf0fb")
 
-    # Layout: a top area (error banner + header), then a single verdict ROW of
-    # three EQUAL-width cards (Position · Investor · Markov Forecast), then a
-    # bottom area (MTF/momentum/sector). results_top/bottom are cleared+rebuilt on
-    # repaint; the verdict row and its three cards are PERSISTENT — the Markov card
-    # holds a Highcharts element that must exist at first render (a chart added
-    # later on a chart-less page fails to resolve `nicegui-highcharts`) and must
-    # not be destroyed by a clear(), so the verdict cards are refilled in place.
-    results_top = ui.column().classes("w-full gap-3")
-    verdict_row = ui.row().classes("w-full gap-3 items-stretch flex-wrap")
-    with verdict_row:
-        position_card = ui.card().classes("flex-1 min-w-[280px]")
-        investor_card = ui.card().classes("flex-1 min-w-[280px]")
-        markov_card = ui.card().classes("flex-1 min-w-[280px]")
-        with markov_card:
-            ui.label("Markov Forecast · composite-score regime").classes("text-subtitle2 opacity-70")
-            markov_head = ui.row().classes("items-center gap-3 flex-wrap")
-            markov_metrics = ui.row().classes("gap-4 flex-wrap")
-            markov_chart = ui.highchart(markov_forecast_figure(None)).classes("w-full")
-    verdict_row.set_visibility(False)
-    markov_card.set_visibility(False)
-    results_bottom = ui.column().classes("w-full gap-3")
+        with ui.row().classes("items-center gap-3 flex-wrap"):
+            symbol_in = select_all_on_focus(ui.input("Symbol", value="AAPL").classes("w-32"))
+            analyze_btn = ui.button("Analyze", icon="analytics", color=None) \
+                .props("no-caps").classes("cv2-btn-primary")
+            status = ui.label("Enter a symbol and click Analyze.").classes("calc-eyebrow")
+
+        # Layout: a top area (error banner + header), then a single verdict ROW of
+        # three EQUAL-width cards (Position · Investor · Markov Forecast), then a
+        # bottom area (MTF/momentum/sector). results_top/bottom are cleared+rebuilt on
+        # repaint; the verdict row and its three cards are PERSISTENT — the Markov card
+        # holds a Highcharts element that must exist at first render (a chart added
+        # later on a chart-less page fails to resolve `nicegui-highcharts`) and must
+        # not be destroyed by a clear(), so the verdict cards are refilled in place.
+        # items-start (not items-stretch): the short Position/Investor cards no longer
+        # stretch to the tall Markov card, removing the dead space.
+        results_top = ui.column().classes("w-full gap-2")
+        verdict_row = ui.row().classes("w-full gap-3 items-start flex-wrap")
+        with verdict_row:
+            position_card = ui.card().classes("calc-card flex-1 min-w-[280px]")
+            investor_card = ui.card().classes("calc-card flex-1 min-w-[280px]")
+            markov_card = ui.card().classes("calc-card flex-1 min-w-[280px]")
+            with markov_card:
+                ui.label("Markov Forecast · composite-score regime").classes("calc-eyebrow")
+                markov_head = ui.row().classes("items-center gap-3 flex-wrap")
+                markov_metrics = ui.row().classes("gap-4 flex-wrap")
+                markov_chart = ui.highchart(markov_forecast_figure(None)).classes("w-full")
+        verdict_row.set_visibility(False)
+        markov_card.set_visibility(False)
+        results_bottom = ui.column().classes("w-full gap-2")
 
     # ── card builders (widgets; pull from the pure transforms above) ──────────
     def _header(res):
-        with ui.card().classes("w-full"):
+        with ui.card().classes("calc-card w-full"):
             with ui.row().classes("items-center gap-4 flex-wrap"):
                 ui.label(res.get("symbol", "")).classes("text-h5")
                 desc = res.get("description")
@@ -311,7 +320,7 @@ def render():
         # in a subtitle). The verdict WORD/color are unchanged — never re-derived.
         head = position_headline(verdict, mk) if mk else None
         with card:
-            ui.label(title).classes("text-subtitle2 opacity-70")
+            ui.label(title).classes("calc-eyebrow")
             with ui.row().classes("items-baseline gap-3"):
                 ui.label(verdict.get("verdict", "—")).classes("text-h4 text-weight-bold") \
                     .style(f"color:{verdict_color(verdict.get('verdict'))}")
@@ -336,8 +345,8 @@ def render():
 
     def _alignment_card(ema):
         ema = ema or {}
-        with ui.card().classes("flex-1 min-w-[220px]"):
-            ui.label("MTF EMA alignment").classes("text-subtitle2 opacity-70")
+        with ui.card().classes("calc-card flex-1 min-w-[220px]"):
+            ui.label("MTF EMA alignment").classes("calc-eyebrow")
             pct = ema.get("alignment_percentage")
             ui.label(f"{pct:+.0f}%" if pct is not None else "—") \
                 .classes("text-h6").style(f"color:{bias_color(ema.get('bias'))}")
@@ -348,16 +357,16 @@ def render():
                         .style(f"color:{bias_color(r['status'])}")
 
     def _momentum_card(m):
-        with ui.card().classes("flex-1 min-w-[200px]"):
-            ui.label("Momentum").classes("text-subtitle2 opacity-70")
+        with ui.card().classes("calc-card flex-1 min-w-[200px]"):
+            ui.label("Momentum").classes("calc-eyebrow")
             for label, value in momentum_rows(m):
                 with ui.row().classes("items-center gap-2 w-full justify-between"):
                     ui.label(label).classes("text-sm opacity-80")
                     ui.label(value).classes("text-sm text-weight-medium")
 
     def _fundamentals_card(fundamentals):
-        with ui.card().classes("flex-1 min-w-[200px]"):
-            ui.label("Fundamentals").classes("text-subtitle2 opacity-70")
+        with ui.card().classes("calc-card flex-1 min-w-[200px]"):
+            ui.label("Fundamentals").classes("calc-eyebrow")
             for label, value in fundamentals_rows(fundamentals):
                 with ui.row().classes("items-center gap-2 w-full justify-between"):
                     ui.label(label).classes("text-sm opacity-80")
@@ -366,8 +375,8 @@ def render():
     def _sector_card(sector):
         sector = sector or {}
         strength = sector.get("strength") or {}
-        with ui.card().classes("flex-1 min-w-[200px]"):
-            ui.label("Sector").classes("text-subtitle2 opacity-70")
+        with ui.card().classes("calc-card flex-1 min-w-[200px]"):
+            ui.label("Sector").classes("calc-eyebrow")
             name = sector.get("name") or "Unknown"
             etf = sector.get("etf")
             ui.label(f"{name}" + (f" ({etf})" if etf else "")).classes("text-sm")
