@@ -690,12 +690,19 @@ def _patch_gamma(monkeypatch, *, chain=None, walls=None, history=None):
         get_directional_walls=_fake_directional_walls)
     fake_gh = _types.SimpleNamespace(
         connect=lambda read_only=False: object(),
+        load_date_with_grid=lambda conn, symbol, view, date=None: (history or []),
         load_today_with_grid=lambda conn, symbol, view: (history or []))
     monkeypatch.setitem(_sys.modules, "gamma_tool", fake_gt)
     monkeypatch.setitem(_sys.modules, "gex_history_db", fake_gh)
     monkeypatch.setattr(compute._proxy.schwab_py_client, "get_option_chain",
                         lambda *a, **k: _FakeChainResp(
                             chain if chain is not None else {"underlyingPrice": 5400.0}))
+    # Persistence gate is time-dependent — pin it so tests are deterministic:
+    # not in the cleared window, active session date fixed.
+    import datetime as _dtm
+    from services.options_svc import scheduler as _sched
+    monkeypatch.setattr(_sched, "gamma_cleared", lambda now=None: False)
+    monkeypatch.setattr(_sched, "active_session_date", lambda now=None: _dtm.date(2026, 6, 18))
 
 
 def test_gamma_snapshot_builds_views_and_term(monkeypatch):
@@ -719,6 +726,33 @@ def test_gamma_snapshot_builds_views_and_term(monkeypatch):
         "net_delta_0dte": 10.0, "projected_net_delta_close": 5.0,
         "hedge_pressure": -5.0}
     assert snap["term"] == {"expirations": ["2026-06-18"], "cells": {}}
+
+
+def test_gamma_snapshot_cleared_window_returns_none(monkeypatch):
+    # Overnight 'cleared' window (trading day, after midnight, pre-session): the
+    # snapshot is None so the handler caches a graceful-empty view (no stale data).
+    _patch_gamma(monkeypatch, history=[(1, 2, 3, 4, 5, 6, {5400.0: {"net": 1}})])
+    from services.options_svc import scheduler as _sched
+    monkeypatch.setattr(_sched, "gamma_cleared", lambda now=None: True)
+    assert compute.gamma_snapshot("$SPX") is None
+
+
+def test_gamma_snapshot_history_uses_active_session_date(monkeypatch):
+    # The heatmap history loads the ACTIVE SESSION DATE (e.g. Friday over a weekend),
+    # not "today", so it persists off-hours.
+    seen = {}
+    _patch_gamma(monkeypatch, history=[(1, 2, 3, 4, 5, 6, {5400.0: {"net": 1}})])
+    import datetime as _dtm
+    import sys as _sys
+    from services.options_svc import scheduler as _sched
+    monkeypatch.setattr(_sched, "active_session_date", lambda now=None: _dtm.date(2026, 6, 26))
+
+    def _capture(conn, symbol, view, date=None):
+        seen["date"] = date
+        return [(1, 2, 3, 4, 5, 6, {5400.0: {"net": 1}})]
+    _sys.modules["gex_history_db"].load_date_with_grid = _capture
+    compute.gamma_snapshot("$SPX")
+    assert seen["date"] == _dtm.date(2026, 6, 26)
 
 
 def _chain_with_exps(*dates):

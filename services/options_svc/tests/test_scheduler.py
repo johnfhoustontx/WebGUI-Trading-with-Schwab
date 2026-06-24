@@ -132,6 +132,34 @@ def test_periodic_refresh_due_weekend_throttled():
     assert due2 is False and slot2 == slot
 
 
+# ── Gamma display persistence (active session date + cleared window) ─────────
+# Reference weekdays: 2026-06-22 Mon, 23 Tue, 24 Wed, 25 Thu, 26 Fri, 27 Sat, 28 Sun.
+def test_active_session_date_is_today_on_a_trading_day():
+    assert scheduler.active_session_date(_ct(2026, 6, 23, 16, 0)).isoformat() == "2026-06-23"
+
+
+def test_active_session_date_holds_friday_through_weekend():
+    assert scheduler.active_session_date(_ct(2026, 6, 27, 10, 0)).isoformat() == "2026-06-26"  # Sat
+    assert scheduler.active_session_date(_ct(2026, 6, 28, 23, 0)).isoformat() == "2026-06-26"  # Sun
+
+
+def test_active_session_date_holds_prior_day_on_holiday():
+    # 2026-01-19 (MLK) is a Monday holiday → most recent trading day is Fri 2026-01-16.
+    assert scheduler.active_session_date(_ct(2026, 1, 19, 12, 0)).isoformat() == "2026-01-16"
+
+
+def test_gamma_cleared_overnight_on_a_trading_day():
+    assert scheduler.gamma_cleared(_ct(2026, 6, 23, 0, 0)) is True    # Tue midnight
+    assert scheduler.gamma_cleared(_ct(2026, 6, 23, 7, 0)) is True    # Tue pre-session
+    assert scheduler.gamma_cleared(_ct(2026, 6, 23, 10, 0)) is False  # Tue live session
+    assert scheduler.gamma_cleared(_ct(2026, 6, 23, 23, 0)) is False  # Tue after close → persist
+
+
+def test_gamma_not_cleared_on_non_trading_days():
+    assert scheduler.gamma_cleared(_ct(2026, 6, 27, 2, 0)) is False   # Sat → persist Friday
+    assert scheduler.gamma_cleared(_ct(2026, 1, 19, 2, 0)) is False   # MLK Mon → persist
+
+
 # ── Cadence-mirror drift guard ──────────────────────────────────────────────
 # The GEX-collection cadence is intentionally mirrored (not imported) between the
 # standalone collector and this Tier-2 scheduler to keep the scheduler's import

@@ -11,12 +11,15 @@ from typing import Iterable, Tuple
 DB_PATH = Path(__file__).parent / "gex_history.db"
 
 
-def _today_local_unix_range() -> tuple[int, int]:
-    """``[start, end)`` unix seconds spanning the current LOCAL calendar day.
+def _local_unix_range(d=None) -> tuple[int, int]:
+    """``[start, end)`` unix seconds spanning the LOCAL calendar day ``d``
+    (default: today).
 
-    Lets today-filters use a sargable ``ts >= ? AND ts < ?`` range (the index on
+    Lets day-filters use a sargable ``ts >= ? AND ts < ?`` range (the index on
     ``ts`` applies) instead of ``DATE(ts,'unixepoch','localtime') = DATE('now')``,
-    which wraps ``ts`` in a function and so can't use the index.
+    which wraps ``ts`` in a function and so can't use the index. Passing an
+    explicit ``d`` lets callers load a PRIOR session's rows (gamma persistence:
+    show Friday's heatmap over the weekend).
 
     NOTE: uses the current fixed local UTC offset; on the two DST-transition days
     the [start,end) edge can differ by an hour from SQLite's DST-aware
@@ -24,10 +27,16 @@ def _today_local_unix_range() -> tuple[int, int]:
     15:20 CT, never near the 02:00/midnight boundary, so no row is ever classified
     differently."""
     now = _dt.datetime.now().astimezone()
-    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    base = now if d is None else _dt.datetime(d.year, d.month, d.day, tzinfo=now.tzinfo)
+    start = base.replace(hour=0, minute=0, second=0, microsecond=0)
     tomorrow = (start + _dt.timedelta(days=1)).replace(
         hour=0, minute=0, second=0, microsecond=0)
     return int(start.timestamp()), int(tomorrow.timestamp())
+
+
+def _today_local_unix_range() -> tuple[int, int]:
+    """``[start, end)`` unix seconds for the current local calendar day."""
+    return _local_unix_range(None)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS snapshots (
@@ -212,18 +221,24 @@ def load_today(
     return cur.fetchall()
 
 
-def load_today_with_grid(
+def load_date_with_grid(
     conn: sqlite3.Connection,
     symbol: str,
     view: str,
+    date=None,
 ) -> list[tuple]:
-    """Like load_today but also includes the per-strike gex grid dict.
+    """Like load_today_with_grid but for an explicit local calendar ``date``
+    (default: today).
+
+    Used by the Gamma persistence path to load the LAST trading session's rows
+    (e.g. Friday's) so the heatmap stays populated after close / over a weekend,
+    then clears once a new trading day (with no rows yet) becomes the active date.
 
     Returns list of (ts, spot, flip, top_pos_strike, top_neg_strike,
                      net_total, gex_grid) tuples. gex_grid is the decoded
     JSON dict or {} if NULL.
     """
-    start, end = _today_local_unix_range()
+    start, end = _local_unix_range(date)
     cur = conn.execute(
         """
         SELECT ts, spot, flip, top_pos_strike, top_neg_strike, net_total, gex_json
@@ -246,6 +261,15 @@ def load_today_with_grid(
             grid = {}
         out.append((*row[:6], grid))
     return out
+
+
+def load_today_with_grid(
+    conn: sqlite3.Connection,
+    symbol: str,
+    view: str,
+) -> list[tuple]:
+    """Today's per-strike rows + grid dict (thin wrapper over load_date_with_grid)."""
+    return load_date_with_grid(conn, symbol, view, None)
 
 
 def purge_old(conn: sqlite3.Connection) -> int:

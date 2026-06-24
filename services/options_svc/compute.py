@@ -677,6 +677,18 @@ def gamma_snapshot(symbol: str) -> dict | None:
     import gamma_tool as gt
     import gex_history_db as gh
 
+    from services.options_svc import scheduler as _sched
+
+    # Persistence: after close the last session's candles + heatmap stay shown
+    # until the next trading day's midnight (Fri data persists through the weekend);
+    # in the overnight 'cleared' window of a trading day (after midnight, before the
+    # 08:30 CT session) show nothing. The heatmap loads the ACTIVE SESSION DATE so
+    # it stays populated off-hours and clears for the new session on its own.
+    now = _sched._market_now()
+    if _sched.gamma_cleared(now):
+        return None  # cleared → handler caches a graceful-empty view
+    session_date = _sched.active_session_date(now)
+
     chain = _gamma_fetch_chain(symbol)
     if not chain:
         return None
@@ -696,7 +708,9 @@ def gamma_snapshot(symbol: str) -> dict | None:
     def _history(vstr):
         try:
             conn = gh.connect(read_only=True)
-            return gh.load_today_with_grid(conn, symbol, vstr)
+            # Active session date (today live, or the last trading day off-hours/
+            # weekends) so the heatmap persists after close + clears next session.
+            return gh.load_date_with_grid(conn, symbol, vstr, session_date)
         except Exception:
             return []
 

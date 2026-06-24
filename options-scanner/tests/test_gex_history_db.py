@@ -200,6 +200,25 @@ def test_load_today_with_grid_decodes_json(tmp_path, monkeypatch):
     assert all(isinstance(k, float) for k in rows[0][6].keys())
 
 
+def test_load_date_with_grid_loads_a_prior_session(tmp_path, monkeypatch):
+    # Gamma persistence: a prior session's rows (e.g. Friday's) must be loadable by
+    # explicit date so the heatmap stays populated over the weekend.
+    import datetime as _dt
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    yesterday = _dt.date.today() - _dt.timedelta(days=1)
+    y_noon = _dt.datetime(yesterday.year, yesterday.month, yesterday.day, 12, 0).astimezone()
+    summary = {"ts": int(y_noon.timestamp()), "spot": 100.0, "flip": 99.0,
+               "top_pos_strike": 110.0, "top_neg_strike": 95.0, "net_total": 1.0}
+    grid = {100.0: {"call": 0.5, "put": -0.25, "net": 0.25}}
+    db.insert_snapshot(conn, "SPY", "gex", summary, grid, dte=1)
+    # Today's query finds nothing; the prior-date query finds the row.
+    assert db.load_date_with_grid(conn, "SPY", "gex") == []
+    rows = db.load_date_with_grid(conn, "SPY", "gex", yesterday)
+    assert len(rows) == 1 and rows[0][6] == grid
+
+
 def test_load_today_with_grid_empty_when_no_json(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
     conn = db.connect()

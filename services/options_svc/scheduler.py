@@ -74,6 +74,51 @@ def _in_gex_window(now):
     return _GEX_START <= (now.hour, now.minute) < _GEX_STOP
 
 
+# ── Gamma display persistence (after close → next trading day's midnight) ─────
+# The Gamma candles + heatmap should keep showing the LAST trading session's data
+# after market close / once the collector stops, then clear for the next session.
+# The display window for session date D is [D 00:00, next_trading_day(D) 00:00):
+#   • weekday after close → shows today until tonight's midnight;
+#   • Fri/holiday-eve → persists through the weekend/holiday until the midnight
+#     before the next trading day (e.g. Mon 00:00);
+#   • after that midnight, until the new session's data exists → cleared.
+def _prev_trading_day(d):
+    """Most recent trading day strictly before date ``d`` (skips weekends/holidays)."""
+    import datetime as _dtmod
+    d = d - _dtmod.timedelta(days=1)
+    while d.weekday() >= 5 or d in _HOLIDAYS:
+        d -= _dtmod.timedelta(days=1)
+    return d
+
+
+def active_session_date(now=None):
+    """The trading day whose Gamma data should be displayed now: today if today is
+    a trading day, else the most recent prior trading day.
+
+    Drives heatmap persistence: Friday's data stays shown all weekend (active date
+    = Friday) until Monday becomes 'today' — a trading day whose rows don't exist
+    yet, so the heatmap naturally clears."""
+    now = now or _market_now()
+    d = now.date()
+    if d.weekday() < 5 and d not in _HOLIDAYS:
+        return d
+    return _prev_trading_day(d)
+
+
+def gamma_cleared(now=None):
+    """True in the overnight 'cleared' window of a trading day — after midnight CT
+    but before the session/collection start (08:30 CT).
+
+    The prior session's data was displayed until midnight; the new session hasn't
+    produced any data yet, so Gamma shows nothing. False on non-trading days
+    (weekend/holiday) so the last session's data persists, and False after 08:30
+    so the live session shows."""
+    now = now or _market_now()
+    d = now.date()
+    is_td = d.weekday() < 5 and d not in _HOLIDAYS
+    return is_td and (now.hour, now.minute) < _GEX_START
+
+
 def _gex_slot_key(now):
     return (now.date().isoformat(), now.hour, now.minute // _GEX_INTERVAL_MIN)
 
