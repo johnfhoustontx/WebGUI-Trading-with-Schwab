@@ -36,6 +36,34 @@ def test_whatif_pnl_zeroes_at_spot():
     assert sim.whatif_pnl(df, spot=None) == [[100, 5], [110, 8], [120, 20]]  # no spot ⇒ raw
 
 
+def test_whatif_pnl_from_entry_baseline():
+    # value(S) already in dollars (×100 contract multiplier); ``baseline`` = the
+    # entry mark (position value at spot, now). The SNDK call credit spread: −5,450
+    # at entry, 0 if it expires worthless (max profit = the credit), −20,000 deep
+    # ITM (max loss = width − credit). P/L = value(S) − baseline → from-entry payoff.
+    rows = [{"S": 1893, "theo_price": -5450.0},
+            {"S": 1700, "theo_price": 0.0},
+            {"S": 2100, "theo_price": -20000.0}]
+    assert sim.whatif_pnl(rows, spot=1893, baseline=-5450.0) == [
+        [1893, 0.0], [1700, 5450.0], [2100, -14550.0]]
+
+
+def test_whatif_pnl_baseline_overrides_zero_at_spot():
+    # Once Δt elapses, the nearest-spot row (forward-time value) differs from the
+    # entry mark; the explicit baseline must win (from-entry, not "zero at spot").
+    rows = [{"S": 100, "theo_price": -300.0},      # row nearest spot, forward-t
+            {"S": 120, "theo_price": -2000.0}]
+    assert sim.whatif_pnl(rows, spot=100) == [[100, 0.0], [120, -1700.0]]            # legacy
+    assert sim.whatif_pnl(rows, spot=100, baseline=-545.0) == [[100, 245.0], [120, -1455.0]]
+
+
+def test_whatif_figure_threads_baseline():
+    rows = [{"S": 1700, "theo_price": 0.0}, {"S": 1893, "theo_price": -5450.0},
+            {"S": 2100, "theo_price": -20000.0}]
+    data = dict(sim.whatif_figure(rows, spot=1893, baseline=-5450.0)["series"][0]["data"])
+    assert data[1700] == 5450.0 and data[2100] == -14550.0   # from-entry profit / loss
+
+
 def test_whatif_figure_profit_loss_shading_and_bands():
     # The payoff restyle: an area split at the 0 threshold — green (profit) above,
     # red (loss) below — for both line and fill, with faint Profit/Loss background
@@ -197,3 +225,19 @@ def test_render_with_warm_meta_seeds_strategy_editor():
     bus_client.bus().cache_set("cache:options:sim_meta", meta)
     with ui.card():
         sim.render()  # must not raise (editor seeded from the warm meta)
+
+
+def test_sim_capture_keys_cover_inputs():
+    # Guard against forgetting to persist a Simulator input across navigation.
+    assert set(sim._SIM_KEYS) == {
+        "symbol", "strategy", "legs", "dt", "mult", "lookback", "ds", "active_tab"}
+
+
+def test_sim_snapshot_roundtrips_via_page_state():
+    from pages.options import page_state as ps
+    vals = {"symbol": "AAPL", "strategy": "IC", "legs": [{"option_type": "put"}],
+            "dt": 7.0, "mult": 2.0, "lookback": "5m_3d", "ds": -3.0,
+            "active_tab": "What-if", "junk": 1}
+    snap = ps.snapshot(vals, sim._SIM_KEYS)
+    assert "junk" not in snap and snap["dt"] == 7.0
+    assert ps.merge_restore(snap, sim._SIM_DEFAULTS)["symbol"] == "AAPL"

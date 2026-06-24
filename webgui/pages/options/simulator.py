@@ -39,6 +39,15 @@ from .inputs import select_all_on_focus
 # Shared dark-navy "dashboard" theme (same CSS the Calculator injects, so the two
 # pages never drift).
 from .theme import DASHBOARD_CSS
+from . import page_state as _ps
+
+# Persisted (single-user) Simulator input snapshot — survives navigation + browser
+# reload, resets on a webgui restart (same as the other persisting pages). The pure
+# snapshot/merge/precedence helpers live in page_state.py.
+_SIM_KEYS = ("symbol", "strategy", "legs", "dt", "mult", "lookback", "ds", "active_tab")
+_SIM_DEFAULTS = {"symbol": "SPY", "strategy": "PCS", "legs": [], "dt": 5.0,
+                 "mult": 1.5, "lookback": "auto", "ds": 0.0, "active_tab": "Replay"}
+_LAST_SIM: dict = {}
 
 SPOT_COLOR = "#ffd54f"
 TARGET_COLOR = "#42a5f5"
@@ -79,33 +88,38 @@ _DARK_AXIS = {"labels": {"style": {"color": "#bdbdbd"}},
               "lineColor": "rgba(255,255,255,0.15)"}
 
 
-def whatif_pnl(df, spot):
-    """``[S, P/L]`` pairs where ``P/L = theo_price(S) − theo_price(spot)``.
+def whatif_pnl(df, spot, baseline=None):
+    """``[S, P/L]`` pairs where ``P/L = theo_price(S) − baseline``.
 
-    The What-if rows carry the position's signed theo *value* (a credit spread is a
-    net liability ⇒ negative); subtracting its value at the current spot re-bases the
-    curve to **profit / loss from here** — zero at spot, so it splits cleanly into a
-    green profit zone above zero and a red loss zone below (the payoff look). The
-    baseline is the row nearest spot (the sweep is symmetric about spot, so a row
-    sits on it)."""
+    The What-if rows carry the position's signed theo *value* in DOLLARS (the ×100
+    contract multiplier is applied by the service). When ``baseline`` is given (the
+    service's ``whatif_baseline`` — the position's value at the current spot AND
+    current time = the entry mark), the curve is **profit / loss from entry**: it
+    matches the Calculator's ``entry_credit + value(S,t)`` (profit caps at the net
+    credit, loss floors at width−credit), splitting cleanly into a green profit zone
+    above zero and a red loss zone below.
+
+    With no ``baseline`` it falls back to the legacy "zero at spot" subtraction (the
+    row nearest spot) — kept for back-compat and pre-update cached results."""
     rows = _records(df)
     if not rows:
         return []
-    base = (min(rows, key=lambda r: abs(r["S"] - spot)).get("theo_price", 0)
-            if spot is not None else 0)
-    return [[r["S"], r.get("theo_price", 0) - base] for r in rows]
+    if baseline is None:
+        baseline = (min(rows, key=lambda r: abs(r["S"] - spot)).get("theo_price", 0)
+                    if spot is not None else 0)
+    return [[r["S"], r.get("theo_price", 0) - baseline] for r in rows]
 
 
-def whatif_figure(df, spot, target_s=None):
-    """Profit/loss payoff: underlying price (S) vs position **P/L** (theo value
-    relative to its value at the current spot — see ``whatif_pnl``).
+def whatif_figure(df, spot, target_s=None, baseline=None):
+    """Profit/loss payoff: underlying price (S) vs position **P/L** in dollars
+    (theo value relative to the entry ``baseline`` — see ``whatif_pnl``).
 
     Styled to match the dashboard payoff mock: an **area** with Highcharts y-zones
     at the ``0`` threshold paints a green profit fill above zero and a red loss fill
     below (the line itself switches green↔red at the breakevens); faint Profit/Loss
     background bands wash each half-plane; the gold **spot** + blue dashed **ΔS
     target** verticals and the solid zero/breakeven line are kept."""
-    data = whatif_pnl(df, spot)
+    data = whatif_pnl(df, spot, baseline)
     xplotlines = [_plotline(spot, SPOT_COLOR)]
     if target_s is not None:
         xplotlines.append(_plotline(target_s, TARGET_COLOR, dash="Dash"))
@@ -133,7 +147,7 @@ def whatif_figure(df, spot, target_s=None):
         "xAxis": {**_DARK_AXIS, "title": {"text": "Underlying"}, "plotLines": xplotlines},
         "yAxis": {**_DARK_AXIS, "title": {"text": "P / L"}, "plotLines": yplotlines,
                   "plotBands": yplotbands},
-        "tooltip": {"pointFormat": "S {point.x:g} → P/L <b>{point.y:.2f}</b>"},
+        "tooltip": {"pointFormat": "S {point.x:g} → P/L <b>${point.y:,.0f}</b>"},
         # Smooth transition when the chart is updated in place on a slider change.
         "plotOptions": {"series": {"animation": {"duration": 500}}},
         # Area filled to the 0 threshold: the part above zero is green (profit), the
@@ -272,6 +286,7 @@ def render():
         "pending": None,     # latest sim_run params awaiting the debounce flush
         "replay": None,      # last sim_replay payload (price/Greek trace)
         "replay_ver": None,  # last-seen sim_replay cache version
+        "restoring": False,  # True while restoring a persisted snapshot (suppress enqueues)
     }
 
     # ── Dark "dashboard" shell (page-scoped, .calc-v2) — the SAME navy theme as the
@@ -361,7 +376,7 @@ def render():
 
     editor = leg_editor.build_leg_editor(
         legs_box, strikes_for=_strikes_for, expiries_for=_expiries_for,
-        show_premium=False, on_change=lambda: _on_legs_changed(), header=True,
+        show_premium=False, on_change=lambda: (_on_legs_changed(), _capture()), header=True,
         spot_getter=lambda: (state.get("meta") or {}).get("spot") or 0)
 
     # Seed the default template (PCS) so a cold page shows the strategy's legs
@@ -369,6 +384,41 @@ def render():
     # real ladder once a snapshot arrives (see ``_apply_meta``). ``apply_template``
     # → ``set_legs`` does NOT fire ``on_change``, so no premature command enqueues.
     editor.apply_template(strategy_sel.value)
+
+    # ── persist + restore full UI state across navigation (single-user) ───────
+    def _capture():
+        """Snapshot the current inputs into the module-level _LAST_SIM (cheap dict
+        write; wired to every input change). No-op while restoring."""
+        if state.get("restoring"):
+            return
+        _LAST_SIM.clear()
+        _LAST_SIM.update(_ps.snapshot({
+            "symbol": (symbol_in.value or "").strip().upper(),
+            "strategy": strategy_sel.value,
+            "legs": editor.get_legs(),
+            "dt": float(dt_slider.value), "mult": float(mult_slider.value),
+            "lookback": lookback_sel.value, "ds": float(ds_slider.value),
+            "active_tab": tabs.value,
+        }, _SIM_KEYS))
+
+    def _restore(snap):
+        """Apply a persisted snapshot to the widgets under the restoring guard
+        (so wiring fires no stray commands). Legs ride ``pending_legs`` so the
+        post-fetch ``_apply_meta`` applies them (beating the template re-seed) and
+        runs with the restored sliders."""
+        s = _ps.merge_restore(snap, _SIM_DEFAULTS)
+        state["restoring"] = True
+        try:
+            symbol_in.value = s["symbol"]
+            strategy_sel.value = s["strategy"]
+            dt_slider.value = s["dt"]
+            mult_slider.value = s["mult"]
+            lookback_sel.value = s["lookback"]
+            ds_slider.value = s["ds"]
+            tabs.value = s["active_tab"]
+            state["pending_legs"] = s["legs"] or None
+        finally:
+            state["restoring"] = False
 
     # ── render figures from the cached sweep result ──────────────────────────
     def _render_figures():
@@ -389,7 +439,8 @@ def render():
         # ΔS is a CLIENT-SIDE overlay line only — no command, computed here.
         target_s = spot * (1 + ds_slider.value / 100.0) if spot is not None else None
         # Update in place so Highcharts animates the transition (no clear/recreate).
-        whatif_chart.options = whatif_figure(result.get("whatif_rows") or [], spot, target_s)
+        whatif_chart.options = whatif_figure(result.get("whatif_rows") or [], spot,
+                                             target_s, baseline=result.get("whatif_baseline"))
         whatif_chart.update()
         shock = result.get("ivshock")
         if shock:
@@ -447,6 +498,8 @@ def render():
     @guard
     def _enqueue_run():
         """Enqueue a sim_run immediately (used for discrete strategy/leg edits)."""
+        if state.get("restoring"):
+            return
         params = _current_params()
         if params is None:
             return
@@ -457,6 +510,8 @@ def render():
         """Enqueue a sim_replay — fires on discrete strategy/leg edits + look-back
         changes (not the dt/mult sliders), since the replay trace depends only on
         the legs + the look-back window."""
+        if state.get("restoring"):
+            return
         if not state.get("meta") or not _legs_payload():
             return
         bus_client.request("options", {"type": "sim_replay", "args": {
@@ -474,6 +529,8 @@ def render():
         """Sliders fire often during drag → stash latest params; the debounce
         timer flushes the most recent at most ~every 0.4s. Also repaint the ΔS
         overlay immediately (client-side, no command needed)."""
+        if state.get("restoring"):
+            return
         params = _current_params()
         if params is not None:
             state["pending"] = params
@@ -506,22 +563,27 @@ def render():
         for el in (replay_chart, whatif_chart, ivshock_chart):
             ui.run_javascript(f"getElement({el.id})?.chart?.reflow()")
 
-    # Reflow after the newly-selected panel has actually become visible.
-    tabs.on_value_change(lambda e: ui.timer(0.05, _reflow_charts, once=True))
+    # Reflow after the newly-selected panel has actually become visible (+ persist
+    # the active tab).
+    tabs.on_value_change(lambda e: (ui.timer(0.05, _reflow_charts, once=True), _capture()))
 
     fetch_btn.on_click(_request_fetch)
     # Strategy pick → re-seed the editor from the template, then enqueue both runs.
+    # Suppressed while restoring (the restored legs come via pending_legs, not the
+    # template).
     strategy_sel.on_value_change(
-        lambda e: (editor.apply_template(strategy_sel.value), _on_legs_changed()))
+        lambda e: None if state.get("restoring")
+        else (editor.apply_template(strategy_sel.value), _on_legs_changed(), _capture()))
     # ΔS is client-side only (overlay) — re-render, never enqueue.
-    ds_slider.on_value_change(lambda e: (_render_figures()))
+    ds_slider.on_value_change(lambda e: (_render_figures(), _capture()))
     # Δt + IV-mult drive the sweep → debounced enqueue.
-    dt_slider.on_value_change(lambda e: _slider_changed())
-    mult_slider.on_value_change(lambda e: _slider_changed())
-    # The scrub cursor is client-side only — move the cursor, never enqueue.
+    dt_slider.on_value_change(lambda e: (_slider_changed(), _capture()))
+    mult_slider.on_value_change(lambda e: (_slider_changed(), _capture()))
+    # The scrub cursor is client-side only — move the cursor, never enqueue (not persisted).
     scrub_slider.on_value_change(lambda e: _render_replay())
     # Look-back override re-runs the replay with a different window.
-    lookback_sel.on_value_change(lambda e: _enqueue_replay())
+    lookback_sel.on_value_change(lambda e: (_enqueue_replay(), _capture()))
+    symbol_in.on_value_change(lambda e: _capture())
 
     # ── version-poll repaint (fetch-free) ────────────────────────────────────
     def _apply_meta(meta):
@@ -573,27 +635,33 @@ def render():
         state["replay"] = bus_client.read("options:sim_replay") or None
         _render_replay()
 
-    # Initial paint (graceful-empty when the service is cold).
-    state["meta_ver"] = bus_client.read_version("options:sim_meta")
-    state["meta"] = bus_client.read("options:sim_meta")
-    if state["meta"]:
-        _apply_meta(state["meta"])
+    # Initial paint: paint the cached result/replay instantly (no empty flash), then
+    # seed. We track the current meta version WITHOUT applying the stale meta — the
+    # seed below re-fetches, and _poll_meta applies the fresh one (with the restored /
+    # copied legs riding pending_legs).
     state["result_ver"] = bus_client.read_version("options:sim_result")
     state["result"] = bus_client.read("options:sim_result") or None
     _render_figures()
     state["replay_ver"] = bus_client.read_version("options:sim_replay")
     state["replay"] = bus_client.read("options:sim_replay") or None
     _render_replay()
+    state["meta_ver"] = bus_client.read_version("options:sim_meta")
 
     ui.timer(2.0, _poll_meta)
     ui.timer(2.0, _poll_result)
     ui.timer(2.0, _poll_replay)
     ui.timer(0.4, _flush_pending)  # debounce flush for slider-driven sweeps
 
-    # Legs copied in from the Calculator: stash them + fetch the snapshot; the legs
-    # are applied once the meta arrives (see ``_apply_meta``'s pending path).
+    # Seed precedence: an explicit Copy-to-Simulator handoff > the persisted snapshot
+    # > SPY/PCS defaults. Both the handoff + restore paths stash their legs in
+    # ``pending_legs`` and re-fetch; ``_apply_meta`` applies them when the fresh meta
+    # lands and runs (auto-refresh) with the restored sliders.
     p = handoff.take_pending_simulator()
-    if p:
+    seed = _ps.pick_seed(p, _LAST_SIM)
+    if seed == "handoff":
         symbol_in.value = p.get("symbol") or symbol_in.value
         state["pending_legs"] = p.get("legs") or []
-        _request_fetch()   # enqueue sim_fetch; legs applied when the meta arrives
+        _request_fetch()
+    elif seed == "restore":
+        _restore(_LAST_SIM)
+        _request_fetch()   # auto-refresh: re-fetch + re-run with the restored legs/sliders
