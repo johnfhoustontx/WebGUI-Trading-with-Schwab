@@ -779,7 +779,7 @@ def test_calc_compute_command_caches_result(monkeypatch):
             "ivadj": 0.0, "qty": 1, "expiry": "2026-06-19",
             "legs": [{"strike": 445.0, "premium": 0.5, "option_type": "put",
                       "side": "short", "qty": 1}],
-            "range_min": 0.0, "range_max": 0.0, "range_pct": 0.05}
+            "num_strikes": 24, "price_rows": [440.0, 445.0, 450.0]}
     sub = bus.subscribe("events:options:calc_result")
     handlers.handle_command(bus, Command(type="calc_compute", args=args))
     msg = sub.get_message(timeout=1.0)

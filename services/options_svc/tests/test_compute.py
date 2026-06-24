@@ -1049,6 +1049,24 @@ def test_sim_run_returns_whatif_and_ivshock(monkeypatch):
     assert out["ivshock"]["shock"]["theo_price"] == 1.5
 
 
+def test_sim_run_whatif_dollars_and_entry_baseline(monkeypatch):
+    """What-if rows carry DOLLAR position values (the ×100 contract multiplier the
+    old path dropped) and sim_run returns ``whatif_baseline`` — the position's $
+    value at (spot, NOW). The page subtracts that baseline so the payoff is measured
+    from trade entry (matches the Calculator), not from the forward-time spot value."""
+    snap = _SimSnap("SPY", 450.0, [_SimRow("2026-06-19", "call", 450)])
+    _patch_sim(monkeypatch, snap)
+    compute._SIM_SNAPSHOTS.clear()
+    compute._SIM_SNAPSHOTS["SPY"] = snap
+
+    out = compute.sim_run("SPY", "2026-06-19", "call", 450, "buy", 5, 1.5)
+    # Fake sweep theo = S − 100 (per-share × qty); ×100 → dollars.
+    assert out["whatif_rows"][0]["theo_price"] == (450.0 * 0.8 - 100.0) * 100
+    assert out["whatif_rows"][-1]["theo_price"] == (450.0 * 1.2 - 100.0) * 100
+    # Entry baseline = position value at (spot, now) = (spot − 100) × 100.
+    assert out["whatif_baseline"] == (450.0 - 100.0) * 100
+
+
 def test_sim_run_empty_when_no_snapshot(monkeypatch):
     _patch_sim(monkeypatch, _SimSnap("SPY", 450.0, []))
     compute._SIM_SNAPSHOTS.clear()
@@ -1331,9 +1349,11 @@ def test_calc_compute_returns_summary_grid_labels(monkeypatch):
         return [dt.date(2026, 6, 18), dt.date(2026, 6, 19)]
 
     def _spread_pnl(legs, spot, iv, r, eval_dates, price_range, expiry,
-                    iv_adjustment=0.0, eval_times=None, per_leg_expiry=False):
+                    iv_adjustment=0.0, eval_times=None, per_leg_expiry=False,
+                    rows_per_side=30, price_rows=None):
         seen["pnl"] = dict(iv=iv, r=r, price_range=price_range, iv_adj=iv_adjustment,
-                           eval_times=eval_times)
+                           eval_times=eval_times, rows_per_side=rows_per_side,
+                           price_rows=price_rows)
         return [{"price": 450.0, "pnl": [10, -5], "pnl_pct": [2.0, -1.0]}]
 
     _patch_calc_oc(monkeypatch, calc_summary=_summary,
@@ -1345,7 +1365,7 @@ def test_calc_compute_returns_summary_grid_labels(monkeypatch):
              "side": "short", "qty": 1}]
     out = compute.calc_compute(
         strategy="PCS", spot=450.0, iv=0.18, rate=0.045, ivadj=0.0, qty=1,
-        expiry="2026-06-19", legs=legs, range_min=0.0, range_max=0.0, range_pct=0.05)
+        expiry="2026-06-19", legs=legs)
 
     assert out["summary"] == {"max_loss": 100.0, "max_profit": 50.0}
     # First column is the intraday "Now"; subsequent eval dates keep MM/DD labels.
@@ -1354,27 +1374,14 @@ def test_calc_compute_returns_summary_grid_labels(monkeypatch):
     # Intraday time-to-expiry threaded to the engine (one per column).
     assert seen["pnl"]["eval_times"] is not None
     assert len(seen["pnl"]["eval_times"]) == 2
-    # Math wired through: rate->r, iv passed, range falls back to generate_price_range.
+    # Math wired through: rate->r, iv passed. No explicit price_rows ⇒ engine fallback
+    # over ±num_strikes (default 24) rows.
     assert seen["summary"]["r"] == 0.045 and seen["summary"]["iv"] == 0.18
-    assert seen["pnl"]["price_range"] == (450.0 * 0.95, 450.0 * 1.05)
+    assert seen["pnl"]["price_rows"] is None and seen["pnl"]["rows_per_side"] == 24
     assert seen["eval"][1] == dt.date(2026, 6, 19)
 
 
-def test_symmetric_price_range_widens_to_include_strikes():
-    lo, hi = compute.symmetric_price_range(100.0, [92.0, 108.0], pct=0.05)
-    assert round((lo + hi) / 2, 6) == 100.0
-    assert lo <= 92.0 and hi >= 108.0
-
-
-def test_symmetric_price_range_keeps_default_band_when_strikes_inside():
-    assert compute.symmetric_price_range(100.0, [99.0, 101.0], pct=0.05) == (95.0, 105.0)
-
-
-def test_symmetric_price_range_ignores_none_strikes():
-    assert compute.symmetric_price_range(100.0, [None], pct=0.1) == (90.0, 110.0)
-
-
-def test_calc_compute_passes_symmetric_range_spanning_strikes(monkeypatch):
+def test_calc_compute_uses_explicit_price_rows(monkeypatch):
     import datetime as dt
 
     seen = {}
@@ -1382,37 +1389,16 @@ def test_calc_compute_passes_symmetric_range_spanning_strikes(monkeypatch):
         monkeypatch,
         calc_summary=lambda *a, **k: {},
         generate_eval_dates=lambda t, e: [dt.date(2026, 6, 19)],
-        generate_price_range=lambda *a, **k: (0.0, 0.0),  # should NOT be used
+        generate_price_range=lambda *a, **k: (0.0, 0.0),  # unused now
         calc_spread_pnl=lambda legs, spot, iv, r, ed, pr, exp, iv_adjustment=0.0,
-        eval_times=None, per_leg_expiry=False: (seen.__setitem__("pr", pr), [])[1])
+        eval_times=None, per_leg_expiry=False, rows_per_side=30, price_rows=None:
+        (seen.__setitem__("rows", price_rows), [])[1])
 
-    # Long strike (430) is > 5% below spot (450) → band must widen to include it.
-    legs = [{"strike": 445.0, "side": "short"}, {"strike": 430.0, "side": "long"}]
+    # The page's explicit ±N real chain strikes are threaded straight to the engine.
     compute.calc_compute(strategy="PCS", spot=450.0, iv=0.18, rate=0.045, ivadj=0.0,
-                         qty=1, expiry="2026-06-19", legs=legs, range_min=0.0,
-                         range_max=0.0, range_pct=0.05)
-    lo, hi = seen["pr"]
-    assert round((lo + hi) / 2, 6) == 450.0       # symmetric about spot
-    assert lo <= 430.0 and hi >= 445.0            # strikes in view
-
-
-def test_calc_compute_uses_explicit_range_when_valid(monkeypatch):
-    import datetime as dt
-
-    seen = {}
-    _patch_calc_oc(
-        monkeypatch,
-        calc_summary=lambda *a, **k: {},
-        generate_eval_dates=lambda t, e: [dt.date(2026, 6, 19)],
-        generate_price_range=lambda *a, **k: (0.0, 0.0),  # would lose if called
-        calc_spread_pnl=lambda legs, spot, iv, r, ed, pr, exp, iv_adjustment=0.0,
-        eval_times=None, per_leg_expiry=False: (seen.__setitem__("pr", pr), [])[1])
-
-    compute.calc_compute(strategy="PCS", spot=450.0, iv=0.18, rate=0.045, ivadj=0.0,
-                         qty=1, expiry="2026-06-19", legs=[], range_min=440.0,
-                         range_max=460.0, range_pct=0.05)
-    # Explicit (min, max) used since max > min.
-    assert seen["pr"] == (440.0, 460.0)
+                         qty=1, expiry="2026-06-19", legs=[],
+                         num_strikes=24, price_rows=[445.0, 450.0, 455.0])
+    assert seen["rows"] == [445.0, 450.0, 455.0]
 
 
 # ── intraday time-to-expiry + 0DTE current-P&L (the calculator bug fix) ───────
@@ -1471,8 +1457,7 @@ def test_calc_compute_0dte_now_column_shows_current_pnl():
                               tzinfo=__import__("zoneinfo").ZoneInfo("America/New_York"))
     out = compute.calc_compute(
         strategy="LONG_CALL", spot=spot, iv=0.30, rate=0.045, ivadj=0.0, qty=1,
-        expiry=today.isoformat(), legs=legs, range_min=0.0, range_max=0.0,
-        range_pct=0.05, now=now)
+        expiry=today.isoformat(), legs=legs, now=now)
 
     # Columns: an intraday "Now" + the expiration payoff.
     assert out["eval_labels"][0] == "Now"
@@ -1495,7 +1480,8 @@ def test_calc_compute_multiday_builds_now_and_future_columns(monkeypatch):
         generate_eval_dates=lambda t, e: [t, t + dt.timedelta(days=2), e],
         generate_price_range=lambda *a, **k: (0.0, 0.0),
         calc_spread_pnl=lambda legs, spot, iv, r, ed, pr, exp, iv_adjustment=0.0,
-        eval_times=None, per_leg_expiry=False: (seen.__setitem__("times", eval_times), [])[1])
+        eval_times=None, per_leg_expiry=False, rows_per_side=30, price_rows=None:
+        (seen.__setitem__("times", eval_times), [])[1])
 
     today = dt.date.today()
     expiry = today + dt.timedelta(days=4)
@@ -1503,8 +1489,7 @@ def test_calc_compute_multiday_builds_now_and_future_columns(monkeypatch):
                               tzinfo=__import__("zoneinfo").ZoneInfo("America/New_York"))
     out = compute.calc_compute(
         strategy="LONG_CALL", spot=100.0, iv=0.30, rate=0.045, ivadj=0.0, qty=1,
-        expiry=expiry.isoformat(), legs=[{"strike": 100.0}], range_min=0.0,
-        range_max=0.0, range_pct=0.05, now=now)
+        expiry=expiry.isoformat(), legs=[{"strike": 100.0}], now=now)
 
     # "Now" replaces today's slot; future dates keep MM/DD; expiry column T == 0.
     assert out["eval_labels"][0] == "Now"
@@ -1723,8 +1708,7 @@ def test_calc_compute_butterfly_uses_generic_summary():
         {"strike": 105, "option_type": "call", "side": "long", "premium": 1.5, "qty": 1, "expiry": exp},
     ]
     out = compute.calc_compute(strategy="CUSTOM", spot=100, iv=0.25, rate=0.04,
-                               ivadj=0.0, qty=1, expiry=exp, legs=legs,
-                               range_min=0, range_max=0, range_pct=0.10)
+                               ivadj=0.0, qty=1, expiry=exp, legs=legs)
     s = out["summary"]
     assert s["max_loss"] > 0 and s["max_profit"] > 0
     assert len(s["breakevens"]) == 2

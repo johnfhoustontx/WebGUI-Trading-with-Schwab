@@ -1089,16 +1089,6 @@ _CALC_ANALYTIC_CODES = {"PCS", "CCS", "IC",
                         "LONG_CALL", "LONG_PUT", "NAKED_CALL", "NAKED_PUT"}
 
 
-def symmetric_price_range(spot, strikes, pct=0.05):
-    """Price range symmetric about spot, widened to include all strikes.
-    Returns (low, high) with midpoint == spot."""
-    half = spot * pct
-    for k in strikes or []:
-        if k is not None:
-            half = max(half, abs(k - spot))
-    return (round(spot - half, 2), round(spot + half, 2))
-
-
 # ── intraday time-to-expiry (the 0DTE fix) ───────────────────────────────────
 # Options stop trading at the 4:00pm ET close (QQQ/SPY/equities and PM-settled
 # 0DTE index weeklys). Time-to-expiry is the CALENDAR span from now to that close
@@ -1167,7 +1157,7 @@ def calc_iv(spot, strike, option_type, mark, expiry, rate=0.045, now=None) -> di
 
 
 def calc_compute(strategy, spot, iv, rate, ivadj, qty, expiry, legs,
-                 range_min, range_max, range_pct, now=None) -> dict:
+                 num_strikes=24, price_rows=None, now=None) -> dict:
     """Run the calculator math → ``{"summary", "eval_labels", "pnl_data"}``.
 
     Time-to-expiry is INTRADAY (calendar seconds to the 4:00pm ET close on the
@@ -1179,10 +1169,11 @@ def calc_compute(strategy, spot, iv, rate, ivadj, qty, expiry, legs,
     ``calc_summary`` tiles (incl. PoP) also use the intraday "Now" T rather than the
     old ``or 1/365`` clamp, which over-priced 0DTE ~20×.
 
-    The price range is explicit min/max when valid, else ``symmetric_price_range``
-    (symmetric about spot, widened to span all leg strikes) at ``range_pct``.
-    ``expiry`` arrives as an ISO string. Labels are pre-formatted strings so the
-    page's grid header needs no date objects. ``summary``/``pnl_data`` are JSON-safe."""
+    The grid's price rows are the page's explicit ``price_rows`` (the ±N real chain
+    strikes around spot from the Number-of-strikes control). When absent, fall back
+    to the engine's even-step heuristic over ±``num_strikes`` rows. ``expiry`` arrives
+    as an ISO string. Labels are pre-formatted strings so the page's grid header needs
+    no date objects. ``summary``/``pnl_data`` are JSON-safe."""
     import datetime as dt
 
     import options_calculator as oc
@@ -1224,20 +1215,17 @@ def calc_compute(strategy, spot, iv, rate, ivadj, qty, expiry, legs,
     if expiry_date == today:
         columns.append(("Exp", 0.0))
 
-    if range_min and range_max and range_max > range_min:
-        price_range = (range_min, range_max)
-    else:
-        # Symmetric about spot (spot dead-center), widened so every leg's strike
-        # falls inside the grid. Replaces ``oc.generate_price_range`` (which could
-        # render asymmetrically / clip the strikes) — engine math is unchanged.
-        strikes = [leg.get("strike") for leg in (legs or [])]
-        price_range = symmetric_price_range(spot, strikes, pct=range_pct)
-
     eval_labels = [lab for lab, _ in columns]
     eval_times = [t for _, t in columns]
+    # Grid rows: the page's explicit ±num_strikes real chain strikes when available;
+    # else the engine's even-step heuristic over ±num_strikes rows (a wide-open
+    # price_range so rows_per_side governs the extent).
+    rows = [float(p) for p in (price_rows or []) if isinstance(p, (int, float))]
     pnl_data = oc.calc_spread_pnl(legs, spot, iv, rate, [None] * len(columns),
-                                  price_range, expiry_date, iv_adjustment=ivadj,
-                                  eval_times=eval_times, per_leg_expiry=True)
+                                  (0.0, 1e12), expiry_date, iv_adjustment=ivadj,
+                                  eval_times=eval_times, per_leg_expiry=True,
+                                  rows_per_side=int(num_strikes or 24),
+                                  price_rows=(rows or None))
     return {"summary": summary, "eval_labels": eval_labels, "pnl_data": pnl_data}
 
 
@@ -1257,6 +1245,12 @@ def calc_compute(strategy, spot, iv, rate, ivadj, qty, expiry, legs,
 
 # symbol -> ChainSnapshot object (in-process; never serialized whole).
 _SIM_SNAPSHOTS: dict = {}
+
+# Equity/index option contract multiplier (shares per contract). The simulator
+# engine prices in per-share × qty units; ×100 converts the What-if curve to a
+# DOLLAR position value so it matches the Calculator (options_calculator.py scales
+# by the same literal 100). The old What-if path dropped this entirely.
+_CONTRACT_MULT = 100
 
 
 def expiries_of(snapshot):
@@ -1354,30 +1348,48 @@ def sim_run(symbol, expiry=None, kind=None, strike=None, direction=None,
 
     today = _dt.date.today()
 
-    def _forward_days(c):
-        """Each leg's days-to-expiry AFTER ``dt`` elapsed days from now (>=0.01).
+    def _days_after(c, elapsed):
+        """Each leg's days-to-expiry after ``elapsed`` days from now (>=0.01).
         Tolerates a string or date ``expiry`` (test doubles use strings)."""
         exp = c.expiry
         if isinstance(exp, str):
             try:
                 exp = _dt.date.fromisoformat(exp[:10])
             except ValueError:
-                return max(float(dt), 0.01)
+                return max(float(elapsed), 0.01)
         dte_now = max((exp - today).days, 0)
-        return max(dte_now - float(dt), 0.01)
+        return max(dte_now - float(elapsed), 0.01)
 
     s_range = np.linspace(snap.spot * 0.8, snap.spot * 1.2, 81)
     whatif_eng = seng.WhatIfEngine(snap)
     wdf = seng.aggregate_position(
-        pos, lambda c: whatif_eng.sweep(c, s_range, _forward_days(c)))
+        pos, lambda c: whatif_eng.sweep(c, s_range, _days_after(c, float(dt))))
     whatif_rows = _sim_records(wdf)
+    # ×100 → DOLLAR position value (see _CONTRACT_MULT). Without this a 10-lot
+    # spread's What-if read 100× too small (−$200 instead of −$20,000).
+    for _r in whatif_rows:
+        _tp = _r.get("theo_price")
+        if isinstance(_tp, (int, float)):
+            _r["theo_price"] = _tp * _CONTRACT_MULT
+    # Entry baseline: the position's $ value at the CURRENT spot and CURRENT time
+    # (Δt=0, full per-leg DTE) — the mark you'd enter at. The page measures What-if
+    # P/L from here (value(S,t) − baseline), i.e. the Calculator's
+    # ``entry_credit + value(S,t)`` — NOT the old forward-time "zero at spot"
+    # subtraction (which hid theta and was off by the credit).
+    bdf = seng.aggregate_position(
+        pos, lambda c: whatif_eng.sweep(c, [snap.spot], _days_after(c, 0.0)))
+    brows = _sim_records(bdf)
+    whatif_baseline = (float(brows[0]["theo_price"]) * _CONTRACT_MULT
+                       if brows and isinstance(brows[0].get("theo_price"), (int, float))
+                       else 0.0)
 
     shock_eng = seng.IVShockEngine(snap)
     sdf = seng.aggregate_position(pos, lambda c: shock_eng.sweep(c, [1.0, float(mult)]))
     rows = sdf.to_dict("records") if hasattr(sdf, "to_dict") else list(sdf or [])
     ivshock = {"base": rows[0], "shock": rows[1]} if len(rows) >= 2 else None
 
-    return {"spot": snap.spot, "whatif_rows": whatif_rows, "ivshock": ivshock}
+    return {"spot": snap.spot, "whatif_rows": whatif_rows,
+            "whatif_baseline": whatif_baseline, "ivshock": ivshock}
 
 
 _REPLAY_OVERRIDES = {
