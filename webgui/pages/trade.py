@@ -497,7 +497,10 @@ def render():
 
     analyze_btn.on_click(_request_analyze)
     symbol_in.on("keydown.enter", lambda e: _request_analyze())
-    symbol_in.on("blur", lambda e: _request_analyze())  # tab-out = Analyze
+    # tab-out = Analyze. Use focusout (NOT blur): NiceGUI attaches the listener to
+    # the Quasar q-input's ROOT element, and the native `blur` event does not bubble
+    # there — `focusout` bubbles (same reason select_all_on_focus uses `focusin`).
+    symbol_in.on("focusout", lambda e: _request_analyze())
 
     # ── version-poll repaint (fetch-free) ─────────────────────────────────────
     @guard
