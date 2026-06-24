@@ -11,6 +11,26 @@ Both the **Calculator** and the **Simulator** inject this one constant
 look never drifts between the two pages. (The class name is historical —
 ``calc-v2`` — kept stable so neither page's markup has to change; the theme is
 page-agnostic and promotable app-wide.)
+
+Apply to a new page::
+
+    from pages.options.theme import DASHBOARD_CSS
+    ui.add_css(DASHBOARD_CSS)
+    with ui.column().classes("calc-v2 w-full gap-4"):
+        ui.label("Title").classes("text-h6").style("color:#eaf0fb")
+        with ui.column().classes("calc-card w-full gap-3"):   # bordered navy panel
+            ui.input("Symbol")                                 # auto-boxed (q-field)
+            ui.button("Go", color=None).props("no-caps").classes("cv2-btn-primary")
+
+Inputs / selects / tabs inside ``.calc-v2`` are auto-restyled; **buttons need
+``color=None``** (drops Quasar's ``bg-primary``) + a ``cv2-btn`` / ``cv2-btn-primary``
+class. Class vocabulary: ``.calc-card`` (panel), ``.calc-eyebrow`` (muted label),
+``.cv2-btn`` / ``.cv2-btn-primary`` (buttons), ``.strategy-menu-btn`` (boxed Strategy
+trigger, via ``strategy_menu.build_strategy_menu(boxed=True)``), ``.strat-menu-navy``
+(the teleported Strategy popup — GLOBAL, mounts on ``<body>`` outside ``.calc-v2``),
+``.leg-head`` (leg-table header, via ``leg_editor.build_leg_editor(header=True)``),
+``.leg-strike`` (centered strike cell). The **full palette + class reference** lives
+in the root ``CLAUDE.md`` "App theme — dark-navy 'dashboard'" section (canonical).
 """
 
 # Dark-navy "dashboard" restyle, page-scoped under .calc-v2. Converts NiceGUI's

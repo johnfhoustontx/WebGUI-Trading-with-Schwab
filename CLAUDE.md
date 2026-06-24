@@ -8,7 +8,27 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-06-23 (**Multi-leg Simulator + Calculator DONE**: the
+**Last updated:** 2026-06-24 (**App theme rollout + What-if payoff**: the dark-navy
+**"dashboard" theme** is now **shared, not Calculator-only** — extracted to
+**`webgui/pages/options/theme.py`** (`DASHBOARD_CSS`, scoped under `.calc-v2`) and
+injected by **both** the Calculator **and** the Simulator (`ui.add_css(DASHBOARD_CSS)`
++ wrap in `.calc-v2`), so the look never drifts. The **Simulator** gains the navy
+gradient, bordered `calc-card`s, the **boxed** Strategy picker, **header-table** legs,
+`cv2-btn`/`cv2-btn-primary` buttons, and **dark transparent Quasar tabs** so its
+already-dark-transparent Highcharts panels sit on the navy. See the new **"App theme
+— dark-navy 'dashboard'"** reference section below (palette + class vocabulary +
+how-to-apply) — the single place to look up the theme. The Simulator **What-if** tab
+is restyled as a **green/red profit-loss payoff**: `simulator.whatif_figure` plots
+`P/L = theo_price(S) − theo_price(spot)` (`whatif_pnl`, **zero at spot**) as a
+Highcharts **area** with `threshold:0` + `color`/`negativeColor` + `fillColor`/
+`negativeFillColor` (green profit fill+line above the breakeven, red loss below; an
+explicit base `color` stops a default-blue base path leaking under the split) + faint
+full-height Profit/Loss `plotBands` with labels; `theo_price` is already
+sign-weighted by leg side (`aggregate_position` scale `sign*ratio`), so the
+subtraction is the holder's P/L and the direction is correct (verified live: a
+24-DTE SPY bull put spread loses on the downside, profits on the upside). webgui 430
+green. Branch `Using_Highcharts`.)
+Prior — 2026-06-23 (**Multi-leg Simulator + Calculator DONE**: the
 `/options/simulator` and `/options/calculator` pages now build, price, and analyze
 **multi-leg strategies** — verticals (credit *and* debit), condors (iron +
 all-same), butterflies (long 1-2-1 + iron), and **calendars/diagonals** (per-leg
@@ -305,6 +325,41 @@ teleported `strat-menu-navy` popup — so the two pages never drift). Options de
 / [`-plan.md`](docs/plans/2026-06-14-options-section-expansion-plan.md).
 Gamma/Simulator: [`docs/plans/2026-06-14-gamma-simulator-design.md`](docs/plans/2026-06-14-gamma-simulator-design.md) / [`-plan.md`](docs/plans/2026-06-14-gamma-simulator-plan.md).
 
+**App theme — dark-navy "dashboard" (DONE — 2026-06-24; the canonical reference).**
+The shared dark-navy look used by the **Calculator** + **Simulator** (page-scoped;
+promotable app-wide). One CSS string lives in **`webgui/pages/options/theme.py`**
+(`DASHBOARD_CSS`, scoped under `.calc-v2`); a page injects it with
+`ui.add_css(DASHBOARD_CSS)` and wraps its content in `.calc-v2`, so the two pages
+never drift. **This section + `theme.py` are the single source — look here to apply
+or change the theme.**
+- **Apply to a new page:**
+  ```python
+  from pages.options.theme import DASHBOARD_CSS
+  ui.add_css(DASHBOARD_CSS)
+  with ui.column().classes("calc-v2 w-full gap-4"):
+      ui.label("Title").classes("text-h6").style("color:#eaf0fb")
+      with ui.column().classes("calc-card w-full gap-3"):      # bordered navy panel
+          ui.input("Symbol")                                    # auto-boxed (q-field)
+          ui.button("Go", color=None).props("no-caps").classes("cv2-btn-primary")
+  ```
+  Inputs / selects / tabs inside `.calc-v2` are auto-restyled; **buttons need
+  `color=None`** (drops Quasar's `bg-primary`) + a `cv2-btn` / `cv2-btn-primary` class.
+- **Class vocabulary** (all under `.calc-v2` except the popup): `.calc-v2` page wrapper
+  (navy radial-gradient bg + base text) · `.calc-card` bordered navy panel ·
+  `.calc-eyebrow` small muted label · `.cv2-btn` / `.cv2-btn-primary` secondary /
+  primary button · `.strategy-menu-btn` boxed Strategy trigger
+  (`strategy_menu.build_strategy_menu(..., boxed=True)`) · `.strat-menu-navy` the
+  teleported Strategy-menu popup (**GLOBAL** — Quasar menus mount on `<body>`, outside
+  `.calc-v2`) · `.leg-head` leg-table header row
+  (`leg_editor.build_leg_editor(..., header=True)`) · `.leg-strike` centered strike cell.
+- **Palette** (hex → role): page bg `#16243f→#0c1424→#0a0f1c` (radial) / border `#1d2942`
+  · card `#101a30` / border `#213152` · input box `#0c1426` / border `#243353` / focus
+  ring `#3b82f6` · input text `#e7edf8` · base text `#cdd8ee` · muted label `#7f8db0` ·
+  icon + eyebrow `#8794b4` · title `#eaf0fb` · secondary btn `#15213b` (hover `#1b2950`)
+  · primary btn `#2563eb` (hover `#1d4fd1`) · tab active `#e7edf8` / inactive `#8794b4`
+  / indicator `#3b82f6` · **P/L payoff** profit-green `#34d399` / loss-red `#f87171`
+  (gradient fills + faint `rgba(...,.06)` washes — `simulator.whatif_figure`).
+
 **`pages/ui_guard.py` (cross-cutting, load-bearing — used by ~15 pages).** Provides
 `guard` / `guard_async` decorators that make a NiceGUI callback a clean no-op when
 the owning client/slot has been deleted (browser tab navigated away / closed /
@@ -394,7 +449,12 @@ module-level functions (TDD them with sample dicts); keep `render()` thin
   Highcharts `bar` reverses its xAxis by default (`reversed:False` = high values at
   top). `chart.update()` MERGES options, so a series-TYPE switch leaks the old type's
   plotLines/colorAxis — RECREATE the element on kind-change (bar↔heatmap), don't
-  update in place (see `gamma._set_chart`). `accessibility.enabled:False` silences
+  update in place (see `gamma._set_chart`). A **green-above-zero / red-below-zero P&L
+  payoff** = an `area` series with `threshold:0` + `color`/`negativeColor` (line) +
+  `fillColor`/`negativeFillColor` (fill); you MUST set an explicit base `color`/
+  `fillColor` or Highcharts paints a default-blue (`#2caffe`) base path UNDER the
+  green/red split (cost: a stray blue area — see `simulator.whatif_figure`).
+  `accessibility.enabled:False` silences
   the a11y-module console nag (house pattern). (`plotly` was never a Python dep —
   `ui.plotly(dict)` rendered via bundled plotly.js.)
 - Tables: `ui.table(columns=[{name,label,field,...}], rows=[...], row_key="id")`;
