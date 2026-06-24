@@ -53,3 +53,21 @@ def test_generic_summary_keys():
     s = oc.calc_summary_generic(legs, 100, 0.04, 0.2, 0.05)
     assert set(s) >= {"entry_credit", "max_profit", "max_loss",
                       "breakevens", "return_on_risk", "pop"}
+
+
+def test_calc_spread_pnl_uses_explicit_price_rows():
+    # The Calculator's Number-of-strikes control hands the grid the ±N real chain
+    # strikes; calc_spread_pnl must use them verbatim as the price rows.
+    legs = [{"strike": 100, "option_type": "call", "side": "long", "premium": 2.0, "qty": 1}]
+    rows = oc.calc_spread_pnl(legs, 100, 0.2, 0.045, [None], (0, 1e9),
+                              date(2026, 7, 17), eval_times=[0.05],
+                              price_rows=[90, 95, 100, 105, 110])
+    assert [r["price"] for r in rows] == [90.0, 95.0, 100.0, 105.0, 110.0]
+
+
+def test_calc_spread_pnl_price_rows_none_keeps_step_gen():
+    # No price_rows → the legacy spot-magnitude step grid (unchanged fallback).
+    legs = [{"strike": 100, "option_type": "call", "side": "long", "premium": 2.0, "qty": 1}]
+    rows = oc.calc_spread_pnl(legs, 100, 0.2, 0.045, [None], (95, 105),
+                              date(2026, 7, 17), eval_times=[0.05])
+    assert len(rows) >= 3 and all("price" in r for r in rows)

@@ -838,7 +838,7 @@ def _leg_expiry_years(leg, expiry_date=None):
 
 def calc_spread_pnl(legs, spot, iv, r, eval_dates, price_range,
                     expiry_date, iv_adjustment=0.0, rows_per_side=30,
-                    eval_times=None, per_leg_expiry=False):
+                    eval_times=None, per_leg_expiry=False, price_rows=None):
     """
     Calculate P&L grid for a spread across prices and dates.
 
@@ -860,6 +860,10 @@ def calc_spread_pnl(legs, spot, iv, r, eval_dates, price_range,
                         intraday "Now" column (fractional day) and an expiration
                         column (T=0) for 0DTE. ``eval_dates`` is ignored for timing
                         when ``eval_times`` is supplied.
+        price_rows    - Optional explicit list of price-axis rows (e.g. the
+                        Calculator's ±N real chain strikes around spot). When given,
+                        used verbatim (sorted/deduped) and the spot-magnitude step
+                        grid + ``price_range``/``rows_per_side`` are bypassed.
 
     Returns list of dicts: {price: float, pnl: [floats], pnl_pct: [floats]}
         Each pnl/pnl_pct list has one value per column.
@@ -878,35 +882,37 @@ def calc_spread_pnl(legs, spot, iv, r, eval_dates, price_range,
         else:
             total_premium_received -= leg["premium"] * qty * 100
 
-    # Generate price steps with size scaled to underlying price:
-    #   spot > 5000        -> $5.00
-    #   1000 <= spot <= 5000 -> $2.50
-    #   spot < 1000        -> $1.00
-    # Capped at rows_per_side above and below spot.
-    import math
-    if spot > 5000:
-        step = 5.00
-    elif spot < 1000:
-        step = 1.00
+    # Grid price rows. Explicit ``price_rows`` (the Calculator's ±N real chain
+    # strikes around spot) win and are used verbatim. Otherwise generate the legacy
+    # spot-magnitude step grid (±rows_per_side, clamped to price_range):
+    #   spot > 5000 -> $5.00 · 1000-5000 -> $2.50 · spot < 1000 -> $1.00
+    if price_rows:
+        price_steps = sorted({round(float(p), 2) for p in price_rows})
     else:
-        step = 2.50
+        import math
+        if spot > 5000:
+            step = 5.00
+        elif spot < 1000:
+            step = 1.00
+        else:
+            step = 2.50
 
-    inv = 1.0 / step  # used to snap to the step grid
-    low_limit = math.floor((spot - rows_per_side * step) * inv) / inv
-    high_limit = math.ceil((spot + rows_per_side * step) * inv) / inv
-    # Also respect the user-supplied price_range boundaries
-    low = max(price_range[0], low_limit)
-    high = min(price_range[1], high_limit)
-    low_r = math.floor(low * inv) / inv
-    high_r = math.ceil(high * inv) / inv
-    if high_r <= low_r:
-        price_steps = [low_r]
-    else:
-        price_steps = []
-        p = low_r
-        while p <= high_r + 0.01:
-            price_steps.append(round(p, 2))
-            p += step
+        inv = 1.0 / step  # used to snap to the step grid
+        low_limit = math.floor((spot - rows_per_side * step) * inv) / inv
+        high_limit = math.ceil((spot + rows_per_side * step) * inv) / inv
+        # Also respect the user-supplied price_range boundaries
+        low = max(price_range[0], low_limit)
+        high = min(price_range[1], high_limit)
+        low_r = math.floor(low * inv) / inv
+        high_r = math.ceil(high * inv) / inv
+        if high_r <= low_r:
+            price_steps = [low_r]
+        else:
+            price_steps = []
+            p = low_r
+            while p <= high_r + 0.01:
+                price_steps.append(round(p, 2))
+                p += step
 
     # Per-column time-to-expiry (years). Explicit ``eval_times`` (intraday "Now"
     # + expiration) win; otherwise fall back to the legacy calendar-day math.
