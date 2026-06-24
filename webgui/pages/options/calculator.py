@@ -29,6 +29,17 @@ from .inputs import select_all_on_focus
 # Shared dark-navy "dashboard" theme (Calculator + Simulator inject the SAME CSS so
 # the look never drifts). Kept under its historical name here.
 from .theme import DASHBOARD_CSS as CALC_V2_CSS
+from . import page_state as _ps
+
+# Persisted (single-user) Calculator input snapshot — survives navigation + browser
+# reload, resets on a webgui restart (same as the other persisting pages). The pure
+# snapshot/merge/precedence helpers live in page_state.py.
+_CALC_KEYS = ("symbol", "strategy", "legs", "iv", "rate", "ivadj", "contracts",
+              "price", "num_strikes", "expiry")
+_CALC_DEFAULTS = {"symbol": "SPY", "strategy": "PCS", "legs": [], "iv": 20.0,
+                  "rate": 4.5, "ivadj": 0.0, "contracts": 1, "price": 100.0,
+                  "num_strikes": 24, "expiry": None}
+_LAST_CALC: dict = {}
 
 # 3D / beveled button styling for the Calculator action buttons (Load / IV /
 # Fetch Premiums and Calculate / Expected Move). Scoped to ``.calc-btn-3d`` and
@@ -386,6 +397,7 @@ def render():
         "calc_spot": None,    # spot used for the last enqueued compute (grid marker)
         "pending_legs": None,  # legs copied in from the Simulator, applied on chain load
         "contracts": 1,       # last-applied Contracts count (drives per-leg qty scaling)
+        "restoring": False,   # True while restoring a persisted snapshot (suppress enqueues)
     }
 
     # ── Dark "dashboard" layout (page-scoped, .calc-v2). The functional widgets
@@ -465,7 +477,7 @@ def render():
 
     editor = leg_editor.build_leg_editor(
         leg_box, strikes_for=_strikes_for, expiries_for=_expiries_for,
-        show_premium=True, on_change=lambda: None, header=True,
+        show_premium=True, on_change=lambda: _capture(), header=True,
         spot_getter=lambda: float(price_in.value or 0))
 
     def _scale_leg_qty(factor):
@@ -484,24 +496,71 @@ def render():
     def _seed_template():
         """Apply the selected template (legs = its ratios) then scale by the current
         Contracts so the legs reflect the position size from the start."""
+        if state.get("restoring"):
+            return
         editor.apply_template(strategy_sel.value)
         _scale_leg_qty(max(1, int(contracts_in.value or 1)))
 
+    # ── persist + restore full UI state across navigation (single-user) ───────
+    def _capture():
+        """Snapshot the current inputs into the module-level _LAST_CALC (cheap dict
+        write; wired to every input change). No-op while restoring."""
+        if state.get("restoring"):
+            return
+        _LAST_CALC.clear()
+        _LAST_CALC.update(_ps.snapshot({
+            "symbol": (symbol_in.value or "").strip().upper(),
+            "strategy": strategy_sel.value, "legs": editor.get_legs(),
+            "iv": iv_in.value, "rate": rate_in.value, "ivadj": ivchg_in.value,
+            "contracts": int(contracts_in.value or 1), "price": price_in.value,
+            "num_strikes": int(nstrikes_in.value or 24), "expiry": expiry_sel.value,
+        }, _CALC_KEYS))
+
+    def _restore(snap):
+        """Apply a persisted snapshot to the widgets under the restoring guard (so
+        wiring fires no stray commands). Legs ride ``pending_legs`` so the post-load
+        ``_apply_chain`` applies them (keeping their premiums) and recomputes."""
+        s = _ps.merge_restore(snap, _CALC_DEFAULTS)
+        state["restoring"] = True
+        try:
+            symbol_in.value = s["symbol"]
+            strategy_sel.value = s["strategy"]
+            iv_in.value = s["iv"]
+            rate_in.value = s["rate"]
+            ivchg_in.value = s["ivadj"]
+            contracts_in.value = s["contracts"]
+            state["contracts"] = s["contracts"]
+            price_in.value = s["price"]
+            nstrikes_in.value = s["num_strikes"]
+            if s["expiry"]:
+                expiry_sel.options = [s["expiry"]]
+                expiry_sel.value = s["expiry"]
+                expiry_sel.update()
+            state["pending_legs"] = s["legs"] or None
+        finally:
+            state["restoring"] = False
+
     # Seed the default template (PCS). Tolerates empty strikes/expiries pre-load.
     _seed_template()
-    strategy_sel.on_value_change(lambda e: _seed_template())
+    strategy_sel.on_value_change(
+        lambda e: None if state.get("restoring") else (_seed_template(), _capture()))
 
     @guard
     def _on_contracts_change():
         """Contracts is the position-size multiplier: scale all legs by new/old so
         changing it from 1 → 10 takes every leg's qty up 10× (ratios preserved)."""
+        if state.get("restoring"):
+            return
         new = max(1, int(contracts_in.value or 1))
         old = state.get("contracts") or 1
         if new != old:
             _scale_leg_qty(new / old)
         state["contracts"] = new
 
-    contracts_in.on_value_change(lambda e: _on_contracts_change())
+    contracts_in.on_value_change(lambda e: (_on_contracts_change(), _capture()))
+    # Persist the remaining inputs on change (cheap dict write; no command).
+    for _w in (symbol_in, iv_in, rate_in, ivchg_in, price_in, nstrikes_in, expiry_sel):
+        _w.on_value_change(lambda e: _capture())
 
     @guard
     def fetch_premiums():
@@ -690,7 +749,10 @@ def render():
         pending = state.pop("pending_legs", None)
         if pending:
             editor.set_legs(pending)
-            fetch_premiums()
+            # Copy-from-Simulator legs carry no premium → fetch from the chain; a
+            # restored snapshot keeps the user's own premiums (don't clobber them).
+            if any(l.get("premium") in (None, 0) for l in pending):
+                fetch_premiums()
             do_calc()
         elif not editor.is_dirty():
             _seed_template()   # re-seed (template ratios × Contracts), snap strikes
@@ -830,3 +892,10 @@ def render():
         symbol_in.value = _legs_in.get("symbol") or symbol_in.value
         state["pending_legs"] = _legs_in.get("legs") or []
         load_symbol()   # enqueue calc_load; legs applied when the chain arrives
+
+    # Restore the persisted snapshot — but only when no handoff consumed the seed
+    # (an explicit Copy/Send-to-Calculator wins). Auto-refresh: reload the chain
+    # (fresh price) → _apply_chain applies the restored legs + recomputes.
+    if not _pending and not _legs_in and _LAST_CALC:
+        _restore(_LAST_CALC)
+        load_symbol()

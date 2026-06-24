@@ -247,3 +247,19 @@ def test_strikes_window_edges_and_empty():
 
 def test_strikes_window_dedups_and_ignores_junk():
     assert calc.strikes_window([100, 100, 105, None, "x", 95], 100, 5) == [95.0, 100.0, 105.0]
+
+
+def test_calc_capture_keys_cover_inputs():
+    # Guard against forgetting to persist a Calculator input across navigation.
+    assert set(calc._CALC_KEYS) == {
+        "symbol", "strategy", "legs", "iv", "rate", "ivadj", "contracts",
+        "price", "num_strikes", "expiry"}
+
+
+def test_calc_snapshot_roundtrips_via_page_state():
+    from pages.options import page_state as ps
+    snap = ps.snapshot({"symbol": "MSFT", "strategy": "CCS", "legs": [], "iv": 25.0,
+                        "rate": 4.5, "ivadj": 0.0, "contracts": 3, "price": 410.0,
+                        "num_strikes": 30, "expiry": "2026-07-17", "junk": 1}, calc._CALC_KEYS)
+    assert "junk" not in snap
+    assert ps.merge_restore(snap, calc._CALC_DEFAULTS)["num_strikes"] == 30
