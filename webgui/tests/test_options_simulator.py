@@ -27,6 +27,30 @@ def test_whatif_figure_no_target_omits_overlay():
     assert len(fig["yAxis"]["plotLines"]) == 1
 
 
+def test_whatif_pnl_zeroes_at_spot():
+    # P/L = theo(S) − theo(spot): zero at the spot row, relative elsewhere.
+    df = [{"S": 100, "theo_price": 5}, {"S": 110, "theo_price": 8},
+          {"S": 120, "theo_price": 20}]
+    assert sim.whatif_pnl(df, spot=110) == [[100, -3], [110, 0], [120, 12]]
+    assert sim.whatif_pnl([], 110) == []          # empty-safe
+    assert sim.whatif_pnl(df, spot=None) == [[100, 5], [110, 8], [120, 20]]  # no spot ⇒ raw
+
+
+def test_whatif_figure_profit_loss_shading_and_bands():
+    # The payoff restyle: an area split at the 0 threshold — green (profit) above,
+    # red (loss) below — for both line and fill, with faint Profit/Loss background
+    # bands. An explicit base color avoids Highcharts' default-blue base path.
+    fig = sim.whatif_figure([{"S": 100, "theo_price": 5}, {"S": 110, "theo_price": 8},
+                             {"S": 120, "theo_price": 20}], spot=110.0)
+    s = fig["series"][0]
+    assert fig["chart"]["type"] == "area" and s["type"] == "area"
+    assert s["threshold"] == 0
+    assert s["color"] == sim.PNL_GREEN and s["negativeColor"] == sim.PNL_RED
+    assert s["fillColor"] == sim._PNL_GREEN_FILL and s["negativeFillColor"] == sim._PNL_RED_FILL
+    assert {b["label"]["text"] for b in fig["yAxis"]["plotBands"]} == {"Profit", "Loss"}
+    assert [110, 0] in s["data"]                  # zero at spot
+
+
 def test_ivshock_figure_two_series():
     base = {"theo_price": 1.0, "delta": 0.5, "gamma": 0.02, "theta": -0.1, "vega": 0.3}
     shock = {"theo_price": 1.6, "delta": 0.55, "gamma": 0.018, "theta": -0.12, "vega": 0.45}

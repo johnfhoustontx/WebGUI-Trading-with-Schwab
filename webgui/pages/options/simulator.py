@@ -45,6 +45,19 @@ TARGET_COLOR = "#42a5f5"
 BASE_COLOR = "#42a5f5"
 SHOCK_COLOR = "#ffa726"
 
+# Profit / loss payoff palette (What-if) — green profit zone above zero, red loss
+# zone below, on the dark dashboard navy. The fills are vertical gradients
+# (strongest at the extremes, fading toward the zero/breakeven line); the faint
+# *_BAND colors wash the full profit/loss half-planes behind the curve.
+PNL_GREEN = "#34d399"
+PNL_RED = "#f87171"
+_PNL_GREEN_FILL = {"linearGradient": {"x1": 0, "y1": 0, "x2": 0, "y2": 1},
+                   "stops": [[0, "rgba(52,211,153,0.45)"], [1, "rgba(52,211,153,0.04)"]]}
+_PNL_RED_FILL = {"linearGradient": {"x1": 0, "y1": 0, "x2": 0, "y2": 1},
+                 "stops": [[0, "rgba(248,113,113,0.04)"], [1, "rgba(248,113,113,0.45)"]]}
+_BAND_GREEN = "rgba(52,211,153,0.06)"
+_BAND_RED = "rgba(248,113,113,0.06)"
+
 
 def _records(df):
     """Normalize a DataFrame or list-of-dicts to a list of dict rows."""
@@ -66,31 +79,72 @@ _DARK_AXIS = {"labels": {"style": {"color": "#bdbdbd"}},
               "lineColor": "rgba(255,255,255,0.15)"}
 
 
-def whatif_figure(df, spot, target_s=None):
-    """Highcharts curve of underlying price (S) vs position theo price."""
+def whatif_pnl(df, spot):
+    """``[S, P/L]`` pairs where ``P/L = theo_price(S) − theo_price(spot)``.
+
+    The What-if rows carry the position's signed theo *value* (a credit spread is a
+    net liability ⇒ negative); subtracting its value at the current spot re-bases the
+    curve to **profit / loss from here** — zero at spot, so it splits cleanly into a
+    green profit zone above zero and a red loss zone below (the payoff look). The
+    baseline is the row nearest spot (the sweep is symmetric about spot, so a row
+    sits on it)."""
     rows = _records(df)
-    data = [[r["S"], r["theo_price"]] for r in rows]
+    if not rows:
+        return []
+    base = (min(rows, key=lambda r: abs(r["S"] - spot)).get("theo_price", 0)
+            if spot is not None else 0)
+    return [[r["S"], r.get("theo_price", 0) - base] for r in rows]
+
+
+def whatif_figure(df, spot, target_s=None):
+    """Profit/loss payoff: underlying price (S) vs position **P/L** (theo value
+    relative to its value at the current spot — see ``whatif_pnl``).
+
+    Styled to match the dashboard payoff mock: an **area** with Highcharts y-zones
+    at the ``0`` threshold paints a green profit fill above zero and a red loss fill
+    below (the line itself switches green↔red at the breakevens); faint Profit/Loss
+    background bands wash each half-plane; the gold **spot** + blue dashed **ΔS
+    target** verticals and the solid zero/breakeven line are kept."""
+    data = whatif_pnl(df, spot)
     xplotlines = [_plotline(spot, SPOT_COLOR)]
     if target_s is not None:
         xplotlines.append(_plotline(target_s, TARGET_COLOR, dash="Dash"))
-    yplotlines = [_plotline(0, "#888888", dash="Dash", width=1)]  # zero baseline
+    yplotlines = [_plotline(0, "rgba(255,255,255,0.35)", width=1)]  # zero / breakeven
+    # Full-height profit (green) / loss (red) washes behind the curve, labelled on
+    # the right like the mock. The ±1e7 extents clip to the visible y-axis.
+    yplotbands = [
+        {"from": 0, "to": 1e7, "color": _BAND_GREEN,
+         "label": {"text": "Profit", "align": "right", "verticalAlign": "top",
+                   "x": -8, "y": 18, "style": {"color": PNL_GREEN, "fontWeight": "600"}}},
+        {"from": -1e7, "to": 0, "color": _BAND_RED,
+         "label": {"text": "Loss", "align": "right", "verticalAlign": "bottom",
+                   "x": -8, "y": -8, "style": {"color": PNL_RED, "fontWeight": "600"}}},
+    ]
     return {
         # Explicit height: this chart mounts inside an inactive tab panel, and
         # NiceGUI's highchart only reflows once at mount (no ResizeObserver). Without
         # a fixed height it measures the hidden 0-height container and collapses to
         # title-height when the tab is shown.
-        "chart": {"type": "line", "backgroundColor": "transparent", "height": 420},
-        "title": {"text": "What-if: price sweep", "style": {"color": "#e6e6e6"}},
+        "chart": {"type": "area", "backgroundColor": "transparent", "height": 420},
+        "title": {"text": "What-if: profit / loss", "style": {"color": "#e6e6e6"}},
         "credits": {"enabled": False},
         "accessibility": {"enabled": False},
         "legend": {"enabled": False},
         "xAxis": {**_DARK_AXIS, "title": {"text": "Underlying"}, "plotLines": xplotlines},
-        "yAxis": {**_DARK_AXIS, "title": {"text": "Theo price"}, "plotLines": yplotlines},
-        "tooltip": {"pointFormat": "S {point.x:g} → theo <b>{point.y:.2f}</b>"},
+        "yAxis": {**_DARK_AXIS, "title": {"text": "P / L"}, "plotLines": yplotlines,
+                  "plotBands": yplotbands},
+        "tooltip": {"pointFormat": "S {point.x:g} → P/L <b>{point.y:.2f}</b>"},
         # Smooth transition when the chart is updated in place on a slider change.
         "plotOptions": {"series": {"animation": {"duration": 500}}},
-        "series": [{"name": "Theo", "type": "line", "data": data,
-                    "color": "#66bb6a", "marker": {"enabled": False}}],
+        # Area filled to the 0 threshold: the part above zero is green (profit), the
+        # part below red (loss) — both line AND fill — split at the breakeven
+        # crossings via color/negativeColor. Setting an explicit base ``color`` +
+        # ``fillColor`` stops Highcharts painting a default-blue base path under the
+        # zones.
+        "series": [{"name": "P/L", "type": "area", "data": data,
+                    "threshold": 0, "lineWidth": 2, "marker": {"enabled": False},
+                    "color": PNL_GREEN, "fillColor": _PNL_GREEN_FILL,
+                    "negativeColor": PNL_RED, "negativeFillColor": _PNL_RED_FILL}],
     }
 
 
