@@ -70,7 +70,7 @@ def coerce_choice(value, options):
 
 
 def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
-                     on_change=lambda: None, spot_getter=lambda: 0.0):
+                     on_change=lambda: None, spot_getter=lambda: 0.0, header=False):
     """Mount the editor into ``container``. Returns a handle with
     get_legs() / set_legs(legs) / apply_template(name) / is_dirty()."""
     state = {"legs": [], "dirty": False}
@@ -99,7 +99,21 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
     def _render():
         container.clear()
         exps = expiries_for() or []
+        # ``header`` mode (Calculator): the field labels move to a single header
+        # row and each leg renders label-less inputs — a clean table. Default off,
+        # so the Simulator keeps a label on every field.
+        lab = (lambda _t: "") if header else (lambda t: t)
         with container:
+            if header:
+                with ui.row().classes("items-center gap-2 no-wrap leg-head"):
+                    ui.label("Type").classes("w-20")
+                    ui.label("Side").classes("w-24")
+                    ui.label("Expiry").classes("w-40")
+                    ui.label("Strike").classes("w-24")
+                    ui.label("Qty").classes("w-16")
+                    if show_premium:
+                        ui.label("Premium").classes("w-20")
+                    ui.label("Actions").classes("w-10 text-right")
             for i, leg in enumerate(state["legs"]):
                 # Coerce the leg's expiry + strike into the AVAILABLE options FIRST —
                 # ui.select raises ValueError on a value not in its options (a default
@@ -116,19 +130,19 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
                     # Compact widths so the whole row (incl. the remove ✕) fits the
                     # Calculator's fixed-width left column and never spills onto the
                     # P&L matrix beside it.
-                    ui.select(["call", "put"], value=leg.get("option_type"), label="Type") \
+                    ui.select(["call", "put"], value=leg.get("option_type"), label=lab("Type")) \
                         .classes("w-20").on_value_change(lambda e, i=i: _set_field(i, "option_type", e.value))
-                    ui.select(["long", "short"], value=leg.get("side"), label="Side") \
-                        .classes("w-20").on_value_change(lambda e, i=i: _set_field(i, "side", e.value))
-                    ui.select(exps, value=e_val, label="Expiry") \
-                        .classes("w-32").on_value_change(lambda e, i=i: _set_field(i, "expiry", e.value))
-                    sw = ui.select(s_opts, value=s_val, label="Strike").classes("w-20")
+                    ui.select(["long", "short"], value=leg.get("side"), label=lab("Side")) \
+                        .classes("w-24").on_value_change(lambda e, i=i: _set_field(i, "side", e.value))
+                    ui.select(exps, value=e_val, label=lab("Expiry")) \
+                        .classes("w-40").on_value_change(lambda e, i=i: _set_field(i, "expiry", e.value))
+                    sw = ui.select(s_opts, value=s_val, label=lab("Strike")).classes("w-24")
                     sw.on_value_change(lambda e, i=i: _set_field(i, "strike", e.value))
                     leg["_strike_widget"] = sw
-                    ui.number("Qty", value=leg.get("qty", 1), min=1, max=100, format="%.0f") \
+                    ui.number(lab("Qty"), value=leg.get("qty", 1), min=1, max=100, format="%.0f") \
                         .classes("w-16").on_value_change(lambda e, i=i: _set_field(i, "qty", int(e.value or 1)))
                     if show_premium:
-                        ui.number("Premium", value=leg.get("premium") or 0.0, format="%.2f") \
+                        ui.number(lab("Premium"), value=leg.get("premium") or 0.0, format="%.2f") \
                             .classes("w-20").on_value_change(lambda e, i=i: _set_field(i, "premium", e.value))
                     ui.button(icon="close", on_click=lambda e, i=i: _remove(i)) \
                         .props("flat dense round").tooltip("Remove leg")

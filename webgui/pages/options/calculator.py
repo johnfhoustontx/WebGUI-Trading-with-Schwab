@@ -51,6 +51,44 @@ CALC_CSS = """
 .calc-btn-3d.calc-go.q-btn:active{box-shadow:0 1px 0 0 #1f5e2a,0 2px 4px rgba(0,0,0,.45);}
 """
 
+# Dark-navy "dashboard" restyle, page-scoped under .calc-v2 (Calculator only for
+# now; promotable app-wide later). Converts NiceGUI's standard underline fields to
+# filled navy boxes, draws bordered cards, and styles the outline / primary buttons.
+CALC_V2_CSS = """
+.calc-v2{
+  background:radial-gradient(130% 90% at 50% -20%,#16243f 0%,#0c1424 55%,#0a0f1c 100%);
+  border:1px solid #1d2942;border-radius:14px;padding:18px 20px 22px;
+}
+.calc-v2 .calc-card{
+  background:#101a30;border:1px solid #213152;border-radius:12px;padding:14px 16px;
+}
+.calc-v2 .calc-eyebrow{color:#8794b4;font-size:12px;letter-spacing:.02em;}
+/* Boxed dark inputs — restyle the standard q-field control into a filled box. */
+.calc-v2 .q-field__control{
+  background:#0c1426;border:1px solid #243353;border-radius:8px;padding:0 10px;min-height:40px;
+}
+.calc-v2 .q-field__control:before,.calc-v2 .q-field__control:after{border:0!important;}
+.calc-v2 .q-field--focused .q-field__control{
+  border-color:#3b82f6;box-shadow:0 0 0 2px rgba(59,130,246,.28);
+}
+.calc-v2 .q-field__label{color:#7f8db0;}
+.calc-v2 .q-field__native,.calc-v2 .q-field__native input,
+.calc-v2 .q-field__native textarea,.calc-v2 .q-field__native span{color:#e7edf8!important;}
+.calc-v2 .q-field__append .q-icon,.calc-v2 .q-field__prepend .q-icon{color:#8794b4;}
+/* Leg table header row */
+.calc-v2 .leg-head{color:#7f8db0;font-size:12px;padding:0 2px 4px;}
+/* Buttons */
+.calc-v2 .cv2-btn.q-btn{
+  background:#15213b!important;color:#cdd8ee!important;border:1px solid #2a3a5c;
+  border-radius:9px;min-height:40px;font-weight:500;
+}
+.calc-v2 .cv2-btn.q-btn:hover{background:#1b2950!important;}
+.calc-v2 .cv2-btn-primary.q-btn{
+  background:#2563eb!important;color:#fff!important;border-radius:9px;min-height:40px;font-weight:600;
+}
+.calc-v2 .cv2-btn-primary.q-btn:hover{background:#1d4fd1!important;}
+"""
+
 def strategy_options():
     """Flat list of strategy codes for the dropdown, in ``STRATEGY_GROUPS`` order.
 
@@ -341,7 +379,7 @@ def render():
     from . import strategy_menu
 
     ui.add_css(CALC_CSS)
-    ui.label("Calculator").classes("text-h5")
+    ui.add_css(CALC_V2_CSS)
 
     # Page state (local closure, not module globals — built per request).
     state = {
@@ -355,62 +393,58 @@ def render():
         "contracts": 1,       # last-applied Contracts count (drives per-leg qty scaling)
     }
 
-    # Two columns: inputs (vertical) on the LEFT, P&L matrix on the RIGHT. The
-    # Load / IV / Fetch-Premiums buttons sit at the right edge of their input
-    # sections (fixed width → vertically aligned); all action buttons are 3D.
-    with ui.row().classes("w-full no-wrap gap-6 items-start"):
-        with ui.column().classes("gap-3 shrink-0").style("width:620px"):
-            # Line 1: Strategy + Symbol  ·  Load (right edge)
-            with ui.row().classes("w-full items-end justify-between gap-3 no-wrap"):
-                with ui.row().classes("items-end gap-3"):
-                    strategy_sel = strategy_menu.build_strategy_menu(value="PCS", classes="w-48")
-                    symbol_in = select_all_on_focus(ui.input("Symbol", value="SPY").classes("w-28"))
-                ui.button("Load", icon="download", on_click=lambda: load_symbol()) \
-                    .props("dense no-caps").classes("calc-btn-3d w-40") \
-                    .tooltip("Load price + expiries/strikes from the chain")
-            # Line 2 (new line below Strategy/Symbol): Expiry, Contracts, IV%  ·  IV
-            with ui.row().classes("w-full items-end justify-between gap-3 no-wrap"):
-                with ui.row().classes("items-end gap-3"):
-                    expiry_sel = ui.select([], label="Expiry").classes("w-44")
-                    contracts_in = ui.number("Contracts", value=1, min=1, max=100).classes("w-24")
-                    iv_in = ui.number("IV %", value=20.0, format="%.1f").classes("w-24")
-                ui.button("IV", icon="download", on_click=lambda: fetch_iv()) \
-                    .props("dense no-caps").classes("calc-btn-3d w-40") \
-                    .tooltip("Fetch ATM IV for the expiry")
-            # Line 3: Price, IV Δ%, Rate%
-            with ui.row().classes("items-end gap-3"):
-                price_in = ui.number("Price", value=100.0, format="%.2f").classes("w-28")
-                ivchg_in = ui.number("IV Δ %", value=0.0, format="%.1f").classes("w-24")
-                rate_in = ui.number("Rate %", value=4.5, format="%.2f").classes("w-24")
-            # Line 4: price-range controls
-            with ui.row().classes("items-end gap-3"):
-                rmin_in = ui.number("Range min", value=0.0, format="%.2f").classes("w-28")
-                rmax_in = ui.number("Range max", value=0.0, format="%.2f").classes("w-28")
-                rpct_in = ui.number("Range %", value=5.0, format="%.1f").classes("w-24")
-            # Legs — the editable multi-leg editor mounts into leg_box below. It's
-            # full-width within the left column (was sharing a justify-between row
-            # with Fetch Premiums, which pushed that button over the P&L matrix as
-            # the editor widened to 6 columns).
-            leg_box = ui.column().classes("gap-2 w-full")
-            # Primary actions (Fetch Premiums fills leg premiums, so it leads here).
-            with ui.row().classes("items-center gap-3 pt-1 flex-wrap"):
-                ui.button("Fetch Premiums", icon="download", on_click=lambda: fetch_premiums()) \
-                    .props("no-caps").classes("calc-btn-3d") \
-                    .tooltip("Fill leg premiums from the chain (strikes required)")
-                ui.button("Calculate", icon="calculate", on_click=lambda: do_calc()) \
-                    .props("no-caps").classes("calc-btn-3d calc-go")
-                ui.button("Expected Move", icon="show_chart", on_click=lambda: send_to_em()) \
-                    .props("no-caps").classes("calc-btn-3d") \
-                    .tooltip("Chart the expected move for these legs")
-                ui.button("Copy to Simulator", icon="science",
-                          on_click=lambda: handoff.send_to_simulator(
-                              leg_editor.legs_to_payload(
-                                  (symbol_in.value or "").replace("$", "").upper(),
-                                  editor.get_legs(), keep_premium=False))) \
-                    .props("no-caps").classes("calc-btn-3d") \
-                    .tooltip("Open these legs in the Simulator")
-        # RIGHT: P&L matrix (summary tiles + heatmap grid)
-        with ui.column().classes("flex-1 min-w-0 gap-3"):
+    # ── Dark "dashboard" layout (page-scoped, .calc-v2). The functional widgets
+    # keep their names; only arrangement + styling change. Right stack = Load / IV /
+    # Calculate; bottom row = Fetch Premiums / Expected Move / Copy to Simulator. ──
+    with ui.column().classes("calc-v2 w-full gap-4"):
+        ui.label("Options Strategy Calculator").classes("text-h6").style("color:#eaf0fb")
+        with ui.row().classes("items-end gap-4 flex-wrap"):
+            strategy_sel = strategy_menu.build_strategy_menu(value="PCS", classes="w-52")
+            symbol_in = select_all_on_focus(ui.input("Symbol", value="SPY").classes("w-40"))
+        with ui.row().classes("w-full items-start gap-4 no-wrap"):
+            with ui.column().classes("flex-1 min-w-0 gap-4"):
+                # Inputs card
+                with ui.column().classes("calc-card w-full gap-3"):
+                    with ui.row().classes("items-end gap-4 flex-wrap"):
+                        expiry_sel = ui.select([], label="Expiry").classes("w-40")
+                        contracts_in = ui.number("Contracts", value=1, min=1, max=100).classes("w-28")
+                        iv_in = ui.number("IV %", value=20.0, format="%.1f").classes("w-24")
+                    with ui.row().classes("items-end gap-4 flex-wrap"):
+                        price_in = ui.number("Price", value=100.0, format="%.2f").classes("w-32")
+                        rate_in = ui.number("Rate %", value=4.5, format="%.2f").classes("w-24")
+                        ivchg_in = ui.number("IV Δ %", value=0.0, format="%.1f").classes("w-24")
+                    with ui.row().classes("items-end gap-4 flex-wrap"):
+                        rmin_in = ui.number("Range min", value=0.0, format="%.2f").classes("w-28")
+                        rmax_in = ui.number("Range max", value=0.0, format="%.2f").classes("w-28")
+                        with ui.column().classes("gap-0"):
+                            ui.label("Range %").classes("calc-eyebrow")
+                            rpct_in = ui.slider(min=0, max=50, step=0.5, value=5) \
+                                .props("label-always").classes("w-44")
+                # Legs card (header-table editor)
+                with ui.column().classes("calc-card w-full gap-2"):
+                    leg_box = ui.column().classes("gap-2 w-full")
+                # Bottom action buttons
+                with ui.row().classes("items-center gap-3 flex-wrap"):
+                    ui.button("Fetch Premiums", icon="download", color=None, on_click=lambda: fetch_premiums()) \
+                        .props("no-caps").classes("cv2-btn").tooltip("Fill leg premiums from the chain")
+                    ui.button("Expected Move", icon="show_chart", color=None, on_click=lambda: send_to_em()) \
+                        .props("no-caps").classes("cv2-btn").tooltip("Chart the expected move for these legs")
+                    ui.button("Copy to Simulator", icon="science", color=None,
+                              on_click=lambda: handoff.send_to_simulator(
+                                  leg_editor.legs_to_payload(
+                                      (symbol_in.value or "").replace("$", "").upper(),
+                                      editor.get_legs(), keep_premium=False))) \
+                        .props("no-caps").classes("cv2-btn").tooltip("Open these legs in the Simulator")
+            # Right action stack
+            with ui.column().classes("shrink-0 gap-3").style("width:190px"):
+                ui.button("Load", icon="cloud_upload", color=None, on_click=lambda: load_symbol()) \
+                    .props("no-caps").classes("cv2-btn w-full").tooltip("Load price + expiries/strikes")
+                ui.button("IV Update", icon="trending_up", color=None, on_click=lambda: fetch_iv()) \
+                    .props("no-caps").classes("cv2-btn w-full").tooltip("Fetch / imply IV for the expiry")
+                ui.button("Calculate", icon="calculate", color=None, on_click=lambda: do_calc()) \
+                    .props("no-caps").classes("cv2-btn-primary w-full")
+        # Results card (summary tiles + P&L grid), full width
+        with ui.column().classes("calc-card w-full gap-3"):
             summary_box = ui.row().classes("gap-3 flex-wrap")
             grid_box = ui.column().classes("w-full")
 
@@ -434,7 +468,7 @@ def render():
 
     editor = leg_editor.build_leg_editor(
         leg_box, strikes_for=_strikes_for, expiries_for=_expiries_for,
-        show_premium=True, on_change=lambda: None,
+        show_premium=True, on_change=lambda: None, header=True,
         spot_getter=lambda: float(price_in.value or 0))
 
     def _scale_leg_qty(factor):
