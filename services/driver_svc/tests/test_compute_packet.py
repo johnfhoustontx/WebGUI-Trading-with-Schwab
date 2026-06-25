@@ -31,6 +31,17 @@ def _lim():
 # ---------------------------------------------------------------------------
 # Task 4.1 — build_packet
 # ---------------------------------------------------------------------------
+def test_build_packet_skips_non_dict_signals():
+    """A malformed (None/str) signal element is skipped, not crashed on."""
+    scan = {"signals_0dte": [None, "junk",
+                {"symbol": "QQQ", "type": "PCS", "max_loss": 200,
+                 "credit": 60, "pop_pct": 0.85, "composite_score": 78,
+                 "expiration": "2026-06-24"}],
+            "signals_swing": []}
+    pkt = compute.build_packet(scan, {}, target=500.0, limits=_lim(), market={})
+    assert len(pkt["menu"]) == 1 and pkt["menu"][0]["structure"] == "PCS"
+
+
 def test_build_packet_filters_allowed_and_assigns_ids():
     scan = {"signals_0dte": [
                 {"symbol": "QQQ", "structure": "put_credit_spread", "max_loss": 200,

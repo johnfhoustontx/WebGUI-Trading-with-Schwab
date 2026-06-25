@@ -213,7 +213,9 @@ def build_packet(scan_view, paper_view, *, target, limits, market) -> dict:
     """
     raw = list((scan_view or {}).get("signals_0dte", []) or []) + \
         list((scan_view or {}).get("signals_swing", []) or [])
-    allowed = [s for s in raw if _g.is_allowed(s)]
+    # Filter to dicts first so a malformed (None/str) list element can't AttributeError
+    # in is_allowed — build_packet stays defensive even when called directly.
+    allowed = [s for s in raw if isinstance(s, dict) and _g.is_allowed(s)]
     allowed.sort(key=lambda s: (s.get("composite_score") or 0), reverse=True)
 
     menu, menu_by_id = [], {}
@@ -260,8 +262,10 @@ def run_cycle(scan_view, paper_view, *, target, limits, market, client=None) -> 
     (``executable`` / ``rejected`` / ``halted`` / ``halt_reason``) merged with
     ``decision`` (the audit) + ``day_pnl`` + ``open_positions``.
     """
-    from services.driver_svc import decider
     try:
+        # Imported inside the try (keeps the monkeypatch point at
+        # services.driver_svc.decider.decide) so even a decider import error stands down.
+        from services.driver_svc import decider
         packet = build_packet(scan_view, paper_view, target=target, limits=limits,
                               market=market)
         model_facing = {k: v for k, v in packet.items() if k != "menu_by_id"}
