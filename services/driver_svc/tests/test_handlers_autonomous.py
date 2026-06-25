@@ -154,6 +154,33 @@ def test_cycle_does_not_mutate_raw_menu_signal(fake_bus, monkeypatch):
     assert enqueued_sig is not raw_signal
 
 
+def test_cycle_partial_enqueue_failure_still_publishes(fake_bus, monkeypatch):
+    """A mid-loop enqueue failure must NOT skip the publish, and the audit log must
+    record only what ACTUALLY fired (M1 — no silent partial execution)."""
+    handlers.set_control(fake_bus, enabled=True)
+    _seed_caches(fake_bus)
+    _stub_cycle(monkeypatch, {
+        "decision": {"stand_down": False, "day_thesis": "two", "trades": []},
+        "executable": [
+            {"id": "m0", "signal": {"symbol": "QQQ", "structure": "PCS"}, "qty": 1, "rationale": ""},
+            {"id": "m1", "signal": {"symbol": "SPX", "structure": "IC"}, "qty": 1, "rationale": ""}],
+        "rejected": [], "halted": False, "halt_reason": None,
+        "day_pnl": 0.0, "open_positions": []})
+    calls = {"n": 0}
+
+    def _flaky(stream, cmd):
+        calls["n"] += 1
+        if calls["n"] >= 2:
+            raise RuntimeError("bus down")
+
+    monkeypatch.setattr(fake_bus, "enqueue_command", _flaky)
+    handlers.run_autonomous_cycle(fake_bus)   # must not raise
+    env = fake_bus.cache_get("cache:driver:autonomous")
+    assert env is not None                                   # published despite the failure
+    executed = env.payload["decisions"][0]["executed"]
+    assert len(executed) == 1 and executed[0]["symbol"] == "QQQ"  # only what fired
+
+
 def test_cycle_stand_down_enqueues_nothing_but_publishes(fake_bus, monkeypatch):
     handlers.set_control(fake_bus, enabled=True)
     _seed_caches(fake_bus, day_pnl=120.0)

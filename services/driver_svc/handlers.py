@@ -154,12 +154,14 @@ def _read_payload(bus, key):
     return env.payload if env else None
 
 
-def _publish_autonomous(bus, *, day_pnl, positions, decision, guarded, control) -> int:
+def _publish_autonomous(bus, *, day_pnl, positions, decision, guarded, executed, control) -> int:
     """Cache + publish the monitor view, prepending this cycle to the decision log.
 
     Reads the prior ``cache:driver:autonomous`` to grow a NEWEST-FIRST audit log
     (``log.insert(0, …)``) capped at ``_DECISION_LOG_CAP`` so the page never balloons.
-    Each log row carries the thesis + the executed (clamped) trades + the rejected
+    Each log row carries the thesis + the trades that were ACTUALLY ENQUEUED this
+    cycle (``executed`` — what truly fired, which equals the clamped executable list
+    on the happy path but is shorter if an enqueue failed mid-loop) + the rejected
     ones + the halt flag/reason. Validated through ``AutonomousState`` before caching.
     """
     prev = _read_payload(bus, CACHE_AUTONOMOUS) or {}
@@ -168,9 +170,9 @@ def _publish_autonomous(bus, *, day_pnl, positions, decision, guarded, control) 
         "ts": _now_iso(),
         "thesis": decision.get("day_thesis", ""),
         "stand_down": decision.get("stand_down", True),
-        "executed": [{"id": t.get("id"), "symbol": t["signal"].get("symbol"),
+        "executed": [{"id": t.get("id"), "symbol": (t.get("signal") or {}).get("symbol"),
                       "qty": t.get("qty"), "rationale": t.get("rationale", "")}
-                     for t in guarded.get("executable", [])],
+                     for t in executed],
         "rejected": guarded.get("rejected", []),
         "halted": guarded.get("halted", False),
         "halt_reason": guarded.get("halt_reason"),
@@ -213,16 +215,28 @@ def run_autonomous_cycle(bus) -> None:
     market = compute.fetch_market_context()
     out = compute.run_cycle(scan, paper, target=settings.DAILY_TARGET,
                             limits=settings.limits(), market=market)
+    # Enqueue each survivor, isolated: a single bad enqueue (transient bus error /
+    # malformed row) must NOT skip the halt-latch + publish below, and the audit log
+    # must record only what ACTUALLY fired. ``executed`` accumulates the enqueued rows.
+    executed = []
     for t in out.get("executable", []):
-        signal = {**t["signal"], "source": "driver"}  # COPY — never mutate the raw signal
-        bus.enqueue_command(CMD_OPTIONS, {"type": "paper_create",
-                                          "args": {"signal": signal, "qty": t["qty"]}})
+        sig = t.get("signal")
+        if not isinstance(sig, dict):
+            continue
+        signal = {**sig, "source": "driver"}  # shallow COPY — we add only the top-level source tag
+        try:
+            bus.enqueue_command(CMD_OPTIONS, {"type": "paper_create",
+                                              "args": {"signal": signal, "qty": t.get("qty")}})
+            executed.append(t)
+        except Exception:  # noqa: BLE001 — stop firing, but still latch/publish what fired.
+            break
     if out.get("halted"):
         control = set_control(bus, halted=True, reason=out.get("halt_reason"),
                               halted_date=date.today().isoformat())
     _publish_autonomous(bus, day_pnl=out.get("day_pnl"),
                         positions=out.get("open_positions", []),
-                        decision=out.get("decision", {}), guarded=out, control=control)
+                        decision=out.get("decision", {}), guarded=out,
+                        executed=executed, control=control)
 
 
 def handle_command(bus, command) -> None:
