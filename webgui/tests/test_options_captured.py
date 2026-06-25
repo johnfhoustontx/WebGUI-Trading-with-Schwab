@@ -168,6 +168,24 @@ def test_opened_column_present_and_populated():
     assert row["opened"] == "2026-06-17 13:49"
 
 
+def test_exit_value_default_uses_current_value():
+    """The close dialog pre-fills its Exit value with the signal's current price."""
+    assert captured.exit_value_default({"current_value": 0.234}) == 0.23
+
+
+def test_exit_value_default_zero_when_missing():
+    assert captured.exit_value_default({}) == 0.0
+    assert captured.exit_value_default({"current_value": None}) == 0.0
+
+
+def test_exit_value_default_handles_non_numeric():
+    assert captured.exit_value_default({"current_value": "x"}) == 0.0
+
+
+def test_exit_value_default_int_to_float():
+    assert captured.exit_value_default({"current_value": 2}) == 2.0
+
+
 def test_render_callable():
     assert callable(captured.render)
 

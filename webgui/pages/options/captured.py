@@ -79,6 +79,14 @@ def pnl_color(value):
     return ""
 
 
+def exit_value_default(sig):
+    """Pre-fill for the close dialog's Exit-value input: the signal's current price
+    (the live spread mark, ``current_value``) rounded to 2dp, or 0.0 when it isn't
+    known yet (no mark — e.g. a freshly captured signal not yet repriced)."""
+    cur = (sig or {}).get("current_value")
+    return round(float(cur), 2) if isinstance(cur, (int, float)) else 0.0
+
+
 def fmt_opened(ts):
     """Format a captured signal's ``first_seen_ts`` as ``'YYYY-MM-DD HH:MM'``.
 
@@ -299,7 +307,10 @@ def render():
         signal_id = sig.get("signal_id")
         with ui.dialog() as dlg, ui.card():
             ui.label(f"Close {sig.get('symbol')} {sig.get('strategy')}").classes("text-subtitle1")
-            exit_val = ui.number("Exit value (spread debit)", value=0.0, format="%.2f")
+            # Pre-load the current price (live spread mark) as the exit value; 0.0
+            # when not yet repriced. The user can still override it.
+            exit_val = ui.number("Exit value (spread debit)",
+                                 value=exit_value_default(sig), format="%.2f")
             reason = ui.input("Reason", value="MANUAL_CLOSE")
 
             def confirm():
