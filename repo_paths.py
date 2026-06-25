@@ -19,6 +19,11 @@ BRIDGE_PATH = SHARED / "sentiment_bridge.json"
 APPSETTINGS = SHARED / "appsettings.json"
 TOKENS      = SHARED / "tokens.json"
 
+# Dedicated paper-account DB for the autonomous Driver — a SEPARATE file from the
+# manual paper_account.db so the driver's book is fully isolated (zero schema change;
+# every paper_account_db/paper_engine fn already takes db_path).
+DRIVER_PAPER_DB = OPTIONS_SCANNER / "data" / "paper_account_driver.db"
+
 _ports = tomllib.loads((REPO_ROOT / "config" / "ports.toml").read_text())
 PROXY_PORT       = _ports["proxy"]
 PROXY_URL        = f"http://127.0.0.1:{PROXY_PORT}"
