@@ -11,6 +11,7 @@ it has halted for the day — live in ``cache:driver:control`` (the
 ``DriverControl`` contract), NOT here. This module holds only the fixed v1
 defaults.
 """
+import os
 
 DAILY_TARGET = 500.0          # bank-the-day threshold ($ net day P&L)
 PER_TRADE_MAX_RISK = 300.0    # max $ loss per single spread position
@@ -19,7 +20,11 @@ MAX_CONCURRENT = 6            # max open driver positions
 MAX_TRADES_PER_CYCLE = 3      # max new trades per checkpoint
 VIX_MAX = 25.0               # no new entries above this (mirrors config.VIX_MAX_TRADE)
 MENU_TOP_N = 12              # how many top-scored signals Claude sees
-MODEL = "claude-sonnet-4-6"  # Claude model for the decision call (cheaper than Opus)
+# Build default = Opus 4.8 (the most capable). Override per-deployment WITHOUT editing
+# this committed default by setting the DRIVER_MODEL env var
+# (e.g. DRIVER_MODEL=claude-sonnet-4-6 to run cheaper). Loaded at import → set it
+# before starting driver_svc; a restart picks up a change.
+MODEL = os.environ.get("DRIVER_MODEL", "claude-opus-4-8")
 MAX_TOKENS = 2000
 CHECKPOINT_MIN = 30          # intraday re-evaluation cadence (minutes)
 
