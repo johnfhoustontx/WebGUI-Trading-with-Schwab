@@ -157,3 +157,58 @@ def build_messages(packet) -> list:
 def system_prompt() -> str:
     """The system prompt stating the decision mandate (see ``_SYSTEM``)."""
     return _SYSTEM
+
+
+def _make_client():
+    """Build a real ``anthropic.Anthropic`` client, or ``None`` if no key.
+
+    The ``anthropic`` import is LAZY (here, not at module top) so the test suite
+    can import this module and drive ``decide`` with an injected fake client
+    without the SDK installed. Returns ``None`` when the API key is unset — the
+    caller then stands down rather than calling a non-existent client.
+    """
+    key = secrets.anthropic_api_key()
+    if not key:
+        return None
+    import anthropic
+    return anthropic.Anthropic(api_key=key)
+
+
+def decide(packet, client=None, _force_no_key=False) -> dict:
+    """Ask Claude for a decision via a single forced tool-use call.
+
+    A one-shot ``messages.create`` that forces the ``submit_decision`` tool
+    (``tool_choice``), then parses the tool_use block's ``input`` through
+    ``parse_decision``. The whole body is wrapped so that ANY failure degrades to
+    a stand-down and ``decide`` NEVER raises:
+
+    * ``_force_no_key`` (test hook) or no resolvable API key / no client → stand down,
+    * an API / network error from ``messages.create`` → stand down,
+    * a response with no ``submit_decision`` tool_use block (text-only, wrong tool
+      name, empty/``None`` content) → stand down,
+    * a malformed tool ``input`` → ``parse_decision`` normalizes it (→ stand down).
+
+    ``client`` is injected (a fake in tests, the real SDK client in production); when
+    omitted it is built via ``_make_client``. See @claude-api for the SDK surface.
+    """
+    try:
+        if _force_no_key:
+            return parse_decision(None)
+        client = client or _make_client()
+        if client is None:
+            return parse_decision(None)
+        resp = client.messages.create(
+            model=settings.MODEL,
+            max_tokens=settings.MAX_TOKENS,
+            system=system_prompt(),
+            tools=[DECISION_TOOL],
+            tool_choice={"type": "tool", "name": "submit_decision"},
+            messages=build_messages(packet),
+        )
+        for block in getattr(resp, "content", None) or []:
+            if (getattr(block, "type", None) == "tool_use"
+                    and getattr(block, "name", "") == "submit_decision"):
+                return parse_decision(getattr(block, "input", None))
+        return parse_decision(None)
+    except Exception:  # noqa: BLE001 — the decider is untrusted; degrade to stand down.
+        return parse_decision(None)

@@ -134,3 +134,122 @@ def test_system_prompt_states_the_mandate():
     assert "ceiling" in sp or "clamp" in sp              # quantities are ceilings
     assert "target" in sp                                # the daily target
     assert "submit_decision" in decider.system_prompt()  # call the tool (exact name)
+
+
+# ---------------------------------------------------------------------------
+# Task 3.3 — decide (the Anthropic call, client injected/mocked)
+# ---------------------------------------------------------------------------
+def _block(btype="tool_use", name="submit_decision", inp=None):
+    """A minimal anthropic-style content block (duck-typed: .type/.name/.input)."""
+    return type("B", (), {"type": btype, "name": name, "input": inp})()
+
+
+class _FakeClient:
+    """Mimics ``anthropic.Anthropic``: ``.messages.create(**kw)`` → an object whose
+    ``.content`` is a list of content blocks (one ``tool_use`` carrying the input)."""
+
+    def __init__(self, tool_input):
+        self._ti = tool_input
+        self.last_kwargs = None
+
+    @property
+    def messages(self):
+        return self
+
+    def create(self, **kw):
+        self.last_kwargs = kw
+        return type("R", (), {"content": [_block(inp=self._ti)]})()
+
+
+class _RaisingClient:
+    """A client whose ``messages.create`` raises — simulates an API/network error."""
+
+    @property
+    def messages(self):
+        return self
+
+    def create(self, **kw):
+        raise RuntimeError("boom from the API")
+
+
+def test_decide_extracts_tool_input():
+    client = _FakeClient({"stand_down": False, "trades": [{"id": "m0", "quantity": 1}]})
+    d = decider.decide({"menu": [{"id": "m0"}]}, client=client)
+    assert d["stand_down"] is False and d["trades"][0]["id"] == "m0"
+
+
+def test_decide_no_client_stands_down():
+    # no api key / no client → stand-down, never raises
+    d = decider.decide({"menu": []}, client=None, _force_no_key=True)
+    assert d["stand_down"] is True and d["trades"] == []
+
+
+def test_decide_passes_model_tool_and_choice():
+    """The call uses settings.MODEL, forces submit_decision, and sends the system prompt."""
+    client = _FakeClient({"stand_down": True, "trades": []})
+    decider.decide({"menu": [{"id": "m0"}], "target": 500}, client=client)
+    kw = client.last_kwargs
+    assert kw["model"] == decider.settings.MODEL
+    assert kw["max_tokens"] == decider.settings.MAX_TOKENS
+    assert kw["tool_choice"] == {"type": "tool", "name": "submit_decision"}
+    assert kw["tools"] == [decider.DECISION_TOOL]
+    assert kw["system"] == decider.system_prompt()
+    assert kw["messages"][0]["role"] == "user"
+
+
+def test_decide_api_error_stands_down():
+    """ANY exception from the client → stand-down (decide never raises)."""
+    d = decider.decide({"menu": [{"id": "m0"}]}, client=_RaisingClient())
+    assert d["stand_down"] is True and d["trades"] == []
+
+
+def test_decide_malformed_tool_input_stands_down():
+    """A tool_use block whose input isn't a usable dict → stand-down."""
+    d = decider.decide({"menu": []}, client=_FakeClient("not-a-dict"))
+    assert d["stand_down"] is True and d["trades"] == []
+
+
+def test_decide_no_tool_use_block_stands_down():
+    """A response with only a text block (no tool_use) → stand-down."""
+
+    class _TextOnly:
+        @property
+        def messages(self):
+            return self
+
+        def create(self, **kw):
+            return type("R", (), {"content": [_block(btype="text", name="", inp=None)]})()
+
+    d = decider.decide({"menu": []}, client=_TextOnly())
+    assert d["stand_down"] is True and d["trades"] == []
+
+
+def test_decide_ignores_wrong_named_tool_block():
+    """A tool_use block with the wrong name is not treated as the decision."""
+
+    class _WrongTool:
+        @property
+        def messages(self):
+            return self
+
+        def create(self, **kw):
+            blk = _block(name="something_else",
+                         inp={"stand_down": False, "trades": [{"id": "m0", "quantity": 1}]})
+            return type("R", (), {"content": [blk]})()
+
+    d = decider.decide({"menu": []}, client=_WrongTool())
+    assert d["stand_down"] is True and d["trades"] == []
+
+
+def test_decide_empty_or_none_content_stands_down():
+    """A response with no/None content → stand-down (no crash on the loop)."""
+
+    class _Empty:
+        @property
+        def messages(self):
+            return self
+
+        def create(self, **kw):
+            return type("R", (), {"content": None})()
+
+    assert decider.decide({"menu": []}, client=_Empty())["stand_down"] is True
