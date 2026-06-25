@@ -16,7 +16,7 @@ intentionally NOT ported here — ``run_full_scan`` is called directly.
 """
 import sys
 
-from repo_paths import OPTIONS_SCANNER
+from repo_paths import DRIVER_PAPER_DB, OPTIONS_SCANNER
 
 if str(OPTIONS_SCANNER) not in sys.path:
     sys.path.insert(0, str(OPTIONS_SCANNER))
@@ -149,6 +149,58 @@ def paper_account_view() -> dict:
         "orders": orders,
         "has_account": has_account,
     }
+
+
+# ── Isolated driver paper account (DRIVER_PAPER_DB) ──────────────────────────
+# The autonomous Driver trades into a SEPARATE DB file so its book, P&L, and
+# $500/halt logic are fully isolated from the user's manual paper account. The
+# paper_engine/paper_account_db machinery is already db_path-parameterized, so
+# these wrappers just thread ``DRIVER_PAPER_DB`` (kept as a module global so the
+# tests can monkeypatch it onto a tmp DB without touching the real account).
+
+
+def ensure_driver_account(starting_balance: float = 25000.0) -> None:
+    """Seed the dedicated driver paper account if absent (idempotent). Must run
+    before the first open/manage — the engine indexes get_account()['halted']."""
+    import datetime as dt
+
+    import paper_account_db
+
+    paper_account_db.ensure_account(DRIVER_PAPER_DB, starting_balance=starting_balance,
+                                    session_date=dt.date.today().isoformat())
+
+
+def has_driver_account() -> bool:
+    """True if the driver account row has been seeded (False on any failure)."""
+    import paper_account_db
+
+    try:
+        return paper_account_db.get_account(DRIVER_PAPER_DB) is not None
+    except Exception:
+        return False
+
+
+def driver_account_view() -> dict:
+    """Driver account snapshot + open positions (mirrors ``paper_account_view`` on
+    the DRIVER db). No rescue overlay (that reads the manual account). Each
+    sub-read is defensively guarded so a partial failure still returns a view."""
+    import paper_account_db
+    import paper_engine
+
+    try:
+        snapshot = paper_engine.account_snapshot(DRIVER_PAPER_DB)
+    except Exception:
+        snapshot = None
+    try:
+        positions = paper_account_db.fetch_open_positions(DRIVER_PAPER_DB)
+    except Exception:
+        positions = []
+    try:
+        orders = paper_account_db.fetch_orders(DRIVER_PAPER_DB, limit=100, status="FILLED")
+    except Exception:
+        orders = []
+    return {"snapshot": snapshot, "positions": positions, "orders": orders,
+            "has_account": has_driver_account()}
 
 
 def run_entry_cycle() -> None:
