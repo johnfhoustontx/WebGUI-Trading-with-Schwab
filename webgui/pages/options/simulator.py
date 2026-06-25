@@ -35,7 +35,7 @@ from nicegui import ui
 
 from pages.ui_guard import guard
 
-from .inputs import select_all_on_focus
+from .inputs import select_all_on_focus, should_load
 # Shared dark-navy "dashboard" theme (same CSS the Calculator injects, so the two
 # pages never drift).
 from .theme import DASHBOARD_CSS
@@ -274,8 +274,12 @@ def render():
     from . import leg_editor
     from . import strategies as S
     from . import strategy_menu
+    from . import overlay as _overlay
 
     ui.add_css(DASHBOARD_CSS)
+
+    # Full-screen wait overlay shown while a user-initiated Fetch is in flight.
+    wait = _overlay.build_loading_overlay()
 
     # Page state (local closure, not module globals — built per request).
     state: dict = {
@@ -287,6 +291,8 @@ def render():
         "replay": None,      # last sim_replay payload (price/Greek trace)
         "replay_ver": None,  # last-seen sim_replay cache version
         "restoring": False,  # True while restoring a persisted snapshot (suppress enqueues)
+        "last_loaded": None,   # last symbol a Fetch was triggered for (tab/Enter dedup)
+        "loading": False,      # True while a user-initiated fetch is in flight (overlay up)
     }
 
     # ── Dark "dashboard" shell (page-scoped, .calc-v2) — the SAME navy theme as the
@@ -546,13 +552,36 @@ def render():
 
     # ── fetch ────────────────────────────────────────────────────────────────
     @guard
-    def _request_fetch():
+    def _request_fetch(show_wait=False):
         sym = (symbol_in.value or "").strip().upper()
         if not sym:
             ui.notify("Enter a symbol first.", type="warning")
             return
+        if show_wait and state.get("loading"):
+            return  # a user fetch is already in flight (collapses focusout-then-click)
+        state["last_loaded"] = sym
+        if show_wait:
+            state["loading"] = True
+            wait.show(f"Fetching {sym}…")
+            ui.timer(15.0, _fetch_timeout, once=True)
         bus_client.request("options", {"type": "sim_fetch", "args": {"symbol": sym}})
         status.text = "Fetching snapshot…"
+
+    @guard
+    def _fetch_timeout():
+        """Safety net: if the snapshot never arrived, drop the overlay + reset the
+        dedup so a retry re-triggers (e.g. the service is down)."""
+        if state.get("loading"):
+            state["loading"] = False
+            wait.hide()
+            state["last_loaded"] = None
+
+    @guard
+    def _symbol_submit():
+        """Tab-out / Enter on the symbol field → Fetch (deduped: only when changed)."""
+        if not should_load((symbol_in.value or "").strip().upper(), state.get("last_loaded")):
+            return
+        _request_fetch(show_wait=True)
 
     @guard
     def _reflow_charts():
@@ -567,7 +596,7 @@ def render():
     # the active tab).
     tabs.on_value_change(lambda e: (ui.timer(0.05, _reflow_charts, once=True), _capture()))
 
-    fetch_btn.on_click(_request_fetch)
+    fetch_btn.on_click(lambda e: _request_fetch(show_wait=True))
     # Strategy pick → re-seed the editor from the template, then enqueue both runs.
     # Suppressed while restoring (the restored legs come via pending_legs, not the
     # template).
@@ -584,9 +613,13 @@ def render():
     # Look-back override re-runs the replay with a different window.
     lookback_sel.on_value_change(lambda e: (_enqueue_replay(), _capture()))
     symbol_in.on_value_change(lambda e: _capture())
+    symbol_in.on("keydown.enter", lambda e: _symbol_submit())
+    symbol_in.on("focusout", lambda e: _symbol_submit())
 
     # ── version-poll repaint (fetch-free) ────────────────────────────────────
     def _apply_meta(meta):
+        state["loading"] = False
+        wait.hide()
         state["meta"] = meta or None
         # Repopulate the editor's per-leg expiry/strike selects from the new
         # snapshot. Pending legs copied in from the Calculator win; else when the
