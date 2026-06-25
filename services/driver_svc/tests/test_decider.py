@@ -99,3 +99,38 @@ def test_parse_bad_scalars_never_raise():
     assert d["confidence"] == 0.0          # unparseable → 0.0
     assert d["day_thesis"] == "123"        # coerced to str
     assert d["trades"][0]["id"] == "m0"
+
+
+# ---------------------------------------------------------------------------
+# Task 3.2 — build_messages + system prompt
+# ---------------------------------------------------------------------------
+def test_build_messages_includes_menu_and_target():
+    packet = {"target": 500, "gap_to_target": 380, "menu": [{"id": "m0", "symbol": "QQQ"}],
+              "vix": 14.2, "open_positions": [], "limits": {"per_trade_max_risk": 300}}
+    msgs = decider.build_messages(packet)
+    blob = str(msgs)
+    assert "m0" in blob and "500" in blob and "380" in blob
+
+
+def test_build_messages_shape_is_single_user_turn():
+    """A list with exactly one user message embedding the packet JSON."""
+    msgs = decider.build_messages({"menu": [{"id": "m0"}], "target": 500})
+    assert isinstance(msgs, list) and len(msgs) == 1
+    assert msgs[0]["role"] == "user"
+    assert "m0" in msgs[0]["content"] and "500" in msgs[0]["content"]
+
+
+def test_build_messages_is_json_safe_with_odd_types():
+    """Non-JSON-native packet values (e.g. a set) must not blow up serialization."""
+    packet = {"menu": [{"id": "m0", "weird": {1, 2, 3}}], "target": 500}
+    msgs = decider.build_messages(packet)   # must not raise
+    assert msgs[0]["role"] == "user" and "m0" in msgs[0]["content"]
+
+
+def test_system_prompt_states_the_mandate():
+    sp = decider.system_prompt().lower()
+    assert "menu" in sp                                  # pick only from the menu
+    assert "stand" in sp and "down" in sp                # standing down is valid
+    assert "ceiling" in sp or "clamp" in sp              # quantities are ceilings
+    assert "target" in sp                                # the daily target
+    assert "submit_decision" in decider.system_prompt()  # call the tool (exact name)

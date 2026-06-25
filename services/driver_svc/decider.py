@@ -28,6 +28,8 @@ test suite can import this module without the SDK installed and drive ``decide``
 with an injected fake client. See @claude-api for the exact ``messages.create`` /
 tool-use surface this mirrors.
 """
+import json
+
 from services.driver_svc import secrets, settings
 
 # The tool the model must call exactly once. ``tool_choice`` (in ``decide``) forces
@@ -122,3 +124,36 @@ def parse_decision(raw) -> dict:
         "confidence": _coerce_float(raw.get("confidence", 0.0)),
         "trades": clean,
     }
+
+
+# The mandate. Strategy-agnostic: the model never invents strikes or structures —
+# it can only pick menu ids the scanner already produced and scored. The
+# quantities it gives are CEILINGS the code re-clamps to the risk budget, and
+# standing down on a poor-edge checkpoint is an explicitly correct, encouraged
+# decision (the daily target is a target, NOT a quota to force-fill).
+_SYSTEM = (
+    "You are the decision engine for an autonomous PAPER options trader. Your job: "
+    "choose 0+ defined-risk credit spreads FROM THE PROVIDED MENU to move toward the "
+    "daily net target, or stand down. You may ONLY pick menu ids; never invent trades. "
+    "Quantities you give are ceilings — code re-clamps to the risk budget. The target is "
+    "a target, NOT a quota: standing down on a poor-edge checkpoint is a correct, "
+    "encouraged decision. Prefer high composite_score and PoP; avoid over-concentration. "
+    "Call submit_decision exactly once."
+)
+
+
+def build_messages(packet) -> list:
+    """The ``messages`` payload: one user turn embedding the decision packet JSON.
+
+    ``default=str`` keeps serialization total — any non-JSON-native value in the
+    packet (e.g. a stray set/datetime) is stringified rather than raising, so the
+    call can never fail to build. The packet is the model's entire view of the
+    world (target, gap, menu, VIX, open positions, limits).
+    """
+    return [{"role": "user",
+             "content": "Decision packet (JSON):\n" + json.dumps(packet, default=str)}]
+
+
+def system_prompt() -> str:
+    """The system prompt stating the decision mandate (see ``_SYSTEM``)."""
+    return _SYSTEM
