@@ -64,14 +64,18 @@ def _signal_structure(signal) -> str:
 def _max_loss(signal) -> float | None:
     """The signal's max loss as a float, or ``None`` if missing/unparseable.
 
-    Never raises: a ``None`` or non-numeric ``max_loss`` (sparse/bad signal)
-    returns ``None``, which the callers treat as "no defined risk → reject".
+    Never raises: a ``None``, non-numeric, or **non-finite** (``NaN`` / ``inf``)
+    ``max_loss`` returns ``None``, which the callers treat as "no defined risk →
+    reject". The finite check matters because the scanner derives ``max_loss`` by
+    rounding option marks (``round(nan, 2)`` is still ``NaN``), and ``NaN`` would
+    otherwise slip the ``> 0`` allowlist gate and crash ``math.floor`` downstream.
     """
     ml = signal.get("max_loss")
     try:
-        return float(ml) if ml is not None else None
+        v = float(ml) if ml is not None else None
     except (TypeError, ValueError):
         return None
+    return v if (v is not None and math.isfinite(v)) else None
 
 
 def is_allowed(signal) -> bool:
@@ -108,6 +112,11 @@ def clamp_quantity(signal, requested_qty, per_trade_max_risk, remaining_budget) 
     if not ml or ml <= 0:
         return 0
     try:
+        # ``ml`` is finite (``_max_loss`` guarantees it); guard the budget args so
+        # a NaN/inf/non-numeric cap can't crash the floor division either.
+        if not (math.isfinite(float(per_trade_max_risk))
+                and math.isfinite(float(remaining_budget))):
+            return 0
         req = max(0, int(requested_qty))
     except (TypeError, ValueError):
         return 0

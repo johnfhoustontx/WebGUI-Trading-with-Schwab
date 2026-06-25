@@ -69,6 +69,22 @@ def test_clamp_quantity_negative_max_loss():
     assert g.clamp_quantity({"structure": "PCS", "max_loss": -50.0}, 3, 300, 900) == 0
 
 
+def test_clamp_quantity_nonfinite_inputs_never_raise():
+    """NaN/inf in max_loss OR the budget args → 0 (a malformed chain can't crash)."""
+    nan, inf = float("nan"), float("inf")
+    assert g.clamp_quantity({"structure": "PCS", "max_loss": nan}, 5, 1000, 900) == 0
+    assert g.clamp_quantity({"structure": "PCS", "max_loss": inf}, 5, 1000, 900) == 0
+    sig = {"structure": "PCS", "max_loss": 200.0}
+    assert g.clamp_quantity(sig, 5, per_trade_max_risk=nan, remaining_budget=900) == 0
+    assert g.clamp_quantity(sig, 5, per_trade_max_risk=1000, remaining_budget=inf) == 0
+
+
+def test_is_allowed_rejects_nonfinite_max_loss():
+    """NaN/inf max_loss must fail the allowlist (NaN would otherwise slip `> 0`)."""
+    assert g.is_allowed({"structure": "PCS", "max_loss": float("nan")}) is False
+    assert g.is_allowed({"structure": "PCS", "max_loss": float("inf")}) is False
+
+
 # ---------------------------------------------------------------------------
 # Task 2.3 — halt_state
 # ---------------------------------------------------------------------------
@@ -184,9 +200,12 @@ def test_apply_idless_trade_rejected_offmenu():
 
 def test_apply_executable_carries_full_signal_and_rationale():
     """Survivors carry the FULL scanner signal (for verbatim enqueue) + rationale."""
+    menu = _menu()
+    menu["m2"]["extra_field"] = "must-survive"   # any signal field must pass through
     decision = {"stand_down": False,
                 "trades": [{"id": "m2", "quantity": 1, "rationale": "high pop IC"}]}
-    out = g.apply_guardrails(decision, _menu(), g_limits(), open_count=0, day_pnl=0)
+    out = g.apply_guardrails(decision, menu, g_limits(), open_count=0, day_pnl=0)
     t = out["executable"][0]
-    assert t["signal"] is _menu()["m2"] or t["signal"]["symbol"] == "SPX"
+    assert t["signal"] is menu["m2"]                      # same object, enqueued verbatim
+    assert t["signal"]["extra_field"] == "must-survive"   # no field dropped
     assert t["rationale"] == "high pop IC" and t["qty"] >= 1
