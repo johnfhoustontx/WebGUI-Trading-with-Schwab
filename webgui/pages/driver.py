@@ -1,22 +1,34 @@
-"""Driver page (Tier-3 reader) — morning-agent order-approval queue + performance.
+"""Driver page (Tier-3 reader) — autonomous monitor + STOP, then the legacy
+morning-agent order-approval queue + performance.
 
-This page holds **no engine call**. The morning pipeline (grade the day, select
-trades), order execution, and performance aggregation all live in
-``services/driver_svc``; the page reads the cached ``ApprovalState`` /
-``PerfReport`` and enqueues commands:
+This page holds **no engine call**. The morning pipeline, the autonomous Claude
+decision layer, order execution, and performance aggregation all live in
+``services/driver_svc``; the page reads cached views and enqueues commands.
 
-* **Run morning agent** → ``{"type":"run"}`` on ``cmd:driver`` — grade today and
-  propose trades (the 09:28-ET scheduler fires the same command unattended).
-* **APPROVE** → ``{"type":"approve"}`` — execute the pending proposed trades
-  (``order_executor``; ``PAPER_TRADE=True`` in config → simulated). Gated behind
-  a confirm dialog since it is outward-facing.
-* **SKIP** → ``{"type":"skip"}`` — decline today's trades.
-* **Refresh performance** → ``{"type":"perf"}`` — recompute the perf report.
+**Autonomous monitor (top, autonomy level B).** Reads ``cache:driver:autonomous``
+(``AutonomousState`` — day P&L vs the $500 target, open driver positions, and the
+newest-first per-checkpoint decision log) and ``cache:driver:control``
+(``DriverControl`` — the enabled/halted master switch). It is a MONITOR + OVERRIDE:
+* **Enable / Disable** toggle → ``{"type":"enable"|"disable"}`` on ``cmd:driver`` —
+  the master switch (Enable also re-arms a prior day's halt).
+* **STOP** (kill-switch, confirm-gated) → ``{"type":"stop"}`` — latches ``halted``
+  so no further checkpoints run until the next-day re-arm.
+* **Run now** → ``{"type":"cycle"}`` — fire one decision checkpoint immediately.
 
-A version-poll on ``driver:approvals`` / ``driver:performance`` repaints from the
-cache; the state persists across navigation (single-user). The pure display
-builders (``grade_color``/``status_text``/``condition_rows``/
-``proposed_trade_lines``/``perf_*``) are unit-tested.
+**Legacy approval queue + performance (below the separator).** Still available
+(it's gated off whenever autonomy is enabled):
+* **Run morning agent** → ``{"type":"run"}`` — grade today + propose trades
+  (the 09:28-ET scheduler fires the same command unattended).
+* **APPROVE** → ``{"type":"approve"}`` (confirm-gated, outward-facing) /
+  **SKIP** → ``{"type":"skip"}`` / **Refresh performance** → ``{"type":"perf"}``.
+
+A version-poll on ``driver:autonomous`` / ``driver:control`` /
+``driver:approvals`` / ``driver:performance`` repaints from the cache; state
+persists across navigation (single-user). The pure display builders
+(``target_progress``/``control_state_label``/``decision_log_rows``/
+``position_rows`` for the monitor; ``grade_color``/``status_text``/
+``condition_rows``/``proposed_trade_lines``/``perf_*`` for the legacy queue) are
+unit-tested.
 """
 import bus_client
 from nicegui import ui
@@ -232,8 +244,13 @@ def decision_log_rows(decisions):
             "ts": d.get("ts", ""),
             "thesis": d.get("thesis", ""),
             "stand_down": bool(d.get("stand_down", False)),
-            "executed": list(d.get("executed") or []),
-            "rejected": list(d.get("rejected") or []),
+            # Filter nested sub-lists to dicts: the AutonomousState contract gates
+            # `decisions` as list[dict] but NOT these nested lists, so a malformed
+            # executed/rejected (None, a str, or a list of non-dicts) must not reach
+            # the card loops and blank the monitor — this page is the audit-log
+            # resilience boundary.
+            "executed": [t for t in (d.get("executed") or []) if isinstance(t, dict)],
+            "rejected": [r for r in (d.get("rejected") or []) if isinstance(r, dict)],
             "halted": bool(d.get("halted", False)),
             "halt_reason": d.get("halt_reason"),
         })

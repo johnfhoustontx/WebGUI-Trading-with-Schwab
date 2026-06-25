@@ -97,6 +97,21 @@ def test_decision_log_rows_tolerates_sparse_dicts():
     assert r["halted"] is False and r["halt_reason"] is None
 
 
+def test_decision_log_rows_filters_nested_non_dicts():
+    """Contract-legal-but-malformed nested executed/rejected (a str, or a list with
+    non-dict items) are filtered to dicts so the card loops can't AttributeError and
+    blank the monitor — this page is the audit-log resilience boundary."""
+    rows = driver.decision_log_rows([{
+        "ts": "t", "thesis": "x",
+        "executed": ["not-a-dict", 42, {"symbol": "QQQ", "qty": 1}],
+        "rejected": "garbage",   # a str is iterable — must NOT splay into chars
+    }])
+    assert rows[0]["executed"] == [{"symbol": "QQQ", "qty": 1}]
+    assert rows[0]["rejected"] == []
+    # The downstream one-line summary survives the now-clean row.
+    assert "QQQ" in driver.decision_summary(rows[0])
+
+
 def test_decision_log_rows_halt_row():
     rows = driver.decision_log_rows([{
         "ts": "t", "thesis": "", "stand_down": True, "executed": [], "rejected": [],
