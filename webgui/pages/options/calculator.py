@@ -25,7 +25,7 @@ unit-tested; ``render()`` wires the form + visuals.
 """
 import math
 
-from .inputs import select_all_on_focus
+from .inputs import select_all_on_focus, should_load
 # Shared dark-navy "dashboard" theme (Calculator + Simulator inject the SAME CSS so
 # the look never drifts). Kept under its historical name here.
 from .theme import DASHBOARD_CSS as CALC_V2_CSS
@@ -383,9 +383,13 @@ def render():
     from . import handoff
     from . import leg_editor
     from . import strategy_menu
+    from . import overlay as _overlay
 
     ui.add_css(CALC_CSS)
     ui.add_css(CALC_V2_CSS)
+
+    # Full-screen wait overlay shown while a user-initiated Load is in flight.
+    wait = _overlay.build_loading_overlay()
 
     # Page state (local closure, not module globals — built per request).
     state = {
@@ -398,6 +402,9 @@ def render():
         "pending_legs": None,  # legs copied in from the Simulator, applied on chain load
         "contracts": 1,       # last-applied Contracts count (drives per-leg qty scaling)
         "restoring": False,   # True while restoring a persisted snapshot (suppress enqueues)
+        "last_loaded": None,   # last symbol a Load was triggered for (tab/Enter dedup)
+        "loading": False,      # True while a user-initiated load is in flight (overlay up)
+        "applying": False,     # True while _apply_chain/_prefill set Expiry programmatically
     }
 
     # ── Dark "dashboard" layout (page-scoped, .calc-v2). The functional widgets
@@ -430,7 +437,7 @@ def render():
                                                     max=200, format="%.0f").classes("w-40") \
                                 .tooltip("Strikes shown either side of spot in the P&L grid")
                     with ui.column().classes("shrink-0 gap-3").style("width:170px"):
-                        ui.button("Load", icon="cloud_upload", color=None, on_click=lambda: load_symbol()) \
+                        ui.button("Load", icon="cloud_upload", color=None, on_click=lambda: load_symbol(show_wait=True)) \
                             .props("no-caps").classes("cv2-btn w-full").tooltip("Load price + expiries/strikes")
                         ui.button("IV Update", icon="trending_up", color=None, on_click=lambda: fetch_iv()) \
                             .props("no-caps").classes("cv2-btn w-full").tooltip("Fetch / imply IV for the expiry")
@@ -559,8 +566,23 @@ def render():
 
     contracts_in.on_value_change(lambda e: (_on_contracts_change(), _capture()))
     # Persist the remaining inputs on change (cheap dict write; no command).
-    for _w in (symbol_in, iv_in, rate_in, ivchg_in, price_in, nstrikes_in, expiry_sel):
+    for _w in (iv_in, rate_in, ivchg_in, price_in, nstrikes_in):
         _w.on_value_change(lambda e: _capture())
+    # Symbol: tab-out / Enter simulate Load (deduped); value-change still persists.
+    symbol_in.on_value_change(lambda e: _capture())
+    symbol_in.on("keydown.enter", lambda e: _symbol_submit())
+    symbol_in.on("focusout", lambda e: _symbol_submit())
+
+    @guard
+    def _on_expiry_change():
+        """Top-level Expiry → propagate to ALL legs (re-syncs each leg's strikes).
+        Suppressed while restoring or while _apply_chain/_prefill set it programmatically."""
+        if state.get("restoring") or state.get("applying"):
+            return
+        editor.apply_expiry(expiry_sel.value)
+        _capture()
+
+    expiry_sel.on_value_change(lambda e: _on_expiry_change())
 
     @guard
     def fetch_premiums():
@@ -596,14 +618,41 @@ def render():
             ui.notify("No premium for: " + ", ".join(missing), type="warning")
 
     @guard
-    def load_symbol():
-        """Enqueue a ``calc_load`` for the symbol; the version-poll applies it."""
+    def load_symbol(show_wait=False):
+        """Enqueue a ``calc_load`` for the symbol; the version-poll applies it.
+
+        ``show_wait`` (user-initiated: Load button / symbol tab-out / Enter) shows the
+        centered wait overlay until the chain arrives (or a ~15s safety timeout).
+        Mount-time auto-loads (restore / handoff) pass show_wait=False."""
         sym = (symbol_in.value or "").strip().upper()
         if not sym:
             ui.notify("Enter a symbol first.", type="warning")
             return
+        if show_wait and state.get("loading"):
+            return  # a user load is already in flight (collapses focusout-then-click)
+        state["last_loaded"] = sym
+        if show_wait:
+            state["loading"] = True
+            wait.show(f"Loading {sym}…")
+            ui.timer(15.0, _load_timeout, once=True)
         bus_client.request("options", {"type": "calc_load", "args": {"symbol": sym}})
         ui.notify(f"Loading {sym}…", type="info")
+
+    @guard
+    def _load_timeout():
+        """Safety net: if the chain never arrived, drop the overlay + reset the dedup
+        so a retry re-triggers (e.g. the service is down)."""
+        if state.get("loading"):
+            state["loading"] = False
+            wait.hide()
+            state["last_loaded"] = None
+
+    @guard
+    def _symbol_submit():
+        """Tab-out / Enter on the symbol field → Load (deduped: only when changed)."""
+        if not should_load((symbol_in.value or "").strip().upper(), state.get("last_loaded")):
+            return
+        load_symbol(show_wait=True)
 
     @guard
     def fetch_iv():
@@ -734,14 +783,20 @@ def render():
     # ── version-poll repaint (fetch-free) ────────────────────────────────────
     def _apply_chain(cc):
         cc = cc or {}
+        state["loading"] = False
+        wait.hide()
         state["chain"] = cc.get("chain")
         if cc.get("price"):
             price_in.value = round(cc["price"], 2)
         exps = chain_expiries(state["chain"] or {})
-        expiry_sel.options = exps
-        if exps and expiry_sel.value not in exps:
-            expiry_sel.value = exps[0]
-        expiry_sel.update()
+        state["applying"] = True
+        try:
+            expiry_sel.options = exps
+            if exps and expiry_sel.value not in exps:
+                expiry_sel.value = exps[0]
+            expiry_sel.update()
+        finally:
+            state["applying"] = False
         # Repopulate the per-leg expiry/strike selects from the freshly-loaded
         # chain. Pending legs copied in from the Simulator win; otherwise, when the
         # user hasn't touched the legs, re-seed the template so strikes snap to the
@@ -857,9 +912,13 @@ def render():
             price_in.value = round(price, 2)
         exp = sig.get("expiration")
         if exp:
-            expiry_sel.options = [exp]
-            expiry_sel.value = exp
-            expiry_sel.update()
+            state["applying"] = True
+            try:
+                expiry_sel.options = [exp]
+                expiry_sel.value = exp
+                expiry_sel.update()
+            finally:
+                state["applying"] = False
         iv = sig.get("short_iv")
         if iv:
             iv_in.value = round(iv, 1)
