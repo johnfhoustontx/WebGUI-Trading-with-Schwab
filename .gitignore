@@ -6,6 +6,7 @@
 **/ai_config.json
 shared/sentiment_bridge.json
 shared/anthropic_key.txt
+shared/driver_model.txt
 
 # Databases & runtime state
 *.db

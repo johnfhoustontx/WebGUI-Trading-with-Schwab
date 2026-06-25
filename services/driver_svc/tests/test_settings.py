@@ -16,3 +16,27 @@ def test_limits_dict_shape():
     assert lim["vix_max"] == 25.0
     assert lim["max_concurrent"] >= 1
     assert lim["max_trades_per_cycle"] >= 1
+
+
+def test_resolve_model_prefers_env(monkeypatch):
+    """The DRIVER_MODEL env var wins over the file and the default."""
+    monkeypatch.setenv("DRIVER_MODEL", "claude-haiku-4-5-20251001")
+    assert settings._resolve_model() == "claude-haiku-4-5-20251001"
+
+
+def test_resolve_model_falls_back_to_file(monkeypatch, tmp_path):
+    """Env unset → read the model from the gitignored shared/driver_model.txt
+    (the robust override that dodges Windows setx propagation; stripped)."""
+    monkeypatch.delenv("DRIVER_MODEL", raising=False)
+    import repo_paths
+    monkeypatch.setattr(repo_paths, "SHARED_DIR", tmp_path)
+    (tmp_path / "driver_model.txt").write_text("  claude-sonnet-4-6 \n", encoding="utf-8")
+    assert settings._resolve_model() == "claude-sonnet-4-6"
+
+
+def test_resolve_model_default_when_unset(monkeypatch, tmp_path):
+    """Env unset AND no override file → the committed Opus build default."""
+    monkeypatch.delenv("DRIVER_MODEL", raising=False)
+    import repo_paths
+    monkeypatch.setattr(repo_paths, "SHARED_DIR", tmp_path)  # empty dir → no file
+    assert settings._resolve_model() == "claude-opus-4-8"
