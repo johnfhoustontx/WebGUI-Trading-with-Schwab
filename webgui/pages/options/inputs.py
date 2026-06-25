@@ -10,3 +10,11 @@ def select_all_on_focus(inp):
     input for chaining."""
     inp.on('focusin', js_handler='(e) => { const i = e.target; if (i && i.select) i.select(); }')
     return inp
+
+
+def should_load(current, last_loaded):
+    """True when a tab-out / Enter should (re)trigger Load: a non-empty symbol that
+    differs from the one already loaded. The Load / Fetch BUTTON bypasses this and
+    always loads (e.g. to refresh price); this only gates the symbol-field triggers
+    so tabbing through an unchanged symbol won't re-fetch."""
+    return bool(current) and current != last_loaded
