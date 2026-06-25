@@ -115,14 +115,14 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
         with container:
             if header:
                 with ui.row().classes("items-center gap-2 no-wrap leg-head"):
-                    ui.label("Type").classes("w-20")
+                    ui.label("Type").classes("w-24")
                     ui.label("Side").classes("w-24")
                     ui.label("Expiry").classes("w-40")
                     ui.label("Strike").classes("w-24")
                     ui.label("Qty").classes("w-16")
                     if show_premium:
                         ui.label("Premium").classes("w-20")
-                    ui.label("Actions").classes("w-10 text-right")
+                    ui.label("").classes("w-10")
             for i, leg in enumerate(state["legs"]):
                 # Coerce the leg's expiry + strike into the AVAILABLE options FIRST —
                 # ui.select raises ValueError on a value not in its options (a default
@@ -135,12 +135,12 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
                 s_opts = strikes_for(e_val, leg.get("option_type")) or []
                 s_val = coerce_strike(leg.get("strike"), s_opts)
                 leg["strike"] = s_val
-                with ui.row().classes("items-end gap-2 no-wrap"):
+                with ui.row().classes("items-end gap-2 no-wrap leg-row"):
                     # Compact widths so the whole row (incl. the remove ✕) fits the
                     # Calculator's fixed-width left column and never spills onto the
                     # P&L matrix beside it.
                     ui.select(["call", "put"], value=leg.get("option_type"), label=lab("Type")) \
-                        .classes("w-20").on_value_change(lambda e, i=i: _set_field(i, "option_type", e.value))
+                        .classes("w-24").on_value_change(lambda e, i=i: _set_field(i, "option_type", e.value))
                     ui.select(["long", "short"], value=leg.get("side"), label=lab("Side")) \
                         .classes("w-24").on_value_change(lambda e, i=i: _set_field(i, "side", e.value))
                     ui.select(exps, value=e_val, label=lab("Expiry")) \
