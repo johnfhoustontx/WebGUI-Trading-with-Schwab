@@ -139,3 +139,64 @@ def halt_state(day_pnl, target, daily_max_loss, vix, vix_max=25.0):
     if vix is not None and vix > vix_max:
         return (True, f"VIX {vix:.1f} > {vix_max:.0f} — no new entries.")
     return (False, None)
+
+
+def apply_guardrails(decision, menu_by_id, limits, *, open_count, day_pnl, vix=None,
+                     daily_max_loss=250.0):
+    """Turn a model decision into an executable, risk-clamped trade list.
+
+    This is the single authority over what the autonomous driver executes. The
+    model's ``decision`` (a parsed ``{stand_down, trades:[{id, quantity, ...}]}``)
+    is run through, in order:
+
+    1. **Halt check** — ``halt_state``. If halted (banked / loss cap / VIX),
+       NOTHING executes and the reason is returned.
+    2. **Stand-down** — if the model chose to stand down, nothing executes.
+    3. **Per-trade resolution**, tracking the remaining risk budget and the
+       remaining concurrent slots ACROSS trades, in order:
+       * the menu id must resolve to a known signal (else reject "off-menu"),
+       * the signal must be on the allowlist with defined risk (``is_allowed``),
+       * the per-cycle cap and the concurrent-slot budget must not be exhausted,
+       * ``clamp_quantity`` must yield ``>= 1`` under the *remaining* budget.
+       Each survivor consumes one slot and ``qty * max_loss`` of the budget.
+
+    ``menu_by_id`` maps the packet menu id → the FULL scanner signal dict (so the
+    resolved ``signal`` can be enqueued verbatim for paper execution). Returns
+    ``{executable: [{id, signal, qty, rationale}], rejected: [{id, reason}],
+    halted: bool, halt_reason: str|None}``. CODE is authoritative — the model's
+    quantities are ceilings, not commands. Never raises on a well-formed decision.
+    """
+    halted, halt_reason = halt_state(day_pnl, limits["daily_target"],
+                                     daily_max_loss, vix, limits["vix_max"])
+    if halted:
+        return {"executable": [], "rejected": [], "halted": True, "halt_reason": halt_reason}
+    if decision.get("stand_down"):
+        return {"executable": [], "rejected": [], "halted": False, "halt_reason": None}
+
+    executable, rejected = [], []
+    remaining = float(limits["daily_risk_budget"])
+    slots = max(0, limits["max_concurrent"] - int(open_count))
+    per_cycle = limits["max_trades_per_cycle"]
+
+    for t in decision.get("trades", []):
+        mid = t.get("id")
+        sig = menu_by_id.get(mid)
+        if sig is None:
+            rejected.append({"id": mid, "reason": "off-menu (no matching signal)"})
+            continue
+        if not is_allowed(sig):
+            rejected.append({"id": mid, "reason": "structure not in allowlist / no defined risk"})
+            continue
+        if len(executable) >= per_cycle or slots <= 0:
+            rejected.append({"id": mid, "reason": "max trades/concurrent reached"})
+            continue
+        qty = clamp_quantity(sig, t.get("quantity", 1), limits["per_trade_max_risk"], remaining)
+        if qty <= 0:
+            rejected.append({"id": mid, "reason": "unaffordable within remaining budget"})
+            continue
+        executable.append({"id": mid, "signal": sig, "qty": qty,
+                           "rationale": t.get("rationale", "")})
+        remaining -= qty * _max_loss(sig)
+        slots -= 1
+
+    return {"executable": executable, "rejected": rejected, "halted": False, "halt_reason": None}
