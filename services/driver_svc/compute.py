@@ -277,3 +277,18 @@ def run_cycle(scan_view, paper_view, *, target, limits, market, client=None) -> 
                              "trades": [], "error": str(exc)},
                 "executable": [], "rejected": [], "halted": False, "halt_reason": None,
                 "day_pnl": None, "open_positions": []}
+
+
+def fetch_market_context() -> dict:
+    """VIX/SPX context for the decision packet (defensive → ``{}`` on failure).
+
+    Reuses the legacy ``morning_agent.fetch_market_conditions`` (VIX / SPX spot /
+    VIX1D via the proxy). Any failure — including a ``None`` result — degrades to an
+    empty dict so a missing/slow proxy never blocks or crashes a cycle (the packet's
+    ``vix`` then falls back to ``None``, which the guardrails treat as "skip the VIX
+    gate").
+    """
+    try:
+        return dict(morning_agent.fetch_market_conditions() or {})
+    except Exception:  # noqa: BLE001
+        return {}

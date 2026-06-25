@@ -250,3 +250,26 @@ def test_run_cycle_uses_config_daily_max_loss(monkeypatch):
                         lambda packet, **kw: {"stand_down": True, "trades": []})
     out = compute.run_cycle(scan, paper, target=500.0, limits=_lim(), market={"vix": 14})
     assert out["halted"] is True and "loss" in out["halt_reason"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Task 4.3 — fetch_market_context
+# ---------------------------------------------------------------------------
+def test_fetch_market_context_defensive(monkeypatch):
+    monkeypatch.setattr(compute.morning_agent, "fetch_market_conditions",
+                        lambda: {"vix": 13.5, "spx_spot": 5500, "vix1d": 12})
+    ctx = compute.fetch_market_context()
+    assert ctx["vix"] == 13.5
+    assert ctx["spx_spot"] == 5500
+
+
+def test_fetch_market_context_never_raises(monkeypatch):
+    monkeypatch.setattr(compute.morning_agent, "fetch_market_conditions",
+                        lambda: (_ for _ in ()).throw(RuntimeError()))
+    assert compute.fetch_market_context() == {}
+
+
+def test_fetch_market_context_none_result_is_empty(monkeypatch):
+    """A ``None`` from the fetcher degrades to {} (not a crash on dict(None))."""
+    monkeypatch.setattr(compute.morning_agent, "fetch_market_conditions", lambda: None)
+    assert compute.fetch_market_context() == {}
