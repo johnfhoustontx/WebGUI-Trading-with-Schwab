@@ -85,3 +85,32 @@ def is_allowed(signal) -> bool:
         return False
     ml = _max_loss(signal)
     return ml is not None and ml > 0
+
+
+def clamp_quantity(signal, requested_qty, per_trade_max_risk, remaining_budget) -> int:
+    """Resize a requested quantity down to the risk budget; 0 when unaffordable.
+
+    The model's ``requested_qty`` is a CEILING, not a command. The executed
+    quantity is the smallest of three caps, floored to whole spreads:
+
+    * the request itself (``requested_qty``, coerced to a non-negative int),
+    * the per-trade cap ``floor(per_trade_max_risk / max_loss)`` (no single
+      position may risk more than ``per_trade_max_risk``), and
+    * the remaining-budget cap ``floor(remaining_budget / max_loss)`` (the sum
+      of open driver max-loss may not exceed the daily risk budget).
+
+    Returns ``0`` — i.e. "do not trade this" — when the signal has no usable
+    ``max_loss`` (``None`` / non-numeric / ``<= 0``), when ``requested_qty`` is
+    ``None`` / non-numeric / negative, or when even one spread can't fit under
+    the per-trade cap or the remaining budget. Never raises.
+    """
+    ml = _max_loss(signal)
+    if not ml or ml <= 0:
+        return 0
+    try:
+        req = max(0, int(requested_qty))
+    except (TypeError, ValueError):
+        return 0
+    per_trade_cap = math.floor(per_trade_max_risk / ml)
+    budget_cap = math.floor(remaining_budget / ml)
+    return max(0, min(req, per_trade_cap, budget_cap))
