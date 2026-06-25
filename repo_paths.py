@@ -12,6 +12,7 @@ CLAUDE_DRIVER   = REPO_ROOT / "claude-driver"
 TRADE_ANALYZER  = REPO_ROOT / "trade-analyzer"
 PORTFOLIO_ANALYZER = REPO_ROOT / "portfolio-analyzer"
 SHARED          = REPO_ROOT / "shared"
+SHARED_DIR      = SHARED  # alias used by services importing shared-dir-relative files
 WEBGUI          = REPO_ROOT / "webgui"
 
 BRIDGE_PATH = SHARED / "sentiment_bridge.json"
