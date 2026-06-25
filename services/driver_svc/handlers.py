@@ -18,15 +18,34 @@ Each write validates the payload against its contract (``ApprovalState`` /
 change event so the GUI version-poll repaints. Kept synchronous — the scaffold's
 consumer loop handles sync handlers.
 """
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
-from services.driver_svc import compute
-from shared.contracts.driver import ApprovalState, PerfReport
+from services.driver_svc import compute, settings
+from shared.contracts.driver import (
+    ApprovalState,
+    AutonomousState,
+    DriverControl,
+    PerfReport,
+)
 
 CACHE_APPROVALS = "cache:driver:approvals"
 EVENT_APPROVALS = "events:driver:approvals"
 CACHE_PERF = "cache:driver:performance"
 EVENT_PERF = "events:driver:performance"
+
+# Autonomous decision layer (Phase 5) — the master-switch/kill-switch control key
+# and the live monitor view. The option caches the cycle reads + the command
+# stream it executes survivors on (the EXISTING options ``paper_create`` path).
+CACHE_CONTROL = "cache:driver:control"
+EVENT_CONTROL = "events:driver:control"
+CACHE_AUTONOMOUS = "cache:driver:autonomous"
+EVENT_AUTONOMOUS = "events:driver:autonomous"
+CACHE_OPT_SCAN = "cache:options:scan"
+CACHE_OPT_PAPER = "cache:options:paper_account"
+CMD_OPTIONS = "cmd:options"
+
+# Cap on the newest-first per-checkpoint decision log carried in the monitor view.
+_DECISION_LOG_CAP = 50
 
 # Fields we project the compute dict onto (dropping extras like ml_signals /
 # gex_snapshot the GUI ignores). ``.get`` with the field default keeps a
@@ -88,6 +107,42 @@ def refresh_perf(bus) -> None:
                     trades=rep.get("trades", []), timestamp=_now_iso())
     version = bus.cache_set(CACHE_PERF, pr.model_dump())
     bus.publish(EVENT_PERF, {"version": version})
+
+
+# ── autonomous control key (Phase 5.1) ───────────────────────────────────────
+
+
+def read_control(bus) -> dict:
+    """The autonomous control state (``cache:driver:control``) as a plain dict.
+
+    Returns the ``DriverControl`` defaults (disabled, not halted) when the key
+    has never been written — so the very first read is a safe "off" rather than
+    a missing-key crash.
+    """
+    env = bus.cache_get(CACHE_CONTROL)
+    return env.payload if env else DriverControl().model_dump()
+
+
+def set_control(bus, *, enabled=None, halted=None, reason=None, halted_date=None) -> dict:
+    """Mutate + persist the control key, returning the new state dict.
+
+    A read-modify-write of ``cache:driver:control``: each kwarg left ``None`` is
+    untouched, so ``enable``/``disable`` flip only ``enabled`` and the kill-switch
+    flips only ``halted``/``reason``/``halted_date`` without clobbering the master
+    toggle. Validates through ``DriverControl`` before caching and publishes a
+    change event so the GUI version-poll repaints.
+    """
+    cur = read_control(bus)
+    if enabled is not None:
+        cur["enabled"] = bool(enabled)
+    if halted is not None:
+        cur["halted"] = bool(halted)
+        cur["reason"] = reason
+        cur["halted_date"] = halted_date
+    cur["timestamp"] = _now_iso()
+    st = DriverControl(**cur)
+    bus.cache_set(CACHE_CONTROL, st.model_dump(), event=EVENT_CONTROL)
+    return st.model_dump()
 
 
 def handle_command(bus, command) -> None:
