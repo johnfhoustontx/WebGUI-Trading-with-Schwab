@@ -566,7 +566,7 @@ def render():
         if show_wait:
             state["loading"] = True
             wait.show(f"Fetching {sym}…")
-            ui.timer(15.0, _fetch_timeout, once=True)
+            ui.timer(_overlay.LOAD_TIMEOUT_SEC, _fetch_timeout, once=True)
         bus_client.request("options", {"type": "sim_fetch", "args": {"symbol": sym}})
         status.text = "Fetching snapshot…"
 

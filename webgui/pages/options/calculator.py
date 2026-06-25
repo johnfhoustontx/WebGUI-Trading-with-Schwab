@@ -622,7 +622,7 @@ def render():
         """Enqueue a ``calc_load`` for the symbol; the version-poll applies it.
 
         ``show_wait`` (user-initiated: Load button / symbol tab-out / Enter) shows the
-        centered wait overlay until the chain arrives (or a ~15s safety timeout).
+        centered wait overlay until the chain arrives (or a safety timeout).
         Mount-time auto-loads (restore / handoff) pass show_wait=False."""
         sym = (symbol_in.value or "").strip().upper()
         if not sym:
@@ -637,7 +637,7 @@ def render():
         if show_wait:
             state["loading"] = True
             wait.show(f"Loading {sym}…")
-            ui.timer(15.0, _load_timeout, once=True)
+            ui.timer(_overlay.LOAD_TIMEOUT_SEC, _load_timeout, once=True)
         bus_client.request("options", {"type": "calc_load", "args": {"symbol": sym}})
         ui.notify(f"Loading {sym}…", type="info")
 

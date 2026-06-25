@@ -15,6 +15,13 @@ _OVERLAY_STYLE = (
     "background:rgba(6,12,24,0.55);backdrop-filter:blur(1px);"
 )
 
+# Safety-timeout (seconds) for the wait overlay: a backstop that hides the spinner if
+# the load NEVER lands (e.g. the service is down). The PRIMARY dismissal is data
+# arrival, so this must comfortably exceed the slowest legitimate fetch — the
+# Simulator's sim_fetch builds a full ChainSnapshot and measured ~19s for SPY
+# (6870 contracts), so 15s fired prematurely. Shared by both pages so they don't drift.
+LOAD_TIMEOUT_SEC = 30.0
+
 
 def build_loading_overlay(text="Loading…"):
     """Mount a hidden full-screen wait overlay. Returns a handle with
