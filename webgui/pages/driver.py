@@ -184,6 +184,10 @@ CONTROL_OFF_COLOR = "#888888"       # disabled — autonomous off
 CONTROL_ACTIVE_COLOR = "#1D9E75"    # enabled, running
 CONTROL_HALTED_COLOR = "#BA7517"    # latched halt (banked / loss cap / VIX / STOP)
 
+# How many ~2s version-poll ticks to hold the optimistic toggle before giving up:
+# if the enable/disable command never lands (e.g. driver_svc down), revert + warn.
+_PENDING_TIMEOUT_TICKS = 3
+
 
 def target_progress(day_pnl, target):
     """Fraction of the daily target banked, clamped to [0, 1].
@@ -315,6 +319,28 @@ def paper_summary(paper_view):
     }
 
 
+def resolve_switch_state(pending, actual_enabled):
+    """Optimistic Autonomous-switch state — the anti-flicker guard.
+
+    The switch is bound to ``cache:driver:control.enabled`` and rebuilt on every
+    monitor repaint (now frequent — the live paper account drives repaints). Without
+    this, a repaint during the ~1s it takes the enable/disable command to reach the
+    service would yank the switch back to the stale backend value, fighting the click.
+
+    ``pending`` is the user's last toggled value awaiting confirmation (or None when
+    nothing is pending). Returns ``(shown_enabled, still_pending)``:
+
+    * no pending → show the actual control state;
+    * pending matches the actual state → confirmed, clear it (return None);
+    * pending differs → keep SHOWING THE INTENT (don't flip) and keep waiting.
+    """
+    if pending is None:
+        return bool(actual_enabled), None
+    if bool(actual_enabled) == bool(pending):
+        return bool(actual_enabled), None      # confirmed — clear the pending intent
+    return bool(pending), pending              # still in flight — hold the user's intent
+
+
 _POSITION_COLS = [
     {"name": "position_id", "label": "ID", "field": "position_id", "align": "left"},
     {"name": "symbol", "label": "Symbol", "field": "symbol", "align": "left"},
@@ -336,6 +362,7 @@ def render():
         "appr": None, "appr_ver": None, "perf": None, "perf_ver": None,
         "auto": None, "auto_ver": None, "ctrl": None, "ctrl_ver": None,
         "paper": None, "paper_ver": None,
+        "pending_enabled": None, "pending_ticks": 0,
     }
 
     # ── Autonomous monitor + override (Phase 7) ───────────────────────────────
@@ -416,7 +443,10 @@ def render():
         ctrl_view = ctrl or {"enabled": auto.get("enabled", False),
                              "halted": auto.get("halted", False),
                              "reason": auto.get("halt_reason")}
-        enabled = bool(ctrl_view.get("enabled"))
+        # Optimistic toggle: show the user's pending intent until the control state
+        # confirms it, so a (now-frequent) repaint can't flip the switch mid-command.
+        enabled, state["pending_enabled"] = resolve_switch_state(
+            state["pending_enabled"], bool(ctrl_view.get("enabled")))
         halted = bool(ctrl_view.get("halted"))
         # Day P&L = the LIVE paper-account session P&L (the truthful source — the
         # driver trades into the paper account, so it moves as the options service
@@ -593,7 +623,11 @@ def render():
     @guard
     def _on_toggle(e):
         # Master switch: enable re-arms a prior halt (per the service); disable
-        # stands the loop down without latching.
+        # stands the loop down without latching. Record the intent so a repaint
+        # can't flip the switch before the command lands (resolve_switch_state),
+        # and reset the confirmation timeout.
+        state["pending_enabled"] = bool(e.value)
+        state["pending_ticks"] = 0
         if e.value:
             _do("enable", "Enabling autonomous driver…")
         else:
@@ -631,6 +665,18 @@ def render():
             state["perf_ver"] = pv
             state["perf"] = bus_client.read("driver:performance") or None
             _render_perf()
+        # Optimistic-toggle timeout: if the control state never catches up to the
+        # user's pending toggle (command never consumed — e.g. driver_svc down),
+        # give up after a few ticks: revert the switch to reality and warn. This is
+        # the feedback that surfaces a dead service instead of a silently stuck toggle.
+        if state["pending_enabled"] is not None:
+            state["pending_ticks"] += 1
+            if state["pending_ticks"] >= _PENDING_TIMEOUT_TICKS:
+                state["pending_enabled"] = None
+                state["pending_ticks"] = 0
+                ui.notify("Enable/Disable didn't take — is driver_svc running?",
+                          type="warning")
+                _render_monitor()
 
     # Initial paint (graceful-empty when the service is cold / nothing cached).
     state["auto_ver"] = bus_client.read_version("driver:autonomous")

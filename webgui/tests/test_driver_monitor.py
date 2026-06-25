@@ -185,6 +185,26 @@ def test_paper_summary_no_account_is_safe():
     assert s["has_account"] is False and s["session_pnl"] is None
 
 
+# ── resolve_switch_state (optimistic toggle — no flip during command latency) ─
+def test_resolve_switch_state_no_pending_shows_actual():
+    assert driver.resolve_switch_state(None, True) == (True, None)
+    assert driver.resolve_switch_state(None, False) == (False, None)
+
+
+def test_resolve_switch_state_confirmed_clears_pending():
+    # Pending intent matches the actual control state → confirmed, pending cleared.
+    assert driver.resolve_switch_state(True, True) == (True, None)
+    assert driver.resolve_switch_state(False, False) == (False, None)
+
+
+def test_resolve_switch_state_pending_holds_intent():
+    # Clicked ON but control hasn't caught up yet → keep showing ON (don't flip),
+    # keep waiting. This is the anti-flicker guarantee during the ~1s latency.
+    assert driver.resolve_switch_state(True, False) == (True, True)
+    # Clicked OFF, control still enabled → keep showing OFF.
+    assert driver.resolve_switch_state(False, True) == (False, False)
+
+
 def test_target_text_signed():
     assert driver.target_text(250.0, 500.0) == "+$250.00 / $500.00"
     assert driver.target_text(None, 500.0) == "—  / $500.00" or \
