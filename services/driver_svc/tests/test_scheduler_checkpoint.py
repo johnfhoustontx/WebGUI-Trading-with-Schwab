@@ -1,0 +1,103 @@
+"""Tests for the autonomous checkpoint cadence + halt re-arm (Phase 6).
+
+``checkpoint_due`` fires the autonomous decision cycle at most once per
+``settings.CHECKPOINT_MIN``-minute slot during RTH (09:30–16:00 ET) on weekdays;
+``should_rearm`` clears a stale overnight halt latch on the next trading day. Both
+are PURE (ET-aware datetimes / plain dicts in — no clock, no bus), so they take
+fixed inputs here. The ``loop`` itself is not unit-tested (it owns its sleep
+cadence, like the other services' loops + the existing ``morning_due`` tests).
+"""
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+from services.driver_svc import scheduler, settings
+
+ET = ZoneInfo("America/New_York")
+
+
+def _et(y, m, d, hh, mm):
+    return datetime(y, m, d, hh, mm, tzinfo=ET)
+
+
+# ── checkpoint_due ───────────────────────────────────────────────────────────
+
+
+def test_checkpoint_due_every_30m_in_rth():
+    # 2026-06-24 is a Wednesday.
+    now = _et(2026, 6, 24, 10, 0)
+    due, ts = scheduler.checkpoint_due(now, None)
+    assert due is True
+    # same 30-min slot (10:00–10:29) → not due again, slot key unchanged.
+    again_due, again_ts = scheduler.checkpoint_due(_et(2026, 6, 24, 10, 20), ts)
+    assert again_due is False
+    assert again_ts == ts
+    # next slot (10:30) → due.
+    assert scheduler.checkpoint_due(_et(2026, 6, 24, 10, 35), ts)[0] is True
+
+
+def test_checkpoint_due_at_rth_open():
+    """09:30 exactly is the first RTH slot — due."""
+    due, ts = scheduler.checkpoint_due(_et(2026, 6, 24, 9, 30), None)
+    assert due is True
+    assert ts == f"2026-06-24:{(9 * 60 + 30) // settings.CHECKPOINT_MIN}"
+
+
+def test_checkpoint_not_due_before_open():
+    assert scheduler.checkpoint_due(_et(2026, 6, 24, 8, 0), None)[0] is False
+    # one minute before the open is still closed.
+    assert scheduler.checkpoint_due(_et(2026, 6, 24, 9, 29), None)[0] is False
+
+
+def test_checkpoint_not_due_at_or_after_close():
+    """16:00 exactly is the close — NOT due (a slot at/after 16:00 never fires)."""
+    assert scheduler.checkpoint_due(_et(2026, 6, 24, 16, 0), None)[0] is False
+    assert scheduler.checkpoint_due(_et(2026, 6, 24, 16, 30), None)[0] is False
+
+
+def test_checkpoint_due_last_slot_before_close():
+    """15:30–15:59 is the final fire-able slot inside RTH."""
+    assert scheduler.checkpoint_due(_et(2026, 6, 24, 15, 30), None)[0] is True
+    assert scheduler.checkpoint_due(_et(2026, 6, 24, 15, 59), None)[0] is True
+
+
+def test_checkpoint_not_due_on_weekend():
+    # 2026-06-27 is a Saturday, 2026-06-28 a Sunday.
+    assert scheduler.checkpoint_due(_et(2026, 6, 27, 11, 0), None)[0] is False
+    assert scheduler.checkpoint_due(_et(2026, 6, 28, 11, 0), None)[0] is False
+
+
+def test_checkpoint_slot_key_passthrough_when_not_due():
+    """When not due, the passed-in slot key is returned unchanged."""
+    assert scheduler.checkpoint_due(_et(2026, 6, 24, 8, 0), "prev")[1] == "prev"
+    assert scheduler.checkpoint_due(_et(2026, 6, 27, 11, 0), "prev")[1] == "prev"
+
+
+def test_checkpoint_due_next_day_new_slot_key():
+    """A slot index repeats day-to-day, but the date-prefixed key differs → due."""
+    _, ts_wed = scheduler.checkpoint_due(_et(2026, 6, 24, 10, 0), None)
+    due_thu, ts_thu = scheduler.checkpoint_due(_et(2026, 6, 25, 10, 0), ts_wed)
+    assert due_thu is True
+    assert ts_thu != ts_wed
+
+
+# ── should_rearm ─────────────────────────────────────────────────────────────
+
+
+def test_should_rearm_clears_stale_halt():
+    assert scheduler.should_rearm(
+        {"halted": True, "halted_date": "2026-06-23"}, "2026-06-24") is True
+
+
+def test_should_rearm_keeps_same_day_halt():
+    assert scheduler.should_rearm(
+        {"halted": True, "halted_date": "2026-06-24"}, "2026-06-24") is False
+
+
+def test_should_rearm_noop_when_not_halted():
+    assert scheduler.should_rearm({"halted": False}, "2026-06-24") is False
+
+
+def test_should_rearm_missing_date_is_noop():
+    """A halt with no recorded date can't be proven stale → don't re-arm."""
+    assert scheduler.should_rearm({"halted": True, "halted_date": None}, "2026-06-24") is False
+    assert scheduler.should_rearm({"halted": True}, "2026-06-24") is False
