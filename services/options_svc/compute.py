@@ -203,6 +203,25 @@ def driver_account_view() -> dict:
             "has_account": has_driver_account()}
 
 
+def driver_account_perf() -> dict:
+    """Performance scorecard over the driver account (driver_perf.build_scorecard).
+    Defensive → an empty scorecard on any failure."""
+    import paper_account_db
+    import paper_engine
+
+    from services.options_svc import driver_perf
+
+    try:
+        positions = paper_account_db.fetch_all_positions(DRIVER_PAPER_DB)
+    except Exception:
+        positions = []
+    try:
+        snapshot = paper_engine.account_snapshot(DRIVER_PAPER_DB)
+    except Exception:
+        snapshot = {}
+    return driver_perf.build_scorecard(positions, snapshot)
+
+
 def run_entry_cycle() -> None:
     """Run the paper auto-entry cycle: scan open captured signals, open positions.
 

@@ -18,3 +18,11 @@ def test_ensure_and_view_driver_account(tmp_path, monkeypatch):
     assert v["snapshot"]["cash"] == 25000.0
     assert v["snapshot"]["session_pnl"] == 0.0
     assert v["positions"] == [] and v["snapshot"]["open_count"] == 0
+
+
+def test_driver_account_perf_reads_db(tmp_path, monkeypatch):
+    db = tmp_path / "driver.db"
+    monkeypatch.setattr(compute, "DRIVER_PAPER_DB", db)
+    compute.ensure_driver_account()
+    perf = compute.driver_account_perf()
+    assert perf["total_trades"] == 0 and perf["win_rate"] == 0.0
