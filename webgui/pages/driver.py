@@ -163,6 +163,127 @@ _PERF_COLS = [
 ]
 
 
+# ── autonomous monitor: pure builders (Phase 7) ──────────────────────────────
+# The repurposed page reads ``cache:driver:autonomous`` (AutonomousState) +
+# ``cache:driver:control`` (DriverControl) and surfaces: day-P&L-vs-target
+# progress, the control state, the open driver positions, and the per-checkpoint
+# decision log. Control colors for the master-switch state.
+CONTROL_OFF_COLOR = "#888888"       # disabled — autonomous off
+CONTROL_ACTIVE_COLOR = "#1D9E75"    # enabled, running
+CONTROL_HALTED_COLOR = "#BA7517"    # latched halt (banked / loss cap / VIX / STOP)
+
+
+def target_progress(day_pnl, target):
+    """Fraction of the daily target banked, clamped to [0, 1].
+
+    ``None`` day P&L (no fills yet) or a non-positive target → 0.0 (never /0).
+    A red day clamps to 0.0; banking past the target clamps to 1.0.
+    """
+    try:
+        if day_pnl is None or not target or float(target) <= 0:
+            return 0.0
+        return max(0.0, min(1.0, float(day_pnl) / float(target)))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def target_text(day_pnl, target):
+    """``'+$250.00 / $500.00'`` — banked day P&L over the target."""
+    tgt = "—" if target is None else f"${float(target):,.2f}"
+    return f"{_money(day_pnl)} / {tgt}"
+
+
+def control_state_label(control):
+    """One-line human label for the autonomous master-switch state.
+
+    ``DISABLED — autonomous off`` (default) · ``ACTIVE — autonomous running`` ·
+    ``HALTED — <reason>`` (latched within the day; Enable re-arms it).
+    """
+    control = control or {}
+    if not control.get("enabled"):
+        return "DISABLED — autonomous off"
+    if control.get("halted"):
+        return f"HALTED — {control.get('reason') or 'stopped'}"
+    return "ACTIVE — autonomous running"
+
+
+def control_state_color(control):
+    """Hex color matching :func:`control_state_label` (off/active/halted)."""
+    control = control or {}
+    if not control.get("enabled"):
+        return CONTROL_OFF_COLOR
+    if control.get("halted"):
+        return CONTROL_HALTED_COLOR
+    return CONTROL_ACTIVE_COLOR
+
+
+def decision_log_rows(decisions):
+    """Normalize the newest-first checkpoint audit log into render-ready rows.
+
+    Each source row (from ``AutonomousState.decisions``) is sparse:
+    ``{ts, thesis, stand_down, executed:[{id,symbol,qty,rationale}],
+    rejected:[{id,reason}], halted, halt_reason}``. Missing fields default
+    safely so a stand-down / halt row renders cleanly.
+    """
+    out = []
+    for d in decisions or []:
+        d = d or {}
+        out.append({
+            "ts": d.get("ts", ""),
+            "thesis": d.get("thesis", ""),
+            "stand_down": bool(d.get("stand_down", False)),
+            "executed": list(d.get("executed") or []),
+            "rejected": list(d.get("rejected") or []),
+            "halted": bool(d.get("halted", False)),
+            "halt_reason": d.get("halt_reason"),
+        })
+    return out
+
+
+def decision_summary(row):
+    """A compact one-line summary of a single decision-log row's outcome."""
+    row = row or {}
+    if row.get("halted"):
+        return f"HALTED — {row.get('halt_reason') or 'stopped'}"
+    executed = row.get("executed") or []
+    rejected = row.get("rejected") or []
+    if not executed:
+        base = "Stood down — no trades" if row.get("stand_down") else "No trades executed"
+    else:
+        legs = ", ".join(
+            f"{t.get('symbol', '?')}×{t.get('qty', '?')}" for t in executed)
+        base = f"Executed {len(executed)}: {legs}"
+    if rejected:
+        base += f" · {len(rejected)} rejected"
+    return base
+
+
+def position_rows(positions):
+    """Table rows for the open driver-positions panel (P&L pre-formatted, signed)."""
+    rows = []
+    for p in positions or []:
+        p = p or {}
+        rows.append({
+            "position_id": p.get("position_id", ""),
+            "symbol": p.get("symbol", ""),
+            "strategy": p.get("strategy", ""),
+            "quantity": p.get("quantity", ""),
+            "pnl": _money(p.get("unrealized_pnl")),
+            "status": p.get("status", ""),
+        })
+    return rows
+
+
+_POSITION_COLS = [
+    {"name": "position_id", "label": "ID", "field": "position_id", "align": "left"},
+    {"name": "symbol", "label": "Symbol", "field": "symbol", "align": "left"},
+    {"name": "strategy", "label": "Strat", "field": "strategy"},
+    {"name": "quantity", "label": "Qty", "field": "quantity"},
+    {"name": "pnl", "label": "P&L", "field": "pnl"},
+    {"name": "status", "label": "Status", "field": "status"},
+]
+
+
 def render():
     """Driver page: approval queue (run/approve/skip) + performance view."""
     ui.label("Claude Driver").classes("text-h5")

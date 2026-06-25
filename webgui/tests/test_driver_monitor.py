@@ -1,0 +1,154 @@
+"""Tests for the Driver page autonomous-monitor pure builders.
+
+Phase 7 (autonomous driver) adds a MONITOR section to the existing approval-queue
+``/driver`` page: a target-progress proxy, a control-state label, the open
+driver-positions table rows, and the per-checkpoint decision log. These are the
+unit-tested pure transforms; the ``render`` wiring is smoke-covered by the shell
+suite (and ``test_render_is_callable`` in ``test_driver.py``).
+"""
+from pages import driver
+
+
+# ── target_progress ──────────────────────────────────────────────────────────
+def test_target_progress_fraction():
+    assert driver.target_progress(250, 500) == 0.5
+    assert driver.target_progress(0, 500) == 0.0
+    assert driver.target_progress(125, 500) == 0.25
+
+
+def test_target_progress_clamps_to_unit_interval():
+    assert driver.target_progress(600, 500) == 1.0      # banked past target → clamp high
+    assert driver.target_progress(-100, 500) == 0.0     # in the red → clamp low
+
+
+def test_target_progress_handles_none_and_zero_target():
+    assert driver.target_progress(None, 500) == 0.0     # no P&L yet
+    assert driver.target_progress(250, 0) == 0.0        # no/zero target → avoid /0
+    assert driver.target_progress(250, None) == 0.0
+
+
+# ── control_state_label ──────────────────────────────────────────────────────
+def test_control_label_disabled():
+    label = driver.control_state_label({"enabled": False, "halted": False})
+    assert label != ""
+    assert "disabled" in label.lower() and "off" in label.lower()
+
+
+def test_control_label_active():
+    label = driver.control_state_label({"enabled": True, "halted": False})
+    assert "active" in label.lower() and "running" in label.lower()
+
+
+def test_control_label_halted_includes_reason():
+    label = driver.control_state_label(
+        {"enabled": True, "halted": True, "reason": "Target reached"})
+    assert "halted" in label.lower()
+    assert "Target reached" in label
+
+
+def test_control_label_halted_without_reason_is_safe():
+    label = driver.control_state_label({"enabled": True, "halted": True})
+    assert "halted" in label.lower()
+
+
+def test_control_label_none_is_disabled():
+    # An absent/empty control payload reads as the safe default (disabled/off).
+    assert "disabled" in driver.control_state_label({}).lower()
+    assert "disabled" in driver.control_state_label(None).lower()
+
+
+# ── control_state_color ──────────────────────────────────────────────────────
+def test_control_state_color_distinguishes_states():
+    off = driver.control_state_color({"enabled": False, "halted": False})
+    on = driver.control_state_color({"enabled": True, "halted": False})
+    halted = driver.control_state_color({"enabled": True, "halted": True})
+    assert off and on and halted
+    assert on != off and halted != on   # three visually distinct states
+
+
+# ── decision_log_rows ────────────────────────────────────────────────────────
+def test_decision_log_rows_surfaces_fields():
+    rows = driver.decision_log_rows([{
+        "ts": "2026-06-24T10:00:00", "thesis": "bull", "stand_down": False,
+        "executed": [{"id": "m0", "symbol": "QQQ", "qty": 2, "rationale": "high pop"}],
+        "rejected": [{"id": "m9", "reason": "off-menu"}],
+        "halted": False, "halt_reason": None,
+    }])
+    assert rows and rows[0]["thesis"] == "bull"
+    assert rows[0]["ts"] == "2026-06-24T10:00:00"
+    assert rows[0]["stand_down"] is False
+    assert rows[0]["executed"][0]["symbol"] == "QQQ"
+    assert rows[0]["rejected"][0]["reason"] == "off-menu"
+    assert rows[0]["halted"] is False
+
+
+def test_decision_log_rows_handles_none_and_empty():
+    assert driver.decision_log_rows(None) == []
+    assert driver.decision_log_rows([]) == []
+
+
+def test_decision_log_rows_tolerates_sparse_dicts():
+    rows = driver.decision_log_rows([{"thesis": "stand down"}])
+    r = rows[0]
+    assert r["thesis"] == "stand down"
+    assert r["ts"] == ""
+    assert r["stand_down"] is False
+    assert r["executed"] == [] and r["rejected"] == []
+    assert r["halted"] is False and r["halt_reason"] is None
+
+
+def test_decision_log_rows_halt_row():
+    rows = driver.decision_log_rows([{
+        "ts": "t", "thesis": "", "stand_down": True, "executed": [], "rejected": [],
+        "halted": True, "halt_reason": "VIX 26.0 > 25 — no new entries.",
+    }])
+    assert rows[0]["halted"] is True
+    assert "VIX" in rows[0]["halt_reason"]
+
+
+# ── decision_summary (one-line per log row) ──────────────────────────────────
+def test_decision_summary_executed_and_rejected():
+    txt = driver.decision_summary({
+        "stand_down": False, "halted": False,
+        "executed": [{"symbol": "QQQ", "qty": 2}, {"symbol": "SPX", "qty": 1}],
+        "rejected": [{"id": "m9", "reason": "off-menu"}],
+    })
+    assert "QQQ" in txt and "2" in txt
+    assert "reject" in txt.lower()
+
+
+def test_decision_summary_stand_down():
+    assert "stood down" in driver.decision_summary(
+        {"stand_down": True, "executed": [], "rejected": []}).lower()
+
+
+def test_decision_summary_halted():
+    txt = driver.decision_summary(
+        {"halted": True, "halt_reason": "Target reached", "executed": [], "rejected": []})
+    assert "halt" in txt.lower() and "Target reached" in txt
+
+
+# ── position_rows ────────────────────────────────────────────────────────────
+def test_position_rows_formats_pnl():
+    rows = driver.position_rows([
+        {"position_id": 7, "symbol": "QQQ", "strategy": "PCS",
+         "quantity": 2, "unrealized_pnl": 45.0, "status": "OPEN"},
+    ])
+    assert rows[0]["symbol"] == "QQQ"
+    assert rows[0]["strategy"] == "PCS"
+    assert rows[0]["quantity"] == 2
+    assert rows[0]["pnl"] == "+$45.00"
+    assert rows[0]["status"] == "OPEN"
+
+
+def test_position_rows_handles_none_and_missing():
+    assert driver.position_rows(None) == []
+    rows = driver.position_rows([{"symbol": "SPX"}])
+    assert rows[0]["symbol"] == "SPX"
+    assert rows[0]["pnl"] == "—"        # missing unrealized_pnl → dash
+
+
+def test_target_text_signed():
+    assert driver.target_text(250.0, 500.0) == "+$250.00 / $500.00"
+    assert driver.target_text(None, 500.0) == "—  / $500.00" or \
+        "500" in driver.target_text(None, 500.0)
