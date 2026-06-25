@@ -598,6 +598,18 @@ the repo root + `webgui` on `sys.path` for tests. The proxy client is
 > same trap (e.g. `notifier`); prefer importing engine deps eagerly at module
 > load (binds the name once) and/or wrap lazy engine calls similarly.
 
+> **Stdlib collisions via the script-launch path (IMPORTANT, bitten us 2026-06-24).**
+> A service's OWN dir lands on `sys.path` when its `app.py` runs **as a script**
+> (`python services/<svc>/app.py`), so a module there named after a **Python stdlib
+> module** shadows it process-wide. `services/driver_svc/secrets.py` (an API-key
+> resolver) shadowed the stdlib `secrets`, so starlette's `from secrets import
+> token_hex` (pulled in by FastAPI) crashed `driver_svc` **on launch** — but NOT in
+> tests (pytest runs from the repo root, a different `sys.path`, so the suite was
+> green while the service couldn't start). Fixed by renaming it to `api_keys.py`;
+> `driver_svc/tests/test_api_keys.py::test_no_module_shadows_stdlib` now guards every
+> service module name against `sys.stdlib_module_names`. **Rule:** never name a
+> service module after a stdlib module (`secrets`/`token`/`types`/`queue`/`select`/…).
+
 **Structure for testability.** Keep pure transforms/figure-builders as
 module-level functions (TDD them with sample dicts); keep `render()` thin
 (widgets + wiring). Heavy/blocking engine calls go through
@@ -1064,7 +1076,7 @@ at +$500, hard-capped on the downside) — no decision-maker can guarantee it. P
   Exhaustively unit-tested.
 - **Decider** `decider.py`: `build_packet`'s model-facing prompt + a forced
   `submit_decision` tool-use call to **Claude Opus 4.8** (`anthropic` SDK, LAZY import,
-  key via `secrets.anthropic_api_key()` — env / gitignored `shared/anthropic_key.txt`);
+  key via `api_keys.anthropic_api_key()` — env / gitignored `shared/anthropic_key.txt`);
   `parse_decision` is total over adversarial JSON and **every failure → stand-down**
   (never raises, never trades blind).
 - **Compute**: `build_packet` (top-N composite-scored menu + day-P&L gap-to-target +

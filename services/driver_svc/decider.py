@@ -30,7 +30,7 @@ tool-use surface this mirrors.
 """
 import json
 
-from services.driver_svc import secrets, settings
+from services.driver_svc import api_keys, settings
 
 # The tool the model must call exactly once. ``tool_choice`` (in ``decide``) forces
 # this tool, so the model's whole reply is a single ``submit_decision`` tool_use
@@ -167,7 +167,7 @@ def _make_client():
     without the SDK installed. Returns ``None`` when the API key is unset — the
     caller then stands down rather than calling a non-existent client.
     """
-    key = secrets.anthropic_api_key()
+    key = api_keys.anthropic_api_key()
     if not key:
         return None
     import anthropic
