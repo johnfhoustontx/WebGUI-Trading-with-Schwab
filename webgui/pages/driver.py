@@ -291,6 +291,30 @@ def position_rows(positions):
     return rows
 
 
+def paper_summary(paper_view):
+    """Live paper-account P&L from ``cache:options:paper_account`` (the truthful source).
+
+    The driver executes into the options paper account (via the ``paper_create``
+    command), so THIS is the real, live P&L — it moves as the options service
+    reprices (every ~5 min) and is correct whether or not the autonomous decision
+    loop is enabled. The monitor reads it directly rather than the autonomy-gated
+    ``cache:driver:autonomous`` snapshot (which is only published while a cycle runs).
+    Defensive: a missing snapshot / no account → ``has_account`` False, None values.
+    """
+    pv = paper_view or {}
+    snap = pv.get("snapshot")
+    has_account = bool(pv.get("has_account")) and snap is not None
+    snap = snap or {}
+    return {
+        "has_account": has_account,
+        "session_pnl": snap.get("session_pnl"),
+        "realized_pnl": snap.get("realized_pnl"),
+        "open_unrealized": snap.get("open_unrealized"),
+        "equity": snap.get("equity"),
+        "open_count": snap.get("open_count", 0),
+    }
+
+
 _POSITION_COLS = [
     {"name": "position_id", "label": "ID", "field": "position_id", "align": "left"},
     {"name": "symbol", "label": "Symbol", "field": "symbol", "align": "left"},
@@ -311,6 +335,7 @@ def render():
     state = {
         "appr": None, "appr_ver": None, "perf": None, "perf_ver": None,
         "auto": None, "auto_ver": None, "ctrl": None, "ctrl_ver": None,
+        "paper": None, "paper_ver": None,
     }
 
     # ── Autonomous monitor + override (Phase 7) ───────────────────────────────
@@ -330,6 +355,9 @@ def render():
     approval = ui.column().classes("w-full gap-3")
     ui.separator()
     ui.label("Performance").classes("text-h6")
+    ui.label("Morning-agent / order-executor ledger (trade_log.json) — a separate "
+             "record from the live paper-account P&L shown in the monitor above.") \
+        .classes("text-xs opacity-50")
     perf_summary = ui.label("").classes("text-sm opacity-80")
     perf_table = ui.table(columns=_PERF_COLS, rows=[], row_key="trade_id") \
         .classes("w-full").props("dense")
@@ -380,6 +408,8 @@ def render():
         monitor.clear()
         auto = state["auto"] or {}
         ctrl = state["ctrl"] or {}
+        paper = state["paper"] or {}
+        psum = paper_summary(paper)
         # Control derives from the dedicated control key when present, else falls
         # back to the autonomous view's mirrored flags (both are published by the
         # service; control is the authoritative switch).
@@ -388,7 +418,11 @@ def render():
                              "reason": auto.get("halt_reason")}
         enabled = bool(ctrl_view.get("enabled"))
         halted = bool(ctrl_view.get("halted"))
-        day_pnl = auto.get("day_pnl")
+        # Day P&L = the LIVE paper-account session P&L (the truthful source — the
+        # driver trades into the paper account, so it moves as the options service
+        # reprices, whether or not the autonomous loop is enabled). Fall back to the
+        # autonomous snapshot only when the paper account isn't cached yet.
+        day_pnl = psum["session_pnl"] if psum["has_account"] else auto.get("day_pnl")
         target = auto.get("target", 500.0)
 
         with monitor:
@@ -423,20 +457,34 @@ def render():
                         .classes("flex-1").props("rounded")
                     ui.label(target_text(day_pnl, target)) \
                         .classes("text-sm text-weight-medium")
+                # Live paper-account P&L summary (the truthful, always-current numbers).
+                if psum["has_account"]:
+                    with ui.row().classes("items-center gap-4 flex-wrap"):
+                        for lbl, val in (("Session P&L", _money(psum["session_pnl"])),
+                                         ("Realized", _money(psum["realized_pnl"])),
+                                         ("Open P&L", _money(psum["open_unrealized"])),
+                                         ("Equity", _money(psum["equity"])),
+                                         ("Open", str(psum["open_count"]))):
+                            with ui.column().classes("gap-0"):
+                                ui.label(lbl).classes("text-xs opacity-60")
+                                ui.label(val).classes("text-sm text-weight-medium")
                 if halted and ctrl_view.get("reason"):
                     ui.label(f"Halt: {ctrl_view['reason']}") \
                         .classes("text-xs text-amber-9")
 
-            # Open driver positions.
-            positions = auto.get("positions") or []
+            # Open positions — the LIVE paper account (where the driver trades),
+            # falling back to the autonomous snapshot only if the paper account
+            # isn't cached yet.
+            positions = (paper.get("positions") if psum["has_account"]
+                         else auto.get("positions")) or []
             with ui.card().classes("w-full gap-2"):
-                ui.label(f"Open driver positions ({len(positions)})") \
+                ui.label(f"Open positions ({len(positions)})") \
                     .classes("text-subtitle2 opacity-70")
                 if positions:
                     ui.table(columns=_POSITION_COLS, rows=position_rows(positions),
                              row_key="position_id").classes("w-full").props("dense")
                 else:
-                    ui.label("No open driver positions.").classes("text-xs opacity-50")
+                    ui.label("No open positions.").classes("text-xs opacity-50")
 
             # Decision log (per-checkpoint thesis + executed/rejected + halt).
             log = decision_log_rows(auto.get("decisions"))
@@ -557,14 +605,20 @@ def render():
     # ── version-poll repaint (fetch-free) ─────────────────────────────────────
     @guard
     def _poll():
-        # Autonomous monitor + control: repaint when either view advances.
+        # Monitor: repaint when the autonomous view, the control key, OR the live
+        # paper account advances (the paper account drives the live P&L + positions,
+        # so the P&L updates even with the autonomous loop disabled).
         avv = bus_client.read_version("driver:autonomous")
         cvv = bus_client.read_version("driver:control")
-        if avv != state["auto_ver"] or cvv != state["ctrl_ver"]:
+        ppv = bus_client.read_version("options:paper_account")
+        if (avv != state["auto_ver"] or cvv != state["ctrl_ver"]
+                or ppv != state["paper_ver"]):
             state["auto_ver"] = avv
             state["ctrl_ver"] = cvv
+            state["paper_ver"] = ppv
             state["auto"] = bus_client.read("driver:autonomous") or None
             state["ctrl"] = bus_client.read("driver:control") or None
+            state["paper"] = bus_client.read("options:paper_account") or None
             _render_monitor()
         av = bus_client.read_version("driver:approvals")
         if av != state["appr_ver"]:
@@ -583,6 +637,8 @@ def render():
     state["auto"] = bus_client.read("driver:autonomous") or None
     state["ctrl_ver"] = bus_client.read_version("driver:control")
     state["ctrl"] = bus_client.read("driver:control") or None
+    state["paper_ver"] = bus_client.read_version("options:paper_account")
+    state["paper"] = bus_client.read("options:paper_account") or None
     state["appr_ver"] = bus_client.read_version("driver:approvals")
     state["appr"] = bus_client.read("driver:approvals") or None
     state["perf_ver"] = bus_client.read_version("driver:performance")

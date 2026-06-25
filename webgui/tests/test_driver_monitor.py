@@ -163,6 +163,28 @@ def test_position_rows_handles_none_and_missing():
     assert rows[0]["pnl"] == "—"        # missing unrealized_pnl → dash
 
 
+# ── paper_summary (live paper-account P&L, the truthful source) ──────────────
+def test_paper_summary_extracts_live_pnl():
+    """paper_summary pulls the live P&L from the cache:options:paper_account snapshot
+    (where the driver actually trades via paper_create), so the monitor shows real
+    P&L whether or not the autonomous loop is running."""
+    pv = {"has_account": True, "snapshot": {
+        "session_pnl": 5.0, "realized_pnl": 12.5, "open_unrealized": -3.0,
+        "equity": 25014.5, "open_count": 2}, "positions": []}
+    s = driver.paper_summary(pv)
+    assert s["has_account"] is True
+    assert s["session_pnl"] == 5.0 and s["realized_pnl"] == 12.5
+    assert s["open_unrealized"] == -3.0 and s["equity"] == 25014.5
+    assert s["open_count"] == 2
+
+
+def test_paper_summary_no_account_is_safe():
+    assert driver.paper_summary(None)["has_account"] is False
+    assert driver.paper_summary({})["has_account"] is False
+    s = driver.paper_summary({"has_account": True, "snapshot": None})
+    assert s["has_account"] is False and s["session_pnl"] is None
+
+
 def test_target_text_signed():
     assert driver.target_text(250.0, 500.0) == "+$250.00 / $500.00"
     assert driver.target_text(None, 500.0) == "—  / $500.00" or \
@@ -206,6 +228,35 @@ def test_render_monitor_from_seeded_autonomous_state():
     })
     with ui.card():
         driver.render()  # must not raise with populated views
+
+
+def test_render_monitor_shows_live_paper_pnl_when_autonomy_off():
+    """The monitor's Day P&L + positions come from the LIVE paper account
+    (cache:options:paper_account) even when autonomy is OFF — the reported bug.
+
+    With autonomy never enabled there is no cache:driver:autonomous, so the old
+    code showed "—" forever; the P&L must instead come from the paper account the
+    driver actually trades into (and update as it reprices)."""
+    from nicegui import ui
+
+    bus_client.reset()  # no driver:control / driver:autonomous → autonomy never enabled
+    bus_client.bus().cache_set("cache:options:paper_account", {
+        "has_account": True,
+        "snapshot": {"session_pnl": 5.0, "realized_pnl": -333.0, "open_unrealized": 5.0,
+                     "equity": 24672.0, "open_count": 2, "halted": False},
+        "positions": [
+            {"position_id": 1, "symbol": "INTC", "strategy": "PCS", "quantity": 1,
+             "unrealized_pnl": -11.0, "status": "OPEN"},
+            {"position_id": 2, "symbol": "SPY", "strategy": "CCS", "quantity": 1,
+             "unrealized_pnl": 16.0, "status": "OPEN"}],
+    })
+    pv = bus_client.read("options:paper_account")
+    s = driver.paper_summary(pv)
+    assert s["has_account"] and s["session_pnl"] == 5.0 and s["open_count"] == 2
+    assert driver.target_text(s["session_pnl"], 500.0) == "+$5.00 / $500.00"
+    assert [r["symbol"] for r in driver.position_rows(pv.get("positions"))] == ["INTC", "SPY"]
+    with ui.card():
+        driver.render()  # must not raise; the monitor paints from the paper account
 
 
 def test_page_imports_no_engine_or_services():
