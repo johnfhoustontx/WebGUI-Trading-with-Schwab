@@ -1,0 +1,124 @@
+"""The decision layer: build the prompt, call Claude (tool-use), parse the result.
+
+This is the LLM half of the autonomous driver. ``guardrails.py`` is the
+code-authoritative safety core; THIS module is the (deliberately untrusted)
+decision engine that *proposes* trades for the guardrails to then validate and
+clamp. Because the model is never trusted, the entire failure surface of this
+module collapses to a single safe outcome — **stand down** — so a missing key, a
+network error, a malformed tool payload, or a hallucinated trade can never cause
+a bad trade; it just causes no trade.
+
+Three pieces:
+
+* ``parse_decision`` — robustly normalize whatever the model returned into the
+  canonical ``{stand_down, day_thesis, confidence, trades:[{id, quantity,
+  rationale}]}`` shape. Tolerant of every malformed input (non-dict, trades not a
+  list, id-less or non-dict trade items, non-numeric quantity/confidence): a bad
+  shape degrades to a stand-down, it never raises.
+* ``build_messages`` / ``system_prompt`` — embed the decision packet and state the
+  mandate (strategy-agnostic; pick ONLY from the menu; quantities are ceilings the
+  code re-clamps; standing down is a valid, encouraged decision; prefer high
+  composite score / PoP; call the tool exactly once).
+* ``decide`` — the single-shot Anthropic tool-use call. The client is injected (a
+  fake in tests, the real ``anthropic.Anthropic`` in production), and ANY failure
+  returns ``parse_decision(None)`` (a stand-down) — ``decide`` never raises.
+
+The ``anthropic`` import is intentionally LAZY (inside ``_make_client``) so the
+test suite can import this module without the SDK installed and drive ``decide``
+with an injected fake client. See @claude-api for the exact ``messages.create`` /
+tool-use surface this mirrors.
+"""
+from services.driver_svc import secrets, settings
+
+# The tool the model must call exactly once. ``tool_choice`` (in ``decide``) forces
+# this tool, so the model's whole reply is a single ``submit_decision`` tool_use
+# block whose ``input`` ``parse_decision`` then normalizes. The schema documents
+# the shape for the model; CODE (not the schema) is the real safety boundary.
+DECISION_TOOL = {
+    "name": "submit_decision",
+    "description": "Submit the trade decision for this checkpoint.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "stand_down": {"type": "boolean"},
+            "day_thesis": {"type": "string"},
+            "confidence": {"type": "number"},
+            "trades": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string", "description": "menu id from the packet"},
+                        "quantity": {"type": "integer", "minimum": 1},
+                        "rationale": {"type": "string"},
+                    },
+                    "required": ["id", "quantity"],
+                },
+            },
+        },
+        "required": ["stand_down", "trades"],
+    },
+}
+
+
+def _coerce_qty(value) -> int:
+    """A proposed quantity → a positive int, defaulting to 1; never raises.
+
+    The model's quantity is only a CEILING (the guardrails re-clamp it), so a
+    missing / falsy / unparseable / float value defaults to ``1`` rather than
+    rejecting the trade here. ``"4"`` → 4, ``2.9`` → 2, ``0`` / ``None`` /
+    ``"bad"`` → 1. Anything ``< 1`` floors to 1.
+    """
+    try:
+        q = int(float(value))
+    except (TypeError, ValueError):
+        return 1
+    return q if q >= 1 else 1
+
+
+def _coerce_float(value, default=0.0) -> float:
+    """Best-effort float; ``default`` (0.0) on anything unparseable. Never raises."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def parse_decision(raw) -> dict:
+    """Normalize the model's tool output to the canonical decision dict.
+
+    Returns ``{stand_down: bool, day_thesis: str, confidence: float,
+    trades: [{id: str, quantity: int, rationale: str}]}``. Every malformed shape
+    degrades safely (never raises):
+
+    * ``raw`` not a dict (``None`` / list / string / int) → a stand-down.
+    * ``trades`` not a list → no trades.
+    * trade items that aren't dicts, or lack a truthy ``id`` → dropped.
+    * ``quantity`` / ``confidence`` non-numeric → coerced (see ``_coerce_*``).
+
+    ``stand_down`` defaults to ``True`` when no usable trades survived — so a
+    "nothing actionable" reply (or any malformed one) results in no trade.
+    """
+    if not isinstance(raw, dict):
+        return {"stand_down": True, "day_thesis": "", "confidence": 0.0, "trades": []}
+    trades = raw.get("trades")
+    clean = []
+    if isinstance(trades, list):
+        for t in trades:
+            if isinstance(t, dict) and t.get("id"):
+                clean.append({
+                    "id": str(t["id"]),
+                    "quantity": _coerce_qty(t.get("quantity", 1)),
+                    "rationale": str(t.get("rationale", "") or ""),
+                })
+    # Stand down if the model said so OR nothing actionable survived parsing — an
+    # explicit ``stand_down=False`` with zero clean trades is a contradictory /
+    # malformed decision, so we take the safe outcome (no trade) rather than
+    # honoring "don't stand down" when there is nothing to execute.
+    stand_down = bool(raw.get("stand_down", False)) or not clean
+    return {
+        "stand_down": stand_down,
+        "day_thesis": str(raw.get("day_thesis", "") or ""),
+        "confidence": _coerce_float(raw.get("confidence", 0.0)),
+        "trades": clean,
+    }
