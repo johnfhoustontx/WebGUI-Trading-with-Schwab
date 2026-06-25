@@ -558,7 +558,10 @@ def render():
             ui.notify("Enter a symbol first.", type="warning")
             return
         if show_wait and state.get("loading"):
-            return  # a user fetch is already in flight (collapses focusout-then-click)
+            # Collapses the focusout-then-button-click double fire while a fetch is in
+            # flight. (The Fetch button still force-reloads once loading clears — it
+            # bypasses should_load, unlike the Trade page's button-through-dedup.)
+            return
         state["last_loaded"] = sym
         if show_wait:
             state["loading"] = True
