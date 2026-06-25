@@ -67,3 +67,25 @@ def test_clamp_quantity_budget_exactly_one_spread():
 
 def test_clamp_quantity_negative_max_loss():
     assert g.clamp_quantity({"structure": "PCS", "max_loss": -50.0}, 3, 300, 900) == 0
+
+
+# ---------------------------------------------------------------------------
+# Task 2.3 — halt_state
+# ---------------------------------------------------------------------------
+def test_halt_banked_at_target():
+    halted, reason = g.halt_state(day_pnl=520, target=500, daily_max_loss=250, vix=14)
+    assert halted and "target" in reason.lower()
+
+
+def test_halt_loss_cap():
+    halted, reason = g.halt_state(day_pnl=-260, target=500, daily_max_loss=250, vix=14)
+    assert halted and "loss" in reason.lower()
+
+
+def test_halt_vix():
+    halted, reason = g.halt_state(day_pnl=0, target=500, daily_max_loss=250, vix=26)
+    assert halted and "vix" in reason.lower()
+
+
+def test_no_halt_in_normal_range():
+    assert g.halt_state(day_pnl=120, target=500, daily_max_loss=250, vix=15) == (False, None)

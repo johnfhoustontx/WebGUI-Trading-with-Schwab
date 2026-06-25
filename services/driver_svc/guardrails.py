@@ -114,3 +114,28 @@ def clamp_quantity(signal, requested_qty, per_trade_max_risk, remaining_budget) 
     per_trade_cap = math.floor(per_trade_max_risk / ml)
     budget_cap = math.floor(remaining_budget / ml)
     return max(0, min(req, per_trade_cap, budget_cap))
+
+
+def halt_state(day_pnl, target, daily_max_loss, vix, vix_max=25.0):
+    """Whether new entries are halted for the day, and a human-readable reason.
+
+    Returns ``(halted, reason)`` — ``reason`` is ``None`` when not halted. The
+    three conditions are checked in priority order so the reason reflects the
+    dominant cause:
+
+    1. **Banked the target** — ``day_pnl >= target``: the day is done, bank it.
+    2. **Daily loss cap** — ``day_pnl <= -abs(daily_max_loss)``: stop the bleed.
+    3. **VIX ceiling** — ``vix > vix_max``: no new entries in a vol spike.
+
+    A ``None`` ``day_pnl`` (unknown P&L) skips the P&L gates rather than
+    assuming the worst; a ``None`` ``vix`` skips the VIX gate. This only governs
+    *new entries* — existing positions are managed by the options service's
+    paper auto-manage cycle, not here.
+    """
+    if day_pnl is not None and day_pnl >= target:
+        return (True, f"Target reached: ${day_pnl:.0f} ≥ ${target:.0f} — banked for the day.")
+    if day_pnl is not None and day_pnl <= -abs(daily_max_loss):
+        return (True, f"Daily loss cap: ${day_pnl:.0f} ≤ -${abs(daily_max_loss):.0f}.")
+    if vix is not None and vix > vix_max:
+        return (True, f"VIX {vix:.1f} > {vix_max:.0f} — no new entries.")
+    return (False, None)
