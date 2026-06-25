@@ -544,6 +544,9 @@ def test_reprice_captured_tags_rescue_state_and_heat(monkeypatch):
     assert "rescue_state" in row
     assert "heat" in row
     assert isinstance(row["heat"], float)
+    # The live short-leg delta is surfaced on the row so the Rescue board's
+    # "Δ short" column has data for captured signals.
+    assert row["current_short_delta"] == 0.40
 
 
 def test_reprice_captured_escalates_cut_to_tested(monkeypatch):

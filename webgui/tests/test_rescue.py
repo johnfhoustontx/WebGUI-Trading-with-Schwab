@@ -95,6 +95,27 @@ def test_at_risk_rows_captured_cut_included_keyed_by_signal_id():
     assert r["heat"] == 60.0
 
 
+def test_at_risk_rows_pnl_rounded_to_2dp():
+    captured = {"signals": [{
+        "signal_id": "S1", "symbol": "MRVL", "type": "PCS",
+        "short_strike": 285, "long_strike": 280, "expiration": "2026-07-18",
+        "unrealized_pnl": -155.99999999999997, "current_short_delta": -0.3499999,
+        "rescue_state": "critical", "heat": 60.0,
+    }]}
+    r = rescue.at_risk_rows({"positions": []}, captured)[0]
+    assert r["pnl"] == -156.0
+    assert r["short_delta"] == -0.35
+
+
+def test_at_risk_columns_strike_date_no_underlying():
+    fields = [c["field"] for c in rescue.at_risk_columns()]
+    labels = [c["label"] for c in rescue.at_risk_columns()]
+    assert "underlying_vs_short" not in fields   # nonsensical column removed
+    assert "expiration" in fields                # Strike Date uses expiration
+    assert "Strike Date" in labels
+    assert "DTE" not in labels
+
+
 def test_cash_text_credit_debit_zero():
     cr = rescue.cash_text(120.0)
     assert cr["text"] == "+$120"

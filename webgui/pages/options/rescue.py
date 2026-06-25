@@ -116,11 +116,17 @@ def _row_from(src, source, id_field, strategy_field, alt_strategy_field=None):
         "dte": src.get("dte"),
         "expiration": src.get("expiration"),
         "underlying_vs_short": _underlying_vs_short(src),
-        "short_delta": _num(src.get("current_short_delta")),
-        "pnl": _num(src.get("unrealized_pnl")),
+        "short_delta": _round2(_num(src.get("current_short_delta"))),
+        "pnl": _round2(_num(src.get("unrealized_pnl"))),
         "heat": _num(src.get("heat"), 0.0) or 0.0,
         "state": src.get("rescue_state") or "ok",
     }
+
+
+def _round2(v):
+    """Round a float to 2dp (kills binary-float tails like -41.0000000000014);
+    leaves None as None."""
+    return round(v, 2) if isinstance(v, (int, float)) else v
 
 
 def cash_text(value):
@@ -251,11 +257,10 @@ def at_risk_columns():
     """Column defs for the at-risk ui.table."""
     return [
         {"name": "symbol", "label": "Symbol", "field": "symbol", "align": "left"},
-        {"name": "strategy", "label": "Strategy", "field": "strategy", "align": "left"},
+        {"name": "strategy", "label": "Strat", "field": "strategy", "align": "left"},
         {"name": "strikes", "label": "Strikes", "field": "strikes", "align": "left"},
-        {"name": "dte", "label": "DTE", "field": "dte", "align": "right"},
-        {"name": "underlying_vs_short", "label": "Under vs Short",
-         "field": "underlying_vs_short", "align": "left"},
+        {"name": "strike_date", "label": "Strike Date", "field": "expiration",
+         "align": "left"},
         {"name": "short_delta", "label": "Δ short", "field": "short_delta", "align": "right"},
         {"name": "pnl", "label": "P&L", "field": "pnl", "align": "right"},
         {"name": "heat", "label": "Heat", "field": "heat", "align": "right"},
@@ -272,6 +277,17 @@ def _table_rows(rows):
     return out
 
 
+# Sticky table header: the at-risk board's own body scrolls (bounded height) while
+# the column headers stay pinned. Dark bg matches the Quasar dark card.
+_RESCUE_CSS = """
+.rescue-table .q-table__middle { max-height: 72vh; }
+.rescue-table thead tr th {
+  position: sticky; top: 0; z-index: 1;
+  background-color: #1d1d1d;
+}
+"""
+
+
 def render():
     """Render the Rescue page (NiceGUI).
 
@@ -284,6 +300,8 @@ def render():
     from nicegui import ui
 
     from pages.ui_guard import guard
+
+    ui.add_css(_RESCUE_CSS)
 
     # Page state (local closure, not module globals — built per request).
     state: dict = {
@@ -299,33 +317,48 @@ def render():
     # ── waiting-for-service placeholder ──────────────────────────────────────
     waiting = ui.label("Waiting for options service…").classes("opacity-70")
 
-    with ui.column().classes("w-full gap-4") as body:
-        with ui.card().classes("w-full"):
-            ui.label("At-risk positions").classes("text-subtitle1")
-            at_risk_tbl = ui.table(columns=at_risk_columns(), rows=[],
-                                   row_key="id").classes("w-full")
-            # Color the heat cell by zone (same idiom as scanner's composite_score).
-            at_risk_tbl.add_slot("body-cell-heat", r"""
-              <q-td :props="props">
-                <q-badge :style="`background:${props.row._heat_color};color:#111`"
-                         :label="props.value ?? '—'"/>
-              </q-td>
-            """)
-            at_risk_empty = ui.label("No tested or critical positions right now.") \
-                .classes("opacity-70")
+    with ui.row().classes("w-full gap-4 no-wrap items-start") as body:
+        # Left: the at-risk board (shrunk so the rescue menu sits to its right).
+        with ui.column().classes("min-w-0").style("flex: 3 1 0"):
+            with ui.card().classes("w-full"):
+                ui.label("At-risk positions").classes("text-subtitle1")
+                at_risk_tbl = ui.table(columns=at_risk_columns(), rows=[],
+                                       row_key="id").classes("w-full rescue-table")
+                # Color the heat cell by zone (scanner's composite_score idiom).
+                at_risk_tbl.add_slot("body-cell-heat", r"""
+                  <q-td :props="props">
+                    <q-badge :style="`background:${props.row._heat_color};color:#111`"
+                             :label="props.value ?? '—'"/>
+                  </q-td>
+                """)
+                # P&L + Δ short shown with exactly 2 decimals (kill float tails).
+                at_risk_tbl.add_slot("body-cell-pnl", r"""
+                  <q-td :props="props" class="text-right">
+                    {{ props.value == null ? '—' : Number(props.value).toFixed(2) }}
+                  </q-td>
+                """)
+                at_risk_tbl.add_slot("body-cell-short_delta", r"""
+                  <q-td :props="props" class="text-right">
+                    {{ props.value == null ? '—' : Number(props.value).toFixed(2) }}
+                  </q-td>
+                """)
+                at_risk_empty = ui.label("No tested or critical positions right now.") \
+                    .classes("opacity-70")
 
-        with ui.card().classes("w-full"):
-            with ui.row().classes("items-center gap-3 w-full"):
-                advisory_head = ui.label("Select an at-risk position to see rescue options.") \
-                    .classes("text-subtitle1")
-                advisory_spinner = ui.spinner(size="sm")
-                advisory_spinner.set_visibility(False)
-            # Persistent chart present at first render (ESM import-map gotcha):
-            # a minimal payoff placeholder kept around so any later in-place update
-            # works. We keep it lightweight (rationale: don't over-invest).
-            payoff_chart = ui.highchart(_payoff_figure(None)).classes("w-full")
-            payoff_chart.set_visibility(False)
-            cards_col = ui.column().classes("w-full gap-3")
+        # Right: the ranked rescue menu for the selected position.
+        with ui.column().classes("min-w-0").style("flex: 2 1 0"):
+            with ui.card().classes("w-full"):
+                with ui.row().classes("items-center gap-3 w-full"):
+                    advisory_head = ui.label(
+                        "Select an at-risk position to see rescue options.") \
+                        .classes("text-subtitle1")
+                    advisory_spinner = ui.spinner(size="sm")
+                    advisory_spinner.set_visibility(False)
+                # Persistent chart at first render (ESM import-map gotcha): a minimal
+                # payoff placeholder so any later in-place update resolves.
+                payoff_chart = ui.highchart(_payoff_figure(None)).classes("w-full")
+                payoff_chart.set_visibility(False)
+                cards_col = ui.column().classes("w-full gap-3")
 
     # ── at-risk board ────────────────────────────────────────────────────────
     def _render_at_risk():
@@ -501,6 +534,13 @@ def render():
     waiting.set_visibility(_absent)
     body.set_visibility(not _absent)
     _render_at_risk()
+
+    # Opening the page with an empty board → recompute captured marks ("Refresh
+    # Marks") so freshly-CUT signals surface. The version-poll repaints when the
+    # repriced captured view lands. Fires once on load, not on every poll.
+    if not _absent and not at_risk_tbl.rows:
+        bus_client.request("options", {"type": "captured_reprice"})
+        at_risk_empty.text = "No at-risk positions yet — refreshing captured marks…"
 
     ui.timer(2.0, _poll_boards)
     ui.timer(2.0, _poll_advisory)

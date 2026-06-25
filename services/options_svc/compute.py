@@ -477,6 +477,10 @@ def _attach_rescue_assessment(r, rep, mark) -> None:
 
     r["rescue_state"] = state
     r["heat"] = heat
+    # Surface the live short-leg delta on the row so the Rescue board's "Δ short"
+    # column has data for captured signals (the mark merge above doesn't carry it).
+    if rep.get("current_short_delta") is not None:
+        r["current_short_delta"] = rep.get("current_short_delta")
 
 
 def close_captured(signal_id, exit_val: float, reason: str) -> None:
