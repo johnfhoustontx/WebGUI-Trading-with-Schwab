@@ -19,7 +19,7 @@ MAX_CONCURRENT = 6            # max open driver positions
 MAX_TRADES_PER_CYCLE = 3      # max new trades per checkpoint
 VIX_MAX = 25.0               # no new entries above this (mirrors config.VIX_MAX_TRADE)
 MENU_TOP_N = 12              # how many top-scored signals Claude sees
-MODEL = "claude-opus-4-8"
+MODEL = "claude-sonnet-4-6"  # Claude model for the decision call (cheaper than Opus)
 MAX_TOKENS = 2000
 CHECKPOINT_MIN = 30          # intraday re-evaluation cadence (minutes)
 
