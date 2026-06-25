@@ -285,13 +285,25 @@ _POSITION_COLS = [
 
 
 def render():
-    """Driver page: approval queue (run/approve/skip) + performance view."""
+    """Driver page: autonomous monitor + STOP, then legacy approval queue + perf."""
     ui.label("Claude Driver").classes("text-h5")
-    ui.label("Morning-agent order-approval queue. Orders execute via "
-             "order_executor — PAPER_TRADE is enabled, so approvals are "
-             "simulated, not sent to Schwab.").classes("text-xs opacity-60")
+    ui.label("Autonomous PAPER options trader (Claude decides, code-enforced "
+             "guardrails). This page MONITORS what it does and lets you STOP it. "
+             "Paper only — nothing is sent to Schwab.").classes("text-xs opacity-60")
 
-    state = {"appr": None, "appr_ver": None, "perf": None, "perf_ver": None}
+    state = {
+        "appr": None, "appr_ver": None, "perf": None, "perf_ver": None,
+        "auto": None, "auto_ver": None, "ctrl": None, "ctrl_ver": None,
+    }
+
+    # ── Autonomous monitor + override (Phase 7) ───────────────────────────────
+    monitor = ui.column().classes("w-full gap-3")
+
+    ui.separator()
+    with ui.row().classes("items-center gap-3 flex-wrap"):
+        ui.label("Legacy approval queue").classes("text-h6")
+        ui.label("Active only when autonomy is disabled; the morning agent "
+                 "still grades/proposes.").classes("text-xs opacity-50")
 
     with ui.row().classes("items-center gap-3 flex-wrap"):
         run_btn = ui.button("Run morning agent", icon="play_arrow")
@@ -316,6 +328,18 @@ def render():
                       on_click=lambda: (_do("approve", "Approving…"),
                                         confirm_dialog.close()))
 
+    # ── confirm dialog for STOP (latch the kill-switch) ───────────────────────
+    with ui.dialog() as stop_dialog, ui.card():
+        ui.label("STOP the autonomous driver?").classes("text-subtitle1")
+        ui.label("Latches the kill-switch for the rest of today — no new trades "
+                 "will be opened. Open positions keep auto-managing. Enable "
+                 "re-arms it (clears the halt).").classes("text-xs opacity-70")
+        with ui.row().classes("justify-end gap-2 w-full"):
+            ui.button("Cancel", on_click=stop_dialog.close).props("flat")
+            ui.button("STOP", color="negative",
+                      on_click=lambda: (_do("stop", "Stopping…"),
+                                        stop_dialog.close()))
+
     # ── card builders ─────────────────────────────────────────────────────────
     def _conditions_strip(appr):
         with ui.row().classes("items-center gap-4 flex-wrap"):
@@ -333,6 +357,105 @@ def render():
                 ui.label(lines[0]).classes("text-subtitle2 text-weight-bold")
                 for ln in lines[1:]:
                     ui.label(ln).classes("text-sm opacity-80")
+
+    # ── autonomous monitor render (rebuilt in place from cache:driver:*) ───────
+    def _render_monitor():
+        monitor.clear()
+        auto = state["auto"] or {}
+        ctrl = state["ctrl"] or {}
+        # Control derives from the dedicated control key when present, else falls
+        # back to the autonomous view's mirrored flags (both are published by the
+        # service; control is the authoritative switch).
+        ctrl_view = ctrl or {"enabled": auto.get("enabled", False),
+                             "halted": auto.get("halted", False),
+                             "reason": auto.get("halt_reason")}
+        enabled = bool(ctrl_view.get("enabled"))
+        halted = bool(ctrl_view.get("halted"))
+        day_pnl = auto.get("day_pnl")
+        target = auto.get("target", 500.0)
+
+        with monitor:
+            with ui.card().classes("w-full gap-3"):
+                # State banner + master controls.
+                with ui.row().classes("items-center gap-3 flex-wrap w-full"):
+                    ui.label(control_state_label(ctrl_view)) \
+                        .classes("text-weight-bold text-white px-3 py-1 rounded") \
+                        .style(f"background:{control_state_color(ctrl_view)}")
+                    if auto.get("date"):
+                        ui.label(auto["date"]).classes("opacity-60 text-sm")
+                    if auto.get("last_cycle_ts"):
+                        ui.label(f"last cycle {auto['last_cycle_ts']}") \
+                            .classes("opacity-50 text-xs")
+                    ui.space()
+                    # Enable/Disable master toggle (re-arms a prior halt on enable).
+                    sw = ui.switch("Autonomous", value=enabled,
+                                   on_change=_on_toggle)
+                    sw.props("color=positive")
+                    ui.button("Run now", icon="bolt",
+                              on_click=lambda: _do("cycle", "Running a checkpoint…")) \
+                        .props("outline")
+                    ui.button("STOP", icon="stop", color="negative",
+                              on_click=stop_dialog.open) \
+                        .props("unelevated").classes("text-weight-bold")
+
+                # Day-P&L-vs-target progress.
+                with ui.row().classes("items-center gap-3 w-full"):
+                    ui.label("Day P&L").classes("text-xs opacity-60")
+                    ui.linear_progress(value=target_progress(day_pnl, target),
+                                       show_value=False, size="18px") \
+                        .classes("flex-1").props("rounded")
+                    ui.label(target_text(day_pnl, target)) \
+                        .classes("text-sm text-weight-medium")
+                if halted and ctrl_view.get("reason"):
+                    ui.label(f"Halt: {ctrl_view['reason']}") \
+                        .classes("text-xs text-amber-9")
+
+            # Open driver positions.
+            positions = auto.get("positions") or []
+            with ui.card().classes("w-full gap-2"):
+                ui.label(f"Open driver positions ({len(positions)})") \
+                    .classes("text-subtitle2 opacity-70")
+                if positions:
+                    ui.table(columns=_POSITION_COLS, rows=position_rows(positions),
+                             row_key="position_id").classes("w-full").props("dense")
+                else:
+                    ui.label("No open driver positions.").classes("text-xs opacity-50")
+
+            # Decision log (per-checkpoint thesis + executed/rejected + halt).
+            log = decision_log_rows(auto.get("decisions"))
+            with ui.card().classes("w-full gap-2"):
+                ui.label(f"Decision log ({len(log)})") \
+                    .classes("text-subtitle2 opacity-70")
+                if not log:
+                    ui.label("No checkpoints yet — enable autonomy or click "
+                             "“Run now”.").classes("text-xs opacity-50")
+                for row in log:
+                    _decision_card(row)
+
+    def _decision_card(row):
+        halted = row.get("halted")
+        cls = "w-full gap-1"
+        with ui.card().classes(cls):
+            with ui.row().classes("items-center gap-2 flex-wrap"):
+                ui.label(row.get("ts", "")).classes("text-xs opacity-50")
+                if row.get("stand_down"):
+                    ui.label("STAND DOWN").classes("text-xs text-weight-bold "
+                                                   "text-amber-9")
+                if halted:
+                    ui.label("HALTED").classes("text-xs text-weight-bold text-red-9")
+            if row.get("thesis"):
+                ui.label(row["thesis"]).classes("text-sm")
+            ui.label(decision_summary(row)).classes("text-xs opacity-80")
+            for ex in row.get("executed") or []:
+                rat = ex.get("rationale")
+                line = (f"✓ {ex.get('symbol', '?')} ×{ex.get('qty', '?')}"
+                        + (f" — {rat}" if rat else ""))
+                ui.label(line).classes("text-xs text-green-9")
+            for rj in row.get("rejected") or []:
+                ui.label(f"✗ {rj.get('id', '?')} — {rj.get('reason', '')}") \
+                    .classes("text-xs text-red-8 opacity-80")
+            if halted and row.get("halt_reason"):
+                ui.label(row["halt_reason"]).classes("text-xs text-amber-9")
 
     def _render_approval():
         approval.clear()
@@ -402,12 +525,30 @@ def render():
         bus_client.request("driver", {"type": cmd})
         status.text = busy_msg
 
+    @guard
+    def _on_toggle(e):
+        # Master switch: enable re-arms a prior halt (per the service); disable
+        # stands the loop down without latching.
+        if e.value:
+            _do("enable", "Enabling autonomous driver…")
+        else:
+            _do("disable", "Disabling autonomous driver…")
+
     run_btn.on_click(lambda: _do("run", "Running morning agent…"))
     perf_btn.on_click(lambda: _do("perf", "Refreshing performance…"))
 
     # ── version-poll repaint (fetch-free) ─────────────────────────────────────
     @guard
     def _poll():
+        # Autonomous monitor + control: repaint when either view advances.
+        avv = bus_client.read_version("driver:autonomous")
+        cvv = bus_client.read_version("driver:control")
+        if avv != state["auto_ver"] or cvv != state["ctrl_ver"]:
+            state["auto_ver"] = avv
+            state["ctrl_ver"] = cvv
+            state["auto"] = bus_client.read("driver:autonomous") or None
+            state["ctrl"] = bus_client.read("driver:control") or None
+            _render_monitor()
         av = bus_client.read_version("driver:approvals")
         if av != state["appr_ver"]:
             state["appr_ver"] = av
@@ -421,10 +562,15 @@ def render():
             _render_perf()
 
     # Initial paint (graceful-empty when the service is cold / nothing cached).
+    state["auto_ver"] = bus_client.read_version("driver:autonomous")
+    state["auto"] = bus_client.read("driver:autonomous") or None
+    state["ctrl_ver"] = bus_client.read_version("driver:control")
+    state["ctrl"] = bus_client.read("driver:control") or None
     state["appr_ver"] = bus_client.read_version("driver:approvals")
     state["appr"] = bus_client.read("driver:approvals") or None
     state["perf_ver"] = bus_client.read_version("driver:performance")
     state["perf"] = bus_client.read("driver:performance") or None
+    _render_monitor()
     _render_approval()
     _render_perf()
     status.text = status_text(state["appr"])

@@ -152,3 +152,60 @@ def test_target_text_signed():
     assert driver.target_text(250.0, 500.0) == "+$250.00 / $500.00"
     assert driver.target_text(None, 500.0) == "—  / $500.00" or \
         "500" in driver.target_text(None, 500.0)
+
+
+# ── render smoke (monitor section builds without raising) ─────────────────────
+import bus_client  # noqa: E402
+
+
+def test_render_monitor_graceful_empty_cache():
+    """render() paints the monitor without crashing when driver_svc is cold
+    (no cache:driver:autonomous / control) — the Tier-3 graceful-empty path."""
+    from nicegui import ui
+
+    bus_client.reset()  # fresh empty fakeredis cache
+    assert bus_client.read("driver:autonomous") is None
+    with ui.card():
+        driver.render()  # must not raise
+
+
+def test_render_monitor_from_seeded_autonomous_state():
+    """render() builds from a seeded cache:driver:autonomous + control
+    (the Unit-8 live-verification shape: enabled + day P&L + positions + log)."""
+    from nicegui import ui
+
+    bus_client.reset()
+    bus_client.bus().cache_set("cache:driver:control",
+                               {"enabled": True, "halted": False, "reason": None})
+    bus_client.bus().cache_set("cache:driver:autonomous", {
+        "date": "2026-06-24", "enabled": True, "halted": False, "halt_reason": None,
+        "day_pnl": 220.0, "target": 500.0,
+        "positions": [{"position_id": 1, "symbol": "QQQ", "strategy": "PCS",
+                       "quantity": 2, "unrealized_pnl": 30.0, "status": "OPEN"}],
+        "decisions": [{
+            "ts": "2026-06-24T10:00:00", "thesis": "bullish drift", "stand_down": False,
+            "executed": [{"id": "m0", "symbol": "QQQ", "qty": 2, "rationale": "high pop"}],
+            "rejected": [{"id": "m9", "reason": "off-menu"}],
+            "halted": False, "halt_reason": None}],
+        "last_cycle_ts": "2026-06-24T10:00:01",
+    })
+    with ui.card():
+        driver.render()  # must not raise with populated views
+
+
+def test_page_imports_no_engine_or_services():
+    """3-tier rule: the Tier-3 page must not import engine / services / proxy code.
+
+    Guards the import *statements* (prose in the module docstring naturally names
+    ``services/driver_svc`` — that's documentation, not a dependency).
+    """
+    import inspect
+
+    src = inspect.getsource(driver)
+    for forbidden in ("import services", "from services import",
+                      "import proxy", "from proxy import",
+                      "import morning_agent", "import order_executor"):
+        assert forbidden not in src, f"driver.py must not contain `{forbidden}`"
+    # No engine/proxy objects leaked into the page module namespace.
+    for attr in ("proxy", "morning_agent", "order_executor", "compute", "handlers"):
+        assert not hasattr(driver, attr), f"driver.py exposes engine attr {attr!r}"
