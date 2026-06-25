@@ -150,3 +150,103 @@ def test_build_packet_carries_target_and_limits():
     assert pkt["target"] == 500.0
     assert pkt["limits"] == _lim()
     assert pkt["vix"] == 14.0
+
+
+# ---------------------------------------------------------------------------
+# Task 4.2 — run_cycle
+# ---------------------------------------------------------------------------
+def test_run_cycle_returns_executable(monkeypatch):
+    scan = {"signals_0dte": [{"symbol": "QQQ", "type": "PCS", "max_loss": 200,
+                              "composite_score": 80, "credit": 55, "expiration": "2026-06-24"}],
+            "signals_swing": []}
+    paper = {"snapshot": {"session_pnl": 0.0}, "positions": [], "has_account": True}
+    monkeypatch.setattr("services.driver_svc.decider.decide",
+                        lambda packet, **kw: {"stand_down": False,
+                            "day_thesis": "t", "confidence": 0.6,
+                            "trades": [{"id": "m0", "quantity": 1}]})
+    out = compute.run_cycle(scan, paper, target=500.0, limits=_lim(), market={"vix": 14})
+    assert out["executable"][0]["signal"]["symbol"] == "QQQ"
+    assert out["halted"] is False and out["decision"]["day_thesis"] == "t"
+    assert out["day_pnl"] == 0.0
+
+
+def test_run_cycle_defensive_on_explosion(monkeypatch):
+    monkeypatch.setattr("services.driver_svc.decider.decide",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    out = compute.run_cycle({"signals_0dte": [], "signals_swing": []},
+                            {"positions": []}, target=500.0, limits=_lim(), market={})
+    assert out["executable"] == [] and out["decision"]["stand_down"] is True
+    # The shape is always renderable (handler reads these keys unconditionally).
+    for k in ("executable", "rejected", "halted", "halt_reason", "day_pnl",
+              "open_positions", "decision"):
+        assert k in out
+
+
+def test_run_cycle_model_never_sees_menu_by_id(monkeypatch):
+    """The non-JSON ``menu_by_id`` (raw signals) is stripped before the model call."""
+    seen = {}
+    scan = {"signals_0dte": [{"symbol": "QQQ", "type": "PCS", "max_loss": 200,
+                              "composite_score": 80}], "signals_swing": []}
+
+    def _spy(packet, **kw):
+        seen["packet"] = packet
+        return {"stand_down": True, "trades": []}
+
+    monkeypatch.setattr("services.driver_svc.decider.decide", _spy)
+    compute.run_cycle(scan, {"snapshot": {"session_pnl": 0.0}, "positions": []},
+                      target=500.0, limits=_lim(), market={})
+    assert "menu" in seen["packet"]               # the model still gets the menu
+    assert "menu_by_id" not in seen["packet"]     # but NOT the raw-signal mapping
+
+
+def test_run_cycle_halt_blocks_execution(monkeypatch):
+    """A banked-day P&L halts: nothing executes even if the model proposes a trade."""
+    scan = {"signals_0dte": [{"symbol": "QQQ", "type": "PCS", "max_loss": 200,
+                              "composite_score": 80}], "signals_swing": []}
+    paper = {"snapshot": {"session_pnl": 600.0}, "positions": []}   # over target
+    monkeypatch.setattr("services.driver_svc.decider.decide",
+                        lambda packet, **kw: {"stand_down": False, "day_thesis": "x",
+                            "trades": [{"id": "m0", "quantity": 1}]})
+    out = compute.run_cycle(scan, paper, target=500.0, limits=_lim(), market={"vix": 14})
+    assert out["halted"] is True and out["executable"] == []
+    assert out["halt_reason"] and "target" in out["halt_reason"].lower()
+
+
+def test_run_cycle_clamps_quantity(monkeypatch):
+    """The model's quantity is a ceiling; the guardrails clamp to the risk budget."""
+    scan = {"signals_0dte": [{"symbol": "QQQ", "type": "PCS", "max_loss": 200,
+                              "composite_score": 80}], "signals_swing": []}
+    paper = {"snapshot": {"session_pnl": 0.0}, "positions": []}
+    monkeypatch.setattr("services.driver_svc.decider.decide",
+                        lambda packet, **kw: {"stand_down": False, "day_thesis": "x",
+                            "trades": [{"id": "m0", "quantity": 99}]})
+    out = compute.run_cycle(scan, paper, target=500.0, limits=_lim(), market={"vix": 14})
+    # per_trade_max_risk 300 / max_loss 200 -> floor = 1.
+    assert out["executable"][0]["qty"] == 1
+
+
+def test_run_cycle_passes_vix_to_guardrails(monkeypatch):
+    """A high VIX in the market context halts new entries via the guardrails."""
+    scan = {"signals_0dte": [{"symbol": "QQQ", "type": "PCS", "max_loss": 200,
+                              "composite_score": 80}], "signals_swing": []}
+    monkeypatch.setattr("services.driver_svc.decider.decide",
+                        lambda packet, **kw: {"stand_down": False, "day_thesis": "x",
+                            "trades": [{"id": "m0", "quantity": 1}]})
+    out = compute.run_cycle(scan, {"snapshot": {"session_pnl": 0.0}, "positions": []},
+                            target=500.0, limits=_lim(), market={"vix": 30.0})
+    assert out["halted"] is True and "vix" in out["halt_reason"].lower()
+
+
+def test_run_cycle_uses_config_daily_max_loss(monkeypatch):
+    """The daily loss cap is sourced from the legacy config, not hardcoded 250.
+
+    We patch compute._daily_max_loss to a small value and confirm the halt fires at
+    that threshold (proving run_cycle threads the config value into the guardrails).
+    """
+    monkeypatch.setattr(compute, "_daily_max_loss", lambda: 50.0)
+    scan = {"signals_0dte": [], "signals_swing": []}
+    paper = {"snapshot": {"session_pnl": -60.0}, "positions": []}   # past the $50 cap
+    monkeypatch.setattr("services.driver_svc.decider.decide",
+                        lambda packet, **kw: {"stand_down": True, "trades": []})
+    out = compute.run_cycle(scan, paper, target=500.0, limits=_lim(), market={"vix": 14})
+    assert out["halted"] is True and "loss" in out["halt_reason"].lower()

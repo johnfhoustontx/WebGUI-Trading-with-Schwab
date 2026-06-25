@@ -240,3 +240,40 @@ def build_packet(scan_view, paper_view, *, target, limits, market) -> dict:
         "open_count": len(open_positions),
         "limits": limits,
     }
+
+
+def run_cycle(scan_view, paper_view, *, target, limits, market, client=None) -> dict:
+    """Full decision cycle: build_packet → decider.decide → apply_guardrails.
+
+    The per-checkpoint brain a handler (Unit 5) calls. Builds the packet, strips the
+    non-JSON ``menu_by_id`` before handing the packet to the model (the model never
+    sees the raw signals — only the compact menu + its ids), asks the decider, and
+    runs the result through the code-authoritative guardrails (which resolve the ids
+    back to raw signals via ``menu_by_id`` and clamp/reject/halt). The daily loss cap
+    is sourced from the legacy ``config.RISK_LIMITS`` (``_daily_max_loss``) so it can't
+    drift from the old rule tree.
+
+    NEVER raises: any exception anywhere in build/decide/guardrails degrades to a
+    stand-down result with the full renderable shape (the handler reads
+    ``executable`` / ``rejected`` / ``halted`` / ``halt_reason`` / ``day_pnl`` /
+    ``open_positions`` / ``decision`` unconditionally). Returns the guardrails output
+    (``executable`` / ``rejected`` / ``halted`` / ``halt_reason``) merged with
+    ``decision`` (the audit) + ``day_pnl`` + ``open_positions``.
+    """
+    from services.driver_svc import decider
+    try:
+        packet = build_packet(scan_view, paper_view, target=target, limits=limits,
+                              market=market)
+        model_facing = {k: v for k, v in packet.items() if k != "menu_by_id"}
+        decision = decider.decide(model_facing, client=client)
+        guarded = _g.apply_guardrails(
+            decision, packet["menu_by_id"], limits,
+            open_count=packet["open_count"], day_pnl=packet["day_pnl"],
+            vix=packet["vix"], daily_max_loss=_daily_max_loss())
+        return {"decision": decision, "day_pnl": packet["day_pnl"],
+                "open_positions": packet["open_positions"], **guarded}
+    except Exception as exc:  # noqa: BLE001 — the cycle never raises; stand down.
+        return {"decision": {"stand_down": True, "day_thesis": "", "confidence": 0.0,
+                             "trades": [], "error": str(exc)},
+                "executable": [], "rejected": [], "halted": False, "halt_reason": None,
+                "day_pnl": None, "open_positions": []}
