@@ -48,6 +48,10 @@ yfinance                  # still imported by some analysis paths; optional fall
 # --- Scheduling (D) ---
 apscheduler==3.10.4
 
+# --- LLM decision layer (NEW: autonomous driver) ---
+anthropic>=0.40           # Anthropic SDK — Claude tool-use call in driver_svc.decider
+                          # (imported lazily inside decider so the suite needs no install)
+
 # --- Web GUI (NEW: this repo's NiceGUI front-end) ---
 nicegui[highcharts]>=2.0.0   # single multi-page web UI replacing the old Dash/React/Tk UIs.
                              # [highcharts] = optional interactive Highcharts element (ui.highchart,
