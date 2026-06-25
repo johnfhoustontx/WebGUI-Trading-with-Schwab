@@ -1,0 +1,36 @@
+"""Autonomous-driver tunables (v1 defaults; tune on paper).
+
+These are the static knobs for the autonomous decision layer: the daily target,
+the risk envelope the guardrails enforce, the model/token budget for the Claude
+call, and the intraday checkpoint cadence. Kept deliberately separate from the
+legacy claude-driver ``config`` module (which driver_svc also imports) to avoid
+confusion between "the old rule-tree config" and "the new autonomous tunables".
+
+The **runtime-mutable** bits — whether autonomous mode is enabled and whether
+it has halted for the day — live in ``cache:driver:control`` (the
+``DriverControl`` contract), NOT here. This module holds only the fixed v1
+defaults.
+"""
+
+DAILY_TARGET = 500.0          # bank-the-day threshold ($ net day P&L)
+PER_TRADE_MAX_RISK = 300.0    # max $ loss per single spread position
+DAILY_RISK_BUDGET = 900.0     # cap on Σ open driver max-loss
+MAX_CONCURRENT = 6            # max open driver positions
+MAX_TRADES_PER_CYCLE = 3      # max new trades per checkpoint
+VIX_MAX = 25.0               # no new entries above this (mirrors config.VIX_MAX_TRADE)
+MENU_TOP_N = 12              # how many top-scored signals Claude sees
+MODEL = "claude-opus-4-8"
+MAX_TOKENS = 2000
+CHECKPOINT_MIN = 30          # intraday re-evaluation cadence (minutes)
+
+
+def limits() -> dict:
+    """The risk envelope the guardrails enforce (a plain dict for the packet)."""
+    return {
+        "daily_target": DAILY_TARGET,
+        "per_trade_max_risk": PER_TRADE_MAX_RISK,
+        "daily_risk_budget": DAILY_RISK_BUDGET,
+        "max_concurrent": MAX_CONCURRENT,
+        "max_trades_per_cycle": MAX_TRADES_PER_CYCLE,
+        "vix_max": VIX_MAX,
+    }
