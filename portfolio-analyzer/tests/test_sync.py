@@ -78,6 +78,9 @@ class _FakeData:
     def first_account_hash(self):
         return self._account_hash
 
+    def account_hashes(self):
+        return [self._account_hash] if self._account_hash else []
+
     def get_transactions(self, account_hash, start_date, end_date):
         self.get_transactions_calls.append((account_hash, start_date, end_date))
         return list(self._transactions)
@@ -115,8 +118,8 @@ def test_sync_trades_skips_when_already_synced_today():
 
 def test_sync_trades_skips_when_no_account_hash():
     class _NoAccount:
-        def first_account_hash(self):
-            return None
+        def account_hashes(self):
+            return []
 
         def get_transactions(self, *a, **k):  # pragma: no cover
             raise AssertionError("must not be called without an account")
@@ -145,3 +148,38 @@ def test_sync_trades_first_run_uses_lookback_start():
         datetime.date.fromisoformat("2026-06-02") - datetime.timedelta(days=30)
     ).isoformat()
     assert data.get_transactions_calls == [("ABC", expected_start, "2026-06-02")]
+
+
+class _MultiAccountData:
+    """Two linked accounts, each with its own transactions keyed by hash."""
+
+    def __init__(self, by_hash):
+        self._by_hash = by_hash  # {hash: [trade dicts]}
+        self.get_transactions_calls = []
+
+    def account_hashes(self):
+        return list(self._by_hash)
+
+    def first_account_hash(self):  # only the old single-account path used this
+        return next(iter(self._by_hash), None)
+
+    def get_transactions(self, account_hash, start_date, end_date):
+        self.get_transactions_calls.append((account_hash, start_date, end_date))
+        return list(self._by_hash[account_hash])
+
+
+def test_sync_trades_merges_transactions_from_all_accounts():
+    data = _MultiAccountData({
+        "H1": [_trade("a", "2026-06-01")],
+        "H2": [_trade("b", "2026-06-01")],
+    })
+    store = {"last_sync": "2026-05-31", "trades": []}
+    result = sync.sync_trades(data, store, today="2026-06-02")
+    # Trades from BOTH accounts are merged into the store.
+    assert {t["trade_id"] for t in result["trades"]} == {"a", "b"}
+    # Each account was queried over the same window.
+    assert data.get_transactions_calls == [
+        ("H1", "2026-05-31", "2026-06-02"),
+        ("H2", "2026-05-31", "2026-06-02"),
+    ]
+    assert result["last_sync"] == "2026-06-02"

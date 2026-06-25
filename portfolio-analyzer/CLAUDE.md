@@ -32,20 +32,30 @@ OAuth/tokens (the proxy does). It relies on the proxy's `/accounts`,
 method on the relevant client — never reintroduce direct `api.schwabapi.com`
 access or a local token file.
 
+> **Whole-account, not first-account.** Both `/positions` (proxy aggregates +
+> merges every linked account, same-symbol rows folded into one) and the daily
+> **transaction sync** (`sync.py` iterates `data.account_hashes()`) now span **all**
+> linked Schwab accounts — fixed 2026-06-25, when a 2-account user was only seeing
+> the first account's positions. The portfolio is therefore an aggregate book keyed
+> by symbol. Keep new account-scoped Schwab access multi-account (loop
+> `account_hashes()`), not `first_account_hash()`.
+
 ## Architecture (`src/`)
 
 - **`data.py`** — `PortfolioData`, the proxy-backed data client (positions,
   accounts, transactions, daily price history, and the SSE quote-stream
-  consumer `stream_quotes`).
+  consumer `stream_quotes`). `account_hashes()` returns every linked account's
+  hashValue (the multi-account analog of `first_account_hash()`).
 - **`trade_store.py`** — persistent JSON trade store
   (`data/entries.json`): dedupe-by-`trade_id` merge, `last_sync` watermark.
   Pure logic + filesystem, no network.
 - **`trades_import.py`** — one-time CSV bootstrap to seed the trade store with
   historical trades.
 - **`sync.py`** — incremental **daily auto-sync**: on the first launch each day
-  it pulls new trades since `last_sync` from the proxy and merges them in. The
-  decision helpers are pure; `sync_trades` takes the data client by injection so
-  it tests offline.
+  it pulls new trades since `last_sync` from the proxy — **across every linked
+  account** (`data.account_hashes()`) — and merges them in (dedupe by `trade_id`).
+  The decision helpers are pure; `sync_trades` takes the data client by injection
+  so it tests offline.
 - **`live.py`** — pure live-update logic for streamed quotes (`apply_tick`,
   `stream_symbols`, `parse_sse_line`); no network/GUI imports so it unit-tests
   in isolation. The blocking SSE thread lives in `data.py`; the Tk refresh

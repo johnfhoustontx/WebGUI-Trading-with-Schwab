@@ -31,6 +31,14 @@ class PortfolioData:
             return None
         return accounts[0].get("hashValue")
 
+    def account_hashes(self) -> list[str]:
+        """Every linked account's hashValue (empty list if there are none).
+
+        Used by the transaction sync to pull trades from all accounts, mirroring
+        the proxy's ``/positions`` aggregation across the whole linked book.
+        """
+        return [a.get("hashValue") for a in self.get_accounts() if a.get("hashValue")]
+
     def get_transactions(self, account_hash: str, start_date: str, end_date: str) -> list[dict]:
         r = self.session.get(f"{self.base}/transactions/{account_hash}",
                              params={"start_date": start_date, "end_date": end_date}, timeout=30)

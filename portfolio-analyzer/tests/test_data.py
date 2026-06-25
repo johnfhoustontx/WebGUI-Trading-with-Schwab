@@ -34,6 +34,19 @@ def test_first_account_hash_none_when_empty(monkeypatch):
     assert pd_.first_account_hash() is None
 
 
+def test_account_hashes_returns_all(monkeypatch):
+    pd_ = PortfolioData(base_url="http://x")
+    monkeypatch.setattr(pd_.session, "get",
+        lambda *a, **k: _FakeResp([{"hashValue": "ABC"}, {"hashValue": "DEF"}]))
+    assert pd_.account_hashes() == ["ABC", "DEF"]
+
+
+def test_account_hashes_empty_when_no_accounts(monkeypatch):
+    pd_ = PortfolioData(base_url="http://x")
+    monkeypatch.setattr(pd_.session, "get", lambda *a, **k: _FakeResp([]))
+    assert pd_.account_hashes() == []
+
+
 def test_get_daily_history_returns_dataframe(monkeypatch):
     pd_ = PortfolioData(base_url="http://x")
     candles = [

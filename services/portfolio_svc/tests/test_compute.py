@@ -42,6 +42,9 @@ class _FakeData:
     def first_account_hash(self):
         return self._account_hash
 
+    def account_hashes(self):
+        return [self._account_hash] if self._account_hash else []
+
     def get_transactions(self, account_hash, start, end):
         return self._transactions
 

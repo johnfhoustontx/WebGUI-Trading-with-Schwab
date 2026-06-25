@@ -75,8 +75,10 @@ def sync_trades(
     - If no linked account hash is available, returns the store unchanged
       (nothing to sync against).
     - Otherwise requests transactions from :func:`sync_start_date` through
-      ``today``, merges them via :func:`~src.trade_store.update_store`, then
-      explicitly sets ``last_sync = today``.
+      ``today`` **for every linked account**, merges them via
+      :func:`~src.trade_store.update_store` (dedupe by ``trade_id`` — Schwab
+      activity ids are unique per account, so concatenating across accounts is
+      safe), then explicitly sets ``last_sync = today``.
 
     Why force ``last_sync = today`` after the merge: ``update_store`` only bumps
     ``last_sync`` to the max *trade_date* of the merged trades. If today brought
@@ -87,14 +89,16 @@ def sync_trades(
     if not should_sync(store.get("last_sync"), today):
         return store
 
-    account_hash = data.first_account_hash()
-    if account_hash is None:
+    hashes = data.account_hashes()
+    if not hashes:
         return store
 
     start = sync_start_date(
         store.get("last_sync"), today, default_lookback_days=default_lookback_days
     )
-    new = data.get_transactions(account_hash, start, today)
+    new: list = []
+    for account_hash in hashes:
+        new.extend(data.get_transactions(account_hash, start, today))
     store = update_store(store, new)
     # Watermark to today: the sync ran successfully through today even if no new
     # trades (or only older ones) came back. See docstring.

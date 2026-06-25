@@ -19,8 +19,14 @@ sentiment-dashboard, and claude-driver all fetch market data through it.
   `repo_paths.py`).
 - Key endpoints: `/health`, `/quote`, `/quotes`, `/chains`, `/pricehistory`,
   `/instruments` (fundamentals; `projection=fundamental` → P/E, growth, ROE,
-  margins — used by trade_svc), `/accounts`, `/orders/{account_hash}`, and the
-  trade-stream tracker (`/track`, `/untrack`).
+  margins — used by trade_svc), `/accounts`, `/positions`, `/positions/{account_hash}`,
+  `/orders/{account_hash}`, and the trade-stream tracker (`/track`, `/untrack`).
+- **`/positions` aggregates ALL linked accounts** (not just the first): it loops
+  every account hash from `/accounts/accountNumbers`, normalizes each, and folds
+  same-symbol holdings across accounts into one row via `_merge_positions` (sums
+  qty/market-value/P&L, quantity-weights `avg_price`) so a multi-account user sees
+  one whole-account book. A per-account fetch failure is logged and skipped; only a
+  total failure surfaces. `/positions/{account_hash}` still returns a single account.
 
 ## Key files
 
