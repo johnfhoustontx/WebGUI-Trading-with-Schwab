@@ -59,6 +59,13 @@ DASHBOARD_CSS = """
 .calc-v2 .q-field__append .q-icon,.calc-v2 .q-field__prepend .q-icon{color:#8794b4;}
 /* Leg table header row */
 .calc-v2 .leg-head{color:#7f8db0;font-size:12px;padding:0 2px 4px;}
+/* Leg table rows — compact cells (less top/bottom padding, shorter height) and
+   tighter side padding so "call"/"put" are not horizontally clipped. */
+.calc-v2 .leg-row .q-field__control{min-height:32px;padding:0 6px;}
+.calc-v2 .leg-row .q-field__control .q-field__native,
+.calc-v2 .leg-row .q-field__marginal{min-height:32px;padding-top:0;padding-bottom:0;}
+.calc-v2 .leg-row .q-field__append{padding-left:0;}
+.calc-v2 .leg-row .q-field__native{font-size:13px;}
 /* Buttons */
 .calc-v2 .cv2-btn.q-btn{
   background:#15213b!important;color:#cdd8ee!important;border:1px solid #2a3a5c;
