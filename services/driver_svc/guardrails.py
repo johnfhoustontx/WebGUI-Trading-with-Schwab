@@ -50,15 +50,24 @@ def normalize_structure(s) -> str:
     return _STRUCT_MAP.get(key, str(s).strip().upper())
 
 
-def _signal_structure(signal) -> str:
+def signal_structure(signal) -> str:
     """Pull the structure code from a signal, tolerating either key family.
 
     Reads ``structure`` (the projected menu item) first, then ``type`` (the raw
-    scanner signal's structure field), then ``trade_type`` (legacy/fallback), and
-    normalizes whichever is present.
+    scanner signal's structure field — a real ``cache:options:scan`` signal stores
+    ``"PCS"``/``"CCS"``/``"IC"`` there), then ``trade_type`` (legacy/fallback), and
+    normalizes whichever is present. Public so ``compute.build_packet`` can reuse
+    the SAME structure resolution for the model-facing menu projection — the raw
+    scanner signal has no ``structure`` key, and ``trade_type`` is the DTE bucket
+    (``"0-DTE"``/``"SWING"``), not the structure, so reading the wrong key would
+    mislabel every real signal.
     """
     raw = signal.get("structure") or signal.get("type") or signal.get("trade_type")
     return normalize_structure(raw)
+
+
+# Backward-compatible private alias (the function was promoted to public).
+_signal_structure = signal_structure
 
 
 def _max_loss(signal) -> float | None:

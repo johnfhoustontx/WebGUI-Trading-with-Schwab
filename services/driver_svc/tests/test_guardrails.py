@@ -27,6 +27,32 @@ def test_is_allowed_only_defined_risk_spreads():
     assert g.is_allowed({"structure": "PCS", "max_loss": 0}) is False  # no real risk/credit
 
 
+def test_signal_structure_public_reads_real_scanner_keys():
+    """The public ``signal_structure`` reads ``structure`` → ``type`` → ``trade_type``.
+
+    A REAL ``cache:options:scan`` signal stores the structure code in ``type``
+    (``PCS``/``CCS``/``IC``) and uses ``trade_type`` for the DTE bucket — there is
+    NO ``structure`` key. ``compute.build_packet`` reuses this to project the
+    model-facing ``structure`` field, so it must classify the real-shaped signal.
+    """
+    # Real scanner signal: structure in ``type``, NO ``structure`` key.
+    assert g.signal_structure({"type": "PCS", "max_loss": 200.0}) == "PCS"
+    assert g.signal_structure({"type": "IC", "trade_type": "0-DTE"}) == "IC"
+    # The projected menu item uses ``structure`` and still wins (read first).
+    assert g.signal_structure({"structure": "call_credit_spread"}) == "CCS"
+    # The DTE bucket in ``trade_type`` must NOT be mistaken for the structure.
+    assert g.signal_structure({"trade_type": "0-DTE"}) not in g.ALLOWED
+    assert g.signal_structure({}) == ""
+
+
+def test_is_allowed_real_scanner_signal_shape():
+    """A real ``type``-keyed PCS signal (no ``structure`` key) is allowed."""
+    assert g.is_allowed({"type": "PCS", "max_loss": 200.0}) is True
+    assert g.is_allowed({"type": "IC", "max_loss": 300.0}) is True
+    # ``trade_type`` alone (DTE bucket, no structure) is not a tradeable structure.
+    assert g.is_allowed({"trade_type": "0-DTE", "max_loss": 200.0}) is False
+
+
 # ---------------------------------------------------------------------------
 # Task 2.2 — clamp_quantity
 # ---------------------------------------------------------------------------
