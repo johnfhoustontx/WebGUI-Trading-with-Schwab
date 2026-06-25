@@ -205,6 +205,22 @@ def test_resolve_switch_state_pending_holds_intent():
     assert driver.resolve_switch_state(False, True) == (False, False)
 
 
+# ── to_central (UTC → Central time for display) ──────────────────────────────
+def test_to_central_converts_utc_to_central():
+    # 2026-06-25 19:30:20 UTC → 14:30:20 Central (CDT, UTC-5 in June).
+    assert driver.to_central("2026-06-25T19:30:20.799378+00:00") == "2026-06-25 14:30:20 CT"
+
+
+def test_to_central_naive_assumed_utc():
+    assert driver.to_central("2026-06-25T19:30:00") == "2026-06-25 14:30:00 CT"
+
+
+def test_to_central_empty_and_garbage_safe():
+    assert driver.to_central("") == ""
+    assert driver.to_central(None) == ""
+    assert driver.to_central("not-a-date") == "not-a-date"
+
+
 def test_target_text_signed():
     assert driver.target_text(250.0, 500.0) == "+$250.00 / $500.00"
     assert driver.target_text(None, 500.0) == "—  / $500.00" or \

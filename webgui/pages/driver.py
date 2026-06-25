@@ -30,10 +30,35 @@ persists across navigation (single-user). The pure display builders
 ``condition_rows``/``proposed_trade_lines``/``perf_*`` for the legacy queue) are
 unit-tested.
 """
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 import bus_client
 from nicegui import ui
 
 from pages.ui_guard import guard
+
+# Decision-log / cycle timestamps are stored in UTC; show the user's Central time.
+_CENTRAL = ZoneInfo("America/Chicago")
+
+
+def to_central(iso_ts):
+    """Format a stored UTC ISO timestamp as Central (CT) wall-clock for display.
+
+    The service stamps decision-log + last-cycle timestamps in UTC; the page shows
+    them in the user's Central time (CDT/CST — ``America/Chicago`` handles DST). A
+    naive (tz-less) timestamp is assumed UTC. Returns the input unchanged if it
+    can't be parsed (never raises)."""
+    if not iso_ts:
+        return ""
+    try:
+        dt = datetime.fromisoformat(str(iso_ts))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+        return dt.astimezone(_CENTRAL).strftime("%Y-%m-%d %H:%M:%S") + " CT"
+    except Exception:  # noqa: BLE001 — an unparseable ts displays as-is, never breaks.
+        return str(iso_ts)
+
 
 # Grade chip colors (mirror the legacy approval_server trade sheet).
 GRADE_COLORS = {"A": "#1D9E75", "B": "#185FA5", "C": "#BA7517", "X": "#E24B4A"}
@@ -465,7 +490,7 @@ def render():
                     if auto.get("date"):
                         ui.label(auto["date"]).classes("opacity-60 text-sm")
                     if auto.get("last_cycle_ts"):
-                        ui.label(f"last cycle {auto['last_cycle_ts']}") \
+                        ui.label(f"last cycle {to_central(auto['last_cycle_ts'])}") \
                             .classes("opacity-50 text-xs")
                     ui.space()
                     # Enable/Disable master toggle (re-arms a prior halt on enable).
@@ -532,7 +557,7 @@ def render():
         cls = "w-full gap-1"
         with ui.card().classes(cls):
             with ui.row().classes("items-center gap-2 flex-wrap"):
-                ui.label(row.get("ts", "")).classes("text-xs opacity-50")
+                ui.label(to_central(row.get("ts", ""))).classes("text-xs opacity-50")
                 if row.get("stand_down"):
                     ui.label("STAND DOWN").classes("text-xs text-weight-bold "
                                                    "text-amber-9")
