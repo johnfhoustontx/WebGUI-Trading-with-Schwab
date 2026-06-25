@@ -32,6 +32,15 @@ def normalize_legs(legs, keep_premium=True):
     return out
 
 
+def set_legs_expiry(legs, expiry):
+    """Return normalized legs with EVERY leg's expiry set to ``expiry`` (used by the
+    Calculator's top-level Expiry → propagate to all legs). Other fields preserved."""
+    out = normalize_legs(legs)
+    for l in out:
+        l["expiry"] = expiry
+    return out
+
+
 def legs_to_payload(symbol, legs, keep_premium=True):
     """Normalized cross-page copy payload: {symbol (upper, no $), legs:[...]}"""
     return {"symbol": (symbol or "").replace("$", "").upper(),
@@ -184,6 +193,15 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
         """Re-pull expiries/strikes after the page's data source loads."""
         _render()
 
+    def apply_expiry(expiry):
+        """Set every leg's expiry to ``expiry`` and re-render (strike selects re-sync
+        to that expiry's strikes via _render's coercion). Fires on_change. The dirty
+        flag is preserved — an untouched single-expiry template still routes analytic."""
+        state["legs"] = set_legs_expiry(state["legs"], expiry)
+        _render()
+        on_change()
+
     return SimpleNamespace(get_legs=get_legs, set_legs=set_legs,
-                           apply_template=apply_template, refresh_options=refresh_options,
+                           apply_template=apply_template, apply_expiry=apply_expiry,
+                           refresh_options=refresh_options,
                            is_dirty=lambda: state["dirty"])

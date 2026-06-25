@@ -76,3 +76,31 @@ def test_leg_editor_coerces_out_of_options_values_without_raising():
     assert legs[0]["strike"] in strikes          # 737.5 snapped into the options
     assert legs[1]["strike"] in strikes          # 999 snapped to nearest (738)
     assert legs[1]["expiry"] == "2026-06-23"     # absent expiry -> first available
+
+
+def test_set_legs_expiry_sets_every_leg():
+    legs = [{"option_type": "call", "side": "long", "strike": 100,
+             "expiry": "2026-07-17", "qty": 1, "premium": 2.5},
+            {"option_type": "put", "side": "short", "strike": 95,
+             "expiry": "2026-08-21", "qty": 2, "premium": 1.0}]
+    out = LE.set_legs_expiry(legs, "2026-09-18")
+    assert [l["expiry"] for l in out] == ["2026-09-18", "2026-09-18"]
+    assert out[0]["strike"] == 100 and out[1]["qty"] == 2   # other fields preserved
+
+
+def test_apply_expiry_propagates_to_all_legs():
+    from nicegui import ui
+    with ui.card() as container:
+        ed = LE.build_leg_editor(
+            container,
+            strikes_for=lambda exp, otype: [735, 736, 737],
+            expiries_for=lambda: ["2026-06-23", "2026-06-26"],
+            show_premium=True)
+        ed.set_legs([
+            {"option_type": "call", "side": "long", "strike": 736,
+             "expiry": "2026-06-23", "qty": 1, "premium": None},
+            {"option_type": "put", "side": "short", "strike": 735,
+             "expiry": "2026-06-26", "qty": 1, "premium": None}])
+        ed.apply_expiry("2026-06-26")     # propagate to ALL legs (literal, per design)
+    legs = ed.get_legs()
+    assert all(l["expiry"] == "2026-06-26" for l in legs)
