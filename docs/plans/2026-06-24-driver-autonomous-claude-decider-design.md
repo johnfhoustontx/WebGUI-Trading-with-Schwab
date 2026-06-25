@@ -123,9 +123,16 @@ resized, or rejected:
   driver max-loss ≤ a configured cap. Quantity is **re-sized** to fit, not trusted.
 - **Allowlist:** defined-risk spreads only (PCS/CCS/IC). No naked/undefined risk,
   no instruments off the menu, no equities (v1).
-- **Auto-halt** when: today's driver P&L ≥ **+$500** (bank the day) · ≤ the
-  existing `RISK_LIMITS.daily_max_loss` (−$250) · `VIX > VIX_MAX_TRADE` (25) ·
-  weekly/monthly caps breached.
+- **Auto-halt** when: today's P&L ≥ **+$500** (bank the day) · ≤ the existing
+  `RISK_LIMITS.daily_max_loss` (−$250) · `VIX > VIX_MAX_TRADE` (25). **As-built v1
+  note:** the day-P&L driving the bank/loss halt is the paper account's
+  whole-account `session_pnl` under the *dedicated-account* assumption (§7), NOT
+  per-`source` attribution; and the **weekly/monthly caps are deferred to v2** —
+  the legacy `fetch_current_pnl` reads a different ledger (`trade_log.json`, the
+  order-executor's) than the autonomous paper path (`paper_create` →
+  `paper_account_db`), so a correct weekly/monthly backstop needs a paper-account
+  weekly/monthly P&L source that v1 doesn't compute. The v1 loss envelope is the
+  **daily cap + VIX + the master STOP**.
 - **Max trades/day** and **max concurrent driver positions**.
 - **Signal freshness** — reject a menu signal whose scan is stale (mirrors the
   rescue stale-price guard idea).
@@ -220,10 +227,14 @@ Level B has no approval gate, so the page flips from a queue to a dashboard:
 spread menu; 30-min cadence; code guardrails + kill-switch; mechanical exits;
 monitor page; full audit log.
 
-**Deferred (v2+):** equities in the executable universe (needs a paper-equity
-mechanism); Claude-managed exits / rolls; agentic tool-use loop (Claude queries
-chains live vs. a single-shot schema call); parameterized custom spreads off-menu;
-**level C / live** (a separate, deliberate effort with its own design).
+**Deferred (v2+):** **weekly/monthly loss-cap halts** (need a paper-account
+weekly/monthly P&L source — see the §6 as-built note); **per-`source` P&L
+attribution** (driver-only day P&L instead of the whole-account `session_pnl`, so
+the account need not be dedicated); equities in the executable universe (needs a
+paper-equity mechanism); Claude-managed exits / rolls; agentic tool-use loop
+(Claude queries chains live vs. a single-shot schema call); parameterized custom
+spreads off-menu; **level C / live** (a separate, deliberate effort with its own
+design).
 
 ## 13. Risks & mitigations
 

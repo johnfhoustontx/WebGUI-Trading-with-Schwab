@@ -215,11 +215,17 @@ def run_autonomous_cycle(bus) -> None:
     market = compute.fetch_market_context()
     out = compute.run_cycle(scan, paper, target=settings.DAILY_TARGET,
                             limits=settings.limits(), market=market)
+    # Kill-switch tightening: re-read control RIGHT BEFORE firing. The top-of-fn gate
+    # only catches a STOP/disable from before the cycle; the cycle itself is slow (a
+    # proxy fetch + the Claude call), so a STOP that lands DURING it must still be
+    # honored — don't fire this checkpoint's already-decided trades.
+    control = read_control(bus)
+    stop_now = not control.get("enabled") or control.get("halted")
     # Enqueue each survivor, isolated: a single bad enqueue (transient bus error /
     # malformed row) must NOT skip the halt-latch + publish below, and the audit log
     # must record only what ACTUALLY fired. ``executed`` accumulates the enqueued rows.
     executed = []
-    for t in out.get("executable", []):
+    for t in ([] if stop_now else out.get("executable", [])):
         sig = t.get("signal")
         if not isinstance(sig, dict):
             continue

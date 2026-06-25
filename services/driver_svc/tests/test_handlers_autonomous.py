@@ -181,6 +181,33 @@ def test_cycle_partial_enqueue_failure_still_publishes(fake_bus, monkeypatch):
     assert len(executed) == 1 and executed[0]["symbol"] == "QQQ"  # only what fired
 
 
+def test_cycle_honors_stop_landed_mid_cycle(fake_bus, monkeypatch):
+    """A STOP that lands DURING the (slow) cycle is honored — the already-decided
+    trades are NOT fired (kill-switch tightening; the top gate only catches a STOP
+    from before the cycle)."""
+    handlers.set_control(fake_bus, enabled=True)
+    _seed_caches(fake_bus)
+    monkeypatch.setattr(handlers.compute, "fetch_market_context", lambda: {"vix": 14})
+
+    def _slow_cycle(*a, **k):
+        # Simulate the user hitting STOP during the cycle's Claude call.
+        handlers.set_control(fake_bus, halted=True, reason="manual STOP")
+        return {"decision": {"stand_down": False, "day_thesis": "t", "trades": []},
+                "executable": [{"id": "m0", "signal": {"symbol": "QQQ", "structure": "PCS"},
+                                "qty": 1, "rationale": ""}],
+                "rejected": [], "halted": False, "halt_reason": None,
+                "day_pnl": 0.0, "open_positions": []}
+
+    monkeypatch.setattr(handlers.compute, "run_cycle", _slow_cycle)
+    enq = []
+    monkeypatch.setattr(fake_bus, "enqueue_command", lambda s, c: enq.append((s, c)))
+    handlers.run_autonomous_cycle(fake_bus)
+    assert enq == []   # STOP mid-cycle → nothing fired
+    # The published view records nothing executed.
+    env = fake_bus.cache_get("cache:driver:autonomous")
+    assert env is not None and env.payload["decisions"][0]["executed"] == []
+
+
 def test_cycle_stand_down_enqueues_nothing_but_publishes(fake_bus, monkeypatch):
     handlers.set_control(fake_bus, enabled=True)
     _seed_caches(fake_bus, day_pnl=120.0)

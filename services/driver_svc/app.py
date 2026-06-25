@@ -1,10 +1,18 @@
 """Runnable driver domain service (Task #30).
 
-Assembles the shared scaffold with this domain's command handler AND the 09:28-ET
-morning scheduler. The GUI Driver page enqueues ``run``/``approve``/``skip``/
-``perf`` commands on ``cmd:driver``; the scheduler also fires the morning
-pipeline once per trading day and keeps the performance view warm. The scheduler
-never executes orders — only an explicit ``approve`` command does.
+Assembles the shared scaffold with this domain's command handler and scheduler.
+Two coexisting modes on ``cmd:driver``:
+
+* **Legacy approval queue** — ``run``/``approve``/``skip``/``perf``; the 09:28-ET
+  scheduler fires the morning pipeline once per trading day and keeps the
+  performance view warm. This path only *proposes* orders for a human APPROVE —
+  it never executes on its own.
+* **Autonomous decision layer (level B, paper)** — ``cycle``/``enable``/
+  ``disable``/``stop`` + a 30-min RTH checkpoint clock. When the
+  ``cache:driver:control`` master switch is enabled (default OFF), each checkpoint
+  runs the Claude decision layer and AUTO-EXECUTES the guardrail-clamped survivors
+  as PAPER trades via ``cmd:options`` ``paper_create`` (``config.PAPER_TRADE``
+  stays True — this service never flips it).
 
 Importable without side effects; only starts uvicorn under ``__main__`` on the
 ``driver`` service port (8214) from ``repo_paths.SERVICE_PORTS``.
