@@ -219,3 +219,53 @@ def test_decision_log_is_newest_first_and_capped(fake_bus, monkeypatch):
     assert len(log) == 50
     assert log[0]["thesis"] == "cycle-54"   # newest first
     assert log[-1]["thesis"] == "cycle-5"   # oldest retained (55 total, cap 50)
+
+
+# ── 5.3: autonomous command dispatch (cycle/enable/disable/stop) ─────────────
+
+
+def test_handle_command_enable_disable_stop(fake_bus):
+    handlers.handle_command(fake_bus, _cmd("enable"))
+    assert handlers.read_control(fake_bus)["enabled"] is True
+    handlers.handle_command(fake_bus, _cmd("stop"))
+    assert handlers.read_control(fake_bus)["halted"] is True
+    handlers.handle_command(fake_bus, _cmd("disable"))
+    assert handlers.read_control(fake_bus)["enabled"] is False
+
+
+def test_handle_command_stop_sets_reason_and_date(fake_bus):
+    handlers.handle_command(fake_bus, _cmd("enable"))
+    handlers.handle_command(fake_bus, _cmd("stop"))
+    c = handlers.read_control(fake_bus)
+    assert c["halted"] is True
+    assert c["reason"] == "manual STOP"
+    assert c["halted_date"]  # ISO date stamped
+
+
+def test_handle_command_enable_clears_prior_halt(fake_bus):
+    # A halted-but-enabled control re-arms on a fresh enable.
+    handlers.set_control(fake_bus, enabled=True)
+    handlers.set_control(fake_bus, halted=True, reason="banked")
+    handlers.handle_command(fake_bus, _cmd("enable"))
+    c = handlers.read_control(fake_bus)
+    assert c["enabled"] is True and c["halted"] is False and c["reason"] is None
+
+
+def test_handle_command_cycle_runs_autonomous(fake_bus, monkeypatch):
+    called = []
+    monkeypatch.setattr(handlers, "run_autonomous_cycle",
+                        lambda bus: called.append(bus))
+    handlers.handle_command(fake_bus, _cmd("cycle"))
+    assert called == [fake_bus]
+
+
+def test_handle_command_legacy_branches_still_dispatch(fake_bus, monkeypatch):
+    calls = []
+    monkeypatch.setattr(handlers, "run_morning", lambda b: calls.append("run"))
+    monkeypatch.setattr(handlers, "approve", lambda b: calls.append("approve"))
+    monkeypatch.setattr(handlers, "skip", lambda b: calls.append("skip"))
+    monkeypatch.setattr(handlers, "refresh_perf", lambda b: calls.append("perf"))
+    for t in ("run", "approve", "skip", "perf"):
+        handlers.handle_command(fake_bus, _cmd(t))
+    handlers.handle_command(fake_bus, _cmd("bogus"))  # unknown → no-op
+    assert calls == ["run", "approve", "skip", "perf"]

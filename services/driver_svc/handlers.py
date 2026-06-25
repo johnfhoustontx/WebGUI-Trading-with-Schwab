@@ -226,7 +226,13 @@ def run_autonomous_cycle(bus) -> None:
 
 
 def handle_command(bus, command) -> None:
-    """Dispatch a ``cmd:driver`` command; unknown types are a no-op."""
+    """Dispatch a ``cmd:driver`` command; unknown types are a no-op.
+
+    Legacy approval-queue commands (``run``/``approve``/``skip``/``perf``) plus
+    the autonomous controls: ``cycle`` runs one decision checkpoint now, ``enable``
+    /``disable`` flip the master switch (``enable`` also clears any stale halt so
+    re-enabling re-arms), and ``stop`` is the kill-switch (latch ``halted``).
+    """
     if command.type == "run":
         run_morning(bus)
     elif command.type == "approve":
@@ -235,3 +241,12 @@ def handle_command(bus, command) -> None:
         skip(bus)
     elif command.type == "perf":
         refresh_perf(bus)
+    elif command.type == "cycle":
+        run_autonomous_cycle(bus)
+    elif command.type == "enable":
+        set_control(bus, enabled=True, halted=False, reason=None)
+    elif command.type == "disable":
+        set_control(bus, enabled=False)
+    elif command.type == "stop":
+        set_control(bus, halted=True, reason="manual STOP",
+                    halted_date=date.today().isoformat())
