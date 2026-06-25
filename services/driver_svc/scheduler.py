@@ -105,28 +105,68 @@ def _now_et():
     return datetime.now(_ET)
 
 
+def _rearm_if_stale(bus, today) -> None:
+    """Clear a stale overnight halt latch (blocking bus I/O; runs in the executor).
+
+    Reads the control key, and only if ``should_rearm`` says the latch is a real
+    prior-day halt, clears it (``halted=False``, reason cleared). A no-op when not
+    halted or already cleared today — so it is cheap to call every poll.
+    """
+    if should_rearm(handlers.read_control(bus), today):
+        handlers.set_control(bus, halted=False, reason=None)
+
+
 async def loop(bus):
-    """Fire the morning pipeline once/day at 09:28 ET; keep perf warm.
+    """Run the morning approval cadence + the autonomous checkpoint cadence.
 
     One-shot perf refresh at startup so the page has data on first load, then a
-    30 s poll: run the morning pipeline when due (once/day) and recompute the
-    perf view every ~5 min. Each blocking call runs in the executor and is
-    independently guarded so one failure can't kill the loop or skip the other.
+    30 s poll that, each tick:
+
+    * fires the morning pipeline when ``morning_due`` (once/day at 09:28 ET) —
+      the legacy approval path, retained;
+    * **re-arms** a stale overnight halt (``should_rearm``) BEFORE the checkpoint,
+      so a just-cleared latch lets the same poll's checkpoint fire;
+    * fires ``handlers.run_autonomous_cycle`` when ``checkpoint_due`` (once per
+      30-min RTH slot) — the cycle self-gates on the control key, so the clock
+      itself needs no control pre-check;
+    * recomputes the perf view every ~5 min.
+
+    Every blocking call runs in the default executor (``run_autonomous_cycle`` is
+    SLOW — a proxy fetch + a Claude API call — so it must never run on the event
+    loop) and each branch is independently try/except-guarded so one failure can't
+    kill the loop or skip the others. ``last_run_date`` / ``last_slot`` are the
+    in-memory once-per-day / once-per-slot de-dupes.
     """
     loop_ = asyncio.get_event_loop()
     last_run_date = None
+    last_slot = None
     try:
         await loop_.run_in_executor(None, handlers.refresh_perf, bus)
     except Exception:  # noqa: BLE001
         pass
     secs_since_perf = 0
     while True:
+        now = _now_et()
         try:
-            due, run_date = morning_due(_now_et(), last_run_date)
+            due, run_date = morning_due(now, last_run_date)
             if due:
                 last_run_date = run_date
                 await loop_.run_in_executor(None, handlers.run_morning, bus)
         except Exception:  # noqa: BLE001 — never let the scheduler die.
+            pass
+        # Re-arm a stale overnight halt FIRST so a just-cleared latch lets this
+        # same poll's checkpoint fire.
+        try:
+            await loop_.run_in_executor(None, _rearm_if_stale, bus, now.date().isoformat())
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            ck_due, slot = checkpoint_due(now, last_slot)
+            if ck_due:
+                last_slot = slot
+                # BLOCKING + SLOW (proxy fetch + Claude call) → executor, not the loop.
+                await loop_.run_in_executor(None, handlers.run_autonomous_cycle, bus)
+        except Exception:  # noqa: BLE001
             pass
         if secs_since_perf >= PERF_REFRESH_SEC:
             secs_since_perf = 0
