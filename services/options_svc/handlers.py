@@ -103,6 +103,15 @@ CACHE_RESCUE_SUMMARY = "cache:options:rescue_summary"
 EVENT_RESCUE = "events:options:rescue"
 EVENT_RESCUE_SUMMARY = "events:options:rescue_summary"
 
+# Isolated driver paper account (a SEPARATE DB from the manual paper_account.db —
+# see compute.DRIVER_PAPER_DB). Two views: the account snapshot + open positions,
+# and the standalone performance scorecard. The autonomous Driver enqueues
+# ``driver_paper_create`` and the /driver page reads these views.
+CACHE_DRIVER_PAPER = "cache:options:driver_paper_account"
+EVENT_DRIVER_PAPER = "events:options:driver_paper_account"
+CACHE_DRIVER_PERF = "cache:options:driver_paper_perf"
+EVENT_DRIVER_PERF = "events:options:driver_paper_perf"
+
 # Defaults mirror the page's input defaults (symbol SPY, 5-30 DTE, the put/call
 # delta gates, min credit 10% -> 0.10 fraction). The page sends the fraction.
 _SWING_DEFAULTS = {
@@ -253,6 +262,40 @@ def run_manage_and_refresh(bus) -> None:
         publish_rescue_summary(bus)
     except Exception:
         pass
+
+
+def refresh_driver_paper(bus) -> None:
+    """Publish the isolated driver paper account view + its performance scorecard.
+
+    Two views — the account snapshot/positions (``cache:options:driver_paper_account``)
+    and the standalone scorecard (``cache:options:driver_paper_perf``) — each on its
+    own change event. The /driver monitor reads them to show the driver's OWN book
+    (day-P&L, open positions) and how it's performing.
+
+    Deliberately does NOT apply the rescue overlay (``_apply_rescue_overlay`` /
+    ``compute.assess_open_positions``): that overlay reads the MANUAL paper account,
+    so tagging the driver's rows with it would attach heat/state from the wrong
+    book. Both ``compute.driver_account_view`` and ``compute.driver_account_perf``
+    are already fully defensive (degrade, never raise)."""
+    acct = compute.driver_account_view()
+    va = bus.cache_set(CACHE_DRIVER_PAPER, acct)
+    bus.publish(EVENT_DRIVER_PAPER, {"version": va})
+    perf = compute.driver_account_perf()
+    vp = bus.cache_set(CACHE_DRIVER_PERF, perf)
+    bus.publish(EVENT_DRIVER_PERF, {"version": vp})
+
+
+def run_driver_manage_and_refresh(bus) -> None:
+    """5-min driver-account manage tick: reprice + auto-close the driver's open
+    positions (``compute.run_driver_manage_cycle`` — no-op-safe if the driver
+    account doesn't exist yet) then republish both driver views.
+
+    The driver analog of ``run_manage_and_refresh`` — shared by the
+    ``driver_paper_manage`` command and the scheduler's 5-min manage tick so both
+    run identical logic. No rescue summary piggyback (that is the manual book's
+    nav badge)."""
+    compute.run_driver_manage_cycle()
+    refresh_driver_paper(bus)
 
 
 def refresh_paper_trades(bus) -> None:
@@ -449,7 +492,11 @@ def handle_command(bus, command) -> None:
     paper trade from a signal then refresh the ledger; ``paper_reload`` → re-read
     the trade ledger;
     ``paper_close``/``paper_delete``/``paper_delete_closed`` → run the lifecycle
-    action then refresh the ledger; ``paper_analyze`` → analyze the selected
+    action then refresh the ledger; ``driver_paper_create`` (args signal, qty) →
+    open ONE guardrail-approved signal into the ISOLATED driver account then
+    republish the driver views; ``driver_paper_manage`` → reprice/auto-close the
+    driver account then republish; ``driver_paper_reset`` → (re)seed the driver
+    account then republish; ``paper_analyze`` → analyze the selected
     trade, cache the result + publish; ``captured_reload`` → re-read open signals;
     ``captured_reprice`` → reprice all open signals, cache the repriced list +
     flags (two views) + publish both; ``captured_close`` → manually close a signal
@@ -487,6 +534,19 @@ def handle_command(bus, command) -> None:
     elif command.type == "paper_reset":
         compute.reset_paper_account(float(command.args.get("starting_balance", 25000.0)))
         refresh_paper_account(bus)
+    elif command.type == "driver_paper_create":
+        # Open ONE guardrail-approved signal into the ISOLATED driver account
+        # (a separate DB from the manual paper account), then republish the driver
+        # views. ``open_driver_position`` lazily seeds the account + is defensive.
+        compute.open_driver_position(command.args.get("signal"),
+                                     int(command.args.get("qty", 1)))
+        refresh_driver_paper(bus)
+    elif command.type == "driver_paper_manage":
+        run_driver_manage_and_refresh(bus)
+    elif command.type == "driver_paper_reset":
+        compute.ensure_driver_account(
+            float(command.args.get("starting_balance", 25000.0)))
+        refresh_driver_paper(bus)
     elif command.type == "paper_create":
         compute.create_paper_trade(command.args.get("signal"),
                                    command.args.get("qty", 1))
