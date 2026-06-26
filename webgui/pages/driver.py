@@ -321,13 +321,14 @@ def position_rows(positions):
 
 
 def paper_summary(paper_view):
-    """Live paper-account P&L from ``cache:options:paper_account`` (the truthful source).
+    """Live driver paper-account P&L from ``cache:options:driver_paper_account``.
 
-    The driver executes into the options paper account (via the ``paper_create``
-    command), so THIS is the real, live P&L — it moves as the options service
-    reprices (every ~5 min) and is correct whether or not the autonomous decision
-    loop is enabled. The monitor reads it directly rather than the autonomy-gated
-    ``cache:driver:autonomous`` snapshot (which is only published while a cycle runs).
+    The autonomous loop executes into the DRIVER's own isolated paper account (via
+    the ``driver_paper_create`` command), so THIS is the real, live P&L of its book
+    — it moves as the options service reprices the driver account (every ~5 min) and
+    is correct whether or not the autonomous decision loop is enabled. The monitor
+    reads it directly rather than the autonomy-gated ``cache:driver:autonomous``
+    snapshot (which is only published while a cycle runs).
     Defensive: a missing snapshot / no account → ``has_account`` False, None values.
     """
     pv = paper_view or {}
@@ -342,6 +343,100 @@ def paper_summary(paper_view):
         "equity": snap.get("equity"),
         "open_count": snap.get("open_count", 0),
     }
+
+
+# ── performance scorecard: pure builders (cache:options:driver_paper_perf) ───
+# The scorecard renders the driver paper account's standalone performance from
+# ``cache:options:driver_paper_perf`` (published every 5-min driver manage tick —
+# more live than ``AutonomousState.perf``, which only updates per 30-min cycle).
+# All builders are defensive: an unpublished view → ``{}`` → an empty/placeholder
+# card, never a raise. ``profit_factor`` ``None`` (no losses yet) renders as "—".
+def _pnl(v):
+    """Signed dollar string for a P&L scorecard cell; exactly-zero is unsigned
+    (``$0.00``), None → ``$0.00`` (a fresh-account scorecard reads cleanly)."""
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        v = 0.0
+    if v == 0:
+        return "$0.00"
+    return f"{'+' if v > 0 else '-'}${abs(v):,.2f}"
+
+
+def _pct(frac):
+    """A 0..1 fraction as a 1-dp percent (``0.6667 → '66.7%'``); None/garbage → '0.0%'."""
+    try:
+        return f"{float(frac) * 100:.1f}%"
+    except (TypeError, ValueError):
+        return "0.0%"
+
+
+def scorecard_headline_chips(perf):
+    """Headline (label, value) chips: trades, open/closed, win rate, realized,
+    open unrealized, total P&L — the at-a-glance row of the scorecard."""
+    p = perf or {}
+    return [
+        ("Trades", str(int(p.get("total_trades") or 0))),
+        ("Open", str(int(p.get("open") or 0))),
+        ("Closed", str(int(p.get("closed") or 0))),
+        ("Win rate", _pct(p.get("win_rate"))),
+        ("Realized", _pnl(p.get("realized_pnl"))),
+        ("Open P&L", _pnl(p.get("open_unrealized"))),
+        ("Total P&L", _pnl(p.get("total_pnl"))),
+    ]
+
+
+def scorecard_quality_chips(perf):
+    """Quality (label, value) chips: avg win, avg loss, profit factor.
+
+    ``profit_factor`` is ``None`` until there is at least one loss (gross-win /
+    gross-loss is undefined with no losses) — render it as the em-dash "—"."""
+    p = perf or {}
+    pf = p.get("profit_factor")
+    pf_text = "—" if pf is None else f"{float(pf):.2f}"
+    return [
+        ("Avg win", _pnl(p.get("avg_win"))),
+        ("Avg loss", _pnl(p.get("avg_loss"))),
+        ("Profit factor", pf_text),
+    ]
+
+
+def _breakdown_rows(rows, key):
+    """Format a P&L-by-{symbol|strategy} list (signed pnl, percent win-rate)."""
+    out = []
+    for r in rows or []:
+        r = r or {}
+        out.append({
+            key: r.get(key, "?"),
+            "trades": r.get("trades", 0),
+            "pnl": _pnl(r.get("pnl")),
+            "win_rate": _pct(r.get("win_rate")),
+        })
+    return out
+
+
+def scorecard_symbol_rows(perf):
+    """Render-ready P&L-by-symbol table rows (from ``perf['by_symbol']``)."""
+    return _breakdown_rows((perf or {}).get("by_symbol"), "symbol")
+
+
+def scorecard_strategy_rows(perf):
+    """Render-ready P&L-by-strategy table rows (from ``perf['by_strategy']``)."""
+    return _breakdown_rows((perf or {}).get("by_strategy"), "strategy")
+
+
+def best_worst_text(perf):
+    """``'Best MU +$120.00 · Worst MU -$60.00'`` — the extreme closed trades.
+
+    Empty (nothing closed) → ``''`` so the card can hide the line. Defensive over a
+    missing symbol / non-numeric realized_pnl."""
+    p = perf or {}
+    bits = []
+    for label, pos in (("Best", p.get("best")), ("Worst", p.get("worst"))):
+        if isinstance(pos, dict):
+            sym = pos.get("symbol") or "?"
+            bits.append(f"{label} {sym} {_pnl(pos.get('realized_pnl'))}")
+    return " · ".join(bits)
 
 
 def resolve_switch_state(pending, actual_enabled):
@@ -375,6 +470,20 @@ _POSITION_COLS = [
     {"name": "status", "label": "Status", "field": "status"},
 ]
 
+# Performance-scorecard breakdown tables (P&L by symbol / by strategy).
+_SCORE_SYMBOL_COLS = [
+    {"name": "symbol", "label": "Symbol", "field": "symbol", "align": "left"},
+    {"name": "trades", "label": "Trades", "field": "trades"},
+    {"name": "pnl", "label": "P&L", "field": "pnl"},
+    {"name": "win_rate", "label": "Win %", "field": "win_rate"},
+]
+_SCORE_STRATEGY_COLS = [
+    {"name": "strategy", "label": "Strategy", "field": "strategy", "align": "left"},
+    {"name": "trades", "label": "Trades", "field": "trades"},
+    {"name": "pnl", "label": "P&L", "field": "pnl"},
+    {"name": "win_rate", "label": "Win %", "field": "win_rate"},
+]
+
 
 def render():
     """Driver page: autonomous monitor + STOP, then legacy approval queue + perf."""
@@ -387,6 +496,7 @@ def render():
         "appr": None, "appr_ver": None, "perf": None, "perf_ver": None,
         "auto": None, "auto_ver": None, "ctrl": None, "ctrl_ver": None,
         "paper": None, "paper_ver": None,
+        "dperf": None, "dperf_ver": None,        # driver-account performance scorecard
         "pending_enabled": None, "pending_ticks": 0,
     }
 
@@ -552,6 +662,10 @@ def render():
                 for row in log:
                     _decision_card(row)
 
+            # Performance scorecard — the driver account's standalone track record
+            # (cache:options:driver_paper_perf, refreshed every 5-min manage tick).
+            _scorecard_card(state["dperf"] or {})
+
     def _decision_card(row):
         halted = row.get("halted")
         cls = "w-full gap-1"
@@ -576,6 +690,47 @@ def render():
                     .classes("text-xs text-red-8 opacity-80")
             if halted and row.get("halt_reason"):
                 ui.label(row["halt_reason"]).classes("text-xs text-amber-9")
+
+    def _chip(label, value):
+        with ui.column().classes("gap-0"):
+            ui.label(label).classes("text-xs opacity-60")
+            ui.label(value).classes("text-sm text-weight-medium")
+
+    def _scorecard_card(perf):
+        # Plain-widget card (no Highcharts) → safe to rebuild in place each repaint.
+        with ui.card().classes("w-full gap-2"):
+            ui.label("Performance scorecard").classes("text-subtitle2 opacity-70")
+            ui.label("The driver account's standalone track record (isolated paper "
+                     "book; updates every ~5 min as it reprices).") \
+                .classes("text-xs opacity-50")
+            if not perf or not perf.get("total_trades"):
+                ui.label("No driver trades recorded yet.").classes("text-xs opacity-50")
+                return
+            # Headline metrics.
+            with ui.row().classes("items-center gap-5 flex-wrap"):
+                for lbl, val in scorecard_headline_chips(perf):
+                    _chip(lbl, val)
+            # Quality metrics (avg win / avg loss / profit factor).
+            with ui.row().classes("items-center gap-5 flex-wrap"):
+                for lbl, val in scorecard_quality_chips(perf):
+                    _chip(lbl, val)
+            bw = best_worst_text(perf)
+            if bw:
+                ui.label(bw).classes("text-xs opacity-70")
+            # Breakdown tables (P&L by symbol / by strategy).
+            with ui.row().classes("w-full gap-4 items-start flex-wrap"):
+                sym_rows = scorecard_symbol_rows(perf)
+                if sym_rows:
+                    with ui.column().classes("gap-1 flex-1 min-w-[260px]"):
+                        ui.label("P&L by symbol").classes("text-xs opacity-60")
+                        ui.table(columns=_SCORE_SYMBOL_COLS, rows=sym_rows,
+                                 row_key="symbol").classes("w-full").props("dense")
+                strat_rows = scorecard_strategy_rows(perf)
+                if strat_rows:
+                    with ui.column().classes("gap-1 flex-1 min-w-[260px]"):
+                        ui.label("P&L by strategy").classes("text-xs opacity-60")
+                        ui.table(columns=_SCORE_STRATEGY_COLS, rows=strat_rows,
+                                 row_key="strategy").classes("w-full").props("dense")
 
     def _render_approval():
         approval.clear()
@@ -664,20 +819,25 @@ def render():
     # ── version-poll repaint (fetch-free) ─────────────────────────────────────
     @guard
     def _poll():
-        # Monitor: repaint when the autonomous view, the control key, OR the live
-        # paper account advances (the paper account drives the live P&L + positions,
-        # so the P&L updates even with the autonomous loop disabled).
+        # Monitor: repaint when the autonomous view, the control key, the live DRIVER
+        # paper account, OR the driver performance scorecard advances. The driver
+        # paper account drives the live P&L + positions (it updates even with the
+        # autonomous loop disabled, as the options service reprices the driver book);
+        # the perf view (cache:options:driver_paper_perf) drives the scorecard card.
         avv = bus_client.read_version("driver:autonomous")
         cvv = bus_client.read_version("driver:control")
-        ppv = bus_client.read_version("options:paper_account")
+        ppv = bus_client.read_version("options:driver_paper_account")
+        dpv = bus_client.read_version("options:driver_paper_perf")
         if (avv != state["auto_ver"] or cvv != state["ctrl_ver"]
-                or ppv != state["paper_ver"]):
+                or ppv != state["paper_ver"] or dpv != state["dperf_ver"]):
             state["auto_ver"] = avv
             state["ctrl_ver"] = cvv
             state["paper_ver"] = ppv
+            state["dperf_ver"] = dpv
             state["auto"] = bus_client.read("driver:autonomous") or None
             state["ctrl"] = bus_client.read("driver:control") or None
-            state["paper"] = bus_client.read("options:paper_account") or None
+            state["paper"] = bus_client.read("options:driver_paper_account") or None
+            state["dperf"] = bus_client.read("options:driver_paper_perf") or None
             _render_monitor()
         av = bus_client.read_version("driver:approvals")
         if av != state["appr_ver"]:
@@ -708,8 +868,10 @@ def render():
     state["auto"] = bus_client.read("driver:autonomous") or None
     state["ctrl_ver"] = bus_client.read_version("driver:control")
     state["ctrl"] = bus_client.read("driver:control") or None
-    state["paper_ver"] = bus_client.read_version("options:paper_account")
-    state["paper"] = bus_client.read("options:paper_account") or None
+    state["paper_ver"] = bus_client.read_version("options:driver_paper_account")
+    state["paper"] = bus_client.read("options:driver_paper_account") or None
+    state["dperf_ver"] = bus_client.read_version("options:driver_paper_perf")
+    state["dperf"] = bus_client.read("options:driver_paper_perf") or None
     state["appr_ver"] = bus_client.read_version("driver:approvals")
     state["appr"] = bus_client.read("driver:approvals") or None
     state["perf_ver"] = bus_client.read_version("driver:performance")

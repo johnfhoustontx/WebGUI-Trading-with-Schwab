@@ -165,9 +165,9 @@ def test_position_rows_handles_none_and_missing():
 
 # ── paper_summary (live paper-account P&L, the truthful source) ──────────────
 def test_paper_summary_extracts_live_pnl():
-    """paper_summary pulls the live P&L from the cache:options:paper_account snapshot
-    (where the driver actually trades via paper_create), so the monitor shows real
-    P&L whether or not the autonomous loop is running."""
+    """paper_summary pulls the live P&L from the cache:options:driver_paper_account
+    snapshot (the driver's isolated book, where it trades via driver_paper_create),
+    so the monitor shows real P&L whether or not the autonomous loop is running."""
     pv = {"has_account": True, "snapshot": {
         "session_pnl": 5.0, "realized_pnl": 12.5, "open_unrealized": -3.0,
         "equity": 25014.5, "open_count": 2}, "positions": []}
@@ -227,6 +227,103 @@ def test_target_text_signed():
         "500" in driver.target_text(None, 500.0)
 
 
+# ── performance scorecard pure builders (cache:options:driver_paper_perf) ─────
+# The scorecard reads the driver-account perf view published every 5-min manage
+# tick. Builders turn the payload (see the module docstring shape) into render-
+# ready (label, value) chip pairs, formatted breakdown rows, and a best/worst line.
+def _perf(**o):
+    base = {"total_trades": 4, "open": 1, "closed": 3, "wins": 2, "losses": 1,
+            "win_rate": round(2 / 3, 4), "realized_pnl": 100.0, "open_unrealized": 15.0,
+            "total_pnl": 115.0, "session_pnl": 115.0, "avg_win": 80.0, "avg_loss": -60.0,
+            "profit_factor": round(160.0 / 60.0, 2),
+            "best": {"symbol": "MU", "strategy": "PCS", "realized_pnl": 120.0},
+            "worst": {"symbol": "MU", "strategy": "PCS", "realized_pnl": -60.0},
+            "by_symbol": [{"symbol": "MU", "trades": 2, "pnl": 70.0, "win_rate": 0.5},
+                          {"symbol": "SPY", "trades": 1, "pnl": 40.0, "win_rate": 1.0}],
+            "by_strategy": [{"strategy": "PCS", "trades": 2, "pnl": 70.0, "win_rate": 0.5}]}
+    base.update(o)
+    return base
+
+
+def test_scorecard_headline_chips():
+    chips = driver.scorecard_headline_chips(_perf())
+    d = {lbl: val for lbl, val in chips}
+    assert d["Trades"] == "4"
+    assert d["Open"] == "1" and d["Closed"] == "3"
+    assert d["Win rate"] == "66.7%"            # 2/3 of closed
+    assert d["Realized"] == "+$100.00"
+    assert d["Open P&L"] == "+$15.00"
+    assert d["Total P&L"] == "+$115.00"
+
+
+def test_scorecard_headline_chips_empty_safe():
+    # An unpublished view → {} → a placeholder card, never a raise.
+    chips = driver.scorecard_headline_chips({})
+    d = {lbl: val for lbl, val in chips}
+    assert d["Trades"] == "0"
+    assert d["Win rate"] == "0.0%"
+    assert d["Realized"] == "$0.00"            # 0.0 renders unsigned
+    assert driver.scorecard_headline_chips(None)   # None tolerated
+
+
+def test_scorecard_quality_chips():
+    chips = driver.scorecard_quality_chips(_perf())
+    d = {lbl: val for lbl, val in chips}
+    assert d["Avg win"] == "+$80.00"
+    assert d["Avg loss"] == "-$60.00"
+    assert d["Profit factor"] == "2.67"
+
+
+def test_scorecard_quality_chips_profit_factor_none_is_dash():
+    # profit_factor None (no losses yet) renders as the em-dash, never crashes.
+    chips = driver.scorecard_quality_chips(_perf(profit_factor=None))
+    d = {lbl: val for lbl, val in chips}
+    assert d["Profit factor"] == "—"
+
+
+def test_scorecard_quality_chips_empty_safe():
+    d = {lbl: val for lbl, val in driver.scorecard_quality_chips({})}
+    assert d["Profit factor"] == "—"     # missing → undefined → dash
+    assert d["Avg win"] == "$0.00"
+
+
+def test_scorecard_symbol_rows():
+    rows = driver.scorecard_symbol_rows(_perf())
+    by = {r["symbol"]: r for r in rows}
+    assert by["MU"]["trades"] == 2
+    assert by["MU"]["pnl"] == "+$70.00"
+    assert by["MU"]["win_rate"] == "50.0%"
+    assert by["SPY"]["pnl"] == "+$40.00"
+
+
+def test_scorecard_strategy_rows():
+    rows = driver.scorecard_strategy_rows(_perf())
+    assert rows[0]["strategy"] == "PCS"
+    assert rows[0]["pnl"] == "+$70.00"
+    assert rows[0]["win_rate"] == "50.0%"
+
+
+def test_scorecard_breakdown_rows_empty_and_none_safe():
+    assert driver.scorecard_symbol_rows({}) == []
+    assert driver.scorecard_symbol_rows(None) == []
+    assert driver.scorecard_strategy_rows({}) == []
+    # A losing bucket keeps its signed pnl.
+    rows = driver.scorecard_symbol_rows(
+        {"by_symbol": [{"symbol": "X", "trades": 1, "pnl": -30.0, "win_rate": 0.0}]})
+    assert rows[0]["pnl"] == "-$30.00"
+
+
+def test_best_worst_text():
+    txt = driver.best_worst_text(_perf())
+    assert "MU" in txt and "+$120.00" in txt        # best
+    assert "-$60.00" in txt                          # worst
+
+
+def test_best_worst_text_empty_safe():
+    assert driver.best_worst_text({}) == ""          # nothing closed yet
+    assert driver.best_worst_text(None) == ""
+
+
 # ── render smoke (monitor section builds without raising) ─────────────────────
 import bus_client  # noqa: E402
 
@@ -267,16 +364,16 @@ def test_render_monitor_from_seeded_autonomous_state():
 
 
 def test_render_monitor_shows_live_paper_pnl_when_autonomy_off():
-    """The monitor's Day P&L + positions come from the LIVE paper account
-    (cache:options:paper_account) even when autonomy is OFF — the reported bug.
+    """The monitor's Day P&L + positions come from the LIVE DRIVER paper account
+    (cache:options:driver_paper_account) even when autonomy is OFF — the reported bug.
 
     With autonomy never enabled there is no cache:driver:autonomous, so the old
-    code showed "—" forever; the P&L must instead come from the paper account the
-    driver actually trades into (and update as it reprices)."""
+    code showed "—" forever; the P&L must instead come from the isolated driver
+    paper account the autonomous loop actually trades into (and update as it reprices)."""
     from nicegui import ui
 
     bus_client.reset()  # no driver:control / driver:autonomous → autonomy never enabled
-    bus_client.bus().cache_set("cache:options:paper_account", {
+    bus_client.bus().cache_set("cache:options:driver_paper_account", {
         "has_account": True,
         "snapshot": {"session_pnl": 5.0, "realized_pnl": -333.0, "open_unrealized": 5.0,
                      "equity": 24672.0, "open_count": 2, "halted": False},
@@ -286,13 +383,49 @@ def test_render_monitor_shows_live_paper_pnl_when_autonomy_off():
             {"position_id": 2, "symbol": "SPY", "strategy": "CCS", "quantity": 1,
              "unrealized_pnl": 16.0, "status": "OPEN"}],
     })
-    pv = bus_client.read("options:paper_account")
+    pv = bus_client.read("options:driver_paper_account")
     s = driver.paper_summary(pv)
     assert s["has_account"] and s["session_pnl"] == 5.0 and s["open_count"] == 2
     assert driver.target_text(s["session_pnl"], 500.0) == "+$5.00 / $500.00"
     assert [r["symbol"] for r in driver.position_rows(pv.get("positions"))] == ["INTC", "SPY"]
     with ui.card():
-        driver.render()  # must not raise; the monitor paints from the paper account
+        driver.render()  # must not raise; the monitor paints from the driver account
+
+
+def test_render_monitor_shows_scorecard_from_driver_perf():
+    """The performance scorecard renders from cache:options:driver_paper_perf
+    (published every 5-min driver manage tick) — headline + quality + breakdowns."""
+    from nicegui import ui
+
+    bus_client.reset()
+    bus_client.bus().cache_set("cache:options:driver_paper_perf", {
+        "total_trades": 4, "open": 1, "closed": 3, "wins": 2, "losses": 1,
+        "win_rate": round(2 / 3, 4), "realized_pnl": 100.0, "open_unrealized": 15.0,
+        "total_pnl": 115.0, "session_pnl": 115.0, "avg_win": 80.0, "avg_loss": -60.0,
+        "profit_factor": 2.67,
+        "best": {"symbol": "MU", "strategy": "PCS", "realized_pnl": 120.0},
+        "worst": {"symbol": "MU", "strategy": "PCS", "realized_pnl": -60.0},
+        "by_symbol": [{"symbol": "MU", "trades": 2, "pnl": 70.0, "win_rate": 0.5}],
+        "by_strategy": [{"strategy": "PCS", "trades": 2, "pnl": 70.0, "win_rate": 0.5}],
+    })
+    perf = bus_client.read("options:driver_paper_perf")
+    chips = {lbl: val for lbl, val in driver.scorecard_headline_chips(perf)}
+    assert chips["Win rate"] == "66.7%" and chips["Total P&L"] == "+$115.00"
+    with ui.card():
+        driver.render()  # must not raise; the scorecard paints from the perf view
+
+
+def test_monitor_reads_driver_paper_account_not_manual():
+    """3-tier re-point: the monitor's live-P&L source is the DRIVER paper account
+    (cache:options:driver_paper_account), NOT the user's manual paper_account — so
+    the day-P&L bar / summary / positions reflect the driver's own isolated book."""
+    import inspect
+
+    src = inspect.getsource(driver.render)
+    assert 'read("options:driver_paper_account")' in src
+    assert 'read_version("options:driver_paper_account")' in src
+    # The monitor path must no longer read the manual account.
+    assert 'options:paper_account"' not in src
 
 
 def test_page_imports_no_engine_or_services():
