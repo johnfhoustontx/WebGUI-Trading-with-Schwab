@@ -8,7 +8,58 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-06-24 (**Autonomous Driver — strategy-agnostic Claude
+**Last updated:** 2026-06-25 (**Driver isolated paper account + performance
+scorecard**: the autonomous Driver now trades into — and measures itself against —
+its **own dedicated paper book** (`options-scanner/data/paper_account_driver.db`, new
+`repo_paths.DRIVER_PAPER_DB`, $25k start), fully isolated from the user's manual paper
+account. This fixes a latent **write/read split** found while investigating "where do
+the driver's trades show up?": the Driver **wrote** `paper_create` into System A (the
+flat LEDGER `trades.db` — no repricing/auto-manage/account, so its trades were inert
+rows and the `source="driver"` tag was silently dropped) but **read** its day-P&L /
+$500-target / halt from System B (the user's `paper_account.db` ENGINE account) — so it
+measured the **wrong book** and its trades never repriced. Now a new
+**`driver_paper_create`** command (`services/options_svc`) opens each guardrail
+survivor into `DRIVER_PAPER_DB` via the new `compute.open_driver_position(signal, qty)`
+(extracted from `paper_engine.run_entry_cycle`'s per-signal block — simulated fill →
+re-size on the ACTUAL fill credit → reserve BP → `insert_position`; the guardrail qty
+is a **CEILING**, `min(clamped, sized-on-fill)`; never raises), and the **5-min manage
+tick** reprices + auto-exits the driver account on the existing `manage_due` slot in its
+**OWN guarded branch** (`compute.run_driver_manage_cycle`) so a driver failure can't
+skip the manual refresh. options_svc publishes two new views:
+**`cache:options:driver_paper_account`** (snapshot + open positions — **NO rescue
+overlay**, that reads the manual book) and **`cache:options:driver_paper_perf`** (a PURE
+`driver_perf.build_scorecard`: # trades, open/closed, **win rate**, **profit factor**
+[None when no losses yet], avg win/loss, realized/unrealized/total P&L, best/worst,
+**P&L by symbol & by strategy**). `driver_svc` rewired: `run_autonomous_cycle` enqueues
+`driver_paper_create` (not `paper_create`), reads day-P&L + positions from the **DRIVER**
+account (`CACHE_OPT_DRIVER_PAPER`), and attaches the scorecard to the published
+**`AutonomousState.perf`** (new additive field); `build_packet`'s open-position
+attribution is correct-by-construction (the whole driver DB is the driver's; the dead
+`source=="driver"` filter falls back to the full account). The `/driver` **monitor
+re-points** its Day-P&L bar / summary / open positions to
+`cache:options:driver_paper_account` (was the manual `paper_account`) and gains a
+**Performance scorecard card** (headline + quality chips, best/worst, by-symbol /
+by-strategy tables) reading `cache:options:driver_paper_perf` (live — refreshes on the
+5-min tick, not just the 30-min cycle). **driver_svc must NOT import `paper_engine`**
+(it transitively pulls `scoring`/`signal_repricer` → the documented cross-app module
+collision) — all engine calls stay in options_svc; driver_svc only enqueues + reads
+cache. **Also this session** (supporting fixes, shipped): a **`DRIVER_MODEL`** override
+(env → gitignored `shared/driver_model.txt` → default `claude-opus-4-8`) so the decider
+runs e.g. `claude-sonnet-4-6` per-deployment; decision-log timestamps in **CST**
+(`to_central`); the Enable/Disable toggle hardened (optimistic state + timeout warning —
+the real "switch keeps turning off" cause was driver_svc being DOWN, i.e. no consumer
+for the enable command). New: `DRIVER_PAPER_DB`; `open_driver_position` /
+`run_driver_manage_cycle` / `driver_account_view` / `driver_account_perf` /
+`driver_perf.build_scorecard` (options_svc); `driver_paper_create` / `driver_paper_manage`
+/ `driver_paper_reset` commands + the two cache views; `AutonomousState.perf`. **PAPER
+ONLY** — `config.PAPER_TRADE` stays True; the driver never flips it. options_svc **285**
++ driver_svc **138** + contracts **35** + webgui **510** green (incl. a Redis-driven e2e
+proving a `driver_paper_create` lands ONLY in the driver DB — manual account untouched —
+and both views + the scorecard reflect it). Built subagent-by-subagent (TDD, two-stage
+spec+quality review per unit). Branch `Using_Highcharts`. Design/plan:
+[design](docs/plans/2026-06-25-driver-isolated-paper-account-design.md) /
+[plan](docs/plans/2026-06-25-driver-isolated-paper-account-plan.md).)
+Prior — 2026-06-24 (**Autonomous Driver — strategy-agnostic Claude
 decision layer (level B, paper)**: the `/driver` morning agent's hardcoded
 `trade_selector` rule tree (three fixed buckets — the reason only equity trades
 ever appeared: the SPX-options + MES-futures branches hit hardcoded gates and the
@@ -482,7 +533,7 @@ Routes:
 | `/sentiment` | Sentiment (two-column top: **dual** Sentiment gauges (Today + 30-Day Avg) + **dual** Market Trend gauges (Today live-intraday + 30-Day structural — directional 0–100 score, 15-min cadence) / component table; traffic-light tiles; 30d history + rolling avgs; full-width **Sector & Industry Performance** w/ Day/Week/Month %, P/C, RRG, rotation banner, **expandable industries w/ P/C+RRG**; bottom status bar; **persists across navigation**; **server-side 120s auto-refresh + bridge publish, tab-independent**) | built |
 | `/sentiment/rotation` | Sector Rotation (RRG-vs-SPY: Risk-ON/OFF headline + spread; **top row** = quadrant-map table (left) + tight ROTATING FROM/INTO w/ S&P weights (right); **full-width RRG below** w/ per-sector "meteor tails" — engine `assess_sector` retains a `tail` of `TAIL_LENGTH=12` RS-Ratio/RS-Mom points sampled every `TAIL_STRIDE=2` days; page draws **one spline series per sector** (faded trail line + single bright head dot) and **hover-isolates** a sector via native Highcharts `plotOptions.series.states.inactive` (hovering one dims the rest — no client round-trip); reuses `sector_rotation_assessment`; cached, **manual Refresh only**) | built |
 | `/trade` | Trade (on-demand single-symbol analysis: **Position (1–8wk)** + **Investor (months+)** Buy/Hold/Sell verdicts w/ score + top reasons + hard gates + expandable factor breakdown; **MTF EMA alignment** (per-timeframe); momentum strip (RSI/ADX/MACD/VWAP/RelVol); sector strength; **Fundamentals card** (P/E/PEG/growth/ROE/margins via proxy `/instruments`); **Markov Forecast card** (third **equal-width frame in the verdict row**, alongside Position + Investor: 5-band composite-score Markov chain → stacked-area band-probability forecast + P(BUY)/P(SELL)/E[score] at 5/10/20d + a bounded confidence-weighted drift-tilt `markov_adjusted_score` headline, verdict label unchanged; **chart plots the dense near-term `trajectory` now/1/2/3/5/10/20d** so it differs by score — the 5/10/20d tail converges to the bull-leaning prior stationary; chart is dark-navy themed); **dark-navy "dashboard" theme** (`.calc-v2` via shared `theme.py`, `items-start` compact cards); **tab-out (`focusout`) = Analyze** (deduped); **persists last analyzed symbol** + analysis across nav) | built |
-| `/driver` | Driver (**autonomous monitor + override** [level B]: a **Claude (Opus 4.8) decision layer** auto-selects/sizes **defined-risk option spreads (PCS/CCS/IC) from the scanner** (`cache:options:scan`) toward **net $500/day** in **paper**, gated by a **`cache:driver:control`** master switch + confirm-gated **STOP** kill-switch; the page shows day-P&L-vs-$500 progress, open-driver-positions, and a newest-first **decision-log** audit (`cache:driver:autonomous`), with **Enable/Disable** + **Run now**; 09:28-ET + 30-min-RTH checkpoints run `build_packet`→`decider.decide`→**`guardrails.apply_guardrails`** (PURE code clamps size + halts at banked-$500/loss-cap/VIX — the model never sizes its own risk)→`cmd:options` `paper_create`. **Legacy** morning-agent **order-approval queue** retained (gated off while autonomy is enabled): Run morning agent → graded day + proposed trades; **APPROVE** (confirm dialog) / **SKIP**; conditions strip + grade rationale; **Performance** view (win-rate / P&L-by-bucket + trade table). Orders simulated (`PAPER_TRADE=True`)) | built |
+| `/driver` | Driver (**autonomous monitor + override** [level B]: a **Claude decision layer** (Opus 4.8 default; `DRIVER_MODEL` env / `shared/driver_model.txt` override → e.g. Sonnet 4.6) auto-selects/sizes **defined-risk option spreads (PCS/CCS/IC) from the scanner** (`cache:options:scan`) toward **net $500/day** in **paper**, gated by a **`cache:driver:control`** master switch + confirm-gated **STOP** kill-switch; the page shows day-P&L-vs-$500 progress, open-driver-positions, a newest-first **decision-log** audit (`cache:driver:autonomous`, times in **CST**), and a **Performance scorecard** (win-rate / profit-factor / avg win-loss / P&L by symbol & strategy — `cache:options:driver_paper_perf`), all reading the Driver's **own isolated paper book** (`cache:options:driver_paper_account`, separate from the manual account), with **Enable/Disable** + **Run now**; 09:28-ET + 30-min-RTH checkpoints run `build_packet`→`decider.decide`→**`guardrails.apply_guardrails`** (PURE code clamps size + halts at banked-$500/loss-cap/VIX — the model never sizes its own risk)→`cmd:options` **`driver_paper_create`** (opens into the dedicated `paper_account_driver.db`, repriced + auto-exited on the 5-min manage tick — fully separate from the user's manual paper trades). **Legacy** morning-agent **order-approval queue** retained (gated off while autonomy is enabled): Run morning agent → graded day + proposed trades; **APPROVE** (confirm dialog) / **SKIP**; conditions strip + grade rationale; **Performance** view (win-rate / P&L-by-bucket + trade table). Orders simulated (`PAPER_TRADE=True`)) | built |
 | `/settings` | Settings (GUI prefs via `app_settings`: scanner **audio alert** on/off + sound + volume, only-during-market-hours, min-score-to-alert; desktop-notification toggle + permission grant + Test sound. Extensible — first batch) | built |
 | `/portfolio` | Portfolio (3-tier, `services/portfolio_svc` :8212: **Holdings / Sectors / Performance** tabs over the portfolio model — sector breakdown, vs-sector RS, since-purchase excess, benchmark over/under-weight, tailwind; **Performance** scorecard (return/capital/risk/entry grades + composite + ann. return + drawdown) with a per-position **advisory suggestions** detail pane; **live-streaming P&L** via the service's proxy SSE consumer republishing each tick; proxy/stream status bar; persists across nav) | built |
 | `/eod` · `/eod/detail` | EOD Report (pure-webgui aggregator: **Summary** rollup tiles + **Detailed** drill-down tables over the collected `options:*` + `driver:*` caches; **Generate** snapshots the caches → standalone `summary.html` + `detail.html` archived under `webgui/data/eod/<date>/`; in-app view + dated archive list; `/eod/file` serves archived files raw) | built |
@@ -720,7 +771,7 @@ stale); the proxy's REST market data works even when `/health` shows
 `token_expired:true` (auto-refresh) — only a missing/expired **refresh** token is
 fatal.
 
-**Tests:** `cd webgui && ..\.venv\Scripts\python -m pytest -q` (319 green as of
+**Tests:** `cd webgui && ..\.venv\Scripts\python -m pytest -q` (510 green as of
 this writing). TDD pure functions; smoke-verify `render()` with a screenshot.
 
 **Environment quirks to expect:**
@@ -1114,6 +1165,63 @@ clamps to 1 through the real pipeline; built subagent-by-subagent w/ per-unit TD
 spec/quality review). Design/plan:
 [design](docs/plans/2026-06-24-driver-autonomous-claude-decider-design.md) /
 [plan](docs/plans/2026-06-24-driver-autonomous-claude-decider-plan.md).
+
+**Driver isolated paper account + performance scorecard (`/driver`) — DONE
+(2026-06-25).** The autonomous Driver now trades into — and grades itself against — its
+**own dedicated paper book**, isolated from the user's manual paper account, so its real
+performance is measurable. This also fixed a latent **write/read split**: the Driver
+*wrote* `paper_create` into the flat LEDGER (`trades.db` — no repricing/auto-manage, so
+its trades were inert rows and its `source="driver"` tag was dropped) but *read* its
+day-P&L/$500-target/halt from the user's ENGINE account (`paper_account.db`) — measuring
+the wrong book and never repricing its own trades. Pieces:
+- **Dedicated account.** `repo_paths.DRIVER_PAPER_DB =
+  options-scanner/data/paper_account_driver.db` ($25k start). Every `paper_account_db`/
+  `paper_engine` fn already takes a `db_path`, so a second DB file is a fully independent
+  single-account store — **zero schema change** (the `CHECK(id=1)` single-account
+  constraint is sidestepped by using a separate file).
+- **`services/options_svc` (owns ALL `paper_engine` imports):**
+  `compute.open_driver_position(signal, qty)` (extracted from `run_entry_cycle`'s
+  per-signal block — simulated fill → re-size on the ACTUAL fill credit → reserve BP →
+  `paper_engine._record_order` (preserves the `entry_order_id` link) → `insert_position`;
+  the guardrail qty is a **CEILING**, `open_qty = min(clamped, sized-on-fill)`; never
+  raises); `run_driver_manage_cycle()` (`paper_engine.run_manage_cycle(db_path=
+  DRIVER_PAPER_DB)` — reprice + auto-exit + session roll + halt, try/except never-raise);
+  `driver_account_view()` / `driver_account_perf()`; the PURE
+  **`driver_perf.build_scorecard(positions, snapshot)`** (# trades, open/closed, **win
+  rate**, **profit factor** [None when no losses yet → render "—"], avg win/loss,
+  realized/unrealized/total P&L, best/worst [drawn from the None-pnl-excluded set],
+  **P&L by symbol & by strategy**). Handlers: `refresh_driver_paper` publishes **both**
+  views (**NO rescue overlay** — that reads the manual book) + `run_driver_manage_and_refresh`;
+  commands `driver_paper_create` / `driver_paper_manage` / `driver_paper_reset`.
+  Scheduler: the 5-min `manage_due` slot reprices the driver account in its **OWN guarded
+  branch** so a driver-side failure can't skip the manual refresh.
+- **`services/driver_svc` (engine-free re the paper account — only enqueues + reads
+  cache; it must NOT import `paper_engine`/`paper_account_db`, which transitively pull
+  `scoring`/`signal_repricer` → the documented cross-app module collision):**
+  `run_autonomous_cycle` enqueues **`driver_paper_create`** (not `paper_create`), reads
+  day-P&L + open positions from `cache:options:driver_paper_account`
+  (`CACHE_OPT_DRIVER_PAPER`), and attaches the scorecard (`cache:options:driver_paper_perf`)
+  to the published **`AutonomousState.perf`** (new additive field). `build_packet`
+  open-position attribution is correct-by-construction (the whole driver DB is the
+  driver's — the dead `source=="driver"` filter falls back to the full account).
+- **Cache views:** `cache:options:driver_paper_account` (snapshot + open positions) +
+  `cache:options:driver_paper_perf` (the scorecard) — published on each
+  `driver_paper_create` and every 5-min manage tick.
+- **Page** `webgui/pages/driver.py`: the monitor's Day-P&L bar / summary / open positions
+  **re-point** to `cache:options:driver_paper_account` (was the manual `paper_account`); a
+  new **Performance scorecard card** (pure builders `scorecard_headline_chips` /
+  `scorecard_quality_chips` / `scorecard_symbol_rows` / `scorecard_strategy_rows` /
+  `best_worst_text`) renders `cache:options:driver_paper_perf` directly (live — refreshes
+  on the 5-min tick, not just the 30-min cycle). Engine-free (3-tier rule).
+- **PAPER ONLY** — `config.PAPER_TRADE` stays True; the driver never flips it. The
+  historical ledger MU trades are left where they are (the driver starts fresh in its
+  dedicated account). options_svc **285** + driver_svc **138** + contracts **35** +
+  webgui **510** green (incl. a Redis-driven e2e proving `driver_paper_create` lands ONLY
+  in the driver DB — manual account untouched — and both views + the scorecard reflect it,
+  with a non-vacuity leak check). Built subagent-by-subagent (TDD, two-stage spec+quality
+  review per unit). Branch `Using_Highcharts`. Design/plan:
+  [design](docs/plans/2026-06-25-driver-isolated-paper-account-design.md) /
+  [plan](docs/plans/2026-06-25-driver-isolated-paper-account-plan.md).
 
 **Driver page (`/driver`) — DONE (2026-06-16, born 3-tier — Phase 5).** The
 order-approval queue was built directly on the 3-tier model. New service
@@ -1675,7 +1783,7 @@ cd sentiment-dashboard ; python -m pytest tests
 cd trade-analyzer      ; python -m pytest .
 cd portfolio-analyzer  ; python -m pytest tests
 cd claude-driver       ; python -m pytest .
-cd webgui              ; python -m pytest .   # 319 tests: transforms + shell smoke
+cd webgui              ; python -m pytest .   # 510 tests: transforms + shell smoke
 ```
 
 The 3-tier services run per folder from the repo root (NOT `pytest services` over
@@ -1685,12 +1793,12 @@ re-triggers the documented `config`/`scoring`/`notifier` module-name collisions)
 ```powershell
 # from the repo root, one service at a time
 .venv\Scripts\python -m pytest services\sentiment_svc   # 26
-.venv\Scripts\python -m pytest services\options_svc     # 124
+.venv\Scripts\python -m pytest services\options_svc     # 285
 .venv\Scripts\python -m pytest services\portfolio_svc   # 27
 .venv\Scripts\python -m pytest services\trade_svc       # 24
-.venv\Scripts\python -m pytest services\driver_svc      # 26
+.venv\Scripts\python -m pytest services\driver_svc      # 138
 .venv\Scripts\python -m pytest shared\bus               # 15
-.venv\Scripts\python -m pytest shared\contracts         # 21 (no app-dir imports — safe together)
+.venv\Scripts\python -m pytest shared\contracts         # 35 (no app-dir imports — safe together)
 ```
 
 - **options-scanner** has ~2 known date-relative failing tests carried over from
