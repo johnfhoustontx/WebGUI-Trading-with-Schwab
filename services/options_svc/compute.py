@@ -222,6 +222,75 @@ def driver_account_perf() -> dict:
     return driver_perf.build_scorecard(positions, snapshot)
 
 
+def open_driver_position(signal: dict, qty: int, broker=None) -> dict:
+    """Open ONE driver position into ``DRIVER_PAPER_DB`` at ``min(clamped qty,
+    fill-sized)``.
+
+    Adapts the per-signal open block of ``paper_engine.run_entry_cycle``
+    (size → submit → **re-size off the actual fill** → guard → reserve BP →
+    insert) for a single guardrail-approved signal, threading ``DRIVER_PAPER_DB``.
+
+    Qty reconciliation (load-bearing): the driver brings a guardrail-CLAMPED
+    ``qty``; the engine independently re-sizes off the ACTUAL fill credit
+    (``size_contracts(fill, width)``). We open at ``min(int(qty), sized)`` — the
+    clamp is a CEILING the engine can only size *down* from, never up.
+
+    Returns ``{"status": "opened"|"rejected"|"error", ...}``. NEVER raises — the
+    whole body is guarded so a bad signal/broker degrades to an error result.
+    The order row is recorded via ``paper_engine._record_order`` (the same path
+    the manual entry cycle uses) so ``entry_order_id`` links to the position.
+    """
+    import config_paper
+    import paper_account_db
+    import paper_broker
+    import paper_engine
+    import paper_sizing
+
+    broker = broker or paper_broker            # module exposes submit_order(order, client)
+    try:
+        ensure_driver_account()
+        if paper_account_db.get_account(DRIVER_PAPER_DB)["halted"]:
+            return {"status": "rejected", "reason": "halted"}
+        order = {"signal_id": signal["signal_id"], "symbol": signal["symbol"],
+                 "side": "SELL_TO_OPEN", "strategy": signal["strategy"],
+                 "short_strike": signal["short_strike"], "long_strike": signal["long_strike"],
+                 "call_short": signal.get("call_short"), "call_long": signal.get("call_long"),
+                 "expiration": signal["expiration"], "quantity": int(qty),
+                 "limit_price": signal["entry_credit"], "legs": []}
+        resp = broker.submit_order(order, _proxy.schwab_py_client)
+        if resp.get("status") != "FILLED":
+            return {"status": "rejected", "reason": resp.get("status")}
+        fill = resp["price"]
+        # Reject garbage opening-auction fills (a real credit spread never fills
+        # at a near-zero / negative net credit).
+        if fill < config_paper.MIN_FILL_CREDIT:
+            return {"status": "rejected", "reason": "LOW_CREDIT"}
+        # Re-size on the ACTUAL fill credit (keeps realized risk within the cap).
+        sized, max_loss_per = paper_sizing.size_contracts(fill, signal["width"])
+        open_qty = min(int(qty), sized)        # the guardrail clamp is a CEILING
+        if max_loss_per <= 0 or open_qty < 1:
+            return {"status": "rejected", "reason": "RISK_TOO_HIGH"}
+        max_loss_total = round(max_loss_per * open_qty, 2)
+        if max_loss_total > paper_account_db.get_account(DRIVER_PAPER_DB)["cash"]:
+            return {"status": "rejected", "reason": "INSUFFICIENT_BUYING_POWER"}
+        order["quantity"] = open_qty           # persist the re-sized qty actually opened
+        oid = paper_engine._record_order(DRIVER_PAPER_DB, order, resp)
+        paper_account_db.reserve_buying_power(DRIVER_PAPER_DB, max_loss_total)
+        paper_account_db.insert_position(DRIVER_PAPER_DB, {
+            "signal_id": signal["signal_id"], "symbol": signal["symbol"],
+            "strategy": signal["strategy"], "short_strike": signal["short_strike"],
+            "long_strike": signal["long_strike"], "call_short": signal.get("call_short"),
+            "call_long": signal.get("call_long"), "width": signal["width"],
+            "expiration": signal["expiration"], "dte_at_entry": signal.get("dte_at_entry", 0),
+            "quantity": open_qty, "entry_credit": fill, "entry_order_id": oid,
+            "max_loss_per": max_loss_per, "max_loss_total": max_loss_total,
+            "entry_ts": resp["enteredTime"]})
+        return {"status": "opened", "symbol": signal["symbol"], "qty": open_qty,
+                "entry_credit": fill, "max_loss_total": max_loss_total}
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "error", "error": str(exc)}
+
+
 def run_entry_cycle() -> None:
     """Run the paper auto-entry cycle: scan open captured signals, open positions.
 
