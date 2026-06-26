@@ -130,3 +130,13 @@ def test_autonomous_state_rejects_wrong_type():
         AutonomousState.from_json('{"positions": "nope"}')
     with pytest.raises(Exception):
         AutonomousState.from_json('{"decisions": "nope"}')
+
+
+def test_autonomous_state_perf_field():
+    # The driver-account performance scorecard rides the monitor view (additive,
+    # loose dict — like ``conditions`` on ApprovalState).
+    s = AutonomousState(perf={"win_rate": 0.5, "total_trades": 4})
+    assert s.perf["win_rate"] == 0.5
+    assert AutonomousState().perf == {}            # additive default
+    back = AutonomousState.from_json(s.to_json())
+    assert back.perf["total_trades"] == 4
