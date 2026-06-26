@@ -898,12 +898,17 @@ def render():
     def _prefill(sig):
         """Populate inputs from a scanner/swing signal (Send to Calculator).
 
-        Builds the legs from the signal's strike/mark fields and pushes them onto
-        the shared leg-editor (each leg at the signal's expiry, qty 1).
+        Builds the legs from the signal's strike/mark fields and stashes them as
+        ``pending_legs``, then **loads the symbol's chain** — the legs are applied
+        (and the grid computed) once the chain arrives, in ``_apply_chain``. This
+        mirrors the Copy-from-Simulator path: applying legs BEFORE the chain loads
+        wiped every strike, because the leg-editor coerces each strike against the
+        cached chain's strike ladder (empty pre-load → strike cleared to None) —
+        which is exactly the "legs don't transfer" bug.
 
         Note: ``oc.generate_price_range`` is gone from the page, so the Range
-        min/max are NOT pre-filled here (left at 0/0); ``calc_compute`` falls back
-        to ``generate_price_range`` server-side at the Range %."""
+        min/max are NOT pre-filled here; ``calc_compute`` derives the grid rows
+        from the loaded chain's strike ladder."""
         t = sig.get("type")
         if t in strategy_options():
             strategy_sel.value = t        # also re-seeds the template via on_change
@@ -935,13 +940,10 @@ def render():
             legs.append({"option_type": otype, "side": side,
                          "strike": float(strike), "expiry": exp, "qty": 1,
                          "premium": round(mark, 2) if mark else None})
-        if legs:
-            editor.set_legs(legs)
-        try:
-            do_calc()
-        except Exception:
-            pass
-        ui.notify(f"Loaded {sym} {t} from scanner.", type="positive")
+        # Apply once the chain lands (valid strikes); load_symbol enqueues calc_load.
+        state["pending_legs"] = legs or None
+        load_symbol()
+        ui.notify(f"Loaded {sym} {t} from scanner — loading chain…", type="positive")
 
     _pending = handoff.take_pending_calculator()
     if _pending:

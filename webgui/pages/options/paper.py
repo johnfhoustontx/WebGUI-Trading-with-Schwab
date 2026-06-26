@@ -72,13 +72,71 @@ def paper_columns():
     spec = [
         ("symbol", "Symbol"), ("strategy", "Strat"),
         ("strikes", "Strikes"), ("expiration", "Exp"), ("quantity", "Qty"),
-        ("entry_credit_total", "Credit$"), ("max_loss_total", "Risk$"),
-        ("realized_pnl", "P&L$"), ("status", "Status"), ("entry_time", "Entry"),
+        ("entry_credit_total", "Credit"), ("max_loss_total", "Risk"),
+        ("pnl", "P&L"), ("status", "Status"), ("entry_time", "Entry"),
     ]
     cols = [{"name": f, "label": lbl, "field": f, "sortable": True, "align": "left"}
             for f, lbl in spec]
     cols.append({"name": "actions", "label": "", "field": "actions", "align": "center"})
     return cols
+
+
+# P&L cell colors (green profit / red loss / grey flat-or-unknown).
+PNL_GREEN, PNL_RED, PNL_NEUTRAL, PNL_AMBER = "#66bb6a", "#ef5350", "#bdbdbd", "#ffa726"
+
+# Verdict action → chip color for the Analyze popup.
+_VERDICT_COLORS = {"TAKE PROFIT": PNL_GREEN, "HOLD": PNL_AMBER,
+                   "CLOSE": PNL_RED, "EXPIRED": PNL_NEUTRAL}
+
+
+def verdict_color(action):
+    """Chip color for an Analyze verdict action (green take-profit / amber hold /
+    red close / grey otherwise)."""
+    return _VERDICT_COLORS.get((action or "").strip().upper(), PNL_NEUTRAL)
+
+
+def analyze_popup_rows(res):
+    """[(label, text, color), ...] metric rows for the Analyze popup, built from the
+    enriched ``paper_analyze`` result's ``metrics`` block. Skips absent metrics so
+    the popup only shows what's actually available."""
+    m = (res or {}).get("metrics") or {}
+    rows = []
+    pnl = m.get("unrealized_pnl")
+    if isinstance(pnl, (int, float)):
+        rows.append(("Unrealized P&L", f"{pnl:+,.2f}", pnl_color(pnl)))
+    pct = m.get("unrealized_pnl_pct")
+    if isinstance(pct, (int, float)):
+        rows.append(("% of max profit", f"{pct:+.1f}%", PNL_NEUTRAL))
+    und = m.get("underlying_now")
+    if isinstance(und, (int, float)):
+        rows.append(("Current price", f"{und:,.2f}", PNL_NEUTRAL))
+    dte = m.get("dte_remaining")
+    if dte is not None:
+        rows.append(("DTE remaining", str(dte), PNL_NEUTRAL))
+    tgt = m.get("target_pct")
+    if isinstance(tgt, (int, float)):
+        rows.append(("Profit target", f"{tgt:.0f}%", PNL_NEUTRAL))
+    be = m.get("breakeven")
+    if isinstance(be, (int, float)):
+        rows.append(("Breakeven", f"{be:,.2f}", PNL_NEUTRAL))
+    return rows
+
+
+def pnl_color(v):
+    """Hex color for a P&L value: green > 0, red < 0, grey for 0 / None."""
+    if not isinstance(v, (int, float)) or v == 0:
+        return PNL_NEUTRAL
+    return PNL_GREEN if v > 0 else PNL_RED
+
+
+def trade_pnl(t):
+    """Display P&L for a ledger trade: realized when closed, live unrealized when
+    OPEN (attached by the service's reprice). None when unavailable (e.g. an open
+    trade not yet repriced / off-hours with no live chain)."""
+    t = t or {}
+    v = t.get("unrealized_pnl") if (t.get("status") or "").upper() == "OPEN" \
+        else t.get("realized_pnl")
+    return v if isinstance(v, (int, float)) else None
 
 
 def _strikes(t):
@@ -92,6 +150,7 @@ def _strikes(t):
 def paper_rows(trades):
     rows = []
     for t in trades or []:
+        pnl = trade_pnl(t)
         rows.append({
             "id": t.get("trade_id"),
             "trade_id": t.get("trade_id"),
@@ -102,7 +161,8 @@ def paper_rows(trades):
             "quantity": t.get("quantity"),
             "entry_credit_total": _round(t.get("entry_credit_total")),
             "max_loss_total": _round(t.get("max_loss_total")),
-            "realized_pnl": _round(t.get("realized_pnl")),
+            "pnl": _round(pnl),
+            "_pnl_color": pnl_color(pnl),
             "status": t.get("status", ""),
             # Trim to seconds and show "YYYY-MM-DD HH:MM:SS" (drop the ISO 'T').
             "entry_time": (t.get("entry_time") or "")[:19].replace("T", " "),
@@ -110,6 +170,9 @@ def paper_rows(trades):
             # when the trade carries no rescue_state (the usual case).
             "_rescue_color": rescue_highlight(t.get("rescue_state"), t.get("heat")),
         })
+    # Newest trades on top by default (entry_time is a sortable ISO string; rows
+    # with no time sort last). The columns stay click-sortable from here.
+    rows.sort(key=lambda r: r.get("entry_time") or "", reverse=True)
     return rows
 
 
@@ -186,8 +249,9 @@ def render():
 
     raw_by_id: dict = {}
     # sel_id: selected trade (set by row click — no checkbox); live: {trade_id:
-    # live-analyze detail} overlay cache.
-    state = {"sel_id": None, "live": {}}
+    # live-analyze detail} overlay cache. analyze_popup_for: trade_id awaiting the
+    # Analyze-button popup (row-click analyses update the panel silently).
+    state = {"sel_id": None, "live": {}, "analyze_popup_for": None}
 
     with ui.row().classes("w-full no-wrap gap-4 items-start"):
         with ui.column().classes("flex-grow min-w-0"):
@@ -210,17 +274,36 @@ def render():
                 <span v-else>{{ props.value }}</span>
               </q-td>
             ''')
-            # Action buttons live BELOW the table (solid 3D).
+            # Credit / Risk show 2 decimals (numeric value kept for sorting).
+            for _f in ("entry_credit_total", "max_loss_total"):
+                table.add_slot(f'body-cell-{_f}', r'''
+                  <q-td :props="props" class="text-right">
+                    {{ props.value == null ? '—' : Number(props.value).toFixed(2) }}
+                  </q-td>
+                ''')
+            # P&L: 2 decimals, signed, green/red/grey (color from _pnl_color).
+            table.add_slot('body-cell-pnl', r'''
+              <q-td :props="props" class="text-right">
+                <span v-if="props.value == null">—</span>
+                <span v-else :style="`color:${props.row._pnl_color};font-weight:600`">
+                  {{ (props.value >= 0 ? '+' : '') + Number(props.value).toFixed(2) }}
+                </span>
+              </q-td>
+            ''')
+            # Action buttons live BELOW the table (solid 3D). color=None drops
+            # Quasar's bg-primary so the .pt-btn gradient (blue) / .pt-danger (red)
+            # actually paint — WITHOUT it, bg-primary wins and every button reads
+            # solid blue (which is why Delete didn't look red).
             with ui.row().classes("items-center gap-3 flex-wrap q-mt-md"):
-                ui.button("Reload", icon="refresh",
+                ui.button("Reload", icon="refresh", color=None,
                           on_click=lambda: _reload()).props("no-caps").classes("pt-btn")
-                ui.button("Close", icon="check_circle",
+                ui.button("Close", icon="check_circle", color=None,
                           on_click=lambda: _close()).props("no-caps").classes("pt-btn")
-                ui.button("Analyze", icon="biotech",
+                ui.button("Analyze", icon="biotech", color=None,
                           on_click=lambda: _analyze()).props("no-caps").classes("pt-btn")
-                ui.button("Delete", icon="delete",
+                ui.button("Delete", icon="delete", color=None,
                           on_click=lambda: _delete()).props("no-caps").classes("pt-btn pt-danger")
-                ui.button("Delete all closed", icon="delete_sweep",
+                ui.button("Delete all closed", icon="delete_sweep", color=None,
                           on_click=lambda: _delete_closed()).props("no-caps").classes("pt-btn pt-danger")
         detail_panel = detail.render()
 
@@ -334,11 +417,41 @@ def render():
         ui.notify("Delete-all-closed requested.", type="positive")
         status.text = "Deleting closed…"
 
+    def _show_analyze_popup(res):
+        """Descriptive Analyze dialog (verdict + rationale + metrics + close X) —
+        replaces the old one-word toast."""
+        res = res or {}
+        action = res.get("action", "—")
+        with ui.dialog() as dlg, ui.card().classes("min-w-[360px] max-w-[460px] gap-2"):
+            with ui.row().classes("items-center justify-between w-full no-wrap"):
+                ui.label(f"{res.get('symbol', '')} · Trade Analysis") \
+                    .classes("text-subtitle1 font-bold")
+                ui.button(icon="close", on_click=dlg.close).props("flat round dense")
+            ui.label(action).classes("text-weight-bold q-px-sm q-py-xs rounded-borders") \
+                .style(f"background:{verdict_color(action)};color:#111;width:fit-content")
+            if res.get("rationale"):
+                ui.label(res["rationale"]).classes("text-sm")
+            if res.get("note"):
+                ui.label(res["note"]).classes("text-sm opacity-70")
+            rows = analyze_popup_rows(res)
+            if rows:
+                with ui.column().classes("w-full gap-1 q-mt-sm"):
+                    for label, text, color in rows:
+                        with ui.row().classes("justify-between w-full no-wrap"):
+                            ui.label(label).classes("opacity-70 text-sm")
+                            ui.label(text).classes("text-sm text-weight-medium") \
+                                .style(f"color:{color}")
+            ui.button("Close", on_click=dlg.close).props("flat").classes("self-end")
+        dlg.open()
+
     @guard
     def _analyze():
         t = _selected_trade()
         if not t:
             return
+        # Mark this trade so its analyze RESULT pops the descriptive dialog (row
+        # clicks analyze too, but only update the panel — no popup).
+        state["analyze_popup_for"] = t.get("trade_id")
         bus_client.request("options",
                            {"type": "paper_analyze", "args": {"trade_id": t.get("trade_id")}})
         ui.notify(f"Analyzing {t.get('symbol')}…")
@@ -370,11 +483,11 @@ def render():
             if tid and tid == state.get("sel_id") and tid in raw_by_id:
                 _render_detail(raw_by_id[tid])
             status.text = f"{len(table.rows)} trades." if table.rows else ""
-            # Prefer the service's specific reason (e.g. "Expired … — no live
-            # option chain") over a vague generic; fall back only if absent.
-            reason = res.get("note") or ("" if det else "live data unavailable")
-            suffix = f" — {reason}" if reason else ""
-            ntype = "warning" if (reason and not det) else "info"
-            ui.notify(f"{res.get('symbol')}: {res.get('action', '—')}{suffix}", type=ntype)
+            # If this result was triggered by the Analyze BUTTON, pop the
+            # descriptive dialog (verdict + rationale + metrics). Row-click
+            # analyses update the detail panel silently (no popup).
+            if tid and tid == state.get("analyze_popup_for"):
+                state["analyze_popup_for"] = None
+                _show_analyze_popup(res)
 
     ui.timer(2.0, _maybe_repaint)

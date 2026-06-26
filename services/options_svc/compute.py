@@ -250,6 +250,18 @@ def open_driver_position(signal: dict, qty: int, broker=None) -> dict:
 
     broker = broker or paper_broker            # module exposes submit_order(order, client)
     try:
+        # Normalize the signal shape. The driver feeds RAW scanner signals
+        # (cache:options:scan), which key structure under ``type``, credit under
+        # ``credit``, and id under ``id`` — but this engine path (lifted from the
+        # captured-DB entry cycle) reads ``strategy``/``entry_credit``/``signal_id``.
+        # Without this map every driver open KeyError'd on 'signal_id' and silently
+        # degraded to status=error, so NOTHING ever landed in the driver account
+        # (the decision log showed "executed" — only the ENQUEUE — but no position).
+        signal = dict(signal)
+        signal.setdefault("signal_id", signal.get("id"))
+        signal.setdefault("strategy", signal.get("type"))
+        signal.setdefault("entry_credit", signal.get("credit"))
+        signal.setdefault("dte_at_entry", signal.get("dte", 0))
         ensure_driver_account()
         # Clear a STALE (prior-day) drawdown halt before checking it: a new session
         # un-halts + resets the daily counters. Idempotent (no-op if already today),
@@ -368,17 +380,65 @@ def has_paper_account() -> bool:
 # ``_proxy.schwab_py_client`` (mirrors the page).
 
 
-def paper_trades_view() -> dict:
+def _reprice_open_pnl(trades) -> None:
+    """Attach a live ``unrealized_pnl`` (total $, = per-spread × qty) to each OPEN
+    trade IN PLACE via ``signal_repricer.reprice_swing``.
+
+    Ledger trades carry exactly the fields ``reprice_swing`` reads
+    (strategy/short_strike/long_strike/entry_credit/call_short/call_long/symbol/
+    expiration), and it shares a per-(symbol, expiration) chain cache so trades on
+    the same chain reuse one fetch. Fully defensive per-trade — a reprice failure
+    leaves that trade's P&L blank, never raises. Caller gates on market hours so
+    off-hours (no live chain) we skip the proxy churn entirely."""
+    import signal_repricer
+
+    try:
+        signal_repricer.clear_chain_cache()   # fresh marks each publish
+    except Exception:
+        pass
+    for t in trades or []:
+        if (t.get("status") or "").upper() != "OPEN":
+            continue
+        try:
+            rep = signal_repricer.reprice_swing(t, _proxy.schwab_py_client)
+        except Exception:
+            continue
+        per = (rep or {}).get("unrealized_pnl")     # per-spread $ P&L
+        if per is None:
+            continue
+        try:
+            t["unrealized_pnl"] = round(per * int(t.get("quantity") or 1), 2)
+        except (TypeError, ValueError):
+            continue
+
+
+def paper_trades_view(reprice: bool = False) -> dict:
     """Read the paper-trade ledger view: ``{"trades": [...]}``.
 
-    Defensively guarded → ``{"trades": []}`` on any failure, mirroring the page's
-    per-read try/except. The GUI tier reads this cached view directly."""
+    With ``reprice=True`` (and only during market hours), each OPEN trade gets a
+    live ``unrealized_pnl`` so the Paper Trades page can show running P&L instead
+    of a blank column. Defensively guarded → ``{"trades": []}`` on any failure,
+    mirroring the page's per-read try/except. The GUI tier reads this cached view
+    directly."""
     import paper_trader
 
     try:
-        return {"trades": paper_trader.get_all_trades()}
+        trades = paper_trader.get_all_trades()
     except Exception:
         return {"trades": []}
+    if reprice:
+        try:
+            from . import scheduler
+            market_open = scheduler._is_trading_day(scheduler._market_now()) \
+                and scheduler._is_market_hours(scheduler._market_now())
+        except Exception:
+            market_open = True   # if the gate can't be evaluated, attempt it
+        if market_open:
+            try:
+                _reprice_open_pnl(trades)
+            except Exception:
+                pass
+    return {"trades": trades}
 
 
 def create_paper_trade(signal: dict, qty: int) -> dict:
@@ -510,10 +570,24 @@ def analyze_paper(trade_id) -> dict:
     except Exception as exc:
         result = None
         note = f"Live data unavailable: {exc}"
+    verdict = (result or {}).get("verdict") or {}
+    pos = (result or {}).get("position") or {}
+    ptarget = (result or {}).get("profit_target") or {}
     return {
         "trade_id": trade_id,
         "symbol": t.get("symbol"),
-        "action": ((result or {}).get("verdict") or {}).get("action", "—"),
+        "action": verdict.get("action", "—"),
+        # Descriptive fields for the Analyze popup (additive; the page falls back
+        # gracefully when they're absent).
+        "rationale": verdict.get("rationale"),
+        "metrics": {
+            "unrealized_pnl": pos.get("unrealized_pnl"),
+            "unrealized_pnl_pct": pos.get("unrealized_pnl_pct"),
+            "underlying_now": pos.get("underlying_now"),
+            "dte_remaining": pos.get("dte_remaining"),
+            "target_pct": ptarget.get("target_pct"),
+            "breakeven": ptarget.get("breakeven"),
+        },
         "detail": _analyze_detail(result),
         "note": note,
     }

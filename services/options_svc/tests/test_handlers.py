@@ -246,6 +246,9 @@ def test_run_manage_and_refresh_runs_cycle_when_account_present(monkeypatch):
                         lambda: calls.__setitem__("manage", calls["manage"] + 1))
     monkeypatch.setattr(handlers, "refresh_paper_account",
                         lambda b: calls.__setitem__("refresh", calls["refresh"] + 1))
+    # Isolate from the ledger reprice the manage tick now piggybacks (else it hits
+    # the real proxy/DB).
+    monkeypatch.setattr(handlers, "refresh_paper_trades", lambda b, **k: None)
 
     handlers.run_manage_and_refresh(bus)
     assert calls["manage"] == 1 and calls["refresh"] == 1
@@ -259,6 +262,7 @@ def test_run_manage_and_refresh_skips_cycle_when_no_account(monkeypatch):
                         lambda: calls.__setitem__("manage", calls["manage"] + 1))
     monkeypatch.setattr(handlers, "refresh_paper_account",
                         lambda b: calls.__setitem__("refresh", calls["refresh"] + 1))
+    monkeypatch.setattr(handlers, "refresh_paper_trades", lambda b, **k: None)
 
     handlers.run_manage_and_refresh(bus)
     assert calls["manage"] == 0 and calls["refresh"] == 1
@@ -295,7 +299,7 @@ def _fake_trades_view():
 def test_refresh_paper_trades_caches_publishes(monkeypatch):
     bus = Bus(fake=True)
     view = _fake_trades_view()
-    monkeypatch.setattr(handlers.compute, "paper_trades_view", lambda: view)
+    monkeypatch.setattr(handlers.compute, "paper_trades_view", lambda reprice=True: view)
 
     sub = bus.subscribe("events:options:paper_trades")
     handlers.refresh_paper_trades(bus)
@@ -357,7 +361,7 @@ def test_paper_create_command(monkeypatch):
                         lambda signal, qty: seen.__setitem__("create", (signal, qty)))
     # paper_create refreshes the real ledger view -> stub the underlying compute
     # read so refresh_paper_trades caches a deterministic payload.
-    monkeypatch.setattr(handlers.compute, "paper_trades_view", lambda: view)
+    monkeypatch.setattr(handlers.compute, "paper_trades_view", lambda reprice=True: view)
 
     sub = bus.subscribe("events:options:paper_trades")
     signal = {"symbol": "SPY", "type": "PCS", "short_strike": 530}
@@ -382,7 +386,7 @@ def test_paper_create_defaults_qty(monkeypatch):
 
     monkeypatch.setattr(handlers.compute, "create_paper_trade",
                         lambda signal, qty: seen.__setitem__("create", (signal, qty)))
-    monkeypatch.setattr(handlers.compute, "paper_trades_view", lambda: {"trades": []})
+    monkeypatch.setattr(handlers.compute, "paper_trades_view", lambda reprice=True: {"trades": []})
 
     signal = {"symbol": "QQQ", "type": "CCS"}
     handlers.handle_command(bus, Command(type="paper_create", args={"signal": signal}))

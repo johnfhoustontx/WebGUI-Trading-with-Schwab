@@ -23,7 +23,78 @@ TRADE = {
 
 def test_paper_columns_have_keys():
     fields = {c["field"] for c in paper.paper_columns()}
-    assert {"symbol", "strategy", "quantity", "status", "realized_pnl"} <= fields
+    assert {"symbol", "strategy", "quantity", "status", "pnl"} <= fields
+
+
+def test_paper_columns_renamed_headers():
+    """Credit$/Risk$/P&L$ drop the '$' (dollars are implied by the values)."""
+    labels = {c["field"]: c["label"] for c in paper.paper_columns()}
+    assert labels["entry_credit_total"] == "Credit"
+    assert labels["max_loss_total"] == "Risk"
+    assert labels["pnl"] == "P&L"
+
+
+def test_paper_rows_latest_first():
+    """Default order is newest entry_time on top."""
+    trades = [
+        {"trade_id": "old", "symbol": "A", "entry_time": "2026-06-01T09:00:00"},
+        {"trade_id": "new", "symbol": "B", "entry_time": "2026-06-10T09:00:00"},
+        {"trade_id": "mid", "symbol": "C", "entry_time": "2026-06-05T09:00:00"},
+    ]
+    assert [r["id"] for r in paper.paper_rows(trades)] == ["new", "mid", "old"]
+
+
+def test_paper_rows_pnl_open_uses_unrealized():
+    t = {"trade_id": "o", "status": "OPEN", "unrealized_pnl": 123.4, "realized_pnl": None}
+    assert paper.paper_rows([t])[0]["pnl"] == 123.4
+
+
+def test_paper_rows_pnl_closed_uses_realized():
+    t = {"trade_id": "c", "status": "CLOSED", "realized_pnl": -50.0, "unrealized_pnl": 999}
+    assert paper.paper_rows([t])[0]["pnl"] == -50.0
+
+
+def test_paper_rows_pnl_none_when_open_unpriced():
+    t = {"trade_id": "u", "status": "OPEN", "realized_pnl": None}
+    assert paper.paper_rows([t])[0]["pnl"] is None
+
+
+def test_pnl_color():
+    assert paper.pnl_color(10) == "#66bb6a"
+    assert paper.pnl_color(-10) == "#ef5350"
+    assert paper.pnl_color(0) == "#bdbdbd"
+    assert paper.pnl_color(None) == "#bdbdbd"
+
+
+# ── Analyze popup helpers ────────────────────────────────────────────────────
+def test_verdict_color():
+    assert paper.verdict_color("TAKE PROFIT") == "#66bb6a"
+    assert paper.verdict_color("hold") == "#ffa726"
+    assert paper.verdict_color("CLOSE") == "#ef5350"
+    assert paper.verdict_color("—") == "#bdbdbd"
+    assert paper.verdict_color(None) == "#bdbdbd"
+
+
+def test_analyze_popup_rows_builds_available_metrics():
+    res = {"metrics": {"unrealized_pnl": 120.5, "unrealized_pnl_pct": 33.0,
+                       "underlying_now": 515.76, "dte_remaining": 6,
+                       "target_pct": 65.0, "breakeven": 510.0}}
+    rows = paper.analyze_popup_rows(res)
+    by_label = {r[0]: r[1] for r in rows}
+    assert by_label["Unrealized P&L"] == "+120.50"
+    assert by_label["% of max profit"] == "+33.0%"
+    assert by_label["Current price"] == "515.76"
+    assert by_label["DTE remaining"] == "6"
+    assert by_label["Profit target"] == "65%"
+    assert by_label["Breakeven"] == "510.00"
+    # P&L row carries a green color for a profit.
+    pnl_row = next(r for r in rows if r[0] == "Unrealized P&L")
+    assert pnl_row[2] == "#66bb6a"
+
+
+def test_analyze_popup_rows_skips_absent_metrics():
+    assert paper.analyze_popup_rows({}) == []
+    assert paper.analyze_popup_rows({"metrics": {"unrealized_pnl": None}}) == []
 
 
 def test_paper_rows_maps_and_keeps_id():

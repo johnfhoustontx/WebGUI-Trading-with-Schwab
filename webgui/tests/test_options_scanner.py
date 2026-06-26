@@ -132,6 +132,16 @@ def test_stamp_new_sets_flag_from_keys():
     assert by_sym["BBB"]["_new"] is True
 
 
+# ── tab header counts ────────────────────────────────────────────────────────
+def test_tab_label_appends_count():
+    assert scanner.tab_label("0-DTE", 3) == "0-DTE (3)"
+    assert scanner.tab_label("Swing", 0) == "Swing (0)"
+
+
+def test_tab_label_no_count_when_none():
+    assert scanner.tab_label("0-DTE", None) == "0-DTE"
+
+
 # ── bottom status line ───────────────────────────────────────────────────────
 def test_status_line_waiting_when_empty():
     assert scanner.status_line({}) == "Waiting for options service…"

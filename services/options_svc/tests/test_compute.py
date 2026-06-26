@@ -421,6 +421,96 @@ def test_analyze_paper_note_none_on_success(monkeypatch):
     assert out["action"] == "HOLD" and out["note"] is None
 
 
+def test_analyze_paper_includes_rationale_and_metrics(monkeypatch):
+    """The enriched result carries the verdict rationale + a metrics block so the
+    Paper Trades Analyze popup can be descriptive (not a one-word toast)."""
+    import sys as _sys
+    import types as _types
+
+    trade = {"trade_id": "T1", "symbol": "AMD", "expiration": "2090-01-01",
+             "short_strike": 500, "strategy": "PCS"}
+    monkeypatch.setitem(_sys.modules, "paper_trader",
+                        _types.SimpleNamespace(get_all_trades=lambda: [trade]))
+    result = {
+        "verdict": {"action": "TAKE PROFIT", "rationale": "80% captured — take the win"},
+        "position": {"unrealized_pnl": 1680.0, "unrealized_pnl_pct": 65.0,
+                     "underlying_now": 522.36, "dte_remaining": 6},
+        "profit_target": {"target_pct": 65.0, "breakeven": 495.5},
+        "greeks": {"current": {}}, "market": {},
+    }
+    monkeypatch.setitem(_sys.modules, "trade_analyzer",
+                        _types.SimpleNamespace(analyze_trade=lambda c, t, i: result))
+
+    out = compute.analyze_paper("T1")
+    assert out["action"] == "TAKE PROFIT"
+    assert out["rationale"] == "80% captured — take the win"
+    m = out["metrics"]
+    assert m["unrealized_pnl"] == 1680.0 and m["unrealized_pnl_pct"] == 65.0
+    assert m["underlying_now"] == 522.36 and m["dte_remaining"] == 6
+    assert m["target_pct"] == 65.0 and m["breakeven"] == 495.5
+
+
+# ── Paper-trade ledger live P&L reprice ─────────────────────────────────────
+def test_paper_trades_view_reprices_open_total_pnl(monkeypatch):
+    """reprice=True (market open) attaches a live unrealized_pnl = per-spread × qty
+    to OPEN trades only; closed trades are untouched."""
+    import sys as _sys
+    import types as _types
+
+    from services.options_svc import scheduler
+
+    trades = [
+        {"trade_id": "o", "symbol": "SPY", "status": "OPEN", "quantity": 10},
+        {"trade_id": "c", "symbol": "QQQ", "status": "CLOSED", "quantity": 5},
+    ]
+    monkeypatch.setitem(_sys.modules, "paper_trader",
+                        _types.SimpleNamespace(get_all_trades=lambda: trades))
+    monkeypatch.setitem(_sys.modules, "signal_repricer", _types.SimpleNamespace(
+        clear_chain_cache=lambda: None,
+        reprice_swing=lambda t, client: {"unrealized_pnl": 3.0}))  # per-spread $
+    monkeypatch.setattr(scheduler, "_is_trading_day", lambda now: True)
+    monkeypatch.setattr(scheduler, "_is_market_hours", lambda now: True)
+
+    by_id = {t["trade_id"]: t for t in compute.paper_trades_view(reprice=True)["trades"]}
+    assert by_id["o"]["unrealized_pnl"] == 30.0          # 3.0 × qty 10
+    assert "unrealized_pnl" not in by_id["c"]            # closed untouched
+
+
+def test_paper_trades_view_skips_reprice_off_hours(monkeypatch):
+    """Off-hours, no reprice is attempted even with reprice=True (no proxy churn)."""
+    import sys as _sys
+    import types as _types
+
+    from services.options_svc import scheduler
+
+    trades = [{"trade_id": "o", "symbol": "SPY", "status": "OPEN", "quantity": 1}]
+    monkeypatch.setitem(_sys.modules, "paper_trader",
+                        _types.SimpleNamespace(get_all_trades=lambda: trades))
+
+    def _boom(*a, **k):
+        raise AssertionError("reprice_swing must not run off-hours")
+
+    monkeypatch.setitem(_sys.modules, "signal_repricer", _types.SimpleNamespace(
+        clear_chain_cache=lambda: None, reprice_swing=_boom))
+    monkeypatch.setattr(scheduler, "_is_trading_day", lambda now: True)
+    monkeypatch.setattr(scheduler, "_is_market_hours", lambda now: False)
+
+    out = compute.paper_trades_view(reprice=True)
+    assert "unrealized_pnl" not in out["trades"][0]
+
+
+def test_paper_trades_view_default_does_not_reprice(monkeypatch):
+    """Default reprice=False never imports/calls the repricer (cheap publish)."""
+    import sys as _sys
+    import types as _types
+
+    trades = [{"trade_id": "o", "symbol": "SPY", "status": "OPEN", "quantity": 1}]
+    monkeypatch.setitem(_sys.modules, "paper_trader",
+                        _types.SimpleNamespace(get_all_trades=lambda: trades))
+    out = compute.paper_trades_view()
+    assert "unrealized_pnl" not in out["trades"][0]
+
+
 # ── Captured signals (moved from webgui/pages/options/captured.py) ──────────
 def test_captured_view_shape(monkeypatch):
     import sys as _sys

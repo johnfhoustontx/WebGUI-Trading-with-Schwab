@@ -23,6 +23,11 @@ def test_scanner_keys_covers_both_tables():
     assert alerts.scanner_keys({}) == set()
 
 
+def test_new_signal_text_singular_and_plural():
+    assert alerts.new_signal_text(1) == "1 new scanner signal"
+    assert alerts.new_signal_text(3) == "3 new scanner signals"
+
+
 def test_unread_count_is_current_minus_acked():
     keys = alerts.scanner_keys(_scan())
     assert alerts.unread_count(keys, set()) == 2

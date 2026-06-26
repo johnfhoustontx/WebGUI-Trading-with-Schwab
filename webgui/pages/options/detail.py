@@ -110,7 +110,7 @@ def _build_cards(s):
     with ui.expansion("Trade Info", value=True).classes("w-full"):
         _kv("Expiration", f"{s.get('expiration','—')} ({s.get('dte','?')} DTE)")
         if isinstance(s.get("underlying_price"), (int, float)):
-            _kv("Underlying", _money(s.get("underlying_price")))
+            _kv("Current price", _money(s.get("underlying_price")))
         _kv("Strikes", _strikes_text(s))
         _kv("Max Loss", _money(s.get("max_loss")), RED)
         if s.get("max_contracts") is not None:
@@ -200,8 +200,13 @@ class _Handle:
         self._state["has_signal"] = True
         self._header.set_visibility(self._state["open"])
         self._sig_title.text = _signal_title(s)
-        self._gauge.options = gauge_figure(s.get("composite_score") or 0,
-                                           s.get("grade", ""), height=104)
+        # Gauge value: the composite score when the signal has one (scanner/swing/
+        # captured); for a paper trade — which never stored a composite score, so
+        # the gauge used to sit at 0 — fall back to PoP, a real 0-100 quality read.
+        score = s.get("composite_score")
+        if score is None:
+            score = s.get("pop_pct")
+        self._gauge.options = gauge_figure(score or 0, s.get("grade", ""), height=104)
         self._gauge.update()
         for key, _label, value_fn, color_fn in _TILES:
             lbl = self._tiles[key]

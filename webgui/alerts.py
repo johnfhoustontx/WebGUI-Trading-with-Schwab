@@ -39,6 +39,11 @@ def qualifying_new(scan, alerted, min_score):
     return {k for k, sc in scores.items() if k not in alerted and sc >= (min_score or 0)}
 
 
+def new_signal_text(n):
+    """In-app toast text for ``n`` new qualifying scanner signals (singular/plural)."""
+    return f"{n} new scanner signal" + ("" if n == 1 else "s")
+
+
 def in_market_hours(now):
     """True on a weekday within 08:00–15:00 CT (now is a tz-aware datetime)."""
     ct = now.astimezone(CT)

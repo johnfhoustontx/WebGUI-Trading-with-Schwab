@@ -180,7 +180,7 @@ def test_existing_paper_create_branch_intact(monkeypatch):
     created = {}
     monkeypatch.setattr(handlers.compute, "create_paper_trade",
                         lambda signal, qty: created.update(signal=signal, qty=qty))
-    monkeypatch.setattr(handlers.compute, "paper_trades_view", lambda: {"trades": []})
+    monkeypatch.setattr(handlers.compute, "paper_trades_view", lambda reprice=True: {"trades": []})
 
     handlers.handle_command(
         bus, Command(type="paper_create",

@@ -85,6 +85,41 @@ def _money(v):
     return f"{sign}${abs(v):,.2f}"
 
 
+# P&L cell colors (green profit / red loss / grey flat-or-unknown) — so a value is
+# read by COLOR, not by hunting for a +/- sign.
+PNL_GREEN, PNL_RED, PNL_NEUTRAL = "#66bb6a", "#ef5350", "#bdbdbd"
+
+
+def pnl_color(v):
+    """Hex color for a numeric P&L: green > 0, red < 0, grey for 0 / None / junk."""
+    if not isinstance(v, (int, float)) or v == 0:
+        return PNL_NEUTRAL
+    return PNL_GREEN if v > 0 else PNL_RED
+
+
+def current_day_decisions(decisions, today_ct=None):
+    """Filter the checkpoint decision log to TODAY only (Central trading date).
+
+    Each decision's ``ts`` is a UTC ISO string; it's converted to Central and kept
+    only if its CT date matches ``today_ct`` (defaults to now in CT). Rows with a
+    missing/unparseable ts are dropped — they can't be confidently placed in today.
+    """
+    if today_ct is None:
+        today_ct = datetime.now(_CENTRAL).date()
+    out = []
+    for d in decisions or []:
+        ts = (d or {}).get("ts")
+        try:
+            dt = datetime.fromisoformat(str(ts))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+            if dt.astimezone(_CENTRAL).date() == today_ct:
+                out.append(d)
+        except Exception:  # noqa: BLE001 — undateable row can't be "today"; skip it.
+            continue
+    return out
+
+
 def status_text(payload):
     """One-line summary of the current approval state for the status label."""
     if not payload or not payload.get("status"):
@@ -172,9 +207,10 @@ def perf_summary_text(summary):
 
 
 def perf_rows(trades):
-    """Table rows for the performance trade list (P&L pre-formatted, signed)."""
+    """Table rows for the performance trade list (P&L pre-formatted + color)."""
     rows = []
     for t in trades or []:
+        pnl = t.get("pnl")
         rows.append({
             "trade_id": t.get("trade_id", ""),
             "date": t.get("date", ""),
@@ -183,7 +219,8 @@ def perf_rows(trades):
             "side": t.get("side", ""),
             "status": t.get("status", ""),
             "source": t.get("source", ""),
-            "pnl": _money(t.get("pnl")),
+            "pnl": _money(pnl),
+            "_pnl_color": pnl_color(pnl),
         })
     return rows
 
@@ -191,8 +228,8 @@ def perf_rows(trades):
 _PERF_COLS = [
     {"name": "date", "label": "Date", "field": "date", "align": "left"},
     {"name": "trade_id", "label": "Trade", "field": "trade_id", "align": "left"},
-    {"name": "bucket", "label": "Bkt", "field": "bucket"},
-    {"name": "instrument", "label": "Inst", "field": "instrument"},
+    {"name": "bucket", "label": "Bucket", "field": "bucket"},
+    {"name": "instrument", "label": "Instrument", "field": "instrument"},
     {"name": "side", "label": "Side", "field": "side"},
     {"name": "status", "label": "Status", "field": "status"},
     {"name": "source", "label": "Source", "field": "source"},
@@ -315,6 +352,7 @@ def position_rows(positions):
             "strategy": p.get("strategy", ""),
             "quantity": p.get("quantity", ""),
             "pnl": _money(p.get("unrealized_pnl")),
+            "_pnl_color": pnl_color(p.get("unrealized_pnl")),
             "status": p.get("status", ""),
         })
     return rows
@@ -410,6 +448,7 @@ def _breakdown_rows(rows, key):
             key: r.get(key, "?"),
             "trades": r.get("trades", 0),
             "pnl": _pnl(r.get("pnl")),
+            "_pnl_color": pnl_color(r.get("pnl")),
             "win_rate": _pct(r.get("win_rate")),
         })
     return out
@@ -485,8 +524,28 @@ _SCORE_STRATEGY_COLS = [
 ]
 
 
+# Driver-table styling: fixed (sticky) header over a scrolling body, so the column
+# headers stay visible as the trade list scrolls; colored P&L is via body-cell slots.
+DRIVER_CSS = """
+.driver-table .q-table__middle { max-height: 52vh; }
+.driver-table thead tr th {
+  position: sticky; top: 0; z-index: 2; background: #1d1d1d;
+}
+"""
+
+# A body-cell slot that paints the P&L value in its row's _pnl_color.
+_PNL_CELL_SLOT = r'''
+  <q-td :props="props" class="text-right">
+    <span :style="`color:${props.row._pnl_color || '#bdbdbd'};font-weight:600`">
+      {{ props.value }}
+    </span>
+  </q-td>
+'''
+
+
 def render():
     """Driver page: autonomous monitor + STOP, then legacy approval queue + perf."""
+    ui.add_css(DRIVER_CSS)
     ui.label("Claude Driver").classes("text-h5")
     ui.label("Autonomous PAPER options trader (Claude decides, code-enforced "
              "guardrails). This page MONITORS what it does and lets you STOP it. "
@@ -522,7 +581,8 @@ def render():
         .classes("text-xs opacity-50")
     perf_summary = ui.label("").classes("text-sm opacity-80")
     perf_table = ui.table(columns=_PERF_COLS, rows=[], row_key="trade_id") \
-        .classes("w-full").props("dense")
+        .classes("w-full driver-table").props("dense")
+    perf_table.add_slot("body-cell-pnl", _PNL_CELL_SLOT)
 
     # ── confirm dialog for APPROVE (outward-facing action) ────────────────────
     with ui.dialog() as confirm_dialog, ui.card():
@@ -646,18 +706,20 @@ def render():
                 ui.label(f"Open positions ({len(positions)})") \
                     .classes("text-subtitle2 opacity-70")
                 if positions:
-                    ui.table(columns=_POSITION_COLS, rows=position_rows(positions),
-                             row_key="position_id").classes("w-full").props("dense")
+                    pos_tbl = ui.table(columns=_POSITION_COLS, rows=position_rows(positions),
+                                       row_key="position_id").classes("w-full driver-table").props("dense")
+                    pos_tbl.add_slot("body-cell-pnl", _PNL_CELL_SLOT)
                 else:
                     ui.label("No open positions.").classes("text-xs opacity-50")
 
-            # Decision log (per-checkpoint thesis + executed/rejected + halt).
-            log = decision_log_rows(auto.get("decisions"))
+            # Decision log (per-checkpoint thesis + executed/rejected + halt) —
+            # TODAY's checkpoints only (the full history isn't useful day-to-day).
+            log = decision_log_rows(current_day_decisions(auto.get("decisions")))
             with ui.card().classes("w-full gap-2"):
-                ui.label(f"Decision log ({len(log)})") \
+                ui.label(f"Decision log — today ({len(log)})") \
                     .classes("text-subtitle2 opacity-70")
                 if not log:
-                    ui.label("No checkpoints yet — enable autonomy or click "
+                    ui.label("No checkpoints today — enable autonomy or click "
                              "“Run now”.").classes("text-xs opacity-50")
                 for row in log:
                     _decision_card(row)
@@ -723,14 +785,16 @@ def render():
                 if sym_rows:
                     with ui.column().classes("gap-1 flex-1 min-w-[260px]"):
                         ui.label("P&L by symbol").classes("text-xs opacity-60")
-                        ui.table(columns=_SCORE_SYMBOL_COLS, rows=sym_rows,
-                                 row_key="symbol").classes("w-full").props("dense")
+                        st = ui.table(columns=_SCORE_SYMBOL_COLS, rows=sym_rows,
+                                      row_key="symbol").classes("w-full driver-table").props("dense")
+                        st.add_slot("body-cell-pnl", _PNL_CELL_SLOT)
                 strat_rows = scorecard_strategy_rows(perf)
                 if strat_rows:
                     with ui.column().classes("gap-1 flex-1 min-w-[260px]"):
                         ui.label("P&L by strategy").classes("text-xs opacity-60")
-                        ui.table(columns=_SCORE_STRATEGY_COLS, rows=strat_rows,
-                                 row_key="strategy").classes("w-full").props("dense")
+                        st = ui.table(columns=_SCORE_STRATEGY_COLS, rows=strat_rows,
+                                      row_key="strategy").classes("w-full driver-table").props("dense")
+                        st.add_slot("body-cell-pnl", _PNL_CELL_SLOT)
 
     def _render_approval():
         approval.clear()

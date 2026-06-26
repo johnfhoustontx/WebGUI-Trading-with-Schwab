@@ -76,6 +76,26 @@ def test_open_driver_position_into_driver_db(tmp_path, monkeypatch):
     assert pv["orders"][0]["quantity"] == 2          # the re-sized qty, not the request
 
 
+def test_open_driver_position_accepts_raw_scanner_signal(tmp_path, monkeypatch):
+    """Regression: the driver feeds RAW scanner signals (keyed ``type``/``credit``/
+    ``id`` — NOT ``strategy``/``entry_credit``/``signal_id``). open_driver_position
+    must normalize them and open, instead of KeyError'ing on 'signal_id' and
+    silently degrading to status=error (which left the driver account empty while the
+    decision log claimed trades were 'executed')."""
+    db = tmp_path / "driver.db"
+    monkeypatch.setattr(compute, "DRIVER_PAPER_DB", db)
+    compute.ensure_driver_account()
+    scanner_sig = {"id": "SPY_CCS_x", "symbol": "SPY", "type": "PCS",
+                   "short_strike": 105.0, "long_strike": 103.0, "width": 2.0,
+                   "expiration": "2026-07-10", "dte": 15, "credit": 1.50,
+                   "source": "driver"}
+    res = compute.open_driver_position(scanner_sig, qty=2, broker=_fake_broker(1.50))
+    assert res["status"] == "opened" and res["qty"] == 2
+    pos = compute.driver_account_view()["positions"][0]
+    assert pos["symbol"] == "SPY" and pos["strategy"] == "PCS"
+    assert pos["entry_credit"] == 1.50
+
+
 def test_open_driver_position_clamp_is_ceiling(tmp_path, monkeypatch):
     """The guardrail clamp is a CEILING: an absurdly large requested qty must NOT
     open more than the engine sizes off the fill (min(clamped, sized))."""

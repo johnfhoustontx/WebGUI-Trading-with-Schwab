@@ -256,8 +256,15 @@ def run_manage_and_refresh(bus) -> None:
     if compute.has_paper_account():
         compute.run_manage_cycle()
     refresh_paper_account(bus)
-    # Piggyback the manage tick (no new cadence): publish the rescue summary for
-    # the nav badge. Defensive so it never blocks the core paper refresh.
+    # Piggyback the manage tick (no new cadence): refresh the paper-trade LEDGER
+    # too so its open positions get fresh live P&L every 5 min (the account view
+    # above is a separate book). Defensive so a reprice hiccup never blocks the
+    # core paper refresh.
+    try:
+        refresh_paper_trades(bus)
+    except Exception:
+        pass
+    # Also publish the rescue summary for the nav badge.
     try:
         publish_rescue_summary(bus)
     except Exception:
@@ -298,13 +305,16 @@ def run_driver_manage_and_refresh(bus) -> None:
     refresh_driver_paper(bus)
 
 
-def refresh_paper_trades(bus) -> None:
+def refresh_paper_trades(bus, reprice: bool = True) -> None:
     """Read the paper-trade ledger view and publish it to the bus.
 
-    No strict contract: the view is a loosely-shaped read-only dict
-    (``{"trades": [...]}``) that only the Paper Trades page consumes, and
-    ``compute.paper_trades_view`` is already fully defensive."""
-    data = compute.paper_trades_view()
+    ``reprice`` (default True) attaches a live ``unrealized_pnl`` to each OPEN
+    trade during market hours so the Paper Trades page shows running P&L instead
+    of a blank column (the reprice is skipped off-hours inside the view). No strict
+    contract: the view is a loosely-shaped read-only dict (``{"trades": [...]}``)
+    that only the Paper Trades page consumes, and ``compute.paper_trades_view`` is
+    already fully defensive."""
+    data = compute.paper_trades_view(reprice=reprice)
     version = bus.cache_set(CACHE_PAPER_TRADES, data)
     bus.publish(EVENT_PAPER_TRADES, {"version": version})
 

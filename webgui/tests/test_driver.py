@@ -104,5 +104,53 @@ def test_perf_rows():
     assert rows[0]["trade_id"] == "2026-06-16-A-1"
 
 
+def test_perf_rows_carry_pnl_color():
+    rows = driver.perf_rows([
+        {"trade_id": "w", "pnl": 100.0},
+        {"trade_id": "l", "pnl": -50.0},
+        {"trade_id": "z", "pnl": 0.0},
+    ])
+    by_id = {r["trade_id"]: r for r in rows}
+    assert by_id["w"]["_pnl_color"] == "#66bb6a"
+    assert by_id["l"]["_pnl_color"] == "#ef5350"
+    assert by_id["z"]["_pnl_color"] == "#bdbdbd"
+
+
+def test_pnl_color():
+    assert driver.pnl_color(5) == "#66bb6a"
+    assert driver.pnl_color(-5) == "#ef5350"
+    assert driver.pnl_color(0) == "#bdbdbd"
+    assert driver.pnl_color(None) == "#bdbdbd"
+
+
+def test_perf_cols_use_full_words():
+    labels = {c["field"]: c["label"] for c in driver._PERF_COLS}
+    assert labels["bucket"] == "Bucket"
+    assert labels["instrument"] == "Instrument"
+
+
+def test_current_day_decisions_keeps_only_today():
+    import datetime as dt
+    today = dt.date(2026, 6, 26)
+    decisions = [
+        {"ts": "2026-06-26T18:00:00+00:00", "thesis": "today-a"},   # 13:00 CT 06-26
+        {"ts": "2026-06-25T18:00:00+00:00", "thesis": "yesterday"},  # 06-25
+        {"ts": "2026-06-26T02:00:00+00:00", "thesis": "today-early"},  # 21:00 CT 06-25 -> 06-25!
+        {"thesis": "no-ts"},
+    ]
+    kept = driver.current_day_decisions(decisions, today_ct=today)
+    theses = [d["thesis"] for d in kept]
+    assert "today-a" in theses
+    assert "yesterday" not in theses
+    assert "no-ts" not in theses          # undateable rows are dropped
+    # 02:00 UTC on 06-26 is 21:00 CT on 06-25 — NOT today.
+    assert "today-early" not in theses
+
+
+def test_position_rows_carry_pnl_color():
+    rows = driver.position_rows([{"position_id": "p1", "unrealized_pnl": -12.0}])
+    assert rows[0]["_pnl_color"] == "#ef5350"
+
+
 def test_render_is_callable():
     assert callable(driver.render)

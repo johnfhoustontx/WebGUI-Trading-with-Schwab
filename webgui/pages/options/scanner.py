@@ -186,6 +186,14 @@ def _short_time(iso):
         return ""
 
 
+def tab_label(base, count):
+    """Tab header text with the live signal count, e.g. ``'0-DTE (3)'``.
+
+    ``count is None`` (no scan yet) renders just the base label so the tabs don't
+    show a misleading ``(0)`` before the first paint."""
+    return base if count is None else f"{base} ({count})"
+
+
 def status_line(results):
     """Slim bottom status-bar text: last-scan time + signal count (+ errors).
 
@@ -208,11 +216,33 @@ def status_line(results):
     return " · ".join(parts)
 
 
+# Distinct, clearly-defined tab accent colors so 0-DTE vs Swing read at a glance:
+# 0-DTE = amber (short-fuse/urgent), Swing = blue (multi-day). Each tab carries its
+# accent in the text color and a thick colored underline when active (the shared
+# Quasar indicator is hidden so the per-tab color is unambiguous).
+TAB_0DTE_COLOR, TAB_SWING_COLOR = "#ffa726", "#42a5f5"
+
 # Compact the signal tables (dense + tight cell padding) so the right-hand
 # columns (R/R %, PoP %, Score, Grade, actions) stay visible. Scoped to
-# .scan-table so it never leaks to other tables.
-SCAN_CSS = '''
-.scan-table td, .scan-table th { padding: 2px 4px; }
+# .scan-table so it never leaks to other tables. Also: per-tab accent colors and a
+# solid 3D "Run scan" button matching the app's primary buttons (paper .pt-btn /
+# calculator .calc-btn-3d).
+SCAN_CSS = f'''
+.scan-table td, .scan-table th {{ padding: 2px 4px; }}
+.scan-tabs .q-tab {{ text-transform: none; font-weight: 600; }}
+.scan-tabs .q-tab__indicator {{ display: none; }}
+.scan-tabs .tab-0dte {{ color: {TAB_0DTE_COLOR}; }}
+.scan-tabs .tab-swing {{ color: {TAB_SWING_COLOR}; }}
+.scan-tabs .tab-0dte.q-tab--active {{ box-shadow: inset 0 -3px 0 0 {TAB_0DTE_COLOR}; }}
+.scan-tabs .tab-swing.q-tab--active {{ box-shadow: inset 0 -3px 0 0 {TAB_SWING_COLOR}; }}
+.scan-btn.q-btn {{
+  background: linear-gradient(180deg,#5aa0e6 0%,#3a7bc0 55%,#316eac 100%)!important;
+  color: #fff!important; border-radius: 7px; font-weight: 600; min-height: 34px;
+  box-shadow: 0 4px 0 0 #244e78, 0 6px 10px rgba(0,0,0,.4);
+  transition: transform .06s ease, box-shadow .06s ease, filter .12s ease;
+}}
+.scan-btn.q-btn:hover {{ filter: brightness(1.08); }}
+.scan-btn.q-btn:active {{ transform: translateY(4px); box-shadow: 0 1px 0 0 #244e78, 0 2px 4px rgba(0,0,0,.4); }}
 '''
 
 
@@ -228,10 +258,11 @@ def render():
         with ui.column().classes("flex-grow min-w-0"):
             # Top chrome removed (market strip + title + auto-scan/VIX-term lines):
             # just a small Run scan button, the tabs, and a slim bottom status bar.
-            scan_btn = ui.button("Run scan", icon="play_arrow").props("dense outline")
-            with ui.tabs() as tabs:
-                tab_0dte = ui.tab("0-DTE")
-                tab_swing = ui.tab("Swing")
+            scan_btn = ui.button("Run scan", icon="play_arrow", color=None) \
+                .props("no-caps").classes("scan-btn")
+            with ui.tabs().classes("scan-tabs") as tabs:
+                tab_0dte = ui.tab("0-DTE").classes("tab-0dte")
+                tab_swing = ui.tab("Swing").classes("tab-swing")
             with ui.tab_panels(tabs, value=tab_0dte).classes("w-full"):
                 with ui.tab_panel(tab_0dte):
                     table_0dte = ui.table(columns=signal_columns(), rows=[],
@@ -295,6 +326,12 @@ def render():
         table_swing.rows = rows_swing
         table_0dte.update()
         table_swing.update()
+        # Live counts in each tab header (only after a real scan has landed).
+        have = bool(results)
+        tab_0dte.props(f'label="{tab_label("0-DTE", len(rows_0dte) if have else None)}"')
+        tab_swing.props(f'label="{tab_label("Swing", len(rows_swing) if have else None)}"')
+        tab_0dte.update()
+        tab_swing.update()
         status.text = status_line(results)
         if notify:
             for w in (results.get("warnings") or []):

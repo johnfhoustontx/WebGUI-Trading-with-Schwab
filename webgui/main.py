@@ -199,15 +199,24 @@ def _refresh_health() -> None:
     _health_cache["ts"] = _time.monotonic()
 
 # Modernized drawer styling (scoped to .nav-drawer).
+# Inter-item spacing is intentionally tight (~50% of Quasar's defaults): the
+# flex gap (4px→2px), the nav-link vertical padding (8px→4px), and the expansion
+# header min-height (48px→24px) are all halved so the menu reads denser.
 _NAV_CSS = """
+.nav-drawer { gap: 2px; }
+/* Children INSIDE each expandable group also stack tight — NiceGUI wraps the
+   expansion body in a flex column (.nicegui-expansion-content) that defaults to a
+   1rem/16px gap. */
+.nav-drawer .nicegui-expansion-content { gap: 2px; }
 .nav-drawer .q-item, .nav-drawer a.nav-link { border-radius: 10px; }
-.nav-drawer a.nav-link { transition: background .12s ease; padding: 8px 12px; }
+.nav-drawer a.nav-link { transition: background .12s ease; padding: 4px 12px; }
 .nav-drawer a.nav-link:hover { background: rgba(255,255,255,.06); }
 .nav-drawer a.nav-link.active { background: var(--q-primary); color: #fff; }
+.nav-drawer .q-expansion-item .q-item { min-height: 24px; }
 .nav-drawer .nav-icon { font-size: 20px; opacity: .9; }
 .nav-drawer .nav-badge { margin-left: auto; }
 .nav-title { font-weight: 700; letter-spacing: .04em; font-size: .8rem;
-             padding: 4px 12px 10px; opacity: .55; }
+             padding: 4px 12px 6px; opacity: .55; }
 .nav-drawer .nav-subgroup .q-expansion-item__content { padding-left: 14px; }
 /* Page-help "?" — tucked into the bottom-right corner of the header banner. */
 .help-fab { position: absolute; right: 6px; bottom: 2px; z-index: 2300; }
@@ -313,9 +322,8 @@ def _settings_group(active: str) -> None:
     ``expand-icon-toggle`` confines the toggle to the caret so a header click
     follows the link instead of expanding.
     """
-    settings_active = active == "/settings" or active in {p for p, _, _ in SETTINGS_CHILDREN}
     exp = ui.expansion(
-        value=_NAV_OPEN.get("Settings", settings_active)
+        value=_NAV_OPEN.get("Settings", True)
     ).classes("w-full nav-subgroup").props("expand-icon-toggle dense")
     exp.on_value_change(lambda e: _NAV_OPEN.__setitem__("Settings", e.value))
     with exp.add_slot("header"):
@@ -337,20 +345,21 @@ def _layout(active: str, title: str):
     _badge_refs.clear()
     _recompute_badges()
     ui.add_css(_NAV_CSS)
-    drawer = ui.left_drawer(value=True, bordered=True).classes("gap-1 nav-drawer").props("behavior=desktop")
+    drawer = ui.left_drawer(value=True, bordered=True).classes("nav-drawer").props("behavior=desktop")
     with drawer:
         ui.label("SCHWAB TRADING").classes("nav-title")
-        options_active = active == "/" or active.startswith("/options")
+        # Groups start EXPANDED by default (value=True) and stay open until the user
+        # manually collapses one — _NAV_OPEN persists each manual toggle (single-user,
+        # like the badges), so a collapse sticks across navigation.
         options_exp = ui.expansion(
-            "Options", icon="candlestick_chart", value=_NAV_OPEN.get("Options", options_active)
+            "Options", icon="candlestick_chart", value=_NAV_OPEN.get("Options", True)
         ).classes("w-full")
         options_exp.on_value_change(lambda e: _NAV_OPEN.__setitem__("Options", e.value))
         with options_exp:
             for path, label, icon in OPTIONS_CHILDREN:
                 _nav_link(path, label, icon, active)
-        sentiment_active = active.startswith("/sentiment")
         sentiment_exp = ui.expansion(
-            "Sentiment", icon="insights", value=_NAV_OPEN.get("Sentiment", sentiment_active)
+            "Sentiment", icon="insights", value=_NAV_OPEN.get("Sentiment", True)
         ).classes("w-full")
         sentiment_exp.on_value_change(lambda e: _NAV_OPEN.__setitem__("Sentiment", e.value))
         with sentiment_exp:
@@ -358,10 +367,8 @@ def _layout(active: str, title: str):
                 _nav_link(path, label, icon, active)
         for path, label, icon in FLAT_NAV:
             _nav_link(path, label, icon, active)
-        more_paths = {p for p, _, _ in MORE_CHILDREN} | {p for p, _, _ in SETTINGS_CHILDREN}
-        more_active = active in more_paths
         more_exp = ui.expansion(
-            "More", icon="more_horiz", value=_NAV_OPEN.get("More", more_active)
+            "More", icon="more_horiz", value=_NAV_OPEN.get("More", True)
         ).classes("w-full")
         more_exp.on_value_change(lambda e: _NAV_OPEN.__setitem__("More", e.value))
         with more_exp:
@@ -404,6 +411,12 @@ def _layout(active: str, title: str):
         if decision:
             sound, volume, desktop, n = decision
             play_alert(sound, volume)
+            # In-app toast styled to MATCH the scanner's blue "new" badge — same
+            # blue + a "new"-signal icon — so the notification and the in-row
+            # marker read as the same thing.
+            # blue-8 (#1565c0) == the scanner row "new" badge color (Quasar notify
+            # takes a palette NAME, not a hex).
+            ui.notify(alerts.new_signal_text(n), icon="fiber_new", color="blue-8")
             if desktop:
                 notify_desktop("New scanner signal",
                                f"{n} new signal(s) meet your criteria.")
