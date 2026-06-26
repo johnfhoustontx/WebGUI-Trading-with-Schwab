@@ -136,3 +136,31 @@ def test_open_driver_position_never_raises(tmp_path, monkeypatch):
     compute.ensure_driver_account()
     res = compute.open_driver_position({"symbol": "MU"}, qty=1, broker=_fake_broker(1.50))
     assert res["status"] == "error"
+
+
+# ── Task 3.1: run_driver_manage_cycle ────────────────────────────────────────
+
+
+def test_run_driver_manage_cycle_targets_driver_db(tmp_path, monkeypatch):
+    import paper_engine
+
+    db = tmp_path / "driver.db"
+    monkeypatch.setattr(compute, "DRIVER_PAPER_DB", db)
+    compute.ensure_driver_account()          # so has_driver_account() is True
+    seen = {}
+    monkeypatch.setattr(paper_engine, "run_manage_cycle",
+                        lambda client, today, db_path=None: seen.update(db_path=db_path))
+    compute.run_driver_manage_cycle()
+    assert seen["db_path"] == compute.DRIVER_PAPER_DB
+
+
+def test_run_driver_manage_cycle_noop_without_account(tmp_path, monkeypatch):
+    import paper_engine
+
+    db = tmp_path / "driver.db"                # never seeded → has_driver_account() False
+    monkeypatch.setattr(compute, "DRIVER_PAPER_DB", db)
+    called = {"n": 0}
+    monkeypatch.setattr(paper_engine, "run_manage_cycle",
+                        lambda *a, **k: called.__setitem__("n", called["n"] + 1))
+    compute.run_driver_manage_cycle()
+    assert called["n"] == 0                    # gated off when no driver account

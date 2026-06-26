@@ -291,6 +291,20 @@ def open_driver_position(signal: dict, qty: int, broker=None) -> dict:
         return {"status": "error", "error": str(exc)}
 
 
+def run_driver_manage_cycle() -> None:
+    """Reprice + auto-close the DRIVER account's open positions
+    (``paper_engine.run_manage_cycle`` on ``DRIVER_PAPER_DB``). No-op-safe if the
+    driver account doesn't exist yet (gated on ``has_driver_account``)."""
+    import datetime as dt
+
+    import paper_engine
+
+    if not has_driver_account():
+        return
+    paper_engine.run_manage_cycle(_proxy.schwab_py_client, dt.date.today().isoformat(),
+                                  db_path=DRIVER_PAPER_DB)
+
+
 def run_entry_cycle() -> None:
     """Run the paper auto-entry cycle: scan open captured signals, open positions.
 
