@@ -138,6 +138,45 @@ def test_open_driver_position_never_raises(tmp_path, monkeypatch):
     assert res["status"] == "error"
 
 
+def _poke_account(db, **fields):
+    """Test helper: set account columns (session_date / halted) directly."""
+    import paper_account_db
+    conn = paper_account_db.connect(db)
+    try:
+        with conn:
+            cols = ", ".join(f"{k}=?" for k in fields)
+            conn.execute(f"UPDATE account SET {cols} WHERE id=1", tuple(fields.values()))
+    finally:
+        conn.close()
+
+
+def test_open_driver_position_rolls_stale_prior_day_halt(tmp_path, monkeypatch):
+    """A drawdown halt from a PRIOR session must not block the new day: the first
+    open rolls the session (un-halts) and the trade goes through. Guards the
+    manual 'Run now' before the 5-min manage tick self-heals it."""
+    db = tmp_path / "driver.db"
+    monkeypatch.setattr(compute, "DRIVER_PAPER_DB", db)
+    compute.ensure_driver_account()
+    _poke_account(db, halted=1, session_date="2020-01-01")   # stale prior-day halt
+    res = compute.open_driver_position(_driver_signal(), qty=1, broker=_fake_broker(1.50))
+    assert res["status"] == "opened"
+    assert compute.driver_account_view()["snapshot"]["open_count"] == 1
+
+
+def test_open_driver_position_respects_same_day_halt(tmp_path, monkeypatch):
+    """A halt from TODAY's session is real (banked $500 / hit the loss cap) and
+    must STILL reject — the roll only clears a STALE (prior-day) halt."""
+    import datetime as dt
+
+    db = tmp_path / "driver.db"
+    monkeypatch.setattr(compute, "DRIVER_PAPER_DB", db)
+    compute.ensure_driver_account()
+    _poke_account(db, halted=1, session_date=dt.date.today().isoformat())   # today's halt
+    res = compute.open_driver_position(_driver_signal(), qty=1, broker=_fake_broker(1.50))
+    assert res["status"] == "rejected" and res["reason"] == "halted"
+    assert compute.driver_account_view()["snapshot"]["open_count"] == 0
+
+
 # ── Task 3.1: run_driver_manage_cycle ────────────────────────────────────────
 
 

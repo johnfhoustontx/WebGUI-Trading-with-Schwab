@@ -240,6 +240,8 @@ def open_driver_position(signal: dict, qty: int, broker=None) -> dict:
     The order row is recorded via ``paper_engine._record_order`` (the same path
     the manual entry cycle uses) so ``entry_order_id`` links to the position.
     """
+    import datetime as dt
+
     import config_paper
     import paper_account_db
     import paper_broker
@@ -249,6 +251,11 @@ def open_driver_position(signal: dict, qty: int, broker=None) -> dict:
     broker = broker or paper_broker            # module exposes submit_order(order, client)
     try:
         ensure_driver_account()
+        # Clear a STALE (prior-day) drawdown halt before checking it: a new session
+        # un-halts + resets the daily counters. Idempotent (no-op if already today),
+        # and a SAME-day halt (banked $500 / hit the loss cap today) is preserved.
+        # Matters only for a manual open before the 5-min manage tick rolls the session.
+        paper_account_db.roll_session_if_needed(DRIVER_PAPER_DB, dt.date.today().isoformat())
         if paper_account_db.get_account(DRIVER_PAPER_DB)["halted"]:
             return {"status": "rejected", "reason": "halted"}
         q = int(qty)   # the guardrail-clamped request (a CEILING — see the re-size below)
