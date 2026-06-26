@@ -53,8 +53,10 @@ def test_set_control_publishes_event(fake_bus):
 def _seed_caches(fake_bus, *, day_pnl=0.0):
     fake_bus.cache_set("cache:options:scan",
                        {"signals_0dte": [], "signals_swing": []})
-    fake_bus.cache_set("cache:options:paper_account",
-                       {"snapshot": {"day_pnl": day_pnl}, "positions": []})
+    # The autonomous cycle now reads the ISOLATED driver paper book, not the
+    # user's manual account — seed session_pnl (the real account_snapshot field).
+    fake_bus.cache_set("cache:options:driver_paper_account",
+                       {"snapshot": {"session_pnl": day_pnl}, "positions": []})
 
 
 def _stub_cycle(monkeypatch, out):
@@ -89,7 +91,7 @@ def test_cycle_halted_is_noop(fake_bus, monkeypatch):
     assert called == []  # halted → gated off
 
 
-def test_cycle_enqueues_paper_create(fake_bus, monkeypatch):
+def test_cycle_enqueues_driver_paper_create(fake_bus, monkeypatch):
     handlers.set_control(fake_bus, enabled=True)
     _seed_caches(fake_bus, day_pnl=0.0)
     _stub_cycle(monkeypatch, {
@@ -106,7 +108,8 @@ def test_cycle_enqueues_paper_create(fake_bus, monkeypatch):
     assert len(enq) == 1
     stream, cmd = enq[0]
     assert stream == "cmd:options"
-    assert cmd["type"] == "paper_create"
+    # The driver trades into its OWN isolated paper book, not the manual account.
+    assert cmd["type"] == "driver_paper_create"
     assert cmd["args"]["qty"] == 2
     assert cmd["args"]["signal"]["source"] == "driver"
     assert cmd["args"]["signal"]["symbol"] == "QQQ"
@@ -127,9 +130,70 @@ def test_cycle_enqueue_lands_on_cmd_options_stream(fake_bus, monkeypatch):
     assert len(entries) == 1
     _msg_id, fields = entries[0]
     payload = json.loads(fields["data"])
-    assert payload["type"] == "paper_create"
+    assert payload["type"] == "driver_paper_create"
     assert payload["args"]["qty"] == 1
     assert payload["args"]["signal"]["source"] == "driver"
+
+
+def test_cycle_reads_driver_account_for_day_pnl(fake_bus, monkeypatch):
+    """Day-P&L is sourced from the DRIVER paper book (cache:options:driver_paper_account),
+    NOT the manual account — the cycle passes the driver view to run_cycle."""
+    handlers.set_control(fake_bus, enabled=True)
+    fake_bus.cache_set("cache:options:scan",
+                       {"signals_0dte": [], "signals_swing": []})
+    # A manual account with a DIFFERENT pnl that must be ignored.
+    fake_bus.cache_set("cache:options:paper_account",
+                       {"snapshot": {"session_pnl": 999.0}, "positions": [{"symbol": "MANUAL"}]})
+    fake_bus.cache_set("cache:options:driver_paper_account",
+                       {"snapshot": {"session_pnl": 250.0}, "positions": [{"symbol": "DRV"}]})
+    seen = {}
+
+    def _capture_cycle(scan_view, paper_view, **k):
+        seen["paper_view"] = paper_view
+        from services.driver_svc import compute as _c
+        return {"decision": {"stand_down": True, "day_thesis": "t", "trades": []},
+                "executable": [], "rejected": [], "halted": False, "halt_reason": None,
+                "day_pnl": _c._day_pnl(paper_view),
+                "open_positions": (paper_view or {}).get("positions", [])}
+
+    monkeypatch.setattr(handlers.compute, "fetch_market_context", lambda: {"vix": 14})
+    monkeypatch.setattr(handlers.compute, "run_cycle", _capture_cycle)
+    handlers.run_autonomous_cycle(fake_bus)
+    # run_cycle received the DRIVER account view (session_pnl 250, DRV position).
+    assert seen["paper_view"]["snapshot"]["session_pnl"] == 250.0
+    assert seen["paper_view"]["positions"][0]["symbol"] == "DRV"
+    env = fake_bus.cache_get("cache:driver:autonomous")
+    assert env.payload["day_pnl"] == 250.0          # driver book, not the manual 999
+
+
+def test_cycle_attaches_driver_perf_to_monitor(fake_bus, monkeypatch):
+    """The driver-account performance scorecard (cache:options:driver_paper_perf) is
+    attached to the published AutonomousState.perf."""
+    handlers.set_control(fake_bus, enabled=True)
+    _seed_caches(fake_bus)
+    fake_bus.cache_set("cache:options:driver_paper_perf",
+                       {"total_trades": 4, "win_rate": 0.5, "profit_factor": 2.5})
+    _stub_cycle(monkeypatch, {
+        "decision": {"stand_down": True, "day_thesis": "", "trades": []},
+        "executable": [], "rejected": [], "halted": False, "halt_reason": None,
+        "day_pnl": 0.0, "open_positions": []})
+    handlers.run_autonomous_cycle(fake_bus)
+    env = fake_bus.cache_get("cache:driver:autonomous")
+    assert env.payload["perf"]["total_trades"] == 4
+    assert env.payload["perf"]["win_rate"] == 0.5
+
+
+def test_cycle_perf_defaults_empty_when_unpublished(fake_bus, monkeypatch):
+    """A driver-perf view that has never been published → perf == {} (None-guard)."""
+    handlers.set_control(fake_bus, enabled=True)
+    _seed_caches(fake_bus)
+    _stub_cycle(monkeypatch, {
+        "decision": {"stand_down": True, "day_thesis": "", "trades": []},
+        "executable": [], "rejected": [], "halted": False, "halt_reason": None,
+        "day_pnl": 0.0, "open_positions": []})
+    handlers.run_autonomous_cycle(fake_bus)
+    env = fake_bus.cache_get("cache:driver:autonomous")
+    assert env.payload["perf"] == {}
 
 
 def test_cycle_does_not_mutate_raw_menu_signal(fake_bus, monkeypatch):

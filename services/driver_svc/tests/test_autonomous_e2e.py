@@ -41,7 +41,8 @@ def _seed_scan(fake_bus, signal):
 
 
 def _seed_paper(fake_bus, session_pnl):
-    fake_bus.cache_set("cache:options:paper_account",
+    # The autonomous cycle reads the ISOLATED driver paper book.
+    fake_bus.cache_set("cache:options:driver_paper_account",
                        {"snapshot": {"session_pnl": session_pnl}, "positions": []})
 
 
@@ -49,7 +50,7 @@ def test_autonomous_e2e_clamps_and_executes(fake_bus, monkeypatch):
     """Happy path through the REAL run_cycle + guardrails.
 
     The model requests qty=3; the guardrails clamp it to 1 ($300 per-trade /
-    $200 max-loss) and a ``paper_create`` lands on ``cmd:options`` tagged
+    $200 max-loss) and a ``driver_paper_create`` lands on ``cmd:options`` tagged
     ``source="driver"``; the monitor view records the executed QQQ trade.
     """
     handlers.set_control(fake_bus, enabled=True)
@@ -68,12 +69,12 @@ def test_autonomous_e2e_clamps_and_executes(fake_bus, monkeypatch):
 
     handlers.run_autonomous_cycle(fake_bus)
 
-    # (a) a paper_create landed on cmd:options, CLAMPED to qty 1 (real guardrail math).
+    # (a) a driver_paper_create landed on cmd:options, CLAMPED to qty 1 (real guardrail math).
     entries = fake_bus._r.xrange("cmd:options")
     assert len(entries) == 1
     _msg_id, fields = entries[0]
     payload = json.loads(fields["data"])
-    assert payload["type"] == "paper_create"
+    assert payload["type"] == "driver_paper_create"
     assert payload["args"]["qty"] == 1               # 3 → clamped to 1, not a stub
     assert payload["args"]["signal"]["source"] == "driver"
     assert payload["args"]["signal"]["symbol"] == "QQQ"

@@ -41,7 +41,12 @@ EVENT_CONTROL = "events:driver:control"
 CACHE_AUTONOMOUS = "cache:driver:autonomous"
 EVENT_AUTONOMOUS = "events:driver:autonomous"
 CACHE_OPT_SCAN = "cache:options:scan"
-CACHE_OPT_PAPER = "cache:options:paper_account"
+# The autonomous cycle trades into + reads P&L from the driver's OWN isolated
+# paper book (a dedicated DB published by options_svc), NOT the user's manual
+# paper_account — so the $500/halt logic measures the driver's own equity and the
+# trades don't commingle. ``driver_paper_perf`` is the matching scorecard view.
+CACHE_OPT_DRIVER_PAPER = "cache:options:driver_paper_account"
+CACHE_OPT_DRIVER_PERF = "cache:options:driver_paper_perf"
 CMD_OPTIONS = "cmd:options"
 
 # Cap on the newest-first per-checkpoint decision log carried in the monitor view.
@@ -154,7 +159,8 @@ def _read_payload(bus, key):
     return env.payload if env else None
 
 
-def _publish_autonomous(bus, *, day_pnl, positions, decision, guarded, executed, control) -> int:
+def _publish_autonomous(bus, *, day_pnl, positions, decision, guarded, executed,
+                        control, perf=None) -> int:
     """Cache + publish the monitor view, prepending this cycle to the decision log.
 
     Reads the prior ``cache:driver:autonomous`` to grow a NEWEST-FIRST audit log
@@ -162,7 +168,9 @@ def _publish_autonomous(bus, *, day_pnl, positions, decision, guarded, executed,
     Each log row carries the thesis + the trades that were ACTUALLY ENQUEUED this
     cycle (``executed`` — what truly fired, which equals the clamped executable list
     on the happy path but is shorter if an enqueue failed mid-loop) + the rejected
-    ones + the halt flag/reason. Validated through ``AutonomousState`` before caching.
+    ones + the halt flag/reason. ``perf`` is the driver-account performance scorecard
+    (``cache:options:driver_paper_perf``), attached so the page can render it without
+    a second poll. Validated through ``AutonomousState`` before caching.
     """
     prev = _read_payload(bus, CACHE_AUTONOMOUS) or {}
     log = list(prev.get("decisions", []))
@@ -186,6 +194,7 @@ def _publish_autonomous(bus, *, day_pnl, positions, decision, guarded, executed,
         target=settings.DAILY_TARGET,
         positions=positions,
         decisions=log[:_DECISION_LOG_CAP],
+        perf=perf or {},
         last_cycle_ts=_now_iso(),
         timestamp=_now_iso(),
     )
@@ -197,21 +206,24 @@ def run_autonomous_cycle(bus) -> None:
 
     A genuine no-op unless the control key is ``enabled and not halted`` — when
     gated off, NOTHING happens (no market fetch, no cycle, no enqueue, no publish).
-    Otherwise: read the option scan + paper-account caches, ask the bus-free
-    ``compute.run_cycle`` brain (which itself never raises), then for each
-    survivor enqueue the EXISTING ``paper_create`` command on ``cmd:options`` —
-    tagging a COPY of the raw signal ``source="driver"`` (the raw menu signal is
-    the same object the cached scan view holds, so it must NOT be mutated) with
-    the guardrail-CLAMPED ``qty`` (never the model's requested quantity). If the
-    cycle reports a halt, latch the kill-switch (``set_control(halted=True)``) so
-    no further checkpoints run until the next-day re-arm. Finally publish the
-    monitor view.
+    Otherwise: read the option scan + the DRIVER paper-account cache (the driver's
+    OWN isolated book, so day-P&L + open positions + the $500/halt logic measure the
+    driver's equity, not the user's manual account), ask the bus-free
+    ``compute.run_cycle`` brain (which itself never raises), then for each survivor
+    enqueue a ``driver_paper_create`` command on ``cmd:options`` — opening into the
+    driver DB (NOT the manual ``paper_create``) — tagging a COPY of the raw signal
+    ``source="driver"`` (the raw menu signal is the same object the cached scan view
+    holds, so it must NOT be mutated) with the guardrail-CLAMPED ``qty`` (never the
+    model's requested quantity). If the cycle reports a halt, latch the kill-switch
+    (``set_control(halted=True)``) so no further checkpoints run until the next-day
+    re-arm. Finally publish the monitor view, attaching the driver-account
+    performance scorecard (``cache:options:driver_paper_perf``).
     """
     control = read_control(bus)
     if not control.get("enabled") or control.get("halted"):
         return
     scan = _read_payload(bus, CACHE_OPT_SCAN) or {}
-    paper = _read_payload(bus, CACHE_OPT_PAPER) or {}
+    paper = _read_payload(bus, CACHE_OPT_DRIVER_PAPER) or {}
     market = compute.fetch_market_context()
     out = compute.run_cycle(scan, paper, target=settings.DAILY_TARGET,
                             limits=settings.limits(), market=market)
@@ -231,7 +243,7 @@ def run_autonomous_cycle(bus) -> None:
             continue
         signal = {**sig, "source": "driver"}  # shallow COPY — we add only the top-level source tag
         try:
-            bus.enqueue_command(CMD_OPTIONS, {"type": "paper_create",
+            bus.enqueue_command(CMD_OPTIONS, {"type": "driver_paper_create",
                                               "args": {"signal": signal, "qty": t.get("qty")}})
             executed.append(t)
         except Exception:  # noqa: BLE001 — stop firing, but still latch/publish what fired.
@@ -239,10 +251,11 @@ def run_autonomous_cycle(bus) -> None:
     if out.get("halted"):
         control = set_control(bus, halted=True, reason=out.get("halt_reason"),
                               halted_date=date.today().isoformat())
+    perf = _read_payload(bus, CACHE_OPT_DRIVER_PERF) or {}
     _publish_autonomous(bus, day_pnl=out.get("day_pnl"),
                         positions=out.get("open_positions", []),
                         decision=out.get("decision", {}), guarded=out,
-                        executed=executed, control=control)
+                        executed=executed, control=control, perf=perf)
 
 
 def handle_command(bus, command) -> None:
