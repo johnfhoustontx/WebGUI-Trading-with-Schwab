@@ -61,3 +61,13 @@ def test_breakdown_by_symbol_and_strategy():
 def test_tolerates_sparse_rows():
     s = dp.build_scorecard([{"status": "CLOSED"}, None, {}], _snap())
     assert s["closed"] >= 1   # None/empty don't crash
+
+
+def test_best_worst_exclude_none_pnl_rows():
+    # A closed row with no realized_pnl must NOT be reported as best/worst over a
+    # real (negative) trade — best/worst use the same None-excluded set as the metrics.
+    pos = [_closed("MU", "PCS", -5.0),
+           {"symbol": "X", "strategy": "PCS", "status": "CLOSED", "realized_pnl": None}]
+    s = dp.build_scorecard(pos, _snap())
+    assert s["best"]["realized_pnl"] == -5.0
+    assert s["worst"]["realized_pnl"] == -5.0

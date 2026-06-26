@@ -22,9 +22,12 @@ def build_scorecard(positions, snapshot) -> dict:
     wins = [r for r in realized if r > 0]
     losses = [r for r in realized if r < 0]
     sum_w, sum_l = round(sum(wins), 2), round(sum(losses), 2)
-    pf = round(sum_w / abs(sum_l), 2) if sum_l else None     # None = no losses yet
-    best = max(closed, key=lambda p: _num(p.get("realized_pnl")) or 0, default=None) if realized else None
-    worst = min(closed, key=lambda p: _num(p.get("realized_pnl")) or 0, default=None) if realized else None
+    pf = round(sum_w / abs(sum_l), 2) if sum_l else None  # None = no losses yet; 0.0 = only losses
+    # best/worst drawn from the SAME None-excluded population as the other metrics
+    # (a closed row with no realized_pnl must not be reported as best/worst).
+    priced = [p for p in closed if _num(p.get("realized_pnl")) is not None]
+    best = max(priced, key=lambda p: p["realized_pnl"], default=None)
+    worst = min(priced, key=lambda p: p["realized_pnl"], default=None)
     open_unreal = _num(snap.get("open_unrealized")) or 0.0
     return {
         "total_trades": len(positions),
