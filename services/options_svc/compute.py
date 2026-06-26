@@ -251,11 +251,12 @@ def open_driver_position(signal: dict, qty: int, broker=None) -> dict:
         ensure_driver_account()
         if paper_account_db.get_account(DRIVER_PAPER_DB)["halted"]:
             return {"status": "rejected", "reason": "halted"}
+        q = int(qty)   # the guardrail-clamped request (a CEILING — see the re-size below)
         order = {"signal_id": signal["signal_id"], "symbol": signal["symbol"],
                  "side": "SELL_TO_OPEN", "strategy": signal["strategy"],
                  "short_strike": signal["short_strike"], "long_strike": signal["long_strike"],
                  "call_short": signal.get("call_short"), "call_long": signal.get("call_long"),
-                 "expiration": signal["expiration"], "quantity": int(qty),
+                 "expiration": signal["expiration"], "quantity": q,
                  "limit_price": signal["entry_credit"], "legs": []}
         resp = broker.submit_order(order, _proxy.schwab_py_client)
         if resp.get("status") != "FILLED":
@@ -267,7 +268,7 @@ def open_driver_position(signal: dict, qty: int, broker=None) -> dict:
             return {"status": "rejected", "reason": "LOW_CREDIT"}
         # Re-size on the ACTUAL fill credit (keeps realized risk within the cap).
         sized, max_loss_per = paper_sizing.size_contracts(fill, signal["width"])
-        open_qty = min(int(qty), sized)        # the guardrail clamp is a CEILING
+        open_qty = min(q, sized)               # the guardrail clamp is a CEILING
         if max_loss_per <= 0 or open_qty < 1:
             return {"status": "rejected", "reason": "RISK_TOO_HIGH"}
         max_loss_total = round(max_loss_per * open_qty, 2)
@@ -301,8 +302,11 @@ def run_driver_manage_cycle() -> None:
 
     if not has_driver_account():
         return
-    paper_engine.run_manage_cycle(_proxy.schwab_py_client, dt.date.today().isoformat(),
-                                  db_path=DRIVER_PAPER_DB)
+    try:
+        paper_engine.run_manage_cycle(_proxy.schwab_py_client, dt.date.today().isoformat(),
+                                      db_path=DRIVER_PAPER_DB)
+    except Exception:  # noqa: BLE001 — a reprice/proxy failure must not propagate out of
+        pass            # the wrapper (the 5-min tick retries; matches the driver wrappers)
 
 
 def run_entry_cycle() -> None:
