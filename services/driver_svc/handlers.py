@@ -194,7 +194,7 @@ def _publish_autonomous(bus, *, day_pnl, positions, decision, guarded, executed,
         target=settings.DAILY_TARGET,
         positions=positions,
         decisions=log[:_DECISION_LOG_CAP],
-        perf=perf or {},
+        perf=perf if isinstance(perf, dict) else {},   # bulletproof vs a malformed payload
         last_cycle_ts=_now_iso(),
         timestamp=_now_iso(),
     )
