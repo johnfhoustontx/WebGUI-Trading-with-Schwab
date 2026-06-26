@@ -191,10 +191,12 @@ async def loop(bus):
     to every _OFFHOURS_INTERVAL_MIN off-hours (see periodic_refresh_due) so the
     service stops the round-the-clock proxy/SQLite/Redis churn — then, on each
     trading-day 15-min slot within 08:00-15:15 CT, run one rescan (plus 2-min GEX
-    collection + 5-min paper auto-manage on their own windows). Mirrors the page's
-    former _autoscan_loop. The BLOCKING calls run in an executor so the event loop
-    stays responsive. Each is independently guarded so one failure can't kill the
-    loop or skip the others."""
+    collection + 5-min paper auto-manage — both the MANUAL and the isolated DRIVER
+    paper accounts — on their own windows). Mirrors the page's former
+    _autoscan_loop. The BLOCKING calls run in an executor so the event loop stays
+    responsive. Each is independently guarded so one failure can't kill the loop or
+    skip the others — in particular the driver manage tick is guarded separately
+    from the manual one so a driver-side failure can't skip the manual refresh."""
     loop_ = asyncio.get_event_loop()
     last_slot = None
     last_gex_slot = None  # 2-min GEX history-collection slot (see gex_due)
@@ -290,11 +292,24 @@ async def loop(bus):
         # manage cycle" button; the button still works for on-demand runs). The
         # blocking cycle (proxy reprice) runs in the executor; independently
         # guarded so a failure never skips the work above or kills the loop.
+        m_due = False
         try:
             m_due, m_slot = manage_due(now, last_manage_slot)
             if m_due:
                 last_manage_slot = m_slot
                 await loop_.run_in_executor(None, handlers.run_manage_and_refresh, bus)
+        except Exception:
+            pass
+        # Driver paper account auto-manage — reprice + auto-close the ISOLATED
+        # driver account's open positions on the SAME 5-min cadence (it reuses the
+        # manage_due slot decided above, so its book stays current with no page
+        # open). In its OWN try/except — separate from the manual refresh above —
+        # so a driver-side failure can NEITHER skip the manual refresh NOR kill
+        # the loop. No-op-safe when the driver account doesn't exist yet.
+        try:
+            if m_due:
+                await loop_.run_in_executor(
+                    None, handlers.run_driver_manage_and_refresh, bus)
         except Exception:
             pass
         await asyncio.sleep(POLL_INTERVAL_SEC)

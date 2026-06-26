@@ -160,6 +160,39 @@ def test_gamma_not_cleared_on_non_trading_days():
     assert scheduler.gamma_cleared(_ct(2026, 1, 19, 2, 0)) is False   # MLK Mon → persist
 
 
+# ── Driver-account manage tick wiring (Phase 5 / Task 5.1) ──────────────────
+# The driver's ISOLATED paper account reprices on the SAME 5-min manage cadence
+# as the manual account (it reuses the ``manage_due`` gate — no new cadence). The
+# loop() is an infinite coroutine so it can't be unit-driven; assert (a) the
+# wiring target exists + is callable, and (b) the loop source runs the driver
+# tick inside its OWN try/except so a driver-side failure can't skip the manual
+# refresh or kill the loop.
+def test_driver_manage_handler_is_wired():
+    from services.options_svc import handlers
+
+    assert callable(handlers.run_driver_manage_and_refresh)
+
+
+def test_loop_runs_driver_manage_under_its_own_guard():
+    import inspect
+
+    src = inspect.getsource(scheduler.loop)
+    # The driver manage+refresh is invoked in the loop.
+    assert "run_driver_manage_and_refresh" in src
+    # …and the manual manage tick is still invoked (not replaced).
+    assert "run_manage_and_refresh" in src
+    # The driver tick has its OWN try/except so it's independent of the manual
+    # refresh (a separate guarded block, not piggybacked on the manual try).
+    mdue = src.split("m_due, m_slot = manage_due", 1)[1]
+    # Within the manage block, both the manual and driver refreshes appear, and
+    # the driver call is preceded by its own ``try:`` (a sibling guard).
+    assert "run_manage_and_refresh" in mdue and "run_driver_manage_and_refresh" in mdue
+    driver_seg = mdue.split("run_driver_manage_and_refresh", 1)[0]
+    # Between the manual refresh and the driver refresh there is a fresh ``try:``
+    # opening the driver's own guarded block.
+    assert "try:" in driver_seg.split("run_manage_and_refresh", 1)[1]
+
+
 # ── Cadence-mirror drift guard ──────────────────────────────────────────────
 # The GEX-collection cadence is intentionally mirrored (not imported) between the
 # standalone collector and this Tier-2 scheduler to keep the scheduler's import
