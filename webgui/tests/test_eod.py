@@ -147,3 +147,26 @@ def test_generate_writes_standalone_docs_with_relative_link(tmp_path, monkeypatc
     assert summ.startswith("<!DOCTYPE html>") and det.startswith("<!DOCTYPE html>")
     assert 'href="detail.html"' in summ  # file link is relative, not the route
     assert "AAPL" in det and "$SPX" in det
+
+
+# --- Task 2: normalize_trades ------------------------------------------------
+def test_normalize_trades_ledger_and_driver():
+    led = eod.normalize_trades([{
+        "symbol": "AMD", "strategy": "PCS", "trade_type": "SWING", "status": "OPEN",
+        "entry_time": "2026-06-27T10:00:00+00:00", "exit_time": None,
+        "realized_pnl": None, "entry_credit_total": 120.0,
+    }], kind="ledger")
+    assert led[0] == {
+        "symbol": "AMD", "strategy": "PCS", "trade_type": "SWING", "status": "OPEN",
+        "entry_date": "2026-06-27", "exit_date": None, "realized_pnl": None,
+        "credit": 120.0}
+    drv = eod.normalize_trades([{
+        "symbol": "SPY", "strategy": "CCS", "status": "CLOSED",
+        "entry_ts": "2026-06-26T14:00:00", "exit_ts": "2026-06-27T15:00:00",
+        "realized_pnl": 42.0, "entry_credit": 1.5, "quantity": 2,
+    }], kind="driver")
+    assert drv[0]["entry_date"] == "2026-06-26"
+    assert drv[0]["exit_date"] == "2026-06-27"
+    assert drv[0]["realized_pnl"] == 42.0
+    assert drv[0]["trade_type"] is None            # driver positions carry no horizon
+    assert drv[0]["credit"] == 300.0               # 1.5 * qty 2 * 100

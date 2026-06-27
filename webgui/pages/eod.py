@@ -215,6 +215,45 @@ def driver_section(approvals_cache, perf_cache) -> str:
 
 
 # ----------------------------------------------------------------------------- #
+# Trade normalization + period/breakdown aggregation (additive)
+# ----------------------------------------------------------------------------- #
+def _date_of(ts):
+    """YYYY-MM-DD from an ISO timestamp string, or None."""
+    s = str(ts or "")
+    return s[:10] if len(s) >= 10 and s[4] == "-" and s[7] == "-" else None
+
+
+def normalize_trades(raw, *, kind):
+    """Map a book's raw trade dicts into one uniform shape:
+    {symbol, strategy, trade_type, status, entry_date, exit_date, realized_pnl, credit}.
+    ``kind`` = 'ledger' (manual paper_trades) | 'driver' (driver positions)."""
+    out = []
+    for t in raw or []:
+        t = t or {}
+        if kind == "driver":
+            entry, exit_ = "entry_ts", "exit_ts"
+            qty = _num(t.get("quantity"), 1) or 1
+            per = _num(t.get("entry_credit"))
+            credit = round(per * qty * 100, 2) if per is not None else None
+            trade_type = t.get("trade_type")  # normally absent on driver positions
+        else:
+            entry, exit_ = "entry_time", "exit_time"
+            credit = _num(t.get("entry_credit_total"))
+            trade_type = t.get("trade_type")
+        out.append({
+            "symbol": t.get("symbol"),
+            "strategy": t.get("strategy"),
+            "trade_type": trade_type,
+            "status": t.get("status"),
+            "entry_date": _date_of(t.get(entry)),
+            "exit_date": _date_of(t.get(exit_)),
+            "realized_pnl": _num(t.get("realized_pnl")),
+            "credit": credit,
+        })
+    return out
+
+
+# ----------------------------------------------------------------------------- #
 # Whole-report fragments
 # ----------------------------------------------------------------------------- #
 def detail_fragment(snap: dict) -> str:
