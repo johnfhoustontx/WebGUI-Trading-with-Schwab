@@ -951,7 +951,26 @@ def test_gamma_explain_returns_infographic_html(monkeypatch):
     del _FakeEngine.snapshot_summary
 
 
-def test_gamma_analyze_bundles_three_symbols(monkeypatch):
+class _FakeAnthropic:
+    """Minimal stand-in for anthropic.Anthropic — records the create() kwargs and
+    returns a response whose content is one text block."""
+
+    def __init__(self, text):
+        self._text = text
+        self.kwargs = None
+        outer = self
+
+        class _Msgs:
+            def create(self, **kw):
+                outer.kwargs = kw
+                block = type("B", (), {"type": "text", "text": outer._text})()
+                return type("R", (), {"content": [block]})()
+
+        self.messages = _Msgs()
+
+
+def _patch_analyze_bundle(monkeypatch):
+    """Wire the gamma fakes so gamma_analyze builds a real (non-fallback) prompt."""
     import sys as _sys
 
     _patch_gamma(monkeypatch)
@@ -966,18 +985,59 @@ def test_gamma_analyze_bundles_three_symbols(monkeypatch):
         return "BUNDLED PROMPT"
 
     fake_gt.build_summary_prompt_bundled = _bundle
+    return seen
 
-    out = compute.gamma_analyze()
-    assert out == {"prompt": "BUNDLED PROMPT"}
-    # All three symbol bundles built (non-None).
+
+def test_gamma_analyze_calls_api_and_renders_html(monkeypatch):
+    seen = _patch_analyze_bundle(monkeypatch)
+    client = _FakeAnthropic("## SPX\n\n- **gamma flip** at 5000\n")
+
+    out = compute.gamma_analyze(client=client)
+
+    # All three symbol bundles built (non-None) and fed to the model verbatim.
     assert all(b is not None for b in seen["args"])
+    assert client.kwargs["model"] == compute._ANALYZE_MODEL
+    assert client.kwargs["thinking"] == {"type": "disabled"}
+    assert client.kwargs["messages"][0]["content"] == "BUNDLED PROMPT"
+    # Output is a standalone HTML doc carrying the model's rendered analysis.
+    html = out["html"]
+    assert html.lstrip().startswith("<!DOCTYPE html>")
+    assert "Gamma Analysis" in html
+    assert "gamma flip" in html and "<strong>" in html  # markdown → HTML
+    assert out["prompt"] == "BUNDLED PROMPT"
+    del _FakeEngine.calc_expected_move_from_chain
+
+
+def test_gamma_analyze_no_key_returns_config_message(monkeypatch):
+    _patch_analyze_bundle(monkeypatch)
+    monkeypatch.setattr(compute, "_make_analyze_client", lambda: None)
+
+    out = compute.gamma_analyze()  # no injected client + no key → graceful HTML
+
+    assert out["html"].lstrip().startswith("<!DOCTYPE html>")
+    assert "ANTHROPIC_API_KEY" in out["html"]
+    del _FakeEngine.calc_expected_move_from_chain
+
+
+def test_gamma_analyze_api_error_returns_html(monkeypatch):
+    _patch_analyze_bundle(monkeypatch)
+
+    class _Boom:
+        class _Msgs:
+            def create(self, **kw):
+                raise RuntimeError("network down")
+        messages = _Msgs()
+
+    out = compute.gamma_analyze(client=_Boom())
+    assert out["html"].lstrip().startswith("<!DOCTYPE html>")
+    assert "failed" in out["html"].lower()
     del _FakeEngine.calc_expected_move_from_chain
 
 
 def test_gamma_analyze_degrades_when_no_chains(monkeypatch):
     # Weekend / off-hours: all chain fetches fail → build_summary_prompt_bundled
-    # raises. gamma_analyze must still return a readable prompt (never raise) so the
-    # page dialog opens with feedback instead of the button silently doing nothing.
+    # raises. gamma_analyze must still return a readable HTML page (never raise) so
+    # the new tab opens with feedback instead of the button silently doing nothing.
     _patch_gamma(monkeypatch)
 
     class _Bad:
@@ -987,8 +1047,8 @@ def test_gamma_analyze_degrades_when_no_chains(monkeypatch):
     monkeypatch.setattr(compute._proxy.schwab_py_client, "get_option_chain",
                         lambda *a, **k: _Bad())
     out = compute.gamma_analyze()
-    assert isinstance(out.get("prompt"), str) and out["prompt"]
-    assert "could not fetch" in out["prompt"].lower()
+    assert isinstance(out.get("html"), str) and out["html"]
+    assert "could not fetch" in out["html"].lower()
 
 
 # ── Header helpers (moved from webgui/tests/test_options_header.py) ──────────

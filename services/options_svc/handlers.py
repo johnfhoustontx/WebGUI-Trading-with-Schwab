@@ -71,6 +71,23 @@ EVENT_GAMMA_EXPLAIN = "events:options:gamma_explain"
 CACHE_GAMMA_ANALYZE = "cache:options:gamma_analyze"
 EVENT_GAMMA_ANALYZE = "events:options:gamma_analyze"
 
+# Scheduled (auto-run) $SPX/SPY/QQQ Gamma Analyze briefings — one cache key per
+# daily slot so each is independently viewable and persists in Redis until the next
+# day's run overwrites it. Kept SEPARATE from CACHE_GAMMA_ANALYZE (the ad-hoc button
+# key) so a scheduled run does NOT trip an open Gamma page's _watch_analyze (which
+# would auto-open a browser tab). Driven by scheduler.analyze_slot_due at premarket /
+# ~18 min after the open / midday / close on each trading day.
+ANALYZE_SLOT_TITLES = {
+    "premarket": "Premarket",
+    "open": "After open",
+    "midday": "Midday",
+    "close": "At close",
+}
+CACHE_GAMMA_ANALYZE_SCHED = {
+    slot: f"cache:options:gamma_analyze_{slot}" for slot in ANALYZE_SLOT_TITLES}
+EVENT_GAMMA_ANALYZE_SCHED = {
+    slot: f"events:options:gamma_analyze_{slot}" for slot in ANALYZE_SLOT_TITLES}
+
 CACHE_GAMMA_SYMBOLS = "cache:options:gamma_symbols"
 EVENT_GAMMA_SYMBOLS = "events:options:gamma_symbols"
 
@@ -393,6 +410,32 @@ def publish_gex_status(bus) -> None:
     # Per-tick republisher: skip the version bump + publish when the status view
     # is unchanged (e.g. off-hours), so it doesn't wake the GUI poller needlessly.
     bus.cache_set(CACHE_GEX_STATUS, data, event=EVENT_GEX_STATUS, skip_unchanged=True)
+
+
+def run_scheduled_gamma_analyze(bus, slot) -> None:
+    """Auto-run the $SPX/SPY/QQQ Gamma Analyze for a scheduled ``slot`` and cache it
+    under that slot's OWN key (NOT the ad-hoc ``gamma_analyze`` key — so an open
+    Gamma page's _watch_analyze doesn't auto-open a browser tab for it).
+
+    Driven by ``scheduler.analyze_slot_due`` at premarket / ~18 min after the open /
+    midday / close on each trading day, in addition to the ad-hoc Analyze button.
+    The result persists in Redis under its slot key until the next day's run
+    overwrites it; the Gamma page opens it on demand via ``/options/analyze?slot=``.
+    Defensive: ``compute.gamma_analyze`` never raises (every failure → a readable
+    HTML page), so this only guards the slot-key lookup."""
+    key = CACHE_GAMMA_ANALYZE_SCHED.get(slot)
+    if not key:
+        return
+    import datetime as _dt
+    from zoneinfo import ZoneInfo as _ZI
+    now = _dt.datetime.now(_ZI("America/Chicago"))
+    title = ANALYZE_SLOT_TITLES.get(slot, slot)
+    hr = (now.strftime("%I").lstrip("0") or "12")  # portable 12-hour (no %-I on Windows)
+    label = f"Auto · {title} · {now.strftime('%b %d')} {hr}:{now.strftime('%M %p')} CT"
+    res = compute.gamma_analyze(label=label)
+    res = {**res, "slot": slot, "generated_at": now.isoformat()}
+    version = bus.cache_set(CACHE_GAMMA_ANALYZE_SCHED[slot], res)
+    bus.publish(EVENT_GAMMA_ANALYZE_SCHED[slot], {"version": version})
 
 
 def publish_gamma_symbols(bus) -> None:

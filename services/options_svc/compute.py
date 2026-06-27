@@ -1278,13 +1278,127 @@ def _gamma_blocks_for(symbol, chain):
             "dex": bd(dex, "dex"), "vanna": bd(vanna, "vanna")}
 
 
-def gamma_analyze() -> dict:
-    """Build the bundled SPX/SPY/QQQ Analyze prompt → ``{"prompt": <text>}``.
+# ── Gamma Analyze (Claude-written intraday briefing → standalone HTML tab) ───
+# The Analyze button bundles the live $SPX/SPY/QQQ GEX/Charm/DEX/Vanna data into a
+# prompt, runs it through Claude (Sonnet 4.6), and renders the model's analysis as a
+# self-contained dark HTML document the GUI serves in a NEW browser tab — mirroring
+# the Explain flow. The Anthropic call is cost-bounded on purpose: Sonnet 4.6 with
+# thinking DISABLED + a modest max_tokens, so each click costs ~the "typical" 1-page
+# summary the user signed off on (no runaway thinking tokens). The ``anthropic``
+# import is LAZY (only when a key resolves). EVERY failure surface (no chains / no key
+# / API error / empty reply) degrades to a readable HTML page so the tab always shows
+# something — never a silent no-op.
+_ANALYZE_MODEL = "claude-sonnet-4-6"
+_ANALYZE_MAX_TOKENS = 1500  # "typical" ~1-page briefing (user-approved cost point)
+_ANALYZE_SYSTEM = (
+    "You are an options-market analyst writing a concise intraday dealer-positioning "
+    "briefing for an experienced trader, from the structured GEX / Charm / DEX / Vanna "
+    "data provided for $SPX, SPY and QQQ. Write directly in clean Markdown: a short "
+    "title line, then 2-4 tight sections under '## ' headers, with bullet points and "
+    "**bold** for key levels and numbers. Be specific and actionable about gamma flip "
+    "levels, call/put walls, and likely intraday behavior. Do NOT include any "
+    "disclaimers, risk warnings, 'not financial advice' notes, hedging caveats, or "
+    "boilerplate of any kind — output only the analysis itself."
+)
 
-    Ports the page's ``_analyze_prompt``: fetch each of $SPX/SPY/QQQ, build its
-    analysis blocks (defensive per-symbol → None on failure), then bundle them
-    via ``build_summary_prompt_bundled``."""
+_ANALYZE_CSS = """
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:#0c0f15; color:#e6e6e6;
+    font-family:"Segoe UI",system-ui,-apple-system,sans-serif; line-height:1.55; }
+  .ga { max-width:860px; margin:0 auto; padding:34px 30px 60px; }
+  .ga-title { font-size:1.6rem; font-weight:700; color:#90caf9; letter-spacing:.3px; }
+  .ga-sub { color:#8a93a3; font-size:.92rem; margin:4px 0 22px; }
+  .ga-body h1 { font-size:1.35rem; color:#90caf9; margin:1.4em 0 .4em; }
+  .ga-body h2 { font-size:1.12rem; color:#ffd54f; margin:1.3em 0 .4em;
+    border-bottom:1px solid #222a36; padding-bottom:4px; }
+  .ga-body h3 { font-size:1.0rem; color:#ffb74d; margin:1.1em 0 .3em; }
+  .ga-body p { margin:.5em 0; }
+  .ga-body ul, .ga-body ol { margin:.4em 0 .8em; padding-left:1.4em; }
+  .ga-body li { margin:.25em 0; }
+  .ga-body strong { color:#fff; }
+  .ga-body code { background:#1b222e; color:#9ad0ff; padding:1px 5px;
+    border-radius:4px; font-size:.9em; }
+  .ga-body em { color:#c7cdd6; }
+  .ga-body hr { border:0; border-top:1px solid #222a36; margin:1.4em 0; }
+  .ga-body table { border-collapse:collapse; margin:.6em 0; }
+  .ga-body th, .ga-body td { border:1px solid #222a36; padding:5px 10px; }
+"""
+
+
+def _anthropic_api_key():
+    """Anthropic API key, or ``None`` (never raises). ``ANTHROPIC_API_KEY`` env →
+    gitignored ``shared/anthropic_key.txt`` — same resolution order driver_svc uses
+    (kept local so options_svc doesn't import driver_svc)."""
+    import os
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if key:
+        return key.strip()
+    try:
+        from repo_paths import SHARED_DIR
+        p = SHARED_DIR / "anthropic_key.txt"
+        if p.exists():
+            return p.read_text(encoding="utf-8").strip()
+    except Exception:  # noqa: BLE001 — a missing/unreadable file is non-fatal.
+        pass
+    return None
+
+
+def _make_analyze_client():
+    """A real ``anthropic.Anthropic`` client, or ``None`` if no key / SDK (never
+    raises). LAZY import so the test suite + service import without the SDK."""
+    key = _anthropic_api_key()
+    if not key:
+        return None
+    try:
+        import anthropic
+        return anthropic.Anthropic(api_key=key)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _analyze_md_to_html(text: str) -> str:
+    """Markdown analysis → HTML fragment (defensive — escaped ``<pre>`` fallback)."""
+    try:
+        import markdown as _md
+        return _md.markdown(text or "", extensions=["extra", "sane_lists"])
+    except Exception:  # noqa: BLE001
+        import html as _html
+        return f"<pre>{_html.escape(text or '')}</pre>"
+
+
+def _analyze_doc(body_html: str,
+                 subtitle: str = "Dealer-positioning briefing · $SPX / SPY / QQQ") -> str:
+    """Wrap an HTML body fragment in a standalone dark document (Explain aesthetic)."""
+    return ("<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+            "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+            "<title>Gamma Analysis — $SPX / SPY / QQQ</title>"
+            f"<style>{_ANALYZE_CSS}</style></head><body><div class=\"ga\">"
+            "<div class=\"ga-title\">Gamma Analysis</div>"
+            f"<div class=\"ga-sub\">{subtitle}</div>"
+            f"<div class=\"ga-body\">{body_html}</div></div></body></html>")
+
+
+def gamma_analyze(client=None, label: str | None = None) -> dict:
+    """Run the bundled SPX/SPY/QQQ briefing through Claude → ``{"html", "prompt"}``.
+
+    Fetch each of $SPX/SPY/QQQ, build its analysis blocks (defensive per-symbol →
+    None), bundle them via ``build_summary_prompt_bundled``, then call Claude
+    (Sonnet 4.6, thinking disabled) and render the reply as a standalone dark HTML
+    document the GUI serves in a new tab (mirrors ``gamma_explain``). ``client`` is
+    injected in tests; in production it is built from the resolved API key.
+    ``label`` (e.g. ``"Auto · Premarket · Jun 28 8:01 AM CT"``) is appended to the
+    doc subtitle so a scheduled run shows which slot + when it was generated.
+
+    Every failure surface degrades to a readable HTML page (so the tab always opens):
+    no live chains (market closed) · no API key configured · API/network error ·
+    empty model reply. The ``html`` carries NO disclaimers (the system prompt
+    forbids them)."""
     import gamma_tool as gt
+
+    subtitle = "Dealer-positioning briefing · $SPX / SPY / QQQ"
+    if label:
+        subtitle = f"{subtitle} · {label}"
 
     blocks = {}
     for key, sym in (("spx", "$SPX"), ("spy", "SPY"), ("qqq", "QQQ")):
@@ -1296,15 +1410,44 @@ def gamma_analyze() -> dict:
     try:
         prompt = gt.build_summary_prompt_bundled(blocks["spx"], blocks["spy"], blocks["qqq"])
     except Exception:
-        # build_summary_prompt_bundled raises when ALL three bundles are None — i.e.
-        # no live option chain for $SPX/SPY/QQQ (market closed / weekend / proxy
-        # down). Degrade to a readable note so the page's dialog still opens with
-        # feedback instead of the button silently doing nothing (no cache write).
-        prompt = ("No GEX analysis available right now — could not fetch live option "
-                  "chains for $SPX, SPY or QQQ. The market may be closed (Analyze "
-                  "needs live chain data), or the data service is unavailable. Try "
-                  "again during market hours.")
-    return {"prompt": prompt}
+        # build_summary_prompt_bundled raises when ALL three bundles are None — no
+        # live option chain for $SPX/SPY/QQQ (market closed / weekend / proxy down).
+        return {"html": _analyze_doc(
+            "<p>No GEX analysis available right now — could not fetch live option "
+            "chains for $SPX, SPY or QQQ. The market may be closed (Analyze needs "
+            "live chain data), or the data service is unavailable. Try again during "
+            "market hours.</p>", subtitle)}
+
+    client = client or _make_analyze_client()
+    if client is None:
+        return {"html": _analyze_doc(
+            "<p>AI analysis is not configured. Set the <code>ANTHROPIC_API_KEY</code> "
+            "environment variable (or place the key in <code>shared/anthropic_key.txt</code>) "
+            "on the options service, then click Analyze again.</p>", subtitle),
+            "prompt": prompt}
+
+    try:
+        resp = client.messages.create(
+            model=_ANALYZE_MODEL,
+            max_tokens=_ANALYZE_MAX_TOKENS,
+            thinking={"type": "disabled"},
+            system=_ANALYZE_SYSTEM,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = "".join(
+            getattr(b, "text", "") for b in (getattr(resp, "content", None) or [])
+            if getattr(b, "type", None) == "text").strip()
+    except Exception as exc:  # noqa: BLE001 — surface the failure in the tab.
+        return {"html": _analyze_doc(
+            f"<p>AI analysis failed: <code>{exc}</code></p>"
+            "<p>Try again in a moment — if it persists, check the API key and the "
+            "service log.</p>", subtitle), "prompt": prompt}
+
+    if not text:
+        return {"html": _analyze_doc(
+            "<p>The model returned no analysis. Try Analyze again.</p>", subtitle),
+            "prompt": prompt}
+    return {"html": _analyze_doc(_analyze_md_to_html(text), subtitle), "prompt": prompt}
 
 
 # ── Calculator (ported from webgui/pages/options/calculator.py) ──────────────

@@ -179,6 +179,42 @@ def periodic_refresh_due(now, last_slot):
     return (slot != last_slot, slot)
 
 
+# ── Scheduled $SPX/SPY/QQQ Gamma Analyze (Claude briefing) cadence ──────────
+# The Gamma Analyze button is ALSO auto-run at four fixed points on each trading
+# day so the day's index dealer-positioning briefings are generated unattended (in
+# addition to ad-hoc button use). Times are in CT (this module's clock); the ET
+# reference is in the comment. Each slot fires ONCE per day, within a grace window
+# after its target — so a missed 30 s tick or a mid-window service start still fires
+# it, but a long-late start does NOT backfill a stale slot.
+_ANALYZE_SLOTS = {
+    "premarket": (8, 0),    # 09:00 ET — premarket
+    "open":      (8, 48),   # 09:48 ET — ~18 min after the 09:30 open
+    "midday":    (11, 30),  # 12:30 ET — midday
+    "close":     (14, 58),  # 15:58 ET — at the close
+}
+_ANALYZE_GRACE_MIN = 20  # fire within this many minutes of the target, else skip
+
+
+def analyze_slot_due(now, ran_slots):
+    """Name of the scheduled-analyze slot due now, or None.
+
+    Fires each slot ONCE per trading day, when ``target <= now < target + grace`` and
+    that ``(date, slot)`` isn't already in ``ran_slots``. The grace window tolerates a
+    missed tick / mid-window service start without backfilling a long-stale slot. The
+    caller records the returned ``(date, slot)`` in ``ran_slots`` so it won't refire."""
+    if not _is_trading_day(now):
+        return None
+    import datetime as _dt
+    day = now.date().isoformat()
+    for name, (h, m) in _ANALYZE_SLOTS.items():
+        if (day, name) in ran_slots:
+            continue
+        target = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        if target <= now < target + _dt.timedelta(minutes=_ANALYZE_GRACE_MIN):
+            return name
+    return None
+
+
 # ── Scheduler loop ─────────────────────────────────────────────────────────
 POLL_INTERVAL_SEC = 30  # check the slot every 30s (mirrors the page's autoscan loop cadence)
 
@@ -202,6 +238,7 @@ async def loop(bus):
     last_gex_slot = None  # 2-min GEX history-collection slot (see gex_due)
     last_manage_slot = None  # 5-min paper auto-manage slot (see manage_due)
     last_periodic_slot = None  # header + gex_status throttle slot (see periodic_refresh_due)
+    analyze_ran = set()  # (date, slot) of fired scheduled Gamma Analyze runs (see analyze_slot_due)
     # One-shot startup refresh so the Paper Portfolio page has data on first
     # load. The paper account only changes on user actions (entry/manage/reset
     # commands re-publish it), so it is NOT polled every tick. Guarded so a
@@ -310,6 +347,22 @@ async def loop(bus):
             if m_due:
                 await loop_.run_in_executor(
                     None, handlers.run_driver_manage_and_refresh, bus)
+        except Exception:
+            pass
+        # Scheduled $SPX/SPY/QQQ Gamma Analyze — auto-run the Analyze command at
+        # premarket / ~18 min after the open / midday / close on each trading day
+        # (in addition to ad-hoc button use). Each slot fires once per day within a
+        # grace window; the result is cached under its OWN slot key (NOT the ad-hoc
+        # key) so no browser tab auto-opens. The slot is latched in analyze_ran
+        # BEFORE the blocking Claude call so a slow call can't double-fire on the
+        # next tick. Independently guarded so a failure never skips the work above
+        # or kills the loop.
+        try:
+            a_slot = analyze_slot_due(now, analyze_ran)
+            if a_slot:
+                analyze_ran.add((now.date().isoformat(), a_slot))
+                await loop_.run_in_executor(
+                    None, handlers.run_scheduled_gamma_analyze, bus, a_slot)
         except Exception:
             pass
         await asyncio.sleep(POLL_INTERVAL_SEC)

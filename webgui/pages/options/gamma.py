@@ -580,6 +580,22 @@ def render():
         explain_btn = ui.button("Explain", icon="help").props("outline")
         analyze_btn = ui.button("Analyze", icon="psychology").props("outline")
         countdown_lbl = ui.label("").classes("opacity-60 text-sm")
+    # Auto briefings (today): the $SPX/SPY/QQQ Analyze runs the options service
+    # auto-generates at premarket / ~18 min after open / midday / close. Each button
+    # opens that slot's latest briefing in a new tab (the slot key is separate from
+    # the ad-hoc Analyze key, so these never auto-open). Enabled once a slot has been
+    # generated (version present); the generated date/time shows in the doc subtitle.
+    sched_btns = {}
+    with ui.row().classes("items-center gap-2 flex-wrap"):
+        ui.label("Auto briefings:").classes("opacity-60 text-sm")
+        for _slot, _title in (("premarket", "Premarket"), ("open", "Open"),
+                              ("midday", "Midday"), ("close", "Close")):
+            _b = ui.button(_title, icon="schedule").props("flat dense")
+            _b.on_click(lambda s=_slot: ui.navigate.to(
+                f"/options/analyze?slot={s}", new_tab=True))
+            _b.disable()
+            _b.tooltip(f"{_title} $SPX/SPY/QQQ briefing — not generated yet today")
+            sched_btns[_slot] = _b
     # Collector status bar: status dot/text (colored) + last/next scan times.
     # Read-only view published by the options service (cache:options:gex_status);
     # version-polled like gamma/explain/analyze below. Sits alongside (does NOT
@@ -830,41 +846,48 @@ def render():
         seen["explain"] = version
         ui.navigate.to(f"/options/explain?v={version}", new_tab=True)
 
-    def _open_analyze_dialog(res):
-        prompt = (res or {}).get("prompt") or "(no prompt)"
-        with ui.dialog() as dlg, ui.card().classes("min-w-[640px]"):
-            ui.label("GEX analysis prompt (SPX / SPY / QQQ)").classes("text-h6")
-            ta = ui.textarea(value=prompt).props('readonly outlined input-style="min-height:55vh"').classes("w-full")
-            with ui.row():
-                ui.button("Copy", icon="content_copy",
-                          on_click=lambda: ui.clipboard.write(ta.value)).props("flat")
-                ui.button("Close", on_click=dlg.close).props("flat")
-        dlg.open()
-
     @guard
     def _request_analyze():
         bus_client.request("options", {"type": "gamma_analyze"})
-        ui.notify("Analyze requested…")
+        ui.notify("Analyzing $SPX / SPY / QQQ… opens in a new tab (a few seconds).")
 
     @guard
     def _watch_analyze(version):
+        # Mirrors _watch_explain: the service ran gamma_analyze (called Claude +
+        # rendered the HTML) and bumped the version → open the result in a new browser
+        # tab. /options/analyze serves the cached standalone HTML raw (so its own CSS
+        # applies). ?v= busts the browser cache so each click shows the latest.
         if version is None or version == seen["analyze"]:
             return
         seen["analyze"] = version
-        _open_analyze_dialog(bus_client.read("options:gamma_analyze") or {})
+        ui.navigate.to(f"/options/analyze?v={version}", new_tab=True)
+
+    _SCHED_VIEWS = {s: f"options:gamma_analyze_{s}" for s in sched_btns}
+
+    def _sync_sched_btns(versions):
+        # Enable a briefing button once its slot has been generated (version present);
+        # the doc subtitle carries the generated date/time so staleness is visible.
+        for s, b in sched_btns.items():
+            if versions.get(_SCHED_VIEWS[s]):
+                b.enable()
+                b.tooltip(f"Open the latest auto-generated {b.text} briefing")
+            else:
+                b.disable()
 
     @guard
     def _poll():
-        # One coalesced 2s tick: read all four view versions in a single pipelined
+        # One coalesced 2s tick: read all view versions in a single pipelined
         # round-trip (cheap :ver counters, no payload deserialize) and dispatch only
-        # the views that changed — replaces four separate 2s version-poll timers.
+        # the views that changed — replaces separate per-view version-poll timers.
         v = bus_client.read_versions([
             "options:gamma", "options:gex_status",
-            "options:gamma_explain", "options:gamma_analyze"])
+            "options:gamma_explain", "options:gamma_analyze",
+            *_SCHED_VIEWS.values()])
         _maybe_repaint(v["options:gamma"])
         _maybe_repaint_status(v["options:gex_status"])
         _watch_explain(v["options:gamma_explain"])
         _watch_analyze(v["options:gamma_analyze"])
+        _sync_sched_btns(v)
 
     def _set_symbol(sym):
         """Point the dropdown at ``sym`` (adding it to the options if the universe
@@ -893,6 +916,7 @@ def render():
     seen["explain"] = bus_client.read_version("options:gamma_explain")
     seen["analyze"] = bus_client.read_version("options:gamma_analyze")
     seen["status"] = bus_client.read_version("options:gex_status")
+    _sync_sched_btns(bus_client.read_versions(list(_SCHED_VIEWS.values())))
     state["snap"] = bus_client.read("options:gamma") or None
     # Sync the dropdown to the symbol actually in the cache so a page (re)build
     # doesn't show $SPX while another symbol's data is displayed (which a later

@@ -206,3 +206,51 @@ def test_gex_interval_mirrors_collector():
     assert scheduler._GEX_INTERVAL_MIN == gex_collector.POLL_INTERVAL_MIN
     # Staleness threshold == 2 poll intervals (in seconds).
     assert gex_status.STALE_AFTER_SEC == gex_collector.POLL_INTERVAL_MIN * 60 * 2
+
+
+# ── Scheduled Gamma Analyze cadence (analyze_slot_due) ──────────────────────
+# Four fixed CT slots fire once per trading day within a grace window after the
+# target; latched via the caller's ran-set. 2026-06-15 is a Monday.
+def test_analyze_slot_fires_at_target():
+    assert scheduler.analyze_slot_due(_ct(2026, 6, 15, 8, 0), set()) == "premarket"
+    assert scheduler.analyze_slot_due(_ct(2026, 6, 15, 8, 48), set()) == "open"
+    assert scheduler.analyze_slot_due(_ct(2026, 6, 15, 11, 30), set()) == "midday"
+    assert scheduler.analyze_slot_due(_ct(2026, 6, 15, 14, 58), set()) == "close"
+
+
+def test_analyze_slot_fires_within_grace_window():
+    # 09:05 CT is 5 min past the 09:00... actually premarket is 08:00 CT; check 08:19.
+    assert scheduler.analyze_slot_due(_ct(2026, 6, 15, 8, 19), set()) == "premarket"
+
+
+def test_analyze_slot_skips_past_grace():
+    # 08:20 CT is 20 min past the 08:00 target → outside the [target, target+20) window.
+    assert scheduler.analyze_slot_due(_ct(2026, 6, 15, 8, 20), set()) is None
+
+
+def test_analyze_slot_latched_once_per_day():
+    ran = {("2026-06-15", "premarket")}
+    assert scheduler.analyze_slot_due(_ct(2026, 6, 15, 8, 1), ran) is None
+
+
+def test_analyze_slot_none_outside_all_windows():
+    assert scheduler.analyze_slot_due(_ct(2026, 6, 15, 10, 0), set()) is None
+
+
+def test_analyze_slot_skips_weekend():
+    # 2026-06-13 is a Saturday.
+    assert scheduler.analyze_slot_due(_ct(2026, 6, 13, 8, 0), set()) is None
+
+
+def test_analyze_slot_skips_holiday():
+    # 2026-12-25 is in _HOLIDAYS.
+    assert scheduler.analyze_slot_due(_ct(2026, 12, 25, 8, 0), set()) is None
+
+
+def test_loop_wires_scheduled_analyze():
+    import inspect
+    src = inspect.getsource(scheduler.loop)
+    assert "analyze_slot_due" in src and "run_scheduled_gamma_analyze" in src
+    # The slot is latched in analyze_ran BEFORE the blocking call (no double-fire).
+    seg = src.split("analyze_slot_due", 1)[1].split("run_scheduled_gamma_analyze", 1)[0]
+    assert "analyze_ran.add" in seg

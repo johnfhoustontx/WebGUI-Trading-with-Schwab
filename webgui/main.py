@@ -83,6 +83,53 @@ def _serve_explain():
     return HTMLResponse(explain_html(bus_client.read("options:gamma_explain")))
 
 
+_ANALYZE_EMPTY = (
+    "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+    "<title>Gamma Analysis</title></head>"
+    "<body style=\"font-family:system-ui,sans-serif;background:#0c0f15;color:#e9edf3;padding:40px;\">"
+    "<h3>No Gamma analysis generated yet</h3>"
+    "<p>Open the Gamma page and click <b>Analyze</b> first.</p></body></html>")
+
+
+def analyze_html(payload):
+    """Standalone analysis HTML from the cached gamma_analyze payload (or a
+    friendly placeholder)."""
+    html = (payload or {}).get("html")
+    return html if isinstance(html, str) and html.strip() else _ANALYZE_EMPTY
+
+
+# Scheduled-briefing views (one per daily slot), kept separate from the ad-hoc
+# ``options:gamma_analyze`` key so a scheduled run never auto-opens a tab. Mirror of
+# handlers.CACHE_GAMMA_ANALYZE_SCHED (Tier-1 can't import the service, so the view
+# names are listed here). ``/options/analyze?slot=<slot>`` serves the matching one;
+# no/unknown slot → the ad-hoc Analyze result.
+_ANALYZE_SLOT_VIEWS = {
+    "premarket": "options:gamma_analyze_premarket",
+    "open": "options:gamma_analyze_open",
+    "midday": "options:gamma_analyze_midday",
+    "close": "options:gamma_analyze_close",
+}
+
+
+def analyze_view_for(slot):
+    """Bus view name for a scheduled ``slot``, or the ad-hoc view for None/unknown."""
+    return _ANALYZE_SLOT_VIEWS.get(slot, "options:gamma_analyze")
+
+
+@app.get("/options/analyze")
+def _serve_analyze(slot: str = None):
+    """Serve a Gamma Analysis (Claude-written) as a raw standalone page.
+
+    Mirrors ``_serve_explain``: reads the Redis bus cache written by options_svc and
+    returns a raw HTMLResponse so the document's own <style> applies. With no ``slot``
+    it serves the ad-hoc Analyze result (``gamma_analyze`` command); ``?slot=premarket
+    |open|midday|close`` serves that day's auto-generated briefing. Opened in a new
+    browser tab from the Gamma page.
+    """
+    import bus_client
+    return HTMLResponse(analyze_html(bus_client.read(analyze_view_for(slot))))
+
+
 @app.get("/eod/file")
 def _serve_eod_file(date: str, which: str = "summary"):
     """Serve an archived EOD report file (summary.html / detail.html) raw, so its

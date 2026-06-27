@@ -664,6 +664,35 @@ def test_gamma_analyze_command(monkeypatch):
     assert msg is not None and msg.get("version") == env.version
 
 
+def test_run_scheduled_gamma_analyze_caches_slot_key(monkeypatch):
+    bus = Bus(fake=True)
+    seen = {"label": None}
+
+    def _analyze(client=None, label=None):
+        seen["label"] = label
+        return {"html": "<!DOCTYPE html><html><body>doc</body></html>", "prompt": "p"}
+
+    monkeypatch.setattr(handlers.compute, "gamma_analyze", _analyze)
+
+    handlers.run_scheduled_gamma_analyze(bus, "midday")
+
+    # Cached under the slot's OWN key, NOT the ad-hoc gamma_analyze key.
+    env = bus.cache_get("cache:options:gamma_analyze_midday")
+    assert env is not None and env.payload["html"].startswith("<!DOCTYPE html>")
+    assert env.payload["slot"] == "midday" and env.payload.get("generated_at")
+    assert bus.cache_get("cache:options:gamma_analyze") is None
+    # The model run is labelled with the slot title (shows in the doc subtitle).
+    assert "Midday" in (seen["label"] or "")
+
+
+def test_run_scheduled_gamma_analyze_unknown_slot_noop(monkeypatch):
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "gamma_analyze",
+                        lambda **k: {"html": "x"})
+    handlers.run_scheduled_gamma_analyze(bus, "bogus")  # must not raise / cache
+    assert bus.cache_get("cache:options:gamma_analyze_bogus") is None
+
+
 # ── Simulator (Task 2.6e) ────────────────────────────────────────────────────
 def test_sim_fetch_command_caches_meta(monkeypatch):
     bus = Bus(fake=True)
