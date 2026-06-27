@@ -253,6 +253,59 @@ def normalize_trades(raw, *, kind):
     return out
 
 
+def _period_ranges(today):
+    """(start_date, end_date) inclusive for daily / weekly(WTD) / mtd."""
+    return {
+        "daily": (today, today),
+        "weekly": (today - dt.timedelta(days=today.weekday()), today),  # Monday→today
+        "mtd": (today.replace(day=1), today),
+    }
+
+
+def _parse_date(s):
+    try:
+        return dt.date.fromisoformat(str(s)[:10])
+    except (TypeError, ValueError):
+        return None
+
+
+def _in_range(date_str, lo, hi):
+    d = _parse_date(date_str)
+    return d is not None and lo <= d <= hi
+
+
+def period_buckets(norm_trades, today):
+    """{daily, weekly, mtd} each {realized, closed, wins, losses, win_rate, opened,
+    credit}. Realized/closed bucket by EXIT date; opened/credit by ENTRY date."""
+    out = {}
+    for name, (lo, hi) in _period_ranges(today).items():
+        realized = wins = losses = closed = opened = 0.0
+        credit = 0.0
+        for t in norm_trades or []:
+            if _in_range(t.get("exit_date"), lo, hi):
+                closed += 1
+                pnl = _num(t.get("realized_pnl"))
+                if pnl is not None:
+                    realized += pnl
+                    if pnl > 0:
+                        wins += 1
+                    elif pnl < 0:
+                        losses += 1
+            if _in_range(t.get("entry_date"), lo, hi):
+                opened += 1
+                c = _num(t.get("credit"))
+                if c is not None:
+                    credit += c
+        decided = wins + losses
+        out[name] = {
+            "realized": round(realized, 2), "closed": int(closed),
+            "wins": int(wins), "losses": int(losses),
+            "win_rate": (wins / decided) if decided else None,
+            "opened": int(opened), "credit": round(credit, 2),
+        }
+    return out
+
+
 # ----------------------------------------------------------------------------- #
 # Whole-report fragments
 # ----------------------------------------------------------------------------- #

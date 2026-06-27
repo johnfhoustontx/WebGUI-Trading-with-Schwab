@@ -170,3 +170,35 @@ def test_normalize_trades_ledger_and_driver():
     assert drv[0]["realized_pnl"] == 42.0
     assert drv[0]["trade_type"] is None            # driver positions carry no horizon
     assert drv[0]["credit"] == 300.0               # 1.5 * qty 2 * 100
+
+
+# --- Task 3: period_buckets --------------------------------------------------
+import datetime as _dt
+
+
+def _nt(entry, exit_, pnl, status="CLOSED"):
+    return {"symbol": "X", "strategy": "PCS", "trade_type": "SWING", "status": status,
+            "entry_date": entry, "exit_date": exit_, "realized_pnl": pnl, "credit": 100.0}
+
+
+def test_period_buckets_daily_weekly_mtd():
+    today = _dt.date(2026, 6, 27)          # a Saturday; week-to-date = Mon 06-22..27
+    trades = [
+        _nt("2026-06-27", "2026-06-27", 50.0),     # opened+closed today
+        _nt("2026-06-23", "2026-06-25", -20.0),    # closed this week (not today)
+        _nt("2026-06-02", "2026-06-10", 200.0),    # closed this month (not this week)
+        _nt("2026-05-30", "2026-05-31", 999.0),    # last month — excluded everywhere
+        _nt("2026-06-26", None, None, status="OPEN"),  # open entry this week
+    ]
+    b = eod.period_buckets(trades, today)
+    assert b["daily"]["realized"] == 50.0
+    assert b["weekly"]["realized"] == 50.0 + (-20.0)
+    assert b["mtd"]["realized"] == 50.0 - 20.0 + 200.0
+    assert b["daily"]["closed"] == 1
+    assert b["weekly"]["closed"] == 2
+    assert b["mtd"]["closed"] == 3
+    assert b["weekly"]["wins"] == 1 and b["weekly"]["losses"] == 1
+    assert b["weekly"]["win_rate"] == 0.5
+    assert b["daily"]["opened"] == 1
+    assert b["weekly"]["opened"] == 3      # 06-27, 06-23, 06-26
+    assert b["mtd"]["opened"] == 4         # + 06-02
