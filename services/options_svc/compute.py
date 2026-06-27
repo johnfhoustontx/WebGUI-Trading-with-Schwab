@@ -1293,7 +1293,17 @@ def gamma_analyze() -> dict:
             blocks[key] = _gamma_blocks_for(sym, chain) if chain else None
         except Exception:
             blocks[key] = None
-    prompt = gt.build_summary_prompt_bundled(blocks["spx"], blocks["spy"], blocks["qqq"])
+    try:
+        prompt = gt.build_summary_prompt_bundled(blocks["spx"], blocks["spy"], blocks["qqq"])
+    except Exception:
+        # build_summary_prompt_bundled raises when ALL three bundles are None — i.e.
+        # no live option chain for $SPX/SPY/QQQ (market closed / weekend / proxy
+        # down). Degrade to a readable note so the page's dialog still opens with
+        # feedback instead of the button silently doing nothing (no cache write).
+        prompt = ("No GEX analysis available right now — could not fetch live option "
+                  "chains for $SPX, SPY or QQQ. The market may be closed (Analyze "
+                  "needs live chain data), or the data service is unavailable. Try "
+                  "again during market hours.")
     return {"prompt": prompt}
 
 

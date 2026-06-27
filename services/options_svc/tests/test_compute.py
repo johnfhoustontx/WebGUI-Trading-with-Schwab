@@ -974,6 +974,23 @@ def test_gamma_analyze_bundles_three_symbols(monkeypatch):
     del _FakeEngine.calc_expected_move_from_chain
 
 
+def test_gamma_analyze_degrades_when_no_chains(monkeypatch):
+    # Weekend / off-hours: all chain fetches fail → build_summary_prompt_bundled
+    # raises. gamma_analyze must still return a readable prompt (never raise) so the
+    # page dialog opens with feedback instead of the button silently doing nothing.
+    _patch_gamma(monkeypatch)
+
+    class _Bad:
+        status_code = 500
+        def json(self):  # noqa: E704
+            return None
+    monkeypatch.setattr(compute._proxy.schwab_py_client, "get_option_chain",
+                        lambda *a, **k: _Bad())
+    out = compute.gamma_analyze()
+    assert isinstance(out.get("prompt"), str) and out["prompt"]
+    assert "could not fetch" in out["prompt"].lower()
+
+
 # ── Header helpers (moved from webgui/tests/test_options_header.py) ──────────
 def test_sentiment_dot_no_data_when_inactive():
     assert compute.sentiment_dot({"active": False})[1] == "No data"
