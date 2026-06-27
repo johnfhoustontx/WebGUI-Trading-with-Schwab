@@ -337,6 +337,64 @@ def breakdown_rows(norm_trades, key):
     return sorted(rows, key=lambda r: r["trades"], reverse=True)
 
 
+def _pct(frac):
+    n = _num(frac)
+    return "—" if n is None else f"{n * 100:.0f}%"
+
+
+def toc(sections):
+    """An anchor-link table of contents: sections = [(id, title), ...]."""
+    links = " · ".join(f'<a href="#{escape(i)}">{escape(t)}</a>' for i, t in sections)
+    return f'<nav class="eod-toc">{links}</nav>'
+
+
+def details_section(anchor, title, body, *, open=True):
+    """A collapsible section (native <details>, no JS — works in-app + exported)."""
+    op = " open" if open else ""
+    return (f'<details id="{escape(anchor)}" class="eod-sec"{op}>'
+            f'<summary>{escape(title)}</summary>{body}</details>')
+
+
+_PERIOD_LABELS = [("daily", "Daily"), ("weekly", "Weekly (WTD)"), ("mtd", "MTD")]
+
+
+def performance_table_html(buckets):
+    """Daily/Weekly/MTD rows: Realized | Closed (W-L) | Win% | Opened | Credit."""
+    buckets = buckets or {}
+    rows = []
+    for key, label in _PERIOD_LABELS:
+        b = buckets.get(key) or {}
+        wl = f'{int(b.get("wins", 0))}-{int(b.get("losses", 0))}'
+        rows.append(
+            "<tr>"
+            f"<td><b>{escape(label)}</b></td>"
+            f'<td class="{_pn_class(b.get("realized"))}">{_money(b.get("realized"))}</td>'
+            f'<td>{int(b.get("closed", 0))} ({wl})</td>'
+            f'<td>{_pct(b.get("win_rate"))}</td>'
+            f'<td>{int(b.get("opened", 0))}</td>'
+            f'<td>{_money(b.get("credit"))}</td>'
+            "</tr>")
+    return _table(["Period", "Realized P&L", "Closed (W-L)", "Win %", "Opened",
+                   "Credit collected"], rows, empty="No activity.")
+
+
+def breakdown_table_html(rows):
+    """A breakdown table: Group | Trades | Open | Closed | Realized | Win%."""
+    body = []
+    for r in rows or []:
+        body.append(
+            "<tr>"
+            f"<td>{escape(str(r.get('group', '—')))}</td>"
+            f"<td>{int(r.get('trades', 0))}</td>"
+            f"<td>{int(r.get('open', 0))}</td>"
+            f"<td>{int(r.get('closed', 0))}</td>"
+            f'<td class="{_pn_class(r.get("realized"))}">{_money(r.get("realized"))}</td>'
+            f'<td>{_pct(r.get("win_rate"))}</td>'
+            "</tr>")
+    return _table(["Group", "Trades", "Open", "Closed", "Realized P&L", "Win %"],
+                  body, empty="No trades.")
+
+
 # ----------------------------------------------------------------------------- #
 # Whole-report fragments
 # ----------------------------------------------------------------------------- #

@@ -218,3 +218,39 @@ def test_breakdown_rows_by_strategy():
     assert by["CCS"]["realized"] == -10.0
     rows2 = eod.breakdown_rows([{"status": "OPEN"}], "trade_type")
     assert rows2[0]["group"] == "—"
+
+
+# --- Task 5: nav + formatting helpers ----------------------------------------
+def test_toc_and_details_section():
+    toc = eod.toc([("perf", "Performance"), ("brk", "Breakdowns")])
+    assert 'href="#perf"' in toc and "Performance" in toc
+    sec = eod.details_section("perf", "Performance", "<p>body</p>")
+    assert 'id="perf"' in sec
+    assert "<details" in sec and "<summary>" in sec and "Performance" in sec
+    assert "<p>body</p>" in sec
+
+
+def test_pct_helper():
+    assert eod._pct(0.5) == "50%"
+    assert eod._pct(None) == "—"
+
+
+def test_performance_table_html_renders_periods():
+    buckets = {
+        "daily": {"realized": 50.0, "closed": 1, "wins": 1, "losses": 0,
+                  "win_rate": 1.0, "opened": 1, "credit": 100.0},
+        "weekly": {"realized": 30.0, "closed": 2, "wins": 1, "losses": 1,
+                   "win_rate": 0.5, "opened": 3, "credit": 300.0},
+        "mtd": {"realized": 230.0, "closed": 3, "wins": 2, "losses": 1,
+                "win_rate": 0.667, "opened": 4, "credit": 400.0},
+    }
+    html = eod.performance_table_html(buckets)
+    assert "Daily" in html and "Weekly" in html and "MTD" in html
+    assert "$50.00" in html and "$230.00" in html
+
+
+def test_breakdown_table_html_renders():
+    rows = [{"group": "PCS", "trades": 2, "open": 1, "closed": 1,
+             "realized": 30.0, "win_rate": 1.0}]
+    html = eod.breakdown_table_html(rows)
+    assert "PCS" in html and "$30.00" in html
