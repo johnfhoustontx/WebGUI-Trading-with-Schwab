@@ -202,3 +202,19 @@ def test_period_buckets_daily_weekly_mtd():
     assert b["daily"]["opened"] == 1
     assert b["weekly"]["opened"] == 3      # 06-27, 06-23, 06-26
     assert b["mtd"]["opened"] == 4         # + 06-02
+
+
+# --- Task 4: breakdown_rows --------------------------------------------------
+def test_breakdown_rows_by_strategy():
+    trades = [
+        {"strategy": "PCS", "status": "OPEN", "realized_pnl": None},
+        {"strategy": "PCS", "status": "CLOSED", "realized_pnl": 30.0},
+        {"strategy": "CCS", "status": "CLOSED", "realized_pnl": -10.0},
+    ]
+    rows = eod.breakdown_rows(trades, "strategy")
+    by = {r["group"]: r for r in rows}
+    assert by["PCS"]["trades"] == 2 and by["PCS"]["open"] == 1 and by["PCS"]["closed"] == 1
+    assert by["PCS"]["realized"] == 30.0
+    assert by["CCS"]["realized"] == -10.0
+    rows2 = eod.breakdown_rows([{"status": "OPEN"}], "trade_type")
+    assert rows2[0]["group"] == "—"

@@ -306,6 +306,37 @@ def period_buckets(norm_trades, today):
     return out
 
 
+def breakdown_rows(norm_trades, key):
+    """Group normalized trades by ``key`` ('strategy'|'trade_type'|'status').
+    Each row: {group, trades, open, closed, realized, wins, losses, win_rate}.
+    Sorted by trade count desc. A missing/None key value groups under '—'."""
+    groups = {}
+    for t in norm_trades or []:
+        g = t.get(key) or "—"
+        b = groups.setdefault(g, {"group": g, "trades": 0, "open": 0, "closed": 0,
+                                  "realized": 0.0, "wins": 0, "losses": 0})
+        b["trades"] += 1
+        st = (t.get("status") or "").upper()
+        if st == "OPEN":
+            b["open"] += 1
+        else:
+            b["closed"] += 1
+        pnl = _num(t.get("realized_pnl"))
+        if pnl is not None:
+            b["realized"] += pnl
+            if pnl > 0:
+                b["wins"] += 1
+            elif pnl < 0:
+                b["losses"] += 1
+    rows = []
+    for b in groups.values():
+        decided = b["wins"] + b["losses"]
+        b["realized"] = round(b["realized"], 2)
+        b["win_rate"] = (b["wins"] / decided) if decided else None
+        rows.append(b)
+    return sorted(rows, key=lambda r: r["trades"], reverse=True)
+
+
 # ----------------------------------------------------------------------------- #
 # Whole-report fragments
 # ----------------------------------------------------------------------------- #
