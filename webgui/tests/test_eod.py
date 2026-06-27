@@ -254,3 +254,52 @@ def test_breakdown_table_html_renders():
              "realized": 30.0, "win_rate": 1.0}]
     html = eod.breakdown_table_html(rows)
     assert "PCS" in html and "$30.00" in html
+
+
+# --- Task 6: rewired read_snapshot + summary/detail fragments ----------------
+def test_read_snapshot_includes_driver_views(monkeypatch):
+    monkeypatch.setattr(eod.bus_client, "read", lambda k: {"_k": k})
+    snap = eod.read_snapshot()
+    assert "driver_paper_account" in snap and "driver_paper_perf" in snap
+
+
+def test_summary_fragment_has_performance_and_toc():
+    import datetime as _dt
+    snap = {
+        "date": "2026-06-27", "generated_at": "x",
+        "paper_trades": {"trades": [
+            {"symbol": "AMD", "strategy": "PCS", "trade_type": "SWING", "status": "OPEN",
+             "entry_time": "2026-06-27T10:00:00", "exit_time": None,
+             "realized_pnl": None, "entry_credit_total": 120.0}]},
+        "driver_paper_account": {"has_account": True, "snapshot": {"equity": 25000.0},
+                                 "positions": [], "closed_positions": []},
+    }
+    html = eod.summary_fragment(snap, "/eod/detail", today=_dt.date(2026, 6, 27))
+    assert "Performance" in html and "Daily" in html
+    assert "eod-toc" in html
+    assert "Manual paper" in html and "Driver" in html   # both books labelled
+
+
+def test_detail_fragment_has_breakdowns():
+    import datetime as _dt
+    snap = {"date": "2026-06-27", "generated_at": "x",
+            "paper_trades": {"trades": [
+                {"symbol": "AMD", "strategy": "PCS", "trade_type": "SWING",
+                 "status": "OPEN", "entry_time": "2026-06-27T10:00:00",
+                 "realized_pnl": None, "entry_credit_total": 120.0}]},
+            "driver_paper_account": {"has_account": True, "snapshot": {},
+                                     "positions": [], "closed_positions": []}}
+    html = eod.detail_fragment(snap, today=_dt.date(2026, 6, 27))
+    assert "By strategy" in html and "By 0-DTE / Swing" in html and "By status" in html
+    assert "<details" in html
+
+
+def test_summary_fragment_back_compat_two_args():
+    # generate()/render() call it with no `today` — must still work.
+    html = eod.summary_fragment({"date": "2026-06-27"}, "detail.html")
+    assert "EOD Summary" in html
+
+
+def test_detail_fragment_back_compat_one_arg():
+    html = eod.detail_fragment({"date": "2026-06-27"})
+    assert "EOD Detailed Report" in html

@@ -396,20 +396,101 @@ def breakdown_table_html(rows):
 
 
 # ----------------------------------------------------------------------------- #
+# Per-book performance (shared by summary + detail)
+# ----------------------------------------------------------------------------- #
+def _books(snap):
+    """[(label, norm_trades, now_snapshot)] for each paper book (manual + driver)."""
+    snap = snap or {}
+    led = normalize_trades((snap.get("paper_trades") or {}).get("trades"), kind="ledger")
+    dacc = snap.get("driver_paper_account") or {}
+    drv_raw = list(dacc.get("positions") or []) + list(dacc.get("closed_positions") or [])
+    drv = normalize_trades(drv_raw, kind="driver")
+    return [
+        ("Manual paper", led, (snap.get("paper_account") or {}).get("snapshot")),
+        ("Driver", drv, dacc.get("snapshot")),
+    ]
+
+
+def _book_now_line(snapshot):
+    """Point-in-time figures from a book's snapshot (defensive; '' when absent)."""
+    s = snapshot if isinstance(snapshot, dict) else {}
+    if not s:
+        return ""
+    return (
+        '<p class="book-now">'
+        f'Equity {_money(s.get("equity"))} · '
+        f'Session P&L <span class="{_pn_class(s.get("session_pnl"))}">{_money(s.get("session_pnl"))}</span> · '
+        f'Open unrealized <span class="{_pn_class(s.get("open_unrealized"))}">{_money(s.get("open_unrealized"))}</span> · '
+        f'{int(_num(s.get("open_count"), 0))} open'
+        "</p>"
+    )
+
+
+def _book_slug(label):
+    """Deterministic anchor slug from a book label ('Manual paper' → 'manual')."""
+    return label.split()[0].lower()
+
+
+def _performance_block(snap, today):
+    """One ``<details>`` performance section per book (manual + driver).
+
+    Returns ``(toc_entries, sections_html)`` so callers can both link to and
+    render the per-book performance — identical in the summary and the detail."""
+    toc_entries, sections = [], []
+    for label, norm, now_snap in _books(snap):
+        anchor = "perf-" + _book_slug(label)
+        toc_entries.append((anchor, label))
+        body = _book_now_line(now_snap) + performance_table_html(
+            period_buckets(norm, today))
+        sections.append(details_section(anchor, f"{label} — performance", body))
+    return toc_entries, "".join(sections)
+
+
+# ----------------------------------------------------------------------------- #
 # Whole-report fragments
 # ----------------------------------------------------------------------------- #
-def detail_fragment(snap: dict) -> str:
+def detail_fragment(snap: dict, today=None) -> str:
     snap = snap or {}
+    today = today or dt.datetime.now(_CT).date()
+
+    perf_toc, perf_html = _performance_block(snap, today)
+
+    brk_parts = []
+    for label, norm, _now in _books(snap):
+        brk_parts.append(f"<h3>{escape(label)}</h3>")
+        for sub_label, key in (("By strategy", "strategy"),
+                               ("By 0-DTE / Swing", "trade_type"),
+                               ("By status", "status")):
+            brk_parts.append(f"<h4>{escape(sub_label)}</h4>")
+            brk_parts.append(breakdown_table_html(breakdown_rows(norm, key)))
+    breakdowns_html = "".join(brk_parts)
+
+    nav = toc([
+        ("performance", "Performance"),
+        ("breakdowns", "Breakdowns"),
+        ("trades", "Trades"),
+        ("scanner", "Scanner"),
+        ("captured", "Captured"),
+        ("driver", "Driver"),
+    ])
+
     parts = [
         '<div class="eod-report">',
         f"<h1>EOD Detailed Report — {escape(str(snap.get('date', '')))}</h1>",
         f'<div class="meta">Generated {escape(str(snap.get("generated_at", "")))}</div>',
-        "<h2>Captured Signals</h2>", captured_section(snap.get("captured")),
-        "<h2>Paper Trades</h2>",
-        paper_section(snap.get("paper_trades"), snap.get("paper_account")),
-        "<h2>Scanner Signals</h2>", scanner_section(snap.get("scan")),
-        "<h2>Driver — Trades & Performance</h2>",
-        driver_section(snap.get("driver_approvals"), snap.get("driver_performance")),
+        nav,
+        details_section("performance", "Performance", perf_html),
+        details_section("breakdowns", "Breakdowns", breakdowns_html),
+        details_section(
+            "trades", "Paper Trades",
+            paper_section(snap.get("paper_trades"), snap.get("paper_account"))),
+        details_section("scanner", "Scanner Signals", scanner_section(snap.get("scan"))),
+        details_section("captured", "Captured Signals",
+                        captured_section(snap.get("captured"))),
+        details_section(
+            "driver", "Driver — Trades & Performance",
+            driver_section(snap.get("driver_approvals"),
+                           snap.get("driver_performance"))),
         "</div>",
     ]
     return "".join(parts)
@@ -429,8 +510,9 @@ def _tile(k, v, cls="") -> str:
             f'<div class="v {cls}">{v}</div></div>')
 
 
-def summary_fragment(snap: dict, detail_href: str) -> str:
+def summary_fragment(snap: dict, detail_href: str, today=None) -> str:
     snap = snap or {}
+    today = today or dt.datetime.now(_CT).date()
     scan = snap.get("scan") or {}
     n_scan = _count(scan, "signals_0dte") + _count(scan, "signals_swing")
     n_cap = _count(snap.get("captured") or {}, "signals")
@@ -450,11 +532,16 @@ def summary_fragment(snap: dict, detail_href: str) -> str:
         _tile("Driver status", escape(str(appr.get("status") or "—"))),
         _tile("Driver win rate", win_txt),
     ])
+    perf_toc, perf_html = _performance_block(snap, today)
+    nav = toc(perf_toc)
     return (
         '<div class="eod-report">'
         f"<h1>EOD Summary — {escape(str(snap.get('date', '')))}</h1>"
         f'<div class="meta">Generated {escape(str(snap.get("generated_at", "")))}</div>'
         f'<div class="tiles">{tiles}</div>'
+        "<h2>Performance</h2>"
+        f'{nav}'
+        f'{perf_html}'
         f'<p><a href="{escape(detail_href)}">View detailed report →</a></p>'
         "</div>"
     )
@@ -475,6 +562,8 @@ def read_snapshot() -> dict:
         "paper_account": bus_client.read("options:paper_account") or {},
         "driver_approvals": bus_client.read("driver:approvals") or {},
         "driver_performance": bus_client.read("driver:performance") or {},
+        "driver_paper_account": bus_client.read("options:driver_paper_account") or {},
+        "driver_paper_perf": bus_client.read("options:driver_paper_perf") or {},
     }
 
 
