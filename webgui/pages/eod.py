@@ -49,6 +49,15 @@ EOD_CSS = """
 .eod-report .none { opacity: .5; font-style: italic; }
 .eod-report .summary-line { margin: .3rem 0; }
 .eod-report a { color: #64b5f6; }
+.eod-report .eod-toc { margin: .4rem 0 .8rem; font-size: .85rem; opacity: .85; }
+.eod-report .eod-toc a { margin-right: .2rem; }
+.eod-report details.eod-sec { margin: .5rem 0; border: 1px solid rgba(255,255,255,.10);
+    border-radius: 10px; padding: .2rem .7rem; background: rgba(255,255,255,.03); }
+.eod-report details.eod-sec > summary { cursor: pointer; font-size: 1.0rem;
+    font-weight: 600; padding: .35rem 0; opacity: .9; }
+.eod-report details.eod-sec[open] > summary { border-bottom: 1px solid rgba(255,255,255,.08);
+    margin-bottom: .3rem; }
+.eod-report .book-now { opacity: .8; font-size: .82rem; margin: .25rem 0 .4rem; }
 """
 
 
