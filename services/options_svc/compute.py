@@ -199,8 +199,13 @@ def driver_account_view() -> dict:
         orders = paper_account_db.fetch_orders(DRIVER_PAPER_DB, limit=100, status="FILLED")
     except Exception:
         orders = []
+    try:
+        closed_positions = [p for p in paper_account_db.fetch_all_positions(DRIVER_PAPER_DB)
+                            if (p.get("status") or "").upper() != "OPEN"]
+    except Exception:
+        closed_positions = []
     return {"snapshot": snapshot, "positions": positions, "orders": orders,
-            "has_account": has_driver_account()}
+            "closed_positions": closed_positions, "has_account": has_driver_account()}
 
 
 def driver_account_perf() -> dict:

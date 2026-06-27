@@ -20,6 +20,28 @@ def test_ensure_and_view_driver_account(tmp_path, monkeypatch):
     assert v["positions"] == [] and v["snapshot"]["open_count"] == 0
 
 
+def test_driver_account_view_includes_closed_positions(tmp_path, monkeypatch):
+    """The view exposes CLOSED positions (with exit_ts + realized_pnl) so the EoD
+    report can date-bucket the driver book like the manual ledger."""
+    db = tmp_path / "driver.db"
+    monkeypatch.setattr(compute, "DRIVER_PAPER_DB", db)
+    compute.ensure_driver_account()
+    # open one, then close it
+    compute.open_driver_position(_driver_signal(), qty=1, broker=_fake_broker(1.50))
+    import paper_account_db
+    pos = paper_account_db.fetch_open_positions(db)[0]
+    paper_account_db.update_position_mark(
+        db, pos["position_id"], status="CLOSED", realized_pnl=42.0,
+        exit_ts="2026-06-27T15:00:00")
+    view = compute.driver_account_view()
+    assert "closed_positions" in view
+    closed = view["closed_positions"]
+    assert len(closed) == 1 and closed[0]["status"] == "CLOSED"
+    assert closed[0]["realized_pnl"] == 42.0
+    # open list no longer contains it
+    assert all(p["status"] == "OPEN" for p in view["positions"])
+
+
 def test_driver_account_perf_reads_db(tmp_path, monkeypatch):
     db = tmp_path / "driver.db"
     monkeypatch.setattr(compute, "DRIVER_PAPER_DB", db)
