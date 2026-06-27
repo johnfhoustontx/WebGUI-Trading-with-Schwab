@@ -8,7 +8,27 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-06-25 (**Driver isolated paper account + performance
+**Last updated:** 2026-06-27 (**EoD report redesign + Scanner/Paper/Driver UX batch**:
+the **`/eod` report** was rebuilt around **Daily / Weekly(WTD) / MTD performance per
+book** (manual ledger + Driver, separately) + **trade-type breakdowns** (strategy /
+0-DTE-Swing / status) + **TOC + collapsible `<details>` nav** (no JS — works in-app and
+in the exported files); needs the new additive `compute.driver_account_view()`
+**`closed_positions`** field. See the "EOD Report redesign — DONE (2026-06-27)" section
+below + [design](docs/plans/2026-06-27-eod-report-redesign-design.md) /
+[plan](docs/plans/2026-06-27-eod-report-redesign-plan.md). **Also shipped this session**
+(Scanner / Paper Trades / Driver UX batch + denser nav, commit `36bcf40`): Scanner
+Calculator-transfer fix (legs were wiped pre-chain-load — stash `pending_legs` +
+`load_symbol`) + tab counts/colors + in-app new-signal toast + 3D Run-scan button;
+Paper Trades **live unrealized P&L** (reprice open ledger trades via `signal_repricer`,
+market-hours gated) + colored/decimal P&L + renamed headers + newest-first sort +
+**red Delete buttons** (needed `color=None` so `.pt-danger` beats `bg-primary`) +
+descriptive **Analyze popup** + speedometer PoP-fallback + "Current price" label;
+Driver **today-only decision log** + colored perf P&L + Bucket/Instrument labels +
+sticky headers + the **root-cause fix that the driver never opened a position**
+(`open_driver_position` KeyError'd on `'signal_id'` because the driver feeds RAW scanner
+signals `type`/`credit`/`id`, not `strategy`/`entry_credit`/`signal_id` — see
+[[driver-feeds-raw-scanner-signal-shape]]); nav inter-item spacing halved + all groups
+expanded by default. Prior — 2026-06-25 (**Driver isolated paper account + performance
 scorecard**: the autonomous Driver now trades into — and measures itself against —
 its **own dedicated paper book** (`options-scanner/data/paper_account_driver.db`, new
 `repo_paths.DRIVER_PAPER_DB`, $25k start), fully isolated from the user's manual paper
@@ -536,7 +556,7 @@ Routes:
 | `/driver` | Driver (**autonomous monitor + override** [level B]: a **Claude decision layer** (Opus 4.8 default; `DRIVER_MODEL` env / `shared/driver_model.txt` override → e.g. Sonnet 4.6) auto-selects/sizes **defined-risk option spreads (PCS/CCS/IC) from the scanner** (`cache:options:scan`) toward **net $500/day** in **paper**, gated by a **`cache:driver:control`** master switch + confirm-gated **STOP** kill-switch; the page shows day-P&L-vs-$500 progress, open-driver-positions, a newest-first **decision-log** audit (`cache:driver:autonomous`, times in **CST**), and a **Performance scorecard** (win-rate / profit-factor / avg win-loss / P&L by symbol & strategy — `cache:options:driver_paper_perf`), all reading the Driver's **own isolated paper book** (`cache:options:driver_paper_account`, separate from the manual account), with **Enable/Disable** + **Run now**; 09:28-ET + 30-min-RTH checkpoints run `build_packet`→`decider.decide`→**`guardrails.apply_guardrails`** (PURE code clamps size + halts at banked-$500/loss-cap/VIX — the model never sizes its own risk)→`cmd:options` **`driver_paper_create`** (opens into the dedicated `paper_account_driver.db`, repriced + auto-exited on the 5-min manage tick — fully separate from the user's manual paper trades). **Legacy** morning-agent **order-approval queue** retained (gated off while autonomy is enabled): Run morning agent → graded day + proposed trades; **APPROVE** (confirm dialog) / **SKIP**; conditions strip + grade rationale; **Performance** view (win-rate / P&L-by-bucket + trade table). Orders simulated (`PAPER_TRADE=True`)) | built |
 | `/settings` | Settings (GUI prefs via `app_settings`: scanner **audio alert** on/off + sound + volume, only-during-market-hours, min-score-to-alert; desktop-notification toggle + permission grant + Test sound. Extensible — first batch) | built |
 | `/portfolio` | Portfolio (3-tier, `services/portfolio_svc` :8212: **Holdings / Sectors / Performance** tabs over the portfolio model — sector breakdown, vs-sector RS, since-purchase excess, benchmark over/under-weight, tailwind; **Performance** scorecard (return/capital/risk/entry grades + composite + ann. return + drawdown) with a per-position **advisory suggestions** detail pane; **live-streaming P&L** via the service's proxy SSE consumer republishing each tick; proxy/stream status bar; persists across nav) | built |
-| `/eod` · `/eod/detail` | EOD Report (pure-webgui aggregator: **Summary** rollup tiles + **Detailed** drill-down tables over the collected `options:*` + `driver:*` caches; **Generate** snapshots the caches → standalone `summary.html` + `detail.html` archived under `webgui/data/eod/<date>/`; in-app view + dated archive list; `/eod/file` serves archived files raw) | built |
+| `/eod` · `/eod/detail` | EOD Report (pure-webgui aggregator over `options:*` + `driver:*` caches. **Summary** = headline tiles + a **verbose Daily / Weekly(WTD) / MTD performance** block **per book** — the manual paper **ledger** (`options:paper_trades`) and the **Driver** account (`options:driver_paper_account`, incl. its new `closed_positions`) shown separately (realized P&L bucketed by **exit** date; opened/credit by **entry** date; a per-book now-line = equity/session-P&L/open-unrealized/open-count). **Detailed** = the same performance + **trade-type breakdowns** (by **strategy** PCS/CCS/IC, by **0-DTE/Swing**, by **status** Open/Closed/Expired) for each book + full trade/scanner/captured/driver tables. **Navigation**: a jump-link **TOC** + every section in a native **`<details>`** (collapsible, **no JS** — works in-app AND in the exported files). **Generate** snapshots the caches → standalone `summary.html` + `detail.html` archived under `webgui/data/eod/<date>/`; `/eod/file` serves them raw. Pure builders (`normalize_trades`/`period_buckets`/`breakdown_rows`/`performance_table_html`/`breakdown_table_html`/`toc`/`details_section`) unit-tested. Realized reads `$0`/`—` until trades close — by design, not a bug) | built |
 | `/status` | System Status (pure-webgui health board: overall up/down banner + per-component cards probing **Memurai** PING, **schwab-proxy** `/health`, **Schwab Authorization** (OAuth token state, with an **Authorize** button → proxy `/auth`), the **five domain services** `/health`, and **webgui** itself; plus a **published-data-freshness** table — each domain's cache version + age, flagging stale scheduled views; **per-component Restart button on offline cards** — proxy/services relaunch via `tools\restart_one.bat`, Memurai via `Start-Service`; off-thread sweep, auto-refresh 15 s + manual) | built |
 | `/terminate` | Terminate (guarded "stop the whole local stack" page: red **Stop all services** button behind a confirm dialog → spawns `stop_all.bat` detached via `cmd /c start`, which kills the proxy + 5 services + this web app by listening port; **Memurai is left running**; the page goes unresponsive after confirm, by design) | built |
 
@@ -1316,12 +1336,37 @@ SSE consumer updates tick-by-tick. Pieces:
   `webgui/tests/test_portfolio.py` (8). Design/plan: Phase 3 of the
   [3-tier plan](docs/plans/2026-06-15-three-tier-architecture-plan.md).
 
-**EOD Report page (`/eod` + `/eod/detail`) — DONE (2026-06-18).** A **pure-webgui**
+**EOD Report redesign — DONE (2026-06-27).** The summary/detail were rebuilt around
+**Daily / Weekly(WTD) / MTD performance, per book** (manual paper ledger + Driver
+account, shown separately), plus **trade-type breakdowns** (by strategy / 0-DTE-Swing /
+status) and **TOC + collapsible `<details>` navigation** (no JS — works in-app AND in
+the exported standalone files). New pure builders in `webgui/pages/eod.py`:
+`normalize_trades(raw, *, kind)` (one uniform `{symbol, strategy, trade_type, status,
+entry_date, exit_date, realized_pnl, credit}` shape — the ledger keys `entry_time`/
+`exit_time`/`entry_credit_total`/`trade_type`, the driver positions key `entry_ts`/
+`exit_ts`/`entry_credit`+`quantity` and carry **no** `trade_type`); `period_buckets`
+(realized/closed by **exit** date, opened/credit by **entry** date, week-to-date =
+Monday→today, month-to-date = 1st→today); `breakdown_rows(trades, key)`;
+`performance_table_html` / `breakdown_table_html` / `toc` / `details_section` /
+`_book_now_line`. The summary keeps its activity tiles, adds a per-book performance
+block; the detail adds the breakdowns + reuses the existing section builders inside
+`<details>`. **One additive service change**: `compute.driver_account_view()` now also
+returns `closed_positions` (the open-only view couldn't date-bucket the driver's closed
+trades) — requires an `options_svc` restart + a republish (`driver_paper_manage`) to
+appear. **Realized reads `$0`/`—` until trades close** — correct by design, not a bug
+(both books currently have only open positions). webgui **539** + options_svc green;
+verified live (summary perf tables, detail breakdowns PCS 19/CCS 9 + SWING 21/0-DTE 7,
+`<details>` collapse, exported files). Design/plan:
+[design](docs/plans/2026-06-27-eod-report-redesign-design.md) /
+[plan](docs/plans/2026-06-27-eod-report-redesign-plan.md).
+
+**EOD Report page (`/eod` + `/eod/detail`) — DONE (2026-06-18; redesigned 2026-06-27,
+see above).** A **pure-webgui**
 end-of-day report — no new service/port. It reads the caches the existing services
 already publish (`options:scan` / `options:captured` / `options:paper_trades` /
-`options:paper_account` + `driver:approvals` / `driver:performance`) and rolls them
-into a **Summary** (tiles: paper session P&L, scanner/captured/paper counts, driver
-grade/status/win-rate) and a **Detailed** report (full tables per section). Scope is
+`options:paper_account` + `driver:approvals` / `driver:performance`
++ `options:driver_paper_account` / `options:driver_paper_perf`) and rolls them
+into a **Summary** and a **Detailed** report. Scope is
 **Options activity + Driver** only (portfolio/sentiment intentionally excluded).
 Built entirely in `webgui/pages/eod.py` — honors the 3-tier rule (webgui imports
 only `nicegui` + `shared.bus` + `shared.contracts`). Pieces:
