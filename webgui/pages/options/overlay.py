@@ -9,12 +9,6 @@ from types import SimpleNamespace
 
 from nicegui import ui
 
-_OVERLAY_STYLE = (
-    "position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;"
-    "align-items:center;justify-content:center;gap:14px;"
-    "background:rgba(6,12,24,0.55);backdrop-filter:blur(1px);"
-)
-
 # Safety-timeout (seconds) for the wait overlay: a backstop that hides the spinner if
 # the load NEVER lands (e.g. the service is down). The PRIMARY dismissal is data
 # arrival, so this must comfortably exceed the slowest legitimate fetch — the
@@ -26,11 +20,13 @@ LOAD_TIMEOUT_SEC = 30.0
 def build_loading_overlay(text="Loading…"):
     """Mount a hidden full-screen wait overlay. Returns a handle with
     ``element`` / ``show(msg=None)`` / ``hide()``."""
-    overlay = ui.element("div").style(_OVERLAY_STYLE)
+    overlay = ui.element("div").classes(
+        "fixed inset-0 z-[9999] flex flex-col items-center justify-center gap-[14px] "
+        "bg-[rgba(6,12,24,0.55)] backdrop-blur-[1px]")
     with overlay:
         ui.spinner(size="lg", color="primary")
-        label = ui.label(text).style(
-            "color:#e7edf8;font-weight:600;letter-spacing:.02em;")
+        label = ui.label(text).classes(
+            "text-[#e7edf8] font-semibold tracking-[.02em]")
     overlay.set_visibility(False)
 
     def show(msg=None):
