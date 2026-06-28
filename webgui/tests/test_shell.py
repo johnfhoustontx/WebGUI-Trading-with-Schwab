@@ -52,6 +52,17 @@ def test_cached_health_memoizes_within_ttl(monkeypatch):
     assert calls["n"] == 2
 
 
+def test_nav_css_has_no_reachable_rules():
+    """Phase 1: nav-link/nav-title/nav-icon/nav-badge styling moved to .classes();
+    _NAV_CSS keeps only Quasar-internal selectors."""
+    import main
+    css = main._NAV_CSS
+    assert "a.nav-link:hover" not in css           # moved to hover:bg-* utility
+    assert ".nav-title {" not in css and ".nav-title{" not in css
+    assert ".nicegui-expansion-content" in css     # Quasar-internal stays
+    assert ".q-tooltip.help-tip" in css            # teleported tooltip stays
+
+
 def test_recompute_badges_uses_passed_scan(monkeypatch):
     """_recompute_badges(scan) must not re-read options:scan from the bus."""
     import main

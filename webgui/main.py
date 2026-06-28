@@ -255,15 +255,8 @@ _NAV_CSS = """
    expansion body in a flex column (.nicegui-expansion-content) that defaults to a
    1rem/16px gap. */
 .nav-drawer .nicegui-expansion-content { gap: 2px; }
-.nav-drawer .q-item, .nav-drawer a.nav-link { border-radius: 10px; }
-.nav-drawer a.nav-link { transition: background .12s ease; padding: 4px 12px; }
-.nav-drawer a.nav-link:hover { background: rgba(255,255,255,.06); }
-.nav-drawer a.nav-link.active { background: var(--q-primary); color: #fff; }
+.nav-drawer .q-item { border-radius: 10px; }
 .nav-drawer .q-expansion-item .q-item { min-height: 24px; }
-.nav-drawer .nav-icon { font-size: 20px; opacity: .9; }
-.nav-drawer .nav-badge { margin-left: auto; }
-.nav-title { font-weight: 700; letter-spacing: .04em; font-size: .8rem;
-             padding: 4px 12px 6px; opacity: .55; }
 .nav-drawer .nav-subgroup .q-expansion-item__content { padding-left: 14px; }
 /* Page-help "?" — tucked into the bottom-right corner of the header banner. */
 .help-fab { position: absolute; right: 6px; bottom: 2px; z-index: 2300; }
@@ -350,13 +343,15 @@ def _watcher_compute():
 
 
 def _nav_link(path: str, label: str, icon: str, active: str) -> None:
-    classes = "nav-link w-full no-underline items-center" + (" active" if path == active else "")
-    with ui.link(target=path).classes(classes):
+    base = ("w-full no-underline items-center rounded-[10px] px-3 py-1 "
+            "transition-colors hover:bg-white/[0.06]")
+    state = " bg-[var(--q-primary)] text-white" if path == active else ""
+    with ui.link(target=path).classes(base + state):
         with ui.row().classes("items-center gap-3 w-full no-wrap"):
-            ui.icon(icon).classes("nav-icon")
+            ui.icon(icon).classes("text-xl opacity-90")
             ui.label(label)
             n = _NAV_BADGES.get(path, 0)
-            badge = ui.badge(str(n) if n else "").classes("nav-badge").props("color=red rounded")
+            badge = ui.badge(str(n) if n else "").classes("ml-auto").props("color=red rounded")
             badge.set_visibility(bool(n))
             _badge_refs[path] = badge
 
