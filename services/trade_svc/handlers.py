@@ -39,6 +39,7 @@ _FIELDS = {
     "position_verdict": {},
     "investor_verdict": {},
     "markov": None,
+    "swing_model": None,
     "fundamentals": {},
     "fundamentals_available": False,
     "timestamp": None,

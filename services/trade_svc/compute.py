@@ -48,6 +48,7 @@ if str(TRADE_ANALYZER) not in sys.path:
     sys.path.insert(0, str(TRADE_ANALYZER))
 
 import technical  # noqa: E402  (shared indicator lib, imported standalone to dodge the package __init__)
+from src.analysis import factors as _factors  # noqa: E402  (pure swing factor library)
 from src.analysis import markov as _markov  # noqa: E402
 from src.analysis import scoring as _scoring  # noqa: E402  (src.analysis.scoring — namespaced, not the colliding top-level `scoring`)
 from src.analysis.fundamentals import Fundamentals, parse_schwab_fundamentals  # noqa: E402
@@ -432,6 +433,97 @@ def get_prior():
         return np.full((5, 5), 0.2), "uniform"
 
 
+# ── Swing-model universe factor snapshot (Phase 3, Task 3.3) ─────────────────
+# The validated swing model is scored CROSS-SECTIONALLY (a symbol's factor value
+# is z-scored against the same factor across the watchlist), matching how the
+# offline calibration was built. That requires a snapshot of every factor's
+# current value across a representative universe. Like the Markov prior it is
+# rebuilt lazily at most once per day and cached in Redis; analyze() reads it via
+# get_universe_snapshot(). Reuses _MK_UNIVERSE (the same curated, sector-diverse
+# set). Defensive throughout: any failure yields {} so the scorer falls back to
+# the artifact's historical per-factor norm (and analyze() to the legacy verdict).
+_UNIVERSE_KEY = "cache:trade:universe_factors"
+
+
+def _symbol_factor_row(sym):
+    """Latest per-factor values for one universe symbol -> {factor: value}, or {}.
+
+    Self-contained (fetches its own daily/SPY/sector history) so it is trivially
+    mockable in tests. Defensive: thin/missing history -> {}. NaN values are
+    dropped (the cross-sectional basis tolerates a ragged set of symbols)."""
+    try:
+        daily = _price_history(sym, "year", 2, "daily", 1)
+        if daily is None or len(daily) < 60:
+            return {}
+        spy = daily if sym == "SPY" else _price_history("SPY", "year", 2, "daily", 1)
+        sect = resolve_sector(sym)
+        sector_hist = (_price_history(sect["etf"], "year", 2, "daily", 1)
+                       if sect["etf"] else None)
+        spy_close = (_factors._close(spy)
+                     if spy is not None and not spy.empty else None)
+        sec_close = (_factors._close(sector_hist)
+                     if sector_hist is not None and not sector_hist.empty else None)
+        ff = _factors.compute_factor_frame(daily, spy_close=spy_close,
+                                           sector_close=sec_close)
+        row = {}
+        for c in ff.columns:
+            last = ff[c].iloc[-1]
+            if pd.notna(last):
+                row[c] = float(last)
+        return row
+    except Exception:
+        return {}
+
+
+def build_universe_factor_snapshot():
+    """Assemble {factor: [values across the universe]} from the latest per-symbol
+    factor rows (NaN/missing dropped). Fetches concurrently; never raises."""
+    snapshot = {}
+    try:
+        results = parallel_map(lambda s: (s, _symbol_factor_row(s)),
+                               list(_MK_UNIVERSE))
+        for _sym, row in results:
+            for factor, value in (row or {}).items():
+                if value is not None and np.isfinite(value):
+                    snapshot.setdefault(factor, []).append(value)
+    except Exception:
+        return {}
+    return snapshot
+
+
+def _read_universe_snapshot():
+    try:
+        env = _bus().cache_get(_UNIVERSE_KEY)
+        return env.payload if env else None
+    except Exception:
+        return None
+
+
+def _write_universe_snapshot(snapshot):
+    try:
+        _bus().cache_set(_UNIVERSE_KEY, {
+            "factors": {k: [float(x) for x in v] for k, v in snapshot.items()},
+            "date": _today_ct_str()})
+    except Exception:
+        pass
+
+
+def get_universe_snapshot():
+    """{factor: [values]} for today. Lazy: reuse today's cached snapshot; else
+    rebuild from the universe and cache it; {} on failure (the scorer then uses
+    the artifact's historical norm)."""
+    cached = _read_universe_snapshot()
+    if cached and cached.get("date") == _today_ct_str() and cached.get("factors"):
+        return cached["factors"]
+    try:
+        snapshot = build_universe_factor_snapshot()
+        if snapshot:
+            _write_universe_snapshot(snapshot)
+        return snapshot
+    except Exception:
+        return {}
+
+
 # ── Markov forecast block (Task 3.3) ─────────────────────────────────────────
 _MK_HORIZONS = [5, 10, 20]
 # Denser near-term horizons for the CHART ONLY. The 5/10/20d forecast converges to
@@ -625,6 +717,28 @@ def analyze(symbol):
     except Exception:
         markov_block = None
 
+    # Validated swing-model verdict (Phase 3): score this symbol's current factors
+    # cross-sectionally against today's cached universe snapshot (falling back to
+    # the artifact's historical per-factor norm), then read the BUY/HOLD/SELL
+    # verdict off the calibration band. Fully defensive: any failure leaves
+    # swing_block None and the existing verdict/markov untouched.
+    swing_block = None
+    try:
+        from services.trade_svc import swing_model as _swing
+        _art = _swing.load_artifact()
+        if _art:
+            _spy_close = _factors._close(spy) if spy is not None and not spy.empty else None
+            _sec_close = (_factors._close(sector_hist)
+                          if sector_hist is not None and not sector_hist.empty else None)
+            _ff = _factors.compute_factor_frame(daily, spy_close=_spy_close,
+                                                sector_close=_sec_close)
+            _cur = {c: (float(_ff[c].iloc[-1]) if _ff[c].notna().iloc[-1] else None)
+                    for c in _ff.columns}
+            _snap = get_universe_snapshot()
+            swing_block = _swing.score_symbol(_cur, _snap, _art)
+    except Exception:
+        swing_block = None
+
     sym_close = daily["close"]
     spy_close = spy["close"] if spy is not None and not spy.empty else None
     sect_close = sector_hist["close"] if sector_hist is not None else None
@@ -663,6 +777,7 @@ def analyze(symbol):
         "position_verdict": position_verdict,
         "investor_verdict": investor_verdict,
         "markov": markov_block,
+        "swing_model": swing_block,
         "fundamentals": _fundamentals_dict(fundamentals),
         "fundamentals_available": fundamentals.is_sufficient(),
         "timestamp": _now_iso(),
