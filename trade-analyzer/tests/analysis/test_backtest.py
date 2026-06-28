@@ -128,7 +128,22 @@ def test_mean_ic_weights_empty_when_none_positive():
     assert backtest.mean_ic_weights(ics) == {}
 
 
-def test_walk_forward_uses_mean_ic_weights_by_default():
+def test_signed_ic_weights_keeps_sign_and_reclaims_negative():
+    ics = {"mom": {"mean_ic": 0.04, "icir": 0.16, "n_days": 1000},
+           "lowvol": {"mean_ic": -0.066, "icir": -0.24, "n_days": 1000},
+           "noise": {"mean_ic": 0.002, "icir": 0.01, "n_days": 1000}}
+    w = backtest.signed_ic_weights(ics, min_abs_ic=0.005)
+    assert w["lowvol"] < 0 and w["mom"] > 0          # signed: wrong-sign reclaimed
+    assert "noise" not in w                           # below floor dropped
+    assert abs(sum(abs(x) for x in w.values()) - 1.0) < 1e-9   # |weights| sum to 1
+
+
+def test_signed_ic_weights_empty_when_all_below_floor():
+    ics = {"x": {"mean_ic": 0.001, "icir": 0.01, "n_days": 100}}
+    assert backtest.signed_ic_weights(ics, min_abs_ic=0.005) == {}
+
+
+def test_walk_forward_default_weighting():
     # the planted-signal panel: the "good" factor must get weight + drive OOS IC
     f, fwd = _panel(n_days=400)
     res = backtest.walk_forward(f, fwd, train=150, test=50, step=50)

@@ -121,7 +121,7 @@ def fit():
 
     cols = list(panel.columns)
     ics = {c: B.factor_ic(panel[c], forward) for c in cols}            # IC is rank-based -> raw ok
-    weights = B.mean_ic_weights(ics)
+    weights = B.signed_ic_weights(ics)
     z = B.zscore_by_date(panel)
     comp = B.composite(z, weights)
     calib = B.calibrate(comp, forward, n_bands=5)
@@ -188,9 +188,9 @@ def main():
     artifact, ics, weights, horizon_ic, wf, calib, used = fit()
     write_artifact(artifact)
     write_report(artifact, ics, weights, horizon_ic, wf, calib, used)
-    kept = sum(1 for v in weights.values() if v > 0)
+    kept = sum(1 for v in weights.values() if v != 0)
     print(f"OOS IC={wf['oos_ic']:+.4f} · folds={wf['n_folds']} · "
-          f"kept {kept}/{len(weights)} factors · universe {used} symbols")
+          f"kept {kept}/{len(ics)} factors · universe {used} symbols")
     print(f"wrote {SWING_MODEL}")
     print(f"wrote {SWING_MODEL_REPORT}")
 

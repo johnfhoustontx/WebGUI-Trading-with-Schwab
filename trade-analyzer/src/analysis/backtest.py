@@ -106,6 +106,22 @@ def mean_ic_weights(ic_by_factor: Dict[str, dict], min_ic: float = 0.0) -> Dict[
     return {k: v / total for k, v in raw.items()} if total > 0 else {}
 
 
+def signed_ic_weights(ic_by_factor: Dict[str, dict], min_abs_ic: float = 0.005) -> Dict[str, float]:
+    """Standard SIGNED IC-weighted composite: weight_k = mean_ic_k / Σ|mean_ic|,
+    keeping the SIGN, for factors whose |mean_ic| > min_abs_ic (an n-independent
+    noise floor — factors below it are indistinguishable from 0 at these sample
+    sizes, and an n-independent floor stays stable across walk-forward folds,
+    unlike a t-stat gate on small per-fold samples).
+
+    A wrong-sign-but-predictive factor (e.g. low-vol with a negative IC in a
+    high-beta regime) gets a NEGATIVE weight, contributing its predictive power
+    with the correct sign. The |weights| sum to 1. Empty dict if none qualify."""
+    raw = {k: v.get("mean_ic", 0.0) for k, v in ic_by_factor.items()
+           if abs(v.get("mean_ic", 0.0)) > min_abs_ic}
+    denom = sum(abs(x) for x in raw.values())
+    return {k: v / denom for k, v in raw.items()} if denom > 0 else {}
+
+
 def composite(zscores: pd.DataFrame, weights: Dict[str, float]) -> pd.Series:
     """Weighted sum of z-scored factors (only weighted columns contribute)."""
     cols = [c for c in weights if c in zscores.columns]
@@ -117,12 +133,12 @@ def composite(zscores: pd.DataFrame, weights: Dict[str, float]) -> pd.Series:
 
 def walk_forward(factors, forward, train=252, test=63, step=63, weight_fn=None) -> dict:
     """Rolling train->test. Fit weights on each train window (default
-    `mean_ic_weights`, n-independent + stable across folds — see that function),
+    `signed_ic_weights`, n-independent + stable across folds — see that function),
     score the next (unseen) test window, collect the composite's OOS IC. Returns
     oos_ic, fold count, the per-fold OOS ICs, and the weights from the LAST train
     window. Train/test never overlap within a fold; test windows across folds are
     non-overlapping when step >= test (the default step=test tiles them)."""
-    weight_fn = weight_fn or mean_ic_weights
+    weight_fn = weight_fn or signed_ic_weights
     dates = factors.index.get_level_values("date").unique().sort_values()
     folds, oos_ics, last_weights = 0, [], {}
     i = train
