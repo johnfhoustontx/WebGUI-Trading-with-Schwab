@@ -43,3 +43,20 @@ def test_phase3b_pages_have_no_inline_style():
         src = (base / fn).read_text(encoding="utf-8")
         assert ".style(" not in src, f"{fn} still uses .style()"
         assert ":style=" not in src, f"{fn} still uses a Vue :style= slot binding"
+
+
+# Phase 3c chart-heavy screens: Gamma + Expected-Move on Tailwind only.
+# Gamma's dynamic colors are palette-mapped and its panel flex uses a runtime
+# arbitrary Tailwind class; ``EXPLAIN_CSS`` is a ``ui.add_css`` of a CSS STRING
+# (styles the Explain ``ui.html()`` fragment) — NOT a `.style(`/`:style=`, so it
+# passes. The Highcharts option dicts (chart colors) are out of scope. Expected-Move
+# was already inline-style-free — it only joins this guard.
+PHASE_3C_FILES = ["gamma.py", "expected_move.py"]
+
+
+def test_phase3c_pages_have_no_inline_style():
+    base = pathlib.Path(__file__).resolve().parents[1] / "pages" / "options"
+    for fn in PHASE_3C_FILES:
+        src = (base / fn).read_text(encoding="utf-8")
+        assert ".style(" not in src, f"{fn} still uses .style()"
+        assert ":style=" not in src, f"{fn} still uses a Vue :style= slot binding"
