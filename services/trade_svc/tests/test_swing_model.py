@@ -24,6 +24,9 @@ def test_score_symbol_top_band_is_buy():
     assert out["verdict"] == "BUY"
     assert out["expected_fwd"] == 0.0135 and out["hit_rate"] == 0.523
     assert any(c["factor"] == "mom_12_1" for c in out["contributions"])
+    # band-quantile percentile: top band of 3 -> round((2+0.5)/3*100) = 83 (>50)
+    assert out["percentile"] == 83
+    assert out["percentile"] > 50
 
 
 def test_score_symbol_bottom_band_is_sell():
@@ -32,6 +35,9 @@ def test_score_symbol_bottom_band_is_sell():
     out = sm.score_symbol(cur, None, _ARTIFACT)  # norm-primary, no snapshot
     assert out["verdict"] == "SELL"
     assert out["expected_fwd"] == -0.008 and out["hit_rate"] == 0.43
+    # band-quantile percentile: bottom band of 3 -> round((0+0.5)/3*100) = 17 (<50)
+    assert out["percentile"] == 17
+    assert out["percentile"] < 50
 
 
 def test_score_symbol_middle_band_is_hold():

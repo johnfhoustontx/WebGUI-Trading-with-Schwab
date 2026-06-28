@@ -45,11 +45,12 @@ def _band_for(comp, calib):
     return calib[-1], len(calib) - 1, len(calib)
 
 
-def _percentile(comp, calib):
-    lo, hi = calib[0]["score_lo"], calib[-1]["score_hi"]
-    if hi <= lo:
+def _percentile(idx, n_bands):
+    """Band-quantile percentile: the midpoint of the band's equal-n quantile range
+    (e.g. top band of 5 -> ~90th, bottom -> ~10th). Matches the BUY/SELL verdict."""
+    if n_bands <= 0:
         return 50
-    return int(np.clip((comp - lo) / (hi - lo) * 100, 0, 100))
+    return int(round((idx + 0.5) / n_bands * 100))
 
 
 def score_symbol(current_factors, universe_snapshot, artifact):
@@ -91,7 +92,7 @@ def score_symbol(current_factors, universe_snapshot, artifact):
         verdict = "BUY" if idx >= n - 1 else "SELL" if idx <= 0 else "HOLD"
         return {
             "verdict": verdict, "score": round(comp, 3),
-            "percentile": _percentile(comp, calib),
+            "percentile": _percentile(idx, n),
             "expected_fwd": band["mean_fwd"], "hit_rate": band["hit_rate"],
             "horizon_days": artifact.get("horizon", 20),
             "contributions": sorted(contribs, key=lambda d: abs(d["contribution"]), reverse=True),
