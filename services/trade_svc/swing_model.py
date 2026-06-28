@@ -1,8 +1,11 @@
 """Live swing-model scorer (Tier-2). Loads the offline artifact and scores ONE
-symbol's current factors against a cached universe snapshot (cross-sectional, to
-match how the calibration was built), falling back to the artifact's historical
-per-factor norm. Pure scoring; the artifact loader is thin (monkeypatched in
-tests). Defensive: returns None on any failure so analyze() falls back to legacy.
+symbol's current factors on the artifact's CROSS-SECTIONAL norm — the same basis
+the calibration bands were built on (zscore_by_date winsorizes+standardizes per
+date), so a live raw factor lands on the calibration's scale regardless of the
+live cross-section size. The cached universe snapshot (~20-name watchlist) is a
+SECONDARY fallback only (noisy, and not on the calibration scale). Pure scoring;
+the artifact loader is thin (monkeypatched in tests). Defensive: returns None on
+any failure so analyze() falls back to legacy.
 
 Weights are SIGNED (a negative-IC factor like low_vol carries a negative weight),
 so the composite is sum(weight * zscore). The BUY/HOLD/SELL verdict is taken from
@@ -60,12 +63,15 @@ def score_symbol(current_factors, universe_snapshot, artifact):
         contribs, comp = [], 0.0
         for f, w in weights.items():
             v = current_factors.get(f)
-            if v is None or not np.isfinite(v):
+            if v is None or not isinstance(v, (int, float)) or not np.isfinite(v):
                 continue
-            basis = (universe_snapshot or {}).get(f)
-            z = _zscore(v, basis) if basis else None
-            if z is None and f in norm and norm[f].get("std"):
-                z = (v - norm[f]["mean"]) / norm[f]["std"] if norm[f]["std"] else None
+            z = None
+            nf = norm.get(f)
+            if nf and nf.get("std"):
+                z = (v - nf["mean"]) / nf["std"]          # PRIMARY: calibration-consistent
+            if z is None:
+                basis = (universe_snapshot or {}).get(f)   # fallback only
+                z = _zscore(v, basis) if basis else None
             if z is None:
                 continue
             c = w * z

@@ -110,6 +110,29 @@ def build_panel(hist, spy_close, sector_closes, horizon=HORIZON):
     return panel, forward, used
 
 
+def _xs_norm(panel, lo=0.02, hi=0.98):
+    """Per-factor cross-sectional norm: the time-average of the per-date
+    (winsorized) cross-sectional mean and std. This is the basis on which the
+    calibration was built (zscore_by_date winsorizes+standardizes per date), so a
+    live raw factor mapped through it lands on the SAME scale as the calibration
+    bands (independent of the live cross-section size)."""
+    out = {}
+    for c in panel.columns:
+        s = panel[c].dropna()
+        if s.empty:
+            out[c] = {"mean": 0.0, "std": 1.0}
+            continue
+        def _w(g):
+            return g.clip(lower=g.quantile(lo), upper=g.quantile(hi))
+        gw = s.groupby(level="date").transform(_w)
+        means = gw.groupby(level="date").mean()
+        stds = gw.groupby(level="date").std(ddof=0)
+        stds = stds[stds > 0]
+        out[c] = {"mean": float(means.mean()),
+                  "std": float(stds.mean()) if len(stds) else 1.0}
+    return out
+
+
 def fit():
     spy_df = fetch_daily("SPY")
     if spy_df is None:
@@ -126,8 +149,7 @@ def fit():
     comp = B.composite(z, weights)
     calib = B.calibrate(comp, forward, n_bands=5)
     wf = B.walk_forward(panel, forward, train=TRAIN, test=TEST, step=STEP)
-    norm = {c: {"mean": float(panel[c].mean()), "std": float(panel[c].std(ddof=0))}
-            for c in cols}
+    norm = _xs_norm(panel)
     # per-horizon IC for the report
     horizon_ic = {}
     for h in REPORT_HORIZONS:

@@ -26,6 +26,28 @@ def test_score_symbol_top_band_is_buy():
     assert any(c["factor"] == "mom_12_1" for c in out["contributions"])
 
 
+def test_score_symbol_bottom_band_is_sell():
+    # drive the composite low -> bottom band -> SELL
+    cur = {"mom_12_1": -0.5, "low_vol": 0.05}   # low mom (neg z), low_vol high (pos z) * neg weight
+    out = sm.score_symbol(cur, None, _ARTIFACT)  # norm-primary, no snapshot
+    assert out["verdict"] == "SELL"
+    assert out["expected_fwd"] == -0.008 and out["hit_rate"] == 0.43
+
+
+def test_score_symbol_middle_band_is_hold():
+    cur = {"mom_12_1": 0.0, "low_vol": -0.02}    # ~zero composite -> middle band
+    out = sm.score_symbol(cur, None, _ARTIFACT)
+    assert out["verdict"] == "HOLD"
+
+
+def test_score_symbol_uses_norm_not_snapshot(monkeypatch):
+    # with norm-primary, the verdict is independent of (a noisy) snapshot
+    cur = {"mom_12_1": 0.5, "low_vol": -0.05}
+    a = sm.score_symbol(cur, None, _ARTIFACT)
+    b = sm.score_symbol(cur, {"mom_12_1": [0.49, 0.5, 0.51]}, _ARTIFACT)
+    assert a["score"] == b["score"]   # snapshot no longer drives the composite
+
+
 def test_score_symbol_signed_weight_low_vol_subtracts():
     # a HIGH-vol name (low_vol factor very negative) with negative weight -> positive
     # contribution; confirm the low_vol contribution sign = weight * z
