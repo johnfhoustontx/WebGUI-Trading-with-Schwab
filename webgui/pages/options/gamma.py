@@ -17,6 +17,7 @@ STRINGS. The pure builders (``bars_from_gex`` sorts + numeric-compares strikes;
 via ``_refloat_keys`` BEFORE feeding the builders. The builders stay unchanged.
 """
 from pages.ui_guard import guard, guard_async
+from .theme import TXT_POS, TXT_NEG, TXT_NEUTRAL
 
 POS_COLOR = "#66bb6a"
 NEG_COLOR = "#ef5350"
@@ -241,6 +242,35 @@ def panel_flex(n_cols, full_cols=205, min_heat=0.28, max_heat=0.70):
     p = 0.0 if full_cols <= 0 else max(0.0, min(1.0, n_cols / full_cols))
     heat = min_heat + (max_heat - min_heat) * p
     return round(1.0 - heat, 4), round(heat, 4)
+
+
+# Collector status-bar color → Tailwind arbitrary-value class. The finite color set
+# comes from gex_status.classify_collector_status ({green, red, gray, #c48b00}); the
+# compute default/fallback is #666666. Exact values preserved as text-[…] classes.
+_STATUS_CLASS = {
+    "green": "text-[green]",
+    "red": "text-[red]",
+    "gray": "text-[gray]",
+    "#c48b00": "text-[#c48b00]",
+}
+_STATUS_FALLBACK = "text-[#666666]"
+# The full set the reactive status label may carry — removed before each repaint so
+# colors don't accumulate across version-poll repaints.
+_ALL_STATUS = " ".join(sorted(set(_STATUS_CLASS.values()) | {_STATUS_FALLBACK}))
+
+
+def status_color_class(color):
+    """Map a gex_status collector color to its static Tailwind class (fallback gray)."""
+    return _STATUS_CLASS.get(color, _STATUS_FALLBACK)
+
+
+def flex_class(grow, grow2=1, basis="0%"):
+    """Runtime arbitrary-value Tailwind class for a continuous flex ratio.
+
+    The bar/heatmap split is a genuinely continuous value (~82 distinct ratios over a
+    session via panel_flex) with no finite palette, so it uses a JIT-generated
+    arbitrary class (`_` = space). Reset per repaint via .classes(remove=prev, add=new)."""
+    return f"flex-[{grow}_{grow2}_{basis}]"
 
 
 def bar_figure(data, spot, view="GEX", walls=None, flip=None, n_side=N_SIDE, height=680,
@@ -756,13 +786,13 @@ def render():
                 if hp is None:
                     ui.label("0-DTE hedge pressure: n/a (nearest expiry is not 0-DTE)").classes("opacity-60 text-sm")
                 else:
-                    def tile(label, val, color="#bdbdbd"):
+                    def tile(label, val, cls=TXT_NEUTRAL):
                         with ui.card().classes("p-2"):
                             ui.label(label).classes("text-xs opacity-60")
-                            ui.label(f"{val:,.0f}").classes("text-base font-bold").style(f"color:{color}")
+                            ui.label(f"{val:,.0f}").classes(f"text-base font-bold {cls}")
                     tile("Net Δ now", hedge.get("net_delta_0dte") or 0)
                     tile("Projected close", hedge.get("projected_net_delta_close") or 0)
-                    tile("Hedge pressure", hp, "#66bb6a" if hp >= 0 else "#ef5350")
+                    tile("Hedge pressure", hp, TXT_POS if hp >= 0 else TXT_NEG)
 
     @guard
     def _request_refresh():
@@ -813,7 +843,9 @@ def render():
         label = st.get("status_label") or "Collector status unknown"
         color = st.get("status_color") or "#666666"
         status_lbl.text = label
-        status_lbl.style(f"color:{color}")
+        # Reactive: the status bar repaints on every version-poll, so remove the full
+        # status-class set before adding the new one (prevents color accumulation).
+        status_lbl.classes(remove=_ALL_STATUS, add=status_color_class(color))
         last_scan_lbl.text = f"Last scan {st.get('last_scan') or '—'}"
         next_scan_lbl.text = f"Next scan {st.get('next_scan') or '—'}"
 

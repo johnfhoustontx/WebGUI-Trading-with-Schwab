@@ -495,3 +495,20 @@ def test_symbol_options_injects_missing_default():
     out = gamma.symbol_options({"symbols": ["SPY", "QQQ"]})
     assert out[0] == "$SPX"
     assert "SPY" in out and "QQQ" in out
+
+
+# ── Phase 3c: dynamic colors palette-mapped + panel flex as runtime arbitrary class ──
+def test_status_color_class_maps_collector_states():
+    from pages.options import gamma as g
+    assert g.status_color_class("green") == "text-[green]"
+    assert g.status_color_class("red") == "text-[red]"
+    assert g.status_color_class("gray") == "text-[gray]"
+    assert g.status_color_class("#c48b00") == "text-[#c48b00]"
+    assert g.status_color_class("") == "text-[#666666]"     # fallback (also the compute default)
+
+
+def test_flex_class_builds_arbitrary_value():
+    from pages.options import gamma as g
+    assert g.flex_class(0.5) == "flex-[0.5_1_0%]"
+    assert g.flex_class(1) == "flex-[1_1_0%]"
+    assert g.flex_class(0, grow2=0, basis="0px") == "flex-[0_0_0px]"
