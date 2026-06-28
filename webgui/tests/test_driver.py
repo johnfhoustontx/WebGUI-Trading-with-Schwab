@@ -123,6 +123,34 @@ def test_pnl_color():
     assert driver.pnl_color(None) == "#bdbdbd"
 
 
+def test_pnl_class_maps_sign():
+    assert driver.pnl_class(5) == "text-[#66bb6a]"
+    assert driver.pnl_class(-5) == "text-[#ef5350]"
+    assert driver.pnl_class(0) == "text-[#bdbdbd]"
+    assert driver.pnl_class(None) == "text-[#bdbdbd]"
+
+
+def test_grade_bg_class():
+    assert driver.grade_bg_class("A") == "bg-[#1D9E75]"
+    assert driver.grade_bg_class("X") == "bg-[#E24B4A]"
+    assert driver.grade_bg_class("?") == "bg-[#888888]"   # fallback -> neutral
+
+
+def test_perf_rows_carry_pnl_class():
+    rows = driver.perf_rows([
+        {"trade_id": "w", "pnl": 100.0},
+        {"trade_id": "z", "pnl": 0.0},
+    ])
+    by_id = {r["trade_id"]: r for r in rows}
+    assert by_id["w"]["_pnl_class"] == "text-[#66bb6a]"
+    assert by_id["z"]["_pnl_class"] == "text-[#bdbdbd]"
+
+
+def test_position_rows_carry_pnl_class():
+    rows = driver.position_rows([{"position_id": "p1", "unrealized_pnl": -12.0}])
+    assert rows[0]["_pnl_class"] == "text-[#ef5350]"
+
+
 def test_perf_cols_use_full_words():
     labels = {c["field"]: c["label"] for c in driver._PERF_COLS}
     assert labels["bucket"] == "Bucket"

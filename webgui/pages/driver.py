@@ -72,6 +72,11 @@ def grade_color(grade):
     return GRADE_COLORS.get((grade or "").upper(), GRADE_NEUTRAL)
 
 
+def grade_bg_class(grade):
+    """Tailwind bg arbitrary-value class for a day grade (mirrors :func:`grade_color`)."""
+    return f"bg-[{grade_color(grade)}]"
+
+
 def is_pending(payload):
     """True when a cached approval is still awaiting a decision."""
     return bool(payload) and payload.get("status") == "pending"
@@ -95,6 +100,11 @@ def pnl_color(v):
     if not isinstance(v, (int, float)) or v == 0:
         return PNL_NEUTRAL
     return PNL_GREEN if v > 0 else PNL_RED
+
+
+def pnl_class(v):
+    """Tailwind text arbitrary-value class for a numeric P&L (mirrors :func:`pnl_color`)."""
+    return f"text-[{pnl_color(v)}]"
 
 
 def current_day_decisions(decisions, today_ct=None):
@@ -221,6 +231,7 @@ def perf_rows(trades):
             "source": t.get("source", ""),
             "pnl": _money(pnl),
             "_pnl_color": pnl_color(pnl),
+            "_pnl_class": pnl_class(pnl),
         })
     return rows
 
@@ -295,6 +306,11 @@ def control_state_color(control):
     return CONTROL_ACTIVE_COLOR
 
 
+def control_bg_class(control):
+    """Tailwind bg arbitrary-value class for the control state (mirrors :func:`control_state_color`)."""
+    return f"bg-[{control_state_color(control)}]"
+
+
 def decision_log_rows(decisions):
     """Normalize the newest-first checkpoint audit log into render-ready rows.
 
@@ -353,6 +369,7 @@ def position_rows(positions):
             "quantity": p.get("quantity", ""),
             "pnl": _money(p.get("unrealized_pnl")),
             "_pnl_color": pnl_color(p.get("unrealized_pnl")),
+            "_pnl_class": pnl_class(p.get("unrealized_pnl")),
             "status": p.get("status", ""),
         })
     return rows
@@ -449,6 +466,7 @@ def _breakdown_rows(rows, key):
             "trades": r.get("trades", 0),
             "pnl": _pnl(r.get("pnl")),
             "_pnl_color": pnl_color(r.get("pnl")),
+            "_pnl_class": pnl_class(r.get("pnl")),
             "win_rate": _pct(r.get("win_rate")),
         })
     return out
@@ -533,10 +551,11 @@ DRIVER_CSS = """
 }
 """
 
-# A body-cell slot that paints the P&L value in its row's _pnl_color.
+# A body-cell slot that paints the P&L value in its row's _pnl_class (the JIT
+# generates the runtime ``text-[#hex]`` utility from the stamped class string).
 _PNL_CELL_SLOT = r'''
   <q-td :props="props" class="text-right">
-    <span :style="`color:${props.row._pnl_color || '#bdbdbd'};font-weight:600`">
+    <span :class="(props.row._pnl_class || 'text-[#bdbdbd]') + ' font-semibold'">
       {{ props.value }}
     </span>
   </q-td>
@@ -655,8 +674,8 @@ def render():
                 # State banner + master controls.
                 with ui.row().classes("items-center gap-3 flex-wrap w-full"):
                     ui.label(control_state_label(ctrl_view)) \
-                        .classes("text-weight-bold text-white px-3 py-1 rounded") \
-                        .style(f"background:{control_state_color(ctrl_view)}")
+                        .classes("text-weight-bold text-white px-3 py-1 rounded "
+                                 + control_bg_class(ctrl_view))
                     if auto.get("date"):
                         ui.label(auto["date"]).classes("opacity-60 text-sm")
                     if auto.get("last_cycle_ts"):
@@ -807,8 +826,8 @@ def render():
             with ui.card().classes("w-full"):
                 with ui.row().classes("items-center gap-3 flex-wrap"):
                     g = appr.get("grade") or "?"
-                    ui.label(g).classes("text-weight-bold text-white px-3 py-1 rounded") \
-                        .style(f"background:{grade_color(g)}")
+                    ui.label(g).classes("text-weight-bold text-white px-3 py-1 rounded "
+                                        + grade_bg_class(g))
                     if appr.get("date"):
                         ui.label(appr["date"]).classes("opacity-70")
                     ui.label(status_text(appr)).classes("text-sm opacity-80")

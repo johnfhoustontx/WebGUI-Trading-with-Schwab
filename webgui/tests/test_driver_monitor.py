@@ -66,6 +66,12 @@ def test_control_state_color_distinguishes_states():
     assert on != off and halted != on   # three visually distinct states
 
 
+def test_control_bg_class_maps_states():
+    assert driver.control_bg_class({"enabled": False, "halted": False}) == "bg-[#888888]"
+    assert driver.control_bg_class({"enabled": True, "halted": False}) == "bg-[#1D9E75]"
+    assert driver.control_bg_class({"enabled": True, "halted": True}) == "bg-[#BA7517]"
+
+
 # ── decision_log_rows ────────────────────────────────────────────────────────
 def test_decision_log_rows_surfaces_fields():
     rows = driver.decision_log_rows([{
