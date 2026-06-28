@@ -763,7 +763,10 @@ inconsistencies as each screen is converted — no gratuitous redesign). The fiv
   deduped (no scattered magic hexes). Prefer mapping a semantic state the payload **already
   carries** (e.g. a `label`/`bias`) page-side; only when no clean state exists, refactor the
   **Tier-2** source to emit one (allowed — this is the documented exception to webgui-only).
-  NEVER set the dynamic value via `.style()`.
+  NEVER set the dynamic value via `.style()`. (Exception: a **genuinely continuous** value with
+  no finite set — e.g. a computed `flex-grow` ratio — may use a **runtime arbitrary-value class**
+  (`flex-[{w}_1_0%]`, JIT-generated) reset via `.classes(remove=prev, add=new)`; this is distinct
+  from data-driven COLORS, which always map to a fixed finite palette.)
 - **Design tokens, NOT semantic CSS classes.** The dark-navy theme is a vocabulary of
   **Python Tailwind-class-string constants** in `webgui/pages/options/theme.py`
   (`PAGE` / `CARD` / `EYEBROW` / `BTN` / `BTN_PRIMARY` / `LABEL` / `MUTED` / …), each a
