@@ -91,7 +91,9 @@ def _money(v):
 
 
 # P&L cell colors (green profit / red loss / grey flat-or-unknown) — so a value is
-# read by COLOR, not by hunting for a +/- sign.
+# read by COLOR, not by hunting for a +/- sign. These hexes equal the theme
+# TXT_POS/TXT_NEG/TXT_NEUTRAL tokens, but are kept LOCAL because driver.py has no
+# theme.py dependency (it's not an options-section page).
 PNL_GREEN, PNL_RED, PNL_NEUTRAL = "#66bb6a", "#ef5350", "#bdbdbd"
 
 

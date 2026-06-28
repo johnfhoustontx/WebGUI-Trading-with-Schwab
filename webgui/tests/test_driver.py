@@ -180,5 +180,11 @@ def test_position_rows_carry_pnl_color():
     assert rows[0]["_pnl_color"] == "#ef5350"
 
 
+def test_pnl_slot_binds_pnl_class():
+    # the P&L cell slot must reference the stamped field, so a future rename of
+    # _pnl_class can't silently break the :class binding while row tests stay green.
+    assert "_pnl_class" in driver._PNL_CELL_SLOT
+
+
 def test_render_is_callable():
     assert callable(driver.render)
