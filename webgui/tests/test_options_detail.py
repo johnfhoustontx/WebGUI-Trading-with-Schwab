@@ -1,11 +1,18 @@
 """Tests for the shared Trade detail panel pure helpers."""
-from pages.options import detail
+from pages.options import detail, theme
 
 
 def test_pop_color_thresholds():
     assert detail.pop_color(75) == detail.GREEN
     assert detail.pop_color(60) == detail.AMBER
     assert detail.pop_color(40) == detail.RED
+
+
+def test_pop_color_returns_state_class_tokens():
+    assert detail.pop_color(75) == theme.TXT_POS
+    assert detail.pop_color(60) == theme.TXT_WARN
+    assert detail.pop_color(40) == theme.TXT_NEG
+    assert detail.pop_color("n/a") == theme.TXT_NEUTRAL
 
 
 def test_factor_rows_returns_11_for_non_ic():

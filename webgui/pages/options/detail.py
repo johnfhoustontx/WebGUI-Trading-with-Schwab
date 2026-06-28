@@ -17,11 +17,18 @@ from nicegui import ui
 
 from ..gauge import gauge_figure
 from . import svg
+from .theme import TXT_POS, TXT_WARN, TXT_NEG, TXT_NEUTRAL, STATE_TEXT_CLASSES
 
-GREEN = "#66bb6a"
-AMBER = "#ffa726"
-RED = "#ef5350"
-NEUTRAL = "#bdbdbd"
+# Semantic state-color class tokens (Tailwind text-[...] arbitrary values). Names
+# kept (many refs) but the VALUES are now class strings applied via .classes().
+GREEN, AMBER, RED, NEUTRAL = TXT_POS, TXT_WARN, TXT_NEG, TXT_NEUTRAL
+
+
+def _set_color(lbl, cls):
+    """Reactively swap a label's state-color class. .classes() ACCUMULATES, so we
+    must remove the whole finite state set before adding, or repeated repaints
+    stack conflicting text-[...] classes (equal specificity → unpredictable)."""
+    lbl.classes(remove=STATE_TEXT_CLASSES, add=cls)
 
 FACTOR_LABELS = [
     ("rr", "R:R"), ("pop", "PoP"), ("theta", "Theta"), ("iv", "IV Rank"),
@@ -90,7 +97,7 @@ def _kv(label, value, color=None):
         ui.label(label).classes("opacity-70 text-sm")
         lbl = ui.label(value).classes("text-sm")
         if color:
-            lbl.style(f"color:{color}")
+            lbl.classes(add=color)
 
 
 def _strikes_text(s):
@@ -173,7 +180,7 @@ def _greek(label, value, fmt="{:.3f}", color=None):
         txt = fmt.format(value) if isinstance(value, (int, float)) else "—"
         lbl = ui.label(txt).classes("text-sm font-bold")
         if color and isinstance(value, (int, float)):
-            lbl.style(f"color:{color}")
+            lbl.classes(add=color)
 
 
 class _Handle:
@@ -211,7 +218,7 @@ class _Handle:
         for key, _label, value_fn, color_fn in _TILES:
             lbl = self._tiles[key]
             lbl.text = value_fn(s)
-            lbl.style(f"color:{color_fn(s)}")
+            _set_color(lbl, color_fn(s))
         self._body.clear()
         with self._body:
             _build_cards(s)
@@ -223,7 +230,8 @@ def render(width: int = 360):
     The panel owns its own column so it can collapse to a thin strip (reclaiming
     horizontal space) and expand again via the header toggle.
     """
-    col = ui.column().classes("shrink-0 gap-1").style(f"width: {width}px")
+    expanded_w = f"w-[{width}px]"
+    col = ui.column().classes("shrink-0 gap-1").classes(expanded_w)
     with col:
         with ui.row().classes("items-center justify-between w-full no-wrap"):
             title = ui.label("Trade detail").classes("text-subtitle1 font-bold")
@@ -237,7 +245,7 @@ def render(width: int = 360):
             sig_title = ui.label("").classes("text-subtitle1 font-bold")
             with ui.row().classes("items-center gap-3 w-full no-wrap"):
                 gauge_el = ui.highchart(gauge_figure(0, "", height=104)) \
-                    .classes("shrink-0").style("width:160px;height:104px")
+                    .classes("shrink-0 w-[160px] h-[104px]")
                 with ui.grid(columns=2).classes("gap-2"):
                     for key, label, _vf, _cf in _TILES:
                         tiles[key] = _tile_slot(label)
@@ -254,10 +262,10 @@ def render(width: int = 360):
         body.visible = state["open"]
         header.visible = state["open"] and state["has_signal"]
         if state["open"]:
-            col.style(f"width: {width}px")
+            col.classes(remove="w-11", add=expanded_w)
             toggle_btn.props("icon=last_page").tooltip("Collapse panel")
         else:
-            col.style("width: 44px")
+            col.classes(remove=expanded_w, add="w-11")
             toggle_btn.props("icon=first_page").tooltip("Expand panel")
 
     toggle_btn.on_click(toggle)
