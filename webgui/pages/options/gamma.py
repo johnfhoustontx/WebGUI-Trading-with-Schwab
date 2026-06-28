@@ -273,6 +273,11 @@ def flex_class(grow, grow2=1, basis="0%"):
     return f"flex-[{grow}_{grow2}_{basis}]"
 
 
+# Initial bar/heatmap split (50/50). Single source of truth so the box-creation
+# inits and the flex_cur seed in render() can't drift apart.
+_INIT_FLEX = flex_class(0.5)
+
+
 def bar_figure(data, spot, view="GEX", walls=None, flip=None, n_side=N_SIDE, height=680,
                yrange=None):
     """Highcharts horizontal-bar options for one view (dark, beveled, labeled).
@@ -642,7 +647,7 @@ def render():
     # flex weights are set per-render from the intraday snapshot count (panel_flex)
     # so the heatmap grows / bars shrink through the session.
     with ui.row().classes("w-full no-wrap gap-4 items-start"):
-        chart_box = ui.column().classes(f"min-w-0 {flex_class(0.5)}")
+        chart_box = ui.column().classes(f"min-w-0 {_INIT_FLEX}")
         with chart_box:
             # chart_plot switches kind (bar <-> Term heatmap). Highcharts'
             # chart.update() leaks plotLines/colorAxis across a type switch, so the
@@ -654,7 +659,7 @@ def render():
             state["chart_kind"] = "bar"
             chart_msg = ui.label("Fetch a symbol… (no snapshot yet).") \
                 .classes("opacity-60 text-sm")
-        heatmap_box = ui.column().classes(f"min-w-0 {flex_class(0.5)}")
+        heatmap_box = ui.column().classes(f"min-w-0 {_INIT_FLEX}")
         with heatmap_box:
             # Created with the heatmap init fig so the press-and-hold-tooltip load
             # hook is installed at creation (load fires once); updated in place after.
@@ -665,9 +670,9 @@ def render():
         return (symbol_in.value or "").strip().upper()
 
     # Track the current flex class per box so each reset removes the previous
-    # arbitrary class (else two flex-[…] classes stack). Seeded with the init
-    # class set on the boxes above (flex_class(0.5)).
-    flex_cur = {"chart": flex_class(0.5), "heat": flex_class(0.5)}
+    # arbitrary class (else two flex-[…] classes stack). Seeded with _INIT_FLEX —
+    # the same constant the boxes above were created with (can't drift).
+    flex_cur = {"chart": _INIT_FLEX, "heat": _INIT_FLEX}
 
     def _set_flex_class(box, key, cls):
         box.classes(remove=flex_cur[key], add=cls)
