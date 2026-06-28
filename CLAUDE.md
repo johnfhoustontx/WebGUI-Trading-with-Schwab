@@ -8,7 +8,45 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-06-27 (**Gamma Analyze → live Claude API + infographic +
+**Last updated:** 2026-06-28 (**Validated swing (1–8 wk) evaluation — Trade page**:
+the `/trade` **Position** verdict's hand-weighted swing scoring is **replaced by a
+backtested, IC-weighted cross-sectional factor model** (investing/months deferred —
+needs point-in-time fundamentals). A new PURE factor library
+(`trade-analyzer/src/analysis/factors.py`: 10 causal, sign-corrected, daily-OHLCV
+factors + a registry — `mom_12_1`/`mom_6_1`/`pth`/`str_5d`/`vol_adj_mom`/
+`trend_quality`/`low_vol`/`rs_spy`/`rs_sector`/`turnover`; no look-ahead — winsorized
+**cross-sectionally at scoring**, not per-factor) feeds an OFFLINE harness
+(`trade-analyzer/backtest.py` IC/ICIR/quantile-spread/`zscore_by_date`/**signed
+IC-weighting**/`walk_forward`/`calibrate` + the orchestrator `fit_swing_model.py`,
+**run manually — NEVER in the request path**) that pulls ~78 liquid symbols' 5-yr
+daily history, builds a (date,symbol) panel with **20-day forward EXCESS-return-vs-SPY**
+labels, and writes the versioned **artifact `trade-analyzer/data/swing_model.json`**
+(signed weights + per-factor IC + cross-sectional norm + score→outcome calibration +
+walk-forward OOS IC) + a markdown research report (both gitignored under `data/`). A
+LIVE scorer (`services/trade_svc/swing_model.py`, on-demand in `analyze()`, defensive →
+falls back to legacy/None) z-scores the symbol's current factors on the artifact's
+**cross-sectional norm** (calibration-consistent), **clips z to ±3**, composites with
+the signed weights, and reads **BUY/SELL/HOLD off the calibration band** + a percentile
++ expected forward return + beat-SPY hit-rate. Additive optional **`swing_model`** block
+on `TradeAnalysis`; a daily `cache:trade:universe_factors` snapshot is a defensive
+fallback basis. The `/trade` Position card shows the validated verdict as the headline +
+a calibrated outcome line + a **"Why — validated factors"** evidence expander, with the
+**legacy heuristic** verdict tucked into a collapsed expander (Investor + Markov cards
+unchanged — the **Markov card still forecasts the legacy technical-momentum score**, a
+separate lens, a documented coexistence). **Validated result (current fit):** composite
+**OOS IC ≈ +0.037** (5 of 13 walk-forward folds negative — the edge is thin +
+regime-dependent); top quintile ≈ **+1.35% / 4 wk at 52% beat-SPY**, bottom ≈
+**−0.80% / 43%**; signed weights low_vol **−0.34** (reclaimed with a NEGATIVE weight —
+high-vol outperformed in this large-cap bull period), mom_12_1 **+0.21**, mom_6_1
+**+0.17**, trend_quality **+0.12**, rs_sector **+0.08**, turnover **+0.07**. **Honest
+caveats:** survivorship + non-stationarity; the edge leans on low_vol's inverted sign
+reflecting this 5-yr bull-ish regime; **re-run `fit_swing_model.py` periodically**;
+regime-conditional weighting (Option C) is the planned next step. See the **"Validated
+swing evaluation (Trade page) — DONE (2026-06-28)"** section below + the manuals
+(rebuilt). Design/plan:
+[design](docs/plans/2026-06-22-swing-validated-evaluation-design.md) /
+[plan](docs/plans/2026-06-22-swing-validated-evaluation.md). **Prior — 2026-06-27**
+(**Gamma Analyze → live Claude API + infographic +
 4×/day auto-run**: the `/options/gamma` **Analyze** button no longer copies a prompt
 to a dialog — it now **calls Claude (Sonnet 4.6, thinking disabled, ~1.5k max-tokens)
 via a forced `submit_analysis` tool-use call** and renders the structured reply as a
@@ -582,7 +620,7 @@ Routes:
 | `/options/rescue` | Rescue (at-risk credit spreads (PCS/CCS/IC) → **at-risk table** (paper+captured, heat-colored) → select a position → ranked **commission-aware adjustment menu**: close / partial-close / narrow / convert-IC / butterfly / roll-down/out/down-out / broken-wing / inverted / futures-hedge; each card shows gross/commission/net + metrics + legs + rationale + strategic context + warnings + score; execute cards have **Apply → confirm → `rescue_apply`** behind a stale-price guard, advisory cards show "manual"; nav badge from `cache:options:rescue_summary`) | built |
 | `/sentiment` | Sentiment (two-column top: **dual** Sentiment gauges (Today + 30-Day Avg) + **dual** Market Trend gauges (Today live-intraday + 30-Day structural — directional 0–100 score, 15-min cadence) / component table; traffic-light tiles; 30d history + rolling avgs; full-width **Sector & Industry Performance** w/ Day/Week/Month %, P/C, RRG, rotation banner, **expandable industries w/ P/C+RRG**; bottom status bar; **persists across navigation**; **server-side 120s auto-refresh + bridge publish, tab-independent**) | built |
 | `/sentiment/rotation` | Sector Rotation (RRG-vs-SPY: Risk-ON/OFF headline + spread; **top row** = quadrant-map table (left) + tight ROTATING FROM/INTO w/ S&P weights (right); **full-width RRG below** w/ per-sector "meteor tails" — engine `assess_sector` retains a `tail` of `TAIL_LENGTH=12` RS-Ratio/RS-Mom points sampled every `TAIL_STRIDE=2` days; page draws **one spline series per sector** (faded trail line + single bright head dot) and **hover-isolates** a sector via native Highcharts `plotOptions.series.states.inactive` (hovering one dims the rest — no client round-trip); reuses `sector_rotation_assessment`; cached, **manual Refresh only**) | built |
-| `/trade` | Trade (on-demand single-symbol analysis: **Position (1–8wk)** + **Investor (months+)** Buy/Hold/Sell verdicts w/ score + top reasons + hard gates + expandable factor breakdown; **MTF EMA alignment** (per-timeframe); momentum strip (RSI/ADX/MACD/VWAP/RelVol); sector strength; **Fundamentals card** (P/E/PEG/growth/ROE/margins via proxy `/instruments`); **Markov Forecast card** (third **equal-width frame in the verdict row**, alongside Position + Investor: 5-band composite-score Markov chain → stacked-area band-probability forecast + P(BUY)/P(SELL)/E[score] at 5/10/20d + a bounded confidence-weighted drift-tilt `markov_adjusted_score` headline, verdict label unchanged; **chart plots the dense near-term `trajectory` now/1/2/3/5/10/20d** so it differs by score — the 5/10/20d tail converges to the bull-leaning prior stationary; chart is dark-navy themed); **dark-navy "dashboard" theme** (`.calc-v2` via shared `theme.py`, `items-start` compact cards); **tab-out (`focusout`) = Analyze** (deduped); **persists last analyzed symbol** + analysis across nav) | built |
+| `/trade` | Trade (on-demand single-symbol analysis: **Position (1–8wk)** + **Investor (months+)** Buy/Hold/Sell verdicts w/ score + top reasons + hard gates + expandable factor breakdown. The **Position** verdict is now a **backtested, IC-weighted cross-sectional factor model** (`swing_model.json` artifact → live `swing_model.py` scorer): the headline is the **validated** BUY/SELL/HOLD off a **calibration band** + an outcome line (percentile · expected fwd return / horizon · beat-SPY hit-rate) + a **"Why — validated factors"** evidence expander (per-factor z/weight/contribution/IC + model version & OOS IC), with the **legacy heuristic** verdict tucked into a collapsed expander (Investor unchanged); **MTF EMA alignment** (per-timeframe); momentum strip (RSI/ADX/MACD/VWAP/RelVol); sector strength; **Fundamentals card** (P/E/PEG/growth/ROE/margins via proxy `/instruments`); **Markov Forecast card** (third **equal-width frame in the verdict row**, alongside Position + Investor: 5-band composite-score Markov chain → stacked-area band-probability forecast + P(BUY)/P(SELL)/E[score] at 5/10/20d + a bounded confidence-weighted drift-tilt `markov_adjusted_score` headline, verdict label unchanged; **chart plots the dense near-term `trajectory` now/1/2/3/5/10/20d** so it differs by score — the 5/10/20d tail converges to the bull-leaning prior stationary; chart is dark-navy themed); **dark-navy "dashboard" theme** (`.calc-v2` via shared `theme.py`, `items-start` compact cards); **tab-out (`focusout`) = Analyze** (deduped); **persists last analyzed symbol** + analysis across nav) | built |
 | `/driver` | Driver (**autonomous monitor + override** [level B]: a **Claude decision layer** (Opus 4.8 default; `DRIVER_MODEL` env / `shared/driver_model.txt` override → e.g. Sonnet 4.6) auto-selects/sizes **defined-risk option spreads (PCS/CCS/IC) from the scanner** (`cache:options:scan`) toward **net $500/day** in **paper**, gated by a **`cache:driver:control`** master switch + confirm-gated **STOP** kill-switch; the page shows day-P&L-vs-$500 progress, open-driver-positions, a newest-first **decision-log** audit (`cache:driver:autonomous`, times in **CST**), and a **Performance scorecard** (win-rate / profit-factor / avg win-loss / P&L by symbol & strategy — `cache:options:driver_paper_perf`), all reading the Driver's **own isolated paper book** (`cache:options:driver_paper_account`, separate from the manual account), with **Enable/Disable** + **Run now**; 09:28-ET + 30-min-RTH checkpoints run `build_packet`→`decider.decide`→**`guardrails.apply_guardrails`** (PURE code clamps size + halts at banked-$500/loss-cap/VIX — the model never sizes its own risk)→`cmd:options` **`driver_paper_create`** (opens into the dedicated `paper_account_driver.db`, repriced + auto-exited on the 5-min manage tick — fully separate from the user's manual paper trades). **Legacy** morning-agent **order-approval queue** retained (gated off while autonomy is enabled): Run morning agent → graded day + proposed trades; **APPROVE** (confirm dialog) / **SKIP**; conditions strip + grade rationale; **Performance** view (win-rate / P&L-by-bucket + trade table; **today-only** decision log; perf **P&L colored** green/red; **Bucket / Instrument** full-word headers; **sticky table headers**). Orders simulated (`PAPER_TRADE=True`). **Root-cause fix (2026-06-27): the driver had NEVER opened a position** — `compute.open_driver_position` read `signal_id`/`strategy`/`entry_credit` but the driver feeds RAW scanner signals keyed `id`/`type`/`credit`, so every open `KeyError`'d on `'signal_id'` and the defensive `try/except` swallowed it to `status=error`; the decision log showed "executed" (only the ENQUEUE) while the account stayed empty. Fixed by normalizing the signal shape — open positions now appear + the scorecard P&L populates. See [[driver-feeds-raw-scanner-signal-shape]]) | built |
 | `/settings` | Settings (GUI prefs via `app_settings`: scanner **audio alert** on/off + sound + volume, only-during-market-hours, min-score-to-alert; desktop-notification toggle + permission grant + Test sound. Extensible — first batch) | built |
 | `/portfolio` | Portfolio (3-tier, `services/portfolio_svc` :8212: **Holdings / Sectors / Performance** tabs over the portfolio model — sector breakdown, vs-sector RS, since-purchase excess, benchmark over/under-weight, tailwind; **Performance** scorecard (return/capital/risk/entry grades + composite + ann. return + drawdown) with a per-position **advisory suggestions** detail pane; **live-streaming P&L** via the service's proxy SSE consumer republishing each tick; proxy/stream status bar; persists across nav) | built |
@@ -1169,6 +1207,104 @@ repaints (persists across nav). Pieces:
   failure degrades to insufficient-data HOLD, never raises.
 - Tests: `services/trade_svc/tests` (compute/handler/app) + `webgui/tests/test_trade.py`.
   Design/plan: Phase 4 of the [3-tier plan](docs/plans/2026-06-15-three-tier-architecture-plan.md).
+
+**Validated swing evaluation (Trade page) — DONE (2026-06-28).** The `/trade`
+**Position** verdict's hand-weighted, never-validated swing scoring is replaced by a
+**backtested, IC-weighted cross-sectional factor model** whose weights are learned from
+forward returns. Investing (months+) is **deferred** — it can't be backtested without a
+point-in-time fundamentals source. Honest framing: the model is *validated* (it shows a
+small **positive out-of-sample IC** + a calibrated quintile spread), not *guaranteed* —
+the edge is thin and regime-dependent. Architecture = **offline fit → versioned artifact
+→ online score** (the C-ready shape from the design: a single regime key `"all"` today;
+`"trend"/"chop"/"highvol"` drop into the same loader/scorer later). Pieces:
+- **PURE factor library** `trade-analyzer/src/analysis/factors.py` — each factor is
+  `(daily_df) → pd.Series` over a daily-OHLCV frame, **sign-corrected so higher =
+  bullish**, **causal** (the value at bar *t* uses only data ≤ *t* — no look-ahead).
+  Winsorization/standardization are NOT per-factor; they happen **cross-sectionally at
+  scoring** (`zscore_by_date`, across symbols per date → no temporal leakage). The live
+  value is the Series' last element, so the SAME code feeds the backtest and the live
+  scorer (no drift). The 10 registered factors: **mom_12_1** (12-1 intermediate
+  momentum, skip-month), **mom_6_1**, **pth** (price ÷ 252-day high — George & Hwang
+  anchoring), **str_5d** (short-term 5-day reversal, sign-corrected), **vol_adj_mom**
+  (3-mo return ÷ realized vol), **trend_quality** (distance above the 50/200-EMA stack),
+  **low_vol** (−60-day realized vol), **rs_spy** (63-day excess return vs SPY),
+  **rs_sector** (63-day excess vs the sector ETF), **turnover** (volume ÷ 63-day avg —
+  the conditioning var). The `FACTORS` registry is the single source of truth; the
+  **harness's IC decides which earn weight** (not the hand-picked list).
+- **OFFLINE harness** `trade-analyzer/src/analysis/backtest.py` (pure — operates on a
+  `(date,symbol)`-MultiIndex panel + forward Series, no I/O): `factor_ic`
+  (per-date cross-sectional **Spearman rank IC** → mean_ic/icir/n_days; ICIR only
+  trusted with ≥5 IC-days + real dispersion), `quantile_spread` (top-minus-bottom),
+  `zscore_by_date` (cross-sectional winsorize @ 2/98 + standardize, look-ahead-free),
+  **`signed_ic_weights`** (the production weighter: `weight_k = mean_ic_k / Σ|mean_ic|`,
+  **keeping the sign**, above an n-independent noise floor — so a wrong-sign-but-
+  predictive factor like low_vol carries a **NEGATIVE** weight and contributes with the
+  correct sign; chosen over ICIR-/t-stat-weighting because those are n-dependent and
+  unstable across small per-fold samples), `composite`, **`walk_forward`**
+  (rolling train→test, weights fit per train window, composite OOS IC on the unseen test
+  window; train/test never overlap), `calibrate` (bucket composite into quantile bands →
+  per-band score range + mean forward + hit-rate `P(fwd>0)`). The orchestrator
+  **`trade-analyzer/fit_swing_model.py`** (run manually/periodically, **NEVER imported by
+  a service**) pulls ~78 liquid symbols' (curated `UNIVERSE_SECTOR` → sector ETF) **5-yr**
+  daily history via the proxy (concurrent), builds the panel with **20-day forward
+  EXCESS-return-vs-SPY** labels (the prediction target — factors are causal so the future
+  H-bar label is legitimate), runs the engine (train/test/step **378/63/63**), and writes
+  the artifact + a markdown research report.
+- **Artifact** `trade-analyzer/data/swing_model.json` (gitignored under `data/`; path
+  `repo_paths.SWING_MODEL`, report `SWING_MODEL_REPORT`) — `version` (the fit date),
+  `fit_universe_n`, `horizon`, and per regime: signed **`weights`**, **`factor_ic`**
+  (mean_ic/icir/n_days per factor), the cross-sectional **`norm`** (per-factor
+  time-averaged winsorized cross-sectional mean/std — the basis the calibration was built
+  on), the score→outcome **`calibration`** (5 quantile bands → score range / mean_fwd /
+  hit_rate / n), and **`oos_ic`** + `oos_ic_by_fold` + `n_folds`.
+- **LIVE scorer** `services/trade_svc/swing_model.py` (on-demand, defensive → returns
+  `None` so `analyze()` falls back to the legacy verdict on ANY failure): loads the
+  artifact, z-scores the symbol's current factors on the artifact's **cross-sectional
+  norm** (PRIMARY — calibration-consistent regardless of the live cross-section size; the
+  cached universe snapshot is a noisy SECONDARY fallback), **clips z to ±3** (`Z_CLIP` —
+  matches the fit's per-date 2/98 winsorization; stops a live outlier like a turnover
+  spike hijacking the signed composite), `composite = Σ signed_weight × z`, then reads the
+  **calibration band** containing the composite → **BUY** (top band) / **SELL** (bottom) /
+  **HOLD**, a band-quantile **percentile**, the band's expected forward return + beat-SPY
+  hit-rate, and per-factor contributions (z · weight · contribution · historical IC).
+  `analyze()` fetches **2-yr daily** so every long-warmup factor (mom_12_1 needs 273 bars;
+  pth/low_vol roll 252) populates at the last bar.
+- **Contract / cache:** additive optional **`swing_model`** block on `TradeAnalysis`
+  (→ `cache:trade:analysis`); `compute.get_universe_snapshot()` lazily rebuilds a daily
+  **`cache:trade:universe_factors`** snapshot ({factor: [values across the curated
+  universe]}) as the defensive cross-sectional fallback basis.
+- **UI** `webgui/pages/trade.py` (Position card): the validated swing verdict is the
+  **headline** + a calibrated outcome line (e.g. `90th pctile · +1.3% / 20d · 52%
+  beat-SPY` via `swing_headline`), a **"Why — validated factors"** expander (per-factor z
+  / weight / contribution / historical IC + the model version & OOS IC via
+  `swing_contrib_rows`/`swing_model_meta`), and the **legacy heuristic** verdict tucked
+  into a collapsed **"Legacy heuristic"** expander (`_legacy_verdict_body`). Falls back to
+  the legacy body verbatim when `swing_model` is absent. Investor + Markov cards
+  unchanged — **the Markov card still forecasts the legacy technical-momentum
+  `composite_daily`**, NOT the validated composite (a separate lens; a documented
+  coexistence, not a bug).
+- **Validated result (current fit, `version` 2026-06-28):** fit universe **78** symbols,
+  horizon **20d**, **13** walk-forward folds. Composite **OOS IC ≈ +0.0367** — but **5 of
+  13 folds are NEGATIVE**, so the edge is thin and **regime-dependent**. Calibration: top
+  quintile (band 4) ≈ **+1.35% / 4 wk at 52.3% beat-SPY**, bottom (band 0) ≈ **−0.80% /
+  43.3%**. Signed weights (the ONLY factors that cleared the |IC| floor): **low_vol
+  −0.34** (reclaimed with a NEGATIVE weight — high-vol names outperformed in this 5-yr
+  large-cap bull period, IC −0.066), **mom_12_1 +0.21**, **mom_6_1 +0.17**,
+  **trend_quality +0.12**, **rs_sector +0.08**, **turnover +0.07** (pth / str_5d /
+  vol_adj_mom / rs_spy fell below the floor → weight 0).
+- **Honest caveats (state these):** the edge is small + regime-dependent; it leans on
+  **low_vol's inverted sign** reflecting this bull-ish large-cap period (it could flip);
+  **survivorship bias** (the fit universe is today's liquid survivors) + **regime
+  non-stationarity** (a 5-yr fit may not hold forward); the LIVE cross-section
+  (~watchlist) is thin vs the fit universe. Validation reduces self-deception, it does not
+  guarantee forward performance — **re-run `fit_swing_model.py` periodically**.
+  **Regime-conditional weighting (Option C)** is the planned next step (same harness, new
+  regime keys); ML (B) is gated on universe expansion.
+- Tests: factor library + harness + live scorer + contract + page builders are unit-
+  tested (TDD by layer, the design's acceptance gate = positive OOS IC + a meaningful
+  spread on real data). Design/plan:
+  [design](docs/plans/2026-06-22-swing-validated-evaluation-design.md) /
+  [plan](docs/plans/2026-06-22-swing-validated-evaluation.md).
 
 **Markov 2.0 (Trade page) — DONE (2026-06-21).** A probabilistic, forward-looking
 layer on the `PositionVerdict`: model the composite score as a 5-state Markov chain,

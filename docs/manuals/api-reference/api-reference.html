@@ -62,7 +62,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <h1>WebGUI Trading with Schwab</h1>
   <div class="sub">API / Developer Reference</div>
-  <div class="meta">WebGUI Trading with Schwab · Generated 2026-06-23</div>
+  <div class="meta">WebGUI Trading with Schwab · Generated 2026-06-28</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a></li>
@@ -233,7 +233,7 @@ a contract (listed in <em>Cache Key Index</em>).</p>
 <td><code>TradeAnalysis</code></td>
 <td><code>trade.py</code></td>
 <td><code>cache:trade:analysis</code></td>
-<td><code>symbol</code>, <code>description</code>, <code>price</code>, <code>volume</code>, <code>bias</code>, <code>ema_alignment{}</code>, <code>momentum{}</code>, <code>volume_profile{}</code>, <code>sector{}</code>, <code>position_verdict{}</code>, <code>investor_verdict{}</code>, <code>fundamentals{}</code>, <code>fundamentals_available</code>, <code>markov{}</code> (optional), <code>timestamp</code>, <code>errors[]</code></td>
+<td><code>symbol</code>, <code>description</code>, <code>price</code>, <code>volume</code>, <code>bias</code>, <code>ema_alignment{}</code>, <code>momentum{}</code>, <code>volume_profile{}</code>, <code>sector{}</code>, <code>position_verdict{}</code>, <code>investor_verdict{}</code>, <code>fundamentals{}</code>, <code>fundamentals_available</code>, <code>markov{}</code> (optional), <code>swing_model{}</code> (optional), <code>timestamp</code>, <code>errors[]</code></td>
 </tr>
 <tr>
 <td><code>PortfolioModel</code></td>
@@ -525,7 +525,7 @@ the <code>PortfolioModel</code> contract.</p>
 <tr>
 <td><code>analyze</code></td>
 <td><code>{symbol}</code></td>
-<td>MTF technical + fundamental analysis, plus the <strong>Markov 2.0</strong> forecast (5-band composite-score chain → band-probability forecast + bounded drift tilt) → <code>cache:trade:analysis</code>.</td>
+<td>MTF technical + fundamental analysis, plus the <strong>validated swing model</strong> verdict (Position), the <strong>Markov 2.0</strong> forecast (5-band composite-score chain → band-probability forecast + bounded drift tilt), and the Investor verdict → <code>cache:trade:analysis</code>.</td>
 </tr>
 </tbody>
 </table>
@@ -542,15 +542,83 @@ the <code>PortfolioModel</code> contract.</p>
 <tr>
 <td><code>cache:trade:analysis</code></td>
 <td><code>events:trade:analysis</code></td>
-<td><code>TradeAnalysis</code> — verdicts + momentum + sector + fundamentals + the optional <code>markov</code> forecast block.</td>
+<td><code>TradeAnalysis</code> — verdicts + momentum + sector + fundamentals + the optional <code>markov</code> forecast block + the optional <code>swing_model</code> block.</td>
 </tr>
 <tr>
 <td><code>cache:trade:markov_prior</code></td>
 <td>—</td>
 <td>Pooled Markov transition prior <code>{matrix[5][5], date, n_symbols}</code>; rebuilt lazily once/day and read by <code>analyze</code> (internal memoization — no event).</td>
 </tr>
+<tr>
+<td><code>cache:trade:universe_factors</code></td>
+<td>—</td>
+<td>Daily swing-model factor snapshot <code>{factors{factor: [values]}, date}</code> across a curated universe; rebuilt lazily once/day and read by <code>analyze</code> as the <strong>secondary</strong> cross-sectional fallback basis (the artifact's <code>norm</code> is primary). No event.</td>
+</tr>
 </tbody>
 </table>
+<p><strong><code>swing_model</code> block</strong> (additive, optional — present when the artifact loaded and the
+symbol scored; absent → the page shows the legacy verdict). Produced by
+<code>services/trade_svc/swing_model.py:score_symbol</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>verdict</code></td>
+<td><code>BUY</code> (top calibration band) / <code>SELL</code> (bottom) / <code>HOLD</code>.</td>
+</tr>
+<tr>
+<td><code>score</code></td>
+<td>The signed-IC-weighted composite (<code>Σ signed_weight · clip(z, ±3)</code>).</td>
+</tr>
+<tr>
+<td><code>percentile</code></td>
+<td>Band-quantile percentile (top band of 5 → ~90th).</td>
+</tr>
+<tr>
+<td><code>expected_fwd</code></td>
+<td>The band's mean forward excess return over the horizon.</td>
+</tr>
+<tr>
+<td><code>hit_rate</code></td>
+<td>The band's beat-SPY hit-rate (<code>P(forward &gt; 0)</code>).</td>
+</tr>
+<tr>
+<td><code>horizon_days</code></td>
+<td>The label horizon (20).</td>
+</tr>
+<tr>
+<td><code>contributions[]</code></td>
+<td>Per factor <code>{factor, z, weight, contribution, ic}</code>, sorted by |contribution|.</td>
+</tr>
+<tr>
+<td><code>model_version</code></td>
+<td>The artifact's <code>version</code> (fit date).</td>
+</tr>
+<tr>
+<td><code>oos_ic</code></td>
+<td>The artifact's walk-forward out-of-sample IC.</td>
+</tr>
+<tr>
+<td><code>source</code></td>
+<td><code>"validated"</code>.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Offline artifact (not a service view).</strong> <code>trade-analyzer/data/swing_model.json</code>
+(<code>repo_paths.SWING_MODEL</code>, gitignored) is fit <strong>offline</strong> by
+<code>trade-analyzer/fit_swing_model.py</code> (run manually/periodically — never imported by a
+service) using the pure <code>src/analysis/factors.py</code> + <code>src/analysis/backtest.py</code>. It
+stores, per regime key (<code>"all"</code>), the signed <code>weights</code>, per-factor <code>factor_ic</code>
+(<code>mean_ic</code>/<code>icir</code>/<code>n_days</code>), the cross-sectional <code>norm</code> (<code>{factor: {mean, std}}</code> — the
+live scorer's primary z-score basis), the <code>calibration</code> bands
+(<code>{band, score_lo, score_hi, mean_fwd, hit_rate, n}</code>), and <code>oos_ic</code>/<code>oos_ic_by_fold</code>/
+<code>n_folds</code>. A markdown research report is written alongside (<code>SWING_MODEL_REPORT</code>).
+Re-running the fit (e.g. after a regime shift) is the supported maintenance path.</p>
 <h2 id="driver-service-8214">Driver service — :8214</h2>
 <p><strong>Entry:</strong> <code>services/driver_svc/app.py</code>. <strong>Scheduler:</strong> morning pipeline once/day at
 09:28 ET; perf refresh ≈ every 5 min. The scheduler <strong>never executes orders</strong> — only

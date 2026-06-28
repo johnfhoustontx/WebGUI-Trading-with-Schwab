@@ -62,7 +62,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <h1>WebGUI Trading with Schwab</h1>
   <div class="sub">User Guide</div>
-  <div class="meta">WebGUI Trading with Schwab · Generated 2026-06-23</div>
+  <div class="meta">WebGUI Trading with Schwab · Generated 2026-06-28</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -563,16 +563,33 @@ not the page is open.</p>
 <li>A <strong>header</strong> with the symbol, price, bias, and volume.</li>
 <li><strong>Three equal-width cards in one row</strong> — <strong>Position</strong> (1–8 weeks), <strong>Investor</strong>
   (months+), and <strong>Markov Forecast</strong>:</li>
-<li><strong>Position</strong> and <strong>Investor</strong> each show a Buy / Hold / Sell verdict (color-coded),
-    a score, the top reasons, any hard "gates" that fired, and an expandable factor
-    breakdown.</li>
-<li><strong>Markov Forecast</strong> projects where the Position score is likely to head. It shows
+<li><strong>Position (1–8 weeks)</strong> is <strong>backtested</strong>. Rather than a hand-tuned score, it
+    ranks the stock on a set of price/volume factors that were <em>validated against real
+    forward returns</em> (which factors matter, and by how much, was learned from history —
+    not guessed), then places it in a <strong>calibrated band</strong>. The headline shows the
+    Buy / Hold / Sell verdict for that band plus what the band has <em>historically</em>
+    delivered: a band <strong>percentile</strong>, an <strong>expected return</strong> over the model's horizon
+    (≈ 4 weeks), and how often names in that band <strong>beat the S&amp;P 500</strong> — e.g.
+    <em>"90th pctile · +1.3% / 20d · 52% beat-SPY"</em>. Open <strong>"Why — validated factors"</strong> to
+    see each factor's contribution (momentum, trend quality, relative strength,
+    volatility, turnover…) and the <strong>model's own track record</strong> (its version date and
+    out-of-sample accuracy). The previous hand-tuned verdict is still available under a
+    collapsed <strong>"Legacy heuristic"</strong> section for comparison. <em>Honest note:</em> the edge is
+    real but <strong>small and regime-dependent</strong> — treat it as one weighted input, not a
+    guarantee. The <strong>Investor (months+)</strong> validation is deferred (it needs fundamentals
+    history), so that card is unchanged.</li>
+<li><strong>Investor (months+)</strong> shows a Buy / Hold / Sell verdict (color-coded), a score,
+    the top reasons, any hard "gates" that fired, and an expandable factor breakdown.</li>
+<li><strong>Markov Forecast</strong> projects where the <strong>legacy technical-momentum</strong> Position score
+    is likely to head (it tracks that older score, <em>not</em> the new validated factor model —
+    they are two separate lenses on the same stock). It shows
     the current <strong>regime band</strong> (Strong-Bear … Strong-Bull), a stacked-area chart of the
     <strong>probability of being in each band</strong> at +5 / +10 / +20 trading days, the per-horizon
     <strong>P(BUY) / P(SELL) / expected score</strong> and band <strong>persistence</strong>, and a <strong>drift / tilt</strong>
-    line. The tilt is a small, bounded adjustment (±12 points) added to the <strong>Position</strong>
-    card's headline score — shown as <code>base … · Markov …</code> — so the Position score reflects
-    the forecast while the <strong>Buy / Hold / Sell word never changes</strong> (the tilt is advisory).
+    line. The tilt is a small, bounded adjustment (±12 points) applied to the <strong>legacy</strong>
+    heuristic score — shown as <code>base … · Markov …</code> inside the Position card's "Legacy
+    heuristic" section — so that score reflects the forecast while the <strong>Buy / Hold /
+    Sell word never changes</strong> (the tilt is advisory).
     The card appears only when there is enough price history; otherwise the row falls back
     to the two verdict cards.</li>
 <li>An <strong>MTF EMA Alignment</strong> card (per-timeframe trend agreement: Daily, 4H, 1H, 15m,

@@ -62,7 +62,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <h1>WebGUI Trading with Schwab</h1>
   <div class="sub">Technical Reference</div>
-  <div class="meta">WebGUI Trading with Schwab · Generated 2026-06-23</div>
+  <div class="meta">WebGUI Trading with Schwab · Generated 2026-06-28</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a></li>
@@ -97,6 +97,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#technical-primitives">Technical primitives</a></li>
 <li><a href="#fundamental-primitives">Fundamental primitives</a></li>
 <li><a href="#fundamentals-parsing">Fundamentals parsing</a></li>
+<li><a href="#validated-swing-model-position-18-wk">Validated swing model (Position, 1–8 wk)</a></li>
 <li><a href="#markov-20-forecast-position">Markov 2.0 forecast (Position)</a></li>
 </ul>
 </li>
@@ -770,11 +771,159 @@ fraction; <code>returnOnEquity</code> as percent via a <code>&gt;2</code> magnit
 <code>operatingMarginTTM</code> vs <code>MRQ</code> for the margin trend), with legacy speculative names
 as fallback. Fields the payload does not carry (next-earnings date, EPS surprises,
 guidance, FCF) degrade to <code>None</code>, so those gates simply never fire.</p>
+<h2 id="validated-swing-model-position-18-wk">Validated swing model (Position, 1–8 wk)</h2>
+<p><strong>Files:</strong> <code>trade-analyzer/src/analysis/factors.py</code> (factor library) +
+<code>trade-analyzer/src/analysis/backtest.py</code> (IC engine) +
+<code>trade-analyzer/fit_swing_model.py</code> (offline orchestrator) +
+<code>trade-analyzer/data/swing_model.json</code> (artifact) +
+<code>services/trade_svc/swing_model.py</code> (live scorer). The <strong>Position</strong> verdict's
+hand-weighted scoring is replaced by a <strong>backtested, IC-weighted cross-sectional factor
+model</strong> whose weights are learned from forward returns. Investing (months+) is deferred
+(no point-in-time fundamentals source). Architecture: <strong>offline fit → versioned
+artifact → online score</strong>.</p>
+<p><strong>Factor library.</strong> Each factor is <code>(daily_df) → pd.Series</code>, <strong>sign-corrected so higher
+= more bullish</strong>, and <strong>causal</strong> — the value at bar <em>t</em> uses only data ≤ <em>t</em> (no
+look-ahead). Winsorization and standardization are applied <strong>cross-sectionally at
+scoring</strong> (across symbols per date), never per-factor over a symbol's own history (which
+would leak future bars into a past value and inflate measured IC). The live value is the
+Series' last element, so the same code feeds the backtest and the scorer.</p>
+<table>
+<thead>
+<tr>
+<th>Factor</th>
+<th>Definition (sign-corrected)</th>
+<th>Rationale</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mom_12_1</code></td>
+<td>12-month return, skip the last month</td>
+<td>Intermediate continuation; skip-month avoids short-term-reversal contamination</td>
+</tr>
+<tr>
+<td><code>mom_6_1</code></td>
+<td>6-month return, skip the last month</td>
+<td>Shorter-memory momentum</td>
+</tr>
+<tr>
+<td><code>pth</code></td>
+<td>price ÷ 252-day high</td>
+<td>52-week-high anchoring (George &amp; Hwang)</td>
+</tr>
+<tr>
+<td><code>str_5d</code></td>
+<td>−(5-day return)</td>
+<td>Short-term reversal / entry timer</td>
+</tr>
+<tr>
+<td><code>vol_adj_mom</code></td>
+<td>3-month return ÷ 60-day realized vol</td>
+<td>"Sharpe momentum"</td>
+</tr>
+<tr>
+<td><code>trend_quality</code></td>
+<td>distance above the 50/200-EMA stack (+ slope)</td>
+<td>Trend-following premium</td>
+</tr>
+<tr>
+<td><code>low_vol</code></td>
+<td>−(60-day realized vol)</td>
+<td>Low-volatility anomaly</td>
+</tr>
+<tr>
+<td><code>rs_spy</code></td>
+<td>63-day excess return vs SPY</td>
+<td>Cross-sectional momentum</td>
+</tr>
+<tr>
+<td><code>rs_sector</code></td>
+<td>63-day excess return vs the sector ETF</td>
+<td>Idiosyncratic strength</td>
+</tr>
+<tr>
+<td><code>turnover</code></td>
+<td>volume ÷ 63-day average volume</td>
+<td>Conditioning variable (turnover)</td>
+</tr>
+</tbody>
+</table>
+<p>The <code>FACTORS</code> registry is the single source of truth; <strong>the harness's IC decides which
+factors earn weight</strong>, not the hand-picked list.</p>
+<p><strong>IC engine</strong> (<code>backtest.py</code>, pure; operates on a <code>(date, symbol)</code>-MultiIndex factor
+panel + an aligned forward Series):</p>
+<ul>
+<li><code>factor_ic</code> — per-date cross-sectional <strong>Spearman rank IC</strong> of a factor vs the forward
+  excess return, summarized as <code>{mean_ic, icir, n_days}</code>. <strong>ICIR = mean_ic / σ(daily IC)</strong>
+  is only trusted with ≥ 5 IC-days and real daily-IC dispersion (else 0).</li>
+<li><code>quantile_spread</code> — mean forward of the top minus the bottom quintile, per date,
+  averaged.</li>
+<li><code>zscore_by_date</code> — per date, across symbols: winsorize to the <strong>2/98</strong> cross-sectional
+  band, then standardize <code>(x − mean) / std</code>. Look-ahead-free (only same-date data).</li>
+<li><strong><code>signed_ic_weights</code></strong> — the production weighter: <code>weight_k = mean_ic_k / Σ|mean_ic|</code>,
+  <strong>keeping the sign</strong>, for factors whose <code>|mean_ic|</code> clears an n-independent noise floor.
+  A <em>wrong-sign-but-predictive</em> factor (e.g. low-vol with a negative IC in a high-beta
+  regime) gets a <strong>negative</strong> weight and contributes with the correct sign; the
+  <code>|weights|</code> sum to 1. Chosen over ICIR- or t-stat-weighting because those are
+  n-dependent (a daily-IC ICIR is ≈ √252× smaller than a monthly one) and unstable across
+  small per-fold samples.</li>
+<li><code>composite</code> — the weighted sum of z-scored factors.</li>
+<li><strong><code>walk_forward</code></strong> — rolling <strong>train → test</strong> (train/test/step <strong>378 / 63 / 63</strong>
+  trading days): fit weights on each train window, score the <em>unseen</em> next test window,
+  collect the composite's <strong>out-of-sample IC</strong>. Train and test never overlap within a
+  fold; test windows tile when step = test.</li>
+<li><code>calibrate</code> — bucket composite scores into 5 quantile bands; per band record the score
+  range, <strong>mean forward return</strong>, and <strong>hit-rate = P(forward &gt; 0)</strong>. This replaces the old
+  ±40 score cuts — the BUY/SELL bands are the top/bottom calibrated bands.</li>
+</ul>
+<p><strong>Offline fit</strong> (<code>fit_swing_model.py</code>, run <strong>manually/periodically — never in the request
+path</strong>): pulls ≈ 78 liquid symbols' <strong>5-yr</strong> daily history via the proxy (a curated
+<code>UNIVERSE_SECTOR</code> map → sector ETFs; concurrent), builds a <code>(date, symbol)</code> panel with
+<strong>20-day forward EXCESS-return-vs-SPY</strong> labels (the prediction target; factors are causal,
+so using the future H-bar return as the label is legitimate), computes per-factor IC +
+the signed weights + the calibration + the walk-forward OOS IC, and writes the artifact +
+a markdown research report (both gitignored under <code>trade-analyzer/data/</code>).</p>
+<p><strong>Artifact</strong> <code>swing_model.json</code> (<code>repo_paths.SWING_MODEL</code>): <code>version</code> (the fit date),
+<code>fit_universe_n</code>, <code>horizon</code>, and per regime key (<code>"all"</code> today; the loader/scorer are
+<strong>C-ready</strong> for <code>"trend"/"chop"/"highvol"</code> later) the signed <code>weights</code>, per-factor
+<code>factor_ic</code> (<code>mean_ic</code>/<code>icir</code>/<code>n_days</code>), the cross-sectional <code>norm</code> (per-factor
+time-averaged winsorized cross-sectional mean/std — the basis the calibration was built
+on), the <code>calibration</code> bands, and <code>oos_ic</code> + <code>oos_ic_by_fold</code> + <code>n_folds</code>.</p>
+<p><strong>Live scorer</strong> (<code>swing_model.py</code>, on-demand inside <code>analyze()</code>; <strong>defensive</strong> — returns
+<code>None</code> on any failure so <code>analyze()</code> falls back to the legacy verdict). For the symbol's
+current factor values it computes <code>z = (value − norm.mean) / norm.std</code> on the artifact's
+<strong>cross-sectional norm</strong> (the PRIMARY, calibration-consistent basis, independent of the
+live cross-section size; the daily <code>cache:trade:universe_factors</code> snapshot is a noisy
+SECONDARY fallback). Each z is <strong>clipped to ±3</strong> (<code>Z_CLIP</code>, matching the fit's per-date
+2/98 winsorization, so a live outlier such as a turnover spike can't hijack the signed
+composite). Then:</p>
+<pre><code>composite  = Σ_k  signed_weight_k · clip(z_k, −3, +3)
+band       = the calibration band whose [score_lo, score_hi] contains the composite
+verdict    = BUY (top band) | SELL (bottom band) | HOLD (otherwise)
+percentile = band-quantile midpoint  (e.g. top band of 5 → ~90th)
+expected   = band.mean_fwd ;  hit_rate = band.hit_rate  (P beat-SPY over the horizon)
+</code></pre>
+<p><code>analyze()</code> fetches <strong>2-yr</strong> daily history so every long-warmup factor (<code>mom_12_1</code> needs
+252 + 21 bars; <code>pth</code>/<code>low_vol</code> roll 252) populates at the last bar.</p>
+<p><strong>Honest caveats (acceptance gate = positive OOS IC + a meaningful spread on real data).</strong>
+The current fit (<code>version</code> 2026-06-28) shows composite <strong>OOS IC ≈ +0.0367</strong> across <strong>13</strong>
+folds — but <strong>5 of those folds are negative</strong>, so the edge is thin and <strong>regime-
+dependent</strong>. Top quintile ≈ <strong>+1.35% / 4 wk at 52.3% beat-SPY</strong>; bottom ≈ <strong>−0.80% /
+43.3%</strong>. The signed weights that cleared the floor: <strong>low_vol −0.34</strong> (reclaimed with a
+<em>negative</em> weight — high-vol names outperformed in this large-cap bull-ish period),
+<strong>mom_12_1 +0.21</strong>, <strong>mom_6_1 +0.17</strong>, <strong>trend_quality +0.12</strong>, <strong>rs_sector +0.08</strong>,
+<strong>turnover +0.07</strong> (<code>pth</code>/<code>str_5d</code>/<code>vol_adj_mom</code>/<code>rs_spy</code> fell below the floor → 0).
+<strong>Survivorship</strong> (the fit universe is today's survivors) and <strong>regime non-stationarity</strong>
+caveats apply; the model leans on low_vol's inverted sign, which could flip. Validation
+reduces self-deception; it does not guarantee forward performance — <strong>re-run
+<code>fit_swing_model.py</code> periodically</strong>. Regime-conditional weighting is the planned next
+step (same harness, new regime keys).</p>
 <h2 id="markov-20-forecast-position">Markov 2.0 forecast (Position)</h2>
 <p><strong>Files:</strong> <code>trade-analyzer/src/analysis/markov.py</code> (pure math) +
 <code>services/trade_svc/compute.py</code> (reconstruction, prior, wiring). A probabilistic
 forward layer on the <strong>Position</strong> composite score, rendered as the third card in the
-verdict row.</p>
+verdict row. <em>(It forecasts the </em><em>legacy</em><em> technical-momentum <code>composite_daily</code>, a
+separate lens from the validated swing model above — a documented coexistence.)</em></p>
 <p><strong>States — 5 score bands</strong> anchored at the verdict's decision boundaries
 (<code>classify_band</code>):</p>
 <table>

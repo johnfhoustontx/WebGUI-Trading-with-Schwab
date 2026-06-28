@@ -114,7 +114,7 @@ a contract (listed in *Cache Key Index*).
 | Class | File | Cache key | Key fields |
 |-------|------|-----------|-----------|
 | `ScanResult` | `options.py` | `cache:options:scan` | `signals_0dte[]`, `signals_swing[]`, `vix_term_structure{}`, `timestamp`, `errors[]`, `warnings[]` |
-| `TradeAnalysis` | `trade.py` | `cache:trade:analysis` | `symbol`, `description`, `price`, `volume`, `bias`, `ema_alignment{}`, `momentum{}`, `volume_profile{}`, `sector{}`, `position_verdict{}`, `investor_verdict{}`, `fundamentals{}`, `fundamentals_available`, `markov{}` (optional), `timestamp`, `errors[]` |
+| `TradeAnalysis` | `trade.py` | `cache:trade:analysis` | `symbol`, `description`, `price`, `volume`, `bias`, `ema_alignment{}`, `momentum{}`, `volume_profile{}`, `sector{}`, `position_verdict{}`, `investor_verdict{}`, `fundamentals{}`, `fundamentals_available`, `markov{}` (optional), `swing_model{}` (optional), `timestamp`, `errors[]` |
 | `PortfolioModel` | `portfolio.py` | `cache:portfolio:positions` | `holdings_rows[]`, `sector_rows[]`, `performance_rows[]`, `suggestions{}`, `proxy_up`, `streaming`, `errors[]`, `timestamp` |
 | `ApprovalState` | `driver.py` | `cache:driver:approvals` | `date`, `grade`, `grade_reasons[]`, `conditions{}`, `pnl_today`, `pnl_week`, `proposed_trades[]`, `status`, `decision`, `results[]`, `reasons[]`, `error`, `timestamp` |
 | `PerfReport` | `driver.py` | `cache:driver:performance` | `summary{}`, `trades[]`, `timestamp` |
@@ -218,14 +218,43 @@ the `PortfolioModel` contract.
 
 | Type | Args | Effect |
 |------|------|--------|
-| `analyze` | `{symbol}` | MTF technical + fundamental analysis, plus the **Markov 2.0** forecast (5-band composite-score chain → band-probability forecast + bounded drift tilt) → `cache:trade:analysis`. |
+| `analyze` | `{symbol}` | MTF technical + fundamental analysis, plus the **validated swing model** verdict (Position), the **Markov 2.0** forecast (5-band composite-score chain → band-probability forecast + bounded drift tilt), and the Investor verdict → `cache:trade:analysis`. |
 
 **Published views:**
 
 | Cache key | Event | Payload |
 |-----------|-------|---------|
-| `cache:trade:analysis` | `events:trade:analysis` | `TradeAnalysis` — verdicts + momentum + sector + fundamentals + the optional `markov` forecast block. |
+| `cache:trade:analysis` | `events:trade:analysis` | `TradeAnalysis` — verdicts + momentum + sector + fundamentals + the optional `markov` forecast block + the optional `swing_model` block. |
 | `cache:trade:markov_prior` | — | Pooled Markov transition prior `{matrix[5][5], date, n_symbols}`; rebuilt lazily once/day and read by `analyze` (internal memoization — no event). |
+| `cache:trade:universe_factors` | — | Daily swing-model factor snapshot `{factors{factor: [values]}, date}` across a curated universe; rebuilt lazily once/day and read by `analyze` as the **secondary** cross-sectional fallback basis (the artifact's `norm` is primary). No event. |
+
+**`swing_model` block** (additive, optional — present when the artifact loaded and the
+symbol scored; absent → the page shows the legacy verdict). Produced by
+`services/trade_svc/swing_model.py:score_symbol`:
+
+| Field | Meaning |
+|-------|---------|
+| `verdict` | `BUY` (top calibration band) / `SELL` (bottom) / `HOLD`. |
+| `score` | The signed-IC-weighted composite (`Σ signed_weight · clip(z, ±3)`). |
+| `percentile` | Band-quantile percentile (top band of 5 → ~90th). |
+| `expected_fwd` | The band's mean forward excess return over the horizon. |
+| `hit_rate` | The band's beat-SPY hit-rate (`P(forward > 0)`). |
+| `horizon_days` | The label horizon (20). |
+| `contributions[]` | Per factor `{factor, z, weight, contribution, ic}`, sorted by \|contribution\|. |
+| `model_version` | The artifact's `version` (fit date). |
+| `oos_ic` | The artifact's walk-forward out-of-sample IC. |
+| `source` | `"validated"`. |
+
+**Offline artifact (not a service view).** `trade-analyzer/data/swing_model.json`
+(`repo_paths.SWING_MODEL`, gitignored) is fit **offline** by
+`trade-analyzer/fit_swing_model.py` (run manually/periodically — never imported by a
+service) using the pure `src/analysis/factors.py` + `src/analysis/backtest.py`. It
+stores, per regime key (`"all"`), the signed `weights`, per-factor `factor_ic`
+(`mean_ic`/`icir`/`n_days`), the cross-sectional `norm` (`{factor: {mean, std}}` — the
+live scorer's primary z-score basis), the `calibration` bands
+(`{band, score_lo, score_hi, mean_fwd, hit_rate, n}`), and `oos_ic`/`oos_ic_by_fold`/
+`n_folds`. A markdown research report is written alongside (`SWING_MODEL_REPORT`).
+Re-running the fit (e.g. after a regime shift) is the supported maintenance path.
 
 ## Driver service — :8214
 

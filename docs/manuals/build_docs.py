@@ -382,7 +382,7 @@ def build_one(folder: str) -> None:
         print(f"  ! skip {folder}: {md_name} not found")
         return
     md_text = md_path.read_text(encoding="utf-8")
-    meta = "WebGUI Trading with Schwab · Generated 2026-06-23"
+    meta = "WebGUI Trading with Schwab · Generated 2026-06-28"
     html_body = build_html(md_text, title, subtitle, meta, md_path.with_suffix(".html"))
     build_docx(html_body, title, subtitle, meta, md_path.with_suffix(".docx"))
     print(f"  [ok] {folder}: {md_name} -> .html + .docx")

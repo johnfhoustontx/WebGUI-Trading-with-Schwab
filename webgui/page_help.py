@@ -172,9 +172,16 @@ Shows which sectors money is rotating **into** or **out of**, vs the S&P 500.
 
 A **Buy / Hold / Sell** read on a single stock, for two horizons.
 
-- **Position (1–8 weeks)** vs **Investor (months+)** verdicts, each with a score
-  and its top reasons. These sit side-by-side with the **Markov Forecast** as three
-  equal cards.
+- **Position (1–8 weeks)** vs **Investor (months+)** verdicts. These sit
+  side-by-side with the **Markov Forecast** as three equal cards.
+- **Position is now backtested** — instead of a hand-tuned score, it ranks the
+  stock on factors that were *tested against real forward returns*, then places it in
+  a **calibrated band**. The headline shows what that band has historically meant:
+  an **expected return** over the next ~4 weeks and how often it **beat the S&P**
+  (e.g. "+1.3% / 20d · 52% beat-SPY"). Open **"Why — validated factors"** to see each
+  factor's pull and the model's own track record (its out-of-sample accuracy). The
+  old hand-tuned verdict is still there under **"Legacy heuristic"**.
+- **Investor (months+)** still shows a verdict with a score and its top reasons.
 - **Markov Forecast** — looks at where the Position score has historically *travelled*
   and forecasts where it's likely to head: the colored bars show the odds of drifting
   toward **BUY** or **SELL** over the next 5 / 10 / 20 days, and a small **tilt** nudges

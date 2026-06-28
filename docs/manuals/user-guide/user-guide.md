@@ -467,16 +467,33 @@ On-demand analysis of a single symbol. Type a **Symbol** and press **Analyze**.
 - A **header** with the symbol, price, bias, and volume.
 - **Three equal-width cards in one row** — **Position** (1–8 weeks), **Investor**
   (months+), and **Markov Forecast**:
-  - **Position** and **Investor** each show a Buy / Hold / Sell verdict (color-coded),
-    a score, the top reasons, any hard "gates" that fired, and an expandable factor
-    breakdown.
-  - **Markov Forecast** projects where the Position score is likely to head. It shows
+  - **Position (1–8 weeks)** is **backtested**. Rather than a hand-tuned score, it
+    ranks the stock on a set of price/volume factors that were *validated against real
+    forward returns* (which factors matter, and by how much, was learned from history —
+    not guessed), then places it in a **calibrated band**. The headline shows the
+    Buy / Hold / Sell verdict for that band plus what the band has *historically*
+    delivered: a band **percentile**, an **expected return** over the model's horizon
+    (≈ 4 weeks), and how often names in that band **beat the S&P 500** — e.g.
+    *"90th pctile · +1.3% / 20d · 52% beat-SPY"*. Open **"Why — validated factors"** to
+    see each factor's contribution (momentum, trend quality, relative strength,
+    volatility, turnover…) and the **model's own track record** (its version date and
+    out-of-sample accuracy). The previous hand-tuned verdict is still available under a
+    collapsed **"Legacy heuristic"** section for comparison. *Honest note:* the edge is
+    real but **small and regime-dependent** — treat it as one weighted input, not a
+    guarantee. The **Investor (months+)** validation is deferred (it needs fundamentals
+    history), so that card is unchanged.
+  - **Investor (months+)** shows a Buy / Hold / Sell verdict (color-coded), a score,
+    the top reasons, any hard "gates" that fired, and an expandable factor breakdown.
+  - **Markov Forecast** projects where the **legacy technical-momentum** Position score
+    is likely to head (it tracks that older score, *not* the new validated factor model —
+    they are two separate lenses on the same stock). It shows
     the current **regime band** (Strong-Bear … Strong-Bull), a stacked-area chart of the
     **probability of being in each band** at +5 / +10 / +20 trading days, the per-horizon
     **P(BUY) / P(SELL) / expected score** and band **persistence**, and a **drift / tilt**
-    line. The tilt is a small, bounded adjustment (±12 points) added to the **Position**
-    card's headline score — shown as `base … · Markov …` — so the Position score reflects
-    the forecast while the **Buy / Hold / Sell word never changes** (the tilt is advisory).
+    line. The tilt is a small, bounded adjustment (±12 points) applied to the **legacy**
+    heuristic score — shown as `base … · Markov …` inside the Position card's "Legacy
+    heuristic" section — so that score reflects the forecast while the **Buy / Hold /
+    Sell word never changes** (the tilt is advisory).
     The card appears only when there is enough price history; otherwise the row falls back
     to the two verdict cards.
 - An **MTF EMA Alignment** card (per-timeframe trend agreement: Daily, 4H, 1H, 15m,
