@@ -1038,7 +1038,7 @@ stale); the proxy's REST market data works even when `/health` shows
 `token_expired:true` (auto-refresh) — only a missing/expired **refresh** token is
 fatal.
 
-**Tests:** `cd webgui && ..\.venv\Scripts\python -m pytest -q` (607 green as of
+**Tests:** `cd webgui && ..\.venv\Scripts\python -m pytest -q` (610 green as of
 this writing). TDD pure functions; smoke-verify `render()` with a screenshot.
 `tests/test_no_inline_style.py` guards every migrated page against `.style(`/`:style=`
 (the Tailwind-first standard) — add any new page to it.
@@ -2231,7 +2231,7 @@ cd sentiment-dashboard ; python -m pytest tests
 cd trade-analyzer      ; python -m pytest .
 cd portfolio-analyzer  ; python -m pytest tests
 cd claude-driver       ; python -m pytest .
-cd webgui              ; python -m pytest .   # 552 tests: transforms + shell smoke
+cd webgui              ; python -m pytest .   # 610 tests: transforms + shell smoke
 ```
 
 The 3-tier services run per folder from the repo root (NOT `pytest services` over

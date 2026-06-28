@@ -73,6 +73,77 @@ def _pct(v):
     return "—" if v is None else f"{v * 100:.1f}%"
 
 
+def _days(n):
+    """'1 day' / 'N days' (whole words, not the compact 'Nd')."""
+    return f"{n} day" if n == 1 else f"{n} days"
+
+
+# Snake_case engine factor keys → readable labels (Position / Investor / validated
+# swing model). Standard trader acronyms are kept verbatim (RSI/MACD/ADX/VWAP/EMA);
+# everything else is spelled out. An unknown key falls back to underscores→spaces.
+_FACTOR_LABELS = {
+    # Position (1–8 week) factors
+    "ema_alignment": "EMA alignment",
+    "adx": "ADX",
+    "rsi": "RSI",
+    "macd": "MACD",
+    "rel_volume": "Relative volume",
+    "vwap": "VWAP",
+    "volume_profile": "Volume profile",
+    "rs_3m": "Relative strength (3-month)",
+    "rs_6m": "Relative strength (6-month)",
+    "dist_52wk": "Distance from 52-week high",
+    "sector": "Sector strength",
+    # Investor (months+) factors
+    "valuation": "Valuation",
+    "growth_quality": "Growth quality",
+    "earnings_traj": "Earnings trajectory",
+    "rs_vs_spy": "Relative strength vs SPY",
+    "rs_vs_sector": "Relative strength vs sector",
+    # Validated swing-model factors
+    "mom_12_1": "12-1 momentum",
+    "mom_6_1": "6-1 momentum",
+    "pth": "Price-to-52-week-high",
+    "str_5d": "5-day reversal",
+    "vol_adj_mom": "Volatility-adjusted momentum",
+    "trend_quality": "Trend quality",
+    "low_vol": "Low volatility",
+    "rs_spy": "Relative strength vs SPY",
+    "rs_sector": "Relative strength vs sector",
+    "turnover": "Turnover",
+}
+
+
+def humanize_factor(key):
+    """Readable label for a snake_case engine factor key.
+
+    Known keys map via ``_FACTOR_LABELS`` (standard trader acronyms kept as-is); an
+    unknown key degrades to underscores→spaces with the first letter capitalized, so a
+    new engine factor still renders legibly instead of as a raw identifier."""
+    if not key:
+        return ""
+    label = _FACTOR_LABELS.get(key)
+    if label:
+        return label
+    s = str(key).replace("_", " ").strip()
+    return (s[:1].upper() + s[1:]) if s else str(key)
+
+
+def humanize_reason(reason):
+    """Humanize the leading factor key in an engine reason string.
+
+    The verdict engines format reasons as ``"<factor_key> (+score)"``; this swaps the
+    key for its readable label and keeps the score annotation. A reason that is not in
+    that shape (e.g. "Insufficient fundamental data") is returned unchanged."""
+    if not reason:
+        return reason
+    text = str(reason)
+    if " (" in text and text.endswith(")"):
+        key, _sep, rest = text.partition(" (")
+        return f"{humanize_factor(key)} ({rest}"
+    return text
+
+
 def fundamentals_rows(f):
     """(label, value) pairs for the fundamentals card; '—' for missing values.
 
@@ -84,7 +155,7 @@ def fundamentals_rows(f):
     rows = [
         ("P/E", _fmt(f.get("pe_ratio"), 1)),
         ("PEG", _fmt(f.get("peg_ratio"), 2)),
-        ("Rev growth", _pct(f.get("rev_growth_ttm"))),
+        ("Revenue growth", _pct(f.get("rev_growth_ttm"))),
         ("EPS growth", _pct(f.get("eps_growth_ttm"))),
         ("ROE", _pct(f.get("roe"))),
     ]
@@ -92,7 +163,7 @@ def fundamentals_rows(f):
     rows.append(("Margins", "expanding" if me else "contracting" if me is False else "—"))
     dte = f.get("days_to_earnings")
     if dte is not None:
-        rows.append(("Earnings in", f"{dte}d"))
+        rows.append(("Earnings in", _days(dte)))
     return rows
 
 
@@ -103,9 +174,9 @@ def momentum_rows(m):
     return [
         ("RSI", _fmt(m.get("rsi"))),
         ("ADX", _fmt(m.get("adx"))),
-        ("MACD hist", _fmt(m.get("macd_hist"), 3)),
+        ("MACD histogram", _fmt(m.get("macd_hist"), 3)),
         ("VWAP", _fmt(m.get("vwap"), 2)),
-        ("Rel Vol", _fmt(m.get("relative_volume"), 2)),
+        ("Relative Volume", _fmt(m.get("relative_volume"), 2)),
     ]
 
 
@@ -114,7 +185,7 @@ def breakdown_rows(verdict):
     rows = []
     for b in (verdict or {}).get("breakdown", []):
         rows.append({
-            "factor": b.get("factor", ""),
+            "factor": humanize_factor(b.get("factor", "")),
             "weight": b.get("weight", 0),
             "raw_score": b.get("raw_score", 0),
             "contribution": round(float(b.get("contribution", 0.0)), 1),
@@ -195,7 +266,7 @@ def markov_metric_rows(mk):
     rows = []
     for h in mk.get("horizons", []):
         rows.append({
-            "horizon": f"{h.get('n', '?')}d",
+            "horizon": _days(h.get('n', '?')),
             "p_buy": f"{round(h.get('p_buy', 0) * 100)}%",
             "p_sell": f"{round(h.get('p_sell', 0) * 100)}%",
             "e_score": f"{h.get('e_score', 0):+.0f}",
@@ -242,9 +313,9 @@ def swing_headline(sm):
     pct = sm.get("percentile")
     parts = []
     if pct is not None:
-        parts.append(f"{pct}th pctile")
+        parts.append(f"{pct}th percentile")
     if exp is not None:
-        parts.append(f"{exp:+.1%} excess / {hzn}d")
+        parts.append(f"{exp:+.1%} excess / {_days(hzn)}")
     if hit is not None:
         parts.append(f"{hit:.0%} beat-SPY")
     return {"verdict": sm.get("verdict", "—"), "line": " · ".join(parts)}
@@ -261,7 +332,7 @@ def swing_contrib_rows(sm):
     for c in sm.get("contributions", []):
         ic = c.get("ic")
         rows.append({
-            "factor": c.get("factor", ""),
+            "factor": humanize_factor(c.get("factor", "")),
             "z": f"{c.get('z', 0):+.2f}",
             "weight": f"{c.get('weight', 0):+.3f}",
             "contribution": f"{c.get('contribution', 0):+.3f}",
@@ -302,7 +373,7 @@ def markov_forecast_figure(mk):
         return {**base, "series": []}
     labels = mk.get("band_labels") or ["?"] * 5
     points = mk.get("trajectory") or mk.get("horizons") or []
-    cats = ["now"] + [f"{h['n']}d" for h in points]
+    cats = ["now"] + [_days(h["n"]) for h in points]
     now = [0.0] * 5
     cb = mk.get("current_band", 2)
     if 0 <= cb < 5:
@@ -317,7 +388,7 @@ def markov_forecast_figure(mk):
         **base,
         "xAxis": {"categories": cats, "labels": {"style": _MK_AXIS_STYLE},
                   "lineColor": _MK_GRID_COLOR, "tickColor": _MK_GRID_COLOR},
-        "yAxis": {"min": 0, "max": 100, "title": {"text": "P(band)", "style": _MK_AXIS_STYLE},
+        "yAxis": {"min": 0, "max": 100, "title": {"text": "Band probability", "style": _MK_AXIS_STYLE},
                   "labels": {"format": "{value}%", "style": _MK_AXIS_STYLE},
                   "gridLineColor": _MK_GRID_COLOR},
         "plotOptions": {"area": {"stacking": "percent", "marker": {"enabled": False}}},
@@ -327,9 +398,9 @@ def markov_forecast_figure(mk):
 
 _BREAKDOWN_COLS = [
     {"name": "factor", "label": "Factor", "field": "factor", "align": "left"},
-    {"name": "weight", "label": "Wt", "field": "weight"},
-    {"name": "raw_score", "label": "Raw", "field": "raw_score"},
-    {"name": "contribution", "label": "Contrib", "field": "contribution"},
+    {"name": "weight", "label": "Weight", "field": "weight"},
+    {"name": "raw_score", "label": "Raw score", "field": "raw_score"},
+    {"name": "contribution", "label": "Contribution", "field": "contribution"},
 ]
 
 _SWING_COLS = [
@@ -372,10 +443,10 @@ def render():
         # holds a Highcharts element that must exist at first render (a chart added
         # later on a chart-less page fails to resolve `nicegui-highcharts`) and must
         # not be destroyed by a clear(), so the verdict cards are refilled in place.
-        # items-start (not items-stretch): the short Position/Investor cards no longer
-        # stretch to the tall Markov card, removing the dead space.
+        # items-stretch: the three frames render at EQUAL height (all match the tallest
+        # card, the Markov chart) so the verdict row reads as three even frames.
         results_top = ui.column().classes("w-full gap-2")
-        verdict_row = ui.row().classes("w-full gap-3 items-start flex-wrap")
+        verdict_row = ui.row().classes("w-full gap-3 items-stretch flex-wrap")
         with verdict_row:
             position_card = ui.card().classes(f"{CARD} flex-1 min-w-[280px]")
             investor_card = ui.card().classes(f"{CARD} flex-1 min-w-[280px]")
@@ -406,7 +477,7 @@ def render():
                         f"text-weight-bold px-2 rounded {bias_text_class(bias)}")
                 vol = res.get("volume")
                 if vol:
-                    ui.label(f"Vol {vol:,}").classes("opacity-60 text-sm")
+                    ui.label(f"Volume {vol:,}").classes("opacity-60 text-sm")
 
     def _legacy_verdict_body(verdict, mk):
         # The legacy heuristic verdict body (verdict word + score + Markov-adjusted
@@ -428,7 +499,7 @@ def render():
             ui.label(f"base {head['base']:+d} · Markov {head['tilt']}") \
                 .classes("text-xs opacity-60")
         for r in verdict.get("top_reasons", []):
-            ui.label(f"• {r}").classes("text-sm opacity-80")
+            ui.label(f"• {humanize_reason(r)}").classes("text-sm opacity-80")
         for g in verdict.get("gates_triggered", []):
             ui.label(f"⛔ {g}").classes("text-xs text-[#c62828]")
         rows = breakdown_rows(verdict)
@@ -535,7 +606,7 @@ def render():
         if has_verdict:
             # Three EQUAL-width cards in one row: Position · Investor · Markov.
             # (The Markov card's own visibility is managed by _update_markov.)
-            _fill_verdict_card(position_card, "Position · 1–8 wk",
+            _fill_verdict_card(position_card, "Position · 1–8 weeks",
                                res.get("position_verdict"), res.get("markov"),
                                res.get("swing_model"))
             _fill_verdict_card(investor_card, "Investor · months+",
@@ -569,10 +640,10 @@ def render():
                     remove=_MK_BAND_BG_CLASSES)
             dr = markov_drift_row(mk)
             if dr:
-                ui.label(f"drift {dr['drift']} · tilt {dr['tilt']} · conf "
-                         f"{dr['confidence']} · persist {dr['persistence']}") \
+                ui.label(f"drift {dr['drift']} · tilt {dr['tilt']} · confidence "
+                         f"{dr['confidence']} · persistence {dr['persistence']}") \
                     .classes("text-sm opacity-80")
-                ui.label(f"adj score {dr['adjusted']}").classes("text-sm text-weight-medium")
+                ui.label(f"adjusted score {dr['adjusted']}").classes("text-sm text-weight-medium")
             pv = mk.get("prior_version")
             if pv:
                 ui.label(f"prior {pv}").classes("text-xs opacity-50")
@@ -581,7 +652,7 @@ def render():
             for r in markov_metric_rows(mk):
                 with ui.column().classes("items-center gap-0"):
                     ui.label(r["horizon"]).classes("text-xs opacity-60")
-                    ui.label(f"E {r['e_score']}").classes("text-h6")
+                    ui.label(f"Expected {r['e_score']}").classes("text-h6")
                     ui.label(f"↑{r['p_buy']} ↓{r['p_sell']}").classes("text-xs opacity-80")
         markov_chart.options = markov_forecast_figure(mk)
         markov_chart.update()

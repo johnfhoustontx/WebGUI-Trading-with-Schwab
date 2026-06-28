@@ -42,9 +42,9 @@ def test_momentum_rows_formats_and_handles_missing():
                                 "vwap": 211.0, "relative_volume": 1.34})
     d = dict(rows)
     assert d["RSI"] == "55.0"
-    assert d["MACD hist"] == "0.432"  # 3 decimals
+    assert d["MACD histogram"] == "0.432"  # 3 decimals
     assert d["VWAP"] == "211.00"
-    assert d["Rel Vol"] == "1.34"
+    assert d["Relative Volume"] == "1.34"
 
 
 def test_momentum_rows_missing_value_is_dash():
@@ -65,8 +65,9 @@ def test_breakdown_rows():
         {"factor": "adx", "weight": 10, "raw_score": 5, "contribution": 0.49},
     ]}
     rows = trade.breakdown_rows(v)
-    assert rows[0] == {"factor": "ema_alignment", "weight": 20,
+    assert rows[0] == {"factor": "EMA alignment", "weight": 20,
                        "raw_score": 60, "contribution": 12.0}
+    assert rows[1]["factor"] == "ADX"  # snake_case key humanized
     assert rows[1]["contribution"] == 0.5  # rounded to 1 dp
 
 
@@ -94,7 +95,7 @@ def test_fundamentals_rows_formats_percents_and_margin():
     }))
     assert rows["P/E"] == "28.0"
     assert rows["PEG"] == "0.80"
-    assert rows["Rev growth"] == "20.0%"
+    assert rows["Revenue growth"] == "20.0%"
     assert rows["ROE"] == "141.0%"
     assert rows["Margins"] == "expanding"
     assert "Earnings in" not in rows  # None days-to-earnings omitted
@@ -105,9 +106,9 @@ def test_fundamentals_rows_missing_and_contracting():
         "pe_ratio": None, "margin_expanding": False, "days_to_earnings": 12,
     }))
     assert rows["P/E"] == "—"
-    assert rows["Rev growth"] == "—"
+    assert rows["Revenue growth"] == "—"
     assert rows["Margins"] == "contracting"
-    assert rows["Earnings in"] == "12d"
+    assert rows["Earnings in"] == "12 days"
 
 
 def test_fundamentals_rows_empty():
@@ -139,7 +140,7 @@ def test_markov_band_chip():
 
 def test_markov_metric_rows():
     rows = trade.markov_metric_rows(_MK)
-    r10 = next(r for r in rows if r["horizon"] == "10d")
+    r10 = next(r for r in rows if r["horizon"] == "10 days")
     assert r10["p_buy"] == "30%"
 
 
@@ -178,7 +179,7 @@ def test_markov_band_out_of_range():
 
 def test_markov_figure_category_data_alignment():
     fig = trade.markov_forecast_figure(_MK)  # _MK is the existing fixture in this file
-    assert fig["xAxis"]["categories"] == ["now", "5d", "10d", "20d"]
+    assert fig["xAxis"]["categories"] == ["now", "5 days", "10 days", "20 days"]
     assert len(fig["series"]) == 5
     assert all(len(s["data"]) == 4 for s in fig["series"])
 
@@ -205,7 +206,8 @@ def test_markov_figure_uses_dense_trajectory():
         {"n": 20, "dist": [0.05, 0.10, 0.15, 0.35, 0.35]},
     ])
     fig = trade.markov_forecast_figure(mk)
-    assert fig["xAxis"]["categories"] == ["now", "1d", "2d", "3d", "5d", "10d", "20d"]
+    assert fig["xAxis"]["categories"] == ["now", "1 day", "2 days", "3 days",
+                                          "5 days", "10 days", "20 days"]
     assert all(len(s["data"]) == 7 for s in fig["series"])
     assert fig["chart"]["backgroundColor"] == "transparent"  # dark theme
 
@@ -213,7 +215,7 @@ def test_markov_figure_uses_dense_trajectory():
 def test_markov_figure_falls_back_to_horizons_without_trajectory():
     # Back-compat: an older block with only `horizons` still renders 5/10/20.
     fig = trade.markov_forecast_figure(_MK)
-    assert fig["xAxis"]["categories"] == ["now", "5d", "10d", "20d"]
+    assert fig["xAxis"]["categories"] == ["now", "5 days", "10 days", "20 days"]
     assert all(len(s["data"]) == 4 for s in fig["series"])
 
 
@@ -251,8 +253,8 @@ _SM = {
 def test_swing_headline_verdict_and_line():
     head = trade.swing_headline(_SM)
     assert head["verdict"] == "BUY"
-    assert "90th pctile" in head["line"]
-    assert "+1.4% excess / 20d" in head["line"]
+    assert "90th percentile" in head["line"]
+    assert "+1.4% excess / 20 days" in head["line"]
     assert "52% beat-SPY" in head["line"]
 
 
@@ -260,7 +262,7 @@ def test_swing_headline_partial_fields():
     # Missing optional fields are simply omitted from the line (no crash).
     head = trade.swing_headline({"verdict": "HOLD", "percentile": 50})
     assert head["verdict"] == "HOLD"
-    assert head["line"] == "50th pctile"
+    assert head["line"] == "50th percentile"
 
 
 def test_swing_headline_none_tolerant():
@@ -271,7 +273,7 @@ def test_swing_headline_none_tolerant():
 
 def test_swing_contrib_rows_formats_signed_and_ic():
     rows = trade.swing_contrib_rows(_SM)
-    assert rows[0] == {"factor": "mom_12_1", "z": "+1.63", "weight": "+0.211",
+    assert rows[0] == {"factor": "12-1 momentum", "z": "+1.63", "weight": "+0.211",
                        "contribution": "+0.343", "ic": "+0.041"}
     assert rows[1]["z"] == "-0.88" and rows[1]["weight"] == "-0.150"
     assert rows[1]["ic"] == "-0.066"
@@ -312,3 +314,28 @@ def test_markov_figure_differs_by_current_band():
     assert bull["series"][4]["data"][0] == 1.0   # now one-hot at band 4 (Strong-Bull)
     assert bear["series"][0]["data"][0] == 1.0   # now one-hot at band 0 (Strong-Bear)
     assert bull["series"][4]["data"] != bear["series"][4]["data"]
+
+
+def test_days_whole_words():
+    assert trade._days(1) == "1 day"      # singular
+    assert trade._days(20) == "20 days"
+    assert trade._days(0) == "0 days"
+
+
+def test_humanize_factor_known_and_fallback():
+    assert trade.humanize_factor("mom_12_1") == "12-1 momentum"
+    assert trade.humanize_factor("rs_vs_sector") == "Relative strength vs sector"
+    assert trade.humanize_factor("rsi") == "RSI"            # trader acronym kept verbatim
+    assert trade.humanize_factor("growth_quality") == "Growth quality"
+    assert trade.humanize_factor("some_new_key") == "Some new key"  # underscores→spaces fallback
+    assert trade.humanize_factor("") == ""
+    assert trade.humanize_factor(None) == ""
+
+
+def test_humanize_reason_swaps_leading_key():
+    assert trade.humanize_reason("growth_quality (+16)") == "Growth quality (+16)"
+    assert trade.humanize_reason("rs_vs_sector (-10)") == "Relative strength vs sector (-10)"
+    # a reason that is not "<key> (+score)" is returned unchanged
+    assert trade.humanize_reason("Insufficient fundamental data") == "Insufficient fundamental data"
+    assert trade.humanize_reason("") == ""
+    assert trade.humanize_reason(None) is None

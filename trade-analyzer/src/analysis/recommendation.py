@@ -129,7 +129,7 @@ class PositionVerdict:
                 verdict = "HOLD"
 
         if inp.days_to_earnings is not None and 0 <= inp.days_to_earnings <= 56:
-            gates.append(f"Earnings in {inp.days_to_earnings}d: capped at HOLD")
+            gates.append(f"Earnings in {inp.days_to_earnings} days: capped at HOLD")
             if verdict in ("BUY", "SELL"):
                 verdict = "HOLD"
 

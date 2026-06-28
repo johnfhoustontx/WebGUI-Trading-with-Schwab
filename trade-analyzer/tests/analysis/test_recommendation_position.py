@@ -65,7 +65,7 @@ class TestPositionVerdictGates:
         inp = replace(strong_uptrend_inputs, days_to_earnings=14)
         v = PositionVerdict().score(inp)
         assert v["verdict"] == "HOLD"
-        assert any("Earnings in 14d" in g for g in v["gates_triggered"])
+        assert any("Earnings in 14 days" in g for g in v["gates_triggered"])
 
     def test_earnings_outside_window_does_not_gate(self, strong_uptrend_inputs):
         inp = replace(strong_uptrend_inputs, days_to_earnings=90)
