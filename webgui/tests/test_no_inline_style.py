@@ -60,3 +60,14 @@ def test_phase3c_pages_have_no_inline_style():
         src = (base / fn).read_text(encoding="utf-8")
         assert ".style(" not in src, f"{fn} still uses .style()"
         assert ":style=" not in src, f"{fn} still uses a Vue :style= slot binding"
+
+
+# Phase 4: the Trade page (the last DASHBOARD_CSS consumer) on Tailwind tokens +
+# palette-maps. Verdict/bias/markov dynamic colors became `text-[…]`/`bg-[…]`
+# classes (reactive verdict-card sites swap via .classes(remove=…, add=…)), so the
+# page carries no `.style(` and no Vue `:style=` slot binding.
+def test_trade_page_has_no_inline_style():
+    base = pathlib.Path(__file__).resolve().parents[1] / "pages"
+    src = (base / "trade.py").read_text(encoding="utf-8")
+    assert ".style(" not in src, "trade.py still uses .style()"
+    assert ":style=" not in src, "trade.py still uses a Vue :style= slot binding"
