@@ -29,3 +29,14 @@ def test_legacy_dashboard_css_still_present():
     # reference .calc-card/.cv2-btn until their phases. Do NOT remove yet.
     assert ".calc-card" in theme.DASHBOARD_CSS
     assert ".cv2-btn-primary" in theme.DASHBOARD_CSS
+
+
+def test_quasar_internal_css_is_internal_only():
+    css = theme.QUASAR_INTERNAL_CSS
+    # MUST contain the Quasar-internal rules component classes can't reach.
+    assert ".q-field__control" in css
+    assert ".strat-menu-navy" in css
+    # MUST NOT contain the now-tokenized semantic rules.
+    assert ".calc-card{" not in css.replace(" ", "")
+    assert ".cv2-btn" not in css
+    assert ".calc-eyebrow" not in css

@@ -133,3 +133,59 @@ STRATEGY_BTN = (
     "bg-[#0c1426] hover:border-[#3b82f6] border border-[#243353] text-[#e7edf8] "
     "rounded-[8px] min-h-[40px] font-normal"
 )
+
+# ---------------------------------------------------------------------------
+# Quasar-internal / teleported escape-hatch CSS (Phase 0 of the Tailwind-first
+# migration). These rules style Quasar/Highcharts-internal DOM that component
+# `.classes()` strings can't reach: the boxed q-field control (incl. the
+# leg-table variants), the q-tab chrome, and the body-mounted `.strat-menu-navy`
+# popup. Copied VERBATIM from DASHBOARD_CSS and kept scoped under `.calc-v2`
+# exactly as today, so a page can inject ONLY this slim block + apply the tokens
+# above. The semantic rules (`.calc-v2` page bg, `.calc-card`, `.calc-eyebrow`,
+# `.cv2-btn*`, `.strategy-menu-btn`) are intentionally OMITTED — they become
+# tokens (PAGE/CARD/EYEBROW/BTN/BTN_PRIMARY/STRATEGY_BTN).
+# ---------------------------------------------------------------------------
+QUASAR_INTERNAL_CSS = """
+/* Boxed dark inputs — restyle the standard q-field control into a filled box. */
+.calc-v2 .q-field__control{
+  background:#0c1426;border:1px solid #243353;border-radius:8px;padding:0 10px;min-height:40px;
+}
+.calc-v2 .q-field__control:before,.calc-v2 .q-field__control:after{border:0!important;}
+.calc-v2 .q-field--focused .q-field__control{
+  border-color:#3b82f6;box-shadow:0 0 0 2px rgba(59,130,246,.28);
+}
+.calc-v2 .q-field__label{color:#7f8db0;}
+.calc-v2 .q-field__native,.calc-v2 .q-field__native input,
+.calc-v2 .q-field__native textarea,.calc-v2 .q-field__native span{color:#e7edf8!important;}
+.calc-v2 .q-field__append .q-icon,.calc-v2 .q-field__prepend .q-icon{color:#8794b4;}
+/* Leg table header row */
+.calc-v2 .leg-head{color:#7f8db0;font-size:12px;padding:0 2px 4px;}
+/* Leg table rows — compact cells (less top/bottom padding, shorter height) and
+   tighter side padding so "call"/"put" are not horizontally clipped. */
+.calc-v2 .leg-row .q-field__control{min-height:32px;padding:0 6px;}
+.calc-v2 .leg-row .q-field__control .q-field__native,
+.calc-v2 .leg-row .q-field__marginal{min-height:32px;padding-top:0;padding-bottom:0;}
+.calc-v2 .leg-row .q-field__append{padding-left:0;}
+.calc-v2 .leg-row .q-field__native{font-size:13px;}
+/* Centered strike value in the leg table. */
+.calc-v2 .leg-strike .q-field__native{justify-content:center;text-align:center;}
+/* Tabs (Simulator) — light labels, blue indicator, transparent panels so the
+   dark-transparent Highcharts panels sit on the navy gradient. */
+.calc-v2 .q-tabs{color:#8794b4;}
+.calc-v2 .q-tab__label{font-weight:500;}
+.calc-v2 .q-tab--active{color:#e7edf8;}
+.calc-v2 .q-tab__indicator{background:#3b82f6;}
+.calc-v2 .q-tab-panels,.calc-v2 .q-tab-panel,.calc-v2 .q-panel{background:transparent!important;}
+/* Cascading Strategy menu popup — teleported to <body>, so NOT under .calc-v2.
+   Theme it to match the navy cards. */
+.strat-menu-navy.q-menu{
+  background:#101a30!important;border:1px solid #213152;
+  box-shadow:0 10px 28px rgba(0,0,0,.55);border-radius:10px;
+}
+.strat-menu-navy .q-item{color:#e7edf8;border-radius:6px;}
+.strat-menu-navy .q-item__section,.strat-menu-navy .q-item__label{color:#e7edf8;}
+.strat-menu-navy .q-item:hover,
+.strat-menu-navy .q-item--active,
+.strat-menu-navy .q-item.q-manuallyfocused{background:#1b2950!important;}
+.strat-menu-navy .q-icon{color:#8794b4;}
+"""
