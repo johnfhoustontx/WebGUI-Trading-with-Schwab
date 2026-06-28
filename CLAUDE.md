@@ -8,7 +8,17 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-06-28 (**Validated swing (1–8 wk) evaluation — Trade page**:
+**Last updated:** 2026-06-28 (**UI styling standard — Tailwind-first adopted**: all
+NiceGUI component styling must use **Tailwind utility classes via `.classes()`** —
+`.style()`/inline-style/fixed-px are banned; the dark-navy theme becomes **Python
+Tailwind-class-string token constants** in `pages/options/theme.py` applied with
+`.classes(CARD)`; a single `ui.add_css` escape hatch remains **only** for
+Quasar-internal/teleported DOM (`q-field__control`/`q-tab*`/`.strat-menu-navy`);
+standalone `HTMLResponse` docs + Highcharts dicts are out of scope. Scope **pragmatic**,
+intent **convert + light polish**. Phased migration (menu first, then each screen by
+logical group) — see the "UI styling standard — Tailwind-first" section below + the
+[design doc](docs/plans/2026-06-28-tailwind-first-ui-migration-design.md). **Phase 0 not
+yet started.** Prior — **Validated swing (1–8 wk) evaluation — Trade page**:
 the `/trade` **Position** verdict's hand-weighted swing scoring is **replaced by a
 backtested, IC-weighted cross-sectional factor model** (investing/months deferred —
 needs point-in-time fundamentals). A new PURE factor library
@@ -667,6 +677,15 @@ navigation via a single-user module snapshot; see the route table). Options desi
 Gamma/Simulator: [`docs/plans/2026-06-14-gamma-simulator-design.md`](docs/plans/2026-06-14-gamma-simulator-design.md) / [`-plan.md`](docs/plans/2026-06-14-gamma-simulator-plan.md).
 
 **App theme — dark-navy "dashboard" (DONE — 2026-06-24; the canonical reference).**
+> ⚠️ **Migrating to Tailwind-first** (see "UI styling standard — Tailwind-first"
+> below + the design doc
+> [`docs/plans/2026-06-28-tailwind-first-ui-migration-design.md`](docs/plans/2026-06-28-tailwind-first-ui-migration-design.md)).
+> The `DASHBOARD_CSS` semantic classes below (`.calc-card`/`.cv2-btn*`/`.calc-eyebrow`)
+> are being replaced by **Tailwind-class-string token constants** in `theme.py`
+> applied via `.classes(CARD)`; only the **Quasar-internal** rules (`q-field__control`,
+> `q-tab*`, the teleported `.strat-menu-navy` popup) stay in `ui.add_css`. The palette
+> below is the canonical hex source the tokens encode.
+
 The shared dark-navy look used by the **Calculator** + **Simulator** (page-scoped;
 promotable app-wide). One CSS string lives in **`webgui/pages/options/theme.py`**
 (`DASHBOARD_CSS`, scoped under `.calc-v2`); a page injects it with
@@ -678,7 +697,7 @@ or change the theme.**
   from pages.options.theme import DASHBOARD_CSS
   ui.add_css(DASHBOARD_CSS)
   with ui.column().classes("calc-v2 w-full gap-4"):
-      ui.label("Title").classes("text-h6").style("color:#eaf0fb")
+      ui.label("Title").classes("text-h6 text-[#eaf0fb]")       # Tailwind, not .style()
       with ui.column().classes("calc-card w-full gap-3"):      # bordered navy panel
           ui.input("Symbol")                                    # auto-boxed (q-field)
           ui.button("Go", color=None).props("no-caps").classes("cv2-btn-primary")
@@ -700,6 +719,38 @@ or change the theme.**
   · primary btn `#2563eb` (hover `#1d4fd1`) · tab active `#e7edf8` / inactive `#8794b4`
   / indicator `#3b82f6` · **P/L payoff** profit-green `#34d399` / loss-red `#f87171`
   (gradient fills + faint `rgba(...,.06)` washes — `simulator.whatif_figure`).
+
+**UI styling standard — Tailwind-first (mandatory for all NiceGUI UI).** All
+component styling MUST be expressed as **Tailwind utility classes via `.classes()`**.
+This is a hard standard — every new page, and every page touched during the migration,
+follows it. Scope decided **pragmatic** + intent **convert + light polish** (preserve
+today's dark-navy look, standardize it into the token vocabulary, fix obvious
+inconsistencies as each screen is converted — no gratuitous redesign). The four rules:
+- **Banned:** `.style(...)`, inline `style=` attribute strings, `.props("style=…")`, and
+  fixed pixel measurements outside Tailwind classes. Use Tailwind scale utilities, or
+  `[...]` **arbitrary values** when an exact value is required (`w-[37px]`,
+  `text-[#eaf0fb]`) — never `.style("width:37px")`.
+- **Design tokens, NOT semantic CSS classes.** The dark-navy theme is a vocabulary of
+  **Python Tailwind-class-string constants** in `webgui/pages/options/theme.py`
+  (`PAGE` / `CARD` / `EYEBROW` / `BTN` / `BTN_PRIMARY` / `LABEL` / `MUTED` / …), each a
+  reusable utility string encoding the palette above, applied with `.classes(CARD)`.
+  No `.calc-card { … }`-style CSS rules. (Tailwind ships bundled in NiceGUI; custom
+  theme colors aren't trivially configurable, so tokens carry `[#hex]` arbitrary values.)
+- **The ONE escape hatch.** A single documented `ui.add_css` block per theme is allowed
+  **only** for Quasar-internal / teleported DOM that component `.classes()` physically
+  cannot reach: `q-field__control` field internals (boxed inputs), `q-tab*`, the
+  `.nicegui-expansion-content` gap, and body-mounted popups like `.strat-menu-navy`.
+  Nothing else belongs in `ui.add_css`.
+- **Out of scope** (NOT NiceGUI components, so the rule doesn't bind them): standalone
+  documents served as raw `HTMLResponse` — EOD `summary/detail.html`, the Gamma
+  Explain/Analyze infographics — and **Highcharts option dicts** (chart colors are chart
+  config, not CSS).
+
+The migration runs in **phases (menu first, then each screen by logical group)** — see
+the design doc
+[`docs/plans/2026-06-28-tailwind-first-ui-migration-design.md`](docs/plans/2026-06-28-tailwind-first-ui-migration-design.md).
+Status snapshot: **Phase 0 (token module) not yet started** — `theme.py` still ships the
+legacy `DASHBOARD_CSS`. Update this line as phases land.
 
 **`pages/ui_guard.py` (cross-cutting, load-bearing — used by ~15 pages).** Provides
 `guard` / `guard_async` decorators that make a NiceGUI callback a clean no-op when
