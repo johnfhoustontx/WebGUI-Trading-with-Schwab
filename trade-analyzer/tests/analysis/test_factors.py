@@ -88,3 +88,69 @@ def test_compute_factor_frame_columns():
     frame = factors.compute_factor_frame(_df(closes), spy_close=ref, sector_close=ref)
     assert set(factors.FACTORS).issubset(set(frame.columns))
     assert len(frame) == 300
+
+
+def test_factor_is_causal_no_lookahead():
+    # raw factors must be causal: value at bar k uses only data <= k.
+    closes = list(np.linspace(100, 200, 300))
+    rng = np.random.default_rng(0)
+    closes = list(100 + np.cumsum(rng.normal(0.2, 1.0, 300)))
+    df = _df(closes)
+    k = 250
+    full = factors.mom_6_1(df).iloc[k - 1]
+    trunc = factors.mom_6_1(_df(closes[:k])).iloc[-1]
+    assert np.isclose(full, trunc, equal_nan=True)
+
+
+def test_str_5d_direction_drop_beats_rally():
+    drop = [100] * 300; drop[-1] = 90       # recent -10%
+    rally = [100] * 300; rally[-1] = 110    # recent +10%
+    assert factors.str_5d(_df(drop)).iloc[-1] > factors.str_5d(_df(rally)).iloc[-1]
+
+
+def test_turnover_direction_rises_with_volume():
+    vols = [1_000_000] * 300; vols[-1] = 5_000_000
+    s = factors.turnover(_df([100] * 300, vols=vols))
+    assert s.iloc[-1] > 1.0
+
+
+def test_trend_quality_warmup_is_nan():
+    closes = list(np.linspace(100, 200, 300))
+    s = factors.trend_quality(_df(closes))
+    assert s.iloc[:199].isna().all() and np.isfinite(s.iloc[-1])
+
+
+def test_rs_sector_positive_when_outperforming():
+    up = list(np.linspace(100, 200, 300))
+    flat = list(np.linspace(100, 105, 300))
+    s = factors.rs_sector(_df(up), ref_close=factors._close(_df(flat)))
+    assert s.iloc[-1] > 0
+
+
+def test_pth_within_bounds_on_gap_up():
+    closes = list(np.linspace(100, 150, 299)) + [10_000]  # gap far above prior high
+    s = factors.pth(_df(closes))
+    assert (s.dropna() <= 1.5).all() and (s.dropna() >= 0).all()
+
+
+def test_winsorize_degenerate_band_passes_through():
+    s = pd.Series([5.0] + [0.0] * 99)   # 2/98 band collapses to 0
+    w = factors.winsorize(s)
+    assert w.max() == 5.0                # the lone signal is NOT annihilated
+
+
+def test_compute_factor_frame_bad_factor_becomes_nan_column(monkeypatch):
+    def boom(df, **k):
+        raise ValueError("boom")
+    monkeypatch.setitem(factors.FACTORS, "turnover",
+                        {**factors.FACTORS["turnover"], "fn": boom})
+    frame = factors.compute_factor_frame(_df(list(np.linspace(100, 180, 300))))
+    assert "turnover" in frame.columns and frame["turnover"].isna().all()
+    assert set(factors.FACTORS).issubset(set(frame.columns))
+
+
+def test_compute_factor_frame_short_history_degrades():
+    frame = factors.compute_factor_frame(_df(list(np.linspace(100, 110, 80))))
+    assert set(factors.FACTORS).issubset(set(frame.columns)) and len(frame) == 80
+    # long-lookback factors are NaN on the last row, but it does not crash
+    assert np.isnan(frame["mom_12_1"].iloc[-1])

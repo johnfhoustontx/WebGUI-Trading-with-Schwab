@@ -2,8 +2,17 @@
 
 Each factor is ``(daily_df) -> pd.Series`` over a daily OHLCV frame (columns:
 datetime, open, high, low, close, volume), sign-corrected so HIGHER = more
-bullish, and winsorized. The live value is the Series' last element, so the same
-code feeds the offline backtest and the online scorer (no drift).
+bullish. Factors return **raw, causal** values: the value at bar *t* depends
+only on data at or before *t* — no temporal look-ahead. Winsorization and
+standardization are NOT applied per-factor; they are applied **cross-sectionally
+at scoring time** (across symbols per date, which has no temporal look-ahead).
+The live value is the Series' last element, so the same code feeds the offline
+backtest and the online scorer (no drift).
+
+(The earlier per-factor ``winsorize`` clipped each bar using its *entire*
+history — including future bars — so a historical bar's value depended on what
+happened later: a look-ahead bias that would inflate measured IC in the
+backtest. The ``winsorize`` utility is retained for the cross-sectional use.)
 
 Reference-relative factors (RS) take an extra reference close Series aligned by
 date. The FACTORS registry is the single source of truth for what exists; the
@@ -51,37 +60,37 @@ def _register(name, fn, direction=1, needs_ref=False, desc=""):
 
 
 def mom_12_1(df: pd.DataFrame) -> pd.Series:
-    return winsorize(_ret(_close(df), lookback=252, skip=21))
+    return _ret(_close(df), lookback=252, skip=21)
 
 
 def mom_6_1(df: pd.DataFrame) -> pd.Series:
-    return winsorize(_ret(_close(df), lookback=126, skip=21))
+    return _ret(_close(df), lookback=126, skip=21)
 
 
 def pth(df: pd.DataFrame) -> pd.Series:
     close = _close(df)
-    high_252 = close.rolling(252, min_periods=60).max()
+    high_252 = close.rolling(252, min_periods=252).max()
     return (close / high_252).clip(0, 1.5)
 
 
 def str_5d(df: pd.DataFrame) -> pd.Series:
     close = _close(df)
-    return winsorize(-(close / close.shift(5) - 1.0))
+    return -(close / close.shift(5) - 1.0)
 
 
 def _realized_vol(close: pd.Series, window: int = 60) -> pd.Series:
-    return close.pct_change().rolling(window, min_periods=20).std()
+    return close.pct_change().rolling(window, min_periods=window).std()
 
 
 def low_vol(df: pd.DataFrame) -> pd.Series:
-    return winsorize(-_realized_vol(_close(df)))
+    return -_realized_vol(_close(df))
 
 
 def vol_adj_mom(df: pd.DataFrame) -> pd.Series:
     close = _close(df)
     r3 = close / close.shift(63) - 1.0
     vol = _realized_vol(close).replace(0, np.nan)
-    return winsorize(r3 / vol)
+    return r3 / vol
 
 
 def trend_quality(df: pd.DataFrame) -> pd.Series:
@@ -90,7 +99,8 @@ def trend_quality(df: pd.DataFrame) -> pd.Series:
     ema200 = close.ewm(span=200, adjust=False).mean()
     dist = (close - ema200) / ema200
     stack = ((close > ema50).astype(float) + (ema50 > ema200).astype(float) - 1.0)
-    return winsorize(dist + 0.02 * stack)
+    out = dist + 0.02 * stack
+    return out.where(close.expanding().count() >= 200)   # warmup gate: first 200 bars NaN
 
 
 def _excess_return(sym_close, ref_close, lookback):
@@ -101,17 +111,17 @@ def _excess_return(sym_close, ref_close, lookback):
 
 
 def rs_spy(df: pd.DataFrame, ref_close: Optional[pd.Series] = None) -> pd.Series:
-    return winsorize(_excess_return(_close(df), ref_close, 63))
+    return _excess_return(_close(df), ref_close, 63)
 
 
 def rs_sector(df: pd.DataFrame, ref_close: Optional[pd.Series] = None) -> pd.Series:
-    return winsorize(_excess_return(_close(df), ref_close, 63))
+    return _excess_return(_close(df), ref_close, 63)
 
 
 def turnover(df: pd.DataFrame) -> pd.Series:
     vol = pd.Series(df["volume"].to_numpy(dtype="float64"),
                     index=pd.to_datetime(df["datetime"]))
-    return winsorize(vol / vol.rolling(63, min_periods=20).mean())
+    return vol / vol.rolling(63, min_periods=63).mean()
 
 
 _register("mom_12_1", mom_12_1, desc="12-1 intermediate momentum")
