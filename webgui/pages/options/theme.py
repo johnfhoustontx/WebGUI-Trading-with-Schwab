@@ -85,6 +85,16 @@ BTN_3D_DANGER = (
     "transition-[transform,box-shadow,filter] duration-100"
 )
 
+# Raised "3D" effect for static metric TILES (the app-wide tile standard). ADDITIVE
+# only — a top-edge bevel highlight + a hard bottom "lip" + a soft drop shadow, with
+# NO background, so it layers over each tile's own bg (incl. the dynamic sentiment
+# traffic-light colors) without flattening it. Mirrors the buttons' 3D lip aesthetic
+# but static (no hover/press). Apply with ``.classes(TILE_3D)`` on a ``ui.card``.
+TILE_3D = (
+    "rounded-[8px] "
+    "shadow-[inset_0_1px_0_0_rgba(255,255,255,.08),0_3px_0_0_rgba(0,0,0,.30),0_6px_14px_rgba(0,0,0,.42)]"
+)
+
 # Semantic STATE colors (positive / caution / negative / neutral) — the finite
 # palette behind data-driven label colors in detail.py/header.py. Exact hexes from
 # detail.py's GREEN/AMBER/RED/NEUTRAL constants, preserved as arbitrary-value classes

@@ -29,7 +29,7 @@ from .inputs import select_all_on_focus, should_load
 # Shared dark-navy "dashboard" theme (Calculator + Simulator inject the SAME CSS so
 # the look never drifts). Kept under its historical name here.
 from .theme import (QUASAR_INTERNAL_CSS, PAGE, CARD, BTN, BTN_PRIMARY, LABEL,
-                    TXT_POS, TXT_NEG, TXT_NEUTRAL)
+                    TXT_POS, TXT_NEG, TXT_NEUTRAL, TILE_3D)
 from . import page_state as _ps
 
 # Persisted (single-user) Calculator input snapshot — survives navigation + browser
@@ -275,7 +275,7 @@ def _render_summary(box, summary):
     from nicegui import ui
 
     def tile(label, value, color):
-        with ui.card().classes("p-2 min-w-[110px]"):
+        with ui.card().classes(f"p-2 min-w-[110px] {TILE_3D}"):
             ui.label(label).classes("text-xs opacity-60")
             ui.label(value).classes(f"text-base font-bold {tile_color_class(color)}")
 

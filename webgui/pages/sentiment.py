@@ -23,7 +23,7 @@ changes.
 """
 import bus_client
 from pages.gauge import gauge_figure  # noqa: F401  (re-export; used by render)
-from pages.options.theme import BTN_3D
+from pages.options.theme import BTN_3D, TILE_3D
 from pages.ui_guard import guard, guard_async
 
 CLR_GREEN = "#66bb6a"
@@ -557,8 +557,8 @@ def render():
     with ui.row().classes("items-center w-full"):
         ui.space()
         date_lbl = ui.label("").classes("opacity-70 text-sm")
-        ui.button(icon="refresh", on_click=lambda: _request_refresh()) \
-            .props("round dense push color=primary size=sm").classes("q-ml-sm")
+        ui.button(icon="refresh", color=None, on_click=lambda: _request_refresh()) \
+            .props("no-caps").classes(f"q-ml-sm {BTN_3D}")
 
     tile_lbls, tile_cards = {}, {}
     # 2x2 signal matrix (Modifier dropped per design).
@@ -612,7 +612,7 @@ def render():
             ui.label("Signals").classes("text-h6")
             with ui.grid(columns=2).classes("gap-2 q-mt-sm"):
                 for tkey, tlabel in TILE_DEFS:
-                    c = ui.card().classes("q-pa-sm items-center min-w-[96px]")
+                    c = ui.card().classes(f"q-pa-sm items-center min-w-[96px] {TILE_3D}")
                     with c:
                         ui.label(tlabel).classes("text-xs text-[#111]")
                         tile_lbls[tkey] = ui.label("—").classes("text-bold text-[#111]")
@@ -633,8 +633,8 @@ def render():
     with ui.row().classes("items-center gap-3 w-full"):
         ui.button("Refresh", icon="refresh", color=None,
                   on_click=lambda: _request_refresh()).props("no-caps").classes(BTN_3D)
-        ui.button("Expand All", on_click=lambda: _expand_all()).props("flat dense")
-        ui.button("Collapse All", on_click=lambda: _collapse_all()).props("flat dense")
+        ui.button("Expand All", color=None, on_click=lambda: _expand_all()).props("no-caps").classes(BTN_3D)
+        ui.button("Collapse All", color=None, on_click=lambda: _collapse_all()).props("no-caps").classes(BTN_3D)
         summary_lbl = ui.label("").classes("opacity-80 text-sm")
     rotation_lbl = ui.label("").classes("text-sm")
     sector_box = ui.column().classes("w-full q-gutter-none q-mt-sm")

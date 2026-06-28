@@ -17,7 +17,7 @@ from nicegui import ui
 
 from ..gauge import gauge_figure
 from . import svg
-from .theme import TXT_POS, TXT_WARN, TXT_NEG, TXT_NEUTRAL, STATE_TEXT_CLASSES
+from .theme import TXT_POS, TXT_WARN, TXT_NEG, TXT_NEUTRAL, STATE_TEXT_CLASSES, TILE_3D
 
 # Semantic state-color class tokens (Tailwind text-[...] arbitrary values). Names
 # kept (many refs) but the VALUES are now class strings applied via .classes().
@@ -87,7 +87,7 @@ def _signal_title(s):
 
 def _tile_slot(label):
     """A header tile (label + value); returns the value label to update in place."""
-    with ui.card().classes("p-2 min-w-[92px]"):
+    with ui.card().classes(f"p-2 min-w-[92px] {TILE_3D}"):
         ui.label(label).classes("text-xs opacity-60")
         return ui.label("—").classes("text-base font-bold")
 
@@ -175,7 +175,7 @@ def _build_cards(s):
 
 
 def _greek(label, value, fmt="{:.3f}", color=None):
-    with ui.card().classes("p-2 items-center"):
+    with ui.card().classes(f"p-2 items-center {TILE_3D}"):
         ui.label(label).classes("text-xs opacity-60")
         txt = fmt.format(value) if isinstance(value, (int, float)) else "—"
         lbl = ui.label(txt).classes("text-sm font-bold")

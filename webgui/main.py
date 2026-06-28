@@ -272,6 +272,16 @@ _NAV_CSS = """
 .q-tooltip.help-tip li { margin: .2em 0; }
 """
 
+# Global table chrome (app-wide standard): EVERY data table gets a fixed (sticky)
+# header over a bounded, scrolling body, so the column headers stay visible as a long
+# table scrolls. Injected once per page in ``_layout``. Per-page table CSS
+# (.paper-table / .captured-table / .driver-table) may still set its own max-height —
+# its more-specific selector + later injection win over this baseline.
+_TABLE_CSS = """
+.q-table .q-table__middle { max-height: 65vh; }
+.q-table thead tr th { position: sticky; top: 0; z-index: 1; background: #1d1d1d; }
+"""
+
 
 def _acknowledge(active: str) -> None:
     """Clear the badge for the page being viewed."""
@@ -388,6 +398,7 @@ def _layout(active: str, title: str):
     _badge_refs.clear()
     _recompute_badges()
     ui.add_css(_NAV_CSS)
+    ui.add_css(_TABLE_CSS)   # app-wide fixed (sticky) table headers
     drawer = ui.left_drawer(value=True, bordered=True).classes("nav-drawer").props("behavior=desktop")
     with drawer:
         ui.label("SCHWAB TRADING").classes(

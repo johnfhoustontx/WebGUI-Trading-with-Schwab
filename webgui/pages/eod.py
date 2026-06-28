@@ -44,7 +44,9 @@ EOD_CSS = """
 .eod-report th { opacity: .7; font-weight: 600; }
 .eod-report .tiles { display: flex; flex-wrap: wrap; gap: .6rem; margin: .4rem 0; }
 .eod-report .tile { background: rgba(255,255,255,.05); border-radius: 10px;
-                 padding: .5rem .8rem; min-width: 120px; }
+                 padding: .5rem .8rem; min-width: 120px;
+                 box-shadow: inset 0 1px 0 0 rgba(255,255,255,.08),
+                             0 3px 0 0 rgba(0,0,0,.30), 0 6px 14px rgba(0,0,0,.42); }
 .eod-report .tile .k { font-size: .72rem; opacity: .6; }
 .eod-report .tile .v { font-size: 1.1rem; font-weight: 700; }
 .eod-report .pos { color: #4caf50; } .eod-report .neg { color: #ef5350; }
