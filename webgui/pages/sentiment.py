@@ -32,6 +32,31 @@ CLR_FLAT = "#9e9e9e"
 CLR_CYAN = "#3fb6c7"
 LINE_COLOR = "#42a5f5"
 
+# LOCAL Tailwind class maps (Phase 5). These mirror the page's OWN 5-color palette
+# EXACTLY — the yellow/cyan have no theme TXT_* token and the flat differs from the
+# theme neutral, so they are intentionally NOT the shared theme tokens (this page
+# keeps its own look). The `*_color` hex helpers above are retained for the
+# Highcharts figures + non-`.classes()` callers; the `*_class` helpers below return
+# the Tailwind class string for `.classes()`.
+TXT_G = "text-[#66bb6a]"
+TXT_R = "text-[#ef5350]"
+TXT_Y = "text-[#ffd54f]"
+TXT_FLAT = "text-[#9e9e9e]"
+TXT_CY = "text-[#3fb6c7]"
+BG_G = "bg-[#66bb6a]"
+BG_R = "bg-[#ef5350]"
+BG_Y = "bg-[#ffd54f]"
+# Remove-sets for reactive in-place recolors (these MUST cover every class the
+# element can apply, or colors stack across the page's ~2s auto-refresh).
+SENT_TEXT_CLASSES = " ".join([TXT_G, TXT_R, TXT_Y, TXT_FLAT, TXT_CY])
+TRAFFIC_BG_CLASSES = " ".join([BG_G, BG_R, BG_Y])
+
+# Map a local hex -> its Tailwind text class (for helpers that already return a hex).
+_HEX_TO_TXT = {CLR_GREEN: TXT_G, CLR_RED: TXT_R, CLR_YELLOW: TXT_Y,
+               CLR_FLAT: TXT_FLAT, CLR_CYAN: TXT_CY}
+# Map a local hex -> its Tailwind bg class (only the three traffic bands have a bg).
+_HEX_TO_TXT_BG = {CLR_GREEN: BG_G, CLR_RED: BG_R, CLR_YELLOW: BG_Y}
+
 # (component_scores key, display name). Weights are NO LONGER baked from app
 # ``scoring`` at import — they arrive at render time via the cached
 # ``derived["weights"]`` (computed in the service). A component with no weight
@@ -62,6 +87,11 @@ def traffic_color(total):
     if v <= 4.5:
         return CLR_RED
     return CLR_YELLOW
+
+
+def traffic_bg_class(total):
+    """Composite traffic-light band as a Tailwind bg class (tile backgrounds)."""
+    return _HEX_TO_TXT_BG[traffic_color(total)]
 
 
 def gauge_score(total):
@@ -115,6 +145,34 @@ def bias_color(bias):
     if "bear" in b:
         return CLR_RED
     return CLR_YELLOW
+
+
+def bias_text_class(bias):
+    return _HEX_TO_TXT[bias_color(bias)]
+
+
+def trend_text_class(committed):
+    """Tailwind text class for a committed trend state (mirrors _apply's mapping)."""
+    if committed in {"bull_trend", "pullback_in_bull"}:
+        return TXT_G
+    if committed in {"bear_rally", "bear_trend"}:
+        return TXT_R
+    return TXT_Y
+
+
+def rotation_text_class(color):
+    """Map a rotation_banner() hex color -> Tailwind text class."""
+    return _HEX_TO_TXT.get(color, TXT_FLAT)
+
+
+def sc_text_class(score):
+    """Component score color: >=7 green, <4 red, else amber (mirrors _render_components)."""
+    sc = _safe_float(score)
+    if sc >= 7:
+        return TXT_G
+    if sc < 4:
+        return TXT_R
+    return TXT_Y
 
 
 def composite_series(snapshots):
@@ -174,6 +232,10 @@ def pct_color(pct):
     return CLR_GREEN if float(pct) > 0 else CLR_RED
 
 
+def pct_text_class(pct):
+    return _HEX_TO_TXT[pct_color(pct)]
+
+
 def pcr_color(pcr):
     """<0.95 call-dominated green, >1.05 put-dominated red, else flat."""
     if pcr is None or float(pcr) <= 0:
@@ -185,11 +247,19 @@ def pcr_color(pcr):
     return CLR_FLAT
 
 
+def pcr_text_class(pcr):
+    return _HEX_TO_TXT[pcr_color(pcr)]
+
+
 def rrg_color(quadrant):
     return {
         "Leading": CLR_GREEN, "Improving": CLR_CYAN,
         "Weakening": CLR_YELLOW, "Lagging": CLR_RED,
     }.get(quadrant, CLR_FLAT)
+
+
+def rrg_text_class(quadrant):
+    return _HEX_TO_TXT[rrg_color(quadrant)]
 
 
 def pcr_from_chain(chain):
@@ -445,14 +515,6 @@ def _fmt_time(value):
 def render():
     from nicegui import ui
 
-    ui.add_css('''
-    .sent-sectors .secrow { border-bottom: 1px solid rgba(255,255,255,0.05); }
-    .sent-sectors .secrow:hover { background: rgba(255,255,255,0.04); }
-    .sent-sectors .secrow > div { border-right: 1px solid rgba(255,255,255,0.04); }
-    .sent-sectors .secrow > div:last-child { border-right: none; }
-    .sent-sectors .indrow { background: rgba(255,255,255,0.02); }
-    ''')
-
     def _read_cache():
         """Pull the three sentiment cache views off the bus into ``state``.
         Graceful-empty: any missing view yields empty data (page renders a
@@ -502,56 +564,55 @@ def render():
     # Three evenly-distributed, top-aligned columns with matching h6 headers.
     with ui.row().classes("w-full items-start justify-around gap-6 flex-wrap"):
         # ① Market Sentiment — composite speedometer + press-and-hold Components popup
-        with ui.column().classes("items-center").style("min-width:210px"):
+        with ui.column().classes("items-center min-w-[210px]"):
             ui.label("Market Sentiment").classes("text-h6")
             with ui.row().classes("items-end justify-center gap-4 no-wrap"):
                 with ui.column().classes("items-center"):
                     ui.label("Today").classes("opacity-60 text-xs")
                     gauge_box = ui.highchart(gauge_figure(50.0, "—")) \
-                        .classes("q-mt-xs").style("width:170px;height:120px")
+                        .classes("q-mt-xs w-[170px] h-[120px]")
                 with ui.column().classes("items-center"):
                     ui.label("30-Day Avg").classes("opacity-60 text-xs")
                     gauge_avg_box = ui.highchart(gauge_figure(50.0, "—")) \
-                        .classes("q-mt-xs").style("width:170px;height:120px")
+                        .classes("q-mt-xs w-[170px] h-[120px]")
             bias_lbl = ui.label("").classes("text-h6")
             sub_lbl = ui.label("").classes("opacity-80 text-sm")
             with ui.button("Components", icon="table_view").props("flat dense") as comp_btn:
                 with ui.menu().props("no-parent-event") as comp_menu:
-                    comp_box = ui.column().classes("q-pa-md").style("min-width:520px")
+                    comp_box = ui.column().classes("q-pa-md min-w-[520px]")
             # Press-and-hold: shown while the mouse button is down, closed on release.
             comp_btn.on("mousedown", lambda: comp_menu.open())
             comp_btn.on("mouseup", lambda: comp_menu.close())
             comp_btn.on("mouseleave", lambda: comp_menu.close())
         # ② Market Trend — speedometer (hybrid needle) + label/desc + detail popup
-        with ui.column().classes("items-center").style("min-width:210px"):
+        with ui.column().classes("items-center min-w-[210px]"):
             ui.label("Market Trend").classes("text-h6")
             with ui.row().classes("items-end justify-center gap-4 no-wrap"):
                 with ui.column().classes("items-center"):
                     ui.label("Today").classes("opacity-60 text-xs")
                     trend_gauge_box = ui.highchart(gauge_figure(50.0, "—")) \
-                        .classes("q-mt-xs").style("width:170px;height:120px")
+                        .classes("q-mt-xs w-[170px] h-[120px]")
                 with ui.column().classes("items-center"):
                     ui.label("30-Day").classes("opacity-60 text-xs")
                     trend_gauge_30_box = ui.highchart(gauge_figure(50.0, "—")) \
-                        .classes("q-mt-xs").style("width:170px;height:120px")
+                        .classes("q-mt-xs w-[170px] h-[120px]")
             regime_badge = ui.label("").classes("text-subtitle1 text-bold")
             regime_desc = ui.label("").classes("opacity-80 text-sm text-center")
             with ui.button("Trend Detail", icon="insights").props("flat dense") as trend_btn:
                 with ui.menu().props("no-parent-event") as trend_menu:
-                    trend_detail_box = ui.column().classes("q-pa-md text-sm") \
-                        .style("min-width:240px")
+                    trend_detail_box = ui.column().classes("q-pa-md text-sm min-w-[240px]")
             trend_btn.on("mousedown", lambda: trend_menu.open())
             trend_btn.on("mouseup", lambda: trend_menu.close())
             trend_btn.on("mouseleave", lambda: trend_menu.close())
         # ③ Signals — 2x2 matrix
-        with ui.column().classes("items-center").style("min-width:210px"):
+        with ui.column().classes("items-center min-w-[210px]"):
             ui.label("Signals").classes("text-h6")
             with ui.grid(columns=2).classes("gap-2 q-mt-sm"):
                 for tkey, tlabel in TILE_DEFS:
-                    c = ui.card().classes("q-pa-sm items-center").style("min-width:96px")
+                    c = ui.card().classes("q-pa-sm items-center min-w-[96px]")
                     with c:
-                        ui.label(tlabel).classes("text-xs").style("color:#111")
-                        tile_lbls[tkey] = ui.label("—").classes("text-bold").style("color:#111")
+                        ui.label(tlabel).classes("text-xs text-[#111]")
+                        tile_lbls[tkey] = ui.label("—").classes("text-bold text-[#111]")
                     tile_cards[tkey] = c
 
     ui.separator().classes("q-my-md")
@@ -573,7 +634,7 @@ def render():
         ui.button("Collapse All", on_click=lambda: _collapse_all()).props("flat dense")
         summary_lbl = ui.label("").classes("opacity-80 text-sm")
     rotation_lbl = ui.label("").classes("text-sm")
-    sector_box = ui.column().classes("w-full q-gutter-none q-mt-sm sent-sectors")
+    sector_box = ui.column().classes("w-full q-gutter-none q-mt-sm")
 
     SEC_COLS = [("sector", "Sector", 140), ("etf", "ETF", 50),
                 ("desc", "Description", 200), ("day", "Day %", 70),
@@ -586,24 +647,21 @@ def render():
         rows = component_table_rows(latest, weights, rotation_value, sector_value)
         with comp_box:
             with ui.row().classes("items-center w-full no-wrap gap-3 opacity-60 text-xs"):
-                ui.label("Component").style("width:110px")
-                ui.label("Value").style("width:140px")
-                ui.label("Score").style("width:50px")
-                ui.label("Weight").style("width:60px")
-                ui.label("Conf").style("width:50px")
+                ui.label("Component").classes("w-[110px]")
+                ui.label("Value").classes("w-[140px]")
+                ui.label("Score").classes("w-[50px]")
+                ui.label("Weight").classes("w-[60px]")
+                ui.label("Conf").classes("w-[50px]")
             for r in rows:
                 sc = r["score"]
-                sc_color = (CLR_GREEN if sc >= 7 else
-                            (CLR_RED if sc < 4 else CLR_YELLOW))
                 with ui.row().classes("items-center w-full no-wrap gap-3"):
-                    ui.label(r["name"]).classes("text-sm").style("width:110px")
-                    ui.label(str(r["value"])).classes("text-sm").style(
-                        "width:140px;overflow:hidden;text-overflow:ellipsis;"
-                        "white-space:nowrap")
-                    ui.label(f"{sc:.2f}").classes("text-sm text-bold").style(
-                        f"width:50px;color:{sc_color}")
-                    ui.label(r["weight"]).classes("text-sm").style("width:60px")
-                    ui.label(r["conf"]).classes("text-sm").style("width:50px")
+                    ui.label(r["name"]).classes("text-sm w-[110px]")
+                    ui.label(str(r["value"])).classes(
+                        "text-sm w-[140px] overflow-hidden text-ellipsis whitespace-nowrap")
+                    ui.label(f"{sc:.2f}").classes(
+                        "text-sm text-bold w-[50px] " + sc_text_class(sc))
+                    ui.label(r["weight"]).classes("text-sm w-[60px]")
+                    ui.label(r["conf"]).classes("text-sm w-[50px]")
 
     def _comp_context():
         """(rotation_value, sector_value) from loaded sector data, or (None, None).
@@ -641,7 +699,7 @@ def render():
         gauge_avg_box.options = gauge_figure(gauge_score(avg), f"{avg:.2f}")
         gauge_avg_box.update()
         bias_lbl.text = f"{total:.2f} · {comp.get('bias', '')}"
-        bias_lbl.style(f"color:{bias_color(comp.get('bias'))}")
+        bias_lbl.classes(remove=SENT_TEXT_CLASSES, add=bias_text_class(comp.get('bias')))
         sub_lbl.text = f"Confidence {_safe_float(comp.get('aggregate_confidence')):.0%}"
         # Prior series: when showing live, today=live and the prior series is
         # the full backfill (all completed sessions); when showing backfill,
@@ -655,10 +713,10 @@ def render():
             band_labels = (derived.get("size", "—"), derived.get("bias", "—"),
                            derived.get("signal", "—"))
         t = tiles(latest, prev_total, band_labels)
-        band = traffic_color(total)
+        band_bg = traffic_bg_class(total)
         for tkey, _tlabel in TILE_DEFS:
             tile_lbls[tkey].text = t[tkey]
-            tile_cards[tkey].style(f"background-color:{band}")
+            tile_cards[tkey].classes(remove=TRAFFIC_BG_CLASSES, add=band_bg)
         rotation_value, sector_value = _comp_context()
         _render_components(latest, rotation_value, sector_value)
         hist_plot.options = build_history_figure(snaps)
@@ -672,15 +730,11 @@ def render():
         trend = derived.get("trend")
         if trend:
             committed = trend.get("state")
-            green = {"bull_trend", "pullback_in_bull"}
-            red = {"bear_rally", "bear_trend"}
-            color = CLR_GREEN if committed in green else (
-                CLR_RED if committed in red else CLR_YELLOW)
             trend_gauge_box.options = gauge_figure(
                 trend_gauge_value(trend), _TREND_SHORT.get(committed, "—"))
             trend_gauge_box.update()
             regime_badge.text = trend.get("label", "")
-            regime_badge.style(f"color:{color}")
+            regime_badge.classes(remove=SENT_TEXT_CLASSES, add=trend_text_class(committed))
             regime_desc.text = trend.get("description", "")
             trend_detail_box.clear()
             with trend_detail_box:
@@ -719,33 +773,36 @@ def render():
         rows = sector_table_rows(sd, sec["quotes"], sec["trends"], sec["pcr"], sec["quadrants"])
         with sector_box:
             with ui.row().classes("items-center w-full no-wrap gap-2 opacity-60 text-xs"):
-                ui.label("").style("width:24px")
+                ui.label("").classes("w-[24px]")
                 for _f, hdr, w in SEC_COLS:
                     if _f == "desc":
-                        ui.label(hdr).style("flex:1;min-width:160px")
+                        ui.label(hdr).classes("flex-1 min-w-[160px]")
                     else:
-                        ui.label(hdr).style(f"width:{w}px")
+                        ui.label(hdr).classes(f"w-[{w}px]")
             for r in rows:
                 sector_name = r["sector"]
                 expanded = sector_name in state["expanded"]
-                dc = pct_color(r["day"])  # name/etf/desc share the Day % color
-                with ui.row().classes("items-center w-full no-wrap gap-2 text-sm secrow"):
+                dc = pct_text_class(r["day"])  # name/etf/desc share the Day % color
+                with ui.row().classes(
+                        "items-center w-full no-wrap gap-2 text-sm "
+                        "border-b border-white/5 hover:bg-white/[0.04]"):
                     ui.icon("keyboard_arrow_down" if expanded else "keyboard_arrow_right") \
-                        .classes("cursor-pointer").style("width:24px") \
+                        .classes("cursor-pointer w-[24px] border-r border-white/[0.04]") \
                         .on("click", lambda _e, s=sector_name: _toggle_sector(s))
-                    ui.label(str(sector_name or "")).style(f"width:140px;color:{dc}")
-                    ui.label(str(r["etf"] or "")).style(f"width:50px;color:{dc}")
-                    ui.label(str(r["desc"] or "")).style(
-                        f"flex:1;min-width:160px;color:{dc};overflow:hidden;text-overflow:ellipsis;white-space:nowrap")
+                    ui.label(str(sector_name or "")).classes(f"w-[140px] border-r border-white/[0.04] {dc}")
+                    ui.label(str(r["etf"] or "")).classes(f"w-[50px] border-r border-white/[0.04] {dc}")
+                    ui.label(str(r["desc"] or "")).classes(
+                        "flex-1 min-w-[160px] border-r border-white/[0.04] "
+                        f"overflow-hidden text-ellipsis whitespace-nowrap {dc}")
                     for fld in ("day", "week", "month"):
                         v = r[fld]
                         ui.label(f"{v:+.2f}%" if v is not None else "—") \
-                            .style(f"width:70px;color:{pct_color(v)}")
+                            .classes(f"w-[70px] border-r border-white/[0.04] {pct_text_class(v)}")
                     pv = r["pcr"]
-                    ui.label(f"{pv:.2f}" if pv is not None else "").style(
-                        f"width:56px;color:{pcr_color(pv)}")
+                    ui.label(f"{pv:.2f}" if pv is not None else "").classes(
+                        f"w-[56px] border-r border-white/[0.04] {pcr_text_class(pv)}")
                     rv = r["rrg"]
-                    ui.label(str(rv or "")).style(f"width:90px;color:{rrg_color(rv)}")
+                    ui.label(str(rv or "")).classes(f"w-[90px] {rrg_text_class(rv)}")
                 if expanded:
                     # Industries come PRECOMPUTED in the sectors cache view
                     # ({"quotes","trends","pcr","quadrants"} per sector name) —
@@ -753,28 +810,30 @@ def render():
                     ind = (state["industries"] or {}).get(sector_name)
                     if not ind:
                         with ui.row().classes("items-center w-full no-wrap gap-2 text-xs opacity-60"):
-                            ui.label("").style("width:24px")
-                            ui.label("no industry data").style("width:200px")
+                            ui.label("").classes("w-[24px]")
+                            ui.label("no industry data").classes("w-[200px]")
                     else:
                         for ir in industry_rows(sd, sector_name, ind.get("quotes"), ind.get("trends"), ind.get("pcr"), ind.get("quadrants")):
-                            idc = pct_color(ir["day"])  # industry name/etf/desc share its Day % color
-                            with ui.row().classes("items-center w-full no-wrap gap-2 text-xs secrow indrow"):
-                                ui.label("").style("width:24px")
-                                ui.label(str(ir["label"] or "")).style(
-                                    f"width:140px;padding-left:14px;color:{idc};opacity:0.85")
-                                ui.label(str(ir["etf"] or "")).style(f"width:50px;color:{idc}")
-                                ui.label(str(ir["desc"] or "")).style(
-                                    f"flex:1;min-width:160px;color:{idc};overflow:hidden;text-overflow:ellipsis;"
-                                    "white-space:nowrap;opacity:0.8")
+                            idc = pct_text_class(ir["day"])  # industry name/etf/desc share its Day % color
+                            with ui.row().classes(
+                                    "items-center w-full no-wrap gap-2 text-xs "
+                                    "border-b border-white/5 hover:bg-white/[0.04] bg-white/[0.02]"):
+                                ui.label("").classes("w-[24px] border-r border-white/[0.04]")
+                                ui.label(str(ir["label"] or "")).classes(
+                                    f"w-[140px] pl-[14px] border-r border-white/[0.04] opacity-85 {idc}")
+                                ui.label(str(ir["etf"] or "")).classes(f"w-[50px] border-r border-white/[0.04] {idc}")
+                                ui.label(str(ir["desc"] or "")).classes(
+                                    "flex-1 min-w-[160px] border-r border-white/[0.04] "
+                                    f"overflow-hidden text-ellipsis whitespace-nowrap opacity-80 {idc}")
                                 for fld in ("day", "week", "month"):
                                     v = ir[fld]
                                     ui.label(f"{v:+.2f}%" if v is not None else "—") \
-                                        .style(f"width:70px;color:{pct_color(v)}")
+                                        .classes(f"w-[70px] border-r border-white/[0.04] {pct_text_class(v)}")
                                 pv = ir["pcr"]
-                                ui.label(f"{pv:.2f}" if pv is not None else "").style(
-                                    f"width:56px;color:{pcr_color(pv)}")
+                                ui.label(f"{pv:.2f}" if pv is not None else "").classes(
+                                    f"w-[56px] border-r border-white/[0.04] {pcr_text_class(pv)}")
                                 rv = ir["rrg"]
-                                ui.label(str(rv or "")).style(f"width:90px;color:{rrg_color(rv)}")
+                                ui.label(str(rv or "")).classes(f"w-[90px] {rrg_text_class(rv)}")
 
     @guard
     def _toggle_sector(sector_name):
@@ -810,7 +869,7 @@ def render():
         summary_lbl.text = sector_summary(sd, quotes, state.get("sector_summary"))
         regime, color, detail = rotation_banner(sec["rotation"])
         rotation_lbl.text = f"{regime} — {detail}"
-        rotation_lbl.style(f"color:{color}")
+        rotation_lbl.classes(remove=SENT_TEXT_CLASSES, add=rotation_text_class(color))
         _render_sector_table()
         # refill rotation/sector Value cells in the component table now loaded
         if state["snaps"] or state.get("live"):

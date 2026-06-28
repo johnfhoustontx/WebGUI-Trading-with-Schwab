@@ -35,6 +35,68 @@ def test_bias_color_buckets():
     assert S.bias_color("Neutral") == S.CLR_YELLOW
 
 
+# ── Local Tailwind color-class maps (Phase 5) — exact local palette preserved ──
+def test_local_class_constants_mirror_palette():
+    assert S.TXT_G == "text-[#66bb6a]" and S.TXT_R == "text-[#ef5350]"
+    assert S.TXT_Y == "text-[#ffd54f]" and S.TXT_FLAT == "text-[#9e9e9e]"
+    assert S.TXT_CY == "text-[#3fb6c7]"
+    assert S.BG_G == "bg-[#66bb6a]" and S.BG_R == "bg-[#ef5350]" and S.BG_Y == "bg-[#ffd54f]"
+    # remove-sets cover every class an in-place element can apply
+    assert set(S.SENT_TEXT_CLASSES.split()) == {S.TXT_G, S.TXT_R, S.TXT_Y, S.TXT_FLAT, S.TXT_CY}
+    assert set(S.TRAFFIC_BG_CLASSES.split()) == {S.BG_G, S.BG_R, S.BG_Y}
+
+
+def test_traffic_bg_class_maps_bands():
+    assert S.traffic_bg_class(7) == "bg-[#66bb6a]"
+    assert S.traffic_bg_class(4) == "bg-[#ef5350]"
+    assert S.traffic_bg_class(5.5) == "bg-[#ffd54f]"
+
+
+def test_bias_text_class_buckets():
+    assert S.bias_text_class("Bullish") == "text-[#66bb6a]"
+    assert S.bias_text_class("Bearish") == "text-[#ef5350]"
+    assert S.bias_text_class("Neutral") == "text-[#ffd54f]"
+
+
+def test_pct_text_class():
+    assert S.pct_text_class(0.5) == "text-[#66bb6a]"
+    assert S.pct_text_class(-0.5) == "text-[#ef5350]"
+    assert S.pct_text_class(0.0) == "text-[#9e9e9e]"
+    assert S.pct_text_class(None) == "text-[#9e9e9e]"
+
+
+def test_pcr_text_class_and_rrg_text_class():
+    assert S.pcr_text_class(0.9) == "text-[#66bb6a]"
+    assert S.pcr_text_class(1.1) == "text-[#ef5350]"
+    assert S.pcr_text_class(1.0) == "text-[#9e9e9e]"
+    assert S.rrg_text_class("Improving") == "text-[#3fb6c7]"
+    assert S.rrg_text_class("Lagging") == "text-[#ef5350]"
+    assert S.rrg_text_class("Leading") == "text-[#66bb6a]"
+    assert S.rrg_text_class("Weakening") == "text-[#ffd54f]"
+    assert S.rrg_text_class("???") == "text-[#9e9e9e]"
+
+
+def test_sc_text_class():
+    assert S.sc_text_class(7) == "text-[#66bb6a]"
+    assert S.sc_text_class(3) == "text-[#ef5350]"
+    assert S.sc_text_class(5) == "text-[#ffd54f]"
+
+
+def test_trend_text_class():
+    assert S.trend_text_class("bull_trend") == "text-[#66bb6a]"
+    assert S.trend_text_class("pullback_in_bull") == "text-[#66bb6a]"
+    assert S.trend_text_class("bear_trend") == "text-[#ef5350]"
+    assert S.trend_text_class("bear_rally") == "text-[#ef5350]"
+    assert S.trend_text_class("range") == "text-[#ffd54f]"
+
+
+def test_rotation_text_class():
+    assert S.rotation_text_class(S.CLR_GREEN) == "text-[#66bb6a]"
+    assert S.rotation_text_class(S.CLR_RED) == "text-[#ef5350]"
+    assert S.rotation_text_class(S.CLR_YELLOW) == "text-[#ffd54f]"
+    assert S.rotation_text_class(S.CLR_FLAT) == "text-[#9e9e9e]"
+
+
 # ── Market Trend speedometer (needle = the directional 0-100 trend score) ─────
 def test_trend_gauge_value_uses_score_directly():
     assert S.trend_gauge_value({"score": 84.0}) == 84.0
