@@ -22,6 +22,21 @@ def test_heat_color_zones():
     assert rescue.heat_color(None) == rescue.HEAT_GREEN
 
 
+def test_heat_bg_and_border_classes():
+    assert rescue.heat_bg_class(80) == "bg-[#ef5350]"
+    assert rescue.heat_bg_class(60) == "bg-[#ff7043]"
+    assert rescue.heat_bg_class(40) == "bg-[#ffa726]"
+    assert rescue.heat_bg_class(10) == "bg-[#66bb6a]"
+    assert rescue.heat_border_class(80) == "border-l-4 border-[#ef5350]"
+    assert rescue.heat_border_class(None) == ""   # missing -> no border
+
+
+def test_cash_class_maps_sign():
+    assert rescue.cash_class(5) == "text-[#66bb6a]"
+    assert rescue.cash_class(-5) == "text-[#ef5350]"
+    assert rescue.cash_class(0) == "text-[#9e9e9e]"
+
+
 def _paper_view():
     return {
         "positions": [

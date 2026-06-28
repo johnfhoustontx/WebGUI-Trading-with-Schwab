@@ -46,6 +46,35 @@ def heat_color(heat):
     return HEAT_RED
 
 
+def heat_bg_class(heat):
+    """Tailwind ``bg-[<hex>]`` class for a 0-100 heat value (same zones as
+    ``heat_color``; None / non-numeric -> green). Used by the heat-cell slot."""
+    return f"bg-[{heat_color(heat)}]"
+
+
+def heat_border_class(heat):
+    """Left-border Tailwind classes (``border-l-4 border-[<hex>]``) tinting an
+    at-risk row's symbol cell, or '' when heat is missing/non-numeric.
+
+    Distinct from ``heat_color`` (which defaults missing heat to green): a row
+    with no heat value gets NO border. ``rescue_highlight`` still gates on the
+    rescue STATE, so a non-at-risk row never gets a border even with valid heat."""
+    if _num(heat) is None:
+        return ""
+    return f"border-l-4 border-[{heat_color(heat)}]"
+
+
+def cash_class(value):
+    """Tailwind ``text-[<hex>]`` class for a credit/debit value by sign:
+    positive green · negative red · zero/missing neutral. Mirrors ``cash_text``."""
+    v = _num(value)
+    if v is None or round(v) == 0:
+        return f"text-[{CASH_NEUTRAL}]"
+    if v > 0:
+        return f"text-[{CASH_GREEN}]"
+    return f"text-[{CASH_RED}]"
+
+
 def _num(value, default=None):
     """Coerce to float, else ``default`` (handles None / strings safely)."""
     try:
@@ -130,16 +159,20 @@ def _round2(v):
 
 
 def cash_text(value):
-    """Credit/debit display dict: {'text': '+$120'|'-$45'|'$0', 'color': ...}.
+    """Credit/debit display dict: {'text': '+$120'|'-$45'|'$0', 'color': ...,
+    'class': 'text-[<hex>]'}.
 
-    Positive = credit (green), negative = debit (red), zero/missing = neutral."""
+    Positive = credit (green), negative = debit (red), zero/missing = neutral.
+    ``class`` is the Tailwind equivalent of ``color`` (for the .classes() render
+    path); ``color`` is retained for back-compat with existing callers/tests."""
     v = _num(value)
+    cls = cash_class(value)
     if v is None or round(v) == 0:
-        return {"text": "$0", "color": CASH_NEUTRAL}
+        return {"text": "$0", "color": CASH_NEUTRAL, "class": cls}
     mag = abs(round(v))
     if v > 0:
-        return {"text": f"+${mag}", "color": CASH_GREEN}
-    return {"text": f"-${mag}", "color": CASH_RED}
+        return {"text": f"+${mag}", "color": CASH_GREEN, "class": cls}
+    return {"text": f"-${mag}", "color": CASH_RED, "class": cls}
 
 
 # Metric label/key/formatter map for a candidate card (only non-None shown).
@@ -269,11 +302,11 @@ def at_risk_columns():
 
 
 def _table_rows(rows):
-    """Add an ``_heat_color`` field (consumed by the body-cell-heat slot) + an
+    """Add an ``_heat_class`` field (consumed by the body-cell-heat slot) + an
     ``id``-keyed row each ui.table row needs."""
     out = []
     for r in rows:
-        out.append({**r, "_heat_color": heat_color(r.get("heat"))})
+        out.append({**r, "_heat_class": heat_bg_class(r.get("heat"))})
     return out
 
 
@@ -319,7 +352,7 @@ def render():
 
     with ui.row().classes("w-full gap-4 no-wrap items-start") as body:
         # Left: the at-risk board (shrunk so the rescue menu sits to its right).
-        with ui.column().classes("min-w-0").style("flex: 3 1 0"):
+        with ui.column().classes("min-w-0 grow-[3] shrink basis-0"):
             with ui.card().classes("w-full"):
                 ui.label("At-risk positions").classes("text-subtitle1")
                 at_risk_tbl = ui.table(columns=at_risk_columns(), rows=[],
@@ -327,7 +360,7 @@ def render():
                 # Color the heat cell by zone (scanner's composite_score idiom).
                 at_risk_tbl.add_slot("body-cell-heat", r"""
                   <q-td :props="props">
-                    <q-badge :style="`background:${props.row._heat_color};color:#111`"
+                    <q-badge :class="props.row._heat_class + ' text-[#111]'"
                              :label="props.value ?? '—'"/>
                   </q-td>
                 """)
@@ -346,7 +379,7 @@ def render():
                     .classes("opacity-70")
 
         # Right: the ranked rescue menu for the selected position.
-        with ui.column().classes("min-w-0").style("flex: 2 1 0"):
+        with ui.column().classes("min-w-0 grow-[2] shrink basis-0"):
             with ui.card().classes("w-full"):
                 with ui.row().classes("items-center gap-3 w-full"):
                     advisory_head = ui.label(
@@ -461,7 +494,7 @@ def render():
                         cell = card[key]
                         with ui.row().classes("items-center gap-1"):
                             ui.label(f"{lbl}:").classes("opacity-70 text-sm")
-                            ui.label(cell["text"]).style(f"color:{cell['color']}")
+                            ui.label(cell["text"]).classes(cell["class"])
                 if card["metrics"]:
                     with ui.row().classes("gap-4 flex-wrap"):
                         for m in card["metrics"]:
