@@ -40,8 +40,9 @@ _REGIME_BG = {
 }
 # Space-joined value sets for the reactive .classes(remove=…) swap (these colors
 # are set on EVERY repaint, so a plain add= would accumulate conflicting classes).
-_ALL_DOT = " ".join(set(_DOT_CLASS.values()) | {"text-[#666666]"})
-_ALL_REGIME_BG = " ".join(set(_REGIME_BG.values()) | {"bg-[#666666]"})
+# sorted() only for a stable, deterministic string — order is irrelevant to remove=.
+_ALL_DOT = " ".join(sorted(set(_DOT_CLASS.values()) | {"text-[#666666]"}))
+_ALL_REGIME_BG = " ".join(sorted(set(_REGIME_BG.values()) | {"bg-[#666666]"}))
 
 
 def sentiment_dot_class(label):
