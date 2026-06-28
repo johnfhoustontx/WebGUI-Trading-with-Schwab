@@ -859,7 +859,7 @@ stale); the proxy's REST market data works even when `/health` shows
 `token_expired:true` (auto-refresh) — only a missing/expired **refresh** token is
 fatal.
 
-**Tests:** `cd webgui && ..\.venv\Scripts\python -m pytest -q` (510 green as of
+**Tests:** `cd webgui && ..\.venv\Scripts\python -m pytest -q` (552 green as of
 this writing). TDD pure functions; smoke-verify `render()` with a screenshot.
 
 **Environment quirks to expect:**
@@ -1243,7 +1243,8 @@ the edge is thin and regime-dependent. Architecture = **offline fit → versione
   unstable across small per-fold samples), `composite`, **`walk_forward`**
   (rolling train→test, weights fit per train window, composite OOS IC on the unseen test
   window; train/test never overlap), `calibrate` (bucket composite into quantile bands →
-  per-band score range + mean forward + hit-rate `P(fwd>0)`). The orchestrator
+  per-band score range + mean forward + hit-rate `P(fwd>0)`, **isotonic-smoothed** so a
+  higher-ranked band never shows a lower stat). The orchestrator
   **`trade-analyzer/fit_swing_model.py`** (run manually/periodically, **NEVER imported by
   a service**) pulls ~78 liquid symbols' (curated `UNIVERSE_SECTOR` → sector ETF) **5-yr**
   daily history via the proxy (concurrent), builds the panel with **20-day forward
@@ -1274,7 +1275,7 @@ the edge is thin and regime-dependent. Architecture = **offline fit → versione
   **`cache:trade:universe_factors`** snapshot ({factor: [values across the curated
   universe]}) as the defensive cross-sectional fallback basis.
 - **UI** `webgui/pages/trade.py` (Position card): the validated swing verdict is the
-  **headline** + a calibrated outcome line (e.g. `90th pctile · +1.3% / 20d · 52%
+  **headline** + a calibrated outcome line (e.g. `90th pctile · +1.3% excess / 20d · 52%
   beat-SPY` via `swing_headline`), a **"Why — validated factors"** expander (per-factor z
   / weight / contribution / historical IC + the model version & OOS IC via
   `swing_contrib_rows`/`swing_model_meta`), and the **legacy heuristic** verdict tucked
@@ -2049,7 +2050,7 @@ cd sentiment-dashboard ; python -m pytest tests
 cd trade-analyzer      ; python -m pytest .
 cd portfolio-analyzer  ; python -m pytest tests
 cd claude-driver       ; python -m pytest .
-cd webgui              ; python -m pytest .   # 510 tests: transforms + shell smoke
+cd webgui              ; python -m pytest .   # 552 tests: transforms + shell smoke
 ```
 
 The 3-tier services run per folder from the repo root (NOT `pytest services` over
@@ -2061,10 +2062,10 @@ re-triggers the documented `config`/`scoring`/`notifier` module-name collisions)
 .venv\Scripts\python -m pytest services\sentiment_svc   # 26
 .venv\Scripts\python -m pytest services\options_svc     # 285
 .venv\Scripts\python -m pytest services\portfolio_svc   # 27
-.venv\Scripts\python -m pytest services\trade_svc       # 24
+.venv\Scripts\python -m pytest services\trade_svc       # 56
 .venv\Scripts\python -m pytest services\driver_svc      # 138
 .venv\Scripts\python -m pytest shared\bus               # 15
-.venv\Scripts\python -m pytest shared\contracts         # 35 (no app-dir imports — safe together)
+.venv\Scripts\python -m pytest shared\contracts         # 37 (no app-dir imports — safe together)
 ```
 
 - **options-scanner** has ~2 known date-relative failing tests carried over from

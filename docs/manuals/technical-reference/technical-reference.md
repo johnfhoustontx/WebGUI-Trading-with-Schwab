@@ -608,8 +608,11 @@ panel + an aligned forward Series):
   collect the composite's **out-of-sample IC**. Train and test never overlap within a
   fold; test windows tile when step = test.
 - `calibrate` — bucket composite scores into 5 quantile bands; per band record the score
-  range, **mean forward return**, and **hit-rate = P(forward > 0)**. This replaces the old
-  ±40 score cuts — the BUY/SELL bands are the top/bottom calibrated bands.
+  range, **mean forward return**, and **hit-rate = P(forward > 0)**. The mean-forward and
+  hit-rate are **isotonic (pool-adjacent-violators) smoothed** across the score-ordered
+  bands, so thin-signal sampling noise can't make a higher-ranked band show a lower stat.
+  This replaces the old ±40 score cuts — the BUY/SELL bands are the top/bottom calibrated
+  bands.
 
 **Offline fit** (`fit_swing_model.py`, run **manually/periodically — never in the request
 path**): pulls ≈ 78 liquid symbols' **5-yr** daily history via the proxy (a curated
