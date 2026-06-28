@@ -22,13 +22,15 @@ logical group) — see the "UI styling standard — Tailwind-first" section belo
 [phase2](docs/plans/2026-06-28-tailwind-first-ui-migration-phase2-plan.md) /
 [phase3a](docs/plans/2026-06-28-tailwind-first-ui-migration-phase3a-plan.md) /
 [phase3b](docs/plans/2026-06-28-tailwind-first-ui-migration-phase3b-plan.md) /
-[phase3c](docs/plans/2026-06-28-tailwind-first-ui-migration-phase3c-plan.md). **Phase 0
+[phase3c](docs/plans/2026-06-28-tailwind-first-ui-migration-phase3c-plan.md) /
+[phase4](docs/plans/2026-06-28-tailwind-first-ui-migration-phase4-plan.md). **Phase 0
 (token vocabulary) + Phase 1 (nav shell) + Phase 2 (shared `pages/options/*` helpers —
 `.style()`-free, dynamic colors palette-mapped) + Phase 3a (the six signal-table screens
 — Scanner/Swing/Captured/Paper/Paper-Portfolio/Rescue) + Phase 3b (Calculator + Simulator
-on tokens; `DASHBOARD_CSS` now consumed ONLY by Trade) + Phase 3c (Gamma + Expected-Move;
-panel flex via a continuous-value runtime arbitrary class) DONE — ALL OPTIONS SCREENS
-CONVERTED** — webgui 584 green + live-verified. **Phase 3a** removes every `.style()` AND every Vue `:style=` slot binding
+on tokens) + Phase 3c (Gamma + Expected-Move; panel flex via a continuous-value runtime
+arbitrary class) + Phase 4 (Trade + the LEGACY CLEANUP: `DASHBOARD_CSS` DELETED — `theme.py`
+= tokens + `QUASAR_INTERNAL_CSS` only) DONE — ENTIRE OPTIONS SECTION + TRADE TAILWIND-ONLY**
+— webgui 587 green + live-verified (Calc/Sim/Trade un-regressed post-deletion). **Phase 3a** removes every `.style()` AND every Vue `:style=` slot binding
 from those pages: dynamic Quasar table-cell colors now map to a stamped Tailwind **`:class`**
 field from a finite palette (`score_zone_class`/`rec_class`/`pnl_class`/`verdict_class`/
 `heat_bg_class`/`cash_class` — exact hexes preserved as `bg-[#..]`/`text-[#..]` arbitrary
@@ -789,14 +791,15 @@ inconsistencies as each screen is converted — no gratuitous redesign). The fiv
 The migration runs in **phases (menu first, then each screen by logical group)** — see
 the design doc
 [`docs/plans/2026-06-28-tailwind-first-ui-migration-design.md`](docs/plans/2026-06-28-tailwind-first-ui-migration-design.md).
-Status snapshot: **Phase 0 + 1 + 2 + 3a + 3b + 3c done — ALL OPTIONS SCREENS CONVERTED**
-(2026-06-28). **P0** — `theme.py` ships the
+Status snapshot: **Phase 0 + 1 + 2 + 3(a/b/c) + 4 done — OPTIONS SECTION + TRADE TAILWIND-ONLY;
+`DASHBOARD_CSS` DELETED** (2026-06-28). **P0** — `theme.py` ships the
 Tailwind token vocabulary (`PAGE`/`CARD`/`EYEBROW`/`LABEL`/`MUTED`/`BTN`/`BTN_PRIMARY`/
 `STRATEGY_BTN` + the semantic state-color tokens `TXT_POS`/`TXT_WARN`/`TXT_NEG`/
-`TXT_NEUTRAL` + `STATE_TEXT_CLASSES` + the 3D-button tokens `BTN_3D`/`BTN_3D_DANGER`) + a
-`QUASAR_INTERNAL_CSS` escape-hatch block alongside the still-intact legacy `DASHBOARD_CSS`
-(additive — its `.calc-card`/`.cv2-btn*` rules stay until their last consumer flips in the
-Phase 4 cleanup). **P1** — the **nav shell** (`main.py`) is fully Tailwind; `_NAV_CSS` is now
+`TXT_NEUTRAL` + `STATE_TEXT_CLASSES` + the 3D-button tokens `BTN_3D`/`BTN_3D_DANGER`) + the
+**`QUASAR_INTERNAL_CSS`** escape-hatch block (the field/tab/menu internals scoped under the
+`.calc-v2`/`.strategy-menu-btn`/`.leg-*` hooks). **The legacy `DASHBOARD_CSS` was DELETED in P4
+(its last consumer, Trade, flipped) — `theme.py` is now tokens + `QUASAR_INTERNAL_CSS` only.**
+**P1** — the **nav shell** (`main.py`) is fully Tailwind; `_NAV_CSS` is now
 Quasar-internal-only. **P2** — the shared **`pages/options/*` helpers**
 (`detail.py`/`header.py`/`overlay.py`) are `.style()`-free: dynamic data-driven colors are
 **palette-mapped** (a finite state/label → a fixed token — detail tiles via `TXT_*`; the
@@ -825,11 +828,20 @@ gamma's 2 dynamic colors palette-mapped (hedge tile → `TXT_*`; collector statu
 arbitrary `flex-[{w}_1_0%]` class (the documented **continuous-value** exception — no finite
 palette — reset via tracked-previous `_set_flex_class`); Expected-Move was already clean.
 Highcharts option dicts + the Explain/Analyze HTML (Tier-2) + `EXPLAIN_CSS` (styles a `ui.html()`
-fragment) stay **out of scope**. **Phase 3 (every Options screen) is COMPLETE.** **Next: Phase 4**
-(Trade — the LAST `DASHBOARD_CSS` consumer; flipping it triggers the **legacy cleanup** that
-deletes the now-dead `.calc-card`/`.cv2-btn*`/`.calc-eyebrow`/`.strategy-menu-btn` semantic rules
-from `DASHBOARD_CSS`, leaving `theme.py` = tokens + `QUASAR_INTERNAL_CSS` only). Then Phases 5–8
-(Sentiment+Rotation / Portfolio / Driver / utility pages). Update this line as phases land.
+fragment) stay **out of scope**. **Phase 3 (every Options screen) is COMPLETE.** **P4** —
+**Trade** (the LAST `DASHBOARD_CSS` consumer) converted: `.calc-card`→`CARD`, `.calc-eyebrow`→
+`EYEBROW`, `.cv2-btn-primary`→`BTN_PRIMARY`, `.calc-v2` kept as hook + `PAGE`; its 10 `.style()`
+colors palette-mapped via **LOCAL** maps (`verdict_text_class`/`bias_text_class` — the verdict
+3-set `#2e7d32`/`#f9a825`/`#c62828` is DARKER than `TXT_*`, deliberately not shared — +
+`markov_band_bg_class` for the 5-band chip; Highcharts `_MK_*` untouched), reactive verdict/chip
+labels via `remove/add`. Then the **LEGACY CLEANUP**: `DASHBOARD_CSS` had zero consumers → **DELETED**
+from `theme.py`; the dead `verdict_color`/`bias_color` hex fns + `*_COLOR` constants removed;
+`test_theme.py` now asserts `not hasattr(theme,"DASHBOARD_CSS")`; the "App theme" section + example
+rewritten to the token reality. **`theme.py` = tokens + `QUASAR_INTERNAL_CSS` ONLY** — the migration's
+payoff. **The entire Options section + Trade are Tailwind-only** (587 green, live-verified; Calc/Sim
+confirmed un-regressed post-deletion). **Next: Phase 5** (Sentiment + Sector Rotation — the highest
+`.style()` count, ~58), then Phases 6–8 (Portfolio / Driver / utility pages: EOD-shell/Status/
+Settings/Terminate/Manuals). Update this line as phases land.
 
 **`pages/ui_guard.py` (cross-cutting, load-bearing — used by ~15 pages).** Provides
 `guard` / `guard_async` decorators that make a NiceGUI callback a clean no-op when
