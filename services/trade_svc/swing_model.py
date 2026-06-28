@@ -15,6 +15,10 @@ import json
 import numpy as np
 from repo_paths import SWING_MODEL
 
+Z_CLIP = 3.0   # cap live z-scores; the offline fit winsorized per-date (2/98) so
+               # per-date z was bounded — this prevents a live outlier (e.g. a
+               # volume spike in `turnover`) from hijacking the signed composite.
+
 
 def load_artifact():
     try:
@@ -72,6 +76,8 @@ def score_symbol(current_factors, universe_snapshot, artifact):
             if z is None:
                 basis = (universe_snapshot or {}).get(f)   # fallback only
                 z = _zscore(v, basis) if basis else None
+            if z is not None:
+                z = float(np.clip(z, -Z_CLIP, Z_CLIP))
             if z is None:
                 continue
             c = w * z

@@ -125,7 +125,9 @@ _TIMEFRAME_PARAMS = {
     "5min": ("day", 5, "minute", 5),
     "15min": ("day", 10, "minute", 15),
     "60min": ("day", 10, "minute", 30),
-    "daily": ("year", 1, "daily", 1),
+    # 2yr daily so the swing factors with long warmups populate at the last bar:
+    # mom_12_1 needs 252+21=273 bars, and pth/low_vol use rolling-252 windows.
+    "daily": ("year", 2, "daily", 1),
 }
 
 
@@ -647,8 +649,8 @@ def analyze(symbol):
     # fetch is already defensive (degrades to None / empty Fundamentals).
     sect = resolve_sector(symbol)
     spy, sector_hist, fundamentals = parallel_map(lambda fn: fn(), [
-        lambda: _price_history("SPY", "year", 1, "daily", 1),
-        lambda: _price_history(sect["etf"], "year", 1, "daily", 1) if sect["etf"] else None,
+        lambda: _price_history("SPY", "year", 2, "daily", 1),
+        lambda: _price_history(sect["etf"], "year", 2, "daily", 1) if sect["etf"] else None,
         lambda: _fetch_fundamentals(symbol),
     ])
 

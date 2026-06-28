@@ -61,6 +61,22 @@ def test_score_symbol_degrades_without_artifact():
     assert sm.score_symbol({"mom_12_1": 0.5}, None, None) is None
 
 
+def test_score_symbol_clips_outlier_z():
+    # an extreme factor value must not blow up the composite (z capped at +/-3)
+    art = {"version": "t", "horizon": 20, "regimes": {"all": {
+        "weights": {"turnover": 1.0},
+        "factor_ic": {"turnover": {"mean_ic": 0.01}},
+        "norm": {"turnover": {"mean": 1.0, "std": 0.1}},   # tiny std -> huge raw z
+        "calibration": [
+            {"band": 0, "score_lo": -3, "score_hi": -1, "mean_fwd": -0.01, "hit_rate": 0.45, "n": 10},
+            {"band": 1, "score_lo": -1, "score_hi": 1, "mean_fwd": 0.0, "hit_rate": 0.5, "n": 10},
+            {"band": 2, "score_lo": 1, "score_hi": 3, "mean_fwd": 0.01, "hit_rate": 0.52, "n": 10}]}}}
+    out = sm.score_symbol({"turnover": 5.0}, None, art)   # raw z would be (5-1)/0.1 = 40
+    assert out is not None
+    assert abs(out["score"]) <= 3.0 + 1e-9                # clipped to Z_CLIP
+    assert out["contributions"][0]["z"] == 3.0
+
+
 def test_score_symbol_degrades_empty_weights():
     bad = {"regimes": {"all": {"weights": {}, "calibration": [{"band": 0, "score_lo": 0,
             "score_hi": 1, "mean_fwd": 0, "hit_rate": 0.5, "n": 1}]}}}
