@@ -80,6 +80,29 @@ def test_calibration_bands_monotone():
     assert means == sorted(means)
 
 
+def test_isotonic_nondecreasing_pools_violators():
+    # PAV pools the violators (1, 2 after the leading 3) to their mean -> [2, 2, 2].
+    assert backtest._isotonic_nondecreasing([3, 1, 2]) == [2, 2, 2]
+
+
+def test_calibration_is_isotonic_on_noisy_signal():
+    # construct a composite whose middle bands have non-monotone raw mean_fwd,
+    # assert the returned bands' mean_fwd and hit_rate are non-decreasing.
+    import numpy as np, pandas as pd
+    rng = np.random.default_rng(3)
+    n = 1000
+    dates = pd.date_range("2023-01-02", periods=n//10, freq="B")
+    syms = [f"S{i}" for i in range(10)]
+    idx = pd.MultiIndex.from_product([dates, syms], names=["date", "symbol"])
+    comp = pd.Series(rng.normal(size=len(idx)), index=idx)
+    # noisy forward weakly related to comp (will produce wobbly raw bands)
+    fwd = pd.Series(comp.values * 0.002 + rng.normal(scale=0.02, size=len(idx)), index=idx)
+    bands = backtest.calibrate(comp, fwd, n_bands=5)
+    mf = [b["mean_fwd"] for b in bands]
+    hr = [b["hit_rate"] for b in bands]
+    assert mf == sorted(mf) and hr == sorted(hr)   # non-decreasing after isotonic
+
+
 def test_factor_ic_thin_history_no_icir_explosion():
     # a factor with IC computable on only 2 dates: signal detected, but ICIR NOT
     # trusted (no 1e9 explosion) -> icir_weights won't hand it the weight.
@@ -110,22 +133,6 @@ def test_walk_forward_no_leakage_on_noise():
     fwd = pd.Series(rng.normal(size=len(idx)), index=idx)   # independent of f
     res = backtest.walk_forward(f, fwd, train=150, test=50, step=50)
     assert abs(res["oos_ic"]) < 0.2     # a noise factor yields no spurious OOS edge
-
-
-def test_mean_ic_weights_drops_negative_and_weights_by_ic():
-    ics = {"a": {"mean_ic": 0.04, "icir": 0.2, "n_days": 1000},
-           "b": {"mean_ic": 0.02, "icir": 0.1, "n_days": 1000},
-           "neg": {"mean_ic": -0.06, "icir": -0.3, "n_days": 1000}}
-    w = backtest.mean_ic_weights(ics)
-    assert "neg" not in w                       # wrong-sign factor dropped entirely
-    assert w["a"] > w["b"] > 0
-    assert abs(sum(w.values()) - 1.0) < 1e-9
-
-
-def test_mean_ic_weights_empty_when_none_positive():
-    ics = {"x": {"mean_ic": -0.01, "icir": -0.1, "n_days": 100},
-           "y": {"mean_ic": 0.0, "icir": 0.0, "n_days": 100}}
-    assert backtest.mean_ic_weights(ics) == {}
 
 
 def test_signed_ic_weights_keeps_sign_and_reclaims_negative():

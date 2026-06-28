@@ -177,8 +177,9 @@ A **Buy / Hold / Sell** read on a single stock, for two horizons.
 - **Position is now backtested** — instead of a hand-tuned score, it ranks the
   stock on factors that were *tested against real forward returns*, then places it in
   a **calibrated band**. The headline shows what that band has historically meant:
-  an **expected return** over the next ~4 weeks and how often it **beat the S&P**
-  (e.g. "+1.3% / 20d · 52% beat-SPY"). Open **"Why — validated factors"** to see each
+  an **expected return** over the next ~4 weeks — **excess vs the S&P** (how much it
+  beat or trailed the index, not the raw move) — and how often it **beat the S&P**
+  (e.g. "+1.3% excess / 20d · 52% beat-SPY"). Open **"Why — validated factors"** to see each
   factor's pull and the model's own track record (its out-of-sample accuracy). The
   old hand-tuned verdict is still there under **"Legacy heuristic"**.
 - **Investor (months+)** still shows a verdict with a score and its top reasons.

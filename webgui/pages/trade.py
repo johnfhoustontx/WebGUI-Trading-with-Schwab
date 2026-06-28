@@ -203,7 +203,8 @@ def swing_headline(sm):
 
     The validated swing model's BUY/HOLD/SELL becomes the Position card's primary
     verdict; the line summarizes the calibrated outcome (band percentile, expected
-    forward return over the horizon, beat-SPY hit rate). Missing fields are omitted."""
+    forward EXCESS return vs SPY over the horizon, beat-SPY hit rate). Missing
+    fields are omitted."""
     if not sm:
         return None
     exp = sm.get("expected_fwd")
@@ -214,7 +215,7 @@ def swing_headline(sm):
     if pct is not None:
         parts.append(f"{pct}th pctile")
     if exp is not None:
-        parts.append(f"{exp:+.1%} / {hzn}d")
+        parts.append(f"{exp:+.1%} excess / {hzn}d")
     if hit is not None:
         parts.append(f"{hit:.0%} beat-SPY")
     return {"verdict": sm.get("verdict", "—"), "line": " · ".join(parts)}

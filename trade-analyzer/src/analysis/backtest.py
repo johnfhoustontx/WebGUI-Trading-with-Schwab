@@ -89,23 +89,6 @@ def icir_weights(ic_by_factor: Dict[str, dict], min_icir: float = 0.3) -> Dict[s
     return {k: v / total for k, v in raw.items()}
 
 
-def mean_ic_weights(ic_by_factor: Dict[str, dict], min_ic: float = 0.0) -> Dict[str, float]:
-    """Signed mean-IC weighting: weight proportional to max(0, mean_ic) for factors
-    whose mean_ic > min_ic; negative-IC (wrong-sign) and sub-floor factors get 0
-    weight. Normalized to sum to 1; empty dict if none qualify.
-
-    Chosen over ICIR-weighting for the production fit because it is n-independent
-    (a daily-IC ICIR is ~sqrt(252)x smaller than a monthly-IC ICIR, so a fixed
-    ICIR threshold mis-selects, and a t-stat gate computed on small per-fold
-    samples is unstable across walk-forward folds). Mean-IC weighting is stable
-    across folds and directly rewards predictive edge while dropping wrong-sign
-    factors."""
-    raw = {k: max(0.0, v.get("mean_ic", 0.0)) for k, v in ic_by_factor.items()
-           if v.get("mean_ic", 0.0) > min_ic}
-    total = sum(raw.values())
-    return {k: v / total for k, v in raw.items()} if total > 0 else {}
-
-
 def signed_ic_weights(ic_by_factor: Dict[str, dict], min_abs_ic: float = 0.005) -> Dict[str, float]:
     """Standard SIGNED IC-weighted composite: weight_k = mean_ic_k / Σ|mean_ic|,
     keeping the SIGN, for factors whose |mean_ic| > min_abs_ic (an n-independent
@@ -160,9 +143,33 @@ def walk_forward(factors, forward, train=252, test=63, step=63, weight_fn=None) 
             "oos_ic_by_fold": [float(x) for x in oos_ics]}
 
 
+def _isotonic_nondecreasing(values):
+    """Pool-adjacent-violators: nearest non-decreasing fit (equal weights).
+    Smooths thin-signal noise so a higher score-band never shows a lower stat."""
+    vals = [float(v) for v in values]
+    # blocks of (sum, count); merge while the running mean violates monotonicity
+    blocks = []
+    for v in vals:
+        blocks.append([v, 1])
+        while len(blocks) >= 2 and blocks[-2][0] / blocks[-2][1] > blocks[-1][0] / blocks[-1][1]:
+            s, c = blocks.pop()
+            blocks[-1][0] += s
+            blocks[-1][1] += c
+    out = []
+    for s, c in blocks:
+        out.extend([s / c] * c)
+    return out
+
+
 def calibrate(comp: pd.Series, forward: pd.Series, n_bands: int = 5) -> list:
     """Bucket composite scores into n_bands by quantile; per band record score
-    range, mean forward, hit-rate P(forward>0), n. Sorted ascending by score."""
+    range, mean forward, hit-rate P(forward>0), n. Sorted ascending by score.
+
+    `mean_fwd` and `hit_rate` are smoothed with isotonic (non-decreasing)
+    regression across the score-ordered bands: the score->forward-return
+    relationship should be monotone, so thin-signal sampling noise that makes a
+    higher-ranked band show a lower stat is pooled away (see
+    `_isotonic_nondecreasing`)."""
     df = pd.DataFrame({"c": comp, "y": forward}).dropna()
     if len(df) < n_bands:
         return []
@@ -176,4 +183,9 @@ def calibrate(comp: pd.Series, forward: pd.Series, n_bands: int = 5) -> list:
             "hit_rate": float((g["y"] > 0).mean()),
             "n": int(len(g)),
         })
-    return sorted(out, key=lambda d: d["score_lo"])
+    out.sort(key=lambda d: d["score_lo"])
+    mf = _isotonic_nondecreasing([b["mean_fwd"] for b in out])
+    hr = _isotonic_nondecreasing([b["hit_rate"] for b in out])
+    for b, m, h in zip(out, mf, hr):
+        b["mean_fwd"], b["hit_rate"] = m, h
+    return out

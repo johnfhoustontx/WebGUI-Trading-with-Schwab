@@ -237,7 +237,7 @@ def test_swing_headline_verdict_and_line():
     head = trade.swing_headline(_SM)
     assert head["verdict"] == "BUY"
     assert "90th pctile" in head["line"]
-    assert "+1.4% / 20d" in head["line"]
+    assert "+1.4% excess / 20d" in head["line"]
     assert "52% beat-SPY" in head["line"]
 
 
