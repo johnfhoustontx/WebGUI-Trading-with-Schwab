@@ -258,8 +258,8 @@ _NAV_CSS = """
 .nav-drawer .q-item { border-radius: 10px; }
 .nav-drawer .q-expansion-item .q-item { min-height: 24px; }
 .nav-drawer .nav-subgroup .q-expansion-item__content { padding-left: 14px; }
-/* Page-help "?" — tucked into the bottom-right corner of the header banner. */
-.help-fab { position: absolute; right: 6px; bottom: 2px; z-index: 2300; }
+/* Page-help "?" — tucked into the bottom-right corner of the header banner.
+   Positioning is on the element (Tailwind); these stay Quasar-internal. */
 .help-fab .help-btn { font-size: 11px; min-height: 0; min-width: 0; }
 .help-fab .help-btn .q-btn__content { padding: 3px; }
 .q-tooltip.help-tip { background: #1e2735; color: #e7edf5; font-size: .82rem;
@@ -389,7 +389,8 @@ def _layout(active: str, title: str):
     ui.add_css(_NAV_CSS)
     drawer = ui.left_drawer(value=True, bordered=True).classes("nav-drawer").props("behavior=desktop")
     with drawer:
-        ui.label("SCHWAB TRADING").classes("nav-title")
+        ui.label("SCHWAB TRADING").classes(
+            "font-bold tracking-[.04em] text-[.8rem] px-3 pt-1 pb-1.5 opacity-55")
         # Groups start EXPANDED by default (value=True) and stay open until the user
         # manually collapses one — _NAV_OPEN persists each manual toggle (single-user,
         # like the badges), so a collapse sticks across navigation.
@@ -428,7 +429,8 @@ def _layout(active: str, title: str):
 
         # Small "?" tucked into the bottom-right corner of the header banner. Hover
         # for a plain-language "idiot's guide" to THIS page (keyed by route).
-        with ui.element("div").classes("help-fab"):
+        with ui.element("div").classes(
+            "help-fab absolute right-[6px] bottom-[2px] z-[2300]"):
             with ui.button(icon="help").props("round size=xs color=blue").classes("help-btn"):
                 # Quote the multi-word anchor/self values — NiceGUI .props() splits on
                 # spaces, so unquoted "bottom right" would be mis-parsed. This pins the

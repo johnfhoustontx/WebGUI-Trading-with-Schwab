@@ -59,6 +59,7 @@ def test_nav_css_has_no_reachable_rules():
     css = main._NAV_CSS
     assert "a.nav-link:hover" not in css           # moved to hover:bg-* utility
     assert ".nav-title {" not in css and ".nav-title{" not in css
+    assert ".help-fab {" not in css and ".help-fab{" not in css  # position moved
     assert ".nicegui-expansion-content" in css     # Quasar-internal stays
     assert ".q-tooltip.help-tip" in css            # teleported tooltip stays
 
