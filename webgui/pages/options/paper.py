@@ -20,7 +20,8 @@ from nicegui import ui
 from pages.ui_guard import guard
 
 from . import detail, handoff
-from .rescue import heat_color
+from .rescue import heat_border_class
+from .theme import BTN_3D, BTN_3D_DANGER
 
 # rescue_state values that mark a trade at-risk (tested/critical). The manage-cycle
 # rescue overlay tags the paper *account* positions view; the paper-trades ledger
@@ -30,36 +31,23 @@ _AT_RISK_STATES = ("tested", "critical")
 
 # Paper-ledger styling (injected via ui.add_css — ui.html strips <style>):
 #  • compact rows to match the Scanner table (dense + tight padding);
-#  • fixed header with a scrollable body (sticky thead + bounded scroll area);
-#  • solid 3D action buttons (blue default, red ``pt-danger`` for deletes).
+#  • fixed header with a scrollable body (sticky thead + bounded scroll area).
+# The solid 3D action buttons now use the shared BTN_3D / BTN_3D_DANGER tokens.
 PAPER_CSS = """
 .paper-table td, .paper-table th { padding: 2px 6px; font-size: 13px; }
 .paper-table .q-table__middle { max-height: 62vh; }
 .paper-table thead tr th {
   position: sticky; top: 0; z-index: 2; background: #1d1d1d;
 }
-.pt-btn.q-btn{
-  background:linear-gradient(180deg,#5aa0e6 0%,#3a7bc0 55%,#316eac 100%)!important;
-  color:#fff!important;border-radius:7px;font-weight:600;min-height:34px;
-  box-shadow:0 4px 0 0 #244e78,0 6px 10px rgba(0,0,0,.4);
-  transition:transform .06s ease,box-shadow .06s ease,filter .12s ease;
-}
-.pt-btn.q-btn:hover{filter:brightness(1.08);}
-.pt-btn.q-btn:active{transform:translateY(4px);box-shadow:0 1px 0 0 #244e78,0 2px 4px rgba(0,0,0,.4);}
-.pt-btn.pt-danger.q-btn{
-  background:linear-gradient(180deg,#ef6b6b 0%,#d33f3f 55%,#b53030 100%)!important;
-  box-shadow:0 4px 0 0 #7a1f1f,0 6px 10px rgba(0,0,0,.4);
-}
-.pt-btn.pt-danger.q-btn:active{box-shadow:0 1px 0 0 #7a1f1f,0 2px 4px rgba(0,0,0,.4);}
 """
 
 
 def rescue_highlight(state, heat):
-    """Left-border color for an at-risk row, or '' (no tint) otherwise.
+    """Left-border Tailwind classes for an at-risk row, or '' (no tint) otherwise.
 
     Defensive: a missing/None ``state`` yields no highlight, so normal rows look
-    unchanged."""
-    return heat_color(heat) if state in _AT_RISK_STATES else ""
+    unchanged. The class set comes from the shared ``heat_border_class`` (rescue.py)."""
+    return heat_border_class(heat) if state in _AT_RISK_STATES else ""
 
 
 def _round(value, ndigits=2):
@@ -93,6 +81,12 @@ def verdict_color(action):
     """Chip color for an Analyze verdict action (green take-profit / amber hold /
     red close / grey otherwise)."""
     return _VERDICT_COLORS.get((action or "").strip().upper(), PNL_NEUTRAL)
+
+
+def verdict_class(action):
+    """Tailwind ``bg-[<hex>]`` chip class for an Analyze verdict (mirrors
+    ``verdict_color``)."""
+    return f"bg-[{verdict_color(action)}]"
 
 
 def analyze_popup_rows(res):
@@ -129,6 +123,14 @@ def pnl_color(v):
     return PNL_GREEN if v > 0 else PNL_RED
 
 
+def pnl_class(v):
+    """Tailwind ``text-[<hex>]`` class for a P&L value (green / red / grey-neutral).
+
+    Note paper's neutral is grey ``#bdbdbd`` (NOT '' like captured) — so 0 / None
+    always carries a class. Mirrors ``pnl_color``."""
+    return f"text-[{pnl_color(v)}]"
+
+
 def trade_pnl(t):
     """Display P&L for a ledger trade: realized when closed, live unrealized when
     OPEN (attached by the service's reprice). None when unavailable (e.g. an open
@@ -162,13 +164,13 @@ def paper_rows(trades):
             "entry_credit_total": _round(t.get("entry_credit_total")),
             "max_loss_total": _round(t.get("max_loss_total")),
             "pnl": _round(pnl),
-            "_pnl_color": pnl_color(pnl),
+            "_pnl_class": pnl_class(pnl),
             "status": t.get("status", ""),
             # Trim to seconds and show "YYYY-MM-DD HH:MM:SS" (drop the ISO 'T').
             "entry_time": (t.get("entry_time") or "")[:19].replace("T", " "),
             # At-risk rescue tint (left border on the symbol cell). Safe no-op
-            # when the trade carries no rescue_state (the usual case).
-            "_rescue_color": rescue_highlight(t.get("rescue_state"), t.get("heat")),
+            # ('') when the trade carries no rescue_state (the usual case).
+            "_rescue_class": rescue_highlight(t.get("rescue_state"), t.get("heat")),
         })
     # Newest trades on top by default (entry_time is a sortable ISO string; rows
     # with no time sort last). The columns stay click-sortable from here.
@@ -265,10 +267,7 @@ def render():
             # at-risk (rescue_state tested/critical). Plain cell otherwise.
             table.add_slot('body-cell-symbol', r'''
               <q-td :props="props">
-                <span v-if="props.row._rescue_color"
-                      :style="`border-left:4px solid ${props.row._rescue_color};
-                               padding-left:6px;
-                               background:${props.row._rescue_color}22`">
+                <span v-if="props.row._rescue_class" :class="props.row._rescue_class + ' pl-1.5'">
                   {{ props.value }}
                 </span>
                 <span v-else>{{ props.value }}</span>
@@ -281,11 +280,11 @@ def render():
                     {{ props.value == null ? '—' : Number(props.value).toFixed(2) }}
                   </q-td>
                 ''')
-            # P&L: 2 decimals, signed, green/red/grey (color from _pnl_color).
+            # P&L: 2 decimals, signed, green/red/grey (class from _pnl_class).
             table.add_slot('body-cell-pnl', r'''
               <q-td :props="props" class="text-right">
                 <span v-if="props.value == null">—</span>
-                <span v-else :style="`color:${props.row._pnl_color};font-weight:600`">
+                <span v-else :class="props.row._pnl_class + ' font-semibold'">
                   {{ (props.value >= 0 ? '+' : '') + Number(props.value).toFixed(2) }}
                 </span>
               </q-td>
@@ -296,15 +295,15 @@ def render():
             # solid blue (which is why Delete didn't look red).
             with ui.row().classes("items-center gap-3 flex-wrap q-mt-md"):
                 ui.button("Reload", icon="refresh", color=None,
-                          on_click=lambda: _reload()).props("no-caps").classes("pt-btn")
+                          on_click=lambda: _reload()).props("no-caps").classes(BTN_3D)
                 ui.button("Close", icon="check_circle", color=None,
-                          on_click=lambda: _close()).props("no-caps").classes("pt-btn")
+                          on_click=lambda: _close()).props("no-caps").classes(BTN_3D)
                 ui.button("Analyze", icon="biotech", color=None,
-                          on_click=lambda: _analyze()).props("no-caps").classes("pt-btn")
+                          on_click=lambda: _analyze()).props("no-caps").classes(BTN_3D)
                 ui.button("Delete", icon="delete", color=None,
-                          on_click=lambda: _delete()).props("no-caps").classes("pt-btn pt-danger")
+                          on_click=lambda: _delete()).props("no-caps").classes(BTN_3D_DANGER)
                 ui.button("Delete all closed", icon="delete_sweep", color=None,
-                          on_click=lambda: _delete_closed()).props("no-caps").classes("pt-btn pt-danger")
+                          on_click=lambda: _delete_closed()).props("no-caps").classes(BTN_3D_DANGER)
         detail_panel = detail.render()
 
     # Last-seen bus cache versions for the fetch-free repaint/notify timers.
@@ -427,8 +426,9 @@ def render():
                 ui.label(f"{res.get('symbol', '')} · Trade Analysis") \
                     .classes("text-subtitle1 font-bold")
                 ui.button(icon="close", on_click=dlg.close).props("flat round dense")
-            ui.label(action).classes("text-weight-bold q-px-sm q-py-xs rounded-borders") \
-                .style(f"background:{verdict_color(action)};color:#111;width:fit-content")
+            ui.label(action).classes(
+                f"text-weight-bold q-px-sm q-py-xs rounded-borders "
+                f"{verdict_class(action)} text-[#111] w-fit")
             if res.get("rationale"):
                 ui.label(res["rationale"]).classes("text-sm")
             if res.get("note"):
@@ -439,8 +439,8 @@ def render():
                     for label, text, color in rows:
                         with ui.row().classes("justify-between w-full no-wrap"):
                             ui.label(label).classes("opacity-70 text-sm")
-                            ui.label(text).classes("text-sm text-weight-medium") \
-                                .style(f"color:{color}")
+                            ui.label(text).classes(
+                                f"text-sm text-weight-medium text-[{color}]")
             ui.button("Close", on_click=dlg.close).props("flat").classes("self-end")
         dlg.open()
 

@@ -66,6 +66,26 @@ def test_pnl_color():
     assert paper.pnl_color(None) == "#bdbdbd"
 
 
+def test_pnl_class():
+    # Paper's neutral is grey #bdbdbd (NOT '' like captured) for 0 / None.
+    assert paper.pnl_class(10) == "text-[#66bb6a]"
+    assert paper.pnl_class(-10) == "text-[#ef5350]"
+    assert paper.pnl_class(0) == "text-[#bdbdbd]"
+    assert paper.pnl_class(None) == "text-[#bdbdbd]"
+
+
+def test_verdict_class():
+    assert paper.verdict_class("TAKE PROFIT") == "bg-[#66bb6a]"
+    assert paper.verdict_class("hold") == "bg-[#ffa726]"
+    assert paper.verdict_class("CLOSE") == "bg-[#ef5350]"
+    assert paper.verdict_class("—") == "bg-[#bdbdbd]"
+
+
+def test_paper_rows_stamp_pnl_class():
+    t = {"trade_id": "o", "status": "OPEN", "unrealized_pnl": 12.0}
+    assert paper.paper_rows([t])[0]["_pnl_class"] == "text-[#66bb6a]"
+
+
 # ── Analyze popup helpers ────────────────────────────────────────────────────
 def test_verdict_color():
     assert paper.verdict_color("TAKE PROFIT") == "#66bb6a"
