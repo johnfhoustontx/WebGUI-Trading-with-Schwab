@@ -7,21 +7,6 @@ alignment rows) and the ``render`` callable are exercised here.
 from pages import trade
 
 
-def test_verdict_color_buy_hold_sell():
-    assert trade.verdict_color("BUY") == trade.BUY_COLOR
-    assert trade.verdict_color("buy") == trade.BUY_COLOR
-    assert trade.verdict_color("SELL") == trade.SELL_COLOR
-    assert trade.verdict_color("HOLD") == trade.HOLD_COLOR
-    assert trade.verdict_color(None) == trade.HOLD_COLOR  # default amber
-
-
-def test_bias_color():
-    assert trade.bias_color("BULLISH") == trade.BUY_COLOR
-    assert trade.bias_color("BEARISH") == trade.SELL_COLOR
-    assert trade.bias_color("NEUTRAL") == trade.HOLD_COLOR
-    assert trade.bias_color("") == trade.HOLD_COLOR
-
-
 def test_verdict_text_class_maps_states():
     assert trade.verdict_text_class("BUY") == "text-[#2e7d32]"
     assert trade.verdict_text_class("buy") == "text-[#2e7d32]"

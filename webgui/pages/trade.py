@@ -12,8 +12,8 @@ Interaction model:
 
 The result persists across navigation (single-user, like the other pages): a
 prior analysis paints instantly on revisit. The pure display builders
-(``verdict_color``/``momentum_rows``/``breakdown_rows``/``alignment_rows``) are
-unit-tested.
+(``verdict_text_class``/``momentum_rows``/``breakdown_rows``/``alignment_rows``)
+are unit-tested.
 
 Fundamentals are not wired (MVP): the Investor verdict uses technicals/RS only
 and degrades to "Insufficient fundamental data → HOLD" — a note flags this.
@@ -35,10 +35,6 @@ from .options.theme import (
     QUASAR_INTERNAL_CSS,
 )
 
-BUY_COLOR = "#2e7d32"
-HOLD_COLOR = "#f9a825"
-SELL_COLOR = "#c62828"
-
 # Tailwind text-[...] classes for the verdict/bias palette (LOCAL — these hexes
 # are DARKER than theme's TXT_* semantic colors, so they are not reused). The
 # verdict cards refill in place, so reactive labels swap via .classes(remove=
@@ -49,16 +45,6 @@ _SELL_TEXT = "text-[#c62828]"
 VERDICT_TEXT_CLASSES = f"{_BUY_TEXT} {_HOLD_TEXT} {_SELL_TEXT}"
 
 
-def verdict_color(verdict):
-    """Green BUY / amber HOLD / red SELL (HOLD is the default for anything else)."""
-    v = (verdict or "").upper()
-    if v == "BUY":
-        return BUY_COLOR
-    if v == "SELL":
-        return SELL_COLOR
-    return HOLD_COLOR
-
-
 def verdict_text_class(verdict):
     """Tailwind text-[…] class for a BUY/HOLD/SELL verdict (amber HOLD default)."""
     v = (verdict or "").upper()
@@ -67,16 +53,6 @@ def verdict_text_class(verdict):
     if v == "SELL":
         return _SELL_TEXT
     return _HOLD_TEXT
-
-
-def bias_color(bias):
-    """Color a BULLISH/BEARISH/NEUTRAL bias label."""
-    b = (bias or "").upper()
-    if b == "BULLISH":
-        return BUY_COLOR
-    if b == "BEARISH":
-        return SELL_COLOR
-    return HOLD_COLOR
 
 
 def bias_text_class(bias):
