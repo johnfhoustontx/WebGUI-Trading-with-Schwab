@@ -18,7 +18,7 @@ from nicegui import ui
 
 from pages.ui_guard import guard
 
-from .rescue import heat_color
+from .rescue import heat_border_class
 
 # rescue_state values that mark a position at-risk. The options_svc manage cycle
 # tags THIS view (cache:options:paper_account) with rescue_state/heat via
@@ -28,11 +28,12 @@ _AT_RISK_STATES = ("tested", "critical")
 
 
 def rescue_highlight(state, heat):
-    """Heat color for an at-risk row's symbol cell, or '' (no tint) otherwise.
+    """Left-border Tailwind classes for an at-risk row's symbol cell, or '' (no
+    tint) otherwise.
 
     Defensive: a missing/None ``state`` yields no highlight, so healthy rows look
-    unchanged."""
-    return heat_color(heat) if state in _AT_RISK_STATES else ""
+    unchanged. The class set comes from the shared ``heat_border_class`` (rescue.py)."""
+    return heat_border_class(heat) if state in _AT_RISK_STATES else ""
 
 
 def _round(value, ndigits=2):
@@ -84,10 +85,10 @@ def position_rows(positions):
             "current_value": _round(p.get("current_value")),
             "unrealized_pnl": _round(p.get("unrealized_pnl")),
             "status": p.get("status", ""),
-            # At-risk rescue tint on the symbol cell (left border + faint fill),
-            # fed from the manage-cycle rescue overlay on this view. Safe no-op
-            # ('') when the position is healthy / carries no rescue_state.
-            "_rescue_color": rescue_highlight(p.get("rescue_state"), p.get("heat")),
+            # At-risk rescue tint on the symbol cell (left border), fed from the
+            # manage-cycle rescue overlay on this view. Safe no-op ('') when the
+            # position is healthy / carries no rescue_state.
+            "_rescue_class": rescue_highlight(p.get("rescue_state"), p.get("heat")),
         })
     return rows
 
@@ -147,10 +148,7 @@ def render():
     # at-risk (rescue_state tested/critical, from the manage-cycle overlay).
     pos_table.add_slot('body-cell-symbol', r'''
       <q-td :props="props">
-        <span v-if="props.row._rescue_color"
-              :style="`border-left:4px solid ${props.row._rescue_color};
-                       padding-left:6px;
-                       background:${props.row._rescue_color}22`">
+        <span v-if="props.row._rescue_class" :class="props.row._rescue_class + ' pl-1.5'">
           {{ props.value }}
         </span>
         <span v-else>{{ props.value }}</span>
