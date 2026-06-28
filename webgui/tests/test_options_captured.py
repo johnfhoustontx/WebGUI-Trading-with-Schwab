@@ -122,14 +122,38 @@ def test_rec_color_unknown_is_grey():
     assert captured.rec_color("WHATEVER") == "#666666"
 
 
-def test_row_stamps_rec_color_for_cut():
+def test_row_stamps_rec_class_for_cut():
     row = captured.captured_rows([{"recommendation": "CUT"}])[0]
-    assert row["_rec_color"] == captured.REC_RED
+    assert row["_rec_class"] == "bg-[#ef5350]"
 
 
-def test_row_defaults_rec_color_to_amber_when_missing():
+def test_row_defaults_rec_class_to_amber_when_missing():
     row = captured.captured_rows([{}])[0]
-    assert row["_rec_color"] == captured.REC_AMBER
+    assert row["_rec_class"] == "bg-[#ffa726]"
+
+
+def test_rec_class_maps_zones():
+    assert captured.rec_class("TAKE_PROFIT") == "bg-[#66bb6a]"
+    assert captured.rec_class("CUT") == "bg-[#ef5350]"
+    assert captured.rec_class("HOLD") == "bg-[#ffa726]"
+    assert captured.rec_class("WHATEVER") == "bg-[#666666]"
+
+
+def test_pnl_class_maps_sign():
+    assert captured.pnl_class(12.0) == "text-[#66bb6a]"
+    assert captured.pnl_class(-5.0) == "text-[#ef5350]"
+    assert captured.pnl_class(0) == ""
+    assert captured.pnl_class(None) == ""
+
+
+def test_row_stamps_rec_and_pnl_class():
+    row = captured.captured_rows([{"recommendation": "CUT", "unrealized_pnl": -3.0}])[0]
+    assert row["_rec_class"] == "bg-[#ef5350]"
+    assert row["_pnl_class"] == "text-[#ef5350]"
+
+
+def test_row_stamps_rescue_class_empty_for_normal():
+    assert captured.captured_rows([{}])[0]["_rescue_class"] == ""
 
 
 def test_pnl_color_profit_is_green():
@@ -146,9 +170,9 @@ def test_pnl_color_zero_or_missing_is_blank():
     assert captured.pnl_color("x") == ""
 
 
-def test_row_stamps_pnl_color():
-    assert captured.captured_rows([{"unrealized_pnl": 3.0}])[0]["_pnl_color"] == captured.PNL_GREEN
-    assert captured.captured_rows([{"unrealized_pnl": -3.0}])[0]["_pnl_color"] == captured.PNL_RED
+def test_row_stamps_pnl_class():
+    assert captured.captured_rows([{"unrealized_pnl": 3.0}])[0]["_pnl_class"] == "text-[#66bb6a]"
+    assert captured.captured_rows([{"unrealized_pnl": -3.0}])[0]["_pnl_class"] == "text-[#ef5350]"
 
 
 def test_fmt_opened_iso_to_date_and_hhmm():

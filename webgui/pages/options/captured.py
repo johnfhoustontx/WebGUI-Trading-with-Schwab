@@ -21,7 +21,7 @@ from nicegui import ui
 from pages.ui_guard import guard
 
 from . import detail, handoff
-from .rescue import heat_color
+from .rescue import heat_border_class
 
 # rescue_state values that mark a signal at-risk (tested/critical). Captured
 # signals are advisory-only and the manage-cycle rescue overlay only tags paper
@@ -31,11 +31,12 @@ _AT_RISK_STATES = ("tested", "critical")
 
 
 def rescue_highlight(state, heat):
-    """Left-border color for an at-risk row, or '' (no tint) otherwise.
+    """Left-border Tailwind classes for an at-risk row, or '' (no tint) otherwise.
 
     Defensive: a missing/None ``state`` (the common case for captured signals)
-    yields no highlight, so this never changes the look of normal rows."""
-    return heat_color(heat) if state in _AT_RISK_STATES else ""
+    yields no highlight, so this never changes the look of normal rows. The class
+    set comes from the shared ``heat_border_class`` (rescue.py)."""
+    return heat_border_class(heat) if state in _AT_RISK_STATES else ""
 
 
 def _round(value, ndigits=2):
@@ -50,6 +51,11 @@ PNL_GREEN, PNL_RED = "#66bb6a", "#ef5350"
 def rec_color(rec):
     """Recommendation -> badge color (green take-profit / red cut / amber hold)."""
     return {"TAKE_PROFIT": REC_GREEN, "CUT": REC_RED, "HOLD": REC_AMBER}.get(rec, "#666666")
+
+
+def rec_class(rec):
+    """Recommendation -> Tailwind ``bg-[<hex>]`` badge class (mirrors ``rec_color``)."""
+    return f"bg-[{rec_color(rec)}]"
 
 
 # Scoped to .captured-table so it never leaks into the rest of the app. Sticky
@@ -77,6 +83,13 @@ def pnl_color(value):
         if value < 0:
             return PNL_RED
     return ""
+
+
+def pnl_class(value):
+    """P&L -> Tailwind ``text-[<hex>]`` class (green profit / red loss), or '' for
+    zero / missing / non-numeric (uncolored). Mirrors ``pnl_color``."""
+    color = pnl_color(value)
+    return f"text-[{color}]" if color else ""
 
 
 def exit_value_default(sig):
@@ -138,11 +151,11 @@ def captured_rows(signals):
             "max_loss": _round(s.get("entry_max_loss")),
             "unrealized_pnl": _round(s.get("unrealized_pnl")),
             "grade": s.get("entry_grade", ""),
-            "_rec_color": rec_color(s.get("recommendation") or "HOLD"),
-            "_pnl_color": pnl_color(s.get("unrealized_pnl")),
+            "_rec_class": rec_class(s.get("recommendation") or "HOLD"),
+            "_pnl_class": pnl_class(s.get("unrealized_pnl")),
             # At-risk rescue tint (left border on the symbol cell). Safe no-op
-            # when the signal carries no rescue_state (the usual case).
-            "_rescue_color": rescue_highlight(s.get("rescue_state"), s.get("heat")),
+            # ('') when the signal carries no rescue_state (the usual case).
+            "_rescue_class": rescue_highlight(s.get("rescue_state"), s.get("heat")),
         })
     return rows
 
@@ -203,10 +216,7 @@ def render():
             # cell keeps the at-risk rescue tint (tested/critical); plain otherwise.
             table.add_slot('body-cell-symbol', r'''
               <q-td :props="props">
-                <span v-if="props.row._rescue_color"
-                      :style="`border-left:4px solid ${props.row._rescue_color};
-                               padding-left:6px;
-                               background:${props.row._rescue_color}22`">
+                <span v-if="props.row._rescue_class" :class="props.row._rescue_class + ' pl-1.5'">
                   {{ props.value }}
                 </span>
                 <span v-else>{{ props.value }}</span>
@@ -215,9 +225,8 @@ def render():
             # Rec badge (first column) — a blue left-accent marks the selected row.
             table.add_slot('body-cell-recommendation', r'''
               <q-td :props="props"
-                    :style="props.row._selected
-                            ? 'border-left:4px solid #42a5f5; background:#42a5f522' : ''">
-                <q-badge :style="`background:${props.row._rec_color};color:#111`" :label="props.value"/>
+                    :class="props.row._selected ? 'border-l-4 border-[#42a5f5] bg-[#42a5f5]/[.13]' : ''">
+                <q-badge :class="props.row._rec_class + ' text-[#111]'" :label="props.value"/>
               </q-td>
             ''')
             # Current price (live spread mark) shown to 2dp; numeric so it sorts.
@@ -229,7 +238,7 @@ def render():
             # P&L colored green in profit / red in loss (value stays numeric to sort).
             table.add_slot('body-cell-unrealized_pnl', r'''
               <q-td :props="props">
-                <span :style="`color:${props.row._pnl_color};font-weight:600`">
+                <span :class="props.row._pnl_class + ' font-semibold'">
                   {{ props.value == null ? '' : props.value }}
                 </span>
               </q-td>
