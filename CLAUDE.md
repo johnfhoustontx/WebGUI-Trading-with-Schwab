@@ -21,12 +21,14 @@ logical group) — see the "UI styling standard — Tailwind-first" section belo
 [plan](docs/plans/2026-06-28-tailwind-first-ui-migration-plan.md) /
 [phase2](docs/plans/2026-06-28-tailwind-first-ui-migration-phase2-plan.md) /
 [phase3a](docs/plans/2026-06-28-tailwind-first-ui-migration-phase3a-plan.md) /
-[phase3b](docs/plans/2026-06-28-tailwind-first-ui-migration-phase3b-plan.md). **Phase 0
+[phase3b](docs/plans/2026-06-28-tailwind-first-ui-migration-phase3b-plan.md) /
+[phase3c](docs/plans/2026-06-28-tailwind-first-ui-migration-phase3c-plan.md). **Phase 0
 (token vocabulary) + Phase 1 (nav shell) + Phase 2 (shared `pages/options/*` helpers —
 `.style()`-free, dynamic colors palette-mapped) + Phase 3a (the six signal-table screens
 — Scanner/Swing/Captured/Paper/Paper-Portfolio/Rescue) + Phase 3b (Calculator + Simulator
-on tokens; `DASHBOARD_CSS` now consumed ONLY by Trade) DONE** — webgui 581 green +
-live-verified. **Phase 3a** removes every `.style()` AND every Vue `:style=` slot binding
+on tokens; `DASHBOARD_CSS` now consumed ONLY by Trade) + Phase 3c (Gamma + Expected-Move;
+panel flex via a continuous-value runtime arbitrary class) DONE — ALL OPTIONS SCREENS
+CONVERTED** — webgui 584 green + live-verified. **Phase 3a** removes every `.style()` AND every Vue `:style=` slot binding
 from those pages: dynamic Quasar table-cell colors now map to a stamped Tailwind **`:class`**
 field from a finite palette (`score_zone_class`/`rec_class`/`pnl_class`/`verdict_class`/
 `heat_bg_class`/`cash_class` — exact hexes preserved as `bg-[#..]`/`text-[#..]` arbitrary
@@ -788,7 +790,8 @@ inconsistencies as each screen is converted — no gratuitous redesign). The fiv
 The migration runs in **phases (menu first, then each screen by logical group)** — see
 the design doc
 [`docs/plans/2026-06-28-tailwind-first-ui-migration-design.md`](docs/plans/2026-06-28-tailwind-first-ui-migration-design.md).
-Status snapshot: **Phase 0 + 1 + 2 + 3a + 3b done** (2026-06-28). **P0** — `theme.py` ships the
+Status snapshot: **Phase 0 + 1 + 2 + 3a + 3b + 3c done — ALL OPTIONS SCREENS CONVERTED**
+(2026-06-28). **P0** — `theme.py` ships the
 Tailwind token vocabulary (`PAGE`/`CARD`/`EYEBROW`/`LABEL`/`MUTED`/`BTN`/`BTN_PRIMARY`/
 `STRATEGY_BTN` + the semantic state-color tokens `TXT_POS`/`TXT_WARN`/`TXT_NEG`/
 `TXT_NEUTRAL` + `STATE_TEXT_CLASSES` + the 3D-button tokens `BTN_3D`/`BTN_3D_DANGER`) + a
@@ -817,8 +820,17 @@ slimmed to Quasar-table-internals (cell padding, sticky `thead`, `.q-table__midd
 ONLY as **scope hooks** for the Quasar field/tab/menu internals; the dead `CALC_CSS` was
 deleted. The Calculator **P&L heatmap is a raw `ui.html()` grid → out of scope** (documented).
 **`DASHBOARD_CSS` is now consumed ONLY by `trade.py`** — Phase 4 flips Trade, then the cleanup
-deletes the now-dead `.calc-card`/`.cv2-btn*` semantic rules. **Next: Phase 3c** (chart-heavy:
-Gamma + Expected-Move). Update this line as phases land.
+deletes the now-dead `.calc-card`/`.cv2-btn*` semantic rules. **P3c** — **Gamma + Expected-Move**:
+gamma's 2 dynamic colors palette-mapped (hedge tile → `TXT_*`; collector status bar → a local
+`status_color_class` map, reactive `remove/add`) and its 6 **panel-flex** `.style()` → a runtime
+arbitrary `flex-[{w}_1_0%]` class (the documented **continuous-value** exception — no finite
+palette — reset via tracked-previous `_set_flex_class`); Expected-Move was already clean.
+Highcharts option dicts + the Explain/Analyze HTML (Tier-2) + `EXPLAIN_CSS` (styles a `ui.html()`
+fragment) stay **out of scope**. **Phase 3 (every Options screen) is COMPLETE.** **Next: Phase 4**
+(Trade — the LAST `DASHBOARD_CSS` consumer; flipping it triggers the **legacy cleanup** that
+deletes the now-dead `.calc-card`/`.cv2-btn*`/`.calc-eyebrow`/`.strategy-menu-btn` semantic rules
+from `DASHBOARD_CSS`, leaving `theme.py` = tokens + `QUASAR_INTERNAL_CSS` only). Then Phases 5–8
+(Sentiment+Rotation / Portfolio / Driver / utility pages). Update this line as phases land.
 
 **`pages/ui_guard.py` (cross-cutting, load-bearing — used by ~15 pages).** Provides
 `guard` / `guard_async` decorators that make a NiceGUI callback a clean no-op when
