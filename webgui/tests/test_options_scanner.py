@@ -71,16 +71,24 @@ def test_signal_rows_strikes_strip_whole_number_decimals():
     assert rows[0]["strikes"] == "1085/1070"
 
 
-def test_signal_rows_stamp_score_color():
+def test_score_zone_class_maps_zones():
+    assert scanner.score_zone_class(80) == "bg-[#66bb6a]"
+    assert scanner.score_zone_class(60) == "bg-[#42a5f5]"
+    assert scanner.score_zone_class(50) == "bg-[#ffa726]"
+    assert scanner.score_zone_class(30) == "bg-[#ef5350]"
+    assert scanner.score_zone_class(None) == "bg-[#666666]"
+
+
+def test_signal_rows_stamp_score_class():
     rows = scanner.signal_rows([
         {"symbol": "HI", "composite_score": 90},
         {"symbol": "LO", "composite_score": 30},
         {"symbol": "NA"},
     ])
     by_sym = {r["symbol"]: r for r in rows}
-    assert by_sym["HI"]["_score_color"] == scanner.GREEN
-    assert by_sym["LO"]["_score_color"] == scanner.RED
-    assert by_sym["NA"]["_score_color"] == "#666666"
+    assert by_sym["HI"]["_score_class"] == "bg-[#66bb6a]"
+    assert by_sym["LO"]["_score_class"] == "bg-[#ef5350]"
+    assert by_sym["NA"]["_score_class"] == "bg-[#666666]"
 
 
 def _sig(symbol, **kw):

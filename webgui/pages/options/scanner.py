@@ -25,6 +25,7 @@ from nicegui import ui
 from pages.ui_guard import guard
 
 from . import detail, handoff
+from .theme import BTN_3D
 
 
 def _round(value, ndigits=2):
@@ -47,6 +48,13 @@ def score_zone_color(score):
     if score < 75:
         return BLUE
     return GREEN
+
+
+def score_zone_class(score):
+    """Tailwind ``bg-[<hex>]`` class for a composite score by quality zone (same
+    thresholds as ``score_zone_color``; None -> grey). Stamped on each row so the
+    score-badge slot binds it via ``:class`` (Tailwind-only, no inline style)."""
+    return f"bg-[{score_zone_color(score)}]"
 
 
 def _short_exp(exp):
@@ -124,7 +132,7 @@ def signal_rows(signals):
             "rr_pct": _round(s.get("rr_pct"), 1),
             "pop_pct": _round(s.get("pop_pct"), 1),
             "composite_score": s.get("composite_score"),
-            "_score_color": score_zone_color(s.get("composite_score")),
+            "_score_class": score_zone_class(s.get("composite_score")),
             "grade": s.get("grade", ""),
         })
     rows.sort(key=lambda r: (r["composite_score"] is not None, r["composite_score"] or 0),
@@ -224,25 +232,17 @@ TAB_0DTE_COLOR, TAB_SWING_COLOR = "#ffa726", "#42a5f5"
 
 # Compact the signal tables (dense + tight cell padding) so the right-hand
 # columns (R/R %, PoP %, Score, Grade, actions) stay visible. Scoped to
-# .scan-table so it never leaks to other tables. Also: per-tab accent colors and a
-# solid 3D "Run scan" button matching the app's primary buttons (paper .pt-btn /
-# calculator .calc-btn-3d).
+# .scan-table so it never leaks to other tables. The per-tab accent TEXT color is
+# applied as a Tailwind class on each ui.tab; only the Quasar-internal tab chrome
+# (text-transform/weight, hidden indicator, the active-underline box-shadow which
+# can't be reached via .classes()) stays here. The 3D "Run scan" button uses the
+# shared BTN_3D token.
 SCAN_CSS = f'''
 .scan-table td, .scan-table th {{ padding: 2px 4px; }}
 .scan-tabs .q-tab {{ text-transform: none; font-weight: 600; }}
 .scan-tabs .q-tab__indicator {{ display: none; }}
-.scan-tabs .tab-0dte {{ color: {TAB_0DTE_COLOR}; }}
-.scan-tabs .tab-swing {{ color: {TAB_SWING_COLOR}; }}
 .scan-tabs .tab-0dte.q-tab--active {{ box-shadow: inset 0 -3px 0 0 {TAB_0DTE_COLOR}; }}
 .scan-tabs .tab-swing.q-tab--active {{ box-shadow: inset 0 -3px 0 0 {TAB_SWING_COLOR}; }}
-.scan-btn.q-btn {{
-  background: linear-gradient(180deg,#5aa0e6 0%,#3a7bc0 55%,#316eac 100%)!important;
-  color: #fff!important; border-radius: 7px; font-weight: 600; min-height: 34px;
-  box-shadow: 0 4px 0 0 #244e78, 0 6px 10px rgba(0,0,0,.4);
-  transition: transform .06s ease, box-shadow .06s ease, filter .12s ease;
-}}
-.scan-btn.q-btn:hover {{ filter: brightness(1.08); }}
-.scan-btn.q-btn:active {{ transform: translateY(4px); box-shadow: 0 1px 0 0 #244e78, 0 2px 4px rgba(0,0,0,.4); }}
 '''
 
 
@@ -259,10 +259,12 @@ def render():
             # Top chrome removed (market strip + title + auto-scan/VIX-term lines):
             # just a small Run scan button, the tabs, and a slim bottom status bar.
             scan_btn = ui.button("Run scan", icon="play_arrow", color=None) \
-                .props("no-caps").classes("scan-btn")
+                .props("no-caps").classes(BTN_3D)
             with ui.tabs().classes("scan-tabs") as tabs:
-                tab_0dte = ui.tab("0-DTE").classes("tab-0dte")
-                tab_swing = ui.tab("Swing").classes("tab-swing")
+                # tab-0dte/tab-swing keep the Quasar active-underline hook (SCAN_CSS);
+                # the accent TEXT color is a Tailwind class (amber / blue).
+                tab_0dte = ui.tab("0-DTE").classes(f"tab-0dte text-[{TAB_0DTE_COLOR}]")
+                tab_swing = ui.tab("Swing").classes(f"tab-swing text-[{TAB_SWING_COLOR}]")
             with ui.tab_panels(tabs, value=tab_0dte).classes("w-full"):
                 with ui.tab_panel(tab_0dte):
                     table_0dte = ui.table(columns=signal_columns(), rows=[],
@@ -294,15 +296,15 @@ def render():
         # Render the composite score as a quality-colored chip.
         _t.add_slot('body-cell-composite_score', r'''
           <q-td :props="props">
-            <q-badge :style="`background:${props.row._score_color};color:#111`" :label="props.value ?? '—'"/>
+            <q-badge :class="props.row._score_class + ' text-[#111]'" :label="props.value ?? '—'"/>
           </q-td>
         ''')
         # Small, persistent "new" tag on signals that appeared since the last scan.
         _t.add_slot('body-cell-symbol', r'''
           <q-td :props="props">
             {{ props.value }}
-            <q-badge v-if="props.row._new" label="new" class="q-ml-xs"
-                     style="font-size:9px;padding:0 4px;background:#1565c0;color:#fff"/>
+            <q-badge v-if="props.row._new" label="new"
+                     class="q-ml-xs text-[9px] px-1 py-0 bg-[#1565c0] text-white"/>
           </q-td>
         ''')
 
