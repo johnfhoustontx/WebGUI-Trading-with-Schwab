@@ -245,10 +245,11 @@ def _refresh_health() -> None:
     _health_cache["data"] = proxy.health()
     _health_cache["ts"] = _time.monotonic()
 
-# Modernized drawer styling (scoped to .nav-drawer).
-# Inter-item spacing is intentionally tight (~50% of Quasar's defaults): the
-# flex gap (4px→2px), the nav-link vertical padding (8px→4px), and the expansion
-# header min-height (48px→24px) are all halved so the menu reads denser.
+# Quasar-internal drawer styling (scoped to .nav-drawer) — only the rules that
+# component .classes() can't reach live here (nav-link/icon/badge/title visuals
+# moved to Tailwind utilities on the elements in Phase 1). Inter-item spacing is
+# intentionally tight (~50% of Quasar's defaults): the flex gap (4px→2px) and the
+# expansion header min-height (48px→24px) are halved so the menu reads denser.
 _NAV_CSS = """
 .nav-drawer { gap: 2px; }
 /* Children INSIDE each expandable group also stack tight — NiceGUI wraps the
