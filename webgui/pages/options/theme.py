@@ -106,3 +106,30 @@ DASHBOARD_CSS = """
 .strat-menu-navy .q-item.q-manuallyfocused{background:#1b2950!important;}
 .strat-menu-navy .q-icon{color:#8794b4;}
 """
+
+# ---------------------------------------------------------------------------
+# Tailwind design tokens (Phase 0 of the Tailwind-first migration). Each is a
+# reusable .classes() utility string encoding the dark-navy palette. Apply with
+# `.classes(CARD)` instead of `.classes("calc-card")` + a CSS rule. The legacy
+# DASHBOARD_CSS above is retained until its last consumer is converted (Phase 4
+# cleanup). Palette source: CLAUDE.md "App theme — dark-navy 'dashboard'".
+# ---------------------------------------------------------------------------
+PAGE = (
+    "rounded-[14px] border border-[#1d2942] p-[18px_20px_22px] text-[#cdd8ee] "
+    "bg-[radial-gradient(130%_90%_at_50%_-20%,#16243f_0%,#0c1424_55%,#0a0f1c_100%)]"
+)
+CARD = "bg-[#101a30] border border-[#213152] rounded-[12px] px-4 py-3.5"
+EYEBROW = "text-[#8794b4] text-[12px] tracking-[.02em]"
+LABEL = "text-[#eaf0fb]"
+MUTED = "text-[#7f8db0]"
+BTN = (
+    "bg-[#15213b] hover:bg-[#1b2950] text-[#cdd8ee] border border-[#2a3a5c] "
+    "rounded-[9px] min-h-[40px] font-medium"
+)
+BTN_PRIMARY = (
+    "bg-[#2563eb] hover:bg-[#1d4fd1] text-white rounded-[9px] min-h-[40px] font-semibold"
+)
+STRATEGY_BTN = (
+    "bg-[#0c1426] hover:border-[#3b82f6] border border-[#243353] text-[#e7edf8] "
+    "rounded-[8px] min-h-[40px] font-normal"
+)
