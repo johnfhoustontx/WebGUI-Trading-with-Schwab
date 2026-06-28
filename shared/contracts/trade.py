@@ -34,3 +34,4 @@ class TradeAnalysis(_Base):
     timestamp: str | None = None
     errors: list = []
     markov: dict | None = None
+    swing_model: dict | None = None

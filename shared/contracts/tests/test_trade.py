@@ -62,3 +62,17 @@ def test_trade_accepts_payload_with_markov():
         "confidence": 0.7, "prior_version": "2026-06-21",
     })
     assert t.markov["current_band"] == 3
+
+
+def test_trade_accepts_swing_model_block():
+    t = TradeAnalysis(symbol="AAPL", swing_model={
+        "verdict": "BUY", "score": 1.4, "percentile": 88, "expected_fwd": 0.0135,
+        "hit_rate": 0.523, "horizon_days": 20,
+        "contributions": [{"factor": "mom_12_1", "z": 1.2, "weight": 0.211,
+                           "contribution": 0.25, "ic": 0.041}],
+        "model_version": "2026-06-28", "oos_ic": 0.0367, "source": "validated"})
+    assert t.swing_model["verdict"] == "BUY"
+
+
+def test_trade_swing_model_optional():
+    assert TradeAnalysis(symbol="AAPL").swing_model is None
