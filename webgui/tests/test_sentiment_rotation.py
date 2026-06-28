@@ -34,6 +34,28 @@ def test_quadrant_color():
     assert R.quadrant_color("???") == R.CLR_FLAT
 
 
+# ── Local Tailwind color-class maps (Phase 5) — exact local palette preserved ──
+def test_local_text_class_constants():
+    assert R.TXT_G == "text-[#66bb6a]" and R.TXT_R == "text-[#ef5350]"
+    assert R.TXT_Y == "text-[#ffd54f]" and R.TXT_CY == "text-[#3fb6c7]"
+    assert R.TXT_FLAT == "text-[#9e9e9e]"
+    assert set(R.SENT_TEXT_CLASSES.split()) == {R.TXT_G, R.TXT_R, R.TXT_Y, R.TXT_CY, R.TXT_FLAT}
+
+
+def test_quadrant_text_class():
+    assert R.quadrant_text_class("Leading") == "text-[#66bb6a]"
+    assert R.quadrant_text_class("Improving") == "text-[#3fb6c7]"
+    assert R.quadrant_text_class("Weakening") == "text-[#ffd54f]"
+    assert R.quadrant_text_class("Lagging") == "text-[#ef5350]"
+    assert R.quadrant_text_class("???") == "text-[#9e9e9e]"
+
+
+def test_regime_text_class():
+    assert R.regime_text_class("Risk-ON") == "text-[#66bb6a]"
+    assert R.regime_text_class("Risk-OFF") == "text-[#ef5350]"
+    assert R.regime_text_class("Mixed") == "text-[#ffd54f]"
+
+
 def test_headline_parts():
     regime, color, text, detail = R.headline_parts(_assessment(), 1.5)
     assert regime == "Risk-ON" and color == R.CLR_GREEN

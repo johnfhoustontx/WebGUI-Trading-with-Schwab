@@ -25,6 +25,21 @@ CLR_YELLOW = "#ffd54f"
 CLR_CYAN = "#3fb6c7"
 CLR_FLAT = "#9e9e9e"
 
+# LOCAL Tailwind text-class map (Phase 5) — mirrors this page's OWN 5-color
+# palette EXACTLY (same local set as sentiment.py; intentionally NOT the theme
+# tokens — yellow/cyan have no token + the flat differs). The hex `*_color`
+# helpers feed the Highcharts RRG figure; the `*_class` helpers feed `.classes()`.
+TXT_G = "text-[#66bb6a]"
+TXT_R = "text-[#ef5350]"
+TXT_Y = "text-[#ffd54f]"
+TXT_CY = "text-[#3fb6c7]"
+TXT_FLAT = "text-[#9e9e9e]"
+# Remove-set for the reactive in-place `headline_lbl` recolor (covers every
+# class it can apply, so colors don't stack across the page's ~2s auto-refresh).
+SENT_TEXT_CLASSES = " ".join([TXT_G, TXT_R, TXT_Y, TXT_CY, TXT_FLAT])
+_HEX_TO_TXT = {CLR_GREEN: TXT_G, CLR_RED: TXT_R, CLR_YELLOW: TXT_Y,
+               CLR_CYAN: TXT_CY, CLR_FLAT: TXT_FLAT}
+
 # Fallback when the service-supplied risk threshold is absent (cold cache).
 DEFAULT_RISK_THRESHOLD = 1.5
 
@@ -36,8 +51,16 @@ def quadrant_color(q):
     return _QUAD_COLOR.get(q, CLR_FLAT)
 
 
+def quadrant_text_class(q):
+    return _HEX_TO_TXT[quadrant_color(q)]
+
+
 def _regime_color(regime):
     return {"Risk-ON": CLR_GREEN, "Risk-OFF": CLR_RED}.get(regime, CLR_YELLOW)
+
+
+def regime_text_class(regime):
+    return _HEX_TO_TXT[_regime_color(regime)]
 
 
 def headline_parts(a, risk_threshold=DEFAULT_RISK_THRESHOLD):
@@ -185,10 +208,10 @@ def render():
     msg_lbl = ui.label("").classes("text-warning text-sm")
     # Top: Full Quadrant Map (left) + ROTATING FROM/INTO (right).
     with ui.row().classes("w-full no-wrap gap-6 items-start q-mt-md"):
-        with ui.column().style("flex:1.4;min-width:0"):
+        with ui.column().classes("flex-[1.4] min-w-0"):
             ui.label("Full Quadrant Map (sorted by RS-Momentum)").classes("text-subtitle2")
             table_box = ui.column().classes("w-full q-gutter-none")
-        with ui.column().style("flex:1;min-width:0"):
+        with ui.column().classes("flex-1 min-w-0"):
             cols_box = ui.row().classes("no-wrap items-start gap-8 w-full")
     ui.label("Pairing is ordinal — strongest relative-selling vs strongest "
              "relative-buying pressure, not literal cash flow.").classes("opacity-50 text-xs q-mt-sm")
@@ -204,35 +227,38 @@ def render():
         regime, color, text, detail = headline_parts(a, risk_threshold)
         as_of.text = f"as of {a.get('date')}"
         headline_lbl.text = f"{regime} — {text}"
-        headline_lbl.style(f"color:{color}")
+        headline_lbl.classes(remove=SENT_TEXT_CLASSES, add=regime_text_class(regime))
         detail_lbl.text = detail
         msg_lbl.text = ""
         cols_box.clear()
         with cols_box:
-            for side, title, tcolor in (("rotating_from", "ROTATING FROM", CLR_RED),
-                                        ("rotating_into", "ROTATING INTO", CLR_GREEN)):
+            for side, title, tcls in (("rotating_from", "ROTATING FROM", TXT_R),
+                                      ("rotating_into", "ROTATING INTO", TXT_G)):
                 rows, total = side_rows(a, side, weights)
                 with ui.column().classes("items-start"):
-                    ui.label(f"{title}  ·  {total:.0f}% of S&P").style(f"color:{tcolor}").classes("text-bold text-sm")
+                    ui.label(f"{title}  ·  {total:.0f}% of S&P").classes(f"text-bold text-sm {tcls}")
                     for r in rows:
                         with ui.row().classes("items-center no-wrap gap-1 text-sm"):
                             ui.label(str(r["name"] or ""))
-                            ui.label(f"({r['quadrant']})").style(
-                                f"color:{quadrant_color(r['quadrant'])}")
+                            ui.label(f"({r['quadrant']})").classes(
+                                quadrant_text_class(r['quadrant']))
                             ui.label(f"{r['weight']:.1f}%" if r['weight'] else "").classes("opacity-70")
         table_box.clear()
         with table_box:
             with ui.row().classes("items-center w-full no-wrap gap-2 opacity-60 text-xs"):
                 for _f, hdr, w in QCOLS:
-                    ui.label(hdr).style(f"width:{w}px")
+                    ui.label(hdr).classes(f"w-[{w}px]")
             for r in rotation_rows(a):
-                with ui.row().classes("items-center w-full no-wrap gap-2 text-sm").style(f"color:{r['color']}"):
-                    ui.label(str(r.get("name") or "")).style("width:150px")
-                    ui.label(str(r.get("etf") or "")).style("width:55px")
-                    ui.label(f"{r.get('rs_ratio'):.2f}").style("width:90px")
-                    ui.label(f"{r.get('rs_momentum'):.2f}").style("width:90px")
-                    ui.label(str(r.get("quadrant") or "")).style("width:110px")
-                    ui.label(str(r.get("direction") or "")).style("width:60px")
+                # row-level color sets the default text color for all cells
+                with ui.row().classes(
+                        "items-center w-full no-wrap gap-2 text-sm "
+                        + quadrant_text_class(r.get("quadrant"))):
+                    ui.label(str(r.get("name") or "")).classes("w-[150px]")
+                    ui.label(str(r.get("etf") or "")).classes("w-[55px]")
+                    ui.label(f"{r.get('rs_ratio'):.2f}").classes("w-[90px]")
+                    ui.label(f"{r.get('rs_momentum'):.2f}").classes("w-[90px]")
+                    ui.label(str(r.get("quadrant") or "")).classes("w-[110px]")
+                    ui.label(str(r.get("direction") or "")).classes("w-[60px]")
         rrg_box.clear()
         with rrg_box:
             # Hover-isolation is native (states.inactive in the figure) — no
