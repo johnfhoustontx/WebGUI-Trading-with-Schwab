@@ -67,6 +67,12 @@ accelerate price.
   moves get **amplified**. Auto-refreshes every 2 minutes.
 - After the close the **last session's** chart stays on screen until midnight
   (Friday's holds through the weekend), then clears for the next trading day.
+- **Analyze** asks Claude to read the live $SPX / SPY / QQQ dealer positioning and
+  opens an **infographic** in a new tab — a regime + bias gauge, a price-level
+  ladder + key levels per index, a per-symbol **what-if** (rally / sell-off / chop),
+  and a **why is this happening** at the bottom. It also runs on its own at
+  **premarket, ~18 min after the open, midday, and the close** — the **Auto
+  briefings** buttons open each. **Explain** opens a one-symbol infographic.
 """,
     "/options/simulator": """
 **Simulator — the simple version**

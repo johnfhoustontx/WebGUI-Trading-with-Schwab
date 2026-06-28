@@ -1250,6 +1250,40 @@ def gamma_symbol_options() -> list:
         return ["$SPX", "SPY", "QQQ"]
 
 
+def _session_expected_move(chain):
+    """A stable **1-day** expected move (``spot · ATM_IV · √(1/365)``) for the Analyze
+    briefing — the time-of-day-independent 'expected move' a trader reads.
+
+    The engine's ``calc_expected_move_from_chain`` is a 0-DTE *remaining-hours-to-close*
+    EM: off-hours / on weekends ``hours_left`` clamps to 0.1h and near the close it
+    decays to ~0, so it collapses to a misleadingly tiny number (e.g. SPX ≈ 3). This
+    uses the same nearest-expiry ATM IV but a fixed 1-day horizon so the EM band on
+    the ladder + the 'Exp. move' tile stay meaningful all day. Returns float or None
+    (fully defensive — reuses the engine's static ATM-IV helpers)."""
+    import math
+    import datetime as _dt
+    import gamma_tool as gt
+    try:
+        if not chain:
+            return None
+        spot = chain.get("underlyingPrice", 0) or 0
+        if spot <= 0:
+            return None
+        today = _dt.datetime.now(gt.TZ).strftime("%Y-%m-%d")
+        strikes = {}
+        for mp in (chain.get("callExpDateMap", {}), chain.get("putExpDateMap", {})):
+            key, _ = gt.GammaEngine._find_nearest_exp_key(mp, today)
+            if key:
+                for sk, contracts in mp[key].items():
+                    strikes.setdefault(sk, []).extend(contracts)
+        atm_iv = gt.GammaEngine._get_atm_iv(strikes, spot)  # percent, e.g. 12.5
+        if not atm_iv or atm_iv <= 0:
+            return None
+        return round(spot * (atm_iv / 100.0) * math.sqrt(1.0 / 365.0), 2)
+    except Exception:  # noqa: BLE001 — EM is best-effort; missing → None → '—'.
+        return None
+
+
 def _gamma_blocks_for(symbol, chain):
     """Build the per-view analysis blocks for one symbol (ported from the page).
 
@@ -1262,10 +1296,9 @@ def _gamma_blocks_for(symbol, chain):
     if not res:
         return None
     gex, charm, dex, vanna = res
-    try:
-        em = eng.calc_expected_move_from_chain(chain)
-    except Exception:
-        em = None
+    # 1-day expected move (not the engine's 0-DTE remaining-hours EM, which collapses
+    # off-hours / at the close) so the briefing's EM-derived fields stay meaningful.
+    em = _session_expected_move(chain)
     dte = eng._last_dte
 
     def bd(snap, view):
@@ -1291,15 +1324,81 @@ def _gamma_blocks_for(symbol, chain):
 _ANALYZE_MODEL = "claude-sonnet-4-6"
 _ANALYZE_MAX_TOKENS = 1500  # "typical" ~1-page briefing (user-approved cost point)
 _ANALYZE_SYSTEM = (
-    "You are an options-market analyst writing a concise intraday dealer-positioning "
-    "briefing for an experienced trader, from the structured GEX / Charm / DEX / Vanna "
-    "data provided for $SPX, SPY and QQQ. Write directly in clean Markdown: a short "
-    "title line, then 2-4 tight sections under '## ' headers, with bullet points and "
-    "**bold** for key levels and numbers. Be specific and actionable about gamma flip "
-    "levels, call/put walls, and likely intraday behavior. Do NOT include any "
-    "disclaimers, risk warnings, 'not financial advice' notes, hedging caveats, or "
-    "boilerplate of any kind — output only the analysis itself."
+    "You are an options-market analyst. From the structured GEX / Charm / DEX / Vanna "
+    "data provided for $SPX, SPY and QQQ, call the submit_analysis tool exactly once. "
+    "Copy the EXACT computed levels from the data into each index entry — gamma flip, "
+    "call wall, put wall, max pain, expected move (in points), put/call ratio — do not "
+    "estimate or invent numbers, and omit a field only if it isn't present in the data. "
+    "Set bias from -100 (max bearish) to +100 (max bullish), 0 = neutral. For EACH "
+    "index also fill 'what_if' with three short plain-English scenarios for the rest "
+    "of the session, specific to that index: 'rally' (an upside path), 'selloff' (a "
+    "downside path) and 'chop' (a sideways/range path) — one sentence each. Fill 'why' "
+    "with 1-2 plain sentences on why the tape is acting this way (macro context + the "
+    "session's path so far). Keep the headline and per-index notes terse and the "
+    "narrative to 2-3 sentences. Do NOT include any disclaimers, risk warnings, 'not "
+    "financial advice' notes, or boilerplate — only the analysis."
 )
+
+# Forced tool the model fills with the structured analysis (the infographic's data
+# source). tool_choice (in gamma_analyze) forces this single tool call, so the reply
+# is one ``submit_analysis`` tool_use block we render — the model never free-writes.
+_ANALYZE_TOOL = {
+    "name": "submit_analysis",
+    "description": ("Return the structured intraday dealer-positioning analysis for "
+                    "$SPX, SPY and QQQ. The app renders it as an infographic, so copy "
+                    "the exact computed levels from the provided data rather than "
+                    "estimating."),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "regime": {"type": "string",
+                       "description": "Short overall dealer-gamma regime label, e.g. "
+                                      "'Short gamma below spot' or 'Long gamma / pinned'."},
+            "bias": {"type": "number",
+                     "description": "Net directional bias, -100 (bearish) to +100 (bullish)."},
+            "bias_label": {"type": "string",
+                           "description": "Two-or-three-word bias label, e.g. 'Mildly bearish'."},
+            "headline": {"type": "string",
+                         "description": "One-sentence headline for the next few hours."},
+            "narrative": {"type": "string",
+                          "description": "2-3 sentence plain read of what to expect and why."},
+            "why": {"type": "string",
+                    "description": "1-2 plain sentences: why the tape is acting this way "
+                                   "(macro context + the session's path so far)."},
+            "indices": {
+                "type": "array",
+                "description": "One entry per index, in order $SPX, SPY, QQQ.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "symbol": {"type": "string"},
+                        "spot": {"type": "number"},
+                        "gamma_flip": {"type": "number"},
+                        "call_wall": {"type": "number"},
+                        "put_wall": {"type": "number"},
+                        "max_pain": {"type": "number"},
+                        "expected_move": {"type": "number",
+                                          "description": "Expected move in points (1 std dev), not percent."},
+                        "pc_ratio": {"type": "number", "description": "Put/call ratio."},
+                        "note": {"type": "string", "description": "Terse one-line read for this index."},
+                        "what_if": {
+                            "type": "object",
+                            "description": "Three short plain-English scenarios for this "
+                                           "index for the rest of the session.",
+                            "properties": {
+                                "rally": {"type": "string", "description": "Upside path."},
+                                "selloff": {"type": "string", "description": "Downside path."},
+                                "chop": {"type": "string", "description": "Sideways/range path."},
+                            },
+                        },
+                    },
+                    "required": ["symbol"],
+                },
+            },
+        },
+        "required": ["regime", "bias", "headline", "narrative", "why", "indices"],
+    },
+}
 
 _ANALYZE_CSS = """
   :root { color-scheme: dark; }
@@ -1323,6 +1422,42 @@ _ANALYZE_CSS = """
   .ga-body hr { border:0; border-top:1px solid #222a36; margin:1.4em 0; }
   .ga-body table { border-collapse:collapse; margin:.6em 0; }
   .ga-body th, .ga-body td { border:1px solid #222a36; padding:5px 10px; }
+  .ga-banner { display:flex; align-items:center; justify-content:space-between;
+    gap:16px; flex-wrap:wrap; background:#101a30; border:1px solid #213152;
+    border-radius:12px; padding:12px 16px; margin:6px 0 14px; }
+  .ga-regime { color:#eaf0fb; font-size:1.05rem; font-weight:600; }
+  .bias-wrap { display:flex; align-items:center; gap:8px; font-size:.78rem; color:#8a93a3; }
+  .bias-track { position:relative; width:160px; height:8px; border-radius:4px; background:#243353; }
+  .bias-mid { position:absolute; left:50%; top:0; width:1px; height:8px; background:#3b4a6b; }
+  .bias-marker { position:absolute; top:-3px; width:4px; height:14px; border-radius:2px; transform:translateX(-50%); }
+  .bias-lab { color:#cdd8ee; font-size:.8rem; margin-left:2px; }
+  .ga-headline { color:#dce6f7; font-size:1rem; margin:0 0 14px; line-height:1.5; }
+  .idx-card { background:#101a30; border:1px solid #213152; border-radius:12px;
+    padding:12px 14px; margin:0 0 12px; }
+  .idx-head { color:#ffd54f; font-size:1rem; font-weight:600; margin-bottom:6px; }
+  .idx-body { display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
+  .idx-right { flex:1; min-width:240px; }
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(80px,1fr)); gap:8px; }
+  .tile { background:#0c1426; border-radius:8px; padding:6px 9px; }
+  .tile-l { color:#8a93a3; font-size:.72rem; }
+  .tile-v { color:#eaf0fb; font-size:1.05rem; font-weight:600; }
+  .idx-note { color:#9fb0d0; font-size:.85rem; margin-top:8px; line-height:1.45; }
+  .ladder { flex:0 0 auto; }
+  .ladder-empty { color:#8a93a3; font-size:.8rem; }
+  .ga-narr { background:#101a30; border-left:3px solid #3b82f6; padding:10px 12px;
+    color:#dce6f7; font-size:.95rem; line-height:1.55; margin:0 0 14px; }
+  .ga-narr p { margin:.3em 0; }
+  .idx-whatif { margin-top:10px; padding-top:10px; border-top:1px solid #1c2842; }
+  .wf-head { color:#8a93a3; font-size:.72rem; text-transform:uppercase;
+    letter-spacing:.04em; margin-bottom:5px; }
+  .wf-row { display:flex; gap:8px; align-items:baseline; margin:3px 0; }
+  .wf-tag { flex:0 0 64px; font-size:.8rem; font-weight:600; }
+  .wf-txt { color:#cdd8ee; font-size:.88rem; line-height:1.45; }
+  .ga-why { background:#101a30; border:1px solid #213152; border-radius:12px;
+    padding:12px 14px; margin-top:14px; }
+  .ga-why-h { color:#90caf9; font-size:1rem; font-weight:600; margin-bottom:6px; }
+  .ga-why-b { color:#dce6f7; font-size:.95rem; line-height:1.55; }
+  .ga-why-b p { margin:.3em 0; }
 """
 
 
@@ -1379,20 +1514,244 @@ def _analyze_doc(body_html: str,
             f"<div class=\"ga-body\">{body_html}</div></div></body></html>")
 
 
+def _num(x):
+    """``float(x)`` if finite, else None (never raises)."""
+    import math
+    try:
+        f = float(x)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
+
+
+def _fmt_num(val, dec=0) -> str:
+    """Thousands-grouped number to ``dec`` places, or '—' when missing."""
+    v = _num(val)
+    if v is None:
+        return "—"
+    return f"{v:,.{dec}f}"
+
+
+def _parse_analysis(inp) -> dict | None:
+    """Normalize the model's ``submit_analysis`` tool input → render-ready dict.
+
+    Total over adversarial input (mirrors decider.parse_decision): numbers coerced
+    via ``_num`` (bad/missing → None → rendered '—'), strings stripped. Returns None
+    only when there's nothing renderable (so the caller degrades to a message)."""
+    if not isinstance(inp, dict):
+        return None
+    out = {
+        "regime": str(inp.get("regime") or "").strip(),
+        "bias": _num(inp.get("bias")),
+        "bias_label": str(inp.get("bias_label") or "").strip(),
+        "headline": str(inp.get("headline") or "").strip(),
+        "narrative": str(inp.get("narrative") or "").strip(),
+        "why": str(inp.get("why") or "").strip(),
+        "indices": [],
+    }
+    for it in (inp.get("indices") or []):
+        if not isinstance(it, dict):
+            continue
+        wf = it.get("what_if") if isinstance(it.get("what_if"), dict) else {}
+        out["indices"].append({
+            "symbol": str(it.get("symbol") or "").strip(),
+            "spot": _num(it.get("spot")),
+            "gamma_flip": _num(it.get("gamma_flip")),
+            "call_wall": _num(it.get("call_wall")),
+            "put_wall": _num(it.get("put_wall")),
+            "max_pain": _num(it.get("max_pain")),
+            "expected_move": _num(it.get("expected_move")),
+            "pc_ratio": _num(it.get("pc_ratio")),
+            "note": str(it.get("note") or "").strip(),
+            "what_if": {
+                "rally": str(wf.get("rally") or "").strip(),
+                "selloff": str(wf.get("selloff") or "").strip(),
+                "chop": str(wf.get("chop") or "").strip(),
+            },
+        })
+    if not out["indices"] and not out["headline"] and not out["narrative"]:
+        return None
+    return out
+
+
+def _bias_meter_html(bias, label) -> str:
+    """Horizontal bias meter (−100…+100) with a sign-colored marker + label."""
+    import html as _h
+    b = _num(bias)
+    pct = 50.0 if b is None else max(0.0, min(100.0, (b + 100.0) / 2.0))
+    color = "#9aa3bd" if (b is None or abs(b) <= 5) else ("#34d399" if b > 0 else "#f87171")
+    lab = label or ("Neutral" if b is None else
+                    ("Bullish" if b > 5 else "Bearish" if b < -5 else "Neutral"))
+    return ('<div class="bias-wrap"><span>Bearish</span>'
+            '<div class="bias-track"><div class="bias-mid"></div>'
+            f'<div class="bias-marker" style="left:{pct:.0f}%;background:{color}"></div></div>'
+            f'<span>Bullish</span><span class="bias-lab">{_h.escape(lab)}</span></div>')
+
+
+def _metric_tiles_html(idx) -> str:
+    """Per-index metric tiles (spot / flip / walls / max pain / EM / P-C)."""
+    rows = [
+        ("Spot", idx.get("spot"), 0, None),
+        ("Gamma flip", idx.get("gamma_flip"), 0, "#ffd54f"),
+        ("Call wall", idx.get("call_wall"), 0, "#34d399"),
+        ("Put wall", idx.get("put_wall"), 0, "#f87171"),
+        ("Max pain", idx.get("max_pain"), 0, None),
+        ("Exp. move", idx.get("expected_move"), 1, None),
+        ("Put/Call", idx.get("pc_ratio"), 2, None),
+    ]
+    cells = []
+    for lbl, val, dec, color in rows:
+        v = _fmt_num(val, dec)
+        style = f' style="color:{color}"' if (color and v != "—") else ""
+        cells.append(f'<div class="tile"><div class="tile-l">{lbl}</div>'
+                     f'<div class="tile-v"{style}>{v}</div></div>')
+    return f'<div class="tiles">{"".join(cells)}</div>'
+
+
+def _ladder_svg(idx) -> str:
+    """Vertical price-level ladder: spot vs flip / call+put walls / expected-move band."""
+    import html as _h
+    spot = _num(idx.get("spot"))
+    flip = _num(idx.get("gamma_flip"))
+    cw, pw = _num(idx.get("call_wall")), _num(idx.get("put_wall"))
+    em = _num(idx.get("expected_move"))
+    emu = (spot + em) if (spot is not None and em) else None
+    eml = (spot - em) if (spot is not None and em) else None
+    pts = []  # (price, label, color, kind) — kind: dot|dash|tick|faint
+    if cw is not None:
+        pts.append((cw, "Call wall", "#34d399", "tick"))
+    if emu is not None:
+        pts.append((emu, "EM upper", "#7f8db0", "faint"))
+    if spot is not None:
+        pts.append((spot, "Spot", "#f5f5f5", "dot"))
+    if flip is not None:
+        pts.append((flip, "Flip", "#ffd54f", "dash"))
+    if eml is not None:
+        pts.append((eml, "EM lower", "#7f8db0", "faint"))
+    if pw is not None:
+        pts.append((pw, "Put wall", "#f87171", "tick"))
+    if not pts:
+        return '<div class="ladder-empty">no levels</div>'
+    prices = [p for p, _, _, _ in pts]
+    pmin, pmax = min(prices), max(prices)
+    if pmax <= pmin:
+        pmax = pmin + 1.0
+    W, H, top, bot, ax = 250, 190, 20, 170, 30
+
+    def yof(p):
+        return bot - (p - pmin) / (pmax - pmin) * (bot - top)
+
+    svg = [f'<svg viewBox="0 0 {W} {H}" width="250" class="ladder" role="img" '
+           'aria-label="price-level ladder">']
+    if emu is not None and eml is not None:
+        yt, yb = yof(emu), yof(eml)
+        svg.append(f'<rect x="{ax - 4}" y="{yt:.0f}" width="8" height="{(yb - yt):.0f}" '
+                   'fill="#1f3a5f" opacity="0.45"/>')
+    svg.append(f'<line x1="{ax}" y1="{top}" x2="{ax}" y2="{bot}" stroke="#2b3b5a" stroke-width="2"/>')
+    # Label de-collision: markers stay at their true price y, but the text labels are
+    # pushed apart top→bottom to a minimum gap so clustered levels (spot/flip/walls
+    # within a few points) don't overlap into an unreadable smear; a thin connector
+    # links a nudged label back to its true marker.
+    min_gap, label_y, prev = 15, {}, None
+    for i in sorted(range(len(pts)), key=lambda j: yof(pts[j][0])):
+        my = yof(pts[i][0])
+        ly = my if prev is None else max(my, prev + min_gap)
+        label_y[i] = min(ly, H - 6)
+        prev = label_y[i]
+    for i, (price, lbl, color, kind) in enumerate(pts):
+        y, ly = yof(price), label_y[i]
+        if kind == "dot":
+            svg.append(f'<circle cx="{ax}" cy="{y:.0f}" r="5" fill="{color}"/>')
+        elif kind == "dash":
+            svg.append(f'<line x1="{ax - 8}" y1="{y:.0f}" x2="{ax + 8}" y2="{y:.0f}" '
+                       f'stroke="{color}" stroke-width="2" stroke-dasharray="4 3"/>')
+        elif kind == "faint":
+            svg.append(f'<line x1="{ax - 5}" y1="{y:.0f}" x2="{ax + 5}" y2="{y:.0f}" '
+                       f'stroke="{color}" stroke-width="1" stroke-dasharray="2 2"/>')
+        else:
+            svg.append(f'<circle cx="{ax}" cy="{y:.0f}" r="3.5" fill="{color}"/>')
+        if abs(ly - y) > 3:
+            svg.append(f'<line x1="{ax + 8}" y1="{y:.0f}" x2="{ax + 11}" y2="{ly:.0f}" '
+                       'stroke="#3b4a6b" stroke-width="1"/>')
+        dec = 1 if lbl.startswith("EM") else 0
+        lc = "#8a93a3" if kind == "faint" else color
+        svg.append(f'<text x="{ax + 13}" y="{ly + 4:.0f}" fill="{lc}" font-size="12" '
+                   f'font-family="inherit">{_h.escape(lbl)} {price:,.{dec}f}</text>')
+    svg.append('</svg>')
+    return "".join(svg)
+
+
+def _whatif_html(idx) -> str:
+    """Per-index 'what if' scenarios: rally (up) / sell-off (down) / chop (range)."""
+    import html as _h
+    wf = idx.get("what_if") or {}
+    rows = [("Rally", wf.get("rally"), "#34d399", "▲"),
+            ("Sell-off", wf.get("selloff"), "#f87171", "▼"),
+            ("Chop", wf.get("chop"), "#ffd54f", "▬")]
+    items = []
+    for lbl, txt, color, arrow in rows:
+        txt = (txt or "").strip()
+        if not txt:
+            continue
+        items.append(f'<div class="wf-row"><span class="wf-tag" style="color:{color}">'
+                     f'{arrow} {lbl}</span><span class="wf-txt">{_h.escape(txt)}</span></div>')
+    if not items:
+        return ""
+    return f'<div class="idx-whatif"><div class="wf-head">What if</div>{"".join(items)}</div>'
+
+
+def _index_card_html(idx) -> str:
+    import html as _h
+    sym = _h.escape(idx.get("symbol") or "")
+    note = _h.escape(idx.get("note") or "")
+    note_html = f'<div class="idx-note">{note}</div>' if note else ""
+    return (f'<div class="idx-card"><div class="idx-head">{sym}</div>'
+            f'<div class="idx-body">{_ladder_svg(idx)}'
+            f'<div class="idx-right">{_metric_tiles_html(idx)}{note_html}</div></div>'
+            f'{_whatif_html(idx)}</div>')
+
+
+def analyze_infographic_html(data, subtitle=None) -> str:
+    """Render the parsed analysis into the all-in-one dashboard infographic BODY
+    fragment: a regime banner + bias meter, a card per index (price-level ladder +
+    metric tiles + note), and a narrative footer. Wrapped by ``_analyze_doc``."""
+    import html as _h
+    d = data or {}
+    parts = ['<div class="ga-banner">'
+             f'<div class="ga-regime">{_h.escape(d.get("regime") or "—")}</div>'
+             f'{_bias_meter_html(d.get("bias"), d.get("bias_label"))}</div>']
+    headline = _h.escape(d.get("headline") or "")
+    if headline:
+        parts.append(f'<div class="ga-headline">{headline}</div>')
+    narrative = (d.get("narrative") or "").strip()
+    if narrative:
+        parts.append(f'<div class="ga-narr">{_analyze_md_to_html(narrative)}</div>')
+    for idx in d.get("indices") or []:
+        parts.append(_index_card_html(idx))
+    why = (d.get("why") or "").strip()
+    if why:
+        parts.append('<div class="ga-why"><div class="ga-why-h">Why is this happening</div>'
+                     f'<div class="ga-why-b">{_analyze_md_to_html(why)}</div></div>')
+    return "".join(parts)
+
+
 def gamma_analyze(client=None, label: str | None = None) -> dict:
     """Run the bundled SPX/SPY/QQQ briefing through Claude → ``{"html", "prompt"}``.
 
     Fetch each of $SPX/SPY/QQQ, build its analysis blocks (defensive per-symbol →
     None), bundle them via ``build_summary_prompt_bundled``, then call Claude
-    (Sonnet 4.6, thinking disabled) and render the reply as a standalone dark HTML
-    document the GUI serves in a new tab (mirrors ``gamma_explain``). ``client`` is
-    injected in tests; in production it is built from the resolved API key.
-    ``label`` (e.g. ``"Auto · Premarket · Jun 28 8:01 AM CT"``) is appended to the
-    doc subtitle so a scheduled run shows which slot + when it was generated.
+    (Sonnet 4.6, thinking disabled) forcing the ``submit_analysis`` tool, and render
+    the structured reply as the all-in-one dashboard infographic (regime banner +
+    bias meter, a price-level ladder + metric tiles per index, narrative footer) in a
+    standalone dark HTML document the GUI serves in a new tab (mirrors
+    ``gamma_explain``). ``client`` is injected in tests; in production it is built
+    from the resolved API key. ``label`` (e.g. ``"Auto · Premarket · Jun 28 8:01 AM
+    CT"``) is appended to the doc subtitle so a scheduled run shows which slot + when.
 
-    Every failure surface degrades to a readable HTML page (so the tab always opens):
-    no live chains (market closed) · no API key configured · API/network error ·
-    empty model reply. The ``html`` carries NO disclaimers (the system prompt
+    Returns ``{"html", "prompt", "analysis"}`` (``analysis`` = the parsed structured
+    payload). Every failure surface degrades to a readable HTML page (so the tab
+    always opens): no live chains (market closed) · no API key · API/network error ·
+    no/empty tool reply. The ``html`` carries NO disclaimers (the system prompt
     forbids them)."""
     import gamma_tool as gt
 
@@ -1400,11 +1759,17 @@ def gamma_analyze(client=None, label: str | None = None) -> dict:
     if label:
         subtitle = f"{subtitle} · {label}"
 
-    blocks = {}
+    blocks, em_by_sym = {}, {}
     for key, sym in (("spx", "$SPX"), ("spy", "SPY"), ("qqq", "QQQ")):
         try:
             chain = _gamma_fetch_chain(sym)
-            blocks[key] = _gamma_blocks_for(sym, chain) if chain else None
+            if chain:
+                blocks[key] = _gamma_blocks_for(sym, chain)
+                # Authoritative 1-day EM per symbol — overrides the model's copied
+                # value below so the displayed 'Exp. move' is code-computed, not AI-echoed.
+                em_by_sym[sym.lstrip("$").upper()] = _session_expected_move(chain)
+            else:
+                blocks[key] = None
         except Exception:
             blocks[key] = None
     try:
@@ -1432,22 +1797,36 @@ def gamma_analyze(client=None, label: str | None = None) -> dict:
             max_tokens=_ANALYZE_MAX_TOKENS,
             thinking={"type": "disabled"},
             system=_ANALYZE_SYSTEM,
+            tools=[_ANALYZE_TOOL],
+            tool_choice={"type": "tool", "name": "submit_analysis"},
             messages=[{"role": "user", "content": prompt}],
         )
-        text = "".join(
-            getattr(b, "text", "") for b in (getattr(resp, "content", None) or [])
-            if getattr(b, "type", None) == "text").strip()
+        tool_input = None
+        for b in (getattr(resp, "content", None) or []):
+            if (getattr(b, "type", None) == "tool_use"
+                    and getattr(b, "name", "") == "submit_analysis"):
+                tool_input = getattr(b, "input", None)
+                break
     except Exception as exc:  # noqa: BLE001 — surface the failure in the tab.
         return {"html": _analyze_doc(
             f"<p>AI analysis failed: <code>{exc}</code></p>"
             "<p>Try again in a moment — if it persists, check the API key and the "
             "service log.</p>", subtitle), "prompt": prompt}
 
-    if not text:
+    data = _parse_analysis(tool_input)
+    if not data:
         return {"html": _analyze_doc(
-            "<p>The model returned no analysis. Try Analyze again.</p>", subtitle),
-            "prompt": prompt}
-    return {"html": _analyze_doc(_analyze_md_to_html(text), subtitle), "prompt": prompt}
+            "<p>The model returned no usable analysis. Try Analyze again.</p>",
+            subtitle), "prompt": prompt}
+    # Code-authoritative expected move: replace the model's copied value with the
+    # 1-day EM computed above (matched by symbol), so the tile/ladder never show the
+    # engine's collapsed 0-DTE remaining-hours figure.
+    for idx in data.get("indices") or []:
+        k = (idx.get("symbol") or "").lstrip("$").upper()
+        if em_by_sym.get(k) is not None:
+            idx["expected_move"] = em_by_sym[k]
+    return {"html": _analyze_doc(analyze_infographic_html(data, subtitle), subtitle),
+            "prompt": prompt, "analysis": data}
 
 
 # ── Calculator (ported from webgui/pages/options/calculator.py) ──────────────

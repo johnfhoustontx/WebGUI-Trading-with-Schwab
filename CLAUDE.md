@@ -8,7 +8,31 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-06-27 (**EoD report redesign + Scanner/Paper/Driver UX batch**:
+**Last updated:** 2026-06-27 (**Gamma Analyze → live Claude API + infographic +
+4×/day auto-run**: the `/options/gamma` **Analyze** button no longer copies a prompt
+to a dialog — it now **calls Claude (Sonnet 4.6, thinking disabled, ~1.5k max-tokens)
+via a forced `submit_analysis` tool-use call** and renders the structured reply as a
+self-contained dark **infographic** served in a new browser tab (mirrors Explain's
+`/options/<view>` raw-`HTMLResponse` route pattern): a **regime banner + bias meter**,
+a **per-index card** ($SPX/SPY/QQQ) with a **price-level ladder** (spot vs gamma flip /
+call+put walls / expected-move band, with label de-collision) + **metric tiles** +
+note + a **per-symbol what-if** (▲ rally / ▼ sell-off / ▬ chop), and a **"Why is this
+happening"** section at the bottom. The **Exp. move** tile is a **code-authoritative
+1-day EM** (`spot·ATM_IV·√(1/365)` via `compute._session_expected_move`) that overrides
+the model's copy — the engine's `calc_expected_move_from_chain` is a 0-DTE
+remaining-hours EM that collapses to ~0 off-hours / at the close (the bug that surfaced
+SPX EM ≈ 3). It also **auto-runs on a schedule** (`scheduler.analyze_slot_due`: premarket
+09:00 ET / ~18 min after open 09:48 ET / midday 12:30 ET / close 15:58 ET, once per
+trading day within a 20-min grace) → `handlers.run_scheduled_gamma_analyze` caches each
+under its **own slot key** (`cache:options:gamma_analyze_{premarket,open,midday,close}`,
+separate from the ad-hoc `cache:options:gamma_analyze` so a scheduled run never
+auto-opens a tab); the Gamma page's **Auto briefings** buttons open each via
+`/options/analyze?slot=…`. Every failure degrades to a readable HTML page (no chains /
+no key / API error / no tool reply); output carries **no disclaimers**. Anthropic key
+resolved locally in `compute` (env `ANTHROPIC_API_KEY` → gitignored
+`shared/anthropic_key.txt`; options_svc does NOT import driver_svc). See the **"Gamma
+Analyze — Claude infographic + auto-run (DONE 2026-06-27)"** section below. **Earlier
+this session — EoD report redesign + Scanner/Paper/Driver UX batch**:
 the **`/eod` report** was rebuilt around **Daily / Weekly(WTD) / MTD performance per
 book** (manual ledger + Driver, separately) + **trade-type breakdowns** (strategy /
 0-DTE-Swing / status) + **TOC + collapsible `<details>` nav** (no JS — works in-app and
@@ -552,7 +576,7 @@ Routes:
 | `/options/portfolio` | Paper Portfolio (paper account) | built |
 | `/options/calculator` | Calculator (summary tiles + P&L heatmap — grid rows = **±N real chain strikes around spot** via the **Number of strikes** input (default 24, strictly around spot; `strikes_window`→`price_rows`); **intraday time-to-expiry** — the grid's first column is **"Now"** (current mark-to-market value, priced at calendar hours-to-4pm-ET /365) and the last is **"Exp"** (expiration payoff), fixing 0DTE which previously showed only the payoff everywhere; summary tiles + PoP also use the intraday "Now" T (was an `or 1/365` clamp that over-priced 0DTE ~20×); the **IV** button **implies IV from the traded contract's mark** ThinkorSwim-style via a `calc_iv` command → `cache:options:calc_iv` (`compute.calc_iv` → engine `implied_vol` bisection), falling back to ATM chain `volatility` pre-strike-pick; **multi-leg strategy builder** — a Strategy dropdown (singles + verticals credit/debit + condors iron/all-same + butterflies long/iron + calendars/diagonals) over the shared **editable leg-editor** (`leg_editor.py`: per-leg kind/side/strike/expiry/qty + Add/Remove), per-leg expiry so **calendars** price each leg at its own T, a **generic-numeric summary** for non-PCS/CCS/IC structures, and a **Copy to Simulator** button; **persists full UI state across navigation** (symbol/strategy/legs/fields/Number-of-strikes) + **auto-refreshes on return** via a single-user module snapshot — `page_state.py`; the **Symbol** field **Loads on tab-out (`focusout`) / Enter** (deduped via `inputs.should_load`; the Load button still force-reloads) with a **centered full-screen wait overlay** (`overlay.py`, `LOAD_TIMEOUT_SEC=30s` backstop) until the chain lands; the **top-level Expiry propagates to all legs** (`leg_editor.apply_expiry`, re-syncs strikes); **compact leg cells** (`leg-row`) + the **"Actions" header dropped**; **Send-to-Calculator from the Scanner now lands correctly** — `_prefill` stashes `pending_legs` + `load_symbol()` so the legs apply once the chain is loaded (applying them first wiped every strike via the leg-editor's strike-coercion — see [[calculator-leg-transfer-needs-chain-first]])) | built |
 | `/options/swing` | Swing Scanner | built |
-| `/options/gamma` | Gamma (GEX/Charm/DEX/Vanna bars + flip/**single Call+Put walls** + intraday heatmap; **fixed ±20-strike window** around spot for bars+heatmap (`strikes_around`, consistent candle/cell size all day; heatmap `rowsize`=median gap; heatmap cropped to the window); **blended interpolated heatmaps** (intraday **and Term**) — smooth image, no lines, dark `HEAT_STOPS` colorscale (zero→transparent like the candlestick chart), transparent bg, off-white spot line, no fade, **press-and-hold tooltip** (`_HEAT_PRESS_TOOLTIP_JS`); bar/heatmap **width split grows with session** snapshot count; **flicker-free** in-place Highcharts updates; **symbol is a dropdown** — default `$SPX`, populated from the collected universe (watchlist minus `$VIX`) via `cache:options:gamma_symbols`, **syncs to the cached symbol on build + selecting auto-refreshes + repaints ignore foreign-symbol snapshots** (no revert to `$SPX`); Term shows the **next 5 expirations regardless of cadence** (`_term_chain`); **off-hours persistence** — last session's candles+heatmap held until the next trading day's midnight CT (`active_session_date`/`gamma_cleared` + `load_date_with_grid`); off-hours `spot=None` degrades gracefully; Explain works per-selected-symbol) | built |
+| `/options/gamma` | Gamma (GEX/Charm/DEX/Vanna bars + flip/**single Call+Put walls** + intraday heatmap; **fixed ±20-strike window** around spot for bars+heatmap (`strikes_around`, consistent candle/cell size all day; heatmap `rowsize`=median gap; heatmap cropped to the window); **blended interpolated heatmaps** (intraday **and Term**) — smooth image, no lines, dark `HEAT_STOPS` colorscale (zero→transparent like the candlestick chart), transparent bg, off-white spot line, no fade, **press-and-hold tooltip** (`_HEAT_PRESS_TOOLTIP_JS`); bar/heatmap **width split grows with session** snapshot count; **flicker-free** in-place Highcharts updates; **symbol is a dropdown** — default `$SPX`, populated from the collected universe (watchlist minus `$VIX`) via `cache:options:gamma_symbols`, **syncs to the cached symbol on build + selecting auto-refreshes + repaints ignore foreign-symbol snapshots** (no revert to `$SPX`); Term shows the **next 5 expirations regardless of cadence** (`_term_chain`); **off-hours persistence** — last session's candles+heatmap held until the next trading day's midnight CT (`active_session_date`/`gamma_cleared` + `load_date_with_grid`); off-hours `spot=None` degrades gracefully; Explain works per-selected-symbol; **Analyze** calls Claude (forced `submit_analysis` tool) and opens an **infographic** tab — regime + bias gauge, per-index price-level ladder + tiles + **what-if** (rally/sell-off/chop), bottom **"Why is this happening"**; **code-authoritative 1-day Exp. move**; also **auto-runs 4×/day** (premarket / ~18 min after open / midday / close) into per-slot keys with **Auto briefings** buttons — see the "Gamma Analyze" section below) | built |
 | `/options/simulator` | Simulator (**multi-leg strategy builder** — a Strategy dropdown over the shared **editable leg-editor** (`leg_editor.py`) replaces the old single-contract selector — driving all three legacy tabs: **Replay** (re-prices the **netted** position along the underlying's recent path → stacked price + 5-Greek panels over a gap-compressed integer x-axis w/ a client-side scrub cursor) + What-if (a **dollar profit/loss payoff from entry**: P/L = position value (×100 contract multiplier) minus the **entry mark** (`whatif_baseline` = value at spot *now*) — so profit caps at the net credit, loss floors at width−credit, **matching the Calculator** — with a green profit fill above / red loss fill below breakeven (area `threshold:0` + `color`/`negativeColor`) + faint Profit/Loss washes + labels; Δt is **elapsed** days from now, per-leg decay → **calendars** correct, theta visible as Δt slides) + IV-shock; **Copy to Calculator** button; **dark-navy dashboard theme** via shared `theme.py`; **persists full UI state across navigation** (symbol/strategy/legs/sliders/active tab) + **auto-refreshes on return** via a single-user module snapshot — `page_state.py`; the **Symbol** field **Fetches the snapshot on tab-out (`focusout`) / Enter** (deduped) with the same **centered wait overlay** (`overlay.py`) until the meta lands; **compact leg cells** + no "Actions" header (shared `leg_editor`)) | built |
 | `/options/expected-move` | Expected Move (candlestick price history (6-mo daily) + forward **ATM-IV expected-move cone** to the option's expiration (green/red dashed, √-time fan) + leg **strike lines** (short solid / long dashed, put/call colored) + axis **crosshair** w/ Date(X)+Price(Y) label boxes; opened in a **new browser tab** via stash-handoff from Scanner/Paper/Captured/Calculator, or standalone w/ symbol+expiry input) | built |
 | `/options/rescue` | Rescue (at-risk credit spreads (PCS/CCS/IC) → **at-risk table** (paper+captured, heat-colored) → select a position → ranked **commission-aware adjustment menu**: close / partial-close / narrow / convert-IC / butterfly / roll-down/out/down-out / broken-wing / inverted / futures-hedge; each card shows gross/commission/net + metrics + legs + rationale + strategic context + warnings + score; execute cards have **Apply → confirm → `rescue_apply`** behind a stale-price guard, advisory cards show "manual"; nav badge from `cache:options:rescue_summary`) | built |
@@ -980,6 +1004,61 @@ service restart. **Term-structure** collection stays SPX-only, but the Gamma pag
 **Term view** fetches the **next 5 expirations regardless of cadence** at render
 (`compute._term_chain` widens the chain window — weekly/monthly-only names show 5
 columns, not 1).
+
+**Gamma Analyze — Claude infographic + auto-run (DONE — 2026-06-27).** The
+`/options/gamma` **Analyze** button evolved from a copy-paste prompt dialog into a
+live Claude call that renders an **infographic** in a new browser tab (and runs
+itself four times a day). All in `services/options_svc/compute.py` (Tier-2) +
+`webgui/main.py` route + `webgui/pages/options/gamma.py` (Tier-1). Pieces:
+- **Forced tool-use call.** `compute.gamma_analyze(client=None, label=None)` bundles
+  the live $SPX/SPY/QQQ GEX/Charm/DEX/Vanna blocks (`_gamma_blocks_for` →
+  `build_summary_prompt_bundled`) and calls **Claude Sonnet 4.6** (`_ANALYZE_MODEL`,
+  `thinking={"type":"disabled"}`, `max_tokens=1500`) forcing the **`submit_analysis`**
+  tool (`_ANALYZE_TOOL`) — the reply is one structured tool_use block, never free
+  text. `_parse_analysis` normalizes it (total over adversarial input, mirrors
+  `decider.parse_decision`). The `anthropic` import is LAZY; the key resolves in
+  `compute._anthropic_api_key` (env `ANTHROPIC_API_KEY` → gitignored
+  `shared/anthropic_key.txt`) — **options_svc does NOT import driver_svc** (kept local
+  to avoid the cross-app collision).
+- **Infographic render (pure, testable).** `analyze_infographic_html(data, subtitle)`
+  → a regime banner + **bias meter** (`_bias_meter_html`, −100…+100, sign-colored
+  marker); a **per-index card** (`_index_card_html`) = a **price-level ladder**
+  (`_ladder_svg`: spot vs gamma flip / call+put walls / expected-move band, with
+  **label de-collision** so clustered levels stay readable) + **metric tiles**
+  (`_metric_tiles_html`) + note + a **per-symbol what-if** (`_whatif_html`: ▲ rally /
+  ▼ sell-off / ▬ chop); and a bottom **"Why is this happening"** section. Wrapped by
+  `_analyze_doc` (the standalone dark doc + `_ANALYZE_CSS`). Output carries **no
+  disclaimers** (system-prompt-enforced).
+- **Code-authoritative Exp. move.** The engine's `calc_expected_move_from_chain` is a
+  **0-DTE remaining-hours-to-close** EM (`hours_left` clamps to 0.1h off-hours / at the
+  close → collapses to ~0; the bug that surfaced SPX EM ≈ 3). `compute._session_expected_move`
+  computes a stable **1-day** EM (`spot · ATM_IV · √(1/365)`, reusing the engine's
+  static `_find_nearest_exp_key`/`_get_atm_iv`) — used both in the prompt and as a
+  per-symbol **override** of the model's copied value, so the displayed EM is
+  engine-computed, not AI-echoed.
+- **4×/day auto-run.** `scheduler.analyze_slot_due(now, ran_slots)` fires once per
+  trading day per slot (CT: premarket 08:00 / open 08:48 [~18 min after the 09:30 ET
+  open] / midday 11:30 / close 14:58 → 09:00/09:48/12:30/15:58 ET) within a 20-min
+  grace (tolerates a missed tick / mid-window start, no stale backfill); the loop
+  latches `analyze_ran` BEFORE the blocking call so a slow call can't double-fire.
+  `handlers.run_scheduled_gamma_analyze(bus, slot)` runs `gamma_analyze(label=…)` and
+  caches under that slot's **own key** (`CACHE_GAMMA_ANALYZE_SCHED` =
+  `cache:options:gamma_analyze_{premarket,open,midday,close}`) — **separate** from the
+  ad-hoc `cache:options:gamma_analyze` so a scheduled run never trips the page's
+  `_watch_analyze` (which auto-opens a tab). The doc subtitle is stamped with the slot
+  + CT time.
+- **Serving + page.** `webgui/main.py` `@app.get("/options/analyze")` serves the cached
+  HTML raw (`analyze_html`); `?slot=premarket|open|midday|close` (`analyze_view_for`)
+  serves the auto-briefings, no slot → the ad-hoc result (mirrors `/options/explain`).
+  `gamma.py` `_watch_analyze` opens `/options/analyze?v=<version>` in a new tab on the
+  version-poll (like `_watch_explain`); a row of **Auto briefings** buttons opens each
+  slot's `/options/analyze?slot=…` (enabled once that slot's version is present).
+- **Graceful degradation everywhere** — no live chains (market closed) / no API key /
+  API error / no tool reply each return a readable HTML page so the tab always opens.
+- Tests: `services/options_svc/tests/{test_compute,test_handlers,test_scheduler}.py`
+  (tool-use render, EM override, parse defensiveness, slot cadence, scheduled-cache
+  isolation) + `webgui/tests/test_analyze_route.py`. Verified live end-to-end (real
+  Claude call → infographic; EM SPX 2.96→45.9 / SPY 0.27→4.22 / QQQ 0.52→8.0).
 
 **Options GUI polish batch (DONE — 2026-06-16).** A set of UI/UX fixes across the
 Options section (design/plan:

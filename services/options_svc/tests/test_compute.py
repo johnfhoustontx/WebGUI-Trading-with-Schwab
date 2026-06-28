@@ -953,9 +953,11 @@ def test_gamma_explain_returns_infographic_html(monkeypatch):
 
 class _FakeAnthropic:
     """Minimal stand-in for anthropic.Anthropic — records the create() kwargs and
-    returns a response whose content is one text block."""
+    returns a response with a single ``submit_analysis`` tool_use block (``tool_input``)
+    or, when ``tool_input`` is None, a plain text block (the no-tool-use path)."""
 
-    def __init__(self, text):
+    def __init__(self, tool_input=None, text=""):
+        self._tool_input = tool_input
         self._text = text
         self.kwargs = None
         outer = self
@@ -963,10 +965,32 @@ class _FakeAnthropic:
         class _Msgs:
             def create(self, **kw):
                 outer.kwargs = kw
-                block = type("B", (), {"type": "text", "text": outer._text})()
+                if outer._tool_input is not None:
+                    block = type("B", (), {"type": "tool_use", "name": "submit_analysis",
+                                           "input": outer._tool_input})()
+                else:
+                    block = type("B", (), {"type": "text", "text": outer._text})()
                 return type("R", (), {"content": [block]})()
 
         self.messages = _Msgs()
+
+
+_SAMPLE_ANALYSIS = {
+    "regime": "Short gamma below spot",
+    "bias": -25,
+    "bias_label": "Mildly bearish",
+    "headline": "SPX pinned into the close.",
+    "narrative": "Dealers are **short gamma** below spot, so dips can amplify.",
+    "why": "A hot CPI print this morning lifted yields and pressured the tape.",
+    "indices": [{
+        "symbol": "$SPX", "spot": 7354, "gamma_flip": 7348, "call_wall": 7370,
+        "put_wall": 7335, "max_pain": 7350, "expected_move": 11, "pc_ratio": 0.83,
+        "note": "Pinned near the flip.",
+        "what_if": {"rally": "Reclaim 7370 and dealers chase higher.",
+                    "selloff": "Lose 7348 and gamma flips short toward 7335.",
+                    "chop": "Hold 7348-7370 and grind sideways."},
+    }],
+}
 
 
 def _patch_analyze_bundle(monkeypatch):
@@ -988,24 +1012,82 @@ def _patch_analyze_bundle(monkeypatch):
     return seen
 
 
-def test_gamma_analyze_calls_api_and_renders_html(monkeypatch):
+def test_gamma_analyze_calls_api_and_renders_infographic(monkeypatch):
     seen = _patch_analyze_bundle(monkeypatch)
-    client = _FakeAnthropic("## SPX\n\n- **gamma flip** at 5000\n")
+    client = _FakeAnthropic(tool_input=_SAMPLE_ANALYSIS)
 
     out = compute.gamma_analyze(client=client)
 
-    # All three symbol bundles built (non-None) and fed to the model verbatim.
+    # All three symbol bundles built (non-None) and fed to the model verbatim, with
+    # the submit_analysis tool forced + thinking disabled.
     assert all(b is not None for b in seen["args"])
     assert client.kwargs["model"] == compute._ANALYZE_MODEL
     assert client.kwargs["thinking"] == {"type": "disabled"}
+    assert client.kwargs["tool_choice"]["name"] == "submit_analysis"
     assert client.kwargs["messages"][0]["content"] == "BUNDLED PROMPT"
-    # Output is a standalone HTML doc carrying the model's rendered analysis.
+    # Output is a standalone HTML infographic built from the structured data.
     html = out["html"]
     assert html.lstrip().startswith("<!DOCTYPE html>")
-    assert "Gamma Analysis" in html
-    assert "gamma flip" in html and "<strong>" in html  # markdown → HTML
+    assert "Short gamma below spot" in html          # regime banner
+    assert "Mildly bearish" in html                  # bias meter label
+    assert "<svg" in html and "Call wall" in html     # price-level ladder
+    assert "7,370" in html                            # call wall in a tile/ladder
+    assert "short gamma" in html.lower() and "<strong>" in html  # narrative (markdown)
+    # Per-index what-if (rally / sell-off / chop) + bottom "Why is this happening".
+    assert "What if" in html and "Rally" in html and "Sell-off" in html and "Chop" in html
+    assert "Reclaim 7370" in html and "gamma flips short" in html
+    assert "Why is this happening" in html and "hot CPI print" in html
     assert out["prompt"] == "BUNDLED PROMPT"
+    assert out["analysis"]["bias"] == -25
     del _FakeEngine.calc_expected_move_from_chain
+
+
+def test_gamma_analyze_overrides_em_with_authoritative(monkeypatch):
+    # The model's copied expected_move is replaced by the code-computed 1-day EM
+    # (matched by symbol), so the displayed value is authoritative, not AI-echoed.
+    _patch_analyze_bundle(monkeypatch)
+    monkeypatch.setattr(compute, "_session_expected_move", lambda chain: 46.0)
+    client = _FakeAnthropic(tool_input=_SAMPLE_ANALYSIS)  # sample SPX expected_move = 11
+
+    out = compute.gamma_analyze(client=client)
+    spx = next(i for i in out["analysis"]["indices"] if i["symbol"] == "$SPX")
+    assert spx["expected_move"] == 46.0          # overridden, not the model's 11
+    assert "46.0" in out["html"]
+    del _FakeEngine.calc_expected_move_from_chain
+
+
+def test_session_expected_move_defensive():
+    assert compute._session_expected_move(None) is None
+    assert compute._session_expected_move({}) is None
+    assert compute._session_expected_move({"underlyingPrice": 0}) is None
+
+
+def test_gamma_analyze_no_tool_use_degrades(monkeypatch):
+    _patch_analyze_bundle(monkeypatch)
+    client = _FakeAnthropic(tool_input=None, text="(no tool call)")  # text-only reply
+
+    out = compute.gamma_analyze(client=client)
+    assert out["html"].lstrip().startswith("<!DOCTYPE html>")
+    assert "no usable analysis" in out["html"].lower()
+    del _FakeEngine.calc_expected_move_from_chain
+
+
+def test_parse_analysis_defensive():
+    assert compute._parse_analysis(None) is None
+    assert compute._parse_analysis({}) is None  # nothing renderable
+    out = compute._parse_analysis({
+        "headline": "x", "bias": "not-a-number",
+        "indices": [{"symbol": "SPY", "spot": "abc", "call_wall": 700}, "junk"]})
+    assert out["bias"] is None and out["indices"][0]["spot"] is None
+    assert out["indices"][0]["call_wall"] == 700.0 and len(out["indices"]) == 1
+
+
+def test_analyze_infographic_html_handles_missing_fields():
+    # A sparse index (only a spot) still renders tiles ('—' for missing) + a ladder.
+    html = compute.analyze_infographic_html(
+        {"regime": "R", "bias": 10, "headline": "H", "narrative": "",
+         "indices": [{"symbol": "QQQ", "spot": 500}]})
+    assert "QQQ" in html and "—" in html and "<svg" in html
 
 
 def test_gamma_analyze_no_key_returns_config_message(monkeypatch):
