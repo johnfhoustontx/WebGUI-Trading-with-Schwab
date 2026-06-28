@@ -118,6 +118,7 @@ PAGE = (
     "rounded-[14px] border border-[#1d2942] p-[18px_20px_22px] text-[#cdd8ee] "
     "bg-[radial-gradient(130%_90%_at_50%_-20%,#16243f_0%,#0c1424_55%,#0a0f1c_100%)]"
 )
+# px-4 py-3.5 = 16px/14px = .calc-card padding (14px 16px) — axis mapping is deliberate.
 CARD = "bg-[#101a30] border border-[#213152] rounded-[12px] px-4 py-3.5"
 EYEBROW = "text-[#8794b4] text-[12px] tracking-[.02em]"
 LABEL = "text-[#eaf0fb]"
@@ -158,6 +159,12 @@ QUASAR_INTERNAL_CSS = """
 .calc-v2 .q-field__native,.calc-v2 .q-field__native input,
 .calc-v2 .q-field__native textarea,.calc-v2 .q-field__native span{color:#e7edf8!important;}
 .calc-v2 .q-field__append .q-icon,.calc-v2 .q-field__prepend .q-icon{color:#8794b4;}
+/* Strategy menu button internals — the q-btn__content layout + icon color are
+   Quasar-internal (component .classes() can't reach them), so they must survive
+   when a later phase swaps the button BOX style to the STRATEGY_BTN token. The
+   base box rule (bg/border/radius/min-height) is intentionally NOT here. */
+.calc-v2 .strategy-menu-btn .q-btn__content{justify-content:space-between;flex:1;text-transform:none;}
+.calc-v2 .strategy-menu-btn .q-icon{color:#8794b4;}
 /* Leg table header row */
 .calc-v2 .leg-head{color:#7f8db0;font-size:12px;padding:0 2px 4px;}
 /* Leg table rows — compact cells (less top/bottom padding, shorter height) and

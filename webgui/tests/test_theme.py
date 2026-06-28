@@ -15,7 +15,7 @@ def test_tokens_are_class_strings_not_css():
     # contain CSS rule syntax (the whole point of the migration).
     for name in TOKENS:
         val = getattr(theme, name)
-        assert "{" not in val and ";" not in val and ":hover{" not in val, \
+        assert "{" not in val and ";" not in val, \
             f"{name} looks like CSS, not a class string"
 
 
