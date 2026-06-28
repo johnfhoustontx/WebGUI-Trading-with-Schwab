@@ -60,3 +60,21 @@ def test_composite_score_predicts():
     w = backtest.icir_weights({c: backtest.factor_ic(f[c], fwd) for c in f.columns})
     comp = backtest.composite(z, w)
     assert backtest.factor_ic(comp, fwd)["mean_ic"] > 0.7
+
+
+def test_walk_forward_reports_oos_ic():
+    f, fwd = _panel(n_days=400)
+    res = backtest.walk_forward(f, fwd, train=150, test=50, step=50)
+    assert res["oos_ic"] > 0.5
+    assert res["n_folds"] >= 2
+    assert "good" in res["weights"]
+
+
+def test_calibration_bands_monotone():
+    f, fwd = _panel()
+    z = backtest.zscore_by_date(f)
+    w = backtest.icir_weights({c: backtest.factor_ic(f[c], fwd) for c in f.columns})
+    comp = backtest.composite(z, w)
+    bands = backtest.calibrate(comp, fwd, n_bands=5)
+    means = [b["mean_fwd"] for b in bands]
+    assert means == sorted(means)

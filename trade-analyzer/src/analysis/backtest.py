@@ -90,3 +90,47 @@ def composite(zscores: pd.DataFrame, weights: Dict[str, float]) -> pd.Series:
         return pd.Series(np.nan, index=zscores.index)
     w = pd.Series({c: weights[c] for c in cols})
     return (zscores[cols] * w).sum(axis=1, min_count=1)
+
+
+def walk_forward(factors, forward, train=252, test=63, step=63) -> dict:
+    """Rolling train->test. Fit ICIR-weights on each train window, score the next
+    (unseen) test window, collect the composite's OOS IC. Returns oos_ic, fold
+    count, the per-fold OOS ICs, and the weights from the LAST train window."""
+    dates = factors.index.get_level_values("date").unique().sort_values()
+    folds, oos_ics, last_weights = 0, [], {}
+    i = train
+    while i + test <= len(dates):
+        tr = dates[i - train:i]
+        te = dates[i:i + test]
+        f_tr = factors[factors.index.get_level_values("date").isin(tr)]
+        y_tr = forward[forward.index.get_level_values("date").isin(tr)]
+        f_te = factors[factors.index.get_level_values("date").isin(te)]
+        y_te = forward[forward.index.get_level_values("date").isin(te)]
+        w = icir_weights({c: factor_ic(f_tr[c], y_tr) for c in f_tr.columns})
+        comp_te = composite(zscore_by_date(f_te), w)
+        oos_ics.append(factor_ic(comp_te, y_te)["mean_ic"])
+        last_weights = w
+        folds += 1
+        i += step
+    oos = float(np.nanmean(oos_ics)) if oos_ics else 0.0
+    return {"oos_ic": oos, "n_folds": folds, "weights": last_weights,
+            "oos_ic_by_fold": [float(x) for x in oos_ics]}
+
+
+def calibrate(comp: pd.Series, forward: pd.Series, n_bands: int = 5) -> list:
+    """Bucket composite scores into n_bands by quantile; per band record score
+    range, mean forward, hit-rate P(forward>0), n. Sorted ascending by score."""
+    df = pd.DataFrame({"c": comp, "y": forward}).dropna()
+    if len(df) < n_bands:
+        return []
+    df["band"] = pd.qcut(df["c"].rank(method="first"), n_bands, labels=False)
+    out = []
+    for b, g in df.groupby("band"):
+        out.append({
+            "band": int(b),
+            "score_lo": float(g["c"].min()), "score_hi": float(g["c"].max()),
+            "mean_fwd": float(g["y"].mean()),
+            "hit_rate": float((g["y"] > 0).mean()),
+            "n": int(len(g)),
+        })
+    return sorted(out, key=lambda d: d["score_lo"])
