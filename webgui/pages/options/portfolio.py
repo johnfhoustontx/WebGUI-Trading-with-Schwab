@@ -19,6 +19,7 @@ from nicegui import ui
 from pages.ui_guard import guard
 
 from .rescue import heat_border_class
+from .theme import BTN_3D
 
 # rescue_state values that mark a position at-risk. The options_svc manage cycle
 # tags THIS view (cache:options:paper_account) with rescue_state/heat via
@@ -126,12 +127,12 @@ def render():
 
     with ui.row().classes("items-center gap-2 flex-wrap w-full"):
         ui.button("Reload", icon="refresh", on_click=lambda: _reload())
-        ui.button("Run entry cycle", icon="login", on_click=lambda: _cycle("entry")) \
-            .props("outline") \
+        ui.button("Run entry cycle", icon="login", color=None, on_click=lambda: _cycle("entry")) \
+            .props("no-caps").classes(BTN_3D) \
             .tooltip("Simulate auto-entry: scan open captured signals and open paper "
                      "positions for the eligible ones (fills via the paper broker).")
-        ui.button("Run manage cycle", icon="manage_accounts", on_click=lambda: _cycle("manage")) \
-            .props("outline") \
+        ui.button("Run manage cycle", icon="manage_accounts", color=None, on_click=lambda: _cycle("manage")) \
+            .props("no-caps").classes(BTN_3D) \
             .tooltip("Reprice open positions and auto-close any that hit their target/stop. "
                      "Runs automatically every 5 min during market hours; this button forces "
                      "an immediate run.")

@@ -22,6 +22,7 @@ from pages.ui_guard import guard
 
 from . import detail, handoff
 from .rescue import heat_border_class
+from .theme import BTN_3D_DANGER
 
 # rescue_state values that mark a signal at-risk (tested/critical). Captured
 # signals are advisory-only and the manage-cycle rescue overlay only tags paper
@@ -206,8 +207,8 @@ def render():
                 ui.button("Reload", icon="refresh", on_click=lambda: _reload())
                 ui.button("Refresh marks (live)", icon="published_with_changes",
                           on_click=lambda: _reprice())
-                ui.button("Close selected", icon="check_circle",
-                          on_click=lambda: _close()).props("outline")
+                ui.button("Close selected", icon="check_circle", color=None,
+                          on_click=lambda: _close()).props("no-caps").classes(BTN_3D_DANGER)
                 status = ui.label("").classes("opacity-70")
             table = ui.table(columns=captured_columns(), rows=[],
                              row_key="id").classes("w-full captured-table").props("dense")

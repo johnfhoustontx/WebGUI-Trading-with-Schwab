@@ -23,6 +23,8 @@ from zoneinfo import ZoneInfo
 import bus_client
 from nicegui import ui
 
+from pages.options.theme import BTN_3D
+
 # Where generated standalone reports are archived (under the gitignored data dir).
 ARCHIVE_ROOT = Path(__file__).resolve().parents[1] / "data" / "eod"
 
@@ -627,11 +629,12 @@ def render() -> None:
         container.clear()
         with container:
             with ui.row().classes("items-center gap-2"):
-                ui.button("Generate", icon="play_arrow", on_click=_on_generate)
-                ui.button("Open summary file", icon="open_in_new",
-                          on_click=lambda: _open_file("summary")).props("flat")
-                ui.button("Open detail file", icon="open_in_new",
-                          on_click=lambda: _open_file("detail")).props("flat")
+                ui.button("Generate", icon="play_arrow", color=None,
+                          on_click=_on_generate).props("no-caps").classes(BTN_3D)
+                ui.button("Open summary file", icon="open_in_new", color=None,
+                          on_click=lambda: _open_file("summary")).props("no-caps").classes(BTN_3D)
+                ui.button("Open detail file", icon="open_in_new", color=None,
+                          on_click=lambda: _open_file("detail")).props("no-caps").classes(BTN_3D)
             dates = archive_dates(ARCHIVE_ROOT)
             if dates:
                 with ui.row().classes("items-center gap-2 flex-wrap"):

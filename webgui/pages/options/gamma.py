@@ -17,7 +17,7 @@ STRINGS. The pure builders (``bars_from_gex`` sorts + numeric-compares strikes;
 via ``_refloat_keys`` BEFORE feeding the builders. The builders stay unchanged.
 """
 from pages.ui_guard import guard, guard_async
-from .theme import TXT_POS, TXT_NEG, TXT_NEUTRAL
+from .theme import TXT_POS, TXT_NEG, TXT_NEUTRAL, BTN_3D
 
 POS_COLOR = "#66bb6a"
 NEG_COLOR = "#ef5350"
@@ -612,8 +612,8 @@ def render():
         fetch_btn = ui.button("Refresh now", icon="refresh")
         view_toggle = ui.toggle({v: _view_label(v) for v in list(_VIEWS) + ["Term"]},
                                  value="GEX")
-        explain_btn = ui.button("Explain", icon="help").props("outline")
-        analyze_btn = ui.button("Analyze", icon="psychology").props("outline")
+        explain_btn = ui.button("Explain", icon="help", color=None).props("no-caps").classes(BTN_3D)
+        analyze_btn = ui.button("Analyze", icon="psychology", color=None).props("no-caps").classes(BTN_3D)
         countdown_lbl = ui.label("").classes("opacity-60 text-sm")
     # Auto briefings (today): the $SPX/SPY/QQQ Analyze runs the options service
     # auto-generates at premarket / ~18 min after open / midday / close. Each button
