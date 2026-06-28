@@ -441,9 +441,10 @@ def get_prior():
 # offline calibration was built. That requires a snapshot of every factor's
 # current value across a representative universe. Like the Markov prior it is
 # rebuilt lazily at most once per day and cached in Redis; analyze() reads it via
-# get_universe_snapshot(). Reuses _MK_UNIVERSE (the same curated, sector-diverse
-# set). Defensive throughout: any failure yields {} so the scorer falls back to
-# the artifact's historical per-factor norm (and analyze() to the legacy verdict).
+# get_universe_snapshot(). Uses the model's fit_universe — the SAME cross-section the
+# calibration was built on (~78 names) — falling back to the smaller _MK_UNIVERSE when
+# the artifact predates the field. Defensive throughout: any failure yields {} so the
+# scorer falls back to the artifact's historical per-factor norm (and analyze() to legacy).
 _UNIVERSE_KEY = "cache:trade:universe_factors"
 
 
@@ -477,13 +478,28 @@ def _symbol_factor_row(sym):
         return {}
 
 
+def _swing_universe():
+    """Symbols for the swing cross-section snapshot — the SAME set the model was fit
+    on (the artifact's ``fit_universe``), so live z-scores sit on the calibration's
+    cross-section. Falls back to the smaller _MK_UNIVERSE when the artifact predates
+    the field or is unreadable."""
+    try:
+        from services.trade_svc import swing_model as _sw  # local: _swing is analyze()-scoped
+        u = (_sw.load_artifact() or {}).get("fit_universe")
+        if u and len(u) >= 10:
+            return list(u)
+    except Exception:
+        pass
+    return list(_MK_UNIVERSE)
+
+
 def build_universe_factor_snapshot():
     """Assemble {factor: [values across the universe]} from the latest per-symbol
     factor rows (NaN/missing dropped). Fetches concurrently; never raises."""
     snapshot = {}
     try:
         results = parallel_map(lambda s: (s, _symbol_factor_row(s)),
-                               list(_MK_UNIVERSE))
+                               _swing_universe())
         for _sym, row in results:
             for factor, value in (row or {}).items():
                 if value is not None and np.isfinite(value):

@@ -89,6 +89,22 @@ def test_get_universe_snapshot_rebuilds_when_stale(monkeypatch):
     assert snap == {"mom_12_1": [0.5]}
 
 
+def test_swing_universe_reads_fit_universe(monkeypatch):
+    # The snapshot universe is the model's fit_universe (the calibration cross-section).
+    from services.trade_svc import swing_model
+    u10 = [f"S{i}" for i in range(10)]
+    monkeypatch.setattr(swing_model, "load_artifact", lambda: {"fit_universe": u10})
+    assert compute._swing_universe() == u10
+
+
+def test_swing_universe_falls_back_to_mk_universe(monkeypatch):
+    # No artifact / no field / too-thin list -> fall back to the curated _MK_UNIVERSE.
+    from services.trade_svc import swing_model
+    for bad in (None, {}, {"fit_universe": []}, {"fit_universe": ["A", "B"]}):
+        monkeypatch.setattr(swing_model, "load_artifact", lambda b=bad: b)
+        assert compute._swing_universe() == list(compute._MK_UNIVERSE)
+
+
 def test_handler_fields_include_swing_model():
     from services.trade_svc import handlers
     assert "swing_model" in handlers._FIELDS

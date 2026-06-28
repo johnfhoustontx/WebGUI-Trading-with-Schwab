@@ -162,7 +162,7 @@ def fit():
 
     artifact = {
         "version": date.today().isoformat(),
-        "fit_universe_n": used, "horizon": HORIZON,
+        "fit_universe_n": used, "fit_universe": sorted(UNIVERSE_SECTOR), "horizon": HORIZON,
         "regimes": {"all": {
             "weights": weights,
             "factor_ic": {c: {k: ics[c][k] for k in ("mean_ic", "icir", "n_days")} for c in cols},

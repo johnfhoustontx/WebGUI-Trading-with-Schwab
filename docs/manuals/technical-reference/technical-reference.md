@@ -631,12 +631,15 @@ on), the `calibration` bands, and `oos_ic` + `oos_ic_by_fold` + `n_folds`.
 
 **Live scorer** (`swing_model.py`, on-demand inside `analyze()`; **defensive** — returns
 `None` on any failure so `analyze()` falls back to the legacy verdict). For the symbol's
-current factor values it computes `z = (value − norm.mean) / norm.std` on the artifact's
-**cross-sectional norm** (the PRIMARY, calibration-consistent basis, independent of the
-live cross-section size; the daily `cache:trade:universe_factors` snapshot is a noisy
-SECONDARY fallback). Each z is **clipped to ±3** (`Z_CLIP`, matching the fit's per-date
-2/98 winsorization, so a live outlier such as a turnover spike can't hijack the signed
-composite). Then:
+current factor values it computes **cross-sectional** z-scores — each factor standardized
+against the SAME factor across the **current universe snapshot** (`cache:trade:universe_factors`,
+built over the artifact's `fit_universe`, ~78 names). This RE-CENTERS to today's regime,
+matching how the per-date calibration was built; the artifact's time-averaged `norm` is a
+FALLBACK only (used when the snapshot is too thin, <5 names). **(This re-centering fixed a
+"Position always BUY" bug — norm-primary scoring did not re-center, so in an elevated
+regime every symbol's z shifted positive into the top/BUY band.)** Each z is **clipped to
+±3** (`Z_CLIP`, matching the fit's per-date 2/98 winsorization, so a live outlier such as a
+turnover spike can't hijack the signed composite). Then:
 
 ```
 composite  = Σ_k  signed_weight_k · clip(z_k, −3, +3)

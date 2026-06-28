@@ -73,12 +73,15 @@ labels, and writes the versioned **artifact `trade-analyzer/data/swing_model.jso
 (signed weights + per-factor IC + cross-sectional norm + score→outcome calibration +
 walk-forward OOS IC) + a markdown research report (both gitignored under `data/`). A
 LIVE scorer (`services/trade_svc/swing_model.py`, on-demand in `analyze()`, defensive →
-falls back to legacy/None) z-scores the symbol's current factors on the artifact's
-**cross-sectional norm** (calibration-consistent), **clips z to ±3**, composites with
-the signed weights, and reads **BUY/SELL/HOLD off the calibration band** + a percentile
+falls back to legacy/None) z-scores the symbol's current factors **CROSS-SECTIONALLY
+against the current universe snapshot** (re-centered to today's regime — the
+calibration-consistent basis; the artifact's time-averaged norm is only a thin-snapshot
+fallback), **clips z to ±3**, composites with the signed weights, and reads
+**BUY/SELL/HOLD off the calibration band** + a percentile
 + expected forward return + beat-SPY hit-rate. Additive optional **`swing_model`** block
-on `TradeAnalysis`; a daily `cache:trade:universe_factors` snapshot is a defensive
-fallback basis. The `/trade` Position card shows the validated verdict as the headline +
+on `TradeAnalysis`; the daily `cache:trade:universe_factors` snapshot — built over the
+artifact's **`fit_universe`** (~78-name fit cross-section) — is the scoring basis (the
+time-averaged norm is the thin-snapshot fallback). The `/trade` Position card shows the validated verdict as the headline +
 a calibrated outcome line + a **"Why — validated factors"** evidence expander, with the
 **legacy heuristic** verdict tucked into a collapsed expander (Investor + Markov cards
 unchanged — the **Markov card still forecasts the legacy technical-momentum score**, a
@@ -1441,9 +1444,10 @@ the edge is thin and regime-dependent. Architecture = **offline fit → versione
   hit_rate / n), and **`oos_ic`** + `oos_ic_by_fold` + `n_folds`.
 - **LIVE scorer** `services/trade_svc/swing_model.py` (on-demand, defensive → returns
   `None` so `analyze()` falls back to the legacy verdict on ANY failure): loads the
-  artifact, z-scores the symbol's current factors on the artifact's **cross-sectional
-  norm** (PRIMARY — calibration-consistent regardless of the live cross-section size; the
-  cached universe snapshot is a noisy SECONDARY fallback), **clips z to ±3** (`Z_CLIP` —
+  artifact, z-scores the symbol's current factors **CROSS-SECTIONALLY against the current
+  universe snapshot** (PRIMARY — re-centered to today's regime, matching how the per-date
+  calibration was built; the artifact's time-averaged norm is a FALLBACK only, used when
+  the snapshot is too thin, <5 names), **clips z to ±3** (`Z_CLIP` —
   matches the fit's per-date 2/98 winsorization; stops a live outlier like a turnover
   spike hijacking the signed composite), `composite = Σ signed_weight × z`, then reads the
   **calibration band** containing the composite → **BUY** (top band) / **SELL** (bottom) /
@@ -1451,10 +1455,20 @@ the edge is thin and regime-dependent. Architecture = **offline fit → versione
   hit-rate, and per-factor contributions (z · weight · contribution · historical IC).
   `analyze()` fetches **2-yr daily** so every long-warmup factor (mom_12_1 needs 273 bars;
   pth/low_vol roll 252) populates at the last bar.
+- **Fix — "Position always BUY" (2026-06-28):** the live scorer originally used the
+  artifact's **time-averaged** norm as the PRIMARY z-basis, which does NOT re-center to the
+  current regime. In this elevated-momentum/-vol bull period every symbol's z shifted
+  positive (most starkly `low_vol`: tiny norm std × big negative weight → a saturated ±3 z
+  → ≈ +1.0 contribution that dominated), so the composite cleared the top band and **every
+  symbol scored BUY**. Fixed by re-centering to the **current cross-section** (the snapshot,
+  PRIMARY) — matching the per-date calibration basis — and **widening** that snapshot to the
+  artifact's `fit_universe` (~78 names, was ~17) for stable z's. Verified live: the universe
+  now scores ≈ **8 BUY / 49 HOLD / 8 SELL** (was ~all BUY); NVDA/PLTR flipped BUY → HOLD.
 - **Contract / cache:** additive optional **`swing_model`** block on `TradeAnalysis`
   (→ `cache:trade:analysis`); `compute.get_universe_snapshot()` lazily rebuilds a daily
-  **`cache:trade:universe_factors`** snapshot ({factor: [values across the curated
-  universe]}) as the defensive cross-sectional fallback basis.
+  **`cache:trade:universe_factors`** snapshot ({factor: [values across the artifact's
+  **`fit_universe`** ~78-name fit cross-section]}) as the PRIMARY cross-sectional scoring
+  basis — `_swing_universe()` reads `fit_universe`, falling back to the smaller `_MK_UNIVERSE`.
 - **UI** `webgui/pages/trade.py` (Position card): the validated swing verdict is the
   **headline** + a calibrated outcome line (e.g. `90th pctile · +1.3% excess / 20d · 52%
   beat-SPY` via `swing_headline`), a **"Why — validated factors"** expander (per-factor z

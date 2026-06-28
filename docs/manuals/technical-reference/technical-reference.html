@@ -894,12 +894,15 @@ time-averaged winsorized cross-sectional mean/std — the basis the calibration 
 on), the <code>calibration</code> bands, and <code>oos_ic</code> + <code>oos_ic_by_fold</code> + <code>n_folds</code>.</p>
 <p><strong>Live scorer</strong> (<code>swing_model.py</code>, on-demand inside <code>analyze()</code>; <strong>defensive</strong> — returns
 <code>None</code> on any failure so <code>analyze()</code> falls back to the legacy verdict). For the symbol's
-current factor values it computes <code>z = (value − norm.mean) / norm.std</code> on the artifact's
-<strong>cross-sectional norm</strong> (the PRIMARY, calibration-consistent basis, independent of the
-live cross-section size; the daily <code>cache:trade:universe_factors</code> snapshot is a noisy
-SECONDARY fallback). Each z is <strong>clipped to ±3</strong> (<code>Z_CLIP</code>, matching the fit's per-date
-2/98 winsorization, so a live outlier such as a turnover spike can't hijack the signed
-composite). Then:</p>
+current factor values it computes <strong>cross-sectional</strong> z-scores — each factor standardized
+against the SAME factor across the <strong>current universe snapshot</strong> (<code>cache:trade:universe_factors</code>,
+built over the artifact's <code>fit_universe</code>, ~78 names). This RE-CENTERS to today's regime,
+matching how the per-date calibration was built; the artifact's time-averaged <code>norm</code> is a
+FALLBACK only (used when the snapshot is too thin, &lt;5 names). <strong>(This re-centering fixed a
+"Position always BUY" bug — norm-primary scoring did not re-center, so in an elevated
+regime every symbol's z shifted positive into the top/BUY band.)</strong> Each z is <strong>clipped to
+±3</strong> (<code>Z_CLIP</code>, matching the fit's per-date 2/98 winsorization, so a live outlier such as a
+turnover spike can't hijack the signed composite). Then:</p>
 <pre><code>composite  = Σ_k  signed_weight_k · clip(z_k, −3, +3)
 band       = the calibration band whose [score_lo, score_hi] contains the composite
 verdict    = BUY (top band) | SELL (bottom band) | HOLD (otherwise)

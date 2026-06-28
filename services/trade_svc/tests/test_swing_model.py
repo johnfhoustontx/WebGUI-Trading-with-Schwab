@@ -46,12 +46,36 @@ def test_score_symbol_middle_band_is_hold():
     assert out["verdict"] == "HOLD"
 
 
-def test_score_symbol_uses_norm_not_snapshot(monkeypatch):
-    # with norm-primary, the verdict is independent of (a noisy) snapshot
+def test_score_symbol_thin_snapshot_falls_back_to_norm():
+    # A snapshot with <5 names can't form a stable cross-section, so _zscore returns
+    # None and the scorer falls back to the artifact norm — the verdict is then the
+    # norm-based one, independent of the thin snapshot.
     cur = {"mom_12_1": 0.5, "low_vol": -0.05}
-    a = sm.score_symbol(cur, None, _ARTIFACT)
-    b = sm.score_symbol(cur, {"mom_12_1": [0.49, 0.5, 0.51]}, _ARTIFACT)
-    assert a["score"] == b["score"]   # snapshot no longer drives the composite
+    a = sm.score_symbol(cur, None, _ARTIFACT)                             # no snapshot -> norm
+    b = sm.score_symbol(cur, {"mom_12_1": [0.49, 0.5, 0.51]}, _ARTIFACT)  # 3 names (<5) -> norm
+    assert a["score"] == b["score"]
+
+
+def test_score_recenters_to_current_cross_section_not_stale_norm():
+    # Regression for the "always BUY" bug: the current cross-section sits FAR above
+    # the artifact's stale norm. A symbol that is merely AVERAGE for the current
+    # regime must score HOLD (re-centered z ~ 0 -> middle band), NOT BUY. The old
+    # norm-primary path returned BUY (mom_12_1 z = (0.5-0)/0.1 = 5 vs the stale norm).
+    snap = {"mom_12_1": [0.30, 0.40, 0.50, 0.60, 0.70],      # 5 names, current mean 0.50
+            "low_vol": [-0.05, -0.04, -0.03, -0.02, -0.01]}   # current mean -0.03
+    cur = {"mom_12_1": 0.50, "low_vol": -0.03}                # average for the current regime
+    out = sm.score_symbol(cur, snap, _ARTIFACT)
+    assert out["verdict"] == "HOLD"
+
+
+def test_score_symbol_cross_section_drives_verdict():
+    # With a usable (>=5-name) snapshot the composite is driven by the symbol's rank
+    # WITHIN the current cross-section: top -> BUY, bottom -> SELL.
+    snap = {"mom_12_1": [0.30, 0.40, 0.50, 0.60, 0.70]}       # mean 0.50, std ~0.141
+    top = sm.score_symbol({"mom_12_1": 0.70}, snap, _ARTIFACT)
+    bot = sm.score_symbol({"mom_12_1": 0.30}, snap, _ARTIFACT)
+    assert top["verdict"] == "BUY"
+    assert bot["verdict"] == "SELL"
 
 
 def test_score_symbol_signed_weight_low_vol_subtracts():

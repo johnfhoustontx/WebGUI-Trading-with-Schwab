@@ -1,16 +1,21 @@
-"""Live swing-model scorer (Tier-2). Loads the offline artifact and scores ONE
-symbol's current factors on the artifact's CROSS-SECTIONAL norm — the same basis
-the calibration bands were built on (zscore_by_date winsorizes+standardizes per
-date), so a live raw factor lands on the calibration's scale regardless of the
-live cross-section size. The cached universe snapshot (~20-name watchlist) is a
-SECONDARY fallback only (noisy, and not on the calibration scale). Pure scoring;
-the artifact loader is thin (monkeypatched in tests). Defensive: returns None on
-any failure so analyze() falls back to legacy.
+"""Live swing-model scorer (Tier-2). Scores ONE symbol's current factors
+CROSS-SECTIONALLY — each factor z-scored against the SAME factor across the
+current universe snapshot. This matches how the offline calibration bands were
+built (``zscore_by_date`` winsorizes+standardizes per date, i.e. relative to that
+day's cross-section) and, crucially, RE-CENTERS to the current regime: a
+market-wide shift (e.g. elevated momentum/volatility in a bull run) no longer
+pushes every symbol into the top band.
+
+The artifact's time-averaged per-factor ``norm`` is a FALLBACK only — used when the
+live universe snapshot is too thin (<5 names) or absent. (It was previously the
+PRIMARY basis, which made every symbol score BUY: the stale 5-yr norm does not
+re-center, so in an elevated regime every z shifts positive into the top/BUY
+band.) Pure scoring; the artifact loader is thin (monkeypatched in tests).
+Defensive: returns None on any failure so analyze() falls back to legacy.
 
 Weights are SIGNED (a negative-IC factor like low_vol carries a negative weight),
 so the composite is sum(weight * zscore). The BUY/HOLD/SELL verdict is taken from
-which calibration band the composite lands in (top band -> BUY, bottom -> SELL),
-which is self-calibrating to the fitted hit-rate distribution."""
+which calibration band the composite lands in (top band -> BUY, bottom -> SELL)."""
 import json
 import numpy as np
 from repo_paths import SWING_MODEL
@@ -71,12 +76,14 @@ def score_symbol(current_factors, universe_snapshot, artifact):
             if v is None or not isinstance(v, (int, float)) or not np.isfinite(v):
                 continue
             z = None
-            nf = norm.get(f)
-            if nf and nf.get("std"):
-                z = (v - nf["mean"]) / nf["std"]          # PRIMARY: calibration-consistent
-            if z is None:
-                basis = (universe_snapshot or {}).get(f)   # fallback only
-                z = _zscore(v, basis) if basis else None
+            basis = (universe_snapshot or {}).get(f)
+            if basis:                                      # PRIMARY: re-center to the current
+                z = _zscore(v, basis)                      # cross-section (calibration-consistent;
+                                                           # _zscore needs >=5 names, else None)
+            if z is None:                                  # thin/absent snapshot -> norm fallback
+                nf = norm.get(f)
+                if nf and nf.get("std"):
+                    z = (v - nf["mean"]) / nf["std"]       # stale 5-yr norm (NOT regime-centered)
             if z is not None:
                 z = float(np.clip(z, -Z_CLIP, Z_CLIP))
             if z is None:
