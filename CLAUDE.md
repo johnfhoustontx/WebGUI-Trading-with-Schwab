@@ -23,14 +23,17 @@ logical group) — see the "UI styling standard — Tailwind-first" section belo
 [phase3a](docs/plans/2026-06-28-tailwind-first-ui-migration-phase3a-plan.md) /
 [phase3b](docs/plans/2026-06-28-tailwind-first-ui-migration-phase3b-plan.md) /
 [phase3c](docs/plans/2026-06-28-tailwind-first-ui-migration-phase3c-plan.md) /
-[phase4](docs/plans/2026-06-28-tailwind-first-ui-migration-phase4-plan.md). **Phase 0
+[phase4](docs/plans/2026-06-28-tailwind-first-ui-migration-phase4-plan.md) /
+[phase5](docs/plans/2026-06-28-tailwind-first-ui-migration-phase5-plan.md). **Phase 0
 (token vocabulary) + Phase 1 (nav shell) + Phase 2 (shared `pages/options/*` helpers —
 `.style()`-free, dynamic colors palette-mapped) + Phase 3a (the six signal-table screens
 — Scanner/Swing/Captured/Paper/Paper-Portfolio/Rescue) + Phase 3b (Calculator + Simulator
 on tokens) + Phase 3c (Gamma + Expected-Move; panel flex via a continuous-value runtime
 arbitrary class) + Phase 4 (Trade + the LEGACY CLEANUP: `DASHBOARD_CSS` DELETED — `theme.py`
-= tokens + `QUASAR_INTERNAL_CSS` only) DONE — ENTIRE OPTIONS SECTION + TRADE TAILWIND-ONLY**
-— webgui 587 green + live-verified (Calc/Sim/Trade un-regressed post-deletion). **Phase 3a** removes every `.style()` AND every Vue `:style=` slot binding
+= tokens + `QUASAR_INTERNAL_CSS` only) + Phase 5 (Sentiment + Sector Rotation — the heaviest
+~58 `.style()`; local color-class maps, sector-table CSS → Tailwind, auto-refresh recolors
+via `remove/add`) DONE — OPTIONS + TRADE + SENTIMENT TAILWIND-ONLY**
+— webgui 599 green + live-verified (no class-stacking under auto-refresh; gauges/charts intact). **Phase 3a** removes every `.style()` AND every Vue `:style=` slot binding
 from those pages: dynamic Quasar table-cell colors now map to a stamped Tailwind **`:class`**
 field from a finite palette (`score_zone_class`/`rec_class`/`pnl_class`/`verdict_class`/
 `heat_bg_class`/`cash_class` — exact hexes preserved as `bg-[#..]`/`text-[#..]` arbitrary
@@ -791,7 +794,7 @@ inconsistencies as each screen is converted — no gratuitous redesign). The fiv
 The migration runs in **phases (menu first, then each screen by logical group)** — see
 the design doc
 [`docs/plans/2026-06-28-tailwind-first-ui-migration-design.md`](docs/plans/2026-06-28-tailwind-first-ui-migration-design.md).
-Status snapshot: **Phase 0 + 1 + 2 + 3(a/b/c) + 4 done — OPTIONS SECTION + TRADE TAILWIND-ONLY;
+Status snapshot: **Phase 0 + 1 + 2 + 3(a/b/c) + 4 + 5 done — OPTIONS + TRADE + SENTIMENT TAILWIND-ONLY;
 `DASHBOARD_CSS` DELETED** (2026-06-28). **P0** — `theme.py` ships the
 Tailwind token vocabulary (`PAGE`/`CARD`/`EYEBROW`/`LABEL`/`MUTED`/`BTN`/`BTN_PRIMARY`/
 `STRATEGY_BTN` + the semantic state-color tokens `TXT_POS`/`TXT_WARN`/`TXT_NEG`/
@@ -838,10 +841,16 @@ labels via `remove/add`. Then the **LEGACY CLEANUP**: `DASHBOARD_CSS` had zero c
 from `theme.py`; the dead `verdict_color`/`bias_color` hex fns + `*_COLOR` constants removed;
 `test_theme.py` now asserts `not hasattr(theme,"DASHBOARD_CSS")`; the "App theme" section + example
 rewritten to the token reality. **`theme.py` = tokens + `QUASAR_INTERNAL_CSS` ONLY** — the migration's
-payoff. **The entire Options section + Trade are Tailwind-only** (587 green, live-verified; Calc/Sim
-confirmed un-regressed post-deletion). **Next: Phase 5** (Sentiment + Sector Rotation — the highest
-`.style()` count, ~58), then Phases 6–8 (Portfolio / Driver / utility pages: EOD-shell/Status/
-Settings/Terminate/Manuals). Update this line as phases land.
+payoff. **The entire Options section + Trade are Tailwind-only** (587 green; Calc/Sim un-regressed
+post-deletion). **P5** — **Sentiment + Sector Rotation** (the heaviest phase, ~58 `.style()`):
+static widths/flex → arbitrary Tailwind; ~20 dynamic colors from finite sets → **LOCAL Tailwind
+class maps** (these pages keep their OWN palette `#66bb6a`/`#ef5350`/`#ffd54f`/`#9e9e9e`/`#3fb6c7` —
+yellow/cyan/flat differ from `TXT_*`, so deliberately NOT shared; pages do NOT adopt `PAGE`/`CARD` —
+their look is preserved); the `.sent-sectors` `ui.add_css` block → Tailwind row borders/hover; the
+**auto-refresh** in-place recolors (traffic tiles bg + bias/regime/rotation/headline labels) use
+`remove/add` (verified live: no class stacking across refresh cycles). Gauges + history/RRG
+Highcharts charts stay **out of scope**. **Next: Phase 6** (Portfolio), then Phase 7 (Driver) +
+Phase 8 (utility pages: EOD-shell/Status/Settings/Terminate/Manuals). Update this line as phases land.
 
 **`pages/ui_guard.py` (cross-cutting, load-bearing — used by ~15 pages).** Provides
 `guard` / `guard_async` decorators that make a NiceGUI callback a clean no-op when
