@@ -38,7 +38,7 @@ from pages.ui_guard import guard
 from .inputs import select_all_on_focus, should_load
 # Shared dark-navy "dashboard" theme (same CSS the Calculator injects, so the two
 # pages never drift).
-from .theme import DASHBOARD_CSS
+from .theme import QUASAR_INTERNAL_CSS, PAGE, CARD, EYEBROW, BTN, BTN_PRIMARY, LABEL
 from . import page_state as _ps
 
 # Persisted (single-user) Simulator input snapshot — survives navigation + browser
@@ -276,7 +276,7 @@ def render():
     from . import strategy_menu
     from . import overlay as _overlay
 
-    ui.add_css(DASHBOARD_CSS)
+    ui.add_css(QUASAR_INTERNAL_CSS)
 
     # Full-screen wait overlay shown while a user-initiated Fetch is in flight.
     wait = _overlay.build_loading_overlay()
@@ -299,35 +299,35 @@ def render():
     # Calculator (shared ``theme.py``), wrapping the Simulator's existing structure
     # in three cards: controls, strategy+legs, and the tabbed chart panel. The
     # Highcharts panels are already dark-transparent, so they sit on the navy. ──────
-    with ui.column().classes("calc-v2 w-full gap-4"):
-        ui.label("Simulator").classes("text-h6").style("color:#eaf0fb")
+    with ui.column().classes(f"calc-v2 {PAGE} w-full gap-4"):
+        ui.label("Simulator").classes(f"text-h6 {LABEL}")
 
         # Controls card: symbol + fetch + copy + status.
-        with ui.column().classes("calc-card w-full gap-3"):
+        with ui.column().classes(f"{CARD} w-full gap-3"):
             with ui.row().classes("items-end gap-4 flex-wrap"):
                 symbol_in = select_all_on_focus(ui.input("Symbol", value="SPY").classes("w-40"))
                 fetch_btn = ui.button("Fetch snapshot", icon="download", color=None) \
-                    .props("no-caps").classes("cv2-btn-primary")
+                    .props("no-caps").classes(BTN_PRIMARY)
                 ui.button("Copy to Calculator", icon="calculate", color=None,
                           on_click=lambda: handoff.send_to_calculator_legs(
                               leg_editor.legs_to_payload(
                                   (state.get("meta") or {}).get("symbol")
                                   or symbol_in.value or "",
                                   editor.get_legs(), keep_premium=False))) \
-                    .props("no-caps").classes("cv2-btn")
-            status = ui.label("Fetch a snapshot to begin.").classes("calc-eyebrow")
+                    .props("no-caps").classes(BTN)
+            status = ui.label("Fetch a snapshot to begin.").classes(EYEBROW)
 
         # Strategy + legs card. Cascading Strategy picker (family → variant, boxed to
         # match the navy inputs) + the shared multi-leg editor (header table).
         # ``show_premium=False`` — the simulator prices each leg from the chain's IV,
         # so there is no manual premium input.
-        with ui.column().classes("calc-card w-full gap-3"):
+        with ui.column().classes(f"{CARD} w-full gap-3"):
             with ui.row().classes("items-end gap-3 flex-wrap"):
                 strategy_sel = strategy_menu.build_strategy_menu(value="PCS", classes="w-52", boxed=True)
             legs_box = ui.column().classes("gap-2 w-full")
 
         # Tabbed chart card: Replay / What-if / IV-shock.
-        with ui.column().classes("calc-card w-full gap-2"):
+        with ui.column().classes(f"{CARD} w-full gap-2"):
             with ui.tabs() as tabs:
                 tab_replay = ui.tab("Replay")
                 tab_whatif = ui.tab("What-if")
