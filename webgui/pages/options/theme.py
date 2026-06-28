@@ -135,6 +135,18 @@ STRATEGY_BTN = (
     "rounded-[8px] min-h-[40px] font-normal"
 )
 
+# Semantic STATE colors (positive / caution / negative / neutral) — the finite
+# palette behind data-driven label colors in detail.py/header.py. Exact hexes from
+# detail.py's GREEN/AMBER/RED/NEUTRAL constants, preserved as arbitrary-value classes
+# so the look is unchanged. Set reactively via .classes(remove=STATE_TEXT, add=TXT_*)
+# so repeated repaints don't stack conflicting text-[...] classes.
+TXT_POS = "text-[#66bb6a]"
+TXT_WARN = "text-[#ffa726]"
+TXT_NEG = "text-[#ef5350]"
+TXT_NEUTRAL = "text-[#bdbdbd]"
+# Space-joined set for the remove= arg of a reactive color swap.
+STATE_TEXT_CLASSES = "text-[#66bb6a] text-[#ffa726] text-[#ef5350] text-[#bdbdbd]"
+
 # ---------------------------------------------------------------------------
 # Quasar-internal / teleported escape-hatch CSS (Phase 0 of the Tailwind-first
 # migration). These rules style Quasar/Highcharts-internal DOM that component

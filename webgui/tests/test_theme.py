@@ -40,3 +40,21 @@ def test_quasar_internal_css_is_internal_only():
     assert ".calc-card{" not in css.replace(" ", "")
     assert ".cv2-btn" not in css
     assert ".calc-eyebrow" not in css
+
+
+STATE_TOKENS = ["TXT_POS", "TXT_WARN", "TXT_NEG", "TXT_NEUTRAL"]
+
+
+def test_state_color_tokens_exist_and_are_text_classes():
+    for name in STATE_TOKENS:
+        val = getattr(theme, name)
+        assert isinstance(val, str) and val.startswith("text-["), f"{name} not a text-[] class"
+        assert "{" not in val and ";" not in val
+
+
+def test_state_color_tokens_preserve_exact_hex():
+    # convert + light polish: exact colors preserved as arbitrary values.
+    assert theme.TXT_POS == "text-[#66bb6a]"
+    assert theme.TXT_WARN == "text-[#ffa726]"
+    assert theme.TXT_NEG == "text-[#ef5350]"
+    assert theme.TXT_NEUTRAL == "text-[#bdbdbd]"
