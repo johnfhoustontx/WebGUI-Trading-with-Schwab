@@ -135,6 +135,26 @@ STRATEGY_BTN = (
     "rounded-[8px] min-h-[40px] font-normal"
 )
 
+# Shared 3D gradient buttons (the Scanner "Run scan" + Paper action buttons). Apply
+# with color=None so Quasar's bg-primary doesn't compete. Replaces SCAN_CSS .scan-btn
+# and PAPER_CSS .pt-btn / .pt-danger (byte-identical gradients).
+BTN_3D = (
+    "bg-[linear-gradient(180deg,#5aa0e6_0%,#3a7bc0_55%,#316eac_100%)] text-white "
+    "rounded-[7px] font-semibold min-h-[34px] "
+    "shadow-[0_4px_0_0_#244e78,0_6px_10px_rgba(0,0,0,.4)] "
+    "hover:brightness-110 active:translate-y-[4px] "
+    "active:shadow-[0_1px_0_0_#244e78,0_2px_4px_rgba(0,0,0,.4)] "
+    "transition-[transform,box-shadow,filter] duration-100"
+)
+BTN_3D_DANGER = (
+    "bg-[linear-gradient(180deg,#ef6b6b_0%,#d33f3f_55%,#b53030_100%)] text-white "
+    "rounded-[7px] font-semibold min-h-[34px] "
+    "shadow-[0_4px_0_0_#7a1f1f,0_6px_10px_rgba(0,0,0,.4)] "
+    "hover:brightness-110 active:translate-y-[4px] "
+    "active:shadow-[0_1px_0_0_#7a1f1f,0_2px_4px_rgba(0,0,0,.4)] "
+    "transition-[transform,box-shadow,filter] duration-100"
+)
+
 # Semantic STATE colors (positive / caution / negative / neutral) — the finite
 # palette behind data-driven label colors in detail.py/header.py. Exact hexes from
 # detail.py's GREEN/AMBER/RED/NEUTRAL constants, preserved as arbitrary-value classes

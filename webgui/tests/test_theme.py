@@ -58,3 +58,18 @@ def test_state_color_tokens_preserve_exact_hex():
     assert theme.TXT_WARN == "text-[#ffa726]"
     assert theme.TXT_NEG == "text-[#ef5350]"
     assert theme.TXT_NEUTRAL == "text-[#bdbdbd]"
+
+
+BTN3D = ["BTN_3D", "BTN_3D_DANGER"]
+
+
+def test_btn3d_tokens_are_class_strings():
+    for n in BTN3D:
+        v = getattr(theme, n)
+        assert isinstance(v, str) and v.strip() and "{" not in v and ";" not in v
+
+
+def test_btn3d_encodes_gradient_and_shadow():
+    assert "linear-gradient(180deg" in theme.BTN_3D
+    assert theme.BTN_3D.count("shadow-[") >= 1 and "active:" in theme.BTN_3D
+    assert "#d33f3f" in theme.BTN_3D_DANGER  # red variant mid-stop
