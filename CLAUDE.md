@@ -775,8 +775,10 @@ inconsistencies as each screen is converted — no gratuitous redesign). The fiv
   Nothing else belongs in `ui.add_css`.
 - **Out of scope** (NOT NiceGUI components, so the rule doesn't bind them): standalone
   documents served as raw `HTMLResponse` — EOD `summary/detail.html`, the Gamma
-  Explain/Analyze infographics — and **Highcharts option dicts** (chart colors are chart
-  config, not CSS).
+  Explain/Analyze infographics — **raw `ui.html()` HTML-string fragments** built with inline
+  `style=` attributes (e.g. the Calculator P&L heatmap grid, the Gamma Explain blocks), since
+  they aren't NiceGUI components with `.classes()` — and **Highcharts option dicts** (chart
+  colors are chart config, not CSS).
 
 The migration runs in **phases (menu first, then each screen by logical group)** — see
 the design doc
