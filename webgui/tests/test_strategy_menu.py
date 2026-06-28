@@ -24,3 +24,16 @@ def test_strategy_menu_builds_for_every_family():
         for code in ("BUTTERFLY_CALL", "IRON_BUTTERFLY", "CALENDAR_PUT", "DIAGONAL_CALL"):
             sm = SM.build_strategy_menu(value=code)
             assert sm.value == code
+
+
+def test_boxed_strategy_button_carries_hook_and_token():
+    """The boxed Strategy trigger keeps the ``strategy-menu-btn`` scope hook AND
+    carries the ``STRATEGY_BTN`` Tailwind token (so its box style survives once the
+    page stops injecting DASHBOARD_CSS)."""
+    from pages.options import theme
+    with ui.card():
+        sm = SM.build_strategy_menu(value="PCS", boxed=True)
+    classes = sm.button.classes
+    assert "strategy-menu-btn" in classes               # scope hook retained
+    for tok in theme.STRATEGY_BTN.split():
+        assert tok in classes                            # token applied

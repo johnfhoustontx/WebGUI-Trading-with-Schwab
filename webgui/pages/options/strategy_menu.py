@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from nicegui import ui
 
 from . import strategies as S
+from .theme import STRATEGY_BTN
 
 
 class StrategyMenu:
@@ -29,7 +30,7 @@ class StrategyMenu:
             if boxed:
                 self.button = ui.button(S.strategy_label(value), color=None) \
                     .props("no-caps icon-right=arrow_drop_down dense") \
-                    .classes("w-full strategy-menu-btn")
+                    .classes(f"w-full strategy-menu-btn {STRATEGY_BTN}")
             else:
                 self.button = ui.button(S.strategy_label(value)) \
                     .props("no-caps outline icon-right=arrow_drop_down dense") \
