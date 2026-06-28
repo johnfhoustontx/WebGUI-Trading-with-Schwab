@@ -24,6 +24,14 @@ UP_COLOR = "#2e9e6b"
 DOWN_COLOR = "#e24b4a"
 MUTED_COLOR = "#888888"
 
+# Tailwind arbitrary-value text-color classes for the status indicators (local —
+# NOT the theme TXT_* tokens; these labels keep their own palette).
+TXT_UP = "text-[#2e9e6b]"
+TXT_DOWN = "text-[#e24b4a]"
+TXT_MUTED = "text-[#888888]"
+# Full set to strip on a reactive (in-place) recolor so classes don't stack.
+STATUS_TEXT_CLASSES = f"{TXT_UP} {TXT_DOWN} {TXT_MUTED}"
+
 # NiceGUI table columns. The service formats every cell to a display string via
 # portfolio-analyzer's ``view_model`` (HOLDINGS/SECTOR/PERFORMANCE_COLUMNS), so
 # these only map row keys → labels; the page does no further formatting.
@@ -73,6 +81,18 @@ def stream_status(payload):
     """(text, color) for the live-stream indicator."""
     live = bool((payload or {}).get("streaming"))
     return ("● live", UP_COLOR) if live else ("manual refresh", MUTED_COLOR)
+
+
+def proxy_status_class(payload):
+    """(text, Tailwind text-color class) for the proxy indicator."""
+    text, color = proxy_status(payload)
+    return (text, TXT_UP if color == UP_COLOR else TXT_DOWN)
+
+
+def stream_status_class(payload):
+    """(text, Tailwind text-color class) for the live-stream indicator."""
+    text, color = stream_status(payload)
+    return (text, TXT_UP if color == UP_COLOR else TXT_MUTED)
 
 
 def suggestion_text(suggestions, symbol):
@@ -128,7 +148,7 @@ def render():
             ui.label("Select a row to see its suggestions.") \
                 .classes("text-xs opacity-60 q-mt-sm")
             detail = ui.label(suggestion_text({}, None)) \
-                .classes("text-sm").style("white-space:pre-wrap")
+                .classes("text-sm whitespace-pre-wrap")
 
     def _show_detail():
         detail.text = suggestion_text(
@@ -151,12 +171,12 @@ def render():
         sectors_tbl.update()
         perf_tbl.rows = p.get("performance_rows") or []
         perf_tbl.update()
-        ptext, pcolor = proxy_status(p)
+        ptext, pclass = proxy_status_class(p)
         proxy_lbl.text = ptext
-        proxy_lbl.style(f"color:{pcolor}")
-        stext, scolor = stream_status(p)
+        proxy_lbl.classes(remove=STATUS_TEXT_CLASSES, add=pclass)
+        stext, sclass = stream_status_class(p)
         stream_lbl.text = stext
-        stream_lbl.style(f"color:{scolor}")
+        stream_lbl.classes(remove=STATUS_TEXT_CLASSES, add=sclass)
         status_lbl.text = status_line(p)
         _show_detail()
 

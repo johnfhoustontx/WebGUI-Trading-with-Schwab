@@ -23,6 +23,22 @@ def test_stream_status():
     assert off_color == portfolio.MUTED_COLOR
 
 
+def test_proxy_stream_status_classes():
+    # proxy: up -> TXT_UP, down -> TXT_DOWN
+    up_text, up_cls = portfolio.proxy_status_class({"proxy_up": True})
+    assert "up" in up_text.lower() and up_cls == portfolio.TXT_UP
+    down_text, down_cls = portfolio.proxy_status_class({"proxy_up": False})
+    assert "down" in down_text.lower() and down_cls == portfolio.TXT_DOWN
+    # stream: live -> TXT_UP, else -> TXT_MUTED
+    live_text, live_cls = portfolio.stream_status_class({"streaming": True})
+    assert "live" in live_text.lower() and live_cls == portfolio.TXT_UP
+    _off_text, off_cls = portfolio.stream_status_class({"streaming": False})
+    assert off_cls == portfolio.TXT_MUTED
+    # the remove-set contains all three local text classes
+    for cls in (portfolio.TXT_UP, portfolio.TXT_DOWN, portfolio.TXT_MUTED):
+        assert cls in portfolio.STATUS_TEXT_CLASSES
+
+
 def test_suggestion_text_joins_reasons():
     suggestions = {"AAPL": [{"action": "TRIM", "reason": "too big"},
                             {"action": "HOLD", "reason": "ok"}]}
