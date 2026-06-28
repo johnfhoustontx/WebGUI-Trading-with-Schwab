@@ -222,6 +222,9 @@ def render():
     QCOLS = [("name", "Sector", 150), ("etf", "ETF", 55), ("rs_ratio", "RS-Ratio", 90),
              ("rs_momentum", "RS-Mom", 90), ("quadrant", "Quadrant", 110),
              ("direction", "Dir", 60)]
+    # Single source of truth for the quadrant-map column widths so the header
+    # (driven by QCOLS) and the data-row cells never drift.
+    QCOL_W = {field: w for field, _label, w in QCOLS}
 
     def _render(a, weights, risk_threshold):
         regime, color, text, detail = headline_parts(a, risk_threshold)
@@ -253,12 +256,12 @@ def render():
                 with ui.row().classes(
                         "items-center w-full no-wrap gap-2 text-sm "
                         + quadrant_text_class(r.get("quadrant"))):
-                    ui.label(str(r.get("name") or "")).classes("w-[150px]")
-                    ui.label(str(r.get("etf") or "")).classes("w-[55px]")
-                    ui.label(f"{r.get('rs_ratio'):.2f}").classes("w-[90px]")
-                    ui.label(f"{r.get('rs_momentum'):.2f}").classes("w-[90px]")
-                    ui.label(str(r.get("quadrant") or "")).classes("w-[110px]")
-                    ui.label(str(r.get("direction") or "")).classes("w-[60px]")
+                    ui.label(str(r.get("name") or "")).classes(f"w-[{QCOL_W['name']}px]")
+                    ui.label(str(r.get("etf") or "")).classes(f"w-[{QCOL_W['etf']}px]")
+                    ui.label(f"{r.get('rs_ratio'):.2f}").classes(f"w-[{QCOL_W['rs_ratio']}px]")
+                    ui.label(f"{r.get('rs_momentum'):.2f}").classes(f"w-[{QCOL_W['rs_momentum']}px]")
+                    ui.label(str(r.get("quadrant") or "")).classes(f"w-[{QCOL_W['quadrant']}px]")
+                    ui.label(str(r.get("direction") or "")).classes(f"w-[{QCOL_W['direction']}px]")
         rrg_box.clear()
         with rrg_box:
             # Hover-isolation is native (states.inactive in the figure) — no

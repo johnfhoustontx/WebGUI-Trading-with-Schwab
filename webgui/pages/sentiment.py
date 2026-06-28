@@ -56,6 +56,8 @@ _HEX_TO_TXT = {CLR_GREEN: TXT_G, CLR_RED: TXT_R, CLR_YELLOW: TXT_Y,
                CLR_FLAT: TXT_FLAT, CLR_CYAN: TXT_CY}
 # Map a local hex -> its Tailwind bg class (only the three traffic bands have a bg).
 _HEX_TO_TXT_BG = {CLR_GREEN: BG_G, CLR_RED: BG_R, CLR_YELLOW: BG_Y}
+# Per-cell right divider for the sector/industry table rows (last cell omits it).
+BORDER_R = "border-r border-white/[0.04]"
 
 # (component_scores key, display name). Weights are NO LONGER baked from app
 # ``scoring`` at import — they arrive at render time via the cached
@@ -640,6 +642,10 @@ def render():
                 ("desc", "Description", 200), ("day", "Day %", 70),
                 ("week", "Week %", 70), ("month", "Month %", 70),
                 ("pcr", "P/C", 56), ("rrg", "RRG", 90)]
+    # Single source of truth for column widths so the header (driven by SEC_COLS)
+    # and the data-row cells never drift. ``desc`` is the flex column (its tuple
+    # width is unused — both header and rows render it ``flex-1 min-w-[160px]``).
+    SEC_W = {field: w for field, _label, w in SEC_COLS}
 
     def _render_components(latest, rotation_value=None, sector_value=None):
         comp_box.clear()
@@ -787,22 +793,22 @@ def render():
                         "items-center w-full no-wrap gap-2 text-sm "
                         "border-b border-white/5 hover:bg-white/[0.04]"):
                     ui.icon("keyboard_arrow_down" if expanded else "keyboard_arrow_right") \
-                        .classes("cursor-pointer w-[24px] border-r border-white/[0.04]") \
+                        .classes(f"cursor-pointer w-[24px] {BORDER_R}") \
                         .on("click", lambda _e, s=sector_name: _toggle_sector(s))
-                    ui.label(str(sector_name or "")).classes(f"w-[140px] border-r border-white/[0.04] {dc}")
-                    ui.label(str(r["etf"] or "")).classes(f"w-[50px] border-r border-white/[0.04] {dc}")
+                    ui.label(str(sector_name or "")).classes(f"w-[{SEC_W['sector']}px] {BORDER_R} {dc}")
+                    ui.label(str(r["etf"] or "")).classes(f"w-[{SEC_W['etf']}px] {BORDER_R} {dc}")
                     ui.label(str(r["desc"] or "")).classes(
-                        "flex-1 min-w-[160px] border-r border-white/[0.04] "
+                        f"flex-1 min-w-[160px] {BORDER_R} "
                         f"overflow-hidden text-ellipsis whitespace-nowrap {dc}")
                     for fld in ("day", "week", "month"):
                         v = r[fld]
                         ui.label(f"{v:+.2f}%" if v is not None else "—") \
-                            .classes(f"w-[70px] border-r border-white/[0.04] {pct_text_class(v)}")
+                            .classes(f"w-[{SEC_W[fld]}px] {BORDER_R} {pct_text_class(v)}")
                     pv = r["pcr"]
                     ui.label(f"{pv:.2f}" if pv is not None else "").classes(
-                        f"w-[56px] border-r border-white/[0.04] {pcr_text_class(pv)}")
+                        f"w-[{SEC_W['pcr']}px] {BORDER_R} {pcr_text_class(pv)}")
                     rv = r["rrg"]
-                    ui.label(str(rv or "")).classes(f"w-[90px] {rrg_text_class(rv)}")
+                    ui.label(str(rv or "")).classes(f"w-[{SEC_W['rrg']}px] {rrg_text_class(rv)}")
                 if expanded:
                     # Industries come PRECOMPUTED in the sectors cache view
                     # ({"quotes","trends","pcr","quadrants"} per sector name) —
@@ -818,22 +824,22 @@ def render():
                             with ui.row().classes(
                                     "items-center w-full no-wrap gap-2 text-xs "
                                     "border-b border-white/5 hover:bg-white/[0.04] bg-white/[0.02]"):
-                                ui.label("").classes("w-[24px] border-r border-white/[0.04]")
+                                ui.label("").classes(f"w-[24px] {BORDER_R}")
                                 ui.label(str(ir["label"] or "")).classes(
-                                    f"w-[140px] pl-[14px] border-r border-white/[0.04] opacity-85 {idc}")
-                                ui.label(str(ir["etf"] or "")).classes(f"w-[50px] border-r border-white/[0.04] {idc}")
+                                    f"w-[{SEC_W['sector']}px] pl-[14px] {BORDER_R} opacity-85 {idc}")
+                                ui.label(str(ir["etf"] or "")).classes(f"w-[{SEC_W['etf']}px] {BORDER_R} {idc}")
                                 ui.label(str(ir["desc"] or "")).classes(
-                                    "flex-1 min-w-[160px] border-r border-white/[0.04] "
+                                    f"flex-1 min-w-[160px] {BORDER_R} "
                                     f"overflow-hidden text-ellipsis whitespace-nowrap opacity-80 {idc}")
                                 for fld in ("day", "week", "month"):
                                     v = ir[fld]
                                     ui.label(f"{v:+.2f}%" if v is not None else "—") \
-                                        .classes(f"w-[70px] border-r border-white/[0.04] {pct_text_class(v)}")
+                                        .classes(f"w-[{SEC_W[fld]}px] {BORDER_R} {pct_text_class(v)}")
                                 pv = ir["pcr"]
                                 ui.label(f"{pv:.2f}" if pv is not None else "").classes(
-                                    f"w-[56px] border-r border-white/[0.04] {pcr_text_class(pv)}")
+                                    f"w-[{SEC_W['pcr']}px] {BORDER_R} {pcr_text_class(pv)}")
                                 rv = ir["rrg"]
-                                ui.label(str(rv or "")).classes(f"w-[90px] {rrg_text_class(rv)}")
+                                ui.label(str(rv or "")).classes(f"w-[{SEC_W['rrg']}px] {rrg_text_class(rv)}")
 
     @guard
     def _toggle_sector(sector_name):
