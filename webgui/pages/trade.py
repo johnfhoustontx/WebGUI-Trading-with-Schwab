@@ -26,11 +26,27 @@ from nicegui import ui
 from pages.ui_guard import guard
 
 from .options.inputs import select_all_on_focus
-from .options.theme import DASHBOARD_CSS
+from .options.theme import (
+    BTN_PRIMARY,
+    CARD,
+    EYEBROW,
+    LABEL,
+    PAGE,
+    QUASAR_INTERNAL_CSS,
+)
 
 BUY_COLOR = "#2e7d32"
 HOLD_COLOR = "#f9a825"
 SELL_COLOR = "#c62828"
+
+# Tailwind text-[...] classes for the verdict/bias palette (LOCAL — these hexes
+# are DARKER than theme's TXT_* semantic colors, so they are not reused). The
+# verdict cards refill in place, so reactive labels swap via .classes(remove=
+# VERDICT_TEXT_CLASSES, add=…) to avoid stacking conflicting text-[…] classes.
+_BUY_TEXT = "text-[#2e7d32]"
+_HOLD_TEXT = "text-[#f9a825]"
+_SELL_TEXT = "text-[#c62828]"
+VERDICT_TEXT_CLASSES = f"{_BUY_TEXT} {_HOLD_TEXT} {_SELL_TEXT}"
 
 
 def verdict_color(verdict):
@@ -43,6 +59,16 @@ def verdict_color(verdict):
     return HOLD_COLOR
 
 
+def verdict_text_class(verdict):
+    """Tailwind text-[…] class for a BUY/HOLD/SELL verdict (amber HOLD default)."""
+    v = (verdict or "").upper()
+    if v == "BUY":
+        return _BUY_TEXT
+    if v == "SELL":
+        return _SELL_TEXT
+    return _HOLD_TEXT
+
+
 def bias_color(bias):
     """Color a BULLISH/BEARISH/NEUTRAL bias label."""
     b = (bias or "").upper()
@@ -51,6 +77,16 @@ def bias_color(bias):
     if b == "BEARISH":
         return SELL_COLOR
     return HOLD_COLOR
+
+
+def bias_text_class(bias):
+    """Tailwind text-[…] class for a BULLISH/BEARISH/NEUTRAL bias (amber default)."""
+    b = (bias or "").upper()
+    if b == "BULLISH":
+        return _BUY_TEXT
+    if b == "BEARISH":
+        return _SELL_TEXT
+    return _HOLD_TEXT
 
 
 def _fmt(v, nd=1):
@@ -143,20 +179,37 @@ def should_request(symbol, last_requested, since_seconds):
 _MK_BAND_COLORS = ["#c0392b", "#e67e22", "#7f8c8d", "#27ae60", "#1e8449"]
 # stacked-area band fill colors (neutral grey lighter than the chip's grey)
 _MK_AREA_COLORS = ["#c0392b", "#e67e22", "#bdc3c7", "#27ae60", "#1e8449"]
+# Parallel Tailwind bg-[…] classes for the band chip background (derived from
+# _MK_BAND_COLORS — kept in lockstep; that hex list is also read by the Highcharts
+# chart, so it stays). Out-of-range falls back to the neutral grey, mirroring
+# markov_band_chip.
+_MK_BAND_BG = [f"bg-[{c}]" for c in _MK_BAND_COLORS]
+# Space-joined set for the reactive remove= when re-tinting the chip in place.
+_MK_BAND_BG_CLASSES = " ".join(_MK_BAND_BG + ["bg-[#7f8c8d]"])
+
+
+def markov_band_bg_class(band):
+    """Tailwind bg-[…] class for a Markov band index (neutral grey out of range)."""
+    if 0 <= band < len(_MK_BAND_BG):
+        return _MK_BAND_BG[band]
+    return "bg-[#7f8c8d]"
 # Dark-navy chart styling (matches the dashboard theme the Calculator/Simulator share).
 _MK_AXIS_STYLE = {"color": "#bdbdbd"}
 _MK_GRID_COLOR = "rgba(255,255,255,0.08)"
 
 
 def markov_band_chip(mk):
-    """{'label','color'} for the current Markov band, or None when no block."""
+    """{'label','color','band'} for the current Markov band, or None when no block.
+
+    ``band`` is the raw index (for ``markov_band_bg_class`` → the chip's Tailwind
+    background); ``color`` is the hex (kept for any non-page reader)."""
     if not mk:
         return None
     i = mk.get("current_band", 2)
     labels = mk.get("band_labels") or ["?"] * 5
     color = _MK_BAND_COLORS[i] if 0 <= i < len(_MK_BAND_COLORS) else "#7f8c8d"
     label = labels[i] if 0 <= i < len(labels) else "?"
-    return {"label": label, "color": color}
+    return {"label": label, "color": color, "band": i}
 
 
 def markov_metric_rows(mk):
@@ -314,7 +367,7 @@ _SWING_COLS = [
 
 def render():
     """Trade page: symbol input + Analyze button + verdict/MTF/momentum cards."""
-    ui.add_css(DASHBOARD_CSS)
+    ui.add_css(QUASAR_INTERNAL_CSS)
 
     # Page state (local closure, not module globals — built per request). Read any
     # prior cached analysis up-front so the symbol field can seed to the LAST
@@ -327,14 +380,14 @@ def render():
 
     # Dark-navy "dashboard" shell (page-scoped, .calc-v2) — the SAME shared theme the
     # Calculator/Simulator inject, wrapping the controls + result areas.
-    with ui.column().classes("calc-v2 w-full gap-3"):
-        ui.label("Trade Analyzer").classes("text-h6").style("color:#eaf0fb")
+    with ui.column().classes(f"calc-v2 {PAGE} w-full gap-3"):
+        ui.label("Trade Analyzer").classes(f"text-h6 {LABEL}")
 
         with ui.row().classes("items-center gap-3 flex-wrap"):
             symbol_in = select_all_on_focus(ui.input("Symbol", value=seed).classes("w-32"))
             analyze_btn = ui.button("Analyze", icon="analytics", color=None) \
-                .props("no-caps").classes("cv2-btn-primary")
-            status = ui.label("Enter a symbol and click Analyze.").classes("calc-eyebrow")
+                .props("no-caps").classes(BTN_PRIMARY)
+            status = ui.label("Enter a symbol and click Analyze.").classes(EYEBROW)
 
         # Layout: a top area (error banner + header), then a single verdict ROW of
         # three EQUAL-width cards (Position · Investor · Markov Forecast), then a
@@ -348,11 +401,11 @@ def render():
         results_top = ui.column().classes("w-full gap-2")
         verdict_row = ui.row().classes("w-full gap-3 items-start flex-wrap")
         with verdict_row:
-            position_card = ui.card().classes("calc-card flex-1 min-w-[280px]")
-            investor_card = ui.card().classes("calc-card flex-1 min-w-[280px]")
-            markov_card = ui.card().classes("calc-card flex-1 min-w-[280px]")
+            position_card = ui.card().classes(f"{CARD} flex-1 min-w-[280px]")
+            investor_card = ui.card().classes(f"{CARD} flex-1 min-w-[280px]")
+            markov_card = ui.card().classes(f"{CARD} flex-1 min-w-[280px]")
             with markov_card:
-                ui.label("Markov Forecast · composite-score regime").classes("calc-eyebrow")
+                ui.label("Markov Forecast · composite-score regime").classes(EYEBROW)
                 markov_head = ui.row().classes("items-center gap-3 flex-wrap")
                 markov_metrics = ui.row().classes("gap-4 flex-wrap")
                 markov_chart = ui.highchart(markov_forecast_figure(None)).classes("w-full")
@@ -362,7 +415,7 @@ def render():
 
     # ── card builders (widgets; pull from the pure transforms above) ──────────
     def _header(res):
-        with ui.card().classes("calc-card w-full"):
+        with ui.card().classes(f"{CARD} w-full"):
             with ui.row().classes("items-center gap-4 flex-wrap"):
                 ui.label(res.get("symbol", "")).classes("text-h5")
                 desc = res.get("description")
@@ -373,8 +426,8 @@ def render():
                     ui.label(f"${price:,.2f}").classes("text-h6")
                 bias = res.get("bias")
                 if bias:
-                    ui.label(bias).classes("text-weight-bold px-2 rounded") \
-                        .style(f"color:{bias_color(bias)}")
+                    ui.label(bias).classes(
+                        f"text-weight-bold px-2 rounded {bias_text_class(bias)}")
                 vol = res.get("volume")
                 if vol:
                     ui.label(f"Vol {vol:,}").classes("opacity-60 text-sm")
@@ -386,8 +439,9 @@ def render():
         # "Legacy heuristic" expander beneath the swing headline.
         head = position_headline(verdict, mk) if mk else None
         with ui.row().classes("items-baseline gap-3"):
-            ui.label(verdict.get("verdict", "—")).classes("text-h4 text-weight-bold") \
-                .style(f"color:{verdict_color(verdict.get('verdict'))}")
+            ui.label(verdict.get("verdict", "—")).classes(
+                f"text-h4 text-weight-bold {verdict_text_class(verdict.get('verdict'))}",
+                remove=VERDICT_TEXT_CLASSES)
             if head and isinstance(verdict.get("score"), int):
                 ui.label(f"score {head['score']:+d}").classes("opacity-70")
             else:
@@ -400,7 +454,7 @@ def render():
         for r in verdict.get("top_reasons", []):
             ui.label(f"• {r}").classes("text-sm opacity-80")
         for g in verdict.get("gates_triggered", []):
-            ui.label(f"⛔ {g}").classes("text-xs").style(f"color:{SELL_COLOR}")
+            ui.label(f"⛔ {g}").classes("text-xs text-[#c62828]")
         rows = breakdown_rows(verdict)
         if rows:
             with ui.expansion("Factor breakdown").classes("w-full"):
@@ -421,8 +475,9 @@ def render():
             ui.label(title).classes("calc-eyebrow")
             if swing:
                 with ui.row().classes("items-baseline gap-3"):
-                    ui.label(swing["verdict"]).classes("text-h4 text-weight-bold") \
-                        .style(f"color:{verdict_color(swing['verdict'])}")
+                    ui.label(swing["verdict"]).classes(
+                        f"text-h4 text-weight-bold {verdict_text_class(swing['verdict'])}",
+                        remove=VERDICT_TEXT_CLASSES)
                 if swing["line"]:
                     ui.label(swing["line"]).classes("text-sm opacity-80")
                 contrib = swing_contrib_rows(sm)
@@ -441,28 +496,27 @@ def render():
 
     def _alignment_card(ema):
         ema = ema or {}
-        with ui.card().classes("calc-card flex-1 min-w-[220px]"):
-            ui.label("MTF EMA alignment").classes("calc-eyebrow")
+        with ui.card().classes(f"{CARD} flex-1 min-w-[220px]"):
+            ui.label("MTF EMA alignment").classes(EYEBROW)
             pct = ema.get("alignment_percentage")
             ui.label(f"{pct:+.0f}%" if pct is not None else "—") \
-                .classes("text-h6").style(f"color:{bias_color(ema.get('bias'))}")
+                .classes(f"text-h6 {bias_text_class(ema.get('bias'))}")
             for r in alignment_rows(ema):
                 with ui.row().classes("items-center gap-2 w-full justify-between"):
                     ui.label(r["timeframe"]).classes("text-sm opacity-80")
-                    ui.label(r["status"]).classes("text-xs") \
-                        .style(f"color:{bias_color(r['status'])}")
+                    ui.label(r["status"]).classes(f"text-xs {bias_text_class(r['status'])}")
 
     def _momentum_card(m):
-        with ui.card().classes("calc-card flex-1 min-w-[200px]"):
-            ui.label("Momentum").classes("calc-eyebrow")
+        with ui.card().classes(f"{CARD} flex-1 min-w-[200px]"):
+            ui.label("Momentum").classes(EYEBROW)
             for label, value in momentum_rows(m):
                 with ui.row().classes("items-center gap-2 w-full justify-between"):
                     ui.label(label).classes("text-sm opacity-80")
                     ui.label(value).classes("text-sm text-weight-medium")
 
     def _fundamentals_card(fundamentals):
-        with ui.card().classes("calc-card flex-1 min-w-[200px]"):
-            ui.label("Fundamentals").classes("calc-eyebrow")
+        with ui.card().classes(f"{CARD} flex-1 min-w-[200px]"):
+            ui.label("Fundamentals").classes(EYEBROW)
             for label, value in fundamentals_rows(fundamentals):
                 with ui.row().classes("items-center gap-2 w-full justify-between"):
                     ui.label(label).classes("text-sm opacity-80")
@@ -471,17 +525,17 @@ def render():
     def _sector_card(sector):
         sector = sector or {}
         strength = sector.get("strength") or {}
-        with ui.card().classes("calc-card flex-1 min-w-[200px]"):
-            ui.label("Sector").classes("calc-eyebrow")
+        with ui.card().classes(f"{CARD} flex-1 min-w-[200px]"):
+            ui.label("Sector").classes(EYEBROW)
             name = sector.get("name") or "Unknown"
             etf = sector.get("etf")
             ui.label(f"{name}" + (f" ({etf})" if etf else "")).classes("text-sm")
             sc = strength.get("score")
             if sc is not None:
-                ui.label(f"Strength {sc:+d}").classes("text-h6") \
-                    .style(f"color:{BUY_COLOR if sc > 0 else SELL_COLOR if sc < 0 else HOLD_COLOR}")
+                cls = _BUY_TEXT if sc > 0 else _SELL_TEXT if sc < 0 else _HOLD_TEXT
+                ui.label(f"Strength {sc:+d}").classes(f"text-h6 {cls}")
             if strength.get("in_confirmed_downtrend"):
-                ui.label("Confirmed downtrend").classes("text-xs").style(f"color:{SELL_COLOR}")
+                ui.label("Confirmed downtrend").classes("text-xs text-[#c62828]")
 
     def _render_results():
         res = state["result"]
@@ -533,8 +587,10 @@ def render():
         with markov_head:
             chip = markov_band_chip(mk)
             if chip:
-                ui.label(chip["label"]).classes("text-weight-bold px-2 py-1 rounded text-white") \
-                    .style(f"background:{chip['color']}")
+                ui.label(chip["label"]).classes(
+                    "text-weight-bold px-2 py-1 rounded text-white "
+                    f"{markov_band_bg_class(chip['band'])}",
+                    remove=_MK_BAND_BG_CLASSES)
             dr = markov_drift_row(mk)
             if dr:
                 ui.label(f"drift {dr['drift']} · tilt {dr['tilt']} · conf "

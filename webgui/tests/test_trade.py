@@ -22,6 +22,36 @@ def test_bias_color():
     assert trade.bias_color("") == trade.HOLD_COLOR
 
 
+def test_verdict_text_class_maps_states():
+    assert trade.verdict_text_class("BUY") == "text-[#2e7d32]"
+    assert trade.verdict_text_class("buy") == "text-[#2e7d32]"
+    assert trade.verdict_text_class("SELL") == "text-[#c62828]"
+    assert trade.verdict_text_class("HOLD") == "text-[#f9a825]"
+    assert trade.verdict_text_class(None) == "text-[#f9a825]"  # default amber
+
+
+def test_bias_text_class_maps_states():
+    assert trade.bias_text_class("BULLISH") == "text-[#2e7d32]"
+    assert trade.bias_text_class("BEARISH") == "text-[#c62828]"
+    assert trade.bias_text_class("NEUTRAL") == "text-[#f9a825]"
+    assert trade.bias_text_class("") == "text-[#f9a825]"
+
+
+def test_markov_band_bg_class_maps_5_bands():
+    # one assertion per band edge — exact hexes from _MK_BAND_COLORS
+    assert trade.markov_band_bg_class(0) == "bg-[#c0392b]"
+    assert trade.markov_band_bg_class(1) == "bg-[#e67e22]"
+    assert trade.markov_band_bg_class(2) == "bg-[#7f8c8d]"
+    assert trade.markov_band_bg_class(3) == "bg-[#27ae60]"
+    assert trade.markov_band_bg_class(4) == "bg-[#1e8449]"
+
+
+def test_markov_band_bg_class_out_of_range():
+    # mirrors markov_band_chip's neutral fallback (#7f8c8d).
+    assert trade.markov_band_bg_class(9) == "bg-[#7f8c8d]"
+    assert trade.markov_band_bg_class(-1) == "bg-[#7f8c8d]"
+
+
 def test_momentum_rows_formats_and_handles_missing():
     rows = trade.momentum_rows({"rsi": 55.0, "adx": 22.4, "macd_hist": 0.4321,
                                 "vwap": 211.0, "relative_volume": 1.34})
