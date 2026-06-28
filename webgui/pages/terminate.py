@@ -13,6 +13,7 @@ import subprocess
 
 from nicegui import ui
 
+from pages.options.theme import BTN_3D_DANGER
 from repo_paths import REPO_ROOT
 
 STOP_BAT = REPO_ROOT / "stop_all.bat"
@@ -66,7 +67,7 @@ def render():
                     ui.notify("Terminating all services… this page will stop "
                               "responding shortly.", type="warning", timeout=10000)
 
-                ui.button("Stop everything", on_click=_go).props("color=negative")
+                ui.button("Stop everything", color=None, on_click=_go).props("no-caps").classes(BTN_3D_DANGER)
 
-        ui.button("Stop all services", icon="power_settings_new",
-                  on_click=dlg.open).props("color=negative")
+        ui.button("Stop all services", icon="power_settings_new", color=None,
+                  on_click=dlg.open).props("no-caps").classes(BTN_3D_DANGER)

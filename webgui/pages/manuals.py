@@ -11,6 +11,8 @@ traversal.
 """
 from nicegui import ui
 
+from pages.options.theme import BTN_3D
+
 # slug -> {title, desc, icon, file}. `file` is relative to docs/manuals/.
 MANUALS = {
     "user-guide": {
@@ -55,5 +57,5 @@ def render():
                     with ui.column().classes("gap-0 grow"):
                         ui.label(m["title"]).classes("text-subtitle1 font-bold")
                         ui.label(m["desc"]).classes("opacity-70 text-sm")
-                    ui.button("Open", icon="open_in_new",
-                              on_click=lambda _, s=slug: _open(s)).props("outline")
+                    ui.button("Open", icon="open_in_new", color=None,
+                              on_click=lambda _, s=slug: _open(s)).props("no-caps").classes(BTN_3D)

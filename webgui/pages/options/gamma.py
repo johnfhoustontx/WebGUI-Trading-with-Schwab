@@ -609,7 +609,7 @@ def render():
         _sym_opts = symbol_options(bus_client.read("options:gamma_symbols"))
         symbol_in = ui.select(_sym_opts, value=_DEFAULT_SYMBOL,
                               with_input=True, label="Symbol").classes("w-40")
-        fetch_btn = ui.button("Refresh now", icon="refresh")
+        fetch_btn = ui.button("Refresh now", icon="refresh", color=None).props("no-caps").classes(BTN_3D)
         view_toggle = ui.toggle({v: _view_label(v) for v in list(_VIEWS) + ["Term"]},
                                  value="GEX")
         explain_btn = ui.button("Explain", icon="help", color=None).props("no-caps").classes(BTN_3D)

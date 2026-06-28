@@ -20,6 +20,7 @@ from nicegui import ui
 from pages.ui_guard import guard
 
 from .inputs import select_all_on_focus
+from .theme import BTN_3D
 
 from . import detail, handoff, scanner
 
@@ -45,7 +46,7 @@ def render():
                 call_dmax = ui.number("Call Δ max", value=0.20, format="%.2f").classes("w-24")
                 mincr = ui.number("Min credit %", value=10.0, format="%.1f").classes("w-28")
             with ui.row().classes("items-center gap-3"):
-                scan_btn = ui.button("Scan", icon="search")
+                scan_btn = ui.button("Scan", icon="search", color=None).props("no-caps").classes(BTN_3D)
                 status = ui.label("").classes("opacity-70")
             table = ui.table(columns=scanner.signal_columns(), rows=[],
                              row_key="id").classes("w-full")

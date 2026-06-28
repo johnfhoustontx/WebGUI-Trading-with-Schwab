@@ -9,6 +9,8 @@ Scanner / Paper / Captured / Calculator pages, or standalone from the nav.
 Chart is Highcharts candlestick (extras=["stock"], which also provides the axis
 crosshair label boxes)."""
 
+from .theme import BTN_3D
+
 UP_COLOR = "#26a69a"
 DOWN_COLOR = "#ef5350"
 EM_UP_COLOR = "#66bb6a"
@@ -150,7 +152,7 @@ def render():
         type_tog = ui.toggle(["put", "call"], value="put")
         lookback_sel = ui.select(em_lookback_options(), value="auto",
                                  label="Look-back").classes("w-40")
-        draw_btn = ui.button("Draw", icon="show_chart")
+        draw_btn = ui.button("Draw", icon="show_chart", color=None).props("no-caps").classes(BTN_3D)
         status = ui.label("").classes("opacity-70 text-sm")
 
     # stockChart gives an ordinal x-axis (collapses non-trading-day gaps); the

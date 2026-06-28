@@ -396,7 +396,7 @@ def render():
                 status.text = "Closing…"
 
             with ui.row():
-                ui.button("Confirm", on_click=confirm).props("color=negative")
+                ui.button("Confirm", color=None, on_click=confirm).props("no-caps").classes(BTN_3D)
                 ui.button("Cancel", on_click=dlg.close).props("flat")
         dlg.open()
 

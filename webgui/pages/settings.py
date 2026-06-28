@@ -6,6 +6,8 @@ cards/sections here as more settings arrive.
 import app_settings
 from nicegui import ui
 
+from pages.options.theme import BTN_3D
+
 
 def render():
     ui.label("Settings").classes("text-h5")
@@ -23,7 +25,7 @@ def render():
             sound = ui.select(["chime", "bell", "ping"], label="Sound",
                               value=s["alert_sound"]).classes("w-40")
             sound.on_value_change(lambda e: app_settings.set("alert_sound", e.value))
-            test = ui.button("Test sound", icon="volume_up").props("outline")
+            test = ui.button("Test sound", icon="volume_up", color=None).props("no-caps").classes(BTN_3D)
 
         ui.label("Volume").classes("text-sm opacity-70")
         vol = ui.slider(min=0, max=1, step=0.05, value=s["alert_volume"]).classes("w-64")
@@ -48,8 +50,8 @@ def render():
         notif = ui.switch("Show a desktop notification too",
                           value=s["desktop_notifications"])
         notif.on_value_change(lambda e: app_settings.set("desktop_notifications", e.value))
-        ui.button("Grant notification permission", icon="notifications").props(
-            "outline").on_click(
+        ui.button("Grant notification permission", icon="notifications", color=None).props(
+            "no-caps").classes(BTN_3D).on_click(
             lambda: ui.run_javascript("Notification && Notification.requestPermission()"))
 
     # Test sound uses the same shared audio element + helper as the live alert.

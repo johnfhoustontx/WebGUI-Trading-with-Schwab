@@ -29,6 +29,7 @@ from nicegui import run, ui
 
 import bus_client
 import proxy
+from pages.options.theme import BTN_3D
 from repo_paths import (
     MEMURAI_PORT,
     NICEGUI_PORT,
@@ -325,7 +326,7 @@ def render():
 
     banner = ui.row().classes("w-full")
     with ui.row().classes("items-center gap-3"):
-        refresh_btn = ui.button("Refresh", icon="refresh").props("outline")
+        refresh_btn = ui.button("Refresh", icon="refresh", color=None).props("no-caps").classes(BTN_3D)
         spinner = ui.spinner(size="sm")
         spinner.set_visibility(False)
         checked_lbl = ui.label("").classes("text-sm opacity-60")
@@ -369,12 +370,13 @@ def render():
                         if r.get("kind") == "auth" and up is not None:
                             ui.button(
                                 "Re-authorize" if up else "Authorize", icon="login",
+                                color=None,
                                 on_click=lambda: ui.navigate.to(AUTH_URL, new_tab=True)) \
-                                .props("size=sm color=warning outline").classes("ml-auto")
+                                .props("no-caps").classes(f"ml-auto {BTN_3D}")
                         elif up is False and restart_spec(r) is not None:
-                            ui.button("Restart", icon="restart_alt",
+                            ui.button("Restart", icon="restart_alt", color=None,
                                       on_click=lambda t=r: _restart_clicked(t)) \
-                                .props("size=sm color=warning outline").classes("ml-auto")
+                                .props("no-caps").classes(f"ml-auto {BTN_3D}")
                         with ui.column().classes("gap-0 items-end ml-auto"):
                             ui.badge(status_word(up)).props(
                                 f"color={status_color(up)}")

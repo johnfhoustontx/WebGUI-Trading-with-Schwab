@@ -22,7 +22,7 @@ from pages.ui_guard import guard
 
 from . import detail, handoff
 from .rescue import heat_border_class
-from .theme import BTN_3D_DANGER
+from .theme import BTN_3D, BTN_3D_DANGER
 
 # rescue_state values that mark a signal at-risk (tested/critical). Captured
 # signals are advisory-only and the manage-cycle rescue overlay only tags paper
@@ -204,9 +204,10 @@ def render():
     with ui.row().classes("w-full no-wrap gap-4 items-start"):
         with ui.column().classes("flex-grow min-w-0"):
             with ui.row().classes("items-center gap-3"):
-                ui.button("Reload", icon="refresh", on_click=lambda: _reload())
-                ui.button("Refresh marks (live)", icon="published_with_changes",
-                          on_click=lambda: _reprice())
+                ui.button("Reload", icon="refresh", color=None,
+                          on_click=lambda: _reload()).props("no-caps").classes(BTN_3D)
+                ui.button("Refresh marks (live)", icon="published_with_changes", color=None,
+                          on_click=lambda: _reprice()).props("no-caps").classes(BTN_3D)
                 ui.button("Close selected", icon="check_circle", color=None,
                           on_click=lambda: _close()).props("no-caps").classes(BTN_3D_DANGER)
                 status = ui.label("").classes("opacity-70")
@@ -334,7 +335,7 @@ def render():
                 status.text = "Closing…"
 
             with ui.row():
-                ui.button("Confirm", on_click=confirm).props("color=negative")
+                ui.button("Confirm", color=None, on_click=confirm).props("no-caps").classes(BTN_3D)
                 ui.button("Cancel", on_click=dlg.close).props("flat")
         dlg.open()
 

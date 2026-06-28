@@ -11,6 +11,8 @@ imported lazily inside ``render()`` only (mirrors ``expected_move.py`` /
 ``simulator.py``).
 """
 
+from .theme import BTN_3D
+
 # Heat zone colors (higher heat = closer to trouble): green → amber → orange →
 # red. Reuses the shared palette idiom from scanner.py / svg.py (#ef5350 red,
 # #ffa726 amber, #66bb6a green) so the UI stays consistent; orange bridges the
@@ -451,7 +453,7 @@ def render():
                         ui.notify("Applying rescue…")
                         advisory_spinner.set_visibility(True)
 
-                    ui.button("Apply", on_click=_go).props("color=primary")
+                    ui.button("Apply", color=None, on_click=_go).props("no-caps").classes(BTN_3D)
             dlg.open()
         return _do
 
@@ -488,8 +490,8 @@ def render():
                                  else f"score {card['score']}").props("color=primary")
                     ui.space()
                     if card["apply_kind"] == "execute":
-                        ui.button("Apply", icon="play_arrow",
-                                  on_click=_confirm_apply(card)).props("color=primary")
+                        ui.button("Apply", icon="play_arrow", color=None,
+                                  on_click=_confirm_apply(card)).props("no-caps").classes(BTN_3D)
                     else:
                         ui.label("manual — place yourself").classes("opacity-70 text-sm")
                 # Gross / commission / net cash line (cash_text colors).

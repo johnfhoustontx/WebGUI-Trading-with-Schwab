@@ -19,7 +19,7 @@ from nicegui import ui
 from pages.ui_guard import guard
 
 from .rescue import heat_border_class
-from .theme import BTN_3D
+from .theme import BTN_3D, BTN_3D_DANGER
 
 # rescue_state values that mark a position at-risk. The options_svc manage cycle
 # tags THIS view (cache:options:paper_account) with rescue_state/heat via
@@ -126,7 +126,8 @@ def render():
     ui.label("Paper Portfolio").classes("text-h5")
 
     with ui.row().classes("items-center gap-2 flex-wrap w-full"):
-        ui.button("Reload", icon="refresh", on_click=lambda: _reload())
+        ui.button("Reload", icon="refresh", color=None, on_click=lambda: _reload()) \
+            .props("no-caps").classes(BTN_3D)
         ui.button("Run entry cycle", icon="login", color=None, on_click=lambda: _cycle("entry")) \
             .props("no-caps").classes(BTN_3D) \
             .tooltip("Simulate auto-entry: scan open captured signals and open paper "
@@ -137,8 +138,8 @@ def render():
                      "Runs automatically every 5 min during market hours; this button forces "
                      "an immediate run.")
         ui.space()
-        ui.button("Reset", icon="restart_alt", on_click=lambda: _reset()) \
-            .props("flat dense size=sm color=negative") \
+        ui.button("Reset", icon="restart_alt", color=None, on_click=lambda: _reset()) \
+            .props("no-caps").classes(BTN_3D_DANGER) \
             .tooltip("Reset the paper account to a starting balance.")
     status = ui.label("").classes("opacity-70")
 
@@ -213,7 +214,7 @@ def render():
                 status.text = "Resetting…"
 
             with ui.row():
-                ui.button("Confirm", on_click=confirm).props("color=negative")
+                ui.button("Confirm", color=None, on_click=confirm).props("no-caps").classes(BTN_3D_DANGER)
                 ui.button("Cancel", on_click=dlg.close).props("flat")
         dlg.open()
 

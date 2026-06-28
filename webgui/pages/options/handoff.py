@@ -13,6 +13,8 @@ from nicegui import ui
 
 import bus_client
 
+from .theme import BTN_3D
+
 _pending = {"calculator": None, "expected_move": None,
             "simulator": None, "calculator_legs": None}
 
@@ -154,7 +156,7 @@ def send_to_paper(signal):
             dlg.close()
 
         with ui.row():
-            ui.button("Create", on_click=confirm).props("color=primary")
+            ui.button("Create", color=None, on_click=confirm).props("no-caps").classes(BTN_3D)
             ui.button("Cancel", on_click=dlg.close).props("flat")
     dlg.open()
 

@@ -37,6 +37,7 @@ import bus_client
 from nicegui import ui
 
 from pages.ui_guard import guard
+from pages.options.theme import BTN_3D, BTN_3D_DANGER
 
 # Decision-log / cycle timestamps are stored in UTC; show the user's Central time.
 _CENTRAL = ZoneInfo("America/Chicago")
@@ -590,8 +591,10 @@ def render():
                  "still grades/proposes.").classes("text-xs opacity-50")
 
     with ui.row().classes("items-center gap-3 flex-wrap"):
-        run_btn = ui.button("Run morning agent", icon="play_arrow")
-        perf_btn = ui.button("Refresh performance", icon="refresh").props("outline")
+        run_btn = ui.button("Run morning agent", icon="play_arrow", color=None) \
+            .props("no-caps").classes(BTN_3D)
+        perf_btn = ui.button("Refresh performance", icon="refresh", color=None) \
+            .props("no-caps").classes(BTN_3D)
         status = ui.label("").classes("opacity-70 text-sm")
 
     approval = ui.column().classes("w-full gap-3")
@@ -612,9 +615,9 @@ def render():
                  "orders (nothing is sent to Schwab).").classes("text-xs opacity-70")
         with ui.row().classes("justify-end gap-2 w-full"):
             ui.button("Cancel", on_click=confirm_dialog.close).props("flat")
-            ui.button("Approve", color="positive",
+            ui.button("Approve", color=None,
                       on_click=lambda: (_do("approve", "Approving…"),
-                                        confirm_dialog.close()))
+                                        confirm_dialog.close())).props("no-caps").classes(BTN_3D)
 
     # ── confirm dialog for STOP (latch the kill-switch) ───────────────────────
     with ui.dialog() as stop_dialog, ui.card():
@@ -624,9 +627,9 @@ def render():
                  "re-arms it (clears the halt).").classes("text-xs opacity-70")
         with ui.row().classes("justify-end gap-2 w-full"):
             ui.button("Cancel", on_click=stop_dialog.close).props("flat")
-            ui.button("STOP", color="negative",
+            ui.button("STOP", color=None,
                       on_click=lambda: (_do("stop", "Stopping…"),
-                                        stop_dialog.close()))
+                                        stop_dialog.close())).props("no-caps").classes(BTN_3D_DANGER)
 
     # ── card builders ─────────────────────────────────────────────────────────
     def _conditions_strip(appr):
@@ -688,12 +691,12 @@ def render():
                     sw = ui.switch("Autonomous", value=enabled,
                                    on_change=_on_toggle)
                     sw.props("color=positive")
-                    ui.button("Run now", icon="bolt",
+                    ui.button("Run now", icon="bolt", color=None,
                               on_click=lambda: _do("cycle", "Running a checkpoint…")) \
-                        .props("outline")
-                    ui.button("STOP", icon="stop", color="negative",
+                        .props("no-caps").classes(BTN_3D)
+                    ui.button("STOP", icon="stop", color=None,
                               on_click=stop_dialog.open) \
-                        .props("unelevated").classes("text-weight-bold")
+                        .props("no-caps").classes(f"{BTN_3D_DANGER} text-weight-bold")
 
                 # Day-P&L-vs-target progress.
                 with ui.row().classes("items-center gap-3 w-full"):
@@ -846,10 +849,10 @@ def render():
 
             if is_pending(appr):
                 with ui.row().classes("gap-3"):
-                    ui.button("APPROVE", icon="check", color="positive",
-                              on_click=confirm_dialog.open)
-                    ui.button("SKIP", icon="close", color="negative",
-                              on_click=lambda: _do("skip", "Skipping…")).props("outline")
+                    ui.button("APPROVE", icon="check", color=None,
+                              on_click=confirm_dialog.open).props("no-caps").classes(BTN_3D)
+                    ui.button("SKIP", icon="close", color=None,
+                              on_click=lambda: _do("skip", "Skipping…")).props("no-caps").classes(BTN_3D_DANGER)
             elif appr.get("status") == "approved":
                 results = appr.get("results") or []
                 ok = sum(1 for r in results if r.get("success"))

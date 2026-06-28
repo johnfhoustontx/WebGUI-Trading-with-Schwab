@@ -19,6 +19,7 @@ import bus_client
 from nicegui import ui
 
 from pages.ui_guard import guard
+from pages.options.theme import BTN_3D
 
 UP_COLOR = "#2e9e6b"
 DOWN_COLOR = "#e24b4a"
@@ -126,7 +127,7 @@ def render():
     state = {"payload": None, "ver": None, "selected": None}
 
     with ui.row().classes("items-center gap-4 flex-wrap"):
-        refresh_btn = ui.button("Refresh", icon="refresh")
+        refresh_btn = ui.button("Refresh", icon="refresh", color=None).props("no-caps").classes(BTN_3D)
         proxy_lbl = ui.label("").classes("text-sm")
         stream_lbl = ui.label("").classes("text-sm")
         status_lbl = ui.label("").classes("opacity-70 text-sm")

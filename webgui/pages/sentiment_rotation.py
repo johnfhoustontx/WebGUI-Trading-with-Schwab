@@ -17,6 +17,7 @@ command, and a fetch-free version-poll ``ui.timer`` that repaints when the bus
 cache version changes.
 """
 import bus_client
+from pages.options.theme import BTN_3D
 from pages.ui_guard import guard, guard_async  # noqa: F401
 
 CLR_GREEN = "#66bb6a"
@@ -200,8 +201,8 @@ def render():
         ui.label("RRG vs SPY").classes("opacity-60 text-sm")
         as_of = ui.label("").classes("opacity-70 text-sm")
         ui.space()
-        ui.button("Refresh", icon="refresh",
-                  on_click=lambda: _request_refresh()).props("flat dense")
+        ui.button("Refresh", icon="refresh", color=None,
+                  on_click=lambda: _request_refresh()).props("no-caps").classes(BTN_3D)
 
     headline_lbl = ui.label("").classes("text-subtitle1 text-bold")
     detail_lbl = ui.label("").classes("opacity-70 text-sm")
