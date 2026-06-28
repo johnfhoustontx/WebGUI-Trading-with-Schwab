@@ -18,10 +18,12 @@ standalone `HTMLResponse` docs + Highcharts dicts are out of scope. Scope **prag
 intent **convert + light polish**. Phased migration (menu first, then each screen by
 logical group) — see the "UI styling standard — Tailwind-first" section below + the
 [design doc](docs/plans/2026-06-28-tailwind-first-ui-migration-design.md) /
-[plan](docs/plans/2026-06-28-tailwind-first-ui-migration-plan.md). **Phase 0 (token
-vocabulary) + Phase 1 (nav shell) DONE** — webgui 558 green + live-verified; next is
-Phase 2 (shared Options helpers). Prior — **Validated swing (1–8 wk) evaluation — Trade
-page**:
+[plan](docs/plans/2026-06-28-tailwind-first-ui-migration-plan.md) /
+[phase2](docs/plans/2026-06-28-tailwind-first-ui-migration-phase2-plan.md). **Phase 0
+(token vocabulary) + Phase 1 (nav shell) + Phase 2 (shared `pages/options/*` helpers —
+`.style()`-free, dynamic colors palette-mapped) DONE** — webgui 565 green + live-verified;
+next is Phase 3a (signal-table screens). Prior — **Validated swing (1–8 wk) evaluation —
+Trade page**:
 the `/trade` **Position** verdict's hand-weighted swing scoring is **replaced by a
 backtested, IC-weighted cross-sectional factor model** (investing/months deferred —
 needs point-in-time fundamentals). A new PURE factor library
@@ -763,14 +765,20 @@ inconsistencies as each screen is converted — no gratuitous redesign). The fiv
 The migration runs in **phases (menu first, then each screen by logical group)** — see
 the design doc
 [`docs/plans/2026-06-28-tailwind-first-ui-migration-design.md`](docs/plans/2026-06-28-tailwind-first-ui-migration-design.md).
-Status snapshot: **Phase 0 + Phase 1 done** (2026-06-28) — `theme.py` now ships the
+Status snapshot: **Phase 0 + 1 + 2 done** (2026-06-28). **P0** — `theme.py` ships the
 Tailwind token vocabulary (`PAGE`/`CARD`/`EYEBROW`/`LABEL`/`MUTED`/`BTN`/`BTN_PRIMARY`/
-`STRATEGY_BTN`) + a `QUASAR_INTERNAL_CSS` escape-hatch block alongside the still-intact
-legacy `DASHBOARD_CSS` (additive — its `.calc-card`/`.cv2-btn*` rules stay until their
-last consumer flips in the Phase 4 cleanup); and the **nav shell** (`main.py`) is fully
-Tailwind — `_nav_link`/nav-title/icons/badges/help-fab use `.classes()`, and `_NAV_CSS`
-is now Quasar-internal-only (`.nicegui-expansion-content` gap, `.q-item`/`q-tab` internals,
-the teleported `.q-tooltip.help-tip`). **Next: Phase 2** (shared `pages/options/*` helpers).
+`STRATEGY_BTN` + the semantic state-color tokens `TXT_POS`/`TXT_WARN`/`TXT_NEG`/
+`TXT_NEUTRAL` + `STATE_TEXT_CLASSES`) + a `QUASAR_INTERNAL_CSS` escape-hatch block
+alongside the still-intact legacy `DASHBOARD_CSS` (additive — its `.calc-card`/`.cv2-btn*`
+rules stay until their last consumer flips in the Phase 4 cleanup). **P1** — the **nav
+shell** (`main.py`) is fully Tailwind; `_NAV_CSS` is now Quasar-internal-only. **P2** — the
+shared **`pages/options/*` helpers** (`detail.py`/`header.py`/`overlay.py`) are `.style()`-free:
+dynamic data-driven colors are **palette-mapped** (a finite state/label → a fixed token —
+detail tiles via `TXT_*`; the header VIX-regime badge + sentiment dot via local label→class
+maps `regime_badge_class`/`sentiment_dot_class`), and reactive recolors use
+`.classes(remove=…, add=…)` to avoid class accumulation; `leg_editor.py`/`strategy_menu.py`
+were already inline-style-free (a `test_no_inline_style.py` guard pins all five). **Next:
+Phase 3a** (signal-table screens: Scanner/Swing/Captured/Paper/Paper-Portfolio/Rescue).
 Update this line as phases land.
 
 **`pages/ui_guard.py` (cross-cutting, load-bearing — used by ~15 pages).** Provides
