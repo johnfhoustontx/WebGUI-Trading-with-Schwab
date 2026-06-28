@@ -398,12 +398,11 @@ def render():
                         color = "positive" if ok else (
                             "grey" if not row["present"] else "warning")
                         ui.icon("circle").props(f"color={color}").classes("text-xs")
-                        ui.label(row["label"]).classes("font-medium").style(
-                            "min-width:220px")
-                        ui.label(row["view"]).classes("text-xs opacity-60").style(
-                            "min-width:200px")
+                        ui.label(row["label"]).classes("font-medium min-w-[220px]")
+                        ui.label(row["view"]).classes(
+                            "text-xs opacity-60 min-w-[200px]")
                         ui.label(f"v{row['version']}").classes(
-                            "text-xs opacity-70").style("min-width:60px")
+                            "text-xs opacity-70 min-w-[60px]")
                         age = row["age"] + (" · STALE" if row["stale"] else "")
                         ui.label(age).classes(
                             "text-sm " + ("text-orange" if row["stale"] else

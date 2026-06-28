@@ -84,3 +84,22 @@ def test_sentiment_pages_have_no_inline_style():
         src = (base / fn).read_text(encoding="utf-8")
         assert ".style(" not in src, f"{fn} still uses .style()"
         assert ":style=" not in src, f"{fn} still uses a Vue :style= slot binding"
+
+
+# Phase 8: status.py widths → Tailwind `min-w-[Npx]`; the remaining utility pages
+# (settings/terminate/manuals) carry no inline `.style()`. eod.py joins the guard
+# too: its `EOD_CSS` styles an out-of-scope `ui.html()` report fragment via
+# `ui.add_css` and its HTML uses bare `style=` attributes (NOT the `.style(`
+# method / Vue `:style=` binding), so the guard — which checks `.style(`/`:style=`
+# — correctly passes. (status.py keeps its Quasar `ui.icon().props(color=…)` props,
+# out of scope.)
+PHASE_8_FILES = ["status.py", "settings.py", "terminate.py", "manuals.py",
+                 "eod.py"]
+
+
+def test_utility_pages_have_no_inline_style():
+    base = pathlib.Path(__file__).resolve().parents[1] / "pages"
+    for fn in PHASE_8_FILES:
+        src = (base / fn).read_text(encoding="utf-8")
+        assert ".style(" not in src, f"{fn} still uses .style()"
+        assert ":style=" not in src, f"{fn} still uses a Vue :style= slot binding"
