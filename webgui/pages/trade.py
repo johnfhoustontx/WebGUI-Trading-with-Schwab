@@ -198,6 +198,57 @@ def position_headline(pv, mk):
     return {"score": adj, "base": base, "tilt": f"{mk.get('tilt', 0):+.0f}"}
 
 
+def swing_headline(sm):
+    """Headline verdict + a calibrated outcome line for the Position card, or None.
+
+    The validated swing model's BUY/HOLD/SELL becomes the Position card's primary
+    verdict; the line summarizes the calibrated outcome (band percentile, expected
+    forward return over the horizon, beat-SPY hit rate). Missing fields are omitted."""
+    if not sm:
+        return None
+    exp = sm.get("expected_fwd")
+    hit = sm.get("hit_rate")
+    hzn = sm.get("horizon_days", 20)
+    pct = sm.get("percentile")
+    parts = []
+    if pct is not None:
+        parts.append(f"{pct}th pctile")
+    if exp is not None:
+        parts.append(f"{exp:+.1%} / {hzn}d")
+    if hit is not None:
+        parts.append(f"{hit:.0%} beat-SPY")
+    return {"verdict": sm.get("verdict", "—"), "line": " · ".join(parts)}
+
+
+def swing_contrib_rows(sm):
+    """Factor-evidence rows (factor / z / weight / contribution / IC) for the expander.
+
+    Already sorted by |contribution| desc upstream; z/weight/contribution are signed,
+    and a None IC renders as an em dash."""
+    if not sm:
+        return []
+    rows = []
+    for c in sm.get("contributions", []):
+        ic = c.get("ic")
+        rows.append({
+            "factor": c.get("factor", ""),
+            "z": f"{c.get('z', 0):+.2f}",
+            "weight": f"{c.get('weight', 0):+.3f}",
+            "contribution": f"{c.get('contribution', 0):+.3f}",
+            "ic": f"{ic:+.3f}" if isinstance(ic, (int, float)) else "—",
+        })
+    return rows
+
+
+def swing_model_meta(sm):
+    """Model track-record line (version + OOS IC), or None."""
+    if not sm:
+        return None
+    oos = sm.get("oos_ic")
+    return {"version": sm.get("model_version", "?"),
+            "oos_ic": f"{oos:+.4f}" if isinstance(oos, (int, float)) else "—"}
+
+
 def markov_forecast_figure(mk):
     """Highcharts stacked-area option dict: band probability over horizon.
 
@@ -249,6 +300,14 @@ _BREAKDOWN_COLS = [
     {"name": "weight", "label": "Wt", "field": "weight"},
     {"name": "raw_score", "label": "Raw", "field": "raw_score"},
     {"name": "contribution", "label": "Contrib", "field": "contribution"},
+]
+
+_SWING_COLS = [
+    {"name": "factor", "label": "Factor", "field": "factor", "align": "left"},
+    {"name": "z", "label": "z", "field": "z"},
+    {"name": "weight", "label": "Weight", "field": "weight"},
+    {"name": "contribution", "label": "Contribution", "field": "contribution"},
+    {"name": "ic", "label": "IC", "field": "ic"},
 ]
 
 
@@ -319,37 +378,65 @@ def render():
                 if vol:
                     ui.label(f"Vol {vol:,}").classes("opacity-60 text-sm")
 
-    def _fill_verdict_card(card, title, verdict, mk=None):
+    def _legacy_verdict_body(verdict, mk):
+        # The legacy heuristic verdict body (verdict word + score + Markov-adjusted
+        # headline + reasons + gates + factor-breakdown expander). Rendered inline
+        # when there is no validated swing model, else nested in a collapsed
+        # "Legacy heuristic" expander beneath the swing headline.
+        head = position_headline(verdict, mk) if mk else None
+        with ui.row().classes("items-baseline gap-3"):
+            ui.label(verdict.get("verdict", "—")).classes("text-h4 text-weight-bold") \
+                .style(f"color:{verdict_color(verdict.get('verdict'))}")
+            if head and isinstance(verdict.get("score"), int):
+                ui.label(f"score {head['score']:+d}").classes("opacity-70")
+            else:
+                ui.label(f"score {verdict.get('score', 0):+d}"
+                         if isinstance(verdict.get("score"), int)
+                         else "").classes("opacity-70")
+        if head and head["tilt"] and isinstance(verdict.get("score"), int):
+            ui.label(f"base {head['base']:+d} · Markov {head['tilt']}") \
+                .classes("text-xs opacity-60")
+        for r in verdict.get("top_reasons", []):
+            ui.label(f"• {r}").classes("text-sm opacity-80")
+        for g in verdict.get("gates_triggered", []):
+            ui.label(f"⛔ {g}").classes("text-xs").style(f"color:{SELL_COLOR}")
+        rows = breakdown_rows(verdict)
+        if rows:
+            with ui.expansion("Factor breakdown").classes("w-full"):
+                ui.table(columns=_BREAKDOWN_COLS, rows=rows,
+                         row_key="factor").classes("w-full").props("dense")
+
+    def _fill_verdict_card(card, title, verdict, mk=None, sm=None):
         # Refill a PERSISTENT verdict card in place (clear+rebuild its contents) so
         # it can share the verdict row with the persistent Markov chart card.
+        # When a validated swing model is present (Position card only), it becomes the
+        # PRIMARY verdict — a calibrated headline + a "Why — validated factors"
+        # evidence expander — and the legacy heuristic is tucked into a collapsed
+        # "Legacy heuristic" expander. Without it the card renders exactly as before.
         card.clear()
         verdict = verdict or {}
-        # When a Markov block is present, headline the adjusted score (base + tilt
-        # in a subtitle). The verdict WORD/color are unchanged — never re-derived.
-        head = position_headline(verdict, mk) if mk else None
+        swing = swing_headline(sm) if sm else None
         with card:
             ui.label(title).classes("calc-eyebrow")
-            with ui.row().classes("items-baseline gap-3"):
-                ui.label(verdict.get("verdict", "—")).classes("text-h4 text-weight-bold") \
-                    .style(f"color:{verdict_color(verdict.get('verdict'))}")
-                if head and isinstance(verdict.get("score"), int):
-                    ui.label(f"score {head['score']:+d}").classes("opacity-70")
-                else:
-                    ui.label(f"score {verdict.get('score', 0):+d}"
-                             if isinstance(verdict.get("score"), int)
-                             else "").classes("opacity-70")
-            if head and head["tilt"] and isinstance(verdict.get("score"), int):
-                ui.label(f"base {head['base']:+d} · Markov {head['tilt']}") \
-                    .classes("text-xs opacity-60")
-            for r in verdict.get("top_reasons", []):
-                ui.label(f"• {r}").classes("text-sm opacity-80")
-            for g in verdict.get("gates_triggered", []):
-                ui.label(f"⛔ {g}").classes("text-xs").style(f"color:{SELL_COLOR}")
-            rows = breakdown_rows(verdict)
-            if rows:
-                with ui.expansion("Factor breakdown").classes("w-full"):
-                    ui.table(columns=_BREAKDOWN_COLS, rows=rows,
-                             row_key="factor").classes("w-full").props("dense")
+            if swing:
+                with ui.row().classes("items-baseline gap-3"):
+                    ui.label(swing["verdict"]).classes("text-h4 text-weight-bold") \
+                        .style(f"color:{verdict_color(swing['verdict'])}")
+                if swing["line"]:
+                    ui.label(swing["line"]).classes("text-sm opacity-80")
+                contrib = swing_contrib_rows(sm)
+                with ui.expansion("Why — validated factors").classes("w-full"):
+                    if contrib:
+                        ui.table(columns=_SWING_COLS, rows=contrib,
+                                 row_key="factor").classes("w-full").props("dense")
+                    meta = swing_model_meta(sm)
+                    if meta:
+                        ui.label(f"model {meta['version']} · OOS IC {meta['oos_ic']}") \
+                            .classes("text-xs opacity-60")
+                with ui.expansion("Legacy heuristic").classes("w-full"):
+                    _legacy_verdict_body(verdict, mk)
+            else:
+                _legacy_verdict_body(verdict, mk)
 
     def _alignment_card(ema):
         ema = ema or {}
@@ -418,7 +505,8 @@ def render():
             # Three EQUAL-width cards in one row: Position · Investor · Markov.
             # (The Markov card's own visibility is managed by _update_markov.)
             _fill_verdict_card(position_card, "Position · 1–8 wk",
-                               res.get("position_verdict"), res.get("markov"))
+                               res.get("position_verdict"), res.get("markov"),
+                               res.get("swing_model"))
             _fill_verdict_card(investor_card, "Investor · months+",
                                res.get("investor_verdict"))
             with results_bottom:

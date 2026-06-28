@@ -218,6 +218,72 @@ def test_should_request():
     assert trade.should_request("   ", "AAPL", 9.0) is False
 
 
+_SM = {
+    "verdict": "BUY", "score": 0.636, "percentile": 90,
+    "expected_fwd": 0.0135, "hit_rate": 0.523, "horizon_days": 20,
+    "contributions": [
+        {"factor": "mom_12_1", "z": 1.63, "weight": 0.211,
+         "contribution": 0.343, "ic": 0.041},
+        {"factor": "low_vol", "z": -0.88, "weight": -0.15,
+         "contribution": 0.132, "ic": -0.066},
+        {"factor": "turnover", "z": 0.40, "weight": 0.10,
+         "contribution": 0.040, "ic": None},
+    ],
+    "model_version": "2026-06-28", "oos_ic": 0.0367, "source": "validated",
+}
+
+
+def test_swing_headline_verdict_and_line():
+    head = trade.swing_headline(_SM)
+    assert head["verdict"] == "BUY"
+    assert "90th pctile" in head["line"]
+    assert "+1.4% / 20d" in head["line"]
+    assert "52% beat-SPY" in head["line"]
+
+
+def test_swing_headline_partial_fields():
+    # Missing optional fields are simply omitted from the line (no crash).
+    head = trade.swing_headline({"verdict": "HOLD", "percentile": 50})
+    assert head["verdict"] == "HOLD"
+    assert head["line"] == "50th pctile"
+
+
+def test_swing_headline_none_tolerant():
+    # None/empty both degrade to None (the page renders legacy-only in that case).
+    assert trade.swing_headline(None) is None
+    assert trade.swing_headline({}) is None
+
+
+def test_swing_contrib_rows_formats_signed_and_ic():
+    rows = trade.swing_contrib_rows(_SM)
+    assert rows[0] == {"factor": "mom_12_1", "z": "+1.63", "weight": "+0.211",
+                       "contribution": "+0.343", "ic": "+0.041"}
+    assert rows[1]["z"] == "-0.88" and rows[1]["weight"] == "-0.150"
+    assert rows[1]["ic"] == "-0.066"
+    assert rows[2]["ic"] == "—"  # None IC renders as a dash
+
+
+def test_swing_contrib_rows_empty():
+    assert trade.swing_contrib_rows(None) == []
+    assert trade.swing_contrib_rows({}) == []
+    assert trade.swing_contrib_rows({"contributions": []}) == []
+
+
+def test_swing_model_meta():
+    meta = trade.swing_model_meta(_SM)
+    assert meta["version"] == "2026-06-28"
+    assert meta["oos_ic"] == "+0.0367"
+
+
+def test_swing_model_meta_missing_oos():
+    meta = trade.swing_model_meta({"model_version": "x"})
+    assert meta["version"] == "x" and meta["oos_ic"] == "—"
+
+
+def test_swing_model_meta_none_tolerant():
+    assert trade.swing_model_meta(None) is None
+
+
 def test_markov_figure_differs_by_current_band():
     # Regression guard for "looks the same regardless of score": a bullish vs a
     # bearish near-term trajectory must produce different early series data.
