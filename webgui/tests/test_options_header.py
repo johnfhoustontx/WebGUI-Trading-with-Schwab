@@ -36,6 +36,25 @@ def test_header_helpers_moved_to_service():
     assert not hasattr(header, "sentiment_dot")
 
 
+def test_sentiment_dot_class_maps_known_labels():
+    assert header.sentiment_dot_class("Bullish") == "text-[#1D9E75]"
+    assert header.sentiment_dot_class("Bearish") == "text-[#E24B4A]"
+    assert header.sentiment_dot_class("Neutral") == "text-[#EFC347]"
+    assert header.sentiment_dot_class("No data") == "text-[#666666]"
+    assert header.sentiment_dot_class("???") == "text-[#666666]"  # fallback
+
+
+def test_regime_badge_class_known_and_fallback():
+    # Real labels traced from scanner_engine.vix_regime
+    # (options-scanner/scanner_engine.py:158-161).
+    assert header.regime_badge_class("Low vol") == "bg-[#1D9E75]"
+    assert header.regime_badge_class("Normal") == "bg-[#378ADD]"
+    assert header.regime_badge_class("Elevated") == "bg-[#EF9F27]"
+    assert header.regime_badge_class("High vol") == "bg-[#E24B4A]"
+    assert header.regime_badge_class("???") == "bg-[#666666]"  # fallback
+    assert header.regime_badge_class("") == "bg-[#666666]"  # empty fallback
+
+
 def test_render_is_callable():
     assert callable(header.render)
 
