@@ -781,21 +781,28 @@ inconsistencies as each screen is converted — no gratuitous redesign). The fiv
 The migration runs in **phases (menu first, then each screen by logical group)** — see
 the design doc
 [`docs/plans/2026-06-28-tailwind-first-ui-migration-design.md`](docs/plans/2026-06-28-tailwind-first-ui-migration-design.md).
-Status snapshot: **Phase 0 + 1 + 2 done** (2026-06-28). **P0** — `theme.py` ships the
+Status snapshot: **Phase 0 + 1 + 2 + 3a done** (2026-06-28). **P0** — `theme.py` ships the
 Tailwind token vocabulary (`PAGE`/`CARD`/`EYEBROW`/`LABEL`/`MUTED`/`BTN`/`BTN_PRIMARY`/
 `STRATEGY_BTN` + the semantic state-color tokens `TXT_POS`/`TXT_WARN`/`TXT_NEG`/
-`TXT_NEUTRAL` + `STATE_TEXT_CLASSES`) + a `QUASAR_INTERNAL_CSS` escape-hatch block
-alongside the still-intact legacy `DASHBOARD_CSS` (additive — its `.calc-card`/`.cv2-btn*`
-rules stay until their last consumer flips in the Phase 4 cleanup). **P1** — the **nav
-shell** (`main.py`) is fully Tailwind; `_NAV_CSS` is now Quasar-internal-only. **P2** — the
-shared **`pages/options/*` helpers** (`detail.py`/`header.py`/`overlay.py`) are `.style()`-free:
-dynamic data-driven colors are **palette-mapped** (a finite state/label → a fixed token —
-detail tiles via `TXT_*`; the header VIX-regime badge + sentiment dot via local label→class
-maps `regime_badge_class`/`sentiment_dot_class`), and reactive recolors use
+`TXT_NEUTRAL` + `STATE_TEXT_CLASSES` + the 3D-button tokens `BTN_3D`/`BTN_3D_DANGER`) + a
+`QUASAR_INTERNAL_CSS` escape-hatch block alongside the still-intact legacy `DASHBOARD_CSS`
+(additive — its `.calc-card`/`.cv2-btn*` rules stay until their last consumer flips in the
+Phase 4 cleanup). **P1** — the **nav shell** (`main.py`) is fully Tailwind; `_NAV_CSS` is now
+Quasar-internal-only. **P2** — the shared **`pages/options/*` helpers**
+(`detail.py`/`header.py`/`overlay.py`) are `.style()`-free: dynamic data-driven colors are
+**palette-mapped** (a finite state/label → a fixed token — detail tiles via `TXT_*`; the
+header VIX-regime badge + sentiment dot via local label→class maps
+`regime_badge_class`/`sentiment_dot_class`), and reactive recolors use
 `.classes(remove=…, add=…)` to avoid class accumulation; `leg_editor.py`/`strategy_menu.py`
-were already inline-style-free (a `test_no_inline_style.py` guard pins all five). **Next:
-Phase 3a** (signal-table screens: Scanner/Swing/Captured/Paper/Paper-Portfolio/Rescue).
-Update this line as phases land.
+were already inline-style-free. **P3a** — the six **signal-table screens**
+(`scanner`/`swing`/`captured`/`paper`/`portfolio`/`rescue`) are free of `.style()` AND every
+Vue `:style=` slot binding: dynamic **table-cell** colors stamp a Tailwind **class** field
+from a finite-set map (`score_zone_class`/`rec_class`/`pnl_class`/`verdict_class`/
+`heat_bg_class`/`heat_border_class`/`cash_class`) and bind `:class` (JIT-generated); the **3D
+gradient buttons** use `BTN_3D`/`BTN_3D_DANGER` (`color=None`); per-page `ui.add_css` is
+slimmed to Quasar-table-internals (cell padding, sticky `thead`, `.q-table__middle`, scanner
+`.q-tab*`). A `test_no_inline_style.py` guard pins all helper + 3a pages. **Next: Phase 3b**
+(builder/analytic screens: Calculator + Simulator). Update this line as phases land.
 
 **`pages/ui_guard.py` (cross-cutting, load-bearing — used by ~15 pages).** Provides
 `guard` / `guard_async` decorators that make a NiceGUI callback a clean no-op when
