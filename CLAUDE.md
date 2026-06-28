@@ -728,11 +728,22 @@ component styling MUST be expressed as **Tailwind utility classes via `.classes(
 This is a hard standard — every new page, and every page touched during the migration,
 follows it. Scope decided **pragmatic** + intent **convert + light polish** (preserve
 today's dark-navy look, standardize it into the token vocabulary, fix obvious
-inconsistencies as each screen is converted — no gratuitous redesign). The four rules:
+inconsistencies as each screen is converted — no gratuitous redesign). The five rules:
 - **Banned:** `.style(...)`, inline `style=` attribute strings, `.props("style=…")`, and
   fixed pixel measurements outside Tailwind classes. Use Tailwind scale utilities, or
   `[...]` **arbitrary values** when an exact value is required (`w-[37px]`,
   `text-[#eaf0fb]`) — never `.style("width:37px")`.
+- **Dynamic / data-driven values → MAP TO FIXED PALETTE CLASSES.** NiceGUI 3.x bundles
+  the **Tailwind browser JIT** (`tailwindcss.min.js`), so a runtime-built arbitrary-value
+  class (`.classes(f"text-[{hex}]")`) *does* generate (verified) — but we deliberately do
+  **NOT** do that. A data-driven color/size is mapped from its **known finite set** to a
+  **static, semantic** Tailwind class via a small pure lookup — a regime/score *state* →
+  `text-emerald-400` / `text-amber-400` / `text-rose-400`; a collapsed/expanded width →
+  `w-11` / `w-[360px]` — with a neutral-class fallback, so the vocabulary stays clean and
+  deduped (no scattered magic hexes). Prefer mapping a semantic state the payload **already
+  carries** (e.g. a `label`/`bias`) page-side; only when no clean state exists, refactor the
+  **Tier-2** source to emit one (allowed — this is the documented exception to webgui-only).
+  NEVER set the dynamic value via `.style()`.
 - **Design tokens, NOT semantic CSS classes.** The dark-navy theme is a vocabulary of
   **Python Tailwind-class-string constants** in `webgui/pages/options/theme.py`
   (`PAGE` / `CARD` / `EYEBROW` / `BTN` / `BTN_PRIMARY` / `LABEL` / `MUTED` / …), each a
