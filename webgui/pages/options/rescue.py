@@ -53,15 +53,20 @@ def heat_bg_class(heat):
 
 
 def heat_border_class(heat):
-    """Left-border Tailwind classes (``border-l-4 border-[<hex>]``) tinting an
-    at-risk row's symbol cell, or '' when heat is missing/non-numeric.
+    """Left-border + faint fill Tailwind classes
+    (``border-l-4 border-[<hex>] bg-[<hex>]/[.13]``) tinting an at-risk row's
+    symbol cell, or '' when heat is missing/non-numeric.
 
-    Distinct from ``heat_color`` (which defaults missing heat to green): a row
-    with no heat value gets NO border. ``rescue_highlight`` still gates on the
-    rescue STATE, so a non-at-risk row never gets a border even with valid heat."""
+    The faint fill (``/[.13]`` ≈ the old inline ``${color}22`` alpha) is the
+    primary at-a-glance at-risk signal — a 4px border alone is easy to miss on a
+    dense scrolling table. Distinct from ``heat_color`` (which defaults missing
+    heat to green): a row with no heat value gets NO tint. ``rescue_highlight``
+    still gates on the rescue STATE, so a non-at-risk row never gets a tint even
+    with valid heat."""
     if _num(heat) is None:
         return ""
-    return f"border-l-4 border-[{heat_color(heat)}]"
+    c = heat_color(heat)
+    return f"border-l-4 border-[{c}] bg-[{c}]/[.13]"
 
 
 def cash_class(value):

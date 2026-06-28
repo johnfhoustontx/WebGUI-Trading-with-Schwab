@@ -27,8 +27,8 @@ def test_heat_bg_and_border_classes():
     assert rescue.heat_bg_class(60) == "bg-[#ff7043]"
     assert rescue.heat_bg_class(40) == "bg-[#ffa726]"
     assert rescue.heat_bg_class(10) == "bg-[#66bb6a]"
-    assert rescue.heat_border_class(80) == "border-l-4 border-[#ef5350]"
-    assert rescue.heat_border_class(None) == ""   # missing -> no border
+    assert rescue.heat_border_class(80) == "border-l-4 border-[#ef5350] bg-[#ef5350]/[.13]"
+    assert rescue.heat_border_class(None) == ""   # missing -> no tint
 
 
 def test_cash_class_maps_sign():
