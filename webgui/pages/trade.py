@@ -472,7 +472,7 @@ def render():
         verdict = verdict or {}
         swing = swing_headline(sm) if sm else None
         with card:
-            ui.label(title).classes("calc-eyebrow")
+            ui.label(title).classes(EYEBROW)
             if swing:
                 with ui.row().classes("items-baseline gap-3"):
                     ui.label(swing["verdict"]).classes(
