@@ -642,7 +642,7 @@ def render():
     # flex weights are set per-render from the intraday snapshot count (panel_flex)
     # so the heatmap grows / bars shrink through the session.
     with ui.row().classes("w-full no-wrap gap-4 items-start"):
-        chart_box = ui.column().classes("min-w-0").style("flex: 0.5 1 0%")
+        chart_box = ui.column().classes(f"min-w-0 {flex_class(0.5)}")
         with chart_box:
             # chart_plot switches kind (bar <-> Term heatmap). Highcharts'
             # chart.update() leaks plotLines/colorAxis across a type switch, so the
@@ -654,7 +654,7 @@ def render():
             state["chart_kind"] = "bar"
             chart_msg = ui.label("Fetch a symbol… (no snapshot yet).") \
                 .classes("opacity-60 text-sm")
-        heatmap_box = ui.column().classes("min-w-0").style("flex: 0.5 1 0%")
+        heatmap_box = ui.column().classes(f"min-w-0 {flex_class(0.5)}")
         with heatmap_box:
             # Created with the heatmap init fig so the press-and-hold-tooltip load
             # hook is installed at creation (load fires once); updated in place after.
@@ -664,18 +664,27 @@ def render():
     def _current_symbol():
         return (symbol_in.value or "").strip().upper()
 
+    # Track the current flex class per box so each reset removes the previous
+    # arbitrary class (else two flex-[…] classes stack). Seeded with the init
+    # class set on the boxes above (flex_class(0.5)).
+    flex_cur = {"chart": flex_class(0.5), "heat": flex_class(0.5)}
+
+    def _set_flex_class(box, key, cls):
+        box.classes(remove=flex_cur[key], add=cls)
+        flex_cur[key] = cls
+
     def _apply_flex(n_cols, term=False):
         """Set the bar/heatmap column widths. Term → bars full width (no heatmap);
         otherwise proportional to the intraday snapshot count (panel_flex)."""
         if term:
-            chart_box.style("flex: 1 1 0%")
-            heatmap_box.style("flex: 0 0 0px")
+            _set_flex_class(chart_box, "chart", flex_class(1))
+            _set_flex_class(heatmap_box, "heat", flex_class(0, grow2=0, basis="0px"))
             heatmap_box.set_visibility(False)
             return
         heatmap_box.set_visibility(True)
         bar_w, heat_w = panel_flex(n_cols)
-        chart_box.style(f"flex: {bar_w} 1 0%")
-        heatmap_box.style(f"flex: {heat_w} 1 0%")
+        _set_flex_class(chart_box, "chart", flex_class(bar_w))
+        _set_flex_class(heatmap_box, "heat", flex_class(heat_w))
 
     def _set_chart(fig):
         """Paint chart_plot: update in place when the chart KIND is unchanged
