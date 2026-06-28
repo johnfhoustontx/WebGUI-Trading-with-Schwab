@@ -20,10 +20,12 @@ logical group) — see the "UI styling standard — Tailwind-first" section belo
 [design doc](docs/plans/2026-06-28-tailwind-first-ui-migration-design.md) /
 [plan](docs/plans/2026-06-28-tailwind-first-ui-migration-plan.md) /
 [phase2](docs/plans/2026-06-28-tailwind-first-ui-migration-phase2-plan.md) /
-[phase3a](docs/plans/2026-06-28-tailwind-first-ui-migration-phase3a-plan.md). **Phase 0
+[phase3a](docs/plans/2026-06-28-tailwind-first-ui-migration-phase3a-plan.md) /
+[phase3b](docs/plans/2026-06-28-tailwind-first-ui-migration-phase3b-plan.md). **Phase 0
 (token vocabulary) + Phase 1 (nav shell) + Phase 2 (shared `pages/options/*` helpers —
 `.style()`-free, dynamic colors palette-mapped) + Phase 3a (the six signal-table screens
-— Scanner/Swing/Captured/Paper/Paper-Portfolio/Rescue) DONE** — webgui 578 green +
+— Scanner/Swing/Captured/Paper/Paper-Portfolio/Rescue) + Phase 3b (Calculator + Simulator
+on tokens; `DASHBOARD_CSS` now consumed ONLY by Trade) DONE** — webgui 581 green +
 live-verified. **Phase 3a** removes every `.style()` AND every Vue `:style=` slot binding
 from those pages: dynamic Quasar table-cell colors now map to a stamped Tailwind **`:class`**
 field from a finite palette (`score_zone_class`/`rec_class`/`pnl_class`/`verdict_class`/
@@ -783,7 +785,7 @@ inconsistencies as each screen is converted — no gratuitous redesign). The fiv
 The migration runs in **phases (menu first, then each screen by logical group)** — see
 the design doc
 [`docs/plans/2026-06-28-tailwind-first-ui-migration-design.md`](docs/plans/2026-06-28-tailwind-first-ui-migration-design.md).
-Status snapshot: **Phase 0 + 1 + 2 + 3a done** (2026-06-28). **P0** — `theme.py` ships the
+Status snapshot: **Phase 0 + 1 + 2 + 3a + 3b done** (2026-06-28). **P0** — `theme.py` ships the
 Tailwind token vocabulary (`PAGE`/`CARD`/`EYEBROW`/`LABEL`/`MUTED`/`BTN`/`BTN_PRIMARY`/
 `STRATEGY_BTN` + the semantic state-color tokens `TXT_POS`/`TXT_WARN`/`TXT_NEG`/
 `TXT_NEUTRAL` + `STATE_TEXT_CLASSES` + the 3D-button tokens `BTN_3D`/`BTN_3D_DANGER`) + a
@@ -803,8 +805,17 @@ from a finite-set map (`score_zone_class`/`rec_class`/`pnl_class`/`verdict_class
 `heat_bg_class`/`heat_border_class`/`cash_class`) and bind `:class` (JIT-generated); the **3D
 gradient buttons** use `BTN_3D`/`BTN_3D_DANGER` (`color=None`); per-page `ui.add_css` is
 slimmed to Quasar-table-internals (cell padding, sticky `thead`, `.q-table__middle`, scanner
-`.q-tab*`). A `test_no_inline_style.py` guard pins all helper + 3a pages. **Next: Phase 3b**
-(builder/analytic screens: Calculator + Simulator). Update this line as phases land.
+`.q-tab*`). A `test_no_inline_style.py` guard pins all helper + 3a pages. **P3b** — the
+**Calculator + Simulator** (the heaviest `DASHBOARD_CSS` consumers) now use the tokens:
+`.calc-card`→`CARD`, `.cv2-btn`→`BTN`, `.cv2-btn-primary`→`BTN_PRIMARY`, `.calc-eyebrow`→
+`EYEBROW`, `.strategy-menu-btn`→`STRATEGY_BTN` (in the shared `strategy_menu.py`), title →
+`LABEL`, calc summary tiles palette-mapped via `tile_color_class`; both pages now inject
+`QUASAR_INTERNAL_CSS` (NOT `DASHBOARD_CSS`) and keep `.calc-v2`/`.strategy-menu-btn`/`.leg-*`
+ONLY as **scope hooks** for the Quasar field/tab/menu internals; the dead `CALC_CSS` was
+deleted. The Calculator **P&L heatmap is a raw `ui.html()` grid → out of scope** (documented).
+**`DASHBOARD_CSS` is now consumed ONLY by `trade.py`** — Phase 4 flips Trade, then the cleanup
+deletes the now-dead `.calc-card`/`.cv2-btn*` semantic rules. **Next: Phase 3c** (chart-heavy:
+Gamma + Expected-Move). Update this line as phases land.
 
 **`pages/ui_guard.py` (cross-cutting, load-bearing — used by ~15 pages).** Provides
 `guard` / `guard_async` decorators that make a NiceGUI callback a clean no-op when
