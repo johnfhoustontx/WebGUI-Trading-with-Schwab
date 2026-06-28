@@ -28,7 +28,8 @@ import math
 from .inputs import select_all_on_focus, should_load
 # Shared dark-navy "dashboard" theme (Calculator + Simulator inject the SAME CSS so
 # the look never drifts). Kept under its historical name here.
-from .theme import DASHBOARD_CSS as CALC_V2_CSS
+from .theme import (QUASAR_INTERNAL_CSS, PAGE, CARD, BTN, BTN_PRIMARY, LABEL,
+                    TXT_POS, TXT_NEG, TXT_NEUTRAL)
 from . import page_state as _ps
 
 # Persisted (single-user) Calculator input snapshot — survives navigation + browser
@@ -40,31 +41,6 @@ _CALC_DEFAULTS = {"symbol": "SPY", "strategy": "PCS", "legs": [], "iv": 20.0,
                   "rate": 4.5, "ivadj": 0.0, "contracts": 1, "price": 100.0,
                   "num_strikes": 24, "expiry": None}
 _LAST_CALC: dict = {}
-
-# 3D / beveled button styling for the Calculator action buttons (Load / IV /
-# Fetch Premiums and Calculate / Expected Move). Scoped to ``.calc-btn-3d`` and
-# injected via ui.add_css (ui.html strips <style>). ``.calc-go`` is the green
-# accent for the primary Calculate action. The raised look = a hard bottom shadow
-# (the "lip"); pressing translates down and shrinks the lip.
-CALC_CSS = """
-.calc-btn-3d.q-btn{
-  background:linear-gradient(180deg,#5aa0e6 0%,#3a7bc0 55%,#316eac 100%)!important;
-  color:#fff!important;border-radius:7px;font-weight:600;min-height:36px;
-  box-shadow:0 4px 0 0 #244e78,0 6px 10px rgba(0,0,0,.45);
-  transition:transform .06s ease,box-shadow .06s ease,filter .12s ease;
-}
-.calc-btn-3d.q-btn:hover{filter:brightness(1.08);}
-.calc-btn-3d.q-btn:active{
-  transform:translateY(4px);
-  box-shadow:0 1px 0 0 #244e78,0 2px 4px rgba(0,0,0,.45);
-}
-.calc-btn-3d.calc-go.q-btn{
-  background:linear-gradient(180deg,#5cc46a 0%,#3da64f 55%,#338a43 100%)!important;
-  box-shadow:0 4px 0 0 #1f5e2a,0 6px 10px rgba(0,0,0,.45);
-}
-.calc-btn-3d.calc-go.q-btn:active{box-shadow:0 1px 0 0 #1f5e2a,0 2px 4px rgba(0,0,0,.45);}
-"""
-
 
 def strategy_options():
     """Flat list of strategy codes for the dropdown, in ``STRATEGY_GROUPS`` order.
@@ -280,13 +256,28 @@ _CENTER_SPOT_JS = """
 """
 
 
+# Summary-tile color palette → Tailwind text token. The hexes are a finite set
+# (positive / negative / neutral) chosen in ``_render_summary``; map them to the
+# shared theme tokens so the tiles carry no inline-style color.
+_TILE_COLOR_CLASSES = {
+    "#66bb6a": TXT_POS,
+    "#ef5350": TXT_NEG,
+    "#bdbdbd": TXT_NEUTRAL,
+}
+
+
+def tile_color_class(color):
+    """Map a summary-tile hex color → its Tailwind text token (neutral fallback)."""
+    return _TILE_COLOR_CLASSES.get(color, TXT_NEUTRAL)
+
+
 def _render_summary(box, summary):
     from nicegui import ui
 
     def tile(label, value, color):
         with ui.card().classes("p-2 min-w-[110px]"):
             ui.label(label).classes("text-xs opacity-60")
-            ui.label(value).classes("text-base font-bold").style(f"color:{color}")
+            ui.label(value).classes(f"text-base font-bold {tile_color_class(color)}")
 
     box.clear()
     with box:
@@ -385,8 +376,7 @@ def render():
     from . import strategy_menu
     from . import overlay as _overlay
 
-    ui.add_css(CALC_CSS)
-    ui.add_css(CALC_V2_CSS)
+    ui.add_css(QUASAR_INTERNAL_CSS)
 
     # Full-screen wait overlay shown while a user-initiated Load is in flight.
     wait = _overlay.build_loading_overlay()
@@ -411,17 +401,17 @@ def render():
     # keep their names. LEFT = input section (inputs card + Load/IV/Calculate stack,
     # legs, bottom actions); RIGHT = the P&L matrix, which h-scrolls so it never
     # overlaps the inputs. ───────────────────────────────────────────────────────
-    with ui.column().classes("calc-v2 w-full gap-4"):
-        ui.label("Options Strategy Calculator").classes("text-h6").style("color:#eaf0fb")
+    with ui.column().classes(f"calc-v2 {PAGE} w-full gap-4"):
+        ui.label("Options Strategy Calculator").classes(f"text-h6 {LABEL}")
         with ui.row().classes("items-end gap-4 flex-wrap"):
             strategy_sel = strategy_menu.build_strategy_menu(value="PCS", classes="w-52", boxed=True)
             symbol_in = select_all_on_focus(ui.input("Symbol", value="SPY").classes("w-40"))
         with ui.row().classes("w-full items-start gap-4 no-wrap"):
             # LEFT: input section (fixed width so the legs table never collides with
             # the matrix beside it).
-            with ui.column().classes("shrink-0 gap-4").style("width:720px"):
+            with ui.column().classes("shrink-0 gap-4 w-[720px]"):
                 with ui.row().classes("w-full items-start gap-4 no-wrap"):
-                    with ui.column().classes("calc-card flex-1 min-w-0 gap-3"):
+                    with ui.column().classes(f"{CARD} flex-1 min-w-0 gap-3"):
                         with ui.row().classes("items-end gap-4 flex-wrap"):
                             expiry_sel = ui.select([], label="Expiry").classes("w-40")
                             contracts_in = ui.number("Contracts", value=1, min=1, max=100).classes("w-28")
@@ -436,31 +426,31 @@ def render():
                             nstrikes_in = ui.number("Number of strikes", value=24, min=1,
                                                     max=200, format="%.0f").classes("w-40") \
                                 .tooltip("Strikes shown either side of spot in the P&L grid")
-                    with ui.column().classes("shrink-0 gap-3").style("width:170px"):
+                    with ui.column().classes("shrink-0 gap-3 w-[170px]"):
                         ui.button("Load", icon="cloud_upload", color=None, on_click=lambda: load_symbol(show_wait=True)) \
-                            .props("no-caps").classes("cv2-btn w-full").tooltip("Load price + expiries/strikes")
+                            .props("no-caps").classes(f"{BTN} w-full").tooltip("Load price + expiries/strikes")
                         ui.button("IV Update", icon="trending_up", color=None, on_click=lambda: fetch_iv()) \
-                            .props("no-caps").classes("cv2-btn w-full").tooltip("Fetch / imply IV for the expiry")
+                            .props("no-caps").classes(f"{BTN} w-full").tooltip("Fetch / imply IV for the expiry")
                         ui.button("Calculate", icon="calculate", color=None, on_click=lambda: do_calc()) \
-                            .props("no-caps").classes("cv2-btn-primary w-full")
+                            .props("no-caps").classes(f"{BTN_PRIMARY} w-full")
                 # Legs card (header-table editor)
-                with ui.column().classes("calc-card w-full gap-2"):
+                with ui.column().classes(f"{CARD} w-full gap-2"):
                     leg_box = ui.column().classes("gap-2 w-full")
                 # Bottom action buttons
                 with ui.row().classes("items-center gap-3 flex-wrap"):
                     ui.button("Fetch Premiums", icon="download", color=None, on_click=lambda: fetch_premiums()) \
-                        .props("no-caps").classes("cv2-btn").tooltip("Fill leg premiums from the chain")
+                        .props("no-caps").classes(BTN).tooltip("Fill leg premiums from the chain")
                     ui.button("Expected Move", icon="show_chart", color=None, on_click=lambda: send_to_em()) \
-                        .props("no-caps").classes("cv2-btn").tooltip("Chart the expected move for these legs")
+                        .props("no-caps").classes(BTN).tooltip("Chart the expected move for these legs")
                     ui.button("Copy to Simulator", icon="science", color=None,
                               on_click=lambda: handoff.send_to_simulator(
                                   leg_editor.legs_to_payload(
                                       (symbol_in.value or "").replace("$", "").upper(),
                                       editor.get_legs(), keep_premium=False))) \
-                        .props("no-caps").classes("cv2-btn").tooltip("Open these legs in the Simulator")
+                        .props("no-caps").classes(BTN).tooltip("Open these legs in the Simulator")
             # RIGHT: P&L matrix. min-w-0 + the grid's own overflow lets it h-scroll
             # instead of pushing into the inputs.
-            with ui.column().classes("calc-card flex-1 min-w-0 gap-3 self-stretch"):
+            with ui.column().classes(f"{CARD} flex-1 min-w-0 gap-3 self-stretch"):
                 summary_box = ui.row().classes("gap-3 flex-wrap")
                 grid_box = ui.column().classes("w-full")
 

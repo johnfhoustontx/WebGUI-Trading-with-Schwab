@@ -263,3 +263,10 @@ def test_calc_snapshot_roundtrips_via_page_state():
                         "num_strikes": 30, "expiry": "2026-07-17", "junk": 1}, calc._CALC_KEYS)
     assert "junk" not in snap
     assert ps.merge_restore(snap, calc._CALC_DEFAULTS)["num_strikes"] == 30
+
+
+def test_tile_color_class_maps_palette():
+    from pages.options import theme
+    assert calc.tile_color_class("#66bb6a") == theme.TXT_POS
+    assert calc.tile_color_class("#ef5350") == theme.TXT_NEG
+    assert calc.tile_color_class("#bdbdbd") == theme.TXT_NEUTRAL
