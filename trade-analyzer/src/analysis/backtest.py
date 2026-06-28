@@ -89,6 +89,23 @@ def icir_weights(ic_by_factor: Dict[str, dict], min_icir: float = 0.3) -> Dict[s
     return {k: v / total for k, v in raw.items()}
 
 
+def mean_ic_weights(ic_by_factor: Dict[str, dict], min_ic: float = 0.0) -> Dict[str, float]:
+    """Signed mean-IC weighting: weight proportional to max(0, mean_ic) for factors
+    whose mean_ic > min_ic; negative-IC (wrong-sign) and sub-floor factors get 0
+    weight. Normalized to sum to 1; empty dict if none qualify.
+
+    Chosen over ICIR-weighting for the production fit because it is n-independent
+    (a daily-IC ICIR is ~sqrt(252)x smaller than a monthly-IC ICIR, so a fixed
+    ICIR threshold mis-selects, and a t-stat gate computed on small per-fold
+    samples is unstable across walk-forward folds). Mean-IC weighting is stable
+    across folds and directly rewards predictive edge while dropping wrong-sign
+    factors."""
+    raw = {k: max(0.0, v.get("mean_ic", 0.0)) for k, v in ic_by_factor.items()
+           if v.get("mean_ic", 0.0) > min_ic}
+    total = sum(raw.values())
+    return {k: v / total for k, v in raw.items()} if total > 0 else {}
+
+
 def composite(zscores: pd.DataFrame, weights: Dict[str, float]) -> pd.Series:
     """Weighted sum of z-scored factors (only weighted columns contribute)."""
     cols = [c for c in weights if c in zscores.columns]
@@ -98,12 +115,14 @@ def composite(zscores: pd.DataFrame, weights: Dict[str, float]) -> pd.Series:
     return (zscores[cols] * w).sum(axis=1, min_count=1)
 
 
-def walk_forward(factors, forward, train=252, test=63, step=63) -> dict:
-    """Rolling train->test. Fit ICIR-weights on each train window, score the next
-    (unseen) test window, collect the composite's OOS IC. Returns oos_ic, fold
-    count, the per-fold OOS ICs, and the weights from the LAST train window.
-    Train/test never overlap within a fold; test windows across folds are
+def walk_forward(factors, forward, train=252, test=63, step=63, weight_fn=None) -> dict:
+    """Rolling train->test. Fit weights on each train window (default
+    `mean_ic_weights`, n-independent + stable across folds — see that function),
+    score the next (unseen) test window, collect the composite's OOS IC. Returns
+    oos_ic, fold count, the per-fold OOS ICs, and the weights from the LAST train
+    window. Train/test never overlap within a fold; test windows across folds are
     non-overlapping when step >= test (the default step=test tiles them)."""
+    weight_fn = weight_fn or mean_ic_weights
     dates = factors.index.get_level_values("date").unique().sort_values()
     folds, oos_ics, last_weights = 0, [], {}
     i = train
@@ -114,7 +133,7 @@ def walk_forward(factors, forward, train=252, test=63, step=63) -> dict:
         y_tr = forward[forward.index.get_level_values("date").isin(tr)]
         f_te = factors[factors.index.get_level_values("date").isin(te)]
         y_te = forward[forward.index.get_level_values("date").isin(te)]
-        w = icir_weights({c: factor_ic(f_tr[c], y_tr) for c in f_tr.columns})
+        w = weight_fn({c: factor_ic(f_tr[c], y_tr) for c in f_tr.columns})
         comp_te = composite(zscore_by_date(f_te), w)
         oos_ics.append(factor_ic(comp_te, y_te)["mean_ic"])
         last_weights = w

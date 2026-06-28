@@ -110,3 +110,26 @@ def test_walk_forward_no_leakage_on_noise():
     fwd = pd.Series(rng.normal(size=len(idx)), index=idx)   # independent of f
     res = backtest.walk_forward(f, fwd, train=150, test=50, step=50)
     assert abs(res["oos_ic"]) < 0.2     # a noise factor yields no spurious OOS edge
+
+
+def test_mean_ic_weights_drops_negative_and_weights_by_ic():
+    ics = {"a": {"mean_ic": 0.04, "icir": 0.2, "n_days": 1000},
+           "b": {"mean_ic": 0.02, "icir": 0.1, "n_days": 1000},
+           "neg": {"mean_ic": -0.06, "icir": -0.3, "n_days": 1000}}
+    w = backtest.mean_ic_weights(ics)
+    assert "neg" not in w                       # wrong-sign factor dropped entirely
+    assert w["a"] > w["b"] > 0
+    assert abs(sum(w.values()) - 1.0) < 1e-9
+
+
+def test_mean_ic_weights_empty_when_none_positive():
+    ics = {"x": {"mean_ic": -0.01, "icir": -0.1, "n_days": 100},
+           "y": {"mean_ic": 0.0, "icir": 0.0, "n_days": 100}}
+    assert backtest.mean_ic_weights(ics) == {}
+
+
+def test_walk_forward_uses_mean_ic_weights_by_default():
+    # the planted-signal panel: the "good" factor must get weight + drive OOS IC
+    f, fwd = _panel(n_days=400)
+    res = backtest.walk_forward(f, fwd, train=150, test=50, step=50)
+    assert res["oos_ic"] > 0.5 and "good" in res["weights"]

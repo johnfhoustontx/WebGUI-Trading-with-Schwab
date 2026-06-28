@@ -121,7 +121,7 @@ def fit():
 
     cols = list(panel.columns)
     ics = {c: B.factor_ic(panel[c], forward) for c in cols}            # IC is rank-based -> raw ok
-    weights = B.icir_weights(ics)
+    weights = B.mean_ic_weights(ics)
     z = B.zscore_by_date(panel)
     comp = B.composite(z, weights)
     calib = B.calibrate(comp, forward, n_bands=5)
