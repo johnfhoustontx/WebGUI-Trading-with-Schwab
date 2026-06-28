@@ -49,3 +49,44 @@ def quantile_spread(factor: pd.Series, forward: pd.Series, q: int = 5) -> float:
 
     sp = df.groupby(level="date").apply(_one).dropna()
     return float(sp.mean()) if not sp.empty else 0.0
+
+
+def zscore_by_date(factors: pd.DataFrame, winsor=(0.02, 0.98)) -> pd.DataFrame:
+    """Per date, across symbols: winsorize (clip to the cross-sectional quantile
+    band) then standardize (x - mean)/std. A constant cross-section -> all zeros
+    (no inf). Look-ahead-free: only same-date data is used."""
+    lo, hi = winsor
+
+    def _z(col):  # col: one factor's values for one date (a Series across symbols)
+        c = col.clip(lower=col.quantile(lo), upper=col.quantile(hi))
+        mu = c.mean()
+        sd = c.std(ddof=0)
+        if not np.isfinite(sd) or sd <= 0:
+            return c * 0.0
+        return (c - mu) / sd
+
+    return factors.groupby(level="date").transform(_z)
+
+
+def icir_weights(ic_by_factor: Dict[str, dict], min_icir: float = 0.3) -> Dict[str, float]:
+    """Non-negative weights proportional to max(0, ICIR), with factors below
+    `min_icir` zeroed out. Every input factor gets a key (0.0 if it didn't
+    qualify), so downstream consumers never KeyError on a dropped factor.
+    Qualifying weights are normalized to sum to 1 (uniform fallback if none
+    qualify)."""
+    raw = {k: (max(0.0, v.get("icir", 0.0)) if v.get("icir", 0.0) >= min_icir else 0.0)
+           for k, v in ic_by_factor.items()}
+    total = sum(raw.values())
+    if total <= 0:
+        n = len(ic_by_factor) or 1
+        return {k: 1.0 / n for k in ic_by_factor}
+    return {k: v / total for k, v in raw.items()}
+
+
+def composite(zscores: pd.DataFrame, weights: Dict[str, float]) -> pd.Series:
+    """Weighted sum of z-scored factors (only weighted columns contribute)."""
+    cols = [c for c in weights if c in zscores.columns]
+    if not cols:
+        return pd.Series(np.nan, index=zscores.index)
+    w = pd.Series({c: weights[c] for c in cols})
+    return (zscores[cols] * w).sum(axis=1, min_count=1)
