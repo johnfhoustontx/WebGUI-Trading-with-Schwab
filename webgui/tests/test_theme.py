@@ -24,11 +24,12 @@ def test_card_token_encodes_navy_palette():
     assert "#101a30" in theme.CARD and "#213152" in theme.CARD
 
 
-def test_legacy_dashboard_css_still_present():
-    # Phase 0 is additive — existing consumers (Calculator/Simulator/Trade) still
-    # reference .calc-card/.cv2-btn until their phases. Do NOT remove yet.
-    assert ".calc-card" in theme.DASHBOARD_CSS
-    assert ".cv2-btn-primary" in theme.DASHBOARD_CSS
+def test_dashboard_css_removed():
+    # Phase 4 deleted DASHBOARD_CSS after its last consumer (the Trade page) flipped
+    # to tokens. The Quasar-internal rules now live ONLY in QUASAR_INTERNAL_CSS.
+    assert not hasattr(theme, "DASHBOARD_CSS")
+    assert ".q-field__control" in theme.QUASAR_INTERNAL_CSS
+    assert ".strat-menu-navy" in theme.QUASAR_INTERNAL_CSS
 
 
 def test_quasar_internal_css_is_internal_only():

@@ -701,42 +701,41 @@ navigation via a single-user module snapshot; see the route table). Options desi
 / [`-plan.md`](docs/plans/2026-06-14-options-section-expansion-plan.md).
 Gamma/Simulator: [`docs/plans/2026-06-14-gamma-simulator-design.md`](docs/plans/2026-06-14-gamma-simulator-design.md) / [`-plan.md`](docs/plans/2026-06-14-gamma-simulator-plan.md).
 
-**App theme — dark-navy "dashboard" (DONE — 2026-06-24; the canonical reference).**
-> ⚠️ **Migrating to Tailwind-first** (see "UI styling standard — Tailwind-first"
-> below + the design doc
-> [`docs/plans/2026-06-28-tailwind-first-ui-migration-design.md`](docs/plans/2026-06-28-tailwind-first-ui-migration-design.md)).
-> The `DASHBOARD_CSS` semantic classes below (`.calc-card`/`.cv2-btn*`/`.calc-eyebrow`)
-> are being replaced by **Tailwind-class-string token constants** in `theme.py`
-> applied via `.classes(CARD)`; only the **Quasar-internal** rules (`q-field__control`,
-> `q-tab*`, the teleported `.strat-menu-navy` popup) stay in `ui.add_css`. The palette
-> below is the canonical hex source the tokens encode.
-
-The shared dark-navy look used by the **Calculator** + **Simulator** (page-scoped;
-promotable app-wide). One CSS string lives in **`webgui/pages/options/theme.py`**
-(`DASHBOARD_CSS`, scoped under `.calc-v2`); a page injects it with
-`ui.add_css(DASHBOARD_CSS)` and wraps its content in `.calc-v2`, so the two pages
-never drift. **This section + `theme.py` are the single source — look here to apply
-or change the theme.**
+**App theme — dark-navy "dashboard" (Tailwind-first; the canonical reference).**
+The shared dark-navy look (page-scoped via the `.calc-v2` scope hook; promotable
+app-wide) is now a set of **Tailwind design-token constants** in
+**`webgui/pages/options/theme.py`** applied via `.classes(CARD)` etc., plus a slim
+**`QUASAR_INTERNAL_CSS`** escape-hatch (the only `ui.add_css` a page injects) for the
+Quasar/Highcharts-internal DOM that component `.classes()` can't reach (`q-field__control`,
+the `leg-*` cells, the `q-tab*` chrome, the teleported `.strat-menu-navy` popup). The
+**Calculator**, **Simulator**, and **Trade** pages all use this. **`DASHBOARD_CSS` is
+deleted** (Phase 4) — `theme.py` = tokens + `QUASAR_INTERNAL_CSS`. **This section +
+`theme.py` are the single source — look here to apply or change the theme.**
 - **Apply to a new page:**
   ```python
-  from pages.options.theme import DASHBOARD_CSS
-  ui.add_css(DASHBOARD_CSS)
-  with ui.column().classes("calc-v2 w-full gap-4"):
-      ui.label("Title").classes("text-h6 text-[#eaf0fb]")       # Tailwind, not .style()
-      with ui.column().classes("calc-card w-full gap-3"):      # bordered navy panel
+  from pages.options.theme import QUASAR_INTERNAL_CSS, PAGE, CARD, EYEBROW, LABEL, BTN_PRIMARY
+  ui.add_css(QUASAR_INTERNAL_CSS)
+  with ui.column().classes(f"calc-v2 {PAGE} w-full gap-4"):    # .calc-v2 = CSS scope hook
+      ui.label("Title").classes(f"text-h6 {LABEL}")            # Tailwind token, not .style()
+      with ui.column().classes(f"{CARD} w-full gap-3"):        # bordered navy panel
           ui.input("Symbol")                                    # auto-boxed (q-field)
-          ui.button("Go", color=None).props("no-caps").classes("cv2-btn-primary")
+          ui.button("Go", color=None).props("no-caps").classes(BTN_PRIMARY)
   ```
-  Inputs / selects / tabs inside `.calc-v2` are auto-restyled; **buttons need
-  `color=None`** (drops Quasar's `bg-primary`) + a `cv2-btn` / `cv2-btn-primary` class.
-- **Class vocabulary** (all under `.calc-v2` except the popup): `.calc-v2` page wrapper
-  (navy radial-gradient bg + base text) · `.calc-card` bordered navy panel ·
-  `.calc-eyebrow` small muted label · `.cv2-btn` / `.cv2-btn-primary` secondary /
-  primary button · `.strategy-menu-btn` boxed Strategy trigger
-  (`strategy_menu.build_strategy_menu(..., boxed=True)`) · `.strat-menu-navy` the
-  teleported Strategy-menu popup (**GLOBAL** — Quasar menus mount on `<body>`, outside
-  `.calc-v2`) · `.leg-head` leg-table header row
-  (`leg_editor.build_leg_editor(..., header=True)`) · `.leg-strike` centered strike cell.
+  Inputs / selects / tabs inside `.calc-v2` are auto-restyled by `QUASAR_INTERNAL_CSS`;
+  **buttons need `color=None`** (drops Quasar's `bg-primary`) + a `BTN` / `BTN_PRIMARY` token.
+  Reactive (repainted-in-place) label colors swap via `.classes(remove=<finite set>, add=…)`
+  so repeated repaints don't stack conflicting `text-[…]` classes.
+- **Token vocabulary** (`.classes(<TOKEN>)`, all in `theme.py`): `PAGE` navy radial-gradient
+  page wrap · `CARD` bordered navy panel · `EYEBROW` small muted label · `LABEL` / `MUTED`
+  text · `BTN` / `BTN_PRIMARY` secondary / primary button · `STRATEGY_BTN` boxed Strategy
+  trigger box (applied alongside the `strategy-menu-btn` scope hook via
+  `strategy_menu.build_strategy_menu(..., boxed=True)`) · `TXT_POS/TXT_WARN/TXT_NEG/TXT_NEUTRAL`
+  semantic state text colors (+ `STATE_TEXT_CLASSES` for the reactive `remove=`) · `BTN_3D` /
+  `BTN_3D_DANGER` 3D gradient buttons. **CSS-only hooks** (`QUASAR_INTERNAL_CSS`, scoped under
+  `.calc-v2` except the popup): `.calc-v2` scope hook (the page itself uses the `PAGE` token for
+  the gradient) · `.strat-menu-navy` the teleported Strategy-menu popup (**GLOBAL** — Quasar
+  menus mount on `<body>`, outside `.calc-v2`) · `.leg-head` / `.leg-row` / `.leg-strike`
+  leg-table cells (`leg_editor.build_leg_editor(..., header=True)`).
 - **Palette** (hex → role): page bg `#16243f→#0c1424→#0a0f1c` (radial) / border `#1d2942`
   · card `#101a30` / border `#213152` · input box `#0c1426` / border `#243353` / focus
   ring `#3b82f6` · input text `#e7edf8` · base text `#cdd8ee` · muted label `#7f8db0` ·
