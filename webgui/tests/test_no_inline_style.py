@@ -71,3 +71,16 @@ def test_trade_page_has_no_inline_style():
     src = (base / "trade.py").read_text(encoding="utf-8")
     assert ".style(" not in src, "trade.py still uses .style()"
     assert ":style=" not in src, "trade.py still uses a Vue :style= slot binding"
+
+
+# Phase 5: the top-level Sentiment + Sector-Rotation pages on Tailwind only. These
+# keep their OWN look (NOT the navy dashboard theme), so their dynamic colors map to
+# a LOCAL 5-color Tailwind class palette (not the theme tokens); reactive in-place
+# recolors swap via .classes(remove=…, add=…). The `.sent-sectors` ui.add_css block
+# is gone — its borders/hover now ride Tailwind on the sector/industry rows.
+def test_sentiment_pages_have_no_inline_style():
+    base = pathlib.Path(__file__).resolve().parents[1] / "pages"
+    for fn in ["sentiment.py", "sentiment_rotation.py"]:
+        src = (base / fn).read_text(encoding="utf-8")
+        assert ".style(" not in src, f"{fn} still uses .style()"
+        assert ":style=" not in src, f"{fn} still uses a Vue :style= slot binding"
