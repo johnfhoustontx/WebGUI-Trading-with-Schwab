@@ -19,10 +19,26 @@ intent **convert + light polish**. Phased migration (menu first, then each scree
 logical group) — see the "UI styling standard — Tailwind-first" section below + the
 [design doc](docs/plans/2026-06-28-tailwind-first-ui-migration-design.md) /
 [plan](docs/plans/2026-06-28-tailwind-first-ui-migration-plan.md) /
-[phase2](docs/plans/2026-06-28-tailwind-first-ui-migration-phase2-plan.md). **Phase 0
+[phase2](docs/plans/2026-06-28-tailwind-first-ui-migration-phase2-plan.md) /
+[phase3a](docs/plans/2026-06-28-tailwind-first-ui-migration-phase3a-plan.md). **Phase 0
 (token vocabulary) + Phase 1 (nav shell) + Phase 2 (shared `pages/options/*` helpers —
-`.style()`-free, dynamic colors palette-mapped) DONE** — webgui 565 green + live-verified;
-next is Phase 3a (signal-table screens). Prior — **Validated swing (1–8 wk) evaluation —
+`.style()`-free, dynamic colors palette-mapped) + Phase 3a (the six signal-table screens
+— Scanner/Swing/Captured/Paper/Paper-Portfolio/Rescue) DONE** — webgui 578 green +
+live-verified. **Phase 3a** removes every `.style()` AND every Vue `:style=` slot binding
+from those pages: dynamic Quasar table-cell colors now map to a stamped Tailwind **`:class`**
+field from a finite palette (`score_zone_class`/`rec_class`/`pnl_class`/`verdict_class`/
+`heat_bg_class`/`cash_class` — exact hexes preserved as `bg-[#..]`/`text-[#..]` arbitrary
+classes; the shared `heat_border_class` in `rescue.py` is imported by captured/paper/portfolio
+for the at-risk left-border tint, DRY); the 3D gradient buttons (Scanner "Run scan" + Paper
+actions) move to shared **`theme.BTN_3D` / `theme.BTN_3D_DANGER`** tokens (Tailwind arbitrary
+`bg-[linear-gradient(…)]` + multi-layer `shadow-[…,…]` + `hover:`/`active:` variants, applied
+with `color=None`); each page's `ui.add_css` block is slimmed to Quasar-table-internal rules
+only (cell `td/th` padding, sticky `thead tr th`, `.q-table__middle` max-height, the scanner
+`.q-tab`/`.q-tab__indicator`/`.q-tab--active` chrome). A `test_no_inline_style.py` guard
+asserts all six files are `.style(`/`:style=`-free. Live-verified (computed styles): the
+gradient/multi-layer-shadow buttons render exactly, tab accents + active underline, score/
+heat/rec badge bg colors, cash/P&L text colors, and the 3:2 rescue column split — no console
+errors. Next is Phase 3b. Prior — **Validated swing (1–8 wk) evaluation —
 Trade page**:
 the `/trade` **Position** verdict's hand-weighted swing scoring is **replaced by a
 backtested, IC-weighted cross-sectional factor model** (investing/months deferred —
