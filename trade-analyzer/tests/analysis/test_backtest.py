@@ -78,3 +78,35 @@ def test_calibration_bands_monotone():
     bands = backtest.calibrate(comp, fwd, n_bands=5)
     means = [b["mean_fwd"] for b in bands]
     assert means == sorted(means)
+
+
+def test_factor_ic_thin_history_no_icir_explosion():
+    # a factor with IC computable on only 2 dates: signal detected, but ICIR NOT
+    # trusted (no 1e9 explosion) -> icir_weights won't hand it the weight.
+    dates = pd.date_range("2023-01-02", periods=2, freq="B")
+    syms = [f"S{i}" for i in range(10)]
+    idx = pd.MultiIndex.from_product([dates, syms], names=["date", "symbol"])
+    vals = np.tile(np.arange(10.0), 2)
+    f = pd.Series(vals, index=idx)
+    fwd = pd.Series(vals * 0.01, index=idx)        # perfectly aligned each day
+    ic = backtest.factor_ic(f, fwd)
+    assert ic["mean_ic"] > 0.9 and ic["n_days"] == 2
+    assert ic["icir"] == 0.0
+
+
+def test_thin_factor_does_not_dominate_weights():
+    thin = {"mean_ic": 0.9, "icir": 0.0, "n_days": 2}      # post-I1: icir gated to 0
+    stable = {"mean_ic": 0.04, "icir": 1.5, "n_days": 200}
+    w = backtest.icir_weights({"thin": thin, "stable": stable})
+    assert w["stable"] > w["thin"] and w["thin"] == 0.0
+
+
+def test_walk_forward_no_leakage_on_noise():
+    rng = np.random.default_rng(7)
+    dates = pd.date_range("2023-01-02", periods=400, freq="B")
+    syms = [f"S{i}" for i in range(30)]
+    idx = pd.MultiIndex.from_product([dates, syms], names=["date", "symbol"])
+    f = pd.DataFrame({"noise": rng.normal(size=len(idx))}, index=idx)
+    fwd = pd.Series(rng.normal(size=len(idx)), index=idx)   # independent of f
+    res = backtest.walk_forward(f, fwd, train=150, test=50, step=50)
+    assert abs(res["oos_ic"]) < 0.2     # a noise factor yields no spurious OOS edge

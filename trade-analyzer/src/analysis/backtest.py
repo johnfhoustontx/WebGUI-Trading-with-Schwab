@@ -17,22 +17,28 @@ def _spearman(a: pd.Series, b: pd.Series) -> float:
     m = a.notna() & b.notna()
     if m.sum() < 5:
         return np.nan
+    if a[m].nunique() < 2 or b[m].nunique() < 2:
+        return np.nan
     return float(a[m].rank().corr(b[m].rank()))
 
 
 def factor_ic(factor: pd.Series, forward: pd.Series) -> dict:
     """Per-date cross-sectional Spearman IC of `factor` vs `forward`, summarized:
-    {mean_ic, icir, n_days}."""
+    {mean_ic, icir, n_days}. ICIR is only trusted with >= 5 IC-days and a real
+    daily-IC dispersion; otherwise it is 0.0 (so a thin/fluke factor cannot be
+    handed the weight by icir_weights)."""
     df = pd.DataFrame({"f": factor, "y": forward}).dropna()
     if df.empty:
         return {"mean_ic": 0.0, "icir": 0.0, "n_days": 0}
     ics = df.groupby(level="date").apply(
         lambda g: _spearman(g["f"], g["y"])).dropna()
-    if ics.empty:
+    n = int(len(ics))
+    if n == 0:
         return {"mean_ic": 0.0, "icir": 0.0, "n_days": 0}
     mean_ic = float(ics.mean())
-    std = float(ics.std(ddof=0)) or 1e-9
-    return {"mean_ic": mean_ic, "icir": mean_ic / std, "n_days": int(len(ics))}
+    std = float(ics.std(ddof=0))
+    icir = mean_ic / std if (n >= 5 and std > 1e-6) else 0.0
+    return {"mean_ic": mean_ic, "icir": icir, "n_days": n}
 
 
 def quantile_spread(factor: pd.Series, forward: pd.Series, q: int = 5) -> float:
@@ -95,7 +101,9 @@ def composite(zscores: pd.DataFrame, weights: Dict[str, float]) -> pd.Series:
 def walk_forward(factors, forward, train=252, test=63, step=63) -> dict:
     """Rolling train->test. Fit ICIR-weights on each train window, score the next
     (unseen) test window, collect the composite's OOS IC. Returns oos_ic, fold
-    count, the per-fold OOS ICs, and the weights from the LAST train window."""
+    count, the per-fold OOS ICs, and the weights from the LAST train window.
+    Train/test never overlap within a fold; test windows across folds are
+    non-overlapping when step >= test (the default step=test tiles them)."""
     dates = factors.index.get_level_values("date").unique().sort_values()
     folds, oos_ics, last_weights = 0, [], {}
     i = train
