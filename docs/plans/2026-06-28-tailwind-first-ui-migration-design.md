@@ -2,7 +2,12 @@
 
 **Date:** 2026-06-28
 **Branch:** `Using_Highcharts`
-**Status:** design approved — implementation not started
+**Status:** ✅ **COMPLETE — all phases (0–8) implemented, reviewed, and live-verified.** The entire
+webgui is Tailwind-only: zero `.style()`/`:style=` in `webgui/pages` (guarded by
+`test_no_inline_style.py`), `DASHBOARD_CSS` deleted, `theme.py` = tokens + `QUASAR_INTERNAL_CSS`,
+607 webgui tests green. Out-of-scope (by rule): Highcharts dicts, raw `ui.html()` fragments + their
+CSS, Quasar `color=` props; the one escape hatch is per-page Quasar-internal `ui.add_css`. Per-phase
+plans: `…-{plan,phase2,phase3a,phase3b,phase3c,phase4,phase5,phase6-8}-plan.md`.
 
 ## Goal
 

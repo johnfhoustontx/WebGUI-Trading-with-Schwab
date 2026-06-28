@@ -8,15 +8,24 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-06-28 (**UI styling standard — Tailwind-first adopted**: all
-NiceGUI component styling must use **Tailwind utility classes via `.classes()`** —
-`.style()`/inline-style/fixed-px are banned; the dark-navy theme becomes **Python
-Tailwind-class-string token constants** in `pages/options/theme.py` applied with
-`.classes(CARD)`; a single `ui.add_css` escape hatch remains **only** for
-Quasar-internal/teleported DOM (`q-field__control`/`q-tab*`/`.strat-menu-navy`);
-standalone `HTMLResponse` docs + Highcharts dicts are out of scope. Scope **pragmatic**,
-intent **convert + light polish**. Phased migration (menu first, then each screen by
-logical group) — see the "UI styling standard — Tailwind-first" section below + the
+**Last updated:** 2026-06-28 (**✅ Tailwind-first UI migration COMPLETE (Phases 0–8) — the
+ENTIRE webgui is Tailwind-only**: all NiceGUI component styling now uses **Tailwind utility
+classes via `.classes()`** — **zero `.style()`/`:style=` remain anywhere in `webgui/pages`**
+(verified by grep + the `test_no_inline_style.py` guard over every page); **607 webgui tests
+green; every page live-verified** in the browser preview. The dark-navy theme is a vocabulary of
+**Python Tailwind-class-string token constants** in `pages/options/theme.py`
+(`PAGE`/`CARD`/`EYEBROW`/`LABEL`/`MUTED`/`BTN`/`BTN_PRIMARY`/`STRATEGY_BTN`/`TXT_*`/`BTN_3D*`)
+applied with `.classes(CARD)`; the legacy `DASHBOARD_CSS` was **DELETED** (P4) — `theme.py` is now
+**tokens + the one `QUASAR_INTERNAL_CSS` escape hatch** (field/tab/menu internals). Dynamic
+data-driven colors are **palette-mapped** to fixed Tailwind classes (per-page local maps where the
+palette is page-specific); genuinely-continuous values (e.g. a panel-flex ratio) use a runtime
+arbitrary `flex-[…]` class. **Out of scope** (left as-is, by rule): Highcharts option dicts, raw
+`ui.html()` HTML-string fragments + their CSS (EOD/Gamma Explain/Analyze), and Quasar `color=`
+props. The ONE escape hatch is per-page **Quasar-internal** `ui.add_css` (table/field/tab/menu
+internals). Scope **pragmatic**, intent **convert + light polish** (every page kept its existing
+look). Built phase-by-phase (menu → each screen by logical group), each phase spec+quality-reviewed
+by subagents, browser-gated, and tests-green — see the "UI styling standard — Tailwind-first" +
+"App theme — dark-navy" sections below + the
 [design doc](docs/plans/2026-06-28-tailwind-first-ui-migration-design.md) /
 [plan](docs/plans/2026-06-28-tailwind-first-ui-migration-plan.md) /
 [phase2](docs/plans/2026-06-28-tailwind-first-ui-migration-phase2-plan.md) /
@@ -694,12 +703,14 @@ Simulator↔Calculator leg-copy stashes** (`send_to_simulator`/`send_to_calculat
 `ui.select`-compatible button → nested family→variant Quasar submenu driven by
 `strategies.STRATEGY_MENU`/`strategy_label`; both pages mount it so the picker
 never drifts; `boxed=True` styles the trigger for the navy theme), and
-**`theme.py`** (the shared dark-navy **"dashboard" theme** — one page-scoped
-`DASHBOARD_CSS` string the Calculator **and** Simulator both inject and wrap in
-`.calc-v2`: filled navy input boxes, bordered `calc-card`s, `cv2-btn`/
-`cv2-btn-primary` buttons, boxed Strategy button, header-table legs, dark
-transparent tabs so the dark Highcharts panels sit on the navy, and the
-teleported `strat-menu-navy` popup — so the two pages never drift), and
+**`theme.py`** (the shared dark-navy **"dashboard" theme** — now a vocabulary of
+**Tailwind design-token constants** (`PAGE`/`CARD`/`EYEBROW`/`LABEL`/`MUTED`/`BTN`/
+`BTN_PRIMARY`/`STRATEGY_BTN`/`TXT_*`/`BTN_3D*`) applied via `.classes(CARD)`, plus the
+slim **`QUASAR_INTERNAL_CSS`** escape-hatch the Calculator/Simulator/Trade inject for the
+Quasar-internal DOM scoped under the `.calc-v2`/`.strategy-menu-btn`/`.leg-*` hooks
+(filled navy input boxes, compact leg cells, dark transparent tabs, the teleported
+`strat-menu-navy` popup); the legacy `DASHBOARD_CSS` string was **deleted in the
+Tailwind-first migration** — see the "App theme — dark-navy" canonical section below), and
 **`page_state.py`** (the shared PURE persistence helpers — `snapshot` /
 `merge_restore` / `pick_seed` — both pages use to restore their full UI state across
 navigation via a single-user module snapshot; see the route table). Options design + plan: [`docs/plans/2026-06-14-options-section-expansion-design.md`](docs/plans/2026-06-14-options-section-expansion-design.md)
@@ -794,8 +805,15 @@ inconsistencies as each screen is converted — no gratuitous redesign). The fiv
 The migration runs in **phases (menu first, then each screen by logical group)** — see
 the design doc
 [`docs/plans/2026-06-28-tailwind-first-ui-migration-design.md`](docs/plans/2026-06-28-tailwind-first-ui-migration-design.md).
-Status snapshot: **Phase 0 + 1 + 2 + 3(a/b/c) + 4 + 5 done — OPTIONS + TRADE + SENTIMENT TAILWIND-ONLY;
-`DASHBOARD_CSS` DELETED** (2026-06-28). **P0** — `theme.py` ships the
+Status snapshot: **✅ COMPLETE — Phases 0–8 done; the ENTIRE webgui is Tailwind-only** (2026-06-28,
+607 webgui tests green; **zero `.style()`/`:style=` anywhere in `webgui/pages`**, verified by grep +
+the `test_no_inline_style.py` guard covering every converted page). The only inline styling that
+remains is the **documented out-of-scope set**: Highcharts option dicts (chart config), raw
+`ui.html()` HTML-string fragments + their CSS (`EOD_CSS`/`EXPLAIN_CSS`/the Gamma Analyze infographic
+/ the EOD export docs), and Quasar `color=` props. The ONE escape hatch is per-page **Quasar-internal**
+`ui.add_css` (`QUASAR_INTERNAL_CSS` field/tab/menu internals; `_NAV_CSS`; the table-internal
+`SCAN_CSS`/`PAPER_CSS`/`CAPTURED_CSS`/`_RESCUE_CSS`/`DRIVER_CSS` sticky-thead/`.q-table__middle`).
+**P0** — `theme.py` ships the
 Tailwind token vocabulary (`PAGE`/`CARD`/`EYEBROW`/`LABEL`/`MUTED`/`BTN`/`BTN_PRIMARY`/
 `STRATEGY_BTN` + the semantic state-color tokens `TXT_POS`/`TXT_WARN`/`TXT_NEG`/
 `TXT_NEUTRAL` + `STATE_TEXT_CLASSES` + the 3D-button tokens `BTN_3D`/`BTN_3D_DANGER`) + the
@@ -849,8 +867,18 @@ yellow/cyan/flat differ from `TXT_*`, so deliberately NOT shared; pages do NOT a
 their look is preserved); the `.sent-sectors` `ui.add_css` block → Tailwind row borders/hover; the
 **auto-refresh** in-place recolors (traffic tiles bg + bias/regime/rotation/headline labels) use
 `remove/add` (verified live: no class stacking across refresh cycles). Gauges + history/RRG
-Highcharts charts stay **out of scope**. **Next: Phase 6** (Portfolio), then Phase 7 (Driver) +
-Phase 8 (utility pages: EOD-shell/Status/Settings/Terminate/Manuals). Update this line as phases land.
+Highcharts charts stay **out of scope**. **P6** — **Portfolio**: the proxy/stream status-bar colors
+(local `#2e9e6b`/`#e24b4a`/`#888888`) on persistent labels via `remove/add`; static pre-wrap →
+`whitespace-pre-wrap`. **P7** — **Driver**: the grade + control-state **badge backgrounds**
+(`grade_bg_class` 5-set / `control_bg_class` 3-set, rebuilt per repaint → `add=`) and the perf **P&L
+table cell** — a Vue `:style=` slot → **`:class`** with a stamped `_pnl_class` row field (a guard test
+pins the slot references it); `DRIVER_CSS` kept (Quasar-internal sticky-thead). **P8** — **Status**
+(3 static `min-w-[…]` widths; Quasar `color=` props left), and **Settings/Terminate/Manuals** were
+already `.style()`-free; **EOD**'s `EOD_CSS` styles a `ui.html()` fragment → **out of scope**. All
+five pages joined the `test_no_inline_style.py` guard. **✅ The migration is COMPLETE — Phases 0–8,
+the entire webgui is Tailwind-only (607 green, live-verified across every page).** Design/plan docs:
+[design](docs/plans/2026-06-28-tailwind-first-ui-migration-design.md) + the per-phase plans
+`2026-06-28-tailwind-first-ui-migration-{plan,phase2,phase3a,phase3b,phase3c,phase4,phase5,phase6-8}-plan.md`.
 
 **`pages/ui_guard.py` (cross-cutting, load-bearing — used by ~15 pages).** Provides
 `guard` / `guard_async` decorators that make a NiceGUI callback a clean no-op when
@@ -1010,8 +1038,10 @@ stale); the proxy's REST market data works even when `/health` shows
 `token_expired:true` (auto-refresh) — only a missing/expired **refresh** token is
 fatal.
 
-**Tests:** `cd webgui && ..\.venv\Scripts\python -m pytest -q` (552 green as of
+**Tests:** `cd webgui && ..\.venv\Scripts\python -m pytest -q` (607 green as of
 this writing). TDD pure functions; smoke-verify `render()` with a screenshot.
+`tests/test_no_inline_style.py` guards every migrated page against `.style(`/`:style=`
+(the Tailwind-first standard) — add any new page to it.
 
 **Environment quirks to expect:**
 - The proxy on `:8100` may be the *source* repo's proxy (its `/health`
