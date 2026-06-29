@@ -211,6 +211,47 @@ SETTINGS_CHILDREN = [
     ("/manuals", "User Manuals", "menu_book"),
 ]
 
+# ── Browser-tab title + per-page favicon color ──────────────────────────────
+# Each page's BROWSER TAB shows the selected menu-item name (derived from the nav
+# lists above, so it never drifts) and a DISTINCT colored favicon, so several open
+# tabs are tellable-apart at a glance. Applied per page in ``_layout`` via
+# ``ui.page_title`` + a tiny colored-square SVG ``<link rel=icon>``.
+_NAV_LABEL = {route: label for route, label, _icon in
+              OPTIONS_CHILDREN + SENTIMENT_CHILDREN + FLAT_NAV + MORE_CHILDREN
+              + SETTINGS_CHILDREN}
+
+# One distinct color per route (the favicon fill). Material hues, all visually apart.
+_TAB_COLOR = {
+    "/": "#42a5f5",                       # Scanner — blue
+    "/options/paper": "#66bb6a",          # Paper Trades — green
+    "/options/captured": "#ab47bc",       # Captured Signals — purple
+    "/options/portfolio": "#26a69a",      # Paper Portfolio — teal
+    "/options/calculator": "#ffa726",     # Calculator — amber
+    "/options/swing": "#ec407a",          # Swing Scanner — pink
+    "/options/gamma": "#7e57c2",          # Gamma — deep purple
+    "/options/simulator": "#29b6f6",      # Simulator — light blue
+    "/options/expected-move": "#ffca28",  # Expected Move — yellow
+    "/options/rescue": "#ef5350",         # Rescue — red
+    "/sentiment": "#5c6bc0",              # Sentiment — indigo
+    "/sentiment/rotation": "#8d6e63",     # Sector Rotation — brown
+    "/trade": "#26c6da",                 # Trade — cyan
+    "/portfolio": "#9ccc65",             # Portfolio — light green
+    "/driver": "#ff7043",                # Driver — deep orange
+    "/eod": "#78909c",                   # EOD Report — blue grey
+    "/status": "#d4e157",                # System Status — lime
+    "/settings": "#90a4ae",              # Settings — blue grey light
+    "/terminate": "#b71c1c",             # Terminate — dark red
+    "/manuals": "#4db6ac",               # User Manuals — teal
+}
+
+
+def _favicon_link(color: str) -> str:
+    """A ``<link rel=icon>`` with a rounded-square SVG favicon filled ``color`` (data-URI)."""
+    from urllib.parse import quote
+    svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
+           f'<rect width="32" height="32" rx="7" fill="{color}"/></svg>')
+    return f'<link rel="icon" href="data:image/svg+xml,{quote(svg)}">'
+
 # Persisted left-nav expansion state (single-user); None/absent = use active-route default.
 _NAV_OPEN: dict[str, bool] = {}
 
@@ -399,6 +440,9 @@ def _layout(active: str, title: str):
     _recompute_badges()
     ui.add_css(_NAV_CSS)
     ui.add_css(_TABLE_CSS)   # app-wide fixed (sticky) table headers
+    # Browser tab: title = the selected menu item; favicon = this page's color.
+    ui.page_title(_NAV_LABEL.get(active, "Schwab Trading"))
+    ui.add_head_html(_favicon_link(_TAB_COLOR.get(active, "#42a5f5")))
     drawer = ui.left_drawer(value=True, bordered=True).classes("nav-drawer").props("behavior=desktop")
     with drawer:
         ui.label("SCHWAB TRADING").classes(
