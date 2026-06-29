@@ -278,7 +278,7 @@ _NAV_CSS = """
 # (.paper-table / .captured-table / .driver-table) may still set its own max-height —
 # its more-specific selector + later injection win over this baseline.
 _TABLE_CSS = """
-.q-table .q-table__middle { max-height: 65vh; }
+.q-table__middle { max-height: 65vh; }
 .q-table thead tr th { position: sticky; top: 0; z-index: 1; background: #1d1d1d; }
 """
 

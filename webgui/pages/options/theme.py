@@ -92,7 +92,7 @@ BTN_3D_DANGER = (
 # but static (no hover/press). Apply with ``.classes(TILE_3D)`` on a ``ui.card``.
 TILE_3D = (
     "rounded-[8px] "
-    "shadow-[inset_0_1px_0_0_rgba(255,255,255,.08),0_3px_0_0_rgba(0,0,0,.30),0_6px_14px_rgba(0,0,0,.42)]"
+    "shadow-[0_3px_0_0_rgba(0,0,0,.3),0_6px_14px_rgba(0,0,0,.42)]"
 )
 
 # Semantic STATE colors (positive / caution / negative / neutral) — the finite
