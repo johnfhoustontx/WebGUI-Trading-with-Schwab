@@ -193,8 +193,22 @@ def test_decide_passes_model_tool_and_choice():
     assert kw["max_tokens"] == decider.settings.MAX_TOKENS
     assert kw["tool_choice"] == {"type": "tool", "name": "submit_decision"}
     assert kw["tools"] == [decider.DECISION_TOOL]
-    assert kw["system"] == decider.system_prompt()
+    # system is now a single cache-marked content block carrying the mandate text
+    assert kw["system"] == [{"type": "text", "text": decider.system_prompt(),
+                             "cache_control": {"type": "ephemeral", "ttl": "1h"}}]
     assert kw["messages"][0]["role"] == "user"
+
+
+def test_decide_enables_prompt_caching_on_static_prefix():
+    """The tools+system prefix is cache-marked (breakpoint at end-of-system, 1h TTL)
+    so the per-checkpoint packet is never cached. Inert below Sonnet 4.6's 2048-token
+    floor at today's prefix size, but correct + future-proof + bills nothing extra."""
+    client = _FakeClient({"stand_down": True, "trades": []})
+    decider.decide({"menu": [{"id": "m0"}], "target": 500}, client=client)
+    sys_blocks = client.last_kwargs["system"]
+    assert isinstance(sys_blocks, list) and len(sys_blocks) == 1
+    assert sys_blocks[0]["text"] == decider.system_prompt()
+    assert sys_blocks[0]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
 
 
 def test_decide_api_error_stands_down():

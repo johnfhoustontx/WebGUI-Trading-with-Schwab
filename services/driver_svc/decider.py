@@ -159,6 +159,27 @@ def system_prompt() -> str:
     return _SYSTEM
 
 
+def _cached_system() -> list:
+    """The mandate as a single **prompt-cache-marked** system content block.
+
+    Render order is tools → system → messages, so a ``cache_control`` breakpoint on
+    the (last) system block caches **tools + system together** and EXCLUDES the
+    per-checkpoint packet (``build_messages``), which varies every call and must not
+    be cached. ``ttl: "1h"`` because the driver re-decides only every
+    ``CHECKPOINT_MIN`` (~30 min) — far past the default 5-min cache TTL, so a 5-min
+    entry would always be cold by the next checkpoint.
+
+    NOTE — currently INERT (by design, no extra cost): Sonnet 4.6's minimum cacheable
+    prefix is 2048 tokens, and this tools+system prefix measures ~800, so the API
+    silently writes no cache (``cache_creation_input_tokens == 0``) and bills nothing
+    extra. It engages automatically only if the static prefix later grows past 2048
+    (e.g. a longer mandate / more static context). See @claude-api
+    shared/prompt-caching.md (prefix-match + per-model minimums).
+    """
+    return [{"type": "text", "text": _SYSTEM,
+             "cache_control": {"type": "ephemeral", "ttl": "1h"}}]
+
+
 def _make_client():
     """Build a real ``anthropic.Anthropic`` client, or ``None`` if no key.
 
@@ -200,7 +221,7 @@ def decide(packet, client=None, _force_no_key=False) -> dict:
         resp = client.messages.create(
             model=settings.MODEL,
             max_tokens=settings.MAX_TOKENS,
-            system=system_prompt(),
+            system=_cached_system(),   # tools+system cached (prefix breakpoint); see _cached_system
             tools=[DECISION_TOOL],
             tool_choice={"type": "tool", "name": "submit_decision"},
             messages=build_messages(packet),
