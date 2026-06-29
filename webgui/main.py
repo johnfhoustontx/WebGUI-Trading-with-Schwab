@@ -246,11 +246,17 @@ _TAB_COLOR = {
 
 
 def _favicon_link(color: str) -> str:
-    """A ``<link rel=icon>`` with a rounded-square SVG favicon filled ``color`` (data-URI)."""
+    """A rounded-square SVG favicon (data-URI) filled ``color``, as BOTH the modern
+    ``rel=icon`` and the legacy ``rel="shortcut icon"``.
+
+    NiceGUI injects a default ``rel="shortcut icon"`` .ico earlier in <head>; ours are
+    added after it, so the last-declared link of each rel wins — guaranteeing the
+    colored favicon shows in the tab regardless of which rel the browser prefers."""
     from urllib.parse import quote
     svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
            f'<rect width="32" height="32" rx="7" fill="{color}"/></svg>')
-    return f'<link rel="icon" href="data:image/svg+xml,{quote(svg)}">'
+    uri = f"data:image/svg+xml,{quote(svg)}"
+    return f'<link rel="icon" href="{uri}"><link rel="shortcut icon" href="{uri}">'
 
 # Persisted left-nav expansion state (single-user); None/absent = use active-route default.
 _NAV_OPEN: dict[str, bool] = {}
