@@ -169,10 +169,11 @@ def _cached_system() -> list:
     ``CHECKPOINT_MIN`` (~30 min) — far past the default 5-min cache TTL, so a 5-min
     entry would always be cold by the next checkpoint.
 
-    NOTE — currently INERT (by design, no extra cost): Sonnet 4.6's minimum cacheable
-    prefix is 2048 tokens, and this tools+system prefix measures ~800, so the API
-    silently writes no cache (``cache_creation_input_tokens == 0``) and bills nothing
-    extra. It engages automatically only if the static prefix later grows past 2048
+    NOTE — currently INERT (by design, no extra cost): Sonnet 5's minimum cacheable
+    prefix is ~2048 tokens (the recent-Sonnet / Claude-5 floor), and this tools+system
+    prefix measures ~800, so the API silently writes no cache
+    (``cache_creation_input_tokens == 0``) and bills nothing extra. It engages
+    automatically only if the static prefix later grows past that floor
     (e.g. a longer mandate / more static context). See @claude-api
     shared/prompt-caching.md (prefix-match + per-model minimums).
     """

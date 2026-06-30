@@ -1313,15 +1313,15 @@ def _gamma_blocks_for(symbol, chain):
 
 # ── Gamma Analyze (Claude-written intraday briefing → standalone HTML tab) ───
 # The Analyze button bundles the live $SPX/SPY/QQQ GEX/Charm/DEX/Vanna data into a
-# prompt, runs it through Claude (Sonnet 4.6), and renders the model's analysis as a
+# prompt, runs it through Claude (Sonnet 5), and renders the model's analysis as a
 # self-contained dark HTML document the GUI serves in a NEW browser tab — mirroring
-# the Explain flow. The Anthropic call is cost-bounded on purpose: Sonnet 4.6 with
+# the Explain flow. The Anthropic call is cost-bounded on purpose: Sonnet 5 with
 # thinking DISABLED + a modest max_tokens, so each click costs ~the "typical" 1-page
 # summary the user signed off on (no runaway thinking tokens). The ``anthropic``
 # import is LAZY (only when a key resolves). EVERY failure surface (no chains / no key
 # / API error / empty reply) degrades to a readable HTML page so the tab always shows
 # something — never a silent no-op.
-_ANALYZE_MODEL = "claude-sonnet-4-6"
+_ANALYZE_MODEL = "claude-sonnet-5"
 _ANALYZE_MAX_TOKENS = 1500  # "typical" ~1-page briefing (user-approved cost point)
 _ANALYZE_SYSTEM = (
     "You are an options-market analyst. From the structured GEX / Charm / DEX / Vanna "
@@ -1740,7 +1740,7 @@ def gamma_analyze(client=None, label: str | None = None) -> dict:
 
     Fetch each of $SPX/SPY/QQQ, build its analysis blocks (defensive per-symbol →
     None), bundle them via ``build_summary_prompt_bundled``, then call Claude
-    (Sonnet 4.6, thinking disabled) forcing the ``submit_analysis`` tool, and render
+    (Sonnet 5, thinking disabled) forcing the ``submit_analysis`` tool, and render
     the structured reply as the all-in-one dashboard infographic (regime banner +
     bias meter, a price-level ladder + metric tiles per index, narrative footer) in a
     standalone dark HTML document the GUI serves in a new tab (mirrors

@@ -201,7 +201,7 @@ def test_decide_passes_model_tool_and_choice():
 
 def test_decide_enables_prompt_caching_on_static_prefix():
     """The tools+system prefix is cache-marked (breakpoint at end-of-system, 1h TTL)
-    so the per-checkpoint packet is never cached. Inert below Sonnet 4.6's 2048-token
+    so the per-checkpoint packet is never cached. Inert below Sonnet 5's ~2048-token
     floor at today's prefix size, but correct + future-proof + bills nothing extra."""
     client = _FakeClient({"stand_down": True, "trades": []})
     decider.decide({"menu": [{"id": "m0"}], "target": 500}, client=client)

@@ -45,7 +45,7 @@ VIX_MAX = 25.0               # no new entries above this (mirrors config.VIX_MAX
 MENU_TOP_N = 12              # how many top-scored signals Claude sees
 # Decision model (committed build default: Opus 4.8). Override per-deployment via the
 # DRIVER_MODEL env var OR a gitignored shared/driver_model.txt file (see
-# _resolve_model) — e.g. put "claude-sonnet-4-6" in shared/driver_model.txt to run cheaper.
+# _resolve_model) — e.g. put "claude-sonnet-5" in shared/driver_model.txt to run cheaper.
 MODEL = _resolve_model()
 MAX_TOKENS = 2000
 CHECKPOINT_MIN = 30          # intraday re-evaluation cadence (minutes)
