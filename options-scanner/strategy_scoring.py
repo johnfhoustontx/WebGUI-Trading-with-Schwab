@@ -233,7 +233,9 @@ def q_rr(signal):
         return 50.0
     if not isinstance(rr, (int, float)) or rr <= 0:
         return 0.0
-    return _clamp(rr / 1.0 * 100.0)
+    # `rr` here is the RATIO form (1.0 = 1:1) -> 100 at rr=1.0, capped. This is
+    # distinct from scoring.norm_rr's `rr_pct` PERCENTAGE convention (100 at 50%).
+    return _clamp(rr * 100.0)
 
 
 def q_capital_eff(signal):
@@ -329,7 +331,9 @@ def score_strategy(signal, view, atm_iv, em_1sd):
         fit_v = fit_vol(signal.get("net_vega"), view.get("vol_regime", "mid"))
         fit_score = FIT_DIR_W * fit_dir + FIT_VOL_W * fit_v
 
-        # R:R quality, falling back to capital efficiency when unbounded.
+        # R:R quality, falling back to capital efficiency when unbounded. NOTE:
+        # the factor_scores["q_rr"] slot reports capital-efficiency for
+        # unbounded-profit longs (no defined R:R) — the label is shared.
         if signal.get("rr") is None:
             q_rr_val = q_capital_eff(signal)
         else:
@@ -358,13 +362,26 @@ def score_strategy(signal, view, atm_iv, em_1sd):
             "q_liq": round(q_liq_val, 1),
         }
     except Exception:
-        log.exception("score_strategy failed for signal %s", signal.get("type"))
+        # Safe even when `signal` isn't a dict — never call .get on it here.
+        _label = signal.get("type") if isinstance(signal, dict) else signal
+        log.exception("score_strategy failed for signal %s", _label)
         fit_score = 0.0
         quality_score = 0.0
         composite = 0.0
         factor_scores = {
             "fit_dir": 0.0, "fit_vol": 0.0, "q_rr": 0.0,
             "q_be": 0.0, "q_pop": 0.0, "q_liq": 0.0,
+        }
+
+    # A non-dict signal can't be mutated — return a fresh neutral result so the
+    # docstring's "returns a neutral signal rather than raising" holds.
+    if not isinstance(signal, dict):
+        return {
+            "fit_score": round(fit_score, 1),
+            "quality_score": round(quality_score, 1),
+            "composite_score": round(composite, 1),
+            "grade": _grade(composite),
+            "factor_scores": factor_scores,
         }
 
     signal["fit_score"] = round(fit_score, 1)

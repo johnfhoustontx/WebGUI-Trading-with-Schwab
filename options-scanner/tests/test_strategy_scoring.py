@@ -236,6 +236,15 @@ def test_score_strategy_defensive_on_bad_signal():
     assert 0 <= out["composite_score"] <= 100
 
 
+def test_score_strategy_defensive_on_non_dict():
+    # a non-dict signal must NOT raise (the except handler can't assume dict-ness)
+    for bad in (None, "x", 42):
+        out = sc.score_strategy(bad, {"direction": "bullish", "conviction": 0.8,
+                                "vol_regime": "low"}, 0.18, 8.0)
+        assert out["composite_score"] == 0.0
+        assert out["grade"] == "Weak"
+
+
 def test_score_all_sorts_desc():
     a = _long_call_sig()
     b = _long_call_sig()
