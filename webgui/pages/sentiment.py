@@ -233,7 +233,7 @@ def _intraday_figure(points, *, value_key, y_max, y_title, zones):
     value via series.zones. Ordinal x-axis collapses overnight session gaps; the
     date lives in the tooltip header (datetime-crosshair-label epoch-ms gotcha)."""
     pts = points or []
-    data = [[int(p["ts"]) * 1000, _safe_float(p.get(value_key))] for p in pts]
+    data = [[int(_safe_float(p.get("ts"))) * 1000, _safe_float(p.get(value_key))] for p in pts]
     axis_label = {"style": {"color": "#bdbdbd"}}
     return {
         "chart": {"type": "line", "backgroundColor": "transparent",
@@ -582,6 +582,8 @@ def render():
         state["derived"] = composite.get("derived") or {}
         state["snaps"] = history.get("snaps") or []
         state["spy"] = history.get("spy") or []
+        # rides the composite version bump — published in the same service refresh
+        # cycle, so _maybe_repaint's comp_ver poll already triggers a repaint.
         intraday = bus_client.read("sentiment:intraday_history") or {}
         state["intraday"] = intraday.get("points") or []
         state["sector"] = sectors.get("sector")
@@ -683,14 +685,16 @@ def render():
             build_trend_intraday_figure([])).classes("w-full")
 
     # Reflow both charts when the expander opens (a chart built inside a collapsed
-    # expander measures 0x0 — same fix as the Simulator's hidden tab panels).
-    def _reflow_daily(e):
-        if e.value:
-            for el in (sent_intraday_plot, trend_intraday_plot):
-                ui.timer(0.05,
-                         lambda el=el: ui.run_javascript(
-                             f"getElement({el.id})?.chart?.reflow()"), once=True)
-    daily_exp.on_value_change(_reflow_daily)
+    # expander measures 0x0 — same fix as the Simulator's hidden tab panels). The
+    # worker is @guard-ed so the post-timer JS round-trip no-ops on a navigate-away/
+    # disconnect race; the timer stays outside the guarded body.
+    @guard
+    def _reflow_daily_charts():
+        for el in (sent_intraday_plot, trend_intraday_plot):
+            ui.run_javascript(f"getElement({el.id})?.chart?.reflow()")
+
+    daily_exp.on_value_change(
+        lambda e: ui.timer(0.05, _reflow_daily_charts, once=True) if e.value else None)
 
     # Sector & Industry Performance
     ui.separator().classes("q-my-md")
