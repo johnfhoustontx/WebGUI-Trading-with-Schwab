@@ -8,7 +8,33 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-06-28 (**✅ Tailwind-first UI migration COMPLETE (Phases 0–8) — the
+**Last updated:** 2026-06-30 (**Sentiment "Daily Sentiment & Trend" intraday graphs**: the
+`/sentiment` page's collapsed **30-Day History** section — the daily composite-history line
++ 5d/20d rolling-average + velocity/divergence text — is **replaced** by a collapsed
+**"Daily Sentiment & Trend"** expander holding **two stacked, value-colorized (green/yellow/red)
+2-min intraday graphs**: Daily Market Sentiment (0–10) + Daily Market Trend (0–100). Each is a
+Highcharts line colorized by value via `series.zones`/`zoneAxis:"y"` over an **ordinal datetime
+x-axis** (collapses overnight session gaps), rolling the **last 5 trading days**. The series is
+**recorded going forward** (no backfill) — `sentiment_svc`'s 120 s `refresh()` records one
+`(ts, sentiment 0–10, trend 0–100)` point, **RTH-gated** (Mon–Fri 08:30–15:00 CT), into a new
+SQLite store (`services/sentiment_svc/intraday_history_db.py`,
+`repo_paths.SENTIMENT_INTRADAY_DB = sentiment-dashboard/data/sentiment_intraday.db`; rolling
+window = last 5 distinct local dates; one shared connection `check_same_thread=False` serialized
+by `handlers._INTRADAY_LOCK` across the multi-worker executor), prunes to 5 days, and publishes
+**`cache:sentiment:intraday_history`** (`{"points":[{ts,sentiment,trend},…]}`; additive
+`shared/contracts/sentiment.py:IntradayHistory`). The page (`webgui/pages/sentiment.py`) reads
+that view in `_read_cache` (it rides the composite version bump — same refresh cycle), paints
+both charts in `_apply` via the PURE builders `build_sentiment_intraday_figure` /
+`build_trend_intraday_figure` (sentiment bands ≤4.5/≤6.5, trend bands ≤30/≤70, matching the
+gauge/`score_to_state` semantics), and **reflows on expand** (a `@guard`-wrapped worker — a chart
+built inside a collapsed expander measures 0×0, the documented Simulator-hidden-tab fix).
+sentiment_svc **51** + shared/contracts **39** + webgui **617** green; live-verified end-to-end
+(restarted service created the DB + recorded a real RTH point → page rendered both colorized
+charts, session gap collapsed, no console errors). Built subagent-by-subagent (TDD, two-stage
+spec+quality review per task). Branch `Using_Highcharts`. Design/plan:
+[design](docs/plans/2026-06-30-sentiment-daily-intraday-graphs-design.md) /
+[plan](docs/plans/2026-06-30-sentiment-daily-intraday-graphs.md). Prior — 2026-06-28
+(**✅ Tailwind-first UI migration COMPLETE (Phases 0–8) — the
 ENTIRE webgui is Tailwind-only**: all NiceGUI component styling now uses **Tailwind utility
 classes via `.classes()`** — **zero `.style()`/`:style=` remain anywhere in `webgui/pages`**
 (verified by grep + the `test_no_inline_style.py` guard over every page); **607 webgui tests
@@ -670,7 +696,7 @@ Routes:
 | `/options/simulator` | Simulator (**multi-leg strategy builder** — a Strategy dropdown over the shared **editable leg-editor** (`leg_editor.py`) replaces the old single-contract selector — driving all three legacy tabs: **Replay** (re-prices the **netted** position along the underlying's recent path → stacked price + 5-Greek panels over a gap-compressed integer x-axis w/ a client-side scrub cursor) + What-if (a **dollar profit/loss payoff from entry**: P/L = position value (×100 contract multiplier) minus the **entry mark** (`whatif_baseline` = value at spot *now*) — so profit caps at the net credit, loss floors at width−credit, **matching the Calculator** — with a green profit fill above / red loss fill below breakeven (area `threshold:0` + `color`/`negativeColor`) + faint Profit/Loss washes + labels; Δt is **elapsed** days from now, per-leg decay → **calendars** correct, theta visible as Δt slides) + IV-shock; **Copy to Calculator** button; **dark-navy dashboard theme** via shared `theme.py`; **persists full UI state across navigation** (symbol/strategy/legs/sliders/active tab) + **auto-refreshes on return** via a single-user module snapshot — `page_state.py`; the **Symbol** field **Fetches the snapshot on tab-out (`focusout`) / Enter** (deduped) with the same **centered wait overlay** (`overlay.py`) until the meta lands; **compact leg cells** + no "Actions" header (shared `leg_editor`)) | built |
 | `/options/expected-move` | Expected Move (candlestick price history (6-mo daily) + forward **ATM-IV expected-move cone** to the option's expiration (green/red dashed, √-time fan) + leg **strike lines** (short solid / long dashed, put/call colored) + axis **crosshair** w/ Date(X)+Price(Y) label boxes; opened in a **new browser tab** via stash-handoff from Scanner/Paper/Captured/Calculator, or standalone w/ symbol+expiry input) | built |
 | `/options/rescue` | Rescue (at-risk credit spreads (PCS/CCS/IC) → **at-risk table** (paper+captured, heat-colored) → select a position → ranked **commission-aware adjustment menu**: close / partial-close / narrow / convert-IC / butterfly / roll-down/out/down-out / broken-wing / inverted / futures-hedge; each card shows gross/commission/net + metrics + legs + rationale + strategic context + warnings + score; execute cards have **Apply → confirm → `rescue_apply`** behind a stale-price guard, advisory cards show "manual"; nav badge from `cache:options:rescue_summary`) | built |
-| `/sentiment` | Sentiment (two-column top: **dual** Sentiment gauges (Today + 30-Day Avg) + **dual** Market Trend gauges (Today live-intraday + 30-Day structural — directional 0–100 score, 15-min cadence) / component table; traffic-light tiles; 30d history + rolling avgs; full-width **Sector & Industry Performance** w/ Day/Week/Month %, P/C, RRG, rotation banner, **expandable industries w/ P/C+RRG**; bottom status bar; **persists across navigation**; **server-side 120s auto-refresh + bridge publish, tab-independent**) | built |
+| `/sentiment` | Sentiment (two-column top: **dual** Sentiment gauges (Today + 30-Day Avg) + **dual** Market Trend gauges (Today live-intraday + 30-Day structural — directional 0–100 score, 15-min cadence) / component table; traffic-light tiles; collapsed **"Daily Sentiment & Trend"** expander = two value-colorized (green/yellow/red) **2-min intraday graphs** (Daily Market Sentiment 0–10 + Daily Market Trend 0–100), rolling **last 5 trading days**, session gaps collapsed, **recorded going forward** by `sentiment_svc` (RTH-gated) into `SENTIMENT_INTRADAY_DB` → `cache:sentiment:intraday_history` (replaced the old 30-day-history line + rolling-avg/velocity/divergence text); full-width **Sector & Industry Performance** w/ Day/Week/Month %, P/C, RRG, rotation banner, **expandable industries w/ P/C+RRG**; bottom status bar; **persists across navigation**; **server-side 120s auto-refresh + bridge publish, tab-independent**) | built |
 | `/sentiment/rotation` | Sector Rotation (RRG-vs-SPY: Risk-ON/OFF headline + spread; **top row** = quadrant-map table (left) + tight ROTATING FROM/INTO w/ S&P weights (right); **full-width RRG below** w/ per-sector "meteor tails" — engine `assess_sector` retains a `tail` of `TAIL_LENGTH=12` RS-Ratio/RS-Mom points sampled every `TAIL_STRIDE=2` days; page draws **one spline series per sector** (faded trail line + single bright head dot) and **hover-isolates** a sector via native Highcharts `plotOptions.series.states.inactive` (hovering one dims the rest — no client round-trip); reuses `sector_rotation_assessment`; cached, **manual Refresh only**) | built |
 | `/trade` | Trade (on-demand single-symbol analysis: **Position (1–8wk)** + **Investor (months+)** Buy/Hold/Sell verdicts w/ score + top reasons + hard gates + expandable factor breakdown. The **Position** verdict is now a **backtested, IC-weighted cross-sectional factor model** (`swing_model.json` artifact → live `swing_model.py` scorer): the headline is the **validated** BUY/SELL/HOLD off a **calibration band** + an outcome line (percentile · expected fwd return / horizon · beat-SPY hit-rate) + a **"Why — validated factors"** evidence expander (per-factor z/weight/contribution/IC + model version & OOS IC), with the **legacy heuristic** verdict tucked into a collapsed expander (Investor unchanged); **MTF EMA alignment** (per-timeframe); momentum strip (RSI/ADX/MACD/VWAP/RelVol); sector strength; **Fundamentals card** (P/E/PEG/growth/ROE/margins via proxy `/instruments`); **Markov Forecast card** (third **equal-width frame in the verdict row**, alongside Position + Investor: 5-band composite-score Markov chain → stacked-area band-probability forecast + P(BUY)/P(SELL)/E[score] at 5/10/20d + a bounded confidence-weighted drift-tilt `markov_adjusted_score` headline, verdict label unchanged; **chart plots the dense near-term `trajectory` now/1/2/3/5/10/20d** so it differs by score — the 5/10/20d tail converges to the bull-leaning prior stationary; chart is dark-navy themed); **dark-navy "dashboard" theme** (`.calc-v2` via shared `theme.py`, `items-start` compact cards); **tab-out (`focusout`) = Analyze** (deduped); **persists last analyzed symbol** + analysis across nav) | built |
 | `/driver` | Driver (**autonomous monitor + override** [level B]: a **Claude decision layer** (Opus 4.8 default; `DRIVER_MODEL` env / `shared/driver_model.txt` override → e.g. Sonnet 4.6) auto-selects/sizes **defined-risk option spreads (PCS/CCS/IC) from the scanner** (`cache:options:scan`) toward **net $500/day** in **paper**, gated by a **`cache:driver:control`** master switch + confirm-gated **STOP** kill-switch; the page shows day-P&L-vs-$500 progress, open-driver-positions, a newest-first **decision-log** audit (`cache:driver:autonomous`, times in **CST**), and a **Performance scorecard** (win-rate / profit-factor / avg win-loss / P&L by symbol & strategy — `cache:options:driver_paper_perf`), all reading the Driver's **own isolated paper book** (`cache:options:driver_paper_account`, separate from the manual account), with **Enable/Disable** + **Run now**; 09:28-ET morning + 30-min autonomous **entry-window** checkpoints (**09:45–15:30 ET** — the open's first ~15 min skipped so the post-open structure is readable, and **no NEW entries in the last 30 min before the close**; management/exits are unaffected, on options_svc's separate 5-min manage cycle) run `build_packet`→`decider.decide`→**`guardrails.apply_guardrails`** (PURE code clamps size + halts at banked-$500/loss-cap/VIX — the model never sizes its own risk)→`cmd:options` **`driver_paper_create`** (opens into the dedicated `paper_account_driver.db`, repriced + auto-exited on the 5-min manage tick — fully separate from the user's manual paper trades). **Legacy** morning-agent **order-approval queue** retained (gated off while autonomy is enabled): Run morning agent → graded day + proposed trades; **APPROVE** (confirm dialog) / **SKIP**; conditions strip + grade rationale; **Performance** view (win-rate / P&L-by-bucket + trade table; **today-only** decision log; perf **P&L colored** green/red; **Bucket / Instrument** full-word headers; **sticky table headers**). Orders simulated (`PAPER_TRADE=True`). **Root-cause fix (2026-06-27): the driver had NEVER opened a position** — `compute.open_driver_position` read `signal_id`/`strategy`/`entry_credit` but the driver feeds RAW scanner signals keyed `id`/`type`/`credit`, so every open `KeyError`'d on `'signal_id'` and the defensive `try/except` swallowed it to `status=error`; the decision log showed "executed" (only the ENQUEUE) while the account stayed empty. Fixed by normalizing the signal shape — open positions now appear + the scorecard P&L populates. See [[driver-feeds-raw-scanner-signal-shape]]) | built |
@@ -1092,8 +1118,25 @@ not shown; credit_pulse excluded per v4.3 `WEIGHTS`) and the Trend detail are
 columns. The Signals column is a **2×2 four-tile matrix** (`TILE_DEFS` =
 **Bias/Signal/Yesterday/Change** — Modifier dropped per design) with a
 **traffic-light background** (`traffic_color(total)`). Below that, a **collapsed**
-`ui.expansion("30-Day History")` holds the 30d Highcharts history (soft grid) + 5d/20d
-rolling averages + velocity/divergence, then the full-width **Sector & Industry Performance** table
+`ui.expansion("Daily Sentiment & Trend")` holds **two stacked value-colorized 2-min
+intraday graphs** — Daily Market Sentiment (0–10) + Daily Market Trend (0–100), each a
+Highcharts line colorized green/yellow/red by value via `series.zones`/`zoneAxis:"y"`
+(`build_sentiment_intraday_figure`/`build_trend_intraday_figure`; sentiment bands ≤4.5/≤6.5,
+trend bands ≤30/≤70), over an **ordinal datetime x-axis** that collapses overnight session
+gaps, rolling the **last 5 trading days**. The series is **recorded going forward** (no
+backfill) by `sentiment_svc` — each 120 s `refresh()` records one `(ts, sentiment, trend)`
+point **RTH-gated** (Mon–Fri 08:30–15:00 CT) into the SQLite store
+`services/sentiment_svc/intraday_history_db.py` (`repo_paths.SENTIMENT_INTRADAY_DB` =
+`sentiment-dashboard/data/sentiment_intraday.db`; rolling window = last 5 distinct local
+dates; one shared connection serialized by `handlers._INTRADAY_LOCK` across the
+multi-worker executor), then publishes `cache:sentiment:intraday_history`
+(`{"points":[{ts,sentiment,trend},…]}`; additive `IntradayHistory` contract). The page
+reads that view in `_read_cache` (it rides the composite version bump — published in the
+same refresh cycle), paints both charts in `_apply`, and **reflows on expand** (a
+`@guard`-wrapped worker — charts built inside a collapsed expander measure 0×0, the
+documented Simulator-hidden-tab fix). This **replaced** the old 30-day composite-history
+chart + 5d/20d rolling-average + velocity/divergence text lines. Then the full-width
+**Sector & Industry Performance** table
 (11 sectors × Day/Week/Month %, P/C, RRG; per-cell colored; subtle gridlines + row
 hover via a `.sent-sectors` `ui.add_css` block) with a rotation banner
 (`scoring.rotation.compute_rotation`) + "% green | Cap-wtd | Score" summary, and a
