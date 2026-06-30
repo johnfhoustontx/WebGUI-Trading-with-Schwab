@@ -459,6 +459,11 @@ def test_intraday_values_none_when_trend_missing_score():
     assert handlers._intraday_values({"composite": {"total_score": "6.0"}}, {}) is None
 
 
+def test_intraday_values_prefers_smoothed_trend_score():
+    live = {"composite": {"total_score": "6.0"}}
+    assert handlers._intraday_values(live, {"score": 70.0, "smoothed_score": 68.5}) == (6.0, 68.5)
+
+
 def test_refresh_records_and_publishes_intraday_during_rth(monkeypatch):
     bus = Bus(fake=True)
     _patch_compute(monkeypatch, live=_fake_live(total="6.00"), snaps=[{"x": 1}], spy=[1.0])

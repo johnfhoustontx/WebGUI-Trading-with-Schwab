@@ -114,12 +114,16 @@ def _is_rth_now() -> bool:
 
 def _intraday_values(live, trend):
     """(sentiment 0-10, trend 0-100) from the live snapshot + trend dict, or
-    None when there is no live composite to record."""
+    None when there is no live composite to record. Records the SMOOTHED trend
+    score (``smoothed_score``, the EMA value the gauge displays), falling back to
+    the raw ``score`` so the Daily Market Trend graph's latest point matches the
+    gauge needle above it."""
     if not live:
         return None
     try:
+        t = trend or {}
         sentiment = float((live.get("composite") or {})["total_score"])
-        tscore = float((trend or {}).get("score"))
+        tscore = float(t.get("smoothed_score", t.get("score")))
     except (KeyError, TypeError, ValueError):
         return None
     return sentiment, tscore
