@@ -137,7 +137,11 @@ def test_swing_scan_multistrategy_pipeline(monkeypatch):
 
 def test_swing_scan_families_filter(monkeypatch):
     """``families`` restricts which candidate families are built (NEUTRAL-only ->
-    screen_spreads still runs for the IC feed, no directional/vertical signals)."""
+    screen_spreads still runs for the IC feed, and ONLY a NEUTRAL signal results).
+
+    ``build_iron_condors`` returns ONE IC so the signal list is non-empty — that
+    makes the exclusion assertions actually bite (a broken filter that let a
+    DIRECTIONAL/VERTICAL signal through would fail here, not pass vacuously)."""
     chain = _swing_chain()
     monkeypatch.setattr(compute.se, "fetch_option_chain",
                         lambda client, symbol, from_date=None, to_date=None: chain)
@@ -153,19 +157,43 @@ def test_swing_scan_families_filter(monkeypatch):
 
     def _screen(*a, **k):
         seen["screened"] = True
-        return []
+        return [{"type": "PCS", "short_strike": 530.0, "long_strike": 525.0,
+                 "short_mark": 1.2, "long_mark": 0.6, "credit": 0.6, "max_loss": 4.4,
+                 "expiration": "2026-07-15", "underlying_price": 540.0}]
+
+    ic = {"type": "IC", "symbol": "SPY", "short_strike": 525.0, "long_strike": 520.0,
+          "short_mark": 1.1, "long_mark": 0.5, "call_short": 555.0, "call_long": 560.0,
+          "call_short_mark": 1.1, "call_long_mark": 0.5, "credit": 1.2, "max_loss": 3.8,
+          "expiration": "2026-07-15", "underlying_price": 540.0}
 
     monkeypatch.setattr(compute.se, "screen_spreads", _screen)
-    monkeypatch.setattr(compute.se, "build_iron_condors", lambda spreads: [])
+    monkeypatch.setattr(compute.se, "build_iron_condors", lambda spreads: [ic])
 
     out = compute.swing_scan("SPY", 5, 30, -0.20, -0.10, 0.10, 0.20, 0.10,
                              families=["NEUTRAL"])
     # NEUTRAL requested -> screen_spreads ran (feeds the IC builder).
     assert seen["screened"] is True
-    # No DIRECTIONAL / VERTICAL signals were built.
-    assert all(s.get("family") not in ("DIRECTIONAL",) for s in out["signals"])
-    assert not any(s["type"] in ("LONG_CALL", "LONG_PUT", "BULL_CALL", "BEAR_PUT")
+    # Non-empty: the one adapted iron condor (NEUTRAL family) is present.
+    assert out["signals"]
+    assert any(s.get("family") == "NEUTRAL" for s in out["signals"])
+    # No DIRECTIONAL / VERTICAL signals leaked through the filter.
+    assert all(s.get("family") not in ("DIRECTIONAL", "VERTICAL") for s in out["signals"])
+    assert not any(s["type"] in ("LONG_CALL", "LONG_PUT", "SHORT_CALL", "SHORT_PUT",
+                                 "BULL_CALL", "BEAR_PUT", "PCS", "CCS")
                    for s in out["signals"])
+
+
+def test_swing_scan_empty_when_no_chain(monkeypatch):
+    """A missing chain (off-hours/weekend -> fetch returns None) degrades to an
+    explicit empty result instead of raising on the new chain.get/extract_options
+    consumers."""
+    monkeypatch.setattr(compute.se, "fetch_option_chain",
+                        lambda client, symbol, from_date=None, to_date=None: None)
+    monkeypatch.setattr(compute._proxy.schwab_client, "get_quote",
+                        lambda symbol: {"last": 540.0})
+
+    out = compute.swing_scan("SPY", 5, 30, -0.20, -0.10, 0.10, 0.20, 0.10)
+    assert out == {"signals": [], "view": {}}
 
 
 # ── Paper account (moved from webgui/pages/options/portfolio.py) ────────────

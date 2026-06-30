@@ -104,6 +104,11 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     today = dt.date.today()
     chain = se.fetch_option_chain(client, symbol, from_date=today,
                                   to_date=today + dt.timedelta(days=dte_max + 2))
+    # Off-hours/weekend the chain fetch can return None; the candidate builders
+    # below would AttributeError on chain.get(...)/extract_options(None). Degrade
+    # to an explicit empty result so the handler still publishes a fresh view.
+    if not chain:
+        return {"signals": [], "view": {}}
     quote = _proxy.schwab_client.get_quote(symbol) or {}
     spot = quote.get("last") or chain.get("underlyingPrice")
     hist = se.fetch_price_history(client, symbol)
