@@ -131,17 +131,6 @@ def test_composite_series_filters_zeros_and_blanks():
     assert dates == ["2026-06-01", "2026-06-03"]
 
 
-def test_build_history_figure_shape():
-    snaps = [_snap("2026-06-01", 6.0), _snap("2026-06-02", 7.0)]
-    fig = S.build_history_figure(snaps)
-    # Highcharts options dict: one line series over the composite scores.
-    assert fig["series"][0]["type"] == "line"
-    assert fig["series"][0]["data"] == [6.0, 7.0]
-    assert fig["xAxis"]["categories"] == ["2026-06-01", "2026-06-02"]
-    assert fig["yAxis"]["min"] == 0 and fig["yAxis"]["max"] == 10
-    assert fig["accessibility"]["enabled"] is False     # silence a11y-module nag
-
-
 def test_page_imports_no_app_scoring():
     """Regression for the cross-app ``scoring`` collision: the page module must
     NOT carry any app ``scoring``/``live_composite``/trend_regime references —

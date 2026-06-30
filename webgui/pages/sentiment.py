@@ -31,7 +31,6 @@ CLR_RED = "#ef5350"
 CLR_YELLOW = "#ffd54f"
 CLR_FLAT = "#9e9e9e"
 CLR_CYAN = "#3fb6c7"
-LINE_COLOR = "#42a5f5"
 
 # LOCAL Tailwind class maps (Phase 5). These mirror the page's OWN 5-color palette
 # EXACTLY — the yellow/cyan have no theme TXT_* token and the flat differs from the
@@ -193,39 +192,6 @@ def sentiment_30d_avg(snaps):
     """Mean composite over the backfill history (0.0 if none). Pure."""
     scores = composite_series(snaps or [])[1]
     return round(sum(scores) / len(scores), 2) if scores else 0.0
-
-
-def build_history_figure(snapshots):
-    """Highcharts options dict: composite over time (line)."""
-    dates, scores = composite_series(snapshots)
-    axis_label = {"style": {"color": "#bdbdbd"}}
-    return {
-        "chart": {"type": "line", "backgroundColor": "transparent",
-                  "height": 220, "spacing": [8, 12, 8, 0]},
-        "title": {"text": None},
-        "credits": {"enabled": False},
-        "accessibility": {"enabled": False},
-        "legend": {"enabled": False},
-        "xAxis": {
-            "categories": dates,
-            "tickAmount": 6,
-            "lineColor": "rgba(255,255,255,0.15)",
-            "gridLineColor": "rgba(255,255,255,0.06)",
-            "labels": axis_label,
-        },
-        "yAxis": {
-            "min": 0, "max": 10,
-            "title": {"text": "Composite", "style": {"color": "#bdbdbd"}},
-            "gridLineColor": "rgba(255,255,255,0.06)",
-            "labels": axis_label,
-        },
-        "tooltip": {"pointFormat": "Composite: <b>{point.y:.2f}</b>"},
-        "series": [{
-            "name": "Composite", "type": "line", "data": scores,
-            "color": LINE_COLOR, "lineWidth": 2,
-            "marker": {"enabled": True, "radius": 3},
-        }],
-    }
 
 
 def _intraday_figure(points, *, value_key, y_max, y_title, zones):
@@ -523,17 +489,6 @@ def tiles(latest, prev_total, band=None):
         change = f"{total - _safe_float(prev_total):+.2f}"
     return {"modifier": size, "bias": bias, "signal": signal,
             "yesterday": yest, "change": change}
-
-
-def rolling_averages(prior_scores):
-    """(a5, a20, label) — Rising/Falling/Stable from 5d vs 20d means."""
-    s = [x for x in prior_scores if x and x > 0]
-    if not s:
-        return 0.0, 0.0, "Stable"
-    a5 = sum(s[-5:]) / len(s[-5:])
-    a20 = sum(s[-20:]) / len(s[-20:])
-    label = "Rising" if a5 > a20 + 0.3 else ("Falling" if a5 < a20 - 0.3 else "Stable")
-    return round(a5, 2), round(a20, 2), label
 
 
 def _parse_iso(value):

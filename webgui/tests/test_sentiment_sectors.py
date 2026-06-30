@@ -176,13 +176,6 @@ def test_tiles_cold_cache_placeholders():
     assert t["yesterday"] == "—"
 
 
-def test_rolling_averages_label():
-    a5, a20, label = S.rolling_averages([5.0] * 4 + [6.0])
-    assert label in ("Rising", "Falling", "Stable")
-    rising = S.rolling_averages([4.0] * 19 + [9.0] * 6)
-    assert rising[2] == "Rising"
-
-
 def test_industry_rows_built():
     quotes = {"SMH": {"change_pct": 2.5}}
     trends = {"SMH": {"week_pct": 4.0, "month_pct": 9.0}}
