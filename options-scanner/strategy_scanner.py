@@ -240,7 +240,7 @@ def _credit_leg(kind, side, strike, mark, src, delta_key=None):
             "theta": 0, "vega": 0, "gamma": 0, "iv": 0}
 
 
-def _normalize_credit(sig, family, label, bias, legs):
+def _normalize_credit(sig, family, label, bias, legs, source_breakevens):
     """Fill the full normalized contract for an adapted credit structure.
 
     Structural keys (breakevens/capital/rr/net_delta/net_gamma) are computed
@@ -248,17 +248,34 @@ def _normalize_credit(sig, family, label, bias, legs):
     authoritative economics (credit -> net_credit/max_profit, max_loss) and any
     real source greeks (net_theta/net_vega/pop_pct) then RE-OVERRIDE so they win
     over the leg-reconstructed zeros.
+
+    ``source_breakevens`` are the structure-derived breakevens (short_strike
+    -/+ credit). When the reconstructed legs have NO usable marks (all marks
+    <= 0 -> payoff_metrics would see a zero-cost spread and produce garbage
+    breakevens/capital/rr), the structural economics fall back to these
+    source-derived values instead. Production IC/spread dicts always carry
+    marks, so the marks-present path (computed from legs) is the normal one.
     """
     credit = sig.get("credit")
+    max_loss = sig.get("max_loss")
     spot = sig.get("underlying_price") or 0
     m = payoff_metrics(legs, spot)
 
+    has_marks = any((l.get("mark") or 0) > 0 for l in legs)
+    if not has_marks:
+        # Override the marks-derived structural economics with source-derived ones.
+        m = dict(m)
+        m["breakevens"] = [round(b, 2) for b in source_breakevens]
+        m["capital"] = max_loss
+        m["rr"] = (round(credit / max_loss, 3)
+                   if (credit and max_loss) else None)
+
     out = dict(sig)            # preserve source fields
-    out.update(m)              # structural keys from the legs
+    out.update(m)              # structural keys from the legs (or source fallback)
     out.update({
         "family": family, "strategy_label": label, "bias": bias, "legs": legs,
         "net_credit": credit, "net_debit": None,
-        "max_profit": credit, "max_loss": sig.get("max_loss"),
+        "max_profit": credit, "max_loss": max_loss,
         "unbounded": False,
         "timestamp": sig.get("timestamp") or _dt.datetime.now().isoformat(),
     })
@@ -285,7 +302,11 @@ def adapt_credit_spread(sig):
                     sig, delta_key="short_delta"),
         _credit_leg(kind, "long", sig.get("long_strike"), sig.get("long_mark"), sig),
     ]
-    return _normalize_credit(sig, "VERTICAL", label, bias, legs)
+    # PCS breakeven = short - credit (below); CCS = short + credit (above).
+    short_k = sig.get("short_strike") or 0
+    credit = sig.get("credit") or 0
+    src_be = [short_k - credit] if is_pcs else [short_k + credit]
+    return _normalize_credit(sig, "VERTICAL", label, bias, legs, src_be)
 
 
 def adapt_iron_condor(sig):
@@ -299,4 +320,8 @@ def adapt_iron_condor(sig):
         _credit_leg("call", "short", sig.get("call_short"), sig.get("call_short_mark"), sig),
         _credit_leg("call", "long", sig.get("call_long"), sig.get("call_long_mark"), sig),
     ]
-    return _normalize_credit(sig, "NEUTRAL", "Iron Condor", "neutral", legs)
+    # IC breakevens: put_short - credit (lower) and call_short + credit (upper).
+    credit = sig.get("credit") or 0
+    src_be = [(sig.get("short_strike") or 0) - credit,
+              (sig.get("call_short") or 0) + credit]
+    return _normalize_credit(sig, "NEUTRAL", "Iron Condor", "neutral", legs, src_be)

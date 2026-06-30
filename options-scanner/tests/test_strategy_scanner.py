@@ -180,21 +180,59 @@ def test_adapt_credit_spread_ccs_to_normalized():
 
 
 def test_adapt_iron_condor_to_normalized():
+    # Production shape: build_iron_condors always carries the four leg marks +
+    # underlying_price. Put short 445/3.5, put long 440/1.8 -> put credit 1.7;
+    # call short 455/3.2, call long 460/1.6 -> call credit 1.6; total credit 3.3,
+    # 5-wide wings -> max_loss 5 - 3.3 = 1.7.
+    ic = {"id": "SPY_IC_2026-07-10", "symbol": "SPY", "type": "IC",
+          "expiration": "2026-07-10", "dte": 10,
+          "short_strike": 445.0, "long_strike": 440.0, "short_mark": 3.5, "long_mark": 1.8,
+          "call_short": 455.0, "call_long": 460.0, "call_short_mark": 3.2, "call_long_mark": 1.6,
+          "credit": 3.3, "max_loss": 1.7, "pop_pct": 65.0, "underlying_price": 450.0}
+    n = ss.adapt_iron_condor(ic)
+    assert n["family"] == "NEUTRAL" and n["bias"] == "neutral"
+    assert n["strategy_label"] == "Iron Condor"
+    assert n["net_credit"] == 3.3 and n["max_profit"] == 3.3
+    assert len(n["legs"]) == 4
+    kinds = {l["kind"] for l in n["legs"]}
+    assert kinds == {"put", "call"}
+    # full normalized shape with REAL breakeven values (marks present)
+    bes = sorted(n["breakevens"])
+    assert len(bes) == 2
+    assert abs(bes[0] - (445.0 - 3.3)) < 0.3   # put_short - credit = 441.7
+    assert abs(bes[1] - (455.0 + 3.3)) < 0.3   # call_short + credit = 458.3
+    assert abs(n["capital"] - 1.7) < 0.05      # = max_loss
+    assert abs(n["rr"] - (3.3 / 1.7)) < 0.05   # credit / max_loss
+    assert n["net_delta"] is not None and n["net_gamma"] is not None
+    assert n["timestamp"] is not None
+    assert n["net_debit"] is None and n["unbounded"] is False
+
+
+def test_adapt_iron_condor_marks_absent_falls_back_to_source_breakevens():
+    # Latent landmine guard: if leg marks are missing, payoff_metrics sees a
+    # zero-cost IC and would compute wrong economics. The adapter must fall back
+    # to source-derived breakevens / capital / rr instead.
     ic = {"id": "SPY_IC_2026-07-10", "symbol": "SPY", "type": "IC",
           "expiration": "2026-07-10", "dte": 10,
           "short_strike": 445.0, "long_strike": 440.0,
           "call_short": 455.0, "call_long": 460.0,
-          "credit": 2.5, "max_loss": 2.5, "pop_pct": 65.0, "underlying_price": 450.0}
+          "credit": 3.3, "max_loss": 1.7, "pop_pct": 65.0, "underlying_price": 450.0}
     n = ss.adapt_iron_condor(ic)
-    assert n["family"] == "NEUTRAL" and n["bias"] == "neutral"
-    assert n["strategy_label"] == "Iron Condor"
-    assert n["net_credit"] == 2.5 and n["max_profit"] == 2.5
-    assert len(n["legs"]) == 4
-    kinds = {l["kind"] for l in n["legs"]}
-    assert kinds == {"put", "call"}
-    # full normalized shape
-    assert isinstance(n["breakevens"], list)
-    assert n["capital"] is not None
-    assert n["net_delta"] is not None and n["net_gamma"] is not None
-    assert n["timestamp"] is not None
-    assert n["net_debit"] is None and n["unbounded"] is False
+    bes = sorted(n["breakevens"])
+    assert len(bes) == 2
+    assert abs(bes[0] - (445.0 - 3.3)) < 0.05   # put_short - credit = 441.7
+    assert abs(bes[1] - (455.0 + 3.3)) < 0.05   # call_short + credit = 458.3
+    assert abs(n["capital"] - 1.7) < 0.05
+    assert abs(n["rr"] - (3.3 / 1.7)) < 0.05
+
+
+def test_adapt_credit_spread_marks_absent_falls_back():
+    pcs = {"id": "SPY_PCS", "symbol": "SPY", "type": "PCS",
+           "expiration": "2026-07-10", "dte": 10, "short_strike": 445.0,
+           "long_strike": 440.0, "credit": 1.7, "max_loss": 3.3,
+           "underlying_price": 450.0}
+    n = ss.adapt_credit_spread(pcs)
+    assert len(n["breakevens"]) == 1
+    assert abs(n["breakevens"][0] - (445.0 - 1.7)) < 0.05   # short - credit = 443.3
+    assert abs(n["capital"] - 3.3) < 0.05
+    assert abs(n["rr"] - (1.7 / 3.3)) < 0.05
