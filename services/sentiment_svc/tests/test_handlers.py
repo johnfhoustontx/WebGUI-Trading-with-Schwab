@@ -492,3 +492,25 @@ def test_refresh_skips_intraday_off_hours(monkeypatch):
     handlers.refresh(bus, with_sectors=False)
     view = bus.cache_get("cache:sentiment:intraday_history")
     assert view is None or not view.payload.get("points")
+
+
+def test_refresh_intraday_record_failure_non_fatal(monkeypatch):
+    """A DB failure recording the intraday point is logged and does NOT abort the
+    core refresh — the composite view is still written."""
+    bus = Bus(fake=True)
+    _patch_compute(monkeypatch, live=_fake_live(), snaps=[{"x": 1}], spy=[1.0])
+    monkeypatch.setattr(handlers, "_maybe_recompute_trend", lambda: None)
+    monkeypatch.setattr(handlers, "_is_rth_now", lambda: True)
+    monkeypatch.setattr(handlers, "_intraday_conn",
+                        handlers.intraday_history_db.connect(":memory:"))
+    handlers._TREND["trend"] = {"score": 70.0}
+
+    def _boom(*a, **k):
+        raise RuntimeError("insert exploded")
+
+    monkeypatch.setattr(handlers.intraday_history_db, "insert_point", _boom)
+
+    handlers.refresh(bus, with_sectors=False)  # must not raise
+
+    comp = bus.cache_get("cache:sentiment:composite")
+    assert comp is not None  # core refresh completed despite the intraday failure

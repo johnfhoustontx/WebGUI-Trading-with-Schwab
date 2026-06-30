@@ -74,11 +74,27 @@ def _maybe_recompute_trend():
             log.exception("intraday trend recompute failed")
 
 
+CACHE_COMPOSITE = "cache:sentiment:composite"
+CACHE_HISTORY = "cache:sentiment:history"
+CACHE_SECTORS = "cache:sentiment:sectors"
+CACHE_ROTATION = "cache:sentiment:rotation"
+CACHE_INTRADAY = "cache:sentiment:intraday_history"
+
+EVENT_COMPOSITE = "events:sentiment:composite"
+EVENT_SECTORS = "events:sentiment:sectors"
+EVENT_ROTATION = "events:sentiment:rotation"
+EVENT_INTRADAY = "events:sentiment:intraday_history"
+
+
 # --- 2-min intraday sentiment+trend series ------------------------------------
 # A lazily-opened SQLite connection (the on-disk store from Task 1). ``refresh``
 # records one RTH-only point per cycle, prunes to 5 trading days, and publishes
-# ``cache:sentiment:intraday_history`` for the page's two intraday graphs.
+# ``cache:sentiment:intraday_history`` for the page's two intraday graphs. The
+# connection is shared across executor threads (``refresh`` is dispatched from
+# both the scheduler loop and the command consumer), so every access — including
+# the lazy init — is serialized by ``_INTRADAY_LOCK``.
 _intraday_conn = None
+_INTRADAY_LOCK = threading.Lock()
 
 
 def _get_intraday_conn():
@@ -118,28 +134,20 @@ def _record_intraday(bus, live, trend):
         vals = _intraday_values(live, trend)
         if vals is None:
             return
-        conn = _get_intraday_conn()
-        ts = int(_dt.datetime.now().timestamp())
-        intraday_history_db.insert_point(conn, ts, vals[0], vals[1])
-        intraday_history_db.prune(conn, n_days=5)
-        rows = intraday_history_db.load_recent(conn, n_days=5)
-        points = [{"ts": r[0], "sentiment": r[1], "trend": r[2]} for r in rows]
-        version = bus.cache_set(CACHE_INTRADAY, {"points": points})
-        bus.publish(EVENT_INTRADAY, {"version": version})
+        # Serialize the lazy init + DB ops + publish: the shared connection is
+        # check_same_thread=False, so concurrent refresh threads must not touch
+        # it (or the lazy init) at once.
+        with _INTRADAY_LOCK:
+            conn = _get_intraday_conn()
+            ts = int(_dt.datetime.now().timestamp())
+            intraday_history_db.insert_point(conn, ts, vals[0], vals[1])
+            intraday_history_db.prune(conn, n_days=5)
+            rows = intraday_history_db.load_recent(conn, n_days=5)
+            points = [{"ts": r[0], "sentiment": r[1], "trend": r[2]} for r in rows]
+            version = bus.cache_set(CACHE_INTRADAY, {"points": points})
+            bus.publish(EVENT_INTRADAY, {"version": version})
     except Exception:  # noqa: BLE001
         log.exception("intraday history record failed")
-
-CACHE_COMPOSITE = "cache:sentiment:composite"
-CACHE_HISTORY = "cache:sentiment:history"
-CACHE_SECTORS = "cache:sentiment:sectors"
-CACHE_ROTATION = "cache:sentiment:rotation"
-
-CACHE_INTRADAY = "cache:sentiment:intraday_history"
-
-EVENT_COMPOSITE = "events:sentiment:composite"
-EVENT_SECTORS = "events:sentiment:sectors"
-EVENT_ROTATION = "events:sentiment:rotation"
-EVENT_INTRADAY = "events:sentiment:intraday_history"
 
 
 def _sector_industry_etfs(sector_data, sector_name):

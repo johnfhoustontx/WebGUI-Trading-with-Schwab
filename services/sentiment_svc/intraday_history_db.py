@@ -25,7 +25,9 @@ def connect(path=None) -> sqlite3.Connection:
         path = SENTIMENT_INTRADAY_DB
     if path != ":memory:":
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
+    # check_same_thread=False: the sentiment service shares one connection across
+    # executor threads, serialized by the caller's lock (handlers._INTRADAY_LOCK).
+    conn = sqlite3.connect(path, check_same_thread=False)
     conn.executescript(_SCHEMA)
     return conn
 
