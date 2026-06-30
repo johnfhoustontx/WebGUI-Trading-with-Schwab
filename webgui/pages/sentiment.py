@@ -582,6 +582,8 @@ def render():
         state["derived"] = composite.get("derived") or {}
         state["snaps"] = history.get("snaps") or []
         state["spy"] = history.get("spy") or []
+        intraday = bus_client.read("sentiment:intraday_history") or {}
+        state["intraday"] = intraday.get("points") or []
         state["sector"] = sectors.get("sector")
         state["industries"] = sectors.get("industries") or {}
         state["sector_at"] = sectors.get("sector_at")
@@ -591,7 +593,7 @@ def render():
     # Page-local UI state (per render closure; expanded set is page-local, not
     # module-global, per webgui conventions).
     state = {
-        "snaps": [], "spy": [], "sector": None, "live": None,
+        "snaps": [], "spy": [], "intraday": [], "sector": None, "live": None,
         "industries": {}, "expanded": set(), "derived": {}, "sector_summary": {},
         "composite_at": None, "sector_at": None, "proxy_up": None,
         # last-seen bus cache versions for the fetch-free repaint timer
@@ -668,13 +670,27 @@ def render():
                     tile_cards[tkey] = c
 
     ui.separator().classes("q-my-md")
-    # 30-Day History — collapsible, collapsed by default.
-    with ui.expansion("30-Day History", icon="show_chart", value=False).classes("w-full"):
-        hist_plot = ui.highchart(build_history_figure([])).classes("w-full")
-        roll_lbl = ui.label("").classes("opacity-70 text-sm")
-        vel_lbl = ui.label("").classes("opacity-80 text-sm")
-        flag_lbl = ui.label("").classes("text-negative text-sm")
-        div_lbl = ui.label("").classes("text-warning text-sm")
+    # Daily Sentiment & Trend — two value-colorized 2-min intraday series
+    # (rolling last 5 trading days), collapsed by default. Replaces the old
+    # 30-Day History composite chart + rolling/velocity/divergence text.
+    with ui.expansion("Daily Sentiment & Trend", icon="show_chart",
+                      value=False).classes("w-full") as daily_exp:
+        ui.label("Daily Market Sentiment").classes("text-subtitle2 q-mt-sm")
+        sent_intraday_plot = ui.highchart(
+            build_sentiment_intraday_figure([])).classes("w-full")
+        ui.label("Daily Market Trend").classes("text-subtitle2 q-mt-md")
+        trend_intraday_plot = ui.highchart(
+            build_trend_intraday_figure([])).classes("w-full")
+
+    # Reflow both charts when the expander opens (a chart built inside a collapsed
+    # expander measures 0x0 — same fix as the Simulator's hidden tab panels).
+    def _reflow_daily(e):
+        if e.value:
+            for el in (sent_intraday_plot, trend_intraday_plot):
+                ui.timer(0.05,
+                         lambda el=el: ui.run_javascript(
+                             f"getElement({el.id})?.chart?.reflow()"), once=True)
+    daily_exp.on_value_change(_reflow_daily)
 
     # Sector & Industry Performance
     ui.separator().classes("q-my-md")
@@ -775,14 +791,11 @@ def render():
             tile_cards[tkey].classes(remove=TRAFFIC_BG_CLASSES, add=band_bg)
         rotation_value, sector_value = _comp_context()
         _render_components(latest, rotation_value, sector_value)
-        hist_plot.options = build_history_figure(snaps)
-        hist_plot.update()
-        a5, a20, label = rolling_averages(prior_scores)
-        roll_lbl.text = f"5d: {a5:.2f}   20d: {a20:.2f}   {label}"
-        vel = derived.get("velocity") or {}
-        vel_lbl.text = vel.get("text", "")
-        flag_lbl.text = vel.get("flag", "")
-        div_lbl.text = derived.get("divergence", "") or ""
+        pts = state.get("intraday") or []
+        sent_intraday_plot.options = build_sentiment_intraday_figure(pts)
+        sent_intraday_plot.update()
+        trend_intraday_plot.options = build_trend_intraday_figure(pts)
+        trend_intraday_plot.update()
         trend = derived.get("trend")
         if trend:
             committed = trend.get("state")
