@@ -29,7 +29,14 @@ import app_settings  # noqa: E402
 import bus_client  # noqa: E402
 import page_help  # noqa: E402
 import proxy  # noqa: E402
+from pages.ui_guard import install_deleted_slot_log_filter  # noqa: E402
 from repo_paths import NICEGUI_PORT  # noqa: E402
+
+# Silence the benign NiceGUI timer-disconnect-race traceback ("The parent slot of
+# the element has been deleted.") — it escapes the ui_guard callback decorators
+# (raised by Timer._run_in_loop BEFORE the callback runs) and is logged by
+# NiceGUI's default handler. See pages/ui_guard.py.
+install_deleted_slot_log_filter()
 
 # Serve bundled static assets (alert sounds) at /static.
 _STATIC_DIR = _REPO_ROOT / "webgui" / "static"

@@ -1,7 +1,8 @@
 """Tests for the autonomous checkpoint cadence + halt re-arm (Phase 6).
 
 ``checkpoint_due`` fires the autonomous decision cycle at most once per
-``settings.CHECKPOINT_MIN``-minute slot during RTH (09:30–16:00 ET) on weekdays;
+``settings.CHECKPOINT_MIN``-minute slot during the entry window (09:45–15:30 ET,
+inside RTH — open's first 15 min skipped, no new entries in the last 30 min) on weekdays;
 ``should_rearm`` clears a stale overnight halt latch on the next trading day. Both
 are PURE (ET-aware datetimes / plain dicts in — no clock, no bus), so they take
 fixed inputs here. The ``loop`` itself is not unit-tested (it owns its sleep
@@ -35,29 +36,36 @@ def test_checkpoint_due_every_30m_in_rth():
     assert scheduler.checkpoint_due(_et(2026, 6, 24, 10, 35), ts)[0] is True
 
 
-def test_checkpoint_due_at_rth_open():
-    """09:30 exactly is the first RTH slot — due."""
-    due, ts = scheduler.checkpoint_due(_et(2026, 6, 24, 9, 30), None)
+def test_checkpoint_due_at_window_open():
+    """09:45 is the first entry-window slot — due (the 09:30 open bell is skipped)."""
+    due, ts = scheduler.checkpoint_due(_et(2026, 6, 24, 9, 45), None)
     assert due is True
-    assert ts == f"2026-06-24:{(9 * 60 + 30) // settings.CHECKPOINT_MIN}"
+    assert ts == f"2026-06-24:{(9 * 60 + 45) // settings.CHECKPOINT_MIN}"
+
+
+def test_checkpoint_not_due_at_open_bell():
+    """The 09:30 open bell is intentionally OUTSIDE the entry window — not due."""
+    assert scheduler.checkpoint_due(_et(2026, 6, 24, 9, 30), None)[0] is False
+    # the whole first ~15 min after the open is skipped.
+    assert scheduler.checkpoint_due(_et(2026, 6, 24, 9, 44), None)[0] is False
 
 
 def test_checkpoint_not_due_before_open():
     assert scheduler.checkpoint_due(_et(2026, 6, 24, 8, 0), None)[0] is False
-    # one minute before the open is still closed.
-    assert scheduler.checkpoint_due(_et(2026, 6, 24, 9, 29), None)[0] is False
 
 
-def test_checkpoint_not_due_at_or_after_close():
-    """16:00 exactly is the close — NOT due (a slot at/after 16:00 never fires)."""
+def test_checkpoint_not_due_in_last_half_hour():
+    """No new entries in the last 30 min — a slot at/after 15:30 ET never fires."""
+    assert scheduler.checkpoint_due(_et(2026, 6, 24, 15, 30), None)[0] is False
+    assert scheduler.checkpoint_due(_et(2026, 6, 24, 15, 59), None)[0] is False
+    # ...and the actual 16:00 close, of course.
     assert scheduler.checkpoint_due(_et(2026, 6, 24, 16, 0), None)[0] is False
-    assert scheduler.checkpoint_due(_et(2026, 6, 24, 16, 30), None)[0] is False
 
 
-def test_checkpoint_due_last_slot_before_close():
-    """15:30–15:59 is the final fire-able slot inside RTH."""
-    assert scheduler.checkpoint_due(_et(2026, 6, 24, 15, 30), None)[0] is True
-    assert scheduler.checkpoint_due(_et(2026, 6, 24, 15, 59), None)[0] is True
+def test_checkpoint_due_last_entry_slot():
+    """The 15:00–15:29 ET slot is the final fire-able entry slot (14:00 CT)."""
+    assert scheduler.checkpoint_due(_et(2026, 6, 24, 15, 0), None)[0] is True
+    assert scheduler.checkpoint_due(_et(2026, 6, 24, 15, 29), None)[0] is True
 
 
 def test_checkpoint_not_due_on_weekend():

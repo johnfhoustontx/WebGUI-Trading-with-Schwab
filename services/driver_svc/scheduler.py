@@ -8,7 +8,8 @@ Two coexisting cadences over one ~30 s poll loop:
   scheduler NEVER executes orders here — ``run_morning`` only produces a *pending*
   approval; execution happens only on an explicit ``approve`` command. Retained
   unchanged so the approval-queue/back-compat behaviour still works.
-* **Autonomous checkpoints (Phase 6)** — during RTH (09:30–16:00 ET, weekdays),
+* **Autonomous checkpoints (Phase 6)** — during the entry window (09:45–15:30 ET,
+  weekdays — the open's first ~15 min skipped, no new entries in the last 30 min),
   fire ``handlers.run_autonomous_cycle`` at most once per ``settings.CHECKPOINT_MIN``
   (30)-minute slot, plus a daily halt **re-arm**: a banked/loss-capped/VIX day
   latches ``cache:driver:control`` ``halted``; the next trading day clears that
@@ -43,10 +44,18 @@ from services.driver_svc import handlers, settings as _settings
 _ET = ZoneInfo("America/New_York")
 RUN_HOUR, RUN_MIN = 9, 28  # mirrors config.AGENT_RUN_HOUR / AGENT_RUN_MIN
 
-# Regular-trading-hours bounds for the autonomous checkpoint clock (ET, h:m
-# tuples). A slot at/after RTH_END (16:00) never fires; the open (09:30) does.
-RTH_START = (9, 30)
-RTH_END = (16, 0)
+# Autonomous ENTRY-window bounds for the checkpoint clock (ET, h:m tuples).
+# Deliberately INSIDE regular trading hours, aligned to the daily playbook:
+#  * start 09:45 (not the 09:30 open) — skip the first ~15 min so the post-open
+#    structure is readable before the Driver opens risk (mirrors the user's
+#    08:48 CT post-open review); the open-bell slot never fires.
+#  * end 15:30 — no NEW entries in the last 30 min before the 16:00 close (pin /
+#    gamma risk into the bell for defined-risk + 0-DTE spreads). A slot at/after
+#    RTH_END never fires, so the last entry decision is the 15:00 ET slot (14:00 CT).
+# Management/exits are UNAFFECTED — they run on options_svc's separate 5-min
+# manage cycle right into the close; this bound only gates NEW driver entries.
+RTH_START = (9, 45)
+RTH_END = (15, 30)
 
 POLL_INTERVAL_SEC = 30        # check the run gate every 30 s
 PERF_REFRESH_SEC = 300        # recompute the perf view ~every 5 min
@@ -71,9 +80,11 @@ def checkpoint_due(now, last_slot):
     """(due, slot_key): True at most once per ``settings.CHECKPOINT_MIN`` slot in RTH.
 
     ``now`` is an ET-aware datetime; ``last_slot`` is the date-prefixed key of the
-    last checkpoint that fired (or None). Due only on weekdays inside
-    09:30–16:00 ET — the open (09:30) is the first fire-able slot and a time
-    at/after the 16:00 close never fires. The slot key embeds the date
+    last checkpoint that fired (or None). Due only on weekdays inside the entry
+    window (09:45–15:30 ET) — the open-bell 09:30 slot is intentionally skipped
+    (the first fire-able slot is 09:45) and a time at/after 15:30 never fires (no
+    new entries into the close, so the last entry decision is the 15:00 ET slot).
+    The slot key embeds the date
     (``"YYYY-MM-DD:<slot-index>"``) so the same intraday slot index on the next
     trading day is a fresh key. When not due, the passed-in ``last_slot`` is
     returned unchanged (so the loop's state survives an off-hours poll).
