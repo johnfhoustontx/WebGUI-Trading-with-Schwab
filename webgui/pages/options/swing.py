@@ -124,6 +124,10 @@ def render():
             "min_cr_fraction": pct_to_fraction(mincr.value),
         }
         bus_client.request("options", {"type": "swing_scan", "args": params})
+        if not families_sel.value:
+            # Falsy families ⇒ the service scans ALL families (the contract);
+            # surface it so an empty multiselect isn't a silent "scan everything".
+            ui.notify("No strategies selected — scanning all.", type="info")
         ui.notify("Swing scan requested")
         status.text = "Scanning…"
 

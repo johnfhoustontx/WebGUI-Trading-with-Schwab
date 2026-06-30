@@ -114,8 +114,8 @@ def _bias_class(bias):
 def _fmt_max_profit(signal):
     """Max profit cell: '∞' when unbounded / None, else a 2dp string."""
     mp = signal.get("max_profit")
-    if mp is None or signal.get("unbounded"):
-        return "∞" if (signal.get("unbounded") or mp is None) else f"{mp:.2f}"
+    if signal.get("unbounded") or mp is None:
+        return "∞"
     return f"{mp:.2f}" if isinstance(mp, (int, float)) else "—"
 
 
