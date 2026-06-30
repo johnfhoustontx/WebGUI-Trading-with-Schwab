@@ -228,6 +228,55 @@ def build_history_figure(snapshots):
     }
 
 
+def _intraday_figure(points, *, value_key, y_max, y_title, zones):
+    """Shared Highcharts options for a 2-min intraday value series, colorized by
+    value via series.zones. Ordinal x-axis collapses overnight session gaps; the
+    date lives in the tooltip header (datetime-crosshair-label epoch-ms gotcha)."""
+    pts = points or []
+    data = [[int(p["ts"]) * 1000, _safe_float(p.get(value_key))] for p in pts]
+    axis_label = {"style": {"color": "#bdbdbd"}}
+    return {
+        "chart": {"type": "line", "backgroundColor": "transparent",
+                  "height": 200, "spacing": [8, 12, 8, 0]},
+        "title": {"text": None},
+        "credits": {"enabled": False},
+        "accessibility": {"enabled": False},
+        "legend": {"enabled": False},
+        "xAxis": {"type": "datetime", "ordinal": True,
+                  "lineColor": "rgba(255,255,255,0.15)",
+                  "gridLineColor": "rgba(255,255,255,0.06)", "labels": axis_label,
+                  "crosshair": {"label": {"enabled": False}}},
+        "yAxis": {"min": 0, "max": y_max,
+                  "title": {"text": y_title, "style": {"color": "#bdbdbd"}},
+                  "gridLineColor": "rgba(255,255,255,0.06)", "labels": axis_label},
+        "tooltip": {"xDateFormat": "%b %e, %H:%M",
+                    "pointFormat": y_title + ": <b>{point.y:.2f}</b>"},
+        "series": [{
+            "name": y_title, "type": "line", "data": data,
+            "lineWidth": 2, "zoneAxis": "y", "zones": zones,
+            "marker": {"enabled": False},
+        }],
+    }
+
+
+def build_sentiment_intraday_figure(points):
+    """Daily Market Sentiment (0-10), colorized by traffic bands."""
+    zones = [{"value": 4.5, "color": CLR_RED},
+             {"value": 6.5, "color": CLR_YELLOW},
+             {"color": CLR_GREEN}]
+    return _intraday_figure(points, value_key="sentiment", y_max=10,
+                            y_title="Sentiment", zones=zones)
+
+
+def build_trend_intraday_figure(points):
+    """Daily Market Trend (0-100), colorized by the 30/70 range boundaries."""
+    zones = [{"value": 30, "color": CLR_RED},
+             {"value": 70, "color": CLR_YELLOW},
+             {"color": CLR_GREEN}]
+    return _intraday_figure(points, value_key="trend", y_max=100,
+                            y_title="Trend", zones=zones)
+
+
 def pct_color(pct):
     """Green up / red down / gray flat (|pct| < 0.05)."""
     if pct is None or abs(float(pct)) < 0.05:

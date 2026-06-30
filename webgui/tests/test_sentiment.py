@@ -180,3 +180,38 @@ def test_sentiment_30d_avg():
              {"composite": {"total_score": "8.0"}}]
     assert S.sentiment_30d_avg(snaps) == 7.0          # mean(6,8)
     assert S.sentiment_30d_avg([]) == 0.0
+
+
+# ── Colorized intraday figures (Task 4) ──────────────────────────────────────
+_PTS = [{"ts": 1000, "sentiment": 3.0, "trend": 20.0},
+        {"ts": 1120, "sentiment": 6.0, "trend": 55.0},
+        {"ts": 1240, "sentiment": 8.0, "trend": 85.0}]
+
+
+def test_sentiment_intraday_figure_maps_points_to_ms():
+    fig = S.build_sentiment_intraday_figure(_PTS)
+    data = fig["series"][0]["data"]
+    assert data[0] == [1000 * 1000, 3.0]
+    assert len(data) == 3
+
+
+def test_sentiment_intraday_figure_has_value_zones():
+    fig = S.build_sentiment_intraday_figure(_PTS)
+    zones = fig["series"][0]["zones"]
+    # red <=4.5, yellow <=6.5, green above
+    assert zones[0]["value"] == 4.5 and zones[1]["value"] == 6.5
+    assert "color" in zones[-1]
+
+
+def test_trend_intraday_figure_value_zones_and_axis():
+    fig = S.build_trend_intraday_figure(_PTS)
+    data = fig["series"][0]["data"]
+    assert data[2] == [1240 * 1000, 85.0]
+    zones = fig["series"][0]["zones"]
+    assert zones[0]["value"] == 30 and zones[1]["value"] == 70
+    assert fig["yAxis"]["min"] == 0 and fig["yAxis"]["max"] == 100
+
+
+def test_intraday_figures_empty_points_are_valid():
+    assert S.build_sentiment_intraday_figure([])["series"][0]["data"] == []
+    assert S.build_trend_intraday_figure(None)["series"][0]["data"] == []
