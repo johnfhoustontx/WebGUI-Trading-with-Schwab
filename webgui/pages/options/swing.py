@@ -9,8 +9,11 @@ button enqueues a ``swing_scan`` command (with the user's inputs as args) onto
 the Redis bus; the service runs it and writes the result under
 ``cache:options:swing``; this page only **reads** that payload and formats it.
 
-Cache view read: ``options:swing`` → ``{signals:[...], symbol, params}``. Results
-reuse the scanner's table columns/rows + the shared Trade detail panel + handoff
+Cache view read: ``options:swing`` → ``{signals:[...], view:{...}, symbol, params}``
+where each signal is the NORMALIZED multi-strategy shape (LONG_CALL/.../IRON_CONDOR
+with a ``legs`` list, ``family``, ``bias``, ``net_debit``/``net_credit``,
+``breakevens``, …). Results render via the multi-strategy ``strategy_table`` columns/
+rows + an inferred-view banner + the shared Trade detail panel + legs-aware handoff
 row actions. A fetch-free version-poll ``ui.timer`` repaints when the bus cache
 version changes (graceful-empty when the service is cold).
 """
@@ -22,7 +25,7 @@ from pages.ui_guard import guard
 from .inputs import select_all_on_focus
 from .theme import BTN_3D
 
-from . import detail, handoff, scanner
+from . import detail, handoff, strategy_table
 
 
 def pct_to_fraction(value):
@@ -30,8 +33,13 @@ def pct_to_fraction(value):
     return float(value) / 100.0
 
 
+# Strategy-family multiselect options (Diagonal is a later phase — omitted).
+_FAMILY_OPTIONS = {"DIRECTIONAL": "Directional", "VERTICAL": "Spreads",
+                   "NEUTRAL": "Neutral"}
+
+
 def render():
-    """Swing Scanner page: inputs + Scan button + results table (left) + detail panel."""
+    """Multi-strategy Swing Scanner: inputs + Scan + view banner + strategy table."""
     ui.label("Swing Scanner").classes("text-h5")
 
     with ui.row().classes("w-full no-wrap gap-4 items-start"):
@@ -40,15 +48,24 @@ def render():
                 symbol_in = select_all_on_focus(ui.input("Symbol", value="SPY").classes("w-28"))
                 dte_min = ui.number("DTE min", value=5, min=0).classes("w-24")
                 dte_max = ui.number("DTE max", value=30, min=1).classes("w-24")
-                put_dmin = ui.number("Put Δ min", value=-0.20, format="%.2f").classes("w-24")
-                put_dmax = ui.number("Put Δ max", value=-0.10, format="%.2f").classes("w-24")
-                call_dmin = ui.number("Call Δ min", value=0.10, format="%.2f").classes("w-24")
-                call_dmax = ui.number("Call Δ max", value=0.20, format="%.2f").classes("w-24")
-                mincr = ui.number("Min credit %", value=10.0, format="%.1f").classes("w-28")
+                families_sel = ui.select(
+                    _FAMILY_OPTIONS, multiple=True,
+                    value=["DIRECTIONAL", "VERTICAL", "NEUTRAL"], label="Strategies"
+                ).props("use-chips").classes("w-56")
+            # Credit-spread-only gates live in an advanced expander (they only
+            # constrain PCS/CCS).
+            with ui.expansion("Advanced — credit spreads").classes("w-full"):
+                with ui.row().classes("items-end gap-2 flex-wrap"):
+                    put_dmin = ui.number("Put Δ min", value=-0.20, format="%.2f").classes("w-24")
+                    put_dmax = ui.number("Put Δ max", value=-0.10, format="%.2f").classes("w-24")
+                    call_dmin = ui.number("Call Δ min", value=0.10, format="%.2f").classes("w-24")
+                    call_dmax = ui.number("Call Δ max", value=0.20, format="%.2f").classes("w-24")
+                    mincr = ui.number("Min credit %", value=10.0, format="%.1f").classes("w-28")
             with ui.row().classes("items-center gap-3"):
                 scan_btn = ui.button("Scan", icon="search", color=None).props("no-caps").classes(BTN_3D)
                 status = ui.label("").classes("opacity-70")
-            table = ui.table(columns=scanner.signal_columns(), rows=[],
+            banner = ui.label(strategy_table.view_banner_text(None)).classes("opacity-80 text-sm")
+            table = ui.table(columns=strategy_table.strategy_columns(), rows=[],
                              row_key="id").classes("w-full")
         detail_panel = detail.render()
 
@@ -60,22 +77,34 @@ def render():
         row = event.args[1] if isinstance(event.args, list) and len(event.args) > 1 else event.args
         sig = by_id.get(row.get("id")) if isinstance(row, dict) else None
         if sig:
-            detail_panel.update(sig)
+            detail_panel.update(strategy_table.detail_signal(sig))
 
     table.on("rowClick", _select)
-    # per-row buttons: Send to Calculator / Send to Paper trade
-    handoff.add_row_actions(table, lambda row: by_id.get(row.get("id")))
+    # per-row buttons: Calculator / Paper (gated) / Expected Move — legs-aware.
+    handoff.add_strategy_row_actions(table, lambda row: by_id.get(row.get("id")))
+    # Quality-colored composite score chip + bias colored by direction.
+    table.add_slot('body-cell-composite_score', r'''
+      <q-td :props="props">
+        <q-badge :class="props.row._score_class + ' text-[#111]'" :label="props.value ?? '—'"/>
+      </q-td>
+    ''')
+    table.add_slot('body-cell-bias', r'''
+      <q-td :props="props">
+        <span :class="props.row._bias_class">{{ props.value || '—' }}</span>
+      </q-td>
+    ''')
 
     def _populate(payload):
-        """Paint the table + detail map from a swing-result dict."""
+        """Paint the table + detail map + view banner from a swing-result dict."""
         payload = payload or {}
         signals = payload.get("signals") or []
         by_id.clear()
         for s in signals:
             if s.get("id"):
                 by_id[s["id"]] = s
-        table.rows = scanner.signal_rows(signals)
+        table.rows = strategy_table.strategy_rows(signals)
         table.update()
+        banner.text = strategy_table.view_banner_text(payload.get("view"))
         if not payload:
             status.text = ""
         else:
@@ -87,6 +116,7 @@ def render():
             "symbol": symbol_in.value.strip().upper(),
             "dte_min": int(dte_min.value),
             "dte_max": int(dte_max.value),
+            "families": list(families_sel.value or []),
             "put_d_min": float(put_dmin.value),
             "put_d_max": float(put_dmax.value),
             "call_d_min": float(call_dmin.value),

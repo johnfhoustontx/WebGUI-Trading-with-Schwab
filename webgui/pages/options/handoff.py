@@ -46,10 +46,18 @@ def _legs_from_fields(sig, specs):
 
 
 def signal_to_em_payload(signal):
-    """Normalize a scanner/captured/paper signal dict to {symbol, expiry, legs}."""
+    """Normalize a scanner/captured/paper signal dict to {symbol, expiry, legs}.
+
+    Prefers a normalized multi-leg ``legs`` list when present (the new
+    multi-strategy swing signals); falls back to the legacy per-field strike specs
+    (``_EM_LEG_FIELDS``) for the old single-shape spread dicts without ``legs``."""
     sig = signal or {}
     symbol = (sig.get("symbol") or "").replace("$", "").upper()
     expiry = sig.get("expiration") or sig.get("expiry")
+    if sig.get("legs"):
+        legs = [{"strike": l.get("strike"), "option_type": l.get("kind"), "side": l.get("side")}
+                for l in sig["legs"] if l.get("strike") not in (None, 0, "")]
+        return {"symbol": symbol, "expiry": expiry, "legs": legs}
     specs = _EM_LEG_FIELDS.get(sig.get("type"), [])
     return {"symbol": symbol, "expiry": expiry, "legs": _legs_from_fields(sig, specs)}
 
@@ -133,6 +141,26 @@ def send_to_calculator_legs(payload):
     ui.navigate.to("/options/calculator")
 
 
+def _signal_legs_payload(sig):
+    """Normalized multi-leg signal → the Calculator's {symbol, legs} copy payload."""
+    legs = []
+    for l in (sig or {}).get("legs") or []:
+        legs.append({"option_type": l.get("kind"), "side": l.get("side"),
+                     "strike": l.get("strike"), "expiry": l.get("expiration"),
+                     "qty": l.get("qty", 1), "premium": l.get("mark")})
+    return {"symbol": ((sig or {}).get("symbol") or "").replace("$", "").upper(),
+            "legs": legs}
+
+
+def send_signal_to_calculator(sig):
+    """Send a normalized multi-leg signal to the Calculator via its legs payload;
+    fall back to the legacy single-signal stash for old spread dicts without legs."""
+    if sig and sig.get("legs"):
+        send_to_calculator_legs(_signal_legs_payload(sig))
+    else:
+        send_to_calculator(sig)
+
+
 def send_to_paper(signal):
     if not signal:
         ui.notify("Select a signal first.", type="warning")
@@ -211,4 +239,35 @@ def add_expected_move_action(table, get_signal):
 
     ``get_signal(row)`` maps a clicked display row to its raw engine signal."""
     table.add_slot("body-cell-actions", _EM_ACTION_SLOT)
+    table.on("to_em", lambda e: send_to_expected_move(signal_to_em_payload(get_signal(e.args))))
+
+
+# Per-row actions for the multi-strategy swing table: Calculator + Expected Move
+# for ALL rows; Paper trade ONLY when the row is a credit-creditable structure
+# (``props.row._allow_paper``). Sends multi-leg signals via the legs-aware paths.
+_STRATEGY_ACTIONS_SLOT = """
+<q-td :props="props" auto-width>
+  <q-btn dense flat round size="sm" icon="calculate" color="primary"
+         @click.stop="() => $parent.$emit('to_calc', props.row)">
+    <q-tooltip>Send to Calculator</q-tooltip>
+  </q-btn>
+  <q-btn v-if="props.row._allow_paper" dense flat round size="sm" icon="request_quote" color="secondary"
+         @click.stop="() => $parent.$emit('to_paper', props.row)">
+    <q-tooltip>Send to Paper trade</q-tooltip>
+  </q-btn>
+  <q-btn dense flat round size="sm" icon="show_chart" color="accent"
+         @click.stop="() => $parent.$emit('to_em', props.row)">
+    <q-tooltip>Expected Move</q-tooltip>
+  </q-btn>
+</q-td>
+"""
+
+
+def add_strategy_row_actions(table, get_signal):
+    """Per-row Calculator / Paper (gated) / Expected-Move actions for the
+    multi-strategy swing table. ``get_signal(row)`` maps a clicked display row to
+    its raw normalized signal (carrying ``legs``)."""
+    table.add_slot("body-cell-actions", _STRATEGY_ACTIONS_SLOT)
+    table.on("to_calc", lambda e: send_signal_to_calculator(get_signal(e.args)))
+    table.on("to_paper", lambda e: send_to_paper(get_signal(e.args)))
     table.on("to_em", lambda e: send_to_expected_move(signal_to_em_payload(get_signal(e.args))))
