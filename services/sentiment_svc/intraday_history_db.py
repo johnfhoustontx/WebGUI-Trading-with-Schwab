@@ -16,7 +16,6 @@ CREATE TABLE IF NOT EXISTS sentiment_intraday (
     sentiment REAL,
     trend     REAL
 );
-CREATE INDEX IF NOT EXISTS idx_si_ts ON sentiment_intraday(ts);
 """
 
 
