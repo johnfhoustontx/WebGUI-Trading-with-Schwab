@@ -111,6 +111,14 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
         return {"signals": [], "view": {}}
     quote = _proxy.schwab_client.get_quote(symbol) or {}
     spot = quote.get("last") or chain.get("underlyingPrice")
+    # Off-hours the quote can miss AND the chain dict can lack ``underlyingPrice``
+    # (the engine defaults that key to 0; compute uses a bare .get()), leaving
+    # spot None. The candidate builders price off spot (spot*0.20, spot*atm_iv),
+    # so a None spot would TypeError and the scaffold would swallow it -> NO cache
+    # write -> the page hangs on "Scanning…". Degrade to an explicit empty result
+    # (matching the no-chain guard above) BEFORE any builder runs.
+    if not spot:
+        return {"signals": [], "view": {}}
     hist = se.fetch_price_history(client, symbol)
     tech = se.calc_technicals(hist) if hist is not None else {}
     iv = run_iv_analysis(client, symbol, price=spot, hist=hist, chain=chain) or {}

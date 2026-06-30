@@ -196,6 +196,21 @@ def test_swing_scan_empty_when_no_chain(monkeypatch):
     assert out == {"signals": [], "view": {}}
 
 
+def test_swing_scan_empty_when_no_spot(monkeypatch):
+    """A chain present but no resolvable spot (off-hours quote miss + a chain
+    lacking ``underlyingPrice``) degrades to an explicit empty result instead of
+    raising in the builders (spot=None -> spot*0.20 / spot*atm_iv TypeError)."""
+    # Chain present but WITHOUT underlyingPrice, and the quote returns no last.
+    monkeypatch.setattr(compute.se, "fetch_option_chain",
+                        lambda client, symbol, from_date=None, to_date=None:
+                        {"callExpDateMap": {}, "putExpDateMap": {}})
+    monkeypatch.setattr(compute._proxy.schwab_client, "get_quote",
+                        lambda symbol: {})
+
+    out = compute.swing_scan("SPY", 5, 30, -0.20, -0.10, 0.10, 0.20, 0.10)
+    assert out == {"signals": [], "view": {}}
+
+
 # ── Paper account (moved from webgui/pages/options/portfolio.py) ────────────
 def test_paper_account_view_shape(monkeypatch):
     """``paper_account_view`` assembles snapshot + positions + orders + flag from
