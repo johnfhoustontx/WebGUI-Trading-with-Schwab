@@ -185,13 +185,13 @@ def detail_signal(signal):
 
     ``detail.py`` reads ``credit``/``breakeven``/``pop_pct``/``dte``; the normalized
     multi-leg signal stores ``net_credit``/``net_debit`` + a ``breakevens`` list, so
-    fill ``credit`` (from credit, else debit) and ``breakeven`` (first breakeven) when
-    absent. The input is NOT mutated."""
+    fill ``credit`` from ``net_credit`` ONLY and ``breakeven`` (first breakeven) when
+    absent. A debit structure (``net_credit`` None) deliberately leaves ``credit``
+    unset → the panel's green "Credit" tile shows "—" rather than the DEBIT amount
+    mislabeled as a credit. The input is NOT mutated."""
     out = dict(signal or {})
     if out.get("credit") is None:
         out["credit"] = out.get("net_credit")
-        if out["credit"] is None:
-            out["credit"] = out.get("net_debit")
     if out.get("breakeven") is None:
         bes = out.get("breakevens") or []
         out["breakeven"] = bes[0] if bes else None

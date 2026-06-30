@@ -290,9 +290,13 @@ def test_detail_signal_fills_credit_and_breakeven():
     assert "breakeven" not in sig
 
 
-def test_detail_signal_credit_from_debit_when_no_credit():
+def test_detail_signal_does_not_fill_credit_from_debit():
+    # A debit structure (net_credit None) must NOT show its DEBIT in the green
+    # "Credit" tile of the shared detail panel — leave credit unset (→ "—").
     out = st.detail_signal(_long_call())
-    assert out["credit"] == 2.50      # falls back to net_debit
+    assert out.get("credit") is None
+    out2 = st.detail_signal(_bull_call_debit())
+    assert out2.get("credit") is None
 
 
 def test_detail_signal_preserves_existing_breakeven():
