@@ -57,6 +57,23 @@ def test_infer_view_conviction_clamped():
     assert 0.0 <= v["conviction"] <= 1.0
 
 
+def test_vol_regime_from_iv_hv_when_rank_missing_high():
+    v = sc.infer_market_view({"trend": "NEUTRAL"},
+                             {"iv_rank": None, "current_iv": 0.30, "hv_current": 0.20})  # iv_hv=1.5
+    assert v["vol_regime"] == "high"
+
+
+def test_vol_regime_from_iv_hv_when_rank_missing_low():
+    v = sc.infer_market_view({"trend": "NEUTRAL"},
+                             {"iv_rank": None, "current_iv": 0.16, "hv_current": 0.20})  # iv_hv=0.8
+    assert v["vol_regime"] == "low"
+
+
+def test_vol_regime_mid_when_no_iv_signal():
+    v = sc.infer_market_view({"trend": "NEUTRAL"}, {"iv_rank": None})
+    assert v["vol_regime"] == "mid"
+
+
 #############################################
 # Task 9 — fit normalizers
 #############################################

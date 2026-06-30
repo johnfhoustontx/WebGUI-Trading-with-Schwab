@@ -85,8 +85,11 @@ def infer_market_view(technicals, iv_analysis):
         NEUTRAL/unknown -> neutral.
     conviction: base by trend strength, nudged by RSI extremity and
         price-vs-sma20 separation; clamped to [0, 1].
-    vol_regime: from ``iv_analysis['iv_rank']`` — <35 low, >65 high, else mid
-        (None -> mid).
+    vol_regime: PRIMARY ``iv_analysis['iv_rank']`` — <35 low, >65 high, else
+        mid. FALLBACK when iv_rank is None (insufficient HV history): the IV/HV
+        ratio ``current_iv / hv_current`` (>=1.2 high, <=0.9 low, else mid). A
+        strongly-disagreeing IV/HV (>1.3 / <0.85) may nudge a mid iv_rank off
+        mid. None of either signal -> mid.
     """
     technicals = technicals or {}
     iv_analysis = iv_analysis or {}
@@ -126,14 +129,39 @@ def infer_market_view(technicals, iv_analysis):
 
     conviction = max(0.0, min(1.0, conviction))
 
-    # vol regime from iv_rank.
+    # vol regime — IV Rank (primary) + IV/HV ratio (fallback / light confirmation).
     iv_rank = iv_analysis.get("iv_rank")
-    if iv_rank is None:
-        vol_regime = "mid"
-    elif iv_rank < 35:
-        vol_regime = "low"
-    elif iv_rank > 65:
-        vol_regime = "high"
+
+    # IV/HV ratio (defensive — both present and hv_current > 0; same units cancel).
+    current_iv = iv_analysis.get("current_iv")
+    hv_current = iv_analysis.get("hv_current")
+    iv_hv = None
+    if (isinstance(current_iv, (int, float)) and isinstance(hv_current, (int, float))
+            and hv_current > 0):
+        iv_hv = current_iv / hv_current
+
+    if iv_rank is not None:
+        # PRIMARY: iv_rank thresholds.
+        if iv_rank < 35:
+            vol_regime = "low"
+        elif iv_rank > 65:
+            vol_regime = "high"
+        else:
+            vol_regime = "mid"
+            # Light confirmation: a strongly-disagreeing IV/HV ratio nudges off mid.
+            if iv_hv is not None:
+                if iv_hv > 1.3:
+                    vol_regime = "high"
+                elif iv_hv < 0.85:
+                    vol_regime = "low"
+    elif iv_hv is not None:
+        # FALLBACK: iv_rank missing (insufficient HV history) — derive from IV/HV.
+        if iv_hv >= 1.2:
+            vol_regime = "high"
+        elif iv_hv <= 0.9:
+            vol_regime = "low"
+        else:
+            vol_regime = "mid"
     else:
         vol_regime = "mid"
 
