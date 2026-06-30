@@ -615,17 +615,21 @@ def render():
         explain_btn = ui.button("Explain", icon="help", color=None).props("no-caps").classes(BTN_3D)
         analyze_btn = ui.button("Analyze", icon="psychology", color=None).props("no-caps").classes(BTN_3D)
         countdown_lbl = ui.label("").classes("opacity-60 text-sm")
-    # Auto briefings (today): the $SPX/SPY/QQQ Analyze runs the options service
-    # auto-generates at premarket / ~18 min after open / midday / close. Each button
-    # opens that slot's latest briefing in a new tab (the slot key is separate from
-    # the ad-hoc Analyze key, so these never auto-open). Enabled once a slot has been
-    # generated (version present); the generated date/time shows in the doc subtitle.
+    # Auto briefings: the $SPX/SPY/QQQ Analyze the options service auto-generates at
+    # premarket / ~18 min after open / midday / close. Each button opens that slot's
+    # briefing in a new tab (the slot key is separate from the ad-hoc Analyze key, so
+    # these never auto-open). A button is **highlighted** only when its slot's data is
+    # from TODAY (CT); prior-day data (e.g. over the weekend) stays dim — see
+    # _sync_sched_btns. Clickable whenever data exists.
+    _SCHED_HL = "bg-[#2563eb] text-white opacity-100"  # today's briefing is ready
+    _SCHED_DIM = "opacity-40"                           # prior-day data, or none yet
     sched_btns = {}
     with ui.row().classes("items-center gap-2 flex-wrap"):
         ui.label("Auto briefings:").classes("opacity-60 text-sm")
         for _slot, _title in (("premarket", "Premarket"), ("open", "Open"),
                               ("midday", "Midday"), ("close", "Close")):
             _b = ui.button(_title, icon="schedule").props("flat dense")
+            _b.classes(f"rounded text-[#cdd8ee] {_SCHED_DIM}")
             _b.on_click(lambda s=_slot: ui.navigate.to(
                 f"/options/analyze?slot={s}", new_tab=True))
             _b.disable()
@@ -909,16 +913,39 @@ def render():
         ui.navigate.to(f"/options/analyze?v={version}", new_tab=True)
 
     _SCHED_VIEWS = {s: f"options:gamma_analyze_{s}" for s in sched_btns}
+    _sched_state = {s: {"ver": None, "date": None, "applied": None} for s in sched_btns}
 
     def _sync_sched_btns(versions):
-        # Enable a briefing button once its slot has been generated (version present);
-        # the doc subtitle carries the generated date/time so staleness is visible.
+        # Highlight a briefing button ONLY when its slot's data is from TODAY (CT);
+        # prior-day data (e.g. over the weekend) stays dim — and the un-highlighted
+        # buttons are dimmed further. Clickable whenever data exists; disabled when a
+        # slot has never run. The payload (for generated_at) is read only when a slot's
+        # version changes; the today-vs-prior compare runs every tick, so a highlight
+        # also drops at midnight on a page left open across the rollover.
+        import datetime as _dt
+        from zoneinfo import ZoneInfo as _ZI
+        today = _dt.datetime.now(_ZI("America/Chicago")).date().isoformat()
         for s, b in sched_btns.items():
-            if versions.get(_SCHED_VIEWS[s]):
-                b.enable()
-                b.tooltip(f"Open the latest auto-generated {b.text} briefing")
+            ver = versions.get(_SCHED_VIEWS[s])
+            st = _sched_state[s]
+            if ver != st["ver"]:
+                st["ver"] = ver
+                ga = ((bus_client.read(_SCHED_VIEWS[s]) or {}).get("generated_at")
+                      if ver else "") or ""
+                st["date"] = ga[:10] if len(ga) >= 10 else None
+            is_today = bool(ver) and st["date"] == today
+            key = (bool(ver), is_today)
+            if key == st["applied"]:
+                continue  # no state change → don't re-push classes every tick
+            st["applied"] = key
+            if is_today:
+                b.classes(remove=_SCHED_DIM, add=_SCHED_HL)
+                b.tooltip(f"Open today's {b.text} briefing")
             else:
-                b.disable()
+                b.classes(remove=_SCHED_HL, add=_SCHED_DIM)
+                b.tooltip(f"{b.text} briefing — "
+                          + ("prior day (not today's)" if ver else "not generated yet today"))
+            (b.enable if ver else b.disable)()
 
     @guard
     def _poll():
