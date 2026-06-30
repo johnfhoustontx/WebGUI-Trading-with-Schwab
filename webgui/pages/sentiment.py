@@ -204,6 +204,9 @@ def _intraday_figure(points, *, value_key, y_max, y_title, zones):
     return {
         "chart": {"type": "line", "backgroundColor": "transparent",
                   "height": 200, "spacing": [8, 12, 8, 0]},
+        # Recorded ts are UTC epoch; Highcharts datetime axes default to UTC, so
+        # render the axis + tooltip in Central Time (the trading session's clock).
+        "time": {"timezone": "America/Chicago"},
         "title": {"text": None},
         "credits": {"enabled": False},
         "accessibility": {"enabled": False},

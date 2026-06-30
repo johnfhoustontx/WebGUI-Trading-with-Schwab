@@ -204,3 +204,11 @@ def test_trend_intraday_figure_value_zones_and_axis():
 def test_intraday_figures_empty_points_are_valid():
     assert S.build_sentiment_intraday_figure([])["series"][0]["data"] == []
     assert S.build_trend_intraday_figure(None)["series"][0]["data"] == []
+
+
+def test_intraday_figures_render_in_central_time():
+    # Highcharts renders datetime axes in UTC by default; the recorded ts are UTC
+    # epoch, so the axis/tooltip must be told to display Central Time.
+    for fig in (S.build_sentiment_intraday_figure(_PTS),
+                S.build_trend_intraday_figure(_PTS)):
+        assert fig["time"]["timezone"] == "America/Chicago"
