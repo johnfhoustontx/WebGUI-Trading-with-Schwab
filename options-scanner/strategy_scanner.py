@@ -66,32 +66,61 @@ def _sign(leg):
     return 1.0 if leg["side"] == "long" else -1.0
 
 
+def _pl_at(legs, entry_cost, S):
+    v = sum(_sign(l) * _intrinsic(l, S) * l.get("qty", 1) for l in legs)
+    return v - entry_cost
+
+
 def payoff_metrics(legs, spot):
     entry_cost = sum(_sign(l) * l["mark"] * l.get("qty", 1) for l in legs)   # +debit
+    net = round(entry_cost, 4)
+
+    # --- Tail analysis (structure-driven, not grid-driven) ---
+    # As S->inf the payoff slope equals call_coeff = sum(sign*qty) over CALL legs.
+    #   > 0 unbounded PROFIT (long call) ; < 0 unbounded LOSS (naked short call) ;
+    #   == 0 bounded on the upside (verticals/condors/flies). The downside (S->0)
+    # is ALWAYS bounded (puts floor at S=0), so never flag unbounded from below.
+    call_coeff = sum(_sign(l) * l.get("qty", 1) for l in legs if l["kind"] == "call")
+    unbounded = (call_coeff != 0)
+
+    # --- Bounded extrema at payoff BREAKPOINTS (S=0, each strike, a far-high pt) ---
+    strikes = [l["strike"] for l in legs]
+    far_high = 2.0 * max(strikes) if strikes else spot * 2.0
+    points = sorted({0.0, far_high} | set(strikes))
+    pls = [_pl_at(legs, entry_cost, S) for S in points]
+    bounded_max = max(pls)
+    bounded_min = min(pls)
+
+    # Override the extremum on whichever side is unbounded.
+    if call_coeff > 0:          # unbounded upside profit
+        max_profit = None
+    else:
+        max_profit = round(bounded_max, 2)
+
+    margin_proxy = round(abs(net) if net > 0 else spot * 0.20, 2)
+    if call_coeff < 0:          # unbounded upside loss -> can't read off the grid
+        max_loss = margin_proxy
+        capital = margin_proxy
+    else:
+        max_loss = abs(round(bounded_min, 2))
+        capital = max_loss if not unbounded else margin_proxy
+
+    # --- Breakevens: scan a fine grid for sign changes + interpolate ---
     grid = [spot * (_GRID_LO + (_GRID_HI - _GRID_LO) * i / (_GRID_N - 1))
             for i in range(_GRID_N)]
-    pls = []
-    for S in grid:
-        v = sum(_sign(l) * _intrinsic(l, S) * l.get("qty", 1) for l in legs)
-        pls.append(v - entry_cost)
-    max_p, min_p = max(pls), min(pls)
-    edge = 0.5
-    unbounded = (pls[-1] >= max_p - edge and pls[-1] > pls[-2] + 1e-6) or \
-                (pls[0] <= min_p + edge and pls[0] < pls[1] - 1e-6)
+    gpls = [_pl_at(legs, entry_cost, S) for S in grid]
     breakevens = []
     for i in range(1, len(grid)):
-        if (pls[i - 1] <= 0 < pls[i]) or (pls[i - 1] >= 0 > pls[i]):
-            t = pls[i - 1] / (pls[i - 1] - pls[i])
+        if (gpls[i - 1] <= 0 < gpls[i]) or (gpls[i - 1] >= 0 > gpls[i]):
+            t = gpls[i - 1] / (gpls[i - 1] - gpls[i])
             breakevens.append(round(grid[i - 1] + t * (grid[i] - grid[i - 1]), 2))
-    max_profit = None if (unbounded and pls[-1] >= max_p - edge) else round(max_p, 2)
-    max_loss = abs(round(min_p, 2))
-    net = round(entry_cost, 4)
+
     return {
         "net_debit": net if net > 0 else None,
         "net_credit": round(-net, 4) if net < 0 else None,
         "max_profit": max_profit, "max_loss": max_loss,
         "breakevens": breakevens, "unbounded": unbounded,
-        "capital": max_loss if not unbounded else round(abs(net) if net > 0 else spot * 0.20, 2),
+        "capital": capital,
         "rr": (round(max_profit / max_loss, 3) if (max_profit and max_loss) else None),
         "net_delta": round(sum(_sign(l) * l["delta"] * l.get("qty", 1) for l in legs), 4),
         "net_theta": round(sum(_sign(l) * l["theta"] * l.get("qty", 1) for l in legs), 4),
@@ -211,30 +240,52 @@ def _credit_leg(kind, side, strike, mark, src, delta_key=None):
             "theta": 0, "vega": 0, "gamma": 0, "iv": 0}
 
 
+def _normalize_credit(sig, family, label, bias, legs):
+    """Fill the full normalized contract for an adapted credit structure.
+
+    Structural keys (breakevens/capital/rr/net_delta/net_gamma) are computed
+    from the reconstructed legs via payoff_metrics; the source dict's
+    authoritative economics (credit -> net_credit/max_profit, max_loss) and any
+    real source greeks (net_theta/net_vega/pop_pct) then RE-OVERRIDE so they win
+    over the leg-reconstructed zeros.
+    """
+    credit = sig.get("credit")
+    spot = sig.get("underlying_price") or 0
+    m = payoff_metrics(legs, spot)
+
+    out = dict(sig)            # preserve source fields
+    out.update(m)              # structural keys from the legs
+    out.update({
+        "family": family, "strategy_label": label, "bias": bias, "legs": legs,
+        "net_credit": credit, "net_debit": None,
+        "max_profit": credit, "max_loss": sig.get("max_loss"),
+        "unbounded": False,
+        "timestamp": sig.get("timestamp") or _dt.datetime.now().isoformat(),
+    })
+    # Keep authoritative source greeks/pop where present (don't let leg=0 clobber).
+    for k in ("net_theta", "net_vega", "pop_pct"):
+        if sig.get(k) is not None:
+            out[k] = sig[k]
+    return out
+
+
 def adapt_credit_spread(sig):
     """Adapt a screen_spreads PCS/CCS dict into the normalized signal shape.
 
-    Preserves every source field; adds family/strategy_label/bias/legs +
-    net_credit/max_profit. PCS -> bullish, CCS -> bearish.
+    Preserves every source field; adds the full normalized contract
+    (legs/family/strategy_label/bias/breakevens/capital/rr/net_* /timestamp).
+    PCS -> bullish, CCS -> bearish; source economics stay authoritative.
     """
-    stype = sig.get("type")
-    is_pcs = stype == "PCS"
+    is_pcs = sig.get("type") == "PCS"
     kind = "put" if is_pcs else "call"
     bias = "bullish" if is_pcs else "bearish"
     label = "Put Credit Spread" if is_pcs else "Call Credit Spread"
-    credit = sig.get("credit")
     legs = [
         _credit_leg(kind, "short", sig.get("short_strike"), sig.get("short_mark"),
                     sig, delta_key="short_delta"),
         _credit_leg(kind, "long", sig.get("long_strike"), sig.get("long_mark"), sig),
     ]
-    out = dict(sig)
-    out.update({
-        "family": "VERTICAL", "strategy_label": label, "bias": bias, "legs": legs,
-        "net_credit": credit, "net_debit": None, "max_profit": credit,
-        "max_loss": sig.get("max_loss"), "unbounded": False,
-    })
-    return out
+    return _normalize_credit(sig, "VERTICAL", label, bias, legs)
 
 
 def adapt_iron_condor(sig):
@@ -242,17 +293,10 @@ def adapt_iron_condor(sig):
 
     Put side = short_strike / long_strike; call side = call_short / call_long.
     """
-    credit = sig.get("credit")
     legs = [
         _credit_leg("put", "short", sig.get("short_strike"), sig.get("short_mark"), sig),
         _credit_leg("put", "long", sig.get("long_strike"), sig.get("long_mark"), sig),
         _credit_leg("call", "short", sig.get("call_short"), sig.get("call_short_mark"), sig),
         _credit_leg("call", "long", sig.get("call_long"), sig.get("call_long_mark"), sig),
     ]
-    out = dict(sig)
-    out.update({
-        "family": "NEUTRAL", "strategy_label": "Iron Condor", "bias": "neutral",
-        "legs": legs, "net_credit": credit, "net_debit": None,
-        "max_profit": credit, "max_loss": sig.get("max_loss"), "unbounded": False,
-    })
-    return out
+    return _normalize_credit(sig, "NEUTRAL", "Iron Condor", "neutral", legs)

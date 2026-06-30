@@ -87,6 +87,24 @@ def test_payoff_put_credit_spread_max_loss_width_minus_credit():
     assert abs(m["max_loss"] - 3.3) < 0.1
 
 
+def test_payoff_naked_short_call_unbounded_loss():
+    legs = [_leg("call", "short", 455.0, 3.5)]
+    m = ss.payoff_metrics(legs, spot=450.0)
+    assert m["net_credit"] == 3.5 and m["net_debit"] is None
+    assert m["unbounded"] is True
+    assert m["max_profit"] == 3.5          # keep the credit if S stays below strike
+    assert m["capital"] > 0                 # margin proxy, not a tiny/zero value
+
+
+def test_payoff_naked_short_put_bounded_loss():
+    legs = [_leg("put", "short", 445.0, 3.5)]
+    m = ss.payoff_metrics(legs, spot=450.0)
+    assert m["unbounded"] is False
+    assert m["net_credit"] == 3.5
+    assert abs(m["max_loss"] - 441.5) < 0.5   # strike(445) - credit(3.5) at S=0
+    assert abs(m["max_profit"] - 3.5) < 0.05
+
+
 # ---- Task 4 ----
 def test_pop_long_call_is_low_side_probability():
     legs = [_leg("call", "long", 450.0, 6.0)]
@@ -136,6 +154,15 @@ def test_adapt_credit_spread_pcs_to_normalized():
     assert n["net_credit"] == 1.7 and n["max_loss"] == 3.3
     assert [l["side"] for l in n["legs"]] == ["short", "long"]
     assert n["legs"][0]["kind"] == "put"
+    # full normalized shape: structural keys populated, source greeks preserved
+    assert isinstance(n["breakevens"], list) and n["breakevens"]
+    assert abs(n["breakevens"][0] - 443.3) < 0.3   # short_strike - credit = 445 - 1.7
+    assert n["capital"] is not None
+    assert n["rr"] is not None
+    assert n["net_delta"] is not None
+    assert n["timestamp"] is not None
+    assert n["net_theta"] == 0.04 and n["net_vega"] == -0.02  # source greeks win
+    assert n["net_debit"] is None and n["unbounded"] is False
 
 
 def test_adapt_credit_spread_ccs_to_normalized():
@@ -165,3 +192,9 @@ def test_adapt_iron_condor_to_normalized():
     assert len(n["legs"]) == 4
     kinds = {l["kind"] for l in n["legs"]}
     assert kinds == {"put", "call"}
+    # full normalized shape
+    assert isinstance(n["breakevens"], list)
+    assert n["capital"] is not None
+    assert n["net_delta"] is not None and n["net_gamma"] is not None
+    assert n["timestamp"] is not None
+    assert n["net_debit"] is None and n["unbounded"] is False
