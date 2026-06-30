@@ -442,3 +442,53 @@ def test_handle_command_refresh_rotation(monkeypatch):
 
     handlers.handle_command(bus, Command(type="refresh_rotation"))
     assert seen["rot"] == 1
+
+
+# --- 2-min intraday sentiment+trend recording (Task 3) ------------------------
+
+def test_intraday_values_extracts_sentiment_and_trend():
+    live = {"composite": {"total_score": "6.30"}}
+    assert handlers._intraday_values(live, {"score": 71.5}) == (6.30, 71.5)
+
+
+def test_intraday_values_none_when_no_live():
+    assert handlers._intraday_values(None, {"score": 70}) is None
+
+
+def test_intraday_values_none_when_trend_missing_score():
+    assert handlers._intraday_values({"composite": {"total_score": "6.0"}}, {}) is None
+
+
+def test_refresh_records_and_publishes_intraday_during_rth(monkeypatch):
+    bus = Bus(fake=True)
+    _patch_compute(monkeypatch, live=_fake_live(total="6.00"), snaps=[{"x": 1}], spy=[1.0])
+    monkeypatch.setattr(handlers, "_maybe_recompute_trend", lambda: None)
+    monkeypatch.setattr(handlers, "_is_rth_now", lambda: True)
+    monkeypatch.setattr(handlers, "_intraday_conn",
+                        handlers.intraday_history_db.connect(":memory:"))
+    handlers._TREND["trend"] = {"score": 70.0}
+
+    sub = bus.subscribe("events:sentiment:intraday_history")
+    handlers.refresh(bus, with_sectors=False)
+    msg = sub.get_message(timeout=1.0)
+    sub.close()
+
+    view = bus.cache_get("cache:sentiment:intraday_history")
+    assert view is not None
+    pts = view.payload["points"]
+    assert pts and pts[-1]["sentiment"] == 6.0 and pts[-1]["trend"] == 70.0
+    assert msg is not None and "version" in msg
+
+
+def test_refresh_skips_intraday_off_hours(monkeypatch):
+    bus = Bus(fake=True)
+    _patch_compute(monkeypatch, live=_fake_live(), snaps=[{"x": 1}], spy=[1.0])
+    monkeypatch.setattr(handlers, "_maybe_recompute_trend", lambda: None)
+    monkeypatch.setattr(handlers, "_is_rth_now", lambda: False)
+    monkeypatch.setattr(handlers, "_intraday_conn",
+                        handlers.intraday_history_db.connect(":memory:"))
+    handlers._TREND["trend"] = {"score": 70.0}
+
+    handlers.refresh(bus, with_sectors=False)
+    view = bus.cache_get("cache:sentiment:intraday_history")
+    assert view is None or not view.payload.get("points")

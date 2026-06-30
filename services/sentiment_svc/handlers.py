@@ -18,12 +18,14 @@ Cache views (split by concern, mirroring the page's single ``_CACHE``):
 Kept synchronous: it calls blocking ``compute`` functions and the scaffold's
 consumer loop awaits the result only if it is awaitable.
 """
+import datetime as _dt
 import logging
 import threading
 import time
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo as _ZI
 
-from services.sentiment_svc import compute, scheduler
+from services.sentiment_svc import compute, intraday_history_db, scheduler
 from shared.contracts.sentiment import CompositeSnapshot
 
 log = logging.getLogger(__name__)
@@ -71,14 +73,73 @@ def _maybe_recompute_trend():
         except Exception:  # noqa: BLE001 — recompute failure must not abort refresh.
             log.exception("intraday trend recompute failed")
 
+
+# --- 2-min intraday sentiment+trend series ------------------------------------
+# A lazily-opened SQLite connection (the on-disk store from Task 1). ``refresh``
+# records one RTH-only point per cycle, prunes to 5 trading days, and publishes
+# ``cache:sentiment:intraday_history`` for the page's two intraday graphs.
+_intraday_conn = None
+
+
+def _get_intraday_conn():
+    global _intraday_conn
+    if _intraday_conn is None:
+        _intraday_conn = intraday_history_db.connect()
+    return _intraday_conn
+
+
+def _is_rth_now() -> bool:
+    """Mon-Fri 08:30-15:00 CT (mirrors the page's is_rth)."""
+    now = _dt.datetime.now(_ZI("America/Chicago"))
+    if now.weekday() >= 5:
+        return False
+    return (8, 30) <= (now.hour, now.minute) < (15, 0)
+
+
+def _intraday_values(live, trend):
+    """(sentiment 0-10, trend 0-100) from the live snapshot + trend dict, or
+    None when there is no live composite to record."""
+    if not live:
+        return None
+    try:
+        sentiment = float((live.get("composite") or {})["total_score"])
+        tscore = float((trend or {}).get("score"))
+    except (KeyError, TypeError, ValueError):
+        return None
+    return sentiment, tscore
+
+
+def _record_intraday(bus, live, trend):
+    """Record one 2-min point (RTH-only), prune to 5 trading days, publish the
+    view. Defensive — never aborts the core refresh."""
+    try:
+        if not _is_rth_now():
+            return
+        vals = _intraday_values(live, trend)
+        if vals is None:
+            return
+        conn = _get_intraday_conn()
+        ts = int(_dt.datetime.now().timestamp())
+        intraday_history_db.insert_point(conn, ts, vals[0], vals[1])
+        intraday_history_db.prune(conn, n_days=5)
+        rows = intraday_history_db.load_recent(conn, n_days=5)
+        points = [{"ts": r[0], "sentiment": r[1], "trend": r[2]} for r in rows]
+        version = bus.cache_set(CACHE_INTRADAY, {"points": points})
+        bus.publish(EVENT_INTRADAY, {"version": version})
+    except Exception:  # noqa: BLE001
+        log.exception("intraday history record failed")
+
 CACHE_COMPOSITE = "cache:sentiment:composite"
 CACHE_HISTORY = "cache:sentiment:history"
 CACHE_SECTORS = "cache:sentiment:sectors"
 CACHE_ROTATION = "cache:sentiment:rotation"
 
+CACHE_INTRADAY = "cache:sentiment:intraday_history"
+
 EVENT_COMPOSITE = "events:sentiment:composite"
 EVENT_SECTORS = "events:sentiment:sectors"
 EVENT_ROTATION = "events:sentiment:rotation"
+EVENT_INTRADAY = "events:sentiment:intraday_history"
 
 
 def _sector_industry_etfs(sector_data, sector_name):
@@ -174,6 +235,8 @@ def refresh(bus, with_sectors: bool = False) -> None:
     bus.publish(EVENT_COMPOSITE, {"version": version})
 
     bus.cache_set(CACHE_HISTORY, {"snaps": snaps or [], "spy": spy or []})
+
+    _record_intraday(bus, live, _TREND["trend"])
 
     sector = None
     if with_sectors:
