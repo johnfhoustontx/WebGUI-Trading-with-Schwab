@@ -54,32 +54,50 @@ def assign_ids(signals, symbol):
     return signals
 
 
+# Phase-1 candidate families. ``families=None`` ⇒ build all of these.
+_SWING_FAMILIES = ("DIRECTIONAL", "VERTICAL", "NEUTRAL")
+
+
 def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
-               call_d_min, call_d_max, min_cr_fraction) -> list:
-    """Run the swing scan pipeline; returns scored signals (list of dicts).
+               call_d_min, call_d_max, min_cr_fraction, families=None) -> dict:
+    """Run the multi-strategy swing scan pipeline; returns ``{"signals", "view"}``.
 
-    Two-client usage mirrors the page exactly: ``_proxy.schwab_py_client`` is the
-    schwab-py-compatible client passed into the engine calls, while
-    ``_proxy.schwab_client.get_quote(symbol)`` (SchwabClient-compatible) fetches
-    the quote. ``min_cr_fraction`` is already a fraction.
+    The pipeline builds NORMALIZED candidates across families
+    (``strategy_scanner``, Unit A) and scores them on a unified 0-100 Fit+Quality
+    scale (``strategy_scoring``, Unit B) against a market view inferred from the
+    symbol's technicals + IV regime:
 
-    The page wrapped ``scoring.score_all_signals`` in an ``options_scoring()``
-    collision guard because the GUI process also loads the sentiment ``scoring``
-    package. This service process loads NO sentiment code, so ``import scoring``
-    binds options-scanner's ``scoring.py`` unambiguously — the guard is
-    intentionally NOT ported and ``score_all_signals`` is called directly.
+      1. fetch chain / quote / spot / history / technicals / IV analysis (the daily
+         expected move feeds breakeven-vs-EM scoring),
+      2. derive ``atm_iv`` (decimal) from the engine's authoritative dollar daily EM
+         (``dem = spot·iv·√(1/365)`` ⇒ invert to a fraction; this dodges the
+         percent/decimal trap — ``run_iv_analysis``'s ``current_iv`` is a PERCENT),
+      3. infer the market view,
+      4. build candidates by family — DIRECTIONAL (long/short calls & puts) and
+         VERTICAL (debit verticals + adapted PCS/CCS credit spreads) and NEUTRAL
+         (iron condors). Credit spreads feed BOTH the VERTICAL credit set AND the
+         NEUTRAL iron condors, so ``screen_spreads`` runs whenever EITHER family is
+         requested,
+      5. score + rank + assign ids.
 
-    ``scoring`` is imported lazily here (not at module top) to avoid binding the
-    process-wide ``sys.modules['scoring']`` to options-scanner's module merely by
-    importing this module — that matters only for the *combined* test run where
-    all services share one process and the sentiment service also imports its own
-    ``scoring`` package. In the real (process-isolated) service, the lazy import
-    still resolves to options-scanner's ``scoring.py``. Mirrors ``run_full_scan``,
-    which likewise imports ``scoring`` lazily.
+    ``families`` (default all Phase-1 families) restricts which candidate families
+    are built. Two-client usage mirrors the page: ``_proxy.schwab_py_client`` is
+    the schwab-py-compatible client passed into the engine calls, while
+    ``_proxy.schwab_client.get_quote(symbol)`` fetches the quote.
+    ``min_cr_fraction`` arrives already as a fraction.
+
+    ``strategy_scanner`` / ``strategy_scoring`` are imported lazily here (not at
+    module top) to avoid binding the process-wide ``sys.modules`` entries merely by
+    importing this module — the same rationale the old ``import scoring`` carried
+    (``strategy_scoring`` itself lazy-imports options-scanner's ``scoring`` for the
+    liquidity normalizer). In the real (process-isolated) service these resolve
+    unambiguously to options-scanner's modules.
     """
     import datetime as dt
+    import math
 
-    import scoring
+    import strategy_scanner as ssn
+    import strategy_scoring as ssc
 
     client = _proxy.schwab_py_client
 
@@ -93,12 +111,42 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     iv = run_iv_analysis(client, symbol, price=spot, hist=hist, chain=chain) or {}
     dem = ((iv.get("expected_moves") or {}).get("daily") or {}).get("move_dollars")
 
-    spreads = se.screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
-                                call_d_min, call_d_max, min_cr_fraction, "SWING",
-                                spot=spot, daily_expected_move=dem)
-    signals = list(spreads) + list(se.build_iron_condors(spreads))
-    scoring.score_all_signals(signals, {symbol: iv}, {symbol: tech})
-    return assign_ids(signals, symbol)
+    # ATM IV (DECIMAL fraction) from the engine's authoritative dollar daily EM —
+    # avoids the percent/decimal trap (``dem = spot·iv_dec·√(1/365)``).
+    atm_iv = None
+    if dem and spot and spot > 0:
+        atm_iv = (dem * math.sqrt(365.0)) / spot
+    if not atm_iv:
+        civ = (iv or {}).get("current_iv")
+        atm_iv = (civ / 100.0) if (civ and civ > 1.5) else (civ or 0.20)
+
+    # 1-sigma dollar move to the front of the trade horizon (breakeven-vs-EM factor).
+    em_1sd = (dem or 0.0) * math.sqrt(max(dte_min, 1))
+
+    view = ssc.infer_market_view(tech or {}, iv or {})
+
+    fams = set(families) if families else set(_SWING_FAMILIES)
+    signals = []
+    if "DIRECTIONAL" in fams:
+        signals += ssn.build_directional(chain, symbol, spot, atm_iv, dte_min, dte_max)
+
+    # Credit spreads feed BOTH the VERTICAL credit set AND the NEUTRAL iron condors,
+    # so compute screen_spreads if EITHER family is requested.
+    spreads = []
+    if {"VERTICAL", "NEUTRAL"} & fams:
+        spreads = list(se.screen_spreads(chain, symbol, dte_min, dte_max, put_d_min,
+                                         put_d_max, call_d_min, call_d_max,
+                                         min_cr_fraction, "SWING", spot=spot,
+                                         daily_expected_move=dem))
+    if "VERTICAL" in fams:
+        signals += ssn.build_debit_verticals(chain, symbol, spot, atm_iv, dte_min, dte_max)
+        signals += [ssn.adapt_credit_spread(s) for s in spreads]
+    if "NEUTRAL" in fams:
+        signals += [ssn.adapt_iron_condor(ic) for ic in se.build_iron_condors(spreads)]
+
+    signals = ssc.score_all(signals, view, atm_iv, em_1sd)
+    assign_ids(signals, symbol)
+    return {"signals": signals, "view": view}
 
 
 # ── Paper account (ported from webgui/pages/options/portfolio.py) ───────────

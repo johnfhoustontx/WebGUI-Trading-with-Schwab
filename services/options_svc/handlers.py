@@ -140,6 +140,7 @@ _SWING_DEFAULTS = {
     "call_d_min": 0.10,
     "call_d_max": 0.20,
     "min_cr_fraction": 0.10,
+    "families": None,
 }
 
 # The six fields ScanResult validates — we project the engine dict onto exactly
@@ -191,15 +192,17 @@ def swing_scan(bus, args: dict) -> None:
     On-demand only (not scheduled): the GUI Swing page enqueues a ``swing_scan``
     command with the user's inputs in ``args``; we extract them (falling back to
     the page-default for any missing key), call ``compute.swing_scan`` with the
-    raw client objects, and cache the signal list (plus the symbol + original
-    args, for the page to display/debug) under ``cache:options:swing``.
+    raw client objects, and cache the scored ``signals`` + the inferred market
+    ``view`` (plus the symbol + original args, for the page to display/debug)
+    under ``cache:options:swing``.
 
     No ScanResult gate: this is a flat signal list (not the dual-list scan
     contract), and the page reads ``payload["signals"]`` directly."""
     args = args or {}
     params = {k: args.get(k, default) for k, default in _SWING_DEFAULTS.items()}
-    signals = compute.swing_scan(**params)
-    payload = {"signals": signals, "symbol": params["symbol"], "params": args}
+    result = compute.swing_scan(**params)
+    payload = {"signals": result["signals"], "view": result.get("view"),
+               "symbol": params["symbol"], "params": args}
     version = bus.cache_set(CACHE_SWING, payload)
     bus.publish(EVENT_SWING, {"version": version})
 

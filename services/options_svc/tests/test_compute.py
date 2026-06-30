@@ -47,56 +47,125 @@ def test_assign_ids_preserves_existing():
     assert compute.assign_ids([{"symbol": "MU", "id": "keep"}], "MU")[0]["id"] == "keep"
 
 
-def test_swing_scan_pipeline_wiring(monkeypatch):
-    """The swing pipeline calls each engine step with the right clients/args and
-    scores directly (no ``options_scoring`` guard)."""
+def _swing_chain(exp_str="2026-07-15", dte=15):
+    """A minimal multi-strategy chain: a few call + put strikes (each with the
+    greeks ``strategy_scanner.extract_options`` needs) within the DTE window so
+    ``build_directional`` / ``build_debit_verticals`` produce real signals."""
+    def leg(delta, mark):
+        return [{"delta": delta, "mark": mark, "bid": mark - 0.05, "ask": mark + 0.05,
+                 "theta": -0.03, "vega": 0.10, "gamma": 0.01, "volatility": 22.0,
+                 "totalVolume": 1000, "openInterest": 5000}]
+    key = f"{exp_str}:{dte}"
+    return {
+        "underlyingPrice": 540.0,
+        "callExpDateMap": {key: {
+            "535.0": leg(0.60, 8.0), "545.0": leg(0.40, 4.0),
+            "555.0": leg(0.28, 2.0),
+        }},
+        "putExpDateMap": {key: {
+            "545.0": leg(-0.60, 8.0), "535.0": leg(-0.40, 4.0),
+            "525.0": leg(-0.28, 2.0),
+        }},
+    }
+
+
+def test_swing_scan_multistrategy_pipeline(monkeypatch):
+    """The new multi-strategy pipeline: infer a view, build DIRECTIONAL + VERTICAL
+    (incl. adapted PCS) + NEUTRAL candidates from the REAL strategy_scanner, score
+    them with the REAL strategy_scoring, and return ``{"signals", "view"}``."""
     calls = {}
 
-    chain = {"underlyingPrice": 540.0}
+    chain = _swing_chain()
     monkeypatch.setattr(compute.se, "fetch_option_chain",
                         lambda client, symbol, from_date=None, to_date=None: (
                             calls.__setitem__("chain_client", client), chain)[1])
     monkeypatch.setattr(compute._proxy.schwab_client, "get_quote",
                         lambda symbol: (calls.__setitem__("quote_symbol", symbol),
-                                        {"last": 541.0})[1])
+                                        {"last": 540.0})[1])
     monkeypatch.setattr(compute.se, "fetch_price_history",
                         lambda client, symbol: {"hist": True})
-    monkeypatch.setattr(compute.se, "calc_technicals", lambda hist: {"rsi": 50})
+    monkeypatch.setattr(compute.se, "calc_technicals",
+                        lambda hist: {"trend": "BULLISH", "rsi14": 60,
+                                      "price": 540.0, "sma20": 530.0})
     monkeypatch.setattr(compute, "run_iv_analysis",
                         lambda client, symbol, price=None, hist=None, chain=None: (
                             calls.__setitem__("iv_price", price),
-                            {"expected_moves": {"daily": {"move_dollars": 3.2}}})[1])
+                            {"iv_rank": 50.0,
+                             "expected_moves": {"daily": {"move_dollars": 5.0}}})[1])
 
     def _screen(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
                 call_d_min, call_d_max, min_cr, kind, spot=None, daily_expected_move=None):
         calls["screen"] = dict(min_cr=min_cr, kind=kind, spot=spot,
                                dem=daily_expected_move)
-        return [{"symbol": symbol, "type": "PCS", "short_strike": 530}]
+        return [{"symbol": symbol, "type": "PCS", "short_strike": 530.0,
+                 "long_strike": 525.0, "short_mark": 1.2, "long_mark": 0.6,
+                 "credit": 0.6, "max_loss": 4.4, "expiration": "2026-07-15",
+                 "underlying_price": 540.0}]
 
     monkeypatch.setattr(compute.se, "screen_spreads", _screen)
     monkeypatch.setattr(compute.se, "build_iron_condors", lambda spreads: [])
 
-    # ``scoring`` is imported lazily inside swing_scan; patch the module object in
-    # sys.modules so the in-function ``import scoring`` resolves to this fake (no
-    # collision-guard ceremony — the service binds options-scanner's scoring).
-    import sys as _sys
-    import types as _types
-    fake_scoring = _types.SimpleNamespace(
-        score_all_signals=lambda signals, ivs, techs: calls.__setitem__("scored", True))
-    monkeypatch.setitem(_sys.modules, "scoring", fake_scoring)
-
     out = compute.swing_scan("SPY", 5, 30, -0.20, -0.10, 0.10, 0.20, 0.10)
 
+    # Return shape: a dict with signals (list) + view (dict).
+    assert isinstance(out, dict)
+    assert isinstance(out["signals"], list)
+    assert isinstance(out["view"], dict)
+
+    # Clients / fetch wiring preserved.
     assert calls["chain_client"] is compute._proxy.schwab_py_client
     assert calls["quote_symbol"] == "SPY"
-    assert calls["iv_price"] == 541.0          # quote.last wins over chain price
-    assert calls["screen"]["min_cr"] == 0.10   # passed as a fraction, not %
+    assert calls["iv_price"] == 540.0
+
+    # screen_spreads still called with SWING + spot + the daily EM.
     assert calls["screen"]["kind"] == "SWING"
-    assert calls["screen"]["spot"] == 541.0
-    assert calls["screen"]["dem"] == 3.2
-    assert calls["scored"] is True
-    # assign_ids ran -> signal has a unique id.
-    assert out and out[0]["id"].startswith("SPY")
+    assert calls["screen"]["spot"] == 540.0
+    assert calls["screen"]["dem"] == 5.0
+
+    # The inferred view came from the technicals (bullish trend).
+    assert out["view"]["direction"] == "bullish"
+
+    types = {s["type"] for s in out["signals"]}
+    # A DIRECTIONAL family member (e.g. LONG_CALL) AND the adapted VERTICAL (PCS).
+    assert "LONG_CALL" in types
+    assert "PCS" in types
+    # Every signal was scored.
+    assert out["signals"] and all("composite_score" in s for s in out["signals"])
+    # ids assigned.
+    assert all(s.get("id") for s in out["signals"])
+
+
+def test_swing_scan_families_filter(monkeypatch):
+    """``families`` restricts which candidate families are built (NEUTRAL-only ->
+    screen_spreads still runs for the IC feed, no directional/vertical signals)."""
+    chain = _swing_chain()
+    monkeypatch.setattr(compute.se, "fetch_option_chain",
+                        lambda client, symbol, from_date=None, to_date=None: chain)
+    monkeypatch.setattr(compute._proxy.schwab_client, "get_quote",
+                        lambda symbol: {"last": 540.0})
+    monkeypatch.setattr(compute.se, "fetch_price_history", lambda client, symbol: {"h": 1})
+    monkeypatch.setattr(compute.se, "calc_technicals", lambda hist: {"trend": "NEUTRAL"})
+    monkeypatch.setattr(compute, "run_iv_analysis",
+                        lambda client, symbol, price=None, hist=None, chain=None:
+                        {"expected_moves": {"daily": {"move_dollars": 5.0}}})
+
+    seen = {"screened": False}
+
+    def _screen(*a, **k):
+        seen["screened"] = True
+        return []
+
+    monkeypatch.setattr(compute.se, "screen_spreads", _screen)
+    monkeypatch.setattr(compute.se, "build_iron_condors", lambda spreads: [])
+
+    out = compute.swing_scan("SPY", 5, 30, -0.20, -0.10, 0.10, 0.20, 0.10,
+                             families=["NEUTRAL"])
+    # NEUTRAL requested -> screen_spreads ran (feeds the IC builder).
+    assert seen["screened"] is True
+    # No DIRECTIONAL / VERTICAL signals were built.
+    assert all(s.get("family") not in ("DIRECTIONAL",) for s in out["signals"])
+    assert not any(s["type"] in ("LONG_CALL", "LONG_PUT", "BULL_CALL", "BEAR_PUT")
+                   for s in out["signals"])
 
 
 # ── Paper account (moved from webgui/pages/options/portfolio.py) ────────────

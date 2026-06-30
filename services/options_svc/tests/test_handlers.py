@@ -134,11 +134,12 @@ def _fake_swing_signals():
 def test_swing_scan_command(monkeypatch):
     bus = Bus(fake=True)
     signals = _fake_swing_signals()
+    view = {"direction": "bullish", "conviction": 0.6, "vol_regime": "mid"}
     seen = {"params": None}
 
     def _rec(**params):
         seen["params"] = params
-        return signals
+        return {"signals": signals, "view": view}
 
     monkeypatch.setattr(handlers.compute, "swing_scan", _rec)
 
@@ -153,13 +154,16 @@ def test_swing_scan_command(monkeypatch):
     msg = sub.get_message(timeout=1.0)
     sub.close()
 
-    # compute called with the args from the command (already a fraction).
-    assert seen["params"] == args
+    # compute called with the command args + the new ``families`` default (None).
+    for k, v in args.items():
+        assert seen["params"][k] == v
+    assert seen["params"]["families"] is None
 
     env = bus.cache_get("cache:options:swing")
     assert env is not None
     payload = env.payload
     assert payload["signals"] == signals
+    assert payload["view"] == view
     assert payload["symbol"] == "SPY"
     assert payload["params"] == args
     # Event published with the cache_set version.
@@ -855,7 +859,7 @@ def test_swing_scan_uses_defaults_for_missing_args(monkeypatch):
 
     def _rec(**params):
         seen["params"] = params
-        return []
+        return {"signals": [], "view": {}}
 
     monkeypatch.setattr(handlers.compute, "swing_scan", _rec)
 
@@ -864,9 +868,11 @@ def test_swing_scan_uses_defaults_for_missing_args(monkeypatch):
     assert seen["params"]["symbol"] == "QQQ"
     assert seen["params"]["dte_min"] == 5
     assert seen["params"]["min_cr_fraction"] == 0.10
+    assert seen["params"]["families"] is None
     # Even with no signals, the (empty) result is cached + published.
     env = bus.cache_get("cache:options:swing")
     assert env is not None and env.payload["signals"] == []
+    assert env.payload["view"] == {}
 
 
 def test_collect_gex_history_calls_compute(monkeypatch):
