@@ -185,12 +185,16 @@ Every pure piece is unit-tested before wiring:
 
 ## 7. Phasing (ship incrementally; each phase tested + browser-verified)
 
-1. **Phase 1 — Foundation + Directional + Verticals.** Normalized signal model + payoff
-   helper + `infer_market_view` + Fit/Quality scoring + builders for longs, naked
-   shorts, debit verticals (+ reuse credit verticals) → end-to-end on the page
-   (family multiselect, view banner, new columns, Calculator/EM handoff).
-2. **Phase 2 — Neutral.** Condor (all-call/all-put), butterfly (call/put fly), iron
-   fly builders + their quality inputs.
+1. **Phase 1 — Foundation + Directional + Verticals + adapted Neutral(IC).** Normalized
+   signal model + payoff helper + `infer_market_view` + Fit/Quality scoring + builders for
+   longs, naked shorts, debit verticals (+ reuse credit verticals) → end-to-end on the page
+   (family multiselect, view banner, new columns, Calculator/EM handoff). **Note (as built
+   2026-06-30):** the **NEUTRAL** family's **iron condor** was pulled forward into Phase 1 —
+   it's a free byproduct of the existing `build_iron_condors(spreads)`, so `adapt_iron_condor`
+   + the NEUTRAL family ship now. The *richer* Neutral builders (all-call/all-put condors,
+   butterflies, iron flies) remain Phase 2.
+2. **Phase 2 — Neutral (full).** Condor (all-call/all-put), butterfly (call/put fly), iron
+   fly builders + their quality inputs (the adapted iron condor already shipped in Phase 1).
 3. **Phase 3 — Diagonals.** Multi-expiration strike selection (the most complex
    builder) for `CALL_DIAG` / `PUT_DIAG`.
 
