@@ -8,7 +8,24 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-06-30 (**Multi-strategy Swing Scanner — Phase 1**: the `/options/swing`
+**Last updated:** 2026-06-30 (**Swing Scanner — quality-gated grading**: the multi-strategy
+Swing Scanner's **grade now reflects trade QUALITY, not view-fit**. The `score_strategy`
+composite is **quality-dominant** (`0.7·quality + 0.3·fit` — fit demoted to a ranking
+tiebreaker), and the **grade is capped by per-family HARD GATES** (liquidity / R:R-or-
+capital-efficiency / PoP): a trade failing any minimum bar → **Weak** + a **`grade_reason`**
+naming the failed dims ("Fails: liquidity, PoP"); pass mins → Good/Marginal; clear the
+**excellent** bars on every gated dim + composite ≥78 → **Strong** (genuinely rare). Per-family
+bars (credit = high-PoP/low-R:R; long = low-PoP/high-R:R with unbounded-profit auto-passing
+reward; naked = capital-efficiency → below Strong by design). Making the **liquidity gate real**
+required carrying `bid`/`ask`/`volume`/`oi` onto the normalized legs (`strategy_scanner` +
+`scanner_engine.build_iron_condors` now forwards both IC shorts' liquidity). The page shows a
+**color-coded Grade** (Strong/Good→green, Marginal→amber, Weak→red) with the reason in a tooltip.
+strategy_scanner **26** + strategy_scoring **57** + options_svc + webgui **653** green;
+live-verified (SPY/NVDA/IWM: Weak trades carry a liquidity/R:R reason, Strong rare, quality
+dominates so a counter-view but structurally-sound trade can still grade Good). Design/plan:
+[design](docs/plans/2026-06-30-swing-quality-gated-grading-design.md) /
+[plan](docs/plans/2026-06-30-swing-quality-gated-grading.md). Prior — 2026-06-30
+(**Multi-strategy Swing Scanner — Phase 1**: the `/options/swing`
 page was expanded from a credit-spread-only premium scanner to a **unified single-symbol
 multi-strategy scanner** — it builds + ranks candidates across **Directional** (long/naked
 call+put), **Spreads** (debit bull-call/bear-put + credit PCS/CCS), and **Neutral** (iron
@@ -714,7 +731,7 @@ Routes:
 | `/options/captured` | Captured Signals | built |
 | `/options/portfolio` | Paper Portfolio (paper account) | built |
 | `/options/calculator` | Calculator (summary tiles + P&L heatmap — grid rows = **±N real chain strikes around spot** via the **Number of strikes** input (default 24, strictly around spot; `strikes_window`→`price_rows`); **intraday time-to-expiry** — the grid's first column is **"Now"** (current mark-to-market value, priced at calendar hours-to-4pm-ET /365) and the last is **"Exp"** (expiration payoff), fixing 0DTE which previously showed only the payoff everywhere; summary tiles + PoP also use the intraday "Now" T (was an `or 1/365` clamp that over-priced 0DTE ~20×); the **IV** button **implies IV from the traded contract's mark** ThinkorSwim-style via a `calc_iv` command → `cache:options:calc_iv` (`compute.calc_iv` → engine `implied_vol` bisection), falling back to ATM chain `volatility` pre-strike-pick; **multi-leg strategy builder** — a Strategy dropdown (singles + verticals credit/debit + condors iron/all-same + butterflies long/iron + calendars/diagonals) over the shared **editable leg-editor** (`leg_editor.py`: per-leg kind/side/strike/expiry/qty + Add/Remove), per-leg expiry so **calendars** price each leg at its own T, a **generic-numeric summary** for non-PCS/CCS/IC structures, and a **Copy to Simulator** button; **persists full UI state across navigation** (symbol/strategy/legs/fields/Number-of-strikes) + **auto-refreshes on return** via a single-user module snapshot — `page_state.py`; the **Symbol** field **Loads on tab-out (`focusout`) / Enter** (deduped via `inputs.should_load`; the Load button still force-reloads) with a **centered full-screen wait overlay** (`overlay.py`, `LOAD_TIMEOUT_SEC=30s` backstop) until the chain lands; the **top-level Expiry propagates to all legs** (`leg_editor.apply_expiry`, re-syncs strikes); **compact leg cells** (`leg-row`) + the **"Actions" header dropped**; **Send-to-Calculator from the Scanner now lands correctly** — `_prefill` stashes `pending_legs` + `load_symbol()` so the legs apply once the chain is loaded (applying them first wiped every strike via the leg-editor's strike-coercion — see [[calculator-leg-transfer-needs-chain-first]])) | built |
-| `/options/swing` | Swing Scanner (**multi-strategy**, single-symbol: builds + ranks candidates across **Directional** (long/naked call+put), **Spreads** (debit bull-call/bear-put + credit PCS/CCS), and **Neutral** (iron condor) families on ONE unified **0–100 Fit+Quality** score; **Diagonals** are a later phase. The scanner **infers a market view** (direction/conviction + IV vol-regime) from the symbol's technicals + IV and ranks each structure by FIT to that view + STRUCTURAL QUALITY — so a long call and a put-credit-spread are comparable. A **Strategy-families multiselect** (default all; empty ⇒ all) + an inferred-**view banner** + strategy-agnostic columns (Strategy/Bias/Legs/Debit-Credit/Max P/Max L/R:R/PoP/BE/Score/Grade, colored by score+bias). Per-row **Send to Calculator / Expected Move** work for ALL types via the canonical `legs`; **Send to Paper** is shown only for credit structures (PCS/CCS/IC). See the "Multi-strategy Swing Scanner" section below) | built |
+| `/options/swing` | Swing Scanner (**multi-strategy**, single-symbol: builds + ranks candidates across **Directional** (long/naked call+put), **Spreads** (debit bull-call/bear-put + credit PCS/CCS), and **Neutral** (iron condor) families on ONE unified **0–100 Fit+Quality** score; **Diagonals** are a later phase. The scanner **infers a market view** (direction/conviction + IV vol-regime) from the symbol's technicals + IV and ranks each structure by FIT to that view + STRUCTURAL QUALITY — so a long call and a put-credit-spread are comparable. A **Strategy-families multiselect** (default all; empty ⇒ all) + an inferred-**view banner** + strategy-agnostic columns (Strategy/Bias/Legs/Debit-Credit/Max P/Max L/R:R/PoP/BE/Score/Grade, colored by score+bias; the **Grade is quality-gated** — color-coded green/amber/red with a `grade_reason` tooltip, driven by structural quality + per-family hard gates, NOT view-fit). Per-row **Send to Calculator / Expected Move** work for ALL types via the canonical `legs`; **Send to Paper** is shown only for credit structures (PCS/CCS/IC). See the "Multi-strategy Swing Scanner" section below) | built |
 | `/options/gamma` | Gamma (GEX/Charm/DEX/Vanna bars + flip/**single Call+Put walls** + intraday heatmap; **fixed ±20-strike window** around spot for bars+heatmap (`strikes_around`, consistent candle/cell size all day; heatmap `rowsize`=median gap; heatmap cropped to the window); **blended interpolated heatmaps** (intraday **and Term**) — smooth image, no lines, dark `HEAT_STOPS` colorscale (zero→transparent like the candlestick chart), transparent bg, off-white spot line, no fade, **press-and-hold tooltip** (`_HEAT_PRESS_TOOLTIP_JS`); bar/heatmap **width split grows with session** snapshot count; **flicker-free** in-place Highcharts updates; **symbol is a dropdown** — default `$SPX`, populated from the collected universe (watchlist minus `$VIX`) via `cache:options:gamma_symbols`, **syncs to the cached symbol on build + selecting auto-refreshes + repaints ignore foreign-symbol snapshots** (no revert to `$SPX`); Term shows the **next 5 expirations regardless of cadence** (`_term_chain`); **off-hours persistence** — last session's candles+heatmap held until the next trading day's midnight CT (`active_session_date`/`gamma_cleared` + `load_date_with_grid`); off-hours `spot=None` degrades gracefully; Explain works per-selected-symbol; **Analyze** calls Claude (forced `submit_analysis` tool) and opens an **infographic** tab — regime + bias gauge, per-index price-level ladder + tiles + **what-if** (rally/sell-off/chop), bottom **"Why is this happening"**; **code-authoritative 1-day Exp. move**; also **auto-runs 4×/day** (premarket / ~18 min after open / midday / close) into per-slot keys with **Auto briefings** buttons — see the "Gamma Analyze" section below) | built |
 | `/options/simulator` | Simulator (**multi-leg strategy builder** — a Strategy dropdown over the shared **editable leg-editor** (`leg_editor.py`) replaces the old single-contract selector — driving all three legacy tabs: **Replay** (re-prices the **netted** position along the underlying's recent path → stacked price + 5-Greek panels over a gap-compressed integer x-axis w/ a client-side scrub cursor) + What-if (a **dollar profit/loss payoff from entry**: P/L = position value (×100 contract multiplier) minus the **entry mark** (`whatif_baseline` = value at spot *now*) — so profit caps at the net credit, loss floors at width−credit, **matching the Calculator** — with a green profit fill above / red loss fill below breakeven (area `threshold:0` + `color`/`negativeColor`) + faint Profit/Loss washes + labels; Δt is **elapsed** days from now, per-leg decay → **calendars** correct, theta visible as Δt slides) + IV-shock; **Copy to Calculator** button; **dark-navy dashboard theme** via shared `theme.py`; **persists full UI state across navigation** (symbol/strategy/legs/sliders/active tab) + **auto-refreshes on return** via a single-user module snapshot — `page_state.py`; the **Symbol** field **Fetches the snapshot on tab-out (`focusout`) / Enter** (deduped) with the same **centered wait overlay** (`overlay.py`) until the meta lands; **compact leg cells** + no "Actions" header (shared `leg_editor`)) | built |
 | `/options/expected-move` | Expected Move (candlestick price history (6-mo daily) + forward **ATM-IV expected-move cone** to the option's expiration (green/red dashed, √-time fan) + leg **strike lines** (short solid / long dashed, put/call colored) + axis **crosshair** w/ Date(X)+Price(Y) label boxes; opened in a **new browser tab** via stash-handoff from Scanner/Paper/Captured/Calculator, or standalone w/ symbol+expiry input) | built |
@@ -764,9 +781,26 @@ options-service swing path. Pieces:
   delta-neutral structure scores high only at low conviction) + `fit_vol(net_vega,
   vol_regime)` (long-vega fits LOW iv, short-vega fits HIGH); **Structural-Quality** =
   liquidity (`scoring.norm_liquidity` across legs) + R:R/capital-efficiency +
-  breakeven-vs-EM + PoP. `score_strategy` = `0.5·(0.6·fit_dir+0.4·fit_vol) +
-  0.5·quality` → composite + grade (Strong≥80/Good≥60/Marginal≥40/Weak) + `factor_scores`;
-  `score_all` scores + sorts desc; both per-signal defensive.
+  breakeven-vs-EM + PoP. **Quality-gated grading (2026-06-30 — the grade reflects trade
+  QUALITY, not view-fit):** `score_strategy` composite is **quality-dominant**
+  (`0.7·quality + 0.3·fit`; fit is a ranking tiebreaker, no longer half the grade), and the
+  **grade is capped by per-family HARD GATES** on liquidity, R:R (or capital-efficiency for
+  naked shorts, whose R:R is undefined), and PoP — `GATE_BARS`/`gate_profile`/`evaluate_gates`.
+  A trade that FAILS any minimum bar → **Weak** (composite capped ≤`GATE_FAIL_CAP`39) + a
+  **`grade_reason`** naming the failed dims (e.g. "Fails: liquidity, PoP"); pass all mins →
+  **Good** (≥`GOOD_MIN`58)/**Marginal**; pass the **excellent** bars on every gated dim +
+  composite ≥`STRONG_MIN`78 → **Strong** (genuinely rare). Bars are per-family (credit = high
+  PoP/low R:R; long = low PoP/high R:R with unbounded-profit auto-passing reward; naked =
+  capital-efficiency, so its low cap-eff keeps it below Strong by design). **Making the
+  liquidity gate real** required carrying `bid`/`ask`/`volume`/`oi` onto the normalized legs
+  (`strategy_scanner._leg_from` + the adapters' short legs; `scanner_engine.build_iron_condors`
+  now forwards put-short + call-short `bid`/`ask`/`volume`/`call_*` so the IC liq gate isn't
+  inert). `q_liq` degrades to 50 for a leg genuinely missing bid/ask (no false-fail). The page
+  shows a **color-coded Grade** (Strong/Good→green, Marginal→amber, Weak→red via
+  `strategy_table.grade_class`) with the `grade_reason` in a tooltip. `score_all` scores +
+  sorts desc; all per-signal defensive. Design/plan:
+  [design](docs/plans/2026-06-30-swing-quality-gated-grading-design.md) /
+  [plan](docs/plans/2026-06-30-swing-quality-gated-grading.md).
 - **`services/options_svc/compute.swing_scan`** now returns `{"signals", "view"}` and
   takes a `families` arg (None ⇒ all of DIRECTIONAL/VERTICAL/NEUTRAL). It keeps the
   existing fetch (chain/quote/spot/hist/tech/iv/dem), derives **`atm_iv` as a DECIMAL
