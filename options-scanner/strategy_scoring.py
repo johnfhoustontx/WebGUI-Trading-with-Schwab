@@ -67,6 +67,49 @@ GRADE_GOOD = 60.0
 GRADE_MARGINAL = 40.0
 
 
+#############################################
+# E1 — quality gate config (per-family hard gates)
+#############################################
+
+# Per-profile hard-gate bars: a ``min`` level (must clear all three to avoid a
+# Weak/capped grade) and an ``excellent`` level (clear all three for Strong).
+# Each level carries a ``liq`` bar, a reward bar (``rr`` capital-efficiency for
+# most; ``capeff`` for NAKED whose R:R is undefined under unbounded loss), and a
+# ``pop`` bar. Sourced from the design table.
+GATE_BARS = {
+    "LONG":    {"min": {"liq": 40, "rr": 0.8,  "pop": 30},
+                "excellent": {"liq": 70, "rr": 1.5, "pop": 45}},
+    "NAKED":   {"min": {"liq": 40, "capeff": 0.10, "pop": 65},
+                "excellent": {"liq": 70, "capeff": 0.20, "pop": 78}},
+    "DEBIT":   {"min": {"liq": 45, "rr": 0.6,  "pop": 30},
+                "excellent": {"liq": 75, "rr": 1.2, "pop": 45}},
+    "CREDIT":  {"min": {"liq": 45, "rr": 0.15, "pop": 60},
+                "excellent": {"liq": 75, "rr": 0.33, "pop": 72}},
+    "NEUTRAL": {"min": {"liq": 45, "rr": 0.12, "pop": 55},
+                "excellent": {"liq": 75, "rr": 0.25, "pop": 68}},
+}
+
+# Map normalized signal ``type`` -> gate profile. Unknown -> safe DEBIT default.
+_TYPE_PROFILE = {
+    "LONG_CALL": "LONG", "LONG_PUT": "LONG",
+    "SHORT_CALL": "NAKED", "SHORT_PUT": "NAKED",
+    "BULL_CALL": "DEBIT", "BEAR_PUT": "DEBIT",
+    "PCS": "CREDIT", "CCS": "CREDIT",
+    "IRON_CONDOR": "NEUTRAL", "IC": "NEUTRAL",
+}
+
+# Lenient per-leg liquidity floors (skipped for any leg missing that field, so
+# absent data never false-fails the liquidity gate).
+OI_FLOOR = 50
+VOL_FLOOR = 5
+
+
+def gate_profile(signal):
+    """Map a normalized signal to its gate profile (safe default 'DEBIT')."""
+    t = signal.get("type") if isinstance(signal, dict) else None
+    return _TYPE_PROFILE.get(str(t).upper(), "DEBIT")
+
+
 def _clamp(x, lo=0.0, hi=100.0):
     return max(lo, min(hi, x))
 

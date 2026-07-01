@@ -192,6 +192,89 @@ def test_q_breakeven_defensive_no_em():
 
 
 #############################################
+# E1 Task 2 — gate_profile
+#############################################
+
+def test_gate_profile_maps_types():
+    assert sc.gate_profile({"type": "LONG_CALL"}) == "LONG"
+    assert sc.gate_profile({"type": "LONG_PUT"}) == "LONG"
+    assert sc.gate_profile({"type": "SHORT_PUT"}) == "NAKED"
+    assert sc.gate_profile({"type": "SHORT_CALL"}) == "NAKED"
+    assert sc.gate_profile({"type": "BULL_CALL"}) == "DEBIT"
+    assert sc.gate_profile({"type": "BEAR_PUT"}) == "DEBIT"
+    assert sc.gate_profile({"type": "PCS"}) == "CREDIT"
+    assert sc.gate_profile({"type": "CCS"}) == "CREDIT"
+    assert sc.gate_profile({"type": "IRON_CONDOR"}) == "NEUTRAL"
+    assert sc.gate_profile({"type": "???"}) == "DEBIT"   # safe default
+
+
+def test_gate_bars_have_min_and_excellent_levels():
+    for profile in ("LONG", "NAKED", "DEBIT", "CREDIT", "NEUTRAL"):
+        bars = sc.GATE_BARS[profile]
+        assert "min" in bars and "excellent" in bars
+        assert set(bars["min"]) == set(bars["excellent"])
+
+
+#############################################
+# E1 Task 3 — evaluate_gates
+#############################################
+
+def _credit(rr=0.3, pop=70, legs=None):
+    return {"type": "PCS", "family": "VERTICAL", "rr": rr, "pop_pct": pop,
+            "max_profit": 1.7, "capital": 3.3, "underlying_price": 450,
+            "legs": legs if legs is not None else
+                    [{"bid": 1.0, "ask": 1.05, "mark": 1.02, "volume": 500, "oi": 1000}]}
+
+
+def test_gates_credit_passes_min():
+    g = sc.evaluate_gates(_credit(rr=0.3, pop=70))
+    assert g["passed_min"] and not g["reasons"]
+
+
+def test_gates_credit_fails_low_pop():
+    g = sc.evaluate_gates(_credit(pop=40))
+    assert not g["passed_min"] and "PoP" in " ".join(g["reasons"])
+
+
+def test_gates_long_unbounded_profit_passes_reward():
+    g = sc.evaluate_gates({"type": "LONG_CALL", "rr": None, "net_debit": 6.0, "pop_pct": 35,
+        "max_profit": None, "capital": 6.0,
+        "legs": [{"bid": 5.9, "ask": 6.0, "mark": 5.95, "volume": 800, "oi": 2000}]})
+    assert g["passed_min"]
+
+
+def test_gates_naked_low_capital_efficiency_fails_reward():
+    g = sc.evaluate_gates({"type": "SHORT_CALL", "rr": None, "net_credit": 3.5, "pop_pct": 70,
+        "max_profit": 3.5, "capital": 90.0,
+        "legs": [{"bid": 3.4, "ask": 3.6, "mark": 3.5, "volume": 300, "oi": 800}]})
+    assert not g["passed_min"] and "R:R" in " ".join(g["reasons"])
+
+
+def test_gates_fail_illiquid():
+    g = sc.evaluate_gates(_credit(legs=[{"bid": 1.0, "ask": 1.9, "mark": 1.4, "volume": 1, "oi": 5}]))
+    assert not g["passed_min"] and "liquidity" in " ".join(g["reasons"])
+
+
+def test_gates_excellent_flag():
+    g = sc.evaluate_gates(_credit(rr=0.4, pop=75,
+        legs=[{"bid": 1.0, "ask": 1.01, "mark": 1.005, "volume": 900, "oi": 5000}]))
+    assert g["passed_excellent"]
+
+
+def test_gates_missing_liquidity_fields_not_false_fail():
+    # legs lack oi/volume entirely -> those floors are SKIPPED, not failed
+    g = sc.evaluate_gates(_credit(rr=0.3, pop=70,
+        legs=[{"bid": 1.0, "ask": 1.02, "mark": 1.01}]))
+    assert g["passed_min"] and "liquidity" not in " ".join(g["reasons"])
+
+
+def test_gates_debit_missing_rr_fails():
+    g = sc.evaluate_gates({"type": "BULL_CALL", "rr": None, "pop_pct": 40,
+        "legs": [{"bid": 1.0, "ask": 1.02, "mark": 1.01, "volume": 500, "oi": 1000}]})
+    assert not g["passed_min"] and "R:R" in " ".join(g["reasons"])
+
+
+#############################################
 # Task 10 — score_strategy / score_all
 #############################################
 
