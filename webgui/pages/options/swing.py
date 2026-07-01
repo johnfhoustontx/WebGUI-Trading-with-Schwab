@@ -96,6 +96,13 @@ def render():
         <span :class="props.row._bias_class">{{ props.value || '—' }}</span>
       </q-td>
     ''')
+    # Quality grade colored by pass/fail band + a tooltip with the reason.
+    table.add_slot('body-cell-grade', r'''
+      <q-td :props="props">
+        <span :class="props.row._grade_class">{{ props.value || '—' }}</span>
+        <q-tooltip v-if="props.row.grade_reason">{{ props.row.grade_reason }}</q-tooltip>
+      </q-td>
+    ''')
 
     def _populate(payload):
         """Paint the table + detail map + view banner from a swing-result dict."""

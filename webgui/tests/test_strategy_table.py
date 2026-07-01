@@ -7,7 +7,7 @@ exercised across each type: a long call (unbounded max profit), a debit vertical
 an adapted PCS, and an iron condor.
 """
 from pages.options import strategy_table as st
-from pages.options.theme import TXT_POS, TXT_NEG, TXT_NEUTRAL
+from pages.options.theme import TXT_POS, TXT_NEG, TXT_NEUTRAL, TXT_WARN
 
 
 # --- sample normalized signals --------------------------------------------
@@ -246,6 +246,32 @@ def test_strategy_rows_robust_to_missing_keys():
 def test_strategy_rows_empty():
     assert st.strategy_rows([]) == []
     assert st.strategy_rows(None) == []
+
+
+# --- grade_class + grade_reason -------------------------------------------
+
+def test_grade_class_maps_grades():
+    from pages.options import theme
+    assert st.grade_class("Strong") == theme.TXT_POS
+    assert st.grade_class("Good") == theme.TXT_POS
+    assert st.grade_class("Marginal") == theme.TXT_WARN
+    assert st.grade_class("Weak") == theme.TXT_NEG
+    assert st.grade_class("???") == theme.TXT_NEUTRAL
+
+
+def test_strategy_rows_carry_grade_reason_and_class():
+    from pages.options import theme
+    row = st.strategy_rows([{"id": "x", "type": "PCS", "grade": "Weak",
+                             "grade_reason": "Fails: PoP", "composite_score": 30}])[0]
+    assert row["grade_reason"] == "Fails: PoP"
+    assert row["_grade_class"] == theme.TXT_NEG
+
+
+def test_strategy_rows_grade_reason_defaults_empty():
+    row = st.strategy_rows([{"id": "y", "type": "PCS", "grade": "Strong",
+                             "composite_score": 90}])[0]
+    assert row["grade_reason"] == ""
+    assert row["_grade_class"] == TXT_POS
 
 
 # --- view_banner_text ------------------------------------------------------

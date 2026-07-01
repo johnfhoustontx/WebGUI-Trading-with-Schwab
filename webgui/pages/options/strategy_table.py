@@ -14,7 +14,7 @@ score zone) to a fixed Tailwind class (Tailwind-first standard), never a runtime
 ``.style()`` hex.
 """
 from . import scanner
-from .theme import TXT_POS, TXT_NEG, TXT_NEUTRAL
+from .theme import TXT_POS, TXT_WARN, TXT_NEG, TXT_NEUTRAL
 
 
 # Credit-creditable structures the Paper-trade button is allowed for (the paper
@@ -111,6 +111,20 @@ def _bias_class(bias):
     return TXT_NEUTRAL
 
 
+def grade_class(grade):
+    """Map a quality grade (Strong/Good/Marginal/Weak) to a fixed Tailwind class.
+
+    Strong/Good → green, Marginal → amber, Weak → red, anything else → neutral.
+    """
+    if grade in ("Strong", "Good"):
+        return TXT_POS
+    if grade == "Marginal":
+        return TXT_WARN
+    if grade == "Weak":
+        return TXT_NEG
+    return TXT_NEUTRAL
+
+
 def _fmt_max_profit(signal):
     """Max profit cell: '∞' when unbounded / None, else a 2dp string."""
     mp = signal.get("max_profit")
@@ -150,8 +164,10 @@ def strategy_rows(signals):
             "breakevens": breakeven_text(s),
             "composite_score": score,
             "grade": s.get("grade", ""),
+            "grade_reason": s.get("grade_reason", ""),
             "_score_class": scanner.score_zone_class(score),
             "_bias_class": _bias_class(s.get("bias")),
+            "_grade_class": grade_class(s.get("grade")),
             "_allow_paper": s.get("type") in _PAPER_TYPES,
         })
     rows.sort(key=lambda r: (r["composite_score"] is not None, r["composite_score"] or 0),
