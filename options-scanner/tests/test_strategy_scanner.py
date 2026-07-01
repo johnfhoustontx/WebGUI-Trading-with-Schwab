@@ -142,6 +142,42 @@ def test_adapt_credit_spread_short_leg_carries_source_liquidity():
     assert "bid" not in long_leg and "ask" not in long_leg
 
 
+def test_adapt_iron_condor_short_legs_carry_source_liquidity():
+    # Source IC carries put-side liquidity at top-level bid/ask/volume and
+    # call-side liquidity at call_bid/call_ask/call_volume; BOTH short legs must
+    # carry them so the IC liquidity gate checks both sides.
+    ic = {"id": "SPY_IC", "symbol": "SPY", "type": "IC",
+          "expiration": "2026-07-10", "dte": 10,
+          "short_strike": 445.0, "long_strike": 440.0, "short_mark": 3.5, "long_mark": 1.8,
+          "call_short": 455.0, "call_long": 460.0, "call_short_mark": 3.2, "call_long_mark": 1.6,
+          "credit": 3.3, "max_loss": 1.7, "underlying_price": 450.0,
+          "bid": 1.68, "ask": 1.72, "volume": 400,
+          "call_bid": 1.58, "call_ask": 1.62, "call_volume": 350}
+    n = ss.adapt_iron_condor(ic)
+    put_short = next(l for l in n["legs"] if l["kind"] == "put" and l["side"] == "short")
+    call_short = next(l for l in n["legs"] if l["kind"] == "call" and l["side"] == "short")
+    assert put_short["bid"] == 1.68 and put_short["ask"] == 1.72 and put_short["volume"] == 400
+    assert call_short["bid"] == 1.58 and call_short["ask"] == 1.62 and call_short["volume"] == 350
+    # long legs stay absent (no fabrication)
+    for l in n["legs"]:
+        if l["side"] == "long":
+            assert "bid" not in l and "ask" not in l
+
+
+def test_adapt_iron_condor_call_short_liquidity_absent_when_source_lacks_it():
+    # If the source IC has no call-side bid/ask, the call-short leg leaves them
+    # absent (norm_liquidity degrades to 50) — no fabrication.
+    ic = {"id": "SPY_IC", "symbol": "SPY", "type": "IC",
+          "expiration": "2026-07-10", "dte": 10,
+          "short_strike": 445.0, "long_strike": 440.0, "short_mark": 3.5, "long_mark": 1.8,
+          "call_short": 455.0, "call_long": 460.0, "call_short_mark": 3.2, "call_long_mark": 1.6,
+          "credit": 3.3, "max_loss": 1.7, "underlying_price": 450.0,
+          "bid": 1.68, "ask": 1.72}
+    n = ss.adapt_iron_condor(ic)
+    call_short = next(l for l in n["legs"] if l["kind"] == "call" and l["side"] == "short")
+    assert "bid" not in call_short and "ask" not in call_short
+
+
 # ---- Task 5 ----
 def test_build_directional_emits_long_and_naked_each_side():
     chain = _chain()

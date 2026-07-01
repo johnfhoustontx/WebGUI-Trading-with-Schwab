@@ -279,11 +279,15 @@ def test_gates_debit_missing_rr_fails():
 #############################################
 
 def _long_call_sig():
+    # A real long call ALWAYS carries a net_debit (payoff_metrics sets it), which
+    # triggers the unbounded-profit reward auto-pass; legs are liquid + pop >= 30
+    # so this exercises the real GATE-PASSING path, not a cap artifact.
     return {"type": "LONG_CALL", "family": "DIRECTIONAL", "bias": "bullish",
             "net_delta": 0.55, "net_vega": 0.40, "net_theta": -0.03, "pop_pct": 35,
-            "rr": None, "max_profit": None, "max_loss": 6.0, "capital": 6.0,
-            "breakevens": [456.0], "underlying_price": 450.0,
-            "legs": [{"bid": 5.9, "ask": 6.1, "mark": 6.0}]}
+            "rr": None, "net_debit": 6.0, "max_profit": None, "max_loss": 6.0,
+            "capital": 6.0, "breakevens": [456.0], "underlying_price": 450.0,
+            "legs": [{"bid": 5.98, "ask": 6.02, "mark": 6.0,
+                      "volume": 800, "oi": 2000}]}
 
 
 def test_score_strategy_adds_composite_and_grade():
@@ -309,7 +313,12 @@ def test_score_strategy_better_in_aligned_view():
                              {"direction": "bullish", "conviction": 0.8, "vol_regime": "low"}, 0.18, 8.0)
     bear = sc.score_strategy(_long_call_sig(),
                              {"direction": "bearish", "conviction": 0.8, "vol_regime": "low"}, 0.18, 8.0)
+    # both PASS the gates (a real long call: net_debit -> reward auto-pass, liquid,
+    # pop >= 30) so neither is capped at 39 -> the comparison is meaningful, not a
+    # cap artifact.
+    assert bull["grade"] != "Weak" and bear["grade"] != "Weak"
     assert bull["composite_score"] > bear["composite_score"]
+    assert bull["composite_score"] > 39 and bear["composite_score"] > 39
 
 
 def test_score_strategy_defensive_on_bad_signal():

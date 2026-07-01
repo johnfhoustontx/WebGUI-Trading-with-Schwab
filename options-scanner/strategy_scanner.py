@@ -234,23 +234,27 @@ def build_debit_verticals(chain, symbol, spot, atm_iv, dte_min, dte_max):
     return out
 
 
-def _credit_leg(kind, side, strike, mark, src, delta_key=None, carry_liq=False):
+def _credit_leg(kind, side, strike, mark, src, delta_key=None, carry_liq=False,
+                liq_keys=("bid", "ask", "volume")):
     """Build a normalized leg from a credit-spread source dict (greeks default 0).
 
-    When ``carry_liq`` is set (the SHORT leg — the one whose top-level bid/ask
-    the source dict describes), copy the source dict's top-level ``bid``/``ask``/
-    ``volume`` onto the leg when present so ``q_liq`` can gate on real liquidity.
-    Missing values (and the long leg) stay absent so ``norm_liquidity`` degrades
-    to a neutral 50 rather than false-failing — do NOT fabricate.
+    When ``carry_liq`` is set (a SHORT leg — the one whose liquidity the source
+    dict describes), copy the source dict's liquidity fields (``liq_keys``, in the
+    normalized leg's ``bid``/``ask``/``volume`` order) onto the leg when present so
+    ``q_liq`` can gate on real liquidity. ``liq_keys`` lets the CALL-short leg of an
+    iron condor pull the call-side fields (``call_bid``/``call_ask``/``call_volume``)
+    while the put-short uses the top-level put-side ones. Missing values (and long
+    legs) stay absent so ``norm_liquidity`` degrades to a neutral 50 rather than
+    false-failing — do NOT fabricate.
     """
     leg = {"kind": kind, "side": side, "strike": strike,
            "expiration": src.get("expiration"), "qty": 1, "mark": mark or 0,
            "delta": src.get(delta_key, 0) or 0 if delta_key else 0,
            "theta": 0, "vega": 0, "gamma": 0, "iv": 0}
     if carry_liq:
-        for k in ("bid", "ask", "volume"):
-            if src.get(k) is not None:
-                leg[k] = src[k]
+        for leg_field, src_key in zip(("bid", "ask", "volume"), liq_keys):
+            if src.get(src_key) is not None:
+                leg[leg_field] = src[src_key]
     return leg
 
 
@@ -332,7 +336,8 @@ def adapt_iron_condor(sig):
         _credit_leg("put", "short", sig.get("short_strike"), sig.get("short_mark"), sig,
                     carry_liq=True),
         _credit_leg("put", "long", sig.get("long_strike"), sig.get("long_mark"), sig),
-        _credit_leg("call", "short", sig.get("call_short"), sig.get("call_short_mark"), sig),
+        _credit_leg("call", "short", sig.get("call_short"), sig.get("call_short_mark"), sig,
+                    carry_liq=True, liq_keys=("call_bid", "call_ask", "call_volume")),
         _credit_leg("call", "long", sig.get("call_long"), sig.get("call_long_mark"), sig),
     ]
     # IC breakevens: put_short - credit (lower) and call_short + credit (upper).
