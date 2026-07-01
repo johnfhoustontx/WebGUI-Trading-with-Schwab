@@ -42,36 +42,37 @@ def render():
     """Multi-strategy Swing Scanner: inputs + Scan + view banner + strategy table."""
     ui.label("Swing Scanner").classes("text-h5")
 
-    with ui.row().classes("w-full no-wrap gap-4 items-start"):
-        with ui.column().classes("flex-grow min-w-0"):
-            with ui.row().classes("items-end gap-2 flex-wrap"):
-                symbol_in = select_all_on_focus(
-                    ui.input("Symbol", value="SPY").props("autofocus").classes("w-28 uppercase"))
-                dte_min = ui.number("DTE min", value=0, min=0).classes("w-24")
-                dte_max = ui.number("DTE max", value=120, min=1).classes("w-24")
-            # Strategy families as a neat stacked checkbox group (default all on).
-            with ui.column().classes("gap-1 mt-1"):
+    with ui.column().classes("w-full gap-2"):
+        # Primary controls span the FULL page width, so symbol + DTE + strategies
+        # + Scan all sit on one line (the detail panel no longer squeezes them).
+        with ui.row().classes("items-end gap-3 flex-wrap"):
+            symbol_in = select_all_on_focus(
+                ui.input("Symbol", value="SPY").props("autofocus").classes("w-28 uppercase"))
+            dte_min = ui.number("DTE min", value=0, min=0).classes("w-24")
+            dte_max = ui.number("DTE max", value=120, min=1).classes("w-24")
+            with ui.column().classes("gap-0"):
                 ui.label("Strategies").classes("text-xs text-[#8794b4]")
-                family_cbs = {
-                    code: ui.checkbox(label, value=True).props("dense")
-                    for code, label in _FAMILY_OPTIONS.items()
-                }
-            # Credit-spread-only gates live in an advanced expander (they only
-            # constrain PCS/CCS).
-            with ui.expansion("Advanced — credit spreads").classes("w-full"):
-                with ui.row().classes("items-end gap-2 flex-wrap"):
-                    put_dmin = ui.number("Put Δ min", value=-0.20, format="%.2f").classes("w-24")
-                    put_dmax = ui.number("Put Δ max", value=-0.10, format="%.2f").classes("w-24")
-                    call_dmin = ui.number("Call Δ min", value=0.10, format="%.2f").classes("w-24")
-                    call_dmax = ui.number("Call Δ max", value=0.20, format="%.2f").classes("w-24")
-                    mincr = ui.number("Min credit %", value=10.0, format="%.1f").classes("w-28")
-            with ui.row().classes("items-center gap-3"):
-                scan_btn = ui.button("Scan", icon="search", color=None).props("no-caps").classes(BTN_3D)
-                status = ui.label("").classes("opacity-70")
-            banner = ui.label(strategy_table.view_banner_text(None)).classes("opacity-80 text-sm")
+                with ui.row().classes("items-center gap-3 no-wrap"):
+                    family_cbs = {
+                        code: ui.checkbox(label, value=True).props("dense")
+                        for code, label in _FAMILY_OPTIONS.items()
+                    }
+            scan_btn = ui.button("Scan", icon="search", color=None).props("no-caps").classes(BTN_3D)
+            status = ui.label("").classes("opacity-70")
+        # Credit-spread-only gates (collapsed; constrain PCS/CCS only).
+        with ui.expansion("Advanced — credit spreads").classes("w-full"):
+            with ui.row().classes("items-end gap-2 flex-wrap"):
+                put_dmin = ui.number("Put Δ min", value=-0.20, format="%.2f").classes("w-24")
+                put_dmax = ui.number("Put Δ max", value=-0.10, format="%.2f").classes("w-24")
+                call_dmin = ui.number("Call Δ min", value=0.10, format="%.2f").classes("w-24")
+                call_dmax = ui.number("Call Δ max", value=0.20, format="%.2f").classes("w-24")
+                mincr = ui.number("Min credit %", value=10.0, format="%.1f").classes("w-28")
+        banner = ui.label(strategy_table.view_banner_text(None)).classes("opacity-80 text-sm")
+        # Results table + shared detail panel side by side, below the controls.
+        with ui.row().classes("w-full no-wrap gap-4 items-start"):
             table = ui.table(columns=strategy_table.strategy_columns(), rows=[],
-                             row_key="id").classes("w-full")
-        detail_panel = detail.render()
+                             row_key="id").classes("flex-grow min-w-0")
+            detail_panel = detail.render()
 
     by_id: dict = {}
     # Last-seen bus cache version for the fetch-free repaint timer.
