@@ -45,9 +45,10 @@ def render():
     with ui.row().classes("w-full no-wrap gap-4 items-start"):
         with ui.column().classes("flex-grow min-w-0"):
             with ui.row().classes("items-end gap-2 flex-wrap"):
-                symbol_in = select_all_on_focus(ui.input("Symbol", value="SPY").classes("w-28"))
-                dte_min = ui.number("DTE min", value=5, min=0).classes("w-24")
-                dte_max = ui.number("DTE max", value=30, min=1).classes("w-24")
+                symbol_in = select_all_on_focus(
+                    ui.input("Symbol", value="SPY").props("autofocus").classes("w-28 uppercase"))
+                dte_min = ui.number("DTE min", value=0, min=0).classes("w-24")
+                dte_max = ui.number("DTE max", value=120, min=1).classes("w-24")
             # Strategy families as a neat stacked checkbox group (default all on).
             with ui.column().classes("gap-1 mt-1"):
                 ui.label("Strategies").classes("text-xs text-[#8794b4]")
@@ -142,6 +143,8 @@ def render():
         status.text = "Scanning…"
 
     scan_btn.on_click(_request_scan)
+    # Enter in the Symbol field triggers the scan (mirrors the Scan button).
+    symbol_in.on("keydown.enter", lambda: _request_scan())
 
     # Initial paint from the bus cache (graceful-empty if the service is cold).
     seen["version"] = bus_client.read_version("options:swing")

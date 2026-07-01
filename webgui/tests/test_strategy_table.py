@@ -335,3 +335,21 @@ def test_detail_signal_handles_empty_breakevens():
     sig = dict(_pcs(), breakevens=[])
     out = st.detail_signal(sig)
     assert out.get("breakeven") is None
+
+
+def test_short_exp_formats_and_handles_missing():
+    assert st._short_exp("2026-10-28") == "10/28"
+    assert st._short_exp("") == "—"
+    assert st._short_exp(None) == "—"
+
+
+def test_columns_include_exp_and_dte():
+    fields = [c["field"] for c in st.strategy_columns()]
+    assert "expiration" in fields and "dte" in fields
+
+
+def test_rows_carry_exp_and_dte():
+    row = st.strategy_rows([{"id": "x", "type": "PCS", "expiration": "2026-10-28",
+                             "dte": 120, "composite_score": 50}])[0]
+    assert row["expiration"] == "10/28"
+    assert row["dte"] == 120

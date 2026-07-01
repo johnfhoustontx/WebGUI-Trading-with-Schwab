@@ -40,6 +40,17 @@ def _fmt_strike(value):
     return str(value)
 
 
+def _short_exp(expiration):
+    """Expiration ``'YYYY-MM-DD'`` → ``'MM/DD'`` for a compact cell; '—' if absent."""
+    if not expiration:
+        return "—"
+    try:
+        _y, m, d = str(expiration).split("-")[:3]
+        return f"{int(m):02d}/{int(d):02d}"
+    except (ValueError, AttributeError):
+        return str(expiration)
+
+
 def legs_summary(legs):
     """Compact one-line summary of the legs, e.g. ``"L 450C / S 455C"``.
 
@@ -85,6 +96,8 @@ def strategy_columns():
         ("strategy_label", "Strategy"),
         ("bias", "Bias"),
         ("legs", "Legs"),
+        ("expiration", "Exp"),
+        ("dte", "DTE"),
         ("debit_credit", "Debit/Credit"),
         ("max_profit", "Max P"),
         ("max_loss", "Max L"),
@@ -156,6 +169,8 @@ def strategy_rows(signals):
             "strategy_label": s.get("strategy_label", ""),
             "bias": s.get("bias", ""),
             "legs": legs_summary(s.get("legs")),
+            "expiration": _short_exp(s.get("expiration")),
+            "dte": s.get("dte"),
             "debit_credit": debit_credit_text(s),
             "max_profit": _fmt_max_profit(s),
             "max_loss": _fmt_2(s.get("max_loss")),
