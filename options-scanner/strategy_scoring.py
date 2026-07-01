@@ -66,6 +66,13 @@ GRADE_STRONG = 80.0
 GRADE_GOOD = 60.0
 GRADE_MARGINAL = 40.0
 
+# E1 quality-gated grade thresholds. The grade is driven by structural quality
+# and gated by the per-family hard gates: a gate-failure caps the composite +
+# forces Weak; passing the excellent gates + a high composite earns Strong.
+GATE_FAIL_CAP = 39
+STRONG_MIN = 78
+GOOD_MIN = 58
+
 
 #############################################
 # E1 — quality gate config (per-family hard gates)
@@ -455,8 +462,12 @@ def evaluate_gates(signal, em_1sd=None):
 def score_strategy(signal, view, atm_iv, em_1sd):
     """Score one candidate signal in place and return it.
 
-    Adds: fit_score, quality_score, composite_score, grade, factor_scores.
-    Defensive: a bad signal gets a neutral/0 composite rather than raising.
+    Adds: fit_score, quality_score, composite_score, grade, grade_reason,
+    factor_scores. The composite is quality-DOMINANT (0.7*quality + 0.3*fit) and
+    the grade is gated by the per-family hard gates (a gate-min failure caps the
+    composite at GATE_FAIL_CAP + forces Weak with a 'Fails: ...' reason).
+    Defensive: a bad signal gets a neutral/0 composite + 'unscored' reason
+    rather than raising.
     """
     try:
         fit_dir = fit_directional(signal.get("net_delta"), view)
@@ -483,7 +494,24 @@ def score_strategy(signal, view, atm_iv, em_1sd):
             + w["q_liq"] * q_liq_val
         ) / wsum
 
-        composite = _clamp(FIT_WEIGHT * fit_score + QUALITY_WEIGHT * quality_score)
+        # Quality-DOMINANT composite (view-fit demoted to a tiebreaker).
+        composite = round(0.7 * quality_score + 0.3 * fit_score, 1)
+
+        # Per-family HARD GATES cap + grade the trade.
+        gates = evaluate_gates(signal, em_1sd)
+        if not gates["passed_min"]:
+            grade = "Weak"
+            composite = min(composite, GATE_FAIL_CAP)
+            grade_reason = "Fails: " + ", ".join(gates["reasons"])
+        elif gates["passed_excellent"] and composite >= STRONG_MIN:
+            grade = "Strong"
+            grade_reason = "Excellent on all quality gates"
+        elif composite >= GOOD_MIN:
+            grade = "Good"
+            grade_reason = "Passes all quality gates"
+        else:
+            grade = "Marginal"
+            grade_reason = "Fillable but middling quality"
 
         factor_scores = {
             "fit_dir": round(fit_dir, 1),
@@ -500,6 +528,8 @@ def score_strategy(signal, view, atm_iv, em_1sd):
         fit_score = 0.0
         quality_score = 0.0
         composite = 0.0
+        grade = "Weak"
+        grade_reason = "unscored"
         factor_scores = {
             "fit_dir": 0.0, "fit_vol": 0.0, "q_rr": 0.0,
             "q_be": 0.0, "q_pop": 0.0, "q_liq": 0.0,
@@ -512,26 +542,18 @@ def score_strategy(signal, view, atm_iv, em_1sd):
             "fit_score": round(fit_score, 1),
             "quality_score": round(quality_score, 1),
             "composite_score": round(composite, 1),
-            "grade": _grade(composite),
+            "grade": grade,
+            "grade_reason": grade_reason,
             "factor_scores": factor_scores,
         }
 
     signal["fit_score"] = round(fit_score, 1)
     signal["quality_score"] = round(quality_score, 1)
     signal["composite_score"] = round(composite, 1)
-    signal["grade"] = _grade(composite)
+    signal["grade"] = grade
+    signal["grade_reason"] = grade_reason
     signal["factor_scores"] = factor_scores
     return signal
-
-
-def _grade(composite):
-    if composite >= GRADE_STRONG:
-        return "Strong"
-    if composite >= GRADE_GOOD:
-        return "Good"
-    if composite >= GRADE_MARGINAL:
-        return "Marginal"
-    return "Weak"
 
 
 def score_all(signals, view, atm_iv, em_1sd):

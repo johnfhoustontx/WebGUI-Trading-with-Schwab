@@ -328,6 +328,32 @@ def test_score_strategy_defensive_on_non_dict():
         assert out["grade"] == "Weak"
 
 
+# ---- E1 Task 4: quality-dominant, gated grade ----
+def test_score_strategy_gate_fail_weak_with_reason():
+    out = sc.score_strategy(_credit(pop=40),
+                            {"direction": "bullish", "conviction": 0.8, "vol_regime": "low"}, 0.18, 8.0)
+    assert out["grade"] == "Weak" and "PoP" in out["grade_reason"] and out["composite_score"] <= 39
+
+
+def test_score_strategy_passes_gates_not_weak():
+    out = sc.score_strategy(_credit(rr=0.3, pop=72),
+                            {"direction": "bullish", "conviction": 0.8, "vol_regime": "high"}, 0.18, 8.0)
+    assert out["grade"] != "Weak" and "grade_reason" in out
+
+
+def test_score_strategy_quality_dominant_fit_cannot_force_weak():
+    # a structurally-fine bullish PCS scored under a bearish view: gates pass -> not Weak
+    out = sc.score_strategy(_credit(rr=0.35, pop=75),
+                            {"direction": "bearish", "conviction": 0.9, "vol_regime": "high"}, 0.18, 8.0)
+    assert out["grade"] != "Weak"
+
+
+def test_score_strategy_defensive_signal_has_grade_reason():
+    out = sc.score_strategy({"net_delta": None},
+                            {"direction": "bullish", "conviction": 0.8, "vol_regime": "low"}, 0.18, 8.0)
+    assert "grade_reason" in out
+
+
 def test_score_all_sorts_desc():
     a = _long_call_sig()
     b = _long_call_sig()
