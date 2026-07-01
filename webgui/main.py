@@ -702,4 +702,11 @@ def terminate_page() -> None:
 
 
 if __name__ in {"__main__", "__mp_main__"}:
-    ui.run(port=NICEGUI_PORT, title="Schwab Trading", dark=True, reload=False, show=False)
+    # Bind to localhost only (single-user, localhost-first app): reachable at
+    # http://localhost:8500 from this PC. This avoids listening on every network
+    # interface (the default host="0.0.0.0"), which on Windows produced benign but
+    # noisy `OSError [WinError 64] "network name is no longer available"` accept
+    # tracebacks whenever a transient/virtual adapter (link-local 169.254.x, WSL/
+    # Docker) dropped — and keeps the trading app off the LAN.
+    ui.run(host="127.0.0.1", port=NICEGUI_PORT, title="Schwab Trading",
+           dark=True, reload=False, show=False)
