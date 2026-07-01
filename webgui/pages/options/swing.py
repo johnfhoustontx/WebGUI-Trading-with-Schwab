@@ -33,7 +33,7 @@ def pct_to_fraction(value):
     return float(value) / 100.0
 
 
-# Strategy-family multiselect options (Diagonal is a later phase — omitted).
+# Strategy-family checkbox options (Diagonal is a later phase — omitted).
 _FAMILY_OPTIONS = {"DIRECTIONAL": "Directional", "VERTICAL": "Spreads",
                    "NEUTRAL": "Neutral"}
 
@@ -48,10 +48,13 @@ def render():
                 symbol_in = select_all_on_focus(ui.input("Symbol", value="SPY").classes("w-28"))
                 dte_min = ui.number("DTE min", value=5, min=0).classes("w-24")
                 dte_max = ui.number("DTE max", value=30, min=1).classes("w-24")
-                families_sel = ui.select(
-                    _FAMILY_OPTIONS, multiple=True,
-                    value=["DIRECTIONAL", "VERTICAL", "NEUTRAL"], label="Strategies"
-                ).props("use-chips").classes("w-56")
+            # Strategy families as a neat stacked checkbox group (default all on).
+            with ui.column().classes("gap-1 mt-1"):
+                ui.label("Strategies").classes("text-xs text-[#8794b4]")
+                family_cbs = {
+                    code: ui.checkbox(label, value=True).props("dense")
+                    for code, label in _FAMILY_OPTIONS.items()
+                }
             # Credit-spread-only gates live in an advanced expander (they only
             # constrain PCS/CCS).
             with ui.expansion("Advanced — credit spreads").classes("w-full"):
@@ -116,7 +119,7 @@ def render():
             "symbol": symbol_in.value.strip().upper(),
             "dte_min": int(dte_min.value),
             "dte_max": int(dte_max.value),
-            "families": list(families_sel.value or []),
+            "families": [code for code, cb in family_cbs.items() if cb.value],
             "put_d_min": float(put_dmin.value),
             "put_d_max": float(put_dmax.value),
             "call_d_min": float(call_dmin.value),
@@ -124,9 +127,9 @@ def render():
             "min_cr_fraction": pct_to_fraction(mincr.value),
         }
         bus_client.request("options", {"type": "swing_scan", "args": params})
-        if not families_sel.value:
+        if not params["families"]:
             # Falsy families ⇒ the service scans ALL families (the contract);
-            # surface it so an empty multiselect isn't a silent "scan everything".
+            # surface it so an all-unchecked group isn't a silent "scan everything".
             ui.notify("No strategies selected — scanning all.", type="info")
         ui.notify("Swing scan requested")
         status.text = "Scanning…"
