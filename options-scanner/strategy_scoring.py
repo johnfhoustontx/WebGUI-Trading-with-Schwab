@@ -360,6 +360,95 @@ def q_liq(signal):
 
 
 #############################################
+# E1 Task 3 — evaluate_gates
+#############################################
+
+def _reward_metric(signal, profile):
+    """Resolve the reward value for the gate compare, per profile.
+
+    LONG:  R:R; but None R:R with a set net_debit == unbounded profit -> AUTO-PASS
+           (infinite upside clears any R:R bar), signalled by returning +inf.
+    NAKED: capital efficiency = max_profit / capital (R:R undefined under
+           unbounded loss). Missing/invalid -> None (fail).
+    else:  R:R. None/<=0 -> None (fail).
+    """
+    if profile == "NAKED":
+        mp = signal.get("max_profit")
+        cap = signal.get("capital")
+        if isinstance(mp, (int, float)) and isinstance(cap, (int, float)) and cap > 0:
+            return mp / cap
+        return None
+
+    rr = signal.get("rr")
+    if profile == "LONG" and rr is None and signal.get("net_debit") is not None:
+        return float("inf")   # unbounded profit -> auto-pass
+    if isinstance(rr, (int, float)) and rr > 0:
+        return rr
+    return None
+
+
+def _liquidity_ok(signal, liq_bar):
+    """q_liq >= bar AND (present-only) min leg oi/volume >= floors."""
+    if q_liq(signal) < liq_bar:
+        return False
+    legs = signal.get("legs")
+    if isinstance(legs, (list, tuple)):
+        for leg in legs:
+            if not isinstance(leg, dict):
+                continue
+            oi = leg.get("oi")
+            if isinstance(oi, (int, float)) and oi < OI_FLOOR:
+                return False
+            vol = leg.get("volume")
+            if isinstance(vol, (int, float)) and vol < VOL_FLOOR:
+                return False
+    return True
+
+
+def evaluate_gates(signal, em_1sd=None):
+    """Evaluate the per-family hard gates for a signal.
+
+    Returns ``{"passed_min": bool, "passed_excellent": bool, "reasons": [...]}``
+    where ``reasons`` lists the dimensions that failed the MIN bars ("liquidity",
+    "R:R", "PoP"). Defensive: a missing key -> that dimension treated as a fail
+    (reward/pop); liquidity uses the already-defensive q_liq.
+    """
+    if not isinstance(signal, dict):
+        return {"passed_min": False, "passed_excellent": False,
+                "reasons": ["liquidity", "R:R", "PoP"]}
+
+    profile = gate_profile(signal)
+    bars = GATE_BARS[profile]
+    reward_key = "capeff" if profile == "NAKED" else "rr"
+
+    reward = _reward_metric(signal, profile)
+    pop = signal.get("pop_pct")
+    pop_ok_val = pop if isinstance(pop, (int, float)) else None
+
+    def _check(level):
+        liq_ok = _liquidity_ok(signal, level["liq"])
+        reward_ok = reward is not None and reward >= level[reward_key]
+        pop_ok = pop_ok_val is not None and pop_ok_val >= level["pop"]
+        return liq_ok, reward_ok, pop_ok
+
+    liq_min, reward_min, pop_min = _check(bars["min"])
+    reasons = []
+    if not liq_min:
+        reasons.append("liquidity")
+    if not reward_min:
+        reasons.append("R:R")
+    if not pop_min:
+        reasons.append("PoP")
+    passed_min = liq_min and reward_min and pop_min
+
+    liq_ex, reward_ex, pop_ex = _check(bars["excellent"])
+    passed_excellent = liq_ex and reward_ex and pop_ex
+
+    return {"passed_min": passed_min, "passed_excellent": passed_excellent,
+            "reasons": reasons}
+
+
+#############################################
 # Task 10 — score_strategy / score_all
 #############################################
 

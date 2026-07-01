@@ -223,7 +223,7 @@ def _credit(rr=0.3, pop=70, legs=None):
     return {"type": "PCS", "family": "VERTICAL", "rr": rr, "pop_pct": pop,
             "max_profit": 1.7, "capital": 3.3, "underlying_price": 450,
             "legs": legs if legs is not None else
-                    [{"bid": 1.0, "ask": 1.05, "mark": 1.02, "volume": 500, "oi": 1000}]}
+                    [{"bid": 1.0, "ask": 1.008, "mark": 1.004, "volume": 500, "oi": 1000}]}
 
 
 def test_gates_credit_passes_min():
