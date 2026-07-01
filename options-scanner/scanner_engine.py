@@ -912,6 +912,12 @@ def build_iron_condors(spreads, max_n=3):
                     "short_mark": p.get("short_mark"), "long_mark": p.get("long_mark"),
                     "call_short_mark": c.get("short_mark"),
                     "call_long_mark": c.get("long_mark"),
+                    # Forward short-leg liquidity (additive) so the swing scanner's
+                    # per-family liquidity gate can check BOTH shorts: put side from
+                    # the PCS, call side from the CCS. Other consumers ignore these.
+                    "bid": p.get("bid"), "ask": p.get("ask"), "volume": p.get("volume"),
+                    "call_bid": c.get("bid"), "call_ask": c.get("ask"),
+                    "call_volume": c.get("volume"),
                     "width": p["width"], "credit": round(cr, 2), "max_loss": round(ml, 2),
                     "spread_bid": round(p.get("spread_bid", 0) + c.get("spread_bid", 0), 2),
                     "spread_ask": round(p.get("spread_ask", 0) + c.get("spread_ask", 0), 2),

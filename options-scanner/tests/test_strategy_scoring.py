@@ -363,6 +363,21 @@ def test_score_strategy_defensive_signal_has_grade_reason():
     assert "grade_reason" in out
 
 
+def test_score_strategy_excellent_earns_strong():
+    # A CREDIT PCS clearing the EXCELLENT bars (liq/rr/pop) with strong fit
+    # (bullish PCS in a high-conviction bull view, short-vega in high IV) reaches
+    # composite >= STRONG_MIN -> Strong. Guards that the top band is reachable.
+    sig = {"type": "PCS", "family": "VERTICAL", "net_delta": 0.30, "net_vega": -0.30,
+           "pop_pct": 80, "rr": 0.9, "max_profit": 1.7, "capital": 1.9,
+           "underlying_price": 450, "breakevens": [448.0],
+           "legs": [{"bid": 1.00, "ask": 1.005, "mark": 1.002, "volume": 900, "oi": 5000}]}
+    out = sc.score_strategy(sig, {"direction": "bullish", "conviction": 0.9,
+                                  "vol_regime": "high"}, 0.18, 8.0)
+    assert out["composite_score"] >= sc.STRONG_MIN
+    assert out["grade"] == "Strong"
+    assert out["grade_reason"] == "Excellent on all quality gates"
+
+
 def test_score_all_sorts_desc():
     a = _long_call_sig()
     b = _long_call_sig()

@@ -18,10 +18,15 @@ The pipeline is two-stage:
      - **Quality** (0-100) — execution-agnostic trade quality (R:R or capital
        efficiency, breakeven vs. expected move, probability of profit,
        liquidity).
-     - **Composite** = 0.5 * fit + 0.5 * quality, plus a letter grade and a
-       per-factor breakdown.
+     - **Composite** = QUALITY-DOMINANT ``0.7 * quality + 0.3 * fit`` (view-fit
+       demoted to a ranking tiebreaker), plus a per-factor breakdown.
+     - **Grade** is driven by the per-family HARD GATES (liquidity, R:R/capital
+       efficiency, PoP): a gate-min failure caps the composite at ``GATE_FAIL_CAP``
+       and forces Weak (with a ``grade_reason``); clearing the excellent bars +
+       ``composite >= STRONG_MIN`` earns Strong, ``>= GOOD_MIN`` Good, else Marginal.
 
-   ``score_all`` scores a list and returns it sorted by composite (desc).
+   ``score_all`` scores a list and returns it sorted by composite (desc), so
+   gate-failures (capped composite) sink to the bottom.
 
 SCALE NOTE: net_delta / net_vega are PER-SHARE Schwab sums (a single long call
 ~ +0.55 delta, a vertical ~ +0.30, net_vega ~ +/-0.1..0.5). The normalizers are
@@ -41,9 +46,9 @@ log = logging.getLogger("scanner")
 # CONSTANTS
 #############################################
 
-# Composite blend (fit vs. quality)
-FIT_WEIGHT = 0.5
-QUALITY_WEIGHT = 0.5
+# Composite blend — QUALITY-DOMINANT (view-fit demoted to a ranking tiebreaker).
+QUALITY_WEIGHT = 0.7
+FIT_WEIGHT = 0.3
 
 # fit_score = FIT_DIR_W * directional fit + FIT_VOL_W * volatility fit
 FIT_DIR_W = 0.6
@@ -60,11 +65,6 @@ QUALITY_WEIGHTS = {
 # Soft-clamp scales for the per-share Greek sums.
 DELTA_SCALE = 0.5    # |net_delta| ~ 0.5 -> tanh ~ 0.76
 VEGA_SCALE = 0.3     # |net_vega| ~ 0.3 -> tanh ~ 0.76
-
-# Grade thresholds on the composite.
-GRADE_STRONG = 80.0
-GRADE_GOOD = 60.0
-GRADE_MARGINAL = 40.0
 
 # E1 quality-gated grade thresholds. The grade is driven by structural quality
 # and gated by the per-family hard gates: a gate-failure caps the composite +
@@ -86,6 +86,10 @@ GOOD_MIN = 58
 GATE_BARS = {
     "LONG":    {"min": {"liq": 40, "rr": 0.8,  "pop": 30},
                 "excellent": {"liq": 70, "rr": 1.5, "pop": 45}},
+    # NAKED: by design, a naked short's low capital-efficiency (max_profit is the
+    # credit against a large margin-based capital) keeps its composite below
+    # STRONG_MIN, so "Strong" is effectively unreachable for naked shorts —
+    # intended (a naked short is rarely your best trade).
     "NAKED":   {"min": {"liq": 40, "capeff": 0.10, "pop": 65},
                 "excellent": {"liq": 70, "capeff": 0.20, "pop": 78}},
     "DEBIT":   {"min": {"liq": 45, "rr": 0.6,  "pop": 30},
@@ -412,13 +416,14 @@ def _liquidity_ok(signal, liq_bar):
     return True
 
 
-def evaluate_gates(signal, em_1sd=None):
+def evaluate_gates(signal):
     """Evaluate the per-family hard gates for a signal.
 
     Returns ``{"passed_min": bool, "passed_excellent": bool, "reasons": [...]}``
     where ``reasons`` lists the dimensions that failed the MIN bars ("liquidity",
-    "R:R", "PoP"). Defensive: a missing key -> that dimension treated as a fail
-    (reward/pop); liquidity uses the already-defensive q_liq.
+    "R:R", "PoP"). Breakeven-vs-EM is intentionally NOT a gate (it's a ranking
+    quality factor, not a hard filter). Defensive: a missing key -> that dimension
+    treated as a fail (reward/pop); liquidity uses the already-defensive q_liq.
     """
     if not isinstance(signal, dict):
         return {"passed_min": False, "passed_excellent": False,
@@ -495,10 +500,10 @@ def score_strategy(signal, view, atm_iv, em_1sd):
         ) / wsum
 
         # Quality-DOMINANT composite (view-fit demoted to a tiebreaker).
-        composite = round(0.7 * quality_score + 0.3 * fit_score, 1)
+        composite = round(QUALITY_WEIGHT * quality_score + FIT_WEIGHT * fit_score, 1)
 
         # Per-family HARD GATES cap + grade the trade.
-        gates = evaluate_gates(signal, em_1sd)
+        gates = evaluate_gates(signal)
         if not gates["passed_min"]:
             grade = "Weak"
             composite = min(composite, GATE_FAIL_CAP)

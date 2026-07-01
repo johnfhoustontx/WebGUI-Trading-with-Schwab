@@ -296,3 +296,45 @@ def test_adapt_credit_spread_marks_absent_falls_back():
     assert abs(n["breakevens"][0] - (445.0 - 1.7)) < 0.05   # short - credit = 443.3
     assert abs(n["capital"] - 3.3) < 0.05
     assert abs(n["rr"] - (1.7 / 3.3)) < 0.05
+
+
+# ---- E1 code-review fix: build_iron_condors forwards liquidity end-to-end ----
+def _spread(side, short_k, long_k, short_delta, bid, ask, volume):
+    return {"symbol": "TEST", "type": side, "expiration": "2026-07-10", "dte": 10,
+            "short_strike": short_k, "long_strike": long_k,
+            "short_mark": 1.5, "long_mark": 0.5, "width": 5,
+            "credit": 1.0, "max_loss": 4.0, "rr_pct": 25.0, "pop_pct": 85.0,
+            "short_delta": short_delta, "net_theta": -0.03,
+            "breakeven": (short_k - 1.0) if side == "PCS" else (short_k + 1.0),
+            "trade_type": "SWING", "underlying_price": 450.0,
+            "bid": bid, "ask": ask, "volume": volume}
+
+
+def test_build_iron_condors_forwards_short_leg_liquidity():
+    from scanner_engine import build_iron_condors
+    pcs = _spread("PCS", 445.0, 440.0, -0.15, bid=1.48, ask=1.52, volume=400)
+    ccs = _spread("CCS", 455.0, 460.0, 0.15, bid=1.18, ask=1.22, volume=350)
+    ic = build_iron_condors([pcs, ccs], max_n=1)[0]
+    # additive liquidity keys forwarded from the two source spreads
+    assert ic["bid"] == 1.48 and ic["ask"] == 1.52 and ic["volume"] == 400
+    assert ic["call_bid"] == 1.18 and ic["call_ask"] == 1.22 and ic["call_volume"] == 350
+
+
+def test_iron_condor_liquidity_gate_lit_up_end_to_end():
+    # A liquid IC passes the NEUTRAL liq gate; an illiquid one (wide short spreads)
+    # now FAILS it — proving the gate is no longer inert on real build output.
+    import scanner_engine as se
+    import strategy_scoring as sc
+
+    liquid_pcs = _spread("PCS", 445.0, 440.0, -0.15, bid=1.48, ask=1.52, volume=400)
+    liquid_ccs = _spread("CCS", 455.0, 460.0, 0.15, bid=1.18, ask=1.22, volume=350)
+    liq_ic = ss.adapt_iron_condor(se.build_iron_condors([liquid_pcs, liquid_ccs], 1)[0])
+    liq_gates = sc.evaluate_gates(liq_ic)
+    assert "liquidity" not in liq_gates["reasons"]
+
+    # wide spreads (spread ~ 40% of mark) -> norm_liquidity ~ 0 on both shorts
+    wide_pcs = _spread("PCS", 445.0, 440.0, -0.15, bid=1.0, ask=1.6, volume=400)
+    wide_ccs = _spread("CCS", 455.0, 460.0, 0.15, bid=1.0, ask=1.6, volume=350)
+    wide_ic = ss.adapt_iron_condor(se.build_iron_condors([wide_pcs, wide_ccs], 1)[0])
+    wide_gates = sc.evaluate_gates(wide_ic)
+    assert "liquidity" in wide_gates["reasons"] and not wide_gates["passed_min"]
