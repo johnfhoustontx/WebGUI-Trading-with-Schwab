@@ -172,7 +172,9 @@ def _leg_from(leg_data, kind, side, exp):
     return {"kind": kind, "side": side, "strike": leg_data["strike"], "expiration": exp,
             "qty": 1, "mark": leg_data["mark"], "delta": leg_data["delta"],
             "theta": leg_data["theta"], "vega": leg_data["vega"],
-            "gamma": leg_data["gamma"], "iv": leg_data["iv"]}
+            "gamma": leg_data["gamma"], "iv": leg_data["iv"],
+            "bid": leg_data.get("bid"), "ask": leg_data.get("ask"),
+            "volume": leg_data.get("volume"), "oi": leg_data.get("oi")}
 
 
 def _dte_for(exp_str):
@@ -232,12 +234,24 @@ def build_debit_verticals(chain, symbol, spot, atm_iv, dte_min, dte_max):
     return out
 
 
-def _credit_leg(kind, side, strike, mark, src, delta_key=None):
-    """Build a normalized leg from a credit-spread source dict (greeks default 0)."""
-    return {"kind": kind, "side": side, "strike": strike,
-            "expiration": src.get("expiration"), "qty": 1, "mark": mark or 0,
-            "delta": src.get(delta_key, 0) or 0 if delta_key else 0,
-            "theta": 0, "vega": 0, "gamma": 0, "iv": 0}
+def _credit_leg(kind, side, strike, mark, src, delta_key=None, carry_liq=False):
+    """Build a normalized leg from a credit-spread source dict (greeks default 0).
+
+    When ``carry_liq`` is set (the SHORT leg — the one whose top-level bid/ask
+    the source dict describes), copy the source dict's top-level ``bid``/``ask``/
+    ``volume`` onto the leg when present so ``q_liq`` can gate on real liquidity.
+    Missing values (and the long leg) stay absent so ``norm_liquidity`` degrades
+    to a neutral 50 rather than false-failing — do NOT fabricate.
+    """
+    leg = {"kind": kind, "side": side, "strike": strike,
+           "expiration": src.get("expiration"), "qty": 1, "mark": mark or 0,
+           "delta": src.get(delta_key, 0) or 0 if delta_key else 0,
+           "theta": 0, "vega": 0, "gamma": 0, "iv": 0}
+    if carry_liq:
+        for k in ("bid", "ask", "volume"):
+            if src.get(k) is not None:
+                leg[k] = src[k]
+    return leg
 
 
 def _normalize_credit(sig, family, label, bias, legs, source_breakevens):
@@ -299,7 +313,7 @@ def adapt_credit_spread(sig):
     label = "Put Credit Spread" if is_pcs else "Call Credit Spread"
     legs = [
         _credit_leg(kind, "short", sig.get("short_strike"), sig.get("short_mark"),
-                    sig, delta_key="short_delta"),
+                    sig, delta_key="short_delta", carry_liq=True),
         _credit_leg(kind, "long", sig.get("long_strike"), sig.get("long_mark"), sig),
     ]
     # PCS breakeven = short - credit (below); CCS = short + credit (above).
@@ -315,7 +329,8 @@ def adapt_iron_condor(sig):
     Put side = short_strike / long_strike; call side = call_short / call_long.
     """
     legs = [
-        _credit_leg("put", "short", sig.get("short_strike"), sig.get("short_mark"), sig),
+        _credit_leg("put", "short", sig.get("short_strike"), sig.get("short_mark"), sig,
+                    carry_liq=True),
         _credit_leg("put", "long", sig.get("long_strike"), sig.get("long_mark"), sig),
         _credit_leg("call", "short", sig.get("call_short"), sig.get("call_short_mark"), sig),
         _credit_leg("call", "long", sig.get("call_long"), sig.get("call_long_mark"), sig),

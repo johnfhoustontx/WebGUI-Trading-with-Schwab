@@ -118,6 +118,30 @@ def test_pop_put_credit_spread_is_high():
     assert pop > 55
 
 
+# ---- E1 Task 1: liquidity fields carried onto normalized legs ----
+def test_build_directional_legs_carry_liquidity_fields():
+    lc = next(s for s in ss.build_directional(_chain(), "SPY", 450.0, 0.18, 5, 30)
+              if s["type"] == "LONG_CALL")
+    leg = lc["legs"][0]
+    assert "bid" in leg and "ask" in leg and leg["ask"] > leg["bid"]
+    assert "volume" in leg and "oi" in leg
+
+
+def test_adapt_credit_spread_short_leg_carries_source_liquidity():
+    pcs = {"id": "SPY_PCS", "symbol": "SPY", "type": "PCS",
+           "expiration": "2026-07-10", "dte": 10, "short_strike": 445.0,
+           "long_strike": 440.0, "short_mark": 3.5, "long_mark": 1.8,
+           "credit": 1.7, "max_loss": 3.3, "underlying_price": 450.0,
+           "short_delta": -0.32, "bid": 1.65, "ask": 1.75, "volume": 320}
+    n = ss.adapt_credit_spread(pcs)
+    short_leg = n["legs"][0]
+    assert short_leg["bid"] == 1.65 and short_leg["ask"] == 1.75
+    assert short_leg["volume"] == 320
+    # long leg / missing values stay absent so norm_liquidity degrades to 50
+    long_leg = n["legs"][1]
+    assert "bid" not in long_leg and "ask" not in long_leg
+
+
 # ---- Task 5 ----
 def test_build_directional_emits_long_and_naked_each_side():
     chain = _chain()
