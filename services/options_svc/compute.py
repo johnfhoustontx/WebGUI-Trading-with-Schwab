@@ -14,9 +14,12 @@ lazily inside ``run_full_scan``) resolves to options-scanner's ``scoring.py``
 unambiguously. Therefore the page's ``options_scoring()`` collision guard is
 intentionally NOT ported here — ``run_full_scan`` is called directly.
 """
+import logging
 import sys
 
 from repo_paths import DRIVER_PAPER_DB, OPTIONS_SCANNER
+
+log = logging.getLogger(__name__)
 
 if str(OPTIONS_SCANNER) not in sys.path:
     sys.path.insert(0, str(OPTIONS_SCANNER))
@@ -288,6 +291,16 @@ def driver_account_perf() -> dict:
     return driver_perf.build_scorecard(positions, snapshot)
 
 
+# The driver account's per-trade risk cap for the PAPER SIZER on the open path.
+# Kept SEPARATE from the manual account's ``config_paper.MAX_RISK_PER_TRADE`` ($250)
+# so raising the driver's cap never changes the user's manual paper trades. Must match
+# ``driver_svc.settings.PER_TRADE_MAX_RISK`` (the guardrail's per-trade cap) so the
+# driver can't approve a qty the sizer then zeroes to RISK_TOO_HIGH. Raised to fund
+# liquid index/large-cap spreads ($SPX ~$700-1,150/contract, MU ~$400) that a $250
+# cap sized to 0 — the reason $SPX/MU picks logged "Executed" but never opened.
+_DRIVER_MAX_RISK_PER_TRADE = 1500.0
+
+
 def open_driver_position(signal: dict, qty: int, broker=None) -> dict:
     """Open ONE driver position into ``DRIVER_PAPER_DB`` at ``min(clamped qty,
     fill-sized)``.
@@ -352,7 +365,8 @@ def open_driver_position(signal: dict, qty: int, broker=None) -> dict:
         if fill < config_paper.MIN_FILL_CREDIT:
             return {"status": "rejected", "reason": "LOW_CREDIT"}
         # Re-size on the ACTUAL fill credit (keeps realized risk within the cap).
-        sized, max_loss_per = paper_sizing.size_contracts(fill, signal["width"])
+        sized, max_loss_per = paper_sizing.size_contracts(
+            fill, signal["width"], max_risk=_DRIVER_MAX_RISK_PER_TRADE)  # driver cap, not manual $250
         open_qty = min(q, sized)               # the guardrail clamp is a CEILING
         if max_loss_per <= 0 or open_qty < 1:
             return {"status": "rejected", "reason": "RISK_TOO_HIGH"}
@@ -391,7 +405,8 @@ def run_driver_manage_cycle() -> None:
         paper_engine.run_manage_cycle(_proxy.schwab_py_client, dt.date.today().isoformat(),
                                       db_path=DRIVER_PAPER_DB)
     except Exception:  # noqa: BLE001 — a reprice/proxy failure must not propagate out of
-        pass            # the wrapper (the 5-min tick retries; matches the driver wrappers)
+        # the wrapper (the 5-min tick retries; matches the driver wrappers).
+        log.exception("driver manage cycle degraded (retries on next tick)")
 
 
 def run_entry_cycle() -> None:
@@ -431,6 +446,32 @@ def has_paper_account() -> bool:
     return paper_account_db.get_account() is not None
 
 
+def reconcile_paper_buying_power() -> dict:
+    """R6: reconcile ``buying_power_reserved`` against open positions for BOTH the
+    manual paper account (default DB) AND the isolated driver account
+    (``DRIVER_PAPER_DB``).
+
+    Opening a position is a non-atomic 3-commit sequence (record_order →
+    reserve_buying_power → insert_position); a crash between the reserve and the
+    insert orphans reserved BP against no position, which corrupts the driver's
+    halt/loss-cap math. Called once at service startup to self-heal any drift left
+    by a prior crash. Idempotent + defensive — ``reconcile_buying_power`` never
+    raises and is a no-op when the book is consistent. Returns the per-book
+    corrected drift (0.0 = clean / absent) for logging/observability."""
+    import paper_account_db
+
+    out = {"manual": 0.0, "driver": 0.0}
+    try:
+        out["manual"] = paper_account_db.reconcile_buying_power(None)  # default DB
+    except Exception:  # noqa: BLE001 — startup self-heal must never crash the loop.
+        log.exception("manual BP reconcile degraded")
+    try:
+        out["driver"] = paper_account_db.reconcile_buying_power(DRIVER_PAPER_DB)
+    except Exception:  # noqa: BLE001
+        log.exception("driver BP reconcile degraded")
+    return out
+
+
 # ── Paper trades ledger (ported from webgui/pages/options/paper.py) ─────────
 # The page read the paper-trade ledger directly (``paper_trader.get_all_trades``)
 # and ran the close/delete/delete-all/analyze actions itself. Those reads +
@@ -461,7 +502,7 @@ def _reprice_open_pnl(trades) -> None:
     try:
         signal_repricer.clear_chain_cache()   # fresh marks each publish
     except Exception:
-        pass
+        log.exception("clear_chain_cache before reprice degraded")
     for t in trades or []:
         if (t.get("status") or "").upper() != "OPEN":
             continue
@@ -491,6 +532,7 @@ def paper_trades_view(reprice: bool = False) -> dict:
     try:
         trades = paper_trader.get_all_trades()
     except Exception:
+        log.exception("paper_trades_view read degraded → empty ledger")
         return {"trades": []}
     if reprice:
         try:
@@ -503,7 +545,7 @@ def paper_trades_view(reprice: bool = False) -> dict:
             try:
                 _reprice_open_pnl(trades)
             except Exception:
-                pass
+                log.exception("paper_trades reprice degraded (P&L left blank)")
     return {"trades": trades}
 
 
@@ -685,6 +727,7 @@ def captured_view() -> dict:
     try:
         return {"signals": signal_db.get_open_signals_with_latest_mark()}
     except Exception:
+        log.exception("captured_view read degraded → empty signals")
         return {"signals": []}
 
 
@@ -706,6 +749,7 @@ def reprice_captured() -> dict:
     try:
         sigs = signal_db.get_open_signals_with_latest_mark()
     except Exception:
+        log.exception("reprice_captured signal read degraded → empty set")
         sigs = []
 
     now = dt.datetime.now(dt.timezone.utc)
@@ -735,7 +779,7 @@ def reprice_captured() -> dict:
         try:
             _attach_rescue_assessment(r, rep, mark)
         except Exception:
-            pass
+            log.exception("rescue assessment for captured signal degraded (row untagged)")
     return {"signals": sigs, "flags": flags}
 
 
@@ -841,6 +885,7 @@ def refresh_header() -> dict:
     try:
         raw = _proxy.schwab_py_client.get_quotes(HEADER_SYMBOLS).json() or {}
     except Exception:
+        log.warning("header quotes fetch degraded → blank prices", exc_info=True)
         raw = {}
 
     prices = {s: quote_last(raw, s) for s in ("$SPX", "SPY", "QQQ")}
@@ -850,6 +895,7 @@ def refresh_header() -> dict:
     try:
         dot_color, dot_label = sentiment_dot(evaluate_regime())
     except Exception:
+        log.warning("header sentiment dot degraded → no-data dot", exc_info=True)
         dot_color, dot_label = _DOT_NO_DATA
 
     return {
@@ -964,6 +1010,89 @@ def gamma_walls(vname, data, spot):
     return [s for s in (w.get("put_wall"), w.get("call_wall")) if s is not None]
 
 
+# Strikes shown on each side of spot in the Gamma page's bar/heatmap window
+# (webgui/pages/options/gamma.py N_SIDE). The page crops the display to this
+# ±N_SIDE window; embedding the FULL per-strike chain history (all four views,
+# ~250 strikes × full session) made cache:options:gamma ~14 MB and forced a big
+# JSON parse on the GUI event loop every 120 s. We crop each per-strike grid to
+# the display window SERVER-SIDE before caching — same key, same structure, far
+# fewer strikes. flip/walls are computed on the FULL grid FIRST (they're separate
+# fields), so cropping can't change them.
+GAMMA_N_SIDE = 20
+
+
+def _window_around(strikes, spot, n_side=GAMMA_N_SIDE):
+    """The nearest ``n_side`` strikes ≤ spot + ``n_side`` strictly above — mirrors
+    the page's ``gamma.strikes_around``. Returns a set of floats; an unusable spot
+    returns ALL numeric strikes (no crop)."""
+    s = sorted({x for x in (strikes or []) if isinstance(x, (int, float))})
+    if not isinstance(spot, (int, float)):
+        return set(s)
+    below = [x for x in s if x < spot][-n_side:]
+    above = [x for x in s if x > spot][:n_side]
+    at = [x for x in s if x == spot]
+    return set(below + at + above)
+
+
+def _crop_grid(grid, keep):
+    """Return ``grid`` restricted to keys in ``keep`` (a set of float strikes).
+
+    ``grid`` maps strike(float) -> cell. Non-dict / empty grids pass through
+    unchanged. ``keep=None`` means no crop."""
+    if keep is None or not isinstance(grid, dict) or not grid:
+        return grid
+    return {k: v for k, v in grid.items() if k in keep}
+
+
+def _crop_gamma_views(views, spot, n_side=GAMMA_N_SIDE):
+    """Crop each view's current per-strike ``data`` grid AND its history-row grids
+    (tuple index 6) to the display window: the ±``n_side`` band around the CURRENT
+    spot, widened to span the intraday spot PATH (min→max of history-row spots).
+
+    This exactly mirrors the page's y-range (``bar_yrange(±n_side)`` then
+    ``union_range(spot_path)``) — the heatmap is cropped to that same [lo, hi]
+    band client-side, so keeping only strikes in that band is behavior-preserving
+    while dropping the ~250-strike full chain down to the visible window.
+
+    Mutates ``views`` in place (the entries are freshly built dicts). flip/walls
+    live in separate fields already computed on the FULL grid, so they're untouched.
+    Returns ``views``.
+    """
+    for entry in (views or {}).values():
+        data = entry.get("data") or {}
+        grid = data.get("gex") or {}
+        rows = entry.get("history") or []
+        # All strikes present anywhere (current grid + every history-row grid).
+        all_strikes = set(grid.keys())
+        for r in rows:
+            if len(r) > 6 and isinstance(r[6], dict):
+                all_strikes.update(r[6].keys())
+        path_spots = [r[1] for r in rows
+                      if len(r) > 1 and isinstance(r[1], (int, float))]
+        if not isinstance(spot, (int, float)) and not path_spots:
+            continue  # no usable spot → leave grids untouched (can't window safely)
+        # ±n_side band around the current spot (falls back to the path when the
+        # current spot is missing — e.g. an off-hours snapshot).
+        anchor = spot if isinstance(spot, (int, float)) else path_spots[0]
+        keep = _window_around(all_strikes, anchor, n_side)
+        # Widen to span the intraday spot path (so the overlaid price line — and any
+        # strike between two drifted spots — isn't clipped), matching union_range.
+        if path_spots:
+            lo, hi = min(path_spots), max(path_spots)
+            keep |= {k for k in all_strikes if lo <= k <= hi}
+        # Crop the current per-strike grid used for the bars.
+        if grid:
+            data["gex"] = _crop_grid(grid, keep)
+        # Crop each history row's grid (index 6). Rows are tuples → rebuild.
+        cropped_rows = []
+        for r in rows:
+            if len(r) > 6 and isinstance(r[6], dict) and r[6]:
+                r = tuple(r[:6]) + (_crop_grid(r[6], keep),) + tuple(r[7:])
+            cropped_rows.append(r)
+        entry["history"] = cropped_rows
+    return views
+
+
 def gamma_snapshot(symbol: str) -> dict | None:
     """Fetch + compute the full Gamma snapshot for ``symbol``.
 
@@ -1014,36 +1143,57 @@ def gamma_snapshot(symbol: str) -> dict | None:
     def _walls(vname, data):
         return gamma_walls(vname, data, spot)
 
+    # ONE read-only connection reused across all four view history loads (was a
+    # fresh connect per view — 4 opens per snapshot). None if the open failed →
+    # each _history degrades to [].
+    try:
+        hist_conn = gh.connect(read_only=True)
+    except Exception:
+        hist_conn = None
+
     def _history(vstr):
+        if hist_conn is None:
+            return []
         try:
-            conn = gh.connect(read_only=True)
             # Active session date (today live, or the last trading day off-hours/
             # weekends) so the heatmap persists after close + clears next session.
-            return gh.load_date_with_grid(conn, symbol, vstr, session_date)
+            return gh.load_date_with_grid(hist_conn, symbol, vstr, session_date)
         except Exception:
             return []
 
-    views = {}
-    for vname, (idx, vstr) in _GAMMA_VIEWS.items():
-        data = by_index.get(idx) or {}
-        try:
-            summary = eng.snapshot_summary(data, vstr)
-        except Exception:
-            summary = {}
-        entry = {
-            "data": data,
-            "summary": summary,
-            "walls": _walls(vname, data),
-            "flip": (summary or {}).get("flip"),
-            "history": _history(vstr),
-        }
-        if vname == "DEX":
-            entry["hedge"] = {
-                "net_delta_0dte": data.get("net_delta_0dte"),
-                "projected_net_delta_close": data.get("projected_net_delta_close"),
-                "hedge_pressure": data.get("hedge_pressure"),
+    try:
+        views = {}
+        for vname, (idx, vstr) in _GAMMA_VIEWS.items():
+            data = by_index.get(idx) or {}
+            try:
+                summary = eng.snapshot_summary(data, vstr)
+            except Exception:
+                summary = {}
+            entry = {
+                "data": data,
+                "summary": summary,
+                "walls": _walls(vname, data),
+                "flip": (summary or {}).get("flip"),
+                "history": _history(vstr),
             }
-        views[vname] = entry
+            if vname == "DEX":
+                entry["hedge"] = {
+                    "net_delta_0dte": data.get("net_delta_0dte"),
+                    "projected_net_delta_close": data.get("projected_net_delta_close"),
+                    "hedge_pressure": data.get("hedge_pressure"),
+                }
+            views[vname] = entry
+    finally:
+        if hist_conn is not None:
+            try:
+                hist_conn.close()
+            except Exception:
+                log.debug("gamma history conn close failed", exc_info=True)
+
+    # Slim the payload: crop each view's per-strike grid + history grids to the
+    # ±display-window strikes. flip/walls above were computed on the FULL grid, so
+    # they're unaffected. (Cut cache:options:gamma from ~14 MB → well under ~1 MB.)
+    _crop_gamma_views(views, spot)
 
     try:
         # The Term view wants the next 5 expirations regardless of the symbol's
@@ -1066,6 +1216,38 @@ def gamma_snapshot(symbol: str) -> dict | None:
 # the first hour". The always-on options service now owns collection: the
 # scheduler calls this on every 2-min slot within market hours, so history
 # accrues for the whole session whenever the service is up.
+
+# Retention on the live collection path: keep the last N distinct session-dates
+# so the DB stops growing without bound (it grew ~250 MB/day, unbounded) WHILE
+# preserving the Gamma page's off-hours persistence (it shows the last session
+# until the next trading day — so at least the most recent session must survive).
+# N=5 covers weekends/holidays comfortably. The purge is gated to run at most
+# once per local date (NOT every 2-min collect tick — purging every tick wastes a
+# scan/DELETE). ``_LAST_PURGE_DATE`` tracks the last date we ran it.
+GEX_KEEP_SESSIONS = 5
+_LAST_PURGE_DATE = None
+
+
+def _maybe_purge_gex(gh, conn) -> None:
+    """Run the keep-last-N-sessions retention at most once per local date.
+
+    Defensive: any failure (a locked/legacy DB) is swallowed — retention must
+    never break the collection round. DELETE reclaims free pages for reuse (bounds
+    growth) but does NOT shrink the 3 GB file; see ``purge_keep_sessions`` for the
+    documented one-time manual VACUUM."""
+    global _LAST_PURGE_DATE
+    import datetime as _dt
+
+    today = _dt.date.today()
+    if _LAST_PURGE_DATE == today:
+        return
+    try:
+        gh.purge_keep_sessions(conn, keep_sessions=GEX_KEEP_SESSIONS)
+        _LAST_PURGE_DATE = today
+    except Exception:
+        # Leave _LAST_PURGE_DATE unset so the next collect start retries.
+        pass
+
 
 def collect_gex_snapshots() -> int:
     """Fetch + persist one snapshot round (GEX/Charm/DEX/Vanna + term) for the
@@ -1100,6 +1282,8 @@ def collect_gex_snapshots() -> int:
     conn = gh.connect()
     try:
         gh.init_schema(conn)
+        # Once-per-day retention at collection start (keeps growth bounded).
+        _maybe_purge_gex(gh, conn)
         gc.log.info("Polling GEX history (options_svc)")
         gc.poll_once(_proxy.schwab_py_client, gt.GammaEngine(), conn)
         gc.touch_lock(gc.LOCK_PATH, source="options_svc", owner=owner,
@@ -1179,7 +1363,7 @@ def gex_status_view(now=None) -> dict:
             try:
                 conn.close()
             except Exception:
-                pass
+                log.debug("gex_status conn close failed", exc_info=True)
         has_data = last_ts is not None
         label, color = gs.classify_collector_status(age, now, has_data, last_ts)
 
@@ -1308,6 +1492,7 @@ def gamma_symbol_options() -> list:
         import gex_collector as gc
         return [s for s in gc.collection_symbols() if s != "$VIX"]
     except Exception:
+        log.exception("gamma_symbol_options degraded → index trio fallback")
         return ["$SPX", "SPY", "QQQ"]
 
 
@@ -1536,7 +1721,7 @@ def _anthropic_api_key():
         if p.exists():
             return p.read_text(encoding="utf-8").strip()
     except Exception:  # noqa: BLE001 — a missing/unreadable file is non-fatal.
-        pass
+        log.debug("reading anthropic_key.txt failed", exc_info=True)
     return None
 
 
@@ -1978,7 +2163,7 @@ def time_to_expiry_years(now_dt, expiry_date):
     return _year_fraction(now_dt, _expiry_settlement(expiry_date))
 
 
-def calc_iv(spot, strike, option_type, mark, expiry, rate=0.045, now=None) -> dict:
+def calc_iv(spot, strike, option_type, mark, expiry, rate=None, now=None) -> dict:
     """Imply IV (percent) from an option ``mark`` at the intraday time-to-expiry.
 
     ToS-style: solve Black-Scholes for sigma given the contract's current mark and
@@ -1986,10 +2171,16 @@ def calc_iv(spot, strike, option_type, mark, expiry, rate=0.045, now=None) -> di
     reproduces ThinkorSwim's per-contract IV at 0DTE (where IV is acutely sensitive
     to the time basis). Returns ``{"iv", "strike", "option_type", "mark", "T",
     "error"}``; ``iv`` is None with a reason when it can't be solved (expired, mark
-    at/below intrinsic, missing inputs). Fully defensive — never raises."""
+    at/below intrinsic, missing inputs). Fully defensive — never raises.
+
+    ``rate`` defaults to the shared ``options_calculator.RISK_FREE_RATE`` (0.045,
+    static) so the calculator, simulator, and this IV solver all use one r."""
     import datetime as dt
 
     import options_calculator as oc
+
+    if rate is None:
+        rate = oc.RISK_FREE_RATE
 
     try:
         expiry_date = dt.date.fromisoformat(str(expiry))

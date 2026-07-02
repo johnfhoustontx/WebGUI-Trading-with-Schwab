@@ -126,8 +126,10 @@ def test_open_driver_position_clamp_is_ceiling(tmp_path, monkeypatch):
     db = tmp_path / "driver.db"
     monkeypatch.setattr(compute, "DRIVER_PAPER_DB", db)
     compute.ensure_driver_account()
-    sized = paper_sizing.size_contracts(1.5, 2.0)[0]   # 5 (engine ceiling)
-    assert sized == 5
+    # Size against the DRIVER's per-trade cap (what open_driver_position uses), not the
+    # manual account's default $250: (2-1.5)*100 = $50/contract; floor(1500/50) = 30.
+    sized = paper_sizing.size_contracts(1.5, 2.0, max_risk=compute._DRIVER_MAX_RISK_PER_TRADE)[0]
+    assert sized == 30
     res = compute.open_driver_position(_driver_signal(), qty=100, broker=_fake_broker(1.50))
     assert res["status"] == "opened"
     pos = compute.driver_account_view()["positions"][0]
@@ -217,6 +219,31 @@ def test_open_driver_position_respects_same_day_halt(tmp_path, monkeypatch):
     res = compute.open_driver_position(_driver_signal(), qty=1, broker=_fake_broker(1.50))
     assert res["status"] == "rejected" and res["reason"] == "halted"
     assert compute.driver_account_view()["snapshot"]["open_count"] == 0
+
+
+def test_open_driver_position_wide_spx_opens_under_raised_cap(tmp_path, monkeypatch):
+    """A wide $SPX-shaped CCS (~$705/contract) opens under the driver's raised
+    per-trade cap ($1500) but is rejected RISK_TOO_HIGH under the old $250 cap. This
+    is the fix that lets the driver actually TRADE $SPX/MU: at $250 the paper sizer
+    returned 0 contracts, so those picks logged 'Executed' (the enqueue) yet never
+    opened."""
+    db = tmp_path / "driver.db"
+    monkeypatch.setattr(compute, "DRIVER_PAPER_DB", db)
+    compute.ensure_driver_account()
+    spx = _driver_signal(signal_id="SPX_CCS_x", symbol="$SPX", strategy="CCS",
+                         short_strike=6000.0, long_strike=6010.0, width=10.0,
+                         entry_credit=2.95)   # (10-2.95)*100 = $705/contract
+    # Old $250 cap → floor(250/705) = 0 contracts → rejected.
+    monkeypatch.setattr(compute, "_DRIVER_MAX_RISK_PER_TRADE", 250.0)
+    r0 = compute.open_driver_position(spx, qty=2, broker=_fake_broker(2.95))
+    assert r0["status"] == "rejected" and r0["reason"] == "RISK_TOO_HIGH"
+    assert compute.driver_account_view()["snapshot"]["open_count"] == 0
+    # Raised $1500 cap → floor(1500/705) = 2 contracts → opens.
+    monkeypatch.setattr(compute, "_DRIVER_MAX_RISK_PER_TRADE", 1500.0)
+    r1 = compute.open_driver_position(spx, qty=2, broker=_fake_broker(2.95))
+    assert r1["status"] == "opened" and r1["qty"] == 2
+    assert r1["max_loss_total"] == 1410.0     # 705 * 2
+    assert compute.driver_account_view()["snapshot"]["open_count"] == 1
 
 
 # ── Task 3.1: run_driver_manage_cycle ────────────────────────────────────────

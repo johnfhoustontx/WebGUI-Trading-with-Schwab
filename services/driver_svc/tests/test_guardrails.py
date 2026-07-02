@@ -55,17 +55,33 @@ def test_is_allowed_real_scanner_signal_shape():
 
 # ---------------------------------------------------------------------------
 # Task 2.2 — clamp_quantity
+#
+# NOTE: a signal's ``max_loss`` is PER-SHARE (the scanner's units). clamp_quantity
+# converts it to per-CONTRACT dollars (``* CONTRACT_MULTIPLIER`` = ``* 100``) before
+# comparing to the dollar caps, so ``max_loss: 2.0`` below is a $200/contract spread.
 # ---------------------------------------------------------------------------
 def test_clamp_quantity_respects_per_trade_and_budget():
-    sig = {"structure": "PCS", "max_loss": 200.0}   # $200 risk per spread
+    sig = {"structure": "PCS", "max_loss": 2.0}   # $2/share x 100 = $200 risk per spread
     # requested 5, per-trade cap $300 → 1 spread; budget $900 → 4; → min(5,1,4)=1
     assert g.clamp_quantity(sig, 5, per_trade_max_risk=300, remaining_budget=900) == 1
     # bigger per-trade cap: per-trade $1000 → 5; budget $900 → 4; req 5 → 4
     assert g.clamp_quantity(sig, 5, per_trade_max_risk=1000, remaining_budget=900) == 4
 
 
+def test_clamp_quantity_uses_per_contract_dollars():
+    """REGRESSION: a $SPX-shaped spread (per-share max_loss 7.05 = $705/contract) is
+    evaluated in per-contract DOLLARS. Under the old per-share bug clamp returned
+    floor(300/7.05)=42 (capped to the request), so $SPX/MU slipped the driver only to
+    be rejected RISK_TOO_HIGH by the paper account's per-contract sizer."""
+    spx = {"structure": "CCS", "max_loss": 7.05}                  # $705 per contract
+    assert g.clamp_quantity(spx, 2, per_trade_max_risk=300, remaining_budget=900) == 0
+    # With a per-trade cap that actually covers it, contracts fit: floor(1500/705)=2.
+    assert g.clamp_quantity(spx, 2, per_trade_max_risk=1500, remaining_budget=4500) == 2
+    assert g.clamp_quantity(spx, 5, per_trade_max_risk=1500, remaining_budget=4500) == 2
+
+
 def test_clamp_quantity_zero_when_unaffordable():
-    sig = {"structure": "PCS", "max_loss": 1000.0}
+    sig = {"structure": "PCS", "max_loss": 10.0}   # $1000 per contract
     assert g.clamp_quantity(sig, 1, per_trade_max_risk=300, remaining_budget=900) == 0
 
 
@@ -75,7 +91,7 @@ def test_clamp_quantity_zero_on_bad_maxloss():
 
 def test_clamp_quantity_hardening_bad_requested_qty():
     """A None / non-numeric / negative requested qty is a no-trade, not a crash."""
-    sig = {"structure": "PCS", "max_loss": 200.0}
+    sig = {"structure": "PCS", "max_loss": 2.0}   # $200 per contract
     assert g.clamp_quantity(sig, None, 1000, 900) == 0
     assert g.clamp_quantity(sig, "x", 1000, 900) == 0
     assert g.clamp_quantity(sig, -3, 1000, 900) == 0
@@ -85,7 +101,7 @@ def test_clamp_quantity_hardening_bad_requested_qty():
 
 def test_clamp_quantity_budget_exactly_one_spread():
     """Remaining budget equal to exactly one spread's max-loss yields 1."""
-    sig = {"structure": "PCS", "max_loss": 200.0}
+    sig = {"structure": "PCS", "max_loss": 2.0}   # $200 per contract
     assert g.clamp_quantity(sig, 5, per_trade_max_risk=1000, remaining_budget=200) == 1
     # A penny short of one spread → 0 (floor, never over-commit the budget).
     assert g.clamp_quantity(sig, 5, per_trade_max_risk=1000, remaining_budget=199.99) == 0
@@ -100,7 +116,7 @@ def test_clamp_quantity_nonfinite_inputs_never_raise():
     nan, inf = float("nan"), float("inf")
     assert g.clamp_quantity({"structure": "PCS", "max_loss": nan}, 5, 1000, 900) == 0
     assert g.clamp_quantity({"structure": "PCS", "max_loss": inf}, 5, 1000, 900) == 0
-    sig = {"structure": "PCS", "max_loss": 200.0}
+    sig = {"structure": "PCS", "max_loss": 2.0}   # $200 per contract
     assert g.clamp_quantity(sig, 5, per_trade_max_risk=nan, remaining_budget=900) == 0
     assert g.clamp_quantity(sig, 5, per_trade_max_risk=1000, remaining_budget=inf) == 0
 
@@ -138,9 +154,9 @@ def test_no_halt_in_normal_range():
 # ---------------------------------------------------------------------------
 def _menu():
     return {
-        "m0": {"id": "m0", "structure": "PCS", "max_loss": 200.0, "symbol": "QQQ"},
+        "m0": {"id": "m0", "structure": "PCS", "max_loss": 2.0, "symbol": "QQQ"},   # $200/contract
         "m1": {"id": "m1", "structure": "naked_put", "max_loss": None, "symbol": "X"},
-        "m2": {"id": "m2", "structure": "IC", "max_loss": 300.0, "symbol": "SPX"},
+        "m2": {"id": "m2", "structure": "IC", "max_loss": 3.0, "symbol": "SPX"},     # $300/contract
     }
 
 

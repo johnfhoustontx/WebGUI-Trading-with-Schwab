@@ -37,6 +37,15 @@ _STRUCT_MAP = {
 # by ``is_allowed`` regardless of what the model proposed.
 ALLOWED = {"PCS", "CCS", "IC"}
 
+# An option contract is 100 shares. The scanner stores ``max_loss`` PER-SHARE
+# (e.g. 7.05 for a $SPX spread = width - credit), but the driver's risk caps
+# (``per_trade_max_risk`` / ``daily_risk_budget``) are DOLLARS. Affordability MUST
+# be evaluated in per-CONTRACT dollars (``max_loss * 100``) or a $705 position is
+# mis-counted as $7 and the guardrail under-enforces its own dollar cap by 100x —
+# the bug that let $SPX/MU past the driver only to be rejected ``RISK_TOO_HIGH`` by
+# the paper account's per-contract sizer (which correctly used ``(width-credit)*100``).
+CONTRACT_MULTIPLIER = 100
+
 
 def normalize_structure(s) -> str:
     """Canonicalize a structure label to ``PCS`` / ``CCS`` / ``IC`` (else upper).
@@ -87,6 +96,16 @@ def _max_loss(signal) -> float | None:
     return v if (v is not None and math.isfinite(v)) else None
 
 
+def _max_loss_dollars(signal) -> float | None:
+    """The signal's max loss in PER-CONTRACT DOLLARS (per-share ``max_loss`` * 100).
+
+    ``None`` when the per-share max loss is missing/unparseable/non-finite. This is
+    the risk unit the dollar caps must be compared against — see ``CONTRACT_MULTIPLIER``.
+    """
+    ml = _max_loss(signal)
+    return ml * CONTRACT_MULTIPLIER if ml is not None else None
+
+
 def is_allowed(signal) -> bool:
     """True iff ``signal`` is a defined-risk credit spread with real risk.
 
@@ -116,8 +135,12 @@ def clamp_quantity(signal, requested_qty, per_trade_max_risk, remaining_budget) 
     ``max_loss`` (``None`` / non-numeric / ``<= 0``), when ``requested_qty`` is
     ``None`` / non-numeric / negative, or when even one spread can't fit under
     the per-trade cap or the remaining budget. Never raises.
+
+    ``max_loss`` is converted to PER-CONTRACT DOLLARS (``_max_loss_dollars``) before
+    every comparison, because the caps are dollars and one spread risks
+    ``max_loss * 100`` (see ``CONTRACT_MULTIPLIER``).
     """
-    ml = _max_loss(signal)
+    ml = _max_loss_dollars(signal)
     if not ml or ml <= 0:
         return 0
     try:
@@ -214,7 +237,7 @@ def apply_guardrails(decision, menu_by_id, limits, *, open_count, day_pnl, vix=N
             continue
         executable.append({"id": mid, "signal": sig, "qty": qty,
                            "rationale": t.get("rationale", "")})
-        remaining -= qty * _max_loss(sig)
+        remaining -= qty * _max_loss_dollars(sig)   # dollars — keep the budget in per-contract $
         slots -= 1
 
     return {"executable": executable, "rejected": rejected, "halted": False, "halt_reason": None}

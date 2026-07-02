@@ -34,7 +34,7 @@ def _lim():
 def test_build_packet_skips_non_dict_signals():
     """A malformed (None/str) signal element is skipped, not crashed on."""
     scan = {"signals_0dte": [None, "junk",
-                {"symbol": "QQQ", "type": "PCS", "max_loss": 200,
+                {"symbol": "QQQ", "type": "PCS", "max_loss": 2,
                  "credit": 60, "pop_pct": 0.85, "composite_score": 78,
                  "expiration": "2026-06-24"}],
             "signals_swing": []}
@@ -167,7 +167,7 @@ def test_build_packet_carries_target_and_limits():
 # Task 4.2 — run_cycle
 # ---------------------------------------------------------------------------
 def test_run_cycle_returns_executable(monkeypatch):
-    scan = {"signals_0dte": [{"symbol": "QQQ", "type": "PCS", "max_loss": 200,
+    scan = {"signals_0dte": [{"symbol": "QQQ", "type": "PCS", "max_loss": 2,
                               "composite_score": 80, "credit": 55, "expiration": "2026-06-24"}],
             "signals_swing": []}
     paper = {"snapshot": {"session_pnl": 0.0}, "positions": [], "has_account": True}
@@ -196,7 +196,7 @@ def test_run_cycle_defensive_on_explosion(monkeypatch):
 def test_run_cycle_model_never_sees_menu_by_id(monkeypatch):
     """The non-JSON ``menu_by_id`` (raw signals) is stripped before the model call."""
     seen = {}
-    scan = {"signals_0dte": [{"symbol": "QQQ", "type": "PCS", "max_loss": 200,
+    scan = {"signals_0dte": [{"symbol": "QQQ", "type": "PCS", "max_loss": 2,
                               "composite_score": 80}], "signals_swing": []}
 
     def _spy(packet, **kw):
@@ -212,7 +212,7 @@ def test_run_cycle_model_never_sees_menu_by_id(monkeypatch):
 
 def test_run_cycle_halt_blocks_execution(monkeypatch):
     """A banked-day P&L halts: nothing executes even if the model proposes a trade."""
-    scan = {"signals_0dte": [{"symbol": "QQQ", "type": "PCS", "max_loss": 200,
+    scan = {"signals_0dte": [{"symbol": "QQQ", "type": "PCS", "max_loss": 2,
                               "composite_score": 80}], "signals_swing": []}
     paper = {"snapshot": {"session_pnl": 600.0}, "positions": []}   # over target
     monkeypatch.setattr("services.driver_svc.decider.decide",
@@ -225,20 +225,20 @@ def test_run_cycle_halt_blocks_execution(monkeypatch):
 
 def test_run_cycle_clamps_quantity(monkeypatch):
     """The model's quantity is a ceiling; the guardrails clamp to the risk budget."""
-    scan = {"signals_0dte": [{"symbol": "QQQ", "type": "PCS", "max_loss": 200,
+    scan = {"signals_0dte": [{"symbol": "QQQ", "type": "PCS", "max_loss": 2,
                               "composite_score": 80}], "signals_swing": []}
     paper = {"snapshot": {"session_pnl": 0.0}, "positions": []}
     monkeypatch.setattr("services.driver_svc.decider.decide",
                         lambda packet, **kw: {"stand_down": False, "day_thesis": "x",
                             "trades": [{"id": "m0", "quantity": 99}]})
     out = compute.run_cycle(scan, paper, target=500.0, limits=_lim(), market={"vix": 14})
-    # per_trade_max_risk 300 / max_loss 200 -> floor = 1.
+    # per_trade_max_risk 300 / per-contract $200 (max_loss 2 * 100) -> floor = 1.
     assert out["executable"][0]["qty"] == 1
 
 
 def test_run_cycle_passes_vix_to_guardrails(monkeypatch):
     """A high VIX in the market context halts new entries via the guardrails."""
-    scan = {"signals_0dte": [{"symbol": "QQQ", "type": "PCS", "max_loss": 200,
+    scan = {"signals_0dte": [{"symbol": "QQQ", "type": "PCS", "max_loss": 2,
                               "composite_score": 80}], "signals_swing": []}
     monkeypatch.setattr("services.driver_svc.decider.decide",
                         lambda packet, **kw: {"stand_down": False, "day_thesis": "x",

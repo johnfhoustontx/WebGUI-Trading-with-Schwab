@@ -37,8 +37,15 @@ def _resolve_model() -> str:
 
 
 DAILY_TARGET = 500.0          # bank-the-day threshold ($ net day P&L)
-PER_TRADE_MAX_RISK = 300.0    # max $ loss per single spread position
-DAILY_RISK_BUDGET = 900.0     # cap on Σ open driver max-loss
+# Per-trade dollar risk cap. Raised 300 -> 1500 so the driver can fund liquid
+# index/large-cap spreads whose per-CONTRACT max loss is large: $SPX credit spreads
+# run ~$700-$1,150/contract and MU ~$400 — a $300 cap sized them to 0 (RISK_TOO_HIGH),
+# so they never opened. Must stay in sync with options_svc
+# compute._DRIVER_MAX_RISK_PER_TRADE (the paper sizer's cap on the open path); the
+# widest $SPX (~$1,833/contract) is still excluded by design — raise both to ~2000 to
+# include it.
+PER_TRADE_MAX_RISK = 1500.0   # max $ loss per single spread position
+DAILY_RISK_BUDGET = 4500.0    # cap on Σ open driver max-loss (3x the per-trade cap)
 MAX_CONCURRENT = 6            # max open driver positions
 MAX_TRADES_PER_CYCLE = 3      # max new trades per checkpoint
 VIX_MAX = 25.0               # no new entries above this (mirrors config.VIX_MAX_TRADE)

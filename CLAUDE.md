@@ -8,7 +8,140 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-06-30 (**Swing Scanner — quality-gated grading**: the multi-strategy
+**Last updated:** 2026-07-01 (**Reliability remediation** — the technical audit's
+[Reliability & Error Handling](docs/audits/2026-07-01-technical-audit.md) pillar (the lowest-scored,
+5/10) addressed; theme = *keep the "never raises" defensiveness, add the evidence*. All suites green:
+options_svc **333**, driver_svc **157**, sentiment_svc **61**, portfolio_svc **32**, trade_svc **68**,
+shared/contracts **42**, scaffold **20**, proxy **63**, webgui **676**, options-scanner paper/scoring
+modules **90** (full options-scanner blocked only by the pre-existing intermittent tkinter dashboard
+crash; the OPTS agent's clean run was 1186/10-baseline). **R1 (flagship — retires the known days-long
+silent-KeyError incident):** `options_svc/handlers.py` now **captures** `open_driver_position`'s result,
+logs opened/rejected/error, and surfaces a rolling `last_open_results` (cap 25) on
+`cache:options:driver_paper_account` so the /driver log shows per-trade OUTCOMES, not just "enqueued".
+**R2 (dead scheduler was invisible):** `_scaffold._supervise_scheduler` restarts a dead scheduler
+coroutine (3 s backoff, `max_restarts=10` storm cap → then `alive=False`) and `/health` gains
+`scheduler_alive`/`scheduler_restarts`/`scheduler_last_tick_age_s` (the age is "since last (re)start" —
+`scheduler_alive` is the load-bearing signal; a service with `scheduler=None` reports alive). **R3
+(no persistent logs + silent excepts):** `make_app` installs a per-service `RotatingFileHandler`
+(`services/<domain>_svc/logs/<domain>.log`, 10 MB × 5, root logger, **off under pytest**, idempotent);
+**19 scheduler + several handler/compute `except Exception: pass`** → `log.exception`. **R4b/R8 (failures
+invisible until /status):** the app-wide watcher (`webgui/main.py`, on every page) now alerts (chime +
+`⚠` Status nav badge + optional desktop notification, same settings/market-hours gate) on **STALE
+scheduled views + down service `/health`** — pure transition-deduped logic in `alerts.py`
+(`new_health_alerts`), service-health probe throttled to 30 s (not every 2 s). **R5 (stale trade
+commands):** additive **`Command.ts`** (`shared/contracts`) + a 3-min staleness gate rejects stale
+`driver_paper_create`/`paper_create` (missing ts → treated fresh, back-compat). **R6 (non-atomic open
+→ BP drift):** `paper_account_db.reconcile_buying_power` recomputes reserved BP = Σ open positions'
+max_loss (keeps `cash+reserved` invariant), run at options_svc scheduler startup for BOTH the manual +
+driver books. **R7 (stand-down reason opaque):** `decider` classifies `no_key`/`api_error`/
+`parse_error`/`model` (fail-safe behavior byte-identical — additive), carried through
+`_publish_autonomous` onto the decision-log row → the /driver UI shows a red incident chip so a broken
+API key looks like an ops incident, not model caution. **R9 (Low):** proxy stops retrying deterministic
+4xx (401-refresh + order-POST-no-retry intact) + rotates its INFO log; portfolio SSE gets capped
+backoff + logging; the app-wide `_tick` is `guard_async`-wrapped + logs once on a bus outage (not a
+traceback every 2 s); EOD archives write via temp-file + `os.replace`. **DEFERRED (flagged):** **R4a**
+— a cross-process auto-restart **supervisor daemon** (R2 in-process restart + R4b alerting already cover
+visibility + in-process self-heal; a standalone watchdog that auto-restarts dead PROCESSES is new
+always-on machinery, offered as an optional follow-up). Remaining audit pillars: **Security** (proxy
+wildcard CORS + no-auth order path, Memurai password, dep pinning) + **Code Quality** (god-modules,
+`render()` closures, sys.path/collision debt). Prior — 2026-07-01 (**Performance + Architecture remediation** — the technical audit's
+[Performance & Speed](docs/audits/2026-07-01-technical-audit.md) + [Scalability & Architecture]
+pillars addressed; all suites green: options-scanner **1181** [+11 pre-existing baseline], options_svc
+**322**, driver_svc **143**, sentiment_svc **61**, portfolio_svc **29**, shared/bus **20**, scaffold
+**8**, webgui **658**). **P3 (command handlers off the event loop):** `services/_scaffold.py`'s
+consume loop now dispatches each command via `run_in_executor` (one-at-a-time, read order) so a slow
+handler (a ~19 s `sim_fetch`) no longer stalls `/health`, the scheduler, or the queue. **A2 (command-
+stream hygiene, `shared/bus/client.py`):** `enqueue_command` XADD is bounded (`_XADD_MAXLEN=1000`,
+approximate); a **dead-letter** convention `cmd:{domain}:dead` (Redis list, `Bus.dead_letter`/
+`dead_letter_key`) + per-entry decode: a handler that raises → dead-letter + ack (was: logged &
+discarded); an undecodable/poison entry → dead-letter + ack + **batch continues** (was: whole batch
+failed un-acked into the PEL forever); `Bus.drain_pending` (`XAUTOCLAIM`, min-idle 0) drains a crashed
+consumer's stranded PEL to the dead-letter list at startup — **surfaced for review, never silently
+lost NOR blindly re-executed** (a stranded `driver_paper_create`/`rescue_apply` re-run could double-
+open). **P1/A1 (GEX retention):** `gex_history_db.purge_keep_sessions(keep=5)` now deletes old rows
+from BOTH `gex_snapshots` AND `gex_term_snapshots` (the term table previously had NO purge), called
+from `compute.collect_gex_snapshots` **at most once per local date** (`_LAST_PURGE_DATE` latch, not
+every 2-min tick) — bounds the ~3 GB DB growth while keeping the last 5 sessions so the off-hours
+persistence still works. DELETE reuses free pages but doesn't shrink the file: a **one-time manual
+`VACUUM`** (`PRAGMA auto_vacuum=INCREMENTAL; VACUUM;`, run offline) is documented to reclaim the 3 GB
+— deliberately NOT auto-run (locks the live DB for minutes). **P2 (slim `cache:options:gamma`):**
+`compute.gamma_snapshot` now crops every view's per-strike history grid to the ±20-strike display
+window (`GAMMA_N_SIDE`, widened for the intraday spot path) BEFORE caching — **flip/walls are still
+computed on the FULL grid first** (crop-invariant; verified a far $SPX wall at 3000 survives). Same
+key/structure, so the page is unchanged; measured **16.3 MB → 3.07 MB ($SPX), 9.8 MB → 2.97 MB (SPY)**
+on a trending day (~1 MB calm). **P5/P6 (webgui off-loop reads):** the big gamma + calc-chain payload
+reads now run via `nicegui.run.io_bound` under `guard_async` + an in-flight guard (the cheap `:ver`
+version probes stay on-loop; version-gating preserved so the 14 MB isn't fetched every 2 s). **A4
+(scheduler concurrency):** `options_svc/scheduler.py` runs the due slot branches concurrently so a slow
+15-min rescan can't delay the 2-min GEX collect / 5-min manage (per-branch isolation preserved). **P4
+(sentiment cost):** the 120 s refresh is off-hours-gated (`refresh_due`) and the 35-day backfill is now
+computed **at most once per session-day** (`_load_snapshots_cached`) with `skip_unchanged` on the
+history publish — ~95%+ fewer off-hours proxy calls, RTH cadence unchanged. **P8/P9 (GEX):** sargable
+`last_snapshot_age`/`first_snapshot_today` (`ts >= ? AND ts < ?` range) + one reused read-only
+connection across the 4 gamma views. **P10 (portfolio):** the 10-min full rebuild is off-hours-gated
+(explicit refresh still immediate). **DEFERRED by decision** (user-confirmed): **A5** (per-tab request-id
+result keying — a single-user-multi-tab edge case) and **A6** (retire the `sentiment_bridge.json`
+dual-write → regime_filter reads Redis; + the ':8100 proxy may be the source repo's binary' version-skew)
+— the bridge retirement is a live-scanner-gating migration and the proxy-skew is an ops concern; both
+left for a dedicated pass. Reliability + Security + Code-Quality pillars are the remaining audit
+follow-ups. Prior — 2026-07-01 (**Calculation-accuracy audit + remediation**: a five-domain
+quant audit of the app's math [full reports under [`docs/audits/`](docs/audits/):
+[technical audit](docs/audits/2026-07-01-technical-audit.md) +
+[calculation-accuracy audit](docs/audits/2026-07-01-calculation-accuracy-audit.md)] found the
+money-bearing math (BSM pricing/Greeks/IV solver, expected move, defined-risk trade economics,
+buying-power/margin, GEX regime signals, the look-ahead-free factor model) **textbook-correct**,
+but flagged a set of standard-conformance + consistency defects, **now FIXED** (all suites green:
+options-scanner **1166** [+10 pre-existing baseline fails], options_svc **314**, trade_svc **68**,
+sentiment_svc **52**, portfolio-analyzer **198**, portfolio_svc **27**). **Behavior changes to know:**
+(1) **RSI + ADX now use Wilder's RMA smoothing** (`shared/analysis_lib/technical.py` +
+`trade_svc/compute.py`), not simple rolling means — values now match TOS/TradingView (RSI-14
+validated against the StockCharts worked example 70.53/66.32); this shifts the Trade-page momentum
+strip + the sentiment intraday-trend needle (correctly). (2) **VWAP is now session-anchored**
+(resets each session), not a multi-day cumulative. (3) **Volume-profile value area** now grows
+**contiguously from the POC** (standard Market-Profile), not by sorting disjoint high-volume bins.
+(4) **Relative Strength** (`technical.calculate_relative_strength` + `analysis_lib/sector_analysis.py`
+Holdings "vs Sector (RS)") switched from an unstable return-ratio [sign-inverted in down markets] to
+a **parity ratio `100·(1+stock)/(1+bench)`**. (5) **Swing-scanner economics are now
+commission-aware**: a new PURE `options-scanner/commissions.py` (reads `config/commissions.toml`,
+no `services/` import) folds **round-trip commission** ($0.65/leg × legs × 2) into
+`strategy_scanner.payoff_metrics`' `max_profit`/`max_loss`/`capital` [never off an unbounded profit],
+so R:R + capital-efficiency + the quality **grade** are net-of-fees — a borderline IC can now flip
+Good→Weak. **Driver-facing gap CLOSED:** the live autonomous **driver sizes from the FLAT scanner**
+(`cache:options:scan`), not the swing scanner — so rather than mutate the flat scanner's tuned
+composite score / sort / paper-BP sizing (all consume the gross `credit`/`max_loss`/`rr_pct`),
+`scanner_engine._attach_net_economics` adds **additive** `commission`/`net_credit`/`net_max_loss`/
+`net_rr_pct` to every PCS/CCS/IC signal, and the driver's model menu (`driver_svc.compute._menu_item`
++ the decider system prompt) now shows the model the **net** credit/max_loss + commission, so the
+driver's perceived edge is net-of-fees while scoring/ranking/sizing + the webgui display stay
+untouched (guardrail BP sizing still keys off the raw gross `max_loss` — structural margin, not
+commission — by design). Additionally, the **paper engine now debits commission into realized
+P&L at close** (`paper_engine.net_realized_pnl` → both close sites; round-trip on a managed
+BUY_TO_CLOSE, opening-only on an OTM expiry), reducing both the stored `realized_pnl` and account
+cash from the one value in `_close` — so the **driver performance scorecard AND the manual paper
+account are net-of-fees** (the rescue-apply close path already did this). (6) **Swing payoff units
+normalized to per-CONTRACT dollars (×100)** across all families (`payoff_metrics` native builders
+were per-share while credit adapters were ×100 — now consistent; `_normalize_credit` `capital` bug
+fixed: `capital = max_loss` for defined-risk credit). (7) **Single risk-free-rate source**
+`options_calculator.RISK_FREE_RATE = 0.045` (was 0.045 in the calculator vs **0.04** in the
+simulator); **`q = 0` dividend assumption documented** in the BSM docstrings. (8) **Simulator
+expiry settlement fixed** from a timezone-naive `hour=15` to **16:00 US/Eastern tz-aware**,
+matching the calculator (`options_calculator.expiry_time_to_years`) — the 0DTE bug where 15:30
+collapsed an option to intrinsic-only ($0.012 vs the correct $0.090). (9) **Term-structure GEX
+×0.01 unit fix** (`gamma_tool.compute_term_grid`) — term cells were **100× the intraday scale**
+(per-$1² not per-1%); GEX magnitudes documented as **nearest-expiry-relative** (not a full-surface
+SpotGamma replica — sign/flip/walls ARE standard). (10) **Portfolio annualized return** switched to
+a **252 trading-day basis** (was calendar 365 while vol used √252 → ~1.45× Sharpe-scale error;
+`evaluation.py` now `busday_count`-based). (11) **Factor-model live scorer z-basis** now matches
+the fit's **2/98 cross-sectional winsorization** (`swing_model.py`, was a ±3 hard clip → mild tail
+miscalibration; ±3 kept only on the thin-snapshot norm fallback). (12) **Two PoP conventions
+documented** (calculator = risk-neutral lognormal r-drift; swing = zero-drift normal) — labeled,
+not unified. **DEFERRED (require a manual `fit_swing_model.py` refit against live 5-yr proxy data —
+documented in-code in `swing_model.py` + the audit doc):** covariance-aware factor weighting [the
+univariate signed-IC weighter double-counts the correlated momentum cluster] and regime-gating
+`low_vol`'s regime-overfit inverted sign. Reliability/security/perf/architecture findings from the
+same audit pass (silent-degradation logging, 3 GB unbounded `gex_history.db`, at-most-once command
+streams, proxy wildcard-CORS) are catalogued in the technical-audit doc as OPEN follow-ups. Branch
+`Using_Highcharts`. Prior — 2026-06-30 (**Swing Scanner — quality-gated grading**: the multi-strategy
 Swing Scanner's **grade now reflects trade QUALITY, not view-fit**. The `score_strategy`
 composite is **quality-dominant** (`0.7·quality + 0.3·fit` — fit demoted to a ranking
 tiebreaker), and the **grade is capped by per-family HARD GATES** (liquidity / R:R-or-
@@ -739,7 +872,7 @@ Routes:
 | `/sentiment` | Sentiment (two-column top: **dual** Sentiment gauges (Today + 30-Day Avg) + **dual** Market Trend gauges (Today live-intraday + 30-Day structural — directional 0–100 score, 15-min cadence) / component table; traffic-light tiles; collapsed **"Daily Sentiment & Trend"** expander = two value-colorized (green/yellow/red) **2-min intraday graphs** (Daily Market Sentiment 0–10 + Daily Market Trend 0–100), rolling **last 5 trading days**, session gaps collapsed, **recorded going forward** by `sentiment_svc` (RTH-gated) into `SENTIMENT_INTRADAY_DB` → `cache:sentiment:intraday_history` (replaced the old 30-day-history line + rolling-avg/velocity/divergence text); full-width **Sector & Industry Performance** w/ Day/Week/Month %, P/C, RRG, rotation banner, **expandable industries w/ P/C+RRG**; bottom status bar; **persists across navigation**; **server-side 120s auto-refresh + bridge publish, tab-independent**) | built |
 | `/sentiment/rotation` | Sector Rotation (RRG-vs-SPY: Risk-ON/OFF headline + spread; **top row** = quadrant-map table (left) + tight ROTATING FROM/INTO w/ S&P weights (right); **full-width RRG below** w/ per-sector "meteor tails" — engine `assess_sector` retains a `tail` of `TAIL_LENGTH=12` RS-Ratio/RS-Mom points sampled every `TAIL_STRIDE=2` days; page draws **one spline series per sector** (faded trail line + single bright head dot) and **hover-isolates** a sector via native Highcharts `plotOptions.series.states.inactive` (hovering one dims the rest — no client round-trip); reuses `sector_rotation_assessment`; cached, **manual Refresh only**) | built |
 | `/trade` | Trade (on-demand single-symbol analysis: **Position (1–8wk)** + **Investor (months+)** Buy/Hold/Sell verdicts w/ score + top reasons + hard gates + expandable factor breakdown. The **Position** verdict is now a **backtested, IC-weighted cross-sectional factor model** (`swing_model.json` artifact → live `swing_model.py` scorer): the headline is the **validated** BUY/SELL/HOLD off a **calibration band** + an outcome line (percentile · expected fwd return / horizon · beat-SPY hit-rate) + a **"Why — validated factors"** evidence expander (per-factor z/weight/contribution/IC + model version & OOS IC), with the **legacy heuristic** verdict tucked into a collapsed expander (Investor unchanged); **MTF EMA alignment** (per-timeframe); momentum strip (RSI/ADX/MACD/VWAP/RelVol); sector strength; **Fundamentals card** (P/E/PEG/growth/ROE/margins via proxy `/instruments`); **Markov Forecast card** (third **equal-width frame in the verdict row**, alongside Position + Investor: 5-band composite-score Markov chain → stacked-area band-probability forecast + P(BUY)/P(SELL)/E[score] at 5/10/20d + a bounded confidence-weighted drift-tilt `markov_adjusted_score` headline, verdict label unchanged; **chart plots the dense near-term `trajectory` now/1/2/3/5/10/20d** so it differs by score — the 5/10/20d tail converges to the bull-leaning prior stationary; chart is dark-navy themed); **dark-navy "dashboard" theme** (`.calc-v2` via shared `theme.py`, `items-start` compact cards); **tab-out (`focusout`) = Analyze** (deduped); **persists last analyzed symbol** + analysis across nav) | built |
-| `/driver` | Driver (**autonomous monitor + override** [level B]: a **Claude decision layer** (Opus 4.8 default; `DRIVER_MODEL` env / `shared/driver_model.txt` override → e.g. Sonnet 5) auto-selects/sizes **defined-risk option spreads (PCS/CCS/IC) from the scanner** (`cache:options:scan`) toward **net $500/day** in **paper**, gated by a **`cache:driver:control`** master switch + confirm-gated **STOP** kill-switch; the page shows day-P&L-vs-$500 progress, open-driver-positions, a newest-first **decision-log** audit (`cache:driver:autonomous`, times in **CST**), and a **Performance scorecard** (win-rate / profit-factor / avg win-loss / P&L by symbol & strategy — `cache:options:driver_paper_perf`), all reading the Driver's **own isolated paper book** (`cache:options:driver_paper_account`, separate from the manual account), with **Enable/Disable** + **Run now**; 09:28-ET morning + 30-min autonomous **entry-window** checkpoints (**09:45–15:30 ET** — the open's first ~15 min skipped so the post-open structure is readable, and **no NEW entries in the last 30 min before the close**; management/exits are unaffected, on options_svc's separate 5-min manage cycle) run `build_packet`→`decider.decide`→**`guardrails.apply_guardrails`** (PURE code clamps size + halts at banked-$500/loss-cap/VIX — the model never sizes its own risk)→`cmd:options` **`driver_paper_create`** (opens into the dedicated `paper_account_driver.db`, repriced + auto-exited on the 5-min manage tick — fully separate from the user's manual paper trades). **Legacy** morning-agent **order-approval queue** retained (gated off while autonomy is enabled): Run morning agent → graded day + proposed trades; **APPROVE** (confirm dialog) / **SKIP**; conditions strip + grade rationale; **Performance** view (win-rate / P&L-by-bucket + trade table; **today-only** decision log; perf **P&L colored** green/red; **Bucket / Instrument** full-word headers; **sticky table headers**). Orders simulated (`PAPER_TRADE=True`). **Root-cause fix (2026-06-27): the driver had NEVER opened a position** — `compute.open_driver_position` read `signal_id`/`strategy`/`entry_credit` but the driver feeds RAW scanner signals keyed `id`/`type`/`credit`, so every open `KeyError`'d on `'signal_id'` and the defensive `try/except` swallowed it to `status=error`; the decision log showed "executed" (only the ENQUEUE) while the account stayed empty. Fixed by normalizing the signal shape — open positions now appear + the scorecard P&L populates. See [[driver-feeds-raw-scanner-signal-shape]]) | built |
+| `/driver` | Driver (**autonomous monitor + override** [level B]: a **Claude decision layer** (Opus 4.8 default; `DRIVER_MODEL` env / `shared/driver_model.txt` override → e.g. Sonnet 5) auto-selects/sizes **defined-risk option spreads (PCS/CCS/IC) from the scanner** (`cache:options:scan`) toward **net $500/day** in **paper**, gated by a **`cache:driver:control`** master switch + confirm-gated **STOP** kill-switch; the page shows day-P&L-vs-$500 progress, open-driver-positions, a newest-first **decision-log** audit (`cache:driver:autonomous`, times in **CST**), and a **Performance scorecard** (win-rate / profit-factor / avg win-loss / P&L by symbol & strategy — `cache:options:driver_paper_perf`), all reading the Driver's **own isolated paper book** (`cache:options:driver_paper_account`, separate from the manual account), with **Enable/Disable** + **Run now**; 09:28-ET morning + 30-min autonomous **entry-window** checkpoints (**09:45–15:30 ET** — the open's first ~15 min skipped so the post-open structure is readable, and **no NEW entries in the last 30 min before the close**; management/exits are unaffected, on options_svc's separate 5-min manage cycle) run `build_packet`→`decider.decide`→**`guardrails.apply_guardrails`** (PURE code clamps size + halts at banked-$500/loss-cap/VIX — the model never sizes its own risk)→`cmd:options` **`driver_paper_create`** (opens into the dedicated `paper_account_driver.db`, repriced + auto-exited on the 5-min manage tick — fully separate from the user's manual paper trades). **Legacy** morning-agent **order-approval queue** retained (gated off while autonomy is enabled): Run morning agent → graded day + proposed trades; **APPROVE** (confirm dialog) / **SKIP**; conditions strip + grade rationale; **Performance** view (win-rate / P&L-by-bucket + trade table; **today-only** decision log; perf **P&L colored** green/red; **Bucket / Instrument** full-word headers; **sticky table headers**). Orders simulated (`PAPER_TRADE=True`). **Root-cause fix (2026-06-27): the driver had NEVER opened a position** — `compute.open_driver_position` read `signal_id`/`strategy`/`entry_credit` but the driver feeds RAW scanner signals keyed `id`/`type`/`credit`, so every open `KeyError`'d on `'signal_id'` and the defensive `try/except` swallowed it to `status=error`; the decision log showed "executed" (only the ENQUEUE) while the account stayed empty. Fixed by normalizing the signal shape — open positions now appear + the scorecard P&L populates. See [[driver-feeds-raw-scanner-signal-shape]]. **Second root-cause fix (2026-07-02): $SPX/MU logged "Executed" but never opened** — a **100× units mismatch**: `guardrails.clamp_quantity` sized affordability off the scanner's **PER-SHARE** `max_loss` (~$7) while the paper account's `size_contracts` correctly used **per-CONTRACT** dollars (`(width−credit)×100`, ~$705), so the driver kept proposing $SPX/MU whose real per-contract risk ($409–$1,833) exceeded the paper sizer's $250 cap → `RISK_TOO_HIGH` → **silently rejected** (the "Executed" in the log is only the ENQUEUE; the true outcome is in the account view's `last_open_results`, cap 25). Fixed: the guardrail evaluates **per-contract dollars** (`CONTRACT_MULTIPLIER`); the driver's caps raised to **$1,500/$4,500** and the paper open path given its own **`_DRIVER_MAX_RISK_PER_TRADE=$1,500`** (manual account unchanged at $250) — $SPX/MU now open. See [[driver-executed-but-rejected-risk-too-high]]) | built |
 | `/settings` | Settings (GUI prefs via `app_settings`: scanner **audio alert** on/off + sound + volume, only-during-market-hours, min-score-to-alert; desktop-notification toggle + permission grant + Test sound. Extensible — first batch) | built |
 | `/portfolio` | Portfolio (3-tier, `services/portfolio_svc` :8212: **Holdings / Sectors / Performance** tabs over the portfolio model — sector breakdown, vs-sector RS, since-purchase excess, benchmark over/under-weight, tailwind; **Performance** scorecard (return/capital/risk/entry grades + composite + ann. return + drawdown) with a per-position **advisory suggestions** detail pane; **live-streaming P&L** via the service's proxy SSE consumer republishing each tick; proxy/stream status bar; persists across nav) | built |
 | `/eod` · `/eod/detail` | EOD Report (pure-webgui aggregator over `options:*` + `driver:*` caches. **Summary** = headline tiles + a **verbose Daily / Weekly(WTD) / MTD performance** block **per book** — the manual paper **ledger** (`options:paper_trades`) and the **Driver** account (`options:driver_paper_account`, incl. its new `closed_positions`) shown separately (realized P&L bucketed by **exit** date; opened/credit by **entry** date; a per-book now-line = equity/session-P&L/open-unrealized/open-count). **Detailed** = the same performance + **trade-type breakdowns** (by **strategy** PCS/CCS/IC, by **0-DTE/Swing**, by **status** Open/Closed/Expired) for each book + full trade/scanner/captured/driver tables. **Navigation**: a jump-link **TOC** + every section in a native **`<details>`** (collapsible, **no JS** — works in-app AND in the exported files). **Generate** snapshots the caches → standalone `summary.html` + `detail.html` archived under `webgui/data/eod/<date>/`; `/eod/file` serves them raw. Pure builders (`normalize_trades`/`period_buckets`/`breakdown_rows`/`performance_table_html`/`breakdown_table_html`/`toc`/`details_section`) unit-tested. Realized reads `$0`/`—` until trades close — by design, not a bug) | built |
@@ -1765,12 +1898,18 @@ at +$500, hard-capped on the downside) — no decision-maker can guarantee it. P
   default so they don't conflict).
 - **Contracts** `DriverControl` (`cache:driver:control` — master switch + STOP latch)
   + `AutonomousState` (`cache:driver:autonomous` — the monitor view). Tunables in
-  `settings.py` (`DAILY_TARGET=500`, `PER_TRADE_MAX_RISK=300`, `DAILY_RISK_BUDGET=900`,
-  `MAX_CONCURRENT=6`, `MAX_TRADES_PER_CYCLE=3`, `MODEL="claude-opus-4-8"` (build
+  `settings.py` (`DAILY_TARGET=500`, `PER_TRADE_MAX_RISK=1500`, `DAILY_RISK_BUDGET=4500`
+  — **raised from $300/$900 (2026-07-02)** so the driver can fund $SPX/MU spreads whose
+  per-CONTRACT max loss is large; the guardrail now evaluates affordability in
+  per-contract dollars (`guardrails.CONTRACT_MULTIPLIER=100` — the scanner's `max_loss`
+  is PER-SHARE) and the paper open path uses its own matching
+  `options_svc.compute._DRIVER_MAX_RISK_PER_TRADE=1500` so the user's MANUAL account
+  stays at `config_paper.MAX_RISK_PER_TRADE=250`; see the /driver route note), `MAX_CONCURRENT=6`,
+  `MAX_TRADES_PER_CYCLE=3`, `MODEL="claude-opus-4-8"` (build
   default; the **`DRIVER_MODEL`** env var overrides it per-deployment —
   e.g. `claude-sonnet-5` for lower cost), `CHECKPOINT_MIN=30`); the daily loss
-  cap is sourced from the legacy
-  `config.RISK_LIMITS`.
+  cap is sourced from the legacy `config.RISK_LIMITS` (still **$250** — with the raised
+  per-trade cap, a single losing $SPX can trip the daily halt; raise it if undesired).
 - **Page** `webgui/pages/driver.py`: a Tier-1 **monitor + override** (Enable/Disable,
   confirm-gated **STOP**, **Run now**, $500 progress, open-driver-positions, newest-
   first decision-log audit) reading `cache:driver:autonomous`/`control` + version-
