@@ -8,7 +8,36 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-07-01 (**Reliability remediation** — the technical audit's
+**Last updated:** 2026-07-02 (**Driver risk-sizing fix (RISK_TOO_HIGH) + Sonnet 5 + prompt
+caching** — a debugging session on "driver trades logged **Executed** but never showed up."
+Root cause: the `/driver` decision-log "Executed N: SYM×q" line is only the **enqueue** of a
+`driver_paper_create` command; the real open in `options_svc.compute.open_driver_position` was
+**silently rejecting** every $SPX/MU pick with `RISK_TOO_HIGH` (the truth is the account view's
+rolling **`last_open_results`**, and the driver DB had NEVER held an $SPX or MU position). The
+cause was a **100× units mismatch**: `guardrails.clamp_quantity` (driver_svc) sized affordability
+off the scanner's **per-SHARE** `max_loss` (~$7) while `paper_sizing.size_contracts`
+(options-scanner) correctly used **per-CONTRACT** dollars (`(width−credit)×100`, ~$705), so the
+driver kept approving $SPX/MU whose real per-contract risk ($409–$1,833) blew past the paper
+sizer's `config_paper.MAX_RISK_PER_TRADE=$250` → sized to 0. **Fixed:** (1) the guardrail now
+evaluates **per-contract dollars** (`guardrails.CONTRACT_MULTIPLIER=100` + `_max_loss_dollars`)
+in `clamp_quantity` + the daily-budget accounting; (2) the driver's caps raised
+`PER_TRADE_MAX_RISK 300→1500` / `DAILY_RISK_BUDGET 900→4500` (user opted to let $SPX/MU trade);
+(3) the paper OPEN path got its own `options_svc.compute._DRIVER_MAX_RISK_PER_TRADE=1500` (passed
+explicitly to `size_contracts`) so the user's MANUAL paper account stays at $250. A $SPX
+regression test (rejected at $250, opens 2 contracts at $1500) + updated guardrail/e2e/packet
+tests pin it; driver_svc **160** + options_svc **334** green. **NOTE:** the legacy daily-loss
+halt is still **$250** (`config.RISK_LIMITS`), so with $1,500 trades one losing $SPX can trip the
+day's halt (raise it if undesired); the widest $SPX (~$1,833/contract) stays excluded at $1,500.
+**Restart options_svc + driver_svc** to pick this up. See
+[[driver-executed-but-rejected-risk-too-high]]. **Also this session:** both Claude API call sites
+upgraded **Sonnet 4.6 → Sonnet 5** (`claude-sonnet-5`) — the driver decider (via the gitignored
+`shared/driver_model.txt` override) + the Gamma Analyze `_ANALYZE_MODEL`; live-probed first
+(Sonnet 5 **accepts** `thinking:{"type":"disabled"}`, unlike Fable 5, so no param rework), build
+default stays **Opus 4.8**. **Prompt caching** enabled on the driver decision call
+(`decider._cached_system` cache-marks the tools+system prefix, 1h TTL to match the 30-min
+checkpoint cadence) — currently **inert** (the ~800-token prefix is below Sonnet's 2048-token
+cache floor, so nothing is cached or billed extra; engages automatically if the static prefix
+grows). Branch `Using_Highcharts`.). Prior — 2026-07-01 (**Reliability remediation** — the technical audit's
 [Reliability & Error Handling](docs/audits/2026-07-01-technical-audit.md) pillar (the lowest-scored,
 5/10) addressed; theme = *keep the "never raises" defensiveness, add the evidence*. All suites green:
 options_svc **333**, driver_svc **157**, sentiment_svc **61**, portfolio_svc **32**, trade_svc **68**,
