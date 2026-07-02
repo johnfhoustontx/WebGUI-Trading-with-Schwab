@@ -386,6 +386,14 @@ async def loop(bus):
                 await loop_.run_in_executor(None, handlers.collect_gex_history, bus)
             except Exception:
                 log.exception("collect_gex_history branch degraded")
+            # Republish the Gamma snapshot for the currently-viewed symbol right after
+            # collection so the intraday heatmap + candles stay current server-side —
+            # otherwise the gamma cache only refreshes while a page is open (its 120 s
+            # timer) and shows a stale, cut-off session on the next load after a gap.
+            try:
+                await loop_.run_in_executor(None, handlers.refresh_gamma_current, bus)
+            except Exception:
+                log.exception("refresh_gamma_current branch degraded")
 
         if g_due:
             branches.append(_gex_branch())

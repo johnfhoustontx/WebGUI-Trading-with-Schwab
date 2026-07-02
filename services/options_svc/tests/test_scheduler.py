@@ -173,6 +173,17 @@ def test_driver_manage_handler_is_wired():
     assert callable(handlers.run_driver_manage_and_refresh)
 
 
+def test_loop_refreshes_gamma_after_collection():
+    import inspect
+
+    src = inspect.getsource(scheduler.loop)
+    # The GEX-collection branch also republishes the current gamma snapshot, so the
+    # heatmap stays fresh server-side with no page open. It runs AFTER collection.
+    assert "refresh_gamma_current" in src
+    seg = src.split("collect_gex_history", 1)[1]
+    assert "refresh_gamma_current" in seg
+
+
 def test_loop_runs_driver_manage_under_its_own_guard():
     import inspect
 

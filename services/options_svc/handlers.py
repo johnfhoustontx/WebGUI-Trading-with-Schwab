@@ -463,6 +463,25 @@ def refresh_gamma(bus, symbol="$SPX") -> None:
     bus.publish(EVENT_GAMMA, {"version": version})
 
 
+def refresh_gamma_current(bus) -> None:
+    """Refresh the Gamma snapshot for the symbol CURRENTLY in the cache, so the
+    intraday heatmap + candles stay current server-side even when no Gamma page is
+    open. Driven on the GEX-collection cadence (every 2 min in-window): without it
+    the gamma cache only refreshed while a page was open (its 120 s timer) / at
+    startup, so after a gap the heatmap showed a stale, cut-off session on next load.
+
+    Reads the symbol from the cached snapshot so it NEVER forces a fixed $SPX (which
+    would reintroduce the symbol-revert bug); falls back to $SPX only when nothing is
+    cached. Defensive — ``refresh_gamma`` is itself guarded."""
+    sym = "$SPX"
+    try:
+        env = bus.cache_get(CACHE_GAMMA)
+        sym = ((env.payload if env else None) or {}).get("symbol") or "$SPX"
+    except Exception:  # noqa: BLE001
+        sym = "$SPX"
+    refresh_gamma(bus, sym)
+
+
 def collect_gex_history(bus=None) -> None:
     """Write one round of intraday GEX/Charm/DEX/Vanna (+term) snapshots.
 

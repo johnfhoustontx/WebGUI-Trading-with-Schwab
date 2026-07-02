@@ -604,6 +604,28 @@ def test_refresh_gamma_caches_empty_when_none(monkeypatch):
     assert env.payload["views"] == {}
 
 
+def test_refresh_gamma_current_uses_cached_symbol(monkeypatch):
+    """The server-side keep-fresh refresh reads the symbol from the cache so it
+    never forces $SPX over the user's last-viewed symbol."""
+    bus = Bus(fake=True)
+    bus.cache_set("cache:options:gamma", {"symbol": "QQQ", "views": {}})
+    seen = {"symbol": None}
+    monkeypatch.setattr(handlers.compute, "gamma_snapshot",
+                        lambda s: (seen.__setitem__("symbol", s), _fake_gamma_snapshot())[1])
+
+    handlers.refresh_gamma_current(bus)
+    assert seen["symbol"] == "QQQ"
+
+
+def test_refresh_gamma_current_defaults_spx_when_empty(monkeypatch):
+    bus = Bus(fake=True)  # nothing cached
+    seen = {"symbol": None}
+    monkeypatch.setattr(handlers.compute, "gamma_snapshot",
+                        lambda s: (seen.__setitem__("symbol", s), None)[1])
+    handlers.refresh_gamma_current(bus)
+    assert seen["symbol"] == "$SPX"
+
+
 def test_gamma_refresh_command(monkeypatch):
     bus = Bus(fake=True)
     seen = {"calls": []}
