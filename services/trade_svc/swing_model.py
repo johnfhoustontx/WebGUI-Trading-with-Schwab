@@ -6,11 +6,19 @@ day's cross-section) and, crucially, RE-CENTERS to the current regime: a
 market-wide shift (e.g. elevated momentum/volatility in a bull run) no longer
 pushes every symbol into the top band.
 
+The cross-sectional z uses the SAME transform as the offline fit
+(``backtest.zscore_by_date``): winsorize the current cross-section to the 2nd/98th
+percentiles then standardize by the winsorized column's mean/std — a genuine 2/98
+winsorization, NOT a hard ±3 clip. This keeps the live composite on the exact scale
+the calibration bands were built on, so a live symbol with a true |z|>3 is not biased
+toward the middle band (fixes C11 mild tail miscalibration).
+
 The artifact's time-averaged per-factor ``norm`` is a FALLBACK only — used when the
 live universe snapshot is too thin (<5 names) or absent. (It was previously the
 PRIMARY basis, which made every symbol score BUY: the stale 5-yr norm does not
 re-center, so in an elevated regime every z shifts positive into the top/BUY
-band.) Pure scoring; the artifact loader is thin (monkeypatched in tests).
+band.) The norm was never winsorized, so the norm-fallback path keeps a defensive ±3
+clip (``Z_CLIP``). Pure scoring; the artifact loader is thin (monkeypatched in tests).
 Defensive: returns None on any failure so analyze() falls back to legacy.
 
 Weights are SIGNED (a negative-IC factor like low_vol carries a negative weight),
@@ -20,9 +28,27 @@ import json
 import numpy as np
 from repo_paths import SWING_MODEL
 
-Z_CLIP = 3.0   # cap live z-scores; the offline fit winsorized per-date (2/98) so
-               # per-date z was bounded — this prevents a live outlier (e.g. a
-               # volume spike in `turnover`) from hijacking the signed composite.
+MIN_XSECTION = 5   # a cross-section thinner than this can't form stable 2/98
+                   # quantiles -> fall back to the artifact norm (documented
+                   # thin-snapshot fallback).
+WINSOR = (0.02, 0.98)   # MUST match backtest.zscore_by_date's winsor bounds.
+Z_CLIP = 3.0   # defensive cap for the NORM-FALLBACK path ONLY (the stale 5-yr norm
+               # was NOT winsorized, so a live outlier against a tiny norm std could
+               # otherwise blow up the signed composite). The PRIMARY cross-sectional
+               # path is winsorized to match the fit instead — see _cross_section_z.
+
+# NOTE (C12/C13, 2026-07-01): two known weighting/scoring limitations are documented
+# but NOT fixed here — both require regenerating swing_model.json via a manual
+# fit_swing_model.py refit (needs live proxy 5-yr data, out of scope for this session):
+#   C12 — the fit's signed_ic_weights uses UNIVARIATE signed IC, which double-counts
+#         the correlated momentum cluster (mom_12_1 / mom_6_1 / vol_adj_mom /
+#         trend_quality). A covariance-aware weighting is the fix (offline harness
+#         change + refit).
+#   C13 — the dominant factor low_vol (weight -0.34) rests on a regime-overfit inverted
+#         sign; regime-gating (the artifact's regime-key structure exists for it) is the
+#         intended fix, also an offline refit.
+# The shipped artifact and its weights are LEFT UNCHANGED. See
+# docs/audits/2026-07-01-calculation-accuracy-audit.md.
 
 
 def load_artifact():
@@ -32,13 +58,30 @@ def load_artifact():
         return None
 
 
-def _zscore(value, basis):
+def _cross_section_z(value, basis):
+    """z-score `value` against the current-universe cross-section `basis`, using the
+    SAME transform the offline fit applies per date (backtest.zscore_by_date): treat
+    (basis + value) as one cross-sectional column, winsorize it to [q(0.02), q(0.98)],
+    then standardize by the WINSORIZED column's mean/std(ddof=0). This is a genuine
+    2/98 winsorization — NOT a hard ±3 clip — so a live symbol with |z|>3 is composited
+    on the SAME scale the calibration bands were built on (no tail miscalibration).
+
+    Returns None when the cross-section is too thin (<MIN_XSECTION finite names) so the
+    caller falls back to the artifact norm."""
     arr = np.asarray(basis, dtype="float64")
     arr = arr[np.isfinite(arr)]
-    if len(arr) < 5:
+    if len(arr) < MIN_XSECTION or not np.isfinite(value):
         return None
-    mu, sd = float(arr.mean()), float(arr.std(ddof=0))
-    return (value - mu) / sd if sd > 0 else 0.0
+    # Include the live value in the cross-section exactly as the fit includes every
+    # symbol's value on that date, so the same winsor bounds/mean/std apply to it.
+    col = np.append(arr, float(value))
+    lo = np.quantile(col, WINSOR[0])           # linear interpolation == pandas default
+    hi = np.quantile(col, WINSOR[1])
+    c = np.clip(col, lo, hi)                    # winsorize the whole column
+    mu, sd = float(c.mean()), float(c.std(ddof=0))   # stats on the WINSORIZED column
+    if not np.isfinite(sd) or sd <= 0:
+        return 0.0
+    return (float(c[-1]) - mu) / sd            # the (winsorized) live value's z
 
 
 def _band_for(comp, calib):
@@ -78,14 +121,17 @@ def score_symbol(current_factors, universe_snapshot, artifact):
             z = None
             basis = (universe_snapshot or {}).get(f)
             if basis:                                      # PRIMARY: re-center to the current
-                z = _zscore(v, basis)                      # cross-section (calibration-consistent;
-                                                           # _zscore needs >=5 names, else None)
+                z = _cross_section_z(v, basis)             # cross-section, winsorized 2/98 to
+                                                           # MATCH the fit's zscore_by_date exactly
+                                                           # (needs >=MIN_XSECTION names, else None).
+                                                           # Already bounded by winsorization — do
+                                                           # NOT ±3-clip it (would re-compress the
+                                                           # scale the bands were built on).
             if z is None:                                  # thin/absent snapshot -> norm fallback
                 nf = norm.get(f)
                 if nf and nf.get("std"):
-                    z = (v - nf["mean"]) / nf["std"]       # stale 5-yr norm (NOT regime-centered)
-            if z is not None:
-                z = float(np.clip(z, -Z_CLIP, Z_CLIP))
+                    z = (v - nf["mean"]) / nf["std"]       # stale 5-yr norm (NOT regime-centered);
+                    z = float(np.clip(z, -Z_CLIP, Z_CLIP)) # unwinsorized norm -> defensive ±3 clip
             if z is None:
                 continue
             c = w * z

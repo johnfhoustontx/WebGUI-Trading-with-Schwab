@@ -178,6 +178,10 @@ def _publish_autonomous(bus, *, day_pnl, positions, decision, guarded, executed,
         "ts": _now_iso(),
         "thesis": decision.get("day_thesis", ""),
         "stand_down": decision.get("stand_down", True),
+        # R7: carry the stand-down REASON onto the log row so the /driver UI can
+        # distinguish an ops incident (no_key/api_error/parse_error) from a genuine
+        # model stand-down. Missing/legacy → None → renders as today.
+        "reason": decision.get("reason"),
         "executed": [{"id": t.get("id"), "symbol": (t.get("signal") or {}).get("symbol"),
                       "qty": t.get("qty"), "rationale": t.get("rationale", "")}
                      for t in executed],

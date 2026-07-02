@@ -14,10 +14,13 @@ loop+sleep here own the cadence. The BLOCKING rescan runs in the default
 executor so the event loop stays responsive.
 """
 import asyncio
+import logging
 from datetime import date as _date, time as _time
 from zoneinfo import ZoneInfo
 
-from services.options_svc import handlers
+from services.options_svc import compute, handlers
+
+log = logging.getLogger(__name__)
 
 # ── Schedule logic (ported verbatim from scanner.py) ───────────────────────
 _CT = ZoneInfo("America/Chicago")
@@ -219,6 +222,22 @@ def analyze_slot_due(now, ran_slots):
 POLL_INTERVAL_SEC = 30  # check the slot every 30s (mirrors the page's autoscan loop cadence)
 
 
+async def _gather_due(coros):
+    """Run the tick's due-branch coroutines CONCURRENTLY and wait for all.
+
+    A4 fix: the due branches are independent (GEX collection writes
+    gex_history.db, manage writes the paper account, rescan writes the scan
+    cache), so a slow branch (e.g. the 15-min rescan) must not delay the START
+    of the time-critical ones (2-min GEX collect / 5-min manage). Each branch
+    carries its OWN try/except, so it never raises here; ``return_exceptions``
+    is set as a belt-and-suspenders guard so one branch's failure can't affect
+    the others. The set of branches per tick is small and fixed (≤5), so this
+    is bounded — no unbounded task spawning."""
+    if not coros:
+        return
+    await asyncio.gather(*coros, return_exceptions=True)
+
+
 async def loop(bus):
     """Server-side 15-min auto-scan + gated header/GEX-status refresh.
 
@@ -235,6 +254,18 @@ async def loop(bus):
     from the manual one so a driver-side failure can't skip the manual refresh."""
     loop_ = asyncio.get_event_loop()
     last_slot = None
+    # R6: one-shot startup self-heal — reconcile buying_power_reserved against open
+    # positions for BOTH the manual + isolated driver accounts, correcting any BP
+    # orphaned by a crash between reserve_buying_power and insert_position in a
+    # prior run (a non-atomic open sequence). Idempotent/defensive; guarded so a
+    # cold DB never stops the loop from starting.
+    try:
+        drift = await loop_.run_in_executor(None, compute.reconcile_paper_buying_power)
+        if drift and (abs(drift.get("manual", 0.0)) >= 0.01
+                      or abs(drift.get("driver", 0.0)) >= 0.01):
+            log.warning("startup BP reconcile corrected drift: %s", drift)
+    except Exception:
+        log.exception("startup buying-power reconcile degraded")
     last_gex_slot = None  # 2-min GEX history-collection slot (see gex_due)
     last_manage_slot = None  # 5-min paper auto-manage slot (see manage_due)
     last_periodic_slot = None  # header + gex_status throttle slot (see periodic_refresh_due)
@@ -246,7 +277,7 @@ async def loop(bus):
     try:
         await loop_.run_in_executor(None, handlers.refresh_paper_account, bus)
     except Exception:
-        pass
+        log.exception("startup refresh_paper_account degraded")
     # One-shot startup refresh of the paper-trade ledger so the Paper Trades page
     # has data on first load. The ledger only changes on user actions
     # (reload/close/delete/delete-all commands re-publish it), so it is NOT polled
@@ -254,7 +285,7 @@ async def loop(bus):
     try:
         await loop_.run_in_executor(None, handlers.refresh_paper_trades, bus)
     except Exception:
-        pass
+        log.exception("startup refresh_paper_trades degraded")
     # One-shot startup refresh of the open captured-signals view so the Captured
     # Signals page has data on first load. The signal set only changes on user
     # actions (reload/reprice/close commands re-publish it), so it is NOT polled
@@ -262,7 +293,7 @@ async def loop(bus):
     try:
         await loop_.run_in_executor(None, handlers.refresh_captured, bus)
     except Exception:
-        pass
+        log.exception("startup refresh_captured degraded")
     # One-shot startup refresh of the Gamma snapshot ($SPX default) so the Gamma
     # page has data on first load. The page drives subsequent refreshes by
     # enqueuing ``gamma_refresh`` with the current symbol (its own 120s timer), so
@@ -270,23 +301,32 @@ async def loop(bus):
     try:
         await loop_.run_in_executor(None, handlers.refresh_gamma, bus, "$SPX")
     except Exception:
-        pass
+        log.exception("startup refresh_gamma degraded")
     # One-shot startup publish of the Gamma dropdown symbol universe (collected
     # symbols minus $VIX) so the Gamma page's dropdown is populated on first load.
     # The watchlist rarely changes mid-session; a service restart republishes.
     try:
         await loop_.run_in_executor(None, handlers.publish_gamma_symbols, bus)
     except Exception:
-        pass
+        log.exception("startup publish_gamma_symbols degraded")
     # One-shot startup publish of the GEX-collector status view so the Gamma
     # page's status bar has data on first load. Refreshed every tick below.
     # Guarded so a cold DB never stops the loop from starting.
     try:
         await loop_.run_in_executor(None, handlers.publish_gex_status, bus)
     except Exception:
-        pass
+        log.exception("startup publish_gex_status degraded")
     while True:
         now = _market_now()  # one clock read per tick, reused by every gate below
+        # A4: decide which branches are DUE this tick (synchronous slot-gating,
+        # unchanged), then run their blocking work CONCURRENTLY so a slow branch
+        # (e.g. the 15-min rescan) can't delay the START of the time-critical ones
+        # (2-min GEX collect / 5-min manage). The slot-DUE logic + last_*_slot
+        # bookkeeping stay serial here; only the executor-await work is gathered.
+        # Each branch is its OWN coroutine carrying its OWN try/except, so a
+        # failure/hang in one can't affect the others (per-branch isolation).
+        branches = []
+
         # Header + GEX-status refresh: every tick during market hours (their natural
         # ~30s cadence), throttled to every _OFFHOURS_INTERVAL_MIN off-hours so the
         # service stops making proxy/SQLite/Redis calls round the clock. Each is
@@ -294,24 +334,40 @@ async def loop(bus):
         try:
             p_due, p_slot = periodic_refresh_due(now, last_periodic_slot)
             last_periodic_slot = p_slot
-            if p_due:
-                try:
-                    await loop_.run_in_executor(None, handlers.refresh_header, bus)
-                except Exception:
-                    pass
-                try:
-                    await loop_.run_in_executor(None, handlers.publish_gex_status, bus)
-                except Exception:
-                    pass
         except Exception:
-            pass
+            log.exception("periodic_refresh_due gate degraded")
+            p_due = False
+
+        async def _periodic_branch():
+            try:
+                await loop_.run_in_executor(None, handlers.refresh_header, bus)
+            except Exception:
+                log.exception("refresh_header branch degraded")
+            try:
+                await loop_.run_in_executor(None, handlers.publish_gex_status, bus)
+            except Exception:
+                log.exception("publish_gex_status branch degraded")
+
+        if p_due:
+            branches.append(_periodic_branch())
+
         try:
             due, slot = autoscan_due(now, last_slot)
             if due:
                 last_slot = slot
-                await loop_.run_in_executor(None, handlers.rescan, bus)
         except Exception:
-            pass  # never let the scheduler die
+            log.exception("autoscan_due gate degraded")
+            due = False
+
+        async def _rescan_branch():
+            try:
+                await loop_.run_in_executor(None, handlers.rescan, bus)
+            except Exception:
+                log.exception("rescan branch degraded")  # never let the scheduler die
+
+        if due:
+            branches.append(_rescan_branch())
+
         # Intraday GEX history collection — write a snapshot round on each 2-min
         # slot within market hours so the Gamma heatmap keeps populating all
         # session (replaces the standalone gex_collector window). The blocking
@@ -321,9 +377,19 @@ async def loop(bus):
             g_due, g_slot = gex_due(now, last_gex_slot)
             if g_due:
                 last_gex_slot = g_slot
-                await loop_.run_in_executor(None, handlers.collect_gex_history, bus)
         except Exception:
-            pass
+            log.exception("gex_due gate degraded")
+            g_due = False
+
+        async def _gex_branch():
+            try:
+                await loop_.run_in_executor(None, handlers.collect_gex_history, bus)
+            except Exception:
+                log.exception("collect_gex_history branch degraded")
+
+        if g_due:
+            branches.append(_gex_branch())
+
         # Paper auto-manage — reprice open paper positions + auto-close hits on
         # each 5-min slot within market hours (replaces the manual-only "Run
         # manage cycle" button; the button still works for on-demand runs). The
@@ -334,21 +400,32 @@ async def loop(bus):
             m_due, m_slot = manage_due(now, last_manage_slot)
             if m_due:
                 last_manage_slot = m_slot
-                await loop_.run_in_executor(None, handlers.run_manage_and_refresh, bus)
         except Exception:
-            pass
-        # Driver paper account auto-manage — reprice + auto-close the ISOLATED
-        # driver account's open positions on the SAME 5-min cadence (it reuses the
-        # manage_due slot decided above, so its book stays current with no page
-        # open). In its OWN try/except — separate from the manual refresh above —
-        # so a driver-side failure can NEITHER skip the manual refresh NOR kill
-        # the loop. No-op-safe when the driver account doesn't exist yet.
-        try:
-            if m_due:
+            log.exception("manage_due gate degraded")
+            m_due = False
+
+        # The manual + driver manage refreshes share the manage_due slot but each
+        # keeps its OWN try/except — a driver-side failure can NEITHER skip the
+        # manual refresh NOR kill the loop. No-op-safe when the driver account
+        # doesn't exist yet. Kept in one branch coroutine so the manual refresh
+        # runs first (its book is the primary one), driver second.
+        async def _manage_branch():
+            try:
+                await loop_.run_in_executor(None, handlers.run_manage_and_refresh, bus)
+            except Exception:
+                log.exception("run_manage_and_refresh branch degraded")
+            # Driver paper account auto-manage — reprice + auto-close the ISOLATED
+            # driver account's open positions on the SAME 5-min cadence (it reuses
+            # the manage_due slot decided above). In its OWN try/except.
+            try:
                 await loop_.run_in_executor(
                     None, handlers.run_driver_manage_and_refresh, bus)
-        except Exception:
-            pass
+            except Exception:
+                log.exception("run_driver_manage_and_refresh branch degraded")
+
+        if m_due:
+            branches.append(_manage_branch())
+
         # Scheduled $SPX/SPY/QQQ Gamma Analyze — auto-run the Analyze command at
         # premarket / ~18 min after the open / midday / close on each trading day
         # (in addition to ad-hoc button use). Each slot fires once per day within a
@@ -361,8 +438,22 @@ async def loop(bus):
             a_slot = analyze_slot_due(now, analyze_ran)
             if a_slot:
                 analyze_ran.add((now.date().isoformat(), a_slot))
-                await loop_.run_in_executor(
-                    None, handlers.run_scheduled_gamma_analyze, bus, a_slot)
         except Exception:
-            pass
+            log.exception("analyze_slot_due gate degraded")
+            a_slot = None
+
+        async def _analyze_branch(slot_name):
+            try:
+                await loop_.run_in_executor(
+                    None, handlers.run_scheduled_gamma_analyze, bus, slot_name)
+            except Exception:
+                log.exception("run_scheduled_gamma_analyze branch degraded")
+
+        if a_slot:
+            branches.append(_analyze_branch(a_slot))
+
+        # Run all DUE branches concurrently (bounded, ≤5). A slow branch can't
+        # delay the start of the time-critical ones; per-branch try/except keeps
+        # each isolated.
+        await _gather_due(branches)
         await asyncio.sleep(POLL_INTERVAL_SEC)

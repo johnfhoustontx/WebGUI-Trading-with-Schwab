@@ -314,13 +314,39 @@ def control_bg_class(control):
     return f"bg-[{control_state_color(control)}]"
 
 
+# R7 — stand-down reason observability. The decider tags each decision with WHY it
+# stood down: ``model`` (a real choice) vs an OPS INCIDENT (``no_key`` = broken /
+# rotated Anthropic key, ``api_error`` = network/SDK failure, ``parse_error`` =
+# garbled tool reply). Only the incident reasons get a visible tag — a genuine
+# model stand-down (or a legacy row with no reason) renders exactly as before, so
+# "weeks of cautious model behavior" can't hide a dead key. Unknown reason → no tag.
+_INCIDENT_REASON_LABELS = {
+    "no_key": "NO API KEY",
+    "api_error": "API ERROR",
+    "parse_error": "BAD REPLY",
+}
+
+
+def stand_down_reason_label(reason):
+    """Short human tag for an OPS-INCIDENT stand-down reason, else ``None``.
+
+    ``no_key`` → 'NO API KEY' · ``api_error`` → 'API ERROR' · ``parse_error`` →
+    'BAD REPLY'. A genuine model decision (``model``), a missing/empty reason
+    (legacy row — back-compat), or any unrecognized code → ``None`` (no tag; the
+    entry renders exactly as it did before this field existed)."""
+    return _INCIDENT_REASON_LABELS.get(reason or "")
+
+
 def decision_log_rows(decisions):
     """Normalize the newest-first checkpoint audit log into render-ready rows.
 
     Each source row (from ``AutonomousState.decisions``) is sparse:
-    ``{ts, thesis, stand_down, executed:[{id,symbol,qty,rationale}],
+    ``{ts, thesis, stand_down, reason, executed:[{id,symbol,qty,rationale}],
     rejected:[{id,reason}], halted, halt_reason}``. Missing fields default
-    safely so a stand-down / halt row renders cleanly.
+    safely so a stand-down / halt row renders cleanly. ``reason`` (R7) is threaded
+    through so the page can flag an ops-incident stand-down (no_key/api_error)
+    distinctly from a genuine model stand-down; a row lacking it → ``None``
+    (back-compat — renders exactly as before).
     """
     out = []
     for d in decisions or []:
@@ -329,6 +355,9 @@ def decision_log_rows(decisions):
             "ts": d.get("ts", ""),
             "thesis": d.get("thesis", ""),
             "stand_down": bool(d.get("stand_down", False)),
+            # Why the decider stood down, if it did (model | no_key | api_error |
+            # parse_error). Absent on legacy rows → None → renders as today.
+            "reason": d.get("reason"),
             # Filter nested sub-lists to dicts: the AutonomousState contract gates
             # `decisions` as list[dict] but NOT these nested lists, so a malformed
             # executed/rejected (None, a str, or a list of non-dicts) must not reach
@@ -343,7 +372,12 @@ def decision_log_rows(decisions):
 
 
 def decision_summary(row):
-    """A compact one-line summary of a single decision-log row's outcome."""
+    """A compact one-line summary of a single decision-log row's outcome.
+
+    A stand-down caused by an OPS INCIDENT (no_key/api_error/parse_error) is tagged
+    (``Stood down — no trades [API ERROR]``) so a broken key surfaces in the summary
+    line, not just as a normal-looking stand-down. A genuine model stand-down (or a
+    legacy row without a reason) reads exactly as before."""
     row = row or {}
     if row.get("halted"):
         return f"HALTED — {row.get('halt_reason') or 'stopped'}"
@@ -351,6 +385,9 @@ def decision_summary(row):
     rejected = row.get("rejected") or []
     if not executed:
         base = "Stood down — no trades" if row.get("stand_down") else "No trades executed"
+        tag = stand_down_reason_label(row.get("reason"))
+        if tag:
+            base += f" [{tag}]"
     else:
         legs = ", ".join(
             f"{t.get('symbol', '?')}×{t.get('qty', '?')}" for t in executed)
@@ -761,6 +798,17 @@ def render():
                 if row.get("stand_down"):
                     ui.label("STAND DOWN").classes("text-xs text-weight-bold "
                                                    "text-amber-9")
+                    # R7: an OPS-INCIDENT stand-down (no_key/api_error/parse_error)
+                    # gets a distinct red chip so a broken key isn't mistaken for
+                    # weeks of "cautious model behavior". A model stand-down / legacy
+                    # row (no reason) shows nothing extra — renders as before.
+                    incident = stand_down_reason_label(row.get("reason"))
+                    if incident:
+                        ui.label(incident).classes(
+                            "text-xs text-weight-bold text-white px-2 rounded "
+                            "bg-[#E24B4A]").tooltip(
+                            "Stand-down was caused by an operational failure, not a "
+                            "model decision — check the driver service / API key.")
                 if halted:
                     ui.label("HALTED").classes("text-xs text-weight-bold text-red-9")
             if row.get("thesis"):

@@ -254,3 +254,64 @@ def test_loop_wires_scheduled_analyze():
     # The slot is latched in analyze_ran BEFORE the blocking call (no double-fire).
     seg = src.split("analyze_slot_due", 1)[1].split("run_scheduled_gamma_analyze", 1)[0]
     assert "analyze_ran.add" in seg
+
+
+# ── Concurrent due-branch execution (A4) ────────────────────────────────────
+# When multiple slot branches are due on the same tick they must run
+# CONCURRENTLY, so a slow branch (e.g. the 15-min rescan) can't delay the START
+# of the time-critical ones (2-min GEX collect / 5-min manage). Each branch keeps
+# its OWN isolation so one failure/hang can't sink the others.
+import asyncio  # noqa: E402
+
+
+def test_gather_due_runs_branches_concurrently():
+    """Two due branches that each 'sleep' complete in ~max(t), not ~sum(t) —
+    proving they run concurrently rather than serially awaited."""
+    order = []
+
+    async def branch_slow():
+        order.append("slow_start")
+        await asyncio.sleep(0.05)
+        order.append("slow_end")
+
+    async def branch_fast():
+        order.append("fast_start")
+        await asyncio.sleep(0.01)
+        order.append("fast_end")
+
+    async def _drive():
+        await scheduler._gather_due([branch_slow(), branch_fast()])
+
+    asyncio.run(_drive())
+    # Both branches STARTED before either finished (interleaved) → concurrent.
+    assert order[:2] == ["slow_start", "fast_start"]
+    # The fast branch finished before the slow one (it wasn't blocked behind it).
+    assert order.index("fast_end") < order.index("slow_end")
+
+
+def test_gather_due_isolates_branch_failures():
+    """A branch that RAISES must not prevent the others from running (per-branch
+    isolation preserved through the concurrent gather)."""
+    ran = []
+
+    async def branch_boom():
+        ran.append("boom")
+        raise RuntimeError("branch failed")
+
+    async def branch_ok():
+        ran.append("ok")
+
+    async def _drive():
+        # Must NOT raise despite branch_boom blowing up.
+        await scheduler._gather_due([branch_boom(), branch_ok()])
+
+    asyncio.run(_drive())
+    assert "boom" in ran and "ok" in ran
+
+
+def test_loop_runs_due_branches_concurrently():
+    """The tick loop gathers its due branches (concurrent) rather than awaiting
+    each executor call serially in sequence."""
+    import inspect
+    src = inspect.getsource(scheduler.loop)
+    assert "_gather_due" in src

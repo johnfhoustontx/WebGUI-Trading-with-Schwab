@@ -214,6 +214,30 @@ def test_render_callable():
     assert callable(calc.render)
 
 
+def test_big_calc_chain_read_is_off_loop():
+    """Perf regression (P6): the ~10 MB cache:options:calc_chain (full ~7000-
+    contract chain) must be read OFF the event loop via run.io_bound, while the
+    cheap :ver probe stays ON the loop.
+
+    Guards: the version compare still uses read_version (the tiny :ver counter,
+    never wrapped), the big GET+parse goes through run.io_bound, _poll_chain became
+    an async guard_async coroutine, version-gating is preserved (only fetch on a
+    version change), and an in-flight guard stops a slow read stacking across the
+    1 s poll ticks. calc_result / calc_iv are small and stay inline."""
+    import inspect
+
+    src = inspect.getsource(calc.render)
+    assert 'run.io_bound(bus_client.read, "options:calc_chain")' in src
+    assert 'read_version("options:calc_chain")' in src   # cheap probe NOT wrapped
+    assert "async def _poll_chain" in src
+    assert "guard_async" in src
+    assert 'version == state["chain_ver"]' in src        # version-gate preserved
+    assert 'state.get("chain_fetching")' in src          # re-entrancy guard
+    # The small result/iv reads stay inline (not moved off-loop).
+    assert 'bus_client.read("options:calc_result")' in src
+    assert 'bus_client.read("options:calc_iv")' in src
+
+
 def test_render_graceful_empty_cache():
     """render() must paint without crashing when the bus cache is empty (options
     service cold) — the Tier-3 graceful-empty path. Mirrors the swing/simulator

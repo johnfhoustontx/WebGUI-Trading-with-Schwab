@@ -115,6 +115,36 @@ def test_cycle_enqueues_driver_paper_create(fake_bus, monkeypatch):
     assert cmd["args"]["signal"]["symbol"] == "QQQ"
 
 
+def test_cycle_publishes_stand_down_reason_on_log_row(fake_bus, monkeypatch):
+    """R7 end-to-end: the decider's stand-down ``reason`` (e.g. a broken key →
+    'no_key') must be carried onto the published decision-log row so the /driver UI
+    can flag an ops incident vs a genuine model stand-down."""
+    handlers.set_control(fake_bus, enabled=True)
+    _seed_caches(fake_bus)
+    _stub_cycle(monkeypatch, {
+        "decision": {"stand_down": True, "day_thesis": "", "trades": [],
+                     "reason": "no_key"},
+        "executable": [], "rejected": [], "halted": False, "halt_reason": None,
+        "day_pnl": 0.0, "open_positions": []})
+    handlers.run_autonomous_cycle(fake_bus)
+    state = fake_bus.cache_get("cache:driver:autonomous").payload
+    assert state["decisions"][0]["reason"] == "no_key"
+    assert state["decisions"][0]["stand_down"] is True
+
+
+def test_cycle_log_row_reason_absent_is_none(fake_bus, monkeypatch):
+    """A decision with no reason (legacy/back-compat) publishes reason=None."""
+    handlers.set_control(fake_bus, enabled=True)
+    _seed_caches(fake_bus)
+    _stub_cycle(monkeypatch, {
+        "decision": {"stand_down": True, "day_thesis": "", "trades": []},
+        "executable": [], "rejected": [], "halted": False, "halt_reason": None,
+        "day_pnl": 0.0, "open_positions": []})
+    handlers.run_autonomous_cycle(fake_bus)
+    state = fake_bus.cache_get("cache:driver:autonomous").payload
+    assert state["decisions"][0]["reason"] is None
+
+
 def test_cycle_enqueue_lands_on_cmd_options_stream(fake_bus, monkeypatch):
     """Read the stream back (no enqueue_command monkeypatch) → real round-trip."""
     handlers.set_control(fake_bus, enabled=True)

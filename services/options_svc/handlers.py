@@ -13,8 +13,35 @@ GUI's two tabs (0-DTE / Swing) both read from it — there is no scan/swing spli
 
 Kept synchronous: the scaffold's consumer loop handles sync handlers.
 """
+import datetime as _dt
+import logging
+
 from services.options_svc import compute
 from shared.contracts.options import ScanResult
+
+log = logging.getLogger(__name__)
+
+# ── R5: stale trade-opening command gate ────────────────────────────────────
+# A trade-OPENING command (``driver_paper_create`` / ``paper_create``) consumed
+# long after it was enqueued (e.g. the service was down for hours and the stream
+# replays it on restart) would open on STALE economics — corrupting the measured
+# book. We reject any opening command whose enqueue ``ts`` is older than this.
+# Idempotent refresh/manage/reset commands are NOT gated (re-running them is safe).
+# Missing ts (a legacy command serialized before the field existed) → treated as
+# fresh (never reject a legacy command). See shared/contracts/envelope.Command.ts.
+STALE_OPEN_MAX_AGE_SEC = 180  # 3 minutes
+
+# ── R1: surfaced per-trade open results ──────────────────────────────────────
+# ``compute.open_driver_position`` never raises and returns
+# {"status": "opened"|"rejected"|"error", ...}. Historically the handler THREW
+# THE RESULT AWAY, so a signal-shape drift / broker rejection / MIN_FILL_CREDIT
+# reject showed "executed" in the decision log while the account stayed empty
+# (the [[driver-feeds-raw-scanner-signal-shape]] incident). We now capture every
+# open outcome into this rolling list (single-user, single-process service) and
+# surface it on the driver account view so the /driver page shows opened/rejected/
+# error PER trade, not just "enqueued". Also holds R5 stale-reject records.
+_LAST_OPEN_RESULTS: list[dict] = []
+_MAX_OPEN_RESULTS = 25
 
 # ``paper_adjust`` (the rescue-apply primitives) lives in options-scanner and
 # transitively pulls in ``paper_engine`` → ``scoring``. Importing it at module top
@@ -37,6 +64,49 @@ def _paper_adjust():
         import paper_adjust as _pa
         paper_adjust = _pa
     return paper_adjust
+
+def _record_open_result(result: dict) -> None:
+    """Append one open outcome (R1) to the rolling surfaced-results list.
+
+    Stamps a ``ts`` if absent so the /driver page can order/age them. Trims to the
+    last ``_MAX_OPEN_RESULTS`` (newest last). Pure list bookkeeping — never raises."""
+    try:
+        rec = dict(result or {})
+        rec.setdefault("ts", _dt.datetime.now(_dt.timezone.utc).isoformat())
+        _LAST_OPEN_RESULTS.append(rec)
+        if len(_LAST_OPEN_RESULTS) > _MAX_OPEN_RESULTS:
+            del _LAST_OPEN_RESULTS[:-_MAX_OPEN_RESULTS]
+    except Exception:  # noqa: BLE001 — surfacing must never break the open path.
+        log.exception("recording open result degraded")
+
+
+def _command_age_seconds(command) -> float | None:
+    """Age of ``command`` in seconds from its enqueue ``ts``, or None when the ts
+    is missing/unparseable (→ caller treats as NOT stale, back-compat).
+
+    ``Command.ts`` is an ISO-8601 UTC stamp set at enqueue time; a legacy command
+    serialized before the field existed decodes with a fresh stamp (age ~0), and
+    an explicit ``ts=None`` yields None here."""
+    ts = getattr(command, "ts", None)
+    if not ts:
+        return None
+    try:
+        when = _dt.datetime.fromisoformat(ts)
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=_dt.timezone.utc)
+        return (_dt.datetime.now(_dt.timezone.utc) - when).total_seconds()
+    except Exception:  # noqa: BLE001 — unparseable ts → treat as not-stale.
+        log.warning("command ts unparseable (%r); treating as fresh", ts)
+        return None
+
+
+def _is_stale_open(command) -> bool:
+    """True if a trade-OPENING command is older than ``STALE_OPEN_MAX_AGE_SEC``.
+
+    Missing/unparseable ts → False (never reject a legacy command)."""
+    age = _command_age_seconds(command)
+    return age is not None and age > STALE_OPEN_MAX_AGE_SEC
+
 
 CACHE_SCAN = "cache:options:scan"
 EVENT_SCAN = "events:options:scan"
@@ -235,7 +305,7 @@ def _apply_rescue_overlay(data) -> None:
             row["heat"] = entry.get("heat", 0.0)
     except Exception:
         # Never let the overlay break the core paper-account publish.
-        pass
+        log.exception("rescue overlay degraded (paper-account publish continues)")
 
 
 def refresh_paper_account(bus) -> None:
@@ -283,12 +353,12 @@ def run_manage_and_refresh(bus) -> None:
     try:
         refresh_paper_trades(bus)
     except Exception:
-        pass
+        log.exception("piggyback refresh_paper_trades degraded")
     # Also publish the rescue summary for the nav badge.
     try:
         publish_rescue_summary(bus)
     except Exception:
-        pass
+        log.exception("publish_rescue_summary degraded")
 
 
 def refresh_driver_paper(bus) -> None:
@@ -303,8 +373,15 @@ def refresh_driver_paper(bus) -> None:
     ``compute.assess_open_positions``): that overlay reads the MANUAL paper account,
     so tagging the driver's rows with it would attach heat/state from the wrong
     book. Both ``compute.driver_account_view`` and ``compute.driver_account_perf``
-    are already fully defensive (degrade, never raise)."""
+    are already fully defensive (degrade, never raise).
+
+    R1: the view carries ``last_open_results`` — the rolling per-trade open
+    outcomes (opened/rejected/error, with reason) — so the /driver decision log
+    can show WHY a driver open didn't land, instead of a bare "enqueued"."""
     acct = compute.driver_account_view()
+    if isinstance(acct, dict):
+        # Surface a COPY so a later append can't mutate the cached snapshot.
+        acct["last_open_results"] = list(_LAST_OPEN_RESULTS)
     va = bus.cache_set(CACHE_DRIVER_PAPER, acct)
     bus.publish(EVENT_DRIVER_PAPER, {"version": va})
     perf = compute.driver_account_perf()
@@ -594,9 +671,39 @@ def handle_command(bus, command) -> None:
         # Open ONE guardrail-approved signal into the ISOLATED driver account
         # (a separate DB from the manual paper account), then republish the driver
         # views. ``open_driver_position`` lazily seeds the account + is defensive.
-        compute.open_driver_position(command.args.get("signal"),
-                                     int(command.args.get("qty", 1)))
-        refresh_driver_paper(bus)
+        signal = command.args.get("signal") or {}
+        sym = signal.get("symbol") or signal.get("id")
+        # R5: refuse a trade-opening command consumed long after enqueue (stale
+        # economics on a service-restart replay). Surfaced via the R1 results list.
+        if _is_stale_open(command):
+            age = _command_age_seconds(command)
+            log.warning(
+                "REJECTED stale driver_paper_create for %s: age %.0fs > %ds "
+                "(enqueue ts=%s) — not opening on stale economics",
+                sym, age or -1, STALE_OPEN_MAX_AGE_SEC, getattr(command, "ts", None))
+            _record_open_result({"status": "rejected", "reason": "stale_command",
+                                 "symbol": sym, "age_sec": round(age or 0, 1),
+                                 "source": "driver"})
+            refresh_driver_paper(bus)
+        else:
+            # R1: capture the outcome — ``open_driver_position`` NEVER raises and
+            # returns {"status": "opened"|"rejected"|"error", ...}. Log + surface
+            # any non-opened outcome so a silent shape-drift / broker / low-credit
+            # reject can't masquerade as an executed trade in the decision log.
+            result = compute.open_driver_position(
+                signal, int(command.args.get("qty", 1))) or {}
+            result.setdefault("symbol", sym)
+            result.setdefault("source", "driver")
+            status = result.get("status")
+            if status != "opened":
+                log.warning(
+                    "driver open did NOT land for %s: status=%s reason=%s error=%s",
+                    sym, status, result.get("reason"), result.get("error"))
+            else:
+                log.info("driver opened %s qty=%s credit=%s",
+                         sym, result.get("qty"), result.get("entry_credit"))
+            _record_open_result(result)
+            refresh_driver_paper(bus)
     elif command.type == "driver_paper_manage":
         run_driver_manage_and_refresh(bus)
     elif command.type == "driver_paper_reset":
@@ -604,8 +711,22 @@ def handle_command(bus, command) -> None:
             float(command.args.get("starting_balance", 25000.0)))
         refresh_driver_paper(bus)
     elif command.type == "paper_create":
-        compute.create_paper_trade(command.args.get("signal"),
-                                   command.args.get("qty", 1))
+        # R5: refuse a stale manual paper-open (a restart replay would open on
+        # stale economics). Surfaced via the R1 results list + logged; the ledger
+        # is still refreshed so the page repaints.
+        if _is_stale_open(command):
+            age = _command_age_seconds(command)
+            sig = command.args.get("signal") or {}
+            log.warning(
+                "REJECTED stale paper_create for %s: age %.0fs > %ds (enqueue ts=%s)",
+                sig.get("symbol"), age or -1, STALE_OPEN_MAX_AGE_SEC,
+                getattr(command, "ts", None))
+            _record_open_result({"status": "rejected", "reason": "stale_command",
+                                 "symbol": sig.get("symbol"),
+                                 "age_sec": round(age or 0, 1), "source": "manual"})
+        else:
+            compute.create_paper_trade(command.args.get("signal"),
+                                       command.args.get("qty", 1))
         refresh_paper_trades(bus)
     elif command.type == "paper_reload":
         refresh_paper_trades(bus)

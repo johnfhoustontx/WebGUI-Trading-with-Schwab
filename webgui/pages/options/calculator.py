@@ -365,11 +365,11 @@ def render():
     chain-extractors LOCALLY on the cached chain dict."""
     import datetime as dt
 
-    from nicegui import ui
+    from nicegui import ui, run
 
     import bus_client
 
-    from pages.ui_guard import guard
+    from pages.ui_guard import guard, guard_async
 
     from . import handoff
     from . import leg_editor
@@ -395,6 +395,7 @@ def render():
         "last_loaded": None,   # last symbol a Load was triggered for (tab/Enter dedup)
         "loading": False,      # True while a user-initiated load is in flight (overlay up)
         "applying": False,     # True while _apply_chain/_prefill set Expiry programmatically
+        "chain_fetching": False,  # in-flight guard for the off-loop big-chain read
     }
 
     # ── Dark "dashboard" layout (page-scoped, .calc-v2). The functional widgets
@@ -836,13 +837,24 @@ def render():
             ui.notify(f"Couldn't imply IV ({res['error']}). Enter it manually.",
                       type="warning")
 
-    @guard
-    def _poll_chain():
+    @guard_async
+    async def _poll_chain():
+        # The :ver probe stays ON the event loop (cheap). The chain payload
+        # (cache:options:calc_chain is the full ~7000-contract chain, ~10 MB — a
+        # blocking GET + JSON parse) is read OFF the loop via run.io_bound so it
+        # never blocks other clients. The version-gate means the big read only
+        # happens when a new chain was published (not every 1 s tick), and the
+        # in-flight guard stops a slow read from stacking across ticks.
         version = bus_client.read_version("options:calc_chain")
-        if version == state["chain_ver"]:
+        if version == state["chain_ver"] or state.get("chain_fetching"):
             return
         state["chain_ver"] = version
-        _apply_chain(bus_client.read("options:calc_chain"))
+        state["chain_fetching"] = True
+        try:
+            chain = await run.io_bound(bus_client.read, "options:calc_chain")
+        finally:
+            state["chain_fetching"] = False
+        _apply_chain(chain)
 
     @guard
     def _poll_result():

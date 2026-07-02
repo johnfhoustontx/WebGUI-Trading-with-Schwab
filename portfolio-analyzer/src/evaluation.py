@@ -97,17 +97,28 @@ def compute_baseline(holding: dict, stock_df, sector_df, spy_df, entry) -> dict:
 
     window = slice_since(stock_df, entry_date) if entry_date else None
     days_held = None
+    trading_days_held = None
     if entry_date is not None:
         try:
-            days_held = max(1, (date.today() - date.fromisoformat(entry_date)).days)
+            today = date.today()
+            entry = date.fromisoformat(entry_date)
+            days_held = max(1, (today - entry).days)
+            # Business-day (trading-day) count over the holding window so the
+            # annualized return is on the SAME 252-day basis as annualized
+            # volatility (which uses sqrt(252)). Mixing calendar 365 with
+            # trading 252 mis-scales the Sharpe-like ratio by ~365/252 ≈ 1.45x.
+            import numpy as np
+            trading_days_held = max(1, int(np.busday_count(entry, today)))
         except ValueError:
             days_held = None
+            trading_days_held = None
 
     return {
         "symbol": holding.get("symbol"),
         "entry_date": entry_date,
         "entry_price": entry_price,
         "days_held": days_held,
+        "trading_days_held": trading_days_held,
         "ann_vol": annualized_volatility(window),
         "atr": latest_atr(stock_df),
         "peak_close": float(window["close"].max()) if window is not None else None,
@@ -204,14 +215,22 @@ def evaluate_portfolio(model: dict, baselines: dict) -> dict:
         # scoring against the broker average price alone.
         entry_price = (b.get("entry_price") or h.get("avg_price")) if b else None
         days = b.get("days_held")
+        # Prefer a real business-day count; fall back to converting calendar
+        # days at the standard 252/365 ratio when only calendar days are known.
+        trading_days = b.get("trading_days_held")
+        if trading_days is None and days:
+            trading_days = max(1, round(days * TRADING_DAYS / 365))
 
         total_return = None
         if last is not None and entry_price:
             total_return = last / entry_price - 1.0
 
+        # Annualize on the TRADING-day (252) basis so this ratio's numerator
+        # shares a basis with annualized volatility (sqrt(252)); the Sharpe-like
+        # ratio below (ann_return / ann_vol) is then scale-consistent.
         ann_return = None
-        if total_return is not None and days and (1 + total_return) > 0:
-            ann_return = (1 + total_return) ** (365 / days) - 1
+        if total_return is not None and trading_days and (1 + total_return) > 0:
+            ann_return = (1 + total_return) ** (TRADING_DAYS / trading_days) - 1
 
         vs_sector = (total_return - b["sector_ret"]
                      if total_return is not None and b.get("sector_ret") is not None

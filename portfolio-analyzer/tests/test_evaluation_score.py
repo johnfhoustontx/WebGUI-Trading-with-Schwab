@@ -14,7 +14,8 @@ def make_holding(symbol="ABC", last=110.0, qty=10, avg=100.0):
 
 def make_baseline(symbol="ABC", **over):
     base = {"symbol": symbol, "entry_date": "2026-01-05", "entry_price": 100.0,
-            "days_held": 100, "ann_vol": 0.20, "atr": 2.0, "peak_close": 115.0,
+            "days_held": 100, "trading_days_held": 70, "ann_vol": 0.20,
+            "atr": 2.0, "peak_close": 115.0,
             "sector_ret": 0.04, "spy_ret": 0.03, "entry_pct": 0.25}
     base.update(over)
     return base
@@ -29,7 +30,9 @@ def test_core_metrics():
                                {"ABC": make_baseline()})
     c = cards["ABC"]
     assert c["total_return"] == pytest.approx(0.10)          # 110/100 - 1
-    assert c["ann_return"] == pytest.approx((1.10) ** (365 / 100) - 1)
+    # Annualized on the TRADING-day (252) basis to match ann_vol's sqrt(252),
+    # using trading_days_held=70 (not calendar days=100).
+    assert c["ann_return"] == pytest.approx((1.10) ** (252 / 70) - 1)
     assert c["vs_sector"] == pytest.approx(0.10 - 0.04)
     assert c["vs_spy"] == pytest.approx(0.10 - 0.03)
     assert c["sharpe"] == pytest.approx(c["ann_return"] / 0.20)

@@ -15,7 +15,11 @@ def test_health():
     with TestClient(app) as c:
         r = c.get("/health")
         assert r.status_code == 200
-        assert r.json() == {"domain": "trade", "up": True}
+        body = r.json()
+        assert body["domain"] == "trade"
+        assert body["up"] is True
+        # Additive R2 scheduler-heartbeat keys (trade is command-only → alive).
+        assert body["scheduler_alive"] is True
 
 
 def test_app_wires_command_handler():

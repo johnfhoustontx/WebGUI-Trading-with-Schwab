@@ -62,7 +62,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <h1>WebGUI Trading with Schwab</h1>
   <div class="sub">User Guide</div>
-  <div class="meta">WebGUI Trading with Schwab · Generated 2026-06-28</div>
+  <div class="meta">WebGUI Trading with Schwab · Generated 2026-07-02</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -78,6 +78,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#layout">Layout</a></li>
 <li><a href="#navigation-groups">Navigation groups</a></li>
 <li><a href="#alert-badges-and-chimes">Alert badges and chimes</a></li>
+<li><a href="#getting-help-on-any-page">Getting help on any page</a></li>
 </ul>
 </li>
 <li><a href="#options">Options</a><ul>
@@ -106,6 +107,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#eod-report">EOD Report</a></li>
 <li><a href="#system-status">System Status</a></li>
 <li><a href="#settings">Settings</a></li>
+<li><a href="#user-manuals">User Manuals</a></li>
 <li><a href="#terminate">Terminate</a></li>
 </ul>
 </li>
@@ -194,6 +196,9 @@ running — it's a shared Windows service.)</p>
 <ul>
 <li>A <strong>left navigation drawer</strong> with expandable groups and flat items.</li>
 <li>A <strong>header</strong> at the top with a menu toggle and the current page title.</li>
+<li>A small blue <strong>"?" help button</strong> in the bottom-right corner of the header —
+  hover it for a plain-language "idiot's guide" to the page you're on (see
+  <em>Getting help on any page</em> below).</li>
 <li>The <strong>page content</strong> in the main area.</li>
 </ul>
 <h2 id="navigation-groups">Navigation groups</h2>
@@ -207,7 +212,7 @@ running — it's a shared Windows service.)</p>
 <tbody>
 <tr>
 <td><strong>Options</strong> (expandable)</td>
-<td>Scanner · Paper Trades · Captured Signals · Paper Portfolio · Calculator · Swing Scanner · Gamma · Simulator · Expected Move</td>
+<td>Scanner · Paper Trades · Captured Signals · Paper Portfolio · Calculator · Swing Scanner · Gamma · Simulator · Expected Move · Rescue</td>
 </tr>
 <tr>
 <td><strong>Sentiment</strong> (expandable)</td>
@@ -227,7 +232,7 @@ running — it's a shared Windows service.)</p>
 </tr>
 <tr>
 <td><strong>More</strong> (expandable)</td>
-<td>EOD Report · System Status · Settings · Terminate</td>
+<td>EOD Report · System Status · Settings (→ User Manuals) · Terminate</td>
 </tr>
 </tbody>
 </table>
@@ -253,6 +258,15 @@ link, or use <strong>Test sound</strong> on the Settings page, to unlock audio f
 session.</p>
 </blockquote>
 <p>You control all of this on the <strong>Settings</strong> page (see <em>Reports &amp; System</em>).</p>
+<h2 id="getting-help-on-any-page">Getting help on any page</h2>
+<p>Two built-in help features are always within reach:</p>
+<ul>
+<li><strong>The "?" button</strong> — a small blue circle in the header's bottom-right corner, on
+  <strong>every</strong> page. Hover it and a short "idiot's guide" pops up explaining, in plain
+  language, what that page is for and how changing its settings changes the result.</li>
+<li><strong>User Manuals</strong> — a menu item <strong>nested under Settings</strong> (in the <strong>More</strong> group).
+  It opens this User Guide plus the Technical and API references in your browser.</li>
+</ul>
 <hr />
 <h1 id="options">Options</h1>
 <p>The Options section is the heart of the app. All Options pages share a common
@@ -673,6 +687,18 @@ just approve or skip the result.</p>
 <blockquote>
 <p>Clicking <strong>Test sound</strong> also unlocks browser audio for the session.</p>
 </blockquote>
+<p>The <strong>Settings</strong> nav entry is also a small sub-group: click its caret to reveal
+<strong>User Manuals</strong>, which opens this User Guide and the Technical / API references in
+your browser.</p>
+<h2 id="user-manuals">User Manuals</h2>
+<p><strong>Route:</strong> <code>/manuals</code> (nested under <strong>Settings</strong> in the <strong>More</strong> group).</p>
+<p>A simple index that links the three manuals — each opens in a new browser tab:</p>
+<ul>
+<li><strong>User Guide</strong> — how to use the app (this document).</li>
+<li><strong>Technical Reference</strong> — the math behind every number.</li>
+<li><strong>API / Developer Reference</strong> — the integration surface for developers.</li>
+</ul>
+<p>The Word (<code>.docx</code>) copies live alongside the HTML under <code>docs/manuals/</code>.</p>
 <h2 id="terminate">Terminate</h2>
 <p><strong>Route:</strong> <code>/terminate</code> (under <strong>More</strong>).</p>
 <p>A guarded "stop the whole local stack" page. The red <strong>Stop all services</strong> button

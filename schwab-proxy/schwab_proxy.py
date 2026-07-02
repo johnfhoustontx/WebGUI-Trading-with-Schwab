@@ -31,7 +31,7 @@ import time
 import base64
 import asyncio
 import logging
-from logging.handlers import TimedRotatingFileHandler
+from logging.handlers import TimedRotatingFileHandler, RotatingFileHandler
 import sqlite3
 import threading
 import pathlib
@@ -84,12 +84,22 @@ _error_handler.setFormatter(
     )
 )
 
+# Full INFO stream, size-rotated so it never grows unbounded: ~10 MB active
+# file + 5 backups (~60 MB ceiling), matching errors.log's bounded-history
+# policy (was a plain FileHandler that grew without limit).
+_info_handler = RotatingFileHandler(
+    LOG_DIR / "schwab_proxy.log",
+    maxBytes=10 * 1024 * 1024,
+    backupCount=5,
+    encoding="utf-8",
+)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
     datefmt="%H:%M:%S",
     handlers=[
-        logging.FileHandler(LOG_DIR / "schwab_proxy.log"),
+        _info_handler,
         logging.StreamHandler(),
         _error_handler,
     ],
@@ -118,6 +128,18 @@ MIN_REQUEST_INTERVAL = 0.2  # seconds between Schwab API calls
 # (a lost response on a submitted order must never cause a duplicate).
 MAX_RETRIES = 3            # total attempts for a retryable request
 RETRY_BACKOFF_BASE = 0.25  # seconds; sleep = base * 2**attempt → 0.25, 0.5, ...
+
+
+def _is_retryable_status(status_code: int) -> bool:
+    """Whether an HTTP status warrants a retry.
+
+    Deterministic 4xx CLIENT errors (400/403/404/…) will not change on a
+    re-request, so retrying them just burns MAX_RETRIES attempts + backoff (the
+    mechanism behind the old errors.log flood). We retry ONLY 5xx server errors;
+    network/timeout exceptions are retried separately at the call site. 401 is
+    NOT handled here — it has its own token-refresh-then-retry path.
+    """
+    return status_code >= 500
 
 # Daily auto-shutdown: 15:30 America/Chicago, Mon–Fri (handles DST automatically).
 SHUTDOWN_TZ = ZoneInfo("America/Chicago")
@@ -299,10 +321,13 @@ class TokenManager:
     def api_request(self, endpoint: str, params: Optional[Dict] = None) -> Dict:
         """Marketdata API GET request, with bounded retry on transient failures.
 
-        Idempotent GET, so any non-200 (incl. timeouts → 504, dropped
-        connections → 502) is retried up to MAX_RETRIES with exponential
-        backoff. On final failure the original {status_code, data, error} shape
-        is returned unchanged, so consumers see no contract difference.
+        Idempotent GET, so TRANSIENT failures (timeouts → 504, dropped
+        connections → 502, 5xx server errors) are retried up to MAX_RETRIES with
+        exponential backoff. Deterministic 4xx client errors (400/403/404/…) are
+        NOT retried — they won't change on a re-request — except 401, which keeps
+        its token-refresh-then-retry path. On final failure the original
+        {status_code, data, error} shape is returned unchanged, so consumers see
+        no contract difference.
         """
         self.ensure_valid_token()
         headers = {"Authorization": f'Bearer {self.tokens["AccessToken"]}', "Accept": "application/json"}
@@ -323,6 +348,10 @@ class TokenManager:
                     return {"status_code": 200, "data": resp.json(), "error": None}
                 logger.error(f"Schwab {resp.status_code}: {resp.text[:200]}")
                 result = {"status_code": resp.status_code, "data": None, "error": resp.text[:500]}
+                # A deterministic 4xx (400/403/404/…) won't change on re-request:
+                # return immediately instead of burning the remaining attempts.
+                if not _is_retryable_status(resp.status_code):
+                    return result
             except requests.exceptions.Timeout:
                 result = {"status_code": 504, "data": None, "error": "Schwab API timeout"}
             except requests.exceptions.RequestException as e:
@@ -642,6 +671,11 @@ def trader_request(method: str, endpoint: str, json_body: dict = None) -> dict:
                 return {"status_code": resp.status_code, "data": resp.json() if resp.text else {}, "error": None}
             logger.error(f"Trader API {resp.status_code}: {resp.text[:300]}")
             result = {"status_code": resp.status_code, "data": None, "error": resp.text[:500]}
+            # A deterministic 4xx won't change on re-request — don't retry it.
+            # (POSTs already fail fast via attempts=1; this also short-circuits
+            # a 4xx on the idempotent GET path.)
+            if not _is_retryable_status(resp.status_code):
+                return result
         except requests.exceptions.RequestException as e:
             result = {"status_code": 502, "data": None, "error": str(e)}
         if attempt < attempts - 1:

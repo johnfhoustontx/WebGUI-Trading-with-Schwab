@@ -87,6 +87,84 @@ def test_reserve_and_release_buying_power(tmp_path):
     assert acct["buying_power_reserved"] == 0.0
 
 
+def _open_pos(db, signal_id, max_loss_total):
+    return pdb.insert_position(db, {
+        "signal_id": signal_id, "symbol": "QQQ", "strategy": "PCS",
+        "short_strike": 1, "long_strike": 0, "width": 1,
+        "expiration": "2026-06-05", "dte_at_entry": 1, "quantity": 1,
+        "entry_credit": 0.5, "entry_order_id": 1, "max_loss_per": max_loss_total,
+        "max_loss_total": max_loss_total, "entry_ts": "t"})
+
+
+def test_reconcile_fixes_orphaned_reserved_bp(tmp_path):
+    """R6: a crash between reserve_buying_power and insert_position leaves BP
+    reserved against no position. Reconcile recomputes reserved = Σ open
+    max_loss_total, credits the orphaned amount back to cash (cash+reserved kept
+    invariant), and returns the corrected drift."""
+    db = _db(tmp_path)
+    pdb.ensure_account(db, 25_000.0, "2026-06-03")
+    # One real open position worth 300 of reserved BP.
+    _open_pos(db, "sigA", 300.0)
+    pdb.reserve_buying_power(db, 300.0)
+    # Simulate a crash AFTER a second reserve but BEFORE the insert: 200 orphaned.
+    pdb.reserve_buying_power(db, 200.0)
+    before = pdb.get_account(db)
+    assert before["buying_power_reserved"] == 500.0
+    total_before = before["cash"] + before["buying_power_reserved"]
+
+    drift = pdb.reconcile_buying_power(db)
+
+    after = pdb.get_account(db)
+    assert drift == 200.0                                # over-reserved by 200
+    assert after["buying_power_reserved"] == 300.0       # = Σ open max_loss_total
+    assert after["cash"] == round(before["cash"] + 200.0, 2)  # orphaned BP credited back
+    # Total committed capital is invariant across the fix.
+    assert round(after["cash"] + after["buying_power_reserved"], 2) == round(total_before, 2)
+
+
+def test_reconcile_is_noop_when_consistent(tmp_path):
+    """When reserved already equals Σ open max_loss_total, reconcile changes
+    nothing and returns 0.0 (idempotent)."""
+    db = _db(tmp_path)
+    pdb.ensure_account(db, 25_000.0, "2026-06-03")
+    _open_pos(db, "sigA", 300.0)
+    pdb.reserve_buying_power(db, 300.0)
+    before = pdb.get_account(db)
+
+    drift = pdb.reconcile_buying_power(db)
+    # Running it twice is still a no-op.
+    drift2 = pdb.reconcile_buying_power(db)
+
+    after = pdb.get_account(db)
+    assert drift == 0.0 and drift2 == 0.0
+    assert after["cash"] == before["cash"]
+    assert after["buying_power_reserved"] == before["buying_power_reserved"]
+
+
+def test_reconcile_no_account_is_safe(tmp_path):
+    """Reconcile against a DB with no account row is a safe no-op (returns 0.0)."""
+    db = _db(tmp_path)
+    assert pdb.reconcile_buying_power(db) == 0.0
+
+
+def test_reconcile_ignores_closed_positions(tmp_path):
+    """Closed positions don't hold BP, so reconcile excludes them from the sum."""
+    db = _db(tmp_path)
+    pdb.ensure_account(db, 25_000.0, "2026-06-03")
+    open_pid = _open_pos(db, "sigOpen", 250.0)
+    closed_pid = _open_pos(db, "sigClosed", 400.0)
+    pdb.close_position(db, closed_pid, exit_debit=0.1, exit_order_id=9,
+                       realized_pnl=10, exit_reason="X", exit_ts="t", status="CLOSED")
+    # Reserved reflects BOTH opens (a crash left the closed one's BP reserved).
+    pdb.reserve_buying_power(db, 650.0)
+
+    drift = pdb.reconcile_buying_power(db)
+
+    after = pdb.get_account(db)
+    assert drift == 400.0  # the closed position's orphaned BP
+    assert after["buying_power_reserved"] == 250.0  # only the open position
+
+
 def test_realize_pnl_updates_lifetime_and_session(tmp_path):
     db = _db(tmp_path)
     pdb.ensure_account(db, 25_000.0, "2026-06-03")

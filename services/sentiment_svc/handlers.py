@@ -43,6 +43,46 @@ _TREND = {"last_ts": None, "history": [], "committed": None, "smoothed": None,
           "trend": None, "trend_30d": None}
 _TREND_LOCK = threading.Lock()
 
+# Cached 30-day backfill. ``compute.load_snapshots`` re-runs the full 35-day
+# scoring path (re-fetching ~6 months of VIX/VIX1D/VIX9D/CPCE + sector/SPY
+# histories and rescoring 35 days) — ~24 proxy calls — but the 30-day history
+# changes at most once per session-day. So it is computed at most ONCE per local
+# date here and reused on the intervening 120 s ticks (the LIVE composite +
+# intraday recording still refresh every gated tick). ``refresh`` runs from two
+# entry points across a multi-worker executor, so the read-modify-write is
+# serialized by ``_SNAPSHOTS_LOCK``.
+_SNAPSHOTS = {"date": None, "snaps": None, "spy": None}
+_SNAPSHOTS_LOCK = threading.Lock()
+
+
+def _session_date() -> str:
+    """Current local (CT) date as an ISO string — the backfill cache key. Split
+    out so tests can freeze the session day without touching the wall clock."""
+    return _dt.datetime.now(_ZI("America/Chicago")).date().isoformat()
+
+
+def _load_snapshots_cached():
+    """(snaps, spy) for the 30-day history — computed at most once per session-day.
+
+    Returns the cached (snaps, spy) when it was already computed for today's local
+    date; otherwise runs the heavy ``compute.load_snapshots`` once and caches it.
+    Serialized by ``_SNAPSHOTS_LOCK`` (two refresh entry points, multi-worker
+    executor). Defensive: if a recompute raises but a prior day's result is cached,
+    the stale-but-valid cached history is reused rather than aborting the refresh."""
+    today = _session_date()
+    with _SNAPSHOTS_LOCK:
+        if _SNAPSHOTS["date"] == today and _SNAPSHOTS["snaps"] is not None:
+            return _SNAPSHOTS["snaps"], _SNAPSHOTS["spy"]
+        try:
+            snaps, spy = compute.load_snapshots()
+        except Exception:  # noqa: BLE001 — keep the last good history if any.
+            log.exception("backfill load_snapshots failed")
+            if _SNAPSHOTS["snaps"] is not None:
+                return _SNAPSHOTS["snaps"], _SNAPSHOTS["spy"]
+            return [], []
+        _SNAPSHOTS.update(date=today, snaps=snaps, spy=spy)
+        return snaps, spy
+
 
 def _maybe_recompute_trend():
     """Recompute the directional Market Trend if the 15-min gate is due.
@@ -225,7 +265,9 @@ def _composite_gate(live, snaps):
 
 def refresh(bus, with_sectors: bool = False) -> None:
     """Compute sentiment, write the cache views, publish events, dual-write bridge."""
-    snaps, spy = compute.load_snapshots()
+    # 30-day backfill is cached per session-day (see _load_snapshots_cached) —
+    # only the LIVE composite (+ intraday recording) recompute every tick.
+    snaps, spy = _load_snapshots_cached()
     live = compute.load_live()
 
     # Validation gate — fail loudly if the composite shape drifts.
@@ -246,7 +288,10 @@ def refresh(bus, with_sectors: bool = False) -> None:
     })
     bus.publish(EVENT_COMPOSITE, {"version": version})
 
-    bus.cache_set(CACHE_HISTORY, {"snaps": snaps or [], "spy": spy or []})
+    # skip_unchanged: the 30-day history is cached per session-day, so most ticks
+    # write a byte-identical payload — don't bump the version (no GUI repaint).
+    bus.cache_set(CACHE_HISTORY, {"snaps": snaps or [], "spy": spy or []},
+                  skip_unchanged=True)
 
     _record_intraday(bus, live, _TREND["trend"])
 

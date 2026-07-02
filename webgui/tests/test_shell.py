@@ -81,3 +81,140 @@ def test_recompute_badges_uses_passed_scan(monkeypatch):
 
     main._recompute_badges(scan={"signals": []})
     assert "options:scan" not in reads  # used the passed scan, no extra read
+
+
+# ── Health / staleness watcher (R4b / R8 / R9) ───────────────────────────────
+def _reset_health_state(main):
+    main._ALERT_STATE.update(
+        alerted=set(), alerted_init=None, health_alerted=set(), health_init=None)
+    main._svc_health_cache.update(data={}, ts=0.0)
+    main._bus_outage.update(logged=False)
+    main._NAV_BADGES.clear()
+
+
+def test_probe_services_throttled_to_interval(monkeypatch):
+    """The Tier-2 /health fan-out runs at most once per interval, NOT every tick."""
+    import main
+
+    calls = {"n": 0}
+
+    class _Resp:
+        status_code = 200
+
+        def json(self):
+            return {"up": True}
+
+    def fake_get(url, timeout=None):
+        calls["n"] += 1
+        return _Resp()
+
+    import requests
+    monkeypatch.setattr(requests, "get", fake_get)
+    main._svc_health_cache.update(data={}, ts=0.0)
+
+    n_svc = len(main._HEALTH_SERVICES)
+    # First probe at t0 -> one GET per service.
+    main._probe_services_health(1000.0)
+    assert calls["n"] == n_svc
+    # A tick 2s later reuses the cache -> no new GETs (throttled).
+    main._probe_services_health(1002.0)
+    assert calls["n"] == n_svc
+    # Past the interval -> re-probes.
+    main._probe_services_health(1000.0 + main._HEALTH_PROBE_INTERVAL_SEC + 1)
+    assert calls["n"] == 2 * n_svc
+
+
+def test_probe_services_health_never_raises(monkeypatch):
+    """A dead service (connection error) maps to False, never propagates."""
+    import main
+    import requests
+
+    def boom(url, timeout=None):
+        raise requests.exceptions.ConnectionError("refused")
+
+    monkeypatch.setattr(requests, "get", boom)
+    main._svc_health_cache.update(data={}, ts=0.0)
+    out = main._probe_services_health(5000.0)
+    assert set(out.keys()) == set(main._HEALTH_SERVICES)
+    assert all(v is False for v in out.values())
+
+
+def test_is_view_stale_threshold(monkeypatch):
+    import datetime as dt
+    import main
+
+    now = dt.datetime(2026, 6, 17, 15, 0, tzinfo=dt.timezone.utc)
+    fresh = (now - dt.timedelta(seconds=10)).isoformat()
+    old = (now - dt.timedelta(seconds=main.alerts.STALE_AFTER_SEC + 60)).isoformat()
+    assert main._is_view_stale(fresh, now) is False
+    assert main._is_view_stale(old, now) is True
+    assert main._is_view_stale(None, now) is True          # no publish yet -> stale
+    assert main._is_view_stale("garbage", now) is True     # unparseable -> stale
+
+
+def test_watcher_seeds_health_then_alerts_on_transition(monkeypatch):
+    """First tick seeds (no alert); a service going down after seeding fires once,
+    then dedups while it stays down."""
+    import main
+
+    _reset_health_state(main)
+    monkeypatch.setattr(main.bus_client, "read", lambda v: {})
+    monkeypatch.setattr(main, "_recompute_badges", lambda scan=None: None)
+    monkeypatch.setattr(main.app_settings, "load", lambda: {
+        "alert_enabled": True, "alert_market_hours_only": False,
+        "alert_min_score": 0, "alert_sound": "chime", "alert_volume": 0.6,
+        "desktop_notifications": False})
+    monkeypatch.setattr(main, "_freshness_facts", lambda now_utc: {})
+
+    health = {"data": {"options": True}}
+    monkeypatch.setattr(main, "_probe_services_health", lambda mono: health["data"])
+
+    # Seed tick: everything up -> no alert, no badge.
+    assert main._watcher_compute() is None
+    assert main._NAV_BADGES.get("/status", 0) == 0
+
+    # options_svc goes down -> transition -> health alert fires once.
+    health["data"] = {"options": False}
+    d = main._watcher_compute()
+    assert d and d["health"] is not None and d["health"][3] == 1
+    assert main._NAV_BADGES["/status"] == 1
+
+    # Still down next tick -> deduped (no new alert), badge persists.
+    d2 = main._watcher_compute()
+    assert d2 is None or d2.get("health") is None
+    assert main._NAV_BADGES["/status"] == 1
+
+    # Recovers -> badge clears, and can alert again if it breaks later.
+    health["data"] = {"options": True}
+    assert main._watcher_compute() is None
+    assert main._NAV_BADGES["/status"] == 0
+
+
+def test_guarded_compute_logs_once_on_bus_outage(monkeypatch, caplog):
+    """A bus outage logs a single warning (not a traceback every tick) and returns
+    None; recovery logs once and resumes."""
+    import logging
+    import main
+
+    _reset_health_state(main)
+
+    calls = {"n": 0}
+
+    def boom():
+        calls["n"] += 1
+        raise ConnectionError("memurai down")
+
+    monkeypatch.setattr(main, "_watcher_compute", boom)
+    with caplog.at_level(logging.WARNING, logger="webgui.watcher"):
+        assert main._guarded_compute() is None
+        assert main._guarded_compute() is None
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1                    # logged ONCE despite two outages
+    assert main._bus_outage["logged"] is True
+    assert calls["n"] == 2                        # still attempted each tick
+
+    # Recovery: next successful compute resets the memo + logs once at INFO.
+    monkeypatch.setattr(main, "_watcher_compute", lambda: {"scanner": None, "health": None})
+    with caplog.at_level(logging.INFO, logger="webgui.watcher"):
+        assert main._guarded_compute() == {"scanner": None, "health": None}
+    assert main._bus_outage["logged"] is False

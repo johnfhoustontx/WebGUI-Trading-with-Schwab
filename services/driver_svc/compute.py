@@ -184,14 +184,23 @@ def _menu_item(sig, mid) -> dict:
     ``expiration`` key (``expiry`` fallback) and ``pop`` the real ``pop_pct``
     (``pop`` fallback). Only the id + this projection are shown to the model — the
     RAW signal stays in ``menu_by_id`` for verbatim execution.
+
+    ``credit``/``max_loss`` are shown **NET of round-trip commission** (the scanner
+    attaches ``net_credit``/``net_max_loss``/``commission``; gross fields are the
+    fallback for pre-fix cached signals) so the model's perceived edge is
+    net-of-fees. Sizing/BP still key off the RAW gross ``max_loss`` in
+    ``menu_by_id`` (structural margin; commission is a transaction cost, not margin).
     """
+    net_credit = sig.get("net_credit", sig.get("credit"))
+    net_max_loss = sig.get("net_max_loss", sig.get("max_loss"))
     return {
         "id": mid,
         "symbol": sig.get("symbol"),
         "structure": _g.signal_structure(sig),
         "expiry": sig.get("expiration") or sig.get("expiry"),
-        "credit": sig.get("credit"),
-        "max_loss": sig.get("max_loss"),
+        "credit": net_credit,
+        "max_loss": net_max_loss,
+        "commission": sig.get("commission"),
         "pop": sig.get("pop_pct") if sig.get("pop_pct") is not None else sig.get("pop"),
         "score": sig.get("composite_score"),
     }

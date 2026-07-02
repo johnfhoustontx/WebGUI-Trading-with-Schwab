@@ -23,6 +23,52 @@ log = logging.getLogger("scanner")
 
 UNLIMITED = 999999  # placeholder for unlimited risk/reward in single-leg strategies
 
+# Single source of truth for the risk-free rate used across the pricing/PoP stack
+# (this module, the options simulator, and services/options_svc compute.calc_iv).
+# STATIC ASSUMPTION — a fixed short-term Treasury proxy, NOT sourced live. For the
+# short-dated retail options this tool prices, r is a second-order input; a live
+# curve is out of scope. Import this everywhere rather than re-typing the literal
+# (previously it drifted: calculator 0.045 vs simulator 0.04).
+RISK_FREE_RATE = 0.045
+
+# Expiry settlement convention — options stop trading at the 4:00pm ET close. The
+# time-to-expiry helper below (and services/options_svc compute) both settle to
+# 16:00 US/Eastern so the calculator and the simulator compute an IDENTICAL T.
+EXPIRY_CLOSE_HOUR_ET = 16  # 4:00pm ET
+
+# DIVIDEND-YIELD ASSUMPTION (q = 0): every Black-Scholes routine here assumes a
+# ZERO continuous dividend yield. This slightly OVERSTATES call value and
+# UNDERSTATES put value for dividend-paying names (SPX/SPY carry ~1.3% annualized),
+# growing with T. Acceptable for the short-dated retail structures this tool
+# targets, but stated explicitly. A live q term is intentionally OUT OF SCOPE.
+
+
+def expiry_time_to_years(ref_dt, expiry_date):
+    """Years from ``ref_dt`` to the expiry's 4:00pm ET close (/365, never negative).
+
+    Settles at ``EXPIRY_CLOSE_HOUR_ET`` (16:00 US/Eastern) so this matches the
+    calculator's canonical ``services/options_svc/compute.time_to_expiry_years``
+    convention — both tools then produce an IDENTICAL time-to-expiry, which
+    matters most at 0DTE where T is acutely sensitive to the settlement hour.
+
+    ``ref_dt`` may be tz-aware or tz-naive. When aware, the settlement is built in
+    America/New_York and the two aware datetimes subtract correctly across zones.
+    When naive (the simulator's ``as_of``/history index are naive wall-clock), the
+    settlement is a naive 16:00 so both sides compare on the same wall-clock basis
+    (never mixing aware/naive, which would raise TypeError).
+    """
+    import datetime as _dt
+
+    if getattr(ref_dt, "tzinfo", None) is not None:
+        from zoneinfo import ZoneInfo as _ZoneInfo
+        settlement = _dt.datetime(expiry_date.year, expiry_date.month,
+                                  expiry_date.day, EXPIRY_CLOSE_HOUR_ET, 0, 0,
+                                  tzinfo=_ZoneInfo("America/New_York"))
+    else:
+        settlement = _dt.datetime(expiry_date.year, expiry_date.month,
+                                  expiry_date.day, EXPIRY_CLOSE_HOUR_ET, 0, 0)
+    return max((settlement - ref_dt).total_seconds(), 0.0) / (365.0 * 86400.0)
+
 #############################################
 # NORMAL DISTRIBUTION HELPERS
 #############################################
@@ -46,7 +92,11 @@ def norm_pdf(x):
 #############################################
 
 def _d1_d2(S, K, T, r, sigma):
-    """Compute d1 and d2 for Black-Scholes formula."""
+    """Compute d1 and d2 for Black-Scholes formula.
+
+    Assumes a ZERO continuous dividend yield (q = 0) — see the module-level
+    DIVIDEND-YIELD ASSUMPTION note. No dividend drift term appears in d1/d2.
+    """
     sqrt_T = math.sqrt(T)
     d1 = (math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * sqrt_T)
     d2 = d1 - sigma * sqrt_T
@@ -64,6 +114,11 @@ def bs_price(S, K, T, r, sigma, option_type):
         r          - Risk-free interest rate (annualized)
         sigma      - Implied volatility (annualized)
         option_type - 'call' or 'put'
+
+    Assumes a ZERO continuous dividend yield (q = 0) — see the module-level
+    DIVIDEND-YIELD ASSUMPTION note. This slightly overstates call value and
+    understates put value for dividend-paying underlyings (e.g. SPX/SPY ~1.3%),
+    the error growing with T; acceptable for the short-dated retail options here.
 
     Returns intrinsic value when T <= 0 (at or past expiration).
     """
@@ -400,6 +455,10 @@ def bs_greeks(S, K, T, r, sigma, option_type="call"):
     Returns a dict with keys: price, delta, gamma, theta, vega, rho.
     Each value is a scalar float or numpy array, matching the input shape.
     Accepts scalar or numpy-array S/K.
+
+    Assumes a ZERO continuous dividend yield (q = 0) throughout — see the
+    module-level DIVIDEND-YIELD ASSUMPTION note (no dividend drift on price/delta,
+    no dividend term on charm/theta).
     """
     return {
         "price": bs_price_v(S, K, T, r, sigma, option_type),
@@ -416,7 +475,7 @@ def bs_greeks(S, K, T, r, sigma, option_type="call"):
 # SPREAD SUMMARY
 #############################################
 
-def calc_summary(legs, strategy, spot, r=0.045, iv=0.20, T=None):
+def calc_summary(legs, strategy, spot, r=RISK_FREE_RATE, iv=0.20, T=None):
     """
     Calculate summary metrics for a credit spread or iron condor.
 
@@ -427,12 +486,15 @@ def calc_summary(legs, strategy, spot, r=0.045, iv=0.20, T=None):
         strategy - 'CCS' (call credit spread), 'PCS' (put credit spread),
                    or 'IC' (iron condor)
         spot     - Current underlying price
-        r        - Risk-free rate (default 0.045)
+        r        - Risk-free rate (default RISK_FREE_RATE = 0.045, static)
         iv       - Implied volatility (default 0.20)
         T        - Time to expiration in years (default None -> 1/365)
 
     Returns dict with: entry_credit, max_profit, max_loss,
         breakevens, return_on_risk, pop
+
+    ``pop`` is a risk-neutral LOGNORMAL probability of profit (drift = r) — see
+    ``_estimate_pop`` for the exact convention.
     """
     if T is None:
         T = 1.0 / 365.0
@@ -566,13 +628,20 @@ def calc_summary(legs, strategy, spot, r=0.045, iv=0.20, T=None):
     }
 
 
-def calc_summary_generic(legs, spot, r=0.045, iv=0.20, T=None):
+def calc_summary_generic(legs, spot, r=RISK_FREE_RATE, iv=0.20, T=None):
     """Numeric summary for ANY leg set (incl. butterfly/condor/calendar).
 
     Evaluates net position P&L across a dense price grid at the FRONT-leg
     expiry (calendars price the back leg via BS at its remaining T) and reads
-    max-profit / max-loss / breakevens off that curve. PoP = risk-neutral
-    lognormal probability mass over the profitable price region.
+    max-profit / max-loss / breakevens off that curve.
+
+    PoP CONVENTION: risk-neutral LOGNORMAL terminal distribution with drift = r
+    (``mu = ln(spot) + (r - 0.5*iv^2)*T``, ``sd = iv*sqrt(T)``), integrating the
+    probability mass over the profitable price region at expiration. This is the
+    same lognormal-with-r-drift basis as ``_estimate_pop`` — and DELIBERATELY
+    DIFFERENT from the Swing Scanner's zero-drift NORMAL PoP; the two are not
+    unified so each keeps its tuned behavior (labels should distinguish them).
+    ``r`` defaults to the module ``RISK_FREE_RATE`` (0.045, static).
     """
     import math
     if T is None or T <= 0:
@@ -662,10 +731,20 @@ def calc_summary_generic(legs, spot, r=0.045, iv=0.20, T=None):
 
 def _estimate_pop(legs, strategy, spot, r, iv, T=1/365):
     """
-    Estimate probability of profit using Black-Scholes CDF.
+    Estimate probability of profit using the Black-Scholes CDF.
 
-    Uses the BS d2 formula with the breakeven price as the "strike"
-    to estimate the probability that S finishes profitable.
+    CONVENTION (state this on any user-facing PoP label): a RISK-NEUTRAL LOGNORMAL
+    terminal distribution with DRIFT = r. The BS ``d2`` is evaluated with the
+    breakeven price as the "strike", so ``P(S_T > breakeven) = N(d2)`` and
+    ``P(S_T < breakeven) = N(-d2)`` under
+    ``d2 = [ln(S/be) + (r - 0.5*iv^2)*T] / (iv*sqrt(T))`` — i.e. the probability
+    that S finishes on the profitable side of the breakeven AT EXPIRATION.
+
+    NOTE — this is INTENTIONALLY a different convention from the Swing Scanner's
+    PoP, which uses a ZERO-DRIFT NORMAL terminal distribution. The two are kept
+    separate on purpose (unifying would shift the scanner's tuned gates); a
+    user-facing label should say "lognormal, r-drift" here vs "zero-drift" there
+    so the two numbers are distinguishable.
 
     Parameters:
         legs     - List of leg dicts

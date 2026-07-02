@@ -103,6 +103,30 @@ def get_ma_values(df: pd.DataFrame, periods: List[int] = None) -> Dict[int, floa
 # MOMENTUM INDICATORS
 #############################################
 
+def _wilder_rma(series: pd.Series, period: int) -> pd.Series:
+    """Wilder's smoothed moving average (RMA), SMA-seeded.
+
+    RMA_t = RMA_{t-1} + (x_t - RMA_{t-1}) / period, i.e. an EWMA with
+    alpha = 1/period. To match the reference implementations exactly, the
+    first RMA value is the SMA of the first `period` observations, after which
+    the ewm(adjust=False) recurrence takes over — the same SMA-seed idiom used
+    by ``calculate_ema``. Values before the seed bar are NaN.
+    """
+    x = series.to_numpy(dtype=float)
+    n = len(x)
+    out = np.full(n, np.nan)
+    if n < period:
+        return pd.Series(out, index=series.index)
+    # Seed at index period-1 with the SMA of the first `period` values, then run
+    # the Wilder recurrence over the remainder via ewm(alpha=1/period).
+    seq = np.empty(n - period + 1)
+    seq[0] = np.mean(x[:period])
+    seq[1:] = x[period:]
+    out[period - 1:] = (
+        pd.Series(seq).ewm(alpha=1.0 / period, adjust=False).mean().to_numpy())
+    return pd.Series(out, index=series.index)
+
+
 def calculate_rsi(df: pd.DataFrame, period: int = 14) -> float:
     """Calculate Relative Strength Index
     
@@ -115,14 +139,21 @@ def calculate_rsi(df: pd.DataFrame, period: int = 14) -> float:
     """
     if df is None or len(df) < period + 1:
         return 50.0
-    
+
     delta = df['close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    
-    rs = gain / loss.replace(0, 0.0001)
+    gain = delta.where(delta > 0, 0.0)
+    loss = (-delta).where(delta < 0, 0.0)
+
+    # Wilder's smoothing (RMA), matching TOS/TradingView/StockCharts: seed the
+    # first average with the SMA of the first `period` deltas, then apply the
+    # Wilder recurrence via ewm(alpha=1/period, adjust=False). The first delta
+    # (NaN) is dropped so bar `period` is the seeded value.
+    avg_gain = _wilder_rma(gain.iloc[1:], period)
+    avg_loss = _wilder_rma(loss.iloc[1:], period)
+
+    rs = avg_gain / avg_loss.replace(0, 0.0001)
     rsi = 100 - (100 / (1 + rs))
-    
+
     return float(rsi.iloc[-1]) if not pd.isna(rsi.iloc[-1]) else 50.0
 
 
@@ -156,16 +187,21 @@ def calculate_adx(df: pd.DataFrame, period: int = 14) -> float:
         (high - close.shift()).abs(),
         (low - close.shift()).abs()
     ], axis=1).max(axis=1)
-    
-    # ATR and directional indicators
-    atr = tr.rolling(window=period).mean()
-    plus_di = 100 * (plus_dm.rolling(window=period).mean() / atr)
-    minus_di = 100 * (minus_dm.rolling(window=period).mean() / atr)
-    
-    # DX and ADX
+
+    # Wilder smoothing (RMA) of TR / +DM / -DM. The first row of each of these
+    # is NaN (diff/shift), so drop it before seeding so the SMA seed uses real
+    # values — matching TOS/TradingView/StockCharts ADX.
+    smoothed_tr = _wilder_rma(tr.iloc[1:], period)
+    smoothed_plus_dm = _wilder_rma(plus_dm.iloc[1:], period)
+    smoothed_minus_dm = _wilder_rma(minus_dm.iloc[1:], period)
+
+    plus_di = 100 * (smoothed_plus_dm / smoothed_tr.replace(0, 0.0001))
+    minus_di = 100 * (smoothed_minus_dm / smoothed_tr.replace(0, 0.0001))
+
+    # DX, then ADX = Wilder RMA of DX.
     dx = 100 * ((plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, 0.0001))
-    adx = dx.rolling(window=period).mean()
-    
+    adx = _wilder_rma(dx.dropna(), period)
+
     return float(adx.iloc[-1]) if not pd.isna(adx.iloc[-1]) else 20.0
 
 
@@ -249,10 +285,28 @@ def calculate_vwap(df: pd.DataFrame) -> Optional[float]:
     """
     if df is None or len(df) < 1 or 'volume' not in df.columns:
         return None
-    
+
     typical_price = (df['high'] + df['low'] + df['close']) / 3
-    vwap = (typical_price * df['volume']).cumsum() / df['volume'].cumsum()
-    
+    tpv = typical_price * df['volume']
+
+    # Session-anchored: VWAP resets at each session open. Derive a per-bar session
+    # date (from a `datetime` column if present, else a DatetimeIndex) and cumsum
+    # WITHIN each session so the value doesn't drift across a multi-day frame.
+    session_key = None
+    if 'datetime' in df.columns:
+        session_key = pd.to_datetime(df['datetime']).dt.date
+    elif isinstance(df.index, pd.DatetimeIndex):
+        session_key = df.index.normalize()
+
+    if session_key is not None:
+        cum_tpv = tpv.groupby(session_key).cumsum()
+        cum_vol = df['volume'].groupby(session_key).cumsum()
+        vwap = cum_tpv / cum_vol
+    else:
+        # No session information available — fall back to a single cumulative
+        # window (single-session assumption).
+        vwap = tpv.cumsum() / df['volume'].cumsum()
+
     return float(vwap.iloc[-1]) if not pd.isna(vwap.iloc[-1]) else None
 
 
@@ -333,19 +387,27 @@ def calculate_volume_profile(
     if total_volume == 0:
         return {'poc': poc, 'vah': float(price_max), 'val': float(price_min)}
     
-    sorted_indices = np.argsort(volume_at_price)[::-1]
-    cumulative = 0
-    value_area_indices = []
-    
-    for idx in sorted_indices:
-        cumulative += volume_at_price[idx]
-        value_area_indices.append(idx)
-        if cumulative >= total_volume * 0.7:
-            break
-    
-    vah = float(bin_centers[max(value_area_indices)])
-    val = float(bin_centers[min(value_area_indices)])
-    
+    # Value area grows CONTIGUOUSLY outward from the POC: start at the POC bin,
+    # then repeatedly annex whichever adjacent bin (one above the current high or
+    # one below the current low) carries more volume, until the accumulated volume
+    # reaches 70% of the total. VAH/VAL then bound this contiguous region.
+    target = total_volume * 0.7
+    low_i = high_i = int(poc_idx)
+    cumulative = float(volume_at_price[poc_idx])
+    n = num_bins
+    while cumulative < target and (low_i > 0 or high_i < n - 1):
+        vol_below = volume_at_price[low_i - 1] if low_i > 0 else -1.0
+        vol_above = volume_at_price[high_i + 1] if high_i < n - 1 else -1.0
+        if vol_above >= vol_below:
+            high_i += 1
+            cumulative += float(volume_at_price[high_i])
+        else:
+            low_i -= 1
+            cumulative += float(volume_at_price[low_i])
+
+    vah = float(bin_centers[high_i])
+    val = float(bin_centers[low_i])
+
     return {'poc': poc, 'vah': vah, 'val': val}
 
 
@@ -652,16 +714,16 @@ def calculate_relative_strength(
         
         stock_return = (
             stock_df['close'].iloc[-1] / stock_df['close'].iloc[-period-1] - 1
-        ) * 100
-        
+        )
+
         benchmark_return = (
             benchmark_df['close'].iloc[-1] / benchmark_df['close'].iloc[-period-1] - 1
-        ) * 100
-        
-        if benchmark_return == 0:
-            results[label] = 100.0
-        else:
-            results[label] = stock_return / benchmark_return * 100
+        )
+
+        # Parity-preserving ratio: 100 = parity, >100 = outperformance. Stable in
+        # down markets (no sign inversion when the benchmark return is negative),
+        # unlike the old return/return quotient.
+        results[label] = 100.0 * (1.0 + stock_return) / (1.0 + benchmark_return)
     
     # Calculate composite RS
     if results:

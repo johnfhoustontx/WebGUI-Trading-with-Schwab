@@ -29,6 +29,12 @@ if str(_REPO_ROOT) not in sys.path:
 
 from repo_paths import MEMURAI_URL  # noqa: E402
 
+# Cap the command streams (``cmd:*``) so they cannot grow without bound. XADD
+# trims (approximately, for speed) to roughly this many entries. A single-user
+# stack issues at most a few commands/second, so ~1000 is a generous window for
+# inspection/replay while guaranteeing bounded memory.
+_XADD_MAXLEN = 1000
+
 
 class _Subscription:
     """Wraps a redis pubsub so callers get decoded dict payloads back.
@@ -162,9 +168,86 @@ class Bus:
         return _Subscription(pubsub)
 
     # --- command stream --------------------------------------------------
+    @staticmethod
+    def dead_letter_key(stream: str) -> str:
+        """The dead-letter list name for a command ``stream`` (``cmd:{domain}:dead``)."""
+        return f"{stream}:dead"
+
     def enqueue_command(self, stream: str, command: dict) -> str:
         cmd = Command(**command)
-        return self._r.xadd(stream, {"data": cmd.to_json()})
+        # maxlen caps the stream so cmd:* can't grow forever; approximate=True lets
+        # Redis trim in efficient ~macro-node batches (a small overshoot is fine).
+        return self._r.xadd(
+            stream, {"data": cmd.to_json()}, maxlen=_XADD_MAXLEN, approximate=True
+        )
+
+    def dead_letter(self, stream: str, raw_fields: dict, reason: str) -> None:
+        """Record an un-processable command on the ``{stream}:dead`` list.
+
+        A command handler that raises, or a stream entry that fails to decode,
+        is routed here (rather than silently lost) so a human can inspect/replay
+        it. We deliberately do NOT auto-re-execute — a stranded trade-opening
+        command (e.g. ``driver_paper_create`` / ``rescue_apply``) re-run could
+        double-open a position. Stores the raw XADD fields verbatim + why.
+        """
+        record = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "reason": reason,
+            "fields": raw_fields,
+        }
+        try:
+            self._r.rpush(self.dead_letter_key(stream), json.dumps(record, default=str))
+        except Exception:  # never let dead-lettering itself take down the loop.
+            pass
+
+    def _ensure_group(self, stream: str, group: str) -> None:
+        # Ensure the consumer group exists ONCE per (stream, group) for this Bus,
+        # not on every poll. consume_commands runs in a tight ~50ms loop in each
+        # of the 5 services; the old per-poll xgroup_create was an extra round-trip
+        # + a swallowed BUSYGROUP exception on every single poll.
+        gk = (stream, group)
+        if gk in self._groups:
+            return
+        try:
+            self._r.xgroup_create(stream, group, id="0", mkstream=True)
+        except Exception as exc:  # BUSYGROUP — group already exists.
+            if "BUSYGROUP" not in str(exc):
+                raise
+        self._groups.add(gk)
+
+    def drain_pending(self, stream: str, group: str, consumer: str) -> int:
+        """Move any entries stranded in the group's PEL to the dead-letter list.
+
+        Called once at consumer startup: a previous consumer that crashed leaves
+        its read-but-un-acked entries PENDING forever. We claim them (XAUTOCLAIM,
+        min-idle 0) and dead-letter + ack each — surfacing stranded commands for
+        human review instead of losing them, and WITHOUT auto-re-executing (a
+        re-run trade-opening command could double-open a position). Returns the
+        number of entries drained. Defensive — never raises.
+        """
+        self._ensure_group(stream, group)
+        moved = 0
+        start = "0-0"
+        try:
+            while True:
+                res = self._r.xautoclaim(
+                    stream, group, consumer, min_idle_time=0, start_id=start, count=100
+                )
+                # redis-py: (next_cursor, [(id, fields), ...], [deleted_ids])
+                next_cursor = res[0]
+                claimed = res[1] if len(res) > 1 else []
+                for msg_id, fields in claimed:
+                    self.dead_letter(stream, fields, f"stranded in PEL ({msg_id})")
+                    self._r.xack(stream, group, msg_id)
+                    moved += 1
+                if not claimed or next_cursor in ("0-0", "0", b"0-0", b"0"):
+                    break
+                start = next_cursor
+        except Exception:  # noqa: BLE001 — draining must never crash startup.
+            log_exc = getattr(self, "_log_drain_exc", None)
+            if log_exc:
+                log_exc()
+        return moved
 
     def consume_commands(
         self,
@@ -174,18 +257,14 @@ class Bus:
         block_ms: int = 50,
         count: int = 10,
     ) -> list[tuple[str, Command]]:
-        # Ensure the consumer group exists ONCE per (stream, group) for this Bus,
-        # not on every poll. consume_commands runs in a tight ~50ms loop in each
-        # of the 5 services; the old per-poll xgroup_create was an extra round-trip
-        # + a swallowed BUSYGROUP exception on every single poll.
-        gk = (stream, group)
-        if gk not in self._groups:
-            try:
-                self._r.xgroup_create(stream, group, id="0", mkstream=True)
-            except Exception as exc:  # BUSYGROUP — group already exists.
-                if "BUSYGROUP" not in str(exc):
-                    raise
-            self._groups.add(gk)
+        """Read up to ``count`` new commands, decoding each defensively.
+
+        A stream entry that fails to decode (poison / corrupt) is dead-lettered
+        and ack'd in place and skipped — it never fails the whole batch nor sticks
+        un-acked in the PEL. Only successfully-decoded ``(msg_id, Command)`` pairs
+        are returned (the return shape is unchanged for callers).
+        """
+        self._ensure_group(stream, group)
         resp = self._r.xreadgroup(
             groupname=group,
             consumername=consumer,
@@ -198,7 +277,11 @@ class Bus:
         out: list[tuple[str, Command]] = []
         for _stream_name, messages in resp:
             for msg_id, fields in messages:
-                out.append((msg_id, Command.from_json(fields["data"])))
+                try:
+                    out.append((msg_id, Command.from_json(fields["data"])))
+                except Exception as exc:  # noqa: BLE001 — poison entry, don't sink the batch.
+                    self.dead_letter(stream, fields, f"decode failed: {exc!r}")
+                    self._r.xack(stream, group, msg_id)
         return out
 
     def ack(self, stream: str, group: str, msg_id: str) -> None:

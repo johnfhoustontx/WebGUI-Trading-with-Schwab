@@ -425,6 +425,18 @@ class GammaEngine:
 
         Returns dict: {"spot": float, "gex": {strike: {"call": float, "put": float, "net": float}}, "strike_count": int}
         or None on failure.
+
+        Units & scope (important — read before comparing to a reference):
+          * Per-strike values are dollar-gamma per **1% spot move**
+            (gamma * OI * 100 * spot^2 * 0.01 — the SqueezeMetrics/SpotGamma
+            convention). The term-structure path (compute_term_grid) uses the
+            SAME per-1% unit, so the two are directly comparable.
+          * This aggregates the **NEAREST expiration only** (via
+            _find_nearest_exp_key), NOT the full option surface. Absolute
+            magnitudes are therefore an internally-consistent RELATIVE index and
+            will NOT numerically match a full-surface reference such as
+            SpotGamma. The sign, the gamma-flip location, and the call/put wall
+            strikes ARE methodologically standard and comparable.
         """
         if not chain:
             return None
@@ -868,7 +880,11 @@ class GammaEngine:
                 c = contracts[0] if contracts else {}
                 gamma_c = float(c.get("gamma") or 0.0)
                 oi_c = float(c.get("openInterest") or 0)
-                call_gex = oi_c * gamma_c * (S ** 2) * 100
+                # Per-1% dollar-gamma (SqueezeMetrics/SpotGamma convention):
+                # OI * gamma * 100(contract multiplier) * S^2 * 0.01 — the SAME
+                # unit as the intraday GEX path in calc_from_chain. Without the
+                # * 0.01 the term grid would be 100x (per-$1^2, not per-1%).
+                call_gex = oi_c * gamma_c * (S ** 2) * 100 * 0.01
                 cell = per_strike.setdefault(K, {
                     "call_gex_usd": 0.0, "put_gex_usd": 0.0, "net_gex_usd": 0.0,
                 })
@@ -879,7 +895,9 @@ class GammaEngine:
                 p = contracts[0] if contracts else {}
                 gamma_p = float(p.get("gamma") or 0.0)
                 oi_p = float(p.get("openInterest") or 0)
-                put_gex = oi_p * gamma_p * (S ** 2) * 100
+                # Per-1% dollar-gamma — matches call_gex above and the intraday
+                # calc_from_chain path (see the * 0.01 note there).
+                put_gex = oi_p * gamma_p * (S ** 2) * 100 * 0.01
                 cell = per_strike.setdefault(K, {
                     "call_gex_usd": 0.0, "put_gex_usd": 0.0, "net_gex_usd": 0.0,
                 })

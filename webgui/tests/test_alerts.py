@@ -64,3 +64,67 @@ def test_should_alert_truth_table():
     assert not alerts.should_alert({**base, "alert_enabled": False}, q, now_open)
     # market-hours gate off → fires even after close
     assert alerts.should_alert({**base, "alert_market_hours_only": False}, q, now_closed)
+
+
+# ── Health / staleness alerts (R4b / R8) ─────────────────────────────────────
+NOW_OPEN = dt.datetime(2026, 6, 17, 10, 0, tzinfo=CT)     # Wed 10:00 CT (in-hours)
+NOW_CLOSED = dt.datetime(2026, 6, 17, 16, 0, tzinfo=CT)   # after 15:00 CT
+GATE_ON = {"alert_enabled": True, "alert_market_hours_only": True}
+GATE_OFF_HOURS = {"alert_enabled": True, "alert_market_hours_only": False}
+
+
+def test_unhealthy_keys_namespaces_stale_and_down():
+    fresh = {"options:scan": True, "sentiment:composite": False}
+    health = {"options": False, "trade": True, "driver": None}
+    keys = alerts.unhealthy_keys(fresh, health)
+    # stale view + down service; healthy view, up service, and None-health excluded
+    assert keys == {"stale:options:scan", "down:options"}
+    assert alerts.unhealthy_keys({}, {}) == set()
+    assert alerts.unhealthy_keys(None, None) == set()
+
+
+def test_new_health_alerts_fires_on_transition_only():
+    fresh = {"options:scan": True}
+    health = {}
+    fire, nxt = alerts.new_health_alerts(fresh, health, set(), GATE_ON, NOW_OPEN)
+    assert fire == {"stale:options:scan"}
+    assert nxt == {"stale:options:scan"}
+    # Persistent: same problem next tick -> deduped (no new fire), still tracked.
+    fire2, nxt2 = alerts.new_health_alerts(fresh, health, nxt, GATE_ON, NOW_OPEN)
+    assert fire2 == set()
+    assert nxt2 == {"stale:options:scan"}
+
+
+def test_new_health_alerts_clears_and_refires_on_recovery():
+    fresh_bad = {"options:scan": True}
+    fresh_ok = {"options:scan": False}
+    _, alerted = alerts.new_health_alerts(fresh_bad, {}, set(), GATE_ON, NOW_OPEN)
+    # Recovered -> dropped from carry-forward set.
+    fire, alerted = alerts.new_health_alerts(fresh_ok, {}, alerted, GATE_ON, NOW_OPEN)
+    assert fire == set()
+    assert alerted == set()
+    # Breaks again -> fires again (fire-on-transition).
+    fire, alerted = alerts.new_health_alerts(fresh_bad, {}, alerted, GATE_ON, NOW_OPEN)
+    assert fire == {"stale:options:scan"}
+
+
+def test_new_health_alerts_respects_gate_but_still_tracks():
+    fresh = {"options:scan": True}
+    # Master toggle off -> no fire, but the problem is still tracked so it won't
+    # chime the instant alerts are re-enabled if it's still broken.
+    fire, nxt = alerts.new_health_alerts(
+        fresh, {}, set(), {"alert_enabled": False}, NOW_OPEN)
+    assert fire == set()
+    assert nxt == {"stale:options:scan"}
+    # Off-hours with the market-hours gate on -> no fire, still tracked.
+    fire, nxt = alerts.new_health_alerts(fresh, {}, set(), GATE_ON, NOW_CLOSED)
+    assert fire == set()
+    assert nxt == {"stale:options:scan"}
+    # Gate off -> fires even after close.
+    fire, _ = alerts.new_health_alerts(fresh, {}, set(), GATE_OFF_HOURS, NOW_CLOSED)
+    assert fire == {"stale:options:scan"}
+
+
+def test_health_alert_text_singular_plural():
+    assert alerts.health_alert_text(1) == "1 service alert — stale or down"
+    assert alerts.health_alert_text(2) == "2 service alerts — stale or down"

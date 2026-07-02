@@ -2,7 +2,23 @@
     .venv\\Scripts\\python -m pytest services\\trade_svc\\tests\\test_swing_model.py -v
 (never `pytest services` over all services — cross-app module-name collisions.)"""
 import numpy as np
+import pandas as pd
+import pytest
 from services.trade_svc import swing_model as sm
+
+
+def _fit_z(value, basis):
+    """The FIT's exact per-date transform (backtest.zscore_by_date), evaluated for
+    `value` against the cross-section `basis`: winsorize the WHOLE column (basis +
+    value) to [q(0.02), q(0.98)], then standardize by the WINSORIZED column's
+    mean/std(ddof=0). This is the reference the live scorer must reproduce."""
+    col = pd.Series(list(basis) + [value], dtype="float64")
+    lo, hi = col.quantile(0.02), col.quantile(0.98)
+    c = col.clip(lower=lo, upper=hi)
+    mu, sd = c.mean(), c.std(ddof=0)
+    if not np.isfinite(sd) or sd <= 0:
+        return 0.0
+    return float((c.iloc[-1] - mu) / sd)
 
 _ARTIFACT = {
     "version": "2026-06-28", "horizon": 20,
@@ -111,3 +127,73 @@ def test_score_symbol_degrades_empty_weights():
     bad = {"regimes": {"all": {"weights": {}, "calibration": [{"band": 0, "score_lo": 0,
             "score_hi": 1, "mean_fwd": 0, "hit_rate": 0.5, "n": 1}]}}}
     assert sm.score_symbol({"mom_12_1": 0.5}, None, bad) is None
+
+
+# --- C11: the live z-transform must MATCH the fit's 2/98 winsorization, not a ±3 clip ---
+
+def test_cross_section_z_matches_fit_winsorization():
+    # (a) With a normal (>=5-name) cross-section, the live z equals the FIT's exact
+    # per-date transform (winsorize to [q02, q98], then standardize on the winsorized
+    # column) — NOT the raw (mean/std of the un-winsorized basis) and NOT a ±3 clip.
+    basis = [0.30, 0.35, 0.42, 0.50, 0.55, 0.61, 0.70, 0.80, 0.90, 1.10]
+    value = 0.66
+    got = sm._cross_section_z(value, basis)
+    assert got is not None
+    assert got == pytest.approx(_fit_z(value, basis), rel=1e-9, abs=1e-12)
+    # And it is distinguishable from a naive raw z (no winsorization) — proves we
+    # aren't accidentally re-deriving the old raw-mean/std path.
+    raw = np.asarray(basis + [value], dtype="float64")
+    naive = (value - raw.mean()) / raw.std(ddof=0)
+    assert abs(got - naive) > 1e-6
+
+
+def test_outlier_is_winsorized_to_2_98_bound_not_clipped_to_3():
+    # (b) A genuine |z|>3 outlier is winsorized to the 2/98 quantile bound (the fit's
+    # behavior), NOT hard-clipped to ±3. Use a tight cross-section + a far outlier so
+    # winsorization visibly caps the tail: the live value clips to q98 BEFORE
+    # standardizing, so the resulting z is exactly the fit's value — and is neither the
+    # old ±3 clip nor the raw (unwinsorized) z. (Both a raw z and a winsorized z can
+    # exceed 3.0 here; the point is that the WINSORIZED one, capped at the q98 bound,
+    # is materially below the raw one — proving the tail was clipped, not the z.)
+    basis = list(np.linspace(0.40, 0.60, 50))      # 51 names total incl. the value
+    value = 100.0                                  # far outlier
+    got = sm._cross_section_z(value, basis)
+    expected = _fit_z(value, basis)
+    assert got == pytest.approx(expected, rel=1e-9, abs=1e-12)   # matches the FIT exactly
+    assert abs(got - 3.0) > 1e-6                                 # NOT the ±3 clip artefact
+    # Winsorization clips the 100.0 outlier to the q98 bound (~0.6) BEFORE standardizing,
+    # so the composited z (~1.64) is FAR below the raw un-winsorized z (~7.07). This is
+    # the whole point of matching the fit: a ±3 clip would instead have compressed a
+    # genuine |z|>3 back to 3.0, biasing extreme names toward the middle band.
+    col = np.append(np.asarray(basis, dtype="float64"), value)
+    raw_z = (value - col.mean()) / col.std(ddof=0)
+    assert raw_z > 6.0                              # the un-winsorized z really is extreme
+    assert got < raw_z / 3                          # winsorization materially shrank it
+
+
+def test_thin_cross_section_returns_none_for_norm_fallback():
+    # (c) The thin-snapshot fallback: <5 names can't form a stable 2/98 cross-section,
+    # so _cross_section_z returns None and score_symbol falls through to the norm path
+    # (which keeps the defensive ±3 clip). Verified end-to-end: a thin snapshot yields
+    # the same score as no snapshot at all (both use the norm fallback).
+    assert sm._cross_section_z(0.5, [0.49, 0.50, 0.51]) is None   # 3 names (<5)
+    a = sm.score_symbol({"mom_12_1": 0.5, "low_vol": -0.05}, None, _ARTIFACT)
+    b = sm.score_symbol({"mom_12_1": 0.5, "low_vol": -0.05},
+                        {"mom_12_1": [0.49, 0.5, 0.51]}, _ARTIFACT)
+    assert a["score"] == b["score"]
+
+
+def test_norm_fallback_still_clips_to_3():
+    # The norm fallback (thin/absent snapshot) keeps the ±3 clip as documented — the
+    # existing outlier-clip test uses this path; assert the clip is still applied when
+    # the raw norm z blows past 3 (tiny std in the artifact norm).
+    art = {"version": "t", "horizon": 20, "regimes": {"all": {
+        "weights": {"turnover": 1.0},
+        "factor_ic": {"turnover": {"mean_ic": 0.01}},
+        "norm": {"turnover": {"mean": 1.0, "std": 0.1}},   # raw z = (5-1)/0.1 = 40
+        "calibration": [
+            {"band": 0, "score_lo": -3, "score_hi": -1, "mean_fwd": -0.01, "hit_rate": 0.45, "n": 10},
+            {"band": 1, "score_lo": -1, "score_hi": 1, "mean_fwd": 0.0, "hit_rate": 0.5, "n": 10},
+            {"band": 2, "score_lo": 1, "score_hi": 3, "mean_fwd": 0.01, "hit_rate": 0.52, "n": 10}]}}}
+    out = sm.score_symbol({"turnover": 5.0}, None, art)      # no snapshot -> norm
+    assert out["contributions"][0]["z"] == 3.0               # clipped

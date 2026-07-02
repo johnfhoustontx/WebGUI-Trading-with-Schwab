@@ -35,6 +35,61 @@ def test_compute_no_scoring_guard():
     assert not hasattr(compute, "options_scoring")
 
 
+# ── R6: reconcile buying power for both books ────────────────────────────────
+def test_reconcile_paper_buying_power_both_books(monkeypatch):
+    """``reconcile_paper_buying_power`` reconciles BOTH the manual (default DB)
+    and the driver (DRIVER_PAPER_DB) accounts, returning the per-book drift."""
+    import paper_account_db
+
+    seen = []
+
+    def _fake_reconcile(db_path):
+        seen.append(db_path)
+        return 200.0 if db_path is None else 50.0
+
+    monkeypatch.setattr(paper_account_db, "reconcile_buying_power", _fake_reconcile)
+
+    out = compute.reconcile_paper_buying_power()
+
+    assert out == {"manual": 200.0, "driver": 50.0}
+    # None (default DB) for manual, DRIVER_PAPER_DB for the driver book.
+    assert None in seen and compute.DRIVER_PAPER_DB in seen
+
+
+def test_reconcile_paper_buying_power_defensive(monkeypatch, caplog):
+    """A reconcile failure on one book is logged + degrades to 0.0, never raises."""
+    import paper_account_db
+
+    def _boom(db_path):
+        raise RuntimeError("db locked")
+
+    monkeypatch.setattr(paper_account_db, "reconcile_buying_power", _boom)
+
+    with caplog.at_level("ERROR"):
+        out = compute.reconcile_paper_buying_power()
+
+    assert out == {"manual": 0.0, "driver": 0.0}
+    assert any("reconcile degraded" in r.message for r in caplog.records)
+
+
+# ── R3b: silent degradation now logs ─────────────────────────────────────────
+def test_paper_trades_view_read_failure_logs(monkeypatch, caplog):
+    """A ledger-read failure is log.exception'd (not silently swallowed) and
+    degrades to an empty ledger."""
+    import paper_trader
+
+    def _boom():
+        raise RuntimeError("ledger unreadable")
+
+    monkeypatch.setattr(paper_trader, "get_all_trades", _boom)
+
+    with caplog.at_level("ERROR"):
+        out = compute.paper_trades_view(reprice=False)
+
+    assert out == {"trades": []}
+    assert any("paper_trades_view read degraded" in r.message for r in caplog.records)
+
+
 # ── Swing scan (moved from webgui/pages/options/swing.py) ────────────────────
 def test_assign_ids_adds_unique_ids():
     out = compute.assign_ids([{"symbol": "MU"}, {"symbol": "MU"}], "MU")
@@ -893,8 +948,21 @@ def _patch_gamma(monkeypatch, *, chain=None, walls=None, history=None):
     fake_gt = _types.SimpleNamespace(
         GammaEngine=_FakeEngine,
         get_directional_walls=_fake_directional_walls)
+
+    class _CountingConn:
+        n_open = 0
+        n_close = 0
+
+        def close(self):
+            _CountingConn.n_close += 1
+
+    def _connect(read_only=False):
+        _CountingConn.n_open += 1
+        return _CountingConn()
+
     fake_gh = _types.SimpleNamespace(
-        connect=lambda read_only=False: object(),
+        connect=_connect,
+        _ConnCls=_CountingConn,
         load_date_with_grid=lambda conn, symbol, view, date=None: (history or []),
         load_today_with_grid=lambda conn, symbol, view: (history or []))
     monkeypatch.setitem(_sys.modules, "gamma_tool", fake_gt)
@@ -931,6 +999,85 @@ def test_gamma_snapshot_builds_views_and_term(monkeypatch):
         "net_delta_0dte": 10.0, "projected_net_delta_close": 5.0,
         "hedge_pressure": -5.0}
     assert snap["term"] == {"expirations": ["2026-06-18"], "cells": {}}
+
+
+class _WideEngine(_FakeEngine):
+    """Like _FakeEngine but returns a WIDE per-strike grid (spot ±60 strikes) so
+    cropping to ±20 is observable, and reports far-out extreme strikes for
+    flip/walls so we can prove flip/walls come from the FULL grid pre-crop."""
+
+    def calc_all_from_chain(self, chain):
+        spot = 5400.0
+        # 1-wide strikes from 5340..5460 (121 strikes; ±60 around spot).
+        grid = {}
+        for i in range(-60, 61):
+            k = float(spot + i)
+            # Make the biggest call GEX far above the ±20 window (5455) and the
+            # most-negative put far below (5345) so directional walls land OUTSIDE
+            # the crop window — proving they're computed on the full grid.
+            call = 100.0 if k == 5455.0 else 1.0
+            put = -100.0 if k == 5345.0 else -1.0
+            grid[k] = {"call": call, "put": put, "net": call + put}
+        gex = {"spot": spot, "gex": grid, "strike_count": len(grid)}
+        charm = {"spot": spot, "gex": dict(grid), "strike_count": len(grid)}
+        dex = {"spot": spot, "gex": dict(grid), "strike_count": len(grid),
+               "net_delta_0dte": 10.0, "projected_net_delta_close": 5.0,
+               "hedge_pressure": -5.0}
+        vanna = {"spot": spot, "gex": dict(grid), "strike_count": len(grid)}
+        return gex, charm, dex, vanna
+
+
+def test_gamma_snapshot_crops_grids_to_window(monkeypatch):
+    """Each view's current grid + history grids are cropped to ±GAMMA_N_SIDE
+    strikes around spot, while flip/walls (full-grid fields) are unchanged."""
+    # A wide history-row grid at the same spot (5340..5460); should crop to window.
+    hist_grid = {float(5400 + i): {"net": 1.0} for i in range(-60, 61)}
+    _patch_gamma(monkeypatch, history=[(1, 5400.0, 3, 4, 5, 6, hist_grid)])
+    import sys as _sys
+    _sys.modules["gamma_tool"].GammaEngine = _WideEngine
+
+    snap = compute.gamma_snapshot("$SPX")
+    gexv = snap["views"]["GEX"]
+    # Cropped current grid: exactly the ±20 window = 20 below + at-spot + 20 above.
+    kept = sorted(gexv["data"]["gex"].keys())
+    assert kept == [float(5400 + i) for i in range(-20, 21)]
+    # History grid cropped identically.
+    hist_kept = sorted(gexv["history"][0][6].keys())
+    assert hist_kept == [float(5400 + i) for i in range(-20, 21)]
+    # Walls come from the FULL grid (call wall 5455, put wall 5345) — OUTSIDE the
+    # ±20 crop window, proving they were computed pre-crop.
+    assert gexv["walls"] == [5345.0, 5455.0]
+    assert gexv["flip"] == 5399.5
+
+
+def test_gamma_snapshot_crop_widens_for_history_spot_drift(monkeypatch):
+    """The crop window is the union across every history-row spot, so a strike in
+    an earlier row's near-spot window is kept even if far from the current spot."""
+    # Two history rows at different spots; a strike near the earlier spot (5300)
+    # must survive even though it's >20 strikes from the current spot (5400).
+    early_grid = {5300.0: {"net": 5.0}, 5400.0: {"net": 1.0}}
+    late_grid = {5400.0: {"net": 2.0}}
+    _patch_gamma(monkeypatch, history=[(1, 5300.0, 3, 4, 5, 6, early_grid),
+                                       (2, 5400.0, 3, 4, 5, 6, late_grid)])
+    import sys as _sys
+    _sys.modules["gamma_tool"].GammaEngine = _WideEngine
+
+    snap = compute.gamma_snapshot("$SPX")
+    gexv = snap["views"]["GEX"]
+    # 5300 is within ±20 of the earlier spot 5300 → kept in the union window.
+    assert 5300.0 in gexv["history"][0][6]
+
+
+def test_gamma_snapshot_reuses_one_history_connection(monkeypatch):
+    """The four view history loads share ONE read-only connection (was 4 opens),
+    closed after the snapshot is built."""
+    _patch_gamma(monkeypatch, history=[(1, 5400.0, 3, 4, 5, 6, {5400.0: {"net": 1}})])
+    import sys as _sys
+    cc = _sys.modules["gex_history_db"]._ConnCls
+    cc.n_open = cc.n_close = 0
+    compute.gamma_snapshot("$SPX")
+    assert cc.n_open == 1     # one connection for all four views
+    assert cc.n_close == 1     # and it's closed
 
 
 def test_gamma_snapshot_cleared_window_returns_none(monkeypatch):
@@ -1941,12 +2088,20 @@ def _fake_gex_modules(monkeypatch, *, lock_ok=True):
         poll_once=_poll,
         log=_types.SimpleNamespace(info=lambda *a, **k: None),
     )
+    def _purge(conn, keep_sessions=5):
+        calls["purged"] = calls.get("purged", 0) + 1
+        calls["keep_sessions"] = keep_sessions
+        return 0
+
     fake_gh = _types.SimpleNamespace(connect=lambda: _Conn(),
-                                     init_schema=lambda conn: None)
+                                     init_schema=lambda conn: None,
+                                     purge_keep_sessions=_purge)
     fake_gt = _types.SimpleNamespace(GammaEngine=lambda: "ENGINE")
     monkeypatch.setitem(_sys.modules, "gex_collector", fake_gc)
     monkeypatch.setitem(_sys.modules, "gex_history_db", fake_gh)
     monkeypatch.setitem(_sys.modules, "gamma_tool", fake_gt)
+    # Reset the once-per-day purge latch so each test starts fresh.
+    monkeypatch.setattr(compute, "_LAST_PURGE_DATE", None)
     return calls
 
 
@@ -1966,6 +2121,32 @@ def test_collect_gex_snapshots_defers_when_lock_held(monkeypatch):
     n = compute.collect_gex_snapshots()
     assert calls["poll"] is False    # a fresh foreign collector owns the lock
     assert n == 0
+    assert "purged" not in calls     # deferred → no purge either
+
+
+def test_collect_gex_snapshots_purges_once_per_day(monkeypatch):
+    """Retention runs on the live path but at most once per local date (not on
+    every 2-min collect tick)."""
+    calls = _fake_gex_modules(monkeypatch, lock_ok=True)
+    compute.collect_gex_snapshots()
+    assert calls.get("purged") == 1
+    assert calls.get("keep_sessions") == compute.GEX_KEEP_SESSIONS
+    # A second collect the SAME day must NOT purge again (gated).
+    compute.collect_gex_snapshots()
+    assert calls.get("purged") == 1
+
+
+def test_collect_gex_snapshots_purge_failure_is_swallowed(monkeypatch):
+    """A retention failure must never abort the collection round."""
+    calls = _fake_gex_modules(monkeypatch, lock_ok=True)
+    import sys as _sys
+
+    def _boom(conn, keep_sessions=5):
+        raise RuntimeError("db locked")
+    _sys.modules["gex_history_db"].purge_keep_sessions = _boom
+    n = compute.collect_gex_snapshots()
+    assert calls["poll"] is True   # collection still happened
+    assert n == 3
 
 
 # ── GEX collector status view ───────────────────────────────────────────────

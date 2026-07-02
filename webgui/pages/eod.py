@@ -15,7 +15,9 @@ than raising.
 from __future__ import annotations
 
 import datetime as dt
+import os
 import re
+import tempfile
 from html import escape
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -594,13 +596,43 @@ def archive_dates(root) -> list[str]:
     return sorted(dates, reverse=True)
 
 
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write ``text`` to ``path`` atomically.
+
+    Writes to a temp file in the SAME directory (so ``os.replace`` is a rename on
+    the same filesystem, which is atomic), then replaces the target. A crash
+    mid-write leaves the temp file, never a half-written ``path`` — so a
+    concurrent reader (``/eod/file``) never serves a partial document.
+    ``os.replace`` overwrites an existing target atomically, preserving the
+    same-date-overwrite behavior.
+    """
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp_name, path)  # atomic rename; overwrites any existing file
+    except BaseException:
+        # Best-effort cleanup of the temp file if the replace never happened.
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+
+
 def write_archive(root, date: str, summary_doc: str, detail_doc: str) -> dict:
-    """Write summary.html + detail.html into <root>/<date>/; return their paths."""
+    """Write summary.html + detail.html into <root>/<date>/; return their paths.
+
+    Each file is written atomically (temp file + ``os.replace``) so a crash
+    mid-generate can never leave a half-written ``.html`` for ``/eod/file`` to
+    serve. Same-date regeneration overwrites in place, atomically.
+    """
     day = Path(root) / date
     day.mkdir(parents=True, exist_ok=True)
     summ, det = day / "summary.html", day / "detail.html"
-    summ.write_text(summary_doc, encoding="utf-8")
-    det.write_text(detail_doc, encoding="utf-8")
+    _atomic_write_text(summ, summary_doc)
+    _atomic_write_text(det, detail_doc)
     return {"summary": summ, "detail": det}
 
 

@@ -5,7 +5,7 @@ from typing import List
 import numpy as np
 import pandas as pd
 
-from options_calculator import bs_greeks
+from options_calculator import bs_greeks, expiry_time_to_years
 
 
 @dataclass
@@ -133,10 +133,10 @@ class ReplayEngine:
         if hist.empty:
             return pd.DataFrame(columns=["theo_price", "delta", "gamma", "theta", "vega", "rho"])
 
-        # T at each bar: time from that bar's timestamp to expiry end-of-day (15:00).
-        expiry_dt = datetime.combine(contract.expiry, datetime.min.time()).replace(hour=15)
+        # T at each bar: years from that bar's timestamp to the option's 4:00pm ET
+        # settlement (matches the calculator's convention — a shared helper).
         years_to_expiry = np.array([
-            max((expiry_dt - ts.to_pydatetime()).total_seconds() / (365 * 86400), 1e-6)
+            max(expiry_time_to_years(ts.to_pydatetime(), contract.expiry), 1e-6)
             for ts in hist.index
         ])
 
@@ -178,8 +178,8 @@ class IVShockEngine:
         self.snap = snapshot
 
     def sweep(self, contract: ContractRow, multipliers) -> pd.DataFrame:
-        expiry_dt = datetime.combine(contract.expiry, datetime.min.time()).replace(hour=15)
-        T = max((expiry_dt - self.snap.as_of).total_seconds() / (365 * 86400), 1e-6)
+        # Years to the option's 4:00pm ET settlement (calculator-consistent helper).
+        T = max(expiry_time_to_years(self.snap.as_of, contract.expiry), 1e-6)
         mults = np.asarray(multipliers, dtype=float)
         sigmas = mults * contract.iv
         rows = []

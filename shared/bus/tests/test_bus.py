@@ -1,3 +1,5 @@
+import json
+
 from shared.bus import Bus
 
 
@@ -132,3 +134,77 @@ def test_consume_twice_exercises_busygroup_branch():
     b.enqueue_command("cmd:test2", {"type": "b"})
     second = b.consume_commands("cmd:test2", group="g", consumer="c", block_ms=50)
     assert len(second) == 1 and second[0][1].type == "b"
+
+
+# --- A2: command-stream hygiene ------------------------------------------
+
+
+def test_enqueue_bounds_stream_length():
+    """XADD is capped so cmd:* streams cannot grow without bound."""
+    from shared.bus import client
+
+    b = Bus(fake=True)
+    n = client._XADD_MAXLEN + 200
+    for i in range(n):
+        b.enqueue_command("cmd:cap", {"type": "x", "args": {"i": i}})
+    length = b._r.xlen("cmd:cap")
+    # approximate trimming keeps roughly maxlen (never unbounded, never > enqueued).
+    assert length <= n
+    assert length <= client._XADD_MAXLEN + 50  # fakeredis trims exactly to maxlen
+
+
+def test_dead_letter_pushes_raw_and_records_reason():
+    b = Bus(fake=True)
+    b.dead_letter("cmd:dl", {"data": '{"type": "boom"}'}, "handler raised")
+    items = b._r.lrange("cmd:dl:dead", 0, -1)
+    assert len(items) == 1
+    rec = json.loads(items[0])
+    assert rec["reason"] == "handler raised"
+    assert rec["fields"] == {"data": '{"type": "boom"}'}
+    assert "ts" in rec
+
+
+def test_undecodable_entry_dead_letters_and_batch_continues():
+    """A poison stream entry is dead-lettered + ack'd; good entries still return."""
+    b = Bus(fake=True)
+    # Group must exist before the manual XADD so it's delivered to the group.
+    b.consume_commands("cmd:poison", group="g", consumer="c", block_ms=10)
+    b._r.xadd("cmd:poison", {"data": "NOT VALID JSON {{{"})  # poison
+    b.enqueue_command("cmd:poison", {"type": "good", "args": {}})
+
+    out = b.consume_commands("cmd:poison", group="g", consumer="c", block_ms=50)
+    # only the decodable command comes back
+    assert [c.type for _id, c in out] == ["good"]
+    # poison landed in the dead-letter list
+    dead = b._r.lrange("cmd:poison:dead", 0, -1)
+    assert len(dead) == 1 and json.loads(dead[0])["reason"].startswith("decode")
+    # poison is NOT stuck in the PEL (it was ack'd)
+    b.ack("cmd:poison", "g", out[0][0])
+    pending = b._r.xpending("cmd:poison", "g")
+    assert pending["pending"] == 0
+
+
+def test_drain_pending_moves_stranded_entries_to_dead_letter():
+    """A prior consumer's un-acked PEL entry is drained to dead-letter, not re-run."""
+    b = Bus(fake=True)
+    # First consumer reads a command then "crashes" without acking.
+    b.enqueue_command("cmd:strand", {"type": "driver_paper_create", "args": {}})
+    read = b.consume_commands("cmd:strand", group="g", consumer="dead-c", block_ms=50)
+    assert len(read) == 1  # now pending, un-acked
+
+    moved = b.drain_pending("cmd:strand", group="g", consumer="new-c")
+    assert moved == 1
+    dead = b._r.lrange("cmd:strand:dead", 0, -1)
+    assert len(dead) == 1
+    rec = json.loads(dead[0])
+    assert "driver_paper_create" in rec["fields"]["data"]
+    assert rec["reason"].startswith("stranded")
+    # PEL is now empty — nothing stuck, nothing auto-re-executed.
+    assert b._r.xpending("cmd:strand", "g")["pending"] == 0
+
+
+def test_drain_pending_noop_when_nothing_stranded():
+    b = Bus(fake=True)
+    # group exists but no pending entries
+    b.consume_commands("cmd:clean", group="g", consumer="c", block_ms=10)
+    assert b.drain_pending("cmd:clean", group="g", consumer="c") == 0

@@ -220,16 +220,24 @@ def _ema_series(close, span):
 
 
 def _rsi_series(close, period=14):
+    # Wilder's smoothing (RMA), matching technical.calculate_rsi and the
+    # reference implementations (TOS/TradingView/StockCharts): smooth gains and
+    # losses with ewm(alpha=1/period, adjust=False) rather than a simple rolling
+    # mean. (An SMA seed vs. the ewm's own warmup differs only in the earliest
+    # bars, which the reconstruction nulls in its warmup region anyway.)
     delta = close.diff()
-    gain = delta.where(delta > 0, 0.0).rolling(period).mean()
-    loss = (-delta.where(delta < 0, 0.0)).rolling(period).mean()
-    rs = gain / loss.replace(0, 1e-4)
+    gain = delta.where(delta > 0, 0.0)
+    loss = (-delta).where(delta < 0, 0.0)
+    avg_gain = gain.ewm(alpha=1.0 / period, adjust=False, min_periods=period).mean()
+    avg_loss = loss.ewm(alpha=1.0 / period, adjust=False, min_periods=period).mean()
+    rs = avg_gain / avg_loss.replace(0, 1e-4)
     return (100 - (100 / (1 + rs))).where(close.notna())
 
 
 def _adx_series(daily, period=14):
-    """Approximate Wilder ADX as a Series (mirrors technical.calculate_adx; an
-    approximate ADX is fine for the reconstructed base score)."""
+    """Wilder ADX as a Series (mirrors technical.calculate_adx): TR/+DM/-DM and
+    the final ADX are all Wilder-smoothed (ewm alpha=1/period), not simple
+    rolling means."""
     high, low, close = daily["high"], daily["low"], daily["close"]
     up = high.diff()
     down = -low.diff()
@@ -237,11 +245,12 @@ def _adx_series(daily, period=14):
     minus_dm = (((down > up) & (down > 0)) * down.clip(lower=0)).fillna(0.0)
     tr = pd.concat([(high - low), (high - close.shift()).abs(),
                     (low - close.shift()).abs()], axis=1).max(axis=1)
-    atr = tr.rolling(period).mean().replace(0, 1e-4)
-    plus_di = 100 * plus_dm.rolling(period).mean() / atr
-    minus_di = 100 * minus_dm.rolling(period).mean() / atr
+    _rma = lambda s: s.ewm(alpha=1.0 / period, adjust=False, min_periods=period).mean()
+    atr = _rma(tr).replace(0, 1e-4)
+    plus_di = 100 * _rma(plus_dm) / atr
+    minus_di = 100 * _rma(minus_dm) / atr
     dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, 1e-4)
-    return dx.rolling(period).mean()
+    return _rma(dx)
 
 
 def _aligned_close(hist, target_index):

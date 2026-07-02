@@ -310,7 +310,43 @@ def _heading_level(name: str) -> int:
     return {"h1": 1, "h2": 2, "h3": 3, "h4": 4, "h5": 5, "h6": 6}.get(name, 1)
 
 
-def build_docx(body_html: str, title: str, subtitle: str, meta: str, out_path: Path) -> None:
+# User Guide screenshots — inserted into the .docx (Word only) right after the
+# matching page heading. Keyed by exact heading text; paths are relative to the
+# user-guide/ folder. Images are NOT referenced from the Markdown, so the HTML
+# build stays image-free. Add a page's shot here to have it embedded.
+USER_GUIDE_SHOTS = {
+    "Scanner": "images/scanner.png",
+    "Calculator": "images/calculator.png",
+    "Gamma": "images/gamma.png",
+    "Simulator": "images/simulator.png",
+    "Expected Move": "images/expected-move.png",
+    "Sentiment dashboard": "images/sentiment.png",
+    "Sector Rotation": "images/rotation.png",
+    "Trade": "images/trade.png",
+    "Portfolio": "images/portfolio.png",
+    "Driver": "images/driver.png",
+}
+
+# Content width for US Letter with 1" margins is 6.5"; keep a hair under so the
+# bordered screenshot never overflows the text column.
+_SHOT_WIDTH_IN = 6.3
+
+
+def _add_screenshot(doc, img_path: Path, caption: str) -> None:
+    """Insert a centered screenshot + a small italic caption."""
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.add_run().add_picture(str(img_path), width=Inches(_SHOT_WIDTH_IN))
+    cap = doc.add_paragraph()
+    cap.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    cr = cap.add_run(caption)
+    cr.italic = True
+    cr.font.size = Pt(8.5)
+    cr.font.color.rgb = RGBColor(0x5B, 0x66, 0x78)
+
+
+def build_docx(body_html: str, title: str, subtitle: str, meta: str, out_path: Path,
+               shots: dict | None = None, base_dir: Path | None = None) -> None:
     soup = BeautifulSoup(body_html, "html.parser")
     doc = Document()
 
@@ -350,6 +386,11 @@ def build_docx(body_html: str, title: str, subtitle: str, meta: str, out_path: P
             lvl = _heading_level(name)
             p = doc.add_heading(level=lvl)
             _inline_runs(p, node)
+            htext = node.get_text().strip()
+            if shots and base_dir and htext in shots:
+                img_path = base_dir / shots[htext]
+                if img_path.is_file():
+                    _add_screenshot(doc, img_path, f"The {htext} page.")
         elif name == "p":
             p = doc.add_paragraph()
             _inline_runs(p, node)
@@ -382,9 +423,11 @@ def build_one(folder: str) -> None:
         print(f"  ! skip {folder}: {md_name} not found")
         return
     md_text = md_path.read_text(encoding="utf-8")
-    meta = "WebGUI Trading with Schwab · Generated 2026-06-28"
+    meta = "WebGUI Trading with Schwab · Generated 2026-07-02"
     html_body = build_html(md_text, title, subtitle, meta, md_path.with_suffix(".html"))
-    build_docx(html_body, title, subtitle, meta, md_path.with_suffix(".docx"))
+    shots = USER_GUIDE_SHOTS if folder == "user-guide" else None
+    build_docx(html_body, title, subtitle, meta, md_path.with_suffix(".docx"),
+               shots=shots, base_dir=md_path.parent)
     print(f"  [ok] {folder}: {md_name} -> .html + .docx")
 
 

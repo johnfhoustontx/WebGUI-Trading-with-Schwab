@@ -26,7 +26,10 @@ def test_health(monkeypatch):
     with TestClient(app) as c:
         r = c.get("/health")
         assert r.status_code == 200
-        assert r.json() == {"domain": "options", "up": True}
+        body = r.json()
+        assert body["domain"] == "options"
+        assert body["up"] is True
+        assert body["scheduler_alive"] is True
 
 
 def test_autoscan_due_logic():

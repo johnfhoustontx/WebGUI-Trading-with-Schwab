@@ -29,8 +29,21 @@ with an injected fake client. See @claude-api for the exact ``messages.create`` 
 tool-use surface this mirrors.
 """
 import json
+import logging
 
 from services.driver_svc import api_keys, settings
+
+_log = logging.getLogger("driver_svc.decider")
+
+# Stand-down REASON taxonomy (R7 observability). Every failure still degrades to a
+# stand-down — this classifies WHY, so a rotated/broken key ("no_key") or a
+# network/SDK failure ("api_error") is distinguishable from the model genuinely
+# choosing to stand down ("model") in the decision log. ``parse_error`` is a
+# malformed / empty tool reply (a model that returned nothing usable).
+REASON_NO_KEY = "no_key"          # no Anthropic API key / client resolved
+REASON_API_ERROR = "api_error"    # SDK / network / HTTP error from messages.create
+REASON_PARSE_ERROR = "parse_error"  # malformed / empty tool payload
+REASON_MODEL = "model"            # the model itself decided (stand down or trade)
 
 # The tool the model must call exactly once. ``tool_choice`` (in ``decide``) forces
 # this tool, so the model's whole reply is a single ``submit_decision`` tool_use
@@ -90,19 +103,26 @@ def parse_decision(raw) -> dict:
     """Normalize the model's tool output to the canonical decision dict.
 
     Returns ``{stand_down: bool, day_thesis: str, confidence: float,
-    trades: [{id: str, quantity: int, rationale: str}]}``. Every malformed shape
-    degrades safely (never raises):
+    trades: [{id: str, quantity: int, rationale: str}], reason: str}``. Every
+    malformed shape degrades safely (never raises):
 
-    * ``raw`` not a dict (``None`` / list / string / int) → a stand-down.
+    * ``raw`` not a dict (``None`` / list / string / int) → a stand-down with
+      ``reason="parse_error"`` (a malformed / empty tool payload).
     * ``trades`` not a list → no trades.
     * trade items that aren't dicts, or lack a truthy ``id`` → dropped.
     * ``quantity`` / ``confidence`` non-numeric → coerced (see ``_coerce_*``).
 
     ``stand_down`` defaults to ``True`` when no usable trades survived — so a
-    "nothing actionable" reply (or any malformed one) results in no trade.
+    "nothing actionable" reply (or any malformed one) results in no trade. The
+    additive ``reason`` (R7 observability) distinguishes a genuine model decision
+    (``"model"`` — a well-formed dict, whether it stood down or traded) from a
+    malformed / empty reply (``"parse_error"``). ``decide`` overrides ``reason``
+    with the op-level cause (``no_key`` / ``api_error``) when it degrades before
+    or around the model call.
     """
     if not isinstance(raw, dict):
-        return {"stand_down": True, "day_thesis": "", "confidence": 0.0, "trades": []}
+        return {"stand_down": True, "day_thesis": "", "confidence": 0.0,
+                "trades": [], "reason": REASON_PARSE_ERROR}
     trades = raw.get("trades")
     clean = []
     if isinstance(trades, list):
@@ -123,6 +143,9 @@ def parse_decision(raw) -> dict:
         "day_thesis": str(raw.get("day_thesis", "") or ""),
         "confidence": _coerce_float(raw.get("confidence", 0.0)),
         "trades": clean,
+        # A well-formed dict IS a real model decision (even a stand-down / no-trade
+        # reply). Only a non-dict is a parse failure (handled above).
+        "reason": REASON_MODEL,
     }
 
 
@@ -137,7 +160,9 @@ _SYSTEM = (
     "daily net target, or stand down. You may ONLY pick menu ids; never invent trades. "
     "Quantities you give are ceilings — code re-clamps to the risk budget. The target is "
     "a target, NOT a quota: standing down on a poor-edge checkpoint is a correct, "
-    "encouraged decision. Prefer high composite_score and PoP; avoid over-concentration. "
+    "encouraged decision. Each menu item's credit and max_loss are already NET of "
+    "round-trip commission (the commission field shows the fee) — judge edge on those net "
+    "numbers. Prefer high composite_score and PoP; avoid over-concentration. "
     "Call submit_decision exactly once."
 )
 
@@ -196,29 +221,57 @@ def _make_client():
     return anthropic.Anthropic(api_key=key)
 
 
+def _stand_down(reason: str, *, detail: str = "") -> dict:
+    """A stand-down decision tagged with the op-level ``reason`` (R7).
+
+    Fail-safe behavior is IDENTICAL to a plain ``parse_decision(None)`` stand-down;
+    this only stamps WHY. Non-``model`` reasons are logged at WARNING (``no_key`` /
+    ``api_error``) or above so a rotated/broken key or an API outage surfaces as the
+    ops incident it is — not weeks of "cautious model behavior" — and hits the
+    service log files. ``parse_error`` (an empty/garbled tool reply) is also warned
+    since a forced tool call should always yield a usable payload.
+    """
+    d = parse_decision(None)   # canonical stand-down shape (reason=parse_error)
+    d["reason"] = reason
+    if reason != REASON_MODEL:
+        _log.warning("driver decider stood down: reason=%s%s",
+                     reason, f" ({detail})" if detail else "")
+    return d
+
+
 def decide(packet, client=None, _force_no_key=False) -> dict:
     """Ask Claude for a decision via a single forced tool-use call.
 
     A one-shot ``messages.create`` that forces the ``submit_decision`` tool
     (``tool_choice``), then parses the tool_use block's ``input`` through
     ``parse_decision``. The whole body is wrapped so that ANY failure degrades to
-    a stand-down and ``decide`` NEVER raises:
+    a stand-down and ``decide`` NEVER raises — but each failure mode is tagged with
+    a distinct ``reason`` (R7 observability) so a broken key or API outage is
+    distinguishable from a model that chose to stand down:
 
-    * ``_force_no_key`` (test hook) or no resolvable API key / no client → stand down,
-    * an API / network error from ``messages.create`` → stand down,
+    * ``_force_no_key`` (test hook) or no resolvable API key / no client →
+      ``reason="no_key"`` (an ops incident — logged at WARNING),
+    * an API / network error from ``messages.create`` → ``reason="api_error"``
+      (logged at WARNING with the exception),
     * a response with no ``submit_decision`` tool_use block (text-only, wrong tool
-      name, empty/``None`` content) → stand down,
-    * a malformed tool ``input`` → ``parse_decision`` normalizes it (→ stand down).
+      name, empty/``None`` content) → ``reason="parse_error"``,
+    * a malformed tool ``input`` → ``parse_decision`` → ``reason="parse_error"``,
+    * a well-formed reply (stand-down OR trades) → ``reason="model"`` (no warning).
 
-    ``client`` is injected (a fake in tests, the real SDK client in production); when
-    omitted it is built via ``_make_client``. See @claude-api for the SDK surface.
+    Fail-safe behavior is unchanged: every non-``model`` path still yields
+    ``stand_down=True`` with no trades — the ``reason`` is purely additive.
+    ``client`` is injected (a fake in tests, the real SDK client in production);
+    when omitted it is built via ``_make_client``. See @claude-api for the SDK surface.
     """
     try:
         if _force_no_key:
-            return parse_decision(None)
+            return _stand_down(REASON_NO_KEY, detail="forced (test hook)")
         client = client or _make_client()
         if client is None:
-            return parse_decision(None)
+            return _stand_down(REASON_NO_KEY, detail="no ANTHROPIC_API_KEY resolved")
+    except Exception as exc:  # noqa: BLE001 — even client construction degrades safely.
+        return _stand_down(REASON_API_ERROR, detail=f"client init: {exc!r}")
+    try:
         resp = client.messages.create(
             model=settings.MODEL,
             max_tokens=settings.MAX_TOKENS,
@@ -227,10 +280,18 @@ def decide(packet, client=None, _force_no_key=False) -> dict:
             tool_choice={"type": "tool", "name": "submit_decision"},
             messages=build_messages(packet),
         )
-        for block in getattr(resp, "content", None) or []:
-            if (getattr(block, "type", None) == "tool_use"
-                    and getattr(block, "name", "") == "submit_decision"):
-                return parse_decision(getattr(block, "input", None))
-        return parse_decision(None)
-    except Exception:  # noqa: BLE001 — the decider is untrusted; degrade to stand down.
-        return parse_decision(None)
+    except Exception as exc:  # noqa: BLE001 — API/network error → stand down (api_error).
+        return _stand_down(REASON_API_ERROR, detail=repr(exc))
+    for block in getattr(resp, "content", None) or []:
+        if (getattr(block, "type", None) == "tool_use"
+                and getattr(block, "name", "") == "submit_decision"):
+            # parse_decision tags reason=model (well-formed) or parse_error (garbled
+            # input). Surface a parse_error at WARNING — a forced tool call should
+            # always return a usable payload, so a garbled one is worth flagging.
+            parsed = parse_decision(getattr(block, "input", None))
+            if parsed.get("reason") == REASON_PARSE_ERROR:
+                _log.warning("driver decider: submit_decision returned a malformed "
+                             "tool payload (reason=parse_error)")
+            return parsed
+    # No submit_decision tool_use block at all (text-only / wrong tool / empty).
+    return _stand_down(REASON_PARSE_ERROR, detail="no submit_decision tool_use block")

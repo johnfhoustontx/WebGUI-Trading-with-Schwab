@@ -23,6 +23,7 @@ import signal_repricer
 import signal_recommender
 import scanner_engine
 import paper_broker as _default_broker
+from commissions import round_trip_commission
 
 log = logging.getLogger("paper_engine")
 
@@ -254,8 +255,37 @@ def _dte_remaining(expiration, now_date):
         return 99
 
 
+def _position_legs(pos):
+    """Leg count for commission: 4 for an iron condor (call side present), else 2."""
+    return 4 if pos.get("call_short") is not None else 2
+
+
+def net_realized_pnl(gross, pos, qty, *, expired):
+    """Realized P&L (dollars) net of the position's lifecycle option commission.
+
+    A managed close (BUY_TO_CLOSE) pays commission on BOTH the open and the close
+    (round-trip = per-leg rate x legs x qty x 2); an OTM expiration pays only the
+    opening commission (a spread that expires is not actively closed), i.e. half
+    the round-trip. Folding the whole lifecycle fee into the realized figure at
+    close makes both the stored position row AND account cash net-of-fees (``_close``
+    writes both from this one value), so the driver scorecard reflects true P&L.
+    Defensive: any failure returns ``gross`` unchanged — commission math must never
+    break a close.
+    """
+    try:
+        rt = round_trip_commission(_position_legs(pos), pos.get("symbol"), qty)
+        commission = round(rt / 2.0, 2) if expired else round(rt, 2)
+        return round(gross - commission, 2)
+    except Exception:  # pragma: no cover - defensive
+        return gross
+
+
 def _close(db_path, pos, exit_debit, exit_order_id, realized_pnl, reason, status):
-    """Close a position, release its reserved buying power, and realize P&L."""
+    """Close a position, release its reserved buying power, and realize P&L.
+
+    ``realized_pnl`` is expected NET of commission (see ``net_realized_pnl``); it is
+    written to both the position row and account cash, keeping equity consistent.
+    """
     paper_account_db.close_position(
         db_path, pos["position_id"], exit_debit=exit_debit,
         exit_order_id=exit_order_id, realized_pnl=realized_pnl, exit_reason=reason,
@@ -294,10 +324,11 @@ def run_manage_cycle(client, now_date, broker=None, db_path=None):
                             _default_broker.PREFIX, pos["symbol"])
                 continue
             net, pnl_per = signal_repricer.intrinsic_value(trade, settlement)
+            realized = net_realized_pnl(round(pnl_per * qty, 2), pos, qty, expired=True)
             _close(db_path, pos, exit_debit=round(net, 2), exit_order_id=None,
-                   realized_pnl=round(pnl_per * qty, 2), reason="EXPIRED", status="EXPIRED")
-            log.info("%s EXPIRED %s %s x%s pnl %.2f", _default_broker.PREFIX,
-                     pos["symbol"], pos["strategy"], qty, round(pnl_per * qty, 2))
+                   realized_pnl=realized, reason="EXPIRED", status="EXPIRED")
+            log.info("%s EXPIRED %s %s x%s pnl %.2f (net of fees)", _default_broker.PREFIX,
+                     pos["symbol"], pos["strategy"], qty, realized)
             continue
 
         if per_contract is None:
@@ -321,10 +352,11 @@ def run_manage_cycle(client, now_date, broker=None, db_path=None):
                             _default_broker.PREFIX, pos["symbol"], pos["strategy"], resp["status"])
                 continue
             fill = resp["price"]
-            realized = round((pos["entry_credit"] - fill) * MULTIPLIER * qty, 2)
+            gross = round((pos["entry_credit"] - fill) * MULTIPLIER * qty, 2)
+            realized = net_realized_pnl(gross, pos, qty, expired=False)
             _close(db_path, pos, exit_debit=fill, exit_order_id=oid,
                    realized_pnl=realized, reason=rec["code"], status="CLOSED")
-            log.info("%s CLOSED %s %s x%s @ %.2f pnl %.2f (%s)", _default_broker.PREFIX,
+            log.info("%s CLOSED %s %s x%s @ %.2f pnl %.2f net (%s)", _default_broker.PREFIX,
                      pos["symbol"], pos["strategy"], qty, fill, realized, rec["code"])
 
     # Session drawdown guard — never auto-unhalts mid-session.

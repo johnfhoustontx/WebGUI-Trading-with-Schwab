@@ -446,6 +446,30 @@ def test_render_view_updates_in_place_not_clear():
     assert "bar_yrange" in src           # fixed ±N_SIDE window y-range is wired
 
 
+def test_big_gamma_snapshot_read_is_off_loop():
+    """Perf regression (P5): the ~14 MB cache:options:gamma snapshot must be read
+    OFF the event loop via run.io_bound — in the version-gated repaint AND the
+    initial page-build read — while the cheap :ver probes stay ON the loop.
+
+    Guards: the version compare is still done from read_versions/read_version (the
+    tiny :ver counters, never wrapped), the big payload GET+parse goes through
+    run.io_bound, and an in-flight ("fetching") guard prevents a slow read from
+    stacking across the 2 s poll ticks."""
+    src = inspect.getsource(gamma.render)
+    # The big-payload read is moved off-loop.
+    assert 'run.io_bound(bus_client.read, "options:gamma")' in src
+    # The cheap version probes are NOT wrapped (still a plain synchronous call).
+    assert "read_versions([" in src
+    # The repaint/poll became async + are guarded against a dead client.
+    assert "async def _maybe_repaint" in src
+    assert "async def _poll" in src
+    assert "@guard_async" in src
+    # Re-entrancy: a poll must not fire a second big read while one is in flight.
+    assert 'state.get("fetching")' in src
+    # Version-gating preserved: only fetch when the version actually changed.
+    assert 'version == seen["gamma"]' in src
+
+
 def test_render_syncs_symbol_and_guards_foreign_snapshots():
     """Regression: the dropdown must sync to the cached snapshot's symbol on build,
     and a repaint must ignore a snapshot whose symbol != the selected one — so a

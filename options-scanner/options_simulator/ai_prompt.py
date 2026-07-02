@@ -2,15 +2,13 @@
 
 Mirrors the no-API-call convention of ai_prompt_builder.py at the project root.
 """
-from datetime import datetime
-
 import numpy as np
 
 from options_simulator.engine import (
     ChainSnapshot, ContractRow, IVShockEngine, Position, WhatIfEngine,
     aggregate_position,
 )
-from options_calculator import bs_greeks
+from options_calculator import bs_greeks, expiry_time_to_years
 
 
 SIGMA_MULTIPLIERS = [0.5, 0.75, 1.0, 1.5, 2.0, 3.0]
@@ -19,8 +17,7 @@ S_GRID_PCT = [-0.20, -0.10, -0.05, 0.0, 0.05, 0.10, 0.20]
 
 def _current_greeks(snap: ChainSnapshot, pos: Position) -> dict:
     """Net Greeks of the position (signed sum across legs) at current spot."""
-    expiry_dt = datetime.combine(pos.expiry, datetime.min.time()).replace(hour=15)
-    T = max((expiry_dt - snap.as_of).total_seconds() / (365 * 86400), 1e-6)
+    T = max(expiry_time_to_years(snap.as_of, pos.expiry), 1e-6)
     out = {"price": 0.0, "delta": 0.0, "gamma": 0.0,
            "theta": 0.0, "vega": 0.0, "rho": 0.0}
     for leg in pos.legs:
@@ -34,8 +31,9 @@ def _current_greeks(snap: ChainSnapshot, pos: Position) -> dict:
 
 def _identity_block(snap: ChainSnapshot, pos: Position) -> str:
     primary = pos.primary
-    expiry_dt = datetime.combine(primary.expiry, datetime.min.time()).replace(hour=15)
-    hours_to_expiry = (expiry_dt - snap.as_of).total_seconds() / 3600.0
+    # Hours to the option's 4:00pm ET settlement (calculator-consistent helper;
+    # returns years → ×365×24 = hours, floored at 0 past the close).
+    hours_to_expiry = expiry_time_to_years(snap.as_of, primary.expiry) * 365.0 * 24.0
     sym = snap.symbol or "(unknown)"
 
     lines = [
@@ -106,8 +104,8 @@ def _replay_section(snap: ChainSnapshot, pos: Position) -> str:
 
 def _whatif_section(snap: ChainSnapshot, pos: Position) -> str:
     s_arr = np.array([snap.spot * (1 + p) for p in S_GRID_PCT])
-    expiry_dt = datetime.combine(pos.expiry, datetime.min.time()).replace(hour=15)
-    t_days = max((expiry_dt - snap.as_of).total_seconds() / 86400.0, 0.01)
+    # Days to the option's 4:00pm ET settlement (calculator-consistent helper).
+    t_days = max(expiry_time_to_years(snap.as_of, pos.expiry) * 365.0, 0.01)
     eng = WhatIfEngine(snap)
     df = aggregate_position(pos, lambda c: eng.sweep(c, s_range=s_arr, t_days=t_days))
     lines = ["## What-if (underlying price sweep — values are NET for the position)",

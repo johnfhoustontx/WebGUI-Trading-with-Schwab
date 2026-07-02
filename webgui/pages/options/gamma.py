@@ -382,8 +382,10 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None):
     data = [[xi, strikes[yi], z[yi][xi]]
             for yi in vis for xi in range(len(times))
             if z[yi][xi] is not None]
-    zmax = max((abs(z[yi][xi]) for yi in vis for xi in range(len(times))
-                if z[yi][xi] is not None), default=0) or None
+    # Symmetric color clamp from the VISIBLE cells' 95th-percentile |net| (robust —
+    # same as the Term heatmap) so a few extreme strikes don't wash the mid-range
+    # colors to transparent on the flatter views (Charm / DEX / Vanna).
+    zmax = _robust_zmax([z[yi] for yi in vis]) or None
     # Row height from the VISIBLE strikes' typical spacing (median gap) so cells
     # tile the window densely regardless of off-window strike spacing.
     rowsize = _strike_step([strikes[yi] for yi in vis])
@@ -457,6 +459,12 @@ def _heat_init_fig(height=680):
     fig = _base_chart("heatmap", height)
     fig["title"] = {"text": None}
     fig["series"] = []
+    # A colorAxis MUST be present when the heatmap element is CREATED: Highcharts 12.4
+    # won't bind a colorAxis added later via chart.update(), so a heatmap series pushed
+    # into a colorAxis-less chart renders nothing (no image / no cells). The persistent
+    # heat element is created from this fig and updated in place, so seed the colorAxis
+    # here (min/max come later from heatmap_figure's data).
+    fig["colorAxis"] = _coloraxis(None)
     fig["tooltip"] = {"enabled": True}      # needed so chart.tooltip exists for press
     fig["chart"]["events"] = {":load": _HEAT_PRESS_TOOLTIP_JS}
     return fig
@@ -595,13 +603,15 @@ def symbol_options(cached):
 
 def render():
     import bus_client
-    from nicegui import ui
+    from nicegui import ui, run
 
     ui.add_css(EXPLAIN_CSS)  # scoped styles for the Explain dialog (ui.html strips <style>)
     ui.label("Gamma").classes("text-h5")
 
     # state["snap"] is the cached snapshot from the bus (None until first read).
-    state: dict = {"snap": None, "countdown": 120}
+    # ``fetching`` is an in-flight guard so a slow off-loop big-payload read
+    # (cache:options:gamma is ~14 MB) can't pile up across 2 s poll ticks.
+    state: dict = {"snap": None, "countdown": 120, "fetching": False}
     # Last-seen bus cache versions for the fetch-free repaint/dialog timers.
     seen = {"gamma": None, "explain": None, "analyze": None, "status": None}
 
@@ -659,7 +669,7 @@ def render():
             # (see _set_chart); same-kind repaints update in place (flicker-free).
             chart_plot_box = ui.column().classes("w-full q-gutter-none")
             with chart_plot_box:
-                state["chart_el"] = ui.highchart(_empty_fig(), extras=["heatmap"]).classes("w-full")
+                state["chart_el"] = ui.highchart(_empty_fig(), extras=["heatmap", "coloraxis"]).classes("w-full")
             state["chart_kind"] = "bar"
             chart_msg = ui.label("Fetch a symbol… (no snapshot yet).") \
                 .classes("opacity-60 text-sm")
@@ -667,7 +677,7 @@ def render():
         with heatmap_box:
             # Created with the heatmap init fig so the press-and-hold-tooltip load
             # hook is installed at creation (load fires once); updated in place after.
-            heat_plot = ui.highchart(_heat_init_fig(), extras=["heatmap"]).classes("w-full")
+            heat_plot = ui.highchart(_heat_init_fig(), extras=["heatmap", "coloraxis"]).classes("w-full")
             heat_msg = ui.label("").classes("opacity-60 text-sm")
 
     def _current_symbol():
@@ -704,7 +714,7 @@ def render():
         if state.get("chart_kind") != kind:
             chart_plot_box.clear()
             with chart_plot_box:
-                state["chart_el"] = ui.highchart(fig, extras=["heatmap"]).classes("w-full")
+                state["chart_el"] = ui.highchart(fig, extras=["heatmap", "coloraxis"]).classes("w-full")
             state["chart_kind"] = kind
         else:
             _set_figure(state["chart_el"], fig)
@@ -838,14 +848,22 @@ def render():
             state["countdown"] = 120
         countdown_lbl.text = f"Next refresh: {state['countdown'] // 60}:{state['countdown'] % 60:02d}"
 
-    @guard
-    def _maybe_repaint(version):
-        # Fetch-free: re-read + repaint only when the bus cache version changes
-        # (the service bumps it when a requested gamma_refresh finishes).
-        if version == seen["gamma"]:
+    @guard_async
+    async def _maybe_repaint(version):
+        # Repaint only when the bus cache version changes (the service bumps it
+        # when a requested gamma_refresh finishes). The version compare is done by
+        # the caller off the cheap :ver probe; the actual snapshot payload
+        # (cache:options:gamma is ~14 MB — a big blocking GET + JSON parse) is read
+        # OFF the event loop via run.io_bound so it never blocks other clients.
+        if version == seen["gamma"] or state.get("fetching"):
+            # Unchanged, or a prior big read is still in flight — don't stack them.
             return
         seen["gamma"] = version
-        snap = bus_client.read("options:gamma") or None
+        state["fetching"] = True
+        try:
+            snap = await run.io_bound(bus_client.read, "options:gamma") or None
+        finally:
+            state["fetching"] = False
         # Only adopt a snapshot for the symbol currently selected — a foreign
         # publish (e.g. the service's one-shot $SPX startup refresh) must NOT
         # revert the displayed symbol out from under the user.
@@ -947,16 +965,18 @@ def render():
                           + ("prior day (not today's)" if ver else "not generated yet today"))
             (b.enable if ver else b.disable)()
 
-    @guard
-    def _poll():
+    @guard_async
+    async def _poll():
         # One coalesced 2s tick: read all view versions in a single pipelined
-        # round-trip (cheap :ver counters, no payload deserialize) and dispatch only
-        # the views that changed — replaces separate per-view version-poll timers.
+        # round-trip (cheap :ver counters, no payload deserialize — these stay ON
+        # the event loop) and dispatch only the views that changed. Only the big
+        # gamma snapshot fetch (~14 MB) is moved off-loop, inside _maybe_repaint;
+        # the small status/explain/analyze/sched payloads stay inline.
         v = bus_client.read_versions([
             "options:gamma", "options:gex_status",
             "options:gamma_explain", "options:gamma_analyze",
             *_SCHED_VIEWS.values()])
-        _maybe_repaint(v["options:gamma"])
+        await _maybe_repaint(v["options:gamma"])
         _maybe_repaint_status(v["options:gex_status"])
         _watch_explain(v["options:gamma_explain"])
         _watch_analyze(v["options:gamma_analyze"])
@@ -985,19 +1005,38 @@ def render():
     view_toggle.on_value_change(lambda e: _render_view())
 
     # Initial paint from the bus cache (graceful-empty if the service is cold).
+    # The cheap :ver probes + the small gex_status/sched reads stay inline; the big
+    # gamma snapshot (~14 MB) is read OFF the event loop in _initial_load so the
+    # first page build doesn't block the loop for every connected client.
     seen["gamma"] = bus_client.read_version("options:gamma")
     seen["explain"] = bus_client.read_version("options:gamma_explain")
     seen["analyze"] = bus_client.read_version("options:gamma_analyze")
     seen["status"] = bus_client.read_version("options:gex_status")
     _sync_sched_btns(bus_client.read_versions(list(_SCHED_VIEWS.values())))
-    state["snap"] = bus_client.read("options:gamma") or None
-    # Sync the dropdown to the symbol actually in the cache so a page (re)build
-    # doesn't show $SPX while another symbol's data is displayed (which a later
-    # refresh would then revert to $SPX). Done BEFORE wiring on_value_change.
-    _set_symbol((state["snap"] or {}).get("symbol"))
-    symbol_in.on_value_change(lambda e: _on_symbol_change())
-    _render_view()
     _paint_status(bus_client.read("options:gex_status"))
+
+    @guard_async
+    async def _initial_load():
+        # Big-payload initial read, off-loop. Guarded against the 2 s _poll racing
+        # it (both go through state["fetching"]); the poll skips while this runs and
+        # this skips if the poll already fetched. Symbol-sync + first paint happen
+        # here, and on_value_change is wired AFTER the sync so the programmatic
+        # symbol set doesn't enqueue a spurious refresh.
+        if not state.get("fetching"):
+            state["fetching"] = True
+            try:
+                state["snap"] = await run.io_bound(bus_client.read, "options:gamma") or None
+            finally:
+                state["fetching"] = False
+        # Sync the dropdown to the symbol actually in the cache so a page (re)build
+        # doesn't show $SPX while another symbol's data is displayed (which a later
+        # refresh would then revert to $SPX). Done BEFORE wiring on_value_change.
+        _set_symbol((state["snap"] or {}).get("symbol"))
+        symbol_in.on_value_change(lambda e: _on_symbol_change())
+        _render_view()
+
+    _render_view()                       # instant empty/placeholder paint
+    ui.timer(0.05, _initial_load, once=True)  # big snapshot read off-loop
 
     ui.timer(1.0, _tick)                 # countdown display (no fetch)
     ui.timer(2.0, _poll)                 # one coalesced version-poll for all 4 views

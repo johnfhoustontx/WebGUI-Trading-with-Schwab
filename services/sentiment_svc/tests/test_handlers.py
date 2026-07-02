@@ -27,6 +27,9 @@ def _fake_live(total="7.80", bias="Long"):
 def _patch_compute(monkeypatch, *, live, snaps, spy, sector=None,
                    proxy_up=True, industries_fn=None):
     calls = {"bridge": 0, "sector_perf": 0, "industries": []}
+    # Reset the per-session-day backfill cache so module-level state can't leak
+    # between tests (the cache is keyed by the real local date).
+    handlers._SNAPSHOTS.update(date=None, snaps=None, spy=None)
     monkeypatch.setattr(handlers.compute, "load_snapshots",
                         lambda *a, **k: (snaps, spy))
     monkeypatch.setattr(handlers.compute, "load_live", lambda *a, **k: live)
@@ -431,6 +434,97 @@ def test_refresh_trend_recompute_failure_non_fatal(monkeypatch):
     assert comp is not None
     assert comp.payload["derived"]["trend"] is None
     _reset_trend()
+
+
+# --- incremental / cached backfill (P4) ---------------------------------------
+# ``load_snapshots`` re-runs the full 35-day backfill + 6-mo SPY fetch (~24 proxy
+# calls). It changes at most once per session-day, so ``refresh`` caches it via
+# ``_load_snapshots_cached`` and only recomputes on a NEW local date — the 120 s
+# ticks in-between reuse the cached (snaps, spy). The live composite + intraday
+# recording still refresh every gated tick.
+
+def _reset_snapshots_cache():
+    handlers._SNAPSHOTS.update(date=None, snaps=None, spy=None)
+
+
+def test_backfill_cached_across_same_day_refreshes(monkeypatch):
+    """Repeated refreshes on the SAME local date call the heavy backfill ONCE;
+    the intervening ticks reuse the cached (snaps, spy)."""
+    _reset_snapshots_cache()
+    bus = Bus(fake=True)
+    snaps = [{"date": "2026-06-15", "composite": {"total_score": "7.80"}}]
+    spy = [1.0, 2.0]
+    calls = _patch_compute(monkeypatch, live=_fake_live(), snaps=snaps, spy=spy)
+
+    # Count real backfill invocations (the patch above replaces load_snapshots).
+    load_calls = {"n": 0}
+
+    def _load(*a, **k):
+        load_calls["n"] += 1
+        return snaps, spy
+
+    monkeypatch.setattr(handlers.compute, "load_snapshots", _load)
+    # Freeze the session date so all three refreshes land on the same day.
+    monkeypatch.setattr(handlers, "_session_date", lambda: "2026-06-15")
+
+    handlers.refresh(bus, with_sectors=False)
+    handlers.refresh(bus, with_sectors=False)
+    handlers.refresh(bus, with_sectors=False)
+
+    assert load_calls["n"] == 1  # heavy backfill computed once, not per tick
+    # Composite still written each cycle (live composite is not cached).
+    assert bus.cache_get("cache:sentiment:composite") is not None
+    assert calls["bridge"] == 3  # bridge dual-write still every cycle
+    _reset_snapshots_cache()
+
+
+def test_backfill_recomputed_on_new_session_day(monkeypatch):
+    """A new local session date invalidates the cache and recomputes the backfill."""
+    _reset_snapshots_cache()
+    bus = Bus(fake=True)
+    snaps = [{"date": "d", "composite": {"total_score": "7.80"}}]
+    spy = [1.0]
+    _patch_compute(monkeypatch, live=_fake_live(), snaps=snaps, spy=spy)
+
+    load_calls = {"n": 0}
+
+    def _load(*a, **k):
+        load_calls["n"] += 1
+        return snaps, spy
+
+    monkeypatch.setattr(handlers.compute, "load_snapshots", _load)
+
+    dates = iter(["2026-06-15", "2026-06-15", "2026-06-16"])
+    monkeypatch.setattr(handlers, "_session_date", lambda: next(dates))
+
+    handlers.refresh(bus, with_sectors=False)  # 06-15: compute
+    handlers.refresh(bus, with_sectors=False)  # 06-15: cached
+    handlers.refresh(bus, with_sectors=False)  # 06-16: recompute
+
+    assert load_calls["n"] == 2
+    _reset_snapshots_cache()
+
+
+def test_history_cache_set_skips_unchanged_version(monkeypatch):
+    """The history view is written with skip_unchanged=True, so a byte-identical
+    (snaps, spy) payload across cycles does NOT bump the version (no needless
+    GUI repaint). The version is stable across same-day refreshes."""
+    _reset_snapshots_cache()
+    bus = Bus(fake=True)
+    snaps = [{"date": "2026-06-15", "composite": {"total_score": "7.80"}}]
+    spy = [1.0, 2.0]
+    _patch_compute(monkeypatch, live=_fake_live(), snaps=snaps, spy=spy)
+    monkeypatch.setattr(handlers.compute, "load_snapshots",
+                        lambda *a, **k: (snaps, spy))
+    monkeypatch.setattr(handlers, "_session_date", lambda: "2026-06-15")
+
+    handlers.refresh(bus, with_sectors=False)
+    v1 = bus.cache_version("cache:sentiment:history")
+    handlers.refresh(bus, with_sectors=False)
+    v2 = bus.cache_version("cache:sentiment:history")
+
+    assert v1 == v2  # identical history payload -> no version bump
+    _reset_snapshots_cache()
 
 
 def test_handle_command_refresh_rotation(monkeypatch):

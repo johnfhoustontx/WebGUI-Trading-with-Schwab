@@ -273,7 +273,13 @@ def load_today_with_grid(
 
 
 def purge_old(conn: sqlite3.Connection) -> int:
-    """Delete snapshots older than today (local date). Returns rows deleted."""
+    """Delete snapshots older than today (local date). Returns rows deleted.
+
+    Legacy standalone-collector retention (keep today only). The live
+    options-service path uses :func:`purge_keep_sessions` instead so the
+    off-hours-persistence feature (show the last session until the next trading
+    day) keeps at least the last N distinct session-dates.
+    """
     cur = conn.execute(
         """
         DELETE FROM snapshots
@@ -284,19 +290,91 @@ def purge_old(conn: sqlite3.Connection) -> int:
     return cur.rowcount
 
 
+def _distinct_session_dates(conn: sqlite3.Connection) -> list[str]:
+    """Distinct local session-dates (YYYY-MM-DD) present in ``snapshots``,
+    newest first.
+
+    Derived from the ``snapshots.ts`` epoch column via
+    ``DATE(ts,'unixepoch','localtime')`` (only for the small DISTINCT scan — the
+    per-row DELETE below uses a sargable ``ts <`` range so the index applies)."""
+    cur = conn.execute(
+        """
+        SELECT DISTINCT DATE(ts, 'unixepoch', 'localtime') AS d
+          FROM snapshots
+         ORDER BY d DESC
+        """
+    )
+    return [r[0] for r in cur.fetchall() if r[0] is not None]
+
+
+def purge_keep_sessions(conn: sqlite3.Connection, keep_sessions: int = 5) -> int:
+    """Keep the last ``keep_sessions`` distinct session-dates; delete everything
+    older, across BOTH ``snapshots`` AND ``gex_term_snapshots``. Returns the total
+    rows deleted (both tables).
+
+    This is the retention used by the always-on options-service collection path.
+    It preserves the Gamma page's off-hours persistence: the page shows the last
+    session's candles/heatmap until the next trading day, so we must never drop
+    the most recent session(s). Keeping the last N (default 5) distinct
+    session-dates covers weekends/holidays comfortably.
+
+    Retention alone (DELETE) reclaims free pages for reuse so the DB stops growing
+    without bound, but does NOT shrink the file on disk. To shrink the existing
+    ~3 GB file, run a ONE-TIME manual VACUUM (offline, it locks the DB for
+    minutes) — optionally first ``PRAGMA auto_vacuum=INCREMENTAL`` then ``VACUUM``
+    to enable incremental reclaim going forward:
+
+        sqlite3 gex_history.db "PRAGMA auto_vacuum=INCREMENTAL; VACUUM;"
+
+    Never auto-run VACUUM here — a full VACUUM on the multi-GB file mid-collection
+    would lock it for minutes and risk collection failures.
+    """
+    if keep_sessions < 1:
+        keep_sessions = 1
+    dates = _distinct_session_dates(conn)
+    if len(dates) <= keep_sessions:
+        return 0  # nothing older than the retention window
+    # The oldest date to KEEP is dates[keep_sessions - 1]; delete strictly before
+    # its local-day start (sargable ts range → the ts index applies).
+    oldest_keep = dates[keep_sessions - 1]
+    y, m, d = (int(x) for x in oldest_keep.split("-"))
+    cutoff, _ = _local_unix_range(_dt.date(y, m, d))  # [start, ...) of oldest kept day
+
+    deleted = 0
+    cur = conn.execute("DELETE FROM snapshots WHERE ts < ?", (cutoff,))
+    deleted += cur.rowcount or 0
+
+    # gex_term_snapshots keys its time as a 'YYYY-MM-DD ...' text prefix; keep the
+    # SAME distinct session-dates. Term rows are SPX-only, but a lexicographic
+    # date-prefix compare (substr 1..10) is exact for the ISO date format and
+    # matches the idx_term_date index expression.
+    cur = conn.execute(
+        "DELETE FROM gex_term_snapshots WHERE substr(timestamp_ct, 1, 10) < ?",
+        (oldest_keep,),
+    )
+    deleted += cur.rowcount or 0
+
+    conn.commit()
+    return deleted
+
+
 def last_snapshot_age(
     conn: sqlite3.Connection,
     symbol: str,
     view: str,
 ) -> tuple[int | None, int | None]:
-    """Return (age_seconds, last_ts) for today's latest snapshot, or (None, None)."""
+    """Return (age_seconds, last_ts) for today's latest snapshot, or (None, None).
+
+    Sargable ``ts >= ? AND ts < ?`` day-range (mirrors ``load_today``) so the
+    ``ts`` index applies, instead of wrapping ``ts`` in ``DATE(...)``."""
+    start, end = _today_local_unix_range()
     cur = conn.execute(
         """
         SELECT MAX(ts) FROM snapshots
          WHERE symbol = ? AND view = ?
-           AND DATE(ts, 'unixepoch', 'localtime') = DATE('now', 'localtime')
+           AND ts >= ? AND ts < ?
         """,
-        (symbol, view),
+        (symbol, view, start, end),
     )
     row = cur.fetchone()
     if not row or row[0] is None:
@@ -313,16 +391,20 @@ def first_snapshot_today(
     """Return the gex_grid dict of today's earliest snapshot, or {} if none.
 
     Used as the "vs Open" baseline for ΔDEX ghost bars.
+
+    Sargable ``ts >= ? AND ts < ?`` day-range (mirrors ``load_today``) so the
+    ``ts`` index applies, instead of wrapping ``ts`` in ``DATE(...)``.
     """
+    start, end = _today_local_unix_range()
     cur = conn.execute(
         """
         SELECT gex_json FROM snapshots
          WHERE symbol = ? AND view = ?
-           AND DATE(ts, 'unixepoch', 'localtime') = DATE('now', 'localtime')
+           AND ts >= ? AND ts < ?
          ORDER BY ts ASC
          LIMIT 1
         """,
-        (symbol, view),
+        (symbol, view, start, end),
     )
     row = cur.fetchone()
     if not row or not row[0]:

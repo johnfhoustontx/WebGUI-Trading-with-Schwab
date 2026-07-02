@@ -60,21 +60,26 @@ def test_nearest_by_delta_empty_returns_none():
 
 
 # ---- Task 3 ----
+# NOTE (C10 + C1): payoff_metrics now reports per-CONTRACT dollars (x100) net of
+# round-trip commission ($0.65/leg x n_legs x 2). Equity rate assumed (no symbol).
 def test_payoff_long_call_unbounded_profit_capped_loss():
     legs = [_leg("call", "long", 450.0, 6.0)]
     m = ss.payoff_metrics(legs, spot=450.0)
-    assert m["net_debit"] == 6.0 and m["net_credit"] is None
-    assert m["max_loss"] == 6.0
+    # net_debit = 6.0 x 100 = 600; 1-leg round-trip commission = 0.65x1x2 = 1.30
+    assert m["net_debit"] == 600.0 and m["net_credit"] is None
+    assert abs(m["max_loss"] - 601.30) < 0.01   # 600 debit + 1.30 commission
+    assert m["commission"] == 1.30
     assert m["unbounded"] is True
-    assert abs(m["breakevens"][0] - 456.0) < 0.5
+    assert abs(m["breakevens"][0] - 456.0) < 0.5   # breakeven = price level, unshifted
 
 
 def test_payoff_bull_call_debit_spread_bounded():
     legs = [_leg("call", "long", 450.0, 6.0), _leg("call", "short", 455.0, 3.5)]
     m = ss.payoff_metrics(legs, spot=450.0)
-    assert abs(m["net_debit"] - 2.5) < 1e-6
-    assert abs(m["max_loss"] - 2.5) < 0.05
-    assert abs(m["max_profit"] - 2.5) < 0.1
+    # net_debit 2.5 -> 250; commission 2 legs x 0.65 x 2 = 2.60
+    assert abs(m["net_debit"] - 250.0) < 1e-6
+    assert abs(m["max_loss"] - 252.60) < 0.05    # 250 + 2.60 commission
+    assert abs(m["max_profit"] - 247.40) < 0.1   # 250 - 2.60 commission
     assert m["unbounded"] is False
     assert abs(m["breakevens"][0] - 452.5) < 0.2
 
@@ -82,27 +87,29 @@ def test_payoff_bull_call_debit_spread_bounded():
 def test_payoff_put_credit_spread_max_loss_width_minus_credit():
     legs = [_leg("put", "short", 445.0, 3.5), _leg("put", "long", 440.0, 1.8)]
     m = ss.payoff_metrics(legs, spot=450.0)
-    assert abs(m["net_credit"] - 1.7) < 1e-6
-    assert abs(m["max_profit"] - 1.7) < 0.05
-    assert abs(m["max_loss"] - 3.3) < 0.1
+    # net_credit 1.7 -> 170; commission 2.60
+    assert abs(m["net_credit"] - 170.0) < 1e-6
+    assert abs(m["max_profit"] - 167.40) < 0.05  # 170 - 2.60 commission
+    assert abs(m["max_loss"] - 332.60) < 0.1     # 330 + 2.60 commission
 
 
 def test_payoff_naked_short_call_unbounded_loss():
     legs = [_leg("call", "short", 455.0, 3.5)]
     m = ss.payoff_metrics(legs, spot=450.0)
-    assert m["net_credit"] == 3.5 and m["net_debit"] is None
+    assert abs(m["net_credit"] - 350.0) < 1e-6 and m["net_debit"] is None
     assert m["unbounded"] is True
-    assert m["max_profit"] == 3.5          # keep the credit if S stays below strike
-    assert m["capital"] > 0                 # margin proxy, not a tiny/zero value
+    assert abs(m["max_profit"] - 348.70) < 0.05   # 350 credit - 1.30 commission
+    assert m["capital"] > 0                        # margin proxy (x100) + commission
 
 
 def test_payoff_naked_short_put_bounded_loss():
     legs = [_leg("put", "short", 445.0, 3.5)]
     m = ss.payoff_metrics(legs, spot=450.0)
     assert m["unbounded"] is False
-    assert m["net_credit"] == 3.5
-    assert abs(m["max_loss"] - 441.5) < 0.5   # strike(445) - credit(3.5) at S=0
-    assert abs(m["max_profit"] - 3.5) < 0.05
+    assert abs(m["net_credit"] - 350.0) < 1e-6
+    # (strike 445 - credit 3.5) x 100 = 44150, + 1.30 commission
+    assert abs(m["max_loss"] - 44151.30) < 0.5
+    assert abs(m["max_profit"] - 348.70) < 0.05   # 350 - 1.30 commission
 
 
 # ---- Task 4 ----
@@ -211,13 +218,17 @@ def test_adapt_credit_spread_pcs_to_normalized():
            "short_delta": -0.32, "net_theta": 0.04, "net_vega": -0.02}
     n = ss.adapt_credit_spread(pcs)
     assert n["family"] == "VERTICAL" and n["bias"] == "bullish"
-    assert n["net_credit"] == 1.7 and n["max_loss"] == 3.3
+    # per-contract dollars net of commission (2 legs x 0.65 x 2 = 2.60):
+    # net_credit 1.7 -> 170; max_loss 3.3 -> 330 + 2.60 = 332.60
+    assert n["net_credit"] == 170.0 and abs(n["max_loss"] - 332.60) < 0.01
+    assert abs(n["max_profit"] - 167.40) < 0.01    # 170 - 2.60 commission
+    assert n["commission"] == 2.60
     assert [l["side"] for l in n["legs"]] == ["short", "long"]
     assert n["legs"][0]["kind"] == "put"
     # full normalized shape: structural keys populated, source greeks preserved
     assert isinstance(n["breakevens"], list) and n["breakevens"]
     assert abs(n["breakevens"][0] - 443.3) < 0.3   # short_strike - credit = 445 - 1.7
-    assert n["capital"] is not None
+    assert abs(n["capital"] - n["max_loss"]) < 0.01   # capital == dollar max_loss
     assert n["rr"] is not None
     assert n["net_delta"] is not None
     assert n["timestamp"] is not None
@@ -234,7 +245,8 @@ def test_adapt_credit_spread_ccs_to_normalized():
     n = ss.adapt_credit_spread(ccs)
     assert n["family"] == "VERTICAL" and n["bias"] == "bearish"
     assert n["strategy_label"] == "Call Credit Spread"
-    assert n["net_credit"] == 1.7 and n["max_profit"] == 1.7
+    # net_credit 1.7 -> 170; max_profit = 170 - 2.60 commission = 167.40
+    assert n["net_credit"] == 170.0 and abs(n["max_profit"] - 167.40) < 0.01
     assert [l["kind"] for l in n["legs"]] == ["call", "call"]
     assert [l["side"] for l in n["legs"]] == ["short", "long"]
 
@@ -252,7 +264,11 @@ def test_adapt_iron_condor_to_normalized():
     n = ss.adapt_iron_condor(ic)
     assert n["family"] == "NEUTRAL" and n["bias"] == "neutral"
     assert n["strategy_label"] == "Iron Condor"
-    assert n["net_credit"] == 3.3 and n["max_profit"] == 3.3
+    # 4-leg IC: commission = 4 x 0.65 x 2 = $5.20 (the finding's example).
+    # net_credit 3.3 -> 330; max_profit = 330 - 5.20 = 324.80; the $5.20 is a real
+    # ~1.6% haircut on a $330 credit, enough to move a gate.
+    assert n["net_credit"] == 330.0 and abs(n["max_profit"] - 324.80) < 0.01
+    assert n["commission"] == 5.20
     assert len(n["legs"]) == 4
     kinds = {l["kind"] for l in n["legs"]}
     assert kinds == {"put", "call"}
@@ -261,8 +277,10 @@ def test_adapt_iron_condor_to_normalized():
     assert len(bes) == 2
     assert abs(bes[0] - (445.0 - 3.3)) < 0.3   # put_short - credit = 441.7
     assert abs(bes[1] - (455.0 + 3.3)) < 0.3   # call_short + credit = 458.3
-    assert abs(n["capital"] - 1.7) < 0.05      # = max_loss
-    assert abs(n["rr"] - (3.3 / 1.7)) < 0.05   # credit / max_loss
+    # max_loss 1.7 -> 170 + 5.20 = 175.20; capital == dollar max_loss
+    assert abs(n["max_loss"] - 175.20) < 0.05
+    assert abs(n["capital"] - 175.20) < 0.05
+    assert abs(n["rr"] - (324.80 / 175.20)) < 0.02   # net max_profit / net max_loss
     assert n["net_delta"] is not None and n["net_gamma"] is not None
     assert n["timestamp"] is not None
     assert n["net_debit"] is None and n["unbounded"] is False
@@ -282,8 +300,9 @@ def test_adapt_iron_condor_marks_absent_falls_back_to_source_breakevens():
     assert len(bes) == 2
     assert abs(bes[0] - (445.0 - 3.3)) < 0.05   # put_short - credit = 441.7
     assert abs(bes[1] - (455.0 + 3.3)) < 0.05   # call_short + credit = 458.3
-    assert abs(n["capital"] - 1.7) < 0.05
-    assert abs(n["rr"] - (3.3 / 1.7)) < 0.05
+    # source-derived economics still x100 + commission (5.20) in the marks-absent path
+    assert abs(n["capital"] - 175.20) < 0.05    # (1.7 x 100) + 5.20, == dollar max_loss
+    assert abs(n["rr"] - (324.80 / 175.20)) < 0.02
 
 
 def test_adapt_credit_spread_marks_absent_falls_back():
@@ -294,8 +313,26 @@ def test_adapt_credit_spread_marks_absent_falls_back():
     n = ss.adapt_credit_spread(pcs)
     assert len(n["breakevens"]) == 1
     assert abs(n["breakevens"][0] - (445.0 - 1.7)) < 0.05   # short - credit = 443.3
-    assert abs(n["capital"] - 3.3) < 0.05
-    assert abs(n["rr"] - (1.7 / 3.3)) < 0.05
+    # 2-leg PCS commission 2.60: capital = (3.3 x 100) + 2.60 = 332.60, == max_loss
+    assert abs(n["capital"] - 332.60) < 0.05
+    assert abs(n["rr"] - (167.40 / 332.60)) < 0.02   # net max_profit / net max_loss
+
+
+# ---- C10: cross-family unit consistency (per-CONTRACT dollars everywhere) ----
+def test_cross_family_max_loss_same_scale():
+    # A directional long put and an adapted put-credit-spread of comparable risk
+    # must report max_loss on the SAME (x100 per-contract) scale — before the fix
+    # the directional was ~1/100th of the credit adapter's scale.
+    lp = ss.payoff_metrics([_leg("put", "long", 445.0, 3.3)], spot=450.0)
+    pcs = ss.adapt_credit_spread(
+        {"id": "X", "symbol": "SPY", "type": "PCS", "expiration": "2026-07-10",
+         "dte": 10, "short_strike": 445.0, "long_strike": 440.0,
+         "short_mark": 3.5, "long_mark": 1.8, "credit": 1.7, "max_loss": 3.3,
+         "underlying_price": 450.0})
+    # both in the hundreds, not one ~3 and the other ~330
+    assert lp["max_loss"] > 100 and pcs["max_loss"] > 100
+    # same order of magnitude (ratio within ~3x), not ~100x apart
+    assert 0.3 < (lp["max_loss"] / pcs["max_loss"]) < 3.0
 
 
 # ---- E1 code-review fix: build_iron_condors forwards liquidity end-to-end ----

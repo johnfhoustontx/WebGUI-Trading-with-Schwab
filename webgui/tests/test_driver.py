@@ -186,5 +186,55 @@ def test_pnl_slot_binds_pnl_class():
     assert "_pnl_class" in driver._PNL_CELL_SLOT
 
 
+# ── R7: stand-down reason observability ─────────────────────────────────────
+def test_decision_log_rows_carry_reason():
+    """The reason (from the decider) is threaded through onto each log row so the
+    page can distinguish an ops-incident stand-down (no_key/api_error) from a
+    genuine model stand-down. Missing reason → None (back-compat, renders as today)."""
+    rows = driver.decision_log_rows([
+        {"ts": "t1", "stand_down": True, "reason": "no_key"},
+        {"ts": "t2", "stand_down": True, "reason": "model"},
+        {"ts": "t3", "stand_down": True},                       # legacy row, no reason
+    ])
+    assert rows[0]["reason"] == "no_key"
+    assert rows[1]["reason"] == "model"
+    assert rows[2]["reason"] is None                            # absent → None
+
+
+def test_stand_down_reason_label_non_model():
+    """A non-model reason gets a short, distinct human tag for the log entry."""
+    assert driver.stand_down_reason_label("no_key") == "NO API KEY"
+    assert driver.stand_down_reason_label("api_error") == "API ERROR"
+    assert driver.stand_down_reason_label("parse_error") == "BAD REPLY"
+
+
+def test_stand_down_reason_label_model_or_absent_is_none():
+    """A genuine model stand-down (or a missing/unknown reason) → no tag: it must
+    render exactly as today (back-compat), NOT flag a normal decision as an incident."""
+    assert driver.stand_down_reason_label("model") is None
+    assert driver.stand_down_reason_label(None) is None
+    assert driver.stand_down_reason_label("") is None
+    assert driver.stand_down_reason_label("something_new") is None   # unknown → no tag
+
+
+def test_decision_summary_flags_incident_stand_down():
+    """The one-line summary appends the incident tag for a non-model stand-down so
+    a no_key/api_error is visible even where the badge isn't rendered."""
+    row = driver.decision_log_rows([
+        {"ts": "t", "stand_down": True, "reason": "api_error"}])[0]
+    summary = driver.decision_summary(row)
+    assert "API ERROR" in summary
+
+
+def test_decision_summary_model_stand_down_unchanged():
+    """A genuine model stand-down summary is unchanged (no incident tag) — back-compat."""
+    row = driver.decision_log_rows([
+        {"ts": "t", "stand_down": True, "reason": "model"}])[0]
+    assert driver.decision_summary(row) == "Stood down — no trades"
+    # a legacy row with no reason at all is identical
+    legacy = driver.decision_log_rows([{"ts": "t", "stand_down": True}])[0]
+    assert driver.decision_summary(legacy) == "Stood down — no trades"
+
+
 def test_render_is_callable():
     assert callable(driver.render)

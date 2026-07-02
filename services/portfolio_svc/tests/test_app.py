@@ -23,7 +23,10 @@ def test_health(monkeypatch):
     with TestClient(app) as c:
         r = c.get("/health")
         assert r.status_code == 200
-        assert r.json() == {"domain": "portfolio", "up": True}
+        body = r.json()
+        assert body["domain"] == "portfolio"
+        assert body["up"] is True
+        assert body["scheduler_alive"] is True
 
 
 def test_app_wires_command_handler_and_scheduler():

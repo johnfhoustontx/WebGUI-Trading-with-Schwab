@@ -191,6 +191,57 @@ def reserve_buying_power(db_path, amount):
         conn.close()
 
 
+def reconcile_buying_power(db_path):
+    """Recompute ``buying_power_reserved`` = Σ OPEN positions' ``max_loss_total``
+    and correct any drift, crediting/debiting ``cash`` by the inverse delta so the
+    account's total committed capital (``cash + buying_power_reserved``) is
+    invariant across the fix.
+
+    Why (R6): opening a position is a 3-commit sequence — record_order →
+    reserve_buying_power → insert_position — that is NOT atomic. A crash BETWEEN
+    reserve and insert leaves buying power reserved against no position, so the
+    driver's halt/loss-cap math (which reads reserved/equity) runs on a corrupted
+    book. Rewriting the sequence into one transaction is too invasive; instead we
+    reconcile at service startup for BOTH the manual and the driver account.
+
+    Idempotent + defensive: a no-op when reserved already equals the open-position
+    total (within a rounding tolerance); returns the corrected drift amount (0.0 on
+    no-op / no account). Logs when it actually corrects. Never raises."""
+    try:
+        conn = connect(db_path)
+    except Exception:  # noqa: BLE001 — a cold/unreadable DB must not crash startup.
+        log.exception("reconcile_buying_power could not open %s", db_path)
+        return 0.0
+    try:
+        with conn:
+            a = conn.execute(
+                "SELECT cash, buying_power_reserved FROM account WHERE id=1").fetchone()
+            if a is None:
+                return 0.0  # no account yet → nothing to reconcile
+            rows = conn.execute(
+                "SELECT COALESCE(SUM(max_loss_total), 0) AS s "
+                "FROM paper_positions WHERE status='OPEN'").fetchone()
+            correct_reserved = round(float(rows["s"] or 0.0), 2)
+            current_reserved = round(float(a["buying_power_reserved"] or 0.0), 2)
+            drift = round(current_reserved - correct_reserved, 2)
+            if abs(drift) < 0.01:
+                return 0.0  # consistent → no-op
+            # Over-reserved (drift>0) → credit the orphaned BP back to cash;
+            # under-reserved (drift<0) → debit cash. Keeps cash+reserved invariant.
+            new_cash = round(float(a["cash"]) + drift, 2)
+            _update_account(conn, cash=new_cash, buying_power_reserved=correct_reserved)
+            log.warning(
+                "reconciled buying power on %s: reserved %.2f -> %.2f "
+                "(drift %.2f, cash %.2f -> %.2f)",
+                db_path, current_reserved, correct_reserved, drift, a["cash"], new_cash)
+            return drift
+    except Exception:  # noqa: BLE001 — reconciliation must never crash startup.
+        log.exception("reconcile_buying_power degraded for %s", db_path)
+        return 0.0
+    finally:
+        conn.close()
+
+
 def release_buying_power(db_path, amount):
     conn = connect(db_path)
     try:

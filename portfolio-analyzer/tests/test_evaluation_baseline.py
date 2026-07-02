@@ -115,6 +115,10 @@ def test_compute_baseline_full():
     assert b["symbol"] == "ABC"
     assert b["entry_date"] == "2026-01-05"
     assert b["days_held"] >= 1
+    # Trading-day count for the 252-basis annualization; never exceeds calendar
+    # days (~5 trading days per 7 calendar).
+    assert b["trading_days_held"] >= 1
+    assert b["trading_days_held"] <= b["days_held"]
     assert b["peak_close"] == pytest.approx(110.0)
     assert b["sector_ret"] == pytest.approx(53 / 50 - 1)
     assert b["spy_ret"] == pytest.approx(412 / 400 - 1)
@@ -129,6 +133,7 @@ def test_compute_baseline_no_entry_uses_position_avg_price_no_window_stats():
     # Without an entry date there is no holding window: window stats are None.
     assert b["entry_date"] is None
     assert b["days_held"] is None
+    assert b["trading_days_held"] is None
     assert b["sector_ret"] is None and b["spy_ret"] is None
     assert b["peak_close"] is None
     # entry price still falls back to the position's avg_price
@@ -150,6 +155,7 @@ def test_compute_baseline_garbage_entry_date_does_not_raise():
              "total_quantity": 10.0}
     b = compute_baseline(_holding(), stock, stock, stock, entry)
     assert b["days_held"] is None
+    assert b["trading_days_held"] is None
     # slice_since on an unparseable date degrades to None -> window stats None
     assert b["peak_close"] is None
     assert b["sector_ret"] is None and b["spy_ret"] is None

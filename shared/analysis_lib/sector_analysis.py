@@ -368,11 +368,15 @@ class SectorRanker:
                 spy_3m = self._calc_return(spy_df, 63)
                 spy_6m = self._calc_return(spy_df, 126)
                 
-                # RS = sector return / spy return * 100
-                rs_1w_vs = (rs_1w / spy_1w * 100) if spy_1w != 0 else 100
-                rs_1m_vs = (rs_1m / spy_1m * 100) if spy_1m != 0 else 100
-                rs_3m_vs = (rs_3m / spy_3m * 100) if spy_3m != 0 else 100
-                rs_6m_vs = (rs_6m / spy_6m * 100) if spy_6m != 0 else 100
+                # Sector RS vs SPY: parity-preserving growth-factor ratio
+                # 100 * (1 + sector) / (1 + spy) (100 == parity). A raw
+                # return/return ratio is unstable near spy=0 and SIGN-INVERTS
+                # when SPY is negative (a sector that fell less than SPY would
+                # wrongly rank weak). Returns are percents here, so /100 first.
+                rs_1w_vs = _rs_parity(rs_1w / 100.0, spy_1w / 100.0)
+                rs_1m_vs = _rs_parity(rs_1m / 100.0, spy_1m / 100.0)
+                rs_3m_vs = _rs_parity(rs_3m / 100.0, spy_3m / 100.0)
+                rs_6m_vs = _rs_parity(rs_6m / 100.0, spy_6m / 100.0)
                 
                 # Composite RS (weighted per Blueprint)
                 # 10% 1W, 25% 1M, 35% 3M, 30% 6M
@@ -554,13 +558,31 @@ def calculate_stock_vs_sector_rs(
         
         stock_ret = (stock_df['close'].iloc[-1] / stock_df['close'].iloc[-period-1] - 1) * 100
         sector_ret = (sector_df['close'].iloc[-1] / sector_df['close'].iloc[-period-1] - 1) * 100
-        
-        if sector_ret == 0:
-            results[label] = 100.0
-        else:
-            results[label] = stock_ret / sector_ret * 100
-    
+
+        # Parity-preserving relative strength: 100 * (1 + stock) / (1 + sector),
+        # with returns as fractions (100 == parity, >100 == outperformance).
+        # A plain return/return ratio is unstable as the denominator -> 0 and
+        # SIGN-INVERTS in down markets (e.g. stock -1% vs sector -2% must read
+        # as OUTperformance, not weakness). The growth-factor ratio is stable
+        # and sign-correct in both up and down markets.
+        results[label] = _rs_parity(stock_ret / 100.0, sector_ret / 100.0)
+
     return results
+
+
+def _rs_parity(stock_ret: float, sector_ret: float) -> float:
+    """Parity-preserving relative strength from two *fractional* returns.
+
+    Returns ``100 * (1 + stock_ret) / (1 + sector_ret)`` (100 == parity,
+    >100 == the stock outperformed). Stable and sign-correct in down markets,
+    unlike a raw return/return ratio. Falls back to parity (100.0) only when
+    the growth factor ``1 + sector_ret`` is non-positive (a -100%+ benchmark
+    move, which can't happen for a real ETF) to avoid a divide-by-zero/sign flip.
+    """
+    denom = 1.0 + sector_ret
+    if denom <= 0:
+        return 100.0
+    return 100.0 * (1.0 + stock_ret) / denom
 
 
 def determine_rrg_quadrant(rs: float, rs_momentum: float) -> str:

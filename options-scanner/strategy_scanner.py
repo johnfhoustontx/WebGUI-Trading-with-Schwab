@@ -9,7 +9,15 @@ adapted here; this module owns the new families.
 import datetime as _dt
 import math
 
+import commissions as _cm
+
 _GRID_LO, _GRID_HI, _GRID_N = 0.5, 1.5, 401   # ±50% of spot payoff grid
+
+# Contract multiplier: option economics are per-share; a standard US equity/index
+# option controls 100 shares. ALL normalized families report per-CONTRACT dollars
+# (matching the calculator + the ×100 scanner convention), so a directional row's
+# max_loss and a credit row's max_loss compare on the same scale.
+_CONTRACT_MULT = 100.0
 
 
 def _norm_mark(c):
@@ -71,7 +79,7 @@ def _pl_at(legs, entry_cost, S):
     return v - entry_cost
 
 
-def payoff_metrics(legs, spot):
+def payoff_metrics(legs, spot, symbol=None):
     entry_cost = sum(_sign(l) * l["mark"] * l.get("qty", 1) for l in legs)   # +debit
     net = round(entry_cost, 4)
 
@@ -91,19 +99,30 @@ def payoff_metrics(legs, spot):
     bounded_max = max(pls)
     bounded_min = min(pls)
 
-    # Override the extremum on whichever side is unbounded.
+    # Round-trip (open+close) commission in per-CONTRACT dollars — modeled as a
+    # real cost against reward: subtract from max_profit, ADD to max_loss/capital
+    # so R:R / capital-efficiency / grade all see net-of-commission economics.
+    # Never subtracted from an UNBOUNDED profit (None). Breakevens are the
+    # gross-payoff crossing levels (display convention); left unshifted.
+    comm = _cm.round_trip_commission(legs, symbol, 1)
+
+    # Override the extremum on whichever side is unbounded. Everything ×100
+    # (per-contract dollars), commission then folded in.
     if call_coeff > 0:          # unbounded upside profit
         max_profit = None
     else:
-        max_profit = round(bounded_max, 2)
+        max_profit = round(bounded_max * _CONTRACT_MULT - comm, 2)
 
-    margin_proxy = round(abs(net) if net > 0 else spot * 0.20, 2)
+    margin_proxy = round((abs(net) if net > 0 else spot * 0.20) * _CONTRACT_MULT, 2)
     if call_coeff < 0:          # unbounded upside loss -> can't read off the grid
-        max_loss = margin_proxy
-        capital = margin_proxy
+        max_loss = round(margin_proxy + comm, 2)
+        capital = max_loss
     else:
-        max_loss = abs(round(bounded_min, 2))
-        capital = max_loss if not unbounded else margin_proxy
+        max_loss = round(abs(bounded_min) * _CONTRACT_MULT + comm, 2)
+        capital = max_loss if not unbounded else round(margin_proxy + comm, 2)
+
+    net_debit = round(net * _CONTRACT_MULT, 2) if net > 0 else None
+    net_credit = round(-net * _CONTRACT_MULT, 2) if net < 0 else None
 
     # --- Breakevens: scan a fine grid for sign changes + interpolate ---
     grid = [spot * (_GRID_LO + (_GRID_HI - _GRID_LO) * i / (_GRID_N - 1))
@@ -116,11 +135,12 @@ def payoff_metrics(legs, spot):
             breakevens.append(round(grid[i - 1] + t * (grid[i] - grid[i - 1]), 2))
 
     return {
-        "net_debit": net if net > 0 else None,
-        "net_credit": round(-net, 4) if net < 0 else None,
+        "net_debit": net_debit,
+        "net_credit": net_credit,
         "max_profit": max_profit, "max_loss": max_loss,
         "breakevens": breakevens, "unbounded": unbounded,
         "capital": capital,
+        "commission": comm,
         "rr": (round(max_profit / max_loss, 3) if (max_profit and max_loss) else None),
         "net_delta": round(sum(_sign(l) * l["delta"] * l.get("qty", 1) for l in legs), 4),
         "net_theta": round(sum(_sign(l) * l["theta"] * l.get("qty", 1) for l in legs), 4),
@@ -185,7 +205,7 @@ def _dte_for(exp_str):
 
 
 def _assemble(stype, family, label, bias, legs, symbol, spot, atm_iv):
-    m = payoff_metrics(legs, spot)
+    m = payoff_metrics(legs, spot, symbol)
     front = min(legs, key=lambda l: l["expiration"])
     dte = _dte_for(front["expiration"])
     pop = pop_from_payoff(legs, spot, atm_iv, dte)
@@ -273,27 +293,47 @@ def _normalize_credit(sig, family, label, bias, legs, source_breakevens):
     breakevens/capital/rr), the structural economics fall back to these
     source-derived values instead. Production IC/spread dicts always carry
     marks, so the marks-present path (computed from legs) is the normal one.
+
+    UNITS + COMMISSION: the source ``credit`` / ``max_loss`` are PER-SHARE
+    dollars; they are scaled to per-CONTRACT dollars (x100) here so credit
+    families report on the SAME scale as the natively-built directional/debit
+    families. Round-trip (open+close) commission is then folded in — subtracted
+    from max_profit, added to max_loss — and ``capital`` is set = the (dollar,
+    commission-inclusive) max_loss (a defined-risk credit spread risks exactly
+    its max loss; the old per-share ``capital`` was a latent unit bug).
     """
+    symbol = sig.get("symbol")
     credit = sig.get("credit")
     max_loss = sig.get("max_loss")
     spot = sig.get("underlying_price") or 0
-    m = payoff_metrics(legs, spot)
+    m = payoff_metrics(legs, spot, symbol)
+
+    # Round-trip commission (per-contract dollars), same scale as the x100 economics.
+    comm = _cm.round_trip_commission(legs, symbol, 1)
+
+    # Authoritative source economics -> per-contract dollars, net of commission.
+    credit_d = (credit * _CONTRACT_MULT) if isinstance(credit, (int, float)) else None
+    max_loss_d = (max_loss * _CONTRACT_MULT) if isinstance(max_loss, (int, float)) else None
+    net_credit = round(credit_d, 2) if credit_d is not None else None
+    max_profit = round(credit_d - comm, 2) if credit_d is not None else None
+    max_loss_net = round(max_loss_d + comm, 2) if max_loss_d is not None else None
+    capital_net = max_loss_net   # defined-risk: capital == (dollar) max loss
+    rr_net = (round(max_profit / max_loss_net, 3)
+              if (max_profit and max_loss_net) else None)
 
     has_marks = any((l.get("mark") or 0) > 0 for l in legs)
     if not has_marks:
         # Override the marks-derived structural economics with source-derived ones.
         m = dict(m)
         m["breakevens"] = [round(b, 2) for b in source_breakevens]
-        m["capital"] = max_loss
-        m["rr"] = (round(credit / max_loss, 3)
-                   if (credit and max_loss) else None)
 
     out = dict(sig)            # preserve source fields
     out.update(m)              # structural keys from the legs (or source fallback)
     out.update({
         "family": family, "strategy_label": label, "bias": bias, "legs": legs,
-        "net_credit": credit, "net_debit": None,
-        "max_profit": credit, "max_loss": max_loss,
+        "net_credit": net_credit, "net_debit": None,
+        "max_profit": max_profit, "max_loss": max_loss_net,
+        "capital": capital_net, "rr": rr_net, "commission": comm,
         "unbounded": False,
         "timestamp": sig.get("timestamp") or _dt.datetime.now().isoformat(),
     })

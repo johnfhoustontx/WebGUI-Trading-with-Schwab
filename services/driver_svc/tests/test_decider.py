@@ -41,7 +41,8 @@ def test_parse_non_dict_inputs_stand_down():
     """A list / string / int / empty — anything not a dict — stands down cleanly."""
     for bad in ([], "submit", 42, 0.0, ("a",), set()):
         d = decider.parse_decision(bad)
-        assert d == {"stand_down": True, "day_thesis": "", "confidence": 0.0, "trades": []}
+        assert d == {"stand_down": True, "day_thesis": "", "confidence": 0.0,
+                     "trades": [], "reason": "parse_error"}
 
 
 def test_parse_trades_not_a_list_yields_empty_trades():
@@ -267,3 +268,122 @@ def test_decide_empty_or_none_content_stands_down():
             return type("R", (), {"content": None})()
 
     assert decider.decide({"menu": []}, client=_Empty())["stand_down"] is True
+
+
+# ---------------------------------------------------------------------------
+# R7 — stand-down REASON taxonomy (observability; fail-safe behavior unchanged)
+# ---------------------------------------------------------------------------
+# Every failure mode still degrades to stand_down (never trade blind), but the
+# decision now carries a ``reason`` so a broken/rotated key ("no_key"/"api_error")
+# is DISTINGUISHABLE from the model choosing to stand down ("model"). The parse
+# layer classifies its own inputs; ``decide`` overrides with the op-level cause
+# (no_key / api_error / parse_error) when it degrades before/around the model.
+def test_parse_reason_model_on_valid_stand_down():
+    """A well-formed model reply that stands down → reason 'model' (a real choice)."""
+    d = decider.parse_decision({"stand_down": True, "trades": []})
+    assert d["stand_down"] is True and d["reason"] == "model"
+
+
+def test_parse_reason_model_on_trades():
+    """A well-formed model reply that DOES trade also carries reason 'model'."""
+    d = decider.parse_decision({"stand_down": False,
+                                "trades": [{"id": "m0", "quantity": 1}]})
+    assert d["stand_down"] is False and d["reason"] == "model"
+
+
+def test_parse_reason_parse_error_on_non_dict():
+    """A non-dict reply (None/list/str/int) → reason 'parse_error' (unusable payload)."""
+    for bad in (None, [], "submit", 42):
+        d = decider.parse_decision(bad)
+        assert d["stand_down"] is True and d["reason"] == "parse_error"
+
+
+def test_parse_reason_model_on_dict_with_junk_trades():
+    """A well-formed dict with a garbled ``trades`` field is still a MODEL decision
+    (the tool returned a structured object) that stands down for lack of trades —
+    NOT a parse_error. Only a non-dict envelope is a parse failure."""
+    d = decider.parse_decision({"trades": "nope"})
+    assert d["stand_down"] is True and d["reason"] == "model"
+
+
+def test_decide_no_key_reason(monkeypatch):
+    """No resolvable API key → stand_down with reason 'no_key' (an ops incident)."""
+    d = decider.decide({"menu": []}, client=None, _force_no_key=True)
+    assert d["stand_down"] is True and d["trades"] == []
+    assert d["reason"] == "no_key"
+
+
+def test_decide_no_key_via_missing_key(monkeypatch):
+    """When _make_client resolves no key (real path), reason is 'no_key' too."""
+    monkeypatch.setattr(decider.api_keys, "anthropic_api_key", lambda: "")
+    d = decider.decide({"menu": []})
+    assert d["stand_down"] is True and d["reason"] == "no_key"
+
+
+def test_decide_api_error_reason():
+    """A raised API/network error → stand_down with reason 'api_error'."""
+    d = decider.decide({"menu": [{"id": "m0"}]}, client=_RaisingClient())
+    assert d["stand_down"] is True and d["trades"] == []
+    assert d["reason"] == "api_error"
+
+
+def test_decide_parse_error_reason_on_malformed_tool_input():
+    """A tool_use block whose input isn't a usable dict → reason 'parse_error'."""
+    d = decider.decide({"menu": []}, client=_FakeClient("not-a-dict"))
+    assert d["stand_down"] is True and d["reason"] == "parse_error"
+
+
+def test_decide_parse_error_reason_on_no_tool_block():
+    """A text-only reply (no submit_decision tool_use) → reason 'parse_error'."""
+
+    class _TextOnly:
+        @property
+        def messages(self):
+            return self
+
+        def create(self, **kw):
+            return type("R", (), {"content": [_block(btype="text", name="", inp=None)]})()
+
+    d = decider.decide({"menu": []}, client=_TextOnly())
+    assert d["stand_down"] is True and d["reason"] == "parse_error"
+
+
+def test_decide_model_reason_on_valid_choice():
+    """A valid model tool reply keeps reason 'model' through decide (not overridden)."""
+    client = _FakeClient({"stand_down": True, "day_thesis": "chop", "trades": []})
+    d = decider.decide({"menu": []}, client=client)
+    assert d["stand_down"] is True and d["reason"] == "model"
+
+
+def test_decide_model_reason_on_valid_trade():
+    """A valid model reply that trades → reason 'model' + trades survive."""
+    client = _FakeClient({"stand_down": False, "trades": [{"id": "m0", "quantity": 1}]})
+    d = decider.decide({"menu": [{"id": "m0"}]}, client=client)
+    assert d["stand_down"] is False and d["reason"] == "model" and d["trades"][0]["id"] == "m0"
+
+
+def test_decide_no_key_logs_warning(caplog):
+    """Non-model degrade (no_key) is logged at WARNING+ with context (hits svc logs)."""
+    import logging
+    with caplog.at_level(logging.WARNING):
+        decider.decide({"menu": []}, client=None, _force_no_key=True)
+    assert any(r.levelno >= logging.WARNING and "no_key" in r.getMessage().lower()
+               for r in caplog.records)
+
+
+def test_decide_api_error_logs_warning(caplog):
+    """An api_error degrade is logged at WARNING+ with the exception context."""
+    import logging
+    with caplog.at_level(logging.WARNING):
+        decider.decide({"menu": [{"id": "m0"}]}, client=_RaisingClient())
+    assert any(r.levelno >= logging.WARNING and "api_error" in r.getMessage().lower()
+               for r in caplog.records)
+
+
+def test_decide_model_stand_down_does_not_warn(caplog):
+    """A genuine model stand-down must NOT log a warning (it's normal behavior)."""
+    import logging
+    client = _FakeClient({"stand_down": True, "trades": []})
+    with caplog.at_level(logging.WARNING):
+        decider.decide({"menu": []}, client=client)
+    assert not any(r.levelno >= logging.WARNING for r in caplog.records)

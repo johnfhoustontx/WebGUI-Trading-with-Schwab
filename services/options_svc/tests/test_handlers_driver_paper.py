@@ -13,9 +13,23 @@ P&L are tracked apart from the user's manual paper trades. These handlers expose
 We monkeypatch ``handlers.compute.*`` so nothing touches a live proxy / engine,
 and use a fakeredis ``Bus(fake=True)`` (the options_svc test idiom — no fixture).
 """
+import datetime as _dt
+
 from shared.bus import Bus
 from shared.contracts.envelope import Command
 from services.options_svc import handlers
+
+
+def _clear_open_results():
+    """R1's surfaced-results list is module-level (single-process service)."""
+    handlers._LAST_OPEN_RESULTS.clear()
+
+
+def _stale_command(cmd_type, args, seconds):
+    """Build a command whose enqueue ts is ``seconds`` in the past (R5)."""
+    ts = (_dt.datetime.now(_dt.timezone.utc)
+          - _dt.timedelta(seconds=seconds)).isoformat()
+    return Command(type=cmd_type, args=args, ts=ts)
 
 
 def test_refresh_driver_paper_publishes_both_views(monkeypatch):
@@ -189,3 +203,171 @@ def test_existing_paper_create_branch_intact(monkeypatch):
     assert created["signal"]["symbol"] == "SPY" and created["qty"] == 3
     # The driver account view is NOT published by the manual path.
     assert bus.cache_get("cache:options:driver_paper_account") is None
+
+
+# ── R1: driver open results are captured, logged, and surfaced ───────────────
+
+def test_r1_rejected_open_is_logged_and_surfaced(monkeypatch, caplog):
+    """A rejected open (status != opened) is log.warning'd AND appears in the
+    surfaced ``last_open_results`` list on the driver account view."""
+    _clear_open_results()
+    bus = Bus(fake=True)
+    monkeypatch.setattr(
+        handlers.compute, "open_driver_position",
+        lambda signal, qty, **k: {"status": "rejected", "reason": "LOW_CREDIT"})
+    monkeypatch.setattr(handlers.compute, "driver_account_view",
+                        lambda: {"snapshot": {}, "positions": [], "has_account": True})
+    monkeypatch.setattr(handlers.compute, "driver_account_perf", lambda: {})
+
+    with caplog.at_level("WARNING"):
+        handlers.handle_command(
+            bus, Command(type="driver_paper_create",
+                         args={"signal": {"symbol": "MU"}, "qty": 1}))
+
+    assert any("did NOT land" in r.message for r in caplog.records)
+    view = bus.cache_get("cache:options:driver_paper_account").payload
+    results = view["last_open_results"]
+    assert len(results) == 1
+    assert results[0]["status"] == "rejected"
+    assert results[0]["reason"] == "LOW_CREDIT"
+    assert results[0]["symbol"] == "MU"
+
+
+def test_r1_error_open_is_logged_and_surfaced(monkeypatch, caplog):
+    """An error open (defensive degradation inside open_driver_position) is
+    surfaced too, not swallowed."""
+    _clear_open_results()
+    bus = Bus(fake=True)
+    monkeypatch.setattr(
+        handlers.compute, "open_driver_position",
+        lambda signal, qty, **k: {"status": "error", "error": "KeyError: 'width'"})
+    monkeypatch.setattr(handlers.compute, "driver_account_view",
+                        lambda: {"snapshot": {}, "positions": [], "has_account": True})
+    monkeypatch.setattr(handlers.compute, "driver_account_perf", lambda: {})
+
+    with caplog.at_level("WARNING"):
+        handlers.handle_command(
+            bus, Command(type="driver_paper_create",
+                         args={"signal": {"symbol": "NVDA", "id": "s1"}}))
+
+    assert any("did NOT land" in r.message for r in caplog.records)
+    results = bus.cache_get("cache:options:driver_paper_account").payload["last_open_results"]
+    assert results[-1]["status"] == "error"
+    assert "KeyError" in results[-1]["error"]
+
+
+def test_r1_opened_records_normally(monkeypatch):
+    """A successful open records with status=opened (and does not log a warning)."""
+    _clear_open_results()
+    bus = Bus(fake=True)
+    monkeypatch.setattr(
+        handlers.compute, "open_driver_position",
+        lambda signal, qty, **k: {"status": "opened", "symbol": "SPY",
+                                  "qty": 1, "entry_credit": 0.42})
+    monkeypatch.setattr(handlers.compute, "driver_account_view",
+                        lambda: {"snapshot": {}, "positions": [], "has_account": True})
+    monkeypatch.setattr(handlers.compute, "driver_account_perf", lambda: {})
+
+    handlers.handle_command(
+        bus, Command(type="driver_paper_create",
+                     args={"signal": {"symbol": "SPY"}, "qty": 1}))
+
+    results = bus.cache_get("cache:options:driver_paper_account").payload["last_open_results"]
+    assert results[-1]["status"] == "opened"
+    assert results[-1]["entry_credit"] == 0.42
+
+
+# ── R5: stale trade-opening commands are rejected ────────────────────────────
+
+def test_r5_stale_driver_open_is_rejected(monkeypatch, caplog):
+    """A driver_paper_create older than the threshold is REJECTED (open not
+    called) with a logged reason + a surfaced stale record."""
+    _clear_open_results()
+    bus = Bus(fake=True)
+    called = []
+    monkeypatch.setattr(handlers.compute, "open_driver_position",
+                        lambda signal, qty, **k: called.append(1) or {"status": "opened"})
+    monkeypatch.setattr(handlers.compute, "driver_account_view",
+                        lambda: {"snapshot": {}, "positions": [], "has_account": True})
+    monkeypatch.setattr(handlers.compute, "driver_account_perf", lambda: {})
+
+    cmd = _stale_command("driver_paper_create", {"signal": {"symbol": "MU"}, "qty": 1},
+                         seconds=handlers.STALE_OPEN_MAX_AGE_SEC + 60)
+    with caplog.at_level("WARNING"):
+        handlers.handle_command(bus, cmd)
+
+    assert called == []  # open NEVER attempted on a stale command
+    assert any("REJECTED stale driver_paper_create" in r.message for r in caplog.records)
+    results = bus.cache_get("cache:options:driver_paper_account").payload["last_open_results"]
+    assert results[-1]["status"] == "rejected"
+    assert results[-1]["reason"] == "stale_command"
+
+
+def test_r5_fresh_driver_open_proceeds(monkeypatch):
+    """A fresh command (recent ts) opens normally."""
+    _clear_open_results()
+    bus = Bus(fake=True)
+    called = []
+    monkeypatch.setattr(handlers.compute, "open_driver_position",
+                        lambda signal, qty, **k: called.append(1) or {"status": "opened"})
+    monkeypatch.setattr(handlers.compute, "driver_account_view",
+                        lambda: {"snapshot": {}, "positions": [], "has_account": True})
+    monkeypatch.setattr(handlers.compute, "driver_account_perf", lambda: {})
+
+    cmd = _stale_command("driver_paper_create", {"signal": {"symbol": "MU"}, "qty": 1},
+                         seconds=5)  # 5s old → fresh
+    handlers.handle_command(bus, cmd)
+
+    assert called == [1]  # open attempted
+
+
+def test_r5_missing_ts_treated_as_fresh(monkeypatch):
+    """A command with ts=None (a legacy command, or explicit unknown) is treated
+    as NOT stale — never reject a legacy command (back-compat)."""
+    _clear_open_results()
+    bus = Bus(fake=True)
+    called = []
+    monkeypatch.setattr(handlers.compute, "open_driver_position",
+                        lambda signal, qty, **k: called.append(1) or {"status": "opened"})
+    monkeypatch.setattr(handlers.compute, "driver_account_view",
+                        lambda: {"snapshot": {}, "positions": [], "has_account": True})
+    monkeypatch.setattr(handlers.compute, "driver_account_perf", lambda: {})
+
+    cmd = Command(type="driver_paper_create", args={"signal": {"symbol": "MU"}}, ts=None)
+    handlers.handle_command(bus, cmd)
+
+    assert called == [1]  # opened despite no ts
+
+
+def test_r5_stale_manual_paper_create_is_rejected(monkeypatch, caplog):
+    """A stale manual paper_create is refused (create not called) + surfaced."""
+    _clear_open_results()
+    bus = Bus(fake=True)
+    called = []
+    monkeypatch.setattr(handlers.compute, "create_paper_trade",
+                        lambda signal, qty: called.append(1))
+    monkeypatch.setattr(handlers.compute, "paper_trades_view",
+                        lambda reprice=True: {"trades": []})
+
+    cmd = _stale_command("paper_create", {"signal": {"symbol": "SPY"}, "qty": 1},
+                         seconds=handlers.STALE_OPEN_MAX_AGE_SEC + 30)
+    with caplog.at_level("WARNING"):
+        handlers.handle_command(bus, cmd)
+
+    assert called == []  # create NEVER attempted
+    assert any("REJECTED stale paper_create" in r.message for r in caplog.records)
+    assert handlers._LAST_OPEN_RESULTS[-1]["reason"] == "stale_command"
+
+
+def test_r5_idempotent_refresh_not_gated(monkeypatch):
+    """A stale ``refresh_paper`` (idempotent) is NOT gated — it still runs."""
+    bus = Bus(fake=True)
+    called = []
+    monkeypatch.setattr(handlers.compute, "paper_account_view",
+                        lambda: called.append(1) or {"positions": []})
+    monkeypatch.setattr(handlers.compute, "assess_open_positions", lambda: {})
+
+    cmd = _stale_command("refresh_paper", {}, seconds=99999)
+    handlers.handle_command(bus, cmd)
+
+    assert called == [1]  # ran despite being old

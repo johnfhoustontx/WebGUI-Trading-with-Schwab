@@ -21,6 +21,7 @@ from fastapi.responses import HTMLResponse  # noqa: E402
 from nicegui import app, run, ui  # noqa: E402
 
 import datetime as _dt  # noqa: E402
+import logging  # noqa: E402
 import time as _time  # noqa: E402
 from zoneinfo import ZoneInfo as _ZoneInfo  # noqa: E402
 
@@ -29,8 +30,9 @@ import app_settings  # noqa: E402
 import bus_client  # noqa: E402
 import page_help  # noqa: E402
 import proxy  # noqa: E402
+from pages.ui_guard import guard_async  # noqa: E402
 from pages.ui_guard import install_deleted_slot_log_filter  # noqa: E402
-from repo_paths import NICEGUI_PORT  # noqa: E402
+from repo_paths import NICEGUI_PORT, SERVICE_URLS  # noqa: E402
 
 # Silence the benign NiceGUI timer-disconnect-race traceback ("The parent slot of
 # the element has been deleted.") — it escapes the ui_guard callback decorators
@@ -275,8 +277,95 @@ _NAV_BADGES: dict[str, int] = {}
 _ALERT_STATE: dict = {
     "acked_scan": set(), "alerted": set(), "alerted_init": None,
     "captured_seen": None, "driver_seen": None, "rescue_seen": None,
+    # Health/staleness (R4b/R8): the set of currently stale/down component keys
+    # already alerted, so we chime only on transition INTO bad (fire-on-transition,
+    # clear-on-heal). Seeded on the first tick so a service that's already stale/down
+    # at launch doesn't chime immediately.
+    "health_alerted": set(), "health_init": None,
 }
 _badge_refs: dict = {}
+
+# ── Health / staleness surfacing (R4b / R8) ──────────────────────────────────
+# Representative SCHEDULED cache views (mirrors the scheduled rows of
+# status.py:_FRESHNESS) — a view older than alerts.STALE_AFTER_SEC means the
+# owning service is up-but-wedged (or gone). On-demand views (trade/driver) are
+# excluded: they're expected to be old.
+_HEALTH_VIEWS = [
+    "sentiment:composite",
+    "options:scan",
+    "options:gex_status",
+    "portfolio:positions",
+]
+
+# Tier-2 services probed by a lightweight /health GET. Throttled (see
+# _HEALTH_PROBE_INTERVAL_SEC) so we do NOT probe all services every 2s tick.
+_HEALTH_SERVICES = list(SERVICE_URLS.keys())
+_HEALTH_PROBE_INTERVAL_SEC = 30.0
+_HEALTH_HTTP_TIMEOUT = 2.0
+# Last successful service-health probe result + when (monotonic). Reused between
+# probes so the 2s watcher only pays the HTTP fan-out every ~30s.
+_svc_health_cache: dict = {"data": {}, "ts": 0.0}
+
+# Log-once memo for a bus (Memurai) outage: True once "bus down" has been logged,
+# reset when the bus recovers so a later outage logs again. Prevents a full
+# traceback every 2s on every open page when Memurai is down (R9).
+_bus_outage: dict = {"logged": False}
+_LOG = logging.getLogger("webgui.watcher")
+
+
+def _probe_services_health(now_mono: float) -> dict:
+    """Throttled Tier-2 /health probe → ``{service: up_bool_or_None}``.
+
+    Runs the HTTP fan-out at most once per ``_HEALTH_PROBE_INTERVAL_SEC``; between
+    probes it returns the cached result (so a 2s watcher tick is cheap and does NOT
+    hit all five services). ``None`` for a service means "couldn't determine" and is
+    treated as healthy by the pure alert logic (no false alarm). Never raises.
+    """
+    if (not _svc_health_cache["data"]
+            or now_mono - _svc_health_cache["ts"] >= _HEALTH_PROBE_INTERVAL_SEC):
+        import requests  # local import — keep module load light
+        out: dict = {}
+        for svc in _HEALTH_SERVICES:
+            url = SERVICE_URLS.get(svc)
+            if not url:
+                out[svc] = None
+                continue
+            try:
+                r = requests.get(f"{url}/health", timeout=_HEALTH_HTTP_TIMEOUT)
+                out[svc] = (r.status_code == 200 and r.json().get("up") is True)
+            except Exception:  # noqa: BLE001 — a probe must never raise
+                out[svc] = False
+        _svc_health_cache["data"] = out
+        _svc_health_cache["ts"] = now_mono
+    return dict(_svc_health_cache["data"])
+
+
+def _freshness_facts(now_utc) -> dict:
+    """``{view: is_stale}`` for the representative scheduled views (never raises)."""
+    facts: dict = {}
+    for view in _HEALTH_VIEWS:
+        try:
+            _ver, ts = bus_client.read_meta(view)
+            facts[view] = _is_view_stale(ts, now_utc)
+        except Exception:  # noqa: BLE001
+            # A read failure is a bus problem, handled by the tick guard — don't
+            # flag the view stale off a transient read error.
+            facts[view] = False
+    return facts
+
+
+def _is_view_stale(ts, now_utc) -> bool:
+    """Mirror of status.py:is_stale for a scheduled view (no import to avoid pulling
+    the page module + requests at webgui module load). A missing ts => stale."""
+    if not ts:
+        return True
+    try:
+        when = _dt.datetime.fromisoformat(ts)
+    except (ValueError, TypeError):
+        return True
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=_dt.timezone.utc)
+    return (now_utc - when).total_seconds() > alerts.STALE_AFTER_SEC
 
 # proxy.health() is shown as a down-banner on EVERY page build. The call is a
 # blocking HTTP GET with a 3s timeout — without caching, every navigation paid it
@@ -382,29 +471,87 @@ def _recompute_badges(scan=None) -> None:
 
 def _watcher_compute():
     """Off-thread part of a watcher tick: read the bus once, recompute badges, and
-    DECIDE whether to alert. Returns an alert tuple ``(sound, volume, desktop, n)``
-    or None. Does NO UI work (safe to run via ``run.io_bound``) — the caller fires
-    the chime/notification on the UI thread.
+    DECIDE whether to alert. Returns an alert dict ``{"scanner": (...), "health":
+    (...)}`` (each value or None), or None if nothing fires. Does NO UI work (safe
+    to run via ``run.io_bound``) — the caller fires the chime/notification on the
+    UI thread.
+
+    Also surfaces STALE scheduled views + DOWN Tier-2 services (R4b/R8): the
+    service health fan-out is THROTTLED to once per ``_HEALTH_PROBE_INTERVAL_SEC``
+    (NOT probed every tick), and staleness/down alerts fire only on transition INTO
+    bad (deduped while persistent, cleared on recovery). A "⚠"-count badge on the
+    System Status nav item reflects the current unhealthy count regardless of the
+    chime gate.
     """
     scan = bus_client.read("options:scan") or {}   # read ONCE; passed to badges below
     keys = alerts.scanner_keys(scan)
-    # Seed on the first tick so pre-existing signals don't alert on launch.
+    s = app_settings.load()                        # in-memory cached (no disk hit)
+    now = _dt.datetime.now(tz=_CT)
+    now_mono = _time.monotonic()
+    now_utc = _dt.datetime.now(_dt.timezone.utc)
+
+    # ── health / staleness facts (throttled probe) ──────────────────────────
+    freshness = _freshness_facts(now_utc)
+    svc_health = _probe_services_health(now_mono)
+    unhealthy_n = len(alerts.unhealthy_keys(freshness, svc_health))
+    _NAV_BADGES["/status"] = unhealthy_n           # badge tracks count, ungated
+
+    # Seed on the first tick so pre-existing signals / already-down services don't
+    # alert on launch.
     if _ALERT_STATE["alerted_init"] is None:
         _ALERT_STATE["alerted"] = keys
         _ALERT_STATE["alerted_init"] = True
+        _ALERT_STATE["health_alerted"] = alerts.unhealthy_keys(freshness, svc_health)
+        _ALERT_STATE["health_init"] = True
         _recompute_badges(scan)
         return None
     _recompute_badges(scan)
-    s = app_settings.load()                        # in-memory cached (no disk hit)
+
+    # ── scanner alert ────────────────────────────────────────────────────────
     q = alerts.qualifying_new(scan, _ALERT_STATE["alerted"], s["alert_min_score"])
-    now = _dt.datetime.now(tz=_CT)
-    decision = None
+    scanner = None
     if alerts.should_alert(s, q, now):
-        decision = (s["alert_sound"], s["alert_volume"],
-                    bool(s.get("desktop_notifications")), len(q))
+        scanner = (s["alert_sound"], s["alert_volume"],
+                   bool(s.get("desktop_notifications")), len(q))
     # Mark everything currently present as alerted so each signal chimes once.
     _ALERT_STATE["alerted"] |= keys
-    return decision
+
+    # ── health / staleness alert (transition-deduped) ────────────────────────
+    fire, next_alerted = alerts.new_health_alerts(
+        freshness, svc_health, _ALERT_STATE["health_alerted"], s, now)
+    _ALERT_STATE["health_alerted"] = next_alerted
+    health = None
+    if fire:
+        health = (s["alert_sound"], s["alert_volume"],
+                  bool(s.get("desktop_notifications")), len(fire))
+
+    if scanner is None and health is None:
+        return None
+    return {"scanner": scanner, "health": health}
+
+
+def _guarded_compute():
+    """Run ``_watcher_compute`` but survive a Memurai/bus outage (R9).
+
+    When the bus is down, every open page's 2s tick would otherwise raise deep in
+    ``bus_client`` and NiceGUI would log a full traceback every 2 seconds. Here we
+    swallow the failure, log a SINGLE "bus down" warning (memoized via
+    ``_bus_outage``), and return None so the tick is a clean no-op. When the bus
+    recovers, the memo resets and a one-line "bus recovered" is logged, then normal
+    operation resumes.
+    """
+    try:
+        result = _watcher_compute()
+    except Exception as exc:  # noqa: BLE001 — a watcher outage must not spam logs
+        if not _bus_outage["logged"]:
+            _LOG.warning("watcher: backbone/bus unavailable (%s) — alerts paused; "
+                         "logging once until it recovers.", type(exc).__name__)
+            _bus_outage["logged"] = True
+        return None
+    if _bus_outage["logged"]:
+        _LOG.info("watcher: backbone/bus recovered — alerts resumed.")
+        _bus_outage["logged"] = False
+    return result
 
 
 def _nav_link(path: str, label: str, icon: str, active: str) -> None:
@@ -516,23 +663,39 @@ def _layout(active: str, title: str):
     # alert/badge watcher on every page so the chime fires regardless of route.
     _acknowledge(active)
 
+    @guard_async
     async def _tick():
         # Run the blocking bus reads + the proxy health re-warm OFF the event loop;
         # then do the (UI-thread-only) chime + badge updates back here after await.
-        decision = await run.io_bound(_watcher_compute)
+        # ``_guarded_compute`` swallows a Memurai/bus outage (logging once, not a
+        # traceback every 2s) → None; ``@guard_async`` swallows a client-disconnect
+        # race after the await. Either way the tick is a clean no-op.
+        decision = await run.io_bound(_guarded_compute)
         await run.io_bound(_refresh_health)
         if decision:
-            sound, volume, desktop, n = decision
-            play_alert(sound, volume)
-            # In-app toast styled to MATCH the scanner's blue "new" badge — same
-            # blue + a "new"-signal icon — so the notification and the in-row
-            # marker read as the same thing.
-            # blue-8 (#1565c0) == the scanner row "new" badge color (Quasar notify
-            # takes a palette NAME, not a hex).
-            ui.notify(alerts.new_signal_text(n), icon="fiber_new", color="blue-8")
-            if desktop:
-                notify_desktop("New scanner signal",
-                               f"{n} new signal(s) meet your criteria.")
+            scanner = decision.get("scanner")
+            health = decision.get("health")
+            if scanner:
+                sound, volume, desktop, n = scanner
+                play_alert(sound, volume)
+                # In-app toast styled to MATCH the scanner's blue "new" badge — same
+                # blue + a "new"-signal icon — so the notification and the in-row
+                # marker read as the same thing.
+                # blue-8 (#1565c0) == the scanner row "new" badge color (Quasar notify
+                # takes a palette NAME, not a hex).
+                ui.notify(alerts.new_signal_text(n), icon="fiber_new", color="blue-8")
+                if desktop:
+                    notify_desktop("New scanner signal",
+                                   f"{n} new signal(s) meet your criteria.")
+            if health:
+                sound, volume, desktop, n = health
+                play_alert(sound, volume)
+                # Amber warning toast — distinct from the blue scanner toast so a
+                # service alert is not confused with a new trading signal.
+                ui.notify(alerts.health_alert_text(n), icon="warning", color="orange-9")
+                if desktop:
+                    notify_desktop("Service alert",
+                                   f"{n} component(s) stale or down — see System Status.")
         for route, badge in _badge_refs.items():
             n = _NAV_BADGES.get(route, 0)
             badge.text = str(n) if n else ""

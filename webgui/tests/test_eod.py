@@ -137,6 +137,51 @@ def test_write_archive_creates_both_files(tmp_path):
     assert paths["summary"].parent.name == "2026-06-18"
 
 
+def test_write_archive_uses_atomic_replace(tmp_path, monkeypatch):
+    """The archive write must go through os.replace (atomic rename), so a
+    reader never sees a partial file — and the temp file lives in the SAME dir."""
+    seen = []
+    real_replace = eod.os.replace
+
+    def _spy_replace(src, dst):
+        # A .tmp temp file in the SAME directory as the final target.
+        assert str(src).endswith(".tmp")
+        assert eod.Path(src).parent == eod.Path(dst).parent
+        seen.append((str(src), str(dst)))
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(eod.os, "replace", _spy_replace)
+    paths = eod.write_archive(tmp_path, "2026-06-18", "<sum/>", "<det/>")
+    assert len(seen) == 2  # both files went through the atomic rename
+    assert paths["summary"].read_text(encoding="utf-8") == "<sum/>"
+    assert paths["detail"].read_text(encoding="utf-8") == "<det/>"
+
+
+def test_write_archive_no_partial_file_on_crash(tmp_path, monkeypatch):
+    """If the write crashes mid-generate, the final .html never appears — the
+    reader is never handed a half-written document; the temp file is cleaned up."""
+    def _boom(src, dst):
+        raise RuntimeError("crash mid-generate")
+
+    monkeypatch.setattr(eod.os, "replace", _boom)
+    try:
+        eod.write_archive(tmp_path, "2026-06-18", "<sum/>", "<det/>")
+    except RuntimeError:
+        pass
+    day = tmp_path / "2026-06-18"
+    assert not (day / "summary.html").exists()  # no half-written final file
+    # And no stray temp files were left behind.
+    assert list(day.glob("*.tmp")) == []
+
+
+def test_write_archive_same_date_overwrites(tmp_path):
+    """Re-generating the same date overwrites in place (atomic, preserved)."""
+    eod.write_archive(tmp_path, "2026-06-18", "<sum-v1/>", "<det-v1/>")
+    paths = eod.write_archive(tmp_path, "2026-06-18", "<sum-v2/>", "<det-v2/>")
+    assert paths["summary"].read_text(encoding="utf-8") == "<sum-v2/>"
+    assert paths["detail"].read_text(encoding="utf-8") == "<det-v2/>"
+
+
 def test_generate_writes_standalone_docs_with_relative_link(tmp_path, monkeypatch):
     monkeypatch.setattr(eod, "read_snapshot", lambda: dict(SAMPLE))
     monkeypatch.setattr(eod, "ARCHIVE_ROOT", tmp_path)

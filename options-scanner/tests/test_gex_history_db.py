@@ -165,6 +165,104 @@ def test_purge_old_deletes_prior_days(tmp_path, monkeypatch):
     assert rows[0][0] == now
 
 
+def _day_ts(days_ago, hour=12):
+    """Unix ts at local `hour` on the day `days_ago` days before today."""
+    import datetime as _dt
+    d = _dt.date.today() - _dt.timedelta(days=days_ago)
+    return int(_dt.datetime(d.year, d.month, d.day, hour).astimezone().timestamp())
+
+
+def _make_summary(ts, spot=1.0):
+    return {"ts": ts, "spot": spot, "flip": None,
+            "top_pos_strike": None, "top_neg_strike": None, "net_total": None}
+
+
+def test_purge_keep_sessions_keeps_last_n_and_last_session(tmp_path, monkeypatch):
+    """Retention keeps exactly the last N distinct session-dates AND never drops
+    the most recent session (off-hours persistence)."""
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    # 8 distinct session-dates, two rows each (two views).
+    for days in range(8):
+        ts = _day_ts(days)
+        db.insert_snapshot(conn, "SPY", "gex", _make_summary(ts, float(days)), {}, 1)
+        db.insert_snapshot(conn, "SPY", "charm", _make_summary(ts, float(days)), {}, 1)
+    deleted = db.purge_keep_sessions(conn, keep_sessions=5)
+    assert deleted > 0
+    kept_dates = db._distinct_session_dates(conn)
+    assert len(kept_dates) == 5
+    # The most-recent (today) session is preserved.
+    import datetime as _dt
+    assert _dt.date.today().isoformat() in kept_dates
+
+
+def test_purge_keep_sessions_noop_when_within_window(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    for days in range(3):  # only 3 sessions, keep 5 → nothing to delete
+        db.insert_snapshot(conn, "SPY", "gex", _make_summary(_day_ts(days)), {}, 1)
+    assert db.purge_keep_sessions(conn, keep_sessions=5) == 0
+    assert len(db._distinct_session_dates(conn)) == 3
+
+
+def test_purge_keep_sessions_covers_term_table(tmp_path, monkeypatch):
+    """Retention purges BOTH snapshots AND gex_term_snapshots, keeping the same
+    N session-dates in each."""
+    import datetime as _dt
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    for days in range(6):  # 6 sessions in both tables; keep 5 → oldest dropped
+        ts = _day_ts(days)
+        db.insert_snapshot(conn, "$SPX", "gex", _make_summary(ts), {}, 1)
+        date_str = (_dt.date.today() - _dt.timedelta(days=days)).isoformat()
+        db.insert_term_snapshot_rows(
+            conn,
+            [(f"{date_str} 12:00:00", "$SPX", "2026-06-18", 5000.0,
+              1.0, -0.5, 0.5, 5000.0)],
+        )
+    db.purge_keep_sessions(conn, keep_sessions=5)
+    # snapshots: 5 sessions kept.
+    assert len(db._distinct_session_dates(conn)) == 5
+    # term table: 5 distinct date-prefixes kept (oldest dropped).
+    term_dates = {r[0] for r in conn.execute(
+        "SELECT DISTINCT substr(timestamp_ct,1,10) FROM gex_term_snapshots")}
+    assert len(term_dates) == 5
+    oldest = (_dt.date.today() - _dt.timedelta(days=5)).isoformat()
+    assert oldest not in term_dates
+
+
+def test_last_snapshot_age_matches_date_filter(tmp_path, monkeypatch):
+    """The sargable ts-range in last_snapshot_age returns the same result as the
+    old DATE(ts,'unixepoch','localtime')=DATE('now') filter."""
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    today_ts = _day_ts(0)
+    db.insert_snapshot(conn, "SPY", "gex", _make_summary(today_ts, 1.0), {}, 1)
+    db.insert_snapshot(conn, "SPY", "gex", _make_summary(_day_ts(2), 2.0), {}, 1)
+    age, last_ts = db.last_snapshot_age(conn, "SPY", "gex")
+    assert last_ts == today_ts  # yesterday/older excluded
+
+
+def test_first_snapshot_today_matches_date_filter(tmp_path, monkeypatch):
+    """The sargable ts-range in first_snapshot_today returns today's earliest,
+    excluding prior days (same as the old DATE() filter)."""
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    grid_today = {5000.0: {"call": 1.0, "put": -0.5, "net": 0.5}}
+    db.insert_snapshot(conn, "$SPX", "dex",
+                       _make_summary(_day_ts(0, hour=9)), grid_today, 0)
+    # A prior-day row that is EARLIER in clock-time must NOT be picked.
+    db.insert_snapshot(conn, "$SPX", "dex",
+                       _make_summary(_day_ts(3, hour=8)),
+                       {9999.0: {"net": 1.0}}, 0)
+    assert db.first_snapshot_today(conn, "$SPX", "dex") == grid_today
+
+
 def test_last_snapshot_age_fresh(tmp_path, monkeypatch):
     dbpath = tmp_path / "t.db"
     monkeypatch.setattr(db, "DB_PATH", dbpath)

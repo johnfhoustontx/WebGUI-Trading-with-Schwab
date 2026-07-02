@@ -88,18 +88,21 @@ Every page shares the same frame:
 
 - A **left navigation drawer** with expandable groups and flat items.
 - A **header** at the top with a menu toggle and the current page title.
+- A small blue **"?" help button** in the bottom-right corner of the header —
+  hover it for a plain-language "idiot's guide" to the page you're on (see
+  *Getting help on any page* below).
 - The **page content** in the main area.
 
 ## Navigation groups
 
 | Group | Pages |
 |-------|-------|
-| **Options** (expandable) | Scanner · Paper Trades · Captured Signals · Paper Portfolio · Calculator · Swing Scanner · Gamma · Simulator · Expected Move |
+| **Options** (expandable) | Scanner · Paper Trades · Captured Signals · Paper Portfolio · Calculator · Swing Scanner · Gamma · Simulator · Expected Move · Rescue |
 | **Sentiment** (expandable) | Sentiment · Sector Rotation |
 | **Trade** (flat) | Trade |
 | **Portfolio** (flat) | Portfolio |
 | **Driver** (flat) | Driver |
-| **More** (expandable) | EOD Report · System Status · Settings · Terminate |
+| **More** (expandable) | EOD Report · System Status · Settings (→ User Manuals) · Terminate |
 
 The group containing the page you're on opens automatically, and the drawer
 remembers which groups you left open as you move around.
@@ -125,6 +128,16 @@ Opening that page clears its badge.
 > session.
 
 You control all of this on the **Settings** page (see *Reports & System*).
+
+## Getting help on any page
+
+Two built-in help features are always within reach:
+
+- **The "?" button** — a small blue circle in the header's bottom-right corner, on
+  **every** page. Hover it and a short "idiot's guide" pops up explaining, in plain
+  language, what that page is for and how changing its settings changes the result.
+- **User Manuals** — a menu item **nested under Settings** (in the **More** group).
+  It opens this User Guide plus the Technical and API references in your browser.
 
 ---
 
@@ -592,6 +605,22 @@ Preferences for the alert system (saved on your machine, no login):
   permission.
 
 > Clicking **Test sound** also unlocks browser audio for the session.
+
+The **Settings** nav entry is also a small sub-group: click its caret to reveal
+**User Manuals**, which opens this User Guide and the Technical / API references in
+your browser.
+
+## User Manuals
+
+**Route:** `/manuals` (nested under **Settings** in the **More** group).
+
+A simple index that links the three manuals — each opens in a new browser tab:
+
+- **User Guide** — how to use the app (this document).
+- **Technical Reference** — the math behind every number.
+- **API / Developer Reference** — the integration surface for developers.
+
+The Word (`.docx`) copies live alongside the HTML under `docs/manuals/`.
 
 ## Terminate
 

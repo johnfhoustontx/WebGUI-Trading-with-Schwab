@@ -16,6 +16,7 @@ import logging
 
 import pandas as pd
 
+from options_calculator import RISK_FREE_RATE
 from options_simulator.engine import ChainSnapshot, ContractRow
 
 log = logging.getLogger(__name__)
@@ -159,7 +160,8 @@ def fetch_snapshot(client, symbol: str, expiry: date | None = None,
     return ChainSnapshot(
         spot=spot,
         as_of=datetime.now(),
-        r=0.04,
+        # Shared risk-free rate — was a divergent 0.04 vs the calculator's 0.045.
+        r=RISK_FREE_RATE,
         symbol=symbol.upper(),
         contracts=contracts,
         price_history=price_history,

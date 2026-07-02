@@ -14,7 +14,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 
 import theme
-from options_calculator import bs_greeks
+from options_calculator import bs_greeks, expiry_time_to_years
 from options_simulator.ai_prompt import build_simulator_prompt
 from options_simulator.data import fetch_snapshot
 from options_simulator.engine import (
@@ -603,8 +603,9 @@ class OptionsSimulatorWindow(tk.Toplevel):
             self.whatif_readout.config(text="IV unavailable")
             return
         primary = pos.primary
-        expiry_dt = datetime.combine(primary.expiry, datetime.min.time()).replace(hour=15)
-        base_t_days = max((expiry_dt - self.snapshot.as_of).total_seconds() / 86400.0, 0.01)
+        # Days to the option's 4:00pm ET settlement (calculator-consistent helper).
+        base_t_days = max(
+            expiry_time_to_years(self.snapshot.as_of, primary.expiry) * 365.0, 0.01)
         forward_days = max(base_t_days - self.whatif_dt_var.get(), 0.01)
 
         s_range = np.linspace(self.snapshot.spot * 0.80, self.snapshot.spot * 1.20, 81)

@@ -38,6 +38,51 @@ _SCAN_MAX_WORKERS = 4
 
 log = logging.getLogger("scanner")
 
+# Round-trip Schwab commission (config/commissions.toml) folded into ADDITIVE
+# net-of-fee economics on each signal. The gross credit/max_loss/rr_pct stay
+# untouched (they feed the tuned composite score + sort + paper BP sizing +
+# webgui display); the autonomous driver's model menu reads the net_* fields so
+# its perceived edge is net-of-commission. See the 2026-07-01 calc-accuracy
+# remediation in the root CLAUDE.md.
+from commissions import round_trip_commission
+
+_CONTRACT_MULT = 100.0                       # shares per option contract
+_LEGS_BY_TYPE = {"PCS": 2, "CCS": 2, "IC": 4}
+
+
+def _attach_net_economics(sig):
+    """Attach commission + net-of-fee economics to a scanner signal, in place.
+
+    Adds ``commission`` (round-trip $ per 1 contract), ``net_credit``,
+    ``net_max_loss`` and ``net_rr_pct`` (per-share, same units as the gross
+    ``credit``/``max_loss``). Leaves the gross fields untouched. Defensive: any
+    missing/garbage economics degrade the net fields to the gross values (or
+    None) rather than raising — a signal must never crash on commission math.
+    """
+    try:
+        n_legs = _LEGS_BY_TYPE.get(sig.get("type"), 2)
+        commission = round_trip_commission(n_legs, sig.get("symbol"))
+        sig["commission"] = round(commission, 2)
+        per_share = commission / _CONTRACT_MULT
+        credit = sig.get("credit")
+        max_loss = sig.get("max_loss")
+        if credit is None or max_loss is None:
+            sig["net_credit"] = credit
+            sig["net_max_loss"] = max_loss
+            sig["net_rr_pct"] = sig.get("rr_pct")
+            return
+        net_credit = round(credit - per_share, 2)
+        net_max_loss = round(max_loss + per_share, 2)
+        sig["net_credit"] = net_credit
+        sig["net_max_loss"] = net_max_loss
+        sig["net_rr_pct"] = (round(net_credit / net_max_loss * 100, 1)
+                             if net_max_loss > 0 else sig.get("rr_pct"))
+    except Exception:  # pragma: no cover - defensive: never crash a signal
+        sig.setdefault("commission", 0.0)
+        sig.setdefault("net_credit", sig.get("credit"))
+        sig.setdefault("net_max_loss", sig.get("max_loss"))
+        sig.setdefault("net_rr_pct", sig.get("rr_pct"))
+
 from watchlist import get_scan_symbols, get_load_error
 import fill_model
 
@@ -889,6 +934,8 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
     else:
         log.info(f"  [{trade_type}] {len(results)} spreads produced")
     results.sort(key=lambda x: x["rr_pct"], reverse=True)
+    for s in results:
+        _attach_net_economics(s)
     return results
 
 
@@ -933,6 +980,8 @@ def build_iron_condors(spreads, max_n=3):
                     "_ccs_signal": c,
                 })
     ics.sort(key=lambda x: x["rr_pct"], reverse=True)
+    for s in ics:
+        _attach_net_economics(s)
     return ics[:max_n]
 
 
