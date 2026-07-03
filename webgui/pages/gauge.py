@@ -8,9 +8,11 @@ smooth red→yellow→green rainbow (many graduated plotBands) and a needle poin
 nicegui-highcharts component auto-loads (``loadMore``) on mount, so the element
 needs NO ``extras`` — just ``ui.highchart(gauge_figure(...))``. Pure + unit-tested.
 """
-_RED = (239, 83, 80)      # #ef5350
-_YELLOW = (255, 213, 79)  # #ffd54f
-_GREEN = (102, 187, 106)  # #66bb6a
+from pages.options import theme
+
+_RED = theme.rgb("red")      # #ef5350
+_YELLOW = theme.rgb("yellow")  # #ffd54f
+_GREEN = theme.rgb("green")  # #66bb6a
 _FACE_BANDS = 60          # graduated plotBands across the arc → smooth gradient
 
 
