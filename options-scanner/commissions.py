@@ -20,7 +20,7 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     import tomli as tomllib
 
-from shared.symbols import INDEX_ROOTS as _INDEX_ROOTS, is_index_symbol  # noqa: E402
+from shared.symbols import is_index_symbol  # noqa: E402
 
 # Repo root = parent of options-scanner/. Kept path-derived (not imported from
 # repo_paths) so this module has zero import-time coupling and can't fail import.

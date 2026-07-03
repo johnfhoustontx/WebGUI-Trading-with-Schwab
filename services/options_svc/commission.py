@@ -10,7 +10,7 @@ import sys, pathlib
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))  # repo root
 from repo_paths import REPO_ROOT  # noqa: E402
-from shared.symbols import INDEX_ROOTS as _INDEX_ROOTS, is_index_symbol  # noqa: E402
+from shared.symbols import is_index_symbol  # noqa: E402
 
 try:
     import tomllib  # py3.11+
