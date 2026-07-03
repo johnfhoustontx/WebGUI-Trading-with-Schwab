@@ -38,6 +38,7 @@ from pages.ui_guard import guard
 from .inputs import select_all_on_focus, should_load
 # Shared dark-navy "dashboard" theme (same CSS the Calculator injects, so the two
 # pages never drift).
+from pages.options import theme
 from .theme import QUASAR_INTERNAL_CSS, PAGE, CARD, EYEBROW, BTN, BTN_PRIMARY, LABEL
 from . import page_state as _ps
 
@@ -49,10 +50,10 @@ _SIM_DEFAULTS = {"symbol": "SPY", "strategy": "PCS", "legs": [], "dt": 5.0,
                  "mult": 1.5, "lookback": "auto", "ds": 0.0, "active_tab": "Replay"}
 _LAST_SIM: dict = {}
 
-SPOT_COLOR = "#ffd54f"
-TARGET_COLOR = "#42a5f5"
-BASE_COLOR = "#42a5f5"
-SHOCK_COLOR = "#ffa726"
+SPOT_COLOR = theme.hex_of("yellow")
+TARGET_COLOR = theme.hex_of("blue")
+BASE_COLOR = theme.hex_of("blue")
+SHOCK_COLOR = theme.hex_of("amber")
 
 # Profit / loss payoff palette (What-if) — green profit zone above zero, red loss
 # zone below, on the dark dashboard navy. The fills are vertical gradients
@@ -191,9 +192,9 @@ def ivshock_figure(base, shock, mult=1.5):
 
 _GREEK_PANELS = ["delta", "gamma", "theta", "vega", "rho"]
 _PANEL_TITLES = ["Price", "Delta", "Gamma", "Theta", "Vega", "Rho"]
-CURSOR_COLOR = "#ef5350"
-PRICE_COLOR = "#66bb6a"
-GREEK_COLOR = "#42a5f5"
+CURSOR_COLOR = theme.hex_of("red")
+PRICE_COLOR = theme.hex_of("green")
+GREEK_COLOR = theme.hex_of("blue")
 
 # Replay look-back override menu (key → label). "auto" lets the service pick the
 # window from the selected contract's DTE; the rest force a fixed window.
