@@ -35,6 +35,7 @@ from zoneinfo import ZoneInfo
 import sys as _sys, pathlib as _pathlib
 _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo root
 from shared.symbols import INDEX_SYMBOLS  # noqa: E402
+from shared.market_calendar import HOLIDAYS  # noqa: E402
 
 # Cap per-scan concurrency to stay well below Schwab API rate limits while
 # still collapsing per-symbol round-trips from O(symbols) to ~O(1).
@@ -92,11 +93,9 @@ import fill_model
 
 TZ = ZoneInfo("America/Chicago")
 
-HOLIDAYS_2026 = {
-    date(2026, 1, 1), date(2026, 1, 19), date(2026, 2, 16),
-    date(2026, 4, 3), date(2026, 5, 25), date(2026, 7, 3),
-    date(2026, 9, 7), date(2026, 11, 26), date(2026, 12, 25),
-}
+# Sourced from shared/market_calendar.py (single canonical set — 2026+2027, incl.
+# Juneteenth). Name kept for back-compat; it is NOT 2026-only.
+HOLIDAYS_2026 = HOLIDAYS
 
 #############################################
 # MARKET HOURS
