@@ -23,14 +23,12 @@ changes.
 """
 import bus_client
 from pages.gauge import gauge_figure  # noqa: F401  (re-export; used by render)
+from pages.options import theme
 from pages.options.theme import BTN_3D, TILE_3D
 from pages.ui_guard import guard, guard_async
 
-CLR_GREEN = "#66bb6a"
-CLR_RED = "#ef5350"
-CLR_YELLOW = "#ffd54f"
-CLR_FLAT = "#9e9e9e"
-CLR_CYAN = "#3fb6c7"
+CLR_GREEN, CLR_RED = theme.hex_of("green"), theme.hex_of("red")
+CLR_YELLOW, CLR_FLAT, CLR_CYAN = theme.hex_of("yellow"), theme.hex_of("flat"), theme.hex_of("cyan")
 
 # LOCAL Tailwind class maps (Phase 5). These mirror the page's OWN 5-color palette
 # EXACTLY — the yellow/cyan have no theme TXT_* token and the flat differs from the
@@ -38,14 +36,9 @@ CLR_CYAN = "#3fb6c7"
 # keeps its own look). The `*_color` hex helpers above are retained for the
 # Highcharts figures + non-`.classes()` callers; the `*_class` helpers below return
 # the Tailwind class string for `.classes()`.
-TXT_G = "text-[#66bb6a]"
-TXT_R = "text-[#ef5350]"
-TXT_Y = "text-[#ffd54f]"
-TXT_FLAT = "text-[#9e9e9e]"
-TXT_CY = "text-[#3fb6c7]"
-BG_G = "bg-[#66bb6a]"
-BG_R = "bg-[#ef5350]"
-BG_Y = "bg-[#ffd54f]"
+TXT_G, TXT_R = theme.txt("green"), theme.txt("red")
+TXT_Y, TXT_FLAT, TXT_CY = theme.txt("yellow"), theme.txt("flat"), theme.txt("cyan")
+BG_G, BG_R, BG_Y = theme.bg("green"), theme.bg("red"), theme.bg("yellow")
 # Remove-sets for reactive in-place recolors (these MUST cover every class the
 # element can apply, or colors stack across the page's ~2s auto-refresh).
 SENT_TEXT_CLASSES = " ".join([TXT_G, TXT_R, TXT_Y, TXT_FLAT, TXT_CY])
