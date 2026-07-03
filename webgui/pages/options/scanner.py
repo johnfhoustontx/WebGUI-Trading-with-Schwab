@@ -24,6 +24,7 @@ from nicegui import ui
 
 from pages.ui_guard import guard
 
+from pages.options import theme
 from . import detail, handoff
 from .theme import BTN_3D
 
@@ -34,7 +35,7 @@ def _round(value, ndigits=2):
 
 # Quality zones for the composite score (match the speedometer in svg.py /
 # the colors in detail.py): <40 RED, <55 AMBER, <75 BLUE, else GREEN.
-RED, AMBER, BLUE, GREEN = "#ef5350", "#ffa726", "#42a5f5", "#66bb6a"
+RED, AMBER, BLUE, GREEN = theme.hex_of("red"), theme.hex_of("amber"), theme.hex_of("blue"), theme.hex_of("green")
 
 
 def score_zone_color(score):
@@ -228,7 +229,7 @@ def status_line(results):
 # 0-DTE = amber (short-fuse/urgent), Swing = blue (multi-day). Each tab carries its
 # accent in the text color and a thick colored underline when active (the shared
 # Quasar indicator is hidden so the per-tab color is unambiguous).
-TAB_0DTE_COLOR, TAB_SWING_COLOR = "#ffa726", "#42a5f5"
+TAB_0DTE_COLOR, TAB_SWING_COLOR = theme.hex_of("amber"), theme.hex_of("blue")
 
 # Compact the signal tables (dense + tight cell padding) so the right-hand
 # columns (R/R %, PoP %, Score, Grade, actions) stay visible. Scoped to
