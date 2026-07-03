@@ -20,6 +20,7 @@ from nicegui import ui
 
 from pages.ui_guard import guard
 
+from pages.options import theme
 from . import detail, handoff
 from .rescue import heat_border_class
 from .theme import BTN_3D, BTN_3D_DANGER
@@ -44,9 +45,9 @@ def _round(value, ndigits=2):
     return round(value, ndigits) if isinstance(value, (int, float)) else value
 
 
-REC_RED, REC_AMBER, REC_GREEN = "#ef5350", "#ffa726", "#66bb6a"
+REC_RED, REC_AMBER, REC_GREEN = theme.hex_of("red"), theme.hex_of("amber"), theme.hex_of("green")
 # Profit/loss cell colors (green in profit, red in loss).
-PNL_GREEN, PNL_RED = "#66bb6a", "#ef5350"
+PNL_GREEN, PNL_RED = theme.hex_of("green"), theme.hex_of("red")
 
 
 def rec_color(rec):
