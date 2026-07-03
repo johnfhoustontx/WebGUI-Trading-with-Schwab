@@ -8,7 +8,35 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-07-02 (**Driver risk-sizing fix (RISK_TOO_HIGH) + Sonnet 5 + prompt
+**Last updated:** 2026-07-03 (**Config consolidation — single-source calendar, symbols, and UI
+palette** — a hard-coded-config audit found three classes of duplication; each is now consolidated to
+one sanctioned source (behavior-preserving refactor; branch `config-consolidation`, 25 commits, all
+suites green). **(1) Market calendar:** the NYSE holiday set (found duplicated in **7** places — the 5
+known service/webgui/CLI schedulers **plus** two the audit missed: a **stale** `scanner_engine.py`
+`HOLIDAYS_2026` that was missing Juneteenth + all of 2027, and `claude-driver/config.py`
+`MARKET_HOLIDAYS`) now lives ONLY in new **`shared/market_calendar.py`** (`HOLIDAYS` frozenset + `CT`
+clock + `is_holiday`/`is_trading_day`/`prev_trading_day`/`next_trading_day`/`market_now`). Every
+consumer imports it; per-consumer `is`-identity drift-guard tests pin it. **Yearly holiday maintenance
+is now ONE edit.** The `scanner_engine` convergence is a **behavior BUGFIX** — the scanner previously
+treated Juneteenth + 2027 holidays as trading days. Each consumer keeps its own market-HOURS window
+(scan 08:00–15:15 / RTH 08:30–15:00 / GEX 08:30–15:20) — those legitimately differ and are NOT shared.
+**(2) Symbols (tiered):** new **`shared/symbols.py`** holds the small canonical index sets
+(`SPX`/`VIX`/`SPY`/`QQQ`, `SCAN_BASE`, `COLLECTION_BASE`, `INDEX_SYMBOLS`, `INDEX_ROOTS` +
+`is_index_symbol`); `watchlist`/`gex_collector`/`scanner_engine`/`scanner` + both `commission(s).py`
+modules now import from it (the commission `_INDEX_ROOTS` was duplicated in two files). **Deliberately
+out of scope** (different concerns, left in place): the `Top 20.xlsx` file-sourced live universe, the
+78-name backtest `UNIVERSE_SECTOR`, the 140-symbol sector maps, `HEADER_SYMBOLS` (different display
+order), the legacy `gamma_tool.py` Tk dropdown. **(3) UI palette (Level A):**
+`webgui/pages/options/theme.py` gained a canonical **`PALETTE`** dict + `hex_of`/`txt`/`bg`/`rgb`
+helpers; ~11 pages (sentiment, sentiment_rotation, gamma, rescue, svg, gauge, simulator,
+expected_move, captured, paper, scanner) now derive their shared semantic colors from it (green
+`#66bb6a` / red `#ef5350` / amber `#ffa726` / yellow `#ffd54f` / blue `#42a5f5` / cyan `#3fb6c7` /
+flat / neutral / muted), so a re-theme of the semantic colors is a **one-file edit**. **Documented
+intentional variants are PRESERVED, not merged** (trade verdict darks, simulator `PNL_GREEN/RED`,
+expected_move `UP_COLOR` teal + leg tints, gamma chart chrome, rescue `HEAT_ORANGE`, driver grades,
+portfolio status) and Highcharts option dicts + `ui.html` fragments (e.g. calculator heatmap) stay
+out of scope per the Tailwind-first rule. All conversions byte-identical (no rendered color changed).
+See [design/plan](docs/plans/2026-07-03-config-consolidation.md). Prior — 2026-07-02 (**Driver risk-sizing fix (RISK_TOO_HIGH) + Sonnet 5 + prompt
 caching** — a debugging session on "driver trades logged **Executed** but never showed up."
 Root cause: the `/driver` decision-log "Executed N: SYM×q" line is only the **enqueue** of a
 `driver_paper_create` command; the real open in `options_svc.compute.open_driver_position` was
