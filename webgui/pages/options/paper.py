@@ -19,6 +19,7 @@ from nicegui import ui
 
 from pages.ui_guard import guard
 
+from pages.options import theme
 from . import detail, handoff
 from .rescue import heat_border_class
 from .theme import BTN_3D, BTN_3D_DANGER
@@ -70,7 +71,7 @@ def paper_columns():
 
 
 # P&L cell colors (green profit / red loss / grey flat-or-unknown).
-PNL_GREEN, PNL_RED, PNL_NEUTRAL, PNL_AMBER = "#66bb6a", "#ef5350", "#bdbdbd", "#ffa726"
+PNL_GREEN, PNL_RED, PNL_NEUTRAL, PNL_AMBER = theme.hex_of("green"), theme.hex_of("red"), theme.hex_of("neutral"), theme.hex_of("amber")
 
 # Verdict action → chip color for the Analyze popup.
 _VERDICT_COLORS = {"TAKE PROFIT": PNL_GREEN, "HOLD": PNL_AMBER,
