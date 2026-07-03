@@ -11,21 +11,22 @@ imported lazily inside ``render()`` only (mirrors ``expected_move.py`` /
 ``simulator.py``).
 """
 
+from pages.options import theme
 from .theme import BTN_3D
 
 # Heat zone colors (higher heat = closer to trouble): green → amber → orange →
 # red. Reuses the shared palette idiom from scanner.py / svg.py (#ef5350 red,
 # #ffa726 amber, #66bb6a green) so the UI stays consistent; orange bridges the
 # amber→red gap for the 50-75 zone.
-HEAT_GREEN = "#66bb6a"
-HEAT_AMBER = "#ffa726"
+HEAT_GREEN = theme.hex_of("green")
+HEAT_AMBER = theme.hex_of("amber")
 HEAT_ORANGE = "#ff7043"
-HEAT_RED = "#ef5350"
+HEAT_RED = theme.hex_of("red")
 
 # Cash (credit/debit) text colors — same green/red as pnl_color in captured.py.
-CASH_GREEN = "#66bb6a"
-CASH_RED = "#ef5350"
-CASH_NEUTRAL = "#9e9e9e"
+CASH_GREEN = theme.hex_of("green")
+CASH_RED = theme.hex_of("red")
+CASH_NEUTRAL = theme.hex_of("flat")
 
 # rescue_state values that put a position on the at-risk board.
 _AT_RISK_STATES = ("tested", "critical")
