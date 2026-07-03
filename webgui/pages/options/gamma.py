@@ -37,6 +37,15 @@ HOVER = {"bgcolor": "#222222", "bordercolor": "#444444", "font": {"size": 11, "c
 # engine/cache strings stay "GEX"/"DEX" — only the display label changes).
 _VIEW_LABELS = {"GEX": "GAMMA", "DEX": "DELTA"}
 
+# Shared plot-area geometry for the "by strike" bars + the intraday heatmap. Both
+# panels use the SAME chart height + top/bottom margins so their Strike axes occupy
+# the identical vertical pixel band — a given strike lines up across both panels (and
+# the shared-strike crosshair lands on the right row in each). The bottom margin fits
+# the heatmap's rotated time labels; the bars just leave that space empty.
+_PLOT_HEIGHT = 680
+_PLOT_MARGIN_TOP = 48
+_PLOT_MARGIN_BOTTOM = 64
+
 # Dark diverging color-axis stops: the heatmap blends into the dark page (like the
 # candlestick chart) — net ≈ 0 fades to TRANSPARENT (the background shows through),
 # strong negative glows red, strong positive glows green. (rgba alpha is honored by
@@ -300,13 +309,19 @@ def bar_figure(data, spot, view="GEX", walls=None, flip=None, n_side=N_SIDE, hei
                                   a["text"])
                  for a in line_annotations(spot, flip, walls)]
     fig = _base_chart("bar", height)
+    # Shared plot geometry so the Strike axis aligns pixel-for-pixel with the heatmap.
+    fig["chart"]["marginTop"] = _PLOT_MARGIN_TOP
+    fig["chart"]["marginBottom"] = _PLOT_MARGIN_BOTTOM
     fig.update({
         "title": {"text": f"{label} by strike", "style": {"color": FONT}},
         # A Highcharts bar chart reverses its xAxis by default (low strike at top);
         # reversed=False restores high strikes at the TOP, matching the heatmap's
-        # linear strike axis so the two panels line up.
+        # linear strike axis so the two panels line up. startOnTick/endOnTick False
+        # pins the axis to EXACTLY [yr0, yr1] (no tick-snapping) so the vertical band
+        # matches the heatmap's yAxis exactly.
         "xAxis": {**_dark_axis("Strike"), "min": yr[0], "max": yr[1],
-                  "reversed": False, "plotLines": plotlines},
+                  "reversed": False, "startOnTick": False, "endOnTick": False,
+                  "plotLines": plotlines},
         "yAxis": {**_dark_axis(label),
                   "plotLines": [{"value": 0, "color": "#777777", "width": 1, "zIndex": 3}]},
         "tooltip": {"backgroundColor": "#222222", "borderColor": "#444444",
@@ -406,12 +421,14 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None):
                        "color": PRICE_LINE, "lineWidth": 2, "marker": {"enabled": False},
                        "colorAxis": False, "enableMouseTracking": True, "states": no_fade,
                        "tooltip": {"headerFormat": "", "pointFormat": "Spot {point.y:,.2f}"}})
-    yaxis = {**_dark_axis("Strike")}
+    yaxis = {**_dark_axis("Strike"), "startOnTick": False, "endOnTick": False}
     if yrange is not None:
         yaxis["min"], yaxis["max"] = yrange[0], yrange[1]
     fig = _base_chart("heatmap", height)
     fig["chart"]["backgroundColor"] = "transparent"     # same as the candlestick graph
-    fig["chart"]["marginBottom"] = 64                   # room for rotated time labels
+    # Shared plot geometry so the Strike axis aligns pixel-for-pixel with the bars.
+    fig["chart"]["marginTop"] = _PLOT_MARGIN_TOP
+    fig["chart"]["marginBottom"] = _PLOT_MARGIN_BOTTOM   # room for rotated time labels
     # Press-and-hold tooltip hook must be on whatever options the element MOUNTS
     # with — _render_view overwrites the init fig's options before the client
     # mounts, so carry the load hook here too (load fires once at mount).
@@ -448,6 +465,38 @@ _HEAT_PRESS_TOOLTIP_JS = (
     "document.addEventListener('mouseup',function(){"
     "if(held){held=false;if(c.tooltip)c.tooltip.hide(0);}});}"
 )
+
+
+# Shared crosshair spanning BOTH panels. Installed once on the chart row (matched by
+# the .gamma-xhair-row hook class); it appends two absolutely-positioned overlay
+# lines and, on mousemove over either chart's plot area, draws a HORIZONTAL strike
+# line across the WHOLE row (so the same strike is marked on the bars AND the heatmap
+# — the alignment payoff) plus a VERTICAL cursor line at the pointer within the
+# hovered panel's plot band. pointer-events:none so it never blocks the charts'
+# own tooltips (incl. the heatmap press-and-hold). MT/MB match _PLOT_MARGIN_* so the
+# plot band is located correctly; querying .highcharts-container live on each move
+# survives chart recreation (bar↔Term). Idempotent via the row._xhair latch.
+_CROSSHAIR_JS = (
+    "(()=>{const row=document.querySelector('.gamma-xhair-row');"
+    "if(!row||row._xhair)return;row._xhair=true;"
+    "const MT=%d,MB=%d;"
+    "const mk=(css)=>{const d=document.createElement('div');"
+    "d.style.cssText='position:absolute;pointer-events:none;display:none;z-index:6;'+css;"
+    "row.appendChild(d);return d;};"
+    "const h=mk('left:0;right:0;height:0;border-top:1px dashed rgba(245,245,245,0.6);');"
+    "const v=mk('width:0;border-left:1px dashed rgba(245,245,245,0.6);');"
+    "const hide=()=>{h.style.display='none';v.style.display='none';};"
+    "row.addEventListener('mousemove',(e)=>{"
+    "const rr=row.getBoundingClientRect();let hit=null;"
+    "row.querySelectorAll('.highcharts-container').forEach((c)=>{const r=c.getBoundingClientRect();"
+    "if(e.clientX>=r.left&&e.clientX<=r.right&&e.clientY>=r.top&&e.clientY<=r.bottom)hit=r;});"
+    "if(!hit){hide();return;}const top=hit.top+MT,bot=hit.bottom-MB;"
+    "if(e.clientY<top||e.clientY>bot){hide();return;}"
+    "h.style.top=(e.clientY-rr.top)+'px';h.style.display='block';"
+    "v.style.left=(e.clientX-rr.left)+'px';v.style.top=(top-rr.top)+'px';"
+    "v.style.height=(bot-top)+'px';v.style.display='block';});"
+    "row.addEventListener('mouseleave',hide);})();"
+) % (_PLOT_MARGIN_TOP, _PLOT_MARGIN_BOTTOM)
 
 
 def _heat_init_fig(height=680):
@@ -660,7 +709,7 @@ def render():
     # each time would flash. Message labels are toggled via set_visibility. Column
     # flex weights are set per-render from the intraday snapshot count (panel_flex)
     # so the heatmap grows / bars shrink through the session.
-    with ui.row().classes("w-full no-wrap gap-4 items-start"):
+    with ui.row().classes("w-full no-wrap gap-4 items-start relative gamma-xhair-row"):
         chart_box = ui.column().classes(f"min-w-0 {_INIT_FLEX}")
         with chart_box:
             # chart_plot switches kind (bar <-> Term heatmap). Highcharts'
@@ -1041,3 +1090,10 @@ def render():
     ui.timer(1.0, _tick)                 # countdown display (no fetch)
     ui.timer(2.0, _poll)                 # one coalesced version-poll for all 4 views
     ui.timer(120.0, _auto_refresh)       # enqueue a refresh every 120s
+
+    @guard
+    def _install_crosshair():
+        # Wire the shared bar↔heatmap crosshair once (after the charts mount). The
+        # installer latches on the row so repeated calls are no-ops.
+        ui.run_javascript(_CROSSHAIR_JS)
+    ui.timer(0.4, _install_crosshair, once=True)
