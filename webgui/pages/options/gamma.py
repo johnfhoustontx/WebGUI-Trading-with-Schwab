@@ -17,14 +17,15 @@ STRINGS. The pure builders (``bars_from_gex`` sorts + numeric-compares strikes;
 via ``_refloat_keys`` BEFORE feeding the builders. The builders stay unchanged.
 """
 from pages.ui_guard import guard, guard_async
+from pages.options import theme
 from .theme import TXT_POS, TXT_NEG, TXT_NEUTRAL, BTN_3D
 
-POS_COLOR = "#66bb6a"
-NEG_COLOR = "#ef5350"
-SPOT_COLOR = "#ffd54f"
+POS_COLOR = theme.hex_of("green")
+NEG_COLOR = theme.hex_of("red")
+SPOT_COLOR = theme.hex_of("yellow")
 PRICE_LINE = "#f5f5f5"          # off-white — spot track overlaid on the dark heatmap
 HEATMAP_SEP = "#4d4d4d"         # softer (lighter) cell-separator mesh on the heatmap
-FLIP_COLOR = "#42a5f5"
+FLIP_COLOR = theme.hex_of("blue")
 WALL_COLOR = "#b39ddb"
 
 # Dark theme for all charts (matches the app's dark shell).
