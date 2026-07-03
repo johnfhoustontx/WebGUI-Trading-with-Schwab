@@ -95,17 +95,61 @@ TILE_3D = (
     "shadow-[inset_0_2px_0_0_rgba(255,255,255,.3),0_5px_0_0_rgba(0,0,0,.4),0_10px_20px_rgba(0,0,0,.5)]"
 )
 
+# ---------------------------------------------------------------------------
+# SEMANTIC PALETTE — the single source for the app's shared semantic colors.
+# Pages/charts that previously redefined these hexes import from here, so a
+# re-theme is a ONE-FILE edit. Raw hexes (for Highcharts option dicts + ui.html
+# fragments) + helpers for the two other consumed forms: Tailwind arbitrary-value
+# classes, and (r, g, b) tuples (svg.py / gauge.py).
+# NOTE: intentional page-local variants (trade verdict darks, simulator chart
+# shades, gamma chart chrome, driver grades, portfolio status) are DELIBERATELY
+# NOT here — they are distinct roles, not duplication.
+# ---------------------------------------------------------------------------
+PALETTE = {
+    "green":   "#66bb6a",   # positive / bullish
+    "red":     "#ef5350",   # negative / bearish
+    "amber":   "#ffa726",   # caution / warning
+    "yellow":  "#ffd54f",   # spot / neutral-highlight
+    "blue":    "#42a5f5",   # informational / flip
+    "cyan":    "#3fb6c7",   # sentiment cyan
+    "flat":    "#9e9e9e",   # flat / no-change
+    "neutral": "#bdbdbd",   # neutral text
+    "muted":   "#888888",   # muted / disabled
+}
+
+
+def hex_of(name: str) -> str:
+    """Raw hex for a palette color (use in Highcharts dicts / ui.html)."""
+    return PALETTE[name]
+
+
+def txt(name: str) -> str:
+    """Tailwind text-color arbitrary class for a palette color."""
+    return f"text-[{PALETTE[name]}]"
+
+
+def bg(name: str) -> str:
+    """Tailwind bg-color arbitrary class for a palette color."""
+    return f"bg-[{PALETTE[name]}]"
+
+
+def rgb(name: str) -> tuple[int, int, int]:
+    """(r, g, b) tuple for a palette color (use in svg.py / gauge.py)."""
+    h = PALETTE[name].lstrip("#")
+    return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+
+
 # Semantic STATE colors (positive / caution / negative / neutral) — the finite
 # palette behind data-driven label colors in detail.py/header.py. Exact hexes from
 # detail.py's GREEN/AMBER/RED/NEUTRAL constants, preserved as arbitrary-value classes
 # so the look is unchanged. Set reactively via .classes(remove=STATE_TEXT, add=TXT_*)
 # so repeated repaints don't stack conflicting text-[...] classes.
-TXT_POS = "text-[#66bb6a]"
-TXT_WARN = "text-[#ffa726]"
-TXT_NEG = "text-[#ef5350]"
-TXT_NEUTRAL = "text-[#bdbdbd]"
+TXT_POS = txt("green")        # text-[#66bb6a]
+TXT_WARN = txt("amber")       # text-[#ffa726]
+TXT_NEG = txt("red")          # text-[#ef5350]
+TXT_NEUTRAL = txt("neutral")  # text-[#bdbdbd]
 # Space-joined set for the remove= arg of a reactive color swap.
-STATE_TEXT_CLASSES = "text-[#66bb6a] text-[#ffa726] text-[#ef5350] text-[#bdbdbd]"
+STATE_TEXT_CLASSES = " ".join([TXT_POS, TXT_WARN, TXT_NEG, TXT_NEUTRAL])
 
 # ---------------------------------------------------------------------------
 # Quasar-internal / teleported escape-hatch CSS. These rules style the

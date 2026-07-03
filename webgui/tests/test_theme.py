@@ -74,3 +74,34 @@ def test_btn3d_encodes_gradient_and_shadow():
     assert "linear-gradient(180deg" in theme.BTN_3D
     assert theme.BTN_3D.count("shadow-[") >= 1 and "active:" in theme.BTN_3D
     assert "#d33f3f" in theme.BTN_3D_DANGER  # red variant mid-stop
+
+
+def test_semantic_palette_raw_hexes():
+    from pages.options import theme
+    p = theme.PALETTE
+    assert p["green"] == "#66bb6a"
+    assert p["red"] == "#ef5350"
+    assert p["amber"] == "#ffa726"
+    assert p["yellow"] == "#ffd54f"
+    assert p["blue"] == "#42a5f5"
+    assert p["cyan"] == "#3fb6c7"
+    assert p["flat"] == "#9e9e9e"
+    assert p["neutral"] == "#bdbdbd"
+    assert p["muted"] == "#888888"
+
+
+def test_palette_helpers():
+    from pages.options import theme
+    assert theme.hex_of("green") == "#66bb6a"
+    assert theme.txt("red") == "text-[#ef5350]"
+    assert theme.bg("green") == "bg-[#66bb6a]"
+    assert theme.rgb("red") == (239, 83, 80)
+
+
+def test_txt_tokens_unchanged_after_refactor():
+    from pages.options import theme
+    assert theme.TXT_POS == "text-[#66bb6a]"
+    assert theme.TXT_WARN == "text-[#ffa726]"
+    assert theme.TXT_NEG == "text-[#ef5350]"
+    assert theme.TXT_NEUTRAL == "text-[#bdbdbd]"
+    assert theme.STATE_TEXT_CLASSES == "text-[#66bb6a] text-[#ffa726] text-[#ef5350] text-[#bdbdbd]"
