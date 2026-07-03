@@ -53,6 +53,27 @@ def test_in_market_hours():
     assert not alerts.in_market_hours(dt.datetime(2026, 6, 13, 10, 0, tzinfo=CT))  # Saturday
 
 
+def test_in_market_hours_excludes_holidays():
+    # Thanksgiving 2026-11-26 (a Thursday) — closed despite being an in-window weekday.
+    assert not alerts.in_market_hours(dt.datetime(2026, 11, 26, 10, 0, tzinfo=CT))
+    # Christmas 2026-12-25 (a Friday) — closed.
+    assert not alerts.in_market_hours(dt.datetime(2026, 12, 25, 10, 0, tzinfo=CT))
+    # New Year's Day 2027-01-01 (a Friday) — closed (holiday, not weekend).
+    assert not alerts.in_market_hours(dt.datetime(2027, 1, 1, 10, 0, tzinfo=CT))
+    # the regular weekday right before Thanksgiving IS open.
+    assert alerts.in_market_hours(dt.datetime(2026, 11, 25, 10, 0, tzinfo=CT))  # Wed
+
+
+def test_alerts_suppressed_on_holiday():
+    """Both scanner and health-alert gates are closed on a market holiday."""
+    holiday = dt.datetime(2026, 11, 26, 10, 0, tzinfo=CT)  # Thanksgiving, in-window
+    base = {"alert_enabled": True, "alert_market_hours_only": True}
+    assert not alerts.should_alert(base, {"k"}, holiday)
+    assert not alerts.health_alert_gate(base, holiday)
+    # ...but with the market-hours gate OFF, the user opted into off-hours alerts.
+    assert alerts.should_alert({**base, "alert_market_hours_only": False}, {"k"}, holiday)
+
+
 def test_should_alert_truth_table():
     now_open = dt.datetime(2026, 6, 17, 10, 0, tzinfo=CT)
     now_closed = dt.datetime(2026, 6, 17, 16, 0, tzinfo=CT)

@@ -26,11 +26,18 @@ log = logging.getLogger(__name__)
 _CT = ZoneInfo("America/Chicago")
 _SCAN_START = (8, 0)    # 08:00 CT
 _SCAN_END = (15, 15)    # 15:15 CT
-# US market holidays 2026 (keep in sync with options-scanner/scanner.py Config.HOLIDAYS)
+# US market holidays 2026–2027 (keep in sync with the other service schedulers,
+# options-scanner/scanner.py Config.HOLIDAYS, and webgui/alerts.py). Includes
+# Juneteenth; observed dates per NYSE (Sat→prior Fri, Sun→following Mon). Update yearly.
 _HOLIDAYS = {
+    # 2026
     _date(2026, 1, 1), _date(2026, 1, 19), _date(2026, 2, 16), _date(2026, 4, 3),
-    _date(2026, 5, 25), _date(2026, 7, 3), _date(2026, 9, 7),
+    _date(2026, 5, 25), _date(2026, 6, 19), _date(2026, 7, 3), _date(2026, 9, 7),
     _date(2026, 11, 26), _date(2026, 12, 25),
+    # 2027
+    _date(2027, 1, 1), _date(2027, 1, 18), _date(2027, 2, 15), _date(2027, 3, 26),
+    _date(2027, 5, 31), _date(2027, 6, 18), _date(2027, 7, 5), _date(2027, 9, 6),
+    _date(2027, 11, 25), _date(2027, 12, 24),
 }
 
 

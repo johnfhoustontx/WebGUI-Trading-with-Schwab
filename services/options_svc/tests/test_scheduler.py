@@ -57,6 +57,13 @@ def test_gex_due_holiday():
     assert due is False
 
 
+def test_gex_due_juneteenth():
+    # Juneteenth is a full NYSE closure — 2026-06-19 and the next occurrence,
+    # 2027-06-18 (observed, since 6/19/2027 is a Saturday), are both holidays.
+    assert scheduler.gex_due(_ct(2026, 6, 19, 9, 0), None)[0] is False
+    assert scheduler.gex_due(_ct(2027, 6, 18, 9, 0), None)[0] is False
+
+
 # ── manage_due (paper auto-manage cadence) ──────────────────────────────────
 def test_manage_due_first_tick_in_window():
     due, slot = scheduler.manage_due(_ct(2026, 6, 15, 9, 0), None)

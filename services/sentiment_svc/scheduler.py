@@ -27,11 +27,18 @@ _CT = ZoneInfo("America/Chicago")
 _RTH_START = (8, 30)   # 08:30 CT (mirrors handlers._is_rth_now open)
 _RTH_END = (15, 0)     # 15:00 CT (exclusive — mirrors handlers._is_rth_now close)
 _OFFHOURS_INTERVAL_MIN = 15  # off-hours throttle: refresh at most once per 15 min
-# US market holidays 2026 (kept in sync with options_svc/scanner Config.HOLIDAYS).
+# US market holidays 2026–2027 (kept in sync with the other service schedulers,
+# options-scanner Config.HOLIDAYS, and webgui/alerts.py). Includes Juneteenth;
+# observed dates per NYSE (Sat→prior Fri, Sun→following Mon). Update yearly.
 _HOLIDAYS = {
+    # 2026
     _date(2026, 1, 1), _date(2026, 1, 19), _date(2026, 2, 16), _date(2026, 4, 3),
-    _date(2026, 5, 25), _date(2026, 7, 3), _date(2026, 9, 7),
+    _date(2026, 5, 25), _date(2026, 6, 19), _date(2026, 7, 3), _date(2026, 9, 7),
     _date(2026, 11, 26), _date(2026, 12, 25),
+    # 2027
+    _date(2027, 1, 1), _date(2027, 1, 18), _date(2027, 2, 15), _date(2027, 3, 26),
+    _date(2027, 5, 31), _date(2027, 6, 18), _date(2027, 7, 5), _date(2027, 9, 6),
+    _date(2027, 11, 25), _date(2027, 12, 24),
 }
 
 
