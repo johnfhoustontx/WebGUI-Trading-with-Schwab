@@ -36,6 +36,7 @@ Version 1.0.0 Changes:
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root
 from repo_paths import ML_SERVER_URLS, ANALYTICS_URL, PROXY_URL, APPROVAL_PORT as _APPROVAL_PORT
+from shared.market_calendar import HOLIDAYS as _CAL_HOLIDAYS  # noqa: E402
 
 #############################################
 # CAPITAL & RISK PARAMETERS
@@ -114,31 +115,9 @@ SCHWAB_PROXY_URL = PROXY_URL
 
 # US equity market full-close holidays (NYSE schedule).
 # Agent exits immediately on these dates — no API calls, no approval prompts.
-# Update annually. Dates as "YYYY-MM-DD" strings.
-MARKET_HOLIDAYS = {
-    # 2026
-    "2026-01-01",  # New Year's Day
-    "2026-01-19",  # Martin Luther King Jr. Day
-    "2026-02-16",  # Presidents' Day
-    "2026-04-03",  # Good Friday
-    "2026-05-25",  # Memorial Day
-    "2026-06-19",  # Juneteenth
-    "2026-07-03",  # Independence Day (observed — Jul 4 is Saturday)
-    "2026-09-07",  # Labor Day
-    "2026-11-26",  # Thanksgiving
-    "2026-12-25",  # Christmas
-    # 2027
-    "2027-01-01",  # New Year's Day
-    "2027-01-18",  # Martin Luther King Jr. Day
-    "2027-02-15",  # Presidents' Day
-    "2027-03-26",  # Good Friday
-    "2027-05-31",  # Memorial Day
-    "2027-06-18",  # Juneteenth (observed — Jun 19 is Saturday)
-    "2027-07-05",  # Independence Day (observed — Jul 4 is Sunday)
-    "2027-09-06",  # Labor Day
-    "2027-11-25",  # Thanksgiving
-    "2027-12-24",  # Christmas (observed — Dec 25 is Saturday)
-}
+# Derived from shared/market_calendar.py (single canonical set); kept as ISO strings
+# because morning_agent compares a "YYYY-MM-DD" string against this set.
+MARKET_HOLIDAYS = frozenset(d.isoformat() for d in _CAL_HOLIDAYS)
 
 #############################################
 # TRADE SELECTION THRESHOLDS
