@@ -84,3 +84,9 @@ def test_refresh_due_before_rth_is_off_hours():
     assert due1 is True
     due2, _ = scheduler.refresh_due(_ct(2026, 6, 15, 7, 1), slot1)
     assert due2 is False
+
+
+def test_holidays_sourced_from_shared_calendar():
+    from services.sentiment_svc import scheduler
+    from shared import market_calendar as mc
+    assert scheduler._HOLIDAYS is mc.HOLIDAYS

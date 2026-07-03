@@ -149,3 +149,9 @@ def test_new_health_alerts_respects_gate_but_still_tracks():
 def test_health_alert_text_singular_plural():
     assert alerts.health_alert_text(1) == "1 service alert — stale or down"
     assert alerts.health_alert_text(2) == "2 service alerts — stale or down"
+
+
+def test_holidays_sourced_from_shared_calendar():
+    import alerts
+    from shared import market_calendar as mc
+    assert alerts._HOLIDAYS is mc.HOLIDAYS

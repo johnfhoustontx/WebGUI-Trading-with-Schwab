@@ -30,3 +30,12 @@ def test_prev_and_next_trading_day_skip_weekend_holiday():
 def test_market_now_is_ct_aware():
     now = mc.market_now()
     assert now.tzinfo is not None
+
+
+def test_canonical_holiday_membership_pins():
+    from datetime import date
+    # A few load-bearing dates — a tripwire if the set is ever edited by mistake.
+    for d in [date(2026, 1, 1), date(2026, 6, 19), date(2026, 7, 3), date(2026, 12, 25),
+              date(2027, 1, 1), date(2027, 6, 18), date(2027, 12, 24)]:
+        assert d in mc.HOLIDAYS
+    assert date(2026, 3, 26) not in mc.HOLIDAYS  # not a 2026 holiday
