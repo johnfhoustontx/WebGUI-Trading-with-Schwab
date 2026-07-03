@@ -39,6 +39,7 @@ import daily_trade_log
 import pathlib as _pathlib
 sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo root
 from shared.market_calendar import HOLIDAYS as _SHARED_HOLIDAYS  # noqa: E402
+from shared.symbols import SCAN_BASE as _SCAN_BASE, VIX as _VIX  # noqa: E402
 
 try:
     import schwab
@@ -65,8 +66,8 @@ class Config:
     TOKEN_FILE = Path.home() / ".schwab-mcp" / "token.json"
 
     # Symbols to scan
-    SYMBOLS = ["$SPX", "SPY", "QQQ"]
-    VIX_SYMBOL = "$VIX"
+    SYMBOLS = list(_SCAN_BASE)
+    VIX_SYMBOL = _VIX
 
     # Timezone
     TZ = ZoneInfo("America/Chicago")

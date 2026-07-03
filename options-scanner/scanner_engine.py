@@ -32,6 +32,10 @@ from pathlib import Path
 from datetime import datetime, timedelta, date
 from zoneinfo import ZoneInfo
 
+import sys as _sys, pathlib as _pathlib
+_sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo root
+from shared.symbols import INDEX_SYMBOLS  # noqa: E402
+
 # Cap per-scan concurrency to stay well below Schwab API rate limits while
 # still collapsing per-symbol round-trips from O(symbols) to ~O(1).
 _SCAN_MAX_WORKERS = 4
@@ -273,7 +277,7 @@ MAX_ENTRY_SHORT_DELTA = 0.27
 MOMENTUM_VETO = 0.6
 
 # Index symbols whose dealer-gamma signal is reliable enough to gate on.
-INDEX_SYMBOLS = frozenset({"$SPX", "SPY", "QQQ"})
+# (Sourced from shared/symbols.py — imported at the top of this module.)
 # Net-GEX regime: ratio = net/gross in [-1,1]. <= this => strongly-negative
 # (trend-prone) -> skip index premium. See 2026-06-12 design doc.
 GEX_STRONG_NEG = -0.30
