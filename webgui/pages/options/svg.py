@@ -79,5 +79,5 @@ def range_marker_svg(low, high, current, width=160, height=14):
             f'<line x1="{width - 2}" y1="{mid - 4:.1f}" x2="{width - 2}" y2="{mid + 4:.1f}" '
             f'stroke="#666" stroke-width="2"/>'
             f'<polygon points="{x:.1f},{mid - 5:.1f} {x - 4:.1f},{mid + 4:.1f} {x + 4:.1f},{mid + 4:.1f}" '
-            f'fill="#ffd54f"/>'
+            f'fill="{theme.hex_of("yellow")}"/>'
             f'</svg>')
