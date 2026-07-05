@@ -9,11 +9,14 @@ with no usable creds silently no-ops. Built service-owned (NOT importing the
 legacy options-scanner/notifier.py) to avoid its winsound/winotify baggage and
 the documented `notifier` cross-app module-name collision.
 """
+import html as _html
 import json
 import logging
 import os
 import smtplib
+from datetime import datetime
 from email.mime.text import MIMEText
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -21,6 +24,10 @@ from repo_paths import NOTIFICATIONS_CONFIG
 
 log = logging.getLogger(__name__)
 _CONFIG_PATH = NOTIFICATIONS_CONFIG
+
+_TZ = ZoneInfo("America/Chicago")
+_MULT = 100
+_D_GREEN, _D_YELLOW, _D_GRAY = 0x2ECC71, 0xF1C40F, 0x95A5A6
 
 _DEFAULTS = {
     "enabled": True,
@@ -90,3 +97,55 @@ def captured_key(s: dict) -> str:
     """Identity for a captured signal — its signal_id when present, else signal_key."""
     sid = s.get("signal_id")
     return str(sid) if sid not in (None, "") else signal_key(s)
+
+
+def _strikes_str(s: dict) -> str:
+    if str(s.get("type", "")).upper() == "IC":
+        return (f"{s.get('short_strike')}/{s.get('long_strike')}p — "
+                f"{s.get('call_short', '')}/{s.get('call_long', '')}c")
+    return f"{s.get('short_strike')}/{s.get('long_strike')} ({s.get('width', '')}-wide)"
+
+
+def telegram_signal_text(s: dict) -> str:
+    e = lambda v: _html.escape(str(v))
+    rr = s.get("rr_pct", 0) or 0
+    emoji = "🟢" if rr >= 25 else ("🟡" if rr >= 15 else "⚪")
+    return (
+        f"{emoji} <b>{e(s.get('symbol'))} {e(s.get('type'))}</b> ({e(s.get('trade_type', ''))})\n"
+        f"Exp <code>{e(s.get('expiration'))}</code> • {e(_strikes_str(s))}\n"
+        f"Credit <b>${(s.get('credit') or 0):.2f}</b> "
+        f"(${(s.get('credit') or 0) * _MULT:,.0f}/ct) • Max loss ${(s.get('max_loss') or 0):.2f}\n"
+        f"R:R <b>{rr:.1f}%</b> • PoP {s.get('pop_pct', 0):.0f}% • Δ {s.get('short_delta', 0):.3f}"
+    )
+
+
+def discord_signal_embed(s: dict) -> dict:
+    rr = s.get("rr_pct", 0) or 0
+    color = _D_GREEN if rr >= 25 else (_D_YELLOW if rr >= 15 else _D_GRAY)
+    return {
+        "title": f"{s.get('symbol')} {s.get('type')} ({s.get('trade_type', '')})",
+        "description": f"Exp {s.get('expiration')} • Strikes {_strikes_str(s)}",
+        "color": color,
+        "fields": [
+            {"name": "Credit", "value": f"${(s.get('credit') or 0):.2f}", "inline": True},
+            {"name": "Max Loss", "value": f"${(s.get('max_loss') or 0):.2f}", "inline": True},
+            {"name": "R:R", "value": f"{rr:.1f}%", "inline": True},
+            {"name": "PoP", "value": f"{s.get('pop_pct', 0):.0f}%", "inline": True},
+            {"name": "Δ short", "value": f"{s.get('short_delta', 0):.3f}", "inline": True},
+            {"name": "Score", "value": f"{s.get('composite_score', 0):.0f}", "inline": True},
+        ],
+        "timestamp": datetime.now(_TZ).isoformat(),
+    }
+
+
+def sms_summary_text(sigs: list, kind: str, cap: int = 5) -> str:
+    n = len(sigs)
+    head = f"{n} new {kind} signal" + ("" if n == 1 else "s")
+    lines = [head]
+    for s in sigs[:cap]:
+        lines.append(f"{s.get('symbol')} {s.get('type')} "
+                     f"{_strikes_str(s)} Cr ${ (s.get('credit') or 0):.2f} "
+                     f"R:R {(s.get('rr_pct') or 0):.0f}%")
+    if n > cap:
+        lines.append(f"…+{n - cap} more")
+    return "\n".join(lines)

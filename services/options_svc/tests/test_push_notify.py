@@ -57,3 +57,32 @@ def test_signal_key_ic_folds_call_legs():
 
 def test_captured_key_prefers_signal_id():
     assert pn.captured_key({"signal_id": "abc", "symbol": "SPY"}) == "abc"
+
+
+def _sig():
+    return {"symbol": "SPY", "type": "PCS", "trade_type": "0DTE",
+            "short_strike": 500, "long_strike": 495, "width": 5,
+            "expiration": "2026-07-10", "credit": 1.20, "max_loss": 3.80,
+            "rr_pct": 31.6, "pop_pct": 72, "short_delta": -0.18,
+            "net_theta": 0.05, "short_iv": 14.2, "breakeven": 498.8,
+            "composite_score": 80}
+
+
+def test_telegram_text_has_symbol_and_credit():
+    t = pn.telegram_signal_text(_sig())
+    assert "SPY" in t and "PCS" in t and "1.20" in t
+
+
+def test_discord_embed_has_fields():
+    e = pn.discord_signal_embed(_sig())
+    assert e["title"].startswith("SPY PCS")
+    names = {f["name"] for f in e["fields"]}
+    assert "Credit" in names and "R:R" in names
+
+
+def test_sms_summary_batches_and_caps():
+    sigs = [dict(_sig(), symbol=f"S{i}") for i in range(8)]
+    txt = pn.sms_summary_text(sigs, kind="scanner", cap=5)
+    assert txt.startswith("8 new scanner")
+    assert txt.count("\n") <= 6  # header + <=5 lines
+    assert "S0" in txt
