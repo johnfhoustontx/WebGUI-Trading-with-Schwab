@@ -129,3 +129,26 @@ def test_senders_never_raise(monkeypatch):
     monkeypatch.setattr(pn.requests, "post", boom)
     pn.send_telegram("T", 1, "x")   # no exception
     pn.send_discord("https://h", {})
+
+
+def test_new_keys_diff_and_reset():
+    prev = {"date": "2026-07-05", "keys": ["a", "b"]}
+    # same day: only c is new
+    new, nxt = pn.new_keys(["a", "b", "c"], prev, today="2026-07-05")
+    assert new == ["c"] and set(nxt["keys"]) == {"a", "b", "c"}
+    # new day: set resets, everything is new
+    new2, nxt2 = pn.new_keys(["a"], nxt, today="2026-07-06")
+    assert new2 == ["a"] and nxt2 == {"date": "2026-07-06", "keys": ["a"]}
+
+
+def test_new_keys_preserves_order_and_dedups():
+    new, nxt = pn.new_keys(["x", "x", "y"], None, today="2026-07-05")
+    assert new == ["x", "y"]
+
+
+def test_seen_roundtrip_via_bus():
+    from shared.bus import Bus
+    bus = Bus(fake=True)
+    pn.save_seen(bus, "cache:options:notified_scan", {"date": "2026-07-05", "keys": ["k"]})
+    got = pn.load_seen(bus, "cache:options:notified_scan")
+    assert got["keys"] == ["k"]

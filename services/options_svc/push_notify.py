@@ -192,3 +192,32 @@ def send_sms(fi_number: str, smtp_user: str, smtp_pw: str, body: str,
             smtp.send_message(msg)
     except Exception as exc:  # noqa: BLE001
         log.warning("Fi SMS send failed: %s", exc)
+
+
+def new_keys(current: list, prev: dict | None, today: str):
+    """Return (new_keys_in_order, next_state).
+
+    `prev` is {"date", "keys"} or None. On a date change the seen-set resets
+    (a persisting signal doesn't re-spam, but each new day's signals fire once).
+    Order-preserving + deduped.
+    """
+    same_day = bool(prev and prev.get("date") == today)
+    seen = set(prev["keys"]) if same_day else set()
+    out, ordered_seen = [], list(prev["keys"]) if same_day else []
+    for k in current:
+        if k not in seen:
+            seen.add(k)
+            out.append(k)
+            ordered_seen.append(k)
+    # dedup `out` while preserving order (current may repeat)
+    out = list(dict.fromkeys(out))
+    return out, {"date": today, "keys": list(dict.fromkeys(ordered_seen))}
+
+
+def load_seen(bus, key: str):
+    env = bus.cache_get(key)
+    return env.payload if (env is not None and isinstance(env.payload, dict)) else None
+
+
+def save_seen(bus, key: str, state: dict) -> None:
+    bus.cache_set(key, state)
