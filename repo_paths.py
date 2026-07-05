@@ -20,6 +20,7 @@ WEBGUI          = REPO_ROOT / "webgui"
 BRIDGE_PATH = SHARED / "sentiment_bridge.json"
 APPSETTINGS = SHARED / "appsettings.json"
 TOKENS      = SHARED / "tokens.json"
+NOTIFICATIONS_CONFIG = SHARED / "notifications.json"
 
 # Dedicated paper-account DB for the autonomous Driver — a SEPARATE file from the
 # manual paper_account.db so the driver's book is fully isolated (zero schema change;
