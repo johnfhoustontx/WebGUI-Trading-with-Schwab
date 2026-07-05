@@ -152,3 +152,74 @@ def test_seen_roundtrip_via_bus():
     pn.save_seen(bus, "cache:options:notified_scan", {"date": "2026-07-05", "keys": ["k"]})
     got = pn.load_seen(bus, "cache:options:notified_scan")
     assert got["keys"] == ["k"]
+
+
+def test_notify_signals_sends_per_channel_and_updates_seen(monkeypatch):
+    from shared.bus import Bus
+    bus = Bus(fake=True)
+    cfg = {"enabled": True, "market_hours_only": False, "min_score": 0,
+           "telegram": {"bot_token": "T", "chat_id": 1},
+           "discord": {"webhook_url": "https://h"},
+           "sms": {"fi_number": "555", "smtp_user": "u", "smtp_app_password": "p"}}
+    monkeypatch.setattr(pn, "load_config", lambda: cfg)
+    tg, dc, sms = [], [], []
+    monkeypatch.setattr(pn, "send_telegram", lambda *a: tg.append(a))
+    monkeypatch.setattr(pn, "send_discord", lambda *a: dc.append(a))
+    monkeypatch.setattr(pn, "send_sms", lambda *a, **k: sms.append(a))
+
+    sigs = [_sig(), dict(_sig(), symbol="QQQ")]
+    pn.notify_signals(bus, sigs, kind="scanner",
+                      seen_key="cache:options:notified_scan", today="2026-07-05")
+    assert len(tg) == 2 and len(dc) == 2   # one per signal
+    assert len(sms) == 1                    # one batched summary
+    # second call with same signals: nothing new
+    pn.notify_signals(bus, sigs, kind="scanner",
+                      seen_key="cache:options:notified_scan", today="2026-07-05")
+    assert len(tg) == 2
+
+
+def test_min_score_gate_scanner(monkeypatch):
+    from shared.bus import Bus
+    bus = Bus(fake=True)
+    cfg = {"enabled": True, "market_hours_only": False, "min_score": 90,
+           "telegram": {"bot_token": "T", "chat_id": 1},
+           "discord": {"webhook_url": ""}, "sms": {}}
+    monkeypatch.setattr(pn, "load_config", lambda: cfg)
+    tg = []
+    monkeypatch.setattr(pn, "send_telegram", lambda *a: tg.append(a))
+    pn.notify_signals(bus, [_sig()], kind="scanner",   # score 80 < 90
+                      seen_key="cache:options:notified_scan", today="2026-07-05")
+    assert tg == []
+
+
+def test_seed_run_does_not_send(monkeypatch):
+    from shared.bus import Bus
+    bus = Bus(fake=True)
+    cfg = {"enabled": True, "market_hours_only": False, "min_score": 0,
+           "telegram": {"bot_token": "T", "chat_id": 1}, "discord": {}, "sms": {}}
+    monkeypatch.setattr(pn, "load_config", lambda: cfg)
+    tg = []
+    monkeypatch.setattr(pn, "send_telegram", lambda *a: tg.append(a))
+    pn.notify_signals(bus, [_sig()], kind="scanner",
+                      seen_key="cache:options:notified_scan", today="2026-07-05", seed=True)
+    assert tg == []  # seeded silently
+    # now a real run with the same signal also stays silent (already seen)
+    pn.notify_signals(bus, [_sig()], kind="scanner",
+                      seen_key="cache:options:notified_scan", today="2026-07-05")
+    assert tg == []
+
+
+def test_disabled_config_no_send(monkeypatch):
+    from shared.bus import Bus
+    bus = Bus(fake=True)
+    monkeypatch.setattr(pn, "load_config",
+                        lambda: {"enabled": False, "telegram": {"bot_token": "T", "chat_id": 1}})
+    tg = []
+    monkeypatch.setattr(pn, "send_telegram", lambda *a: tg.append(a))
+    pn.notify_signals(bus, [_sig()], kind="scanner",
+                      seen_key="cache:options:notified_scan", today="2026-07-05")
+    assert tg == []
+
+
+def test_market_hours_gate_is_bool():
+    assert isinstance(pn._in_market_hours(), bool)

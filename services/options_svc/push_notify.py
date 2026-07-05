@@ -221,3 +221,82 @@ def load_seen(bus, key: str):
 
 def save_seen(bus, key: str, state: dict) -> None:
     bus.cache_set(key, state)
+
+
+import datetime as _dt
+
+# Local NYSE full-closure holidays + trading window, copied from webgui/alerts.py
+# so this gate agrees with the rest of the stack WITHOUT importing that module
+# (alerts.py pulls in pages.options.scanner → NiceGUI/engine deps we don't want
+# in the always-on service process). **Update yearly** alongside alerts._HOLIDAYS.
+_MKT_OPEN, _MKT_CLOSE = _dt.time(8, 0), _dt.time(15, 0)   # CT trading window
+_HOLIDAYS = frozenset({
+    # 2026
+    _dt.date(2026, 1, 1), _dt.date(2026, 1, 19), _dt.date(2026, 2, 16), _dt.date(2026, 4, 3),
+    _dt.date(2026, 5, 25), _dt.date(2026, 6, 19), _dt.date(2026, 7, 3), _dt.date(2026, 9, 7),
+    _dt.date(2026, 11, 26), _dt.date(2026, 12, 25),
+    # 2027
+    _dt.date(2027, 1, 1), _dt.date(2027, 1, 18), _dt.date(2027, 2, 15), _dt.date(2027, 3, 26),
+    _dt.date(2027, 5, 31), _dt.date(2027, 6, 18), _dt.date(2027, 7, 5), _dt.date(2027, 9, 6),
+    _dt.date(2027, 11, 25), _dt.date(2027, 12, 24),
+})
+
+
+def _today_ct() -> str:
+    return _dt.datetime.now(_TZ).date().isoformat()
+
+
+def _in_market_hours() -> bool:
+    """Trading-day 08:00–15:00 CT. Uses a local weekday + holiday check (a copy of
+    webgui/alerts.py's calendar) so the gate agrees with the rest of the stack
+    without importing that NiceGUI-coupled module. Defensive → True on any error
+    (fail-open: better a rare off-hours notify than silently dropping all)."""
+    try:
+        ct = _dt.datetime.now(_TZ)
+        return (ct.weekday() < 5 and ct.date() not in _HOLIDAYS
+                and _MKT_OPEN <= ct.time() <= _MKT_CLOSE)
+    except Exception:
+        return True
+
+
+def notify_signals(bus, signals: list, *, kind: str, seen_key: str,
+                   today: str | None = None, seed: bool = False,
+                   config: dict | None = None) -> list:
+    """Diff `signals` against the date-scoped seen-set and notify the new ones.
+
+    kind: "scanner" | "captured". Returns the list of newly-notified keys.
+    seed=True updates the seen-set WITHOUT sending (first run after restart).
+    Never raises — a send failure is swallowed per-channel.
+    """
+    cfg = config or load_config()
+    today = today or _today_ct()
+    key_fn = captured_key if kind == "captured" else signal_key
+
+    prev = load_seen(bus, seen_key)
+    keys = [key_fn(s) for s in signals]
+    new, nxt = new_keys(keys, prev, today)
+    save_seen(bus, seen_key, nxt)
+
+    if seed or not cfg.get("enabled", True) or not new:
+        return new if seed else []
+
+    if cfg.get("market_hours_only") and not _in_market_hours():
+        return []
+
+    min_score = cfg.get("min_score", 0) or 0
+    new_set = set(new)
+    fresh = [s for s, k in zip(signals, keys) if k in new_set]
+    if kind == "scanner" and min_score:
+        fresh = [s for s in fresh if (s.get("composite_score") or 0) >= min_score]
+    if not fresh:
+        return []
+
+    tg = cfg.get("telegram", {})
+    dc = cfg.get("discord", {})
+    sms = cfg.get("sms", {})
+    for s in fresh:
+        send_telegram(tg.get("bot_token"), tg.get("chat_id"), telegram_signal_text(s))
+        send_discord(dc.get("webhook_url"), discord_signal_embed(s))
+    send_sms(sms.get("fi_number"), sms.get("smtp_user"), sms.get("smtp_app_password"),
+             sms_summary_text(fresh, kind), subject=f"{len(fresh)} new {kind} signal(s)")
+    return [signal_key(s) if kind != "captured" else captured_key(s) for s in fresh]
