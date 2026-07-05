@@ -86,3 +86,46 @@ def test_sms_summary_batches_and_caps():
     assert txt.startswith("8 new scanner")
     assert txt.count("\n") <= 6  # header + <=5 lines
     assert "S0" in txt
+
+
+def test_send_telegram_posts_to_bot_api(monkeypatch):
+    calls = {}
+    monkeypatch.setattr(pn.requests, "post",
+                        lambda url, **kw: calls.update(url=url, json=kw.get("json")))
+    pn.send_telegram("TOK", 42, "hello")
+    assert calls["url"].endswith("/botTOK/sendMessage")
+    assert calls["json"]["chat_id"] == 42 and calls["json"]["parse_mode"] == "HTML"
+
+
+def test_send_discord_posts_embed(monkeypatch):
+    calls = {}
+    monkeypatch.setattr(pn.requests, "post",
+                        lambda url, **kw: calls.update(url=url, json=kw.get("json")))
+    pn.send_discord("https://hook", {"title": "x"})
+    assert calls["url"] == "https://hook"
+    assert calls["json"]["embeds"] == [{"title": "x"}]
+
+
+def test_send_sms_emails_fi_gateway(monkeypatch):
+    sent = {}
+
+    class FakeSMTP:
+        def __init__(self, host, port, timeout=None): sent["host"] = host
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def starttls(self): sent["tls"] = True
+        def login(self, u, p): sent["login"] = (u, p)
+        def send_message(self, msg): sent["to"] = msg["To"]; sent["body"] = msg.get_payload()
+
+    monkeypatch.setattr(pn.smtplib, "SMTP", FakeSMTP)
+    pn.send_sms("5551234567", "u@gmail.com", "pw", "2 new signals")
+    assert sent["to"] == "5551234567@msg.fi.google.com"
+    assert sent["login"] == ("u@gmail.com", "pw")
+    assert "2 new signals" in sent["body"]
+
+
+def test_senders_never_raise(monkeypatch):
+    def boom(*a, **k): raise RuntimeError("net")
+    monkeypatch.setattr(pn.requests, "post", boom)
+    pn.send_telegram("T", 1, "x")   # no exception
+    pn.send_discord("https://h", {})

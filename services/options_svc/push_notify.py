@@ -149,3 +149,46 @@ def sms_summary_text(sigs: list, kind: str, cap: int = 5) -> str:
     if n > cap:
         lines.append(f"…+{n - cap} more")
     return "\n".join(lines)
+
+
+_TELEGRAM_API = "https://api.telegram.org/bot{token}/sendMessage"
+_SMTP_HOST, _SMTP_PORT = "smtp.gmail.com", 587
+_FI_GATEWAY = "@msg.fi.google.com"
+
+
+def send_telegram(token: str, chat_id, text: str) -> None:
+    if not token or not chat_id:
+        return
+    try:
+        requests.post(_TELEGRAM_API.format(token=token), json={
+            "chat_id": chat_id, "text": text, "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        }, timeout=8)
+    except Exception as exc:  # noqa: BLE001 — best-effort
+        log.warning("Telegram send failed: %s", exc)
+
+
+def send_discord(webhook_url: str, embed: dict) -> None:
+    if not webhook_url:
+        return
+    try:
+        requests.post(webhook_url, json={"embeds": [embed]}, timeout=8)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Discord send failed: %s", exc)
+
+
+def send_sms(fi_number: str, smtp_user: str, smtp_pw: str, body: str,
+             subject: str = "") -> None:
+    if not (fi_number and smtp_user and smtp_pw):
+        return
+    try:
+        msg = MIMEText(body)
+        msg["From"] = smtp_user
+        msg["To"] = f"{fi_number}{_FI_GATEWAY}"
+        msg["Subject"] = subject
+        with smtplib.SMTP(_SMTP_HOST, _SMTP_PORT, timeout=10) as smtp:
+            smtp.starttls()
+            smtp.login(smtp_user, smtp_pw)
+            smtp.send_message(msg)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Fi SMS send failed: %s", exc)
