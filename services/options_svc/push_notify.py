@@ -9,6 +9,7 @@ with no usable creds silently no-ops. Built service-owned (NOT importing the
 legacy options-scanner/notifier.py) to avoid its winsound/winotify baggage and
 the documented `notifier` cross-app module-name collision.
 """
+import datetime as _dt
 import html as _html
 import json
 import logging
@@ -144,7 +145,7 @@ def sms_summary_text(sigs: list, kind: str, cap: int = 5) -> str:
     lines = [head]
     for s in sigs[:cap]:
         lines.append(f"{s.get('symbol')} {s.get('type')} "
-                     f"{_strikes_str(s)} Cr ${ (s.get('credit') or 0):.2f} "
+                     f"{_strikes_str(s)} Cr ${(s.get('credit') or 0):.2f} "
                      f"R:R {(s.get('rr_pct') or 0):.0f}%")
     if n > cap:
         lines.append(f"…+{n - cap} more")
@@ -201,9 +202,14 @@ def new_keys(current: list, prev: dict | None, today: str):
     (a persisting signal doesn't re-spam, but each new day's signals fire once).
     Order-preserving + deduped.
     """
-    same_day = bool(prev and prev.get("date") == today)
-    seen = set(prev["keys"]) if same_day else set()
-    out, ordered_seen = [], list(prev["keys"]) if same_day else []
+    # Read the prior keys defensively: a malformed `prev` (missing/non-list
+    # "keys") must never raise — that would break the module's never-raises
+    # contract (notify_signals → the caller).
+    same_day = bool(prev) and prev.get("date") == today
+    raw = prev.get("keys") if same_day else []
+    raw = raw if isinstance(raw, list) else []
+    seen = set(raw)
+    out, ordered_seen = [], list(raw)
     for k in current:
         if k not in seen:
             seen.add(k)
@@ -222,8 +228,6 @@ def load_seen(bus, key: str):
 def save_seen(bus, key: str, state: dict) -> None:
     bus.cache_set(key, state)
 
-
-import datetime as _dt
 
 # Local NYSE full-closure holidays + trading window, copied from webgui/alerts.py
 # so this gate agrees with the rest of the stack WITHOUT importing that module
@@ -275,6 +279,11 @@ def notify_signals(bus, signals: list, *, kind: str, seen_key: str,
     prev = load_seen(bus, seen_key)
     keys = [key_fn(s) for s in signals]
     new, nxt = new_keys(keys, prev, today)
+    # Mark keys seen BEFORE the enable/market-hours/min-score gates — intentional,
+    # mirroring webgui/main.py's unconditional `_ALERT_STATE["alerted"] |= keys`
+    # after gating the chime. Each signal is considered exactly once; a signal
+    # first seen off-hours or while disabled is absorbed here and is NOT deferred
+    # to re-notify later.
     save_seen(bus, seen_key, nxt)
 
     if seed or not cfg.get("enabled", True) or not new:
@@ -285,7 +294,13 @@ def notify_signals(bus, signals: list, *, kind: str, seen_key: str,
 
     min_score = cfg.get("min_score", 0) or 0
     new_set = set(new)
-    fresh = [s for s, k in zip(signals, keys) if k in new_set]
+    # dedup by key so two signals sharing a key notify only once (keep the first)
+    fresh, seen_fresh = [], set()
+    for s, k in zip(signals, keys):
+        if k in new_set and k not in seen_fresh:
+            seen_fresh.add(k)
+            fresh.append(s)
+    # min_score is scanner-only: captured signals carry no composite_score.
     if kind == "scanner" and min_score:
         fresh = [s for s in fresh if (s.get("composite_score") or 0) >= min_score]
     if not fresh:
@@ -299,4 +314,4 @@ def notify_signals(bus, signals: list, *, kind: str, seen_key: str,
         send_discord(dc.get("webhook_url"), discord_signal_embed(s))
     send_sms(sms.get("fi_number"), sms.get("smtp_user"), sms.get("smtp_app_password"),
              sms_summary_text(fresh, kind), subject=f"{len(fresh)} new {kind} signal(s)")
-    return [signal_key(s) if kind != "captured" else captured_key(s) for s in fresh]
+    return [key_fn(s) for s in fresh]

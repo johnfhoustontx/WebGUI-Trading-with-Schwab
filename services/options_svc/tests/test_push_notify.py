@@ -223,3 +223,93 @@ def test_disabled_config_no_send(monkeypatch):
 
 def test_market_hours_gate_is_bool():
     assert isinstance(pn._in_market_hours(), bool)
+
+
+# --- C1: new_keys must never raise on a malformed prev ---
+
+def test_new_keys_malformed_prev_missing_keys():
+    new, nxt = pn.new_keys(["a"], {"date": "2026-07-05"}, today="2026-07-05")
+    assert new == ["a"]
+    assert nxt == {"date": "2026-07-05", "keys": ["a"]}
+
+
+def test_new_keys_malformed_prev_nonlist_keys():
+    new, nxt = pn.new_keys(["a"], {"date": "2026-07-05", "keys": "oops"},
+                           today="2026-07-05")
+    # non-list prior treated as empty → "a" is new
+    assert new == ["a"]
+    assert nxt == {"date": "2026-07-05", "keys": ["a"]}
+
+
+def test_notify_signals_survives_malformed_seen(monkeypatch):
+    from shared.bus import Bus
+    bus = Bus(fake=True)
+    cfg = {"enabled": True, "market_hours_only": False, "min_score": 0,
+           "telegram": {"bot_token": "T", "chat_id": 1}, "discord": {}, "sms": {}}
+    monkeypatch.setattr(pn, "load_config", lambda: cfg)
+    monkeypatch.setattr(pn, "send_telegram", lambda *a: None)
+    monkeypatch.setattr(pn, "send_discord", lambda *a: None)
+    monkeypatch.setattr(pn, "send_sms", lambda *a, **k: None)
+    pn.save_seen(bus, "cache:options:notified_scan",
+                 {"date": "2026-07-05", "keys": None})
+    # must not raise even though the stored seen-set is malformed
+    pn.notify_signals(bus, [_sig()], kind="scanner",
+                      seen_key="cache:options:notified_scan", today="2026-07-05")
+
+
+# --- I1: mark-seen happens before the gate (mirrors webgui watcher) ---
+
+def test_seen_marked_even_when_gated_off(monkeypatch):
+    from shared.bus import Bus
+    bus = Bus(fake=True)
+    cfg = {"enabled": False, "market_hours_only": False, "min_score": 0,
+           "telegram": {"bot_token": "T", "chat_id": 1}, "discord": {}, "sms": {}}
+    monkeypatch.setattr(pn, "load_config", lambda: cfg)
+    tg = []
+    monkeypatch.setattr(pn, "send_telegram", lambda *a: tg.append(a))
+    monkeypatch.setattr(pn, "send_discord", lambda *a: None)
+    monkeypatch.setattr(pn, "send_sms", lambda *a, **k: None)
+    sig = _sig()
+    pn.notify_signals(bus, [sig], kind="scanner",
+                      seen_key="cache:options:notified_scan", today="2026-07-05")
+    assert tg == []  # disabled → nothing sent
+    seen = pn.load_seen(bus, "cache:options:notified_scan")
+    assert pn.signal_key(sig) in seen["keys"]  # but the key IS marked seen
+
+
+# --- M1: duplicate-key signals notify only once ---
+
+def test_duplicate_key_signals_notify_once(monkeypatch):
+    from shared.bus import Bus
+    bus = Bus(fake=True)
+    cfg = {"enabled": True, "market_hours_only": False, "min_score": 0,
+           "telegram": {"bot_token": "T", "chat_id": 1}, "discord": {}, "sms": {}}
+    monkeypatch.setattr(pn, "load_config", lambda: cfg)
+    tg = []
+    monkeypatch.setattr(pn, "send_telegram", lambda *a: tg.append(a))
+    monkeypatch.setattr(pn, "send_discord", lambda *a: None)
+    monkeypatch.setattr(pn, "send_sms", lambda *a, **k: None)
+    sigs = [_sig(), _sig()]  # identical → same key
+    pn.notify_signals(bus, sigs, kind="scanner",
+                      seen_key="cache:options:notified_scan", today="2026-07-05")
+    assert len(tg) == 1  # only one send despite two duplicate signals
+
+
+# --- M4: min_score applies to scanner only, not captured ---
+
+def test_min_score_not_applied_to_captured(monkeypatch):
+    from shared.bus import Bus
+    bus = Bus(fake=True)
+    cfg = {"enabled": True, "market_hours_only": False, "min_score": 90,
+           "telegram": {"bot_token": "T", "chat_id": 1}, "discord": {}, "sms": {}}
+    monkeypatch.setattr(pn, "load_config", lambda: cfg)
+    tg = []
+    monkeypatch.setattr(pn, "send_telegram", lambda *a: tg.append(a))
+    monkeypatch.setattr(pn, "send_discord", lambda *a: None)
+    monkeypatch.setattr(pn, "send_sms", lambda *a, **k: None)
+    # captured signal with no composite_score still notifies despite min_score=90
+    cap = {"signal_id": "cap1", "symbol": "SPY", "type": "PCS",
+           "short_strike": 500, "long_strike": 495, "expiration": "2026-07-10"}
+    pn.notify_signals(bus, [cap], kind="captured",
+                      seen_key="cache:options:notified_captured", today="2026-07-05")
+    assert len(tg) == 1

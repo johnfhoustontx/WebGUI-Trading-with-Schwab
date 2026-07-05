@@ -65,8 +65,12 @@ limits when a scan surfaces several signals at once.
 ### Triggers (hooked at the existing publish points in `handlers.py`)
 
 - **New scanner signals** — in `rescan(bus)`, after `cache_set(CACHE_SCAN, …)`:
-  diff the current signal keys against a persisted "already-notified" set, filter by
-  the min-score gate, notify the new ones, then add them to the set.
+  diff the current signal keys against a persisted "already-notified" set. Keys are
+  marked seen **when diffed (before gating)** — mirroring the webgui watcher's
+  unconditional `alerted |= keys` — so each signal is considered exactly once; a
+  signal first seen off-hours, while disabled, or below min-score is absorbed into
+  the seen-set and is not deferred to re-notify later. Then the enable/market-hours/
+  min-score gates decide whether to actually send.
 - **New captured signals** — in `refresh_captured(bus)` (and the `captured_reprice`
   republish path): diff `signal_id`s against a persisted seen-set, notify new ones.
 
