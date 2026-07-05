@@ -19,13 +19,10 @@ Version 1.0.0 Changes:
 - Auto-detection of proxy availability with fallback warning
 """
 
-import json
 import logging
-import time
 import sys, pathlib
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, List
-from datetime import datetime, timedelta
 
 import requests
 

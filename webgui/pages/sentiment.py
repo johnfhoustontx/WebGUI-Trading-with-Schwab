@@ -24,7 +24,7 @@ changes.
 import bus_client
 from pages.gauge import gauge_figure  # noqa: F401  (re-export; used by render)
 from pages.options.theme import BTN_3D, TILE_3D
-from pages.ui_guard import guard, guard_async
+from pages.ui_guard import guard
 
 CLR_GREEN = "#66bb6a"
 CLR_RED = "#ef5350"
@@ -514,7 +514,6 @@ def _fmt_time(value):
     if dt is None:
         return ""
     try:
-        from datetime import timezone
         if dt.tzinfo is not None:
             dt = dt.astimezone(tz=None).replace(tzinfo=None)
         return dt.strftime("%H:%M:%S")

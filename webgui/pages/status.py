@@ -32,7 +32,6 @@ import proxy
 from pages.options.theme import BTN_3D
 from repo_paths import (
     MEMURAI_PORT,
-    NICEGUI_PORT,
     NICEGUI_URL,
     PROXY_PORT,
     PROXY_URL,

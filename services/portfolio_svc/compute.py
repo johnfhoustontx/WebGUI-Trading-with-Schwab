@@ -38,7 +38,7 @@ from src.benchmark import load_benchmark_weights  # noqa: E402
 from src.data import PortfolioData  # noqa: E402
 from src.entries import weighted_avg_entry  # noqa: E402
 from src.evaluation import compute_baseline, evaluate_portfolio  # noqa: E402
-from src.live import apply_tick, stream_symbols  # noqa: E402  (re-exported)
+from src.live import apply_tick, stream_symbols  # noqa: E402, F401  (re-exported: compute.apply_tick / compute.stream_symbols)
 from src.portfolio import build_portfolio  # noqa: E402
 from src.suggestions import suggest  # noqa: E402
 from src.sync import sync_trades  # noqa: E402

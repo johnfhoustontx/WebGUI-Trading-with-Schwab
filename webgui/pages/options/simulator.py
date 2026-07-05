@@ -272,7 +272,6 @@ def render():
     """Simulator page: fetch + strategy/leg editor + Replay / What-if / IV-shock tabs."""
     from . import handoff
     from . import leg_editor
-    from . import strategies as S
     from . import strategy_menu
     from . import overlay as _overlay
 

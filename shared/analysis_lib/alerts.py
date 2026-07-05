@@ -310,12 +310,12 @@ class AlertManager:
         if entry > stop:  # Long trade
             alerts['entry'] = self.create_alert(
                 symbol, AlertType.PRICE_CROSS_BELOW, entry,
-                notes=f"Entry zone for long trade"
+                notes="Entry zone for long trade"
             )
         else:  # Short trade
             alerts['entry'] = self.create_alert(
                 symbol, AlertType.PRICE_CROSS_ABOVE, entry,
-                notes=f"Entry zone for short trade"
+                notes="Entry zone for short trade"
             )
 
         # Stop alert

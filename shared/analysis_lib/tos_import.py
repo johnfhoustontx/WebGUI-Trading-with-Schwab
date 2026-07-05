@@ -11,8 +11,8 @@ Provides functionality to import:
 import logging
 import csv
 from pathlib import Path
-from datetime import datetime, date
-from typing import Optional, Dict, List, Any
+from datetime import datetime
+from typing import Optional, Dict, List
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -442,7 +442,6 @@ def import_tos_breadth(filepath: str = None) -> Optional[TOSBreadthData]:
 
 if __name__ == '__main__':
     # Test the importer
-    import sys
 
     logging.basicConfig(level=logging.INFO)
 
@@ -455,7 +454,7 @@ if __name__ == '__main__':
     # Try to import it
     data = importer.import_breadth_csv(template)
     if data:
-        print(f"\nImported data:")
+        print("\nImported data:")
         print(f"  NYSE A/D: {data.nyse_advances}/{data.nyse_declines}")
         print(f"  NASDAQ A/D: {data.nasdaq_advances}/{data.nasdaq_declines}")
         print(f"  A/D Ratio: {data.ad_ratio}")

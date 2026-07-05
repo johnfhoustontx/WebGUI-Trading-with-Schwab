@@ -14,17 +14,16 @@ Version 1.0.0 Changes:
 """
 
 import logging
-from typing import Optional, Dict, Tuple
+from typing import Optional, Dict
 from dataclasses import dataclass, field
-from datetime import datetime, date
+from datetime import datetime
 
 import pandas as pd
-import numpy as np
 
 from config import (
     MACRO_WEIGHTS, MACRO_DEPLOYMENT, VIX_LOW, VIX_NORMAL, VIX_HIGH, VIX_EXTREME
 )
-from technical import calculate_sma, calculate_ema
+from technical import calculate_sma
 
 logger = logging.getLogger(__name__)
 

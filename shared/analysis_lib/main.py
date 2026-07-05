@@ -17,12 +17,11 @@ import argparse
 import logging
 import sys
 from pathlib import Path
-from datetime import datetime
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from config import PORTFOLIO, COLORS
+from config import COLORS
 from schwab_client import MarketDataClient
 from sector_analysis import SectorRanker, get_sector_info
 from macro_score import MacroScoreCalculator

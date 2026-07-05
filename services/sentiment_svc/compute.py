@@ -581,7 +581,6 @@ def _fetch_sector_month_pcts():
     no override is passed). Defensive: returns ``{}`` on any failure."""
     try:
         import sectors_ref
-        from services import _proxy
         sd = sectors_ref.load_sectors_data()
         etfs = [r["etf"] for r in sd
                 if r.get("kind") == "sector" and r.get("etf")]

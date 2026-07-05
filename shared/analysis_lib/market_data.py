@@ -11,12 +11,11 @@ import time
 import re
 import requests
 from datetime import datetime, timedelta
-from typing import Optional, Dict, List, Any, Tuple
+from typing import Optional, Dict, List
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
-import numpy as np
 
 try:
     import yfinance as yf
@@ -25,7 +24,7 @@ except ImportError:
     YFINANCE_AVAILABLE = False
     yf = None
 
-from data_cache import get_cache, CACHE_TTL
+from data_cache import get_cache
 
 # Import FRED API key from config if available
 try:

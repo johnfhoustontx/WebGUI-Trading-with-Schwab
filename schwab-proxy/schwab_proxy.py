@@ -51,7 +51,7 @@ from urllib.parse import urlparse, parse_qs
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 
 from trade_registry import TradeRegistry, resolve_legs
 import trade_detector
