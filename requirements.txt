@@ -14,6 +14,12 @@
 # De-dup rule applied: where the same package was constrained differently, the
 # higher / looser constraint is kept and the dropped one is noted inline.
 # Sources: P=schwab-proxy  O=options-scanner  S=sentiment-dashboard  D=claude-driver
+#
+# REPRODUCIBLE INSTALL: this file is the human-readable direct-dependency list.
+# For a byte-identical, fully-pinned environment (all transitive deps), install
+# `requirements.lock` instead (generated via `pip freeze`; refresh it after any
+# dependency change). Dev/CI tooling (ruff, pre-commit, pip-audit, pytest-cov)
+# lives in `requirements-dev.txt`. See docs/audits/2026-07-02-best-practices-validation.md.
 # ----------------------------------------------------------------------------
 
 # --- Web / API server (P, O, D) ---

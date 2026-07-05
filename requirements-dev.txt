@@ -1,0 +1,9 @@
+# Development / CI tooling (not needed to RUN the app — see requirements.txt).
+# Install:  pip install -r requirements-dev.txt
+#
+# Kept version-ranged; CI pins the runtime deps via requirements.lock.
+
+ruff>=0.14                 # lint + format (config: ruff.toml)
+pre-commit>=3.7            # local hook runner (.pre-commit-config.yaml)
+pip-audit>=2.7            # dependency CVE scanning (supply-chain)
+pytest-cov>=5.0          # coverage measurement
