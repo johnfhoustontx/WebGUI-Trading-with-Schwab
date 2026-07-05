@@ -35,7 +35,7 @@ Version 1.0.0 Changes:
 
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root
-from repo_paths import ML_SERVER_URLS, ANALYTICS_URL, PROXY_URL, APPROVAL_PORT as _APPROVAL_PORT
+from repo_paths import ML_SERVER_URLS, ANALYTICS_URL, PROXY_URL, APPROVAL_PORT as _APPROVAL_PORT, CLAUDE_DRIVER
 from shared.market_calendar import HOLIDAYS as _CAL_HOLIDAYS  # noqa: E402
 
 #############################################
@@ -157,9 +157,6 @@ MARKET_CLOSE_MIN  = 0
 # PATHS
 #############################################
 
-import os
-
-BASE_DIR      = os.path.dirname(os.path.abspath(__file__))
-TRADE_LOG     = os.path.join(BASE_DIR, "data", "trade_log.json")
-PENDING_TRADE = os.path.join(BASE_DIR, "data", "pending_trade.json")
-LOG_DIR       = os.path.join(BASE_DIR, "logs")
+TRADE_LOG     = str(CLAUDE_DRIVER / "data" / "trade_log.json")
+PENDING_TRADE = str(CLAUDE_DRIVER / "data" / "pending_trade.json")
+LOG_DIR       = str(CLAUDE_DRIVER / "logs")
