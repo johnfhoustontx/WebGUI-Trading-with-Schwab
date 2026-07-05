@@ -2366,6 +2366,49 @@ executes through new paper-engine primitives behind a stale-price guard. Pieces:
 - Design/plan: [design](docs/plans/2026-06-21-rescue-tested-trades-design.md) /
   [plan](docs/plans/2026-06-21-rescue-tested-trades-plan.md).
 
+**Signal push notifications — Telegram / Discord / Google Fi SMS — DONE (2026-07-05).**
+The always-on options service now pushes a **phone notification** the moment it
+publishes a **new scanner signal** or a **new captured signal** — server-side, so the
+phone is pinged 24/7 regardless of whether a browser tab is open (this deliberately does
+NOT reuse the browser-gated webgui alert watcher). Self-contained, service-owned module
+**`services/options_svc/push_notify.py`** (headless; ports the proven Telegram/Discord
+formatters from the legacy `options-scanner/notifier.py` rather than importing it — that
+module drags in `winsound`/`winotify` and `notifier` is a documented cross-app name
+collision). Three channels, each **self-gating on config presence** (missing creds →
+silent no-op): **Telegram** (Bot API, HTML, one msg per new signal), **Discord** (webhook
+embed, one per new signal), and **SMS via Google Fi** (`smtplib` emails a **batched**
+summary to `<10-digit-Fi-number>@msg.fi.google.com` — Fi's proprietary email-to-text
+gateway, still functional in 2026 unlike the deprecated `@vtext`/`@tmomail` carrier
+gateways — sent from Gmail over `smtp.gmail.com:587` STARTTLS with an **app password**).
+**Triggers** are hooked at the existing publish points in `handlers.py`: `rescan` (new
+scanner signals) and `refresh_captured` + the `captured_reprice` branch (new captured
+signals; `remove_closed_from_captured` is deliberately NOT wired — a manual close is not a
+new signal). Each hook is **best-effort + try/except-wrapped AFTER the cache_set/publish**
+so a notify failure can never block the scan/publish path. **"New" detection** is
+single-source + restart-safe: a stable signal key (symbol/type/strikes/expiration, IC
+folds the call legs) diffed against a **date-scoped Redis seen-set**
+(`cache:options:notified_scan` / `cache:options:notified_captured`, a `{date, keys[]}`
+envelope that resets on a new trading date) — keys are marked seen **when diffed (before
+gating)**, mirroring the webgui watcher's unconditional `alerted |= keys`, so each signal
+is considered once; a signal first seen off-hours/disabled/below-min-score is absorbed and
+not deferred. On the service's **first publish after (re)start** the set is seeded
+**silently** (no re-notify storm). Gates: a master `enabled`, an optional `market_hours_only`
+(a local weekday + 08:00–15:00 CT + holiday check copied byte-for-byte from
+`webgui/alerts.py` to avoid importing NiceGUI into the service — update the `_HOLIDAYS`
+copy yearly alongside `alerts._HOLIDAYS`), and a scanner-only `min_score` (captured signals
+carry no `composite_score`). **Config**: gitignored `shared/notifications.json`
+(+ committed `shared/notifications.example.json`; `repo_paths.NOTIFICATIONS_CONFIG`), env
+vars override file values (`TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`/`DISCORD_WEBHOOK_URL`/
+`FI_SMS_NUMBER`/`SMS_SMTP_USER`/`SMS_SMTP_APP_PASSWORD`/`NOTIFY_ENABLED`). **Setup**:
+Telegram bot via `@BotFather` (token) + `.../getUpdates` (chat_id); Discord channel →
+Integrations → Webhooks; SMS = your 10-digit Fi number + a Gmail **App Password** (Google
+Account → Security → 2-Step Verification → App passwords). **Out of scope (YAGNI)**:
+per-channel Settings-page toggles, and trade-executed/error notifications. push_notify
+**27** + options_svc handlers **45** green. Built subagent-by-subagent (TDD, two-stage
+spec+quality review). Branch `Using_Highcharts`. Design/plan:
+[design](docs/plans/2026-07-05-signal-push-notifications-design.md) /
+[plan](docs/plans/2026-07-05-signal-push-notifications-plan.md).
+
 ## Paths and ports: `repo_paths.py` + `config/ports.toml`
 
 `repo_paths.py` at the repo root is the single source of truth for cross-app
@@ -2420,6 +2463,7 @@ the app runs out-of-the-box; only the `*.example.*` templates are committed.
 | `shared/appsettings.json`      | `shared/appsettings.example.json`       | Schwab API keys     |
 | `shared/tokens.json`           | `shared/tokens.example.json`            | Schwab OAuth tokens |
 | `shared/sentiment_bridge.json` | `shared/sentiment_bridge.example.json`  | Sentiment bridge    |
+| `shared/notifications.json`    | `shared/notifications.example.json`     | Telegram/Discord/Fi-SMS push creds |
 
 `schwab-proxy/proxy_tokens.json` and `**/config_notifications.py` are also
 gitignored. **Never commit real keys, tokens, or account numbers.**
