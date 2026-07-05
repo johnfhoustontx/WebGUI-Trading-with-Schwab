@@ -210,19 +210,8 @@ def _intraday_figure(points, *, value_key, y_max, y_title, zones, scale=1.0):
     ``scale`` rescales the value (e.g. 0.1 shows the 0-100 trend on a 0-10 axis). The
     date lives in the tooltip header (datetime-crosshair-label epoch-ms gotcha)."""
     pts = points or []
-    # Build the series, inserting a NULL point wherever consecutive RTH points span
-    # more than the overnight gap — a null y-value breaks the line, so each trading
-    # day renders as its own segment with a gap from the prior day's close (the
-    # ordinal axis alone collapses the gap into a continuous line, and series.gapSize
-    # doesn't detect it once ordinal has compressed the time span).
-    data = []
-    prev_ms = None
-    for p in pts:
-        ms = int(_safe_float(p.get("ts"))) * 1000
-        if prev_ms is not None and (ms - prev_ms) > _INTRADAY_GAP_MS:
-            data.append([prev_ms + 1, None])   # break the line across the overnight gap
-        data.append([ms, _safe_float(p.get(value_key)) * scale])
-        prev_ms = ms
+    data = [[int(_safe_float(p.get("ts"))) * 1000,
+             _safe_float(p.get(value_key)) * scale] for p in pts]
     axis_label = {"style": {"color": "#bdbdbd"}}
     return {
         "chart": {"type": "line", "backgroundColor": "transparent",
@@ -234,6 +223,10 @@ def _intraday_figure(points, *, value_key, y_max, y_title, zones, scale=1.0):
         "credits": {"enabled": False},
         "accessibility": {"enabled": False},
         "legend": {"enabled": False},
+        # stockChart chrome off — we only want the compact ordinal plot.
+        "rangeSelector": {"enabled": False},
+        "navigator": {"enabled": False},
+        "scrollbar": {"enabled": False},
         "xAxis": {"type": "datetime", "ordinal": True,
                   "lineColor": "rgba(255,255,255,0.15)",
                   "gridLineColor": "rgba(255,255,255,0.06)", "labels": axis_label,
@@ -247,6 +240,11 @@ def _intraday_figure(points, *, value_key, y_max, y_title, zones, scale=1.0):
             "name": y_title, "type": "line", "data": data,
             "lineWidth": 2, "zoneAxis": "y", "zones": zones,
             "marker": {"enabled": False},
+            # Break the line wherever two consecutive RTH points are more than the
+            # overnight gap apart (prior-day close → next-day open). On the ordinal
+            # stock axis this both COLLAPSES the empty overnight (no dead space) and
+            # draws a gap between day segments — the Highstock weekend-gap mechanism.
+            "gapSize": _INTRADAY_GAP_MS, "gapUnit": "value",
         }],
     }
 
@@ -660,11 +658,16 @@ def render():
     with ui.expansion("Daily Sentiment & Trend", icon="show_chart",
                       value=False).classes("w-full") as daily_exp:
         ui.label("Daily Market Sentiment").classes("text-subtitle2 q-mt-sm")
+        # type="stockChart" (+ the stock module) is what makes xAxis.ordinal
+        # actually collapse the overnight gaps — on a plain ui.highchart the ordinal
+        # option is ignored, leaving dead space between trading days.
         sent_intraday_plot = ui.highchart(
-            build_sentiment_intraday_figure([])).classes("w-full")
+            build_sentiment_intraday_figure([]),
+            type="stockChart", extras=["stock"]).classes("w-full")
         ui.label("Daily Market Trend").classes("text-subtitle2 q-mt-md")
         trend_intraday_plot = ui.highchart(
-            build_trend_intraday_figure([])).classes("w-full")
+            build_trend_intraday_figure([]),
+            type="stockChart", extras=["stock"]).classes("w-full")
 
     # Reflow both charts when the expander opens (a chart built inside a collapsed
     # expander measures 0x0 — same fix as the Simulator's hidden tab panels). The

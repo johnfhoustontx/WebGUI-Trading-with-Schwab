@@ -204,22 +204,17 @@ def test_trend_intraday_figure_rescaled_to_0_10():
 
 
 def test_intraday_figures_break_line_across_overnight_gap():
-    # A gap larger than the overnight threshold between consecutive points inserts a
-    # NULL point so the line breaks (prior-day close → next-day open shows as a gap),
-    # keeping RTH-only sessions as separate segments. (ts is seconds; threshold ms.)
-    gap_s = S._INTRADAY_GAP_MS // 1000 + 60
-    pts = [{"ts": 1000, "sentiment": 5.0, "trend": 50.0},
-           {"ts": 1000 + gap_s, "sentiment": 6.0, "trend": 60.0}]
-    for fig in (S.build_sentiment_intraday_figure(pts),
-                S.build_trend_intraday_figure(pts)):
-        data = fig["series"][0]["data"]
-        assert len(data) == 3 and any(pt[1] is None for pt in data)  # 2 real + 1 null
-
-    # No break when points are within the same session (small gap).
-    close = [{"ts": 1000, "sentiment": 5.0, "trend": 50.0},
-             {"ts": 1120, "sentiment": 6.0, "trend": 60.0}]
-    d = S.build_sentiment_intraday_figure(close)["series"][0]["data"]
-    assert len(d) == 2 and all(pt[1] is not None for pt in d)
+    # The line is broken across the overnight gap via the Highstock ``gapSize`` /
+    # ``gapUnit`` mechanism (not manual null points) — on the ordinal stock axis this
+    # collapses the empty overnight AND draws a gap between day segments. gapSize is
+    # the overnight threshold, in value (ms) units.
+    for fig in (S.build_sentiment_intraday_figure(_PTS),
+                S.build_trend_intraday_figure(_PTS)):
+        series = fig["series"][0]
+        assert series["gapSize"] == S._INTRADAY_GAP_MS
+        assert series["gapUnit"] == "value"
+        # Data carries only the real points (no synthetic null breaks).
+        assert all(pt[1] is not None for pt in series["data"])
 
 
 def test_intraday_figures_empty_points_are_valid():
