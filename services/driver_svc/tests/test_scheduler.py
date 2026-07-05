@@ -1,10 +1,11 @@
 """Tests for the driver service scheduler gate (Task #29c).
 
 ``morning_due`` fires the morning pipeline at most once per trading day, on or
-after 09:28 ET (mirroring ``config.AGENT_RUN_HOUR/MIN``), on weekdays only. The
-holiday check is delegated to ``compute.run_morning`` (defensive), so the gate
-itself only needs weekday + time + once-per-day dedup. The ``loop`` is not
-unit-tested (it owns its own sleep cadence, like the other services' loops).
+after 09:28 ET (mirroring ``config.AGENT_RUN_HOUR/MIN``), on weekdays that are not
+NYSE market holidays (``compute.run_morning`` ALSO returns a no_trade payload on a
+holiday, as defence-in-depth). The gate needs trading-day + time + once-per-day
+dedup. The ``loop`` is not unit-tested (it owns its own sleep cadence, like the
+other services' loops).
 """
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -55,6 +56,16 @@ def test_not_due_on_weekend():
     sat, _ = scheduler.morning_due(_et(2026, 6, 20, 10, 0), None)
     sun, _ = scheduler.morning_due(_et(2026, 6, 21, 10, 0), None)
     assert sat is False and sun is False
+
+
+def test_not_due_on_market_holiday():
+    # 2026-07-03 (Fri) is the observed Independence Day holiday — the gate must NOT
+    # fire (defence beyond compute.run_morning's no_trade), passing last_run_date
+    # through unchanged; the adjacent trading day (Thu 07-02) at the same time fires.
+    assert _et(2026, 7, 3, 10, 0).date() in scheduler._HOLIDAYS
+    due, day = scheduler.morning_due(_et(2026, 7, 3, 10, 0), None)
+    assert due is False and day is None
+    assert scheduler.morning_due(_et(2026, 7, 2, 10, 0), None)[0] is True
 
 
 def test_run_time_matches_config():
