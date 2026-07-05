@@ -980,3 +980,23 @@ def test_handle_command_sim_replay(monkeypatch):
     assert seen["lookback"] == "5m_3d"
     assert seen["legs"] is None
     assert msg is not None and msg.get("version") == env.version
+
+
+# ── Task 8/9: server-side push notifications on new scanner/captured signals ──
+
+def test_rescan_calls_notify(monkeypatch):
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "run_scan", lambda: {
+        "signals_0dte": [{"symbol": "SPY", "type": "PCS", "short_strike": 500,
+                          "long_strike": 495, "expiration": "2026-07-10",
+                          "composite_score": 80}],
+        "signals_swing": [], "errors": [], "warnings": []})
+    seen = {}
+    monkeypatch.setattr(handlers.push_notify, "notify_signals",
+                        lambda bus, sigs, **kw: seen.update(n=len(sigs),
+                                                            kind=kw["kind"],
+                                                            key=kw["seen_key"]))
+    handlers.rescan(bus)
+    assert seen["n"] == 1
+    assert seen["kind"] == "scanner"
+    assert seen["key"] == handlers.CACHE_NOTIFIED_SCAN

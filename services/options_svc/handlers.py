@@ -17,6 +17,7 @@ import datetime as _dt
 import logging
 
 from services.options_svc import compute
+from services.options_svc import push_notify
 from shared.contracts.options import ScanResult
 
 log = logging.getLogger(__name__)
@@ -132,6 +133,11 @@ EVENT_CAPTURED = "events:options:captured"
 CACHE_CAPTURED_FLAGS = "cache:options:captured_flags"
 EVENT_CAPTURED_FLAGS = "events:options:captured_flags"
 
+# Date-scoped seen-sets for server-side phone push (Telegram/Discord/Fi-SMS).
+# See services/options_svc/push_notify.py.
+CACHE_NOTIFIED_SCAN = "cache:options:notified_scan"
+CACHE_NOTIFIED_CAPTURED = "cache:options:notified_captured"
+
 CACHE_GAMMA = "cache:options:gamma"
 EVENT_GAMMA = "events:options:gamma"
 
@@ -239,6 +245,17 @@ def rescan(bus) -> None:
     # One cache view holds the whole result (both signal lists + metadata).
     version = bus.cache_set(CACHE_SCAN, scan.model_dump())
     bus.publish(EVENT_SCAN, {"version": version})
+
+    # Server-side phone push on genuinely-new signals (Telegram/Discord/Fi-SMS).
+    # Best-effort; must never break the scan/publish path. First run after start
+    # seeds silently so a restart mid-session doesn't blast every open signal.
+    try:
+        all_sigs = (scan.signals_0dte or []) + (scan.signals_swing or [])
+        seed = push_notify.load_seen(bus, CACHE_NOTIFIED_SCAN) is None
+        push_notify.notify_signals(bus, all_sigs, kind="scanner",
+                                   seen_key=CACHE_NOTIFIED_SCAN, seed=seed)
+    except Exception:  # noqa: BLE001
+        log.exception("scanner push-notify failed (non-fatal)")
 
 
 def refresh_header(bus) -> None:
