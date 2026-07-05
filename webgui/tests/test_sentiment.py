@@ -192,13 +192,34 @@ def test_sentiment_intraday_figure_has_value_zones():
     assert "color" in zones[-1]
 
 
-def test_trend_intraday_figure_value_zones_and_axis():
+def test_trend_intraday_figure_rescaled_to_0_10():
+    # Trend is stored 0-100 but shown on a 0-10 scale (like sentiment): value ×0.1,
+    # y-axis max 10, and zone boundaries at 3/7 (the 30/70 trend-state cuts /10).
     fig = S.build_trend_intraday_figure(_PTS)
     data = fig["series"][0]["data"]
-    assert data[2] == [1240 * 1000, 85.0]
+    assert data[2] == [1240 * 1000, 8.5]          # 85.0 → 8.5
     zones = fig["series"][0]["zones"]
-    assert zones[0]["value"] == 30 and zones[1]["value"] == 70
-    assert fig["yAxis"]["min"] == 0 and fig["yAxis"]["max"] == 100
+    assert zones[0]["value"] == 3 and zones[1]["value"] == 7
+    assert fig["yAxis"]["min"] == 0 and fig["yAxis"]["max"] == 10
+
+
+def test_intraday_figures_break_line_across_overnight_gap():
+    # A gap larger than the overnight threshold between consecutive points inserts a
+    # NULL point so the line breaks (prior-day close → next-day open shows as a gap),
+    # keeping RTH-only sessions as separate segments. (ts is seconds; threshold ms.)
+    gap_s = S._INTRADAY_GAP_MS // 1000 + 60
+    pts = [{"ts": 1000, "sentiment": 5.0, "trend": 50.0},
+           {"ts": 1000 + gap_s, "sentiment": 6.0, "trend": 60.0}]
+    for fig in (S.build_sentiment_intraday_figure(pts),
+                S.build_trend_intraday_figure(pts)):
+        data = fig["series"][0]["data"]
+        assert len(data) == 3 and any(pt[1] is None for pt in data)  # 2 real + 1 null
+
+    # No break when points are within the same session (small gap).
+    close = [{"ts": 1000, "sentiment": 5.0, "trend": 50.0},
+             {"ts": 1120, "sentiment": 6.0, "trend": 60.0}]
+    d = S.build_sentiment_intraday_figure(close)["series"][0]["data"]
+    assert len(d) == 2 and all(pt[1] is not None for pt in d)
 
 
 def test_intraday_figures_empty_points_are_valid():

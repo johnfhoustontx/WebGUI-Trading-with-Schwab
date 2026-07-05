@@ -194,12 +194,35 @@ def sentiment_30d_avg(snaps):
     return round(sum(scores) / len(scores), 2) if scores else 0.0
 
 
-def _intraday_figure(points, *, value_key, y_max, y_title, zones):
+# Break the intraday line where consecutive RTH points are more than this far
+# apart (ms) — i.e. across the overnight gap from the prior day's ~15:00 CT close
+# to the next day's ~08:30 CT open. 4h is safely above any intra-session recording
+# gap and well below the ~17.5h overnight, so each trading day renders as its own
+# segment with a gap between days, while the ordinal x-axis keeps RTH compact.
+_INTRADAY_GAP_MS = 4 * 60 * 60 * 1000
+
+
+def _intraday_figure(points, *, value_key, y_max, y_title, zones, scale=1.0):
     """Shared Highcharts options for a 2-min intraday value series, colorized by
-    value via series.zones. Ordinal x-axis collapses overnight session gaps; the
+    value via series.zones. RTH-only data (the service records only 08:30–15:00 CT);
+    the ordinal x-axis keeps sessions compact while ``series.gapSize`` BREAKS the line
+    across the overnight gap so the prior-day-close→next-day-open gap shows as a gap.
+    ``scale`` rescales the value (e.g. 0.1 shows the 0-100 trend on a 0-10 axis). The
     date lives in the tooltip header (datetime-crosshair-label epoch-ms gotcha)."""
     pts = points or []
-    data = [[int(_safe_float(p.get("ts"))) * 1000, _safe_float(p.get(value_key))] for p in pts]
+    # Build the series, inserting a NULL point wherever consecutive RTH points span
+    # more than the overnight gap — a null y-value breaks the line, so each trading
+    # day renders as its own segment with a gap from the prior day's close (the
+    # ordinal axis alone collapses the gap into a continuous line, and series.gapSize
+    # doesn't detect it once ordinal has compressed the time span).
+    data = []
+    prev_ms = None
+    for p in pts:
+        ms = int(_safe_float(p.get("ts"))) * 1000
+        if prev_ms is not None and (ms - prev_ms) > _INTRADAY_GAP_MS:
+            data.append([prev_ms + 1, None])   # break the line across the overnight gap
+        data.append([ms, _safe_float(p.get(value_key)) * scale])
+        prev_ms = ms
     axis_label = {"style": {"color": "#bdbdbd"}}
     return {
         "chart": {"type": "line", "backgroundColor": "transparent",
@@ -238,12 +261,14 @@ def build_sentiment_intraday_figure(points):
 
 
 def build_trend_intraday_figure(points):
-    """Daily Market Trend (0-100), colorized by the 30/70 range boundaries."""
-    zones = [{"value": 30, "color": CLR_RED},
-             {"value": 70, "color": CLR_YELLOW},
+    """Daily Market Trend on a 0-10 scale (same as sentiment) — the stored 0-100
+    trend is rescaled ×0.1; colorized by the 3/7 range boundaries (the 30/70
+    trend-state cuts on the 0-10 scale)."""
+    zones = [{"value": 3, "color": CLR_RED},
+             {"value": 7, "color": CLR_YELLOW},
              {"color": CLR_GREEN}]
-    return _intraday_figure(points, value_key="trend", y_max=100,
-                            y_title="Trend", zones=zones)
+    return _intraday_figure(points, value_key="trend", y_max=10,
+                            y_title="Trend", zones=zones, scale=0.1)
 
 
 def pct_color(pct):
