@@ -442,6 +442,21 @@ def refresh_captured(bus) -> None:
     data = compute.captured_view()
     version = bus.cache_set(CACHE_CAPTURED, data)
     bus.publish(EVENT_CAPTURED, {"version": version})
+    _notify_captured(bus, (data or {}).get("signals"))
+
+
+def _notify_captured(bus, signals) -> None:
+    """Best-effort server-side phone push on new captured signals.
+
+    Shared by ``refresh_captured`` and the ``captured_reprice`` command path so the
+    notify logic is DRY. Never fatal — a notify failure must not stop the publish.
+    First run after start seeds silently (see ``push_notify.notify_signals``)."""
+    try:
+        seed = push_notify.load_seen(bus, CACHE_NOTIFIED_CAPTURED) is None
+        push_notify.notify_signals(bus, signals or [], kind="captured",
+                                   seen_key=CACHE_NOTIFIED_CAPTURED, seed=seed)
+    except Exception:  # noqa: BLE001
+        log.exception("captured push-notify failed (non-fatal)")
 
 
 def remove_closed_from_captured(bus, signal_id) -> None:
@@ -790,6 +805,7 @@ def handle_command(bus, command) -> None:
         bus.publish(EVENT_CAPTURED, {"version": ver})
         fver = bus.cache_set(CACHE_CAPTURED_FLAGS, {"flags": res["flags"]})
         bus.publish(EVENT_CAPTURED_FLAGS, {"version": fver})
+        _notify_captured(bus, res.get("signals"))
     elif command.type == "captured_close":
         sid = command.args.get("signal_id")
         compute.close_captured(sid,

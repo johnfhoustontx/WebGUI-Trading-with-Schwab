@@ -1000,3 +1000,32 @@ def test_rescan_calls_notify(monkeypatch):
     assert seen["n"] == 1
     assert seen["kind"] == "scanner"
     assert seen["key"] == handlers.CACHE_NOTIFIED_SCAN
+
+
+def test_refresh_captured_calls_notify(monkeypatch):
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "captured_view", lambda: {"signals": [
+        {"signal_id": "s1", "symbol": "SPY", "type": "PCS"}]})
+    got = {}
+    monkeypatch.setattr(handlers.push_notify, "notify_signals",
+                        lambda bus, sigs, **kw: got.update(n=len(sigs),
+                                                           kind=kw["kind"],
+                                                           key=kw["seen_key"]))
+    handlers.refresh_captured(bus)
+    assert got["n"] == 1 and got["kind"] == "captured"
+    assert got["key"] == handlers.CACHE_NOTIFIED_CAPTURED
+
+
+def test_captured_reprice_calls_notify(monkeypatch):
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "reprice_captured",
+                        lambda: {"signals": [{"signal_id": "X1", "symbol": "SPY"}],
+                                 "flags": []})
+    got = {}
+    monkeypatch.setattr(handlers.push_notify, "notify_signals",
+                        lambda bus, sigs, **kw: got.update(n=len(sigs),
+                                                           kind=kw["kind"],
+                                                           key=kw["seen_key"]))
+    handlers.handle_command(bus, Command(type="captured_reprice"))
+    assert got["n"] == 1 and got["kind"] == "captured"
+    assert got["key"] == handlers.CACHE_NOTIFIED_CAPTURED
