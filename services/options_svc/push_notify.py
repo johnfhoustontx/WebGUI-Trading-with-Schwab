@@ -70,3 +70,23 @@ def load_config() -> dict:
     if os.environ.get("NOTIFY_ENABLED"):
         cfg["enabled"] = os.environ["NOTIFY_ENABLED"].lower() not in ("0", "false", "no")
     return cfg
+
+
+def signal_key(s: dict) -> str:
+    """Stable identity for a scanner signal (symbol/type/strikes/expiration).
+
+    Mirrors the fields signal_db dedups on. IC folds in the call legs so a
+    different call wing is a distinct signal.
+    """
+    parts = [str(s.get("symbol", "")), str(s.get("type", "")),
+             str(s.get("short_strike", "")), str(s.get("long_strike", "")),
+             str(s.get("expiration", ""))]
+    if str(s.get("type", "")).upper() == "IC":
+        parts += [str(s.get("call_short", "")), str(s.get("call_long", ""))]
+    return "|".join(parts)
+
+
+def captured_key(s: dict) -> str:
+    """Identity for a captured signal — its signal_id when present, else signal_key."""
+    sid = s.get("signal_id")
+    return str(sid) if sid not in (None, "") else signal_key(s)
