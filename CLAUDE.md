@@ -36,7 +36,18 @@ intentional variants are PRESERVED, not merged** (trade verdict darks, simulator
 expected_move `UP_COLOR` teal + leg tints, gamma chart chrome, rescue `HEAT_ORANGE`, driver grades,
 portfolio status) and Highcharts option dicts + `ui.html` fragments (e.g. calculator heatmap) stay
 out of scope per the Tailwind-first rule. All conversions byte-identical (no rendered color changed).
-See [design/plan](docs/plans/2026-07-03-config-consolidation.md). Prior — 2026-07-02 (**Driver risk-sizing fix (RISK_TOO_HIGH) + Sonnet 5 + prompt
+**Also this session (4 further hard-coded-config remediations on the same branch):** **(a)** the
+`claude-driver/config.py` `TRADE_LOG`/`PENDING_TRADE`/`LOG_DIR` paths now resolve via
+`repo_paths.CLAUDE_DRIVER` (was `os.path.join(BASE_DIR, …)` — the last `D:\`-rule path violation);
+**(b)** `claude-driver/test_preflight.py` imports its service URLs from `repo_paths`
+(`PROXY_URL`/`ANALYTICS_URL`/`ML_SERVER_URLS`) instead of hard-coded `127.0.0.1:81xx/80xx` literals;
+**(c)** a **single `RISK_FREE_RATE` source** — `gamma_tool.py` (5 sites, byte-identical 0.045) and
+`backtest_0dte.py` now import `options_calculator.RISK_FREE_RATE`; the backtest was the last divergence
+(**0.04 → 0.045**, a deliberate alignment that shifts that OFFLINE script's output); **(d)** the Gamma
+Analyze model gained a **`GAMMA_ANALYZE_MODEL`** override chain (env → gitignored
+`shared/analyze_model.txt` → default `claude-sonnet-5`), mirroring the driver's `DRIVER_MODEL` — so the
+analyze model is tunable per-deployment without a code change. See
+[design/plan](docs/plans/2026-07-03-config-consolidation.md). Prior — 2026-07-02 (**Driver risk-sizing fix (RISK_TOO_HIGH) + Sonnet 5 + prompt
 caching** — a debugging session on "driver trades logged **Executed** but never showed up."
 Root cause: the `/driver` decision-log "Executed N: SYM×q" line is only the **enqueue** of a
 `driver_paper_create` command; the real open in `options_svc.compute.open_driver_position` was
