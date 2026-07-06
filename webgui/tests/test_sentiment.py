@@ -177,11 +177,15 @@ _PTS = [{"ts": 1000, "sentiment": 3.0, "trend": 20.0},
         {"ts": 1240, "sentiment": 8.0, "trend": 85.0}]
 
 
-def test_sentiment_intraday_figure_maps_points_to_ms():
+def test_sentiment_intraday_figure_uses_sequential_index_slots():
+    # Points map to sequential integer slots (a synthetic category axis packs the
+    # trading days contiguously — no overnight dead space). Each point carries its
+    # value in ``y`` and its CT date+time in ``name`` (for the tooltip).
     fig = S.build_sentiment_intraday_figure(_PTS)
     data = fig["series"][0]["data"]
-    assert data[0] == [1000 * 1000, 3.0]
     assert len(data) == 3
+    assert data[0]["x"] == 0 and data[0]["y"] == 3.0 and "name" in data[0]
+    assert [d["x"] for d in data] == [0, 1, 2]           # contiguous slots
 
 
 def test_sentiment_intraday_figure_has_value_zones():
@@ -197,35 +201,41 @@ def test_trend_intraday_figure_rescaled_to_0_10():
     # y-axis max 10, and zone boundaries at 3/7 (the 30/70 trend-state cuts /10).
     fig = S.build_trend_intraday_figure(_PTS)
     data = fig["series"][0]["data"]
-    assert data[2] == [1240 * 1000, 8.5]          # 85.0 → 8.5
+    assert data[2]["y"] == 8.5                     # 85.0 → 8.5
     zones = fig["series"][0]["zones"]
     assert zones[0]["value"] == 3 and zones[1]["value"] == 7
     assert fig["yAxis"]["min"] == 0 and fig["yAxis"]["max"] == 10
 
 
 def test_intraday_figures_break_line_across_overnight_gap():
-    # A gap larger than the overnight threshold between consecutive points inserts a
-    # NULL point so the line breaks (prior-day close → next-day open shows as a gap),
-    # keeping RTH-only sessions as separate segments. Rendered on a PLAIN datetime
-    # chart (NOT a stockChart, whose chart.update() throws and freezes an open page),
-    # so the overnight simply shows as a gap. (ts is seconds; threshold ms.)
-    gap_s = S._INTRADAY_GAP_MS // 1000 + 60
-    pts = [{"ts": 1000, "sentiment": 5.0, "trend": 50.0},
-           {"ts": 1000 + gap_s, "sentiment": 6.0, "trend": 60.0}]
+    # Two RTH points on consecutive CT days (overnight gap > threshold): a NULL slot
+    # is inserted (so the line breaks — each trading day is its own segment) but the
+    # days stay CONTIGUOUS on the index axis (no dead space). Two days → two labeled
+    # tick positions.
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    CT = ZoneInfo("America/Chicago")
+    ts1 = int(datetime(2025, 1, 1, 14, 0, tzinfo=CT).timestamp())   # 14:00 CT day 1
+    ts2 = int(datetime(2025, 1, 2, 8, 30, tzinfo=CT).timestamp())   # 08:30 CT day 2
+    pts = [{"ts": ts1, "sentiment": 5.0, "trend": 50.0},
+           {"ts": ts2, "sentiment": 6.0, "trend": 60.0}]
     for fig in (S.build_sentiment_intraday_figure(pts),
                 S.build_trend_intraday_figure(pts)):
-        # plain datetime axis — no ordinal / breaks (both would break live updates or
-        # labels); the null is what separates the day segments.
-        assert fig["xAxis"]["type"] == "datetime"
-        assert "breaks" not in fig["xAxis"] and "ordinal" not in fig["xAxis"]
         data = fig["series"][0]["data"]
-        assert len(data) == 3 and any(pt[1] is None for pt in data)  # 2 real + 1 null
+        # 2 real points + 1 null slot between them, all on contiguous integer slots.
+        assert len(data) == 3
+        assert any(d.get("y") is None for d in data)
+        assert [d["x"] for d in data] == [0, 1, 2]
+        assert len(fig["xAxis"]["tickPositions"]) == 2   # one labeled tick per day
+        # No datetime axis / stock-only keys (those froze updates or dropped labels).
+        assert "type" not in fig["xAxis"] and "breaks" not in fig["xAxis"]
+        assert "time" not in fig
 
-    # No break when points are within the same session (small gap).
-    close = [{"ts": 1000, "sentiment": 5.0, "trend": 50.0},
-             {"ts": 1120, "sentiment": 6.0, "trend": 60.0}]
+    # No break when points are within the same session (small gap) → no null slot.
+    close = [{"ts": ts1, "sentiment": 5.0, "trend": 50.0},
+             {"ts": ts1 + 120, "sentiment": 6.0, "trend": 60.0}]
     d = S.build_sentiment_intraday_figure(close)["series"][0]["data"]
-    assert len(d) == 2 and all(pt[1] is not None for pt in d)
+    assert len(d) == 2 and all(pt.get("y") is not None for pt in d)
 
 
 def test_intraday_figures_empty_points_are_valid():
@@ -234,8 +244,14 @@ def test_intraday_figures_empty_points_are_valid():
 
 
 def test_intraday_figures_render_in_central_time():
-    # Highcharts renders datetime axes in UTC by default; the recorded ts are UTC
-    # epoch, so the axis/tooltip must be told to display Central Time.
-    for fig in (S.build_sentiment_intraday_figure(_PTS),
-                S.build_trend_intraday_figure(_PTS)):
-        assert fig["time"]["timezone"] == "America/Chicago"
+    # The recorded ts are UTC epoch; the per-point tooltip name (and the day-boundary
+    # tick labels) must format in Central Time, not UTC. A ts at 12:00 UTC is 06:00
+    # (CST) / 07:00 (CDT) CT — so the name's time is NOT "12:00".
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    ts = 1_735_732_800  # 2025-01-01 12:00:00 UTC
+    ct = datetime.fromtimestamp(ts, ZoneInfo("America/Chicago"))
+    fig = S.build_sentiment_intraday_figure([{"ts": ts, "sentiment": 5.0, "trend": 50.0}])
+    name = fig["series"][0]["data"][0]["name"]
+    assert f"{ct:%H:%M}" in name          # CT time-of-day
+    assert "12:00" not in name            # NOT the UTC time-of-day

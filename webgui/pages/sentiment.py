@@ -21,10 +21,15 @@ widgets, a Refresh button that enqueues a ``cmd:sentiment`` command, and a
 fetch-free version-poll ``ui.timer`` that repaints when the bus cache version
 changes.
 """
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 import bus_client
 from pages.gauge import gauge_figure  # noqa: F401  (re-export; used by render)
 from pages.options.theme import BTN_3D, TILE_3D
 from pages.ui_guard import guard
+
+_CT = ZoneInfo("America/Chicago")  # trading session clock for the intraday graphs
 
 CLR_GREEN = "#66bb6a"
 CLR_RED = "#ef5350"
@@ -204,51 +209,66 @@ _INTRADAY_GAP_MS = 4 * 60 * 60 * 1000
 
 def _intraday_figure(points, *, value_key, y_max, y_title, zones, scale=1.0):
     """Shared Highcharts options for a 2-min intraday value series, colorized by
-    value via series.zones. RTH-only data (the service records only 08:30–15:00 CT);
-    a NULL point breaks the line across the overnight gap so each trading day renders
-    as its own segment with a gap from the prior day's close. ``scale`` rescales the
-    value (e.g. 0.1 shows the 0-100 trend on a 0-10 axis). The date lives in the
-    tooltip header (datetime-crosshair-label epoch-ms gotcha).
+    value via series.zones. RTH-only data (the service records only 08:30–15:00 CT).
+    ``scale`` rescales the value (e.g. 0.1 shows the 0-100 trend on a 0-10 axis).
 
-    Deliberately a PLAIN chart (datetime axis) — NOT a Highstock stockChart. A
-    stockChart's ordinal axis would collapse the overnight dead space, but Highstock's
-    ``chart.update(fullOptions)`` throws (``Cannot read properties of undefined
-    (reading 'enabled')`` in the stock module) on every in-place update, so an
-    already-open page freezes at the data it first rendered and never draws the
-    current day. broken-axis (``xAxis.breaks``) collapses the gap but generates zero
-    ticks (no axis labels). So a plain datetime axis is used — it updates reliably and
-    labels correctly; the overnight simply shows as a gap."""
+    Renders on a **synthetic integer-index (category) x-axis**, NOT a datetime axis:
+    each RTH point gets the next sequential slot, so trading days pack CONTIGUOUSLY
+    with only a 1-slot gap between them — no overnight/weekend dead space. A date
+    label sits at each day boundary (``tickPositions`` + a category per slot), and the
+    real Central-Time date+time lives in each point's ``name`` (shown in the tooltip).
+    A NULL slot between days breaks the line into per-day segments.
+
+    Why not the obvious approaches: a Highstock stockChart's ordinal axis collapses
+    the dead space natively but its ``chart.update()`` throws in the stock module,
+    FREEZING in-place updates (an open page never draws the current day); broken-axis
+    (``xAxis.breaks``) collapses the gap but renders zero ticks (no labels). A plain
+    category axis updates reliably AND has no dead space."""
     pts = points or []
-    # Insert a NULL point wherever consecutive RTH points span more than the overnight
-    # gap — a null y-value breaks the line, so each trading day is its own segment.
-    data = []
+    # Build the series + the per-slot category labels together. Every slot (real point
+    # OR the null gap between days) advances the index by 1, so days are contiguous.
+    data, categories, tick_positions = [], [], []
+    idx = 0
     prev_ms = None
+    prev_date = None
     for p in pts:
         ms = int(_safe_float(p.get("ts"))) * 1000
+        ct = datetime.fromtimestamp(ms / 1000, _CT)
+        day = ct.date()
         if prev_ms is not None and (ms - prev_ms) > _INTRADAY_GAP_MS:
-            data.append([prev_ms + 1, None])   # break the line across the overnight gap
-        data.append([ms, _safe_float(p.get(value_key)) * scale])
+            # A null slot breaks the line + leaves a small gap between day segments.
+            data.append({"x": idx, "y": None})
+            categories.append("")
+            idx += 1
+        if day != prev_date:                       # first slot of a new day → labeled tick
+            tick_positions.append(idx)
+            categories.append(f"{ct:%b} {ct.day}")   # e.g. "Jul 6"
+            prev_date = day
+        else:
+            categories.append("")
+        data.append({"x": idx, "y": _safe_float(p.get(value_key)) * scale,
+                     "name": f"{ct:%b} {ct.day}, {ct:%H:%M}"})   # tooltip date+time (CT)
+        idx += 1
         prev_ms = ms
     axis_label = {"style": {"color": "#bdbdbd"}}
     return {
         "chart": {"type": "line", "backgroundColor": "transparent",
                   "height": 200, "spacing": [8, 12, 8, 0]},
-        # Recorded ts are UTC epoch; Highcharts datetime axes default to UTC, so
-        # render the axis + tooltip in Central Time (the trading session's clock).
-        "time": {"timezone": "America/Chicago"},
         "title": {"text": None},
         "credits": {"enabled": False},
         "accessibility": {"enabled": False},
         "legend": {"enabled": False},
-        "xAxis": {"type": "datetime",
+        # Category axis: contiguous slots (no dead space); ticks/labels only at the
+        # day boundaries. Date+time per point is carried in point.name (tooltip).
+        "xAxis": {"categories": categories, "tickPositions": tick_positions,
                   "lineColor": "rgba(255,255,255,0.15)",
                   "gridLineColor": "rgba(255,255,255,0.06)", "labels": axis_label,
                   "crosshair": {"label": {"enabled": False}}},
         "yAxis": {"min": 0, "max": y_max,
                   "title": {"text": y_title, "style": {"color": "#bdbdbd"}},
                   "gridLineColor": "rgba(255,255,255,0.06)", "labels": axis_label},
-        "tooltip": {"xDateFormat": "%b %e, %H:%M",
-                    "pointFormat": y_title + ": <b>{point.y:.2f}</b>"},
+        "tooltip": {"headerFormat": "",
+                    "pointFormat": "{point.name}<br>" + y_title + ": <b>{point.y:.2f}</b>"},
         "series": [{
             "name": y_title, "type": "line", "data": data,
             "lineWidth": 2, "zoneAxis": "y", "zones": zones,
