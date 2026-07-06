@@ -27,6 +27,7 @@ import subprocess
 import requests
 from nicegui import run, ui
 
+import alerts
 import bus_client
 import proxy
 from pages.options.theme import BTN_3D
@@ -189,7 +190,10 @@ def freshness_row(label, view, version, ts, now, scheduled):
         "view": f"cache:{view}",
         "version": version if present else "—",
         "age": age_text(ts, now) if present else "no data yet",
-        "stale": present and is_stale(ts, now, scheduled),
+        # Per-view threshold (alerts.stale_after) so a slow-cadence view like the
+        # 15-min options:scan isn't flagged stale between its scans — matches the
+        # app-wide toast watcher (main.py) so both surfaces agree.
+        "stale": present and is_stale(ts, now, scheduled, alerts.stale_after(view)),
         "present": present,
     }
 

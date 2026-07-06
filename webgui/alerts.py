@@ -91,6 +91,20 @@ def should_alert(settings, qualifying, now):
 # _STALE_AFTER_SEC). Kept local so alerts.py stays a pure, NiceGUI-free module.
 STALE_AFTER_SEC = 600
 
+# Per-view staleness overrides (seconds). A view is only "stale" if the owning
+# service has plausibly MISSED a scheduled publish, so the threshold must exceed
+# that view's publish cadence + a grace. ``options:scan`` autoscans once per 15-min
+# slot (options_svc scheduler ``autoscan_due``), so the default 600 s falsely flags
+# it as stale for ~5 min every cycle — 20 min gives a full cycle + grace while still
+# catching a genuinely wedged/dead scanner. Add an entry here for any view whose real
+# publish cadence exceeds STALE_AFTER_SEC.
+STALE_OVERRIDES = {"options:scan": 20 * 60}
+
+
+def stale_after(view):
+    """Staleness threshold (seconds) for ``view`` — a per-view override or the default."""
+    return STALE_OVERRIDES.get(view, STALE_AFTER_SEC)
+
 
 def unhealthy_keys(freshness, health):
     """Set of stable keys for everything currently STALE or DOWN.

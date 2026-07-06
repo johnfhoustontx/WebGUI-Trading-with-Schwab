@@ -346,7 +346,7 @@ def _freshness_facts(now_utc) -> dict:
     for view in _HEALTH_VIEWS:
         try:
             _ver, ts = bus_client.read_meta(view)
-            facts[view] = _is_view_stale(ts, now_utc)
+            facts[view] = _is_view_stale(ts, now_utc, view)
         except Exception:  # noqa: BLE001
             # A read failure is a bus problem, handled by the tick guard — don't
             # flag the view stale off a transient read error.
@@ -354,9 +354,11 @@ def _freshness_facts(now_utc) -> dict:
     return facts
 
 
-def _is_view_stale(ts, now_utc) -> bool:
+def _is_view_stale(ts, now_utc, view=None) -> bool:
     """Mirror of status.py:is_stale for a scheduled view (no import to avoid pulling
-    the page module + requests at webgui module load). A missing ts => stale."""
+    the page module + requests at webgui module load). A missing ts => stale. The
+    threshold is per-view (alerts.stale_after) so a slow-cadence view like the 15-min
+    ``options:scan`` isn't falsely flagged between its scans."""
     if not ts:
         return True
     try:
@@ -365,7 +367,7 @@ def _is_view_stale(ts, now_utc) -> bool:
         return True
     if when.tzinfo is None:
         when = when.replace(tzinfo=_dt.timezone.utc)
-    return (now_utc - when).total_seconds() > alerts.STALE_AFTER_SEC
+    return (now_utc - when).total_seconds() > alerts.stale_after(view)
 
 # proxy.health() is shown as a down-banner on EVERY page build. The call is a
 # blocking HTTP GET with a 3s timeout — without caching, every navigation paid it
