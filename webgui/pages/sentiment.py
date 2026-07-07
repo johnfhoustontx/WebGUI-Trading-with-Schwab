@@ -110,9 +110,16 @@ def _clamp(v, lo, hi):
     return max(lo, min(hi, v))
 
 
-# Short dial captions (the full label shows beneath the gauge).
-_TREND_SHORT = {"bull_trend": "BULL", "pullback_in_bull": "PULLBACK",
-                "range": "RANGE", "bear_rally": "BEAR RALLY", "bear_trend": "BEAR"}
+# Short dial captions (the full label shows beneath the gauge). Covers BOTH the
+# new five-state (direction x aggression) vocab published for the Today gauge AND
+# the old trend-band vocab the 30-day structural gauge still uses.
+_TREND_SHORT = {
+    # new five-state vocab (Today gauge)
+    "bullish": "Bull", "lack_of_bullishness": "Weak Bull", "neutral": "Neutral",
+    "lack_of_bearishness": "Resilient", "bearish": "Bear",
+    # old trend-band vocab (30-day structural gauge)
+    "bull_trend": "BULL", "pullback_in_bull": "PULLBACK",
+    "range": "RANGE", "bear_rally": "BEAR RALLY", "bear_trend": "BEAR"}
 
 # Market Trend sub-score display metadata (name + weight). Mirrors the service's
 # TREND_WEIGHTS — kept local so the page imports no engine (3-tier rule).
@@ -158,13 +165,28 @@ def bias_text_class(bias):
     return _HEX_TO_TXT[bias_color(bias)]
 
 
+# State -> text-color class, covering BOTH the new five-state vocab (Today gauge)
+# and the old trend-band vocab (30-day structural gauge). Unlisted -> amber.
+_TREND_STATE_CLASS = {
+    # new five-state vocab
+    "bullish": TXT_G, "lack_of_bearishness": TXT_G,
+    "bearish": TXT_R,
+    "lack_of_bullishness": TXT_Y, "neutral": TXT_Y,
+    # old trend-band vocab
+    "bull_trend": TXT_G, "pullback_in_bull": TXT_G,
+    "bear_rally": TXT_R, "bear_trend": TXT_R,
+    "range": TXT_Y}
+
+
 def trend_text_class(committed):
-    """Tailwind text class for a committed trend state (mirrors _apply's mapping)."""
-    if committed in {"bull_trend", "pullback_in_bull"}:
-        return TXT_G
-    if committed in {"bear_rally", "bear_trend"}:
-        return TXT_R
-    return TXT_Y
+    """Tailwind text class for a committed trend state (both vocabularies)."""
+    return _TREND_STATE_CLASS.get(committed, TXT_Y)
+
+
+def market_state_evidence_rows(trend):
+    """Evidence strings explaining WHY the new five-state trend was chosen
+    (e.g. "direction 75/100", "aggression -0.37"). Defensive: [] when absent."""
+    return (trend or {}).get("evidence") or []
 
 
 def rotation_text_class(color):
@@ -829,6 +851,12 @@ def render():
                 for r in trend_subscore_rows(trend):
                     ui.label(f"{r['name']} ({r['weight']}): {r['score']}  "
                              f"conf {r['conf']}").classes("text-sm")
+                evidence = market_state_evidence_rows(trend)
+                if evidence:
+                    ui.separator().classes("q-my-xs")
+                    ui.label("Why").classes("text-bold text-sm")
+                    for line in evidence:
+                        ui.label(str(line)).classes("text-sm")
         else:
             trend_gauge_box.options = gauge_figure(50.0, "—")
             trend_gauge_box.update()

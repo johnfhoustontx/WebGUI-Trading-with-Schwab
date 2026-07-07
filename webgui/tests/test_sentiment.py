@@ -83,11 +83,36 @@ def test_sc_text_class():
 
 
 def test_trend_text_class():
+    # old-vocab (still used by the 30-day structural gauge)
     assert S.trend_text_class("bull_trend") == "text-[#66bb6a]"
     assert S.trend_text_class("pullback_in_bull") == "text-[#66bb6a]"
     assert S.trend_text_class("bear_trend") == "text-[#ef5350]"
     assert S.trend_text_class("bear_rally") == "text-[#ef5350]"
     assert S.trend_text_class("range") == "text-[#ffd54f]"
+    # new five-state vocab (direction x aggression) used by the Today gauge
+    assert S.trend_text_class("bullish") == "text-[#66bb6a]"
+    assert S.trend_text_class("lack_of_bearishness") == "text-[#66bb6a]"
+    assert S.trend_text_class("bearish") == "text-[#ef5350]"
+    assert S.trend_text_class("lack_of_bullishness") == "text-[#ffd54f]"
+    assert S.trend_text_class("neutral") == "text-[#ffd54f]"
+    assert S.trend_text_class("mystery") == "text-[#ffd54f]"  # unknown -> amber default
+
+
+def test_trend_short_covers_both_vocabularies():
+    for k in ("bullish", "lack_of_bullishness", "neutral",
+              "lack_of_bearishness", "bearish"):
+        assert k in S._TREND_SHORT
+    for k in ("bull_trend", "pullback_in_bull", "range",
+              "bear_rally", "bear_trend"):
+        assert k in S._TREND_SHORT
+
+
+def test_market_state_evidence_rows():
+    ev = ["direction 75/100", "aggression -0.37"]
+    assert S.market_state_evidence_rows({"evidence": ev}) == ev
+    assert S.market_state_evidence_rows({}) == []
+    assert S.market_state_evidence_rows(None) == []
+    assert S.market_state_evidence_rows({"evidence": None}) == []
 
 
 def test_rotation_text_class():
