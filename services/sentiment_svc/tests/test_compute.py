@@ -113,11 +113,31 @@ def test_bridge_trend_merges_intraday_over_daily(monkeypatch):
 
 
 def test_bridge_trend_falls_back_to_daily_when_no_intraday(monkeypatch):
-    daily = {"state": "range", "sma_50": 480.0, "confidence": 0.4}
+    """No intraday state (cold start): keep the daily dict's structural
+    back-compat fields, but the published ``state`` is OVERRIDDEN to the new-vocab
+    NEUTRAL — never the daily dict's OLD-vocab band (which regime_filter, rekeyed
+    to the five-state vocabulary, would fail-open on)."""
+    daily = {"state": "range", "sma_50": 480.0, "drawdown": -0.03,
+             "spy_close": 500.0, "confidence": 0.4}
     monkeypatch.setattr(compute, "build_trend_dict", lambda spy: dict(daily))
-    assert compute._bridge_trend(None, spy=[1.0]) == daily
-    # an intraday dict with no state also falls back
-    assert compute._bridge_trend({"confidence": 0.9}, spy=[1.0]) == daily
+
+    for intraday in (None, {"confidence": 0.9}):  # absent / present-but-no-state
+        out = compute._bridge_trend(intraday, spy=[1.0])
+        # published state is the RECOGNIZED new-vocab neutral, not old-vocab.
+        assert out["state"] == "neutral"
+        assert out["state"] not in {"range", "bull_trend", "pullback_in_bull",
+                                    "bear_rally", "bear_trend"}
+        assert out["label"] == "Neutral"
+        assert out["raw_state"] == "neutral"
+        assert out["confidence"] == 0.0
+        # structural back-compat fields still sourced from the daily dict.
+        assert out["sma_50"] == 480.0
+        assert out["drawdown"] == -0.03
+        assert out["spy_close"] == 500.0
+
+    # no daily dict at all -> None (nothing to publish, no old-vocab leak).
+    monkeypatch.setattr(compute, "build_trend_dict", lambda spy: None)
+    assert compute._bridge_trend(None, spy=[]) is None
 
 
 def test_derive_sector_summary_values():

@@ -817,12 +817,30 @@ def rotation_risk_threshold():
 def _bridge_trend(intraday, spy):
     """Bridge trend_regime dict: the intraday model's directional state/confidence
     + trend_score/sub_scores, merged onto the DAILY classify dict's structural
-    sma_*/drawdown/spy_close (kept for the additive-only bridge contract). Falls
-    back to the daily dict when no intraday trend is available, so the bridge
-    always carries a valid 5-state ``state`` for regime_filter."""
+    sma_*/drawdown/spy_close (kept for the additive-only bridge contract).
+
+    When no intraday trend is available yet (the cold-start window before the
+    first 15-min recompute after a restart), keep the daily dict's structural
+    back-compat fields but OVERRIDE the published ``state``/``label``/
+    ``description``/``raw_state`` to the new-vocab NEUTRAL — regime_filter is
+    rekeyed to the five-state vocabulary and would fail-open (run ungated) on the
+    daily dict's OLD-vocab ``state``. So the bridge ALWAYS carries a recognized
+    new-vocab ``state`` (cold start -> neutral, the conservative default)."""
     daily = build_trend_dict(spy) or {}
     if not intraday or not intraday.get("state"):
-        return daily or None
+        if not daily:
+            return None
+        neutral = dict(daily)
+        neutral.update({
+            "state": "neutral",
+            "label": market_state.STATE_LABELS["neutral"],
+            "description": market_state.STATE_DESCRIPTIONS["neutral"],
+            "raw_state": "neutral",
+            "confidence": 0.0,
+            "trend_score": 50.0,
+            "sub_scores": {},
+        })
+        return neutral
     merged = dict(daily)
     merged.update({
         "state": intraday.get("state"),
