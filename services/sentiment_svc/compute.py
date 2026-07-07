@@ -591,11 +591,25 @@ def compute_intraday_trend(schwab, sector_data=None, prior_history=None,
         except Exception:  # noqa: BLE001 — order-flow simply drops out.
             of_score, of_conf = 0.0, 0.0
 
+        #    (d0b) option_flow — streamed near-ATM SPY/QQQ option aggressor
+        #          pressure (put vs call). Positive = net call-buying / put-selling
+        #          = ALIGNED (NO flip). Missing/malformed → drops out (conf 0).
+        opt_score, opt_conf = 0.0, 0.0
+        try:
+            of = order_flow or {}
+            opt_flow = of.get("options")
+            if isinstance(opt_flow, dict):
+                opt_score, opt_conf = order_flow_mod.option_flow_component(opt_flow)
+        except Exception:  # noqa: BLE001 — option-flow simply drops out.
+            opt_score, opt_conf = 0.0, 0.0
+
         aggression, agg_conf = aggression_mod.blend_aggression(
             {"effort": effort_score, "skew": skew_comp, "flow": flow_comp,
-             "rejection": rej_score, "order_flow": of_score},
+             "rejection": rej_score, "order_flow": of_score,
+             "option_flow": opt_score},
             {"effort": effort_conf, "skew": skew_conf, "flow": flow_conf,
-             "rejection": rej_conf, "order_flow": of_conf})
+             "rejection": rej_conf, "order_flow": of_conf,
+             "option_flow": opt_conf})
 
         #    (d) profile shape — a balanced single-HVN session DAMPENS aggression
         #        (rotational balance -> more likely Neutral, sharpening that state).
@@ -630,6 +644,8 @@ def compute_intraday_trend(schwab, sector_data=None, prior_history=None,
             evidence.append(f"sector P/C Δ {sector_pc_delta:+.2f}")
         if of_conf > 0:
             evidence.append(f"order-flow {of_score:+.2f}")
+        if opt_conf > 0:
+            evidence.append(f"option-flow {opt_score:+.2f}")
         if prof_shape is not None:
             evidence.append(f"profile {prof_shape} ({prof_bal:.2f})")
         evidence.append(f"aggression {aggression:+.2f}")

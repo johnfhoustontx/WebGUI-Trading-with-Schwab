@@ -48,6 +48,10 @@ def test_weights_need_not_sum_to_one():
     # and need NOT sum to 1 — every declared component just carries a weight.
     assert all(w > 0 for w in AGG_WEIGHTS.values())
     assert "rejection" in AGG_WEIGHTS
+    # every declared aggression sub-signal carries a weight (pins the vocabulary).
+    assert set(AGG_WEIGHTS) == {"effort", "skew", "flow", "order_flow",
+                                "rejection", "option_flow"}
+    assert AGG_WEIGHTS["option_flow"] == 0.10
 
 
 def test_rejection_component_participates():

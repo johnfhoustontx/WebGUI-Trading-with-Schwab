@@ -450,6 +450,41 @@ def test_order_flow_missing_or_malformed_drops_out():
         assert not any("order-flow" in e for e in out["evidence"])
 
 
+def test_option_flow_pushes_aggression_negative():
+    """A put-buying OPTION-flow signal (signal<0) drags the aggression axis MORE
+    NEGATIVE; against a bullish direction it flips toward lack_of_bullishness, and
+    logs an option-flow evidence line. Same schwab fixture, only order_flow differs."""
+    sch = _FakeBullSchwab()
+    base = compute.compute_intraday_trend(sch)  # no option flow
+    bear = compute.compute_intraday_trend(
+        sch, order_flow={"options": {"signal": -0.7, "n": 40}})
+    assert bear["aggression"] < base["aggression"]       # put-buying → more negative
+    assert bear["state"] == "lack_of_bullishness"        # bullish dir, negative aggression
+    assert any("option-flow" in e for e in bear["evidence"])
+    assert not any("option-flow" in e for e in base["evidence"])
+
+
+def test_option_flow_call_buying_more_positive():
+    """A call-buying OPTION-flow signal (signal>0) lifts the aggression axis (NO flip)."""
+    sch = _FakeBullSchwab()
+    base = compute.compute_intraday_trend(sch)
+    bull = compute.compute_intraday_trend(
+        sch, order_flow={"options": {"signal": 0.7, "n": 40}})
+    assert bull["aggression"] > base["aggression"]
+
+
+def test_option_flow_missing_drops_out():
+    """Missing / malformed ``options`` drops the option-flow component out; the
+    classifier still runs and produces a valid state."""
+    sch = _FakeBullSchwab()
+    for of in (None, {}, {"SPY": {"aggressor_ratio": 0.5, "n": 10}},
+               {"options": {"signal": None, "n": 0}},
+               {"options": "not-a-dict"}):
+        out = compute.compute_intraday_trend(sch, order_flow=of)
+        assert out["state"] in _TREND_STATES
+        assert not any("option-flow" in e for e in out["evidence"])
+
+
 def test_micro_signals_drop_out_on_no_data():
     """No frames (proxy down) -> session/rejection/profile all drop out; the
     classifier still returns a valid neutral state (graceful)."""

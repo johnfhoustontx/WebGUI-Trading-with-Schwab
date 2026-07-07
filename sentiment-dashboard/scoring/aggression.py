@@ -13,7 +13,7 @@ from __future__ import annotations
 
 
 AGG_WEIGHTS = {"effort": 0.35, "skew": 0.30, "flow": 0.20, "order_flow": 0.15,
-               "rejection": 0.20}
+               "rejection": 0.20, "option_flow": 0.10}
 
 
 def _clamp(v, lo, hi):
