@@ -9,7 +9,8 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > port change, copied/removed module — update the relevant section here.
 
 **Last updated:** 2026-07-07 (**Five-state market classifier (direction × aggression) —
-Phases 0–2 shipped (LIVE on REST data), Phases 3–5 in progress**: the app's one-axis intraday
+Phases 0–3 shipped (LIVE on REST data); Phases 4–5 (streamer order flow) DEFERRED to a live
+follow-up**: the app's one-axis intraday
 trend state (`scoring/intraday_trend.py:score_to_state` → `bull_trend`/`pullback_in_bull`/`range`/
 `bear_rally`/`bear_trend`) is **replaced — for the regime-driving intraday state** — by a
 **two-axis direction × aggression classifier** emitting five trader states: **Bullish / Lack of
@@ -46,17 +47,33 @@ aggression axis — `score_to_state` is **retained, deliberately NOT deleted**),
 both vocabularies (`_TREND_SHORT`/`trend_text_class` cover all 10 keys). **Phase 0** lifted the
 Telegram/Discord/Fi-SMS channel senders + `shared/notifications.json` config out of
 `options_svc/push_notify.py` into a shared **`shared/notify/`** helper (for the coming state-transition
-alerts). **DEFERRED (Tier 3, separate design): item 9** (state → Swing-Scanner strategy-family bias),
-**item 10** (state into the Driver packet + guardrail modifier), **item 11** (formal IC/backtest
-validation that the five states stratify forward returns — the recording exists so this can run).
-**IN PROGRESS: Phase 3** (intraday structure signals — session-structure, rejection/defense +
-**state-transition push** via the shared helper, volume-profile-shape Neutral detector) **+ Phases
-4–5** (streamer **equity + option aggressor flow** — proxy widens the L1-equity/option normalizers +
-adds an option SSE fan-out on the existing shared stream worker; sentiment_svc classifies at-bid/at-ask
-→ `cache:sentiment:order_flow` → the aggression axis's `order_flow` component). Everything is ADDITIVE
-except the ONE coordinated `trend_regime.state` vocabulary change (`regime_filter` rekeyed in lockstep).
-Green: sentiment_svc **93**, options_svc **396**, webgui **681**, options-scanner flow_skew **+18** /
-gex_history migration, sentiment-dashboard effort/aggression/market_state **+34**, shared/notify **14**.
+alerts). **Phase 3 (SHIPPED)** added three intraday structure signals — **session-structure**
+(`scoring/session_structure.py`, VWAP-hold + opening-range break → blended into the DIRECTION
+price sub-score, `SESSION_BLEND=0.20`), **rejection/defense** (`scoring/rejection_defense.py`,
+upper-wick exhaustion at highs vs defended-dip resilience → a new `rejection` AGGRESSION component,
+`AGG_WEIGHTS["rejection"]=0.20`, no sign flip), and **volume-profile-shape**
+(`scoring/profile_shape.py`, balanced single-HVN session → damps aggression toward Neutral,
+`PROFILE_DAMP=0.5`) — all folded into `compute_intraday_trend` (each defensive/degrading) — plus a
+**state-transition phone push** (`services/sentiment_svc/state_alert.py`: on a committed-state FLIP,
+fire Telegram/Discord/Fi-SMS via the `shared/notify/` helper, gated enabled + valid-new-vocab + differ
++ market-hours; the cold-start old→new-vocab first cycle and same-state are skipped; best-effort, can't
+abort the recompute). **DEFERRED — Phases 4–5 (streamer equity + option aggressor flow), a LIVE
+follow-up:** widen the proxy's L1-equity + L1-option normalizers (add bid/ask/sizes/last-size/volume —
+the equity normalizer today carries only `last`/`net_change`), add an option SSE fan-out with a
+refcounted OSI union on the EXISTING shared stream worker (`schwab_proxy._stream_worker`, which also
+serves paper-trade tracking + the portfolio SSE — higher blast radius), and a sentiment_svc SSE
+consumer that classifies last-vs-bid/ask (quote rule) → aggressor ratio / CVD + put/call aggressor
+pressure → `cache:sentiment:order_flow` → the aggression axis's still-unused `order_flow` component
+(weight 0.15, currently drops out). **Deferred because it needs the LIVE Schwab stream up to verify the
+exact populated L1 field mappings against a real RTH sample (a `TODO(live)` the plan flags), which a
+headless build can't do** — do it with the stack running. **DEFERRED (Tier 3, separate design): item 9**
+(state → Swing-Scanner strategy-family bias), **item 10** (state into the Driver packet + guardrail
+modifier), **item 11** (formal IC/backtest validation that the five states stratify forward returns —
+the recording exists so this can run). Everything is ADDITIVE except the ONE coordinated
+`trend_regime.state` vocabulary change (`regime_filter` rekeyed in lockstep).
+Green: sentiment_svc **112**, options_svc **396**, webgui **681**, options-scanner flow_skew **+18** /
+gex_history migration, sentiment-dashboard scoring modules
+(effort/aggression/market_state/session/rejection/profile) **+67**, shared/notify **14**.
 Built subagent-by-subagent (TDD, two-stage spec+quality review per unit). **Restart `options_svc` +
 `sentiment_svc`** to pick this up. Branch `Using_Highcharts`. Design/plan:
 [design](docs/plans/2026-07-07-five-state-market-classifier-design.md) /
