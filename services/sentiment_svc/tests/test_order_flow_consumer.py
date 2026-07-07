@@ -78,6 +78,31 @@ def test_build_view_mostly_buys_positive():
     assert "ts" in spy
 
 
+def test_build_view_pins_last_size_to_size_mapping():
+    """VALUE-pinned: with only the proxy ``last_size`` field (NO ``size`` key),
+    ``build_order_flow_view`` must weight each trade's volume by ``last_size`` —
+    dropping the ``_of_tick`` last_size fallback (volumes collapsing to the 1.0
+    count default) would fail these exact totals. Guards the load-bearing mapping.
+    """
+    windows = {"SPY": deque()}
+    now = 500.0
+    # 8 buyer-initiated (last >= ask) at last_size 5 → buy_vol 40.0.
+    for i in range(8):
+        ofc.add_tick(windows, "SPY",
+                     {"last": 100.0, "bid": 99.9, "ask": 100.0, "last_size": 5},
+                     now + i)
+    # 3 seller-initiated (last <= bid) at last_size 4 → sell_vol 12.0.
+    for i in range(3):
+        ofc.add_tick(windows, "SPY",
+                     {"last": 99.9, "bid": 99.9, "ask": 100.0, "last_size": 4},
+                     now + 8 + i)
+    spy = ofc.build_order_flow_view(windows, now + 20)["SPY"]
+    assert spy["buy_vol"] == 40.0      # 8 × last_size 5, NOT 8 × 1.0
+    assert spy["sell_vol"] == 12.0     # 3 × last_size 4, NOT 3 × 1.0
+    assert spy["cvd"] == 28.0          # 40 − 12
+    assert spy["n"] == 11
+
+
 def test_build_view_empty_is_empty():
     assert ofc.build_order_flow_view({}, 0.0) == {}
     # a symbol with an empty deque is skipped, not emitted.
