@@ -40,6 +40,63 @@ def test_missing_file_returns_disabled_defaults(tmp_path, monkeypatch):
     assert cfg["enabled"] is True  # default-on; channels self-gate on creds
 
 
+# ── Action digest (10/1/3 CT "trades needing action") ───────────────────────
+_ITEMS = {
+    "captured_action": [{"symbol": "MU", "strategy": "PCS", "recommendation": "CUT",
+                         "reason": "2x credit stop"}],
+    "expiring_today": [{"symbol": "QQQ", "strategy": "PCS", "book": "account",
+                        "expiration": "2026-06-03"}],
+    "at_risk": [{"symbol": "AMD", "strategy": "CCS", "rescue_state": "critical", "heat": 82}],
+    "account_near": [{"symbol": "INTC", "strategy": "PCS", "note": "44% of target"}],
+}
+
+
+def test_action_total_counts_all_sections():
+    assert pn.action_total(_ITEMS) == 4
+    assert pn.action_total({}) == 0
+    assert pn.action_total({"captured_action": [], "at_risk": []}) == 0
+
+
+def test_action_digest_text_includes_all_sections_and_rows():
+    txt = pn.action_digest_text(_ITEMS, "Midday (1:00 PM CT)")
+    assert "Midday" in txt
+    for token in ("MU PCS", "CUT", "QQQ PCS", "AMD CCS", "critical", "INTC PCS", "44% of target"):
+        assert token in txt
+
+
+def test_action_digest_text_omits_empty_sections():
+    txt = pn.action_digest_text({"captured_action": _ITEMS["captured_action"]}, "")
+    assert "Captured" in txt and "MU PCS" in txt
+    assert "Expiring today" not in txt and "At risk" not in txt
+
+
+def test_action_digest_embed_one_field_per_nonempty_section():
+    embed = pn.action_digest_embed(_ITEMS, "Morning")
+    names = [f["name"] for f in embed["fields"]]
+    assert len(names) == 4
+    assert any("Captured" in n for n in names)
+
+
+def test_send_action_digest_skips_when_disabled():
+    assert pn.send_action_digest(_ITEMS, config={"enabled": False}) is False
+
+
+def test_send_action_digest_skips_when_empty():
+    cfg = {"enabled": True, "telegram": {"bot_token": "T", "chat_id": 1}}
+    assert pn.send_action_digest({}, config=cfg) is False
+
+
+def test_send_action_digest_sends_when_items_present(monkeypatch):
+    sent = {"tg": 0, "dc": 0}
+    monkeypatch.setattr(pn, "send_telegram", lambda *a, **k: sent.__setitem__("tg", sent["tg"] + 1))
+    monkeypatch.setattr(pn, "send_discord", lambda *a, **k: sent.__setitem__("dc", sent["dc"] + 1))
+    monkeypatch.setattr(pn, "send_sms", lambda *a, **k: None)
+    cfg = {"enabled": True, "telegram": {"bot_token": "T", "chat_id": 1},
+           "discord": {"webhook_url": "https://d"}, "sms": {}}
+    assert pn.send_action_digest(_ITEMS, slot_label="Morning", config=cfg) is True
+    assert sent["tg"] == 1 and sent["dc"] == 1
+
+
 def test_signal_key_stable_and_distinct():
     a = {"symbol": "SPY", "type": "PCS", "short_strike": 500, "long_strike": 495,
          "expiration": "2026-07-10"}

@@ -138,6 +138,9 @@ EVENT_CAPTURED_FLAGS = "events:options:captured_flags"
 CACHE_NOTIFIED_SCAN = "cache:options:notified_scan"
 CACHE_NOTIFIED_CAPTURED = "cache:options:notified_captured"
 
+CACHE_ACTION_ALERT = "cache:options:action_alert"
+EVENT_ACTION_ALERT = "events:options:action_alert"
+
 CACHE_GAMMA = "cache:options:gamma"
 EVENT_GAMMA = "events:options:gamma"
 
@@ -354,19 +357,29 @@ def publish_rescue_summary(bus) -> None:
 
 def run_manage_and_refresh(bus) -> None:
     """Run the paper auto-manage cycle (reprice open positions + auto-close
-    target/stop hits) then republish the paper account view.
+    target/stop hits + expiration-settle) then republish the paper views.
 
     Guarded on an existing account — with no account it just refreshes so the
-    page shows the no-account state. Shared by the ``paper_manage`` command
-    (manual button) and the scheduler's auto-manage tick (``scheduler.manage_due``)
-    so both run identical logic."""
+    page shows the no-account state. Also auto-settles expired **ledger** trades
+    (``compute.expire_ledger_trades`` — the Paper Trades tab otherwise never
+    closes on expiration) and republishes the ledger view when any settled.
+    Shared by the ``paper_manage`` command (manual button) and the scheduler's
+    auto-manage tick (``scheduler.manage_due``) so both run identical logic."""
     if compute.has_paper_account():
         compute.run_manage_cycle()
+    # Auto-settle expired LEDGER trades (the Paper Trades tab otherwise never
+    # closes on expiration). Defensive so a settlement hiccup never skips the
+    # refreshes below; the piggyback ledger refresh further down republishes the
+    # settled rows.
+    try:
+        compute.expire_ledger_trades()
+    except Exception:
+        log.exception("expire_ledger_trades degraded")
     refresh_paper_account(bus)
     # Piggyback the manage tick (no new cadence): refresh the paper-trade LEDGER
-    # too so its open positions get fresh live P&L every 5 min (the account view
-    # above is a separate book). Defensive so a reprice hiccup never blocks the
-    # core paper refresh.
+    # too so its open positions get fresh live P&L every 5 min (and reflect any
+    # expiration settlement above; the account view is a separate book).
+    # Defensive so a reprice hiccup never blocks the core paper refresh.
     try:
         refresh_paper_trades(bus)
     except Exception:
@@ -567,6 +580,38 @@ def run_scheduled_gamma_analyze(bus, slot) -> None:
     res = {**res, "slot": slot, "generated_at": now.isoformat()}
     version = bus.cache_set(CACHE_GAMMA_ANALYZE_SCHED[slot], res)
     bus.publish(EVENT_GAMMA_ANALYZE_SCHED[slot], {"version": version})
+
+
+def run_action_alert(bus, slot=None) -> None:
+    """Collect trades needing action + push a digest to Telegram/Discord (+ SMS).
+
+    Driven by ``scheduler.action_alert_due`` at 10:00 / 13:00 / 15:00 CT on each
+    trading day. Caches the digest under ``cache:options:action_alert`` for
+    inspection (the run's items + whether it pushed). Fully defensive — a collect
+    or push hiccup never raises into the scheduler; an empty digest pushes nothing
+    (see ``push_notify.send_action_digest``)."""
+    import datetime as _dt
+    from zoneinfo import ZoneInfo as _ZI
+
+    slot_label = push_notify.action_slot_label(slot)
+    try:
+        items = compute.collect_action_items()
+    except Exception:
+        log.exception("collect_action_items degraded → empty digest")
+        items = {}
+    sent = False
+    try:
+        sent = push_notify.send_action_digest(items, slot_label=slot_label)
+    except Exception:
+        log.exception("send_action_digest degraded")
+    payload = {"slot": slot, "slot_label": slot_label, "items": items,
+               "total": push_notify.action_total(items), "sent": bool(sent),
+               "generated_at": _dt.datetime.now(_ZI("America/Chicago")).isoformat()}
+    try:
+        version = bus.cache_set(CACHE_ACTION_ALERT, payload)
+        bus.publish(EVENT_ACTION_ALERT, {"version": version})
+    except Exception:
+        log.exception("action_alert cache_set degraded")
 
 
 def publish_gamma_symbols(bus) -> None:

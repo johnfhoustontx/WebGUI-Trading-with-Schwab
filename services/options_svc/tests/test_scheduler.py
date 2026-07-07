@@ -103,6 +103,40 @@ def test_manage_due_holiday():
     assert due is False
 
 
+# ── action_alert_due (10/1/3 CT digest) ─────────────────────────────────────
+def test_action_alert_due_fires_at_each_slot():
+    # 2026-06-15 is a Monday.
+    assert scheduler.action_alert_due(_ct(2026, 6, 15, 10, 0), set()) == "morning"
+    assert scheduler.action_alert_due(_ct(2026, 6, 15, 13, 0), set()) == "midday"
+    assert scheduler.action_alert_due(_ct(2026, 6, 15, 15, 0), set()) == "close"
+
+
+def test_action_alert_due_within_grace():
+    assert scheduler.action_alert_due(_ct(2026, 6, 15, 10, 15), set()) == "morning"
+
+
+def test_action_alert_due_not_after_grace():
+    assert scheduler.action_alert_due(_ct(2026, 6, 15, 10, 25), set()) is None
+
+
+def test_action_alert_due_once_per_slot():
+    ran = {("2026-06-15", "morning")}
+    assert scheduler.action_alert_due(_ct(2026, 6, 15, 10, 5), ran) is None
+
+
+def test_action_alert_due_off_hours_none():
+    assert scheduler.action_alert_due(_ct(2026, 6, 15, 9, 0), set()) is None   # before first slot
+
+
+def test_action_alert_due_weekend_none():
+    # 2026-06-13 is a Saturday.
+    assert scheduler.action_alert_due(_ct(2026, 6, 13, 10, 0), set()) is None
+
+
+def test_action_alert_due_holiday_none():
+    assert scheduler.action_alert_due(_ct(2026, 7, 3, 10, 0), set()) is None
+
+
 # ── periodic_refresh_due (header + gex_status per-tick gating) ───────────────
 # During market hours the header/status refresh every tick; off-hours/weekends
 # they throttle to a longer interval so the service stops making proxy + SQLite +

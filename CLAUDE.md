@@ -8,7 +8,34 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-07-02 (**Driver risk-sizing fix (RISK_TOO_HIGH) + Sonnet 5 + prompt
+**Last updated:** 2026-07-06 (**Paper expiration auto-close (both books) + thrice-daily
+"trades needing action" push** — two features. **(1) Expiration auto-close.** Validated that
+paper trades did NOT reliably auto-close on expiration and fixed both stores. The **account**
+engine (`paper_engine.run_manage_cycle`, `paper_account.db`) settles at intrinsic, but had two
+bugs: it settled 0-DTE **intraday at the open** (the 5-min auto-manage tick made this fire at
+08:30) and it **could never settle a past expiration** because
+`signal_repricer.reprice_swing` returns `current_underlying=None` for `exp < today` (it skips the
+doomed chain fetch). Now gated by the pure `paper_engine.should_settle(exp, today, now_ct)` —
+settle at/after **15:00 CT** on the expiry day (4pm ET close) or any later day — with a direct
+`paper_engine.underlying_last(client, symbol)` quote fallback when the repricer supplies none
+(`run_manage_cycle` gained a `now_ct=None` param for deterministic tests). The **ledger**
+(`paper_trader.py`/`trades.db`, the Paper Trades tab) **never auto-closed at all** —
+`expire_paper_trade` had ZERO callers — so new `compute.expire_ledger_trades(now_ct=None)`
+settles OPEN ledger trades on the SAME `should_settle` gate, wired into
+`handlers.run_manage_and_refresh` (the 5-min manage tick + the manual "Run manage cycle" button;
+the pre-existing piggyback `refresh_paper_trades` republishes the settled rows). See
+[[paper-two-systems-expiration]]. **(2) Action alerts.** A thrice-daily push (Telegram + Discord;
+SMS if configured) at **10:00 / 13:00 / 15:00 CT** on trading days summarizing **trades needing
+action** — `scheduler.action_alert_due` (once per slot within a 20-min grace, mirrors
+`analyze_slot_due`) → `handlers.run_action_alert(bus, slot)` → `compute.collect_action_items`
+(four categories: captured signals recommending **CUT/TAKE_PROFIT** via a fresh `reprice_captured`,
+**expiring-today** ledger+account trades, **at-risk** rescue tested/critical, account **near
+stop/target** [40–50% of max profit, or 150–200% of credit loss]) → `push_notify.send_action_digest`
+(new `action_digest_text`/`action_digest_embed`/`action_total`/`action_slot_label`; skips an empty
+digest — no "all clear" spam). Cached at `cache:options:action_alert` for inspection. All defensive
++ per-category guarded. Restart `options_svc` to pick both up. options_svc **389** + options-scanner
+paper/eod/repricer **71** green; verified live (digest built against real data: 17 captured actions +
+1 at-risk). Branch `Using_Highcharts`.). Prior — 2026-07-02 (**Driver risk-sizing fix (RISK_TOO_HIGH) + Sonnet 5 + prompt
 caching** — a debugging session on "driver trades logged **Executed** but never showed up."
 Root cause: the `/driver` decision-log "Executed N: SYM×q" line is only the **enqueue** of a
 `driver_paper_create` command; the real open in `options_svc.compute.open_driver_position` was

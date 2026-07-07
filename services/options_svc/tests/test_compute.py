@@ -573,6 +573,132 @@ def test_analyze_paper_expired_trade_skips_engine_with_note(monkeypatch):
     assert "Expired 2020-01-01" in out["note"]
 
 
+def test_expire_ledger_trades_settles_past_and_close_day(monkeypatch):
+    """Open ledger trades that are past-expiry (or 0-DTE at/after 15:00 CT) settle
+    via expire_paper_trade; a future / pre-close trade is left OPEN."""
+    import datetime as _dt
+    import sys as _sys
+    import types as _types
+    from zoneinfo import ZoneInfo
+
+    now_ct = _dt.datetime(2026, 6, 3, 15, 30, tzinfo=ZoneInfo("America/Chicago"))
+    trades = [
+        {"trade_id": "past", "status": "OPEN", "symbol": "SPY", "strategy": "PCS",
+         "expiration": "2026-06-01", "short_strike": 500, "long_strike": 499,
+         "entry_credit": 0.5, "quantity": 1},
+        {"trade_id": "today", "status": "OPEN", "symbol": "QQQ", "strategy": "PCS",
+         "expiration": "2026-06-03", "short_strike": 400, "long_strike": 399,
+         "entry_credit": 0.4, "quantity": 1},
+        {"trade_id": "future", "status": "OPEN", "symbol": "IWM", "strategy": "PCS",
+         "expiration": "2026-07-01", "short_strike": 200, "long_strike": 199,
+         "entry_credit": 0.3, "quantity": 1},
+        {"trade_id": "closed", "status": "CLOSED", "symbol": "AMD", "strategy": "PCS",
+         "expiration": "2026-06-01", "entry_credit": 0.3, "quantity": 1},
+    ]
+    settled = []
+    fake_pt = _types.SimpleNamespace(
+        get_all_trades=lambda: trades,
+        expire_paper_trade=lambda t, sp: {**t, "status": "EXPIRED"},
+        update_trade=lambda tid, closed: settled.append(tid))
+
+    def _should_settle(exp, today, nc):   # the real gate logic, inlined
+        e = _dt.date.fromisoformat(exp); t = _dt.date.fromisoformat(today)
+        return e < t or (e == t and nc.hour >= 15)
+
+    fake_pe = _types.SimpleNamespace(
+        should_settle=_should_settle,
+        underlying_last=lambda client, sym: 505.0)
+    monkeypatch.setitem(_sys.modules, "paper_trader", fake_pt)
+    monkeypatch.setitem(_sys.modules, "paper_engine", fake_pe)
+
+    n = compute.expire_ledger_trades(now_ct=now_ct)
+    assert n == 2
+    assert set(settled) == {"past", "today"}   # future + closed left alone
+
+
+def test_expire_ledger_trades_defers_when_no_underlying(monkeypatch):
+    import datetime as _dt
+    import sys as _sys
+    import types as _types
+    from zoneinfo import ZoneInfo
+
+    now_ct = _dt.datetime(2026, 6, 3, 15, 30, tzinfo=ZoneInfo("America/Chicago"))
+    trades = [{"trade_id": "past", "status": "OPEN", "symbol": "SPY", "strategy": "PCS",
+               "expiration": "2026-06-01", "short_strike": 500, "long_strike": 499,
+               "entry_credit": 0.5, "quantity": 1}]
+    settled = []
+    monkeypatch.setitem(_sys.modules, "paper_trader", _types.SimpleNamespace(
+        get_all_trades=lambda: trades,
+        expire_paper_trade=lambda t, sp: t,
+        update_trade=lambda tid, c: settled.append(tid)))
+    monkeypatch.setitem(_sys.modules, "paper_engine", _types.SimpleNamespace(
+        should_settle=lambda exp, today, nc: True,
+        underlying_last=lambda client, sym: None))   # no quote -> defer
+
+    assert compute.expire_ledger_trades(now_ct=now_ct) == 0
+    assert settled == []
+
+
+def test_collect_action_items_all_four_categories(monkeypatch):
+    """collect_action_items gathers captured actions, expiring-today, at-risk,
+    and near-stop/target across the ledger + account books."""
+    import datetime as _dt
+    import sys as _sys
+    import types as _types
+    from zoneinfo import ZoneInfo
+
+    now_ct = _dt.datetime(2026, 6, 3, 13, 0, tzinfo=ZoneInfo("America/Chicago"))
+
+    # 1) captured recommending action
+    monkeypatch.setattr(compute, "reprice_captured", lambda: {"signals": [
+        {"symbol": "MU", "strategy": "PCS", "recommendation": "CUT",
+         "recommendation_reason": "2x credit stop"},
+        {"symbol": "SPY", "strategy": "CCS", "recommendation": "HOLD"},   # ignored
+    ], "flags": []})
+
+    # 2) ledger trade expiring today
+    monkeypatch.setitem(_sys.modules, "paper_trader", _types.SimpleNamespace(
+        get_all_trades=lambda: [
+            {"trade_id": "l1", "status": "OPEN", "symbol": "IWM", "strategy": "PCS",
+             "expiration": "2026-06-03"},
+            {"trade_id": "l2", "status": "OPEN", "symbol": "DIA", "strategy": "PCS",
+             "expiration": "2026-07-01"},   # future -> ignored
+        ]))
+
+    # account positions: one expiring today + tested + near-target
+    positions = [
+        {"position_id": 1, "symbol": "QQQ", "strategy": "PCS", "expiration": "2026-06-03",
+         "entry_credit": 1.0, "quantity": 1, "unrealized_pnl": 45.0,
+         "current_underlying": 400, "current_value": 0.55, "current_short_delta": -0.2},
+    ]
+    monkeypatch.setattr(compute, "_load_open_positions", lambda: positions)
+    monkeypatch.setattr(compute, "_rescue_dte", lambda exp: 0)
+    monkeypatch.setattr(compute, "_assess_position_risk",
+                        lambda pos, mark, gex=None, regime=None: {"state": "tested", "heat": 70.0})
+
+    out = compute.collect_action_items(now_ct=now_ct)
+    assert [r["symbol"] for r in out["captured_action"]] == ["MU"]
+    assert {(r["symbol"], r["book"]) for r in out["expiring_today"]} == {("IWM", "ledger"), ("QQQ", "account")}
+    assert out["at_risk"][0]["symbol"] == "QQQ" and out["at_risk"][0]["rescue_state"] == "tested"
+    # capture = 45 / (1.0*1*100) *100 = 45% -> near target (40..50)
+    assert out["account_near"][0]["symbol"] == "QQQ" and "target" in out["account_near"][0]["note"]
+
+
+def test_collect_action_items_defensive_empty(monkeypatch):
+    import datetime as _dt
+    import sys as _sys
+    import types as _types
+    from zoneinfo import ZoneInfo
+
+    now_ct = _dt.datetime(2026, 6, 3, 13, 0, tzinfo=ZoneInfo("America/Chicago"))
+    monkeypatch.setattr(compute, "reprice_captured", lambda: {"signals": [], "flags": []})
+    monkeypatch.setitem(_sys.modules, "paper_trader",
+                        _types.SimpleNamespace(get_all_trades=lambda: []))
+    monkeypatch.setattr(compute, "_load_open_positions", lambda: [])
+    out = compute.collect_action_items(now_ct=now_ct)
+    assert out == {"captured_action": [], "expiring_today": [], "at_risk": [], "account_near": []}
+
+
 def test_analyze_paper_note_none_on_success(monkeypatch):
     import sys as _sys
     import types as _types

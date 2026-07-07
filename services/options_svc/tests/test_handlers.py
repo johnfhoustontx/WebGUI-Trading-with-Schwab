@@ -210,6 +210,7 @@ def test_paper_command_dispatch(monkeypatch):
                         lambda: calls.__setitem__("entry", calls["entry"] + 1))
     monkeypatch.setattr(handlers.compute, "run_manage_cycle",
                         lambda: calls.__setitem__("manage", calls["manage"] + 1))
+    monkeypatch.setattr(handlers.compute, "expire_ledger_trades", lambda: 0)
     monkeypatch.setattr(handlers.compute, "reset_paper_account",
                         lambda bal: calls.__setitem__("reset", bal))
 
@@ -248,14 +249,68 @@ def test_run_manage_and_refresh_runs_cycle_when_account_present(monkeypatch):
     monkeypatch.setattr(handlers.compute, "has_paper_account", lambda: True)
     monkeypatch.setattr(handlers.compute, "run_manage_cycle",
                         lambda: calls.__setitem__("manage", calls["manage"] + 1))
+    monkeypatch.setattr(handlers.compute, "expire_ledger_trades", lambda: 0)
     monkeypatch.setattr(handlers, "refresh_paper_account",
                         lambda b: calls.__setitem__("refresh", calls["refresh"] + 1))
     # Isolate from the ledger reprice the manage tick now piggybacks (else it hits
     # the real proxy/DB).
-    monkeypatch.setattr(handlers, "refresh_paper_trades", lambda b, **k: None)
+    monkeypatch.setattr(handlers, "refresh_paper_trades",
+                        lambda b, **k: calls.__setitem__("trades", calls.get("trades", 0) + 1))
 
     handlers.run_manage_and_refresh(bus)
     assert calls["manage"] == 1 and calls["refresh"] == 1
+    # The manage tick always piggybacks one ledger refresh (fresh P&L + any
+    # expiration settlement).
+    assert calls.get("trades", 0) == 1
+
+
+def test_run_action_alert_pushes_and_caches(monkeypatch):
+    """run_action_alert collects items, pushes the digest, and caches the run."""
+    bus = Bus(fake=True)
+    items = {"captured_action": [{"symbol": "MU", "strategy": "PCS", "recommendation": "CUT"}],
+             "expiring_today": [], "at_risk": [], "account_near": []}
+    calls = {}
+    monkeypatch.setattr(handlers.compute, "collect_action_items", lambda: items)
+    monkeypatch.setattr(handlers.push_notify, "send_action_digest",
+                        lambda it, **k: calls.setdefault("sent", (it, k.get("slot_label"))) or True)
+
+    handlers.run_action_alert(bus, "morning")
+
+    env = bus.cache_get("cache:options:action_alert")
+    assert env is not None
+    assert env.payload["slot"] == "morning" and env.payload["total"] == 1
+    assert env.payload["sent"] is True and env.payload["items"] == items
+    # digest was pushed with the human slot label
+    assert calls["sent"][1] == handlers.push_notify.action_slot_label("morning")
+
+
+def test_run_action_alert_defensive_on_collect_failure(monkeypatch):
+    """A collect failure degrades to an empty digest, never raises."""
+    bus = Bus(fake=True)
+    def _boom():
+        raise RuntimeError("nope")
+    monkeypatch.setattr(handlers.compute, "collect_action_items", _boom)
+    monkeypatch.setattr(handlers.push_notify, "send_action_digest", lambda it, **k: False)
+
+    handlers.run_action_alert(bus, "midday")   # must not raise
+    env = bus.cache_get("cache:options:action_alert")
+    assert env.payload["total"] == 0 and env.payload["sent"] is False
+
+
+def test_run_manage_and_refresh_settles_ledger_then_refreshes(monkeypatch):
+    """The manage tick settles expired ledger trades, then republishes the ledger."""
+    bus = Bus(fake=True)
+    calls = {"expire": 0, "trades": 0}
+    monkeypatch.setattr(handlers.compute, "has_paper_account", lambda: True)
+    monkeypatch.setattr(handlers.compute, "run_manage_cycle", lambda: None)
+    monkeypatch.setattr(handlers.compute, "expire_ledger_trades",
+                        lambda: calls.__setitem__("expire", calls["expire"] + 1) or 2)
+    monkeypatch.setattr(handlers, "refresh_paper_account", lambda b: None)
+    monkeypatch.setattr(handlers, "refresh_paper_trades",
+                        lambda b, **k: calls.__setitem__("trades", calls["trades"] + 1))
+
+    handlers.run_manage_and_refresh(bus)
+    assert calls["expire"] == 1 and calls["trades"] == 1
 
 
 def test_run_manage_and_refresh_skips_cycle_when_no_account(monkeypatch):
@@ -264,6 +319,7 @@ def test_run_manage_and_refresh_skips_cycle_when_no_account(monkeypatch):
     monkeypatch.setattr(handlers.compute, "has_paper_account", lambda: False)
     monkeypatch.setattr(handlers.compute, "run_manage_cycle",
                         lambda: calls.__setitem__("manage", calls["manage"] + 1))
+    monkeypatch.setattr(handlers.compute, "expire_ledger_trades", lambda: 0)
     monkeypatch.setattr(handlers, "refresh_paper_account",
                         lambda b: calls.__setitem__("refresh", calls["refresh"] + 1))
     monkeypatch.setattr(handlers, "refresh_paper_trades", lambda b, **k: None)

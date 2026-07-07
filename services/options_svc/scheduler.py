@@ -225,6 +225,38 @@ def analyze_slot_due(now, ran_slots):
     return None
 
 
+# ── Scheduled "trades needing action" digest cadence (10/1/3 CT) ────────────
+# A thrice-daily push (Telegram/Discord) summarizing open trades that need a
+# human decision. Times are CT (this module's clock). Each slot fires ONCE per
+# trading day within a grace window (mirrors analyze_slot_due) so a missed 30 s
+# tick / mid-window start still fires it without backfilling a long-stale slot.
+_ACTION_ALERT_SLOTS = {
+    "morning": (10, 0),   # 10:00 CT
+    "midday":  (13, 0),   # 13:00 CT
+    "close":   (15, 0),   # 15:00 CT — pre-close sweep (market close)
+}
+_ACTION_ALERT_GRACE_MIN = 20
+
+
+def action_alert_due(now, ran_slots):
+    """Name of the action-alert slot due now, or None.
+
+    Fires each slot ONCE per trading day when ``target <= now < target + grace``
+    and that ``(date, slot)`` isn't already in ``ran_slots``. The caller records
+    the returned ``(date, slot)`` so it won't refire. Mirrors ``analyze_slot_due``."""
+    if not _is_trading_day(now):
+        return None
+    import datetime as _dt
+    day = now.date().isoformat()
+    for name, (h, m) in _ACTION_ALERT_SLOTS.items():
+        if (day, name) in ran_slots:
+            continue
+        target = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        if target <= now < target + _dt.timedelta(minutes=_ACTION_ALERT_GRACE_MIN):
+            return name
+    return None
+
+
 # ── Scheduler loop ─────────────────────────────────────────────────────────
 POLL_INTERVAL_SEC = 30  # check the slot every 30s (mirrors the page's autoscan loop cadence)
 
@@ -277,6 +309,7 @@ async def loop(bus):
     last_manage_slot = None  # 5-min paper auto-manage slot (see manage_due)
     last_periodic_slot = None  # header + gex_status throttle slot (see periodic_refresh_due)
     analyze_ran = set()  # (date, slot) of fired scheduled Gamma Analyze runs (see analyze_slot_due)
+    action_alert_ran = set()  # (date, slot) of fired action-alert pushes (see action_alert_due)
     # One-shot startup refresh so the Paper Portfolio page has data on first
     # load. The paper account only changes on user actions (entry/manage/reset
     # commands re-publish it), so it is NOT polled every tick. Guarded so a
@@ -466,6 +499,28 @@ async def loop(bus):
 
         if a_slot:
             branches.append(_analyze_branch(a_slot))
+
+        # Scheduled "trades needing action" digest — push a Telegram/Discord
+        # summary at 10:00 / 13:00 / 15:00 CT on each trading day. The slot is
+        # latched in action_alert_ran BEFORE the blocking collect+push so a slow
+        # push can't double-fire on the next tick. Independently guarded.
+        try:
+            aa_slot = action_alert_due(now, action_alert_ran)
+            if aa_slot:
+                action_alert_ran.add((now.date().isoformat(), aa_slot))
+        except Exception:
+            log.exception("action_alert_due gate degraded")
+            aa_slot = None
+
+        async def _action_alert_branch(slot_name):
+            try:
+                await loop_.run_in_executor(
+                    None, handlers.run_action_alert, bus, slot_name)
+            except Exception:
+                log.exception("run_action_alert branch degraded")
+
+        if aa_slot:
+            branches.append(_action_alert_branch(aa_slot))
 
         # Run all DUE branches concurrently (bounded, ≤5). A slow branch can't
         # delay the start of the time-critical ones; per-branch try/except keeps
