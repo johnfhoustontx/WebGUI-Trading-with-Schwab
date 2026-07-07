@@ -7,6 +7,7 @@ Mirrors the gex_history_db pattern."""
 from __future__ import annotations
 
 import datetime as _dt
+import os
 import sqlite3
 from pathlib import Path
 
@@ -21,8 +22,17 @@ CREATE TABLE IF NOT EXISTS sentiment_intraday (
 
 def connect(path=None) -> sqlite3.Connection:
     if path is None:
-        from repo_paths import SENTIMENT_INTRADAY_DB
-        path = SENTIMENT_INTRADAY_DB
+        # Under pytest the default connection is in-memory (mirrors Bus's
+        # fakeredis-under-pytest convention): tests that exercise the refresh
+        # path must never insert their fixture points into the REAL rolling
+        # intraday DB — the live service republishes whatever is in the file,
+        # so leaked test rows showed up as spikes on the /sentiment intraday
+        # graphs (2026-07-07). An explicit ``path`` is always honored.
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            path = ":memory:"
+        else:
+            from repo_paths import SENTIMENT_INTRADAY_DB
+            path = SENTIMENT_INTRADAY_DB
     if path != ":memory:":
         Path(path).parent.mkdir(parents=True, exist_ok=True)
     # check_same_thread=False: the sentiment service shares one connection across
