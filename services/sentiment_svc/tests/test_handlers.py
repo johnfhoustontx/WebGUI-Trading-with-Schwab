@@ -613,3 +613,60 @@ def test_refresh_intraday_record_failure_non_fatal(monkeypatch):
 
     comp = bus.cache_get("cache:sentiment:composite")
     assert comp is not None  # core refresh completed despite the intraday failure
+
+
+# --- sector P/C daily persistence (Part C) ------------------------------------
+def _mem_sector_pcr(monkeypatch):
+    conn = handlers.sector_pcr_history_db.connect(":memory:")
+    monkeypatch.setattr(handlers, "_sector_pcr_conn", conn)
+    return conn
+
+
+def test_record_sector_pcr_records_value(monkeypatch):
+    conn = _mem_sector_pcr(monkeypatch)
+    monkeypatch.setattr(handlers, "_is_rth_now", lambda: True)
+    handlers._record_sector_pcr({"sector_pcr": 0.83})
+    rows = conn.execute("SELECT pcr FROM sector_pcr").fetchall()
+    assert rows and rows[-1][0] == 0.83
+
+
+def test_record_sector_pcr_skips_none(monkeypatch):
+    conn = _mem_sector_pcr(monkeypatch)
+    monkeypatch.setattr(handlers, "_is_rth_now", lambda: True)
+    handlers._record_sector_pcr({"sector_pcr": None})
+    assert conn.execute("SELECT COUNT(*) FROM sector_pcr").fetchone()[0] == 0
+
+
+def test_record_sector_pcr_skips_off_hours(monkeypatch):
+    conn = _mem_sector_pcr(monkeypatch)
+    monkeypatch.setattr(handlers, "_is_rth_now", lambda: False)
+    handlers._record_sector_pcr({"sector_pcr": 0.9})
+    assert conn.execute("SELECT COUNT(*) FROM sector_pcr").fetchone()[0] == 0
+
+
+def test_record_sector_pcr_failure_non_fatal(monkeypatch):
+    _mem_sector_pcr(monkeypatch)
+    monkeypatch.setattr(handlers, "_is_rth_now", lambda: True)
+
+    def _boom(*a, **k):
+        raise RuntimeError("record exploded")
+
+    monkeypatch.setattr(handlers.sector_pcr_history_db, "record", _boom)
+    handlers._record_sector_pcr({"sector_pcr": 0.9})  # must not raise
+
+
+def test_refresh_calls_record_sector_pcr(monkeypatch):
+    bus = Bus(fake=True)
+    live = _fake_live()
+    live["sector_pcr"] = 0.77
+    _patch_compute(monkeypatch, live=live, snaps=[{"x": 1}], spy=[1.0])
+    monkeypatch.setattr(handlers, "_maybe_recompute_trend", lambda: None)
+    monkeypatch.setattr(handlers, "_is_rth_now", lambda: True)
+    monkeypatch.setattr(handlers, "_intraday_conn",
+                        handlers.intraday_history_db.connect(":memory:"))
+    conn = _mem_sector_pcr(monkeypatch)
+
+    handlers.refresh(bus, with_sectors=False)
+
+    rows = conn.execute("SELECT pcr FROM sector_pcr").fetchall()
+    assert rows and rows[-1][0] == 0.77

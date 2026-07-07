@@ -31,6 +31,11 @@ DRIVER_PAPER_DB = OPTIONS_SCANNER / "data" / "paper_account_driver.db"
 # Trend" graphs. Rolling last 5 trading days; written by sentiment_svc each refresh.
 SENTIMENT_INTRADAY_DB = SENTIMENT / "data" / "sentiment_intraday.db"
 
+# Daily cap-weighted cross-sector Put/Call ratio for the 5-trading-day
+# options-flow-direction delta. One row per LOCAL calendar date; written by
+# sentiment_svc each RTH refresh.
+SECTOR_PCR_HISTORY_DB = SENTIMENT / "data" / "sector_pcr.db"
+
 _ports = tomllib.loads((REPO_ROOT / "config" / "ports.toml").read_text())
 PROXY_PORT       = _ports["proxy"]
 PROXY_URL        = f"http://127.0.0.1:{PROXY_PORT}"

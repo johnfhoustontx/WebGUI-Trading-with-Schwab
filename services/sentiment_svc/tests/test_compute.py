@@ -299,6 +299,36 @@ def test_derive_composite_extras_passes_through_trend():
     assert out["trend"] == trend
 
 
+def test_sector_pc_delta_reads_store(monkeypatch):
+    """compute.sector_pc_delta opens the store and returns the 5-day delta."""
+    import datetime as dt
+    from services.sentiment_svc import sector_pcr_history_db as db
+    conn = db.connect(":memory:")
+    base = dt.date(2026, 6, 16)
+    for i in range(6):
+        db.record(conn, (base + dt.timedelta(days=i)).isoformat(), 0.50 + i * 0.02)
+    monkeypatch.setattr(db, "connect", lambda *a, **k: conn)
+    assert abs(compute.sector_pc_delta() - 0.10) < 1e-9   # 0.60 - 0.50
+
+
+def test_sector_pc_delta_none_on_empty_store(monkeypatch):
+    from services.sentiment_svc import sector_pcr_history_db as db
+    conn = db.connect(":memory:")
+    monkeypatch.setattr(db, "connect", lambda *a, **k: conn)
+    assert compute.sector_pc_delta() is None
+
+
+def test_sector_pc_delta_defensive_on_error(monkeypatch):
+    """A store-open failure degrades to None, never raises."""
+    from services.sentiment_svc import sector_pcr_history_db as db
+
+    def _boom(*a, **k):
+        raise RuntimeError("db gone")
+
+    monkeypatch.setattr(db, "connect", _boom)
+    assert compute.sector_pc_delta() is None
+
+
 def test_compute_imports_clean():
     """compute imports without pulling in nicegui or the webgui UI tier."""
     import services.sentiment_svc.compute as c  # noqa: F401

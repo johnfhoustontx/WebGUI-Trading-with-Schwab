@@ -744,6 +744,21 @@ def _bridge_trend(intraday, spy):
     return merged
 
 
+def sector_pc_delta():
+    """5-trading-day change in the cap-weighted cross-sector Put/Call ratio.
+
+    Reads the daily ``sector_pcr`` store (written by handlers each RTH refresh)
+    and returns ``latest - (5-trading-days-ago)``, or ``None`` if the store has
+    too few dates / a None endpoint / any failure. This is the internal reader
+    Phase 2's market-state classifier calls — there is no cache view."""
+    try:
+        from services.sentiment_svc import sector_pcr_history_db as _db
+        conn = _db.connect()
+        return _db.sector_pc_delta(conn)
+    except Exception:  # noqa: BLE001 — defensive: never raise into a caller.
+        return None
+
+
 def build_and_write_bridge(snaps, spy, live, sector, trend=None):
     """Build the bridge payload from cache/state data and write it. Defensive."""
     try:

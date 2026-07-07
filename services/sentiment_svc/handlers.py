@@ -25,7 +25,8 @@ import time
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo as _ZI
 
-from services.sentiment_svc import compute, intraday_history_db, scheduler
+from services.sentiment_svc import (
+    compute, intraday_history_db, scheduler, sector_pcr_history_db)
 from shared.contracts.sentiment import CompositeSnapshot
 
 log = logging.getLogger(__name__)
@@ -142,6 +143,43 @@ def _get_intraday_conn():
     if _intraday_conn is None:
         _intraday_conn = intraday_history_db.connect()
     return _intraday_conn
+
+
+# --- daily cap-weighted sector Put/Call ratio (options-flow direction) --------
+# A second lazily-opened SQLite store: one row per LOCAL date (today's row is
+# REPLACE-updated each RTH refresh, so the latest read wins), used for the
+# 5-trading-day P/C delta the market-state classifier reads. Shares the same
+# ``_INTRADAY_LOCK`` as the intraday store — both are check_same_thread=False
+# connections touched from the multi-worker executor, and one lock serializing
+# both is simplest and contention-free (the recorders run back-to-back in the
+# same refresh, off-loop).
+_sector_pcr_conn = None
+
+
+def _get_sector_pcr_conn():
+    global _sector_pcr_conn
+    if _sector_pcr_conn is None:
+        _sector_pcr_conn = sector_pcr_history_db.connect()
+    return _sector_pcr_conn
+
+
+def _record_sector_pcr(live):
+    """Record today's cap-weighted sector P/C ratio (RTH-only), prune the window.
+    Defensive — never aborts the core refresh. Skips when ``sector_pcr`` is
+    None."""
+    try:
+        if not _is_rth_now():
+            return
+        pcr = (live or {}).get("sector_pcr")
+        if pcr is None:
+            return
+        with _INTRADAY_LOCK:
+            conn = _get_sector_pcr_conn()
+            date_iso = _dt.datetime.now(_ZI("America/Chicago")).date().isoformat()
+            sector_pcr_history_db.record(conn, date_iso, pcr)
+            sector_pcr_history_db.prune(conn, keep=10)
+    except Exception:  # noqa: BLE001
+        log.exception("sector pcr record failed")
 
 
 def _is_rth_now() -> bool:
@@ -294,6 +332,7 @@ def refresh(bus, with_sectors: bool = False) -> None:
                   skip_unchanged=True)
 
     _record_intraday(bus, live, _TREND["trend"])
+    _record_sector_pcr(live)
 
     sector = None
     if with_sectors:
