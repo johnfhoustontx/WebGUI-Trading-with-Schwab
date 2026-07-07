@@ -9,75 +9,43 @@ with no usable creds silently no-ops. Built service-owned (NOT importing the
 legacy options-scanner/notifier.py) to avoid its winsound/winotify baggage and
 the documented `notifier` cross-app module-name collision.
 """
-import datetime as _dt
 import html as _html
-import json
-import logging
-import os
-import smtplib
 from datetime import datetime
-from email.mime.text import MIMEText
 from zoneinfo import ZoneInfo
 
-import requests
+# `import requests`/`import smtplib` are retained (unused directly here) so that
+# `push_notify.requests`/`push_notify.smtplib` resolve to the same module
+# singletons the shared senders use — existing tests monkeypatch those module
+# attributes and expect them to affect the delegated senders.
+import requests  # noqa: F401 — module handle for test monkeypatching
+import smtplib  # noqa: F401 — module handle for test monkeypatching
 
 from repo_paths import NOTIFICATIONS_CONFIG
+from shared.notify.channels import (
+    load_config as _shared_load_config,
+    send_telegram,
+    send_discord,
+    send_sms,
+    _in_market_hours,
+    _today_ct,
+)
 
-log = logging.getLogger(__name__)
+# Kept so the config-path override (which tests monkeypatch on this module) is
+# honored — `load_config()` passes it through to the shared resolver.
 _CONFIG_PATH = NOTIFICATIONS_CONFIG
 
 _TZ = ZoneInfo("America/Chicago")
 _MULT = 100
 _D_GREEN, _D_YELLOW, _D_GRAY = 0x2ECC71, 0xF1C40F, 0x95A5A6
 
-_DEFAULTS = {
-    "enabled": True,
-    "market_hours_only": True,
-    "min_score": 0,
-    "telegram": {"bot_token": "", "chat_id": 0},
-    "discord": {"webhook_url": ""},
-    "sms": {"fi_number": "", "smtp_user": "", "smtp_app_password": ""},
-}
-
-
-def _deep_merge(base: dict, over: dict) -> dict:
-    out = {k: (dict(v) if isinstance(v, dict) else v) for k, v in base.items()}
-    for k, v in (over or {}).items():
-        if isinstance(v, dict) and isinstance(out.get(k), dict):
-            out[k] = _deep_merge(out[k], v)
-        else:
-            out[k] = v
-    return out
-
 
 def load_config() -> dict:
-    """Merged config: DEFAULTS < file < env. Never raises (bad file → defaults)."""
-    cfg = _deep_merge(_DEFAULTS, {})
-    try:
-        raw = json.loads(_CONFIG_PATH.read_text())
-        if isinstance(raw, dict):
-            cfg = _deep_merge(cfg, raw)
-    except Exception:
-        pass
-    # Env overrides (win over file).
-    if os.environ.get("TELEGRAM_BOT_TOKEN"):
-        cfg["telegram"]["bot_token"] = os.environ["TELEGRAM_BOT_TOKEN"]
-    if os.environ.get("TELEGRAM_CHAT_ID"):
-        try:
-            cfg["telegram"]["chat_id"] = int(os.environ["TELEGRAM_CHAT_ID"])
-        except ValueError:
-            pass
-    if os.environ.get("DISCORD_WEBHOOK_URL"):
-        cfg["discord"]["webhook_url"] = os.environ["DISCORD_WEBHOOK_URL"]
-    if os.environ.get("FI_SMS_NUMBER"):
-        cfg["sms"]["fi_number"] = os.environ["FI_SMS_NUMBER"]
-    if os.environ.get("SMS_SMTP_USER"):
-        cfg["sms"]["smtp_user"] = os.environ["SMS_SMTP_USER"]
-    if os.environ.get("SMS_SMTP_APP_PASSWORD"):
-        cfg["sms"]["smtp_app_password"] = os.environ["SMS_SMTP_APP_PASSWORD"]
-    if os.environ.get("NOTIFY_ENABLED"):
-        cfg["enabled"] = os.environ["NOTIFY_ENABLED"].lower() not in ("0", "false", "no")
-    return cfg
+    """Options-domain config load — delegates to shared, honoring `_CONFIG_PATH`.
+
+    A thin wrapper (not a copy) so `push_notify._CONFIG_PATH` monkeypatches keep
+    working while the resolution logic lives in `shared.notify.channels`.
+    """
+    return _shared_load_config(_CONFIG_PATH)
 
 
 def signal_key(s: dict) -> str:
@@ -152,47 +120,120 @@ def sms_summary_text(sigs: list, kind: str, cap: int = 5) -> str:
     return "\n".join(lines)
 
 
-_TELEGRAM_API = "https://api.telegram.org/bot{token}/sendMessage"
-_SMTP_HOST, _SMTP_PORT = "smtp.gmail.com", 587
-_FI_GATEWAY = "@msg.fi.google.com"
+# ── Scheduled action digest (10:00 / 13:00 / 15:00 CT "trades needing action") ─
+# A thrice-daily push summarizing open positions/signals that need a human
+# decision: captured signals recommending CUT/TAKE_PROFIT, anything expiring
+# today, at-risk (short strike breached/near), and account positions nearing
+# their stop/target. Unlike new-signal alerts there is NO seen-set — each slot
+# pushes the CURRENT snapshot (the same trade legitimately re-appears at 10/1/3
+# because it still needs action); the scheduler's once-per-slot latch prevents
+# re-firing within a slot.
+_ACTION_SLOT_LABELS = {
+    "morning": "Morning (10:00 AM CT)",
+    "midday": "Midday (1:00 PM CT)",
+    "close": "Pre-close (3:00 PM CT)",
+}
+_ACTION_SECTIONS = ("captured_action", "expiring_today", "at_risk", "account_near")
 
 
-def send_telegram(token: str, chat_id, text: str) -> None:
-    if not token or not chat_id:
-        return
-    try:
-        requests.post(_TELEGRAM_API.format(token=token), json={
-            "chat_id": chat_id, "text": text, "parse_mode": "HTML",
-            "disable_web_page_preview": True,
-        }, timeout=8)
-    except Exception as exc:  # noqa: BLE001 — best-effort
-        log.warning("Telegram send failed: %s", exc)
+def action_slot_label(slot) -> str:
+    return _ACTION_SLOT_LABELS.get(slot, "")
 
 
-def send_discord(webhook_url: str, embed: dict) -> None:
-    if not webhook_url:
-        return
-    try:
-        requests.post(webhook_url, json={"embeds": [embed]}, timeout=8)
-    except Exception as exc:  # noqa: BLE001
-        log.warning("Discord send failed: %s", exc)
+def action_total(items: dict) -> int:
+    """Total count of actionable rows across all sections."""
+    return sum(len((items or {}).get(k) or []) for k in _ACTION_SECTIONS)
 
 
-def send_sms(fi_number: str, smtp_user: str, smtp_pw: str, body: str,
-             subject: str = "") -> None:
-    if not (fi_number and smtp_user and smtp_pw):
-        return
-    try:
-        msg = MIMEText(body)
-        msg["From"] = smtp_user
-        msg["To"] = f"{fi_number}{_FI_GATEWAY}"
-        msg["Subject"] = subject
-        with smtplib.SMTP(_SMTP_HOST, _SMTP_PORT, timeout=10) as smtp:
-            smtp.starttls()
-            smtp.login(smtp_user, smtp_pw)
-            smtp.send_message(msg)
-    except Exception as exc:  # noqa: BLE001
-        log.warning("Fi SMS send failed: %s", exc)
+def _row_text(section: str, s: dict) -> str:
+    sym, strat = s.get("symbol", ""), s.get("strategy", "")
+    if section == "captured_action":
+        extra = f" ({s.get('reason')})" if s.get("reason") else ""
+        return f"{sym} {strat} — {s.get('recommendation', '')}{extra}"
+    if section == "expiring_today":
+        return f"{sym} {strat} [{s.get('book', '')}] exp {s.get('expiration', '')}"
+    if section == "at_risk":
+        heat = s.get("heat")
+        h = f" (heat {heat:.0f})" if isinstance(heat, (int, float)) else ""
+        return f"{sym} {strat} — {s.get('rescue_state', '')}{h}"
+    return f"{sym} {strat} — {s.get('note', '')}"   # account_near
+
+
+_ACTION_SECTION_HEADS = {
+    "captured_action": "⚠️ Captured — act now",
+    "expiring_today": "⏰ Expiring today",
+    "at_risk": "🔴 At risk",
+    "account_near": "🎯 Near stop/target",
+}
+_ACTION_CAP = 8   # rows per section in the message
+
+
+def action_digest_text(items: dict, slot_label: str = "") -> str:
+    """Telegram HTML digest. Sections with no rows are omitted."""
+    e = lambda v: _html.escape(str(v))
+    head = "🔔 <b>Trades needing action</b>"
+    if slot_label:
+        head += f" — {e(slot_label)}"
+    lines = [head]
+    for sec in _ACTION_SECTIONS:
+        rows = (items or {}).get(sec) or []
+        if not rows:
+            continue
+        lines.append(f"\n<b>{_ACTION_SECTION_HEADS[sec]} ({len(rows)})</b>")
+        for s in rows[:_ACTION_CAP]:
+            lines.append(f"• {e(_row_text(sec, s))}")
+        if len(rows) > _ACTION_CAP:
+            lines.append(f"…+{len(rows) - _ACTION_CAP} more")
+    return "\n".join(lines)
+
+
+def action_digest_embed(items: dict, slot_label: str = "") -> dict:
+    fields = []
+    for sec in _ACTION_SECTIONS:
+        rows = (items or {}).get(sec) or []
+        if not rows:
+            continue
+        val = "\n".join(_row_text(sec, s) for s in rows[:_ACTION_CAP])
+        if len(rows) > _ACTION_CAP:
+            val += f"\n…+{len(rows) - _ACTION_CAP} more"
+        fields.append({"name": f"{_ACTION_SECTION_HEADS[sec]} ({len(rows)})",
+                       "value": val[:1000], "inline": False})
+    return {
+        "title": "🔔 Trades needing action" + (f" — {slot_label}" if slot_label else ""),
+        "color": _D_YELLOW,
+        "fields": fields,
+        "timestamp": datetime.now(_TZ).isoformat(),
+    }
+
+
+def action_sms_text(items: dict, slot_label: str = "") -> str:
+    counts = [(_ACTION_SECTION_HEADS[sec].split(" ", 1)[-1], len((items or {}).get(sec) or []))
+              for sec in _ACTION_SECTIONS]
+    parts = [f"{n} {name.lower()}" for name, n in counts if n]
+    head = "Trades need action"
+    if slot_label:
+        head += f" ({slot_label.split(' (')[0]})"
+    return head + ": " + (", ".join(parts) if parts else "none")
+
+
+def send_action_digest(items: dict, *, slot_label: str = "", config: dict | None = None) -> bool:
+    """Push the action digest to Telegram + Discord (+ SMS if configured).
+
+    Returns True if a send was attempted. Skips entirely when notifications are
+    disabled OR nothing needs action (no empty "all clear" spam). Best-effort per
+    channel (never raises)."""
+    cfg = config or load_config()
+    if not cfg.get("enabled", True) or action_total(items) == 0:
+        return False
+    tg = cfg.get("telegram", {})
+    dc = cfg.get("discord", {})
+    sms = cfg.get("sms", {})
+    send_telegram(tg.get("bot_token"), tg.get("chat_id"),
+                  action_digest_text(items, slot_label))
+    send_discord(dc.get("webhook_url"), action_digest_embed(items, slot_label))
+    send_sms(sms.get("fi_number"), sms.get("smtp_user"), sms.get("smtp_app_password"),
+             action_sms_text(items, slot_label), subject="Trades need action")
+    return True
 
 
 def new_keys(current: list, prev: dict | None, today: str):
@@ -227,40 +268,6 @@ def load_seen(bus, key: str):
 
 def save_seen(bus, key: str, state: dict) -> None:
     bus.cache_set(key, state)
-
-
-# Local NYSE full-closure holidays + trading window, copied from webgui/alerts.py
-# so this gate agrees with the rest of the stack WITHOUT importing that module
-# (alerts.py pulls in pages.options.scanner → NiceGUI/engine deps we don't want
-# in the always-on service process). **Update yearly** alongside alerts._HOLIDAYS.
-_MKT_OPEN, _MKT_CLOSE = _dt.time(8, 0), _dt.time(15, 0)   # CT trading window
-_HOLIDAYS = frozenset({
-    # 2026
-    _dt.date(2026, 1, 1), _dt.date(2026, 1, 19), _dt.date(2026, 2, 16), _dt.date(2026, 4, 3),
-    _dt.date(2026, 5, 25), _dt.date(2026, 6, 19), _dt.date(2026, 7, 3), _dt.date(2026, 9, 7),
-    _dt.date(2026, 11, 26), _dt.date(2026, 12, 25),
-    # 2027
-    _dt.date(2027, 1, 1), _dt.date(2027, 1, 18), _dt.date(2027, 2, 15), _dt.date(2027, 3, 26),
-    _dt.date(2027, 5, 31), _dt.date(2027, 6, 18), _dt.date(2027, 7, 5), _dt.date(2027, 9, 6),
-    _dt.date(2027, 11, 25), _dt.date(2027, 12, 24),
-})
-
-
-def _today_ct() -> str:
-    return _dt.datetime.now(_TZ).date().isoformat()
-
-
-def _in_market_hours() -> bool:
-    """Trading-day 08:00–15:00 CT. Uses a local weekday + holiday check (a copy of
-    webgui/alerts.py's calendar) so the gate agrees with the rest of the stack
-    without importing that NiceGUI-coupled module. Defensive → True on any error
-    (fail-open: better a rare off-hours notify than silently dropping all)."""
-    try:
-        ct = _dt.datetime.now(_TZ)
-        return (ct.weekday() < 5 and ct.date() not in _HOLIDAYS
-                and _MKT_OPEN <= ct.time() <= _MKT_CLOSE)
-    except Exception:
-        return True
 
 
 def notify_signals(bus, signals: list, *, kind: str, seen_key: str,
