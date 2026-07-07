@@ -447,3 +447,89 @@ def test_first_snapshot_today_empty(tmp_path, monkeypatch):
     conn = db.connect()
     db.init_schema(conn)
     assert db.first_snapshot_today(conn, "$SPX", "dex") == {}
+
+
+def test_insert_snapshot_roundtrips_skew_scalars(tmp_path, monkeypatch):
+    """The 25-delta skew scalars (rr_25d/call_vol/put_vol) round-trip from the
+    summary dict through insert_snapshot to the DB."""
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    db.insert_snapshot(
+        conn, "$SPX", "dex",
+        {"ts": 1_700_000_000, "spot": 5000.0, "flip": None,
+         "top_pos_strike": None, "top_neg_strike": None, "net_total": 0.0,
+         "rr_25d": 4.5, "call_vol": 1200, "put_vol": 1500},
+        {}, 0,
+    )
+    row = conn.execute(
+        "SELECT rr_25d, call_vol, put_vol FROM snapshots WHERE view = 'dex'"
+    ).fetchone()
+    assert row == (4.5, 1200, 1500)
+
+
+def test_insert_snapshot_missing_skew_is_null(tmp_path, monkeypatch):
+    """A summary WITHOUT the skew keys → the columns are NULL, no error."""
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    db.insert_snapshot(
+        conn, "SPY", "gex",
+        {"ts": 1_700_000_000, "spot": 100.0, "flip": None,
+         "top_pos_strike": None, "top_neg_strike": None, "net_total": None},
+        {}, 1,
+    )
+    row = conn.execute(
+        "SELECT rr_25d, call_vol, put_vol FROM snapshots WHERE symbol = 'SPY'"
+    ).fetchone()
+    assert row == (None, None, None)
+
+
+def test_skew_columns_backfilled_on_preexisting_db(tmp_path, monkeypatch):
+    """A DB created before the skew columns existed must get them via ALTER TABLE
+    (rr_25d REAL, call_vol INTEGER, put_vol INTEGER), and a subsequent insert must
+    round-trip the scalars."""
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "legacy.db")
+    conn = db.connect()
+    # Pre-migration schema: has the 0-DTE cols but NOT the skew cols.
+    conn.executescript(
+        """
+        CREATE TABLE snapshots (
+            symbol          TEXT    NOT NULL,
+            view            TEXT    NOT NULL,
+            ts              INTEGER NOT NULL,
+            spot            REAL,
+            flip            REAL,
+            top_pos_strike  REAL,
+            top_neg_strike  REAL,
+            net_total       REAL,
+            dte             INTEGER,
+            gex_json        TEXT,
+            net_delta_0dte            REAL,
+            projected_net_delta_close REAL,
+            hedge_pressure            REAL,
+            PRIMARY KEY (symbol, view, ts)
+        );
+        """
+    )
+    db.init_schema(conn)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(snapshots)")}
+    assert {"rr_25d", "call_vol", "put_vol"} <= cols
+
+    # And the scalars round-trip through insert after the migration.
+    db.insert_snapshot(
+        conn, "$SPX", "dex",
+        {"ts": 1_700_000_000, "spot": 5000.0, "flip": None,
+         "top_pos_strike": None, "top_neg_strike": None, "net_total": 0.0,
+         "rr_25d": -2.1, "call_vol": 900, "put_vol": 1100},
+        {}, 0,
+    )
+    row = conn.execute(
+        "SELECT rr_25d, call_vol, put_vol FROM snapshots WHERE view = 'dex'"
+    ).fetchone()
+    assert row == (-2.1, 900, 1100)
+
+    # Idempotent: a second init_schema must not raise or duplicate columns.
+    db.init_schema(conn)
+    cols_after = {r[1] for r in conn.execute("PRAGMA table_info(snapshots)")}
+    assert cols_after == cols

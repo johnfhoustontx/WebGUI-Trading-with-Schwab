@@ -53,6 +53,9 @@ CREATE TABLE IF NOT EXISTS snapshots (
     net_delta_0dte            REAL,
     projected_net_delta_close REAL,
     hedge_pressure            REAL,
+    rr_25d                    REAL,
+    call_vol                  INTEGER,
+    put_vol                   INTEGER,
     PRIMARY KEY (symbol, view, ts)
 );
 CREATE INDEX IF NOT EXISTS idx_snap_today
@@ -84,9 +87,16 @@ def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(_SCHEMA)
     # Backfill columns on pre-existing DBs (SQLite lacks IF NOT EXISTS for columns).
     existing = {row[1] for row in conn.execute("PRAGMA table_info(snapshots)")}
-    for col in ("net_delta_0dte", "projected_net_delta_close", "hedge_pressure"):
+    for col, col_type in (
+        ("net_delta_0dte", "REAL"),
+        ("projected_net_delta_close", "REAL"),
+        ("hedge_pressure", "REAL"),
+        ("rr_25d", "REAL"),
+        ("call_vol", "INTEGER"),
+        ("put_vol", "INTEGER"),
+    ):
         if col not in existing:
-            conn.execute(f"ALTER TABLE snapshots ADD COLUMN {col} REAL")
+            conn.execute(f"ALTER TABLE snapshots ADD COLUMN {col} {col_type}")
     conn.commit()
     init_term_schema(conn)
 
@@ -176,8 +186,9 @@ def insert_snapshot(
         INSERT OR REPLACE INTO snapshots
             (symbol, view, ts, spot, flip, top_pos_strike,
              top_neg_strike, net_total, dte, gex_json,
-             net_delta_0dte, projected_net_delta_close, hedge_pressure)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             net_delta_0dte, projected_net_delta_close, hedge_pressure,
+             rr_25d, call_vol, put_vol)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             symbol,
@@ -193,6 +204,9 @@ def insert_snapshot(
             summary.get("net_delta_0dte"),
             summary.get("projected_net_delta_close"),
             summary.get("hedge_pressure"),
+            summary.get("rr_25d"),
+            summary.get("call_vol"),
+            summary.get("put_vol"),
         ),
     )
 
