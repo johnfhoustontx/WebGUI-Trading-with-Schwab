@@ -7,13 +7,17 @@ stays responsive. Passed to the scaffold as ``make_app(scheduler=loop)``; the
 scaffold runs it once and the loop+sleep here own the cadence.
 """
 import asyncio
+import logging
 from datetime import date as _date, time as _time
 from zoneinfo import ZoneInfo
 
-from services.sentiment_svc import handlers
+from services.sentiment_svc import handlers, order_flow_consumer
+
+log = logging.getLogger(__name__)
 
 REFRESH_INTERVAL_SEC = 120
 TREND_INTERVAL_SEC = 900   # 15 minutes — directional Market Trend recompute cadence
+ORDER_FLOW_PUBLISH_SEC = 30   # publish cache:sentiment:order_flow at this cadence
 
 # ── Off-hours refresh gating (P4) ────────────────────────────────────────────
 # The 120 s refresh used to run UNCONDITIONALLY 24/7 — ~30-40 proxy→Schwab calls
@@ -98,13 +102,47 @@ async def loop(bus):
         await loop_.run_in_executor(None, handlers.refresh_rotation, bus)
     except Exception:  # noqa: BLE001
         pass
+
+    # Streaming aggressor order-flow (aggression axis input). Start the blocking
+    # SSE consumer on a daemon thread + a ~30 s publish task, both guarded so a
+    # consumer/publish failure can NEVER break the main refresh loop below.
+    of_stop = None
+    of_task = None
+    try:
+        of_stop = order_flow_consumer.start_consumer(bus)
+        of_task = asyncio.create_task(_order_flow_publish_loop(bus, loop_))
+    except Exception:  # noqa: BLE001 — order-flow is best-effort; refresh must go on.
+        log.exception("order-flow consumer failed to start")
+
     last_slot = None  # off-hours throttle slot (see refresh_due)
+    try:
+        while True:
+            await asyncio.sleep(REFRESH_INTERVAL_SEC)
+            due, last_slot = refresh_due(_market_now(), last_slot)
+            if not due:
+                continue
+            try:
+                await loop_.run_in_executor(None, handlers.refresh, bus, False)
+            except Exception:  # noqa: BLE001 — never let the scheduler die.
+                pass
+    finally:
+        if of_stop is not None:
+            of_stop.set()
+        if of_task is not None:
+            of_task.cancel()
+
+
+async def _order_flow_publish_loop(bus, loop_):
+    """Publish ``cache:sentiment:order_flow`` every ~30 s off the event loop.
+
+    Fully isolated from the main refresh loop — any publish failure is swallowed
+    (``order_flow_consumer.publish`` is itself defensive) so streaming order-flow
+    can never break the composite refresh cadence."""
     while True:
-        await asyncio.sleep(REFRESH_INTERVAL_SEC)
-        due, last_slot = refresh_due(_market_now(), last_slot)
-        if not due:
-            continue
+        await asyncio.sleep(ORDER_FLOW_PUBLISH_SEC)
         try:
-            await loop_.run_in_executor(None, handlers.refresh, bus, False)
-        except Exception:  # noqa: BLE001 — never let the scheduler die.
-            pass
+            await loop_.run_in_executor(None, order_flow_consumer.publish, bus)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 — best-effort publish.
+            log.debug("order-flow publish tick failed", exc_info=True)
