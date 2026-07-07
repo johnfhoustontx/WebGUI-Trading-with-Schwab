@@ -81,6 +81,17 @@ logs/scanner_YYYY-MM-DD.log
 
 Both `.db` files use idempotent `init_schema` migrations — safe to call on every startup.
 
+## Five-state classifier engine inputs (2026-07-07)
+
+Two PURE engine modules feed the webgui's five-state market classifier (full design in the root
+`CLAUDE.md`): **`flow_skew.py`** — `risk_reversal_25d(chain)` (25-δ put−call IV, shared front
+expiration) + `index_call_put_volume(chain)`, computed in the options-service **2-min GEX poll** from
+the already-fetched $SPX/SPY/QQQ chains (no extra fetch), persisted per snapshot in `gex_history_db`
+(additive `rr_25d`/`call_vol`/`put_vol` columns) → published as `cache:options:flow_skew`. And
+**`strategy_scoring.py`** gained a LOW-weight market-state family tilt (`state_family_tilt`,
+`STATE_TILT_MAX=6`) folded into `score_strategy`'s composite **after** the hard-gate grade (a ranking
+nudge that can never flip a gated grade), fed the live state by the options-service `swing` handler.
+
 ## Where to extend
 
 - **New Greek view** (e.g. Vanna): extend `GammaEngine` in `gamma_tool.py` mirroring `calc_charm_from_chain`, add the view string to `_set_view`/`_redraw`, add `bs_vanna` in `options_calculator.py`. The history-DB schema is view-string keyed — no migration needed.

@@ -37,7 +37,17 @@ sentiment-dashboard, and claude-driver all fetch market data through it.
 | `trade_registry.py`  | Registry of tracked OptionsScanner paper trades.                |
 | `trade_detector.py`  | Detects fills/events from the option stream.                    |
 | `perf_writer.py`     | Writes trade-performance events + IV snapshots.                 |
-| `stream_bridge.py`   | `schwab.streaming` LEVELONE_OPTIONS subscription bridge.        |
+| `stream_bridge.py`   | `schwab.streaming` LEVELONE_OPTIONS/EQUITIES subscription bridge. |
+
+**Streaming SSE fan-outs (2026-07-07).** The shared `_stream_worker` fans level-one ticks to SSE
+subscribers via **`/stream/quotes?symbols=…`** (equities — `_normalize_level1_equity` widened with
+bid/ask/sizes/last-size/volume + RTH `REGULAR_MARKET_*` fallbacks) and **`/stream/options?symbols=<OSI,…>`**
+(options — new `_normalize_level1_option` + a refcounted OSI union that is **provably additive to
+paper-trade tracking**: the reconcile subscribes `_registry.legs_union() ∪ flow_osis` on the serialized
+stream loop, and the trade-untrack orphan guard spares `_option_refcount`, so a tracked leg can NEVER
+lose its subscription; the `_on_option_message` trade-detector block is byte-identical, fan-out appended
+after). Consumed by `portfolio_svc` (equity P&L) + `sentiment_svc`'s `order_flow_consumer` (aggressor
+order-flow for the five-state classifier). Both refcounts support multiple concurrent subscribers.
 
 ## Logging
 
