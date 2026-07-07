@@ -249,20 +249,31 @@ def test_option_flow_balanced_near_zero():
 
 
 def test_option_flow_prev_last_carried_per_osi():
-    """prev_last is tracked PER OSI: two OSIs' inside-spread ticks each tick-test
-    against their OWN previous last, not a shared running value."""
+    """prev_last is tracked PER OSI — and this test DISCRIMINATES a shared global
+    prev_last from the per-OSI map. The CALL trade interleaved between the PUT's
+    two trades is priced ABOVE the PUT's first, so:
+
+      * per-OSI:  PUT#2 (4.96) tick-tests vs the PUT's OWN prior 4.95 -> UP  -> +1
+                  (put_buy),  net signal -1 (bearish).
+      * global:   PUT#2 (4.96) tick-tests vs the shared prior 4.99 (the CALL) ->
+                  DOWN -> -1 (put_sell), net signal +1 (bullish).
+
+    All trades are strictly mid-spread (bid<last<ask) so the tick test — not the
+    quote rule — drives every classification. A regression to a single global
+    prev_last would flip these assertions.
+    """
+    b, a = 4.90, 5.00   # strictly inside the spread -> tick test decides sign
     ticks = [
-        # CALL: first inside-spread -> prev None -> 0; then uptick -> +1 (buy).
-        {"osi": _CALL, "last": 4.95, "size": 1, "bid": 4.90, "ask": 5.00},
-        {"osi": _PUT, "last": 4.95, "size": 1, "bid": 4.90, "ask": 5.00},   # prev None -> 0
-        {"osi": _CALL, "last": 4.98, "size": 1, "bid": 4.90, "ask": 5.00},  # vs CALL 4.95 -> +1
-        {"osi": _PUT, "last": 4.92, "size": 1, "bid": 4.90, "ask": 5.00},   # vs PUT 4.95 -> -1 (put sell)
+        {"osi": _PUT,  "last": 4.95, "size": 1, "bid": b, "ask": a},  # prev None -> 0
+        {"osi": _CALL, "last": 4.99, "size": 1, "bid": b, "ask": a},  # prev None -> 0 (global prev now 4.99)
+        {"osi": _PUT,  "last": 4.96, "size": 1, "bid": b, "ask": a},  # per-OSI 4.96>4.95 UP; global 4.96<4.99 DOWN
     ]
     r = aggregate_option_flow(ticks)
-    assert r["call_buy"] == 1.0     # the CALL uptick
-    assert r["put_sell"] == 1.0     # the PUT downtick
-    # net (call_buy - call_sell) - (put_buy - put_sell) = 1 - (-1) = +2 over vol 2
-    assert r["signal"] > 0
+    # ONLY the per-OSI implementation produces these (global -> put_sell=1, signal +1).
+    assert r["put_buy"] == 1.0
+    assert r["put_sell"] == 0.0
+    assert r["call_buy"] == 0.0 and r["call_sell"] == 0.0
+    assert r["signal"] == -1.0
 
 
 def test_option_flow_untaggable_osi_skipped():
