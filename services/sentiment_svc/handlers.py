@@ -26,8 +26,8 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo as _ZI
 
 from services.sentiment_svc import (
-    compute, intraday_history_db, market_state_history_db, scheduler,
-    sector_pcr_history_db, state_alert)
+    compute, intraday_history_db, market_state_history_db, order_flow_consumer,
+    scheduler, sector_pcr_history_db, state_alert)
 from shared.contracts.sentiment import CompositeSnapshot
 
 log = logging.getLogger(__name__)
@@ -92,8 +92,9 @@ def _maybe_recompute_trend(bus):
     Threads persisted hysteresis/smoothing state through ``compute_intraday_trend``
     and refreshes the cached payloads in ``_TREND``. Also feeds the aggression axis:
     the cross-service ``cache:options:flow_skew`` view (25-delta put-skew Δ) read
-    from the bus, and ``compute.sector_pc_delta()`` (5-day cap-weighted sector P/C
-    Δ). Both reads are defensive — a bus/cache failure degrades to None, never
+    from the bus, ``compute.sector_pc_delta()`` (5-day cap-weighted sector P/C Δ),
+    and ``cache:sentiment:order_flow`` (streamed SPY aggressor ratio) read from the
+    bus. All reads are defensive — a bus/cache failure degrades to None, never
     aborts. Defensive overall — a recompute failure logs and leaves the prior
     cached trend in place (never aborts refresh).
     """
@@ -117,6 +118,15 @@ def _maybe_recompute_trend(bus):
         except Exception:  # noqa: BLE001 — degrade to None.
             log.debug("sector_pc_delta read failed", exc_info=True)
             pc_delta = None
+        # Streamed aggressor order-flow (cache:sentiment:order_flow), published by
+        # the service's own SSE consumer. Defensive read → None drops out.
+        order_flow = None
+        try:
+            env = bus.cache_get(order_flow_consumer.CACHE_ORDER_FLOW)
+            if env is not None and isinstance(env.payload, dict):
+                order_flow = env.payload
+        except Exception:  # noqa: BLE001 — degrade to None.
+            log.debug("order_flow read failed", exc_info=True)
 
         try:
             t = compute.compute_intraday_trend(
@@ -125,7 +135,8 @@ def _maybe_recompute_trend(bus):
                 prior_committed=_TREND["committed"],
                 prev_smoothed=_TREND["smoothed"],
                 flow_skew=flow_skew,
-                sector_pc_delta=pc_delta)
+                sector_pc_delta=pc_delta,
+                order_flow=order_flow)
             t30 = compute.compute_30d_trend()
             prev_committed = _TREND["committed"]
             _TREND.update(

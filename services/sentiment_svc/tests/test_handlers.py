@@ -441,6 +441,33 @@ def test_refresh_feeds_flow_skew_and_pc_delta_into_trend(monkeypatch):
     _reset_trend()
 
 
+def test_refresh_feeds_order_flow_into_trend(monkeypatch):
+    """``_maybe_recompute_trend`` reads ``cache:sentiment:order_flow`` from the bus
+    and threads it into the trend compute as ``order_flow=``."""
+    _reset_trend()
+    bus = Bus(fake=True)
+    _patch_compute(monkeypatch, live=_fake_live(), snaps=[{"x": 1}], spy=[1.0])
+
+    # The service's own SSE consumer publishes the order-flow view — seed it.
+    order_flow = {"SPY": {"aggressor_ratio": 0.8, "n": 50}}
+    bus.cache_set(handlers.order_flow_consumer.CACHE_ORDER_FLOW, order_flow)
+
+    captured = {}
+
+    def _capture(*a, **k):
+        captured["order_flow"] = k.get("order_flow")
+        return {"state": "bullish", "state_history": [], "smoothed_score": 70.0}
+
+    monkeypatch.setattr(handlers.compute, "compute_intraday_trend", _capture)
+    monkeypatch.setattr(handlers.compute, "compute_30d_trend", lambda *a, **k: {})
+    monkeypatch.setattr(handlers.time, "monotonic", lambda: 9100.0)
+
+    handlers.refresh(bus, with_sectors=False)
+
+    assert captured["order_flow"] == order_flow
+    _reset_trend()
+
+
 def test_refresh_trend_recompute_failure_non_fatal(monkeypatch):
     """A blowup in the trend recompute is logged and does not abort the refresh
     (the composite still caches with whatever trend was last held — None)."""

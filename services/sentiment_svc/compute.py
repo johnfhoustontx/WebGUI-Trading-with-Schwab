@@ -40,6 +40,7 @@ from scoring import rotation as scoring_rotation    # noqa: E402
 from scoring import intraday_trend  # noqa: E402
 from scoring import effort as effort_mod  # noqa: E402
 from scoring import aggression as aggression_mod  # noqa: E402
+from scoring import order_flow as order_flow_mod  # noqa: E402
 from scoring import market_state  # noqa: E402
 from scoring import session_structure as session_structure_mod  # noqa: E402
 from scoring import rejection_defense as rejection_mod  # noqa: E402
@@ -361,7 +362,8 @@ def _mean(seq):
 
 def compute_intraday_trend(schwab, sector_data=None, prior_history=None,
                            prior_committed=None, prev_smoothed=None,
-                           flow_skew=None, sector_pc_delta=None) -> dict:
+                           flow_skew=None, sector_pc_delta=None,
+                           order_flow=None) -> dict:
     """Live five-state Market State from direction × aggression.
 
     Blends four sub-scores (price MTF/VWAP/MACD/RSI, breadth, sector
@@ -376,8 +378,10 @@ def compute_intraday_trend(schwab, sector_data=None, prior_history=None,
 
     ``flow_skew`` is the ``cache:options:flow_skew`` payload
     (``{symbol: {rr_delta, ...}}``); ``sector_pc_delta`` is
-    ``compute.sector_pc_delta()`` (a float or None). Both default None so the
-    aggression axis degrades gracefully to effort-only / neutral.
+    ``compute.sector_pc_delta()`` (a float or None); ``order_flow`` is the
+    ``cache:sentiment:order_flow`` payload (``{symbol: {aggressor_ratio, n, ...}}``,
+    SPY used — positive = net buying = ALIGNED, no sign flip). All default None so
+    the aggression axis degrades gracefully to effort-only / neutral.
 
     Each sub-block is defensive: on failure that sub-score becomes
     ``TrendSub(50, 0)`` and drops out of the confidence-weighted blend. An
@@ -575,12 +579,23 @@ def compute_intraday_trend(schwab, sector_data=None, prior_history=None,
         else:
             flow_comp, flow_conf = 0.0, 0.0
 
-        #    (order_flow arrives in a later phase; its absence just drops out.)
+        #    (d0) order_flow — streamed aggressor ratio (SPY). Positive = net
+        #         buying = ALIGNED with aggression (NO sign flip). Missing/malformed
+        #         → drops out (conf 0). Read via the pure flow_aggression_component.
+        of_score, of_conf = 0.0, 0.0
+        try:
+            of = order_flow or {}
+            spy_flow = of.get("SPY")
+            if isinstance(spy_flow, dict):
+                of_score, of_conf = order_flow_mod.flow_aggression_component(spy_flow)
+        except Exception:  # noqa: BLE001 — order-flow simply drops out.
+            of_score, of_conf = 0.0, 0.0
+
         aggression, agg_conf = aggression_mod.blend_aggression(
             {"effort": effort_score, "skew": skew_comp, "flow": flow_comp,
-             "rejection": rej_score},
+             "rejection": rej_score, "order_flow": of_score},
             {"effort": effort_conf, "skew": skew_conf, "flow": flow_conf,
-             "rejection": rej_conf})
+             "rejection": rej_conf, "order_flow": of_conf})
 
         #    (d) profile shape — a balanced single-HVN session DAMPENS aggression
         #        (rotational balance -> more likely Neutral, sharpening that state).
@@ -613,6 +628,8 @@ def compute_intraday_trend(schwab, sector_data=None, prior_history=None,
             evidence.append(f"put-skew Δ {rr_delta:+.1f}")
         if sector_pc_delta is not None:
             evidence.append(f"sector P/C Δ {sector_pc_delta:+.2f}")
+        if of_conf > 0:
+            evidence.append(f"order-flow {of_score:+.2f}")
         if prof_shape is not None:
             evidence.append(f"profile {prof_shape} ({prof_bal:.2f})")
         evidence.append(f"aggression {aggression:+.2f}")

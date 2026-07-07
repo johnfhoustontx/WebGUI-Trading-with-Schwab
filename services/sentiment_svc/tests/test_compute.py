@@ -422,6 +422,34 @@ def test_balanced_profile_dampens_aggression(monkeypatch):
     assert any("profile trend" in e for e in base["evidence"])   # shape still logged
 
 
+def test_order_flow_makes_aggression_more_positive():
+    """Streamed positive SPY aggressor ratio lifts the aggression axis (NO sign
+    flip — net buying is aligned) and logs an order-flow evidence line; a mirror
+    negative ratio drags it down. Same schwab fixture, only order_flow differs."""
+    sch = _FakeBullSchwab()
+    base = compute.compute_intraday_trend(sch)  # no order_flow
+    hi = compute.compute_intraday_trend(
+        sch, order_flow={"SPY": {"aggressor_ratio": 0.8, "n": 50}})
+    lo = compute.compute_intraday_trend(
+        sch, order_flow={"SPY": {"aggressor_ratio": -0.8, "n": 50}})
+    assert hi["aggression"] > base["aggression"]   # positive flow lifts aggression
+    assert hi["aggression"] > lo["aggression"]     # monotonic in the ratio
+    assert any("order-flow" in e for e in hi["evidence"])
+    assert not any("order-flow" in e for e in base["evidence"])
+
+
+def test_order_flow_missing_or_malformed_drops_out():
+    """None / no-SPY / ratio-None order_flow all drop the component out; the
+    classifier still runs and produces a valid state (graceful degradation)."""
+    sch = _FakeBullSchwab()
+    for of in (None, {}, {"QQQ": {"aggressor_ratio": 0.9, "n": 40}},
+               {"SPY": {"aggressor_ratio": None, "n": 0}},
+               {"SPY": "not-a-dict"}):
+        out = compute.compute_intraday_trend(sch, order_flow=of)
+        assert out["state"] in _TREND_STATES
+        assert not any("order-flow" in e for e in out["evidence"])
+
+
 def test_micro_signals_drop_out_on_no_data():
     """No frames (proxy down) -> session/rejection/profile all drop out; the
     classifier still returns a valid neutral state (graceful)."""
