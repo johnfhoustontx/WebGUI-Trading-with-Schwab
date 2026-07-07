@@ -9,8 +9,8 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > port change, copied/removed module — update the relevant section here.
 
 **Last updated:** 2026-07-07 (**Five-state market classifier (direction × aggression) —
-Phases 0–3 shipped (LIVE on REST data); Phases 4–5 (streamer order flow) DEFERRED to a live
-follow-up**: the app's one-axis intraday
+Phases 0–5 shipped (Phases 0–3 LIVE on REST data; Phases 4–5 streamer order flow code-complete,
+pending a live RTH check)**: the app's one-axis intraday
 trend state (`scoring/intraday_trend.py:score_to_state` → `bull_trend`/`pullback_in_bull`/`range`/
 `bear_rally`/`bear_trend`) is **replaced — for the regime-driving intraday state** — by a
 **two-axis direction × aggression classifier** emitting five trader states: **Bullish / Lack of
@@ -57,23 +57,36 @@ upper-wick exhaustion at highs vs defended-dip resilience → a new `rejection` 
 **state-transition phone push** (`services/sentiment_svc/state_alert.py`: on a committed-state FLIP,
 fire Telegram/Discord/Fi-SMS via the `shared/notify/` helper, gated enabled + valid-new-vocab + differ
 + market-hours; the cold-start old→new-vocab first cycle and same-state are skipped; best-effort, can't
-abort the recompute). **DEFERRED — Phases 4–5 (streamer equity + option aggressor flow), a LIVE
-follow-up:** widen the proxy's L1-equity + L1-option normalizers (add bid/ask/sizes/last-size/volume —
-the equity normalizer today carries only `last`/`net_change`), add an option SSE fan-out with a
-refcounted OSI union on the EXISTING shared stream worker (`schwab_proxy._stream_worker`, which also
-serves paper-trade tracking + the portfolio SSE — higher blast radius), and a sentiment_svc SSE
-consumer that classifies last-vs-bid/ask (quote rule) → aggressor ratio / CVD + put/call aggressor
-pressure → `cache:sentiment:order_flow` → the aggression axis's still-unused `order_flow` component
-(weight 0.15, currently drops out). **Deferred because it needs the LIVE Schwab stream up to verify the
-exact populated L1 field mappings against a real RTH sample (a `TODO(live)` the plan flags), which a
-headless build can't do** — do it with the stack running. **DEFERRED (Tier 3, separate design): item 9**
+abort the recompute). **Phases 4–5 (SHIPPED — streamer equity + option aggressor flow; code-complete,
+pending a LIVE RTH verification):** the aggression axis now has real order-flow. **Proxy (additive,
+proven-safe):** `_normalize_level1_equity` widened with bid/ask/bid_size/ask_size/last_size/total_volume
+(+ RTH `REGULAR_MARKET_*` fallbacks for last/last_size — resolves the old `TODO(live)`); a NEW
+`_normalize_level1_option` (last/last_size/bid/ask) + a `/stream/options` SSE fan-out with a refcounted
+OSI union on the EXISTING shared stream worker — **provably isolated from paper-trade tracking**: the
+reconcile subscribes `_registry.legs_union() ∪ flow_osis` (replace-semantics, read fresh on the stream
+loop) and the trade-untrack orphan guard spares `_option_refcount`, so a tracked leg can NEVER lose its
+subscription; the trade-detector block in `_on_option_message` is byte-identical (fan-out appended after).
+**Consumers (`services/sentiment_svc/order_flow_consumer.py`, mirror the portfolio SSE-worker pattern):**
+an EQUITY worker streams `/stream/quotes?symbols=SPY,QQQ`, classifies each trade via the PURE
+`scoring/order_flow.py` (Lee-Ready quote rule + tick test → aggressor ratio / CVD), rolls a 5-min window;
+an OPTION worker refreshes near-ATM SPY/QQQ OSIs every 5 min, streams `/stream/options`, classifies
+put/call trades at bid/ask (per-OSI prev_last) → a signed put/call-pressure `signal` (put-buying →
+NEGATIVE → bearish); both publish into **`cache:sentiment:order_flow`** (`{SPY,QQQ, options}`). The
+classifier folds SPY equity CVD as the **`order_flow`** component (weight 0.15) and option pressure as a
+distinct **`option_flow`** component (weight 0.10) — both NO sign flip (positive = net buying = bullish =
+aligned), both defensive/degrading (no stream → drop out). Honest caveat: level-one CONFLATES rapid
+ticks, so this is a **sampled** read (reliable over minute windows, not tick-perfect); Schwab has no
+time-&-sales, SPY proxies $SPX (no index tape). **Still needs a LIVE RTH check** (restart proxy +
+sentiment_svc, watch `cache:sentiment:order_flow` populate + the aggression axis move) — the blocking SSE
+workers are live-verified, not unit-tested (the pure classifier/window/aggregate helpers carry the
+coverage, mirroring the portfolio precedent). **DEFERRED (Tier 3, separate design): item 9**
 (state → Swing-Scanner strategy-family bias), **item 10** (state into the Driver packet + guardrail
 modifier), **item 11** (formal IC/backtest validation that the five states stratify forward returns —
 the recording exists so this can run). Everything is ADDITIVE except the ONE coordinated
 `trend_regime.state` vocabulary change (`regime_filter` rekeyed in lockstep).
-Green: sentiment_svc **112**, options_svc **396**, webgui **681**, options-scanner flow_skew **+18** /
-gex_history migration, sentiment-dashboard scoring modules
-(effort/aggression/market_state/session/rejection/profile) **+67**, shared/notify **14**.
+Green: sentiment_svc **136**, options_svc **396**, webgui **681**, schwab-proxy **82** (equity + option
+stream fan-out), options-scanner flow_skew **+18** / gex_history migration, sentiment-dashboard scoring
+modules (effort/aggression/market_state/session/rejection/profile/order_flow) **+91**, shared/notify **14**.
 Built subagent-by-subagent (TDD, two-stage spec+quality review per unit). **Restart `options_svc` +
 `sentiment_svc`** to pick this up. Branch `Using_Highcharts`. Design/plan:
 [design](docs/plans/2026-07-07-five-state-market-classifier-design.md) /
