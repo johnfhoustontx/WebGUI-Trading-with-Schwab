@@ -46,14 +46,31 @@ def _exp_date(exp_key):
     return str(exp_key).split(":", 1)[0]
 
 
-def _front_key(exp_map):
-    """The map key of the nearest (min-date) expiration, or None if empty."""
-    if not isinstance(exp_map, dict) or not exp_map:
-        return None
-    try:
-        return min(exp_map.keys(), key=_exp_date)
-    except Exception:  # pragma: no cover - defensive
-        return None
+def _shared_front_keys(call_map, put_map):
+    """(call_key, put_key) for the earliest expiration DATE present in BOTH maps.
+
+    Reading both 25-delta legs from the SAME expiration makes the tenor
+    correct-by-construction (no mismatched-tenor path from a one-sided front
+    series). Returns (None, None) when either map is missing/empty or the two
+    maps share no common expiration date.
+    """
+    if not isinstance(call_map, dict) or not isinstance(put_map, dict):
+        return None, None
+    if not call_map or not put_map:
+        return None, None
+    # Map each expiration DATE -> its full key, per side (first key wins on a
+    # duplicate date, which the Schwab shape does not produce).
+    call_by_date = {}
+    for k in call_map:
+        call_by_date.setdefault(_exp_date(k), k)
+    put_by_date = {}
+    for k in put_map:
+        put_by_date.setdefault(_exp_date(k), k)
+    shared = set(call_by_date) & set(put_by_date)
+    if not shared:
+        return None, None
+    front = min(shared)
+    return call_by_date[front], put_by_date[front]
 
 
 def _iter_contracts(strike_map):
@@ -116,16 +133,19 @@ def _sum_volume(exp_map):
 #############################################
 
 def risk_reversal_25d(chain):
-    """25-delta risk-reversal at the FRONT expiration: ``put_iv - call_iv``.
+    """25-delta risk-reversal at the shared FRONT expiration: ``put_iv - call_iv``.
 
-    Picks the nearest expiration present in each map (min expiration date across
-    the map keys), then finds the CALL nearest to +0.25 delta and the PUT nearest
-    to -0.25 delta in that expiration, reading each one's ``volatility``.
+    Uses ONE shared front expiration = the earliest expiration DATE present in
+    BOTH ``callExpDateMap`` and ``putExpDateMap`` (so both legs come from the same
+    tenor, correct-by-construction — a one-sided front series can't mix tenors),
+    then finds the CALL nearest to +0.25 delta and the PUT nearest to -0.25 delta
+    in that expiration, reading each one's ``volatility``.
 
     Returns ``{"put_iv", "call_iv", "rr"}`` (IVs in the chain's native PERCENT;
     ``rr`` positive = downside fear), or ``None`` when the chain is empty / has no
-    maps / the front expiration lacks a usable call or put (a usable contract has
-    both a non-None delta and a non-None volatility). Never raises.
+    maps / there is no expiration common to both maps / the shared front lacks a
+    usable call or put (a usable contract has both a non-None delta and a non-None
+    volatility). Never raises.
     """
     if not isinstance(chain, dict):
         return None
@@ -133,8 +153,7 @@ def risk_reversal_25d(chain):
     call_map = chain.get(_CALL_MAP)
     put_map = chain.get(_PUT_MAP)
 
-    call_key = _front_key(call_map)
-    put_key = _front_key(put_map)
+    call_key, put_key = _shared_front_keys(call_map, put_map)
     if call_key is None or put_key is None:
         return None
 

@@ -94,6 +94,33 @@ def test_rr_uses_front_expiration_only():
     assert rr["put_iv"] == 22.0
 
 
+def test_rr_uses_shared_front_expiration():
+    # Call map's earliest exp (2026-07-10:2) is ABSENT from the put map; both
+    # maps share 2026-07-11:3. RR must read BOTH legs from the shared 07-11 exp,
+    # NOT the call map's earlier-but-unmatched front.
+    chain = {
+        "callExpDateMap": {
+            "2026-07-10:2": {"5900.0": [_call(5900.0, 0.25, 99.0)]},  # unmatched front
+            "2026-07-11:3": {"5900.0": [_call(5900.0, 0.25, 18.0)]},  # SHARED
+        },
+        "putExpDateMap": {
+            "2026-07-11:3": {"5800.0": [_put(5800.0, -0.25, 22.0)]},  # SHARED (earliest)
+        },
+    }
+    rr = flow_skew.risk_reversal_25d(chain)
+    assert rr["call_iv"] == 18.0   # from shared 07-11, not the 99.0 at 07-10
+    assert rr["put_iv"] == 22.0
+    assert rr["rr"] == 4.0
+
+
+def test_rr_no_common_expiration_none():
+    chain = {
+        "callExpDateMap": {"2026-07-10:2": {"5900.0": [_call(5900.0, 0.25, 18.0)]}},
+        "putExpDateMap": {"2026-07-11:3": {"5800.0": [_put(5800.0, -0.25, 22.0)]}},
+    }
+    assert flow_skew.risk_reversal_25d(chain) is None
+
+
 def test_rr_skips_none_volatility():
     # Nearest-by-delta call has None IV -> must be skipped; next-nearest used.
     chain = {
