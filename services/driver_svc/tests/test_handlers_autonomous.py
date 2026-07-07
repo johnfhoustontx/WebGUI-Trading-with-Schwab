@@ -369,6 +369,62 @@ def test_decision_log_is_newest_first_and_capped(fake_bus, monkeypatch):
     assert log[-1]["thesis"] == "cycle-5"   # oldest retained (55 total, cap 50)
 
 
+# ── Task 3: market_state merged from cache:sentiment:composite (context only) ─
+
+
+def _capture_market_cycle(seen):
+    def _capture(scan_view, paper_view, *, target, limits, market, **k):
+        seen["market"] = market
+        return {"decision": {"stand_down": True, "day_thesis": "", "trades": []},
+                "executable": [], "rejected": [], "halted": False, "halt_reason": None,
+                "day_pnl": 0.0, "open_positions": []}
+    return _capture
+
+
+def test_cycle_merges_market_state_from_composite(fake_bus, monkeypatch):
+    """The handler reads cache:sentiment:composite derived.trend and merges the
+    five-state {state,label,evidence} into the market context passed to run_cycle."""
+    handlers.set_control(fake_bus, enabled=True)
+    _seed_caches(fake_bus)
+    fake_bus.cache_set("cache:sentiment:composite", {"derived": {"trend": {
+        "state": "lack_of_bearishness", "label": "Lack of Bearishness",
+        "description": "resilient, puts undefended",
+        "evidence": ["put-skew Δ -1.2", "aggression +0.30"]}}})
+    seen = {}
+    monkeypatch.setattr(handlers.compute, "fetch_market_context", lambda: {"vix": 14})
+    monkeypatch.setattr(handlers.compute, "run_cycle", _capture_market_cycle(seen))
+    handlers.run_autonomous_cycle(fake_bus)
+    ms = seen["market"]["market_state"]
+    assert ms["label"] == "Lack of Bearishness"
+    assert ms["state"] == "lack_of_bearishness"
+    assert "put-skew Δ -1.2" in ms["evidence"]
+    # The existing market context (vix) is preserved alongside.
+    assert seen["market"]["vix"] == 14
+
+
+def test_cycle_market_state_absent_when_no_composite(fake_bus, monkeypatch):
+    """No composite published → market carries no market_state (graceful, no crash)."""
+    handlers.set_control(fake_bus, enabled=True)
+    _seed_caches(fake_bus)   # composite deliberately NOT seeded
+    seen = {}
+    monkeypatch.setattr(handlers.compute, "fetch_market_context", lambda: {"vix": 14})
+    monkeypatch.setattr(handlers.compute, "run_cycle", _capture_market_cycle(seen))
+    handlers.run_autonomous_cycle(fake_bus)
+    assert "market_state" not in seen["market"]
+
+
+def test_cycle_market_state_absent_when_trend_blank(fake_bus, monkeypatch):
+    """A composite whose derived.trend has no state/label → no market_state (defensive)."""
+    handlers.set_control(fake_bus, enabled=True)
+    _seed_caches(fake_bus)
+    fake_bus.cache_set("cache:sentiment:composite", {"derived": {"trend": {}}})
+    seen = {}
+    monkeypatch.setattr(handlers.compute, "fetch_market_context", lambda: {})
+    monkeypatch.setattr(handlers.compute, "run_cycle", _capture_market_cycle(seen))
+    handlers.run_autonomous_cycle(fake_bus)
+    assert "market_state" not in seen["market"]
+
+
 # ── 5.3: autonomous command dispatch (cycle/enable/disable/stop) ─────────────
 
 

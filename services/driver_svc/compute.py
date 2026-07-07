@@ -206,6 +206,32 @@ def _menu_item(sig, mid) -> dict:
     }
 
 
+def _market_state_line(market) -> str | None:
+    """A concise decider-facing ``Market state`` line from the five-state context.
+
+    Reads ``market["market_state"]`` (``{state, label, evidence}`` from
+    ``cache:sentiment:composite`` ``derived.trend``, merged into the market context
+    by the handler). Renders e.g.
+    ``"Market state: Lack of Bearishness — put-skew Δ -1.2 · aggression +0.30"``.
+    Returns ``None`` when absent / malformed / label-blank so ``build_packet`` omits
+    the field entirely (no empty ``Market state:`` line).
+
+    This is REASONING CONTEXT ONLY — ``regime_filter`` already hard-gates the scanner
+    menu the driver reads, so the state changes NO hard rule (the code-authoritative
+    ``guardrails`` never see it). Defensive: never raises.
+    """
+    ms = (market or {}).get("market_state")
+    if not isinstance(ms, dict):
+        return None
+    label = str(ms.get("label") or "").strip()
+    if not label:
+        return None
+    evidence = ms.get("evidence")
+    ev = (" · ".join(s for s in (str(e).strip() for e in evidence) if s)
+          if isinstance(evidence, list) else "")
+    return f"Market state: {label} — {ev}" if ev else f"Market state: {label}"
+
+
 def build_packet(scan_view, paper_view, *, target, limits, market) -> dict:
     """Project the cache views into the model's decision packet (pure).
 
@@ -240,7 +266,7 @@ def build_packet(scan_view, paper_view, *, target, limits, market) -> dict:
     driver_positions = [p for p in positions if str(p.get("source", "")) == "driver"]
     open_positions = driver_positions or positions
 
-    return {
+    packet = {
         "target": target,
         "day_pnl": day_pnl,
         "gap_to_target": (target - day_pnl) if day_pnl is not None else target,
@@ -251,6 +277,13 @@ def build_packet(scan_view, paper_view, *, target, limits, market) -> dict:
         "open_count": len(open_positions),
         "limits": limits,
     }
+    # Additive REASONING CONTEXT: the five-state market state (label + evidence), if
+    # present. Only added when non-blank so an absent state leaves no empty line. It
+    # NEVER filters the menu — the menu/allowed set above is computed without it.
+    ms_line = _market_state_line(market)
+    if ms_line:
+        packet["market_state"] = ms_line
+    return packet
 
 
 def run_cycle(scan_view, paper_view, *, target, limits, market, client=None) -> dict:

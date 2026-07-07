@@ -48,6 +48,11 @@ CACHE_OPT_SCAN = "cache:options:scan"
 CACHE_OPT_DRIVER_PAPER = "cache:options:driver_paper_account"
 CACHE_OPT_DRIVER_PERF = "cache:options:driver_paper_perf"
 CMD_OPTIONS = "cmd:options"
+# The sentiment composite carries the five-state market state under
+# ``derived.trend`` — surfaced to the decider as REASONING CONTEXT only (the scanner
+# menu is ALREADY hard-gated by regime_filter, so this adds no hard rule; guardrails
+# are untouched).
+CACHE_SENTIMENT_COMPOSITE = "cache:sentiment:composite"
 
 # Cap on the newest-first per-checkpoint decision log carried in the monitor view.
 _DECISION_LOG_CAP = 50
@@ -159,6 +164,28 @@ def _read_payload(bus, key):
     return env.payload if env else None
 
 
+def _read_market_state(bus):
+    """The five-state market state from ``cache:sentiment:composite`` ``derived.trend``.
+
+    Returns ``{state, label, evidence}`` (additive REASONING CONTEXT for the
+    decider — ``regime_filter`` already hard-gates the scanner menu the driver
+    reads, so this changes NO hard rule and the guardrails never see it). Read
+    DEFENSIVELY → ``None`` on any failure / missing composite / blank trend, so a
+    down/slow sentiment service never blocks a cycle.
+    """
+    try:
+        trend = ((_read_payload(bus, CACHE_SENTIMENT_COMPOSITE) or {})
+                 .get("derived") or {}).get("trend") or {}
+        state, label = trend.get("state"), trend.get("label")
+        if not (state or label):
+            return None
+        ev = trend.get("evidence")
+        return {"state": state, "label": label,
+                "evidence": list(ev) if isinstance(ev, list) else []}
+    except Exception:  # noqa: BLE001 — context is best-effort; never block the cycle.
+        return None
+
+
 def _publish_autonomous(bus, *, day_pnl, positions, decision, guarded, executed,
                         control, perf=None) -> int:
     """Cache + publish the monitor view, prepending this cycle to the decision log.
@@ -229,6 +256,11 @@ def run_autonomous_cycle(bus) -> None:
     scan = _read_payload(bus, CACHE_OPT_SCAN) or {}
     paper = _read_payload(bus, CACHE_OPT_DRIVER_PAPER) or {}
     market = compute.fetch_market_context()
+    # Additive: fold the five-state market state into the decider's market context
+    # (context only — no new hard rule; the menu is already regime-gated upstream).
+    ms = _read_market_state(bus)
+    if ms:
+        market["market_state"] = ms
     out = compute.run_cycle(scan, paper, target=settings.DAILY_TARGET,
                             limits=settings.limits(), market=market)
     # Kill-switch tightening: re-read control RIGHT BEFORE firing. The top-of-fn gate
