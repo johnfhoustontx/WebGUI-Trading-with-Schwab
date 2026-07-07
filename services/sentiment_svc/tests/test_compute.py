@@ -342,6 +342,96 @@ def test_compute_intraday_trend_migration_guard_old_vocab_prior():
     assert out["state"] == out["raw_state"] == "bullish"
 
 
+# --- micro-structure refinements: session / rejection / profile ---------------
+
+def _wick_bars(n, start, step, wick, tail, vol=1_000_000):
+    """A rising DAILY OHLCV frame with big UPPER wicks + tiny lower tails —
+    exhaustion/rejection near the highs (bearish for aggression)."""
+    closes = [start + i * step for i in range(n)]
+    return pd.DataFrame({
+        "open": closes,
+        "high": [c + wick for c in closes],   # long upper wick
+        "low": [c - tail for c in closes],     # tiny lower tail
+        "close": closes,
+        "volume": [vol] * n,
+        "datetime": pd.date_range("2026-06-01", periods=n, freq="D"),
+    })
+
+
+class _FakeExhaustedRallySchwab(_FakeBullSchwab):
+    """Rising intraday tape (bullish DIRECTION) but the DAILY SPY frame prints
+    big upper wicks near the highs -> rejection/exhaustion (negative aggression)."""
+
+    def get_daily_history(self, symbol, months=12):
+        if symbol == "$VIX":
+            return _bars(60, 20.0, -0.05)
+        return _wick_bars(60, 400.0, 0.6, wick=3.0, tail=0.2)
+
+
+def test_session_structure_nudges_price_direction_up(monkeypatch):
+    """A strongly-bullish session structure (above VWAP + OR break) blends INTO
+    the price sub-score, lifting the direction vs the same read with no session."""
+    ss = compute.session_structure_mod
+    # control: session forced to zero confidence -> no blend, price untouched.
+    monkeypatch.setattr(ss, "score_session_structure",
+                        lambda *a, **k: ss.SessionStructure(0.0, 0.0))
+    base = compute.compute_intraday_trend(_FakeBullSchwab())
+    # treatment: a max-bullish structure blends in and raises the price sub-score.
+    monkeypatch.setattr(ss, "score_session_structure",
+                        lambda *a, **k: ss.SessionStructure(1.0, 1.0))
+    boosted = compute.compute_intraday_trend(_FakeBullSchwab())
+    assert boosted["sub_scores"]["price"] > base["sub_scores"]["price"]
+    # the session readout appears only when it carries confidence.
+    assert any("session" in e for e in boosted["evidence"])
+    assert not any("session" in e for e in base["evidence"])
+
+
+def test_rejection_pushes_aggression_more_negative(monkeypatch):
+    """Big daily upper wicks (rejection) drag the aggression axis MORE negative;
+    a bullish direction + negative aggression -> lack_of_bullishness."""
+    sch = _FakeExhaustedRallySchwab()
+    real = compute.compute_intraday_trend(sch)          # real rejection reading
+    rd = compute.rejection_mod
+    monkeypatch.setattr(rd, "score_rejection_defense",
+                        lambda *a, **k: rd.RejectionDefense(0.0, 0.0))
+    base = compute.compute_intraday_trend(sch)          # rejection dropped out
+    assert real["score"] > 60.0                         # direction still bullish
+    assert real["aggression"] < base["aggression"]      # rejection dragged it down
+    assert real["aggression"] < 0.0
+    assert real["state"] == "lack_of_bullishness"
+    assert any("rejection/defense" in e for e in real["evidence"])
+    assert not any("rejection/defense" in e for e in base["evidence"])
+
+
+def test_balanced_profile_dampens_aggression(monkeypatch):
+    """A strongly-balanced single-HVN profile shrinks |aggression| toward 0
+    (rotational balance -> more likely Neutral)."""
+    ps = compute.profile_mod
+    sch = _FakeBullSchwab()
+    kwargs = dict(flow_skew={"SPY": {"rr_delta": -1.0}})   # mild positive aggression
+    # control: no balance (strength 0) -> no damping.
+    monkeypatch.setattr(ps, "classify_profile_shape",
+                        lambda *a, **k: ps.ProfileShape("trend", 0.0, 0.0))
+    base = compute.compute_intraday_trend(sch, **kwargs)
+    # treatment: a max-balanced session -> heavy damping (factor 1-0.5*1=0.5).
+    monkeypatch.setattr(ps, "classify_profile_shape",
+                        lambda *a, **k: ps.ProfileShape("balance", 1.0, 1.0))
+    damped = compute.compute_intraday_trend(sch, **kwargs)
+    assert abs(damped["aggression"]) < abs(base["aggression"])
+    assert any("profile balance" in e for e in damped["evidence"])
+    assert any("profile trend" in e for e in base["evidence"])   # shape still logged
+
+
+def test_micro_signals_drop_out_on_no_data():
+    """No frames (proxy down) -> session/rejection/profile all drop out; the
+    classifier still returns a valid neutral state (graceful)."""
+    out = compute.compute_intraday_trend(_FakeDeadSchwab())
+    assert out["state"] == "neutral"
+    assert not any("session" in e for e in out["evidence"])
+    assert not any("rejection/defense" in e for e in out["evidence"])
+    assert not any("profile" in e for e in out["evidence"])
+
+
 # --- 30-day structural trend (Phase 3) ----------------------------------------
 
 def test_compute_30d_trend_from_daily():

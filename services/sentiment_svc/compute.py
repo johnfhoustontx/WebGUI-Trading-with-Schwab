@@ -41,6 +41,9 @@ from scoring import intraday_trend  # noqa: E402
 from scoring import effort as effort_mod  # noqa: E402
 from scoring import aggression as aggression_mod  # noqa: E402
 from scoring import market_state  # noqa: E402
+from scoring import session_structure as session_structure_mod  # noqa: E402
+from scoring import rejection_defense as rejection_mod  # noqa: E402
+from scoring import profile_shape as profile_mod  # noqa: E402
 import live_composite  # noqa: E402,F401  (eager: pins module; never lazy)
 from live_composite import (  # noqa: E402
     signal_band, compute_live, build_bridge_payload,
@@ -318,6 +321,10 @@ _CYC_DEF_SCALE_30D = 3.0
 SKEW_DELTA_SCALE = 5.0   # first-pass tunable: IV points to saturate put-skew Δ
 PC_DELTA_SCALE = 0.3     # first-pass tunable: P/C change to saturate flow
 
+# Micro-structure refinements folded into the five-state classifier.
+SESSION_BLEND = 0.20     # session structure's share of the price sub-score
+PROFILE_DAMP = 0.5       # max aggression damping from a fully-balanced profile
+
 # Sentinel so an OMITTED ``compute_30d_trend`` arg fetches internally, while an
 # explicit ``None`` (caller has no data) stays neutral rather than re-fetching.
 _FETCH = object()
@@ -418,6 +425,30 @@ def compute_intraday_trend(schwab, sector_data=None, prior_history=None,
         except Exception:  # noqa: BLE001
             price = intraday_trend.TrendSub(50.0, 0.0)
 
+        # 1b) SESSION STRUCTURE — VWAP-hold + opening-range break blended INTO the
+        #     price sub-score (DIRECTION). A bullish structure (holding above VWAP,
+        #     clearing the OR) nudges the direction up. Defensive -> drops out.
+        sess = session_structure_mod.SessionStructure(0.0, 0.0)
+        try:
+            # Prefer the 15-min frame; DataFrame-in-``or`` raises, so branch by None.
+            sframe = frames.get("15min")
+            if sframe is None:
+                sframe = frames.get("5min")
+            if sframe is not None and len(sframe):
+                srows = [{"high": float(r["high"]), "low": float(r["low"]),
+                          "close": float(r["close"]), "volume": float(r["volume"])}
+                         for _, r in sframe.iterrows()]
+                sess = session_structure_mod.score_session_structure(srows)
+                if sess.confidence > 0:
+                    sess_0_100 = 50.0 + 50.0 * sess.score
+                    blended_price = ((1 - SESSION_BLEND) * price.score
+                                     + SESSION_BLEND * sess_0_100)
+                    # keep the price sub-score's own confidence + interp.
+                    price = intraday_trend.TrendSub(
+                        blended_price, price.confidence, price.interp)
+        except Exception:  # noqa: BLE001 — session structure simply drops out.
+            sess = session_structure_mod.SessionStructure(0.0, 0.0)
+
         # 2) BREADTH — A/D, % above 50DMA, new highs/lows.
         try:
             bq = schwab.get_quotes(
@@ -506,6 +537,21 @@ def compute_intraday_trend(schwab, sector_data=None, prior_history=None,
         except Exception:  # noqa: BLE001 — effort simply drops out (conf 0).
             effort_score, effort_conf = 0.0, 0.0
 
+        #    (a2) rejection/defense — daily upper-wick exhaustion vs dip resilience.
+        #         Sign already aligns with aggression (positive = no supply); NO flip.
+        rej_score, rej_conf = 0.0, 0.0
+        try:
+            daily = frames.get("1day")
+            if daily is not None and len(daily):
+                tail = daily.tail(20)
+                ohlc = [{"open": float(r["open"]), "high": float(r["high"]),
+                         "low": float(r["low"]), "close": float(r["close"])}
+                        for _, r in tail.iterrows()]
+                rr = rejection_mod.score_rejection_defense(ohlc)
+                rej_score, rej_conf = float(rr.score), float(rr.confidence)
+        except Exception:  # noqa: BLE001 — rejection simply drops out (conf 0).
+            rej_score, rej_conf = 0.0, 0.0
+
         #    (b) skew — 25-delta risk-reversal CHANGE; rising put fear -> NEGATIVE.
         rr_delta = None
         try:
@@ -531,17 +577,44 @@ def compute_intraday_trend(schwab, sector_data=None, prior_history=None,
 
         #    (order_flow arrives in a later phase; its absence just drops out.)
         aggression, agg_conf = aggression_mod.blend_aggression(
-            {"effort": effort_score, "skew": skew_comp, "flow": flow_comp},
-            {"effort": effort_conf, "skew": skew_conf, "flow": flow_conf})
+            {"effort": effort_score, "skew": skew_comp, "flow": flow_comp,
+             "rejection": rej_score},
+            {"effort": effort_conf, "skew": skew_conf, "flow": flow_conf,
+             "rejection": rej_conf})
+
+        #    (d) profile shape — a balanced single-HVN session DAMPENS aggression
+        #        (rotational balance -> more likely Neutral, sharpening that state).
+        prof_shape, prof_bal = None, 0.0
+        try:
+            pframe = frames.get("15min")
+            if pframe is None:
+                pframe = frames.get("5min")
+            if pframe is not None and len(pframe):
+                prows = [{"high": float(r["high"]), "low": float(r["low"]),
+                          "close": float(r["close"]), "volume": float(r["volume"])}
+                         for _, r in pframe.iterrows()]
+                ps = profile_mod.classify_profile_shape(prows)
+                prof_shape, prof_bal = ps.shape, float(ps.balance_strength)
+                if prof_bal > 0:
+                    aggression = round(intraday_trend._clamp(
+                        aggression * (1 - PROFILE_DAMP * prof_bal), -1.0, 1.0), 3)
+        except Exception:  # noqa: BLE001 — profile simply drops out (no damping).
+            prof_shape, prof_bal = None, 0.0
 
         # 8) EVIDENCE (dimensions that HAVE data) + five-state classification.
         evidence = [f"direction {smoothed:.0f}/100"]
+        if sess.confidence > 0:
+            evidence.append(f"session {sess.score:+.2f}")
         if effort_conf > 0:
             evidence.append(f"effort {effort_score:+.2f}")
+        if rej_conf > 0:
+            evidence.append(f"rejection/defense {rej_score:+.2f}")
         if rr_delta is not None:
             evidence.append(f"put-skew Δ {rr_delta:+.1f}")
         if sector_pc_delta is not None:
             evidence.append(f"sector P/C Δ {sector_pc_delta:+.2f}")
+        if prof_shape is not None:
+            evidence.append(f"profile {prof_shape} ({prof_bal:.2f})")
         evidence.append(f"aggression {aggression:+.2f}")
 
         ms = market_state.classify_market_state(smoothed, aggression,
