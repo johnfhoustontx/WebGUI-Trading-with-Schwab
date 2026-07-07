@@ -461,6 +461,90 @@ def test_make_heartbeat_poll_polls_and_touches_lock(tmp_path, monkeypatch):
     assert data["heartbeat"] > 1000
 
 
+def _skew_call(strike, delta, iv, vol=0):
+    return {"strike": strike, "delta": delta, "volatility": iv, "totalVolume": vol}
+
+
+def _skew_put(strike, delta, iv, vol=0):
+    return {"strike": strike, "delta": delta, "volatility": iv, "totalVolume": vol}
+
+
+def _patch_snapshot_summary(monkeypatch):
+    from gamma_tool import GammaEngine
+    monkeypatch.setattr(
+        GammaEngine, "snapshot_summary",
+        staticmethod(lambda r, view="gex": {
+            "spot": r["spot"], "flip": r.get("flip"),
+            "top_pos_strike": r.get("top_pos_strike"),
+            "top_neg_strike": r.get("top_neg_strike"),
+            "net_total": r.get("net_total", 0.0),
+        }),
+    )
+
+
+def test_poll_once_computes_and_stores_skew(tmp_path, monkeypatch):
+    """poll_once computes 25-delta skew ONCE per symbol from the already-fetched
+    chain and merges rr_25d/call_vol/put_vol into EACH view summary before insert
+    (no extra chain fetch)."""
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    _patch_snapshot_summary(monkeypatch)
+    monkeypatch.setattr(gc, "poll_term_once", lambda *a, **k: None)
+
+    captured = []
+    monkeypatch.setattr(
+        db, "insert_snapshot",
+        lambda conn, symbol, view, summary, grid, dte: captured.append(
+            (symbol, view, dict(summary))))
+
+    # 25-delta call IV 18, put IV 22 -> rr = 22 - 18 = 4.0; vols 100/300.
+    chain = {
+        "callExpDateMap": {"2026-07-11:3": {
+            "5900.0": [_skew_call(5900.0, 0.25, 18.0, vol=100)]}},
+        "putExpDateMap": {"2026-07-11:3": {
+            "5800.0": [_skew_put(5800.0, -0.25, 22.0, vol=300)]}},
+    }
+    client = _make_client({s: chain for s in gc.SYMBOLS})
+    engine = _make_engine()
+    gc.poll_once(client, engine, conn, symbols=gc.SYMBOLS)
+
+    assert captured  # rows were inserted
+    # The chain was fetched once per symbol (no extra get_option_chain per skew).
+    assert client.get_option_chain.call_count == len(gc.SYMBOLS)
+    for symbol, view, summary in captured:
+        assert summary["rr_25d"] == 4.0
+        assert summary["call_vol"] == 100
+        assert summary["put_vol"] == 300
+
+
+def test_poll_once_skew_none_when_no_skew(tmp_path, monkeypatch):
+    """A chain that yields no skew -> rr_25d/call_vol/put_vol are None and the
+    poll still succeeds (rows inserted)."""
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    _patch_snapshot_summary(monkeypatch)
+    monkeypatch.setattr(gc, "poll_term_once", lambda *a, **k: None)
+
+    captured = []
+    monkeypatch.setattr(
+        db, "insert_snapshot",
+        lambda conn, symbol, view, summary, grid, dte: captured.append(
+            (symbol, view, dict(summary))))
+
+    chain = {"symbol": "X"}  # no expiration maps -> no rr, no volume
+    client = _make_client({s: chain for s in gc.SYMBOLS})
+    engine = _make_engine()
+    gc.poll_once(client, engine, conn, symbols=gc.SYMBOLS)
+
+    assert captured
+    for symbol, view, summary in captured:
+        assert summary["rr_25d"] is None
+        assert summary["call_vol"] is None
+        assert summary["put_vol"] is None
+
+
 def test_sentiment_hook_never_raises(monkeypatch):
     import gex_collector as gc
     # Force the subprocess call to raise; the helper must swallow it.

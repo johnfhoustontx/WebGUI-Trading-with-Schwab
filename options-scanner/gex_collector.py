@@ -19,6 +19,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import flow_skew
 from gamma_tool import GammaEngine
 import gex_history_db as db
 
@@ -193,12 +194,28 @@ def poll_once(client, engine, conn, lock=None, symbols=None) -> None:
             if not chain:
                 log.warning("No chain for %s", symbol)
                 continue
+            # Options-flow skew computed ONCE per symbol from the already-fetched
+            # chain (NO extra get_option_chain call) and merged into EACH view's
+            # summary so any view row persists the scalars. Fully defensive: a
+            # skew-compute failure must never break the poll — degrade to None.
+            try:
+                rr = flow_skew.risk_reversal_25d(chain)
+                vol = flow_skew.index_call_put_volume(chain)
+                skew_fields = {
+                    "rr_25d": (rr or {}).get("rr"),
+                    "call_vol": (vol or {}).get("call_vol"),
+                    "put_vol": (vol or {}).get("put_vol"),
+                }
+            except Exception:
+                log.debug("skew compute failed for %s", symbol, exc_info=True)
+                skew_fields = {"rr_25d": None, "call_vol": None, "put_vol": None}
             # Single pass yields GEX, Charm, DEX, Vanna — all persisted below.
             gex, charm, dex, vanna = engine.calc_all_from_chain(chain, use_volume=False)
             dte = engine._last_dte
             if gex:
                 gex_summary = GammaEngine.snapshot_summary(gex)
                 gex_summary["ts"] = ts_boundary
+                gex_summary.update(skew_fields)
                 db.insert_snapshot(
                     conn, symbol, "gex",
                     gex_summary, gex["gex"], dte,
@@ -206,6 +223,7 @@ def poll_once(client, engine, conn, lock=None, symbols=None) -> None:
             if charm:
                 charm_summary = GammaEngine.snapshot_summary(charm)
                 charm_summary["ts"] = ts_boundary
+                charm_summary.update(skew_fields)
                 db.insert_snapshot(
                     conn, symbol, "charm",
                     charm_summary, charm["gex"], dte,
@@ -213,6 +231,7 @@ def poll_once(client, engine, conn, lock=None, symbols=None) -> None:
             if dex:
                 dex_summary = GammaEngine.snapshot_summary(dex, view="dex")
                 dex_summary["ts"] = ts_boundary
+                dex_summary.update(skew_fields)
                 db.insert_snapshot(
                     conn, symbol, "dex",
                     dex_summary, dex["gex"], dte,
@@ -220,6 +239,7 @@ def poll_once(client, engine, conn, lock=None, symbols=None) -> None:
             if vanna:
                 vanna_summary = GammaEngine.snapshot_summary(vanna)
                 vanna_summary["ts"] = ts_boundary
+                vanna_summary.update(skew_fields)
                 db.insert_snapshot(
                     conn, symbol, "vanna",
                     vanna_summary, vanna["gex"], dte,
