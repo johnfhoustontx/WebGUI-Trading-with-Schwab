@@ -919,6 +919,21 @@ _equity_subscribed: set = set()         # the symbol set currently subscribed on
 _equity_lock = threading.Lock()         # guards the three structures above
 _equity_id_counter = itertools.count()  # monotonic SSE subscriber ids
 
+# Option SSE subscriber registry (near-ATM option FLOW). Mirrors the equity
+# fan-out: option ticks ride the SHARED stream worker session (the same
+# StreamClient that serves trade-tracking LEVELONE_OPTIONS) and never open a
+# second Schwab login. Each SSE request registers a subscriber; the worker's
+# option handler fans matching normalized ticks to each subscriber's queue.
+# The FLOW subscription is ADDITIVE to trade tracking: _reconcile_option_subscription
+# always subs _registry.legs_union() | _option_refcount, so a tracked trade leg
+# can never be dropped by flow churn, and _untrack spares any orphaned leg that
+# the flow refcount still wants — so a flow OSI is never stranded by an untrack.
+_option_subscribers: dict = {}          # sub_id -> {"loop", "queue", "osis": set[str]}
+_option_refcount = collections.Counter()  # osi -> active flow subscriber count
+_option_subscribed: set = set()         # the OSI set currently subscribed on Schwab
+_option_lock = threading.Lock()         # guards the three structures above
+_option_id_counter = itertools.count()  # monotonic option SSE subscriber ids
+
 
 def _now_iso() -> str:
     return datetime.now(SHUTDOWN_TZ).isoformat()
@@ -1013,8 +1028,11 @@ def _untrack(trade_id: str) -> dict:
             return {"status": "ok"}
         legs_before = set(state.get("legs", {}).values())
         _registry.remove(trade_id)
-        # legs still referenced by other tracked trades must stay subscribed.
-        still_used = _registry.legs_union()
+        # Legs still referenced by another tracked trade OR wanted by an active
+        # option-flow subscriber must stay subscribed — sparing _option_refcount
+        # keeps the flow subscription ADDITIVE (an untrack can never strand a flow
+        # OSI). Trade tracking itself is unaffected: legs_union() still governs.
+        still_used = _registry.legs_union() | set(_option_refcount)
         orphaned = legs_before - still_used
         _entry_snapped.discard(trade_id)
         if orphaned:
@@ -1215,6 +1233,20 @@ def _on_option_message(msg):
                     state["fired"].add(event["event_type"])
                     if event["terminal"]:
                         _untrack(trade_id)
+
+            # FLOW FAN-OUT (ADDITIVE — the trade-detector block above and the
+            # _leg_quotes cache are untouched). Normalize this tick and hand it to
+            # any option SSE subscriber whose OSI set contains it. A bad tick can't
+            # kill the loop (the whole handler is wrapped in try/except).
+            tick = _normalize_level1_option(item)
+            with _option_lock:
+                targets = [s for s in _option_subscribers.values()
+                           if key in s["osis"]]
+            for s in targets:
+                try:
+                    s["loop"].call_soon_threadsafe(_option_enqueue, s["queue"], tick)
+                except Exception:
+                    pass
     except Exception:
         logger.exception("_on_option_message failed")
 
@@ -1263,6 +1295,37 @@ def _update_equity_refcount(counter, symbols, add: bool) -> set:
 
 def _equity_enqueue(queue, tick):
     """Bounded put with drop-oldest. Runs on the subscriber's event loop via
+    call_soon_threadsafe, so queue ops are loop-safe here."""
+    try:
+        queue.put_nowait(tick)
+    except asyncio.QueueFull:
+        try:
+            queue.get_nowait()
+        except asyncio.QueueEmpty:
+            pass
+        try:
+            queue.put_nowait(tick)
+        except asyncio.QueueFull:
+            pass
+
+
+def _update_option_refcount(counter, osis, add: bool) -> set:
+    """Apply +1/-1 per OSI to `counter`; drop OSIs whose count hits 0. Returns the
+    current union (set of OSIs with count > 0). Pure. Mirrors
+    _update_equity_refcount for the option-flow fan-out."""
+    for o in osis:
+        if add:
+            counter[o] += 1
+        else:
+            counter[o] -= 1
+            if counter[o] <= 0:
+                del counter[o]
+    return set(counter)
+
+
+def _option_enqueue(queue, tick):
+    """Bounded put with drop-oldest for the option fan-out (copy of
+    _equity_enqueue). Runs on the subscriber's event loop via
     call_soon_threadsafe, so queue ops are loop-safe here."""
     try:
         queue.put_nowait(tick)
@@ -1333,6 +1396,46 @@ async def _reconcile_equity_subscription():
         logger.exception("equity subscription reconcile failed")
 
 
+def _apply_option_subscription():
+    """Marshal an option-subscription reconcile onto the stream worker loop.
+
+    Mirrors _apply_equity_subscription. The reconcile coroutine reads the CURRENT
+    union itself (on the worker loop), so concurrent connect/disconnect calls
+    can't apply stale unions out of order. Safe no-op if the loop/client isn't up
+    yet (the worker re-subscribes the union on login)."""
+    if _stream_loop is None or _stream_client is None:
+        return
+    try:
+        asyncio.run_coroutine_threadsafe(
+            _reconcile_option_subscription(), _stream_loop)
+    except Exception:
+        logger.exception("option subscription reconcile dispatch failed")
+
+
+async def _reconcile_option_subscription():
+    """Runs on the stream worker loop. Reconciles Schwab's option subscription to
+    the union of TRACKED TRADE LEGS and FLOW OSIs using subs (replace-semantics).
+
+    ADDITIVE GUARANTEE: the union ALWAYS includes _registry.legs_union(), so a
+    flow subscribe/unsubscribe can NEVER drop a tracked trade leg. Trade
+    track/untrack keep their own level_one_option_add/unsubs fast path; this
+    reconcile only ever layers flow OSIs on top (and removes flow-only OSIs that
+    no tracked trade wants). The unsubs-all branch fires only when NOTHING (no
+    trade, no flow) is wanted."""
+    global _option_subscribed
+    with _option_lock:
+        union = set(_registry.legs_union()) | set(_option_refcount)
+        prev = set(_option_subscribed)
+        _option_subscribed = set(union)
+    try:
+        if union and union != prev:
+            await _stream_client.level_one_option_subs(list(union))
+        elif not union and prev:
+            await _stream_client.level_one_option_unsubs(list(prev))
+    except Exception:
+        logger.exception("option subscription reconcile failed")
+
+
 def _stream_worker():
     """Daemon thread: owns an asyncio loop + StreamClient and runs the receive loop.
 
@@ -1344,7 +1447,7 @@ def _stream_worker():
     _stream_loop = loop
 
     async def _main():
-        global _stream_client, _equity_subscribed
+        global _stream_client, _equity_subscribed, _option_subscribed
         backoff = 5
         while True:
             try:
@@ -1353,10 +1456,16 @@ def _stream_worker():
                 await _stream_client.login()
                 _stream_client.add_level_one_option_handler(_on_option_message)
                 _stream_client.add_level_one_equity_handler(_on_equity_message)
-                # Reconcile may have populated the registry before login.
-                existing = _registry.legs_union()
-                if existing:
-                    await _stream_client.level_one_option_subs(list(existing))
+                # Reconcile may have populated the registry before login, and
+                # option-flow SSE subscribers may have connected before the worker
+                # was up. Subscribe the UNION of tracked trade legs and flow OSIs
+                # (subs REPLACES the set) so both resume after any reconnect —
+                # trade legs are always included, so tracking is never disturbed.
+                with _option_lock:
+                    opt_union = set(_registry.legs_union()) | set(_option_refcount)
+                    _option_subscribed = set(opt_union)
+                if opt_union:
+                    await _stream_client.level_one_option_subs(list(opt_union))
                 # Re-subscribe the equity union too: SSE subscribers may have
                 # connected before the worker was up, and equities must resume
                 # after any reconnect (level_one_equity_subs REPLACES the set).
@@ -1366,8 +1475,8 @@ def _stream_worker():
                 if eq_union:
                     await _stream_client.level_one_equity_subs(list(eq_union))
                 logger.info(
-                    "stream worker: logged in; %d option legs, %d equity symbols",
-                    len(existing), len(eq_union))
+                    "stream worker: logged in; %d option OSIs (legs+flow), "
+                    "%d equity symbols", len(opt_union), len(eq_union))
                 backoff = 5
                 while True:
                     await _stream_client.handle_message()
@@ -1462,6 +1571,37 @@ def _normalize_level1_equity(content_item: dict) -> dict:
     return out
 
 
+# Schwab LEVELONE_OPTIONS field map for the FLOW fan-out normalizer.
+# Numeric keys verified against schwab-py's StreamClient.LevelOneOptionFields:
+#   2 = BID_PRICE, 3 = ASK_PRICE, 4 = LAST_PRICE, 18 = LAST_SIZE.
+# handle_message() relabels numeric keys to the UPPERCASE enum names; we read the
+# name first and fall back to the numeric key (see _field), mirroring
+# _normalize_level1_equity. This is a WIDENED normalizer for consumers that need
+# aggressor flow (last + last_size) — the trade-detector path reads _leg_quotes
+# directly and is unaffected by this map.
+_L1_OPTION_FIELDS = {
+    "last": ("LAST_PRICE", "4"),
+    "last_size": ("LAST_SIZE", "18"),
+    "bid": ("BID_PRICE", "2"),
+    "ask": ("ASK_PRICE", "3"),
+}
+
+
+def _normalize_level1_option(content_item: dict) -> dict:
+    """Map a single LEVELONE_OPTIONS content item to a compact quote dict for the
+    flow fan-out: {"symbol": <key>, "last", "last_size", "bid", "ask"} — each a
+    float or None. Reads each field by its relabeled enum NAME, falling back to
+    the raw numeric key (mirrors _field/_normalize_level1_equity). Missing or
+    unparseable values become None.
+
+    Additive: the trade-detector path reads _leg_quotes directly and is unaffected.
+    """
+    out = {"symbol": content_item.get("key", "")}
+    for out_name, (enum_name, num_key) in _L1_OPTION_FIELDS.items():
+        out[out_name] = _coerce_float(_field(content_item, enum_name, num_key))
+    return out
+
+
 def _sse_format(payload: dict) -> str:
     """Frame a dict as a single SSE event: `data: <json>\\n\\n`."""
     return "data: " + json.dumps(payload) + "\n\n"
@@ -1506,6 +1646,52 @@ async def stream_quotes(symbols: str = Query(...)):
                 _update_equity_refcount(_equity_refcount, syms, add=False)
             _apply_equity_subscription()
             logger.info("equity SSE subscriber %d closed", sub_id)
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@app.get("/stream/options")
+async def stream_options(symbols: str = Query(...)):
+    """SSE stream of LEVELONE_OPTIONS ticks for `symbols` (comma-separated OSIs).
+
+    Mirrors /stream/quotes. Rides the SHARED stream worker session (the same
+    StreamClient that serves trade tracking), so it opens NO second Schwab login.
+    The flow subscription is ADDITIVE to trade tracking: the reconcile subscribes
+    _registry.legs_union() | _option_refcount (replace-semantics), so registering
+    flow OSIs can never drop a tracked trade leg, and closing this stream can
+    never strand a leg a tracked trade still holds.
+
+    The normalizer, refcount, enqueue, and reconcile union are unit-tested; the
+    live fan-out/subscription is verified end-to-end against a running proxy.
+    """
+    # OSI symbols are case-sensitive as Schwab returns them; do NOT upper-case.
+    osis = [s.strip() for s in symbols.split(",") if s.strip()]
+    if not osis:
+        raise HTTPException(status_code=400, detail="symbols query param required")
+
+    async def event_generator():
+        loop = asyncio.get_running_loop()
+        queue: "asyncio.Queue[dict]" = asyncio.Queue(maxsize=1000)
+        sub_id = next(_option_id_counter)
+        with _option_lock:
+            _option_subscribers[sub_id] = {"loop": loop, "queue": queue, "osis": set(osis)}
+            _update_option_refcount(_option_refcount, osis, add=True)
+        _apply_option_subscription()
+        logger.info("option SSE subscriber %d: %d OSIs", sub_id, len(osis))
+        try:
+            while True:
+                try:
+                    tick = await asyncio.wait_for(queue.get(), timeout=15)
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+                    continue
+                yield _sse_format(tick)
+        finally:
+            with _option_lock:
+                _option_subscribers.pop(sub_id, None)
+                _update_option_refcount(_option_refcount, osis, add=False)
+            _apply_option_subscription()
+            logger.info("option SSE subscriber %d closed", sub_id)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
