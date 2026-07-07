@@ -12,7 +12,8 @@ inputs and flips nothing.
 from __future__ import annotations
 
 
-AGG_WEIGHTS = {"effort": 0.35, "skew": 0.30, "flow": 0.20, "order_flow": 0.15}
+AGG_WEIGHTS = {"effort": 0.35, "skew": 0.30, "flow": 0.20, "order_flow": 0.15,
+               "rejection": 0.20}
 
 
 def _clamp(v, lo, hi):

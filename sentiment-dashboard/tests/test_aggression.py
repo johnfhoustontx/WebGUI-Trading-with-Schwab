@@ -43,5 +43,26 @@ def test_single_component_present():
     assert c == round(AGG_WEIGHTS["skew"], 3)
 
 
-def test_weights_sum_to_one():
-    assert abs(sum(AGG_WEIGHTS.values()) - 1.0) < 1e-9
+def test_weights_need_not_sum_to_one():
+    # blend is confidence-weighted (num/den), so weights are relative importances
+    # and need NOT sum to 1 — every declared component just carries a weight.
+    assert all(w > 0 for w in AGG_WEIGHTS.values())
+    assert "rejection" in AGG_WEIGHTS
+
+
+def test_rejection_component_participates():
+    # present + confident -> a negative rejection reading drags the blend down.
+    with_rej, _ = blend_aggression(
+        {"effort": 0.5, "rejection": -0.8},
+        {"effort": 1.0, "rejection": 1.0})
+    without_rej, _ = blend_aggression({"effort": 0.5}, {"effort": 1.0})
+    assert with_rej < without_rej
+
+
+def test_rejection_drops_out_at_zero_confidence():
+    # absent / conf 0 -> rejection contributes nothing (blend == effort-only).
+    dropped, _ = blend_aggression(
+        {"effort": 0.5, "rejection": -0.8},
+        {"effort": 1.0, "rejection": 0.0})
+    effort_only, _ = blend_aggression({"effort": 0.5}, {"effort": 1.0})
+    assert dropped == effort_only
