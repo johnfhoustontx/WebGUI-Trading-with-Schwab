@@ -161,3 +161,110 @@ def reconstruct_state_series(daily_bars, direction_lookback=220,
         except Exception:
             states[t] = None
     return states
+
+
+# --- forward-return metrics ---------------------------------------------------
+STATE_ORDINAL = {
+    "bearish": -2,
+    "lack_of_bullishness": -1,
+    "neutral": 0,
+    "lack_of_bearishness": 1,
+    "bullish": 2,
+}
+
+
+def forward_returns(closes, horizon):
+    """Causal ``horizon``-day forward simple returns aligned to each close.
+
+    ``fr[t] = closes[t+horizon]/closes[t] - 1``; the last ``horizon`` entries
+    (and any bad/None/zero-base value) are ``None``. Same length as ``closes``.
+    """
+    xs = list(closes or ())
+    n = len(xs)
+    out = [None] * n
+    if horizon is None or horizon <= 0:
+        return out
+    for t in range(n - horizon):
+        base = _num(xs[t])
+        fwd = _num(xs[t + horizon])
+        if base is None or fwd is None or base == 0:
+            continue
+        out[t] = fwd / base - 1.0
+    return out
+
+
+def per_state_stats(states, fwd):
+    """Group forward returns by state over days where BOTH are non-None.
+
+    Returns ``{state: {"mean", "hit_rate", "n"}}`` — ``hit_rate`` = P(fwd > 0).
+    States with no valid observations are omitted.
+    """
+    groups: dict[str, list[float]] = {}
+    for s, f in zip(states or (), fwd or ()):
+        if s is None or f is None:
+            continue
+        fv = _num(f)
+        if fv is None:
+            continue
+        groups.setdefault(s, []).append(fv)
+    stats = {}
+    for s, vals in groups.items():
+        n = len(vals)
+        if n == 0:
+            continue
+        stats[s] = {
+            "mean": sum(vals) / n,
+            "hit_rate": sum(1 for v in vals if v > 0) / n,
+            "n": n,
+        }
+    return stats
+
+
+def _ranks(xs):
+    """Fractional (average) ranks — ties share the mean of their positions."""
+    order = sorted(range(len(xs)), key=lambda i: xs[i])
+    ranks = [0.0] * len(xs)
+    i = 0
+    while i < len(order):
+        j = i
+        while j + 1 < len(order) and xs[order[j + 1]] == xs[order[i]]:
+            j += 1
+        avg = (i + j) / 2.0 + 1.0
+        for k in range(i, j + 1):
+            ranks[order[k]] = avg
+        i = j + 1
+    return ranks
+
+
+def _spearman(a, b):
+    """Spearman rank correlation = Pearson correlation of the fractional ranks.
+    Zero variance in either ranked series -> 0.0."""
+    ra, rb = _ranks(a), _ranks(b)
+    n = len(ra)
+    if n == 0:
+        return 0.0
+    ma = sum(ra) / n
+    mb = sum(rb) / n
+    cov = sum((ra[i] - ma) * (rb[i] - mb) for i in range(n))
+    va = sum((r - ma) ** 2 for r in ra)
+    vb = sum((r - mb) ** 2 for r in rb)
+    if va <= 0 or vb <= 0:
+        return 0.0
+    return cov / (va ** 0.5 * vb ** 0.5)
+
+
+def ordinal_ic(states, fwd):
+    """Spearman rank IC between the state ordinal (STATE_ORDINAL) and forward
+    return, over days where both are valid. Fewer than 5 valid pairs -> 0.0."""
+    xs, ys = [], []
+    for s, f in zip(states or (), fwd or ()):
+        if s is None or f is None or s not in STATE_ORDINAL:
+            continue
+        fv = _num(f)
+        if fv is None:
+            continue
+        xs.append(float(STATE_ORDINAL[s]))
+        ys.append(fv)
+    if len(xs) < 5:
+        return 0.0
+    return _spearman(xs, ys)
