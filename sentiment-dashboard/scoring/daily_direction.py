@@ -115,3 +115,49 @@ def daily_direction_score(daily_bars) -> float:
 
     direction = _clamp((align + slope + rsi_signed) / 3.0, -1.0, 1.0)
     return _clamp(50.0 + 50.0 * direction, 0.0, 100.0)
+
+
+# --- reconstruction -----------------------------------------------------------
+def reconstruct_state_series(daily_bars, direction_lookback=220,
+                             agg_lookback=30):
+    """Per-bar committed five-state series over ``daily_bars`` (oldest first).
+
+    For each index ``t >= direction_lookback`` the DIRECTION axis is
+    ``daily_direction_score`` over the trailing ``direction_lookback`` window and
+    the AGGRESSION axis is the confidence-weighted blend of the REAL
+    ``effort`` + ``rejection_defense`` sub-scores over the trailing
+    ``agg_lookback`` window; the two are crossed via
+    ``market_state.classify_market_state`` and threaded through
+    ``trend_regime.commit_state``'s 2-day hysteresis (history + prev-committed
+    carried across the loop). Days before warmup, or any day whose slice fails,
+    yield ``None``. Pure + deterministic — never raises.
+    """
+    bars = list(daily_bars or ())
+    n = len(bars)
+    states = [None] * n
+
+    history: list[str] = []
+    prev_committed = None
+
+    for t in range(n):
+        if t < direction_lookback:
+            continue
+        try:
+            dir_slice = bars[t - direction_lookback:t + 1]
+            agg_slice = bars[max(0, t - agg_lookback):t + 1]
+
+            direction = daily_direction_score(dir_slice)
+            eff = effort.score_effort(agg_slice)
+            rej = rejection_defense.score_rejection_defense(agg_slice)
+            agg_score, _agg_conf = aggression.blend_aggression(
+                {"effort": eff.score, "rejection": rej.score},
+                {"effort": eff.confidence, "rejection": rej.confidence},
+            )
+            raw = market_state.classify_market_state(direction, agg_score).state
+            committed, history = trend_regime.commit_state(
+                raw, history, prev_committed)
+            prev_committed = committed
+            states[t] = committed
+        except Exception:
+            states[t] = None
+    return states
