@@ -41,6 +41,12 @@ SECTOR_PCR_HISTORY_DB = SENTIMENT / "data" / "sector_pcr.db"
 # REPLACE-updates each RTH recompute); written by sentiment_svc.
 MARKET_STATE_HISTORY_DB = SENTIMENT / "data" / "market_state.db"
 
+# Offline five-state-classifier validation study outputs (markdown report + JSON
+# artifact) written by sentiment-dashboard/validate_market_state.py. Run manually;
+# sentiment-dashboard/data/ is gitignored, mirroring SWING_MODEL_REPORT.
+MARKET_STATE_VALIDATION_REPORT = SENTIMENT / "data" / "market_state_validation.md"
+MARKET_STATE_VALIDATION_JSON   = SENTIMENT / "data" / "market_state_validation.json"
+
 _ports = tomllib.loads((REPO_ROOT / "config" / "ports.toml").read_text())
 PROXY_PORT       = _ports["proxy"]
 PROXY_URL        = f"http://127.0.0.1:{PROXY_PORT}"
