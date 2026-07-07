@@ -8,7 +8,59 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-07-06 (**Paper expiration auto-close (both books) + thrice-daily
+**Last updated:** 2026-07-07 (**Five-state market classifier (direction × aggression) —
+Phases 0–2 shipped (LIVE on REST data), Phases 3–5 in progress**: the app's one-axis intraday
+trend state (`scoring/intraday_trend.py:score_to_state` → `bull_trend`/`pullback_in_bull`/`range`/
+`bear_rally`/`bear_trend`) is **replaced — for the regime-driving intraday state** — by a
+**two-axis direction × aggression classifier** emitting five trader states: **Bullish / Lack of
+Bullishness / Neutral / Lack of Bearishness / Bearish**. The two middle states capture the
+effort-vs-result asymmetry a single directional axis can't express (price up but hollow → *Lack of
+Bullishness*; price down but no follow-through → *Lack of Bearishness*). **Architecture:** the
+existing 0–100 intraday trend score is the DIRECTION axis (unchanged), crossed with a NEW signed
+**AGGRESSION** axis via a 9-cell grid (`sentiment-dashboard/scoring/market_state.py:classify_market_state`,
+PURE; bands `≥60` bullish / `≤40` bearish, aggression `≥0.2`/`≤−0.2`). Aggression inputs
+(confidence-weighted-blended via the PURE signed `scoring/aggression.py:blend_aggression`, graceful-
+degrading): **(1) volume-effort** (`scoring/effort.py` — up/down-day volume ratio + volume-on-
+rallies-vs-pullbacks + close-location-value over SPY daily); **(2) 25-delta risk-reversal skew Δ**
+(`options-scanner/flow_skew.py`, computed in the options_svc **2-min GEX poll** from the ALREADY-
+fetched $SPX/SPY/QQQ chains — no extra fetch — stored per snapshot in `gex_history_db`, published
+as **`cache:options:flow_skew`** with `rr_delta` vs the prior snapshot; a shared-front-expiration
+guard keeps the RR tenor-consistent); **(3) cross-sector cap-weighted P/C 5-trading-day Δ**
+(`live_composite.cap_weighted_pcr` + a NEW daily store `services/sentiment_svc/sector_pcr_history_db.py`).
+Wired in `sentiment_svc.compute_intraday_trend` (reads `cache:options:flow_skew` + `compute.sector_pc_delta()`,
+signs+normalizes — **rising put demand → NEGATIVE aggression**, SCALE tunables `SKEW_DELTA_SCALE=5.0`
+IV-pts / `PC_DELTA_SCALE=0.3` P/C — blends, classifies), threaded through the EXISTING
+`trend_regime.commit_state` 2-day hysteresis with a **migration guard** (an old-vocab persisted state
+is treated as cold-start so no stale string is published). Published under the **SAME** bridge
+`trend_regime.state` key, so **`regime_filter` was rekeyed via its one `_TREND_STATE_VOTE` dict** to
+the new vocab (`bullish`→bull/block-CCS · `bearish`→bear/block-PCS · `neutral`→None ·
+`lack_of_bearishness`→lean_bull [resilient, puts undefended → favor PCS] · `lack_of_bullishness`→
+lean_bear [exhaustion at highs → favor CCS]) — **`evaluate_regime`'s AND-of-agreement logic is
+UNCHANGED** (the two middle states land exactly on the old soft-lean slots). `compute._bridge_trend`
+always emits new-vocab (neutral at cold start) so the gate is NEVER fed an unrecognized string. The
+daily committed state is **recorded** (`services/sentiment_svc/market_state_history_db.py`, 90-day
+window) for a later backtest-validation task. `/sentiment` shows the five-state label + description +
+a **"Why" evidence** popup (direction/effort/skew/flow/aggression lines) on the **Today** trend gauge;
+the **30-Day structural gauge KEEPS the old band vocabulary** (a structural direction-only read has no
+aggression axis — `score_to_state` is **retained, deliberately NOT deleted**), so the page carries
+both vocabularies (`_TREND_SHORT`/`trend_text_class` cover all 10 keys). **Phase 0** lifted the
+Telegram/Discord/Fi-SMS channel senders + `shared/notifications.json` config out of
+`options_svc/push_notify.py` into a shared **`shared/notify/`** helper (for the coming state-transition
+alerts). **DEFERRED (Tier 3, separate design): item 9** (state → Swing-Scanner strategy-family bias),
+**item 10** (state into the Driver packet + guardrail modifier), **item 11** (formal IC/backtest
+validation that the five states stratify forward returns — the recording exists so this can run).
+**IN PROGRESS: Phase 3** (intraday structure signals — session-structure, rejection/defense +
+**state-transition push** via the shared helper, volume-profile-shape Neutral detector) **+ Phases
+4–5** (streamer **equity + option aggressor flow** — proxy widens the L1-equity/option normalizers +
+adds an option SSE fan-out on the existing shared stream worker; sentiment_svc classifies at-bid/at-ask
+→ `cache:sentiment:order_flow` → the aggression axis's `order_flow` component). Everything is ADDITIVE
+except the ONE coordinated `trend_regime.state` vocabulary change (`regime_filter` rekeyed in lockstep).
+Green: sentiment_svc **93**, options_svc **396**, webgui **681**, options-scanner flow_skew **+18** /
+gex_history migration, sentiment-dashboard effort/aggression/market_state **+34**, shared/notify **14**.
+Built subagent-by-subagent (TDD, two-stage spec+quality review per unit). **Restart `options_svc` +
+`sentiment_svc`** to pick this up. Branch `Using_Highcharts`. Design/plan:
+[design](docs/plans/2026-07-07-five-state-market-classifier-design.md) /
+[plan](docs/plans/2026-07-07-five-state-market-classifier-plan.md).). Prior — 2026-07-06 (**Paper expiration auto-close (both books) + thrice-daily
 "trades needing action" push** — two features. **(1) Expiration auto-close.** Validated that
 paper trades did NOT reliably auto-close on expiration and fixed both stores. The **account**
 engine (`paper_engine.run_manage_cycle`, `paper_account.db`) settles at intrinsic, but had two
