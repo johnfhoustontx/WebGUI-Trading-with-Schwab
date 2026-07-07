@@ -27,7 +27,7 @@ from zoneinfo import ZoneInfo as _ZI
 
 from services.sentiment_svc import (
     compute, intraday_history_db, market_state_history_db, scheduler,
-    sector_pcr_history_db)
+    sector_pcr_history_db, state_alert)
 from shared.contracts.sentiment import CompositeSnapshot
 
 log = logging.getLogger(__name__)
@@ -127,6 +127,7 @@ def _maybe_recompute_trend(bus):
                 flow_skew=flow_skew,
                 sector_pc_delta=pc_delta)
             t30 = compute.compute_30d_trend()
+            prev_committed = _TREND["committed"]
             _TREND.update(
                 last_ts=now,
                 history=t.get("state_history", []),
@@ -134,12 +135,24 @@ def _maybe_recompute_trend(bus):
                 smoothed=t.get("smoothed_score"),
                 trend=t,
                 trend_30d=t30)
+            new_committed = _TREND["committed"]
             # Record the freshly-committed market-state for later validation.
             # Nested guard so a recorder failure can't abort the recompute.
             try:
                 _record_market_state(_TREND["trend"])
             except Exception:  # noqa: BLE001
                 log.exception("market state record failed (recompute)")
+            # Push a phone alert when the committed state FLIPS. The gate in
+            # ``send_state_transition`` handles enabled/market-hours/valid-vocab
+            # filtering (incl. the cold-start old→new-vocab first cycle) — the
+            # handler just detects "committed changed" and delegates. Best-effort:
+            # a notify failure must NOT abort the recompute.
+            if new_committed != prev_committed:
+                try:
+                    state_alert.send_state_transition(
+                        prev_committed, new_committed, _TREND["trend"])
+                except Exception:  # noqa: BLE001
+                    log.exception("state transition notify failed")
         except Exception:  # noqa: BLE001 — recompute failure must not abort refresh.
             log.exception("intraday trend recompute failed")
 

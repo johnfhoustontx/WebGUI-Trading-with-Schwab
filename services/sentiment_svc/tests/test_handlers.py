@@ -783,3 +783,71 @@ def test_maybe_recompute_trend_records_market_state(monkeypatch):
     assert rows[0]["direction_score"] == 28.0
     assert rows[0]["aggression"] == -0.6
     _reset_trend()
+
+
+# --- market-state transition push alert ---------------------------------------
+
+def _stub_trend_recompute(monkeypatch, new_state):
+    """Make ``_maybe_recompute_trend`` recompute to a given committed state."""
+    _mem_market_state(monkeypatch)
+    monkeypatch.setattr(handlers, "_is_rth_now", lambda: True)
+    fresh = {"state": new_state, "state_history": [new_state],
+             "smoothed_score": 30.0, "aggression": -0.5,
+             "description": "desc", "evidence": ["e1"]}
+    monkeypatch.setattr(handlers.compute, "compute_intraday_trend",
+                        lambda *a, **k: fresh)
+    monkeypatch.setattr(handlers.compute, "compute_30d_trend", lambda *a, **k: {})
+    monkeypatch.setattr(handlers.compute, "sector_pc_delta", lambda: None)
+    monkeypatch.setattr(handlers.time, "monotonic", lambda: 21000.0)
+    return fresh
+
+
+def test_recompute_notifies_on_committed_state_change(monkeypatch):
+    _reset_trend()
+    handlers._TREND["committed"] = "bullish"  # prior committed
+    fresh = _stub_trend_recompute(monkeypatch, "bearish")
+
+    seen = {}
+    monkeypatch.setattr(handlers.state_alert, "send_state_transition",
+                        lambda old, new, trend, **k: seen.update(
+                            old=old, new=new, trend=trend) or True)
+
+    handlers._maybe_recompute_trend(Bus(fake=True))
+
+    assert seen["old"] == "bullish"
+    assert seen["new"] == "bearish"
+    assert seen["trend"] == fresh
+    _reset_trend()
+
+
+def test_recompute_no_notify_when_state_unchanged(monkeypatch):
+    _reset_trend()
+    handlers._TREND["committed"] = "bullish"
+    _stub_trend_recompute(monkeypatch, "bullish")  # same committed
+
+    calls = {"n": 0}
+    monkeypatch.setattr(handlers.state_alert, "send_state_transition",
+                        lambda *a, **k: calls.__setitem__("n", calls["n"] + 1))
+
+    handlers._maybe_recompute_trend(Bus(fake=True))
+    assert calls["n"] == 0
+    _reset_trend()
+
+
+def test_recompute_notify_failure_non_fatal(monkeypatch):
+    """A ``send_state_transition`` that raises does NOT abort the recompute —
+    ``_TREND`` still updates to the new committed state."""
+    _reset_trend()
+    handlers._TREND["committed"] = "bullish"
+    _stub_trend_recompute(monkeypatch, "bearish")
+
+    def _boom(*a, **k):
+        raise RuntimeError("notify exploded")
+
+    monkeypatch.setattr(handlers.state_alert, "send_state_transition", _boom)
+
+    handlers._maybe_recompute_trend(Bus(fake=True))  # must not raise
+
+    assert handlers._TREND["committed"] == "bearish"
+    assert handlers._TREND["smoothed"] == 30.0
+    _reset_trend()
