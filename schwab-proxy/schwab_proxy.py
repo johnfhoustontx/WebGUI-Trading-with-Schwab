@@ -1401,18 +1401,30 @@ def _stream_worker():
 # subscribed symbol is in "key". _normalize_level1_equity reads the relabeled
 # names first and falls back to the raw numeric strings, mirroring _field().
 
-# Schwab LEVELONE_EQUITIES field map: (relabeled enum NAME, raw numeric key).
+# Schwab LEVELONE_EQUITIES field map: out_name -> (relabeled enum NAME, raw
+# numeric key), or a LIST of such candidate pairs tried in order (first
+# non-None wins) when a field has a base + fallback source.
 # Numeric keys taken from schwab-py's StreamClient.LevelOneEquityFields enum:
-#   3 = LAST_PRICE, 18 = NET_CHANGE. handle_message() relabels these to the
-# UPPERCASE enum names; we read the name first and fall back to the numeric key.
-# These are the regular (not extended-hours) fields. The numeric values are
-# verified against schwab-py's enum but the exact populated fields per tick
-# should still be sanity-checked against a real LEVELONE_EQUITIES payload.
-# TODO(live): confirm LAST_PRICE/NET_CHANGE are populated as expected on a live
-# stream sample (vs. e.g. REGULAR_MARKET_* variants 29/31 during RTH).
+#   1 = BID_PRICE, 2 = ASK_PRICE, 3 = LAST_PRICE, 4 = BID_SIZE, 5 = ASK_SIZE,
+#   8 = TOTAL_VOLUME, 9 = LAST_SIZE, 18 = NET_CHANGE, and the RTH variants
+#   29 = REGULAR_MARKET_LAST_PRICE, 30 = REGULAR_MARKET_LAST_SIZE.
+# handle_message() relabels the numeric keys to the UPPERCASE enum names; we
+# read the name first and fall back to the numeric key (see _field). These are
+# the regular (not extended-hours) fields.
+# TODO(live): the base-vs-regular-market ambiguity for LAST is now covered by
+# reading BOTH LAST_PRICE(3)/LAST_SIZE(9) AND their REGULAR_MARKET_* variants
+# (29/30) — during RTH Schwab may populate the regular-market field instead of
+# the base, so trying both makes the mapping correct regardless of which the
+# live stream sends. Only a live sample would reveal any further field surprises.
 _L1_EQUITY_FIELDS = {
-    "last": ("LAST_PRICE", "3"),
+    "last": [("LAST_PRICE", "3"), ("REGULAR_MARKET_LAST_PRICE", "29")],
     "net_change": ("NET_CHANGE", "18"),
+    "bid": ("BID_PRICE", "1"),
+    "ask": ("ASK_PRICE", "2"),
+    "bid_size": ("BID_SIZE", "4"),
+    "ask_size": ("ASK_SIZE", "5"),
+    "last_size": [("LAST_SIZE", "9"), ("REGULAR_MARKET_LAST_SIZE", "30")],
+    "total_volume": ("TOTAL_VOLUME", "8"),
 }
 
 
@@ -1429,14 +1441,24 @@ def _coerce_float(value):
 def _normalize_level1_equity(content_item: dict) -> dict:
     """Map a single LEVELONE_EQUITIES content item to a compact quote dict.
 
-    Returns {"symbol": <key>, "last": <float|None>, "net_change": <float|None>}.
-    Reads each field by its relabeled enum NAME, falling back to the raw numeric
-    key; missing or unparseable values become None. Extra/unknown fields are
-    ignored.
+    Returns {"symbol": <key>, "last", "net_change", "bid", "ask", "bid_size",
+    "ask_size", "last_size", "total_volume"} — each a float or None. Reads each
+    field by its relabeled enum NAME, falling back to the raw numeric key; a
+    field with multiple candidate sources (e.g. LAST_PRICE with a
+    REGULAR_MARKET_LAST_PRICE fallback) takes the first non-None. Missing or
+    unparseable values become None. Extra/unknown fields are ignored.
+
+    Additive: legacy consumers reading only "last"/"net_change" are unaffected.
     """
     out = {"symbol": content_item.get("key", "")}
-    for out_name, (enum_name, num_key) in _L1_EQUITY_FIELDS.items():
-        out[out_name] = _coerce_float(_field(content_item, enum_name, num_key))
+    for out_name, spec in _L1_EQUITY_FIELDS.items():
+        candidates = spec if isinstance(spec, list) else [spec]
+        value = None
+        for enum_name, num_key in candidates:
+            value = _coerce_float(_field(content_item, enum_name, num_key))
+            if value is not None:
+                break
+        out[out_name] = value
     return out
 
 
