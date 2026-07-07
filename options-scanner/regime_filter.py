@@ -43,16 +43,19 @@ MAX_BRIDGE_AGE_HOURS = 36
 # also agrees (the AND rule below), and can't satisfy the double-hard block
 # under low confidence / divergence.
 #
-# Keys MUST match the classifier's 5 states exactly
-# (sentiment-dashboard/scoring/trend_regime.py STATE_LABELS). Confirmed trends
-# are hard votes; the two counter-/intermediate states (a pullback within a
-# bull, a counter-trend bounce within a bear) are soft leans; range is neutral.
+# Keys MUST match the market-state classifier's 5 states exactly
+# (sentiment-dashboard/scoring/market_state.py STATE_LABELS), a direction ×
+# aggression vocabulary. Confirmed direction states (bullish/bearish) are hard
+# votes; the two lack_of_* states are soft leans (lack_of_bearishness = a
+# resilient tape with undefended puts -> lean bullish / favor PCS;
+# lack_of_bullishness = buyer exhaustion at highs -> lean bearish / favor CCS);
+# neutral casts no vote.
 _TREND_STATE_VOTE = {
-    "bull_trend":       "bull",
-    "pullback_in_bull": "lean_bull",
-    "range":            None,
-    "bear_rally":       "lean_bear",
-    "bear_trend":       "bear",
+    "bullish":             "bull",       # motivated buying -> block CCS
+    "lack_of_bullishness": "lean_bear",  # exhaustion at highs -> soft-favor CCS
+    "neutral":             None,         # both sides allowed
+    "lack_of_bearishness": "lean_bull",  # resilient, puts undefended -> soft-favor PCS
+    "bearish":             "bear",       # urgent selling -> block PCS
 }
 
 
