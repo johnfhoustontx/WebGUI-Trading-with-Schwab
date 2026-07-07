@@ -703,3 +703,83 @@ def test_refresh_calls_record_sector_pcr(monkeypatch):
 
     rows = conn.execute("SELECT pcr FROM sector_pcr").fetchall()
     assert rows and rows[-1][0] == 0.77
+
+
+# --- daily committed market-state persistence (validation record) -------------
+def _mem_market_state(monkeypatch):
+    conn = handlers.market_state_history_db.connect(":memory:")
+    monkeypatch.setattr(handlers, "_get_market_state_conn", lambda: conn)
+    return conn
+
+
+def _trend(**over):
+    t = {"state": "bullish", "smoothed_score": 72.0, "aggression": 0.4,
+         "evidence": ["e1", "e2"], "sub_scores": {"price": 60.0},
+         "aggression_confidence": 0.8}
+    t.update(over)
+    return t
+
+
+def test_record_market_state_records_row(monkeypatch):
+    conn = _mem_market_state(monkeypatch)
+    monkeypatch.setattr(handlers, "_is_rth_now", lambda: True)
+    handlers._record_market_state(_trend())
+    rows = handlers.market_state_history_db.load_recent(conn, n_days=60)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["committed_state"] == "bullish"
+    assert row["direction_score"] == 72.0
+    assert row["aggression"] == 0.4
+    assert row["components"] == {
+        "evidence": ["e1", "e2"], "sub_scores": {"price": 60.0},
+        "aggression_confidence": 0.8}
+
+
+def test_record_market_state_skips_falsy_state(monkeypatch):
+    conn = _mem_market_state(monkeypatch)
+    monkeypatch.setattr(handlers, "_is_rth_now", lambda: True)
+    handlers._record_market_state(_trend(state=None))
+    assert conn.execute("SELECT COUNT(*) FROM market_state").fetchone()[0] == 0
+
+
+def test_record_market_state_skips_off_hours(monkeypatch):
+    conn = _mem_market_state(monkeypatch)
+    monkeypatch.setattr(handlers, "_is_rth_now", lambda: False)
+    handlers._record_market_state(_trend())
+    assert conn.execute("SELECT COUNT(*) FROM market_state").fetchone()[0] == 0
+
+
+def test_record_market_state_failure_non_fatal(monkeypatch):
+    _mem_market_state(monkeypatch)
+    monkeypatch.setattr(handlers, "_is_rth_now", lambda: True)
+
+    def _boom(*a, **k):
+        raise RuntimeError("record exploded")
+
+    monkeypatch.setattr(handlers.market_state_history_db, "record", _boom)
+    handlers._record_market_state(_trend())  # must not raise
+
+
+def test_maybe_recompute_trend_records_market_state(monkeypatch):
+    """``_record_market_state`` is called at the end of ``_maybe_recompute_trend``
+    with the freshly-updated ``_TREND['trend']`` dict."""
+    _reset_trend()
+    conn = _mem_market_state(monkeypatch)
+    monkeypatch.setattr(handlers, "_is_rth_now", lambda: True)
+    bus = Bus(fake=True)
+
+    fresh = _trend(state="bearish", smoothed_score=28.0, aggression=-0.6)
+    monkeypatch.setattr(handlers.compute, "compute_intraday_trend",
+                        lambda *a, **k: fresh)
+    monkeypatch.setattr(handlers.compute, "compute_30d_trend", lambda *a, **k: {})
+    monkeypatch.setattr(handlers.compute, "sector_pc_delta", lambda: None)
+    monkeypatch.setattr(handlers.time, "monotonic", lambda: 12000.0)
+
+    handlers._maybe_recompute_trend(bus)
+
+    rows = handlers.market_state_history_db.load_recent(conn, n_days=60)
+    assert len(rows) == 1
+    assert rows[0]["committed_state"] == "bearish"
+    assert rows[0]["direction_score"] == 28.0
+    assert rows[0]["aggression"] == -0.6
+    _reset_trend()

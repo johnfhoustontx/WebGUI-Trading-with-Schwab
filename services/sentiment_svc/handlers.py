@@ -26,7 +26,8 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo as _ZI
 
 from services.sentiment_svc import (
-    compute, intraday_history_db, scheduler, sector_pcr_history_db)
+    compute, intraday_history_db, market_state_history_db, scheduler,
+    sector_pcr_history_db)
 from shared.contracts.sentiment import CompositeSnapshot
 
 log = logging.getLogger(__name__)
@@ -133,6 +134,12 @@ def _maybe_recompute_trend(bus):
                 smoothed=t.get("smoothed_score"),
                 trend=t,
                 trend_30d=t30)
+            # Record the freshly-committed market-state for later validation.
+            # Nested guard so a recorder failure can't abort the recompute.
+            try:
+                _record_market_state(_TREND["trend"])
+            except Exception:  # noqa: BLE001
+                log.exception("market state record failed (recompute)")
         except Exception:  # noqa: BLE001 — recompute failure must not abort refresh.
             log.exception("intraday trend recompute failed")
 
@@ -205,6 +212,48 @@ def _record_sector_pcr(live):
             sector_pcr_history_db.prune(conn, keep=10)
     except Exception:  # noqa: BLE001
         log.exception("sector pcr record failed")
+
+
+# --- daily committed market-state (validation record) -------------------------
+# A third lazily-opened SQLite store: one row per LOCAL date (today's row is
+# REPLACE-updated each RTH recompute), recording the five-state classifier's
+# committed state + direction/aggression + a components JSON, so a later task can
+# backtest whether the states stratify forward returns. Shares ``_INTRADAY_LOCK``
+# with the other two on-disk stores (all check_same_thread=False, touched off-loop
+# from the multi-worker executor).
+_market_state_conn = None
+
+
+def _get_market_state_conn():
+    global _market_state_conn
+    if _market_state_conn is None:
+        _market_state_conn = market_state_history_db.connect()
+    return _market_state_conn
+
+
+def _record_market_state(trend):
+    """Record today's committed market-state (RTH-only), prune the window.
+    Defensive — never aborts the trend recompute. Skips when the committed
+    ``state`` is falsy."""
+    try:
+        if not _is_rth_now():
+            return
+        t = trend or {}
+        committed_state = t.get("state")
+        if not committed_state:
+            return
+        components = {"evidence": t.get("evidence"),
+                      "sub_scores": t.get("sub_scores"),
+                      "aggression_confidence": t.get("aggression_confidence")}
+        with _INTRADAY_LOCK:
+            conn = _get_market_state_conn()
+            date_iso = _dt.datetime.now(_ZI("America/Chicago")).date().isoformat()
+            market_state_history_db.record(
+                conn, date_iso, committed_state,
+                t.get("smoothed_score"), t.get("aggression"), components)
+            market_state_history_db.prune(conn, keep=90)
+    except Exception:  # noqa: BLE001
+        log.exception("market state record failed")
 
 
 def _is_rth_now() -> bool:

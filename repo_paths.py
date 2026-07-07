@@ -36,6 +36,11 @@ SENTIMENT_INTRADAY_DB = SENTIMENT / "data" / "sentiment_intraday.db"
 # sentiment_svc each RTH refresh.
 SECTOR_PCR_HISTORY_DB = SENTIMENT / "data" / "sector_pcr.db"
 
+# Daily committed market-state (the five-state classifier's RTH output) recorded
+# for later validation/backtesting. One row per LOCAL calendar date (today's row
+# REPLACE-updates each RTH recompute); written by sentiment_svc.
+MARKET_STATE_HISTORY_DB = SENTIMENT / "data" / "market_state.db"
+
 _ports = tomllib.loads((REPO_ROOT / "config" / "ports.toml").read_text())
 PROXY_PORT       = _ports["proxy"]
 PROXY_URL        = f"http://127.0.0.1:{PROXY_PORT}"
