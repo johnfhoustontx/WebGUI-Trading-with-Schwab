@@ -71,18 +71,17 @@ def test_derive_composite_extras_shape_and_values():
     # trend defaults to the neutral directional dict when none is threaded in.
     tr = out["trend"]
     assert tr is not None
-    assert tr["state"] in {"bull_trend", "pullback_in_bull", "range",
-                           "bear_rally", "bear_trend"}
+    assert tr["state"] in _TREND_STATES
     assert {"label", "description", "raw_state", "score", "smoothed_score",
             "confidence", "sub_scores"} <= set(tr)
 
 
 def test_derive_composite_extras_defensive_no_spy():
-    """No trend threaded in -> neutral 'range' placeholder; minimal snaps ->
+    """No trend threaded in -> neutral placeholder; minimal snaps ->
     velocity dashes, no crash."""
     out = compute.derive_composite_extras(None, [], [])
-    assert out["trend"]["state"] == "range"
-    assert out["trend_30d_ago"]["state"] == "range"
+    assert out["trend"]["state"] == "neutral"
+    assert out["trend_30d_ago"]["state"] == "neutral"
     assert out["divergence"] == ""
     assert out["velocity"]["flag"] == ""
     assert isinstance(out["weights"], dict)
@@ -100,11 +99,11 @@ def test_bridge_trend_merges_intraday_over_daily(monkeypatch):
                         lambda spy: {"state": "range", "sma_50": 480.0,
                                      "sma_200": 450.0, "spy_close": 500.0,
                                      "confidence": 0.4})
-    intraday = {"state": "bull_trend", "label": "Bull Trend", "description": "x",
-                "raw_state": "bull_trend", "confidence": 0.9,
+    intraday = {"state": "bullish", "label": "Bullish", "description": "x",
+                "raw_state": "bullish", "confidence": 0.9,
                 "smoothed_score": 84.0, "sub_scores": {"price": 88}}
     merged = compute._bridge_trend(intraday, spy=[1.0, 2.0])
-    assert merged["state"] == "bull_trend"
+    assert merged["state"] == "bullish"
     assert merged["trend_score"] == 84.0
     assert merged["sub_scores"] == {"price": 88}
     assert merged["confidence"] == 0.9
@@ -145,8 +144,7 @@ def test_derive_composite_extras_includes_trend_30d_ago():
     out = compute.derive_composite_extras(live=None, snaps=snaps, spy=[])
     assert "trend" in out and "trend_30d_ago" in out
     t30 = out["trend_30d_ago"]
-    assert t30 is not None and t30.get("state") in {
-        "bull_trend", "pullback_in_bull", "range", "bear_rally", "bear_trend"}
+    assert t30 is not None and t30.get("state") in _TREND_STATES
     # neutral placeholder shape (directional, not the daily build_trend_dict).
     assert "sub_scores" in t30
 
@@ -160,8 +158,8 @@ def test_derive_composite_extras_trend_30d_passes_through():
 
 # --- intraday trend (Phase 3) -------------------------------------------------
 
-_TREND_STATES = {"bull_trend", "pullback_in_bull", "range",
-                 "bear_rally", "bear_trend"}
+_TREND_STATES = {"bullish", "lack_of_bullishness", "neutral",
+                 "lack_of_bearishness", "bearish"}
 
 
 def _bars(n, start, step, vol=1_000_000):
@@ -237,40 +235,91 @@ class _FakeDeadSchwab:
 
 
 def test_compute_intraday_trend_shape_and_bull():
-    out = compute.compute_intraday_trend(_FakeBullSchwab())
+    # Bullish DIRECTION (rising tape) + POSITIVE aggression (falling put fear /
+    # falling put demand) -> the ``bullish`` state.
+    out = compute.compute_intraday_trend(
+        _FakeBullSchwab(),
+        flow_skew={"SPY": {"rr_delta": -3.0}},
+        sector_pc_delta=-0.2)
     for k in ("score", "smoothed_score", "state", "label", "description",
-              "sub_scores", "sub_confidence", "confidence"):
+              "sub_scores", "sub_confidence", "confidence",
+              "aggression", "aggression_confidence", "evidence"):
         assert k in out, f"missing key {k}"
     assert 0.0 <= out["score"] <= 100.0
     assert out["score"] > 60.0
-    assert out["state"] in {"bull_trend", "pullback_in_bull"}
+    assert out["aggression"] > 0.0          # positive aggression from the inputs
+    assert out["state"] == "bullish"
     assert set(out["sub_scores"]) == {"price", "breadth", "sector", "vix"}
     assert set(out["sub_confidence"]) == {"price", "breadth", "sector", "vix"}
     # The 45% price input must actually contribute — a DataFrame in a boolean
     # `or` used to raise "truth value ambiguous", silently zeroing this block.
     assert out["sub_confidence"]["price"] > 0.0
     assert out["sub_scores"]["price"] > 50.0   # rising tape -> bullish price score
+    # evidence carries the direction + aggression readouts.
+    assert any("direction" in e for e in out["evidence"])
+    assert any("aggression" in e for e in out["evidence"])
+
+
+def test_compute_intraday_trend_bull_direction_negative_aggression():
+    """A bullish DIRECTION with NEGATIVE aggression (rising put fear via a
+    positive rr_delta + rising sector put demand) flips to lack_of_bullishness —
+    the aggression axis, not direction alone, decides the state."""
+    out = compute.compute_intraday_trend(
+        _FakeBullSchwab(),
+        flow_skew={"SPY": {"rr_delta": 3.0}},
+        sector_pc_delta=0.2)
+    assert out["score"] > 60.0              # direction still bullish
+    assert out["aggression"] < 0.0          # but aggression is negative
+    assert out["state"] == "lack_of_bullishness"
+    # both put-skew + sector P/C evidence lines present.
+    assert any("put-skew" in e for e in out["evidence"])
+    assert any("sector P/C" in e for e in out["evidence"])
+
+
+def test_compute_intraday_trend_graceful_without_flow_inputs():
+    """Missing flow_skew + None sector_pc_delta still classifies (effort-only /
+    neutral aggression) without crashing — a valid new-vocab state."""
+    out = compute.compute_intraday_trend(_FakeBullSchwab())  # no flow inputs
+    assert out["state"] in _TREND_STATES
+    assert {"aggression", "aggression_confidence", "evidence"} <= set(out)
+    # no put-skew / sector-P&C evidence when those inputs are absent.
+    assert not any("put-skew" in e for e in out["evidence"])
+    assert not any("sector P/C" in e for e in out["evidence"])
 
 
 def test_compute_intraday_trend_defensive_no_data():
     out = compute.compute_intraday_trend(_FakeDeadSchwab())
     assert out["score"] == 50.0
     assert out["confidence"] == 0.0
-    assert out["state"] == "range"
+    assert out["state"] == "neutral"
+    assert out["aggression"] == 0.0
     assert set(out["sub_scores"]) == {"price", "breadth", "sector", "vix"}
 
 
 def test_compute_intraday_trend_hysteresis_threads_state():
-    """A single bull read does NOT flip a prior committed 'range' (2-day
-    hysteresis): commit_state needs HYSTERESIS_DAYS matching raws to flip."""
+    """A single divergent read does NOT flip a prior committed new-vocab state
+    (2-day hysteresis): commit_state needs HYSTERESIS_DAYS matching raws to flip."""
     out = compute.compute_intraday_trend(
-        _FakeBullSchwab(), prior_history=["range"], prior_committed="range")
-    # committed state stays 'range' on the first divergent read.
-    assert out["state"] == "range"
+        _FakeBullSchwab(), prior_history=["neutral"], prior_committed="neutral",
+        flow_skew={"SPY": {"rr_delta": -3.0}}, sector_pc_delta=-0.2)
+    # committed state stays 'neutral' on the first divergent read.
+    assert out["state"] == "neutral"
     # raw_state reflects the fresh (bullish) classification.
-    assert out["raw_state"] in {"bull_trend", "pullback_in_bull"}
+    assert out["raw_state"] == "bullish"
     # the rolling history was advanced by commit_state.
     assert out["state_history"] and out["state_history"][-1] == out["raw_state"]
+
+
+def test_compute_intraday_trend_migration_guard_old_vocab_prior():
+    """A stale OLD-vocab prior_committed ('range') is treated as a cold start —
+    the new-vocab state is adopted immediately (no 2-read transient)."""
+    out = compute.compute_intraday_trend(
+        _FakeBullSchwab(), prior_history=["range"], prior_committed="range",
+        flow_skew={"SPY": {"rr_delta": -3.0}}, sector_pc_delta=-0.2)
+    assert out["state"] in _TREND_STATES
+    assert out["state"] != "range"
+    # cold start -> committed == raw (adopted immediately, not held at 'range').
+    assert out["state"] == out["raw_state"] == "bullish"
 
 
 # --- 30-day structural trend (Phase 3) ----------------------------------------

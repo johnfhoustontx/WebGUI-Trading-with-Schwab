@@ -38,6 +38,9 @@ from scoring import trend_regime as trend_regime  # noqa: E402
 from scoring import sector_perf as scoring_sector  # noqa: E402,F401
 from scoring import rotation as scoring_rotation    # noqa: E402
 from scoring import intraday_trend  # noqa: E402
+from scoring import effort as effort_mod  # noqa: E402
+from scoring import aggression as aggression_mod  # noqa: E402
+from scoring import market_state  # noqa: E402
 import live_composite  # noqa: E402,F401  (eager: pins module; never lazy)
 from live_composite import (  # noqa: E402
     signal_band, compute_live, build_bridge_payload,
@@ -308,6 +311,13 @@ _DEFENSIVE = {"XLP", "XLU", "XLV", "XLRE"}
 _CYC_DEF_SCALE_INTRADAY = 1.0
 _CYC_DEF_SCALE_30D = 3.0
 
+# Aggression-axis normalization scales (first-pass tunables). SKEW is in 25-delta
+# risk-reversal IV points; PC is the 5-day cap-weighted cross-sector Put/Call
+# change. The raw signal / scale is clamped to ±1, so each is "the input value
+# that saturates that sub-signal to its extreme".
+SKEW_DELTA_SCALE = 5.0   # first-pass tunable: IV points to saturate put-skew Δ
+PC_DELTA_SCALE = 0.3     # first-pass tunable: P/C change to saturate flow
+
 # Sentinel so an OMITTED ``compute_30d_trend`` arg fetches internally, while an
 # explicit ``None`` (caller has no data) stays neutral rather than re-fetching.
 _FETCH = object()
@@ -318,18 +328,22 @@ def _neutral_trend():
 
     Returned when there is no trend computed yet, or as the catastrophic-failure
     fallback of ``compute_intraday_trend`` — so the GUI always sees a valid,
-    fully-shaped trend payload."""
+    fully-shaped trend payload. Uses the five-state (direction × aggression)
+    vocabulary: a neutral direction with zero aggression."""
     return {
         "score": 50.0,
         "smoothed_score": 50.0,
-        "state": "range",
-        "raw_state": "range",
-        "label": trend_regime.STATE_LABELS["range"],
-        "description": trend_regime.STATE_DESCRIPTIONS["range"],
+        "state": "neutral",
+        "raw_state": "neutral",
+        "label": market_state.STATE_LABELS["neutral"],
+        "description": market_state.STATE_DESCRIPTIONS["neutral"],
         "confidence": 0.0,
         "sub_scores": {"price": 50.0, "breadth": 50.0, "sector": 50.0, "vix": 50.0},
         "sub_confidence": {"price": 0.0, "breadth": 0.0, "sector": 0.0, "vix": 0.0},
         "state_history": [],
+        "aggression": 0.0,
+        "aggression_confidence": 0.0,
+        "evidence": [],
     }
 
 
@@ -339,13 +353,24 @@ def _mean(seq):
 
 
 def compute_intraday_trend(schwab, sector_data=None, prior_history=None,
-                           prior_committed=None, prev_smoothed=None) -> dict:
-    """Live 0-100 *directional* Market Trend from intraday proxy data.
+                           prior_committed=None, prev_smoothed=None,
+                           flow_skew=None, sector_pc_delta=None) -> dict:
+    """Live five-state Market State from direction × aggression.
 
     Blends four sub-scores (price MTF/VWAP/MACD/RSI, breadth, sector
-    participation, VIX context) via ``intraday_trend.blend_trend``, EMA-smooths
-    the needle, and runs the 2-day hysteresis state machine (reusing
-    ``trend_regime.commit_state``) so the published state is sticky.
+    participation, VIX context) into an EMA-smoothed 0-100 *direction* score,
+    then crosses it with a signed *aggression* axis (volume-effort + 25-delta
+    put-skew Δ + cross-sector P/C Δ) via ``market_state.classify_market_state``
+    to pick one of five states (``bullish`` / ``lack_of_bullishness`` /
+    ``neutral`` / ``lack_of_bearishness`` / ``bearish``). The 2-day hysteresis
+    state machine (``trend_regime.commit_state``) keeps the published state
+    sticky, with a migration guard that treats a stale OLD-vocab
+    ``prior_committed`` as a cold start (adopt the new vocabulary immediately).
+
+    ``flow_skew`` is the ``cache:options:flow_skew`` payload
+    (``{symbol: {rr_delta, ...}}``); ``sector_pc_delta`` is
+    ``compute.sector_pc_delta()`` (a float or None). Both default None so the
+    aggression axis degrades gracefully to effort-only / neutral.
 
     Each sub-block is defensive: on failure that sub-score becomes
     ``TrendSub(50, 0)`` and drops out of the confidence-weighted blend. An
@@ -462,19 +487,83 @@ def compute_intraday_trend(schwab, sector_data=None, prior_history=None,
         raw_score, agg = intraday_trend.blend_trend(scores, confs)
         agg = round(agg * intraday_trend.vol_confidence_factor(vix_change_pct), 3)
 
-        # 6) SMOOTH + hysteresis state.
+        # 6) SMOOTH the directional needle.
         smoothed = intraday_trend.ema_smooth(prev_smoothed, raw_score, span=3)
-        raw_state = intraday_trend.score_to_state(smoothed)
+
+        # 7) AGGRESSION axis — signed effort/urgency behind the move.
+        #    (a) effort — SPY DAILY volume-vs-result confirmation (signed).
+        effort_score, effort_conf = 0.0, 0.0
+        try:
+            daily = frames.get("1day")
+            if daily is not None and len(daily):
+                tail = daily.tail(30)
+                ohlcv = [{"open": float(r["open"]), "high": float(r["high"]),
+                          "low": float(r["low"]), "close": float(r["close"]),
+                          "volume": float(r["volume"])}
+                         for _, r in tail.iterrows()]
+                er = effort_mod.score_effort(ohlcv)
+                effort_score, effort_conf = float(er.score), float(er.confidence)
+        except Exception:  # noqa: BLE001 — effort simply drops out (conf 0).
+            effort_score, effort_conf = 0.0, 0.0
+
+        #    (b) skew — 25-delta risk-reversal CHANGE; rising put fear -> NEGATIVE.
+        rr_delta = None
+        try:
+            fs = flow_skew or {}
+            entry = (fs.get("SPY") or fs.get("$SPX") or {})
+            rr_delta = entry.get("rr_delta")
+        except Exception:  # noqa: BLE001
+            rr_delta = None
+        if isinstance(rr_delta, (int, float)) and not isinstance(rr_delta, bool):
+            skew_comp = -intraday_trend._clamp(rr_delta / SKEW_DELTA_SCALE, -1, 1)
+            skew_conf = 1.0
+        else:
+            skew_comp, skew_conf = 0.0, 0.0
+            rr_delta = None  # normalize non-numeric to None for the evidence line
+
+        #    (c) flow — 5-day cap-weighted sector P/C change; rising put demand
+        #        -> NEGATIVE.
+        if sector_pc_delta is not None:
+            flow_comp = -intraday_trend._clamp(sector_pc_delta / PC_DELTA_SCALE, -1, 1)
+            flow_conf = 1.0
+        else:
+            flow_comp, flow_conf = 0.0, 0.0
+
+        #    (order_flow arrives in a later phase; its absence just drops out.)
+        aggression, agg_conf = aggression_mod.blend_aggression(
+            {"effort": effort_score, "skew": skew_comp, "flow": flow_comp},
+            {"effort": effort_conf, "skew": skew_conf, "flow": flow_conf})
+
+        # 8) EVIDENCE (dimensions that HAVE data) + five-state classification.
+        evidence = [f"direction {smoothed:.0f}/100"]
+        if effort_conf > 0:
+            evidence.append(f"effort {effort_score:+.2f}")
+        if rr_delta is not None:
+            evidence.append(f"put-skew Δ {rr_delta:+.1f}")
+        if sector_pc_delta is not None:
+            evidence.append(f"sector P/C Δ {sector_pc_delta:+.2f}")
+        evidence.append(f"aggression {aggression:+.2f}")
+
+        ms = market_state.classify_market_state(smoothed, aggression,
+                                                evidence=evidence)
+        raw_state = ms.state
+
+        # 9) Hysteresis, with a MIGRATION guard: a ``prior_committed`` that is not
+        #    in the new-vocab ``STATE_LABELS`` is a stale OLD-vocab value from
+        #    before this change — treat it as a cold start so the new-vocab state
+        #    publishes immediately (no 2-read transient emitting an old string).
+        prior_valid = (prior_committed
+                       if prior_committed in market_state.STATE_LABELS else None)
         committed, hist = trend_regime.commit_state(
-            raw_state, prior_history or [], prior_committed)
+            raw_state, prior_history or [], prior_valid)
 
         return {
             "score": raw_score,
             "smoothed_score": smoothed,
             "state": committed,
             "raw_state": raw_state,
-            "label": trend_regime.STATE_LABELS[committed],
-            "description": trend_regime.STATE_DESCRIPTIONS[committed],
+            "label": market_state.STATE_LABELS[committed],
+            "description": market_state.STATE_DESCRIPTIONS[committed],
             "confidence": agg,
             "sub_scores": {"price": price.score, "breadth": breadth.score,
                            "sector": sector.score, "vix": vix_sub.score},
@@ -483,6 +572,9 @@ def compute_intraday_trend(schwab, sector_data=None, prior_history=None,
                                "sector": sector.confidence,
                                "vix": vix_sub.confidence},
             "state_history": hist,
+            "aggression": aggression,
+            "aggression_confidence": agg_conf,
+            "evidence": list(ms.evidence),
         }
     except Exception:  # noqa: BLE001 — never raise into the refresh path.
         return _neutral_trend()

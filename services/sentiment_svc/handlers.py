@@ -85,24 +85,46 @@ def _load_snapshots_cached():
         return snaps, spy
 
 
-def _maybe_recompute_trend():
+def _maybe_recompute_trend(bus):
     """Recompute the directional Market Trend if the 15-min gate is due.
 
     Threads persisted hysteresis/smoothing state through ``compute_intraday_trend``
-    and refreshes the cached payloads in ``_TREND``. Defensive — a recompute
-    failure logs and leaves the prior cached trend in place (never aborts refresh).
+    and refreshes the cached payloads in ``_TREND``. Also feeds the aggression axis:
+    the cross-service ``cache:options:flow_skew`` view (25-delta put-skew Δ) read
+    from the bus, and ``compute.sector_pc_delta()`` (5-day cap-weighted sector P/C
+    Δ). Both reads are defensive — a bus/cache failure degrades to None, never
+    aborts. Defensive overall — a recompute failure logs and leaves the prior
+    cached trend in place (never aborts refresh).
     """
     from services import _proxy
     with _TREND_LOCK:
         now = time.monotonic()
         if not scheduler.trend_due(now, _TREND["last_ts"]):
             return
+
+        # Aggression inputs — cross-service put-skew + sector P/C change. Read
+        # defensively so a missing/locked cache never aborts the trend recompute.
+        flow_skew = None
+        try:
+            env = bus.cache_get(CACHE_OPTIONS_FLOW_SKEW)
+            if env is not None and isinstance(env.payload, dict):
+                flow_skew = env.payload
+        except Exception:  # noqa: BLE001 — degrade to None.
+            log.debug("flow_skew read failed", exc_info=True)
+        try:
+            pc_delta = compute.sector_pc_delta()
+        except Exception:  # noqa: BLE001 — degrade to None.
+            log.debug("sector_pc_delta read failed", exc_info=True)
+            pc_delta = None
+
         try:
             t = compute.compute_intraday_trend(
                 _proxy.schwab_client,
                 prior_history=_TREND["history"],
                 prior_committed=_TREND["committed"],
-                prev_smoothed=_TREND["smoothed"])
+                prev_smoothed=_TREND["smoothed"],
+                flow_skew=flow_skew,
+                sector_pc_delta=pc_delta)
             t30 = compute.compute_30d_trend()
             _TREND.update(
                 last_ts=now,
@@ -114,6 +136,9 @@ def _maybe_recompute_trend():
         except Exception:  # noqa: BLE001 — recompute failure must not abort refresh.
             log.exception("intraday trend recompute failed")
 
+
+# Cross-service view (published by options_svc) feeding the aggression axis.
+CACHE_OPTIONS_FLOW_SKEW = "cache:options:flow_skew"
 
 CACHE_COMPOSITE = "cache:sentiment:composite"
 CACHE_HISTORY = "cache:sentiment:history"
@@ -312,7 +337,7 @@ def refresh(bus, with_sectors: bool = False) -> None:
     _composite_gate(live, snaps)
 
     # 15-min directional Market-Trend recompute (gated + state persisted).
-    _maybe_recompute_trend()
+    _maybe_recompute_trend(bus)
 
     now_iso = datetime.now(timezone.utc).isoformat()
 
