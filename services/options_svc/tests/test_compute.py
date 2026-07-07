@@ -2353,6 +2353,62 @@ def test_gex_next_scan_boundaries():
     assert compute._gex_next_scan(ct(15, 18)) is None
 
 
+# ── flow_skew_view (per-index skew level + change since prior snapshot) ───────
+# Reads gex_history_db.latest_skew_by_symbol (2 most-recent rows) per index
+# symbol. We fake the lazily-imported gex_history_db so nothing touches the DB.
+
+def _fake_skew_db(monkeypatch, rows_by_symbol):
+    import sys as _sys
+    import types as _types
+
+    def _latest(conn, symbol, view="gex"):
+        return list(rows_by_symbol.get(symbol, []))
+
+    fake_gh = _types.SimpleNamespace(
+        connect=lambda read_only=False: _types.SimpleNamespace(
+            close=lambda: None),
+        latest_skew_by_symbol=_latest,
+    )
+    monkeypatch.setitem(_sys.modules, "gex_history_db", fake_gh)
+
+
+def test_flow_skew_view_builds_per_symbol_with_delta(monkeypatch):
+    # $SPX has two snapshots -> rr_delta = latest.rr - prior.rr.
+    _fake_skew_db(monkeypatch, {
+        "$SPX": [(200, 4.0, 300, 310), (140, 1.5, 200, 210)],
+        "SPY": [(200, -2.0, 50, 60)],   # only one snapshot -> rr_delta None
+    })
+    out = compute.flow_skew_view()
+    assert out["$SPX"] == {"rr_25d": 4.0, "rr_delta": 2.5,
+                           "call_vol": 300, "put_vol": 310, "ts": 200}
+    assert out["SPY"] == {"rr_25d": -2.0, "rr_delta": None,
+                          "call_vol": 50, "put_vol": 60, "ts": 200}
+    # QQQ had no rows -> absent from the view.
+    assert "QQQ" not in out
+
+
+def test_flow_skew_view_delta_none_when_rr_missing(monkeypatch):
+    # A None rr in either the latest or prior row -> rr_delta None.
+    _fake_skew_db(monkeypatch, {
+        "$SPX": [(200, None, 300, 310), (140, 1.5, 200, 210)],
+    })
+    out = compute.flow_skew_view()
+    assert out["$SPX"]["rr_25d"] is None
+    assert out["$SPX"]["rr_delta"] is None
+
+
+def test_flow_skew_view_defensive_empty_on_failure(monkeypatch):
+    import sys as _sys
+    import types as _types
+
+    def _boom(read_only=False):
+        raise RuntimeError("db locked")
+
+    monkeypatch.setitem(_sys.modules, "gex_history_db",
+                        _types.SimpleNamespace(connect=_boom))
+    assert compute.flow_skew_view() == {}
+
+
 def test_gamma_walls_one_each_side_for_gex():
     data = {"spot": 450.0, "gex": {
         440.0: {"call": 10.0,  "put": -900.0, "net": -890.0},  # put wall (below)

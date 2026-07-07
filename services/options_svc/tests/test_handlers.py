@@ -963,6 +963,60 @@ def test_collect_gex_history_calls_compute(monkeypatch):
     assert called["v"] is True
 
 
+def test_collect_gex_history_publishes_flow_skew_after_collect(monkeypatch):
+    """collect_gex_history publishes the flow-skew view AFTER collection (it
+    rides the same 2-min tick that just wrote the rows)."""
+    order = []
+    monkeypatch.setattr(handlers.compute, "collect_gex_snapshots",
+                        lambda: order.append("collect"))
+    monkeypatch.setattr(handlers, "publish_flow_skew",
+                        lambda bus: order.append("publish"))
+    bus = Bus(fake=True)
+    handlers.collect_gex_history(bus=bus)
+    assert order == ["collect", "publish"]
+
+
+def test_collect_gex_history_no_bus_skips_publish(monkeypatch):
+    """A legacy caller passing bus=None still collects, but does not publish."""
+    order = []
+    monkeypatch.setattr(handlers.compute, "collect_gex_snapshots",
+                        lambda: order.append("collect"))
+    monkeypatch.setattr(handlers, "publish_flow_skew",
+                        lambda bus: order.append("publish"))
+    handlers.collect_gex_history(bus=None)
+    assert order == ["collect"]
+
+
+def test_collect_gex_history_publish_failure_does_not_raise(monkeypatch):
+    """A publish_flow_skew failure must never abort the (already-done) collect."""
+    monkeypatch.setattr(handlers.compute, "collect_gex_snapshots", lambda: None)
+
+    def _boom(bus):
+        raise RuntimeError("redis down")
+
+    monkeypatch.setattr(handlers, "publish_flow_skew", _boom)
+    handlers.collect_gex_history(bus=Bus(fake=True))  # must not raise
+
+
+def test_publish_flow_skew_caches_and_publishes(monkeypatch):
+    """publish_flow_skew caches compute.flow_skew_view() under
+    cache:options:flow_skew and publishes a version event."""
+    bus = Bus(fake=True)
+    sentinel = {"$SPX": {"rr_25d": 4.0, "rr_delta": 0.5,
+                         "call_vol": 300, "put_vol": 310, "ts": 200}}
+    monkeypatch.setattr(handlers.compute, "flow_skew_view", lambda: sentinel)
+
+    sub = bus.subscribe("events:options:flow_skew")
+    handlers.publish_flow_skew(bus)
+    msg = sub.get_message(timeout=1.0)
+    sub.close()
+
+    env = bus.cache_get("cache:options:flow_skew")
+    assert env is not None
+    assert env.payload == sentinel
+    assert msg is not None and msg.get("version") == env.version
+
+
 def test_publish_gex_status_caches_and_publishes(monkeypatch):
     """publish_gex_status caches compute.gex_status_view() under
     cache:options:gex_status and publishes a version event."""

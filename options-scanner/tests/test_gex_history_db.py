@@ -485,6 +485,50 @@ def test_insert_snapshot_missing_skew_is_null(tmp_path, monkeypatch):
     assert row == (None, None, None)
 
 
+def test_latest_skew_by_symbol_two_most_recent(tmp_path, monkeypatch):
+    """latest_skew_by_symbol returns the two most-recent (ts, rr_25d, call_vol,
+    put_vol) rows for (symbol, view), most-recent first (LIMIT 2)."""
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    base = int(time.time())
+    for offset, rr, cv, pv in [(0, 1.0, 100, 110), (60, 2.0, 200, 210),
+                               (120, 3.0, 300, 310)]:
+        db.insert_snapshot(
+            conn, "$SPX", "gex",
+            {"ts": base + offset, "spot": 5000.0, "flip": None,
+             "top_pos_strike": None, "top_neg_strike": None, "net_total": 0.0,
+             "rr_25d": rr, "call_vol": cv, "put_vol": pv},
+            {}, 0,
+        )
+    rows = db.latest_skew_by_symbol(conn, "$SPX", "gex")
+    assert len(rows) == 2
+    assert rows[0] == (base + 120, 3.0, 300, 310)   # most recent first
+    assert rows[1] == (base + 60, 2.0, 200, 210)
+
+
+def test_latest_skew_by_symbol_filters_symbol_and_view(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    ts = int(time.time())
+    base = {"ts": ts, "spot": 1.0, "flip": None, "top_pos_strike": None,
+            "top_neg_strike": None, "net_total": 0.0,
+            "rr_25d": 5.0, "call_vol": 1, "put_vol": 2}
+    db.insert_snapshot(conn, "$SPX", "gex", base, {}, 0)
+    db.insert_snapshot(conn, "$SPX", "charm", base, {}, 0)
+    db.insert_snapshot(conn, "SPY", "gex", base, {}, 0)
+    assert len(db.latest_skew_by_symbol(conn, "$SPX", "gex")) == 1
+    assert db.latest_skew_by_symbol(conn, "QQQ", "gex") == []
+
+
+def test_latest_skew_by_symbol_empty(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    assert db.latest_skew_by_symbol(conn, "$SPX", "gex") == []
+
+
 def test_skew_columns_backfilled_on_preexisting_db(tmp_path, monkeypatch):
     """A DB created before the skew columns existed must get them via ALTER TABLE
     (rr_25d REAL, call_vol INTEGER, put_vol INTEGER), and a subsequent insert must

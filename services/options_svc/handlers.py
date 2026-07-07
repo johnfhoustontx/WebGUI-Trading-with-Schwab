@@ -191,6 +191,13 @@ EVENT_CALC_IV = "events:options:calc_iv"
 CACHE_GEX_STATUS = "cache:options:gex_status"
 EVENT_GEX_STATUS = "events:options:gex_status"
 
+# Per-index 25-delta options-flow skew (level + change since the prior snapshot).
+# No strict contract (mirrors gex_status): a small read-only dict the sentiment
+# service reads defensively as an aggression input. Published on each 2-min GEX
+# tick right after collection (rides collect_gex_history).
+CACHE_FLOW_SKEW = "cache:options:flow_skew"
+EVENT_FLOW_SKEW = "events:options:flow_skew"
+
 CACHE_EXPECTED_MOVE = "cache:options:expected_move"
 EVENT_EXPECTED_MOVE = "events:options:expected_move"
 
@@ -538,8 +545,33 @@ def collect_gex_history(bus=None) -> None:
     refresh, so there is no Redis cache view to publish here. ``bus`` is accepted
     only for handler-signature uniformity with the other scheduler-invoked
     refreshers. Guarded by the caller; ``compute.collect_gex_snapshots`` is
-    itself defensive (per-symbol failures are logged, not raised)."""
+    itself defensive (per-symbol failures are logged, not raised).
+
+    After collection, publishes the per-index flow-skew view
+    (``cache:options:flow_skew``) so it rides the SAME 2-min tick that just wrote
+    the rows. That publish is best-effort — a failure must never affect the
+    collection that already succeeded (and ``bus`` is None for legacy callers)."""
     compute.collect_gex_snapshots()
+    if bus is not None:
+        try:
+            publish_flow_skew(bus)
+        except Exception:
+            log.exception("publish_flow_skew after collect degraded")
+
+
+def publish_flow_skew(bus) -> None:
+    """Compute the per-index flow-skew view and publish it to the bus.
+
+    No strict contract: the view is a small read-only dict keyed by index symbol
+    (``{symbol: {rr_25d, rr_delta, call_vol, put_vol, ts}}``) that the sentiment
+    service consumes defensively, and ``compute.flow_skew_view`` is already fully
+    defensive (any failure degrades to ``{}``). Guarded so a bus hiccup never
+    escapes into the caller."""
+    try:
+        view = compute.flow_skew_view()
+        bus.cache_set(CACHE_FLOW_SKEW, view, event=EVENT_FLOW_SKEW)
+    except Exception:
+        log.exception("publish_flow_skew degraded")
 
 
 def publish_gex_status(bus) -> None:

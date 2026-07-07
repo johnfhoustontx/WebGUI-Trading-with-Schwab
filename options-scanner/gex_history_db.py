@@ -286,6 +286,31 @@ def load_today_with_grid(
     return load_date_with_grid(conn, symbol, view, None)
 
 
+def latest_skew_by_symbol(
+    conn: sqlite3.Connection,
+    symbol: str,
+    view: str = "gex",
+) -> list[tuple]:
+    """Return the two most-recent skew rows for (symbol, view), most-recent first.
+
+    Rows: (ts, rr_25d, call_vol, put_vol). Used by the flow-skew publish step to
+    compute the CHANGE in the 25-delta risk-reversal since the prior snapshot
+    (LIMIT 2, ORDER BY ts DESC). Returns [] when there are no rows.
+    """
+    cur = conn.execute(
+        """
+        SELECT ts, rr_25d, call_vol, put_vol
+          FROM snapshots
+         WHERE symbol = ?
+           AND view   = ?
+         ORDER BY ts DESC
+         LIMIT 2
+        """,
+        (symbol, view),
+    )
+    return cur.fetchall()
+
+
 def purge_old(conn: sqlite3.Connection) -> int:
     """Delete snapshots older than today (local date). Returns rows deleted.
 

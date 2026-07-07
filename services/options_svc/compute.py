@@ -1432,6 +1432,67 @@ def gex_status_view(now=None) -> dict:
                 "next_scan": None, "age_seconds": None}
 
 
+# Index symbols the flow-skew view reports (the sentiment service reads this as an
+# aggression input). Deliberately small + explicit (not the whole GEX universe).
+FLOW_SKEW_INDEX_SYMBOLS = ("$SPX", "SPY", "QQQ")
+
+
+def flow_skew_view() -> dict:
+    """Per-index 25-delta skew level + its CHANGE since the prior snapshot.
+
+    Reads the last two GEX snapshots per index symbol from ``gex_history.db``
+    (``gex_history_db.latest_skew_by_symbol``) and returns
+    ``{symbol: {"rr_25d", "rr_delta", "call_vol", "put_vol", "ts"}}`` where
+    ``rr_delta = latest.rr_25d − prior.rr_25d`` (None when either is missing or
+    there is only one snapshot). Symbols with no rows are omitted.
+
+    No strict contract (mirrors ``gex_status_view``): a small read-only dict the
+    sentiment service consumes defensively. Fully defensive — any failure (DB
+    locked/missing, import error) degrades to ``{}`` so the publish never raises.
+    ``gex_history_db`` is imported LAZILY per the service's cross-app collision
+    discipline (same as ``gex_status_view``/``collect_gex_snapshots``)."""
+    try:
+        import gex_history_db as gh
+    except Exception:
+        log.debug("flow_skew_view: gex_history_db import failed", exc_info=True)
+        return {}
+
+    try:
+        conn = gh.connect(read_only=True)
+    except Exception:
+        log.debug("flow_skew_view: DB connect failed", exc_info=True)
+        return {}
+
+    out: dict = {}
+    try:
+        for symbol in FLOW_SKEW_INDEX_SYMBOLS:
+            try:
+                rows = gh.latest_skew_by_symbol(conn, symbol, "gex")
+            except Exception:
+                log.debug("flow_skew_view: read failed for %s", symbol,
+                          exc_info=True)
+                continue
+            if not rows:
+                continue
+            ts, rr, call_vol, put_vol = rows[0][0], rows[0][1], rows[0][2], rows[0][3]
+            rr_delta = None
+            if len(rows) > 1:
+                prior_rr = rows[1][1]
+                if rr is not None and prior_rr is not None:
+                    rr_delta = rr - prior_rr
+            out[symbol] = {"rr_25d": rr, "rr_delta": rr_delta,
+                           "call_vol": call_vol, "put_vol": put_vol, "ts": ts}
+    except Exception:
+        log.debug("flow_skew_view: build failed", exc_info=True)
+        return {}
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            log.debug("flow_skew_view conn close failed", exc_info=True)
+    return out
+
+
 def build_gamma_read(symbol, spot, gex_summary, charm_summary, dex_summary,
                      vanna_summary, walls, regime):
     """Map the gamma-engine summaries + walls + sentiment → a GammaRead.
