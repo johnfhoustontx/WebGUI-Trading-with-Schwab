@@ -953,6 +953,37 @@ def test_swing_scan_uses_defaults_for_missing_args(monkeypatch):
     assert env.payload["view"] == {}
 
 
+def test_swing_scan_reads_market_state(monkeypatch):
+    """The handler reads the live committed state from cache:sentiment:composite
+    and threads it into compute.swing_scan as ``market_state``."""
+    bus = Bus(fake=True)
+    bus.cache_set("cache:sentiment:composite",
+                  {"derived": {"trend": {"state": "lack_of_bearishness"}}})
+    seen = {"params": None}
+
+    def _rec(**params):
+        seen["params"] = params
+        return {"signals": [], "view": {}}
+
+    monkeypatch.setattr(handlers.compute, "swing_scan", _rec)
+    handlers.swing_scan(bus, {"symbol": "SPY"})
+    assert seen["params"]["market_state"] == "lack_of_bearishness"
+
+
+def test_swing_scan_absent_composite_no_market_state(monkeypatch):
+    """No composite cached (bus returns None) -> market_state=None (graceful)."""
+    bus = Bus(fake=True)
+    seen = {"params": None}
+
+    def _rec(**params):
+        seen["params"] = params
+        return {"signals": [], "view": {}}
+
+    monkeypatch.setattr(handlers.compute, "swing_scan", _rec)
+    handlers.swing_scan(bus, {"symbol": "SPY"})
+    assert seen["params"]["market_state"] is None
+
+
 def test_collect_gex_history_calls_compute(monkeypatch):
     """The handler delegates to compute.collect_gex_snapshots (a pure write to
     the on-disk history store; no Redis cache view to publish)."""

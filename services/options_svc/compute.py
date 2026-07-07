@@ -62,7 +62,8 @@ _SWING_FAMILIES = ("DIRECTIONAL", "VERTICAL", "NEUTRAL")
 
 
 def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
-               call_d_min, call_d_max, min_cr_fraction, families=None) -> dict:
+               call_d_min, call_d_max, min_cr_fraction, families=None,
+               market_state=None) -> dict:
     """Run the multi-strategy swing scan pipeline; returns ``{"signals", "view"}``.
 
     The pipeline builds NORMALIZED candidates across families
@@ -84,7 +85,12 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
       5. score + rank + assign ids.
 
     ``families`` (default all Phase-1 families) restricts which candidate families
-    are built. Two-client usage mirrors the page: ``_proxy.schwab_py_client`` is
+    are built. ``market_state`` (optional) is the live committed five-state
+    classifier label (bullish / lack_of_bullishness / neutral / lack_of_bearishness
+    / bearish); it is threaded to ``score_all`` for the low-weight family-ranking
+    tilt. ``None`` (absent/bad composite) applies no tilt. The caller (the ``swing``
+    command handler) reads it from ``cache:sentiment:composite`` — compute stays
+    proxy-only. Two-client usage mirrors the page: ``_proxy.schwab_py_client`` is
     the schwab-py-compatible client passed into the engine calls, while
     ``_proxy.schwab_client.get_quote(symbol)`` fetches the quote.
     ``min_cr_fraction`` arrives already as a fraction.
@@ -160,7 +166,7 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     if "NEUTRAL" in fams:
         signals += [ssn.adapt_iron_condor(ic) for ic in se.build_iron_condors(spreads)]
 
-    signals = ssc.score_all(signals, view, atm_iv, em_1sd)
+    signals = ssc.score_all(signals, view, atm_iv, em_1sd, market_state=market_state)
     assign_ids(signals, symbol)
     return {"signals": signals, "view": view}
 

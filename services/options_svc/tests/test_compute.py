@@ -266,6 +266,50 @@ def test_swing_scan_empty_when_no_spot(monkeypatch):
     assert out == {"signals": [], "view": {}}
 
 
+def _swing_scan_market_state_env(monkeypatch):
+    """Shared fixture wiring for the market-state tilt tests: a bullish view + one
+    adapted PCS candidate (which carries a non-zero `lack_of_bearishness` tilt)."""
+    chain = _swing_chain()
+    monkeypatch.setattr(compute.se, "fetch_option_chain",
+                        lambda client, symbol, from_date=None, to_date=None: chain)
+    monkeypatch.setattr(compute._proxy.schwab_client, "get_quote",
+                        lambda symbol: {"last": 540.0})
+    monkeypatch.setattr(compute.se, "fetch_price_history", lambda client, symbol: {"h": 1})
+    monkeypatch.setattr(compute.se, "calc_technicals",
+                        lambda hist: {"trend": "BULLISH", "rsi14": 60,
+                                      "price": 540.0, "sma20": 530.0})
+    monkeypatch.setattr(compute, "run_iv_analysis",
+                        lambda client, symbol, price=None, hist=None, chain=None:
+                        {"iv_rank": 50.0,
+                         "expected_moves": {"daily": {"move_dollars": 5.0}}})
+    monkeypatch.setattr(compute.se, "screen_spreads",
+                        lambda *a, **k: [{"symbol": "SPY", "type": "PCS",
+                                          "short_strike": 530.0, "long_strike": 525.0,
+                                          "short_mark": 1.2, "long_mark": 0.6,
+                                          "credit": 0.6, "max_loss": 4.4,
+                                          "expiration": "2026-07-15",
+                                          "underlying_price": 540.0}])
+    monkeypatch.setattr(compute.se, "build_iron_condors", lambda spreads: [])
+
+
+def test_swing_scan_threads_market_state_tilt(monkeypatch):
+    """A live committed market state threads into score_all -> the PCS signal
+    carries a non-zero family-tilt (`lack_of_bearishness` favors put credit)."""
+    _swing_scan_market_state_env(monkeypatch)
+    out = compute.swing_scan("SPY", 5, 30, -0.20, -0.10, 0.10, 0.20, 0.10,
+                             market_state="lack_of_bearishness")
+    pcs = [s for s in out["signals"] if s["type"] == "PCS"]
+    assert pcs and pcs[0]["state_tilt"] != 0.0
+
+
+def test_swing_scan_no_market_state_no_tilt(monkeypatch):
+    """Absent market state (default None) -> the PCS signal carries a 0.0 tilt."""
+    _swing_scan_market_state_env(monkeypatch)
+    out = compute.swing_scan("SPY", 5, 30, -0.20, -0.10, 0.10, 0.20, 0.10)
+    pcs = [s for s in out["signals"] if s["type"] == "PCS"]
+    assert pcs and pcs[0]["state_tilt"] == 0.0
+
+
 # ── Paper account (moved from webgui/pages/options/portfolio.py) ────────────
 def test_paper_account_view_shape(monkeypatch):
     """``paper_account_view`` assembles snapshot + positions + orders + flag from

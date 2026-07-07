@@ -294,10 +294,22 @@ def swing_scan(bus, args: dict) -> None:
     under ``cache:options:swing``.
 
     No ScanResult gate: this is a flat signal list (not the dual-list scan
-    contract), and the page reads ``payload["signals"]`` directly."""
+    contract), and the page reads ``payload["signals"]`` directly.
+
+    Cross-service read: the live committed five-state market classifier lives in
+    ``cache:sentiment:composite`` under ``derived.trend.state`` (published by the
+    sentiment service). We read it DEFENSIVELY here — every level guarded, any
+    missing level / absent composite -> ``None`` -> ``compute.swing_scan`` applies
+    no family-ranking tilt — and pass it as ``market_state``. This keeps
+    ``compute.swing_scan`` proxy-only (no bus dependency); the handler is the
+    natural cross-service reader (mirrors the ``cache_get`` reads in
+    ``remove_closed_from_captured`` / ``refresh_gamma_current``)."""
     args = args or {}
     params = {k: args.get(k, default) for k, default in _SWING_DEFAULTS.items()}
-    result = compute.swing_scan(**params)
+    env = bus.cache_get("cache:sentiment:composite")
+    payload = env.payload if env is not None else None
+    market_state = (((payload or {}).get("derived") or {}).get("trend") or {}).get("state")
+    result = compute.swing_scan(**params, market_state=market_state)
     payload = {"signals": result["signals"], "view": result.get("view"),
                "symbol": params["symbol"], "params": args}
     version = bus.cache_set(CACHE_SWING, payload)
