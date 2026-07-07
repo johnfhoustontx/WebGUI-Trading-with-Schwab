@@ -9,8 +9,9 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > port change, copied/removed module — update the relevant section here.
 
 **Last updated:** 2026-07-07 (**Five-state market classifier (direction × aggression) —
-Phases 0–5 shipped (Phases 0–3 LIVE on REST data; Phases 4–5 streamer order flow code-complete,
-pending a live RTH check)**: the app's one-axis intraday
+Phases 0–5 + Tier 3 shipped (Phases 0–3 LIVE on REST data; Phases 4–5 streamer login+subscriptions
+verified live, RTH order-flow population pending; Tier 3 = validation harness + LOW-weight swing/driver
+integrations)**: the app's one-axis intraday
 trend state (`scoring/intraday_trend.py:score_to_state` → `bull_trend`/`pullback_in_bull`/`range`/
 `bear_rally`/`bear_trend`) is **replaced — for the regime-driving intraday state** — by a
 **two-axis direction × aggression classifier** emitting five trader states: **Bullish / Lack of
@@ -79,14 +80,32 @@ ticks, so this is a **sampled** read (reliable over minute windows, not tick-per
 time-&-sales, SPY proxies $SPX (no index tape). **Still needs a LIVE RTH check** (restart proxy +
 sentiment_svc, watch `cache:sentiment:order_flow` populate + the aggression axis move) — the blocking SSE
 workers are live-verified, not unit-tested (the pure classifier/window/aggregate helpers carry the
-coverage, mirroring the portfolio precedent). **DEFERRED (Tier 3, separate design): item 9**
-(state → Swing-Scanner strategy-family bias), **item 10** (state into the Driver packet + guardrail
-modifier), **item 11** (formal IC/backtest validation that the five states stratify forward returns —
-the recording exists so this can run). Everything is ADDITIVE except the ONE coordinated
-`trend_regime.state` vocabulary change (`regime_filter` rekeyed in lockstep).
-Green: sentiment_svc **136**, options_svc **396**, webgui **681**, schwab-proxy **82** (equity + option
-stream fan-out), options-scanner flow_skew **+18** / gex_history migration, sentiment-dashboard scoring
-modules (effort/aggression/market_state/session/rejection/profile/order_flow) **+91**, shared/notify **14**.
+coverage, mirroring the portfolio precedent). **Tier 3 (SHIPPED — validate-first): item 11** built an
+OFFLINE validation harness (`sentiment-dashboard/validate_market_state.py` — run manually, NEVER in a
+request path) that reconstructs the daily committed state over ~5yr SPY history (a daily-OHLCV CORE
+reconstruction: a NEW `scoring/daily_direction.py:daily_direction_score` proxy × the REAL
+`effort`+`rejection_defense` aggression, through the REAL `market_state` grid + `commit_state`
+hysteresis) and measures forward-return stratification (per-state mean/hit-rate + **ordinal IC**). **Honest
+result:** 20d ordinal IC **+0.087** (5d +0.055) — a modest, **regime-dependent** edge (calm IC +0.086 /
+stressed +0.024) CONCENTRATED IN THE TWO MIDDLE STATES (Lack-of-Bullishness +0.99% vs Lack-of-Bearishness
++2.16% mean-20d — the framework's effort-vs-result innovation); the extremes are **inconclusive** here
+(Bullish +0.65% underperformed via exhaustion; **Bearish NEVER fired in 5yr** — the inputs that most drive
+it, skew spikes + put-flow, are exactly the ones EXCLUDED from the daily reconstruction). So — like the
+validated swing model — a thin, label-don't-overtrust edge. **Items 9 & 10 were therefore built at LOW
+weight (user decision):** **item 9** = a SMALL bounded family-fit tilt (`strategy_scoring.state_family_tilt`,
+`STATE_TILT_MAX=6`, leaning on the two middle states — Lack-of-Bearishness→PCS+, Lack-of-Bullishness→CCS+/
+long-call−) applied to `score_strategy`'s composite **AFTER the hard-gate grade is decided (a ranking nudge
+that can NEVER flip a gated grade)**, fed by the live state read from `cache:sentiment:composite` in the
+`swing` handler; **item 10** = the committed state (label+evidence) surfaced to the **Driver's Claude
+decider as CONTEXT ONLY** in `build_packet` (read in the driver handler) — **`guardrails.py` is UNTOUCHED**
+(`regime_filter` already hard-gates the driver's menu; the state is context, not a second gate, proven
+context-only by test). Both additive/defensive (no state → no tilt / no context line). Everything is
+ADDITIVE except the ONE coordinated `trend_regime.state` vocabulary change (`regime_filter` rekeyed in
+lockstep). Green: sentiment_svc **136**, options_svc **400**, driver_svc **168**, webgui **681**,
+schwab-proxy **82** (equity + option stream fan-out), options-scanner flow_skew **+18** / strategy_scoring
+**56** / gex_history migration, sentiment-dashboard scoring modules
+(effort/aggression/market_state/session/rejection/profile/order_flow/daily_direction) **+101**,
+shared/notify **14**.
 Built subagent-by-subagent (TDD, two-stage spec+quality review per unit). **Restart `options_svc` +
 `sentiment_svc`** to pick this up. Branch `Using_Highcharts`. Design/plan:
 [design](docs/plans/2026-07-07-five-state-market-classifier-design.md) /
