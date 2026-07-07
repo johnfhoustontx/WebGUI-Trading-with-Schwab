@@ -40,6 +40,33 @@ def test_build_bridge_payload_core():
     assert "aggregate_confidence" in p and "velocity" in p and "weights" in p
 
 
+def test_cap_weighted_pcr_known():
+    import pytest
+    # (0.9*2 + 0.6*1)/(2+1) = 2.4/3 = 0.8
+    pcr = {"XLK": 0.9, "XLF": 0.6}
+    weights = {"XLK": 2.0, "XLF": 1.0}
+    assert L.cap_weighted_pcr(pcr, weights) == pytest.approx(0.8)
+
+
+def test_cap_weighted_pcr_empty_is_none():
+    assert L.cap_weighted_pcr({}, {}) is None
+    assert L.cap_weighted_pcr({"XLK": 0.9}, {}) is None       # no usable weight
+    assert L.cap_weighted_pcr({}, {"XLK": 2.0}) is None       # no pcr
+
+
+def test_cap_weighted_pcr_partial_weights():
+    # only sectors with a non-zero weight AND a pcr contribute
+    pcr = {"XLK": 1.0, "XLF": 0.5, "XLE": 0.3}
+    weights = {"XLK": 3.0, "XLF": 0.0, "XLE": 1.0}   # XLF weight 0 -> excluded
+    # (1.0*3 + 0.3*1)/(3+1) = 3.3/4 = 0.825
+    import pytest
+    assert L.cap_weighted_pcr(pcr, weights) == pytest.approx(0.825)
+
+
+def test_cap_weighted_pcr_single_sector():
+    assert L.cap_weighted_pcr({"XLK": 0.7}, {"XLK": 2.0}) == 0.7
+
+
 def test_build_bridge_payload_regime_bands():
     band = lambda t: L.build_bridge_payload(_snap(t), [], [], "x")["regime"]
     assert band(8.5) == "strong_bullish"
