@@ -1,0 +1,50 @@
+# Ruff configuration — lint gate for the actively-developed code.
+#
+# Philosophy: catch REAL bugs (pyflakes `F` + syntax `E9`), NOT fight the
+# codebase's deliberate style (one-line `x=1; y=2` / `if c: return` statements,
+# short local names). Line length is generous; stylistic E7xx/E4xx rules are not
+# selected. See docs/audits/2026-07-02-best-practices-validation.md (item 4).
+#
+# Scope: the clean 3-tier code (services/, shared/, webgui/), the proxy, and
+# tools/. The copied LEGACY engine dirs (options-scanner, sentiment-dashboard,
+# trade-analyzer, portfolio-analyzer, claude-driver) + the legacy Tk/GUI modules
+# under shared/analysis_lib are GRANDFATHERED (excluded) — they were copied
+# verbatim from the source monorepo and carry pre-existing lint debt (incl. the
+# `sys.path` glue that makes E402 unavoidable and dormant bugs like undefined
+# names in dead Tk code). Tightening them is a separate pass (validation item 6).
+
+line-length = 120
+target-version = "py311"
+
+extend-exclude = [
+    ".venv",
+    "**/__pycache__",
+    "**/frontend",
+    "**/node_modules",
+    "docs",
+    # Grandfathered legacy engine app-dirs (copied verbatim):
+    "options-scanner",
+    "sentiment-dashboard",
+    "trade-analyzer",
+    "portfolio-analyzer",
+    "claude-driver",
+    # Legacy Tk/GUI modules under shared (NOT part of the 3-tier stack):
+    "shared/analysis_lib/gui_main.py",
+    "shared/analysis_lib/agents",
+    "shared/analysis_lib/mtf_analysis.py",
+    "shared/analysis_lib/blueprint_scorer.py",
+]
+
+[lint]
+# E9 = syntax errors; F = pyflakes (undefined names, unused imports, redefinitions,
+# f-string bugs). These are correctness signals, not style.
+select = ["E9", "F"]
+# F841 (unused local variable) is low-value and its autofix edits logic lines —
+# left off so the gate stays no-logic-change.
+ignore = ["F841"]
+
+[lint.per-file-ignores]
+# Re-export modules deliberately import names for their public surface.
+"**/__init__.py" = ["F401"]
+# Test files sometimes import fixtures/for-side-effects.
+"**/tests/**" = ["F401"]

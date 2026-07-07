@@ -19,7 +19,6 @@ Paths and ports come from repo_paths.py — no hard-coded D:\ paths.
 """
 import argparse
 import datetime as _dt
-import shutil
 import sqlite3
 import sys
 import pathlib

@@ -14,7 +14,7 @@ Version 1.0.0 Changes:
 """
 
 import logging
-from typing import Optional, Dict, Tuple
+from typing import Dict
 from dataclasses import dataclass
 from enum import Enum
 

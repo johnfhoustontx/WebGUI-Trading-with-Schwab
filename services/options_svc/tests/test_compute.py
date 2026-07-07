@@ -266,6 +266,50 @@ def test_swing_scan_empty_when_no_spot(monkeypatch):
     assert out == {"signals": [], "view": {}}
 
 
+def _swing_scan_market_state_env(monkeypatch):
+    """Shared fixture wiring for the market-state tilt tests: a bullish view + one
+    adapted PCS candidate (which carries a non-zero `lack_of_bearishness` tilt)."""
+    chain = _swing_chain()
+    monkeypatch.setattr(compute.se, "fetch_option_chain",
+                        lambda client, symbol, from_date=None, to_date=None: chain)
+    monkeypatch.setattr(compute._proxy.schwab_client, "get_quote",
+                        lambda symbol: {"last": 540.0})
+    monkeypatch.setattr(compute.se, "fetch_price_history", lambda client, symbol: {"h": 1})
+    monkeypatch.setattr(compute.se, "calc_technicals",
+                        lambda hist: {"trend": "BULLISH", "rsi14": 60,
+                                      "price": 540.0, "sma20": 530.0})
+    monkeypatch.setattr(compute, "run_iv_analysis",
+                        lambda client, symbol, price=None, hist=None, chain=None:
+                        {"iv_rank": 50.0,
+                         "expected_moves": {"daily": {"move_dollars": 5.0}}})
+    monkeypatch.setattr(compute.se, "screen_spreads",
+                        lambda *a, **k: [{"symbol": "SPY", "type": "PCS",
+                                          "short_strike": 530.0, "long_strike": 525.0,
+                                          "short_mark": 1.2, "long_mark": 0.6,
+                                          "credit": 0.6, "max_loss": 4.4,
+                                          "expiration": "2026-07-15",
+                                          "underlying_price": 540.0}])
+    monkeypatch.setattr(compute.se, "build_iron_condors", lambda spreads: [])
+
+
+def test_swing_scan_threads_market_state_tilt(monkeypatch):
+    """A live committed market state threads into score_all -> the PCS signal
+    carries a non-zero family-tilt (`lack_of_bearishness` favors put credit)."""
+    _swing_scan_market_state_env(monkeypatch)
+    out = compute.swing_scan("SPY", 5, 30, -0.20, -0.10, 0.10, 0.20, 0.10,
+                             market_state="lack_of_bearishness")
+    pcs = [s for s in out["signals"] if s["type"] == "PCS"]
+    assert pcs and pcs[0]["state_tilt"] != 0.0
+
+
+def test_swing_scan_no_market_state_no_tilt(monkeypatch):
+    """Absent market state (default None) -> the PCS signal carries a 0.0 tilt."""
+    _swing_scan_market_state_env(monkeypatch)
+    out = compute.swing_scan("SPY", 5, 30, -0.20, -0.10, 0.10, 0.20, 0.10)
+    pcs = [s for s in out["signals"] if s["type"] == "PCS"]
+    assert pcs and pcs[0]["state_tilt"] == 0.0
+
+
 # ── Paper account (moved from webgui/pages/options/portfolio.py) ────────────
 def test_paper_account_view_shape(monkeypatch):
     """``paper_account_view`` assembles snapshot + positions + orders + flag from
@@ -571,6 +615,132 @@ def test_analyze_paper_expired_trade_skips_engine_with_note(monkeypatch):
     out = compute.analyze_paper("T3")
     assert out["action"] == "EXPIRED" and out["detail"] is None
     assert "Expired 2020-01-01" in out["note"]
+
+
+def test_expire_ledger_trades_settles_past_and_close_day(monkeypatch):
+    """Open ledger trades that are past-expiry (or 0-DTE at/after 15:00 CT) settle
+    via expire_paper_trade; a future / pre-close trade is left OPEN."""
+    import datetime as _dt
+    import sys as _sys
+    import types as _types
+    from zoneinfo import ZoneInfo
+
+    now_ct = _dt.datetime(2026, 6, 3, 15, 30, tzinfo=ZoneInfo("America/Chicago"))
+    trades = [
+        {"trade_id": "past", "status": "OPEN", "symbol": "SPY", "strategy": "PCS",
+         "expiration": "2026-06-01", "short_strike": 500, "long_strike": 499,
+         "entry_credit": 0.5, "quantity": 1},
+        {"trade_id": "today", "status": "OPEN", "symbol": "QQQ", "strategy": "PCS",
+         "expiration": "2026-06-03", "short_strike": 400, "long_strike": 399,
+         "entry_credit": 0.4, "quantity": 1},
+        {"trade_id": "future", "status": "OPEN", "symbol": "IWM", "strategy": "PCS",
+         "expiration": "2026-07-01", "short_strike": 200, "long_strike": 199,
+         "entry_credit": 0.3, "quantity": 1},
+        {"trade_id": "closed", "status": "CLOSED", "symbol": "AMD", "strategy": "PCS",
+         "expiration": "2026-06-01", "entry_credit": 0.3, "quantity": 1},
+    ]
+    settled = []
+    fake_pt = _types.SimpleNamespace(
+        get_all_trades=lambda: trades,
+        expire_paper_trade=lambda t, sp: {**t, "status": "EXPIRED"},
+        update_trade=lambda tid, closed: settled.append(tid))
+
+    def _should_settle(exp, today, nc):   # the real gate logic, inlined
+        e = _dt.date.fromisoformat(exp); t = _dt.date.fromisoformat(today)
+        return e < t or (e == t and nc.hour >= 15)
+
+    fake_pe = _types.SimpleNamespace(
+        should_settle=_should_settle,
+        underlying_last=lambda client, sym: 505.0)
+    monkeypatch.setitem(_sys.modules, "paper_trader", fake_pt)
+    monkeypatch.setitem(_sys.modules, "paper_engine", fake_pe)
+
+    n = compute.expire_ledger_trades(now_ct=now_ct)
+    assert n == 2
+    assert set(settled) == {"past", "today"}   # future + closed left alone
+
+
+def test_expire_ledger_trades_defers_when_no_underlying(monkeypatch):
+    import datetime as _dt
+    import sys as _sys
+    import types as _types
+    from zoneinfo import ZoneInfo
+
+    now_ct = _dt.datetime(2026, 6, 3, 15, 30, tzinfo=ZoneInfo("America/Chicago"))
+    trades = [{"trade_id": "past", "status": "OPEN", "symbol": "SPY", "strategy": "PCS",
+               "expiration": "2026-06-01", "short_strike": 500, "long_strike": 499,
+               "entry_credit": 0.5, "quantity": 1}]
+    settled = []
+    monkeypatch.setitem(_sys.modules, "paper_trader", _types.SimpleNamespace(
+        get_all_trades=lambda: trades,
+        expire_paper_trade=lambda t, sp: t,
+        update_trade=lambda tid, c: settled.append(tid)))
+    monkeypatch.setitem(_sys.modules, "paper_engine", _types.SimpleNamespace(
+        should_settle=lambda exp, today, nc: True,
+        underlying_last=lambda client, sym: None))   # no quote -> defer
+
+    assert compute.expire_ledger_trades(now_ct=now_ct) == 0
+    assert settled == []
+
+
+def test_collect_action_items_all_four_categories(monkeypatch):
+    """collect_action_items gathers captured actions, expiring-today, at-risk,
+    and near-stop/target across the ledger + account books."""
+    import datetime as _dt
+    import sys as _sys
+    import types as _types
+    from zoneinfo import ZoneInfo
+
+    now_ct = _dt.datetime(2026, 6, 3, 13, 0, tzinfo=ZoneInfo("America/Chicago"))
+
+    # 1) captured recommending action
+    monkeypatch.setattr(compute, "reprice_captured", lambda: {"signals": [
+        {"symbol": "MU", "strategy": "PCS", "recommendation": "CUT",
+         "recommendation_reason": "2x credit stop"},
+        {"symbol": "SPY", "strategy": "CCS", "recommendation": "HOLD"},   # ignored
+    ], "flags": []})
+
+    # 2) ledger trade expiring today
+    monkeypatch.setitem(_sys.modules, "paper_trader", _types.SimpleNamespace(
+        get_all_trades=lambda: [
+            {"trade_id": "l1", "status": "OPEN", "symbol": "IWM", "strategy": "PCS",
+             "expiration": "2026-06-03"},
+            {"trade_id": "l2", "status": "OPEN", "symbol": "DIA", "strategy": "PCS",
+             "expiration": "2026-07-01"},   # future -> ignored
+        ]))
+
+    # account positions: one expiring today + tested + near-target
+    positions = [
+        {"position_id": 1, "symbol": "QQQ", "strategy": "PCS", "expiration": "2026-06-03",
+         "entry_credit": 1.0, "quantity": 1, "unrealized_pnl": 45.0,
+         "current_underlying": 400, "current_value": 0.55, "current_short_delta": -0.2},
+    ]
+    monkeypatch.setattr(compute, "_load_open_positions", lambda: positions)
+    monkeypatch.setattr(compute, "_rescue_dte", lambda exp: 0)
+    monkeypatch.setattr(compute, "_assess_position_risk",
+                        lambda pos, mark, gex=None, regime=None: {"state": "tested", "heat": 70.0})
+
+    out = compute.collect_action_items(now_ct=now_ct)
+    assert [r["symbol"] for r in out["captured_action"]] == ["MU"]
+    assert {(r["symbol"], r["book"]) for r in out["expiring_today"]} == {("IWM", "ledger"), ("QQQ", "account")}
+    assert out["at_risk"][0]["symbol"] == "QQQ" and out["at_risk"][0]["rescue_state"] == "tested"
+    # capture = 45 / (1.0*1*100) *100 = 45% -> near target (40..50)
+    assert out["account_near"][0]["symbol"] == "QQQ" and "target" in out["account_near"][0]["note"]
+
+
+def test_collect_action_items_defensive_empty(monkeypatch):
+    import datetime as _dt
+    import sys as _sys
+    import types as _types
+    from zoneinfo import ZoneInfo
+
+    now_ct = _dt.datetime(2026, 6, 3, 13, 0, tzinfo=ZoneInfo("America/Chicago"))
+    monkeypatch.setattr(compute, "reprice_captured", lambda: {"signals": [], "flags": []})
+    monkeypatch.setitem(_sys.modules, "paper_trader",
+                        _types.SimpleNamespace(get_all_trades=lambda: []))
+    monkeypatch.setattr(compute, "_load_open_positions", lambda: [])
+    out = compute.collect_action_items(now_ct=now_ct)
+    assert out == {"captured_action": [], "expiring_today": [], "at_risk": [], "account_near": []}
 
 
 def test_analyze_paper_note_none_on_success(monkeypatch):
@@ -2225,6 +2395,62 @@ def test_gex_next_scan_boundaries():
 
     # Just before stop where the next boundary would be >= stop → None.
     assert compute._gex_next_scan(ct(15, 18)) is None
+
+
+# ── flow_skew_view (per-index skew level + change since prior snapshot) ───────
+# Reads gex_history_db.latest_skew_by_symbol (2 most-recent rows) per index
+# symbol. We fake the lazily-imported gex_history_db so nothing touches the DB.
+
+def _fake_skew_db(monkeypatch, rows_by_symbol):
+    import sys as _sys
+    import types as _types
+
+    def _latest(conn, symbol, view="gex"):
+        return list(rows_by_symbol.get(symbol, []))
+
+    fake_gh = _types.SimpleNamespace(
+        connect=lambda read_only=False: _types.SimpleNamespace(
+            close=lambda: None),
+        latest_skew_by_symbol=_latest,
+    )
+    monkeypatch.setitem(_sys.modules, "gex_history_db", fake_gh)
+
+
+def test_flow_skew_view_builds_per_symbol_with_delta(monkeypatch):
+    # $SPX has two snapshots -> rr_delta = latest.rr - prior.rr.
+    _fake_skew_db(monkeypatch, {
+        "$SPX": [(200, 4.0, 300, 310), (140, 1.5, 200, 210)],
+        "SPY": [(200, -2.0, 50, 60)],   # only one snapshot -> rr_delta None
+    })
+    out = compute.flow_skew_view()
+    assert out["$SPX"] == {"rr_25d": 4.0, "rr_delta": 2.5,
+                           "call_vol": 300, "put_vol": 310, "ts": 200}
+    assert out["SPY"] == {"rr_25d": -2.0, "rr_delta": None,
+                          "call_vol": 50, "put_vol": 60, "ts": 200}
+    # QQQ had no rows -> absent from the view.
+    assert "QQQ" not in out
+
+
+def test_flow_skew_view_delta_none_when_rr_missing(monkeypatch):
+    # A None rr in either the latest or prior row -> rr_delta None.
+    _fake_skew_db(monkeypatch, {
+        "$SPX": [(200, None, 300, 310), (140, 1.5, 200, 210)],
+    })
+    out = compute.flow_skew_view()
+    assert out["$SPX"]["rr_25d"] is None
+    assert out["$SPX"]["rr_delta"] is None
+
+
+def test_flow_skew_view_defensive_empty_on_failure(monkeypatch):
+    import sys as _sys
+    import types as _types
+
+    def _boom(read_only=False):
+        raise RuntimeError("db locked")
+
+    monkeypatch.setitem(_sys.modules, "gex_history_db",
+                        _types.SimpleNamespace(connect=_boom))
+    assert compute.flow_skew_view() == {}
 
 
 def test_gamma_walls_one_each_side_for_gex():

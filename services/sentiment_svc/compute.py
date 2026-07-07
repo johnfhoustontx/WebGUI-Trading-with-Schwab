@@ -38,6 +38,13 @@ from scoring import trend_regime as trend_regime  # noqa: E402
 from scoring import sector_perf as scoring_sector  # noqa: E402,F401
 from scoring import rotation as scoring_rotation    # noqa: E402
 from scoring import intraday_trend  # noqa: E402
+from scoring import effort as effort_mod  # noqa: E402
+from scoring import aggression as aggression_mod  # noqa: E402
+from scoring import order_flow as order_flow_mod  # noqa: E402
+from scoring import market_state  # noqa: E402
+from scoring import session_structure as session_structure_mod  # noqa: E402
+from scoring import rejection_defense as rejection_mod  # noqa: E402
+from scoring import profile_shape as profile_mod  # noqa: E402
 import live_composite  # noqa: E402,F401  (eager: pins module; never lazy)
 from live_composite import (  # noqa: E402
     signal_band, compute_live, build_bridge_payload,
@@ -308,6 +315,17 @@ _DEFENSIVE = {"XLP", "XLU", "XLV", "XLRE"}
 _CYC_DEF_SCALE_INTRADAY = 1.0
 _CYC_DEF_SCALE_30D = 3.0
 
+# Aggression-axis normalization scales (first-pass tunables). SKEW is in 25-delta
+# risk-reversal IV points; PC is the 5-day cap-weighted cross-sector Put/Call
+# change. The raw signal / scale is clamped to ±1, so each is "the input value
+# that saturates that sub-signal to its extreme".
+SKEW_DELTA_SCALE = 5.0   # first-pass tunable: IV points to saturate put-skew Δ
+PC_DELTA_SCALE = 0.3     # first-pass tunable: P/C change to saturate flow
+
+# Micro-structure refinements folded into the five-state classifier.
+SESSION_BLEND = 0.20     # session structure's share of the price sub-score
+PROFILE_DAMP = 0.5       # max aggression damping from a fully-balanced profile
+
 # Sentinel so an OMITTED ``compute_30d_trend`` arg fetches internally, while an
 # explicit ``None`` (caller has no data) stays neutral rather than re-fetching.
 _FETCH = object()
@@ -318,18 +336,22 @@ def _neutral_trend():
 
     Returned when there is no trend computed yet, or as the catastrophic-failure
     fallback of ``compute_intraday_trend`` — so the GUI always sees a valid,
-    fully-shaped trend payload."""
+    fully-shaped trend payload. Uses the five-state (direction × aggression)
+    vocabulary: a neutral direction with zero aggression."""
     return {
         "score": 50.0,
         "smoothed_score": 50.0,
-        "state": "range",
-        "raw_state": "range",
-        "label": trend_regime.STATE_LABELS["range"],
-        "description": trend_regime.STATE_DESCRIPTIONS["range"],
+        "state": "neutral",
+        "raw_state": "neutral",
+        "label": market_state.STATE_LABELS["neutral"],
+        "description": market_state.STATE_DESCRIPTIONS["neutral"],
         "confidence": 0.0,
         "sub_scores": {"price": 50.0, "breadth": 50.0, "sector": 50.0, "vix": 50.0},
         "sub_confidence": {"price": 0.0, "breadth": 0.0, "sector": 0.0, "vix": 0.0},
         "state_history": [],
+        "aggression": 0.0,
+        "aggression_confidence": 0.0,
+        "evidence": [],
     }
 
 
@@ -339,13 +361,27 @@ def _mean(seq):
 
 
 def compute_intraday_trend(schwab, sector_data=None, prior_history=None,
-                           prior_committed=None, prev_smoothed=None) -> dict:
-    """Live 0-100 *directional* Market Trend from intraday proxy data.
+                           prior_committed=None, prev_smoothed=None,
+                           flow_skew=None, sector_pc_delta=None,
+                           order_flow=None) -> dict:
+    """Live five-state Market State from direction × aggression.
 
     Blends four sub-scores (price MTF/VWAP/MACD/RSI, breadth, sector
-    participation, VIX context) via ``intraday_trend.blend_trend``, EMA-smooths
-    the needle, and runs the 2-day hysteresis state machine (reusing
-    ``trend_regime.commit_state``) so the published state is sticky.
+    participation, VIX context) into an EMA-smoothed 0-100 *direction* score,
+    then crosses it with a signed *aggression* axis (volume-effort + 25-delta
+    put-skew Δ + cross-sector P/C Δ) via ``market_state.classify_market_state``
+    to pick one of five states (``bullish`` / ``lack_of_bullishness`` /
+    ``neutral`` / ``lack_of_bearishness`` / ``bearish``). The 2-day hysteresis
+    state machine (``trend_regime.commit_state``) keeps the published state
+    sticky, with a migration guard that treats a stale OLD-vocab
+    ``prior_committed`` as a cold start (adopt the new vocabulary immediately).
+
+    ``flow_skew`` is the ``cache:options:flow_skew`` payload
+    (``{symbol: {rr_delta, ...}}``); ``sector_pc_delta`` is
+    ``compute.sector_pc_delta()`` (a float or None); ``order_flow`` is the
+    ``cache:sentiment:order_flow`` payload (``{symbol: {aggressor_ratio, n, ...}}``,
+    SPY used — positive = net buying = ALIGNED, no sign flip). All default None so
+    the aggression axis degrades gracefully to effort-only / neutral.
 
     Each sub-block is defensive: on failure that sub-score becomes
     ``TrendSub(50, 0)`` and drops out of the confidence-weighted blend. An
@@ -392,6 +428,30 @@ def compute_intraday_trend(schwab, sector_data=None, prior_history=None,
                     n_timeframes=len(frames))
         except Exception:  # noqa: BLE001
             price = intraday_trend.TrendSub(50.0, 0.0)
+
+        # 1b) SESSION STRUCTURE — VWAP-hold + opening-range break blended INTO the
+        #     price sub-score (DIRECTION). A bullish structure (holding above VWAP,
+        #     clearing the OR) nudges the direction up. Defensive -> drops out.
+        sess = session_structure_mod.SessionStructure(0.0, 0.0)
+        try:
+            # Prefer the 15-min frame; DataFrame-in-``or`` raises, so branch by None.
+            sframe = frames.get("15min")
+            if sframe is None:
+                sframe = frames.get("5min")
+            if sframe is not None and len(sframe):
+                srows = [{"high": float(r["high"]), "low": float(r["low"]),
+                          "close": float(r["close"]), "volume": float(r["volume"])}
+                         for _, r in sframe.iterrows()]
+                sess = session_structure_mod.score_session_structure(srows)
+                if sess.confidence > 0:
+                    sess_0_100 = 50.0 + 50.0 * sess.score
+                    blended_price = ((1 - SESSION_BLEND) * price.score
+                                     + SESSION_BLEND * sess_0_100)
+                    # keep the price sub-score's own confidence + interp.
+                    price = intraday_trend.TrendSub(
+                        blended_price, price.confidence, price.interp)
+        except Exception:  # noqa: BLE001 — session structure simply drops out.
+            sess = session_structure_mod.SessionStructure(0.0, 0.0)
 
         # 2) BREADTH — A/D, % above 50DMA, new highs/lows.
         try:
@@ -462,19 +522,154 @@ def compute_intraday_trend(schwab, sector_data=None, prior_history=None,
         raw_score, agg = intraday_trend.blend_trend(scores, confs)
         agg = round(agg * intraday_trend.vol_confidence_factor(vix_change_pct), 3)
 
-        # 6) SMOOTH + hysteresis state.
+        # 6) SMOOTH the directional needle.
         smoothed = intraday_trend.ema_smooth(prev_smoothed, raw_score, span=3)
-        raw_state = intraday_trend.score_to_state(smoothed)
+
+        # 7) AGGRESSION axis — signed effort/urgency behind the move.
+        #    (a) effort — SPY DAILY volume-vs-result confirmation (signed).
+        effort_score, effort_conf = 0.0, 0.0
+        try:
+            daily = frames.get("1day")
+            if daily is not None and len(daily):
+                tail = daily.tail(30)
+                ohlcv = [{"open": float(r["open"]), "high": float(r["high"]),
+                          "low": float(r["low"]), "close": float(r["close"]),
+                          "volume": float(r["volume"])}
+                         for _, r in tail.iterrows()]
+                er = effort_mod.score_effort(ohlcv)
+                effort_score, effort_conf = float(er.score), float(er.confidence)
+        except Exception:  # noqa: BLE001 — effort simply drops out (conf 0).
+            effort_score, effort_conf = 0.0, 0.0
+
+        #    (a2) rejection/defense — daily upper-wick exhaustion vs dip resilience.
+        #         Sign already aligns with aggression (positive = no supply); NO flip.
+        rej_score, rej_conf = 0.0, 0.0
+        try:
+            daily = frames.get("1day")
+            if daily is not None and len(daily):
+                tail = daily.tail(20)
+                ohlc = [{"open": float(r["open"]), "high": float(r["high"]),
+                         "low": float(r["low"]), "close": float(r["close"])}
+                        for _, r in tail.iterrows()]
+                rr = rejection_mod.score_rejection_defense(ohlc)
+                rej_score, rej_conf = float(rr.score), float(rr.confidence)
+        except Exception:  # noqa: BLE001 — rejection simply drops out (conf 0).
+            rej_score, rej_conf = 0.0, 0.0
+
+        #    (b) skew — 25-delta risk-reversal CHANGE; rising put fear -> NEGATIVE.
+        rr_delta = None
+        try:
+            fs = flow_skew or {}
+            entry = (fs.get("SPY") or fs.get("$SPX") or {})
+            rr_delta = entry.get("rr_delta")
+        except Exception:  # noqa: BLE001
+            rr_delta = None
+        if isinstance(rr_delta, (int, float)) and not isinstance(rr_delta, bool):
+            skew_comp = -intraday_trend._clamp(rr_delta / SKEW_DELTA_SCALE, -1, 1)
+            skew_conf = 1.0
+        else:
+            skew_comp, skew_conf = 0.0, 0.0
+            rr_delta = None  # normalize non-numeric to None for the evidence line
+
+        #    (c) flow — 5-day cap-weighted sector P/C change; rising put demand
+        #        -> NEGATIVE.
+        if sector_pc_delta is not None:
+            flow_comp = -intraday_trend._clamp(sector_pc_delta / PC_DELTA_SCALE, -1, 1)
+            flow_conf = 1.0
+        else:
+            flow_comp, flow_conf = 0.0, 0.0
+
+        #    (d0) order_flow — streamed aggressor ratio (SPY). Positive = net
+        #         buying = ALIGNED with aggression (NO sign flip). Missing/malformed
+        #         → drops out (conf 0). Read via the pure flow_aggression_component.
+        of_score, of_conf = 0.0, 0.0
+        try:
+            of = order_flow or {}
+            spy_flow = of.get("SPY")
+            if isinstance(spy_flow, dict):
+                of_score, of_conf = order_flow_mod.flow_aggression_component(spy_flow)
+        except Exception:  # noqa: BLE001 — order-flow simply drops out.
+            of_score, of_conf = 0.0, 0.0
+
+        #    (d0b) option_flow — streamed near-ATM SPY/QQQ option aggressor
+        #          pressure (put vs call). Positive = net call-buying / put-selling
+        #          = ALIGNED (NO flip). Missing/malformed → drops out (conf 0).
+        opt_score, opt_conf = 0.0, 0.0
+        try:
+            of = order_flow or {}
+            opt_flow = of.get("options")
+            if isinstance(opt_flow, dict):
+                opt_score, opt_conf = order_flow_mod.option_flow_component(opt_flow)
+        except Exception:  # noqa: BLE001 — option-flow simply drops out.
+            opt_score, opt_conf = 0.0, 0.0
+
+        aggression, agg_conf = aggression_mod.blend_aggression(
+            {"effort": effort_score, "skew": skew_comp, "flow": flow_comp,
+             "rejection": rej_score, "order_flow": of_score,
+             "option_flow": opt_score},
+            {"effort": effort_conf, "skew": skew_conf, "flow": flow_conf,
+             "rejection": rej_conf, "order_flow": of_conf,
+             "option_flow": opt_conf})
+
+        #    (d) profile shape — a balanced single-HVN session DAMPENS aggression
+        #        (rotational balance -> more likely Neutral, sharpening that state).
+        prof_shape, prof_bal = None, 0.0
+        try:
+            pframe = frames.get("15min")
+            if pframe is None:
+                pframe = frames.get("5min")
+            if pframe is not None and len(pframe):
+                prows = [{"high": float(r["high"]), "low": float(r["low"]),
+                          "close": float(r["close"]), "volume": float(r["volume"])}
+                         for _, r in pframe.iterrows()]
+                ps = profile_mod.classify_profile_shape(prows)
+                prof_shape, prof_bal = ps.shape, float(ps.balance_strength)
+                if prof_bal > 0:
+                    aggression = round(intraday_trend._clamp(
+                        aggression * (1 - PROFILE_DAMP * prof_bal), -1.0, 1.0), 3)
+        except Exception:  # noqa: BLE001 — profile simply drops out (no damping).
+            prof_shape, prof_bal = None, 0.0
+
+        # 8) EVIDENCE (dimensions that HAVE data) + five-state classification.
+        evidence = [f"direction {smoothed:.0f}/100"]
+        if sess.confidence > 0:
+            evidence.append(f"session {sess.score:+.2f}")
+        if effort_conf > 0:
+            evidence.append(f"effort {effort_score:+.2f}")
+        if rej_conf > 0:
+            evidence.append(f"rejection/defense {rej_score:+.2f}")
+        if rr_delta is not None:
+            evidence.append(f"put-skew Δ {rr_delta:+.1f}")
+        if sector_pc_delta is not None:
+            evidence.append(f"sector P/C Δ {sector_pc_delta:+.2f}")
+        if of_conf > 0:
+            evidence.append(f"order-flow {of_score:+.2f}")
+        if opt_conf > 0:
+            evidence.append(f"option-flow {opt_score:+.2f}")
+        if prof_shape is not None:
+            evidence.append(f"profile {prof_shape} ({prof_bal:.2f})")
+        evidence.append(f"aggression {aggression:+.2f}")
+
+        ms = market_state.classify_market_state(smoothed, aggression,
+                                                evidence=evidence)
+        raw_state = ms.state
+
+        # 9) Hysteresis, with a MIGRATION guard: a ``prior_committed`` that is not
+        #    in the new-vocab ``STATE_LABELS`` is a stale OLD-vocab value from
+        #    before this change — treat it as a cold start so the new-vocab state
+        #    publishes immediately (no 2-read transient emitting an old string).
+        prior_valid = (prior_committed
+                       if prior_committed in market_state.STATE_LABELS else None)
         committed, hist = trend_regime.commit_state(
-            raw_state, prior_history or [], prior_committed)
+            raw_state, prior_history or [], prior_valid)
 
         return {
             "score": raw_score,
             "smoothed_score": smoothed,
             "state": committed,
             "raw_state": raw_state,
-            "label": trend_regime.STATE_LABELS[committed],
-            "description": trend_regime.STATE_DESCRIPTIONS[committed],
+            "label": market_state.STATE_LABELS[committed],
+            "description": market_state.STATE_DESCRIPTIONS[committed],
             "confidence": agg,
             "sub_scores": {"price": price.score, "breadth": breadth.score,
                            "sector": sector.score, "vix": vix_sub.score},
@@ -483,6 +678,9 @@ def compute_intraday_trend(schwab, sector_data=None, prior_history=None,
                                "sector": sector.confidence,
                                "vix": vix_sub.confidence},
             "state_history": hist,
+            "aggression": aggression,
+            "aggression_confidence": agg_conf,
+            "evidence": list(ms.evidence),
         }
     except Exception:  # noqa: BLE001 — never raise into the refresh path.
         return _neutral_trend()
@@ -581,7 +779,6 @@ def _fetch_sector_month_pcts():
     no override is passed). Defensive: returns ``{}`` on any failure."""
     try:
         import sectors_ref
-        from services import _proxy
         sd = sectors_ref.load_sectors_data()
         etfs = [r["etf"] for r in sd
                 if r.get("kind") == "sector" and r.get("etf")]
@@ -726,12 +923,30 @@ def rotation_risk_threshold():
 def _bridge_trend(intraday, spy):
     """Bridge trend_regime dict: the intraday model's directional state/confidence
     + trend_score/sub_scores, merged onto the DAILY classify dict's structural
-    sma_*/drawdown/spy_close (kept for the additive-only bridge contract). Falls
-    back to the daily dict when no intraday trend is available, so the bridge
-    always carries a valid 5-state ``state`` for regime_filter."""
+    sma_*/drawdown/spy_close (kept for the additive-only bridge contract).
+
+    When no intraday trend is available yet (the cold-start window before the
+    first 15-min recompute after a restart), keep the daily dict's structural
+    back-compat fields but OVERRIDE the published ``state``/``label``/
+    ``description``/``raw_state`` to the new-vocab NEUTRAL — regime_filter is
+    rekeyed to the five-state vocabulary and would fail-open (run ungated) on the
+    daily dict's OLD-vocab ``state``. So the bridge ALWAYS carries a recognized
+    new-vocab ``state`` (cold start -> neutral, the conservative default)."""
     daily = build_trend_dict(spy) or {}
     if not intraday or not intraday.get("state"):
-        return daily or None
+        if not daily:
+            return None
+        neutral = dict(daily)
+        neutral.update({
+            "state": "neutral",
+            "label": market_state.STATE_LABELS["neutral"],
+            "description": market_state.STATE_DESCRIPTIONS["neutral"],
+            "raw_state": "neutral",
+            "confidence": 0.0,
+            "trend_score": 50.0,
+            "sub_scores": {},
+        })
+        return neutral
     merged = dict(daily)
     merged.update({
         "state": intraday.get("state"),
@@ -743,6 +958,21 @@ def _bridge_trend(intraday, spy):
         "sub_scores": intraday.get("sub_scores"),
     })
     return merged
+
+
+def sector_pc_delta():
+    """5-trading-day change in the cap-weighted cross-sector Put/Call ratio.
+
+    Reads the daily ``sector_pcr`` store (written by handlers each RTH refresh)
+    and returns ``latest - (5-trading-days-ago)``, or ``None`` if the store has
+    too few dates / a None endpoint / any failure. This is the internal reader
+    Phase 2's market-state classifier calls — there is no cache view."""
+    try:
+        from services.sentiment_svc import sector_pcr_history_db as _db
+        conn = _db.connect()
+        return _db.sector_pc_delta(conn)
+    except Exception:  # noqa: BLE001 — defensive: never raise into a caller.
+        return None
 
 
 def build_and_write_bridge(snaps, spy, live, sector, trend=None):

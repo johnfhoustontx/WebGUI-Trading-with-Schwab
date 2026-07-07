@@ -210,6 +210,7 @@ def test_paper_command_dispatch(monkeypatch):
                         lambda: calls.__setitem__("entry", calls["entry"] + 1))
     monkeypatch.setattr(handlers.compute, "run_manage_cycle",
                         lambda: calls.__setitem__("manage", calls["manage"] + 1))
+    monkeypatch.setattr(handlers.compute, "expire_ledger_trades", lambda: 0)
     monkeypatch.setattr(handlers.compute, "reset_paper_account",
                         lambda bal: calls.__setitem__("reset", bal))
 
@@ -248,14 +249,68 @@ def test_run_manage_and_refresh_runs_cycle_when_account_present(monkeypatch):
     monkeypatch.setattr(handlers.compute, "has_paper_account", lambda: True)
     monkeypatch.setattr(handlers.compute, "run_manage_cycle",
                         lambda: calls.__setitem__("manage", calls["manage"] + 1))
+    monkeypatch.setattr(handlers.compute, "expire_ledger_trades", lambda: 0)
     monkeypatch.setattr(handlers, "refresh_paper_account",
                         lambda b: calls.__setitem__("refresh", calls["refresh"] + 1))
     # Isolate from the ledger reprice the manage tick now piggybacks (else it hits
     # the real proxy/DB).
-    monkeypatch.setattr(handlers, "refresh_paper_trades", lambda b, **k: None)
+    monkeypatch.setattr(handlers, "refresh_paper_trades",
+                        lambda b, **k: calls.__setitem__("trades", calls.get("trades", 0) + 1))
 
     handlers.run_manage_and_refresh(bus)
     assert calls["manage"] == 1 and calls["refresh"] == 1
+    # The manage tick always piggybacks one ledger refresh (fresh P&L + any
+    # expiration settlement).
+    assert calls.get("trades", 0) == 1
+
+
+def test_run_action_alert_pushes_and_caches(monkeypatch):
+    """run_action_alert collects items, pushes the digest, and caches the run."""
+    bus = Bus(fake=True)
+    items = {"captured_action": [{"symbol": "MU", "strategy": "PCS", "recommendation": "CUT"}],
+             "expiring_today": [], "at_risk": [], "account_near": []}
+    calls = {}
+    monkeypatch.setattr(handlers.compute, "collect_action_items", lambda: items)
+    monkeypatch.setattr(handlers.push_notify, "send_action_digest",
+                        lambda it, **k: calls.setdefault("sent", (it, k.get("slot_label"))) or True)
+
+    handlers.run_action_alert(bus, "morning")
+
+    env = bus.cache_get("cache:options:action_alert")
+    assert env is not None
+    assert env.payload["slot"] == "morning" and env.payload["total"] == 1
+    assert env.payload["sent"] is True and env.payload["items"] == items
+    # digest was pushed with the human slot label
+    assert calls["sent"][1] == handlers.push_notify.action_slot_label("morning")
+
+
+def test_run_action_alert_defensive_on_collect_failure(monkeypatch):
+    """A collect failure degrades to an empty digest, never raises."""
+    bus = Bus(fake=True)
+    def _boom():
+        raise RuntimeError("nope")
+    monkeypatch.setattr(handlers.compute, "collect_action_items", _boom)
+    monkeypatch.setattr(handlers.push_notify, "send_action_digest", lambda it, **k: False)
+
+    handlers.run_action_alert(bus, "midday")   # must not raise
+    env = bus.cache_get("cache:options:action_alert")
+    assert env.payload["total"] == 0 and env.payload["sent"] is False
+
+
+def test_run_manage_and_refresh_settles_ledger_then_refreshes(monkeypatch):
+    """The manage tick settles expired ledger trades, then republishes the ledger."""
+    bus = Bus(fake=True)
+    calls = {"expire": 0, "trades": 0}
+    monkeypatch.setattr(handlers.compute, "has_paper_account", lambda: True)
+    monkeypatch.setattr(handlers.compute, "run_manage_cycle", lambda: None)
+    monkeypatch.setattr(handlers.compute, "expire_ledger_trades",
+                        lambda: calls.__setitem__("expire", calls["expire"] + 1) or 2)
+    monkeypatch.setattr(handlers, "refresh_paper_account", lambda b: None)
+    monkeypatch.setattr(handlers, "refresh_paper_trades",
+                        lambda b, **k: calls.__setitem__("trades", calls["trades"] + 1))
+
+    handlers.run_manage_and_refresh(bus)
+    assert calls["expire"] == 1 and calls["trades"] == 1
 
 
 def test_run_manage_and_refresh_skips_cycle_when_no_account(monkeypatch):
@@ -264,6 +319,7 @@ def test_run_manage_and_refresh_skips_cycle_when_no_account(monkeypatch):
     monkeypatch.setattr(handlers.compute, "has_paper_account", lambda: False)
     monkeypatch.setattr(handlers.compute, "run_manage_cycle",
                         lambda: calls.__setitem__("manage", calls["manage"] + 1))
+    monkeypatch.setattr(handlers.compute, "expire_ledger_trades", lambda: 0)
     monkeypatch.setattr(handlers, "refresh_paper_account",
                         lambda b: calls.__setitem__("refresh", calls["refresh"] + 1))
     monkeypatch.setattr(handlers, "refresh_paper_trades", lambda b, **k: None)
@@ -897,6 +953,37 @@ def test_swing_scan_uses_defaults_for_missing_args(monkeypatch):
     assert env.payload["view"] == {}
 
 
+def test_swing_scan_reads_market_state(monkeypatch):
+    """The handler reads the live committed state from cache:sentiment:composite
+    and threads it into compute.swing_scan as ``market_state``."""
+    bus = Bus(fake=True)
+    bus.cache_set("cache:sentiment:composite",
+                  {"derived": {"trend": {"state": "lack_of_bearishness"}}})
+    seen = {"params": None}
+
+    def _rec(**params):
+        seen["params"] = params
+        return {"signals": [], "view": {}}
+
+    monkeypatch.setattr(handlers.compute, "swing_scan", _rec)
+    handlers.swing_scan(bus, {"symbol": "SPY"})
+    assert seen["params"]["market_state"] == "lack_of_bearishness"
+
+
+def test_swing_scan_absent_composite_no_market_state(monkeypatch):
+    """No composite cached (bus returns None) -> market_state=None (graceful)."""
+    bus = Bus(fake=True)
+    seen = {"params": None}
+
+    def _rec(**params):
+        seen["params"] = params
+        return {"signals": [], "view": {}}
+
+    monkeypatch.setattr(handlers.compute, "swing_scan", _rec)
+    handlers.swing_scan(bus, {"symbol": "SPY"})
+    assert seen["params"]["market_state"] is None
+
+
 def test_collect_gex_history_calls_compute(monkeypatch):
     """The handler delegates to compute.collect_gex_snapshots (a pure write to
     the on-disk history store; no Redis cache view to publish)."""
@@ -905,6 +992,60 @@ def test_collect_gex_history_calls_compute(monkeypatch):
                         lambda: called.__setitem__("v", True))
     handlers.collect_gex_history(bus=None)
     assert called["v"] is True
+
+
+def test_collect_gex_history_publishes_flow_skew_after_collect(monkeypatch):
+    """collect_gex_history publishes the flow-skew view AFTER collection (it
+    rides the same 2-min tick that just wrote the rows)."""
+    order = []
+    monkeypatch.setattr(handlers.compute, "collect_gex_snapshots",
+                        lambda: order.append("collect"))
+    monkeypatch.setattr(handlers, "publish_flow_skew",
+                        lambda bus: order.append("publish"))
+    bus = Bus(fake=True)
+    handlers.collect_gex_history(bus=bus)
+    assert order == ["collect", "publish"]
+
+
+def test_collect_gex_history_no_bus_skips_publish(monkeypatch):
+    """A legacy caller passing bus=None still collects, but does not publish."""
+    order = []
+    monkeypatch.setattr(handlers.compute, "collect_gex_snapshots",
+                        lambda: order.append("collect"))
+    monkeypatch.setattr(handlers, "publish_flow_skew",
+                        lambda bus: order.append("publish"))
+    handlers.collect_gex_history(bus=None)
+    assert order == ["collect"]
+
+
+def test_collect_gex_history_publish_failure_does_not_raise(monkeypatch):
+    """A publish_flow_skew failure must never abort the (already-done) collect."""
+    monkeypatch.setattr(handlers.compute, "collect_gex_snapshots", lambda: None)
+
+    def _boom(bus):
+        raise RuntimeError("redis down")
+
+    monkeypatch.setattr(handlers, "publish_flow_skew", _boom)
+    handlers.collect_gex_history(bus=Bus(fake=True))  # must not raise
+
+
+def test_publish_flow_skew_caches_and_publishes(monkeypatch):
+    """publish_flow_skew caches compute.flow_skew_view() under
+    cache:options:flow_skew and publishes a version event."""
+    bus = Bus(fake=True)
+    sentinel = {"$SPX": {"rr_25d": 4.0, "rr_delta": 0.5,
+                         "call_vol": 300, "put_vol": 310, "ts": 200}}
+    monkeypatch.setattr(handlers.compute, "flow_skew_view", lambda: sentinel)
+
+    sub = bus.subscribe("events:options:flow_skew")
+    handlers.publish_flow_skew(bus)
+    msg = sub.get_message(timeout=1.0)
+    sub.close()
+
+    env = bus.cache_get("cache:options:flow_skew")
+    assert env is not None
+    assert env.payload == sentinel
+    assert msg is not None and msg.get("version") == env.version
 
 
 def test_publish_gex_status_caches_and_publishes(monkeypatch):
@@ -980,3 +1121,52 @@ def test_handle_command_sim_replay(monkeypatch):
     assert seen["lookback"] == "5m_3d"
     assert seen["legs"] is None
     assert msg is not None and msg.get("version") == env.version
+
+
+# ── Task 8/9: server-side push notifications on new scanner/captured signals ──
+
+def test_rescan_calls_notify(monkeypatch):
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "run_scan", lambda: {
+        "signals_0dte": [{"symbol": "SPY", "type": "PCS", "short_strike": 500,
+                          "long_strike": 495, "expiration": "2026-07-10",
+                          "composite_score": 80}],
+        "signals_swing": [], "errors": [], "warnings": []})
+    seen = {}
+    monkeypatch.setattr(handlers.push_notify, "notify_signals",
+                        lambda bus, sigs, **kw: seen.update(n=len(sigs),
+                                                            kind=kw["kind"],
+                                                            key=kw["seen_key"]))
+    handlers.rescan(bus)
+    assert seen["n"] == 1
+    assert seen["kind"] == "scanner"
+    assert seen["key"] == handlers.CACHE_NOTIFIED_SCAN
+
+
+def test_refresh_captured_calls_notify(monkeypatch):
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "captured_view", lambda: {"signals": [
+        {"signal_id": "s1", "symbol": "SPY", "type": "PCS"}]})
+    got = {}
+    monkeypatch.setattr(handlers.push_notify, "notify_signals",
+                        lambda bus, sigs, **kw: got.update(n=len(sigs),
+                                                           kind=kw["kind"],
+                                                           key=kw["seen_key"]))
+    handlers.refresh_captured(bus)
+    assert got["n"] == 1 and got["kind"] == "captured"
+    assert got["key"] == handlers.CACHE_NOTIFIED_CAPTURED
+
+
+def test_captured_reprice_calls_notify(monkeypatch):
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "reprice_captured",
+                        lambda: {"signals": [{"signal_id": "X1", "symbol": "SPY"}],
+                                 "flags": []})
+    got = {}
+    monkeypatch.setattr(handlers.push_notify, "notify_signals",
+                        lambda bus, sigs, **kw: got.update(n=len(sigs),
+                                                           kind=kw["kind"],
+                                                           key=kw["seen_key"]))
+    handlers.handle_command(bus, Command(type="captured_reprice"))
+    assert got["n"] == 1 and got["kind"] == "captured"
+    assert got["key"] == handlers.CACHE_NOTIFIED_CAPTURED

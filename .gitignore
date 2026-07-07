@@ -5,6 +5,7 @@
 **/config_notifications.py
 **/ai_config.json
 shared/sentiment_bridge.json
+shared/notifications.json
 shared/anthropic_key.txt
 shared/driver_model.txt
 shared/analyze_model.txt

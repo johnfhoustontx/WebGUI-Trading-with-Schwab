@@ -56,10 +56,13 @@ def _patch_compute(monkeypatch, *, live, snaps, spy, sector=None,
     # Stub the directional-trend recompute so existing tests never touch a live
     # proxy (the gating/persistence is exercised in the Phase-4 tests below).
     monkeypatch.setattr(handlers.compute, "compute_intraday_trend",
-                        lambda *a, **k: {"state": "range",
+                        lambda *a, **k: {"state": "neutral",
                                          "state_history": [], "smoothed_score": 50.0})
     monkeypatch.setattr(handlers.compute, "compute_30d_trend",
-                        lambda *a, **k: {"state": "range"})
+                        lambda *a, **k: {"state": "neutral"})
+    # sector_pc_delta is read inside _maybe_recompute_trend (aggression axis) —
+    # stub it so tests never touch the real on-disk sector-P/C store.
+    monkeypatch.setattr(handlers.compute, "sector_pc_delta", lambda: None)
 
     # Stub the scoring-derive helpers (real ones tested in test_compute.py).
     monkeypatch.setattr(handlers.compute, "derive_composite_extras",
@@ -372,9 +375,9 @@ def test_refresh_recomputes_trend_first_call_then_gates(monkeypatch):
     monkeypatch.setattr(handlers.compute, "derive_composite_extras", _derive)
 
     calls = {"intraday": 0, "thirty": 0}
-    sentinel = {"state": "bull_trend", "smoothed_score": 88.0,
-                "state_history": ["bull_trend"], "marker": "intraday"}
-    sentinel30 = {"state": "bull_trend", "marker": "30d"}
+    sentinel = {"state": "bullish", "smoothed_score": 88.0,
+                "state_history": ["bullish"], "marker": "intraday"}
+    sentinel30 = {"state": "bullish", "marker": "30d"}
 
     def _intraday(*a, **k):
         calls["intraday"] += 1
@@ -396,8 +399,8 @@ def test_refresh_recomputes_trend_first_call_then_gates(monkeypatch):
     assert comp.payload["derived"]["trend"] == sentinel
     assert comp.payload["derived"]["trend_30d_ago"] == sentinel30
     # state persisted for the next hysteresis read.
-    assert handlers._TREND["committed"] == "bull_trend"
-    assert handlers._TREND["history"] == ["bull_trend"]
+    assert handlers._TREND["committed"] == "bullish"
+    assert handlers._TREND["history"] == ["bullish"]
     assert handlers._TREND["smoothed"] == 88.0
 
     # Second refresh, clock unchanged -> NOT due -> no recompute, cached trend used.
@@ -405,6 +408,63 @@ def test_refresh_recomputes_trend_first_call_then_gates(monkeypatch):
     assert calls["intraday"] == 1 and calls["thirty"] == 1  # still 1
     comp2 = bus.cache_get("cache:sentiment:composite")
     assert comp2.payload["derived"]["trend"] == sentinel
+    _reset_trend()
+
+
+def test_refresh_feeds_flow_skew_and_pc_delta_into_trend(monkeypatch):
+    """``_maybe_recompute_trend`` reads ``cache:options:flow_skew`` from the bus
+    and ``compute.sector_pc_delta()`` and threads both into the trend compute."""
+    _reset_trend()
+    bus = Bus(fake=True)
+    _patch_compute(monkeypatch, live=_fake_live(), snaps=[{"x": 1}], spy=[1.0])
+
+    # The options service publishes the flow-skew view — seed it in the bus.
+    flow_skew = {"SPY": {"rr_delta": -1.5, "rr_25d": 2.0}}
+    bus.cache_set(handlers.CACHE_OPTIONS_FLOW_SKEW, flow_skew)
+    monkeypatch.setattr(handlers.compute, "sector_pc_delta", lambda: 0.12)
+
+    captured = {}
+
+    def _capture(*a, **k):
+        captured["flow_skew"] = k.get("flow_skew")
+        captured["sector_pc_delta"] = k.get("sector_pc_delta")
+        return {"state": "bullish", "state_history": [], "smoothed_score": 70.0}
+
+    monkeypatch.setattr(handlers.compute, "compute_intraday_trend", _capture)
+    monkeypatch.setattr(handlers.compute, "compute_30d_trend", lambda *a, **k: {})
+    monkeypatch.setattr(handlers.time, "monotonic", lambda: 9000.0)
+
+    handlers.refresh(bus, with_sectors=False)
+
+    assert captured["flow_skew"] == flow_skew
+    assert captured["sector_pc_delta"] == 0.12
+    _reset_trend()
+
+
+def test_refresh_feeds_order_flow_into_trend(monkeypatch):
+    """``_maybe_recompute_trend`` reads ``cache:sentiment:order_flow`` from the bus
+    and threads it into the trend compute as ``order_flow=``."""
+    _reset_trend()
+    bus = Bus(fake=True)
+    _patch_compute(monkeypatch, live=_fake_live(), snaps=[{"x": 1}], spy=[1.0])
+
+    # The service's own SSE consumer publishes the order-flow view — seed it.
+    order_flow = {"SPY": {"aggressor_ratio": 0.8, "n": 50}}
+    bus.cache_set(handlers.order_flow_consumer.CACHE_ORDER_FLOW, order_flow)
+
+    captured = {}
+
+    def _capture(*a, **k):
+        captured["order_flow"] = k.get("order_flow")
+        return {"state": "bullish", "state_history": [], "smoothed_score": 70.0}
+
+    monkeypatch.setattr(handlers.compute, "compute_intraday_trend", _capture)
+    monkeypatch.setattr(handlers.compute, "compute_30d_trend", lambda *a, **k: {})
+    monkeypatch.setattr(handlers.time, "monotonic", lambda: 9100.0)
+
+    handlers.refresh(bus, with_sectors=False)
+
+    assert captured["order_flow"] == order_flow
     _reset_trend()
 
 
@@ -561,7 +621,7 @@ def test_intraday_values_prefers_smoothed_trend_score():
 def test_refresh_records_and_publishes_intraday_during_rth(monkeypatch):
     bus = Bus(fake=True)
     _patch_compute(monkeypatch, live=_fake_live(total="6.00"), snaps=[{"x": 1}], spy=[1.0])
-    monkeypatch.setattr(handlers, "_maybe_recompute_trend", lambda: None)
+    monkeypatch.setattr(handlers, "_maybe_recompute_trend", lambda *a, **k: None)
     monkeypatch.setattr(handlers, "_is_rth_now", lambda: True)
     monkeypatch.setattr(handlers, "_intraday_conn",
                         handlers.intraday_history_db.connect(":memory:"))
@@ -582,7 +642,7 @@ def test_refresh_records_and_publishes_intraday_during_rth(monkeypatch):
 def test_refresh_skips_intraday_off_hours(monkeypatch):
     bus = Bus(fake=True)
     _patch_compute(monkeypatch, live=_fake_live(), snaps=[{"x": 1}], spy=[1.0])
-    monkeypatch.setattr(handlers, "_maybe_recompute_trend", lambda: None)
+    monkeypatch.setattr(handlers, "_maybe_recompute_trend", lambda *a, **k: None)
     monkeypatch.setattr(handlers, "_is_rth_now", lambda: False)
     monkeypatch.setattr(handlers, "_intraday_conn",
                         handlers.intraday_history_db.connect(":memory:"))
@@ -598,7 +658,7 @@ def test_refresh_intraday_record_failure_non_fatal(monkeypatch):
     core refresh — the composite view is still written."""
     bus = Bus(fake=True)
     _patch_compute(monkeypatch, live=_fake_live(), snaps=[{"x": 1}], spy=[1.0])
-    monkeypatch.setattr(handlers, "_maybe_recompute_trend", lambda: None)
+    monkeypatch.setattr(handlers, "_maybe_recompute_trend", lambda *a, **k: None)
     monkeypatch.setattr(handlers, "_is_rth_now", lambda: True)
     monkeypatch.setattr(handlers, "_intraday_conn",
                         handlers.intraday_history_db.connect(":memory:"))
@@ -613,3 +673,208 @@ def test_refresh_intraday_record_failure_non_fatal(monkeypatch):
 
     comp = bus.cache_get("cache:sentiment:composite")
     assert comp is not None  # core refresh completed despite the intraday failure
+
+
+# --- sector P/C daily persistence (Part C) ------------------------------------
+def _mem_sector_pcr(monkeypatch):
+    conn = handlers.sector_pcr_history_db.connect(":memory:")
+    monkeypatch.setattr(handlers, "_sector_pcr_conn", conn)
+    return conn
+
+
+def test_record_sector_pcr_records_value(monkeypatch):
+    conn = _mem_sector_pcr(monkeypatch)
+    monkeypatch.setattr(handlers, "_is_rth_now", lambda: True)
+    handlers._record_sector_pcr({"sector_pcr": 0.83})
+    rows = conn.execute("SELECT pcr FROM sector_pcr").fetchall()
+    assert rows and rows[-1][0] == 0.83
+
+
+def test_record_sector_pcr_skips_none(monkeypatch):
+    conn = _mem_sector_pcr(monkeypatch)
+    monkeypatch.setattr(handlers, "_is_rth_now", lambda: True)
+    handlers._record_sector_pcr({"sector_pcr": None})
+    assert conn.execute("SELECT COUNT(*) FROM sector_pcr").fetchone()[0] == 0
+
+
+def test_record_sector_pcr_skips_off_hours(monkeypatch):
+    conn = _mem_sector_pcr(monkeypatch)
+    monkeypatch.setattr(handlers, "_is_rth_now", lambda: False)
+    handlers._record_sector_pcr({"sector_pcr": 0.9})
+    assert conn.execute("SELECT COUNT(*) FROM sector_pcr").fetchone()[0] == 0
+
+
+def test_record_sector_pcr_failure_non_fatal(monkeypatch):
+    _mem_sector_pcr(monkeypatch)
+    monkeypatch.setattr(handlers, "_is_rth_now", lambda: True)
+
+    def _boom(*a, **k):
+        raise RuntimeError("record exploded")
+
+    monkeypatch.setattr(handlers.sector_pcr_history_db, "record", _boom)
+    handlers._record_sector_pcr({"sector_pcr": 0.9})  # must not raise
+
+
+def test_refresh_calls_record_sector_pcr(monkeypatch):
+    bus = Bus(fake=True)
+    live = _fake_live()
+    live["sector_pcr"] = 0.77
+    _patch_compute(monkeypatch, live=live, snaps=[{"x": 1}], spy=[1.0])
+    monkeypatch.setattr(handlers, "_maybe_recompute_trend", lambda *a, **k: None)
+    monkeypatch.setattr(handlers, "_is_rth_now", lambda: True)
+    monkeypatch.setattr(handlers, "_intraday_conn",
+                        handlers.intraday_history_db.connect(":memory:"))
+    conn = _mem_sector_pcr(monkeypatch)
+
+    handlers.refresh(bus, with_sectors=False)
+
+    rows = conn.execute("SELECT pcr FROM sector_pcr").fetchall()
+    assert rows and rows[-1][0] == 0.77
+
+
+# --- daily committed market-state persistence (validation record) -------------
+def _mem_market_state(monkeypatch):
+    conn = handlers.market_state_history_db.connect(":memory:")
+    monkeypatch.setattr(handlers, "_get_market_state_conn", lambda: conn)
+    return conn
+
+
+def _trend(**over):
+    t = {"state": "bullish", "smoothed_score": 72.0, "aggression": 0.4,
+         "evidence": ["e1", "e2"], "sub_scores": {"price": 60.0},
+         "aggression_confidence": 0.8}
+    t.update(over)
+    return t
+
+
+def test_record_market_state_records_row(monkeypatch):
+    conn = _mem_market_state(monkeypatch)
+    monkeypatch.setattr(handlers, "_is_rth_now", lambda: True)
+    handlers._record_market_state(_trend())
+    rows = handlers.market_state_history_db.load_recent(conn, n_days=60)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["committed_state"] == "bullish"
+    assert row["direction_score"] == 72.0
+    assert row["aggression"] == 0.4
+    assert row["components"] == {
+        "evidence": ["e1", "e2"], "sub_scores": {"price": 60.0},
+        "aggression_confidence": 0.8}
+
+
+def test_record_market_state_skips_falsy_state(monkeypatch):
+    conn = _mem_market_state(monkeypatch)
+    monkeypatch.setattr(handlers, "_is_rth_now", lambda: True)
+    handlers._record_market_state(_trend(state=None))
+    assert conn.execute("SELECT COUNT(*) FROM market_state").fetchone()[0] == 0
+
+
+def test_record_market_state_skips_off_hours(monkeypatch):
+    conn = _mem_market_state(monkeypatch)
+    monkeypatch.setattr(handlers, "_is_rth_now", lambda: False)
+    handlers._record_market_state(_trend())
+    assert conn.execute("SELECT COUNT(*) FROM market_state").fetchone()[0] == 0
+
+
+def test_record_market_state_failure_non_fatal(monkeypatch):
+    _mem_market_state(monkeypatch)
+    monkeypatch.setattr(handlers, "_is_rth_now", lambda: True)
+
+    def _boom(*a, **k):
+        raise RuntimeError("record exploded")
+
+    monkeypatch.setattr(handlers.market_state_history_db, "record", _boom)
+    handlers._record_market_state(_trend())  # must not raise
+
+
+def test_maybe_recompute_trend_records_market_state(monkeypatch):
+    """``_record_market_state`` is called at the end of ``_maybe_recompute_trend``
+    with the freshly-updated ``_TREND['trend']`` dict."""
+    _reset_trend()
+    conn = _mem_market_state(monkeypatch)
+    monkeypatch.setattr(handlers, "_is_rth_now", lambda: True)
+    bus = Bus(fake=True)
+
+    fresh = _trend(state="bearish", smoothed_score=28.0, aggression=-0.6)
+    monkeypatch.setattr(handlers.compute, "compute_intraday_trend",
+                        lambda *a, **k: fresh)
+    monkeypatch.setattr(handlers.compute, "compute_30d_trend", lambda *a, **k: {})
+    monkeypatch.setattr(handlers.compute, "sector_pc_delta", lambda: None)
+    monkeypatch.setattr(handlers.time, "monotonic", lambda: 12000.0)
+
+    handlers._maybe_recompute_trend(bus)
+
+    rows = handlers.market_state_history_db.load_recent(conn, n_days=60)
+    assert len(rows) == 1
+    assert rows[0]["committed_state"] == "bearish"
+    assert rows[0]["direction_score"] == 28.0
+    assert rows[0]["aggression"] == -0.6
+    _reset_trend()
+
+
+# --- market-state transition push alert ---------------------------------------
+
+def _stub_trend_recompute(monkeypatch, new_state):
+    """Make ``_maybe_recompute_trend`` recompute to a given committed state."""
+    _mem_market_state(monkeypatch)
+    monkeypatch.setattr(handlers, "_is_rth_now", lambda: True)
+    fresh = {"state": new_state, "state_history": [new_state],
+             "smoothed_score": 30.0, "aggression": -0.5,
+             "description": "desc", "evidence": ["e1"]}
+    monkeypatch.setattr(handlers.compute, "compute_intraday_trend",
+                        lambda *a, **k: fresh)
+    monkeypatch.setattr(handlers.compute, "compute_30d_trend", lambda *a, **k: {})
+    monkeypatch.setattr(handlers.compute, "sector_pc_delta", lambda: None)
+    monkeypatch.setattr(handlers.time, "monotonic", lambda: 21000.0)
+    return fresh
+
+
+def test_recompute_notifies_on_committed_state_change(monkeypatch):
+    _reset_trend()
+    handlers._TREND["committed"] = "bullish"  # prior committed
+    fresh = _stub_trend_recompute(monkeypatch, "bearish")
+
+    seen = {}
+    monkeypatch.setattr(handlers.state_alert, "send_state_transition",
+                        lambda old, new, trend, **k: seen.update(
+                            old=old, new=new, trend=trend) or True)
+
+    handlers._maybe_recompute_trend(Bus(fake=True))
+
+    assert seen["old"] == "bullish"
+    assert seen["new"] == "bearish"
+    assert seen["trend"] == fresh
+    _reset_trend()
+
+
+def test_recompute_no_notify_when_state_unchanged(monkeypatch):
+    _reset_trend()
+    handlers._TREND["committed"] = "bullish"
+    _stub_trend_recompute(monkeypatch, "bullish")  # same committed
+
+    calls = {"n": 0}
+    monkeypatch.setattr(handlers.state_alert, "send_state_transition",
+                        lambda *a, **k: calls.__setitem__("n", calls["n"] + 1))
+
+    handlers._maybe_recompute_trend(Bus(fake=True))
+    assert calls["n"] == 0
+    _reset_trend()
+
+
+def test_recompute_notify_failure_non_fatal(monkeypatch):
+    """A ``send_state_transition`` that raises does NOT abort the recompute —
+    ``_TREND`` still updates to the new committed state."""
+    _reset_trend()
+    handlers._TREND["committed"] = "bullish"
+    _stub_trend_recompute(monkeypatch, "bearish")
+
+    def _boom(*a, **k):
+        raise RuntimeError("notify exploded")
+
+    monkeypatch.setattr(handlers.state_alert, "send_state_transition", _boom)
+
+    handlers._maybe_recompute_trend(Bus(fake=True))  # must not raise
+
+    assert handlers._TREND["committed"] == "bearish"
+    assert handlers._TREND["smoothed"] == 30.0
+    _reset_trend()

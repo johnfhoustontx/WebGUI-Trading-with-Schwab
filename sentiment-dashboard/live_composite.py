@@ -49,6 +49,19 @@ def _safe_float(v, default=0.0):
         return default
 
 
+def cap_weighted_pcr(pcr, weights):
+    """Cap-weighted RAW cross-sector Put/Call ratio (NOT the 1-10 contrarian score).
+
+    Only sectors that have BOTH a pcr and a non-zero cap weight contribute.
+    Higher = more puts = more downside hedging. Returns None when no usable
+    sector is present.
+    """
+    pw = [(pcr[e], weights.get(e, 0.0)) for e in pcr if weights.get(e)]
+    if not pw:
+        return None
+    return sum(r * w for r, w in pw) / sum(w for _, w in pw)
+
+
 def signal_band(total):
     """(size_modifier, bias, signal) — mirrors source _update_position_modifier."""
     if total >= 9:
@@ -264,6 +277,9 @@ def compute_live(schwab, sector_data, prior_vix1d=0.0, prior_sector_trends=None)
 
     pcr = {etf: v for etf, v in _pmap(_chain, sectors) if v is not None}
     pc_res = _pc.score_sector_weighted(pcr, sp_weights)
+    # Additive: RAW cap-weighted cross-sector Put/Call ratio (options-flow
+    # direction). Higher = more downside hedging. None when no usable sector.
+    sector_pcr = cap_weighted_pcr(pcr, sp_weights)
 
     # --- sector close history -> dual momentum (rotation) + sector_perf ---
     def _hist(etf):
@@ -302,6 +318,7 @@ def compute_live(schwab, sector_data, prior_vix1d=0.0, prior_sector_trends=None)
         "volatility": {"interpretation":
                        f"T{int(term.score)}-1D{int(v1d_r.score)}-S{int(slope.score)}"},
         "options": {"pc_equity": "", "interpretation": pc_res.interp},
+        "sector_pcr": sector_pcr,
         "breadth": {"interpretation": br.interp},
         "rotation": {"interpretation": dual.get("interp", "")},
         "_sector_runtime": {"sector_data": sector_data, "quotes": last_quotes, "dual": dual, "closes": closes},

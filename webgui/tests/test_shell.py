@@ -151,6 +151,16 @@ def test_is_view_stale_threshold(monkeypatch):
     assert main._is_view_stale(None, now) is True          # no publish yet -> stale
     assert main._is_view_stale("garbage", now) is True     # unparseable -> stale
 
+    # options:scan autoscans every 15 min → it has a longer per-view threshold, so a
+    # 12-min-old scan is NOT stale for it, but IS for a default-threshold view. This
+    # is the fix for the false "scanner stale" toast ~10 min after each scan.
+    twelve_min = (now - dt.timedelta(minutes=12)).isoformat()
+    assert main._is_view_stale(twelve_min, now, "options:scan") is False
+    assert main._is_view_stale(twelve_min, now, "sentiment:composite") is True
+    # ...but a genuinely wedged scanner (older than its 20-min threshold) still flags.
+    dead_scan = (now - dt.timedelta(minutes=25)).isoformat()
+    assert main._is_view_stale(dead_scan, now, "options:scan") is True
+
 
 def test_watcher_seeds_health_then_alerts_on_transition(monkeypatch):
     """First tick seeds (no alert); a service going down after seeding fires once,

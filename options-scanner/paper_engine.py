@@ -294,10 +294,63 @@ def _close(db_path, pos, exit_debit, exit_order_id, realized_pnl, reason, status
     paper_account_db.realize_pnl(db_path, realized_pnl)
 
 
-def run_manage_cycle(client, now_date, broker=None, db_path=None):
+# Options settle on the expiration date at the 4pm ET close = 15:00 CT. Only
+# auto-settle a position at/after that time on its expiry day (never intraday at
+# the open — a 0-DTE credit spread must be held to the close), or on any later
+# day (recovery for a position whose settlement window was missed).
+SETTLE_HOUR_CT = 15
+
+
+def should_settle(expiration, today, now_ct):
+    """True when an option position should be expiration-settled.
+
+    ``expiration``/``today`` are ISO date strings; ``now_ct`` is a tz-aware CT
+    datetime (for the intraday 15:00 gate). Settles when the expiration is in the
+    past (``exp < today`` — recovery for a missed window) OR it is the expiry day
+    and the CT clock is at/after 15:00. A malformed/missing date never settles."""
+    try:
+        exp = date.fromisoformat(str(expiration)[:10])
+        tod = date.fromisoformat(str(today)[:10])
+    except (ValueError, TypeError):
+        return False
+    if exp < tod:
+        return True
+    if exp == tod:
+        return now_ct.hour >= SETTLE_HOUR_CT
+    return False
+
+
+def underlying_last(client, symbol):
+    """Best-effort last underlying price for settlement, or None.
+
+    Used when the repricer can't supply ``current_underlying`` (it returns None
+    for a past expiration, since it skips the doomed chain fetch). Maps SPX→$SPX
+    and reads lastPrice/mark/closePrice from a direct quote. Never raises."""
+    if client is None or not symbol:
+        return None
+    api = "$SPX" if symbol == "SPX" else symbol
+    try:
+        r = client.get_quotes([api])
+        data = r.json() if hasattr(r, "json") else (r or {})
+        info = data.get(api) or data.get(symbol) or {}
+        q = info.get("quote", info.get("reference", info)) if isinstance(info, dict) else {}
+        px = q.get("lastPrice") or q.get("mark") or q.get("closePrice")
+        return float(px) if px else None
+    except Exception:
+        return None
+
+
+def run_manage_cycle(client, now_date, broker=None, db_path=None, now_ct=None):
     """Re-price open positions, apply exit rules (target / CUT / expiration), and
-    trip the session drawdown halt. RTH gating is the caller's responsibility."""
+    trip the session drawdown halt. RTH gating is the caller's responsibility.
+
+    Expiration settlement fires only at/after 15:00 CT on the expiry day (or any
+    later day) via ``should_settle`` — so a 0-DTE spread is held to the close, not
+    force-settled at the open — and falls back to a direct underlying quote when
+    the repricer can't supply one (a past expiration). ``now_ct`` defaults to the
+    live CT clock; inject it for deterministic tests."""
     broker = broker or _default_broker
+    now_ct = now_ct or datetime.now(TZ)
     signal_repricer.clear_chain_cache()        # fresh quotes for every fill
     paper_account_db.roll_session_if_needed(db_path, now_date)
 
@@ -316,9 +369,12 @@ def run_manage_cycle(client, now_date, broker=None, db_path=None):
                 current_short_delta=mark.get("current_short_delta"),
                 last_mark_ts=datetime.now(TZ).isoformat())
 
-        # Expiration settlement at intrinsic value vs the marked underlying.
-        if dte <= 0:
-            settlement = mark.get("current_underlying")
+        # Expiration settlement at intrinsic value vs the underlying — only at/
+        # after the 15:00 CT close on the expiry day (or later). The underlying
+        # comes from the repricer when available, else a direct quote (the
+        # repricer returns None for a past expiration).
+        if should_settle(pos["expiration"], now_date, now_ct):
+            settlement = mark.get("current_underlying") or underlying_last(client, pos["symbol"])
             if not settlement:
                 log.warning("%s EXPIRY DEFERRED %s: no underlying quote, retry next cycle",
                             _default_broker.PREFIX, pos["symbol"])

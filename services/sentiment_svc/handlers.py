@@ -25,7 +25,9 @@ import time
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo as _ZI
 
-from services.sentiment_svc import compute, intraday_history_db, scheduler
+from services.sentiment_svc import (
+    compute, intraday_history_db, market_state_history_db, order_flow_consumer,
+    scheduler, sector_pcr_history_db, state_alert)
 from shared.contracts.sentiment import CompositeSnapshot
 
 log = logging.getLogger(__name__)
@@ -84,25 +86,59 @@ def _load_snapshots_cached():
         return snaps, spy
 
 
-def _maybe_recompute_trend():
+def _maybe_recompute_trend(bus):
     """Recompute the directional Market Trend if the 15-min gate is due.
 
     Threads persisted hysteresis/smoothing state through ``compute_intraday_trend``
-    and refreshes the cached payloads in ``_TREND``. Defensive — a recompute
-    failure logs and leaves the prior cached trend in place (never aborts refresh).
+    and refreshes the cached payloads in ``_TREND``. Also feeds the aggression axis:
+    the cross-service ``cache:options:flow_skew`` view (25-delta put-skew Δ) read
+    from the bus, ``compute.sector_pc_delta()`` (5-day cap-weighted sector P/C Δ),
+    and ``cache:sentiment:order_flow`` (streamed SPY aggressor ratio) read from the
+    bus. All reads are defensive — a bus/cache failure degrades to None, never
+    aborts. Defensive overall — a recompute failure logs and leaves the prior
+    cached trend in place (never aborts refresh).
     """
     from services import _proxy
     with _TREND_LOCK:
         now = time.monotonic()
         if not scheduler.trend_due(now, _TREND["last_ts"]):
             return
+
+        # Aggression inputs — cross-service put-skew + sector P/C change. Read
+        # defensively so a missing/locked cache never aborts the trend recompute.
+        flow_skew = None
+        try:
+            env = bus.cache_get(CACHE_OPTIONS_FLOW_SKEW)
+            if env is not None and isinstance(env.payload, dict):
+                flow_skew = env.payload
+        except Exception:  # noqa: BLE001 — degrade to None.
+            log.debug("flow_skew read failed", exc_info=True)
+        try:
+            pc_delta = compute.sector_pc_delta()
+        except Exception:  # noqa: BLE001 — degrade to None.
+            log.debug("sector_pc_delta read failed", exc_info=True)
+            pc_delta = None
+        # Streamed aggressor order-flow (cache:sentiment:order_flow), published by
+        # the service's own SSE consumer. Defensive read → None drops out.
+        order_flow = None
+        try:
+            env = bus.cache_get(order_flow_consumer.CACHE_ORDER_FLOW)
+            if env is not None and isinstance(env.payload, dict):
+                order_flow = env.payload
+        except Exception:  # noqa: BLE001 — degrade to None.
+            log.debug("order_flow read failed", exc_info=True)
+
         try:
             t = compute.compute_intraday_trend(
                 _proxy.schwab_client,
                 prior_history=_TREND["history"],
                 prior_committed=_TREND["committed"],
-                prev_smoothed=_TREND["smoothed"])
+                prev_smoothed=_TREND["smoothed"],
+                flow_skew=flow_skew,
+                sector_pc_delta=pc_delta,
+                order_flow=order_flow)
             t30 = compute.compute_30d_trend()
+            prev_committed = _TREND["committed"]
             _TREND.update(
                 last_ts=now,
                 history=t.get("state_history", []),
@@ -110,9 +146,30 @@ def _maybe_recompute_trend():
                 smoothed=t.get("smoothed_score"),
                 trend=t,
                 trend_30d=t30)
+            new_committed = _TREND["committed"]
+            # Record the freshly-committed market-state for later validation.
+            # Nested guard so a recorder failure can't abort the recompute.
+            try:
+                _record_market_state(_TREND["trend"])
+            except Exception:  # noqa: BLE001
+                log.exception("market state record failed (recompute)")
+            # Push a phone alert when the committed state FLIPS. The gate in
+            # ``send_state_transition`` handles enabled/market-hours/valid-vocab
+            # filtering (incl. the cold-start old→new-vocab first cycle) — the
+            # handler just detects "committed changed" and delegates. Best-effort:
+            # a notify failure must NOT abort the recompute.
+            if new_committed != prev_committed:
+                try:
+                    state_alert.send_state_transition(
+                        prev_committed, new_committed, _TREND["trend"])
+                except Exception:  # noqa: BLE001
+                    log.exception("state transition notify failed")
         except Exception:  # noqa: BLE001 — recompute failure must not abort refresh.
             log.exception("intraday trend recompute failed")
 
+
+# Cross-service view (published by options_svc) feeding the aggression axis.
+CACHE_OPTIONS_FLOW_SKEW = "cache:options:flow_skew"
 
 CACHE_COMPOSITE = "cache:sentiment:composite"
 CACHE_HISTORY = "cache:sentiment:history"
@@ -142,6 +199,85 @@ def _get_intraday_conn():
     if _intraday_conn is None:
         _intraday_conn = intraday_history_db.connect()
     return _intraday_conn
+
+
+# --- daily cap-weighted sector Put/Call ratio (options-flow direction) --------
+# A second lazily-opened SQLite store: one row per LOCAL date (today's row is
+# REPLACE-updated each RTH refresh, so the latest read wins), used for the
+# 5-trading-day P/C delta the market-state classifier reads. Shares the same
+# ``_INTRADAY_LOCK`` as the intraday store — both are check_same_thread=False
+# connections touched from the multi-worker executor, and one lock serializing
+# both is simplest and contention-free (the recorders run back-to-back in the
+# same refresh, off-loop).
+_sector_pcr_conn = None
+
+
+def _get_sector_pcr_conn():
+    global _sector_pcr_conn
+    if _sector_pcr_conn is None:
+        _sector_pcr_conn = sector_pcr_history_db.connect()
+    return _sector_pcr_conn
+
+
+def _record_sector_pcr(live):
+    """Record today's cap-weighted sector P/C ratio (RTH-only), prune the window.
+    Defensive — never aborts the core refresh. Skips when ``sector_pcr`` is
+    None."""
+    try:
+        if not _is_rth_now():
+            return
+        pcr = (live or {}).get("sector_pcr")
+        if pcr is None:
+            return
+        with _INTRADAY_LOCK:
+            conn = _get_sector_pcr_conn()
+            date_iso = _dt.datetime.now(_ZI("America/Chicago")).date().isoformat()
+            sector_pcr_history_db.record(conn, date_iso, pcr)
+            sector_pcr_history_db.prune(conn, keep=10)
+    except Exception:  # noqa: BLE001
+        log.exception("sector pcr record failed")
+
+
+# --- daily committed market-state (validation record) -------------------------
+# A third lazily-opened SQLite store: one row per LOCAL date (today's row is
+# REPLACE-updated each RTH recompute), recording the five-state classifier's
+# committed state + direction/aggression + a components JSON, so a later task can
+# backtest whether the states stratify forward returns. Shares ``_INTRADAY_LOCK``
+# with the other two on-disk stores (all check_same_thread=False, touched off-loop
+# from the multi-worker executor).
+_market_state_conn = None
+
+
+def _get_market_state_conn():
+    global _market_state_conn
+    if _market_state_conn is None:
+        _market_state_conn = market_state_history_db.connect()
+    return _market_state_conn
+
+
+def _record_market_state(trend):
+    """Record today's committed market-state (RTH-only), prune the window.
+    Defensive — never aborts the trend recompute. Skips when the committed
+    ``state`` is falsy."""
+    try:
+        if not _is_rth_now():
+            return
+        t = trend or {}
+        committed_state = t.get("state")
+        if not committed_state:
+            return
+        components = {"evidence": t.get("evidence"),
+                      "sub_scores": t.get("sub_scores"),
+                      "aggression_confidence": t.get("aggression_confidence")}
+        with _INTRADAY_LOCK:
+            conn = _get_market_state_conn()
+            date_iso = _dt.datetime.now(_ZI("America/Chicago")).date().isoformat()
+            market_state_history_db.record(
+                conn, date_iso, committed_state,
+                t.get("smoothed_score"), t.get("aggression"), components)
+            market_state_history_db.prune(conn, keep=90)
+    except Exception:  # noqa: BLE001
+        log.exception("market state record failed")
 
 
 def _is_rth_now() -> bool:
@@ -274,7 +410,7 @@ def refresh(bus, with_sectors: bool = False) -> None:
     _composite_gate(live, snaps)
 
     # 15-min directional Market-Trend recompute (gated + state persisted).
-    _maybe_recompute_trend()
+    _maybe_recompute_trend(bus)
 
     now_iso = datetime.now(timezone.utc).isoformat()
 
@@ -294,6 +430,7 @@ def refresh(bus, with_sectors: bool = False) -> None:
                   skip_unchanged=True)
 
     _record_intraday(bus, live, _TREND["trend"])
+    _record_sector_pcr(live)
 
     sector = None
     if with_sectors:

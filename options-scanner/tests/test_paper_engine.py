@@ -249,6 +249,97 @@ def test_manage_cycle_defers_expiry_without_underlying(tmp_path, monkeypatch):
     assert pdb.get_account(db)["buying_power_reserved"] > 0
 
 
+# ── Expiration settlement gate (should_settle / underlying_last) ────────────
+def _ct(h, m=0, d=3):
+    return datetime(2026, 6, d, h, m, tzinfo=_CT)
+
+
+def test_should_settle_past_expiration_true():
+    assert pe.should_settle("2026-06-02", "2026-06-03", _ct(10)) is True
+
+
+def test_should_settle_expiry_day_before_close_false():
+    # 0-DTE at 10:00 CT must be held to the close, not settled at the open.
+    assert pe.should_settle("2026-06-03", "2026-06-03", _ct(10)) is False
+
+
+def test_should_settle_expiry_day_at_close_true():
+    assert pe.should_settle("2026-06-03", "2026-06-03", _ct(15)) is True
+    assert pe.should_settle("2026-06-03", "2026-06-03", _ct(15, 30)) is True
+
+
+def test_should_settle_future_false():
+    assert pe.should_settle("2026-06-10", "2026-06-03", _ct(16)) is False
+
+
+def test_should_settle_malformed_false():
+    assert pe.should_settle(None, "2026-06-03", _ct(16)) is False
+    assert pe.should_settle("not-a-date", "2026-06-03", _ct(16)) is False
+
+
+class _QuoteClient:
+    """Minimal client whose get_quotes([sym]) yields a lastPrice for settlement."""
+    def __init__(self, price):
+        self._price = price
+
+    def get_quotes(self, syms):
+        sym = syms[0]
+        price = self._price
+        class _R:
+            status_code = 200
+            def json(self):
+                return {sym: {"quote": {"lastPrice": price}}}
+        return _R()
+
+
+def test_underlying_last_reads_last_price():
+    assert pe.underlying_last(_QuoteClient(497.25), "SPY") == 497.25
+
+
+def test_underlying_last_none_client_returns_none():
+    assert pe.underlying_last(None, "SPY") is None
+
+
+def test_manage_cycle_settles_at_close_with_fetched_underlying(tmp_path, monkeypatch):
+    """A 0-DTE position at/after 15:00 CT settles at intrinsic vs a FETCHED
+    underlying, even though the repricer supplies no current_underlying."""
+    db = str(tmp_path / "acct.db")
+    pdb.ensure_account(db, 25_000.0, "2026-06-03")
+    pe.run_entry_cycle(None, "2026-06-03", [_sig(expiration="2026-06-03")],
+                       _FakeBroker(0.50), db)
+    # Repricer can't price the expired chain (underlying None) — settlement must
+    # fall back to a direct quote. Underlying 505 is above both PCS put strikes
+    # (500/499) -> both worthless -> full credit kept.
+    monkeypatch.setattr(pe.signal_repricer, "reprice_swing",
+        lambda trade, client: {"current_value": None, "unrealized_pnl": None,
+            "pnl_pct_of_credit": None, "current_underlying": None,
+            "current_short_delta": None, "error": "expired"})
+    pe.run_manage_cycle(_QuoteClient(505.0), "2026-06-03", _FakeBroker(), db,
+                        now_ct=_ct(15, 5))
+    assert pdb.fetch_open_positions(db) == []          # settled + closed
+    acct = pdb.get_account(db)
+    assert acct["buying_power_reserved"] == 0.0
+    assert acct["realized_pnl"] > 0                    # OTM PCS -> kept credit (net fees)
+
+
+def test_manage_cycle_holds_0dte_before_close(tmp_path, monkeypatch):
+    """Before 15:00 CT on expiry day, a 0-DTE position is NOT force-settled."""
+    db = str(tmp_path / "acct.db")
+    pdb.ensure_account(db, 25_000.0, "2026-06-03")
+    pe.run_entry_cycle(None, "2026-06-03", [_sig(expiration="2026-06-03")],
+                       _FakeBroker(0.50), db)
+    monkeypatch.setattr(pe.signal_repricer, "reprice_swing",
+        lambda trade, client: {"current_value": 0.20, "unrealized_pnl": 30.0,
+            "pnl_pct_of_credit": 40.0, "current_underlying": 500.0,
+            "current_short_delta": -0.1, "error": None})
+    monkeypatch.setattr(pe.signal_recommender, "recommend",
+        lambda ctx: {"action": "HOLD", "reason": "x", "code": "HOLD"})
+    pe.run_manage_cycle(_QuoteClient(500.0), "2026-06-03", _FakeBroker(), db,
+                        now_ct=_ct(10))
+    assert len(pdb.fetch_open_positions(db)) == 1      # held, not settled
+    assert pdb.get_account(db)["buying_power_reserved"] > 0
+
+
 def test_manage_cycle_passes_per_contract_pnl_to_recommender(tmp_path, monkeypatch):
     db = str(tmp_path / "acct.db")
     pdb.ensure_account(db, 25_000.0, "2026-06-03")

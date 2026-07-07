@@ -8,6 +8,7 @@ Covers strategy_scoring.py:
 """
 
 import strategy_scoring as sc
+from strategy_scoring import state_family_tilt, STATE_TILT_MAX
 
 
 #############################################
@@ -395,3 +396,59 @@ def test_score_all_handles_bad_signal():
     assert len(out) == 2
     for s in out:
         assert 0 <= s["composite_score"] <= 100
+
+
+#############################################
+# Task 1 — market-state family tilt
+#############################################
+
+def test_tilt_bounded():
+    for st in ("bullish", "lack_of_bullishness", "neutral", "lack_of_bearishness", "bearish"):
+        for t in ("PCS", "CCS", "IC", "LONG_CALL", "LONG_PUT", "BULL_CALL", "BEAR_PUT"):
+            assert -STATE_TILT_MAX <= state_family_tilt(st, t) <= STATE_TILT_MAX
+
+
+def test_middle_states_lean_correctly():
+    assert state_family_tilt("lack_of_bearishness", "PCS") > 0
+    assert state_family_tilt("lack_of_bullishness", "CCS") > 0
+    assert state_family_tilt("lack_of_bullishness", "LONG_CALL") < 0
+    assert state_family_tilt("neutral", "IC") > 0
+
+
+def test_unknown_no_tilt():
+    assert state_family_tilt(None, "PCS") == 0.0
+    assert state_family_tilt("garbage", "PCS") == 0.0
+    assert state_family_tilt("neutral", "UNKNOWN") == 0.0
+
+
+def test_score_strategy_market_state_tilts_composite():
+    # a PCS scored under lack_of_bearishness gets a positive, bounded ranking nudge.
+    base = sc.score_strategy(_credit(rr=0.3, pop=72),
+                             {"direction": "bullish", "conviction": 0.8, "vol_regime": "high"},
+                             0.18, 8.0)
+    tilted = sc.score_strategy(_credit(rr=0.3, pop=72),
+                               {"direction": "bullish", "conviction": 0.8, "vol_regime": "high"},
+                               0.18, 8.0, market_state="lack_of_bearishness")
+    assert tilted["composite_score"] > base["composite_score"]
+    assert tilted["composite_score"] - base["composite_score"] <= STATE_TILT_MAX + 0.01
+    assert tilted["state_tilt"] > 0
+    assert base["state_tilt"] == 0.0
+
+
+def test_score_strategy_tilt_cannot_flip_hard_gate():
+    # a hard-gated Weak trade (fails PoP) stays Weak even with a positive tilt.
+    out = sc.score_strategy(_credit(pop=40),
+                            {"direction": "bullish", "conviction": 0.8, "vol_regime": "low"},
+                            0.18, 8.0, market_state="lack_of_bearishness")
+    assert out["grade"] == "Weak"
+    assert "PoP" in out["grade_reason"]
+    assert out["state_tilt"] > 0  # tilt applied
+    # composite nudged but grade unchanged (tilt is a ranking-only nudge)
+
+
+def test_score_all_threads_market_state():
+    a = _credit(rr=0.3, pop=72)
+    view = {"direction": "bullish", "conviction": 0.8, "vol_regime": "high"}
+    plain = sc.score_all([_credit(rr=0.3, pop=72)], view, 0.18, 8.0)
+    tilted = sc.score_all([a], view, 0.18, 8.0, market_state="lack_of_bearishness")
+    assert tilted[0]["composite_score"] > plain[0]["composite_score"]

@@ -1,0 +1,28 @@
+# Pre-commit hooks — the local mechanical backstop that mirrors CI.
+# Install once:  pipx run pre-commit install   (or: pip install pre-commit && pre-commit install)
+# Run on all files:  pre-commit run --all-files
+#
+# Ruff config lives in ruff.toml (scope + rules). These hooks lint (and format-check)
+# only the in-scope, non-grandfathered code — see docs/audits/2026-07-02-best-practices-validation.md.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.5
+    hooks:
+      - id: ruff              # lint (uses ruff.toml: select E9,F)
+        args: [--fix]
+        # ruff-format is intentionally omitted — the codebase's compact one-line
+        # style is deliberate; enforcing the formatter would rewrite it wholesale.
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '\.(md|bak)$'
+      - id: end-of-file-fixer
+        exclude: '\.(md|bak)$'
+      - id: check-yaml
+      - id: check-toml
+      - id: check-added-large-files
+        args: [--maxkb=2048]   # block accidental commit of DBs / xlsx / big blobs
+      - id: check-merge-conflict
+      - id: detect-private-key   # cheap secret-in-commit guard

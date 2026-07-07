@@ -20,6 +20,8 @@ REAL field-name notes (verified against the engines, NOT the plan's guesses):
 * the paper snapshot's day-P&L field is ``session_pnl`` (``paper_engine.
   account_snapshot``).
 """
+import json
+
 from services.driver_svc import compute
 
 
@@ -161,6 +163,47 @@ def test_build_packet_carries_target_and_limits():
     assert pkt["target"] == 500.0
     assert pkt["limits"] == _lim()
     assert pkt["vix"] == 14.0
+
+
+# ---------------------------------------------------------------------------
+# Task 3 — market_state surfaced to the decider (context ONLY; guardrails untouched)
+# ---------------------------------------------------------------------------
+def test_build_packet_includes_market_state_line():
+    """The five-state market state (label + evidence) reaches the model-facing packet."""
+    market = {"vix": 14.0, "market_state": {
+        "state": "lack_of_bearishness", "label": "Lack of Bearishness",
+        "evidence": ["put-skew Δ -1.2", "aggression +0.30"]}}
+    pkt = compute.build_packet({}, {"snapshot": {}}, target=500.0, limits=_lim(),
+                               market=market)
+    blob = json.dumps(pkt, default=str)   # the decider serializes the packet this way
+    assert "Lack of Bearishness" in blob
+    # At least one evidence string is carried through.
+    assert ("put-skew Δ -1.2" in blob) or ("aggression +0.30" in blob)
+
+
+def test_build_packet_market_state_absent_no_empty_line():
+    """No market_state (or a blank one) → the packet builds fine, no empty 'Market state:'."""
+    for market in ({}, {"vix": 14.0}, None, {"market_state": None},
+                   {"market_state": {"label": ""}}, {"market_state": "junk"}):
+        pkt = compute.build_packet({}, {"snapshot": {}}, target=500.0, limits=_lim(),
+                                   market=market)
+        assert "Market state:" not in json.dumps(pkt, default=str)
+
+
+def test_market_state_is_context_only_not_a_filter():
+    """market_state must NOT change the menu / allowed signals — it is decider context,
+    not a new hard rule (the guardrails path stays unchanged)."""
+    scan = {"signals_0dte": [{"symbol": "QQQ", "type": "PCS", "max_loss": 200.0,
+                              "composite_score": 60, "credit": 55,
+                              "expiration": "2026-06-24"}],
+            "signals_swing": []}
+    base = compute.build_packet(scan, {"snapshot": {}}, target=500.0, limits=_lim(),
+                                market={})
+    with_ms = compute.build_packet(scan, {"snapshot": {}}, target=500.0, limits=_lim(),
+                                   market={"market_state": {"label": "Bearish",
+                                           "state": "bearish", "evidence": ["x"]}})
+    assert with_ms["menu"] == base["menu"]
+    assert with_ms["menu_by_id"] == base["menu_by_id"]
 
 
 # ---------------------------------------------------------------------------

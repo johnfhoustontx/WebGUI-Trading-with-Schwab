@@ -10,32 +10,35 @@ import regime_filter as rf
 
 def test_trend_state_vote_matches_classifier_states():
     """_TREND_STATE_VOTE must key on exactly the 5 states the classifier emits
-    (scoring/trend_regime.py STATE_LABELS): bull_trend, pullback_in_bull, range,
-    bear_rally, bear_trend — no dead keys. Confirmed trends are hard votes; the
-    two counter-/intermediate states are soft leans; range is neutral."""
+    (scoring/market_state.py STATE_LABELS): bullish, lack_of_bullishness,
+    neutral, lack_of_bearishness, bearish — no dead keys. Confirmed direction
+    states are hard votes; the two lack_of_* states are soft leans; neutral is
+    no vote."""
     assert set(rf._TREND_STATE_VOTE) == {
-        "bull_trend", "pullback_in_bull", "range", "bear_rally", "bear_trend"}
-    assert rf._TREND_STATE_VOTE["bull_trend"] == "bull"
-    assert rf._TREND_STATE_VOTE["bear_trend"] == "bear"
-    assert rf._TREND_STATE_VOTE["pullback_in_bull"] == "lean_bull"
-    assert rf._TREND_STATE_VOTE["bear_rally"] == "lean_bear"
-    assert rf._TREND_STATE_VOTE["range"] is None
-    for dead in ("recovery", "bounce_in_bear", "distribution", "neutral", "chop"):
+        "bullish", "lack_of_bullishness", "neutral",
+        "lack_of_bearishness", "bearish"}
+    assert rf._TREND_STATE_VOTE["bullish"] == "bull"
+    assert rf._TREND_STATE_VOTE["bearish"] == "bear"
+    assert rf._TREND_STATE_VOTE["lack_of_bearishness"] == "lean_bull"
+    assert rf._TREND_STATE_VOTE["lack_of_bullishness"] == "lean_bear"
+    assert rf._TREND_STATE_VOTE["neutral"] is None
+    for dead in ("bull_trend", "pullback_in_bull", "range",
+                 "bear_rally", "bear_trend"):
         assert dead not in rf._TREND_STATE_VOTE
 
 
-def test_bear_rally_with_bearish_sentiment_blocks_pcs():
-    """bear_rally (lean_bear) + hard bearish sentiment agree → PCS blocked."""
+def test_lack_of_bullishness_with_bearish_sentiment_blocks_pcs():
+    """lack_of_bullishness (lean_bear) + hard bearish sentiment agree → PCS blocked."""
     out = rf.evaluate_regime(
-        bridge=_bridge(score=2.0, bias="short", trend_state="bear_rally"))
+        bridge=_bridge(score=2.0, bias="short", trend_state="lack_of_bullishness"))
     assert out["allow_pcs"] is False
     assert out["allow_ccs"] is True
 
 
-def test_range_trend_does_not_block_alone():
-    """range casts no trend vote → sentiment alone can't tighten a side."""
+def test_neutral_trend_does_not_block_alone():
+    """neutral casts no trend vote → sentiment alone can't tighten a side."""
     out = rf.evaluate_regime(
-        bridge=_bridge(score=7.5, bias="long", trend_state="range"))
+        bridge=_bridge(score=7.5, bias="long", trend_state="neutral"))
     assert out["allow_ccs"] is True and out["allow_pcs"] is True
 
 
@@ -73,36 +76,36 @@ def test_evaluate_regime_reads_intraday_trend_fields():
     """The bridge's trend_regime block now carries the intraday model's additive
     trend_score/sub_scores fields alongside state/confidence/sma_*. Those extra
     fields must not break consumption — regime_filter still reads ``state`` and
-    behaves exactly as for a confident bull trend (CCS blocked)."""
-    bridge = _bridge(score=7.5, bias="long", trend_state="bull_trend")
+    behaves exactly as for a confident bullish state (CCS blocked)."""
+    bridge = _bridge(score=7.5, bias="long", trend_state="bullish")
     # overlay the new additive fields the sentiment service now publishes
     bridge["trend_regime"].update({
         "trend_score": 84.0,
         "sub_scores": {"price": 88, "breadth": 70, "sector": 65, "vix": 55},
-        "label": "Bull Trend", "raw_state": "bull_trend",
+        "label": "Bullish", "raw_state": "bullish",
         "spy_close": 500.0, "sma_50": 480.0, "sma_200": 450.0,
         "sma_200_slope_pct": 0.3, "drawdown_pct": -1.0,
     })
     out = rf.evaluate_regime(bridge=bridge)
     assert out["active"] is True
-    assert out["trend_state"] == "bull_trend"
+    assert out["trend_state"] == "bullish"
     assert out["allow_ccs"] is False
     assert out["allow_pcs"] is True
 
 
-def test_bullish_score_and_bull_trend_blocks_ccs():
+def test_bullish_score_and_bullish_trend_blocks_ccs():
     out = rf.evaluate_regime(bridge=_bridge(
-        score=7.5, bias="long", trend_state="bull_trend"
+        score=7.5, bias="long", trend_state="bullish"
     ))
     assert out["active"] is True
     assert out["allow_ccs"] is False
     assert out["allow_pcs"] is True
-    assert out["trend_state"] == "bull_trend"
+    assert out["trend_state"] == "bullish"
 
 
-def test_bearish_score_and_bear_trend_blocks_pcs():
+def test_bearish_score_and_bearish_trend_blocks_pcs():
     out = rf.evaluate_regime(bridge=_bridge(
-        score=2.0, bias="short", trend_state="bear_trend"
+        score=2.0, bias="short", trend_state="bearish"
     ))
     assert out["allow_ccs"] is True
     assert out["allow_pcs"] is False
@@ -117,7 +120,7 @@ def test_neutral_allows_both():
 def test_sentiment_bullish_but_trend_bear_does_not_block():
     """Divergence: bridge says high score but trend is bearish → both sides allowed."""
     out = rf.evaluate_regime(bridge=_bridge(
-        score=7.5, bias="long", trend_state="bear_trend"
+        score=7.5, bias="long", trend_state="bearish"
     ))
     assert out["allow_ccs"] is True
     assert out["allow_pcs"] is True
@@ -134,10 +137,10 @@ def test_sentiment_alone_not_enough_when_trend_neutral():
 
 
 def test_low_trend_confidence_does_not_block_alone():
-    """A hard bull_trend with low confidence becomes a lean — needs sentiment agreement."""
+    """A hard bullish state with low confidence becomes a lean — needs sentiment agreement."""
     out = rf.evaluate_regime(bridge=_bridge(
         score=5.0, bias="neutral",
-        trend_state="bull_trend", trend_confidence=0.3,
+        trend_state="bullish", trend_confidence=0.3,
     ))
     assert out["allow_ccs"] is True
     assert out["allow_pcs"] is True
@@ -146,10 +149,10 @@ def test_low_trend_confidence_does_not_block_alone():
 def test_divergence_flag_suppresses_block_unless_hard_agreement():
     """When the bridge itself flags divergence, both hard votes are required.
 
-    Both votes here are hard (score 7.5 + bull_trend), so the block stands.
+    Both votes here are hard (score 7.5 + bullish), so the block stands.
     """
     out = rf.evaluate_regime(bridge=_bridge(
-        score=7.5, bias="long", trend_state="bull_trend",
+        score=7.5, bias="long", trend_state="bullish",
         divergence_flag="VIX vs Rotation disagreement",
     ))
     assert out["allow_ccs"] is False
@@ -157,7 +160,7 @@ def test_divergence_flag_suppresses_block_unless_hard_agreement():
 
 def test_filter_drops_ccs_in_bullish_regime():
     regime = rf.evaluate_regime(bridge=_bridge(
-        score=7.5, bias="long", trend_state="bull_trend"
+        score=7.5, bias="long", trend_state="bullish"
     ))
     sigs = [
         {"type": "PCS", "symbol": "SPY", "id": "p1"},
@@ -172,7 +175,7 @@ def test_filter_drops_ccs_in_bullish_regime():
 
 def test_filter_drops_pcs_in_bearish_regime():
     regime = rf.evaluate_regime(bridge=_bridge(
-        score=2.0, bias="short", trend_state="bear_trend"
+        score=2.0, bias="short", trend_state="bearish"
     ))
     sigs = [
         {"type": "PCS", "symbol": "SPY", "id": "p1"},
@@ -186,7 +189,7 @@ def test_filter_drops_pcs_in_bearish_regime():
 
 def test_per_symbol_re_enables_ccs_when_symbol_trend_bearish():
     regime = rf.evaluate_regime(
-        bridge=_bridge(score=7.5, bias="long", trend_state="bull_trend"),
+        bridge=_bridge(score=7.5, bias="long", trend_state="bullish"),
         technicals_by_symbol={
             "SPY": {"trend": "WEAKENING"},
             "QQQ": {"trend": "BULLISH"},
@@ -207,7 +210,7 @@ def test_per_symbol_re_enables_ccs_when_symbol_trend_bearish():
 def test_neutral_score_with_bullish_trend_does_not_tighten():
     """Neutral score (6.3) means both sides allowed even with a bullish symbol trend."""
     regime = rf.evaluate_regime(
-        bridge=_bridge(score=6.3, bias="neutral", trend_state="bull_trend"),
+        bridge=_bridge(score=6.3, bias="neutral", trend_state="bullish"),
         technicals_by_symbol={"SPY": {"trend": "BULLISH"}},
     )
     assert regime["allow_ccs"] is True
@@ -224,7 +227,7 @@ def test_filter_inactive_passes_signals_through():
 def test_current_bridge_snapshot_blocks_ccs():
     """Sanity check with the actual live bridge values (2026-05-22 snapshot)."""
     out = rf.evaluate_regime(bridge=_bridge(
-        score=6.84, bias="neutral", trend_state="bull_trend",
+        score=6.84, bias="neutral", trend_state="bullish",
         trend_confidence=1.0, aggregate_confidence=0.862,
         divergence_flag="DIVERGENCE: VIX Complex 9 vs Rotation 3 — low conviction",
     ))
@@ -232,4 +235,4 @@ def test_current_bridge_snapshot_blocks_ccs():
     assert out["active"] is True
     assert out["allow_ccs"] is False
     assert out["allow_pcs"] is True
-    assert out["trend_state"] == "bull_trend"
+    assert out["trend_state"] == "bullish"

@@ -19,7 +19,7 @@ import urllib.parse
 import logging
 from pathlib import Path
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, List
 
 import requests
 import pandas as pd
@@ -142,9 +142,9 @@ class SchwabClient:
         print("\n" + "="*60)
         print("SCHWAB API AUTHORIZATION REQUIRED")
         print("="*60)
-        print(f"\n1. Opening browser to authorize...")
-        print(f"2. Log in to your Schwab account")
-        print(f"3. After authorization, copy the FULL redirect URL")
+        print("\n1. Opening browser to authorize...")
+        print("2. Log in to your Schwab account")
+        print("3. After authorization, copy the FULL redirect URL")
         print(f"   (It will start with: {self.callback_url})")
         print("="*60 + "\n")
         

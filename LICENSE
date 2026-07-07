@@ -1,0 +1,24 @@
+Copyright (c) 2026 John Fernandes. All rights reserved.
+
+This software and its source code are proprietary and confidential. No license,
+express or implied, is granted to any person to use, copy, modify, merge,
+publish, distribute, sublicense, or sell copies of this software, in whole or in
+part, without the prior written permission of the copyright holder.
+
+It is a personal, single-user trading tool provided "AS IS", without warranty of
+any kind, express or implied, including but not limited to the warranties of
+merchantability, fitness for a particular purpose, and non-infringement. In no
+event shall the author be liable for any claim, damages, or other liability
+arising from, out of, or in connection with the software or its use — including,
+without limitation, any trading or financial losses.
+
+THIRD-PARTY NOTICES
+-------------------
+This project depends on Highcharts (bundled via `nicegui[highcharts]` /
+`nicegui-highcharts`). Highcharts is free for PERSONAL and NON-COMMERCIAL use
+only; COMMERCIAL use requires a separate paid license from Highsoft. This project
+is intended and licensed for personal, non-commercial use accordingly. Do not
+deploy it commercially without obtaining the appropriate Highcharts license.
+
+All other third-party dependencies are used under their respective open-source
+licenses (see requirements.txt / requirements.lock).

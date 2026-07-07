@@ -62,7 +62,8 @@ _SWING_FAMILIES = ("DIRECTIONAL", "VERTICAL", "NEUTRAL")
 
 
 def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
-               call_d_min, call_d_max, min_cr_fraction, families=None) -> dict:
+               call_d_min, call_d_max, min_cr_fraction, families=None,
+               market_state=None) -> dict:
     """Run the multi-strategy swing scan pipeline; returns ``{"signals", "view"}``.
 
     The pipeline builds NORMALIZED candidates across families
@@ -84,7 +85,12 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
       5. score + rank + assign ids.
 
     ``families`` (default all Phase-1 families) restricts which candidate families
-    are built. Two-client usage mirrors the page: ``_proxy.schwab_py_client`` is
+    are built. ``market_state`` (optional) is the live committed five-state
+    classifier label (bullish / lack_of_bullishness / neutral / lack_of_bearishness
+    / bearish); it is threaded to ``score_all`` for the low-weight family-ranking
+    tilt. ``None`` (absent/bad composite) applies no tilt. The caller (the ``swing``
+    command handler) reads it from ``cache:sentiment:composite`` — compute stays
+    proxy-only. Two-client usage mirrors the page: ``_proxy.schwab_py_client`` is
     the schwab-py-compatible client passed into the engine calls, while
     ``_proxy.schwab_client.get_quote(symbol)`` fetches the quote.
     ``min_cr_fraction`` arrives already as a fraction.
@@ -160,7 +166,7 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     if "NEUTRAL" in fams:
         signals += [ssn.adapt_iron_condor(ic) for ic in se.build_iron_condors(spreads)]
 
-    signals = ssc.score_all(signals, view, atm_iv, em_1sd)
+    signals = ssc.score_all(signals, view, atm_iv, em_1sd, market_state=market_state)
     assign_ids(signals, symbol)
     return {"signals": signals, "view": view}
 
@@ -596,6 +602,54 @@ def delete_closed_paper() -> None:
     import paper_trader
 
     paper_trader.delete_closed_trades()
+
+
+def expire_ledger_trades(now_ct=None) -> int:
+    """Auto-settle expired OPEN ledger trades (``trades.db``) at intrinsic value.
+
+    The Paper Trades ledger otherwise NEVER auto-closes on expiration
+    (``paper_trader.expire_paper_trade`` had no caller), so expired trades linger
+    OPEN indefinitely. This mirrors the account engine's expiration settlement for
+    the ledger: for each OPEN trade whose expiration is past — or is today and the
+    CT clock is at/after 15:00 (the shared ``paper_engine.should_settle`` gate, so
+    a 0-DTE spread is held to the close, not settled at the open) — settle at
+    intrinsic value vs a directly-fetched underlying and persist the EXPIRED row.
+
+    Defensive per-trade (a bad trade never aborts the pass); returns the count
+    settled. Runs on the 5-min manage tick + the manual "Run manage cycle" button.
+    ``now_ct`` defaults to the live CT clock; inject it for deterministic tests."""
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+
+    import paper_engine
+    import paper_trader
+
+    now_ct = now_ct or _dt.datetime.now(ZoneInfo("America/Chicago"))
+    today = now_ct.date().isoformat()
+    try:
+        trades = paper_trader.get_all_trades()
+    except Exception:
+        log.exception("expire_ledger_trades read degraded → no settlement")
+        return 0
+
+    settled = 0
+    for t in trades:
+        if (t.get("status") or "").upper() != "OPEN":
+            continue
+        if not paper_engine.should_settle(t.get("expiration"), today, now_ct):
+            continue
+        sp = paper_engine.underlying_last(_proxy.schwab_py_client, t.get("symbol"))
+        if sp is None:
+            log.warning("ledger EXPIRY DEFERRED %s: no underlying quote", t.get("symbol"))
+            continue
+        try:
+            closed = paper_trader.expire_paper_trade(dict(t), sp)
+            paper_trader.update_trade(t["trade_id"], closed)
+            settled += 1
+        except Exception:
+            log.exception("expire_ledger_trades: settle failed for %s", t.get("trade_id"))
+            continue
+    return settled
 
 
 def _analyze_detail(result) -> dict | None:
@@ -1382,6 +1436,67 @@ def gex_status_view(now=None) -> dict:
         return {"status_label": "Collector status unknown",
                 "status_color": "#666666", "last_scan": None,
                 "next_scan": None, "age_seconds": None}
+
+
+# Index symbols the flow-skew view reports (the sentiment service reads this as an
+# aggression input). Deliberately small + explicit (not the whole GEX universe).
+FLOW_SKEW_INDEX_SYMBOLS = ("$SPX", "SPY", "QQQ")
+
+
+def flow_skew_view() -> dict:
+    """Per-index 25-delta skew level + its CHANGE since the prior snapshot.
+
+    Reads the last two GEX snapshots per index symbol from ``gex_history.db``
+    (``gex_history_db.latest_skew_by_symbol``) and returns
+    ``{symbol: {"rr_25d", "rr_delta", "call_vol", "put_vol", "ts"}}`` where
+    ``rr_delta = latest.rr_25d − prior.rr_25d`` (None when either is missing or
+    there is only one snapshot). Symbols with no rows are omitted.
+
+    No strict contract (mirrors ``gex_status_view``): a small read-only dict the
+    sentiment service consumes defensively. Fully defensive — any failure (DB
+    locked/missing, import error) degrades to ``{}`` so the publish never raises.
+    ``gex_history_db`` is imported LAZILY per the service's cross-app collision
+    discipline (same as ``gex_status_view``/``collect_gex_snapshots``)."""
+    try:
+        import gex_history_db as gh
+    except Exception:
+        log.debug("flow_skew_view: gex_history_db import failed", exc_info=True)
+        return {}
+
+    try:
+        conn = gh.connect(read_only=True)
+    except Exception:
+        log.debug("flow_skew_view: DB connect failed", exc_info=True)
+        return {}
+
+    out: dict = {}
+    try:
+        for symbol in FLOW_SKEW_INDEX_SYMBOLS:
+            try:
+                rows = gh.latest_skew_by_symbol(conn, symbol, "gex")
+            except Exception:
+                log.debug("flow_skew_view: read failed for %s", symbol,
+                          exc_info=True)
+                continue
+            if not rows:
+                continue
+            ts, rr, call_vol, put_vol = rows[0][0], rows[0][1], rows[0][2], rows[0][3]
+            rr_delta = None
+            if len(rows) > 1:
+                prior_rr = rows[1][1]
+                if rr is not None and prior_rr is not None:
+                    rr_delta = rr - prior_rr
+            out[symbol] = {"rr_25d": rr, "rr_delta": rr_delta,
+                           "call_vol": call_vol, "put_vol": put_vol, "ts": ts}
+    except Exception:
+        log.debug("flow_skew_view: build failed", exc_info=True)
+        return {}
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            log.debug("flow_skew_view conn close failed", exc_info=True)
+    return out
 
 
 def build_gamma_read(symbol, spot, gex_summary, charm_summary, dex_summary,
@@ -3250,3 +3365,114 @@ def assess_open_positions() -> dict:
             "position_ids": tested_ids,
         },
     }
+
+
+# ── Scheduled "trades needing action" digest (10:00 / 13:00 / 15:00 CT) ───────
+# The manage cycle auto-closes at TAKE_PROFIT (>=50% of max profit captured) /
+# MONEY_STOP (loss <= 200% of credit); these thresholds flag positions
+# APPROACHING those bars so the thrice-daily push gives a heads-up FIRST.
+_NEAR_TARGET_PCT = 40.0    # 40–50% of max profit captured
+_NEAR_STOP_PCT = -150.0    # loss between 150% and 200% of credit (position-level)
+
+
+def _capture_pct(pos):
+    """Position-level P&L as a % of total entry credit, or None."""
+    try:
+        credit_total = float(pos.get("entry_credit") or 0) * float(pos.get("quantity") or 1) * 100.0
+        upnl = pos.get("unrealized_pnl")
+        if credit_total <= 0 or upnl is None:
+            return None
+        return float(upnl) / credit_total * 100.0
+    except (TypeError, ValueError):
+        return None
+
+
+def collect_action_items(now_ct=None) -> dict:
+    """Gather trades needing a human decision for the scheduled 10/1/3 CT push.
+
+    Four categories (each independently guarded — a category failure never aborts
+    the others; never raises):
+
+    * ``captured_action`` — open captured signals whose live recommendation is
+      CUT or TAKE_PROFIT (a fresh ``reprice_captured`` so the recs are current);
+    * ``expiring_today`` — open ledger AND account trades expiring today (0-DTE);
+    * ``at_risk`` — account positions the rescue engine tags tested/critical
+      (short strike breached or near);
+    * ``account_near`` — account positions approaching (not yet at) their
+      auto-close stop or profit target.
+
+    Returns ``{section: [ {symbol, strategy, ...}, ... ]}``. ``now_ct`` defaults to
+    the live CT clock; inject for deterministic tests."""
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+
+    now_ct = now_ct or _dt.datetime.now(ZoneInfo("America/Chicago"))
+    today = now_ct.date().isoformat()
+    out = {"captured_action": [], "expiring_today": [], "at_risk": [], "account_near": []}
+
+    # 1. Captured signals recommending action (fresh reprice for current recs).
+    try:
+        rep = reprice_captured()
+        for s in rep.get("signals", []) or []:
+            rec = (s.get("recommendation") or "").upper()
+            if rec in ("CUT", "TAKE_PROFIT"):
+                out["captured_action"].append({
+                    "symbol": s.get("symbol"), "strategy": s.get("strategy"),
+                    "recommendation": rec, "expiration": s.get("expiration"),
+                    "unrealized_pnl": s.get("unrealized_pnl"),
+                    "reason": s.get("recommendation_reason")})
+    except Exception:
+        log.exception("collect_action_items: captured pass degraded")
+
+    positions = _load_open_positions()   # account book, read once, reused below
+
+    # 2. Expiring today (0-DTE) still open — ledger book …
+    try:
+        import paper_trader
+        for t in paper_trader.get_all_trades():
+            if (t.get("status") or "").upper() == "OPEN" and str(t.get("expiration"))[:10] == today:
+                out["expiring_today"].append({
+                    "book": "ledger", "symbol": t.get("symbol"),
+                    "strategy": t.get("strategy"), "expiration": t.get("expiration"),
+                    "unrealized_pnl": t.get("unrealized_pnl")})
+    except Exception:
+        log.exception("collect_action_items: ledger-expiring pass degraded")
+    # … and account book.
+    for p in positions or []:
+        try:
+            if str(p.get("expiration"))[:10] == today:
+                out["expiring_today"].append({
+                    "book": "account", "symbol": p.get("symbol"),
+                    "strategy": p.get("strategy"), "expiration": p.get("expiration"),
+                    "unrealized_pnl": p.get("unrealized_pnl")})
+        except Exception:
+            continue
+
+    # 3 & 4. At-risk (rescue tested/critical) + near stop/target — account book.
+    for p in positions or []:
+        try:
+            mark = {"current_underlying": p.get("current_underlying"),
+                    "current_value": p.get("current_value"),
+                    "unrealized_pnl": p.get("unrealized_pnl"),
+                    "current_short_delta": p.get("current_short_delta"),
+                    "dte": _rescue_dte(p.get("expiration"))}
+            risk = _assess_position_risk(p, mark, gex=None, regime=None) or {}
+            if (risk.get("state") or "").lower() in ("tested", "critical"):
+                out["at_risk"].append({
+                    "symbol": p.get("symbol"), "strategy": p.get("strategy"),
+                    "rescue_state": (risk.get("state") or "").lower(),
+                    "heat": risk.get("heat"), "unrealized_pnl": p.get("unrealized_pnl")})
+            cap = _capture_pct(p)
+            if cap is not None:
+                if _NEAR_TARGET_PCT <= cap < 50.0:
+                    out["account_near"].append({
+                        "symbol": p.get("symbol"), "strategy": p.get("strategy"),
+                        "note": f"{cap:.0f}% of target"})
+                elif -200.0 < cap <= _NEAR_STOP_PCT:
+                    out["account_near"].append({
+                        "symbol": p.get("symbol"), "strategy": p.get("strategy"),
+                        "note": f"loss {abs(cap):.0f}% of credit (near stop)"})
+        except Exception:
+            continue
+
+    return out

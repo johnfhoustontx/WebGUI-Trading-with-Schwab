@@ -126,6 +126,64 @@ def _clamp(x, lo=0.0, hi=100.0):
 
 
 #############################################
+# Task 1 — market-state family tilt
+#############################################
+
+# A LOW-WEIGHT, bounded ranking nudge from the five-state market classifier
+# (services publish `trend_regime.state`). A validation study found the edge is
+# MODEST and CONCENTRATED IN THE TWO MIDDLE STATES (lack_of_bullishness /
+# lack_of_bearishness); the extremes are unreliable, so their leans are small.
+# This nudges family RANKING only — it is applied to `composite_score` AFTER the
+# hard-gated grade is decided, so it can NEVER flip a gate (a Weak trade stays
+# Weak). Values are per-family points in the [-STATE_TILT_MAX, +STATE_TILT_MAX]
+# band; a family absent from a state's row contributes 0.
+STATE_TILT_MAX = 6.0
+
+_STATE_TILT = {
+    "neutral": {
+        "IC": 3, "PCS": 3, "CCS": 3,
+        "LONG_CALL": -2, "LONG_PUT": -2,
+    },
+    "lack_of_bearishness": {  # resilient, puts undefended -> favor put credit
+        "PCS": 5, "BULL_CALL": 2,
+        "LONG_PUT": -3, "BEAR_PUT": -2,
+    },
+    "lack_of_bullishness": {  # exhaustion at highs -> favor call credit
+        "CCS": 5, "BEAR_PUT": 2,
+        "LONG_CALL": -4, "BULL_CALL": -3,
+    },
+    "bullish": {  # small — the exhaustion caveat keeps the extreme modest
+        "LONG_CALL": 2, "BULL_CALL": 2, "PCS": 2, "CCS": -2,
+    },
+    "bearish": {  # defensive; rarely fires
+        "LONG_PUT": 3, "BEAR_PUT": 3, "PCS": -3, "CCS": 1,
+    },
+}
+
+
+def state_family_tilt(state, structure_type):
+    """Bounded family-ranking tilt for a market state + structure type.
+
+    Looks up ``_STATE_TILT[state][family_key]`` where ``family_key`` is the
+    signal's structure ``type`` (uppercased; ``IRON_CONDOR`` folds to ``IC``),
+    clamps the result to +/-``STATE_TILT_MAX``, and returns ``0.0`` for an
+    unknown/None state, an unknown/None type, or a family absent from the row.
+    """
+    if not state or not structure_type:
+        return 0.0
+    row = _STATE_TILT.get(str(state))
+    if not row:
+        return 0.0
+    key = str(structure_type).upper()
+    if key == "IRON_CONDOR":
+        key = "IC"
+    pts = row.get(key)
+    if not isinstance(pts, (int, float)):
+        return 0.0
+    return float(_clamp(pts, -STATE_TILT_MAX, STATE_TILT_MAX))
+
+
+#############################################
 # Task 8 — infer_market_view
 #############################################
 
@@ -464,13 +522,20 @@ def evaluate_gates(signal):
 # Task 10 — score_strategy / score_all
 #############################################
 
-def score_strategy(signal, view, atm_iv, em_1sd):
+def score_strategy(signal, view, atm_iv, em_1sd, market_state=None):
     """Score one candidate signal in place and return it.
 
     Adds: fit_score, quality_score, composite_score, grade, grade_reason,
-    factor_scores. The composite is quality-DOMINANT (0.7*quality + 0.3*fit) and
-    the grade is gated by the per-family hard gates (a gate-min failure caps the
-    composite at GATE_FAIL_CAP + forces Weak with a 'Fails: ...' reason).
+    factor_scores, state_tilt. The composite is quality-DOMINANT
+    (0.7*quality + 0.3*fit) and the grade is gated by the per-family hard gates
+    (a gate-min failure caps the composite at GATE_FAIL_CAP + forces Weak with a
+    'Fails: ...' reason).
+
+    ``market_state`` (optional) is the five-state classifier label; when given, a
+    LOW-WEIGHT, bounded ``state_family_tilt`` is added to ``composite_score``
+    AFTER the grade is decided — a pure ranking nudge that can NEVER flip a
+    hard-gated grade (a Weak trade stays Weak).
+
     Defensive: a bad signal gets a neutral/0 composite + 'unscored' reason
     rather than raising.
     """
@@ -550,7 +615,14 @@ def score_strategy(signal, view, atm_iv, em_1sd):
             "grade": grade,
             "grade_reason": grade_reason,
             "factor_scores": factor_scores,
+            "state_tilt": 0.0,
         }
+
+    # Market-state family tilt — a LOW-WEIGHT ranking nudge applied AFTER the
+    # grade is decided, so it can NEVER flip a hard-gated grade (a Weak trade
+    # stays Weak). 0.0 when market_state/type is unknown or None.
+    tilt = state_family_tilt(market_state, signal.get("type"))
+    composite = _clamp(composite + tilt, 0.0, 100.0)
 
     signal["fit_score"] = round(fit_score, 1)
     signal["quality_score"] = round(quality_score, 1)
@@ -558,17 +630,19 @@ def score_strategy(signal, view, atm_iv, em_1sd):
     signal["grade"] = grade
     signal["grade_reason"] = grade_reason
     signal["factor_scores"] = factor_scores
+    signal["state_tilt"] = tilt
     return signal
 
 
-def score_all(signals, view, atm_iv, em_1sd):
+def score_all(signals, view, atm_iv, em_1sd, market_state=None):
     """Score each signal (neutralizing on exception) and return sorted by
-    composite_score descending.
+    composite_score descending. ``market_state`` is threaded to each
+    ``score_strategy`` for the low-weight market-state family tilt.
     """
     scored = []
     for sig in signals or []:
         try:
-            scored.append(score_strategy(sig, view, atm_iv, em_1sd))
+            scored.append(score_strategy(sig, view, atm_iv, em_1sd, market_state=market_state))
         except Exception:
             log.exception("score_all: skipping unscorable signal")
             if isinstance(sig, dict):

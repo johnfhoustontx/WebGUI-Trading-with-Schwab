@@ -20,6 +20,7 @@ WEBGUI          = REPO_ROOT / "webgui"
 BRIDGE_PATH = SHARED / "sentiment_bridge.json"
 APPSETTINGS = SHARED / "appsettings.json"
 TOKENS      = SHARED / "tokens.json"
+NOTIFICATIONS_CONFIG = SHARED / "notifications.json"
 
 # Dedicated paper-account DB for the autonomous Driver — a SEPARATE file from the
 # manual paper_account.db so the driver's book is fully isolated (zero schema change;
@@ -29,6 +30,22 @@ DRIVER_PAPER_DB = OPTIONS_SCANNER / "data" / "paper_account_driver.db"
 # Intraday 2-min sentiment + trend series for the /sentiment "Daily Sentiment &
 # Trend" graphs. Rolling last 5 trading days; written by sentiment_svc each refresh.
 SENTIMENT_INTRADAY_DB = SENTIMENT / "data" / "sentiment_intraday.db"
+
+# Daily cap-weighted cross-sector Put/Call ratio for the 5-trading-day
+# options-flow-direction delta. One row per LOCAL calendar date; written by
+# sentiment_svc each RTH refresh.
+SECTOR_PCR_HISTORY_DB = SENTIMENT / "data" / "sector_pcr.db"
+
+# Daily committed market-state (the five-state classifier's RTH output) recorded
+# for later validation/backtesting. One row per LOCAL calendar date (today's row
+# REPLACE-updates each RTH recompute); written by sentiment_svc.
+MARKET_STATE_HISTORY_DB = SENTIMENT / "data" / "market_state.db"
+
+# Offline five-state-classifier validation study outputs (markdown report + JSON
+# artifact) written by sentiment-dashboard/validate_market_state.py. Run manually;
+# sentiment-dashboard/data/ is gitignored, mirroring SWING_MODEL_REPORT.
+MARKET_STATE_VALIDATION_REPORT = SENTIMENT / "data" / "market_state_validation.md"
+MARKET_STATE_VALIDATION_JSON   = SENTIMENT / "data" / "market_state_validation.json"
 
 _ports = tomllib.loads((REPO_ROOT / "config" / "ports.toml").read_text())
 PROXY_PORT       = _ports["proxy"]

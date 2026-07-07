@@ -30,19 +30,43 @@ others. Passed to the scaffold as ``make_app(scheduler=loop)``.
 **Catch-up semantics (single-user):** ``last_run_date`` lives in memory, so if
 the service starts after 09:28 on a trading day it fires once immediately
 (``last_run_date=None`` → due) so the page has a fresh pending approval; a
-restart later the same day re-fires and overwrites the cached approval. The
-market-holiday short-circuit lives in ``compute.run_morning`` (it returns a
-``no_trade`` payload), so the gate here only checks weekday + time. The
-autonomous ``last_slot`` is the analogous in-memory de-dupe for checkpoints.
+restart later the same day re-fires and overwrites the cached approval. Both the
+morning and autonomous gates skip weekends AND NYSE market holidays (``_HOLIDAYS``
++ ``_is_trading_day``), so no cycle — and no Claude API call — fires on a day the
+market is closed (``compute.run_morning`` ALSO returns a ``no_trade`` payload on a
+holiday as defence-in-depth). The autonomous ``last_slot`` is the analogous
+in-memory de-dupe for checkpoints.
 """
 import asyncio
-from datetime import datetime
+from datetime import date as _date, datetime
 from zoneinfo import ZoneInfo
 
 from services.driver_svc import handlers, settings as _settings
 
 _ET = ZoneInfo("America/New_York")
 RUN_HOUR, RUN_MIN = 9, 28  # mirrors config.AGENT_RUN_HOUR / AGENT_RUN_MIN
+
+# US market holidays 2026–2027 (keep in sync with the other service schedulers —
+# options_svc/scheduler.py, sentiment_svc, options-scanner/scanner.py Config.HOLIDAYS,
+# and webgui/alerts.py). Includes Juneteenth; observed dates per NYSE (Sat→prior Fri,
+# Sun→following Mon). Update yearly. The autonomous checkpoint + legacy morning gates
+# below both treat a weekday holiday like a weekend so no cycle (and no Claude API
+# call) fires on a day the market is closed.
+_HOLIDAYS = {
+    # 2026
+    _date(2026, 1, 1), _date(2026, 1, 19), _date(2026, 2, 16), _date(2026, 4, 3),
+    _date(2026, 5, 25), _date(2026, 6, 19), _date(2026, 7, 3), _date(2026, 9, 7),
+    _date(2026, 11, 26), _date(2026, 12, 25),
+    # 2027
+    _date(2027, 1, 1), _date(2027, 1, 18), _date(2027, 2, 15), _date(2027, 3, 26),
+    _date(2027, 5, 31), _date(2027, 6, 18), _date(2027, 7, 5), _date(2027, 9, 6),
+    _date(2027, 11, 25), _date(2027, 12, 24),
+}
+
+
+def _is_trading_day(now) -> bool:
+    """True on a weekday that is not an NYSE full-closure holiday (``now`` is ET-aware)."""
+    return now.weekday() < 5 and now.date() not in _HOLIDAYS
 
 # Autonomous ENTRY-window bounds for the checkpoint clock (ET, h:m tuples).
 # Deliberately INSIDE regular trading hours, aligned to the daily playbook:
@@ -62,13 +86,13 @@ PERF_REFRESH_SEC = 300        # recompute the perf view ~every 5 min
 
 
 def morning_due(now, last_run_date):
-    """(should_run, run_date): True at most once per weekday, at/after 09:28 ET.
+    """(should_run, run_date): True at most once per trading day, at/after 09:28 ET.
 
     ``now`` is an ET-aware datetime; ``last_run_date`` is the ISO date string of
     the last fire (or None). When not yet due, the passed-in ``last_run_date`` is
-    returned unchanged.
+    returned unchanged. Never fires on a weekend or NYSE market holiday.
     """
-    if now.weekday() >= 5:  # Sat/Sun
+    if not _is_trading_day(now):  # weekend or market holiday
         return (False, last_run_date)
     if (now.hour, now.minute) < (RUN_HOUR, RUN_MIN):
         return (False, last_run_date)
@@ -80,16 +104,18 @@ def checkpoint_due(now, last_slot):
     """(due, slot_key): True at most once per ``settings.CHECKPOINT_MIN`` slot in RTH.
 
     ``now`` is an ET-aware datetime; ``last_slot`` is the date-prefixed key of the
-    last checkpoint that fired (or None). Due only on weekdays inside the entry
-    window (09:45–15:30 ET) — the open-bell 09:30 slot is intentionally skipped
-    (the first fire-able slot is 09:45) and a time at/after 15:30 never fires (no
-    new entries into the close, so the last entry decision is the 15:00 ET slot).
-    The slot key embeds the date
+    last checkpoint that fired (or None). Due only on trading days (weekday and not
+    an NYSE holiday) inside the entry window (09:45–15:30 ET) — the open-bell 09:30
+    slot is intentionally skipped (the first fire-able slot is 09:45) and a time
+    at/after 15:30 never fires (no new entries into the close, so the last entry
+    decision is the 15:00 ET slot). The slot key embeds the date
     (``"YYYY-MM-DD:<slot-index>"``) so the same intraday slot index on the next
     trading day is a fresh key. When not due, the passed-in ``last_slot`` is
-    returned unchanged (so the loop's state survives an off-hours poll).
+    returned unchanged (so the loop's state survives an off-hours poll). Firing is
+    gated to trading days so no autonomous cycle (hence no Claude API call) runs on
+    a market holiday, even with autonomy enabled.
     """
-    if now.weekday() >= 5:  # Sat/Sun
+    if not _is_trading_day(now):  # weekend or market holiday
         return (False, last_slot)
     hm = (now.hour, now.minute)
     if hm < RTH_START or hm >= RTH_END:

@@ -61,6 +61,24 @@ Weights sum to 100%.
 | Rotation | 15% | `scoring/rotation.py` | Blended day/3d/week cyclical-vs-defensive (40/40/20). |
 | Sector Performance | 25% | `scoring/sector_perf.py` | S&P cap-weighted daily move across 11 GICS sectors. Cap weights in `sectors_ref.SP500_SECTOR_WEIGHTS`. |
 
+## Five-state market classifier (2026-07-07) — the intraday / regime trend
+
+The bridge `trend_regime.state` + the webgui **Today** Market-Trend label are now driven by a
+**two-axis direction × aggression** classifier (Bullish / Lack of Bullishness / Neutral / Lack of
+Bearishness / Bearish), NOT the old `trend_regime` bands (which are RETAINED only for the 30-Day
+structural gauge). New PURE `scoring/` modules: `market_state.py` (the 9-cell grid +
+STATE_LABELS/DESCRIPTIONS), `aggression.py` (signed confidence-weighted blend), `effort.py`
+(volume-effort), `session_structure.py`, `rejection_defense.py`, `profile_shape.py`,
+`order_flow.py` (Lee-Ready aggressor quote rule + put/call option pressure), and
+`daily_direction.py` (a daily direction-score proxy + reconstruction/IC helpers for the offline
+validation). The 0–100 DIRECTION axis stays `intraday_trend.py` (its `score_to_state` banding is
+kept for the 30-day gauge). The classifier is assembled + the aggression inputs read in
+`services/sentiment_svc/compute.compute_intraday_trend`; state-transition phone alerts in
+`services/sentiment_svc/state_alert.py` (via `shared/notify/`). Offline validation:
+`validate_market_state.py` (run MANUALLY) → `data/market_state_validation.{md,json}`.
+**The full design, data flow, and the honest backtest result live in the root `CLAUDE.md`
+five-state entry** — read that first.
+
 **Credit Pulse removed from the composite (v4.3).** Its 5% was reallocated to
 Put/Call (15% → 20%). `scoring/credit_pulse.py` (HYG/IEI z-score 60% + HYG vs
 50d MA 40%, 60d cache) and `history_backfill.py` still **compute** a

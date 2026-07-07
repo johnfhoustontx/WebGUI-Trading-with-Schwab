@@ -21,11 +21,16 @@ widgets, a Refresh button that enqueues a ``cmd:sentiment`` command, and a
 fetch-free version-poll ``ui.timer`` that repaints when the bus cache version
 changes.
 """
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 import bus_client
 from pages.gauge import gauge_figure  # noqa: F401  (re-export; used by render)
 from pages.options import theme
 from pages.options.theme import BTN_3D, TILE_3D
-from pages.ui_guard import guard, guard_async
+from pages.ui_guard import guard
+
+_CT = ZoneInfo("America/Chicago")  # trading session clock for the intraday graphs
 
 CLR_GREEN, CLR_RED = theme.hex_of("green"), theme.hex_of("red")
 CLR_YELLOW, CLR_FLAT, CLR_CYAN = theme.hex_of("yellow"), theme.hex_of("flat"), theme.hex_of("cyan")
@@ -98,9 +103,16 @@ def _clamp(v, lo, hi):
     return max(lo, min(hi, v))
 
 
-# Short dial captions (the full label shows beneath the gauge).
-_TREND_SHORT = {"bull_trend": "BULL", "pullback_in_bull": "PULLBACK",
-                "range": "RANGE", "bear_rally": "BEAR RALLY", "bear_trend": "BEAR"}
+# Short dial captions (the full label shows beneath the gauge). Covers BOTH the
+# new five-state (direction x aggression) vocab published for the Today gauge AND
+# the old trend-band vocab the 30-day structural gauge still uses.
+_TREND_SHORT = {
+    # new five-state vocab (Today gauge)
+    "bullish": "Bull", "lack_of_bullishness": "Weak Bull", "neutral": "Neutral",
+    "lack_of_bearishness": "Resilient", "bearish": "Bear",
+    # old trend-band vocab (30-day structural gauge)
+    "bull_trend": "BULL", "pullback_in_bull": "PULLBACK",
+    "range": "RANGE", "bear_rally": "BEAR RALLY", "bear_trend": "BEAR"}
 
 # Market Trend sub-score display metadata (name + weight). Mirrors the service's
 # TREND_WEIGHTS — kept local so the page imports no engine (3-tier rule).
@@ -146,13 +158,28 @@ def bias_text_class(bias):
     return _HEX_TO_TXT[bias_color(bias)]
 
 
+# State -> text-color class, covering BOTH the new five-state vocab (Today gauge)
+# and the old trend-band vocab (30-day structural gauge). Unlisted -> amber.
+_TREND_STATE_CLASS = {
+    # new five-state vocab
+    "bullish": TXT_G, "lack_of_bearishness": TXT_G,
+    "bearish": TXT_R,
+    "lack_of_bullishness": TXT_Y, "neutral": TXT_Y,
+    # old trend-band vocab
+    "bull_trend": TXT_G, "pullback_in_bull": TXT_G,
+    "bear_rally": TXT_R, "bear_trend": TXT_R,
+    "range": TXT_Y}
+
+
 def trend_text_class(committed):
-    """Tailwind text class for a committed trend state (mirrors _apply's mapping)."""
-    if committed in {"bull_trend", "pullback_in_bull"}:
-        return TXT_G
-    if committed in {"bear_rally", "bear_trend"}:
-        return TXT_R
-    return TXT_Y
+    """Tailwind text class for a committed trend state (both vocabularies)."""
+    return _TREND_STATE_CLASS.get(committed, TXT_Y)
+
+
+def market_state_evidence_rows(trend):
+    """Evidence strings explaining WHY the new five-state trend was chosen
+    (e.g. "direction 75/100", "aggression -0.37"). Defensive: [] when absent."""
+    return (trend or {}).get("evidence") or []
 
 
 def rotation_text_class(color):
@@ -187,32 +214,76 @@ def sentiment_30d_avg(snaps):
     return round(sum(scores) / len(scores), 2) if scores else 0.0
 
 
-def _intraday_figure(points, *, value_key, y_max, y_title, zones):
+# Break the intraday line where consecutive RTH points are more than this far
+# apart (ms) — i.e. across the overnight gap from the prior day's ~15:00 CT close
+# to the next day's ~08:30 CT open. 4h is safely above any intra-session recording
+# gap and well below the ~17.5h overnight, so each trading day renders as its own
+# segment with a small gap between days.
+_INTRADAY_GAP_MS = 4 * 60 * 60 * 1000
+
+
+def _intraday_figure(points, *, value_key, y_max, y_title, zones, scale=1.0):
     """Shared Highcharts options for a 2-min intraday value series, colorized by
-    value via series.zones. Ordinal x-axis collapses overnight session gaps; the
-    date lives in the tooltip header (datetime-crosshair-label epoch-ms gotcha)."""
+    value via series.zones. RTH-only data (the service records only 08:30–15:00 CT).
+    ``scale`` rescales the value (e.g. 0.1 shows the 0-100 trend on a 0-10 axis).
+
+    Renders on a **synthetic integer-index (category) x-axis**, NOT a datetime axis:
+    each RTH point gets the next sequential slot, so trading days pack CONTIGUOUSLY
+    with only a 1-slot gap between them — no overnight/weekend dead space. A date
+    label sits at each day boundary (``tickPositions`` + a category per slot), and the
+    real Central-Time date+time lives in each point's ``name`` (shown in the tooltip).
+    A NULL slot between days breaks the line into per-day segments.
+
+    Why not the obvious approaches: a Highstock stockChart's ordinal axis collapses
+    the dead space natively but its ``chart.update()`` throws in the stock module,
+    FREEZING in-place updates (an open page never draws the current day); broken-axis
+    (``xAxis.breaks``) collapses the gap but renders zero ticks (no labels). A plain
+    category axis updates reliably AND has no dead space."""
     pts = points or []
-    data = [[int(_safe_float(p.get("ts"))) * 1000, _safe_float(p.get(value_key))] for p in pts]
+    # Build the series + the per-slot category labels together. Every slot (real point
+    # OR the null gap between days) advances the index by 1, so days are contiguous.
+    data, categories, tick_positions = [], [], []
+    idx = 0
+    prev_ms = None
+    prev_date = None
+    for p in pts:
+        ms = int(_safe_float(p.get("ts"))) * 1000
+        ct = datetime.fromtimestamp(ms / 1000, _CT)
+        day = ct.date()
+        if prev_ms is not None and (ms - prev_ms) > _INTRADAY_GAP_MS:
+            # A null slot breaks the line + leaves a small gap between day segments.
+            data.append({"x": idx, "y": None})
+            categories.append("")
+            idx += 1
+        if day != prev_date:                       # first slot of a new day → labeled tick
+            tick_positions.append(idx)
+            categories.append(f"{ct:%b} {ct.day}")   # e.g. "Jul 6"
+            prev_date = day
+        else:
+            categories.append("")
+        data.append({"x": idx, "y": _safe_float(p.get(value_key)) * scale,
+                     "name": f"{ct:%b} {ct.day}, {ct:%H:%M}"})   # tooltip date+time (CT)
+        idx += 1
+        prev_ms = ms
     axis_label = {"style": {"color": "#bdbdbd"}}
     return {
         "chart": {"type": "line", "backgroundColor": "transparent",
                   "height": 200, "spacing": [8, 12, 8, 0]},
-        # Recorded ts are UTC epoch; Highcharts datetime axes default to UTC, so
-        # render the axis + tooltip in Central Time (the trading session's clock).
-        "time": {"timezone": "America/Chicago"},
         "title": {"text": None},
         "credits": {"enabled": False},
         "accessibility": {"enabled": False},
         "legend": {"enabled": False},
-        "xAxis": {"type": "datetime", "ordinal": True,
+        # Category axis: contiguous slots (no dead space); ticks/labels only at the
+        # day boundaries. Date+time per point is carried in point.name (tooltip).
+        "xAxis": {"categories": categories, "tickPositions": tick_positions,
                   "lineColor": "rgba(255,255,255,0.15)",
                   "gridLineColor": "rgba(255,255,255,0.06)", "labels": axis_label,
                   "crosshair": {"label": {"enabled": False}}},
         "yAxis": {"min": 0, "max": y_max,
                   "title": {"text": y_title, "style": {"color": "#bdbdbd"}},
                   "gridLineColor": "rgba(255,255,255,0.06)", "labels": axis_label},
-        "tooltip": {"xDateFormat": "%b %e, %H:%M",
-                    "pointFormat": y_title + ": <b>{point.y:.2f}</b>"},
+        "tooltip": {"headerFormat": "",
+                    "pointFormat": "{point.name}<br>" + y_title + ": <b>{point.y:.2f}</b>"},
         "series": [{
             "name": y_title, "type": "line", "data": data,
             "lineWidth": 2, "zoneAxis": "y", "zones": zones,
@@ -231,12 +302,14 @@ def build_sentiment_intraday_figure(points):
 
 
 def build_trend_intraday_figure(points):
-    """Daily Market Trend (0-100), colorized by the 30/70 range boundaries."""
-    zones = [{"value": 30, "color": CLR_RED},
-             {"value": 70, "color": CLR_YELLOW},
+    """Daily Market Trend on a 0-10 scale (same as sentiment) — the stored 0-100
+    trend is rescaled ×0.1; colorized by the 3/7 range boundaries (the 30/70
+    trend-state cuts on the 0-10 scale)."""
+    zones = [{"value": 3, "color": CLR_RED},
+             {"value": 7, "color": CLR_YELLOW},
              {"color": CLR_GREEN}]
-    return _intraday_figure(points, value_key="trend", y_max=100,
-                            y_title="Trend", zones=zones)
+    return _intraday_figure(points, value_key="trend", y_max=10,
+                            y_title="Trend", zones=zones, scale=0.1)
 
 
 def pct_color(pct):
@@ -507,7 +580,6 @@ def _fmt_time(value):
     if dt is None:
         return ""
     try:
-        from datetime import timezone
         if dt.tzinfo is not None:
             dt = dt.astimezone(tz=None).replace(tzinfo=None)
         return dt.strftime("%H:%M:%S")
@@ -629,6 +701,9 @@ def render():
     with ui.expansion("Daily Sentiment & Trend", icon="show_chart",
                       value=False).classes("w-full") as daily_exp:
         ui.label("Daily Market Sentiment").classes("text-subtitle2 q-mt-sm")
+        # Plain chart (NOT a stockChart): a stockChart's chart.update() throws in the
+        # stock module on every in-place update, freezing an open page on the data it
+        # first rendered (the current day never appears) — see _intraday_figure.
         sent_intraday_plot = ui.highchart(
             build_sentiment_intraday_figure([])).classes("w-full")
         ui.label("Daily Market Trend").classes("text-subtitle2 q-mt-md")
@@ -769,6 +844,12 @@ def render():
                 for r in trend_subscore_rows(trend):
                     ui.label(f"{r['name']} ({r['weight']}): {r['score']}  "
                              f"conf {r['conf']}").classes("text-sm")
+                evidence = market_state_evidence_rows(trend)
+                if evidence:
+                    ui.separator().classes("q-my-xs")
+                    ui.label("Why").classes("text-bold text-sm")
+                    for line in evidence:
+                        ui.label(str(line)).classes("text-sm")
         else:
             trend_gauge_box.options = gauge_figure(50.0, "—")
             trend_gauge_box.update()

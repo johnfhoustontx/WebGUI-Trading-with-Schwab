@@ -12,19 +12,90 @@ from schwab_proxy import (
 # NORMALIZER
 #############################################
 
+def _expected(symbol, **over):
+    """Build a full normalized dict: every field None unless overridden."""
+    base = {
+        "symbol": symbol,
+        "last": None, "net_change": None,
+        "bid": None, "ask": None,
+        "bid_size": None, "ask_size": None,
+        "last_size": None, "total_volume": None,
+    }
+    base.update(over)
+    return base
+
+
 def test_normalize_basic_numeric_keys():
     # 3 = LAST_PRICE, 18 = NET_CHANGE per schwab-py LevelOneEquityFields.
     item = {"key": "AAPL", "3": 150.25, "18": 1.10}
-    assert _normalize_level1_equity(item) == {
-        "symbol": "AAPL", "last": 150.25, "net_change": 1.10,
+    assert _normalize_level1_equity(item) == _expected(
+        "AAPL", last=150.25, net_change=1.10,
+    )
+
+
+def test_normalize_all_fields_populated():
+    # Full LEVELONE_EQUITIES numeric field map:
+    # 1=BID, 2=ASK, 3=LAST, 4=BID_SIZE, 5=ASK_SIZE, 8=TOTAL_VOLUME,
+    # 9=LAST_SIZE, 18=NET_CHANGE.
+    item = {
+        "key": "AAPL",
+        "1": 150.10, "2": 150.30, "3": 150.25,
+        "4": 200.0, "5": 300.0, "8": 1234567.0,
+        "9": 50.0, "18": 1.10,
     }
+    assert _normalize_level1_equity(item) == _expected(
+        "AAPL", last=150.25, net_change=1.10,
+        bid=150.10, ask=150.30, bid_size=200.0, ask_size=300.0,
+        last_size=50.0, total_volume=1234567.0,
+    )
+
+
+def test_normalize_all_fields_populated_by_enum_name():
+    item = {
+        "key": "AAPL",
+        "BID_PRICE": 150.10, "ASK_PRICE": 150.30, "LAST_PRICE": 150.25,
+        "BID_SIZE": 200.0, "ASK_SIZE": 300.0, "TOTAL_VOLUME": 1234567.0,
+        "LAST_SIZE": 50.0, "NET_CHANGE": 1.10,
+    }
+    assert _normalize_level1_equity(item) == _expected(
+        "AAPL", last=150.25, net_change=1.10,
+        bid=150.10, ask=150.30, bid_size=200.0, ask_size=300.0,
+        last_size=50.0, total_volume=1234567.0,
+    )
+
+
+def test_normalize_regular_market_fallback_for_last_and_last_size():
+    # During RTH Schwab may populate the regular-market variants instead of the
+    # base LAST_PRICE(3)/LAST_SIZE(9): REGULAR_MARKET_LAST_PRICE(29),
+    # REGULAR_MARKET_LAST_SIZE(30). The normalizer falls back to them.
+    item = {
+        "key": "AAPL",
+        "REGULAR_MARKET_LAST_PRICE": 151.00, "29": 151.00,
+        "REGULAR_MARKET_LAST_SIZE": 42.0,
+    }
+    out = _normalize_level1_equity(item)
+    assert out["last"] == 151.00
+    assert out["last_size"] == 42.0
+
+
+def test_normalize_regular_market_fallback_by_numeric_key():
+    item = {"key": "AAPL", "29": 151.00, "30": 42.0}
+    out = _normalize_level1_equity(item)
+    assert out["last"] == 151.00
+    assert out["last_size"] == 42.0
+
+
+def test_normalize_base_last_wins_over_regular_market():
+    # When both the base and regular-market fields are present, the base wins.
+    item = {"key": "AAPL", "3": 150.25, "29": 151.00, "9": 50.0, "30": 42.0}
+    out = _normalize_level1_equity(item)
+    assert out["last"] == 150.25
+    assert out["last_size"] == 50.0
 
 
 def test_normalize_missing_fields_are_none():
     item = {"key": "XLK"}
-    assert _normalize_level1_equity(item) == {
-        "symbol": "XLK", "last": None, "net_change": None,
-    }
+    assert _normalize_level1_equity(item) == _expected("XLK")
 
 
 def test_normalize_missing_key_yields_empty_symbol():
@@ -37,9 +108,9 @@ def test_normalize_missing_key_yields_empty_symbol():
 
 def test_normalize_ignores_unknown_fields():
     item = {"key": "SPY", "3": 500.0, "18": -2.5, "7": "garbage", "foo": "bar"}
-    assert _normalize_level1_equity(item) == {
-        "symbol": "SPY", "last": 500.0, "net_change": -2.5,
-    }
+    assert _normalize_level1_equity(item) == _expected(
+        "SPY", last=500.0, net_change=-2.5,
+    )
 
 
 def test_normalize_coerces_string_numerics_to_float():
@@ -68,9 +139,9 @@ def test_normalize_unparseable_value_is_none():
 def test_normalize_reads_relabeled_enum_names():
     # schwab-py handle_message() relabels numeric keys to UPPERCASE enum names.
     item = {"key": "AAPL", "LAST_PRICE": 150.25, "NET_CHANGE": 1.10}
-    assert _normalize_level1_equity(item) == {
-        "symbol": "AAPL", "last": 150.25, "net_change": 1.10,
-    }
+    assert _normalize_level1_equity(item) == _expected(
+        "AAPL", last=150.25, net_change=1.10,
+    )
 
 
 #############################################
@@ -203,7 +274,9 @@ def test_on_equity_message_fans_out_with_symbol_filtering():
     assert fn is _equity_enqueue
     enqueue_queue, tick = args
     assert enqueue_queue is fake_subscribers["aapl-sub"]["queue"]
-    assert tick == {"symbol": "AAPL", "last": 150.0, "net_change": 1.0}
+    assert tick["symbol"] == "AAPL"
+    assert tick["last"] == 150.0
+    assert tick["net_change"] == 1.0
 
     # The SPY subscriber matched neither AAPL nor XOM -> no calls.
     assert spy_loop.calls == []
@@ -235,4 +308,6 @@ def test_on_equity_message_one_bad_target_does_not_block_others():
     fn, args = good_loop.calls[0]
     assert fn is _equity_enqueue
     _, tick = args
-    assert tick == {"symbol": "AAPL", "last": 150.0, "net_change": 1.0}
+    assert tick["symbol"] == "AAPL"
+    assert tick["last"] == 150.0
+    assert tick["net_change"] == 1.0

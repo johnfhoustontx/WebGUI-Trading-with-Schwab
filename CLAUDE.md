@@ -8,45 +8,171 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-07-03 (**Config consolidation — single-source calendar, symbols, and UI
-palette** — a hard-coded-config audit found three classes of duplication; each is now consolidated to
-one sanctioned source (behavior-preserving refactor; branch `config-consolidation`, 25 commits, all
-suites green). **(1) Market calendar:** the NYSE holiday set (found duplicated in **7** places — the 5
-known service/webgui/CLI schedulers **plus** two the audit missed: a **stale** `scanner_engine.py`
-`HOLIDAYS_2026` that was missing Juneteenth + all of 2027, and `claude-driver/config.py`
-`MARKET_HOLIDAYS`) now lives ONLY in new **`shared/market_calendar.py`** (`HOLIDAYS` frozenset + `CT`
-clock + `is_holiday`/`is_trading_day`/`prev_trading_day`/`next_trading_day`/`market_now`). Every
-consumer imports it; per-consumer `is`-identity drift-guard tests pin it. **Yearly holiday maintenance
-is now ONE edit.** The `scanner_engine` convergence is a **behavior BUGFIX** — the scanner previously
-treated Juneteenth + 2027 holidays as trading days. Each consumer keeps its own market-HOURS window
-(scan 08:00–15:15 / RTH 08:30–15:00 / GEX 08:30–15:20) — those legitimately differ and are NOT shared.
+**Last updated:** 2026-07-07 (**Five-state market classifier (direction × aggression) —
+Phases 0–5 + Tier 3 shipped (Phases 0–3 LIVE on REST data; Phases 4–5 streamer login+subscriptions
+verified live, RTH order-flow population pending; Tier 3 = validation harness + LOW-weight swing/driver
+integrations)**: the app's one-axis intraday
+trend state (`scoring/intraday_trend.py:score_to_state` → `bull_trend`/`pullback_in_bull`/`range`/
+`bear_rally`/`bear_trend`) is **replaced — for the regime-driving intraday state** — by a
+**two-axis direction × aggression classifier** emitting five trader states: **Bullish / Lack of
+Bullishness / Neutral / Lack of Bearishness / Bearish**. The two middle states capture the
+effort-vs-result asymmetry a single directional axis can't express (price up but hollow → *Lack of
+Bullishness*; price down but no follow-through → *Lack of Bearishness*). **Architecture:** the
+existing 0–100 intraday trend score is the DIRECTION axis (unchanged), crossed with a NEW signed
+**AGGRESSION** axis via a 9-cell grid (`sentiment-dashboard/scoring/market_state.py:classify_market_state`,
+PURE; bands `≥60` bullish / `≤40` bearish, aggression `≥0.2`/`≤−0.2`). Aggression inputs
+(confidence-weighted-blended via the PURE signed `scoring/aggression.py:blend_aggression`, graceful-
+degrading): **(1) volume-effort** (`scoring/effort.py` — up/down-day volume ratio + volume-on-
+rallies-vs-pullbacks + close-location-value over SPY daily); **(2) 25-delta risk-reversal skew Δ**
+(`options-scanner/flow_skew.py`, computed in the options_svc **2-min GEX poll** from the ALREADY-
+fetched $SPX/SPY/QQQ chains — no extra fetch — stored per snapshot in `gex_history_db`, published
+as **`cache:options:flow_skew`** with `rr_delta` vs the prior snapshot; a shared-front-expiration
+guard keeps the RR tenor-consistent); **(3) cross-sector cap-weighted P/C 5-trading-day Δ**
+(`live_composite.cap_weighted_pcr` + a NEW daily store `services/sentiment_svc/sector_pcr_history_db.py`).
+Wired in `sentiment_svc.compute_intraday_trend` (reads `cache:options:flow_skew` + `compute.sector_pc_delta()`,
+signs+normalizes — **rising put demand → NEGATIVE aggression**, SCALE tunables `SKEW_DELTA_SCALE=5.0`
+IV-pts / `PC_DELTA_SCALE=0.3` P/C — blends, classifies), threaded through the EXISTING
+`trend_regime.commit_state` 2-day hysteresis with a **migration guard** (an old-vocab persisted state
+is treated as cold-start so no stale string is published). Published under the **SAME** bridge
+`trend_regime.state` key, so **`regime_filter` was rekeyed via its one `_TREND_STATE_VOTE` dict** to
+the new vocab (`bullish`→bull/block-CCS · `bearish`→bear/block-PCS · `neutral`→None ·
+`lack_of_bearishness`→lean_bull [resilient, puts undefended → favor PCS] · `lack_of_bullishness`→
+lean_bear [exhaustion at highs → favor CCS]) — **`evaluate_regime`'s AND-of-agreement logic is
+UNCHANGED** (the two middle states land exactly on the old soft-lean slots). `compute._bridge_trend`
+always emits new-vocab (neutral at cold start) so the gate is NEVER fed an unrecognized string. The
+daily committed state is **recorded** (`services/sentiment_svc/market_state_history_db.py`, 90-day
+window) for a later backtest-validation task. `/sentiment` shows the five-state label + description +
+a **"Why" evidence** popup (direction/effort/skew/flow/aggression lines) on the **Today** trend gauge;
+the **30-Day structural gauge KEEPS the old band vocabulary** (a structural direction-only read has no
+aggression axis — `score_to_state` is **retained, deliberately NOT deleted**), so the page carries
+both vocabularies (`_TREND_SHORT`/`trend_text_class` cover all 10 keys). **Phase 0** lifted the
+Telegram/Discord/Fi-SMS channel senders + `shared/notifications.json` config out of
+`options_svc/push_notify.py` into a shared **`shared/notify/`** helper (for the coming state-transition
+alerts). **Phase 3 (SHIPPED)** added three intraday structure signals — **session-structure**
+(`scoring/session_structure.py`, VWAP-hold + opening-range break → blended into the DIRECTION
+price sub-score, `SESSION_BLEND=0.20`), **rejection/defense** (`scoring/rejection_defense.py`,
+upper-wick exhaustion at highs vs defended-dip resilience → a new `rejection` AGGRESSION component,
+`AGG_WEIGHTS["rejection"]=0.20`, no sign flip), and **volume-profile-shape**
+(`scoring/profile_shape.py`, balanced single-HVN session → damps aggression toward Neutral,
+`PROFILE_DAMP=0.5`) — all folded into `compute_intraday_trend` (each defensive/degrading) — plus a
+**state-transition phone push** (`services/sentiment_svc/state_alert.py`: on a committed-state FLIP,
+fire Telegram/Discord/Fi-SMS via the `shared/notify/` helper, gated enabled + valid-new-vocab + differ
++ market-hours; the cold-start old→new-vocab first cycle and same-state are skipped; best-effort, can't
+abort the recompute). **Phases 4–5 (SHIPPED — streamer equity + option aggressor flow; code-complete,
+pending a LIVE RTH verification):** the aggression axis now has real order-flow. **Proxy (additive,
+proven-safe):** `_normalize_level1_equity` widened with bid/ask/bid_size/ask_size/last_size/total_volume
+(+ RTH `REGULAR_MARKET_*` fallbacks for last/last_size — resolves the old `TODO(live)`); a NEW
+`_normalize_level1_option` (last/last_size/bid/ask) + a `/stream/options` SSE fan-out with a refcounted
+OSI union on the EXISTING shared stream worker — **provably isolated from paper-trade tracking**: the
+reconcile subscribes `_registry.legs_union() ∪ flow_osis` (replace-semantics, read fresh on the stream
+loop) and the trade-untrack orphan guard spares `_option_refcount`, so a tracked leg can NEVER lose its
+subscription; the trade-detector block in `_on_option_message` is byte-identical (fan-out appended after).
+**Consumers (`services/sentiment_svc/order_flow_consumer.py`, mirror the portfolio SSE-worker pattern):**
+an EQUITY worker streams `/stream/quotes?symbols=SPY,QQQ`, classifies each trade via the PURE
+`scoring/order_flow.py` (Lee-Ready quote rule + tick test → aggressor ratio / CVD), rolls a 5-min window;
+an OPTION worker refreshes near-ATM SPY/QQQ OSIs every 5 min, streams `/stream/options`, classifies
+put/call trades at bid/ask (per-OSI prev_last) → a signed put/call-pressure `signal` (put-buying →
+NEGATIVE → bearish); both publish into **`cache:sentiment:order_flow`** (`{SPY,QQQ, options}`). The
+classifier folds SPY equity CVD as the **`order_flow`** component (weight 0.15) and option pressure as a
+distinct **`option_flow`** component (weight 0.10) — both NO sign flip (positive = net buying = bullish =
+aligned), both defensive/degrading (no stream → drop out). Honest caveat: level-one CONFLATES rapid
+ticks, so this is a **sampled** read (reliable over minute windows, not tick-perfect); Schwab has no
+time-&-sales, SPY proxies $SPX (no index tape). **Still needs a LIVE RTH check** (restart proxy +
+sentiment_svc, watch `cache:sentiment:order_flow` populate + the aggression axis move) — the blocking SSE
+workers are live-verified, not unit-tested (the pure classifier/window/aggregate helpers carry the
+coverage, mirroring the portfolio precedent). **Tier 3 (SHIPPED — validate-first): item 11** built an
+OFFLINE validation harness (`sentiment-dashboard/validate_market_state.py` — run manually, NEVER in a
+request path) that reconstructs the daily committed state over ~5yr SPY history (a daily-OHLCV CORE
+reconstruction: a NEW `scoring/daily_direction.py:daily_direction_score` proxy × the REAL
+`effort`+`rejection_defense` aggression, through the REAL `market_state` grid + `commit_state`
+hysteresis) and measures forward-return stratification (per-state mean/hit-rate + **ordinal IC**). **Honest
+result:** 20d ordinal IC **+0.087** (5d +0.055) — a modest, **regime-dependent** edge (calm IC +0.086 /
+stressed +0.024) CONCENTRATED IN THE TWO MIDDLE STATES (Lack-of-Bullishness +0.99% vs Lack-of-Bearishness
++2.16% mean-20d — the framework's effort-vs-result innovation); the extremes are **inconclusive** here
+(Bullish +0.65% underperformed via exhaustion; **Bearish NEVER fired in 5yr** — the inputs that most drive
+it, skew spikes + put-flow, are exactly the ones EXCLUDED from the daily reconstruction). So — like the
+validated swing model — a thin, label-don't-overtrust edge. **Items 9 & 10 were therefore built at LOW
+weight (user decision):** **item 9** = a SMALL bounded family-fit tilt (`strategy_scoring.state_family_tilt`,
+`STATE_TILT_MAX=6`, leaning on the two middle states — Lack-of-Bearishness→PCS+, Lack-of-Bullishness→CCS+/
+long-call−) applied to `score_strategy`'s composite **AFTER the hard-gate grade is decided (a ranking nudge
+that can NEVER flip a gated grade)**, fed by the live state read from `cache:sentiment:composite` in the
+`swing` handler; **item 10** = the committed state (label+evidence) surfaced to the **Driver's Claude
+decider as CONTEXT ONLY** in `build_packet` (read in the driver handler) — **`guardrails.py` is UNTOUCHED**
+(`regime_filter` already hard-gates the driver's menu; the state is context, not a second gate, proven
+context-only by test). Both additive/defensive (no state → no tilt / no context line). Everything is
+ADDITIVE except the ONE coordinated `trend_regime.state` vocabulary change (`regime_filter` rekeyed in
+lockstep). Green: sentiment_svc **136**, options_svc **400**, driver_svc **168**, webgui **681**,
+schwab-proxy **82** (equity + option stream fan-out), options-scanner flow_skew **+18** / strategy_scoring
+**56** / gex_history migration, sentiment-dashboard scoring modules
+(effort/aggression/market_state/session/rejection/profile/order_flow/daily_direction) **+101**,
+shared/notify **14**.
+Built subagent-by-subagent (TDD, two-stage spec+quality review per unit). **Restart `options_svc` +
+`sentiment_svc`** to pick this up. Branch `Using_Highcharts`. Design/plan:
+[design](docs/plans/2026-07-07-five-state-market-classifier-design.md) /
+[plan](docs/plans/2026-07-07-five-state-market-classifier-plan.md).). Prior — 2026-07-06 (**Paper expiration auto-close (both books) + thrice-daily
+"trades needing action" push** — two features. **(1) Expiration auto-close.** Validated that
+paper trades did NOT reliably auto-close on expiration and fixed both stores. The **account**
+engine (`paper_engine.run_manage_cycle`, `paper_account.db`) settles at intrinsic, but had two
+bugs: it settled 0-DTE **intraday at the open** (the 5-min auto-manage tick made this fire at
+08:30) and it **could never settle a past expiration** because
+`signal_repricer.reprice_swing` returns `current_underlying=None` for `exp < today` (it skips the
+doomed chain fetch). Now gated by the pure `paper_engine.should_settle(exp, today, now_ct)` —
+settle at/after **15:00 CT** on the expiry day (4pm ET close) or any later day — with a direct
+`paper_engine.underlying_last(client, symbol)` quote fallback when the repricer supplies none
+(`run_manage_cycle` gained a `now_ct=None` param for deterministic tests). The **ledger**
+(`paper_trader.py`/`trades.db`, the Paper Trades tab) **never auto-closed at all** —
+`expire_paper_trade` had ZERO callers — so new `compute.expire_ledger_trades(now_ct=None)`
+settles OPEN ledger trades on the SAME `should_settle` gate, wired into
+`handlers.run_manage_and_refresh` (the 5-min manage tick + the manual "Run manage cycle" button;
+the pre-existing piggyback `refresh_paper_trades` republishes the settled rows). See
+[[paper-two-systems-expiration]]. **(2) Action alerts.** A thrice-daily push (Telegram + Discord;
+SMS if configured) at **10:00 / 13:00 / 15:00 CT** on trading days summarizing **trades needing
+action** — `scheduler.action_alert_due` (once per slot within a 20-min grace, mirrors
+`analyze_slot_due`) → `handlers.run_action_alert(bus, slot)` → `compute.collect_action_items`
+(four categories: captured signals recommending **CUT/TAKE_PROFIT** via a fresh `reprice_captured`,
+**expiring-today** ledger+account trades, **at-risk** rescue tested/critical, account **near
+stop/target** [40–50% of max profit, or 150–200% of credit loss]) → `push_notify.send_action_digest`
+(new `action_digest_text`/`action_digest_embed`/`action_total`/`action_slot_label`; skips an empty
+digest — no "all clear" spam). Cached at `cache:options:action_alert` for inspection. All defensive
++ per-category guarded. Restart `options_svc` to pick both up. options_svc **389** + options-scanner
+paper/eod/repricer **71** green; verified live (digest built against real data: 17 captured actions +
+1 at-risk). Branch `Using_Highcharts`.). Prior — 2026-07-03 (**Config consolidation — single-source
+calendar, symbols, and UI palette** — a hard-coded-config audit found three classes of duplication,
+each now consolidated to one sanctioned source (behavior-preserving refactor). **(1) Market calendar:**
+the NYSE holiday set (found duplicated in **7** places — the 5 known service/webgui/CLI schedulers
+**plus** two the audit missed: a **stale** `scanner_engine.py` `HOLIDAYS_2026` that was missing
+Juneteenth + all of 2027, and `claude-driver/config.py` `MARKET_HOLIDAYS`) now lives ONLY in new
+**`shared/market_calendar.py`** (`HOLIDAYS` frozenset + `CT` clock +
+`is_holiday`/`is_trading_day`/`prev_trading_day`/`next_trading_day`/`market_now`). Every consumer
+imports it; per-consumer `is`-identity drift-guard tests pin it. **Yearly holiday maintenance is now
+ONE edit.** The `scanner_engine` convergence is a **behavior BUGFIX** (the scanner previously treated
+Juneteenth + 2027 holidays as trading days). Each consumer keeps its own market-HOURS window (scan
+08:00–15:15 / RTH 08:30–15:00 / GEX 08:30–15:20) — those legitimately differ and are NOT shared.
 **(2) Symbols (tiered):** new **`shared/symbols.py`** holds the small canonical index sets
 (`SPX`/`VIX`/`SPY`/`QQQ`, `SCAN_BASE`, `COLLECTION_BASE`, `INDEX_SYMBOLS`, `INDEX_ROOTS` +
 `is_index_symbol`); `watchlist`/`gex_collector`/`scanner_engine`/`scanner` + both `commission(s).py`
-modules now import from it (the commission `_INDEX_ROOTS` was duplicated in two files). **Deliberately
-out of scope** (different concerns, left in place): the `Top 20.xlsx` file-sourced live universe, the
-78-name backtest `UNIVERSE_SECTOR`, the 140-symbol sector maps, `HEADER_SYMBOLS` (different display
-order), the legacy `gamma_tool.py` Tk dropdown. **(3) UI palette (Level A):**
-`webgui/pages/options/theme.py` gained a canonical **`PALETTE`** dict + `hex_of`/`txt`/`bg`/`rgb`
-helpers; ~11 pages (sentiment, sentiment_rotation, gamma, rescue, svg, gauge, simulator,
-expected_move, captured, paper, scanner) now derive their shared semantic colors from it (green
-`#66bb6a` / red `#ef5350` / amber `#ffa726` / yellow `#ffd54f` / blue `#42a5f5` / cyan `#3fb6c7` /
-flat / neutral / muted), so a re-theme of the semantic colors is a **one-file edit**. **Documented
-intentional variants are PRESERVED, not merged** (trade verdict darks, simulator `PNL_GREEN/RED`,
-expected_move `UP_COLOR` teal + leg tints, gamma chart chrome, rescue `HEAT_ORANGE`, driver grades,
-portfolio status) and Highcharts option dicts + `ui.html` fragments (e.g. calculator heatmap) stay
-out of scope per the Tailwind-first rule. All conversions byte-identical (no rendered color changed).
-**Also this session (4 further hard-coded-config remediations on the same branch):** **(a)** the
-`claude-driver/config.py` `TRADE_LOG`/`PENDING_TRADE`/`LOG_DIR` paths now resolve via
-`repo_paths.CLAUDE_DRIVER` (was `os.path.join(BASE_DIR, …)` — the last `D:\`-rule path violation);
-**(b)** `claude-driver/test_preflight.py` imports its service URLs from `repo_paths`
+modules import from it (the commission `_INDEX_ROOTS` was duplicated in two files). **Out of scope**
+(different concerns, left in place): the `Top 20.xlsx` live universe, the 78-name backtest
+`UNIVERSE_SECTOR`, the 140-symbol sector maps, `HEADER_SYMBOLS` (different order), the legacy
+`gamma_tool.py` Tk dropdown. **(3) UI palette (Level A):** `webgui/pages/options/theme.py` gained a
+canonical **`PALETTE`** dict + `hex_of`/`txt`/`bg`/`rgb` helpers; ~11 pages (sentiment,
+sentiment_rotation, gamma, rescue, svg, gauge, simulator, expected_move, captured, paper, scanner) now
+derive their shared semantic colors from it (green `#66bb6a` / red `#ef5350` / amber `#ffa726` /
+yellow `#ffd54f` / blue `#42a5f5` / cyan `#3fb6c7` / flat / neutral / muted), so re-theming the
+semantic colors is a **one-file edit**. **Documented intentional variants are PRESERVED, not merged**
+(trade verdict darks, simulator `PNL_GREEN/RED`, expected_move `UP_COLOR` teal + leg tints, gamma chart
+chrome, rescue `HEAT_ORANGE`, driver grades, portfolio status); Highcharts option dicts + `ui.html`
+fragments stay out of scope per the Tailwind-first rule. All conversions byte-identical (no rendered
+color changed). **Also this session (4 further hard-coded-config remediations):** **(a)** the
+`claude-driver/config.py` `TRADE_LOG`/`PENDING_TRADE`/`LOG_DIR` paths resolve via
+`repo_paths.CLAUDE_DRIVER` (was `os.path.join(BASE_DIR, …)` — the last `D:\`-rule violation); **(b)**
+`claude-driver/test_preflight.py` imports its service URLs from `repo_paths`
 (`PROXY_URL`/`ANALYTICS_URL`/`ML_SERVER_URLS`) instead of hard-coded `127.0.0.1:81xx/80xx` literals;
 **(c)** a **single `RISK_FREE_RATE` source** — `gamma_tool.py` (5 sites, byte-identical 0.045) and
-`backtest_0dte.py` now import `options_calculator.RISK_FREE_RATE`; the backtest was the last divergence
-(**0.04 → 0.045**, a deliberate alignment that shifts that OFFLINE script's output); **(d)** the Gamma
+`backtest_0dte.py` import `options_calculator.RISK_FREE_RATE` (the backtest was the last divergence,
+**0.04 → 0.045**, a deliberate alignment that shifts that OFFLINE script's output); **(d)** the Gamma
 Analyze model gained a **`GAMMA_ANALYZE_MODEL`** override chain (env → gitignored
-`shared/analyze_model.txt` → default `claude-sonnet-5`), mirroring the driver's `DRIVER_MODEL` — so the
-analyze model is tunable per-deployment without a code change. See
+`shared/analyze_model.txt` → default `claude-sonnet-5`), mirroring the driver's `DRIVER_MODEL`. See
 [design/plan](docs/plans/2026-07-03-config-consolidation.md). Prior — 2026-07-02 (**Driver risk-sizing fix (RISK_TOO_HIGH) + Sonnet 5 + prompt
 caching** — a debugging session on "driver trades logged **Executed** but never showed up."
 Root cause: the `/driver` decision-log "Executed N: SYM×q" line is only the **enqueue** of a
@@ -937,7 +1063,7 @@ Routes:
 | `/options/simulator` | Simulator (**multi-leg strategy builder** — a Strategy dropdown over the shared **editable leg-editor** (`leg_editor.py`) replaces the old single-contract selector — driving all three legacy tabs: **Replay** (re-prices the **netted** position along the underlying's recent path → stacked price + 5-Greek panels over a gap-compressed integer x-axis w/ a client-side scrub cursor) + What-if (a **dollar profit/loss payoff from entry**: P/L = position value (×100 contract multiplier) minus the **entry mark** (`whatif_baseline` = value at spot *now*) — so profit caps at the net credit, loss floors at width−credit, **matching the Calculator** — with a green profit fill above / red loss fill below breakeven (area `threshold:0` + `color`/`negativeColor`) + faint Profit/Loss washes + labels; Δt is **elapsed** days from now, per-leg decay → **calendars** correct, theta visible as Δt slides) + IV-shock; **Copy to Calculator** button; **dark-navy dashboard theme** via shared `theme.py`; **persists full UI state across navigation** (symbol/strategy/legs/sliders/active tab) + **auto-refreshes on return** via a single-user module snapshot — `page_state.py`; the **Symbol** field **Fetches the snapshot on tab-out (`focusout`) / Enter** (deduped) with the same **centered wait overlay** (`overlay.py`) until the meta lands; **compact leg cells** + no "Actions" header (shared `leg_editor`)) | built |
 | `/options/expected-move` | Expected Move (candlestick price history (6-mo daily) + forward **ATM-IV expected-move cone** to the option's expiration (green/red dashed, √-time fan) + leg **strike lines** (short solid / long dashed, put/call colored) + axis **crosshair** w/ Date(X)+Price(Y) label boxes; opened in a **new browser tab** via stash-handoff from Scanner/Paper/Captured/Calculator, or standalone w/ symbol+expiry input) | built |
 | `/options/rescue` | Rescue (at-risk credit spreads (PCS/CCS/IC) → **at-risk table** (paper+captured, heat-colored) → select a position → ranked **commission-aware adjustment menu**: close / partial-close / narrow / convert-IC / butterfly / roll-down/out/down-out / broken-wing / inverted / futures-hedge; each card shows gross/commission/net + metrics + legs + rationale + strategic context + warnings + score; execute cards have **Apply → confirm → `rescue_apply`** behind a stale-price guard, advisory cards show "manual"; nav badge from `cache:options:rescue_summary`) | built |
-| `/sentiment` | Sentiment (two-column top: **dual** Sentiment gauges (Today + 30-Day Avg) + **dual** Market Trend gauges (Today live-intraday + 30-Day structural — directional 0–100 score, 15-min cadence) / component table; traffic-light tiles; collapsed **"Daily Sentiment & Trend"** expander = two value-colorized (green/yellow/red) **2-min intraday graphs** (Daily Market Sentiment 0–10 + Daily Market Trend 0–100), rolling **last 5 trading days**, session gaps collapsed, **recorded going forward** by `sentiment_svc` (RTH-gated) into `SENTIMENT_INTRADAY_DB` → `cache:sentiment:intraday_history` (replaced the old 30-day-history line + rolling-avg/velocity/divergence text); full-width **Sector & Industry Performance** w/ Day/Week/Month %, P/C, RRG, rotation banner, **expandable industries w/ P/C+RRG**; bottom status bar; **persists across navigation**; **server-side 120s auto-refresh + bridge publish, tab-independent**) | built |
+| `/sentiment` | Sentiment (two-column top: **dual** Sentiment gauges (Today + 30-Day Avg) + **dual** Market Trend gauges (Today live-intraday + 30-Day structural — directional 0–100 score, 15-min cadence). **The Today trend gauge's state label + regime badge now show the FIVE-STATE (direction × aggression) vocabulary** — short labels **Bull / Weak Bull / Neutral / Resilient / Bear**, badge label+description e.g. "Lack of Bearishness — Refuses to drop, puts cheap/undefended — favor PCS" — and the press-and-hold **TREND DETAIL popup gained a "Why" evidence section** (direction/effort/skew/flow/session/rejection/profile/order-flow/option-flow/aggression lines). The **0–100 needle is unchanged** (still the direction score); the **30-Day structural gauge deliberately KEEPS the old band vocabulary** (structural read = no aggression axis), so the panel carries both. See the root five-state entry above. / component table; traffic-light tiles; collapsed **"Daily Sentiment & Trend"** expander = two value-colorized (green/yellow/red) **2-min intraday graphs** (Daily Market Sentiment 0–10 + Daily Market Trend 0–100), rolling **last 5 trading days**, session gaps collapsed, **recorded going forward** by `sentiment_svc` (RTH-gated) into `SENTIMENT_INTRADAY_DB` → `cache:sentiment:intraday_history` (replaced the old 30-day-history line + rolling-avg/velocity/divergence text); full-width **Sector & Industry Performance** w/ Day/Week/Month %, P/C, RRG, rotation banner, **expandable industries w/ P/C+RRG**; bottom status bar; **persists across navigation**; **server-side 120s auto-refresh + bridge publish, tab-independent**) | built |
 | `/sentiment/rotation` | Sector Rotation (RRG-vs-SPY: Risk-ON/OFF headline + spread; **top row** = quadrant-map table (left) + tight ROTATING FROM/INTO w/ S&P weights (right); **full-width RRG below** w/ per-sector "meteor tails" — engine `assess_sector` retains a `tail` of `TAIL_LENGTH=12` RS-Ratio/RS-Mom points sampled every `TAIL_STRIDE=2` days; page draws **one spline series per sector** (faded trail line + single bright head dot) and **hover-isolates** a sector via native Highcharts `plotOptions.series.states.inactive` (hovering one dims the rest — no client round-trip); reuses `sector_rotation_assessment`; cached, **manual Refresh only**) | built |
 | `/trade` | Trade (on-demand single-symbol analysis: **Position (1–8wk)** + **Investor (months+)** Buy/Hold/Sell verdicts w/ score + top reasons + hard gates + expandable factor breakdown. The **Position** verdict is now a **backtested, IC-weighted cross-sectional factor model** (`swing_model.json` artifact → live `swing_model.py` scorer): the headline is the **validated** BUY/SELL/HOLD off a **calibration band** + an outcome line (percentile · expected fwd return / horizon · beat-SPY hit-rate) + a **"Why — validated factors"** evidence expander (per-factor z/weight/contribution/IC + model version & OOS IC), with the **legacy heuristic** verdict tucked into a collapsed expander (Investor unchanged); **MTF EMA alignment** (per-timeframe); momentum strip (RSI/ADX/MACD/VWAP/RelVol); sector strength; **Fundamentals card** (P/E/PEG/growth/ROE/margins via proxy `/instruments`); **Markov Forecast card** (third **equal-width frame in the verdict row**, alongside Position + Investor: 5-band composite-score Markov chain → stacked-area band-probability forecast + P(BUY)/P(SELL)/E[score] at 5/10/20d + a bounded confidence-weighted drift-tilt `markov_adjusted_score` headline, verdict label unchanged; **chart plots the dense near-term `trajectory` now/1/2/3/5/10/20d** so it differs by score — the 5/10/20d tail converges to the bull-leaning prior stationary; chart is dark-navy themed); **dark-navy "dashboard" theme** (`.calc-v2` via shared `theme.py`, `items-start` compact cards); **tab-out (`focusout`) = Analyze** (deduped); **persists last analyzed symbol** + analysis across nav) | built |
 | `/driver` | Driver (**autonomous monitor + override** [level B]: a **Claude decision layer** (Opus 4.8 default; `DRIVER_MODEL` env / `shared/driver_model.txt` override → e.g. Sonnet 5) auto-selects/sizes **defined-risk option spreads (PCS/CCS/IC) from the scanner** (`cache:options:scan`) toward **net $500/day** in **paper**, gated by a **`cache:driver:control`** master switch + confirm-gated **STOP** kill-switch; the page shows day-P&L-vs-$500 progress, open-driver-positions, a newest-first **decision-log** audit (`cache:driver:autonomous`, times in **CST**), and a **Performance scorecard** (win-rate / profit-factor / avg win-loss / P&L by symbol & strategy — `cache:options:driver_paper_perf`), all reading the Driver's **own isolated paper book** (`cache:options:driver_paper_account`, separate from the manual account), with **Enable/Disable** + **Run now**; 09:28-ET morning + 30-min autonomous **entry-window** checkpoints (**09:45–15:30 ET** — the open's first ~15 min skipped so the post-open structure is readable, and **no NEW entries in the last 30 min before the close**; management/exits are unaffected, on options_svc's separate 5-min manage cycle) run `build_packet`→`decider.decide`→**`guardrails.apply_guardrails`** (PURE code clamps size + halts at banked-$500/loss-cap/VIX — the model never sizes its own risk)→`cmd:options` **`driver_paper_create`** (opens into the dedicated `paper_account_driver.db`, repriced + auto-exited on the 5-min manage tick — fully separate from the user's manual paper trades). **Legacy** morning-agent **order-approval queue** retained (gated off while autonomy is enabled): Run morning agent → graded day + proposed trades; **APPROVE** (confirm dialog) / **SKIP**; conditions strip + grade rationale; **Performance** view (win-rate / P&L-by-bucket + trade table; **today-only** decision log; perf **P&L colored** green/red; **Bucket / Instrument** full-word headers; **sticky table headers**). Orders simulated (`PAPER_TRADE=True`). **Root-cause fix (2026-06-27): the driver had NEVER opened a position** — `compute.open_driver_position` read `signal_id`/`strategy`/`entry_credit` but the driver feeds RAW scanner signals keyed `id`/`type`/`credit`, so every open `KeyError`'d on `'signal_id'` and the defensive `try/except` swallowed it to `status=error`; the decision log showed "executed" (only the ENQUEUE) while the account stayed empty. Fixed by normalizing the signal shape — open positions now appear + the scorecard P&L populates. See [[driver-feeds-raw-scanner-signal-shape]]. **Second root-cause fix (2026-07-02): $SPX/MU logged "Executed" but never opened** — a **100× units mismatch**: `guardrails.clamp_quantity` sized affordability off the scanner's **PER-SHARE** `max_loss` (~$7) while the paper account's `size_contracts` correctly used **per-CONTRACT** dollars (`(width−credit)×100`, ~$705), so the driver kept proposing $SPX/MU whose real per-contract risk ($409–$1,833) exceeded the paper sizer's $250 cap → `RISK_TOO_HIGH` → **silently rejected** (the "Executed" in the log is only the ENQUEUE; the true outcome is in the account view's `last_open_results`, cap 25). Fixed: the guardrail evaluates **per-contract dollars** (`CONTRACT_MULTIPLIER`); the driver's caps raised to **$1,500/$4,500** and the paper open path given its own **`_DRIVER_MAX_RISK_PER_TRADE=$1,500`** (manual account unchanged at $250) — $SPX/MU now open. See [[driver-executed-but-rejected-risk-too-high]]) | built |
@@ -2405,6 +2531,49 @@ executes through new paper-engine primitives behind a stale-price guard. Pieces:
 - Design/plan: [design](docs/plans/2026-06-21-rescue-tested-trades-design.md) /
   [plan](docs/plans/2026-06-21-rescue-tested-trades-plan.md).
 
+**Signal push notifications — Telegram / Discord / Google Fi SMS — DONE (2026-07-05).**
+The always-on options service now pushes a **phone notification** the moment it
+publishes a **new scanner signal** or a **new captured signal** — server-side, so the
+phone is pinged 24/7 regardless of whether a browser tab is open (this deliberately does
+NOT reuse the browser-gated webgui alert watcher). Self-contained, service-owned module
+**`services/options_svc/push_notify.py`** (headless; ports the proven Telegram/Discord
+formatters from the legacy `options-scanner/notifier.py` rather than importing it — that
+module drags in `winsound`/`winotify` and `notifier` is a documented cross-app name
+collision). Three channels, each **self-gating on config presence** (missing creds →
+silent no-op): **Telegram** (Bot API, HTML, one msg per new signal), **Discord** (webhook
+embed, one per new signal), and **SMS via Google Fi** (`smtplib` emails a **batched**
+summary to `<10-digit-Fi-number>@msg.fi.google.com` — Fi's proprietary email-to-text
+gateway, still functional in 2026 unlike the deprecated `@vtext`/`@tmomail` carrier
+gateways — sent from Gmail over `smtp.gmail.com:587` STARTTLS with an **app password**).
+**Triggers** are hooked at the existing publish points in `handlers.py`: `rescan` (new
+scanner signals) and `refresh_captured` + the `captured_reprice` branch (new captured
+signals; `remove_closed_from_captured` is deliberately NOT wired — a manual close is not a
+new signal). Each hook is **best-effort + try/except-wrapped AFTER the cache_set/publish**
+so a notify failure can never block the scan/publish path. **"New" detection** is
+single-source + restart-safe: a stable signal key (symbol/type/strikes/expiration, IC
+folds the call legs) diffed against a **date-scoped Redis seen-set**
+(`cache:options:notified_scan` / `cache:options:notified_captured`, a `{date, keys[]}`
+envelope that resets on a new trading date) — keys are marked seen **when diffed (before
+gating)**, mirroring the webgui watcher's unconditional `alerted |= keys`, so each signal
+is considered once; a signal first seen off-hours/disabled/below-min-score is absorbed and
+not deferred. On the service's **first publish after (re)start** the set is seeded
+**silently** (no re-notify storm). Gates: a master `enabled`, an optional `market_hours_only`
+(a local weekday + 08:00–15:00 CT + holiday check copied byte-for-byte from
+`webgui/alerts.py` to avoid importing NiceGUI into the service — update the `_HOLIDAYS`
+copy yearly alongside `alerts._HOLIDAYS`), and a scanner-only `min_score` (captured signals
+carry no `composite_score`). **Config**: gitignored `shared/notifications.json`
+(+ committed `shared/notifications.example.json`; `repo_paths.NOTIFICATIONS_CONFIG`), env
+vars override file values (`TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`/`DISCORD_WEBHOOK_URL`/
+`FI_SMS_NUMBER`/`SMS_SMTP_USER`/`SMS_SMTP_APP_PASSWORD`/`NOTIFY_ENABLED`). **Setup**:
+Telegram bot via `@BotFather` (token) + `.../getUpdates` (chat_id); Discord channel →
+Integrations → Webhooks; SMS = your 10-digit Fi number + a Gmail **App Password** (Google
+Account → Security → 2-Step Verification → App passwords). **Out of scope (YAGNI)**:
+per-channel Settings-page toggles, and trade-executed/error notifications. push_notify
+**27** + options_svc handlers **45** green. Built subagent-by-subagent (TDD, two-stage
+spec+quality review). Branch `Using_Highcharts`. Design/plan:
+[design](docs/plans/2026-07-05-signal-push-notifications-design.md) /
+[plan](docs/plans/2026-07-05-signal-push-notifications-plan.md).
+
 ## Paths and ports: `repo_paths.py` + `config/ports.toml`
 
 `repo_paths.py` at the repo root is the single source of truth for cross-app
@@ -2459,6 +2628,7 @@ the app runs out-of-the-box; only the `*.example.*` templates are committed.
 | `shared/appsettings.json`      | `shared/appsettings.example.json`       | Schwab API keys     |
 | `shared/tokens.json`           | `shared/tokens.example.json`            | Schwab OAuth tokens |
 | `shared/sentiment_bridge.json` | `shared/sentiment_bridge.example.json`  | Sentiment bridge    |
+| `shared/notifications.json`    | `shared/notifications.example.json`     | Telegram/Discord/Fi-SMS push creds |
 
 `schwab-proxy/proxy_tokens.json` and `**/config_notifications.py` are also
 gitignored. **Never commit real keys, tokens, or account numbers.**

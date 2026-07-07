@@ -1,0 +1,108 @@
+name: CI
+
+# Runs the test matrix + lint + dependency audit on every push/PR.
+#
+# WHY windows-latest: the stack is Windows-first — it imports winotify (Windows-only)
+# and uses tkinter/Memurai; a Linux runner would fail at import. Tests need NO live
+# services (the bus uses fakeredis under pytest; the proxy is mocked), so no Redis
+# service container is required.
+#
+# WHY a matrix of per-folder jobs: running the whole tree in one pytest invocation
+# re-triggers the documented cross-app top-level module-name collisions
+# (config/scoring/notifier/src). Each suite runs in isolation, exactly as the docs
+# prescribe. The copied LEGACY engine dirs (sentiment-dashboard / trade-analyzer /
+# portfolio-analyzer / claude-driver) are not gated here (grandfathered, like ruff);
+# options-scanner IS gated with its documented pre-existing failures deselected
+# (tkinter dashboard tests need a display + crash headless; the earnings tests are
+# date-relative; test_key_levels_doc references an uncopied doc).
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dev tooling
+        run: pip install -r requirements-dev.txt
+      - name: Ruff lint (scope + rules in ruff.toml)
+        run: ruff check .
+        # NB: `ruff format` is intentionally NOT enforced — the codebase uses a
+        # deliberate compact style (one-line statements) that the formatter would
+        # rewrite wholesale. The lint gate (select E9,F) catches real bugs without
+        # a mass reformat.
+
+  audit:
+    runs-on: windows-latest
+    # Non-blocking initially: a freshly-disclosed transitive CVE should surface for
+    # review, not wedge all development. Flip to blocking once the baseline is clean.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install pinned runtime + audit tool
+        run: |
+          pip install -r requirements.lock
+          pip install pip-audit
+      - name: pip-audit (dependency CVE scan)
+        run: pip-audit
+
+  test:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: shared
+            cmd: python -m pytest shared/bus shared/contracts -q
+          - name: scaffold
+            cmd: python -m pytest services/tests -q
+          - name: sentiment_svc
+            cmd: python -m pytest services/sentiment_svc -q
+          - name: options_svc
+            cmd: python -m pytest services/options_svc -q
+          - name: portfolio_svc
+            cmd: python -m pytest services/portfolio_svc -q
+          - name: trade_svc
+            cmd: python -m pytest services/trade_svc -q
+          - name: driver_svc
+            cmd: python -m pytest services/driver_svc -q
+          - name: webgui
+            cmd: python -m pytest webgui -q
+          - name: proxy
+            cmd: python -m pytest schwab-proxy/tests -q
+          - name: options-scanner
+            # Deselect the documented pre-existing baseline failures (kept out of the
+            # gate, not silently ignored — see the audit docs).
+            cmd: >-
+              python -m pytest options-scanner/tests -q
+              --ignore=options-scanner/tests/test_dashboard_captured_signals_drift.py
+              --ignore=options-scanner/tests/test_dashboard_tree_signal_map.py
+              --ignore=options-scanner/tests/test_key_levels_doc.py
+              --deselect "options-scanner/tests/test_scanner_engine.py::TestEarningsAvoidance"
+    name: test (${{ matrix.name }})
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install pinned runtime deps
+        run: pip install -r requirements.lock
+      - name: Run ${{ matrix.name }} suite
+        run: ${{ matrix.cmd }}

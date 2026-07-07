@@ -17,6 +17,7 @@ import datetime as _dt
 import logging
 
 from services.options_svc import compute
+from services.options_svc import push_notify
 from shared.contracts.options import ScanResult
 
 log = logging.getLogger(__name__)
@@ -132,6 +133,14 @@ EVENT_CAPTURED = "events:options:captured"
 CACHE_CAPTURED_FLAGS = "cache:options:captured_flags"
 EVENT_CAPTURED_FLAGS = "events:options:captured_flags"
 
+# Date-scoped seen-sets for server-side phone push (Telegram/Discord/Fi-SMS).
+# See services/options_svc/push_notify.py.
+CACHE_NOTIFIED_SCAN = "cache:options:notified_scan"
+CACHE_NOTIFIED_CAPTURED = "cache:options:notified_captured"
+
+CACHE_ACTION_ALERT = "cache:options:action_alert"
+EVENT_ACTION_ALERT = "events:options:action_alert"
+
 CACHE_GAMMA = "cache:options:gamma"
 EVENT_GAMMA = "events:options:gamma"
 
@@ -181,6 +190,13 @@ EVENT_CALC_IV = "events:options:calc_iv"
 
 CACHE_GEX_STATUS = "cache:options:gex_status"
 EVENT_GEX_STATUS = "events:options:gex_status"
+
+# Per-index 25-delta options-flow skew (level + change since the prior snapshot).
+# No strict contract (mirrors gex_status): a small read-only dict the sentiment
+# service reads defensively as an aggression input. Published on each 2-min GEX
+# tick right after collection (rides collect_gex_history).
+CACHE_FLOW_SKEW = "cache:options:flow_skew"
+EVENT_FLOW_SKEW = "events:options:flow_skew"
 
 CACHE_EXPECTED_MOVE = "cache:options:expected_move"
 EVENT_EXPECTED_MOVE = "events:options:expected_move"
@@ -240,6 +256,17 @@ def rescan(bus) -> None:
     version = bus.cache_set(CACHE_SCAN, scan.model_dump())
     bus.publish(EVENT_SCAN, {"version": version})
 
+    # Server-side phone push on genuinely-new signals (Telegram/Discord/Fi-SMS).
+    # Best-effort; must never break the scan/publish path. First run after start
+    # seeds silently so a restart mid-session doesn't blast every open signal.
+    try:
+        all_sigs = (scan.signals_0dte or []) + (scan.signals_swing or [])
+        seed = push_notify.load_seen(bus, CACHE_NOTIFIED_SCAN) is None
+        push_notify.notify_signals(bus, all_sigs, kind="scanner",
+                                   seen_key=CACHE_NOTIFIED_SCAN, seed=seed)
+    except Exception:  # noqa: BLE001
+        log.exception("scanner push-notify failed (non-fatal)")
+
 
 def refresh_header(bus) -> None:
     """Compute the compact header view and publish it to the bus.
@@ -267,10 +294,22 @@ def swing_scan(bus, args: dict) -> None:
     under ``cache:options:swing``.
 
     No ScanResult gate: this is a flat signal list (not the dual-list scan
-    contract), and the page reads ``payload["signals"]`` directly."""
+    contract), and the page reads ``payload["signals"]`` directly.
+
+    Cross-service read: the live committed five-state market classifier lives in
+    ``cache:sentiment:composite`` under ``derived.trend.state`` (published by the
+    sentiment service). We read it DEFENSIVELY here — every level guarded, any
+    missing level / absent composite -> ``None`` -> ``compute.swing_scan`` applies
+    no family-ranking tilt — and pass it as ``market_state``. This keeps
+    ``compute.swing_scan`` proxy-only (no bus dependency); the handler is the
+    natural cross-service reader (mirrors the ``cache_get`` reads in
+    ``remove_closed_from_captured`` / ``refresh_gamma_current``)."""
     args = args or {}
     params = {k: args.get(k, default) for k, default in _SWING_DEFAULTS.items()}
-    result = compute.swing_scan(**params)
+    env = bus.cache_get("cache:sentiment:composite")
+    payload = env.payload if env is not None else None
+    market_state = (((payload or {}).get("derived") or {}).get("trend") or {}).get("state")
+    result = compute.swing_scan(**params, market_state=market_state)
     payload = {"signals": result["signals"], "view": result.get("view"),
                "symbol": params["symbol"], "params": args}
     version = bus.cache_set(CACHE_SWING, payload)
@@ -337,19 +376,29 @@ def publish_rescue_summary(bus) -> None:
 
 def run_manage_and_refresh(bus) -> None:
     """Run the paper auto-manage cycle (reprice open positions + auto-close
-    target/stop hits) then republish the paper account view.
+    target/stop hits + expiration-settle) then republish the paper views.
 
     Guarded on an existing account — with no account it just refreshes so the
-    page shows the no-account state. Shared by the ``paper_manage`` command
-    (manual button) and the scheduler's auto-manage tick (``scheduler.manage_due``)
-    so both run identical logic."""
+    page shows the no-account state. Also auto-settles expired **ledger** trades
+    (``compute.expire_ledger_trades`` — the Paper Trades tab otherwise never
+    closes on expiration) and republishes the ledger view when any settled.
+    Shared by the ``paper_manage`` command (manual button) and the scheduler's
+    auto-manage tick (``scheduler.manage_due``) so both run identical logic."""
     if compute.has_paper_account():
         compute.run_manage_cycle()
+    # Auto-settle expired LEDGER trades (the Paper Trades tab otherwise never
+    # closes on expiration). Defensive so a settlement hiccup never skips the
+    # refreshes below; the piggyback ledger refresh further down republishes the
+    # settled rows.
+    try:
+        compute.expire_ledger_trades()
+    except Exception:
+        log.exception("expire_ledger_trades degraded")
     refresh_paper_account(bus)
     # Piggyback the manage tick (no new cadence): refresh the paper-trade LEDGER
-    # too so its open positions get fresh live P&L every 5 min (the account view
-    # above is a separate book). Defensive so a reprice hiccup never blocks the
-    # core paper refresh.
+    # too so its open positions get fresh live P&L every 5 min (and reflect any
+    # expiration settlement above; the account view is a separate book).
+    # Defensive so a reprice hiccup never blocks the core paper refresh.
     try:
         refresh_paper_trades(bus)
     except Exception:
@@ -425,6 +474,21 @@ def refresh_captured(bus) -> None:
     data = compute.captured_view()
     version = bus.cache_set(CACHE_CAPTURED, data)
     bus.publish(EVENT_CAPTURED, {"version": version})
+    _notify_captured(bus, (data or {}).get("signals"))
+
+
+def _notify_captured(bus, signals) -> None:
+    """Best-effort server-side phone push on new captured signals.
+
+    Shared by ``refresh_captured`` and the ``captured_reprice`` command path so the
+    notify logic is DRY. Never fatal — a notify failure must not stop the publish.
+    First run after start seeds silently (see ``push_notify.notify_signals``)."""
+    try:
+        seed = push_notify.load_seen(bus, CACHE_NOTIFIED_CAPTURED) is None
+        push_notify.notify_signals(bus, signals or [], kind="captured",
+                                   seen_key=CACHE_NOTIFIED_CAPTURED, seed=seed)
+    except Exception:  # noqa: BLE001
+        log.exception("captured push-notify failed (non-fatal)")
 
 
 def remove_closed_from_captured(bus, signal_id) -> None:
@@ -493,8 +557,33 @@ def collect_gex_history(bus=None) -> None:
     refresh, so there is no Redis cache view to publish here. ``bus`` is accepted
     only for handler-signature uniformity with the other scheduler-invoked
     refreshers. Guarded by the caller; ``compute.collect_gex_snapshots`` is
-    itself defensive (per-symbol failures are logged, not raised)."""
+    itself defensive (per-symbol failures are logged, not raised).
+
+    After collection, publishes the per-index flow-skew view
+    (``cache:options:flow_skew``) so it rides the SAME 2-min tick that just wrote
+    the rows. That publish is best-effort — a failure must never affect the
+    collection that already succeeded (and ``bus`` is None for legacy callers)."""
     compute.collect_gex_snapshots()
+    if bus is not None:
+        try:
+            publish_flow_skew(bus)
+        except Exception:
+            log.exception("publish_flow_skew after collect degraded")
+
+
+def publish_flow_skew(bus) -> None:
+    """Compute the per-index flow-skew view and publish it to the bus.
+
+    No strict contract: the view is a small read-only dict keyed by index symbol
+    (``{symbol: {rr_25d, rr_delta, call_vol, put_vol, ts}}``) that the sentiment
+    service consumes defensively, and ``compute.flow_skew_view`` is already fully
+    defensive (any failure degrades to ``{}``). Guarded so a bus hiccup never
+    escapes into the caller."""
+    try:
+        view = compute.flow_skew_view()
+        bus.cache_set(CACHE_FLOW_SKEW, view, event=EVENT_FLOW_SKEW)
+    except Exception:
+        log.exception("publish_flow_skew degraded")
 
 
 def publish_gex_status(bus) -> None:
@@ -535,6 +624,38 @@ def run_scheduled_gamma_analyze(bus, slot) -> None:
     res = {**res, "slot": slot, "generated_at": now.isoformat()}
     version = bus.cache_set(CACHE_GAMMA_ANALYZE_SCHED[slot], res)
     bus.publish(EVENT_GAMMA_ANALYZE_SCHED[slot], {"version": version})
+
+
+def run_action_alert(bus, slot=None) -> None:
+    """Collect trades needing action + push a digest to Telegram/Discord (+ SMS).
+
+    Driven by ``scheduler.action_alert_due`` at 10:00 / 13:00 / 15:00 CT on each
+    trading day. Caches the digest under ``cache:options:action_alert`` for
+    inspection (the run's items + whether it pushed). Fully defensive — a collect
+    or push hiccup never raises into the scheduler; an empty digest pushes nothing
+    (see ``push_notify.send_action_digest``)."""
+    import datetime as _dt
+    from zoneinfo import ZoneInfo as _ZI
+
+    slot_label = push_notify.action_slot_label(slot)
+    try:
+        items = compute.collect_action_items()
+    except Exception:
+        log.exception("collect_action_items degraded → empty digest")
+        items = {}
+    sent = False
+    try:
+        sent = push_notify.send_action_digest(items, slot_label=slot_label)
+    except Exception:
+        log.exception("send_action_digest degraded")
+    payload = {"slot": slot, "slot_label": slot_label, "items": items,
+               "total": push_notify.action_total(items), "sent": bool(sent),
+               "generated_at": _dt.datetime.now(_ZI("America/Chicago")).isoformat()}
+    try:
+        version = bus.cache_set(CACHE_ACTION_ALERT, payload)
+        bus.publish(EVENT_ACTION_ALERT, {"version": version})
+    except Exception:
+        log.exception("action_alert cache_set degraded")
 
 
 def publish_gamma_symbols(bus) -> None:
@@ -773,6 +894,7 @@ def handle_command(bus, command) -> None:
         bus.publish(EVENT_CAPTURED, {"version": ver})
         fver = bus.cache_set(CACHE_CAPTURED_FLAGS, {"flags": res["flags"]})
         bus.publish(EVENT_CAPTURED_FLAGS, {"version": fver})
+        _notify_captured(bus, res.get("signals"))
     elif command.type == "captured_close":
         sid = command.args.get("signal_id")
         compute.close_captured(sid,

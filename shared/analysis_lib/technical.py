@@ -18,8 +18,7 @@ from typing import Optional, Dict, Tuple, List
 import logging
 
 from config import (
-    EMA_PERIODS, TREND_STATES, RSI_OVERSOLD, RSI_OVERBOUGHT,
-    ADX_TRENDING, TIMEFRAME_WEIGHTS
+    EMA_PERIODS, TREND_STATES, TIMEFRAME_WEIGHTS
 )
 
 logger = logging.getLogger(__name__)
