@@ -3,6 +3,9 @@ from scoring.order_flow import (
     classify_tick,
     aggregate_flow,
     flow_aggression_component,
+    osi_option_type,
+    aggregate_option_flow,
+    option_flow_component,
     MIN_TICKS_FULL,
 )
 
@@ -178,3 +181,152 @@ def test_score_clamped():
 def test_never_raises_on_garbage_component():
     assert flow_aggression_component({}) == (0.0, 0.0)
     assert flow_aggression_component({"aggressor_ratio": "x", "n": "y"}) == (0.0, 0.0)
+
+
+# ---------- osi_option_type ----------
+
+def test_osi_type_call():
+    # Schwab OSI: 6-char space-padded root + YYMMDD + C/P + 8-digit strike.
+    assert osi_option_type("SPY   260717C00500000") == "C"
+
+
+def test_osi_type_put():
+    assert osi_option_type("QQQ   260717P00450000") == "P"
+
+
+def test_osi_type_no_padding():
+    # A compact OSI with no root padding still parses off the date+type+strike tail.
+    assert osi_option_type("A260717C00500000") == "C"
+
+
+def test_osi_type_lowercase_normalized():
+    assert osi_option_type("spy   260717p00500000") == "P"
+
+
+def test_osi_type_garbage_is_none():
+    assert osi_option_type("SPY") is None
+    assert osi_option_type("") is None
+    assert osi_option_type("not an osi") is None
+    assert osi_option_type(None) is None
+    assert osi_option_type(12345) is None
+    # equity-style symbol (no date/type/strike tail) -> None
+    assert osi_option_type("SPY   260717X00500000") is None
+
+
+# ---------- aggregate_option_flow ----------
+
+_CALL = "SPY   260717C00500000"
+_PUT = "SPY   260717P00500000"
+
+
+def test_option_flow_put_buying_is_bearish():
+    """Puts lifted at the ask (protection buying) → signal < 0 (BEARISH)."""
+    ticks = [{"osi": _PUT, "last": 5.0, "size": 10, "bid": 4.9, "ask": 5.0}
+             for _ in range(6)]
+    r = aggregate_option_flow(ticks)
+    assert r["put_buy"] == 60.0
+    assert r["call_buy"] == 0.0
+    assert r["signal"] is not None and r["signal"] < 0
+    assert r["n"] == 6
+
+
+def test_option_flow_call_buying_is_bullish():
+    """Calls lifted at the ask → signal > 0 (BULLISH)."""
+    ticks = [{"osi": _CALL, "last": 5.0, "size": 10, "bid": 4.9, "ask": 5.0}
+             for _ in range(6)]
+    r = aggregate_option_flow(ticks)
+    assert r["call_buy"] == 60.0
+    assert r["signal"] > 0
+    assert r["n"] == 6
+
+
+def test_option_flow_balanced_near_zero():
+    """Equal call-buying and put-buying nets ~0."""
+    ticks = ([{"osi": _CALL, "last": 5.0, "size": 5, "bid": 4.9, "ask": 5.0}] * 4
+             + [{"osi": _PUT, "last": 5.0, "size": 5, "bid": 4.9, "ask": 5.0}] * 4)
+    r = aggregate_option_flow(ticks)
+    assert r["signal"] == 0.0
+
+
+def test_option_flow_prev_last_carried_per_osi():
+    """prev_last is tracked PER OSI: two OSIs' inside-spread ticks each tick-test
+    against their OWN previous last, not a shared running value."""
+    ticks = [
+        # CALL: first inside-spread -> prev None -> 0; then uptick -> +1 (buy).
+        {"osi": _CALL, "last": 4.95, "size": 1, "bid": 4.90, "ask": 5.00},
+        {"osi": _PUT, "last": 4.95, "size": 1, "bid": 4.90, "ask": 5.00},   # prev None -> 0
+        {"osi": _CALL, "last": 4.98, "size": 1, "bid": 4.90, "ask": 5.00},  # vs CALL 4.95 -> +1
+        {"osi": _PUT, "last": 4.92, "size": 1, "bid": 4.90, "ask": 5.00},   # vs PUT 4.95 -> -1 (put sell)
+    ]
+    r = aggregate_option_flow(ticks)
+    assert r["call_buy"] == 1.0     # the CALL uptick
+    assert r["put_sell"] == 1.0     # the PUT downtick
+    # net (call_buy - call_sell) - (put_buy - put_sell) = 1 - (-1) = +2 over vol 2
+    assert r["signal"] > 0
+
+
+def test_option_flow_untaggable_osi_skipped():
+    """A tick whose OSI can't be typed is skipped (not counted, no volume)."""
+    ticks = [
+        {"osi": _CALL, "last": 5.0, "size": 3, "bid": 4.9, "ask": 5.0},   # +1 call buy
+        {"osi": "GARBAGE", "last": 5.0, "size": 9, "bid": 4.9, "ask": 5.0},
+    ]
+    r = aggregate_option_flow(ticks)
+    assert r["n"] == 1
+    assert r["call_buy"] == 3.0
+
+
+def test_option_flow_missing_size_defaults_one():
+    ticks = [{"osi": _CALL, "last": 5.0, "bid": 4.9, "ask": 5.0} for _ in range(3)]
+    r = aggregate_option_flow(ticks)
+    assert r["call_buy"] == 3.0     # 3 × 1.0
+
+
+def test_option_flow_empty_signal_none():
+    r = aggregate_option_flow([])
+    assert r == {"call_buy": 0.0, "call_sell": 0.0, "put_buy": 0.0,
+                 "put_sell": 0.0, "n": 0, "signal": None}
+
+
+def test_option_flow_never_raises_on_garbage():
+    r = aggregate_option_flow(["x", {"osi": _CALL, "last": None, "bid": 4.9, "ask": 5.0},
+                               42])
+    assert isinstance(r["n"], int)
+    # the sole taggable tick had last None -> indeterminate -> no volume, signal None
+    assert r["signal"] is None
+
+
+# ---------- option_flow_component ----------
+
+def test_option_flow_component_bullish_positive():
+    agg = aggregate_option_flow(
+        [{"osi": _CALL, "last": 5.0, "size": 10, "bid": 4.9, "ask": 5.0}] * MIN_TICKS_FULL)
+    score, conf = option_flow_component(agg)
+    assert score > 0        # net call-buying -> positive, NO flip
+    assert conf == 1.0
+
+
+def test_option_flow_component_bearish_negative():
+    agg = aggregate_option_flow(
+        [{"osi": _PUT, "last": 5.0, "size": 10, "bid": 4.9, "ask": 5.0}] * 10)
+    score, _ = option_flow_component(agg)
+    assert score < 0        # net put-buying -> negative (bearish)
+
+
+def test_option_flow_component_confidence_rises_with_n():
+    small = option_flow_component({"signal": 1.0, "n": 5})
+    big = option_flow_component({"signal": 1.0, "n": MIN_TICKS_FULL})
+    assert big[1] > small[1]
+    assert big[1] == 1.0
+
+
+def test_option_flow_component_none_returns_zeros():
+    assert option_flow_component({"signal": None, "n": 0}) == (0.0, 0.0)
+    assert option_flow_component({"signal": 0.8, "n": 0}) == (0.0, 0.0)
+    assert option_flow_component({}) == (0.0, 0.0)
+    assert option_flow_component("x") == (0.0, 0.0)
+
+
+def test_option_flow_component_clamped():
+    assert option_flow_component({"signal": 5.0, "n": 30})[0] == 1.0
+    assert option_flow_component({"signal": -5.0, "n": 30})[0] == -1.0

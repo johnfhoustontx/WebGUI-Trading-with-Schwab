@@ -107,9 +107,11 @@ async def loop(bus):
     # SSE consumer on a daemon thread + a ~30 s publish task, both guarded so a
     # consumer/publish failure can NEVER break the main refresh loop below.
     of_stop = None
+    of_opt_stop = None
     of_task = None
     try:
         of_stop = order_flow_consumer.start_consumer(bus)
+        of_opt_stop = order_flow_consumer.start_option_consumer(bus)
         of_task = asyncio.create_task(_order_flow_publish_loop(bus, loop_))
     except Exception:  # noqa: BLE001 — order-flow is best-effort; refresh must go on.
         log.exception("order-flow consumer failed to start")
@@ -128,6 +130,8 @@ async def loop(bus):
     finally:
         if of_stop is not None:
             of_stop.set()
+        if of_opt_stop is not None:
+            of_opt_stop.set()
         if of_task is not None:
             of_task.cancel()
 
