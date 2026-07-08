@@ -139,6 +139,18 @@ def _serve_analyze(slot: str = None):
     return HTMLResponse(analyze_html(bus_client.read(analyze_view_for(slot))))
 
 
+@app.get("/options/gamma-history")
+def _serve_gamma_history():
+    """Serve the latest on-demand regenerated Gamma briefing HISTORY report.
+
+    The Gamma page's history picker enqueues a ``gamma_history`` command (date +
+    optional slot); options_svc rebuilds the HTML from the stored structured
+    analysis and caches it here. Raw HTMLResponse so the doc's own <style> applies.
+    """
+    import bus_client
+    return HTMLResponse(analyze_html(bus_client.read("options:gamma_history")))
+
+
 @app.get("/eod/file")
 def _serve_eod_file(date: str, which: str = "summary"):
     """Serve an archived EOD report file (summary.html / detail.html) raw, so its

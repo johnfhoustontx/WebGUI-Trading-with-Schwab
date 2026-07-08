@@ -27,6 +27,12 @@ NOTIFICATIONS_CONFIG = SHARED / "notifications.json"
 # every paper_account_db/paper_engine fn already takes db_path).
 DRIVER_PAPER_DB = OPTIONS_SCANNER / "data" / "paper_account_driver.db"
 
+# History of Gamma Analyze briefings (the 4×/day Auto briefings + ad-hoc/manual runs).
+# Stores the STRUCTURED analysis payload (the source of truth) per (date, slot); the
+# HTML report is regenerated on demand from it. Written by options_svc; read by the
+# gamma_briefing_report.py utility. One row per (CT date, slot).
+GAMMA_BRIEFING_DB = OPTIONS_SCANNER / "data" / "gamma_briefings.db"
+
 # Intraday 2-min sentiment + trend series for the /sentiment "Daily Sentiment &
 # Trend" graphs. Rolling last 5 trading days; written by sentiment_svc each refresh.
 SENTIMENT_INTRADAY_DB = SENTIMENT / "data" / "sentiment_intraday.db"

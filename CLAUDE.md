@@ -8,7 +8,30 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-07-07 (**Five-state market classifier (direction × aggression) —
+**Last updated:** 2026-07-08 (**Gamma briefing history — store + CLI utility +
+in-app viewer**: every Gamma Analyze briefing (the 4×/day Auto briefings + ad-hoc/
+manual runs) is now **persisted** to a new SQLite store
+`options-scanner/gamma_briefing_history_db.py` (`repo_paths.GAMMA_BRIEFING_DB`, one
+row per `(date, slot)`) as its **STRUCTURED analysis payload** — the report HTML is
+**regenerated on demand** (pure `compute.analyze_history_doc`), never frozen, so old
+briefings re-render in the current infographic design and the data stays queryable
+(bias/headline pulled out as columns). `handlers._persist_briefing` records each
+successful run (wired into `run_scheduled_gamma_analyze` + the ad-hoc `gamma_analyze`
+command; degraded no-chains/no-key pages have no `analysis` and are skipped);
+`publish_gamma_briefing_index` publishes the metadata index
+**`cache:options:gamma_briefings`** for the picker (startup + after each persist); the
+**`gamma_history`** command regenerates a date's (or a single slot's) report →
+**`cache:options:gamma_history`** → served raw at **`/options/gamma-history`**. A
+**CLI utility** `services/options_svc/gamma_briefing_report.py` (run manually) does
+`--list` / `--date [--slot]` / `--range START END` / `--generate` (fresh run → store
+→ report; needs the proxy + key), writing HTML under
+`options-scanner/data/gamma_reports/`. The `/options/gamma` page gains a **History
+picker** (a date + slot dropdown from the index + an **Open** button that enqueues
+`gamma_history` and opens the regenerated report in a new tab, mirroring
+`_watch_analyze`; `history_dates` is the pure date-list helper). **Restart
+`options_svc`** so persistence + the index publish go live. gamma_briefing_history_db
+**7** + options_svc handlers/scheduler/compute + webgui **689** green. Built with
+per-layer TDD. Branch `Using_Highcharts`.). Prior — 2026-07-07 (**Five-state market classifier (direction × aggression) —
 Phases 0–5 + Tier 3 shipped (Phases 0–3 LIVE on REST data; Phases 4–5 streamer login+subscriptions
 verified live, RTH order-flow population pending; Tier 3 = validation harness + LOW-weight swing/driver
 integrations)**: the app's one-axis intraday
@@ -1022,7 +1045,7 @@ Routes:
 | `/options/portfolio` | Paper Portfolio (paper account) | built |
 | `/options/calculator` | Calculator (summary tiles + P&L heatmap — grid rows = **±N real chain strikes around spot** via the **Number of strikes** input (default 24, strictly around spot; `strikes_window`→`price_rows`); **intraday time-to-expiry** — the grid's first column is **"Now"** (current mark-to-market value, priced at calendar hours-to-4pm-ET /365) and the last is **"Exp"** (expiration payoff), fixing 0DTE which previously showed only the payoff everywhere; summary tiles + PoP also use the intraday "Now" T (was an `or 1/365` clamp that over-priced 0DTE ~20×); the **IV** button **implies IV from the traded contract's mark** ThinkorSwim-style via a `calc_iv` command → `cache:options:calc_iv` (`compute.calc_iv` → engine `implied_vol` bisection), falling back to ATM chain `volatility` pre-strike-pick; **multi-leg strategy builder** — a Strategy dropdown (singles + verticals credit/debit + condors iron/all-same + butterflies long/iron + calendars/diagonals) over the shared **editable leg-editor** (`leg_editor.py`: per-leg kind/side/strike/expiry/qty + Add/Remove), per-leg expiry so **calendars** price each leg at its own T, a **generic-numeric summary** for non-PCS/CCS/IC structures, and a **Copy to Simulator** button; **persists full UI state across navigation** (symbol/strategy/legs/fields/Number-of-strikes) + **auto-refreshes on return** via a single-user module snapshot — `page_state.py`; the **Symbol** field **Loads on tab-out (`focusout`) / Enter** (deduped via `inputs.should_load`; the Load button still force-reloads) with a **centered full-screen wait overlay** (`overlay.py`, `LOAD_TIMEOUT_SEC=30s` backstop) until the chain lands; the **top-level Expiry propagates to all legs** (`leg_editor.apply_expiry`, re-syncs strikes); **compact leg cells** (`leg-row`) + the **"Actions" header dropped**; **Send-to-Calculator from the Scanner now lands correctly** — `_prefill` stashes `pending_legs` + `load_symbol()` so the legs apply once the chain is loaded (applying them first wiped every strike via the leg-editor's strike-coercion — see [[calculator-leg-transfer-needs-chain-first]])) | built |
 | `/options/swing` | Swing Scanner (**multi-strategy**, single-symbol: builds + ranks candidates across **Directional** (long/naked call+put), **Spreads** (debit bull-call/bear-put + credit PCS/CCS), and **Neutral** (iron condor) families on ONE unified **0–100 Fit+Quality** score; **Diagonals** are a later phase. The scanner **infers a market view** (direction/conviction + IV vol-regime) from the symbol's technicals + IV and ranks each structure by FIT to that view + STRUCTURAL QUALITY — so a long call and a put-credit-spread are comparable. A **Strategy-families multiselect** (default all; empty ⇒ all) + an inferred-**view banner** + strategy-agnostic columns (Strategy/Bias/Legs/Debit-Credit/Max P/Max L/R:R/PoP/BE/Score/Grade, colored by score+bias; the **Grade is quality-gated** — color-coded green/amber/red with a `grade_reason` tooltip, driven by structural quality + per-family hard gates, NOT view-fit). Per-row **Send to Calculator / Expected Move** work for ALL types via the canonical `legs`; **Send to Paper** is shown only for credit structures (PCS/CCS/IC). See the "Multi-strategy Swing Scanner" section below) | built |
-| `/options/gamma` | Gamma (GEX/Charm/DEX/Vanna bars + flip/**single Call+Put walls** + intraday heatmap; **fixed ±20-strike window** around spot for bars+heatmap (`strikes_around`, consistent candle/cell size all day; heatmap `rowsize`=median gap; heatmap cropped to the window); **blended interpolated heatmaps** (intraday **and Term**) — smooth image, no lines, dark `HEAT_STOPS` colorscale (zero→transparent like the candlestick chart), transparent bg, off-white spot line, no fade, **press-and-hold tooltip** (`_HEAT_PRESS_TOOLTIP_JS`); bar/heatmap **width split grows with session** snapshot count; **flicker-free** in-place Highcharts updates; **symbol is a dropdown** — default `$SPX`, populated from the collected universe (watchlist minus `$VIX`) via `cache:options:gamma_symbols`, **syncs to the cached symbol on build + selecting auto-refreshes + repaints ignore foreign-symbol snapshots** (no revert to `$SPX`); Term shows the **next 5 expirations regardless of cadence** (`_term_chain`); **off-hours persistence** — last session's candles+heatmap held until the next trading day's midnight CT (`active_session_date`/`gamma_cleared` + `load_date_with_grid`); off-hours `spot=None` degrades gracefully; Explain works per-selected-symbol; **Analyze** calls Claude (forced `submit_analysis` tool) and opens an **infographic** tab — regime + bias gauge, per-index price-level ladder + tiles + **what-if** (rally/sell-off/chop), bottom **"Why is this happening"**; **code-authoritative 1-day Exp. move**; also **auto-runs 4×/day** (premarket / ~18 min after open / midday / close) into per-slot keys with **Auto briefings** buttons — see the "Gamma Analyze" section below) | built |
+| `/options/gamma` | Gamma (GEX/Charm/DEX/Vanna bars + flip/**single Call+Put walls** + intraday heatmap; **fixed ±20-strike window** around spot for bars+heatmap (`strikes_around`, consistent candle/cell size all day; heatmap `rowsize`=median gap; heatmap cropped to the window); **blended interpolated heatmaps** (intraday **and Term**) — smooth image, no lines, dark `HEAT_STOPS` colorscale (zero→transparent like the candlestick chart), transparent bg, off-white spot line, no fade, **press-and-hold tooltip** (`_HEAT_PRESS_TOOLTIP_JS`); bar/heatmap **width split grows with session** snapshot count; **flicker-free** in-place Highcharts updates; **symbol is a dropdown** — default `$SPX`, populated from the collected universe (watchlist minus `$VIX`) via `cache:options:gamma_symbols`, **syncs to the cached symbol on build + selecting auto-refreshes + repaints ignore foreign-symbol snapshots** (no revert to `$SPX`); Term shows the **next 5 expirations regardless of cadence** (`_term_chain`); **off-hours persistence** — last session's candles+heatmap held until the next trading day's midnight CT (`active_session_date`/`gamma_cleared` + `load_date_with_grid`); off-hours `spot=None` degrades gracefully; Explain works per-selected-symbol; **Analyze** calls Claude (forced `submit_analysis` tool) and opens an **infographic** tab — regime + bias gauge, per-index price-level ladder + tiles + **what-if** (rally/sell-off/chop), bottom **"Why is this happening"**; **code-authoritative 1-day Exp. move**; also **auto-runs 4×/day** (premarket / ~18 min after open / midday / close) into per-slot keys with **Auto briefings** buttons + a **History picker** (date + slot dropdown → a report regenerated from the persisted briefing history at `/options/gamma-history`) — see the "Gamma Analyze" section below) | built |
 | `/options/simulator` | Simulator (**multi-leg strategy builder** — a Strategy dropdown over the shared **editable leg-editor** (`leg_editor.py`) replaces the old single-contract selector — driving all three legacy tabs: **Replay** (re-prices the **netted** position along the underlying's recent path → stacked price + 5-Greek panels over a gap-compressed integer x-axis w/ a client-side scrub cursor) + What-if (a **dollar profit/loss payoff from entry**: P/L = position value (×100 contract multiplier) minus the **entry mark** (`whatif_baseline` = value at spot *now*) — so profit caps at the net credit, loss floors at width−credit, **matching the Calculator** — with a green profit fill above / red loss fill below breakeven (area `threshold:0` + `color`/`negativeColor`) + faint Profit/Loss washes + labels; Δt is **elapsed** days from now, per-leg decay → **calendars** correct, theta visible as Δt slides) + IV-shock; **Copy to Calculator** button; **dark-navy dashboard theme** via shared `theme.py`; **persists full UI state across navigation** (symbol/strategy/legs/sliders/active tab) + **auto-refreshes on return** via a single-user module snapshot — `page_state.py`; the **Symbol** field **Fetches the snapshot on tab-out (`focusout`) / Enter** (deduped) with the same **centered wait overlay** (`overlay.py`) until the meta lands; **compact leg cells** + no "Actions" header (shared `leg_editor`)) | built |
 | `/options/expected-move` | Expected Move (candlestick price history (6-mo daily) + forward **ATM-IV expected-move cone** to the option's expiration (green/red dashed, √-time fan) + leg **strike lines** (short solid / long dashed, put/call colored) + axis **crosshair** w/ Date(X)+Price(Y) label boxes; opened in a **new browser tab** via stash-handoff from Scanner/Paper/Captured/Calculator, or standalone w/ symbol+expiry input) | built |
 | `/options/rescue` | Rescue (at-risk credit spreads (PCS/CCS/IC) → **at-risk table** (paper+captured, heat-colored) → select a position → ranked **commission-aware adjustment menu**: close / partial-close / narrow / convert-IC / butterfly / roll-down/out/down-out / broken-wing / inverted / futures-hedge; each card shows gross/commission/net + metrics + legs + rationale + strategic context + warnings + score; execute cards have **Apply → confirm → `rescue_apply`** behind a stale-price guard, advisory cards show "manual"; nav badge from `cache:options:rescue_summary`) | built |
@@ -1805,6 +1828,45 @@ itself four times a day). All in `services/options_svc/compute.py` (Tier-2) +
   (tool-use render, EM override, parse defensiveness, slot cadence, scheduled-cache
   isolation) + `webgui/tests/test_analyze_route.py`. Verified live end-to-end (real
   Claude call → infographic; EM SPX 2.96→45.9 / SPY 0.27→4.22 / QQQ 0.52→8.0).
+
+**Gamma briefing history — store + CLI utility + in-app viewer (DONE — 2026-07-08).**
+Every briefing above is now persisted so past briefings can be browsed/regenerated.
+The design decision (deliberate): **store the STRUCTURED analysis payload, regenerate
+the report on demand** — compact, queryable, and future-proof (old briefings re-render
+in the current infographic design; the raw GEX numbers already live in
+`gex_history.db`, so only the AI's structured read is kept). Pieces:
+- **Store** `options-scanner/gamma_briefing_history_db.py` (Tier-3 SQLite,
+  `repo_paths.GAMMA_BRIEFING_DB` = `options-scanner/data/gamma_briefings.db`). One row
+  per **`(date, slot)`** (scheduled slots are unique/day → re-run REPLACEs; ad-hoc/
+  manual use time-stamped slots like `adhoc-1842` so each is kept). Columns: date,
+  slot, generated_at, symbol_scope, model, **bias**, **headline** (pulled out for
+  cheap trend queries) + **`analysis_json`** (the full structured dict = source of
+  truth). `connect`/`insert_briefing`/`get_briefing`/`briefings_for_date`/
+  `list_briefings`/`purge(keep_days)`; every fn takes an explicit conn for temp-DB tests.
+- **Persistence** `handlers._persist_briefing(res, slot, now)` (best-effort; only runs
+  with a real `analysis` — degraded no-chains/no-key/error pages are skipped; never
+  raises) wired into `run_scheduled_gamma_analyze` + the ad-hoc `gamma_analyze` command.
+- **Report builder** PURE `compute.analyze_history_doc(briefings, title)` — combines N
+  stored briefings into one standalone doc (each re-rendered via
+  `analyze_infographic_html` under a date/slot header), reusing `_ANALYZE_CSS`.
+- **In-app viewer.** `handlers.publish_gamma_briefing_index` publishes the metadata
+  index **`cache:options:gamma_briefings`** (startup + after each persist); the
+  **`gamma_history`** command (`run_gamma_history(bus, date, slot=None)`) regenerates a
+  date's (or a single slot's) report → **`cache:options:gamma_history`**, served raw at
+  **`/options/gamma-history`** (`webgui/main.py`). The `/options/gamma` page's
+  **History picker** — a date dropdown (from the index via the pure `history_dates`) +
+  a slot select (All / the four slots) + **Open** — enqueues `gamma_history` and opens
+  the regenerated report in a new tab on the version-poll (mirrors `_watch_analyze`).
+- **CLI utility** `services/options_svc/gamma_briefing_report.py` (run MANUALLY, never
+  in a request path): `--list [--days N]` / `--date YYYY-MM-DD [--slot S]` (single day,
+  slots combined) / `--range START END` / `--generate [--slot L]` (fresh run via
+  `compute.gamma_analyze` → store → report; needs the proxy + ANTHROPIC key). Writes
+  HTML under `options-scanner/data/gamma_reports/` (or `--out`).
+- **Restart `options_svc`** so persistence + the index publish go live (the DB starts
+  empty and fills going forward). gamma_briefing_history_db **7** + options_svc
+  handlers/scheduler/compute + webgui **689** green; verified live end-to-end (index
+  published, picker populated + Open→regenerate→serve, CLI `--list`/`--date` combined
+  report). Built per-layer TDD.
 
 **Options GUI polish batch (DONE — 2026-06-16).** A set of UI/UX fixes across the
 Options section (design/plan:

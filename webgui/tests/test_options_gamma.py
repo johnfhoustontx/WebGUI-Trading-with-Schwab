@@ -536,3 +536,15 @@ def test_flex_class_builds_arbitrary_value():
     assert g.flex_class(0.5) == "flex-[0.5_1_0%]"
     assert g.flex_class(1) == "flex-[1_1_0%]"
     assert g.flex_class(0, grow2=0, basis="0px") == "flex-[0_0_0px]"
+
+
+def test_history_dates_distinct_newest_first():
+    from pages.options import gamma as g
+    payload = {"briefings": [
+        {"date": "2026-07-08", "slot": "close"},
+        {"date": "2026-07-08", "slot": "open"},
+        {"date": "2026-07-02", "slot": "adhoc-1842"},
+    ]}
+    assert g.history_dates(payload) == ["2026-07-08", "2026-07-02"]  # distinct, order kept
+    assert g.history_dates(None) == []
+    assert g.history_dates({"briefings": []}) == []

@@ -650,6 +650,21 @@ def symbol_options(cached):
     return out
 
 
+def history_dates(cached):
+    """Distinct briefing dates (newest first) from the cached gamma_briefings index.
+
+    ``cached`` is ``{"briefings":[{date, slot, …}, …]}`` (metadata, already newest
+    first) or None. Used to populate the history-picker date dropdown."""
+    briefings = (cached or {}).get("briefings") if isinstance(cached, dict) else None
+    out, seen = [], set()
+    for b in (briefings or []):
+        d = (b or {}).get("date")
+        if d and d not in seen:
+            seen.add(d)
+            out.append(d)
+    return out
+
+
 def render():
     import bus_client
     from nicegui import ui, run
@@ -694,7 +709,18 @@ def render():
             _b.disable()
             _b.tooltip(f"{_title} $SPX/SPY/QQQ briefing — not generated yet today")
             sched_btns[_slot] = _b
-    # Collector status bar: status dot/text (colored) + last/next scan times.
+    # History picker: browse past stored briefings. Pick a date (+ optional slot) and
+    # Open regenerates the report from the stored analysis (via the gamma_history
+    # command) and opens it in a new tab. Dates come from cache:options:gamma_briefings.
+    with ui.row().classes("items-center gap-2 flex-wrap"):
+        ui.label("History:").classes("opacity-60 text-sm")
+        hist_date = ui.select([], label="Date").props("dense options-dense").classes("w-40")
+        hist_slot = ui.select(
+            {"": "All slots", "premarket": "Premarket", "open": "Open",
+             "midday": "Midday", "close": "Close"}, value="") \
+            .props("dense options-dense").classes("w-32")
+        hist_open = ui.button("Open", icon="history").props("flat dense")
+        hist_hint = ui.label("").classes("opacity-50 text-xs")
     # Read-only view published by the options service (cache:options:gex_status);
     # version-polled like gamma/explain/analyze below. Sits alongside (does NOT
     # replace) the "Next refresh" countdown above.
@@ -979,6 +1005,35 @@ def render():
         seen["analyze"] = version
         ui.navigate.to(f"/options/analyze?v={version}", new_tab=True)
 
+    def _refresh_history_dates(payload):
+        dates = history_dates(payload)
+        hist_date.options = dates
+        if dates and hist_date.value not in dates:
+            hist_date.value = dates[0]        # default to the newest
+        hist_date.update()
+        hist_hint.text = f"{len(dates)} day(s) stored" if dates else "no history yet"
+
+    @guard
+    def _open_history():
+        d = hist_date.value
+        if not d:
+            ui.notify("No stored briefings to view yet.", type="warning")
+            return
+        bus_client.request("options", {"type": "gamma_history",
+                                       "args": {"date": d, "slot": hist_slot.value or None}})
+        ui.notify("Building history report… opens in a new tab.")
+
+    @guard
+    def _watch_history(version):
+        # options_svc regenerated the history report → open it in a new tab (mirrors
+        # _watch_analyze). /options/gamma-history serves the cached HTML raw.
+        if version is None or version == seen.get("history"):
+            return
+        seen["history"] = version
+        ui.navigate.to(f"/options/gamma-history?v={version}", new_tab=True)
+
+    hist_open.on_click(_open_history)
+
     _SCHED_VIEWS = {s: f"options:gamma_analyze_{s}" for s in sched_btns}
     _sched_state = {s: {"ver": None, "date": None, "applied": None} for s in sched_btns}
 
@@ -1024,12 +1079,17 @@ def render():
         v = bus_client.read_versions([
             "options:gamma", "options:gex_status",
             "options:gamma_explain", "options:gamma_analyze",
+            "options:gamma_briefings", "options:gamma_history",
             *_SCHED_VIEWS.values()])
         await _maybe_repaint(v["options:gamma"])
         _maybe_repaint_status(v["options:gex_status"])
         _watch_explain(v["options:gamma_explain"])
         _watch_analyze(v["options:gamma_analyze"])
         _sync_sched_btns(v)
+        if v["options:gamma_briefings"] != seen.get("briefings"):
+            seen["briefings"] = v["options:gamma_briefings"]
+            _refresh_history_dates(bus_client.read("options:gamma_briefings"))
+        _watch_history(v["options:gamma_history"])
 
     def _set_symbol(sym):
         """Point the dropdown at ``sym`` (adding it to the options if the universe
@@ -1061,8 +1121,11 @@ def render():
     seen["explain"] = bus_client.read_version("options:gamma_explain")
     seen["analyze"] = bus_client.read_version("options:gamma_analyze")
     seen["status"] = bus_client.read_version("options:gex_status")
+    seen["briefings"] = bus_client.read_version("options:gamma_briefings")
+    seen["history"] = bus_client.read_version("options:gamma_history")
     _sync_sched_btns(bus_client.read_versions(list(_SCHED_VIEWS.values())))
     _paint_status(bus_client.read("options:gex_status"))
+    _refresh_history_dates(bus_client.read("options:gamma_briefings"))
 
     @guard_async
     async def _initial_load():

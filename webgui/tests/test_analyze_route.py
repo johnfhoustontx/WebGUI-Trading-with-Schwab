@@ -28,3 +28,8 @@ def test_analyze_view_for_default_is_adhoc():
     # No slot / unknown slot → the ad-hoc Analyze view.
     assert main.analyze_view_for(None) == "options:gamma_analyze"
     assert main.analyze_view_for("bogus") == "options:gamma_analyze"
+
+
+def test_gamma_history_route_registered():
+    paths = {getattr(r, "path", None) for r in app.routes}
+    assert "/options/gamma-history" in paths

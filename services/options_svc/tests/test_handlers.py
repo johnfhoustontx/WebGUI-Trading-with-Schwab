@@ -775,6 +775,92 @@ def test_run_scheduled_gamma_analyze_unknown_slot_noop(monkeypatch):
     assert bus.cache_get("cache:options:gamma_analyze_bogus") is None
 
 
+def test_persist_briefing_records_history(monkeypatch, tmp_path):
+    import datetime
+    from zoneinfo import ZoneInfo
+    import gamma_briefing_history_db as gbh
+    real = gbh.connect
+    monkeypatch.setattr(gbh, "connect", lambda db_path=None: real(tmp_path / "h.db"))
+
+    now = datetime.datetime(2026, 7, 2, 8, 0, tzinfo=ZoneInfo("America/Chicago"))
+    res = {"html": "<x>", "analysis": {"bias": -22, "headline": "Pinned",
+           "indices": [{"symbol": "$SPX", "spot": 7400}]}}
+    handlers._persist_briefing(res, "premarket", now)
+
+    got = gbh.get_briefing(real(tmp_path / "h.db"), "2026-07-02", "premarket")
+    assert got and got["bias"] == -22 and got["headline"] == "Pinned"
+    assert got["analysis"]["indices"][0]["spot"] == 7400
+
+
+def test_publish_gamma_briefing_index(monkeypatch, tmp_path):
+    import gamma_briefing_history_db as gbh
+    real = gbh.connect
+    monkeypatch.setattr(gbh, "connect", lambda db_path=None: real(tmp_path / "h.db"))
+    # seed two rows
+    c = real(tmp_path / "h.db")
+    for slot in ("open", "close"):
+        gbh.insert_briefing(c, date="2026-07-08", slot=slot, generated_at="t",
+                            symbol_scope="$SPX/SPY/QQQ", model="m", bias=-10,
+                            headline="h", analysis={"bias": -10, "indices": []})
+    c.close()
+
+    bus = Bus(fake=True)
+    handlers.publish_gamma_briefing_index(bus)
+    env = bus.cache_get("cache:options:gamma_briefings")
+    assert env is not None
+    slots = {b["slot"] for b in env.payload["briefings"]}
+    assert slots == {"open", "close"}
+    # metadata only (no heavy analysis payload in the index)
+    assert "analysis" not in env.payload["briefings"][0]
+
+
+def test_run_gamma_history_regenerates_report(monkeypatch, tmp_path):
+    import gamma_briefing_history_db as gbh
+    real = gbh.connect
+    monkeypatch.setattr(gbh, "connect", lambda db_path=None: real(tmp_path / "h.db"))
+    c = real(tmp_path / "h.db")
+    gbh.insert_briefing(c, date="2026-07-08", slot="midday", generated_at="t",
+                        symbol_scope="$SPX/SPY/QQQ", model="m", bias=-10,
+                        headline="Pinned",
+                        analysis={"regime": "Short gamma", "bias": -10,
+                                  "headline": "Pinned", "indices": [
+                                      {"symbol": "$SPX", "spot": 7400}]})
+    c.close()
+
+    bus = Bus(fake=True)
+    handlers.run_gamma_history(bus, "2026-07-08", slot="midday")
+    env = bus.cache_get("cache:options:gamma_history")
+    assert env is not None
+    assert env.payload["html"].lstrip().startswith("<!DOCTYPE html>")
+    assert "Short gamma" in env.payload["html"] and env.payload["date"] == "2026-07-08"
+
+
+def test_run_gamma_history_no_match_is_graceful(monkeypatch, tmp_path):
+    import gamma_briefing_history_db as gbh
+    real = gbh.connect
+    monkeypatch.setattr(gbh, "connect", lambda db_path=None: real(tmp_path / "h.db"))
+    bus = Bus(fake=True)
+    handlers.run_gamma_history(bus, "1999-01-01")  # nothing stored
+    env = bus.cache_get("cache:options:gamma_history")
+    assert env is not None and "No briefings found" in env.payload["html"]
+
+
+def test_persist_briefing_skips_without_analysis(monkeypatch, tmp_path):
+    import gamma_briefing_history_db as gbh
+    real, called = gbh.connect, {"n": 0}
+
+    def _c(db_path=None):
+        called["n"] += 1
+        return real(tmp_path / "h.db")
+
+    monkeypatch.setattr(gbh, "connect", _c)
+    import datetime
+    from zoneinfo import ZoneInfo
+    now = datetime.datetime(2026, 7, 2, 8, 0, tzinfo=ZoneInfo("America/Chicago"))
+    handlers._persist_briefing({"html": "degraded, no analysis"}, "premarket", now)
+    assert called["n"] == 0  # never even opened the DB (no analysis → no row)
+
+
 # ── Simulator (Task 2.6e) ────────────────────────────────────────────────────
 def test_sim_fetch_command_caches_meta(monkeypatch):
     bus = Bus(fake=True)

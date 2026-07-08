@@ -2096,6 +2096,43 @@ def analyze_infographic_html(data, subtitle=None) -> str:
     return "".join(parts)
 
 
+_HISTORY_CSS = """
+  .ga-sec { border-top:1px solid #213152; margin-top:26px; padding-top:10px; }
+  .ga-sec:first-of-type { border-top:0; margin-top:0; }
+  .ga-sec-h { color:#90caf9; font-size:.95rem; font-weight:600; margin:0 0 10px;
+    text-transform:uppercase; letter-spacing:.04em; }
+"""
+
+
+def analyze_history_doc(briefings, title="Gamma Briefings") -> str:
+    """Standalone HTML report combining several STORED briefings into one document.
+
+    Each ``briefings`` item is a row dict from ``gamma_briefing_history_db`` (an
+    ``analysis`` payload + ``date``/``slot``/``generated_at`` metadata); each is
+    re-rendered via ``analyze_infographic_html`` under a date/slot header. PURE +
+    deterministic (the report is regenerated from the stored data, never frozen), so
+    the utility + any future in-app viewer share one renderer. Rows without a usable
+    ``analysis`` are skipped."""
+    import html as _h
+    parts = []
+    for b in (briefings or []):
+        analysis = (b or {}).get("analysis")
+        if not analysis:
+            continue
+        hdr = _h.escape(f"{b.get('date', '')} · {b.get('slot', '')} · "
+                        f"{b.get('generated_at', '')}")
+        parts.append(f'<div class="ga-sec"><div class="ga-sec-h">{hdr}</div>'
+                     f'<div class="ga-body">{analyze_infographic_html(analysis)}</div></div>')
+    body = "".join(parts) or "<p>No briefings found for this selection.</p>"
+    return ("<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+            "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+            f"<title>{_h.escape(title)}</title>"
+            f"<style>{_ANALYZE_CSS}{_HISTORY_CSS}</style></head><body><div class=\"ga\">"
+            f"<div class=\"ga-title\">{_h.escape(title)}</div>"
+            f"<div class=\"ga-sub\">{len(parts)} briefing(s)</div>"
+            f"{body}</div></body></html>")
+
+
 def gamma_analyze(client=None, label: str | None = None) -> dict:
     """Run the bundled SPX/SPY/QQQ briefing through Claude → ``{"html", "prompt"}``.
 

@@ -356,6 +356,12 @@ async def loop(bus):
         await loop_.run_in_executor(None, handlers.publish_gex_status, bus)
     except Exception:
         log.exception("startup publish_gex_status degraded")
+    # One-shot startup publish of the stored-briefings index so the Gamma page's
+    # history picker is populated on first load (refreshed after each new briefing).
+    try:
+        await loop_.run_in_executor(None, handlers.publish_gamma_briefing_index, bus)
+    except Exception:
+        log.exception("startup publish_gamma_briefing_index degraded")
     while True:
         now = _market_now()  # one clock read per tick, reused by every gate below
         # A4: decide which branches are DUE this tick (synchronous slot-gating,
