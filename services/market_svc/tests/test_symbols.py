@@ -14,15 +14,17 @@ _EXPECTED_DISPLAYS = {
     "XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU", "XLV", "XLY",
     "TLT", "HYG", "LQD",
     "GDLC", "VCX",
+    "MCHI", "EWJ", "EWY", "INDA", "EWT", "EWZ", "EWA", "EWU", "EWW", "EWC",
 }
 
 
 def test_every_csv_symbol_is_mapped():
-    # 47 tiles: the 48 CSV rows collapse ($PCALL+$PCSP → ONE external put/call tile,
-    # the redundant HYG-LQD spread dropped), plus XLB (Materials) added to Sector SPDR.
-    assert len(S.SYMBOL_MAP) == 47
+    # 57 tiles: the 48 CSV rows collapse ($PCALL+$PCSP → ONE external put/call tile,
+    # the redundant HYG-LQD spread dropped), XLB (Materials) added to Sector SPDR, plus
+    # 10 single-country iShares MSCI ETFs in the Countries frame.
+    assert len(S.SYMBOL_MAP) == 57
     # A future mistyped ticker/display must fail: the full display set is pinned.
-    assert len(_EXPECTED_DISPLAYS) == 47
+    assert len(_EXPECTED_DISPLAYS) == 57
     assert {t["display"] for t in S.SYMBOL_MAP} == _EXPECTED_DISPLAYS
     # Every entry has a non-empty display; every quote tile has a real quote_symbol.
     for t in S.SYMBOL_MAP:
@@ -36,7 +38,7 @@ def test_categories_cover_the_expected_set_in_frame_order():
         "Volatility", "Options Sentiment", "Market Internals / Breadth", "Currency",
         "Cash Index", "Equity Index Futures", "Broad-Market ETF",
         "Sector SPDR", "Thematic / Industry ETF", "Factor / Momentum ETF",
-        "Fixed Income / Credit ETF", "Crypto / Alternatives",
+        "Fixed Income / Credit ETF", "Crypto / Alternatives", "Countries",
     ]
     # every mapped tile's category is in the order list
     assert {t["category"] for t in S.SYMBOL_MAP} <= set(S.CATEGORY_ORDER)

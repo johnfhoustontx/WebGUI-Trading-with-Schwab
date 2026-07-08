@@ -23,7 +23,7 @@ CATEGORY_ORDER = [
     "Volatility", "Options Sentiment", "Market Internals / Breadth", "Currency",
     "Cash Index", "Equity Index Futures", "Broad-Market ETF",
     "Sector SPDR", "Thematic / Industry ETF", "Factor / Momentum ETF",
-    "Fixed Income / Credit ETF", "Crypto / Alternatives",
+    "Fixed Income / Credit ETF", "Crypto / Alternatives", "Countries",
 ]
 
 
@@ -49,6 +49,7 @@ _INT = "Market Internals / Breadth"
 _SEC = "Sector SPDR"
 _THM = "Thematic / Industry ETF"
 _BRD = "Broad-Market ETF"
+_CTY = "Countries"
 
 SYMBOL_MAP = [
     # Volatility (inverted — fear up = risk-off)
@@ -114,6 +115,17 @@ SYMBOL_MAP = [
     # Crypto / Alternatives
     _q("GDLC", "GDLC", "Grayscale CoinDesk Crypto 5 ETF", "Crypto / Alternatives"),
     _q("VCX", "VCX", "Fundrise Innovation Fund (private venture)", "Crypto / Alternatives"),
+    # Countries (single-country iShares MSCI ETFs; literal up=green)
+    _q("MCHI", "MCHI", "China — iShares MSCI China ETF", _CTY),
+    _q("EWJ", "EWJ", "Japan — iShares MSCI Japan ETF", _CTY),
+    _q("EWY", "EWY", "South Korea — iShares MSCI South Korea ETF", _CTY),
+    _q("INDA", "INDA", "India — iShares MSCI India ETF", _CTY),
+    _q("EWT", "EWT", "Taiwan — iShares MSCI Taiwan ETF", _CTY),
+    _q("EWZ", "EWZ", "Brazil — iShares MSCI Brazil ETF", _CTY),
+    _q("EWA", "EWA", "Australia — iShares MSCI Australia ETF", _CTY),
+    _q("EWU", "EWU", "United Kingdom — iShares MSCI United Kingdom ETF", _CTY),
+    _q("EWW", "EWW", "Mexico — iShares MSCI Mexico ETF", _CTY),
+    _q("EWC", "EWC", "Canada — iShares MSCI Canada ETF", _CTY),
 ]
 
 
