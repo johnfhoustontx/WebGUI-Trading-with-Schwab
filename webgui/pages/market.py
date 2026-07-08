@@ -3,7 +3,7 @@
 Reads cache:market:dashboard (published by market_svc), renders one framed
 panel per category with tiles colored by risk-on/off condition. Repaints in
 place on the ~2 s version bump. Tailwind-first: data-driven colors map from the
-finite color_state set to fixed background classes (no .style()).
+finite color_state set to fixed background classes (no inline styling).
 """
 import bus_client
 from pages.ui_guard import guard

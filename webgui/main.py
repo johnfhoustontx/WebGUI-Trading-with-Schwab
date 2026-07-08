@@ -209,6 +209,7 @@ FLAT_NAV = [
 # "More" is an expandable group for reports / diagnostics / config. (route, label, icon)
 # Settings is itself a nested sub-group (its children render indented beneath it).
 MORE_CHILDREN = [
+    ("/market", "Market Dashboard", "dashboard"),
     ("/eod", "EOD Report", "summarize"),
     ("/status", "System Status", "monitor_heart"),
     ("/settings", "Settings", "settings"),
@@ -836,6 +837,13 @@ def eod_detail_page() -> None:
     with _layout("/eod", "EOD Report — Detail"):
         from pages import eod
         eod.render_detail()
+
+
+@ui.page("/market")
+def market_page() -> None:
+    with _layout("/market", "Market Dashboard"):
+        from pages import market
+        market.render()
 
 
 @ui.page("/status")

@@ -213,6 +213,15 @@ The morning agent proposes trades; you approve or skip. Orders are **simulated**
 - **Performance** — win rate and P&L of past decisions. It also runs itself at
   09:28 ET each weekday.
 """,
+    "/market": """
+**Market Dashboard — the simple version**
+
+A live grid of macro tickers, grouped into framed panels by category.
+
+- **Colored tiles** — green means risk-on (up), red means risk-off, grey is flat
+  or has no data. Fear gauges like VIX flip: up = red.
+- **Auto-updates** roughly every 2 seconds during market hours.
+""",
     "/eod": """
 **EOD Report — the simple version**
 
