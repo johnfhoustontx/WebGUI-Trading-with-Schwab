@@ -1051,7 +1051,7 @@ condition**. Sixth Tier-2 service. Pieces:
   `color_state`, and publishes **`cache:market:dashboard`** (`skip_unchanged=True`, so no
   repaint on byte-identical ticks). No command handler — the page only reads.
 - **PURE modules.** `symbols.py` = the **CSV→Schwab symbol map** (single source of truth):
-  57 tiles with per-symbol **polarity** (`normal` up=risk-on / `inverted` up=risk-off) +
+  55 tiles with per-symbol **polarity** (`normal` up=risk-on / `inverted` up=risk-off) +
   `kind` (`quote`/`spread`/`external`), encoding the translations (`SPX`→`$SPX`, `VIX`→
   `$VIX`, `SKEW`→`$SKEW`, `/ES[U26]`→`/ESU26`) and the **equivalents for symbols Schwab
   can't quote** (`$DXY`→**`UUP`**; `$PCALL`+`$PCSP`→one **"Put/Call"** tile

@@ -67,8 +67,6 @@ SYMBOL_MAP = [
     _q("$DECN", "$DECN", "NYSE declining issues", _INT, "inverted", value_only=True),
     _spread("$ADVN-$DECN", "$ADVN", "$DECN", "diff_last",
             "Net advancers (breadth spread)", _INT, "normal"),
-    _q("$ADD", "$ADD", "NYSE advance/decline line (net)", _INT, "normal", value_only=True),
-    _q("$ADSPD", "$ADSPD", "Advance/decline spread", _INT, "normal", value_only=True),
     _q("$TICK", "$TICK", "NYSE TICK", _INT, "normal", value_only=True),
     # Currency (equivalent: UUP; inverted — dollar strength = risk-off)
     _q("$DXY", "UUP", "US Dollar Index (via UUP proxy)", "Currency", "inverted"),

@@ -4,7 +4,7 @@ from services.market_svc import symbols as S
 _EXPECTED_DISPLAYS = {
     "VIX", "VIX1D", "VIX3M", "SKEW",
     "Put/Call",
-    "$ADVN", "$DECN", "$ADVN-$DECN", "$ADD", "$ADSPD", "$TICK",
+    "$ADVN", "$DECN", "$ADVN-$DECN", "$TICK",
     "$DXY",
     "SPX", "NDX",
     "/ES[U26]", "/NQ[U26]",
@@ -19,12 +19,12 @@ _EXPECTED_DISPLAYS = {
 
 
 def test_every_csv_symbol_is_mapped():
-    # 57 tiles: the 48 CSV rows collapse ($PCALL+$PCSP → ONE external put/call tile,
-    # the redundant HYG-LQD spread dropped), XLB (Materials) added to Sector SPDR, plus
-    # 10 single-country iShares MSCI ETFs in the Countries frame.
-    assert len(S.SYMBOL_MAP) == 57
+    # 55 tiles: $PCALL+$PCSP → ONE external put/call tile; the redundant HYG-LQD spread
+    # dropped; $ADD/$ADSPD dropped (Schwab serves no data for them + they duplicate the
+    # $ADVN-$DECN net-advancers tile); XLB added to Sector SPDR; +10 country ETFs.
+    assert len(S.SYMBOL_MAP) == 55
     # A future mistyped ticker/display must fail: the full display set is pinned.
-    assert len(_EXPECTED_DISPLAYS) == 57
+    assert len(_EXPECTED_DISPLAYS) == 55
     assert {t["display"] for t in S.SYMBOL_MAP} == _EXPECTED_DISPLAYS
     # Every entry has a non-empty display; every quote tile has a real quote_symbol.
     for t in S.SYMBOL_MAP:
