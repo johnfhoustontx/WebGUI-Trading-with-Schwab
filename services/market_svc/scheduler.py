@@ -1,0 +1,57 @@
+"""Market dashboard scheduler — poll the proxy, publish, repeat.
+
+~2 s cadence during regular trading hours; throttled to ~15 s off-hours/
+weekends/holidays (indices/internals are stale then; futures still move but a
+glance-cadence suffices). The market-hours gate mirrors the other services.
+"""
+import asyncio
+import datetime as _dt
+import logging
+from datetime import date as _date, time as _time
+from zoneinfo import ZoneInfo
+
+from services.market_svc import compute, handlers
+
+_log = logging.getLogger("market_svc.scheduler")
+
+RTH_INTERVAL_SEC = 2
+OFFHOURS_INTERVAL_SEC = 15
+
+_CT = ZoneInfo("America/Chicago")
+_RTH_START = (8, 30)
+_RTH_END = (15, 0)
+# Keep in sync with the other service schedulers + webgui/alerts.py. Update yearly.
+_HOLIDAYS = {
+    _date(2026, 1, 1), _date(2026, 1, 19), _date(2026, 2, 16), _date(2026, 4, 3),
+    _date(2026, 5, 25), _date(2026, 6, 19), _date(2026, 7, 3), _date(2026, 9, 7),
+    _date(2026, 11, 26), _date(2026, 12, 25),
+    _date(2027, 1, 1), _date(2027, 1, 18), _date(2027, 2, 15), _date(2027, 3, 26),
+    _date(2027, 5, 31), _date(2027, 6, 18), _date(2027, 7, 5), _date(2027, 9, 6),
+    _date(2027, 11, 25), _date(2027, 12, 24),
+}
+
+
+def _is_rth(now):
+    if now.weekday() >= 5 or now.date() in _HOLIDAYS:
+        return False
+    return _time(*_RTH_START) <= now.time() <= _time(*_RTH_END)
+
+
+def poll_interval(now=None):
+    """Seconds until the next poll — fast during RTH, slow off-hours (pure)."""
+    now = now or _dt.datetime.now(_CT)
+    return RTH_INTERVAL_SEC if _is_rth(now) else OFFHOURS_INTERVAL_SEC
+
+
+async def loop(bus) -> None:
+    """Poll → publish → sleep(poll_interval), forever. Never raises out."""
+    loop_ = asyncio.get_event_loop()
+    while True:
+        try:
+            payload = await loop_.run_in_executor(None, compute.collect, bus)
+            await loop_.run_in_executor(None, handlers.publish, bus, payload)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 — never let the scheduler die.
+            _log.exception("market poll cycle failed")
+        await asyncio.sleep(poll_interval())
