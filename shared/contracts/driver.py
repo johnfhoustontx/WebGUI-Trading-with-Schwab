@@ -28,7 +28,7 @@ class AutonomousState(_Base):
     chosen / clamped / rejected trades — and ``perf``, the driver paper account's
     performance scorecard (win rate / profit factor / P&L by symbol & strategy,
     sourced from ``cache:options:driver_paper_perf``). Loose dicts — the page
-    tolerates sparse rows, like ``ApprovalState`` leaves its proposed trades loose.
+    tolerates sparse/missing rows defensively.
     """
 
     date: str = ""

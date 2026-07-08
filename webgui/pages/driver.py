@@ -109,9 +109,7 @@ def current_day_decisions(decisions, today_ct=None):
 
 # ── driver realized-performance table (from the isolated paper account's CLOSED
 # trades) ────────────────────────────────────────────────────────────────────────
-# Replaces the dead legacy morning-agent ``trade_log.json`` ledger, which only ever
-# showed never-closing "polled" equity/futures rows at $0. These are the driver's
-# ACTUAL closed options credit spreads with real realized P&L, read from
+# The driver's ACTUAL closed options credit spreads with real realized P&L, read from
 # ``cache:options:driver_paper_account['closed_positions']`` — updated every 5-min
 # manage cycle (timely), so realized results appear as positions close.
 _EXIT_REASON_LABELS = {
