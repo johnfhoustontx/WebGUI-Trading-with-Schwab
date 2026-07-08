@@ -20,6 +20,17 @@ def test_tile_text_formats_last_and_change():
     assert "3.6" in txt["change"] and "%" in txt["change"]
 
 
+def test_tile_text_negative_change_signs():
+    t = {"display": "SPX", "last": 7503.85, "change": -1.5, "change_pct": -0.8,
+         "value_only": False}
+    txt = market.tile_text(t)
+    assert txt["last"] == "7503.85"
+    # negatives: no leading '+', explicit '-' from the float formatting
+    assert "+" not in txt["change"]
+    assert "-1.50" in txt["change"]
+    assert "-0.80%" in txt["change"]
+
+
 def test_tile_text_value_only_hides_change():
     t = {"display": "$TICK", "last": 300.0, "change": None, "change_pct": None,
          "value_only": True}

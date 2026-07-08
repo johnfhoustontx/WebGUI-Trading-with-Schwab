@@ -27,6 +27,12 @@ def bg_class(state):
     return _BG.get(state, _BG["no_data"])
 
 
+# Union of every class token in _BG — removed before adding the current state's
+# class on an in-place recolor so bg/text utilities never stack (sentiment-page
+# idiom). dict.fromkeys dedups while preserving order.
+_ALL_BG_CLASSES = " ".join(dict.fromkeys(" ".join(_BG.values()).split()))
+
+
 def _fmt(v, nd=2):
     try:
         f = float(v)
@@ -55,25 +61,59 @@ def tile_text(t):
 def render():
     ui.label("Market Dashboard").classes("text-h6 text-slate-100")
     board = ui.row().classes("w-full flex-wrap gap-4 items-start")
-    state = {"version": None}
+    # tiles: display -> {"container", "last", "change", "state"} element handles.
+    state = {"version": None, "built": False, "tiles": {}}
 
-    def _paint(payload):
+    def _build(payload):
+        """First paint: build the framed board ONCE, stash per-tile handles."""
         board.clear()
+        state["tiles"] = {}
         with board:
             for cat in payload.get("categories", []):
                 with ui.column().classes(
                         "rounded-lg border border-slate-700 bg-slate-900/40 p-3 gap-2"):
-                    ui.label(cat["category"]).classes(
+                    ui.label(cat.get("category", "")).classes(
                         "text-xs uppercase tracking-wide text-slate-400")
                     with ui.row().classes("flex-wrap gap-2"):
-                        for t in cat["tiles"]:
+                        for t in cat.get("tiles", []):
                             txt = tile_text(t)
-                            with ui.column().classes(
-                                    f"rounded-md p-2 w-[120px] gap-0 {bg_class(t['color_state'])}"):
-                                ui.label(t["display"]).classes("text-sm font-semibold truncate")
-                                ui.label(txt["last"]).classes("text-base font-bold")
-                                if txt["change"]:
-                                    ui.label(txt["change"]).classes("text-xs")
+                            container = ui.column().classes(
+                                "rounded-md p-2 w-[120px] gap-0 "
+                                f"{bg_class(t.get('color_state'))}")
+                            with container:
+                                ui.label(t.get("display", "")).classes(
+                                    "text-sm font-semibold truncate")
+                                last_lbl = ui.label(txt["last"]).classes(
+                                    "text-base font-bold")
+                                change_lbl = ui.label(txt["change"]).classes("text-xs")
+                                ui.tooltip(t.get("description", ""))
+                            state["tiles"][t.get("display")] = {
+                                "container": container, "last": last_lbl,
+                                "change": change_lbl, "state": t.get("color_state")}
+        state["built"] = True
+
+    def _update(payload):
+        """Subsequent paints: update label text + swap bg class IN PLACE."""
+        for cat in payload.get("categories", []):
+            for t in cat.get("tiles", []):
+                h = state["tiles"].get(t.get("display"))
+                if not h:  # a new tile appeared → structure changed; rebuild.
+                    _build(payload)
+                    return
+                txt = tile_text(t)
+                h["last"].text = txt["last"]
+                h["change"].text = txt["change"]
+                new_state = t.get("color_state")
+                if new_state != h["state"]:
+                    h["container"].classes(
+                        remove=_ALL_BG_CLASSES, add=bg_class(new_state))
+                    h["state"] = new_state
+
+    def _paint(payload):
+        if state["built"]:
+            _update(payload)
+        else:
+            _build(payload)
 
     @guard
     def _poll():
@@ -86,9 +126,9 @@ def render():
                 state["version"] = v
                 _paint(payload)
 
-    payload = bus_client.read(VIEW)
+    payload, version = bus_client.read_full(VIEW)
     if payload:
-        state["version"] = bus_client.read_version(VIEW)
+        state["version"] = version
         _paint(payload)
     else:
         with board:
