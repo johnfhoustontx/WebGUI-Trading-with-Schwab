@@ -19,6 +19,7 @@ echo   options_svc   http://127.0.0.1:8211  (incl. 5-min GEX history collection)
 echo   portfolio_svc http://127.0.0.1:8212  (sector breakdown + live-streaming P&L)
 echo   trade_svc     http://127.0.0.1:8213  (on-demand symbol analysis)
 echo   driver_svc    http://127.0.0.1:8214  (morning-agent order-approval queue)
+echo   market_svc    http://127.0.0.1:8215  (live macro-ticker dashboard, ~2s poll)
 echo   web gui       http://127.0.0.1:8500
 echo ============================================
 echo.
@@ -98,6 +99,15 @@ echo Starting driver service in a new window...
 start "Driver Service (:8214)" cmd /k ""%PY%" services\driver_svc\app.py"
 echo.
 
+REM --- 4d. market service (:8215): live macro-ticker dashboard ---
+REM     Tier-2 processing service. Polls the proxy /quotes for ~48 macro tickers
+REM     (indices, VIX/SKEW, internals, futures, sector/thematic ETFs) on a ~2s
+REM     RTH cadence, derives semantic risk-on/off tile colors, and publishes
+REM     cache:market:dashboard; the web GUI Market Dashboard page reads from there.
+echo Starting market service in a new window...
+start "Market Service (:8215)" cmd /k ""%PY%" services\market_svc\app.py"
+echo.
+
 REM --- 5. NiceGUI web app (:8500) ---
 echo Starting NiceGUI web app on :8500 in a new window...
 start "Schwab Web GUI (:8500)" cmd /k ""%PY%" webgui\main.py"
@@ -116,11 +126,12 @@ start "" "http://127.0.0.1:8500"
 
 echo.
 echo ============================================
-echo   All services started. Seven windows are
+echo   All services started. Eight windows are
 echo   running: proxy, sentiment service, options
 echo   service (incl. GEX collection), portfolio
-echo   service, trade service, driver service, web
-echo   gui. (Memurai runs as a Windows service.)
+echo   service, trade service, driver service,
+echo   market service, web gui. (Memurai runs as a
+echo   Windows service.)
 echo   Close those windows to stop them.
 echo ============================================
 echo.

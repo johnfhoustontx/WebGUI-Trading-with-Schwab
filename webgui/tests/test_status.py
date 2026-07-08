@@ -14,7 +14,7 @@ def _iso(seconds_ago):
 def test_component_targets_covers_every_tier():
     keys = [t["key"] for t in status.component_targets()]
     for expected in ("memurai", "proxy", "sentiment", "options", "portfolio",
-                     "trade", "driver", "webgui"):
+                     "trade", "driver", "market", "webgui"):
         assert expected in keys, f"{expected} missing from {keys}"
 
 
@@ -162,6 +162,14 @@ def test_restart_spec_service_waits_for_proxy():
     assert spec["kind"] == "script"
     assert spec["script"] == r"services\options_svc\app.py"
     assert spec["kill_port"] == status.SERVICE_PORTS["options"]
+    assert spec["wait_port"] == status.PROXY_PORT
+
+
+def test_restart_spec_market_service():
+    spec = status.restart_spec(_target("market", "service"))
+    assert spec["kind"] == "script"
+    assert spec["script"] == r"services\market_svc\app.py"
+    assert spec["kill_port"] == status.SERVICE_PORTS["market"]
     assert spec["wait_port"] == status.PROXY_PORT
 
 
