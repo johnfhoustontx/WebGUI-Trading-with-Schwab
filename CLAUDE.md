@@ -982,8 +982,8 @@ services → webgui. Full design: [3-tier design doc](docs/plans/2026-06-15-thre
 
 `webgui/main.py` is the server + nav shell: a left-nav with expandable
 **Options**, **Sentiment**, and **More** groups (Sentiment children: Sentiment
-dashboard + Sector Rotation; **More** children: EOD Report + System Status +
-Settings + Terminate) plus flat Trade / Portfolio / Driver items. The groups
+dashboard + Sector Rotation; **More** children: Market Dashboard + EOD Report +
+System Status + Settings + Terminate) plus flat Trade / Portfolio / Driver items. The groups
 **start EXPANDED by default** (`_NAV_OPEN.get(..., True)`) and stay open until the
 user manually collapses one (`_NAV_OPEN` persists each toggle, single-user); the
 **inter-item spacing is tight** (`_NAV_CSS`: flex gap 2px, link padding 4px,
@@ -1033,8 +1033,58 @@ Routes:
 | `/settings` | Settings (GUI prefs via `app_settings`: scanner **audio alert** on/off + sound + volume, only-during-market-hours, min-score-to-alert; desktop-notification toggle + permission grant + Test sound. Extensible — first batch) | built |
 | `/portfolio` | Portfolio (3-tier, `services/portfolio_svc` :8212: **Holdings / Sectors / Performance** tabs over the portfolio model — sector breakdown, vs-sector RS, since-purchase excess, benchmark over/under-weight, tailwind; **Performance** scorecard (return/capital/risk/entry grades + composite + ann. return + drawdown) with a per-position **advisory suggestions** detail pane; **live-streaming P&L** via the service's proxy SSE consumer republishing each tick; proxy/stream status bar; persists across nav) | built |
 | `/eod` · `/eod/detail` | EOD Report (pure-webgui aggregator over `options:*` + `driver:*` caches. **Summary** = headline tiles + a **verbose Daily / Weekly(WTD) / MTD performance** block **per book** — the manual paper **ledger** (`options:paper_trades`) and the **Driver** account (`options:driver_paper_account`, incl. its new `closed_positions`) shown separately (realized P&L bucketed by **exit** date; opened/credit by **entry** date; a per-book now-line = equity/session-P&L/open-unrealized/open-count). **Detailed** = the same performance + **trade-type breakdowns** (by **strategy** PCS/CCS/IC, by **0-DTE/Swing**, by **status** Open/Closed/Expired) for each book + full trade/scanner/captured/driver tables. **Navigation**: a jump-link **TOC** + every section in a native **`<details>`** (collapsible, **no JS** — works in-app AND in the exported files). **Generate** snapshots the caches → standalone `summary.html` + `detail.html` archived under `webgui/data/eod/<date>/`; `/eod/file` serves them raw. Pure builders (`normalize_trades`/`period_buckets`/`breakdown_rows`/`performance_table_html`/`breakdown_table_html`/`toc`/`details_section`) unit-tested. Realized reads `$0`/`—` until trades close — by design, not a bug) | built |
-| `/status` | System Status (pure-webgui health board: overall up/down banner + per-component cards probing **Memurai** PING, **schwab-proxy** `/health`, **Schwab Authorization** (OAuth token state, with an **Authorize** button → proxy `/auth`), the **five domain services** `/health`, and **webgui** itself; plus a **published-data-freshness** table — each domain's cache version + age, flagging stale scheduled views; **per-component Restart button on offline cards** — proxy/services relaunch via `tools\restart_one.bat`, Memurai via `Start-Service`; off-thread sweep, auto-refresh 15 s + manual) | built |
-| `/terminate` | Terminate (guarded "stop the whole local stack" page: red **Stop all services** button behind a confirm dialog → spawns `stop_all.bat` detached via `cmd /c start`, which kills the proxy + 5 services + this web app by listening port; **Memurai is left running**; the page goes unresponsive after confirm, by design) | built |
+| `/market` | Market Dashboard (3-tier, `services/market_svc` :8215: a live grid of ~48 macro tickers from `symbol_categories.csv`, grouped into a **framed panel per category** laid out macro→tape→rotation (Volatility/Options-Sentiment/Internals/Currency · Cash-Index/Futures/Broad-ETF/Custom-Spread · Sector/Thematic/Factor/Fixed-Income/Crypto). Each **tile** shows symbol + description (hover tooltip) + last + net/%-change on a **semantic risk-on/off colored background** (green risk-on / red risk-off / grey no-data, intensity by magnitude) — **polarity-aware** (VIX/SKEW/put-call/TLT/UUP shade RED on up-moves). `market_svc` polls the proxy's raw `/quotes` on a **~2 s RTH cadence** (15 s off-hours), normalizes change across INDEX/EQUITY/FUTURE, computes the `$ADVN-$DECN` + `HYG-LQD` spreads, and reads the app's own cap-weighted put/call from `cache:sentiment:composite` → publishes `cache:market:dashboard`; the page version-polls + **updates tiles in place** (no per-tick rebuild). **CSV→Schwab symbol map** handles the translations (`SPX`→`$SPX`, `VIX`→`$VIX`, `/ES[U26]`→`/ESU26`) + **equivalents for symbols Schwab can't quote** (`$DXY`→`UUP`; `$PCALL`/`$PCSP`→the sentiment cap-weighted P/C tile). See the "Market Dashboard" section below) | built |
+| `/status` | System Status (pure-webgui health board: overall up/down banner + per-component cards probing **Memurai** PING, **schwab-proxy** `/health`, **Schwab Authorization** (OAuth token state, with an **Authorize** button → proxy `/auth`), the **six domain services** `/health` (incl. `market_svc` :8215), and **webgui** itself; plus a **published-data-freshness** table — each domain's cache version + age (incl. `market:dashboard`), flagging stale scheduled views; **per-component Restart button on offline cards** — proxy/services relaunch via `tools\restart_one.bat`, Memurai via `Start-Service`; off-thread sweep, auto-refresh 15 s + manual) | built |
+| `/terminate` | Terminate (guarded "stop the whole local stack" page: red **Stop all services** button behind a confirm dialog → spawns `stop_all.bat` detached via `cmd /c start`, which kills the proxy + 6 services + this web app by listening port; **Memurai is left running**; the page goes unresponsive after confirm, by design) | built |
+
+**Market Dashboard (`/market`) — DONE (2026-07-07).** A new **More → Market Dashboard**
+page streaming a live grid of ~48 macro tickers (from `symbol_categories.csv`), grouped
+into a **framed panel per category** and colored by **semantic risk-on/off market
+condition**. Sixth Tier-2 service. Pieces:
+- **New service `services/market_svc` (:8215, read-only).** A scheduler polls the proxy's
+  **raw `/quotes`** endpoint (not `SchwabProxyClient.get_quotes`, which discards
+  `assetMainType`/`futurePercentChange`) for all real symbols in ONE batched call on a
+  **~2 s RTH cadence** (`scheduler.poll_interval`, throttled to 15 s off-hours/weekends/
+  holidays via the shared `_HOLIDAYS` gate), normalizes change across INDEX/EQUITY/FUTURE,
+  computes the two spreads, reads the app's own cap-weighted put/call, derives a per-tile
+  `color_state`, and publishes **`cache:market:dashboard`** (`skip_unchanged=True`, so no
+  repaint on byte-identical ticks). No command handler — the page only reads.
+- **PURE modules.** `symbols.py` = the **CSV→Schwab symbol map** (single source of truth):
+  47 tiles with per-symbol **polarity** (`normal` up=risk-on / `inverted` up=risk-off) +
+  `kind` (`quote`/`spread`/`external`), encoding the translations (`SPX`→`$SPX`, `VIX`→
+  `$VIX`, `SKEW`→`$SKEW`, `/ES[U26]`→`/ESU26`) and the **equivalents for symbols Schwab
+  can't quote** (`$DXY`→**`UUP`**; `$PCALL`+`$PCSP`→one **"Put/Call (cap-wt sectors)"** tile
+  fed from `cache:sentiment:composite` → `live.sector_pcr`). `classify.py` = pure
+  `normalize_quote` (asset-type-aware % field), `spread_value` (`$ADVN-$DECN` = leg last
+  diff, colored by SIGN not magnitude since a count isn't a %; `HYG-LQD` = HY %chg − IG %chg,
+  risk-on when HY leads), and `color_state` (polarity × sign × intensity → 6 buckets +
+  `no_data`). `compute.build_dashboard` is PURE over an already-fetched raw dict + pcr; the
+  `SYMBOL_MAP` whitelist iteration means the proxy's `errors` bucket can never become a
+  bogus tile.
+- **Coloring (design decision — semantic, not literal up/down).** Green = risk-on, red =
+  risk-off, grey = flat/no-data, intensity by magnitude. **Inverted** instruments shade RED
+  on up-moves: VIX/VIX1D/VIX3M, SKEW, the put/call tile, `UUP` (dollar strength), `TLT`
+  (long-duration flight-to-safety). Defensive equity sectors (XLP/XLU/XLV) stay **literal**
+  up=green (deliberate). Contract `shared/contracts/market.py:MarketDashboard`.
+- **Page `webgui/pages/market.py` (Tier-1, engine-free).** Reads `cache:market:dashboard`,
+  paints framed category panels (macro→tape→rotation frame order) of colored tiles
+  (symbol + description tooltip + last + net/%-change), version-polls, and **updates tiles
+  IN PLACE** (build-once + `.classes(remove=…, add=…)` bg swap keyed by the unique display —
+  no per-tick DOM rebuild). Tailwind-first (data-driven colors from a finite `_BG` map, no
+  `.style()`). Wired into `MORE_CHILDREN` + `/market` route; surfaced on `/status` (health
+  board + freshness) and killed by `/terminate` (`stop_all.py` iterates `SERVICE_PORTS`).
+- **"Streamed" caveat.** Schwab's SSE streamer is equities-only (indices/internals/VIX have
+  NO streaming service; futures would need a proxy `LEVELONE_FUTURES` bridge), so ~half the
+  symbols are REST-only regardless — the honest uniform path is the ~2 s poll (visually
+  continuous). **Launch:** `start_all.bat`/`start_all_wt.bat` launch it as the 8th window/tab.
+  **Restart `market_svc` (+ the webgui to pick up the new route)** to see it live.
+  market_svc **30** + shared/contracts **43** + webgui **687** green; **live-verified
+  end-to-end** (real proxy+Redis → all 47 tiles populated with correct semantic colors, incl.
+  UUP/put-call equivalents; VIX+3.6%→risk_off_strong, TLT−1.1%→risk_on_strong,
+  $ADVN-$DECN=−465→risk_off_mild). Built subagent-by-subagent (TDD, two-stage spec+quality
+  review per layer). Design/plan:
+  [design](docs/plans/2026-07-07-market-dashboard-design.md) /
+  [plan](docs/plans/2026-07-07-market-dashboard-plan.md).
 
 **Multi-strategy Swing Scanner (`/options/swing`) — Phase 1 DONE (2026-06-30).** The
 Swing Scanner was expanded from a credit-spread-only premium scanner to a **unified,
@@ -2571,6 +2621,7 @@ options   = 8211
 portfolio = 8212
 trade     = 8213
 driver    = 8214
+market    = 8215
 ```
 
 **Rule: never hard-code `D:\` paths or port numbers in the apps.** Add them to
@@ -2641,6 +2692,7 @@ python services\options_svc\app.py        # :8211  (scan/swing/header/gamma/pape
                                           #          + 5-min intraday GEX history collection, 08:30–15:20 CT)
 python services\portfolio_svc\app.py      # :8212  (sector breakdown + vs-sector perf + live-streaming P&L)
 python services\trade_svc\app.py          # :8213  (on-demand symbol analysis: MTF + Position/Investor verdicts)
+python services\market_svc\app.py         # :8215  (live macro-ticker Market Dashboard: ~2s RTH poll of /quotes → cache:market:dashboard)
 python services\driver_svc\app.py         # :8214  (morning-agent order-approval queue: 09:28-ET run + approve/skip;
                                           #          orders simulated — config.PAPER_TRADE=True)
 
