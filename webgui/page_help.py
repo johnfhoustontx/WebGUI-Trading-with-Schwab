@@ -205,13 +205,15 @@ Your **real** Schwab holdings, with context.
     "/driver": """
 **Driver — the simple version**
 
-The morning agent proposes trades; you approve or skip. Orders are **simulated**
-(paper) — nothing goes to a live account.
+An autonomous **paper** options trader: Claude picks and sizes defined-risk credit
+spreads, code-enforced guardrails cap the risk. Nothing goes to a live account.
 
-- **Run morning agent** — grades the day and lists proposed trades with their risk.
-- **APPROVE** (simulated fill) / **SKIP**.
-- **Performance** — win rate and P&L of past decisions. It also runs itself at
-  09:28 ET each weekday.
+- **Enable / Disable** — turn the autonomous trader on or off.
+- **STOP** — halt new trades for the rest of the day (open positions keep managing).
+- **Run now** — fire one decision checkpoint immediately.
+- **Day P&L** progresses toward the $500 target; the decision log shows what it did.
+- **Performance** — the driver's closed trades and realized P&L (win rate, profit
+  factor, P&L by symbol/strategy). **Refresh** reprices now.
 """,
     "/market": """
 **Market Dashboard — the simple version**

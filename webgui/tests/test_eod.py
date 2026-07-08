@@ -11,8 +11,9 @@ SAMPLE = {
                               "unrealized_pnl": 42.0}]},
     "paper_trades": {"trades": []},
     "paper_account": {"has_account": False, "snapshot": None},
-    "driver_approvals": {"grade": "B", "status": "no_trade"},
-    "driver_performance": {"summary": {}, "trades": []},
+    "driver_paper_account": {"has_account": False, "snapshot": None,
+                             "positions": [], "closed_positions": []},
+    "driver_paper_perf": {"total_trades": 0, "realized_pnl": 0.0, "win_rate": None},
 }
 
 
@@ -83,19 +84,6 @@ def test_scanner_section_counts_and_lists():
     assert 'class="none"' in eod.scanner_section({"signals_0dte": [], "signals_swing": []})
 
 
-def test_driver_section_shows_grade_status_and_perf():
-    appr = {"date": "2026-06-18", "grade": "B+", "status": "approved",
-            "decision": "approved", "pnl_today": 210.0,
-            "proposed_trades": [{"symbol": "MES", "bucket": "A", "side": "long"}]}
-    perf = {"summary": {"win_rate": 0.62, "realized_pnl": 1500.0, "trades": 21},
-            "trades": []}
-    html = eod.driver_section(appr, perf)
-    assert "B+" in html and "approved" in html
-    assert "MES" in html
-    assert "62%" in html
-    assert 'class="none"' in eod.driver_section(None, None)
-
-
 # --- whole-report fragments ---------------------------------------------------
 def test_detail_fragment_includes_all_sections_and_date():
     html = eod.detail_fragment(SAMPLE)
@@ -111,7 +99,7 @@ def test_summary_fragment_tiles_and_detail_link():
     assert 'class="eod-report"' in html
     assert 'href="/eod/detail"' in html
     assert "Scanner signals" in html and "Captured signals" in html
-    assert "no_trade" in html  # driver status surfaced
+    assert "Driver win rate" in html  # driver scorecard tile surfaced
 
 
 def test_summary_fragment_link_target_is_parameterized():

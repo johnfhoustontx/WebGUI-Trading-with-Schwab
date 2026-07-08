@@ -290,7 +290,7 @@ _NAV_OPEN: dict[str, bool] = {}
 _NAV_BADGES: dict[str, int] = {}
 _ALERT_STATE: dict = {
     "acked_scan": set(), "alerted": set(), "alerted_init": None,
-    "captured_seen": None, "driver_seen": None, "rescue_seen": None,
+    "captured_seen": None, "rescue_seen": None,
     # Health/staleness (R4b/R8): the set of currently stale/down component keys
     # already alerted, so we chime only on transition INTO bad (fire-on-transition,
     # clear-on-heal). Seeded on the first tick so a service that's already stale/down
@@ -449,8 +449,6 @@ def _acknowledge(active: str) -> None:
         _ALERT_STATE["acked_scan"] = alerts.scanner_keys(scan)
     elif active == "/options/captured":
         _ALERT_STATE["captured_seen"] = bus_client.read_version("options:captured")
-    elif active == "/driver":
-        _ALERT_STATE["driver_seen"] = bus_client.read_version("driver:approvals")
     elif active == "/options/rescue":
         # Acknowledge the current rescue-summary version so the badge clears on
         # open and only re-appears when the manage cycle publishes a new summary.
@@ -471,10 +469,6 @@ def _recompute_badges(scan=None) -> None:
     cap_ver = bus_client.read_version("options:captured")  # cheap :ver probe
     _NAV_BADGES["/options/captured"] = 1 if (
         cap_ver is not None and cap_ver != _ALERT_STATE["captured_seen"]) else 0
-    drv, drv_ver = bus_client.read_full("driver:approvals")  # payload+version, one read
-    drv = drv or {}
-    _NAV_BADGES["/driver"] = 1 if (
-        drv.get("status") == "pending" and drv_ver != _ALERT_STATE["driver_seen"]) else 0
     # Rescue: count of at-risk paper positions (tested + critical) from the small
     # rescue_summary view. Cleared on open (version acknowledged), so the count
     # only re-appears when the manage cycle republishes a changed summary.
