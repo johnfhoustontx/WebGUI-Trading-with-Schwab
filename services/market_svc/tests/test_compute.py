@@ -39,19 +39,20 @@ def test_vix_tile_is_risk_off_and_spx_risk_off_down():
     assert tiles["/ES[U26]"]["color_state"] == "risk_on_mild" # +0.126% future
 
 
-def test_spread_tiles_computed():
+def test_spread_tile_computed():
     d = compute.build_dashboard(_raw(), sector_pcr=0.99, proxy_up=True)
     tiles = {t["display"]: t for c in d["categories"] for t in c["tiles"]}
+    # $ADVN-$DECN net-breadth spread is colored by SIGN (a count, not a %).
     assert tiles["$ADVN-$DECN"]["last"] == -465.0            # 1160 - 1625
     assert tiles["$ADVN-$DECN"]["color_state"] == "risk_off_mild"
-    assert round(tiles["HYG-LQD"]["change_pct"], 3) == 0.3   # 0.5 - 0.2
-    assert tiles["HYG-LQD"]["color_state"] == "risk_on_mild"
+    # HYG-LQD was intentionally removed (redundant with the individual HYG/LQD tiles).
+    assert "HYG-LQD" not in tiles
 
 
 def test_putcall_tile_from_sentiment_pcr_inverted():
     d = compute.build_dashboard(_raw(), sector_pcr=1.10, proxy_up=True)
     tiles = {t["display"]: t for c in d["categories"] for t in c["tiles"]}
-    pc = tiles["Put/Call (cap-wt sectors)"]
+    pc = tiles["Put/Call"]
     assert round(pc["last"], 2) == 1.10
     assert pc["color_state"] == "risk_off_mild"   # pcr>1 = more puts = risk-off
 
@@ -84,4 +85,4 @@ def test_missing_symbol_is_no_data_not_a_crash():
     d = compute.build_dashboard(raw, sector_pcr=None, proxy_up=True)
     tiles = {t["display"]: t for c in d["categories"] for t in c["tiles"]}
     assert tiles["SPX"]["color_state"] == "no_data"
-    assert tiles["Put/Call (cap-wt sectors)"]["color_state"] == "no_data"  # pcr None
+    assert tiles["Put/Call"]["color_state"] == "no_data"  # pcr None

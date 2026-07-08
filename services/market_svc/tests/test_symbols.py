@@ -3,12 +3,11 @@ from services.market_svc import symbols as S
 
 _EXPECTED_DISPLAYS = {
     "VIX", "VIX1D", "VIX3M", "SKEW",
-    "Put/Call (cap-wt sectors)",
+    "Put/Call",
     "$ADVN", "$DECN", "$ADVN-$DECN", "$ADD", "$ADSPD", "$TICK",
     "$DXY",
     "SPX", "NDX",
     "/ES[U26]", "/NQ[U26]",
-    "HYG-LQD",
     "SPY", "DIA", "QQQ", "IWM", "RSP", "QQEW",
     "MTUM", "SPMO",
     "SMH", "XSD", "IGV", "QTUM", "XBI", "XRT", "XME",
@@ -19,11 +18,11 @@ _EXPECTED_DISPLAYS = {
 
 
 def test_every_csv_symbol_is_mapped():
-    # 48 CSV rows, but $PCALL+$PCSP collapse to ONE external put/call tile,
-    # so the dashboard has 47 tiles.
-    assert len(S.SYMBOL_MAP) == 47
+    # 48 CSV rows collapse to 46 tiles: $PCALL+$PCSP → ONE external put/call tile,
+    # and the redundant HYG-LQD spread was dropped (HYG/LQD show individually).
+    assert len(S.SYMBOL_MAP) == 46
     # A future mistyped ticker/display must fail: the full display set is pinned.
-    assert len(_EXPECTED_DISPLAYS) == 47
+    assert len(_EXPECTED_DISPLAYS) == 46
     assert {t["display"] for t in S.SYMBOL_MAP} == _EXPECTED_DISPLAYS
     # Every entry has a non-empty display; every quote tile has a real quote_symbol.
     for t in S.SYMBOL_MAP:
@@ -35,7 +34,7 @@ def test_every_csv_symbol_is_mapped():
 def test_categories_cover_the_expected_set_in_frame_order():
     assert S.CATEGORY_ORDER == [
         "Volatility", "Options Sentiment", "Market Internals / Breadth", "Currency",
-        "Cash Index", "Equity Index Futures", "Broad-Market ETF", "Custom Basket / Spread",
+        "Cash Index", "Equity Index Futures", "Broad-Market ETF",
         "Sector SPDR", "Thematic / Industry ETF", "Factor / Momentum ETF",
         "Fixed Income / Credit ETF", "Crypto / Alternatives",
     ]
@@ -58,7 +57,6 @@ def test_translations_and_polarities():
 def test_kinds():
     kinds = {t["display"]: t["kind"] for t in S.SYMBOL_MAP}
     assert kinds["$ADVN-$DECN"] == "spread"
-    assert kinds["HYG-LQD"] == "spread"
     # the collapsed put/call tile is external (fed from sentiment)
     ext = [t for t in S.SYMBOL_MAP if t["kind"] == "external"]
     assert len(ext) == 1 and ext[0]["category"] == "Options Sentiment"
@@ -73,7 +71,7 @@ def test_quote_symbols_are_the_real_ones_only():
 
 
 def test_quote_symbols_deduped():
-    # HYG/LQD and $ADVN/$DECN each appear as both a quote tile AND a spread leg —
-    # the dedup in quote_symbols() must collapse them.
+    # $ADVN/$DECN each appear as both a quote tile AND a leg of the $ADVN-$DECN
+    # spread — the dedup in quote_symbols() must collapse them.
     qs = S.quote_symbols()
     assert len(qs) == len(set(qs))

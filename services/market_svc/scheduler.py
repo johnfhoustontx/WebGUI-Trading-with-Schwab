@@ -1,8 +1,11 @@
 """Market dashboard scheduler — poll the proxy, publish, repeat.
 
-~2 s cadence during regular trading hours; throttled to ~15 s off-hours/
-weekends/holidays (indices/internals are stale then; futures still move but a
-glance-cadence suffices). The market-hours gate mirrors the other services.
+~2 s cadence during regular trading hours; a slower ~5 s off-hours/weekends/
+holidays. It is NOT throttled hard off-hours because the equity-index FUTURES
+(/ES, /NQ) trade almost 24 h — they're the main thing moving after the cash
+close, so a 5 s cadence keeps them visibly ticking (the cash indices/internals
+are stale then anyway, and skip_unchanged means an unchanged payload costs
+nothing). The market-hours gate mirrors the other services.
 """
 import asyncio
 import datetime as _dt
@@ -15,7 +18,7 @@ from services.market_svc import compute, handlers
 _log = logging.getLogger("market_svc.scheduler")
 
 RTH_INTERVAL_SEC = 2
-OFFHOURS_INTERVAL_SEC = 15
+OFFHOURS_INTERVAL_SEC = 5   # futures trade ~24h → keep off-hours snappy
 
 _CT = ZoneInfo("America/Chicago")
 _RTH_START = (8, 30)

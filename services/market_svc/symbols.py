@@ -21,7 +21,7 @@ Each entry:
 # Frame layout order (design §5): macro gauges → tape → rotation.
 CATEGORY_ORDER = [
     "Volatility", "Options Sentiment", "Market Internals / Breadth", "Currency",
-    "Cash Index", "Equity Index Futures", "Broad-Market ETF", "Custom Basket / Spread",
+    "Cash Index", "Equity Index Futures", "Broad-Market ETF",
     "Sector SPDR", "Thematic / Industry ETF", "Factor / Momentum ETF",
     "Fixed Income / Credit ETF", "Crypto / Alternatives",
 ]
@@ -56,9 +56,11 @@ SYMBOL_MAP = [
     _q("VIX1D", "$VIX1D", "1-day volatility index", "Volatility", "inverted"),
     _q("VIX3M", "$VIX3M", "3-month volatility index", "Volatility", "inverted"),
     _q("SKEW", "$SKEW", "CBOE SKEW / tail-risk index", "Volatility", "inverted"),
-    # Options Sentiment (external — app's cap-weighted sector P/C; inverted)
+    # Options Sentiment (external — app's cap-weighted sector P/C; inverted).
+    # Display is short ("Put/Call") so it fits the tile; the "cap-weighted sector"
+    # detail lives in the description (hover tooltip).
     _external("Put/Call", "sentiment_pcr", "Cap-weighted sector put/call ratio",
-              "Options Sentiment", "inverted", "Put/Call (cap-wt sectors)"),
+              "Options Sentiment", "inverted", "Put/Call"),
     # Market Internals / Breadth (value-only internals + a computed net spread)
     _q("$ADVN", "$ADVN", "NYSE advancing issues", _INT, "normal", value_only=True),
     _q("$DECN", "$DECN", "NYSE declining issues", _INT, "inverted", value_only=True),
@@ -75,9 +77,6 @@ SYMBOL_MAP = [
     # Equity Index Futures
     _q("/ES[U26]", "/ESU26", "E-mini S&P 500 future, Sep 2026", "Equity Index Futures"),
     _q("/NQ[U26]", "/NQU26", "E-mini Nasdaq 100 future, Sep 2026", "Equity Index Futures"),
-    # Custom Basket / Spread (HY vs IG relative day-performance; risk-on when HY leads)
-    _spread("HYG-LQD", "HYG", "LQD", "diff_pct",
-            "Credit spread (high-yield minus IG)", "Custom Basket / Spread", "normal"),
     # Broad-Market ETF
     _q("SPY", "SPY", "SPDR S&P 500 ETF", _BRD),
     _q("DIA", "DIA", "SPDR Dow Jones Industrial Average ETF", _BRD),
