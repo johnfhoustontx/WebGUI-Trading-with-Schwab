@@ -982,8 +982,8 @@ services → webgui. Full design: [3-tier design doc](docs/plans/2026-06-15-thre
 
 `webgui/main.py` is the server + nav shell: a left-nav with expandable
 **Options**, **Sentiment**, and **More** groups (Sentiment children: Sentiment
-dashboard + Sector Rotation; **More** children: Market Dashboard + EOD Report +
-System Status + Settings + Terminate) plus flat Trade / Portfolio / Driver items. The groups
+dashboard + Sector Rotation; **More** children: EOD Report +
+System Status + Settings + Terminate) plus flat Market Dashboard / Trade / Portfolio / Driver items. The groups
 **start EXPANDED by default** (`_NAV_OPEN.get(..., True)`) and stay open until the
 user manually collapses one (`_NAV_OPEN` persists each toggle, single-user); the
 **inter-item spacing is tight** (`_NAV_CSS`: flex gap 2px, link padding 4px,
@@ -1051,7 +1051,7 @@ condition**. Sixth Tier-2 service. Pieces:
   `color_state`, and publishes **`cache:market:dashboard`** (`skip_unchanged=True`, so no
   repaint on byte-identical ticks). No command handler — the page only reads.
 - **PURE modules.** `symbols.py` = the **CSV→Schwab symbol map** (single source of truth):
-  46 tiles with per-symbol **polarity** (`normal` up=risk-on / `inverted` up=risk-off) +
+  47 tiles with per-symbol **polarity** (`normal` up=risk-on / `inverted` up=risk-off) +
   `kind` (`quote`/`spread`/`external`), encoding the translations (`SPX`→`$SPX`, `VIX`→
   `$VIX`, `SKEW`→`$SKEW`, `/ES[U26]`→`/ESU26`) and the **equivalents for symbols Schwab
   can't quote** (`$DXY`→**`UUP`**; `$PCALL`+`$PCSP`→one **"Put/Call"** tile

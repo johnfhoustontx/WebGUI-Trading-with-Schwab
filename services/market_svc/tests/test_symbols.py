@@ -11,18 +11,18 @@ _EXPECTED_DISPLAYS = {
     "SPY", "DIA", "QQQ", "IWM", "RSP", "QQEW",
     "MTUM", "SPMO",
     "SMH", "XSD", "IGV", "QTUM", "XBI", "XRT", "XME",
-    "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU", "XLV", "XLY",
+    "XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU", "XLV", "XLY",
     "TLT", "HYG", "LQD",
     "GDLC", "VCX",
 }
 
 
 def test_every_csv_symbol_is_mapped():
-    # 48 CSV rows collapse to 46 tiles: $PCALL+$PCSP → ONE external put/call tile,
-    # and the redundant HYG-LQD spread was dropped (HYG/LQD show individually).
-    assert len(S.SYMBOL_MAP) == 46
+    # 47 tiles: the 48 CSV rows collapse ($PCALL+$PCSP → ONE external put/call tile,
+    # the redundant HYG-LQD spread dropped), plus XLB (Materials) added to Sector SPDR.
+    assert len(S.SYMBOL_MAP) == 47
     # A future mistyped ticker/display must fail: the full display set is pinned.
-    assert len(_EXPECTED_DISPLAYS) == 46
+    assert len(_EXPECTED_DISPLAYS) == 47
     assert {t["display"] for t in S.SYMBOL_MAP} == _EXPECTED_DISPLAYS
     # Every entry has a non-empty display; every quote tile has a real quote_symbol.
     for t in S.SYMBOL_MAP:

@@ -201,6 +201,7 @@ SENTIMENT_CHILDREN = [
 
 # Flat top-level items (non-Options apps). (route, label, icon)
 FLAT_NAV = [
+    ("/market", "Market Dashboard", "dashboard"),
     ("/trade", "Trade", "analytics"),
     ("/portfolio", "Portfolio", "account_balance"),
     ("/driver", "Driver", "smart_toy"),
@@ -209,7 +210,6 @@ FLAT_NAV = [
 # "More" is an expandable group for reports / diagnostics / config. (route, label, icon)
 # Settings is itself a nested sub-group (its children render indented beneath it).
 MORE_CHILDREN = [
-    ("/market", "Market Dashboard", "dashboard"),
     ("/eod", "EOD Report", "summarize"),
     ("/status", "System Status", "monitor_heart"),
     ("/settings", "Settings", "settings"),
@@ -244,6 +244,7 @@ _TAB_COLOR = {
     "/options/rescue": "#ef5350",         # Rescue — red
     "/sentiment": "#5c6bc0",              # Sentiment — indigo
     "/sentiment/rotation": "#8d6e63",     # Sector Rotation — brown
+    "/market": "#00bfa5",                # Market Dashboard — teal-green
     "/trade": "#26c6da",                 # Trade — cyan
     "/portfolio": "#9ccc65",             # Portfolio — light green
     "/driver": "#ff7043",                # Driver — deep orange

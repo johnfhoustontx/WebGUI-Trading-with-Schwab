@@ -96,6 +96,7 @@ SYMBOL_MAP = [
     _q("XRT", "XRT", "SPDR S&P Retail ETF", _THM),
     _q("XME", "XME", "SPDR S&P Metals & Mining ETF", _THM),
     # Sector SPDR (all literal up=green — defensive sectors NOT inverted, per design)
+    _q("XLB", "XLB", "Materials Select Sector SPDR", _SEC),
     _q("XLC", "XLC", "Communication Services Select Sector SPDR", _SEC),
     _q("XLE", "XLE", "Energy Select Sector SPDR", _SEC),
     _q("XLF", "XLF", "Financials Select Sector SPDR", _SEC),
