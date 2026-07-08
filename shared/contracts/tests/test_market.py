@@ -6,7 +6,7 @@ def test_round_trip_and_defaults():
         categories=[{"category": "Volatility",
                      "tiles": [{"display": "VIX", "last": 16.1, "change_pct": 3.6,
                                 "color_state": "risk_off_strong"}]}],
-        proxy_up=True, timestamp="2026-07-07T12:00:00Z")
+        proxy_up=True)
     d = md.model_dump()
     assert d["categories"][0]["category"] == "Volatility"
     assert d["proxy_up"] is True

@@ -45,7 +45,7 @@ def poll_interval(now=None):
 
 async def loop(bus) -> None:
     """Poll → publish → sleep(poll_interval), forever. Never raises out."""
-    loop_ = asyncio.get_event_loop()
+    loop_ = asyncio.get_running_loop()
     while True:
         try:
             payload = await loop_.run_in_executor(None, compute.collect, bus)

@@ -15,4 +15,3 @@ class MarketDashboard(_Base):
     categories: list[dict] = []
     proxy_up: bool = False
     errors: list = []
-    timestamp: str | None = None

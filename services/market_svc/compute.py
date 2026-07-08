@@ -18,6 +18,10 @@ CACHE_SENTIMENT = "cache:sentiment:composite"
 # Baseline for the cap-weighted put/call tile: pcr>1 = more puts = risk-off.
 _PCR_BASELINE = 1.0
 
+# Pooled HTTP session (keep-alive) — matches the house perf pattern
+# (schwab_proxy.trader_request reuses a pooled session).
+_SESSION = requests.Session()
+
 
 def fetch_raw_quotes(syms, *, timeout=8.0):
     """GET the proxy's raw /quotes for ``syms``; returns the raw Schwab dict.
@@ -28,7 +32,7 @@ def fetch_raw_quotes(syms, *, timeout=8.0):
     if not syms:
         return {}
     try:
-        resp = requests.get(f"{PROXY_URL}/quotes",
+        resp = _SESSION.get(f"{PROXY_URL}/quotes",
                             params={"symbols": ",".join(syms)}, timeout=timeout)
         if resp.status_code != 200:
             return {}

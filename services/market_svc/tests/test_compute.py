@@ -1,3 +1,5 @@
+from shared.bus import Bus
+
 from services.market_svc import compute
 
 
@@ -52,6 +54,28 @@ def test_putcall_tile_from_sentiment_pcr_inverted():
     pc = tiles["Put/Call (cap-wt sectors)"]
     assert round(pc["last"], 2) == 1.10
     assert pc["color_state"] == "risk_off_mild"   # pcr>1 = more puts = risk-off
+
+
+def test_read_sector_pcr():
+    bus = Bus()  # fakeredis under pytest
+    bus.cache_set("cache:sentiment:composite", {"live": {"sector_pcr": 0.97}})
+    assert compute.read_sector_pcr(bus) == 0.97
+
+
+def test_read_sector_pcr_missing_key_is_none():
+    bus = Bus()  # no cache:sentiment:composite seeded
+    assert compute.read_sector_pcr(bus) is None
+
+
+def test_read_sector_pcr_missing_or_empty_value_is_none():
+    for val in (None, ""):
+        bus = Bus()
+        bus.cache_set("cache:sentiment:composite", {"live": {"sector_pcr": val}})
+        assert compute.read_sector_pcr(bus) is None
+    # live present but sector_pcr key absent entirely
+    bus = Bus()
+    bus.cache_set("cache:sentiment:composite", {"live": {}})
+    assert compute.read_sector_pcr(bus) is None
 
 
 def test_missing_symbol_is_no_data_not_a_crash():
