@@ -6,7 +6,7 @@ inside RTH — open's first 15 min skipped, no new entries in the last 30 min) o
 ``should_rearm`` clears a stale overnight halt latch on the next trading day. Both
 are PURE (ET-aware datetimes / plain dicts in — no clock, no bus), so they take
 fixed inputs here. The ``loop`` itself is not unit-tested (it owns its sleep
-cadence, like the other services' loops + the existing ``morning_due`` tests).
+cadence, like the other services' loops).
 """
 from datetime import datetime
 from zoneinfo import ZoneInfo

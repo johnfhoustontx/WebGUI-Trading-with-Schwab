@@ -1,41 +1,28 @@
-"""Server-side driver scheduler (Task #29c; autonomous cadence Phase 6).
+"""Server-side driver scheduler (autonomous checkpoint cadence).
 
-Two coexisting cadences over one ~30 s poll loop:
+**Autonomous checkpoints** over one ~30 s poll loop — during the entry window
+(09:45–15:30 ET, weekdays — the open's first ~15 min skipped, no new entries in
+the last 30 min), fire ``handlers.run_autonomous_cycle`` at most once per
+``settings.CHECKPOINT_MIN`` (30)-minute slot, plus a daily halt **re-arm**: a
+banked/loss-capped/VIX day latches ``cache:driver:control`` ``halted``; the next
+trading day clears that stale overnight latch so checkpoints can run again. The
+cycle SELF-GATES on the control key (it no-ops unless ``enabled and not halted``),
+so the scheduler may call it whenever a checkpoint is due; autonomy ships OFF by
+default (``enabled=False``), so until the user enables it the checkpoints are
+no-ops.
 
-* **Legacy morning approval** — runs the morning pipeline once per trading day
-  at/after 09:28 ET (the ``claude-driver/morning_agent`` cadence,
-  ``config.AGENT_RUN_HOUR/MIN``) and keeps the performance view warm. The
-  scheduler NEVER executes orders here — ``run_morning`` only produces a *pending*
-  approval; execution happens only on an explicit ``approve`` command. Retained
-  unchanged so the approval-queue/back-compat behaviour still works.
-* **Autonomous checkpoints (Phase 6)** — during the entry window (09:45–15:30 ET,
-  weekdays — the open's first ~15 min skipped, no new entries in the last 30 min),
-  fire ``handlers.run_autonomous_cycle`` at most once per ``settings.CHECKPOINT_MIN``
-  (30)-minute slot, plus a daily halt **re-arm**: a banked/loss-capped/VIX day
-  latches ``cache:driver:control`` ``halted``; the next trading day clears that
-  stale overnight latch so checkpoints can run again. The cycle SELF-GATES on the
-  control key (it no-ops unless ``enabled and not halted``), so the scheduler may
-  call it whenever a checkpoint is due; autonomy ships OFF by default
-  (``enabled=False``), so until the user enables it the checkpoints are no-ops and
-  only the legacy morning path runs. They coexist intentionally.
+The run-time gates (``checkpoint_due``, ``should_rearm``) are pure (tested); the
+``loop`` owns its sleep cadence and runs every BLOCKING handler in the default
+executor so the event loop stays responsive (``run_autonomous_cycle`` is slow — a
+proxy market fetch + a Claude API call — so it MUST go through the executor, never
+directly on the loop). Each branch is independently try/except-guarded so one
+failure can't kill the loop or skip the others. Passed to the scaffold as
+``make_app(scheduler=loop)``.
 
-The run-time gates (``morning_due``, ``checkpoint_due``, ``should_rearm``) are
-pure (tested); the ``loop`` owns its sleep cadence and runs every BLOCKING handler
-in the default executor so the event loop stays responsive
-(``run_autonomous_cycle`` is slow — a proxy market fetch + a Claude API call — so
-it MUST go through the executor, never directly on the loop). Each branch is
-independently try/except-guarded so one failure can't kill the loop or skip the
-others. Passed to the scaffold as ``make_app(scheduler=loop)``.
-
-**Catch-up semantics (single-user):** ``last_run_date`` lives in memory, so if
-the service starts after 09:28 on a trading day it fires once immediately
-(``last_run_date=None`` → due) so the page has a fresh pending approval; a
-restart later the same day re-fires and overwrites the cached approval. Both the
-morning and autonomous gates skip weekends AND NYSE market holidays (``_HOLIDAYS``
-+ ``_is_trading_day``), so no cycle — and no Claude API call — fires on a day the
-market is closed (``compute.run_morning`` ALSO returns a ``no_trade`` payload on a
-holiday as defence-in-depth). The autonomous ``last_slot`` is the analogous
-in-memory de-dupe for checkpoints.
+**Catch-up semantics (single-user):** the autonomous ``last_slot`` is the
+in-memory once-per-slot de-dupe for checkpoints. The gate skips weekends AND NYSE
+market holidays (``_HOLIDAYS`` + ``_is_trading_day``), so no cycle — and no Claude
+API call — fires on a day the market is closed.
 """
 import asyncio
 from datetime import date as _date, datetime
@@ -44,14 +31,13 @@ from zoneinfo import ZoneInfo
 from services.driver_svc import handlers, settings as _settings
 
 _ET = ZoneInfo("America/New_York")
-RUN_HOUR, RUN_MIN = 9, 28  # mirrors config.AGENT_RUN_HOUR / AGENT_RUN_MIN
 
 # US market holidays 2026–2027 (keep in sync with the other service schedulers —
 # options_svc/scheduler.py, sentiment_svc, options-scanner/scanner.py Config.HOLIDAYS,
 # and webgui/alerts.py). Includes Juneteenth; observed dates per NYSE (Sat→prior Fri,
-# Sun→following Mon). Update yearly. The autonomous checkpoint + legacy morning gates
-# below both treat a weekday holiday like a weekend so no cycle (and no Claude API
-# call) fires on a day the market is closed.
+# Sun→following Mon). Update yearly. The autonomous checkpoint gate below treats a
+# weekday holiday like a weekend so no cycle (and no Claude API call) fires on a day
+# the market is closed.
 _HOLIDAYS = {
     # 2026
     _date(2026, 1, 1), _date(2026, 1, 19), _date(2026, 2, 16), _date(2026, 4, 3),
@@ -82,22 +68,6 @@ RTH_START = (9, 45)
 RTH_END = (15, 30)
 
 POLL_INTERVAL_SEC = 30        # check the run gate every 30 s
-PERF_REFRESH_SEC = 300        # recompute the perf view ~every 5 min
-
-
-def morning_due(now, last_run_date):
-    """(should_run, run_date): True at most once per trading day, at/after 09:28 ET.
-
-    ``now`` is an ET-aware datetime; ``last_run_date`` is the ISO date string of
-    the last fire (or None). When not yet due, the passed-in ``last_run_date`` is
-    returned unchanged. Never fires on a weekend or NYSE market holiday.
-    """
-    if not _is_trading_day(now):  # weekend or market holiday
-        return (False, last_run_date)
-    if (now.hour, now.minute) < (RUN_HOUR, RUN_MIN):
-        return (False, last_run_date)
-    today = now.date().isoformat()
-    return (today != last_run_date, today)
 
 
 def checkpoint_due(now, last_slot):
@@ -154,43 +124,26 @@ def _rearm_if_stale(bus, today) -> None:
 
 
 async def loop(bus):
-    """Run the morning approval cadence + the autonomous checkpoint cadence.
+    """Run the autonomous checkpoint cadence.
 
-    One-shot perf refresh at startup so the page has data on first load, then a
-    30 s poll that, each tick:
+    A 30 s poll that, each tick:
 
-    * fires the morning pipeline when ``morning_due`` (once/day at 09:28 ET) —
-      the legacy approval path, retained;
     * **re-arms** a stale overnight halt (``should_rearm``) BEFORE the checkpoint,
       so a just-cleared latch lets the same poll's checkpoint fire;
     * fires ``handlers.run_autonomous_cycle`` when ``checkpoint_due`` (once per
       30-min RTH slot) — the cycle self-gates on the control key, so the clock
-      itself needs no control pre-check;
-    * recomputes the perf view every ~5 min.
+      itself needs no control pre-check.
 
     Every blocking call runs in the default executor (``run_autonomous_cycle`` is
     SLOW — a proxy fetch + a Claude API call — so it must never run on the event
     loop) and each branch is independently try/except-guarded so one failure can't
-    kill the loop or skip the others. ``last_run_date`` / ``last_slot`` are the
-    in-memory once-per-day / once-per-slot de-dupes.
+    kill the loop or skip the others. ``last_slot`` is the in-memory once-per-slot
+    de-dupe.
     """
     loop_ = asyncio.get_event_loop()
-    last_run_date = None
     last_slot = None
-    try:
-        await loop_.run_in_executor(None, handlers.refresh_perf, bus)
-    except Exception:  # noqa: BLE001
-        pass
-    secs_since_perf = 0
     while True:
         now = _now_et()
-        try:
-            due, run_date = morning_due(now, last_run_date)
-            if due:
-                last_run_date = run_date
-                await loop_.run_in_executor(None, handlers.run_morning, bus)
-        except Exception:  # noqa: BLE001 — never let the scheduler die.
-            pass
         # Re-arm a stale overnight halt FIRST so a just-cleared latch lets this
         # same poll's checkpoint fire.
         try:
@@ -205,11 +158,4 @@ async def loop(bus):
                 await loop_.run_in_executor(None, handlers.run_autonomous_cycle, bus)
         except Exception:  # noqa: BLE001
             pass
-        if secs_since_perf >= PERF_REFRESH_SEC:
-            secs_since_perf = 0
-            try:
-                await loop_.run_in_executor(None, handlers.refresh_perf, bus)
-            except Exception:  # noqa: BLE001
-                pass
-        secs_since_perf += POLL_INTERVAL_SEC
         await asyncio.sleep(POLL_INTERVAL_SEC)

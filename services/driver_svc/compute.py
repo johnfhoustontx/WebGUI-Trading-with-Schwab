@@ -1,41 +1,35 @@
 """Driver compute module — NiceGUI-free engine-call layer for ``driver_svc``.
 
-The service-side orchestration that the legacy ``claude-driver/morning_agent.py``
-``run_morning_agent()`` performed, MINUS its side effects: ``run_morning()``
-calls the SAME building-block functions (service health → ML/Schwab signals →
-GEX → market conditions → P&L → day grade → ``trade_selector.select_trades``)
-but **returns** the pending-trade payload instead of writing
-``pending_trade.json`` and HTTP-posting it to the :8300 approval server. The
-3-tier flow caches that payload at ``cache:driver:approvals`` and the GUI's
-APPROVE/SKIP buttons drive ``execute`` / a status transition.
+The autonomous decision layer's bus-free brain: ``build_packet`` projects the
+cached scanner menu + driver-paper-account P&L into the model-facing decision
+packet, ``run_cycle`` wires ``build_packet → decider.decide → guardrails`` (never
+raising — any failure stands down), and ``open_driver_position`` /
+``run_driver_manage_cycle`` open + manage the driver's OWN isolated paper book.
+``fetch_market_context`` supplies the VIX/SPX context the guardrails' VIX gate
+reads.
 
-This module must NOT import ``nicegui`` or anything from ``webgui/``. It depends
-only on the copied ``claude-driver`` engines, imported standalone (their dir on
-``sys.path``). Because ``driver_svc`` runs in its own process, pinning
-``morning_agent``/``config``/``trade_selector``/``order_executor``/``perf_report``
-as top-level modules cannot collide with the other domains' engines (the same
-isolation ``sentiment_svc`` relies on for ``scoring`` and ``trade_svc`` for
-``technical``). ``config.PAPER_TRADE`` is True, so ``execute`` only *simulates*
-orders — this service never modifies that flag.
+This module must NOT import ``nicegui`` or anything from ``webgui/``. It needs
+only ``claude-driver/config.py``'s legacy ``RISK_LIMITS`` (the fallback daily-loss
+cap), imported standalone (its dir on ``sys.path``). Because ``driver_svc`` runs
+in its own process, pinning ``config`` as a top-level module cannot collide with
+the other domains' engines (the same isolation ``sentiment_svc`` relies on for
+``scoring`` and ``trade_svc`` for ``technical``). ``config.PAPER_TRADE`` is True —
+this service never modifies that flag.
 
 Every public function is defensive: a thrown engine degrades to an ``error`` /
 empty payload rather than raising, so one bad cycle can never crash the service.
 """
 import sys
-from datetime import date, datetime, timezone
 
-from repo_paths import CLAUDE_DRIVER
+import requests
+
+from repo_paths import CLAUDE_DRIVER, PROXY_URL
 
 # ── isolated engine imports (separate process — no cross-app name collision) ──
 # claude-driver folder on sys.path so its hyphen-free top-level modules import by
 # name (``config`` is generic — safe only because this is a dedicated process).
 if str(CLAUDE_DRIVER) not in sys.path:
     sys.path.insert(0, str(CLAUDE_DRIVER))
-
-import morning_agent  # noqa: E402  (orchestration building blocks: grade + fetchers)
-import order_executor  # noqa: E402  (execute_trades — PAPER_TRADE=True simulates)
-import perf_report  # noqa: E402  (read-only trade-log/perf-db aggregation)
-import trade_selector  # noqa: E402  (select_trades by grade + signals)
 
 # Legacy risk envelope — source the daily loss cap here so it can't drift from the
 # old rule-tree config (``claude-driver/config.py`` is on sys.path via CLAUDE_DRIVER).
@@ -68,89 +62,6 @@ def _daily_max_loss() -> float:
         return float(_RISK_LIMITS.get("daily_max_loss", 250.0))
     except (TypeError, ValueError):
         return 250.0
-
-
-def _now_iso():
-    return datetime.now(timezone.utc).isoformat()
-
-
-def _today():
-    return date.today().isoformat()
-
-
-def run_morning() -> dict:
-    """Run the morning pipeline and return the approval payload (never raises).
-
-    Mirrors ``morning_agent.run_morning_agent`` without its ``pending_trade.json``
-    write or the HTTP post to the approval server — the caching/publishing is the
-    handler's job. Returns one of:
-
-    * ``status="pending"`` — graded A/B/C with ≥1 qualifying proposed trade.
-    * ``status="no_trade"`` — market holiday, graded X, or no qualifying setups
-      (``reasons`` explains).
-    * ``status="error"`` — a pipeline exception (``error`` carries the message).
-    """
-    try:
-        if morning_agent.is_market_holiday():
-            return {"date": _today(), "grade": "", "status": "no_trade",
-                    "reasons": ["Market holiday — no run today."],
-                    "proposed_trades": [], "timestamp": _now_iso()}
-
-        health = morning_agent.check_service_health()
-        ml_signals = morning_agent.fetch_all_ml_signals(health=health)
-        gex = morning_agent.fetch_gex_snapshot()
-        conditions = morning_agent.fetch_market_conditions()
-        pnl = morning_agent.fetch_current_pnl()
-        grade, reasons = morning_agent.grade_day(conditions, pnl)
-
-        base = {
-            "date": _today(), "grade": grade, "grade_reasons": reasons,
-            "conditions": conditions,
-            "pnl_today": pnl.get("today"), "pnl_week": pnl.get("week"),
-            "timestamp": _now_iso(),
-        }
-
-        if grade == "X":
-            return {**base, "status": "no_trade", "reasons": reasons,
-                    "proposed_trades": []}
-
-        proposed = trade_selector.select_trades(
-            grade=grade, ml_signals=ml_signals, gex=gex,
-            conditions=conditions, pnl=pnl) or []
-        if not proposed:
-            return {**base, "status": "no_trade",
-                    "reasons": ["No qualifying setups."], "proposed_trades": []}
-
-        return {**base, "status": "pending", "decision": None,
-                "proposed_trades": proposed}
-    except Exception as exc:  # noqa: BLE001 — degrade, never crash the service.
-        return {"date": _today(), "status": "error", "error": str(exc),
-                "proposed_trades": [], "timestamp": _now_iso()}
-
-
-def execute(proposed_trades) -> list:
-    """Execute approved trades via ``order_executor`` (PAPER_TRADE simulates).
-
-    Defensive: an executor explosion degrades to a single failed-result entry
-    rather than raising, so the approve path always produces a renderable result.
-    """
-    try:
-        return order_executor.execute_trades(proposed_trades or [])
-    except Exception as exc:  # noqa: BLE001
-        return [{"success": False, "error": str(exc)}]
-
-
-def build_perf_report() -> dict:
-    """Read-only performance aggregation (``perf_report.build_report``).
-
-    Defensive: a missing/locked DB degrades to an empty report rather than
-    raising.
-    """
-    try:
-        rep = perf_report.build_report()
-        return {"summary": rep.get("summary", {}), "trades": rep.get("trades", [])}
-    except Exception:  # noqa: BLE001
-        return {"summary": {}, "trades": []}
 
 
 # ── autonomous decision cycle (Phase 4) ──────────────────────────────────────
@@ -335,16 +246,55 @@ def run_cycle(scan_view, paper_view, *, target, limits, market, client=None) -> 
                 "day_pnl": None, "open_positions": []}
 
 
-def fetch_market_context() -> dict:
-    """VIX/SPX context for the decision packet (defensive → ``{}`` on failure).
+def _index_price(quote_dict, *fields):
+    """Extract a price from a Schwab ``/quotes`` entry (defensive → ``None``).
 
-    Reuses the legacy ``morning_agent.fetch_market_conditions`` (VIX / SPX spot /
-    VIX1D via the proxy). Any failure — including a ``None`` result — degrades to an
-    empty dict so a missing/slow proxy never blocks or crashes a cycle (the packet's
-    ``vix`` then falls back to ``None``, which the guardrails treat as "skip the VIX
-    gate").
+    Indices ($VIX / $SPX / $VIX1D) nest their values under a ``"quote"`` sub-key
+    (``{"assetMainType": "INDEX", "quote": {"lastPrice": 20.3, ...}}``); ETFs carry
+    them flat at the top level. Checks both shapes, trying each requested field (or
+    a sensible default set) in order. Replicates the legacy
+    ``morning_agent._index_price`` so this module no longer imports morning_agent.
+    Never raises — a missing/unparseable value yields ``None``.
+    """
+    if not quote_dict:
+        return None
+    search_dicts = [quote_dict, quote_dict.get("quote", {})]
+    default_fields = fields or ("lastPrice", "mark", "closePrice", "close")
+    for d in search_dicts:
+        for field in default_fields:
+            val = d.get(field)
+            if val is not None:
+                try:
+                    return float(val)
+                except (TypeError, ValueError):
+                    pass
+    return None
+
+
+def fetch_market_context() -> dict:
+    """VIX/SPX/VIX1D context for the decision packet (defensive → ``{}`` on failure).
+
+    Self-contained: fetches ``$VIX,$SPX,$VIX1D`` straight from the schwab-proxy
+    (``PROXY_URL``) via ``requests``, replicating the legacy
+    ``morning_agent.fetch_market_conditions`` index-quote parsing (index quotes nest
+    their values under a ``"quote"`` sub-key — ``_index_price`` handles both nested
+    + flat shapes). Only ``vix`` is consumed downstream (the guardrails' VIX gate; a
+    missing ``vix`` → skip that gate); ``spx_spot`` / ``vix1d`` ride along as
+    context.
+
+    ANY failure — a down/slow proxy, a non-200, malformed JSON — degrades to ``{}``
+    so a cycle is never blocked or crashed (``build_packet`` then reads
+    ``market.get("vix")`` → ``None``).
     """
     try:
-        return dict(morning_agent.fetch_market_conditions() or {})
-    except Exception:  # noqa: BLE001
+        resp = requests.get(f"{PROXY_URL}/quotes",
+                            params={"symbols": "$VIX,$SPX,$VIX1D"}, timeout=10)
+        resp.raise_for_status()
+        quotes = resp.json() or {}
+        return {
+            "vix": _index_price(quotes.get("$VIX", {})),
+            "spx_spot": _index_price(quotes.get("$SPX", {})),
+            "vix1d": _index_price(quotes.get("$VIX1D", {})),
+        }
+    except Exception:  # noqa: BLE001 — defensive: never block/crash a cycle.
         return {}

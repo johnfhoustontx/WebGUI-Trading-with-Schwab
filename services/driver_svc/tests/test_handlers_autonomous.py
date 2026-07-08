@@ -463,13 +463,10 @@ def test_handle_command_cycle_runs_autonomous(fake_bus, monkeypatch):
     assert called == [fake_bus]
 
 
-def test_handle_command_legacy_branches_still_dispatch(fake_bus, monkeypatch):
-    calls = []
-    monkeypatch.setattr(handlers, "run_morning", lambda b: calls.append("run"))
-    monkeypatch.setattr(handlers, "approve", lambda b: calls.append("approve"))
-    monkeypatch.setattr(handlers, "skip", lambda b: calls.append("skip"))
-    monkeypatch.setattr(handlers, "refresh_perf", lambda b: calls.append("perf"))
-    for t in ("run", "approve", "skip", "perf"):
+def test_handle_command_unknown_type_is_noop(fake_bus):
+    """An unknown command type (incl. the removed legacy run/approve/skip/perf) is
+    a silent no-op — nothing published, no crash."""
+    for t in ("run", "approve", "skip", "perf", "bogus"):
         handlers.handle_command(fake_bus, _cmd(t))
-    handlers.handle_command(fake_bus, _cmd("bogus"))  # unknown → no-op
-    assert calls == ["run", "approve", "skip", "perf"]
+    assert fake_bus.cache_get("cache:driver:autonomous") is None
+    assert fake_bus.cache_get("cache:driver:control") is None

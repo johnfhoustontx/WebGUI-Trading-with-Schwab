@@ -1,7 +1,6 @@
 """Tests for the autonomous decision cycle in ``driver_svc.compute`` (Phase 4).
 
-Three additive functions (the existing ``run_morning``/``execute``/
-``build_perf_report`` are untouched):
+Three functions:
 
 * ``build_packet`` — projects the scanner menu (allowed-only, top-N by composite
   score, stable ids ``m0..``) + day P&L + gap-to-target into the model-facing
@@ -10,8 +9,8 @@ Three additive functions (the existing ``run_morning``/``execute``/
 * ``run_cycle`` — ``build_packet → decider.decide → guardrails.apply_guardrails``;
   defensive (any exception → a stand-down result). Tests monkeypatch
   ``services.driver_svc.decider.decide`` so no model/network is hit.
-* ``fetch_market_context`` — VIX/SPX via ``morning_agent.fetch_market_conditions``,
-  defensive → ``{}``.
+* ``fetch_market_context`` — self-contained VIX/SPX/VIX1D fetch straight from the
+  proxy (``$VIX,$SPX,$VIX1D`` via ``requests``); defensive → ``{}`` on any failure.
 
 REAL field-name notes (verified against the engines, NOT the plan's guesses):
 * the scanner signal's structure code lives in ``type`` (``"PCS"``/``"CCS"``/
@@ -307,23 +306,58 @@ def test_run_cycle_uses_config_daily_max_loss(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Task 4.3 — fetch_market_context
+# Task 4.3 — fetch_market_context (self-contained: fetches $VIX,$SPX,$VIX1D
+# straight from the proxy; morning_agent is no longer imported)
 # ---------------------------------------------------------------------------
-def test_fetch_market_context_defensive(monkeypatch):
-    monkeypatch.setattr(compute.morning_agent, "fetch_market_conditions",
-                        lambda: {"vix": 13.5, "spx_spot": 5500, "vix1d": 12})
+class _Resp:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self._payload
+
+
+def test_fetch_market_context_parses_index_quotes(monkeypatch):
+    """Index quotes nest their values under a 'quote' sub-key — _index_price
+    handles both the nested (index) and flat (ETF) shapes."""
+    payload = {
+        "$VIX": {"assetMainType": "INDEX", "quote": {"lastPrice": 13.5}},
+        "$SPX": {"assetMainType": "INDEX", "quote": {"lastPrice": 5500.0}},
+        "$VIX1D": {"quote": {"lastPrice": 12.0}},
+    }
+    monkeypatch.setattr(compute.requests, "get", lambda *a, **k: _Resp(payload))
     ctx = compute.fetch_market_context()
     assert ctx["vix"] == 13.5
-    assert ctx["spx_spot"] == 5500
+    assert ctx["spx_spot"] == 5500.0
+    assert ctx["vix1d"] == 12.0
+
+
+def test_fetch_market_context_missing_symbol_is_none(monkeypatch):
+    """A symbol absent from the response degrades to None (never a crash)."""
+    monkeypatch.setattr(compute.requests, "get",
+                        lambda *a, **k: _Resp({"$VIX": {"quote": {"lastPrice": 20.0}}}))
+    ctx = compute.fetch_market_context()
+    assert ctx["vix"] == 20.0
+    assert ctx["spx_spot"] is None and ctx["vix1d"] is None
 
 
 def test_fetch_market_context_never_raises(monkeypatch):
-    monkeypatch.setattr(compute.morning_agent, "fetch_market_conditions",
-                        lambda: (_ for _ in ()).throw(RuntimeError()))
+    """A proxy failure (requests.get raises) degrades to {} — never raises."""
+    def _boom(*a, **k):
+        raise RuntimeError("proxy down")
+
+    monkeypatch.setattr(compute.requests, "get", _boom)
     assert compute.fetch_market_context() == {}
 
 
-def test_fetch_market_context_none_result_is_empty(monkeypatch):
-    """A ``None`` from the fetcher degrades to {} (not a crash on dict(None))."""
-    monkeypatch.setattr(compute.morning_agent, "fetch_market_conditions", lambda: None)
+def test_fetch_market_context_non_200_is_empty(monkeypatch):
+    """A non-200 (raise_for_status raises) degrades to {} rather than crashing."""
+    class _Err(_Resp):
+        def raise_for_status(self):
+            raise RuntimeError("500 Server Error")
+
+    monkeypatch.setattr(compute.requests, "get", lambda *a, **k: _Err({}))
     assert compute.fetch_market_context() == {}

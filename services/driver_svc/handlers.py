@@ -1,20 +1,17 @@
 """Driver service handlers (Tier-2 → Tier-3 write path).
 
-The order-approval queue reified over Redis. Three command-driven transitions
-plus a read-only performance refresh:
+The autonomous decision layer's bus I/O, command-driven over ``cmd:driver``:
 
-* ``run`` — run the morning pipeline (``compute.run_morning``) and cache the
-  resulting **pending** approval at ``cache:driver:approvals`` (also fired by the
-  9:28 ET scheduler).
-* ``approve`` — if the cached approval is still ``pending``, execute its proposed
-  trades (``compute.execute`` → ``order_executor``, PAPER_TRADE simulates),
-  re-cache it as ``approved`` with the results.
-* ``skip`` — mark the cached approval ``skipped``.
-* ``perf`` — recompute + cache the performance report at
-  ``cache:driver:performance`` (also refreshed periodically by the scheduler).
+* ``cycle`` — run one autonomous decision checkpoint now
+  (``run_autonomous_cycle``: gate → ``compute.run_cycle`` → enqueue the clamped
+  survivors as ``driver_paper_create`` on ``cmd:options`` → latch the kill-switch
+  on halt → publish the monitor view at ``cache:driver:autonomous``).
+* ``enable`` / ``disable`` — flip the ``cache:driver:control`` master switch
+  (``enable`` also clears any stale halt so re-enabling re-arms).
+* ``stop`` — the kill-switch (latch ``halted``).
 
-Each write validates the payload against its contract (``ApprovalState`` /
-``PerfReport``) as a gate against gross drift BEFORE caching, then publishes a
+Each write validates the payload against its contract (``DriverControl`` /
+``AutonomousState``) as a gate against gross drift BEFORE caching, then publishes a
 change event so the GUI version-poll repaints. Kept synchronous — the scaffold's
 consumer loop handles sync handlers.
 """
@@ -22,16 +19,9 @@ from datetime import date, datetime, timezone
 
 from services.driver_svc import compute, settings
 from shared.contracts.driver import (
-    ApprovalState,
     AutonomousState,
     DriverControl,
-    PerfReport,
 )
-
-CACHE_APPROVALS = "cache:driver:approvals"
-EVENT_APPROVALS = "events:driver:approvals"
-CACHE_PERF = "cache:driver:performance"
-EVENT_PERF = "events:driver:performance"
 
 # Autonomous decision layer (Phase 5) — the master-switch/kill-switch control key
 # and the live monitor view. The option caches the cycle reads + the command
@@ -57,66 +47,9 @@ CACHE_SENTIMENT_COMPOSITE = "cache:sentiment:composite"
 # Cap on the newest-first per-checkpoint decision log carried in the monitor view.
 _DECISION_LOG_CAP = 50
 
-# Fields we project the compute dict onto (dropping extras like ml_signals /
-# gex_snapshot the GUI ignores). ``.get`` with the field default keeps a
-# partial/error result from crashing while construction validates the types.
-_APPROVAL_FIELDS = {
-    "date": "", "grade": "", "grade_reasons": [], "conditions": {},
-    "pnl_today": None, "pnl_week": None, "proposed_trades": [], "status": "",
-    "decision": None, "results": [], "reasons": [], "error": None,
-    "timestamp": None,
-}
-
 
 def _now_iso():
     return datetime.now(timezone.utc).isoformat()
-
-
-def _cache_approval(bus, result) -> int:
-    """Validate ``result`` against ``ApprovalState``, cache it, publish an event."""
-    st = ApprovalState(**{k: result.get(k, default)
-                          for k, default in _APPROVAL_FIELDS.items()})
-    version = bus.cache_set(CACHE_APPROVALS, st.model_dump())
-    bus.publish(EVENT_APPROVALS, {"version": version})
-    return version
-
-
-def run_morning(bus) -> None:
-    """Run the morning pipeline and cache the pending approval (+ publish)."""
-    _cache_approval(bus, compute.run_morning())
-
-
-def approve(bus) -> None:
-    """Execute the pending approval's trades and mark it approved.
-
-    No-op unless a ``pending`` approval is currently cached (already-decided or
-    no-trade states must not re-fire orders).
-    """
-    env = bus.cache_get(CACHE_APPROVALS)
-    payload = env.payload if env else None
-    if not payload or payload.get("status") != "pending":
-        return
-    results = compute.execute(payload.get("proposed_trades") or [])
-    _cache_approval(bus, {**payload, "decision": "approved",
-                          "status": "approved", "results": results})
-
-
-def skip(bus) -> None:
-    """Mark the cached approval skipped (no-op if nothing is cached)."""
-    env = bus.cache_get(CACHE_APPROVALS)
-    payload = env.payload if env else None
-    if not payload:
-        return
-    _cache_approval(bus, {**payload, "decision": "skipped", "status": "skipped"})
-
-
-def refresh_perf(bus) -> None:
-    """Recompute the performance report, cache it, publish an event."""
-    rep = compute.build_perf_report()
-    pr = PerfReport(summary=rep.get("summary", {}),
-                    trades=rep.get("trades", []), timestamp=_now_iso())
-    version = bus.cache_set(CACHE_PERF, pr.model_dump())
-    bus.publish(EVENT_PERF, {"version": version})
 
 
 # ── autonomous control key (Phase 5.1) ───────────────────────────────────────
@@ -297,20 +230,12 @@ def run_autonomous_cycle(bus) -> None:
 def handle_command(bus, command) -> None:
     """Dispatch a ``cmd:driver`` command; unknown types are a no-op.
 
-    Legacy approval-queue commands (``run``/``approve``/``skip``/``perf``) plus
-    the autonomous controls: ``cycle`` runs one decision checkpoint now, ``enable``
-    /``disable`` flip the master switch (``enable`` also clears any stale halt so
-    re-enabling re-arms), and ``stop`` is the kill-switch (latch ``halted``).
+    The autonomous controls: ``cycle`` runs one decision checkpoint now,
+    ``enable``/``disable`` flip the master switch (``enable`` also clears any stale
+    halt so re-enabling re-arms), and ``stop`` is the kill-switch (latch
+    ``halted``).
     """
-    if command.type == "run":
-        run_morning(bus)
-    elif command.type == "approve":
-        approve(bus)
-    elif command.type == "skip":
-        skip(bus)
-    elif command.type == "perf":
-        refresh_perf(bus)
-    elif command.type == "cycle":
+    if command.type == "cycle":
         run_autonomous_cycle(bus)
     elif command.type == "enable":
         set_control(bus, enabled=True, halted=False, reason=None)
