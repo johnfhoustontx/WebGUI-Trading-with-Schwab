@@ -698,8 +698,18 @@ def build_dashboard(raw, *, sector_pcr, proxy_up):
                 t.update(last=None, change=None, change_pct=None, color_state="no_data")
             else:
                 last, chg, pct = classify.spread_value(mode, la, lb)
-                t.update(last=last, change=chg, change_pct=pct,
-                         color_state=classify.color_state(chg, polarity=e["polarity"]))
+                if mode == "diff_last":
+                    # A signed COUNT spread ($ADVN-$DECN): the count isn't a %, so
+                    # color by SIGN (single intensity, value_only path) and display
+                    # the level only — NOT the pct thresholds (else it's always
+                    # "strong"). Mark value_only so tile_text shows the level, no %.
+                    t["value_only"] = True
+                    t.update(last=last, change=None, change_pct=None,
+                             color_state=classify.color_state(
+                                 chg, polarity=e["polarity"], value_only=True))
+                else:  # diff_pct (HYG-LQD): a real percentage-point spread
+                    t.update(last=last, change=None, change_pct=pct,
+                             color_state=classify.color_state(pct, polarity=e["polarity"]))
         elif e["kind"] == "external":  # sentiment put/call
             if sector_pcr is None:
                 t.update(last=None, change=None, change_pct=None, color_state="no_data")
