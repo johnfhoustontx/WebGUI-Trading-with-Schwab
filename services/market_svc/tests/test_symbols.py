@@ -1,10 +1,35 @@
 from services.market_svc import symbols as S
 
 
+_EXPECTED_DISPLAYS = {
+    "VIX", "VIX1D", "VIX3M", "SKEW",
+    "Put/Call (cap-wt sectors)",
+    "$ADVN", "$DECN", "$ADVN-$DECN", "$ADD", "$ADSPD", "$TICK",
+    "$DXY",
+    "SPX", "NDX",
+    "/ES[U26]", "/NQ[U26]",
+    "HYG-LQD",
+    "SPY", "DIA", "QQQ", "IWM", "RSP", "QQEW",
+    "MTUM", "SPMO",
+    "SMH", "XSD", "IGV", "QTUM", "XBI", "XRT", "XME",
+    "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU", "XLV", "XLY",
+    "TLT", "HYG", "LQD",
+    "GDLC", "VCX",
+}
+
+
 def test_every_csv_symbol_is_mapped():
     # 48 CSV rows, but $PCALL+$PCSP collapse to ONE external put/call tile,
     # so the dashboard has 47 tiles.
     assert len(S.SYMBOL_MAP) == 47
+    # A future mistyped ticker/display must fail: the full display set is pinned.
+    assert len(_EXPECTED_DISPLAYS) == 47
+    assert {t["display"] for t in S.SYMBOL_MAP} == _EXPECTED_DISPLAYS
+    # Every entry has a non-empty display; every quote tile has a real quote_symbol.
+    for t in S.SYMBOL_MAP:
+        assert t["display"], t
+        if t["kind"] == "quote":
+            assert t["quote_symbol"], t
 
 
 def test_categories_cover_the_expected_set_in_frame_order():
@@ -45,3 +70,10 @@ def test_quote_symbols_are_the_real_ones_only():
     assert "$ADVN" in qs and "$DECN" in qs and "HYG" in qs and "LQD" in qs
     assert "$ADVN-$DECN" not in qs and "HYG-LQD" not in qs
     assert "$PCALL" not in qs
+
+
+def test_quote_symbols_deduped():
+    # HYG/LQD and $ADVN/$DECN each appear as both a quote tile AND a spread leg —
+    # the dedup in quote_symbols() must collapse them.
+    qs = S.quote_symbols()
+    assert len(qs) == len(set(qs))

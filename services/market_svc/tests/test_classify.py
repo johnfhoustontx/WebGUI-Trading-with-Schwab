@@ -51,6 +51,14 @@ def test_color_state_flat_and_no_data():
     assert C.color_state(None, polarity="normal") == "no_data"
 
 
+def test_color_state_boundaries_pin_flat_and_strong_cutoffs():
+    # Exactly _FLAT_PCT (0.1): mag < _FLAT_PCT is a strict `<`, so 0.1 is NOT
+    # flat — it's the first mild bucket.
+    assert C.color_state(0.1, polarity="normal") == "risk_on_mild"
+    # Exactly _STRONG_PCT (1.0): mag >= _STRONG_PCT, so 1.0 IS strong.
+    assert C.color_state(1.0, polarity="normal") == "risk_on_strong"
+
+
 def test_color_state_value_only_uses_sign_one_intensity():
     # a value-only internal (e.g. $TICK = +300) → mild risk-on, not "strong"
     assert C.color_state(300.0, polarity="normal", value_only=True) == "risk_on_mild"
