@@ -2,7 +2,6 @@ r"""check_env.py - validate that the Trading With Schwab apps are up.
 
 Hybrid checks:
     schwab-proxy          HTTP GET {PROXY_URL}/health
-    claude-driver         HTTP GET 127.0.0.1:{APPROVAL_PORT}/status
     options-scanner       psutil scan for `python ... dashboard.py`
     sentiment-dashboard   scan for sentiment_dashboard.py + bridge freshness
     trade-analyzer        scan for trade_analyzer.py (on-demand; not required)
@@ -19,7 +18,7 @@ import pathlib
 from dataclasses import dataclass
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root
-from repo_paths import PROXY_URL, APPROVAL_PORT, BRIDGE_PATH, SENTIMENT  # noqa: E402
+from repo_paths import PROXY_URL, BRIDGE_PATH, SENTIMENT  # noqa: E402
 
 sys.path.insert(0, str(SENTIMENT))  # for market_calendar.is_trading_day
 
@@ -159,14 +158,6 @@ def check_proxy():
     return CheckRow("schwab-proxy", state, detail)
 
 
-def check_approval():
-    try:
-        _http_json(f"http://127.0.0.1:{APPROVAL_PORT}/status")
-    except Exception as e:
-        return CheckRow("claude-driver", DOWN, f"unreachable ({type(e).__name__})")
-    return CheckRow("claude-driver", UP, f"approval server :{APPROVAL_PORT}")
-
-
 def check_options_scanner():
     alive = _proc_alive("dashboard.py")
     return CheckRow("options-scanner", UP if alive else DOWN,
@@ -194,7 +185,6 @@ def run_all_checks():
         check_proxy(),
         check_options_scanner(),
         check_sentiment(),
-        check_approval(),
         check_trade_analyzer(),
     ]
 
