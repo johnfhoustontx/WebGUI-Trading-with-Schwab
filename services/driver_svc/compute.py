@@ -53,7 +53,17 @@ from services.driver_svc import settings as _st  # noqa: E402
 
 
 def _daily_max_loss() -> float:
-    """The daily loss cap from the legacy config (defensive → 250.0)."""
+    """The daily-loss halt for the autonomous driver (defensive → 250.0).
+
+    Prefers the driver's OWN ``settings.DAILY_LOSS_HALT`` (all aggression knobs live in
+    settings.py now); falls back to the legacy ``config.RISK_LIMITS['daily_max_loss']``,
+    then 250.0. Never raises."""
+    try:
+        v = getattr(_st, "DAILY_LOSS_HALT", None)
+        if v is not None:
+            return float(v)
+    except (TypeError, ValueError):
+        pass
     try:
         return float(_RISK_LIMITS.get("daily_max_loss", 250.0))
     except (TypeError, ValueError):

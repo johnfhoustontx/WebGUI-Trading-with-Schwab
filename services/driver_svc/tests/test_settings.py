@@ -13,7 +13,8 @@ def test_limits_dict_shape():
     assert lim["daily_target"] == 500.0
     assert lim["per_trade_max_risk"] > 0
     assert lim["daily_risk_budget"] >= lim["per_trade_max_risk"]
-    assert lim["vix_max"] == 25.0
+    assert 20.0 <= lim["vix_max"] <= 40.0          # a sane VIX ceiling (aggression-tunable)
+    assert lim["daily_loss_halt"] > 0              # the daily-loss halt is surfaced + positive
     assert lim["max_concurrent"] >= 1
     assert lim["max_trades_per_cycle"] >= 1
 

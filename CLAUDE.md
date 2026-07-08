@@ -8,7 +8,20 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-07-08 (**Gamma briefing history — store + CLI utility +
+**Last updated:** 2026-07-08 (**Driver "Very Aggressive" risk profile** — loosened the
+autonomous driver's risk envelope toward the $500/day goal (user directive); all knobs now live
+in `driver_svc/settings.py`: `PER_TRADE_MAX_RISK 1500→3000`, `DAILY_RISK_BUDGET 4500→12000`,
+`MAX_CONCURRENT 6→10`, `MAX_TRADES_PER_CYCLE 3→5`, `VIX_MAX 25→35`, `MENU_TOP_N 12→15`, plus a NEW
+`DAILY_LOSS_HALT=1500` — the biggest brake, replacing the legacy $250 halt that ended the day
+after ONE losing $SPX (`compute._daily_max_loss` reads settings first, legacy `config.RISK_LIMITS`
+as fallback). The paper OPEN path's `options_svc.compute._DRIVER_MAX_RISK_PER_TRADE`→`3000` (the
+MANUAL account stays `config_paper.MAX_RISK_PER_TRADE=250`); the `decider._SYSTEM` prompt was
+rewritten from "standing down is encouraged" to an AGGRESSIVE mandate (take reasonably-scored
+trades to build toward the target; stand down only on genuinely poor edge / hostile conditions).
+Net posture: ~half the $25k paper book deployable, ~12%/trade, a $1,500 daily-loss stop (3× the
+target) — deliberately aggressive (user choice; dial back in `settings.py`). driver_svc **168** +
+options_svc driver-account **15** green. **Restart driver_svc + options_svc** to pick it up.
+Branch `Using_Highcharts`.). Prior — 2026-07-08 (**Gamma briefing history — store + CLI utility +
 in-app viewer**: every Gamma Analyze briefing (the 4×/day Auto briefings + ad-hoc/
 manual runs) is now **persisted** to a new SQLite store
 `options-scanner/gamma_briefing_history_db.py` (`repo_paths.GAMMA_BRIEFING_DB`, one
@@ -2168,18 +2181,21 @@ at +$500, hard-capped on the downside) — no decision-maker can guarantee it. P
   default so they don't conflict).
 - **Contracts** `DriverControl` (`cache:driver:control` — master switch + STOP latch)
   + `AutonomousState` (`cache:driver:autonomous` — the monitor view). Tunables in
-  `settings.py` (`DAILY_TARGET=500`, `PER_TRADE_MAX_RISK=1500`, `DAILY_RISK_BUDGET=4500`
-  — **raised from $300/$900 (2026-07-02)** so the driver can fund $SPX/MU spreads whose
-  per-CONTRACT max loss is large; the guardrail now evaluates affordability in
-  per-contract dollars (`guardrails.CONTRACT_MULTIPLIER=100` — the scanner's `max_loss`
-  is PER-SHARE) and the paper open path uses its own matching
-  `options_svc.compute._DRIVER_MAX_RISK_PER_TRADE=1500` so the user's MANUAL account
-  stays at `config_paper.MAX_RISK_PER_TRADE=250`; see the /driver route note), `MAX_CONCURRENT=6`,
-  `MAX_TRADES_PER_CYCLE=3`, `MODEL="claude-opus-4-8"` (build
-  default; the **`DRIVER_MODEL`** env var overrides it per-deployment —
-  e.g. `claude-sonnet-5` for lower cost), `CHECKPOINT_MIN=30`); the daily loss
-  cap is sourced from the legacy `config.RISK_LIMITS` (still **$250** — with the raised
-  per-trade cap, a single losing $SPX can trip the daily halt; raise it if undesired).
+  `settings.py` (`DAILY_TARGET=500`, `PER_TRADE_MAX_RISK=3000`, `DAILY_RISK_BUDGET=12000`,
+  `MAX_CONCURRENT=10`, `MAX_TRADES_PER_CYCLE=5`, `VIX_MAX=35`, `MENU_TOP_N=15`,
+  `DAILY_LOSS_HALT=1500` — the **"Very Aggressive" risk profile (2026-07-02, user choice)**:
+  the driver presses toward $500/day and tolerates real drawdown (~half the $25k paper book
+  deployable, ~12%/trade, a $1,500 daily-loss stop = 3× the target). **All risk knobs now live
+  in `settings.py`**; `compute._daily_max_loss` reads `DAILY_LOSS_HALT` first (legacy
+  `config.RISK_LIMITS` is only a fallback — this replaced the old $250 halt that stopped the
+  day after one losing $SPX). The guardrail evaluates affordability in per-contract dollars
+  (`guardrails.CONTRACT_MULTIPLIER=100` — the scanner's `max_loss` is PER-SHARE) and the paper
+  open path uses its own matching `options_svc.compute._DRIVER_MAX_RISK_PER_TRADE=3000` so the
+  user's MANUAL account stays at `config_paper.MAX_RISK_PER_TRADE=250`. The `decider._SYSTEM`
+  prompt is an AGGRESSIVE mandate (take reasonably-scored trades to build toward the target;
+  stand down only on genuinely poor edge / hostile conditions). `MODEL="claude-opus-4-8"` (build
+  default; the **`DRIVER_MODEL`** env var / gitignored `shared/driver_model.txt` override it
+  per-deployment — e.g. `claude-sonnet-5`), `CHECKPOINT_MIN=30`).
 - **Page** `webgui/pages/driver.py`: a Tier-1 **monitor + override** (Enable/Disable,
   confirm-gated **STOP**, **Run now**, $500 progress, open-driver-positions, newest-
   first decision-log audit) reading `cache:driver:autonomous`/`control` + version-

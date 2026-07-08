@@ -304,7 +304,7 @@ def driver_account_perf() -> dict:
 # driver can't approve a qty the sizer then zeroes to RISK_TOO_HIGH. Raised to fund
 # liquid index/large-cap spreads ($SPX ~$700-1,150/contract, MU ~$400) that a $250
 # cap sized to 0 — the reason $SPX/MU picks logged "Executed" but never opened.
-_DRIVER_MAX_RISK_PER_TRADE = 1500.0
+_DRIVER_MAX_RISK_PER_TRADE = 3000.0
 
 
 def open_driver_position(signal: dict, qty: int, broker=None) -> dict:

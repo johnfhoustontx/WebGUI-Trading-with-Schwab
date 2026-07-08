@@ -12,8 +12,8 @@ stubbed:
 
 Everything else is real, so the headline assertion — the model asks for **3**
 contracts but a ``paper_create`` lands with ``qty == 1`` — is proof the REAL
-guardrail math ran (``per_trade_max_risk $1500 / $1000 per-contract = 1``, i.e.
-the per-share ``max_loss 10`` x100), not a stub.
+guardrail math ran (``per_trade_max_risk $3000 / $2000 per-contract = 1``, i.e.
+the per-share ``max_loss 20`` x100), not a stub.
 The signal is seeded with the REAL ``cache:options:scan`` field names
 (``type``/``expiration``/``pop_pct``) verified against
 ``options-scanner/scanner_engine.py``.
@@ -28,7 +28,7 @@ from services.driver_svc import handlers
 _QQQ_PCS = {
     "symbol": "QQQ",
     "type": "PCS",
-    "max_loss": 10.0,        # per-SHARE; x100 = $1,000/contract (clamps qty 3 -> 1 at the $1,500 cap)
+    "max_loss": 20.0,        # per-SHARE; x100 = $2,000/contract (clamps qty 3 -> 1 at the $3,000 cap)
     "credit": 60.0,
     "pop_pct": 0.85,
     "composite_score": 80,
@@ -50,8 +50,8 @@ def _seed_paper(fake_bus, session_pnl):
 def test_autonomous_e2e_clamps_and_executes(fake_bus, monkeypatch):
     """Happy path through the REAL run_cycle + guardrails.
 
-    The model requests qty=3; the guardrails clamp it to 1 ($1500 per-trade /
-    $1000 per-contract) and a ``driver_paper_create`` lands on ``cmd:options`` tagged
+    The model requests qty=3; the guardrails clamp it to 1 ($3000 per-trade /
+    $2000 per-contract) and a ``driver_paper_create`` lands on ``cmd:options`` tagged
     ``source="driver"``; the monitor view records the executed QQQ trade.
     """
     handlers.set_control(fake_bus, enabled=True)

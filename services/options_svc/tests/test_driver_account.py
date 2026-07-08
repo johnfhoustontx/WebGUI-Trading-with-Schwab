@@ -127,9 +127,9 @@ def test_open_driver_position_clamp_is_ceiling(tmp_path, monkeypatch):
     monkeypatch.setattr(compute, "DRIVER_PAPER_DB", db)
     compute.ensure_driver_account()
     # Size against the DRIVER's per-trade cap (what open_driver_position uses), not the
-    # manual account's default $250: (2-1.5)*100 = $50/contract; floor(1500/50) = 30.
+    # manual account's default $250: (2-1.5)*100 = $50/contract; floor(3000/50) = 60.
     sized = paper_sizing.size_contracts(1.5, 2.0, max_risk=compute._DRIVER_MAX_RISK_PER_TRADE)[0]
-    assert sized == 30
+    assert sized == 60
     res = compute.open_driver_position(_driver_signal(), qty=100, broker=_fake_broker(1.50))
     assert res["status"] == "opened"
     pos = compute.driver_account_view()["positions"][0]
@@ -238,8 +238,9 @@ def test_open_driver_position_wide_spx_opens_under_raised_cap(tmp_path, monkeypa
     r0 = compute.open_driver_position(spx, qty=2, broker=_fake_broker(2.95))
     assert r0["status"] == "rejected" and r0["reason"] == "RISK_TOO_HIGH"
     assert compute.driver_account_view()["snapshot"]["open_count"] == 0
-    # Raised $1500 cap → floor(1500/705) = 2 contracts → opens.
-    monkeypatch.setattr(compute, "_DRIVER_MAX_RISK_PER_TRADE", 1500.0)
+    # Raised $3000 cap (the "Very Aggressive" default) → floor(3000/705)=4, clamped to the
+    # requested 2 → opens.
+    monkeypatch.setattr(compute, "_DRIVER_MAX_RISK_PER_TRADE", 3000.0)
     r1 = compute.open_driver_position(spx, qty=2, broker=_fake_broker(2.95))
     assert r1["status"] == "opened" and r1["qty"] == 2
     assert r1["max_loss_total"] == 1410.0     # 705 * 2
