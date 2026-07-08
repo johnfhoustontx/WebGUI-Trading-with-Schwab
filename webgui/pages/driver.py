@@ -251,6 +251,79 @@ _PERF_COLS = [
 ]
 
 
+# ── driver realized-performance table (from the isolated paper account's CLOSED
+# trades) ────────────────────────────────────────────────────────────────────────
+# Replaces the dead legacy morning-agent ``trade_log.json`` ledger, which only ever
+# showed never-closing "polled" equity/futures rows at $0. These are the driver's
+# ACTUAL closed options credit spreads with real realized P&L, read from
+# ``cache:options:driver_paper_account['closed_positions']`` — updated every 5-min
+# manage cycle (timely), so realized results appear as positions close.
+_EXIT_REASON_LABELS = {
+    "TARGET_HIT": "Target hit", "MONEY_STOP": "Money stop", "DELTA_STOP": "Delta stop",
+    "TIME_STOP": "Time stop", "EXPIRED": "Expired", "MANUAL": "Manual close",
+}
+
+
+def _humanize_reason(r):
+    """A snake_case exit code → a reader-friendly label (keeps unknown codes readable)."""
+    if not r:
+        return "—"
+    return _EXIT_REASON_LABELS.get(str(r).upper(), str(r).replace("_", " ").title())
+
+
+def _closed_when(ts):
+    """Compact 'YYYY-MM-DD HH:MM' from a stored ISO ts (already CT), else the date / '—'."""
+    s = str(ts or "")
+    if len(s) >= 16 and s[10:11] == "T":
+        return s[:10] + " " + s[11:16]
+    return s[:10] or "—"
+
+
+def closed_summary_text(closed):
+    """One-line realized-performance summary from the driver account's closed trades."""
+    priced = [c for c in (closed or [])
+              if isinstance(c, dict) and isinstance(c.get("realized_pnl"), (int, float))]
+    if not priced:
+        return ("No closed trades yet — the driver's realized P&L appears here as its "
+                "positions close (target / stop / expiry).")
+    wins = [c for c in priced if c["realized_pnl"] > 0]
+    losses = [c for c in priced if c["realized_pnl"] < 0]
+    realized = round(sum(c["realized_pnl"] for c in priced), 2)
+    wr = round(100 * len(wins) / len(priced))
+    return (f"Closed: {len(priced)} · {len(wins)}W–{len(losses)}L ({wr}% win) · "
+            f"Realized: {_money(realized)}")
+
+
+def closed_trade_rows(closed):
+    """Reader-friendly, newest-first rows for the driver's closed-trade table."""
+    items = [c for c in (closed or []) if isinstance(c, dict)]
+    items.sort(key=lambda c: str(c.get("exit_ts") or ""), reverse=True)
+    rows = []
+    for c in items:
+        pnl = c.get("realized_pnl")
+        rows.append({
+            "cid": str(c.get("position_id", c.get("signal_id", ""))),
+            "closed": _closed_when(c.get("exit_ts")),
+            "symbol": c.get("symbol", ""),
+            "strategy": c.get("strategy", ""),
+            "qty": c.get("quantity", ""),
+            "reason": _humanize_reason(c.get("exit_reason")),
+            "pnl": _money(pnl),
+            "_pnl_class": pnl_class(pnl),
+        })
+    return rows
+
+
+_CLOSED_COLS = [
+    {"name": "closed", "label": "Closed", "field": "closed", "align": "left"},
+    {"name": "symbol", "label": "Symbol", "field": "symbol", "align": "left"},
+    {"name": "strategy", "label": "Strategy", "field": "strategy"},
+    {"name": "qty", "label": "Qty", "field": "qty"},
+    {"name": "reason", "label": "Exit reason", "field": "reason", "align": "left"},
+    {"name": "pnl", "label": "Realized P&L", "field": "pnl"},
+]
+
+
 # ── autonomous monitor: pure builders (Phase 7) ──────────────────────────────
 # The repurposed page reads ``cache:driver:autonomous`` (AutonomousState) +
 # ``cache:driver:control`` (DriverControl) and surfaces: day-P&L-vs-target
@@ -630,18 +703,19 @@ def render():
     with ui.row().classes("items-center gap-3 flex-wrap"):
         run_btn = ui.button("Run morning agent", icon="play_arrow", color=None) \
             .props("no-caps").classes(BTN_3D)
-        perf_btn = ui.button("Refresh performance", icon="refresh", color=None) \
-            .props("no-caps").classes(BTN_3D)
         status = ui.label("").classes("opacity-70 text-sm")
 
     approval = ui.column().classes("w-full gap-3")
     ui.separator()
-    ui.label("Performance").classes("text-h6")
-    ui.label("Morning-agent / order-executor ledger (trade_log.json) — a separate "
-             "record from the live paper-account P&L shown in the monitor above.") \
+    with ui.row().classes("items-center gap-3 flex-wrap"):
+        ui.label("Performance").classes("text-h6")
+        perf_btn = ui.button("Refresh", icon="refresh", color=None) \
+            .props("no-caps dense").classes(BTN_3D)
+    ui.label("The driver's closed trades and realized P&L from its isolated paper "
+             "account — updates every 5-min manage cycle as positions close.") \
         .classes("text-xs opacity-50")
     perf_summary = ui.label("").classes("text-sm opacity-80")
-    perf_table = ui.table(columns=_PERF_COLS, rows=[], row_key="trade_id") \
+    perf_table = ui.table(columns=_CLOSED_COLS, rows=[], row_key="cid") \
         .classes("w-full driver-table").props("dense")
     perf_table.add_slot("body-cell-pnl", _PNL_CELL_SLOT)
 
@@ -925,9 +999,12 @@ def render():
                     ui.label(f"Pipeline error: {appr.get('error', 'unknown')}")
 
     def _render_perf():
-        perf = state["perf"] or {}
-        perf_summary.text = perf_summary_text(perf.get("summary"))
-        perf_table.rows = perf_rows(perf.get("trades"))
+        # The driver's realized track record = the isolated paper account's CLOSED
+        # trades (cache:options:driver_paper_account['closed_positions']), NOT the dead
+        # legacy trade_log ledger. Rides the same 2s version-poll as the monitor.
+        closed = (state["paper"] or {}).get("closed_positions") or []
+        perf_summary.text = closed_summary_text(closed)
+        perf_table.rows = closed_trade_rows(closed)
         perf_table.update()
 
     # ── command enqueue ───────────────────────────────────────────────────────
@@ -950,7 +1027,15 @@ def render():
             _do("disable", "Disabling autonomous driver…")
 
     run_btn.on_click(lambda: _do("run", "Running morning agent…"))
-    perf_btn.on_click(lambda: _do("perf", "Refreshing performance…"))
+
+    @guard
+    def _refresh_perf():
+        # Force an immediate driver-account reprice + republish (options_svc) so the
+        # closed-trade table refreshes now, not at the next 5-min manage tick.
+        bus_client.request("options", {"type": "driver_paper_manage"})
+        status.text = "Refreshing performance…"
+
+    perf_btn.on_click(_refresh_perf)
 
     # ── version-poll repaint (fetch-free) ─────────────────────────────────────
     @guard
@@ -975,17 +1060,13 @@ def render():
             state["paper"] = bus_client.read("options:driver_paper_account") or None
             state["dperf"] = bus_client.read("options:driver_paper_perf") or None
             _render_monitor()
+            _render_perf()          # the closed-trade table lives in the driver account
         av = bus_client.read_version("driver:approvals")
         if av != state["appr_ver"]:
             state["appr_ver"] = av
             state["appr"] = bus_client.read("driver:approvals") or None
             _render_approval()
             status.text = status_text(state["appr"])
-        pv = bus_client.read_version("driver:performance")
-        if pv != state["perf_ver"]:
-            state["perf_ver"] = pv
-            state["perf"] = bus_client.read("driver:performance") or None
-            _render_perf()
         # Optimistic-toggle timeout: if the control state never catches up to the
         # user's pending toggle (command never consumed — e.g. driver_svc down),
         # give up after a few ticks: revert the switch to reality and warn. This is
@@ -1010,8 +1091,6 @@ def render():
     state["dperf"] = bus_client.read("options:driver_paper_perf") or None
     state["appr_ver"] = bus_client.read_version("driver:approvals")
     state["appr"] = bus_client.read("driver:approvals") or None
-    state["perf_ver"] = bus_client.read_version("driver:performance")
-    state["perf"] = bus_client.read("driver:performance") or None
     _render_monitor()
     _render_approval()
     _render_perf()
