@@ -214,6 +214,104 @@ def _pick_latest_briefing(payloads, today_ct):
         return None
 
 
+_READ_INDEX_SYMBOLS = ("$SPX", "SPY", "QQQ")
+_SPOT_KEY = {"$SPX": "spx_spot", "SPY": "spy_spot", "QQQ": "qqq_spot"}
+
+
+def _posture(spot, flip) -> str:
+    """One-word gamma posture from spot vs the gamma flip (``''`` if unknown)."""
+    try:
+        if spot is None or flip is None:
+            return ""
+        return ("below flip (negative gamma)" if float(spot) < float(flip)
+                else "above flip (positive gamma)")
+    except (TypeError, ValueError):
+        return ""
+
+
+def _as_of(briefing) -> str:
+    """A short ``slot HH:MM CT`` freshness stamp from the briefing meta (``''`` if unknown)."""
+    slot = str(briefing.get("_slot") or "").strip()
+    gen = str(briefing.get("_generated_at") or "")
+    hhmm = gen[11:16] if len(gen) >= 16 else ""
+    return " ".join(x for x in (slot, (hhmm + " CT") if hhmm else "") if x).strip()
+
+
+def _market_read_summary(read) -> str:
+    """One-line summary for the /driver decision log (regime · bias · breadth · sent)."""
+    parts = []
+    if read.get("regime"):
+        parts.append(str(read["regime"]))
+    if read.get("bias") is not None:
+        parts.append(f"bias {read['bias']}")
+    if read.get("breadth_spread") is not None:
+        parts.append(f"breadth {read['breadth_spread']} {read.get('risk', '')}".strip())
+    elif read.get("risk"):
+        parts.append(str(read["risk"]))
+    if read.get("sentiment_score") is not None:
+        parts.append(f"sent {read['sentiment_score']}")
+    return " · ".join(parts)
+
+
+def _market_read(market) -> dict:
+    """Assemble the decider's ``market_read`` from the enriched market context (pure).
+
+    Joins the freshest gamma briefing (``market['briefing']`` — regime/bias/headline +
+    per-index flip/walls/what-if), a LIVE per-index spot
+    (``market['{spx,spy,qqq}_spot']`` from ``fetch_market_context``; the briefing spot
+    is the fallback), the market-dashboard breadth/risk (``market['dashboard']``), and
+    the sentiment 0-10 score/bias (``market['sentiment']``). ``{}`` when NONE of the
+    three sources is usable (→ ``build_packet`` omits the key; byte-identical to today).
+    Never raises — a partial context yields a partial read. REASONING CONTEXT ONLY (the
+    guardrails never see it; it changes no hard rule).
+    """
+    try:
+        m = market or {}
+        briefing = m.get("briefing") if isinstance(m.get("briefing"), dict) else None
+        dash = _dashboard_risk_read(m.get("dashboard"))
+        sent = m.get("sentiment") if isinstance(m.get("sentiment"), dict) else None
+        read = {}
+        if briefing:
+            as_of = _as_of(briefing)
+            if as_of:
+                read["as_of"] = as_of
+            for k in ("regime", "bias", "bias_label", "headline"):
+                if briefing.get(k) is not None:
+                    read[k] = briefing[k]
+            by_sym = {i.get("symbol"): i for i in (briefing.get("indices") or [])
+                      if isinstance(i, dict)}
+            idx_out = []
+            for sym in _READ_INDEX_SYMBOLS:
+                i = by_sym.get(sym)
+                if not i:
+                    continue
+                spot = m.get(_SPOT_KEY[sym]) or i.get("spot")
+                idx_out.append({
+                    "symbol": sym, "spot": spot, "flip": i.get("gamma_flip"),
+                    "put_wall": i.get("put_wall"), "call_wall": i.get("call_wall"),
+                    "max_pain": i.get("max_pain"), "exp_move": i.get("expected_move"),
+                    "pc_ratio": i.get("pc_ratio"),
+                    "posture": _posture(spot, i.get("gamma_flip")),
+                    "what_if": i.get("what_if")})
+            if idx_out:
+                read["indices"] = idx_out
+        if dash.get("breadth_spread") is not None:
+            read["breadth_spread"] = dash["breadth_spread"]
+        if dash.get("risk"):
+            read["risk"] = dash["risk"]
+        if sent:
+            if sent.get("score") is not None:
+                read["sentiment_score"] = sent["score"]
+            if sent.get("bias"):
+                read["sentiment_bias"] = sent["bias"]
+        if not read:
+            return {}
+        read["summary"] = _market_read_summary(read)
+        return read
+    except Exception:  # noqa: BLE001 — context is best-effort; never block a cycle.
+        return {}
+
+
 def build_packet(scan_view, paper_view, *, target, limits, market) -> dict:
     """Project the cache views into the model's decision packet (pure).
 
@@ -265,6 +363,12 @@ def build_packet(scan_view, paper_view, *, target, limits, market) -> dict:
     ms_line = _market_state_line(market)
     if ms_line:
         packet["market_state"] = ms_line
+    # Additive REASONING CONTEXT: the market read (gamma briefing + dashboard breadth +
+    # sentiment), if any source is present. Like market_state it NEVER filters the menu
+    # (the allowed set above is computed without it) — the guardrails never see it.
+    mr = _market_read(market)
+    if mr:
+        packet["market_read"] = mr
     return packet
 
 

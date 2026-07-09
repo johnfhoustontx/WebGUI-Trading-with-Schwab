@@ -453,3 +453,83 @@ def test_pick_latest_briefing_skips_no_analysis_and_junk():
 
 def test_pick_latest_briefing_empty_is_none():
     assert compute._pick_latest_briefing([], _dt.date(2026, 7, 8)) is None
+
+
+# ---------------------------------------------------------------------------
+# market-read: _market_read assembly + build_packet wiring
+# ---------------------------------------------------------------------------
+def _market_ctx():
+    return {
+        "vix": 15.0, "spx_spot": 5980.0, "spy_spot": 598.0, "qqq_spot": 521.0,
+        "briefing": {"_slot": "midday", "_generated_at": "2026-07-08T12:30:00-05:00",
+            "regime": "negative gamma below flip", "bias": -35, "bias_label": "bearish",
+            "headline": "Dealers short gamma.", "indices": [
+                {"symbol": "$SPX", "spot": 5975, "gamma_flip": 6005, "put_wall": 5900,
+                 "call_wall": 6050, "max_pain": 5975, "expected_move": 46, "pc_ratio": 1.3,
+                 "what_if": {"rally": "r", "selloff": "s", "chop": "c"}},
+                {"symbol": "SPY", "gamma_flip": 600, "put_wall": 590, "call_wall": 605},
+                {"symbol": "QQQ", "gamma_flip": 523, "put_wall": 515, "call_wall": 528}]},
+        "dashboard": {"categories": [{"category": "B", "tiles": [
+            {"display": "$ADVN-$DECN", "last": -620.0, "color_state": "risk_off_mild"},
+            {"display": "VIX", "color_state": "risk_off_strong"}]}]},
+        "sentiment": {"score": 4.1, "bias": "bearish"}}
+
+
+def test_market_read_full_assembly():
+    mr = compute._market_read(_market_ctx())
+    assert mr["regime"] == "negative gamma below flip" and mr["bias"] == -35
+    assert mr["breadth_spread"] == -620.0 and mr["risk"] == "risk_off"
+    assert mr["sentiment_score"] == 4.1 and mr["sentiment_bias"] == "bearish"
+    spx = next(i for i in mr["indices"] if i["symbol"] == "$SPX")
+    assert spx["spot"] == 5980.0                       # LIVE spot overrides briefing 5975
+    assert spx["flip"] == 6005 and spx["put_wall"] == 5900
+    assert spx["posture"] == "below flip (negative gamma)"
+    assert "midday" in mr["as_of"] and "12:30" in mr["as_of"]
+    assert mr["summary"]                               # one-line summary present
+
+
+def test_market_read_posture_above_flip_uses_briefing_spot_when_no_live():
+    ctx = {"briefing": {"indices": [
+        {"symbol": "$SPX", "spot": 6100, "gamma_flip": 6005}]}}   # no live spx_spot
+    mr = compute._market_read(ctx)
+    spx = mr["indices"][0]
+    assert spx["spot"] == 6100                          # falls back to briefing spot
+    assert spx["posture"] == "above flip (positive gamma)"
+
+
+def test_market_read_degrades_partial():
+    # No briefing → no gamma lines, but breadth + sentiment still present.
+    mr = compute._market_read({"dashboard": _market_ctx()["dashboard"],
+                               "sentiment": {"score": 6.0, "bias": "bullish"}})
+    assert "indices" not in mr and "regime" not in mr
+    assert mr["breadth_spread"] == -620.0 and mr["sentiment_score"] == 6.0
+
+
+def test_market_read_all_absent_is_empty():
+    for m in ({}, None, {"vix": 15.0}, {"briefing": None, "dashboard": None}):
+        assert compute._market_read(m) == {}
+
+
+def test_build_packet_includes_market_read():
+    pkt = compute.build_packet({}, {"snapshot": {}}, target=500.0, limits=_lim(),
+                               market=_market_ctx())
+    assert "market_read" in pkt
+    blob = json.dumps(pkt, default=str)
+    assert "put_wall" in blob and "negative gamma below flip" in blob
+
+
+def test_build_packet_market_read_absent_backcompat():
+    """No market-read sources → NO market_read key (byte-identical to today)."""
+    pkt = compute.build_packet({}, {"snapshot": {}}, target=500.0, limits=_lim(),
+                               market={"vix": 14.0})
+    assert "market_read" not in pkt
+
+
+def test_market_read_is_context_only_not_a_filter():
+    scan = {"signals_0dte": [{"symbol": "QQQ", "type": "PCS", "max_loss": 200.0,
+                              "composite_score": 60, "expiration": "2026-06-24"}],
+            "signals_swing": []}
+    base = compute.build_packet(scan, {"snapshot": {}}, target=500.0, limits=_lim(), market={})
+    withmr = compute.build_packet(scan, {"snapshot": {}}, target=500.0, limits=_lim(),
+                                  market=_market_ctx())
+    assert withmr["menu"] == base["menu"] and withmr["menu_by_id"] == base["menu_by_id"]
