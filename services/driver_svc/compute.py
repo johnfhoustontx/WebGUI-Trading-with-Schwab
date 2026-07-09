@@ -64,6 +64,68 @@ def _daily_max_loss() -> float:
         return 250.0
 
 
+# ── cumulative MTD banking target (2026-07-09) ───────────────────────────────
+# The banking target carries the $500/day deficit/excess forward month-to-date, clamped
+# to [floor, cap]. Pure + defensive; the −$1,500 loss halt + per-trade caps are untouched.
+import datetime as _dt
+
+
+def effective_target(base, n_trading_days, mtd_before_today, *, cap, floor) -> float:
+    """The cumulative MTD banking target (clamped to ``[floor, cap]``).
+
+    ``N*base − MTD_realized_before_today`` = what today must bank to be back on the
+    (N trading days × base) pace; clamped so a behind month ratchets up to ``cap``
+    (recover over days, never one shot) and an ahead month eases to ``floor``. Any
+    unparseable input → ``base`` (safe fallback). Never raises.
+    """
+    try:
+        raw = float(n_trading_days) * float(base) - float(mtd_before_today)
+    except (TypeError, ValueError):
+        return float(base)
+    return max(float(floor), min(float(cap), raw))
+
+
+def _iso_date(ts):
+    """The date from an ISO-ish timestamp's first 10 chars, or ``None``."""
+    try:
+        return _dt.date.fromisoformat(str(ts)[:10])
+    except (TypeError, ValueError):
+        return None
+
+
+def mtd_realized_before_today(closed_positions, today_ct) -> float:
+    """Σ realized_pnl of driver closed positions with an exit date in the current month
+    AND strictly before ``today_ct``. Junk-tolerant (bad rows skipped); never raises."""
+    ym, total = (today_ct.year, today_ct.month), 0.0
+    for p in closed_positions or []:
+        if not isinstance(p, dict):
+            continue
+        d = _iso_date(p.get("exit_ts") or p.get("exit_time"))
+        if d is None or (d.year, d.month) != ym or d >= today_ct:
+            continue
+        try:
+            total += float(p.get("realized_pnl") or 0.0)
+        except (TypeError, ValueError):
+            pass
+    return total
+
+
+def _mtd_trading_days(today_ct) -> int:
+    """Trading days from the 1st of ``today_ct``'s month through today inclusive
+    (weekdays − NYSE holidays). ``_HOLIDAYS`` imported lazily to avoid a
+    compute<->scheduler import cycle. Never raises."""
+    try:
+        from services.driver_svc.scheduler import _HOLIDAYS
+    except Exception:  # noqa: BLE001 — degrade to weekdays-only.
+        _HOLIDAYS = set()
+    d, n = today_ct.replace(day=1), 0
+    while d <= today_ct:
+        if d.weekday() < 5 and d not in _HOLIDAYS:
+            n += 1
+        d += _dt.timedelta(days=1)
+    return n
+
+
 # ── autonomous decision cycle (Phase 4) ──────────────────────────────────────
 # This module is BUS-FREE: the handler (Unit 5) reads the Redis cache views and
 # passes ``scan_view`` / ``paper_view`` in as plain dicts. ``build_packet`` is a
