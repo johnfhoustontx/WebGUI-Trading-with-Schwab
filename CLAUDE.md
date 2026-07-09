@@ -8,7 +8,38 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-07-08 (**Driver market-context block — the decider now reads gamma /
+**Last updated:** 2026-07-09 (**Driver directional gate + cumulative MTD target** — two fixes
+motivated by a forensic review ("C") of the driver's REAL closed book: 22 closed trades,
+**−$908 realized / 27% win / PF 0.23**, drawdown to $22,768 (−8.9%), a −$1,946 halt day. Root
+cause = **wrong-side selection** — 10 of 11 DELTA_STOPs were **call credit spreads run over by a
+rising tape** (CCS bucket −$706 @ 21% win); the stops fire at ~0.35 short delta (sensible, median
+~1-day hold) so they're fine — **the entry side is the problem**. The app's own sentiment read was
+**bearish (3.92) while price melted up**, i.e. its directional opinions were INVERTED, so the fix
+keys on **price truth**, not sentiment. **(A) Directional gate** (`guardrails._side_blocked` +
+`WRONG_SIDE_REGIME` + a `posture` kwarg on `apply_guardrails`): hard-block a **CCS in an `up` tape /
+a PCS in a `down` tape** (IC exempt), where `compute._directional_posture(market_read)` derives
+up/down/neutral from **broad-index change_pct + `$ADVN-$DECN` breadth agreement** (NOT sentiment/bias,
+NOT the gamma flip — a volatility regime); `_market_read` now carries per-index `change_pct` from the
+dashboard. The gate is **code-authoritative, IC-exempt, and degrade-safe** (posture `neutral` when
+data is missing → inert), placed BEFORE the capacity check so a block never eats a slot. It ships
+**behind `settings.DIRECTIONAL_GATE_ENABLED` (default False = INERT)** and `run_cycle` forces
+`neutral` until the flag is flipped. **Backtest first** (`validate_directional_gate.py`, offline):
+replaying the 22 real trades vs SPX spot-trend from `gex_history` — at a 24h lookback it blocks the
+**two catastrophic $SPX CCS losses (−$561, clear up-trends) → net +$613 / 66% of the CCS bucket**,
+but only **7/22 trades are covered** by history and it's **lookback-sensitive** (30h → net −$49 / 0%);
+concept validated on the worst day, but **too thin to auto-enable → flag stays OFF** pending more
+coverage / the user's call. **(B) Cumulative MTD target** (LIVE now): the flat $500/day banking
+target becomes `effective_target = clamp(N×500 − MTD_realized_before_today, TARGET_FLOOR 250,
+TARGET_CAP 1000)` (`compute.effective_target` + `mtd_realized_before_today` + `_mtd_trading_days`),
+computed in the handler from the driver book's closed-position MTD realized P&L + a holiday-aware
+trading-day count, threaded into `build_packet` + `halt_state` (and the published monitor `target`).
+Behind pace → ratchet to $1,000; ahead → ease to $250; **the −$1,500 loss halt + per-trade caps are
+UNCHANGED** (only the bank/stop threshold moves — bounded, no chasing via oversizing); fails safe to
+$500. Built directly, TDD, per-task commits: driver_svc **196** + contracts **38** green. **Restart
+`driver_svc`** — the cumulative target is live immediately; the gate is inert until you enable it.
+PAPER ONLY. Design/plan:
+[design](docs/plans/2026-07-09-driver-directional-gate-cumulative-target-design.md) /
+[plan](docs/plans/2026-07-09-driver-directional-gate-cumulative-target-plan.md). Prior — 2026-07-08 (**Driver market-context block — the decider now reads gamma /
 breadth / sentiment (context only)**: the autonomous Driver's Claude decider was blind to market
 structure — it saw only `vix` + the five-state label string, yet it trades $SPX/SPY/QQQ credit
 spreads whose safety is defined by exactly the gamma flip/walls it couldn't see. It now gets an
