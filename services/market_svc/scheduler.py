@@ -50,13 +50,14 @@ SUMMARY_RTH_SEC = 20 * 60       # refresh the Claude verdict every ~20 min durin
 SUMMARY_OFFHOURS_SEC = 60 * 60  # ~hourly off-hours
 
 
-def summary_due(last_run, secs_since, *, now=None):
+def summary_due(has_run, secs_since, *, now=None):
     """Whether to regenerate the Claude verdict this cycle (pure).
 
-    ``last_run`` is None until the first run (→ always due). Otherwise fire when
-    ``secs_since`` the last run exceeds the RTH/off-hours interval.
+    ``has_run`` is a True/None sentinel — None until the first run (→ always due).
+    Once it has run, fire when ``secs_since`` the last run exceeds the RTH/off-hours
+    interval.
     """
-    if last_run is None:
+    if has_run is None:
         return True
     now = now or _dt.datetime.now(_CT)
     threshold = SUMMARY_RTH_SEC if _is_rth(now) else SUMMARY_OFFHOURS_SEC
@@ -66,20 +67,20 @@ def summary_due(last_run, secs_since, *, now=None):
 async def loop(bus) -> None:
     """Poll → publish → (periodic Claude summary) → sleep, forever. Never raises out."""
     loop_ = asyncio.get_running_loop()
-    last_summary = None
+    summary_started = None
     secs_since_summary = 0.0
     while True:
         interval = poll_interval()
         try:
             payload = await loop_.run_in_executor(None, compute.collect, bus)
             await loop_.run_in_executor(None, handlers.publish, bus, payload)
-            if summary_due(last_summary, secs_since_summary):
+            if summary_due(summary_started, secs_since_summary):
                 sent = bus.cache_get("cache:sentiment:composite")
                 sent_payload = sent.payload if sent else {}
                 summary = await loop_.run_in_executor(
                     None, compute.generate_summary, payload, sent_payload)
                 await loop_.run_in_executor(None, handlers.publish_summary, bus, summary)
-                last_summary = True
+                summary_started = True
                 secs_since_summary = 0.0
         except asyncio.CancelledError:
             raise

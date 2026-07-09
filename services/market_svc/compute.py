@@ -163,7 +163,9 @@ def _make_summary_client():
         return None
     try:
         import anthropic
-        return anthropic.Anthropic(api_key=key)
+        # Bounded: this runs inline in the poll loop, so a hung connection must not
+        # stall the dashboard cadence (the SDK default is ~600s).
+        return anthropic.Anthropic(api_key=key, timeout=30.0, max_retries=1)
     except Exception:  # noqa: BLE001
         return None
 
@@ -186,16 +188,16 @@ def build_summary_packet(dashboard, sentiment):
     def _movers(cats, n=3):
         tiles = [t for c in cats for t in byc.get(c, []) if t.get("change_pct") is not None]
         tiles.sort(key=lambda t: abs(t.get("change_pct") or 0), reverse=True)
-        return [{"display": t["display"], "change_pct": t["change_pct"]} for t in tiles[:n]]
+        return [{"display": t.get("display"), "change_pct": t.get("change_pct")} for t in tiles[:n]]
 
     return {
         "sentiment": {"score": comp.get("total_score"), "bias": comp.get("bias")},
         "trend": {"label": trend.get("label"), "score": trend.get("score")},
         "breadth": (live.get("breadth") or {}).get("interpretation"),
         "put_call": live.get("sector_pcr"),
-        "vol": [{"display": t["display"], "last": t.get("last"), "change_pct": t.get("change_pct")}
+        "vol": [{"display": t.get("display"), "last": t.get("last"), "change_pct": t.get("change_pct")}
                 for t in byc.get("Volatility", [])],
-        "index": [{"display": t["display"], "change_pct": t.get("change_pct")}
+        "index": [{"display": t.get("display"), "change_pct": t.get("change_pct")}
                   for t in byc.get("Cash Index", [])],
         "movers": _movers(["Sector SPDR", "Thematic / Industry ETF"], 4),
     }

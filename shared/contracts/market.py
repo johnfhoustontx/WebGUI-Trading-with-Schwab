@@ -27,8 +27,8 @@ class MarketSummary(_Base):
     A short Claude-written verdict market_svc publishes on a schedule. The webgui
     ticker leads its scroll with this, followed by live rule-based data items.
     Defensive: an empty ``narrative`` (no key / API error) means the ticker shows
-    live items only.
+    live items only. Freshness (generated-at) is carried by the bus envelope ts,
+    like the other domain views — no per-payload timestamp.
     """
 
     narrative: str = ""
-    generated_at: str | None = None

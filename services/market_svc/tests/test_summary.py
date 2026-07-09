@@ -32,10 +32,9 @@ def test_build_summary_packet_extracts_compact_facts():
     assert "VIX" in {t["display"] for t in p["vol"]}
 
 
-def test_generate_summary_no_client_is_empty_but_safe(monkeypatch):
-    # Force the "no client available" path deterministically (this machine may
-    # have a real ANTHROPIC key configured; never call the real API in tests).
-    monkeypatch.setattr(compute, "_make_summary_client", lambda: None)
+def test_generate_summary_no_client_is_empty_but_safe():
+    # The autouse _no_live_claude fixture forces _make_summary_client → None, so the
+    # default real-client resolution path returns an empty narrative (no network).
     out = compute.generate_summary(_dash(), _sent(), client=None)
     assert out["narrative"] == ""
 
