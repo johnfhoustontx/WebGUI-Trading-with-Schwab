@@ -553,3 +553,62 @@ def test_run_cycle_market_read_none_when_absent(monkeypatch):
     out = compute.run_cycle({}, {"snapshot": {}}, target=500.0, limits=_lim(),
                             market={"vix": 14})
     assert out.get("market_read") is None
+
+
+# ── directional gate: _directional_posture + market_read change_pct + run_cycle ─
+def test_directional_posture_up_down_neutral():
+    up = {"breadth_spread": 500, "indices": [
+        {"symbol": "$SPX", "change_pct": 0.6}, {"symbol": "QQQ", "change_pct": 0.4}]}
+    down = {"breadth_spread": -500, "indices": [
+        {"symbol": "$SPX", "change_pct": -0.6}, {"symbol": "QQQ", "change_pct": -0.4}]}
+    mixed = {"breadth_spread": 500, "indices": [   # index vs breadth disagree
+        {"symbol": "$SPX", "change_pct": -0.6}, {"symbol": "QQQ", "change_pct": 0.4}]}
+    assert compute._directional_posture(up) == "up"
+    assert compute._directional_posture(down) == "down"
+    assert compute._directional_posture(mixed) == "neutral"
+    for bad in (None, {}, {"breadth_spread": 500}, "junk"):
+        assert compute._directional_posture(bad) == "neutral"
+
+
+# an input `market` (pre-market_read) that build_packet turns into an UP posture:
+def _up_market():
+    return {"vix": 14, "spx_spot": 5980.0, "qqq_spot": 521.0,
+            "briefing": {"_slot": "midday", "_generated_at": "2026-07-09T12:30:00-05:00",
+                "indices": [{"symbol": "$SPX", "gamma_flip": 6005},
+                            {"symbol": "QQQ", "gamma_flip": 523}]},
+            "dashboard": {"categories": [{"category": "B", "tiles": [
+                {"display": "$ADVN-$DECN", "last": 500.0, "color_state": "risk_on_mild"},
+                {"display": "SPX", "change_pct": 0.6, "color_state": "risk_on_mild"},
+                {"display": "QQQ", "change_pct": 0.5, "color_state": "risk_on_mild"}]}]}}
+
+
+def test_market_read_carries_index_change_pct():
+    """_market_read enriches each index with change_pct from the dashboard tile."""
+    mr = compute._market_read(_up_market())
+    spx = next(i for i in mr["indices"] if i["symbol"] == "$SPX")
+    assert spx["change_pct"] == 0.6
+
+
+def _ccs_scan():
+    return {"signals_0dte": [{"symbol": "SPY", "type": "CCS", "max_loss": 2.0,
+                              "composite_score": 80, "expiration": "2026-07-13"}],
+            "signals_swing": []}
+
+
+def test_run_cycle_gate_inert_when_flag_off(monkeypatch):
+    """Flag OFF (default) → posture forced neutral → a CCS in an up tape still executes."""
+    monkeypatch.setattr("services.driver_svc.decider.decide",
+        lambda p, **k: {"stand_down": False, "trades": [{"id": "m0", "quantity": 1}]})
+    out = compute.run_cycle(_ccs_scan(), {"snapshot": {}}, target=500.0, limits=_lim(),
+                            market=_up_market())
+    assert len(out["executable"]) == 1                       # gate inert
+
+
+def test_run_cycle_gate_blocks_wrong_side_when_flag_on(monkeypatch):
+    monkeypatch.setattr("services.driver_svc.settings.DIRECTIONAL_GATE_ENABLED", True)
+    monkeypatch.setattr("services.driver_svc.decider.decide",
+        lambda p, **k: {"stand_down": False, "trades": [{"id": "m0", "quantity": 1}]})
+    out = compute.run_cycle(_ccs_scan(), {"snapshot": {}}, target=500.0, limits=_lim(),
+                            market=_up_market())
+    assert out["executable"] == []
+    assert out["rejected"][0]["reason"]                      # blocked wrong-side

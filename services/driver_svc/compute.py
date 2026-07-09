@@ -278,6 +278,24 @@ def _pick_latest_briefing(payloads, today_ct):
 
 _READ_INDEX_SYMBOLS = ("$SPX", "SPY", "QQQ")
 _SPOT_KEY = {"$SPX": "spx_spot", "SPY": "spy_spot", "QQQ": "qqq_spot"}
+# Market-dashboard tile display name per broad-index symbol (the CSV symbol, e.g. $SPX→SPX).
+_DASH_DISPLAY = {"$SPX": "SPX", "SPY": "SPY", "QQQ": "QQQ"}
+
+
+def _dashboard_change_pct(dashboard) -> dict:
+    """Map each broad-index symbol → its ``change_pct`` from the dashboard tile.
+
+    The market_read's per-index direction input for the directional gate. Only present
+    symbols with a non-``None`` change land in the map. Defensive → ``{}``. Never raises.
+    """
+    try:
+        cats = (dashboard or {}).get("categories") or []
+        by_disp = {t.get("display"): t.get("change_pct")
+                   for c in cats for t in (c.get("tiles") or []) if isinstance(t, dict)}
+        return {sym: by_disp[disp] for sym, disp in _DASH_DISPLAY.items()
+                if by_disp.get(disp) is not None}
+    except Exception:  # noqa: BLE001 — context is best-effort.
+        return {}
 
 
 def _posture(spot, flip) -> str:
@@ -342,6 +360,7 @@ def _market_read(market) -> dict:
                     read[k] = briefing[k]
             by_sym = {i.get("symbol"): i for i in (briefing.get("indices") or [])
                       if isinstance(i, dict)}
+            chg = _dashboard_change_pct(m.get("dashboard"))   # per-index direction
             idx_out = []
             for sym in _READ_INDEX_SYMBOLS:
                 i = by_sym.get(sym)
@@ -352,7 +371,7 @@ def _market_read(market) -> dict:
                     "symbol": sym, "spot": spot, "flip": i.get("gamma_flip"),
                     "put_wall": i.get("put_wall"), "call_wall": i.get("call_wall"),
                     "max_pain": i.get("max_pain"), "exp_move": i.get("expected_move"),
-                    "pc_ratio": i.get("pc_ratio"),
+                    "pc_ratio": i.get("pc_ratio"), "change_pct": chg.get(sym),
                     "posture": _posture(spot, i.get("gamma_flip")),
                     "what_if": i.get("what_if")})
             if idx_out:
@@ -372,6 +391,36 @@ def _market_read(market) -> dict:
         return read
     except Exception:  # noqa: BLE001 — context is best-effort; never block a cycle.
         return {}
+
+
+def _directional_posture(market_read) -> str:
+    """The broad-tape direction from the market_read — ``up`` / ``down`` / ``neutral``.
+
+    Keys on PRICE TRUTH (broad-index change_pct + $ADVN-$DECN breadth), deliberately NOT
+    on sentiment/bias (which were inverted during the loss period that motivated the gate)
+    nor the gamma flip (a volatility regime, not a direction). Decisive only when the
+    $SPX/QQQ change and the breadth AGREE; otherwise ``neutral``. Missing/partial data →
+    ``neutral`` (so the gate is inert without a clear read). Never raises. The threshold is
+    validated/tuned by the offline backtest before the gate is enabled.
+    """
+    try:
+        mr = market_read or {}
+        breadth = mr.get("breadth_spread")
+        ups = downs = 0
+        for i in (mr.get("indices") or []):
+            if i.get("symbol") in ("$SPX", "QQQ") and i.get("change_pct") is not None:
+                c = float(i["change_pct"])
+                ups += c > 0
+                downs += c < 0
+        b_up = breadth is not None and float(breadth) > 0
+        b_down = breadth is not None and float(breadth) < 0
+        if ups > downs and b_up:
+            return "up"
+        if downs > ups and b_down:
+            return "down"
+        return "neutral"
+    except Exception:  # noqa: BLE001 — context is best-effort; default to no gate.
+        return "neutral"
 
 
 def build_packet(scan_view, paper_view, *, target, limits, market) -> dict:
@@ -460,10 +509,15 @@ def run_cycle(scan_view, paper_view, *, target, limits, market, client=None) -> 
                               market=market)
         model_facing = {k: v for k, v in packet.items() if k != "menu_by_id"}
         decision = decider.decide(model_facing, client=client)
+        # Directional gate — pass a decisive posture ONLY when the flag is on; otherwise
+        # "neutral" keeps the gate inert (byte-identical to today). Ships off until the
+        # offline backtest validates it (settings.DIRECTIONAL_GATE_ENABLED).
+        posture = (_directional_posture(packet.get("market_read"))
+                   if _st.DIRECTIONAL_GATE_ENABLED else "neutral")
         guarded = _g.apply_guardrails(
             decision, packet["menu_by_id"], limits,
             open_count=packet["open_count"], day_pnl=packet["day_pnl"],
-            vix=packet["vix"], daily_max_loss=_daily_max_loss())
+            vix=packet["vix"], daily_max_loss=_daily_max_loss(), posture=posture)
         return {"decision": decision, "day_pnl": packet["day_pnl"],
                 "open_positions": packet["open_positions"],
                 # Threaded out for /driver observability (its one-line summary is stamped
