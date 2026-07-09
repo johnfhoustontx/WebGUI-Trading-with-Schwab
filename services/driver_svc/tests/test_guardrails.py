@@ -251,3 +251,63 @@ def test_apply_executable_carries_full_signal_and_rationale():
     assert t["signal"] is menu["m2"]                      # same object, enqueued verbatim
     assert t["signal"]["extra_field"] == "must-survive"   # no field dropped
     assert t["rationale"] == "high pop IC" and t["qty"] >= 1
+
+
+# ── directional wrong-side gate (2026-07-09) ─────────────────────────────────
+def _gdec(mid):
+    return {"stand_down": False, "trades": [{"id": mid, "quantity": 1}]}
+
+
+def test_side_blocked_matrix():
+    ccs = {"type": "CCS", "max_loss": 2.0}
+    pcs = {"type": "PCS", "max_loss": 2.0}
+    ic = {"type": "IC", "max_loss": 2.0}
+    assert g._side_blocked(ccs, "up") and not g._side_blocked(ccs, "down")
+    assert g._side_blocked(pcs, "down") and not g._side_blocked(pcs, "up")
+    assert not g._side_blocked(ic, "up") and not g._side_blocked(ic, "down")   # IC exempt
+    for s in (ccs, pcs, ic):
+        assert not g._side_blocked(s, "neutral")                              # neutral → nothing
+
+
+def test_apply_guardrails_blocks_wrong_side_ccs_when_up():
+    menu = {"m0": {"type": "CCS", "max_loss": 2.0}}
+    out = g.apply_guardrails(_gdec("m0"), menu, g_limits(), open_count=0, day_pnl=0.0,
+                             vix=14, posture="up")
+    assert out["executable"] == []
+    assert out["rejected"][0]["reason"] == g.WRONG_SIDE_REGIME
+
+
+def test_apply_guardrails_blocks_wrong_side_pcs_when_down():
+    menu = {"m0": {"type": "PCS", "max_loss": 2.0}}
+    out = g.apply_guardrails(_gdec("m0"), menu, g_limits(), open_count=0, day_pnl=0.0,
+                             vix=14, posture="down")
+    assert out["executable"] == [] and out["rejected"][0]["reason"] == g.WRONG_SIDE_REGIME
+
+
+def test_apply_guardrails_allows_right_side_pcs_when_up():
+    """A PCS (short puts, bullish) is the RIGHT side in an up tape — it still trades."""
+    menu = {"m0": {"type": "PCS", "max_loss": 2.0}}
+    out = g.apply_guardrails(_gdec("m0"), menu, g_limits(), open_count=0, day_pnl=0.0,
+                             vix=14, posture="up")
+    assert len(out["executable"]) == 1 and out["executable"][0]["qty"] == 1
+
+
+def test_apply_guardrails_neutral_and_default_are_backcompat():
+    """Default posture (neutral) → the gate is inert; a CCS trades exactly as before."""
+    menu = {"m0": {"type": "CCS", "max_loss": 2.0}}
+    for kw in ({}, {"posture": "neutral"}):
+        out = g.apply_guardrails(_gdec("m0"), menu, g_limits(), open_count=0, day_pnl=0.0,
+                                 vix=14, **kw)
+        assert len(out["executable"]) == 1
+
+
+def test_wrong_side_block_does_not_consume_slot_or_budget():
+    """A blocked wrong-side trade must not eat a concurrent slot — a following right-side
+    trade in the SAME cycle still executes."""
+    menu = {"m0": {"type": "CCS", "max_loss": 2.0}, "m1": {"type": "PCS", "max_loss": 2.0}}
+    dec = {"stand_down": False, "trades": [{"id": "m0", "quantity": 1},
+                                           {"id": "m1", "quantity": 1}]}
+    out = g.apply_guardrails(dec, menu, g_limits(), open_count=0, day_pnl=0.0,
+                             vix=14, posture="up")
+    assert [t["id"] for t in out["executable"]] == ["m1"]          # CCS blocked, PCS runs
+    assert out["rejected"][0]["reason"] == g.WRONG_SIDE_REGIME

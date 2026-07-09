@@ -106,6 +106,28 @@ def _max_loss_dollars(signal) -> float | None:
     return ml * CONTRACT_MULTIPLIER if ml is not None else None
 
 
+# Rejection reason for the directional gate (2026-07-09) — a defined-risk spread whose
+# directional side is wrong for the current market posture (a CCS in an up tape / a PCS in
+# a down tape). Surfaced on the /driver decision log like the other reject reasons.
+WRONG_SIDE_REGIME = "wrong-side for the current regime (directional gate)"
+
+
+def _side_blocked(signal, posture) -> bool:
+    """True iff this defined-risk spread's directional side is wrong for ``posture``.
+
+    A CCS (short calls) is hurt by an UP tape; a PCS (short puts) by a DOWN tape; an IC is
+    neutral and never blocked. Any ``posture`` other than ``"up"``/``"down"`` (incl. the
+    default ``"neutral"``) blocks nothing — so the gate is inert unless a decisive posture
+    is supplied. Pure; never raises (``signal_structure`` tolerates sparse signals).
+    """
+    struct = signal_structure(signal)
+    if posture == "up" and struct == "CCS":
+        return True
+    if posture == "down" and struct == "PCS":
+        return True
+    return False
+
+
 def is_allowed(signal) -> bool:
     """True iff ``signal`` is a defined-risk credit spread with real risk.
 
@@ -183,7 +205,7 @@ def halt_state(day_pnl, target, daily_max_loss, vix, vix_max=25.0):
 
 
 def apply_guardrails(decision, menu_by_id, limits, *, open_count, day_pnl, vix=None,
-                     daily_max_loss=250.0):
+                     daily_max_loss=250.0, posture="neutral"):
     """Turn a model decision into an executable, risk-clamped trade list.
 
     This is the single authority over what the autonomous driver executes. The
@@ -227,6 +249,13 @@ def apply_guardrails(decision, menu_by_id, limits, *, open_count, day_pnl, vix=N
             continue
         if not is_allowed(sig):
             rejected.append({"id": mid, "reason": "structure not in allowlist / no defined risk"})
+            continue
+        # Directional gate — before the capacity check so a wrong-side block does NOT
+        # consume a concurrent slot/budget (a following right-side trade can still run).
+        # ``posture`` defaults to "neutral" (inert); run_cycle supplies a decisive posture
+        # only when settings.DIRECTIONAL_GATE_ENABLED.
+        if _side_blocked(sig, posture):
+            rejected.append({"id": mid, "reason": WRONG_SIDE_REGIME})
             continue
         if len(executable) >= per_cycle or slots <= 0:
             rejected.append({"id": mid, "reason": "max trades/concurrent reached"})
