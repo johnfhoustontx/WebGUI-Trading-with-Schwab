@@ -136,7 +136,7 @@ def ticker_items(dashboard, sentiment):
 
     # Volatility (VIX/VIX1D/SKEW) — inverted feel already baked into color_state.
     for t in byc.get("Volatility", []):
-        text = f"{t['display']} {_fmt(t.get('last'))} {_fmt_pct(t.get('change_pct'))}".strip()
+        text = f"{t.get('display', '')} {_fmt(t.get('last'))} {_fmt_pct(t.get('change_pct'))}".strip()
         items.append({"text": text, "tone": _tone_from_state(t.get("color_state"))})
 
     # Put/Call.
@@ -147,7 +147,7 @@ def ticker_items(dashboard, sentiment):
 
     # Indices.
     for t in byc.get("Cash Index", []):
-        items.append({"text": f"{t['display']} {_fmt_pct(t.get('change_pct'))}",
+        items.append({"text": f"{t.get('display', '')} {_fmt_pct(t.get('change_pct'))}".strip(),
                       "tone": _tone_from_state(t.get("color_state"))})
 
     # Top movers (sector + thematic), by |change|.
@@ -155,7 +155,7 @@ def ticker_items(dashboard, sentiment):
               if t.get("change_pct") is not None]
     movers.sort(key=lambda t: abs(t.get("change_pct") or 0), reverse=True)
     for t in movers[:4]:
-        items.append({"text": f"{t['display']} {_fmt_pct(t.get('change_pct'))}",
+        items.append({"text": f"{t.get('display', '')} {_fmt_pct(t.get('change_pct'))}".strip(),
                       "tone": _tone_from_state(t.get("color_state"))})
 
     return items
@@ -177,19 +177,23 @@ def render_ticker(active):
         scroll = ui.row().classes(
             f"mkt-ticker-scroll {speed_class(speed)} items-center gap-2")
 
-    state = {"versions": None}
+    state = {"versions": None, "sig": None}
 
-    def _paint():
+    def _read():
+        """Read the caches → ``(narrative, items)`` (the rendered content)."""
         dash = bus_client.read("market:dashboard")
         sent = bus_client.read("sentiment:composite")
         summ = bus_client.read("market:summary") or {}
+        narrative = (summ.get("narrative") or "").strip()
+        return narrative, ticker_items(dash, sent)
+
+    def _paint(narrative, items):
+        """Rebuild the marquee DOM from already-built ``(narrative, items)``."""
         scroll.clear()
         with scroll:
-            narrative = (summ.get("narrative") or "").strip()
             if narrative:
                 ui.label(f"⚠ {narrative}").classes("text-amber-300 text-xs font-medium")
                 ui.label("·").classes("text-slate-600 text-xs")
-            items = ticker_items(dash, sent)
             if not items and not narrative:
                 ui.label("Market data loading…").classes("text-slate-400 text-xs")
             for i, it in enumerate(items):
@@ -197,13 +201,29 @@ def render_ticker(active):
                 if i < len(items) - 1:
                     ui.label("·").classes("text-slate-600 text-xs")
 
+    def _signature(narrative, items):
+        # Signature of the RENDERED content — NOT the raw cache version (which bumps
+        # ~every 2s during RTH for tile fields the ticker never shows). Only a change
+        # in the displayed strings/tones triggers a DOM rebuild, so the marquee keeps
+        # scrolling smoothly through the common no-visible-change RTH tick.
+        return (narrative, tuple((i["text"], i["tone"]) for i in items))
+
     @guard
     def _poll():
+        # First gate (cheap): skip everything unless a watched version advanced.
         vers = bus_client.read_versions(VIEWS)
-        if vers != state["versions"]:
-            state["versions"] = vers
-            _paint()
+        if vers == state["versions"]:
+            return
+        state["versions"] = vers
+        # Second gate: only clear+rebuild when the displayed content actually changed.
+        narrative, items = _read()
+        sig = _signature(narrative, items)
+        if sig != state["sig"]:
+            state["sig"] = sig
+            _paint(narrative, items)
 
-    _paint()
+    narrative, items = _read()
+    _paint(narrative, items)
+    state["sig"] = _signature(narrative, items)
     state["versions"] = bus_client.read_versions(VIEWS)
     ui.timer(4.0, _poll)

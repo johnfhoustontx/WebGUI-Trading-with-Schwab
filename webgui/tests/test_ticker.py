@@ -45,6 +45,36 @@ def test_ticker_items_empty_caches_safe():
     assert ticker.ticker_items({}, {}) == []
 
 
+def test_ticker_items_dashboard_only_and_sentiment_only_safe():
+    # Dashboard-only (no sentiment) → tile-derived items, no raise.
+    dash_items = ticker.ticker_items(_dash(), None)
+    assert dash_items and all(i["tone"] in {"risk_on", "risk_off", "neutral", "warn"}
+                              for i in dash_items)
+    assert "VIX" in " ".join(i["text"] for i in dash_items)
+    # Sentiment-only (no dashboard) → sentiment/trend/breadth items, no raise.
+    sent_items = ticker.ticker_items(None, _sent())
+    texts = " ".join(i["text"] for i in sent_items)
+    assert "Cautious" in texts and "Neutral" in texts and "1.34" in texts
+
+
+def test_put_call_tone_flips_around_one():
+    hi = ticker.ticker_items(None, {"live": {"sector_pcr": 1.34}})
+    assert any(i["text"].startswith("P/C") and i["tone"] == "risk_off" for i in hi)
+    lo = ticker.ticker_items(None, {"live": {"sector_pcr": 0.72}})
+    assert any(i["text"].startswith("P/C") and i["tone"] == "risk_on" for i in lo)
+
+
+def test_movers_section_caps_at_four():
+    dash = {"categories": [{"category": "Sector SPDR", "tiles": [
+        {"display": f"S{n}", "change_pct": float(n), "color_state": "risk_on_mild"}
+        for n in range(1, 8)]}]}  # 7 sector tiles
+    items = ticker.ticker_items(dash, None)
+    # Only the mover items exist here (no sentiment/vol/index); at most 4.
+    assert len(items) == 4
+    # And they are the largest-|change| movers (S7..S4).
+    assert {i["text"].split()[0] for i in items} == {"S7", "S6", "S5", "S4"}
+
+
 def test_speed_class_maps_numbers_to_finite_buckets():
     # Higher seconds = slower scroll.
     assert ticker.speed_class(90) == "mkt-dur-slow"
