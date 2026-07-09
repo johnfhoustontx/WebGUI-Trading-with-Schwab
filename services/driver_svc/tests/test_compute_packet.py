@@ -412,3 +412,44 @@ def test_dashboard_risk_read_risk_on_and_missing_breadth():
 def test_dashboard_risk_read_empty_is_empty():
     for d in ({}, None, {"categories": []}, {"categories": [{"tiles": []}]}, "junk"):
         assert compute._dashboard_risk_read(d) == {}
+
+
+# ---------------------------------------------------------------------------
+# market-read: _pick_latest_briefing (freshest TODAY gamma briefing)
+# ---------------------------------------------------------------------------
+import datetime as _dt   # noqa: E402
+
+
+def _brief(slot, gen, bias=-20):
+    return {"slot": slot, "generated_at": gen,
+            "analysis": {"bias": bias, "regime": "neg gamma",
+                         "indices": [{"symbol": "$SPX", "gamma_flip": 6005}]}}
+
+
+def test_pick_latest_briefing_newest_today():
+    today = _dt.date(2026, 7, 8)
+    payloads = [_brief("open", "2026-07-08T08:48:00-05:00", bias=-10),
+                _brief("midday", "2026-07-08T11:30:00-05:00", bias=-35)]
+    out = compute._pick_latest_briefing(payloads, today)
+    assert out["bias"] == -35 and out["_slot"] == "midday"      # newest wins
+    assert out["_generated_at"].startswith("2026-07-08T11:30")
+
+
+def test_pick_latest_briefing_drops_prior_day():
+    today = _dt.date(2026, 7, 8)
+    out = compute._pick_latest_briefing(
+        [_brief("close", "2026-07-07T14:58:00-05:00")], today)   # yesterday only
+    assert out is None                                           # stale gamma dropped
+
+
+def test_pick_latest_briefing_skips_no_analysis_and_junk():
+    today = _dt.date(2026, 7, 8)
+    payloads = [None, "junk", {"slot": "open", "generated_at": "2026-07-08T08:48:00-05:00",
+                               "analysis": None},               # degraded page → skip
+                _brief("midday", "2026-07-08T11:30:00-05:00")]
+    out = compute._pick_latest_briefing(payloads, today)
+    assert out and out["_slot"] == "midday"
+
+
+def test_pick_latest_briefing_empty_is_none():
+    assert compute._pick_latest_briefing([], _dt.date(2026, 7, 8)) is None

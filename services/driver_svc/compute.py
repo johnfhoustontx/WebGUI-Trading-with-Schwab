@@ -186,6 +186,34 @@ def _dashboard_risk_read(dashboard) -> dict:
         return {}
 
 
+def _pick_latest_briefing(payloads, today_ct):
+    """The freshest TODAY gamma_analyze ``analysis`` across the scheduled-slot payloads.
+
+    ``payloads`` = the scheduled-slot payloads (``{analysis, slot, generated_at}``; keys
+    tolerated absent). Keeps only those whose ``generated_at`` date == ``today_ct`` (a
+    prior-session briefing's walls mislead → dropped) with a non-empty ``analysis``, and
+    returns the latest by ``generated_at`` (ISO sorts lexically), stamping
+    ``_slot``/``_generated_at`` onto a COPY. ``None`` when nothing usable. Never raises.
+    """
+    try:
+        today = today_ct.isoformat() if hasattr(today_ct, "isoformat") else str(today_ct)
+        best = None
+        for p in payloads or []:
+            if not isinstance(p, dict):
+                continue
+            analysis, gen = p.get("analysis"), str(p.get("generated_at") or "")
+            if not isinstance(analysis, dict) or not analysis or gen[:10] != today:
+                continue
+            if best is None or gen > best[0]:
+                best = (gen, p.get("slot"), analysis)
+        if best is None:
+            return None
+        gen, slot, analysis = best
+        return {**analysis, "_slot": slot, "_generated_at": gen}
+    except Exception:  # noqa: BLE001 — context is best-effort; never block a cycle.
+        return None
+
+
 def build_packet(scan_view, paper_view, *, target, limits, market) -> dict:
     """Project the cache views into the model's decision packet (pure).
 
