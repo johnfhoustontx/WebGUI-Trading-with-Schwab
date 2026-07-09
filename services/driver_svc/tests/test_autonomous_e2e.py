@@ -12,8 +12,8 @@ stubbed:
 
 Everything else is real, so the headline assertion — the model asks for **3**
 contracts but a ``paper_create`` lands with ``qty == 1`` — is proof the REAL
-guardrail math ran (``per_trade_max_risk $1500 / $1000 per-contract = 1``, i.e.
-the per-share ``max_loss 10`` x100), not a stub.
+guardrail math ran (``per_trade_max_risk $3000 / $2000 per-contract = 1``, i.e.
+the per-share ``max_loss 20`` x100), not a stub.
 The signal is seeded with the REAL ``cache:options:scan`` field names
 (``type``/``expiration``/``pop_pct``) verified against
 ``options-scanner/scanner_engine.py``.
@@ -28,7 +28,7 @@ from services.driver_svc import handlers
 _QQQ_PCS = {
     "symbol": "QQQ",
     "type": "PCS",
-    "max_loss": 10.0,        # per-SHARE; x100 = $1,000/contract (clamps qty 3 -> 1 at the $1,500 cap)
+    "max_loss": 20.0,        # per-SHARE; x100 = $2,000/contract (clamps qty 3 -> 1 at the $3,000 cap)
     "credit": 60.0,
     "pop_pct": 0.85,
     "composite_score": 80,
@@ -50,8 +50,8 @@ def _seed_paper(fake_bus, session_pnl):
 def test_autonomous_e2e_clamps_and_executes(fake_bus, monkeypatch):
     """Happy path through the REAL run_cycle + guardrails.
 
-    The model requests qty=3; the guardrails clamp it to 1 ($1500 per-trade /
-    $1000 per-contract) and a ``driver_paper_create`` lands on ``cmd:options`` tagged
+    The model requests qty=3; the guardrails clamp it to 1 ($3000 per-trade /
+    $2000 per-contract) and a ``driver_paper_create`` lands on ``cmd:options`` tagged
     ``source="driver"``; the monitor view records the executed QQQ trade.
     """
     handlers.set_control(fake_bus, enabled=True)
@@ -130,3 +130,39 @@ def test_autonomous_e2e_banked_target_halts(fake_bus, monkeypatch):
     assert state["halted"] is True
     assert state["halt_reason"] and "target" in state["halt_reason"].lower()
     assert state["day_pnl"] == 600.0
+
+
+def test_autonomous_e2e_packet_carries_market_read(fake_bus, monkeypatch):
+    """Through the REAL build_packet: seeded market-read sources reach the model-facing
+    packet, and the /driver log row shows the summary."""
+    import datetime as _dt
+
+    handlers.set_control(fake_bus, enabled=True)
+    _seed_scan(fake_bus, _QQQ_PCS)
+    _seed_paper(fake_bus, session_pnl=0.0)
+    fake_bus.cache_set("cache:market:dashboard", {"categories": [{"category": "B", "tiles": [
+        {"display": "$ADVN-$DECN", "last": -620.0, "color_state": "risk_off_mild"}]}]})
+    fake_bus.cache_set("cache:options:gamma_analyze_midday", {
+        "slot": "midday", "generated_at": _dt.date.today().isoformat() + "T12:30:00-05:00",
+        "analysis": {"bias": -35, "regime": "neg gamma", "indices": [
+            {"symbol": "$SPX", "gamma_flip": 6005, "put_wall": 5900, "call_wall": 6050}]}})
+    monkeypatch.setattr(handlers.compute, "fetch_market_context",
+                        lambda: {"vix": 14, "spx_spot": 5980.0})
+    seen = {}
+    monkeypatch.setattr(
+        "services.driver_svc.decider.decide",
+        lambda packet, **kw: seen.setdefault("pkt", packet) or
+        {"stand_down": True, "trades": []})
+
+    handlers.run_autonomous_cycle(fake_bus)
+
+    # (a) the REAL build_packet folded the market read into the model-facing packet.
+    mr = seen["pkt"]["market_read"]
+    assert mr["risk"] == "risk_off" and mr["breadth_spread"] == -620.0
+    assert mr["indices"][0]["symbol"] == "$SPX"
+    assert mr["indices"][0]["spot"] == 5980.0          # live spot, not the briefing's
+    # (b) the model NEVER sees menu_by_id (raw signals).
+    assert "menu_by_id" not in seen["pkt"]
+    # (c) the /driver decision log row shows the one-line summary.
+    row = fake_bus.cache_get("cache:driver:autonomous").payload["decisions"][0]
+    assert row["market_read"] and "risk_off" in row["market_read"]

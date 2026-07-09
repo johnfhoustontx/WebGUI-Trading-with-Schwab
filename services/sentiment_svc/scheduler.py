@@ -1,10 +1,13 @@
 """Server-side sentiment refresher (Task 1.3).
 
 The Tier-2 analog of the page's former ``_bg_loop``: run a **full** refresh
-(with sectors) once at startup, then a composite-only refresh every 120 s. The
-blocking ``handlers.refresh`` runs in the default executor so the event loop
-stays responsive. Passed to the scaffold as ``make_app(scheduler=loop)``; the
-scaffold runs it once and the loop+sleep here own the cadence.
+(with sectors) once at startup, then a composite-only refresh every 120 s —
+plus a **with-sectors refresh once per RTH hour** (``sectors_due``) so the
+sector P/C (a live option-volume ratio, empty premarket) populates after the
+open even when the service started premarket. The blocking ``handlers.refresh``
+runs in the default executor so the event loop stays responsive. Passed to the
+scaffold as ``make_app(scheduler=loop)``; the scaffold runs it once and the
+loop+sleep here own the cadence.
 """
 import asyncio
 import logging
@@ -51,6 +54,24 @@ def refresh_due(now, last_slot):
     if _is_rth(now):
         return (True, last_slot)
     slot = (now.date().isoformat(), now.hour, now.minute // _OFFHOURS_INTERVAL_MIN)
+    return (slot != last_slot, slot)
+
+
+def sectors_due(now, last_slot):
+    """(should_refresh_sectors, slot) — hourly RTH sector-fan-out recompute.
+
+    The sector view (quotes/trends/**P/C**/RRG) used to be computed ONLY at
+    service startup + the manual Refresh button. A premarket start (the normal
+    morning routine) meant every ETF's chain had zero option volume, so
+    ``pcr_from_chain`` returned None for all 11 sectors and the P/C column
+    stayed BLANK all day (2026-07-09). Fire once per RTH hour: the first tick
+    at/after the 08:30 CT open heals the blank within one refresh cycle, and
+    the hourly recompute keeps P/C (a live volume ratio) current. ~24 extra
+    proxy calls per fire — cheap at 7×/day. When not due, ``last_slot`` passes
+    through unchanged."""
+    if not _is_rth(now):
+        return (False, last_slot)
+    slot = (now.date().isoformat(), now.hour)
     return (slot != last_slot, slot)
 
 
@@ -102,15 +123,21 @@ async def loop(bus):
     except Exception:  # noqa: BLE001 — order-flow is best-effort; refresh must go on.
         log.exception("order-flow consumer failed to start")
 
-    last_slot = None  # off-hours throttle slot (see refresh_due)
+    last_slot = None      # off-hours throttle slot (see refresh_due)
+    sectors_slot = None   # hourly RTH sector-recompute slot (see sectors_due)
     try:
         while True:
             await asyncio.sleep(REFRESH_INTERVAL_SEC)
-            due, last_slot = refresh_due(_market_now(), last_slot)
+            now = _market_now()
+            due, last_slot = refresh_due(now, last_slot)
             if not due:
                 continue
+            # Hourly RTH sector recompute rides the same tick: with_sectors=True
+            # once per RTH hour so the P/C column (live option-volume ratio)
+            # populates after the open even when the service started premarket.
+            with_sectors, sectors_slot = sectors_due(now, sectors_slot)
             try:
-                await loop_.run_in_executor(None, handlers.refresh, bus, False)
+                await loop_.run_in_executor(None, handlers.refresh, bus, with_sectors)
             except Exception:  # noqa: BLE001 — never let the scheduler die.
                 pass
     finally:

@@ -1,79 +1,32 @@
-# Claude is the Driver
+# claude-driver (legacy support library)
 
-Automated virtual trading system. $10,000 virtual book across three strategy buckets.
+> **The morning-agent + browser approval workflow that this folder used to host was
+> removed on 2026-07-08.** Its job — autonomously selecting, sizing, and managing
+> defined-risk option credit spreads toward a daily target — now lives in the 3-tier
+> **`services/driver_svc`** (a Claude decision layer + pure `guardrails.py`, surfaced
+> on the NiceGUI `/driver` page over Redis). See the root `CLAUDE.md`
+> "Autonomous Driver" sections.
 
-## Architecture
+## What's left here
 
-| Module | Role |
+This folder is no longer a runnable agent — it's a small support library:
+
+| File | Role |
 |---|---|
-| `config.py` | All parameters — capital, risk limits, endpoints, thresholds |
-| `morning_agent.py` | Orchestrator — runs at 9:28am ET, pulls all data, grades the day |
-| `trade_selector.py` | Decision engine — structure + strike selection |
-| `approval_server.py` | FastAPI server — opens browser, waits for your APPROVE/SKIP |
-| `order_executor.py` | Places bracket orders via Schwab API |
-| `intraday_monitor.py` | Polls positions, closes at 50% target or EOD |
+| `config.py` | Parameters incl. `RISK_LIMITS`; still imported by `services/driver_svc` for the daily-loss-halt fallback. **Do not delete.** |
+| `feature_engineer.py` | Feature builder for the external ML prediction servers (unrelated to the removed agent). |
+| ML / diagnostic scripts + tests | Standalone utilities for the external ML servers. |
 
-## Your only daily action
+There is no entry point, port, `start_all.bat`, or approval UI here anymore.
 
-Check your browser at 9:30am. Click **APPROVE** or **SKIP**. Everything else is automated.  
-Auto-skips after 15 minutes if no response.
+## Dependencies (for the ML scripts)
 
-## Setup
+- Schwab proxy on port 8100 (this repo's `schwab-proxy/`, via `repo_paths.PROXY_URL`).
+- External ML prediction servers — MES 8000 / MNQ 8001 / ES 8004 / NQ 8005
+  (`ML_SERVER_URLS`); separate processes, not started by this repo.
 
-```
-cd D:\Claude_is_the_Driver
-pip install -r requirements.txt
-```
+## Tests
 
-## Run
-
-```
-start_all.bat
-```
-
-Or manually:
-```
-# Terminal 1
-python approval_server.py
-
-# Terminal 2
-python morning_agent.py          # waits for 9:28am
-python morning_agent.py --now    # runs immediately (testing)
-```
-
-## Buckets
-
-| Bucket | Strategy | Allocation | Max risk/trade |
-|---|---|---|---|
-| A | SPX 0-DTE options (IC / PCS / CCS) | $4,000 | $300 |
-| B | Equity day trades (QQQ/SPY/NVDA/TSLA) | $3,500 | $150 |
-| C | MES micro futures (ORB) | $1,500 | $75 |
-| Reserve | Drawdown buffer | $1,000 | — |
-
-## Risk limits
-
-| Limit | Amount |
-|---|---|
-| Daily max loss | $250 |
-| Weekly max loss | $600 |
-| Monthly drawdown | $1,500 |
-
-## Data files
-
-- `data/trade_log.json` — all trades with P&L
-- `data/pending_trade.json` — current pending trade awaiting approval
-- `logs/` — per-day log files for each module
-
-## Dependencies
-
-Requires existing services running:
-- Schwab proxy on port 8100 (`D:\AI_Based_Analysis\SchwabProxy\schwab_proxy.py`)
-- OptionsAnalytics on port 8200 (`D:\Schwab Test Project\OptionsAnalytics\main.py`)
-- ML prediction servers on ports 8000–8052
-
-## Schwab re-auth
-
-If the proxy token expires (every 7 days):
-```
-http://127.0.0.1:8100/auth
+```powershell
+cd claude-driver && python -m pytest .
 ```

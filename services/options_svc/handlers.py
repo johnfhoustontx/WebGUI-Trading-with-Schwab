@@ -167,6 +167,14 @@ CACHE_GAMMA_ANALYZE_SCHED = {
 EVENT_GAMMA_ANALYZE_SCHED = {
     slot: f"events:options:gamma_analyze_{slot}" for slot in ANALYZE_SLOT_TITLES}
 
+# Gamma briefing HISTORY (the persisted Auto/ad-hoc briefings) — an index of stored
+# briefings for the in-app picker, and the latest on-demand regenerated history report
+# (HTML rebuilt from the stored structured analysis via the gamma_history command).
+CACHE_GAMMA_BRIEFINGS = "cache:options:gamma_briefings"
+EVENT_GAMMA_BRIEFINGS = "events:options:gamma_briefings"
+CACHE_GAMMA_HISTORY = "cache:options:gamma_history"
+EVENT_GAMMA_HISTORY = "events:options:gamma_history"
+
 CACHE_GAMMA_SYMBOLS = "cache:options:gamma_symbols"
 EVENT_GAMMA_SYMBOLS = "events:options:gamma_symbols"
 
@@ -600,6 +608,78 @@ def publish_gex_status(bus) -> None:
     bus.cache_set(CACHE_GEX_STATUS, data, event=EVENT_GEX_STATUS, skip_unchanged=True)
 
 
+def _persist_briefing(res, slot, now) -> None:
+    """Append a successful briefing to the on-disk history (gamma_briefing_history_db).
+
+    Stores the STRUCTURED analysis payload (source of truth) per (date, slot) so a
+    report can be regenerated on demand — see the gamma_briefing_report.py utility.
+    Best-effort: only runs with a real ``analysis`` are recorded (degraded no-chains/
+    no-key/error pages have none); any failure is logged, never raised — persistence
+    must not break the generation/cache path."""
+    analysis = (res or {}).get("analysis")
+    if not analysis:
+        return
+    try:
+        import gamma_briefing_history_db as gbh
+        conn = gbh.connect()
+        try:
+            gbh.insert_briefing(
+                conn, date=now.date().isoformat(), slot=slot,
+                generated_at=now.isoformat(), symbol_scope="$SPX/SPY/QQQ",
+                model=getattr(compute, "_ANALYZE_MODEL", None),
+                bias=analysis.get("bias"), headline=analysis.get("headline"),
+                analysis=analysis)
+        finally:
+            conn.close()
+    except Exception:
+        log.exception("gamma briefing history persist degraded")
+
+
+def publish_gamma_briefing_index(bus) -> None:
+    """Publish the stored-briefings index (metadata only) for the in-app history
+    picker (``cache:options:gamma_briefings``). Called at startup and after each
+    persist. Defensive — a cold/absent DB just yields an empty list."""
+    briefings = []
+    try:
+        import gamma_briefing_history_db as gbh
+        conn = gbh.connect()
+        try:
+            briefings = gbh.list_briefings(conn)  # metadata, newest date first
+        finally:
+            conn.close()
+    except Exception:
+        log.exception("gamma briefing index degraded")
+    bus.cache_set(CACHE_GAMMA_BRIEFINGS, {"briefings": briefings},
+                  event=EVENT_GAMMA_BRIEFINGS, skip_unchanged=True)
+
+
+def run_gamma_history(bus, date, slot=None) -> None:
+    """Regenerate a history report (HTML) from the stored briefings for ``date`` — a
+    single slot if given, else all of that day's slots — and cache it for the page to
+    open in a new tab (``cache:options:gamma_history``). The HTML is rebuilt from the
+    stored structured analysis (compute.analyze_history_doc); a no-match yields a
+    readable 'no briefings' page. Defensive throughout."""
+    rows, title = [], f"Gamma Briefings — {date}"
+    try:
+        import gamma_briefing_history_db as gbh
+        conn = gbh.connect()
+        try:
+            if slot:
+                r = gbh.get_briefing(conn, date, slot)
+                rows = [r] if r else []
+                title = f"Gamma Briefing — {date} · {slot}"
+            else:
+                rows = gbh.briefings_for_date(conn, date)
+        finally:
+            conn.close()
+    except Exception:
+        log.exception("gamma history load degraded")
+    html = compute.analyze_history_doc(rows, title=title)
+    version = bus.cache_set(CACHE_GAMMA_HISTORY,
+                            {"html": html, "date": date, "slot": slot})
+    bus.publish(EVENT_GAMMA_HISTORY, {"version": version})
+
+
 def run_scheduled_gamma_analyze(bus, slot) -> None:
     """Auto-run the $SPX/SPY/QQQ Gamma Analyze for a scheduled ``slot`` and cache it
     under that slot's OWN key (NOT the ad-hoc ``gamma_analyze`` key — so an open
@@ -624,6 +704,8 @@ def run_scheduled_gamma_analyze(bus, slot) -> None:
     res = {**res, "slot": slot, "generated_at": now.isoformat()}
     version = bus.cache_set(CACHE_GAMMA_ANALYZE_SCHED[slot], res)
     bus.publish(EVENT_GAMMA_ANALYZE_SCHED[slot], {"version": version})
+    _persist_briefing(res, slot, now)      # record to history (best-effort)
+    publish_gamma_briefing_index(bus)      # refresh the in-app history picker
 
 
 def run_action_alert(bus, slot=None) -> None:
@@ -913,6 +995,15 @@ def handle_command(bus, command) -> None:
         res = compute.gamma_analyze()
         version = bus.cache_set(CACHE_GAMMA_ANALYZE, res)
         bus.publish(EVENT_GAMMA_ANALYZE, {"version": version})
+        # Record ad-hoc runs to history too, under a time-stamped slot so repeated
+        # clicks in a day are each kept (distinct from the scheduled slots).
+        import datetime as _dt
+        from zoneinfo import ZoneInfo as _ZI
+        _now = _dt.datetime.now(_ZI("America/Chicago"))
+        _persist_briefing(res, f"adhoc-{_now.strftime('%H%M')}", _now)
+        publish_gamma_briefing_index(bus)
+    elif command.type == "gamma_history":
+        run_gamma_history(bus, command.args.get("date"), command.args.get("slot"))
     elif command.type == "sim_fetch":
         meta = compute.sim_fetch(command.args.get("symbol", "SPY"))
         version = bus.cache_set(CACHE_SIM_META, meta)

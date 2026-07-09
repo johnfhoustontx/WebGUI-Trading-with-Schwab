@@ -1,119 +1,11 @@
 """Tests for the Driver page pure display builders + render API.
 
-The orchestration (morning pipeline, order execution, perf aggregation) lives in
-``services/driver_svc``; this page is a Tier-3 reader, so only its pure
-transforms (grade coloring, status text, condition/trade/perf rows) and the
-``render`` callable are exercised here.
+The orchestration (autonomous decision layer, order execution, perf aggregation)
+lives in ``services/driver_svc`` / ``services/options_svc``; this page is a Tier-3
+reader, so only its pure transforms (P&L coloring, closed-trade rows, the
+autonomous-monitor builders) and the ``render`` callable are exercised here.
 """
 from pages import driver
-
-
-def test_grade_color():
-    assert driver.grade_color("A") == driver.GRADE_COLORS["A"]
-    assert driver.grade_color("b") == driver.GRADE_COLORS["B"]
-    assert driver.grade_color("X") == driver.GRADE_COLORS["X"]
-    assert driver.grade_color("?") == driver.GRADE_NEUTRAL  # unknown -> grey
-
-
-def test_is_pending():
-    assert driver.is_pending({"status": "pending"}) is True
-    assert driver.is_pending({"status": "approved"}) is False
-    assert driver.is_pending({"status": "no_trade"}) is False
-    assert driver.is_pending(None) is False
-    assert driver.is_pending({}) is False
-
-
-def test_status_text_variants():
-    assert "Run the morning agent" in driver.status_text(None)
-    assert driver.status_text({"status": "pending", "grade": "B",
-                               "proposed_trades": [1, 2]}).startswith("Grade B")
-    assert "2 proposed" in driver.status_text({"status": "pending", "grade": "B",
-                                               "proposed_trades": [1, 2]})
-    assert "Approved" in driver.status_text({"status": "approved",
-                                             "proposed_trades": [1]})
-    assert "Skipped" in driver.status_text({"status": "skipped"})
-    assert "No trade" in driver.status_text({"status": "no_trade",
-                                             "reasons": ["VIX too high"]})
-    assert "error" in driver.status_text({"status": "error",
-                                          "error": "proxy down"}).lower()
-
-
-def test_condition_rows_formats_and_handles_missing():
-    rows = dict(driver.condition_rows(
-        {"vix": 16.2, "spx_spot": 5400.5, "vix1d": 14.1}, 25.0, -50.0))
-    assert rows["VIX"] == "16.2"
-    assert rows["SPX"] == "5,400.50"
-    assert rows["VIX1D"] == "14.1"
-    assert rows["P&L today"] == "+$25.00"
-    assert rows["P&L week"] == "-$50.00"
-
-
-def test_condition_rows_missing_is_dash():
-    rows = dict(driver.condition_rows({}, None, None))
-    assert rows["VIX"] == "—"
-    assert rows["SPX"] == "—"
-    assert rows["P&L today"] == "—"
-
-
-def test_proposed_trade_lines_bucket_a():
-    lines = driver.proposed_trade_lines({
-        "bucket": "A", "instrument": "SPX", "structure": "put_credit_spread",
-        "strikes": {"short": 5350, "long": 5340}, "contracts": 1,
-        "max_risk": 300.0, "notes": "SPX 0-DTE pcs",
-        "ml_signal": "Bullish", "ml_confidence": 72.0,
-    })
-    blob = " | ".join(lines)
-    assert "Bucket A" in blob
-    assert "Put Credit Spread" in blob  # structure title-cased, underscores spaced
-    assert "short" in blob and "5350" in blob  # strike detail
-    assert "300" in blob  # max risk
-    assert "SPX 0-DTE pcs" in blob  # notes
-    assert "Bullish" in blob  # ml signal
-
-
-def test_proposed_trade_lines_bucket_b_equity():
-    lines = driver.proposed_trade_lines({
-        "bucket": "B", "instrument": "QQQ", "side": "BUY", "max_risk": 150.0,
-        "notes": "momentum long",
-    })
-    blob = " | ".join(lines)
-    assert "Bucket B" in blob
-    assert "QQQ" in blob and "BUY" in blob
-    assert "150" in blob
-
-
-def test_perf_summary_text():
-    txt = driver.perf_summary_text({"total_trades": 5, "wins": 3, "losses": 2,
-                                    "win_rate": 60.0, "realized_pnl": 125.5})
-    assert "5" in txt and "60.0%" in txt and "3-2" in txt and "125.5" in txt
-
-
-def test_perf_summary_text_empty():
-    assert "No trades" in driver.perf_summary_text({})
-    assert "No trades" in driver.perf_summary_text(None)
-
-
-def test_perf_rows():
-    rows = driver.perf_rows([
-        {"trade_id": "2026-06-16-A-1", "date": "2026-06-16", "bucket": "A",
-         "instrument": "SPX", "side": "SELL_TO_OPEN", "status": "closed",
-         "source": "streamed", "pnl": 100.0},
-    ])
-    assert rows[0]["bucket"] == "A"
-    assert rows[0]["pnl"] == "+$100.00"
-    assert rows[0]["trade_id"] == "2026-06-16-A-1"
-
-
-def test_perf_rows_carry_pnl_color():
-    rows = driver.perf_rows([
-        {"trade_id": "w", "pnl": 100.0},
-        {"trade_id": "l", "pnl": -50.0},
-        {"trade_id": "z", "pnl": 0.0},
-    ])
-    by_id = {r["trade_id"]: r for r in rows}
-    assert by_id["w"]["_pnl_color"] == "#66bb6a"
-    assert by_id["l"]["_pnl_color"] == "#ef5350"
-    assert by_id["z"]["_pnl_color"] == "#bdbdbd"
 
 
 def test_pnl_color():
@@ -130,31 +22,55 @@ def test_pnl_class_maps_sign():
     assert driver.pnl_class(None) == "text-[#bdbdbd]"
 
 
-def test_grade_bg_class():
-    assert driver.grade_bg_class("A") == "bg-[#1D9E75]"
-    assert driver.grade_bg_class("X") == "bg-[#E24B4A]"
-    assert driver.grade_bg_class("?") == "bg-[#888888]"   # fallback -> neutral
-
-
-def test_perf_rows_carry_pnl_class():
-    rows = driver.perf_rows([
-        {"trade_id": "w", "pnl": 100.0},
-        {"trade_id": "z", "pnl": 0.0},
-    ])
-    by_id = {r["trade_id"]: r for r in rows}
-    assert by_id["w"]["_pnl_class"] == "text-[#66bb6a]"
-    assert by_id["z"]["_pnl_class"] == "text-[#bdbdbd]"
-
-
 def test_position_rows_carry_pnl_class():
     rows = driver.position_rows([{"position_id": "p1", "unrealized_pnl": -12.0}])
     assert rows[0]["_pnl_class"] == "text-[#ef5350]"
 
 
-def test_perf_cols_use_full_words():
-    labels = {c["field"]: c["label"] for c in driver._PERF_COLS}
-    assert labels["bucket"] == "Bucket"
-    assert labels["instrument"] == "Instrument"
+# ── driver realized-performance (closed trades from the isolated paper account) ──
+def _closed(symbol="RKLB", strategy="PCS", pnl=15.0, exit_ts="2026-07-02T11:00:00-05:00",
+            reason="TARGET_HIT", qty=2, pid=7):
+    return {"position_id": pid, "symbol": symbol, "strategy": strategy, "quantity": qty,
+            "entry_credit": 0.33, "realized_pnl": pnl, "exit_reason": reason, "exit_ts": exit_ts,
+            "status": "CLOSED"}
+
+
+def test_closed_summary_text_computes_realized_and_winrate():
+    txt = driver.closed_summary_text([
+        _closed(pnl=120.0), _closed(pnl=-60.0), _closed(pnl=40.0)])
+    assert "Closed: 3" in txt
+    assert "2W" in txt and "1L" in txt and "67% win" in txt   # 2 of 3 winners
+    assert "+$100.00" in txt                                   # 120 - 60 + 40
+
+
+def test_closed_summary_text_empty_is_friendly():
+    for empty in ([], None, [{"status": "CLOSED"}]):          # no realized_pnl → friendly note
+        assert "No closed trades yet" in driver.closed_summary_text(empty)
+
+
+def test_closed_trade_rows_newest_first_and_reader_friendly():
+    rows = driver.closed_trade_rows([
+        _closed(symbol="MU", exit_ts="2026-07-01T09:30:00-05:00", pnl=-18.0, reason="MONEY_STOP"),
+        _closed(symbol="SPY", exit_ts="2026-07-02T13:00:00-05:00", pnl=16.4, reason="TARGET_HIT"),
+    ])
+    assert [r["symbol"] for r in rows] == ["SPY", "MU"]        # newest (07-02) first
+    assert rows[0]["reason"] == "Target hit" and rows[1]["reason"] == "Money stop"  # humanized
+    assert rows[0]["closed"] == "2026-07-02 13:00"            # compact date+time
+    assert rows[0]["pnl"] == "+$16.40" and rows[1]["pnl"] == "-$18.00"
+    assert rows[0]["_pnl_class"] and rows[1]["_pnl_class"]    # colored
+
+
+def test_closed_trade_rows_tolerates_junk():
+    rows = driver.closed_trade_rows([None, {}, _closed()])    # None dropped; {} tolerated
+    assert len(rows) == 2                                      # None filtered out, no crash
+    assert rows[0]["symbol"] == "RKLB" and rows[-1]["symbol"] == ""
+
+
+def test_closed_cols_are_clean_reader_friendly_set():
+    labels = [c["label"] for c in driver._CLOSED_COLS]
+    assert labels == ["Closed", "Symbol", "Strategy", "Qty", "Exit reason", "Realized P&L"]
+    # the useless legacy columns are gone
+    assert "Bucket" not in labels and "Source" not in labels and "Status" not in labels
 
 
 def test_current_day_decisions_keeps_only_today():

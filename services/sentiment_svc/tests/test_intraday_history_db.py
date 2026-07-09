@@ -61,3 +61,15 @@ def test_prune_deletes_older_than_n_dates():
     min_date = min(dt.datetime.fromtimestamp(r[0]).astimezone().date()
                    for r in c.execute("SELECT ts FROM sentiment_intraday"))
     assert min_date == base + dt.timedelta(days=3)   # start of the kept 5-of-8 window
+
+
+def test_connect_default_path_is_memory_under_pytest():
+    """Regression (2026-07-07): tests calling handlers.refresh() leaked fixture
+    rows into the REAL sentiment_intraday.db (the live service then republished
+    them — the 'volatile spikes' on the /sentiment intraday graphs). Under
+    pytest, connect() with no explicit path must NEVER open the real file —
+    mirror of the Bus fakeredis-under-pytest convention."""
+    conn = db.connect()          # no path → would be repo_paths.SENTIMENT_INTRADAY_DB
+    rows = conn.execute("PRAGMA database_list").fetchall()
+    # (seq, name, file) — an in-memory DB has an empty file column.
+    assert rows[0][2] in ("", None)

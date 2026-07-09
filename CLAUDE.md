@@ -8,7 +8,95 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-07-07 (**Five-state market classifier (direction × aggression) —
+**Last updated:** 2026-07-08 (**Driver market-context block — the decider now reads gamma /
+breadth / sentiment (context only)**: the autonomous Driver's Claude decider was blind to market
+structure — it saw only `vix` + the five-state label string, yet it trades $SPX/SPY/QQQ credit
+spreads whose safety is defined by exactly the gamma flip/walls it couldn't see. It now gets an
+additive **`market_read`** in its decision packet: per-index **gamma flip / call+put walls / max-pain /
+expected-move / what-if** from the **freshest TODAY `gamma_analyze` briefing** (the 4×/day Claude
+briefing — one Claude writes the gamma thesis, the Driver's Claude now reads it) paired with a **live
+per-index spot** (`fetch_market_context` gained `SPY,QQQ` → a fresh spot-vs-flip **posture**; the
+briefing spot is the fallback), the **market-dashboard breadth (`$ADVN-$DECN`) + risk-on/off**
+(`cache:market:dashboard`), and the **sentiment 0-10 score + bias** (`cache:sentiment:composite`
+`live.composite`). **CONTEXT ONLY — no new hard rule**: `_market_read` is appended in `build_packet`
+exactly like the existing `market_state` line (never filters the menu; absent sources → no key →
+byte-identical to today), and **`guardrails.py` is UNTOUCHED** (the wall-aware rejection + breadth
+halt are a **deferred** ③-gate follow-up that must be backtested first). Pure, defensive helpers in
+`driver_svc/compute.py` (`_dashboard_risk_read` / `_pick_latest_briefing` [drops prior-session
+briefings — stale walls mislead] / `_market_read` / `_posture` / `_as_of` / `_market_read_summary`);
+the handler reads the caches into the `market` dict (`_read_briefing` across the 4 scheduled slot keys
++ `_read_sentiment_magnitude`); the decider `_SYSTEM` gained a paragraph on **how to weigh** the read
+(prefer put-credit below the put wall / call-credit above the call wall; below-flip / risk-off →
+be **selective, NOT stand down** — keeps the Very Aggressive $500/day mandate); and a one-line
+`market_read` **summary is surfaced on each `/driver` decision-log row**. Driver stays **Redis + one
+proxy quote** (3-tier clean — no engine/DB imports). Built directly, TDD, per-task commits: driver_svc
+**170** + contracts **38** green. **Restart `driver_svc`** (benefits from `options_svc` + `market_svc` +
+`sentiment_svc` up so the briefing / dashboard / composite caches populate). PAPER ONLY. Design/plan:
+[design](docs/plans/2026-07-08-driver-market-context-block-design.md) /
+[plan](docs/plans/2026-07-08-driver-market-context-block-plan.md). Prior — 2026-07-08 (**Removed the legacy morning-agent / order-approval queue (full purge)**
+— per the user's directive, the entire legacy morning-agent + approval-queue subsystem was deleted in
+three reviewed units. (1) **`services/driver_svc`** — the `run_morning`/`execute`/`build_perf_report`
+compute, the `run`/`approve`/`skip`/`perf` handlers + `cache:driver:approvals`/`cache:driver:performance`,
+the `morning_due` scheduler branch, and the `ApprovalState`/`PerfReport` contracts. The AUTONOMOUS path is
+UNTOUCHED — its `fetch_market_context` was made **self-contained** (a direct `$VIX,$SPX,$VIX1D` proxy
+fetch, defensive → `{}`) so it no longer imports `morning_agent`. (2) **`webgui/pages/driver.py`** — the
+"Legacy approval queue" UI, "Run morning agent" button, approval cards/dialog + dead builders removed; the
+page is now purely the **autonomous monitor + the closed-trade Performance view**. Stray refs cleaned in
+`main.py` (nav badge), `status.py` (freshness row repointed to `driver:autonomous`), `eod.py` (driver tiles
+repointed to `driver_paper_perf`), `page_help.py`. (3) **`claude-driver/`** — DELETED `morning_agent.py`,
+`order_executor.py`, `trade_selector.py`, `perf_report.py`, `approval_server.py`, `order_preview.py`,
+`intraday_monitor.py`, `start_all.bat` + their 8 tests; KEPT `config.py` (autonomous still reads
+`RISK_LIMITS`) + `feature_engineer.py` (shared ML-feature builder, used by non-morning-agent ML scripts);
+`tools/check_env.py` dropped the :8300 approval-server health check. Green: driver_svc **144** + contracts
+**37** + webgui **679**; claude-driver introduced no new import errors. Branch `Using_Highcharts`.). Prior — 2026-07-08 (**Driver Performance view — real closed-trade P&L (was always $0)**
+— the `/driver` "Performance" table read the dead legacy morning-agent `trade_log.json` ledger,
+whose old "polled" equity/futures rows never close, so it showed **all-open, $0, ~2-week-stale**
+data. Repointed it to the driver's **isolated paper account's `closed_positions`**
+(`cache:options:driver_paper_account`) — the REAL closed options credit spreads with actual
+realized P&L, updated every 5-min manage cycle + the page's 2s version-poll (timely). New PURE
+builders in `webgui/pages/driver.py` — `closed_summary_text` (Closed N · W–L · win% · realized $)
++ `closed_trade_rows` (newest-first) + `_CLOSED_COLS` — with reader-friendly columns
+(Closed/Symbol/Strategy/Qty/**humanized** Exit-reason [`TARGET_HIT`→"Target hit"]/colored Realized
+P&L), dropping the useless legacy Bucket/Source/Status columns; a **Refresh** button forces an
+immediate `driver_paper_manage` reprice. The legacy `cache:driver:performance` page read is gone.
+webgui driver **31** green (compile-verified; browser check skipped — the running webgui holds
+:8500). **Restart the webgui** to see it. Branch `Using_Highcharts`.). Prior — 2026-07-08 (**Driver "Very Aggressive" risk profile** — loosened the
+autonomous driver's risk envelope toward the $500/day goal (user directive); all knobs now live
+in `driver_svc/settings.py`: `PER_TRADE_MAX_RISK 1500→3000`, `DAILY_RISK_BUDGET 4500→12000`,
+`MAX_CONCURRENT 6→10`, `MAX_TRADES_PER_CYCLE 3→5`, `VIX_MAX 25→35`, `MENU_TOP_N 12→15`, plus a NEW
+`DAILY_LOSS_HALT=1500` — the biggest brake, replacing the legacy $250 halt that ended the day
+after ONE losing $SPX (`compute._daily_max_loss` reads settings first, legacy `config.RISK_LIMITS`
+as fallback). The paper OPEN path's `options_svc.compute._DRIVER_MAX_RISK_PER_TRADE`→`3000` (the
+MANUAL account stays `config_paper.MAX_RISK_PER_TRADE=250`); the `decider._SYSTEM` prompt was
+rewritten from "standing down is encouraged" to an AGGRESSIVE mandate (take reasonably-scored
+trades to build toward the target; stand down only on genuinely poor edge / hostile conditions).
+Net posture: ~half the $25k paper book deployable, ~12%/trade, a $1,500 daily-loss stop (3× the
+target) — deliberately aggressive (user choice; dial back in `settings.py`). driver_svc **168** +
+options_svc driver-account **15** green. **Restart driver_svc + options_svc** to pick it up.
+Branch `Using_Highcharts`.). Prior — 2026-07-08 (**Gamma briefing history — store + CLI utility +
+in-app viewer**: every Gamma Analyze briefing (the 4×/day Auto briefings + ad-hoc/
+manual runs) is now **persisted** to a new SQLite store
+`options-scanner/gamma_briefing_history_db.py` (`repo_paths.GAMMA_BRIEFING_DB`, one
+row per `(date, slot)`) as its **STRUCTURED analysis payload** — the report HTML is
+**regenerated on demand** (pure `compute.analyze_history_doc`), never frozen, so old
+briefings re-render in the current infographic design and the data stays queryable
+(bias/headline pulled out as columns). `handlers._persist_briefing` records each
+successful run (wired into `run_scheduled_gamma_analyze` + the ad-hoc `gamma_analyze`
+command; degraded no-chains/no-key pages have no `analysis` and are skipped);
+`publish_gamma_briefing_index` publishes the metadata index
+**`cache:options:gamma_briefings`** for the picker (startup + after each persist); the
+**`gamma_history`** command regenerates a date's (or a single slot's) report →
+**`cache:options:gamma_history`** → served raw at **`/options/gamma-history`**. A
+**CLI utility** `services/options_svc/gamma_briefing_report.py` (run manually) does
+`--list` / `--date [--slot]` / `--range START END` / `--generate` (fresh run → store
+→ report; needs the proxy + key), writing HTML under
+`options-scanner/data/gamma_reports/`. The `/options/gamma` page gains a **History
+picker** (a date + slot dropdown from the index + an **Open** button that enqueues
+`gamma_history` and opens the regenerated report in a new tab, mirroring
+`_watch_analyze`; `history_dates` is the pure date-list helper). **Restart
+`options_svc`** so persistence + the index publish go live. gamma_briefing_history_db
+**7** + options_svc handlers/scheduler/compute + webgui **689** green. Built with
+per-layer TDD. Branch `Using_Highcharts`.). Prior — 2026-07-07 (**Five-state market classifier (direction × aggression) —
 Phases 0–5 + Tier 3 shipped (Phases 0–3 LIVE on REST data; Phases 4–5 streamer login+subscriptions
 verified live, RTH order-flow population pending; Tier 3 = validation harness + LOW-weight swing/driver
 integrations)**: the app's one-axis intraday
@@ -1019,8 +1107,8 @@ services → webgui. Full design: [3-tier design doc](docs/plans/2026-06-15-thre
 
 `webgui/main.py` is the server + nav shell: a left-nav with expandable
 **Options**, **Sentiment**, and **More** groups (Sentiment children: Sentiment
-dashboard + Sector Rotation; **More** children: EOD Report + System Status +
-Settings + Terminate) plus flat Trade / Portfolio / Driver items. The groups
+dashboard + Sector Rotation; **More** children: EOD Report +
+System Status + Settings + Terminate) plus flat Market Dashboard / Trade / Portfolio / Driver items. The groups
 **start EXPANDED by default** (`_NAV_OPEN.get(..., True)`) and stay open until the
 user manually collapses one (`_NAV_OPEN` persists each toggle, single-user); the
 **inter-item spacing is tight** (`_NAV_CSS`: flex gap 2px, link padding 4px,
@@ -1059,19 +1147,110 @@ Routes:
 | `/options/portfolio` | Paper Portfolio (paper account) | built |
 | `/options/calculator` | Calculator (summary tiles + P&L heatmap — grid rows = **±N real chain strikes around spot** via the **Number of strikes** input (default 24, strictly around spot; `strikes_window`→`price_rows`); **intraday time-to-expiry** — the grid's first column is **"Now"** (current mark-to-market value, priced at calendar hours-to-4pm-ET /365) and the last is **"Exp"** (expiration payoff), fixing 0DTE which previously showed only the payoff everywhere; summary tiles + PoP also use the intraday "Now" T (was an `or 1/365` clamp that over-priced 0DTE ~20×); the **IV** button **implies IV from the traded contract's mark** ThinkorSwim-style via a `calc_iv` command → `cache:options:calc_iv` (`compute.calc_iv` → engine `implied_vol` bisection), falling back to ATM chain `volatility` pre-strike-pick; **multi-leg strategy builder** — a Strategy dropdown (singles + verticals credit/debit + condors iron/all-same + butterflies long/iron + calendars/diagonals) over the shared **editable leg-editor** (`leg_editor.py`: per-leg kind/side/strike/expiry/qty + Add/Remove), per-leg expiry so **calendars** price each leg at its own T, a **generic-numeric summary** for non-PCS/CCS/IC structures, and a **Copy to Simulator** button; **persists full UI state across navigation** (symbol/strategy/legs/fields/Number-of-strikes) + **auto-refreshes on return** via a single-user module snapshot — `page_state.py`; the **Symbol** field **Loads on tab-out (`focusout`) / Enter** (deduped via `inputs.should_load`; the Load button still force-reloads) with a **centered full-screen wait overlay** (`overlay.py`, `LOAD_TIMEOUT_SEC=30s` backstop) until the chain lands; the **top-level Expiry propagates to all legs** (`leg_editor.apply_expiry`, re-syncs strikes); **compact leg cells** (`leg-row`) + the **"Actions" header dropped**; **Send-to-Calculator from the Scanner now lands correctly** — `_prefill` stashes `pending_legs` + `load_symbol()` so the legs apply once the chain is loaded (applying them first wiped every strike via the leg-editor's strike-coercion — see [[calculator-leg-transfer-needs-chain-first]])) | built |
 | `/options/swing` | Swing Scanner (**multi-strategy**, single-symbol: builds + ranks candidates across **Directional** (long/naked call+put), **Spreads** (debit bull-call/bear-put + credit PCS/CCS), and **Neutral** (iron condor) families on ONE unified **0–100 Fit+Quality** score; **Diagonals** are a later phase. The scanner **infers a market view** (direction/conviction + IV vol-regime) from the symbol's technicals + IV and ranks each structure by FIT to that view + STRUCTURAL QUALITY — so a long call and a put-credit-spread are comparable. A **Strategy-families multiselect** (default all; empty ⇒ all) + an inferred-**view banner** + strategy-agnostic columns (Strategy/Bias/Legs/Debit-Credit/Max P/Max L/R:R/PoP/BE/Score/Grade, colored by score+bias; the **Grade is quality-gated** — color-coded green/amber/red with a `grade_reason` tooltip, driven by structural quality + per-family hard gates, NOT view-fit). Per-row **Send to Calculator / Expected Move** work for ALL types via the canonical `legs`; **Send to Paper** is shown only for credit structures (PCS/CCS/IC). See the "Multi-strategy Swing Scanner" section below) | built |
-| `/options/gamma` | Gamma (GEX/Charm/DEX/Vanna bars + flip/**single Call+Put walls** + intraday heatmap; **fixed ±20-strike window** around spot for bars+heatmap (`strikes_around`, consistent candle/cell size all day; heatmap `rowsize`=median gap; heatmap cropped to the window); **blended interpolated heatmaps** (intraday **and Term**) — smooth image, no lines, dark `HEAT_STOPS` colorscale (zero→transparent like the candlestick chart), transparent bg, off-white spot line, no fade, **press-and-hold tooltip** (`_HEAT_PRESS_TOOLTIP_JS`); bar/heatmap **width split grows with session** snapshot count; **flicker-free** in-place Highcharts updates; **symbol is a dropdown** — default `$SPX`, populated from the collected universe (watchlist minus `$VIX`) via `cache:options:gamma_symbols`, **syncs to the cached symbol on build + selecting auto-refreshes + repaints ignore foreign-symbol snapshots** (no revert to `$SPX`); Term shows the **next 5 expirations regardless of cadence** (`_term_chain`); **off-hours persistence** — last session's candles+heatmap held until the next trading day's midnight CT (`active_session_date`/`gamma_cleared` + `load_date_with_grid`); off-hours `spot=None` degrades gracefully; Explain works per-selected-symbol; **Analyze** calls Claude (forced `submit_analysis` tool) and opens an **infographic** tab — regime + bias gauge, per-index price-level ladder + tiles + **what-if** (rally/sell-off/chop), bottom **"Why is this happening"**; **code-authoritative 1-day Exp. move**; also **auto-runs 4×/day** (premarket / ~18 min after open / midday / close) into per-slot keys with **Auto briefings** buttons — see the "Gamma Analyze" section below) | built |
+| `/options/gamma` | Gamma (GEX/Charm/DEX/Vanna bars + flip/**single Call+Put walls** + intraday heatmap; **fixed ±20-strike window** around spot for bars+heatmap (`strikes_around`, consistent candle/cell size all day; heatmap `rowsize`=median gap; heatmap cropped to the window); **blended interpolated heatmaps** (intraday **and Term**) — smooth image, no lines, dark `HEAT_STOPS` colorscale (zero→transparent like the candlestick chart), transparent bg, off-white spot line, no fade, **press-and-hold tooltip** (`_HEAT_PRESS_TOOLTIP_JS`); bar/heatmap **width split grows with session** snapshot count; **flicker-free** in-place Highcharts updates; **symbol is a dropdown** — default `$SPX`, populated from the collected universe (watchlist minus `$VIX`) via `cache:options:gamma_symbols`, **syncs to the cached symbol on build + selecting auto-refreshes + repaints ignore foreign-symbol snapshots** (no revert to `$SPX`); Term shows the **next 5 expirations regardless of cadence** (`_term_chain`); **off-hours persistence** — last session's candles+heatmap held until the next trading day's midnight CT (`active_session_date`/`gamma_cleared` + `load_date_with_grid`); off-hours `spot=None` degrades gracefully; Explain works per-selected-symbol; **Analyze** calls Claude (forced `submit_analysis` tool) and opens an **infographic** tab — regime + bias gauge, per-index price-level ladder + tiles + **what-if** (rally/sell-off/chop), bottom **"Why is this happening"**; **code-authoritative 1-day Exp. move**; also **auto-runs 4×/day** (premarket / ~18 min after open / midday / close) into per-slot keys with **Auto briefings** buttons + a **History picker** (date + slot dropdown → a report regenerated from the persisted briefing history at `/options/gamma-history`) — see the "Gamma Analyze" section below) | built |
 | `/options/simulator` | Simulator (**multi-leg strategy builder** — a Strategy dropdown over the shared **editable leg-editor** (`leg_editor.py`) replaces the old single-contract selector — driving all three legacy tabs: **Replay** (re-prices the **netted** position along the underlying's recent path → stacked price + 5-Greek panels over a gap-compressed integer x-axis w/ a client-side scrub cursor) + What-if (a **dollar profit/loss payoff from entry**: P/L = position value (×100 contract multiplier) minus the **entry mark** (`whatif_baseline` = value at spot *now*) — so profit caps at the net credit, loss floors at width−credit, **matching the Calculator** — with a green profit fill above / red loss fill below breakeven (area `threshold:0` + `color`/`negativeColor`) + faint Profit/Loss washes + labels; Δt is **elapsed** days from now, per-leg decay → **calendars** correct, theta visible as Δt slides) + IV-shock; **Copy to Calculator** button; **dark-navy dashboard theme** via shared `theme.py`; **persists full UI state across navigation** (symbol/strategy/legs/sliders/active tab) + **auto-refreshes on return** via a single-user module snapshot — `page_state.py`; the **Symbol** field **Fetches the snapshot on tab-out (`focusout`) / Enter** (deduped) with the same **centered wait overlay** (`overlay.py`) until the meta lands; **compact leg cells** + no "Actions" header (shared `leg_editor`)) | built |
 | `/options/expected-move` | Expected Move (candlestick price history (6-mo daily) + forward **ATM-IV expected-move cone** to the option's expiration (green/red dashed, √-time fan) + leg **strike lines** (short solid / long dashed, put/call colored) + axis **crosshair** w/ Date(X)+Price(Y) label boxes; opened in a **new browser tab** via stash-handoff from Scanner/Paper/Captured/Calculator, or standalone w/ symbol+expiry input) | built |
 | `/options/rescue` | Rescue (at-risk credit spreads (PCS/CCS/IC) → **at-risk table** (paper+captured, heat-colored) → select a position → ranked **commission-aware adjustment menu**: close / partial-close / narrow / convert-IC / butterfly / roll-down/out/down-out / broken-wing / inverted / futures-hedge; each card shows gross/commission/net + metrics + legs + rationale + strategic context + warnings + score; execute cards have **Apply → confirm → `rescue_apply`** behind a stale-price guard, advisory cards show "manual"; nav badge from `cache:options:rescue_summary`) | built |
 | `/sentiment` | Sentiment (two-column top: **dual** Sentiment gauges (Today + 30-Day Avg) + **dual** Market Trend gauges (Today live-intraday + 30-Day structural — directional 0–100 score, 15-min cadence). **The Today trend gauge's state label + regime badge now show the FIVE-STATE (direction × aggression) vocabulary** — short labels **Bull / Weak Bull / Neutral / Resilient / Bear**, badge label+description e.g. "Lack of Bearishness — Refuses to drop, puts cheap/undefended — favor PCS" — and the press-and-hold **TREND DETAIL popup gained a "Why" evidence section** (direction/effort/skew/flow/session/rejection/profile/order-flow/option-flow/aggression lines). The **0–100 needle is unchanged** (still the direction score); the **30-Day structural gauge deliberately KEEPS the old band vocabulary** (structural read = no aggression axis), so the panel carries both. See the root five-state entry above. / component table; traffic-light tiles; collapsed **"Daily Sentiment & Trend"** expander = two value-colorized (green/yellow/red) **2-min intraday graphs** (Daily Market Sentiment 0–10 + Daily Market Trend 0–100), rolling **last 5 trading days**, session gaps collapsed, **recorded going forward** by `sentiment_svc` (RTH-gated) into `SENTIMENT_INTRADAY_DB` → `cache:sentiment:intraday_history` (replaced the old 30-day-history line + rolling-avg/velocity/divergence text); full-width **Sector & Industry Performance** w/ Day/Week/Month %, P/C, RRG, rotation banner, **expandable industries w/ P/C+RRG**; bottom status bar; **persists across navigation**; **server-side 120s auto-refresh + bridge publish, tab-independent**) | built |
 | `/sentiment/rotation` | Sector Rotation (RRG-vs-SPY: Risk-ON/OFF headline + spread; **top row** = quadrant-map table (left) + tight ROTATING FROM/INTO w/ S&P weights (right); **full-width RRG below** w/ per-sector "meteor tails" — engine `assess_sector` retains a `tail` of `TAIL_LENGTH=12` RS-Ratio/RS-Mom points sampled every `TAIL_STRIDE=2` days; page draws **one spline series per sector** (faded trail line + single bright head dot) and **hover-isolates** a sector via native Highcharts `plotOptions.series.states.inactive` (hovering one dims the rest — no client round-trip); reuses `sector_rotation_assessment`; cached, **manual Refresh only**) | built |
 | `/trade` | Trade (on-demand single-symbol analysis: **Position (1–8wk)** + **Investor (months+)** Buy/Hold/Sell verdicts w/ score + top reasons + hard gates + expandable factor breakdown. The **Position** verdict is now a **backtested, IC-weighted cross-sectional factor model** (`swing_model.json` artifact → live `swing_model.py` scorer): the headline is the **validated** BUY/SELL/HOLD off a **calibration band** + an outcome line (percentile · expected fwd return / horizon · beat-SPY hit-rate) + a **"Why — validated factors"** evidence expander (per-factor z/weight/contribution/IC + model version & OOS IC), with the **legacy heuristic** verdict tucked into a collapsed expander (Investor unchanged); **MTF EMA alignment** (per-timeframe); momentum strip (RSI/ADX/MACD/VWAP/RelVol); sector strength; **Fundamentals card** (P/E/PEG/growth/ROE/margins via proxy `/instruments`); **Markov Forecast card** (third **equal-width frame in the verdict row**, alongside Position + Investor: 5-band composite-score Markov chain → stacked-area band-probability forecast + P(BUY)/P(SELL)/E[score] at 5/10/20d + a bounded confidence-weighted drift-tilt `markov_adjusted_score` headline, verdict label unchanged; **chart plots the dense near-term `trajectory` now/1/2/3/5/10/20d** so it differs by score — the 5/10/20d tail converges to the bull-leaning prior stationary; chart is dark-navy themed); **dark-navy "dashboard" theme** (`.calc-v2` via shared `theme.py`, `items-start` compact cards); **tab-out (`focusout`) = Analyze** (deduped); **persists last analyzed symbol** + analysis across nav) | built |
-| `/driver` | Driver (**autonomous monitor + override** [level B]: a **Claude decision layer** (Opus 4.8 default; `DRIVER_MODEL` env / `shared/driver_model.txt` override → e.g. Sonnet 5) auto-selects/sizes **defined-risk option spreads (PCS/CCS/IC) from the scanner** (`cache:options:scan`) toward **net $500/day** in **paper**, gated by a **`cache:driver:control`** master switch + confirm-gated **STOP** kill-switch; the page shows day-P&L-vs-$500 progress, open-driver-positions, a newest-first **decision-log** audit (`cache:driver:autonomous`, times in **CST**), and a **Performance scorecard** (win-rate / profit-factor / avg win-loss / P&L by symbol & strategy — `cache:options:driver_paper_perf`), all reading the Driver's **own isolated paper book** (`cache:options:driver_paper_account`, separate from the manual account), with **Enable/Disable** + **Run now**; 09:28-ET morning + 30-min autonomous **entry-window** checkpoints (**09:45–15:30 ET** — the open's first ~15 min skipped so the post-open structure is readable, and **no NEW entries in the last 30 min before the close**; management/exits are unaffected, on options_svc's separate 5-min manage cycle) run `build_packet`→`decider.decide`→**`guardrails.apply_guardrails`** (PURE code clamps size + halts at banked-$500/loss-cap/VIX — the model never sizes its own risk)→`cmd:options` **`driver_paper_create`** (opens into the dedicated `paper_account_driver.db`, repriced + auto-exited on the 5-min manage tick — fully separate from the user's manual paper trades). **Legacy** morning-agent **order-approval queue** retained (gated off while autonomy is enabled): Run morning agent → graded day + proposed trades; **APPROVE** (confirm dialog) / **SKIP**; conditions strip + grade rationale; **Performance** view (win-rate / P&L-by-bucket + trade table; **today-only** decision log; perf **P&L colored** green/red; **Bucket / Instrument** full-word headers; **sticky table headers**). Orders simulated (`PAPER_TRADE=True`). **Root-cause fix (2026-06-27): the driver had NEVER opened a position** — `compute.open_driver_position` read `signal_id`/`strategy`/`entry_credit` but the driver feeds RAW scanner signals keyed `id`/`type`/`credit`, so every open `KeyError`'d on `'signal_id'` and the defensive `try/except` swallowed it to `status=error`; the decision log showed "executed" (only the ENQUEUE) while the account stayed empty. Fixed by normalizing the signal shape — open positions now appear + the scorecard P&L populates. See [[driver-feeds-raw-scanner-signal-shape]]. **Second root-cause fix (2026-07-02): $SPX/MU logged "Executed" but never opened** — a **100× units mismatch**: `guardrails.clamp_quantity` sized affordability off the scanner's **PER-SHARE** `max_loss` (~$7) while the paper account's `size_contracts` correctly used **per-CONTRACT** dollars (`(width−credit)×100`, ~$705), so the driver kept proposing $SPX/MU whose real per-contract risk ($409–$1,833) exceeded the paper sizer's $250 cap → `RISK_TOO_HIGH` → **silently rejected** (the "Executed" in the log is only the ENQUEUE; the true outcome is in the account view's `last_open_results`, cap 25). Fixed: the guardrail evaluates **per-contract dollars** (`CONTRACT_MULTIPLIER`); the driver's caps raised to **$1,500/$4,500** and the paper open path given its own **`_DRIVER_MAX_RISK_PER_TRADE=$1,500`** (manual account unchanged at $250) — $SPX/MU now open. See [[driver-executed-but-rejected-risk-too-high]]) | built |
+| `/driver` | Driver (**autonomous monitor + override** [level B]: a **Claude decision layer** (Opus 4.8 default; `DRIVER_MODEL` env / `shared/driver_model.txt` override → e.g. Sonnet 5) auto-selects/sizes **defined-risk option spreads (PCS/CCS/IC) from the scanner** (`cache:options:scan`) toward **net $500/day** in **paper**, gated by a **`cache:driver:control`** master switch + confirm-gated **STOP** kill-switch; the page shows day-P&L-vs-$500 progress, open-driver-positions, a newest-first **decision-log** audit (`cache:driver:autonomous`, times in **CST**), and a **Performance scorecard** (win-rate / profit-factor / avg win-loss / P&L by symbol & strategy — `cache:options:driver_paper_perf`), all reading the Driver's **own isolated paper book** (`cache:options:driver_paper_account`, separate from the manual account), with **Enable/Disable** + **Run now**; 09:28-ET morning + 30-min autonomous **entry-window** checkpoints (**09:45–15:30 ET** — the open's first ~15 min skipped so the post-open structure is readable, and **no NEW entries in the last 30 min before the close**; management/exits are unaffected, on options_svc's separate 5-min manage cycle) run `build_packet`→`decider.decide`→**`guardrails.apply_guardrails`** (PURE code clamps size + halts at banked-$500/loss-cap/VIX — the model never sizes its own risk)→`cmd:options` **`driver_paper_create`** (opens into the dedicated `paper_account_driver.db`, repriced + auto-exited on the 5-min manage tick — fully separate from the user's manual paper trades). A **Performance** view shows the driver's **closed trades + realized P&L** from its isolated paper account (`cache:options:driver_paper_account['closed_positions']` — reader-friendly columns Closed/Symbol/Strategy/Qty/Exit-reason/Realized-P&L, colored, newest-first, updated every 5-min manage cycle + the 2s version-poll; a **Refresh** button forces a `driver_paper_manage` reprice). **The legacy morning-agent order-approval queue + its `claude-driver` engine were REMOVED (2026-07-08)** — the page is now purely the autonomous monitor + this Performance view. Orders simulated (`PAPER_TRADE=True`). **Root-cause fix (2026-06-27): the driver had NEVER opened a position** — `compute.open_driver_position` read `signal_id`/`strategy`/`entry_credit` but the driver feeds RAW scanner signals keyed `id`/`type`/`credit`, so every open `KeyError`'d on `'signal_id'` and the defensive `try/except` swallowed it to `status=error`; the decision log showed "executed" (only the ENQUEUE) while the account stayed empty. Fixed by normalizing the signal shape — open positions now appear + the scorecard P&L populates. See [[driver-feeds-raw-scanner-signal-shape]]. **Second root-cause fix (2026-07-02): $SPX/MU logged "Executed" but never opened** — a **100× units mismatch**: `guardrails.clamp_quantity` sized affordability off the scanner's **PER-SHARE** `max_loss` (~$7) while the paper account's `size_contracts` correctly used **per-CONTRACT** dollars (`(width−credit)×100`, ~$705), so the driver kept proposing $SPX/MU whose real per-contract risk ($409–$1,833) exceeded the paper sizer's $250 cap → `RISK_TOO_HIGH` → **silently rejected** (the "Executed" in the log is only the ENQUEUE; the true outcome is in the account view's `last_open_results`, cap 25). Fixed: the guardrail evaluates **per-contract dollars** (`CONTRACT_MULTIPLIER`); the driver's caps raised to **$1,500/$4,500** and the paper open path given its own **`_DRIVER_MAX_RISK_PER_TRADE=$1,500`** (manual account unchanged at $250) — $SPX/MU now open. See [[driver-executed-but-rejected-risk-too-high]]. **Market-context block (2026-07-08):** the decider's
+packet now carries an additive **`market_read`** — per-index gamma **flip/walls/what-if** from the
+freshest `gamma_analyze` briefing + a **live spot** (spot-vs-flip **posture**), dashboard **breadth +
+risk-on/off**, and the **sentiment 0-10 score** — as **reasoning context only** (never filters the
+menu; `guardrails.py` untouched — the wall-aware gate is deferred). Its one-line summary shows on each
+decision-log row) | built |
 | `/settings` | Settings (GUI prefs via `app_settings`: scanner **audio alert** on/off + sound + volume, only-during-market-hours, min-score-to-alert; desktop-notification toggle + permission grant + Test sound. Extensible — first batch) | built |
 | `/portfolio` | Portfolio (3-tier, `services/portfolio_svc` :8212: **Holdings / Sectors / Performance** tabs over the portfolio model — sector breakdown, vs-sector RS, since-purchase excess, benchmark over/under-weight, tailwind; **Performance** scorecard (return/capital/risk/entry grades + composite + ann. return + drawdown) with a per-position **advisory suggestions** detail pane; **live-streaming P&L** via the service's proxy SSE consumer republishing each tick; proxy/stream status bar; persists across nav) | built |
 | `/eod` · `/eod/detail` | EOD Report (pure-webgui aggregator over `options:*` + `driver:*` caches. **Summary** = headline tiles + a **verbose Daily / Weekly(WTD) / MTD performance** block **per book** — the manual paper **ledger** (`options:paper_trades`) and the **Driver** account (`options:driver_paper_account`, incl. its new `closed_positions`) shown separately (realized P&L bucketed by **exit** date; opened/credit by **entry** date; a per-book now-line = equity/session-P&L/open-unrealized/open-count). **Detailed** = the same performance + **trade-type breakdowns** (by **strategy** PCS/CCS/IC, by **0-DTE/Swing**, by **status** Open/Closed/Expired) for each book + full trade/scanner/captured/driver tables. **Navigation**: a jump-link **TOC** + every section in a native **`<details>`** (collapsible, **no JS** — works in-app AND in the exported files). **Generate** snapshots the caches → standalone `summary.html` + `detail.html` archived under `webgui/data/eod/<date>/`; `/eod/file` serves them raw. Pure builders (`normalize_trades`/`period_buckets`/`breakdown_rows`/`performance_table_html`/`breakdown_table_html`/`toc`/`details_section`) unit-tested. Realized reads `$0`/`—` until trades close — by design, not a bug) | built |
-| `/status` | System Status (pure-webgui health board: overall up/down banner + per-component cards probing **Memurai** PING, **schwab-proxy** `/health`, **Schwab Authorization** (OAuth token state, with an **Authorize** button → proxy `/auth`), the **five domain services** `/health`, and **webgui** itself; plus a **published-data-freshness** table — each domain's cache version + age, flagging stale scheduled views; **per-component Restart button on offline cards** — proxy/services relaunch via `tools\restart_one.bat`, Memurai via `Start-Service`; off-thread sweep, auto-refresh 15 s + manual) | built |
-| `/terminate` | Terminate (guarded "stop the whole local stack" page: red **Stop all services** button behind a confirm dialog → spawns `stop_all.bat` detached via `cmd /c start`, which kills the proxy + 5 services + this web app by listening port; **Memurai is left running**; the page goes unresponsive after confirm, by design) | built |
+| `/market` | Market Dashboard (3-tier, `services/market_svc` :8215: a live grid of ~48 macro tickers from `symbol_categories.csv`, grouped into a **framed panel per category** laid out macro→tape→rotation (Volatility/Options-Sentiment/Internals/Currency · Cash-Index/Futures/Broad-ETF · Sector/Thematic/Factor/Fixed-Income/Crypto/Countries). Each **tile** shows symbol + description (hover tooltip) + last + net/%-change on a **semantic risk-on/off colored background** (green risk-on / red risk-off / grey no-data, intensity by magnitude) — **polarity-aware** (VIX/SKEW/put-call/TLT/UUP shade RED on up-moves). `market_svc` polls the proxy's raw `/quotes` on a **~2 s RTH cadence** (5 s off-hours — futures trade ~24h so off-hours stays snappy), normalizes change across INDEX/EQUITY/FUTURE, computes the `$ADVN-$DECN` breadth spread, and reads the app's own cap-weighted put/call from `cache:sentiment:composite` → publishes `cache:market:dashboard`; the page version-polls + **updates tiles in place** (no per-tick rebuild). **CSV→Schwab symbol map** handles the translations (`SPX`→`$SPX`, `VIX`→`$VIX`, `/ES[U26]`→`/ESU26`) + **equivalents for symbols Schwab can't quote** (`$DXY`→`UUP`; `$PCALL`/`$PCSP`→the sentiment cap-weighted P/C tile). See the "Market Dashboard" section below) | built |
+| `/status` | System Status (pure-webgui health board: overall up/down banner + per-component cards probing **Memurai** PING, **schwab-proxy** `/health`, **Schwab Authorization** (OAuth token state, with an **Authorize** button → proxy `/auth`), the **six domain services** `/health` (incl. `market_svc` :8215), and **webgui** itself; plus a **published-data-freshness** table — each domain's cache version + age (incl. `market:dashboard`), flagging stale scheduled views; **per-component Restart button on offline cards** — proxy/services relaunch via `tools\restart_one.bat`, Memurai via `Start-Service`; off-thread sweep, auto-refresh 15 s + manual) | built |
+| `/terminate` | Terminate (guarded "stop the whole local stack" page: red **Stop all services** button behind a confirm dialog → spawns `stop_all.bat` detached via `cmd /c start`, which kills the proxy + 6 services + this web app by listening port; **Memurai is left running**; the page goes unresponsive after confirm, by design) | built |
+
+**Market Dashboard (`/market`) — DONE (2026-07-07).** A new **More → Market Dashboard**
+page streaming a live grid of ~48 macro tickers (from `symbol_categories.csv`), grouped
+into a **framed panel per category** and colored by **semantic risk-on/off market
+condition**. Sixth Tier-2 service. Pieces:
+- **New service `services/market_svc` (:8215, read-only).** A scheduler polls the proxy's
+  **raw `/quotes`** endpoint (not `SchwabProxyClient.get_quotes`, which discards
+  `assetMainType`/`futurePercentChange`) for all real symbols in ONE batched call on a
+  **~2 s RTH cadence** (`scheduler.poll_interval`, 5 s off-hours/weekends/holidays — NOT
+  throttled hard because the equity-index futures trade ~24h and are the main off-hours
+  mover; the shared `_HOLIDAYS` gate drives it), normalizes change across INDEX/EQUITY/FUTURE,
+  computes the `$ADVN-$DECN` breadth spread, reads the app's own cap-weighted put/call, derives a per-tile
+  `color_state`, and publishes **`cache:market:dashboard`** (`skip_unchanged=True`, so no
+  repaint on byte-identical ticks). No command handler — the page only reads.
+- **PURE modules.** `symbols.py` = the **CSV→Schwab symbol map** (single source of truth):
+  55 tiles with per-symbol **polarity** (`normal` up=risk-on / `inverted` up=risk-off) +
+  `kind` (`quote`/`spread`/`external`), encoding the translations (`SPX`→`$SPX`, `VIX`→
+  `$VIX`, `SKEW`→`$SKEW`, `/ES[U26]`→`/ESU26`) and the **equivalents for symbols Schwab
+  can't quote** (`$DXY`→**`UUP`**; `$PCALL`+`$PCSP`→one **"Put/Call"** tile
+  fed from `cache:sentiment:composite` → `live.sector_pcr`). `classify.py` = pure
+  `normalize_quote` (asset-type-aware % field), `spread_value` (`$ADVN-$DECN` = leg last
+  diff, colored by SIGN not magnitude since a count isn't a %), and `color_state`
+  (polarity × sign × intensity → 6 buckets +
+  `no_data`). `compute.build_dashboard` is PURE over an already-fetched raw dict + pcr; the
+  `SYMBOL_MAP` whitelist iteration means the proxy's `errors` bucket can never become a
+  bogus tile.
+- **Coloring (design decision — semantic, not literal up/down).** Green = risk-on, red =
+  risk-off, grey = flat/no-data, intensity by magnitude. **Inverted** instruments shade RED
+  on up-moves: VIX/VIX1D/VIX3M, SKEW, the put/call tile, `UUP` (dollar strength), `TLT`
+  (long-duration flight-to-safety). Defensive equity sectors (XLP/XLU/XLV) stay **literal**
+  up=green (deliberate). Contract `shared/contracts/market.py:MarketDashboard`.
+- **Page `webgui/pages/market.py` (Tier-1, engine-free).** Reads `cache:market:dashboard`,
+  paints framed category panels (macro→tape→rotation frame order) of colored tiles
+  (symbol + description tooltip + last + net/%-change), version-polls, and **updates tiles
+  IN PLACE** (build-once + `.classes(remove=…, add=…)` bg swap keyed by the unique display —
+  no per-tick DOM rebuild). Tailwind-first (data-driven colors from a finite `_BG` map, no
+  `.style()`). Wired into `MORE_CHILDREN` + `/market` route; surfaced on `/status` (health
+  board + freshness) and killed by `/terminate` (`stop_all.py` iterates `SERVICE_PORTS`).
+- **"Streamed" caveat.** Schwab's SSE streamer is equities-only (indices/internals/VIX have
+  NO streaming service; futures would need a proxy `LEVELONE_FUTURES` bridge), so ~half the
+  symbols are REST-only regardless — the honest uniform path is the ~2 s poll (visually
+  continuous). **Launch:** `start_all.bat`/`start_all_wt.bat` launch it as the 8th window/tab.
+  **Restart `market_svc` (+ the webgui to pick up the new route)** to see it live.
+  market_svc **30** + shared/contracts **43** + webgui **687** green; **live-verified
+  end-to-end** (real proxy+Redis → all 47 tiles populated with correct semantic colors, incl.
+  UUP/put-call equivalents; VIX+3.6%→risk_off_strong, TLT−1.1%→risk_on_strong,
+  $ADVN-$DECN=−465→risk_off_mild). Built subagent-by-subagent (TDD, two-stage spec+quality
+  review per layer). Design/plan:
+  [design](docs/plans/2026-07-07-market-dashboard-design.md) /
+  [plan](docs/plans/2026-07-07-market-dashboard-plan.md).
+
+**Market Summary Ticker (every page) — DONE (2026-07-08).** A fixed scrolling marquee pinned
+to the **bottom of every page** (rendered in `main.py` `_layout`) that gives an at-a-glance
+market read synthesized from the app's own data. **Hybrid content:** it leads with a short
+**Claude-written verdict** (the "why", refreshed on a schedule) then scrolls **live,
+color-coded data items** (the fast numbers). Pieces:
+- **Narrative — Claude, scheduled (`market_svc`).** `compute.build_summary_packet` (PURE)
+  distills the dashboard + sentiment/trend caches into a compact packet;
+  `compute.generate_summary` calls Claude (Sonnet 5, thinking disabled, `max_tokens≈220`,
+  client built with `timeout=30/max_retries=1`) for a 1–2 sentence verdict; the scheduler's
+  `summary_due` gate (~20 min RTH / ~60 min off-hours) publishes **`cache:market:summary`**
+  (`MarketSummary` contract, `skip_unchanged=True`). Reuses the Gamma-Analyze pattern (lazy
+  `anthropic`, key via `ANTHROPIC_API_KEY`→`shared/anthropic_key.txt`) — fully defensive:
+  no key / API error → empty narrative → the ticker shows live items only. **Test hygiene:**
+  a market_svc `conftest` autouse fixture monkeypatches `_make_summary_client→None` so the
+  suite NEVER makes a live Claude call.
+- **Live items — rule-based, Tier-1 (`webgui/pages/ticker.py`).** PURE `ticker_items(dashboard,
+  sentiment)` composes `{text, tone}` items (sentiment score/bias, trend label/score, breadth,
+  VIX/VIX1D/VIX3M/SKEW, put/call, SPX/NDX, top-4 sector/thematic movers by |Δ|); `item_class`
+  maps `tone`→fixed Tailwind class (Tailwind-first, no `.style()`). Zero API cost, updates live.
+- **Render.** `render_ticker(active)` (called in `_layout`, gated by the Settings toggle) is a
+  fixed `ui.footer` marquee — the `@keyframes` animation is the ONE `ui.add_css` escape hatch;
+  scroll speed is a **finite `speed_class`** (slow/med/fast), not an inline style. A `@guard`ed
+  version-gated `ui.timer` reads the three cache versions and **only rebuilds when the RENDERED
+  content signature changes** (not on every 2 s dashboard bump) → the marquee scrolls smoothly
+  without tearing/jumping. Content column gets `pb-10` so the footer never covers content; the
+  "?" help fab (z-2300) stays above the ticker (z-2200).
+- **Control.** `app_settings` `ticker_enabled` (default on) + `ticker_speed`; a **Settings**
+  page toggle (Show + Slow/Medium/Fast). When off, `render_ticker` renders nothing.
+- market_svc **35** + shared/contracts **38** + webgui **687** green (no live API calls in the
+  suite); **live-verified** end-to-end (real Claude verdict published to `cache:market:summary`
+  + 14 correct color-coded live items from the live caches). **Restart `market_svc` + the
+  webgui** to see it. Built subagent-by-subagent (TDD, two-stage spec+quality review). Design/plan:
+  [design](docs/plans/2026-07-08-market-summary-ticker-design.md) /
+  [plan](docs/plans/2026-07-08-market-summary-ticker-plan.md).
 
 **Multi-strategy Swing Scanner (`/options/swing`) — Phase 1 DONE (2026-06-30).** The
 Swing Scanner was expanded from a credit-spread-only premium scanner to a **unified,
@@ -1792,6 +1971,45 @@ itself four times a day). All in `services/options_svc/compute.py` (Tier-2) +
   isolation) + `webgui/tests/test_analyze_route.py`. Verified live end-to-end (real
   Claude call → infographic; EM SPX 2.96→45.9 / SPY 0.27→4.22 / QQQ 0.52→8.0).
 
+**Gamma briefing history — store + CLI utility + in-app viewer (DONE — 2026-07-08).**
+Every briefing above is now persisted so past briefings can be browsed/regenerated.
+The design decision (deliberate): **store the STRUCTURED analysis payload, regenerate
+the report on demand** — compact, queryable, and future-proof (old briefings re-render
+in the current infographic design; the raw GEX numbers already live in
+`gex_history.db`, so only the AI's structured read is kept). Pieces:
+- **Store** `options-scanner/gamma_briefing_history_db.py` (Tier-3 SQLite,
+  `repo_paths.GAMMA_BRIEFING_DB` = `options-scanner/data/gamma_briefings.db`). One row
+  per **`(date, slot)`** (scheduled slots are unique/day → re-run REPLACEs; ad-hoc/
+  manual use time-stamped slots like `adhoc-1842` so each is kept). Columns: date,
+  slot, generated_at, symbol_scope, model, **bias**, **headline** (pulled out for
+  cheap trend queries) + **`analysis_json`** (the full structured dict = source of
+  truth). `connect`/`insert_briefing`/`get_briefing`/`briefings_for_date`/
+  `list_briefings`/`purge(keep_days)`; every fn takes an explicit conn for temp-DB tests.
+- **Persistence** `handlers._persist_briefing(res, slot, now)` (best-effort; only runs
+  with a real `analysis` — degraded no-chains/no-key/error pages are skipped; never
+  raises) wired into `run_scheduled_gamma_analyze` + the ad-hoc `gamma_analyze` command.
+- **Report builder** PURE `compute.analyze_history_doc(briefings, title)` — combines N
+  stored briefings into one standalone doc (each re-rendered via
+  `analyze_infographic_html` under a date/slot header), reusing `_ANALYZE_CSS`.
+- **In-app viewer.** `handlers.publish_gamma_briefing_index` publishes the metadata
+  index **`cache:options:gamma_briefings`** (startup + after each persist); the
+  **`gamma_history`** command (`run_gamma_history(bus, date, slot=None)`) regenerates a
+  date's (or a single slot's) report → **`cache:options:gamma_history`**, served raw at
+  **`/options/gamma-history`** (`webgui/main.py`). The `/options/gamma` page's
+  **History picker** — a date dropdown (from the index via the pure `history_dates`) +
+  a slot select (All / the four slots) + **Open** — enqueues `gamma_history` and opens
+  the regenerated report in a new tab on the version-poll (mirrors `_watch_analyze`).
+- **CLI utility** `services/options_svc/gamma_briefing_report.py` (run MANUALLY, never
+  in a request path): `--list [--days N]` / `--date YYYY-MM-DD [--slot S]` (single day,
+  slots combined) / `--range START END` / `--generate [--slot L]` (fresh run via
+  `compute.gamma_analyze` → store → report; needs the proxy + ANTHROPIC key). Writes
+  HTML under `options-scanner/data/gamma_reports/` (or `--out`).
+- **Restart `options_svc`** so persistence + the index publish go live (the DB starts
+  empty and fills going forward). gamma_briefing_history_db **7** + options_svc
+  handlers/scheduler/compute + webgui **689** green; verified live end-to-end (index
+  published, picker populated + Open→regenerate→serve, CLI `--list`/`--date` combined
+  report). Built per-layer TDD.
+
 **Options GUI polish batch (DONE — 2026-06-16).** A set of UI/UX fixes across the
 Options section (design/plan:
 [design](docs/plans/2026-06-16-options-gui-polish-design.md) /
@@ -2092,18 +2310,21 @@ at +$500, hard-capped on the downside) — no decision-maker can guarantee it. P
   default so they don't conflict).
 - **Contracts** `DriverControl` (`cache:driver:control` — master switch + STOP latch)
   + `AutonomousState` (`cache:driver:autonomous` — the monitor view). Tunables in
-  `settings.py` (`DAILY_TARGET=500`, `PER_TRADE_MAX_RISK=1500`, `DAILY_RISK_BUDGET=4500`
-  — **raised from $300/$900 (2026-07-02)** so the driver can fund $SPX/MU spreads whose
-  per-CONTRACT max loss is large; the guardrail now evaluates affordability in
-  per-contract dollars (`guardrails.CONTRACT_MULTIPLIER=100` — the scanner's `max_loss`
-  is PER-SHARE) and the paper open path uses its own matching
-  `options_svc.compute._DRIVER_MAX_RISK_PER_TRADE=1500` so the user's MANUAL account
-  stays at `config_paper.MAX_RISK_PER_TRADE=250`; see the /driver route note), `MAX_CONCURRENT=6`,
-  `MAX_TRADES_PER_CYCLE=3`, `MODEL="claude-opus-4-8"` (build
-  default; the **`DRIVER_MODEL`** env var overrides it per-deployment —
-  e.g. `claude-sonnet-5` for lower cost), `CHECKPOINT_MIN=30`); the daily loss
-  cap is sourced from the legacy `config.RISK_LIMITS` (still **$250** — with the raised
-  per-trade cap, a single losing $SPX can trip the daily halt; raise it if undesired).
+  `settings.py` (`DAILY_TARGET=500`, `PER_TRADE_MAX_RISK=3000`, `DAILY_RISK_BUDGET=12000`,
+  `MAX_CONCURRENT=10`, `MAX_TRADES_PER_CYCLE=5`, `VIX_MAX=35`, `MENU_TOP_N=15`,
+  `DAILY_LOSS_HALT=1500` — the **"Very Aggressive" risk profile (2026-07-02, user choice)**:
+  the driver presses toward $500/day and tolerates real drawdown (~half the $25k paper book
+  deployable, ~12%/trade, a $1,500 daily-loss stop = 3× the target). **All risk knobs now live
+  in `settings.py`**; `compute._daily_max_loss` reads `DAILY_LOSS_HALT` first (legacy
+  `config.RISK_LIMITS` is only a fallback — this replaced the old $250 halt that stopped the
+  day after one losing $SPX). The guardrail evaluates affordability in per-contract dollars
+  (`guardrails.CONTRACT_MULTIPLIER=100` — the scanner's `max_loss` is PER-SHARE) and the paper
+  open path uses its own matching `options_svc.compute._DRIVER_MAX_RISK_PER_TRADE=3000` so the
+  user's MANUAL account stays at `config_paper.MAX_RISK_PER_TRADE=250`. The `decider._SYSTEM`
+  prompt is an AGGRESSIVE mandate (take reasonably-scored trades to build toward the target;
+  stand down only on genuinely poor edge / hostile conditions). `MODEL="claude-opus-4-8"` (build
+  default; the **`DRIVER_MODEL`** env var / gitignored `shared/driver_model.txt` override it
+  per-deployment — e.g. `claude-sonnet-5`), `CHECKPOINT_MIN=30`).
 - **Page** `webgui/pages/driver.py`: a Tier-1 **monitor + override** (Enable/Disable,
   confirm-gated **STOP**, **Run now**, $500 progress, open-driver-positions, newest-
   first decision-log audit) reading `cache:driver:autonomous`/`control` + version-
@@ -2608,6 +2829,7 @@ options   = 8211
 portfolio = 8212
 trade     = 8213
 driver    = 8214
+market    = 8215
 ```
 
 **Rule: never hard-code `D:\` paths or port numbers in the apps.** Add them to
@@ -2678,6 +2900,7 @@ python services\options_svc\app.py        # :8211  (scan/swing/header/gamma/pape
                                           #          + 5-min intraday GEX history collection, 08:30–15:20 CT)
 python services\portfolio_svc\app.py      # :8212  (sector breakdown + vs-sector perf + live-streaming P&L)
 python services\trade_svc\app.py          # :8213  (on-demand symbol analysis: MTF + Position/Investor verdicts)
+python services\market_svc\app.py         # :8215  (live macro-ticker Market Dashboard: ~2s RTH poll of /quotes → cache:market:dashboard)
 python services\driver_svc\app.py         # :8214  (morning-agent order-approval queue: 09:28-ET run + approve/skip;
                                           #          orders simulated — config.PAPER_TRADE=True)
 

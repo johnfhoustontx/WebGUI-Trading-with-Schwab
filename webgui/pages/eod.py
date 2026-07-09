@@ -189,46 +189,6 @@ def scanner_section(scan_cache) -> str:
     )
 
 
-def driver_section(approvals_cache, perf_cache) -> str:
-    appr = approvals_cache if isinstance(approvals_cache, dict) else {}
-    perf = perf_cache if isinstance(perf_cache, dict) else {}
-    if not appr and not perf:
-        return '<p class="none">No driver activity.</p>'
-
-    parts = []
-    if appr:
-        parts.append(
-            '<p class="summary-line">'
-            f'Grade <b>{escape(str(appr.get("grade") or "—"))}</b> · '
-            f'Status {escape(str(appr.get("status") or "—"))} · '
-            f'Decision {escape(str(appr.get("decision") or "—"))} · '
-            f'P&L today <span class="{_pn_class(appr.get("pnl_today"))}">'
-            f'{_money(appr.get("pnl_today"))}</span>'
-            "</p>"
-        )
-        rows = []
-        for tr in (appr.get("proposed_trades") or []):
-            rows.append(
-                "<tr>" + _cell(tr.get("symbol")) + _cell(tr.get("bucket"))
-                + _cell(tr.get("side")) + _cell(tr.get("quantity")) + "</tr>")
-        parts.append(_table(
-            ["Symbol", "Bucket", "Side", "Qty"], rows, empty="No proposed trades."))
-
-    summary = perf.get("summary") if isinstance(perf.get("summary"), dict) else {}
-    if summary:
-        win = _num(summary.get("win_rate"))
-        win_txt = f"{win * 100:.0f}%" if win is not None else "—"
-        parts.append(
-            '<p class="summary-line">'
-            f'Win rate {win_txt} · '
-            f'Realized P&L <span class="{_pn_class(summary.get("realized_pnl"))}">'
-            f'{_money(summary.get("realized_pnl"))}</span> · '
-            f'{int(_num(summary.get("trades"), 0))} trades'
-            "</p>"
-        )
-    return "".join(parts)
-
-
 # ----------------------------------------------------------------------------- #
 # Trade normalization + period/breakdown aggregation (additive)
 # ----------------------------------------------------------------------------- #
@@ -480,13 +440,16 @@ def detail_fragment(snap: dict, today=None) -> str:
             brk_parts.append(breakdown_table_html(breakdown_rows(norm, key)))
     breakdowns_html = "".join(brk_parts)
 
+    # The driver's realized trades + performance are surfaced per-book (the "Driver"
+    # book) inside the Performance + Breakdowns sections, sourced from
+    # cache:options:driver_paper_account — so there is no separate legacy driver
+    # section (the old morning-agent approvals/performance views are gone).
     nav = toc([
         ("performance", "Performance"),
         ("breakdowns", "Breakdowns"),
         ("trades", "Trades"),
         ("scanner", "Scanner"),
         ("captured", "Captured"),
-        ("driver", "Driver"),
     ])
 
     parts = [
@@ -502,10 +465,6 @@ def detail_fragment(snap: dict, today=None) -> str:
         details_section("scanner", "Scanner Signals", scanner_section(snap.get("scan"))),
         details_section("captured", "Captured Signals",
                         captured_section(snap.get("captured"))),
-        details_section(
-            "driver", "Driver — Trades & Performance",
-            driver_section(snap.get("driver_approvals"),
-                           snap.get("driver_performance"))),
         "</div>",
     ]
     return "".join(parts)
@@ -532,20 +491,23 @@ def summary_fragment(snap: dict, detail_href: str, today=None) -> str:
     n_scan = _count(scan, "signals_0dte") + _count(scan, "signals_swing")
     n_cap = _count(snap.get("captured") or {}, "signals")
     n_paper = _count(snap.get("paper_trades") or {}, "trades")
-    appr = snap.get("driver_approvals") or {}
-    perf = (snap.get("driver_performance") or {}).get("summary") or {}
     acct = (snap.get("paper_account") or {}).get("snapshot") or {}
     session_pnl = acct.get("session_pnl")
-    win = _num(perf.get("win_rate"))
-    win_txt = f"{win * 100:.0f}%" if win is not None else "—"
+    # Driver at-a-glance from its isolated paper account's scorecard
+    # (cache:options:driver_paper_perf) — the legacy morning-agent grade/status
+    # approvals are gone.
+    dperf = snap.get("driver_paper_perf") or {}
+    d_realized = dperf.get("realized_pnl")
+    d_win = _num(dperf.get("win_rate"))
+    d_win_txt = f"{d_win * 100:.0f}%" if d_win is not None else "—"
     tiles = "".join([
         _tile("Paper session P&L", _money(session_pnl), _pn_class(session_pnl)),
         _tile("Scanner signals", n_scan),
         _tile("Captured signals", n_cap),
         _tile("Paper trades", n_paper),
-        _tile("Driver grade", escape(str(appr.get("grade") or "—"))),
-        _tile("Driver status", escape(str(appr.get("status") or "—"))),
-        _tile("Driver win rate", win_txt),
+        _tile("Driver realized P&L", _money(d_realized), _pn_class(d_realized)),
+        _tile("Driver win rate", d_win_txt),
+        _tile("Driver trades", int(_num(dperf.get("total_trades"), 0))),
     ])
     perf_toc, perf_html = _performance_block(snap, today)
     nav = toc(perf_toc)
@@ -575,8 +537,6 @@ def read_snapshot() -> dict:
         "captured": bus_client.read("options:captured") or {},
         "paper_trades": bus_client.read("options:paper_trades") or {},
         "paper_account": bus_client.read("options:paper_account") or {},
-        "driver_approvals": bus_client.read("driver:approvals") or {},
-        "driver_performance": bus_client.read("driver:performance") or {},
         "driver_paper_account": bus_client.read("options:driver_paper_account") or {},
         "driver_paper_perf": bus_client.read("options:driver_paper_perf") or {},
     }

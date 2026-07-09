@@ -1,7 +1,7 @@
 """Terminate page — stop the whole local stack from the web GUI.
 
 A deliberately guarded action: a single red button behind a confirm dialog that
-spawns ``stop_all.bat`` (proxy + the five domain services + this web app; Memurai
+spawns ``stop_all.bat`` (proxy + the six domain services + this web app; Memurai
 is left running). Because it kills the web app too, the page goes unresponsive
 right after you confirm — by design.
 
@@ -42,7 +42,7 @@ def render():
             ui.icon("warning").classes("text-orange text-2xl")
             ui.label("Stop all local services").classes("text-subtitle1 font-bold")
         ui.label(
-            "Stops the schwab-proxy, all five domain services, and this web app "
+            "Stops the schwab-proxy, all six domain services, and this web app "
             "by killing whatever is listening on their ports. Memurai (the Redis "
             "backbone) keeps running.").classes("opacity-80")
         ui.label(

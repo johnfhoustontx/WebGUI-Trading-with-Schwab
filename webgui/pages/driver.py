@@ -1,11 +1,10 @@
-"""Driver page (Tier-3 reader) — autonomous monitor + STOP, then the legacy
-morning-agent order-approval queue + performance.
+"""Driver page (Tier-3 reader) — autonomous monitor + STOP + realized performance.
 
-This page holds **no engine call**. The morning pipeline, the autonomous Claude
-decision layer, order execution, and performance aggregation all live in
-``services/driver_svc``; the page reads cached views and enqueues commands.
+This page holds **no engine call**. The autonomous Claude decision layer, order
+execution, and performance aggregation all live in ``services/driver_svc`` /
+``services/options_svc``; the page reads cached views and enqueues commands.
 
-**Autonomous monitor (top, autonomy level B).** Reads ``cache:driver:autonomous``
+**Autonomous monitor (autonomy level B).** Reads ``cache:driver:autonomous``
 (``AutonomousState`` — day P&L vs the $500 target, open driver positions, and the
 newest-first per-checkpoint decision log) and ``cache:driver:control``
 (``DriverControl`` — the enabled/halted master switch). It is a MONITOR + OVERRIDE:
@@ -15,20 +14,17 @@ newest-first per-checkpoint decision log) and ``cache:driver:control``
   so no further checkpoints run until the next-day re-arm.
 * **Run now** → ``{"type":"cycle"}`` — fire one decision checkpoint immediately.
 
-**Legacy approval queue + performance (below the separator).** Still available
-(it's gated off whenever autonomy is enabled):
-* **Run morning agent** → ``{"type":"run"}`` — grade today + propose trades
-  (the 09:28-ET scheduler fires the same command unattended).
-* **APPROVE** → ``{"type":"approve"}`` (confirm-gated, outward-facing) /
-  **SKIP** → ``{"type":"skip"}`` / **Refresh performance** → ``{"type":"perf"}``.
+**Performance.** The driver's realized track record from its isolated paper account
+(``cache:options:driver_paper_account['closed_positions']`` — closed credit spreads
+with real realized P&L, updated every 5-min manage cycle); **Refresh** forces an
+immediate reprice/republish via ``{"type":"driver_paper_manage"}`` on ``cmd:options``.
 
 A version-poll on ``driver:autonomous`` / ``driver:control`` /
-``driver:approvals`` / ``driver:performance`` repaints from the cache; state
-persists across navigation (single-user). The pure display builders
-(``target_progress``/``control_state_label``/``decision_log_rows``/
-``position_rows`` for the monitor; ``grade_color``/``status_text``/
-``condition_rows``/``proposed_trade_lines``/``perf_*`` for the legacy queue) are
-unit-tested.
+``options:driver_paper_account`` / ``options:driver_paper_perf`` repaints from the
+cache; state persists across navigation (single-user). The pure display builders
+(``target_progress``/``control_state_label``/``decision_log_rows``/``position_rows``
+for the monitor; ``closed_summary_text``/``closed_trade_rows`` + the ``scorecard_*``
+builders for performance) are unit-tested.
 """
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -59,28 +55,6 @@ def to_central(iso_ts):
         return dt.astimezone(_CENTRAL).strftime("%Y-%m-%d %H:%M:%S") + " CT"
     except Exception:  # noqa: BLE001 — an unparseable ts displays as-is, never breaks.
         return str(iso_ts)
-
-
-# Grade chip colors (mirror the legacy approval_server trade sheet).
-GRADE_COLORS = {"A": "#1D9E75", "B": "#185FA5", "C": "#BA7517", "X": "#E24B4A"}
-GRADE_NEUTRAL = "#888888"
-APPROVE_COLOR = "#2e7d32"
-SKIP_COLOR = "#c62828"
-
-
-def grade_color(grade):
-    """Color a day grade A/B/C/X; unknown -> neutral grey."""
-    return GRADE_COLORS.get((grade or "").upper(), GRADE_NEUTRAL)
-
-
-def grade_bg_class(grade):
-    """Tailwind bg arbitrary-value class for a day grade (mirrors :func:`grade_color`)."""
-    return f"bg-[{grade_color(grade)}]"
-
-
-def is_pending(payload):
-    """True when a cached approval is still awaiting a decision."""
-    return bool(payload) and payload.get("status") == "pending"
 
 
 def _money(v):
@@ -133,121 +107,74 @@ def current_day_decisions(decisions, today_ct=None):
     return out
 
 
-def status_text(payload):
-    """One-line summary of the current approval state for the status label."""
-    if not payload or not payload.get("status"):
-        return "Run the morning agent to grade today and propose trades."
-    st = payload["status"]
-    n = len(payload.get("proposed_trades") or [])
-    if st == "pending":
-        return f"Grade {payload.get('grade', '?')} · {n} proposed — awaiting approval."
-    if st == "approved":
-        sent = len(payload.get("results") or [])
-        return f"Approved — {sent} order(s) sent (paper)."
-    if st == "skipped":
-        return "Skipped for today."
-    if st == "no_trade":
-        reasons = payload.get("reasons") or []
-        tail = f" — {reasons[0]}" if reasons else ""
-        return f"No trade today{tail}"
-    if st == "error":
-        return f"Pipeline error: {payload.get('error', 'unknown')}"
-    return st
+# ── driver realized-performance table (from the isolated paper account's CLOSED
+# trades) ────────────────────────────────────────────────────────────────────────
+# The driver's ACTUAL closed options credit spreads with real realized P&L, read from
+# ``cache:options:driver_paper_account['closed_positions']`` — updated every 5-min
+# manage cycle (timely), so realized results appear as positions close.
+_EXIT_REASON_LABELS = {
+    "TARGET_HIT": "Target hit", "MONEY_STOP": "Money stop", "DELTA_STOP": "Delta stop",
+    "TIME_STOP": "Time stop", "EXPIRED": "Expired", "MANUAL": "Manual close",
+}
 
 
-def _fmt(v, nd=1):
-    return "—" if v is None else f"{v:.{nd}f}"
+def _humanize_reason(r):
+    """A snake_case exit code → a reader-friendly label (keeps unknown codes readable)."""
+    if not r:
+        return "—"
+    return _EXIT_REASON_LABELS.get(str(r).upper(), str(r).replace("_", " ").title())
 
 
-def condition_rows(conditions, pnl_today, pnl_week):
-    """(label, value) pairs for the market-conditions strip."""
-    conditions = conditions or {}
-    return [
-        ("VIX", _fmt(conditions.get("vix"))),
-        ("SPX", "—" if conditions.get("spx_spot") is None
-         else f"{conditions['spx_spot']:,.2f}"),
-        ("VIX1D", _fmt(conditions.get("vix1d"))),
-        ("P&L today", _money(pnl_today)),
-        ("P&L week", _money(pnl_week)),
-    ]
+def _closed_when(ts):
+    """Compact 'YYYY-MM-DD HH:MM' from a stored ISO ts (already CT), else the date / '—'."""
+    s = str(ts or "")
+    if len(s) >= 16 and s[10:11] == "T":
+        return s[:10] + " " + s[11:16]
+    return s[:10] or "—"
 
 
-def proposed_trade_lines(trade):
-    """Human-readable lines describing one proposed trade (any bucket)."""
-    trade = trade or {}
-    bucket = trade.get("bucket", "?")
-    structure = trade.get("structure", "")
-    instrument = trade.get("instrument", "")
-    head = structure.replace("_", " ").title() if structure else instrument
-    lines = [f"Bucket {bucket} · {head}".rstrip(" ·")]
-
-    side = trade.get("side")
-    if side:
-        lines.append(f"{instrument} {side}".strip())
-
-    strikes = trade.get("strikes") or {}
-    detail = " · ".join(f"{k}: {v}" for k, v in strikes.items() if k != "structure")
-    if detail:
-        lines.append(detail)
-
-    notes = trade.get("notes")
-    if notes:
-        lines.append(notes)
-
-    bits = []
-    if trade.get("contracts") is not None:
-        bits.append(f"{trade['contracts']} contract(s)")
-    if trade.get("max_risk") is not None:
-        bits.append(f"max risk ${trade['max_risk']:.0f}")
-    if bits:
-        lines.append(" · ".join(bits))
-
-    ml = trade.get("ml_signal")
-    if ml:
-        conf = trade.get("ml_confidence")
-        lines.append(f"ML {ml}" + (f" {conf:.0f}%" if conf is not None else ""))
-    return lines
+def closed_summary_text(closed):
+    """One-line realized-performance summary from the driver account's closed trades."""
+    priced = [c for c in (closed or [])
+              if isinstance(c, dict) and isinstance(c.get("realized_pnl"), (int, float))]
+    if not priced:
+        return ("No closed trades yet — the driver's realized P&L appears here as its "
+                "positions close (target / stop / expiry).")
+    wins = [c for c in priced if c["realized_pnl"] > 0]
+    losses = [c for c in priced if c["realized_pnl"] < 0]
+    realized = round(sum(c["realized_pnl"] for c in priced), 2)
+    wr = round(100 * len(wins) / len(priced))
+    return (f"Closed: {len(priced)} · {len(wins)}W–{len(losses)}L ({wr}% win) · "
+            f"Realized: {_money(realized)}")
 
 
-def perf_summary_text(summary):
-    """One-line performance summary, or a friendly empty note."""
-    if not summary or not summary.get("total_trades"):
-        return "No trades recorded yet."
-    return (f"Trades: {summary.get('total_trades', 0)} · "
-            f"Win rate: {summary.get('win_rate', 0)}% "
-            f"({summary.get('wins', 0)}-{summary.get('losses', 0)}) · "
-            f"Realized: ${summary.get('realized_pnl', 0):.2f}")
-
-
-def perf_rows(trades):
-    """Table rows for the performance trade list (P&L pre-formatted + color)."""
+def closed_trade_rows(closed):
+    """Reader-friendly, newest-first rows for the driver's closed-trade table."""
+    items = [c for c in (closed or []) if isinstance(c, dict)]
+    items.sort(key=lambda c: str(c.get("exit_ts") or ""), reverse=True)
     rows = []
-    for t in trades or []:
-        pnl = t.get("pnl")
+    for c in items:
+        pnl = c.get("realized_pnl")
         rows.append({
-            "trade_id": t.get("trade_id", ""),
-            "date": t.get("date", ""),
-            "bucket": t.get("bucket", ""),
-            "instrument": t.get("instrument", ""),
-            "side": t.get("side", ""),
-            "status": t.get("status", ""),
-            "source": t.get("source", ""),
+            "cid": str(c.get("position_id", c.get("signal_id", ""))),
+            "closed": _closed_when(c.get("exit_ts")),
+            "symbol": c.get("symbol", ""),
+            "strategy": c.get("strategy", ""),
+            "qty": c.get("quantity", ""),
+            "reason": _humanize_reason(c.get("exit_reason")),
             "pnl": _money(pnl),
-            "_pnl_color": pnl_color(pnl),
             "_pnl_class": pnl_class(pnl),
         })
     return rows
 
 
-_PERF_COLS = [
-    {"name": "date", "label": "Date", "field": "date", "align": "left"},
-    {"name": "trade_id", "label": "Trade", "field": "trade_id", "align": "left"},
-    {"name": "bucket", "label": "Bucket", "field": "bucket"},
-    {"name": "instrument", "label": "Instrument", "field": "instrument"},
-    {"name": "side", "label": "Side", "field": "side"},
-    {"name": "status", "label": "Status", "field": "status"},
-    {"name": "source", "label": "Source", "field": "source"},
-    {"name": "pnl", "label": "P&L", "field": "pnl"},
+_CLOSED_COLS = [
+    {"name": "closed", "label": "Closed", "field": "closed", "align": "left"},
+    {"name": "symbol", "label": "Symbol", "field": "symbol", "align": "left"},
+    {"name": "strategy", "label": "Strategy", "field": "strategy"},
+    {"name": "qty", "label": "Qty", "field": "qty"},
+    {"name": "reason", "label": "Exit reason", "field": "reason", "align": "left"},
+    {"name": "pnl", "label": "Realized P&L", "field": "pnl"},
 ]
 
 
@@ -603,7 +530,7 @@ _PNL_CELL_SLOT = r'''
 
 
 def render():
-    """Driver page: autonomous monitor + STOP, then legacy approval queue + perf."""
+    """Driver page: autonomous monitor + STOP + realized performance."""
     ui.add_css(DRIVER_CSS)
     ui.label("Claude Driver").classes("text-h5")
     ui.label("Autonomous PAPER options trader (Claude decides, code-enforced "
@@ -611,50 +538,30 @@ def render():
              "Paper only — nothing is sent to Schwab.").classes("text-xs opacity-60")
 
     state = {
-        "appr": None, "appr_ver": None, "perf": None, "perf_ver": None,
         "auto": None, "auto_ver": None, "ctrl": None, "ctrl_ver": None,
         "paper": None, "paper_ver": None,
         "dperf": None, "dperf_ver": None,        # driver-account performance scorecard
         "pending_enabled": None, "pending_ticks": 0,
     }
 
-    # ── Autonomous monitor + override (Phase 7) ───────────────────────────────
+    # ── Autonomous monitor + override ─────────────────────────────────────────
     monitor = ui.column().classes("w-full gap-3")
+    # Busy-message line for the monitor's autonomous actions (enable/disable/stop/
+    # cycle) + the performance Refresh below.
+    status = ui.label("").classes("opacity-70 text-sm")
 
     ui.separator()
     with ui.row().classes("items-center gap-3 flex-wrap"):
-        ui.label("Legacy approval queue").classes("text-h6")
-        ui.label("Active only when autonomy is disabled; the morning agent "
-                 "still grades/proposes.").classes("text-xs opacity-50")
-
-    with ui.row().classes("items-center gap-3 flex-wrap"):
-        run_btn = ui.button("Run morning agent", icon="play_arrow", color=None) \
-            .props("no-caps").classes(BTN_3D)
-        perf_btn = ui.button("Refresh performance", icon="refresh", color=None) \
-            .props("no-caps").classes(BTN_3D)
-        status = ui.label("").classes("opacity-70 text-sm")
-
-    approval = ui.column().classes("w-full gap-3")
-    ui.separator()
-    ui.label("Performance").classes("text-h6")
-    ui.label("Morning-agent / order-executor ledger (trade_log.json) — a separate "
-             "record from the live paper-account P&L shown in the monitor above.") \
+        ui.label("Performance").classes("text-h6")
+        perf_btn = ui.button("Refresh", icon="refresh", color=None) \
+            .props("no-caps dense").classes(BTN_3D)
+    ui.label("The driver's closed trades and realized P&L from its isolated paper "
+             "account — updates every 5-min manage cycle as positions close.") \
         .classes("text-xs opacity-50")
     perf_summary = ui.label("").classes("text-sm opacity-80")
-    perf_table = ui.table(columns=_PERF_COLS, rows=[], row_key="trade_id") \
+    perf_table = ui.table(columns=_CLOSED_COLS, rows=[], row_key="cid") \
         .classes("w-full driver-table").props("dense")
     perf_table.add_slot("body-cell-pnl", _PNL_CELL_SLOT)
-
-    # ── confirm dialog for APPROVE (outward-facing action) ────────────────────
-    with ui.dialog() as confirm_dialog, ui.card():
-        ui.label("Approve and send the proposed orders?").classes("text-subtitle1")
-        ui.label("Submitted via order_executor — PAPER_TRADE=True simulates the "
-                 "orders (nothing is sent to Schwab).").classes("text-xs opacity-70")
-        with ui.row().classes("justify-end gap-2 w-full"):
-            ui.button("Cancel", on_click=confirm_dialog.close).props("flat")
-            ui.button("Approve", color=None,
-                      on_click=lambda: (_do("approve", "Approving…"),
-                                        confirm_dialog.close())).props("no-caps").classes(BTN_3D)
 
     # ── confirm dialog for STOP (latch the kill-switch) ───────────────────────
     with ui.dialog() as stop_dialog, ui.card():
@@ -667,24 +574,6 @@ def render():
             ui.button("STOP", color=None,
                       on_click=lambda: (_do("stop", "Stopping…"),
                                         stop_dialog.close())).props("no-caps").classes(BTN_3D_DANGER)
-
-    # ── card builders ─────────────────────────────────────────────────────────
-    def _conditions_strip(appr):
-        with ui.row().classes("items-center gap-4 flex-wrap"):
-            for label, value in condition_rows(appr.get("conditions"),
-                                               appr.get("pnl_today"),
-                                               appr.get("pnl_week")):
-                with ui.row().classes("items-baseline gap-1"):
-                    ui.label(label).classes("text-xs opacity-60")
-                    ui.label(value).classes("text-sm text-weight-medium")
-
-    def _trade_card(trade):
-        lines = proposed_trade_lines(trade)
-        with ui.card().classes("w-full"):
-            if lines:
-                ui.label(lines[0]).classes("text-subtitle2 text-weight-bold")
-                for ln in lines[1:]:
-                    ui.label(ln).classes("text-sm opacity-80")
 
     # ── autonomous monitor render (rebuilt in place from cache:driver:*) ───────
     def _render_monitor():
@@ -868,66 +757,13 @@ def render():
                                       row_key="strategy").classes("w-full driver-table").props("dense")
                         st.add_slot("body-cell-pnl", _PNL_CELL_SLOT)
 
-    def _render_approval():
-        approval.clear()
-        appr = state["appr"]
-        with approval:
-            if not appr or not appr.get("status"):
-                ui.label("No approval yet — click “Run morning agent”.") \
-                    .classes("opacity-70")
-                return
-            with ui.card().classes("w-full"):
-                with ui.row().classes("items-center gap-3 flex-wrap"):
-                    g = appr.get("grade") or "?"
-                    ui.label(g).classes("text-weight-bold text-white px-3 py-1 rounded "
-                                        + grade_bg_class(g))
-                    if appr.get("date"):
-                        ui.label(appr["date"]).classes("opacity-70")
-                    ui.label(status_text(appr)).classes("text-sm opacity-80")
-                _conditions_strip(appr)
-                for r in appr.get("grade_reasons") or []:
-                    ui.label(f"• {r}").classes("text-xs opacity-70")
-
-            trades = appr.get("proposed_trades") or []
-            if trades:
-                ui.label(f"Proposed trades ({len(trades)})") \
-                    .classes("text-subtitle2 opacity-70")
-                for t in trades:
-                    _trade_card(t)
-
-            if is_pending(appr):
-                with ui.row().classes("gap-3"):
-                    ui.button("APPROVE", icon="check", color=None,
-                              on_click=confirm_dialog.open).props("no-caps").classes(BTN_3D)
-                    ui.button("SKIP", icon="close", color=None,
-                              on_click=lambda: _do("skip", "Skipping…")).props("no-caps").classes(BTN_3D_DANGER)
-            elif appr.get("status") == "approved":
-                results = appr.get("results") or []
-                ok = sum(1 for r in results if r.get("success"))
-                with ui.row().classes("items-center gap-2 bg-green-2 text-green-10 "
-                                      "rounded p-3"):
-                    ui.icon("check_circle")
-                    ui.label(f"Approved — {ok}/{len(results)} order(s) succeeded "
-                             "(paper).")
-            elif appr.get("status") == "skipped":
-                with ui.row().classes("items-center gap-2 opacity-70 rounded p-3"):
-                    ui.icon("block")
-                    ui.label("Skipped for today.")
-            elif appr.get("status") == "no_trade":
-                with ui.row().classes("items-center gap-2 bg-amber-2 text-amber-10 "
-                                      "rounded p-3"):
-                    ui.icon("info")
-                    ui.label("; ".join(appr.get("reasons") or ["No trade today."]))
-            elif appr.get("status") == "error":
-                with ui.row().classes("items-center gap-2 bg-red-2 text-red-10 "
-                                      "rounded p-3"):
-                    ui.icon("warning")
-                    ui.label(f"Pipeline error: {appr.get('error', 'unknown')}")
-
     def _render_perf():
-        perf = state["perf"] or {}
-        perf_summary.text = perf_summary_text(perf.get("summary"))
-        perf_table.rows = perf_rows(perf.get("trades"))
+        # The driver's realized track record = the isolated paper account's CLOSED
+        # trades (cache:options:driver_paper_account['closed_positions']), NOT the dead
+        # legacy trade_log ledger. Rides the same 2s version-poll as the monitor.
+        closed = (state["paper"] or {}).get("closed_positions") or []
+        perf_summary.text = closed_summary_text(closed)
+        perf_table.rows = closed_trade_rows(closed)
         perf_table.update()
 
     # ── command enqueue ───────────────────────────────────────────────────────
@@ -949,8 +785,14 @@ def render():
         else:
             _do("disable", "Disabling autonomous driver…")
 
-    run_btn.on_click(lambda: _do("run", "Running morning agent…"))
-    perf_btn.on_click(lambda: _do("perf", "Refreshing performance…"))
+    @guard
+    def _refresh_perf():
+        # Force an immediate driver-account reprice + republish (options_svc) so the
+        # closed-trade table refreshes now, not at the next 5-min manage tick.
+        bus_client.request("options", {"type": "driver_paper_manage"})
+        status.text = "Refreshing performance…"
+
+    perf_btn.on_click(_refresh_perf)
 
     # ── version-poll repaint (fetch-free) ─────────────────────────────────────
     @guard
@@ -975,17 +817,7 @@ def render():
             state["paper"] = bus_client.read("options:driver_paper_account") or None
             state["dperf"] = bus_client.read("options:driver_paper_perf") or None
             _render_monitor()
-        av = bus_client.read_version("driver:approvals")
-        if av != state["appr_ver"]:
-            state["appr_ver"] = av
-            state["appr"] = bus_client.read("driver:approvals") or None
-            _render_approval()
-            status.text = status_text(state["appr"])
-        pv = bus_client.read_version("driver:performance")
-        if pv != state["perf_ver"]:
-            state["perf_ver"] = pv
-            state["perf"] = bus_client.read("driver:performance") or None
-            _render_perf()
+            _render_perf()          # the closed-trade table lives in the driver account
         # Optimistic-toggle timeout: if the control state never catches up to the
         # user's pending toggle (command never consumed — e.g. driver_svc down),
         # give up after a few ticks: revert the switch to reality and warn. This is
@@ -1008,12 +840,6 @@ def render():
     state["paper"] = bus_client.read("options:driver_paper_account") or None
     state["dperf_ver"] = bus_client.read_version("options:driver_paper_perf")
     state["dperf"] = bus_client.read("options:driver_paper_perf") or None
-    state["appr_ver"] = bus_client.read_version("driver:approvals")
-    state["appr"] = bus_client.read("driver:approvals") or None
-    state["perf_ver"] = bus_client.read_version("driver:performance")
-    state["perf"] = bus_client.read("driver:performance") or None
     _render_monitor()
-    _render_approval()
     _render_perf()
-    status.text = status_text(state["appr"])
     ui.timer(2.0, _poll)

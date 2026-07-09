@@ -139,6 +139,18 @@ def _serve_analyze(slot: str = None):
     return HTMLResponse(analyze_html(bus_client.read(analyze_view_for(slot))))
 
 
+@app.get("/options/gamma-history")
+def _serve_gamma_history():
+    """Serve the latest on-demand regenerated Gamma briefing HISTORY report.
+
+    The Gamma page's history picker enqueues a ``gamma_history`` command (date +
+    optional slot); options_svc rebuilds the HTML from the stored structured
+    analysis and caches it here. Raw HTMLResponse so the doc's own <style> applies.
+    """
+    import bus_client
+    return HTMLResponse(analyze_html(bus_client.read("options:gamma_history")))
+
+
 @app.get("/eod/file")
 def _serve_eod_file(date: str, which: str = "summary"):
     """Serve an archived EOD report file (summary.html / detail.html) raw, so its
@@ -201,6 +213,7 @@ SENTIMENT_CHILDREN = [
 
 # Flat top-level items (non-Options apps). (route, label, icon)
 FLAT_NAV = [
+    ("/market", "Market Dashboard", "dashboard"),
     ("/trade", "Trade", "analytics"),
     ("/portfolio", "Portfolio", "account_balance"),
     ("/driver", "Driver", "smart_toy"),
@@ -243,6 +256,7 @@ _TAB_COLOR = {
     "/options/rescue": "#ef5350",         # Rescue — red
     "/sentiment": "#5c6bc0",              # Sentiment — indigo
     "/sentiment/rotation": "#8d6e63",     # Sector Rotation — brown
+    "/market": "#00bfa5",                # Market Dashboard — teal-green
     "/trade": "#26c6da",                 # Trade — cyan
     "/portfolio": "#9ccc65",             # Portfolio — light green
     "/driver": "#ff7043",                # Driver — deep orange
@@ -276,7 +290,7 @@ _NAV_OPEN: dict[str, bool] = {}
 _NAV_BADGES: dict[str, int] = {}
 _ALERT_STATE: dict = {
     "acked_scan": set(), "alerted": set(), "alerted_init": None,
-    "captured_seen": None, "driver_seen": None, "rescue_seen": None,
+    "captured_seen": None, "rescue_seen": None,
     # Health/staleness (R4b/R8): the set of currently stale/down component keys
     # already alerted, so we chime only on transition INTO bad (fire-on-transition,
     # clear-on-heal). Seeded on the first tick so a service that's already stale/down
@@ -435,8 +449,6 @@ def _acknowledge(active: str) -> None:
         _ALERT_STATE["acked_scan"] = alerts.scanner_keys(scan)
     elif active == "/options/captured":
         _ALERT_STATE["captured_seen"] = bus_client.read_version("options:captured")
-    elif active == "/driver":
-        _ALERT_STATE["driver_seen"] = bus_client.read_version("driver:approvals")
     elif active == "/options/rescue":
         # Acknowledge the current rescue-summary version so the badge clears on
         # open and only re-appears when the manage cycle publishes a new summary.
@@ -457,10 +469,6 @@ def _recompute_badges(scan=None) -> None:
     cap_ver = bus_client.read_version("options:captured")  # cheap :ver probe
     _NAV_BADGES["/options/captured"] = 1 if (
         cap_ver is not None and cap_ver != _ALERT_STATE["captured_seen"]) else 0
-    drv, drv_ver = bus_client.read_full("driver:approvals")  # payload+version, one read
-    drv = drv or {}
-    _NAV_BADGES["/driver"] = 1 if (
-        drv.get("status") == "pending" and drv_ver != _ALERT_STATE["driver_seen"]) else 0
     # Rescue: count of at-risk paper positions (tested + critical) from the small
     # rescue_summary view. Cleared on open (version acknowledged), so the count
     # only re-appears when the manage cycle republishes a changed summary.
@@ -705,7 +713,13 @@ def _layout(active: str, title: str):
 
     ui.timer(2.0, _tick)
 
-    with ui.column().classes("w-full p-4 gap-3") as content:
+    # Fixed bottom market-summary marquee on every page (gated by the Settings
+    # toggle). ui.footer() is fixed-position, so its DOM order doesn't matter.
+    from pages import ticker
+    ticker.render_ticker(active)
+
+    # pb-10 keeps the fixed footer marquee from covering the last content row.
+    with ui.column().classes("w-full p-4 gap-3 pb-10") as content:
         health = cached_health()  # memoized — no blocking HTTP on every navigation
         if not health.get("up"):
             with ui.row().classes(
@@ -836,6 +850,13 @@ def eod_detail_page() -> None:
     with _layout("/eod", "EOD Report — Detail"):
         from pages import eod
         eod.render_detail()
+
+
+@ui.page("/market")
+def market_page() -> None:
+    with _layout("/market", "Market Dashboard"):
+        from pages import market
+        market.render()
 
 
 @ui.page("/status")

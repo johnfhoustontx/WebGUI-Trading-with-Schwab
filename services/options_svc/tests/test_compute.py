@@ -1519,6 +1519,27 @@ def test_analyze_infographic_html_handles_missing_fields():
     assert "QQQ" in html and "—" in html and "<svg" in html
 
 
+def test_analyze_history_doc_combines_stored_briefings():
+    rows = [
+        {"date": "2026-07-02", "slot": "open",
+         "generated_at": "2026-07-02T08:48:00-05:00", "analysis": _SAMPLE_ANALYSIS},
+        {"date": "2026-07-02", "slot": "midday",
+         "generated_at": "2026-07-02T11:30:00-05:00",
+         "analysis": {**_SAMPLE_ANALYSIS, "headline": "Midday read"}},
+    ]
+    html = compute.analyze_history_doc(rows, title="My Report")
+    assert html.lstrip().startswith("<!DOCTYPE html>")
+    assert "My Report" in html and "2 briefing(s)" in html
+    assert "open" in html and "midday" in html                 # per-briefing section headers
+    assert "Short gamma below spot" in html                    # regime re-rendered from data
+    assert html.count("ga-sec") >= 2                           # one section per briefing
+
+
+def test_analyze_history_doc_skips_rows_without_analysis():
+    html = compute.analyze_history_doc([{"date": "x", "slot": "y", "analysis": None}])
+    assert "0 briefing(s)" in html and "No briefings found" in html
+
+
 def test_gamma_analyze_no_key_returns_config_message(monkeypatch):
     _patch_analyze_bundle(monkeypatch)
     monkeypatch.setattr(compute, "_make_analyze_client", lambda: None)

@@ -137,6 +137,18 @@ def test_system_prompt_states_the_mandate():
     assert "submit_decision" in decider.system_prompt()  # call the tool (exact name)
 
 
+def test_system_prompt_has_market_read_guidance():
+    """The mandate tells the model HOW to weigh the market_read — and does so framed to
+    sharpen selection, NOT to add caution (the aggressive $500/day mandate stands)."""
+    sp = decider.system_prompt()
+    low = sp.lower()
+    assert "market_read" in sp                            # names the packet field
+    assert "put wall" in low and "call wall" in low       # actionable strike guidance
+    assert "gamma flip" in low                            # the negative-gamma cue
+    # framed as "be selective, NOT stand down" — keeps pressing when favorable
+    assert "not to stand down" in low or "not a mandate to trade less" in low
+
+
 # ---------------------------------------------------------------------------
 # Task 3.3 — decide (the Anthropic call, client injected/mocked)
 # ---------------------------------------------------------------------------

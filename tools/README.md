@@ -16,7 +16,6 @@ Hybrid validator. Exit code `0` only if every *required* app is healthy.
 | schwab-proxy | HTTP `GET {PROXY_URL}/health` (reports token state) | yes |
 | options-scanner | process scan for `dashboard.py` | yes |
 | sentiment-dashboard | process scan + market-aware bridge freshness | yes |
-| claude-driver | HTTP `GET :{APPROVAL_PORT}/status` | yes |
 | trade-analyzer | process scan for `trade_analyzer.py` | no (on-demand) |
 
 States: `UP` / `IDLE` / `DOWN` / `STALE` / `NO TOKEN`. `IDLE` and `UP` are

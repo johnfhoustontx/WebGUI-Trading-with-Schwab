@@ -37,19 +37,23 @@ def _resolve_model() -> str:
 
 
 DAILY_TARGET = 500.0          # bank-the-day threshold ($ net day P&L)
-# Per-trade dollar risk cap. Raised 300 -> 1500 so the driver can fund liquid
-# index/large-cap spreads whose per-CONTRACT max loss is large: $SPX credit spreads
-# run ~$700-$1,150/contract and MU ~$400 — a $300 cap sized them to 0 (RISK_TOO_HIGH),
-# so they never opened. Must stay in sync with options_svc
-# compute._DRIVER_MAX_RISK_PER_TRADE (the paper sizer's cap on the open path); the
-# widest $SPX (~$1,833/contract) is still excluded by design — raise both to ~2000 to
-# include it.
-PER_TRADE_MAX_RISK = 1500.0   # max $ loss per single spread position
-DAILY_RISK_BUDGET = 4500.0    # cap on Σ open driver max-loss (3x the per-trade cap)
-MAX_CONCURRENT = 6            # max open driver positions
-MAX_TRADES_PER_CYCLE = 3      # max new trades per checkpoint
-VIX_MAX = 25.0               # no new entries above this (mirrors config.VIX_MAX_TRADE)
-MENU_TOP_N = 12              # how many top-scored signals Claude sees
+# ── AGGRESSIVE risk envelope ("Very Aggressive" profile, 2026-07-02, user choice) ──
+# Tuned to PRESS toward the $500/day target and tolerate real drawdown. Per-trade cap
+# funds the widest liquid $SPX (~$1,833/contract) with room to size up on smaller names;
+# must stay in sync with options_svc compute._DRIVER_MAX_RISK_PER_TRADE (the paper
+# sizer's cap on the open path). All values are for the $25k paper book.
+PER_TRADE_MAX_RISK = 3000.0   # max $ loss per single spread position (~12% of the book)
+DAILY_RISK_BUDGET = 12000.0   # cap on Σ open driver max-loss (~half the book deployable)
+MAX_CONCURRENT = 10           # max open driver positions
+MAX_TRADES_PER_CYCLE = 5      # max new trades per 30-min checkpoint
+VIX_MAX = 35.0               # no new entries above this VIX (spreads collect more premium in vol)
+# Daily-loss HALT: stop opening NEW trades once the day is down this much (management +
+# exits are unaffected). Raised from the legacy $250 — which halted after a single losing
+# $SPX — to 3x the $500 target so the driver absorbs losers and keeps pressing. This is
+# now the driver's OWN knob: compute._daily_max_loss() reads it here (legacy
+# config.RISK_LIMITS is only a fallback).
+DAILY_LOSS_HALT = 1500.0     # $ daily loss that halts new entries
+MENU_TOP_N = 15             # how many top-scored signals Claude sees
 # Decision model (committed build default: Opus 4.8). Override per-deployment via the
 # DRIVER_MODEL env var OR a gitignored shared/driver_model.txt file (see
 # _resolve_model) — e.g. put "claude-sonnet-5" in shared/driver_model.txt to run cheaper.
@@ -67,4 +71,5 @@ def limits() -> dict:
         "max_concurrent": MAX_CONCURRENT,
         "max_trades_per_cycle": MAX_TRADES_PER_CYCLE,
         "vix_max": VIX_MAX,
+        "daily_loss_halt": DAILY_LOSS_HALT,   # informs the model's loss budget in the packet
     }

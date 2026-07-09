@@ -1,7 +1,6 @@
 """Tests for the autonomous decision cycle in ``driver_svc.compute`` (Phase 4).
 
-Three additive functions (the existing ``run_morning``/``execute``/
-``build_perf_report`` are untouched):
+Three functions:
 
 * ``build_packet`` — projects the scanner menu (allowed-only, top-N by composite
   score, stable ids ``m0..``) + day P&L + gap-to-target into the model-facing
@@ -10,8 +9,8 @@ Three additive functions (the existing ``run_morning``/``execute``/
 * ``run_cycle`` — ``build_packet → decider.decide → guardrails.apply_guardrails``;
   defensive (any exception → a stand-down result). Tests monkeypatch
   ``services.driver_svc.decider.decide`` so no model/network is hit.
-* ``fetch_market_context`` — VIX/SPX via ``morning_agent.fetch_market_conditions``,
-  defensive → ``{}``.
+* ``fetch_market_context`` — self-contained VIX/SPX/VIX1D fetch straight from the
+  proxy (``$VIX,$SPX,$VIX1D`` via ``requests``); defensive → ``{}`` on any failure.
 
 REAL field-name notes (verified against the engines, NOT the plan's guesses):
 * the scanner signal's structure code lives in ``type`` (``"PCS"``/``"CCS"``/
@@ -307,23 +306,250 @@ def test_run_cycle_uses_config_daily_max_loss(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Task 4.3 — fetch_market_context
+# Task 4.3 — fetch_market_context (self-contained: fetches $VIX,$SPX,$VIX1D
+# straight from the proxy; morning_agent is no longer imported)
 # ---------------------------------------------------------------------------
-def test_fetch_market_context_defensive(monkeypatch):
-    monkeypatch.setattr(compute.morning_agent, "fetch_market_conditions",
-                        lambda: {"vix": 13.5, "spx_spot": 5500, "vix1d": 12})
+class _Resp:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self._payload
+
+
+def test_fetch_market_context_parses_index_quotes(monkeypatch):
+    """Index quotes nest their values under a 'quote' sub-key — _index_price
+    handles both the nested (index) and flat (ETF) shapes."""
+    payload = {
+        "$VIX": {"assetMainType": "INDEX", "quote": {"lastPrice": 13.5}},
+        "$SPX": {"assetMainType": "INDEX", "quote": {"lastPrice": 5500.0}},
+        "$VIX1D": {"quote": {"lastPrice": 12.0}},
+    }
+    monkeypatch.setattr(compute.requests, "get", lambda *a, **k: _Resp(payload))
     ctx = compute.fetch_market_context()
     assert ctx["vix"] == 13.5
-    assert ctx["spx_spot"] == 5500
+    assert ctx["spx_spot"] == 5500.0
+    assert ctx["vix1d"] == 12.0
+
+
+def test_fetch_market_context_missing_symbol_is_none(monkeypatch):
+    """A symbol absent from the response degrades to None (never a crash)."""
+    monkeypatch.setattr(compute.requests, "get",
+                        lambda *a, **k: _Resp({"$VIX": {"quote": {"lastPrice": 20.0}}}))
+    ctx = compute.fetch_market_context()
+    assert ctx["vix"] == 20.0
+    assert ctx["spx_spot"] is None and ctx["vix1d"] is None
 
 
 def test_fetch_market_context_never_raises(monkeypatch):
-    monkeypatch.setattr(compute.morning_agent, "fetch_market_conditions",
-                        lambda: (_ for _ in ()).throw(RuntimeError()))
+    """A proxy failure (requests.get raises) degrades to {} — never raises."""
+    def _boom(*a, **k):
+        raise RuntimeError("proxy down")
+
+    monkeypatch.setattr(compute.requests, "get", _boom)
     assert compute.fetch_market_context() == {}
 
 
-def test_fetch_market_context_none_result_is_empty(monkeypatch):
-    """A ``None`` from the fetcher degrades to {} (not a crash on dict(None))."""
-    monkeypatch.setattr(compute.morning_agent, "fetch_market_conditions", lambda: None)
+def test_fetch_market_context_non_200_is_empty(monkeypatch):
+    """A non-200 (raise_for_status raises) degrades to {} rather than crashing."""
+    class _Err(_Resp):
+        def raise_for_status(self):
+            raise RuntimeError("500 Server Error")
+
+    monkeypatch.setattr(compute.requests, "get", lambda *a, **k: _Err({}))
     assert compute.fetch_market_context() == {}
+
+
+def test_fetch_market_context_includes_etf_spots(monkeypatch):
+    """SPY/QQQ are ETFs (flat quote shape) — their spot rides along for the market read."""
+    payload = {
+        "$VIX": {"quote": {"lastPrice": 13.5}},
+        "$SPX": {"quote": {"lastPrice": 5500.0}},
+        "$VIX1D": {"quote": {"lastPrice": 12.0}},
+        "SPY": {"assetMainType": "EQUITY", "lastPrice": 598.2},   # flat (ETF) shape
+        "QQQ": {"assetMainType": "EQUITY", "lastPrice": 521.4},
+    }
+    monkeypatch.setattr(compute.requests, "get", lambda *a, **k: _Resp(payload))
+    ctx = compute.fetch_market_context()
+    assert ctx["spy_spot"] == 598.2 and ctx["qqq_spot"] == 521.4
+    assert ctx["vix"] == 13.5 and ctx["spx_spot"] == 5500.0    # unchanged
+
+
+def test_fetch_market_context_missing_etf_spot_is_none(monkeypatch):
+    """A symbol absent from the response degrades to None (never a crash)."""
+    monkeypatch.setattr(compute.requests, "get",
+                        lambda *a, **k: _Resp({"$VIX": {"quote": {"lastPrice": 20.0}}}))
+    ctx = compute.fetch_market_context()
+    assert ctx["spy_spot"] is None and ctx["qqq_spot"] is None
+
+
+# ---------------------------------------------------------------------------
+# market-read: _dashboard_risk_read (breadth spread + risk-on/off aggregate)
+# ---------------------------------------------------------------------------
+def test_dashboard_risk_read_breadth_and_risk():
+    dash = {"categories": [
+        {"category": "Breadth", "tiles": [
+            {"display": "$ADVN-$DECN", "last": -465.0, "color_state": "risk_off_mild"},
+            {"display": "VIX", "color_state": "risk_off_strong"}]},
+        {"category": "Index", "tiles": [
+            {"display": "SPX", "color_state": "risk_off_mild"}]}]}
+    out = compute._dashboard_risk_read(dash)
+    assert out["breadth_spread"] == -465.0
+    assert out["risk"] == "risk_off"        # net color_state tilt is negative
+
+
+def test_dashboard_risk_read_risk_on_and_missing_breadth():
+    dash = {"categories": [{"category": "X", "tiles": [
+        {"display": "SPY", "color_state": "risk_on_strong"},
+        {"display": "XLK", "color_state": "risk_on_mild"}]}]}
+    out = compute._dashboard_risk_read(dash)
+    assert out["risk"] == "risk_on" and "breadth_spread" not in out
+
+
+def test_dashboard_risk_read_empty_is_empty():
+    for d in ({}, None, {"categories": []}, {"categories": [{"tiles": []}]}, "junk"):
+        assert compute._dashboard_risk_read(d) == {}
+
+
+# ---------------------------------------------------------------------------
+# market-read: _pick_latest_briefing (freshest TODAY gamma briefing)
+# ---------------------------------------------------------------------------
+import datetime as _dt   # noqa: E402
+
+
+def _brief(slot, gen, bias=-20):
+    return {"slot": slot, "generated_at": gen,
+            "analysis": {"bias": bias, "regime": "neg gamma",
+                         "indices": [{"symbol": "$SPX", "gamma_flip": 6005}]}}
+
+
+def test_pick_latest_briefing_newest_today():
+    today = _dt.date(2026, 7, 8)
+    payloads = [_brief("open", "2026-07-08T08:48:00-05:00", bias=-10),
+                _brief("midday", "2026-07-08T11:30:00-05:00", bias=-35)]
+    out = compute._pick_latest_briefing(payloads, today)
+    assert out["bias"] == -35 and out["_slot"] == "midday"      # newest wins
+    assert out["_generated_at"].startswith("2026-07-08T11:30")
+
+
+def test_pick_latest_briefing_drops_prior_day():
+    today = _dt.date(2026, 7, 8)
+    out = compute._pick_latest_briefing(
+        [_brief("close", "2026-07-07T14:58:00-05:00")], today)   # yesterday only
+    assert out is None                                           # stale gamma dropped
+
+
+def test_pick_latest_briefing_skips_no_analysis_and_junk():
+    today = _dt.date(2026, 7, 8)
+    payloads = [None, "junk", {"slot": "open", "generated_at": "2026-07-08T08:48:00-05:00",
+                               "analysis": None},               # degraded page → skip
+                _brief("midday", "2026-07-08T11:30:00-05:00")]
+    out = compute._pick_latest_briefing(payloads, today)
+    assert out and out["_slot"] == "midday"
+
+
+def test_pick_latest_briefing_empty_is_none():
+    assert compute._pick_latest_briefing([], _dt.date(2026, 7, 8)) is None
+
+
+# ---------------------------------------------------------------------------
+# market-read: _market_read assembly + build_packet wiring
+# ---------------------------------------------------------------------------
+def _market_ctx():
+    return {
+        "vix": 15.0, "spx_spot": 5980.0, "spy_spot": 598.0, "qqq_spot": 521.0,
+        "briefing": {"_slot": "midday", "_generated_at": "2026-07-08T12:30:00-05:00",
+            "regime": "negative gamma below flip", "bias": -35, "bias_label": "bearish",
+            "headline": "Dealers short gamma.", "indices": [
+                {"symbol": "$SPX", "spot": 5975, "gamma_flip": 6005, "put_wall": 5900,
+                 "call_wall": 6050, "max_pain": 5975, "expected_move": 46, "pc_ratio": 1.3,
+                 "what_if": {"rally": "r", "selloff": "s", "chop": "c"}},
+                {"symbol": "SPY", "gamma_flip": 600, "put_wall": 590, "call_wall": 605},
+                {"symbol": "QQQ", "gamma_flip": 523, "put_wall": 515, "call_wall": 528}]},
+        "dashboard": {"categories": [{"category": "B", "tiles": [
+            {"display": "$ADVN-$DECN", "last": -620.0, "color_state": "risk_off_mild"},
+            {"display": "VIX", "color_state": "risk_off_strong"}]}]},
+        "sentiment": {"score": 4.1, "bias": "bearish"}}
+
+
+def test_market_read_full_assembly():
+    mr = compute._market_read(_market_ctx())
+    assert mr["regime"] == "negative gamma below flip" and mr["bias"] == -35
+    assert mr["breadth_spread"] == -620.0 and mr["risk"] == "risk_off"
+    assert mr["sentiment_score"] == 4.1 and mr["sentiment_bias"] == "bearish"
+    spx = next(i for i in mr["indices"] if i["symbol"] == "$SPX")
+    assert spx["spot"] == 5980.0                       # LIVE spot overrides briefing 5975
+    assert spx["flip"] == 6005 and spx["put_wall"] == 5900
+    assert spx["posture"] == "below flip (negative gamma)"
+    assert "midday" in mr["as_of"] and "12:30" in mr["as_of"]
+    assert mr["summary"]                               # one-line summary present
+
+
+def test_market_read_posture_above_flip_uses_briefing_spot_when_no_live():
+    ctx = {"briefing": {"indices": [
+        {"symbol": "$SPX", "spot": 6100, "gamma_flip": 6005}]}}   # no live spx_spot
+    mr = compute._market_read(ctx)
+    spx = mr["indices"][0]
+    assert spx["spot"] == 6100                          # falls back to briefing spot
+    assert spx["posture"] == "above flip (positive gamma)"
+
+
+def test_market_read_degrades_partial():
+    # No briefing → no gamma lines, but breadth + sentiment still present.
+    mr = compute._market_read({"dashboard": _market_ctx()["dashboard"],
+                               "sentiment": {"score": 6.0, "bias": "bullish"}})
+    assert "indices" not in mr and "regime" not in mr
+    assert mr["breadth_spread"] == -620.0 and mr["sentiment_score"] == 6.0
+
+
+def test_market_read_all_absent_is_empty():
+    for m in ({}, None, {"vix": 15.0}, {"briefing": None, "dashboard": None}):
+        assert compute._market_read(m) == {}
+
+
+def test_build_packet_includes_market_read():
+    pkt = compute.build_packet({}, {"snapshot": {}}, target=500.0, limits=_lim(),
+                               market=_market_ctx())
+    assert "market_read" in pkt
+    blob = json.dumps(pkt, default=str)
+    assert "put_wall" in blob and "negative gamma below flip" in blob
+
+
+def test_build_packet_market_read_absent_backcompat():
+    """No market-read sources → NO market_read key (byte-identical to today)."""
+    pkt = compute.build_packet({}, {"snapshot": {}}, target=500.0, limits=_lim(),
+                               market={"vix": 14.0})
+    assert "market_read" not in pkt
+
+
+def test_market_read_is_context_only_not_a_filter():
+    scan = {"signals_0dte": [{"symbol": "QQQ", "type": "PCS", "max_loss": 200.0,
+                              "composite_score": 60, "expiration": "2026-06-24"}],
+            "signals_swing": []}
+    base = compute.build_packet(scan, {"snapshot": {}}, target=500.0, limits=_lim(), market={})
+    withmr = compute.build_packet(scan, {"snapshot": {}}, target=500.0, limits=_lim(),
+                                  market=_market_ctx())
+    assert withmr["menu"] == base["menu"] and withmr["menu_by_id"] == base["menu_by_id"]
+
+
+def test_run_cycle_returns_market_read(monkeypatch):
+    """run_cycle threads the packet's market_read out so the handler can surface a
+    summary on the decision log (observability)."""
+    monkeypatch.setattr("services.driver_svc.decider.decide",
+                        lambda packet, **kw: {"stand_down": True, "trades": []})
+    out = compute.run_cycle({}, {"snapshot": {}}, target=500.0, limits=_lim(),
+                            market=_market_ctx())
+    assert out["market_read"]["risk"] == "risk_off"
+    assert out["market_read"]["summary"]
+
+
+def test_run_cycle_market_read_none_when_absent(monkeypatch):
+    """No market-read sources → run_cycle returns market_read=None (back-compat)."""
+    monkeypatch.setattr("services.driver_svc.decider.decide",
+                        lambda packet, **kw: {"stand_down": True, "trades": []})
+    out = compute.run_cycle({}, {"snapshot": {}}, target=500.0, limits=_lim(),
+                            market={"vix": 14})
+    assert out.get("market_read") is None

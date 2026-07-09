@@ -13,6 +13,8 @@ DEFAULTS = {
     "alert_market_hours_only": True,
     "alert_min_score": 0,            # only alert on signals with score >= this
     "desktop_notifications": False,
+    "ticker_enabled": True,          # bottom market-summary marquee on every page
+    "ticker_speed": 60,              # marquee duration seconds (higher = slower)
 }
 
 _PATH = pathlib.Path(__file__).resolve().parent / "data" / "settings.json"

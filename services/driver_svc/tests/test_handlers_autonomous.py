@@ -425,6 +425,103 @@ def test_cycle_market_state_absent_when_trend_blank(fake_bus, monkeypatch):
     assert "market_state" not in seen["market"]
 
 
+# ── market-read: handler folds briefing + dashboard + sentiment into market ───
+def _today_iso():
+    import datetime as _dt
+    return _dt.date.today().isoformat()
+
+
+def test_cycle_folds_market_read_sources(fake_bus, monkeypatch):
+    """The handler reads the freshest gamma briefing + market dashboard + sentiment
+    magnitude and merges them into the market context passed to run_cycle."""
+    handlers.set_control(fake_bus, enabled=True)
+    _seed_caches(fake_bus)
+    fake_bus.cache_set("cache:options:gamma_analyze_midday", {
+        "slot": "midday", "generated_at": _today_iso() + "T12:30:00-05:00",
+        "analysis": {"bias": -35, "regime": "neg gamma", "indices": [
+            {"symbol": "$SPX", "gamma_flip": 6005, "put_wall": 5900, "call_wall": 6050}]}})
+    fake_bus.cache_set("cache:market:dashboard", {"categories": [{"category": "B", "tiles": [
+        {"display": "$ADVN-$DECN", "last": -620.0, "color_state": "risk_off_mild"}]}]})
+    fake_bus.cache_set("cache:sentiment:composite",
+                       {"live": {"composite": {"total_score": "4.1", "bias": "bearish"}},
+                        "derived": {"trend": {}}})
+    seen = {}
+    monkeypatch.setattr(handlers.compute, "fetch_market_context",
+                        lambda: {"vix": 14, "spx_spot": 5980.0})
+    monkeypatch.setattr(handlers.compute, "run_cycle", _capture_market_cycle(seen))
+    handlers.run_autonomous_cycle(fake_bus)
+    market = seen["market"]
+    assert market["briefing"]["_slot"] == "midday" and market["briefing"]["bias"] == -35
+    assert market["dashboard"]["categories"][0]["tiles"][0]["last"] == -620.0
+    assert market["sentiment"] == {"score": 4.1, "bias": "bearish"}
+    assert market["vix"] == 14 and market["spx_spot"] == 5980.0   # preserved
+
+
+def test_cycle_market_read_sources_absent_graceful(fake_bus, monkeypatch):
+    """None of the market-read caches published → market carries none of them (no crash)."""
+    handlers.set_control(fake_bus, enabled=True)
+    _seed_caches(fake_bus)   # no briefing / dashboard / composite seeded
+    seen = {}
+    monkeypatch.setattr(handlers.compute, "fetch_market_context", lambda: {"vix": 14})
+    monkeypatch.setattr(handlers.compute, "run_cycle", _capture_market_cycle(seen))
+    handlers.run_autonomous_cycle(fake_bus)
+    for k in ("briefing", "dashboard", "sentiment"):
+        assert k not in seen["market"]
+
+
+def test_cycle_drops_prior_day_briefing(fake_bus, monkeypatch):
+    """A yesterday-only gamma briefing is NOT folded in (stale walls mislead)."""
+    handlers.set_control(fake_bus, enabled=True)
+    _seed_caches(fake_bus)
+    fake_bus.cache_set("cache:options:gamma_analyze_close", {
+        "slot": "close", "generated_at": "2020-01-02T14:58:00-05:00",   # long ago
+        "analysis": {"bias": -10, "indices": []}})
+    seen = {}
+    monkeypatch.setattr(handlers.compute, "fetch_market_context", lambda: {"vix": 14})
+    monkeypatch.setattr(handlers.compute, "run_cycle", _capture_market_cycle(seen))
+    handlers.run_autonomous_cycle(fake_bus)
+    assert "briefing" not in seen["market"]
+
+
+def test_publish_autonomous_stamps_market_read_summary(fake_bus):
+    """The market_read one-line summary lands on the newest decision-log row (/driver
+    observability) so the log shows what the model saw."""
+    handlers._publish_autonomous(
+        fake_bus, day_pnl=0.0, positions=[],
+        decision={"day_thesis": "t", "stand_down": True},
+        guarded={"rejected": [], "halted": False, "halt_reason": None}, executed=[],
+        control={"enabled": True, "halted": False},
+        market_read={"summary": "neg gamma · bias -35 · breadth -620 risk_off · sent 4.1"})
+    row = fake_bus.cache_get("cache:driver:autonomous").payload["decisions"][0]
+    assert "bias -35" in row["market_read"]
+
+
+def test_publish_autonomous_market_read_absent_is_none(fake_bus):
+    """No market_read passed → the log row's market_read is None (back-compat)."""
+    handlers._publish_autonomous(
+        fake_bus, day_pnl=0.0, positions=[],
+        decision={"day_thesis": "t", "stand_down": True},
+        guarded={"rejected": [], "halted": False, "halt_reason": None}, executed=[],
+        control={"enabled": True, "halted": False})
+    row = fake_bus.cache_get("cache:driver:autonomous").payload["decisions"][0]
+    assert row["market_read"] is None
+
+
+def test_cycle_end_to_end_stamps_market_read_on_log(fake_bus, monkeypatch):
+    """Through the REAL run_cycle: a seeded dashboard yields a market_read whose summary
+    is published on the decision-log row."""
+    handlers.set_control(fake_bus, enabled=True)
+    _seed_caches(fake_bus)
+    fake_bus.cache_set("cache:market:dashboard", {"categories": [{"category": "B", "tiles": [
+        {"display": "$ADVN-$DECN", "last": -620.0, "color_state": "risk_off_mild"}]}]})
+    monkeypatch.setattr(handlers.compute, "fetch_market_context", lambda: {"vix": 14})
+    monkeypatch.setattr("services.driver_svc.decider.decide",
+                        lambda packet, **kw: {"stand_down": True, "trades": []})
+    handlers.run_autonomous_cycle(fake_bus)
+    row = fake_bus.cache_get("cache:driver:autonomous").payload["decisions"][0]
+    assert row["market_read"] and "risk_off" in row["market_read"]
+
+
 # ── 5.3: autonomous command dispatch (cycle/enable/disable/stop) ─────────────
 
 
@@ -463,13 +560,10 @@ def test_handle_command_cycle_runs_autonomous(fake_bus, monkeypatch):
     assert called == [fake_bus]
 
 
-def test_handle_command_legacy_branches_still_dispatch(fake_bus, monkeypatch):
-    calls = []
-    monkeypatch.setattr(handlers, "run_morning", lambda b: calls.append("run"))
-    monkeypatch.setattr(handlers, "approve", lambda b: calls.append("approve"))
-    monkeypatch.setattr(handlers, "skip", lambda b: calls.append("skip"))
-    monkeypatch.setattr(handlers, "refresh_perf", lambda b: calls.append("perf"))
-    for t in ("run", "approve", "skip", "perf"):
+def test_handle_command_unknown_type_is_noop(fake_bus):
+    """An unknown command type (incl. the removed legacy run/approve/skip/perf) is
+    a silent no-op — nothing published, no crash."""
+    for t in ("run", "approve", "skip", "perf", "bogus"):
         handlers.handle_command(fake_bus, _cmd(t))
-    handlers.handle_command(fake_bus, _cmd("bogus"))  # unknown → no-op
-    assert calls == ["run", "approve", "skip", "perf"]
+    assert fake_bus.cache_get("cache:driver:autonomous") is None
+    assert fake_bus.cache_get("cache:driver:control") is None

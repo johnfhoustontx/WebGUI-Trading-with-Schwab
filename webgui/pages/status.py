@@ -7,8 +7,8 @@ you whether everything is up:
 * **Tier 3 — Memurai** (Redis backbone, :6379) via a ``PING``.
 * **Tier 1 — schwab-proxy** (:8100) via its ``/health`` (also surfaces whether a
   Schwab token is loaded).
-* **Tier 2 — the five domain services** (sentiment/options/portfolio/trade/driver,
-  :8210–8214) via each service's ``/health`` probe.
+* **Tier 2 — the six domain services** (sentiment/options/portfolio/trade/driver/
+  market, :8210–8215) via each service's ``/health`` probe.
 * **Tier 1 — webgui** itself (it's serving this page, so it's up by definition).
 
 Below the component checks it shows a **data-freshness** table: for each domain
@@ -61,7 +61,8 @@ _FRESHNESS = [
     ("Options · Gamma collector", "options:gex_status", True),
     ("Portfolio", "portfolio:positions", True),
     ("Trade (on-demand)", "trade:analysis", False),
-    ("Driver", "driver:approvals", False),
+    ("Driver (on-demand)", "driver:autonomous", False),
+    ("Market Dashboard", "market:dashboard", True),
 ]
 
 
@@ -87,7 +88,8 @@ def component_targets():
         "options": "options_svc (scan / gamma / paper)",
         "portfolio": "portfolio_svc (holdings + live P&L)",
         "trade": "trade_svc (on-demand analysis)",
-        "driver": "driver_svc (morning approvals)",
+        "driver": "driver_svc (autonomous trader)",
+        "market": "market_svc (macro-ticker dashboard)",
     }
     for domain, label in svc_labels.items():
         url = SERVICE_URLS.get(domain)

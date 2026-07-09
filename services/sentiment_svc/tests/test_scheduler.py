@@ -90,3 +90,38 @@ def test_holidays_sourced_from_shared_calendar():
     from services.sentiment_svc import scheduler
     from shared import market_calendar as mc
     assert scheduler._HOLIDAYS is mc.HOLIDAYS
+
+
+# -- sectors_due: hourly RTH sector recompute (P/C fix, 2026-07-09) ------------
+# The sector view (quotes/trends/P/C/RRG) was recomputed ONLY at service startup
+# + manual Refresh; a premarket start meant zero option volume -> pcr_from_chain
+# None for every ETF -> a blank P/C column ALL DAY. sectors_due refreshes the
+# sector fan-out once per RTH hour so P/C fills right after the open.
+
+
+def test_sectors_due_once_per_rth_hour():
+    # 2026-06-15 is a Monday.
+    due1, slot1 = scheduler.sectors_due(_ct(2026, 6, 15, 9, 5), None)
+    assert due1 is True
+    # same RTH hour -> not due again, slot unchanged.
+    due2, slot2 = scheduler.sectors_due(_ct(2026, 6, 15, 9, 45), slot1)
+    assert due2 is False and slot2 == slot1
+    # next hour -> due.
+    due3, slot3 = scheduler.sectors_due(_ct(2026, 6, 15, 10, 1), slot1)
+    assert due3 is True and slot3 != slot1
+
+
+def test_sectors_due_fires_at_open_tick():
+    """The first tick at/after 08:30 CT fires (heals a premarket-start blank P/C)."""
+    assert scheduler.sectors_due(_ct(2026, 6, 15, 8, 32), None)[0] is True
+
+
+def test_sectors_due_not_off_hours_weekend_holiday():
+    # premarket / after close on a trading day
+    assert scheduler.sectors_due(_ct(2026, 6, 15, 7, 0), None)[0] is False
+    assert scheduler.sectors_due(_ct(2026, 6, 15, 15, 30), None)[0] is False
+    # Saturday + the 2026-07-03 holiday
+    assert scheduler.sectors_due(_ct(2026, 6, 13, 10, 0), None)[0] is False
+    assert scheduler.sectors_due(_ct(2026, 7, 3, 10, 0), None)[0] is False
+    # slot passes through unchanged when not due
+    assert scheduler.sectors_due(_ct(2026, 6, 15, 7, 0), "prev")[1] == "prev"

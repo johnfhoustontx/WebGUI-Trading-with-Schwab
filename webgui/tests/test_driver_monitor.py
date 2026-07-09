@@ -1,10 +1,10 @@
 """Tests for the Driver page autonomous-monitor pure builders.
 
-Phase 7 (autonomous driver) adds a MONITOR section to the existing approval-queue
-``/driver`` page: a target-progress proxy, a control-state label, the open
-driver-positions table rows, and the per-checkpoint decision log. These are the
-unit-tested pure transforms; the ``render`` wiring is smoke-covered by the shell
-suite (and ``test_render_is_callable`` in ``test_driver.py``).
+The autonomous ``/driver`` page is a MONITOR + OVERRIDE: a target-progress proxy, a
+control-state label, the open driver-positions table rows, and the per-checkpoint
+decision log. These are the unit-tested pure transforms; the ``render`` wiring is
+smoke-covered by the shell suite (and ``test_render_is_callable`` in
+``test_driver.py``).
 """
 from pages import driver
 
@@ -444,9 +444,8 @@ def test_page_imports_no_engine_or_services():
 
     src = inspect.getsource(driver)
     for forbidden in ("import services", "from services import",
-                      "import proxy", "from proxy import",
-                      "import morning_agent", "import order_executor"):
+                      "import proxy", "from proxy import"):
         assert forbidden not in src, f"driver.py must not contain `{forbidden}`"
     # No engine/proxy objects leaked into the page module namespace.
-    for attr in ("proxy", "morning_agent", "order_executor", "compute", "handlers"):
+    for attr in ("proxy", "compute", "handlers"):
         assert not hasattr(driver, attr), f"driver.py exposes engine attr {attr!r}"
