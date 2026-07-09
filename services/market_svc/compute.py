@@ -125,3 +125,101 @@ def collect(bus):
     pcr = read_sector_pcr(bus)
     proxy_up = bool(raw) or bool(_proxy.health().get("up"))
     return build_dashboard(raw, sector_pcr=pcr, proxy_up=proxy_up)
+
+
+# ---------------------------------------------------------------------------
+# Market summary — a periodic Claude-written verdict (cache:market:summary).
+# ---------------------------------------------------------------------------
+_SUMMARY_MODEL = "claude-sonnet-5"
+_SUMMARY_MAX_TOKENS = 220
+_SUMMARY_MAX_CHARS = 400
+_SUMMARY_SYSTEM = (
+    "You are a terse markets desk analyst. Given a compact JSON snapshot of the "
+    "current tape (sentiment, trend, breadth, volatility, index moves, sector/theme "
+    "leaders), write ONE or TWO plain sentences (<=350 chars) summarizing the market "
+    "read and posture. No preamble, no disclaimers, no bullet points, no markdown — "
+    "just the sentences. Lead with the overall condition."
+)
+
+
+def _anthropic_api_key():
+    import os
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if key:
+        return key.strip()
+    try:
+        from repo_paths import SHARED_DIR
+        p = SHARED_DIR / "anthropic_key.txt"
+        if p.exists():
+            return p.read_text(encoding="utf-8").strip()
+    except Exception:  # noqa: BLE001
+        log.debug("reading anthropic_key.txt failed", exc_info=True)
+    return None
+
+
+def _make_summary_client():
+    key = _anthropic_api_key()
+    if not key:
+        return None
+    try:
+        import anthropic
+        return anthropic.Anthropic(api_key=key)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _tiles_by_cat(dashboard):
+    out = {}
+    for c in (dashboard or {}).get("categories", []):
+        out[c.get("category")] = c.get("tiles", [])
+    return out
+
+
+def build_summary_packet(dashboard, sentiment):
+    """PURE: compact facts for the summary prompt from the two cache payloads."""
+    byc = _tiles_by_cat(dashboard)
+    live = (sentiment or {}).get("live") or {}
+    der = (sentiment or {}).get("derived") or {}
+    comp = live.get("composite") or {}
+    trend = der.get("trend") or {}
+
+    def _movers(cats, n=3):
+        tiles = [t for c in cats for t in byc.get(c, []) if t.get("change_pct") is not None]
+        tiles.sort(key=lambda t: abs(t.get("change_pct") or 0), reverse=True)
+        return [{"display": t["display"], "change_pct": t["change_pct"]} for t in tiles[:n]]
+
+    return {
+        "sentiment": {"score": comp.get("total_score"), "bias": comp.get("bias")},
+        "trend": {"label": trend.get("label"), "score": trend.get("score")},
+        "breadth": (live.get("breadth") or {}).get("interpretation"),
+        "put_call": live.get("sector_pcr"),
+        "vol": [{"display": t["display"], "last": t.get("last"), "change_pct": t.get("change_pct")}
+                for t in byc.get("Volatility", [])],
+        "index": [{"display": t["display"], "change_pct": t.get("change_pct")}
+                  for t in byc.get("Cash Index", [])],
+        "movers": _movers(["Sector SPDR", "Thematic / Industry ETF"], 4),
+    }
+
+
+def generate_summary(dashboard, sentiment, client=None):
+    """Build the packet, call Claude for a 1-2 sentence verdict. Defensive → {'narrative': ''}."""
+    import json
+    packet = build_summary_packet(dashboard, sentiment)
+    c = client if client is not None else _make_summary_client()
+    if c is None:
+        return {"narrative": ""}
+    try:
+        resp = c.messages.create(
+            model=_SUMMARY_MODEL, max_tokens=_SUMMARY_MAX_TOKENS,
+            thinking={"type": "disabled"},
+            system=_SUMMARY_SYSTEM,
+            messages=[{"role": "user", "content": json.dumps(packet)}])
+        text = ""
+        for block in getattr(resp, "content", []) or []:
+            if getattr(block, "type", None) == "text" or hasattr(block, "text"):
+                text += getattr(block, "text", "")
+        text = " ".join(text.split()).strip()[:_SUMMARY_MAX_CHARS]
+        return {"narrative": text}
+    except Exception:  # noqa: BLE001 — never raise out of a summary attempt.
+        log.warning("market summary generation failed", exc_info=True)
+        return {"narrative": ""}
