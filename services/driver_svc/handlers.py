@@ -43,6 +43,13 @@ CMD_OPTIONS = "cmd:options"
 # menu is ALREADY hard-gated by regime_filter, so this adds no hard rule; guardrails
 # are untouched).
 CACHE_SENTIMENT_COMPOSITE = "cache:sentiment:composite"
+# Additive market-read context (reasoning only, no hard rule): the market dashboard
+# (breadth + risk-on/off) and the four scheduled gamma_analyze briefing slot keys
+# (per-index flip/walls/what-if). The slot keys mirror options_svc's
+# ``CACHE_GAMMA_ANALYZE_SCHED``; ``_pick_latest_briefing`` chooses the freshest today.
+CACHE_MARKET_DASHBOARD = "cache:market:dashboard"
+GAMMA_ANALYZE_SLOTS = ("premarket", "open", "midday", "close")
+CACHE_GAMMA_ANALYZE = {s: f"cache:options:gamma_analyze_{s}" for s in GAMMA_ANALYZE_SLOTS}
 
 # Cap on the newest-first per-checkpoint decision log carried in the monitor view.
 _DECISION_LOG_CAP = 50
@@ -115,6 +122,43 @@ def _read_market_state(bus):
         ev = trend.get("evidence")
         return {"state": state, "label": label,
                 "evidence": list(ev) if isinstance(ev, list) else []}
+    except Exception:  # noqa: BLE001 — context is best-effort; never block the cycle.
+        return None
+
+
+def _read_briefing(bus, today_ct):
+    """The freshest TODAY gamma briefing analysis across the 4 scheduled slot keys.
+
+    Reads each ``cache:options:gamma_analyze_{slot}`` and lets the pure
+    ``compute._pick_latest_briefing`` pick the newest today (a prior-session briefing's
+    walls mislead → dropped; a degraded page with no ``analysis`` → skipped). Additive
+    REASONING CONTEXT only. Defensive → ``None`` so a missing/stale briefing never
+    blocks a cycle.
+    """
+    try:
+        payloads = [_read_payload(bus, k) for k in CACHE_GAMMA_ANALYZE.values()]
+        return compute._pick_latest_briefing([p for p in payloads if p], today_ct)
+    except Exception:  # noqa: BLE001 — context is best-effort; never block the cycle.
+        return None
+
+
+def _read_sentiment_magnitude(bus):
+    """The sentiment 0-10 score + bias from ``cache:sentiment:composite`` live.composite.
+
+    Complements ``_read_market_state`` (which reads the five-state ``derived.trend``) with
+    the composite MAGNITUDE the driver otherwise never sees. Additive REASONING CONTEXT
+    only. Defensive → ``None`` on any failure / missing composite / blank score+bias.
+    """
+    try:
+        comp = ((_read_payload(bus, CACHE_SENTIMENT_COMPOSITE) or {})
+                .get("live") or {}).get("composite") or {}
+        raw = comp.get("total_score")
+        try:
+            score = float(raw) if raw is not None else None
+        except (TypeError, ValueError):
+            score = None
+        bias = comp.get("bias")
+        return {"score": score, "bias": bias} if (score is not None or bias) else None
     except Exception:  # noqa: BLE001 — context is best-effort; never block the cycle.
         return None
 
@@ -194,6 +238,18 @@ def run_autonomous_cycle(bus) -> None:
     ms = _read_market_state(bus)
     if ms:
         market["market_state"] = ms
+    # Additive market-read context (gamma briefing + dashboard breadth + sentiment
+    # magnitude) — REASONING CONTEXT only; no new hard rule (the menu is already
+    # regime-gated upstream and the guardrails never see any of this).
+    briefing = _read_briefing(bus, date.today())
+    if briefing:
+        market["briefing"] = briefing
+    dash = _read_payload(bus, CACHE_MARKET_DASHBOARD)
+    if dash:
+        market["dashboard"] = dash
+    sent = _read_sentiment_magnitude(bus)
+    if sent:
+        market["sentiment"] = sent
     out = compute.run_cycle(scan, paper, target=settings.DAILY_TARGET,
                             limits=settings.limits(), market=market)
     # Kill-switch tightening: re-read control RIGHT BEFORE firing. The top-of-fn gate

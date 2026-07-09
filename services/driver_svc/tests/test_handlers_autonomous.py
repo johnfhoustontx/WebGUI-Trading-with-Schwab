@@ -425,6 +425,64 @@ def test_cycle_market_state_absent_when_trend_blank(fake_bus, monkeypatch):
     assert "market_state" not in seen["market"]
 
 
+# ── market-read: handler folds briefing + dashboard + sentiment into market ───
+def _today_iso():
+    import datetime as _dt
+    return _dt.date.today().isoformat()
+
+
+def test_cycle_folds_market_read_sources(fake_bus, monkeypatch):
+    """The handler reads the freshest gamma briefing + market dashboard + sentiment
+    magnitude and merges them into the market context passed to run_cycle."""
+    handlers.set_control(fake_bus, enabled=True)
+    _seed_caches(fake_bus)
+    fake_bus.cache_set("cache:options:gamma_analyze_midday", {
+        "slot": "midday", "generated_at": _today_iso() + "T12:30:00-05:00",
+        "analysis": {"bias": -35, "regime": "neg gamma", "indices": [
+            {"symbol": "$SPX", "gamma_flip": 6005, "put_wall": 5900, "call_wall": 6050}]}})
+    fake_bus.cache_set("cache:market:dashboard", {"categories": [{"category": "B", "tiles": [
+        {"display": "$ADVN-$DECN", "last": -620.0, "color_state": "risk_off_mild"}]}]})
+    fake_bus.cache_set("cache:sentiment:composite",
+                       {"live": {"composite": {"total_score": "4.1", "bias": "bearish"}},
+                        "derived": {"trend": {}}})
+    seen = {}
+    monkeypatch.setattr(handlers.compute, "fetch_market_context",
+                        lambda: {"vix": 14, "spx_spot": 5980.0})
+    monkeypatch.setattr(handlers.compute, "run_cycle", _capture_market_cycle(seen))
+    handlers.run_autonomous_cycle(fake_bus)
+    market = seen["market"]
+    assert market["briefing"]["_slot"] == "midday" and market["briefing"]["bias"] == -35
+    assert market["dashboard"]["categories"][0]["tiles"][0]["last"] == -620.0
+    assert market["sentiment"] == {"score": 4.1, "bias": "bearish"}
+    assert market["vix"] == 14 and market["spx_spot"] == 5980.0   # preserved
+
+
+def test_cycle_market_read_sources_absent_graceful(fake_bus, monkeypatch):
+    """None of the market-read caches published → market carries none of them (no crash)."""
+    handlers.set_control(fake_bus, enabled=True)
+    _seed_caches(fake_bus)   # no briefing / dashboard / composite seeded
+    seen = {}
+    monkeypatch.setattr(handlers.compute, "fetch_market_context", lambda: {"vix": 14})
+    monkeypatch.setattr(handlers.compute, "run_cycle", _capture_market_cycle(seen))
+    handlers.run_autonomous_cycle(fake_bus)
+    for k in ("briefing", "dashboard", "sentiment"):
+        assert k not in seen["market"]
+
+
+def test_cycle_drops_prior_day_briefing(fake_bus, monkeypatch):
+    """A yesterday-only gamma briefing is NOT folded in (stale walls mislead)."""
+    handlers.set_control(fake_bus, enabled=True)
+    _seed_caches(fake_bus)
+    fake_bus.cache_set("cache:options:gamma_analyze_close", {
+        "slot": "close", "generated_at": "2020-01-02T14:58:00-05:00",   # long ago
+        "analysis": {"bias": -10, "indices": []}})
+    seen = {}
+    monkeypatch.setattr(handlers.compute, "fetch_market_context", lambda: {"vix": 14})
+    monkeypatch.setattr(handlers.compute, "run_cycle", _capture_market_cycle(seen))
+    handlers.run_autonomous_cycle(fake_bus)
+    assert "briefing" not in seen["market"]
+
+
 # ── 5.3: autonomous command dispatch (cycle/enable/disable/stop) ─────────────
 
 
