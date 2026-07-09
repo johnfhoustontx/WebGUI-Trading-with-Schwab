@@ -94,7 +94,7 @@ def test_sentiment_pages_have_no_inline_style():
 # — correctly passes. (status.py keeps its Quasar `ui.icon().props(color=…)` props,
 # out of scope.)
 PHASE_8_FILES = ["status.py", "settings.py", "terminate.py", "manuals.py",
-                 "eod.py", "market.py"]
+                 "eod.py", "market.py", "ticker.py"]
 
 
 def test_utility_pages_have_no_inline_style():

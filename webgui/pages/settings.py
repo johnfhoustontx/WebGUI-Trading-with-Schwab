@@ -54,6 +54,27 @@ def render():
             "no-caps").classes(BTN_3D).on_click(
             lambda: ui.run_javascript("Notification && Notification.requestPermission()"))
 
+    with ui.card().classes("w-full max-w-2xl"):
+        ui.label("Market summary ticker").classes("text-subtitle1 font-bold")
+        ui.label("Scrolling market-summary marquee at the bottom of every page "
+                 "(live data items + a periodic Claude verdict).").classes(
+                 "opacity-70 text-sm")
+
+        tick = ui.switch("Show the ticker", value=s["ticker_enabled"])
+        tick.on_value_change(lambda e: app_settings.set("ticker_enabled", e.value))
+
+        with ui.row().classes("items-center gap-2"):
+            ui.label("Scroll speed").classes("text-sm opacity-70")
+            # Labels map to a marquee duration in seconds (higher = slower).
+            _SPEEDS = {"Slow": 90, "Medium": 60, "Fast": 35}
+            _cur = {90: "Slow", 60: "Medium", 35: "Fast"}.get(s["ticker_speed"], "Medium")
+            speed = ui.select(list(_SPEEDS), label="Speed", value=_cur).classes("w-40")
+            speed.on_value_change(
+                lambda e: app_settings.set("ticker_speed", _SPEEDS.get(e.value, 60)))
+
+        ui.label("Changes apply on the next page load / navigation.").classes(
+                 "opacity-60 text-xs")
+
     # Test sound uses the same shared audio element + helper as the live alert.
     def _test():
         from main import play_alert

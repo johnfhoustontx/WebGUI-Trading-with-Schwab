@@ -713,7 +713,13 @@ def _layout(active: str, title: str):
 
     ui.timer(2.0, _tick)
 
-    with ui.column().classes("w-full p-4 gap-3") as content:
+    # Fixed bottom market-summary marquee on every page (gated by the Settings
+    # toggle). ui.footer() is fixed-position, so its DOM order doesn't matter.
+    from pages import ticker
+    ticker.render_ticker(active)
+
+    # pb-10 keeps the fixed footer marquee from covering the last content row.
+    with ui.column().classes("w-full p-4 gap-3 pb-10") as content:
         health = cached_health()  # memoized — no blocking HTTP on every navigation
         if not health.get("up"):
             with ui.row().classes(

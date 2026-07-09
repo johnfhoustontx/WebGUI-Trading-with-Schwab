@@ -5,11 +5,34 @@ cache:market:summary (Claude verdict), renders a fixed bottom marquee. The pure
 builders here (``ticker_items``/``item_class``/``speed_class``) carry the coverage;
 ``render_ticker`` does the widget + timer wiring (Task 5).
 
-Tailwind-first: NO ``.style()``. The marquee ``@keyframes`` animation lives in the
+Tailwind-first: NO inline styles. The marquee ``@keyframes`` animation lives in the
 ONE ``ui.add_css`` escape hatch (``_TICKER_CSS``); the scroll speed is a finite
 class (slow/med/fast), and item colors map from a finite ``tone`` set to fixed
 Tailwind text classes.
 """
+import app_settings
+import bus_client
+from nicegui import ui
+
+from pages.ui_guard import guard
+
+# The ONE ui.add_css escape hatch for this component: a keyframe marquee animation
+# (not expressible as a Tailwind utility) + the three finite scroll-speed buckets
+# (a genuinely-continuous duration, kept a 3-class set so the page stays
+# inline-style-free). Everything else is Tailwind classes.
+_TICKER_CSS = """
+@keyframes mkt-marquee { from { transform: translateX(100%); } to { transform: translateX(-100%); } }
+.mkt-ticker-scroll { display: inline-flex; white-space: nowrap; will-change: transform;
+  animation: mkt-marquee var(--mkt-dur, 60s) linear infinite; }
+.mkt-ticker-scroll.mkt-dur-slow { --mkt-dur: 90s; }
+.mkt-ticker-scroll.mkt-dur-med  { --mkt-dur: 60s; }
+.mkt-ticker-scroll.mkt-dur-fast { --mkt-dur: 35s; }
+.mkt-ticker-wrap:hover .mkt-ticker-scroll { animation-play-state: paused; }
+"""
+
+# Cache views the ticker version-polls (cheap :ver counters, one round-trip).
+VIEWS = ("market:dashboard", "sentiment:composite", "market:summary")
+
 
 # tone → fixed Tailwind text class (finite map, Tailwind-first).
 _TONE = {
@@ -29,7 +52,7 @@ def speed_class(speed):
     """Map a marquee-duration number (seconds) to a finite scroll-speed CSS class.
 
     Higher seconds = slower scroll. Bucketed into three fixed classes defined in
-    ``_TICKER_CSS`` so the page stays ``.style()``-free (Tailwind-first). Any
+    ``_TICKER_CSS`` so the page stays inline-style-free (Tailwind-first). Any
     unparseable value falls back to the medium bucket.
     """
     try:
@@ -136,3 +159,51 @@ def ticker_items(dashboard, sentiment):
                       "tone": _tone_from_state(t.get("color_state"))})
 
     return items
+
+
+def render_ticker(active):
+    """Fixed bottom marquee on every page (gated by the Settings toggle).
+
+    Renders nothing when ``ticker_enabled`` is off. Reads the two live caches +
+    the Claude narrative, version-gated on a 4s timer so it's cheap on every page.
+    """
+    if not app_settings.get("ticker_enabled"):
+        return
+    ui.add_css(_TICKER_CSS)
+    speed = app_settings.get("ticker_speed") or 60
+    with ui.footer().classes(
+            "mkt-ticker-wrap bg-slate-950/95 border-t border-slate-700 "
+            "h-8 px-3 flex items-center overflow-hidden z-[2200]"):
+        scroll = ui.row().classes(
+            f"mkt-ticker-scroll {speed_class(speed)} items-center gap-2")
+
+    state = {"versions": None}
+
+    def _paint():
+        dash = bus_client.read("market:dashboard")
+        sent = bus_client.read("sentiment:composite")
+        summ = bus_client.read("market:summary") or {}
+        scroll.clear()
+        with scroll:
+            narrative = (summ.get("narrative") or "").strip()
+            if narrative:
+                ui.label(f"⚠ {narrative}").classes("text-amber-300 text-xs font-medium")
+                ui.label("·").classes("text-slate-600 text-xs")
+            items = ticker_items(dash, sent)
+            if not items and not narrative:
+                ui.label("Market data loading…").classes("text-slate-400 text-xs")
+            for i, it in enumerate(items):
+                ui.label(it["text"]).classes(f"text-xs {item_class(it['tone'])}")
+                if i < len(items) - 1:
+                    ui.label("·").classes("text-slate-600 text-xs")
+
+    @guard
+    def _poll():
+        vers = bus_client.read_versions(VIEWS)
+        if vers != state["versions"]:
+            state["versions"] = vers
+            _paint()
+
+    _paint()
+    state["versions"] = bus_client.read_versions(VIEWS)
+    ui.timer(4.0, _poll)

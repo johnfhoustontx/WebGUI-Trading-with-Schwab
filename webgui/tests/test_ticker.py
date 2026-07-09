@@ -43,3 +43,22 @@ def test_item_class_maps_every_tone_to_fixed_class():
 def test_ticker_items_empty_caches_safe():
     assert ticker.ticker_items(None, None) == []
     assert ticker.ticker_items({}, {}) == []
+
+
+def test_speed_class_maps_numbers_to_finite_buckets():
+    # Higher seconds = slower scroll.
+    assert ticker.speed_class(90) == "mkt-dur-slow"
+    assert ticker.speed_class(60) == "mkt-dur-med"
+    assert ticker.speed_class(35) == "mkt-dur-fast"
+    # Every result is one of the three finite classes.
+    for v in (10, 45, 46, 74, 75, 200):
+        assert ticker.speed_class(v) in {"mkt-dur-slow", "mkt-dur-med", "mkt-dur-fast"}
+    # Unparseable falls back to the medium bucket (never raises).
+    assert ticker.speed_class(None) == "mkt-dur-med"
+    assert ticker.speed_class("nope") == "mkt-dur-med"
+
+
+def test_speed_class_used_in_ticker_css():
+    # Each bucket class must be defined in the marquee CSS escape hatch.
+    for cls in ("mkt-dur-slow", "mkt-dur-med", "mkt-dur-fast"):
+        assert f".{cls}" in ticker._TICKER_CSS
