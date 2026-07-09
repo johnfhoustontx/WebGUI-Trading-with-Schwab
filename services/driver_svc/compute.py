@@ -153,6 +153,39 @@ def _market_state_line(market) -> str | None:
     return f"Market state: {label} — {ev}" if ev else f"Market state: {label}"
 
 
+# ── market-read context helpers (Phase: driver market-context block) ─────────
+# The decider gets an additive ``market_read`` (gamma structure + breadth + sentiment)
+# to sharpen selection. Every helper here is PURE + defensive (degrades, never raises);
+# REASONING CONTEXT ONLY — the guardrails never see any of it.
+
+# Market-dashboard tile ``color_state`` → a signed risk tilt (risk-on positive).
+_RISK_WEIGHT = {"risk_on_strong": 2, "risk_on_mild": 1, "flat": 0,
+                "risk_off_mild": -1, "risk_off_strong": -2, "no_data": 0}
+
+
+def _dashboard_risk_read(dashboard) -> dict:
+    """Breadth spread + an aggregate risk-on/off label from ``cache:market:dashboard``.
+
+    Reads the ``$ADVN-$DECN`` tile's ``last`` (the breadth spread) and sums every tile's
+    ``color_state`` into a net tilt → ``risk_on`` / ``neutral`` / ``risk_off``. Defensive
+    → ``{}`` on a missing / empty / malformed dashboard. Never raises.
+    """
+    try:
+        cats = (dashboard or {}).get("categories") or []
+        tiles = [t for c in cats for t in (c.get("tiles") or []) if isinstance(t, dict)]
+        if not tiles:
+            return {}
+        breadth = next((t.get("last") for t in tiles
+                        if t.get("display") == "$ADVN-$DECN"), None)
+        score = sum(_RISK_WEIGHT.get(t.get("color_state"), 0) for t in tiles)
+        out = {"risk": "risk_on" if score > 0 else "risk_off" if score < 0 else "neutral"}
+        if breadth is not None:
+            out["breadth_spread"] = breadth
+        return out
+    except Exception:  # noqa: BLE001 — context is best-effort; never block a cycle.
+        return {}
+
+
 def build_packet(scan_view, paper_view, *, target, limits, market) -> dict:
     """Project the cache views into the model's decision packet (pure).
 

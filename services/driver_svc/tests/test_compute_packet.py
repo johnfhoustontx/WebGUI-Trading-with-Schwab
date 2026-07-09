@@ -384,3 +384,31 @@ def test_fetch_market_context_missing_etf_spot_is_none(monkeypatch):
                         lambda *a, **k: _Resp({"$VIX": {"quote": {"lastPrice": 20.0}}}))
     ctx = compute.fetch_market_context()
     assert ctx["spy_spot"] is None and ctx["qqq_spot"] is None
+
+
+# ---------------------------------------------------------------------------
+# market-read: _dashboard_risk_read (breadth spread + risk-on/off aggregate)
+# ---------------------------------------------------------------------------
+def test_dashboard_risk_read_breadth_and_risk():
+    dash = {"categories": [
+        {"category": "Breadth", "tiles": [
+            {"display": "$ADVN-$DECN", "last": -465.0, "color_state": "risk_off_mild"},
+            {"display": "VIX", "color_state": "risk_off_strong"}]},
+        {"category": "Index", "tiles": [
+            {"display": "SPX", "color_state": "risk_off_mild"}]}]}
+    out = compute._dashboard_risk_read(dash)
+    assert out["breadth_spread"] == -465.0
+    assert out["risk"] == "risk_off"        # net color_state tilt is negative
+
+
+def test_dashboard_risk_read_risk_on_and_missing_breadth():
+    dash = {"categories": [{"category": "X", "tiles": [
+        {"display": "SPY", "color_state": "risk_on_strong"},
+        {"display": "XLK", "color_state": "risk_on_mild"}]}]}
+    out = compute._dashboard_risk_read(dash)
+    assert out["risk"] == "risk_on" and "breadth_spread" not in out
+
+
+def test_dashboard_risk_read_empty_is_empty():
+    for d in ({}, None, {"categories": []}, {"categories": [{"tiles": []}]}, "junk"):
+        assert compute._dashboard_risk_read(d) == {}
