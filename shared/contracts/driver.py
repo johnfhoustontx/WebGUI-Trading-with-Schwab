@@ -24,11 +24,12 @@ class AutonomousState(_Base):
 
     The repurposed Driver page renders the autonomous loop from this view:
     today's day P&L vs the target, the open driver positions, ``decisions``
-    — the per-checkpoint audit log (newest first) of each cycle's thesis plus the
-    chosen / clamped / rejected trades — and ``perf``, the driver paper account's
-    performance scorecard (win rate / profit factor / P&L by symbol & strategy,
-    sourced from ``cache:options:driver_paper_perf``). Loose dicts — the page
-    tolerates sparse/missing rows defensively.
+    — the per-checkpoint audit log (newest first) of each cycle's thesis, the
+    chosen / clamped / rejected trades, and a one-line ``market_read`` summary (the
+    gamma / breadth / sentiment context the model saw this cycle, or None) — and
+    ``perf``, the driver paper account's performance scorecard (win rate / profit
+    factor / P&L by symbol & strategy, sourced from ``cache:options:driver_paper_perf``).
+    Loose dicts — the page tolerates sparse/missing rows defensively.
     """
 
     date: str = ""

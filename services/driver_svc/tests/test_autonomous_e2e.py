@@ -130,3 +130,39 @@ def test_autonomous_e2e_banked_target_halts(fake_bus, monkeypatch):
     assert state["halted"] is True
     assert state["halt_reason"] and "target" in state["halt_reason"].lower()
     assert state["day_pnl"] == 600.0
+
+
+def test_autonomous_e2e_packet_carries_market_read(fake_bus, monkeypatch):
+    """Through the REAL build_packet: seeded market-read sources reach the model-facing
+    packet, and the /driver log row shows the summary."""
+    import datetime as _dt
+
+    handlers.set_control(fake_bus, enabled=True)
+    _seed_scan(fake_bus, _QQQ_PCS)
+    _seed_paper(fake_bus, session_pnl=0.0)
+    fake_bus.cache_set("cache:market:dashboard", {"categories": [{"category": "B", "tiles": [
+        {"display": "$ADVN-$DECN", "last": -620.0, "color_state": "risk_off_mild"}]}]})
+    fake_bus.cache_set("cache:options:gamma_analyze_midday", {
+        "slot": "midday", "generated_at": _dt.date.today().isoformat() + "T12:30:00-05:00",
+        "analysis": {"bias": -35, "regime": "neg gamma", "indices": [
+            {"symbol": "$SPX", "gamma_flip": 6005, "put_wall": 5900, "call_wall": 6050}]}})
+    monkeypatch.setattr(handlers.compute, "fetch_market_context",
+                        lambda: {"vix": 14, "spx_spot": 5980.0})
+    seen = {}
+    monkeypatch.setattr(
+        "services.driver_svc.decider.decide",
+        lambda packet, **kw: seen.setdefault("pkt", packet) or
+        {"stand_down": True, "trades": []})
+
+    handlers.run_autonomous_cycle(fake_bus)
+
+    # (a) the REAL build_packet folded the market read into the model-facing packet.
+    mr = seen["pkt"]["market_read"]
+    assert mr["risk"] == "risk_off" and mr["breadth_spread"] == -620.0
+    assert mr["indices"][0]["symbol"] == "$SPX"
+    assert mr["indices"][0]["spot"] == 5980.0          # live spot, not the briefing's
+    # (b) the model NEVER sees menu_by_id (raw signals).
+    assert "menu_by_id" not in seen["pkt"]
+    # (c) the /driver decision log row shows the one-line summary.
+    row = fake_bus.cache_get("cache:driver:autonomous").payload["decisions"][0]
+    assert row["market_read"] and "risk_off" in row["market_read"]

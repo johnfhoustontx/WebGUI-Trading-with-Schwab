@@ -403,7 +403,10 @@ def run_cycle(scan_view, paper_view, *, target, limits, market, client=None) -> 
             open_count=packet["open_count"], day_pnl=packet["day_pnl"],
             vix=packet["vix"], daily_max_loss=_daily_max_loss())
         return {"decision": decision, "day_pnl": packet["day_pnl"],
-                "open_positions": packet["open_positions"], **guarded}
+                "open_positions": packet["open_positions"],
+                # Threaded out for /driver observability (its one-line summary is stamped
+                # onto the decision-log row); None when no market-read source was present.
+                "market_read": packet.get("market_read"), **guarded}
     except Exception as exc:  # noqa: BLE001 — the cycle never raises; stand down.
         return {"decision": {"stand_down": True, "day_thesis": "", "confidence": 0.0,
                              "trades": [], "error": str(exc)},

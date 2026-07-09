@@ -533,3 +533,23 @@ def test_market_read_is_context_only_not_a_filter():
     withmr = compute.build_packet(scan, {"snapshot": {}}, target=500.0, limits=_lim(),
                                   market=_market_ctx())
     assert withmr["menu"] == base["menu"] and withmr["menu_by_id"] == base["menu_by_id"]
+
+
+def test_run_cycle_returns_market_read(monkeypatch):
+    """run_cycle threads the packet's market_read out so the handler can surface a
+    summary on the decision log (observability)."""
+    monkeypatch.setattr("services.driver_svc.decider.decide",
+                        lambda packet, **kw: {"stand_down": True, "trades": []})
+    out = compute.run_cycle({}, {"snapshot": {}}, target=500.0, limits=_lim(),
+                            market=_market_ctx())
+    assert out["market_read"]["risk"] == "risk_off"
+    assert out["market_read"]["summary"]
+
+
+def test_run_cycle_market_read_none_when_absent(monkeypatch):
+    """No market-read sources → run_cycle returns market_read=None (back-compat)."""
+    monkeypatch.setattr("services.driver_svc.decider.decide",
+                        lambda packet, **kw: {"stand_down": True, "trades": []})
+    out = compute.run_cycle({}, {"snapshot": {}}, target=500.0, limits=_lim(),
+                            market={"vix": 14})
+    assert out.get("market_read") is None

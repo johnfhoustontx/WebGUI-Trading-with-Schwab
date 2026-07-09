@@ -483,6 +483,45 @@ def test_cycle_drops_prior_day_briefing(fake_bus, monkeypatch):
     assert "briefing" not in seen["market"]
 
 
+def test_publish_autonomous_stamps_market_read_summary(fake_bus):
+    """The market_read one-line summary lands on the newest decision-log row (/driver
+    observability) so the log shows what the model saw."""
+    handlers._publish_autonomous(
+        fake_bus, day_pnl=0.0, positions=[],
+        decision={"day_thesis": "t", "stand_down": True},
+        guarded={"rejected": [], "halted": False, "halt_reason": None}, executed=[],
+        control={"enabled": True, "halted": False},
+        market_read={"summary": "neg gamma · bias -35 · breadth -620 risk_off · sent 4.1"})
+    row = fake_bus.cache_get("cache:driver:autonomous").payload["decisions"][0]
+    assert "bias -35" in row["market_read"]
+
+
+def test_publish_autonomous_market_read_absent_is_none(fake_bus):
+    """No market_read passed → the log row's market_read is None (back-compat)."""
+    handlers._publish_autonomous(
+        fake_bus, day_pnl=0.0, positions=[],
+        decision={"day_thesis": "t", "stand_down": True},
+        guarded={"rejected": [], "halted": False, "halt_reason": None}, executed=[],
+        control={"enabled": True, "halted": False})
+    row = fake_bus.cache_get("cache:driver:autonomous").payload["decisions"][0]
+    assert row["market_read"] is None
+
+
+def test_cycle_end_to_end_stamps_market_read_on_log(fake_bus, monkeypatch):
+    """Through the REAL run_cycle: a seeded dashboard yields a market_read whose summary
+    is published on the decision-log row."""
+    handlers.set_control(fake_bus, enabled=True)
+    _seed_caches(fake_bus)
+    fake_bus.cache_set("cache:market:dashboard", {"categories": [{"category": "B", "tiles": [
+        {"display": "$ADVN-$DECN", "last": -620.0, "color_state": "risk_off_mild"}]}]})
+    monkeypatch.setattr(handlers.compute, "fetch_market_context", lambda: {"vix": 14})
+    monkeypatch.setattr("services.driver_svc.decider.decide",
+                        lambda packet, **kw: {"stand_down": True, "trades": []})
+    handlers.run_autonomous_cycle(fake_bus)
+    row = fake_bus.cache_get("cache:driver:autonomous").payload["decisions"][0]
+    assert row["market_read"] and "risk_off" in row["market_read"]
+
+
 # ── 5.3: autonomous command dispatch (cycle/enable/disable/stop) ─────────────
 
 

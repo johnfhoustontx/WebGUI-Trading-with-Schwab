@@ -164,7 +164,7 @@ def _read_sentiment_magnitude(bus):
 
 
 def _publish_autonomous(bus, *, day_pnl, positions, decision, guarded, executed,
-                        control, perf=None) -> int:
+                        control, perf=None, market_read=None) -> int:
     """Cache + publish the monitor view, prepending this cycle to the decision log.
 
     Reads the prior ``cache:driver:autonomous`` to grow a NEWEST-FIRST audit log
@@ -192,6 +192,10 @@ def _publish_autonomous(bus, *, day_pnl, positions, decision, guarded, executed,
         "rejected": guarded.get("rejected", []),
         "halted": guarded.get("halted", False),
         "halt_reason": guarded.get("halt_reason"),
+        # Additive observability: the one-line market_read summary the model saw this
+        # cycle (gamma regime · bias · breadth · sentiment), or None when absent.
+        "market_read": (market_read or {}).get("summary")
+        if isinstance(market_read, dict) else None,
     })
     st = AutonomousState(
         date=date.today().isoformat(),
@@ -280,7 +284,8 @@ def run_autonomous_cycle(bus) -> None:
     _publish_autonomous(bus, day_pnl=out.get("day_pnl"),
                         positions=out.get("open_positions", []),
                         decision=out.get("decision", {}), guarded=out,
-                        executed=executed, control=control, perf=perf)
+                        executed=executed, control=control, perf=perf,
+                        market_read=out.get("market_read"))
 
 
 def handle_command(bus, command) -> None:
