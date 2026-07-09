@@ -164,7 +164,7 @@ def _read_sentiment_magnitude(bus):
 
 
 def _publish_autonomous(bus, *, day_pnl, positions, decision, guarded, executed,
-                        control, perf=None, market_read=None) -> int:
+                        control, perf=None, market_read=None, target=None) -> int:
     """Cache + publish the monitor view, prepending this cycle to the decision log.
 
     Reads the prior ``cache:driver:autonomous`` to grow a NEWEST-FIRST audit log
@@ -203,7 +203,9 @@ def _publish_autonomous(bus, *, day_pnl, positions, decision, guarded, executed,
         halted=control.get("halted", False),
         halt_reason=control.get("reason"),
         day_pnl=day_pnl,
-        target=settings.DAILY_TARGET,
+        # The dynamic cumulative MTD target (falls back to the base if not supplied), so
+        # the /driver progress bar + halt reflect the SAME value the cycle used.
+        target=target if target is not None else settings.DAILY_TARGET,
         positions=positions,
         decisions=log[:_DECISION_LOG_CAP],
         perf=perf if isinstance(perf, dict) else {},   # bulletproof vs a malformed payload
@@ -254,8 +256,20 @@ def run_autonomous_cycle(bus) -> None:
     sent = _read_sentiment_magnitude(bus)
     if sent:
         market["sentiment"] = sent
-    out = compute.run_cycle(scan, paper, target=settings.DAILY_TARGET,
-                            limits=settings.limits(), market=market)
+    # Cumulative MTD banking target: carry the $500/day deficit/excess forward (capped
+    # [floor, cap]). The −$1,500 loss halt + per-trade caps are UNCHANGED — only the
+    # bank/stop threshold moves. Any failure → the flat base target (never block a cycle).
+    try:
+        today = date.today()
+        eff_target = compute.effective_target(
+            settings.DAILY_TARGET, compute._mtd_trading_days(today),
+            compute.mtd_realized_before_today(paper.get("closed_positions") or [], today),
+            cap=settings.TARGET_CAP, floor=settings.TARGET_FLOOR)
+    except Exception:  # noqa: BLE001 — degrade to the flat base target.
+        eff_target = settings.DAILY_TARGET
+    lim = settings.limits()
+    lim["daily_target"] = eff_target          # halt_state banks at the dynamic target
+    out = compute.run_cycle(scan, paper, target=eff_target, limits=lim, market=market)
     # Kill-switch tightening: re-read control RIGHT BEFORE firing. The top-of-fn gate
     # only catches a STOP/disable from before the cycle; the cycle itself is slow (a
     # proxy fetch + the Claude call), so a STOP that lands DURING it must still be
@@ -285,7 +299,7 @@ def run_autonomous_cycle(bus) -> None:
                         positions=out.get("open_positions", []),
                         decision=out.get("decision", {}), guarded=out,
                         executed=executed, control=control, perf=perf,
-                        market_read=out.get("market_read"))
+                        market_read=out.get("market_read"), target=eff_target)
 
 
 def handle_command(bus, command) -> None:
