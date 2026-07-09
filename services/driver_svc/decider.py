@@ -166,7 +166,14 @@ _SYSTEM = (
     "ceilings the code re-clamps to the risk budget), and spread across symbols/expiries to "
     "avoid over-concentration. Stand down only when edge is genuinely poor (weak scores/PoP "
     "across the menu) or conditions are hostile; standing down on a good-edge checkpoint "
-    "forfeits progress toward the target. Call submit_decision exactly once."
+    "forfeits progress toward the target. "
+    "A market_read may be present (gamma structure, breadth, sentiment). Use it to sharpen "
+    "strike/side selection and conviction — prefer put-credit shorts below the put wall and "
+    "call-credit shorts above the call wall; treat spot below the gamma flip (negative gamma) "
+    "or risk-off / falling breadth as a reason to be selective, NOT to stand down. When the "
+    "read is favorable, press toward the target. This is context to improve selection, not a "
+    "mandate to trade less. "
+    "Call submit_decision exactly once."
 )
 
 
