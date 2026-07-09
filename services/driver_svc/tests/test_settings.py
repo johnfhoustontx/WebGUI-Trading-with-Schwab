@@ -29,6 +29,12 @@ def test_target_cap_and_floor_defaults():
     assert settings.TARGET_FLOOR < settings.DAILY_TARGET < settings.TARGET_CAP
 
 
+def test_directional_gate_flag_default_off():
+    """The directional gate ships INERT — enabled only after the offline backtest
+    (validate_directional_gate.py) proves it blocks the CCS loss bucket."""
+    assert settings.DIRECTIONAL_GATE_ENABLED is False
+
+
 def test_resolve_model_prefers_env(monkeypatch):
     """The DRIVER_MODEL env var wins over the file and the default."""
     monkeypatch.setenv("DRIVER_MODEL", "claude-haiku-4-5-20251001")

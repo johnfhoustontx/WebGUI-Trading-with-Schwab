@@ -61,6 +61,12 @@ VIX_MAX = 35.0               # no new entries above this VIX (spreads collect mo
 # config.RISK_LIMITS is only a fallback).
 DAILY_LOSS_HALT = 1500.0     # $ daily loss that halts new entries
 MENU_TOP_N = 15             # how many top-scored signals Claude sees
+# Directional gate (2026-07-09): hard-block the wrong-side credit spread (a CCS in an up
+# tape / a PCS in a down tape) in guardrails, keyed on the market_read's price-truth
+# posture. Ships INERT (False) — run_cycle forces posture "neutral" until this is flipped
+# after the offline backtest (validate_directional_gate.py) shows it would have blocked the
+# CCS loss bucket without nuking winners. See the design/plan 2026-07-09.
+DIRECTIONAL_GATE_ENABLED = False
 # Decision model (committed build default: Opus 4.8). Override per-deployment via the
 # DRIVER_MODEL env var OR a gitignored shared/driver_model.txt file (see
 # _resolve_model) — e.g. put "claude-sonnet-5" in shared/driver_model.txt to run cheaper.
