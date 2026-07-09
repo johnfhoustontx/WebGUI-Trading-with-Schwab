@@ -272,15 +272,17 @@ def _index_price(quote_dict, *fields):
 
 
 def fetch_market_context() -> dict:
-    """VIX/SPX/VIX1D context for the decision packet (defensive → ``{}`` on failure).
+    """VIX/SPX/VIX1D + SPY/QQQ spot context for the packet (defensive → ``{}`` on failure).
 
-    Self-contained: fetches ``$VIX,$SPX,$VIX1D`` straight from the schwab-proxy
+    Self-contained: fetches ``$VIX,$SPX,$VIX1D,SPY,QQQ`` straight from the schwab-proxy
     (``PROXY_URL``) via ``requests``, replicating the legacy
     ``morning_agent.fetch_market_conditions`` index-quote parsing (index quotes nest
     their values under a ``"quote"`` sub-key — ``_index_price`` handles both nested
-    + flat shapes). Only ``vix`` is consumed downstream (the guardrails' VIX gate; a
-    missing ``vix`` → skip that gate); ``spx_spot`` / ``vix1d`` ride along as
-    context.
+    + flat shapes). Only ``vix`` is consumed by the guardrails (the VIX gate; a
+    missing ``vix`` → skip that gate); ``spx_spot`` / ``vix1d`` and the live
+    ``spy_spot`` / ``qqq_spot`` ride along as context — the ETF spots give the packet's
+    ``market_read`` a FRESH per-index spot for distance-to-flip/wall (the briefing spot
+    is the fallback).
 
     ANY failure — a down/slow proxy, a non-200, malformed JSON — degrades to ``{}``
     so a cycle is never blocked or crashed (``build_packet`` then reads
@@ -288,13 +290,15 @@ def fetch_market_context() -> dict:
     """
     try:
         resp = requests.get(f"{PROXY_URL}/quotes",
-                            params={"symbols": "$VIX,$SPX,$VIX1D"}, timeout=10)
+                            params={"symbols": "$VIX,$SPX,$VIX1D,SPY,QQQ"}, timeout=10)
         resp.raise_for_status()
         quotes = resp.json() or {}
         return {
             "vix": _index_price(quotes.get("$VIX", {})),
             "spx_spot": _index_price(quotes.get("$SPX", {})),
             "vix1d": _index_price(quotes.get("$VIX1D", {})),
+            "spy_spot": _index_price(quotes.get("SPY", {})),
+            "qqq_spot": _index_price(quotes.get("QQQ", {})),
         }
     except Exception:  # noqa: BLE001 — defensive: never block/crash a cycle.
         return {}

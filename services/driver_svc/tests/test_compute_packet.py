@@ -361,3 +361,26 @@ def test_fetch_market_context_non_200_is_empty(monkeypatch):
 
     monkeypatch.setattr(compute.requests, "get", lambda *a, **k: _Err({}))
     assert compute.fetch_market_context() == {}
+
+
+def test_fetch_market_context_includes_etf_spots(monkeypatch):
+    """SPY/QQQ are ETFs (flat quote shape) — their spot rides along for the market read."""
+    payload = {
+        "$VIX": {"quote": {"lastPrice": 13.5}},
+        "$SPX": {"quote": {"lastPrice": 5500.0}},
+        "$VIX1D": {"quote": {"lastPrice": 12.0}},
+        "SPY": {"assetMainType": "EQUITY", "lastPrice": 598.2},   # flat (ETF) shape
+        "QQQ": {"assetMainType": "EQUITY", "lastPrice": 521.4},
+    }
+    monkeypatch.setattr(compute.requests, "get", lambda *a, **k: _Resp(payload))
+    ctx = compute.fetch_market_context()
+    assert ctx["spy_spot"] == 598.2 and ctx["qqq_spot"] == 521.4
+    assert ctx["vix"] == 13.5 and ctx["spx_spot"] == 5500.0    # unchanged
+
+
+def test_fetch_market_context_missing_etf_spot_is_none(monkeypatch):
+    """A symbol absent from the response degrades to None (never a crash)."""
+    monkeypatch.setattr(compute.requests, "get",
+                        lambda *a, **k: _Resp({"$VIX": {"quote": {"lastPrice": 20.0}}}))
+    ctx = compute.fetch_market_context()
+    assert ctx["spy_spot"] is None and ctx["qqq_spot"] is None
