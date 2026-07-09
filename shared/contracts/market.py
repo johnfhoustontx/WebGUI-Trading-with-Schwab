@@ -19,3 +19,16 @@ class MarketDashboard(_Base):
     categories: list[dict] = []
     proxy_up: bool = False
     errors: list = []
+
+
+class MarketSummary(_Base):
+    """Market summary narrative payload (cache:market:summary).
+
+    A short Claude-written verdict market_svc publishes on a schedule. The webgui
+    ticker leads its scroll with this, followed by live rule-based data items.
+    Defensive: an empty ``narrative`` (no key / API error) means the ticker shows
+    live items only.
+    """
+
+    narrative: str = ""
+    generated_at: str | None = None
