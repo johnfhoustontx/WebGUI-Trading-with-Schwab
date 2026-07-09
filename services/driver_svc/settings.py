@@ -36,7 +36,14 @@ def _resolve_model() -> str:
     return "claude-opus-4-8"
 
 
-DAILY_TARGET = 500.0          # bank-the-day threshold ($ net day P&L)
+DAILY_TARGET = 500.0          # base bank-the-day threshold ($ net day P&L)
+# Cumulative MTD target band (2026-07-09): the banking target carries the $500/day
+# deficit/excess month-to-date, clamped to [floor, cap] — behind the pace it ratchets to
+# the cap (recover over days, never one reckless shot), ahead it eases to the floor (keep
+# a light day). The −$1,500 DAILY_LOSS_HALT + the per-trade caps are UNCHANGED, so this
+# only moves WHEN the day banks/stops, not how big any single trade can be.
+TARGET_CAP = 1000.0           # max ratcheted daily target (2x base)
+TARGET_FLOOR = 250.0          # min daily target when ahead of the MTD pace
 # ── AGGRESSIVE risk envelope ("Very Aggressive" profile, 2026-07-02, user choice) ──
 # Tuned to PRESS toward the $500/day target and tolerate real drawdown. Per-trade cap
 # funds the widest liquid $SPX (~$1,833/contract) with room to size up on smaller names;
@@ -72,4 +79,6 @@ def limits() -> dict:
         "max_trades_per_cycle": MAX_TRADES_PER_CYCLE,
         "vix_max": VIX_MAX,
         "daily_loss_halt": DAILY_LOSS_HALT,   # informs the model's loss budget in the packet
+        "target_cap": TARGET_CAP,             # cumulative MTD target band (see above)
+        "target_floor": TARGET_FLOOR,
     }
