@@ -709,18 +709,6 @@ def render():
             _b.disable()
             _b.tooltip(f"{_title} $SPX/SPY/QQQ briefing — not generated yet today")
             sched_btns[_slot] = _b
-    # History picker: browse past stored briefings. Pick a date (+ optional slot) and
-    # Open regenerates the report from the stored analysis (via the gamma_history
-    # command) and opens it in a new tab. Dates come from cache:options:gamma_briefings.
-    with ui.row().classes("items-center gap-2 flex-wrap"):
-        ui.label("History:").classes("opacity-60 text-sm")
-        hist_date = ui.select([], label="Date").props("dense options-dense").classes("w-40")
-        hist_slot = ui.select(
-            {"": "All slots", "premarket": "Premarket", "open": "Open",
-             "midday": "Midday", "close": "Close"}, value="") \
-            .props("dense options-dense").classes("w-32")
-        hist_open = ui.button("Open", icon="history").props("flat dense")
-        hist_hint = ui.label("").classes("opacity-50 text-xs")
     # Read-only view published by the options service (cache:options:gex_status);
     # version-polled like gamma/explain/analyze below. Sits alongside (does NOT
     # replace) the "Next refresh" countdown above.
@@ -754,6 +742,20 @@ def render():
             # hook is installed at creation (load fires once); updated in place after.
             heat_plot = ui.highchart(_heat_init_fig(), extras=["heatmap", "coloraxis"]).classes("w-full")
             heat_msg = ui.label("").classes("opacity-60 text-sm")
+
+    # History picker (BELOW the charts): browse past stored briefings. Pick a date
+    # (+ optional slot) and Open regenerates the report from the stored analysis (via
+    # the gamma_history command) and opens it in a new tab. Dates come from
+    # cache:options:gamma_briefings.
+    with ui.row().classes("items-center gap-2 flex-wrap"):
+        ui.label("History:").classes("opacity-60 text-sm")
+        hist_date = ui.select([], label="Date").props("dense options-dense").classes("w-40")
+        hist_slot = ui.select(
+            {"": "All slots", "premarket": "Premarket", "open": "Open",
+             "midday": "Midday", "close": "Close"}, value="") \
+            .props("dense options-dense").classes("w-32")
+        hist_open = ui.button("Open", icon="history").props("flat dense")
+        hist_hint = ui.label("").classes("opacity-50 text-xs")
 
     def _current_symbol():
         return (symbol_in.value or "").strip().upper()
