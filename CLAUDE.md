@@ -1150,6 +1150,41 @@ condition**. Sixth Tier-2 service. Pieces:
   [design](docs/plans/2026-07-07-market-dashboard-design.md) /
   [plan](docs/plans/2026-07-07-market-dashboard-plan.md).
 
+**Market Summary Ticker (every page) — DONE (2026-07-08).** A fixed scrolling marquee pinned
+to the **bottom of every page** (rendered in `main.py` `_layout`) that gives an at-a-glance
+market read synthesized from the app's own data. **Hybrid content:** it leads with a short
+**Claude-written verdict** (the "why", refreshed on a schedule) then scrolls **live,
+color-coded data items** (the fast numbers). Pieces:
+- **Narrative — Claude, scheduled (`market_svc`).** `compute.build_summary_packet` (PURE)
+  distills the dashboard + sentiment/trend caches into a compact packet;
+  `compute.generate_summary` calls Claude (Sonnet 5, thinking disabled, `max_tokens≈220`,
+  client built with `timeout=30/max_retries=1`) for a 1–2 sentence verdict; the scheduler's
+  `summary_due` gate (~20 min RTH / ~60 min off-hours) publishes **`cache:market:summary`**
+  (`MarketSummary` contract, `skip_unchanged=True`). Reuses the Gamma-Analyze pattern (lazy
+  `anthropic`, key via `ANTHROPIC_API_KEY`→`shared/anthropic_key.txt`) — fully defensive:
+  no key / API error → empty narrative → the ticker shows live items only. **Test hygiene:**
+  a market_svc `conftest` autouse fixture monkeypatches `_make_summary_client→None` so the
+  suite NEVER makes a live Claude call.
+- **Live items — rule-based, Tier-1 (`webgui/pages/ticker.py`).** PURE `ticker_items(dashboard,
+  sentiment)` composes `{text, tone}` items (sentiment score/bias, trend label/score, breadth,
+  VIX/VIX1D/VIX3M/SKEW, put/call, SPX/NDX, top-4 sector/thematic movers by |Δ|); `item_class`
+  maps `tone`→fixed Tailwind class (Tailwind-first, no `.style()`). Zero API cost, updates live.
+- **Render.** `render_ticker(active)` (called in `_layout`, gated by the Settings toggle) is a
+  fixed `ui.footer` marquee — the `@keyframes` animation is the ONE `ui.add_css` escape hatch;
+  scroll speed is a **finite `speed_class`** (slow/med/fast), not an inline style. A `@guard`ed
+  version-gated `ui.timer` reads the three cache versions and **only rebuilds when the RENDERED
+  content signature changes** (not on every 2 s dashboard bump) → the marquee scrolls smoothly
+  without tearing/jumping. Content column gets `pb-10` so the footer never covers content; the
+  "?" help fab (z-2300) stays above the ticker (z-2200).
+- **Control.** `app_settings` `ticker_enabled` (default on) + `ticker_speed`; a **Settings**
+  page toggle (Show + Slow/Medium/Fast). When off, `render_ticker` renders nothing.
+- market_svc **35** + shared/contracts **38** + webgui **687** green (no live API calls in the
+  suite); **live-verified** end-to-end (real Claude verdict published to `cache:market:summary`
+  + 14 correct color-coded live items from the live caches). **Restart `market_svc` + the
+  webgui** to see it. Built subagent-by-subagent (TDD, two-stage spec+quality review). Design/plan:
+  [design](docs/plans/2026-07-08-market-summary-ticker-design.md) /
+  [plan](docs/plans/2026-07-08-market-summary-ticker-plan.md).
+
 **Multi-strategy Swing Scanner (`/options/swing`) — Phase 1 DONE (2026-06-30).** The
 Swing Scanner was expanded from a credit-spread-only premium scanner to a **unified,
 single-symbol multi-strategy scanner** that builds + ranks candidate structures across
