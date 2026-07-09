@@ -46,15 +46,44 @@ def poll_interval(now=None):
     return RTH_INTERVAL_SEC if _is_rth(now) else OFFHOURS_INTERVAL_SEC
 
 
+SUMMARY_RTH_SEC = 20 * 60       # refresh the Claude verdict every ~20 min during RTH
+SUMMARY_OFFHOURS_SEC = 60 * 60  # ~hourly off-hours
+
+
+def summary_due(last_run, secs_since, *, now=None):
+    """Whether to regenerate the Claude verdict this cycle (pure).
+
+    ``last_run`` is None until the first run (→ always due). Otherwise fire when
+    ``secs_since`` the last run exceeds the RTH/off-hours interval.
+    """
+    if last_run is None:
+        return True
+    now = now or _dt.datetime.now(_CT)
+    threshold = SUMMARY_RTH_SEC if _is_rth(now) else SUMMARY_OFFHOURS_SEC
+    return secs_since >= threshold
+
+
 async def loop(bus) -> None:
-    """Poll → publish → sleep(poll_interval), forever. Never raises out."""
+    """Poll → publish → (periodic Claude summary) → sleep, forever. Never raises out."""
     loop_ = asyncio.get_running_loop()
+    last_summary = None
+    secs_since_summary = 0.0
     while True:
+        interval = poll_interval()
         try:
             payload = await loop_.run_in_executor(None, compute.collect, bus)
             await loop_.run_in_executor(None, handlers.publish, bus, payload)
+            if summary_due(last_summary, secs_since_summary):
+                sent = bus.cache_get("cache:sentiment:composite")
+                sent_payload = sent.payload if sent else {}
+                summary = await loop_.run_in_executor(
+                    None, compute.generate_summary, payload, sent_payload)
+                await loop_.run_in_executor(None, handlers.publish_summary, bus, summary)
+                last_summary = True
+                secs_since_summary = 0.0
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 — never let the scheduler die.
             _log.exception("market poll cycle failed")
-        await asyncio.sleep(poll_interval())
+        await asyncio.sleep(interval)
+        secs_since_summary += interval
