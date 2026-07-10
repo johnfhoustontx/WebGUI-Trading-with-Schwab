@@ -1706,7 +1706,13 @@ _ANALYZE_SYSTEM = (
     "of the session, specific to that index: 'rally' (an upside path), 'selloff' (a "
     "downside path) and 'chop' (a sideways/range path) — one sentence each. Fill 'why' "
     "with 1-2 plain sentences on why the tape is acting this way (macro context + the "
-    "session's path so far). Keep the headline and per-index notes terse and the "
+    "session's path so far). "
+    "FRAME EVERYTHING FROM THE TRADER'S PERSPECTIVE — write what the READER should DO "
+    "and expect, NOT what dealers are doing. Prefer 'you' and concrete actions ('fade "
+    "the call wall', 'buy dips toward the put wall', 'lean long / stay long above the "
+    "flip', 'respect the supply', 'trade with the trend', 'tighten stops') over "
+    "describing dealer hedging mechanics; you may mention the mechanism briefly, but "
+    "LEAD with the action. Keep the headline and per-index notes terse and the "
     "narrative to 2-3 sentences. Do NOT include any disclaimers, risk warnings, 'not "
     "financial advice' notes, or boilerplate — only the analysis."
 )
@@ -1716,24 +1722,31 @@ _ANALYZE_SYSTEM = (
 # is one ``submit_analysis`` tool_use block we render — the model never free-writes.
 _ANALYZE_TOOL = {
     "name": "submit_analysis",
-    "description": ("Return the structured intraday dealer-positioning analysis for "
-                    "$SPX, SPY and QQQ. The app renders it as an infographic, so copy "
-                    "the exact computed levels from the provided data rather than "
-                    "estimating."),
+    "description": ("Return the structured intraday options-flow analysis + trader "
+                    "playbook for $SPX, SPY and QQQ. The app renders it as an "
+                    "infographic, so copy the exact computed levels from the provided "
+                    "data rather than estimating. Frame the prose as what the reader "
+                    "should DO, not what dealers are doing."),
     "input_schema": {
         "type": "object",
         "properties": {
             "regime": {"type": "string",
-                       "description": "Short overall dealer-gamma regime label, e.g. "
-                                      "'Short gamma below spot' or 'Long gamma / pinned'."},
+                       "description": "Short overall regime label framed for the trader, "
+                                      "e.g. 'Trend day — stay long above the flip' or "
+                                      "'Pinned / range — fade the walls'."},
             "bias": {"type": "number",
                      "description": "Net directional bias, -100 (bearish) to +100 (bullish)."},
             "bias_label": {"type": "string",
                            "description": "Two-or-three-word bias label, e.g. 'Mildly bearish'."},
             "headline": {"type": "string",
-                         "description": "One-sentence headline for the next few hours."},
+                         "description": "One-sentence headline telling the reader what to "
+                                        "do / expect over the next few hours (an action, "
+                                        "not a description of dealer hedging)."},
             "narrative": {"type": "string",
-                          "description": "2-3 sentence plain read of what to expect and why."},
+                          "description": "2-3 sentence plain read of what the reader should "
+                                         "do and expect, and why — lead with the action "
+                                         "('lean long above the flip', 'fade the call "
+                                         "wall'), mention the mechanism only briefly."},
             "why": {"type": "string",
                     "description": "1-2 plain sentences: why the tape is acting this way "
                                    "(macro context + the session's path so far)."},
@@ -1752,15 +1765,28 @@ _ANALYZE_TOOL = {
                         "expected_move": {"type": "number",
                                           "description": "Expected move in points (1 std dev), not percent."},
                         "pc_ratio": {"type": "number", "description": "Put/call ratio."},
-                        "note": {"type": "string", "description": "Terse one-line read for this index."},
+                        "note": {"type": "string",
+                                 "description": "Terse one-line read for this index, framed "
+                                                "as what to do (e.g. 'buy dips toward 5900, "
+                                                "trim into the 5950 call wall')."},
                         "what_if": {
                             "type": "object",
                             "description": "Three short plain-English scenarios for this "
-                                           "index for the rest of the session.",
+                                           "index for the rest of the session, each telling "
+                                           "the reader how to play it.",
                             "properties": {
-                                "rally": {"type": "string", "description": "Upside path."},
-                                "selloff": {"type": "string", "description": "Downside path."},
-                                "chop": {"type": "string", "description": "Sideways/range path."},
+                                "rally": {"type": "string",
+                                          "description": "Upside path — what to do if it "
+                                                         "rallies (e.g. 'ride it, trim into "
+                                                         "the call wall')."},
+                                "selloff": {"type": "string",
+                                            "description": "Downside path — what to do if it "
+                                                           "sells off (e.g. 'buy the dip at "
+                                                           "the put wall, stops below')."},
+                                "chop": {"type": "string",
+                                         "description": "Sideways/range path — what to do if "
+                                                        "it chops (e.g. 'fade the edges, "
+                                                        "avoid the middle')."},
                             },
                         },
                     },
