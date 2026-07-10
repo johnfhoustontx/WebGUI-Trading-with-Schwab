@@ -150,6 +150,13 @@ def ticker_items(dashboard, sentiment):
         items.append({"text": f"{t.get('display', '')} {_fmt_pct(t.get('change_pct'))}".strip(),
                       "tone": _tone_from_state(t.get("color_state"))})
 
+    # Magnificent 7 composite (equal-weighted avg day move + breadth).
+    mag = next((t for t in byc.get("Magnificent 7", []) if t.get("basket")), None)
+    if mag and mag.get("avg_pct") is not None:
+        breadth = mag.get("breadth_text", "")
+        text = f"MAG7 {_fmt_pct(mag.get('avg_pct'))}" + (f" ({breadth})" if breadth else "")
+        items.append({"text": text, "tone": _tone_from_state(mag.get("color_state"))})
+
     # Top movers (sector + thematic), by |change|.
     movers = [t for c in ("Sector SPDR", "Thematic / Industry ETF") for t in byc.get(c, [])
               if t.get("change_pct") is not None]
