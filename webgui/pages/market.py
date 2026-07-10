@@ -43,6 +43,14 @@ def _fmt(v, nd=2):
 
 def tile_text(t):
     """Display strings for a tile: {last, change}."""
+    if t.get("basket"):
+        # Composite tile (MAG7): headline = equal-weighted avg day %-move,
+        # subline = breadth (e.g. "3/7 up").
+        try:
+            head = f"{float(t.get('avg_pct')):+.2f}%"
+        except (TypeError, ValueError):
+            head = "—"
+        return {"last": head, "change": t.get("breadth_text", "")}
     if t.get("last") is None:
         return {"last": "—", "change": ""}
     if t.get("value_only"):

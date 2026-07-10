@@ -21,7 +21,7 @@ Each entry:
 # Frame layout order (design §5): macro gauges → tape → rotation.
 CATEGORY_ORDER = [
     "Volatility", "Options Sentiment", "Market Internals / Breadth", "Currency",
-    "Cash Index", "Equity Index Futures", "Broad-Market ETF",
+    "Cash Index", "Equity Index Futures", "Broad-Market ETF", "Magnificent 7",
     "Sector SPDR", "Thematic / Industry ETF", "Factor / Momentum ETF",
     "Fixed Income / Credit ETF", "Crypto / Alternatives", "Countries",
 ]
@@ -45,11 +45,20 @@ def _external(csv, source, desc, cat, polarity, display):
             "value_only": False, "spread": None, "source": source}
 
 
+def _basket(display, members, desc, cat, polarity="normal"):
+    """A composite tile: equal-weighted avg day-move + breadth over ``members``
+    (each of which is also fetched as its own quote tile)."""
+    return {"csv_symbol": display, "display": display, "description": desc, "category": cat,
+            "polarity": polarity, "kind": "basket", "quote_symbol": None,
+            "value_only": False, "spread": None, "source": None, "basket": tuple(members)}
+
+
 _INT = "Market Internals / Breadth"
 _SEC = "Sector SPDR"
 _THM = "Thematic / Industry ETF"
 _BRD = "Broad-Market ETF"
 _CTY = "Countries"
+_MAG = "Magnificent 7"
 
 SYMBOL_MAP = [
     # Volatility (inverted — fear up = risk-off)
@@ -83,6 +92,17 @@ SYMBOL_MAP = [
     _q("IWM", "IWM", "iShares Russell 2000 ETF", _BRD),
     _q("RSP", "RSP", "Invesco S&P 500 Equal Weight ETF", _BRD),
     _q("QQEW", "QQEW", "First Trust Nasdaq-100 Equal Weight ETF", _BRD),
+    # Magnificent 7 — a leading equal-weighted composite (avg day-move + breadth)
+    # then the seven mega-cap constituents.
+    _basket("MAG7", ("NVDA", "MSFT", "GOOGL", "AMZN", "META", "AAPL", "TSLA"),
+            "Equal-weighted avg day move of the Magnificent 7 (+ N/7 advancing)", _MAG),
+    _q("NVDA", "NVDA", "NVIDIA", _MAG),
+    _q("MSFT", "MSFT", "Microsoft", _MAG),
+    _q("GOOGL", "GOOGL", "Alphabet (Google)", _MAG),
+    _q("AMZN", "AMZN", "Amazon", _MAG),
+    _q("META", "META", "Meta Platforms", _MAG),
+    _q("AAPL", "AAPL", "Apple", _MAG),
+    _q("TSLA", "TSLA", "Tesla", _MAG),
     # Factor / Momentum ETF
     _q("MTUM", "MTUM", "iShares MSCI USA Momentum Factor ETF", "Factor / Momentum ETF"),
     _q("SPMO", "SPMO", "Invesco S&P 500 Momentum ETF", "Factor / Momentum ETF"),
@@ -128,13 +148,16 @@ SYMBOL_MAP = [
 
 
 def quote_symbols():
-    """Deduped list of real Schwab symbols to fetch (kind=='quote' + spread legs)."""
+    """Deduped list of real Schwab symbols to fetch (kind=='quote' + spread legs
+    + basket members)."""
     out = []
     for t in SYMBOL_MAP:
         if t["kind"] == "quote" and t["quote_symbol"]:
             out.append(t["quote_symbol"])
         elif t["kind"] == "spread":
             out.extend([t["spread"][0], t["spread"][1]])
+        elif t["kind"] == "basket":
+            out.extend(t["basket"])
     seen, uniq = set(), []
     for s in out:
         if s not in seen:

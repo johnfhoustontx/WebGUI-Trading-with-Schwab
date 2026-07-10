@@ -111,6 +111,16 @@ def build_dashboard(raw, *, sector_pcr, proxy_up):
                 t.update(last=sector_pcr, change=None, change_pct=None,
                          color_state=classify.color_state(
                              dev, polarity=e["polarity"], value_only=True))
+        elif e["kind"] == "basket":  # equal-weighted composite (MAG7): avg %chg + breadth
+            pcts = [n[2] for n in (_leg(raw, m) for m in e.get("basket", ())) if n is not None]
+            if not pcts:
+                t.update(last=None, change=None, change_pct=None, color_state="no_data")
+            else:
+                avg = sum(pcts) / len(pcts)
+                up = sum(1 for p in pcts if p > 0)
+                t.update(last=None, change=None, change_pct=avg,
+                         basket=True, avg_pct=avg, breadth_text=f"{up}/{len(pcts)} up",
+                         color_state=classify.color_state(avg, polarity=e["polarity"]))
         tiles_by_cat[e["category"]].append(t)
 
     categories = [{"category": c, "tiles": tiles_by_cat[c]}

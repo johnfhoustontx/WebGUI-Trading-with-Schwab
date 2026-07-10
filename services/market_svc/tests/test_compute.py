@@ -23,6 +23,33 @@ def _raw():
     }
 
 
+def _mag_raw():
+    px = {"NVDA": -1.0, "MSFT": 0.6, "GOOGL": -0.4, "AMZN": 0.0,
+          "META": 3.0, "AAPL": -0.6, "TSLA": 0.4}
+    return {s: {"assetMainType": "EQUITY", "quote": {"lastPrice": 100.0, "netPercentChange": p}}
+            for s, p in px.items()}
+
+
+def test_mag7_basket_avg_and_breadth():
+    d = compute.build_dashboard(_mag_raw(), sector_pcr=None, proxy_up=True)
+    tiles = {t["display"]: t for c in d["categories"] for t in c["tiles"]}
+    mag = tiles["MAG7"]
+    expected_avg = (-1.0 + 0.6 - 0.4 + 0.0 + 3.0 - 0.6 + 0.4) / 7   # +0.2857
+    assert round(mag["change_pct"], 4) == round(expected_avg, 4)
+    assert mag["avg_pct"] == mag["change_pct"]
+    assert mag["breadth_text"] == "3/7 up"          # MSFT, META, TSLA > 0
+    assert mag["basket"] is True
+    assert mag["color_state"] == "risk_on_mild"     # +0.29% avg
+    # each constituent is also its own tile in the frame
+    assert tiles["NVDA"]["change_pct"] == -1.0
+
+
+def test_mag7_no_data_when_members_absent():
+    d = compute.build_dashboard({}, sector_pcr=None, proxy_up=True)
+    tiles = {t["display"]: t for c in d["categories"] for t in c["tiles"]}
+    assert tiles["MAG7"]["color_state"] == "no_data"
+
+
 def test_build_dashboard_shapes_categories_in_order():
     d = compute.build_dashboard(_raw(), sector_pcr=0.99, proxy_up=True)
     cats = [c["category"] for c in d["categories"]]

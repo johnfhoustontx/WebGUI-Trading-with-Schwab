@@ -9,6 +9,7 @@ _EXPECTED_DISPLAYS = {
     "SPX", "NDX",
     "/ES[U26]", "/NQ[U26]",
     "SPY", "DIA", "QQQ", "IWM", "RSP", "QQEW",
+    "MAG7", "NVDA", "MSFT", "GOOGL", "AMZN", "META", "AAPL", "TSLA",
     "MTUM", "SPMO",
     "SMH", "XSD", "IGV", "QTUM", "XBI", "XRT", "XME",
     "XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU", "XLV", "XLY",
@@ -19,12 +20,12 @@ _EXPECTED_DISPLAYS = {
 
 
 def test_every_csv_symbol_is_mapped():
-    # 55 tiles: $PCALL+$PCSP → ONE external put/call tile; the redundant HYG-LQD spread
-    # dropped; $ADD/$ADSPD dropped (Schwab serves no data for them + they duplicate the
-    # $ADVN-$DECN net-advancers tile); XLB added to Sector SPDR; +10 country ETFs.
-    assert len(S.SYMBOL_MAP) == 55
+    # 63 tiles: base 55 + the Magnificent 7 frame (a MAG7 composite + 7 constituents).
+    # (base 55 = $PCALL+$PCSP→ONE put/call tile; HYG-LQD dropped; $ADD/$ADSPD dropped;
+    # XLB added; +10 country ETFs.)
+    assert len(S.SYMBOL_MAP) == 63
     # A future mistyped ticker/display must fail: the full display set is pinned.
-    assert len(_EXPECTED_DISPLAYS) == 55
+    assert len(_EXPECTED_DISPLAYS) == 63
     assert {t["display"] for t in S.SYMBOL_MAP} == _EXPECTED_DISPLAYS
     # Every entry has a non-empty display; every quote tile has a real quote_symbol.
     for t in S.SYMBOL_MAP:
@@ -36,7 +37,7 @@ def test_every_csv_symbol_is_mapped():
 def test_categories_cover_the_expected_set_in_frame_order():
     assert S.CATEGORY_ORDER == [
         "Volatility", "Options Sentiment", "Market Internals / Breadth", "Currency",
-        "Cash Index", "Equity Index Futures", "Broad-Market ETF",
+        "Cash Index", "Equity Index Futures", "Broad-Market ETF", "Magnificent 7",
         "Sector SPDR", "Thematic / Industry ETF", "Factor / Momentum ETF",
         "Fixed Income / Credit ETF", "Crypto / Alternatives", "Countries",
     ]
@@ -64,11 +65,23 @@ def test_kinds():
     assert len(ext) == 1 and ext[0]["category"] == "Options Sentiment"
 
 
+def test_mag7_basket():
+    by_disp = {t["display"]: t for t in S.SYMBOL_MAP}
+    mag = by_disp["MAG7"]
+    assert mag["kind"] == "basket" and mag["category"] == "Magnificent 7"
+    assert mag["basket"] == ("NVDA", "MSFT", "GOOGL", "AMZN", "META", "AAPL", "TSLA")
+    # each constituent is ALSO its own quote tile in the same frame
+    for sym in mag["basket"]:
+        assert by_disp[sym]["kind"] == "quote"
+        assert by_disp[sym]["category"] == "Magnificent 7"
+
+
 def test_quote_symbols_are_the_real_ones_only():
     qs = S.quote_symbols()
-    # includes spread legs, excludes computed/external
+    # includes spread legs + basket members, excludes computed/external composites
     assert "$ADVN" in qs and "$DECN" in qs and "HYG" in qs and "LQD" in qs
-    assert "$ADVN-$DECN" not in qs and "HYG-LQD" not in qs
+    assert "NVDA" in qs and "TSLA" in qs          # basket members are fetched
+    assert "$ADVN-$DECN" not in qs and "HYG-LQD" not in qs and "MAG7" not in qs
     assert "$PCALL" not in qs
 
 
