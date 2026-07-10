@@ -548,3 +548,44 @@ def test_history_dates_distinct_newest_first():
     assert g.history_dates(payload) == ["2026-07-08", "2026-07-02"]  # distinct, order kept
     assert g.history_dates(None) == []
     assert g.history_dates({"briefings": []}) == []
+
+
+def test_flow_figure_builds_stacked_panels():
+    from pages.options import gamma as g
+    rows = [
+        {"ts": 1783000000, "spot": 500.0, "call_vol": 100, "put_vol": 80,
+         "call_prem": 2.0e6, "put_prem": 1.5e6},
+        {"ts": 1783000120, "spot": 501.0, "call_vol": 140, "put_vol": 130,
+         "call_prem": 3.0e6, "put_prem": 2.8e6},
+    ]
+    fig = g.flow_figure(rows)
+    names = [s["name"] for s in fig["series"]]
+    assert names == ["Price", "Call premium", "Put premium", "Net premium (call − put)"]
+    assert len(fig["yAxis"]) == 3                       # price / premium / net panels
+    call = next(s for s in fig["series"] if s["name"] == "Call premium")
+    assert call["data"][0] == [0, 2.0]                  # 2.0e6 -> 2.0 $M
+    net = next(s for s in fig["series"] if s["name"].startswith("Net"))
+    assert net["data"][0] == [0, 0.5] and net["type"] == "area"   # (2.0-1.5)/1e6
+
+
+def test_flow_figure_skips_missing_premium():
+    from pages.options import gamma as g
+    rows = [
+        {"ts": 1, "spot": 500.0, "call_prem": None, "put_prem": None},   # pre-Phase-1
+        {"ts": 2, "spot": 501.0, "call_prem": 1.0e6, "put_prem": 0.4e6},
+    ]
+    fig = g.flow_figure(rows)
+    call = next(s for s in fig["series"] if s["name"] == "Call premium")
+    assert call["data"] == [[1, 1.0]]                   # only the row that has premium
+    price = next(s for s in fig["series"] if s["name"] == "Price")
+    assert len(price["data"]) == 2                      # price present for both
+
+
+def test_flow_summary_text_variants():
+    from pages.options import gamma as g
+    assert "No flow data" in g.flow_summary_text([])
+    assert "not collected yet" in g.flow_summary_text(
+        [{"ts": 1, "spot": 1, "call_prem": None, "put_prem": None}])
+    s = g.flow_summary_text(
+        [{"ts": 1, "spot": 1, "call_vol": 10, "put_vol": 5, "call_prem": 3.0e6, "put_prem": 1.0e6}])
+    assert "3.0M" in s and "1.0M" in s and "+2.0M" in s

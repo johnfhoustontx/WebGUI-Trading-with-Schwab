@@ -570,6 +570,89 @@ def wrap_explain(symbol, body_html, full=False):
             f"</head><body>{inner}</body></html>")
 
 
+# Flow-view colors (price / call premium / put premium).
+FLOW_PRICE = "#e8d44d"   # yellow — underlying price
+FLOW_CALL = "#26c6a4"    # green — call premium
+FLOW_PUT = "#ef5f7a"     # pink — put premium
+
+
+def _flow_num(v):
+    return v if isinstance(v, (int, float)) else None
+
+
+def flow_figure(rows, height=680):
+    """Intraday options-flow chart for one symbol (dark, stacked panels).
+
+    ``rows`` = the snapshot's ``flow`` list ({ts, spot, call_vol, put_vol,
+    call_prem, put_prem}, one per 2-min snapshot). TOP panel: underlying **price**
+    (left axis) + daily-cumulative **call/put premium** in $M (right axis). BOTTOM
+    panel: **net premium (call − put)** in $M as a signed area (green call-lead /
+    red put-lead). Premium is None on rows that predate Phase-1 collection — those
+    points are skipped (the line just starts where premium began collecting)."""
+    rows = rows or []
+    times = [_fmt_ts(r.get("ts")) for r in rows]
+    spot = [[i, _flow_num(r.get("spot"))] for i, r in enumerate(rows)
+            if _flow_num(r.get("spot")) is not None]
+    callp = [[i, _flow_num(r.get("call_prem")) / 1e6] for i, r in enumerate(rows)
+             if _flow_num(r.get("call_prem")) is not None]
+    putp = [[i, _flow_num(r.get("put_prem")) / 1e6] for i, r in enumerate(rows)
+            if _flow_num(r.get("put_prem")) is not None]
+    net = []
+    for i, r in enumerate(rows):
+        cp, pp = _flow_num(r.get("call_prem")), _flow_num(r.get("put_prem"))
+        if cp is None and pp is None:
+            continue
+        net.append([i, ((cp or 0) - (pp or 0)) / 1e6])
+
+    fig = _base_chart("line", height)
+    fig["chart"]["marginBottom"] = 64
+    fig["legend"] = {"enabled": True, "itemStyle": {"color": FONT},
+                     "itemHoverStyle": {"color": "#ffffff"}}
+    fig.update({
+        "title": {"text": "Intraday options flow (price + call/put premium)",
+                  "style": {"color": FONT}},
+        "xAxis": {**_dark_axis("Time"), "categories": times,
+                  "labels": {"rotation": -45, "style": {"color": FONT}}},
+        "yAxis": [
+            {**_dark_axis("Price"), "top": "0%", "height": "62%"},
+            {**_dark_axis("Premium ($M)"), "top": "0%", "height": "62%", "opposite": True},
+            {**_dark_axis("Net premium ($M)"), "top": "68%", "height": "32%",
+             "offset": 0, "plotLines": [{"value": 0, "color": "#777777", "width": 1}]},
+        ],
+        "tooltip": {"shared": True, "backgroundColor": "#222222",
+                    "borderColor": "#444444", "style": {"color": FONT, "fontSize": "11px"},
+                    "valueDecimals": 2},
+        "series": [
+            {"type": "line", "name": "Price", "data": spot, "yAxis": 0,
+             "color": FLOW_PRICE, "lineWidth": 2, "marker": {"enabled": False}},
+            {"type": "line", "name": "Call premium", "data": callp, "yAxis": 1,
+             "color": FLOW_CALL, "lineWidth": 2, "marker": {"enabled": False}},
+            {"type": "line", "name": "Put premium", "data": putp, "yAxis": 1,
+             "color": FLOW_PUT, "lineWidth": 2, "marker": {"enabled": False}},
+            {"type": "area", "name": "Net premium (call − put)", "data": net, "yAxis": 2,
+             "threshold": 0, "color": FLOW_CALL, "negativeColor": FLOW_PUT,
+             "fillColor": "rgba(38,198,164,0.28)", "negativeFillColor": "rgba(239,95,122,0.28)",
+             "lineWidth": 1, "marker": {"enabled": False}},
+        ],
+    })
+    return fig
+
+
+def flow_summary_text(rows):
+    """One-line status for the Flow view header."""
+    rows = rows or []
+    if not rows:
+        return "No flow data yet for this session (collected going forward)."
+    last = rows[-1]
+    cp, pp = _flow_num(last.get("call_prem")), _flow_num(last.get("put_prem"))
+    if cp is None or pp is None:
+        return ("Premium not collected yet for this session — populates going "
+                "forward (price + volume shown).")
+    cv, pv = int(last.get("call_vol") or 0), int(last.get("put_vol") or 0)
+    return (f"Today: call ${cp / 1e6:,.1f}M · put ${pp / 1e6:,.1f}M premium · "
+            f"net ${(cp - pp) / 1e6:+,.1f}M · {cv:,} call / {pv:,} put contracts")
+
+
 def term_heatmap(term_grid):
     """Highcharts heatmap options for the Term view (net GEX by expiry × strike).
 
@@ -684,7 +767,7 @@ def render():
         symbol_in = ui.select(_sym_opts, value=_DEFAULT_SYMBOL,
                               with_input=True, label="Symbol").classes("w-40")
         fetch_btn = ui.button("Refresh now", icon="refresh", color=None).props("no-caps").classes(BTN_3D)
-        view_toggle = ui.toggle({v: _view_label(v) for v in list(_VIEWS) + ["Term"]},
+        view_toggle = ui.toggle({v: _view_label(v) for v in list(_VIEWS) + ["Flow", "Term"]},
                                  value="GEX")
         explain_btn = ui.button("Explain", icon="help", color=None).props("no-caps").classes(BTN_3D)
         analyze_btn = ui.button("Analyze", icon="psychology", color=None).props("no-caps").classes(BTN_3D)
@@ -823,6 +906,16 @@ def render():
             heat_msg.set_visibility(False)
             _apply_flex(0, term=True)
             summary_lbl.text = summary_text({"spot": spot, "strike_count": None}, "Term")
+            return
+        if view == "Flow":
+            # Intraday options-flow: price + call/put premium + net panel, full width
+            # (no heatmap). Same single chart element as Term (recreated on kind change).
+            _set_chart(flow_figure(snap.get("flow") or []))
+            state["chart_el"].set_visibility(True)
+            heat_plot.set_visibility(False)
+            heat_msg.set_visibility(False)
+            _apply_flex(0, term=True)
+            summary_lbl.text = flow_summary_text(snap.get("flow"))
             return
 
         entry = (snap.get("views") or {}).get(view) or {}

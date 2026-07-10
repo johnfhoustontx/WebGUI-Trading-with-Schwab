@@ -1215,6 +1215,7 @@ def gamma_snapshot(symbol: str) -> dict | None:
         except Exception:
             return []
 
+    flow = []
     try:
         views = {}
         for vname, (idx, vstr) in _GAMMA_VIEWS.items():
@@ -1237,6 +1238,16 @@ def gamma_snapshot(symbol: str) -> dict | None:
                     "hedge_pressure": data.get("hedge_pressure"),
                 }
             views[vname] = entry
+        # Intraday options-flow series (spot + daily-cumulative call/put volume +
+        # premium) for the Flow view — reuses the SAME read-only connection as the
+        # view history loads (one open per snapshot). Same active-session date.
+        if hist_conn is not None:
+            try:
+                _frows = gh.load_flow_series(hist_conn, symbol, session_date)
+                flow = [{"ts": r[0], "spot": r[1], "call_vol": r[2], "put_vol": r[3],
+                         "call_prem": r[4], "put_prem": r[5]} for r in _frows]
+            except Exception:
+                flow = []
     finally:
         if hist_conn is not None:
             try:
@@ -1258,7 +1269,7 @@ def gamma_snapshot(symbol: str) -> dict | None:
         term = {}
 
     return {"symbol": symbol, "spot": spot, "dte": dte,
-            "views": views, "term": term}
+            "views": views, "term": term, "flow": flow}
 
 
 # ── Intraday GEX history collection (Tier-2 owner) ──────────────────────────
