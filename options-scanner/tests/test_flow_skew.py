@@ -256,3 +256,49 @@ def test_volume_malformed_contracts_dont_raise():
     v = flow_skew.index_call_put_volume(chain)
     assert v["call_vol"] == 10
     assert v["put_vol"] == 5
+
+
+#############################################
+# index_call_put_premium
+#############################################
+
+def _pc(vol, mark=None, bid=None, ask=None):
+    d = {"strike": 100.0, "totalVolume": vol}
+    if mark is not None:
+        d["mark"] = mark
+    if bid is not None:
+        d["bid"] = bid
+    if ask is not None:
+        d["ask"] = ask
+    return d
+
+
+def test_index_call_put_premium_sums_mark_x_vol_x100():
+    chain = {
+        "callExpDateMap": {"2026-07-11:3": {"100.0": [_pc(10, mark=2.0)],
+                                            "105.0": [_pc(5, mark=1.0)]}},
+        "putExpDateMap": {"2026-07-11:3": {"95.0": [_pc(4, mark=3.0)]}},
+    }
+    out = flow_skew.index_call_put_premium(chain)
+    assert out["call_prem"] == (10 * 2.0 + 5 * 1.0) * 100  # 2500
+    assert out["put_prem"] == 4 * 3.0 * 100                # 1200
+
+
+def test_premium_falls_back_to_bid_ask_mid():
+    chain = {"callExpDateMap": {"e": {"100.0": [_pc(10, bid=1.0, ask=3.0)]}},  # mid 2.0
+             "putExpDateMap": {}}
+    assert flow_skew.index_call_put_premium(chain)["call_prem"] == 10 * 2.0 * 100  # 2000
+
+
+def test_premium_skips_unusable_and_zero_vol():
+    chain = {"callExpDateMap": {"e": {"100.0": [{"strike": 100, "totalVolume": 10},  # no price
+                                               _pc(0, mark=5.0)]}},                  # zero vol
+             "putExpDateMap": {}}
+    assert flow_skew.index_call_put_premium(chain)["call_prem"] == 0.0
+
+
+def test_premium_defensive_empty_and_none():
+    assert flow_skew.index_call_put_premium({"callExpDateMap": {}, "putExpDateMap": {}}) == {
+        "call_prem": 0.0, "put_prem": 0.0}
+    assert flow_skew.index_call_put_premium(None) is None
+    assert flow_skew.index_call_put_premium({}) is None

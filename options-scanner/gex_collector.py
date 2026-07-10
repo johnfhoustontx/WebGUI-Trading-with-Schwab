@@ -201,14 +201,18 @@ def poll_once(client, engine, conn, lock=None, symbols=None) -> None:
             try:
                 rr = flow_skew.risk_reversal_25d(chain)
                 vol = flow_skew.index_call_put_volume(chain)
+                prem = flow_skew.index_call_put_premium(chain)
                 skew_fields = {
                     "rr_25d": (rr or {}).get("rr"),
                     "call_vol": (vol or {}).get("call_vol"),
                     "put_vol": (vol or {}).get("put_vol"),
+                    "call_prem": (prem or {}).get("call_prem"),
+                    "put_prem": (prem or {}).get("put_prem"),
                 }
             except Exception:
                 log.debug("skew compute failed for %s", symbol, exc_info=True)
-                skew_fields = {"rr_25d": None, "call_vol": None, "put_vol": None}
+                skew_fields = {"rr_25d": None, "call_vol": None, "put_vol": None,
+                               "call_prem": None, "put_prem": None}
             # Single pass yields GEX, Charm, DEX, Vanna — all persisted below.
             gex, charm, dex, vanna = engine.calc_all_from_chain(chain, use_volume=False)
             dte = engine._last_dte

@@ -56,6 +56,8 @@ CREATE TABLE IF NOT EXISTS snapshots (
     rr_25d                    REAL,
     call_vol                  INTEGER,
     put_vol                   INTEGER,
+    call_prem                 REAL,
+    put_prem                  REAL,
     PRIMARY KEY (symbol, view, ts)
 );
 CREATE INDEX IF NOT EXISTS idx_snap_today
@@ -94,6 +96,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
         ("rr_25d", "REAL"),
         ("call_vol", "INTEGER"),
         ("put_vol", "INTEGER"),
+        ("call_prem", "REAL"),
+        ("put_prem", "REAL"),
     ):
         if col not in existing:
             conn.execute(f"ALTER TABLE snapshots ADD COLUMN {col} {col_type}")
@@ -187,8 +191,8 @@ def insert_snapshot(
             (symbol, view, ts, spot, flip, top_pos_strike,
              top_neg_strike, net_total, dte, gex_json,
              net_delta_0dte, projected_net_delta_close, hedge_pressure,
-             rr_25d, call_vol, put_vol)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             rr_25d, call_vol, put_vol, call_prem, put_prem)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             symbol,
@@ -207,6 +211,8 @@ def insert_snapshot(
             summary.get("rr_25d"),
             summary.get("call_vol"),
             summary.get("put_vol"),
+            summary.get("call_prem"),
+            summary.get("put_prem"),
         ),
     )
 
@@ -307,6 +313,35 @@ def latest_skew_by_symbol(
          LIMIT 2
         """,
         (symbol, view),
+    )
+    return cur.fetchall()
+
+
+def load_flow_series(
+    conn: sqlite3.Connection,
+    symbol: str,
+    d=None,
+) -> list[tuple]:
+    """Intraday options-flow series for one symbol on LOCAL date ``d`` (default today).
+
+    One row per 2-min snapshot from the ``gex`` view, chronological:
+    ``(ts, spot, call_vol, put_vol, call_prem, put_prem)`` — the underlying price plus
+    the daily-cumulative call/put volume (contracts) + premium (dollars). Feeds the
+    intraday premium-flow chart; the frontend derives per-window flow + net from the
+    cumulative series. Uses the sargable ``ts >= ? AND ts < ?`` range so the ``ts``
+    index applies. Passing an explicit ``d`` loads a prior session.
+    """
+    start, end = _local_unix_range(d)
+    cur = conn.execute(
+        """
+        SELECT ts, spot, call_vol, put_vol, call_prem, put_prem
+          FROM snapshots
+         WHERE symbol = ?
+           AND view   = 'gex'
+           AND ts >= ? AND ts < ?
+         ORDER BY ts
+        """,
+        (symbol, start, end),
     )
     return cur.fetchall()
 
