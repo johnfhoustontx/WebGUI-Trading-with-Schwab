@@ -155,21 +155,43 @@ def _derive(data: GammaRead) -> Dict:
     pin_lo, pin_hi = sorted([pct(data.put_wall), pct(data.call_wall)])
 
     drift_word = "up into the close" if charm_up else "down into the close"
-    flow_word = "dealer buying" if dex_buy else "dealer selling"
-    tailwind_word = "a tailwind" if dex_buy else "a headwind"
-    regime_word = "range-bound" if long_gamma else "trending / amplified"
-    invert_word = "Inverts" if long_gamma else "Calms"
+
+    # Per-signal reader-first reads (what YOU should do, not what dealers are doing).
+    # Precomputed here \u2014 normal strings, so em-dashes/apostrophes are unconstrained
+    # (unlike inside the big terminal f-string body, where they'd be f-expr backslashes).
+    if long_gamma:
+        gex_read = ('You\u2019re <b>above the flip</b>, so trade a <b>pinned</b> tape. Moves get '
+                    'dampened \u2014 fade the edges (sell into the call wall, buy the put wall) '
+                    'and expect chop, not breakouts.')
+    else:
+        gex_read = ('You\u2019re <b>below the flip</b>, so trade a <b>trending</b> tape. Moves '
+                    'amplify \u2014 go with the trend, give it room, and don\u2019t fade strength.')
+
+    charm_read = (f'Expect price to <b>drift {drift_word}</b> (charm pull) \u2014 <b>lean '
+                  f'{"up" if charm_up else "down"}</b>. Strongest in the last hour and on '
+                  f'OPEX Thu\u2013Fri.')
+
+    flow_amt = _fmt_flow(data.dex_flow_usd).split('$')[-1]
+    if dex_buy:
+        dex_read = (f'A standing <b>bid under</b> the tape (${flow_amt} of hedging) \u2014 '
+                    f'lean long and buy dips.')
+    else:
+        dex_read = (f'A standing <b>offer over</b> the tape (${flow_amt} of hedging) \u2014 '
+                    f'respect the supply; sell rallies.')
 
     net_read = (
-        f'Three signals lean the same way \u2014 <b>{regime_word} with a slow '
-        f'drift {"higher" if charm_up else "lower"}</b>. '
-        f'{"Long" if long_gamma else "Short"} gamma '
-        f'{"pins price between" if long_gamma else "lets price run past"} '
-        f'<b>{_fmt_px(data.put_wall)}</b> and <b>{_fmt_px(data.call_wall)}</b>, '
-        f'charm nudges it {drift_word.split(" into")[0]}, and '
-        f'<b>{_fmt_flow(data.dex_flow_usd)}</b> of {flow_word} sits underneath as '
-        f'{tailwind_word}. <span class="risk">{invert_word} if '
-        f'{_fmt_px(data.gamma_flip)} fails on volume.</span>'
+        f'All three signals line up \u2014 trade it as a '
+        f'<b>{"range-bound" if long_gamma else "trending"} tape drifting '
+        f'{"higher" if charm_up else "lower"}</b>. '
+        + (f'Fade the edges: sell into <b>{_fmt_px(data.call_wall)}</b>, buy toward '
+           f'<b>{_fmt_px(data.put_wall)}</b>, and lean with the drift. ' if long_gamma
+           else f'Go with the move and give it room past <b>{_fmt_px(data.put_wall)}</b> / '
+                f'<b>{_fmt_px(data.call_wall)}</b> \u2014 don\u2019t fade strength. ')
+        + f'A <b>{"standing bid" if dex_buy else "standing offer"}</b> '
+          f'({_fmt_flow(data.dex_flow_usd)} of hedging) sits '
+          f'{"under" if dex_buy else "over"} you. '
+          f'<span class="risk">Reassess if {_fmt_px(data.gamma_flip)} fails on volume '
+          f'\u2014 the regime flips.</span>'
     )
 
     # --- Vanna (VEX) ---
@@ -180,19 +202,19 @@ def _derive(data: GammaRead) -> Dict:
         vex_pos = vex >= 0
         if vex_pos and iv == "falling":
             vanna_lean = ("up", "\u25b2 Vanna rally")
-            vanna_read = ("Positive VEX with IV falling \u2014 dealer delta turns long, "
-                          "a vanna-rally bid under price.")
+            vanna_read = ("Falling IV is a tailwind here (positive VEX) \u2014 expect a grind "
+                          "higher; lean long and buy dips.")
         elif vex_pos and iv == "rising":
             vanna_lean = ("down", "\u25bc Vol bleed")
-            vanna_read = ("Positive VEX but IV rising \u2014 dealer delta sheds, "
-                          "a drag as vol firms.")
+            vanna_read = ("Rising IV is a drag here (positive VEX) \u2014 fade rallies; expect "
+                          "a slow bleed as vol firms.")
         elif not vex_pos:
             vanna_lean = ("down", "\u25bc Waterfall risk")
-            vanna_read = ("Negative VEX \u2014 a vol spike forces dealers to chase: "
-                          "selling into declines, buying into rallies.")
+            vanna_read = ("Negative VEX \u2014 a vol spike accelerates declines. Tighten stops, "
+                          "don\u2019t buy falling knives, and respect the downside.")
         else:  # positive VEX, flat IV
             vanna_lean = ("range", "\u25c7 Neutral drift")
-            vanna_read = "Positive VEX, IV flat \u2014 little vol-driven drift right now."
+            vanna_read = "Positive VEX, IV flat \u2014 little vol-driven push; trade the levels, not vol."
         vex_str = _fmt_signed_b(vex)
         iv_label = iv
     else:
@@ -247,6 +269,9 @@ def _derive(data: GammaRead) -> Dict:
         charm_lean_class=charm_lean[0], charm_lean_text=charm_lean[1],
         dex_lean_class=dex_lean[0], dex_lean_text=dex_lean[1],
         drift_word=drift_word,
+        gex_read=gex_read,
+        charm_read=charm_read,
+        dex_read=dex_read,
         sentiment_score=int(data.sentiment_score),
         sentiment_trend=data.sentiment_trend.replace("_", " "),
         sentiment_trend_bull="bull" in data.sentiment_trend.lower(),
@@ -614,7 +639,7 @@ def _render_terminal(c: Dict) -> str:
     body = f"""<div class="wrap">
   <header class="head">
     <div>
-      <div class="kicker">Gamma Desk Read \u00b7 Dealer Positioning</div>
+      <div class="kicker">Gamma Desk Read \u00b7 Your Playbook</div>
       <div class="id"><div class="ticker">$<em>{c['symbol_raw']}</em></div>
         <div class="spot-box"><span class="lab">Spot</span><span class="val">{c['spot']}</span></div></div>
     </div>
@@ -645,7 +670,7 @@ def _render_terminal(c: Dict) -> str:
       <article class="sig {c['gex_lean_class']}">
         <div class="sig-head"><div class="sig-name">Gamma Exposure <span>GEX</span></div>
           <div class="lean {c['gex_lean_class']}">{c['gex_lean_text']}</div></div>
-        <p class="sig-read">Spot is <b>{'above' if c['regime_class']=='sup' else 'below'} the flip</b> \u2014 dealers {'long' if c['regime_class']=='sup' else 'short'} gamma. {'They buy dips and sell rips, so moves get dampened and price pins between the walls.' if c['regime_class']=='sup' else 'They sell dips and buy rips, so moves trend and amplify.'}</p>
+        <p class="sig-read">{c['gex_read']}</p>
         <div class="sig-data">
           <div class="dpt"><span class="k">Call wall</span><span class="v res">{c['call_wall']}</span></div>
           <div class="dpt"><span class="k">Put wall</span><span class="v sup">{c['put_wall']}</span></div>
@@ -656,7 +681,7 @@ def _render_terminal(c: Dict) -> str:
       <article class="sig {c['charm_lean_class']}">
         <div class="sig-head"><div class="sig-name">Charm Pressure <span>\u0394-DECAY</span></div>
           <div class="lean {c['charm_lean_class']}">{c['charm_lean_text']}</div></div>
-        <p class="sig-read">Spot {'above' if c['charm_lean_class']=='up' else 'below'} the charm flip \u2014 should <b>drift price {c['drift_word']}</b>. Strongest in the last hour and on OPEX Thu\u2013Fri.</p>
+        <p class="sig-read">{c['charm_read']}</p>
         <div class="sig-data">
           <div class="dpt"><span class="k">Charm flip</span><span class="v">{c['charm_flip']}</span></div>
           <div class="dpt"><span class="k">Max +decay</span><span class="v sup">{c['charm_max_pos']}</span></div>
@@ -667,7 +692,7 @@ def _render_terminal(c: Dict) -> str:
       <article class="sig {c['dex_lean_class']}">
         <div class="sig-head"><div class="sig-name">Delta Exposure <span>DEX</span></div>
           <div class="lean {c['dex_lean_class']}">{c['dex_lean_text']}</div></div>
-        <p class="sig-read">Dealers must <b>{c['flow'].split()[0].lower()} {c['flow'].split('$')[1]}</b> of shares to stay hedged \u2014 {'supportive of upward' if c['flow_class']=='sup' else 'a drag on'} price action.</p>
+        <p class="sig-read">{c['dex_read']}</p>
         <div class="sig-data"><div class="dpt"><span class="k">Net hedge flow</span><span class="v {c['flow_class']}">{c['flow']}</span></div></div>
         <div class="play"><span class="t">Play</span> &nbsp;{'Favor the long side.' if c['flow_class']=='sup' else 'Respect the supply.'} <span class="risk">Watch the projected EOD flip \u2014 once hedge pressure crosses zero the {'tailwind turns headwind' if c['flow_class']=='sup' else 'pressure lifts'}.</span></div>
       </article>
