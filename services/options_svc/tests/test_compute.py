@@ -2376,8 +2376,8 @@ def test_gex_status_view_in_window(monkeypatch):
     assert out["age_seconds"] == 120
     # last_ts=1781530800 is 8:40 AM CT (formatted via _fmt_clock).
     assert out["last_scan"] == "8:40 AM"
-    # Next 2-min boundary strictly after 10:02 within the window → 10:04.
-    assert out["next_scan"] == "10:04 AM"
+    # Next 1-min boundary strictly after 10:02 within the window → 10:03.
+    assert out["next_scan"] == "10:03 AM"
 
 
 def test_gex_status_view_after_window_no_next(monkeypatch):
@@ -2406,16 +2406,16 @@ def test_gex_next_scan_boundaries():
     assert before is not None
     assert (before.hour, before.minute) == (8, 30)
 
-    # Inside the window → next 2-min boundary strictly after now.
+    # Inside the window → next 1-min boundary strictly after now.
     inside = compute._gex_next_scan(ct(10, 2))
     assert inside is not None
-    assert (inside.hour, inside.minute) == (10, 4)
+    assert (inside.hour, inside.minute) == (10, 3)
 
     # Exactly at the stop boundary (15:20) → None.
     assert compute._gex_next_scan(ct(15, 20)) is None
 
     # Just before stop where the next boundary would be >= stop → None.
-    assert compute._gex_next_scan(ct(15, 18)) is None
+    assert compute._gex_next_scan(ct(15, 19)) is None
 
 
 # ── flow_skew_view (per-index skew level + change since prior snapshot) ───────
