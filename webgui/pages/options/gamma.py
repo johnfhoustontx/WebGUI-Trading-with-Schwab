@@ -253,6 +253,11 @@ def panel_flex(n_cols, full_cols=205, min_heat=0.28, max_heat=0.70):
     return round(1.0 - heat, 4), round(heat, 4)
 
 
+# Fixed strike/heatmap flex split now that the full day + forward band are shown.
+# (strike, heat). Flip to (0.70, 0.30) if the day gets hard to read.
+_STRIKE_HEAT_SPLIT = (0.40, 0.60)
+
+
 # Collector status-bar color → Tailwind arbitrary-value class. The finite color set
 # comes from gex_status.classify_collector_status ({green, red, gray, #c48b00}); the
 # compute default/fallback is #666666. Exact values preserved as text-[…] classes.
@@ -375,11 +380,16 @@ def _coloraxis(zmax):
     return ca
 
 
-def heatmap_figure(rows, view="GEX", height=680, yrange=None):
+def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None):
     """Intraday strike×time Highcharts heatmap (dark, cell separators, concise
     hover) with the underlying spot-price line overlaid on the same (linear)
     strike axis. ``yrange`` (when given) sets the Strike axis range so it aligns
-    with the bar chart's near-spot window."""
+    with the bar chart's near-spot window.
+
+    ``projection`` (GEX only) appends a forward band: extra time columns of
+    projected net-per-mark cells on the SAME heatmap series/colorAxis, a 'now'
+    divider between the collected and future columns, the Spot line continued flat
+    along the cone midline, and faint EM up/down cone overlays."""
     m = heatmap_matrix(rows)
     times, strikes, z = m["x"], m["y"], m["z"]
     # Only build cells for strikes within the visible ``yrange`` window. GEX net is
@@ -421,6 +431,56 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None):
                        "color": PRICE_LINE, "lineWidth": 2, "marker": {"enabled": False},
                        "colorAxis": False, "enableMouseTracking": True, "states": no_fade,
                        "tooltip": {"headerFormat": "", "pointFormat": "Spot {point.y:,.2f}"}})
+    # Forward projection band (GEX only): extend the figure with future columns,
+    # a 'now' seam, the spot line continued along the cone midline, and EM cones.
+    xaxis_plotlines = []
+    if projection and projection.get("times") and projection.get("grid"):
+        ptimes = list(projection["times"])
+        base = len(times)
+        pgrid = projection["grid"]
+        cone = projection.get("cone") or {}
+        # Future heatmap cells on the SAME heatmap series/colorAxis, cropped to yrange.
+        proj_rows_for_zmax = []
+        heat_series = next(s for s in series if s["type"] == "heatmap")
+        for strike, vals in pgrid.items():
+            try:
+                sk = float(strike)
+            except (TypeError, ValueError):
+                continue
+            if yrange is not None and not (yrange[0] <= sk <= yrange[1]):
+                continue
+            proj_rows_for_zmax.append([v for v in vals if v is not None])
+            for j, v in enumerate(vals):
+                if v is not None:
+                    heat_series["data"].append([base + j, sk, v])
+        # Re-clamp the color axis over collected + projected visible cells (robust
+        # 95th-pct so a few extreme 0-DTE ATM close cells don't wash the scale).
+        zmax = _robust_zmax([z[yi] for yi in vis] + proj_rows_for_zmax) or None
+        # 'now' divider between the last collected and first future column.
+        xaxis_plotlines.append({"value": base - 0.5, "color": "#8a93a3", "width": 1,
+                                "dashStyle": "Dash", "zIndex": 4,
+                                "className": "gamma-now-divider",
+                                "label": {"text": "now", "style": {"color": FONT},
+                                          "rotation": 0, "y": 12}})
+        # Continue the Spot line flat along cone.mid into the future.
+        mids = cone.get("mid") or []
+        spot_series = next((s for s in series if s.get("name") == "Spot"), None)
+        if spot_series is not None:
+            for j, mid in enumerate(mids):
+                if isinstance(mid, (int, float)):
+                    spot_series["data"].append([base + j, mid])
+        # EM up/down faint dashed overlays (own axis, ignore colorAxis).
+        def _cone_series(name, key, color):
+            pts = [[base + j, lvl] for j, lvl in enumerate(cone.get(key) or [])
+                   if isinstance(lvl, (int, float))]
+            return {"type": "line", "name": name, "data": pts, "color": color,
+                    "dashStyle": "ShortDash", "lineWidth": 1, "colorAxis": False,
+                    "marker": {"enabled": False}, "enableMouseTracking": False,
+                    "states": no_fade,
+                    "tooltip": {"headerFormat": "", "pointFormat": name + " {point.y:,.2f}"}}
+        series.append(_cone_series("EM up", "up", "#7fd1a3"))
+        series.append(_cone_series("EM down", "down", "#e79a9a"))
+        times = times + ptimes
     yaxis = {**_dark_axis("Strike"), "startOnTick": False, "endOnTick": False}
     if yrange is not None:
         yaxis["min"], yaxis["max"] = yrange[0], yrange[1]
@@ -437,7 +497,8 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None):
         "title": {"text": f"{_view_label(view)} intraday (strike × time)",
                   "style": {"color": FONT}},
         "xAxis": {**_dark_axis("Time"), "categories": times,
-                  "labels": {"rotation": -45, "style": {"color": FONT}}},
+                  "labels": {"rotation": -45, "style": {"color": FONT}},
+                  "plotLines": xaxis_plotlines},
         "yAxis": yaxis,
         "colorAxis": _coloraxis(zmax),
         "series": series,
@@ -861,7 +922,7 @@ def render():
             heatmap_box.set_visibility(False)
             return
         heatmap_box.set_visibility(True)
-        bar_w, heat_w = panel_flex(n_cols)
+        bar_w, heat_w = _STRIKE_HEAT_SPLIT
         _set_flex_class(chart_box, "chart", flex_class(bar_w))
         _set_flex_class(heatmap_box, "heat", flex_class(heat_w))
 
@@ -968,7 +1029,15 @@ def render():
             {**summary, "strike_count": data.get("strike_count")}, _view_label(view))
 
         if rows:
-            _set_figure(heat_plot, heatmap_figure(rows, view, yrange=yr))
+            projection = None
+            if view == "GEX":
+                proj = entry.get("projection") or {}
+                if proj.get("times") and proj.get("grid"):
+                    projection = {"times": proj["times"],
+                                  "grid": _refloat_keys(proj["grid"]),
+                                  "cone": proj.get("cone") or {},
+                                  "spot": proj.get("spot")}
+            _set_figure(heat_plot, heatmap_figure(rows, view, yrange=yr, projection=projection))
             heat_plot.set_visibility(True)
             heat_msg.set_visibility(False)
         else:

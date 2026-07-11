@@ -589,3 +589,39 @@ def test_flow_summary_text_variants():
     s = g.flow_summary_text(
         [{"ts": 1, "spot": 1, "call_vol": 10, "put_vol": 5, "call_prem": 3.0e6, "put_prem": 1.0e6}])
     assert "3.0M" in s and "1.0M" in s and "+2.0M" in s
+
+
+def _proj_rows():
+    return [("09:30", 100.0, None, None, None, 0,
+             {99.0: {"net": 5.0}, 100.0: {"net": -3.0}, 101.0: {"net": 4.0}}),
+            ("09:31", 100.2, None, None, None, 0,
+             {99.0: {"net": 6.0}, 100.0: {"net": -2.0}, 101.0: {"net": 5.0}})]
+
+
+def test_heatmap_appends_projection_columns():
+    proj = {"times": ["13:15", "13:30"], "spot": 100.0,
+            "grid": {99.0: [5.0, 6.0], 100.0: [-8.0, -12.0], 101.0: [4.0, 3.0]},
+            "cone": {"mid": [100.0, 100.0], "up": [100.5, 100.8], "down": [99.5, 99.2]}}
+    fig = gamma.heatmap_figure(_proj_rows(), "GEX", yrange=[95.0, 105.0], projection=proj)
+    cats = fig["xAxis"]["categories"]
+    assert cats[-2:] == ["13:15", "13:30"]                         # future cols appended
+    pls = fig["xAxis"].get("plotLines", [])
+    assert any(pl.get("className") == "gamma-now-divider" for pl in pls)   # 'now' seam
+    hm = next(s for s in fig["series"] if s["type"] == "heatmap")
+    assert any(p[0] >= 2 for p in hm["data"])                      # future cells at idx>=2
+    names = [s.get("name") for s in fig["series"]]
+    assert "EM up" in names and "EM down" in names                # cone overlays
+    spot = next(s for s in fig["series"] if s.get("name") == "Spot")
+    assert len(spot["data"]) == 4                                  # 2 collected + 2 cone.mid
+
+
+def test_heatmap_no_projection_unchanged():
+    fig = gamma.heatmap_figure(_proj_rows(), "GEX", yrange=[95.0, 105.0], projection=None)
+    assert not any(pl.get("className") == "gamma-now-divider"
+                   for pl in fig["xAxis"].get("plotLines", []))
+    names = [s.get("name") for s in fig["series"]]
+    assert "EM up" not in names and "EM down" not in names
+
+
+def test_strike_heat_split_constant():
+    assert gamma._STRIKE_HEAT_SPLIT == (0.40, 0.60)   # flip to (0.70, 0.30) if hard to read
