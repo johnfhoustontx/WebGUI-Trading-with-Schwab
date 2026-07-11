@@ -1164,9 +1164,12 @@ includes the Settings children, e.g. User Manuals). Per-page alert badges
 **float on the tabs** (`_badge_refs`), and each drawer group item carries the
 **SUM of its children's badges** (`_group_badge_refs`, updated by the 2s
 watcher). The old expandable sub-menus / `_NAV_OPEN` / `_settings_group` are
-GONE. The shared `.compact-tabs` rule also styles in-page view tabs (e.g. the
-Gamma GEX/Charm/DEX/Vanna/Flow/Term picker, a `ui.tabs` since 2026-07-11 —
-same value/on_value_change API as the old `ui.toggle`). Pages live in
+GONE. Tabs are **folder-style** (bordered, rounded top corners, active filled with
+the Quasar primary → follows the `[menu].accent` theme knob). A page with its
+own view tabs mounts them as a **subtab row flush under the strip** via
+`main.subtab_slot()` + `.compact-subtabs` (e.g. the Gamma
+GEX/Charm/DEX/Vanna/Flow/Term picker, a `ui.tabs` since 2026-07-11 — same
+value/on_value_change API as the old `ui.toggle`). Pages live in
 `webgui/pages/`; each leaf exposes `render()` called inside the shell
 `_layout`. `webgui/proxy.py` wraps `schwab-proxy/proxy_client.py` and adds
 `health()`. Pure transforms / SVG builders are unit-tested (`webgui/tests/`);
