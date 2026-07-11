@@ -1625,8 +1625,14 @@ def gamma_explain(symbol: str, style: str = "terminal") -> dict:
         gt.GammaEngine.snapshot_summary(dex, "dex"),
         gt.GammaEngine.snapshot_summary(vanna, "vanna"),
         walls, regime)
+    proj_text = ""
     try:
-        html = gamma_infographic.render_infographic(read, style=style)
+        from services.options_svc import scheduler as _sched
+        proj_text = _projection_brief(eng, chain, spot, _sched._market_now())
+    except Exception:
+        proj_text = ""
+    try:
+        html = gamma_infographic.render_infographic(read, style=style, projection=proj_text)
     except Exception as exc:  # never let a render glitch break the command
         return _fallback(f"Infographic render failed: {exc}")
     return {"symbol": symbol, "html": html}

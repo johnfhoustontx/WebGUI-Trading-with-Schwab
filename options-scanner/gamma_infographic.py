@@ -600,7 +600,7 @@ def _doc(style: str, body: str, c: Dict) -> str:
 # STYLE: TERMINAL (dark vertical ladder)
 #############################################
 
-def _render_terminal(c: Dict) -> str:
+def _render_terminal(c: Dict, projection: str = "") -> str:
     if c['vanna_present'] or c['pinch_present']:
         lean_cls = 'pending' if c['vanna_lean_class'] == 'pend' else c['vanna_lean_class']
         pinch_dpts = (
@@ -636,6 +636,15 @@ def _render_terminal(c: Dict) -> str:
         f'<div class="lab"><span class="px">{c["pinch_strike_str"]}</span>'
         f'<span class="nm">Pinch</span></div></div>'
     ) if c['pinch_present'] else ''
+    import html as _html
+    proj_block = (
+        '<section class="gi-close" style="margin:14px 0;padding:12px 16px;'
+        'border:1px solid #213152;border-radius:12px;background:#101a30;'
+        'color:#c7d2e8;font-size:.92rem;line-height:1.5;">'
+        '<div style="color:#8a93a3;text-transform:uppercase;letter-spacing:.04em;'
+        'font-size:.72rem;margin-bottom:4px;">Into the close</div>'
+        f'{_html.escape(projection)}</section>'
+    ) if projection else ''
     body = f"""<div class="wrap">
   <header class="head">
     <div>
@@ -648,6 +657,7 @@ def _render_terminal(c: Dict) -> str:
       <div class="meta">VIX <b>{c['vix_str']}</b> &nbsp;\u00b7&nbsp; Sentiment <b>{c['sentiment_score']}/10 {c['sentiment_trend']}</b></div>
     </div>
   </header>
+  {proj_block}
   <section class="lmap-card">
     <div class="ttl">Level Map</div>
     <div class="sub">Walls, flips &amp; decay strikes \u00b7 {c['axis_lo']}\u2013{c['axis_hi']}</div>
@@ -715,7 +725,7 @@ def _render_terminal(c: Dict) -> str:
 # STYLE: DESKNOTE (light research note)
 #############################################
 
-def _render_desknote(c: Dict) -> str:
+def _render_desknote(c: Dict, projection: str = "") -> str:
     pinch_mark = (
         f'<div class="mark pinch dn" style="left:{c["p_pinch"]}%;"><div class="stem"></div>'
         f'<div class="lab"><span class="px">{c["pinch_strike_str"]}</span><span class="nm">Pinch magnet</span></div></div>'
@@ -800,7 +810,7 @@ def _render_desknote(c: Dict) -> str:
 # STYLE: COMMANDBAR (wide dark HUD)
 #############################################
 
-def _render_commandbar(c: Dict) -> str:
+def _render_commandbar(c: Dict, projection: str = "") -> str:
     pin_zone_lab = '' if c['pinch_present'] else (
         f'<div class="sp-zlab" style="left:{c["pin_lo"]+c["pin_width"]/2-3}%;color:var(--spot);">Pin zone</div>'
     )
@@ -891,14 +901,16 @@ _RENDERERS = {
 }
 
 
-def render_infographic(data: GammaRead, style: str = "terminal") -> str:
+def render_infographic(data: GammaRead, style: str = "terminal", projection: str = "") -> str:
     """Return a complete, self-contained HTML page for the given gamma read.
 
     style: 'terminal' | 'desknote' | 'commandbar'
+    projection: optional forward "into the close" read; rendered as a block in
+        the terminal style (ignored by the other styles). Empty -> no block.
     """
     if style not in _RENDERERS:
         raise ValueError(f"Unknown style '{style}'. Choose from {list(_RENDERERS)}.")
-    return _RENDERERS[style](_derive(data))
+    return _RENDERERS[style](_derive(data), projection)
 
 
 def save_infographic(data: GammaRead, path: str, style: str = "terminal") -> str:
