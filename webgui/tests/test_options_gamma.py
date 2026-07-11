@@ -625,3 +625,17 @@ def test_heatmap_no_projection_unchanged():
 
 def test_strike_heat_split_constant():
     assert gamma._STRIKE_HEAT_SPLIT == (0.40, 0.60)   # flip to (0.70, 0.30) if hard to read
+
+
+def test_status_strip_text_combines_sources():
+    s = gamma.status_strip_text({"last_scan": "1:00 PM", "next_scan": "1:01 PM"},
+                                "spot 5,400.00", 75)
+    assert "Last scan 1:00 PM" in s
+    assert "Next scan 1:01 PM" in s
+    assert "Next refresh 1:15" in s
+    assert "spot 5,400.00" in s
+
+
+def test_status_strip_text_defensive():
+    s = gamma.status_strip_text(None, "", 0)
+    assert "Last scan —" in s and "Next scan —" in s and "Next refresh 0:00" in s

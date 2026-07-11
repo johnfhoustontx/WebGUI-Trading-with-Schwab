@@ -278,6 +278,20 @@ def status_color_class(color):
     return _STATUS_CLASS.get(color, _STATUS_FALLBACK)
 
 
+def status_strip_text(gex_status, summary, countdown):
+    """One-line '·'-separated status strip: last/next scan + next-refresh countdown +
+    the per-view summary. The collector STATUS WORD is rendered separately (colored),
+    so it's not included here. Defensive: missing fields → em-dashes."""
+    st = gex_status or {}
+    parts = [f"Last scan {st.get('last_scan') or '—'}",
+             f"Next scan {st.get('next_scan') or '—'}"]
+    if isinstance(countdown, int):
+        parts.append(f"Next refresh {countdown // 60}:{countdown % 60:02d}")
+    if summary:
+        parts.append(summary)
+    return "  ·  ".join(parts)
+
+
 def flex_class(grow, grow2=1, basis="0%"):
     """Runtime arbitrary-value Tailwind class for a continuous flex ratio.
 
@@ -832,36 +846,50 @@ def render():
                                  value="GEX")
         explain_btn = ui.button("Explain", icon="help", color=None).props("no-caps").classes(BTN_3D)
         analyze_btn = ui.button("Analyze", icon="psychology", color=None).props("no-caps").classes(BTN_3D)
-        countdown_lbl = ui.label("").classes("opacity-60 text-sm")
-    # Auto briefings: the $SPX/SPY/QQQ Analyze the options service auto-generates at
-    # premarket / ~18 min after open / midday / close. Each button opens that slot's
-    # briefing in a new tab (the slot key is separate from the ad-hoc Analyze key, so
-    # these never auto-open). A button is **highlighted** only when its slot's data is
-    # from TODAY (CT); prior-day data (e.g. over the weekend) stays dim — see
-    # _sync_sched_btns. Clickable whenever data exists.
-    _SCHED_HL = "bg-[#2563eb] text-white opacity-100"  # today's briefing is ready
-    _SCHED_DIM = "opacity-40"                           # prior-day data, or none yet
-    sched_btns = {}
-    with ui.row().classes("items-center gap-2 flex-wrap"):
-        ui.label("Auto briefings:").classes("opacity-60 text-sm")
-        for _slot, _title in (("premarket", "Premarket"), ("open", "Open"),
-                              ("midday", "Midday"), ("close", "Close")):
-            _b = ui.button(_title, icon="schedule").props("flat dense")
-            _b.classes(f"rounded text-[#cdd8ee] {_SCHED_DIM}")
-            _b.on_click(lambda s=_slot: ui.navigate.to(
-                f"/options/analyze?slot={s}", new_tab=True))
-            _b.disable()
-            _b.tooltip(f"{_title} $SPX/SPY/QQQ briefing — not generated yet today")
-            sched_btns[_slot] = _b
-    # Read-only view published by the options service (cache:options:gex_status);
-    # version-polled like gamma/explain/analyze below. Sits alongside (does NOT
-    # replace) the "Next refresh" countdown above.
-    with ui.row().classes("items-center gap-4 flex-wrap"):
+        # Auto briefings: the $SPX/SPY/QQQ Analyze the options service auto-generates at
+        # premarket / ~18 min after open / midday / close, folded into a single dropdown
+        # to save a header row. Each item opens that slot's briefing in a new tab (the
+        # slot key is separate from the ad-hoc Analyze key, so these never auto-open). An
+        # item is **highlighted** only when its slot's data is from TODAY (CT); prior-day
+        # data (e.g. over the weekend) stays dim — see _sync_sched_btns. Clickable
+        # whenever data exists; disabled when a slot has never run.
+        _SCHED_HL = "bg-[#2563eb] text-white opacity-100"  # today's briefing is ready
+        _SCHED_DIM = "opacity-40"                           # prior-day data, or none yet
+        sched_btns = {}
+        _sched_titles = {}
+        briefings_btn = ui.button("Briefings", icon="schedule", color=None).props("no-caps").classes(BTN_3D)
+        with briefings_btn:
+            _briefings_menu = ui.menu()
+            with _briefings_menu:
+                for _slot, _title in (("premarket", "Premarket"), ("open", "Open"),
+                                      ("midday", "Midday"), ("close", "Close")):
+                    _mi = ui.menu_item(_title, on_click=lambda s=_slot: ui.navigate.to(
+                        f"/options/analyze?slot={s}", new_tab=True))
+                    _mi.classes(f"text-[#cdd8ee] {_SCHED_DIM}")
+                    _mi.set_enabled(False)
+                    _mi.tooltip(f"{_title} $SPX/SPY/QQQ briefing — not generated yet today")
+                    sched_btns[_slot] = _mi
+                    _sched_titles[_slot] = _title
+    # Read-only status strip: the collector status WORD (colored) + a neutral detail
+    # label that folds last/next scan + the "Next refresh" countdown + the per-view
+    # summary into one line (status_strip_text). Version-polled like gamma/explain/
+    # analyze below. pressure_box (populated only on the DEX view) follows.
+    with ui.row().classes("items-center gap-3 flex-wrap"):
         status_lbl = ui.label("").classes("text-sm font-medium")
-        last_scan_lbl = ui.label("Last scan —").classes("opacity-60 text-sm")
-        next_scan_lbl = ui.label("Next scan —").classes("opacity-60 text-sm")
-    summary_lbl = ui.label("").classes("opacity-70 text-sm")
+        detail_lbl = ui.label("").classes("opacity-60 text-sm")
     pressure_box = ui.row().classes("gap-3 items-center")
+
+    # Three independent sources feed the detail strip (collector status, the per-view
+    # summary, the refresh countdown); unify them behind one state dict + repaint fn.
+    strip_state = {"status": None, "summary": "", "countdown": state.get("countdown", 120)}
+
+    def _repaint_strip():
+        detail_lbl.text = status_strip_text(strip_state["status"], strip_state["summary"],
+                                            strip_state["countdown"])
+
+    def _set_summary(text):
+        strip_state["summary"] = text or ""
+        _repaint_strip()
     # Persistent panels: the Highcharts elements are created ONCE and updated in
     # place on every repaint (Highcharts diffs the new options) — rebuilding them
     # each time would flash. Message labels are toggled via set_visibility. Column
@@ -954,7 +982,7 @@ def render():
             heat_msg.set_visibility(False)
             chart_msg.text = "Fetch a symbol… (no snapshot yet)."
             chart_msg.set_visibility(True)
-            summary_lbl.text = ""
+            _set_summary("")
             return
         chart_msg.set_visibility(False)
 
@@ -966,7 +994,7 @@ def render():
             heat_plot.set_visibility(False)
             heat_msg.set_visibility(False)
             _apply_flex(0, term=True)
-            summary_lbl.text = summary_text({"spot": spot, "strike_count": None}, "Term")
+            _set_summary(summary_text({"spot": spot, "strike_count": None}, "Term"))
             return
         if view == "Flow":
             # Intraday options-flow: price + call/put premium + net panel, full width
@@ -976,7 +1004,7 @@ def render():
             heat_plot.set_visibility(False)
             heat_msg.set_visibility(False)
             _apply_flex(0, term=True)
-            summary_lbl.text = flow_summary_text(snap.get("flow"))
+            _set_summary(flow_summary_text(snap.get("flow")))
             return
 
         entry = (snap.get("views") or {}).get(view) or {}
@@ -1000,7 +1028,7 @@ def render():
             chart_msg.text = (f"No spot price for {sym} yet "
                               "(market closed or sparse data) — try Refresh during market hours.")
             chart_msg.set_visibility(True)
-            summary_lbl.text = ""
+            _set_summary("")
             return
         summary = entry.get("summary") or {}
         flip = entry.get("flip")
@@ -1025,8 +1053,8 @@ def render():
         yr = union_range(yr, spot_path)
         _set_chart(bar_figure(data, view_spot, view=view, walls=walls, flip=flip, yrange=yr))
         state["chart_el"].set_visibility(True)
-        summary_lbl.text = summary_text(
-            {**summary, "strike_count": data.get("strike_count")}, _view_label(view))
+        _set_summary(summary_text(
+            {**summary, "strike_count": data.get("strike_count")}, _view_label(view)))
 
         if rows:
             projection = None
@@ -1085,7 +1113,8 @@ def render():
         state["countdown"] = state.get("countdown", 120) - 1
         if state["countdown"] < 0:
             state["countdown"] = 120
-        countdown_lbl.text = f"Next refresh: {state['countdown'] // 60}:{state['countdown'] % 60:02d}"
+        strip_state["countdown"] = state["countdown"]
+        _repaint_strip()
 
     @guard_async
     async def _maybe_repaint(version):
@@ -1121,8 +1150,8 @@ def render():
         # Reactive: the status bar repaints on every version-poll, so remove the full
         # status-class set before adding the new one (prevents color accumulation).
         status_lbl.classes(remove=_ALL_STATUS, add=status_color_class(color))
-        last_scan_lbl.text = f"Last scan {st.get('last_scan') or '—'}"
-        next_scan_lbl.text = f"Next scan {st.get('next_scan') or '—'}"
+        strip_state["status"] = st
+        _repaint_strip()
 
     @guard
     def _maybe_repaint_status(version):
@@ -1224,14 +1253,15 @@ def render():
             if key == st["applied"]:
                 continue  # no state change → don't re-push classes every tick
             st["applied"] = key
+            _t = _sched_titles[s]
             if is_today:
                 b.classes(remove=_SCHED_DIM, add=_SCHED_HL)
-                b.tooltip(f"Open today's {b.text} briefing")
+                b.tooltip(f"Open today's {_t} briefing")
             else:
                 b.classes(remove=_SCHED_HL, add=_SCHED_DIM)
-                b.tooltip(f"{b.text} briefing — "
+                b.tooltip(f"{_t} briefing — "
                           + ("prior day (not today's)" if ver else "not generated yet today"))
-            (b.enable if ver else b.disable)()
+            b.set_enabled(bool(ver))
 
     @guard_async
     async def _poll():
