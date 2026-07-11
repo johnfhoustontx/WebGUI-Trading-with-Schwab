@@ -77,7 +77,7 @@ def _market_now():
 # constants above are ported verbatim rather than imported.
 _GEX_START = (8, 30)     # gex_collector.START_HOUR/START_MIN
 _GEX_STOP = (15, 20)     # gex_collector.STOP_HOUR/STOP_MIN
-_GEX_INTERVAL_MIN = 2    # gex_collector.POLL_INTERVAL_MIN
+_GEX_INTERVAL_MIN = 1    # gex_collector.POLL_INTERVAL_MIN
 
 
 def _in_gex_window(now):
@@ -134,7 +134,7 @@ def _gex_slot_key(now):
 
 
 def gex_due(now, last_slot):
-    """(should_collect, slot): True at most once per 2-min slot, only on a
+    """(should_collect, slot): True at most once per 1-min slot, only on a
     trading day within the 08:30–15:20 CT GEX-collection window. Mirrors
     ``autoscan_due`` on the gex_collector cadence/window."""
     if not (_is_trading_day(now) and _in_gex_window(now)):
