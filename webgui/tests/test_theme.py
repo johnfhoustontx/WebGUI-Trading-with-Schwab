@@ -74,3 +74,55 @@ def test_btn3d_encodes_gradient_and_shadow():
     assert "linear-gradient(180deg" in theme.BTN_3D
     assert theme.BTN_3D.count("shadow-[") >= 1 and "active:" in theme.BTN_3D
     assert "#d33f3f" in theme.BTN_3D_DANGER  # red variant mid-stop
+
+
+# -- Theme config (config/theme.toml) — styling without code edits (2026-07-09) --
+
+
+def test_load_theme_missing_file_returns_defaults():
+    t = theme.load_theme("Z:/nope/does-not-exist.toml")
+    assert t["palette"]["card_bg"] == "#101a30"
+    assert t["semantic"]["positive"] == "#66bb6a"
+    assert t["gauge"]["needle"] == "#f5f5f5"
+
+
+def test_load_theme_merges_partial_override(tmp_path):
+    p = tmp_path / "theme.toml"
+    p.write_text('[palette]\ncard_bg = "#222831"\n', encoding="utf-8")
+    t = theme.load_theme(p)
+    assert t["palette"]["card_bg"] == "#222831"        # overridden
+    assert t["palette"]["card_border"] == "#213152"    # untouched default
+    assert t["semantic"]["negative"] == "#ef5350"      # other sections intact
+
+
+def test_load_theme_ignores_unknown_keys_and_bad_values(tmp_path):
+    p = tmp_path / "theme.toml"
+    p.write_text('[palette]\nbogus = "#111111"\ncard_bg = 42\n[nonsense]\nx = "y"\n',
+                 encoding="utf-8")
+    t = theme.load_theme(p)
+    assert "bogus" not in t["palette"]
+    assert t["palette"]["card_bg"] == "#101a30"        # non-string value → default
+    assert "nonsense" not in t
+
+
+def test_build_tokens_reflect_theme_values(tmp_path):
+    p = tmp_path / "theme.toml"
+    p.write_text(
+        '[palette]\ncard_bg = "#222831"\nprimary = "#00aa55"\n'
+        '[buttons_3d]\nblue_top = "#123456"\n'
+        '[semantic]\npositive = "#00ff00"\n', encoding="utf-8")
+    toks = theme.build_tokens(theme.load_theme(p))
+    assert "bg-[#222831]" in toks["CARD"]
+    assert "bg-[#00aa55]" in toks["BTN_PRIMARY"]
+    assert "#123456" in toks["BTN_3D"]
+    assert "text-[#00ff00]" in toks["TXT_POS"]
+    # the module-level tokens are build_tokens(THEME) — same generator.
+    assert theme.CARD == theme.build_tokens(theme.THEME)["CARD"]
+
+
+def test_quasar_internal_css_reflects_theme(tmp_path):
+    p = tmp_path / "theme.toml"
+    p.write_text('[palette]\ninput_bg = "#31363f"\n', encoding="utf-8")
+    css = theme.build_quasar_css(theme.load_theme(p))
+    assert "#31363f" in css
+    assert ".q-field__control" in css and ".strat-menu-navy" in css

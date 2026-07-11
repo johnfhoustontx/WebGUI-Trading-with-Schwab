@@ -1441,6 +1441,18 @@ the `leg-*` cells, the `q-tab*` chrome, the teleported `.strat-menu-navy` popup)
 **Calculator**, **Simulator**, and **Trade** pages all use this. **`DASHBOARD_CSS` is
 deleted** (Phase 4) — `theme.py` = tokens + `QUASAR_INTERNAL_CSS`. **This section +
 `theme.py` are the single source — look here to apply or change the theme.**
+- **Restyle WITHOUT code edits (2026-07-09): `config/theme.toml`.** Every color
+  (`repo_paths.THEME_TOML`, all knobs commented in-file) — surfaces/cards/text,
+  secondary+primary buttons, the **3D gradient buttons**, the semantic
+  positive/warning/negative/neutral set, the **speedometer gauge face + needle**
+  (`pages/gauge.py`), and the Sentiment/Rotation chart palette
+  (`sentiment.py CLR_*`) — is loaded ONCE at webgui startup
+  (`theme.load_theme()` → `build_tokens`/`build_quasar_css`; missing
+  file/keys/malformed values → the built-in defaults, never raises). **Edit the
+  TOML → restart the webgui → hard-refresh.** NOT config-driven (deliberate):
+  per-chart Highcharts colorscales (e.g. the Gamma heatmap), data-driven
+  table-cell zone maps (score/heat/P&L), the nav drawer, and the standalone
+  EOD/Analyze report documents.
 - **Apply to a new page:**
   ```python
   from pages.options.theme import QUASAR_INTERNAL_CSS, PAGE, CARD, EYEBROW, LABEL, BTN_PRIMARY
@@ -2908,6 +2920,13 @@ market    = 8215
 (Schwab standard: options $0.65/contract per leg, futures $2.25/side, index-exchange-fee
 passthrough), loaded by `services/options_svc/commission.py` (used by the Rescue
 candidate menu). **Rule: don't hard-code commission rates** — add them here.
+
+`config/theme.toml` is the single source of truth for the **webgui styling palette**
+(surfaces/cards/text, buttons incl. the 3D gradients, semantic state colors, the
+speedometer gauge face, the Sentiment/Rotation chart palette), loaded once at webgui
+startup by `webgui/pages/options/theme.py:load_theme()` — edit + restart the webgui to
+restyle without code changes; missing keys fall back to the built-in dark-navy defaults.
+See the "App theme — dark-navy 'dashboard'" section.
 
 ## Secrets
 
