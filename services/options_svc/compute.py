@@ -1783,6 +1783,61 @@ def project_em_cone(spot, atm_iv, marks, now):
         return {"mid": [], "up": [], "down": []}
 
 
+def _net_zero_cross(col):
+    """Strike where net GEX crosses zero (linear interp between sign-changing
+    adjacent strikes). ``col`` maps strike(float)->net. None if no crossing."""
+    items = sorted(col.items())
+    for (k0, v0), (k1, v1) in zip(items, items[1:]):
+        if v0 == 0:
+            return k0
+        if (v0 < 0) != (v1 < 0) and v1 != v0:
+            return k0 + (k1 - k0) * (0 - v0) / (v1 - v0)
+    return None
+
+
+def _projection_brief(eng, chain, spot, now):
+    """Compact factual 'into the close' summary of the forward GEX projection for
+    ONE symbol — projected flip / call wall / put wall at the close + the EM band —
+    used as prompt CONTEXT so the model writes each index's reader-first
+    close_outlook. Returns '' when there's no session left / no projection."""
+    try:
+        proj = project_gex_grid(eng, chain, spot, now)
+        if not proj.get("times") or not proj.get("grid"):
+            return ""
+        col = {}
+        for k, vals in proj["grid"].items():
+            if vals and isinstance(vals[-1], (int, float)):
+                try:
+                    col[float(k)] = vals[-1]
+                except (TypeError, ValueError):
+                    continue
+        if not col or not isinstance(spot, (int, float)):
+            return ""
+        flip = _net_zero_cross(col)
+        above = [(k, v) for k, v in col.items() if k > spot]
+        below = [(k, v) for k, v in col.items() if k < spot]
+        call_wall = max(above, key=lambda kv: kv[1])[0] if above else None
+        put_wall = min(below, key=lambda kv: kv[1])[0] if below else None
+        cone = project_em_cone(spot, atm_iv_from_chain(chain, spot),
+                               _future_marks_ct(now), now)
+        em_lo = cone["down"][-1] if cone.get("down") else None
+        em_up = cone["up"][-1] if cone.get("up") else None
+        close_lbl = proj["times"][-1]
+        parts = [f"Into the close ({close_lbl} CT), holding spot flat"]
+        if flip is not None:
+            parts.append(f"projected gamma flip ~{flip:.0f}")
+        if call_wall is not None:
+            parts.append(f"call wall firms ~{call_wall:.0f}")
+        if put_wall is not None:
+            parts.append(f"put wall ~{put_wall:.0f}")
+        if isinstance(em_lo, (int, float)) and isinstance(em_up, (int, float)):
+            parts.append(f"expected-move band {em_lo:.0f}-{em_up:.0f}")
+        return ": ".join([parts[0], "; ".join(parts[1:])]) + "." if len(parts) > 1 else parts[0] + "."
+    except Exception:
+        log.debug("_projection_brief failed", exc_info=True)
+        return ""
+
+
 def _gamma_blocks_for(symbol, chain):
     """Build the per-view analysis blocks for one symbol (ported from the page).
 
@@ -1896,6 +1951,12 @@ _ANALYZE_TOOL = {
                                  "description": "Terse one-line read for this index, framed "
                                                 "as what to do (e.g. 'buy dips toward 5900, "
                                                 "trim into the 5950 call wall')."},
+                        "close_outlook": {"type": "string",
+                            "description": "One line on what to DO as the day decays "
+                                "into the close, using the provided FORWARD PROJECTION "
+                                "(e.g. 'into the close the call wall firms at 5950 — trim "
+                                "rallies into it; stay defensive below the flip'). "
+                                "Reader-first action, NOT dealer mechanics."},
                         "what_if": {
                             "type": "object",
                             "description": "Three short plain-English scenarios for this "
@@ -1983,6 +2044,10 @@ _ANALYZE_CSS = """
   .ga-why-h { color:#90caf9; font-size:1rem; font-weight:600; margin-bottom:6px; }
   .ga-why-b { color:#dce6f7; font-size:.95rem; line-height:1.55; }
   .ga-why-b p { margin:.3em 0; }
+  .idx-close { color:#c7d2e8; font-size:.86rem; margin-top:8px; padding-top:8px;
+    border-top:1px solid #1c2842; line-height:1.45; }
+  .idx-close-h { color:#8a93a3; text-transform:uppercase; font-size:.72rem;
+    letter-spacing:.04em; margin-right:6px; }
 """
 
 
@@ -2088,6 +2153,7 @@ def _parse_analysis(inp) -> dict | None:
             "expected_move": _num(it.get("expected_move")),
             "pc_ratio": _num(it.get("pc_ratio")),
             "note": str(it.get("note") or "").strip(),
+            "close_outlook": str(it.get("close_outlook") or "").strip(),
             "what_if": {
                 "rally": str(wf.get("rally") or "").strip(),
                 "selloff": str(wf.get("selloff") or "").strip(),
@@ -2230,10 +2296,13 @@ def _index_card_html(idx) -> str:
     sym = _h.escape(idx.get("symbol") or "")
     note = _h.escape(idx.get("note") or "")
     note_html = f'<div class="idx-note">{note}</div>' if note else ""
+    close_outlook = _h.escape(idx.get("close_outlook") or "")
+    co_html = (f'<div class="idx-close"><span class="idx-close-h">Into the close</span> '
+               f'{close_outlook}</div>') if close_outlook else ""
     return (f'<div class="idx-card"><div class="idx-head">{sym}</div>'
             f'<div class="idx-body">{_ladder_svg(idx)}'
             f'<div class="idx-right">{_metric_tiles_html(idx)}{note_html}</div></div>'
-            f'{_whatif_html(idx)}</div>')
+            f'{co_html}{_whatif_html(idx)}</div>')
 
 
 def analyze_infographic_html(data, subtitle=None) -> str:
@@ -2321,11 +2390,12 @@ def gamma_analyze(client=None, label: str | None = None) -> dict:
     if label:
         subtitle = f"{subtitle} · {label}"
 
-    blocks, em_by_sym = {}, {}
+    blocks, em_by_sym, chains = {}, {}, {}
     for key, sym in (("spx", "$SPX"), ("spy", "SPY"), ("qqq", "QQQ")):
         try:
             chain = _gamma_fetch_chain(sym)
             if chain:
+                chains[sym] = chain
                 blocks[key] = _gamma_blocks_for(sym, chain)
                 # Authoritative 1-day EM per symbol — overrides the model's copied
                 # value below so the displayed 'Exp. move' is code-computed, not AI-echoed.
@@ -2344,6 +2414,28 @@ def gamma_analyze(client=None, label: str | None = None) -> dict:
             "chains for $SPX, SPY or QQQ. The market may be closed (Analyze needs "
             "live chain data), or the data service is unavailable. Try again during "
             "market hours.</p>", subtitle)}
+
+    # Forward-projection context: a code-computed 'into the close' brief per index
+    # (projected flip/walls + EM band under flat-spot time-decay) so the model can
+    # author each index's reader-first close_outlook. Never breaks the briefing.
+    try:
+        from services.options_svc import scheduler as _sched
+        _now = _sched._market_now()
+        _eng = gt.GammaEngine()
+        _briefs = []
+        for _sym in ("$SPX", "SPY", "QQQ"):
+            _ch = chains.get(_sym)
+            if not _ch:
+                continue
+            _b = _projection_brief(_eng, _ch, _ch.get("underlyingPrice"), _now)
+            if _b:
+                _briefs.append(f"{_sym}: {_b}")
+        if _briefs:
+            prompt = (prompt + "\n\nFORWARD PROJECTION (flat-spot time-decay to the "
+                      "close, code-computed — use it to write each index's "
+                      "close_outlook as a reader-first action):\n" + "\n".join(_briefs))
+    except Exception:
+        log.debug("analyze projection context failed", exc_info=True)
 
     client = client or _make_analyze_client()
     if client is None:

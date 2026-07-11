@@ -2578,3 +2578,56 @@ def test_calc_compute_butterfly_uses_generic_summary():
     s = out["summary"]
     assert s["max_loss"] > 0 and s["max_profit"] > 0
     assert len(s["breakevens"]) == 2
+
+
+def test_analyze_tool_has_close_outlook():
+    props = (compute._ANALYZE_TOOL["input_schema"]["properties"]["indices"]
+             ["items"]["properties"])
+    assert "close_outlook" in props and props["close_outlook"]["type"] == "string"
+
+
+def test_parse_analysis_carries_close_outlook():
+    inp = {"regime": "r", "bias": 0, "headline": "h", "narrative": "n", "why": "w",
+           "indices": [{"symbol": "$SPX", "close_outlook": "trim into the call wall"}]}
+    out = compute._parse_analysis(inp)
+    assert out["indices"][0]["close_outlook"] == "trim into the call wall"
+    # absent -> empty string (defensive default)
+    inp2 = {"headline": "h", "indices": [{"symbol": "SPY"}]}
+    assert compute._parse_analysis(inp2)["indices"][0]["close_outlook"] == ""
+
+
+def test_infographic_renders_close_outlook():
+    data = {"regime": "r", "bias": 0, "headline": "h", "narrative": "", "why": "",
+            "indices": [{"symbol": "$SPX", "close_outlook": "stay long above the flip"}]}
+    html = compute.analyze_infographic_html(data)
+    assert "Into the close" in html and "stay long above the flip" in html
+    # absent -> no "Into the close" block
+    data2 = {"indices": [{"symbol": "SPY"}], "headline": "h"}
+    assert "Into the close" not in compute.analyze_infographic_html(data2)
+
+
+def test_projection_brief_reader_line():
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+    import gamma_tool as gt
+    CT = ZoneInfo("America/Chicago")
+    exp = "2026-07-11:0"
+    def leg(k, oi):
+        return [{"strike": k, "gamma": 0.05, "openInterest": oi, "volatility": 20.0,
+                 "delta": 0.5, "daysToExpiration": 0}]
+    wide = {float(100 + i): (4000 if i == 0 else 800) for i in range(-8, 9)}
+    chain = {"underlyingPrice": 100.0,
+             "callExpDateMap": {exp: {f"{k:.1f}": leg(k, oi) for k, oi in wide.items()}},
+             "putExpDateMap": {exp: {f"{k:.1f}": leg(k, max(oi - 200, 100)) for k, oi in wide.items()}}}
+
+    class _E(gt.GammaEngine):
+        @staticmethod
+        def _find_nearest_exp_key(m, today):
+            return (next(iter(m)), 0) if m else (None, None)
+
+    now = _dt.datetime(2026, 7, 11, 13, 0, tzinfo=CT)
+    brief = compute._projection_brief(_E(), chain, 100.0, now)
+    assert "Into the close" in brief and "15:00" in brief
+    # after the close -> empty
+    assert compute._projection_brief(_E(), chain, 100.0,
+                                     _dt.datetime(2026, 7, 11, 15, 30, tzinfo=CT)) == ""
