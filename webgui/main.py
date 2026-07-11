@@ -30,6 +30,7 @@ import app_settings  # noqa: E402
 import bus_client  # noqa: E402
 import page_help  # noqa: E402
 import proxy  # noqa: E402
+from pages.options import theme  # noqa: E402  (config/theme.toml typography + menu)
 from pages.ui_guard import guard_async  # noqa: E402
 from pages.ui_guard import install_deleted_slot_log_filter  # noqa: E402
 from repo_paths import NICEGUI_PORT, SERVICE_URLS  # noqa: E402
@@ -411,6 +412,10 @@ def _refresh_health() -> None:
 # expansion header min-height (48px→24px) are halved so the menu reads denser.
 _NAV_CSS = """
 .nav-drawer { gap: 2px; }
+/* Active nav item pill — rides the Quasar primary so the [menu].accent theme knob
+   (ui.colors) recolors it together with the header bar. A plain rule, not a
+   Tailwind arbitrary class: the bundled JIT doesn't generate var(...) arbitraries. */
+.nav-drawer .nav-active { background: var(--q-primary); color: #fff; }
 /* Children INSIDE each expandable group also stack tight — NiceGUI wraps the
    expansion body in a flex column (.nicegui-expansion-content) that defaults to a
    1rem/16px gap. */
@@ -567,7 +572,12 @@ def _guarded_compute():
 def _nav_link(path: str, label: str, icon: str, active: str) -> None:
     base = ("w-full no-underline items-center rounded-[10px] px-3 py-1 "
             "transition-colors hover:bg-white/[0.06]")
-    state = " bg-[var(--q-primary)] text-white" if path == active else ""
+    # nav-active is a plain CSS rule in _NAV_CSS (background: var(--q-primary)) —
+    # NOT a Tailwind arbitrary class: the bundled Tailwind JIT does not reliably
+    # generate arbitrary values containing var(...) (plain-hex arbitraries are
+    # fine), so the old bg-[var(--q-primary)] silently produced no rule. The CSS
+    # var keeps the pill following the [menu].accent knob (ui.colors).
+    state = " nav-active" if path == active else ""
     with ui.link(target=path).classes(base + state):
         with ui.row().classes("items-center gap-3 w-full no-wrap"):
             ui.icon(icon).classes("text-xl opacity-90")
@@ -610,13 +620,25 @@ def _layout(active: str, title: str):
     _recompute_badges()
     ui.add_css(_NAV_CSS)
     ui.add_css(_TABLE_CSS)   # app-wide fixed (sticky) table headers
+    # config/theme.toml [typography] + [menu] — app-wide text categories and menu
+    # styling, injected AFTER the baseline CSS so a configured override wins.
+    # Both are "" / no-ops when the config keeps the defaults.
+    if theme.TYPOGRAPHY_CSS:
+        ui.add_css(theme.TYPOGRAPHY_CSS)
+    if theme.NAV_THEME_CSS:
+        ui.add_css(theme.NAV_THEME_CSS)
+    if theme.MENU_ACCENT:
+        # Recolors the Quasar primary: the header bar AND the active nav pill
+        # (bg-[var(--q-primary)]) both follow it.
+        ui.colors(primary=theme.MENU_ACCENT)
     # Browser tab: title = the selected menu item; favicon = this page's color.
     ui.page_title(_NAV_LABEL.get(active, "Schwab Trading"))
     ui.add_head_html(_favicon_link(_TAB_COLOR.get(active, "#42a5f5")))
     drawer = ui.left_drawer(value=True, bordered=True).classes("nav-drawer").props("behavior=desktop")
     with drawer:
+        # nav-title = the [menu].title theme hook (build_nav_css overrides its color).
         ui.label("SCHWAB TRADING").classes(
-            "font-bold tracking-[.04em] text-[.8rem] px-3 pt-1 pb-1.5 opacity-55")
+            "nav-title font-bold tracking-[.04em] text-[.8rem] px-3 pt-1 pb-1.5 opacity-55")
         # Groups start EXPANDED by default (value=True) and stay open until the user
         # manually collapses one — _NAV_OPEN persists each manual toggle (single-user,
         # like the badges), so a collapse sticks across navigation.

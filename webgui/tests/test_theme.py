@@ -126,3 +126,59 @@ def test_quasar_internal_css_reflects_theme(tmp_path):
     css = theme.build_quasar_css(theme.load_theme(p))
     assert "#31363f" in css
     assert ".q-field__control" in css and ".strat-menu-navy" in css
+
+
+# -- [typography] + [menu] sections (fonts/sizes + app-menu styling, 2026-07-09) --
+
+
+def test_typography_defaults_match_quasar():
+    t = theme.load_theme("Z:/nope.toml")
+    ty = t["typography"]
+    assert ty["family"] == ""            # "" = keep the app default (Roboto)
+    assert ty["titles"] == "1.25rem"     # .text-h6
+    assert ty["body"] == "14px"
+    css = theme.build_typography_css(t)
+    assert ".text-h6{font-size:1.25rem" in css.replace(" ", "")
+    assert "font-family" not in css      # empty family emits no font rule
+
+
+def test_typography_css_reflects_overrides(tmp_path):
+    p = tmp_path / "theme.toml"
+    p.write_text(
+        '[typography]\nfamily = "Georgia, serif"\ntitles = "22px"\nbody = "15px"\n'
+        'small = "11px"\n', encoding="utf-8")
+    css = theme.build_typography_css(theme.load_theme(p))
+    flat = css.replace(" ", "")
+    assert "font-family:Georgia,serif" in flat
+    assert ".text-h6{font-size:22px" in flat
+    assert "body{" in flat and "font-size:15px" in flat
+    assert ".text-xs{font-size:11px" in flat
+    # EYEBROW size follows [typography].small
+    toks = theme.build_tokens(theme.load_theme(p))
+    assert "text-[11px]" in toks["EYEBROW"]
+
+
+def test_menu_defaults_emit_no_rules():
+    # All [menu] knobs default "" = keep today's exact Quasar look — the nav CSS
+    # must emit NOTHING so the defaults can never drift from the stock render.
+    t = theme.load_theme("Z:/nope.toml")
+    assert all(v == "" for v in t["menu"].values())
+    assert theme.build_nav_css(t).strip() == ""
+
+
+def test_menu_css_reflects_overrides(tmp_path):
+    p = tmp_path / "theme.toml"
+    p.write_text(
+        '[menu]\ndrawer_bg = "#0d1526"\ntext = "#9fb4d8"\nhover_bg = "#1a2745"\n'
+        'title = "#ffcc00"\n', encoding="utf-8")
+    css = theme.build_nav_css(theme.load_theme(p))
+    flat = css.replace(" ", "")
+    assert ".nav-drawer{background:#0d1526!important" in flat
+    assert "#9fb4d8" in flat and "#1a2745" in flat and "#ffcc00" in flat
+
+
+def test_menu_accent_is_a_plain_value_not_css():
+    # accent recolors Quasar primary (header bar + active pill) via ui.colors in
+    # _layout — it is NOT part of the nav CSS block.
+    t = theme.load_theme("Z:/nope.toml")
+    assert t["menu"]["accent"] == ""

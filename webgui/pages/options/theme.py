@@ -92,6 +92,25 @@ _DEFAULTS = {
         "green": "#66bb6a", "red": "#ef5350", "yellow": "#ffd54f",
         "flat": "#9e9e9e", "cyan": "#3fb6c7",
     },
+    "typography": {
+        # Text categories — sizes accept any CSS length ("15px" / "1.1rem").
+        # ``family`` empty = keep the app default (Roboto).
+        "family": "",            # app-wide font family
+        "titles": "1.25rem",     # page & card titles (.text-h6)
+        "subtitles": "1rem",     # section headings (.text-subtitle1)
+        "sections": "0.875rem",  # sub-section headings (.text-subtitle2)
+        "body": "14px",          # base text
+        "small": "12px",         # eyebrows / captions / status lines (.text-xs)
+    },
+    "menu": {
+        # Application menu (header bar + left nav drawer). Every knob defaults
+        # "" = keep the stock Quasar look; a value emits an override.
+        "accent": "",     # header bar + selected item pill (the Quasar primary)
+        "drawer_bg": "",  # menu panel background
+        "text": "",       # menu item text + icons
+        "hover_bg": "",   # menu item hover wash
+        "title": "",      # the "SCHWAB TRADING" drawer caption
+    },
 }
 
 
@@ -143,7 +162,7 @@ def build_tokens(theme):
             f"bg-[{p['card_bg']}] border border-[{p['card_border']}] "
             f"rounded-[12px] px-4 py-3.5"
         ),
-        "EYEBROW": f"text-[{p['icon']}] text-[12px] tracking-[.02em]",
+        "EYEBROW": f"text-[{p['icon']}] text-[{theme['typography']['small']}] tracking-[.02em]",
         "LABEL": f"text-[{p['title']}]",
         "MUTED": f"text-[{p['muted']}]",
         "BTN": (
@@ -258,6 +277,51 @@ def build_quasar_css(theme):
 """
 
 
+def build_typography_css(theme):
+    """App-wide text-category CSS from ``[typography]``.
+
+    The categories map onto the classes the pages already use — Quasar's
+    ``.text-h6`` (titles) / ``.text-subtitle1`` (subtitles) / ``.text-subtitle2``
+    (sections) and Tailwind's ``.text-xs`` (small) — plus the base ``body`` size,
+    so no page needs editing to follow a size change. ``!important`` beats the
+    frameworks' own definitions. An empty ``family`` emits no font rule (keeps
+    the app default Roboto). Injected app-wide by ``main._layout``."""
+    ty = theme["typography"]
+    rules = []
+    if ty["family"]:
+        rules.append(f"body{{font-family:{ty['family']}!important;}}")
+    rules += [
+        f"body{{font-size:{ty['body']};}}",
+        f".text-h6{{font-size:{ty['titles']}!important;}}",
+        f".text-subtitle1{{font-size:{ty['subtitles']}!important;}}",
+        f".text-subtitle2{{font-size:{ty['sections']}!important;}}",
+        f".text-xs{{font-size:{ty['small']}!important;}}",
+    ]
+    return "\n".join(rules)
+
+
+def build_nav_css(theme):
+    """Application-menu override CSS from ``[menu]`` (drawer bg / text / hover /
+    caption). Emits a rule ONLY for a non-empty knob, so all-default config
+    produces an empty string and the stock Quasar look can never drift. The
+    ``accent`` knob is NOT css — ``main._layout`` feeds it to ``ui.colors(
+    primary=…)``, which recolors the header bar AND the active nav pill (both
+    ride the Quasar primary). Injected app-wide by ``main._layout``."""
+    m = theme["menu"]
+    rules = []
+    if m["drawer_bg"]:
+        rules.append(f".nav-drawer{{background:{m['drawer_bg']}!important;}}")
+    if m["text"]:
+        rules.append(
+            f".nav-drawer a,.nav-drawer .q-item,.nav-drawer .q-item__label,"
+            f".nav-drawer .q-icon{{color:{m['text']}!important;}}")
+    if m["hover_bg"]:
+        rules.append(f".nav-drawer a:hover{{background:{m['hover_bg']}!important;}}")
+    if m["title"]:
+        rules.append(f".nav-drawer .nav-title{{color:{m['title']}!important;}}")
+    return "\n".join(rules)
+
+
 # ---------------------------------------------------------------------------
 # Module-level theme + tokens — loaded ONCE at import (restart the webgui after
 # editing config/theme.toml). All existing `.classes(CARD)` / `.classes(BTN_3D)`
@@ -284,3 +348,6 @@ TXT_NEUTRAL = _TOKENS["TXT_NEUTRAL"]
 STATE_TEXT_CLASSES = _TOKENS["STATE_TEXT_CLASSES"]
 
 QUASAR_INTERNAL_CSS = build_quasar_css(THEME)
+TYPOGRAPHY_CSS = build_typography_css(THEME)   # injected app-wide by main._layout
+NAV_THEME_CSS = build_nav_css(THEME)           # "" when [menu] is all-default
+MENU_ACCENT = THEME["menu"]["accent"]          # "" = keep the stock Quasar primary
