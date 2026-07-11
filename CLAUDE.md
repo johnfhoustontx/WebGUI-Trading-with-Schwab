@@ -8,7 +8,45 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-07-09 (**Intraday options premium/volume flow — new Gamma `Flow`
+**Last updated:** 2026-07-11 (**Gamma forward projection on the GEX heatmap + 1-min collection +
+condensed header**: the `/options/gamma` GEX heatmap now draws a **forward projection band** out to
+the 4pm-ET close — future **15-min** columns re-price today's **standing open interest at flat spot**
+(the deterministic charm/time-decay morph: walls sharpen, gamma concentrates ATM into the close), each
+contract's current GEX contribution scaled by a **BS gamma time-decay ratio** anchored 1.0 at the
+collected "now" column so the seam is continuous (`compute.project_gex_grid`, pure, reuses the engine's
+exact GEX formula). An **expected-move cone** (`project_em_cone`, √-time fan) is overlaid so the spot
+uncertainty is shown honestly rather than baked into the colored grid. **GEX-only, sticky-strike IV,
+hidden off-hours** (no session left → collected-only). The projection rides the EXISTING
+`cache:options:gamma` GEX view — `gamma_snapshot` attaches a `projection` block (`{times, grid, cone,
+spot}`) computed off the live chain and **cropped to the display window** (`_crop_gamma_views`); the page
+appends the future columns right of a dashed **"now" divider** with the cone as faint dashed overlays
+(`heatmap_figure(projection=…)`, same interpolated image / colorAxis). The strike/heatmap split is now a
+**fixed 40/60** (`_STRIKE_HEAT_SPLIT`, one-line flip to 70/30) — the full day + forward band make the
+heatmap the star. **GEX collection cadence dropped 2 min → 1 min** (`gex_collector.POLL_INTERVAL_MIN` /
+`scheduler._GEX_INTERVAL_MIN` / `gex_status.STALE_AFTER_SEC=120` in lockstep). **Explain + Analyze + the
+4×/day scheduled auto-briefings** now carry a reader-first **"into the close"** forward read
+(`_projection_brief` = projected flip / call+put walls / EM band at the close → an optional
+`close_outlook` field on the Analyze `submit_analysis` schema + infographic card, and an "Into the close"
+block on the Explain infographic). The Gamma **header was condensed 4 rows → 2** (a **Briefings**
+dropdown replaces the four auto-briefing buttons; one `·`-separated status strip merges collector status
++ last/next scan + refresh countdown + summary via `status_strip_text`). **Restart `options_svc` + the
+webgui.** Built subagent-by-subagent, TDD per layer (2-stage spec+quality review); options_svc **431** +
+webgui **698** green. Branch `Using_Highcharts`. Design/plan:
+[design](docs/plans/2026-07-11-gamma-forward-projection-design.md) /
+[plan](docs/plans/2026-07-11-gamma-forward-projection-plan.md). Prior — 2026-07-10 (**Manual Paper Portfolio → hourly entry+manage cadence**: the
+MANUAL paper account's auto-run moved from the every-5-min `manage_due` slot to a NEW
+**top-of-the-hour** schedule — entry (open new paper trades from current captured signals) +
+manage (reprice + auto-close hits) **once at 09:00–14:00 CT** (last run 2pm; **NO 15:00 run** at
+the regular-session close). New PURE gate `scheduler.paper_cycle_due(now, ran_slots)` (trading-day
+only, once-per-hour within a 20-min grace, mirrors `analyze_slot_due`) + handler
+`handlers.run_paper_entry_and_manage` (entry guarded on an existing account in its own try/except
+so an entry failure can't skip manage → `run_manage_and_refresh`); the scheduler `loop` gates it on
+`paper_cycle_due` (hour latched in `paper_ran` before the blocking cycle). The isolated **DRIVER**
+paper account is UNCHANGED — it stays on the 5-min `manage_due` slot (`run_driver_manage_and_refresh`
+now runs alone there). **Trade-off:** the manual book's live P&L + target/stop auto-close now update
+hourly, not every 5 min. **Restart `options_svc`** to pick it up. options_svc **419** green; TDD per
+layer (8 gate + 3 handler tests + updated loop source-inspection tests). Branch `Using_Highcharts`.
+See the "Paper auto-manage" box below. Prior — 2026-07-09 (**Intraday options premium/volume flow — new Gamma `Flow`
 view**: a per-symbol intraday chart (a new view inserted **before Term**) of the underlying
 **price** + daily-cumulative **call/put premium ($M)** with a **net-premium (call−put)** signed
 bottom panel. **Phase 1 (backend):** the 2-min GEX poll now also computes
@@ -1174,7 +1212,7 @@ decision-log row) | built |
 | `/portfolio` | Portfolio (3-tier, `services/portfolio_svc` :8212: **Holdings / Sectors / Performance** tabs over the portfolio model — sector breakdown, vs-sector RS, since-purchase excess, benchmark over/under-weight, tailwind; **Performance** scorecard (return/capital/risk/entry grades + composite + ann. return + drawdown) with a per-position **advisory suggestions** detail pane; **live-streaming P&L** via the service's proxy SSE consumer republishing each tick; proxy/stream status bar; persists across nav) | built |
 | `/eod` · `/eod/detail` | EOD Report (pure-webgui aggregator over `options:*` + `driver:*` caches. **Summary** = headline tiles + a **verbose Daily / Weekly(WTD) / MTD performance** block **per book** — the manual paper **ledger** (`options:paper_trades`) and the **Driver** account (`options:driver_paper_account`, incl. its new `closed_positions`) shown separately (realized P&L bucketed by **exit** date; opened/credit by **entry** date; a per-book now-line = equity/session-P&L/open-unrealized/open-count). **Detailed** = the same performance + **trade-type breakdowns** (by **strategy** PCS/CCS/IC, by **0-DTE/Swing**, by **status** Open/Closed/Expired) for each book + full trade/scanner/captured/driver tables. **Navigation**: a jump-link **TOC** + every section in a native **`<details>`** (collapsible, **no JS** — works in-app AND in the exported files). **Generate** snapshots the caches → standalone `summary.html` + `detail.html` archived under `webgui/data/eod/<date>/`; `/eod/file` serves them raw. Pure builders (`normalize_trades`/`period_buckets`/`breakdown_rows`/`performance_table_html`/`breakdown_table_html`/`toc`/`details_section`) unit-tested. Realized reads `$0`/`—` until trades close — by design, not a bug) | built |
 | `/market` | Market Dashboard (3-tier, `services/market_svc` :8215: a live grid of ~48 macro tickers from `symbol_categories.csv`, grouped into a **framed panel per category** laid out macro→tape→rotation (Volatility/Options-Sentiment/Internals/Currency · Cash-Index/Futures/Broad-ETF/**Magnificent-7** · Sector/Thematic/Factor/Fixed-Income/Crypto/Countries). Each **tile** shows symbol + description (hover tooltip) + last + net/%-change on a **semantic risk-on/off colored background** (green risk-on / red risk-off / grey no-data, intensity by magnitude) — **polarity-aware** (VIX/SKEW/put-call/TLT/UUP shade RED on up-moves). The **Magnificent 7** frame leads with a **composite `MAG7` tile** = the equal-weighted avg day %-move of NVDA/MSFT/GOOGL/AMZN/META/AAPL/TSLA + a breadth subline (e.g. "3/7 up"), colored by the avg (a new `kind="basket"` tile whose members are also its 7 constituent tiles). `market_svc` polls the proxy's raw `/quotes` on a **~2 s RTH cadence** (5 s off-hours — futures trade ~24h so off-hours stays snappy), normalizes change across INDEX/EQUITY/FUTURE, computes the `$ADVN-$DECN` breadth spread + the `MAG7` basket, and reads the app's own cap-weighted put/call from `cache:sentiment:composite` → publishes `cache:market:dashboard`; the page version-polls + **updates tiles in place** (no per-tick rebuild). **CSV→Schwab symbol map** handles the translations (`SPX`→`$SPX`, `VIX`→`$VIX`, `/ES[U26]`→`/ESU26`) + **equivalents for symbols Schwab can't quote** (`$DXY`→`UUP`; `$PCALL`/`$PCSP`→the sentiment cap-weighted P/C tile). See the "Market Dashboard" section below) | built |
-| `/status` | System Status (pure-webgui health board: overall up/down banner + per-component cards probing **Memurai** PING, **schwab-proxy** `/health`, **Schwab Authorization** (OAuth token state, with an **Authorize** button → proxy `/auth`), the **six domain services** `/health` (incl. `market_svc` :8215), and **webgui** itself; plus a **published-data-freshness** table — each domain's cache version + age (incl. `market:dashboard`), flagging stale scheduled views; **per-component Restart button on offline cards** — proxy/services relaunch via `tools\restart_one.bat`, Memurai via `Start-Service`; off-thread sweep, auto-refresh 15 s + manual) | built |
+| `/status` | System Status (pure-webgui health board: overall up/down banner + per-component cards probing **Memurai** PING, **schwab-proxy** `/health`, **Schwab Authorization** (OAuth token state, with an **Authorize** button → proxy `/auth`), the **six domain services** `/health` (incl. `market_svc` :8215), and **webgui** itself; plus a **published-data-freshness** table — each domain's cache version + age (incl. `market:dashboard`), flagging stale scheduled views; a **Restart button on every component card** (proxy + the six services + Memurai + the webgui itself, shown up or down) — proxy/services/webgui relaunch **windowlessly** via `tools\restart_one.bat` (`CREATE_NO_WINDOW` → hidden `pythonw`, logs to `logs\`), Memurai via `Restart-Service`; the auth card shows **Authorize** instead; off-thread sweep, auto-refresh 15 s + manual) | built |
 | `/terminate` | Terminate (guarded "stop the whole local stack" page: red **Stop all services** button behind a confirm dialog → spawns `stop_all.bat` detached via `cmd /c start`, which kills the proxy + 6 services + this web app by listening port; **Memurai is left running**; the page goes unresponsive after confirm, by design) | built |
 
 **Market Dashboard (`/market`) — DONE (2026-07-07).** A new **More → Market Dashboard**
@@ -2050,13 +2088,22 @@ Options section (design/plan:
 - Pure transforms are unit-tested (webgui + options_svc suites).
 
 > **Paper auto-manage (DONE — supersedes the old "manual-only" TODO).** The
-> `options_svc` scheduler now reprices + auto-closes paper positions on its own:
-> `manage_due` fires `run_manage_and_refresh` every **5 min** within market hours
-> (`scheduler.py:97,104,219`), so the Paper Portfolio updates unattended. The
-> "Run Manage Cycle" button is now a manual trigger of the same cycle, not the only
-> path. (Tick cadence reference: each 30 s scheduler tick also runs
-> `refresh_header` + `publish_gex_status`; the 2-min GEX collect and 5-min manage
-> are slot-gated within 08:30–15:20 CT.)
+> `options_svc` scheduler reprices + auto-closes paper positions on its own. **Two
+> distinct cadences (changed 2026-07-10):** the **MANUAL Paper Portfolio** runs
+> **entry + manage once at the top of each hour, 09:00–14:00 CT** (last run 14:00 /
+> 2pm; **NO 15:00 run** at the regular-session close) — `scheduler.paper_cycle_due`
+> (trading days only, once-per-hour within a 20-min grace, mirrors
+> `analyze_slot_due`) → `handlers.run_paper_entry_and_manage` (opens new paper
+> trades from current captured signals via `compute.run_entry_cycle`, guarded on an
+> existing account + its own try/except so an entry failure can't skip manage, then
+> `run_manage_and_refresh`). The **isolated DRIVER paper account** stays on the
+> old **5-min** `manage_due` slot (`run_driver_manage_and_refresh`). Both windows
+> are trading-day/market-hours gated. The "Run Manage Cycle" button is still a
+> manual trigger of the manage cycle. (Tick cadence reference: each 30 s scheduler
+> tick also runs `refresh_header` + `publish_gex_status`; the 2-min GEX collect +
+> 5-min driver manage are slot-gated within their CT windows. **Trade-off to know:**
+> the manual account's live P&L + target/stop auto-close now update **hourly**, not
+> every 5 min.)
 
 **Gamma panels / walls / flicker batch (DONE — 2026-06-16).** Four fixes from a
 live-screenshot review (design/plan:
@@ -2667,25 +2714,37 @@ imports only `nicegui` + `bus_client`/`proxy` + `repo_paths`. Pieces:
   show `age_text` + a STALE flag for **scheduled** views older than 600 s (`is_stale`);
   **on-demand** views (trade/driver) are never flagged. This distinguishes "service
   answers /health" from "service is actively publishing".
-- **Per-component Restart (2026-06-19).** Each **offline** component card grows a
-  **Restart** button (proxy + the five services + Memurai; never the webgui — it
-  can't restart itself, and its card is always "up"). `restart_spec(target)` maps a
-  component to how it restarts — a **script** spec (proxy / service: free the port
-  then launch the venv python on the entry script; services pass `wait_port=8100`
-  so they wait for the proxy) or a **service** spec (Memurai → `Start-Service`).
-  `restart_command(spec)` builds the argv: a script spec spawns its own console
-  via `cmd /c start … cmd /k call tools\restart_one.bat <kill_port> <wait_port>
-  <script>` (detached, live logs); `restart_one.bat` taskkills the port's LISTENING
-  owner (clears a wedged process) then hands off to `wait_and_run.bat`. The page's
-  click handler spawns it, toasts, and schedules a 7s re-sweep. Verified live: a
-  Restart click on the proxy bound :8100 within ~1s and the card flipped to Online.
+- **Per-component Restart (2026-06-19; every card 2026-07-10).** **Every**
+  component card carries a **Restart** button — shown regardless of up/down state,
+  so you can also restart a wedged-but-listening service — covering the proxy, all
+  **six** Tier-2 services (sentiment/options/portfolio/trade/driver/market), Memurai,
+  and **the webgui itself**. Only the **auth** card is excepted (its action is
+  **Authorize**, a link to `/auth`, not a process restart). `restart_spec(target)`
+  maps a component to how it restarts — a **script** spec (proxy / service / **self**:
+  free the port then launch the venv python on the entry script; services pass
+  `wait_port=8100` so they wait for the proxy, the webgui uses `wait_port=0`) or a
+  **service** spec (Memurai → `Restart-Service`, falling back to `Start-Service` if
+  stopped — works up or down; may need an elevated session). **Windowless (2026-07-10):**
+  `restart_command(spec)` builds a `cmd /c tools\restart_one.bat <kill_port>
+  <wait_port> <name> <script>` argv and `_do_restart` spawns it with
+  **`CREATE_NO_WINDOW`** — nothing flashes. `restart_one.bat` taskkills the port's
+  LISTENING owner (`/F /PID`, no `/T` — so the webgui's own self-restart doesn't take
+  the spawn down with it), waits for the dependency (`ping`-based sleep, no console
+  needed), then launches the component **hidden** via `pythonw` +
+  `Start-Process -WindowStyle Hidden` with stdout/stderr → `logs\<name>.out.log` /
+  `.err.log` (mirrors `start_all_wt.bat nowindow`). The **webgui self-restart** frees
+  :8500 and relaunches even though it kills the current page — the click handler toasts
+  "this page will disconnect; reload" and skips the re-sweep. Every other restart
+  toasts + schedules a 7s re-sweep. Verified: a live proxy restart (prior turn) bound
+  :8100 in ~1s; the windowless `restart_one.bat` launch primitive is smoke-tested
+  (hidden `pythonw`, output captured to `logs\`).
 - **Wiring.** `("/status", "System Status", "monitor_heart")` in the **More** nav
   group; `@ui.page("/status")` → `status.render()`; `/status` added to
   `test_shell.py`. Auto-refresh `ui.timer(15s)` + manual Refresh button (with
   spinner + re-entrancy guard). Pure builders (`component_targets`/`status_word`/
   `status_color`/`status_icon`/`overall_status`/`age_text`/`is_stale`/`freshness_row`
   + `restart_spec`/`restart_command` + `auth_status`) unit-tested in
-  `webgui/tests/test_status.py` (34); render + live restart + live auth-card
+  `webgui/tests/test_status.py` (35); render + live restart + live auth-card
   verified by screenshot.
 
 **Rescue tested trades (`/options/rescue`) — DONE (2026-06-21).** An advisory +
@@ -2873,8 +2932,8 @@ browser). It opens the proxy + 5 services + web gui in **7 separate console
 windows**.
 
 **One-window alternative — `start_all_wt.bat`** (requires Windows Terminal):
-launches the same 7 processes as **7 tabs in a single Windows Terminal window**
-(live logs preserved, but far less desktop clutter). The processes stay 7
+launches the same 8 processes as **8 tabs in a single Windows Terminal window**
+(live logs preserved, but far less desktop clutter). The processes stay 8
 separate OS processes — required, since merging services into one Python process
 would re-introduce the `config`/`scoring`/`notifier`/`src` top-level
 module-name collisions the 3-tier split exists to prevent. Each tab waits for the
@@ -2882,6 +2941,31 @@ proxy (:8100) before starting via `tools\wait_and_run.bat <wait_port|0> <script>
 (the proxy tab passes `0` to start immediately), preserving the same ordering as
 the multi-window launcher; tabs run under `cmd /k` so they stay open with live
 output. Close the window (or a tab) to stop the services.
+
+**Double-click launcher — `start_all_hidden.bat`**: the click-to-run entry point.
+Double-click it in Windows Explorer (or a desktop **shortcut** to it — right-click
+→ Send to → Desktop) to launch the whole stack **windowless**. Because a `.bat`
+double-clicked always opens its own console, it **relaunches itself hidden** (via
+`powershell Start-Process -WindowStyle Hidden`, so you see at most a brief flash)
+and then runs `start_all_wt.bat nowindow`. Net effect: click → nothing visible →
+the browser opens to the web GUI, with all 8 processes hidden. Stop with
+`stop_all.bat` or More → Terminate.
+
+**No-window mode — `start_all_wt.bat nowindow`** (aliases `-nowindow` /
+`/nowindow` / `hidden`): the same launcher, but every process runs **hidden with
+NO window at all** — each is spawned via PowerShell `Start-Process -WindowStyle
+Hidden` using the venv **`pythonw.exe`** (falls back to `python.exe`), with
+stdout/stderr redirected to `logs\<name>.out.log` / `.err.log` at the repo root.
+Same proxy-first ordering (it waits for :8100 before starting the six services +
+web GUI) and it still opens the browser. Since there are no consoles to close,
+**stop a windowless stack with `stop_all.bat`** (or the GUI's More → Terminate).
+The default (no-arg) mode is unchanged (WT tabs with live logs). NOTE: the
+proxy + six services already write their own rotating log files regardless; the
+redirect additionally captures the **web GUI** output, which otherwise only goes
+to its console. (The System Status page's per-component **Restart** buttons are
+**also windowless** — they spawn `tools\restart_one.bat` with `CREATE_NO_WINDOW`,
+which relaunches the component hidden via `pythonw` + `Start-Process -WindowStyle
+Hidden`, logs to `logs\<name>.out.log`.)
 
 **Stopping — `stop_all.bat`** (also reachable from the GUI's **More → Terminate**
 page): runs `tools\stop_all.py`, which reads the ports from `repo_paths` and kills
