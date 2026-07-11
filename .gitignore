@@ -51,3 +51,10 @@ trade-analyzer/data/
 
 # Stale manual stderr/stdout redirect captures from ad-hoc restarts
 *.log.err
+
+# Local artifacts that must never be committed: desktop shortcuts, ad-hoc DB
+# backups, the sentiment intraday store, and the generated EOD report archives.
+*.lnk
+*.db.bak
+sentiment-dashboard/data/
+webgui/data/eod/
