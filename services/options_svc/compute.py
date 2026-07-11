@@ -1149,6 +1149,16 @@ def _crop_gamma_views(views, spot, n_side=GAMMA_N_SIDE):
                 r = tuple(r[:6]) + (_crop_grid(r[6], keep),) + tuple(r[7:])
             cropped_rows.append(r)
         entry["history"] = cropped_rows
+        # Crop the forward-projection grid (GEX view only) to the same window.
+        # Its keys are strike STRINGS ("5400.0") vs the float ``keep`` set.
+        proj = entry.get("projection")
+        if isinstance(proj, dict) and isinstance(proj.get("grid"), dict) and proj["grid"]:
+            def _kf(s):
+                try:
+                    return float(s)
+                except (TypeError, ValueError):
+                    return None
+            proj["grid"] = {k: v for k, v in proj["grid"].items() if _kf(k) in keep}
     return views
 
 
@@ -1242,6 +1252,14 @@ def gamma_snapshot(symbol: str) -> dict | None:
                     "projected_net_delta_close": data.get("projected_net_delta_close"),
                     "hedge_pressure": data.get("hedge_pressure"),
                 }
+            if vname == "GEX":
+                try:
+                    marks = _future_marks_ct(now)
+                    proj = project_gex_grid(eng, chain, spot, now)
+                    proj["cone"] = project_em_cone(spot, atm_iv_from_chain(chain, spot), marks, now)
+                    entry["projection"] = proj
+                except Exception:
+                    log.debug("gamma projection attach failed", exc_info=True)
             views[vname] = entry
         # Intraday options-flow series (spot + daily-cumulative call/put volume +
         # premium) for the Flow view — reuses the SAME read-only connection as the

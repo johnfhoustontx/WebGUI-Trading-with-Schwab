@@ -1331,6 +1331,46 @@ def test_gamma_snapshot_none_when_chain_fetch_fails(monkeypatch):
     assert compute.gamma_snapshot("$SPX") is None
 
 
+def test_gamma_snapshot_gex_carries_projection(monkeypatch):
+    """The GEX view carries a forward `projection` block (times/grid/cone/spot),
+    cropped to the display window; other views do not."""
+    import datetime as _dtm
+    from zoneinfo import ZoneInfo
+    from services.options_svc import scheduler as _sched
+
+    exp = "2026-06-18:0"
+    def _leg(k, oi):
+        return [{"strike": k, "gamma": 0.05, "openInterest": oi,
+                 "volatility": 20.0, "delta": 0.5, "daysToExpiration": 0}]
+    wide = {float(5400 + i): (5000 if i == 0 else 500) for i in range(-60, 61)}
+    chain = {"underlyingPrice": 5400.0,
+             "callExpDateMap": {exp: {f"{k:.1f}": _leg(k, oi) for k, oi in wide.items()}},
+             "putExpDateMap": {exp: {f"{k:.1f}": _leg(k, max(oi - 200, 100)) for k, oi in wide.items()}}}
+
+    class _ProjEngine(_WideEngine):
+        @staticmethod
+        def _find_nearest_exp_key(exp_map, today):
+            return (next(iter(exp_map)), 0) if exp_map else (None, None)
+
+    _patch_gamma(monkeypatch, chain=chain,
+                 history=[(1, 5400.0, 3, 4, 5, 6, {5400.0: {"net": 1}})])
+    import sys as _sys
+    _sys.modules["gamma_tool"].GammaEngine = _ProjEngine
+    monkeypatch.setattr(_sched, "_market_now",
+                        lambda: _dtm.datetime(2026, 6, 18, 13, 0, tzinfo=ZoneInfo("America/Chicago")))
+
+    snap = compute.gamma_snapshot("$SPX")
+    proj = snap["views"]["GEX"]["projection"]
+    assert set(proj) >= {"times", "grid", "cone", "spot"}
+    assert proj["times"] and proj["times"][-1] == "15:00"
+    assert proj["grid"]                                     # populated
+    assert len(next(iter(proj["grid"].values()))) == len(proj["times"])
+    assert all(5380.0 <= float(k) <= 5420.0 for k in proj["grid"])   # cropped to +-20 window
+    assert set(proj["cone"]) == {"mid", "up", "down"}
+    assert "projection" not in snap["views"]["Charm"]
+    assert "projection" not in snap["views"]["DEX"]
+
+
 def test_build_gamma_read_maps_and_falls_back():
     read = compute.build_gamma_read(
         "$SPX", spot=5400.0,
