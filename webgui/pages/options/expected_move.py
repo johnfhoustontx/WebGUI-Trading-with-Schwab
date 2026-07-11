@@ -9,13 +9,12 @@ Scanner / Paper / Captured / Calculator pages, or standalone from the nav.
 Chart is Highcharts candlestick (extras=["stock"], which also provides the axis
 crosshair label boxes)."""
 
-from pages.options import theme
 from .theme import BTN_3D
 
 UP_COLOR = "#26a69a"
-DOWN_COLOR = theme.hex_of("red")
-EM_UP_COLOR = theme.hex_of("green")
-EM_DOWN_COLOR = theme.hex_of("red")
+DOWN_COLOR = "#ef5350"
+EM_UP_COLOR = "#66bb6a"
+EM_DOWN_COLOR = "#ef5350"
 PUT_COLOR = "#ef9a9a"
 CALL_COLOR = "#90caf9"
 
@@ -142,7 +141,7 @@ def render():
     from . import handoff
     from .inputs import select_all_on_focus
 
-    ui.label("Expected Move").classes("text-h5")
+    # No page title — the tab strip names the page (2026-07-11 cleanup).
 
     state = {"ver": None, "last": None}
 

@@ -5,12 +5,10 @@ markers) as inline SVG strings so NiceGUI can render them via ``ui.html``. Pure
 functions — unit-tested, no NiceGUI dependency. (The composite-score speedometer
 is now the shared Highcharts solid-gauge in ``pages/gauge.py``.)
 """
-from pages.options import theme
-
-RED = theme.rgb("red")      # #ef5350
-AMBER = theme.rgb("amber")   # #ffa726
-BLUE = theme.rgb("blue")    # #42a5f5
-GREEN = theme.rgb("green")  # #66bb6a
+RED = (239, 83, 80)      # #ef5350
+AMBER = (255, 167, 38)   # #ffa726
+BLUE = (66, 165, 245)    # #42a5f5
+GREEN = (102, 187, 106)  # #66bb6a
 
 
 def _clamp(v, lo=0.0, hi=100.0):
@@ -79,5 +77,5 @@ def range_marker_svg(low, high, current, width=160, height=14):
             f'<line x1="{width - 2}" y1="{mid - 4:.1f}" x2="{width - 2}" y2="{mid + 4:.1f}" '
             f'stroke="#666" stroke-width="2"/>'
             f'<polygon points="{x:.1f},{mid - 5:.1f} {x - 4:.1f},{mid + 4:.1f} {x + 4:.1f},{mid + 4:.1f}" '
-            f'fill="{theme.hex_of("yellow")}"/>'
+            f'fill="#ffd54f"/>'
             f'</svg>')

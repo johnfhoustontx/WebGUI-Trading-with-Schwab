@@ -16,10 +16,15 @@ intentionally NOT ported here — ``run_full_scan`` is called directly.
 """
 import logging
 import sys
+from zoneinfo import ZoneInfo
 
 from repo_paths import DRIVER_PAPER_DB, OPTIONS_SCANNER
 
 log = logging.getLogger(__name__)
+
+# Central time (4pm ET cash close = 15:00 CT) — shared by the forward-projection
+# helpers (_future_marks_ct / project_gex_grid).
+_PROJ_CT_TZ = ZoneInfo("America/Chicago")
 
 if str(OPTIONS_SCANNER) not in sys.path:
     sys.path.insert(0, str(OPTIONS_SCANNER))
@@ -1144,6 +1149,16 @@ def _crop_gamma_views(views, spot, n_side=GAMMA_N_SIDE):
                 r = tuple(r[:6]) + (_crop_grid(r[6], keep),) + tuple(r[7:])
             cropped_rows.append(r)
         entry["history"] = cropped_rows
+        # Crop the forward-projection grid (GEX view only) to the same window.
+        # Its keys are strike STRINGS ("5400.0") vs the float ``keep`` set.
+        proj = entry.get("projection")
+        if isinstance(proj, dict) and isinstance(proj.get("grid"), dict) and proj["grid"]:
+            def _kf(s):
+                try:
+                    return float(s)
+                except (TypeError, ValueError):
+                    return None
+            proj["grid"] = {k: v for k, v in proj["grid"].items() if _kf(k) in keep}
     return views
 
 
@@ -1215,6 +1230,7 @@ def gamma_snapshot(symbol: str) -> dict | None:
         except Exception:
             return []
 
+    flow = []
     try:
         views = {}
         for vname, (idx, vstr) in _GAMMA_VIEWS.items():
@@ -1236,7 +1252,25 @@ def gamma_snapshot(symbol: str) -> dict | None:
                     "projected_net_delta_close": data.get("projected_net_delta_close"),
                     "hedge_pressure": data.get("hedge_pressure"),
                 }
+            if vname == "GEX":
+                try:
+                    marks = _future_marks_ct(now)
+                    proj = project_gex_grid(eng, chain, spot, now)
+                    proj["cone"] = project_em_cone(spot, atm_iv_from_chain(chain, spot), marks, now)
+                    entry["projection"] = proj
+                except Exception:
+                    log.debug("gamma projection attach failed", exc_info=True)
             views[vname] = entry
+        # Intraday options-flow series (spot + daily-cumulative call/put volume +
+        # premium) for the Flow view — reuses the SAME read-only connection as the
+        # view history loads (one open per snapshot). Same active-session date.
+        if hist_conn is not None:
+            try:
+                _frows = gh.load_flow_series(hist_conn, symbol, session_date)
+                flow = [{"ts": r[0], "spot": r[1], "call_vol": r[2], "put_vol": r[3],
+                         "call_prem": r[4], "put_prem": r[5]} for r in _frows]
+            except Exception:
+                flow = []
     finally:
         if hist_conn is not None:
             try:
@@ -1258,7 +1292,7 @@ def gamma_snapshot(symbol: str) -> dict | None:
         term = {}
 
     return {"symbol": symbol, "spot": spot, "dte": dte,
-            "views": views, "term": term}
+            "views": views, "term": term, "flow": flow}
 
 
 # ── Intraday GEX history collection (Tier-2 owner) ──────────────────────────
@@ -1591,8 +1625,14 @@ def gamma_explain(symbol: str, style: str = "terminal") -> dict:
         gt.GammaEngine.snapshot_summary(dex, "dex"),
         gt.GammaEngine.snapshot_summary(vanna, "vanna"),
         walls, regime)
+    proj_text = ""
     try:
-        html = gamma_infographic.render_infographic(read, style=style)
+        from services.options_svc import scheduler as _sched
+        proj_text = _projection_brief(eng, chain, spot, _sched._market_now())
+    except Exception:
+        proj_text = ""
+    try:
+        html = gamma_infographic.render_infographic(read, style=style, projection=proj_text)
     except Exception as exc:  # never let a render glitch break the command
         return _fallback(f"Infographic render failed: {exc}")
     return {"symbol": symbol, "html": html}
@@ -1643,6 +1683,165 @@ def _session_expected_move(chain):
         return round(spot * (atm_iv / 100.0) * math.sqrt(1.0 / 365.0), 2)
     except Exception:  # noqa: BLE001 — EM is best-effort; missing → None → '—'.
         return None
+
+
+def _future_marks_ct(now):
+    """15-min CT marks from the next quarter-hour through 15:00 CT (the close).
+    Returns [] once ``now`` is at/after the close (off-hours hides the band)."""
+    import datetime as _dt
+    ct = _PROJ_CT_TZ
+    now = now.astimezone(ct)
+    close = now.replace(hour=15, minute=0, second=0, microsecond=0)
+    if now >= close:
+        return []
+    q = (now.minute // 15 + 1) * 15
+    mark = now.replace(minute=0, second=0, microsecond=0) + _dt.timedelta(minutes=q)
+    out = []
+    while mark <= close:
+        out.append(mark)
+        mark = mark + _dt.timedelta(minutes=15)
+    return out
+
+
+def _T_at(dte, mark_ct):
+    """Engine-consistent time-to-expiry (years) at a CT wall-clock ``mark_ct``.
+    Mirrors GammaEngine: T = (dte*24 + hours_to_close)/(365*24), floored 1e-6,
+    hours measured to 15:00 CT (the 4pm ET cash close)."""
+    hours_left = max(0.0, (15 - mark_ct.hour) + (0 - mark_ct.minute) / 60.0)
+    return max((dte * 24 + hours_left) / (365 * 24), 1e-6)
+
+
+def project_gex_grid(eng, chain, spot, now):
+    """Flat-spot time-decay projection of net GEX per strike to the 4pm ET close.
+    Re-prices standing OI at future 15-min marks with spot held flat: each contract's
+    CURRENT GEX contribution (chain gamma) is scaled by bs_gamma(S,K,T',σ)/
+    bs_gamma(S,K,T_now,σ) — 1.0 at T'=T_now so the seam is continuous; σ<=0 holds flat.
+    ``now`` must be timezone-aware (callers pass an aware datetime); a naive ``now``
+    degrades to an empty grid defensively. Pure + defensive: empty grid on any failure.
+    Returns {"times":[HH:MM...], "grid":{strike_str:[net_t0...]}, "spot": spot}."""
+    empty = {"times": [], "grid": {}, "spot": spot}
+    try:
+        if not chain or not spot or spot <= 0:
+            return empty
+        marks = _future_marks_ct(now)
+        if not marks:
+            return empty
+        from options_calculator import bs_gamma
+        ct = _PROJ_CT_TZ
+        call_map = chain.get("callExpDateMap", {})
+        put_map = chain.get("putExpDateMap", {})
+        today = now.astimezone(ct).strftime("%Y-%m-%d")
+        ck, cdte = eng._find_nearest_exp_key(call_map, today)
+        pk, pdte = eng._find_nearest_exp_key(put_map, today)
+        dtes = [d for d in (cdte, pdte) if d is not None]
+        dte = min(dtes) if dtes else 0
+        r = 0.045
+        t_now = _T_at(dte, now.astimezone(ct))
+        t_future = [_T_at(dte, m) for m in marks]
+        grid = {}
+
+        def _accumulate(exp_key, exp_map, sign):
+            if not exp_key:
+                return
+            for strike_str, contracts in exp_map.get(exp_key, {}).items():
+                strike = float(strike_str)
+                key = str(strike)
+                for c in contracts:
+                    oi = c.get("openInterest", 0) or 0
+                    gamma = c.get("gamma", 0) or 0
+                    if oi <= 0 or gamma == 0:
+                        continue
+                    base = sign * gamma * oi * 100 * spot * spot * 0.01
+                    iv = (c.get("volatility", 0) or 0) / 100.0
+                    denom = bs_gamma(spot, strike, t_now, r, iv) if iv > 0 else 0.0
+                    row = grid.setdefault(key, [0.0] * len(marks))
+                    for i, tf in enumerate(t_future):
+                        ratio = (bs_gamma(spot, strike, tf, r, iv) / denom) if (iv > 0 and denom > 0) else 1.0
+                        row[i] += base * ratio
+
+        _accumulate(ck, call_map, +1.0)
+        _accumulate(pk, put_map, -1.0)
+        return {"times": [m.strftime("%H:%M") for m in marks], "grid": grid, "spot": spot}
+    except Exception:
+        log.debug("project_gex_grid failed", exc_info=True)
+        return empty
+
+
+def project_em_cone(spot, atm_iv, marks, now):
+    """Up/mid/down expected-move fan over the future marks (flat-spot midline).
+    half_width(τ) = spot*atm_iv*sqrt(τ/365), τ = calendar days from ``now`` to the mark.
+    ``now`` (and the marks) must be timezone-aware; a naive ``now`` degrades to empty
+    lists defensively. Returns {"mid":[...], "up":[...], "down":[...]} (empty if unusable)."""
+    import math
+    out = {"mid": [], "up": [], "down": []}
+    try:
+        if not spot or spot <= 0 or not atm_iv or atm_iv <= 0 or not marks:
+            return out
+        for m in marks:
+            tau_days = max(0.0, (m - now).total_seconds() / 86400.0)
+            hw = spot * atm_iv * math.sqrt(tau_days / 365.0)
+            out["mid"].append(spot)
+            out["up"].append(spot + hw)
+            out["down"].append(spot - hw)
+        return out
+    except Exception:
+        log.debug("project_em_cone failed", exc_info=True)
+        return {"mid": [], "up": [], "down": []}
+
+
+def _net_zero_cross(col):
+    """Strike where net GEX crosses zero (linear interp between sign-changing
+    adjacent strikes). ``col`` maps strike(float)->net. None if no crossing."""
+    items = sorted(col.items())
+    for (k0, v0), (k1, v1) in zip(items, items[1:]):
+        if v0 == 0:
+            return k0
+        if (v0 < 0) != (v1 < 0) and v1 != v0:
+            return k0 + (k1 - k0) * (0 - v0) / (v1 - v0)
+    return None
+
+
+def _projection_brief(eng, chain, spot, now):
+    """Compact factual 'into the close' summary of the forward GEX projection for
+    ONE symbol — projected flip / call wall / put wall at the close + the EM band —
+    used as prompt CONTEXT so the model writes each index's reader-first
+    close_outlook. Returns '' when there's no session left / no projection."""
+    try:
+        proj = project_gex_grid(eng, chain, spot, now)
+        if not proj.get("times") or not proj.get("grid"):
+            return ""
+        col = {}
+        for k, vals in proj["grid"].items():
+            if vals and isinstance(vals[-1], (int, float)):
+                try:
+                    col[float(k)] = vals[-1]
+                except (TypeError, ValueError):
+                    continue
+        if not col or not isinstance(spot, (int, float)):
+            return ""
+        flip = _net_zero_cross(col)
+        above = [(k, v) for k, v in col.items() if k > spot]
+        below = [(k, v) for k, v in col.items() if k < spot]
+        call_wall = max(above, key=lambda kv: kv[1])[0] if above else None
+        put_wall = min(below, key=lambda kv: kv[1])[0] if below else None
+        cone = project_em_cone(spot, atm_iv_from_chain(chain, spot),
+                               _future_marks_ct(now), now)
+        em_lo = cone["down"][-1] if cone.get("down") else None
+        em_up = cone["up"][-1] if cone.get("up") else None
+        close_lbl = proj["times"][-1]
+        parts = [f"Into the close ({close_lbl} CT), holding spot flat"]
+        if flip is not None:
+            parts.append(f"projected gamma flip ~{flip:.0f}")
+        if call_wall is not None:
+            parts.append(f"call wall firms ~{call_wall:.0f}")
+        if put_wall is not None:
+            parts.append(f"put wall ~{put_wall:.0f}")
+        if isinstance(em_lo, (int, float)) and isinstance(em_up, (int, float)):
+            parts.append(f"expected-move band {em_lo:.0f}-{em_up:.0f}")
+        return ": ".join([parts[0], "; ".join(parts[1:])]) + "." if len(parts) > 1 else parts[0] + "."
+    except Exception:
+        log.debug("_projection_brief failed", exc_info=True)
+        return ""
 
 
 def _gamma_blocks_for(symbol, chain):
@@ -1717,7 +1916,13 @@ _ANALYZE_SYSTEM = (
     "of the session, specific to that index: 'rally' (an upside path), 'selloff' (a "
     "downside path) and 'chop' (a sideways/range path) — one sentence each. Fill 'why' "
     "with 1-2 plain sentences on why the tape is acting this way (macro context + the "
-    "session's path so far). Keep the headline and per-index notes terse and the "
+    "session's path so far). "
+    "FRAME EVERYTHING FROM THE TRADER'S PERSPECTIVE — write what the READER should DO "
+    "and expect, NOT what dealers are doing. Prefer 'you' and concrete actions ('fade "
+    "the call wall', 'buy dips toward the put wall', 'lean long / stay long above the "
+    "flip', 'respect the supply', 'trade with the trend', 'tighten stops') over "
+    "describing dealer hedging mechanics; you may mention the mechanism briefly, but "
+    "LEAD with the action. Keep the headline and per-index notes terse and the "
     "narrative to 2-3 sentences. Do NOT include any disclaimers, risk warnings, 'not "
     "financial advice' notes, or boilerplate — only the analysis."
 )
@@ -1727,24 +1932,31 @@ _ANALYZE_SYSTEM = (
 # is one ``submit_analysis`` tool_use block we render — the model never free-writes.
 _ANALYZE_TOOL = {
     "name": "submit_analysis",
-    "description": ("Return the structured intraday dealer-positioning analysis for "
-                    "$SPX, SPY and QQQ. The app renders it as an infographic, so copy "
-                    "the exact computed levels from the provided data rather than "
-                    "estimating."),
+    "description": ("Return the structured intraday options-flow analysis + trader "
+                    "playbook for $SPX, SPY and QQQ. The app renders it as an "
+                    "infographic, so copy the exact computed levels from the provided "
+                    "data rather than estimating. Frame the prose as what the reader "
+                    "should DO, not what dealers are doing."),
     "input_schema": {
         "type": "object",
         "properties": {
             "regime": {"type": "string",
-                       "description": "Short overall dealer-gamma regime label, e.g. "
-                                      "'Short gamma below spot' or 'Long gamma / pinned'."},
+                       "description": "Short overall regime label framed for the trader, "
+                                      "e.g. 'Trend day — stay long above the flip' or "
+                                      "'Pinned / range — fade the walls'."},
             "bias": {"type": "number",
                      "description": "Net directional bias, -100 (bearish) to +100 (bullish)."},
             "bias_label": {"type": "string",
                            "description": "Two-or-three-word bias label, e.g. 'Mildly bearish'."},
             "headline": {"type": "string",
-                         "description": "One-sentence headline for the next few hours."},
+                         "description": "One-sentence headline telling the reader what to "
+                                        "do / expect over the next few hours (an action, "
+                                        "not a description of dealer hedging)."},
             "narrative": {"type": "string",
-                          "description": "2-3 sentence plain read of what to expect and why."},
+                          "description": "2-3 sentence plain read of what the reader should "
+                                         "do and expect, and why — lead with the action "
+                                         "('lean long above the flip', 'fade the call "
+                                         "wall'), mention the mechanism only briefly."},
             "why": {"type": "string",
                     "description": "1-2 plain sentences: why the tape is acting this way "
                                    "(macro context + the session's path so far)."},
@@ -1763,15 +1975,34 @@ _ANALYZE_TOOL = {
                         "expected_move": {"type": "number",
                                           "description": "Expected move in points (1 std dev), not percent."},
                         "pc_ratio": {"type": "number", "description": "Put/call ratio."},
-                        "note": {"type": "string", "description": "Terse one-line read for this index."},
+                        "note": {"type": "string",
+                                 "description": "Terse one-line read for this index, framed "
+                                                "as what to do (e.g. 'buy dips toward 5900, "
+                                                "trim into the 5950 call wall')."},
+                        "close_outlook": {"type": "string",
+                            "description": "One line on what to DO as the day decays "
+                                "into the close, using the provided FORWARD PROJECTION "
+                                "(e.g. 'into the close the call wall firms at 5950 — trim "
+                                "rallies into it; stay defensive below the flip'). "
+                                "Reader-first action, NOT dealer mechanics."},
                         "what_if": {
                             "type": "object",
                             "description": "Three short plain-English scenarios for this "
-                                           "index for the rest of the session.",
+                                           "index for the rest of the session, each telling "
+                                           "the reader how to play it.",
                             "properties": {
-                                "rally": {"type": "string", "description": "Upside path."},
-                                "selloff": {"type": "string", "description": "Downside path."},
-                                "chop": {"type": "string", "description": "Sideways/range path."},
+                                "rally": {"type": "string",
+                                          "description": "Upside path — what to do if it "
+                                                         "rallies (e.g. 'ride it, trim into "
+                                                         "the call wall')."},
+                                "selloff": {"type": "string",
+                                            "description": "Downside path — what to do if it "
+                                                           "sells off (e.g. 'buy the dip at "
+                                                           "the put wall, stops below')."},
+                                "chop": {"type": "string",
+                                         "description": "Sideways/range path — what to do if "
+                                                        "it chops (e.g. 'fade the edges, "
+                                                        "avoid the middle')."},
                             },
                         },
                     },
@@ -1841,6 +2072,10 @@ _ANALYZE_CSS = """
   .ga-why-h { color:#90caf9; font-size:1rem; font-weight:600; margin-bottom:6px; }
   .ga-why-b { color:#dce6f7; font-size:.95rem; line-height:1.55; }
   .ga-why-b p { margin:.3em 0; }
+  .idx-close { color:#c7d2e8; font-size:.86rem; margin-top:8px; padding-top:8px;
+    border-top:1px solid #1c2842; line-height:1.45; }
+  .idx-close-h { color:#8a93a3; text-transform:uppercase; font-size:.72rem;
+    letter-spacing:.04em; margin-right:6px; }
 """
 
 
@@ -1946,6 +2181,7 @@ def _parse_analysis(inp) -> dict | None:
             "expected_move": _num(it.get("expected_move")),
             "pc_ratio": _num(it.get("pc_ratio")),
             "note": str(it.get("note") or "").strip(),
+            "close_outlook": str(it.get("close_outlook") or "").strip(),
             "what_if": {
                 "rally": str(wf.get("rally") or "").strip(),
                 "selloff": str(wf.get("selloff") or "").strip(),
@@ -2088,10 +2324,13 @@ def _index_card_html(idx) -> str:
     sym = _h.escape(idx.get("symbol") or "")
     note = _h.escape(idx.get("note") or "")
     note_html = f'<div class="idx-note">{note}</div>' if note else ""
+    close_outlook = _h.escape(idx.get("close_outlook") or "")
+    co_html = (f'<div class="idx-close"><span class="idx-close-h">Into the close</span> '
+               f'{close_outlook}</div>') if close_outlook else ""
     return (f'<div class="idx-card"><div class="idx-head">{sym}</div>'
             f'<div class="idx-body">{_ladder_svg(idx)}'
             f'<div class="idx-right">{_metric_tiles_html(idx)}{note_html}</div></div>'
-            f'{_whatif_html(idx)}</div>')
+            f'{co_html}{_whatif_html(idx)}</div>')
 
 
 def analyze_infographic_html(data, subtitle=None) -> str:
@@ -2179,11 +2418,12 @@ def gamma_analyze(client=None, label: str | None = None) -> dict:
     if label:
         subtitle = f"{subtitle} · {label}"
 
-    blocks, em_by_sym = {}, {}
+    blocks, em_by_sym, chains = {}, {}, {}
     for key, sym in (("spx", "$SPX"), ("spy", "SPY"), ("qqq", "QQQ")):
         try:
             chain = _gamma_fetch_chain(sym)
             if chain:
+                chains[sym] = chain
                 blocks[key] = _gamma_blocks_for(sym, chain)
                 # Authoritative 1-day EM per symbol — overrides the model's copied
                 # value below so the displayed 'Exp. move' is code-computed, not AI-echoed.
@@ -2202,6 +2442,28 @@ def gamma_analyze(client=None, label: str | None = None) -> dict:
             "chains for $SPX, SPY or QQQ. The market may be closed (Analyze needs "
             "live chain data), or the data service is unavailable. Try again during "
             "market hours.</p>", subtitle)}
+
+    # Forward-projection context: a code-computed 'into the close' brief per index
+    # (projected flip/walls + EM band under flat-spot time-decay) so the model can
+    # author each index's reader-first close_outlook. Never breaks the briefing.
+    try:
+        from services.options_svc import scheduler as _sched
+        _now = _sched._market_now()
+        _eng = gt.GammaEngine()
+        _briefs = []
+        for _sym in ("$SPX", "SPY", "QQQ"):
+            _ch = chains.get(_sym)
+            if not _ch:
+                continue
+            _b = _projection_brief(_eng, _ch, _ch.get("underlyingPrice"), _now)
+            if _b:
+                _briefs.append(f"{_sym}: {_b}")
+        if _briefs:
+            prompt = (prompt + "\n\nFORWARD PROJECTION (flat-spot time-decay to the "
+                      "close, code-computed — use it to write each index's "
+                      "close_outlook as a reader-first action):\n" + "\n".join(_briefs))
+    except Exception:
+        log.debug("analyze projection context failed", exc_info=True)
 
     client = client or _make_analyze_client()
     if client is None:

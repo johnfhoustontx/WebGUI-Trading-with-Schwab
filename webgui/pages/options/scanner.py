@@ -24,7 +24,6 @@ from nicegui import ui
 
 from pages.ui_guard import guard
 
-from pages.options import theme
 from . import detail, handoff
 from .theme import BTN_3D
 
@@ -35,7 +34,7 @@ def _round(value, ndigits=2):
 
 # Quality zones for the composite score (match the speedometer in svg.py /
 # the colors in detail.py): <40 RED, <55 AMBER, <75 BLUE, else GREEN.
-RED, AMBER, BLUE, GREEN = theme.hex_of("red"), theme.hex_of("amber"), theme.hex_of("blue"), theme.hex_of("green")
+RED, AMBER, BLUE, GREEN = "#ef5350", "#ffa726", "#42a5f5", "#66bb6a"
 
 
 def score_zone_color(score):
@@ -229,7 +228,7 @@ def status_line(results):
 # 0-DTE = amber (short-fuse/urgent), Swing = blue (multi-day). Each tab carries its
 # accent in the text color and a thick colored underline when active (the shared
 # Quasar indicator is hidden so the per-tab color is unambiguous).
-TAB_0DTE_COLOR, TAB_SWING_COLOR = theme.hex_of("amber"), theme.hex_of("blue")
+TAB_0DTE_COLOR, TAB_SWING_COLOR = "#ffa726", "#42a5f5"
 
 # Compact the signal tables (dense + tight cell padding) so the right-hand
 # columns (R/R %, PoP %, Score, Grade, actions) stay visible. Scoped to
@@ -238,12 +237,12 @@ TAB_0DTE_COLOR, TAB_SWING_COLOR = theme.hex_of("amber"), theme.hex_of("blue")
 # (text-transform/weight, hidden indicator, the active-underline box-shadow which
 # can't be reached via .classes()) stays here. The 3D "Run scan" button uses the
 # shared BTN_3D token.
-SCAN_CSS = f'''
-.scan-table td, .scan-table th {{ padding: 2px 4px; }}
-.scan-tabs .q-tab {{ text-transform: none; font-weight: 600; }}
-.scan-tabs .q-tab__indicator {{ display: none; }}
-.scan-tabs .tab-0dte.q-tab--active {{ box-shadow: inset 0 -3px 0 0 {TAB_0DTE_COLOR}; }}
-.scan-tabs .tab-swing.q-tab--active {{ box-shadow: inset 0 -3px 0 0 {TAB_SWING_COLOR}; }}
+SCAN_CSS = '''
+.scan-table td, .scan-table th { padding: 2px 4px; }
+.scan-tabs .q-tab { font-weight: 600; }
+/* Quasar gives each q-tab-panel 16px padding — drop it so the tables sit flush
+   with the column (aligned with the right-justified Run scan button). */
+.scan-panels .q-tab-panel { padding: 0; }
 '''
 
 
@@ -255,18 +254,34 @@ def render():
     service is cold (no cache) the page paints empty tables + a waiting status.
     """
     ui.add_css(SCAN_CSS)  # compact signal-table columns
+    # 0-DTE / Swing as SUBTABS directly under the main tab strip (like Gamma's
+    # view tabs, 2026-07-11): rendered into main.subtab_slot(), folder-styled by
+    # .compact-subtabs; the amber/blue accent TEXT colors are kept per tab. Falls
+    # back inline if the slot is absent. tab_panels below reference the element
+    # regardless of where it is mounted.
+    import main as _shell
+    _slot = _shell.subtab_slot()
+
+    def _build_scan_tabs():
+        with ui.tabs().classes("compact-subtabs scan-tabs").props(
+                "dense no-caps inline-label align=left") as tabs:
+            t0 = ui.tab("0-DTE").classes(f"tab-0dte text-[{TAB_0DTE_COLOR}]")
+            ts = ui.tab("Swing").classes(f"tab-swing text-[{TAB_SWING_COLOR}]")
+        return tabs, t0, ts
+
+    if _slot is not None:
+        with _slot:
+            tabs, tab_0dte, tab_swing = _build_scan_tabs()
+    else:
+        tabs, tab_0dte, tab_swing = _build_scan_tabs()
+
     with ui.row().classes("w-full no-wrap gap-4 items-start"):
         with ui.column().classes("flex-grow min-w-0"):
-            # Top chrome removed (market strip + title + auto-scan/VIX-term lines):
-            # just a small Run scan button, the tabs, and a slim bottom status bar.
-            scan_btn = ui.button("Run scan", icon="play_arrow", color=None) \
-                .props("no-caps").classes(BTN_3D)
-            with ui.tabs().classes("scan-tabs") as tabs:
-                # tab-0dte/tab-swing keep the Quasar active-underline hook (SCAN_CSS);
-                # the accent TEXT color is a Tailwind class (amber / blue).
-                tab_0dte = ui.tab("0-DTE").classes(f"tab-0dte text-[{TAB_0DTE_COLOR}]")
-                tab_swing = ui.tab("Swing").classes(f"tab-swing text-[{TAB_SWING_COLOR}]")
-            with ui.tab_panels(tabs, value=tab_0dte).classes("w-full"):
+            # Run scan sits right-aligned with the table's right edge.
+            with ui.row().classes("w-full justify-end"):
+                scan_btn = ui.button("Run scan", icon="play_arrow", color=None) \
+                    .props("no-caps").classes(BTN_3D)
+            with ui.tab_panels(tabs, value=tab_0dte).classes("w-full scan-panels"):
                 with ui.tab_panel(tab_0dte):
                     table_0dte = ui.table(columns=signal_columns(), rows=[],
                                           row_key="id").classes("w-full scan-table").props("dense")

@@ -30,6 +30,7 @@ import app_settings  # noqa: E402
 import bus_client  # noqa: E402
 import page_help  # noqa: E402
 import proxy  # noqa: E402
+from pages.options import theme  # noqa: E402  (config/theme.toml typography + menu)
 from pages.ui_guard import guard_async  # noqa: E402
 from pages.ui_guard import install_deleted_slot_log_filter  # noqa: E402
 from repo_paths import NICEGUI_PORT, SERVICE_URLS  # noqa: E402
@@ -214,9 +215,9 @@ SENTIMENT_CHILDREN = [
 # Flat top-level items (non-Options apps). (route, label, icon)
 FLAT_NAV = [
     ("/market", "Market Dashboard", "dashboard"),
-    ("/trade", "Trade", "analytics"),
+    ("/trade", "Trade Analyzer", "analytics"),
     ("/portfolio", "Portfolio", "account_balance"),
-    ("/driver", "Driver", "smart_toy"),
+    ("/driver", "Claude Trades", "smart_toy"),
 ]
 
 # "More" is an expandable group for reports / diagnostics / config. (route, label, icon)
@@ -232,6 +233,25 @@ MORE_CHILDREN = [
 SETTINGS_CHILDREN = [
     ("/manuals", "User Manuals", "menu_book"),
 ]
+
+# ── Main-menu groups (2026-07-11 nav redesign) ───────────────────────────────
+# The drawer shows ONE flat item per group; the group's child pages render as a
+# compact TAB STRIP across the top of the page (small padding), replacing the old
+# expandable sub-menus. A group's drawer badge is the SUM of its children's badge
+# counts; the per-page badges float on the tabs. (label, icon, children)
+_NAV_GROUPS = [
+    ("Options", "candlestick_chart", OPTIONS_CHILDREN),
+    ("Market Trend & Sentiment", "insights", SENTIMENT_CHILDREN),
+    ("More", "more_horiz", MORE_CHILDREN + SETTINGS_CHILDREN),
+]
+
+
+def _group_children(active: str):
+    """The child list of the group containing ``active``, or None (flat page)."""
+    for _label, _icon, children in _NAV_GROUPS:
+        if any(path == active for path, _l, _i in children):
+            return children
+    return None
 
 # ── Browser-tab title + per-page favicon color ──────────────────────────────
 # Each page's BROWSER TAB shows the selected menu-item name (derived from the nav
@@ -281,12 +301,11 @@ def _favicon_link(color: str) -> str:
     uri = f"data:image/svg+xml,{quote(svg)}"
     return f'<link rel="icon" href="{uri}"><link rel="shortcut icon" href="{uri}">'
 
-# Persisted left-nav expansion state (single-user); None/absent = use active-route default.
-_NAV_OPEN: dict[str, bool] = {}
-
-# Single-user nav-badge state (mirrors _NAV_OPEN). _NAV_BADGES holds route->count;
-# _ALERT_STATE tracks what's been acknowledged/alerted so we badge/chime only on
-# genuinely new items. _badge_refs maps route->badge element for the current page.
+# Single-user nav-badge state. _NAV_BADGES holds route->count; _ALERT_STATE
+# tracks what's been acknowledged/alerted so we badge/chime only on genuinely
+# new items. _badge_refs maps route->badge element (on the top tab strip + the
+# flat drawer links); _group_badge_refs maps group label->(badge, member paths)
+# for the drawer group items (badge = sum of member counts).
 _NAV_BADGES: dict[str, int] = {}
 _ALERT_STATE: dict = {
     "acked_scan": set(), "alerted": set(), "alerted_init": None,
@@ -298,6 +317,17 @@ _ALERT_STATE: dict = {
     "health_alerted": set(), "health_init": None,
 }
 _badge_refs: dict = {}
+_group_badge_refs: dict = {}
+
+# Per-page-build slot directly under the top tab strip, where a page can mount
+# its own view SUBTABS (see _layout; e.g. the Gamma GEX/Charm/... row). Rebuilt
+# on every _layout; None on pages without a strip.
+_SUBTAB_SLOT: dict = {"el": None}
+
+
+def subtab_slot():
+    """The container under the main tab strip for a page's view subtabs (or None)."""
+    return _SUBTAB_SLOT["el"]
 
 # ── Health / staleness surfacing (R4b / R8) ──────────────────────────────────
 # Representative SCHEDULED cache views (mirrors the scheduled rows of
@@ -404,20 +434,47 @@ def _refresh_health() -> None:
     _health_cache["data"] = proxy.health()
     _health_cache["ts"] = _time.monotonic()
 
-# Quasar-internal drawer styling (scoped to .nav-drawer) — only the rules that
-# component .classes() can't reach live here (nav-link/icon/badge/title visuals
-# moved to Tailwind utilities on the elements in Phase 1). Inter-item spacing is
-# intentionally tight (~50% of Quasar's defaults): the flex gap (4px→2px) and the
-# expansion header min-height (48px→24px) are halved so the menu reads denser.
+# Quasar-internal styling — only the rules component .classes() can't reach live
+# here (nav-link/icon/badge/title visuals moved to Tailwind utilities in Phase 1).
+# The drawer is a FLAT main menu (2026-07-11) — each group's child pages render as
+# the .compact-tabs strip across the top of the page instead of expandable
+# sub-menus, so the old expansion rules are gone.
 _NAV_CSS = """
 .nav-drawer { gap: 2px; }
-/* Children INSIDE each expandable group also stack tight — NiceGUI wraps the
-   expansion body in a flex column (.nicegui-expansion-content) that defaults to a
-   1rem/16px gap. */
-.nav-drawer .nicegui-expansion-content { gap: 2px; }
+/* Active nav item pill — rides the Quasar primary so the [menu].accent theme knob
+   (ui.colors) recolors it together with the header bar. A plain rule, not a
+   Tailwind arbitrary class: the bundled JIT doesn't generate var(...) arbitraries. */
+.nav-drawer .nav-active { background: var(--q-primary); color: #fff; }
 .nav-drawer .q-item { border-radius: 10px; }
-.nav-drawer .q-expansion-item .q-item { min-height: 24px; }
-.nav-drawer .nav-subgroup .q-expansion-item__content { padding-left: 14px; }
+/* Compact tab strips (the sub-menu tabs under the header + subtab rows like
+   Gamma's GEX/Charm/...): classic folder-style tabs — bordered boxes with rounded
+   TOP corners sitting on a baseline, the active one filled with the accent (the
+   Quasar primary, so the [menu].accent theme knob recolors it). Small padding.
+   Quasar-internal (q-tab). */
+.compact-tabs { border-bottom: 1px solid rgba(255,255,255,.14); }
+.compact-tabs .q-tab {
+  min-height: 32px; padding: 0 14px; margin-right: 3px;
+  border: 1px solid rgba(255,255,255,.14); border-bottom: none;
+  border-radius: 8px 8px 0 0; background: rgba(255,255,255,.05);
+}
+.compact-tabs .q-tab--active { background: var(--q-primary); color: #fff; }
+.compact-tabs .q-tab__indicator { display: none; }
+.compact-tabs .q-tab__label { font-size: 13px; }
+/* Subtab row (a page's own view tabs, e.g. Gamma GEX/Charm/DEX/Vanna/Flow/Term)
+   — same folder shape, one size smaller and a muted active fill so the hierarchy
+   under the main strip reads clearly. */
+.compact-subtabs { border-bottom: 1px solid rgba(255,255,255,.10); }
+.compact-subtabs .q-tab {
+  min-height: 27px; padding: 0 12px; margin-right: 3px;
+  border: 1px solid rgba(255,255,255,.12); border-bottom: none;
+  border-radius: 7px 7px 0 0; background: rgba(255,255,255,.04);
+}
+.compact-subtabs .q-tab--active { background: rgba(255,255,255,.14); color: #fff; }
+.compact-subtabs .q-tab__indicator { display: none; }
+.compact-subtabs .q-tab__label { font-size: 12px; }
+/* Flush tab panels — Quasar gives each q-tab-panel 16px padding; pages whose
+   panels should hug their card/table edges opt in with .flush-panels. */
+.flush-panels .q-tab-panel { padding: 4px 0 0 0; }
 /* Page-help "?" — tucked into the bottom-right corner of the header banner.
    Positioning is on the element (Tailwind); these stay Quasar-internal. */
 .help-fab .help-btn { font-size: 11px; min-height: 0; min-width: 0; }
@@ -567,7 +624,12 @@ def _guarded_compute():
 def _nav_link(path: str, label: str, icon: str, active: str) -> None:
     base = ("w-full no-underline items-center rounded-[10px] px-3 py-1 "
             "transition-colors hover:bg-white/[0.06]")
-    state = " bg-[var(--q-primary)] text-white" if path == active else ""
+    # nav-active is a plain CSS rule in _NAV_CSS (background: var(--q-primary)) —
+    # NOT a Tailwind arbitrary class: the bundled Tailwind JIT does not reliably
+    # generate arbitrary values containing var(...) (plain-hex arbitraries are
+    # fine), so the old bg-[var(--q-primary)] silently produced no rule. The CSS
+    # var keeps the pill following the [menu].accent knob (ui.colors).
+    state = " nav-active" if path == active else ""
     with ui.link(target=path).classes(base + state):
         with ui.row().classes("items-center gap-3 w-full no-wrap"):
             ui.icon(icon).classes("text-xl opacity-90")
@@ -578,23 +640,23 @@ def _nav_link(path: str, label: str, icon: str, active: str) -> None:
             _badge_refs[path] = badge
 
 
-def _settings_group(active: str) -> None:
-    """Render Settings as a nested sub-group: the header is the real /settings nav
-    link (native navigation), and only the caret toggles the sub-menu, beneath
-    which SETTINGS_CHILDREN (e.g. User Manuals) render indented.
-
-    ``expand-icon-toggle`` confines the toggle to the caret so a header click
-    follows the link instead of expanding.
-    """
-    exp = ui.expansion(
-        value=_NAV_OPEN.get("Settings", True)
-    ).classes("w-full nav-subgroup").props("expand-icon-toggle dense")
-    exp.on_value_change(lambda e: _NAV_OPEN.__setitem__("Settings", e.value))
-    with exp.add_slot("header"):
-        _nav_link("/settings", "Settings", "settings", active)
-    with exp:
-        for path, label, icon in SETTINGS_CHILDREN:
-            _nav_link(path, label, icon, active)
+def _nav_group_link(label: str, icon: str, children, active: str) -> None:
+    """One flat drawer item for a GROUP: navigates to the group's first page,
+    highlights when the active route is any of its children, and carries a badge
+    with the SUM of the children's badge counts (updated by the watcher via
+    ``_group_badge_refs``). The children themselves render as the top tab strip."""
+    paths = [p for p, _l, _i in children]
+    base = ("w-full no-underline items-center rounded-[10px] px-3 py-1 "
+            "transition-colors hover:bg-white/[0.06]")
+    state = " nav-active" if active in paths else ""
+    with ui.link(target=paths[0]).classes(base + state):
+        with ui.row().classes("items-center gap-3 w-full no-wrap"):
+            ui.icon(icon).classes("text-xl opacity-90")
+            ui.label(label)
+            n = sum(_NAV_BADGES.get(p, 0) for p in paths)
+            badge = ui.badge(str(n) if n else "").classes("ml-auto").props("color=red rounded")
+            badge.set_visibility(bool(n))
+            _group_badge_refs[label] = (badge, paths)
 
 
 @contextmanager
@@ -607,45 +669,39 @@ def _layout(active: str, title: str):
     # nav stays reachable at any viewport width (Quasar hides it as an overlay
     # below the layout breakpoint otherwise).
     _badge_refs.clear()
+    _group_badge_refs.clear()
     _recompute_badges()
     ui.add_css(_NAV_CSS)
     ui.add_css(_TABLE_CSS)   # app-wide fixed (sticky) table headers
+    # config/theme.toml [typography] + [menu] — app-wide text categories and menu
+    # styling, injected AFTER the baseline CSS so a configured override wins.
+    # Both are "" / no-ops when the config keeps the defaults.
+    if theme.TYPOGRAPHY_CSS:
+        ui.add_css(theme.TYPOGRAPHY_CSS)
+    if theme.NAV_THEME_CSS:
+        ui.add_css(theme.NAV_THEME_CSS)
+    if theme.MENU_ACCENT:
+        # Recolors the Quasar primary: the header bar AND the active nav pill
+        # (bg-[var(--q-primary)]) both follow it.
+        ui.colors(primary=theme.MENU_ACCENT)
     # Browser tab: title = the selected menu item; favicon = this page's color.
     ui.page_title(_NAV_LABEL.get(active, "Schwab Trading"))
     ui.add_head_html(_favicon_link(_TAB_COLOR.get(active, "#42a5f5")))
     drawer = ui.left_drawer(value=True, bordered=True).classes("nav-drawer").props("behavior=desktop")
     with drawer:
+        # nav-title = the [menu].title theme hook (build_nav_css overrides its color).
         ui.label("SCHWAB TRADING").classes(
-            "font-bold tracking-[.04em] text-[.8rem] px-3 pt-1 pb-1.5 opacity-55")
-        # Groups start EXPANDED by default (value=True) and stay open until the user
-        # manually collapses one — _NAV_OPEN persists each manual toggle (single-user,
-        # like the badges), so a collapse sticks across navigation.
-        options_exp = ui.expansion(
-            "Options", icon="candlestick_chart", value=_NAV_OPEN.get("Options", True)
-        ).classes("w-full")
-        options_exp.on_value_change(lambda e: _NAV_OPEN.__setitem__("Options", e.value))
-        with options_exp:
-            for path, label, icon in OPTIONS_CHILDREN:
-                _nav_link(path, label, icon, active)
-        sentiment_exp = ui.expansion(
-            "Sentiment", icon="insights", value=_NAV_OPEN.get("Sentiment", True)
-        ).classes("w-full")
-        sentiment_exp.on_value_change(lambda e: _NAV_OPEN.__setitem__("Sentiment", e.value))
-        with sentiment_exp:
-            for path, label, icon in SENTIMENT_CHILDREN:
-                _nav_link(path, label, icon, active)
+            "nav-title font-bold tracking-[.04em] text-[.8rem] px-3 pt-1 pb-1.5 opacity-55")
+        # Flat main menu (2026-07-11): one item per GROUP (its child pages render
+        # as the top tab strip) + the single-page apps. No expandable sub-menus.
+        opts_label, opts_icon, opts_children = _NAV_GROUPS[0]
+        _nav_group_link(opts_label, opts_icon, opts_children, active)
+        sent_label, sent_icon, sent_children = _NAV_GROUPS[1]
+        _nav_group_link(sent_label, sent_icon, sent_children, active)
         for path, label, icon in FLAT_NAV:
             _nav_link(path, label, icon, active)
-        more_exp = ui.expansion(
-            "More", icon="more_horiz", value=_NAV_OPEN.get("More", True)
-        ).classes("w-full")
-        more_exp.on_value_change(lambda e: _NAV_OPEN.__setitem__("More", e.value))
-        with more_exp:
-            for path, label, icon in MORE_CHILDREN:
-                if path == "/settings":
-                    _settings_group(active)
-                else:
-                    _nav_link(path, label, icon, active)
+        more_label, more_icon, more_children = _NAV_GROUPS[2]
+        _nav_group_link(more_label, more_icon, more_children, active)
 
     with ui.header().classes("items-center justify-between"):
         with ui.row().classes("items-center gap-2"):
@@ -665,6 +721,30 @@ def _layout(active: str, title: str):
                     'max-width=480px anchor="bottom right" self="top right"'
                 ).classes("help-tip"):
                     ui.markdown(page_help.help_md(active)).classes("text-left")
+
+    # Sub-menu TAB STRIP (2026-07-11): the active group's child pages as
+    # folder-style tabs across the top of the page (.compact-tabs in _NAV_CSS).
+    # Clicking a tab navigates; the per-page alert badges float on the tabs. A
+    # SUBTAB slot sits directly beneath the strip — a page with its own view tabs
+    # (e.g. Gamma's GEX/Charm/DEX/Vanna/Flow/Term) renders them there via
+    # ``main.subtab_slot()`` so they read as a second tab level, not page chrome.
+    _SUBTAB_SLOT["el"] = None
+    children = _group_children(active)
+    if children:
+        with ui.element("div").classes("w-full px-2 pt-1"):
+            strip = ui.tabs(value=active).classes("compact-tabs w-full").props(
+                "dense no-caps align=left inline-label")
+            with strip:
+                for path, label, _icon in children:
+                    with ui.tab(path, label=label):
+                        n = _NAV_BADGES.get(path, 0)
+                        b = ui.badge(str(n) if n else "").props(
+                            "floating color=red rounded")
+                        b.set_visibility(bool(n))
+                        _badge_refs[path] = b
+            strip.on_value_change(lambda e: ui.navigate.to(e.value)
+                                  if e.value != active else None)
+            _SUBTAB_SLOT["el"] = ui.element("div").classes("w-full pl-3")
 
     # Hidden audio element used by play_alert (one per page/client).
     ui.html('<audio id="alert-audio" preload="auto"></audio>')
@@ -708,6 +788,10 @@ def _layout(active: str, title: str):
                                    f"{n} component(s) stale or down — see System Status.")
         for route, badge in _badge_refs.items():
             n = _NAV_BADGES.get(route, 0)
+            badge.text = str(n) if n else ""
+            badge.set_visibility(bool(n))
+        for _label, (badge, paths) in _group_badge_refs.items():
+            n = sum(_NAV_BADGES.get(p, 0) for p in paths)
             badge.text = str(n) if n else ""
             badge.set_visibility(bool(n))
 
@@ -819,7 +903,7 @@ def sentiment_rotation_page() -> None:
 
 @ui.page("/trade")
 def trade_page() -> None:
-    with _layout("/trade", "Trade"):
+    with _layout("/trade", "Trade Analyzer"):
         from pages import trade
         trade.render()
 
@@ -833,7 +917,7 @@ def portfolio_page() -> None:
 
 @ui.page("/driver")
 def driver_page() -> None:
-    with _layout("/driver", "Driver"):
+    with _layout("/driver", "Claude Trades"):
         from pages import driver
         driver.render()
 

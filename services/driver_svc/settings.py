@@ -36,7 +36,14 @@ def _resolve_model() -> str:
     return "claude-opus-4-8"
 
 
-DAILY_TARGET = 500.0          # bank-the-day threshold ($ net day P&L)
+DAILY_TARGET = 500.0          # base bank-the-day threshold ($ net day P&L)
+# Cumulative MTD target band (2026-07-09): the banking target carries the $500/day
+# deficit/excess month-to-date, clamped to [floor, cap] — behind the pace it ratchets to
+# the cap (recover over days, never one reckless shot), ahead it eases to the floor (keep
+# a light day). The −$1,500 DAILY_LOSS_HALT + the per-trade caps are UNCHANGED, so this
+# only moves WHEN the day banks/stops, not how big any single trade can be.
+TARGET_CAP = 1000.0           # max ratcheted daily target (2x base)
+TARGET_FLOOR = 250.0          # min daily target when ahead of the MTD pace
 # ── AGGRESSIVE risk envelope ("Very Aggressive" profile, 2026-07-02, user choice) ──
 # Tuned to PRESS toward the $500/day target and tolerate real drawdown. Per-trade cap
 # funds the widest liquid $SPX (~$1,833/contract) with room to size up on smaller names;
@@ -54,6 +61,12 @@ VIX_MAX = 35.0               # no new entries above this VIX (spreads collect mo
 # config.RISK_LIMITS is only a fallback).
 DAILY_LOSS_HALT = 1500.0     # $ daily loss that halts new entries
 MENU_TOP_N = 15             # how many top-scored signals Claude sees
+# Directional gate (2026-07-09): hard-block the wrong-side credit spread (a CCS in an up
+# tape / a PCS in a down tape) in guardrails, keyed on the market_read's price-truth
+# posture. Ships INERT (False) — run_cycle forces posture "neutral" until this is flipped
+# after the offline backtest (validate_directional_gate.py) shows it would have blocked the
+# CCS loss bucket without nuking winners. See the design/plan 2026-07-09.
+DIRECTIONAL_GATE_ENABLED = False
 # Decision model (committed build default: Opus 4.8). Override per-deployment via the
 # DRIVER_MODEL env var OR a gitignored shared/driver_model.txt file (see
 # _resolve_model) — e.g. put "claude-sonnet-5" in shared/driver_model.txt to run cheaper.
@@ -72,4 +85,6 @@ def limits() -> dict:
         "max_trades_per_cycle": MAX_TRADES_PER_CYCLE,
         "vix_max": VIX_MAX,
         "daily_loss_halt": DAILY_LOSS_HALT,   # informs the model's loss budget in the packet
+        "target_cap": TARGET_CAP,             # cumulative MTD target band (see above)
+        "target_floor": TARGET_FLOOR,
     }

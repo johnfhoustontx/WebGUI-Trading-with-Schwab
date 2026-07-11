@@ -8,7 +8,92 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-07-08 (**Driver market-context block — the decider now reads gamma /
+**Last updated:** 2026-07-11 (**Gamma forward projection on the GEX heatmap + 1-min collection +
+condensed header**: the `/options/gamma` GEX heatmap now draws a **forward projection band** out to
+the 4pm-ET close — future **15-min** columns re-price today's **standing open interest at flat spot**
+(the deterministic charm/time-decay morph: walls sharpen, gamma concentrates ATM into the close), each
+contract's current GEX contribution scaled by a **BS gamma time-decay ratio** anchored 1.0 at the
+collected "now" column so the seam is continuous (`compute.project_gex_grid`, pure, reuses the engine's
+exact GEX formula). An **expected-move cone** (`project_em_cone`, √-time fan) is overlaid so the spot
+uncertainty is shown honestly rather than baked into the colored grid. **GEX-only, sticky-strike IV,
+hidden off-hours** (no session left → collected-only). The projection rides the EXISTING
+`cache:options:gamma` GEX view — `gamma_snapshot` attaches a `projection` block (`{times, grid, cone,
+spot}`) computed off the live chain and **cropped to the display window** (`_crop_gamma_views`); the page
+appends the future columns right of a dashed **"now" divider** with the cone as faint dashed overlays
+(`heatmap_figure(projection=…)`, same interpolated image / colorAxis). The strike/heatmap split is now a
+**fixed 40/60** (`_STRIKE_HEAT_SPLIT`, one-line flip to 70/30) — the full day + forward band make the
+heatmap the star. **GEX collection cadence dropped 2 min → 1 min** (`gex_collector.POLL_INTERVAL_MIN` /
+`scheduler._GEX_INTERVAL_MIN` / `gex_status.STALE_AFTER_SEC=120` in lockstep). **Explain + Analyze + the
+4×/day scheduled auto-briefings** now carry a reader-first **"into the close"** forward read
+(`_projection_brief` = projected flip / call+put walls / EM band at the close → an optional
+`close_outlook` field on the Analyze `submit_analysis` schema + infographic card, and an "Into the close"
+block on the Explain infographic). The Gamma **header was condensed 4 rows → 2** (a **Briefings**
+dropdown replaces the four auto-briefing buttons; one `·`-separated status strip merges collector status
++ last/next scan + refresh countdown + summary via `status_strip_text`). **Restart `options_svc` + the
+webgui.** Built subagent-by-subagent, TDD per layer (2-stage spec+quality review); options_svc **431** +
+webgui **698** green. Branch `Using_Highcharts`. Design/plan:
+[design](docs/plans/2026-07-11-gamma-forward-projection-design.md) /
+[plan](docs/plans/2026-07-11-gamma-forward-projection-plan.md). Prior — 2026-07-10 (**Manual Paper Portfolio → hourly entry+manage cadence**: the
+MANUAL paper account's auto-run moved from the every-5-min `manage_due` slot to a NEW
+**top-of-the-hour** schedule — entry (open new paper trades from current captured signals) +
+manage (reprice + auto-close hits) **once at 09:00–14:00 CT** (last run 2pm; **NO 15:00 run** at
+the regular-session close). New PURE gate `scheduler.paper_cycle_due(now, ran_slots)` (trading-day
+only, once-per-hour within a 20-min grace, mirrors `analyze_slot_due`) + handler
+`handlers.run_paper_entry_and_manage` (entry guarded on an existing account in its own try/except
+so an entry failure can't skip manage → `run_manage_and_refresh`); the scheduler `loop` gates it on
+`paper_cycle_due` (hour latched in `paper_ran` before the blocking cycle). The isolated **DRIVER**
+paper account is UNCHANGED — it stays on the 5-min `manage_due` slot (`run_driver_manage_and_refresh`
+now runs alone there). **Trade-off:** the manual book's live P&L + target/stop auto-close now update
+hourly, not every 5 min. **Restart `options_svc`** to pick it up. options_svc **419** green; TDD per
+layer (8 gate + 3 handler tests + updated loop source-inspection tests). Branch `Using_Highcharts`.
+See the "Paper auto-manage" box below. Prior — 2026-07-09 (**Intraday options premium/volume flow — new Gamma `Flow`
+view**: a per-symbol intraday chart (a new view inserted **before Term**) of the underlying
+**price** + daily-cumulative **call/put premium ($M)** with a **net-premium (call−put)** signed
+bottom panel. **Phase 1 (backend):** the 2-min GEX poll now also computes
+**`flow_skew.index_call_put_premium(chain)`** = `Σ mark × totalVolume × 100` per call/put
+(mid-based, **UNSIGNED daily-cumulative** — Schwab has no time-&-sales tape, so no buy/sell split)
+for EVERY collected symbol (index base + `Top 20.xlsx`), stored as additive `call_prem`/`put_prem`
+REAL columns in `gex_history_db` (idempotent ALTER migration), read via
+**`gex_history_db.load_flow_series(conn, symbol, d)`** → `(ts, spot, call_vol, put_vol, call_prem,
+put_prem)` per snapshot. **Phase 2 (frontend):** `compute.gamma_snapshot` embeds a **`flow`** series
+(reusing the ONE read-only history connection), and the page's PURE `flow_figure`/`flow_summary_text`
+render it as a Highcharts stacked-panel chart (price left-axis + call/put premium right-axis + net
+panel) under the new **`Flow`** toggle. Premium is **forward-only** (NULL on pre-Phase-1 rows → the
+line starts where collection began); no signed buy/sell is possible from stored data. **Restart
+`options_svc`** (its `collect_gex_snapshots` runs `init_schema` [adds the columns] then `poll_once`
+[populates them]) **+ the webgui**. options-scanner flow_skew/gex_history **+7**, options_svc compute,
+webgui **692** green; TDD per layer. Branch `Using_Highcharts`. Prior — 2026-07-09 (**Driver directional gate + cumulative MTD target** — two fixes
+motivated by a forensic review ("C") of the driver's REAL closed book: 22 closed trades,
+**−$908 realized / 27% win / PF 0.23**, drawdown to $22,768 (−8.9%), a −$1,946 halt day. Root
+cause = **wrong-side selection** — 10 of 11 DELTA_STOPs were **call credit spreads run over by a
+rising tape** (CCS bucket −$706 @ 21% win); the stops fire at ~0.35 short delta (sensible, median
+~1-day hold) so they're fine — **the entry side is the problem**. The app's own sentiment read was
+**bearish (3.92) while price melted up**, i.e. its directional opinions were INVERTED, so the fix
+keys on **price truth**, not sentiment. **(A) Directional gate** (`guardrails._side_blocked` +
+`WRONG_SIDE_REGIME` + a `posture` kwarg on `apply_guardrails`): hard-block a **CCS in an `up` tape /
+a PCS in a `down` tape** (IC exempt), where `compute._directional_posture(market_read)` derives
+up/down/neutral from **broad-index change_pct + `$ADVN-$DECN` breadth agreement** (NOT sentiment/bias,
+NOT the gamma flip — a volatility regime); `_market_read` now carries per-index `change_pct` from the
+dashboard. The gate is **code-authoritative, IC-exempt, and degrade-safe** (posture `neutral` when
+data is missing → inert), placed BEFORE the capacity check so a block never eats a slot. It ships
+**behind `settings.DIRECTIONAL_GATE_ENABLED` (default False = INERT)** and `run_cycle` forces
+`neutral` until the flag is flipped. **Backtest first** (`validate_directional_gate.py`, offline):
+replaying the 22 real trades vs SPX spot-trend from `gex_history` — at a 24h lookback it blocks the
+**two catastrophic $SPX CCS losses (−$561, clear up-trends) → net +$613 / 66% of the CCS bucket**,
+but only **7/22 trades are covered** by history and it's **lookback-sensitive** (30h → net −$49 / 0%);
+concept validated on the worst day, but **too thin to auto-enable → flag stays OFF** pending more
+coverage / the user's call. **(B) Cumulative MTD target** (LIVE now): the flat $500/day banking
+target becomes `effective_target = clamp(N×500 − MTD_realized_before_today, TARGET_FLOOR 250,
+TARGET_CAP 1000)` (`compute.effective_target` + `mtd_realized_before_today` + `_mtd_trading_days`),
+computed in the handler from the driver book's closed-position MTD realized P&L + a holiday-aware
+trading-day count, threaded into `build_packet` + `halt_state` (and the published monitor `target`).
+Behind pace → ratchet to $1,000; ahead → ease to $250; **the −$1,500 loss halt + per-trade caps are
+UNCHANGED** (only the bank/stop threshold moves — bounded, no chasing via oversizing); fails safe to
+$500. Built directly, TDD, per-task commits: driver_svc **196** + contracts **38** green. **Restart
+`driver_svc`** — the cumulative target is live immediately; the gate is inert until you enable it.
+PAPER ONLY. Design/plan:
+[design](docs/plans/2026-07-09-driver-directional-gate-cumulative-target-design.md) /
+[plan](docs/plans/2026-07-09-driver-directional-gate-cumulative-target-plan.md). Prior — 2026-07-08 (**Driver market-context block — the decider now reads gamma /
 breadth / sentiment (context only)**: the autonomous Driver's Claude decider was blind to market
 structure — it saw only `vix` + the five-state label string, yet it trades $SPX/SPY/QQQ credit
 spreads whose safety is defined by exactly the gamma flip/walls it couldn't see. It now gets an
@@ -225,8 +310,8 @@ digest — no "all clear" spam). Cached at `cache:options:action_alert` for insp
 + per-category guarded. Restart `options_svc` to pick both up. options_svc **389** + options-scanner
 paper/eod/repricer **71** green; verified live (digest built against real data: 17 captured actions +
 1 at-risk). Branch `Using_Highcharts`.). Prior — 2026-07-03 (**Config consolidation — single-source
-calendar, symbols, and UI palette** — a hard-coded-config audit found three classes of duplication,
-each now consolidated to one sanctioned source (behavior-preserving refactor). **(1) Market calendar:**
+calendar and symbols** — a hard-coded-config audit found duplication that is
+now consolidated to one sanctioned source (behavior-preserving refactor). **(1) Market calendar:**
 the NYSE holiday set (found duplicated in **7** places — the 5 known service/webgui/CLI schedulers
 **plus** two the audit missed: a **stale** `scanner_engine.py` `HOLIDAYS_2026` that was missing
 Juneteenth + all of 2027, and `claude-driver/config.py` `MARKET_HOLIDAYS`) now lives ONLY in new
@@ -242,16 +327,11 @@ Juneteenth + 2027 holidays as trading days). Each consumer keeps its own market-
 modules import from it (the commission `_INDEX_ROOTS` was duplicated in two files). **Out of scope**
 (different concerns, left in place): the `Top 20.xlsx` live universe, the 78-name backtest
 `UNIVERSE_SECTOR`, the 140-symbol sector maps, `HEADER_SYMBOLS` (different order), the legacy
-`gamma_tool.py` Tk dropdown. **(3) UI palette (Level A):** `webgui/pages/options/theme.py` gained a
-canonical **`PALETTE`** dict + `hex_of`/`txt`/`bg`/`rgb` helpers; ~11 pages (sentiment,
-sentiment_rotation, gamma, rescue, svg, gauge, simulator, expected_move, captured, paper, scanner) now
-derive their shared semantic colors from it (green `#66bb6a` / red `#ef5350` / amber `#ffa726` /
-yellow `#ffd54f` / blue `#42a5f5` / cyan `#3fb6c7` / flat / neutral / muted), so re-theming the
-semantic colors is a **one-file edit**. **Documented intentional variants are PRESERVED, not merged**
-(trade verdict darks, simulator `PNL_GREEN/RED`, expected_move `UP_COLOR` teal + leg tints, gamma chart
-chrome, rescue `HEAT_ORANGE`, driver grades, portfolio status); Highcharts option dicts + `ui.html`
-fragments stay out of scope per the Tailwind-first rule. All conversions byte-identical (no rendered
-color changed). **Also this session (4 further hard-coded-config remediations):** **(a)** the
+`gamma_tool.py` Tk dropdown. **(A UI-palette Level-A step was built but DROPPED at merge):** the base
+branch independently shipped **`config/theme.toml`** (restyle-without-code-edits) — a more complete
+realization of the same "editable theme" goal — so the palette work (`theme.PALETTE` + `hex_of`/`txt`/
+`bg`/`rgb` + ~11 page migrations) was **reverted in favor of the base's config-driven theme system**.
+**Also this session (4 further hard-coded-config remediations):** **(a)** the
 `claude-driver/config.py` `TRADE_LOG`/`PENDING_TRADE`/`LOG_DIR` paths resolve via
 `repo_paths.CLAUDE_DRIVER` (was `os.path.join(BASE_DIR, …)` — the last `D:\`-rule violation); **(b)**
 `claude-driver/test_preflight.py` imports its service URLs from `repo_paths`
@@ -1147,7 +1227,7 @@ Routes:
 | `/options/portfolio` | Paper Portfolio (paper account) | built |
 | `/options/calculator` | Calculator (summary tiles + P&L heatmap — grid rows = **±N real chain strikes around spot** via the **Number of strikes** input (default 24, strictly around spot; `strikes_window`→`price_rows`); **intraday time-to-expiry** — the grid's first column is **"Now"** (current mark-to-market value, priced at calendar hours-to-4pm-ET /365) and the last is **"Exp"** (expiration payoff), fixing 0DTE which previously showed only the payoff everywhere; summary tiles + PoP also use the intraday "Now" T (was an `or 1/365` clamp that over-priced 0DTE ~20×); the **IV** button **implies IV from the traded contract's mark** ThinkorSwim-style via a `calc_iv` command → `cache:options:calc_iv` (`compute.calc_iv` → engine `implied_vol` bisection), falling back to ATM chain `volatility` pre-strike-pick; **multi-leg strategy builder** — a Strategy dropdown (singles + verticals credit/debit + condors iron/all-same + butterflies long/iron + calendars/diagonals) over the shared **editable leg-editor** (`leg_editor.py`: per-leg kind/side/strike/expiry/qty + Add/Remove), per-leg expiry so **calendars** price each leg at its own T, a **generic-numeric summary** for non-PCS/CCS/IC structures, and a **Copy to Simulator** button; **persists full UI state across navigation** (symbol/strategy/legs/fields/Number-of-strikes) + **auto-refreshes on return** via a single-user module snapshot — `page_state.py`; the **Symbol** field **Loads on tab-out (`focusout`) / Enter** (deduped via `inputs.should_load`; the Load button still force-reloads) with a **centered full-screen wait overlay** (`overlay.py`, `LOAD_TIMEOUT_SEC=30s` backstop) until the chain lands; the **top-level Expiry propagates to all legs** (`leg_editor.apply_expiry`, re-syncs strikes); **compact leg cells** (`leg-row`) + the **"Actions" header dropped**; **Send-to-Calculator from the Scanner now lands correctly** — `_prefill` stashes `pending_legs` + `load_symbol()` so the legs apply once the chain is loaded (applying them first wiped every strike via the leg-editor's strike-coercion — see [[calculator-leg-transfer-needs-chain-first]])) | built |
 | `/options/swing` | Swing Scanner (**multi-strategy**, single-symbol: builds + ranks candidates across **Directional** (long/naked call+put), **Spreads** (debit bull-call/bear-put + credit PCS/CCS), and **Neutral** (iron condor) families on ONE unified **0–100 Fit+Quality** score; **Diagonals** are a later phase. The scanner **infers a market view** (direction/conviction + IV vol-regime) from the symbol's technicals + IV and ranks each structure by FIT to that view + STRUCTURAL QUALITY — so a long call and a put-credit-spread are comparable. A **Strategy-families multiselect** (default all; empty ⇒ all) + an inferred-**view banner** + strategy-agnostic columns (Strategy/Bias/Legs/Debit-Credit/Max P/Max L/R:R/PoP/BE/Score/Grade, colored by score+bias; the **Grade is quality-gated** — color-coded green/amber/red with a `grade_reason` tooltip, driven by structural quality + per-family hard gates, NOT view-fit). Per-row **Send to Calculator / Expected Move** work for ALL types via the canonical `legs`; **Send to Paper** is shown only for credit structures (PCS/CCS/IC). See the "Multi-strategy Swing Scanner" section below) | built |
-| `/options/gamma` | Gamma (GEX/Charm/DEX/Vanna bars + flip/**single Call+Put walls** + intraday heatmap; **fixed ±20-strike window** around spot for bars+heatmap (`strikes_around`, consistent candle/cell size all day; heatmap `rowsize`=median gap; heatmap cropped to the window); **blended interpolated heatmaps** (intraday **and Term**) — smooth image, no lines, dark `HEAT_STOPS` colorscale (zero→transparent like the candlestick chart), transparent bg, off-white spot line, no fade, **press-and-hold tooltip** (`_HEAT_PRESS_TOOLTIP_JS`); bar/heatmap **width split grows with session** snapshot count; **flicker-free** in-place Highcharts updates; **symbol is a dropdown** — default `$SPX`, populated from the collected universe (watchlist minus `$VIX`) via `cache:options:gamma_symbols`, **syncs to the cached symbol on build + selecting auto-refreshes + repaints ignore foreign-symbol snapshots** (no revert to `$SPX`); Term shows the **next 5 expirations regardless of cadence** (`_term_chain`); **off-hours persistence** — last session's candles+heatmap held until the next trading day's midnight CT (`active_session_date`/`gamma_cleared` + `load_date_with_grid`); off-hours `spot=None` degrades gracefully; Explain works per-selected-symbol; **Analyze** calls Claude (forced `submit_analysis` tool) and opens an **infographic** tab — regime + bias gauge, per-index price-level ladder + tiles + **what-if** (rally/sell-off/chop), bottom **"Why is this happening"**; **code-authoritative 1-day Exp. move**; also **auto-runs 4×/day** (premarket / ~18 min after open / midday / close) into per-slot keys with **Auto briefings** buttons + a **History picker** (date + slot dropdown → a report regenerated from the persisted briefing history at `/options/gamma-history`) — see the "Gamma Analyze" section below) | built |
+| `/options/gamma` | Gamma (GEX/Charm/DEX/Vanna bars + flip/**single Call+Put walls** + intraday heatmap; **fixed ±20-strike window** around spot for bars+heatmap (`strikes_around`, consistent candle/cell size all day; heatmap `rowsize`=median gap; heatmap cropped to the window); **blended interpolated heatmaps** (intraday **and Term**) — smooth image, no lines, dark `HEAT_STOPS` colorscale (zero→transparent like the candlestick chart), transparent bg, off-white spot line, no fade, **press-and-hold tooltip** (`_HEAT_PRESS_TOOLTIP_JS`); bar/heatmap **width split grows with session** snapshot count; **flicker-free** in-place Highcharts updates; **symbol is a dropdown** — default `$SPX`, populated from the collected universe (watchlist minus `$VIX`) via `cache:options:gamma_symbols`, **syncs to the cached symbol on build + selecting auto-refreshes + repaints ignore foreign-symbol snapshots** (no revert to `$SPX`); Term shows the **next 5 expirations regardless of cadence** (`_term_chain`); **off-hours persistence** — last session's candles+heatmap held until the next trading day's midnight CT (`active_session_date`/`gamma_cleared` + `load_date_with_grid`); off-hours `spot=None` degrades gracefully; a **Flow** view (inserted before Term) charts the symbol's intraday **price** + daily-cumulative **call/put premium ($M)** + a **net-premium (call−put)** signed panel from the snapshot's `flow` series (`flow_figure`/`flow_summary_text`; premium is mid-based, unsigned, forward-only); Explain works per-selected-symbol; **Analyze** calls Claude (forced `submit_analysis` tool) and opens an **infographic** tab — regime + bias gauge, per-index price-level ladder + tiles + **what-if** (rally/sell-off/chop), bottom **"Why is this happening"**; **code-authoritative 1-day Exp. move**; also **auto-runs 4×/day** (premarket / ~18 min after open / midday / close) into per-slot keys with **Auto briefings** buttons + a **History picker** (date + slot dropdown → a report regenerated from the persisted briefing history at `/options/gamma-history`) — see the "Gamma Analyze" section below) | built |
 | `/options/simulator` | Simulator (**multi-leg strategy builder** — a Strategy dropdown over the shared **editable leg-editor** (`leg_editor.py`) replaces the old single-contract selector — driving all three legacy tabs: **Replay** (re-prices the **netted** position along the underlying's recent path → stacked price + 5-Greek panels over a gap-compressed integer x-axis w/ a client-side scrub cursor) + What-if (a **dollar profit/loss payoff from entry**: P/L = position value (×100 contract multiplier) minus the **entry mark** (`whatif_baseline` = value at spot *now*) — so profit caps at the net credit, loss floors at width−credit, **matching the Calculator** — with a green profit fill above / red loss fill below breakeven (area `threshold:0` + `color`/`negativeColor`) + faint Profit/Loss washes + labels; Δt is **elapsed** days from now, per-leg decay → **calendars** correct, theta visible as Δt slides) + IV-shock; **Copy to Calculator** button; **dark-navy dashboard theme** via shared `theme.py`; **persists full UI state across navigation** (symbol/strategy/legs/sliders/active tab) + **auto-refreshes on return** via a single-user module snapshot — `page_state.py`; the **Symbol** field **Fetches the snapshot on tab-out (`focusout`) / Enter** (deduped) with the same **centered wait overlay** (`overlay.py`) until the meta lands; **compact leg cells** + no "Actions" header (shared `leg_editor`)) | built |
 | `/options/expected-move` | Expected Move (candlestick price history (6-mo daily) + forward **ATM-IV expected-move cone** to the option's expiration (green/red dashed, √-time fan) + leg **strike lines** (short solid / long dashed, put/call colored) + axis **crosshair** w/ Date(X)+Price(Y) label boxes; opened in a **new browser tab** via stash-handoff from Scanner/Paper/Captured/Calculator, or standalone w/ symbol+expiry input) | built |
 | `/options/rescue` | Rescue (at-risk credit spreads (PCS/CCS/IC) → **at-risk table** (paper+captured, heat-colored) → select a position → ranked **commission-aware adjustment menu**: close / partial-close / narrow / convert-IC / butterfly / roll-down/out/down-out / broken-wing / inverted / futures-hedge; each card shows gross/commission/net + metrics + legs + rationale + strategic context + warnings + score; execute cards have **Apply → confirm → `rescue_apply`** behind a stale-price guard, advisory cards show "manual"; nav badge from `cache:options:rescue_summary`) | built |
@@ -1163,8 +1243,8 @@ decision-log row) | built |
 | `/settings` | Settings (GUI prefs via `app_settings`: scanner **audio alert** on/off + sound + volume, only-during-market-hours, min-score-to-alert; desktop-notification toggle + permission grant + Test sound. Extensible — first batch) | built |
 | `/portfolio` | Portfolio (3-tier, `services/portfolio_svc` :8212: **Holdings / Sectors / Performance** tabs over the portfolio model — sector breakdown, vs-sector RS, since-purchase excess, benchmark over/under-weight, tailwind; **Performance** scorecard (return/capital/risk/entry grades + composite + ann. return + drawdown) with a per-position **advisory suggestions** detail pane; **live-streaming P&L** via the service's proxy SSE consumer republishing each tick; proxy/stream status bar; persists across nav) | built |
 | `/eod` · `/eod/detail` | EOD Report (pure-webgui aggregator over `options:*` + `driver:*` caches. **Summary** = headline tiles + a **verbose Daily / Weekly(WTD) / MTD performance** block **per book** — the manual paper **ledger** (`options:paper_trades`) and the **Driver** account (`options:driver_paper_account`, incl. its new `closed_positions`) shown separately (realized P&L bucketed by **exit** date; opened/credit by **entry** date; a per-book now-line = equity/session-P&L/open-unrealized/open-count). **Detailed** = the same performance + **trade-type breakdowns** (by **strategy** PCS/CCS/IC, by **0-DTE/Swing**, by **status** Open/Closed/Expired) for each book + full trade/scanner/captured/driver tables. **Navigation**: a jump-link **TOC** + every section in a native **`<details>`** (collapsible, **no JS** — works in-app AND in the exported files). **Generate** snapshots the caches → standalone `summary.html` + `detail.html` archived under `webgui/data/eod/<date>/`; `/eod/file` serves them raw. Pure builders (`normalize_trades`/`period_buckets`/`breakdown_rows`/`performance_table_html`/`breakdown_table_html`/`toc`/`details_section`) unit-tested. Realized reads `$0`/`—` until trades close — by design, not a bug) | built |
-| `/market` | Market Dashboard (3-tier, `services/market_svc` :8215: a live grid of ~48 macro tickers from `symbol_categories.csv`, grouped into a **framed panel per category** laid out macro→tape→rotation (Volatility/Options-Sentiment/Internals/Currency · Cash-Index/Futures/Broad-ETF · Sector/Thematic/Factor/Fixed-Income/Crypto/Countries). Each **tile** shows symbol + description (hover tooltip) + last + net/%-change on a **semantic risk-on/off colored background** (green risk-on / red risk-off / grey no-data, intensity by magnitude) — **polarity-aware** (VIX/SKEW/put-call/TLT/UUP shade RED on up-moves). `market_svc` polls the proxy's raw `/quotes` on a **~2 s RTH cadence** (5 s off-hours — futures trade ~24h so off-hours stays snappy), normalizes change across INDEX/EQUITY/FUTURE, computes the `$ADVN-$DECN` breadth spread, and reads the app's own cap-weighted put/call from `cache:sentiment:composite` → publishes `cache:market:dashboard`; the page version-polls + **updates tiles in place** (no per-tick rebuild). **CSV→Schwab symbol map** handles the translations (`SPX`→`$SPX`, `VIX`→`$VIX`, `/ES[U26]`→`/ESU26`) + **equivalents for symbols Schwab can't quote** (`$DXY`→`UUP`; `$PCALL`/`$PCSP`→the sentiment cap-weighted P/C tile). See the "Market Dashboard" section below) | built |
-| `/status` | System Status (pure-webgui health board: overall up/down banner + per-component cards probing **Memurai** PING, **schwab-proxy** `/health`, **Schwab Authorization** (OAuth token state, with an **Authorize** button → proxy `/auth`), the **six domain services** `/health` (incl. `market_svc` :8215), and **webgui** itself; plus a **published-data-freshness** table — each domain's cache version + age (incl. `market:dashboard`), flagging stale scheduled views; **per-component Restart button on offline cards** — proxy/services relaunch via `tools\restart_one.bat`, Memurai via `Start-Service`; off-thread sweep, auto-refresh 15 s + manual) | built |
+| `/market` | Market Dashboard (3-tier, `services/market_svc` :8215: a live grid of ~48 macro tickers from `symbol_categories.csv`, grouped into a **framed panel per category** laid out macro→tape→rotation (Volatility/Options-Sentiment/Internals/Currency · Cash-Index/Futures/Broad-ETF/**Magnificent-7** · Sector/Thematic/Factor/Fixed-Income/Crypto/Countries). Each **tile** shows symbol + description (hover tooltip) + last + net/%-change on a **semantic risk-on/off colored background** (green risk-on / red risk-off / grey no-data, intensity by magnitude) — **polarity-aware** (VIX/SKEW/put-call/TLT/UUP shade RED on up-moves). The **Magnificent 7** frame leads with a **composite `MAG7` tile** = the equal-weighted avg day %-move of NVDA/MSFT/GOOGL/AMZN/META/AAPL/TSLA + a breadth subline (e.g. "3/7 up"), colored by the avg (a new `kind="basket"` tile whose members are also its 7 constituent tiles). `market_svc` polls the proxy's raw `/quotes` on a **~2 s RTH cadence** (5 s off-hours — futures trade ~24h so off-hours stays snappy), normalizes change across INDEX/EQUITY/FUTURE, computes the `$ADVN-$DECN` breadth spread + the `MAG7` basket, and reads the app's own cap-weighted put/call from `cache:sentiment:composite` → publishes `cache:market:dashboard`; the page version-polls + **updates tiles in place** (no per-tick rebuild). **CSV→Schwab symbol map** handles the translations (`SPX`→`$SPX`, `VIX`→`$VIX`, `/ES[U26]`→`/ESU26`) + **equivalents for symbols Schwab can't quote** (`$DXY`→`UUP`; `$PCALL`/`$PCSP`→the sentiment cap-weighted P/C tile). See the "Market Dashboard" section below) | built |
+| `/status` | System Status (pure-webgui health board: overall up/down banner + per-component cards probing **Memurai** PING, **schwab-proxy** `/health`, **Schwab Authorization** (OAuth token state, with an **Authorize** button → proxy `/auth`), the **six domain services** `/health` (incl. `market_svc` :8215), and **webgui** itself; plus a **published-data-freshness** table — each domain's cache version + age (incl. `market:dashboard`), flagging stale scheduled views; a **Restart button on every component card** (proxy + the six services + Memurai + the webgui itself, shown up or down) — proxy/services/webgui relaunch **windowlessly** via `tools\restart_one.bat` (`CREATE_NO_WINDOW` → hidden `pythonw`, logs to `logs\`), Memurai via `Restart-Service`; the auth card shows **Authorize** instead; off-thread sweep, auto-refresh 15 s + manual) | built |
 | `/terminate` | Terminate (guarded "stop the whole local stack" page: red **Stop all services** button behind a confirm dialog → spawns `stop_all.bat` detached via `cmd /c start`, which kills the proxy + 6 services + this web app by listening port; **Memurai is left running**; the page goes unresponsive after confirm, by design) | built |
 
 **Market Dashboard (`/market`) — DONE (2026-07-07).** A new **More → Market Dashboard**
@@ -1181,7 +1261,7 @@ condition**. Sixth Tier-2 service. Pieces:
   `color_state`, and publishes **`cache:market:dashboard`** (`skip_unchanged=True`, so no
   repaint on byte-identical ticks). No command handler — the page only reads.
 - **PURE modules.** `symbols.py` = the **CSV→Schwab symbol map** (single source of truth):
-  55 tiles with per-symbol **polarity** (`normal` up=risk-on / `inverted` up=risk-off) +
+  63 tiles with per-symbol **polarity** (`normal` up=risk-on / `inverted` up=risk-off) +
   `kind` (`quote`/`spread`/`external`), encoding the translations (`SPX`→`$SPX`, `VIX`→
   `$VIX`, `SKEW`→`$SKEW`, `/ES[U26]`→`/ESU26`) and the **equivalents for symbols Schwab
   can't quote** (`$DXY`→**`UUP`**; `$PCALL`+`$PCSP`→one **"Put/Call"** tile
@@ -1393,6 +1473,18 @@ the `leg-*` cells, the `q-tab*` chrome, the teleported `.strat-menu-navy` popup)
 **Calculator**, **Simulator**, and **Trade** pages all use this. **`DASHBOARD_CSS` is
 deleted** (Phase 4) — `theme.py` = tokens + `QUASAR_INTERNAL_CSS`. **This section +
 `theme.py` are the single source — look here to apply or change the theme.**
+- **Restyle WITHOUT code edits (2026-07-09): `config/theme.toml`.** Every color
+  (`repo_paths.THEME_TOML`, all knobs commented in-file) — surfaces/cards/text,
+  secondary+primary buttons, the **3D gradient buttons**, the semantic
+  positive/warning/negative/neutral set, the **speedometer gauge face + needle**
+  (`pages/gauge.py`), and the Sentiment/Rotation chart palette
+  (`sentiment.py CLR_*`) — is loaded ONCE at webgui startup
+  (`theme.load_theme()` → `build_tokens`/`build_quasar_css`; missing
+  file/keys/malformed values → the built-in defaults, never raises). **Edit the
+  TOML → restart the webgui → hard-refresh.** NOT config-driven (deliberate):
+  per-chart Highcharts colorscales (e.g. the Gamma heatmap), data-driven
+  table-cell zone maps (score/heat/P&L), the nav drawer, and the standalone
+  EOD/Analyze report documents.
 - **Apply to a new page:**
   ```python
   from pages.options.theme import QUASAR_INTERNAL_CSS, PAGE, CARD, EYEBROW, LABEL, BTN_PRIMARY
@@ -2040,13 +2132,22 @@ Options section (design/plan:
 - Pure transforms are unit-tested (webgui + options_svc suites).
 
 > **Paper auto-manage (DONE — supersedes the old "manual-only" TODO).** The
-> `options_svc` scheduler now reprices + auto-closes paper positions on its own:
-> `manage_due` fires `run_manage_and_refresh` every **5 min** within market hours
-> (`scheduler.py:97,104,219`), so the Paper Portfolio updates unattended. The
-> "Run Manage Cycle" button is now a manual trigger of the same cycle, not the only
-> path. (Tick cadence reference: each 30 s scheduler tick also runs
-> `refresh_header` + `publish_gex_status`; the 2-min GEX collect and 5-min manage
-> are slot-gated within 08:30–15:20 CT.)
+> `options_svc` scheduler reprices + auto-closes paper positions on its own. **Two
+> distinct cadences (changed 2026-07-10):** the **MANUAL Paper Portfolio** runs
+> **entry + manage once at the top of each hour, 09:00–14:00 CT** (last run 14:00 /
+> 2pm; **NO 15:00 run** at the regular-session close) — `scheduler.paper_cycle_due`
+> (trading days only, once-per-hour within a 20-min grace, mirrors
+> `analyze_slot_due`) → `handlers.run_paper_entry_and_manage` (opens new paper
+> trades from current captured signals via `compute.run_entry_cycle`, guarded on an
+> existing account + its own try/except so an entry failure can't skip manage, then
+> `run_manage_and_refresh`). The **isolated DRIVER paper account** stays on the
+> old **5-min** `manage_due` slot (`run_driver_manage_and_refresh`). Both windows
+> are trading-day/market-hours gated. The "Run Manage Cycle" button is still a
+> manual trigger of the manage cycle. (Tick cadence reference: each 30 s scheduler
+> tick also runs `refresh_header` + `publish_gex_status`; the 2-min GEX collect +
+> 5-min driver manage are slot-gated within their CT windows. **Trade-off to know:**
+> the manual account's live P&L + target/stop auto-close now update **hourly**, not
+> every 5 min.)
 
 **Gamma panels / walls / flicker batch (DONE — 2026-06-16).** Four fixes from a
 live-screenshot review (design/plan:
@@ -2657,25 +2758,37 @@ imports only `nicegui` + `bus_client`/`proxy` + `repo_paths`. Pieces:
   show `age_text` + a STALE flag for **scheduled** views older than 600 s (`is_stale`);
   **on-demand** views (trade/driver) are never flagged. This distinguishes "service
   answers /health" from "service is actively publishing".
-- **Per-component Restart (2026-06-19).** Each **offline** component card grows a
-  **Restart** button (proxy + the five services + Memurai; never the webgui — it
-  can't restart itself, and its card is always "up"). `restart_spec(target)` maps a
-  component to how it restarts — a **script** spec (proxy / service: free the port
-  then launch the venv python on the entry script; services pass `wait_port=8100`
-  so they wait for the proxy) or a **service** spec (Memurai → `Start-Service`).
-  `restart_command(spec)` builds the argv: a script spec spawns its own console
-  via `cmd /c start … cmd /k call tools\restart_one.bat <kill_port> <wait_port>
-  <script>` (detached, live logs); `restart_one.bat` taskkills the port's LISTENING
-  owner (clears a wedged process) then hands off to `wait_and_run.bat`. The page's
-  click handler spawns it, toasts, and schedules a 7s re-sweep. Verified live: a
-  Restart click on the proxy bound :8100 within ~1s and the card flipped to Online.
+- **Per-component Restart (2026-06-19; every card 2026-07-10).** **Every**
+  component card carries a **Restart** button — shown regardless of up/down state,
+  so you can also restart a wedged-but-listening service — covering the proxy, all
+  **six** Tier-2 services (sentiment/options/portfolio/trade/driver/market), Memurai,
+  and **the webgui itself**. Only the **auth** card is excepted (its action is
+  **Authorize**, a link to `/auth`, not a process restart). `restart_spec(target)`
+  maps a component to how it restarts — a **script** spec (proxy / service / **self**:
+  free the port then launch the venv python on the entry script; services pass
+  `wait_port=8100` so they wait for the proxy, the webgui uses `wait_port=0`) or a
+  **service** spec (Memurai → `Restart-Service`, falling back to `Start-Service` if
+  stopped — works up or down; may need an elevated session). **Windowless (2026-07-10):**
+  `restart_command(spec)` builds a `cmd /c tools\restart_one.bat <kill_port>
+  <wait_port> <name> <script>` argv and `_do_restart` spawns it with
+  **`CREATE_NO_WINDOW`** — nothing flashes. `restart_one.bat` taskkills the port's
+  LISTENING owner (`/F /PID`, no `/T` — so the webgui's own self-restart doesn't take
+  the spawn down with it), waits for the dependency (`ping`-based sleep, no console
+  needed), then launches the component **hidden** via `pythonw` +
+  `Start-Process -WindowStyle Hidden` with stdout/stderr → `logs\<name>.out.log` /
+  `.err.log` (mirrors `start_all_wt.bat nowindow`). The **webgui self-restart** frees
+  :8500 and relaunches even though it kills the current page — the click handler toasts
+  "this page will disconnect; reload" and skips the re-sweep. Every other restart
+  toasts + schedules a 7s re-sweep. Verified: a live proxy restart (prior turn) bound
+  :8100 in ~1s; the windowless `restart_one.bat` launch primitive is smoke-tested
+  (hidden `pythonw`, output captured to `logs\`).
 - **Wiring.** `("/status", "System Status", "monitor_heart")` in the **More** nav
   group; `@ui.page("/status")` → `status.render()`; `/status` added to
   `test_shell.py`. Auto-refresh `ui.timer(15s)` + manual Refresh button (with
   spinner + re-entrancy guard). Pure builders (`component_targets`/`status_word`/
   `status_color`/`status_icon`/`overall_status`/`age_text`/`is_stale`/`freshness_row`
   + `restart_spec`/`restart_command` + `auth_status`) unit-tested in
-  `webgui/tests/test_status.py` (34); render + live restart + live auth-card
+  `webgui/tests/test_status.py` (35); render + live restart + live auth-card
   verified by screenshot.
 
 **Rescue tested trades (`/options/rescue`) — DONE (2026-06-21).** An advisory +
@@ -2840,6 +2953,13 @@ market    = 8215
 passthrough), loaded by `services/options_svc/commission.py` (used by the Rescue
 candidate menu). **Rule: don't hard-code commission rates** — add them here.
 
+`config/theme.toml` is the single source of truth for the **webgui styling palette**
+(surfaces/cards/text, buttons incl. the 3D gradients, semantic state colors, the
+speedometer gauge face, the Sentiment/Rotation chart palette), loaded once at webgui
+startup by `webgui/pages/options/theme.py:load_theme()` — edit + restart the webgui to
+restyle without code changes; missing keys fall back to the built-in dark-navy defaults.
+See the "App theme — dark-navy 'dashboard'" section.
+
 ## Secrets
 
 Live in `shared/` and are **all gitignored**. Real values were copied locally so
@@ -2863,8 +2983,8 @@ browser). It opens the proxy + 5 services + web gui in **7 separate console
 windows**.
 
 **One-window alternative — `start_all_wt.bat`** (requires Windows Terminal):
-launches the same 7 processes as **7 tabs in a single Windows Terminal window**
-(live logs preserved, but far less desktop clutter). The processes stay 7
+launches the same 8 processes as **8 tabs in a single Windows Terminal window**
+(live logs preserved, but far less desktop clutter). The processes stay 8
 separate OS processes — required, since merging services into one Python process
 would re-introduce the `config`/`scoring`/`notifier`/`src` top-level
 module-name collisions the 3-tier split exists to prevent. Each tab waits for the
@@ -2872,6 +2992,31 @@ proxy (:8100) before starting via `tools\wait_and_run.bat <wait_port|0> <script>
 (the proxy tab passes `0` to start immediately), preserving the same ordering as
 the multi-window launcher; tabs run under `cmd /k` so they stay open with live
 output. Close the window (or a tab) to stop the services.
+
+**Double-click launcher — `start_all_hidden.bat`**: the click-to-run entry point.
+Double-click it in Windows Explorer (or a desktop **shortcut** to it — right-click
+→ Send to → Desktop) to launch the whole stack **windowless**. Because a `.bat`
+double-clicked always opens its own console, it **relaunches itself hidden** (via
+`powershell Start-Process -WindowStyle Hidden`, so you see at most a brief flash)
+and then runs `start_all_wt.bat nowindow`. Net effect: click → nothing visible →
+the browser opens to the web GUI, with all 8 processes hidden. Stop with
+`stop_all.bat` or More → Terminate.
+
+**No-window mode — `start_all_wt.bat nowindow`** (aliases `-nowindow` /
+`/nowindow` / `hidden`): the same launcher, but every process runs **hidden with
+NO window at all** — each is spawned via PowerShell `Start-Process -WindowStyle
+Hidden` using the venv **`pythonw.exe`** (falls back to `python.exe`), with
+stdout/stderr redirected to `logs\<name>.out.log` / `.err.log` at the repo root.
+Same proxy-first ordering (it waits for :8100 before starting the six services +
+web GUI) and it still opens the browser. Since there are no consoles to close,
+**stop a windowless stack with `stop_all.bat`** (or the GUI's More → Terminate).
+The default (no-arg) mode is unchanged (WT tabs with live logs). NOTE: the
+proxy + six services already write their own rotating log files regardless; the
+redirect additionally captures the **web GUI** output, which otherwise only goes
+to its console. (The System Status page's per-component **Restart** buttons are
+**also windowless** — they spawn `tools\restart_one.bat` with `CREATE_NO_WINDOW`,
+which relaunches the component hidden via `pythonw` + `Start-Process -WindowStyle
+Hidden`, logs to `logs\<name>.out.log`.)
 
 **Stopping — `stop_all.bat`** (also reachable from the GUI's **More → Terminate**
 page): runs `tools\stop_all.py`, which reads the ports from `repo_paths` and kills

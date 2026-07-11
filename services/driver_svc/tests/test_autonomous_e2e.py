@@ -103,7 +103,9 @@ def test_autonomous_e2e_banked_target_halts(fake_bus, monkeypatch):
     """
     handlers.set_control(fake_bus, enabled=True)
     _seed_scan(fake_bus, _QQQ_PCS)
-    _seed_paper(fake_bus, session_pnl=600.0)        # already banked the day
+    # Above the TARGET_CAP ($1,000) so the banked-target halt trips regardless of the
+    # cumulative MTD target (which, mid-month with nothing banked, ratchets to the cap).
+    _seed_paper(fake_bus, session_pnl=1100.0)
 
     monkeypatch.setattr(handlers.compute, "fetch_market_context",
                         lambda: {"vix": 14})
@@ -129,7 +131,7 @@ def test_autonomous_e2e_banked_target_halts(fake_bus, monkeypatch):
     state = fake_bus.cache_get("cache:driver:autonomous").payload
     assert state["halted"] is True
     assert state["halt_reason"] and "target" in state["halt_reason"].lower()
-    assert state["day_pnl"] == 600.0
+    assert state["day_pnl"] == 1100.0
 
 
 def test_autonomous_e2e_packet_carries_market_read(fake_bus, monkeypatch):

@@ -187,3 +187,54 @@ def index_call_put_volume(chain):
     ratio = None if call_vol == 0 else put_vol / call_vol
 
     return {"call_vol": call_vol, "put_vol": put_vol, "ratio": ratio}
+
+
+_CONTRACT_MULTIPLIER = 100  # one option contract = 100 shares
+
+
+def _contract_mark(c):
+    """A contract's mark (mid) price, falling back to (bid+ask)/2. None if unusable."""
+    mark = _as_float(c.get("mark"))
+    if mark is not None and mark > 0:
+        return mark
+    bid, ask = _as_float(c.get("bid")), _as_float(c.get("ask"))
+    if bid is not None and ask is not None and (bid + ask) > 0:
+        return (bid + ask) / 2.0
+    return None
+
+
+def _sum_premium(exp_map):
+    """Total traded PREMIUM ($) across an expiration map: Σ mark × totalVolume × 100.
+
+    Uses the contract mark (mid) as the trade-price proxy (Schwab gives no time-&-
+    sales tape), so this is a **daily-cumulative** premium estimate, not a signed
+    buy/sell split. Defensive — skips contracts missing volume or a usable mark.
+    """
+    total = 0.0
+    if not isinstance(exp_map, dict):
+        return total
+    for strike_map in exp_map.values():
+        for c in _iter_contracts(strike_map):
+            vol = _as_float(c.get("totalVolume"))
+            mark = _contract_mark(c)
+            if vol and mark and vol > 0:
+                total += mark * vol * _CONTRACT_MULTIPLIER
+    return total
+
+
+def index_call_put_premium(chain):
+    """Total call vs put traded PREMIUM ($) across the chain (Σ mark×totalVolume×100).
+
+    Companion to ``index_call_put_volume`` — same chain, same 2-min cadence — for the
+    intraday options-premium-flow chart. Returns ``{"call_prem", "put_prem"}``
+    (floats, dollars), or ``None`` on an empty chain (no maps at all). Never raises.
+    """
+    if not isinstance(chain, dict):
+        return None
+
+    call_map = chain.get(_CALL_MAP)
+    put_map = chain.get(_PUT_MAP)
+    if not isinstance(call_map, dict) and not isinstance(put_map, dict):
+        return None
+
+    return {"call_prem": _sum_premium(call_map), "put_prem": _sum_premium(put_map)}

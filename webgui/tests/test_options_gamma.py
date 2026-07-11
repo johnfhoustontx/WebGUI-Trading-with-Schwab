@@ -442,7 +442,7 @@ def test_render_view_updates_in_place_not_clear():
     assert "_set_chart" in src            # kind-aware recreate for the bar<->Term switch
     assert "chart_box.clear()" not in src   # never tear down the whole panel/messages
     assert "heatmap_box.clear()" not in src
-    assert "panel_flex" in src           # proportional split is wired
+    assert "_STRIKE_HEAT_SPLIT" in src   # fixed 40/60 strike/heatmap split is wired
     assert "bar_yrange" in src           # fixed ±N_SIDE window y-range is wired
 
 
@@ -548,3 +548,94 @@ def test_history_dates_distinct_newest_first():
     assert g.history_dates(payload) == ["2026-07-08", "2026-07-02"]  # distinct, order kept
     assert g.history_dates(None) == []
     assert g.history_dates({"briefings": []}) == []
+
+
+def test_flow_figure_builds_stacked_panels():
+    from pages.options import gamma as g
+    rows = [
+        {"ts": 1783000000, "spot": 500.0, "call_vol": 100, "put_vol": 80,
+         "call_prem": 2.0e6, "put_prem": 1.5e6},
+        {"ts": 1783000120, "spot": 501.0, "call_vol": 140, "put_vol": 130,
+         "call_prem": 3.0e6, "put_prem": 2.8e6},
+    ]
+    fig = g.flow_figure(rows)
+    names = [s["name"] for s in fig["series"]]
+    assert names == ["Price", "Call premium", "Put premium", "Net premium (call − put)"]
+    assert len(fig["yAxis"]) == 3                       # price / premium / net panels
+    call = next(s for s in fig["series"] if s["name"] == "Call premium")
+    assert call["data"][0] == [0, 2.0]                  # 2.0e6 -> 2.0 $M
+    net = next(s for s in fig["series"] if s["name"].startswith("Net"))
+    assert net["data"][0] == [0, 0.5] and net["type"] == "area"   # (2.0-1.5)/1e6
+
+
+def test_flow_figure_skips_missing_premium():
+    from pages.options import gamma as g
+    rows = [
+        {"ts": 1, "spot": 500.0, "call_prem": None, "put_prem": None},   # pre-Phase-1
+        {"ts": 2, "spot": 501.0, "call_prem": 1.0e6, "put_prem": 0.4e6},
+    ]
+    fig = g.flow_figure(rows)
+    call = next(s for s in fig["series"] if s["name"] == "Call premium")
+    assert call["data"] == [[1, 1.0]]                   # only the row that has premium
+    price = next(s for s in fig["series"] if s["name"] == "Price")
+    assert len(price["data"]) == 2                      # price present for both
+
+
+def test_flow_summary_text_variants():
+    from pages.options import gamma as g
+    assert "No flow data" in g.flow_summary_text([])
+    assert "not collected yet" in g.flow_summary_text(
+        [{"ts": 1, "spot": 1, "call_prem": None, "put_prem": None}])
+    s = g.flow_summary_text(
+        [{"ts": 1, "spot": 1, "call_vol": 10, "put_vol": 5, "call_prem": 3.0e6, "put_prem": 1.0e6}])
+    assert "3.0M" in s and "1.0M" in s and "+2.0M" in s
+
+
+def _proj_rows():
+    return [("09:30", 100.0, None, None, None, 0,
+             {99.0: {"net": 5.0}, 100.0: {"net": -3.0}, 101.0: {"net": 4.0}}),
+            ("09:31", 100.2, None, None, None, 0,
+             {99.0: {"net": 6.0}, 100.0: {"net": -2.0}, 101.0: {"net": 5.0}})]
+
+
+def test_heatmap_appends_projection_columns():
+    proj = {"times": ["13:15", "13:30"], "spot": 100.0,
+            "grid": {99.0: [5.0, 6.0], 100.0: [-8.0, -12.0], 101.0: [4.0, 3.0]},
+            "cone": {"mid": [100.0, 100.0], "up": [100.5, 100.8], "down": [99.5, 99.2]}}
+    fig = gamma.heatmap_figure(_proj_rows(), "GEX", yrange=[95.0, 105.0], projection=proj)
+    cats = fig["xAxis"]["categories"]
+    assert cats[-2:] == ["13:15", "13:30"]                         # future cols appended
+    pls = fig["xAxis"].get("plotLines", [])
+    assert any(pl.get("className") == "gamma-now-divider" for pl in pls)   # 'now' seam
+    hm = next(s for s in fig["series"] if s["type"] == "heatmap")
+    assert any(p[0] >= 2 for p in hm["data"])                      # future cells at idx>=2
+    names = [s.get("name") for s in fig["series"]]
+    assert "EM up" in names and "EM down" in names                # cone overlays
+    spot = next(s for s in fig["series"] if s.get("name") == "Spot")
+    assert len(spot["data"]) == 4                                  # 2 collected + 2 cone.mid
+
+
+def test_heatmap_no_projection_unchanged():
+    fig = gamma.heatmap_figure(_proj_rows(), "GEX", yrange=[95.0, 105.0], projection=None)
+    assert not any(pl.get("className") == "gamma-now-divider"
+                   for pl in fig["xAxis"].get("plotLines", []))
+    names = [s.get("name") for s in fig["series"]]
+    assert "EM up" not in names and "EM down" not in names
+
+
+def test_strike_heat_split_constant():
+    assert gamma._STRIKE_HEAT_SPLIT == (0.40, 0.60)   # flip to (0.70, 0.30) if hard to read
+
+
+def test_status_strip_text_combines_sources():
+    s = gamma.status_strip_text({"last_scan": "1:00 PM", "next_scan": "1:01 PM"},
+                                "spot 5,400.00", 75)
+    assert "Last scan 1:00 PM" in s
+    assert "Next scan 1:01 PM" in s
+    assert "Next refresh 1:15" in s
+    assert "spot 5,400.00" in s
+
+
+def test_status_strip_text_defensive():
+    s = gamma.status_strip_text(None, "", 0)
+    assert "Last scan —" in s and "Next scan —" in s and "Next refresh 0:00" in s

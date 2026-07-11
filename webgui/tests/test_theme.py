@@ -76,32 +76,166 @@ def test_btn3d_encodes_gradient_and_shadow():
     assert "#d33f3f" in theme.BTN_3D_DANGER  # red variant mid-stop
 
 
-def test_semantic_palette_raw_hexes():
-    from pages.options import theme
-    p = theme.PALETTE
-    assert p["green"] == "#66bb6a"
-    assert p["red"] == "#ef5350"
-    assert p["amber"] == "#ffa726"
-    assert p["yellow"] == "#ffd54f"
-    assert p["blue"] == "#42a5f5"
-    assert p["cyan"] == "#3fb6c7"
-    assert p["flat"] == "#9e9e9e"
-    assert p["neutral"] == "#bdbdbd"
-    assert p["muted"] == "#888888"
+# -- Theme config (config/theme.toml) — styling without code edits (2026-07-09) --
 
 
-def test_palette_helpers():
-    from pages.options import theme
-    assert theme.hex_of("green") == "#66bb6a"
-    assert theme.txt("red") == "text-[#ef5350]"
-    assert theme.bg("green") == "bg-[#66bb6a]"
-    assert theme.rgb("red") == (239, 83, 80)
+def test_load_theme_missing_file_returns_defaults():
+    t = theme.load_theme("Z:/nope/does-not-exist.toml")
+    assert t["palette"]["card_bg"] == "#101a30"
+    assert t["semantic"]["positive"] == "#66bb6a"
+    assert t["gauge"]["needle"] == "#f5f5f5"
 
 
-def test_txt_tokens_unchanged_after_refactor():
-    from pages.options import theme
-    assert theme.TXT_POS == "text-[#66bb6a]"
-    assert theme.TXT_WARN == "text-[#ffa726]"
-    assert theme.TXT_NEG == "text-[#ef5350]"
-    assert theme.TXT_NEUTRAL == "text-[#bdbdbd]"
-    assert theme.STATE_TEXT_CLASSES == "text-[#66bb6a] text-[#ffa726] text-[#ef5350] text-[#bdbdbd]"
+def test_load_theme_merges_partial_override(tmp_path):
+    p = tmp_path / "theme.toml"
+    p.write_text('[palette]\ncard_bg = "#222831"\n', encoding="utf-8")
+    t = theme.load_theme(p)
+    assert t["palette"]["card_bg"] == "#222831"        # overridden
+    assert t["palette"]["card_border"] == "#213152"    # untouched default
+    assert t["semantic"]["negative"] == "#ef5350"      # other sections intact
+
+
+def test_load_theme_ignores_unknown_keys_and_bad_values(tmp_path):
+    p = tmp_path / "theme.toml"
+    p.write_text('[palette]\nbogus = "#111111"\ncard_bg = 42\n[nonsense]\nx = "y"\n',
+                 encoding="utf-8")
+    t = theme.load_theme(p)
+    assert "bogus" not in t["palette"]
+    assert t["palette"]["card_bg"] == "#101a30"        # non-string value → default
+    assert "nonsense" not in t
+
+
+def test_build_tokens_reflect_theme_values(tmp_path):
+    p = tmp_path / "theme.toml"
+    p.write_text(
+        '[palette]\ncard_bg = "#222831"\nprimary = "#00aa55"\n'
+        '[buttons_3d]\nblue_top = "#123456"\n'
+        '[semantic]\npositive = "#00ff00"\n', encoding="utf-8")
+    toks = theme.build_tokens(theme.load_theme(p))
+    assert "bg-[#222831]" in toks["CARD"]
+    assert "bg-[#00aa55]" in toks["BTN_PRIMARY"]
+    assert "#123456" in toks["BTN_3D"]
+    assert "text-[#00ff00]" in toks["TXT_POS"]
+    # the module-level tokens are build_tokens(THEME) — same generator.
+    assert theme.CARD == theme.build_tokens(theme.THEME)["CARD"]
+
+
+def test_quasar_internal_css_reflects_theme(tmp_path):
+    p = tmp_path / "theme.toml"
+    p.write_text('[palette]\ninput_bg = "#31363f"\n', encoding="utf-8")
+    css = theme.build_quasar_css(theme.load_theme(p))
+    assert "#31363f" in css
+    assert ".q-field__control" in css and ".strat-menu-navy" in css
+
+
+# -- [typography] + [menu] sections (fonts/sizes + app-menu styling, 2026-07-09) --
+
+
+def test_typography_defaults_match_quasar():
+    t = theme.load_theme("Z:/nope.toml")
+    ty = t["typography"]
+    assert ty["family"] == ""            # "" = keep the app default (Roboto)
+    assert ty["titles"] == "20px"        # .text-h6 (20px = the framework 1.25rem)
+    assert ty["body"] == "14px"
+    css = theme.build_typography_css(t)
+    assert ".text-h6{font-size:20px" in css.replace(" ", "")
+    assert "font-family" not in css      # empty family emits no font rule
+
+
+def test_typography_bare_number_means_pixels(tmp_path):
+    # "just type a bigger number" works: a unitless size is treated as px.
+    assert theme.normalize_size("15") == "15px"
+    assert theme.normalize_size("1.1rem") == "1.1rem"   # explicit units untouched
+    assert theme.normalize_size("") == ""
+    p = tmp_path / "theme.toml"
+    p.write_text('[typography]\ntitles = "22"\nsmall = "11"\n', encoding="utf-8")
+    t = theme.load_theme(p)
+    css = theme.build_typography_css(t).replace(" ", "")
+    assert ".text-h6{font-size:22px" in css
+    assert "text-[11px]" in theme.build_tokens(t)["EYEBROW"]
+
+
+def test_typography_css_reflects_overrides(tmp_path):
+    p = tmp_path / "theme.toml"
+    p.write_text(
+        '[typography]\nfamily = "Georgia, serif"\ntitles = "22px"\nbody = "15px"\n'
+        'small = "11px"\n', encoding="utf-8")
+    css = theme.build_typography_css(theme.load_theme(p))
+    flat = css.replace(" ", "")
+    assert "font-family:Georgia,serif" in flat
+    assert ".text-h6{font-size:22px" in flat
+    assert "body{" in flat and "font-size:15px" in flat
+    assert ".text-xs{font-size:11px" in flat
+    # EYEBROW size follows [typography].small
+    toks = theme.build_tokens(theme.load_theme(p))
+    assert "text-[11px]" in toks["EYEBROW"]
+
+
+def test_menu_defaults_emit_no_rules():
+    # All [menu] knobs default "" = keep today's exact Quasar look — the nav CSS
+    # must emit NOTHING so the defaults can never drift from the stock render.
+    t = theme.load_theme("Z:/nope.toml")
+    assert all(v == "" for v in t["menu"].values())
+    assert theme.build_nav_css(t).strip() == ""
+
+
+def test_menu_css_reflects_overrides(tmp_path):
+    p = tmp_path / "theme.toml"
+    p.write_text(
+        '[menu]\ndrawer_bg = "#0d1526"\ntext = "#9fb4d8"\nhover_bg = "#1a2745"\n'
+        'title = "#ffcc00"\n', encoding="utf-8")
+    css = theme.build_nav_css(theme.load_theme(p))
+    flat = css.replace(" ", "")
+    assert ".nav-drawer{background:#0d1526!important" in flat
+    assert "#9fb4d8" in flat and "#1a2745" in flat and "#ffcc00" in flat
+
+
+def test_menu_accent_is_a_plain_value_not_css():
+    # accent recolors Quasar primary (header bar + active pill) via ui.colors in
+    # _layout — it is NOT part of the nav CSS block.
+    t = theme.load_theme("Z:/nope.toml")
+    assert t["menu"]["accent"] == ""
+
+
+# -- set_theme_values: comment-preserving TOML editor (Settings page, 2026-07-09) --
+
+_TOML = """# header comment stays
+[palette]                      # section comment stays
+card_bg      = "#101a30"       # cards / frames
+text         = "#cdd8ee"       # base body text
+
+[menu]
+accent    = ""                 # header bar
+title     = ""                 # caption
+"""
+
+
+def test_set_theme_values_updates_value_preserving_comments():
+    out = theme.set_theme_values(_TOML, {"palette": {"card_bg": "#222831"}})
+    assert 'card_bg      = "#222831"       # cards / frames' in out
+    assert "# header comment stays" in out
+    assert 'text         = "#cdd8ee"' in out                # untouched
+
+
+def test_set_theme_values_is_section_scoped():
+    # a key name that exists in two sections only updates the targeted section
+    out = theme.set_theme_values(_TOML, {"menu": {"title": "#ffcc00"}})
+    assert 'title     = "#ffcc00"' in out
+    assert 'card_bg      = "#101a30"' in out
+
+
+def test_set_theme_values_missing_key_is_noop_and_multi_update():
+    out = theme.set_theme_values(_TOML, {
+        "palette": {"nope": "#000000", "text": "#ffffff"},
+        "menu": {"accent": "#2e7d32"}})
+    assert "#000000" not in out
+    assert 'text         = "#ffffff"' in out
+    assert 'accent    = "#2e7d32"' in out
+
+
+def test_knob_label_humanizes_keys():
+    assert theme.knob_label("card_bg") == "Card background"
+    assert theme.knob_label("btn_hover") == "Button hover"
+    assert theme.knob_label("blue_top") == "Blue top"
+    assert theme.knob_label("page_bg1") == "Page background 1"
+    assert theme.knob_label("drawer_bg") == "Drawer background"

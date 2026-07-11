@@ -26,24 +26,35 @@ from zoneinfo import ZoneInfo
 
 import bus_client
 from pages.gauge import gauge_figure  # noqa: F401  (re-export; used by render)
-from pages.options import theme
-from pages.options.theme import BTN_3D, TILE_3D
+from pages.options.theme import BTN_3D, THEME, TILE_3D
 from pages.ui_guard import guard
 
 _CT = ZoneInfo("America/Chicago")  # trading session clock for the intraday graphs
 
-CLR_GREEN, CLR_RED = theme.hex_of("green"), theme.hex_of("red")
-CLR_YELLOW, CLR_FLAT, CLR_CYAN = theme.hex_of("yellow"), theme.hex_of("flat"), theme.hex_of("cyan")
+# The page's 5-color value palette now comes from config/theme.toml [charts]
+# (edit + restart the webgui to restyle) — defaults preserve the historical look:
+# green #66bb6a / red #ef5350 / yellow #ffd54f / flat #9e9e9e / cyan #3fb6c7.
+_CH = THEME["charts"]
+CLR_GREEN = _CH["green"]
+CLR_RED = _CH["red"]
+CLR_YELLOW = _CH["yellow"]
+CLR_FLAT = _CH["flat"]
+CLR_CYAN = _CH["cyan"]
 
-# LOCAL Tailwind class maps (Phase 5). These mirror the page's OWN 5-color palette
-# EXACTLY — the yellow/cyan have no theme TXT_* token and the flat differs from the
-# theme neutral, so they are intentionally NOT the shared theme tokens (this page
-# keeps its own look). The `*_color` hex helpers above are retained for the
-# Highcharts figures + non-`.classes()` callers; the `*_class` helpers below return
-# the Tailwind class string for `.classes()`.
-TXT_G, TXT_R = theme.txt("green"), theme.txt("red")
-TXT_Y, TXT_FLAT, TXT_CY = theme.txt("yellow"), theme.txt("flat"), theme.txt("cyan")
-BG_G, BG_R, BG_Y = theme.bg("green"), theme.bg("red"), theme.bg("yellow")
+# LOCAL Tailwind class maps (Phase 5), generated from the same palette. These are
+# the page's OWN 5-color vocabulary — the yellow/cyan have no theme TXT_* token and
+# the flat differs from the theme neutral, so they are intentionally NOT the shared
+# theme tokens. The `CLR_*` hex constants above feed the Highcharts figures +
+# non-`.classes()` callers; the `*_class` helpers below return the Tailwind class
+# string for `.classes()`.
+TXT_G = f"text-[{CLR_GREEN}]"
+TXT_R = f"text-[{CLR_RED}]"
+TXT_Y = f"text-[{CLR_YELLOW}]"
+TXT_FLAT = f"text-[{CLR_FLAT}]"
+TXT_CY = f"text-[{CLR_CYAN}]"
+BG_G = f"bg-[{CLR_GREEN}]"
+BG_R = f"bg-[{CLR_RED}]"
+BG_Y = f"bg-[{CLR_YELLOW}]"
 # Remove-sets for reactive in-place recolors (these MUST cover every class the
 # element can apply, or colors stack across the page's ~2s auto-refresh).
 SENT_TEXT_CLASSES = " ".join([TXT_G, TXT_R, TXT_Y, TXT_FLAT, TXT_CY])

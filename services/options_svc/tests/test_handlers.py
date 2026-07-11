@@ -264,6 +264,51 @@ def test_run_manage_and_refresh_runs_cycle_when_account_present(monkeypatch):
     assert calls.get("trades", 0) == 1
 
 
+def test_run_paper_entry_and_manage_runs_entry_then_manage(monkeypatch):
+    """The hourly manual paper cycle opens new trades (account present) then
+    reprices/auto-closes + refreshes via run_manage_and_refresh."""
+    bus = Bus(fake=True)
+    order = []
+    monkeypatch.setattr(handlers.compute, "has_paper_account", lambda: True)
+    monkeypatch.setattr(handlers.compute, "run_entry_cycle",
+                        lambda: order.append("entry"))
+    monkeypatch.setattr(handlers, "run_manage_and_refresh",
+                        lambda b: order.append("manage"))
+    handlers.run_paper_entry_and_manage(bus)
+    assert order == ["entry", "manage"]   # entry BEFORE manage
+
+
+def test_run_paper_entry_and_manage_skips_entry_without_account(monkeypatch):
+    """With no paper account, entry is skipped but manage/refresh still runs so
+    the page shows the no-account state."""
+    bus = Bus(fake=True)
+    order = []
+    monkeypatch.setattr(handlers.compute, "has_paper_account", lambda: False)
+    monkeypatch.setattr(handlers.compute, "run_entry_cycle",
+                        lambda: order.append("entry"))
+    monkeypatch.setattr(handlers, "run_manage_and_refresh",
+                        lambda b: order.append("manage"))
+    handlers.run_paper_entry_and_manage(bus)
+    assert order == ["manage"]   # no entry, manage still ran
+
+
+def test_run_paper_entry_and_manage_entry_failure_still_manages(monkeypatch):
+    """An entry-cycle failure must NOT skip the manage/refresh (own try/except)."""
+    bus = Bus(fake=True)
+    order = []
+    monkeypatch.setattr(handlers.compute, "has_paper_account", lambda: True)
+
+    def _boom():
+        order.append("entry")
+        raise RuntimeError("nope")
+
+    monkeypatch.setattr(handlers.compute, "run_entry_cycle", _boom)
+    monkeypatch.setattr(handlers, "run_manage_and_refresh",
+                        lambda b: order.append("manage"))
+    handlers.run_paper_entry_and_manage(bus)   # must not raise
+    assert order == ["entry", "manage"]
+
+
 def test_run_action_alert_pushes_and_caches(monkeypatch):
     """run_action_alert collects items, pushes the digest, and caches the run."""
     bus = Bus(fake=True)

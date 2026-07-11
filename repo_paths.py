@@ -22,6 +22,11 @@ APPSETTINGS = SHARED / "appsettings.json"
 TOKENS      = SHARED / "tokens.json"
 NOTIFICATIONS_CONFIG = SHARED / "notifications.json"
 
+# App styling config (webgui theme) — edit + restart the webgui to restyle the
+# app without touching code. Missing file/keys fall back to the built-in
+# dark-navy defaults in webgui/pages/options/theme.py.
+THEME_TOML = REPO_ROOT / "config" / "theme.toml"
+
 # Dedicated paper-account DB for the autonomous Driver — a SEPARATE file from the
 # manual paper_account.db so the driver's book is fully isolated (zero schema change;
 # every paper_account_db/paper_engine fn already takes db_path).

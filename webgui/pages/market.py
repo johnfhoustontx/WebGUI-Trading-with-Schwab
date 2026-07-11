@@ -43,6 +43,14 @@ def _fmt(v, nd=2):
 
 def tile_text(t):
     """Display strings for a tile: {last, change}."""
+    if t.get("basket"):
+        # Composite tile (MAG7): headline = equal-weighted avg day %-move,
+        # subline = breadth (e.g. "3/7 up").
+        try:
+            head = f"{float(t.get('avg_pct')):+.2f}%"
+        except (TypeError, ValueError):
+            head = "—"
+        return {"last": head, "change": t.get("breadth_text", "")}
     if t.get("last") is None:
         return {"last": "—", "change": ""}
     if t.get("value_only"):
@@ -59,7 +67,7 @@ def tile_text(t):
 
 
 def render():
-    ui.label("Market Dashboard").classes("text-h6 text-slate-100")
+    # No page title — the drawer names the page (2026-07-11 dead-space cleanup).
     board = ui.row().classes("w-full flex-wrap gap-4 items-start")
     # tiles: display -> {"container", "last", "change", "state"} element handles.
     state = {"version": None, "built": False, "tiles": {}}

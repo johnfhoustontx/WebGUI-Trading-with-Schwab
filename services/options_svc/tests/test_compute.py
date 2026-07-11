@@ -1331,6 +1331,46 @@ def test_gamma_snapshot_none_when_chain_fetch_fails(monkeypatch):
     assert compute.gamma_snapshot("$SPX") is None
 
 
+def test_gamma_snapshot_gex_carries_projection(monkeypatch):
+    """The GEX view carries a forward `projection` block (times/grid/cone/spot),
+    cropped to the display window; other views do not."""
+    import datetime as _dtm
+    from zoneinfo import ZoneInfo
+    from services.options_svc import scheduler as _sched
+
+    exp = "2026-06-18:0"
+    def _leg(k, oi):
+        return [{"strike": k, "gamma": 0.05, "openInterest": oi,
+                 "volatility": 20.0, "delta": 0.5, "daysToExpiration": 0}]
+    wide = {float(5400 + i): (5000 if i == 0 else 500) for i in range(-60, 61)}
+    chain = {"underlyingPrice": 5400.0,
+             "callExpDateMap": {exp: {f"{k:.1f}": _leg(k, oi) for k, oi in wide.items()}},
+             "putExpDateMap": {exp: {f"{k:.1f}": _leg(k, max(oi - 200, 100)) for k, oi in wide.items()}}}
+
+    class _ProjEngine(_WideEngine):
+        @staticmethod
+        def _find_nearest_exp_key(exp_map, today):
+            return (next(iter(exp_map)), 0) if exp_map else (None, None)
+
+    _patch_gamma(monkeypatch, chain=chain,
+                 history=[(1, 5400.0, 3, 4, 5, 6, {5400.0: {"net": 1}})])
+    import sys as _sys
+    _sys.modules["gamma_tool"].GammaEngine = _ProjEngine
+    monkeypatch.setattr(_sched, "_market_now",
+                        lambda: _dtm.datetime(2026, 6, 18, 13, 0, tzinfo=ZoneInfo("America/Chicago")))
+
+    snap = compute.gamma_snapshot("$SPX")
+    proj = snap["views"]["GEX"]["projection"]
+    assert set(proj) >= {"times", "grid", "cone", "spot"}
+    assert proj["times"] and proj["times"][-1] == "15:00"
+    assert proj["grid"]                                     # populated
+    assert len(next(iter(proj["grid"].values()))) == len(proj["times"])
+    assert all(5380.0 <= float(k) <= 5420.0 for k in proj["grid"])   # cropped to +-20 window
+    assert set(proj["cone"]) == {"mid", "up", "down"}
+    assert "projection" not in snap["views"]["Charm"]
+    assert "projection" not in snap["views"]["DEX"]
+
+
 def test_build_gamma_read_maps_and_falls_back():
     read = compute.build_gamma_read(
         "$SPX", spot=5400.0,
@@ -2376,8 +2416,8 @@ def test_gex_status_view_in_window(monkeypatch):
     assert out["age_seconds"] == 120
     # last_ts=1781530800 is 8:40 AM CT (formatted via _fmt_clock).
     assert out["last_scan"] == "8:40 AM"
-    # Next 2-min boundary strictly after 10:02 within the window → 10:04.
-    assert out["next_scan"] == "10:04 AM"
+    # Next 1-min boundary strictly after 10:02 within the window → 10:03.
+    assert out["next_scan"] == "10:03 AM"
 
 
 def test_gex_status_view_after_window_no_next(monkeypatch):
@@ -2406,16 +2446,16 @@ def test_gex_next_scan_boundaries():
     assert before is not None
     assert (before.hour, before.minute) == (8, 30)
 
-    # Inside the window → next 2-min boundary strictly after now.
+    # Inside the window → next 1-min boundary strictly after now.
     inside = compute._gex_next_scan(ct(10, 2))
     assert inside is not None
-    assert (inside.hour, inside.minute) == (10, 4)
+    assert (inside.hour, inside.minute) == (10, 3)
 
     # Exactly at the stop boundary (15:20) → None.
     assert compute._gex_next_scan(ct(15, 20)) is None
 
     # Just before stop where the next boundary would be >= stop → None.
-    assert compute._gex_next_scan(ct(15, 18)) is None
+    assert compute._gex_next_scan(ct(15, 19)) is None
 
 
 # ── flow_skew_view (per-index skew level + change since prior snapshot) ───────
@@ -2538,3 +2578,56 @@ def test_calc_compute_butterfly_uses_generic_summary():
     s = out["summary"]
     assert s["max_loss"] > 0 and s["max_profit"] > 0
     assert len(s["breakevens"]) == 2
+
+
+def test_analyze_tool_has_close_outlook():
+    props = (compute._ANALYZE_TOOL["input_schema"]["properties"]["indices"]
+             ["items"]["properties"])
+    assert "close_outlook" in props and props["close_outlook"]["type"] == "string"
+
+
+def test_parse_analysis_carries_close_outlook():
+    inp = {"regime": "r", "bias": 0, "headline": "h", "narrative": "n", "why": "w",
+           "indices": [{"symbol": "$SPX", "close_outlook": "trim into the call wall"}]}
+    out = compute._parse_analysis(inp)
+    assert out["indices"][0]["close_outlook"] == "trim into the call wall"
+    # absent -> empty string (defensive default)
+    inp2 = {"headline": "h", "indices": [{"symbol": "SPY"}]}
+    assert compute._parse_analysis(inp2)["indices"][0]["close_outlook"] == ""
+
+
+def test_infographic_renders_close_outlook():
+    data = {"regime": "r", "bias": 0, "headline": "h", "narrative": "", "why": "",
+            "indices": [{"symbol": "$SPX", "close_outlook": "stay long above the flip"}]}
+    html = compute.analyze_infographic_html(data)
+    assert "Into the close" in html and "stay long above the flip" in html
+    # absent -> no "Into the close" block
+    data2 = {"indices": [{"symbol": "SPY"}], "headline": "h"}
+    assert "Into the close" not in compute.analyze_infographic_html(data2)
+
+
+def test_projection_brief_reader_line():
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+    import gamma_tool as gt
+    CT = ZoneInfo("America/Chicago")
+    exp = "2026-07-11:0"
+    def leg(k, oi):
+        return [{"strike": k, "gamma": 0.05, "openInterest": oi, "volatility": 20.0,
+                 "delta": 0.5, "daysToExpiration": 0}]
+    wide = {float(100 + i): (4000 if i == 0 else 800) for i in range(-8, 9)}
+    chain = {"underlyingPrice": 100.0,
+             "callExpDateMap": {exp: {f"{k:.1f}": leg(k, oi) for k, oi in wide.items()}},
+             "putExpDateMap": {exp: {f"{k:.1f}": leg(k, max(oi - 200, 100)) for k, oi in wide.items()}}}
+
+    class _E(gt.GammaEngine):
+        @staticmethod
+        def _find_nearest_exp_key(m, today):
+            return (next(iter(m)), 0) if m else (None, None)
+
+    now = _dt.datetime(2026, 7, 11, 13, 0, tzinfo=CT)
+    brief = compute._projection_brief(_E(), chain, 100.0, now)
+    assert "Into the close" in brief and "15:00" in brief
+    # after the close -> empty
+    assert compute._projection_brief(_E(), chain, 100.0,
+                                     _dt.datetime(2026, 7, 11, 15, 30, tzinfo=CT)) == ""

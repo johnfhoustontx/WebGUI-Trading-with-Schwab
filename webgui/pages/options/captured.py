@@ -20,7 +20,6 @@ from nicegui import ui
 
 from pages.ui_guard import guard
 
-from pages.options import theme
 from . import detail, handoff
 from .rescue import heat_border_class
 from .theme import BTN_3D, BTN_3D_DANGER
@@ -45,9 +44,9 @@ def _round(value, ndigits=2):
     return round(value, ndigits) if isinstance(value, (int, float)) else value
 
 
-REC_RED, REC_AMBER, REC_GREEN = theme.hex_of("red"), theme.hex_of("amber"), theme.hex_of("green")
+REC_RED, REC_AMBER, REC_GREEN = "#ef5350", "#ffa726", "#66bb6a"
 # Profit/loss cell colors (green in profit, red in loss).
-PNL_GREEN, PNL_RED = theme.hex_of("green"), theme.hex_of("red")
+PNL_GREEN, PNL_RED = "#66bb6a", "#ef5350"
 
 
 def rec_color(rec):
@@ -193,7 +192,7 @@ def synth_from_captured(row):
 
 def render():
     """Captured Signals page: table (left) + shared detail panel (right), bus-fed."""
-    ui.label("Captured Signals").classes("text-h5")
+    # No page title — the tab strip names the page (2026-07-11 dead-space cleanup).
     ui.add_css(CAPTURED_CSS)  # sticky header + bounded height + compact columns
 
     raw_by_id: dict = {}
@@ -204,16 +203,18 @@ def render():
 
     with ui.row().classes("w-full no-wrap gap-4 items-start"):
         with ui.column().classes("flex-grow min-w-0"):
-            with ui.row().classes("items-center gap-3"):
+            # Action buttons right-justified with the table's right edge; the
+            # row-count status renders BELOW the table, bottom-right, small.
+            with ui.row().classes("items-center gap-3 w-full justify-end"):
                 ui.button("Reload", icon="refresh", color=None,
                           on_click=lambda: _reload()).props("no-caps").classes(BTN_3D)
                 ui.button("Refresh marks (live)", icon="published_with_changes", color=None,
                           on_click=lambda: _reprice()).props("no-caps").classes(BTN_3D)
                 ui.button("Close selected", icon="check_circle", color=None,
                           on_click=lambda: _close()).props("no-caps").classes(BTN_3D_DANGER)
-                status = ui.label("").classes("opacity-70")
             table = ui.table(columns=captured_columns(), rows=[],
                              row_key="id").classes("w-full captured-table").props("dense")
+            status = ui.label("").classes("opacity-60 text-xs self-end")
             # No selection checkbox: clicking a row selects it (detail panel +
             # Close-selected) and the Rec cell shows a blue left-accent. The symbol
             # cell keeps the at-risk rescue tint (tested/critical); plain otherwise.

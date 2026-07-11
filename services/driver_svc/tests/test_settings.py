@@ -19,6 +19,22 @@ def test_limits_dict_shape():
     assert lim["max_trades_per_cycle"] >= 1
 
 
+def test_target_cap_and_floor_defaults():
+    """The cumulative MTD target band: base 500 → floor 250 (ease when ahead) → cap
+    1000 (ratchet when behind). Surfaced in limits() for the guardrails/tests."""
+    assert settings.TARGET_CAP == 1000.0 and settings.TARGET_FLOOR == 250.0
+    lim = settings.limits()
+    assert lim["target_cap"] == 1000.0 and lim["target_floor"] == 250.0
+    assert lim["daily_target"] == 500.0                 # base unchanged
+    assert settings.TARGET_FLOOR < settings.DAILY_TARGET < settings.TARGET_CAP
+
+
+def test_directional_gate_flag_default_off():
+    """The directional gate ships INERT — enabled only after the offline backtest
+    (validate_directional_gate.py) proves it blocks the CCS loss bucket."""
+    assert settings.DIRECTIONAL_GATE_ENABLED is False
+
+
 def test_resolve_model_prefers_env(monkeypatch):
     """The DRIVER_MODEL env var wins over the file and the default."""
     monkeypatch.setenv("DRIVER_MODEL", "claude-haiku-4-5-20251001")

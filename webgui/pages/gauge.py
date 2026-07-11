@@ -2,17 +2,22 @@
 Market Trend, and Trade-detail panels.
 
 A semicircular **angular gauge** with a painted "speedometer face": the arc is a
-smooth red→yellow→green rainbow (many graduated plotBands) and a needle points to
-``value`` (0-100), with the integer value + ``label`` text in the center. The
-``gauge`` series type lives in the ``highcharts-more`` module, which the
-nicegui-highcharts component auto-loads (``loadMore``) on mount, so the element
-needs NO ``extras`` — just ``ui.highchart(gauge_figure(...))``. Pure + unit-tested.
+smooth low→mid→high ramp (many graduated plotBands, red→yellow→green by default)
+and a needle points to ``value`` (0-100), with the integer value + ``label`` text
+in the center. The face ramp + needle colors come from ``config/theme.toml``
+``[gauge]`` (via the shared ``THEME`` — edit + restart the webgui to restyle;
+defaults preserved). The ``gauge`` series type lives in the ``highcharts-more``
+module, which the nicegui-highcharts component auto-loads (``loadMore``) on
+mount, so the element needs NO ``extras`` — just ``ui.highchart(gauge_figure(...))``.
+Pure + unit-tested.
 """
-from pages.options import theme
+from pages.options.theme import THEME, hex_rgb
 
-_RED = theme.rgb("red")      # #ef5350
-_YELLOW = theme.rgb("yellow")  # #ffd54f
-_GREEN = theme.rgb("green")  # #66bb6a
+_G = THEME["gauge"]
+_RED = hex_rgb(_G["low"], (239, 83, 80))       # left of the arc  (default #ef5350)
+_YELLOW = hex_rgb(_G["mid"], (255, 213, 79))   # middle           (default #ffd54f)
+_GREEN = hex_rgb(_G["high"], (102, 187, 106))  # right            (default #66bb6a)
+_NEEDLE = _G["needle"]                          # needle + pivot   (default #f5f5f5)
 _FACE_BANDS = 60          # graduated plotBands across the arc → smooth gradient
 
 
@@ -78,10 +83,10 @@ def gauge_figure(value, label, height=120):
                   "minorTickWidth": 0, "tickPositions": [],
                   "labels": {"enabled": False}, "plotBands": rainbow_bands()},
         "plotOptions": {"gauge": {
-            "dial": {"backgroundColor": "#f5f5f5", "baseWidth": 3, "topWidth": 1,
+            "dial": {"backgroundColor": _NEEDLE, "baseWidth": 3, "topWidth": 1,
                      "radius": "80%", "rearLength": "0%",
                      "borderColor": "#222222", "borderWidth": 0.5},
-            "pivot": {"backgroundColor": "#f5f5f5", "radius": 4,
+            "pivot": {"backgroundColor": _NEEDLE, "radius": 4,
                       "borderColor": "#222222", "borderWidth": 0.5},
             "dataLabels": labels,
         }},

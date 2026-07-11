@@ -17,19 +17,24 @@ command, and a fetch-free version-poll ``ui.timer`` that repaints when the bus
 cache version changes.
 """
 import bus_client
-from pages.options import theme
 from pages.options.theme import BTN_3D
 from pages.ui_guard import guard, guard_async  # noqa: F401
 
-CLR_GREEN, CLR_RED = theme.hex_of("green"), theme.hex_of("red")
-CLR_YELLOW, CLR_CYAN, CLR_FLAT = theme.hex_of("yellow"), theme.hex_of("cyan"), theme.hex_of("flat")
+CLR_GREEN = "#66bb6a"
+CLR_RED = "#ef5350"
+CLR_YELLOW = "#ffd54f"
+CLR_CYAN = "#3fb6c7"
+CLR_FLAT = "#9e9e9e"
 
 # LOCAL Tailwind text-class map (Phase 5) — mirrors this page's OWN 5-color
 # palette EXACTLY (same local set as sentiment.py; intentionally NOT the theme
 # tokens — yellow/cyan have no token + the flat differs). The hex `*_color`
 # helpers feed the Highcharts RRG figure; the `*_class` helpers feed `.classes()`.
-TXT_G, TXT_R = theme.txt("green"), theme.txt("red")
-TXT_Y, TXT_CY, TXT_FLAT = theme.txt("yellow"), theme.txt("cyan"), theme.txt("flat")
+TXT_G = "text-[#66bb6a]"
+TXT_R = "text-[#ef5350]"
+TXT_Y = "text-[#ffd54f]"
+TXT_CY = "text-[#3fb6c7]"
+TXT_FLAT = "text-[#9e9e9e]"
 # Remove-set for the reactive in-place `headline_lbl` recolor (covers every
 # class it can apply, so colors don't stack across the page's ~2s auto-refresh).
 SENT_TEXT_CLASSES = " ".join([TXT_G, TXT_R, TXT_Y, TXT_CY, TXT_FLAT])

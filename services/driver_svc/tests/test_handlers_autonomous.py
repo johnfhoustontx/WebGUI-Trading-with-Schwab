@@ -483,6 +483,51 @@ def test_cycle_drops_prior_day_briefing(fake_bus, monkeypatch):
     assert "briefing" not in seen["market"]
 
 
+# ── cumulative MTD banking target ────────────────────────────────────────────
+def _capture_target_cycle(seen):
+    def _capture(scan_view, paper_view, *, target, limits, market, **k):
+        seen["target"] = target
+        seen["limit_target"] = limits["daily_target"]
+        return {"decision": {"stand_down": True, "day_thesis": "", "trades": []},
+                "executable": [], "rejected": [], "halted": False, "halt_reason": None,
+                "day_pnl": 0.0, "open_positions": []}
+    return _capture
+
+
+def test_cycle_uses_cumulative_mtd_target(fake_bus, monkeypatch):
+    import datetime as _dt
+    handlers.set_control(fake_bus, enabled=True)
+    fake_bus.cache_set("cache:options:scan", {"signals_0dte": [], "signals_swing": []})
+    # Driver book: behind the MTD pace (a loss earlier this month) -> ratchet toward cap.
+    m = _dt.date.today().strftime("%Y-%m")
+    fake_bus.cache_set("cache:options:driver_paper_account", {
+        "snapshot": {"session_pnl": 0.0}, "positions": [],
+        "closed_positions": [{"realized_pnl": -300.0, "exit_ts": f"{m}-01T15:00:00-05:00"}]})
+    seen = {}
+    monkeypatch.setattr(handlers.compute, "fetch_market_context", lambda: {"vix": 14})
+    monkeypatch.setattr(handlers.compute, "run_cycle", _capture_target_cycle(seen))
+    handlers.run_autonomous_cycle(fake_bus)
+    # behind pace -> target > base, clamped <= cap; halt_state uses the SAME value.
+    assert 500 < seen["target"] <= 1000
+    assert seen["limit_target"] == seen["target"]
+    # ...and the monitor view's target reflects the dynamic value.
+    assert fake_bus.cache_get("cache:driver:autonomous").payload["target"] == seen["target"]
+
+
+def test_cycle_target_falls_back_to_base_on_error(fake_bus, monkeypatch):
+    """A failure computing the MTD target must degrade to the flat base (never block)."""
+    handlers.set_control(fake_bus, enabled=True)
+    fake_bus.cache_set("cache:options:scan", {"signals_0dte": [], "signals_swing": []})
+    fake_bus.cache_set("cache:options:driver_paper_account", {"snapshot": {}, "positions": []})
+    monkeypatch.setattr(handlers.compute, "_mtd_trading_days",
+                        lambda *a: (_ for _ in ()).throw(RuntimeError("boom")))
+    seen = {}
+    monkeypatch.setattr(handlers.compute, "fetch_market_context", lambda: {})
+    monkeypatch.setattr(handlers.compute, "run_cycle", _capture_target_cycle(seen))
+    handlers.run_autonomous_cycle(fake_bus)
+    assert seen["target"] == handlers.settings.DAILY_TARGET   # 500 fallback
+
+
 def test_publish_autonomous_stamps_market_read_summary(fake_bus):
     """The market_read one-line summary lands on the newest decision-log row (/driver
     observability) so the log shows what the model saw."""

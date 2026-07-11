@@ -123,9 +123,10 @@ def order_rows(orders):
 
 def render():
     """Paper Portfolio page: account cards + positions + fills log (bus-fed)."""
-    ui.label("Paper Portfolio").classes("text-h5")
-
-    with ui.row().classes("items-center gap-2 flex-wrap w-full"):
+    # No page title — the tab strip names the page (2026-07-11 dead-space cleanup).
+    # Action buttons right-justified with the tables (mirrors Captured Signals);
+    # the counts status renders BELOW the fills table, bottom-right, small.
+    with ui.row().classes("items-center gap-2 flex-wrap w-full justify-end"):
         ui.button("Reload", icon="refresh", color=None, on_click=lambda: _reload()) \
             .props("no-caps").classes(BTN_3D)
         ui.button("Run entry cycle", icon="login", color=None, on_click=lambda: _cycle("entry")) \
@@ -137,11 +138,9 @@ def render():
             .tooltip("Reprice open positions and auto-close any that hit their target/stop. "
                      "Runs automatically every 5 min during market hours; this button forces "
                      "an immediate run.")
-        ui.space()
         ui.button("Reset", icon="restart_alt", color=None, on_click=lambda: _reset()) \
             .props("no-caps").classes(BTN_3D_DANGER) \
             .tooltip("Reset the paper account to a starting balance.")
-    status = ui.label("").classes("opacity-70")
 
     cards_box = ui.row().classes("gap-3 flex-wrap")
     ui.label("Open positions").classes("text-subtitle1 mt-2")
@@ -158,6 +157,8 @@ def render():
     ''')
     ui.label("Fills log (last 100)").classes("text-subtitle1 mt-2")
     ord_table = ui.table(columns=order_columns(), rows=[], row_key="order_id").classes("w-full")
+    with ui.row().classes("w-full justify-end"):
+        status = ui.label("").classes("opacity-60 text-xs")
 
     # Last-seen bus cache version for the fetch-free repaint timer.
     seen = {"version": None}

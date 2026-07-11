@@ -19,7 +19,6 @@ from nicegui import ui
 
 from pages.ui_guard import guard
 
-from pages.options import theme
 from . import detail, handoff
 from .rescue import heat_border_class
 from .theme import BTN_3D, BTN_3D_DANGER
@@ -71,7 +70,7 @@ def paper_columns():
 
 
 # P&L cell colors (green profit / red loss / grey flat-or-unknown).
-PNL_GREEN, PNL_RED, PNL_NEUTRAL, PNL_AMBER = theme.hex_of("green"), theme.hex_of("red"), theme.hex_of("neutral"), theme.hex_of("amber")
+PNL_GREEN, PNL_RED, PNL_NEUTRAL, PNL_AMBER = "#66bb6a", "#ef5350", "#bdbdbd", "#ffa726"
 
 # Verdict action → chip color for the Analyze popup.
 _VERDICT_COLORS = {"TAKE PROFIT": PNL_GREEN, "HOLD": PNL_AMBER,
@@ -248,7 +247,7 @@ def merge_detail(base, detail):
 def render():
     """Paper Trades page: ledger table (left) + shared detail panel (right), bus-fed."""
     ui.add_css(PAPER_CSS)
-    ui.label("Paper Trades").classes("text-h5")
+    # No page title — the tab strip names the page (2026-07-11 dead-space cleanup).
 
     raw_by_id: dict = {}
     # sel_id: selected trade (set by row click — no checkbox); live: {trade_id:
@@ -258,12 +257,13 @@ def render():
 
     with ui.row().classes("w-full no-wrap gap-4 items-start"):
         with ui.column().classes("flex-grow min-w-0"):
-            status = ui.label("").classes("opacity-70")
             # No selection checkbox — clicking a row selects it (drives the detail
             # panel + the action buttons below). dense + .paper-table = Scanner-like
-            # compact rows with a fixed header over a scrolling body.
+            # compact rows with a fixed header over a scrolling body. The row-count
+            # status renders BELOW the table, bottom-right, small (see after table).
             table = ui.table(columns=paper_columns(), rows=[], row_key="id") \
                 .classes("w-full paper-table").props("dense")
+            status = ui.label("").classes("opacity-60 text-xs self-end")
             # Symbol cell gets a colored left-border + faint tint when the row is
             # at-risk (rescue_state tested/critical). Plain cell otherwise.
             table.add_slot('body-cell-symbol', r'''

@@ -40,7 +40,7 @@ _FAMILY_OPTIONS = {"DIRECTIONAL": "Directional", "VERTICAL": "Spreads",
 
 def render():
     """Multi-strategy Swing Scanner: inputs + Scan + view banner + strategy table."""
-    ui.label("Swing Scanner").classes("text-h5")
+    # No page title — the tab strip names the page (2026-07-11 dead-space cleanup).
 
     with ui.column().classes("w-full gap-2"):
         # Primary controls span the FULL page width, so symbol + DTE + strategies

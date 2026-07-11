@@ -577,3 +577,47 @@ def test_skew_columns_backfilled_on_preexisting_db(tmp_path, monkeypatch):
     db.init_schema(conn)
     cols_after = {r[1] for r in conn.execute("PRAGMA table_info(snapshots)")}
     assert cols_after == cols
+
+
+def test_insert_and_load_flow_series(tmp_path, monkeypatch):
+    dbpath = tmp_path / "t.db"
+    monkeypatch.setattr(db, "DB_PATH", dbpath)
+    conn = db.connect()
+    db.init_schema(conn)
+    ts = int(time.time())
+    for i, (cv, pv, cp, pp) in enumerate([(100, 80, 2.0e6, 1.5e6),
+                                          (140, 130, 3.1e6, 2.9e6)]):
+        summary = {"ts": ts + i * 120, "spot": 500.0 + i, "call_vol": cv,
+                   "put_vol": pv, "call_prem": cp, "put_prem": pp}
+        db.insert_snapshot(conn, "SPY", "gex", summary, {"500": {"net": 1.0}}, dte=1)
+    rows = db.load_flow_series(conn, "SPY")
+    assert len(rows) == 2
+    # (ts, spot, call_vol, put_vol, call_prem, put_prem), chronological
+    assert rows[0][1] == 500.0 and rows[0][4] == 2.0e6 and rows[0][5] == 1.5e6
+    assert rows[1][2] == 140 and rows[1][4] == 3.1e6   # newest snapshot's call premium
+
+
+def test_premium_columns_backfilled_on_existing_db(tmp_path, monkeypatch):
+    # A pre-existing DB WITHOUT the premium columns (schema as it was through
+    # put_vol) gets call_prem/put_prem added by init_schema's ALTER migration.
+    dbpath = tmp_path / "old.db"
+    raw = sqlite3.connect(dbpath)
+    raw.execute(
+        "CREATE TABLE snapshots ("
+        "symbol TEXT, view TEXT, ts INTEGER, spot REAL, flip REAL, "
+        "top_pos_strike REAL, top_neg_strike REAL, net_total REAL, dte INTEGER, "
+        "gex_json TEXT, net_delta_0dte REAL, projected_net_delta_close REAL, "
+        "hedge_pressure REAL, rr_25d REAL, call_vol INTEGER, put_vol INTEGER, "
+        "PRIMARY KEY (symbol, view, ts))")
+    raw.commit(); raw.close()
+    monkeypatch.setattr(db, "DB_PATH", dbpath)
+    conn = db.connect()
+    db.init_schema(conn)  # must ALTER-add call_prem/put_prem (+ the older ones)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(snapshots)")}
+    assert "call_prem" in cols and "put_prem" in cols
+    # and inserts now round-trip the premium
+    db.insert_snapshot(conn, "SPY", "gex",
+                       {"ts": int(time.time()), "spot": 1.0,
+                        "call_prem": 9.0, "put_prem": 4.0},
+                       {"x": {"net": 1}}, dte=1)
+    assert db.load_flow_series(conn, "SPY")[0][4] == 9.0

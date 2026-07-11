@@ -43,3 +43,14 @@ def test_tile_text_no_data():
     t = {"display": "SPX", "last": None, "change_pct": None, "value_only": False}
     txt = market.tile_text(t)
     assert txt["last"] == "—"
+
+
+def test_tile_text_basket_shows_avg_and_breadth():
+    t = {"display": "MAG7", "basket": True, "avg_pct": 0.32,
+         "breadth_text": "3/7 up", "change_pct": 0.32, "color_state": "risk_on_mild"}
+    txt = market.tile_text(t)
+    assert txt["last"] == "+0.32%"      # equal-weighted avg day move (headline)
+    assert txt["change"] == "3/7 up"    # breadth subline
+    # a negative avg keeps the sign
+    t2 = {"display": "MAG7", "basket": True, "avg_pct": -1.5, "breadth_text": "1/7 up"}
+    assert market.tile_text(t2)["last"] == "-1.50%"

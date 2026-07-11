@@ -17,15 +17,14 @@ STRINGS. The pure builders (``bars_from_gex`` sorts + numeric-compares strikes;
 via ``_refloat_keys`` BEFORE feeding the builders. The builders stay unchanged.
 """
 from pages.ui_guard import guard, guard_async
-from pages.options import theme
 from .theme import TXT_POS, TXT_NEG, TXT_NEUTRAL, BTN_3D
 
-POS_COLOR = theme.hex_of("green")
-NEG_COLOR = theme.hex_of("red")
-SPOT_COLOR = theme.hex_of("yellow")
+POS_COLOR = "#66bb6a"
+NEG_COLOR = "#ef5350"
+SPOT_COLOR = "#ffd54f"
 PRICE_LINE = "#f5f5f5"          # off-white — spot track overlaid on the dark heatmap
 HEATMAP_SEP = "#4d4d4d"         # softer (lighter) cell-separator mesh on the heatmap
-FLIP_COLOR = theme.hex_of("blue")
+FLIP_COLOR = "#42a5f5"
 WALL_COLOR = "#b39ddb"
 
 # Dark theme for all charts (matches the app's dark shell).
@@ -254,6 +253,11 @@ def panel_flex(n_cols, full_cols=205, min_heat=0.28, max_heat=0.70):
     return round(1.0 - heat, 4), round(heat, 4)
 
 
+# Fixed strike/heatmap flex split now that the full day + forward band are shown.
+# (strike, heat). Flip to (0.70, 0.30) if the day gets hard to read.
+_STRIKE_HEAT_SPLIT = (0.40, 0.60)
+
+
 # Collector status-bar color → Tailwind arbitrary-value class. The finite color set
 # comes from gex_status.classify_collector_status ({green, red, gray, #c48b00}); the
 # compute default/fallback is #666666. Exact values preserved as text-[…] classes.
@@ -272,6 +276,20 @@ _ALL_STATUS = " ".join(sorted(set(_STATUS_CLASS.values()) | {_STATUS_FALLBACK}))
 def status_color_class(color):
     """Map a gex_status collector color to its static Tailwind class (fallback gray)."""
     return _STATUS_CLASS.get(color, _STATUS_FALLBACK)
+
+
+def status_strip_text(gex_status, summary, countdown):
+    """One-line '·'-separated status strip: last/next scan + next-refresh countdown +
+    the per-view summary. The collector STATUS WORD is rendered separately (colored),
+    so it's not included here. Defensive: missing fields → em-dashes."""
+    st = gex_status or {}
+    parts = [f"Last scan {st.get('last_scan') or '—'}",
+             f"Next scan {st.get('next_scan') or '—'}"]
+    if isinstance(countdown, int):
+        parts.append(f"Next refresh {countdown // 60}:{countdown % 60:02d}")
+    if summary:
+        parts.append(summary)
+    return "  ·  ".join(parts)
 
 
 def flex_class(grow, grow2=1, basis="0%"):
@@ -376,11 +394,16 @@ def _coloraxis(zmax):
     return ca
 
 
-def heatmap_figure(rows, view="GEX", height=680, yrange=None):
+def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None):
     """Intraday strike×time Highcharts heatmap (dark, cell separators, concise
     hover) with the underlying spot-price line overlaid on the same (linear)
     strike axis. ``yrange`` (when given) sets the Strike axis range so it aligns
-    with the bar chart's near-spot window."""
+    with the bar chart's near-spot window.
+
+    ``projection`` (GEX only) appends a forward band: extra time columns of
+    projected net-per-mark cells on the SAME heatmap series/colorAxis, a 'now'
+    divider between the collected and future columns, the Spot line continued flat
+    along the cone midline, and faint EM up/down cone overlays."""
     m = heatmap_matrix(rows)
     times, strikes, z = m["x"], m["y"], m["z"]
     # Only build cells for strikes within the visible ``yrange`` window. GEX net is
@@ -422,6 +445,56 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None):
                        "color": PRICE_LINE, "lineWidth": 2, "marker": {"enabled": False},
                        "colorAxis": False, "enableMouseTracking": True, "states": no_fade,
                        "tooltip": {"headerFormat": "", "pointFormat": "Spot {point.y:,.2f}"}})
+    # Forward projection band (GEX only): extend the figure with future columns,
+    # a 'now' seam, the spot line continued along the cone midline, and EM cones.
+    xaxis_plotlines = []
+    if projection and projection.get("times") and projection.get("grid"):
+        ptimes = list(projection["times"])
+        base = len(times)
+        pgrid = projection["grid"]
+        cone = projection.get("cone") or {}
+        # Future heatmap cells on the SAME heatmap series/colorAxis, cropped to yrange.
+        proj_rows_for_zmax = []
+        heat_series = next(s for s in series if s["type"] == "heatmap")
+        for strike, vals in pgrid.items():
+            try:
+                sk = float(strike)
+            except (TypeError, ValueError):
+                continue
+            if yrange is not None and not (yrange[0] <= sk <= yrange[1]):
+                continue
+            proj_rows_for_zmax.append([v for v in vals if v is not None])
+            for j, v in enumerate(vals):
+                if v is not None:
+                    heat_series["data"].append([base + j, sk, v])
+        # Re-clamp the color axis over collected + projected visible cells (robust
+        # 95th-pct so a few extreme 0-DTE ATM close cells don't wash the scale).
+        zmax = _robust_zmax([z[yi] for yi in vis] + proj_rows_for_zmax) or None
+        # 'now' divider between the last collected and first future column.
+        xaxis_plotlines.append({"value": base - 0.5, "color": "#8a93a3", "width": 1,
+                                "dashStyle": "Dash", "zIndex": 4,
+                                "className": "gamma-now-divider",
+                                "label": {"text": "now", "style": {"color": FONT},
+                                          "rotation": 0, "y": 12}})
+        # Continue the Spot line flat along cone.mid into the future.
+        mids = cone.get("mid") or []
+        spot_series = next((s for s in series if s.get("name") == "Spot"), None)
+        if spot_series is not None:
+            for j, mid in enumerate(mids):
+                if isinstance(mid, (int, float)):
+                    spot_series["data"].append([base + j, mid])
+        # EM up/down faint dashed overlays (own axis, ignore colorAxis).
+        def _cone_series(name, key, color):
+            pts = [[base + j, lvl] for j, lvl in enumerate(cone.get(key) or [])
+                   if isinstance(lvl, (int, float))]
+            return {"type": "line", "name": name, "data": pts, "color": color,
+                    "dashStyle": "ShortDash", "lineWidth": 1, "colorAxis": False,
+                    "marker": {"enabled": False}, "enableMouseTracking": False,
+                    "states": no_fade,
+                    "tooltip": {"headerFormat": "", "pointFormat": name + " {point.y:,.2f}"}}
+        series.append(_cone_series("EM up", "up", "#7fd1a3"))
+        series.append(_cone_series("EM down", "down", "#e79a9a"))
+        times = times + ptimes
     yaxis = {**_dark_axis("Strike"), "startOnTick": False, "endOnTick": False}
     if yrange is not None:
         yaxis["min"], yaxis["max"] = yrange[0], yrange[1]
@@ -438,7 +511,8 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None):
         "title": {"text": f"{_view_label(view)} intraday (strike × time)",
                   "style": {"color": FONT}},
         "xAxis": {**_dark_axis("Time"), "categories": times,
-                  "labels": {"rotation": -45, "style": {"color": FONT}}},
+                  "labels": {"rotation": -45, "style": {"color": FONT}},
+                  "plotLines": xaxis_plotlines},
         "yAxis": yaxis,
         "colorAxis": _coloraxis(zmax),
         "series": series,
@@ -571,6 +645,89 @@ def wrap_explain(symbol, body_html, full=False):
             f"</head><body>{inner}</body></html>")
 
 
+# Flow-view colors (price / call premium / put premium).
+FLOW_PRICE = "#e8d44d"   # yellow — underlying price
+FLOW_CALL = "#26c6a4"    # green — call premium
+FLOW_PUT = "#ef5f7a"     # pink — put premium
+
+
+def _flow_num(v):
+    return v if isinstance(v, (int, float)) else None
+
+
+def flow_figure(rows, height=680):
+    """Intraday options-flow chart for one symbol (dark, stacked panels).
+
+    ``rows`` = the snapshot's ``flow`` list ({ts, spot, call_vol, put_vol,
+    call_prem, put_prem}, one per 2-min snapshot). TOP panel: underlying **price**
+    (left axis) + daily-cumulative **call/put premium** in $M (right axis). BOTTOM
+    panel: **net premium (call − put)** in $M as a signed area (green call-lead /
+    red put-lead). Premium is None on rows that predate Phase-1 collection — those
+    points are skipped (the line just starts where premium began collecting)."""
+    rows = rows or []
+    times = [_fmt_ts(r.get("ts")) for r in rows]
+    spot = [[i, _flow_num(r.get("spot"))] for i, r in enumerate(rows)
+            if _flow_num(r.get("spot")) is not None]
+    callp = [[i, _flow_num(r.get("call_prem")) / 1e6] for i, r in enumerate(rows)
+             if _flow_num(r.get("call_prem")) is not None]
+    putp = [[i, _flow_num(r.get("put_prem")) / 1e6] for i, r in enumerate(rows)
+            if _flow_num(r.get("put_prem")) is not None]
+    net = []
+    for i, r in enumerate(rows):
+        cp, pp = _flow_num(r.get("call_prem")), _flow_num(r.get("put_prem"))
+        if cp is None and pp is None:
+            continue
+        net.append([i, ((cp or 0) - (pp or 0)) / 1e6])
+
+    fig = _base_chart("line", height)
+    fig["chart"]["marginBottom"] = 64
+    fig["legend"] = {"enabled": True, "itemStyle": {"color": FONT},
+                     "itemHoverStyle": {"color": "#ffffff"}}
+    fig.update({
+        "title": {"text": "Intraday options flow (price + call/put premium)",
+                  "style": {"color": FONT}},
+        "xAxis": {**_dark_axis("Time"), "categories": times,
+                  "labels": {"rotation": -45, "style": {"color": FONT}}},
+        "yAxis": [
+            {**_dark_axis("Price"), "top": "0%", "height": "62%"},
+            {**_dark_axis("Premium ($M)"), "top": "0%", "height": "62%", "opposite": True},
+            {**_dark_axis("Net premium ($M)"), "top": "68%", "height": "32%",
+             "offset": 0, "plotLines": [{"value": 0, "color": "#777777", "width": 1}]},
+        ],
+        "tooltip": {"shared": True, "backgroundColor": "#222222",
+                    "borderColor": "#444444", "style": {"color": FONT, "fontSize": "11px"},
+                    "valueDecimals": 2},
+        "series": [
+            {"type": "line", "name": "Price", "data": spot, "yAxis": 0,
+             "color": FLOW_PRICE, "lineWidth": 2, "marker": {"enabled": False}},
+            {"type": "line", "name": "Call premium", "data": callp, "yAxis": 1,
+             "color": FLOW_CALL, "lineWidth": 2, "marker": {"enabled": False}},
+            {"type": "line", "name": "Put premium", "data": putp, "yAxis": 1,
+             "color": FLOW_PUT, "lineWidth": 2, "marker": {"enabled": False}},
+            {"type": "area", "name": "Net premium (call − put)", "data": net, "yAxis": 2,
+             "threshold": 0, "color": FLOW_CALL, "negativeColor": FLOW_PUT,
+             "fillColor": "rgba(38,198,164,0.28)", "negativeFillColor": "rgba(239,95,122,0.28)",
+             "lineWidth": 1, "marker": {"enabled": False}},
+        ],
+    })
+    return fig
+
+
+def flow_summary_text(rows):
+    """One-line status for the Flow view header."""
+    rows = rows or []
+    if not rows:
+        return "No flow data yet for this session (collected going forward)."
+    last = rows[-1]
+    cp, pp = _flow_num(last.get("call_prem")), _flow_num(last.get("put_prem"))
+    if cp is None or pp is None:
+        return ("Premium not collected yet for this session — populates going "
+                "forward (price + volume shown).")
+    cv, pv = int(last.get("call_vol") or 0), int(last.get("put_vol") or 0)
+    return (f"Today: call ${cp / 1e6:,.1f}M · put ${pp / 1e6:,.1f}M premium · "
+            f"net ${(cp - pp) / 1e6:+,.1f}M · {cv:,} call / {pv:,} put contracts")
+
+
 def term_heatmap(term_grid):
     """Highcharts heatmap options for the Term view (net GEX by expiry × strike).
 
@@ -671,7 +828,7 @@ def render():
     from nicegui import ui, run
 
     ui.add_css(EXPLAIN_CSS)  # scoped styles for the Explain dialog (ui.html strips <style>)
-    ui.label("Gamma").classes("text-h5")
+    # No page title — the tab strip names the page (2026-07-11 dead-space cleanup).
 
     # state["snap"] is the cached snapshot from the bus (None until first read).
     # ``fetching`` is an in-flight guard so a slow off-loop big-payload read
@@ -680,45 +837,81 @@ def render():
     # Last-seen bus cache versions for the fetch-free repaint/dialog timers.
     seen = {"gamma": None, "explain": None, "analyze": None, "status": None}
 
-    with ui.row().classes("items-center gap-3 flex-wrap"):
+    # View picker as SUBTABS directly under the main tab strip (2026-07-11 — was a
+    # ui.toggle button group in the header row): a second tab level, styled by the
+    # shared .compact-subtabs rule. Renders into main.subtab_slot() (the slot the
+    # shell mounts beneath the strip); falls back inline if the slot is absent.
+    # Same value/on_value_change API as the old toggle, so the wiring is unchanged.
+    import main as _shell
+    _slot = _shell.subtab_slot()
+
+    def _build_view_tabs():
+        tabs = ui.tabs(value="GEX").classes("compact-subtabs").props(
+            "dense no-caps inline-label align=left")
+        with tabs:
+            for v in list(_VIEWS) + ["Flow", "Term"]:
+                ui.tab(v, label=_view_label(v))
+        return tabs
+
+    if _slot is not None:
+        with _slot:
+            view_toggle = _build_view_tabs()
+    else:
+        view_toggle = _build_view_tabs()
+
+    with ui.row().classes("items-center gap-3 flex-wrap w-full"):
         _sym_opts = symbol_options(bus_client.read("options:gamma_symbols"))
         symbol_in = ui.select(_sym_opts, value=_DEFAULT_SYMBOL,
                               with_input=True, label="Symbol").classes("w-40")
         fetch_btn = ui.button("Refresh now", icon="refresh", color=None).props("no-caps").classes(BTN_3D)
-        view_toggle = ui.toggle({v: _view_label(v) for v in list(_VIEWS) + ["Term"]},
-                                 value="GEX")
+        # Explain / Analyze / Briefings push to the RIGHT of the frame (2026-07-11).
+        ui.space()
         explain_btn = ui.button("Explain", icon="help", color=None).props("no-caps").classes(BTN_3D)
         analyze_btn = ui.button("Analyze", icon="psychology", color=None).props("no-caps").classes(BTN_3D)
-        countdown_lbl = ui.label("").classes("opacity-60 text-sm")
-    # Auto briefings: the $SPX/SPY/QQQ Analyze the options service auto-generates at
-    # premarket / ~18 min after open / midday / close. Each button opens that slot's
-    # briefing in a new tab (the slot key is separate from the ad-hoc Analyze key, so
-    # these never auto-open). A button is **highlighted** only when its slot's data is
-    # from TODAY (CT); prior-day data (e.g. over the weekend) stays dim — see
-    # _sync_sched_btns. Clickable whenever data exists.
-    _SCHED_HL = "bg-[#2563eb] text-white opacity-100"  # today's briefing is ready
-    _SCHED_DIM = "opacity-40"                           # prior-day data, or none yet
-    sched_btns = {}
-    with ui.row().classes("items-center gap-2 flex-wrap"):
-        ui.label("Auto briefings:").classes("opacity-60 text-sm")
-        for _slot, _title in (("premarket", "Premarket"), ("open", "Open"),
-                              ("midday", "Midday"), ("close", "Close")):
-            _b = ui.button(_title, icon="schedule").props("flat dense")
-            _b.classes(f"rounded text-[#cdd8ee] {_SCHED_DIM}")
-            _b.on_click(lambda s=_slot: ui.navigate.to(
-                f"/options/analyze?slot={s}", new_tab=True))
-            _b.disable()
-            _b.tooltip(f"{_title} $SPX/SPY/QQQ briefing — not generated yet today")
-            sched_btns[_slot] = _b
-    # Read-only view published by the options service (cache:options:gex_status);
-    # version-polled like gamma/explain/analyze below. Sits alongside (does NOT
-    # replace) the "Next refresh" countdown above.
-    with ui.row().classes("items-center gap-4 flex-wrap"):
+        # Auto briefings: the $SPX/SPY/QQQ Analyze the options service auto-generates at
+        # premarket / ~18 min after open / midday / close, folded into a single dropdown
+        # to save a header row. Each item opens that slot's briefing in a new tab (the
+        # slot key is separate from the ad-hoc Analyze key, so these never auto-open). An
+        # item is **highlighted** only when its slot's data is from TODAY (CT); prior-day
+        # data (e.g. over the weekend) stays dim — see _sync_sched_btns. Clickable
+        # whenever data exists; disabled when a slot has never run.
+        _SCHED_HL = "bg-[#2563eb] text-white opacity-100"  # today's briefing is ready
+        _SCHED_DIM = "opacity-40"                           # prior-day data, or none yet
+        sched_btns = {}
+        _sched_titles = {}
+        briefings_btn = ui.button("Briefings", icon="schedule", color=None).props("no-caps").classes(BTN_3D)
+        with briefings_btn:
+            _briefings_menu = ui.menu()
+            with _briefings_menu:
+                for _slot, _title in (("premarket", "Premarket"), ("open", "Open"),
+                                      ("midday", "Midday"), ("close", "Close")):
+                    _mi = ui.menu_item(_title, on_click=lambda s=_slot: ui.navigate.to(
+                        f"/options/analyze?slot={s}", new_tab=True))
+                    _mi.classes(f"text-[#cdd8ee] {_SCHED_DIM}")
+                    _mi.set_enabled(False)
+                    _mi.tooltip(f"{_title} $SPX/SPY/QQQ briefing — not generated yet today")
+                    sched_btns[_slot] = _mi
+                    _sched_titles[_slot] = _title
+    # Read-only status strip: the collector status WORD (colored) + a neutral detail
+    # label that folds last/next scan + the "Next refresh" countdown + the per-view
+    # summary into one line (status_strip_text). Version-polled like gamma/explain/
+    # analyze below. pressure_box (populated only on the DEX view) follows.
+    with ui.row().classes("items-center gap-3 flex-wrap"):
         status_lbl = ui.label("").classes("text-sm font-medium")
-        last_scan_lbl = ui.label("Last scan —").classes("opacity-60 text-sm")
-        next_scan_lbl = ui.label("Next scan —").classes("opacity-60 text-sm")
-    summary_lbl = ui.label("").classes("opacity-70 text-sm")
+        detail_lbl = ui.label("").classes("opacity-60 text-sm")
     pressure_box = ui.row().classes("gap-3 items-center")
+
+    # Three independent sources feed the detail strip (collector status, the per-view
+    # summary, the refresh countdown); unify them behind one state dict + repaint fn.
+    strip_state = {"status": None, "summary": "", "countdown": state.get("countdown", 120)}
+
+    def _repaint_strip():
+        detail_lbl.text = status_strip_text(strip_state["status"], strip_state["summary"],
+                                            strip_state["countdown"])
+
+    def _set_summary(text):
+        strip_state["summary"] = text or ""
+        _repaint_strip()
     # Persistent panels: the Highcharts elements are created ONCE and updated in
     # place on every repaint (Highcharts diffs the new options) — rebuilding them
     # each time would flash. Message labels are toggled via set_visibility. Column
@@ -779,7 +972,7 @@ def render():
             heatmap_box.set_visibility(False)
             return
         heatmap_box.set_visibility(True)
-        bar_w, heat_w = panel_flex(n_cols)
+        bar_w, heat_w = _STRIKE_HEAT_SPLIT
         _set_flex_class(chart_box, "chart", flex_class(bar_w))
         _set_flex_class(heatmap_box, "heat", flex_class(heat_w))
 
@@ -811,7 +1004,7 @@ def render():
             heat_msg.set_visibility(False)
             chart_msg.text = "Fetch a symbol… (no snapshot yet)."
             chart_msg.set_visibility(True)
-            summary_lbl.text = ""
+            _set_summary("")
             return
         chart_msg.set_visibility(False)
 
@@ -823,7 +1016,17 @@ def render():
             heat_plot.set_visibility(False)
             heat_msg.set_visibility(False)
             _apply_flex(0, term=True)
-            summary_lbl.text = summary_text({"spot": spot, "strike_count": None}, "Term")
+            _set_summary(summary_text({"spot": spot, "strike_count": None}, "Term"))
+            return
+        if view == "Flow":
+            # Intraday options-flow: price + call/put premium + net panel, full width
+            # (no heatmap). Same single chart element as Term (recreated on kind change).
+            _set_chart(flow_figure(snap.get("flow") or []))
+            state["chart_el"].set_visibility(True)
+            heat_plot.set_visibility(False)
+            heat_msg.set_visibility(False)
+            _apply_flex(0, term=True)
+            _set_summary(flow_summary_text(snap.get("flow")))
             return
 
         entry = (snap.get("views") or {}).get(view) or {}
@@ -847,7 +1050,7 @@ def render():
             chart_msg.text = (f"No spot price for {sym} yet "
                               "(market closed or sparse data) — try Refresh during market hours.")
             chart_msg.set_visibility(True)
-            summary_lbl.text = ""
+            _set_summary("")
             return
         summary = entry.get("summary") or {}
         flip = entry.get("flip")
@@ -872,11 +1075,19 @@ def render():
         yr = union_range(yr, spot_path)
         _set_chart(bar_figure(data, view_spot, view=view, walls=walls, flip=flip, yrange=yr))
         state["chart_el"].set_visibility(True)
-        summary_lbl.text = summary_text(
-            {**summary, "strike_count": data.get("strike_count")}, _view_label(view))
+        _set_summary(summary_text(
+            {**summary, "strike_count": data.get("strike_count")}, _view_label(view)))
 
         if rows:
-            _set_figure(heat_plot, heatmap_figure(rows, view, yrange=yr))
+            projection = None
+            if view == "GEX":
+                proj = entry.get("projection") or {}
+                if proj.get("times") and proj.get("grid"):
+                    projection = {"times": proj["times"],
+                                  "grid": _refloat_keys(proj["grid"]),
+                                  "cone": proj.get("cone") or {},
+                                  "spot": proj.get("spot")}
+            _set_figure(heat_plot, heatmap_figure(rows, view, yrange=yr, projection=projection))
             heat_plot.set_visibility(True)
             heat_msg.set_visibility(False)
         else:
@@ -924,7 +1135,8 @@ def render():
         state["countdown"] = state.get("countdown", 120) - 1
         if state["countdown"] < 0:
             state["countdown"] = 120
-        countdown_lbl.text = f"Next refresh: {state['countdown'] // 60}:{state['countdown'] % 60:02d}"
+        strip_state["countdown"] = state["countdown"]
+        _repaint_strip()
 
     @guard_async
     async def _maybe_repaint(version):
@@ -960,8 +1172,8 @@ def render():
         # Reactive: the status bar repaints on every version-poll, so remove the full
         # status-class set before adding the new one (prevents color accumulation).
         status_lbl.classes(remove=_ALL_STATUS, add=status_color_class(color))
-        last_scan_lbl.text = f"Last scan {st.get('last_scan') or '—'}"
-        next_scan_lbl.text = f"Next scan {st.get('next_scan') or '—'}"
+        strip_state["status"] = st
+        _repaint_strip()
 
     @guard
     def _maybe_repaint_status(version):
@@ -1063,14 +1275,15 @@ def render():
             if key == st["applied"]:
                 continue  # no state change → don't re-push classes every tick
             st["applied"] = key
+            _t = _sched_titles[s]
             if is_today:
                 b.classes(remove=_SCHED_DIM, add=_SCHED_HL)
-                b.tooltip(f"Open today's {b.text} briefing")
+                b.tooltip(f"Open today's {_t} briefing")
             else:
                 b.classes(remove=_SCHED_HL, add=_SCHED_DIM)
-                b.tooltip(f"{b.text} briefing — "
+                b.tooltip(f"{_t} briefing — "
                           + ("prior day (not today's)" if ver else "not generated yet today"))
-            (b.enable if ver else b.disable)()
+            b.set_enabled(bool(ver))
 
     @guard_async
     async def _poll():
