@@ -472,6 +472,9 @@ _NAV_CSS = """
 .compact-subtabs .q-tab--active { background: rgba(255,255,255,.14); color: #fff; }
 .compact-subtabs .q-tab__indicator { display: none; }
 .compact-subtabs .q-tab__label { font-size: 12px; }
+/* Flush tab panels — Quasar gives each q-tab-panel 16px padding; pages whose
+   panels should hug their card/table edges opt in with .flush-panels. */
+.flush-panels .q-tab-panel { padding: 4px 0 0 0; }
 /* Page-help "?" — tucked into the bottom-right corner of the header banner.
    Positioning is on the element (Tailwind); these stay Quasar-internal. */
 .help-fab .help-btn { font-size: 11px; min-height: 0; min-width: 0; }

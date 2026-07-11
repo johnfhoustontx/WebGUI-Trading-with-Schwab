@@ -298,40 +298,56 @@ def render():
     # Calculator (shared ``theme.py``), wrapping the Simulator's existing structure
     # in three cards: controls, strategy+legs, and the tabbed chart panel. The
     # Highcharts panels are already dark-transparent, so they sit on the navy. ──────
-    with ui.column().classes(f"calc-v2 {PAGE} w-full gap-4"):
+    # Replay / What-if / IV-shock as SUBTABS directly under the main tab strip
+    # (2026-07-11 — like Gamma/Scanner): rendered into main.subtab_slot(), folder-
+    # styled by .compact-subtabs, so the view tabs sit as high as possible. Falls
+    # back inline if the slot is absent. Same value/on_value_change API as before.
+    import main as _shell
+    _slot = _shell.subtab_slot()
+
+    def _build_sim_tabs():
+        with ui.tabs().classes("compact-subtabs").props(
+                "dense no-caps inline-label align=left") as t:
+            t_replay = ui.tab("Replay")
+            t_whatif = ui.tab("What-if")
+            t_ivshock = ui.tab("IV shock")
+        return t, t_replay, t_whatif, t_ivshock
+
+    if _slot is not None:
+        with _slot:
+            tabs, tab_replay, tab_whatif, tab_ivshock = _build_sim_tabs()
+    else:
+        tabs, tab_replay, tab_whatif, tab_ivshock = _build_sim_tabs()
+
+    with ui.column().classes(f"calc-v2 {PAGE} w-full gap-3"):
         # No page title — the tab strip names the page (2026-07-11 cleanup).
 
-        # Controls card: symbol + fetch + copy + status.
-        with ui.column().classes(f"{CARD} w-full gap-3"):
-            with ui.row().classes("items-end gap-4 flex-wrap"):
-                symbol_in = select_all_on_focus(ui.input("Symbol", value="SPY").classes("w-40"))
-                fetch_btn = ui.button("Fetch snapshot", icon="download", color=None) \
-                    .props("no-caps").classes(BTN_PRIMARY)
-                ui.button("Copy to Calculator", icon="calculate", color=None,
-                          on_click=lambda: handoff.send_to_calculator_legs(
-                              leg_editor.legs_to_payload(
-                                  (state.get("meta") or {}).get("symbol")
-                                  or symbol_in.value or "",
-                                  editor.get_legs(), keep_premium=False))) \
-                    .props("no-caps").classes(BTN)
-            status = ui.label("Fetch a snapshot to begin.").classes(EYEBROW)
-
-        # Strategy + legs card. Cascading Strategy picker (family → variant, boxed to
-        # match the navy inputs) + the shared multi-leg editor (header table).
-        # ``show_premium=False`` — the simulator prices each leg from the chain's IV,
-        # so there is no manual premium input.
-        with ui.column().classes(f"{CARD} w-full gap-3"):
-            with ui.row().classes("items-end gap-3 flex-wrap"):
-                strategy_sel = strategy_menu.build_strategy_menu(value="PCS", classes="w-52", boxed=True)
-            legs_box = ui.column().classes("gap-2 w-full")
-
-        # Tabbed chart card: Replay / What-if / IV-shock.
+        # Controls + Strategy SIDE-BY-SIDE in one card (2026-07-11 — was two
+        # stacked cards; halves the vertical space above the charts): left =
+        # symbol / fetch / copy + status, right = strategy picker + leg editor.
         with ui.column().classes(f"{CARD} w-full gap-2"):
-            with ui.tabs() as tabs:
-                tab_replay = ui.tab("Replay")
-                tab_whatif = ui.tab("What-if")
-                tab_ivshock = ui.tab("IV shock")
-            with ui.tab_panels(tabs, value=tab_replay).classes("w-full"):
+            with ui.row().classes("w-full gap-6 items-start flex-wrap"):
+                with ui.column().classes("gap-3 shrink-0"):
+                    symbol_in = select_all_on_focus(ui.input("Symbol", value="SPY").classes("w-40"))
+                    fetch_btn = ui.button("Fetch snapshot", icon="download", color=None) \
+                        .props("no-caps").classes(BTN_PRIMARY)
+                    ui.button("Copy to Calculator", icon="calculate", color=None,
+                              on_click=lambda: handoff.send_to_calculator_legs(
+                                  leg_editor.legs_to_payload(
+                                      (state.get("meta") or {}).get("symbol")
+                                      or symbol_in.value or "",
+                                      editor.get_legs(), keep_premium=False))) \
+                        .props("no-caps").classes(BTN)
+                    status = ui.label("Fetch a snapshot to begin.").classes(EYEBROW)
+                # Strategy + legs (right). ``show_premium=False`` — the simulator
+                # prices each leg from the chain's IV, so no manual premium input.
+                with ui.column().classes("gap-2 flex-grow min-w-[340px]"):
+                    strategy_sel = strategy_menu.build_strategy_menu(value="PCS", classes="w-52", boxed=True)
+                    legs_box = ui.column().classes("gap-2 w-full")
+
+        # Chart card: the panels follow the subtabs mounted under the main strip.
+        with ui.column().classes(f"{CARD} w-full gap-2"):
+            with ui.tab_panels(tabs, value=tab_replay).classes("w-full flush-panels"):
                 with ui.tab_panel(tab_replay):
                     with ui.row().classes("items-center gap-4 w-full"):
                         lookback_sel = ui.select(lookback_options(), value="auto",
