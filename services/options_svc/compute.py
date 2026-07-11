@@ -1656,6 +1656,110 @@ def _session_expected_move(chain):
         return None
 
 
+def _future_marks_ct(now):
+    """15-min CT marks from the next quarter-hour through 15:00 CT (the close).
+    Returns [] once ``now`` is at/after the close (off-hours hides the band)."""
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+    ct = ZoneInfo("America/Chicago")
+    now = now.astimezone(ct)
+    close = now.replace(hour=15, minute=0, second=0, microsecond=0)
+    if now >= close:
+        return []
+    q = (now.minute // 15 + 1) * 15
+    mark = now.replace(minute=0, second=0, microsecond=0) + _dt.timedelta(minutes=q)
+    out = []
+    while mark <= close:
+        out.append(mark)
+        mark = mark + _dt.timedelta(minutes=15)
+    return out
+
+
+def _T_at(dte, mark_ct):
+    """Engine-consistent time-to-expiry (years) at a CT wall-clock ``mark_ct``.
+    Mirrors GammaEngine: T = (dte*24 + hours_to_close)/(365*24), floored 1e-6,
+    hours measured to 15:00 CT (the 4pm ET cash close)."""
+    hours_left = max(0.0, (15 - mark_ct.hour) + (0 - mark_ct.minute) / 60.0)
+    return max((dte * 24 + hours_left) / (365 * 24), 1e-6)
+
+
+def project_gex_grid(eng, chain, spot, now):
+    """Flat-spot time-decay projection of net GEX per strike to the 4pm ET close.
+    Re-prices standing OI at future 15-min marks with spot held flat: each contract's
+    CURRENT GEX contribution (chain gamma) is scaled by bs_gamma(S,K,T',σ)/
+    bs_gamma(S,K,T_now,σ) — 1.0 at T'=T_now so the seam is continuous; σ<=0 holds flat.
+    Pure + defensive: empty grid on any failure. Returns
+    {"times":[HH:MM...], "grid":{strike_str:[net_t0...]}, "spot": spot}."""
+    from zoneinfo import ZoneInfo
+    empty = {"times": [], "grid": {}, "spot": spot}
+    try:
+        if not chain or not spot or spot <= 0:
+            return empty
+        marks = _future_marks_ct(now)
+        if not marks:
+            return empty
+        from options_calculator import bs_gamma
+        ct = ZoneInfo("America/Chicago")
+        call_map = chain.get("callExpDateMap", {})
+        put_map = chain.get("putExpDateMap", {})
+        today = now.astimezone(ct).strftime("%Y-%m-%d")
+        ck, cdte = eng._find_nearest_exp_key(call_map, today)
+        pk, pdte = eng._find_nearest_exp_key(put_map, today)
+        dtes = [d for d in (cdte, pdte) if d is not None]
+        dte = min(dtes) if dtes else 0
+        r = 0.045
+        t_now = _T_at(dte, now.astimezone(ct))
+        t_future = [_T_at(dte, m) for m in marks]
+        grid = {}
+
+        def _accumulate(exp_key, exp_map, sign):
+            if not exp_key:
+                return
+            for strike_str, contracts in exp_map.get(exp_key, {}).items():
+                strike = float(strike_str)
+                key = str(strike)
+                for c in contracts:
+                    oi = c.get("openInterest", 0) or 0
+                    gamma = c.get("gamma", 0) or 0
+                    if oi <= 0 or gamma == 0:
+                        continue
+                    base = sign * gamma * oi * 100 * spot * spot * 0.01
+                    iv = (c.get("volatility", 0) or 0) / 100.0
+                    denom = bs_gamma(spot, strike, t_now, r, iv) if iv > 0 else 0.0
+                    row = grid.setdefault(key, [0.0] * len(marks))
+                    for i, tf in enumerate(t_future):
+                        ratio = (bs_gamma(spot, strike, tf, r, iv) / denom) if (iv > 0 and denom > 0) else 1.0
+                        row[i] += base * ratio
+
+        _accumulate(ck, call_map, +1.0)
+        _accumulate(pk, put_map, -1.0)
+        return {"times": [m.strftime("%H:%M") for m in marks], "grid": grid, "spot": spot}
+    except Exception:
+        log.debug("project_gex_grid failed", exc_info=True)
+        return empty
+
+
+def project_em_cone(spot, atm_iv, marks, now):
+    """Up/mid/down expected-move fan over the future marks (flat-spot midline).
+    half_width(τ) = spot*atm_iv*sqrt(τ/365), τ = calendar days from ``now`` to the mark.
+    Returns {"mid":[...], "up":[...], "down":[...]} (empty lists if inputs unusable)."""
+    import math
+    out = {"mid": [], "up": [], "down": []}
+    try:
+        if not spot or spot <= 0 or not atm_iv or atm_iv <= 0 or not marks:
+            return out
+        for m in marks:
+            tau_days = max(0.0, (m - now).total_seconds() / 86400.0)
+            hw = spot * atm_iv * math.sqrt(tau_days / 365.0)
+            out["mid"].append(spot)
+            out["up"].append(spot + hw)
+            out["down"].append(spot - hw)
+        return out
+    except Exception:
+        log.debug("project_em_cone failed", exc_info=True)
+        return {"mid": [], "up": [], "down": []}
+
+
 def _gamma_blocks_for(symbol, chain):
     """Build the per-view analysis blocks for one symbol (ported from the page).
 
