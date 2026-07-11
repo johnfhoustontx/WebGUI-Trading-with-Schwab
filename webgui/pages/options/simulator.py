@@ -299,7 +299,7 @@ def render():
     # in three cards: controls, strategy+legs, and the tabbed chart panel. The
     # Highcharts panels are already dark-transparent, so they sit on the navy. ──────
     with ui.column().classes(f"calc-v2 {PAGE} w-full gap-4"):
-        ui.label("Simulator").classes(f"text-h6 {LABEL}")
+        # No page title — the tab strip names the page (2026-07-11 cleanup).
 
         # Controls card: symbol + fetch + copy + status.
         with ui.column().classes(f"{CARD} w-full gap-3"):

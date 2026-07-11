@@ -352,7 +352,7 @@ def render():
         "rows_by_id": {},          # id -> raw display row (for source/symbol)
     }
 
-    ui.label("Rescue").classes("text-h5")
+    # No page title — the tab strip names the page (2026-07-11 cleanup).
 
     # ── waiting-for-service placeholder ──────────────────────────────────────
     waiting = ui.label("Waiting for options service…").classes("opacity-70")

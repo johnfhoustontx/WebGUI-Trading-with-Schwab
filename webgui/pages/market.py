@@ -67,7 +67,7 @@ def tile_text(t):
 
 
 def render():
-    ui.label("Market Dashboard").classes("text-h6 text-slate-100")
+    # No page title — the drawer names the page (2026-07-11 dead-space cleanup).
     board = ui.row().classes("w-full flex-wrap gap-4 items-start")
     # tiles: display -> {"container", "last", "change", "state"} element handles.
     state = {"version": None, "built": False, "tiles": {}}

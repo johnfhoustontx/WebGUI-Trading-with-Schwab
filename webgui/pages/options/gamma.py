@@ -828,7 +828,7 @@ def render():
     from nicegui import ui, run
 
     ui.add_css(EXPLAIN_CSS)  # scoped styles for the Explain dialog (ui.html strips <style>)
-    ui.label("Gamma").classes("text-h5")
+    # No page title — the tab strip names the page (2026-07-11 dead-space cleanup).
 
     # state["snap"] is the cached snapshot from the bus (None until first read).
     # ``fetching`` is an in-flight guard so a slow off-loop big-payload read
@@ -859,11 +859,13 @@ def render():
     else:
         view_toggle = _build_view_tabs()
 
-    with ui.row().classes("items-center gap-3 flex-wrap"):
+    with ui.row().classes("items-center gap-3 flex-wrap w-full"):
         _sym_opts = symbol_options(bus_client.read("options:gamma_symbols"))
         symbol_in = ui.select(_sym_opts, value=_DEFAULT_SYMBOL,
                               with_input=True, label="Symbol").classes("w-40")
         fetch_btn = ui.button("Refresh now", icon="refresh", color=None).props("no-caps").classes(BTN_3D)
+        # Explain / Analyze / Briefings push to the RIGHT of the frame (2026-07-11).
+        ui.space()
         explain_btn = ui.button("Explain", icon="help", color=None).props("no-caps").classes(BTN_3D)
         analyze_btn = ui.button("Analyze", icon="psychology", color=None).props("no-caps").classes(BTN_3D)
         # Auto briefings: the $SPX/SPY/QQQ Analyze the options service auto-generates at

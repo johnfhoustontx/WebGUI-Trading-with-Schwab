@@ -141,7 +141,7 @@ def render():
     from . import handoff
     from .inputs import select_all_on_focus
 
-    ui.label("Expected Move").classes("text-h5")
+    # No page title — the tab strip names the page (2026-07-11 cleanup).
 
     state = {"ver": None, "last": None}
 
