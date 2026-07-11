@@ -1,12 +1,28 @@
-"""Settings page — GUI preferences (audio alerts, notifications).
+"""Settings page — GUI preferences (audio alerts, notifications, appearance).
 
-Thin render(): each control writes through to app_settings. Extensible — add new
-cards/sections here as more settings arrive.
+Thin render(): each control writes through to app_settings; the Appearance
+section writes through to config/theme.toml (``theme.save_theme_values``,
+comment-preserving) and applies on a web-GUI restart — the theme loads once at
+startup. Extensible — add new cards/sections here as more settings arrive.
 """
 import app_settings
 from nicegui import ui
 
-from pages.options.theme import BTN_3D
+from pages.options import theme
+from pages.options.theme import BTN_3D, BTN_3D_DANGER
+
+# Appearance section layout: (toml section, card label, editor kind).
+# "color" → color inputs; "text" → free-text (sizes / font family);
+# "menu" → free-text colors where "" keeps the stock look.
+_THEME_SECTIONS = [
+    ("palette", "Surfaces, text & buttons", "color"),
+    ("semantic", "State colors (positive / warning / negative)", "color"),
+    ("buttons_3d", "3D gradient buttons", "color"),
+    ("gauge", "Speedometer gauges", "color"),
+    ("charts", "Sentiment & rotation charts", "color"),
+    ("typography", "Text — font & sizes", "text"),
+    ("menu", "Application menu", "menu"),
+]
 
 
 def render():
@@ -74,6 +90,76 @@ def render():
 
         ui.label("Changes apply on the next page load / navigation.").classes(
                  "opacity-60 text-xs")
+
+    # ── Appearance — every configurable GUI component (config/theme.toml) ────
+    with ui.card().classes("w-full max-w-2xl"):
+        ui.label("Appearance").classes("text-subtitle1 font-bold")
+        ui.label("Colors, fonts and menu styling for the whole app — saved to "
+                 "config/theme.toml. Changes apply after the web GUI restarts "
+                 "(use Save & restart, then reload the page).").classes(
+                 "opacity-70 text-sm")
+
+        t = theme.load_theme()          # current file values merged over defaults
+        inputs: dict = {}               # (section, key) -> input element
+        for sec, label, kind in _THEME_SECTIONS:
+            with ui.expansion(label, value=False).classes("w-full"):
+                if kind == "menu":
+                    ui.label('Leave a field empty to keep the stock look.').classes(
+                        "opacity-60 text-xs")
+                with ui.grid(columns=2).classes("w-full gap-x-4"):
+                    for key, val in t[sec].items():
+                        lab = theme.knob_label(key)
+                        if kind == "color":
+                            el = ui.color_input(label=lab, value=val).classes("w-full")
+                        else:
+                            ph = "default" if (kind == "menu" or key == "family") else None
+                            el = ui.input(label=lab, value=val,
+                                          placeholder=ph).classes("w-full")
+                        inputs[(sec, key)] = el
+
+        def _updates():
+            return {sec: {k: (inputs[(sec, k)].value or "").strip()
+                          for k in t[sec] if (sec, k) in inputs}
+                    for sec, _label, _kind in _THEME_SECTIONS}
+
+        def _save(notify=True):
+            theme.save_theme_values(_updates())
+            if notify:
+                ui.notify("Saved — restart the web GUI to apply (Save & restart, "
+                          "or More → System Status)", type="positive")
+
+        def _save_restart():
+            _save(notify=False)
+            from pages import status
+            ui.notify("Saved — restarting the web GUI; reload this page in a few "
+                      "seconds", type="warning")
+            status._do_restart({"kind": "self"})
+
+        def _reset():
+            defaults = {sec: dict(vals) for sec, vals in theme._DEFAULTS.items()}
+            theme.save_theme_values(defaults)
+            for (sec, key), el in inputs.items():
+                el.value = defaults[sec][key]
+                el.update()
+            reset_dlg.close()
+            ui.notify("Reset to defaults — restart the web GUI to apply",
+                      type="positive")
+
+        with ui.dialog() as reset_dlg, ui.card():
+            ui.label("Reset every appearance setting to the built-in defaults?")
+            with ui.row():
+                ui.button("Reset", color=None).props("no-caps").classes(
+                    BTN_3D_DANGER).on_click(_reset)
+                ui.button("Cancel", color=None).props("no-caps").classes(
+                    BTN_3D).on_click(reset_dlg.close)
+
+        with ui.row().classes("items-center gap-3"):
+            ui.button("Save", icon="save", color=None).props("no-caps").classes(
+                BTN_3D).on_click(_save)
+            ui.button("Save & restart web GUI", icon="restart_alt", color=None).props(
+                "no-caps").classes(BTN_3D).on_click(_save_restart)
+            ui.button("Reset to defaults", color=None).props("no-caps").classes(
+                BTN_3D_DANGER).on_click(reset_dlg.open)
 
     # Test sound uses the same shared audio element + helper as the live alert.
     def _test():

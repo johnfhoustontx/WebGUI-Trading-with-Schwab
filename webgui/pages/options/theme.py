@@ -277,6 +277,77 @@ def build_quasar_css(theme):
 """
 
 
+def set_theme_values(text, updates):
+    """Update ``key = "value"`` lines in a theme-TOML string, preserving comments.
+
+    ``updates`` is ``{section: {key: new_value}}``. Line-based + section-scoped:
+    only a known ``key =`` line inside the targeted ``[section]`` is rewritten
+    (the quoted value is replaced; everything else on the line — alignment,
+    trailing comment — is kept). A key not present in the text is a no-op, so a
+    hand-trimmed config never gains surprise lines. Pure (string in/out); the
+    Settings page writes through :func:`save_theme_values`."""
+    import re
+    lines = text.splitlines(keepends=True)
+    section = None
+    out = []
+    for line in lines:
+        m_sec = re.match(r"\s*\[([^\]]+)\]", line)
+        if m_sec:
+            section = m_sec.group(1).strip()
+        elif section in updates:
+            m_kv = re.match(r'(\s*(\w+)\s*=\s*)"[^"]*"(.*)$', line, re.DOTALL)
+            if m_kv and m_kv.group(2) in updates[section]:
+                new = str(updates[section][m_kv.group(2)])
+                line = f'{m_kv.group(1)}"{new}"{m_kv.group(3)}'
+        out.append(line)
+    return "".join(out)
+
+
+def save_theme_values(updates, path=None):
+    """Write ``updates`` (``{section: {key: value}}``) into ``config/theme.toml``.
+
+    Comment-preserving (see :func:`set_theme_values`). If the file is missing it
+    is (re)created from the built-in defaults first so every knob line exists.
+    Returns the merged theme dict re-loaded from disk. Used by the Settings
+    page's Appearance section; the running app picks the change up on the next
+    webgui restart (the theme loads once at import)."""
+    if path is None:
+        from repo_paths import THEME_TOML
+        path = THEME_TOML
+    p = pathlib.Path(path)
+    if not p.exists():
+        rows = []
+        for sec, vals in _DEFAULTS.items():
+            rows.append(f"[{sec}]")
+            rows += [f'{k} = "{v}"' for k, v in vals.items()]
+            rows.append("")
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("\n".join(rows), encoding="utf-8")
+    p.write_text(set_theme_values(p.read_text(encoding="utf-8"), updates),
+                 encoding="utf-8")
+    return load_theme(path)
+
+
+# Word expansions for knob_label — keys are TOML knob-name fragments.
+_LABEL_WORDS = {"bg": "background", "btn": "button"}
+
+
+def knob_label(key):
+    """Human label for a TOML knob key — whole words, no shorthand.
+
+    ``card_bg`` → "Card background", ``btn_hover`` → "Button hover",
+    ``page_bg1`` → "Page background 1"."""
+    import re
+    words = []
+    for w in str(key).split("_"):
+        m = re.match(r"([a-z]+)(\d+)$", w)
+        suffix = ""
+        if m:
+            w, suffix = m.group(1), " " + m.group(2)
+        words.append(_LABEL_WORDS.get(w, w) + suffix)
+    return " ".join(words).capitalize()
+
+
 def build_typography_css(theme):
     """App-wide text-category CSS from ``[typography]``.
 
