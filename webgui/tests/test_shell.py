@@ -55,14 +55,29 @@ def test_cached_health_memoizes_within_ttl(monkeypatch):
 
 def test_nav_css_has_no_reachable_rules():
     """Phase 1: nav-link/nav-title/nav-icon/nav-badge styling moved to .classes();
-    _NAV_CSS keeps only Quasar-internal selectors."""
+    _NAV_CSS keeps only Quasar-internal selectors. The 2026-07-11 nav redesign
+    replaced the expandable sub-menus with the top tab strip, so the expansion
+    rules are gone and the compact-tabs rule (small tab padding) is in."""
     import main
     css = main._NAV_CSS
     assert "a.nav-link:hover" not in css           # moved to hover:bg-* utility
     assert ".nav-title {" not in css and ".nav-title{" not in css
     assert ".help-fab {" not in css and ".help-fab{" not in css  # position moved
-    assert ".nicegui-expansion-content" in css     # Quasar-internal stays
+    assert ".nicegui-expansion-content" not in css  # no expandable sub-menus anymore
+    assert ".compact-tabs .q-tab" in css           # small-padding tab strips
     assert ".q-tooltip.help-tip" in css            # teleported tooltip stays
+
+
+def test_group_children_maps_routes_to_their_group():
+    """The top tab strip shows the active route's group; flat pages have none."""
+    import main
+    opts = main._group_children("/options/gamma")
+    assert ("/", "Scanner", "radar") in opts                       # Options group
+    assert main._group_children("/sentiment/rotation") == main.SENTIMENT_CHILDREN
+    more = main._group_children("/manuals")                        # Settings child
+    assert ("/eod", "EOD Report", "summarize") in more             # merged into More
+    assert main._group_children("/trade") is None                  # flat page — no strip
+    assert main._group_children("/driver") is None
 
 
 def test_recompute_badges_uses_passed_scan(monkeypatch):

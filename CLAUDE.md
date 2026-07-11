@@ -1153,17 +1153,21 @@ services → webgui. Full design: [3-tier design doc](docs/plans/2026-06-15-thre
 
 ## webgui structure (NiceGUI app)
 
-`webgui/main.py` is the server + nav shell: a left-nav with expandable
-**Options**, **Sentiment**, and **More** groups (Sentiment children: Sentiment
-dashboard + Sector Rotation; **More** children: EOD Report +
-System Status + Settings + Terminate) plus flat Market Dashboard / Trade / Portfolio / Driver items. The groups
-**start EXPANDED by default** (`_NAV_OPEN.get(..., True)`) and stay open until the
-user manually collapses one (`_NAV_OPEN` persists each toggle, single-user); the
-**inter-item spacing is tight** (`_NAV_CSS`: flex gap 2px, link padding 4px,
-expansion-header min-height 24px, and the **`.nicegui-expansion-content` gap is
-overridden to 2px** — NiceGUI defaults that wrapper to a 1rem column gap, which is
-the real source of group-child spacing, NOT `.q-expansion-item__content`). Pages
-live in `webgui/pages/`; each leaf exposes `render()` called inside the shell
+`webgui/main.py` is the server + nav shell (**redesigned 2026-07-11 — sub-menus
+are TABS**): the left drawer is a **FLAT main menu** — one item per group
+(**Options**, **Sentiment**, **More**) plus the flat Market Dashboard / Trade /
+Portfolio / Driver items — and the active group's **child pages render as a
+compact TAB STRIP across the top of the page** (`_NAV_GROUPS` +
+`_group_children(active)`; a `ui.tabs` under the header with `.compact-tabs`
+small padding — q-tab min-height 32px — clicking a tab navigates; More's strip
+includes the Settings children, e.g. User Manuals). Per-page alert badges
+**float on the tabs** (`_badge_refs`), and each drawer group item carries the
+**SUM of its children's badges** (`_group_badge_refs`, updated by the 2s
+watcher). The old expandable sub-menus / `_NAV_OPEN` / `_settings_group` are
+GONE. The shared `.compact-tabs` rule also styles in-page view tabs (e.g. the
+Gamma GEX/Charm/DEX/Vanna/Flow/Term picker, a `ui.tabs` since 2026-07-11 —
+same value/on_value_change API as the old `ui.toggle`). Pages live in
+`webgui/pages/`; each leaf exposes `render()` called inside the shell
 `_layout`. `webgui/proxy.py` wraps `schwab-proxy/proxy_client.py` and adds
 `health()`. Pure transforms / SVG builders are unit-tested (`webgui/tests/`);
 heavy engine calls run off-thread via `nicegui.run.io_bound`.

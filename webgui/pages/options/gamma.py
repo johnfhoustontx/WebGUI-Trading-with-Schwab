@@ -842,8 +842,14 @@ def render():
         symbol_in = ui.select(_sym_opts, value=_DEFAULT_SYMBOL,
                               with_input=True, label="Symbol").classes("w-40")
         fetch_btn = ui.button("Refresh now", icon="refresh", color=None).props("no-caps").classes(BTN_3D)
-        view_toggle = ui.toggle({v: _view_label(v) for v in list(_VIEWS) + ["Flow", "Term"]},
-                                 value="GEX")
+        # View picker as compact TABS (2026-07-11 — was a ui.toggle button group);
+        # .compact-tabs (shared rule injected by the shell) keeps the padding small.
+        # Same value/on_value_change API as the old toggle, so the wiring is unchanged.
+        view_toggle = ui.tabs(value="GEX").classes("compact-tabs").props(
+            "dense no-caps inline-label")
+        with view_toggle:
+            for v in list(_VIEWS) + ["Flow", "Term"]:
+                ui.tab(v, label=_view_label(v))
         explain_btn = ui.button("Explain", icon="help", color=None).props("no-caps").classes(BTN_3D)
         analyze_btn = ui.button("Analyze", icon="psychology", color=None).props("no-caps").classes(BTN_3D)
         # Auto briefings: the $SPX/SPY/QQQ Analyze the options service auto-generates at
