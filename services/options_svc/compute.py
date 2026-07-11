@@ -16,10 +16,15 @@ intentionally NOT ported here — ``run_full_scan`` is called directly.
 """
 import logging
 import sys
+from zoneinfo import ZoneInfo
 
 from repo_paths import DRIVER_PAPER_DB, OPTIONS_SCANNER
 
 log = logging.getLogger(__name__)
+
+# Central time (4pm ET cash close = 15:00 CT) — shared by the forward-projection
+# helpers (_future_marks_ct / project_gex_grid).
+_PROJ_CT_TZ = ZoneInfo("America/Chicago")
 
 if str(OPTIONS_SCANNER) not in sys.path:
     sys.path.insert(0, str(OPTIONS_SCANNER))
@@ -1660,8 +1665,7 @@ def _future_marks_ct(now):
     """15-min CT marks from the next quarter-hour through 15:00 CT (the close).
     Returns [] once ``now`` is at/after the close (off-hours hides the band)."""
     import datetime as _dt
-    from zoneinfo import ZoneInfo
-    ct = ZoneInfo("America/Chicago")
+    ct = _PROJ_CT_TZ
     now = now.astimezone(ct)
     close = now.replace(hour=15, minute=0, second=0, microsecond=0)
     if now >= close:
@@ -1688,9 +1692,9 @@ def project_gex_grid(eng, chain, spot, now):
     Re-prices standing OI at future 15-min marks with spot held flat: each contract's
     CURRENT GEX contribution (chain gamma) is scaled by bs_gamma(S,K,T',σ)/
     bs_gamma(S,K,T_now,σ) — 1.0 at T'=T_now so the seam is continuous; σ<=0 holds flat.
-    Pure + defensive: empty grid on any failure. Returns
-    {"times":[HH:MM...], "grid":{strike_str:[net_t0...]}, "spot": spot}."""
-    from zoneinfo import ZoneInfo
+    ``now`` must be timezone-aware (callers pass an aware datetime); a naive ``now``
+    degrades to an empty grid defensively. Pure + defensive: empty grid on any failure.
+    Returns {"times":[HH:MM...], "grid":{strike_str:[net_t0...]}, "spot": spot}."""
     empty = {"times": [], "grid": {}, "spot": spot}
     try:
         if not chain or not spot or spot <= 0:
@@ -1699,7 +1703,7 @@ def project_gex_grid(eng, chain, spot, now):
         if not marks:
             return empty
         from options_calculator import bs_gamma
-        ct = ZoneInfo("America/Chicago")
+        ct = _PROJ_CT_TZ
         call_map = chain.get("callExpDateMap", {})
         put_map = chain.get("putExpDateMap", {})
         today = now.astimezone(ct).strftime("%Y-%m-%d")
@@ -1742,7 +1746,8 @@ def project_gex_grid(eng, chain, spot, now):
 def project_em_cone(spot, atm_iv, marks, now):
     """Up/mid/down expected-move fan over the future marks (flat-spot midline).
     half_width(τ) = spot*atm_iv*sqrt(τ/365), τ = calendar days from ``now`` to the mark.
-    Returns {"mid":[...], "up":[...], "down":[...]} (empty lists if inputs unusable)."""
+    ``now`` (and the marks) must be timezone-aware; a naive ``now`` degrades to empty
+    lists defensively. Returns {"mid":[...], "up":[...], "down":[...]} (empty if unusable)."""
     import math
     out = {"mid": [], "up": [], "down": []}
     try:
