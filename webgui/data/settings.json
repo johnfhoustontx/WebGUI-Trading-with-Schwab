@@ -4,5 +4,7 @@
   "alert_volume": 1,
   "alert_market_hours_only": true,
   "alert_min_score": 55,
-  "desktop_notifications": true
+  "desktop_notifications": true,
+  "ticker_enabled": true,
+  "ticker_speed": 60
 }

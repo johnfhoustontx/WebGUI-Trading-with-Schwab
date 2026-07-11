@@ -104,6 +104,49 @@ def test_manage_due_holiday():
     assert due is False
 
 
+# ── paper_cycle_due (manual Paper Portfolio hourly entry+manage) ────────────
+# The MANUAL Paper Portfolio runs entry + manage once at the TOP OF THE HOUR,
+# 09:00–14:00 CT (last run 14:00 / 2pm; NO 15:00 run at the regular-session
+# close). Trading days only; each hour fires once within a grace window
+# (mirrors analyze_slot_due), latched via the caller's ran-set.
+def test_paper_cycle_due_fires_at_each_hour():
+    # 2026-06-15 is a Monday.
+    for h in (9, 10, 11, 12, 13, 14):
+        assert scheduler.paper_cycle_due(_ct(2026, 6, 15, h, 0), set()) == h
+
+
+def test_paper_cycle_due_within_grace():
+    assert scheduler.paper_cycle_due(_ct(2026, 6, 15, 9, 15), set()) == 9
+
+
+def test_paper_cycle_due_not_after_grace():
+    assert scheduler.paper_cycle_due(_ct(2026, 6, 15, 9, 25), set()) is None
+
+
+def test_paper_cycle_due_latched_once_per_hour():
+    ran = {("2026-06-15", 9)}
+    assert scheduler.paper_cycle_due(_ct(2026, 6, 15, 9, 5), ran) is None
+
+
+def test_paper_cycle_due_no_run_at_3pm_close():
+    # No 15:00 (3pm CT) run — the regular session closes then.
+    assert scheduler.paper_cycle_due(_ct(2026, 6, 15, 15, 0), set()) is None
+
+
+def test_paper_cycle_due_before_first_hour():
+    assert scheduler.paper_cycle_due(_ct(2026, 6, 15, 8, 30), set()) is None
+
+
+def test_paper_cycle_due_weekend_none():
+    # 2026-06-13 is a Saturday.
+    assert scheduler.paper_cycle_due(_ct(2026, 6, 13, 9, 0), set()) is None
+
+
+def test_paper_cycle_due_holiday_none():
+    # 2026-07-03 is in _HOLIDAYS.
+    assert scheduler.paper_cycle_due(_ct(2026, 7, 3, 9, 0), set()) is None
+
+
 # ── action_alert_due (10/1/3 CT digest) ─────────────────────────────────────
 def test_action_alert_due_fires_at_each_slot():
     # 2026-06-15 is a Monday.
@@ -226,24 +269,27 @@ def test_loop_refreshes_gamma_after_collection():
     assert "refresh_gamma_current" in seg
 
 
-def test_loop_runs_driver_manage_under_its_own_guard():
+def test_loop_runs_driver_manage_on_5min_slot():
     import inspect
 
     src = inspect.getsource(scheduler.loop)
-    # The driver manage+refresh is invoked in the loop.
-    assert "run_driver_manage_and_refresh" in src
-    # …and the manual manage tick is still invoked (not replaced).
-    assert "run_manage_and_refresh" in src
-    # The driver tick has its OWN try/except so it's independent of the manual
-    # refresh (a separate guarded block, not piggybacked on the manual try).
-    mdue = src.split("m_due, m_slot = manage_due", 1)[1]
-    # Within the manage block, both the manual and driver refreshes appear, and
-    # the driver call is preceded by its own ``try:`` (a sibling guard).
-    assert "run_manage_and_refresh" in mdue and "run_driver_manage_and_refresh" in mdue
-    driver_seg = mdue.split("run_driver_manage_and_refresh", 1)[0]
-    # Between the manual refresh and the driver refresh there is a fresh ``try:``
-    # opening the driver's own guarded block.
-    assert "try:" in driver_seg.split("run_manage_and_refresh", 1)[1]
+    # The DRIVER manage+refresh is invoked on the 5-min manage_due slot, under its
+    # own guarded block. The MANUAL account is NOT managed on this slot anymore.
+    mdue = src.split("m_due, m_slot = manage_due", 1)[1].split("paper_cycle_due", 1)[0]
+    assert "run_driver_manage_and_refresh" in mdue
+    assert "run_manage_and_refresh" not in mdue   # manual moved off the 5-min slot
+
+
+def test_loop_runs_manual_paper_cycle_hourly():
+    import inspect
+
+    src = inspect.getsource(scheduler.loop)
+    # The manual Paper Portfolio entry+manage runs on the hourly paper_cycle_due
+    # slot via run_paper_entry_and_manage.
+    assert "paper_cycle_due" in src and "run_paper_entry_and_manage" in src
+    # The hour is latched in paper_ran BEFORE the blocking call (no double-fire).
+    seg = src.split("paper_cycle_due", 1)[1].split("run_paper_entry_and_manage", 1)[0]
+    assert "paper_ran.add" in seg
 
 
 # ── Cadence-mirror drift guard ──────────────────────────────────────────────

@@ -418,6 +418,25 @@ def run_manage_and_refresh(bus) -> None:
         log.exception("publish_rescue_summary degraded")
 
 
+def run_paper_entry_and_manage(bus) -> None:
+    """Hourly MANUAL Paper Portfolio cycle: open new paper trades from the current
+    captured signals, then reprice open positions + auto-close hits and republish.
+
+    Entry mirrors the ``paper_entry`` command (guarded on an existing account, in
+    its OWN try/except so an entry failure can NEVER skip the manage/refresh);
+    manage reuses ``run_manage_and_refresh`` (which itself guards on an account
+    and republishes the paper account + ledger + rescue-summary views). Shared by
+    the scheduler's hourly ``paper_cycle_due`` tick (09:00–14:00 CT) — this is the
+    manual account's cadence; the isolated DRIVER account stays on the 5-min
+    ``manage_due`` slot."""
+    if compute.has_paper_account():
+        try:
+            compute.run_entry_cycle()
+        except Exception:
+            log.exception("hourly paper entry cycle degraded (manage still runs)")
+    run_manage_and_refresh(bus)
+
+
 def refresh_driver_paper(bus) -> None:
     """Publish the isolated driver paper account view + its performance scorecard.
 

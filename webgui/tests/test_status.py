@@ -179,36 +179,59 @@ def test_restart_spec_memurai_is_a_service():
     assert spec["service"] == "Memurai"
 
 
-def test_restart_spec_self_is_none():
-    assert status.restart_spec(_target("webgui", "self")) is None
+def test_restart_spec_self_restarts_webgui():
+    spec = status.restart_spec(_target("webgui", "self"))
+    assert spec["kind"] == "script"
+    assert spec["script"].endswith("main.py")
+    assert spec["kill_port"] == status.NICEGUI_PORT
+    assert spec["wait_port"] == 0  # webgui doesn't need the proxy to start
 
 
-def test_every_component_target_is_restartable_except_webgui_and_auth():
-    # The webgui can't restart itself; the auth card's action is Authorize (a
-    # link to /auth), not a process restart — neither has a restart spec.
+def test_every_component_target_is_restartable_except_auth():
+    # Every card has a Restart action now (incl. the webgui, which relaunches
+    # itself). Only the auth card is excepted — its action is Authorize (a link
+    # to /auth), not a process restart.
     for t in status.component_targets():
         spec = status.restart_spec(t)
-        if t["kind"] in ("self", "auth"):
+        if t["kind"] == "auth":
             assert spec is None
         else:
             assert spec is not None, f"{t['key']} should be restartable"
 
 
 # --- restart_command ----------------------------------------------------------
-def test_restart_command_script_is_detached_console():
+def test_restart_command_script_is_windowless():
     spec = status.restart_spec(_target("proxy", "proxy"))
     cmd = status.restart_command(spec)
-    assert cmd[:3] == ["cmd", "/c", "start"]
+    assert cmd[:3] == ["cmd", "/c", r"tools\restart_one.bat"]
+    # No `start`/`cmd /k` → no console window is spawned (restart_one.bat runs the
+    # component hidden itself).
+    assert "start" not in cmd
     assert "restart_one.bat" in " ".join(cmd)
     assert cmd[-1].endswith("schwab_proxy.py")
+    # Carries the log name so restart_one.bat can redirect output to logs\.
+    assert "proxy" in cmd
+
+
+def test_restart_command_passes_ports_and_name_in_order():
+    spec = status.restart_spec(_target("options", "service"))
+    cmd = status.restart_command(spec)
+    # cmd /c restart_one.bat <kill_port> <wait_port> <name> <script>
+    assert cmd[3] == str(status.SERVICE_PORTS["options"])   # kill_port
+    assert cmd[4] == str(status.PROXY_PORT)                 # wait_port (proxy)
+    assert cmd[5] == "options_svc"                          # log name
+    assert cmd[6] == r"services\options_svc\app.py"         # script
 
 
 def test_restart_command_service_uses_powershell():
     spec = status.restart_spec(_target("memurai", "memurai"))
     cmd = status.restart_command(spec)
+    joined = " ".join(cmd)
     assert cmd[0] == "powershell"
-    assert "Start-Service" in " ".join(cmd)
-    assert "Memurai" in " ".join(cmd)
+    # Restart if running, fall back to Start if stopped — works either way.
+    assert "Restart-Service" in joined
+    assert "Start-Service" in joined
+    assert "Memurai" in joined
 
 
 def test_restart_command_none_passthrough():

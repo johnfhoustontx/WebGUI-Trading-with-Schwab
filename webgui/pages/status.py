@@ -33,6 +33,7 @@ import proxy
 from pages.options.theme import BTN_3D
 from repo_paths import (
     MEMURAI_PORT,
+    NICEGUI_PORT,
     NICEGUI_URL,
     PROXY_PORT,
     PROXY_URL,
@@ -226,14 +227,18 @@ def restart_spec(target):
 
     * **proxy / service** → a ``script`` spec: free the port then launch the
       venv python on the entry script (services wait for the proxy first).
-    * **memurai** → a ``service`` spec: start the Memurai Windows service.
-    * **self** (the webgui) / unknown → ``None`` — the app can't restart itself.
+    * **self** (the webgui) → a ``script`` spec too: it frees :8500 and relaunches
+      the webgui in a detached console, so the app CAN restart itself — the current
+      page just disconnects (reload after a moment).
+    * **memurai** → a ``service`` spec: restart the Memurai Windows service.
+    * **auth** / unknown → ``None`` — the auth card's action is Authorize, not a
+      process restart (the proxy card restarts the proxy).
     """
     kind = target.get("kind")
     key = target.get("key")
     if kind == "proxy":
         return {"kind": "script", "title": f"Schwab Proxy :{PROXY_PORT}",
-                "kill_port": PROXY_PORT, "wait_port": 0,
+                "name": "proxy", "kill_port": PROXY_PORT, "wait_port": 0,
                 "script": r"schwab-proxy\schwab_proxy.py"}
     if kind == "service":
         port = SERVICE_PORTS.get(key)
@@ -241,8 +246,14 @@ def restart_spec(target):
             return None
         # Services wait for the proxy (:8100) before starting.
         return {"kind": "script", "title": f"{key}_svc :{port}",
-                "kill_port": port, "wait_port": PROXY_PORT,
+                "name": f"{key}_svc", "kill_port": port, "wait_port": PROXY_PORT,
                 "script": rf"services\{key}_svc\app.py"}
+    if kind == "self":
+        # The web app restarts itself: free :8500 then relaunch (no proxy wait —
+        # the GUI shows a proxy-down banner and works without it).
+        return {"kind": "script", "title": f"Web GUI :{NICEGUI_PORT}",
+                "name": "webgui", "kill_port": NICEGUI_PORT, "wait_port": 0,
+                "script": r"webgui\main.py"}
     if kind == "memurai":
         return {"kind": "service", "title": "Memurai", "service": "Memurai"}
     return None
@@ -251,27 +262,41 @@ def restart_spec(target):
 def restart_command(spec):
     """argv to spawn for a restart spec (``None`` → ``None``).
 
-    A ``script`` spec opens its own console (``cmd /c start`` → ``cmd /k``) running
-    ``tools\\restart_one.bat`` so the restarted component has live logs and the
-    spawn is fully detached from the web app. A ``service`` spec starts the
-    Windows service via PowerShell.
+    A ``script`` spec runs ``tools\\restart_one.bat`` — which frees the port, waits
+    for the dependency, then launches the component **hidden** (via ``pythonw`` +
+    ``Start-Process -WindowStyle Hidden``) with stdout/stderr redirected to
+    ``logs\\<name>.out.log`` / ``.err.log``. Combined with the ``CREATE_NO_WINDOW``
+    spawn in :func:`_do_restart`, the whole restart is **windowless** — nothing
+    flashes. A ``service`` spec restarts the Windows service via PowerShell
+    (``Restart-Service``, falling back to ``Start-Service`` if it's stopped).
     """
     if not spec:
         return None
     if spec["kind"] == "service":
+        svc = spec["service"]
         return ["powershell", "-NoProfile", "-Command",
-                f"Start-Service -Name '{spec['service']}'"]
-    return ["cmd", "/c", "start", spec["title"], "cmd", "/k", "call",
-            r"tools\restart_one.bat", str(spec["kill_port"]),
-            str(spec["wait_port"]), spec["script"]]
+                f"try {{ Restart-Service -Name '{svc}' -Force -ErrorAction Stop }} "
+                f"catch {{ Start-Service -Name '{svc}' }}"]
+    return ["cmd", "/c", r"tools\restart_one.bat", str(spec["kill_port"]),
+            str(spec["wait_port"]), spec["name"], spec["script"]]
+
+
+# Windows: run the restart with no console window. 0 elsewhere (import-safe).
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 def _do_restart(target):
-    """Spawn the restart for ``target`` (detached). Returns False if not restartable."""
+    """Spawn the restart for ``target`` windowless. Returns False if not restartable.
+
+    ``CREATE_NO_WINDOW`` keeps the spawned ``cmd``/``powershell`` off-screen; the
+    ``restart_one.bat`` script then launches the component itself hidden. The batch
+    kills the target port with ``taskkill /F /PID`` (no ``/T``), so the web app's
+    own self-restart doesn't take this spawn down with it.
+    """
     cmd = restart_command(restart_spec(target))
     if cmd is None:
         return False
-    subprocess.Popen(cmd, cwd=str(REPO_ROOT))
+    subprocess.Popen(cmd, cwd=str(REPO_ROOT), creationflags=_NO_WINDOW)
     return True
 
 
@@ -371,14 +396,15 @@ def render():
                             ui.label(f"{r['tier']} · {r['url']}").classes(
                                 "text-xs opacity-60")
                         # Action button: Authorize (auth card, proxy reachable) or
-                        # Restart (any other offline + restartable component).
+                        # Restart (every restartable component — always available,
+                        # so you can also restart a wedged-but-listening service).
                         if r.get("kind") == "auth" and up is not None:
                             ui.button(
                                 "Re-authorize" if up else "Authorize", icon="login",
                                 color=None,
                                 on_click=lambda: ui.navigate.to(AUTH_URL, new_tab=True)) \
                                 .props("no-caps").classes(f"ml-auto {BTN_3D}")
-                        elif up is False and restart_spec(r) is not None:
+                        elif restart_spec(r) is not None:
                             ui.button("Restart", icon="restart_alt", color=None,
                                       on_click=lambda t=r: _restart_clicked(t)) \
                                 .props("no-caps").classes(f"ml-auto {BTN_3D}")
@@ -424,6 +450,11 @@ def render():
         if not ok:
             ui.notify(f"{target['label']} can't be restarted from here.",
                       type="warning")
+            return
+        if target.get("kind") == "self":
+            # Restarting the web app kills THIS page — no point re-sweeping it.
+            ui.notify("Restarting the web app — this page will disconnect. "
+                      "Reload in a few seconds.", type="warning", timeout=10000)
             return
         ui.notify(f"Restarting {target['label']}… it should come back online "
                   "within ~15s.", type="warning", timeout=8000)

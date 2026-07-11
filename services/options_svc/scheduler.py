@@ -166,6 +166,41 @@ def manage_due(now, last_slot):
     return (slot != last_slot, slot)
 
 
+# ── Manual Paper Portfolio hourly entry+manage cadence ──────────────────────
+# The MANUAL Paper Portfolio (the user's own paper account) runs its entry cycle
+# (open new paper trades from the current captured signals) + manage cycle
+# (reprice open positions + auto-close target/stop hits) once at the TOP OF THE
+# HOUR, 09:00–14:00 CT — the last run at 14:00 (2pm), with NO run at 15:00 (3pm)
+# when the regular session closes. Trading days only. This REPLACES the manual
+# account's former 5-min manage cadence (see manage_due); the isolated DRIVER
+# account stays on the manage_due 5-min slot. Each hour fires ONCE within a grace
+# window (mirrors analyze_slot_due) so a missed 30 s tick / mid-window service
+# start still fires without backfilling a long-stale hour.
+_PAPER_HOURS = (9, 10, 11, 12, 13, 14)   # CT top-of-hour run hours (no 15:00)
+_PAPER_GRACE_MIN = 20  # fire within this many minutes of the top of the hour, else skip
+
+
+def paper_cycle_due(now, ran_slots):
+    """The CT hour whose manual Paper Portfolio entry+manage cycle is due now, or None.
+
+    Fires each listed hour (09:00–14:00 CT) ONCE per trading day, when
+    ``:00 <= now < :00 + grace`` and that ``(date, hour)`` isn't already in
+    ``ran_slots``. The caller records the returned ``(date, hour)`` so it won't
+    refire. Mirrors ``analyze_slot_due`` — the grace window tolerates a missed
+    tick / mid-window start without backfilling a long-stale hour."""
+    if not _is_trading_day(now):
+        return None
+    import datetime as _dt
+    day = now.date().isoformat()
+    for h in _PAPER_HOURS:
+        if (day, h) in ran_slots:
+            continue
+        target = now.replace(hour=h, minute=0, second=0, microsecond=0)
+        if target <= now < target + _dt.timedelta(minutes=_PAPER_GRACE_MIN):
+            return h
+    return None
+
+
 # ── Per-tick refresh gating (header + GEX status) ───────────────────────────
 # refresh_header (a proxy quotes call + bridge read) and publish_gex_status (a
 # SQLite read + cache write) used to run on EVERY 30 s tick, 24/7 — making proxy
@@ -285,12 +320,13 @@ async def loop(bus):
     to every _OFFHOURS_INTERVAL_MIN off-hours (see periodic_refresh_due) so the
     service stops the round-the-clock proxy/SQLite/Redis churn — then, on each
     trading-day 15-min slot within 08:00-15:15 CT, run one rescan (plus 2-min GEX
-    collection + 5-min paper auto-manage — both the MANUAL and the isolated DRIVER
-    paper accounts — on their own windows). Mirrors the page's former
-    _autoscan_loop. The BLOCKING calls run in an executor so the event loop stays
-    responsive. Each is independently guarded so one failure can't kill the loop or
-    skip the others — in particular the driver manage tick is guarded separately
-    from the manual one so a driver-side failure can't skip the manual refresh."""
+    collection; the isolated DRIVER paper account auto-manages on its own 5-min
+    slot, and the MANUAL Paper Portfolio runs entry+manage hourly at the top of
+    the hour 09:00–14:00 CT — see paper_cycle_due — with no 15:00 run). Mirrors
+    the page's former _autoscan_loop. The BLOCKING calls run in an executor so the
+    event loop stays responsive. Each is independently guarded so one failure can't
+    kill the loop or skip the others — in particular the driver manage tick and the
+    hourly manual paper cycle are guarded separately so one can't skip the other."""
     loop_ = asyncio.get_event_loop()
     last_slot = None
     # R6: one-shot startup self-heal — reconcile buying_power_reserved against open
@@ -306,7 +342,8 @@ async def loop(bus):
     except Exception:
         log.exception("startup buying-power reconcile degraded")
     last_gex_slot = None  # 2-min GEX history-collection slot (see gex_due)
-    last_manage_slot = None  # 5-min paper auto-manage slot (see manage_due)
+    last_manage_slot = None  # 5-min DRIVER paper auto-manage slot (see manage_due)
+    paper_ran = set()  # (date, hour) of fired hourly manual paper cycles (see paper_cycle_due)
     last_periodic_slot = None  # header + gex_status throttle slot (see periodic_refresh_due)
     analyze_ran = set()  # (date, slot) of fired scheduled Gamma Analyze runs (see analyze_slot_due)
     action_alert_ran = set()  # (date, slot) of fired action-alert pushes (see action_alert_due)
@@ -444,11 +481,13 @@ async def loop(bus):
         if g_due:
             branches.append(_gex_branch())
 
-        # Paper auto-manage — reprice open paper positions + auto-close hits on
-        # each 5-min slot within market hours (replaces the manual-only "Run
-        # manage cycle" button; the button still works for on-demand runs). The
-        # blocking cycle (proxy reprice) runs in the executor; independently
-        # guarded so a failure never skips the work above or kills the loop.
+        # DRIVER paper auto-manage — reprice + auto-close the ISOLATED driver
+        # account's open positions on each 5-min slot within market hours. (The
+        # MANUAL Paper Portfolio no longer manages here — it runs entry+manage
+        # hourly on its own paper_cycle_due slot below.) The blocking cycle (proxy
+        # reprice) runs in the executor; independently guarded so a failure never
+        # skips the work above or kills the loop. No-op-safe when the driver
+        # account doesn't exist yet.
         m_due = False
         try:
             m_due, m_slot = manage_due(now, last_manage_slot)
@@ -458,19 +497,7 @@ async def loop(bus):
             log.exception("manage_due gate degraded")
             m_due = False
 
-        # The manual + driver manage refreshes share the manage_due slot but each
-        # keeps its OWN try/except — a driver-side failure can NEITHER skip the
-        # manual refresh NOR kill the loop. No-op-safe when the driver account
-        # doesn't exist yet. Kept in one branch coroutine so the manual refresh
-        # runs first (its book is the primary one), driver second.
-        async def _manage_branch():
-            try:
-                await loop_.run_in_executor(None, handlers.run_manage_and_refresh, bus)
-            except Exception:
-                log.exception("run_manage_and_refresh branch degraded")
-            # Driver paper account auto-manage — reprice + auto-close the ISOLATED
-            # driver account's open positions on the SAME 5-min cadence (it reuses
-            # the manage_due slot decided above). In its OWN try/except.
+        async def _driver_manage_branch():
             try:
                 await loop_.run_in_executor(
                     None, handlers.run_driver_manage_and_refresh, bus)
@@ -478,7 +505,32 @@ async def loop(bus):
                 log.exception("run_driver_manage_and_refresh branch degraded")
 
         if m_due:
-            branches.append(_manage_branch())
+            branches.append(_driver_manage_branch())
+
+        # Manual Paper Portfolio hourly entry+manage — open new paper trades from
+        # the current captured signals AND reprice/auto-close existing ones, once
+        # at the top of each hour 09:00–14:00 CT (last run 14:00 / 2pm; NO 15:00
+        # run at the regular-session close). Replaces the manual account's former
+        # 5-min manage cadence. The hour is latched in paper_ran BEFORE the blocking
+        # cycle so a slow cycle can't double-fire on the next tick. Independently
+        # guarded so a failure never skips the work above or kills the loop.
+        try:
+            paper_h = paper_cycle_due(now, paper_ran)
+            if paper_h is not None:
+                paper_ran.add((now.date().isoformat(), paper_h))
+        except Exception:
+            log.exception("paper_cycle_due gate degraded")
+            paper_h = None
+
+        async def _paper_cycle_branch():
+            try:
+                await loop_.run_in_executor(
+                    None, handlers.run_paper_entry_and_manage, bus)
+            except Exception:
+                log.exception("run_paper_entry_and_manage branch degraded")
+
+        if paper_h is not None:
+            branches.append(_paper_cycle_branch())
 
         # Scheduled $SPX/SPY/QQQ Gamma Analyze — auto-run the Analyze command at
         # premarket / ~18 min after the open / midday / close on each trading day
