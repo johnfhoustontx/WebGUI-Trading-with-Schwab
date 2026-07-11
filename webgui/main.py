@@ -215,9 +215,9 @@ SENTIMENT_CHILDREN = [
 # Flat top-level items (non-Options apps). (route, label, icon)
 FLAT_NAV = [
     ("/market", "Market Dashboard", "dashboard"),
-    ("/trade", "Trade", "analytics"),
+    ("/trade", "Trade Analyzer", "analytics"),
     ("/portfolio", "Portfolio", "account_balance"),
-    ("/driver", "Driver", "smart_toy"),
+    ("/driver", "Claude Trades", "smart_toy"),
 ]
 
 # "More" is an expandable group for reports / diagnostics / config. (route, label, icon)
@@ -241,7 +241,7 @@ SETTINGS_CHILDREN = [
 # counts; the per-page badges float on the tabs. (label, icon, children)
 _NAV_GROUPS = [
     ("Options", "candlestick_chart", OPTIONS_CHILDREN),
-    ("Sentiment", "insights", SENTIMENT_CHILDREN),
+    ("Market Trend & Sentiment", "insights", SENTIMENT_CHILDREN),
     ("More", "more_horiz", MORE_CHILDREN + SETTINGS_CHILDREN),
 ]
 
@@ -903,7 +903,7 @@ def sentiment_rotation_page() -> None:
 
 @ui.page("/trade")
 def trade_page() -> None:
-    with _layout("/trade", "Trade"):
+    with _layout("/trade", "Trade Analyzer"):
         from pages import trade
         trade.render()
 
@@ -917,7 +917,7 @@ def portfolio_page() -> None:
 
 @ui.page("/driver")
 def driver_page() -> None:
-    with _layout("/driver", "Driver"):
+    with _layout("/driver", "Claude Trades"):
         from pages import driver
         driver.render()
 
