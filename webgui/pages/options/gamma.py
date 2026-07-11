@@ -837,19 +837,33 @@ def render():
     # Last-seen bus cache versions for the fetch-free repaint/dialog timers.
     seen = {"gamma": None, "explain": None, "analyze": None, "status": None}
 
+    # View picker as SUBTABS directly under the main tab strip (2026-07-11 — was a
+    # ui.toggle button group in the header row): a second tab level, styled by the
+    # shared .compact-subtabs rule. Renders into main.subtab_slot() (the slot the
+    # shell mounts beneath the strip); falls back inline if the slot is absent.
+    # Same value/on_value_change API as the old toggle, so the wiring is unchanged.
+    import main as _shell
+    _slot = _shell.subtab_slot()
+
+    def _build_view_tabs():
+        tabs = ui.tabs(value="GEX").classes("compact-subtabs").props(
+            "dense no-caps inline-label align=left")
+        with tabs:
+            for v in list(_VIEWS) + ["Flow", "Term"]:
+                ui.tab(v, label=_view_label(v))
+        return tabs
+
+    if _slot is not None:
+        with _slot:
+            view_toggle = _build_view_tabs()
+    else:
+        view_toggle = _build_view_tabs()
+
     with ui.row().classes("items-center gap-3 flex-wrap"):
         _sym_opts = symbol_options(bus_client.read("options:gamma_symbols"))
         symbol_in = ui.select(_sym_opts, value=_DEFAULT_SYMBOL,
                               with_input=True, label="Symbol").classes("w-40")
         fetch_btn = ui.button("Refresh now", icon="refresh", color=None).props("no-caps").classes(BTN_3D)
-        # View picker as compact TABS (2026-07-11 — was a ui.toggle button group);
-        # .compact-tabs (shared rule injected by the shell) keeps the padding small.
-        # Same value/on_value_change API as the old toggle, so the wiring is unchanged.
-        view_toggle = ui.tabs(value="GEX").classes("compact-tabs").props(
-            "dense no-caps inline-label")
-        with view_toggle:
-            for v in list(_VIEWS) + ["Flow", "Term"]:
-                ui.tab(v, label=_view_label(v))
         explain_btn = ui.button("Explain", icon="help", color=None).props("no-caps").classes(BTN_3D)
         analyze_btn = ui.button("Analyze", icon="psychology", color=None).props("no-caps").classes(BTN_3D)
         # Auto briefings: the $SPX/SPY/QQQ Analyze the options service auto-generates at

@@ -319,6 +319,16 @@ _ALERT_STATE: dict = {
 _badge_refs: dict = {}
 _group_badge_refs: dict = {}
 
+# Per-page-build slot directly under the top tab strip, where a page can mount
+# its own view SUBTABS (see _layout; e.g. the Gamma GEX/Charm/... row). Rebuilt
+# on every _layout; None on pages without a strip.
+_SUBTAB_SLOT: dict = {"el": None}
+
+
+def subtab_slot():
+    """The container under the main tab strip for a page's view subtabs (or None)."""
+    return _SUBTAB_SLOT["el"]
+
 # ── Health / staleness surfacing (R4b / R8) ──────────────────────────────────
 # Representative SCHEDULED cache views (mirrors the scheduled rows of
 # status.py:_FRESHNESS) — a view older than alerts.STALE_AFTER_SEC means the
@@ -436,10 +446,32 @@ _NAV_CSS = """
    Tailwind arbitrary class: the bundled JIT doesn't generate var(...) arbitraries. */
 .nav-drawer .nav-active { background: var(--q-primary); color: #fff; }
 .nav-drawer .q-item { border-radius: 10px; }
-/* Compact tab strips (the sub-menu tabs under the header + in-page view tabs like
-   Gamma's GEX/Charm/...): small padding, short tabs. Quasar-internal (q-tab). */
-.compact-tabs .q-tab { min-height: 32px; padding: 0 12px; }
+/* Compact tab strips (the sub-menu tabs under the header + subtab rows like
+   Gamma's GEX/Charm/...): classic folder-style tabs — bordered boxes with rounded
+   TOP corners sitting on a baseline, the active one filled with the accent (the
+   Quasar primary, so the [menu].accent theme knob recolors it). Small padding.
+   Quasar-internal (q-tab). */
+.compact-tabs { border-bottom: 1px solid rgba(255,255,255,.14); }
+.compact-tabs .q-tab {
+  min-height: 32px; padding: 0 14px; margin-right: 3px;
+  border: 1px solid rgba(255,255,255,.14); border-bottom: none;
+  border-radius: 8px 8px 0 0; background: rgba(255,255,255,.05);
+}
+.compact-tabs .q-tab--active { background: var(--q-primary); color: #fff; }
+.compact-tabs .q-tab__indicator { display: none; }
 .compact-tabs .q-tab__label { font-size: 13px; }
+/* Subtab row (a page's own view tabs, e.g. Gamma GEX/Charm/DEX/Vanna/Flow/Term)
+   — same folder shape, one size smaller and a muted active fill so the hierarchy
+   under the main strip reads clearly. */
+.compact-subtabs { border-bottom: 1px solid rgba(255,255,255,.10); }
+.compact-subtabs .q-tab {
+  min-height: 27px; padding: 0 12px; margin-right: 3px;
+  border: 1px solid rgba(255,255,255,.12); border-bottom: none;
+  border-radius: 7px 7px 0 0; background: rgba(255,255,255,.04);
+}
+.compact-subtabs .q-tab--active { background: rgba(255,255,255,.14); color: #fff; }
+.compact-subtabs .q-tab__indicator { display: none; }
+.compact-subtabs .q-tab__label { font-size: 12px; }
 /* Page-help "?" — tucked into the bottom-right corner of the header banner.
    Positioning is on the element (Tailwind); these stay Quasar-internal. */
 .help-fab .help-btn { font-size: 11px; min-height: 0; min-width: 0; }
@@ -687,13 +719,17 @@ def _layout(active: str, title: str):
                 ).classes("help-tip"):
                     ui.markdown(page_help.help_md(active)).classes("text-left")
 
-    # Sub-menu TAB STRIP (2026-07-11): the active group's child pages as compact
-    # tabs across the top of the page (small padding — .compact-tabs in _NAV_CSS).
-    # Clicking a tab navigates; the per-page alert badges float on the tabs.
+    # Sub-menu TAB STRIP (2026-07-11): the active group's child pages as
+    # folder-style tabs across the top of the page (.compact-tabs in _NAV_CSS).
+    # Clicking a tab navigates; the per-page alert badges float on the tabs. A
+    # SUBTAB slot sits directly beneath the strip — a page with its own view tabs
+    # (e.g. Gamma's GEX/Charm/DEX/Vanna/Flow/Term) renders them there via
+    # ``main.subtab_slot()`` so they read as a second tab level, not page chrome.
+    _SUBTAB_SLOT["el"] = None
     children = _group_children(active)
     if children:
         with ui.element("div").classes("w-full px-2 pt-1"):
-            strip = ui.tabs(value=active).classes("compact-tabs").props(
+            strip = ui.tabs(value=active).classes("compact-tabs w-full").props(
                 "dense no-caps align=left inline-label")
             with strip:
                 for path, label, _icon in children:
@@ -705,6 +741,7 @@ def _layout(active: str, title: str):
                         _badge_refs[path] = b
             strip.on_value_change(lambda e: ui.navigate.to(e.value)
                                   if e.value != active else None)
+            _SUBTAB_SLOT["el"] = ui.element("div").classes("w-full pl-3")
 
     # Hidden audio element used by play_alert (one per page/client).
     ui.html('<audio id="alert-audio" preload="auto"></audio>')
