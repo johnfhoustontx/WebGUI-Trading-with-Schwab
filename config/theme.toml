@@ -2,10 +2,11 @@
 # App styling — edit this file, then RESTART THE WEB GUI to apply
 # (More → System Status → Restart on the "Web GUI" card, then reload the page).
 #
-# Colors are "#rrggbb" hex; [typography] sizes are CSS lengths ("15px"/"1.1rem").
-# Any key you delete (or mistype) simply falls back to the built-in default
-# shown here, so this file is always safe to edit. Loader:
-# webgui/pages/options/theme.py:load_theme().
+# Colors are "#rrggbb" hex; [typography] sizes are in PIXELS (a bare number
+# works: "15" = "15px"). Any key you delete (or mistype) simply falls back to
+# the built-in default shown here, so this file is always safe to edit.
+# Loader: webgui/pages/options/theme.py:load_theme().
+# Tip: easiest way to edit — Settings → Appearance in the app itself.
 #
 # NOT covered here (deliberately): per-chart Highcharts colorscales (e.g. the
 # Gamma heatmap), the data-driven table-cell zone colors (score/heat/P&L maps),
@@ -63,12 +64,13 @@ flat   = "#9e9e9e"             # flat / no-data
 cyan   = "#3fb6c7"             # the "Improving" RRG accent
 
 [typography]                   # ── text categories: font + sizes ────────────
-# Sizes accept any CSS length ("15px", "1.1rem"). family "" keeps the app
-# default (Roboto); e.g. family = "Georgia, serif" or "'Segoe UI', sans-serif".
+# Sizes are in PIXELS — a plain number works too ("15" = "15px"); a larger
+# number = bigger text. family "" keeps the app default (Roboto); e.g.
+# family = "Georgia, serif" or "'Segoe UI', sans-serif".
 family    = ""                 # app-wide font family ("" = default Roboto)
-titles    = "1.25rem"          # page & card titles
-subtitles = "1rem"             # section headings
-sections  = "0.875rem"         # sub-section headings
+titles    = "20px"             # page & card titles
+subtitles = "16px"             # section headings
+sections  = "14px"             # sub-section headings
 body      = "14px"             # base text
 small     = "12px"             # eyebrows / captions / status lines
 

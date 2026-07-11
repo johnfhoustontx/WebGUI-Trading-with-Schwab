@@ -93,14 +93,16 @@ _DEFAULTS = {
         "flat": "#9e9e9e", "cyan": "#3fb6c7",
     },
     "typography": {
-        # Text categories — sizes accept any CSS length ("15px" / "1.1rem").
-        # ``family`` empty = keep the app default (Roboto).
-        "family": "",            # app-wide font family
-        "titles": "1.25rem",     # page & card titles (.text-h6)
-        "subtitles": "1rem",     # section headings (.text-subtitle1)
-        "sections": "0.875rem",  # sub-section headings (.text-subtitle2)
-        "body": "14px",          # base text
-        "small": "12px",         # eyebrows / captions / status lines (.text-xs)
+        # Text categories — sizes in PIXELS ("20px", or a bare number like "20";
+        # larger = bigger text). Defaults render identically to the framework
+        # sizes they replace (20px = the old 1.25rem etc.). ``family`` empty =
+        # keep the app default (Roboto).
+        "family": "",        # app-wide font family
+        "titles": "20px",    # page & card titles (.text-h6)
+        "subtitles": "16px", # section headings (.text-subtitle1)
+        "sections": "14px",  # sub-section headings (.text-subtitle2)
+        "body": "14px",      # base text
+        "small": "12px",     # eyebrows / captions / status lines (.text-xs)
     },
     "menu": {
         # Application menu (header bar + left nav drawer). Every knob defaults
@@ -162,7 +164,8 @@ def build_tokens(theme):
             f"bg-[{p['card_bg']}] border border-[{p['card_border']}] "
             f"rounded-[12px] px-4 py-3.5"
         ),
-        "EYEBROW": f"text-[{p['icon']}] text-[{theme['typography']['small']}] tracking-[.02em]",
+        "EYEBROW": (f"text-[{p['icon']}] "
+                    f"text-[{normalize_size(theme['typography']['small'])}] tracking-[.02em]"),
         "LABEL": f"text-[{p['title']}]",
         "MUTED": f"text-[{p['muted']}]",
         "BTN": (
@@ -348,16 +351,28 @@ def knob_label(key):
     return " ".join(words).capitalize()
 
 
+def normalize_size(v):
+    """A text size as CSS: a bare number means PIXELS (``"15"`` → ``"15px"``).
+
+    Any explicit unit ("15px", "1.1rem") passes through unchanged, so hand-set
+    values keep working — the bare-number convenience is for the Settings page
+    where "just type a bigger number" should do the obvious thing."""
+    s = str(v or "").strip()
+    return f"{s}px" if s.replace(".", "", 1).isdigit() else s
+
+
 def build_typography_css(theme):
     """App-wide text-category CSS from ``[typography]``.
 
     The categories map onto the classes the pages already use — Quasar's
     ``.text-h6`` (titles) / ``.text-subtitle1`` (subtitles) / ``.text-subtitle2``
     (sections) and Tailwind's ``.text-xs`` (small) — plus the base ``body`` size,
-    so no page needs editing to follow a size change. ``!important`` beats the
+    so no page needs editing to follow a size change. Sizes go through
+    :func:`normalize_size` (bare number = pixels). ``!important`` beats the
     frameworks' own definitions. An empty ``family`` emits no font rule (keeps
     the app default Roboto). Injected app-wide by ``main._layout``."""
-    ty = theme["typography"]
+    ty = {k: (v if k == "family" else normalize_size(v))
+          for k, v in theme["typography"].items()}
     rules = []
     if ty["family"]:
         rules.append(f"body{{font-family:{ty['family']}!important;}}")

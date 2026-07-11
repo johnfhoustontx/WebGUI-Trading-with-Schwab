@@ -135,11 +135,24 @@ def test_typography_defaults_match_quasar():
     t = theme.load_theme("Z:/nope.toml")
     ty = t["typography"]
     assert ty["family"] == ""            # "" = keep the app default (Roboto)
-    assert ty["titles"] == "1.25rem"     # .text-h6
+    assert ty["titles"] == "20px"        # .text-h6 (20px = the framework 1.25rem)
     assert ty["body"] == "14px"
     css = theme.build_typography_css(t)
-    assert ".text-h6{font-size:1.25rem" in css.replace(" ", "")
+    assert ".text-h6{font-size:20px" in css.replace(" ", "")
     assert "font-family" not in css      # empty family emits no font rule
+
+
+def test_typography_bare_number_means_pixels(tmp_path):
+    # "just type a bigger number" works: a unitless size is treated as px.
+    assert theme.normalize_size("15") == "15px"
+    assert theme.normalize_size("1.1rem") == "1.1rem"   # explicit units untouched
+    assert theme.normalize_size("") == ""
+    p = tmp_path / "theme.toml"
+    p.write_text('[typography]\ntitles = "22"\nsmall = "11"\n', encoding="utf-8")
+    t = theme.load_theme(p)
+    css = theme.build_typography_css(t).replace(" ", "")
+    assert ".text-h6{font-size:22px" in css
+    assert "text-[11px]" in theme.build_tokens(t)["EYEBROW"]
 
 
 def test_typography_css_reflects_overrides(tmp_path):

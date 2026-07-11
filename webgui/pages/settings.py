@@ -11,17 +11,17 @@ from nicegui import ui
 from pages.options import theme
 from pages.options.theme import BTN_3D, BTN_3D_DANGER
 
-# Appearance section layout: (toml section, card label, editor kind).
-# "color" → color inputs; "text" → free-text (sizes / font family);
-# "menu" → free-text colors where "" keeps the stock look.
+# Appearance section layout: (toml section, tab label, editor kind).
+# "color" → clickable swatch tiles with a color picker; "text" → free-text
+# (sizes / font family); "menu" → free-text colors where "" keeps the stock look.
 _THEME_SECTIONS = [
-    ("palette", "Surfaces, text & buttons", "color"),
-    ("semantic", "State colors (positive / warning / negative)", "color"),
-    ("buttons_3d", "3D gradient buttons", "color"),
-    ("gauge", "Speedometer gauges", "color"),
-    ("charts", "Sentiment & rotation charts", "color"),
-    ("typography", "Text — font & sizes", "text"),
-    ("menu", "Application menu", "menu"),
+    ("palette", "Surfaces", "color"),
+    ("semantic", "State colors", "color"),
+    ("buttons_3d", "3D buttons", "color"),
+    ("gauge", "Gauges", "color"),
+    ("charts", "Charts", "color"),
+    ("typography", "Text", "text"),
+    ("menu", "Menu", "menu"),
 ]
 
 
@@ -100,27 +100,67 @@ def render():
                  "opacity-70 text-sm")
 
         t = theme.load_theme()          # current file values merged over defaults
-        inputs: dict = {}               # (section, key) -> input element
-        for sec, label, kind in _THEME_SECTIONS:
-            with ui.expansion(label, value=False).classes("w-full"):
-                if kind == "menu":
-                    ui.label('Leave a field empty to keep the stock look.').classes(
-                        "opacity-60 text-xs")
-                with ui.grid(columns=2).classes("w-full gap-x-4"):
-                    for key, val in t[sec].items():
-                        lab = theme.knob_label(key)
-                        if kind == "color":
-                            el = ui.color_input(label=lab, value=val).classes("w-full")
+        inputs: dict = {}               # (section, key) -> text input element
+        colors: dict = {(sec, k): v for sec, _l, kind in _THEME_SECTIONS
+                        if kind == "color" for k, v in t[sec].items()}
+        tile_refs: dict = {}            # (section, key) -> (swatch el, hex label)
+
+        def _pick(sec, key, value):
+            """Color picked on a tile: update state + repaint swatch/hex in place."""
+            old = colors[(sec, key)]
+            colors[(sec, key)] = value
+            swatch, hex_lbl = tile_refs[(sec, key)]
+            # continuous value → runtime arbitrary class, reset via remove/add
+            swatch.classes(remove=f"bg-[{old}]", add=f"bg-[{value}]")
+            hex_lbl.text = value
+
+        def _tile(sec, key, val):
+            """One compact swatch tile (color block + name + hex; click to pick)."""
+            with ui.card().tight().classes(
+                    "w-[118px] cursor-pointer bg-[#0c1424] border border-white/10"):
+                swatch = ui.element("div").classes(f"w-full h-12 bg-[{val}]")
+                with ui.column().classes("px-2 py-1 gap-0"):
+                    ui.label(theme.knob_label(key)).classes(
+                        "text-[11px] font-bold leading-tight")
+                    hex_lbl = ui.label(val).classes("text-[10px] opacity-60")
+                ui.color_picker(on_pick=lambda e, s=sec, k=key: _pick(s, k, e.color))
+            tile_refs[(sec, key)] = (swatch, hex_lbl)
+
+        with ui.tabs().classes("w-full") as tabs:
+            tab_els = {sec: ui.tab(label) for sec, label, _k in _THEME_SECTIONS}
+        with ui.tab_panels(tabs, value=tab_els["palette"]).classes("w-full"):
+            for sec, label, kind in _THEME_SECTIONS:
+                with ui.tab_panel(tab_els[sec]).classes("p-2"):
+                    if kind == "color":
+                        with ui.row().classes("gap-2 flex-wrap"):
+                            for key, val in t[sec].items():
+                                _tile(sec, key, val)
+                    else:
+                        if kind == "menu":
+                            ui.label("Leave a field empty to keep the stock look "
+                                     "(colors, e.g. #2e7d32).").classes(
+                                     "opacity-60 text-xs")
                         else:
-                            ph = "default" if (kind == "menu" or key == "family") else None
-                            el = ui.input(label=lab, value=val,
-                                          placeholder=ph).classes("w-full")
-                        inputs[(sec, key)] = el
+                            ui.label("Sizes are in pixels — just type a number "
+                                     "(e.g. 16 or 16px); bigger number = bigger "
+                                     "text.").classes("opacity-60 text-xs")
+                        with ui.grid(columns=2).classes("w-full gap-x-4"):
+                            for key, val in t[sec].items():
+                                ph = ("default" if (kind == "menu" or key == "family")
+                                      else "pixels, e.g. 14")
+                                el = ui.input(label=theme.knob_label(key), value=val,
+                                              placeholder=ph).classes("w-full")
+                                inputs[(sec, key)] = el
 
         def _updates():
-            return {sec: {k: (inputs[(sec, k)].value or "").strip()
-                          for k in t[sec] if (sec, k) in inputs}
-                    for sec, _label, _kind in _THEME_SECTIONS}
+            out: dict = {}
+            for sec, _label, kind in _THEME_SECTIONS:
+                if kind == "color":
+                    out[sec] = {k: colors[(sec, k)] for k in t[sec]}
+                else:
+                    out[sec] = {k: (inputs[(sec, k)].value or "").strip()
+                                for k in t[sec] if (sec, k) in inputs}
+            return out
 
         def _save(notify=True):
             theme.save_theme_values(_updates())
@@ -138,9 +178,11 @@ def render():
         def _reset():
             defaults = {sec: dict(vals) for sec, vals in theme._DEFAULTS.items()}
             theme.save_theme_values(defaults)
-            for (sec, key), el in inputs.items():
+            for (sec, key), el in inputs.items():          # text inputs
                 el.value = defaults[sec][key]
                 el.update()
+            for (sec, key) in list(colors):                # swatch tiles
+                _pick(sec, key, defaults[sec][key])
             reset_dlg.close()
             ui.notify("Reset to defaults — restart the web GUI to apply",
                       type="positive")
