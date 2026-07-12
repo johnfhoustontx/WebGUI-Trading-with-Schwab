@@ -521,7 +521,9 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None):
     fig.update({
         "title": {"text": f"{_view_label(view)} intraday (strike × time)",
                   "style": {"color": FONT}},
-        "xAxis": {**_dark_axis("Time"), "categories": times,
+        # No "Time" axis title — the HH:MM labels make it obvious, and the title was
+        # getting clipped at the bottom edge under the rotated labels.
+        "xAxis": {**_dark_axis(), "categories": times,
                   "labels": {"rotation": -45, "style": {"color": FONT}},
                   "plotLines": xaxis_plotlines},
         "yAxis": yaxis,
@@ -959,17 +961,14 @@ def render():
             # hook is installed at creation (load fires once); updated in place after.
             heat_plot = ui.highchart(_heat_init_fig(), extras=["heatmap", "coloraxis"]).classes("w-full")
             heat_msg = ui.label("").classes("opacity-60 text-sm")
-        # Tiny status overlay pinned to the bottom-right of the heatmap panel (the chart
-        # row is `relative`): the collector status WORD (colored) + the neutral detail
-        # strip (last/next scan + refresh countdown + per-view summary). pointer-events-
-        # none so it never blocks the chart crosshair / press-and-hold tooltip.
-        # A faint dark pill keeps the tiny text legible over the time-axis labels /
-        # cells it sits above; pointer-events-none so it never blocks the chart.
-        with ui.row().classes("absolute bottom-1 right-2 items-baseline gap-2 text-[10px] "
-                              "leading-none whitespace-nowrap pointer-events-none z-10 "
-                              "bg-[#0c1424cc] px-1.5 py-0.5 rounded"):
-            status_lbl = ui.label("").classes("font-medium")
-            detail_lbl = ui.label("").classes("opacity-70")
+
+    # Tiny status strip BELOW the charts, right-aligned: the collector status WORD
+    # (colored) + the neutral detail (last/next scan + refresh countdown + per-view
+    # summary). Sits under the charts so it never collides with the time-axis labels.
+    with ui.row().classes("w-full justify-end items-baseline gap-2 text-[10px] "
+                          "leading-none opacity-90 -mt-1"):
+        status_lbl = ui.label("").classes("font-medium")
+        detail_lbl = ui.label("").classes("opacity-70")
 
     # History picker (BELOW the charts): browse past stored briefings. Pick a date
     # (+ optional slot) and Open regenerates the report from the stored analysis (via
