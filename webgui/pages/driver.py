@@ -33,7 +33,7 @@ import bus_client
 from nicegui import ui
 
 from pages.ui_guard import guard
-from pages.options.theme import BTN_3D, BTN_3D_DANGER
+from pages.options.theme import BTN, BTN_DANGER, BTN_PRIMARY
 
 # Decision-log / cycle timestamps are stored in UTC; show the user's Central time.
 _CENTRAL = ZoneInfo("America/Chicago")
@@ -514,7 +514,7 @@ _SCORE_STRATEGY_COLS = [
 DRIVER_CSS = """
 .driver-table .q-table__middle { max-height: 52vh; }
 .driver-table thead tr th {
-  position: sticky; top: 0; z-index: 2; background: #1d1d1d;
+  position: sticky; top: 0; z-index: 2; background: #141a30;
 }
 """
 
@@ -554,7 +554,7 @@ def render():
     with ui.row().classes("items-center gap-3 flex-wrap"):
         ui.label("Performance").classes("text-h6")
         perf_btn = ui.button("Refresh", icon="refresh", color=None) \
-            .props("no-caps dense").classes(BTN_3D)
+            .props("no-caps dense").classes(BTN)
     ui.label("The driver's closed trades and realized P&L from its isolated paper "
              "account — updates every 5-min manage cycle as positions close.") \
         .classes("text-xs opacity-50")
@@ -573,7 +573,7 @@ def render():
             ui.button("Cancel", on_click=stop_dialog.close).props("flat")
             ui.button("STOP", color=None,
                       on_click=lambda: (_do("stop", "Stopping…"),
-                                        stop_dialog.close())).props("no-caps").classes(BTN_3D_DANGER)
+                                        stop_dialog.close())).props("no-caps").classes(BTN_DANGER)
 
     # ── autonomous monitor render (rebuilt in place from cache:driver:*) ───────
     def _render_monitor():
@@ -619,10 +619,10 @@ def render():
                     sw.props("color=positive")
                     ui.button("Run now", icon="bolt", color=None,
                               on_click=lambda: _do("cycle", "Running a checkpoint…")) \
-                        .props("no-caps").classes(BTN_3D)
+                        .props("no-caps").classes(BTN_PRIMARY)
                     ui.button("STOP", icon="stop", color=None,
                               on_click=stop_dialog.open) \
-                        .props("no-caps").classes(f"{BTN_3D_DANGER} text-weight-bold")
+                        .props("no-caps").classes(f"{BTN_DANGER} text-weight-bold")
 
                 # Day-P&L-vs-target progress.
                 with ui.row().classes("items-center gap-3 w-full"):

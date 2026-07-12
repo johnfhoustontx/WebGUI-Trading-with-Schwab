@@ -278,19 +278,6 @@ def market_status_parts(now=None):
         return "MARKET CLOSED", False
 
 
-def session_pnl_parts(account):
-    """(text, tone) for the drawer "Session P&L" stat from the paper-account cache.
-
-    tone ∈ {"pos","neg","flat"}; a missing/invalid value → ("—", "flat")."""
-    try:
-        val = float((account or {}).get("session_pnl"))
-    except (TypeError, ValueError):
-        return "—", "flat"
-    if val > 0:
-        return f"+${abs(val):,.2f}", "pos"
-    if val < 0:
-        return f"-${abs(val):,.2f}", "neg"
-    return "$0.00", "flat"
 
 # ── Browser-tab title + per-page favicon color ──────────────────────────────
 # Each page's BROWSER TAB shows the selected menu-item name (derived from the nav
@@ -798,18 +785,6 @@ def _layout(active: str, title: str):
                 _nav_link(path, label, icon, active)
             more_label, more_icon, more_children = _NAV_GROUPS[2]
             _nav_group_link(more_label, more_icon, more_children, active)
-            # Session P&L — bottom of the rail (defensive read of the paper account).
-            try:
-                _pa = bus_client.read("options:paper_account") or {}
-            except Exception:  # noqa: BLE001 — chrome must never break a render.
-                _pa = {}
-            _pnl_txt, _pnl_tone = session_pnl_parts(_pa.get("snapshot"))
-            _pnl_cls = {"pos": theme.TXT_POS, "neg": theme.TXT_NEG,
-                        "flat": theme.MUTED}[_pnl_tone]
-            with ui.column().classes(
-                    "w-full px-3 pt-3 mt-auto border-t border-white/[0.05] gap-0"):
-                ui.label("Session P&L").classes("text-[10.5px] text-[#565f7d]")
-                ui.label(_pnl_txt).classes(f"text-[18px] font-semibold {_pnl_cls}")
 
     with ui.header().classes("items-center justify-between px-4"):
         with ui.row().classes("items-center gap-3 no-wrap"):
@@ -857,6 +832,12 @@ def _layout(active: str, title: str):
             strip.on_value_change(lambda e: ui.navigate.to(e.value)
                                   if e.value != active else None)
             _SUBTAB_SLOT["el"] = ui.element("div").classes("w-full pl-3")
+    else:
+        # Flat pages (no group strip) still get the slot so a page's own view
+        # tabs (e.g. Portfolio Holdings/Sectors/Performance) mount at the top in
+        # the same position as the group pages' subtabs.
+        with ui.element("div").classes("w-full px-2 pt-1"):
+            _SUBTAB_SLOT["el"] = ui.element("div").classes("w-full")
 
     # Hidden audio element used by play_alert (one per page/client).
     ui.html('<audio id="alert-audio" preload="auto"></audio>')

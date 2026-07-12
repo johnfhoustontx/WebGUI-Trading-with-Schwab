@@ -244,3 +244,27 @@ def test_guarded_compute_logs_once_on_bus_outage(monkeypatch, caplog):
     with caplog.at_level(logging.INFO, logger="webgui.watcher"):
         assert main._guarded_compute() == {"scanner": None, "health": None}
     assert main._bus_outage["logged"] is False
+
+
+# ── Deep Slate shell helpers (Phase 2) ──────────────────────────────────────
+def test_breadcrumb_parts_grouped_and_flat():
+    import main
+    # Grouped page → (group label, page label)
+    assert main.breadcrumb_parts("/") == ("Options", "Scanner")
+    assert main.breadcrumb_parts("/options/gamma") == ("Options", "Gamma")
+    assert main.breadcrumb_parts("/sentiment/rotation") == (
+        "Market Trend & Sentiment", "Sector Rotation")
+    assert main.breadcrumb_parts("/status") == ("More", "System Status")
+    # Flat single page → (page label, "") — no "· Tab"
+    assert main.breadcrumb_parts("/trade") == ("Trade Analyzer", "")
+    assert main.breadcrumb_parts("/market") == ("Market Dashboard", "")
+
+
+def test_market_status_parts():
+    import main
+    from datetime import datetime
+    # A Wednesday 10:00 CT (2026-07-08) is open; a Sunday is closed.
+    open_dt = datetime(2026, 7, 8, 10, 0, tzinfo=main.alerts.CT)
+    closed_dt = datetime(2026, 7, 5, 10, 0, tzinfo=main.alerts.CT)  # Sunday
+    assert main.market_status_parts(open_dt) == ("MARKET OPEN", True)
+    assert main.market_status_parts(closed_dt) == ("MARKET CLOSED", False)

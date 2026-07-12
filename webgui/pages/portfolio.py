@@ -132,11 +132,27 @@ def render():
         stream_lbl = ui.label("").classes("text-sm")
         status_lbl = ui.label("").classes("opacity-70 text-sm")
 
-    with ui.tabs().classes("w-full") as tabs:
-        ui.tab("Holdings")
-        ui.tab("Sectors")
-        ui.tab("Performance")
-    with ui.tab_panels(tabs, value="Holdings").classes("w-full"):
+    # Holdings / Sectors / Performance as folder-style TABS at the top of the
+    # page (2026-07-12 — like the Options pages): rendered into main.subtab_slot()
+    # so they sit under the header in the same position as the group subtabs;
+    # falls back inline if the slot is absent.
+    import main as _shell
+
+    def _build_tabs():
+        with ui.tabs().classes("compact-tabs").props(
+                "dense no-caps inline-label align=left") as t:
+            ui.tab("Holdings")
+            ui.tab("Sectors")
+            ui.tab("Performance")
+        return t
+
+    _slot = _shell.subtab_slot()
+    if _slot is not None:
+        with _slot:
+            tabs = _build_tabs()
+    else:
+        tabs = _build_tabs()
+    with ui.tab_panels(tabs, value="Holdings").classes("w-full flush-panels"):
         with ui.tab_panel("Holdings"):
             holdings_tbl = ui.table(columns=HOLDINGS_COLS, rows=[],
                                     row_key="symbol").classes("w-full").props("dense")

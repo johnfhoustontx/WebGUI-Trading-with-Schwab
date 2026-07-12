@@ -14,12 +14,14 @@ HELP_MD: dict[str, str] = {
 Finds option **credit spreads** (you sell risk and collect cash up front) and
 scores each one **0–100** for quality.
 
-- **0-DTE / Swing tabs** — trades expiring today vs over several days.
+- **0-DTE / Swing** — the small tabs at the very top (under the page tabs):
+  trades expiring today vs over several days.
 - **Score chip & Grade** — greener/higher means better reward-vs-risk, higher
   probability of profit, and better trend fit. Work from the top down.
 - **Click a row** for full details; the row buttons send it to the Calculator,
   paper-trade it, or chart its Expected Move.
-- It re-scans on its own — **Scan** just forces a refresh.
+- It re-scans on its own — **Run scan** (at the right edge of the table) just
+  forces a refresh.
 """,
     "/options/swing": """
 **Swing Scanner — the simple version**
@@ -58,8 +60,9 @@ accelerate price.
 
 - **Symbol dropdown** — pick the index or stock. The page **remembers** your last
   symbol when you come back, and switching symbols refreshes automatically.
-- **GEX / Charm / DEX / Vanna / Term** — different lenses on dealer positioning;
-  the **walls** mark likely support/resistance.
+- **GEX / Charm / DEX / Vanna / Flow / Term** — the small tabs at the very top
+  (under the page tabs): different lenses on dealer positioning; the **walls**
+  mark likely support/resistance.
 - **Bars + heat map** — show ±20 strikes around spot, so the size stays steady as
   the day moves. **Press and hold** the left mouse button on the heat map to read a
   strike's value (it follows the cursor while held); plain hovering shows nothing.
@@ -71,8 +74,9 @@ accelerate price.
   opens an **infographic** in a new tab — a regime + bias gauge, a price-level
   ladder + key levels per index, a per-symbol **what-if** (rally / sell-off / chop),
   and a **why is this happening** at the bottom. It also runs on its own at
-  **premarket, ~18 min after the open, midday, and the close** — the **Auto
-  briefings** buttons open each. **Explain** opens a one-symbol infographic.
+  **premarket, ~18 min after the open, midday, and the close** — the
+  **Briefings** dropdown (top right, next to Explain and Analyze) opens each.
+  **Explain** opens a one-symbol infographic.
 """,
     "/options/simulator": """
 **Simulator — the simple version**
@@ -81,6 +85,9 @@ Re-prices a **multi-leg** option position under different what-ifs (Black-Schole
 
 - **Fetch snapshot**, then pick a **Strategy** and adjust the **legs** (kind / side /
   strike / expiry / qty) — singles, spreads, condors, butterflies, calendars.
+  The controls and strategy sit side-by-side in one panel.
+- **Replay / What-if / IV shock** — the small tabs at the very top (under the
+  page tabs) switch the three views below.
 - **Replay** — how the whole position would have behaved along recent price moves.
 - **What-if (ΔS / Δt)** — slide the underlying price or fast-forward **elapsed** days;
   each leg decays on its own clock, so calendars behave correctly. Watch the price
@@ -197,6 +204,7 @@ A **Buy / Hold / Sell** read on a single stock, for two horizons.
 
 Your **real** Schwab holdings, with context.
 
+- **Holdings / Sectors / Performance** — the tabs at the very top of the page.
 - **Holdings** — live P&L plus how each name is doing vs its sector.
 - **Sectors** — are you over- or under-weight vs the S&P?
 - **Performance** — letter grades per position; click one for advice.
