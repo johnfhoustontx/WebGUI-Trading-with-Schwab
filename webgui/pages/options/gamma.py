@@ -328,6 +328,9 @@ def bar_figure(data, spot, view="GEX", walls=None, flip=None, n_side=N_SIDE, hei
                                   a["text"])
                  for a in line_annotations(spot, flip, walls)]
     fig = _base_chart("bar", height)
+    # Transparent so the page background shows through — matches the heatmap panel
+    # (and the candlestick graph) instead of the lighter DARK_BG box.
+    fig["chart"]["backgroundColor"] = "transparent"
     # Shared plot geometry so the Strike axis aligns pixel-for-pixel with the heatmap.
     fig["chart"]["marginTop"] = _PLOT_MARGIN_TOP
     fig["chart"]["marginBottom"] = _PLOT_MARGIN_BOTTOM

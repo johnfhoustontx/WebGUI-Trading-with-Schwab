@@ -326,9 +326,10 @@ def test_base_chart_sets_dark_background():
     assert gamma._dark_axis()["gridLineColor"] == gamma.GRID
 
 
-def test_bar_figure_is_dark_and_beveled_with_friendly_title():
+def test_bar_figure_is_transparent_and_beveled_with_friendly_title():
     fig = gamma.bar_figure(GEX, 450.0, view="GEX", walls=[452.0], flip=449.5)
-    assert fig["chart"]["backgroundColor"] == gamma.DARK_BG
+    # Transparent so the page background shows through (matches the heatmap panel).
+    assert fig["chart"]["backgroundColor"] == "transparent"
     pt = fig["series"][0]["data"][0]
     assert pt["borderWidth"] >= 1 and pt["borderColor"]        # beveled per-bar border
     assert pt["borderColor"] != pt["color"]                    # darker shade
