@@ -22,7 +22,8 @@ from pages.ui_guard import guard
 
 from . import detail, handoff
 from .rescue import heat_border_class
-from .theme import BTN_3D, BTN_3D_DANGER
+from .theme import (BADGE_MUTED, BADGE_NEG, BADGE_POS, BADGE_WARN, BTN,
+                    BTN_3D_DANGER, BTN_PRIMARY)
 
 # rescue_state values that mark a signal at-risk (tested/critical). Captured
 # signals are advisory-only and the manage-cycle rescue overlay only tags paper
@@ -55,20 +56,23 @@ def rec_color(rec):
 
 
 def rec_class(rec):
-    """Recommendation -> Tailwind ``bg-[<hex>]`` badge class (mirrors ``rec_color``)."""
-    return f"bg-[{rec_color(rec)}]"
+    """Recommendation -> Deep Slate badge token (tinted bg + colored fg).
+
+    TAKE_PROFIT green / CUT red / HOLD amber, from the shared semantic palette."""
+    return {"TAKE_PROFIT": BADGE_POS, "CUT": BADGE_NEG,
+            "HOLD": BADGE_WARN}.get(rec, BADGE_MUTED)
 
 
 # Scoped to .captured-table so it never leaks into the rest of the app. Sticky
 # header (visible while the body scrolls), a bounded body height so the horizontal
 # scrollbar sits at the bottom of the table viewport — reachable without scrolling
 # past 100+ rows — and tight cell padding to compress the inter-column space.
-# #1d1d1d matches the app's dark theme (same as the calculator sticky header).
+# #141a30 matches the app's dark theme (same as the calculator sticky header).
 CAPTURED_CSS = '''
 .captured-table .q-table__middle { max-height: 70vh; }
 .captured-table thead tr th {
   position: sticky; top: 0; z-index: 2;
-  background-color: #1d1d1d;
+  background-color: #141a30;
 }
 .captured-table td, .captured-table th { padding: 4px 8px; }
 '''
@@ -207,9 +211,9 @@ def render():
             # row-count status renders BELOW the table, bottom-right, small.
             with ui.row().classes("items-center gap-3 w-full justify-end"):
                 ui.button("Reload", icon="refresh", color=None,
-                          on_click=lambda: _reload()).props("no-caps").classes(BTN_3D)
+                          on_click=lambda: _reload()).props("no-caps").classes(BTN)
                 ui.button("Refresh marks (live)", icon="published_with_changes", color=None,
-                          on_click=lambda: _reprice()).props("no-caps").classes(BTN_3D)
+                          on_click=lambda: _reprice()).props("no-caps").classes(BTN_PRIMARY)
                 ui.button("Close selected", icon="check_circle", color=None,
                           on_click=lambda: _close()).props("no-caps").classes(BTN_3D_DANGER)
             table = ui.table(columns=captured_columns(), rows=[],
@@ -230,7 +234,7 @@ def render():
             table.add_slot('body-cell-recommendation', r'''
               <q-td :props="props"
                     :class="props.row._selected ? 'border-l-4 border-[#42a5f5] bg-[#42a5f5]/[.13]' : ''">
-                <q-badge :class="props.row._rec_class + ' text-[#111]'" :label="props.value"/>
+                <q-badge :class="props.row._rec_class" :label="props.value"/>
               </q-td>
             ''')
             # Current price (live spread mark) shown to 2dp; numeric so it sorts.
@@ -337,7 +341,7 @@ def render():
                 status.text = "Closing…"
 
             with ui.row():
-                ui.button("Confirm", color=None, on_click=confirm).props("no-caps").classes(BTN_3D)
+                ui.button("Confirm", color=None, on_click=confirm).props("no-caps").classes(BTN_PRIMARY)
                 ui.button("Cancel", on_click=dlg.close).props("flat")
         dlg.open()
 

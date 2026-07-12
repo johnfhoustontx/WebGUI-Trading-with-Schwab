@@ -21,7 +21,7 @@ from pages.ui_guard import guard
 
 from . import detail, handoff
 from .rescue import heat_border_class
-from .theme import BTN_3D, BTN_3D_DANGER
+from .theme import BADGE_ACCENT, BADGE_MUTED, BTN, BTN_3D_DANGER, BTN_PRIMARY
 
 # rescue_state values that mark a trade at-risk (tested/critical). The manage-cycle
 # rescue overlay tags the paper *account* positions view; the paper-trades ledger
@@ -32,12 +32,13 @@ _AT_RISK_STATES = ("tested", "critical")
 # Paper-ledger styling (injected via ui.add_css — ui.html strips <style>):
 #  • compact rows to match the Scanner table (dense + tight padding);
 #  • fixed header with a scrollable body (sticky thead + bounded scroll area).
-# The solid 3D action buttons now use the shared BTN_3D / BTN_3D_DANGER tokens.
+# Action buttons use the shared flat Deep Slate tokens: BTN (secondary Reload/
+# Close), BTN_PRIMARY (Analyze), BTN_3D_DANGER (ghost-danger Delete).
 PAPER_CSS = """
 .paper-table td, .paper-table th { padding: 2px 6px; font-size: 13px; }
 .paper-table .q-table__middle { max-height: 62vh; }
 .paper-table thead tr th {
-  position: sticky; top: 0; z-index: 2; background: #1d1d1d;
+  position: sticky; top: 0; z-index: 2; background: #141a30;
 }
 """
 
@@ -131,6 +132,12 @@ def pnl_class(v):
     return f"text-[{pnl_color(v)}]"
 
 
+def status_badge_class(status):
+    """Deep Slate status-badge token: OPEN → blue-accent pill, everything else
+    (EXPIRED / CLOSED) → muted grey pill."""
+    return BADGE_ACCENT if (status or "").upper() == "OPEN" else BADGE_MUTED
+
+
 def trade_pnl(t):
     """Display P&L for a ledger trade: realized when closed, live unrealized when
     OPEN (attached by the service's reprice). None when unavailable (e.g. an open
@@ -166,6 +173,7 @@ def paper_rows(trades):
             "pnl": _round(pnl),
             "_pnl_class": pnl_class(pnl),
             "status": t.get("status", ""),
+            "_status_class": status_badge_class(t.get("status")),
             # Trim to seconds and show "YYYY-MM-DD HH:MM:SS" (drop the ISO 'T').
             "entry_time": (t.get("entry_time") or "")[:19].replace("T", " "),
             # At-risk rescue tint (left border on the symbol cell). Safe no-op
@@ -290,17 +298,23 @@ def render():
                 </span>
               </q-td>
             ''')
+            # Status as a Deep Slate pill (OPEN blue-accent / closed grey).
+            table.add_slot('body-cell-status', r'''
+              <q-td :props="props">
+                <q-badge :class="props.row._status_class" :label="props.value"/>
+              </q-td>
+            ''')
             # Action buttons live BELOW the table (solid 3D). color=None drops
             # Quasar's bg-primary so the .pt-btn gradient (blue) / .pt-danger (red)
             # actually paint — WITHOUT it, bg-primary wins and every button reads
             # solid blue (which is why Delete didn't look red).
             with ui.row().classes("items-center gap-3 flex-wrap q-mt-md"):
                 ui.button("Reload", icon="refresh", color=None,
-                          on_click=lambda: _reload()).props("no-caps").classes(BTN_3D)
+                          on_click=lambda: _reload()).props("no-caps").classes(BTN)
                 ui.button("Close", icon="check_circle", color=None,
-                          on_click=lambda: _close()).props("no-caps").classes(BTN_3D)
+                          on_click=lambda: _close()).props("no-caps").classes(BTN)
                 ui.button("Analyze", icon="biotech", color=None,
-                          on_click=lambda: _analyze()).props("no-caps").classes(BTN_3D)
+                          on_click=lambda: _analyze()).props("no-caps").classes(BTN_PRIMARY)
                 ui.button("Delete", icon="delete", color=None,
                           on_click=lambda: _delete()).props("no-caps").classes(BTN_3D_DANGER)
                 ui.button("Delete all closed", icon="delete_sweep", color=None,
@@ -397,7 +411,7 @@ def render():
                 status.text = "Closing…"
 
             with ui.row():
-                ui.button("Confirm", color=None, on_click=confirm).props("no-caps").classes(BTN_3D)
+                ui.button("Confirm", color=None, on_click=confirm).props("no-caps").classes(BTN_PRIMARY)
                 ui.button("Cancel", on_click=dlg.close).props("flat")
         dlg.open()
 

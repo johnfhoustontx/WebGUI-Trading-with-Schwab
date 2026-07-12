@@ -8,76 +8,94 @@
 # Loader: webgui/pages/options/theme.py:load_theme().
 # Tip: easiest way to edit — Settings → Appearance in the app itself.
 #
+# ── ACTIVE PALETTE: "Deep Slate" (2026-07-11) ───────────────────────────────
+# Content-area palette + typography adopted from the "Deep Slate" redesign
+# handoff: deep charcoal-blue chrome, a single blue accent (#6b86ff), semantic
+# red/green P&L, IBM Plex type with tabular-nums. Hairline borders are given as
+# solid-hex approximations of the spec's white-alpha values (the token layer
+# builds Tailwind classes, which are kept hex-only). The [menu] app-shell knobs
+# are intentionally left at the stock look for this phase — see the adoption
+# plan (docs/plans/2026-07-11-deep-slate-adoption-plan.md).
+#
 # NOT covered here (deliberately): per-chart Highcharts colorscales (e.g. the
 # Gamma heatmap), the data-driven table-cell zone colors (score/heat/P&L maps),
 # and the standalone EOD/Analyze report documents.
 # ============================================================================
 
 [palette]                      # ── surfaces + text + buttons ────────────────
-page_bg1     = "#16243f"       # page background gradient — center glow
-page_bg2     = "#0c1424"       # page background gradient — middle
-page_bg3     = "#0a0f1c"       # page background gradient — edges
-page_border  = "#1d2942"       # page frame border
-card_bg      = "#101a30"       # cards / frames / popup menus
-card_border  = "#213152"       # card + popup border
-text         = "#cdd8ee"       # base body text
-title        = "#eaf0fb"       # headings / titles (the LABEL token)
-muted        = "#7f8db0"       # secondary text, field labels
-icon         = "#8794b4"       # icons, eyebrows, inactive tabs
-input_bg     = "#0c1426"       # boxed input fill
-input_border = "#243353"       # boxed input border
-input_text   = "#e7edf8"       # input text, active tab, popup items
-focus        = "#3b82f6"       # focus ring, tab indicator, hover accents
-btn_bg       = "#15213b"       # secondary button fill
-btn_hover    = "#1b2950"       # secondary button + popup item hover
-btn_border   = "#2a3a5c"       # secondary button border
-primary      = "#2563eb"       # primary button fill
-primary_hover = "#1d4fd1"      # primary button hover
+page_bg1     = "#111731"       # page background gradient — top-center glow (raised-panel tone)
+page_bg2     = "#0c1020"       # page background gradient — app background
+page_bg3     = "#0a0e1c"       # page background gradient — edges / rail
+page_border  = "#1b2138"       # page frame border (hairline approx)
+card_bg      = "#0f1428"       # cards / frames / popup menus
+card_border  = "#1c2340"       # card + popup border (hairline approx)
+text         = "#c7cee6"       # base body text
+title        = "#eef1f6"       # headings / titles (the LABEL token)
+muted        = "#8891ab"       # secondary text, field labels
+icon         = "#6d76a0"       # icons, eyebrows, inactive tabs (faint)
+input_bg     = "#141a30"       # boxed input fill (table header / inset tone)
+input_border = "#252c46"       # boxed input border
+input_text   = "#eef1f6"       # input text, active tab, popup items
+focus        = "#6b86ff"       # focus ring, tab indicator, hover accents (blue accent)
+btn_bg       = "#171e39"       # secondary button fill
+btn_hover    = "#20284a"       # secondary button + popup item hover
+btn_border   = "#2a3358"       # secondary button border
+primary      = "#6b86ff"       # primary button fill (blue accent)
+primary_hover = "#5877f2"      # primary button hover
 
 [semantic]                     # ── state colors (labels, tiles, detail panel) ─
-positive = "#66bb6a"           # good / up / profit
-warning  = "#ffa726"           # caution / hold
-negative = "#ef5350"           # bad / down / loss
-neutral  = "#bdbdbd"           # flat / no signal
+positive = "#4dd6a0"           # good / up / profit (text-optimized green)
+warning  = "#e6b45a"           # caution / hold (amber)
+negative = "#f08183"           # bad / down / loss (text-optimized red)
+neutral  = "#9ba4c4"           # flat / no signal (secondary text)
 
 [buttons_3d]                   # ── the standard 3D gradient buttons ─────────
-blue_top    = "#5aa0e6"        # main action button — gradient top
-blue_mid    = "#3a7bc0"        #   gradient middle
-blue_bottom = "#316eac"        #   gradient bottom
-blue_lip    = "#244e78"        #   the hard 3D "lip" shadow under the button
-red_top     = "#ef6b6b"        # danger button (Delete etc.) — gradient top
-red_mid     = "#d33f3f"        #   gradient middle
-red_bottom  = "#b53030"        #   gradient bottom
-red_lip     = "#7a1f1f"        #   the 3D lip
+blue_top    = "#8398ff"        # main action button — gradient top
+blue_mid    = "#6b86ff"        #   gradient middle (blue accent)
+blue_bottom = "#586fe6"        #   gradient bottom
+blue_lip    = "#3a4aa0"        #   the hard 3D "lip" shadow under the button
+red_top     = "#f08183"        # danger button (Delete etc.) — gradient top
+red_mid     = "#e5595b"        #   gradient middle
+red_bottom  = "#c9484a"        #   gradient bottom
+red_lip     = "#7a2a2b"        #   the 3D lip
 
 [gauge]                        # ── the speedometer gauges ───────────────────
-low    = "#ef5350"             # left of the arc (0)
-mid    = "#ffd54f"             # middle of the arc (50)
-high   = "#66bb6a"             # right of the arc (100)
-needle = "#f5f5f5"             # needle + pivot
+low    = "#e5595b"             # left of the arc (0)
+mid    = "#e6b45a"             # middle of the arc (50)
+high   = "#35c281"             # right of the arc (100)
+needle = "#eef1f6"             # needle + pivot
 
 [charts]                       # ── Sentiment / Sector-Rotation value colors ─
-green  = "#66bb6a"             # positive values (lines, zones, table text)
-red    = "#ef5350"             # negative values
-yellow = "#ffd54f"             # mid-band / caution values
-flat   = "#9e9e9e"             # flat / no-data
-cyan   = "#3fb6c7"             # the "Improving" RRG accent
+green  = "#4dd6a0"             # positive values (lines, zones, table text)
+red    = "#f08183"             # negative values
+yellow = "#e6b45a"             # mid-band / caution values
+flat   = "#8891ab"             # flat / no-data
+cyan   = "#6b86ff"             # the "Improving" RRG accent (Deep Slate → blue)
 
 [typography]                   # ── text categories: font + sizes ────────────
 # Sizes are in PIXELS — a plain number works too ("15" = "15px"); a larger
-# number = bigger text. family "" keeps the app default (Roboto); e.g.
-# family = "Georgia, serif" or "'Segoe UI', sans-serif".
-family    = ""                 # app-wide font family ("" = default Roboto)
-titles    = "20px"             # page & card titles
-subtitles = "16px"             # section headings
-sections  = "14px"             # sub-section headings
-body      = "14px"             # base text
-small     = "12px"             # eyebrows / captions / status lines
+# number = bigger text. family "" keeps the app default (Roboto). font_url ""
+# loads no web font; numeric "" = default figures ("tabular" = tabular-nums
+# app-wide). Density: the Deep Slate type scale (denser than the framework
+# defaults) — 16px screen title, 13px body/table cell, 11px captions. Bump any
+# value back up if a screen feels cramped.
+family    = "'IBM Plex Sans', system-ui, sans-serif"   # app-wide UI font
+font_url  = "https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+numeric   = "tabular"          # tabular-nums app-wide (aligned numeric columns)
+titles    = "16px"             # page & card titles (Deep Slate screen title)
+subtitles = "14px"             # section headings
+sections  = "13px"             # sub-section headings
+body      = "13px"             # base text / table cells
+small     = "11px"             # eyebrows / captions / status lines
 
 [menu]                         # ── application menu (header bar + left nav) ─
-# Every knob "" = keep the stock look; set a color to override.
-accent    = ""                 # header bar + selected item pill (Quasar primary)
-drawer_bg = ""                 # menu panel background
-text      = ""                 # menu item text + icons
-hover_bg  = ""                 # menu item hover wash
-title     = ""                 # the "SCHWAB TRADING" caption
+# Deep Slate shell (Phase 2): dark header + rail with a blue accent on the active
+# pill/tab. accent drives ui.colors(primary) (pill/tab fills + Quasar controls);
+# header_bg keeps the top bar dark, decoupled from accent (a small code change in
+# theme.py/build_nav_css). Every knob "" = keep the stock look.
+accent    = "#6b86ff"          # active pill/tab + Quasar-primary controls (blue accent)
+header_bg = "#111731"          # top header bar background (dark — decoupled from accent)
+drawer_bg = "#0a0e1c"          # left nav rail background
+text      = "#98a1c0"          # menu item text + dots (inactive tone; active → light)
+hover_bg  = "rgba(107,134,255,0.08)"  # menu item hover wash
+title     = "#565f7d"          # the "WORKSPACE" drawer caption

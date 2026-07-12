@@ -96,8 +96,13 @@ _DEFAULTS = {
         # Text categories — sizes in PIXELS ("20px", or a bare number like "20";
         # larger = bigger text). Defaults render identically to the framework
         # sizes they replace (20px = the old 1.25rem etc.). ``family`` empty =
-        # keep the app default (Roboto).
+        # keep the app default (Roboto). ``font_url`` empty = no web font loaded.
+        # ``numeric`` empty = default figures; "tabular" = tabular-nums app-wide
+        # (aligned numeric columns — the trading-terminal look). Both default to
+        # the stock render, so a plain config is unchanged.
         "family": "",        # app-wide font family
+        "font_url": "",      # web-font stylesheet URL (Google Fonts etc.) — "" = none
+        "numeric": "",       # "tabular" = font-variant-numeric:tabular-nums app-wide
         "titles": "20px",    # page & card titles (.text-h6)
         "subtitles": "16px", # section headings (.text-subtitle1)
         "sections": "14px",  # sub-section headings (.text-subtitle2)
@@ -107,11 +112,12 @@ _DEFAULTS = {
     "menu": {
         # Application menu (header bar + left nav drawer). Every knob defaults
         # "" = keep the stock Quasar look; a value emits an override.
-        "accent": "",     # header bar + selected item pill (the Quasar primary)
+        "accent": "",     # selected pill / tab + Quasar-primary controls (ui.colors)
+        "header_bg": "",  # top header bar background (decoupled from accent)
         "drawer_bg": "",  # menu panel background
         "text": "",       # menu item text + icons
         "hover_bg": "",   # menu item hover wash
-        "title": "",      # the "SCHWAB TRADING" drawer caption
+        "title": "",      # the drawer caption ("WORKSPACE")
     },
 }
 
@@ -152,6 +158,20 @@ def build_tokens(theme):
     """The full Tailwind design-token vocabulary generated from a theme dict."""
     p, s, b = theme["palette"], theme["semantic"], theme["buttons_3d"]
     state_txt = [f"text-[{s[k]}]" for k in ("positive", "warning", "negative", "neutral")]
+    pr = hex_rgb(p["primary"], (107, 134, 255))       # primary glow rgb
+    dr = hex_rgb(b["red_mid"], (229, 89, 91))         # solid-danger glow rgb
+    # Flat "Deep Slate" buttons — built as locals so the legacy BTN_3D[_DANGER]
+    # names can alias them (every existing call site flattens with no per-site edit).
+    _btn_primary = (
+        f"bg-[{p['primary']}] hover:brightness-110 text-[#0b1024] "
+        "rounded-[9px] min-h-[34px] font-semibold "
+        f"shadow-[0_4px_14px_-4px_rgba({pr[0]},{pr[1]},{pr[2]},0.6)]"
+    )
+    _btn_danger = (
+        f"bg-[{s['negative']}]/[.13] hover:bg-[{s['negative']}]/20 "
+        f"text-[{s['negative']}] border border-[{s['negative']}]/40 "
+        "rounded-[9px] min-h-[34px] font-medium"
+    )
     return {
         "PAGE": (
             f"rounded-[14px] border border-[{p['page_border']}] "
@@ -168,47 +188,40 @@ def build_tokens(theme):
                     f"text-[{normalize_size(theme['typography']['small'])}] tracking-[.02em]"),
         "LABEL": f"text-[{p['title']}]",
         "MUTED": f"text-[{p['muted']}]",
+        # ── Buttons — flat "Deep Slate" (mimic the redesign mockup) ───────────
+        # Secondary: dark fill + faint hairline border + body text (Reload, Close,
+        # Load, Test sound, Copy-to-…). Apply with color=None (drops bg-primary).
         "BTN": (
             f"bg-[{p['btn_bg']}] hover:bg-[{p['btn_hover']}] text-[{p['text']}] "
-            f"border border-[{p['btn_border']}] rounded-[9px] min-h-[40px] font-medium"
+            f"border border-[{p['btn_border']}] rounded-[9px] min-h-[34px] font-medium"
         ),
-        "BTN_PRIMARY": (
-            f"bg-[{p['primary']}] hover:bg-[{p['primary_hover']}] text-white "
-            f"rounded-[9px] min-h-[40px] font-semibold"
+        # Primary: solid blue accent + dark navy text + a soft accent glow.
+        "BTN_PRIMARY": _btn_primary,
+        # Danger (ghost/outlined): faint red tint + red border + red text — the
+        # in-table destructive style (Delete / Delete all closed / Reset).
+        "BTN_DANGER": _btn_danger,
+        # Danger (solid): a full red fill + glow — the heavyweight stop action
+        # (Terminate → "Stop all services"), used sparingly.
+        "BTN_DANGER_SOLID": (
+            f"bg-[{b['red_mid']}] hover:brightness-110 text-white "
+            "rounded-[9px] min-h-[40px] font-semibold "
+            f"shadow-[0_4px_14px_-4px_rgba({dr[0]},{dr[1]},{dr[2]},0.6)]"
         ),
         "STRATEGY_BTN": (
             f"bg-[{p['input_bg']}] hover:border-[{p['focus']}] "
             f"border border-[{p['input_border']}] text-[{p['input_text']}] "
-            f"rounded-[8px] min-h-[40px] font-normal"
+            f"rounded-[8px] min-h-[34px] font-normal"
         ),
-        # Shared 3D gradient buttons (the app-wide button standard). Apply with
-        # color=None so Quasar's bg-primary doesn't compete.
-        "BTN_3D": (
-            f"bg-[linear-gradient(180deg,{b['blue_top']}_0%,{b['blue_mid']}_55%,"
-            f"{b['blue_bottom']}_100%)] text-white "
-            "rounded-[7px] font-semibold min-h-[34px] "
-            f"shadow-[0_4px_0_0_{b['blue_lip']},0_6px_10px_rgba(0,0,0,.4)] "
-            "hover:brightness-110 active:translate-y-[4px] "
-            f"active:shadow-[0_1px_0_0_{b['blue_lip']},0_2px_4px_rgba(0,0,0,.4)] "
-            "transition-[transform,box-shadow,filter] duration-100"
-        ),
-        "BTN_3D_DANGER": (
-            f"bg-[linear-gradient(180deg,{b['red_top']}_0%,{b['red_mid']}_55%,"
-            f"{b['red_bottom']}_100%)] text-white "
-            "rounded-[7px] font-semibold min-h-[34px] "
-            f"shadow-[0_4px_0_0_{b['red_lip']},0_6px_10px_rgba(0,0,0,.4)] "
-            "hover:brightness-110 active:translate-y-[4px] "
-            f"active:shadow-[0_1px_0_0_{b['red_lip']},0_2px_4px_rgba(0,0,0,.4)] "
-            "transition-[transform,box-shadow,filter] duration-100"
-        ),
-        # Raised "3D" bevel for static metric TILES — additive (no background) so
-        # it layers over each tile's own bg without flattening it. rgba-only, so
-        # it works over any palette.
-        "TILE_3D": (
-            "rounded-[8px] "
-            "shadow-[inset_0_2px_0_0_rgba(255,255,255,.3),"
-            "0_5px_0_0_rgba(0,0,0,.4),0_10px_20px_rgba(0,0,0,.5)]"
-        ),
+        # BTN_3D / BTN_3D_DANGER — LEGACY names kept as aliases so every existing
+        # .classes(BTN_3D[_DANGER]) call site flattens to the Deep Slate look with
+        # no per-site edit. BTN_3D → the flat primary; BTN_3D_DANGER → ghost danger.
+        "BTN_3D": _btn_primary,
+        "BTN_3D_DANGER": _btn_danger,
+        # Flat metric TILE (Deep Slate) — a hairline border + 12px radius, NO bevel
+        # or drop shadow. Additive (no background), so it layers over each tile's
+        # own bg/color without flattening it. Name kept (legacy call sites) though
+        # it is no longer "3D".
+        "TILE_3D": f"rounded-[12px] border border-[{p['card_border']}] shadow-none",
         # Semantic STATE colors — the finite palette behind data-driven label
         # colors. Set reactively via .classes(remove=STATE_TEXT_CLASSES, add=TXT_*).
         "TXT_POS": state_txt[0],
@@ -216,6 +229,16 @@ def build_tokens(theme):
         "TXT_NEG": state_txt[2],
         "TXT_NEUTRAL": state_txt[3],
         "STATE_TEXT_CLASSES": " ".join(state_txt),
+        # Semantic BADGE fills (Deep Slate) — a translucent tint background + the
+        # matching colored foreground, as ONE Tailwind class for a q-badge/pill.
+        # bg-[hex]/opacity + text-[hex] both JIT-generate (verified). POS/WARN/NEG
+        # follow the configured semantic palette; ACCENT (OPEN) + MUTED (closed)
+        # are the Deep Slate blue-accent-text / grey pills.
+        "BADGE_POS": f"bg-[{s['positive']}]/15 text-[{s['positive']}] rounded-[6px]",
+        "BADGE_WARN": f"bg-[{s['warning']}]/15 text-[{s['warning']}] rounded-[6px]",
+        "BADGE_NEG": f"bg-[{s['negative']}]/15 text-[{s['negative']}] rounded-[6px]",
+        "BADGE_ACCENT": "bg-[#a9b6ff]/15 text-[#a9b6ff] rounded-[6px]",
+        "BADGE_MUTED": "bg-white/5 text-[#8891ab] rounded-[6px]",
     }
 
 
@@ -371,7 +394,8 @@ def build_typography_css(theme):
     :func:`normalize_size` (bare number = pixels). ``!important`` beats the
     frameworks' own definitions. An empty ``family`` emits no font rule (keeps
     the app default Roboto). Injected app-wide by ``main._layout``."""
-    ty = {k: (v if k == "family" else normalize_size(v))
+    _passthrough = ("family", "font_url", "numeric")
+    ty = {k: (v if k in _passthrough else normalize_size(v))
           for k, v in theme["typography"].items()}
     rules = []
     if ty["family"]:
@@ -383,7 +407,33 @@ def build_typography_css(theme):
         f".text-subtitle2{{font-size:{ty['sections']}!important;}}",
         f".text-xs{{font-size:{ty['small']}!important;}}",
     ]
+    # tabular-nums app-wide (aligned numeric columns) when [typography].numeric
+    # is set — the trading-terminal look. Empty = stock figures, so the default
+    # render is unchanged.
+    if str(ty.get("numeric", "")).strip().lower().startswith("tab"):
+        rules.append("body{font-variant-numeric:tabular-nums;}")
     return "\n".join(rules)
+
+
+def build_font_head_html(theme):
+    """A ``<link>`` preconnect + web-font stylesheet from ``[typography].font_url``.
+
+    Returns the head HTML that loads the configured web font (e.g. IBM Plex from
+    Google Fonts) so the ``[typography].family`` actually resolves, or ``""`` when
+    no ``font_url`` is set (keeping the app default Roboto, no extra request).
+    Injected app-wide by ``main._layout`` via ``ui.add_head_html``. Defensive: any
+    problem yields ``""``."""
+    try:
+        url = str(theme["typography"].get("font_url", "")).strip()
+    except Exception:  # noqa: BLE001
+        url = ""
+    if not url:
+        return ""
+    return (
+        '<link rel="preconnect" href="https://fonts.googleapis.com">'
+        '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
+        f'<link rel="stylesheet" href="{url}">'
+    )
 
 
 def build_nav_css(theme):
@@ -395,6 +445,11 @@ def build_nav_css(theme):
     ride the Quasar primary). Injected app-wide by ``main._layout``."""
     m = theme["menu"]
     rules = []
+    if m.get("header_bg"):
+        # The header bar is DECOUPLED from the accent: accent (ui.colors primary)
+        # drives the active pill/tab + Quasar controls, while header_bg keeps the
+        # top bar dark (else a blue accent would paint the whole header blue).
+        rules.append(f".q-header{{background:{m['header_bg']}!important;}}")
     if m["drawer_bg"]:
         rules.append(f".nav-drawer{{background:{m['drawer_bg']}!important;}}")
     if m["text"]:
@@ -423,6 +478,8 @@ LABEL = _TOKENS["LABEL"]
 MUTED = _TOKENS["MUTED"]
 BTN = _TOKENS["BTN"]
 BTN_PRIMARY = _TOKENS["BTN_PRIMARY"]
+BTN_DANGER = _TOKENS["BTN_DANGER"]
+BTN_DANGER_SOLID = _TOKENS["BTN_DANGER_SOLID"]
 STRATEGY_BTN = _TOKENS["STRATEGY_BTN"]
 BTN_3D = _TOKENS["BTN_3D"]
 BTN_3D_DANGER = _TOKENS["BTN_3D_DANGER"]
@@ -432,8 +489,14 @@ TXT_WARN = _TOKENS["TXT_WARN"]
 TXT_NEG = _TOKENS["TXT_NEG"]
 TXT_NEUTRAL = _TOKENS["TXT_NEUTRAL"]
 STATE_TEXT_CLASSES = _TOKENS["STATE_TEXT_CLASSES"]
+BADGE_POS = _TOKENS["BADGE_POS"]
+BADGE_WARN = _TOKENS["BADGE_WARN"]
+BADGE_NEG = _TOKENS["BADGE_NEG"]
+BADGE_ACCENT = _TOKENS["BADGE_ACCENT"]
+BADGE_MUTED = _TOKENS["BADGE_MUTED"]
 
 QUASAR_INTERNAL_CSS = build_quasar_css(THEME)
 TYPOGRAPHY_CSS = build_typography_css(THEME)   # injected app-wide by main._layout
+FONT_HEAD_HTML = build_font_head_html(THEME)   # "" when no [typography].font_url
 NAV_THEME_CSS = build_nav_css(THEME)           # "" when [menu] is all-default
 MENU_ACCENT = THEME["menu"]["accent"]          # "" = keep the stock Quasar primary

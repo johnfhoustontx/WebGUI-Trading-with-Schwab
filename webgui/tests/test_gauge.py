@@ -22,8 +22,11 @@ def test_gauge_figure_rainbow_face_and_needle():
     r0, rN = _rgb(bands[0]["color"]), _rgb(bands[-1]["color"])
     assert r0[0] > r0[1]            # left end reddish (R > G)
     assert rN[1] > rN[0]            # right end greenish (G > R)
+    # Middle is a WARM tone (yellow/amber): red & green both dominate blue. Kept
+    # palette-relative so a re-theme (config [gauge].mid) can't break it — the
+    # default #ffd54f and Deep Slate #e6b45a both satisfy this.
     mid = _rgb(bands[len(bands) // 2]["color"])
-    assert mid[0] > 180 and mid[1] > 180 and mid[2] < 150   # middle yellow-ish
+    assert mid[0] > 150 and mid[1] > 150 and mid[2] < mid[0] and mid[2] < mid[1]
     assert fig["plotOptions"]["gauge"]["dial"]        # needle present
     assert "Long" in fig["series"][0]["dataLabels"]["format"]
     assert fig["accessibility"]["enabled"] is False

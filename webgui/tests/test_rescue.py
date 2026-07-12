@@ -23,10 +23,14 @@ def test_heat_color_zones():
 
 
 def test_heat_bg_and_border_classes():
-    assert rescue.heat_bg_class(80) == "bg-[#ef5350]"
-    assert rescue.heat_bg_class(60) == "bg-[#ff7043]"
-    assert rescue.heat_bg_class(40) == "bg-[#ffa726]"
-    assert rescue.heat_bg_class(10) == "bg-[#66bb6a]"
+    from pages.options import theme
+    # Deep Slate badge tokens: <25 green · 25-50 amber · >=50 red ("red if >=50").
+    assert rescue.heat_bg_class(80) == theme.BADGE_NEG
+    assert rescue.heat_bg_class(60) == theme.BADGE_NEG
+    assert rescue.heat_bg_class(40) == theme.BADGE_WARN
+    assert rescue.heat_bg_class(10) == theme.BADGE_POS
+    assert rescue.heat_bg_class(None) == theme.BADGE_POS   # missing -> green
+    # The row-border tint (separate helper) is unchanged.
     assert rescue.heat_border_class(80) == "border-l-4 border-[#ef5350] bg-[#ef5350]/[.13]"
     assert rescue.heat_border_class(None) == ""   # missing -> no tint
 

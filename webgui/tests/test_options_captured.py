@@ -123,20 +123,24 @@ def test_rec_color_unknown_is_grey():
 
 
 def test_row_stamps_rec_class_for_cut():
+    from pages.options import theme
     row = captured.captured_rows([{"recommendation": "CUT"}])[0]
-    assert row["_rec_class"] == "bg-[#ef5350]"
+    assert row["_rec_class"] == theme.BADGE_NEG
 
 
 def test_row_defaults_rec_class_to_amber_when_missing():
+    from pages.options import theme
     row = captured.captured_rows([{}])[0]
-    assert row["_rec_class"] == "bg-[#ffa726]"
+    assert row["_rec_class"] == theme.BADGE_WARN
 
 
 def test_rec_class_maps_zones():
-    assert captured.rec_class("TAKE_PROFIT") == "bg-[#66bb6a]"
-    assert captured.rec_class("CUT") == "bg-[#ef5350]"
-    assert captured.rec_class("HOLD") == "bg-[#ffa726]"
-    assert captured.rec_class("WHATEVER") == "bg-[#666666]"
+    from pages.options import theme
+    # Deep Slate badge tokens (tinted bg + colored fg), from the semantic palette.
+    assert captured.rec_class("TAKE_PROFIT") == theme.BADGE_POS
+    assert captured.rec_class("CUT") == theme.BADGE_NEG
+    assert captured.rec_class("HOLD") == theme.BADGE_WARN
+    assert captured.rec_class("WHATEVER") == theme.BADGE_MUTED
 
 
 def test_pnl_class_maps_sign():
@@ -147,8 +151,9 @@ def test_pnl_class_maps_sign():
 
 
 def test_row_stamps_rec_and_pnl_class():
+    from pages.options import theme
     row = captured.captured_rows([{"recommendation": "CUT", "unrealized_pnl": -3.0}])[0]
-    assert row["_rec_class"] == "bg-[#ef5350]"
+    assert row["_rec_class"] == theme.BADGE_NEG
     assert row["_pnl_class"] == "text-[#ef5350]"
 
 

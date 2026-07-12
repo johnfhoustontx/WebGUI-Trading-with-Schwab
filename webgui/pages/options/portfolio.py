@@ -19,7 +19,8 @@ from nicegui import ui
 from pages.ui_guard import guard
 
 from .rescue import heat_border_class
-from .theme import BTN_3D, BTN_3D_DANGER
+from .theme import (BADGE_MUTED, BADGE_NEG, BADGE_POS, BTN, BTN_3D_DANGER,
+                    BTN_PRIMARY)
 
 # rescue_state values that mark a position at-risk. The options_svc manage cycle
 # tags THIS view (cache:options:paper_account) with rescue_state/heat via
@@ -104,6 +105,17 @@ def order_columns():
             for f, lbl in spec]
 
 
+def side_badge_class(side):
+    """Deep Slate side-badge token: SELL → green pill, BUY → red pill (a credit
+    seller reads SELL_TO_OPEN as the "good" side); anything else → muted."""
+    s = (side or "").upper()
+    if "SELL" in s:
+        return BADGE_POS
+    if "BUY" in s:
+        return BADGE_NEG
+    return BADGE_MUTED
+
+
 def order_rows(orders):
     rows = []
     for o in orders or []:
@@ -111,6 +123,7 @@ def order_rows(orders):
             "order_id": o.get("order_id"),
             "ts": (o.get("ts") or "")[:19],
             "side": o.get("side", ""),
+            "_side_class": side_badge_class(o.get("side")),
             "symbol": o.get("symbol", ""),
             "quantity": o.get("quantity"),
             "order_type": o.get("order_type", ""),
@@ -128,13 +141,13 @@ def render():
     # the counts status renders BELOW the fills table, bottom-right, small.
     with ui.row().classes("items-center gap-2 flex-wrap w-full justify-end"):
         ui.button("Reload", icon="refresh", color=None, on_click=lambda: _reload()) \
-            .props("no-caps").classes(BTN_3D)
+            .props("no-caps").classes(BTN)
         ui.button("Run entry cycle", icon="login", color=None, on_click=lambda: _cycle("entry")) \
-            .props("no-caps").classes(BTN_3D) \
+            .props("no-caps").classes(BTN) \
             .tooltip("Simulate auto-entry: scan open captured signals and open paper "
                      "positions for the eligible ones (fills via the paper broker).")
         ui.button("Run manage cycle", icon="manage_accounts", color=None, on_click=lambda: _cycle("manage")) \
-            .props("no-caps").classes(BTN_3D) \
+            .props("no-caps").classes(BTN_PRIMARY) \
             .tooltip("Reprice open positions and auto-close any that hit their target/stop. "
                      "Runs automatically every 5 min during market hours; this button forces "
                      "an immediate run.")
@@ -157,6 +170,12 @@ def render():
     ''')
     ui.label("Fills log (last 100)").classes("text-subtitle1 mt-2")
     ord_table = ui.table(columns=order_columns(), rows=[], row_key="order_id").classes("w-full")
+    # Side as a Deep Slate pill (SELL green / BUY red).
+    ord_table.add_slot('body-cell-side', r'''
+      <q-td :props="props">
+        <q-badge :class="props.row._side_class" :label="props.value"/>
+      </q-td>
+    ''')
     with ui.row().classes("w-full justify-end"):
         status = ui.label("").classes("opacity-60 text-xs")
 

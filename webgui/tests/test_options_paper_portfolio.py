@@ -107,3 +107,11 @@ def test_render_graceful_empty(monkeypatch):
 
     with ui.card():  # provide a parent slot for the widgets
         portfolio.render()
+
+
+def test_side_badge_class():
+    from pages.options import portfolio, theme
+    assert portfolio.side_badge_class("SELL_TO_OPEN") == theme.BADGE_POS
+    assert portfolio.side_badge_class("BUY_TO_CLOSE") == theme.BADGE_NEG
+    assert portfolio.side_badge_class("") == theme.BADGE_MUTED
+    assert portfolio.side_badge_class(None) == theme.BADGE_MUTED

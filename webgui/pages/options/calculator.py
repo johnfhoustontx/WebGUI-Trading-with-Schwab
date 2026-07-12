@@ -310,11 +310,11 @@ def _render_grid(box, eval_labels, pnl_data, spot):
     labels = eval_date_labels(eval_labels)
     cur_idx = min(range(len(rows)), key=lambda i: abs((rows[i]["price"] or 0) - spot))
 
-    th = ['<th style="position:sticky;left:0;top:0;background:#1d1d1d;z-index:2;'
+    th = ['<th style="position:sticky;left:0;top:0;background:#141a30;z-index:2;'
           'padding:4px 8px;">Price</th>']
     for lab in labels:
-        th.append(f'<th style="position:sticky;top:0;background:#1d1d1d;padding:4px 8px;">{lab} $</th>'
-                  f'<th style="position:sticky;top:0;background:#1d1d1d;padding:4px 8px;">%</th>')
+        th.append(f'<th style="position:sticky;top:0;background:#141a30;padding:4px 8px;">{lab} $</th>'
+                  f'<th style="position:sticky;top:0;background:#141a30;padding:4px 8px;">%</th>')
 
     trs = []
     for i, r in enumerate(rows):

@@ -35,67 +35,72 @@ def test_bias_color_buckets():
     assert S.bias_color("Neutral") == S.CLR_YELLOW
 
 
-# ── Local Tailwind color-class maps (Phase 5) — exact local palette preserved ──
+# ── Local Tailwind color-class maps (Phase 5) — driven by config [charts] ──
+# These test the band→color MAPPING, so they reference the module's own
+# config-derived class constants (S.TXT_G, S.BG_R, …) rather than literal hexes,
+# and stay correct when config/theme.toml is re-themed (e.g. Deep Slate).
 def test_local_class_constants_mirror_palette():
-    assert S.TXT_G == "text-[#66bb6a]" and S.TXT_R == "text-[#ef5350]"
-    assert S.TXT_Y == "text-[#ffd54f]" and S.TXT_FLAT == "text-[#9e9e9e]"
-    assert S.TXT_CY == "text-[#3fb6c7]"
-    assert S.BG_G == "bg-[#66bb6a]" and S.BG_R == "bg-[#ef5350]" and S.BG_Y == "bg-[#ffd54f]"
+    # The CLR_* constants mirror config/theme.toml [charts]; the class strings
+    # wrap them as text-[]/bg-[] utilities.
+    assert S.TXT_G == f"text-[{S.CLR_GREEN}]" and S.TXT_R == f"text-[{S.CLR_RED}]"
+    assert S.TXT_Y == f"text-[{S.CLR_YELLOW}]" and S.TXT_FLAT == f"text-[{S.CLR_FLAT}]"
+    assert S.TXT_CY == f"text-[{S.CLR_CYAN}]"
+    assert S.BG_G == f"bg-[{S.CLR_GREEN}]" and S.BG_R == f"bg-[{S.CLR_RED}]" and S.BG_Y == f"bg-[{S.CLR_YELLOW}]"
     # remove-sets cover every class an in-place element can apply
     assert set(S.SENT_TEXT_CLASSES.split()) == {S.TXT_G, S.TXT_R, S.TXT_Y, S.TXT_FLAT, S.TXT_CY}
     assert set(S.TRAFFIC_BG_CLASSES.split()) == {S.BG_G, S.BG_R, S.BG_Y}
 
 
 def test_traffic_bg_class_maps_bands():
-    assert S.traffic_bg_class(7) == "bg-[#66bb6a]"
-    assert S.traffic_bg_class(4) == "bg-[#ef5350]"
-    assert S.traffic_bg_class(5.5) == "bg-[#ffd54f]"
+    assert S.traffic_bg_class(7) == S.BG_G
+    assert S.traffic_bg_class(4) == S.BG_R
+    assert S.traffic_bg_class(5.5) == S.BG_Y
 
 
 def test_bias_text_class_buckets():
-    assert S.bias_text_class("Bullish") == "text-[#66bb6a]"
-    assert S.bias_text_class("Bearish") == "text-[#ef5350]"
-    assert S.bias_text_class("Neutral") == "text-[#ffd54f]"
+    assert S.bias_text_class("Bullish") == S.TXT_G
+    assert S.bias_text_class("Bearish") == S.TXT_R
+    assert S.bias_text_class("Neutral") == S.TXT_Y
 
 
 def test_pct_text_class():
-    assert S.pct_text_class(0.5) == "text-[#66bb6a]"
-    assert S.pct_text_class(-0.5) == "text-[#ef5350]"
-    assert S.pct_text_class(0.0) == "text-[#9e9e9e]"
-    assert S.pct_text_class(None) == "text-[#9e9e9e]"
+    assert S.pct_text_class(0.5) == S.TXT_G
+    assert S.pct_text_class(-0.5) == S.TXT_R
+    assert S.pct_text_class(0.0) == S.TXT_FLAT
+    assert S.pct_text_class(None) == S.TXT_FLAT
 
 
 def test_pcr_text_class_and_rrg_text_class():
-    assert S.pcr_text_class(0.9) == "text-[#66bb6a]"
-    assert S.pcr_text_class(1.1) == "text-[#ef5350]"
-    assert S.pcr_text_class(1.0) == "text-[#9e9e9e]"
-    assert S.rrg_text_class("Improving") == "text-[#3fb6c7]"
-    assert S.rrg_text_class("Lagging") == "text-[#ef5350]"
-    assert S.rrg_text_class("Leading") == "text-[#66bb6a]"
-    assert S.rrg_text_class("Weakening") == "text-[#ffd54f]"
-    assert S.rrg_text_class("???") == "text-[#9e9e9e]"
+    assert S.pcr_text_class(0.9) == S.TXT_G
+    assert S.pcr_text_class(1.1) == S.TXT_R
+    assert S.pcr_text_class(1.0) == S.TXT_FLAT
+    assert S.rrg_text_class("Improving") == S.TXT_CY
+    assert S.rrg_text_class("Lagging") == S.TXT_R
+    assert S.rrg_text_class("Leading") == S.TXT_G
+    assert S.rrg_text_class("Weakening") == S.TXT_Y
+    assert S.rrg_text_class("???") == S.TXT_FLAT
 
 
 def test_sc_text_class():
-    assert S.sc_text_class(7) == "text-[#66bb6a]"
-    assert S.sc_text_class(3) == "text-[#ef5350]"
-    assert S.sc_text_class(5) == "text-[#ffd54f]"
+    assert S.sc_text_class(7) == S.TXT_G
+    assert S.sc_text_class(3) == S.TXT_R
+    assert S.sc_text_class(5) == S.TXT_Y
 
 
 def test_trend_text_class():
     # old-vocab (still used by the 30-day structural gauge)
-    assert S.trend_text_class("bull_trend") == "text-[#66bb6a]"
-    assert S.trend_text_class("pullback_in_bull") == "text-[#66bb6a]"
-    assert S.trend_text_class("bear_trend") == "text-[#ef5350]"
-    assert S.trend_text_class("bear_rally") == "text-[#ef5350]"
-    assert S.trend_text_class("range") == "text-[#ffd54f]"
+    assert S.trend_text_class("bull_trend") == S.TXT_G
+    assert S.trend_text_class("pullback_in_bull") == S.TXT_G
+    assert S.trend_text_class("bear_trend") == S.TXT_R
+    assert S.trend_text_class("bear_rally") == S.TXT_R
+    assert S.trend_text_class("range") == S.TXT_Y
     # new five-state vocab (direction x aggression) used by the Today gauge
-    assert S.trend_text_class("bullish") == "text-[#66bb6a]"
-    assert S.trend_text_class("lack_of_bearishness") == "text-[#66bb6a]"
-    assert S.trend_text_class("bearish") == "text-[#ef5350]"
-    assert S.trend_text_class("lack_of_bullishness") == "text-[#ffd54f]"
-    assert S.trend_text_class("neutral") == "text-[#ffd54f]"
-    assert S.trend_text_class("mystery") == "text-[#ffd54f]"  # unknown -> amber default
+    assert S.trend_text_class("bullish") == S.TXT_G
+    assert S.trend_text_class("lack_of_bearishness") == S.TXT_G
+    assert S.trend_text_class("bearish") == S.TXT_R
+    assert S.trend_text_class("lack_of_bullishness") == S.TXT_Y
+    assert S.trend_text_class("neutral") == S.TXT_Y
+    assert S.trend_text_class("mystery") == S.TXT_Y  # unknown -> amber default
 
 
 def test_trend_short_covers_both_vocabularies():
@@ -116,10 +121,10 @@ def test_market_state_evidence_rows():
 
 
 def test_rotation_text_class():
-    assert S.rotation_text_class(S.CLR_GREEN) == "text-[#66bb6a]"
-    assert S.rotation_text_class(S.CLR_RED) == "text-[#ef5350]"
-    assert S.rotation_text_class(S.CLR_YELLOW) == "text-[#ffd54f]"
-    assert S.rotation_text_class(S.CLR_FLAT) == "text-[#9e9e9e]"
+    assert S.rotation_text_class(S.CLR_GREEN) == S.TXT_G
+    assert S.rotation_text_class(S.CLR_RED) == S.TXT_R
+    assert S.rotation_text_class(S.CLR_YELLOW) == S.TXT_Y
+    assert S.rotation_text_class(S.CLR_FLAT) == S.TXT_FLAT
 
 
 # ── Market Trend speedometer (needle = the directional 0-100 trend score) ─────

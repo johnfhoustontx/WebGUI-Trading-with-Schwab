@@ -252,3 +252,12 @@ def test_render_graceful_empty_cache():
     assert bus_client.read("options:paper_trades") is None  # confirm empty
     with ui.card():
         paper.render()  # must not raise
+
+
+def test_status_badge_class():
+    from pages.options import paper, theme
+    assert paper.status_badge_class("OPEN") == theme.BADGE_ACCENT
+    assert paper.status_badge_class("open") == theme.BADGE_ACCENT
+    assert paper.status_badge_class("EXPIRED") == theme.BADGE_MUTED
+    assert paper.status_badge_class("CLOSED") == theme.BADGE_MUTED
+    assert paper.status_badge_class(None) == theme.BADGE_MUTED

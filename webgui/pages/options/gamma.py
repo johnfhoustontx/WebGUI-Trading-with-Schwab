@@ -17,7 +17,7 @@ STRINGS. The pure builders (``bars_from_gex`` sorts + numeric-compares strikes;
 via ``_refloat_keys`` BEFORE feeding the builders. The builders stay unchanged.
 """
 from pages.ui_guard import guard, guard_async
-from .theme import TXT_POS, TXT_NEG, TXT_NEUTRAL, BTN_3D
+from .theme import TXT_POS, TXT_NEG, TXT_NEUTRAL, BTN, BTN_PRIMARY
 
 POS_COLOR = "#66bb6a"
 NEG_COLOR = "#ef5350"
@@ -863,11 +863,11 @@ def render():
         _sym_opts = symbol_options(bus_client.read("options:gamma_symbols"))
         symbol_in = ui.select(_sym_opts, value=_DEFAULT_SYMBOL,
                               with_input=True, label="Symbol").classes("w-40")
-        fetch_btn = ui.button("Refresh now", icon="refresh", color=None).props("no-caps").classes(BTN_3D)
+        fetch_btn = ui.button("Refresh now", icon="refresh", color=None).props("no-caps").classes(BTN_PRIMARY)
         # Explain / Analyze / Briefings push to the RIGHT of the frame (2026-07-11).
         ui.space()
-        explain_btn = ui.button("Explain", icon="help", color=None).props("no-caps").classes(BTN_3D)
-        analyze_btn = ui.button("Analyze", icon="psychology", color=None).props("no-caps").classes(BTN_3D)
+        explain_btn = ui.button("Explain", icon="help", color=None).props("no-caps").classes(BTN)
+        analyze_btn = ui.button("Analyze", icon="psychology", color=None).props("no-caps").classes(BTN)
         # Auto briefings: the $SPX/SPY/QQQ Analyze the options service auto-generates at
         # premarket / ~18 min after open / midday / close, folded into a single dropdown
         # to save a header row. Each item opens that slot's briefing in a new tab (the
@@ -879,7 +879,7 @@ def render():
         _SCHED_DIM = "opacity-40"                           # prior-day data, or none yet
         sched_btns = {}
         _sched_titles = {}
-        briefings_btn = ui.button("Briefings", icon="schedule", color=None).props("no-caps").classes(BTN_3D)
+        briefings_btn = ui.button("Briefings", icon="schedule", color=None).props("no-caps").classes(BTN)
         with briefings_btn:
             _briefings_menu = ui.menu()
             with _briefings_menu:
