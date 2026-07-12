@@ -17,7 +17,8 @@ from nicegui import ui
 
 from ..gauge import gauge_figure
 from . import svg
-from .theme import TXT_POS, TXT_WARN, TXT_NEG, TXT_NEUTRAL, STATE_TEXT_CLASSES, TILE_3D
+from .theme import (TXT_POS, TXT_WARN, TXT_NEG, TXT_NEUTRAL, STATE_TEXT_CLASSES,
+                    TILE_3D, CARD)
 
 # Semantic state-color class tokens (Tailwind text-[...] arbitrary values). Names
 # kept (many refs) but the VALUES are now class strings applied via .classes().
@@ -86,8 +87,12 @@ def _signal_title(s):
 
 
 def _tile_slot(label):
-    """A header tile (label + value); returns the value label to update in place."""
-    with ui.card().classes(f"p-2 min-w-[92px] {TILE_3D}"):
+    """A header tile (label + value); returns the value label to update in place.
+
+    ``min-w-0 w-full`` — the tile fills its grid cell and may SHRINK below its
+    content's natural width, so the 2×2 grid always fits the panel (at 290px the
+    old ``min-w-[92px]`` tiles + the gauge overflowed the panel edge)."""
+    with ui.card().classes(f"p-2 min-w-0 w-full {TILE_3D}"):
         ui.label(label).classes("text-xs opacity-60")
         return ui.label("—").classes("text-base font-bold")
 
@@ -231,7 +236,9 @@ def render(width: int = 360):
     horizontal space) and expand again via the header toggle.
     """
     expanded_w = f"w-[{width}px]"
-    col = ui.column().classes("shrink-0 gap-1").classes(expanded_w)
+    # The panel is a Deep Slate CARD (navy bg + hairline border + radius + padding)
+    # so it reads as a bordered panel like the rest of the app / the mockup.
+    col = ui.column().classes(f"shrink-0 gap-2 {CARD}").classes(expanded_w)
     with col:
         with ui.row().classes("items-center justify-between w-full no-wrap"):
             title = ui.label("Trade detail").classes("text-subtitle1 font-bold")
@@ -243,12 +250,14 @@ def render(width: int = 360):
         tiles = {}
         with header:
             sig_title = ui.label("").classes("text-subtitle1 font-bold")
-            with ui.row().classes("items-center gap-3 w-full no-wrap"):
-                gauge_el = ui.highchart(gauge_figure(0, "", height=104)) \
-                    .classes("shrink-0 w-[160px] h-[104px]")
-                with ui.grid(columns=2).classes("gap-2"):
-                    for key, label, _vf, _cf in _TILES:
-                        tiles[key] = _tile_slot(label)
+            # Gauge STACKED above a full-width 2×2 tile grid: side-by-side the
+            # gauge (160px) + min-width tiles overflowed the 290px panel (tiles
+            # bled past the right edge). Stacking fits every panel width.
+            gauge_el = ui.highchart(gauge_figure(0, "", height=104)) \
+                .classes("self-center w-[160px] h-[104px]")
+            with ui.grid(columns=2).classes("gap-2 w-full"):
+                for key, label, _vf, _cf in _TILES:
+                    tiles[key] = _tile_slot(label)
         header.set_visibility(False)
         body = ui.column().classes("w-full gap-2")
         with body:
