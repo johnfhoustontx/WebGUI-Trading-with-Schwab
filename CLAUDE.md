@@ -1319,7 +1319,7 @@ color-coded data items** (the fast numbers). Pieces:
   version-gated `ui.timer` reads the three cache versions and **only rebuilds when the RENDERED
   content signature changes** (not on every 2 s dashboard bump) → the marquee scrolls smoothly
   without tearing/jumping. Content column gets `pb-10` so the footer never covers content; the
-  "?" help fab (z-2300) stays above the ticker (z-2200).
+  page-help now lives on the nav tabs + drawer items as 2 s-delayed hover tooltips (`main._help_tooltip`, 2026-07-12 — the header "?" fab is gone).
 - **Control.** `app_settings` `ticker_enabled` (default on) + `ticker_speed`; a **Settings**
   page toggle (Show + Slow/Medium/Fast). When off, `render_ticker` renders nothing.
 - market_svc **35** + shared/contracts **38** + webgui **687** green (no live API calls in the

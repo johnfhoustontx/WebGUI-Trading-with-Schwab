@@ -253,6 +253,45 @@ def _group_children(active: str):
             return children
     return None
 
+
+# ── Deep Slate shell helpers (Phase 2) — pure, unit-tested in test_shell.py ──
+def breadcrumb_parts(active: str):
+    """(section, tab) for the header breadcrumb ``{Section} · {Tab}``.
+
+    A grouped page → (group label, this page's label); a flat single page →
+    (page label, "") so the breadcrumb shows just the section (no "· Tab")."""
+    for label, _icon, children in _NAV_GROUPS:
+        if any(path == active for path, _l, _i in children):
+            return label, _NAV_LABEL.get(active, "")
+    return _NAV_LABEL.get(active, "Schwab Trading"), ""
+
+
+def market_status_parts(now=None):
+    """("MARKET OPEN"|"MARKET CLOSED", is_open) for the header pill.
+
+    Uses the shared trading-day + 08:00–15:00 CT gate (``alerts.in_market_hours``)."""
+    from datetime import datetime
+    try:
+        n = now if now is not None else datetime.now(alerts.CT)
+        return ("MARKET OPEN", True) if alerts.in_market_hours(n) else ("MARKET CLOSED", False)
+    except Exception:  # noqa: BLE001 — chrome must never break a page render.
+        return "MARKET CLOSED", False
+
+
+def session_pnl_parts(account):
+    """(text, tone) for the drawer "Session P&L" stat from the paper-account cache.
+
+    tone ∈ {"pos","neg","flat"}; a missing/invalid value → ("—", "flat")."""
+    try:
+        val = float((account or {}).get("session_pnl"))
+    except (TypeError, ValueError):
+        return "—", "flat"
+    if val > 0:
+        return f"+${abs(val):,.2f}", "pos"
+    if val < 0:
+        return f"-${abs(val):,.2f}", "neg"
+    return "$0.00", "flat"
+
 # ── Browser-tab title + per-page favicon color ──────────────────────────────
 # Each page's BROWSER TAB shows the selected menu-item name (derived from the nav
 # lists above, so it never drifts) and a DISTINCT colored favicon, so several open
@@ -441,44 +480,46 @@ def _refresh_health() -> None:
 # sub-menus, so the old expansion rules are gone.
 _NAV_CSS = """
 .nav-drawer { gap: 2px; }
-/* Active nav item pill — rides the Quasar primary so the [menu].accent theme knob
-   (ui.colors) recolors it together with the header bar. A plain rule, not a
-   Tailwind arbitrary class: the bundled JIT doesn't generate var(...) arbitraries. */
-.nav-drawer .nav-active { background: var(--q-primary); color: #fff; }
+/* Active nav item pill — the "Deep Slate" look: a SUBTLE navy tint (not a solid
+   accent fill), paired with the blue dot the nav item draws itself. Decoupled
+   from --q-primary on purpose (accent drives the DOT + tab fills, the pill stays
+   a soft wash). A plain CSS rule (the bundled JIT doesn't emit rgba arbitraries). */
+.nav-drawer .nav-active { background: rgba(107,134,255,0.13); }
+.nav-drawer .nav-active .nav-label { color: #eef1f6; font-weight: 600; }
 .nav-drawer .q-item { border-radius: 10px; }
-/* Compact tab strips (the sub-menu tabs under the header + subtab rows like
-   Gamma's GEX/Charm/...): classic folder-style tabs — bordered boxes with rounded
-   TOP corners sitting on a baseline, the active one filled with the accent (the
-   Quasar primary, so the [menu].accent theme knob recolors it). Small padding.
-   Quasar-internal (q-tab). */
-.compact-tabs { border-bottom: 1px solid rgba(255,255,255,.14); }
+/* Compact tab strip (the sub-menu tabs under the header): Deep Slate PILL tabs in
+   a raised rounded container — no folder baseline. The active pill is a soft navy
+   tint; inactive are plain. Quasar-internal (q-tab). */
+.compact-tabs {
+  background: #111731; border-radius: 12px; padding: 4px 5px; min-height: 0;
+}
 .compact-tabs .q-tab {
-  min-height: 32px; padding: 0 14px; margin-right: 3px;
-  border: 1px solid rgba(255,255,255,.14); border-bottom: none;
-  border-radius: 8px 8px 0 0; background: rgba(255,255,255,.05);
+  min-height: 30px; padding: 0 13px; margin-right: 2px;
+  border-radius: 8px; background: transparent; color: #8891ab;
 }
-.compact-tabs .q-tab--active { background: var(--q-primary); color: #fff; }
+.compact-tabs .q-tab--active {
+  background: rgba(107,134,255,0.16); color: #dbe2ff;
+}
 .compact-tabs .q-tab__indicator { display: none; }
-.compact-tabs .q-tab__label { font-size: 13px; }
+.compact-tabs .q-tab__label { font-size: 12.5px; font-weight: 500; }
 /* Subtab row (a page's own view tabs, e.g. Gamma GEX/Charm/DEX/Vanna/Flow/Term)
-   — same folder shape, one size smaller and a muted active fill so the hierarchy
-   under the main strip reads clearly. */
-.compact-subtabs { border-bottom: 1px solid rgba(255,255,255,.10); }
-.compact-subtabs .q-tab {
-  min-height: 27px; padding: 0 12px; margin-right: 3px;
-  border: 1px solid rgba(255,255,255,.12); border-bottom: none;
-  border-radius: 7px 7px 0 0; background: rgba(255,255,255,.04);
+   — the same pill shape one size smaller, on a fainter inset container so the
+   hierarchy under the main strip reads clearly. */
+.compact-subtabs {
+  background: #0f1428; border-radius: 10px; padding: 3px 4px; min-height: 0;
 }
-.compact-subtabs .q-tab--active { background: rgba(255,255,255,.14); color: #fff; }
+.compact-subtabs .q-tab {
+  min-height: 26px; padding: 0 11px; margin-right: 2px;
+  border-radius: 7px; background: transparent; color: #8891ab;
+}
+.compact-subtabs .q-tab--active { background: rgba(255,255,255,.08); color: #eef1f6; }
 .compact-subtabs .q-tab__indicator { display: none; }
 .compact-subtabs .q-tab__label { font-size: 12px; }
 /* Flush tab panels — Quasar gives each q-tab-panel 16px padding; pages whose
    panels should hug their card/table edges opt in with .flush-panels. */
 .flush-panels .q-tab-panel { padding: 4px 0 0 0; }
-/* Page-help "?" — tucked into the bottom-right corner of the header banner.
-   Positioning is on the element (Tailwind); these stay Quasar-internal. */
-.help-fab .help-btn { font-size: 11px; min-height: 0; min-width: 0; }
-.help-fab .help-btn .q-btn__content { padding: 3px; }
+/* Page-help tooltips — mounted on every nav TAB + drawer item (the header "?"
+   fab was removed 2026-07-12); shown after the mouse rests 2 s (q-tooltip delay). */
 .q-tooltip.help-tip { background: #1e2735; color: #e7edf5; font-size: .82rem;
     line-height: 1.5; padding: 12px 16px; border: 1px solid rgba(255,255,255,.14);
     border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,.45); }
@@ -486,6 +527,27 @@ _NAV_CSS = """
 .q-tooltip.help-tip p { margin: .4em 0; }
 .q-tooltip.help-tip ul { padding-left: 1.15em; margin: .35em 0; }
 .q-tooltip.help-tip li { margin: .2em 0; }
+/* ── Deep Slate shell chrome (Phase 2) ─────────────────────────────────────
+   Header brand mark + market-status pill + left-rail nav dots. rgba lives in raw
+   CSS (not Tailwind classes) so the bundled JIT never has to emit rgba arbitraries. */
+.brand-tile {
+  width: 28px; height: 28px; border-radius: 9px; flex: none;
+  background: linear-gradient(135deg,#6b86ff,#4a5fd6);
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 4px 14px -4px rgba(107,134,255,0.7);
+}
+.mkt-pill { display: flex; align-items: center; gap: 7px; height: 28px;
+  padding: 0 11px; border-radius: 8px; }
+.mkt-pill .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.mkt-open { background: rgba(53,194,129,0.12); border: 1px solid rgba(53,194,129,0.28); }
+.mkt-open .dot { background: #35c281; box-shadow: 0 0 8px rgba(53,194,129,0.8); }
+.mkt-open .lbl { color: #5fd6a2; }
+.mkt-closed { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.09); }
+.mkt-closed .dot { background: #6d76a0; }
+.mkt-closed .lbl { color: #8891ab; }
+.nav-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.nav-dot-active { background: #6b86ff; }
+.nav-dot-idle { background: #3c4560; }
 """
 
 # Global table chrome (app-wide standard): EVERY data table gets a fixed (sticky)
@@ -495,7 +557,15 @@ _NAV_CSS = """
 # its more-specific selector + later injection win over this baseline.
 _TABLE_CSS = """
 .q-table__middle { max-height: 65vh; }
-.q-table thead tr th { position: sticky; top: 0; z-index: 1; background: #1d1d1d; }
+/* Deep Slate table header: sticky, dark #141a30 inset, with uppercase faint
+   column labels (10.5px / 600 / .06em) — the trading-terminal look. */
+.q-table thead tr th {
+  position: sticky; top: 0; z-index: 1; background: #141a30;
+  font-size: 10.5px; font-weight: 600; letter-spacing: .06em;
+  text-transform: uppercase; color: #6d76a0;
+}
+/* Faint row dividers (Deep Slate) between body rows. */
+.q-table tbody tr:not(:last-child) td { border-bottom: 1px solid rgba(255,255,255,.04); }
 """
 
 
@@ -621,6 +691,15 @@ def _guarded_compute():
     return result
 
 
+def _help_tooltip(path: str) -> None:
+    """Page-help tooltip mounted inside the CURRENT element (a nav tab / drawer
+    item): the plain-language guide for ``path`` (page_help), shown after the
+    mouse RESTS on the element for 2 s (q-tooltip ``delay``). Replaced the old
+    header "?" fab (2026-07-12) — the help now lives on the menu items themselves."""
+    with ui.tooltip().props("delay=2000 max-width=480px").classes("help-tip"):
+        ui.markdown(page_help.help_md(path)).classes("text-left")
+
+
 def _nav_link(path: str, label: str, icon: str, active: str) -> None:
     base = ("w-full no-underline items-center rounded-[10px] px-3 py-1 "
             "transition-colors hover:bg-white/[0.06]")
@@ -629,11 +708,16 @@ def _nav_link(path: str, label: str, icon: str, active: str) -> None:
     # generate arbitrary values containing var(...) (plain-hex arbitraries are
     # fine), so the old bg-[var(--q-primary)] silently produced no rule. The CSS
     # var keeps the pill following the [menu].accent knob (ui.colors).
-    state = " nav-active" if path == active else ""
+    is_active = path == active
+    state = " nav-active" if is_active else ""
     with ui.link(target=path).classes(base + state):
+        _help_tooltip(path)   # rest the mouse 2 s for this page's guide
         with ui.row().classes("items-center gap-3 w-full no-wrap"):
-            ui.icon(icon).classes("text-xl opacity-90")
-            ui.label(label)
+            # Deep Slate: a dot indicator (blue when active, faint when not) — the
+            # ``icon`` arg is retained in the signature but no longer rendered.
+            ui.element("div").classes(
+                "nav-dot " + ("nav-dot-active" if is_active else "nav-dot-idle"))
+            ui.label(label).classes("nav-label")
             n = _NAV_BADGES.get(path, 0)
             badge = ui.badge(str(n) if n else "").classes("ml-auto").props("color=red rounded")
             badge.set_visibility(bool(n))
@@ -648,11 +732,14 @@ def _nav_group_link(label: str, icon: str, children, active: str) -> None:
     paths = [p for p, _l, _i in children]
     base = ("w-full no-underline items-center rounded-[10px] px-3 py-1 "
             "transition-colors hover:bg-white/[0.06]")
-    state = " nav-active" if active in paths else ""
+    is_active = active in paths
+    state = " nav-active" if is_active else ""
     with ui.link(target=paths[0]).classes(base + state):
+        _help_tooltip(paths[0])   # the group's landing page's guide (2 s rest)
         with ui.row().classes("items-center gap-3 w-full no-wrap"):
-            ui.icon(icon).classes("text-xl opacity-90")
-            ui.label(label)
+            ui.element("div").classes(
+                "nav-dot " + ("nav-dot-active" if is_active else "nav-dot-idle"))
+            ui.label(label).classes("nav-label")
             n = sum(_NAV_BADGES.get(p, 0) for p in paths)
             badge = ui.badge(str(n) if n else "").classes("ml-auto").props("color=red rounded")
             badge.set_visibility(bool(n))
@@ -676,51 +763,75 @@ def _layout(active: str, title: str):
     # config/theme.toml [typography] + [menu] — app-wide text categories and menu
     # styling, injected AFTER the baseline CSS so a configured override wins.
     # Both are "" / no-ops when the config keeps the defaults.
+    if theme.FONT_HEAD_HTML:
+        # config/theme.toml [typography].font_url — loads the web font (IBM Plex)
+        # so [typography].family resolves. "" (no font_url) → no-op / no request.
+        ui.add_head_html(theme.FONT_HEAD_HTML)
     if theme.TYPOGRAPHY_CSS:
         ui.add_css(theme.TYPOGRAPHY_CSS)
     if theme.NAV_THEME_CSS:
         ui.add_css(theme.NAV_THEME_CSS)
     if theme.MENU_ACCENT:
-        # Recolors the Quasar primary: the header bar AND the active nav pill
-        # (bg-[var(--q-primary)]) both follow it.
+        # [menu].accent → the Quasar primary: the active pill/tab fills + Quasar-
+        # colored controls (switches, sliders). The HEADER BAR is kept dark by
+        # [menu].header_bg (build_nav_css), decoupled from the accent — else a blue
+        # accent would paint the whole header blue.
         ui.colors(primary=theme.MENU_ACCENT)
     # Browser tab: title = the selected menu item; favicon = this page's color.
     ui.page_title(_NAV_LABEL.get(active, "Schwab Trading"))
     ui.add_head_html(_favicon_link(_TAB_COLOR.get(active, "#42a5f5")))
     drawer = ui.left_drawer(value=True, bordered=True).classes("nav-drawer").props("behavior=desktop")
     with drawer:
-        # nav-title = the [menu].title theme hook (build_nav_css overrides its color).
-        ui.label("SCHWAB TRADING").classes(
-            "nav-title font-bold tracking-[.04em] text-[.8rem] px-3 pt-1 pb-1.5 opacity-55")
-        # Flat main menu (2026-07-11): one item per GROUP (its child pages render
-        # as the top tab strip) + the single-page apps. No expandable sub-menus.
-        opts_label, opts_icon, opts_children = _NAV_GROUPS[0]
-        _nav_group_link(opts_label, opts_icon, opts_children, active)
-        sent_label, sent_icon, sent_children = _NAV_GROUPS[1]
-        _nav_group_link(sent_label, sent_icon, sent_children, active)
-        for path, label, icon in FLAT_NAV:
-            _nav_link(path, label, icon, active)
-        more_label, more_icon, more_children = _NAV_GROUPS[2]
-        _nav_group_link(more_label, more_icon, more_children, active)
+        # Deep Slate rail: "WORKSPACE" caption, dot-per-item nav, Session P&L pinned
+        # to the bottom. The h-full flex column lets `mt-auto` push the stat down.
+        with ui.column().classes("h-full w-full flex flex-col gap-[2px]"):
+            # nav-title = the [menu].title theme hook (build_nav_css sets its color).
+            ui.label("WORKSPACE").classes(
+                "nav-title font-semibold tracking-[.14em] text-[10.5px] px-3 pt-1 pb-2")
+            # Flat main menu: one item per GROUP (its child pages render as the top
+            # tab strip) + the single-page apps. No expandable sub-menus.
+            opts_label, opts_icon, opts_children = _NAV_GROUPS[0]
+            _nav_group_link(opts_label, opts_icon, opts_children, active)
+            sent_label, sent_icon, sent_children = _NAV_GROUPS[1]
+            _nav_group_link(sent_label, sent_icon, sent_children, active)
+            for path, label, icon in FLAT_NAV:
+                _nav_link(path, label, icon, active)
+            more_label, more_icon, more_children = _NAV_GROUPS[2]
+            _nav_group_link(more_label, more_icon, more_children, active)
+            # Session P&L — bottom of the rail (defensive read of the paper account).
+            try:
+                _pa = bus_client.read("options:paper_account") or {}
+            except Exception:  # noqa: BLE001 — chrome must never break a render.
+                _pa = {}
+            _pnl_txt, _pnl_tone = session_pnl_parts(_pa.get("snapshot"))
+            _pnl_cls = {"pos": theme.TXT_POS, "neg": theme.TXT_NEG,
+                        "flat": theme.MUTED}[_pnl_tone]
+            with ui.column().classes(
+                    "w-full px-3 pt-3 mt-auto border-t border-white/[0.05] gap-0"):
+                ui.label("Session P&L").classes("text-[10.5px] text-[#565f7d]")
+                ui.label(_pnl_txt).classes(f"text-[18px] font-semibold {_pnl_cls}")
 
-    with ui.header().classes("items-center justify-between"):
-        with ui.row().classes("items-center gap-2"):
-            ui.button(icon="menu", on_click=drawer.toggle).props("flat round color=white")
-            ui.label("Schwab Trading").classes("text-lg font-bold")
-        ui.label(title).classes("text-base opacity-80")
-
-        # Small "?" tucked into the bottom-right corner of the header banner. Hover
-        # for a plain-language "idiot's guide" to THIS page (keyed by route).
-        with ui.element("div").classes(
-            "help-fab absolute right-[6px] bottom-[2px] z-[2300]"):
-            with ui.button(icon="help").props("round size=xs color=blue").classes("help-btn"):
-                # Quote the multi-word anchor/self values — NiceGUI .props() splits on
-                # spaces, so unquoted "bottom right" would be mis-parsed. This pins the
-                # popup's top-right corner just under the "?" (extends down-left).
-                with ui.tooltip().props(
-                    'max-width=480px anchor="bottom right" self="top right"'
-                ).classes("help-tip"):
-                    ui.markdown(page_help.help_md(active)).classes("text-left")
+    with ui.header().classes("items-center justify-between px-4"):
+        with ui.row().classes("items-center gap-3 no-wrap"):
+            ui.button(icon="menu", on_click=drawer.toggle).props(
+                "flat round dense color=white size=sm")
+            with ui.element("div").classes("brand-tile"):
+                ui.html('<svg width="15" height="15" viewBox="0 0 16 16">'
+                        '<polyline points="1,11 5,6 8,9 15,2" fill="none" stroke="#0b1024" '
+                        'stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>')
+            ui.label("Schwab Trading").classes("text-[15px] font-semibold tracking-[.03em]")
+        with ui.row().classes("items-center gap-4 no-wrap"):
+            _section, _tab = breadcrumb_parts(active)
+            with ui.row().classes("items-center gap-2 no-wrap"):
+                ui.label(_section).classes("text-[12.5px] text-[#8891ab]")
+                if _tab:
+                    ui.element("div").classes("w-[4px] h-[4px] rounded-full bg-[#4a557a]")
+                    ui.label(_tab).classes("text-[12.5px] text-[#a9b6ff] font-medium")
+            _mkt_label, _mkt_open = market_status_parts()
+            with ui.row().classes(
+                    f"mkt-pill {'mkt-open' if _mkt_open else 'mkt-closed'} no-wrap"):
+                ui.element("div").classes("dot")
+                ui.label(_mkt_label).classes("lbl text-[11.5px] font-medium tracking-[.03em]")
 
     # Sub-menu TAB STRIP (2026-07-11): the active group's child pages as
     # folder-style tabs across the top of the page (.compact-tabs in _NAV_CSS).
@@ -737,6 +848,7 @@ def _layout(active: str, title: str):
             with strip:
                 for path, label, _icon in children:
                     with ui.tab(path, label=label):
+                        _help_tooltip(path)   # rest the mouse 2 s for the guide
                         n = _NAV_BADGES.get(path, 0)
                         b = ui.badge(str(n) if n else "").props(
                             "floating color=red rounded")
