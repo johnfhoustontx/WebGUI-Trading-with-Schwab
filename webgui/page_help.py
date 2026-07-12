@@ -168,7 +168,7 @@ Shows which sectors money is rotating **into** or **out of**, vs the S&P 500.
   (no auto-update).
 """,
     "/trade": """
-**Trade — the simple version**
+**Trade Analyzer — the simple version**
 
 A **Buy / Hold / Sell** read on a single stock, for two horizons.
 
@@ -203,7 +203,7 @@ Your **real** Schwab holdings, with context.
 - P&L streams live; **Refresh** rebuilds the grades.
 """,
     "/driver": """
-**Driver — the simple version**
+**Claude Trades — the simple version**
 
 An autonomous **paper** options trader: Claude picks and sizes defined-risk credit
 spreads, code-enforced guardrails cap the risk. Nothing goes to a live account.
@@ -227,7 +227,7 @@ A live grid of macro tickers, grouped into framed panels by category.
     "/eod": """
 **EOD Report — the simple version**
 
-An end-of-day summary of the day's options activity and the Driver.
+An end-of-day summary of the day's options activity and Claude Trades (the autonomous driver).
 
 - **Summary tiles** plus per-section tables (scanner, captured, paper, driver).
 - **Generate** saves a dated HTML snapshot you can reopen later.
@@ -237,7 +237,7 @@ An end-of-day summary of the day's options activity and the Driver.
 
 Shows whether each part of the app is alive.
 
-- **Green/red cards** — Memurai, the Schwab gateway, your Schwab login, the five
+- **Green/red cards** — Memurai, the Schwab gateway, your Schwab login, the six
   services, and the web app.
 - **Data freshness** — flags data that's gone stale.
 - **Restart** brings an offline piece back; **Authorize** re-logs into Schwab.
@@ -245,10 +245,13 @@ Shows whether each part of the app is alive.
     "/settings": """
 **Settings — the simple version**
 
-Controls the alert chimes and notifications.
+Controls the alert chimes, notifications, the ticker, and the app's look.
 
 - **Audio alert / sound / volume** — what plays when new signals appear.
 - **Market-hours only / minimum score** — when the app is allowed to bother you.
+- **Ticker** — the scrolling market-summary bar at the bottom of every page.
+- **Appearance** — every color, font, and menu style, editable in-app (tabs of
+  clickable color swatches). **Save & restart web GUI** applies the change.
 - **Test sound** also unlocks browser audio. The **User Manuals** live here too.
 """,
     "/manuals": """
