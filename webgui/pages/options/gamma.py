@@ -495,7 +495,11 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None):
         series.append(_cone_series("EM up", "up", "#7fd1a3"))
         series.append(_cone_series("EM down", "down", "#e79a9a"))
         times = times + ptimes
-    yaxis = {**_dark_axis("Strike"), "startOnTick": False, "endOnTick": False}
+    # The bar chart already labels the Strike axis and the heatmap shares its EXACT
+    # y-range, so hide the heatmap's (duplicate) strike labels + title and drop its
+    # left-axis gutter — the cells butt directly against the bars.
+    yaxis = {**_dark_axis(), "startOnTick": False, "endOnTick": False,
+             "title": {"text": None}, "labels": {"enabled": False}}
     if yrange is not None:
         yaxis["min"], yaxis["max"] = yrange[0], yrange[1]
     fig = _base_chart("heatmap", height)
@@ -503,6 +507,10 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None):
     # Shared plot geometry so the Strike axis aligns pixel-for-pixel with the bars.
     fig["chart"]["marginTop"] = _PLOT_MARGIN_TOP
     fig["chart"]["marginBottom"] = _PLOT_MARGIN_BOTTOM   # room for rotated time labels
+    # No strike-label gutter (bars own that axis) → cells butt against the bar panel;
+    # zero right margin → the heatmap runs to the panel's right edge.
+    fig["chart"]["marginLeft"] = 0
+    fig["chart"]["marginRight"] = 0
     # Press-and-hold tooltip hook must be on whatever options the element MOUNTS
     # with — _render_view overwrites the init fig's options before the client
     # mounts, so carry the load hook here too (load fires once at mount).
@@ -917,7 +925,9 @@ def render():
     # each time would flash. Message labels are toggled via set_visibility. Column
     # flex weights are set per-render from the intraday snapshot count (panel_flex)
     # so the heatmap grows / bars shrink through the session.
-    with ui.row().classes("w-full no-wrap gap-4 items-start relative gamma-xhair-row"):
+    # gap-0: bars + heatmap sit flush (no inter-panel gap). -mr-4 cancels the content
+    # column's p-4 right padding so the heatmap's right edge reaches the window edge.
+    with ui.row().classes("w-full no-wrap gap-0 items-start relative gamma-xhair-row -mr-4"):
         chart_box = ui.column().classes(f"min-w-0 {_INIT_FLEX}")
         with chart_box:
             # chart_plot switches kind (bar <-> Term heatmap). Highcharts'

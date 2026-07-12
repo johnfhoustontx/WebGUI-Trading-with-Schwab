@@ -156,6 +156,18 @@ def test_heatmap_figure_crops_data_to_yrange():
     assert fig["colorAxis"]["max"] == 5
 
 
+def test_heatmap_figure_hides_duplicate_strike_axis_and_flushes_margins():
+    # The bar chart owns the Strike axis; the heatmap shares its y-RANGE (for
+    # alignment) but hides its own strike labels/title, and runs edge-to-edge
+    # (marginLeft/Right 0) so it butts against the bars and reaches the window edge.
+    rows = [("09:30", 450.0, None, None, None, 0, {449.0: {"net": 5}})]
+    fig = gamma.heatmap_figure(rows, "GEX", yrange=[440.0, 460.0])
+    assert fig["yAxis"]["labels"]["enabled"] is False
+    assert fig["yAxis"].get("title", {}).get("text") is None
+    assert fig["yAxis"]["min"] == 440.0 and fig["yAxis"]["max"] == 460.0   # range kept
+    assert fig["chart"]["marginLeft"] == 0 and fig["chart"]["marginRight"] == 0
+
+
 def test_strike_step_uses_median_gap_not_min():
     # Mixed spacing (fine strikes near money among coarser ones): the row height
     # must be the MEDIAN gap (2.5) so cells fill the panel, NOT the min (1.0)
