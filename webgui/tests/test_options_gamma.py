@@ -270,10 +270,20 @@ def test_wrap_explain_fragment_and_document():
     assert doc.lstrip().startswith("<!DOCTYPE") and body in doc
 
 
-def test_summary_text_mentions_spot_and_flip():
+def test_summary_text_keeps_net_and_flip_drops_spot_and_strikes():
     txt = gamma.summary_text({"spot": 450.0, "flip": 449.5, "net_total": 1234.0,
                               "strike_count": 3}, "GEX")
-    assert "450" in txt and "449.5" in txt
+    assert "GEX" in txt and "449.5" in txt and "1,234" in txt   # flip + net kept
+    assert "spot" not in txt and "strikes" not in txt           # low-value, dropped
+    assert "450.00" not in txt                                  # spot value gone
+
+
+def test_dex_hedge_suffix_variants():
+    s = gamma.dex_hedge_suffix({"net_delta_0dte": 10, "projected_net_delta_close": 5,
+                                "hedge_pressure": -5})
+    assert "Net Δ 10" in s and "hedge -5" in s
+    assert gamma.dex_hedge_suffix({"hedge_pressure": None}) == "hedge n/a (nearest expiry not 0-DTE)"
+    assert gamma.dex_hedge_suffix(None).startswith("hedge n/a")
 
 
 # ── Tier-3 wiring (Task 2.6d) ────────────────────────────────────────────────

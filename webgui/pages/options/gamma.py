@@ -17,7 +17,7 @@ STRINGS. The pure builders (``bars_from_gex`` sorts + numeric-compares strikes;
 via ``_refloat_keys`` BEFORE feeding the builders. The builders stay unchanged.
 """
 from pages.ui_guard import guard, guard_async
-from .theme import TXT_POS, TXT_NEG, TXT_NEUTRAL, BTN, BTN_PRIMARY
+from .theme import BTN, BTN_PRIMARY
 
 POS_COLOR = "#66bb6a"
 NEG_COLOR = "#ef5350"
@@ -781,17 +781,28 @@ def term_heatmap(term_grid):
 
 
 def summary_text(summary, view):
+    # Spot (already the on-chart spot line) and strike-count (a data-loaded indicator
+    # only) were dropped as low-value; net + flip are the actual reads.
     s = summary or {}
     parts = [f"{view}"]
-    if s.get("spot") is not None:
-        parts.append(f"spot {s['spot']:,.2f}")
-    if s.get("strike_count") is not None:
-        parts.append(f"{s['strike_count']} strikes")
     if s.get("net_total") is not None:
         parts.append(f"net {s['net_total']:,.0f}")
     if s.get("flip") is not None:
         parts.append(f"flip {s['flip']:.1f}")
     return "  ·  ".join(parts)
+
+
+def dex_hedge_suffix(hedge):
+    """0-DTE hedge-pressure summary suffix for the Delta view, folded into the
+    bottom-right status strip so DEX has no separate tiles row. Returns the n/a note
+    when the nearest expiry isn't 0-DTE."""
+    h = hedge or {}
+    hp = h.get("hedge_pressure")
+    if hp is None:
+        return "hedge n/a (nearest expiry not 0-DTE)"
+    return (f"Net Δ {h.get('net_delta_0dte') or 0:,.0f}  ·  "
+            f"proj close {h.get('projected_net_delta_close') or 0:,.0f}  ·  "
+            f"hedge {hp:,.0f}")
 
 
 # view name -> (tuple index from calc_all_from_chain, engine view string)
@@ -903,14 +914,10 @@ def render():
                     _mi.tooltip(f"{_title} $SPX/SPY/QQQ briefing — not generated yet today")
                     sched_btns[_slot] = _mi
                     _sched_titles[_slot] = _title
-    # Read-only status strip: the collector status WORD (colored) + a neutral detail
-    # label that folds last/next scan + the "Next refresh" countdown + the per-view
-    # summary into one line (status_strip_text). Version-polled like gamma/explain/
-    # analyze below. pressure_box (populated only on the DEX view) follows.
-    with ui.row().classes("items-center gap-3 flex-wrap"):
-        status_lbl = ui.label("").classes("text-sm font-medium")
-        detail_lbl = ui.label("").classes("opacity-60 text-sm")
-    pressure_box = ui.row().classes("gap-3 items-center")
+    # The collector status + detail strip is rendered as a TINY overlay pinned to the
+    # bottom-right of the heatmap panel (created inside the chart row below), so it no
+    # longer takes a full row above the charts. status_lbl / detail_lbl are created
+    # there; the repaint helpers here reference them (resolved at call time).
 
     # Three independent sources feed the detail strip (collector status, the per-view
     # summary, the refresh countdown); unify them behind one state dict + repaint fn.
@@ -952,6 +959,17 @@ def render():
             # hook is installed at creation (load fires once); updated in place after.
             heat_plot = ui.highchart(_heat_init_fig(), extras=["heatmap", "coloraxis"]).classes("w-full")
             heat_msg = ui.label("").classes("opacity-60 text-sm")
+        # Tiny status overlay pinned to the bottom-right of the heatmap panel (the chart
+        # row is `relative`): the collector status WORD (colored) + the neutral detail
+        # strip (last/next scan + refresh countdown + per-view summary). pointer-events-
+        # none so it never blocks the chart crosshair / press-and-hold tooltip.
+        # A faint dark pill keeps the tiny text legible over the time-axis labels /
+        # cells it sits above; pointer-events-none so it never blocks the chart.
+        with ui.row().classes("absolute bottom-1 right-2 items-baseline gap-2 text-[10px] "
+                              "leading-none whitespace-nowrap pointer-events-none z-10 "
+                              "bg-[#0c1424cc] px-1.5 py-0.5 rounded"):
+            status_lbl = ui.label("").classes("font-medium")
+            detail_lbl = ui.label("").classes("opacity-70")
 
     # History picker (BELOW the charts): browse past stored briefings. Pick a date
     # (+ optional slot) and Open regenerates the report from the stored analysis (via
@@ -1032,7 +1050,6 @@ def render():
         The Highcharts elements persist across repaints and are updated in place
         (via _set_figure / _set_chart) so the charts don't flicker."""
         snap = state["snap"]
-        pressure_box.clear()
         if not snap:
             state["chart_el"].set_visibility(False)
             heat_plot.set_visibility(False)
@@ -1132,19 +1149,10 @@ def render():
         _apply_flex(len(rows))
 
         if view == "DEX":
-            hedge = entry.get("hedge") or {}
-            with pressure_box:
-                hp = hedge.get("hedge_pressure")
-                if hp is None:
-                    ui.label("0-DTE hedge pressure: n/a (nearest expiry is not 0-DTE)").classes("opacity-60 text-sm")
-                else:
-                    def tile(label, val, cls=TXT_NEUTRAL):
-                        with ui.card().classes("p-2"):
-                            ui.label(label).classes("text-xs opacity-60")
-                            ui.label(f"{val:,.0f}").classes(f"text-base font-bold {cls}")
-                    tile("Net Δ now", hedge.get("net_delta_0dte") or 0)
-                    tile("Projected close", hedge.get("projected_net_delta_close") or 0)
-                    tile("Hedge pressure", hp, TXT_POS if hp >= 0 else TXT_NEG)
+            # Fold the 0-DTE hedge-pressure into the bottom-right status strip (no
+            # separate tiles row) so Delta has no extra line.
+            _set_summary(strip_state["summary"] + "  ·  "
+                         + dex_hedge_suffix(entry.get("hedge")))
 
     @guard
     def _request_refresh():
