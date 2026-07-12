@@ -973,18 +973,37 @@ def render():
         box.classes(remove=flex_cur[key], add=cls)
         flex_cur[key] = cls
 
+    def _reflow_charts():
+        """Resize the Highcharts panels to their (flex-sized) containers.
+
+        The nicegui-highcharts element measures its width ONCE at mount and has no
+        ResizeObserver, and ``chart.update()`` does NOT resize — so after a flex/width
+        change the SVG stays frozen at its first-mount width (dead space to the right
+        of the panel). Defer one tick so the new flex widths are laid out, then reflow
+        both panels to fill their containers. Null-safe (no-op if a chart isn't mounted
+        yet); the next repaint reflows again."""
+        @guard
+        def _do():
+            el = state.get("chart_el")
+            ids = [i for i in (getattr(el, "id", None), heat_plot.id) if i]
+            if ids:
+                ui.run_javascript(";".join(f"getElement({i})?.chart?.reflow()" for i in ids))
+        ui.timer(0.05, _do, once=True)
+
     def _apply_flex(n_cols, term=False):
-        """Set the bar/heatmap column widths. Term → bars full width (no heatmap);
-        otherwise proportional to the intraday snapshot count (panel_flex)."""
+        """Set the bar/heatmap column widths (fixed _STRIKE_HEAT_SPLIT split), then
+        reflow so the panels fill their containers. Term → bars full width (no heatmap)."""
         if term:
             _set_flex_class(chart_box, "chart", flex_class(1))
             _set_flex_class(heatmap_box, "heat", flex_class(0, grow2=0, basis="0px"))
             heatmap_box.set_visibility(False)
+            _reflow_charts()
             return
         heatmap_box.set_visibility(True)
         bar_w, heat_w = _STRIKE_HEAT_SPLIT
         _set_flex_class(chart_box, "chart", flex_class(bar_w))
         _set_flex_class(heatmap_box, "heat", flex_class(heat_w))
+        _reflow_charts()
 
     def _set_chart(fig):
         """Paint chart_plot: update in place when the chart KIND is unchanged

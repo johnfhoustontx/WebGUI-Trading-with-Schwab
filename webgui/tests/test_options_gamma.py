@@ -455,6 +455,7 @@ def test_render_view_updates_in_place_not_clear():
     assert "chart_box.clear()" not in src   # never tear down the whole panel/messages
     assert "heatmap_box.clear()" not in src
     assert "_STRIKE_HEAT_SPLIT" in src   # fixed 40/60 strike/heatmap split is wired
+    assert "reflow" in src               # panels reflow to fill their flex containers
     assert "bar_yrange" in src           # fixed ±N_SIDE window y-range is wired
 
 
