@@ -925,9 +925,12 @@ def render():
     # each time would flash. Message labels are toggled via set_visibility. Column
     # flex weights are set per-render from the intraday snapshot count (panel_flex)
     # so the heatmap grows / bars shrink through the session.
-    # gap-0: bars + heatmap sit flush (no inter-panel gap). -mr-4 cancels the content
-    # column's p-4 right padding so the heatmap's right edge reaches the window edge.
-    with ui.row().classes("w-full no-wrap gap-0 items-start relative gamma-xhair-row -mr-4"):
+    # gap-0: bars + heatmap sit flush (no inter-panel gap). w-[calc(100%+1rem)] makes
+    # the row 1rem wider than the content box so it extends INTO (and fills) the content
+    # column's p-4 right padding — the heatmap's right edge then reaches the window edge.
+    # (A negative right margin does NOT widen a full-width flex item, so calc-width is
+    # used instead; the 1rem lands inside the parent's padding → never a horizontal scroll.)
+    with ui.row().classes("w-[calc(100%+1rem)] no-wrap gap-0 items-start relative gamma-xhair-row"):
         chart_box = ui.column().classes(f"min-w-0 {_INIT_FLEX}")
         with chart_box:
             # chart_plot switches kind (bar <-> Term heatmap). Highcharts'
