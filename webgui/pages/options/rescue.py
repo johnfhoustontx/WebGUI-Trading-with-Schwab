@@ -11,7 +11,7 @@ imported lazily inside ``render()`` only (mirrors ``expected_move.py`` /
 ``simulator.py``).
 """
 
-from .theme import BTN_3D
+from .theme import BADGE_NEG, BADGE_POS, BADGE_WARN, BTN_3D
 
 # Heat zone colors (higher heat = closer to trouble): green → amber → orange →
 # red. Reuses the shared palette idiom from scanner.py / svg.py (#ef5350 red,
@@ -49,9 +49,19 @@ def heat_color(heat):
 
 
 def heat_bg_class(heat):
-    """Tailwind ``bg-[<hex>]`` class for a 0-100 heat value (same zones as
-    ``heat_color``; None / non-numeric -> green). Used by the heat-cell slot."""
-    return f"bg-[{heat_color(heat)}]"
+    """Deep Slate badge token for a 0-100 heat value (tinted bg + colored fg).
+
+    <25 green · 25-50 amber · >=50 red (the mock's "red if >=50" with an amber
+    mid-band). None / non-numeric -> green. Used by the heat-cell slot."""
+    try:
+        h = float(heat)
+    except (TypeError, ValueError):
+        return BADGE_POS
+    if h < 25:
+        return BADGE_POS
+    if h < 50:
+        return BADGE_WARN
+    return BADGE_NEG
 
 
 def heat_border_class(heat):
@@ -323,7 +333,7 @@ _RESCUE_CSS = """
 .rescue-table .q-table__middle { max-height: 72vh; }
 .rescue-table thead tr th {
   position: sticky; top: 0; z-index: 1;
-  background-color: #1d1d1d;
+  background-color: #141a30;
 }
 """
 
@@ -359,46 +369,47 @@ def render():
 
     with ui.row().classes("w-full gap-4 no-wrap items-start") as body:
         # Left: the at-risk board (shrunk so the rescue menu sits to its right).
+        # 2026-07-11 GUI conformity: bare dense table (no wrapper card / section
+        # title), like the other Options pages — the tab strip names the page.
         with ui.column().classes("min-w-0 grow-[3] shrink basis-0"):
-            with ui.card().classes("w-full"):
-                ui.label("At-risk positions").classes("text-subtitle1")
-                at_risk_tbl = ui.table(columns=at_risk_columns(), rows=[],
-                                       row_key="id").classes("w-full rescue-table")
-                # Color the heat cell by zone (scanner's composite_score idiom).
-                at_risk_tbl.add_slot("body-cell-heat", r"""
-                  <q-td :props="props">
-                    <q-badge :class="props.row._heat_class + ' text-[#111]'"
-                             :label="props.value ?? '—'"/>
-                  </q-td>
-                """)
-                # P&L + Δ short shown with exactly 2 decimals (kill float tails).
-                at_risk_tbl.add_slot("body-cell-pnl", r"""
-                  <q-td :props="props" class="text-right">
-                    {{ props.value == null ? '—' : Number(props.value).toFixed(2) }}
-                  </q-td>
-                """)
-                at_risk_tbl.add_slot("body-cell-short_delta", r"""
-                  <q-td :props="props" class="text-right">
-                    {{ props.value == null ? '—' : Number(props.value).toFixed(2) }}
-                  </q-td>
-                """)
-                at_risk_empty = ui.label("No tested or critical positions right now.") \
-                    .classes("opacity-70")
+            at_risk_tbl = ui.table(columns=at_risk_columns(), rows=[],
+                                   row_key="id").classes("w-full rescue-table").props("dense")
+            # Color the heat cell by zone (scanner's composite_score idiom).
+            at_risk_tbl.add_slot("body-cell-heat", r"""
+              <q-td :props="props">
+                <q-badge :class="props.row._heat_class"
+                         :label="props.value ?? '—'"/>
+              </q-td>
+            """)
+            # P&L + Δ short shown with exactly 2 decimals (kill float tails).
+            at_risk_tbl.add_slot("body-cell-pnl", r"""
+              <q-td :props="props" class="text-right">
+                {{ props.value == null ? '—' : Number(props.value).toFixed(2) }}
+              </q-td>
+            """)
+            at_risk_tbl.add_slot("body-cell-short_delta", r"""
+              <q-td :props="props" class="text-right">
+                {{ props.value == null ? '—' : Number(props.value).toFixed(2) }}
+              </q-td>
+            """)
+            at_risk_empty = ui.label("No tested or critical positions right now.") \
+                .classes("opacity-70")
 
-        # Right: the ranked rescue menu for the selected position.
+        # Right: the ranked rescue menu for the selected position. Bare column
+        # (2026-07-11 GUI conformity — the candidate cards carry their own frames;
+        # the old default ui.card wrapper was redundant chrome).
         with ui.column().classes("min-w-0 grow-[2] shrink basis-0"):
-            with ui.card().classes("w-full"):
-                with ui.row().classes("items-center gap-3 w-full"):
-                    advisory_head = ui.label(
-                        "Select an at-risk position to see rescue options.") \
-                        .classes("text-subtitle1")
-                    advisory_spinner = ui.spinner(size="sm")
-                    advisory_spinner.set_visibility(False)
-                # Persistent chart at first render (ESM import-map gotcha): a minimal
-                # payoff placeholder so any later in-place update resolves.
-                payoff_chart = ui.highchart(_payoff_figure(None)).classes("w-full")
-                payoff_chart.set_visibility(False)
-                cards_col = ui.column().classes("w-full gap-3")
+            with ui.row().classes("items-center gap-3 w-full"):
+                advisory_head = ui.label(
+                    "Select an at-risk position to see rescue options.") \
+                    .classes("text-subtitle1")
+                advisory_spinner = ui.spinner(size="sm")
+                advisory_spinner.set_visibility(False)
+            # Persistent chart at first render (ESM import-map gotcha): a minimal
+            # payoff placeholder so any later in-place update resolves.
+            payoff_chart = ui.highchart(_payoff_figure(None)).classes("w-full")
+            payoff_chart.set_visibility(False)
+            cards_col = ui.column().classes("w-full gap-3")
 
     # ── at-risk board ────────────────────────────────────────────────────────
     def _render_at_risk():
