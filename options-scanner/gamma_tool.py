@@ -30,7 +30,7 @@ from gex_status import (
     STALE_AFTER_SEC,
 )
 
-from options_calculator import bs_charm, bs_delta, bs_gamma, bs_vanna
+from options_calculator import bs_charm, bs_delta, bs_gamma, bs_vanna, RISK_FREE_RATE
 from dealer_pinch import evaluate_dealer_pinch, dominant_oi_node
 from iv_percentile import percentile_rank, realized_vol_trend
 import theme
@@ -603,7 +603,7 @@ class GammaEngine:
         )
         T = max((dte * 24 + hours_left) / (365 * 24), 1e-6)
 
-        r = 0.045  # risk-free rate
+        r = RISK_FREE_RATE  # risk-free rate
         weight_field = "totalVolume" if use_volume else "openInterest"
         chex = {}
 
@@ -683,7 +683,7 @@ class GammaEngine:
         hours_left_trading = (CLOSE_HOUR_CT - now.hour) + (CLOSE_MIN_CT - now.minute) / 60.0
         hours_left_trading = max(0.0, hours_left_trading)
         T = max((dte * 24 + hours_left_trading) / (365 * 24), 1e-6)
-        r = 0.045
+        r = RISK_FREE_RATE
         weight_field = "totalVolume" if use_volume else "openInterest"
 
         dex = {}
@@ -794,7 +794,7 @@ class GammaEngine:
         )
         T = max((dte * 24 + hours_left) / (365 * 24), 1e-6)
 
-        r = 0.045
+        r = RISK_FREE_RATE
         weight_field = "totalVolume" if use_volume else "openInterest"
         vex = {}
 
@@ -956,7 +956,7 @@ class GammaEngine:
             0.0, (CLOSE_HOUR_CT - now.hour) + (CLOSE_MIN_CT - now.minute) / 60.0,
         )
         T = max((dte * 24 + hours_left_trading) / (365 * 24), 1e-6)
-        r = 0.045
+        r = RISK_FREE_RATE
         weight_field = "totalVolume" if use_volume else "openInterest"
 
         gex = {}
@@ -1071,7 +1071,7 @@ class GammaEngine:
 
         return gex_result, charm_result, dex_result, vanna_result
 
-    def project_exposure_forward(self, view, T_future, r=0.045):
+    def project_exposure_forward(self, view, T_future, r=RISK_FREE_RATE):
         """Project per-strike exposure at a future time-to-expiry T_future.
 
         Args:

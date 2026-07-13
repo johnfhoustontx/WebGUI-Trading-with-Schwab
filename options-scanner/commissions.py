@@ -12,10 +12,15 @@ than raising (a swing candidate should never crash on commission math).
 """
 import pathlib
 
+import sys as _sys, pathlib as _pathlib
+_sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo root
+
 try:
     import tomllib  # py3.11+
 except ModuleNotFoundError:  # pragma: no cover
     import tomli as tomllib
+
+from shared.symbols import is_index_symbol  # noqa: E402
 
 # Repo root = parent of options-scanner/. Kept path-derived (not imported from
 # repo_paths) so this module has zero import-time coupling and can't fail import.
@@ -27,10 +32,6 @@ _DEFAULT_EQUITY_RATE = 0.65
 _DEFAULT_INDEX_RATE = 0.65
 _DEFAULT_INDEX_FEE = 0.0
 
-# Index roots that carry the index option rate (+ exchange passthrough).
-# Mirrors commission._INDEX_ROOTS.
-_INDEX_ROOTS = {"SPX", "VIX", "OEX", "NDX", "RUT", "XSP", "DJX"}
-
 
 def _load_rates():
     try:
@@ -41,12 +42,6 @@ def _load_rates():
 
 
 _RATES = _load_rates()
-
-
-def is_index_symbol(symbol):
-    if not symbol:
-        return False
-    return str(symbol).lstrip("$").upper() in _INDEX_ROOTS
 
 
 def _option_rate(symbol):

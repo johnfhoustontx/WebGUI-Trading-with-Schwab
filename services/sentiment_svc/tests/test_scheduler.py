@@ -86,6 +86,12 @@ def test_refresh_due_before_rth_is_off_hours():
     assert due2 is False
 
 
+def test_holidays_sourced_from_shared_calendar():
+    from services.sentiment_svc import scheduler
+    from shared import market_calendar as mc
+    assert scheduler._HOLIDAYS is mc.HOLIDAYS
+
+
 # -- sectors_due: hourly RTH sector recompute (P/C fix, 2026-07-09) ------------
 # The sector view (quotes/trends/P/C/RRG) was recomputed ONLY at service startup
 # + manual Refresh; a premarket start meant zero option volume -> pcr_from_chain

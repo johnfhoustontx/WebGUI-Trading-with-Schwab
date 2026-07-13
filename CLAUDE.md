@@ -331,7 +331,39 @@ stop/target** [40–50% of max profit, or 150–200% of credit loss]) → `push_
 digest — no "all clear" spam). Cached at `cache:options:action_alert` for inspection. All defensive
 + per-category guarded. Restart `options_svc` to pick both up. options_svc **389** + options-scanner
 paper/eod/repricer **71** green; verified live (digest built against real data: 17 captured actions +
-1 at-risk). Branch `Using_Highcharts`.). Prior — 2026-07-02 (**Driver risk-sizing fix (RISK_TOO_HIGH) + Sonnet 5 + prompt
+1 at-risk). Branch `Using_Highcharts`.). Prior — 2026-07-03 (**Config consolidation — single-source
+calendar and symbols** — a hard-coded-config audit found duplication that is
+now consolidated to one sanctioned source (behavior-preserving refactor). **(1) Market calendar:**
+the NYSE holiday set (found duplicated in **7** places — the 5 known service/webgui/CLI schedulers
+**plus** two the audit missed: a **stale** `scanner_engine.py` `HOLIDAYS_2026` that was missing
+Juneteenth + all of 2027, and `claude-driver/config.py` `MARKET_HOLIDAYS`) now lives ONLY in new
+**`shared/market_calendar.py`** (`HOLIDAYS` frozenset + `CT` clock +
+`is_holiday`/`is_trading_day`/`prev_trading_day`/`next_trading_day`/`market_now`). Every consumer
+imports it; per-consumer `is`-identity drift-guard tests pin it. **Yearly holiday maintenance is now
+ONE edit.** The `scanner_engine` convergence is a **behavior BUGFIX** (the scanner previously treated
+Juneteenth + 2027 holidays as trading days). Each consumer keeps its own market-HOURS window (scan
+08:00–15:15 / RTH 08:30–15:00 / GEX 08:30–15:20) — those legitimately differ and are NOT shared.
+**(2) Symbols (tiered):** new **`shared/symbols.py`** holds the small canonical index sets
+(`SPX`/`VIX`/`SPY`/`QQQ`, `SCAN_BASE`, `COLLECTION_BASE`, `INDEX_SYMBOLS`, `INDEX_ROOTS` +
+`is_index_symbol`); `watchlist`/`gex_collector`/`scanner_engine`/`scanner` + both `commission(s).py`
+modules import from it (the commission `_INDEX_ROOTS` was duplicated in two files). **Out of scope**
+(different concerns, left in place): the `Top 20.xlsx` live universe, the 78-name backtest
+`UNIVERSE_SECTOR`, the 140-symbol sector maps, `HEADER_SYMBOLS` (different order), the legacy
+`gamma_tool.py` Tk dropdown. **(A UI-palette Level-A step was built but DROPPED at merge):** the base
+branch independently shipped **`config/theme.toml`** (restyle-without-code-edits) — a more complete
+realization of the same "editable theme" goal — so the palette work (`theme.PALETTE` + `hex_of`/`txt`/
+`bg`/`rgb` + ~11 page migrations) was **reverted in favor of the base's config-driven theme system**.
+**Also this session (4 further hard-coded-config remediations):** **(a)** the
+`claude-driver/config.py` `TRADE_LOG`/`PENDING_TRADE`/`LOG_DIR` paths resolve via
+`repo_paths.CLAUDE_DRIVER` (was `os.path.join(BASE_DIR, …)` — the last `D:\`-rule violation); **(b)**
+`claude-driver/test_preflight.py` imports its service URLs from `repo_paths`
+(`PROXY_URL`/`ANALYTICS_URL`/`ML_SERVER_URLS`) instead of hard-coded `127.0.0.1:81xx/80xx` literals;
+**(c)** a **single `RISK_FREE_RATE` source** — `gamma_tool.py` (5 sites, byte-identical 0.045) and
+`backtest_0dte.py` import `options_calculator.RISK_FREE_RATE` (the backtest was the last divergence,
+**0.04 → 0.045**, a deliberate alignment that shifts that OFFLINE script's output); **(d)** the Gamma
+Analyze model gained a **`GAMMA_ANALYZE_MODEL`** override chain (env → gitignored
+`shared/analyze_model.txt` → default `claude-sonnet-5`), mirroring the driver's `DRIVER_MODEL`. See
+[design/plan](docs/plans/2026-07-03-config-consolidation.md). Prior — 2026-07-02 (**Driver risk-sizing fix (RISK_TOO_HIGH) + Sonnet 5 + prompt
 caching** — a debugging session on "driver trades logged **Executed** but never showed up."
 Root cause: the `/driver` decision-log "Executed N: SYM×q" line is only the **enqueue** of a
 `driver_paper_create` command; the real open in `options_svc.compute.open_driver_position` was

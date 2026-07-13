@@ -1881,7 +1881,29 @@ def _gamma_blocks_for(symbol, chain):
 # import is LAZY (only when a key resolves). EVERY failure surface (no chains / no key
 # / API error / empty reply) degrades to a readable HTML page so the tab always shows
 # something — never a silent no-op.
-_ANALYZE_MODEL = "claude-sonnet-5"
+def _resolve_analyze_model() -> str:
+    """The Gamma Analyze model: GAMMA_ANALYZE_MODEL env var → gitignored
+    shared/analyze_model.txt → default 'claude-sonnet-5'. Mirrors driver_svc's
+    DRIVER_MODEL override so the analyze model is tunable per-deployment without a
+    code change (e.g. put 'claude-opus-4-8' in shared/analyze_model.txt). ANY
+    failure falls back to the default — never raises."""
+    import os
+    env = os.environ.get("GAMMA_ANALYZE_MODEL")
+    if env and env.strip():
+        return env.strip()
+    try:
+        from repo_paths import SHARED_DIR
+        p = SHARED_DIR / "analyze_model.txt"
+        if p.exists():
+            picked = p.read_text(encoding="utf-8").strip()
+            if picked:
+                return picked
+    except Exception:  # noqa: BLE001 — a missing/unreadable override is non-fatal.
+        log.debug("reading analyze_model.txt failed", exc_info=True)
+    return "claude-sonnet-5"
+
+
+_ANALYZE_MODEL = _resolve_analyze_model()
 _ANALYZE_MAX_TOKENS = 1500  # "typical" ~1-page briefing (user-approved cost point)
 _ANALYZE_SYSTEM = (
     "You are an options-market analyst. From the structured GEX / Charm / DEX / Vanna "

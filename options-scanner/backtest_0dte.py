@@ -51,7 +51,7 @@ from collections import defaultdict
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root
 from repo_paths import PROXY_URL
 
-from options_calculator import bs_price, bs_delta
+from options_calculator import bs_price, bs_delta, RISK_FREE_RATE
 
 log = logging.getLogger("backtest_0dte")
 
@@ -61,7 +61,7 @@ log = logging.getLogger("backtest_0dte")
 
 TRADING_DAYS_PER_YEAR = 252
 SESSION_HOURS = 6.5
-RISK_FREE = 0.04
+RISK_FREE = RISK_FREE_RATE  # single source (options_calculator); was 0.04 — aligned to the canonical 0.045
 
 # --- Schwab futures-options costs ---
 # Commission is the EXACT Schwab published rate: $2.25 per contract per side.

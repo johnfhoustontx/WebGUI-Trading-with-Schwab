@@ -15,13 +15,17 @@ never crashes over the watchlist.
 import logging
 from pathlib import Path
 
+import sys as _sys, pathlib as _pathlib
+_sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo root
+from shared.symbols import SCAN_BASE  # noqa: E402
+
 log = logging.getLogger(__name__)
 
 #############################################
 # CONFIGURATION
 #############################################
 
-BASE_SYMBOLS = ["$SPX", "SPY", "QQQ"]
+BASE_SYMBOLS = list(SCAN_BASE)
 WATCHLIST_PATH = Path(__file__).parent / "data" / "Top 20.xlsx"
 
 _cache = {"mtime": None, "symbols": None}
