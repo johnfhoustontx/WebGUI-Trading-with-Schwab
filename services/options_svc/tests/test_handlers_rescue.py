@@ -332,6 +332,58 @@ def test_handle_command_dispatches_rescue_captured(monkeypatch):
     assert seen == {"pid": "AAPL_0_PCS_500", "source": "captured"}
 
 
+def test_run_rescue_adhoc_caches_advisory(monkeypatch):
+    """run_rescue_adhoc caches compute_rescue_adhoc's advisory under
+    cache:options:rescue:adhoc and publishes a version+position_id event."""
+    bus = Bus(fake=True)
+    seen = {}
+    monkeypatch.setattr(handlers.compute, "compute_rescue_adhoc",
+                        lambda spec: seen.update(spec=spec)
+                        or dict(_SAMPLE_ADVISORY, position_id="adhoc", source="adhoc"))
+
+    sub = bus.subscribe(handlers.EVENT_RESCUE)
+    spec = {"symbol": "SPY", "strategy": "PCS", "short_strike": 500.0,
+            "long_strike": 495.0, "expiration": "2099-07-31"}
+    handlers.run_rescue_adhoc(bus, spec)
+    msg = sub.get_message(timeout=1.0)
+    sub.close()
+
+    assert seen["spec"] == spec
+    env = bus.cache_get(f"{handlers.CACHE_RESCUE}:adhoc")
+    assert env is not None
+    assert env.payload["position_id"] == "adhoc"
+    assert env.payload["source"] == "adhoc"
+    assert msg is not None
+    assert msg.get("version") == env.version
+    assert msg.get("position_id") == "adhoc"
+
+
+def test_handle_command_dispatches_rescue_adhoc(monkeypatch):
+    """handle_command routes a 'rescue_adhoc' command (args.spec) to
+    run_rescue_adhoc."""
+    bus = Bus(fake=True)
+    seen = {}
+    monkeypatch.setattr(handlers, "run_rescue_adhoc",
+                        lambda b, spec: seen.update(spec=spec))
+    spec = {"symbol": "SPY", "strategy": "PCS", "short_strike": 500.0,
+            "long_strike": 495.0, "expiration": "2099-07-31"}
+    handlers.handle_command(bus, Command(type="rescue_adhoc", args={"spec": spec}))
+    assert seen == {"spec": spec}
+
+
+def test_handle_command_rescue_adhoc_spec_as_args_fallback(monkeypatch):
+    """When the spec IS the args dict (no 'spec' key), handle_command still
+    forwards it to run_rescue_adhoc."""
+    bus = Bus(fake=True)
+    seen = {}
+    monkeypatch.setattr(handlers, "run_rescue_adhoc",
+                        lambda b, spec: seen.update(spec=spec))
+    args = {"symbol": "SPY", "strategy": "PCS", "short_strike": 500.0,
+            "long_strike": 495.0, "expiration": "2099-07-31"}
+    handlers.handle_command(bus, Command(type="rescue_adhoc", args=args))
+    assert seen == {"spec": args}
+
+
 def test_handle_command_dispatches_rescue_apply(monkeypatch):
     """handle_command routes a 'rescue_apply' command to run_rescue_apply with the
     int position_id + candidate dict."""

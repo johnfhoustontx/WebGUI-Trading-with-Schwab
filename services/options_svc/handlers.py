@@ -120,6 +120,10 @@ EVENT_SWING = "events:options:swing"
 
 CACHE_PAPER = "cache:options:paper_account"
 EVENT_PAPER = "events:options:paper_account"
+# Manual (scanner-baseline) book performance analytics — the benchmark to compare the
+# driver's Claude-selected book against (equity curve + MAE/MFE; no posture post-mortem).
+CACHE_PAPER_ANALYTICS = "cache:options:paper_analytics"
+EVENT_PAPER_ANALYTICS = "events:options:paper_analytics"
 
 CACHE_PAPER_TRADES = "cache:options:paper_trades"
 EVENT_PAPER_TRADES = "events:options:paper_trades"
@@ -140,6 +144,9 @@ CACHE_NOTIFIED_CAPTURED = "cache:options:notified_captured"
 
 CACHE_ACTION_ALERT = "cache:options:action_alert"
 EVENT_ACTION_ALERT = "events:options:action_alert"
+
+CACHE_EOD_SUMMARY = "cache:options:eod_summary"
+EVENT_EOD_SUMMARY = "events:options:eod_summary"
 
 CACHE_GAMMA = "cache:options:gamma"
 EVENT_GAMMA = "events:options:gamma"
@@ -222,6 +229,9 @@ CACHE_DRIVER_PAPER = "cache:options:driver_paper_account"
 EVENT_DRIVER_PAPER = "events:options:driver_paper_account"
 CACHE_DRIVER_PERF = "cache:options:driver_paper_perf"
 EVENT_DRIVER_PERF = "events:options:driver_paper_perf"
+# Driver-book performance ANALYTICS (equity curve + posture post-mortem + MAE/MFE).
+CACHE_DRIVER_ANALYTICS = "cache:options:driver_paper_analytics"
+EVENT_DRIVER_ANALYTICS = "events:options:driver_paper_analytics"
 
 # Defaults mirror the page's input defaults (symbol SPY, 5-30 DTE, the put/call
 # delta gates, min credit 10% -> 0.10 fraction). The page sends the fraction.
@@ -367,6 +377,14 @@ def refresh_paper_account(bus) -> None:
     _apply_rescue_overlay(data)
     version = bus.cache_set(CACHE_PAPER, data)
     bus.publish(EVENT_PAPER, {"version": version})
+    # Manual-book analytics (equity curve + MAE/MFE) — defensive; can't block the account
+    # republish above.
+    try:
+        analytics = compute.manual_analytics()
+        va = bus.cache_set(CACHE_PAPER_ANALYTICS, analytics)
+        bus.publish(EVENT_PAPER_ANALYTICS, {"version": va})
+    except Exception:
+        log.exception("manual analytics publish degraded")
 
 
 def publish_rescue_summary(bus) -> None:
@@ -463,6 +481,14 @@ def refresh_driver_paper(bus) -> None:
     perf = compute.driver_account_perf()
     vp = bus.cache_set(CACHE_DRIVER_PERF, perf)
     bus.publish(EVENT_DRIVER_PERF, {"version": vp})
+    # Performance analytics (equity curve / posture post-mortem / MAE-MFE). Defensive —
+    # a bad payload can't block the account/perf republish above.
+    try:
+        analytics = compute.driver_analytics()
+        va2 = bus.cache_set(CACHE_DRIVER_ANALYTICS, analytics)
+        bus.publish(EVENT_DRIVER_ANALYTICS, {"version": va2})
+    except Exception:
+        log.exception("driver analytics publish degraded")
 
 
 def run_driver_manage_and_refresh(bus) -> None:
@@ -759,6 +785,37 @@ def run_action_alert(bus, slot=None) -> None:
         log.exception("action_alert cache_set degraded")
 
 
+def run_eod_summary(bus, slot=None) -> None:
+    """Assemble the per-book end-of-day P&L summary + push it (Telegram/Discord/SMS).
+
+    Driven by ``scheduler.eod_summary_due`` at ~15:10 CT on each trading day. Caches the
+    summary under ``cache:options:eod_summary`` for inspection (the day's per-book stats +
+    whether it pushed). Fully defensive — a collect or push hiccup never raises into the
+    scheduler; the push sends nothing when no paper book is seeded (see
+    ``push_notify.send_eod_summary``)."""
+    import datetime as _dt
+    from zoneinfo import ZoneInfo as _ZI
+
+    try:
+        summary = compute.collect_eod_summary()
+    except Exception:
+        log.exception("collect_eod_summary degraded → empty summary")
+        summary = {}
+    sent = False
+    try:
+        sent = push_notify.send_eod_summary(summary)
+    except Exception:
+        log.exception("send_eod_summary degraded")
+    payload = {"slot": slot, "summary": summary,
+               "books": push_notify.eod_book_count(summary), "sent": bool(sent),
+               "generated_at": _dt.datetime.now(_ZI("America/Chicago")).isoformat()}
+    try:
+        version = bus.cache_set(CACHE_EOD_SUMMARY, payload)
+        bus.publish(EVENT_EOD_SUMMARY, {"version": version})
+    except Exception:
+        log.exception("eod_summary cache_set degraded")
+
+
 def publish_gamma_symbols(bus) -> None:
     """Compute the Gamma dropdown universe (collected symbols minus $VIX) and
     publish it to the bus so the Tier-3 Gamma page can populate its symbol
@@ -785,6 +842,20 @@ def run_rescue(bus, position_id, source: str = "paper") -> None:
     key = f"{CACHE_RESCUE}:{position_id}"
     version = bus.cache_set(key, adv)
     bus.publish(EVENT_RESCUE, {"version": version, "position_id": position_id})
+
+
+def run_rescue_adhoc(bus, spec) -> None:
+    """Compute the ranked rescue advisory for a user-defined ad-hoc trade + cache it.
+
+    On-demand only (the GUI's "Rescue an ad-hoc trade" card enqueues a
+    ``rescue_adhoc`` command with the form ``spec``). ``compute.compute_rescue_adhoc``
+    is fully defensive — it returns a ``RescueAdvisory``-shaped dict (advisory-only)
+    or ``{"error": ...}`` on any failure, never raising. Cached under the fixed
+    ``cache:options:rescue:adhoc`` key (advisory-only, so no Apply flow)."""
+    adv = compute.compute_rescue_adhoc(spec)
+    key = f"{CACHE_RESCUE}:adhoc"
+    version = bus.cache_set(key, adv)
+    bus.publish(EVENT_RESCUE, {"version": version, "position_id": "adhoc"})
 
 
 def run_rescue_apply(bus, position_id, candidate) -> None:
@@ -932,7 +1003,8 @@ def handle_command(bus, command) -> None:
             # any non-opened outcome so a silent shape-drift / broker / low-credit
             # reject can't masquerade as an executed trade in the decision log.
             result = compute.open_driver_position(
-                signal, int(command.args.get("qty", 1))) or {}
+                signal, int(command.args.get("qty", 1)),
+                context=command.args.get("context")) or {}
             result.setdefault("symbol", sym)
             result.setdefault("source", "driver")
             status = result.get("status")
@@ -1074,6 +1146,10 @@ def handle_command(bus, command) -> None:
         if source == "paper":
             pid = int(pid)
         run_rescue(bus, pid, source)
+    elif command.type == "rescue_adhoc":
+        # The page sends {"type":"rescue_adhoc","args":{"spec": {...}}}; tolerate
+        # the spec being the args dict itself as a fallback.
+        run_rescue_adhoc(bus, command.args.get("spec") or command.args)
     elif command.type == "rescue_apply":
         run_rescue_apply(bus, int(command.args["position_id"]),
                          command.args["candidate"])

@@ -273,6 +273,114 @@ def test_compute_rescue_paper_path_unchanged_source_paper(monkeypatch):
     assert adv.source == "paper"
 
 
+# ── compute_rescue_adhoc ─────────────────────────────────────────────────────
+
+def _patch_adhoc_happy(monkeypatch, reprice=None):
+    reprice = reprice if reprice is not None else {
+        "current_value": 2.50, "unrealized_pnl": -300.0,
+        "current_underlying": 501.0, "current_short_delta": 0.35,
+        "error": None,
+    }
+    monkeypatch.setattr(compute, "reprice_swing", lambda trade, client, today=None: reprice)
+    monkeypatch.setattr(compute, "gamma_snapshot",
+                        lambda symbol: {"spot": 501.0, "views": {
+                            "GEX": {"flip": 505.0, "walls": [490.0, 510.0]}}})
+    monkeypatch.setattr(compute, "_rescue_regime", lambda: None)
+    monkeypatch.setattr(compute, "_make_leg_pricer", lambda symbol: (lambda *a, **k: 1.0))
+
+
+def _adhoc_spec(**kw):
+    base = dict(symbol="SPY", strategy="PCS", short_strike=500.0,
+                long_strike=495.0, call_short=None, call_long=None,
+                expiration="2099-07-31", quantity=2, entry_credit=1.00)
+    base.update(kw)
+    return base
+
+
+def test_compute_rescue_adhoc_happy_path(monkeypatch):
+    _patch_adhoc_happy(monkeypatch)
+    result = compute.compute_rescue_adhoc(_adhoc_spec())
+    assert result.get("error") is None
+    adv = RescueAdvisory(**result)
+    assert adv.position_id == "adhoc"
+    assert adv.source == "adhoc"
+    assert adv.symbol == "SPY"
+    assert adv.strategy == "PCS"
+    assert adv.candidates, "expected non-empty candidate list"
+    # advisory-only (no executable paper position)
+    assert all(c.apply_kind == "advisory" for c in adv.candidates)
+
+
+def test_compute_rescue_adhoc_ic_requires_call_legs(monkeypatch):
+    _patch_adhoc_happy(monkeypatch)
+    spec = _adhoc_spec(strategy="IC", call_short=None, call_long=None)
+    result = compute.compute_rescue_adhoc(spec)
+    assert "error" in result and result["error"]
+
+
+def test_compute_rescue_adhoc_ic_happy(monkeypatch):
+    _patch_adhoc_happy(monkeypatch)
+    spec = _adhoc_spec(strategy="IC", short_strike=490.0, long_strike=485.0,
+                       call_short=510.0, call_long=515.0)
+    result = compute.compute_rescue_adhoc(spec)
+    assert result.get("error") is None
+    adv = RescueAdvisory(**result)
+    assert adv.strategy == "IC"
+
+
+def test_compute_rescue_adhoc_missing_short_strike(monkeypatch):
+    _patch_adhoc_happy(monkeypatch)
+    spec = _adhoc_spec()
+    del spec["short_strike"]
+    result = compute.compute_rescue_adhoc(spec)
+    assert "error" in result and result["error"]
+
+
+def test_compute_rescue_adhoc_bad_strategy(monkeypatch):
+    _patch_adhoc_happy(monkeypatch)
+    result = compute.compute_rescue_adhoc(_adhoc_spec(strategy="LONG_CALL"))
+    assert "error" in result and result["error"]
+
+
+def test_compute_rescue_adhoc_missing_symbol(monkeypatch):
+    _patch_adhoc_happy(monkeypatch)
+    spec = _adhoc_spec()
+    del spec["symbol"]
+    result = compute.compute_rescue_adhoc(spec)
+    assert "error" in result and result["error"]
+
+
+def test_compute_rescue_adhoc_coerces_string_numerics(monkeypatch):
+    _patch_adhoc_happy(monkeypatch)
+    # strikes/qty/credit arrive from a GUI form as strings.
+    spec = _adhoc_spec(short_strike="500", long_strike="495",
+                       quantity="3", entry_credit="1.25")
+    result = compute.compute_rescue_adhoc(spec)
+    assert result.get("error") is None
+    adv = RescueAdvisory(**result)
+    assert adv.symbol == "SPY"
+    assert adv.candidates
+
+
+def test_compute_rescue_adhoc_bad_numeric_errors(monkeypatch):
+    _patch_adhoc_happy(monkeypatch)
+    result = compute.compute_rescue_adhoc(_adhoc_spec(short_strike="notanumber"))
+    assert "error" in result and result["error"]
+
+
+def test_compute_rescue_adhoc_never_raises(monkeypatch):
+    def _boom(*a, **k):
+        raise RuntimeError("proxy down")
+    monkeypatch.setattr(compute, "reprice_swing", _boom)
+    monkeypatch.setattr(compute, "gamma_snapshot", lambda symbol: None)
+    monkeypatch.setattr(compute, "_rescue_regime", lambda: None)
+    monkeypatch.setattr(compute, "_make_leg_pricer", lambda symbol: (lambda *a, **k: None))
+    result = compute.compute_rescue_adhoc(_adhoc_spec())
+    assert isinstance(result, dict)
+    if result.get("error") is None:
+        RescueAdvisory(**result)
+
+
 # ── assess_open_positions ────────────────────────────────────────────────────
 
 def test_assess_open_positions_counts(monkeypatch):

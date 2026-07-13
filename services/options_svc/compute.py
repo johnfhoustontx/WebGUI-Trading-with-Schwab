@@ -14,6 +14,7 @@ lazily inside ``run_full_scan``) resolves to options-scanner's ``scoring.py``
 unambiguously. Therefore the page's ``options_scoring()`` collision guard is
 intentionally NOT ported here — ``run_full_scan`` is called directly.
 """
+import json as _json
 import logging
 import sys
 from zoneinfo import ZoneInfo
@@ -302,6 +303,117 @@ def driver_account_perf() -> dict:
     return driver_perf.build_scorecard(positions, snapshot)
 
 
+def _book_analytics(db_path, *, starting_balance=25000.0) -> dict:
+    """Performance analytics over ANY paper book — equity curve + posture post-mortem +
+    MAE/MFE excursions (``perf_analytics.build_analytics``). Reads the book's full position
+    history. The equity baseline is the fixed account seed ($25k — both books are seeded
+    there); the curve is realized equity from that base. Defensive → an empty-shaped
+    payload on any failure."""
+    import paper_account_db
+
+    from services.options_svc import perf_analytics
+
+    try:
+        positions = paper_account_db.fetch_all_positions(db_path)
+    except Exception:
+        positions = []
+    return perf_analytics.build_analytics(positions, starting_balance=starting_balance)
+
+
+def driver_analytics() -> dict:
+    """Performance analytics over the DRIVER account (see ``_book_analytics``)."""
+    return _book_analytics(DRIVER_PAPER_DB)
+
+
+def manual_analytics() -> dict:
+    """Performance analytics over the MANUAL paper account (default DB). The scanner-
+    baseline book: it auto-trades every captured signal, so its equity curve / MAE-MFE
+    are the benchmark to compare the driver (Claude's selection) against. The posture
+    post-mortem is naturally empty here (manual opens carry no entry_context)."""
+    return _book_analytics(None)
+
+
+def _eod_book_summary(snapshot, all_positions, *, has_account, today, label) -> dict:
+    """PURE per-book end-of-day stats from an account snapshot + full positions list.
+
+    ``day_pnl``/``equity``/``open_count``/``halted`` are read straight off the snapshot
+    (``session_pnl`` already = session realized + open unrealized, resetting each
+    session). The closed-TODAY win/loss/realized are computed from positions whose
+    ``exit_ts`` date matches ``today`` and whose status is CLOSED/EXPIRED. Tolerates
+    sparse/None rows — never raises.
+    """
+    snap = snapshot or {}
+    closed_today = []
+    for p in all_positions or []:
+        if not isinstance(p, dict):
+            continue
+        if (p.get("status") or "").upper() not in ("CLOSED", "EXPIRED"):
+            continue
+        if str(p.get("exit_ts") or "")[:10] != today:
+            continue
+        closed_today.append(p)
+    realized = [r for r in (p.get("realized_pnl") for p in closed_today)
+                if isinstance(r, (int, float))]
+    wins = [r for r in realized if r > 0]
+    losses = [r for r in realized if r < 0]
+    _num = lambda v: v if isinstance(v, (int, float)) else None
+    return {
+        "label": label,
+        "has_account": bool(has_account),
+        "day_pnl": _num(snap.get("session_pnl")),
+        "equity": _num(snap.get("equity")),
+        "open_count": snap.get("open_count") if isinstance(snap.get("open_count"), int) else 0,
+        "halted": bool(snap.get("halted")),
+        "closed_today": len(closed_today),
+        "wins": len(wins),
+        "losses": len(losses),
+        "realized_today": round(sum(realized), 2) if realized else 0.0,
+    }
+
+
+def collect_eod_summary(now_ct=None) -> dict:
+    """Assemble the end-of-day per-book P&L summary for the scheduled post-close push.
+
+    Reports the two ENGINE paper books the auto-manage cycles actually trade — the
+    user's MANUAL account (default DB) and the isolated DRIVER account
+    (``DRIVER_PAPER_DB``) — each via ``_eod_book_summary``. Book state is read AS-IS at
+    call time (no manage cycle is forced first), so a 0-DTE that expired but hasn't yet
+    been settled still contributes its unrealized to ``day_pnl``. Defensive: a per-book
+    read failure yields that book's empty (no-account) summary; never raises. ``now_ct``
+    defaults to the live CT clock; inject for deterministic tests.
+    """
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+
+    import paper_account_db
+    import paper_engine
+
+    now_ct = now_ct or _dt.datetime.now(ZoneInfo("America/Chicago"))
+    today = now_ct.date().isoformat()
+
+    def _book(db_path, label):
+        try:
+            snap = paper_engine.account_snapshot(db_path)
+        except Exception:
+            snap = None
+        try:
+            positions = paper_account_db.fetch_all_positions(db_path)
+        except Exception:
+            positions = []
+        try:
+            has = paper_account_db.get_account(db_path) is not None
+        except Exception:
+            has = False
+        return _eod_book_summary(snap, positions, has_account=has, today=today, label=label)
+
+    return {
+        "date": today,
+        "books": {"manual": _book(None, "Manual"),
+                  "driver": _book(DRIVER_PAPER_DB, "Driver")},
+        "generated_at": now_ct.isoformat(),
+    }
+
+
 # The driver account's per-trade risk cap for the PAPER SIZER on the open path.
 # Kept SEPARATE from the manual account's ``config_paper.MAX_RISK_PER_TRADE`` ($250)
 # so raising the driver's cap never changes the user's manual paper trades. Must match
@@ -312,9 +424,15 @@ def driver_account_perf() -> dict:
 _DRIVER_MAX_RISK_PER_TRADE = 3000.0
 
 
-def open_driver_position(signal: dict, qty: int, broker=None) -> dict:
+def open_driver_position(signal: dict, qty: int, broker=None, context=None) -> dict:
     """Open ONE driver position into ``DRIVER_PAPER_DB`` at ``min(clamped qty,
     fill-sized)``.
+
+    ``context`` (optional) is the decision context at open — the directional posture,
+    the market_read summary, and whether the shadow gate would have blocked this trade —
+    stamped onto the position's ``entry_context`` (JSON) so a later post-mortem can
+    correlate the entry regime to the realized outcome. A ``None``/non-dict context stores
+    NULL (exactly as before).
 
     Adapts the per-signal open block of ``paper_engine.run_entry_cycle``
     (size → submit → **re-size off the actual fill** → guard → reserve BP →
@@ -395,7 +513,8 @@ def open_driver_position(signal: dict, qty: int, broker=None) -> dict:
             "expiration": signal["expiration"], "dte_at_entry": signal.get("dte_at_entry", 0),
             "quantity": open_qty, "entry_credit": fill, "entry_order_id": oid,
             "max_loss_per": max_loss_per, "max_loss_total": max_loss_total,
-            "entry_ts": resp["enteredTime"]})
+            "entry_ts": resp["enteredTime"],
+            "entry_context": _json.dumps(context) if isinstance(context, dict) else None})
         return {"status": "opened", "symbol": signal["symbol"], "qty": open_qty,
                 "entry_credit": fill, "max_loss_total": max_loss_total}
     except Exception as exc:  # noqa: BLE001
@@ -518,7 +637,12 @@ def _reprice_open_pnl(trades) -> None:
         if (t.get("status") or "").upper() != "OPEN":
             continue
         try:
-            rep = signal_repricer.reprice_swing(t, _proxy.schwab_py_client)
+            # DEBIT/legs trades (long options + debit verticals) reprice generically off
+            # their stored legs; credit spreads keep the tested short/long-strike path.
+            if t.get("direction") == "DEBIT":
+                rep = signal_repricer.reprice_legs(t, _proxy.schwab_py_client)
+            else:
+                rep = signal_repricer.reprice_swing(t, _proxy.schwab_py_client)
         except Exception:
             continue
         per = (rep or {}).get("unrealized_pnl")     # per-spread $ P&L
@@ -3471,30 +3595,19 @@ def _load_captured_as_position(signal_id):
     }
 
 
-def compute_rescue(position_id, source: str = "paper") -> dict:
-    """Build the ranked rescue advisory for ONE position (paper or captured).
+def _advisory_from_position(pos, *, source: str, force_advisory: bool,
+                            position_id) -> dict:
+    """Shared rescue-advisory core: reprice ``pos`` → mark → gamma/regime context
+    → rank candidates → ``RescueAdvisory`` dict.
 
-    ``source="paper"`` (default): loads a real paper position from
-    ``paper_account_db`` and returns an advisory whose execute candidates have a
-    one-click Apply. ``source="captured"``: loads the captured signal by id
-    (``signal_db.get_signal``), shapes it like a position, and forces EVERY
-    candidate to ``apply_kind="advisory"`` (a captured signal has no executable
-    paper position). Both paths reprice to a ``mark`` (live via reprice_swing,
-    falling back to stored fields / the gamma snapshot's spot), pull gamma +
-    regime context, and run the pure rescue engine. Returns a dict shaped like
-    (and validated by) the ``RescueAdvisory`` contract; on ANY failure returns
-    ``{"error": "..."}``. Never raises."""
+    Common to all three callers (paper / captured / ad-hoc): builds the ``trade``
+    dict, reprices via ``reprice_swing`` (falling back to stored fields + the
+    gamma snapshot's live ``spot`` for the underlying), fetches gamma + regime
+    context, runs the pure rescue engine, and — when ``force_advisory`` — forces
+    every candidate to ``apply_kind="advisory"`` (no executable paper position).
+    ``position_id`` / ``source`` are stamped onto the returned advisory verbatim.
+    Fully defensive → ``{"error": "..."}``; never raises."""
     try:
-        captured = (source == "captured")
-        if captured:
-            pos = _load_captured_as_position(position_id)
-            if not pos:
-                return {"error": "signal not found"}
-        else:
-            pos = _load_position(position_id)
-            if not pos:
-                return {"error": "position not found"}
-
         symbol = pos.get("symbol")
         strategy = pos.get("strategy") or ""
 
@@ -3575,9 +3688,9 @@ def compute_rescue(position_id, source: str = "paper") -> dict:
         valid = []
         for c in candidates:
             try:
-                if captured:
-                    # A captured signal has no executable paper position — every
-                    # candidate is advisory-only (the GUI shows no Apply button).
+                if force_advisory:
+                    # No executable paper position — every candidate is
+                    # advisory-only (the GUI shows no Apply button).
                     c = {**c, "apply_kind": "advisory", "applies": False}
                 valid.append(RescueCandidate(**c))
             except Exception:
@@ -3596,6 +3709,124 @@ def compute_rescue(position_id, source: str = "paper") -> dict:
             ts=_rescue_dt.datetime.now(_rescue_dt.timezone.utc).isoformat(),
         )
         return adv.model_dump()
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {e}"}
+
+
+def compute_rescue(position_id, source: str = "paper") -> dict:
+    """Build the ranked rescue advisory for ONE position (paper or captured).
+
+    ``source="paper"`` (default): loads a real paper position from
+    ``paper_account_db`` and returns an advisory whose execute candidates have a
+    one-click Apply. ``source="captured"``: loads the captured signal by id
+    (``signal_db.get_signal``), shapes it like a position, and forces EVERY
+    candidate to ``apply_kind="advisory"`` (a captured signal has no executable
+    paper position). Both delegate to ``_advisory_from_position`` (reprice → mark
+    → gamma/regime → rank). Returns a dict shaped like (and validated by) the
+    ``RescueAdvisory`` contract; on ANY failure returns ``{"error": "..."}``.
+    Never raises."""
+    try:
+        captured = (source == "captured")
+        if captured:
+            pos = _load_captured_as_position(position_id)
+            if not pos:
+                return {"error": "signal not found"}
+        else:
+            pos = _load_position(position_id)
+            if not pos:
+                return {"error": "position not found"}
+        return _advisory_from_position(pos, source=source,
+                                       force_advisory=captured,
+                                       position_id=position_id)
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {e}"}
+
+
+def compute_rescue_adhoc(spec) -> dict:
+    """Build the ranked rescue advisory for a USER-DEFINED ad-hoc trade.
+
+    ``spec`` = ``{symbol, strategy (PCS|CCS|IC), short_strike, long_strike,
+    call_short, call_long, expiration, quantity, entry_credit}`` — a spread the
+    user holds elsewhere, entered via the GUI form (so numeric fields may arrive
+    as strings). Validates the minimum (symbol + a supported strategy + short/long
+    strikes + expiration; IC additionally needs both call legs), coerces numerics
+    defensively, builds a position-like dict, and delegates to
+    ``_advisory_from_position(source="adhoc", force_advisory=True,
+    position_id="adhoc")`` — advisory-only (no executable paper position). Fully
+    defensive → ``{"error": "..."}``; never raises."""
+    try:
+        spec = spec or {}
+        symbol = spec.get("symbol")
+        strategy = spec.get("strategy")
+        expiration = spec.get("expiration")
+        if not symbol:
+            return {"error": "symbol is required"}
+        if strategy not in ("PCS", "CCS", "IC"):
+            return {"error": "strategy must be one of PCS, CCS, IC"}
+        if not expiration:
+            return {"error": "expiration is required"}
+
+        def _flt(key, required):
+            raw = spec.get(key)
+            if raw is None or (isinstance(raw, str) and not raw.strip()):
+                return (None, f"{key} is required") if required else (None, None)
+            try:
+                return float(raw), None
+            except (TypeError, ValueError):
+                return None, f"{key} must be a number"
+
+        short_strike, err = _flt("short_strike", True)
+        if err:
+            return {"error": err}
+        long_strike, err = _flt("long_strike", True)
+        if err:
+            return {"error": err}
+        call_short, err = _flt("call_short", strategy == "IC")
+        if err:
+            return {"error": err}
+        call_long, err = _flt("call_long", strategy == "IC")
+        if err:
+            return {"error": err}
+        entry_credit, err = _flt("entry_credit", False)
+        if err:
+            return {"error": err}
+        if entry_credit is None:
+            entry_credit = 0.0
+
+        qty_raw = spec.get("quantity")
+        if qty_raw is None or (isinstance(qty_raw, str) and not qty_raw.strip()):
+            quantity = 1
+        else:
+            try:
+                quantity = int(float(qty_raw))
+            except (TypeError, ValueError):
+                return {"error": "quantity must be an integer"}
+        if quantity < 1:
+            quantity = 1
+
+        # max_loss_total from the spread width when not otherwise derivable.
+        max_loss = None
+        if short_strike is not None and long_strike is not None:
+            try:
+                max_loss = abs(short_strike - long_strike) * 100 * quantity
+            except Exception:
+                max_loss = None
+
+        pos = {
+            "position_id": "adhoc",
+            "symbol": symbol,
+            "strategy": strategy,
+            "short_strike": short_strike,
+            "long_strike": long_strike,
+            "call_short": call_short,
+            "call_long": call_long,
+            "expiration": expiration,
+            "entry_credit": entry_credit,
+            "quantity": quantity,
+            "max_loss_total": max_loss,
+        }
+        return _advisory_from_position(pos, source="adhoc",
+                                       force_advisory=True, position_id="adhoc")
     except Exception as e:
         return {"error": f"{type(e).__name__}: {e}"}
 
