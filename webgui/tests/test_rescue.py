@@ -252,100 +252,131 @@ def test_summary_line_with_apply_result_stale():
     assert "re-review" in line.lower()
 
 
-# ── ad-hoc trade rescue (pure spec builders) ─────────────────────────────────
-def test_adhoc_strike_fields_per_strategy():
-    assert rescue.adhoc_strike_fields("PCS") == [
-        ("short_strike", "PUT"), ("long_strike", "PUT")]
-    assert rescue.adhoc_strike_fields("CCS") == [
-        ("short_strike", "CALL"), ("long_strike", "CALL")]
-    assert rescue.adhoc_strike_fields("IC") == [
-        ("short_strike", "PUT"), ("long_strike", "PUT"),
-        ("call_short", "CALL"), ("call_long", "CALL")]
-    # case-insensitive
-    assert rescue.adhoc_strike_fields("pcs") == rescue.adhoc_strike_fields("PCS")
-    # unknown / missing -> []
-    assert rescue.adhoc_strike_fields("FOO") == []
-    assert rescue.adhoc_strike_fields(None) == []
-    assert rescue.adhoc_strike_fields("") == []
+# ── ad-hoc trade rescue (pure spec mapping from leg-editor legs) ──────────────
+def _leg(option_type, side, strike, *, premium=1.0, expiry="2026-07-18", qty=1):
+    """A leg-editor leg dict (option_type "call"/"put", side "long"/"short")."""
+    return {"option_type": option_type, "side": side, "strike": strike,
+            "premium": premium, "expiry": expiry, "qty": qty}
 
 
-def test_adhoc_spec_valid_pcs():
-    spec = rescue.adhoc_spec({
-        "symbol": "spy", "strategy": "PCS",
-        "short_strike": 500, "long_strike": 495,
-        "expiration": "2026-07-18", "quantity": 2, "entry_credit": 1.2,
-    })
+def test_adhoc_spec_from_legs_pcs():
+    legs = [_leg("put", "short", 500, premium=1.20),
+            _leg("put", "long", 495, premium=0.60)]
+    spec = rescue.adhoc_spec_from_legs("spy", legs)
     assert "error" not in spec
     assert spec["symbol"] == "SPY"           # upper-cased
     assert spec["strategy"] == "PCS"
     assert spec["short_strike"] == 500
     assert spec["long_strike"] == 495
     assert spec["expiration"] == "2026-07-18"
-    assert spec["quantity"] == 2
-    assert spec["entry_credit"] == 1.2
+    assert spec["quantity"] == 1
+    assert round(spec["entry_credit"], 2) == 0.60   # 1.20 short − 0.60 long
     # No call fields for a PCS.
     assert "call_short" not in spec and "call_long" not in spec
 
 
-def test_adhoc_spec_valid_ic():
-    spec = rescue.adhoc_spec({
-        "symbol": "IWM", "strategy": "IC",
-        "short_strike": 195, "long_strike": 190,
-        "call_short": 210, "call_long": 215,
-        "expiration": "2026-07-25", "quantity": 1, "entry_credit": 0.9,
-    })
+def test_adhoc_spec_from_legs_ccs():
+    legs = [_leg("call", "short", 400, premium=1.50),
+            _leg("call", "long", 405, premium=0.70)]
+    spec = rescue.adhoc_spec_from_legs("QQQ", legs)
     assert "error" not in spec
+    assert spec["strategy"] == "CCS"
+    assert spec["short_strike"] == 400 and spec["long_strike"] == 405
+    assert round(spec["entry_credit"], 2) == 0.80
+    assert "call_short" not in spec
+
+
+def test_adhoc_spec_from_legs_ic():
+    legs = [_leg("put", "short", 195, premium=1.00),
+            _leg("put", "long", 190, premium=0.50),
+            _leg("call", "short", 210, premium=1.20),
+            _leg("call", "long", 215, premium=0.60)]
+    spec = rescue.adhoc_spec_from_legs("IWM", legs)
+    assert "error" not in spec
+    assert spec["strategy"] == "IC"
     assert spec["short_strike"] == 195 and spec["long_strike"] == 190
     assert spec["call_short"] == 210 and spec["call_long"] == 215
+    assert round(spec["entry_credit"], 2) == 1.10   # (1.00+1.20) − (0.50+0.60)
 
 
-def test_adhoc_spec_missing_symbol_errors():
-    spec = rescue.adhoc_spec({
-        "symbol": "", "strategy": "PCS",
-        "short_strike": 500, "long_strike": 495, "expiration": "2026-07-18",
-    })
+def test_adhoc_spec_from_legs_iron_fly():
+    # NBIS-style iron fly: put + call shorts share the 175 strike (allowed).
+    legs = [_leg("put", "short", 175, premium=15.70),
+            _leg("put", "long", 150, premium=9.05),
+            _leg("call", "short", 175, premium=56.97),
+            _leg("call", "long", 200, premium=43.15)]
+    spec = rescue.adhoc_spec_from_legs("NBIS", legs)
+    assert "error" not in spec
+    assert spec["strategy"] == "IC"
+    assert spec["short_strike"] == 175 and spec["long_strike"] == 150
+    assert spec["call_short"] == 175 and spec["call_long"] == 200
+    # (15.70+56.97) − (9.05+43.15) = 20.47
+    assert round(spec["entry_credit"], 2) == 20.47
+
+
+def test_adhoc_spec_from_legs_quantity_from_short_leg():
+    legs = [_leg("put", "short", 500, premium=1.20, qty=3),
+            _leg("put", "long", 495, premium=0.60, qty=3)]
+    spec = rescue.adhoc_spec_from_legs("SPY", legs)
+    assert spec["quantity"] == 3
+
+
+def test_adhoc_spec_from_legs_single_leg_errors():
+    spec = rescue.adhoc_spec_from_legs("SPY", [_leg("put", "short", 500)])
     assert "error" in spec
 
 
-def test_adhoc_spec_bad_strategy_errors():
-    spec = rescue.adhoc_spec({
-        "symbol": "SPY", "strategy": "STRANGLE",
-        "short_strike": 500, "long_strike": 495, "expiration": "2026-07-18",
-    })
+def test_adhoc_spec_from_legs_only_shorts_errors():
+    legs = [_leg("put", "short", 500), _leg("put", "short", 495)]
+    spec = rescue.adhoc_spec_from_legs("SPY", legs)
     assert "error" in spec
 
 
-def test_adhoc_spec_missing_expiration_errors():
-    spec = rescue.adhoc_spec({
-        "symbol": "SPY", "strategy": "PCS",
-        "short_strike": 500, "long_strike": 495, "expiration": "",
-    })
+def test_adhoc_spec_from_legs_debit_put_spread_errors():
+    # short strike BELOW long strike on the put side → debit, not a credit PCS.
+    legs = [_leg("put", "short", 495, premium=0.60),
+            _leg("put", "long", 500, premium=1.20)]
+    spec = rescue.adhoc_spec_from_legs("SPY", legs)
     assert "error" in spec
 
 
-def test_adhoc_spec_missing_required_strike_errors():
-    spec = rescue.adhoc_spec({
-        "symbol": "SPY", "strategy": "PCS",
-        "short_strike": 500, "long_strike": None, "expiration": "2026-07-18",
-    })
+def test_adhoc_spec_from_legs_multi_expiry_errors():
+    legs = [_leg("put", "short", 500, expiry="2026-07-18"),
+            _leg("put", "long", 495, expiry="2026-08-15")]
+    spec = rescue.adhoc_spec_from_legs("SPY", legs)
+    assert "error" in spec
+    assert "single expiration" in spec["error"].lower()
+
+
+def test_adhoc_spec_from_legs_net_debit_errors():
+    # A valid PCS structure, but the short premium is below the long → net debit.
+    legs = [_leg("put", "short", 500, premium=0.40),
+            _leg("put", "long", 495, premium=0.90)]
+    spec = rescue.adhoc_spec_from_legs("SPY", legs)
+    assert "error" in spec
+    assert "credit" in spec["error"].lower()
+
+
+def test_adhoc_spec_from_legs_missing_strike_errors():
+    legs = [_leg("put", "short", None, premium=1.20),
+            _leg("put", "long", 495, premium=0.60)]
+    spec = rescue.adhoc_spec_from_legs("SPY", legs)
     assert "error" in spec
 
 
-def test_adhoc_spec_ic_missing_call_strike_errors():
-    spec = rescue.adhoc_spec({
-        "symbol": "IWM", "strategy": "IC",
-        "short_strike": 195, "long_strike": 190,
-        "call_short": 210, "call_long": "",        # missing call long
-        "expiration": "2026-07-25",
-    })
-    assert "error" in spec
+def test_adhoc_spec_from_legs_empty_errors():
+    assert "error" in rescue.adhoc_spec_from_legs("SPY", [])
+    assert "error" in rescue.adhoc_spec_from_legs("SPY", None)
 
 
-def test_adhoc_spec_defaults_quantity_and_credit():
-    spec = rescue.adhoc_spec({
-        "symbol": "SPY", "strategy": "PCS",
-        "short_strike": 500, "long_strike": 495, "expiration": "2026-07-18",
-        "quantity": "", "entry_credit": "",
-    })
-    assert spec["quantity"] == 1
-    assert spec["entry_credit"] == 0.0
+def test_render_graceful_empty_cache():
+    """render() paints the two-tab page (At-Risk Board + the Calculator-style
+    Ad-hoc Trade leg editor) without crashing on a cold/empty cache — the Tier-3
+    graceful-empty path. Rendering inside a slot context exercises the widget
+    wiring + initial paint (the webgui suite has no NiceGUI User fixture)."""
+    import bus_client
+    from nicegui import ui
+
+    bus_client.reset()  # fresh empty fakeredis cache (no service writes)
+    with ui.card():
+        rescue.render()  # must not raise (builds tabs, board + ad-hoc leg editor)
