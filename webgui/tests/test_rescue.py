@@ -250,3 +250,102 @@ def test_summary_line_with_apply_result_stale():
                     apply_result={"ok": False, "stale": True, "action": "roll_out"})
     line = rescue.summary_line(adv)
     assert "re-review" in line.lower()
+
+
+# ── ad-hoc trade rescue (pure spec builders) ─────────────────────────────────
+def test_adhoc_strike_fields_per_strategy():
+    assert rescue.adhoc_strike_fields("PCS") == [
+        ("short_strike", "PUT"), ("long_strike", "PUT")]
+    assert rescue.adhoc_strike_fields("CCS") == [
+        ("short_strike", "CALL"), ("long_strike", "CALL")]
+    assert rescue.adhoc_strike_fields("IC") == [
+        ("short_strike", "PUT"), ("long_strike", "PUT"),
+        ("call_short", "CALL"), ("call_long", "CALL")]
+    # case-insensitive
+    assert rescue.adhoc_strike_fields("pcs") == rescue.adhoc_strike_fields("PCS")
+    # unknown / missing -> []
+    assert rescue.adhoc_strike_fields("FOO") == []
+    assert rescue.adhoc_strike_fields(None) == []
+    assert rescue.adhoc_strike_fields("") == []
+
+
+def test_adhoc_spec_valid_pcs():
+    spec = rescue.adhoc_spec({
+        "symbol": "spy", "strategy": "PCS",
+        "short_strike": 500, "long_strike": 495,
+        "expiration": "2026-07-18", "quantity": 2, "entry_credit": 1.2,
+    })
+    assert "error" not in spec
+    assert spec["symbol"] == "SPY"           # upper-cased
+    assert spec["strategy"] == "PCS"
+    assert spec["short_strike"] == 500
+    assert spec["long_strike"] == 495
+    assert spec["expiration"] == "2026-07-18"
+    assert spec["quantity"] == 2
+    assert spec["entry_credit"] == 1.2
+    # No call fields for a PCS.
+    assert "call_short" not in spec and "call_long" not in spec
+
+
+def test_adhoc_spec_valid_ic():
+    spec = rescue.adhoc_spec({
+        "symbol": "IWM", "strategy": "IC",
+        "short_strike": 195, "long_strike": 190,
+        "call_short": 210, "call_long": 215,
+        "expiration": "2026-07-25", "quantity": 1, "entry_credit": 0.9,
+    })
+    assert "error" not in spec
+    assert spec["short_strike"] == 195 and spec["long_strike"] == 190
+    assert spec["call_short"] == 210 and spec["call_long"] == 215
+
+
+def test_adhoc_spec_missing_symbol_errors():
+    spec = rescue.adhoc_spec({
+        "symbol": "", "strategy": "PCS",
+        "short_strike": 500, "long_strike": 495, "expiration": "2026-07-18",
+    })
+    assert "error" in spec
+
+
+def test_adhoc_spec_bad_strategy_errors():
+    spec = rescue.adhoc_spec({
+        "symbol": "SPY", "strategy": "STRANGLE",
+        "short_strike": 500, "long_strike": 495, "expiration": "2026-07-18",
+    })
+    assert "error" in spec
+
+
+def test_adhoc_spec_missing_expiration_errors():
+    spec = rescue.adhoc_spec({
+        "symbol": "SPY", "strategy": "PCS",
+        "short_strike": 500, "long_strike": 495, "expiration": "",
+    })
+    assert "error" in spec
+
+
+def test_adhoc_spec_missing_required_strike_errors():
+    spec = rescue.adhoc_spec({
+        "symbol": "SPY", "strategy": "PCS",
+        "short_strike": 500, "long_strike": None, "expiration": "2026-07-18",
+    })
+    assert "error" in spec
+
+
+def test_adhoc_spec_ic_missing_call_strike_errors():
+    spec = rescue.adhoc_spec({
+        "symbol": "IWM", "strategy": "IC",
+        "short_strike": 195, "long_strike": 190,
+        "call_short": 210, "call_long": "",        # missing call long
+        "expiration": "2026-07-25",
+    })
+    assert "error" in spec
+
+
+def test_adhoc_spec_defaults_quantity_and_credit():
+    spec = rescue.adhoc_spec({
+        "symbol": "SPY", "strategy": "PCS",
+        "short_strike": 500, "long_strike": 495, "expiration": "2026-07-18",
+        "quantity": "", "entry_credit": "",
+    })
+    assert spec["quantity"] == 1
+    assert spec["entry_credit"] == 0.0

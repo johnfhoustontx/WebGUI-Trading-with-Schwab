@@ -302,6 +302,63 @@ def summary_line(advisory):
     return f"{prefix}{head} — {state} · heat {heat_s} · {n} rescue {opt_word}"
 
 
+# ── ad-hoc trade rescue (pure spec builders) ─────────────────────────────────
+# Which strike inputs each supported structure needs, as (spec_key, option_right)
+# pairs. ``option_right`` is UPPERCASE ("PUT"/"CALL") — it is the value stored in
+# the spec for the backend; when driving the Calculator's ``chain_strikes(chain,
+# expiry, option_type)`` extractor (whose convention is LOWERCASE "call"/"put",
+# anything ≠ "call" → puts) the caller lowercases it.
+_ADHOC_STRIKE_FIELDS = {
+    "PCS": [("short_strike", "PUT"), ("long_strike", "PUT")],
+    "CCS": [("short_strike", "CALL"), ("long_strike", "CALL")],
+    "IC": [("short_strike", "PUT"), ("long_strike", "PUT"),
+           ("call_short", "CALL"), ("call_long", "CALL")],
+}
+
+
+def adhoc_strike_fields(strategy):
+    """Strike inputs a strategy needs, as ``(spec_key, option_right)`` pairs.
+
+    PCS → short/long PUT · CCS → short/long CALL · IC → put short/long + call
+    short/long. Unknown / missing strategy → ``[]``. ``option_right`` is uppercase
+    ("PUT"/"CALL")."""
+    return list(_ADHOC_STRIKE_FIELDS.get((strategy or "").strip().upper(), []))
+
+
+def adhoc_spec(inputs):
+    """Assemble + validate an ad-hoc rescue spec dict from raw form inputs.
+
+    ``inputs`` keys: symbol, strategy, short_strike, long_strike, call_short,
+    call_long, expiration, quantity, entry_credit. Returns ``{"error": "..."}``
+    when a required field is missing (symbol, a PCS/CCS/IC strategy, expiration,
+    and every strike field for that strategy per ``adhoc_strike_fields``), else the
+    spec dict. Values are left as-is (strings ok — the backend coerces); quantity
+    defaults to 1 and entry_credit to 0.0 when blank."""
+    inputs = inputs or {}
+    symbol = str(inputs.get("symbol") or "").strip().upper()
+    if not symbol:
+        return {"error": "Enter a symbol."}
+    strategy = str(inputs.get("strategy") or "").strip().upper()
+    if strategy not in ("PCS", "CCS", "IC"):
+        return {"error": "Choose a strategy (PCS, CCS, or IC)."}
+    expiration = str(inputs.get("expiration") or "").strip()
+    if not expiration:
+        return {"error": "Choose an expiration."}
+
+    spec = {"symbol": symbol, "strategy": strategy, "expiration": expiration}
+    for key, _right in adhoc_strike_fields(strategy):
+        val = inputs.get(key)
+        if val in (None, "", "—"):
+            return {"error": f"Choose the {key.replace('_', ' ')}."}
+        spec[key] = val
+
+    qty = inputs.get("quantity")
+    spec["quantity"] = 1 if qty in (None, "") else qty
+    credit = inputs.get("entry_credit")
+    spec["entry_credit"] = 0.0 if credit in (None, "") else credit
+    return spec
+
+
 # ── render-only helpers ──────────────────────────────────────────────────────
 def at_risk_columns():
     """Column defs for the at-risk ui.table."""
@@ -347,9 +404,11 @@ def render():
     ranked candidate cards. Mirrors ``simulator.py`` / ``paper.py`` idioms
     (``bus_client.request`` / ``read`` / ``read_version`` + ``@guard``)."""
     import bus_client
-    from nicegui import ui
+    from nicegui import run, ui
 
-    from pages.ui_guard import guard
+    from pages.ui_guard import guard, guard_async
+
+    from .calculator import chain_expiries, chain_strikes
 
     ui.add_css(_RESCUE_CSS)
 
@@ -394,6 +453,43 @@ def render():
             """)
             at_risk_empty = ui.label("No tested or critical positions right now.") \
                 .classes("opacity-70")
+
+            # ── Ad-hoc trade rescue form (Calculator-style, advisory-only) ─────
+            # Define a spread you hold elsewhere (chain-backed strike pickers) and
+            # get the same ranked rescue menu on the right (all advisory — it's not
+            # a paper position, so no one-click Apply). Local sub-state (closure).
+            adhoc: dict = {"chain": None, "chain_ver": None, "chain_fetching": False}
+            with ui.expansion("Rescue an ad-hoc trade", icon="build") \
+                    .classes("w-full mt-3"):
+                with ui.column().classes("w-full gap-2 pt-1"):
+                    with ui.row().classes("items-end gap-2 w-full no-wrap"):
+                        adhoc_sym = ui.input("Symbol").props("dense").classes("grow")
+                        adhoc_load_btn = ui.button("Load").props("no-caps")
+                    adhoc_status = ui.label("").classes("text-sm opacity-70")
+                    adhoc_strat = ui.select(["PCS", "CCS", "IC"], label="Strategy",
+                                            value="PCS").props("dense").classes("w-full")
+                    adhoc_exp_sel = ui.select([], label="Expiration") \
+                        .props("dense").classes("w-full")
+                    # Four strike selects, keyed to spec fields; shown per strategy.
+                    _strike_labels = (("short_strike", "Short strike"),
+                                      ("long_strike", "Long strike"),
+                                      ("call_short", "Call short strike"),
+                                      ("call_long", "Call long strike"))
+                    strike_selects: dict = {}
+                    strike_rows: dict = {}
+                    for _key, _label in _strike_labels:
+                        _srow = ui.row().classes("w-full")
+                        with _srow:
+                            strike_selects[_key] = ui.select([], label=_label) \
+                                .props("dense").classes("w-full")
+                        strike_rows[_key] = _srow
+                    with ui.row().classes("items-end gap-2 w-full no-wrap"):
+                        adhoc_qty = ui.number("Quantity", value=1, min=1) \
+                            .props("dense").classes("grow")
+                        adhoc_credit = ui.number("Entry credit (per contract)") \
+                            .props("dense").classes("grow")
+                    adhoc_compute_btn = ui.button("Compute rescue options",
+                                                  color=None).props("no-caps").classes(BTN_3D)
 
         # Right: the ranked rescue menu for the selected position. Bare column
         # (2026-07-11 GUI conformity — the candidate cards carry their own frames;
@@ -575,6 +671,114 @@ def render():
         advisory_spinner.set_visibility(False)
         _render_cards()
         _notify_apply_result(adv)
+
+    # ── ad-hoc trade rescue wiring ───────────────────────────────────────────
+    def _adhoc_visibility():
+        """Show only the strike selects the chosen strategy needs."""
+        needed = {k for k, _r in adhoc_strike_fields(adhoc_strat.value)}
+        for key, srow in strike_rows.items():
+            srow.set_visibility(key in needed)
+
+    def _adhoc_repopulate_strikes():
+        """Refill each visible strike select from the loaded chain for the current
+        expiry + side (Calculator's ``chain_strikes`` — lowercase side); preserve a
+        still-valid selection, else clear it."""
+        chain = adhoc.get("chain")
+        expiry = adhoc_exp_sel.value
+        rights = dict(adhoc_strike_fields(adhoc_strat.value))   # key -> "PUT"/"CALL"
+        for key, sel in strike_selects.items():
+            right = rights.get(key)
+            opts = (chain_strikes(chain, expiry, right.lower())
+                    if right and chain and expiry else [])
+            sel.options = opts
+            if sel.value not in (opts or []):
+                sel.value = None
+            sel.update()
+
+    def _adhoc_apply_chain(cc):
+        cc = cc or {}
+        adhoc["chain"] = cc.get("chain")
+        exps = chain_expiries(adhoc.get("chain") or {})
+        adhoc_exp_sel.options = exps
+        if exps and adhoc_exp_sel.value not in exps:
+            adhoc_exp_sel.value = exps[0]
+        adhoc_exp_sel.update()
+        _adhoc_repopulate_strikes()
+        adhoc_status.text = (f"Chain loaded — {len(exps)} expirations."
+                             if exps else "No chain data for that symbol.")
+
+    @guard
+    def _adhoc_load():
+        sym = (adhoc_sym.value or "").strip().upper()
+        if not sym:
+            ui.notify("Enter a symbol first.", type="warning")
+            return
+        adhoc_status.text = f"Loading {sym} chain…"
+        # Shares the Calculator's calc_chain cache (single-user, one page at a time).
+        bus_client.request("options", {"type": "calc_load", "args": {"symbol": sym}})
+
+    @guard_async
+    async def _adhoc_poll_chain():
+        # Cheap :ver probe on the loop; the ~10 MB chain payload is read OFF the loop
+        # via run.io_bound (mirrors calculator.py). Version-gated + in-flight-guarded
+        # so the big read happens only on a fresh publish, never stacking.
+        version = bus_client.read_version("options:calc_chain")
+        if version == adhoc["chain_ver"] or adhoc.get("chain_fetching"):
+            return
+        adhoc["chain_ver"] = version
+        adhoc["chain_fetching"] = True
+        try:
+            cc = await run.io_bound(bus_client.read, "options:calc_chain")
+        finally:
+            adhoc["chain_fetching"] = False
+        _adhoc_apply_chain(cc)
+
+    @guard
+    def _adhoc_on_strategy():
+        _adhoc_visibility()
+        _adhoc_repopulate_strikes()
+
+    @guard
+    def _adhoc_on_expiry():
+        _adhoc_repopulate_strikes()
+
+    @guard
+    def _adhoc_compute():
+        spec = adhoc_spec({
+            "symbol": adhoc_sym.value,
+            "strategy": adhoc_strat.value,
+            "short_strike": strike_selects["short_strike"].value,
+            "long_strike": strike_selects["long_strike"].value,
+            "call_short": strike_selects["call_short"].value,
+            "call_long": strike_selects["call_long"].value,
+            "expiration": adhoc_exp_sel.value,
+            "quantity": adhoc_qty.value,
+            "entry_credit": adhoc_credit.value,
+        })
+        if spec.get("error"):
+            ui.notify(spec["error"], type="warning")
+            return
+        # Reuse the existing advisory poll: it reads options:rescue:<selected_id>
+        # → options:rescue:adhoc and paints the (advisory-only) candidate cards.
+        state["selected_id"] = "adhoc"
+        state["selected_source"] = "adhoc"
+        state["advisory"] = None
+        state["advisory_ver"] = None
+        advisory_head.text = f"Computing rescue options for {spec['symbol']}…"
+        advisory_spinner.set_visibility(True)
+        cards_col.clear()
+        payoff_chart.set_visibility(False)
+        bus_client.request("options", {"type": "rescue_adhoc", "args": {"spec": spec}})
+
+    adhoc_load_btn.on_click(_adhoc_load)
+    adhoc_compute_btn.on_click(_adhoc_compute)
+    adhoc_strat.on_value_change(_adhoc_on_strategy)
+    adhoc_exp_sel.on_value_change(_adhoc_on_expiry)
+    _adhoc_visibility()   # initial: PCS → call selects hidden
+    # Track the current calc_chain version WITHOUT applying a possibly-stale cached
+    # chain (a prior symbol's); the poll applies only a fresh publish after Load.
+    adhoc["chain_ver"] = bus_client.read_version("options:calc_chain")
+    ui.timer(1.0, _adhoc_poll_chain)
 
     # Initial paint (graceful-empty when the service is cold).
     state["paper_ver"] = bus_client.read_version("options:paper_account")
