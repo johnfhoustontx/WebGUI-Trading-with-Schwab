@@ -440,17 +440,15 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None):
                "tooltip": {"headerFormat": "",
                            "pointFormat": "Strike {point.y} · net {point.value:,.0f}"}}]
     spots = m.get("spots") or []
-    if any(s is not None for s in spots):
-        # Underlying price track over the session, on the shared Strike axis. A
-        # line series ignores the colorAxis, so it isn't recolored by net value.
-        spot_pts = [[xi, sp] for xi, sp in enumerate(spots) if isinstance(sp, (int, float))]
-        series.append({"type": "line", "name": "Spot", "data": spot_pts,
-                       "color": PRICE_LINE, "lineWidth": 2, "marker": {"enabled": False},
-                       "colorAxis": False, "enableMouseTracking": True, "states": no_fade,
-                       "tooltip": {"headerFormat": "", "pointFormat": "Spot {point.y:,.2f}"}})
+    # Underlying price track over the session (on the shared Strike axis; a line series
+    # ignores the colorAxis so it isn't recolored by net value). Built here, appended
+    # (with the two EM-cone series) AFTER the projection block below.
+    spot_pts = [[xi, sp] for xi, sp in enumerate(spots) if isinstance(sp, (int, float))]
+
     # Forward projection band (GEX only): extend the figure with future columns,
     # a 'now' seam, the spot line continued along the cone midline, and EM cones.
     xaxis_plotlines = []
+    em_up_pts, em_down_pts = [], []
     if projection and projection.get("times") and projection.get("grid"):
         ptimes = list(projection["times"])
         base = len(times)
@@ -458,7 +456,7 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None):
         cone = projection.get("cone") or {}
         # Future heatmap cells on the SAME heatmap series/colorAxis, cropped to yrange.
         proj_rows_for_zmax = []
-        heat_series = next(s for s in series if s["type"] == "heatmap")
+        heat_series = series[0]      # the heatmap series
         for strike, vals in pgrid.items():
             try:
                 sk = float(strike)
@@ -480,24 +478,32 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None):
                                 "label": {"text": "now", "style": {"color": FONT},
                                           "rotation": 0, "y": 12}})
         # Continue the Spot line flat along cone.mid into the future.
-        mids = cone.get("mid") or []
-        spot_series = next((s for s in series if s.get("name") == "Spot"), None)
-        if spot_series is not None:
-            for j, mid in enumerate(mids):
-                if isinstance(mid, (int, float)):
-                    spot_series["data"].append([base + j, mid])
-        # EM up/down faint dashed overlays (own axis, ignore colorAxis).
-        def _cone_series(name, key, color):
-            pts = [[base + j, lvl] for j, lvl in enumerate(cone.get(key) or [])
-                   if isinstance(lvl, (int, float))]
-            return {"type": "line", "name": name, "data": pts, "color": color,
-                    "dashStyle": "ShortDash", "lineWidth": 1, "colorAxis": False,
-                    "marker": {"enabled": False}, "enableMouseTracking": False,
-                    "states": no_fade,
-                    "tooltip": {"headerFormat": "", "pointFormat": name + " {point.y:,.2f}"}}
-        series.append(_cone_series("EM up", "up", "#7fd1a3"))
-        series.append(_cone_series("EM down", "down", "#e79a9a"))
+        for j, mid in enumerate(cone.get("mid") or []):
+            if isinstance(mid, (int, float)):
+                spot_pts.append([base + j, mid])
+        em_up_pts = [[base + j, lvl] for j, lvl in enumerate(cone.get("up") or [])
+                     if isinstance(lvl, (int, float))]
+        em_down_pts = [[base + j, lvl] for j, lvl in enumerate(cone.get("down") or [])
+                       if isinstance(lvl, (int, float))]
         times = times + ptimes
+
+    # Append the three line series in a FIXED order (Spot, EM up, EM down) so EVERY
+    # view emits exactly 4 series (heatmap + these 3). A VARYING series count breaks
+    # the in-place chart.update() — Highcharts replaces (not updates) series, shifting
+    # colorIndex + leaving stray line paths — which rendered the heatmap as a mess of
+    # thin lines when toggling GEX<->Charm/DELTA/Vanna. Empty data → an inert series.
+    def _line_series(name, pts, color, **extra):
+        s = {"type": "line", "name": name, "data": pts, "color": color,
+             "marker": {"enabled": False}, "colorAxis": False, "states": no_fade,
+             "tooltip": {"headerFormat": "", "pointFormat": name + " {point.y:,.2f}"}}
+        s.update(extra)
+        return s
+    series.append(_line_series("Spot", spot_pts, PRICE_LINE, lineWidth=2,
+                               enableMouseTracking=True))
+    series.append(_line_series("EM up", em_up_pts, "#7fd1a3", lineWidth=1,
+                               dashStyle="ShortDash", enableMouseTracking=False))
+    series.append(_line_series("EM down", em_down_pts, "#e79a9a", lineWidth=1,
+                               dashStyle="ShortDash", enableMouseTracking=False))
     # The bar chart already labels the Strike axis and the heatmap shares its EXACT
     # y-range, so hide the heatmap's (duplicate) strike labels + title and drop its
     # left-axis gutter — the cells butt directly against the bars.

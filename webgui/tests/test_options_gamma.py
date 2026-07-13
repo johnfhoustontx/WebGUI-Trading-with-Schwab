@@ -639,12 +639,28 @@ def test_heatmap_appends_projection_columns():
     assert len(spot["data"]) == 4                                  # 2 collected + 2 cone.mid
 
 
-def test_heatmap_no_projection_unchanged():
+def test_heatmap_no_projection_no_divider_empty_cone():
     fig = gamma.heatmap_figure(_proj_rows(), "GEX", yrange=[95.0, 105.0], projection=None)
     assert not any(pl.get("className") == "gamma-now-divider"
                    for pl in fig["xAxis"].get("plotLines", []))
-    names = [s.get("name") for s in fig["series"]]
-    assert "EM up" not in names and "EM down" not in names
+    # The EM cone series are ALWAYS present (fixed 4-series structure so the in-place
+    # chart.update() maps 1:1 across views) but carry EMPTY data with no projection.
+    em = {s["name"]: s for s in fig["series"] if s.get("name") in ("EM up", "EM down")}
+    assert set(em) == {"EM up", "EM down"}
+    assert em["EM up"]["data"] == [] and em["EM down"]["data"] == []
+
+
+def test_heatmap_series_count_constant_across_projection():
+    # A CONSTANT series count (heatmap + Spot + EM up + EM down = 4) is required so the
+    # in-place chart.update() maps series 1:1 when toggling GEX<->Charm/DELTA/Vanna. A
+    # varying count made Highcharts replace series (shifting colorIndex + leaving stray
+    # line paths) → the heatmap rendered as a mess of thin lines. Regression guard.
+    proj = {"times": ["13:15"], "spot": 100.0, "grid": {100.0: [5.0]},
+            "cone": {"mid": [100.0], "up": [100.5], "down": [99.5]}}
+    with_proj = gamma.heatmap_figure(_proj_rows(), "GEX", yrange=[95.0, 105.0], projection=proj)
+    no_proj = gamma.heatmap_figure(_proj_rows(), "Charm", yrange=[95.0, 105.0], projection=None)
+    assert len(with_proj["series"]) == len(no_proj["series"]) == 4
+    assert [s["type"] for s in no_proj["series"]] == ["heatmap", "line", "line", "line"]
 
 
 def test_strike_heat_split_constant():
