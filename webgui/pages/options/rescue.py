@@ -552,11 +552,26 @@ def render():
     def _noop_apply(_card):
         return lambda: None
 
-    # ── tabs ─────────────────────────────────────────────────────────────────
-    with ui.tabs().classes("w-full") as tabs:
-        tab_board = ui.tab("At-Risk Board")
-        tab_adhoc = ui.tab("Ad-hoc Trade")
-    with ui.tab_panels(tabs, value=tab_board).classes("w-full"):
+    # ── tabs: folder-style subtabs mounted under the main strip (app standard,
+    # like Gamma/Scanner/Simulator) via main.subtab_slot(); falls back inline
+    # when the slot is absent (standalone render / tests). ────────────────────
+    import main as _shell
+    _slot = _shell.subtab_slot()
+
+    def _build_tabs():
+        with ui.tabs().classes("compact-subtabs").props(
+                "dense no-caps inline-label align=left") as t:
+            tb = ui.tab("At-Risk Board")
+            ta = ui.tab("Ad-hoc Trade")
+        return t, tb, ta
+
+    if _slot is not None:
+        with _slot:
+            tabs, tab_board, tab_adhoc = _build_tabs()
+    else:
+        tabs, tab_board, tab_adhoc = _build_tabs()
+
+    with ui.tab_panels(tabs, value=tab_board).classes("w-full flush-panels"):
         # ── BOARD PANEL: at-risk table (left) + advisory cards (right) ─────────
         with ui.tab_panel(tab_board):
             with ui.row().classes("w-full gap-4 no-wrap items-start") as board_body:
