@@ -321,9 +321,26 @@ def test_adhoc_spec_from_legs_quantity_from_short_leg():
     assert spec["quantity"] == 3
 
 
-def test_adhoc_spec_from_legs_single_leg_errors():
-    spec = rescue.adhoc_spec_from_legs("SPY", [_leg("put", "short", 500)])
-    assert "error" in spec
+def test_adhoc_spec_from_legs_single_long_call():
+    spec = rescue.adhoc_spec_from_legs("SPY", [_leg("call", "long", 500, premium=3.20, qty=2)])
+    assert spec["strategy"] == "LONG_CALL"
+    assert spec["short_strike"] == 500
+    assert spec["quantity"] == 2
+    assert spec["entry_credit"] == -3.20   # long pays a debit → negative
+
+
+def test_adhoc_spec_from_legs_single_naked_put():
+    spec = rescue.adhoc_spec_from_legs("SPY", [_leg("put", "short", 490, premium=1.80)])
+    assert spec["strategy"] == "NAKED_PUT"
+    assert spec["short_strike"] == 490
+    assert spec["entry_credit"] == 1.80    # naked receives a credit → positive
+
+
+def test_adhoc_spec_from_legs_single_long_put_and_naked_call():
+    assert rescue.adhoc_spec_from_legs(
+        "SPY", [_leg("put", "long", 480, premium=2.0)])["strategy"] == "LONG_PUT"
+    assert rescue.adhoc_spec_from_legs(
+        "SPY", [_leg("call", "short", 520, premium=2.5)])["strategy"] == "NAKED_CALL"
 
 
 def test_adhoc_spec_from_legs_only_shorts_errors():

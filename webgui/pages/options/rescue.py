@@ -34,7 +34,8 @@ _AT_RISK_STATES = ("tested", "critical")
 # else (debit spreads, singles, all-call/put condors/butterflies, calendars,
 # diagonals) pops a "not available yet" message. Extended as coverage grows — see
 # docs/plans/2026-06-23-rescue-adhoc-calculator-tab-design.md.
-RESCUE_ADHOC_SUPPORTED = ("PCS", "CCS", "IC", "IRON_BUTTERFLY")
+RESCUE_ADHOC_SUPPORTED = ("PCS", "CCS", "IC", "IRON_BUTTERFLY",
+                          "LONG_CALL", "LONG_PUT", "NAKED_CALL", "NAKED_PUT")
 
 
 def heat_color(heat):
@@ -309,9 +310,15 @@ def summary_line(advisory):
 
 
 # ── ad-hoc trade rescue (pure spec mapping from leg-editor legs) ──────────────
-# Error surfaced when the legs aren't a recognized defined-risk credit structure.
-_ADHOC_STRUCT_ERR = ("Rescue supports credit spreads and iron condors/flies — "
-                     "this structure isn't recognized.")
+# Error surfaced when the legs aren't a recognized supported structure.
+_ADHOC_STRUCT_ERR = ("Rescue supports single options and credit spreads / iron "
+                     "condors/flies — this structure isn't recognized.")
+
+# (option_type, side) → single-option strategy code (Phase 1).
+_SINGLE_STRAT = {
+    ("call", "long"): "LONG_CALL", ("put", "long"): "LONG_PUT",
+    ("call", "short"): "NAKED_CALL", ("put", "short"): "NAKED_PUT",
+}
 
 
 def adhoc_spec_from_legs(symbol, legs):
@@ -355,6 +362,23 @@ def adhoc_spec_from_legs(symbol, legs):
     if len(expiries) > 1:
         return {"error": "Rescue needs a single expiration (no calendars)."}
     expiration = next(iter(expiries), "")
+
+    # Single-leg structures (Phase 1): long/naked call & put. entry_credit is
+    # SIGNED — a long pays a debit (negative), a naked short receives a credit (+).
+    if len(parsed) == 1:
+        leg = parsed[0]
+        strat = _SINGLE_STRAT.get((leg["option_type"], leg["side"]))
+        if strat is None:
+            return {"error": _ADHOC_STRUCT_ERR}
+        signed = leg["premium"] if leg["side"] == "short" else -leg["premium"]
+        return {
+            "symbol": str(symbol or "").strip().upper(),
+            "strategy": strat,
+            "short_strike": leg["strike"],
+            "expiration": expiration,
+            "quantity": leg["qty"] or 1,
+            "entry_credit": signed,
+        }
 
     put_short = [leg for leg in parsed if leg["option_type"] == "put" and leg["side"] == "short"]
     put_long = [leg for leg in parsed if leg["option_type"] == "put" and leg["side"] == "long"]
