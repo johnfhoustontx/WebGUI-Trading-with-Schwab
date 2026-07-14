@@ -8,7 +8,27 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-07-13 (**Paper-trade non-credit structures (long options + debit verticals)**: the
+**Last updated:** 2026-07-14 (**Rescue coverage — Phase 1b: debit verticals (ad-hoc)**: the `/options/rescue`
+**ad-hoc** tab now builds advisory rescues for **defined-risk DEBIT verticals** — `VERT_CALL_DEBIT` (bull call =
+long lower call + short higher call) and `VERT_PUT_DEBIT` (bear put = long higher put + short lower put) — the
+next family after singles (credit spreads · IC/fly · singles · debit verticals = **8 of 19** structures; the rest
+still pop "not available yet"). **Advisory-only** (ad-hoc has no Apply). Engine (`services/options_svc/rescue.py`,
+PURE): `assess_debit_risk` (directional — "at-risk" = underlying moved against the LONG leg; heat =
+`min(50, loss_frac·60) + min(25, otm_depth·300) + 15 if dte≤5 & OTM`, otm_depth from `long_strike`) +
+`debit_candidates` — all commission-aware, `apply_kind="advisory"`: **close** (sell to close → +cv·100·qty credit,
+`new_max_loss=0`), **roll_out** (sell current + buy +30d same-strikes → debit since the later spread is richer),
+**convert_to_butterfly** (SELL short-strike + BUY beyond it → the L/S/(S±w) butterfly, credit that reduces the net
+debit). Compute routing (`compute.py`): `_advisory_from_debit`/`_adhoc_debit` mirror the singles path —
+`_DEBIT_STRATEGIES` route in `compute_rescue_adhoc`; the two legs are priced directly via `_make_leg_pricer`
+(cv = long mid − short mid, falling back to the entered debit when a leg is unpriceable — the off-hours case, where
+only `close` survives), underlying from the gamma-snapshot spot, `unrealized_pnl = (cv − |entry_credit|)·100·qty`.
+Page mapper (`webgui/pages/options/rescue.py`): `adhoc_spec_from_legs` recognizes a 2-leg debit vertical (BEFORE the
+generic net-credit guard, which applies only to credit structures) → `long_strike`/`short_strike` + a **negative**
+`entry_credit`; both codes added to `RESCUE_ADHOC_SUPPORTED`. TDD per layer; green: options_svc **516** (incl.
+`test_rescue_debit` **11** + `test_compute_rescue` debit **+5**) + webgui rescue/shell **47**; ruff clean.
+Live-verified end-to-end (SPY bull-call + bear-put → advisory-only, correct close economics + directional heat).
+Branch `Using_Highcharts`. Design:
+[design](docs/plans/2026-06-24-rescue-debit-verticals-design.md). Prior — 2026-07-13 (**Paper-trade non-credit structures (long options + debit verticals)**: the
 multi-strategy Swing Scanner's **Send to Paper** button now works for **defined-risk DEBIT** structures —
 **LONG_CALL / LONG_PUT / BULL_CALL / BEAR_PUT** — not just credit spreads (naked shorts stay excluded:
 undefined risk). The ledger (`trades.db`, `paper_trader`) grows a **legs-based DEBIT trade**: `create_paper_trade`
