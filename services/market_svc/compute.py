@@ -213,6 +213,19 @@ def build_summary_packet(dashboard, sentiment):
     }
 
 
+
+def _count_anthropic_call():
+    """Best-effort per-day Claude-call counter (Settings -> API usage).
+
+    Recorded immediately before each ``messages.create`` so every real attempt
+    counts and no-key/stand-down paths (which never reach the API) do not.
+    Never raises — counting must not break a Claude call."""
+    try:
+        from shared import anthropic_counter
+        anthropic_counter.record()
+    except Exception:  # noqa: BLE001
+        pass
+
 def generate_summary(dashboard, sentiment, client=None):
     """Build the packet, call Claude for a 1-2 sentence verdict. Defensive → {'narrative': ''}."""
     import json
@@ -221,6 +234,7 @@ def generate_summary(dashboard, sentiment, client=None):
     if c is None:
         return {"narrative": ""}
     try:
+        _count_anthropic_call()
         resp = c.messages.create(
             model=_SUMMARY_MODEL, max_tokens=_SUMMARY_MAX_TOKENS,
             thinking={"type": "disabled"},

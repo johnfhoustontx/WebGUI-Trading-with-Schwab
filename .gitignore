@@ -59,3 +59,4 @@ trade-analyzer/data/
 sentiment-dashboard/data/
 webgui/data/eod/
 schwab-proxy/data/
+shared/data/

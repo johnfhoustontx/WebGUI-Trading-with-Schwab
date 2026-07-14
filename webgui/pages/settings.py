@@ -225,13 +225,16 @@ def render():
             ui.button("Reset to defaults", color=None).props("no-caps").classes(
                 BTN_3D_DANGER).on_click(reset_dlg.open)
 
-    # ── API usage — outbound Schwab API calls counted at the proxy ────────────
+    # ── API usage — Schwab (proxy-counted) + Claude/Anthropic (shared store) ──
     with ui.card().classes("w-full max-w-2xl"):
         ui.label("API usage").classes("text-subtitle1 font-bold")
-        ui.label("Outbound Schwab API calls, counted at the proxy per actual HTTP "
-                 "request (market data + trading, including retries). Counts "
-                 "accumulate from the first proxy start with the counter.").classes(
-                 "opacity-70 text-sm")
+        ui.label("Outbound Schwab API calls counted at the proxy per actual HTTP "
+                 "request (market data + trading, including retries), and Claude "
+                 "(Anthropic) calls counted at each call site (driver decider, "
+                 "Gamma Analyze, ticker summary). Counts accumulate going "
+                 "forward.").classes("opacity-70 text-sm")
+
+        ui.label("Schwab").classes("text-xs font-bold opacity-80 mt-1")
         stat_lbls = {}
         with ui.row().classes("gap-6"):
             for label, val in api_stats_rows(None):
@@ -240,6 +243,23 @@ def render():
                     stat_lbls[label] = ui.label(val).classes(
                         "text-[20px] font-semibold")
         api_since = ui.label("").classes("opacity-60 text-xs")
+
+        ui.label("Claude (Anthropic)").classes("text-xs font-bold opacity-80 mt-2")
+        claude_lbls = {}
+        with ui.row().classes("gap-6"):
+            for label, val in api_stats_rows(None):
+                with ui.column().classes("gap-0"):
+                    ui.label(label).classes("text-xs opacity-60")
+                    claude_lbls[label] = ui.label(val).classes(
+                        "text-[20px] font-semibold")
+        claude_since = ui.label("").classes("opacity-60 text-xs")
+
+        def _read_claude_stats():
+            try:
+                from shared import anthropic_counter
+                return anthropic_counter.stats()
+            except Exception:  # noqa: BLE001 — the card degrades to placeholders
+                return None
 
         @guard_async
         async def _load_api_stats():
@@ -250,6 +270,14 @@ def render():
                               if stats and stats.get("since")
                               else "No counts yet — restart the proxy if it "
                                    "predates the counter.")
+            cstats = await run.io_bound(_read_claude_stats)
+            for label, val in api_stats_rows(cstats):
+                claude_lbls[label].text = val
+            claude_since.text = (f"Counting since {cstats['since']}."
+                                 if cstats and cstats.get("since")
+                                 else "No counts yet — restart the services "
+                                      "(driver / options / market) if they "
+                                      "predate the counter.")
 
         ui.button("Refresh", icon="refresh", color=None).props("no-caps").classes(
             BTN_3D).on_click(_load_api_stats)

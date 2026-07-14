@@ -2494,6 +2494,19 @@ def analyze_history_doc(briefings, title="Gamma Briefings") -> str:
             f"{body}</div></body></html>")
 
 
+
+def _count_anthropic_call():
+    """Best-effort per-day Claude-call counter (Settings -> API usage).
+
+    Recorded immediately before each ``messages.create`` so every real attempt
+    counts and no-key/stand-down paths (which never reach the API) do not.
+    Never raises — counting must not break a Claude call."""
+    try:
+        from shared import anthropic_counter
+        anthropic_counter.record()
+    except Exception:  # noqa: BLE001
+        pass
+
 def gamma_analyze(client=None, label: str | None = None) -> dict:
     """Run the bundled SPX/SPY/QQQ briefing through Claude → ``{"html", "prompt"}``.
 
@@ -2574,6 +2587,7 @@ def gamma_analyze(client=None, label: str | None = None) -> dict:
             "prompt": prompt}
 
     try:
+        _count_anthropic_call()
         resp = client.messages.create(
             model=_ANALYZE_MODEL,
             max_tokens=_ANALYZE_MAX_TOKENS,

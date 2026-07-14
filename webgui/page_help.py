@@ -285,8 +285,9 @@ Controls the alert chimes, notifications, the ticker, and the app's look.
 - **Ticker** — the scrolling market-summary bar at the bottom of every page.
 - **Appearance** — every color, font, and menu style, editable in-app (tabs of
   clickable color swatches). **Save & restart web GUI** applies the change.
-- **API usage** — how many calls the app made to Schwab today / this week /
-  this month (counted at the gateway).
+- **API usage** — how many calls the app made to Schwab (counted at the
+  gateway) and to Claude (counted at each call site), today / this week /
+  this month.
 - **Maintenance** — **Vacuum GEX history DB** shrinks the intraday options
   database on disk (run it after hours; it locks the file for minutes).
 - **Test sound** also unlocks browser audio. The **User Manuals** live here too.

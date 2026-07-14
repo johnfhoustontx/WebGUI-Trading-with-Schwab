@@ -249,6 +249,19 @@ def _stand_down(reason: str, *, detail: str = "") -> dict:
     return d
 
 
+
+def _count_anthropic_call():
+    """Best-effort per-day Claude-call counter (Settings -> API usage).
+
+    Recorded immediately before each ``messages.create`` so every real attempt
+    counts and no-key/stand-down paths (which never reach the API) do not.
+    Never raises — counting must not break a Claude call."""
+    try:
+        from shared import anthropic_counter
+        anthropic_counter.record()
+    except Exception:  # noqa: BLE001
+        pass
+
 def decide(packet, client=None, _force_no_key=False) -> dict:
     """Ask Claude for a decision via a single forced tool-use call.
 
@@ -282,6 +295,7 @@ def decide(packet, client=None, _force_no_key=False) -> dict:
     except Exception as exc:  # noqa: BLE001 — even client construction degrades safely.
         return _stand_down(REASON_API_ERROR, detail=f"client init: {exc!r}")
     try:
+        _count_anthropic_call()
         resp = client.messages.create(
             model=settings.MODEL,
             max_tokens=settings.MAX_TOKENS,
