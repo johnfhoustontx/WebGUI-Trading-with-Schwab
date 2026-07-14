@@ -244,25 +244,32 @@ def _leg_text(leg):
 def candidate_card_rows(advisory):
     """One display dict per ranked candidate in the advisory (already ordered).
 
-    Each: {title, apply_kind, gross_text, commission_text, net_text (cash_text),
-    metrics [list of 'Label: value' for non-None new_* fields, $ for cash, 2dp
-    for delta], legs [list of 'SELL PUT 500 @1.20'], rationale, context,
+    Each: {title, apply_kind, gross_text, commission_text, net_text,
+    realized_text (cash_text or None — the P&L LOCKED IN for close/partial),
+    metrics [list of 'Label: value' for non-None new_* fields; the trivial
+    'Max loss after: $0' is suppressed on a full close], legs, rationale, context,
     warnings, score}. Defensive: advisory with error / no candidates → []."""
     adv = advisory or {}
     if adv.get("error"):
         return []
     cards = []
     for cand in adv.get("candidates") or []:
+        action = cand.get("action")
         metrics = []
         for key, label, fmt in _CANDIDATE_METRICS:
             val = cand.get(key)
             if val is None:
+                continue
+            # A full close leaves no position → "Max loss after: $0" is trivially
+            # true and reads as "no loss"; the locked-in P&L is shown instead.
+            if key == "new_max_loss" and action == "close":
                 continue
             try:
                 rendered = fmt(val)
             except (TypeError, ValueError):
                 rendered = str(val)
             metrics.append(f"{label}: {rendered}")
+        realized = cand.get("realized_pnl")
         cards.append({
             "title": cand.get("label") or cand.get("action") or "Rescue",
             "apply_kind": cand.get("apply_kind") or "advisory",
@@ -270,6 +277,7 @@ def candidate_card_rows(advisory):
             "commission_text": cash_text(
                 -abs(c) if (c := _num(cand.get("commission"))) is not None else None),
             "net_text": cash_text(cand.get("net_cash")),
+            "realized_text": cash_text(realized) if realized is not None else None,
             "metrics": metrics,
             "legs": [_leg_text(l) for l in cand.get("est_fill_legs") or []],
             "rationale": list(cand.get("rationale") or []),
@@ -626,10 +634,14 @@ def render():
                                   on_click=apply_factory(card)).props("no-caps").classes(BTN_3D)
                     else:
                         ui.label("manual — place yourself").classes("opacity-70 text-sm")
-                # Gross / commission / net cash line (cash_text colors).
+                # Gross / commission / net cash line (cash_text colors); the
+                # locked-in P&L follows when the action realizes one (close/partial).
                 with ui.row().classes("items-center gap-4"):
-                    for lbl, key in (("Gross", "gross_text"), ("Comm", "commission_text"),
-                                     ("Net", "net_text")):
+                    cells = [("Gross", "gross_text"), ("Comm", "commission_text"),
+                             ("Net", "net_text")]
+                    if card.get("realized_text"):
+                        cells.append(("Realized P&L", "realized_text"))
+                    for lbl, key in cells:
                         cell = card[key]
                         with ui.row().classes("items-center gap-1"):
                             ui.label(f"{lbl}:").classes("opacity-70 text-sm")

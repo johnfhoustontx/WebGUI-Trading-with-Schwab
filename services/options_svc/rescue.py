@@ -271,6 +271,7 @@ def build_close(position, mark, price_leg, ctx) -> dict | None:
         "gross_cash": gross,
         "commission": commission,
         "net_cash": round(gross - commission, 2),
+        "realized_pnl": mark.get("unrealized_pnl"),
         "new_max_loss": 0.0,
         "new_short_delta": 0.0,
         "new_width": None,
@@ -298,6 +299,9 @@ def build_partial_close(position, mark, price_leg, ctx) -> dict | None:
     gross = -round(cv * 100 * close_qty, 2)
     commission = commission_for(2, sym, close_qty)
     new_max_loss = round(old_ml * remaining / qty, 2)
+    # realized P&L locked in on the CLOSED fraction only.
+    _pnl = mark.get("unrealized_pnl")
+    realized = round(_pnl * close_qty / qty, 2) if _pnl is not None else None
     return {
         "action": "partial_close",
         "label": f"Close {close_qty} of {qty} contracts (scale down)",
@@ -305,6 +309,7 @@ def build_partial_close(position, mark, price_leg, ctx) -> dict | None:
         "gross_cash": gross,
         "commission": commission,
         "net_cash": round(gross - commission, 2),
+        "realized_pnl": realized,
         "new_max_loss": new_max_loss,
         "new_short_delta": cur_delta,
         "new_width": None,
@@ -782,9 +787,10 @@ def assess_single_risk(position, mark, gex=None, regime=None) -> dict:
 def _single_candidate(action, label, *, gross, commission, rationale,
                       new_max_loss=None, new_expiry=None, dte_after=None,
                       new_width=None, est_fill_legs=None, context=None,
-                      warnings=None, score=50.0) -> dict:
+                      warnings=None, score=50.0, realized_pnl=None) -> dict:
     """Assemble a uniform (RescueCandidate-shaped) single-option candidate dict.
-    All single candidates are advisory-only."""
+    All single candidates are advisory-only. ``realized_pnl`` = the P&L LOCKED IN
+    by the action (set for close/partial; None otherwise)."""
     gross = round(gross, 2)
     commission = round(commission, 2)
     return {
@@ -794,6 +800,7 @@ def _single_candidate(action, label, *, gross, commission, rationale,
         "gross_cash": gross,
         "commission": commission,
         "net_cash": round(gross - commission, 2),
+        "realized_pnl": (round(realized_pnl, 2) if realized_pnl is not None else None),
         "new_max_loss": (round(new_max_loss, 2) if new_max_loss is not None else None),
         "new_short_delta": None,
         "new_width": new_width,
@@ -838,6 +845,7 @@ def single_candidates(position, mark, price_leg, gex=None, regime=None) -> list[
                 "close", "Sell to close",
                 gross=cv * 100 * qty, commission=commission_for(1, sym, qty),
                 new_max_loss=0.0, dte_after=dte,
+                realized_pnl=mark.get("unrealized_pnl"),
                 rationale=["Sell to close — recover the remaining premium, "
                            "cut the loss."],
                 score=60.0))
@@ -877,6 +885,7 @@ def single_candidates(position, mark, price_leg, gex=None, regime=None) -> list[
             "close", "Buy to close",
             gross=-(cv * 100 * qty), commission=commission_for(1, sym, qty),
             new_max_loss=0.0, dte_after=dte,
+            realized_pnl=mark.get("unrealized_pnl"),
             rationale=["Buy to close — removes the undefined risk."],
             context=[undef], score=60.0))
     # 2. roll — buy to close + sell a new option away & out for a credit.
@@ -989,6 +998,7 @@ def debit_candidates(position, mark, price_leg, gex=None, regime=None) -> list[d
             "close", "Sell to close",
             gross=cv * 100 * qty, commission=commission_for(2, sym, qty),
             new_max_loss=0.0, dte_after=dte,
+            realized_pnl=mark.get("unrealized_pnl"),
             est_fill_legs=[_leg("SELL", right, L, expiry, qty,
                                 price_leg(sym, expiry, right, L)),
                            _leg("BUY", right, S, expiry, qty,
@@ -1130,6 +1140,7 @@ def range_candidates(position, mark, price_leg, gex=None, regime=None) -> list[d
             "close", "Close the structure",
             gross=cv * 100 * qty, commission=commission_for(n, sym, qty),
             new_max_loss=0.0, dte_after=dte,
+            realized_pnl=mark.get("unrealized_pnl"),
             est_fill_legs=[
                 _leg(_side_word(l), l.get("right"), l.get("strike"), expiry,
                      qty * int(l.get("qty") or 1),

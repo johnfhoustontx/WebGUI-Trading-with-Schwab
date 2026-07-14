@@ -223,6 +223,33 @@ def test_candidate_card_rows_error_and_empty():
     assert rescue.candidate_card_rows(None) == []
 
 
+def test_candidate_card_close_shows_realized_pnl_not_max_loss():
+    # A full close: show the P&L LOCKED IN, suppress the trivial "Max loss after: $0".
+    close = _candidate(action="close", label="Sell to close", gross_cash=2150.0,
+                       commission=13.0, net_cash=2137.0, realized_pnl=-850.0,
+                       new_max_loss=0.0, new_breakeven=None, new_short_delta=None,
+                       new_width=None, new_expiry=None)
+    row = rescue.candidate_card_rows(_advisory(candidates=[close]))[0]
+    assert row["realized_text"]["text"] == "-$850"     # colored, the actual loss
+    assert not any("max loss" in m.lower() for m in row["metrics"])  # $0 suppressed
+
+
+def test_candidate_card_partial_close_keeps_max_loss_and_shows_realized():
+    # A partial close keeps a residual position → "Max loss after" IS meaningful.
+    partial = _candidate(action="partial_close", label="Close 5 of 10",
+                         realized_pnl=-425.0, new_max_loss=735.0,
+                         new_breakeven=None, new_short_delta=None, new_width=None,
+                         new_expiry=None)
+    row = rescue.candidate_card_rows(_advisory(candidates=[partial]))[0]
+    assert row["realized_text"]["text"] == "-$425"
+    assert any("max loss after" in m.lower() for m in row["metrics"])
+
+
+def test_candidate_card_non_close_has_no_realized_text():
+    row = rescue.candidate_card_rows(_advisory(candidates=[_candidate()]))[0]
+    assert row["realized_text"] is None
+
+
 def test_summary_line_normal():
     adv = _advisory(candidates=[_candidate(), _candidate()])
     line = rescue.summary_line(adv)

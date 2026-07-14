@@ -30,7 +30,14 @@ butterfly; a split 2× body folds in; short/credit structures fall through), emi
 + a NEGATIVE `entry_credit`; the four codes added to `RESCUE_ADHOC_SUPPORTED`. TDD per layer; green: options_svc
 **537** (incl. `test_rescue_range` **15** + `test_compute_rescue` range **+6**) + webgui rescue/shell **52**; ruff
 clean. Live-verified end-to-end (SPY call condor + put butterfly → advisory-only, correct close economics + heat).
-Branch `Using_Highcharts`. Design:
+**Follow-up (same day) — rescue close cards show the LOCKED-IN P&L, not a bare $0.** The card `Max loss` field is
+`new_max_loss` = the max loss of the position that REMAINS after the action; a full **close** leaves you flat → $0,
+which read as "this trade has no loss." Fixed across ALL close paths: the `RescueCandidate` contract gained
+`realized_pnl` (the P&L locked in), set on every close/partial builder (`build_close`/`build_partial_close`/the
+single/debit/range close candidates) from `mark.unrealized_pnl` (partial = ×closed-fraction); the page renders a
+colored **Realized P&L** cell alongside Gross/Comm/Net and **suppresses the trivial "Max loss after: $0" on a full
+close** (partial keeps it — the residual is real). The residual field was also relabeled **"Max loss" → "Max loss
+after"**. Live-verified (MU bear-put debit close → Realized P&L −$650 shown, $0 suppressed). Branch `Using_Highcharts`. Design:
 [design](docs/plans/2026-07-14-rescue-condor-butterfly-design.md). Prior — 2026-07-14 (**Rescue coverage — Phase 1b: debit verticals (ad-hoc)**: the `/options/rescue`
 **ad-hoc** tab now builds advisory rescues for **defined-risk DEBIT verticals** — `VERT_CALL_DEBIT` (bull call =
 long lower call + short higher call) and `VERT_PUT_DEBIT` (bear put = long higher put + short lower put) — the

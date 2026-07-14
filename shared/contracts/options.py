@@ -40,6 +40,7 @@ class RescueCandidate(_Base):
     gross_cash: float = 0.0         # credit (+) / debit (-) before fees
     commission: float = 0.0
     net_cash: float = 0.0           # gross_cash - commission
+    realized_pnl: float | None = None   # P&L LOCKED IN by the action (close/partial)
     new_max_loss: float | None = None
     new_breakeven: float | None = None
     new_short_delta: float | None = None
