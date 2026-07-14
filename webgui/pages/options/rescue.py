@@ -30,6 +30,12 @@ CASH_NEUTRAL = "#9e9e9e"
 # rescue_state values that put a position on the at-risk board.
 _AT_RISK_STATES = ("tested", "critical")
 
+# Strategy codes the ad-hoc rescue engine can advise on today. Selecting anything
+# else (debit spreads, singles, all-call/put condors/butterflies, calendars,
+# diagonals) pops a "not available yet" message. Extended as coverage grows — see
+# docs/plans/2026-06-23-rescue-adhoc-calculator-tab-design.md.
+RESCUE_ADHOC_SUPPORTED = ("PCS", "CCS", "IC", "IRON_BUTTERFLY")
+
 
 def heat_color(heat):
     """CSS color for a 0-100 heat value by zone (None / non-numeric -> green).
@@ -454,6 +460,16 @@ def render():
     from .calculator import chain_expiries, chain_strikes
     from . import leg_editor
     from .strategy_menu import build_strategy_menu
+    from .strategies import strategy_label
+
+    def _adhoc_unsupported(code):
+        """True + pops a 'not available yet' message when a strategy the rescue
+        engine can't advise on yet is selected/computed."""
+        if code in RESCUE_ADHOC_SUPPORTED:
+            return False
+        ui.notify(f"Rescue for '{strategy_label(code)}' is not available yet.",
+                  type="warning", timeout=4000)
+        return True
 
     ui.add_css(_RESCUE_CSS)
 
@@ -744,6 +760,7 @@ def render():
     @guard
     def _adhoc_on_strategy(_e=None):
         _adhoc_seed_template()
+        _adhoc_unsupported(adhoc_strat.value)   # gentle heads-up on select
 
     @guard
     def _adhoc_on_expiry():
@@ -804,6 +821,10 @@ def render():
 
     @guard
     def _adhoc_compute():
+        # Gate on the selected strategy first: an unsupported one pops the
+        # "not available yet" message instead of a confusing structure error.
+        if _adhoc_unsupported(adhoc_strat.value):
+            return
         spec = adhoc_spec_from_legs(adhoc_sym.value, adhoc_editor.get_legs())
         if spec.get("error"):
             ui.notify(spec["error"], type="warning")
