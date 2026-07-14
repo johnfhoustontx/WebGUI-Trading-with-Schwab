@@ -349,12 +349,33 @@ def test_adhoc_spec_from_legs_only_shorts_errors():
     assert "error" in spec
 
 
-def test_adhoc_spec_from_legs_debit_put_spread_errors():
-    # short strike BELOW long strike on the put side → debit, not a credit PCS.
-    legs = [_leg("put", "short", 495, premium=0.60),
-            _leg("put", "long", 500, premium=1.20)]
+def test_adhoc_spec_from_legs_bear_put_debit():
+    # long higher put + short lower put = bear put debit spread.
+    legs = [_leg("put", "long", 500, premium=1.20),
+            _leg("put", "short", 495, premium=0.60)]
     spec = rescue.adhoc_spec_from_legs("SPY", legs)
-    assert "error" in spec
+    assert spec["strategy"] == "VERT_PUT_DEBIT"
+    assert spec["long_strike"] == 500
+    assert spec["short_strike"] == 495
+    assert spec["entry_credit"] == -0.60   # net debit (0.60 − 1.20) → negative, allowed
+
+
+def test_adhoc_spec_from_legs_bull_call_debit():
+    # long lower call + short higher call = bull call debit spread.
+    legs = [_leg("call", "long", 500, premium=3.00),
+            _leg("call", "short", 505, premium=1.50)]
+    spec = rescue.adhoc_spec_from_legs("SPY", legs)
+    assert spec["strategy"] == "VERT_CALL_DEBIT"
+    assert spec["long_strike"] == 500
+    assert spec["short_strike"] == 505
+    assert spec["entry_credit"] == -1.50
+
+
+def test_adhoc_spec_from_legs_credit_spreads_still_map():
+    # regression: a genuine PCS still maps to PCS (not confused with a debit).
+    pcs = rescue.adhoc_spec_from_legs("SPY", [_leg("put", "short", 500, premium=1.20),
+                                              _leg("put", "long", 495, premium=0.60)])
+    assert pcs["strategy"] == "PCS" and pcs["entry_credit"] == 0.60
 
 
 def test_adhoc_spec_from_legs_multi_expiry_errors():

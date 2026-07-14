@@ -35,7 +35,8 @@ _AT_RISK_STATES = ("tested", "critical")
 # diagonals) pops a "not available yet" message. Extended as coverage grows — see
 # docs/plans/2026-06-23-rescue-adhoc-calculator-tab-design.md.
 RESCUE_ADHOC_SUPPORTED = ("PCS", "CCS", "IC", "IRON_BUTTERFLY",
-                          "LONG_CALL", "LONG_PUT", "NAKED_CALL", "NAKED_PUT")
+                          "LONG_CALL", "LONG_PUT", "NAKED_CALL", "NAKED_PUT",
+                          "VERT_CALL_DEBIT", "VERT_PUT_DEBIT")
 
 
 def heat_color(heat):
@@ -391,8 +392,14 @@ def adhoc_spec_from_legs(symbol, legs):
                  and put_short[0]["strike"] > put_long[0]["strike"])
     valid_ccs = (len(call_short) == 1 and len(call_long) == 1
                  and call_short[0]["strike"] < call_long[0]["strike"])
+    # Debit verticals — opposite strike ordering to the credit spreads.
+    valid_call_debit = (len(call_short) == 1 and len(call_long) == 1
+                        and call_long[0]["strike"] < call_short[0]["strike"])
+    valid_put_debit = (len(put_short) == 1 and len(put_long) == 1
+                       and put_long[0]["strike"] > put_short[0]["strike"])
 
     spec: dict = {}
+    is_debit = False
     if n_calls == 0 and valid_pcs:
         spec["strategy"] = "PCS"
         spec["short_strike"] = put_short[0]["strike"]
@@ -410,12 +417,26 @@ def adhoc_spec_from_legs(symbol, legs):
         spec["call_short"] = call_short[0]["strike"]
         spec["call_long"] = call_long[0]["strike"]
         short_qty = put_short[0]["qty"]
+    elif n_puts == 0 and valid_call_debit:
+        spec["strategy"] = "VERT_CALL_DEBIT"
+        spec["long_strike"] = call_long[0]["strike"]
+        spec["short_strike"] = call_short[0]["strike"]
+        short_qty = call_long[0]["qty"]
+        is_debit = True
+    elif n_calls == 0 and valid_put_debit:
+        spec["strategy"] = "VERT_PUT_DEBIT"
+        spec["long_strike"] = put_long[0]["strike"]
+        spec["short_strike"] = put_short[0]["strike"]
+        short_qty = put_long[0]["qty"]
+        is_debit = True
     else:
         return {"error": _ADHOC_STRUCT_ERR}
 
     entry_credit = (sum(leg["premium"] for leg in parsed if leg["side"] == "short")
                     - sum(leg["premium"] for leg in parsed if leg["side"] == "long"))
-    if entry_credit <= 0:
+    # Credit structures must be a net credit; a debit vertical's entry_credit is
+    # NEGATIVE (the debit paid) — expected, so the >0 guard applies to credit only.
+    if not is_debit and entry_credit <= 0:
         return {"error": "Not a net-credit structure (entry credit must be positive)."}
 
     spec.update({
