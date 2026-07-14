@@ -8,7 +8,30 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-07-14 (**Rescue coverage — Phase 1b: debit verticals (ad-hoc)**: the `/options/rescue`
+**Last updated:** 2026-07-14 (**Rescue coverage — Phase 1c: single-type condors & butterflies (ad-hoc)**: the
+`/options/rescue` **ad-hoc** tab now builds advisory rescues for the **single-type range structures** —
+`CONDOR_CALL`/`CONDOR_PUT` (long condor: long K1 / short K2 / short K3 / long K4) and `BUTTERFLY_CALL`/
+`BUTTERFLY_PUT` (long 1-2-1 fly: long K1 / short 2×K2 / long K3). All defined-risk **DEBIT**, neutral/range
+(`IC` + `IRON_BUTTERFLY` were already covered — the mapper folds an iron fly into `IC`; this is the all-call OR
+all-put sibling family). **Advisory-only** (ad-hoc has no Apply). Now **12 of 19** structures; the rest still pop
+"not available yet". Engine (`services/options_svc/rescue.py`, PURE): `assess_range_risk` (heat =
+`min(50, loss_frac·60) + min(35, range_frac·35) + 15 if dte≤5 & range_frac>0.8`, where `range_frac =
+|underlying − center| / half_width`, center = midpoint of the SHORT strikes, half_width = center → nearest LONG
+wing) + `range_candidates` — commission-aware, `apply_kind="advisory"`: **close** (sell the structure → +cv·100·qty
+credit, `new_max_loss=0`) + **roll_out** (+30d same strikes → a debit; skipped if any rolled leg is unpriceable).
+The structure carries per-unit `legs`; **structure value `cv = +long −short`** (a long condor/fly you own is
+POSITIVE, ~ the debit paid — same convention as the debit-vertical path; an early `+short −long` sign slip was
+caught in review + pinned by a non-degenerate compute test). Compute (`compute.py`): `_advisory_from_range`/
+`_adhoc_range` mirror the debit path — `_RANGE_STRATEGIES` route in `compute_rescue_adhoc`; every leg priced via
+`_make_leg_pricer`, cv falls back to the entered debit off-hours (only `close` survives, as with singles/debit).
+Page mapper (`webgui/pages/options/rescue.py`): `_range_spec_from_parsed` recognizes an all-one-type LONG range
+structure by aggregating signed net qty per strike (4 strikes `[+q,−q,−q,+q]` → condor; 3 strikes `[+q,−2q,+q]` →
+butterfly; a split 2× body folds in; short/credit structures fall through), emitting per-unit `legs` + `quantity=q`
++ a NEGATIVE `entry_credit`; the four codes added to `RESCUE_ADHOC_SUPPORTED`. TDD per layer; green: options_svc
+**537** (incl. `test_rescue_range` **15** + `test_compute_rescue` range **+6**) + webgui rescue/shell **52**; ruff
+clean. Live-verified end-to-end (SPY call condor + put butterfly → advisory-only, correct close economics + heat).
+Branch `Using_Highcharts`. Design:
+[design](docs/plans/2026-07-14-rescue-condor-butterfly-design.md). Prior — 2026-07-14 (**Rescue coverage — Phase 1b: debit verticals (ad-hoc)**: the `/options/rescue`
 **ad-hoc** tab now builds advisory rescues for **defined-risk DEBIT verticals** — `VERT_CALL_DEBIT` (bull call =
 long lower call + short higher call) and `VERT_PUT_DEBIT` (bear put = long higher put + short lower put) — the
 next family after singles (credit spreads · IC/fly · singles · debit verticals = **8 of 19** structures; the rest
