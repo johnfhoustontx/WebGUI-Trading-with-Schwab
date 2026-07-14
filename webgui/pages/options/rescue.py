@@ -36,7 +36,9 @@ _AT_RISK_STATES = ("tested", "critical")
 # docs/plans/2026-06-23-rescue-adhoc-calculator-tab-design.md.
 RESCUE_ADHOC_SUPPORTED = ("PCS", "CCS", "IC", "IRON_BUTTERFLY",
                           "LONG_CALL", "LONG_PUT", "NAKED_CALL", "NAKED_PUT",
-                          "VERT_CALL_DEBIT", "VERT_PUT_DEBIT")
+                          "VERT_CALL_DEBIT", "VERT_PUT_DEBIT",
+                          "CONDOR_CALL", "CONDOR_PUT",
+                          "BUTTERFLY_CALL", "BUTTERFLY_PUT")
 
 
 def heat_color(heat):
@@ -322,6 +324,66 @@ _SINGLE_STRAT = {
 }
 
 
+def _range_spec_from_parsed(symbol, parsed, expiration):
+    """Recognize a single-type LONG range structure (condor / butterfly) from
+    parsed legs → an ad-hoc rescue spec carrying per-unit ``legs``, or ``None`` if
+    the legs aren't such a structure (fall through to the vertical/error paths).
+
+    All legs must be ONE option type. Legs are aggregated into signed net qty per
+    strike (long +, short −); ``q`` = the unit count (the wing net magnitude):
+      * 4 distinct strikes, ascending nets ``[+q,−q,−q,+q]`` → CONDOR_CALL/PUT;
+      * 3 distinct strikes, ascending nets ``[+q,−2q,+q]``   → BUTTERFLY_CALL/PUT.
+    Only LONG (debit) structures match — a short fly/condor's nets are inverted and
+    fall through. ``entry_credit`` (per unit, per share) = Σ(sign·prem·qty)/q
+    (NEGATIVE for these debits). Pure; never raises."""
+    types = {leg["option_type"] for leg in parsed}
+    if types not in ({"call"}, {"put"}):
+        return None
+    right = "CALL" if types == {"call"} else "PUT"
+
+    # signed net qty per strike (long +, short −).
+    nets: dict[float, int] = {}
+    for leg in parsed:
+        sign = 1 if leg["side"] == "long" else -1
+        nets[leg["strike"]] = nets.get(leg["strike"], 0) + sign * leg["qty"]
+    strikes = sorted(nets)
+    net_seq = [nets[k] for k in strikes]
+
+    q = None
+    strat = None
+    if len(strikes) == 4 and net_seq[0] > 0:
+        q = net_seq[0]
+        if net_seq == [q, -q, -q, q]:
+            strat = "CONDOR_CALL" if right == "CALL" else "CONDOR_PUT"
+    elif len(strikes) == 3 and net_seq[0] > 0:
+        q = net_seq[0]
+        if net_seq == [q, -2 * q, q]:
+            strat = "BUTTERFLY_CALL" if right == "CALL" else "BUTTERFLY_PUT"
+    if strat is None or not q or q < 1:
+        return None
+
+    # per-unit legs (divide the net by q); a wing = |1| long, a body = |1 or 2| short.
+    legs = []
+    for k in strikes:
+        n = nets[k] // q
+        legs.append({"right": right, "side": "long" if n > 0 else "short",
+                     "strike": k, "qty": abs(n)})
+
+    # entry_credit per unit per share = Σ(sign·prem·qty)/q  (short +, long −).
+    total = sum((1 if leg["side"] == "short" else -1) * leg["premium"] * leg["qty"]
+                for leg in parsed)
+    entry_credit = total / q
+
+    return {
+        "symbol": str(symbol or "").strip().upper(),
+        "strategy": strat,
+        "legs": legs,
+        "expiration": expiration,
+        "quantity": int(q),
+        "entry_credit": entry_credit,
+    }
+
+
 def adhoc_spec_from_legs(symbol, legs):
     """Map leg-editor legs → the ad-hoc rescue spec ``compute_rescue_adhoc``
     consumes (``{symbol, strategy, short_strike, long_strike, call_short?,
@@ -387,6 +449,12 @@ def adhoc_spec_from_legs(symbol, legs):
     call_long = [leg for leg in parsed if leg["option_type"] == "call" and leg["side"] == "long"]
     n_puts = len(put_short) + len(put_long)
     n_calls = len(call_short) + len(call_long)
+
+    # Single-type range structures (condor / butterfly) — recognized from the full
+    # leg set (≥3 distinct strikes, one option type); returns its own legs-based spec.
+    range_spec = _range_spec_from_parsed(symbol, parsed, expiration)
+    if range_spec is not None:
+        return range_spec
 
     valid_pcs = (len(put_short) == 1 and len(put_long) == 1
                  and put_short[0]["strike"] > put_long[0]["strike"])

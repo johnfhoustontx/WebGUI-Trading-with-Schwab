@@ -378,6 +378,71 @@ def test_adhoc_spec_from_legs_credit_spreads_still_map():
     assert pcs["strategy"] == "PCS" and pcs["entry_credit"] == 0.60
 
 
+def test_adhoc_spec_from_legs_call_condor():
+    # long 95, short 100, short 105, long 110 = long call condor (debit).
+    legs = [_leg("call", "long", 95, premium=8.0),
+            _leg("call", "short", 100, premium=5.0),
+            _leg("call", "short", 105, premium=3.0),
+            _leg("call", "long", 110, premium=1.5)]
+    spec = rescue.adhoc_spec_from_legs("SPY", legs)
+    assert spec["strategy"] == "CONDOR_CALL"
+    assert spec["quantity"] == 1
+    assert [l["strike"] for l in spec["legs"]] == [95, 100, 105, 110]
+    assert [l["side"] for l in spec["legs"]] == ["long", "short", "short", "long"]
+    # entry_credit = (5+3) - (8+1.5) = -1.5 (a debit)
+    assert spec["entry_credit"] == -1.5
+
+
+def test_adhoc_spec_from_legs_put_butterfly_1_2_1():
+    # long 90, short 2x 100, long 110 = long put butterfly (debit).
+    legs = [_leg("put", "long", 90, premium=1.0),
+            _leg("put", "short", 100, premium=4.0, qty=2),
+            _leg("put", "long", 110, premium=9.0)]
+    spec = rescue.adhoc_spec_from_legs("SPY", legs)
+    assert spec["strategy"] == "BUTTERFLY_PUT"
+    assert spec["quantity"] == 1
+    body = next(l for l in spec["legs"] if l["strike"] == 100)
+    assert body["side"] == "short" and body["qty"] == 2
+    # entry_credit = (4*2) - (1 + 9) = -2.0 (a debit)
+    assert spec["entry_credit"] == -2.0
+
+
+def test_adhoc_spec_from_legs_butterfly_split_body_legs():
+    # body entered as two qty-1 short legs at the same strike → still a butterfly.
+    legs = [_leg("call", "long", 95, premium=8.0),
+            _leg("call", "short", 100, premium=5.0),
+            _leg("call", "short", 100, premium=5.0),
+            _leg("call", "long", 105, premium=3.0)]
+    spec = rescue.adhoc_spec_from_legs("SPY", legs)
+    assert spec["strategy"] == "BUTTERFLY_CALL"
+    assert spec["quantity"] == 1
+    body = next(l for l in spec["legs"] if l["strike"] == 100)
+    assert body["qty"] == 2
+
+
+def test_adhoc_spec_from_legs_multi_lot_condor():
+    # a 2-lot call condor → quantity 2, per-unit legs.
+    legs = [_leg("call", "long", 95, premium=8.0, qty=2),
+            _leg("call", "short", 100, premium=5.0, qty=2),
+            _leg("call", "short", 105, premium=3.0, qty=2),
+            _leg("call", "long", 110, premium=1.5, qty=2)]
+    spec = rescue.adhoc_spec_from_legs("SPY", legs)
+    assert spec["strategy"] == "CONDOR_CALL"
+    assert spec["quantity"] == 2
+    assert all(l["qty"] == 1 for l in spec["legs"])   # per-unit
+    assert spec["entry_credit"] == -1.5               # still per-unit per-share
+
+
+def test_adhoc_spec_from_legs_short_condor_falls_through_to_error():
+    # inverted (short) condor = a credit; nets don't match [+,-,-,+] → not supported.
+    legs = [_leg("call", "short", 95, premium=8.0),
+            _leg("call", "long", 100, premium=5.0),
+            _leg("call", "long", 105, premium=3.0),
+            _leg("call", "short", 110, premium=1.5)]
+    spec = rescue.adhoc_spec_from_legs("SPY", legs)
+    assert "error" in spec
+
+
 def test_adhoc_spec_from_legs_multi_expiry_errors():
     legs = [_leg("put", "short", 500, expiry="2026-07-18"),
             _leg("put", "long", 495, expiry="2026-08-15")]
