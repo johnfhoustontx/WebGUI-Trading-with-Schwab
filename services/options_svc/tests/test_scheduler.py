@@ -181,6 +181,31 @@ def test_action_alert_due_holiday_none():
     assert scheduler.action_alert_due(_ct(2026, 7, 3, 10, 0), set()) is None
 
 
+# ── eod_summary_due (~15:10 CT post-close push) ──────────────────────────────
+def test_eod_summary_due_fires_at_slot():
+    # 2026-06-15 is a Monday.
+    assert scheduler.eod_summary_due(_ct(2026, 6, 15, 15, 10), set()) == "close"
+
+
+def test_eod_summary_due_within_grace():
+    assert scheduler.eod_summary_due(_ct(2026, 6, 15, 15, 35), set()) == "close"
+
+
+def test_eod_summary_due_not_before_or_after():
+    assert scheduler.eod_summary_due(_ct(2026, 6, 15, 15, 5), set()) is None   # before slot
+    assert scheduler.eod_summary_due(_ct(2026, 6, 15, 15, 45), set()) is None  # past grace
+
+
+def test_eod_summary_due_once_per_day():
+    ran = {("2026-06-15", "close")}
+    assert scheduler.eod_summary_due(_ct(2026, 6, 15, 15, 12), ran) is None
+
+
+def test_eod_summary_due_weekend_and_holiday_none():
+    assert scheduler.eod_summary_due(_ct(2026, 6, 13, 15, 10), set()) is None   # Saturday
+    assert scheduler.eod_summary_due(_ct(2026, 7, 3, 15, 10), set()) is None    # holiday
+
+
 # ── periodic_refresh_due (header + gex_status per-tick gating) ───────────────
 # During market hours the header/status refresh every tick; off-hours/weekends
 # they throttle to a longer interval so the service stops making proxy + SQLite +
@@ -233,16 +258,13 @@ def test_active_session_date_holds_prior_day_on_holiday():
     assert scheduler.active_session_date(_ct(2026, 1, 19, 12, 0)).isoformat() == "2026-01-16"
 
 
-def test_gamma_cleared_overnight_on_a_trading_day():
-    assert scheduler.gamma_cleared(_ct(2026, 6, 23, 0, 0)) is True    # Tue midnight
-    assert scheduler.gamma_cleared(_ct(2026, 6, 23, 7, 0)) is True    # Tue pre-session
-    assert scheduler.gamma_cleared(_ct(2026, 6, 23, 10, 0)) is False  # Tue live session
-    assert scheduler.gamma_cleared(_ct(2026, 6, 23, 23, 0)) is False  # Tue after close → persist
-
-
-def test_gamma_not_cleared_on_non_trading_days():
-    assert scheduler.gamma_cleared(_ct(2026, 6, 27, 2, 0)) is False   # Sat → persist Friday
-    assert scheduler.gamma_cleared(_ct(2026, 1, 19, 2, 0)) is False   # MLK Mon → persist
+def test_active_session_date_premarket_holds_prior_session():
+    # PRE-market on a trading day (before 08:30 CT) → today has no snapshots yet, so
+    # the prior session is shown until today's collection starts. Tue 2026-06-23 07:00
+    # → Mon 2026-06-22. Once collection starts (08:30) it flips to today.
+    assert scheduler.active_session_date(_ct(2026, 6, 23, 7, 0)).isoformat() == "2026-06-22"
+    assert scheduler.active_session_date(_ct(2026, 6, 23, 0, 0)).isoformat() == "2026-06-22"
+    assert scheduler.active_session_date(_ct(2026, 6, 23, 8, 30)).isoformat() == "2026-06-23"
 
 
 # ── Driver-account manage tick wiring (Phase 5 / Task 5.1) ──────────────────
@@ -290,6 +312,17 @@ def test_loop_runs_manual_paper_cycle_hourly():
     # The hour is latched in paper_ran BEFORE the blocking call (no double-fire).
     seg = src.split("paper_cycle_due", 1)[1].split("run_paper_entry_and_manage", 1)[0]
     assert "paper_ran.add" in seg
+
+
+def test_loop_wires_eod_summary_branch():
+    import inspect
+
+    src = inspect.getsource(scheduler.loop)
+    # The EOD-summary push is gated by eod_summary_due, latched in eod_summary_ran BEFORE
+    # the blocking branch, and invoked via run_eod_summary in its own guarded branch.
+    assert "eod_summary_due" in src and "run_eod_summary" in src
+    seg = src.split("eod_summary_due", 1)[1].split("run_eod_summary", 1)[0]
+    assert "eod_summary_ran.add" in seg
 
 
 # ── Cadence-mirror drift guard ──────────────────────────────────────────────

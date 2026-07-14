@@ -1310,14 +1310,12 @@ def gamma_snapshot(symbol: str) -> dict | None:
 
     from services.options_svc import scheduler as _sched
 
-    # Persistence: after close the last session's candles + heatmap stay shown
-    # until the next trading day's midnight (Fri data persists through the weekend);
-    # in the overnight 'cleared' window of a trading day (after midnight, before the
-    # 08:30 CT session) show nothing. The heatmap loads the ACTIVE SESSION DATE so
-    # it stays populated off-hours and clears for the new session on its own.
+    # Persistence: the Gamma display shows the most-recent-available session 24/7 so
+    # the by-strike charts (computed from the live chain, which returns data off-hours)
+    # AND the heatmap stay visible PRE- and POST-market. The heatmap loads the ACTIVE
+    # SESSION DATE (today once collection starts at 08:30 CT, else the prior session),
+    # so premarket it shows yesterday until today's snapshots begin.
     now = _sched._market_now()
-    if _sched.gamma_cleared(now):
-        return None  # cleared → handler caches a graceful-empty view
     session_date = _sched.active_session_date(now)
 
     chain = _gamma_fetch_chain(symbol)

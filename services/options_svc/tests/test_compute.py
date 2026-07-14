@@ -743,6 +743,71 @@ def test_collect_action_items_defensive_empty(monkeypatch):
     assert out == {"captured_action": [], "expiring_today": [], "at_risk": [], "account_near": []}
 
 
+# ── EOD summary (collect_eod_summary + _eod_book_summary) ────────────────────
+def test_eod_book_summary_pure_counts_closed_today():
+    snap = {"session_pnl": 120.0, "equity": 25120.0, "open_count": 3, "halted": False}
+    positions = [
+        {"status": "CLOSED", "exit_ts": "2026-07-13T15:01:00", "realized_pnl": 200.0},
+        {"status": "EXPIRED", "exit_ts": "2026-07-13T15:00:00", "realized_pnl": -20.0},
+        {"status": "CLOSED", "exit_ts": "2026-07-12T15:00:00", "realized_pnl": 999.0},  # not today
+        {"status": "OPEN", "exit_ts": None, "realized_pnl": None},                       # open
+        "junk",                                                                          # sparse row
+    ]
+    b = compute._eod_book_summary(snap, positions, has_account=True,
+                                  today="2026-07-13", label="Manual")
+    assert b["label"] == "Manual" and b["has_account"] is True
+    assert b["day_pnl"] == 120.0 and b["equity"] == 25120.0 and b["open_count"] == 3
+    assert b["closed_today"] == 2 and b["wins"] == 1 and b["losses"] == 1
+    assert b["realized_today"] == 180.0
+
+
+def test_eod_book_summary_no_account_defensive():
+    b = compute._eod_book_summary(None, None, has_account=False,
+                                  today="2026-07-13", label="Driver")
+    assert b["has_account"] is False and b["day_pnl"] is None
+    assert b["closed_today"] == 0 and b["realized_today"] == 0.0 and b["open_count"] == 0
+
+
+def test_collect_eod_summary_two_books(monkeypatch):
+    import datetime as _dt
+    import sys as _sys
+    import types as _types
+    from zoneinfo import ZoneInfo
+
+    now_ct = _dt.datetime(2026, 7, 13, 15, 10, tzinfo=ZoneInfo("America/Chicago"))
+    snap = {"session_pnl": 50.0, "equity": 25050.0, "open_count": 1, "halted": False}
+    pos = [{"status": "CLOSED", "exit_ts": "2026-07-13T15:00:00", "realized_pnl": 50.0}]
+    monkeypatch.setitem(_sys.modules, "paper_account_db", _types.SimpleNamespace(
+        fetch_all_positions=lambda p=None: pos, get_account=lambda p=None: {"cash": 1}))
+    monkeypatch.setitem(_sys.modules, "paper_engine", _types.SimpleNamespace(
+        account_snapshot=lambda p=None: snap))
+    out = compute.collect_eod_summary(now_ct=now_ct)
+    assert out["date"] == "2026-07-13" and set(out["books"]) == {"manual", "driver"}
+    assert out["books"]["manual"]["day_pnl"] == 50.0
+    assert out["books"]["manual"]["closed_today"] == 1
+    assert out["books"]["driver"]["has_account"] is True
+
+
+def test_collect_eod_summary_defensive_on_read_failure(monkeypatch):
+    import datetime as _dt
+    import sys as _sys
+    import types as _types
+    from zoneinfo import ZoneInfo
+
+    now_ct = _dt.datetime(2026, 7, 13, 15, 10, tzinfo=ZoneInfo("America/Chicago"))
+
+    def _boom(*a, **k):
+        raise RuntimeError("db down")
+
+    monkeypatch.setitem(_sys.modules, "paper_account_db", _types.SimpleNamespace(
+        fetch_all_positions=_boom, get_account=_boom))
+    monkeypatch.setitem(_sys.modules, "paper_engine", _types.SimpleNamespace(
+        account_snapshot=_boom))
+    out = compute.collect_eod_summary(now_ct=now_ct)   # must not raise
+    assert out["books"]["manual"]["has_account"] is False
+    assert out["books"]["driver"]["day_pnl"] is None
+
+
 def test_analyze_paper_note_none_on_success(monkeypatch):
     import sys as _sys
     import types as _types
@@ -811,6 +876,32 @@ def test_paper_trades_view_reprices_open_total_pnl(monkeypatch):
     by_id = {t["trade_id"]: t for t in compute.paper_trades_view(reprice=True)["trades"]}
     assert by_id["o"]["unrealized_pnl"] == 30.0          # 3.0 × qty 10
     assert "unrealized_pnl" not in by_id["c"]            # closed untouched
+
+
+def test_paper_trades_view_routes_debit_to_reprice_legs(monkeypatch):
+    """A DEBIT/legs trade reprices via reprice_legs; a credit trade via reprice_swing."""
+    import sys as _sys
+    import types as _types
+
+    from services.options_svc import scheduler
+
+    trades = [
+        {"trade_id": "d", "symbol": "SPY", "status": "OPEN", "quantity": 2,
+         "direction": "DEBIT", "legs": [{"kind": "call", "side": "long", "strike": 100}]},
+        {"trade_id": "c", "symbol": "QQQ", "status": "OPEN", "quantity": 1},   # credit
+    ]
+    monkeypatch.setitem(_sys.modules, "paper_trader",
+                        _types.SimpleNamespace(get_all_trades=lambda: trades))
+    monkeypatch.setitem(_sys.modules, "signal_repricer", _types.SimpleNamespace(
+        clear_chain_cache=lambda: None,
+        reprice_legs=lambda t, client: {"unrealized_pnl": 50.0},     # per contract
+        reprice_swing=lambda t, client: {"unrealized_pnl": 7.0}))
+    monkeypatch.setattr(scheduler, "_is_trading_day", lambda now: True)
+    monkeypatch.setattr(scheduler, "_is_market_hours", lambda now: True)
+
+    by_id = {t["trade_id"]: t for t in compute.paper_trades_view(reprice=True)["trades"]}
+    assert by_id["d"]["unrealized_pnl"] == 100.0     # reprice_legs 50 × qty 2
+    assert by_id["c"]["unrealized_pnl"] == 7.0       # reprice_swing (credit path)
 
 
 def test_paper_trades_view_skips_reprice_off_hours(monkeypatch):
@@ -1140,11 +1231,10 @@ def _patch_gamma(monkeypatch, *, chain=None, walls=None, history=None):
     monkeypatch.setattr(compute._proxy.schwab_py_client, "get_option_chain",
                         lambda *a, **k: _FakeChainResp(
                             chain if chain is not None else {"underlyingPrice": 5400.0}))
-    # Persistence gate is time-dependent — pin it so tests are deterministic:
-    # not in the cleared window, active session date fixed.
+    # Persistence is time-dependent — pin the active session date so tests are
+    # deterministic (the display shows this session's data).
     import datetime as _dtm
     from services.options_svc import scheduler as _sched
-    monkeypatch.setattr(_sched, "gamma_cleared", lambda now=None: False)
     monkeypatch.setattr(_sched, "active_session_date", lambda now=None: _dtm.date(2026, 6, 18))
 
 
@@ -1250,13 +1340,14 @@ def test_gamma_snapshot_reuses_one_history_connection(monkeypatch):
     assert cc.n_close == 1     # and it's closed
 
 
-def test_gamma_snapshot_cleared_window_returns_none(monkeypatch):
-    # Overnight 'cleared' window (trading day, after midnight, pre-session): the
-    # snapshot is None so the handler caches a graceful-empty view (no stale data).
-    _patch_gamma(monkeypatch, history=[(1, 2, 3, 4, 5, 6, {5400.0: {"net": 1}})])
-    from services.options_svc import scheduler as _sched
-    monkeypatch.setattr(_sched, "gamma_cleared", lambda now=None: True)
-    assert compute.gamma_snapshot("$SPX") is None
+def test_gamma_snapshot_shows_data_premarket(monkeypatch):
+    # Pre-market (and post-market) the display shows the most-recent session: the
+    # by-strike charts compute from the chain and the heatmap loads the active
+    # (prior) session — no overnight blanking. So the snapshot is NOT None.
+    _patch_gamma(monkeypatch, history=[(1, 5400.0, 3, 4, 5, 6, {5400.0: {"net": 1}})])
+    snap = compute.gamma_snapshot("$SPX")
+    assert snap is not None
+    assert snap["views"]["GEX"]["history"]   # prior session's heatmap rows shown
 
 
 def test_gamma_snapshot_history_uses_active_session_date(monkeypatch):

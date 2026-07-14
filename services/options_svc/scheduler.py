@@ -102,31 +102,20 @@ def _prev_trading_day(d):
 
 
 def active_session_date(now=None):
-    """The trading day whose Gamma data should be displayed now: today if today is
-    a trading day, else the most recent prior trading day.
+    """The trading day whose Gamma data should be displayed now: today once
+    collection has started (>= 08:30 CT on a trading day), else the most recent
+    prior trading day.
 
-    Drives heatmap persistence: Friday's data stays shown all weekend (active date
-    = Friday) until Monday becomes 'today' — a trading day whose rows don't exist
-    yet, so the heatmap naturally clears."""
-    now = now or _market_now()
-    d = now.date()
-    if d.weekday() < 5 and d not in _HOLIDAYS:
-        return d
-    return _prev_trading_day(d)
-
-
-def gamma_cleared(now=None):
-    """True in the overnight 'cleared' window of a trading day — after midnight CT
-    but before the session/collection start (08:30 CT).
-
-    The prior session's data was displayed until midnight; the new session hasn't
-    produced any data yet, so Gamma shows nothing. False on non-trading days
-    (weekend/holiday) so the last session's data persists, and False after 08:30
-    so the live session shows."""
+    Drives heatmap persistence so the display shows the last completed session
+    PRE- and POST-market: Friday's data stays shown all weekend, and on a trading
+    day BEFORE 08:30 CT (premarket) the prior session shows until today's snapshots
+    begin — at which point today's data takes over."""
     now = now or _market_now()
     d = now.date()
     is_td = d.weekday() < 5 and d not in _HOLIDAYS
-    return is_td and (now.hour, now.minute) < _GEX_START
+    if is_td and (now.hour, now.minute) >= _GEX_START:
+        return d
+    return _prev_trading_day(d)
 
 
 def _gex_slot_key(now):
@@ -292,6 +281,36 @@ def action_alert_due(now, ran_slots):
     return None
 
 
+# ── Scheduled end-of-day summary cadence (~15:10 CT) ─────────────────────────
+# A once-daily push AFTER the regular-session close (15:00 CT / 4pm ET) + 0-DTE
+# settlement, summarizing the day's result per paper book. 15:10 gives the driver's
+# 5-min manage cycle time to settle expiries; the wide grace tolerates a late/mid-window
+# service start. Fires ONCE per trading day within the grace (mirrors action_alert_due).
+_EOD_SUMMARY_SLOTS = {
+    "close": (15, 10),   # 15:10 CT — post-close daily result
+}
+_EOD_SUMMARY_GRACE_MIN = 30
+
+
+def eod_summary_due(now, ran_slots):
+    """Name of the EOD-summary slot due now, or None.
+
+    Fires each slot ONCE per trading day when ``target <= now < target + grace`` and that
+    ``(date, slot)`` isn't already in ``ran_slots``. The caller records the returned
+    ``(date, slot)`` so it won't refire. Mirrors ``action_alert_due``."""
+    if not _is_trading_day(now):
+        return None
+    import datetime as _dt
+    day = now.date().isoformat()
+    for name, (h, m) in _EOD_SUMMARY_SLOTS.items():
+        if (day, name) in ran_slots:
+            continue
+        target = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        if target <= now < target + _dt.timedelta(minutes=_EOD_SUMMARY_GRACE_MIN):
+            return name
+    return None
+
+
 # ── Scheduler loop ─────────────────────────────────────────────────────────
 POLL_INTERVAL_SEC = 30  # check the slot every 30s (mirrors the page's autoscan loop cadence)
 
@@ -305,8 +324,9 @@ async def _gather_due(coros):
     of the time-critical ones (2-min GEX collect / 5-min manage). Each branch
     carries its OWN try/except, so it never raises here; ``return_exceptions``
     is set as a belt-and-suspenders guard so one branch's failure can't affect
-    the others. The set of branches per tick is small and fixed (≤5), so this
-    is bounded — no unbounded task spawning."""
+    the others. The set of branches per tick is small and fixed (a handful —
+    periodic/autoscan/gex/manage/analyze/action-alert/eod-summary, most mutually
+    exclusive by time), so this is bounded — no unbounded task spawning."""
     if not coros:
         return
     await asyncio.gather(*coros, return_exceptions=True)
@@ -347,6 +367,7 @@ async def loop(bus):
     last_periodic_slot = None  # header + gex_status throttle slot (see periodic_refresh_due)
     analyze_ran = set()  # (date, slot) of fired scheduled Gamma Analyze runs (see analyze_slot_due)
     action_alert_ran = set()  # (date, slot) of fired action-alert pushes (see action_alert_due)
+    eod_summary_ran = set()  # (date, slot) of fired EOD-summary pushes (see eod_summary_due)
     # One-shot startup refresh so the Paper Portfolio page has data on first
     # load. The paper account only changes on user actions (entry/manage/reset
     # commands re-publish it), so it is NOT polled every tick. Guarded so a
@@ -579,6 +600,27 @@ async def loop(bus):
 
         if aa_slot:
             branches.append(_action_alert_branch(aa_slot))
+
+        # Scheduled end-of-day summary — push a per-book day-P&L digest at ~15:10 CT on
+        # each trading day. Latched in eod_summary_ran BEFORE the blocking collect+push so
+        # a slow push can't double-fire on the next tick. Independently guarded.
+        try:
+            eod_slot = eod_summary_due(now, eod_summary_ran)
+            if eod_slot:
+                eod_summary_ran.add((now.date().isoformat(), eod_slot))
+        except Exception:
+            log.exception("eod_summary_due gate degraded")
+            eod_slot = None
+
+        async def _eod_summary_branch(slot_name):
+            try:
+                await loop_.run_in_executor(
+                    None, handlers.run_eod_summary, bus, slot_name)
+            except Exception:
+                log.exception("run_eod_summary branch degraded")
+
+        if eod_slot:
+            branches.append(_eod_summary_branch(eod_slot))
 
         # Run all DUE branches concurrently (bounded, ≤5). A slow branch can't
         # delay the start of the time-critical ones; per-branch try/except keeps
