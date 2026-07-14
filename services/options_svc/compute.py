@@ -3424,8 +3424,11 @@ _single_candidates = _rescue.single_candidates
 _assess_single_risk = _rescue.assess_single_risk
 _debit_candidates = _rescue.debit_candidates
 _assess_debit_risk = _rescue.assess_debit_risk
+_range_candidates = _rescue.range_candidates
+_assess_range_risk = _rescue.assess_range_risk
 _SINGLE_STRATEGIES = ("LONG_CALL", "LONG_PUT", "NAKED_CALL", "NAKED_PUT")
 _DEBIT_STRATEGIES = ("VERT_CALL_DEBIT", "VERT_PUT_DEBIT")
+_RANGE_STRATEGIES = ("CONDOR_CALL", "CONDOR_PUT", "BUTTERFLY_CALL", "BUTTERFLY_PUT")
 from shared.contracts.options import (  # noqa: E402
     RescueAdvisory, RescueCandidate, RescueMark)
 
@@ -4089,6 +4092,179 @@ def _adhoc_debit(spec) -> dict:
         return {"error": f"{type(e).__name__}: {e}"}
 
 
+def _advisory_from_range(pos, *, source: str = "adhoc",
+                         position_id="adhoc") -> dict:
+    """Rescue-advisory core for a single-type RANGE structure (condor / butterfly).
+
+    ``reprice_swing`` only handles PCS/CCS/IC, so every leg is priced DIRECTLY via
+    ``_make_leg_pricer`` (per-share chain mids) and the current structure value
+    ``cv`` = Σ (sign · mid · per-unit qty) — sign +1 short (receive) / −1 long (pay)
+    — falling back to the entered debit when any leg is unpriceable. The underlying
+    comes from the gamma snapshot's live ``spot``. Unrealized P&L =
+    (cv − |entry_credit|)·100·qty. Advisory-only. Fully defensive → ``{"error":
+    "..."}``; never raises."""
+    try:
+        symbol = pos.get("symbol")
+        strategy = (pos.get("strategy") or "").upper()
+        legs = pos.get("legs") or []
+        expiry = pos.get("expiration")
+        qty = int(pos.get("quantity") or 1)
+        entry_credit = pos.get("entry_credit") or 0.0
+
+        # 1. mark — price every leg directly; cv = Σ sign·mid·per-unit-qty.
+        price_leg = _make_leg_pricer(symbol)
+        mids = []
+        for leg in legs:
+            try:
+                mids.append(price_leg(symbol, expiry, leg.get("right"),
+                                      leg.get("strike")))
+            except Exception:
+                mids.append(None)
+        if legs and all(m is not None for m in mids):
+            # structure value to the holder = +long −short (a long condor/fly you
+            # own is POSITIVE, ~ the debit paid). Same convention as the debit path.
+            cv = sum((1.0 if leg.get("side") == "long" else -1.0)
+                     * m * int(leg.get("qty") or 1)
+                     for leg, m in zip(legs, mids))
+        else:
+            cv = abs(entry_credit)     # degraded fallback = the debit paid
+
+        # 2. gamma context (defensive → None); its live spot supplies the underlying.
+        try:
+            snap = gamma_snapshot(symbol)
+        except Exception:
+            snap = None
+        underlying = None
+        if isinstance(snap, dict) and (snap.get("spot") or 0) > 0:
+            underlying = snap["spot"]
+        gex = _gex_from_snapshot(snap)
+
+        unrealized_pnl = round((cv - abs(entry_credit)) * 100 * qty, 2)
+        dte = _rescue_dte(expiry)
+        mark = {
+            "underlying": underlying,
+            "current_value": cv,
+            "unrealized_pnl": unrealized_pnl,
+            "short_delta": None,
+            "dte": dte,
+        }
+        engine_mark = {
+            "current_underlying": underlying,
+            "current_value": cv,
+            "unrealized_pnl": unrealized_pnl,
+            "current_short_delta": None,
+            "dte": dte,
+        }
+
+        # 3. regime context (defensive → None).
+        regime = _rescue_regime()
+
+        # 4. engine.
+        cands = _range_candidates(pos, engine_mark, price_leg, gex, regime)
+        risk = _assess_range_risk(pos, engine_mark, gex, regime)
+
+        context = []
+        if cands and cands[0].get("context"):
+            context = list(cands[0]["context"])
+
+        valid = []
+        for c in cands:
+            try:
+                c = {**c, "apply_kind": "advisory", "applies": False}
+                valid.append(RescueCandidate(**c))
+            except Exception:
+                continue
+
+        adv = RescueAdvisory(
+            position_id=position_id,
+            source=source,
+            symbol=symbol,
+            strategy=strategy,
+            state=risk.get("state", "ok"),
+            heat=risk.get("heat", 0.0),
+            mark=RescueMark(**mark),
+            context=context,
+            candidates=valid,
+            ts=_rescue_dt.datetime.now(_rescue_dt.timezone.utc).isoformat(),
+        )
+        return adv.model_dump()
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {e}"}
+
+
+def _adhoc_range(spec) -> dict:
+    """Validate + build a single-type range (condor/butterfly) ad-hoc rescue
+    advisory. ``spec`` carries ``legs`` (per-unit [{right, side, strike, qty}]),
+    ``quantity`` (units), and a SIGNED ``entry_credit`` (NEGATIVE = debit). Defensive."""
+    try:
+        symbol = spec.get("symbol")
+        strategy = (spec.get("strategy") or "").upper()
+        expiration = spec.get("expiration")
+        if not symbol:
+            return {"error": "symbol is required"}
+        if strategy not in _RANGE_STRATEGIES:
+            return {"error": "unsupported range strategy"}
+        if not expiration:
+            return {"error": "expiration is required"}
+
+        raw_legs = spec.get("legs") or []
+        legs = []
+        for leg in raw_legs:
+            strike = leg.get("strike")
+            try:
+                strike = float(strike)
+            except (TypeError, ValueError):
+                return {"error": "every leg needs a numeric strike"}
+            side = str(leg.get("side") or "").lower()
+            if side not in ("long", "short"):
+                return {"error": "every leg needs a side (long/short)"}
+            right = str(leg.get("right") or "").upper()
+            if right not in ("CALL", "PUT"):
+                return {"error": "every leg needs a right (CALL/PUT)"}
+            try:
+                lqty = int(leg.get("qty") or 1)
+            except (TypeError, ValueError):
+                return {"error": "leg qty must be an integer"}
+            legs.append({"right": right, "side": side, "strike": strike,
+                         "qty": max(1, lqty)})
+        if not legs:
+            return {"error": "range structure needs legs"}
+
+        raw = spec.get("entry_credit")
+        if raw is None or (isinstance(raw, str) and not raw.strip()):
+            entry_credit = 0.0
+        else:
+            try:
+                entry_credit = float(raw)
+            except (TypeError, ValueError):
+                return {"error": "entry_credit must be a number"}
+
+        qty_raw = spec.get("quantity")
+        if qty_raw is None or (isinstance(qty_raw, str) and not qty_raw.strip()):
+            quantity = 1
+        else:
+            try:
+                quantity = int(float(qty_raw))
+            except (TypeError, ValueError):
+                return {"error": "quantity must be an integer"}
+        if quantity < 1:
+            quantity = 1
+
+        pos = {
+            "position_id": "adhoc",
+            "symbol": symbol,
+            "strategy": strategy,
+            "legs": legs,
+            "expiration": expiration,
+            "entry_credit": entry_credit,
+            "quantity": quantity,
+            "max_loss_total": abs(entry_credit) * 100 * quantity,
+        }
+        return _advisory_from_range(pos, source="adhoc", position_id="adhoc")
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {e}"}
+
+
 def compute_rescue_adhoc(spec) -> dict:
     """Build the ranked rescue advisory for a USER-DEFINED ad-hoc trade.
 
@@ -4115,10 +4291,14 @@ def compute_rescue_adhoc(spec) -> dict:
         # Debit verticals (bull call / bear put) route to the debit path.
         if strategy in _DEBIT_STRATEGIES:
             return _adhoc_debit(spec)
+        # Single-type range structures (condors / butterflies) route to the range path.
+        if strategy in _RANGE_STRATEGIES:
+            return _adhoc_range(spec)
         if strategy not in ("PCS", "CCS", "IC"):
             return {"error": "strategy must be one of PCS, CCS, IC, "
                     "LONG_CALL, LONG_PUT, NAKED_CALL, NAKED_PUT, "
-                    "VERT_CALL_DEBIT, VERT_PUT_DEBIT"}
+                    "VERT_CALL_DEBIT, VERT_PUT_DEBIT, "
+                    "CONDOR_CALL, CONDOR_PUT, BUTTERFLY_CALL, BUTTERFLY_PUT"}
         if not expiration:
             return {"error": "expiration is required"}
 

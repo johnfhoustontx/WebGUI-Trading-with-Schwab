@@ -1037,6 +1037,139 @@ def debit_candidates(position, mark, price_leg, gex=None, regime=None) -> list[d
 
 
 #############################################
+# SINGLE-TYPE RANGE STRUCTURES (pure) — Phase 1c
+#############################################
+# Coverage for defined-risk DEBIT range structures made of ONE option type:
+# CONDOR_CALL / CONDOR_PUT (long condor: long K1, short K2, short K3, long K4) and
+# BUTTERFLY_CALL / BUTTERFLY_PUT (long 1-2-1 fly: long K1, short 2×K2, long K3).
+# Defined max loss = the debit paid; neutral/range (profit in the body / between the
+# inner shorts). Advisory-only. See
+# docs/plans/2026-07-14-rescue-condor-butterfly-design.md.
+#
+# ``position`` carries ``strategy``, ``legs`` (PER-UNIT: [{right, side, strike, qty}]),
+# ``entry_credit`` (SIGNED per-share: NEGATIVE = debit paid), ``quantity`` (units).
+# ``mark`` carries ``current_underlying``, ``current_value`` (structure value/share =
+# Σ sign·mid·qty over the legs), ``unrealized_pnl`` (dollars), ``dte``.
+
+_RANGE_STRATEGIES = ("CONDOR_CALL", "CONDOR_PUT", "BUTTERFLY_CALL", "BUTTERFLY_PUT")
+
+
+def _range_center_halfwidth(legs) -> tuple:
+    """Profit-zone center + half-width for a range structure, from its legs.
+
+    center = midpoint of the SHORT strikes (the fly body / the two condor inner
+    shorts); half_width = center → the nearest LONG strike (wing). Returns
+    ``(None, None)`` when the strikes are degenerate/missing. Pure."""
+    shorts = [_num(l.get("strike")) for l in (legs or []) if l.get("side") == "short"]
+    longs = [_num(l.get("strike")) for l in (legs or []) if l.get("side") == "long"]
+    shorts = [s for s in shorts if s is not None]
+    longs = [w for w in longs if w is not None]
+    if not shorts or not longs:
+        return (None, None)
+    center = sum(shorts) / len(shorts)
+    half_width = min(abs(w - center) for w in longs)
+    if half_width <= 0:
+        return (center, None)
+    return (center, half_width)
+
+
+def assess_range_risk(position, mark, gex=None, regime=None) -> dict:
+    """Classify a single-type RANGE structure (condor/butterfly) into
+    ok/watch/tested/critical + 0-100 heat. A long range structure loses when the
+    underlying leaves the profit zone toward a wing. Pure, fully defensive (missing
+    underlying / degenerate strikes skip the range term; never raises)."""
+    legs = position.get("legs") or []
+    qty = int(position.get("quantity") or 1)
+    entry_credit = _num(position.get("entry_credit")) or 0.0
+    und = _num(mark.get("current_underlying"))
+    pnl = mark.get("unrealized_pnl")
+    dte = mark.get("dte")
+
+    debit_dollars = abs(entry_credit) * 100 * max(1, qty)
+    loss = max(0.0, -(pnl if pnl is not None else 0.0))
+    loss_frac = loss / max(1.0, debit_dollars)
+
+    center, half_width = _range_center_halfwidth(legs)
+    range_frac = 0.0
+    if und is not None and center is not None and half_width:
+        range_frac = abs(und - center) / half_width
+
+    heat = min(50.0, loss_frac * 60) + min(35.0, range_frac * 35)
+    if dte is not None and dte <= 5 and range_frac > 0.8:
+        heat += 15
+    heat = max(0.0, min(100.0, heat))
+    state = ("critical" if heat >= 75 else "tested" if heat >= 50
+             else "watch" if heat >= 25 else "ok")
+    return {"state": state, "heat": round(heat, 1)}
+
+
+def range_candidates(position, mark, price_leg, gex=None, regime=None) -> list[dict]:
+    """Build advisory rescue candidates for a single-type RANGE structure. Pure; a
+    candidate needing an unpriceable leg is skipped. Order: close first (the safe
+    floor), then roll_out. All ``apply_kind="advisory"``."""
+    legs = position.get("legs") or []
+    sym = position.get("symbol")
+    qty = int(position.get("quantity") or 1)
+    expiry = position.get("expiration")
+    cv = mark.get("current_value")
+    dte = mark.get("dte")
+    strategy = (position.get("strategy") or "").upper()
+    word = "condor" if "CONDOR" in strategy else "butterfly"
+
+    out: list[dict] = []
+    if not legs:
+        return out
+    n = len(legs)
+
+    def _side_word(leg):
+        return "SELL" if leg.get("side") == "long" else "BUY"
+
+    # 1. close — sell/close the whole structure, recover the remaining value (credit).
+    if cv is not None:
+        out.append(_single_candidate(
+            "close", "Close the structure",
+            gross=cv * 100 * qty, commission=commission_for(n, sym, qty),
+            new_max_loss=0.0, dte_after=dte,
+            est_fill_legs=[
+                _leg(_side_word(l), l.get("right"), l.get("strike"), expiry,
+                     qty * int(l.get("qty") or 1),
+                     price_leg(sym, expiry, l.get("right"), l.get("strike")))
+                for l in legs],
+            rationale=[f"Close the {word} — recover the remaining value, cut the loss."],
+            score=60.0))
+
+    # 2. roll_out — close the structure + reopen the SAME strikes at +30d (debit; time).
+    new_expiry = _add_days(expiry, 30)
+    new_mids = ([price_leg(sym, new_expiry, l.get("right"), l.get("strike"))
+                 for l in legs] if cv is not None else [None])
+    if cv is not None and all(m is not None for m in new_mids):
+        # structure value = +long −short (matches ``cv`` from compute).
+        new_cv = sum((1.0 if l.get("side") == "long" else -1.0)
+                     * m * int(l.get("qty") or 1)
+                     for l, m in zip(legs, new_mids))
+        gross = (cv - new_cv) * 100 * qty          # debit (later structure richer)
+        roll_legs = []
+        for l in legs:
+            roll_legs.append(_leg(_side_word(l), l.get("right"), l.get("strike"),
+                                  expiry, qty * int(l.get("qty") or 1),
+                                  price_leg(sym, expiry, l.get("right"), l.get("strike"))))
+        for l, m in zip(legs, new_mids):
+            # reopen: original side at the later expiry.
+            open_side = "BUY" if l.get("side") == "long" else "SELL"
+            roll_legs.append(_leg(open_side, l.get("right"), l.get("strike"),
+                                  new_expiry, qty * int(l.get("qty") or 1), m))
+        out.append(_single_candidate(
+            "roll_out", "Roll out ~30 days",
+            gross=gross, commission=commission_for(2 * n, sym, qty),
+            new_expiry=new_expiry, dte_after=(dte or 0) + 30,
+            est_fill_legs=roll_legs,
+            rationale=[f"Roll the {word} out ~30 days for more time in the range "
+                       f"(costs a debit)."],
+            score=45.0))
+    return out
+
+
+#############################################
 # ORCHESTRATOR (pure)
 #############################################
 

@@ -540,6 +540,103 @@ def test_compute_rescue_adhoc_debit_never_raises(monkeypatch):
         RescueAdvisory(**result)
 
 
+# ── compute_rescue_adhoc — single-type range structures (condor/butterfly) ────
+
+def _condor_spec(**kw):
+    base = dict(symbol="SPY", strategy="CONDOR_CALL", expiration="2099-07-31",
+                quantity=2, entry_credit=-2.00,
+                legs=[{"right": "CALL", "side": "long", "strike": 95.0, "qty": 1},
+                      {"right": "CALL", "side": "short", "strike": 100.0, "qty": 1},
+                      {"right": "CALL", "side": "short", "strike": 105.0, "qty": 1},
+                      {"right": "CALL", "side": "long", "strike": 110.0, "qty": 1}])
+    base.update(kw)
+    return base
+
+
+def _fly_spec(**kw):
+    base = dict(symbol="SPY", strategy="BUTTERFLY_PUT", expiration="2099-07-31",
+                quantity=1, entry_credit=-1.50,
+                legs=[{"right": "PUT", "side": "long", "strike": 110.0, "qty": 1},
+                      {"right": "PUT", "side": "short", "strike": 100.0, "qty": 2},
+                      {"right": "PUT", "side": "long", "strike": 90.0, "qty": 1}])
+    base.update(kw)
+    return base
+
+
+def test_compute_rescue_adhoc_condor_call(monkeypatch):
+    _patch_single_happy(monkeypatch, spot=118.0)   # past the upper wing
+    result = compute.compute_rescue_adhoc(_condor_spec())
+    assert result.get("error") is None
+    adv = RescueAdvisory(**result)
+    assert adv.position_id == "adhoc" and adv.source == "adhoc"
+    assert adv.strategy == "CONDOR_CALL"
+    assert adv.candidates
+    assert all(c.apply_kind == "advisory" for c in adv.candidates)
+    actions = [c.action for c in adv.candidates]
+    assert actions[0] == "close"
+    assert adv.mark.underlying == 118.0
+
+
+def test_compute_rescue_adhoc_butterfly_put(monkeypatch):
+    _patch_single_happy(monkeypatch, spot=90.0)    # at the lower wing
+    result = compute.compute_rescue_adhoc(_fly_spec())
+    assert result.get("error") is None
+    adv = RescueAdvisory(**result)
+    assert adv.strategy == "BUTTERFLY_PUT"
+    assert adv.candidates
+    assert all(c.apply_kind == "advisory" for c in adv.candidates)
+    assert {c.action for c in adv.candidates} >= {"close"}
+
+
+def test_compute_rescue_adhoc_range_cv_is_positive_long_structure(monkeypatch):
+    # non-degenerate pricer: a long call condor priced live must have a POSITIVE
+    # structure value (+long −short), so `close` is a CREDIT — pins the cv sign.
+    def _pricer(sym, exp, right, strike):
+        return {95.0: 13.0, 100.0: 6.0, 105.0: 2.0, 110.0: 0.5}.get(float(strike))
+    monkeypatch.setattr(compute, "_make_leg_pricer", lambda symbol: _pricer)
+    monkeypatch.setattr(compute, "gamma_snapshot",
+                        lambda symbol: {"spot": 102.0, "views": {}})
+    monkeypatch.setattr(compute, "_rescue_regime", lambda: None)
+    result = compute.compute_rescue_adhoc(_condor_spec(quantity=1))
+    assert result.get("error") is None
+    adv = RescueAdvisory(**result)
+    # cv = (13.0 + 0.5) − (6.0 + 2.0) = 5.5 > 0
+    assert adv.mark.current_value == 5.5
+    close = next(c for c in adv.candidates if c.action == "close")
+    assert close.gross_cash == 550.0     # +cv*100*qty, a credit to close
+
+
+def test_compute_rescue_adhoc_range_coerces_strings(monkeypatch):
+    _patch_single_happy(monkeypatch)
+    spec = _condor_spec(quantity="2", entry_credit="-2.00",
+                        legs=[{"right": "CALL", "side": "long", "strike": "95", "qty": "1"},
+                              {"right": "CALL", "side": "short", "strike": "100", "qty": "1"},
+                              {"right": "CALL", "side": "short", "strike": "105", "qty": "1"},
+                              {"right": "CALL", "side": "long", "strike": "110", "qty": "1"}])
+    result = compute.compute_rescue_adhoc(spec)
+    assert result.get("error") is None
+    RescueAdvisory(**result)
+
+
+def test_compute_rescue_adhoc_range_missing_legs(monkeypatch):
+    _patch_single_happy(monkeypatch)
+    spec = _condor_spec()
+    spec["legs"] = []
+    result = compute.compute_rescue_adhoc(spec)
+    assert "error" in result and result["error"]
+
+
+def test_compute_rescue_adhoc_range_never_raises(monkeypatch):
+    monkeypatch.setattr(compute, "_make_leg_pricer",
+                        lambda symbol: (lambda *a, **k: None))
+    monkeypatch.setattr(compute, "gamma_snapshot", lambda symbol: None)
+    monkeypatch.setattr(compute, "_rescue_regime", lambda: None)
+    result = compute.compute_rescue_adhoc(_fly_spec())
+    assert isinstance(result, dict)
+    if result.get("error") is None:
+        RescueAdvisory(**result)
+
+
 # ── assess_open_positions ────────────────────────────────────────────────────
 
 def test_assess_open_positions_counts(monkeypatch):
