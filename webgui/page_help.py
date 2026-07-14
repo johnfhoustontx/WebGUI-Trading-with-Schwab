@@ -159,9 +159,23 @@ fear, which can mean opportunity.
 
 - **Sentiment gauges** — today vs the 30-day average.
 - **Market Trend gauges** — a 0–100 direction (50 = neutral, 100 = strong bull).
-- **Components & sectors** — what's driving the score; expand a sector for its
-  industries.
+- **Components** — press and hold to see what's driving the score.
+- **Daily Sentiment & Trend** — the two color-coded intraday graphs (last 5 days).
+- **Sector & Industry**, **Sector Rotation** and **RRG** now have their own tabs
+  along the top.
 - Updates itself every ~2 minutes; **Refresh** forces it.
+""",
+    "/sentiment/sectors": """
+**Sector & Industry — the simple version**
+
+How each S&P sector — and the industries inside it — is performing.
+
+- **Day / Week / Month %** — return over each window, green up / red down.
+- **P/C** — put/call volume (call-heavy green, put-heavy red); **RRG** — the sector's
+  rotation quadrant.
+- **Click a row** (or **Expand All**) to see that sector's industries.
+- **Summary line** — % of sectors green, cap-weighted move, and a 0–10 score.
+- **Refresh** re-pulls the data (also refreshes on its own).
 """,
     "/sentiment/rotation": """
 **Sector Rotation — the simple version**
@@ -170,9 +184,20 @@ Shows which sectors money is rotating **into** or **out of**, vs the S&P 500.
 
 - **Risk-ON / OFF headline** — are the leaders aggressive (cyclical) or defensive
   sectors?
-- **RRG chart** — each sector's trail: top-right = leading, bottom-left = lagging.
-- **Rotating From / Into** — sectors crossing between quadrants. **Refresh** only
-  (no auto-update).
+- **Quadrant map** — every sector ranked by rotation momentum.
+- **Rotating From / Into** — sectors crossing between quadrants, with their S&P
+  weights. The **RRG** chart is on its own tab. **Refresh** only (no auto-update).
+""",
+    "/sentiment/rrg": """
+**RRG — the simple version**
+
+The Relative Rotation Graph: each sector's momentum vs the S&P 500, over time.
+
+- **The plot** — top-right is **Leading**, bottom-right **Weakening**, bottom-left
+  **Lagging**, top-left **Improving**.
+- **Each sector** draws a trail; the **bright dot** is now, the faded line is where
+  it came from. **Hover** one to dim the rest.
+- **Risk-ON / OFF headline** gives the one-line summary. **Refresh** only.
 """,
     "/trade": """
 **Trade Analyzer — the simple version**
@@ -260,6 +285,10 @@ Controls the alert chimes, notifications, the ticker, and the app's look.
 - **Ticker** — the scrolling market-summary bar at the bottom of every page.
 - **Appearance** — every color, font, and menu style, editable in-app (tabs of
   clickable color swatches). **Save & restart web GUI** applies the change.
+- **API usage** — how many calls the app made to Schwab today / this week /
+  this month (counted at the gateway).
+- **Maintenance** — **Vacuum GEX history DB** shrinks the intraday options
+  database on disk (run it after hours; it locks the file for minutes).
 - **Test sound** also unlocks browser audio. The **User Manuals** live here too.
 """,
     "/manuals": """

@@ -58,3 +58,4 @@ trade-analyzer/data/
 *.db.bak
 sentiment-dashboard/data/
 webgui/data/eod/
+schwab-proxy/data/

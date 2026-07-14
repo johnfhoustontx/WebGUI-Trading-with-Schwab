@@ -52,3 +52,18 @@ def health(base_url: str = PROXY_URL, timeout: float = 3.0) -> dict:
         return {"up": False}
     data["up"] = data.get("status") == "ok"
     return data
+
+
+def api_call_stats(base_url: str = PROXY_URL, timeout: float = 3.0) -> dict | None:
+    """Outbound Schwab API-call counts from the proxy's ``/stats/api_calls``
+    (``{"today", "last_7_days", "last_30_days", "since"}``), or None when the
+    proxy is unreachable / predates the endpoint. Never raises — the Settings
+    "API usage" card renders a friendly placeholder on None."""
+    try:
+        resp = requests.get(f"{base_url}/stats/api_calls", timeout=timeout)
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        return data if isinstance(data, dict) and "today" in data else None
+    except Exception:
+        return None

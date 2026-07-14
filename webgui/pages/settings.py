@@ -1,15 +1,37 @@
-"""Settings page — GUI preferences (audio alerts, notifications, appearance).
+"""Settings page — GUI preferences (audio alerts, notifications, appearance),
+plus API-usage stats and database maintenance.
 
 Thin render(): each control writes through to app_settings; the Appearance
 section writes through to config/theme.toml (``theme.save_theme_values``,
 comment-preserving) and applies on a web-GUI restart — the theme loads once at
-startup. Extensible — add new cards/sections here as more settings arrive.
+startup. The API-usage card reads the proxy's ``/stats/api_calls`` off-thread;
+the Maintenance card runs ``tools/vacuum_gex.py`` as a subprocess off-thread
+(the tool itself refuses to run while the collector is active). Extensible —
+add new cards/sections here as more settings arrive.
 """
 import app_settings
-from nicegui import ui
+import proxy as _proxy
+from nicegui import run, ui
 
 from pages.options import theme
 from pages.options.theme import BTN_3D, BTN_3D_DANGER
+from pages.ui_guard import guard_async
+
+
+def api_stats_rows(stats):
+    """(label, value-text) rows for the API-usage card — pure/testable.
+
+    ``stats`` is the proxy's ``/stats/api_calls`` dict or None (proxy down /
+    old proxy build). Counts are formatted with thousands separators."""
+    if not stats:
+        return [("Today", "—"), ("Last 7 days", "—"), ("Last 30 days", "—")]
+    def _fmt(k):
+        try:
+            return f"{int(stats.get(k, 0)):,}"
+        except (TypeError, ValueError):
+            return "—"
+    return [("Today", _fmt("today")), ("Last 7 days", _fmt("last_7_days")),
+            ("Last 30 days", _fmt("last_30_days"))]
 
 # Appearance section layout: (toml section, tab label, editor kind).
 # "color" → clickable swatch tiles with a color picker; "text" → free-text
@@ -202,6 +224,90 @@ def render():
                 "no-caps").classes(BTN_3D).on_click(_save_restart)
             ui.button("Reset to defaults", color=None).props("no-caps").classes(
                 BTN_3D_DANGER).on_click(reset_dlg.open)
+
+    # ── API usage — outbound Schwab API calls counted at the proxy ────────────
+    with ui.card().classes("w-full max-w-2xl"):
+        ui.label("API usage").classes("text-subtitle1 font-bold")
+        ui.label("Outbound Schwab API calls, counted at the proxy per actual HTTP "
+                 "request (market data + trading, including retries). Counts "
+                 "accumulate from the first proxy start with the counter.").classes(
+                 "opacity-70 text-sm")
+        stat_lbls = {}
+        with ui.row().classes("gap-6"):
+            for label, val in api_stats_rows(None):
+                with ui.column().classes("gap-0"):
+                    ui.label(label).classes("text-xs opacity-60")
+                    stat_lbls[label] = ui.label(val).classes(
+                        "text-[20px] font-semibold")
+        api_since = ui.label("").classes("opacity-60 text-xs")
+
+        @guard_async
+        async def _load_api_stats():
+            stats = await run.io_bound(_proxy.api_call_stats)
+            for label, val in api_stats_rows(stats):
+                stat_lbls[label].text = val
+            api_since.text = (f"Counting since {stats['since']}."
+                              if stats and stats.get("since")
+                              else "No counts yet — restart the proxy if it "
+                                   "predates the counter.")
+
+        ui.button("Refresh", icon="refresh", color=None).props("no-caps").classes(
+            BTN_3D).on_click(_load_api_stats)
+        ui.timer(0.1, _load_api_stats, once=True)   # initial load, off-thread
+
+    # ── Maintenance — VACUUM the intraday GEX history DB ─────────────────────
+    with ui.card().classes("w-full max-w-2xl"):
+        ui.label("Maintenance").classes("text-subtitle1 font-bold")
+        ui.label("VACUUM the intraday GEX history database (gex_history.db) to "
+                 "shrink it on disk — the daily purge frees pages but never "
+                 "shrinks the file. Locks the database for minutes: run it "
+                 "off-hours. The tool refuses to run while the collector is "
+                 "active (market hours / fresh lock).").classes("opacity-70 text-sm")
+        vac_purge = ui.switch("Also purge old sessions first (keep last 5)",
+                              value=False)
+        vac_result = ui.label("").classes(
+            "opacity-70 text-xs whitespace-pre-wrap font-mono")
+
+        def _vacuum_cmd():
+            import sys as _sys
+            from repo_paths import REPO_ROOT
+            cmd = [_sys.executable, str(REPO_ROOT / "tools" / "vacuum_gex.py")]
+            if vac_purge.value:
+                cmd.append("--purge")
+            return cmd, str(REPO_ROOT)
+
+        def _run_vacuum_proc():
+            import subprocess
+            cmd, cwd = _vacuum_cmd()
+            out = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
+                                 timeout=1800)
+            return (out.stdout or "") + (out.stderr or "")
+
+        @guard_async
+        async def _vacuum():
+            vac_dlg.close()
+            vac_btn.set_enabled(False)
+            vac_result.text = "Running VACUUM… (this can take minutes on a large DB)"
+            try:
+                vac_result.text = (await run.io_bound(_run_vacuum_proc)).strip() \
+                    or "Done (no output)."
+            except Exception as exc:  # noqa: BLE001 — surface, never crash the page
+                vac_result.text = f"VACUUM failed: {exc}"
+            finally:
+                vac_btn.set_enabled(True)
+
+        with ui.dialog() as vac_dlg, ui.card():
+            ui.label("VACUUM gex_history.db now? The database is locked for "
+                     "minutes while it runs — best done off-hours.")
+            with ui.row():
+                ui.button("Run VACUUM", color=None).props("no-caps").classes(
+                    BTN_3D).on_click(_vacuum)
+                ui.button("Cancel", color=None).props("no-caps").classes(
+                    BTN_3D).on_click(vac_dlg.close)
+
+        vac_btn = ui.button("Vacuum GEX history DB", icon="cleaning_services",
+                            color=None).props("no-caps").classes(BTN_3D)
+        vac_btn.on_click(vac_dlg.open)
 
     # Test sound uses the same shared audio element + helper as the live alert.
     def _test():

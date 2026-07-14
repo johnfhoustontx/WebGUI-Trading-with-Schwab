@@ -26,6 +26,7 @@ Version 1.0.0 Changes:
 import json
 import os
 import sys
+import hmac
 import signal
 import time
 import base64
@@ -49,11 +50,12 @@ import requests
 import uvicorn
 from urllib.parse import urlparse, parse_qs
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
 
 from trade_registry import TradeRegistry, resolve_legs
+import api_call_counter
 import trade_detector
 import perf_writer
 import stream_bridge
@@ -317,6 +319,10 @@ class TokenManager:
         if elapsed < MIN_REQUEST_INTERVAL:
             time.sleep(MIN_REQUEST_INTERVAL - elapsed)
         self._last_request_time = time.monotonic()
+        # Every marketdata request passes through here (incl. retries + the
+        # 401-refresh re-request), so this is the counting chokepoint for the
+        # Settings "API usage" stats. record() never raises.
+        api_call_counter.record()
 
     def api_request(self, endpoint: str, params: Optional[Dict] = None) -> Dict:
         """Marketdata API GET request, with bounded retry on transient failures.
@@ -366,6 +372,64 @@ class TokenManager:
 # FASTAPI APPLICATION
 #############################################
 
+# ── Security config (backward-compatible; defaults preserve today's behavior) ──
+# CORS defaults to the LOCAL webgui + proxy origins instead of the wildcard "*" — this
+# closes the standing hole where any website open in your browser could reach the
+# token-holding, order-placing proxy on localhost. Override with PROXY_CORS_ORIGINS
+# (comma-separated); set it to "*" to explicitly restore the old wildcard.
+_DEFAULT_CORS_ORIGINS = [
+    "http://127.0.0.1:8500", "http://localhost:8500",   # webgui
+    "http://127.0.0.1:8100", "http://localhost:8100",   # proxy self / local tools
+]
+
+
+def _resolve_cors_origins():
+    raw = os.environ.get("PROXY_CORS_ORIGINS", "").strip()
+    if not raw:
+        return _DEFAULT_CORS_ORIGINS
+    origins = [o.strip() for o in raw.split(",") if o.strip()]
+    if "*" in origins:
+        logger.warning("PROXY_CORS_ORIGINS='*' — CORS wildcard restored (INSECURE: any "
+                       "browser origin can reach the proxy)")
+    return origins or _DEFAULT_CORS_ORIGINS
+
+
+def _resolve_shared_secret():
+    """The trading-endpoint shared secret, or None (default → auth DISABLED, unchanged).
+
+    Env ``PROXY_SHARED_SECRET`` → gitignored ``shared/proxy_secret.txt``. When set, the
+    sensitive endpoints (/accounts, /orders, /positions, /transactions) require a matching
+    ``X-Proxy-Secret`` header; unset → no check, byte-for-byte as before. Never raises."""
+    env = os.environ.get("PROXY_SHARED_SECRET")
+    if env and env.strip():
+        return env.strip()
+    try:
+        from repo_paths import SHARED_DIR
+        p = Path(SHARED_DIR) / "proxy_secret.txt"
+        if p.exists():
+            s = p.read_text(encoding="utf-8").strip()
+            if s:
+                return s
+    except Exception:  # noqa: BLE001 — a missing/unreadable secret file → auth stays off.
+        pass
+    return None
+
+
+PROXY_SHARED_SECRET = _resolve_shared_secret()
+
+
+def require_secret(x_proxy_secret: Optional[str] = Header(default=None)):
+    """FastAPI dependency guarding the sensitive (account/order) endpoints.
+
+    Enforced ONLY when a shared secret is configured (else a no-op → back-compat). A
+    missing/mismatched ``X-Proxy-Secret`` header → 401. Timing-safe compare."""
+    if PROXY_SHARED_SECRET is None:
+        return
+    supplied = x_proxy_secret or ""
+    if not hmac.compare_digest(supplied, PROXY_SHARED_SECRET):
+        raise HTTPException(status_code=401, detail="invalid or missing X-Proxy-Secret")
+
+
 app = FastAPI(
     title="Schwab API Proxy",
     version="1.0.1",
@@ -374,10 +438,12 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_resolve_cors_origins(),
     allow_methods=["*"],
     allow_headers=["*"],
 )
+if PROXY_SHARED_SECRET is not None:
+    logger.info("Proxy trading endpoints require an X-Proxy-Secret header (auth ENABLED)")
 
 token_mgr: Optional[TokenManager] = None
 
@@ -411,6 +477,15 @@ def startup():
 #############################################
 # HEALTH & STATUS
 #############################################
+
+@app.get("/stats/api_calls")
+def api_call_stats():
+    """Outbound Schwab API-call counts (today / last 7 / last 30 days) — the
+    Settings page's "API usage" card. Counted per actual HTTP request at the
+    marketdata rate-limit chokepoint + the trader request loop; per-day rows in
+    schwab-proxy/data/api_call_counts.db (forward-only from first deploy)."""
+    return api_call_counter.stats()
+
 
 @app.get("/health")
 def health():
@@ -658,6 +733,9 @@ def trader_request(method: str, endpoint: str, json_body: dict = None) -> dict:
     session = token_mgr.session
     for attempt in range(attempts):
         try:
+            # Trader calls bypass _rate_limit, so count each attempt here
+            # (Settings "API usage" stats). record() never raises.
+            api_call_counter.record()
             resp = (session.get(url, headers=headers, timeout=30) if is_get
                     else session.post(url, headers=headers, json=json_body, timeout=30))
             if resp.status_code == 401:
@@ -793,7 +871,7 @@ def _normalize_transactions(raw: list) -> list[dict]:
     return out
 
 
-@app.get("/accounts")
+@app.get("/accounts", dependencies=[Depends(require_secret)])
 def get_accounts():
     """
     Fetch linked Schwab account hashes (Trader API).
@@ -805,7 +883,7 @@ def get_accounts():
     return result["data"]
 
 
-@app.post("/orders/{account_hash}")
+@app.post("/orders/{account_hash}", dependencies=[Depends(require_secret)])
 def place_order(account_hash: str, order: dict):
     """
     Place an order via Schwab Trader API.
@@ -819,7 +897,7 @@ def place_order(account_hash: str, order: dict):
     return {"status": "submitted", "status_code": result["status_code"], "data": result["data"]}
 
 
-@app.get("/positions")
+@app.get("/positions", dependencies=[Depends(require_secret)])
 def get_positions_default():
     """Merged positions across ALL linked Schwab accounts.
 
@@ -849,7 +927,7 @@ def get_positions_default():
     return {"positions": _merge_positions(merged)}
 
 
-@app.get("/positions/{account_hash}")
+@app.get("/positions/{account_hash}", dependencies=[Depends(require_secret)])
 def get_positions(account_hash: str):
     """Normalized positions for one account."""
     result = trader_request("GET", f"/accounts/{account_hash}?fields=positions")
@@ -858,7 +936,7 @@ def get_positions(account_hash: str):
     return {"positions": _normalize_positions(result["data"])}
 
 
-@app.get("/transactions/{account_hash}")
+@app.get("/transactions/{account_hash}", dependencies=[Depends(require_secret)])
 def get_transactions(account_hash: str, start_date: str, end_date: str):
     """Normalized trade transactions in [start_date, end_date] (YYYY-MM-DD)."""
     endpoint = (f"/accounts/{account_hash}/transactions"
