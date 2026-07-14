@@ -913,6 +913,130 @@ def single_candidates(position, mark, price_leg, gex=None, regime=None) -> list[
 
 
 #############################################
+# DEBIT VERTICALS (pure) — Phase 1b
+#############################################
+# Coverage for defined-risk DEBIT verticals: VERT_CALL_DEBIT (bull call = long
+# lower call + short higher call) and VERT_PUT_DEBIT (bear put = long higher put
+# + short lower put). Defined max loss = the debit paid; directional. Advisory-
+# only. See docs/plans/2026-06-24-rescue-debit-verticals-design.md.
+#
+# ``position`` carries ``strategy``, ``long_strike`` (the LONG/directional leg),
+# ``short_strike`` (the SHORT leg), ``entry_credit`` (SIGNED per-share: NEGATIVE =
+# debit paid), ``quantity``. ``mark`` carries ``current_underlying``,
+# ``current_value`` (spread value/share = long-leg mid − short-leg mid),
+# ``unrealized_pnl`` (dollars), ``current_short_delta``, ``dte``.
+
+_DEBIT_STRATEGIES = ("VERT_CALL_DEBIT", "VERT_PUT_DEBIT")
+
+
+def assess_debit_risk(position, mark, gex=None, regime=None) -> dict:
+    """Classify a DEBIT-vertical position into ok/watch/tested/critical + 0-100
+    heat. A debit vertical is directional; "at-risk" = the underlying moved
+    against it (toward max loss). Reuses the LONG-single heat model keyed on the
+    LONG leg + a loss-fraction term. Pure, fully defensive (missing underlying/
+    None skips the otm term; never raises)."""
+    strategy = (position.get("strategy") or "").upper()
+    long_strike = _num(position.get("long_strike"))
+    qty = int(position.get("quantity") or 1)
+    entry_credit = _num(position.get("entry_credit")) or 0.0
+    und = _num(mark.get("current_underlying"))
+    pnl = mark.get("unrealized_pnl")
+    dte = mark.get("dte")
+
+    debit_dollars = abs(entry_credit) * 100 * max(1, qty)
+    loss = max(0.0, -(pnl if pnl is not None else 0.0))
+    loss_frac = loss / max(1.0, debit_dollars)
+    otm_depth = 0.0
+    if long_strike and und:
+        if strategy == "VERT_CALL_DEBIT" and und < long_strike:
+            otm_depth = (long_strike - und) / long_strike
+        elif strategy == "VERT_PUT_DEBIT" and und > long_strike:
+            otm_depth = (und - long_strike) / long_strike
+    heat = min(50.0, loss_frac * 60) + min(25.0, otm_depth * 300)
+    if dte is not None and dte <= 5 and otm_depth > 0:
+        heat += 15
+    heat = max(0.0, min(100.0, heat))
+    state = ("critical" if heat >= 75 else "tested" if heat >= 50
+             else "watch" if heat >= 25 else "ok")
+    return {"state": state, "heat": round(heat, 1)}
+
+
+def debit_candidates(position, mark, price_leg, gex=None, regime=None) -> list[dict]:
+    """Build advisory rescue candidates for a DEBIT-vertical position. Pure; a
+    candidate needing an unpriceable leg is skipped. Order: close first (the safe
+    floor), then the repairs. All ``apply_kind="advisory"``."""
+    strategy = (position.get("strategy") or "").upper()
+    sym = position.get("symbol")
+    qty = int(position.get("quantity") or 1)
+    L = _num(position.get("long_strike"))
+    S = _num(position.get("short_strike"))
+    expiry = position.get("expiration")
+    entry_credit = _num(position.get("entry_credit")) or 0.0
+    cv = mark.get("current_value")
+    dte = mark.get("dte")
+    right = "CALL" if strategy == "VERT_CALL_DEBIT" else "PUT"
+    rword = "call" if right == "CALL" else "put"
+
+    out: list[dict] = []
+    if L is None or S is None:
+        return out
+    w = abs(S - L)
+    debit_dollars = abs(entry_credit) * 100 * qty
+
+    # 1. close — sell the spread to close, recover the remaining value (credit).
+    if cv is not None:
+        out.append(_single_candidate(
+            "close", "Sell to close",
+            gross=cv * 100 * qty, commission=commission_for(2, sym, qty),
+            new_max_loss=0.0, dte_after=dte,
+            est_fill_legs=[_leg("SELL", right, L, expiry, qty,
+                                price_leg(sym, expiry, right, L)),
+                           _leg("BUY", right, S, expiry, qty,
+                                price_leg(sym, expiry, right, S))],
+            rationale=["Sell to close — recover the remaining value, cut the loss."],
+            score=60.0))
+
+    # 2. roll_out — sell current + buy same-strikes spread at +30d (debit; time).
+    new_expiry = _add_days(expiry, 30)
+    nl = price_leg(sym, new_expiry, right, L) if cv is not None else None
+    ns = price_leg(sym, new_expiry, right, S) if cv is not None else None
+    if cv is not None and nl is not None and ns is not None:
+        new_spread_val = nl - ns
+        gross = (cv - new_spread_val) * 100 * qty      # debit (later spread richer)
+        out.append(_single_candidate(
+            "roll_out", "Roll out ~30 days",
+            gross=gross, commission=commission_for(4, sym, qty),
+            new_expiry=new_expiry, dte_after=(dte or 0) + 30, new_width=w,
+            est_fill_legs=[
+                _leg("SELL", right, L, expiry, qty, price_leg(sym, expiry, right, L)),
+                _leg("BUY", right, S, expiry, qty, price_leg(sym, expiry, right, S)),
+                _leg("BUY", right, L, new_expiry, qty, nl),
+                _leg("SELL", right, S, new_expiry, qty, ns)],
+            rationale=["Roll out ~30 days for more time (costs a debit)."],
+            score=45.0))
+
+    # 3. convert_to_butterfly — sell an equal-width spread beyond the short strike
+    #    → credit that reduces the net debit and caps the position.
+    far = S + w if right == "CALL" else S - w
+    sp_s = price_leg(sym, expiry, right, S)
+    sp_f = price_leg(sym, expiry, right, far)
+    if sp_s is not None and sp_f is not None:
+        credit = max(0.0, sp_s - sp_f)
+        gross = credit * 100 * qty
+        out.append(_single_candidate(
+            "convert_to_butterfly", f"Convert to {rword} butterfly",
+            gross=gross, commission=commission_for(2, sym, qty),
+            new_max_loss=round(max(0.0, debit_dollars - round(gross, 2)), 2),
+            new_width=w, dte_after=dte,
+            est_fill_legs=[_leg("SELL", right, S, expiry, qty, sp_s),
+                           _leg("BUY", right, far, expiry, qty, sp_f)],
+            rationale=[f"Sell a further {rword} spread → butterfly; recovers "
+                       f"premium and reduces the net debit."],
+            score=52.0))
+    return out
+
+
+#############################################
 # ORCHESTRATOR (pure)
 #############################################
 

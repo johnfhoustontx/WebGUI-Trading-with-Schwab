@@ -475,6 +475,71 @@ def test_compute_rescue_adhoc_single_never_raises(monkeypatch):
         RescueAdvisory(**result)
 
 
+# ── compute_rescue_adhoc — DEBIT verticals ───────────────────────────────────
+
+def _debit_spec(**kw):
+    # bull call: long lower call (100) + short higher call (105); debit paid.
+    base = dict(symbol="SPY", strategy="VERT_CALL_DEBIT", long_strike=100.0,
+                short_strike=105.0, expiration="2099-07-31", quantity=2,
+                entry_credit=-2.00)
+    base.update(kw)
+    return base
+
+
+def test_compute_rescue_adhoc_vert_call_debit(monkeypatch):
+    _patch_single_happy(monkeypatch, spot=95.0)   # underwater bull call
+    result = compute.compute_rescue_adhoc(_debit_spec(strategy="VERT_CALL_DEBIT"))
+    assert result.get("error") is None
+    adv = RescueAdvisory(**result)
+    assert adv.position_id == "adhoc" and adv.source == "adhoc"
+    assert adv.strategy == "VERT_CALL_DEBIT"
+    assert adv.candidates
+    assert all(c.apply_kind == "advisory" for c in adv.candidates)
+    actions = [c.action for c in adv.candidates]
+    assert "close" in actions and actions[0] == "close"
+    # underlying flows through into the published mark.
+    assert adv.mark.underlying == 95.0
+
+
+def test_compute_rescue_adhoc_vert_put_debit(monkeypatch):
+    _patch_single_happy(monkeypatch, spot=110.0)  # underwater bear put
+    result = compute.compute_rescue_adhoc(
+        _debit_spec(strategy="VERT_PUT_DEBIT", long_strike=100.0, short_strike=95.0))
+    assert result.get("error") is None
+    adv = RescueAdvisory(**result)
+    assert adv.strategy == "VERT_PUT_DEBIT"
+    assert adv.candidates
+    assert all(c.apply_kind == "advisory" for c in adv.candidates)
+    assert {c.action for c in adv.candidates} >= {"close"}
+
+
+def test_compute_rescue_adhoc_debit_coerces_strings(monkeypatch):
+    _patch_single_happy(monkeypatch)
+    result = compute.compute_rescue_adhoc(_debit_spec(
+        long_strike="100", short_strike="105", quantity="3", entry_credit="-2.00"))
+    assert result.get("error") is None
+    RescueAdvisory(**result)
+
+
+def test_compute_rescue_adhoc_debit_missing_long_strike(monkeypatch):
+    _patch_single_happy(monkeypatch)
+    spec = _debit_spec()
+    del spec["long_strike"]
+    result = compute.compute_rescue_adhoc(spec)
+    assert "error" in result and result["error"]
+
+
+def test_compute_rescue_adhoc_debit_never_raises(monkeypatch):
+    monkeypatch.setattr(compute, "_make_leg_pricer",
+                        lambda symbol: (lambda *a, **k: None))
+    monkeypatch.setattr(compute, "gamma_snapshot", lambda symbol: None)
+    monkeypatch.setattr(compute, "_rescue_regime", lambda: None)
+    result = compute.compute_rescue_adhoc(_debit_spec())
+    assert isinstance(result, dict)
+    if result.get("error") is None:
+        RescueAdvisory(**result)
+
+
 # ── assess_open_positions ────────────────────────────────────────────────────
 
 def test_assess_open_positions_counts(monkeypatch):

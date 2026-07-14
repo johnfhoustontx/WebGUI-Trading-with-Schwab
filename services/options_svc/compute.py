@@ -3422,7 +3422,10 @@ _rescue_candidates = _rescue.rescue_candidates
 _assess_position_risk = _rescue.assess_position_risk
 _single_candidates = _rescue.single_candidates
 _assess_single_risk = _rescue.assess_single_risk
+_debit_candidates = _rescue.debit_candidates
+_assess_debit_risk = _rescue.assess_debit_risk
 _SINGLE_STRATEGIES = ("LONG_CALL", "LONG_PUT", "NAKED_CALL", "NAKED_PUT")
+_DEBIT_STRATEGIES = ("VERT_CALL_DEBIT", "VERT_PUT_DEBIT")
 from shared.contracts.options import (  # noqa: E402
     RescueAdvisory, RescueCandidate, RescueMark)
 
@@ -3923,6 +3926,169 @@ def _adhoc_single(spec) -> dict:
         return {"error": f"{type(e).__name__}: {e}"}
 
 
+def _advisory_from_debit(pos, *, source: str = "adhoc",
+                         position_id="adhoc") -> dict:
+    """Rescue-advisory core for a DEBIT vertical (bull call / bear put).
+
+    ``reprice_swing`` only handles PCS/CCS/IC, so the two legs are priced DIRECTLY
+    via ``_make_leg_pricer`` (per-share chain mids) and the current spread value
+    ``cv`` = long-leg mid − short-leg mid (falling back to the entered debit when a
+    leg is unpriceable). The underlying comes from the gamma snapshot's live
+    ``spot``. Unrealized P&L = (cv − |entry_credit|)·100·qty (entry_credit is a
+    negative debit → |·| is the per-share debit paid). Advisory-only. Fully
+    defensive → ``{"error": "..."}``; never raises."""
+    try:
+        symbol = pos.get("symbol")
+        strategy = (pos.get("strategy") or "").upper()
+        long_strike = pos.get("long_strike")
+        short_strike = pos.get("short_strike")
+        expiry = pos.get("expiration")
+        qty = int(pos.get("quantity") or 1)
+        entry_credit = pos.get("entry_credit") or 0.0
+        right = "CALL" if strategy == "VERT_CALL_DEBIT" else "PUT"
+
+        # 1. mark — price the two legs directly; cv = long mid − short mid.
+        price_leg = _make_leg_pricer(symbol)
+        try:
+            long_mid = price_leg(symbol, expiry, right, long_strike)
+            short_mid = price_leg(symbol, expiry, right, short_strike)
+        except Exception:
+            long_mid = short_mid = None
+        if long_mid is not None and short_mid is not None:
+            cv = long_mid - short_mid
+        else:
+            cv = abs(entry_credit)     # degraded fallback = the debit paid
+
+        # 2. gamma context (defensive → None); its live spot supplies the underlying.
+        try:
+            snap = gamma_snapshot(symbol)
+        except Exception:
+            snap = None
+        underlying = None
+        if isinstance(snap, dict) and (snap.get("spot") or 0) > 0:
+            underlying = snap["spot"]
+        gex = _gex_from_snapshot(snap)
+
+        unrealized_pnl = round((cv - abs(entry_credit)) * 100 * qty, 2)
+        dte = _rescue_dte(expiry)
+        mark = {
+            "underlying": underlying,
+            "current_value": cv,
+            "unrealized_pnl": unrealized_pnl,
+            "short_delta": None,
+            "dte": dte,
+        }
+        engine_mark = {
+            "current_underlying": underlying,
+            "current_value": cv,
+            "unrealized_pnl": unrealized_pnl,
+            "current_short_delta": None,
+            "dte": dte,
+        }
+
+        # 3. regime context (defensive → None).
+        regime = _rescue_regime()
+
+        # 4. engine.
+        cands = _debit_candidates(pos, engine_mark, price_leg, gex, regime)
+        risk = _assess_debit_risk(pos, engine_mark, gex, regime)
+
+        context = []
+        if cands and cands[0].get("context"):
+            context = list(cands[0]["context"])
+
+        valid = []
+        for c in cands:
+            try:
+                c = {**c, "apply_kind": "advisory", "applies": False}
+                valid.append(RescueCandidate(**c))
+            except Exception:
+                continue
+
+        adv = RescueAdvisory(
+            position_id=position_id,
+            source=source,
+            symbol=symbol,
+            strategy=strategy,
+            state=risk.get("state", "ok"),
+            heat=risk.get("heat", 0.0),
+            mark=RescueMark(**mark),
+            context=context,
+            candidates=valid,
+            ts=_rescue_dt.datetime.now(_rescue_dt.timezone.utc).isoformat(),
+        )
+        return adv.model_dump()
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {e}"}
+
+
+def _adhoc_debit(spec) -> dict:
+    """Validate + build a debit-vertical ad-hoc rescue advisory. Defensive."""
+    try:
+        symbol = spec.get("symbol")
+        strategy = (spec.get("strategy") or "").upper()
+        expiration = spec.get("expiration")
+        if not symbol:
+            return {"error": "symbol is required"}
+        if strategy not in _DEBIT_STRATEGIES:
+            return {"error": "unsupported debit strategy"}
+        if not expiration:
+            return {"error": "expiration is required"}
+
+        def _flt(key, required):
+            raw = spec.get(key)
+            if raw is None or (isinstance(raw, str) and not raw.strip()):
+                return (None, f"{key} is required") if required else (None, None)
+            try:
+                return float(raw), None
+            except (TypeError, ValueError):
+                return None, f"{key} must be a number"
+
+        long_strike, err = _flt("long_strike", True)
+        if err:
+            return {"error": err}
+        short_strike, err = _flt("short_strike", True)
+        if err:
+            return {"error": err}
+        # entry_credit is SIGNED (NEGATIVE = debit paid); do NOT reject a negative.
+        entry_credit, err = _flt("entry_credit", False)
+        if err:
+            return {"error": err}
+        if entry_credit is None:
+            entry_credit = 0.0
+
+        qty_raw = spec.get("quantity")
+        if qty_raw is None or (isinstance(qty_raw, str) and not qty_raw.strip()):
+            quantity = 1
+        else:
+            try:
+                quantity = int(float(qty_raw))
+            except (TypeError, ValueError):
+                return {"error": "quantity must be an integer"}
+        if quantity < 1:
+            quantity = 1
+
+        # Defined max loss = the debit paid.
+        max_loss = abs(entry_credit) * 100 * quantity
+
+        pos = {
+            "position_id": "adhoc",
+            "symbol": symbol,
+            "strategy": strategy,
+            "long_strike": long_strike,
+            "short_strike": short_strike,
+            "call_short": None,
+            "call_long": None,
+            "expiration": expiration,
+            "entry_credit": entry_credit,
+            "quantity": quantity,
+            "max_loss_total": max_loss,
+        }
+        return _advisory_from_debit(pos, source="adhoc", position_id="adhoc")
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {e}"}
+
+
 def compute_rescue_adhoc(spec) -> dict:
     """Build the ranked rescue advisory for a USER-DEFINED ad-hoc trade.
 
@@ -3946,9 +4112,13 @@ def compute_rescue_adhoc(spec) -> dict:
         # Single-option strategies route to the dedicated single path.
         if strategy in _SINGLE_STRATEGIES:
             return _adhoc_single(spec)
+        # Debit verticals (bull call / bear put) route to the debit path.
+        if strategy in _DEBIT_STRATEGIES:
+            return _adhoc_debit(spec)
         if strategy not in ("PCS", "CCS", "IC"):
             return {"error": "strategy must be one of PCS, CCS, IC, "
-                    "LONG_CALL, LONG_PUT, NAKED_CALL, NAKED_PUT"}
+                    "LONG_CALL, LONG_PUT, NAKED_CALL, NAKED_PUT, "
+                    "VERT_CALL_DEBIT, VERT_PUT_DEBIT"}
         if not expiration:
             return {"error": "expiration is required"}
 
