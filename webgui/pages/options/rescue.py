@@ -216,7 +216,9 @@ def _fmt_plain(v):
 
 
 _CANDIDATE_METRICS = (
-    ("new_max_loss", "Max loss", _fmt_cash),
+    # ``new_max_loss`` = the max loss of the position that REMAINS after the action
+    # (a close leaves you flat → $0 residual risk, NOT "this trade had no loss").
+    ("new_max_loss", "Max loss after", _fmt_cash),
     ("new_breakeven", "Breakeven", _fmt_plain),
     ("new_short_delta", "Short delta", _fmt_delta),
     ("new_width", "Width", _fmt_plain),
