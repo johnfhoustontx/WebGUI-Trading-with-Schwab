@@ -694,6 +694,225 @@ def build_futures_hedge(position, mark, price_leg, ctx) -> dict | None:
 
 
 #############################################
+# SINGLE-OPTION RESCUE (pure) — Phase 1
+#############################################
+#
+# Coverage for the "Single" strategy family: LONG_CALL / LONG_PUT (defined risk =
+# the debit paid) and NAKED_CALL / NAKED_PUT (undefined risk = the credit
+# received). Advisory-only (ad-hoc has no Apply). See
+# docs/plans/2026-06-23-rescue-singles-design.md.
+#
+# ``position`` carries ``strategy``, ``short_strike`` (the single strike),
+# ``entry_credit`` (SIGNED per-share: + premium received for a naked short, −
+# premium paid for a long), ``quantity``. ``mark`` carries ``current_underlying``,
+# ``current_value`` (option mark per-share), ``unrealized_pnl`` (dollars),
+# ``current_short_delta``, ``dte``.
+
+_SINGLE_LONG = ("LONG_CALL", "LONG_PUT")
+_SINGLE_NAKED = ("NAKED_CALL", "NAKED_PUT")
+
+
+def _num(x):
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return None
+
+
+def assess_single_risk(position, mark, gex=None, regime=None) -> dict:
+    """Classify a SINGLE-option position into ok/watch/tested/critical + 0-100
+    heat. Pure, fully defensive (missing underlying/None skips that term)."""
+    strategy = (position.get("strategy") or "").upper()
+    strike = _num(position.get("short_strike"))
+    qty = int(position.get("quantity") or 1)
+    entry_credit = _num(position.get("entry_credit")) or 0.0
+    und = _num(mark.get("current_underlying"))
+    pnl = mark.get("unrealized_pnl")
+    dte = mark.get("dte")
+    d = abs(_num(mark.get("current_short_delta")) or 0.0)
+
+    if strategy in _SINGLE_LONG:
+        # defined risk = the debit paid = abs(entry_credit)
+        debit_dollars = abs(entry_credit) * 100 * max(1, qty)
+        loss = max(0.0, -(pnl if pnl is not None else 0.0))
+        loss_frac = loss / max(1.0, debit_dollars)
+        otm_depth = 0.0
+        if strike and und:
+            if strategy == "LONG_CALL" and und < strike:
+                otm_depth = (strike - und) / strike
+            elif strategy == "LONG_PUT" and und > strike:
+                otm_depth = (und - strike) / strike
+        heat = min(50.0, loss_frac * 60) + min(25.0, otm_depth * 300)
+        if dte is not None and dte <= 5 and otm_depth > 0:
+            heat += 15
+        heat = max(0.0, min(100.0, heat))
+        state = ("critical" if heat >= 75 else "tested" if heat >= 50
+                 else "watch" if heat >= 25 else "ok")
+        return {"state": state, "heat": round(heat, 1)}
+
+    # NAKED_CALL / NAKED_PUT — undefined risk; mirror the credit-short-leg logic.
+    state = "ok"
+    heat = 8.0    # undefined-risk base bump
+    if strike and und:
+        # naked put danger = underlying falling toward/through the strike;
+        # naked call = underlying rising toward/through the strike.
+        gap = ((und - strike) / strike if strategy == "NAKED_PUT"
+               else (strike - und) / strike)
+        if gap <= 0:                       # through the short strike
+            state = _max(state, "critical"); heat += 45
+        elif gap <= 0.01:
+            state = _max(state, "tested"); heat += 32
+        elif gap <= 0.03:
+            state = _max(state, "watch"); heat += 18
+    if d >= 0.45:
+        state = _max(state, "critical"); heat += 25
+    elif d >= 0.30:
+        state = _max(state, "tested"); heat += 15
+    credit_dollars = entry_credit * 100 * max(1, qty)
+    if credit_dollars > 0 and pnl is not None and pnl < 0:
+        mult = abs(pnl) / credit_dollars
+        if mult >= 2:
+            heat += 14
+        elif mult >= 1:
+            heat += 8
+    heat = max(0.0, min(100.0, heat))
+    return {"state": state, "heat": round(heat, 1)}
+
+
+def _single_candidate(action, label, *, gross, commission, rationale,
+                      new_max_loss=None, new_expiry=None, dte_after=None,
+                      new_width=None, est_fill_legs=None, context=None,
+                      warnings=None, score=50.0) -> dict:
+    """Assemble a uniform (RescueCandidate-shaped) single-option candidate dict.
+    All single candidates are advisory-only."""
+    gross = round(gross, 2)
+    commission = round(commission, 2)
+    return {
+        "action": action,
+        "label": label,
+        "apply_kind": "advisory",
+        "gross_cash": gross,
+        "commission": commission,
+        "net_cash": round(gross - commission, 2),
+        "new_max_loss": (round(new_max_loss, 2) if new_max_loss is not None else None),
+        "new_short_delta": None,
+        "new_width": new_width,
+        "new_expiry": new_expiry,
+        "dte_after": dte_after,
+        "est_fill_legs": est_fill_legs or [],
+        "rationale": list(rationale),
+        "context": list(context or []),
+        "warnings": list(warnings or []),
+        "score": score,
+    }
+
+
+def single_candidates(position, mark, price_leg, gex=None, regime=None) -> list[dict]:
+    """Build advisory rescue candidates for a single-option position. Pure; a
+    candidate needing an unpriceable leg is skipped. Order: close first (the safe
+    floor), then the repairs."""
+    strategy = (position.get("strategy") or "").upper()
+    sym = position.get("symbol")
+    qty = int(position.get("quantity") or 1)
+    strike = _num(position.get("short_strike"))
+    expiry = position.get("expiration")
+    entry_credit = _num(position.get("entry_credit")) or 0.0
+    cv = mark.get("current_value")
+    dte = mark.get("dte")
+    right = "CALL" if strategy in ("LONG_CALL", "NAKED_CALL") else "PUT"
+    rword = "call" if right == "CALL" else "put"
+    try:
+        w = max(1, round(strike * 0.05)) if strike else 1
+    except (TypeError, ValueError):
+        w = 1
+
+    out: list[dict] = []
+    if strike is None:
+        return out
+
+    if strategy in _SINGLE_LONG:
+        debit_dollars = abs(entry_credit) * 100 * qty
+        # 1. close — sell to close, recover remaining premium (credit).
+        if cv is not None:
+            out.append(_single_candidate(
+                "close", "Sell to close",
+                gross=cv * 100 * qty, commission=commission_for(1, sym, qty),
+                new_max_loss=0.0, dte_after=dte,
+                rationale=["Sell to close — recover the remaining premium, "
+                           "cut the loss."],
+                score=60.0))
+        # 2. roll_out — same strike, +30 DTE (debit; buys time).
+        new_expiry = _add_days(expiry, 30)
+        nl = price_leg(sym, new_expiry, right, strike) if cv is not None else None
+        if cv is not None and nl is not None:
+            out.append(_single_candidate(
+                "roll_out", "Roll out ~30 days",
+                gross=(cv - nl) * 100 * qty, commission=commission_for(2, sym, qty),
+                new_expiry=new_expiry, dte_after=(dte or 0) + 30,
+                est_fill_legs=[_leg("SELL", right, strike, expiry, qty, cv),
+                               _leg("BUY", right, strike, new_expiry, qty, nl)],
+                rationale=["Roll out ~30 days for more time (costs a debit)."],
+                score=45.0))
+        # 3. convert_to_vertical — sell a further-OTM same-type option → debit spread.
+        far = strike + w if right == "CALL" else strike - w
+        sp = price_leg(sym, expiry, right, far)
+        if sp is not None:
+            gross = sp * 100 * qty
+            out.append(_single_candidate(
+                "convert_to_vertical", f"Convert to {rword} debit spread",
+                gross=gross, commission=commission_for(1, sym, qty),
+                new_max_loss=max(0.0, debit_dollars - round(gross, 2)),
+                new_width=w, dte_after=dte,
+                est_fill_legs=[_leg("SELL", right, far, expiry, qty, sp)],
+                rationale=[f"Sell a further-OTM {rword} against it → debit spread; "
+                           f"recovers premium and caps the position."],
+                score=52.0))
+        return out
+
+    # NAKED_CALL / NAKED_PUT — defend undefined risk.
+    undef = "This position is undefined-risk."
+    # 1. close — buy to close (debit).
+    if cv is not None:
+        out.append(_single_candidate(
+            "close", "Buy to close",
+            gross=-(cv * 100 * qty), commission=commission_for(1, sym, qty),
+            new_max_loss=0.0, dte_after=dte,
+            rationale=["Buy to close — removes the undefined risk."],
+            context=[undef], score=60.0))
+    # 2. roll — buy to close + sell a new option away & out for a credit.
+    new_expiry = _add_days(expiry, 30)
+    roll_strike = strike - w if strategy == "NAKED_PUT" else strike + w
+    ns = price_leg(sym, new_expiry, right, roll_strike) if cv is not None else None
+    if cv is not None and ns is not None:
+        out.append(_single_candidate(
+            "roll", f"Roll {'down' if strategy == 'NAKED_PUT' else 'up'} & out",
+            gross=(-cv + ns) * 100 * qty, commission=commission_for(2, sym, qty),
+            new_expiry=new_expiry, dte_after=(dte or 0) + 30,
+            est_fill_legs=[_leg("BUY", right, strike, expiry, qty, cv),
+                           _leg("SELL", right, roll_strike, new_expiry, qty, ns)],
+            rationale=["Roll away and out for a credit — buys room; still "
+                       "undefined risk."],
+            context=[undef], warnings=["Position remains undefined-risk."],
+            score=45.0))
+    # 3. buy_protection — buy a further-OTM same-type option → DEFINES the risk.
+    prot_strike = strike - w if strategy == "NAKED_PUT" else strike + w
+    pp = price_leg(sym, expiry, right, prot_strike)
+    if pp is not None:
+        gross = -(pp * 100 * qty)
+        credit_dollars = entry_credit * 100 * qty
+        out.append(_single_candidate(
+            "buy_protection", f"Buy a further-OTM {rword} (define risk)",
+            gross=gross, commission=commission_for(1, sym, qty),
+            new_max_loss=max(0.0, w * 100 * qty - (credit_dollars + round(gross, 2))),
+            new_width=w, dte_after=dte,
+            est_fill_legs=[_leg("BUY", right, prot_strike, expiry, qty, pp)],
+            rationale=[f"Buy a further-OTM {rword} → converts to a credit spread "
+                       f"that DEFINES your max loss."],
+            score=52.0))
+    return out
+
+
+#############################################
 # ORCHESTRATOR (pure)
 #############################################
 

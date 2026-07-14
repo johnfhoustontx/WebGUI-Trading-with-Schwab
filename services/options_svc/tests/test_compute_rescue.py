@@ -338,7 +338,9 @@ def test_compute_rescue_adhoc_missing_short_strike(monkeypatch):
 
 def test_compute_rescue_adhoc_bad_strategy(monkeypatch):
     _patch_adhoc_happy(monkeypatch)
-    result = compute.compute_rescue_adhoc(_adhoc_spec(strategy="LONG_CALL"))
+    # BULL_CALL (debit vertical) is out of scope for both the spread and single
+    # paths -> still errors. (LONG_CALL is now a SUPPORTED single strategy.)
+    result = compute.compute_rescue_adhoc(_adhoc_spec(strategy="BULL_CALL"))
     assert "error" in result and result["error"]
 
 
@@ -376,6 +378,98 @@ def test_compute_rescue_adhoc_never_raises(monkeypatch):
     monkeypatch.setattr(compute, "_rescue_regime", lambda: None)
     monkeypatch.setattr(compute, "_make_leg_pricer", lambda symbol: (lambda *a, **k: None))
     result = compute.compute_rescue_adhoc(_adhoc_spec())
+    assert isinstance(result, dict)
+    if result.get("error") is None:
+        RescueAdvisory(**result)
+
+
+# ── compute_rescue_adhoc — SINGLE strategies ─────────────────────────────────
+
+def _patch_single_happy(monkeypatch, current_value=1.00, spot=100.0):
+    monkeypatch.setattr(compute, "_make_leg_pricer",
+                        lambda symbol: (lambda *a, **k: current_value))
+    monkeypatch.setattr(compute, "gamma_snapshot",
+                        lambda symbol: {"spot": spot, "views": {
+                            "GEX": {"flip": spot + 3, "walls": [spot - 5, spot + 5]}}})
+    monkeypatch.setattr(compute, "_rescue_regime", lambda: None)
+
+
+def _single_spec(**kw):
+    base = dict(symbol="SPY", strategy="LONG_CALL", short_strike=105.0,
+                expiration="2099-07-31", quantity=2, entry_credit=-2.50)
+    base.update(kw)
+    return base
+
+
+def test_compute_rescue_adhoc_long_call(monkeypatch):
+    _patch_single_happy(monkeypatch, spot=95.0)   # OTM long call, underwater
+    result = compute.compute_rescue_adhoc(_single_spec(strategy="LONG_CALL"))
+    assert result.get("error") is None
+    adv = RescueAdvisory(**result)
+    assert adv.position_id == "adhoc" and adv.source == "adhoc"
+    assert adv.strategy == "LONG_CALL"
+    assert adv.candidates
+    assert all(c.apply_kind == "advisory" for c in adv.candidates)
+    actions = [c.action for c in adv.candidates]
+    assert "close" in actions and actions[0] == "close"
+
+
+def test_compute_rescue_adhoc_long_put(monkeypatch):
+    _patch_single_happy(monkeypatch, spot=110.0)
+    result = compute.compute_rescue_adhoc(
+        _single_spec(strategy="LONG_PUT", short_strike=100.0))
+    assert result.get("error") is None
+    adv = RescueAdvisory(**result)
+    assert adv.strategy == "LONG_PUT"
+    assert {c.action for c in adv.candidates} >= {"close"}
+    assert all(c.apply_kind == "advisory" for c in adv.candidates)
+
+
+def test_compute_rescue_adhoc_naked_put(monkeypatch):
+    _patch_single_happy(monkeypatch, spot=98.0)   # underlying near/below strike
+    result = compute.compute_rescue_adhoc(
+        _single_spec(strategy="NAKED_PUT", short_strike=100.0, entry_credit=1.50))
+    assert result.get("error") is None
+    adv = RescueAdvisory(**result)
+    assert adv.strategy == "NAKED_PUT"
+    assert adv.candidates
+    assert all(c.apply_kind == "advisory" for c in adv.candidates)
+    actions = [c.action for c in adv.candidates]
+    assert "close" in actions and "buy_protection" in actions
+
+
+def test_compute_rescue_adhoc_naked_call(monkeypatch):
+    _patch_single_happy(monkeypatch, spot=102.0)
+    result = compute.compute_rescue_adhoc(
+        _single_spec(strategy="NAKED_CALL", short_strike=100.0, entry_credit=1.50))
+    assert result.get("error") is None
+    adv = RescueAdvisory(**result)
+    assert adv.strategy == "NAKED_CALL"
+    assert all(c.apply_kind == "advisory" for c in adv.candidates)
+
+
+def test_compute_rescue_adhoc_single_coerces_strings(monkeypatch):
+    _patch_single_happy(monkeypatch)
+    result = compute.compute_rescue_adhoc(_single_spec(
+        short_strike="105", quantity="3", entry_credit="-2.50"))
+    assert result.get("error") is None
+    RescueAdvisory(**result)
+
+
+def test_compute_rescue_adhoc_single_missing_strike(monkeypatch):
+    _patch_single_happy(monkeypatch)
+    spec = _single_spec()
+    del spec["short_strike"]
+    result = compute.compute_rescue_adhoc(spec)
+    assert "error" in result and result["error"]
+
+
+def test_compute_rescue_adhoc_single_never_raises(monkeypatch):
+    monkeypatch.setattr(compute, "_make_leg_pricer",
+                        lambda symbol: (lambda *a, **k: None))
+    monkeypatch.setattr(compute, "gamma_snapshot", lambda symbol: None)
+    monkeypatch.setattr(compute, "_rescue_regime", lambda: None)
+    result = compute.compute_rescue_adhoc(_single_spec())
     assert isinstance(result, dict)
     if result.get("error") is None:
         RescueAdvisory(**result)
