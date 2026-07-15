@@ -452,3 +452,76 @@ def test_score_all_threads_market_state():
     plain = sc.score_all([_credit(rr=0.3, pop=72)], view, 0.18, 8.0)
     tilted = sc.score_all([a], view, 0.18, 8.0, market_state="lack_of_bearishness")
     assert tilted[0]["composite_score"] > plain[0]["composite_score"]
+
+
+#############################################
+# Tick-aware liquidity — real-market regression
+#############################################
+
+# LIVE RTH quotes captured 2026-07-15 12:14 CT (market open) from the running
+# options service. These are real, unambiguously fillable markets on some of the
+# most liquid equity/ETF options that trade. The index-calibrated
+# percent-of-mark band (100 at <=1%, hard 0 at >=5%) scored EVERY one of them
+# 0.0, which tripped the hard liquidity gate and forced every candidate to Weak.
+# (bid, ask, mark, volume, oi)
+_AAPL_325C = {"bid": 4.50, "ask": 4.75, "mark": 4.63, "volume": 3144, "oi": 633}
+_AAPL_332_5C = {"bid": 1.50, "ask": 1.61, "mark": 1.56, "volume": 1165, "oi": 92}
+_MSFT_392_5C = {"bid": 7.55, "ask": 7.95, "mark": 7.75, "volume": 234, "oi": 473}
+_MSFT_405C = {"bid": 2.64, "ask": 2.77, "mark": 2.71, "volume": 546, "oi": 228}
+_MSFT_395C = {"bid": 6.25, "ask": 6.60, "mark": 6.43, "volume": 1242, "oi": 488}
+_IWM_294C = {"bid": 2.99, "ask": 3.10, "mark": 3.05, "volume": 76, "oi": 426}
+_IWM_298C = {"bid": 0.92, "ask": 0.97, "mark": 0.95, "volume": 216, "oi": 406}
+# SPY — penny-wide index market; the band was calibrated on these. Must not regress.
+_SPY_750C = {"bid": 4.84, "ask": 4.93, "mark": 4.89, "volume": 2319, "oi": 1902}
+_SPY_756C = {"bid": 1.66, "ask": 1.68, "mark": 1.67, "volume": 1991, "oi": 1665}
+# ZM — a GENUINELY wide market ($0.60 wide on a $2.24 mark = 27%). Must still fail.
+_ZM_91C = {"bid": 1.94, "ask": 2.54, "mark": 2.24, "volume": 179, "oi": 290}
+_ZM_94C = {"bid": 0.60, "ask": 1.00, "mark": 0.80, "volume": 34, "oi": 213}
+
+
+def _sig(legs, **kw):
+    base = {"type": "BULL_CALL", "legs": legs, "pop_pct": 45.0, "rr": 1.0}
+    base.update(kw)
+    return base
+
+
+def test_q_liq_real_liquid_equity_legs_are_not_scored_zero():
+    """A real, fillable AAPL/MSFT/IWM market must not score 0 liquidity."""
+    for leg in (_AAPL_325C, _AAPL_332_5C, _MSFT_392_5C, _MSFT_405C,
+                _MSFT_395C, _IWM_294C, _IWM_298C):
+        assert sc.q_liq(_sig([leg])) > 0.0, leg
+
+
+def test_q_liq_real_liquid_equity_structures_clear_the_min_gate_bar():
+    """These markets must clear the DEBIT/LONG min liquidity bar (45/40)."""
+    assert sc.q_liq(_sig([_AAPL_325C, _AAPL_332_5C])) >= 45   # AAPL bull call
+    assert sc.q_liq(_sig([_MSFT_392_5C, _MSFT_405C])) >= 45   # MSFT bull call
+    assert sc.q_liq(_sig([_IWM_294C, _IWM_298C])) >= 45       # IWM bull call
+    assert sc.q_liq(_sig([_MSFT_395C])) >= 40                 # MSFT long call
+
+
+def test_liquidity_gate_passes_for_real_liquid_equity_structures():
+    """The hard gate must not report 'liquidity' for genuinely liquid markets."""
+    for legs in ([_AAPL_325C, _AAPL_332_5C],
+                 [_MSFT_392_5C, _MSFT_405C],
+                 [_IWM_294C, _IWM_298C]):
+        reasons = sc.evaluate_gates(_sig(legs))["reasons"]
+        assert "liquidity" not in reasons, (legs, reasons)
+
+
+def test_genuinely_wide_market_still_fails_the_liquidity_gate():
+    """Discrimination: a 27%-wide ZM market is NOT fillable and must still fail."""
+    reasons = sc.evaluate_gates(_sig([_ZM_91C, _ZM_94C]))["reasons"]
+    assert "liquidity" in reasons
+
+
+def test_one_tick_wide_market_scores_top_regardless_of_cheap_mark():
+    """A market cannot be tighter than the tick; a cheap option must not be
+    penalized for the tick floor eating a large % of its premium."""
+    penny_wide_cheap = {"bid": 0.09, "ask": 0.10, "mark": 0.095}   # 1 tick = 10.5% of mark
+    assert sc.q_liq(_sig([penny_wide_cheap])) >= 95
+
+
+def test_index_penny_markets_do_not_regress():
+    """SPY (what the band was calibrated on) must stay top-scored."""
+    assert sc.q_liq(_sig([_SPY_750C, _SPY_756C])) >= 80

@@ -406,15 +406,75 @@ def q_pop(signal):
     return _clamp(pop)
 
 
-def q_liq(signal):
-    """Average leg liquidity via scoring.norm_liquidity (0-100).
+#############################################
+# Tick-aware liquidity
+#############################################
 
-    Legs may lack bid/ask -> norm_liquidity returns 50. Lazy-imports scoring to
-    avoid binding sys.modules['scoring'] at module-import time (the cross-app
-    collision documented in the root CLAUDE.md).
+# Standard US option quoting increments: $0.05 at/above $3.00, $0.01 below
+# (penny program). A market can never be tighter than ONE TICK, so a pure
+# percent-of-mark metric structurally penalizes CHEAP options for the tick's
+# mere existence (a one-tick market on a $0.10 option is 10% of mark).
+TICK_BREAK = 3.00
+TICK_LARGE = 0.05
+TICK_SMALL = 0.01
+
+# Percent-of-mark band, WIDENED from scoring.norm_liquidity's 1%/5%. That band
+# was calibrated on the flat scanner's index universe ($SPX/SPY/QQQ — penny-wide
+# markets on high marks); ordinary equity options quote their liquid markets at
+# ~3-7% of mark, so a hard zero at 5% cannot rank them at all.
+LIQ_PCT_BEST, LIQ_PCT_WORST = 2.0, 12.0
+# Tick band: <=2 ticks is about as tight as a market realistically gets;
+# >=20 ticks is a market you should not be crossing.
+LIQ_TICKS_BEST, LIQ_TICKS_WORST = 2.0, 20.0
+
+
+def tick_size(mark):
+    """Standard quoting increment for an option trading at ``mark``."""
+    return TICK_LARGE if (mark or 0) >= TICK_BREAK else TICK_SMALL
+
+
+def _band(value, best, worst):
+    """100 at <=best, 0 at >=worst, linear in between."""
+    if value <= best:
+        return 100.0
+    if value >= worst:
+        return 0.0
+    return (worst - value) / (worst - best) * 100.0
+
+
+def norm_liquidity_ticks(bid, ask, mark):
+    """Tick-aware bid/ask spread liquidity (0-100).
+
+    Scores the spread on TWO scales and takes the more forgiving:
+      * percent-of-mark — the meaningful measure for expensive contracts;
+      * spread in quoting TICKS — the meaningful measure for cheap contracts,
+        which percent-of-mark zeroes out purely because the tick floor is a
+        large fraction of a small premium.
+
+    Deliberately NOT a change to ``scoring.norm_liquidity``: that function is
+    shared with the flat scanner's ``calc_composite_score``, which the autonomous
+    driver sizes (paper) trades from — recalibrating it there would silently
+    shift driver ranking. Keeping this local confines the fix to the Swing
+    Scanner.
+
+    Missing bid/ask/mark -> 50.0 (neutral), matching norm_liquidity's contract
+    so absent data never false-fails the gate.
     """
-    import scoring  # lazy — see docstring
+    if not mark or mark <= 0 or bid is None or ask is None:
+        return 50.0
+    spread = ask - bid
+    if spread <= 0:
+        return 100.0
+    pct_score = _band(spread / mark * 100.0, LIQ_PCT_BEST, LIQ_PCT_WORST)
+    tick_score = _band(spread / tick_size(mark), LIQ_TICKS_BEST, LIQ_TICKS_WORST)
+    return _clamp(max(pct_score, tick_score))
 
+
+def q_liq(signal):
+    """Average leg liquidity via the tick-aware normalizer (0-100).
+
+    Legs may lack bid/ask -> norm_liquidity_ticks returns a neutral 50.
+    """
     legs = signal.get("legs")
     if not isinstance(legs, (list, tuple)) or not legs:
         return 50.0
@@ -424,7 +484,7 @@ def q_liq(signal):
         if not isinstance(leg, dict):
             vals.append(50.0)
             continue
-        vals.append(scoring.norm_liquidity(leg.get("bid"), leg.get("ask"), leg.get("mark")))
+        vals.append(norm_liquidity_ticks(leg.get("bid"), leg.get("ask"), leg.get("mark")))
     return sum(vals) / len(vals) if vals else 50.0
 
 
