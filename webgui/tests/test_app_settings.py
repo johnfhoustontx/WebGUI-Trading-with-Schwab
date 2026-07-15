@@ -55,8 +55,5 @@ def test_get_unknown_key_returns_none(tmp_path, monkeypatch):
 
 
 def test_nav_pinned_defaults_to_off():
-    """Pinning the nav drawer open is opt-in; the hover rail is the default.
-
-    Nothing reads this key yet; the drawer wiring lands in a later task.
-    """
+    """Pinning the nav drawer open is opt-in; the hover rail is the default."""
     assert app_settings.DEFAULTS["nav_pinned"] is False

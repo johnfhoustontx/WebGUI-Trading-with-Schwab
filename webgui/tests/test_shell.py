@@ -53,15 +53,20 @@ def test_cached_health_memoizes_within_ttl(monkeypatch):
     assert calls["n"] == 2
 
 
-def test_nav_css_has_no_reachable_rules():
-    """Phase 1: nav-link/nav-title/nav-icon/nav-badge styling moved to .classes();
-    _NAV_CSS keeps only Quasar-internal selectors. The 2026-07-11 nav redesign
-    replaced the expandable sub-menus with the top tab strip, so the expansion
-    rules are gone and the compact-tabs rule (small tab padding) is in."""
+def test_nav_css_carries_only_what_tailwind_cannot_express():
+    """The nav's layout/typography lives in ``.classes()`` (Tailwind-first). What
+    stays in _NAV_CSS is only what a utility class genuinely CANNOT express:
+    ancestor-state selectors (the rail's :hover/:focus-within/.nav-pinned label
+    fade), rgba washes (the JIT won't emit rgba arbitraries), and Quasar-internal
+    or teleported DOM (.q-tab, .q-tooltip).
+
+    So this guard is deliberately NOT "no .nav-* selector may appear" — _NAV_CSS
+    legitimately styles .nav-label/.nav-title/.nav-icon under exactly those
+    ancestor-state and rgba rules. It bans the things that DID move out and must
+    not creep back, and pins the Quasar-internal rules that must stay."""
     import main
     css = main._NAV_CSS
     assert "a.nav-link:hover" not in css           # moved to hover:bg-* utility
-    assert ".nav-title {" not in css and ".nav-title{" not in css
     assert ".help-fab {" not in css and ".help-fab{" not in css  # position moved
     assert ".nicegui-expansion-content" not in css  # no expandable sub-menus anymore
     assert ".compact-tabs .q-tab" in css           # small-padding tab strips
@@ -342,12 +347,12 @@ def test_reimporting_main_after_startup_does_not_raise():
 
 
 def test_drawer_icons_are_present_and_distinct():
-    """The drawer is becoming a 64px icon rail (hover-to-expand) whose collapsed
-    state shows ONLY icons — so each drawer item needs a non-empty, distinct icon.
-    ``_nav_link``/``_nav_group_link`` now render the ``icon`` arg (the dot is
-    retired), but the rail CSS that collapses the labels lands in a later task.
-    Scope is the 7 drawer items (3 groups + FLAT_NAV); child-page icons are not
-    rail affordances (the tab strip renders labels only)."""
+    """The drawer is a 64px icon rail (hover-to-expand) whose collapsed state shows
+    ONLY icons (_NAV_CSS fades the labels to opacity:0) — so each drawer item needs
+    a non-empty, distinct icon. ``_nav_link``/``_nav_group_link`` render the
+    ``icon`` arg; the dot is retired. Scope is the 7 drawer items (3 groups +
+    FLAT_NAV); child-page icons are not rail affordances (the tab strip renders
+    labels only)."""
     from collections import Counter
 
     import main
@@ -387,6 +392,40 @@ def test_hamburger_pins_instead_of_toggling_the_drawer():
     assert "_toggle_pin" in src
     assert "drawer_width(" in src, "the drawer's width comes from the pin state"
     assert 'app_settings.set("nav_pinned"' in inspect.getsource(main._toggle_pin)
+
+
+def test_toggle_pin_flips_the_width_prop_the_class_and_the_setting(monkeypatch):
+    """The BEHAVIOR the rail CSS depends on, not just its source text.
+
+    test_nav_rail_css_widens_the_aside_not_the_content_div pins the CSS's premise
+    — that .nav-pinned sits on the SAME element as .nav-drawer (the content div),
+    so `.q-drawer:has(> .nav-drawer:not(.nav-pinned))` can opt the pinned drawer
+    out of the hover rule. Nothing pinned that _toggle_pin actually puts it there:
+    move the class to another element and the rail silently stops responding to
+    the pin with a green suite. This closes that gap, and pins the persistence.
+
+    NOTE: Quasar props serialize to STRINGS, so the width compares against
+    str(NAV_WIDTH_*), not the int."""
+    from nicegui import ui
+
+    import main
+
+    saved = {}
+    monkeypatch.setattr(main.app_settings, "get", lambda k: saved.get(k, False))
+    monkeypatch.setattr(main.app_settings, "set", saved.__setitem__)
+
+    drawer = ui.element("div").classes("nav-drawer")
+
+    main._toggle_pin(drawer)
+    assert saved["nav_pinned"] is True, "the pin must persist — it's a preference"
+    assert drawer._props["width"] == str(main.NAV_WIDTH_OPEN)
+    # Same element as .nav-drawer — the :has(> .nav-drawer:not(.nav-pinned)) premise.
+    assert "nav-pinned" in drawer.classes and "nav-drawer" in drawer.classes
+
+    main._toggle_pin(drawer)
+    assert saved["nav_pinned"] is False
+    assert drawer._props["width"] == str(main.NAV_WIDTH_RAIL)
+    assert "nav-pinned" not in drawer.classes
 
 
 def test_the_retired_dot_is_gone_for_good():
