@@ -90,12 +90,20 @@ small     = "11px"             # eyebrows / captions / status lines
 
 [menu]                         # ── application menu (header bar + left nav) ─
 # Deep Slate shell (Phase 2): dark header + rail with a blue accent on the active
-# pill/tab. accent drives ui.colors(primary) (pill/tab fills + Quasar controls);
-# header_bg keeps the top bar dark, decoupled from accent (a small code change in
-# theme.py/build_nav_css). Every knob "" = keep the stock look.
-accent    = "#6b86ff"          # active pill/tab + Quasar-primary controls (blue accent)
+# pill/tab. Every knob "" = keep the stock look.
+#
+# READ THIS BEFORE CHANGING `accent`: it feeds ui.colors(primary=…) and therefore
+# reaches ONLY Quasar-colored controls (switches, sliders, color=primary buttons).
+# It does NOT recolor the header bar (decoupled via header_bg below), and it does
+# NOT recolor the active nav pill, the tab-strip fills, or the active nav icon —
+# those are HARDCODED rgba/hex in main._NAV_CSS, because the bundled Tailwind JIT
+# won't reliably emit var()/rgba() arbitraries, so they can't ride --q-primary.
+# The lie is invisible today only because #6b86ff == rgb(107,134,255), the value
+# hardcoded there: the knob LOOKS like it drives the pill/tab/icon until you
+# change it and they silently stay blue. To move them, edit main._NAV_CSS too.
+accent    = "#6b86ff"          # Quasar-primary controls ONLY (switches/sliders/buttons)
 header_bg = "#111731"          # top header bar background (dark — decoupled from accent)
 drawer_bg = "#0a0e1c"          # left nav rail background
-text      = "#98a1c0"          # menu item text + dots (inactive tone; active → light)
+text      = "#98a1c0"          # menu item text + icons (inactive tone; active → light)
 hover_bg  = "rgba(107,134,255,0.08)"  # menu item hover wash
 title     = "#565f7d"          # the "WORKSPACE" drawer caption

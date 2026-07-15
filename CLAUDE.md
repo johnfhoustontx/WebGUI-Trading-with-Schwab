@@ -1718,8 +1718,11 @@ deleted** (Phase 4) — `theme.py` = tokens + `QUASAR_INTERNAL_CSS`. **This sect
   plus **`[typography]`** (app-wide font family + text-category sizes:
   titles/.text-h6 · subtitles/.text-subtitle1 · sections/.text-subtitle2 · body ·
   small/.text-xs+EYEBROW → `build_typography_css`, injected app-wide by
-  `main._layout`) and **`[menu]`** (the application menu: `accent` recolors the
-  header bar + active nav pill via `ui.colors(primary=…)`; `drawer_bg`/`text`/
+  `main._layout`) and **`[menu]`** (the application menu: `accent` → `ui.colors(
+  primary=…)`, which reaches **only Quasar-colored controls** — switches, sliders,
+  `color=primary` buttons — **NOT** the header bar (decoupled via `header_bg`) and
+  **NOT** the active nav pill / tab fills / icon accent (hardcoded rgba in
+  `main._NAV_CSS` — see the JIT gotcha below); `drawer_bg`/`text`/
   `hover_bg`/`title` emit override CSS via `build_nav_css` — every `[menu]` knob
   defaults `""` = stock look, no rule emitted) — is loaded ONCE at webgui startup
   (`theme.load_theme()` → `build_tokens`/`build_quasar_css`; missing
@@ -1728,10 +1731,12 @@ deleted** (Phase 4) — `theme.py` = tokens + `QUASAR_INTERNAL_CSS`. **This sect
   per-chart Highcharts colorscales (e.g. the Gamma heatmap), data-driven
   table-cell zone maps (score/heat/P&L), and the standalone EOD/Analyze report
   documents. **JIT gotcha (2026-07-09):** the bundled Tailwind browser JIT does
-  NOT reliably generate arbitrary classes containing `var(...)` (plain-hex
-  arbitraries are fine) — the nav pill's old `bg-[var(--q-primary)]` silently
-  produced no rule; it is now the plain `.nav-active` rule in `_NAV_CSS`
-  (`background: var(--q-primary)`), which also follows the `accent` knob.
+  NOT reliably generate arbitrary classes containing `var(...)` **or `rgba(...)`**
+  (plain-hex arbitraries are fine) — the nav pill's old `bg-[var(--q-primary)]`
+  silently produced no rule; it is now a plain `.nav-active` rule in `_NAV_CSS`
+  with a **hardcoded rgba wash**, so it does **not** follow the `accent` knob (nor
+  do the tab-strip fills or the active icon accent). Changing `accent` moves the
+  Quasar controls only; to move the nav accents, edit `main._NAV_CSS` as well.
 - **Apply to a new page:**
   ```python
   from pages.options.theme import QUASAR_INTERNAL_CSS, PAGE, CARD, EYEBROW, LABEL, BTN_PRIMARY

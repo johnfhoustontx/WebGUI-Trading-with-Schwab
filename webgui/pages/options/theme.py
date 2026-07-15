@@ -112,7 +112,10 @@ _DEFAULTS = {
     "menu": {
         # Application menu (header bar + left nav drawer). Every knob defaults
         # "" = keep the stock Quasar look; a value emits an override.
-        "accent": "",     # selected pill / tab + Quasar-primary controls (ui.colors)
+        # accent → ui.colors(primary) = Quasar-colored CONTROLS ONLY (switches,
+        # sliders, color=primary buttons). NOT the header (header_bg) and NOT the
+        # nav pill / tab fills / icon accent (hardcoded rgba in main._NAV_CSS).
+        "accent": "",
         "header_bg": "",  # top header bar background (decoupled from accent)
         "drawer_bg": "",  # menu panel background
         "text": "",       # menu item text + icons
@@ -451,8 +454,8 @@ def build_nav_css(theme):
     rules = []
     if m.get("header_bg"):
         # The header bar is DECOUPLED from the accent: accent (ui.colors primary)
-        # drives the active pill/tab + Quasar controls, while header_bg keeps the
-        # top bar dark (else a blue accent would paint the whole header blue).
+        # drives Quasar controls, while header_bg keeps the top bar dark (else a
+        # blue accent would paint the whole header blue).
         rules.append(f".q-header{{background:{m['header_bg']}!important;}}")
     if m["drawer_bg"]:
         rules.append(f".nav-drawer{{background:{m['drawer_bg']}!important;}}")

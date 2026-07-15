@@ -507,9 +507,10 @@ _NAV_CSS = """
 .nav-drawer { gap: 2px; }
 /* Active nav item pill — the "Deep Slate" look: a SUBTLE navy tint (not a solid
    accent fill), paired with the item's own icon, which carries the active state
-   (see the .nav-active .nav-icon accent below). Decoupled from --q-primary on
-   purpose (accent drives the tab fills, the pill stays a soft wash). A plain CSS
-   rule (the bundled JIT doesn't emit rgba arbitraries). */
+   (see the .nav-active .nav-icon accent below). This wash and the .compact-tabs
+   fill below are both HARDCODED rgba here — neither rides [menu].accent /
+   --q-primary, because the bundled JIT emits neither var() nor rgba()
+   arbitraries reliably. Change the accent knob and these do NOT follow. */
 .nav-drawer .nav-active { background: rgba(107,134,255,0.13); }
 .nav-drawer .nav-active .nav-label { color: #eef1f6; font-weight: 600; }
 .nav-drawer .q-item { border-radius: 10px; }
@@ -546,11 +547,9 @@ _NAV_CSS = """
    ~40px from the drawer's left edge, well inside the rail. */
 .nav-drawer { overflow-x: hidden; }
 /* Labels + the group title clip (not wrap) in the rail and fade in as it opens.
-   Selector order is deliberate: the title class is never the token immediately
-   before a brace, so the test_nav_css_has_no_reachable_rules guard (which bans a
-   standalone rule for it — that styling lives in .classes()) still holds. Only
-   the rail's fade lives here: it keys off an ANCESTOR's hover/focus state, which
-   no Tailwind utility can express. */
+   Only the rail's fade lives here: it keys off an ANCESTOR's hover/focus/pinned
+   state, which no Tailwind utility can express (the rest of the nav's typography
+   is in .classes()). */
 .nav-drawer .nav-label { white-space: nowrap; }
 .nav-drawer .nav-title, .nav-drawer .nav-label {
     opacity: 0; transition: opacity .14s ease; }
@@ -776,7 +775,10 @@ def _count_badge(n: int) -> ui.badge:
     """A red count badge floating on its parent's top-right corner, hidden at 0.
 
     The drawer rail and the tab strip both mount one; the 2s watcher then keeps it
-    current via ``_set_badge``. The parent must be ``relative`` (see ``_nav_icon``)."""
+    current via ``_set_badge``. ``floating`` is position:absolute, so the parent
+    must be POSITIONED: the rail's wrapper is explicitly ``relative`` (see
+    ``_nav_icon``), while the tab-strip call site relies on Quasar's ``.q-tab``
+    already being position:relative."""
     badge = ui.badge(str(n) if n else "").props("color=red rounded floating")
     badge.set_visibility(bool(n))
     return badge
@@ -855,7 +857,10 @@ def _toggle_pin(drawer) -> None:
     pinned = not app_settings.get("nav_pinned")
     app_settings.set("nav_pinned", pinned)
     drawer.props(f"width={drawer_width(pinned)}")
-    drawer.classes(add="nav-pinned") if pinned else drawer.classes(remove="nav-pinned")
+    if pinned:
+        drawer.classes(add="nav-pinned")
+    else:
+        drawer.classes(remove="nav-pinned")
 
 
 @contextmanager
@@ -881,10 +886,12 @@ def _layout(active: str, title: str):
     if theme.NAV_THEME_CSS:
         ui.add_css(theme.NAV_THEME_CSS)
     if theme.MENU_ACCENT:
-        # [menu].accent → the Quasar primary: the active pill/tab fills + Quasar-
-        # colored controls (switches, sliders). The HEADER BAR is kept dark by
-        # [menu].header_bg (build_nav_css), decoupled from the accent — else a blue
-        # accent would paint the whole header blue.
+        # [menu].accent → the Quasar primary, which reaches ONLY Quasar-colored
+        # controls (switches, sliders, color=primary buttons). The HEADER BAR is
+        # kept dark by [menu].header_bg (build_nav_css), decoupled from the accent
+        # — else a blue accent would paint the whole header blue. The active nav
+        # pill / tab fills / icon accent do NOT ride this either: they're hardcoded
+        # rgba in _NAV_CSS (the JIT can't emit var()/rgba() arbitraries).
         ui.colors(primary=theme.MENU_ACCENT)
     # Browser tab: title = the selected menu item; favicon = this page's color.
     ui.page_title(_NAV_LABEL.get(active, "Schwab Trading"))
@@ -898,8 +905,7 @@ def _layout(active: str, title: str):
               .classes("nav-drawer" + (" nav-pinned" if _pinned else ""))
               .props(f"behavior=desktop width={drawer_width(_pinned)}"))
     with drawer:
-        # Deep Slate rail: "WORKSPACE" caption, dot-per-item nav, Session P&L pinned
-        # to the bottom. The h-full flex column lets `mt-auto` push the stat down.
+        # Deep Slate rail: the "WORKSPACE" caption + the icon-per-item nav.
         with ui.column().classes("h-full w-full flex flex-col gap-[2px]"):
             # nav-title = the [menu].title theme hook (build_nav_css sets its color).
             ui.label("WORKSPACE").classes(
