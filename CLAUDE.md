@@ -2542,7 +2542,21 @@ the edge is thin and regime-dependent. Architecture = **offline fit → versione
   [design](docs/plans/2026-06-22-swing-validated-evaluation-design.md) /
   [plan](docs/plans/2026-06-22-swing-validated-evaluation.md).
 
-**Markov 2.0 (Trade page) — DONE (2026-06-21).** A probabilistic, forward-looking
+**Markov 2.0 (Trade page) — CARD REMOVED from the UI (2026-06-28); engine retained.**
+The Markov Forecast card was **deleted** from `/trade`. It forecast the **LEGACY**
+technical composite, so it contradicted the validated Position read (it showed
+"Strong-Bear" while the validated model said BUY on the same 1–8 wk horizon).
+`compute.analyze()` no longer builds the block either — it was a wasted pooled-prior
+rebuild + history fetch per request for a block nobody rendered (pinned by
+`test_analyze_does_not_build_markov_block`). **Retained but unused:** the PURE engine
+(`trade-analyzer/src/analysis/markov.py`, 34 tests), the compute helpers
+(`reconstruct_daily_composite`/`_symbol_band_series`/`build_pooled_prior`/`get_prior`/
+`build_markov_block`), and the additive `markov` contract field. **Reviving it against
+the VALIDATED composite is NOT a small change:** that composite is a per-date
+CROSS-SECTIONAL score, so a symbol's history is *not* reconstructable live — the OFFLINE
+fit would have to emit per-symbol transition matrices, and non-fit-universe symbols would
+fall back to a generic pooled forecast. The historical description follows.
+A probabilistic, forward-looking
 layer on the `PositionVerdict`: model the composite score as a 5-state Markov chain,
 surface where it's heading, and apply a bounded tilt to the score (the BUY/HOLD/SELL
 label is untouched). Pieces:

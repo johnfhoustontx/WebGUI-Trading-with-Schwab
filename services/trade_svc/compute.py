@@ -564,6 +564,10 @@ _MK_K = 0.5
 _MK_MAX_PTS = 12.0
 
 
+# CURRENTLY UNUSED — analyze() no longer builds a Markov block (the Trade page's
+# Markov Forecast card was removed). Kept (with reconstruct_daily_composite /
+# _symbol_band_series / build_pooled_prior / get_prior and the pure engine) tested
+# and revivable rather than deleted.
 def build_markov_block(band_series, composite_daily_now, composite_full):
     """Markov forecast + tilt for one symbol from its band-index series, or None
     if it can't be built (too few observations / any error)."""
@@ -729,20 +733,11 @@ def analyze(symbol):
         position_verdict = {"verdict": "HOLD", "score": 0, "breakdown": [],
                             "top_reasons": [], "gates_triggered": [f"error: {exc}"]}
 
-    # Markov 2.0 forecast + drift tilt (defensive: failure -> no block, verdict
-    # unchanged). The chain is built from composite_daily (which never contains
-    # the tilt), so adding the tilt to the verdict score cannot feed back.
-    markov_block = None
-    try:
-        _comp_series = reconstruct_daily_composite(daily, spy, sector_hist)
-        _valid = _comp_series.dropna()
-        if not _valid.empty:
-            _bands = _valid.map(_markov.classify_band)
-            markov_block = build_markov_block(
-                _bands, float(_valid.iloc[-1]),
-                float(position_verdict.get("score", 0)))
-    except Exception:
-        markov_block = None
+    # (The Markov 2.0 forecast + drift tilt used to be built here. It is no longer
+    # computed: the Trade page's Markov card was REMOVED, so the block had no
+    # reader — and building it cost a pooled-prior rebuild on every request. The
+    # engine + helpers below remain, so reviving the card is a re-wire, not a
+    # rewrite.)
 
     # Validated swing-model verdict (Phase 3): score this symbol's current factors
     # cross-sectionally against today's cached universe snapshot (falling back to
@@ -803,7 +798,6 @@ def analyze(symbol):
                    "strength": _sector_strength_dict(ss)},
         "position_verdict": position_verdict,
         "investor_verdict": investor_verdict,
-        "markov": markov_block,
         "swing_model": swing_block,
         "fundamentals": _fundamentals_dict(fundamentals),
         "fundamentals_available": fundamentals.is_sufficient(),

@@ -223,102 +223,53 @@ def should_request(symbol, last_requested, since_seconds):
     return s != (last_requested or "") or since_seconds >= 1.0
 
 
-_MK_BAND_COLORS = ["#c0392b", "#e67e22", "#7f8c8d", "#27ae60", "#1e8449"]
-# stacked-area band fill colors (neutral grey lighter than the chip's grey)
-_MK_AREA_COLORS = ["#c0392b", "#e67e22", "#bdc3c7", "#27ae60", "#1e8449"]
-# Parallel Tailwind bg-[…] classes for the band chip background (derived from
-# _MK_BAND_COLORS — kept in lockstep; that hex list is also read by the Highcharts
-# chart, so it stays). Out-of-range falls back to the neutral grey, mirroring
-# markov_band_chip.
-_MK_BAND_BG = [f"bg-[{c}]" for c in _MK_BAND_COLORS]
-# Space-joined set for the reactive remove= when re-tinting the chip in place.
-_MK_BAND_BG_CLASSES = " ".join(_MK_BAND_BG + ["bg-[#7f8c8d]"])
+# Tone → text class for the validated swing TILT (reuses the verdict palette, but the
+# card renders it small/plain rather than a bold BUY — see swing_tilt on why).
+_TONE_TEXT = {"pos": _BUY_TEXT, "neg": _SELL_TEXT, "neutral": _HOLD_TEXT}
 
 
-def markov_band_bg_class(band):
-    """Tailwind bg-[…] class for a Markov band index (neutral grey out of range)."""
-    if 0 <= band < len(_MK_BAND_BG):
-        return _MK_BAND_BG[band]
-    return "bg-[#7f8c8d]"
-# Dark-navy chart styling (matches the dashboard theme the Calculator/Simulator share).
-_MK_AXIS_STYLE = {"color": "#bdbdbd"}
-_MK_GRID_COLOR = "rgba(255,255,255,0.08)"
+def tilt_text_class(tone):
+    """Tailwind text-[…] class for a swing tilt tone (amber neutral default)."""
+    return _TONE_TEXT.get(tone, _HOLD_TEXT)
 
 
-def markov_band_chip(mk):
-    """{'label','color','band'} for the current Markov band, or None when no block.
+def swing_tilt(sm):
+    """``(headline, tone)`` for the validated swing read — a ranked TILT, not a verdict.
 
-    ``band`` is the raw index (for ``markov_band_bg_class`` → the chip's Tailwind
-    background); ``color`` is the hex (kept for any non-page reader)."""
-    if not mk:
-        return None
-    i = mk.get("current_band", 2)
-    labels = mk.get("band_labels") or ["?"] * 5
-    color = _MK_BAND_COLORS[i] if 0 <= i < len(_MK_BAND_COLORS) else "#7f8c8d"
-    label = labels[i] if 0 <= i < len(labels) else "?"
-    return {"label": label, "color": color, "band": i}
-
-
-def markov_metric_rows(mk):
-    """Per-horizon metric rows: horizon / P(buy) / P(sell) / E[score]."""
-    if not mk:
-        return []
-    rows = []
-    for h in mk.get("horizons", []):
-        rows.append({
-            "horizon": _days(h.get('n', '?')),
-            "p_buy": f"{round(h.get('p_buy', 0) * 100)}%",
-            "p_sell": f"{round(h.get('p_sell', 0) * 100)}%",
-            "e_score": f"{h.get('e_score', 0):+.0f}",
-        })
-    return rows
-
-
-def markov_drift_row(mk):
-    """Formatted drift/tilt/confidence/adjusted-score strings, or None."""
-    if not mk:
-        return None
-    return {
-        "drift": f"{mk.get('drift', 0):+.0f}",
-        "tilt": f"{mk.get('tilt', 0):+.0f}",
-        "confidence": f"{round(mk.get('confidence', 0) * 100)}%",
-        "persistence": f"{round(mk.get('persistence', 0) * 100)}%",
-        "adjusted": f"{mk.get('markov_adjusted_score', 0):.0f}",
-    }
-
-
-def position_headline(pv, mk):
-    """Headline score for the Position card: the Markov-adjusted score when a
-    markov block is present (with the base score + tilt exposed for a subtitle),
-    else the plain base score. Does NOT change the BUY/HOLD/SELL verdict label."""
-    base = int(round((pv or {}).get("score", 0)))
-    if not mk:
-        return {"score": base, "base": base, "tilt": ""}
-    adj = int(round(mk.get("markov_adjusted_score", base)))
-    return {"score": adj, "base": base, "tilt": f"{mk.get('tilt', 0):+.0f}"}
+    The measured edge is THIN (top band ≈52% beat-SPY, OOS IC ≈+0.04), so the model's
+    BUY/HOLD/SELL is rendered as a cross-sectional RANK plus a mild directional tilt
+    rather than a trade call — a coin-flip-plus-2% edge shown as a bold green "BUY"
+    invites over-reading. Presentation only: the Tier-2 ``swing_model`` contract still
+    carries BUY/HOLD/SELL."""
+    sm = sm or {}
+    pct = sm.get("percentile")
+    rank = f"{pct}th percentile" if pct is not None else "unranked"
+    v = (sm.get("verdict") or "").upper()
+    if v == "BUY":
+        return f"{rank} · slight bullish tilt", "pos"
+    if v == "SELL":
+        return f"{rank} · slight bearish tilt", "neg"
+    return f"{rank} · no clear edge", "neutral"
 
 
 def swing_headline(sm):
-    """Headline verdict + a calibrated outcome line for the Position card, or None.
+    """Ranked-tilt headline + calibrated outcome line for the Position card, or None.
 
-    The validated swing model's BUY/HOLD/SELL becomes the Position card's primary
-    verdict; the line summarizes the calibrated outcome (band percentile, expected
-    forward EXCESS return vs SPY over the horizon, beat-SPY hit rate). Missing
-    fields are omitted."""
+    ``tilt``/``tone`` are the ranked read (see :func:`swing_tilt`); ``line`` summarizes
+    the calibrated outcome (expected forward EXCESS return vs SPY over the horizon +
+    beat-SPY hit rate). Missing fields are omitted."""
     if not sm:
         return None
     exp = sm.get("expected_fwd")
     hit = sm.get("hit_rate")
     hzn = sm.get("horizon_days", 20)
-    pct = sm.get("percentile")
+    tilt, tone = swing_tilt(sm)
     parts = []
-    if pct is not None:
-        parts.append(f"{pct}th percentile")
     if exp is not None:
         parts.append(f"{exp:+.1%} excess / {_days(hzn)}")
     if hit is not None:
         parts.append(f"{hit:.0%} beat-SPY")
-    return {"verdict": sm.get("verdict", "—"), "line": " · ".join(parts)}
+    return {"tilt": tilt, "tone": tone, "line": " · ".join(parts)}
 
 
 def swing_contrib_rows(sm):
@@ -350,50 +301,24 @@ def swing_model_meta(sm):
             "oos_ic": f"{oos:+.4f}" if isinstance(oos, (int, float)) else "—"}
 
 
-def markov_forecast_figure(mk):
-    """Highcharts stacked-area option dict: band probability over horizon.
+def model_staleness(version, today=None, threshold_days=60):
+    """A staleness nudge for the swing-model artifact, or '' when fresh/unparseable.
 
-    Plots the DENSE near-term trajectory (now/1/2/3/5/10/20d from ``mk['trajectory']``,
-    falling back to the sparse ``mk['horizons']`` when absent) so the score-specific
-    early path is visible — the 10d/20d tail converges to the prior stationary and is
-    near-identical across symbols, which made the chart look the same for every stock.
-    Dark-navy themed (transparent bg, light axes) so it sits on the dashboard navy.
-
-    Tolerates None (returns an empty-but-valid figure with an explicit height so the
-    persistent chart element renders at a stable size before data arrives)."""
-    base = {
-        "accessibility": {"enabled": False},
-        "chart": {"type": "area", "height": 200, "backgroundColor": "transparent"},
-        "title": {"text": None},
-        "credits": {"enabled": False},
-        "legend": {"enabled": True, "itemStyle": {"color": "#cdd8ee"},
-                   "itemHoverStyle": {"color": "#ffffff"}},
-    }
-    if not mk:
-        return {**base, "series": []}
-    labels = mk.get("band_labels") or ["?"] * 5
-    points = mk.get("trajectory") or mk.get("horizons") or []
-    cats = ["now"] + [_days(h["n"]) for h in points]
-    now = [0.0] * 5
-    cb = mk.get("current_band", 2)
-    if 0 <= cb < 5:
-        now[cb] = 1.0
-    dists = [now] + [h["dist"] for h in points]
-    series = [{
-        "name": labels[b] if b < len(labels) else "?",
-        "color": _MK_AREA_COLORS[b],
-        "data": [round(d[b] if b < len(d) else 0.0, 4) for d in dists],
-    } for b in range(5)]
-    return {
-        **base,
-        "xAxis": {"categories": cats, "labels": {"style": _MK_AXIS_STYLE},
-                  "lineColor": _MK_GRID_COLOR, "tickColor": _MK_GRID_COLOR},
-        "yAxis": {"min": 0, "max": 100, "title": {"text": "Band probability", "style": _MK_AXIS_STYLE},
-                  "labels": {"format": "{value}%", "style": _MK_AXIS_STYLE},
-                  "gridLineColor": _MK_GRID_COLOR},
-        "plotOptions": {"area": {"stacking": "percent", "marker": {"enabled": False}}},
-        "series": series,
-    }
+    ``version`` is the fit date (YYYY-MM-DD). Older than ``threshold_days`` → a
+    're-run fit_swing_model.py' warning: the validated edge decays as the market regime
+    drifts from the fit window (esp. the regime-dependent ``low_vol`` sign). A
+    missing/unparseable version → '' (no false warning)."""
+    import datetime as _dt
+    try:
+        fit = _dt.date.fromisoformat(str(version)[:10])
+    except (ValueError, TypeError):
+        return ""
+    today = today or _dt.date.today()
+    age = (today - fit).days
+    if age < threshold_days:
+        return ""
+    return (f"⚠ Model is {age} days old (fit {fit.isoformat()}) — re-run "
+            f"fit_swing_model.py to refresh the weights.")
 
 
 _BREAKDOWN_COLS = [
@@ -436,28 +361,19 @@ def render():
                 .props("no-caps").classes(BTN_PRIMARY)
             status = ui.label("Enter a symbol and click Analyze.").classes(EYEBROW)
 
-        # Layout: a top area (error banner + header), then a single verdict ROW of
-        # three EQUAL-width cards (Position · Investor · Markov Forecast), then a
-        # bottom area (MTF/momentum/sector). results_top/bottom are cleared+rebuilt on
-        # repaint; the verdict row and its three cards are PERSISTENT — the Markov card
-        # holds a Highcharts element that must exist at first render (a chart added
-        # later on a chart-less page fails to resolve `nicegui-highcharts`) and must
-        # not be destroyed by a clear(), so the verdict cards are refilled in place.
-        # items-stretch: the three frames render at EQUAL height (all match the tallest
-        # card, the Markov chart) so the verdict row reads as three even frames.
+        # Layout: a top area (error banner + header), then a verdict ROW of two
+        # EQUAL-width cards (Position · Investor), then a bottom area
+        # (MTF/momentum/sector). results_top/bottom are cleared+rebuilt on repaint; the
+        # verdict row and its cards are PERSISTENT and refilled in place.
+        # items-stretch: both frames render at EQUAL height, so the row reads as even
+        # frames. (The Markov Forecast card was REMOVED: it forecast the LEGACY
+        # momentum score, which contradicted the validated Position read — see swing_tilt.)
         results_top = ui.column().classes("w-full gap-2")
         verdict_row = ui.row().classes("w-full gap-3 items-stretch flex-wrap")
         with verdict_row:
             position_card = ui.card().classes(f"{CARD} flex-1 min-w-[280px]")
             investor_card = ui.card().classes(f"{CARD} flex-1 min-w-[280px]")
-            markov_card = ui.card().classes(f"{CARD} flex-1 min-w-[280px]")
-            with markov_card:
-                ui.label("Markov Forecast · composite-score regime").classes(EYEBROW)
-                markov_head = ui.row().classes("items-center gap-3 flex-wrap")
-                markov_metrics = ui.row().classes("gap-4 flex-wrap")
-                markov_chart = ui.highchart(markov_forecast_figure(None)).classes("w-full")
         verdict_row.set_visibility(False)
-        markov_card.set_visibility(False)
         results_bottom = ui.column().classes("w-full gap-2")
 
     # ── card builders (widgets; pull from the pure transforms above) ──────────
@@ -473,31 +389,26 @@ def render():
                     ui.label(f"${price:,.2f}").classes("text-h6")
                 bias = res.get("bias")
                 if bias:
-                    ui.label(bias).classes(
+                    # Labeled TECHNICAL so it reads as short-term tape CONTEXT, not as a
+                    # competing Position verdict (the validated model is that voice).
+                    ui.label(f"Technical: {bias}").classes(
                         f"text-weight-bold px-2 rounded {bias_text_class(bias)}")
                 vol = res.get("volume")
                 if vol:
                     ui.label(f"Volume {vol:,}").classes("opacity-60 text-sm")
 
-    def _legacy_verdict_body(verdict, mk):
-        # The legacy heuristic verdict body (verdict word + score + Markov-adjusted
-        # headline + reasons + gates + factor-breakdown expander). Rendered inline
-        # when there is no validated swing model, else nested in a collapsed
-        # "Legacy heuristic" expander beneath the swing headline.
-        head = position_headline(verdict, mk) if mk else None
+    def _legacy_verdict_body(verdict):
+        # The legacy heuristic body (verdict word + score + reasons + gates + factor
+        # breakdown). Rendered inline only when there is NO validated swing model; else
+        # nested in a collapsed "Legacy heuristic" expander. It is NOT the page's
+        # Position voice — the validated model is (see swing_tilt).
         with ui.row().classes("items-baseline gap-3"):
             ui.label(verdict.get("verdict", "—")).classes(
                 f"text-h4 text-weight-bold {verdict_text_class(verdict.get('verdict'))}",
                 remove=VERDICT_TEXT_CLASSES)
-            if head and isinstance(verdict.get("score"), int):
-                ui.label(f"score {head['score']:+d}").classes("opacity-70")
-            else:
-                ui.label(f"score {verdict.get('score', 0):+d}"
-                         if isinstance(verdict.get("score"), int)
-                         else "").classes("opacity-70")
-        if head and head["tilt"] and isinstance(verdict.get("score"), int):
-            ui.label(f"base {head['base']:+d} · Markov {head['tilt']}") \
-                .classes("text-xs opacity-60")
+            ui.label(f"score {verdict.get('score', 0):+d}"
+                     if isinstance(verdict.get("score"), int)
+                     else "").classes("opacity-70")
         for r in verdict.get("top_reasons", []):
             ui.label(f"• {humanize_reason(r)}").classes("text-sm opacity-80")
         for g in verdict.get("gates_triggered", []):
@@ -508,23 +419,21 @@ def render():
                 ui.table(columns=_BREAKDOWN_COLS, rows=rows,
                          row_key="factor").classes("w-full").props("dense")
 
-    def _fill_verdict_card(card, title, verdict, mk=None, sm=None):
-        # Refill a PERSISTENT verdict card in place (clear+rebuild its contents) so
-        # it can share the verdict row with the persistent Markov chart card.
-        # When a validated swing model is present (Position card only), it becomes the
-        # PRIMARY verdict — a calibrated headline + a "Why — validated factors"
-        # evidence expander — and the legacy heuristic is tucked into a collapsed
-        # "Legacy heuristic" expander. Without it the card renders exactly as before.
+    def _fill_verdict_card(card, title, verdict, sm=None):
+        # Refill a PERSISTENT verdict card in place (clear+rebuild its contents).
+        # When a validated swing model is present (Position card only) it is the ONLY
+        # Position voice: a ranked TILT + a "Why — validated factors" evidence expander,
+        # with the legacy heuristic tucked into a collapsed "Legacy heuristic" expander.
+        # Without it the card falls back to the legacy body.
         card.clear()
         verdict = verdict or {}
         swing = swing_headline(sm) if sm else None
         with card:
             ui.label(title).classes(EYEBROW)
             if swing:
-                with ui.row().classes("items-baseline gap-3"):
-                    ui.label(swing["verdict"]).classes(
-                        f"text-h4 text-weight-bold {verdict_text_class(swing['verdict'])}",
-                        remove=VERDICT_TEXT_CLASSES)
+                ui.label(swing["tilt"]).classes(
+                    f"text-h6 text-weight-medium {tilt_text_class(swing['tone'])}",
+                    remove=VERDICT_TEXT_CLASSES)
                 if swing["line"]:
                     ui.label(swing["line"]).classes("text-sm opacity-80")
                 contrib = swing_contrib_rows(sm)
@@ -536,10 +445,13 @@ def render():
                     if meta:
                         ui.label(f"model {meta['version']} · OOS IC {meta['oos_ic']}") \
                             .classes("text-xs opacity-60")
+                        stale = model_staleness(meta["version"])
+                        if stale:
+                            ui.label(stale).classes("text-xs text-amber-9 text-weight-medium")
                 with ui.expansion("Legacy heuristic").classes("w-full"):
-                    _legacy_verdict_body(verdict, mk)
+                    _legacy_verdict_body(verdict)
             else:
-                _legacy_verdict_body(verdict, mk)
+                _legacy_verdict_body(verdict)
 
     def _alignment_card(ema):
         ema = ema or {}
@@ -604,11 +516,9 @@ def render():
         has_verdict = bool(res.get("position_verdict") or res.get("investor_verdict"))
         verdict_row.set_visibility(has_verdict)
         if has_verdict:
-            # Three EQUAL-width cards in one row: Position · Investor · Markov.
-            # (The Markov card's own visibility is managed by _update_markov.)
+            # Two EQUAL-width cards in one row: Position · Investor.
             _fill_verdict_card(position_card, "Position · 1–8 weeks",
-                               res.get("position_verdict"), res.get("markov"),
-                               res.get("swing_model"))
+                               res.get("position_verdict"), res.get("swing_model"))
             _fill_verdict_card(investor_card, "Investor · months+",
                                res.get("investor_verdict"))
             with results_bottom:
@@ -623,44 +533,6 @@ def render():
                              "Investor verdict degrades to HOLD on insufficient "
                              "data.").classes("text-xs opacity-60")
 
-    @guard
-    def _update_markov(res):
-        mk = (res or {}).get("markov")
-        if not mk:
-            markov_card.set_visibility(False)
-            return
-        markov_card.set_visibility(True)
-        markov_head.clear()
-        with markov_head:
-            chip = markov_band_chip(mk)
-            if chip:
-                ui.label(chip["label"]).classes(
-                    "text-weight-bold px-2 py-1 rounded text-white "
-                    f"{markov_band_bg_class(chip['band'])}",
-                    remove=_MK_BAND_BG_CLASSES)
-            dr = markov_drift_row(mk)
-            if dr:
-                ui.label(f"drift {dr['drift']} · tilt {dr['tilt']} · confidence "
-                         f"{dr['confidence']} · persistence {dr['persistence']}") \
-                    .classes("text-sm opacity-80")
-                ui.label(f"adjusted score {dr['adjusted']}").classes("text-sm text-weight-medium")
-            pv = mk.get("prior_version")
-            if pv:
-                ui.label(f"prior {pv}").classes("text-xs opacity-50")
-        markov_metrics.clear()
-        with markov_metrics:
-            for r in markov_metric_rows(mk):
-                with ui.column().classes("items-center gap-0"):
-                    ui.label(r["horizon"]).classes("text-xs opacity-60")
-                    ui.label(f"Expected {r['e_score']}").classes("text-h6")
-                    ui.label(f"↑{r['p_buy']} ↓{r['p_sell']}").classes("text-xs opacity-80")
-        markov_chart.options = markov_forecast_figure(mk)
-        markov_chart.update()
-        # reflow after the (possibly previously-hidden) chart is visible so it
-        # doesn't render collapsed (no ResizeObserver in nicegui-highcharts).
-        ui.timer(0.05, lambda: ui.run_javascript(
-            f"getElement({markov_chart.id})?.chart?.reflow()"), once=True)
-
     def _status_for(res):
         if not res:
             return "Enter a symbol and click Analyze."
@@ -668,10 +540,14 @@ def render():
         if res.get("errors"):
             return f"{sym}: {res['errors'][0]}"
         price = res.get("price")
-        pv = (res.get("position_verdict") or {}).get("verdict", "—")
+        # Position follows the VALIDATED model — the SAME voice as the card. (It used to
+        # read the LEGACY position_verdict, so the status line could say "Position SELL"
+        # while the card said BUY.) Legacy is the fallback only when there is no model.
+        sm = res.get("swing_model")
+        pos = swing_tilt(sm)[0] if sm else (res.get("position_verdict") or {}).get("verdict", "—")
         iv = (res.get("investor_verdict") or {}).get("verdict", "—")
         px = f" · ${price:,.2f}" if price is not None else ""
-        return f"{sym}{px} · Position {pv} / Investor {iv}"
+        return f"{sym}{px} · Position {pos} / Investor {iv}"
 
     # ── command enqueue ───────────────────────────────────────────────────────
     @guard
@@ -703,12 +579,10 @@ def render():
         state["ver"] = version
         state["result"] = bus_client.read("trade:analysis") or None
         _render_results()
-        _update_markov(state["result"])
         status.text = _status_for(state["result"])
 
     # Initial paint (graceful-empty when the service is cold / no prior analysis).
     # The cache was already read up-front (to seed the symbol field), so just paint.
     _render_results()
-    _update_markov(state["result"])
     status.text = _status_for(state["result"])
     ui.timer(2.0, _poll)

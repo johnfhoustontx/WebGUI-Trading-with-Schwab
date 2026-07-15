@@ -140,8 +140,6 @@ def test_analyze_attaches_swing_model(monkeypatch):
     monkeypatch.setattr(compute, "get_universe_snapshot",
                         lambda: {"mom_12_1": [0.0, 0.1, 0.2, 0.3, 0.4, 0.5],
                                  "low_vol": [-0.05, -0.04, -0.03, -0.02, -0.01, 0.0]})
-    # Markov prior is hit too; pin it so this stays offline.
-    monkeypatch.setattr(compute, "get_prior", lambda: (np.full((5, 5), 0.2), "test"))
 
     result = compute.analyze("AAPL")
     assert result is not None
@@ -155,14 +153,36 @@ def test_analyze_attaches_swing_model(monkeypatch):
 
 
 def test_analyze_swing_model_none_without_artifact(monkeypatch):
-    # No artifact -> swing_model None, analyze() otherwise intact (markov etc.).
+    # No artifact -> swing_model None, analyze() otherwise intact.
     from services import _proxy
     monkeypatch.setattr(_proxy, "schwab_client", _FakeClient())
     from services.trade_svc import swing_model as _swing
     monkeypatch.setattr(_swing, "load_artifact", lambda: None)
-    monkeypatch.setattr(compute, "get_prior", lambda: (np.full((5, 5), 0.2), "test"))
 
     result = compute.analyze("AAPL")
     assert result is not None
     assert result["swing_model"] is None
     assert result["errors"] == []  # analyze still succeeded
+
+
+def test_analyze_does_not_build_markov_block(monkeypatch):
+    # The Trade page's Markov card was removed, so analyze() must not spend a
+    # pooled-prior rebuild (+ its universe-wide history fetch) on a block nobody
+    # reads. Guards the CALL PATH, not just the absent key: analyze()'s broad
+    # try/except would swallow a raising stub, so count the calls instead.
+    from services import _proxy
+    monkeypatch.setattr(_proxy, "schwab_client", _FakeClient())
+    from services.trade_svc import swing_model as _swing
+    monkeypatch.setattr(_swing, "load_artifact", lambda: None)
+    calls = {"n": 0}
+
+    def _counting_prior():
+        calls["n"] += 1
+        return np.full((5, 5), 0.2), "test"
+
+    monkeypatch.setattr(compute, "get_prior", _counting_prior)
+
+    result = compute.analyze("AAPL")
+    assert result is not None
+    assert not result.get("markov")  # key absent (contract default -> None)
+    assert calls["n"] == 0           # no prior rebuild on the request path

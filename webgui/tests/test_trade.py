@@ -22,21 +22,6 @@ def test_bias_text_class_maps_states():
     assert trade.bias_text_class("") == "text-[#f9a825]"
 
 
-def test_markov_band_bg_class_maps_5_bands():
-    # one assertion per band edge — exact hexes from _MK_BAND_COLORS
-    assert trade.markov_band_bg_class(0) == "bg-[#c0392b]"
-    assert trade.markov_band_bg_class(1) == "bg-[#e67e22]"
-    assert trade.markov_band_bg_class(2) == "bg-[#7f8c8d]"
-    assert trade.markov_band_bg_class(3) == "bg-[#27ae60]"
-    assert trade.markov_band_bg_class(4) == "bg-[#1e8449]"
-
-
-def test_markov_band_bg_class_out_of_range():
-    # mirrors markov_band_chip's neutral fallback (#7f8c8d).
-    assert trade.markov_band_bg_class(9) == "bg-[#7f8c8d]"
-    assert trade.markov_band_bg_class(-1) == "bg-[#7f8c8d]"
-
-
 def test_momentum_rows_formats_and_handles_missing():
     rows = trade.momentum_rows({"rsi": 55.0, "adx": 22.4, "macd_hist": 0.4321,
                                 "vwap": 211.0, "relative_volume": 1.34})
@@ -120,105 +105,6 @@ def test_render_is_callable():
     assert callable(trade.render)
 
 
-_MK = {
-    "current_band": 3, "band_labels": ["Strong-Bear", "Weak-Bear", "Neutral",
-                                       "Weak-Bull", "Strong-Bull"],
-    "transition_row": [0.05, 0.1, 0.2, 0.45, 0.2], "persistence": 0.45,
-    "horizons": [
-        {"n": 5, "dist": [0.05, 0.1, 0.2, 0.4, 0.25], "p_buy": 0.25, "p_sell": 0.05, "e_score": 22.0},
-        {"n": 10, "dist": [0.05, 0.1, 0.15, 0.4, 0.3], "p_buy": 0.30, "p_sell": 0.05, "e_score": 28.0},
-        {"n": 20, "dist": [0.05, 0.1, 0.15, 0.35, 0.35], "p_buy": 0.35, "p_sell": 0.05, "e_score": 32.0},
-    ],
-    "drift": 8.0, "tilt": 6.0, "confidence": 0.7,
-    "markov_adjusted_score": 44.0, "composite_daily": 24.0, "prior_version": "2026-06-21",
-}
-
-
-def test_markov_band_chip():
-    assert trade.markov_band_chip(_MK)["label"] == "Weak-Bull"
-
-
-def test_markov_metric_rows():
-    rows = trade.markov_metric_rows(_MK)
-    r10 = next(r for r in rows if r["horizon"] == "10 days")
-    assert r10["p_buy"] == "30%"
-
-
-def test_markov_drift_row():
-    r = trade.markov_drift_row(_MK)
-    assert "+6" in r["tilt"] and "44" in r["adjusted"]
-    assert r["persistence"] == "45%"
-
-
-def test_markov_forecast_figure_shape():
-    fig = trade.markov_forecast_figure(_MK)
-    assert fig["chart"]["type"] == "area"
-    assert len(fig["series"]) == 5
-
-
-def test_markov_builders_tolerate_none():
-    assert trade.markov_band_chip(None) is None
-    assert trade.markov_metric_rows(None) == []
-    assert trade.markov_drift_row(None) is None
-    assert trade.markov_forecast_figure(None)["series"] == []
-
-
-def test_markov_empty_horizons():
-    mk = {"current_band": 2, "band_labels": ["a", "b", "c", "d", "e"], "horizons": []}
-    assert trade.markov_metric_rows(mk) == []
-    fig = trade.markov_forecast_figure(mk)
-    assert fig["xAxis"]["categories"] == ["now"]
-    assert all(len(s["data"]) == 1 for s in fig["series"])
-
-
-def test_markov_band_out_of_range():
-    chip = trade.markov_band_chip({"current_band": 9,
-                                   "band_labels": ["a", "b", "c", "d", "e"]})
-    assert chip["label"] == "?"
-
-
-def test_markov_figure_category_data_alignment():
-    fig = trade.markov_forecast_figure(_MK)  # _MK is the existing fixture in this file
-    assert fig["xAxis"]["categories"] == ["now", "5 days", "10 days", "20 days"]
-    assert len(fig["series"]) == 5
-    assert all(len(s["data"]) == 4 for s in fig["series"])
-
-
-def test_position_headline_prefers_markov():
-    pv = {"verdict": "HOLD", "score": 38}
-    mk = {"markov_adjusted_score": 44.0, "tilt": 6.0}
-    head = trade.position_headline(pv, mk)
-    assert head["score"] == 44 and head["base"] == 38 and "+6" in head["tilt"]
-
-
-def test_position_headline_no_markov():
-    head = trade.position_headline({"verdict": "BUY", "score": 41}, None)
-    assert head["score"] == 41 and head["base"] == 41 and head["tilt"] == ""
-
-
-def test_markov_figure_uses_dense_trajectory():
-    mk = dict(_MK, trajectory=[
-        {"n": 1, "dist": [0.00, 0.00, 0.10, 0.60, 0.30]},
-        {"n": 2, "dist": [0.00, 0.05, 0.15, 0.50, 0.30]},
-        {"n": 3, "dist": [0.05, 0.05, 0.20, 0.45, 0.25]},
-        {"n": 5, "dist": [0.05, 0.10, 0.20, 0.40, 0.25]},
-        {"n": 10, "dist": [0.05, 0.10, 0.15, 0.40, 0.30]},
-        {"n": 20, "dist": [0.05, 0.10, 0.15, 0.35, 0.35]},
-    ])
-    fig = trade.markov_forecast_figure(mk)
-    assert fig["xAxis"]["categories"] == ["now", "1 day", "2 days", "3 days",
-                                          "5 days", "10 days", "20 days"]
-    assert all(len(s["data"]) == 7 for s in fig["series"])
-    assert fig["chart"]["backgroundColor"] == "transparent"  # dark theme
-
-
-def test_markov_figure_falls_back_to_horizons_without_trajectory():
-    # Back-compat: an older block with only `horizons` still renders 5/10/20.
-    fig = trade.markov_forecast_figure(_MK)
-    assert fig["xAxis"]["categories"] == ["now", "5 days", "10 days", "20 days"]
-    assert all(len(s["data"]) == 4 for s in fig["series"])
-
-
 def test_seed_symbol():
     assert trade.seed_symbol({"symbol": "TSLA"}) == "TSLA"
     assert trade.seed_symbol(None) == "AAPL"
@@ -250,19 +136,49 @@ _SM = {
 }
 
 
-def test_swing_headline_verdict_and_line():
+def test_swing_tilt_maps_verdict_to_ranked_tilt():
+    # The validated model's BUY/SELL/HOLD renders as a cross-sectional RANK plus a
+    # mild directional tilt — never a bold trade call (the measured edge is thin).
+    assert trade.swing_tilt(_SM) == ("90th percentile · slight bullish tilt", "pos")
+    assert trade.swing_tilt({"verdict": "SELL", "percentile": 8}) == (
+        "8th percentile · slight bearish tilt", "neg")
+    assert trade.swing_tilt({"verdict": "HOLD", "percentile": 50}) == (
+        "50th percentile · no clear edge", "neutral")
+    # lowercase verdicts normalize the same way
+    assert trade.swing_tilt({"verdict": "buy", "percentile": 90})[1] == "pos"
+
+
+def test_swing_tilt_unranked_without_percentile():
+    # A missing percentile degrades to "unranked" — the tilt still reads.
+    assert trade.swing_tilt({"verdict": "BUY"}) == ("unranked · slight bullish tilt", "pos")
+    assert trade.swing_tilt({}) == ("unranked · no clear edge", "neutral")
+    assert trade.swing_tilt(None) == ("unranked · no clear edge", "neutral")
+
+
+def test_tilt_text_class_maps_tones():
+    assert trade.tilt_text_class("pos") == "text-[#2e7d32]"
+    assert trade.tilt_text_class("neg") == "text-[#c62828]"
+    assert trade.tilt_text_class("neutral") == "text-[#f9a825]"
+    assert trade.tilt_text_class("nonsense") == "text-[#f9a825]"  # default amber
+    assert trade.tilt_text_class(None) == "text-[#f9a825]"
+
+
+def test_swing_headline_tilt_and_line():
     head = trade.swing_headline(_SM)
-    assert head["verdict"] == "BUY"
-    assert "90th percentile" in head["line"]
+    # the percentile lives in `tilt` (the ranked read), NOT in `line`
+    assert head["tilt"] == "90th percentile · slight bullish tilt"
+    assert head["tone"] == "pos"
     assert "+1.4% excess / 20 days" in head["line"]
     assert "52% beat-SPY" in head["line"]
 
 
 def test_swing_headline_partial_fields():
-    # Missing optional fields are simply omitted from the line (no crash).
+    # Missing optional fields are simply omitted from the line (no crash); the
+    # ranked tilt still renders.
     head = trade.swing_headline({"verdict": "HOLD", "percentile": 50})
-    assert head["verdict"] == "HOLD"
-    assert head["line"] == "50th percentile"
+    assert head["tilt"] == "50th percentile · no clear edge"
+    assert head["tone"] == "neutral"
+    assert head["line"] == ""
 
 
 def test_swing_headline_none_tolerant():
@@ -301,19 +217,20 @@ def test_swing_model_meta_none_tolerant():
     assert trade.swing_model_meta(None) is None
 
 
-def test_markov_figure_differs_by_current_band():
-    # Regression guard for "looks the same regardless of score": a bullish vs a
-    # bearish near-term trajectory must produce different early series data.
-    labels = _MK["band_labels"]
-    bull = trade.markov_forecast_figure(
-        {"current_band": 4, "band_labels": labels,
-         "trajectory": [{"n": 1, "dist": [0.0, 0.0, 0.1, 0.3, 0.6]}]})
-    bear = trade.markov_forecast_figure(
-        {"current_band": 0, "band_labels": labels,
-         "trajectory": [{"n": 1, "dist": [0.6, 0.3, 0.1, 0.0, 0.0]}]})
-    assert bull["series"][4]["data"][0] == 1.0   # now one-hot at band 4 (Strong-Bull)
-    assert bear["series"][0]["data"][0] == 1.0   # now one-hot at band 0 (Strong-Bear)
-    assert bull["series"][4]["data"] != bear["series"][4]["data"]
+def test_model_staleness_warns_when_old():
+    import datetime as dt
+    today = dt.date(2026, 9, 1)
+    # 2026-06-28 fit is 65 days before 2026-09-01 → stale
+    warn = trade.model_staleness("2026-06-28", today=today, threshold_days=60)
+    assert "65 days old" in warn and "fit_swing_model.py" in warn
+
+
+def test_model_staleness_silent_when_fresh_or_unparseable():
+    import datetime as dt
+    today = dt.date(2026, 7, 10)
+    assert trade.model_staleness("2026-06-28", today=today, threshold_days=60) == ""  # 12 days
+    assert trade.model_staleness("?", today=today) == ""       # unparseable → no false warn
+    assert trade.model_staleness(None, today=today) == ""
 
 
 def test_days_whole_words():
