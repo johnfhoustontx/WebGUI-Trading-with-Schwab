@@ -513,6 +513,37 @@ _NAV_CSS = """
 .nav-drawer .nav-active { background: rgba(107,134,255,0.13); }
 .nav-drawer .nav-active .nav-label { color: #eef1f6; font-weight: 600; }
 .nav-drawer .q-item { border-radius: 10px; }
+/* ── Icon rail (2026-07-15) ────────────────────────────────────────────────
+   The drawer lays out at NAV_WIDTH_RAIL (drawer_width) and CSS widens it on
+   hover. `!important` is REQUIRED: Quasar writes the width as an INLINE style
+   on <aside class="q-drawer">, and only an author !important rule beats an
+   inline declaration. Quasar's LAYOUT still uses the rail width, so
+   .q-page-container's padding never changes — the expanded menu overlays the
+   content instead of reflowing it (this app's Highcharts have no
+   ResizeObserver, so a reflow on every hover would leave charts mis-sized).
+   .nav-pinned opts out: the drawer is already laid out at the open width.
+   NOTE: the drawer_width prop wiring and the .nav-pinned class are added by a
+   LATER task — until then these rules are inert (the drawer still lays out at
+   Quasar's default width, so there is nothing for :hover to widen). The 248px
+   below must equal NAV_WIDTH_OPEN; a test in test_shell.py pins them together. */
+.nav-drawer { overflow-x: hidden; transition: width .18s ease; }
+.nav-drawer:not(.nav-pinned):hover { width: 248px !important;
+    box-shadow: 0 12px 40px rgba(0,0,0,.5); }
+/* Labels + the group title clip (not wrap) in the rail and fade in as it opens.
+   Selector order is deliberate: the title class is never the token immediately
+   before a brace, so the test_nav_css_has_no_reachable_rules guard (which bans a
+   standalone rule for it — that styling lives in .classes()) still holds. Only
+   the rail's fade lives here: it keys off an ANCESTOR's hover/pinned state, which
+   no Tailwind utility can express. */
+.nav-drawer .nav-label { white-space: nowrap; }
+.nav-drawer .nav-title, .nav-drawer .nav-label {
+    opacity: 0; transition: opacity .14s ease; }
+.nav-drawer.nav-pinned .nav-title, .nav-drawer.nav-pinned .nav-label,
+.nav-drawer:hover .nav-title, .nav-drawer:hover .nav-label { opacity: 1; }
+/* Active icon accent. MUST be !important AND 3 classes: theme.build_nav_css
+   emits `.nav-drawer .q-icon{color:<[menu].text>!important}` (2 classes) and is
+   injected AFTER this block, so equal-specificity would lose. */
+.nav-drawer .nav-active .nav-icon { color: #6b86ff !important; }
 /* Compact tab strip (the sub-menu tabs under the header): Deep Slate PILL tabs in
    a raised rounded container — no folder baseline. The active pill is a soft navy
    tint; inactive are plain. Quasar-internal (q-tab). */
@@ -744,10 +775,14 @@ def _nav_icon(icon: str, is_active: bool, count: int) -> ui.badge:
     """The rail's icon plus its corner count badge.
 
     The icon is the ONLY thing visible when the rail is collapsed, so it carries
-    the active state (via .nav-icon-active — task 5 adds the CSS, which must
-    out-specify the [menu].text override) and the badge rides its top-right
-    corner in BOTH states. Returns the badge so the caller can register it for
-    the 2s watcher."""
+    the active state, and the badge rides its top-right corner in BOTH states.
+    Returns the badge so the caller can register it for the 2s watcher.
+
+    The accent is painted by _NAV_CSS's `.nav-drawer .nav-active .nav-icon` —
+    keyed off the LINK's .nav-active, because it needs 3 classes to out-specify
+    theme.build_nav_css's `.nav-drawer .q-icon{...!important}` ([menu].text),
+    which _layout injects later. That leaves .nav-icon-active below unused by any
+    stylesheet; it is kept as a state hook (it is what a test asserts against)."""
     # ``relative`` is load-bearing, not layout garnish: Quasar's ``floating`` badge is
     # position:absolute, so it anchors to the nearest POSITIONED ancestor. Drop this
     # and the badge escapes up the tree instead of sitting on the icon corner.

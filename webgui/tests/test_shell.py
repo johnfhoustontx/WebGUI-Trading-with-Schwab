@@ -457,3 +457,15 @@ def test_nav_group_link_badge_sums_across_the_groups_paths():
     assert "relative" in wrapper.classes
     icons = [c for c in wrapper.default_slot.children if isinstance(c, ui.icon)]
     assert [i._props["name"] for i in icons] == ["insights"]
+
+
+def test_nav_rail_css_overrides_the_quasar_inline_width():
+    """The rail hinges on beating Quasar's inline style='width:64px' — only an
+    author !important rule can. And .nav-drawer .nav-active .nav-icon must
+    out-specify theme.build_nav_css's '.nav-drawer .q-icon{...!important}'
+    ([menu].text), which _layout injects AFTER _NAV_CSS."""
+    import main
+    css = main._NAV_CSS
+    assert ".nav-drawer:not(.nav-pinned):hover" in css
+    assert f"width: {main.NAV_WIDTH_OPEN}px !important" in css
+    assert ".nav-drawer .nav-active .nav-icon" in css   # 3 classes > theme's 2
