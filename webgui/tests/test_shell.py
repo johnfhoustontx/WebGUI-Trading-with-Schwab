@@ -342,16 +342,27 @@ def test_reimporting_main_after_startup_does_not_raise():
 
 
 def test_drawer_icons_are_present_and_distinct():
-    """The collapsed rail shows ONLY icons, so every drawer item needs a
-    non-empty icon and no two may collide (an ambiguous rail is unusable).
-    The drawer is the 3 groups + the flat pages — child pages live in the tab
-    strip and are not covered here."""
+    """The drawer is becoming a 64px icon rail (hover-to-expand) whose collapsed
+    state shows ONLY icons — so each drawer item needs a non-empty, distinct icon.
+    Guarded AHEAD of the rail: ``_nav_link``/``_nav_group_link`` still render a
+    ``nav-dot`` and ignore their ``icon`` arg, so nothing enforces this yet. Scope
+    is the 7 drawer items (3 groups + FLAT_NAV); child-page icons are not rail
+    affordances (the tab strip renders labels only)."""
+    from collections import Counter
+
     import main
-    icons = [g[1] for g in main._NAV_GROUPS] + [i for _p, _l, i in main.FLAT_NAV]
-    assert len(icons) == 7
-    assert all(icons), "every drawer item needs an icon"
-    assert len(set(icons)) == len(icons), f"duplicate drawer icons: {icons}"
+
+    items = ([(label, icon) for label, icon, _c in main._NAV_GROUPS]
+             + [(label, icon) for _p, label, icon in main.FLAT_NAV])
+    # Pinned count: all()/set-length are vacuously true on an empty list, so this
+    # is the non-vacuity guard. A legitimate new drawer item should bump it.
+    assert len(items) == 7, f"expected 7 drawer items, got {len(items)}: {items}"
+    assert not [l for l, i in items if not i], \
+        f"drawer items with no icon: {[l for l, i in items if not i]}"
+    dupes = {i: [l for l, x in items if x == i]
+             for i, n in Counter(i for _l, i in items).items() if n > 1}
+    assert not dupes, f"drawer icons collide: {dupes}"
+    by_label = dict(items)
     # The two curated changes (design doc 2026-07-15).
-    by_label = {g[0]: g[1] for g in main._NAV_GROUPS}
     assert by_label["Market Trend & Sentiment"] == "speed"
-    assert dict((l, i) for _p, l, i in main.FLAT_NAV)["Trade Analyzer"] == "query_stats"
+    assert by_label["Trade Analyzer"] == "query_stats"
