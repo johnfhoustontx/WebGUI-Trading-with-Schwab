@@ -441,8 +441,12 @@ def build_nav_css(theme):
     caption). Emits a rule ONLY for a non-empty knob, so all-default config
     produces an empty string and the stock Quasar look can never drift. The
     ``accent`` knob is NOT css — ``main._layout`` feeds it to ``ui.colors(
-    primary=…)``, which recolors the header bar AND the active nav pill (both
-    ride the Quasar primary). Injected app-wide by ``main._layout``."""
+    primary=…)``, which now reaches only Quasar-colored CONTROLS (switches,
+    sliders, ``color=primary`` buttons): the header bar is decoupled via
+    ``header_bg`` (below), and the active nav pill + tab-strip fills are
+    hardcoded rgba washes in ``main._NAV_CSS`` (the bundled Tailwind JIT does
+    not reliably emit ``var()``/``rgba()`` arbitraries, so they cannot ride
+    ``--q-primary``). Injected app-wide by ``main._layout``."""
     m = theme["menu"]
     rules = []
     if m.get("header_bg"):
