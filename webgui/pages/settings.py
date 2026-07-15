@@ -10,12 +10,32 @@ the Maintenance card runs ``tools/vacuum_gex.py`` as a subprocess off-thread
 add new cards/sections here as more settings arrive.
 """
 import app_settings
+import bus_client
 import proxy as _proxy
 from nicegui import run, ui
 
 from pages.options import theme
 from pages.options.theme import BTN_3D, BTN_3D_DANGER
 from pages.ui_guard import guard_async
+
+
+def apply_ticker_enabled(value) -> None:
+    """Persist the ticker toggle AND tell market_svc to stop/start the verdict.
+
+    The marquee is rendered Tier-1 off ``ticker_enabled``, but the narrative it
+    shows is a Claude call made by market_svc every ~20 min — so the toggle has
+    to reach the service too, or switching the ticker off would just hide a
+    marquee the stack kept paying for. The command is best-effort: the setting
+    is what the GUI renders from, so it must persist even with the bus down (the
+    service keeps its last known flag; a resync happens at webgui startup).
+    """
+    enabled = bool(value)
+    app_settings.set("ticker_enabled", enabled)
+    try:
+        bus_client.request(
+            "market", {"type": "enable_summary" if enabled else "disable_summary"})
+    except Exception:  # noqa: BLE001 — a bus outage must not break the toggle.
+        pass
 
 
 def api_stats_rows(stats):
@@ -95,11 +115,12 @@ def render():
     with ui.card().classes("w-full max-w-2xl"):
         ui.label("Market summary ticker").classes("text-subtitle1 font-bold")
         ui.label("Scrolling market-summary marquee at the bottom of every page "
-                 "(live data items + a periodic Claude verdict).").classes(
+                 "(live data items + a periodic Claude verdict). Turning it off "
+                 "also stops the Claude calls, not just the marquee.").classes(
                  "opacity-70 text-sm")
 
         tick = ui.switch("Show the ticker", value=s["ticker_enabled"])
-        tick.on_value_change(lambda e: app_settings.set("ticker_enabled", e.value))
+        tick.on_value_change(lambda e: apply_ticker_enabled(e.value))
 
         with ui.row().classes("items-center gap-2"):
             ui.label("Scroll speed").classes("text-sm opacity-70")

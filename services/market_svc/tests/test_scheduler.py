@@ -38,3 +38,28 @@ def test_summary_due_fires_when_interval_elapsed():
     off = dt.datetime(2026, 7, 7, 22, 0, tzinfo=_CT)
     assert sch.summary_due(1.0, secs_since=sch.SUMMARY_RTH_SEC + 1, now=off) is False
     assert sch.summary_due(1.0, secs_since=sch.SUMMARY_OFFHOURS_SEC + 1, now=off) is True
+
+
+def test_summary_never_due_when_disabled():
+    # The ticker toggle is off → no Claude call, no matter how due it otherwise is.
+    rth = dt.datetime(2026, 7, 7, 10, 0, tzinfo=_CT)
+    assert sch.summary_due(None, secs_since=0, now=rth, enabled=False) is False
+    assert sch.summary_due(
+        1.0, secs_since=sch.SUMMARY_RTH_SEC + 1, now=rth, enabled=False) is False
+
+
+def test_summary_due_defaults_to_enabled():
+    # Omitting `enabled` must behave exactly as before (callers/tests unchanged).
+    rth = dt.datetime(2026, 7, 7, 10, 0, tzinfo=_CT)
+    assert sch.summary_due(None, secs_since=0, now=rth) is True
+
+
+def test_loop_gates_summary_on_the_enabled_flag():
+    import inspect
+
+    src = inspect.getsource(sch.loop)
+    # The loop must read the live flag and feed it to the gate — so flipping the
+    # toggle takes effect on the next cycle without a service restart.
+    assert "summary_enabled" in src
+    seg = src.split("summary_due", 1)[0]
+    assert "handlers.summary_enabled(bus)" in seg

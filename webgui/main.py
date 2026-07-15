@@ -49,6 +49,25 @@ if _STATIC_DIR.is_dir():
 _CT = _ZoneInfo("America/Chicago")
 
 
+def sync_ticker_setting() -> None:
+    """Re-assert the ticker toggle to market_svc at startup (best-effort).
+
+    ``ticker_enabled`` is a webgui setting, but it also gates market_svc's ~20-min
+    Claude verdict (see pages/settings.py:apply_ticker_enabled). The service reads
+    that flag from Redis and defaults to ENABLED when the key is missing, so a
+    wiped/restarted Memurai would silently resume the API calls while the GUI still
+    showed the ticker as off. Settings.json is the source of truth — restate it on
+    every startup. Never raises: a down bus must not stop the web GUI from booting
+    (the toggle re-syncs on the next change or startup).
+    """
+    try:
+        enabled = bool(app_settings.get("ticker_enabled"))
+        bus_client.request(
+            "market", {"type": "enable_summary" if enabled else "disable_summary"})
+    except Exception:  # noqa: BLE001
+        logging.getLogger("webgui").warning("ticker setting resync failed", exc_info=True)
+
+
 def play_alert(sound: str, volume: float) -> None:
     """Play a bundled alert WAV in the connected browser at the given volume."""
     sound = sound if sound in ("chime", "bell", "ping") else "chime"
@@ -209,7 +228,9 @@ OPTIONS_CHILDREN = [
 # Sentiment is an expandable group; each child is its own route. (route, label, icon)
 SENTIMENT_CHILDREN = [
     ("/sentiment", "Sentiment", "insights"),
+    ("/sentiment/sectors", "Sector & Industry", "table_chart"),
     ("/sentiment/rotation", "Sector Rotation", "donut_large"),
+    ("/sentiment/rrg", "RRG", "scatter_plot"),
 ]
 
 # Flat top-level items (non-Options apps). (route, label, icon)
@@ -301,7 +322,9 @@ _TAB_COLOR = {
     "/options/expected-move": "#ffca28",  # Expected Move — yellow
     "/options/rescue": "#ef5350",         # Rescue — red
     "/sentiment": "#5c6bc0",              # Sentiment — indigo
+    "/sentiment/sectors": "#7986cb",      # Sector & Industry — indigo light
     "/sentiment/rotation": "#8d6e63",     # Sector Rotation — brown
+    "/sentiment/rrg": "#a1887f",          # RRG — brown light
     "/market": "#00bfa5",                # Market Dashboard — teal-green
     "/trade": "#26c6da",                 # Trade — cyan
     "/portfolio": "#9ccc65",             # Portfolio — light green
@@ -987,11 +1010,25 @@ def sentiment_page() -> None:
         sentiment.render()
 
 
+@ui.page("/sentiment/sectors")
+def sentiment_sectors_page() -> None:
+    with _layout("/sentiment/sectors", "Sector & Industry"):
+        from pages import sentiment_sectors
+        sentiment_sectors.render()
+
+
 @ui.page("/sentiment/rotation")
 def sentiment_rotation_page() -> None:
     with _layout("/sentiment/rotation", "Sector Rotation"):
         from pages import sentiment_rotation
         sentiment_rotation.render()
+
+
+@ui.page("/sentiment/rrg")
+def sentiment_rrg_page() -> None:
+    with _layout("/sentiment/rrg", "RRG"):
+        from pages import sentiment_rrg
+        sentiment_rrg.render()
 
 
 @ui.page("/trade")
@@ -1065,6 +1102,13 @@ def terminate_page() -> None:
 
 
 if __name__ in {"__main__", "__mp_main__"}:
+    # Lifecycle handlers register HERE, not at module scope: pages `import main`
+    # lazily at request time (e.g. pages/options/scanner.py for subtab_slot), and
+    # because this script runs as __main__ that re-executes this file as a second
+    # module object AFTER NiceGUI has started — where app.on_startup() raises and
+    # 500s the page. Inside this guard it runs once, before ui.run().
+    app.on_startup(sync_ticker_setting)
+
     # Bind to localhost only (single-user, localhost-first app): reachable at
     # http://localhost:8500 from this PC. This avoids listening on every network
     # interface (the default host="0.0.0.0"), which on Windows produced benign but

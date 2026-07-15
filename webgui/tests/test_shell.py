@@ -15,7 +15,7 @@ def test_shell_registers_all_pages():
         "/", "/options/paper", "/options/captured", "/options/portfolio",
         "/options/calculator", "/options/swing", "/options/gamma",
         "/options/simulator", "/options/expected-move", "/options/rescue",
-        "/sentiment", "/sentiment/rotation",
+        "/sentiment", "/sentiment/sectors", "/sentiment/rotation", "/sentiment/rrg",
         "/trade", "/portfolio", "/driver", "/settings",
         "/eod", "/eod/detail", "/status", "/manuals", "/terminate",
         "/market",
@@ -268,3 +268,74 @@ def test_market_status_parts():
     closed_dt = datetime(2026, 7, 5, 10, 0, tzinfo=main.alerts.CT)  # Sunday
     assert main.market_status_parts(open_dt) == ("MARKET OPEN", True)
     assert main.market_status_parts(closed_dt) == ("MARKET CLOSED", False)
+
+
+# ── ticker setting resync at startup ───────────────────────────────────────
+# The ticker toggle lives in settings.json (webgui) but gates a Claude call in
+# market_svc, mirrored through Redis. Re-assert it at startup so a wiped/restarted
+# Redis (key gone → service defaults back to enabled) can't silently resume the
+# API calls while the GUI still says the ticker is off.
+
+
+def test_sync_ticker_setting_reasserts_the_flag(monkeypatch):
+    import main
+
+    sent = []
+    monkeypatch.setattr(main.bus_client, "request",
+                        lambda domain, cmd: sent.append((domain, cmd)))
+    monkeypatch.setattr(main.app_settings, "get", lambda k: False)
+    main.sync_ticker_setting()
+    assert sent == [("market", {"type": "disable_summary"})]
+
+    sent.clear()
+    monkeypatch.setattr(main.app_settings, "get", lambda k: True)
+    main.sync_ticker_setting()
+    assert sent == [("market", {"type": "enable_summary"})]
+
+
+def test_sync_ticker_setting_survives_a_down_bus(monkeypatch):
+    import main
+
+    def _boom(domain, cmd):
+        raise RuntimeError("redis down")
+
+    monkeypatch.setattr(main.bus_client, "request", _boom)
+    monkeypatch.setattr(main.app_settings, "get", lambda k: True)
+    main.sync_ticker_setting()  # startup must not fail because Memurai is down
+
+
+def test_sync_ticker_setting_registered_inside_the_main_guard():
+    import inspect
+
+    import main
+
+    src = inspect.getsource(main)
+    head, guard, tail = src.partition('if __name__ in {"__main__", "__mp_main__"}:')
+    assert guard, "the __main__ guard moved — this test needs updating"
+    # Registered exactly once, and only on the entry path (see the reimport test).
+    assert "app.on_startup(" not in head
+    assert "app.on_startup(sync_ticker_setting)" in tail
+
+
+def test_reimporting_main_after_startup_does_not_raise():
+    """Pages do `import main as _shell` (e.g. pages/options/scanner.py) at REQUEST
+    time. The entry script runs as __main__, so that re-executes main.py as a
+    SECOND module object — after NiceGUI has started. Any module-level
+    `app.on_startup()` raises RuntimeError there and 500s every page, so lifecycle
+    registration must live inside the __main__ guard.
+    """
+    import importlib.util
+    import pathlib
+
+    from nicegui import app as ng_app
+    from nicegui.app.app import State
+
+    main_py = pathlib.Path(__file__).resolve().parents[1] / "main.py"
+    prev = ng_app._state
+    ng_app._state = State.STARTED  # simulate "NiceGUI has already been started"
+    try:
+        spec = importlib.util.spec_from_file_location("main_reimport_probe", main_py)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)  # must not raise
+    finally:
+        ng_app._state = prev

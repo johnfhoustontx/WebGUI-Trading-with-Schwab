@@ -46,17 +46,27 @@ def poll_interval(now=None):
     return RTH_INTERVAL_SEC if _is_rth(now) else OFFHOURS_INTERVAL_SEC
 
 
-SUMMARY_RTH_SEC = 20 * 60       # refresh the Claude verdict every ~20 min during RTH
+# The verdict is the ticker's slow "why" — the live data items beside it refresh on
+# the ~2 s poll, so a narrative that lags the tape by up to 40 min costs the reader
+# little and halves the Claude spend (it was the stack's single biggest caller at
+# 20 min: ~21 of ~39 calls/day).
+SUMMARY_RTH_SEC = 40 * 60       # refresh the Claude verdict every ~40 min during RTH
 SUMMARY_OFFHOURS_SEC = 60 * 60  # ~hourly off-hours
 
 
-def summary_due(has_run, secs_since, *, now=None):
+def summary_due(has_run, secs_since, *, now=None, enabled=True):
     """Whether to regenerate the Claude verdict this cycle (pure).
 
     ``has_run`` is a True/None sentinel — None until the first run (→ always due).
     Once it has run, fire when ``secs_since`` the last run exceeds the RTH/off-hours
     interval.
+
+    ``enabled`` is the webgui ticker toggle (see ``handlers.summary_enabled``);
+    False short-circuits everything — no marquee, no Claude call. ``secs_since``
+    keeps accumulating while off, so re-enabling produces a fresh verdict at once.
     """
+    if not enabled:
+        return False
     if has_run is None:
         return True
     now = now or _dt.datetime.now(_CT)
@@ -74,7 +84,10 @@ async def loop(bus) -> None:
         try:
             payload = await loop_.run_in_executor(None, compute.collect, bus)
             await loop_.run_in_executor(None, handlers.publish, bus, payload)
-            if summary_due(summary_started, secs_since_summary):
+            # Read the toggle every cycle (a cheap local cache hit) so flipping it
+            # in Settings takes effect on the next poll, with no service restart.
+            enabled = handlers.summary_enabled(bus)
+            if summary_due(summary_started, secs_since_summary, enabled=enabled):
                 sent = bus.cache_get("cache:sentiment:composite")
                 sent_payload = sent.payload if sent else {}
                 summary = await loop_.run_in_executor(

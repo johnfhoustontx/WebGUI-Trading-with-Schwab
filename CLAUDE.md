@@ -1493,6 +1493,24 @@ color-coded data items** (the fast numbers). Pieces:
   page-help now lives on the nav tabs + drawer items as 2 s-delayed hover tooltips (`main._help_tooltip`, 2026-07-12 — the header "?" fab is gone).
 - **Control.** `app_settings` `ticker_enabled` (default on) + `ticker_speed`; a **Settings**
   page toggle (Show + Slow/Medium/Fast). When off, `render_ticker` renders nothing.
+- **The toggle also gates the Claude call (2026-07-14).** `ticker_enabled` used to be
+  Tier-1 only, so switching the ticker off merely hid the marquee while market_svc kept
+  generating (and paying for) the verdict — it was the stack's **biggest Claude caller**
+  (~21 of ~39 calls/day). The toggle now writes through: `settings.apply_ticker_enabled`
+  enqueues `enable_summary`/`disable_summary` on **`cmd:market`** (market_svc's FIRST
+  command handler — `handlers.handle_command`, wired in `app.py`) → `set_summary_enabled`
+  records **`cache:market:summary_enabled`** → the scheduler reads it each cycle
+  (`handlers.summary_enabled`) and feeds `summary_due(..., enabled=…)`, which
+  short-circuits. **Defaults to enabled** on a missing key / unreadable bus (the flag can
+  only turn the verdict OFF explicitly), and `secs_since` keeps accumulating while off so
+  re-enabling yields a fresh verdict at once. Because a wiped Memurai drops the key (→
+  back to enabled), `main.sync_ticker_setting` re-asserts settings.json at **webgui
+  startup** — registered **inside the `__main__` guard**, NOT at module scope: pages
+  `import main` lazily at request time and the entry script runs as `__main__`, so a
+  module-level `app.on_startup` re-registers after NiceGUI started → `RuntimeError` → every
+  page 500s (learned the hard way; pinned by `test_shell.py`'s reimport probe).
+  **`SUMMARY_RTH_SEC` 20 → 40 min** the same day (the live items refresh on the 2 s poll,
+  so a slower narrative costs the reader little). Steady state ~39 → ~18 calls/day.
 - market_svc **35** + shared/contracts **38** + webgui **687** green (no live API calls in the
   suite); **live-verified** end-to-end (real Claude verdict published to `cache:market:summary`
   + 14 correct color-coded live items from the live caches). **Restart `market_svc` + the
