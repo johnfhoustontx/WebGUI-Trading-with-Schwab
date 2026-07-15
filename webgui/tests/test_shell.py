@@ -344,10 +344,10 @@ def test_reimporting_main_after_startup_does_not_raise():
 def test_drawer_icons_are_present_and_distinct():
     """The drawer is becoming a 64px icon rail (hover-to-expand) whose collapsed
     state shows ONLY icons — so each drawer item needs a non-empty, distinct icon.
-    Guarded AHEAD of the rail: ``_nav_link``/``_nav_group_link`` still render a
-    ``nav-dot`` and ignore their ``icon`` arg, so nothing enforces this yet. Scope
-    is the 7 drawer items (3 groups + FLAT_NAV); child-page icons are not rail
-    affordances (the tab strip renders labels only)."""
+    ``_nav_link``/``_nav_group_link`` now render the ``icon`` arg (the dot is
+    retired), but the rail CSS that collapses the labels lands in a later task.
+    Scope is the 7 drawer items (3 groups + FLAT_NAV); child-page icons are not
+    rail affordances (the tab strip renders labels only)."""
     from collections import Counter
 
     import main
@@ -375,3 +375,16 @@ def test_drawer_width_pinned_vs_rail():
     import main
     assert main.drawer_width(True) == main.NAV_WIDTH_OPEN == 248
     assert main.drawer_width(False) == main.NAV_WIDTH_RAIL == 64
+
+
+def test_nav_link_renders_the_icon_and_registers_its_badge():
+    """The icon (not the retired dot) is the rail's affordance, and the badge ref
+    the 2s watcher writes to must still be registered per route."""
+    import inspect
+    import main
+    src = inspect.getsource(main._nav_link) + inspect.getsource(main._nav_group_link)
+    assert "nav-dot" not in src, "the dot is retired — the icon carries active state"
+    assert "_nav_icon(" in src, "both link builders go through the shared icon+badge helper"
+    helper = inspect.getsource(main._nav_icon)
+    assert "floating" in helper
+    assert "relative" in helper

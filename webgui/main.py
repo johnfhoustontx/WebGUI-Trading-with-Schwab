@@ -553,7 +553,7 @@ _NAV_CSS = """
 .q-tooltip.help-tip ul { padding-left: 1.15em; margin: .35em 0; }
 .q-tooltip.help-tip li { margin: .2em 0; }
 /* ── Deep Slate shell chrome (Phase 2) ─────────────────────────────────────
-   Header brand mark + market-status pill + left-rail nav dots. rgba lives in raw
+   Header brand mark + market-status pill. rgba lives in raw
    CSS (not Tailwind classes) so the bundled JIT never has to emit rgba arbitraries. */
 .brand-tile {
   width: 28px; height: 28px; border-radius: 9px; flex: none;
@@ -570,9 +570,6 @@ _NAV_CSS = """
 .mkt-closed { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.09); }
 .mkt-closed .dot { background: #6d76a0; }
 .mkt-closed .lbl { color: #8891ab; }
-.nav-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
-.nav-dot-active { background: #6b86ff; }
-.nav-dot-idle { background: #3c4560; }
 """
 
 # Global table chrome (app-wide standard): EVERY data table gets a fixed (sticky)
@@ -725,6 +722,23 @@ def _help_tooltip(path: str) -> None:
         ui.markdown(page_help.help_md(path)).classes("text-left")
 
 
+def _nav_icon(icon: str, is_active: bool, count: int):
+    """The rail's icon plus its corner count badge.
+
+    The icon is the ONLY thing visible when the rail is collapsed, so it carries
+    the active state (via .nav-icon-active — task 5 adds the CSS, which must
+    out-specify the [menu].text override) and the badge rides its top-right
+    corner in BOTH states. Returns the badge so the caller can register it for
+    the 2s watcher."""
+    with ui.element("div").classes(
+            "relative flex items-center justify-center flex-none w-[22px] h-[22px]"):
+        ui.icon(icon).classes(
+            "nav-icon text-[21px]" + (" nav-icon-active" if is_active else ""))
+        badge = ui.badge(str(count) if count else "").props("color=red rounded floating")
+        badge.set_visibility(bool(count))
+    return badge
+
+
 def _nav_link(path: str, label: str, icon: str, active: str) -> None:
     base = ("w-full no-underline items-center rounded-[10px] px-3 py-1 "
             "transition-colors hover:bg-white/[0.06]")
@@ -738,15 +752,8 @@ def _nav_link(path: str, label: str, icon: str, active: str) -> None:
     with ui.link(target=path).classes(base + state):
         _help_tooltip(path)   # rest the mouse 2 s for this page's guide
         with ui.row().classes("items-center gap-3 w-full no-wrap"):
-            # Deep Slate: a dot indicator (blue when active, faint when not) — the
-            # ``icon`` arg is retained in the signature but no longer rendered.
-            ui.element("div").classes(
-                "nav-dot " + ("nav-dot-active" if is_active else "nav-dot-idle"))
+            _badge_refs[path] = _nav_icon(icon, is_active, _NAV_BADGES.get(path, 0))
             ui.label(label).classes("nav-label")
-            n = _NAV_BADGES.get(path, 0)
-            badge = ui.badge(str(n) if n else "").classes("ml-auto").props("color=red rounded")
-            badge.set_visibility(bool(n))
-            _badge_refs[path] = badge
 
 
 def _nav_group_link(label: str, icon: str, children, active: str) -> None:
@@ -762,13 +769,9 @@ def _nav_group_link(label: str, icon: str, children, active: str) -> None:
     with ui.link(target=paths[0]).classes(base + state):
         _help_tooltip(paths[0])   # the group's landing page's guide (2 s rest)
         with ui.row().classes("items-center gap-3 w-full no-wrap"):
-            ui.element("div").classes(
-                "nav-dot " + ("nav-dot-active" if is_active else "nav-dot-idle"))
-            ui.label(label).classes("nav-label")
             n = sum(_NAV_BADGES.get(p, 0) for p in paths)
-            badge = ui.badge(str(n) if n else "").classes("ml-auto").props("color=red rounded")
-            badge.set_visibility(bool(n))
-            _group_badge_refs[label] = (badge, paths)
+            _group_badge_refs[label] = (_nav_icon(icon, is_active, n), paths)
+            ui.label(label).classes("nav-label")
 
 
 @contextmanager
