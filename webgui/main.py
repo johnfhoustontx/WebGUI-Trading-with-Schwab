@@ -507,39 +507,58 @@ _NAV_CSS = """
 .nav-drawer { gap: 2px; }
 /* Active nav item pill — the "Deep Slate" look: a SUBTLE navy tint (not a solid
    accent fill), paired with the item's own icon, which carries the active state
-   (.nav-icon-active). Decoupled from --q-primary on purpose (accent drives the
-   tab fills, the pill stays a soft wash). A plain CSS rule (the bundled JIT
-   doesn't emit rgba arbitraries). */
+   (see the .nav-active .nav-icon accent below). Decoupled from --q-primary on
+   purpose (accent drives the tab fills, the pill stays a soft wash). A plain CSS
+   rule (the bundled JIT doesn't emit rgba arbitraries). */
 .nav-drawer .nav-active { background: rgba(107,134,255,0.13); }
 .nav-drawer .nav-active .nav-label { color: #eef1f6; font-weight: 600; }
 .nav-drawer .q-item { border-radius: 10px; }
 /* ── Icon rail (2026-07-15) ────────────────────────────────────────────────
-   The drawer lays out at NAV_WIDTH_RAIL (drawer_width) and CSS widens it on
-   hover. `!important` is REQUIRED: Quasar writes the width as an INLINE style
-   on <aside class="q-drawer">, and only an author !important rule beats an
-   inline declaration. Quasar's LAYOUT still uses the rail width, so
-   .q-page-container's padding never changes — the expanded menu overlays the
-   content instead of reflowing it (this app's Highcharts have no
-   ResizeObserver, so a reflow on every hover would leave charts mis-sized).
-   .nav-pinned opts out: the drawer is already laid out at the open width.
-   NOTE: the drawer_width prop wiring and the .nav-pinned class are added by a
-   LATER task — until then these rules are inert (the drawer still lays out at
-   Quasar's default width, so there is nothing for :hover to widen). The 248px
-   below must equal NAV_WIDTH_OPEN; a test in test_shell.py pins them together. */
-.nav-drawer { overflow-x: hidden; transition: width .18s ease; }
-.nav-drawer:not(.nav-pinned):hover { width: 248px !important;
-    box-shadow: 0 12px 40px rgba(0,0,0,.5); }
+   THE DOM SPLIT — the trap that cost hours; do not re-learn it. `.nav-drawer` is
+   NOT the <aside>. NiceGUI puts the drawer's classes on Quasar's inner content
+   div, so the tree is:
+       <aside class="q-drawer" style="width:64px">   ← the WIDTH lives here
+         <div class="q-drawer__content fit scroll nicegui-drawer nav-drawer">
+   The width must therefore be widened on the ASIDE, reached from our class via
+   :has(). A rule on `.nav-drawer` itself targets a CHILD of the element holding
+   the width and can never win.
+   Why !important: Quasar writes the width as an INLINE style, and only an author
+   !important declaration beats an inline one. It works here because the aside
+   carries no LAYERED !important rule. Note the asymmetry: an unlayered
+   !important does NOT beat NiceGUI's layer(quasar_importants) rules — e.g.
+   `.fit{width:100%!important}` — but .fit is on the CONTENT div, and 100% of a
+   248px aside is what we want anyway.
+   Quasar's LAYOUT still uses the rail width, so .q-page-container's padding never
+   changes — the expanded menu OVERLAYS the content instead of reflowing it (this
+   app's Highcharts have no ResizeObserver, so a reflow on every hover would leave
+   charts mis-sized). :focus-within expands for keyboard users, who otherwise get
+   a rail of unreadable opacity:0 labels. .nav-pinned opts out: the drawer is
+   already laid out at the open width.
+   NOTE: the drawer_width prop wiring and the .nav-pinned class land in a LATER
+   task — until then the aside keeps Quasar's default width, so these rules are
+   inert. The 248px must equal NAV_WIDTH_OPEN; a test pins them together. */
+.q-drawer:has(> .nav-drawer:not(.nav-pinned)) { transition: width .18s ease; }
+.q-drawer:has(> .nav-drawer:not(.nav-pinned)):hover,
+.q-drawer:has(> .nav-drawer:not(.nav-pinned)):focus-within {
+    width: 248px !important; box-shadow: 0 12px 40px rgba(0,0,0,.5); }
+/* .nav-drawer IS the real scroller (Quasar's .scroll sets overflow:auto), so the
+   clip belongs here: it stops the 248px of content from raising a horizontal
+   scrollbar in the 64px rail. It cannot clip the corner count badges — they sit
+   ~40px from the drawer's left edge, well inside the rail. */
+.nav-drawer { overflow-x: hidden; }
 /* Labels + the group title clip (not wrap) in the rail and fade in as it opens.
    Selector order is deliberate: the title class is never the token immediately
    before a brace, so the test_nav_css_has_no_reachable_rules guard (which bans a
    standalone rule for it — that styling lives in .classes()) still holds. Only
-   the rail's fade lives here: it keys off an ANCESTOR's hover/pinned state, which
+   the rail's fade lives here: it keys off an ANCESTOR's hover/focus state, which
    no Tailwind utility can express. */
 .nav-drawer .nav-label { white-space: nowrap; }
 .nav-drawer .nav-title, .nav-drawer .nav-label {
     opacity: 0; transition: opacity .14s ease; }
 .nav-drawer.nav-pinned .nav-title, .nav-drawer.nav-pinned .nav-label,
-.nav-drawer:hover .nav-title, .nav-drawer:hover .nav-label { opacity: 1; }
+.nav-drawer:hover .nav-title, .nav-drawer:hover .nav-label,
+.nav-drawer:focus-within .nav-title, .nav-drawer:focus-within .nav-label {
+    opacity: 1; }
 /* Active icon accent. MUST be !important AND 3 classes: theme.build_nav_css
    emits `.nav-drawer .q-icon{color:<[menu].text>!important}` (2 classes) and is
    injected AFTER this block, so equal-specificity would lose. */
@@ -771,25 +790,25 @@ def _set_badge(badge: ui.badge, n: int) -> None:
     badge.set_visibility(bool(n))
 
 
-def _nav_icon(icon: str, is_active: bool, count: int) -> ui.badge:
+def _nav_icon(icon: str, count: int) -> ui.badge:
     """The rail's icon plus its corner count badge.
 
     The icon is the ONLY thing visible when the rail is collapsed, so it carries
     the active state, and the badge rides its top-right corner in BOTH states.
     Returns the badge so the caller can register it for the 2s watcher.
 
-    The accent is painted by _NAV_CSS's `.nav-drawer .nav-active .nav-icon` —
-    keyed off the LINK's .nav-active, because it needs 3 classes to out-specify
-    theme.build_nav_css's `.nav-drawer .q-icon{...!important}` ([menu].text),
-    which _layout injects later. That leaves .nav-icon-active below unused by any
-    stylesheet; it is kept as a state hook (it is what a test asserts against)."""
+    Takes no is_active: the accent is painted by _NAV_CSS's
+    `.nav-drawer .nav-active .nav-icon`, keyed off the LINK's .nav-active, which
+    the caller already sets. It has to be keyed there — it needs 3 classes to
+    out-specify theme.build_nav_css's `.nav-drawer .q-icon{...!important}`
+    ([menu].text), injected after _NAV_CSS, so a 2-class marker on the icon
+    itself would tie and lose."""
     # ``relative`` is load-bearing, not layout garnish: Quasar's ``floating`` badge is
     # position:absolute, so it anchors to the nearest POSITIONED ancestor. Drop this
     # and the badge escapes up the tree instead of sitting on the icon corner.
     with ui.element("div").classes(
             "relative flex items-center justify-center flex-none w-6 h-6"):
-        ui.icon(icon).classes(
-            "nav-icon text-[20px]" + (" nav-icon-active" if is_active else ""))
+        ui.icon(icon).classes("nav-icon text-[20px]")
         badge = _count_badge(count)
     return badge
 
@@ -807,7 +826,7 @@ def _nav_link(path: str, label: str, icon: str, active: str) -> None:
     with ui.link(target=path).classes(base + state):
         _help_tooltip(path)   # rest the mouse 2 s for this page's guide
         with ui.row().classes("items-center gap-3 w-full no-wrap"):
-            _badge_refs[path] = _nav_icon(icon, is_active, _NAV_BADGES.get(path, 0))
+            _badge_refs[path] = _nav_icon(icon, _NAV_BADGES.get(path, 0))
             ui.label(label).classes("nav-label")
 
 
@@ -825,7 +844,7 @@ def _nav_group_link(label: str, icon: str, children, active: str) -> None:
         _help_tooltip(paths[0])   # the group's landing page's guide (2 s rest)
         with ui.row().classes("items-center gap-3 w-full no-wrap"):
             n = sum(_NAV_BADGES.get(p, 0) for p in paths)
-            _group_badge_refs[label] = (_nav_icon(icon, is_active, n), paths)
+            _group_badge_refs[label] = (_nav_icon(icon, n), paths)
             ui.label(label).classes("nav-label")
 
 

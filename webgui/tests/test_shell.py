@@ -390,6 +390,12 @@ def _nav_wrapper_of(badge):
     return badge.parent_slot.parent
 
 
+def _nav_link_of(badge):
+    """The <a> ancestor of a mounted nav badge — wrapper -> row -> link. It is what
+    carries .nav-active, which the icon accent is keyed off."""
+    return _nav_wrapper_of(badge).parent_slot.parent.parent_slot.parent
+
+
 def test_nav_link_badge_floats_on_the_icon_and_registers_per_route():
     """The badge must sit INSIDE the relative wrapper (Quasar's floating badge is
     position:absolute — it anchors to the nearest positioned ancestor), and the ref
@@ -414,13 +420,14 @@ def test_nav_link_badge_floats_on_the_icon_and_registers_per_route():
     icons = [c for c in wrapper.default_slot.children if isinstance(c, ui.icon)]
     assert [i._props["name"] for i in icons] == ["query_stats"], \
         "the icon is the rail's affordance and shares the badge's wrapper"
-    assert any("nav-icon-active" in i.classes for i in icons), \
-        "the active item's icon carries .nav-icon-active (task 5 styles it)"
+    assert "nav-active" in _nav_link_of(badge).classes, \
+        "the accent is keyed off the LINK (.nav-active .nav-icon) — it needs 3 " \
+        "classes to out-specify theme's .nav-drawer .q-icon !important override"
 
 
 def test_nav_link_badge_hidden_at_zero_and_icon_idle_when_inactive():
     """The 0/inactive complement of the test above — a count of 0 renders no badge
-    text AND is hidden, and a non-active item's icon must NOT claim active state."""
+    text AND is hidden, and a non-active item must NOT claim active state."""
     from nicegui import ui
 
     import main
@@ -433,7 +440,8 @@ def test_nav_link_badge_hidden_at_zero_and_icon_idle_when_inactive():
     assert badge.text == "" and not badge.visible
     icons = [c for c in _nav_wrapper_of(badge).default_slot.children
              if isinstance(c, ui.icon)]
-    assert not any("nav-icon-active" in i.classes for i in icons)
+    assert [i._props["name"] for i in icons] == ["query_stats"]
+    assert "nav-active" not in _nav_link_of(badge).classes
 
 
 def test_nav_group_link_badge_sums_across_the_groups_paths():
@@ -459,13 +467,44 @@ def test_nav_group_link_badge_sums_across_the_groups_paths():
     assert [i._props["name"] for i in icons] == ["insights"]
 
 
-def test_nav_rail_css_overrides_the_quasar_inline_width():
-    """The rail hinges on beating Quasar's inline style='width:64px' — only an
-    author !important rule can. And .nav-drawer .nav-active .nav-icon must
-    out-specify theme.build_nav_css's '.nav-drawer .q-icon{...!important}'
-    ([menu].text), which _layout injects AFTER _NAV_CSS."""
+def test_nav_rail_css_widens_the_aside_not_the_content_div():
+    """.nav-drawer is NOT the <aside> — NiceGUI puts our classes on Quasar's inner
+    .q-drawer__content div, while the inline width='64px' lives on the parent
+    <aside class="q-drawer">. So the rail must widen the ASIDE, reached via :has();
+    a rule on .nav-drawer targets a CHILD of the width-holder and can never win.
+    !important is still required to beat the inline declaration."""
     import main
     css = main._NAV_CSS
-    assert ".nav-drawer:not(.nav-pinned):hover" in css
+    assert ".q-drawer:has(> .nav-drawer:not(.nav-pinned)):hover" in css
+    assert ".nav-drawer:not(.nav-pinned):hover {" not in css, \
+        "widening .nav-drawer targets the content div, not the aside's width"
     assert f"width: {main.NAV_WIDTH_OPEN}px !important" in css
+
+
+def test_nav_rail_expands_on_keyboard_focus_too():
+    """Labels sit at opacity:0 in the rail, so a keyboard user tabbing through the
+    nav would read nothing without :focus-within."""
+    import main
+    css = main._NAV_CSS
+    assert ".q-drawer:has(> .nav-drawer:not(.nav-pinned)):focus-within" in css
+    assert ".nav-drawer:focus-within .nav-label" in css
+
+
+def test_nav_active_icon_accent_outspecifies_the_menu_text_override():
+    """theme.build_nav_css emits '.nav-drawer .q-icon{color:<[menu].text>!important}'
+    (0,2,0) and _layout injects it AFTER _NAV_CSS, so the accent must be BOTH
+    !important and 3 classes — keyed off the parent link's .nav-active. A marker
+    class on the icon itself would be (0,2,0): a tie, and ties go to the later
+    sheet, which is theme's."""
+    import main
+    from pages.options.theme import build_nav_css
+
+    css = main._NAV_CSS
     assert ".nav-drawer .nav-active .nav-icon" in css   # 3 classes > theme's 2
+    assert "!important" in css.split(".nav-drawer .nav-active .nav-icon")[1][:40]
+    # Pin the claim to the REAL competing rule, not a comment about it: if the
+    # [menu].text override ever gains a class, our accent must gain one too.
+    rival = build_nav_css({"menu": {"header_bg": "", "drawer_bg": "", "hover_bg": "",
+                                    "title": "", "text": "#98a1c0"}})
+    assert ".nav-drawer .q-icon{color:#98a1c0!important;}" in rival, \
+        "the rule our accent must out-specify — 2 classes, injected after _NAV_CSS"
