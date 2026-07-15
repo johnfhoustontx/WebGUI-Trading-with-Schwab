@@ -525,3 +525,41 @@ def test_one_tick_wide_market_scores_top_regardless_of_cheap_mark():
 def test_index_penny_markets_do_not_regress():
     """SPY (what the band was calibrated on) must stay top-scored."""
     assert sc.q_liq(_sig([_SPY_750C, _SPY_756C])) >= 80
+
+
+#############################################
+# Leg-dilution asymmetry — unknowns must not be averaged into knowns
+#############################################
+
+# The credit/IC adapters deliberately carry liquidity ONLY on the SHORT legs
+# ("do NOT fabricate"), so a protective long wing arrives with no bid/ask and
+# scores a NEUTRAL 50. Averaging that placeholder into the real measurement
+# compresses every credit structure into [25, 75]: a perfect market scores 75
+# and an unfillable one is floored at 25. Since the CREDIT/NEUTRAL `excellent`
+# liq bar IS 75, that made Strong effectively unreachable for those families.
+# Live SPY CCS captured 2026-07-15: short 776C 2.50/2.52 -> 100, long 778C wing
+# with no quotes -> 50, q_liq reported 75.0.
+_SPY_CCS_SHORT = {"bid": 2.50, "ask": 2.52, "mark": 2.51, "volume": 155, "oi": 500}
+_SPY_CCS_LONG_WING = {"mark": 2.09}            # protective wing — no bid/ask
+_WIDE_SHORT = {"bid": 1.94, "ask": 2.54, "mark": 2.24, "volume": 179, "oi": 290}
+
+
+def test_q_liq_does_not_dilute_a_real_measurement_with_the_neutral_placeholder():
+    """A credit spread's real short-leg market must not be averaged with the
+    unknown wing's neutral 50."""
+    val = sc.q_liq(_sig([_SPY_CCS_SHORT, _SPY_CCS_LONG_WING], type="CCS"))
+    assert val >= 95, val          # was 75.0 = avg(100, 50)
+
+
+def test_credit_spread_can_reach_the_excellent_liquidity_bar():
+    """Dilution capped a 2-leg credit spread at 75, so the excellent bar (75)
+    demanded a literally perfect short-leg market. A real, good AAPL-grade
+    market must be able to clear it."""
+    sig = _sig([_AAPL_325C, _SPY_CCS_LONG_WING], type="PCS", rr=0.4, pop_pct=75.0)
+    assert sc.evaluate_gates(sig)["passed_excellent"] is True
+
+
+def test_unfillable_credit_spread_is_not_floored_by_the_placeholder():
+    """A 27%-wide short leg must score near 0, not be lifted to 25 by the wing."""
+    val = sc.q_liq(_sig([_WIDE_SHORT, _SPY_CCS_LONG_WING], type="CCS"))
+    assert val < 10, val           # was 25.0 = avg(0, 50)

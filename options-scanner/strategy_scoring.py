@@ -470,21 +470,39 @@ def norm_liquidity_ticks(bid, ask, mark):
     return _clamp(max(pct_score, tick_score))
 
 
-def q_liq(signal):
-    """Average leg liquidity via the tick-aware normalizer (0-100).
+def _has_quote(leg):
+    """True when a leg carries a real, usable two-sided market."""
+    return (leg.get("bid") is not None and leg.get("ask") is not None
+            and (leg.get("mark") or 0) > 0)
 
-    Legs may lack bid/ask -> norm_liquidity_ticks returns a neutral 50.
+
+def q_liq(signal):
+    """Average liquidity over the legs that actually carry a quote (0-100).
+
+    Legs WITHOUT a quote are SKIPPED rather than scored a neutral 50 and
+    averaged in. The credit/IC adapters deliberately carry liquidity only on the
+    SHORT legs (a protective wing's market is not fabricated), so averaging the
+    placeholder in compressed every credit structure toward the middle — a 2-leg
+    credit spread was pinned to [25, 75], which put the CREDIT/NEUTRAL
+    ``excellent`` liq bar of 75 out of reach and made Strong effectively
+    unreachable for those families, while a directional structure with full leg
+    data was judged on the whole 0-100 scale. Identical market quality must not
+    score differently based only on whether the wing's quote was populated.
+
+    Judging a credit structure on its short leg mirrors the flat scanner's own
+    hard gate (``scanner_engine.passes_liquidity_gate``), which exempts long
+    wings from the spread check because far-OTM premiums make any spread look
+    huge in percentage terms — "the long leg just defines max loss".
+
+    No leg carries a quote -> 50.0 (neutral), so absent data still never
+    false-fails the gate.
     """
     legs = signal.get("legs")
     if not isinstance(legs, (list, tuple)) or not legs:
         return 50.0
 
-    vals = []
-    for leg in legs:
-        if not isinstance(leg, dict):
-            vals.append(50.0)
-            continue
-        vals.append(norm_liquidity_ticks(leg.get("bid"), leg.get("ask"), leg.get("mark")))
+    vals = [norm_liquidity_ticks(leg.get("bid"), leg.get("ask"), leg.get("mark"))
+            for leg in legs if isinstance(leg, dict) and _has_quote(leg)]
     return sum(vals) / len(vals) if vals else 50.0
 
 
