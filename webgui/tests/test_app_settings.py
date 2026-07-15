@@ -52,3 +52,11 @@ def test_load_falls_back_on_garbage_file(tmp_path, monkeypatch):
 def test_get_unknown_key_returns_none(tmp_path, monkeypatch):
     _fresh(tmp_path, monkeypatch)
     assert app_settings.get("nope") is None
+
+
+def test_nav_pinned_defaults_to_off():
+    """Pinning the nav drawer open is opt-in; the hover rail is the default.
+
+    Nothing reads this key yet; the drawer wiring lands in a later task.
+    """
+    assert app_settings.DEFAULTS["nav_pinned"] is False
