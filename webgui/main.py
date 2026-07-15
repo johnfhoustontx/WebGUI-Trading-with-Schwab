@@ -299,6 +299,21 @@ def market_status_parts(now=None):
         return "MARKET CLOSED", False
 
 
+# ── Nav rail geometry (2026-07-15) ──────────────────────────────────────────
+# The drawer is an ICON RAIL that expands on hover. NAV_WIDTH_RAIL is the width
+# Quasar lays out with (so the page's left offset is always the rail width);
+# NAV_WIDTH_OPEN is what the ``.nav-drawer:hover`` rule widens the drawer to.
+# That rule does not exist yet — a later task adds it to ``_NAV_CSS``; keep the
+# two constants in lockstep with it once it lands.
+NAV_WIDTH_RAIL = 64
+NAV_WIDTH_OPEN = 248
+
+
+def drawer_width(pinned: bool) -> int:
+    """Quasar ``width`` prop for the nav drawer: the full menu when pinned, else
+    the icon rail (hover widens it via CSS only — the layout offset stays here)."""
+    return NAV_WIDTH_OPEN if pinned else NAV_WIDTH_RAIL
+
 
 # ── Browser-tab title + per-page favicon color ──────────────────────────────
 # Each page's BROWSER TAB shows the selected menu-item name (derived from the nav

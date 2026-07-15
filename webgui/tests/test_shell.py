@@ -366,3 +366,12 @@ def test_drawer_icons_are_present_and_distinct():
     # The two curated changes (design doc 2026-07-15).
     assert by_label["Market Trend & Sentiment"] == "speed"
     assert by_label["Trade Analyzer"] == "query_stats"
+
+
+def test_drawer_width_pinned_vs_rail():
+    """Pinned = the full menu (Quasar offsets content to match). Unpinned = the
+    64px icon rail; the CSS :hover rule widens it WITHOUT changing this number,
+    which is exactly why hovering overlays instead of reflowing the page."""
+    import main
+    assert main.drawer_width(True) == main.NAV_WIDTH_OPEN == 248
+    assert main.drawer_width(False) == main.NAV_WIDTH_RAIL == 64
