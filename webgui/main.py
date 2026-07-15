@@ -302,9 +302,9 @@ def market_status_parts(now=None):
 # ── Nav rail geometry (2026-07-15) ──────────────────────────────────────────
 # The drawer is an ICON RAIL that expands on hover. NAV_WIDTH_RAIL is the width
 # Quasar lays out with (so the page's left offset is always the rail width);
-# NAV_WIDTH_OPEN is what the ``.nav-drawer:hover`` rule widens the drawer to.
-# That rule does not exist yet — a later task adds it to ``_NAV_CSS``; keep the
-# two constants in lockstep with it once it lands.
+# NAV_WIDTH_OPEN is what the ``_NAV_CSS`` hover rule widens the ASIDE to, and
+# what ``_layout`` lays the drawer out at when PINNED. The 248 is duplicated as a
+# literal in that CSS rule — a test pins the two together.
 NAV_WIDTH_RAIL = 64
 NAV_WIDTH_OPEN = 248
 
@@ -534,9 +534,8 @@ _NAV_CSS = """
    charts mis-sized). :focus-within expands for keyboard users, who otherwise get
    a rail of unreadable opacity:0 labels. .nav-pinned opts out: the drawer is
    already laid out at the open width.
-   NOTE: the drawer_width prop wiring and the .nav-pinned class land in a LATER
-   task — until then the aside keeps Quasar's default width, so these rules are
-   inert. The 248px must equal NAV_WIDTH_OPEN; a test pins them together. */
+   The width prop + the .nav-pinned class are wired in _layout/_toggle_pin.
+   The 248px must equal NAV_WIDTH_OPEN; a test pins them together. */
 .q-drawer:has(> .nav-drawer:not(.nav-pinned)) { transition: width .18s ease; }
 .q-drawer:has(> .nav-drawer:not(.nav-pinned)):hover,
 .q-drawer:has(> .nav-drawer:not(.nav-pinned)):focus-within {
@@ -848,15 +847,23 @@ def _nav_group_link(label: str, icon: str, children, active: str) -> None:
             ui.label(label).classes("nav-label")
 
 
+def _toggle_pin(drawer) -> None:
+    """Pin/unpin the nav rail (the header hamburger). Pinned = laid out at the
+    open width with the hover rule disabled; unpinned = the icon rail. Quasar
+    reacts to the width prop, so no page reload. Persisted so the drawer opens
+    the way it was left."""
+    pinned = not app_settings.get("nav_pinned")
+    app_settings.set("nav_pinned", pinned)
+    drawer.props(f"width={drawer_width(pinned)}")
+    drawer.classes(add="nav-pinned") if pinned else drawer.classes(remove="nav-pinned")
+
+
 @contextmanager
 def _layout(active: str, title: str):
     """Render shared chrome (header, nav drawer, proxy banner).
 
     Yields the content container the page should populate.
     """
-    # Drawer starts open and is toggleable via the header menu button, so the
-    # nav stays reachable at any viewport width (Quasar hides it as an overlay
-    # below the layout breakpoint otherwise).
     _badge_refs.clear()
     _group_badge_refs.clear()
     _recompute_badges()
@@ -882,7 +889,14 @@ def _layout(active: str, title: str):
     # Browser tab: title = the selected menu item; favicon = this page's color.
     ui.page_title(_NAV_LABEL.get(active, "Schwab Trading"))
     ui.add_head_html(_favicon_link(_TAB_COLOR.get(active, "#42a5f5")))
-    drawer = ui.left_drawer(value=True, bordered=True).classes("nav-drawer").props("behavior=desktop")
+    # Icon rail: laid out at the rail width (or the open width when pinned); the
+    # _NAV_CSS :hover rule expands only the ASIDE over the content (see the rail
+    # comment there). behavior=desktop keeps Quasar from flipping it to a mobile
+    # overlay at narrow viewports.
+    _pinned = bool(app_settings.get("nav_pinned"))
+    drawer = (ui.left_drawer(value=True, bordered=True)
+              .classes("nav-drawer" + (" nav-pinned" if _pinned else ""))
+              .props(f"behavior=desktop width={drawer_width(_pinned)}"))
     with drawer:
         # Deep Slate rail: "WORKSPACE" caption, dot-per-item nav, Session P&L pinned
         # to the bottom. The h-full flex column lets `mt-auto` push the stat down.
@@ -903,8 +917,8 @@ def _layout(active: str, title: str):
 
     with ui.header().classes("items-center justify-between px-4"):
         with ui.row().classes("items-center gap-3 no-wrap"):
-            ui.button(icon="menu", on_click=drawer.toggle).props(
-                "flat round dense color=white size=sm")
+            ui.button(icon="menu", on_click=lambda: _toggle_pin(drawer)).props(
+                "flat round dense color=white size=sm").tooltip("Pin / unpin the menu")
             with ui.element("div").classes("brand-tile"):
                 ui.html('<svg width="15" height="15" viewBox="0 0 16 16">'
                         '<polyline points="1,11 5,6 8,9 15,2" fill="none" stroke="#0b1024" '

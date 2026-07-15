@@ -377,6 +377,18 @@ def test_drawer_width_pinned_vs_rail():
     assert main.drawer_width(False) == main.NAV_WIDTH_RAIL == 64
 
 
+def test_hamburger_pins_instead_of_toggling_the_drawer():
+    """The rail is always visible, so the hamburger's job changed from show/hide
+    to pin/unpin — and the pin must PERSIST (it's a preference, not per-page)."""
+    import inspect
+    import main
+    src = inspect.getsource(main._layout)
+    assert "drawer.toggle" not in src, "hamburger now pins, it does not hide the rail"
+    assert "_toggle_pin" in src
+    assert "drawer_width(" in src, "the drawer's width comes from the pin state"
+    assert 'app_settings.set("nav_pinned"' in inspect.getsource(main._toggle_pin)
+
+
 def test_the_retired_dot_is_gone_for_good():
     """The dot is retired repo-wide — the icon carries active state now. A negative
     source assertion is the cheap global guard against it creeping back."""
