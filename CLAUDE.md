@@ -8,7 +8,32 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-07-14 (**Rescue coverage — Phase 1c: single-type condors & butterflies (ad-hoc)**: the
+**Last updated:** 2026-07-15 (**Nav drawer → icon rail that expands on hover**: the webgui's left drawer
+(`webgui/main.py`) is now a **64px icon rail** that widens to **248px on hover** and **OVERLAYS** the page
+instead of reflowing it. **Mechanism** (the part worth keeping): the drawer is LAID OUT at
+`NAV_WIDTH_RAIL=64` via Quasar's `width` prop (`drawer_width(pinned)` → 64, or `NAV_WIDTH_OPEN=248` when
+pinned); `_NAV_CSS` widens it on hover with `.q-drawer:has(> .nav-drawer:not(.nav-pinned)):hover, :focus-within
+{ width: 248px !important }`. Because Quasar's LAYOUT still uses 64, `.q-page-container`'s padding never
+changes → the expanded menu overlays content — **deliberate**: this app's Highcharts have no ResizeObserver,
+so reflowing on every hover would leave charts mis-sized. No Quasar mini-mode, no JS, no hover round-trips.
+The **hamburger pins/unpins** (persisted via `app_settings` `nav_pinned`, default False); pinned lays out at
+248 (the page genuinely reflows — correct for an explicit choice) and `.nav-pinned` disables the hover rule.
+**Icons render again** (a prior redesign had replaced each item's icon with a colored dot, leaving the `icon`
+arg dead): the dot is retired and the icon is the affordance — it's the only thing visible when collapsed.
+Two were re-curated — Market Trend & Sentiment `insights`→**`speed`** (the page is four speedometer gauges;
+`insights` collided with Trade Analyzer's) and Trade Analyzer `analytics`→**`query_stats`** (the job is
+"analyze one symbol", not "charts"); the other five kept (`candlestick_chart`/`dashboard`/`account_balance`/
+`smart_toy`/`more_horiz`), guarded by a test asserting the 7 drawer icons stay non-empty + mutually distinct.
+**Badges** moved from `ml-auto` onto each icon's top-right corner (Quasar `floating` on a `relative` wrapper)
+so a collapsed rail still reports "3 new signals"; `_count_badge`/`_set_badge` DRY the drawer + tab-strip
+construction and the 2s watcher's updates. **The two traps this exposed are recorded in the "NiceGUI gotchas"
+section — read them before touching drawer CSS or measuring anything in the automation browser**:
+(1) `.nav-drawer` is NOT the `<aside>` (the width lives on the parent `.q-drawer`; reach it via
+`:has(> .nav-drawer)`), and (2) CSS transitions freeze at their START value in the backgrounded automation
+browser, so `getComputedStyle` LIES until you kill transitions. Also: the active-icon accent must be
+`.nav-drawer .nav-active .nav-icon` (0,3,0) `!important` to out-specify `theme.build_nav_css`'s
+`[menu].text` rule — a `.nav-icon-active` class was tried and REMOVED (at (0,2,0) it tied and lost on source
+order). webgui **772** green; ruff clean. Branch `Using_Highcharts`. Prior — 2026-07-14 (**Rescue coverage — Phase 1c: single-type condors & butterflies (ad-hoc)**: the
 `/options/rescue` **ad-hoc** tab now builds advisory rescues for the **single-type range structures** —
 `CONDOR_CALL`/`CONDOR_PUT` (long condor: long K1 / short K2 / short K3 / long K4) and `BUTTERFLY_CALL`/
 `BUTTERFLY_PUT` (long 1-2-1 fly: long K1 / short 2×K2 / long K3). All defined-risk **DEBIT**, neutral/range
@@ -1344,19 +1369,44 @@ services → webgui. Full design: [3-tier design doc](docs/plans/2026-06-15-thre
 
 ## webgui structure (NiceGUI app)
 
-`webgui/main.py` is the server + nav shell (**redesigned 2026-07-11 — sub-menus
-are TABS**): the left drawer is a **FLAT main menu** — one item per group
-(**Options**, **Sentiment**, **More**) plus the flat Market Dashboard / Trade /
-Portfolio / Driver items — and the active group's **child pages render as a
-compact TAB STRIP across the top of the page** (`_NAV_GROUPS` +
-`_group_children(active)`; a `ui.tabs` under the header with `.compact-tabs`
-small padding — q-tab min-height 32px — clicking a tab navigates; More's strip
-includes the Settings children, e.g. User Manuals). Per-page alert badges
-**float on the tabs** (`_badge_refs`), and each drawer group item carries the
-**SUM of its children's badges** (`_group_badge_refs`, updated by the 2s
-watcher). The old expandable sub-menus / `_NAV_OPEN` / `_settings_group` are
-GONE. Tabs are **folder-style** (bordered, rounded top corners, active filled with
-the Quasar primary → follows the `[menu].accent` theme knob). A page with its
+`webgui/main.py` is the server + nav shell (**sub-menus are TABS** since
+2026-07-11; the drawer became an **ICON RAIL** 2026-07-15): the left drawer is a
+**FLAT main menu** — one item per group (**Options**, **Market Trend &
+Sentiment**, **More**) plus the flat Market Dashboard / Trade / Portfolio /
+Driver items — and the active group's **child pages render as a compact TAB
+STRIP across the top of the page** (`_NAV_GROUPS` + `_group_children(active)`;
+a `ui.tabs` under the header with `.compact-tabs` small padding — q-tab
+min-height 30px — clicking a tab navigates; More's strip includes the Settings
+children, e.g. User Manuals).
+
+**The drawer is a 64px ICON RAIL that expands to 248px on hover and OVERLAYS
+the page.** It is LAID OUT at `NAV_WIDTH_RAIL=64` via Quasar's `width` prop
+(`drawer_width(pinned)` → 64, or `NAV_WIDTH_OPEN=248` when pinned — `ui.left_drawer`
+has **no `width` kwarg**, so it goes through `.props(f"width={...}")`), and
+`_NAV_CSS` widens it on hover/`:focus-within` with
+`.q-drawer:has(> .nav-drawer:not(.nav-pinned))` → `width: 248px !important`.
+**Quasar's LAYOUT still uses 64, so `.q-page-container`'s padding never changes —
+the expanded menu OVERLAYS content rather than reflowing it.** That is deliberate:
+this app's Highcharts have no ResizeObserver, so a reflow on every hover would
+leave charts mis-sized. No Quasar mini-mode, no JS, no hover round-trips. Because
+only the icon is visible when collapsed, **the icon is the affordance** (the
+`icon` arg is live again — the earlier colored-dot indicator is retired; a test
+guards that the 7 drawer icons stay non-empty + mutually distinct). Labels/title
+clip and fade in via opacity; `.nav-drawer { overflow-x: hidden }` stops the
+248px of content raising a scrollbar in the rail. The **hamburger pins/unpins**
+(`_toggle_pin`, persisted in `app_settings` `nav_pinned`, default False) rather
+than show/hide: pinned lays out at 248 (the page genuinely reflows — correct for
+an explicit choice) and the `.nav-pinned` class opts out of the hover rule. The
+**active-icon accent** is `.nav-drawer .nav-active .nav-icon` — 3 classes +
+`!important`, which it must be to out-specify `theme.build_nav_css`'s
+`[menu].text` rule (see the gotchas). Per-page alert badges **float on the tabs**
+(`_badge_refs`) and, in the drawer, on each **icon's top-right corner** (Quasar
+`floating` on a `relative` wrapper — so a collapsed rail still reports counts);
+each drawer group item carries the **SUM of its children's badges**
+(`_group_badge_refs`, updated by the 2s watcher). `_count_badge`/`_set_badge` are
+the shared build/update pair. The old expandable sub-menus / `_NAV_OPEN` /
+`_settings_group` are GONE. Tabs are **pill-style** (raised rounded container,
+active pill a soft navy tint). A page with its
 own view tabs mounts them as a **subtab row flush under the strip** via
 `main.subtab_slot()` + `.compact-subtabs` (e.g. the Gamma
 GEX/Charm/DEX/Vanna/Flow/Term picker, a `ui.tabs` since 2026-07-11 — same
@@ -1901,6 +1951,33 @@ module-level functions (TDD them with sample dicts); keep `render()` thin
 - `ui.html(...)` **strips `<style>` and `<iframe>`**. For CSS use `ui.add_css(css)`
   (rules only, scope with a class); render HTML *fragments*, not full documents.
   See `pages/options/gamma.py` Explain (`EXPLAIN_CSS` + `wrap_explain`).
+- **A drawer's `.nav-drawer` class is NOT the `<aside>` — you cannot size the drawer
+  through it (cost: hours; the CSS silently did nothing).** NiceGUI puts the classes
+  you pass to `ui.left_drawer(...).classes(...)` on Quasar's **inner**
+  `div.q-drawer__content.fit.scroll.nicegui-drawer.nav-drawer`; the **parent
+  `<aside class="q-drawer">` is what carries the inline `style="width:…"`** written by
+  the `width` prop. Styling the child resizes a CHILD of the width-holder → no visible
+  effect. Reach the aside via **`:has(> .nav-drawer)`** (see `main._NAV_CSS`). Related,
+  verified: `ui.left_drawer` has **no `width` kwarg** — width goes through
+  `.props("width=64")`; and an unlayered author `!important` (what `ui.add_css` emits)
+  **does** beat the aside's inline width, but it does **NOT** beat NiceGUI's
+  `layer(quasar_importants)` rules (e.g. `.fit{width:100%!important}` — which is on the
+  CONTENT div, and 100% of a 248px aside is what you want anyway). Know that asymmetry
+  before fighting a width.
+- **CSS transitions FREEZE in the automation browser, so `getComputedStyle`
+  measurements LIE (cost: hours chasing phantom values).** The Claude Browser pane's
+  tab is backgrounded (`document.visibilityState === "hidden"`), so
+  `document.timeline.currentTime` stays **0 forever**. Every CSS transition sits
+  `playState:"running"` at `currentTime: 0` indefinitely, pinning its property at its
+  **START** value — and a running transition outranks even author `!important`. So a
+  transitioned property reads its **pre-change** value forever: a phantom `width: 300px`
+  while the inline style says `64px`; a label stuck at `opacity: 0` while its
+  `opacity: 1` rule is present, matching, and higher-specificity. **The tell:** one
+  property from a selector applies instantly while another property from the *identical*
+  selector doesn't. **Fix before measuring:** inject
+  `* { transition: none !important; animation: none !important; }`. (Related preview
+  caveats: `computer{action:"screenshot"}` times out on this app — verify via DOM eval;
+  and hover-by-`ref` works while hover-by-coordinate requires a screenshot first.)
 - **`ui.highchart` inside an inactive `ui.tab_panel` COLLAPSES (cost: the IV-shock
   bug).** The `nicegui-highcharts` Vue component reflows **once** at `mounted()` and
   has **NO ResizeObserver** (`update()` calls `chart.update()`, which does NOT resize
@@ -2008,7 +2085,7 @@ stale); the proxy's REST market data works even when `/health` shows
 `token_expired:true` (auto-refresh) — only a missing/expired **refresh** token is
 fatal.
 
-**Tests:** `cd webgui && ..\.venv\Scripts\python -m pytest -q` (723 green as of
+**Tests:** `cd webgui && ..\.venv\Scripts\python -m pytest -q` (772 green as of
 this writing). TDD pure functions; smoke-verify `render()` with a screenshot.
 `tests/test_no_inline_style.py` guards every migrated page against `.style(`/`:style=`
 (the Tailwind-first standard) — add any new page to it.
@@ -3398,7 +3475,7 @@ cd sentiment-dashboard ; python -m pytest tests
 cd trade-analyzer      ; python -m pytest .
 cd portfolio-analyzer  ; python -m pytest tests
 cd claude-driver       ; python -m pytest .
-cd webgui              ; python -m pytest .   # 610 tests: transforms + shell smoke
+cd webgui              ; python -m pytest .   # 772 tests: transforms + shell smoke
 ```
 
 The 3-tier services run per folder from the repo root (NOT `pytest services` over
