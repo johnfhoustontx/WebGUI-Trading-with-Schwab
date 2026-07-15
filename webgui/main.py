@@ -506,9 +506,10 @@ def _refresh_health() -> None:
 _NAV_CSS = """
 .nav-drawer { gap: 2px; }
 /* Active nav item pill — the "Deep Slate" look: a SUBTLE navy tint (not a solid
-   accent fill), paired with the blue dot the nav item draws itself. Decoupled
-   from --q-primary on purpose (accent drives the DOT + tab fills, the pill stays
-   a soft wash). A plain CSS rule (the bundled JIT doesn't emit rgba arbitraries). */
+   accent fill), paired with the item's own icon, which carries the active state
+   (.nav-icon-active). Decoupled from --q-primary on purpose (accent drives the
+   tab fills, the pill stays a soft wash). A plain CSS rule (the bundled JIT
+   doesn't emit rgba arbitraries). */
 .nav-drawer .nav-active { background: rgba(107,134,255,0.13); }
 .nav-drawer .nav-active .nav-label { color: #eef1f6; font-weight: 600; }
 .nav-drawer .q-item { border-radius: 10px; }
@@ -722,7 +723,24 @@ def _help_tooltip(path: str) -> None:
         ui.markdown(page_help.help_md(path)).classes("text-left")
 
 
-def _nav_icon(icon: str, is_active: bool, count: int):
+def _count_badge(n: int) -> ui.badge:
+    """A red count badge floating on its parent's top-right corner, hidden at 0.
+
+    The drawer rail and the tab strip both mount one; the 2s watcher then keeps it
+    current via ``_set_badge``. The parent must be ``relative`` (see ``_nav_icon``)."""
+    badge = ui.badge(str(n) if n else "").props("color=red rounded floating")
+    badge.set_visibility(bool(n))
+    return badge
+
+
+def _set_badge(badge: ui.badge, n: int) -> None:
+    """Point a mounted count badge at ``n`` — the update half of ``_count_badge``
+    (0 blanks the text AND hides it, so an empty badge never renders as a dot)."""
+    badge.text = str(n) if n else ""
+    badge.set_visibility(bool(n))
+
+
+def _nav_icon(icon: str, is_active: bool, count: int) -> ui.badge:
     """The rail's icon plus its corner count badge.
 
     The icon is the ONLY thing visible when the rail is collapsed, so it carries
@@ -730,23 +748,25 @@ def _nav_icon(icon: str, is_active: bool, count: int):
     out-specify the [menu].text override) and the badge rides its top-right
     corner in BOTH states. Returns the badge so the caller can register it for
     the 2s watcher."""
+    # ``relative`` is load-bearing, not layout garnish: Quasar's ``floating`` badge is
+    # position:absolute, so it anchors to the nearest POSITIONED ancestor. Drop this
+    # and the badge escapes up the tree instead of sitting on the icon corner.
     with ui.element("div").classes(
-            "relative flex items-center justify-center flex-none w-[22px] h-[22px]"):
+            "relative flex items-center justify-center flex-none w-6 h-6"):
         ui.icon(icon).classes(
-            "nav-icon text-[21px]" + (" nav-icon-active" if is_active else ""))
-        badge = ui.badge(str(count) if count else "").props("color=red rounded floating")
-        badge.set_visibility(bool(count))
+            "nav-icon text-[20px]" + (" nav-icon-active" if is_active else ""))
+        badge = _count_badge(count)
     return badge
 
 
 def _nav_link(path: str, label: str, icon: str, active: str) -> None:
     base = ("w-full no-underline items-center rounded-[10px] px-3 py-1 "
             "transition-colors hover:bg-white/[0.06]")
-    # nav-active is a plain CSS rule in _NAV_CSS (background: var(--q-primary)) —
-    # NOT a Tailwind arbitrary class: the bundled Tailwind JIT does not reliably
-    # generate arbitrary values containing var(...) (plain-hex arbitraries are
-    # fine), so the old bg-[var(--q-primary)] silently produced no rule. The CSS
-    # var keeps the pill following the [menu].accent knob (ui.colors).
+    # nav-active is a plain CSS rule in _NAV_CSS (a soft rgba navy wash) — NOT a
+    # Tailwind arbitrary class: the bundled Tailwind JIT emits neither var(...)
+    # nor rgba(...) arbitraries reliably (plain-hex ones are fine), so the old
+    # bg-[var(--q-primary)] silently produced no rule at all. The pill is now
+    # decoupled from --q-primary on purpose — see the rule's comment in _NAV_CSS.
     is_active = path == active
     state = " nav-active" if is_active else ""
     with ui.link(target=path).classes(base + state):
@@ -865,11 +885,7 @@ def _layout(active: str, title: str):
                 for path, label, _icon in children:
                     with ui.tab(path, label=label):
                         _help_tooltip(path)   # rest the mouse 2 s for the guide
-                        n = _NAV_BADGES.get(path, 0)
-                        b = ui.badge(str(n) if n else "").props(
-                            "floating color=red rounded")
-                        b.set_visibility(bool(n))
-                        _badge_refs[path] = b
+                        _badge_refs[path] = _count_badge(_NAV_BADGES.get(path, 0))
             strip.on_value_change(lambda e: ui.navigate.to(e.value)
                                   if e.value != active else None)
             _SUBTAB_SLOT["el"] = ui.element("div").classes("w-full pl-3")
@@ -921,13 +937,9 @@ def _layout(active: str, title: str):
                     notify_desktop("Service alert",
                                    f"{n} component(s) stale or down — see System Status.")
         for route, badge in _badge_refs.items():
-            n = _NAV_BADGES.get(route, 0)
-            badge.text = str(n) if n else ""
-            badge.set_visibility(bool(n))
+            _set_badge(badge, _NAV_BADGES.get(route, 0))
         for _label, (badge, paths) in _group_badge_refs.items():
-            n = sum(_NAV_BADGES.get(p, 0) for p in paths)
-            badge.text = str(n) if n else ""
-            badge.set_visibility(bool(n))
+            _set_badge(badge, sum(_NAV_BADGES.get(p, 0) for p in paths))
 
     ui.timer(2.0, _tick)
 

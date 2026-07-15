@@ -377,14 +377,83 @@ def test_drawer_width_pinned_vs_rail():
     assert main.drawer_width(False) == main.NAV_WIDTH_RAIL == 64
 
 
-def test_nav_link_renders_the_icon_and_registers_its_badge():
-    """The icon (not the retired dot) is the rail's affordance, and the badge ref
-    the 2s watcher writes to must still be registered per route."""
+def test_the_retired_dot_is_gone_for_good():
+    """The dot is retired repo-wide — the icon carries active state now. A negative
+    source assertion is the cheap global guard against it creeping back."""
     import inspect
     import main
-    src = inspect.getsource(main._nav_link) + inspect.getsource(main._nav_group_link)
-    assert "nav-dot" not in src, "the dot is retired — the icon carries active state"
-    assert "_nav_icon(" in src, "both link builders go through the shared icon+badge helper"
-    helper = inspect.getsource(main._nav_icon)
-    assert "floating" in helper
-    assert "relative" in helper
+    assert "nav-dot" not in inspect.getsource(main)
+
+
+def _nav_wrapper_of(badge):
+    """The ``relative`` div ``_nav_icon`` mounts the icon + badge into."""
+    return badge.parent_slot.parent
+
+
+def test_nav_link_badge_floats_on_the_icon_and_registers_per_route():
+    """The badge must sit INSIDE the relative wrapper (Quasar's floating badge is
+    position:absolute — it anchors to the nearest positioned ancestor), and the ref
+    the 2s watcher writes to must be registered under the item's route."""
+    from nicegui import ui
+
+    import main
+    main._NAV_BADGES.clear()
+    main._NAV_BADGES["/trade"] = 3
+    main._badge_refs.clear()
+    with ui.card():
+        main._nav_link("/trade", "Trade Analyzer", "query_stats", "/trade")
+
+    badge = main._badge_refs["/trade"]          # registration, per route
+    assert badge.text == "3" and badge.visible
+    assert badge._props.get("floating") is True
+
+    wrapper = _nav_wrapper_of(badge)            # re-parenting guard
+    assert "relative" in wrapper.classes, \
+        "floating is position:absolute — it anchors to the nearest positioned " \
+        "ancestor, so the badge must stay inside the relative wrapper"
+    icons = [c for c in wrapper.default_slot.children if isinstance(c, ui.icon)]
+    assert [i._props["name"] for i in icons] == ["query_stats"], \
+        "the icon is the rail's affordance and shares the badge's wrapper"
+    assert any("nav-icon-active" in i.classes for i in icons), \
+        "the active item's icon carries .nav-icon-active (task 5 styles it)"
+
+
+def test_nav_link_badge_hidden_at_zero_and_icon_idle_when_inactive():
+    """The 0/inactive complement of the test above — a count of 0 renders no badge
+    text AND is hidden, and a non-active item's icon must NOT claim active state."""
+    from nicegui import ui
+
+    import main
+    main._NAV_BADGES.clear()
+    main._badge_refs.clear()
+    with ui.card():
+        main._nav_link("/trade", "Trade Analyzer", "query_stats", "/market")
+
+    badge = main._badge_refs["/trade"]
+    assert badge.text == "" and not badge.visible
+    icons = [c for c in _nav_wrapper_of(badge).default_slot.children
+             if isinstance(c, ui.icon)]
+    assert not any("nav-icon-active" in i.classes for i in icons)
+
+
+def test_nav_group_link_badge_sums_across_the_groups_paths():
+    """A group item shows the SUM of its children's counts (the watcher recomputes
+    that same sum via _group_badge_refs' paths), on its own icon's corner."""
+    from nicegui import ui
+
+    import main
+    main._NAV_BADGES.clear()
+    main._NAV_BADGES.update({"/": 2, "/options/captured": 5})
+    main._group_badge_refs.clear()
+    children = [("/", "Scanner", "radar"), ("/options/captured", "Captured", "bookmark")]
+    with ui.card():
+        main._nav_group_link("Options", "insights", children, "/")
+
+    badge, paths = main._group_badge_refs["Options"]   # registered shape: (badge, paths)
+    assert paths == ["/", "/options/captured"]
+    assert badge.text == "7" and badge.visible, "2 + 5 across the group's paths"
+
+    wrapper = _nav_wrapper_of(badge)
+    assert "relative" in wrapper.classes
+    icons = [c for c in wrapper.default_slot.children if isinstance(c, ui.icon)]
+    assert [i._props["name"] for i in icons] == ["insights"]
