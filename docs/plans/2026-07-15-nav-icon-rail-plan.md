@@ -20,7 +20,9 @@ Everything below lives in **`webgui/main.py`** unless stated. Run tests with:
 cd "D:/WebGUI Trading with Schwab/webgui" && ../.venv/Scripts/python -m pytest -q
 ```
 
-Baseline is **723 passing**. Never let that number drop.
+Baseline is **761 passing** (measured 2026-07-15; CLAUDE.md's "723" is stale — do not
+trust it). Never let that number drop. Each task below adds one test, so the running total
+is 762, 763, 764, 765, 766, 767.
 
 **Three landmines specific to this codebase — read these or you will lose an afternoon:**
 
@@ -106,7 +108,7 @@ Run the same command. Expected: PASS. Then the full suite:
 ```bash
 ../.venv/Scripts/python -m pytest -q
 ```
-Expected: 724 passed.
+Expected: 762 passed.
 
 **Step 5: Commit**
 
@@ -320,7 +322,7 @@ Update `_nav_group_link`'s docstring line about the dot if it mentions one. Dele
 ```bash
 ../.venv/Scripts/python -m pytest tests/test_shell.py -q && ../.venv/Scripts/python -m pytest -q
 ```
-Expected: all pass, 726 total.
+Expected: all pass, 765 total.
 
 **Step 5: Commit**
 
@@ -485,7 +487,7 @@ settings use it).
 ```bash
 ../.venv/Scripts/python -m pytest -q
 ```
-Expected: 728 passed.
+Expected: 767 passed.
 
 **Step 5: Commit**
 
@@ -590,6 +592,6 @@ git commit -m "docs: record the nav icon rail in CLAUDE.md"
 
 ## Done when
 
-- 728 webgui tests green.
+- 767 webgui tests green.
 - The browser check in Task 7 passes all six probes, screenshots shared.
 - `git log --oneline` shows one commit per task.
