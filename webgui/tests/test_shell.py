@@ -339,3 +339,19 @@ def test_reimporting_main_after_startup_does_not_raise():
         spec.loader.exec_module(mod)  # must not raise
     finally:
         ng_app._state = prev
+
+
+def test_drawer_icons_are_present_and_distinct():
+    """The collapsed rail shows ONLY icons, so every drawer item needs a
+    non-empty icon and no two may collide (an ambiguous rail is unusable).
+    The drawer is the 3 groups + the flat pages — child pages live in the tab
+    strip and are not covered here."""
+    import main
+    icons = [g[1] for g in main._NAV_GROUPS] + [i for _p, _l, i in main.FLAT_NAV]
+    assert len(icons) == 7
+    assert all(icons), "every drawer item needs an icon"
+    assert len(set(icons)) == len(icons), f"duplicate drawer icons: {icons}"
+    # The two curated changes (design doc 2026-07-15).
+    by_label = {g[0]: g[1] for g in main._NAV_GROUPS}
+    assert by_label["Market Trend & Sentiment"] == "speed"
+    assert dict((l, i) for _p, l, i in main.FLAT_NAV)["Trade Analyzer"] == "query_stats"

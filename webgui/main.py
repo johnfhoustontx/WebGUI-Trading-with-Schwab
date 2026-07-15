@@ -236,7 +236,7 @@ SENTIMENT_CHILDREN = [
 # Flat top-level items (non-Options apps). (route, label, icon)
 FLAT_NAV = [
     ("/market", "Market Dashboard", "dashboard"),
-    ("/trade", "Trade Analyzer", "analytics"),
+    ("/trade", "Trade Analyzer", "query_stats"),
     ("/portfolio", "Portfolio", "account_balance"),
     ("/driver", "Claude Trades", "smart_toy"),
 ]
@@ -262,7 +262,7 @@ SETTINGS_CHILDREN = [
 # counts; the per-page badges float on the tabs. (label, icon, children)
 _NAV_GROUPS = [
     ("Options", "candlestick_chart", OPTIONS_CHILDREN),
-    ("Market Trend & Sentiment", "insights", SENTIMENT_CHILDREN),
+    ("Market Trend & Sentiment", "speed", SENTIMENT_CHILDREN),
     ("More", "more_horiz", MORE_CHILDREN + SETTINGS_CHILDREN),
 ]
 
