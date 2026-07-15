@@ -509,24 +509,35 @@ def run_cycle(scan_view, paper_view, *, target, limits, market, client=None) -> 
                               market=market)
         model_facing = {k: v for k, v in packet.items() if k != "menu_by_id"}
         decision = decider.decide(model_facing, client=client)
-        # Directional gate — pass a decisive posture ONLY when the flag is on; otherwise
-        # "neutral" keeps the gate inert (byte-identical to today). Ships off until the
-        # offline backtest validates it (settings.DIRECTIONAL_GATE_ENABLED).
-        posture = (_directional_posture(packet.get("market_read"))
-                   if _st.DIRECTIONAL_GATE_ENABLED else "neutral")
+        # Directional gate — compute the decisive posture ALWAYS (from price truth), but
+        # only ENFORCE it when the flag is on; otherwise "neutral" keeps the live gate inert
+        # (byte-identical execution to today). Ships off until the shadow evidence below
+        # justifies flipping it (settings.DIRECTIONAL_GATE_ENABLED).
+        gate_on = _st.DIRECTIONAL_GATE_ENABLED
+        decisive_posture = _directional_posture(packet.get("market_read"))
+        posture = decisive_posture if gate_on else "neutral"
         guarded = _g.apply_guardrails(
             decision, packet["menu_by_id"], limits,
             open_count=packet["open_count"], day_pnl=packet["day_pnl"],
             vix=packet["vix"], daily_max_loss=_daily_max_loss(), posture=posture)
+        # Shadow gate (log-only): what a LIVE directional gate WOULD have blocked among the
+        # trades that fired, evaluated at the decisive posture even while the gate is inert.
+        # Empty when gate_on (wrong-side trades are already in `rejected`). Recorded on the
+        # /driver decision log so DIRECTIONAL_GATE_ENABLED can be flipped on real evidence.
+        shadow = _g.shadow_gate(guarded.get("executable", []), decisive_posture)
+        shadow["enabled"] = gate_on
         return {"decision": decision, "day_pnl": packet["day_pnl"],
                 "open_positions": packet["open_positions"],
                 # Threaded out for /driver observability (its one-line summary is stamped
                 # onto the decision-log row); None when no market-read source was present.
-                "market_read": packet.get("market_read"), **guarded}
+                "market_read": packet.get("market_read"),
+                "shadow_gate": shadow, **guarded}
     except Exception as exc:  # noqa: BLE001 — the cycle never raises; stand down.
         return {"decision": {"stand_down": True, "day_thesis": "", "confidence": 0.0,
                              "trades": [], "error": str(exc)},
                 "executable": [], "rejected": [], "halted": False, "halt_reason": None,
+                "shadow_gate": {"posture": "neutral", "would_block": [], "n": 0,
+                                "enabled": False},
                 "day_pnl": None, "open_positions": []}
 
 

@@ -20,6 +20,7 @@ Version 1.0.0 Changes:
 """
 
 import logging
+import os
 import sys, pathlib
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, List
@@ -32,6 +33,35 @@ from repo_paths import PROXY_URL
 logger = logging.getLogger(__name__)
 
 PROXY_BASE = PROXY_URL
+
+
+def _client_secret() -> Optional[str]:
+    """The shared secret to send on proxy requests, or None (default → send nothing).
+
+    Resolves the SAME source the proxy checks: env ``PROXY_SHARED_SECRET`` → gitignored
+    ``shared/proxy_secret.txt``. When set, clients attach it as the ``X-Proxy-Secret``
+    header so the (optionally) auth-guarded trading endpoints accept them. Backward-
+    compatible: unset → no header, exactly as before. Never raises."""
+    env = os.environ.get("PROXY_SHARED_SECRET")
+    if env and env.strip():
+        return env.strip()
+    try:
+        from repo_paths import SHARED_DIR
+        p = pathlib.Path(SHARED_DIR) / "proxy_secret.txt"
+        if p.exists():
+            s = p.read_text(encoding="utf-8").strip()
+            if s:
+                return s
+    except Exception:  # noqa: BLE001 — missing/unreadable secret → send no header.
+        pass
+    return None
+
+
+def _apply_secret(session: "requests.Session") -> None:
+    """Attach the X-Proxy-Secret header to a session when a secret is configured."""
+    secret = _client_secret()
+    if secret:
+        session.headers["X-Proxy-Secret"] = secret
 
 #############################################
 # HELPERS
@@ -95,6 +125,7 @@ class SchwabPyProxyClient:
     def __init__(self, base_url: str = PROXY_BASE):
         self.base = base_url
         self.session = requests.Session()
+        _apply_secret(self.session)
 
     def _get(self, path: str, params: Optional[Dict] = None) -> FakeResponse:
         try:
@@ -198,6 +229,7 @@ class SchwabProxyClient:
     def __init__(self, base_url: str = PROXY_BASE):
         self.base = base_url
         self.session = requests.Session()
+        _apply_secret(self.session)
 
     def _proxy_get(self, path: str, params: Optional[Dict] = None) -> Optional[Dict]:
         try:

@@ -82,7 +82,12 @@ class Bus:
         else:
             import redis
 
-            self._r = redis.Redis.from_url(url or MEMURAI_URL, decode_responses=True)
+            # Optional Memurai/Redis auth (backward-compatible): when MEMURAI_PASSWORD is
+            # set AND Memurai is configured with `requirepass`, every service authenticates
+            # with it. Unset → password=None → no AUTH, exactly as before.
+            self._r = redis.Redis.from_url(
+                url or MEMURAI_URL, decode_responses=True,
+                password=os.environ.get("MEMURAI_PASSWORD") or None)
         self._groups: set = set()  # (stream, group) consumer groups already ensured
 
     # --- versioned cache -------------------------------------------------

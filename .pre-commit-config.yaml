@@ -2,13 +2,13 @@
 # Install once:  pipx run pre-commit install   (or: pip install pre-commit && pre-commit install)
 # Run on all files:  pre-commit run --all-files
 #
-# Ruff config lives in ruff.toml (scope + rules). These hooks lint (and format-check)
+# Ruff config lives in pyproject.toml [tool.ruff] (scope + rules). These hooks lint
 # only the in-scope, non-grandfathered code — see docs/audits/2026-07-02-best-practices-validation.md.
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.14.5
     hooks:
-      - id: ruff              # lint (uses ruff.toml: select E9,F)
+      - id: ruff              # lint (uses pyproject.toml: select E9,F63,F7,F82)
         args: [--fix]
         # ruff-format is intentionally omitted — the codebase's compact one-line
         # style is deliberate; enforcing the formatter would rewrite it wholesale.

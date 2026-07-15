@@ -320,6 +320,20 @@ def should_settle(expiration, today, now_ct):
     return False
 
 
+def excursion_update(prior_mae, prior_mfe, pnl):
+    """Roll the running max-adverse / max-favorable excursion for a position (PURE).
+
+    ``pnl`` is the current POSITION-LEVEL unrealized P&L ($). MAE = the most-NEGATIVE
+    P&L ever seen (worst drawdown), MFE = the most-POSITIVE (best paper profit). A
+    ``None`` prior (first mark) seeds both to ``pnl``. Returns ``(mae, mfe)``, rounded.
+    Used to judge — from the book's own history — whether profit targets leave money on
+    the table (low MFE-capture) or stops fire too early/late (deep MAE on winners).
+    """
+    mae = pnl if prior_mae is None else min(prior_mae, pnl)
+    mfe = pnl if prior_mfe is None else max(prior_mfe, pnl)
+    return round(mae, 2), round(mfe, 2)
+
+
 def underlying_last(client, symbol):
     """Best-effort last underlying price for settlement, or None.
 
@@ -362,11 +376,14 @@ def run_manage_cycle(client, now_date, broker=None, db_path=None, now_ct=None):
         per_contract = mark.get("unrealized_pnl")     # ONE contract
 
         if per_contract is not None:
+            pnl = round(per_contract * qty, 2)                 # position-level unrealized
+            mae, mfe = excursion_update(pos.get("mae"), pos.get("mfe"), pnl)
             paper_account_db.update_position_mark(
                 db_path, pos["position_id"],
                 current_value=mark.get("current_value"),
-                unrealized_pnl=round(per_contract * qty, 2),   # position-level
+                unrealized_pnl=pnl,
                 current_short_delta=mark.get("current_short_delta"),
+                mae=mae, mfe=mfe,
                 last_mark_ts=datetime.now(TZ).isoformat())
 
         # Expiration settlement at intrinsic value vs the underlying — only at/

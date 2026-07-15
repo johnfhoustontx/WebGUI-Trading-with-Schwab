@@ -643,9 +643,8 @@ def render():
     # section titles now live per-column (all the same h6 size) below.
     with ui.row().classes("items-center w-full"):
         ui.space()
-        date_lbl = ui.label("").classes("opacity-70 text-sm")
-        ui.button(icon="refresh", color=None, on_click=lambda: _request_refresh()) \
-            .props("no-caps").classes(f"q-ml-sm {BTN_3D}")
+        ui.button("Refresh", icon="refresh", color=None,
+                  on_click=lambda: _request_refresh()).props("no-caps").classes(BTN_3D)
 
     tile_lbls, tile_cards = {}, {}
     # 2x2 signal matrix (Modifier dropped per design).
@@ -707,10 +706,10 @@ def render():
 
     ui.separator().classes("q-my-md")
     # Daily Sentiment & Trend — two value-colorized 2-min intraday series
-    # (rolling last 5 trading days), collapsed by default. Replaces the old
+    # (rolling last 5 trading days), expanded by default. Replaces the old
     # 30-Day History composite chart + rolling/velocity/divergence text.
     with ui.expansion("Daily Sentiment & Trend", icon="show_chart",
-                      value=False).classes("w-full") as daily_exp:
+                      value=True).classes("w-full") as daily_exp:
         ui.label("Daily Market Sentiment").classes("text-subtitle2 q-mt-sm")
         # Plain chart (NOT a stockChart): a stockChart's chart.update() throws in the
         # stock module on every in-place update, freezing an open page on the data it
@@ -733,26 +732,10 @@ def render():
     daily_exp.on_value_change(
         lambda e: ui.timer(0.05, _reflow_daily_charts, once=True) if e.value else None)
 
-    # Sector & Industry Performance
-    ui.separator().classes("q-my-md")
-    ui.label("Sector & Industry Performance").classes("text-subtitle1")
-    with ui.row().classes("items-center gap-3 w-full"):
-        ui.button("Refresh", icon="refresh", color=None,
-                  on_click=lambda: _request_refresh()).props("no-caps").classes(BTN_3D)
-        ui.button("Expand All", color=None, on_click=lambda: _expand_all()).props("no-caps").classes(BTN_3D)
-        ui.button("Collapse All", color=None, on_click=lambda: _collapse_all()).props("no-caps").classes(BTN_3D)
-        summary_lbl = ui.label("").classes("opacity-80 text-sm")
-    rotation_lbl = ui.label("").classes("text-sm")
-    sector_box = ui.column().classes("w-full q-gutter-none q-mt-sm")
-
-    SEC_COLS = [("sector", "Sector", 140), ("etf", "ETF", 50),
-                ("desc", "Description", 200), ("day", "Day %", 70),
-                ("week", "Week %", 70), ("month", "Month %", 70),
-                ("pcr", "P/C", 56), ("rrg", "RRG", 90)]
-    # Single source of truth for column widths so the header (driven by SEC_COLS)
-    # and the data-row cells never drift. ``desc`` is the flex column (its tuple
-    # width is unused — both header and rows render it ``flex-1 min-w-[160px]``).
-    SEC_W = {field: w for field, _label, w in SEC_COLS}
+    # NOTE: the Sector & Industry Performance table moved to its own tab
+    # (``/sentiment/sectors``, ``pages.sentiment_sectors``). This page still reads
+    # ``sentiment:sectors`` in ``_read_cache`` because the Components popup fills
+    # its Rotation / Sector Value cells from that view (see ``_comp_context``).
 
     def _render_components(latest, rotation_value=None, sector_value=None):
         comp_box.clear()
@@ -793,19 +776,10 @@ def render():
         snaps = state["snaps"]
         if not live and not snaps:
             bias_lbl.text = "Waiting for sentiment service…"
-            date_lbl.text = ""
             return
         latest = live or snaps[-1]
         comp = latest.get("composite") or {}
         total = _safe_float(comp.get("total_score"))
-        if live:
-            from datetime import datetime as _dt2
-            from zoneinfo import ZoneInfo as _ZI
-            _rth = is_rth(_dt2.now(_ZI("America/Chicago")))
-            date_lbl.text = (f"as of {latest.get('date')} (live intraday)" if _rth
-                             else f"as of {latest.get('date')} (latest — market closed)")
-        else:
-            date_lbl.text = f"as of {latest.get('date')} (last completed session)"
         gauge_box.options = gauge_figure(gauge_score(total), comp.get("bias", ""))
         gauge_box.update()
         avg = sentiment_30d_avg(state["snaps"])
@@ -878,120 +852,15 @@ def render():
             trend_gauge_30_box.options = gauge_figure(50.0, "—")
             trend_gauge_30_box.update()
 
-    def _render_sector_table():
-        sec = state["sector"]
-        sector_box.clear()
-        if not sec:
-            with sector_box:
-                ui.label("Waiting for sentiment service…").classes("opacity-60 text-sm")
+    def _refill_component_context():
+        """Refill the Components popup's Rotation / Sector-Value cells once the
+        sector cache loads (it version-bumps independently of the composite). The
+        sector TABLE itself now lives on the /sentiment/sectors tab."""
+        if not (state["snaps"] or state.get("live")):
             return
-        sd = sec["sector_data"]
-        rows = sector_table_rows(sd, sec["quotes"], sec["trends"], sec["pcr"], sec["quadrants"])
-        with sector_box:
-            with ui.row().classes("items-center w-full no-wrap gap-2 opacity-60 text-xs"):
-                ui.label("").classes("w-[24px]")
-                for _f, hdr, w in SEC_COLS:
-                    if _f == "desc":
-                        ui.label(hdr).classes("flex-1 min-w-[160px]")
-                    else:
-                        ui.label(hdr).classes(f"w-[{w}px]")
-            for r in rows:
-                sector_name = r["sector"]
-                expanded = sector_name in state["expanded"]
-                dc = pct_text_class(r["day"])  # name/etf/desc share the Day % color
-                with ui.row().classes(
-                        "items-center w-full no-wrap gap-2 text-sm "
-                        "border-b border-white/5 hover:bg-white/[0.04]"):
-                    ui.icon("keyboard_arrow_down" if expanded else "keyboard_arrow_right") \
-                        .classes(f"cursor-pointer w-[24px] {BORDER_R}") \
-                        .on("click", lambda _e, s=sector_name: _toggle_sector(s))
-                    ui.label(str(sector_name or "")).classes(f"w-[{SEC_W['sector']}px] {BORDER_R} {dc}")
-                    ui.label(str(r["etf"] or "")).classes(f"w-[{SEC_W['etf']}px] {BORDER_R} {dc}")
-                    ui.label(str(r["desc"] or "")).classes(
-                        f"flex-1 min-w-[160px] {BORDER_R} "
-                        f"overflow-hidden text-ellipsis whitespace-nowrap {dc}")
-                    for fld in ("day", "week", "month"):
-                        v = r[fld]
-                        ui.label(f"{v:+.2f}%" if v is not None else "—") \
-                            .classes(f"w-[{SEC_W[fld]}px] {BORDER_R} {pct_text_class(v)}")
-                    pv = r["pcr"]
-                    ui.label(f"{pv:.2f}" if pv is not None else "").classes(
-                        f"w-[{SEC_W['pcr']}px] {BORDER_R} {pcr_text_class(pv)}")
-                    rv = r["rrg"]
-                    ui.label(str(rv or "")).classes(f"w-[{SEC_W['rrg']}px] {rrg_text_class(rv)}")
-                if expanded:
-                    # Industries come PRECOMPUTED in the sectors cache view
-                    # ({"quotes","trends","pcr","quadrants"} per sector name) —
-                    # no proxy call here.
-                    ind = (state["industries"] or {}).get(sector_name)
-                    if not ind:
-                        with ui.row().classes("items-center w-full no-wrap gap-2 text-xs opacity-60"):
-                            ui.label("").classes("w-[24px]")
-                            ui.label("no industry data").classes("w-[200px]")
-                    else:
-                        for ir in industry_rows(sd, sector_name, ind.get("quotes"), ind.get("trends"), ind.get("pcr"), ind.get("quadrants")):
-                            idc = pct_text_class(ir["day"])  # industry name/etf/desc share its Day % color
-                            with ui.row().classes(
-                                    "items-center w-full no-wrap gap-2 text-xs "
-                                    "border-b border-white/5 hover:bg-white/[0.04] bg-white/[0.02]"):
-                                ui.label("").classes(f"w-[24px] {BORDER_R}")
-                                ui.label(str(ir["label"] or "")).classes(
-                                    f"w-[{SEC_W['sector']}px] pl-[14px] {BORDER_R} opacity-85 {idc}")
-                                ui.label(str(ir["etf"] or "")).classes(f"w-[{SEC_W['etf']}px] {BORDER_R} {idc}")
-                                ui.label(str(ir["desc"] or "")).classes(
-                                    f"flex-1 min-w-[160px] {BORDER_R} "
-                                    f"overflow-hidden text-ellipsis whitespace-nowrap opacity-80 {idc}")
-                                for fld in ("day", "week", "month"):
-                                    v = ir[fld]
-                                    ui.label(f"{v:+.2f}%" if v is not None else "—") \
-                                        .classes(f"w-[{SEC_W[fld]}px] {BORDER_R} {pct_text_class(v)}")
-                                pv = ir["pcr"]
-                                ui.label(f"{pv:.2f}" if pv is not None else "").classes(
-                                    f"w-[{SEC_W['pcr']}px] {BORDER_R} {pcr_text_class(pv)}")
-                                rv = ir["rrg"]
-                                ui.label(str(rv or "")).classes(f"w-[{SEC_W['rrg']}px] {rrg_text_class(rv)}")
-
-    @guard
-    def _toggle_sector(sector_name):
-        if sector_name in state["expanded"]:
-            state["expanded"].discard(sector_name)
-        else:
-            state["expanded"].add(sector_name)
-        _render_sector_table()
-
-    @guard
-    def _expand_all():
-        if not state["sector"]:
-            return
-        for r in sector_table_rows(state["sector"]["sector_data"], state["sector"]["quotes"],
-                                   state["sector"]["trends"], state["sector"]["pcr"],
-                                   state["sector"]["quadrants"]):
-            state["expanded"].add(r["sector"])
-        _render_sector_table()
-
-    @guard
-    def _collapse_all():
-        state["expanded"].clear()
-        _render_sector_table()
-
-    def _apply_sectors():
-        sec = state["sector"]
-        if not sec:
-            summary_lbl.text = ""
-            rotation_lbl.text = ""
-            _render_sector_table()
-            return
-        sd, quotes = sec["sector_data"], sec["quotes"]
-        summary_lbl.text = sector_summary(sd, quotes, state.get("sector_summary"))
-        regime, color, detail = rotation_banner(sec["rotation"])
-        rotation_lbl.text = f"{regime} — {detail}"
-        rotation_lbl.classes(remove=SENT_TEXT_CLASSES, add=rotation_text_class(color))
-        _render_sector_table()
-        # refill rotation/sector Value cells in the component table now loaded
-        if state["snaps"] or state.get("live"):
-            rotation_value, sector_value = _comp_context()
-            latest = state.get("live") or state["snaps"][-1]
-            _render_components(latest, rotation_value, sector_value)
+        rotation_value, sector_value = _comp_context()
+        latest = state.get("live") or state["snaps"][-1]
+        _render_components(latest, rotation_value, sector_value)
 
     @guard
     def _request_refresh():
@@ -1027,7 +896,7 @@ def render():
         state["sec_ver"] = sec_ver
         _read_cache()
         _apply()
-        _apply_sectors()
+        _refill_component_context()
         _render_status()
 
     ui.separator().classes("q-my-sm")
@@ -1035,7 +904,7 @@ def render():
 
     # Initial paint from the bus cache (graceful-empty if the service is cold).
     _apply()
-    _apply_sectors()
+    _refill_component_context()
     _render_status()
     # Fetch-free version-poll repaint: tracks the service's cache writes without
     # any engine call. The page never fetches; the Refresh button enqueues a

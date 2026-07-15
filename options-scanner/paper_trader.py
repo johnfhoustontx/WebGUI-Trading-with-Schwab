@@ -37,6 +37,56 @@ DATA_DIR.mkdir(exist_ok=True)
 # TRADE MODEL
 #############################################
 
+# Non-credit DEFINED-RISK structures the swing scanner produces that the ledger can now
+# paper-trade: long single options + debit verticals. Their max loss is the debit paid.
+# Naked shorts (SHORT_CALL/SHORT_PUT) are deliberately EXCLUDED (undefined risk).
+PAPER_DEBIT_TYPES = {"LONG_CALL", "LONG_PUT", "BULL_CALL", "BEAR_PUT"}
+
+
+def _create_debit_trade(signal, quantity, mode, now):
+    """Build a legs-based DEBIT paper trade (long option / debit vertical).
+
+    The swing scanner's ``net_debit`` / ``max_loss`` / ``max_profit`` are PER-CONTRACT
+    dollars (already ×100). A DEBIT is stored so the existing Paper Trades columns render:
+    ``entry_credit`` is the NEGATIVE per-share debit (reads as "you paid"), ``max_loss`` is
+    the debit at risk, and ``legs`` drives repricing + expiration settlement."""
+    mult = 100
+    legs = [{"kind": l.get("kind"), "side": l.get("side"), "strike": l.get("strike"),
+             "expiration": l.get("expiration") or signal.get("expiration"),
+             "qty": l.get("qty", 1)}
+            for l in (signal.get("legs") or []) if isinstance(l, dict)]
+    net_debit = signal.get("net_debit") or 0.0        # per-contract $
+    max_loss = signal.get("max_loss") or 0.0          # per-contract $ (incl. commission)
+    max_profit = signal.get("max_profit")             # per-contract $ or None (unbounded)
+    return {
+        "trade_id": str(uuid.uuid4())[:8], "mode": mode, "status": "OPEN",
+        "symbol": signal["symbol"], "strategy": signal["type"],
+        "trade_type": signal.get("trade_type", "SWING"),
+        "expiration": signal["expiration"], "dte_at_entry": signal.get("dte", 0),
+        "quantity": quantity,
+        "direction": "DEBIT",
+        "legs": legs,
+        "entry_debit": round(net_debit, 2),                       # per contract
+        "entry_debit_total": round(net_debit * quantity, 2),
+        # Display-compat: a DEBIT reads as a NEGATIVE credit (premium PAID).
+        "entry_credit": round(-net_debit / mult, 4),             # per share
+        "entry_credit_total": round(-net_debit * quantity, 2),
+        "max_loss_per": round(max_loss / mult, 4),               # per share
+        "max_loss_total": round(max_loss * quantity, 2),
+        "max_profit_total": (round(max_profit * quantity, 2)
+                             if max_profit is not None else None),
+        "unbounded": bool(signal.get("unbounded")),
+        "breakeven": ", ".join(str(b) for b in (signal.get("breakevens") or [])),
+        "short_strike": None, "long_strike": None, "width": None,
+        "short_delta": None, "net_theta": signal.get("net_theta", 0),
+        "entry_delta": None, "entry_theta": None, "entry_vega": None, "entry_gamma": None,
+        "entry_bid": None, "entry_ask": None,
+        "underlying_at_entry": signal.get("underlying_price", 0),
+        "entry_time": now.isoformat(), "exit_time": None, "exit_debit": None,
+        "exit_debit_total": None, "realized_pnl": None, "exit_reason": None, "notes": "",
+    }
+
+
 def create_paper_trade(signal, quantity=1, mode="PAPER"):
     """Create a paper trade from a scanner signal.
 
@@ -44,6 +94,8 @@ def create_paper_trade(signal, quantity=1, mode="PAPER"):
         client.place_order(account_hash, order)
     """
     now = datetime.now(TZ)
+    if signal.get("type") in PAPER_DEBIT_TYPES:
+        return _create_debit_trade(signal, quantity, mode, now)
     multiplier = 100
 
     trade = {
@@ -108,8 +160,24 @@ def close_paper_trade(trade, exit_debit, reason="MANUAL"):
     return trade
 
 
+def _expire_debit_trade(trade, sp):
+    """Settle a DEBIT/legs trade at intrinsic: worth its net intrinsic; P&L = value − debit."""
+    import signal_repricer
+    qty = trade["quantity"]
+    net_per_share, pnl_per_contract = signal_repricer.legs_intrinsic_value(trade, sp)
+    trade["status"] = "EXPIRED"
+    trade["exit_time"] = datetime.now(TZ).isoformat()
+    trade["exit_debit"] = round(net_per_share, 2)                    # exit VALUE (sell to close)
+    trade["exit_debit_total"] = round(net_per_share * qty * 100, 2)
+    trade["realized_pnl"] = round(pnl_per_contract * qty, 2)
+    trade["exit_reason"] = f"EXPIRED @ {sp}"
+    return trade
+
+
 def expire_paper_trade(trade, settlement_price):
     """Mark a paper trade as expired. Calculate P&L at expiration."""
+    if trade.get("direction") == "DEBIT":
+        return _expire_debit_trade(trade, settlement_price)
     multiplier = 100
     qty = trade["quantity"]
     short_k = trade["short_strike"]

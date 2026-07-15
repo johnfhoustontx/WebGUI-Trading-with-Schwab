@@ -1,0 +1,74 @@
+# Repo-root tooling configuration.
+#
+# IMPORTANT: this file intentionally has NO [build-system] / [project] table.
+# The monorepo is NOT a pip-installable package — each app lives in a hyphenated,
+# non-package directory (options-scanner/, sentiment-dashboard/, schwab-proxy/, …)
+# that is placed on sys.path at runtime by its own entrypoint. Repackaging it would
+# break the deliberate sys.path model and re-introduce the documented cross-app
+# top-level module-name collisions (config / scoring / notifier / src).
+#
+# This file exists solely to host the shared ruff lint + format configuration
+# (consolidated here from the former ruff.toml — a single ruff config source avoids
+# ruff's "both ruff.toml and pyproject.toml" dual-config warning).
+
+# ---------------------------------------------------------------------------
+# Ruff — mechanical lint backstop.
+#
+# Philosophy: a LENIENT gate that catches REAL bugs, not a style crusade. The
+# codebase deliberately uses a compact one-line style (`x = 1; y = 2`,
+# `if cond: return`) and short local names; enforcing pycodestyle E7xx/E4xx or the
+# formatter would rewrite it wholesale. So the rule set is the minimal high-signal
+# "correctness" subset and the line length is generous.
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+extend-exclude = [
+    ".venv",
+    "**/__pycache__",
+    "**/data",          # runtime DBs / xlsx / generated artifacts (gitignored)
+    "**/logs",          # rotating service logs (gitignored)
+    "**/frontend",      # legacy built React frontend (not maintained here)
+    "**/node_modules",
+    "docs",
+    # Grandfathered LEGACY engine app-dirs — copied verbatim from the source
+    # monorepo; they carry pre-existing lint debt (sys.path glue → E402, dormant
+    # bugs in dead Tk code). Tightening them is a separate pass.
+    "options-scanner",
+    "sentiment-dashboard",
+    "trade-analyzer",
+    "portfolio-analyzer",
+    "claude-driver",
+    # Legacy Tk/GUI modules under shared/ (not part of the clean 3-tier stack):
+    "shared/analysis_lib/gui_main.py",
+    "shared/analysis_lib/agents",
+    "shared/analysis_lib/mtf_analysis.py",
+    "shared/analysis_lib/blueprint_scorer.py",
+]
+
+[tool.ruff.lint]
+# Minimal, high-signal "real bug" ruleset — passes CLEAN on the current tree:
+#   E9  = syntax errors
+#   F63 = invalid comparisons / `assert (a, b)` tuple bugs / `is` on literals
+#   F7  = misplaced statements (break/continue/return outside a loop/function, etc.)
+#   F82 = undefined names (typos, missing imports) — the highest-value check
+# Deliberately NOT selected: the broader F401 (unused import) / F811 (redefinition)
+# and all E1xx–E7xx style rules — they flag intentional style, not defects, so
+# including them would make the gate red on code that is working as written.
+# (Add more rule classes later ONLY after confirming they are already clean.)
+select = ["E9", "F63", "F7", "F82"]
+
+[tool.ruff.lint.per-file-ignores]
+# Re-export hubs deliberately import names for their public surface; test modules
+# import fixtures for side effects. (No-ops under the current select, kept so a
+# future widening to F401 stays green here.)
+"**/__init__.py" = ["F401"]
+"**/tests/**" = ["F401"]
+
+[tool.ruff.format]
+# NOTE: `ruff format` is NOT enforced in CI or pre-commit (the compact one-line
+# style is intentional). These settings only take effect if a developer runs
+# `ruff format` manually, and simply keep such a run minimally invasive.
+line-ending = "lf"
+quote-style = "preserve"

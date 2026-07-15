@@ -7,6 +7,16 @@ import paper_account_db as pdb
 _CT = ZoneInfo("America/Chicago")
 
 
+def test_excursion_update_seeds_then_rolls():
+    # first mark seeds both to the pnl
+    assert pe.excursion_update(None, None, 30.0) == (30.0, 30.0)
+    # a deeper drawdown lowers MAE only; a higher peak raises MFE only
+    assert pe.excursion_update(-10.0, 50.0, -25.0) == (-25.0, 50.0)
+    assert pe.excursion_update(-10.0, 50.0, 80.0) == (-10.0, 80.0)
+    # a middling mark changes neither
+    assert pe.excursion_update(-10.0, 50.0, 5.0) == (-10.0, 50.0)
+
+
 # 2026-06-04 is a Thursday (a normal trading day, not a holiday).
 def test_in_trading_window_excludes_premarket():
     # 08:15 CT is before the 08:30 RTH open -> not tradeable

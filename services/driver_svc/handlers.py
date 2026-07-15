@@ -163,6 +163,22 @@ def _read_sentiment_magnitude(bus):
         return None
 
 
+def _entry_context_base(out) -> dict:
+    """The per-cycle decision context stamped onto each opened driver position.
+
+    Pulls the decisive posture + shadow-gate enabled flag from ``run_cycle``'s
+    ``shadow_gate`` block and the one-line market_read summary — the regime the decider
+    acted on. Defensive: missing pieces → ``None`` fields (never raises)."""
+    sg = out.get("shadow_gate") if isinstance(out.get("shadow_gate"), dict) else {}
+    mr = out.get("market_read") if isinstance(out.get("market_read"), dict) else {}
+    return {
+        "posture": sg.get("posture"),
+        "gate_enabled": sg.get("enabled"),
+        "market_read": mr.get("summary"),
+        "ts": _now_iso(),
+    }
+
+
 def _publish_autonomous(bus, *, day_pnl, positions, decision, guarded, executed,
                         control, perf=None, market_read=None, target=None) -> int:
     """Cache + publish the monitor view, prepending this cycle to the decision log.
@@ -196,6 +212,11 @@ def _publish_autonomous(bus, *, day_pnl, positions, decision, guarded, executed,
         # cycle (gamma regime · bias · breadth · sentiment), or None when absent.
         "market_read": (market_read or {}).get("summary")
         if isinstance(market_read, dict) else None,
+        # Shadow directional gate (log-only): what a LIVE gate would have blocked among the
+        # trades that fired this cycle, so the /driver log accrues evidence for flipping
+        # settings.DIRECTIONAL_GATE_ENABLED. None on legacy rows → renders as before.
+        "shadow_gate": guarded.get("shadow_gate")
+        if isinstance(guarded.get("shadow_gate"), dict) else None,
     })
     st = AutonomousState(
         date=date.today().isoformat(),
@@ -280,14 +301,24 @@ def run_autonomous_cycle(bus) -> None:
     # malformed row) must NOT skip the halt-latch + publish below, and the audit log
     # must record only what ACTUALLY fired. ``executed`` accumulates the enqueued rows.
     executed = []
+    # Entry context stamped onto each opened position (durable in the driver DB) so a
+    # later post-mortem can correlate the ENTRY regime to the realized outcome — the
+    # posture/market read the decider acted on, plus whether the shadow gate flagged this
+    # trade as wrong-side. Built once per cycle from the cycle output; per-trade
+    # would_block is looked up by id.
+    ctx_base = _entry_context_base(out)
+    shadow_ids = {w.get("id") for w in ((out.get("shadow_gate") or {}).get("would_block") or [])
+                  if isinstance(w, dict)}
     for t in ([] if stop_now else out.get("executable", [])):
         sig = t.get("signal")
         if not isinstance(sig, dict):
             continue
         signal = {**sig, "source": "driver"}  # shallow COPY — we add only the top-level source tag
+        context = {**ctx_base, "would_block": t.get("id") in shadow_ids}
         try:
             bus.enqueue_command(CMD_OPTIONS, {"type": "driver_paper_create",
-                                              "args": {"signal": signal, "qty": t.get("qty")}})
+                                              "args": {"signal": signal, "qty": t.get("qty"),
+                                                       "context": context}})
             executed.append(t)
         except Exception:  # noqa: BLE001 — stop firing, but still latch/publish what fired.
             break

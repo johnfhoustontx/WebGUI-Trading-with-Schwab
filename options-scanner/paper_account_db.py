@@ -78,7 +78,10 @@ CREATE TABLE IF NOT EXISTS paper_positions (
     unrealized_pnl REAL,
     current_short_delta REAL,
     last_mark_ts TEXT,
-    parent_position_id INTEGER
+    parent_position_id INTEGER,
+    mae REAL,               -- max adverse excursion (most-negative position-level unrealized $ seen)
+    mfe REAL,               -- max favorable excursion (most-positive position-level unrealized $ seen)
+    entry_context TEXT      -- JSON: decision context at open (driver posture/market_read); NULL for manual
 );
 CREATE INDEX IF NOT EXISTS idx_positions_status ON paper_positions(status);
 CREATE INDEX IF NOT EXISTS idx_positions_signal ON paper_positions(signal_id);
@@ -114,10 +117,12 @@ def init_db(db_path=None):
     try:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript(SCHEMA)
-        # idempotent migration for older DBs
+        # idempotent migration for older DBs — additive nullable columns only.
         cols = {r[1] for r in conn.execute("PRAGMA table_info(paper_positions)")}
-        if "parent_position_id" not in cols:
-            conn.execute("ALTER TABLE paper_positions ADD COLUMN parent_position_id INTEGER")
+        for name, decl in (("parent_position_id", "INTEGER"), ("mae", "REAL"),
+                           ("mfe", "REAL"), ("entry_context", "TEXT")):
+            if name not in cols:
+                conn.execute(f"ALTER TABLE paper_positions ADD COLUMN {name} {decl}")
         conn.commit()
     finally:
         conn.close()
@@ -372,7 +377,7 @@ def insert_position(db_path, p):
         cols = ("signal_id", "symbol", "strategy", "short_strike", "long_strike",
                 "call_short", "call_long", "width", "expiration", "dte_at_entry",
                 "quantity", "entry_credit", "entry_order_id", "max_loss_per",
-                "max_loss_total", "entry_ts")
+                "max_loss_total", "entry_ts", "entry_context")
         cur = conn.execute(
             f"INSERT INTO paper_positions ({','.join(cols)}) "
             f"VALUES ({','.join('?' for _ in cols)})",

@@ -294,8 +294,32 @@ def decision_log_rows(decisions):
             "rejected": [r for r in (d.get("rejected") or []) if isinstance(r, dict)],
             "halted": bool(d.get("halted", False)),
             "halt_reason": d.get("halt_reason"),
+            # Shadow directional gate (log-only evidence). A dict {posture, would_block,
+            # n, enabled} or None on legacy rows → renders nothing.
+            "shadow_gate": d.get("shadow_gate") if isinstance(d.get("shadow_gate"), dict)
+            else None,
         })
     return out
+
+
+def shadow_gate_line(row):
+    """One-line summary of the log-only directional-gate shadow, or '' when there is
+    nothing to show.
+
+    Surfaced only while the gate is INERT (``enabled`` False) AND it would have blocked
+    at least one trade that fired — the actionable evidence for flipping the gate on. A
+    live gate (``enabled`` True) already rejects wrong-side trades, so nothing is shown.
+    Never raises on a sparse/None shadow dict.
+    """
+    sg = row.get("shadow_gate") if isinstance(row, dict) else None
+    if not isinstance(sg, dict) or sg.get("enabled") or not sg.get("would_block"):
+        return ""
+    wb = [w for w in sg.get("would_block") or [] if isinstance(w, dict)]
+    if not wb:
+        return ""
+    legs = ", ".join(f"{w.get('structure', '?')} {w.get('symbol', '?')}" for w in wb)
+    posture = sg.get("posture", "?")
+    return f"Gate shadow: would block {len(wb)} ({legs}) — {posture} tape"
 
 
 def decision_summary(row):
@@ -509,6 +533,58 @@ _SCORE_STRATEGY_COLS = [
 ]
 
 
+# ── performance analytics: equity curve + posture post-mortem + MAE/MFE ───────
+# Reads cache:options:driver_paper_analytics (perf_analytics.build_analytics) —
+# the time-series / regime-attribution view the forensic driver review needed. The
+# equity-curve + excursion builders are SHARED with the Paper Portfolio page (the
+# scanner-baseline book) via pages.options.perf_charts so both render identically.
+from pages.options.perf_charts import (  # noqa: E402
+    equity_curve_figure,
+    excursion_text,
+    signed_dollar as _signed_dollar,
+)
+
+
+_POSTMORTEM_COLS = [
+    {"name": "stance", "label": "Stance", "field": "stance", "align": "left"},
+    {"name": "trades", "label": "Trades", "field": "trades"},
+    {"name": "win_rate", "label": "Win %", "field": "win_rate"},
+    {"name": "pnl", "label": "Realized", "field": "pnl"},
+    {"name": "avg", "label": "Avg/trade", "field": "avg"},
+]
+
+
+def postmortem_rows(pm):
+    """Table rows for the WITH/AGAINST/neutral posture post-mortem (stances with ≥1
+    trade only). The Realized cell colors via its row ``_pnl_class`` (``_PNL_CELL_SLOT``)."""
+    by = (pm or {}).get("by_stance") or {}
+    rows = []
+    for key, label in (("with", "With tape"), ("against", "Against tape"),
+                       ("neutral", "Neutral / IC")):
+        b = by.get(key) or {}
+        if not b.get("trades"):
+            continue
+        realized = b.get("realized") or 0
+        rows.append({
+            "stance": label, "trades": b.get("trades", 0),
+            "win_rate": f"{(b.get('win_rate') or 0) * 100:.0f}%",
+            "pnl": _signed_dollar(realized), "avg": _signed_dollar(b.get("avg")),
+            "_pnl_class": pnl_class(realized),
+        })
+    return rows
+
+
+def postmortem_headline(pm):
+    """One-line WITH-vs-AGAINST edge, or '' when no posture-attributed trades exist yet."""
+    edge = (pm or {}).get("edge") or {}
+    n_w, n_a = edge.get("n_with") or 0, edge.get("n_against") or 0
+    if n_w == 0 and n_a == 0:
+        return ""
+    return (f"With the tape: {_signed_dollar(edge.get('with_avg'))}/trade ({n_w}) · "
+            f"Against: {_signed_dollar(edge.get('against_avg'))}/trade ({n_a}) · "
+            f"edge {_signed_dollar(edge.get('avg_delta'))}/trade")
+
+
 # Driver-table styling: fixed (sticky) header over a scrolling body, so the column
 # headers stay visible as the trade list scrolls; colored P&L is via body-cell slots.
 DRIVER_CSS = """
@@ -541,6 +617,7 @@ def render():
         "auto": None, "auto_ver": None, "ctrl": None, "ctrl_ver": None,
         "paper": None, "paper_ver": None,
         "dperf": None, "dperf_ver": None,        # driver-account performance scorecard
+        "analytics": None, "analytics_ver": None,  # equity curve + posture post-mortem + MAE/MFE
         "pending_enabled": None, "pending_ticks": 0,
     }
 
@@ -562,6 +639,38 @@ def render():
     perf_table = ui.table(columns=_CLOSED_COLS, rows=[], row_key="cid") \
         .classes("w-full driver-table").props("dense")
     perf_table.add_slot("body-cell-pnl", _PNL_CELL_SLOT)
+
+    # ── Performance analytics: equity curve + posture post-mortem + MAE/MFE ────
+    # Persistent elements (the Highcharts element must exist at first render — the
+    # ESM import-map gotcha — and is updated in place, never rebuilt).
+    ui.separator()
+    ui.label("Analytics").classes("text-h6")
+    ui.label("Realized equity curve, whether trading WITH or AGAINST the tape paid "
+             "(posture at entry vs outcome), and how far trades ran for/against before "
+             "closing (MAE/MFE) — the driver book's self-diagnostics.") \
+        .classes("text-xs opacity-50")
+    equity_chart = ui.highchart(equity_curve_figure([])).classes("w-full")
+    analytics_headline = ui.label("").classes("text-sm opacity-80")
+    postmortem_table = ui.table(columns=_POSTMORTEM_COLS, rows=[], row_key="stance") \
+        .classes("w-full driver-table").props("dense")
+    postmortem_table.add_slot("body-cell-pnl", _PNL_CELL_SLOT)
+    excursion_label = ui.label("").classes("text-xs opacity-60")
+    analytics_empty = ui.label("No closed driver trades yet — analytics populate as "
+                               "positions close.").classes("text-xs opacity-50")
+
+    @guard
+    def _render_analytics():
+        a = state["analytics"] or {}
+        curve = a.get("equity_curve") or []
+        equity_chart.options = equity_curve_figure(curve)
+        equity_chart.update()
+        pm = a.get("postmortem") or {}
+        analytics_headline.text = postmortem_headline(pm)
+        postmortem_table.rows = postmortem_rows(pm)
+        postmortem_table.update()
+        excursion_label.text = excursion_text(a.get("excursions"))
+        has_data = bool(curve) or bool(postmortem_table.rows) or bool(excursion_label.text)
+        analytics_empty.set_visibility(not has_data)
 
     # ── confirm dialog for STOP (latch the kill-switch) ───────────────────────
     with ui.dialog() as stop_dialog, ui.card():
@@ -711,6 +820,13 @@ def render():
             for rj in row.get("rejected") or []:
                 ui.label(f"✗ {rj.get('id', '?')} — {rj.get('reason', '')}") \
                     .classes("text-xs text-red-8 opacity-80")
+            shadow = shadow_gate_line(row)
+            if shadow:
+                ui.label(f"👁 {shadow}").classes(
+                    "text-xs text-weight-medium text-amber-9").tooltip(
+                    "Directional gate is in log-only shadow mode — this trade fired but a "
+                    "LIVE gate would have blocked it as wrong-side for the tape. Evidence "
+                    "for enabling settings.DIRECTIONAL_GATE_ENABLED.")
             if halted and row.get("halt_reason"):
                 ui.label(row["halt_reason"]).classes("text-xs text-amber-9")
 
@@ -806,6 +922,7 @@ def render():
         cvv = bus_client.read_version("driver:control")
         ppv = bus_client.read_version("options:driver_paper_account")
         dpv = bus_client.read_version("options:driver_paper_perf")
+        dav = bus_client.read_version("options:driver_paper_analytics")
         if (avv != state["auto_ver"] or cvv != state["ctrl_ver"]
                 or ppv != state["paper_ver"] or dpv != state["dperf_ver"]):
             state["auto_ver"] = avv
@@ -818,6 +935,10 @@ def render():
             state["dperf"] = bus_client.read("options:driver_paper_perf") or None
             _render_monitor()
             _render_perf()          # the closed-trade table lives in the driver account
+        if dav != state["analytics_ver"]:
+            state["analytics_ver"] = dav
+            state["analytics"] = bus_client.read("options:driver_paper_analytics") or None
+            _render_analytics()
         # Optimistic-toggle timeout: if the control state never catches up to the
         # user's pending toggle (command never consumed — e.g. driver_svc down),
         # give up after a few ticks: revert the switch to reality and warn. This is
@@ -840,6 +961,9 @@ def render():
     state["paper"] = bus_client.read("options:driver_paper_account") or None
     state["dperf_ver"] = bus_client.read_version("options:driver_paper_perf")
     state["dperf"] = bus_client.read("options:driver_paper_perf") or None
+    state["analytics_ver"] = bus_client.read_version("options:driver_paper_analytics")
+    state["analytics"] = bus_client.read("options:driver_paper_analytics") or None
     _render_monitor()
     _render_perf()
+    _render_analytics()
     ui.timer(2.0, _poll)

@@ -148,6 +148,18 @@ def test_strikes_iron_condor_vs_spread():
     assert paper._strikes(ic) == "P 450/445 C 460/465"
 
 
+def test_strikes_debit_legs():
+    long_call = {"strategy": "LONG_CALL", "direction": "DEBIT",
+                 "legs": [{"kind": "call", "side": "long", "strike": 450}]}
+    assert paper._strikes(long_call) == "L 450C"
+    debit_spread = {"strategy": "BULL_CALL", "direction": "DEBIT",
+                    "legs": [{"kind": "call", "side": "long", "strike": 100},
+                             {"kind": "call", "side": "short", "strike": 105}]}
+    assert paper._strikes(debit_spread) == "L 100C / S 105C"
+    # a debit trade with no legs falls back to "—" (None-safe, no crash)
+    assert paper._strikes({"strategy": "LONG_CALL", "direction": "DEBIT"}) == "—"
+
+
 def test_synth_from_trade_for_detail():
     s = paper.synth_from_trade(TRADE)
     assert s["type"] == "PCS"

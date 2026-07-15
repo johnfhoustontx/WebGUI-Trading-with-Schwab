@@ -100,6 +100,8 @@ def test_cycle_enqueues_driver_paper_create(fake_bus, monkeypatch):
         "executable": [{"id": "m0", "signal": {"symbol": "QQQ", "structure": "PCS"},
                         "qty": 2, "rationale": "r"}],
         "rejected": [], "halted": False, "halt_reason": None,
+        "shadow_gate": {"posture": "up", "would_block": [], "n": 0, "enabled": False},
+        "market_read": {"summary": "gamma bullish · breadth +"},
         "day_pnl": 0.0, "open_positions": []})
     enq = []
     monkeypatch.setattr(fake_bus, "enqueue_command",
@@ -113,6 +115,30 @@ def test_cycle_enqueues_driver_paper_create(fake_bus, monkeypatch):
     assert cmd["args"]["qty"] == 2
     assert cmd["args"]["signal"]["source"] == "driver"
     assert cmd["args"]["signal"]["symbol"] == "QQQ"
+    # Entry context stamped for the post-mortem: the posture + market read + would_block.
+    ctx = cmd["args"]["context"]
+    assert ctx["posture"] == "up" and ctx["gate_enabled"] is False
+    assert ctx["would_block"] is False and ctx["market_read"] == "gamma bullish · breadth +"
+
+
+def test_cycle_context_flags_would_block_trade(fake_bus, monkeypatch):
+    """A fired trade the shadow gate flagged is stamped would_block=True in its context."""
+    handlers.set_control(fake_bus, enabled=True)
+    _seed_caches(fake_bus)
+    _stub_cycle(monkeypatch, {
+        "decision": {"stand_down": False, "day_thesis": "t",
+                     "trades": [{"id": "m0", "quantity": 1}]},
+        "executable": [{"id": "m0", "signal": {"symbol": "SPY", "structure": "CCS"},
+                        "qty": 1, "rationale": "r"}],
+        "rejected": [], "halted": False, "halt_reason": None,
+        "shadow_gate": {"posture": "up", "n": 1, "enabled": False,
+                        "would_block": [{"id": "m0", "symbol": "SPY", "structure": "CCS"}]},
+        "day_pnl": 0.0, "open_positions": []})
+    enq = []
+    monkeypatch.setattr(fake_bus, "enqueue_command",
+                        lambda stream, cmd: enq.append((stream, cmd)))
+    handlers.run_autonomous_cycle(fake_bus)
+    assert enq[0][1]["args"]["context"]["would_block"] is True
 
 
 def test_cycle_publishes_stand_down_reason_on_log_row(fake_bus, monkeypatch):
@@ -130,6 +156,26 @@ def test_cycle_publishes_stand_down_reason_on_log_row(fake_bus, monkeypatch):
     state = fake_bus.cache_get("cache:driver:autonomous").payload
     assert state["decisions"][0]["reason"] == "no_key"
     assert state["decisions"][0]["stand_down"] is True
+
+
+def test_cycle_publishes_shadow_gate_on_log_row(fake_bus, monkeypatch):
+    """The shadow directional gate (log-only) rides onto the published decision-log row
+    so /driver accrues would-have-blocked evidence while the gate is inert."""
+    handlers.set_control(fake_bus, enabled=True)
+    _seed_caches(fake_bus)
+    _stub_cycle(monkeypatch, {
+        "decision": {"stand_down": False, "day_thesis": "t",
+                     "trades": [{"id": "m0", "quantity": 1}]},
+        "executable": [{"id": "m0", "signal": {"symbol": "SPY", "structure": "CCS"},
+                        "qty": 1, "rationale": "r"}],
+        "rejected": [], "halted": False, "halt_reason": None,
+        "shadow_gate": {"posture": "up", "would_block": [
+            {"id": "m0", "symbol": "SPY", "structure": "CCS"}], "n": 1, "enabled": False},
+        "day_pnl": 0.0, "open_positions": []})
+    handlers.run_autonomous_cycle(fake_bus)
+    state = fake_bus.cache_get("cache:driver:autonomous").payload
+    sg = state["decisions"][0]["shadow_gate"]
+    assert sg["n"] == 1 and sg["posture"] == "up" and sg["enabled"] is False
 
 
 def test_cycle_log_row_reason_absent_is_none(fake_bus, monkeypatch):

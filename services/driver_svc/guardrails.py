@@ -128,6 +128,30 @@ def _side_blocked(signal, posture) -> bool:
     return False
 
 
+def shadow_gate(executable, posture) -> dict:
+    """Evaluate the directional gate in LOG-ONLY mode over the trades that fired.
+
+    Returns ``{"posture", "would_block": [{id, symbol, structure}], "n": int}`` — the
+    subset of ``executable`` (each ``{id, signal, qty, ...}``) that a LIVE directional
+    gate WOULD have rejected at ``posture`` (a CCS in an up tape / a PCS in a down tape).
+    Nothing is actually blocked; this is the evidence-gathering shadow that runs even
+    while ``settings.DIRECTIONAL_GATE_ENABLED`` is False, so every live trading day
+    accrues real would-have-blocked data before the gate is switched on.
+
+    When the gate is already live (posture passed to ``apply_guardrails``) the wrong-side
+    trades are in ``rejected`` rather than ``executable``, so ``would_block`` is naturally
+    empty — the shadow only surfaces trades the *inert* gate let through. Pure; never
+    raises (``_side_blocked``/``signal_structure`` tolerate sparse rows).
+    """
+    would = []
+    for t in executable or []:
+        sig = (t or {}).get("signal") if isinstance(t, dict) else None
+        if isinstance(sig, dict) and _side_blocked(sig, posture):
+            would.append({"id": t.get("id"), "symbol": sig.get("symbol"),
+                          "structure": signal_structure(sig)})
+    return {"posture": posture, "would_block": would, "n": len(would)}
+
+
 def is_allowed(signal) -> bool:
     """True iff ``signal`` is a defined-risk credit spread with real risk.
 

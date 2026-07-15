@@ -185,6 +185,8 @@ def test_refresh_paper_account_caches_and_publishes(monkeypatch):
     bus = Bus(fake=True)
     view = _fake_paper_view()
     monkeypatch.setattr(handlers.compute, "paper_account_view", lambda: view)
+    monkeypatch.setattr(handlers.compute, "manual_analytics",
+                        lambda: {"equity_curve": [], "postmortem": {}, "excursions": {}})
 
     sub = bus.subscribe("events:options:paper_account")
     handlers.refresh_paper_account(bus)
@@ -195,6 +197,19 @@ def test_refresh_paper_account_caches_and_publishes(monkeypatch):
     assert env is not None
     assert env.payload == view
     assert msg is not None and msg.get("version") == env.version
+
+
+def test_refresh_paper_account_publishes_analytics(monkeypatch):
+    """The manual-book analytics view (equity curve / MAE-MFE) is published alongside
+    the account view — the scanner-baseline benchmark against the driver book."""
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "paper_account_view", _fake_paper_view)
+    monkeypatch.setattr(handlers.compute, "manual_analytics",
+                        lambda: {"equity_curve": [{"date": "d", "equity": 24900.0}],
+                                 "postmortem": {}, "excursions": {"n": 0}})
+    handlers.refresh_paper_account(bus)
+    env = bus.cache_get("cache:options:paper_analytics")
+    assert env is not None and env.payload["equity_curve"][0]["equity"] == 24900.0
 
 
 def test_paper_command_dispatch(monkeypatch):
@@ -340,6 +355,41 @@ def test_run_action_alert_defensive_on_collect_failure(monkeypatch):
     handlers.run_action_alert(bus, "midday")   # must not raise
     env = bus.cache_get("cache:options:action_alert")
     assert env.payload["total"] == 0 and env.payload["sent"] is False
+
+
+def test_run_eod_summary_pushes_and_caches(monkeypatch):
+    """run_eod_summary collects the per-book summary, pushes it, and caches the run."""
+    bus = Bus(fake=True)
+    summary = {"date": "2026-07-13",
+               "books": {"manual": {"has_account": True, "day_pnl": 120.0},
+                         "driver": {"has_account": True, "day_pnl": -30.0}}}
+    calls = {}
+    monkeypatch.setattr(handlers.compute, "collect_eod_summary", lambda: summary)
+    monkeypatch.setattr(handlers.push_notify, "send_eod_summary",
+                        lambda s, **k: calls.setdefault("sent", s) or True)
+
+    handlers.run_eod_summary(bus, "close")
+
+    env = bus.cache_get("cache:options:eod_summary")
+    assert env is not None
+    assert env.payload["slot"] == "close" and env.payload["books"] == 2
+    assert env.payload["sent"] is True and env.payload["summary"] == summary
+    assert calls["sent"] == summary
+
+
+def test_run_eod_summary_defensive_on_collect_failure(monkeypatch):
+    """A collect failure degrades to an empty summary, never raises."""
+    bus = Bus(fake=True)
+
+    def _boom():
+        raise RuntimeError("nope")
+
+    monkeypatch.setattr(handlers.compute, "collect_eod_summary", _boom)
+    monkeypatch.setattr(handlers.push_notify, "send_eod_summary", lambda s, **k: False)
+
+    handlers.run_eod_summary(bus, "close")   # must not raise
+    env = bus.cache_get("cache:options:eod_summary")
+    assert env.payload["books"] == 0 and env.payload["sent"] is False
 
 
 def test_run_manage_and_refresh_settles_ledger_then_refreshes(monkeypatch):

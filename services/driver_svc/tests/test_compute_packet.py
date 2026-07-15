@@ -604,6 +604,30 @@ def test_run_cycle_gate_inert_when_flag_off(monkeypatch):
     assert len(out["executable"]) == 1                       # gate inert
 
 
+def test_run_cycle_shadow_gate_records_would_block_when_flag_off(monkeypatch):
+    """Flag OFF → the CCS fires, but the shadow gate records it as would-have-blocked
+    at the decisive up posture, so evidence accrues before the gate is enabled."""
+    monkeypatch.setattr("services.driver_svc.decider.decide",
+        lambda p, **k: {"stand_down": False, "trades": [{"id": "m0", "quantity": 1}]})
+    out = compute.run_cycle(_ccs_scan(), {"snapshot": {}}, target=500.0, limits=_lim(),
+                            market=_up_market())
+    sg = out["shadow_gate"]
+    assert sg["enabled"] is False and sg["posture"] == "up" and sg["n"] == 1
+    assert sg["would_block"][0]["structure"] == "CCS"
+
+
+def test_run_cycle_shadow_gate_empty_when_flag_on(monkeypatch):
+    """Flag ON → the wrong-side CCS is rejected outright, so the shadow (over the trades
+    that fired) is empty — enabled True with no would-block."""
+    monkeypatch.setattr("services.driver_svc.settings.DIRECTIONAL_GATE_ENABLED", True)
+    monkeypatch.setattr("services.driver_svc.decider.decide",
+        lambda p, **k: {"stand_down": False, "trades": [{"id": "m0", "quantity": 1}]})
+    out = compute.run_cycle(_ccs_scan(), {"snapshot": {}}, target=500.0, limits=_lim(),
+                            market=_up_market())
+    assert out["executable"] == [] and out["shadow_gate"]["enabled"] is True
+    assert out["shadow_gate"]["n"] == 0
+
+
 def test_run_cycle_gate_blocks_wrong_side_when_flag_on(monkeypatch):
     monkeypatch.setattr("services.driver_svc.settings.DIRECTIONAL_GATE_ENABLED", True)
     monkeypatch.setattr("services.driver_svc.decider.decide",

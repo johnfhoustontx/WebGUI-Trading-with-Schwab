@@ -148,10 +148,23 @@ def trade_pnl(t):
     return v if isinstance(v, (int, float)) else None
 
 
+def _legs_text(legs):
+    """Compact leg string for a DEBIT/legs trade, e.g. ``L 450C`` or ``L 100C / S 105C``
+    (mirrors the swing table's leg format)."""
+    parts = []
+    for leg in legs or []:
+        side = "L" if leg.get("side") == "long" else "S"
+        kind = "C" if leg.get("kind") == "call" else "P"
+        parts.append(f"{side} {leg.get('strike', '?')}{kind}")
+    return " / ".join(parts) if parts else "—"
+
+
 def _strikes(t):
     if t.get("strategy") == "IC":
         return f"P {t.get('short_strike','?')}/{t.get('long_strike','?')} " \
                f"C {t.get('call_short','?')}/{t.get('call_long','?')}"
+    if t.get("direction") == "DEBIT" and t.get("legs"):
+        return _legs_text(t["legs"])
     sk, lk = t.get("short_strike"), t.get("long_strike")
     return f"{sk}/{lk}" if sk is not None else "—"
 

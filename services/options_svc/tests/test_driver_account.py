@@ -50,6 +50,41 @@ def test_driver_account_perf_reads_db(tmp_path, monkeypatch):
     assert perf["total_trades"] == 0 and perf["win_rate"] == 0.0
 
 
+def test_manual_and_driver_analytics_delegate_to_book(monkeypatch):
+    """manual_analytics reads the DEFAULT (manual) DB; driver_analytics the DRIVER DB —
+    both via the shared _book_analytics."""
+    seen = []
+    monkeypatch.setattr(compute, "_book_analytics", lambda db, **k: seen.append(db) or {})
+    monkeypatch.setattr(compute, "DRIVER_PAPER_DB", "DRIVERDB")
+    compute.manual_analytics()
+    compute.driver_analytics()
+    assert seen == [None, "DRIVERDB"]   # manual → default DB, driver → driver DB
+
+
+def test_driver_analytics_builds_three_sections(tmp_path, monkeypatch):
+    """driver_analytics returns the equity curve + posture post-mortem + MAE/MFE from
+    the driver DB's closed positions (with entry_context + excursions)."""
+    import json
+
+    import paper_account_db
+    db = tmp_path / "driver.db"
+    monkeypatch.setattr(compute, "DRIVER_PAPER_DB", db)
+    compute.ensure_driver_account()
+    # open a CCS with an "up"-posture context, then close it at a loss with excursions.
+    ctx = {"posture": "up"}
+    compute.open_driver_position(_driver_signal(strategy="CCS"), qty=1,
+                                 broker=_fake_broker(1.50), context=ctx)
+    pos = paper_account_db.fetch_open_positions(db)[0]
+    paper_account_db.update_position_mark(
+        db, pos["position_id"], status="CLOSED", realized_pnl=-40.0,
+        exit_ts="2026-07-10T15:00:00", mae=-60.0, mfe=20.0)
+    a = compute.driver_analytics()
+    assert set(a) == {"equity_curve", "postmortem", "excursions"}
+    assert a["equity_curve"][0]["realized"] == -40.0
+    assert a["postmortem"]["by_stance"]["against"]["trades"] == 1   # CCS in up = against
+    assert a["excursions"]["n"] == 1 and a["excursions"]["avg_mae"] == -60.0
+
+
 # ── Task 2.1: open_driver_position ───────────────────────────────────────────
 
 
@@ -76,6 +111,27 @@ def _driver_signal(**o):
             "dte_at_entry": 15, "entry_credit": 1.50, "source": "driver"}
     base.update(o)
     return base
+
+
+def test_open_driver_position_stores_entry_context(tmp_path, monkeypatch):
+    """The decision context passed at open is persisted as JSON on entry_context so a
+    later post-mortem can attribute the entry regime. A None context stores NULL."""
+    import json
+
+    import paper_account_db
+    db = tmp_path / "driver.db"
+    monkeypatch.setattr(compute, "DRIVER_PAPER_DB", db)
+    compute.ensure_driver_account()
+    ctx = {"posture": "up", "gate_enabled": False, "would_block": True, "market_read": "risk-off"}
+    compute.open_driver_position(_driver_signal(), qty=1, broker=_fake_broker(1.50), context=ctx)
+    pos = paper_account_db.fetch_open_positions(db)[0]
+    assert json.loads(pos["entry_context"]) == ctx
+    # a second open with no context → NULL (back-compat, manual opens)
+    compute.open_driver_position(_driver_signal(signal_id="MU2"), qty=1,
+                                 broker=_fake_broker(1.50))
+    other = [p for p in paper_account_db.fetch_open_positions(db)
+             if p["signal_id"] == "MU2"][0]
+    assert other["entry_context"] is None
 
 
 def test_open_driver_position_into_driver_db(tmp_path, monkeypatch):

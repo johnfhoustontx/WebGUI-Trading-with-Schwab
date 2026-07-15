@@ -63,6 +63,72 @@ def intrinsic_value(trade, settlement):
     return net, pnl
 
 
+def _leg_sign(leg):
+    return 1.0 if leg.get("side") == "long" else -1.0
+
+
+def _leg_intrinsic(leg, sp):
+    """Per-share intrinsic value of one option leg at underlying ``sp`` (unsigned, ≥0)."""
+    k = leg["strike"]
+    return max(sp - k, 0.0) if leg.get("kind") == "call" else max(k - sp, 0.0)
+
+
+def position_intrinsic(legs, sp):
+    """Signed NET per-share intrinsic of a legs list (long +, short −), qty-weighted."""
+    return sum(_leg_sign(leg) * _leg_intrinsic(leg, sp) * (leg.get("qty") or 1)
+               for leg in legs or [])
+
+
+def legs_intrinsic_value(trade, settlement):
+    """(per-contract net value, realized PnL dollars) at settlement for a DEBIT/legs trade.
+
+    Generic analog of ``intrinsic_value`` for the non-credit structures (long single
+    options + debit verticals) the swing scanner produces. The position is worth its net
+    intrinsic at expiry; P&L = that value − the debit paid. ``entry_debit`` is PER-CONTRACT
+    dollars (the scanner's ``net_debit``)."""
+    net_per_share = position_intrinsic(trade.get("legs"), settlement)
+    net_contract = round(net_per_share * MULTIPLIER, 2)
+    entry_debit = trade.get("entry_debit") or 0.0
+    pnl = round(net_contract - entry_debit, 2)
+    return net_per_share, pnl
+
+
+def reprice_legs(trade, client, today=None):
+    """Reprice a DEBIT/legs paper trade for display (same return shape as ``reprice_swing``).
+
+    Values each stored leg at its CURRENT mid (long +, short −), sums to a net per-share
+    value, and computes the unrealized P&L per contract = ``value×100 − entry_debit``. An
+    already-expired trade returns ``error="expired"`` (no doomed chain fetch). Never raises."""
+    if _is_expired(trade.get("expiration"), today):
+        return {"current_value": None, "unrealized_pnl": None, "pnl_pct_of_credit": None,
+                "current_underlying": None, "current_short_delta": None, "error": "expired"}
+    try:
+        chain = _fetch_chain(client, trade["symbol"], trade["expiration"])
+        if chain is None:
+            raise RuntimeError("chain None")
+        pm = chain.get("putExpDateMap", {})
+        cm = chain.get("callExpDateMap", {})
+        net_per_share = 0.0
+        for leg in trade.get("legs") or []:
+            leg_map = cm if leg.get("kind") == "call" else pm
+            mid, _ = _leg_mid(leg_map, leg["strike"])
+            if mid is None:
+                raise RuntimeError("missing leg quote")
+            net_per_share += _leg_sign(leg) * mid * (leg.get("qty") or 1)
+        entry_debit = trade.get("entry_debit") or 0.0
+        pnl = round(net_per_share * MULTIPLIER - entry_debit, 2)   # per contract
+        pnl_pct = round(pnl / entry_debit * 100.0, 2) if entry_debit else 0.0
+        underlying = (chain.get("underlying") or {}).get("last", 0)
+        return {"current_value": round(net_per_share, 2), "unrealized_pnl": pnl,
+                "pnl_pct_of_credit": pnl_pct, "current_underlying": underlying,
+                "current_short_delta": None, "error": None}
+    except Exception as e:
+        log.error(f"reprice_legs failed for {trade.get('symbol')}: {e}")
+        return {"current_value": None, "unrealized_pnl": None, "pnl_pct_of_credit": None,
+                "current_underlying": None, "current_short_delta": None,
+                "error": "repricing failed"}
+
+
 def _fetch_chain(client, symbol, expiration):
     """Wrapper for Schwab option chain. Cached per (symbol, expiration) per run.
 

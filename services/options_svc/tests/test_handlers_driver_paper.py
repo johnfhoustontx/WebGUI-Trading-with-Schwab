@@ -32,6 +32,13 @@ def _stale_command(cmd_type, args, seconds):
     return Command(type=cmd_type, args=args, ts=ts)
 
 
+def _stub_analytics(monkeypatch, payload=None):
+    """Keep refresh_driver_paper's analytics call OFF the real driver DB in unit tests."""
+    monkeypatch.setattr(handlers.compute, "driver_analytics",
+                        lambda: payload if payload is not None
+                        else {"equity_curve": [], "postmortem": {}, "excursions": {}})
+
+
 def test_refresh_driver_paper_publishes_both_views(monkeypatch):
     bus = Bus(fake=True)
     monkeypatch.setattr(
@@ -41,6 +48,7 @@ def test_refresh_driver_paper_publishes_both_views(monkeypatch):
     monkeypatch.setattr(
         handlers.compute, "driver_account_perf",
         lambda: {"total_trades": 0, "win_rate": 0.0})
+    _stub_analytics(monkeypatch)
 
     handlers.refresh_driver_paper(bus)
 
@@ -52,6 +60,20 @@ def test_refresh_driver_paper_publishes_both_views(monkeypatch):
     assert perf.payload["total_trades"] == 0
 
 
+def test_refresh_driver_paper_publishes_analytics_view(monkeypatch):
+    """The analytics view (equity curve / posture post-mortem / MAE-MFE) is published
+    alongside the account + perf views."""
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "driver_account_view",
+                        lambda: {"snapshot": {}, "positions": [], "has_account": True})
+    monkeypatch.setattr(handlers.compute, "driver_account_perf", lambda: {"total_trades": 0})
+    _stub_analytics(monkeypatch, {"equity_curve": [{"date": "d", "equity": 25100.0}],
+                                  "postmortem": {"by_stance": {}}, "excursions": {"n": 0}})
+    handlers.refresh_driver_paper(bus)
+    view = bus.cache_get("cache:options:driver_paper_analytics")
+    assert view is not None and view.payload["equity_curve"][0]["equity"] == 25100.0
+
+
 def test_refresh_driver_paper_publishes_events(monkeypatch):
     """Both views fire their change events with the cache_set version."""
     bus = Bus(fake=True)
@@ -59,6 +81,7 @@ def test_refresh_driver_paper_publishes_events(monkeypatch):
                         lambda: {"snapshot": {}, "positions": [], "has_account": True})
     monkeypatch.setattr(handlers.compute, "driver_account_perf",
                         lambda: {"total_trades": 0})
+    _stub_analytics(monkeypatch)
 
     sub_a = bus.subscribe("events:options:driver_paper_account")
     sub_p = bus.subscribe("events:options:driver_paper_perf")
@@ -86,6 +109,7 @@ def test_refresh_driver_paper_no_rescue_overlay(monkeypatch):
                  "positions": [{"position_id": 7, "symbol": "MU"}],
                  "has_account": True})
     monkeypatch.setattr(handlers.compute, "driver_account_perf", lambda: {})
+    _stub_analytics(monkeypatch)
 
     def _boom():
         raise AssertionError("rescue overlay must not run for the driver account")
@@ -110,6 +134,7 @@ def test_run_driver_manage_and_refresh(monkeypatch):
                                  "has_account": True})
     monkeypatch.setattr(handlers.compute, "driver_account_perf",
                         lambda: {"total_trades": 1})
+    _stub_analytics(monkeypatch)
 
     handlers.run_driver_manage_and_refresh(bus)
 

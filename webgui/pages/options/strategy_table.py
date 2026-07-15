@@ -17,10 +17,12 @@ from . import scanner
 from .theme import TXT_POS, TXT_WARN, TXT_NEG, TXT_NEUTRAL
 
 
-# Credit-creditable structures the Paper-trade button is allowed for (the paper
-# engine builds credit spreads; ``IC`` is the engine's internal iron-condor key,
-# ``IRON_CONDOR`` is the normalized one).
-_PAPER_TYPES = {"PCS", "CCS", "IC", "IRON_CONDOR"}
+# Structures the Paper-trade button is allowed for. Credit spreads (``IC`` is the
+# engine's internal iron-condor key, ``IRON_CONDOR`` the normalized one) PLUS the
+# defined-risk DEBIT structures the ledger now supports (long options + debit verticals).
+# Naked shorts (SHORT_CALL/SHORT_PUT) are excluded — undefined risk.
+_PAPER_TYPES = {"PCS", "CCS", "IC", "IRON_CONDOR",
+                "LONG_CALL", "LONG_PUT", "BULL_CALL", "BEAR_PUT"}
 
 # Inferred-view → what option families it favors (kept short for the banner).
 _FAVORS = {

@@ -150,12 +150,17 @@ def test_rrg_scatter_handles_missing_tail():
 
 def test_render_uses_native_hover_dimming():
     import inspect
-    src = inspect.getsource(R.render)
-    # The plotly hover round-trip is gone — dimming is native Highcharts
-    # (plotOptions.series.states.inactive), so no event wiring remains.
+
+    from pages import sentiment_rrg
+    # The RRG chart now lives on its own tab (/sentiment/rrg). Its render draws the
+    # Highcharts RRG and relies on native hover dimming (states.inactive), so no
+    # plotly event round-trip remains.
+    src = inspect.getsource(sentiment_rrg.render)
     assert "plotly_hover" not in src and "plotly_unhover" not in src
     assert "run_plot_method" not in src
     assert "ui.highchart" in src
+    # The Sector Rotation page no longer renders a chart (moved to the RRG tab).
+    assert "ui.highchart" not in inspect.getsource(R.render)
 
 
 def test_hex_to_rgba_helper():

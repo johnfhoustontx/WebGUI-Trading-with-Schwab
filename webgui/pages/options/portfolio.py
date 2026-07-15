@@ -18,6 +18,7 @@ from nicegui import ui
 
 from pages.ui_guard import guard
 
+from .perf_charts import equity_curve_figure, excursion_text
 from .rescue import heat_border_class
 from .theme import (BADGE_MUTED, BADGE_NEG, BADGE_POS, BTN, BTN_3D_DANGER,
                     BTN_PRIMARY)
@@ -179,8 +180,31 @@ def render():
     with ui.row().classes("w-full justify-end"):
         status = ui.label("").classes("opacity-60 text-xs")
 
-    # Last-seen bus cache version for the fetch-free repaint timer.
-    seen = {"version": None}
+    # ── Analytics: realized equity curve + MAE/MFE (scanner-baseline book) ────
+    # Same builders as the driver monitor, so this book (auto-trades every captured
+    # signal) reads directly against the driver book (Claude's selection) — the
+    # benchmark that shows whether the decider adds edge over the raw scanner.
+    ui.separator().classes("mt-3")
+    ui.label("Analytics").classes("text-subtitle1")
+    ui.label("Realized equity curve + how far trades ran for/against before closing "
+             "(MAE/MFE) for the manual (scanner-baseline) book. Compare against the "
+             "driver's Analytics on the Claude Driver page.").classes("text-xs opacity-50")
+    equity_chart = ui.highchart(equity_curve_figure([])).classes("w-full")
+    excursion_label = ui.label("").classes("text-xs opacity-60")
+    analytics_empty = ui.label("No closed paper trades yet — analytics populate as "
+                               "positions close.").classes("text-xs opacity-50")
+
+    @guard
+    def _populate_analytics(a):
+        a = a or {}
+        curve = a.get("equity_curve") or []
+        equity_chart.options = equity_curve_figure(curve)
+        equity_chart.update()
+        excursion_label.text = excursion_text(a.get("excursions"))
+        analytics_empty.set_visibility(not (curve or excursion_label.text))
+
+    # Last-seen bus cache versions for the fetch-free repaint timers.
+    seen = {"version": None, "analytics": None}
 
     def _populate(pa):
         """Paint the cards + tables from the cached paper-account view."""
@@ -241,6 +265,8 @@ def render():
     # Initial paint from the bus cache (graceful-empty if the service is cold).
     seen["version"] = bus_client.read_version("options:paper_account")
     _populate(bus_client.read("options:paper_account") or {})
+    seen["analytics"] = bus_client.read_version("options:paper_analytics")
+    _populate_analytics(bus_client.read("options:paper_analytics") or {})
 
     @guard
     def _maybe_repaint():
@@ -248,9 +274,12 @@ def render():
         # only re-read + repaint on change. The service bumps it after every
         # paper action (refresh/entry/manage/reset).
         version = bus_client.read_version("options:paper_account")
-        if version == seen["version"]:
-            return
-        seen["version"] = version
-        _populate(bus_client.read("options:paper_account") or {})
+        if version != seen["version"]:
+            seen["version"] = version
+            _populate(bus_client.read("options:paper_account") or {})
+        av = bus_client.read_version("options:paper_analytics")
+        if av != seen["analytics"]:
+            seen["analytics"] = av
+            _populate_analytics(bus_client.read("options:paper_analytics") or {})
 
     ui.timer(2.0, _maybe_repaint)

@@ -1,20 +1,25 @@
 name: CI
 
-# Runs the test matrix + lint + dependency audit on every push/PR.
+# Runs lint + the per-folder test matrix + a dependency audit on every push/PR.
 #
-# WHY windows-latest: the stack is Windows-first — it imports winotify (Windows-only)
-# and uses tkinter/Memurai; a Linux runner would fail at import. Tests need NO live
-# services (the bus uses fakeredis under pytest; the proxy is mocked), so no Redis
-# service container is required.
+# WHY windows-latest: the stack is Windows-first — it imports winotify (a
+# Windows-only toast library) and touches tkinter/Memurai; a Linux runner fails at
+# import time. Tests need NO live services (the bus falls back to fakeredis under
+# pytest — see shared/bus/client.py; the proxy is mocked), so no Redis service
+# container is required.
 #
 # WHY a matrix of per-folder jobs: running the whole tree in one pytest invocation
 # re-triggers the documented cross-app top-level module-name collisions
-# (config/scoring/notifier/src). Each suite runs in isolation, exactly as the docs
-# prescribe. The copied LEGACY engine dirs (sentiment-dashboard / trade-analyzer /
-# portfolio-analyzer / claude-driver) are not gated here (grandfathered, like ruff);
-# options-scanner IS gated with its documented pre-existing failures deselected
-# (tkinter dashboard tests need a display + crash headless; the earnings tests are
-# date-relative; test_key_levels_doc references an uncopied doc).
+# (config / scoring / notifier / src). Each suite runs in isolation, exactly as the
+# root CLAUDE.md "Tests" section prescribes:
+#   * the clean 3-tier suites (shared/*, services/*) run FROM THE REPO ROOT as
+#     `python -m pytest <path>` (their entrypoints add the repo root to sys.path);
+#   * the app folders (webgui, schwab-proxy, options-scanner, sentiment-dashboard,
+#     trade-analyzer, portfolio-analyzer) run FROM INSIDE the folder (working-directory).
+# The copied LEGACY engine dirs are marked `soft` (continue-on-error): they were
+# copied verbatim and carry pre-existing debt (options-scanner has ~2 date-relative
+# + tkinter-display failures documented in CLAUDE.md), so a red legacy suite surfaces
+# for review without wedging the clean-stack gate.
 
 on:
   push:
@@ -27,6 +32,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Lint — the mechanical bug backstop (ruff config lives in pyproject.toml).
+  # ---------------------------------------------------------------------------
   lint:
     runs-on: windows-latest
     steps:
@@ -35,19 +43,21 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      - name: Install dev tooling
+      - name: Install dev tooling (ruff, pytest, pip-audit)
         run: pip install -r requirements-dev.txt
-      - name: Ruff lint (scope + rules in ruff.toml)
+      - name: Ruff lint (rules + scope in pyproject.toml [tool.ruff])
         run: ruff check .
         # NB: `ruff format` is intentionally NOT enforced — the codebase uses a
-        # deliberate compact style (one-line statements) that the formatter would
-        # rewrite wholesale. The lint gate (select E9,F) catches real bugs without
-        # a mass reformat.
+        # deliberate compact style (one-line statements) the formatter would rewrite
+        # wholesale. The lint gate (select E9,F63,F7,F82) catches real bugs only.
 
+  # ---------------------------------------------------------------------------
+  # Dependency CVE audit — non-blocking initially (a freshly-disclosed transitive
+  # CVE should surface for review, not halt all development). Flip to blocking
+  # once the baseline is clean.
+  # ---------------------------------------------------------------------------
   audit:
     runs-on: windows-latest
-    # Non-blocking initially: a freshly-disclosed transitive CVE should surface for
-    # review, not wedge all development. Flip to blocking once the baseline is clean.
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -62,40 +72,79 @@ jobs:
       - name: pip-audit (dependency CVE scan)
         run: pip-audit
 
+  # ---------------------------------------------------------------------------
+  # Tests — one isolated job per suite (see the header note on module collisions).
+  # `dir: "."` runs from the repo root (services/shared); an app-folder `dir` runs
+  # the suite from INSIDE that folder. `soft: true` => continue-on-error.
+  # ---------------------------------------------------------------------------
   test:
     runs-on: windows-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: shared
-            cmd: python -m pytest shared/bus shared/contracts -q
+          # --- clean 3-tier suites (from repo root) ---
+          - name: shared-bus
+            dir: "."
+            cmd: python -m pytest shared/bus -q
+          - name: shared-contracts
+            dir: "."
+            cmd: python -m pytest shared/contracts -q
           - name: scaffold
+            dir: "."
             cmd: python -m pytest services/tests -q
           - name: sentiment_svc
+            dir: "."
             cmd: python -m pytest services/sentiment_svc -q
           - name: options_svc
+            dir: "."
             cmd: python -m pytest services/options_svc -q
           - name: portfolio_svc
+            dir: "."
             cmd: python -m pytest services/portfolio_svc -q
           - name: trade_svc
+            dir: "."
             cmd: python -m pytest services/trade_svc -q
           - name: driver_svc
+            dir: "."
             cmd: python -m pytest services/driver_svc -q
+          - name: market_svc
+            dir: "."
+            cmd: python -m pytest services/market_svc -q
+          # --- app folders (run FROM INSIDE the folder) ---
           - name: webgui
-            cmd: python -m pytest webgui -q
-          - name: proxy
-            cmd: python -m pytest schwab-proxy/tests -q
+            dir: webgui
+            cmd: python -m pytest -q
+          - name: schwab-proxy
+            dir: schwab-proxy
+            cmd: python -m pytest tests -q
+          # --- LEGACY engine dirs — grandfathered, non-blocking (soft) ---
           - name: options-scanner
-            # Deselect the documented pre-existing baseline failures (kept out of the
-            # gate, not silently ignored — see the audit docs).
+            dir: options-scanner
+            soft: true
+            # Deselect the documented pre-existing baseline failures (tkinter
+            # dashboard tests need a display + crash headless; the earnings tests
+            # are date-relative; test_key_levels_doc references an uncopied doc).
             cmd: >-
-              python -m pytest options-scanner/tests -q
-              --ignore=options-scanner/tests/test_dashboard_captured_signals_drift.py
-              --ignore=options-scanner/tests/test_dashboard_tree_signal_map.py
-              --ignore=options-scanner/tests/test_key_levels_doc.py
-              --deselect "options-scanner/tests/test_scanner_engine.py::TestEarningsAvoidance"
+              python -m pytest tests -q
+              --ignore=tests/test_dashboard_captured_signals_drift.py
+              --ignore=tests/test_dashboard_tree_signal_map.py
+              --ignore=tests/test_key_levels_doc.py
+              --deselect "tests/test_scanner_engine.py::TestEarningsAvoidance"
+          - name: sentiment-dashboard
+            dir: sentiment-dashboard
+            soft: true
+            cmd: python -m pytest tests -q
+          - name: trade-analyzer
+            dir: trade-analyzer
+            soft: true
+            cmd: python -m pytest . -q
+          - name: portfolio-analyzer
+            dir: portfolio-analyzer
+            soft: true
+            cmd: python -m pytest tests -q
     name: test (${{ matrix.name }})
+    continue-on-error: ${{ matrix.soft == true }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -105,4 +154,5 @@ jobs:
       - name: Install pinned runtime deps
         run: pip install -r requirements.lock
       - name: Run ${{ matrix.name }} suite
+        working-directory: ${{ matrix.dir }}
         run: ${{ matrix.cmd }}

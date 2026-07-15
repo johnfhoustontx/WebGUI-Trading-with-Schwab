@@ -236,6 +236,109 @@ def send_action_digest(items: dict, *, slot_label: str = "", config: dict | None
     return True
 
 
+# ── Scheduled end-of-day summary (post-close push, ~15:10 CT) ────────────────
+# A once-daily push summarizing the day's result per paper book (manual + driver):
+# day P&L, today's closed W-L + realized, open count, and halt flag. Unlike the action
+# digest there is NO "skip if empty" — the day's P&L is the point — but it does skip
+# when no paper book is seeded at all (no "no books" spam). Book state is read as-is at
+# call time (see compute.collect_eod_summary).
+_EOD_BOOK_ORDER = ("manual", "driver")
+_D_RED = 0xE74C3C
+
+
+def _money(v) -> str:
+    return f"${v:,.0f}" if isinstance(v, (int, float)) else "—"
+
+
+def _signed_money(v) -> str:
+    return f"{'+' if v >= 0 else '-'}${abs(v):,.0f}" if isinstance(v, (int, float)) else "—"
+
+
+def eod_book_line(b: dict) -> str:
+    """Compact one-book line, e.g.
+    ``Manual: +$120 day · 2-1 closed (+$180) · 3 open [HALTED]``. Tolerant of None."""
+    b = b or {}
+    parts = [f"{b.get('label', '?')}: {_signed_money(b.get('day_pnl'))} day"]
+    if b.get("closed_today"):
+        parts.append(f"{b.get('wins', 0)}-{b.get('losses', 0)} closed "
+                     f"({_signed_money(b.get('realized_today'))})")
+    if isinstance(b.get("open_count"), int):
+        parts.append(f"{b['open_count']} open")
+    line = " · ".join(parts)
+    if b.get("halted"):
+        line += " [HALTED]"
+    return line
+
+
+def eod_book_count(summary: dict) -> int:
+    """How many books in the summary are actually seeded (drives the send gate)."""
+    s = summary or {}
+    return sum(1 for k in _EOD_BOOK_ORDER
+               if ((s.get("books") or {}).get(k) or {}).get("has_account"))
+
+
+def _eod_active_books(summary: dict) -> list:
+    s = summary or {}
+    return [(s.get("books") or {}).get(k) or {} for k in _EOD_BOOK_ORDER
+            if ((s.get("books") or {}).get(k) or {}).get("has_account")]
+
+
+def _eod_total_day_pnl(summary: dict) -> float:
+    return sum((b.get("day_pnl") or 0) for b in _eod_active_books(summary))
+
+
+def eod_summary_text(summary: dict) -> str:
+    """Telegram HTML EOD summary — one line per seeded book."""
+    e = lambda v: _html.escape(str(v))
+    s = summary or {}
+    lines = [f"📊 <b>End-of-day summary</b> — {e(s.get('date', ''))}"]
+    for b in _eod_active_books(s):
+        lines.append("• " + e(eod_book_line(b)))
+    if len(lines) == 1:
+        lines.append("No paper books active.")
+    return "\n".join(lines)
+
+
+def eod_summary_embed(summary: dict) -> dict:
+    s = summary or {}
+    fields = [{"name": b.get("label", "?"), "value": eod_book_line(b), "inline": False}
+              for b in _eod_active_books(s)]
+    total = _eod_total_day_pnl(s)
+    color = _D_GREEN if total > 0 else (_D_GRAY if total == 0 else _D_RED)
+    return {
+        "title": f"📊 End-of-day summary — {s.get('date', '')}",
+        "color": color,
+        "fields": fields,
+        "timestamp": datetime.now(_TZ).isoformat(),
+    }
+
+
+def eod_summary_sms(summary: dict) -> str:
+    s = summary or {}
+    body = " | ".join(eod_book_line(b) for b in _eod_active_books(s)) or "No paper books active."
+    return f"EOD {s.get('date', '')}: {body}"
+
+
+def send_eod_summary(summary: dict, *, config: dict | None = None) -> bool:
+    """Push the EOD summary to Telegram + Discord (+ SMS if configured).
+
+    Returns True if a send was attempted. Skips entirely when notifications are disabled
+    OR no paper book is seeded (no "no books" spam). Always sends when a book exists —
+    the day's P&L is the whole point, so there is no empty-content skip. Best-effort per
+    channel (never raises)."""
+    cfg = config or load_config()
+    if not cfg.get("enabled", True) or eod_book_count(summary) == 0:
+        return False
+    tg = cfg.get("telegram", {})
+    dc = cfg.get("discord", {})
+    sms = cfg.get("sms", {})
+    send_telegram(tg.get("bot_token"), tg.get("chat_id"), eod_summary_text(summary))
+    send_discord(dc.get("webhook_url"), eod_summary_embed(summary))
+    send_sms(sms.get("fi_number"), sms.get("smtp_user"), sms.get("smtp_app_password"),
+             eod_summary_sms(summary), subject="EOD summary")
+    return True
+
+
 def new_keys(current: list, prev: dict | None, today: str):
     """Return (new_keys_in_order, next_state).
 

@@ -97,6 +97,75 @@ def test_intrinsic_ccs():
     assert pnl == 50.0
 
 
+# ── DEBIT / legs structures (long options + debit verticals) ─────────────────
+def test_position_intrinsic_long_and_spread():
+    long_call = [{"kind": "call", "side": "long", "strike": 100, "qty": 1}]
+    assert signal_repricer.position_intrinsic(long_call, 108.0) == 8.0
+    assert signal_repricer.position_intrinsic(long_call, 95.0) == 0.0
+    # debit call spread: long 100 / short 105 → capped at width 5
+    spread = long_call + [{"kind": "call", "side": "short", "strike": 105, "qty": 1}]
+    assert signal_repricer.position_intrinsic(spread, 110.0) == 5.0
+    assert signal_repricer.position_intrinsic(spread, 95.0) == 0.0
+
+
+def test_legs_intrinsic_value_long_call():
+    t = {"legs": [{"kind": "call", "side": "long", "strike": 100, "qty": 1}],
+         "entry_debit": 250}   # paid $2.50/contract
+    v, pnl = signal_repricer.legs_intrinsic_value(t, settlement=108.0)
+    assert v == 8.0 and pnl == 550.0            # worth $800 − $250 debit
+    v2, pnl2 = signal_repricer.legs_intrinsic_value(t, settlement=95.0)
+    assert v2 == 0.0 and pnl2 == -250.0          # OTM → lose the debit
+
+
+def _chain_client(call_quotes=None, put_quotes=None, last=100.0):
+    def _mk(quotes):
+        return {f"{_FUTURE_EXP}:30": {f"{float(k):.1f}": [{"bid": b, "ask": a, "delta": 0.5}]
+                                      for k, (b, a) in (quotes or {}).items()}}
+
+    class _R:
+        status_code = 200
+
+        def json(self):
+            return {"callExpDateMap": _mk(call_quotes), "putExpDateMap": _mk(put_quotes),
+                    "underlying": {"last": last}}
+
+    class _C:
+        Options = _FakeOptions
+
+        def get_option_chain(self, symbol, **kwargs):
+            return _R()
+
+    return _C()
+
+
+def test_reprice_legs_long_call_gain():
+    signal_repricer.clear_chain_cache()
+    t = {"direction": "DEBIT", "symbol": "SPY", "expiration": _FUTURE_EXP,
+         "entry_debit": 250, "quantity": 1,
+         "legs": [{"kind": "call", "side": "long", "strike": 100, "qty": 1}]}
+    client = _chain_client(call_quotes={100: (3.4, 3.6)}, last=103.0)   # mid 3.50 → $350
+    rep = signal_repricer.reprice_legs(t, client)
+    assert rep["error"] is None
+    assert rep["current_value"] == 3.5           # per share net value
+    assert rep["unrealized_pnl"] == 100.0         # $350 − $250 per contract
+
+
+def test_reprice_legs_debit_spread_and_missing_quote():
+    signal_repricer.clear_chain_cache()
+    t = {"direction": "DEBIT", "symbol": "SPY", "expiration": _FUTURE_EXP,
+         "entry_debit": 200, "quantity": 1,
+         "legs": [{"kind": "call", "side": "long", "strike": 100, "qty": 1},
+                  {"kind": "call", "side": "short", "strike": 105, "qty": 1}]}
+    client = _chain_client(call_quotes={100: (4.0, 4.2), 105: (1.9, 2.1)})  # 4.1 − 2.0 = 2.1
+    rep = signal_repricer.reprice_legs(t, client)
+    assert rep["current_value"] == 2.1 and rep["unrealized_pnl"] == 10.0   # $210 − $200
+    # a leg with no quote → graceful failure, not a crash
+    client2 = _chain_client(call_quotes={100: (4.0, 4.2)})   # 105 missing
+    signal_repricer.clear_chain_cache()
+    rep2 = signal_repricer.reprice_legs(t, client2)
+    assert rep2["error"] == "repricing failed" and rep2["unrealized_pnl"] is None
+
+
 def test_intrinsic_ic_both_wings_safe():
     t = {"strategy": "IC", "short_strike": 690, "long_strike": 688,
          "call_short": 710, "call_long": 712, "entry_credit": 1.0}

@@ -301,6 +301,30 @@ def test_apply_guardrails_neutral_and_default_are_backcompat():
         assert len(out["executable"]) == 1
 
 
+# ── shadow directional gate (log-only evidence, 2026-07-13) ──────────────────
+def test_shadow_gate_flags_wrong_side_survivors():
+    """A CCS that FIRED (inert gate) is flagged as would-block when posture is up."""
+    executable = [{"id": "m0", "signal": {"symbol": "SPY", "type": "CCS", "max_loss": 2.0},
+                   "qty": 1}]
+    sg = g.shadow_gate(executable, "up")
+    assert sg["n"] == 1 and sg["posture"] == "up"
+    assert sg["would_block"][0] == {"id": "m0", "symbol": "SPY", "structure": "CCS"}
+
+
+def test_shadow_gate_empty_when_right_side_or_neutral():
+    executable = [{"id": "m0", "signal": {"symbol": "SPY", "type": "PCS", "max_loss": 2.0},
+                   "qty": 1}]
+    assert g.shadow_gate(executable, "up")["n"] == 0       # PCS right-side in up tape
+    assert g.shadow_gate(executable, "neutral")["n"] == 0  # indecisive → flags nothing
+
+
+def test_shadow_gate_tolerates_sparse_rows():
+    """Never raises on None / non-dict rows / missing signal (defensive)."""
+    for bad in (None, [], [None, "x", {}, {"signal": None}, {"signal": "x"}]):
+        sg = g.shadow_gate(bad, "up")
+        assert sg["n"] == 0 and sg["would_block"] == []
+
+
 def test_wrong_side_block_does_not_consume_slot_or_budget():
     """A blocked wrong-side trade must not eat a concurrent slot — a following right-side
     trade in the SAME cycle still executes."""

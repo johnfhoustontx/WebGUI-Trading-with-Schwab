@@ -216,9 +216,8 @@ def render():
             cols_box = ui.row().classes("no-wrap items-start gap-8 w-full")
     ui.label("Pairing is ordinal — strongest relative-selling vs strongest "
              "relative-buying pressure, not literal cash flow.").classes("opacity-50 text-xs q-mt-sm")
-    # Below: the RRG spans the full width.
-    ui.label("RRG").classes("text-subtitle2 q-mt-md")
-    rrg_box = ui.column().classes("w-full")
+    # The RRG chart now lives on its own tab (/sentiment/rrg, pages.sentiment_rrg),
+    # which reads the same sentiment:rotation cache view.
 
     QCOLS = [("name", "Sector", 150), ("etf", "ETF", 55), ("rs_ratio", "RS-Ratio", 90),
              ("rs_momentum", "RS-Mom", 90), ("quadrant", "Quadrant", 110),
@@ -263,11 +262,6 @@ def render():
                     ui.label(f"{r.get('rs_momentum'):.2f}").classes(f"w-[{QCOL_W['rs_momentum']}px]")
                     ui.label(str(r.get("quadrant") or "")).classes(f"w-[{QCOL_W['quadrant']}px]")
                     ui.label(str(r.get("direction") or "")).classes(f"w-[{QCOL_W['direction']}px]")
-        rrg_box.clear()
-        with rrg_box:
-            # Hover-isolation is native (states.inactive in the figure) — no
-            # client→server hover round-trip to wire.
-            ui.highchart(rrg_scatter_figure(a)).classes("w-full")
 
     @guard
     def _apply():

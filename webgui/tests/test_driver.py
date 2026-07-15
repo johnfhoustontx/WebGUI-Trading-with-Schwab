@@ -152,5 +152,73 @@ def test_decision_summary_model_stand_down_unchanged():
     assert driver.decision_summary(legacy) == "Stood down — no trades"
 
 
+def test_shadow_gate_line_shows_would_block_when_inert():
+    """An inert gate that would have blocked a fired trade shows the evidence line."""
+    row = driver.decision_log_rows([{"ts": "t", "shadow_gate": {
+        "posture": "up", "enabled": False, "n": 1,
+        "would_block": [{"id": "m0", "symbol": "SPY", "structure": "CCS"}]}}])[0]
+    line = driver.shadow_gate_line(row)
+    assert "would block 1" in line and "CCS SPY" in line and "up tape" in line
+
+
+def test_shadow_gate_line_silent_when_live_or_empty_or_legacy():
+    """No line when the gate is live (already rejects), when nothing would block, or on
+    a legacy row without a shadow_gate."""
+    live = driver.decision_log_rows([{"ts": "t", "shadow_gate": {
+        "posture": "up", "enabled": True, "n": 1,
+        "would_block": [{"id": "m0", "symbol": "SPY", "structure": "CCS"}]}}])[0]
+    empty = driver.decision_log_rows([{"ts": "t", "shadow_gate": {
+        "posture": "neutral", "enabled": False, "n": 0, "would_block": []}}])[0]
+    legacy = driver.decision_log_rows([{"ts": "t", "stand_down": True}])[0]
+    assert driver.shadow_gate_line(live) == ""
+    assert driver.shadow_gate_line(empty) == ""
+    assert legacy["shadow_gate"] is None and driver.shadow_gate_line(legacy) == ""
+
+
+def test_equity_curve_figure_maps_series():
+    curve = [{"date": "2026-07-08", "equity": 25060.0, "realized": 60.0},
+             {"date": "2026-07-09", "equity": 25110.0, "realized": 50.0}]
+    fig = driver.equity_curve_figure(curve)
+    assert fig["xAxis"]["categories"] == ["2026-07-08", "2026-07-09"]
+    series = {s["name"]: s for s in fig["series"]}
+    assert series["Equity"]["data"] == [25060.0, 25110.0]
+    assert series["Daily P&L"]["data"] == [60.0, 50.0]
+
+
+def test_equity_curve_figure_empty_is_valid():
+    fig = driver.equity_curve_figure([])
+    assert fig["xAxis"]["categories"] == []
+    assert all(s["data"] == [] for s in fig["series"])
+
+
+def test_postmortem_rows_and_headline():
+    pm = {"by_stance": {
+        "with": {"trades": 2, "wins": 2, "win_rate": 1.0, "realized": 160.0, "avg": 80.0},
+        "against": {"trades": 3, "wins": 0, "win_rate": 0.0, "realized": -120.0, "avg": -40.0},
+        "neutral": {"trades": 0, "wins": 0, "win_rate": 0.0, "realized": 0.0, "avg": 0.0}},
+        "edge": {"with_avg": 80.0, "against_avg": -40.0, "avg_delta": 120.0,
+                 "n_with": 2, "n_against": 3}}
+    rows = driver.postmortem_rows(pm)
+    # neutral has 0 trades → omitted; with + against present
+    labels = [r["stance"] for r in rows]
+    assert labels == ["With tape", "Against tape"]
+    assert rows[0]["pnl"] == "+$160" and rows[1]["pnl"] == "-$120"
+    assert rows[0]["_pnl_class"] and rows[1]["_pnl_class"]
+    head = driver.postmortem_headline(pm)
+    assert "With the tape" in head and "+$80" in head and "-$40" in head and "edge +$120" in head
+
+
+def test_postmortem_headline_empty_when_no_data():
+    assert driver.postmortem_headline({"edge": {"n_with": 0, "n_against": 0}}) == ""
+    assert driver.postmortem_headline({}) == ""
+
+
+def test_excursion_text():
+    ex = {"n": 5, "avg_mae": -30.0, "avg_mfe": 90.0, "mfe_capture": 0.75}
+    txt = driver.excursion_text(ex)
+    assert "peak +$90" in txt and "drawdown -$30" in txt and "0.75×" in txt and "5 closed" in txt
+    assert driver.excursion_text({"n": 0}) == ""
+
+
 def test_render_is_callable():
     assert callable(driver.render)

@@ -97,6 +97,73 @@ def test_send_action_digest_sends_when_items_present(monkeypatch):
     assert sent["tg"] == 1 and sent["dc"] == 1
 
 
+# ── EOD summary ──────────────────────────────────────────────────────────────
+_EOD = {
+    "date": "2026-07-13",
+    "books": {
+        "manual": {"label": "Manual", "has_account": True, "day_pnl": 120.0,
+                   "equity": 25120.0, "open_count": 3, "halted": False,
+                   "closed_today": 3, "wins": 2, "losses": 1, "realized_today": 180.0},
+        "driver": {"label": "Driver", "has_account": True, "day_pnl": -90.0,
+                   "equity": 24910.0, "open_count": 1, "halted": True,
+                   "closed_today": 1, "wins": 0, "losses": 1, "realized_today": -90.0},
+    },
+}
+
+
+def test_eod_book_line_formats_signs_and_halt():
+    m = pn.eod_book_line(_EOD["books"]["manual"])
+    assert "Manual" in m and "+$120 day" in m and "2-1 closed (+$180)" in m and "3 open" in m
+    d = pn.eod_book_line(_EOD["books"]["driver"])
+    assert "-$90 day" in d and "[HALTED]" in d
+
+
+def test_eod_book_line_tolerates_none_pnl():
+    line = pn.eod_book_line({"label": "Manual", "day_pnl": None})
+    assert "Manual: — day" in line   # no crash on missing P&L
+
+
+def test_eod_book_count_counts_seeded():
+    assert pn.eod_book_count(_EOD) == 2
+    assert pn.eod_book_count({"books": {"manual": {"has_account": False}}}) == 0
+    assert pn.eod_book_count({}) == 0
+
+
+def test_eod_summary_text_one_line_per_seeded_book():
+    txt = pn.eod_summary_text(_EOD)
+    assert "2026-07-13" in txt and "Manual:" in txt and "Driver:" in txt
+
+
+def test_eod_summary_text_skips_unseeded_book():
+    one = {"date": "d", "books": {"manual": _EOD["books"]["manual"],
+                                  "driver": {"has_account": False}}}
+    txt = pn.eod_summary_text(one)
+    assert "Manual:" in txt and "Driver:" not in txt
+
+
+def test_eod_summary_embed_color_by_total():
+    green = pn.eod_summary_embed({"books": {"manual": {"has_account": True, "day_pnl": 50}}})
+    red = pn.eod_summary_embed({"books": {"manual": {"has_account": True, "day_pnl": -50}}})
+    assert green["color"] == pn._D_GREEN and red["color"] == pn._D_RED
+
+
+def test_send_eod_summary_skips_when_disabled_or_no_book():
+    assert pn.send_eod_summary(_EOD, config={"enabled": False}) is False
+    empty = {"books": {"manual": {"has_account": False}}}
+    assert pn.send_eod_summary(empty, config={"enabled": True}) is False
+
+
+def test_send_eod_summary_sends_when_book_present(monkeypatch):
+    sent = {"tg": 0, "dc": 0, "sms": 0}
+    monkeypatch.setattr(pn, "send_telegram", lambda *a, **k: sent.__setitem__("tg", sent["tg"] + 1))
+    monkeypatch.setattr(pn, "send_discord", lambda *a, **k: sent.__setitem__("dc", sent["dc"] + 1))
+    monkeypatch.setattr(pn, "send_sms", lambda *a, **k: sent.__setitem__("sms", sent["sms"] + 1))
+    cfg = {"enabled": True, "telegram": {"bot_token": "T", "chat_id": 1},
+           "discord": {"webhook_url": "https://d"}, "sms": {}}
+    assert pn.send_eod_summary(_EOD, config=cfg) is True
+    assert sent["tg"] == 1 and sent["dc"] == 1 and sent["sms"] == 1
+
+
 def test_signal_key_stable_and_distinct():
     a = {"symbol": "SPY", "type": "PCS", "short_strike": 500, "long_strike": 495,
          "expiration": "2026-07-10"}

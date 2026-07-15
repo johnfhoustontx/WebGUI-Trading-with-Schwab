@@ -23,15 +23,18 @@
 # ----------------------------------------------------------------------------
 
 # --- Web / API server (P, O, D) ---
-fastapi>=0.111.0          # was: fastapi (unpinned) in schwab-proxy, options-scanner
-uvicorn>=0.31.1           # was: uvicorn (unpinned) in schwab-proxy, options-scanner
+# Security-sensitive direct deps are PINNED (==) to the currently-tested versions
+# (matches requirements.lock). Bump deliberately + re-run the suites + refresh the lock.
+fastapi==0.137.0          # pinned (was >=0.111.0)
+uvicorn==0.49.0           # pinned (was >=0.31.1)
+starlette==1.3.1          # ASGI framework under fastapi — pinned explicitly (security-sensitive)
 
 # --- HTTP client (P, O, S, D) ---
-requests>=2.31.0          # was: requests==2.31.0 in claude-driver (loosened to >= for the others)
-httpx                     # async HTTP client used by the FastAPI services (P, O)
+requests==2.34.2          # pinned (was >=2.31.0)
+httpx==0.28.1             # pinned (was unpinned) — async HTTP client used by the FastAPI services (P, O)
 
 # --- Schwab API SDK (P, O, S) ---
-schwab-py                 # provides the `schwab` package (auth, streaming)
+schwab-py==1.5.1          # pinned (was unpinned) — provides the `schwab` package (auth, streaming)
 
 # --- Data / numerics (O, S, D) ---
 pandas>=2.0.0
@@ -55,7 +58,7 @@ yfinance                  # still imported by some analysis paths; optional fall
 apscheduler==3.10.4
 
 # --- LLM decision layer (NEW: autonomous driver) ---
-anthropic>=0.40           # Anthropic SDK — Claude tool-use call in driver_svc.decider
+anthropic==0.112.0        # pinned (was >=0.40) — Anthropic SDK — Claude tool-use call in driver_svc.decider
                           # (imported lazily inside decider so the suite needs no install)
 
 # --- Web GUI (NEW: this repo's NiceGUI front-end) ---
@@ -66,7 +69,7 @@ nicegui[highcharts]>=2.0.0   # single multi-page web UI replacing the old Dash/R
                              # free for personal use; commercial use requires a paid license).
 
 # --- Storage / communication backbone (NEW: 3-tier) ---
-redis>=5.0                # Redis client (talks to a local Memurai server on Windows)
+redis==8.0.0              # pinned (was >=5.0) — Redis client (talks to a local Memurai server on Windows)
 fakeredis>=2.20           # in-memory Redis for pytest (tests need no live server)
 pydantic>=2.0             # typed payload contracts shared between tiers (also pulled in transitively by fastapi; pinned explicitly here)
 

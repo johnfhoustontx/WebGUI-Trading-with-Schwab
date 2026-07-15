@@ -183,6 +183,8 @@ def test_strategy_rows_long_call_unbounded_max_profit():
     assert row["rr"] == "—"
     assert row["debit_credit"] == "-2.50 debit"
     assert row["legs"] == "L 450C"
+    # long options are now paper-tradeable (defined-risk debit = the premium paid)
+    assert row["_allow_paper"] is True
 
 
 def test_strategy_rows_debit_spread():
@@ -190,6 +192,17 @@ def test_strategy_rows_debit_spread():
     assert row["debit_credit"] == "-2.50 debit"
     assert row["max_profit"] == "250.00"
     assert row["rr"] == "1.00"
+    assert row["_allow_paper"] is True          # debit vertical → paper-tradeable
+
+
+def test_strategy_rows_naked_short_not_paper_tradeable():
+    """A naked short (undefined risk) is NOT paper-tradeable — the gate excludes it."""
+    row = st.strategy_rows([{"id": "s1", "symbol": "SPY", "type": "SHORT_CALL",
+                             "strategy_label": "Short Call", "bias": "bearish",
+                             "legs": [{"kind": "call", "side": "short", "strike": 450}],
+                             "net_credit": 250.0, "max_loss": 9999.0, "score": 40,
+                             "grade": "C"}])[0]
+    assert row["_allow_paper"] is False
 
 
 def test_strategy_rows_pcs_carries_fields():
@@ -228,11 +241,10 @@ def test_strategy_rows_score_class_from_scanner():
     assert row["_score_class"] == scanner.score_zone_class(88.0)
 
 
-def test_strategy_rows_allow_paper_false_for_directional():
-    row = st.strategy_rows([_long_call()])[0]
-    assert row["_allow_paper"] is False
-    row2 = st.strategy_rows([_bull_call_debit()])[0]
-    assert row2["_allow_paper"] is False   # BULL_CALL is a debit spread, not creditable
+def test_strategy_rows_allow_paper_for_defined_risk_debit():
+    # Defined-risk debit structures (long options + debit verticals) are now paper-tradeable.
+    assert st.strategy_rows([_long_call()])[0]["_allow_paper"] is True
+    assert st.strategy_rows([_bull_call_debit()])[0]["_allow_paper"] is True
 
 
 def test_strategy_rows_robust_to_missing_keys():
