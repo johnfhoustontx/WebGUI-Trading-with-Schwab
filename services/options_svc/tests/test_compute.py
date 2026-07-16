@@ -2722,3 +2722,94 @@ def test_projection_brief_reader_line():
     # after the close -> empty
     assert compute._projection_brief(_E(), chain, 100.0,
                                      _dt.datetime(2026, 7, 11, 15, 30, tzinfo=CT)) == ""
+
+
+# ── Day-persistent scan union (merge_day_signals) ───────────────────────────
+
+_LISTS = ("signals_0dte", "signals_swing", "signals_directional")
+
+
+def _sig(sid, credit=1.0):
+    return {"id": sid, "symbol": "SPY", "type": "PCS", "credit": credit}
+
+
+def test_merge_day_signals_seeds_from_empty_prev():
+    out = compute.merge_day_signals(None, {"signals_0dte": [_sig("a")]}, "2026-07-16")
+    assert out["date"] == "2026-07-16"
+    assert [s["id"] for s in out["signals_0dte"]] == ["a"]
+    assert out["signals_0dte"][0]["live"] is True
+
+
+def test_merge_day_signals_keeps_live_signal_fresh():
+    """A still-qualifying signal takes the CURRENT scan's numbers, not the old ones."""
+    prev = compute.merge_day_signals(None, {"signals_0dte": [_sig("a", credit=1.0)]}, "2026-07-16")
+    out = compute.merge_day_signals(prev, {"signals_0dte": [_sig("a", credit=2.5)]}, "2026-07-16")
+    assert len(out["signals_0dte"]) == 1
+    assert out["signals_0dte"][0]["credit"] == 2.5   # refreshed
+    assert out["signals_0dte"][0]["live"] is True
+
+
+def test_merge_day_signals_freezes_dropped_out_signal():
+    prev = compute.merge_day_signals(None, {"signals_0dte": [_sig("a", credit=1.0)]}, "2026-07-16")
+    out = compute.merge_day_signals(prev, {"signals_0dte": []}, "2026-07-16")
+    assert len(out["signals_0dte"]) == 1
+    kept = out["signals_0dte"][0]
+    assert kept["id"] == "a"
+    assert kept["credit"] == 1.0        # frozen at last-seen
+    assert kept["live"] is False
+    assert kept["stale_since"]          # stamped
+
+
+def test_merge_day_signals_accumulates_the_union():
+    prev = compute.merge_day_signals(None, {"signals_0dte": [_sig("a")]}, "2026-07-16")
+    out = compute.merge_day_signals(prev, {"signals_0dte": [_sig("b")]}, "2026-07-16")
+    assert {s["id"] for s in out["signals_0dte"]} == {"a", "b"}
+
+
+def test_merge_day_signals_reappearing_signal_goes_live_again():
+    """Dropped out, then came back -- it must be live with fresh numbers."""
+    e = compute.merge_day_signals(None, {"signals_0dte": [_sig("a", 1.0)]}, "2026-07-16")
+    e = compute.merge_day_signals(e, {"signals_0dte": []}, "2026-07-16")
+    assert e["signals_0dte"][0]["live"] is False
+    e = compute.merge_day_signals(e, {"signals_0dte": [_sig("a", 3.0)]}, "2026-07-16")
+    assert e["signals_0dte"][0]["live"] is True
+    assert e["signals_0dte"][0]["credit"] == 3.0
+    assert e["signals_0dte"][0].get("stale_since") in (None, "")
+
+
+def test_merge_day_signals_resets_on_date_roll():
+    prev = compute.merge_day_signals(None, {"signals_0dte": [_sig("a")]}, "2026-07-16")
+    out = compute.merge_day_signals(prev, {"signals_0dte": [_sig("b")]}, "2026-07-17")
+    assert out["date"] == "2026-07-17"
+    assert {s["id"] for s in out["signals_0dte"]} == {"b"}   # yesterday dropped
+
+
+def test_merge_day_signals_covers_all_three_lists():
+    cur = {k: [_sig(f"{k}-1")] for k in _LISTS}
+    out = compute.merge_day_signals(None, cur, "2026-07-16")
+    for k in _LISTS:
+        assert len(out[k]) == 1
+
+
+def test_merge_day_signals_tolerates_malformed_prev():
+    """A corrupt/foreign envelope must degrade to a fresh day, not raise."""
+    # NOTE: a non-iterable prev list (5) is the case that makes the isinstance
+    # guard load-bearing -- with a string ("nope") the per-signal isinstance
+    # check absorbs it anyway, so a string alone cannot pin the guard.
+    for bad in ({}, {"date": "2026-07-16"}, {"date": "2026-07-16", "signals_0dte": "nope"},
+                {"date": "2026-07-16", "signals_0dte": 5},
+                {"date": "2026-07-16", "signals_0dte": {"a": 1}},
+                {"signals_0dte": [{"no_id": 1}]}):
+        out = compute.merge_day_signals(bad, {"signals_0dte": [_sig("a")]}, "2026-07-16")
+        assert [s["id"] for s in out["signals_0dte"]] == ["a"]
+
+
+def test_merge_day_signals_skips_signals_without_an_id():
+    out = compute.merge_day_signals(None, {"signals_0dte": [{"symbol": "SPY"}]}, "2026-07-16")
+    assert out["signals_0dte"] == []
+
+
+def test_merge_day_signals_does_not_mutate_inputs():
+    cur = {"signals_0dte": [_sig("a")]}
+    compute.merge_day_signals(None, cur, "2026-07-16")
+    assert "live" not in cur["signals_0dte"][0]

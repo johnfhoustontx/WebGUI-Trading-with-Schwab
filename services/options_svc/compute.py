@@ -14,6 +14,8 @@ lazily inside ``run_full_scan``) resolves to options-scanner's ``scoring.py``
 unambiguously. Therefore the page's ``options_scoring()`` collision guard is
 intentionally NOT ported here — ``run_full_scan`` is called directly.
 """
+import copy
+import datetime as _dt
 import json as _json
 import logging
 import sys
@@ -46,6 +48,81 @@ def run_scan() -> dict:
     propagate — the handler catches it (matching the sentiment compute, whose
     loaders likewise let the handler own error handling)."""
     return run_full_scan(_proxy.schwab_py_client)
+
+
+# ── Day-persistent scan union ───────────────────────────────────────────────
+# The Scanner table shows the DAY's signals, not just the last scan's. This is
+# published to its own key (cache:options:scan_day); cache:options:scan keeps
+# its live-only semantics because the autonomous driver reads it and must never
+# be offered a signal that no longer qualifies.
+
+_DAY_LISTS = ("signals_0dte", "signals_swing", "signals_directional")
+
+
+def merge_day_signals(prev, current, today, now_iso=None):
+    """Merge one scan's signals into the day's accumulated union. PURE.
+
+    ``prev``    -- the previous ``{date, signals_*}`` envelope (or None/garbage).
+    ``current`` -- the fresh scan dict (the engine result / ScanResult dump).
+    ``today``   -- local date string 'YYYY-MM-DD'.
+
+    Per signal, keyed on the engine's unique ``id``:
+      * present in ``current``  -> take it FRESH, ``live=True`` (still qualifying,
+        and the numbers cost nothing -- the engine just computed them),
+      * absent from ``current`` -> carry the last-seen copy forward FROZEN,
+        ``live=False`` + ``stale_since`` stamped once.
+
+    A ``date`` mismatch (or an unusable ``prev``) resets the day wholesale --
+    the same auto-reset-at-date-roll contract push_notify's seen-set uses.
+    Signals with no ``id`` are dropped (they cannot be tracked across scans).
+    Never mutates its inputs; never raises.
+    """
+    now_iso = now_iso or _dt.datetime.now().isoformat(timespec="seconds")
+
+    if not isinstance(prev, dict) or prev.get("date") != today:
+        prev = {}
+
+    out = {"date": today}
+    for key in _DAY_LISTS:
+        cur_list = current.get(key) if isinstance(current, dict) else None
+        cur_list = cur_list if isinstance(cur_list, list) else []
+        cur_by_id = {s["id"]: s for s in cur_list
+                     if isinstance(s, dict) and s.get("id")}
+
+        prev_list = prev.get(key)
+        prev_list = prev_list if isinstance(prev_list, list) else []
+
+        merged = []
+        seen = set()
+        # Carried-forward first (stable order: oldest first, newcomers appended).
+        for s in prev_list:
+            if not isinstance(s, dict) or not s.get("id") or s["id"] in seen:
+                continue
+            sid = s["id"]
+            seen.add(sid)
+            if sid in cur_by_id:
+                fresh = copy.deepcopy(cur_by_id[sid])
+                fresh["live"] = True
+                fresh["stale_since"] = None
+                fresh["first_seen"] = s.get("first_seen") or now_iso
+                merged.append(fresh)
+            else:
+                kept = copy.deepcopy(s)
+                kept["live"] = False
+                kept.setdefault("first_seen", now_iso)
+                if not kept.get("stale_since"):
+                    kept["stale_since"] = now_iso
+                merged.append(kept)
+        for sid, s in cur_by_id.items():
+            if sid in seen:
+                continue
+            fresh = copy.deepcopy(s)
+            fresh["live"] = True
+            fresh["stale_since"] = None
+            fresh["first_seen"] = now_iso
+            merged.append(fresh)
+        out[key] = merged
+    return out
 
 
 # ── Swing scan (ported from webgui/pages/options/swing.py `_swing_scan`) ─────
