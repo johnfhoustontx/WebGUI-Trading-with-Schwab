@@ -125,12 +125,45 @@ def _humanize_reason(r):
     return _EXIT_REASON_LABELS.get(str(r).upper(), str(r).replace("_", " ").title())
 
 
-def _closed_when(ts):
-    """Compact 'YYYY-MM-DD HH:MM' from a stored ISO ts (already CT), else the date / '—'."""
+def _when_text(ts):
+    """Compact 'YYYY-MM-DD HH:MM' from a stored ISO ts (already CT), else the date / '—'.
+
+    Used for BOTH the entry (``entry_ts``) and exit (``exit_ts``) stamps.
+    """
     s = str(ts or "")
     if len(s) >= 16 and s[10:11] == "T":
         return s[:10] + " " + s[11:16]
     return s[:10] or "—"
+
+
+def _strike_num(x):
+    """A strike as a compact string — 7650.0 → '7650', 22.5 → '22.5' (None → '')."""
+    try:
+        f = float(x)
+    except (TypeError, ValueError):
+        return ""
+    return str(int(f)) if f == int(f) else str(f)
+
+
+def _strikes_text(p):
+    """The position's strikes as 'short/long SIDE' — e.g. '7650/7660 C' (CCS),
+    '165/160 P' (PCS), or both wings for an iron condor ('165/160 P · 185/190 C').
+
+    Both PCS and CCS store their pair in ``short_strike``/``long_strike``; only an IC
+    additionally fills ``call_short``/``call_long`` (its short/long pair is the PUT
+    side). '—' when the strikes aren't known. Never raises.
+    """
+    p = p or {}
+    strat = str(p.get("strategy") or "").upper()
+    parts = []
+    short_k, long_k = _strike_num(p.get("short_strike")), _strike_num(p.get("long_strike"))
+    if short_k and long_k:
+        side = "C" if strat == "CCS" else "P"     # an IC's short/long pair is the put side
+        parts.append(f"{short_k}/{long_k} {side}")
+    cs, cl = _strike_num(p.get("call_short")), _strike_num(p.get("call_long"))
+    if cs and cl:
+        parts.append(f"{cs}/{cl} C")
+    return " · ".join(parts) or "—"
 
 
 def closed_summary_text(closed):
@@ -157,7 +190,8 @@ def closed_trade_rows(closed):
         pnl = c.get("realized_pnl")
         rows.append({
             "cid": str(c.get("position_id", c.get("signal_id", ""))),
-            "closed": _closed_when(c.get("exit_ts")),
+            "opened": _when_text(c.get("entry_ts")),
+            "closed": _when_text(c.get("exit_ts")),
             "symbol": c.get("symbol", ""),
             "strategy": c.get("strategy", ""),
             "qty": c.get("quantity", ""),
@@ -169,6 +203,7 @@ def closed_trade_rows(closed):
 
 
 _CLOSED_COLS = [
+    {"name": "opened", "label": "Opened", "field": "opened", "align": "left"},
     {"name": "closed", "label": "Closed", "field": "closed", "align": "left"},
     {"name": "symbol", "label": "Symbol", "field": "symbol", "align": "left"},
     {"name": "strategy", "label": "Strategy", "field": "strategy"},
@@ -358,6 +393,9 @@ def position_rows(positions):
             "symbol": p.get("symbol", ""),
             "strategy": p.get("strategy", ""),
             "quantity": p.get("quantity", ""),
+            "strikes": _strikes_text(p),
+            "expiration": p.get("expiration", "") or "—",
+            "opened": _when_text(p.get("entry_ts")),
             "pnl": _money(p.get("unrealized_pnl")),
             "_pnl_color": pnl_color(p.get("unrealized_pnl")),
             "_pnl_class": pnl_class(p.get("unrealized_pnl")),
@@ -514,6 +552,9 @@ _POSITION_COLS = [
     {"name": "symbol", "label": "Symbol", "field": "symbol", "align": "left"},
     {"name": "strategy", "label": "Strat", "field": "strategy"},
     {"name": "quantity", "label": "Qty", "field": "quantity"},
+    {"name": "strikes", "label": "Strikes", "field": "strikes", "align": "left"},
+    {"name": "expiration", "label": "Expiration", "field": "expiration", "align": "left"},
+    {"name": "opened", "label": "Opened", "field": "opened", "align": "left"},
     {"name": "pnl", "label": "P&L", "field": "pnl"},
     {"name": "status", "label": "Status", "field": "status"},
 ]

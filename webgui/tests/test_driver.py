@@ -29,10 +29,10 @@ def test_position_rows_carry_pnl_class():
 
 # ── driver realized-performance (closed trades from the isolated paper account) ──
 def _closed(symbol="RKLB", strategy="PCS", pnl=15.0, exit_ts="2026-07-02T11:00:00-05:00",
-            reason="TARGET_HIT", qty=2, pid=7):
+            reason="TARGET_HIT", qty=2, pid=7, entry_ts="2026-07-01T10:15:00-05:00"):
     return {"position_id": pid, "symbol": symbol, "strategy": strategy, "quantity": qty,
             "entry_credit": 0.33, "realized_pnl": pnl, "exit_reason": reason, "exit_ts": exit_ts,
-            "status": "CLOSED"}
+            "entry_ts": entry_ts, "status": "CLOSED"}
 
 
 def test_closed_summary_text_computes_realized_and_winrate():
@@ -68,9 +68,61 @@ def test_closed_trade_rows_tolerates_junk():
 
 def test_closed_cols_are_clean_reader_friendly_set():
     labels = [c["label"] for c in driver._CLOSED_COLS]
-    assert labels == ["Closed", "Symbol", "Strategy", "Qty", "Exit reason", "Realized P&L"]
+    assert labels == ["Opened", "Closed", "Symbol", "Strategy", "Qty", "Exit reason",
+                      "Realized P&L"]
     # the useless legacy columns are gone
     assert "Bucket" not in labels and "Source" not in labels and "Status" not in labels
+
+
+def test_closed_trade_rows_carry_opened_datetime():
+    """Each closed trade shows WHEN it was opened as well as closed (date + time)."""
+    rows = driver.closed_trade_rows([
+        _closed(entry_ts="2026-07-01T10:15:00-05:00", exit_ts="2026-07-02T13:00:00-05:00")])
+    assert rows[0]["opened"] == "2026-07-01 10:15"
+    assert rows[0]["closed"] == "2026-07-02 13:00"
+
+
+def test_closed_trade_rows_missing_entry_ts_is_dash():
+    rows = driver.closed_trade_rows([{"symbol": "X", "exit_ts": "2026-07-02T13:00:00-05:00"}])
+    assert rows[0]["opened"] == "—"
+
+
+# ── open positions: opened time + strikes + expiration ───────────────────────
+def _open_pos(strategy="CCS", short_k=7650.0, long_k=7660.0, call_short=None, call_long=None):
+    return {"position_id": 21, "symbol": "$SPX", "strategy": strategy, "quantity": 3,
+            "unrealized_pnl": -126.0, "status": "OPEN",
+            "entry_ts": "2026-07-09T09:30:00-05:00", "expiration": "2026-07-24",
+            "short_strike": short_k, "long_strike": long_k,
+            "call_short": call_short, "call_long": call_long}
+
+
+def test_strikes_text_ccs_and_pcs():
+    # CCS: short lower / long higher CALLS; PCS: short higher / long lower PUTS.
+    assert driver._strikes_text(_open_pos("CCS", 7650.0, 7660.0)) == "7650/7660 C"
+    assert driver._strikes_text(_open_pos("PCS", 165.0, 160.0)) == "165/160 P"
+
+
+def test_strikes_text_iron_condor_shows_both_wings():
+    ic = _open_pos("IC", 165.0, 160.0, call_short=185.0, call_long=190.0)
+    assert driver._strikes_text(ic) == "165/160 P · 185/190 C"
+
+
+def test_strikes_text_unknown_is_dash():
+    for p in ({}, {"strategy": "CCS"}, {"strategy": "CCS", "short_strike": 100.0}):
+        assert driver._strikes_text(p) == "—"
+
+
+def test_position_rows_carry_opened_strikes_expiration():
+    rows = driver.position_rows([_open_pos()])
+    assert rows[0]["opened"] == "2026-07-09 09:30"
+    assert rows[0]["strikes"] == "7650/7660 C"
+    assert rows[0]["expiration"] == "2026-07-24"
+
+
+def test_position_cols_include_opened_strikes_expiration():
+    labels = [c["label"] for c in driver._POSITION_COLS]
+    for expected in ("Opened", "Strikes", "Expiration"):
+        assert expected in labels
 
 
 def test_current_day_decisions_keeps_only_today():
