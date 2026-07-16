@@ -198,7 +198,7 @@ _ACTIONS_SLOT = """
          @click.stop="() => $parent.$emit('to_calc', props.row)">
     <q-tooltip>Send to Calculator</q-tooltip>
   </q-btn>
-  <q-btn dense flat round size="sm" icon="request_quote" color="secondary"
+  <q-btn v-if="props.row._allow_paper" dense flat round size="sm" icon="request_quote" color="secondary"
          @click.stop="() => $parent.$emit('to_paper', props.row)">
     <q-tooltip>Send to Paper trade</q-tooltip>
   </q-btn>
@@ -207,6 +207,23 @@ _ACTIONS_SLOT = """
     <q-tooltip>Expected Move</q-tooltip>
   </q-btn>
 </q-td>
+"""
+
+
+_ROW_ACTIONS_DOC = """\
+Both row-action slots gate the Paper button on ``props.row._allow_paper`` — the
+ONLY action that is gated, because Calculator/Expected-Move merely inspect a
+signal while Paper BOOKS it. Two hazards share the flag:
+
+* an **undefined-risk** structure (a naked short) — stamped by
+  ``strategy_table.strategy_rows``;
+* a **dropped-out** day-union signal, frozen at an hours-old price — stamped by
+  ``scanner.stamp_stale``, which only ever NARROWS the flag.
+
+``paper_create`` records ``signal['credit']`` verbatim with no re-pricing, so an
+ungated button on a stale row writes a fictional entry into the manual paper book.
+Every caller of these slots MUST stamp ``_allow_paper`` (an absent field reads as
+falsy → no button, which fails safe).
 """
 
 

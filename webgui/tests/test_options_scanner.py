@@ -5,7 +5,19 @@ matching the speedometer zones in pages/options/svg.py. ``signal_rows`` stamps
 each row with ``_score_color`` so the table body-cell slot can render a colored
 chip.
 """
+import bus_client
+import pytest
+
 from pages.options import scanner
+
+
+@pytest.fixture
+def fresh_bus():
+    """Fresh fakeredis-backed Bus per test so cache state does not leak (the
+    ``bus_client.reset()`` idiom from test_bus_client.py)."""
+    bus_client.reset()
+    yield
+    bus_client.reset()
 
 
 def test_score_zone_color_none():
@@ -336,6 +348,88 @@ def test_signal_columns_carry_a_dropped_column():
     assert cols.get("stale_since") == "Dropped"
 
 
+def test_row_class_prop_binds_the_stamped_field():
+    """The dimming is a ``.props()`` string no row test can reach, so a rename of
+    ``_row_class`` would silently kill it while every row test stayed green."""
+    assert "_row_class" in scanner._ROW_CLASS_PROP
+
+
+# ── a dropped signal is frozen at an hours-old price: never paper-tradeable ──
+def test_stamp_stale_blocks_paper_on_a_dropped_row():
+    """``paper_create`` records ``signal['credit']`` VERBATIM with no re-pricing,
+    so booking a dropped row writes a fictional entry (a 9:30 credit stamped with a
+    2pm entry_time) into the manual book — which IS the scanner-baseline-vs-decider
+    benchmark. Before the day union this path did not exist; persistence created it."""
+    sigs = [{"id": "a", "symbol": "SPY", "type": "PCS", "live": False,
+             "stale_since": "2026-07-16T11:00:00"}]
+    rows = scanner.stamp_stale(scanner.signal_rows(sigs), sigs)
+    assert rows[0]["_allow_paper"] is False
+
+
+def test_stamp_stale_leaves_paper_available_on_a_live_row():
+    """A gate that blocks everything is as broken as one that blocks nothing."""
+    sigs = [{"id": "a", "symbol": "SPY", "type": "PCS", "live": True}]
+    rows = scanner.stamp_stale(scanner.signal_rows(sigs), sigs)
+    assert rows[0]["_allow_paper"] is True
+
+
+def test_stamp_stale_leaves_paper_available_when_live_is_absent():
+    sigs = [{"id": "a", "symbol": "SPY", "type": "PCS"}]
+    rows = scanner.stamp_stale(scanner.signal_rows(sigs), sigs)
+    assert rows[0]["_allow_paper"] is True
+
+
+def test_stamp_stale_only_ever_narrows_the_paper_gate():
+    """A LIVE naked short is already un-tradeable (undefined risk) — the stale pass
+    must not hand it a Paper button back."""
+    naked = {"id": "n", "symbol": "SPY", "type": "SHORT_CALL", "live": True,
+             "unbounded_loss": True, "max_profit": 1.2, "legs": [],
+             "strategy_label": "Short Call", "bias": "bearish"}
+    rows = scanner.stamp_stale(scanner.directional_rows([naked]), [naked])
+    assert rows[0]["_allow_paper"] is False
+
+
+def test_stamp_stale_blocks_paper_on_a_stale_directional_long():
+    sigs = [dict(_DIR_SIG, live=False, stale_since="2026-07-16T11:00:00")]
+    rows = scanner.stamp_stale(scanner.directional_rows(sigs), sigs)
+    assert rows[0]["_allow_paper"] is False
+
+
+# ── bounded DOM: the day union reaches ~1,746 rows per list ──────────────────
+def test_table_pagination_is_bounded():
+    """Quasar reads ``rowsPerPage: 0`` as INFINITE. Unpaginated, the day's three
+    tables would render ~5,238 rows x 13-16 columns (~75k cells, many carrying a
+    q-badge/q-tooltip) and rebuild them wholesale on every scan — worst at 3pm,
+    exactly when a trader is looking."""
+    assert scanner._TABLE_PAGINATION["rowsPerPage"] > 0
+
+
+# ── the ~4.5 MB day payload never blocks the event loop ─────────────────────
+def test_read_all_returns_both_views(fresh_bus):
+    bus = bus_client.bus()
+    bus.cache_set("cache:options:scan_day", {"date": DAY, "signals_0dte": []})
+    bus.cache_set("cache:options:scan", {"timestamp": "x", "signals_0dte": []})
+    day_env, live = scanner._read_all()
+    assert day_env["date"] == DAY and live["timestamp"] == "x"
+
+
+def test_read_all_is_graceful_when_the_service_is_cold(fresh_bus):
+    assert scanner._read_all() == ({}, {})
+
+
+def test_render_reads_the_day_payload_off_the_event_loop():
+    """The day union serializes to ~4.5 MB by day's end (~880 B x ~5,238 entries).
+    Both read sites — the first paint and the on-change repaint — must go through
+    ``run.io_bound``; the 2 s poll itself stays on-loop (it reads only ``:ver``
+    ints). Pins what the pure row tests cannot see."""
+    import inspect
+    src = inspect.getsource(scanner.render)
+    assert src.count("run.io_bound(_read_all)") == 2
+    # No un-wrapped payload read may remain in render (read_versions is the cheap
+    # :ver probe and is deliberately allowed to stay on the loop).
+    assert "bus_client.read(" not in src
+
+
 # ── Directional tab (single-leg long/short calls+puts, Fit+Quality scored) ───
 _DIR_SIG = {"id": "SPY_LONG_CALL_2026-07-17_450", "symbol": "SPY",
             "type": "LONG_CALL", "family": "DIRECTIONAL",
@@ -433,14 +527,23 @@ def test_status_line_has_time_count_and_cadence():
         "signals_0dte": [{}], "signals_swing": [{}, {}],
         "timestamp": "2026-06-15T13:32:00-05:00"})
     assert "Last scan 1:32" in out
-    assert "3 signals" in out
+    assert "3 live signals" in out
     assert "auto-scans every 15 min" in out
 
 
 def test_status_line_counts_directional_signals():
     out = scanner.status_line({"signals_0dte": [{}], "signals_swing": [{}],
                               "signals_directional": [{}, {}]})
-    assert "4 signals" in out
+    assert "4 live signals" in out
+
+
+def test_status_line_says_LIVE_so_it_cannot_read_as_the_day_count():
+    """The tab headers carry the DAY's counts (hundreds by 3pm) while this line
+    sums the LAST SCAN (dozens). A bare '37 signals' under tabs reading '(412)'
+    reads as a bug — the word 'live' is what makes the ~50x gap legible."""
+    out = scanner.status_line({"signals_0dte": [{}], "timestamp": None})
+    assert "1 live signal" in out
+    assert "1 signals" not in out
 
 
 def test_status_line_includes_errors():

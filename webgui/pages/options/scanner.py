@@ -27,16 +27,19 @@ The pure display transforms (``signal_columns``, ``signal_rows``,
 ``new_ids_for_paint``, ``status_line``, ``_round``) are unit-tested. ``render()``
 wires the two-pane widgets (tables + shared Trade detail panel), a small "Run
 scan" button that enqueues a ``cmd:options`` command, a slim bottom status bar,
-and a fetch-free version-poll ``ui.timer`` that repaints when either bus cache
-version changes.
+and a version-poll ``ui.timer`` that repaints when either bus cache version
+changes. The poll itself is fetch-free (cheap ``:ver`` ints, on-loop); the day
+union is ~4.5 MB by day's end, so BOTH payload reads — the deferred first paint
+and the on-change repaint — go through ``run.io_bound``, sharing one in-flight
+guard so they cannot stack (the ``gamma.py`` precedent).
 """
 import datetime as dt
 from zoneinfo import ZoneInfo
 
 import bus_client
-from nicegui import ui
+from nicegui import run, ui
 
-from pages.ui_guard import guard
+from pages.ui_guard import guard, guard_async
 
 from . import detail, handoff
 from .theme import BTN_3D
@@ -391,6 +394,21 @@ def stamp_stale(rows, signals):
     ``live is False`` — NOT ``not live``: a payload from the live-only
     ``cache:options:scan`` (or any pre-day-union cache) carries no ``live`` key at
     all, and an absent key must never read as "dropped out".
+
+    Also **closes the Paper button** on a stale row (``_allow_paper``). A dropped
+    signal is frozen at the price it last qualified at — possibly hours old — and
+    ``paper_create`` records ``signal['credit']`` VERBATIM with no re-pricing, so
+    booking one writes a fictional entry (a 9:30 credit stamped with a 2pm
+    ``entry_time``) into the manual book. That book is the app's
+    scanner-baseline-vs-decider benchmark, so a fictional fill corrupts the very
+    measurement it exists for. This hazard is NEW: before the day union the page
+    only ever rendered the last scan's live signals (≤15 min old), so the path did
+    not exist — persistence created it. (Same reflex as ``rescue_apply``, which
+    refuses to mutate on price drift.) Reviewing a dropped signal is the POINT of
+    the day union, so Calculator/Expected-Move stay open — only booking is barred.
+
+    The gate only ever NARROWS: a live naked short whose ``_allow_paper``
+    ``strategy_rows`` already cleared (undefined risk) must never be re-enabled.
     """
     by_id = {s.get("id"): s for s in (signals or []) if s.get("id")}
     for r in rows:
@@ -399,6 +417,7 @@ def stamp_stale(rows, signals):
         r["_stale"] = stale
         r["_row_class"] = STALE_ROW_CLASS if stale else ""
         r["stale_since"] = _short_time(signal.get("stale_since")) if stale else ""
+        r["_allow_paper"] = bool(r.get("_allow_paper", True)) and not stale
     return rows
 
 
@@ -407,7 +426,6 @@ def _short_time(iso):
     if not iso:
         return ""
     try:
-        import datetime as dt
         t = dt.datetime.fromisoformat(iso)
         return t.strftime("%I:%M %p").lstrip("0")
     except Exception:
@@ -427,8 +445,13 @@ def status_line(results):
 
     Reads the LIVE ``options:scan`` view, not the day union: this line is about the
     last SCAN (its clock time, its errors), which the day envelope does not carry.
-    The tab headers carry the day's counts. Empty results (service cold) -> a
-    waiting note."""
+
+    The count says **live** deliberately. The tab headers carry the DAY's counts
+    (hundreds by 3pm) while this sums the last scan (dozens), so a bare
+    "37 signals" sitting under tabs reading "(412)" reads as a bug. That
+    correspondence was true before the day union — the tables rendered the same
+    payload this line summed — and persistence broke it; the word is what makes the
+    gap legible. Empty results (service cold) -> a waiting note."""
     results = results or {}
     if not results:
         return "Waiting for options service…"
@@ -437,7 +460,7 @@ def status_line(results):
     when = _short_time(results.get("timestamp"))
     if when:
         parts.append(f"Last scan {when}")
-    parts.append(f"{n} signals")
+    parts.append(f"{n} live signal" + ("" if n == 1 else "s"))
     errs = results.get("errors") or []
     if errs:
         parts.append(f"{len(errs)} errors")
@@ -470,6 +493,29 @@ SCAN_CSS = '''
 
 
 _DAY_VIEW, _LIVE_VIEW = "options:scan_day", "options:scan"
+
+
+def _read_all():
+    """Read both views' payloads → ``(day_env, live)``. **Blocking + big** — the day
+    union serializes to ~4.5 MB by day's end (~880 B x ~5,238 entries), so every
+    caller must go through ``run.io_bound`` and keep it off the event loop."""
+    return (bus_client.read(_DAY_VIEW) or {}), (bus_client.read(_LIVE_VIEW) or {})
+
+
+# Quasar reads ``rowsPerPage: 0`` as INFINITE, and NiceGUI's ui.table defaults to
+# exactly that. The old page rendered one scan (~40 rows/table); the day union
+# reaches ~1,746 per list, i.e. ~5,238 rows x 13-16 columns (~75k cells, many
+# carrying a q-badge/q-tooltip) rebuilt wholesale on every scan — worst at 3pm,
+# exactly when a trader is looking. Page it.
+_TABLE_PAGINATION = {"rowsPerPage": 100}
+
+# A dropped-out row is dimmed via Quasar's `table-row-class-fn` (a Function prop →
+# NiceGUI's ':'-dynamic binding, evaluated as JS and assigned to the camelized
+# prop). It is the only per-row class hook QTable exposes short of overriding the
+# whole `body` slot, which would cost us the per-cell slots below. The class is a
+# fixed Tailwind utility off a finite state (Tailwind-first standard). Hoisted to a
+# constant so a test can pin the `_row_class` binding — see _SCORE_SLOT/_SYMBOL_SLOT.
+_ROW_CLASS_PROP = ':table-row-class-fn="row => row._row_class"'
 
 # Composite-score chip (0-DTE / Swing only — a directional signal's Fit+Quality
 # score gets the same chip from the shared strategy columns).
@@ -521,14 +567,10 @@ def render():
         tabs, tab_0dte, tab_swing, tab_dir = _build_scan_tabs()
 
     def _table(columns):
-        # A dropped-out row is dimmed via Quasar's table-row-class-fn (a Function
-        # prop → NiceGUI's ':'-dynamic binding), which is the only per-row class
-        # hook QTable exposes; the alternative is overriding the whole `body` slot,
-        # which would cost us the per-cell slots below. The class itself is a fixed
-        # Tailwind utility off a finite state (Tailwind-first standard).
-        return ui.table(columns=columns, rows=[], row_key="id") \
+        return ui.table(columns=columns, rows=[], row_key="id",
+                        pagination=dict(_TABLE_PAGINATION)) \
             .classes("w-full scan-table") \
-            .props('dense :table-row-class-fn="row => row._row_class"')
+            .props(f"dense {_ROW_CLASS_PROP}")
 
     with ui.row().classes("w-full no-wrap gap-4 items-start"):
         with ui.column().classes("flex-grow min-w-0"):
@@ -555,6 +597,9 @@ def render():
     # Last-seen bus cache versions for the fetch-free repaint timer. (NEW-signal
     # tracking lives at module level so it persists across navigation.)
     seen = {_DAY_VIEW: None, _LIVE_VIEW: None}
+    # Shared by the deferred first read + the 2 s poll so the two big
+    # off-loop reads can never stack (the gamma.py precedent).
+    state = {"fetching": False}
 
     def _clicked(event):
         row = event.args[1] if isinstance(event.args, list) and len(event.args) > 1 else event.args
@@ -661,26 +706,38 @@ def render():
 
     scan_btn.on_click(_request_scan)
 
-    def _read_all():
-        return (bus_client.read(_DAY_VIEW) or {}), (bus_client.read(_LIVE_VIEW) or {})
-
-    # Initial paint from the bus cache (graceful-empty if the service is cold).
-    # This paint IS the user viewing the page, so it acknowledges the New markers.
-    seen.update(bus_client.read_versions((_DAY_VIEW, _LIVE_VIEW)))
-    day_env, live = _read_all()
-    _populate(day_env, live, notify=False, acknowledge=True)
-
-    @guard
-    def _maybe_repaint():
-        # Fetch-free: compare the bus cache versions to the last-painted ones and
-        # only re-read + repaint on change (one pipelined round-trip for both). The
-        # service bumps them when a (scheduled or requested) scan finishes.
-        versions = bus_client.read_versions((_DAY_VIEW, _LIVE_VIEW))
-        if versions == seen:
+    @guard_async
+    async def _initial_load():
+        # Big-payload first read, OFF the loop (see _read_all). Shares the
+        # `fetching` guard with the poll so the two can't stack. This paint IS the
+        # user viewing the page, so it acknowledges the New markers.
+        if state["fetching"]:
             return
-        seen.update(versions)
-        day_env, live = _read_all()
+        state["fetching"] = True
+        try:
+            day_env, live = await run.io_bound(_read_all)
+        finally:
+            state["fetching"] = False
+        _populate(day_env, live, notify=False, acknowledge=True)
+
+    @guard_async
+    async def _maybe_repaint():
+        # Cheap on-loop probe: only the `:ver` counters (two tiny ints, one
+        # pipelined round-trip). The ~4.5 MB payload read happens ONLY on a change,
+        # and then off the loop.
+        versions = bus_client.read_versions((_DAY_VIEW, _LIVE_VIEW))
+        if versions == seen or state["fetching"]:
+            return
+        seen.update(versions)          # latch BEFORE the await so we don't re-enter
+        state["fetching"] = True
+        try:
+            day_env, live = await run.io_bound(_read_all)
+        finally:
+            state["fetching"] = False
         # NOT a view — the user may be away, so their New markers must survive.
         _populate(day_env, live, notify=False, acknowledge=False)
 
+    seen.update(bus_client.read_versions((_DAY_VIEW, _LIVE_VIEW)))
+    _populate({}, {}, notify=False)             # instant empty paint
+    ui.timer(0.05, _initial_load, once=True)    # big day-union read off-loop
     ui.timer(2.0, _maybe_repaint)
