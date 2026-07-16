@@ -2774,7 +2774,7 @@ def test_merge_day_signals_reappearing_signal_goes_live_again():
     e = compute.merge_day_signals(e, {"signals_0dte": [_sig("a", 3.0)]}, "2026-07-16")
     assert e["signals_0dte"][0]["live"] is True
     assert e["signals_0dte"][0]["credit"] == 3.0
-    assert e["signals_0dte"][0].get("stale_since") in (None, "")
+    assert e["signals_0dte"][0]["stale_since"] is None
 
 
 def test_merge_day_signals_resets_on_date_roll():
@@ -2813,3 +2813,100 @@ def test_merge_day_signals_does_not_mutate_inputs():
     cur = {"signals_0dte": [_sig("a")]}
     compute.merge_day_signals(None, cur, "2026-07-16")
     assert "live" not in cur["signals_0dte"][0]
+
+
+def test_merge_day_signals_does_not_stamp_first_seen():
+    """first_seen was dead (unread), untested and LIED on cold start (a service
+    restarted at noon would stamp a 9am signal 'first_seen=12:00'). If a consumer
+    ever needs it, it gets added honestly -- omitted, not fabricated, on cold start."""
+    out = compute.merge_day_signals(None, {"signals_0dte": [_sig("a")]}, "2026-07-16")
+    assert "first_seen" not in out["signals_0dte"][0]
+
+
+def test_merge_day_signals_strips_dead_wall_fields_from_day_entries():
+    """gex_walls/dex_walls have ZERO consumers outside options-scanner's own
+    intra-scan scoring, and the day union multiplies them ~10-30x."""
+    sig = dict(_sig("a"), gex_walls=[1.0, 2.0], dex_walls=[3.0, 4.0])
+    out = compute.merge_day_signals(None, {"signals_0dte": [sig]}, "2026-07-16")
+    kept = out["signals_0dte"][0]
+    assert "gex_walls" not in kept
+    assert "dex_walls" not in kept
+    assert kept["credit"] == 1.0          # the rest of the signal survives
+
+
+def test_merge_day_signals_strip_survives_carry_forward():
+    """A carried-forward (frozen) entry must not resurrect the stripped fields."""
+    sig = dict(_sig("a"), gex_walls=[1.0], dex_walls=[2.0])
+    prev = compute.merge_day_signals(None, {"signals_0dte": [sig]}, "2026-07-16")
+    out = compute.merge_day_signals(prev, {"signals_0dte": []}, "2026-07-16")
+    assert "gex_walls" not in out["signals_0dte"][0]
+    assert out["signals_0dte"][0]["live"] is False
+
+
+def test_merge_day_signals_caps_the_list_evicting_oldest_stale_first():
+    prev = compute.merge_day_signals(
+        None, {"signals_0dte": [_sig("a"), _sig("b"), _sig("c")]}, "2026-07-16")
+    # all three drop out -> all stale; cap 2 -> the OLDEST ("a") is evicted.
+    out = compute.merge_day_signals(prev, {"signals_0dte": []}, "2026-07-16",
+                                    max_per_list=2)
+    assert [s["id"] for s in out["signals_0dte"]] == ["b", "c"]
+
+
+def test_merge_day_signals_cap_never_evicts_a_live_signal():
+    """The cap must never break the feature's core promise.
+
+    "a" is the OLDEST entry but is still live, so a live-blind eviction would
+    drop it first. (An earlier version of this test put the stale entries at the
+    front, where oldest-first and live-blind evict the same thing -- it passed
+    under a mutation that evicted live signals.)
+    """
+    prev = compute.merge_day_signals(
+        None, {"signals_0dte": [_sig("a"), _sig("b"), _sig("c")]}, "2026-07-16")
+    out = compute.merge_day_signals(
+        prev, {"signals_0dte": [_sig("a")]}, "2026-07-16", max_per_list=2)
+    # a=live(oldest), b+c=stale, cap 2 -> evict the oldest STALE (b), keep a.
+    assert [s["id"] for s in out["signals_0dte"]] == ["a", "c"]
+    assert out["signals_0dte"][0]["live"] is True
+
+
+def test_merge_day_signals_cap_is_exceeded_rather_than_evict_live():
+    """When live alone exceeds the cap, the cap YIELDS -- live is never dropped."""
+    out = compute.merge_day_signals(
+        None, {"signals_0dte": [_sig("x"), _sig("y"), _sig("z")]}, "2026-07-16",
+        max_per_list=1)
+    assert [s["id"] for s in out["signals_0dte"]] == ["x", "y", "z"]
+
+
+def test_merge_day_signals_cap_logs_what_it_dropped(caplog):
+    """No silent caps -- silent truncation reads as 'covered everything' when it didn't."""
+    prev = compute.merge_day_signals(
+        None, {"signals_0dte": [_sig("a"), _sig("b"), _sig("c")]}, "2026-07-16")
+    with caplog.at_level("WARNING"):
+        compute.merge_day_signals(prev, {"signals_0dte": []}, "2026-07-16",
+                                  max_per_list=2)
+    assert any(r.levelname == "WARNING" and "signals_0dte" in r.getMessage()
+               for r in caplog.records), "eviction must be logged"
+
+
+def test_merge_day_signals_cap_does_not_fire_below_the_limit(caplog):
+    prev = compute.merge_day_signals(None, {"signals_0dte": [_sig("a")]}, "2026-07-16")
+    with caplog.at_level("WARNING"):
+        out = compute.merge_day_signals(prev, {"signals_0dte": []}, "2026-07-16",
+                                        max_per_list=2)
+    assert len(out["signals_0dte"]) == 1
+    assert not [r for r in caplog.records if r.levelname == "WARNING"]
+
+
+def test_day_cap_default_exceeds_the_live_ceiling_with_headroom():
+    """The cap must never fight the feature. Measured live ceiling per list is
+    ~360 (45 watchlist symbols x 8 per symbol per list per scan)."""
+    assert compute._DAY_MAX_PER_LIST >= 360 * 2
+    # ...and it must actually BOUND the payload, or it is not a backstop at all.
+    # 3 lists x cap x ~800 B measured per entry must stay well under the ~16 MB
+    # that forced the documented cache:options:gamma crop.
+    assert 3 * compute._DAY_MAX_PER_LIST * 800 < 6_000_000
+    # ...and it must actually be the default (an unbounded default = no backstop).
+    prev = compute.merge_day_signals(
+        None, {"signals_0dte": [_sig("a"), _sig("b")]}, "2026-07-16")
+    out = compute.merge_day_signals(prev, {"signals_0dte": []}, "2026-07-16")
+    assert len(out["signals_0dte"]) == 2      # default cap does not bind here

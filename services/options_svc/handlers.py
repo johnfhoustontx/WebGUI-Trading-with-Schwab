@@ -18,6 +18,7 @@ import logging
 
 from services.options_svc import compute
 from services.options_svc import push_notify
+from shared.notify.channels import _today_ct
 from shared.contracts.options import ScanResult
 
 log = logging.getLogger(__name__)
@@ -288,7 +289,13 @@ def rescan(bus) -> None:
     # and must never be offered a signal that no longer qualifies. Best-effort —
     # a merge failure must not break the live publish above.
     try:
-        today = _dt.datetime.now().strftime("%Y-%m-%d")
+        # CT, via the SAME helper push_notify uses below — rescan would otherwise
+        # carry three date bases (scheduler: CT, push_notify: CT, this: local).
+        # NOT scheduler.active_session_date(): that flips to today at 08:30 CT
+        # (it is tuned to the GEX collector's window) while scans start at 08:00,
+        # so the 08:00/08:15 scans would read as YESTERDAY and the 08:30 one would
+        # look like a date change and wipe the morning's union.
+        today = _today_ct()
         prev = bus.cache_get(CACHE_SCAN_DAY)
         day = compute.merge_day_signals(
             prev.payload if prev is not None else None, scan.model_dump(), today)

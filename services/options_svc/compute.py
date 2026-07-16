@@ -58,13 +58,69 @@ def run_scan() -> dict:
 
 _DAY_LISTS = ("signals_0dte", "signals_swing", "signals_directional")
 
+# Fields stripped from DAY entries only. `gex_walls`/`dex_walls` are attached to
+# every signal by scanner_engine but have ZERO consumers outside options-scanner's
+# own intra-scan scoring (scoring.norm_gex_proximity / norm_dex_proximity read them
+# during the scan, before anything is cached). They are ~11% of a signal's ~800 B;
+# dead weight in cache:options:scan, but the day union multiplies them by the day's
+# scan count. NOT stripped from cache:options:scan — the driver reads that key and
+# it is deliberately out of scope here.
+_DAY_STRIP = ("gex_walls", "dex_walls")
 
-def merge_day_signals(prev, current, today, now_iso=None):
+# Per-list backstop. Sized from measured numbers, not a round guess:
+#   * live ceiling per list ~= 360 (45 watchlist symbols x 8 per symbol per scan:
+#     pcs[:3] + ccs[:3] + ics<=2, and SINGLE_LEG_MAX_PER_SYMBOL=8 for directional),
+#     so at 2000 the cap can never be the thing that drops a live signal;
+#   * a measured mid-churn day lands ~1,750/list -- BELOW this cap, so the day's
+#     coverage promise holds on a normal day and the cap only trims a pathological
+#     one (~5,600/list). Measured through the real cache_set path, that worst case
+#     serializes to 4.45 MB capped vs 14.06 MB unbounded -- and 14 MB is the scale
+#     that forced the documented cache:options:gamma crop.
+# The eviction is oldest-stale-first and is LOGGED (see below): a silent cap would
+# read as "covered the whole day" when it didn't.
+_DAY_MAX_PER_LIST = 2000
+
+
+def _day_entry(signal):
+    """Deep-copy a signal for the day union, minus the provably-dead fields."""
+    out = copy.deepcopy(signal)
+    for dead in _DAY_STRIP:
+        out.pop(dead, None)
+    return out
+
+
+def _cap_day_list(merged, key, max_per_list):
+    """Trim ``merged`` to ``max_per_list``, evicting OLDEST-STALE-FIRST. Never
+    evicts a ``live`` signal: if live alone exceeds the cap, the cap yields (the
+    day's live set is the feature's core promise) and the overflow is logged."""
+    over = len(merged) - max_per_list
+    if over <= 0:
+        return merged
+    kept, dropped = [], 0
+    for s in merged:                      # list order is oldest-first
+        if dropped < over and not s.get("live"):
+            dropped += 1
+            continue
+        kept.append(s)
+    if len(kept) > max_per_list:
+        log.warning(
+            "day union %s: %d live signals exceed the %d cap — keeping them all "
+            "(live is never evicted); %d stale evicted",
+            key, len(kept), max_per_list, dropped)
+    else:
+        log.warning("day union %s: evicted %d oldest stale signal(s) at the %d cap "
+                    "— the day's coverage is truncated", key, dropped, max_per_list)
+    return kept
+
+
+def merge_day_signals(prev, current, today, now_iso=None, max_per_list=None):
     """Merge one scan's signals into the day's accumulated union. PURE.
 
     ``prev``    -- the previous ``{date, signals_*}`` envelope (or None/garbage).
     ``current`` -- the fresh scan dict (the engine result / ScanResult dump).
-    ``today``   -- local date string 'YYYY-MM-DD'.
+    ``today``   -- date string 'YYYY-MM-DD'. Callers MUST pass a CT-based date
+                   (``shared.notify.channels._today_ct``) so this agrees with the
+                   scheduler's and push_notify's CT date bases — see ``rescan``.
 
     Per signal, keyed on the engine's unique ``id``:
       * present in ``current``  -> take it FRESH, ``live=True`` (still qualifying,
@@ -72,11 +128,21 @@ def merge_day_signals(prev, current, today, now_iso=None):
       * absent from ``current`` -> carry the last-seen copy forward FROZEN,
         ``live=False`` + ``stale_since`` stamped once.
 
-    A ``date`` mismatch (or an unusable ``prev``) resets the day wholesale --
-    the same auto-reset-at-date-roll contract push_notify's seen-set uses.
+    A ``date`` mismatch (or an unusable ``prev``) resets the day wholesale. The
+    reset CONTRACT matches push_notify's seen-set; the date BASIS is the caller's
+    (push_notify derives its own CT date internally, this takes one).
+
+    CONSUMER OBLIGATION: the returned ``date`` is load-bearing for READERS, not
+    just for the reset. ``rescan`` deliberately leaves a stale envelope in place
+    when the merge fails (writing an empty one would destroy the day's data), so
+    on a failure at the first scan of a new day the key still holds YESTERDAY's
+    envelope -- including ``live=True`` entries. A consumer MUST gate on ``date``
+    before trusting ``live``, or it will render day-old signals as live.
+
     Signals with no ``id`` are dropped (they cannot be tracked across scans).
     Never mutates its inputs; never raises.
     """
+    max_per_list = _DAY_MAX_PER_LIST if max_per_list is None else max_per_list
     now_iso = now_iso or _dt.datetime.now().isoformat(timespec="seconds")
 
     if not isinstance(prev, dict) or prev.get("date") != today:
@@ -101,27 +167,24 @@ def merge_day_signals(prev, current, today, now_iso=None):
             sid = s["id"]
             seen.add(sid)
             if sid in cur_by_id:
-                fresh = copy.deepcopy(cur_by_id[sid])
+                fresh = _day_entry(cur_by_id[sid])
                 fresh["live"] = True
                 fresh["stale_since"] = None
-                fresh["first_seen"] = s.get("first_seen") or now_iso
                 merged.append(fresh)
             else:
-                kept = copy.deepcopy(s)
+                kept = _day_entry(s)
                 kept["live"] = False
-                kept.setdefault("first_seen", now_iso)
                 if not kept.get("stale_since"):
                     kept["stale_since"] = now_iso
                 merged.append(kept)
         for sid, s in cur_by_id.items():
             if sid in seen:
                 continue
-            fresh = copy.deepcopy(s)
+            fresh = _day_entry(s)
             fresh["live"] = True
             fresh["stale_since"] = None
-            fresh["first_seen"] = now_iso
             merged.append(fresh)
-        out[key] = merged
+        out[key] = _cap_day_list(merged, key, max_per_list)
     return out
 
 

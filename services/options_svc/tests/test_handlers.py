@@ -1467,3 +1467,28 @@ def test_rescan_day_union_failure_does_not_break_the_live_publish(monkeypatch):
     assert env is not None
     assert env.payload["signals_0dte"][0]["id"] == "a"
     assert bus.cache_get("cache:options:scan_day") is None
+
+
+def test_rescan_day_union_dates_in_ct_not_naive_local(monkeypatch):
+    """rescan carries three date bases; the scheduler and push_notify are both
+    CT-pinned, so the day union must be too. Pinned by forcing the machine's naive
+    local clock to a DIFFERENT date than CT and asserting CT wins."""
+    import datetime as _d
+    from shared.notify import channels
+
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "run_scan",
+                        lambda: _scan_with([{"id": "a", "symbol": "SPY"}]))
+    # CT says the 16th...
+    monkeypatch.setattr(channels, "_today_ct", lambda: "2026-07-16")
+    monkeypatch.setattr(handlers, "_today_ct", lambda: "2026-07-16")
+
+    class _FakeDT(_d.datetime):
+        @classmethod
+        def now(cls, tz=None):        # ...naive local says the 17th.
+            return cls(2026, 7, 17, 0, 30)
+    monkeypatch.setattr(handlers._dt, "datetime", _FakeDT)
+
+    handlers.rescan(bus)
+
+    assert bus.cache_get("cache:options:scan_day").payload["date"] == "2026-07-16"
