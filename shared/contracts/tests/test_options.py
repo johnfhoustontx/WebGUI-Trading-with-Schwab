@@ -20,3 +20,19 @@ def test_scanresult_defaults_empty():
 def test_scanresult_rejects_wrong_type():
     with pytest.raises(Exception):
         ScanResult.from_json('{"signals_0dte": "not-a-list"}')
+
+
+def test_scan_result_accepts_signals_directional():
+    r = ScanResult(signals_0dte=[], signals_swing=[],
+                   signals_directional=[{"id": "x", "type": "LONG_CALL"}])
+    assert r.signals_directional[0]["type"] == "LONG_CALL"
+
+
+def test_scan_result_back_compat_without_signals_directional():
+    """A payload cached before this field existed must still validate.
+
+    Redis persists cache:options:scan across a service restart, so the new code
+    WILL read old payloads.
+    """
+    r = ScanResult(signals_0dte=[], signals_swing=[])
+    assert r.signals_directional == []

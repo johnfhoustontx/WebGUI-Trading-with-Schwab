@@ -56,6 +56,47 @@ def test_rescan_caches_and_publishes(monkeypatch):
     assert msg["version"] == env.version
 
 
+def test_rescan_publishes_signals_directional(monkeypatch):
+    """The engine's third list must survive the projection onto ScanResult.
+
+    Directional candidates ride their OWN list so their Fit+Quality scores are
+    never ranked against the premium-seller composites in the other two.
+    """
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "run_scan", lambda: {
+        "signals_0dte": [], "signals_swing": [],
+        "signals_directional": [{"id": "d1", "type": "LONG_CALL", "symbol": "SPY"}],
+        "timestamp": "2026-07-16T10:00:00", "errors": [], "warnings": [],
+        "vix_term_structure": {},
+    })
+
+    handlers.rescan(bus)
+
+    env = bus.cache_get("cache:options:scan")
+    assert env is not None
+    assert env.payload["signals_directional"][0]["id"] == "d1"
+    assert env.payload["signals_directional"][0]["type"] == "LONG_CALL"
+
+
+def test_rescan_without_signals_directional_still_publishes(monkeypatch):
+    """A stale engine returning no ``signals_directional`` key must not crash.
+
+    The projection is ``.get(k, default)``, so the key defaults to [] rather
+    than raising — the real-world case of new code against an old engine.
+    """
+    bus = Bus(fake=True)
+    result = _fake_result()          # no signals_directional key
+    assert "signals_directional" not in result
+    monkeypatch.setattr(handlers.compute, "run_scan", lambda: result)
+
+    handlers.rescan(bus)
+
+    env = bus.cache_get("cache:options:scan")
+    assert env is not None
+    assert env.payload["signals_directional"] == []
+    assert env.payload["signals_0dte"] == result["signals_0dte"]
+
+
 def test_rescan_gate_rejects_malformed(monkeypatch):
     bus = Bus(fake=True)
     # signals_0dte is a string, not a list -> the ScanResult gate must trip.

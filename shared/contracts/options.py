@@ -10,10 +10,29 @@ class ScanResult(_Base):
     have the right container types) as a gate against gross drift — it does
     not over-specify each signal (the GUI's ``signal_rows`` already tolerates
     sparse fields).
+
+    ``signals_directional`` (single-leg LONG_CALL / LONG_PUT / SHORT_CALL /
+    SHORT_PUT) is a THIRD list, not more of the same — do not merge it into the
+    other two. Two reasons:
+
+    * **Different score.** options-scanner's ``scoring.py`` is a premium
+      seller's model and structurally cannot score a long call, so these are
+      scored by ``strategy_scoring`` (Fit+Quality). Keeping them separate means
+      their scores are never ranked against the premium composites; it also
+      leaves the autonomous driver (which reads ``signals_0dte +
+      signals_swing``) blind to them by construction.
+    * **Different SHAPE.** These carry the ``strategy_scanner`` normalized
+      shape: a ``legs`` list (not flat ``short_strike``/``long_strike``),
+      per-contract dollars (×100, not per-share), ``rr`` (a ratio, not
+      ``rr_pct``, a percent), and ``breakevens`` (a list, not the scalar
+      ``breakeven``). Code reading these lists must not assume one shape.
     """
 
     signals_0dte: list[dict] = []
     signals_swing: list[dict] = []
+    # Additive with a default: payloads cached before this field existed (Redis
+    # persists cache:options:scan across restarts) must still validate.
+    signals_directional: list[dict] = []
     vix_term_structure: dict = {}
     timestamp: str | None = None
     errors: list = []

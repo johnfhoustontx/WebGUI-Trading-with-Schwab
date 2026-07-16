@@ -247,13 +247,16 @@ _SWING_DEFAULTS = {
     "families": None,
 }
 
-# The six fields ScanResult validates — we project the engine dict onto exactly
+# The fields ScanResult validates — we project the engine dict onto exactly
 # these (dropping the extra keys the GUI ignores). ``.get`` with a default of
 # the field's container type keeps missing optional keys from crashing, while
 # the ScanResult construction validates the *types* of whatever is present.
 _SCAN_DEFAULTS = {
     "signals_0dte": [],
     "signals_swing": [],
+    # Single-leg directional candidates ride their own list (own scorer, own
+    # signal shape) — see ScanResult's docstring.
+    "signals_directional": [],
     "vix_term_structure": {},
     "timestamp": None,
     "errors": [],
