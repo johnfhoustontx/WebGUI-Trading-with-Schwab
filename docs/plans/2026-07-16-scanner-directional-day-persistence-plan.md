@@ -1097,6 +1097,20 @@ In `render()`:
 > precisely so this is checkable. **Pin it with a test** — feed a yesterday-dated
 > envelope containing `live=True` signals and assert the table does not show them.
 
+> **OBLIGATION — surface `truncated` in the UI.** The merge caps each list at
+> `_DAY_MAX_PER_LIST` (2000) and evicts oldest-stale-first, emitting a
+> `truncated` block of per-list dropped counts. That cap **never binds on a calm
+> or central day** (~1,746/list) — it binds on a **volatile** day, which is
+> exactly when a trader is most likely to be watching. The feature's promise is
+> "the day's signals persist until end of day"; if 3,500 are silently dropped the
+> page looks identical either way, and a server-side `log.warning` the user never
+> sees is, from their side, a silent cap. The repo convention is explicit: *no
+> silent caps.*
+>
+> Render it (e.g. an unobtrusive "N earlier signals dropped at the day cap" note).
+> Treat the key as **additive and absent-safe** — a pre-restart envelope won't
+> carry it, same as `live`/`stale_since`.
+
 > **Ordering is load-bearing.** `unseen_ids` must be snapshotted before `acknowledge_ids`. A test above pins it.
 
 > The `status_line(results)` bottom bar reads `timestamp`/`errors`/`warnings`, which the day envelope does **not** carry. Either add them to the envelope in `merge_day_signals` (pass through from `current`) or keep a cheap read of `options:scan` for the status line only. **Prefer the former** — one read, one version to poll.
