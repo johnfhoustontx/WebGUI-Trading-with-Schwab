@@ -110,6 +110,24 @@ Up to 8 signals/symbol (4 types × 2 expirations), sorted by score descending.
   (line 440) merges `signals_0dte + signals_swing` only; a third list is invisible
   to it by construction. The `{"PCS","CCS","IC"}` allowlist (`guardrails.py:38`)
   stays as defense-in-depth. **Both facts get pinned by a test.**
+
+> **The two defenses are REDUNDANT — learned while pinning them (2026-07-16).**
+> Mutating `build_packet` to merge `signals_directional` does **not** produce an
+> unsafe outcome: the very next line filters through `guardrails.is_allowed`,
+> which rejects the single-leg types on the allowlist. So the driver is safer
+> than this design claims — belt *and* suspenders both hold independently.
+>
+> The consequence is about **testability**, not safety: an outcome-asserting test
+> built from realistic data **cannot** pin the merge property, because the
+> allowlist masks the regression. Any such test passes under mutation and is
+> therefore worthless as a guard. Pinning the merge requires a **synthetic probe**
+> — an allowlist-*passing* `PCS` parked in `signals_directional`, which only the
+> merge property can exclude (`test_build_packet_never_reads_signals_directional_key`).
+>
+> In practice the allowlist is the defense doing the work. The merge is a genuine
+> second layer, but it is only *observably* load-bearing via that probe. If you
+> ever delete the probe as "unrealistic", you have silently stopped testing the
+> merge.
 - Naked shorts carry `unbounded` from `payoff_metrics`, render an explicit
   undefined-risk marker, and are excluded from Send-to-Paper via the Swing page's
   existing `_allow_paper` gate.
