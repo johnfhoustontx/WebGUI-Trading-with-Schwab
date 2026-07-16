@@ -147,10 +147,20 @@ def grade_class(grade):
 # the profit and loss cells can never drift into disagreeing about the same signal.
 #
 # The legacy fallback partitions ``unbounded`` by ``max_profit``, which is exact:
-# an unbounded-PROFIT long carries max_profit=None (strategy_scanner.py:117), a
-# naked short carries its credit-capped max_profit, and ``_normalize_credit``'s
-# unknown-reward case (max_profit=None too) carries unbounded=False so it is never
-# reached here. Exactly one side can be unbounded, so the two are exclusive.
+# only an unbounded-PROFIT long carries max_profit=None (``payoff_metrics``'
+# ``call_coeff > 0`` branch), a naked short carries its credit-capped max_profit,
+# and ``_normalize_credit``'s unknown-reward case (max_profit=None too) carries
+# unbounded=False so it never reaches the fallback. Exactly one side can be
+# unbounded, so the two are exclusive. Both engine invariants are pinned by
+# ``options-scanner/tests/test_strategy_scanner.py`` (see the adapter's
+# unknown-reward + flag-normalization tests) — they are enforced across a process
+# boundary and a Redis cache, so a comment here would not survive alone.
+#
+# TODO: delete the legacy fallback (and this note) once no signal cached before
+# the unbounded_profit/unbounded_loss keys existed can still be served — i.e.
+# after options_svc has restarted and republished every cache:options:swing /
+# cache:options:scan view. Until then a stale naked short would render its margin
+# proxy as a finite risk cap, so the fallback is load-bearing, not decoration.
 
 def _profit_is_unbounded(signal):
     """True when the PROFIT side is unbounded (a long call)."""

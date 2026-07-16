@@ -340,7 +340,11 @@ def _normalize_credit(sig, family, label, bias, legs, source_breakevens):
         "net_credit": net_credit, "net_debit": None,
         "max_profit": max_profit, "max_loss": max_loss_net,
         "capital": capital_net, "rr": rr_net, "commission": comm,
-        "unbounded": False,
+        # Defined risk, declared from the AUTHORITATIVE source economics — not
+        # from the reconstructed legs. All three flags must be normalized here
+        # together: a consumer that reads a side flag first (the webgui's max-loss
+        # cell does) would let a leg-derived True outrank the `unbounded` False.
+        "unbounded": False, "unbounded_profit": False, "unbounded_loss": False,
         "timestamp": sig.get("timestamp") or _dt.datetime.now().isoformat(),
     })
     # Keep authoritative source greeks/pop where present (don't let leg=0 clobber).

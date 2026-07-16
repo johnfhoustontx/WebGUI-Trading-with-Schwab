@@ -183,6 +183,45 @@ def test_adapt_credit_spread_short_leg_carries_source_liquidity():
     assert "bid" not in long_leg and "ask" not in long_leg
 
 
+def test_adapt_credit_spread_without_credit_is_defined_risk_unknown_reward():
+    """A credit spread with NO source `credit` must never look unbounded.
+
+    _normalize_credit leaves max_profit None here (reward unknown), which is NOT
+    a synonym for unlimited. The webgui's Max P cell decodes exactly this pair
+    (`max_profit is None` + `unbounded` False) to render '—' rather than '∞' --
+    a cross-process invariant enforced only by prose in strategy_table.py, so
+    pin it HERE, at the producer. If any of these flip True, that page would
+    claim unlimited profit on a defined-risk credit spread.
+    """
+    pcs = {"id": "SPY_PCS", "symbol": "SPY", "type": "PCS",
+           "expiration": "2026-07-10", "dte": 10, "short_strike": 445.0,
+           "long_strike": 440.0, "short_mark": 3.5, "long_mark": 1.8,
+           "max_loss": 3.3, "underlying_price": 450.0}   # NOTE: no "credit"
+    n = ss.adapt_credit_spread(pcs)
+    assert n["max_profit"] is None          # reward unknown, not unlimited
+    assert n["unbounded"] is False
+    assert n["unbounded_profit"] is False
+    assert n["unbounded_loss"] is False
+
+
+def test_adapt_credit_spread_normalizes_all_three_unbounded_flags():
+    """The adapter declares defined risk authoritatively, not via the legs.
+
+    `unbounded` is force-set False here because the source economics are
+    authoritative; the two side flags must be normalized in the SAME place or a
+    leg-derived value could silently outrank it (_loss_is_unbounded checks
+    unbounded_loss first).
+    """
+    pcs = {"id": "SPY_PCS", "symbol": "SPY", "type": "PCS",
+           "expiration": "2026-07-10", "dte": 10, "short_strike": 445.0,
+           "long_strike": 440.0, "short_mark": 3.5, "long_mark": 1.8,
+           "credit": 1.7, "max_loss": 3.3, "underlying_price": 450.0}
+    n = ss.adapt_credit_spread(pcs)
+    assert n["unbounded"] is False
+    assert n["unbounded_profit"] is False
+    assert n["unbounded_loss"] is False
+
+
 def test_adapt_iron_condor_short_legs_carry_source_liquidity():
     # Source IC carries put-side liquidity at top-level bid/ask/volume and
     # call-side liquidity at call_bid/call_ask/call_volume; BOTH short legs must
