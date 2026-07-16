@@ -40,7 +40,18 @@ pytest tests/test_scoring.py -v                # single file
 pytest tests/test_scoring.py::test_name -v     # single test
 ```
 
-**Test baseline: 667 passed, 2 failed.** The 2 failures (`tests/test_scanner_engine.py::TestEarningsAvoidance`) are pre-existing fixtures unrelated to current features. Do not "fix" them as part of unrelated work — flag them only if a change is expected to touch them. See [USER_GUIDE § Known issues](docs/USER_GUIDE.md#known-issues).
+**Test baseline: 1260 passed, 15 failed, 1 skipped** (measured 2026-07-16 with `-p no:randomly`). The failures are **pre-existing** and unrelated to current features — do not "fix" them as part of unrelated work; flag them only if a change is expected to touch them. They fall in four groups:
+
+- `tests/test_scanner_engine.py::TestEarningsAvoidance` — stale fixtures
+- `tests/test_dashboard_*` — the Tk dashboard (intermittent; can crash the run)
+- `tests/test_gex_collector*` — timing-dependent
+- `tests/test_key_levels_doc.py` — a missing doc file
+
+**The failure COUNT varies 14–16 run-to-run** — some are order-dependent under `pytest-randomly`. Use `-p no:randomly` for a comparable number, and when in doubt measure your own baseline (`git stash` → run → `git stash pop`) rather than trusting this line. Compare the *set* of failing tests, not just the count.
+
+> This figure was **667 passed / 2 failed** for a long time and was badly stale — it was propagated into a plan doc in 2026-07 and nearly caused a real regression to be waved through as "pre-existing". If you notice it drifting again, fix it here.
+
+See [USER_GUIDE § Known issues](docs/USER_GUIDE.md#known-issues).
 
 There is no lint/format step configured. Black-Scholes math, DB schemas, and scoring are TDD; UI changes are verified manually.
 

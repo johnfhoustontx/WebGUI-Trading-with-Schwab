@@ -20,7 +20,7 @@
 
 | Suite | Command (from repo root unless noted) | Baseline |
 |---|---|---|
-| options-scanner | `cd options-scanner; ..\.venv\Scripts\python -m pytest tests -q` | **667 passed, 2 failed** — the 2 (`test_scanner_engine.py::TestEarningsAvoidance`) are **pre-existing**. Do not fix them. |
+| options-scanner | `cd options-scanner; ..\.venv\Scripts\python -m pytest tests -q -p no:randomly` | **1260 passed, 15 failed, 1 skipped** (measured 2026-07-16). All 15 are **pre-existing** (`TestEarningsAvoidance`, Tk `test_dashboard_*`, `test_gex_collector*`, `test_key_levels_doc`). Do not fix them. **Count varies 14–16** under `pytest-randomly` — compare the failing *set*, not the count. |
 | options_svc | `.venv\Scripts\python -m pytest services\options_svc -q` | all green (~537) |
 | webgui | `cd webgui; ..\.venv\Scripts\python -m pytest . -q` | **772** green |
 | contracts | `.venv\Scripts\python -m pytest shared\contracts -q` | ~37 green |
@@ -249,7 +249,7 @@ In `webgui/pages/options/swing.py`, find the `body-cell-max_loss` slot (add one 
 cd options-scanner; ..\.venv\Scripts\python -m pytest tests -q
 cd ..\webgui; ..\.venv\Scripts\python -m pytest . -q
 ```
-Expected: options-scanner **667 passed, 2 failed** (the pre-existing pair, unchanged); webgui **≥772** green.
+Expected: options-scanner **1260 passed / 15 failed** (the pre-existing set, unchanged — verify the failing *set* matches, not just the count); webgui **≥786** green.
 
 ### Step 10: Commit
 
@@ -405,7 +405,7 @@ Finally, sort the accumulated list **after** the symbol loop (near the existing 
 ```powershell
 cd options-scanner; ..\.venv\Scripts\python -m pytest tests/test_scanner_engine.py -q
 ```
-Expected: PASS (plus the 2 pre-existing `TestEarningsAvoidance` failures — **unchanged**).
+Expected: PASS (the pre-existing failing set — `TestEarningsAvoidance` et al — **unchanged**).
 
 ### Step 5: Commit
 
@@ -1167,7 +1167,7 @@ Per the documented practice, the reliable end-to-end check for a 3-tier page is 
 
 ## Definition of done
 
-- [ ] All five suites at or above baseline (options-scanner 667/2 pre-existing; webgui ≥772; options_svc, contracts, driver_svc green).
+- [ ] All five suites at or above baseline (options-scanner 1260/15 pre-existing set unchanged; webgui ≥786; options_svc, contracts, driver_svc green).
 - [ ] `ruff check` clean.
 - [ ] Directional signals appear in their own tab, scored by Fit+Quality, never mixed into the credit-spread tables.
 - [ ] A naked short renders `Max P` = its credit and `Max L` = `∞` with an undefined-risk badge, and cannot be paper-traded.
