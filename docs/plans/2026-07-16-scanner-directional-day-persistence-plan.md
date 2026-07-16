@@ -21,7 +21,7 @@
 | Suite | Command (from repo root unless noted) | Baseline |
 |---|---|---|
 | options-scanner | `cd options-scanner; ..\.venv\Scripts\python -m pytest tests -q -p no:randomly` | **1260 passed, 15 failed, 1 skipped** (measured 2026-07-16). All 15 are **pre-existing** (`TestEarningsAvoidance`, Tk `test_dashboard_*`, `test_gex_collector*`, `test_key_levels_doc`). Do not fix them. **Count varies 14–16** under `pytest-randomly` — compare the failing *set*, not the count. |
-| options_svc | `.venv\Scripts\python -m pytest services\options_svc -q` | all green (~537) |
+| options_svc | `.venv\Scripts\python -m pytest services\options_svc -q -p no:randomly` | **537 passed, 2 failed** (measured 2026-07-16). The 2 (`test_expected_move.py::test_compute_expected_move_builds_payload`, `::test_compute_expected_move_skips_partial_candle`) are **pre-existing** and date-relative — confirmed by running them at the pre-plan commit `a0c1976`. Do not fix them. Full run takes >2 min; scope to a test file when iterating. |
 | webgui | `cd webgui; ..\.venv\Scripts\python -m pytest . -q` | **772** green |
 | contracts | `.venv\Scripts\python -m pytest shared\contracts -q` | ~37 green |
 | driver_svc | `.venv\Scripts\python -m pytest services\driver_svc -q` | ~203 green |
