@@ -8,7 +8,56 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-07-15 (**Nav drawer → icon rail that expands on hover**: the webgui's left drawer
+**Last updated:** 2026-07-16 (**Scanner: directional trades + day-persistent signals**: the Options Scanner (`/`)
+gained a third sub-tab — **Directional** — and its tables now hold **the whole day's signals**, not just the last
+scan's. **(1) Directional.** `scanner_engine.run_full_scan` emits a NEW **`signals_directional`** list (single-leg
+`LONG_CALL`/`LONG_PUT`/`SHORT_CALL`/`SHORT_PUT`), built per symbol per DTE window by **reusing**
+`strategy_scanner.build_directional` + `strategy_scoring` (already proven on `/options/swing`) against chains the
+scan already fetched. **Own tab + own scorer, deliberately:** options-scanner's `scoring.py` is a premium-seller's
+model that *structurally cannot score a long call* (rewards positive theta, penalizes long vega, needs a short
+strike), so directional is scored on **Fit+Quality** and its score **never sits beside a premium composite**.
+`em_1sd` is computed **per window** (a single 1-day EM would under-score the swing side by ~17.5 composite points).
+Naked shorts render **`Max L = ∞`** + an **undefined-risk** badge and **cannot be paper-traded**. The list is
+invisible to the **autonomous driver by construction** (`build_packet` merges only `signals_0dte + signals_swing`;
+the `{PCS,CCS,IC}` allowlist is the second layer) — **pinned by a synthetic probe** (an allowlist-PASSING PCS parked
+in `signals_directional`), because the two defenses are REDUNDANT and a realistic test can't tell them apart.
+**(2) Day persistence.** `rescan` now publishes a **SECOND key `cache:options:scan_day`** — a date-scoped union
+`{date, signals_*, truncated?}` (pure `compute.merge_day_signals`, id-keyed): a still-qualifying signal takes the
+**fresh** numbers, a dropped-out one is **carried forward frozen** (`live=False` + `stale_since`) and renders
+**dimmed + "Dropped HH:MM"**. **`cache:options:scan` keeps live-only semantics verbatim** — the driver reads it and
+must never be offered a signal that no longer qualifies. Date is **CT-pinned via `_today_ct()`** — NOT
+`active_session_date()`, which flips at 08:30 while scans start at 08:00 and would wipe each morning's first two
+scans. **Capped at 2000/list** (evict oldest-stale-first, **never evict a live signal**, log + a `truncated` block
+the page surfaces): measured worst case was **~17 MB**, at the 16 MB `cache:options:gamma` payload that forced the
+P2 crop. **The page gates its render on `payload["date"] == today_ct`** — the merge is best-effort and fails
+**stale, not absent**, so yesterday's envelope still carries `live=True` rows. **(3) "New" reworked + a bug fixed.**
+Now means **unseen since you last viewed the page** (acknowledged **only on `render()`'s initial paint**, never on a
+version-poll repaint — otherwise a repaint while you're away acknowledges signals you never saw). **The old marker
+was broken:** `_sig_key` rebuilt a key from `short_strike`/`long_strike` but was fed DISPLAY rows where
+`signal_rows` merges both into one `strikes` cell, so every key collapsed to `SPY|PCS|None|None|07/17` and a new
+signal at different strikes went unmarked. **Now keyed on the engine's unique `id`.** **(4) A live bug fixed on the
+way in** (`/options/swing` had it too): `payoff_metrics` set `unbounded=True` for **both** an unbounded PROFIT (long
+call) and an unbounded LOSS (naked short), so a short call rendered **`Max P = ∞`** while its genuinely unlimited
+loss showed as a finite margin proxy — exactly inverted. Now emits `unbounded_profit`/`unbounded_loss`.
+**Persistence created one new hazard, closed:** a dropped signal is frozen at an hours-old price and `paper_create`
+records `signal['credit']` **verbatim, no re-pricing** — so the **Paper button is gated off on stale rows** (all
+three tabs; Calculator/Expected-Move stay open — reviewing a dropped signal is the point, booking it is the
+hazard). Table reads moved **off the event loop** (`run.io_bound`) + `rowsPerPage: 100` (was unbounded → up to
+~6,000 DOM rows). **⚠ KNOWN — the Directional tab's ranking is dominated by a pre-existing scoring artifact
+(`strategy_scoring`, affects `/options/swing` equally):** a long put's max profit is *bounded* at S=0 (underlying →
+$0) so it always gets a finite R:R (measured up to **1404:1**), while a long call's is honestly **unbounded** →
+`rr=None` → a PoP proxy. Live result: **LONG_PUT avg score 59.2 / best rank #1; LONG_CALL avg 45.2 / best rank
+#14 — all top 12 were LONG_PUT**, i.e. *being honest about unlimited upside is penalized ~14 points*. The #1 signal
+was an ATM IWM 295 put **19 minutes from expiry** graded "Good — passes all quality gates" on an **884:1** R:R that
+only pays if IWM hits $0 today. **Not fixed** — it's a scoring-model decision, not a bug, and it changes Swing too.
+**Restart `options_svc` + the webgui.** options-scanner **1269** / options_svc **564** (2 pre-existing
+date-relative `test_expected_move` fails) / driver_svc **209** / contracts **40** / webgui **840** green; ruff
+clean. **Live-verified end-to-end during RTH**: all 4 types built, day key accumulated across two scans with **21
+0-DTE signals frozen at 14:42** as they stopped qualifying, driver menu provably free of directional. **Test
+baselines in `options-scanner/CLAUDE.md` were badly stale (667/2 vs a real 1260/15) and were corrected.** Branch
+`Using_Highcharts`. Design/plan:
+[design](docs/plans/2026-07-16-scanner-directional-day-persistence-design.md) /
+[plan](docs/plans/2026-07-16-scanner-directional-day-persistence-plan.md). Prior — 2026-07-15 (**Nav drawer → icon rail that expands on hover**: the webgui's left drawer
 (`webgui/main.py`) is now a **64px icon rail** that widens to **248px on hover** and **OVERLAYS** the page
 instead of reflowing it. **Mechanism** (the part worth keeping): the drawer is LAID OUT at
 `NAV_WIDTH_RAIL=64` via Quasar's `width` prop (`drawer_width(pinned)` → 64, or `NAV_WIDTH_OPEN=248` when
@@ -1437,7 +1486,7 @@ Routes:
 
 | Route | Page | Status |
 |-------|------|--------|
-| `/` | Options · Scanner (0-4 / 5-15 DTE, two-pane + detail panel; **0-DTE / Swing are folder-style SUBTABS under the main tab strip** (2026-07-11, `main.subtab_slot()` + `.compact-subtabs`; amber/blue tab text kept) with **live signal counts** (`tab_label`); **Run scan is right-aligned flush with the table** (`.scan-panels` drops the q-tab-panel padding); a new qualifying signal pops an **in-app toast** (`fiber_new`, blue-8 — matching the row "new" badge) alongside the chime/desktop notification; **Run scan** is the app's solid 3D button (`color=None` + `.scan-btn`); the per-row **Send to Calculator** now transfers correctly — `_prefill` stashes `pending_legs` + `load_symbol()` so legs apply AFTER the chain loads, instead of being wiped by strike-coercion against an empty chain (see [[calculator-leg-transfer-needs-chain-first]])) | built |
+| `/` | Options · Scanner (0-4 / 5-15 DTE, two-pane + detail panel; **THREE folder-style SUBTABS since 2026-07-16 — 0-DTE / Swing / Directional**. **Directional** renders the engine's `signals_directional` (single-leg LONG_CALL/LONG_PUT/SHORT_CALL/SHORT_PUT) via the SHARED `strategy_table` builders, scored on **Fit+Quality** (never beside a premium composite — see the Last-updated entry); naked shorts show `Max L = ∞` + an undefined-risk badge and no Paper button. **The tables read `cache:options:scan_day`** (the day union) not `cache:options:scan`, so the day's signals persist to EOD with dropped-out ones **dimmed + frozen + "Dropped HH:MM"** and **no Paper button** (frozen price + verbatim `entry_credit` = a fictional entry); the render is **gated on the envelope's CT date** and surfaces a `truncated` notice. The status bar still reads the LIVE key (the day envelope carries no timestamp/errors) and says "N live signals" so it can't be read as the day count. **"New" = unseen since you last VIEWED the page** (acknowledged only on initial paint), keyed on the engine's unique `id` — this fixed a real bug where the key collapsed to `SPY|PCS|None|None|07/17`; **a webgui restart re-marks everything New** (page-side state, deliberate). ⚠ the nav badge/chime still count credit spreads ONLY — a Fit+Quality score isn't commensurable with the premium composite the min-score alert threshold gates on;  under the main tab strip** (2026-07-11, `main.subtab_slot()` + `.compact-subtabs`; amber/blue tab text kept) with **live signal counts** (`tab_label`); **Run scan is right-aligned flush with the table** (`.scan-panels` drops the q-tab-panel padding); a new qualifying signal pops an **in-app toast** (`fiber_new`, blue-8 — matching the row "new" badge) alongside the chime/desktop notification; **Run scan** is the app's solid 3D button (`color=None` + `.scan-btn`); the per-row **Send to Calculator** now transfers correctly — `_prefill` stashes `pending_legs` + `load_symbol()` so legs apply AFTER the chain loads, instead of being wiped by strike-coercion against an empty chain (see [[calculator-leg-transfer-needs-chain-first]])) | built |
 | `/options/paper` | Paper Trades (ledger table + shared detail panel. **Live unrealized P&L** — `compute.paper_trades_view(reprice=True)` reprices OPEN ledger trades via `signal_repricer` (per-spread × qty), **market-hours gated**, on reload + the 5-min manage tick; the **P&L** column shows realized (closed) or live unrealized (open), **2-decimals + green/red colored**; **Credit/Risk** show 2-decimals; headers are **Credit / Risk / P&L** (no `$`); **newest-first** default sort; **Delete / Delete-all-closed buttons are red** (needed `color=None` so `.pt-danger` beats Quasar's `bg-primary`); the **Analyze** button pops a **descriptive dialog** (verdict + rationale + unrealized P&L / % / current price / DTE / target / breakeven + close X) — `compute.analyze_paper` enriched with `rationale` + `metrics`; row-click analyses update the detail panel silently. Detail panel: the **speedometer falls back to PoP** for paper trades (was stuck at 0 — no stored composite score) and the "Underlying" label is now **"Current price"**) | built |
 | `/options/captured` | Captured Signals | built |
 | `/options/portfolio` | Paper Portfolio (paper account) | built |
