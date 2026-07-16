@@ -2,6 +2,7 @@
 import pytest
 import sys
 import os
+from datetime import date, timedelta
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -1562,3 +1563,131 @@ def test_run_full_scan_applies_gex_gate():
     assert "apply_gex_gate" in src
     assert "gex_regime_band" in src
     assert "get_directional_walls" in src
+
+
+class _StubResponse:
+    status_code = 200
+
+    def __init__(self, payload):
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+    def raise_for_status(self):
+        pass
+
+
+@pytest.fixture
+def fake_client(monkeypatch):
+    """Schwab client stub for `run_full_scan`, modelled on
+    test_directional_screening's `_stub_client`.
+
+    Reuses that module's `_make_chain_symmetric` (realistic OTM delta/mark
+    conventions on both sides) but anchors the expiration to a LIVE date --
+    `strategy_scanner._dte_for` parses the expiration STRING, so a hard-coded
+    past date would stamp dte=0 on every directional candidate.
+
+    The 0-DTE bucket gets a FAILED chain (as the sibling module does): its
+    single expiration is 7 DTE, and feeding that to the 0-4 DTE bucket trips a
+    pre-existing unbound-local in screen_spreads' "no matches" log path.
+    """
+    from tests.test_directional_screening import _make_chain_symmetric
+
+    price = 500.0
+    exp = (date.today() + timedelta(days=7)).isoformat()
+    swing_chain = _make_chain_symmetric(spot=price, exp=exp, dte=7)
+    failed_chain = {"underlyingPrice": price, "putExpDateMap": {},
+                    "callExpDateMap": {}, "status": "FAILED"}
+
+    # Pin the regime so the scan never reads the live sentiment bridge file.
+    import regime_filter
+    monkeypatch.setattr(regime_filter, "evaluate_regime", lambda **kw: {
+        "active": False, "allow_ccs": True, "allow_pcs": True, "per_symbol": {},
+        "bias": "neutral", "trend_state": None, "trend_confidence": None,
+        "aggregate_confidence": None, "divergence_flag": None,
+        "composite_score": 5.0, "reason": "test",
+    })
+    # Let the CREDIT-spread path produce signals too, so the "directional never
+    # leaks into the credit lists" test has something to actually iterate.
+    # Both mirror test_directional_screening: pin market-open for the liquidity
+    # gate, and drop the IV Rank floor (the stub iv_data has iv_rank=None, which
+    # would otherwise filter every credit spread away).
+    monkeypatch.setattr(scanner_engine, "_is_options_market_open", lambda: True)
+    monkeypatch.setattr(scanner_engine, "MIN_IV_RANK", {"0-DTE": 0, "SWING": 0})
+
+    class _Stub:
+        class Options:
+            class ContractType:
+                ALL = "ALL"
+
+        def get_quotes(self, symbols):
+            return _StubResponse({
+                s: {"quote": {"lastPrice": 18.0 if s.startswith("$VIX") else price}}
+                for s in symbols
+            })
+
+        def get_option_chain(self, symbol, **kwargs):
+            from_date = kwargs.get("from_date")
+            today = date.today()
+            in_swing_window = (from_date is not None
+                               and today + timedelta(days=5) <= from_date
+                               <= today + timedelta(days=15))
+            return _StubResponse(swing_chain if in_swing_window else failed_chain)
+
+        def get_price_history_every_day(self, symbol):
+            base = price - 30
+            return _StubResponse({"candles": [
+                {"open": base + i * 0.5 - 0.5, "high": base + i * 0.5 + 1.0,
+                 "low": base + i * 0.5 - 1.0, "close": base + i * 0.5, "datetime": i}
+                for i in range(60)
+            ]})
+
+    return _Stub()
+
+
+class TestDirectionalSignals:
+    """Single-leg directional candidates (LONG/SHORT calls & puts).
+
+    NOTE: unrelated to `mode="DIRECTIONAL"` (a directionally-biased CREDIT
+    spread — see test_directional_screening.py). Same word, different concept.
+    """
+
+    def test_run_full_scan_emits_signals_directional(self, fake_client):
+        results = scanner_engine.run_full_scan(fake_client, symbols=["SPY"])
+        assert "signals_directional" in results
+        assert isinstance(results["signals_directional"], list)
+
+    def test_directional_signals_carry_strategy_shape(self, fake_client):
+        results = scanner_engine.run_full_scan(fake_client, symbols=["SPY"])
+        sigs = results["signals_directional"]
+        assert sigs, "expected directional candidates from the fake chain"
+        for s in sigs:
+            assert s["type"] in {"LONG_CALL", "LONG_PUT", "SHORT_CALL", "SHORT_PUT"}
+            assert s["family"] == "DIRECTIONAL"
+            assert isinstance(s["legs"], list) and len(s["legs"]) == 1
+            assert s.get("id")
+            assert s.get("composite_score") is not None
+
+    def test_directional_sorted_by_score_desc(self, fake_client):
+        sigs = scanner_engine.run_full_scan(fake_client, symbols=["SPY"])["signals_directional"]
+        scores = [s.get("composite_score") or 0 for s in sigs]
+        assert scores == sorted(scores, reverse=True)
+
+    def test_directional_never_leaks_into_the_credit_lists(self, fake_client):
+        """The driver reads signals_0dte + signals_swing. Directional must not be there."""
+        results = scanner_engine.run_full_scan(fake_client, symbols=["SPY"])
+        credit = results["signals_0dte"] + results["signals_swing"]
+        # Non-vacuity: an empty credit list would pass the loop below for free.
+        assert credit, "fixture produced no credit spreads — the assertion would be vacuous"
+        for s in credit:
+            assert s["type"] in {"PCS", "CCS", "IC"}
+
+    def test_directional_degrades_when_builder_raises(self, fake_client, monkeypatch):
+        """A directional failure must never break the credit-spread scan."""
+        import strategy_scanner
+        monkeypatch.setattr(strategy_scanner, "build_directional",
+                            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+        results = scanner_engine.run_full_scan(fake_client, symbols=["SPY"])
+        assert results["signals_directional"] == []
+        assert isinstance(results["signals_0dte"], list)   # scan survived

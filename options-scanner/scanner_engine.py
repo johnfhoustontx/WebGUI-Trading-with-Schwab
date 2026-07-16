@@ -448,6 +448,17 @@ DIRECTIONAL_MAX_PER_SYMBOL_BUCKET = 2
 DIRECTIONAL_MAX_RISK_PCT = 0.02   # 2% account risk per directional trade
 DIRECTIONAL_MIN_CREDIT_PCT = 0.20  # higher floor — these strikes pay more
 
+# --- Single-leg directional candidate parameters ---
+# NOTE: unrelated to the "directional pass" parameters above, which tune a
+# directionally-biased CREDIT spread (mode="DIRECTIONAL"). Same word, different
+# concept: these govern actual single-leg LONG/SHORT calls & puts.
+#
+# Built per symbol per DTE window and scored on strategy_scoring's Fit+Quality
+# model -- options-scanner's own `scoring.py` is a premium-seller's model that
+# cannot score a long call (it rewards positive theta and penalizes long vega).
+# 4 structures x 2 windows (0-DTE + swing) = 8.
+DIRECTIONAL_SINGLE_MAX_PER_SYMBOL = 8
+
 
 def get_min_credit_pct(regime, trade_type):
     """Return minimum credit-to-width ratio for the VIX regime and trade type."""
@@ -1163,6 +1174,7 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
         "iv_data": {},
         "signals_0dte": [],
         "signals_swing": [],
+        "signals_directional": [],
         "errors": [],
         "warnings": [],
     }
@@ -1346,6 +1358,50 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
             ccs = [s for s in sigs if s["type"] == "CCS"][:3]
             results["signals_swing"].extend(pcs + ccs + ics)
 
+        # --- Single-leg directional candidates (own tab, own scorer) ---
+        # Lazy import: strategy_scoring lazy-imports options-scanner's `scoring`
+        # for its liquidity normalizer; keep the binding local to the call.
+        try:
+            import strategy_scanner as _ssn
+            import strategy_scoring as _ssc
+
+            # ATM IV as a DECIMAL fraction, derived from the engine's
+            # authoritative dollar daily EM (dem = spot*iv_dec*sqrt(1/365)).
+            # run_iv_analysis's `current_iv` is a PERCENT -- the documented trap.
+            atm_iv = None
+            if daily_em and price and price > 0:
+                atm_iv = (daily_em * math.sqrt(365.0)) / price
+            if not atm_iv:
+                civ = iv_data.get("current_iv")
+                atm_iv = (civ / 100.0) if (civ and civ > 1.5) else (civ or 0.20)
+
+            view = _ssc.infer_market_view(tech or {}, iv_data or {})
+            dir_sigs = []
+            for _chain, _lo, _hi in (
+                (data.get("chain_0"), zerodte_min_dte, zerodte_max_dte),
+                (data.get("chain_s"), swing_min_dte, swing_max_dte),
+            ):
+                if not _chain or _chain.get("status") == "FAILED":
+                    continue
+                win_sigs = _ssn.build_directional(_chain, symbol, price, atm_iv, _lo, _hi)
+                if not win_sigs:
+                    continue
+                # 1-sigma $ move over THIS window's horizon (the breakeven-vs-EM
+                # quality factor). Scored PER WINDOW: a single em_1sd would size
+                # a 5-15 DTE candidate's breakeven against a 0-DTE move and
+                # systematically under-score the swing side of one shared list.
+                # Same formula compute.swing_scan uses (daily_em * sqrt(dte_min)).
+                em_1sd = (daily_em or 0.0) * math.sqrt(max(_lo, 1))
+                dir_sigs += _ssc.score_all(win_sigs, view, atm_iv, em_1sd)
+
+            if dir_sigs:
+                dir_sigs.sort(key=lambda x: (x.get("composite_score") or 0), reverse=True)
+                results["signals_directional"].extend(
+                    dir_sigs[:DIRECTIONAL_SINGLE_MAX_PER_SYMBOL])
+        except Exception as e:  # noqa: BLE001
+            # Directional is additive -- never let it break the credit-spread scan.
+            log.warning(f"  directional build for {symbol} failed: {e}")
+
     # --- Directional pass (regime-gated) ---
     # Evaluate the regime ONCE — both the directional pass and the late
     # sentiment/trend filter below share this result. A single read avoids a
@@ -1516,6 +1572,8 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
     # Re-sort all signals by composite score
     results["signals_0dte"].sort(key=lambda x: (x.get("composite_score", 0), x.get("rr_pct", 0)), reverse=True)
     results["signals_swing"].sort(key=lambda x: (x.get("composite_score", 0), x.get("rr_pct", 0)), reverse=True)
+    results["signals_directional"].sort(
+        key=lambda x: (x.get("composite_score") or 0), reverse=True)
 
     # Add position sizing to all signals
     for sig_list in [results["signals_0dte"], results["signals_swing"]]:
