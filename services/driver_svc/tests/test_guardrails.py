@@ -8,6 +8,8 @@ layer surfaces immediately, not in a live cycle.
 
 Grows per task (2.1 → 2.4).
 """
+import pytest
+
 from services.driver_svc import guardrails as g
 
 
@@ -335,3 +337,24 @@ def test_wrong_side_block_does_not_consume_slot_or_budget():
                              vix=14, posture="up")
     assert [t["id"] for t in out["executable"]] == ["m1"]          # CCS blocked, PCS runs
     assert out["rejected"][0]["reason"] == g.WRONG_SIDE_REGIME
+
+
+# ---------------------------------------------------------------------------
+# Task 4 — directional signals are never allowlisted (defense in depth)
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("stype", ["LONG_CALL", "LONG_PUT", "SHORT_CALL", "SHORT_PUT"])
+def test_directional_types_are_not_allowed(stype):
+    """Defense-in-depth: even if a directional signal reached the guardrail.
+
+    The scanner now builds single-leg directional candidates into a separate
+    ``signals_directional`` list on ``cache:options:scan`` — the same view the
+    driver reads. ``build_packet`` ignores that list by construction (see
+    ``test_compute_packet``); this is the belt to those suspenders.
+
+    Naked shorts (SHORT_CALL/SHORT_PUT) are UNDEFINED RISK — a naked short call
+    has theoretically unlimited loss — and long options are not the driver's
+    mandate. ``max_loss`` is finite and positive here on purpose, so the signal
+    clears the defined-risk gate and this isolates the ALLOWLIST as the thing
+    doing the rejecting.
+    """
+    assert g.is_allowed({"type": stype, "max_loss": 200.0}) is False

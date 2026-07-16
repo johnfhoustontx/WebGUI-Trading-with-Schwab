@@ -636,3 +636,70 @@ def test_run_cycle_gate_blocks_wrong_side_when_flag_on(monkeypatch):
                             market=_up_market())
     assert out["executable"] == []
     assert out["rejected"][0]["reason"]                      # blocked wrong-side
+
+
+# ---------------------------------------------------------------------------
+# Task 4 — the directional list is invisible to the driver
+# ---------------------------------------------------------------------------
+def test_build_packet_ignores_signals_directional():
+    """The driver must never be offered a single-leg directional trade.
+
+    The scanner builds single-leg directional candidates (LONG_CALL/LONG_PUT/
+    SHORT_CALL/SHORT_PUT) into a ``signals_directional`` list on the SAME
+    ``cache:options:scan`` view the autonomous driver reads. Naked shorts are
+    UNDEFINED RISK (a naked short call has theoretically unlimited loss) and long
+    options are not the driver's mandate, so none may reach the model's menu.
+
+    ``build_packet`` merges ``signals_0dte + signals_swing`` only — a third list is
+    invisible to it by construction. This pins that. The directional signal is given
+    a HIGHER composite_score than the PCS so the score-desc sort + MENU_TOP_N cap
+    cannot be what excludes it: only the design can.
+    """
+    pcs = {"symbol": "QQQ", "type": "PCS", "trade_type": "0-DTE", "max_loss": 2.0,
+           "credit": 60, "pop_pct": 85.0, "composite_score": 70,
+           "expiration": "2026-07-17"}
+    long_call = {"symbol": "NVDA", "type": "LONG_CALL", "max_loss": 5.0,
+                 "composite_score": 99, "expiration": "2026-07-17"}
+    naked_call = {"symbol": "TSLA", "type": "SHORT_CALL", "max_loss": 8.0,
+                  "composite_score": 98, "expiration": "2026-07-17"}
+    scan = {"signals_0dte": [pcs], "signals_swing": [],
+            "signals_directional": [long_call, naked_call]}
+
+    pkt = compute.build_packet(scan, {"snapshot": {}, "positions": []},
+                               target=500.0, limits=_lim(), market={})
+
+    # The credit spread IS offered...
+    assert [m["symbol"] for m in pkt["menu"]] == ["QQQ"]
+    assert pkt["menu"][0]["structure"] == "PCS"
+    # ...and NEITHER directional signal reached the menu or the raw execution map,
+    # despite outscoring it (99/98 > 70).
+    structures = {m["structure"] for m in pkt["menu"]}
+    assert "LONG_CALL" not in structures and "SHORT_CALL" not in structures
+    assert long_call not in pkt["menu_by_id"].values()
+    assert naked_call not in pkt["menu_by_id"].values()
+    assert list(pkt["menu_by_id"].values()) == [pcs]
+
+
+def test_build_packet_never_reads_signals_directional_key():
+    """``build_packet`` merges ``signals_0dte + signals_swing`` ONLY — it never reads
+    a third list, whatever is in it.
+
+    This isolates the MERGE from the allowlist. The sibling test above plants REALISTIC
+    directional signals and asserts the outcome, but it cannot distinguish the two
+    defenses: ``is_allowed`` would reject a LONG_CALL even if the merge DID read the
+    list, so that test survives a merge regression. Here the probe is a PCS — a
+    structure the allowlist ACCEPTS — parked in ``signals_directional``. The allowlist
+    cannot exclude it, so if it reaches the menu the merge read a list it must not.
+
+    (A PCS in ``signals_directional`` is not realistic scanner output; it is a probe
+    chosen precisely because only the property under test can reject it.)
+    """
+    probe = {"symbol": "PROBE", "type": "PCS", "max_loss": 2.0, "credit": 60,
+             "composite_score": 99, "expiration": "2026-07-17"}
+    scan = {"signals_0dte": [], "signals_swing": [], "signals_directional": [probe]}
+
+    pkt = compute.build_packet(scan, {"snapshot": {}, "positions": []},
+                               target=500.0, limits=_lim(), market={})
+
+    assert pkt["menu"] == []
+    assert pkt["menu_by_id"] == {}
