@@ -448,16 +448,16 @@ DIRECTIONAL_MAX_PER_SYMBOL_BUCKET = 2
 DIRECTIONAL_MAX_RISK_PCT = 0.02   # 2% account risk per directional trade
 DIRECTIONAL_MIN_CREDIT_PCT = 0.20  # higher floor — these strikes pay more
 
-# --- Single-leg directional candidate parameters ---
-# NOTE: unrelated to the "directional pass" parameters above, which tune a
-# directionally-biased CREDIT spread (mode="DIRECTIONAL"). Same word, different
-# concept: these govern actual single-leg LONG/SHORT calls & puts.
+# --- Single-leg candidate parameters (LONG/SHORT calls & puts) ---
+# Deliberately NOT named DIRECTIONAL_*: the block above tunes a directionally-
+# biased CREDIT spread (mode="DIRECTIONAL"), which is also "directional". The
+# distinguishing concept here is SINGLE-LEG.
 #
 # Built per symbol per DTE window and scored on strategy_scoring's Fit+Quality
 # model -- options-scanner's own `scoring.py` is a premium-seller's model that
 # cannot score a long call (it rewards positive theta and penalizes long vega).
 # 4 structures x 2 windows (0-DTE + swing) = 8.
-DIRECTIONAL_SINGLE_MAX_PER_SYMBOL = 8
+SINGLE_LEG_MAX_PER_SYMBOL = 8
 
 
 def get_min_credit_pct(regime, trade_type):
@@ -1403,7 +1403,7 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
 
             if dir_sigs:
                 # CURRENTLY INERT: _DIRECTIONAL has 4 entries x 2 windows = 8 ==
-                # DIRECTIONAL_SINGLE_MAX_PER_SYMBOL, so the slice below can never
+                # SINGLE_LEG_MAX_PER_SYMBOL, so the slice below can never
                 # truncate and this sort cannot change the result. Kept because the
                 # cap is what makes it load-bearing: the moment _DIRECTIONAL grows
                 # or the cap is lowered, an unsorted concatenation of two
@@ -1411,10 +1411,15 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
                 # than the best 8. Sorting here keeps the cap meaning "the best".
                 dir_sigs.sort(key=lambda x: (x.get("composite_score") or 0), reverse=True)
                 results["signals_directional"].extend(
-                    dir_sigs[:DIRECTIONAL_SINGLE_MAX_PER_SYMBOL])
-        except Exception as e:  # noqa: BLE001
-            # Directional is additive -- never let it break the credit-spread scan.
-            log.warning(f"  directional build for {symbol} failed: {e}")
+                    dir_sigs[:SINGLE_LEG_MAX_PER_SYMBOL])
+        except Exception:  # noqa: BLE001
+            # Single-leg directional is additive -- never let it break the
+            # credit-spread scan. log.exception (not warning): this try spans two
+            # lazy imports and four call sites, so it also catches ImportError --
+            # without a traceback a typo'd module name would degrade to a bare
+            # per-symbol warning forever. Matches gex_collector.py's
+            # degrade-and-continue convention; keeps the swallow, keeps the frame.
+            log.exception(f"  single-leg directional build for {symbol} failed")
 
     # --- Directional pass (regime-gated) ---
     # Evaluate the regime ONCE — both the directional pass and the late

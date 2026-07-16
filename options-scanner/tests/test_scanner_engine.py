@@ -1585,6 +1585,14 @@ def _chain_at(spot, exp, dte):
     `_make_chain_symmetric` (OTM = small |delta| + low mark; |delta| ~ 0.5 ATM),
     but that builder hard-codes strikes 470-530, so it only serves spot=500 and
     cannot supply a second symbol at a different price level.
+
+    NOT a realistic surface, deliberately: the 1-DTE and 7-DTE chains carry
+    IDENTICAL marks and a flat `volatility: 18.0` (no term structure, no skew).
+    That is why 13 of the 16 candidates it yields sit exactly on
+    strategy_scoring's GATE_FAIL_CAP (39.0) -- they fail a hard gate, which pins
+    the score and makes q_be unobservable on those rows. Don't read score
+    realism into fixtures built from this, and when pinning a scoring behaviour
+    pick a candidate that is NOT gate-capped or the assertion proves nothing.
     """
     puts, calls = {}, {}
     for i in range(-30, 31):
@@ -1606,11 +1614,18 @@ def _chain_at(spot, exp, dte):
             "callExpDateMap": {f"{exp}:{dte}": calls}}
 
 
-# Two symbols at different price levels with OPPOSITE price trends, so
-# `infer_market_view` reads a different direction for each and their candidates
-# score differently. That is what makes the post-loop cross-symbol sort
-# load-bearing: `score_all` returns each symbol's list already sorted, so with a
-# single symbol the accumulated list arrives pre-sorted and no sort can bind.
+# {symbol: (spot, price-trend direction)}. Both fields are load-bearing, but for
+# DIFFERENT tests -- each verified by mutation, so don't collapse either:
+#
+#   * The two SPOT LEVELS produce the cross-symbol score spread that makes the
+#     post-loop sort load-bearing. `score_all` returns each symbol's slice
+#     already sorted, so one symbol alone would arrive pre-sorted and no sort
+#     could bind. (Levelling the TRENDS does not break this; the spots do it.)
+#   * The OPPOSITE TRENDS give each symbol a different inferred market view.
+#     That is what keeps QQQ's 7-DTE LONG_CALL off GATE_FAIL_CAP -- the only
+#     reason q_be, hence the per-window em_1sd, is observable at all. Setting
+#     both to +1 gate-caps the probe at 39.0 and
+#     test_swing_window_scored_against_its_own_em fails its vacuity guard.
 _FAKE_SYMBOLS = {"SPY": (500.0, +1), "QQQ": (430.0, -1)}
 
 
@@ -1738,6 +1753,35 @@ class TestDirectionalSignals:
         assert len(set(scores)) > 1, "all scores equal — the ordering assertion is vacuous"
         assert scores == sorted(scores, reverse=True)
 
+    def test_swing_window_scored_against_its_own_em_not_a_one_day_em(self, fake_client):
+        """Each DTE window is scored against ITS OWN em_1sd.
+
+        Pins the deliberate deviation from the task spec (see the comment in
+        scanner_engine.py). strategy_scoring's q_be is
+        `clamp((1 - dist/em_1sd) * 100)`, so scoring a 7-DTE candidate against a
+        1-day em_1sd shrinks the denominator ~sqrt(7)=2.65x, inflates the ratio
+        and drives q_be toward 0 -- under-scoring the swing side of this single
+        jointly-sorted list.
+
+        QQQ's 7-DTE LONG_CALL is the probe because it is the ONLY swing
+        candidate this fixture produces that is NOT pinned to GATE_FAIL_CAP
+        (39.0) by a failed hard gate -- i.e. the only one where q_be is
+        observable at all. Measured: 36.2 scored per-window vs 31.6 under the
+        spec's single 1-day em_1sd; the 34.0 bar sits between them, so a revert
+        to the spec fails here.
+        """
+        sigs = scanner_engine.run_full_scan(
+            fake_client, symbols=self.SYMBOLS)["signals_directional"]
+        probe = [s for s in sigs if s["symbol"] == "QQQ"
+                 and s["type"] == "LONG_CALL" and s["dte"] == 7]
+        assert len(probe) == 1, "probe candidate missing — fixture changed"
+        score = probe[0]["composite_score"]
+        # Non-vacuity: a gate-capped score is constant and would prove nothing.
+        assert score != 39.0, "probe is gate-capped — q_be unobservable, test is vacuous"
+        assert score > 34.0, (
+            f"swing candidate scored {score}: looks scored against a 1-day em_1sd "
+            "rather than its own 7-DTE window")
+
     def test_directional_never_leaks_into_the_credit_lists(self, fake_client):
         """The driver reads signals_0dte + signals_swing. Directional must not be there."""
         results = scanner_engine.run_full_scan(fake_client, symbols=self.SYMBOLS)
@@ -1754,4 +1798,8 @@ class TestDirectionalSignals:
                             lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
         results = scanner_engine.run_full_scan(fake_client, symbols=self.SYMBOLS)
         assert results["signals_directional"] == []
-        assert isinstance(results["signals_0dte"], list)   # scan survived
+        # The credit scan must SURVIVE, not merely still be a list: an
+        # `isinstance(..., list)` check is a tautology that [] satisfies, so it
+        # would pass even if the handler wiped both buckets on the way out.
+        assert results["signals_0dte"], "credit scan did not survive the directional failure"
+        assert results["signals_swing"], "credit scan did not survive the directional failure"
