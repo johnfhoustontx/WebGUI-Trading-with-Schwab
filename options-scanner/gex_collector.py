@@ -23,8 +23,12 @@ import flow_skew
 from gamma_tool import GammaEngine
 import gex_history_db as db
 
+import sys as _sys, pathlib as _pathlib
+_sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo root
+from shared.symbols import COLLECTION_BASE  # noqa: E402
+
 TZ = ZoneInfo("America/Chicago")
-SYMBOLS = ["$SPX", "$VIX", "SPY", "QQQ"]
+SYMBOLS = list(COLLECTION_BASE)
 POLL_INTERVAL_MIN = 1
 START_HOUR, START_MIN = 8, 30
 STOP_HOUR, STOP_MIN = 15, 20

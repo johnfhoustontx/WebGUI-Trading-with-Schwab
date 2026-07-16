@@ -126,3 +126,9 @@ def test_stream_worker_logs_and_backs_off_on_failure(monkeypatch, caplog):
 
 def test_loop_is_coroutine():
     assert asyncio.iscoroutinefunction(scheduler.loop)
+
+
+def test_holidays_sourced_from_shared_calendar():
+    from services.portfolio_svc import scheduler
+    from shared import market_calendar as mc
+    assert scheduler._HOLIDAYS is mc.HOLIDAYS

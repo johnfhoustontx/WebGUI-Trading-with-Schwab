@@ -11,14 +11,13 @@ import sys
 import requests
 from datetime import date, timedelta
 
-SCHWAB_PROXY       = "http://127.0.0.1:8100"
-OPTIONS_ANALYTICS  = "http://127.0.0.1:8200"
-ML_SERVERS = {
-    "MES": "http://127.0.0.1:8000",
-    "MNQ": "http://127.0.0.1:8001",
-    "ES":  "http://127.0.0.1:8004",
-    "NQ":  "http://127.0.0.1:8005",
-}
+import pathlib as _pathlib
+sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo root
+from repo_paths import PROXY_URL, ANALYTICS_URL, ML_SERVER_URLS
+
+SCHWAB_PROXY       = PROXY_URL
+OPTIONS_ANALYTICS  = ANALYTICS_URL
+ML_SERVERS         = ML_SERVER_URLS
 
 results = {}
 

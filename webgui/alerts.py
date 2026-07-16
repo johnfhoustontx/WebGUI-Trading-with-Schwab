@@ -4,34 +4,18 @@ The wiring (timer, audio element, badge UI) lives in main.py's _layout; this
 module holds only the decision logic so it can be tested without NiceGUI.
 """
 import datetime as dt
-from zoneinfo import ZoneInfo
 
 from pages.options.scanner import _sig_key
+from shared.market_calendar import CT as _CAL_CT, HOLIDAYS as _HOLIDAYS, is_holiday
 
-CT = ZoneInfo("America/Chicago")
+# Holidays + CT clock come from shared/market_calendar (single source; update yearly there).
+CT = _CAL_CT
 _OPEN, _CLOSE = dt.time(8, 0), dt.time(15, 0)   # CT trading window
-
-# NYSE full-closure holidays. Mirrors the service schedulers' _HOLIDAYS
-# (services/*/scheduler.py, options-scanner/scanner.py) so the alert gate agrees
-# with the market calendar the rest of the stack uses — but ALSO carries 2027 and
-# Juneteenth (which the service copies currently omit) so chimes stay silent on
-# every real non-trading weekday. Observed dates follow NYSE rules (Sat→prior Fri,
-# Sun→following Mon). **Update yearly** (add the next year, drop the old one).
-_HOLIDAYS = frozenset({
-    # 2026
-    dt.date(2026, 1, 1), dt.date(2026, 1, 19), dt.date(2026, 2, 16), dt.date(2026, 4, 3),
-    dt.date(2026, 5, 25), dt.date(2026, 6, 19), dt.date(2026, 7, 3), dt.date(2026, 9, 7),
-    dt.date(2026, 11, 26), dt.date(2026, 12, 25),
-    # 2027
-    dt.date(2027, 1, 1), dt.date(2027, 1, 18), dt.date(2027, 2, 15), dt.date(2027, 3, 26),
-    dt.date(2027, 5, 31), dt.date(2027, 6, 18), dt.date(2027, 7, 5), dt.date(2027, 9, 6),
-    dt.date(2027, 11, 25), dt.date(2027, 12, 24),
-})
 
 
 def is_market_holiday(day):
     """True if ``day`` (a ``date``) is an NYSE full-closure holiday."""
-    return day in _HOLIDAYS
+    return is_holiday(day)
 
 
 def _signals(scan):

@@ -10,6 +10,7 @@ import sys, pathlib
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))  # repo root
 from repo_paths import REPO_ROOT  # noqa: E402
+from shared.symbols import is_index_symbol  # noqa: E402
 
 try:
     import tomllib  # py3.11+
@@ -26,15 +27,6 @@ def _load_rates() -> dict:
         return tomllib.load(fh)
 
 _RATES = _load_rates()
-
-# Index roots that carry the index option rate (+ exchange passthrough).
-_INDEX_ROOTS = {"SPX", "VIX", "OEX", "NDX", "RUT", "XSP", "DJX"}
-
-
-def is_index_symbol(symbol: str) -> bool:
-    if not symbol:
-        return False
-    return symbol.lstrip("$").upper() in _INDEX_ROOTS
 
 
 def _option_rate(symbol: str) -> float:

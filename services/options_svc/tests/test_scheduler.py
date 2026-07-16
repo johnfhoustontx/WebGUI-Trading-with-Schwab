@@ -447,3 +447,9 @@ def test_loop_runs_due_branches_concurrently():
     import inspect
     src = inspect.getsource(scheduler.loop)
     assert "_gather_due" in src
+
+
+def test_holidays_sourced_from_shared_calendar():
+    from services.options_svc import scheduler
+    from shared import market_calendar as mc
+    assert scheduler._HOLIDAYS is mc.HOLIDAYS
