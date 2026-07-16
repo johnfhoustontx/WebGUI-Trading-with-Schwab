@@ -195,6 +195,68 @@ def test_strategy_rows_debit_spread():
     assert row["_allow_paper"] is True          # debit vertical → paper-tradeable
 
 
+def _naked_short_call():
+    """A naked short call: profit capped at the credit, loss genuinely unlimited."""
+    return {"id": "sc1", "type": "SHORT_CALL", "max_profit": 198.7, "max_loss": 9001.3,
+            "unbounded": True, "unbounded_profit": False, "unbounded_loss": True}
+
+
+def test_fmt_max_profit_naked_short_shows_the_capped_credit_not_infinity():
+    """A naked short's profit is capped at the credit — never render it as ∞."""
+    assert st._fmt_max_profit(_naked_short_call()) == "198.70"
+
+
+def test_fmt_max_loss_naked_short_shows_infinity():
+    assert st._fmt_max_loss(_naked_short_call()) == "∞"
+
+
+def test_fmt_long_call_profit_infinite_loss_capped():
+    long_call = {"type": "LONG_CALL", "max_profit": None, "max_loss": 201.3,
+                 "unbounded": True, "unbounded_profit": True, "unbounded_loss": False}
+    assert st._fmt_max_profit(long_call) == "∞"
+    assert st._fmt_max_loss(long_call) == "201.30"
+
+
+def test_fmt_max_profit_absent_value_is_unknown_not_infinite():
+    """max_profit=None does NOT imply unbounded profit.
+
+    ``strategy_scanner._normalize_credit`` leaves max_profit None when a credit
+    spread's source ``credit`` is missing — a DEFINED-risk structure with an
+    unknown reward. Rendering that as ∞ would claim unlimited profit on a
+    capped trade, the same lie this fix removes from the naked-short cell.
+    """
+    unknown_credit = {"type": "PCS", "max_profit": None, "max_loss": 330.0,
+                      "unbounded": False, "unbounded_profit": False,
+                      "unbounded_loss": False}
+    assert st._fmt_max_profit(unknown_credit) == "—"
+
+
+def test_fmt_max_profit_legacy_signal_without_side_flags():
+    """A cached pre-fix signal has `unbounded` but no `unbounded_profit`.
+
+    The legacy flag is trusted ONLY when max_profit is absent, so a legacy long
+    call still reads ∞ while a legacy naked short (which carries its capped
+    credit) is fixed rather than trusted.
+    """
+    legacy_long = {"type": "LONG_CALL", "max_profit": None, "unbounded": True}
+    legacy_short = {"type": "SHORT_CALL", "max_profit": 198.7, "unbounded": True}
+    assert st._fmt_max_profit(legacy_long) == "∞"
+    assert st._fmt_max_profit(legacy_short) == "198.70"
+
+
+def test_strategy_rows_marks_undefined_risk_only_on_unbounded_loss():
+    rows = st.strategy_rows([
+        {"id": "a", "type": "SHORT_CALL", "max_profit": 198.7, "max_loss": 9001.3,
+         "unbounded": True, "unbounded_profit": False, "unbounded_loss": True},
+        {"id": "b", "type": "LONG_CALL", "max_profit": None, "max_loss": 201.3,
+         "unbounded": True, "unbounded_profit": True, "unbounded_loss": False},
+    ])
+    by_id = {r["id"]: r for r in rows}
+    assert by_id["a"]["_undefined_risk"] is True    # naked short
+    assert by_id["b"]["_undefined_risk"] is False   # long call: risk IS defined
+    assert by_id["a"]["_allow_paper"] is False      # already gated, pin it
+
+
 def test_strategy_rows_naked_short_not_paper_tradeable():
     """A naked short (undefined risk) is NOT paper-tradeable — the gate excludes it."""
     row = st.strategy_rows([{"id": "s1", "symbol": "SPY", "type": "SHORT_CALL",

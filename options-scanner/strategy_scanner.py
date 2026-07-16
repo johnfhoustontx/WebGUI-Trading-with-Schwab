@@ -89,6 +89,11 @@ def payoff_metrics(legs, spot, symbol=None):
     #   == 0 bounded on the upside (verticals/condors/flies). The downside (S->0)
     # is ALWAYS bounded (puts floor at S=0), so never flag unbounded from below.
     call_coeff = sum(_sign(l) * l.get("qty", 1) for l in legs if l["kind"] == "call")
+    # Emit that SIDE explicitly: `unbounded` alone is True for both cases, so a
+    # caller rendering a max-profit/max-loss cell cannot tell a long call from a
+    # naked short. Kept as the OR of the two for back-compat (paper_trader reads it).
+    unbounded_profit = (call_coeff > 0)
+    unbounded_loss = (call_coeff < 0)
     unbounded = (call_coeff != 0)
 
     # --- Bounded extrema at payoff BREAKPOINTS (S=0, each strike, a far-high pt) ---
@@ -139,6 +144,7 @@ def payoff_metrics(legs, spot, symbol=None):
         "net_credit": net_credit,
         "max_profit": max_profit, "max_loss": max_loss,
         "breakevens": breakevens, "unbounded": unbounded,
+        "unbounded_profit": unbounded_profit, "unbounded_loss": unbounded_loss,
         "capital": capital,
         "commission": comm,
         "rr": (round(max_profit / max_loss, 3) if (max_profit and max_loss) else None),

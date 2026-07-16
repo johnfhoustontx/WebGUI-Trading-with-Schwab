@@ -112,6 +112,40 @@ def test_payoff_naked_short_put_bounded_loss():
     assert abs(m["max_profit"] - 348.70) < 0.05   # 350 - 1.30 commission
 
 
+def test_payoff_metrics_distinguishes_unbounded_profit_from_unbounded_loss():
+    """`unbounded` alone conflates a long call with a naked short call.
+
+    A long call has unlimited PROFIT and a capped loss (the debit); a naked
+    short call has a capped profit (the credit) and unlimited LOSS. Both set
+    call_coeff != 0, so the display cannot tell them apart from `unbounded`.
+    """
+    long_call = ss.payoff_metrics([_leg("call", "long", 460.0, 2.0)], spot=450.0)
+    assert long_call["unbounded_profit"] is True
+    assert long_call["unbounded_loss"] is False
+    assert long_call["max_profit"] is None          # genuinely unlimited
+
+    short_call = ss.payoff_metrics([_leg("call", "short", 460.0, 2.0)], spot=450.0)
+    assert short_call["unbounded_profit"] is False
+    assert short_call["unbounded_loss"] is True
+    assert short_call["max_profit"] is not None     # capped at the credit
+    assert short_call["max_profit"] > 0
+
+
+def test_payoff_metrics_bounded_structure_flags_neither():
+    legs = [_leg("call", "long", 460.0, 2.0), _leg("call", "short", 465.0, 1.0)]
+    m = ss.payoff_metrics(legs, spot=450.0)
+    assert m["unbounded_profit"] is False
+    assert m["unbounded_loss"] is False
+    assert m["unbounded"] is False
+
+
+def test_payoff_metrics_keeps_legacy_unbounded_flag():
+    """`unbounded` stays as the OR of both, for back-compat with paper_trader."""
+    for side in ("long", "short"):
+        m = ss.payoff_metrics([_leg("call", side, 460.0, 2.0)], spot=450.0)
+        assert m["unbounded"] is True
+
+
 # ---- Task 4 ----
 def test_pop_long_call_is_low_side_probability():
     legs = [_leg("call", "long", 450.0, 6.0)]

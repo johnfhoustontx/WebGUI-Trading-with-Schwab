@@ -141,11 +141,33 @@ def grade_class(grade):
 
 
 def _fmt_max_profit(signal):
-    """Max profit cell: '∞' when unbounded / None, else a 2dp string."""
+    """Max profit cell: '∞' only when the PROFIT side is unbounded, else 2dp.
+
+    Gates on ``unbounded_profit``, NOT the legacy ``unbounded`` — the latter is
+    also True for a naked short, whose profit is capped at the credit. A missing
+    ``max_profit`` is NOT a synonym either: ``strategy_scanner._normalize_credit``
+    leaves it None when a credit spread's source credit is absent (defined risk,
+    unknown reward) — that reads '—', not '∞'. The legacy flag is honored only
+    when the value is genuinely absent, so a pre-fix cached signal still renders
+    correctly on both sides.
+    """
     mp = signal.get("max_profit")
-    if signal.get("unbounded") or mp is None:
+    if signal.get("unbounded_profit"):
         return "∞"
+    if mp is None:
+        return "∞" if signal.get("unbounded") else "—"
     return f"{mp:.2f}" if isinstance(mp, (int, float)) else "—"
+
+
+def _fmt_max_loss(signal):
+    """Max loss cell: '∞' when the LOSS side is unbounded (a naked short).
+
+    The engine substitutes a margin proxy for an unbounded max_loss, which would
+    otherwise render as a finite figure and read as a risk cap. It is not one.
+    """
+    if signal.get("unbounded_loss"):
+        return "∞"
+    return _fmt_2(signal.get("max_loss"))
 
 
 def _fmt_2(value):
@@ -160,8 +182,9 @@ def strategy_rows(signals):
     """Display rows for the multi-strategy table, sorted by composite score (desc).
 
     Robust to missing keys. Each row carries ``id`` (detail lookup), the formatted
-    cells, plus ``_score_class`` / ``_bias_class`` (Tailwind ``:class`` bindings)
-    and ``_allow_paper`` (gates the Paper button to credit-creditable types).
+    cells, plus ``_score_class`` / ``_bias_class`` (Tailwind ``:class`` bindings),
+    ``_allow_paper`` (gates the Paper button to credit-creditable types) and
+    ``_undefined_risk`` (badges a naked short, whose max loss has no cap).
     """
     rows = []
     for s in signals or []:
@@ -175,7 +198,7 @@ def strategy_rows(signals):
             "dte": s.get("dte"),
             "debit_credit": debit_credit_text(s),
             "max_profit": _fmt_max_profit(s),
-            "max_loss": _fmt_2(s.get("max_loss")),
+            "max_loss": _fmt_max_loss(s),
             "rr": _fmt_2(s.get("rr")),
             "pop_pct": _fmt_1(s.get("pop_pct")),
             "breakevens": breakeven_text(s),
@@ -186,6 +209,7 @@ def strategy_rows(signals):
             "_bias_class": _bias_class(s.get("bias")),
             "_grade_class": grade_class(s.get("grade")),
             "_allow_paper": s.get("type") in _PAPER_TYPES,
+            "_undefined_risk": bool(s.get("unbounded_loss")),
         })
     rows.sort(key=lambda r: (r["composite_score"] is not None, r["composite_score"] or 0),
               reverse=True)

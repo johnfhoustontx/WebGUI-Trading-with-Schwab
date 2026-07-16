@@ -98,6 +98,14 @@ def render():
         <span :class="props.row._bias_class">{{ props.value || '—' }}</span>
       </q-td>
     ''')
+    # A naked short's max loss is a margin proxy, not a cap — say so on the cell.
+    table.add_slot('body-cell-max_loss', r'''
+      <q-td :props="props">
+        {{ props.value }}
+        <q-badge v-if="props.row._undefined_risk" label="undefined risk"
+                 class="q-ml-xs text-[9px] px-1 py-0 bg-[#b71c1c] text-white"/>
+      </q-td>
+    ''')
     # Quality grade colored by pass/fail band + a tooltip with the reason.
     table.add_slot('body-cell-grade', r'''
       <q-td :props="props">
