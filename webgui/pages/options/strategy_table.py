@@ -140,22 +140,43 @@ def grade_class(grade):
     return TXT_NEUTRAL
 
 
+# Which SIDE of a signal's payoff is unbounded. The engine emits explicit
+# ``unbounded_profit``/``unbounded_loss`` flags, but a signal cached BEFORE those
+# existed carries only the legacy ``unbounded`` (True for either side). The two
+# helpers below are the single place that reasoning lives — keep them together so
+# the profit and loss cells can never drift into disagreeing about the same signal.
+#
+# The legacy fallback partitions ``unbounded`` by ``max_profit``, which is exact:
+# an unbounded-PROFIT long carries max_profit=None (strategy_scanner.py:117), a
+# naked short carries its credit-capped max_profit, and ``_normalize_credit``'s
+# unknown-reward case (max_profit=None too) carries unbounded=False so it is never
+# reached here. Exactly one side can be unbounded, so the two are exclusive.
+
+def _profit_is_unbounded(signal):
+    """True when the PROFIT side is unbounded (a long call)."""
+    if signal.get("unbounded_profit"):
+        return True
+    return bool(signal.get("unbounded")) and signal.get("max_profit") is None
+
+
+def _loss_is_unbounded(signal):
+    """True when the LOSS side is unbounded (a naked short)."""
+    if signal.get("unbounded_loss"):
+        return True
+    return bool(signal.get("unbounded")) and signal.get("max_profit") is not None
+
+
 def _fmt_max_profit(signal):
     """Max profit cell: '∞' only when the PROFIT side is unbounded, else 2dp.
 
-    Gates on ``unbounded_profit``, NOT the legacy ``unbounded`` — the latter is
-    also True for a naked short, whose profit is capped at the credit. A missing
-    ``max_profit`` is NOT a synonym either: ``strategy_scanner._normalize_credit``
-    leaves it None when a credit spread's source credit is absent (defined risk,
-    unknown reward) — that reads '—', not '∞'. The legacy flag is honored only
-    when the value is genuinely absent, so a pre-fix cached signal still renders
-    correctly on both sides.
+    Never gates on the legacy ``unbounded`` alone — that is also True for a naked
+    short, whose profit is capped at the credit. A missing ``max_profit`` is not a
+    synonym for unlimited either: ``_normalize_credit`` leaves it None when a credit
+    spread's source credit is absent (defined risk, UNKNOWN reward) → '—', not '∞'.
     """
-    mp = signal.get("max_profit")
-    if signal.get("unbounded_profit"):
+    if _profit_is_unbounded(signal):
         return "∞"
-    if mp is None:
-        return "∞" if signal.get("unbounded") else "—"
+    mp = signal.get("max_profit")
     return f"{mp:.2f}" if isinstance(mp, (int, float)) else "—"
 
 
@@ -165,7 +186,7 @@ def _fmt_max_loss(signal):
     The engine substitutes a margin proxy for an unbounded max_loss, which would
     otherwise render as a finite figure and read as a risk cap. It is not one.
     """
-    if signal.get("unbounded_loss"):
+    if _loss_is_unbounded(signal):
         return "∞"
     return _fmt_2(signal.get("max_loss"))
 
@@ -209,7 +230,7 @@ def strategy_rows(signals):
             "_bias_class": _bias_class(s.get("bias")),
             "_grade_class": grade_class(s.get("grade")),
             "_allow_paper": s.get("type") in _PAPER_TYPES,
-            "_undefined_risk": bool(s.get("unbounded_loss")),
+            "_undefined_risk": _loss_is_unbounded(s),
         })
     rows.sort(key=lambda r: (r["composite_score"] is not None, r["composite_score"] or 0),
               reverse=True)

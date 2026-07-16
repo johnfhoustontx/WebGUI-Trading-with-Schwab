@@ -244,6 +244,50 @@ def test_fmt_max_profit_legacy_signal_without_side_flags():
     assert st._fmt_max_profit(legacy_short) == "198.70"
 
 
+def test_fmt_max_loss_stale_naked_short_still_infinite():
+    """A signal cached before `unbounded_loss` existed must not read as capped.
+
+    `unbounded` + a FINITE max_profit can only be a naked short: an
+    unbounded-profit long carries max_profit=None, and _normalize_credit's
+    unknown-reward case carries unbounded=False. Rendering the margin proxy
+    (9001.30) here would present an uncapped loss as a risk cap.
+    """
+    legacy_short = {"type": "SHORT_CALL", "max_profit": 198.7, "max_loss": 9001.3,
+                    "unbounded": True}
+    assert st._fmt_max_loss(legacy_short) == "∞"
+
+
+def test_fmt_max_loss_stale_long_call_stays_capped():
+    """A legacy long call's loss IS capped at the debit — don't over-flag it."""
+    legacy_long = {"type": "LONG_CALL", "max_profit": None, "max_loss": 201.3,
+                   "unbounded": True}
+    assert st._fmt_max_loss(legacy_long) == "201.30"
+
+
+def test_fmt_max_loss_unknown_reward_credit_spread_stays_capped():
+    """Defined-risk credit spread with an unknown credit: loss is still capped."""
+    unknown_credit = {"type": "PCS", "max_profit": None, "max_loss": 330.0,
+                      "unbounded": False}
+    assert st._fmt_max_loss(unknown_credit) == "330.00"
+
+
+def test_strategy_rows_flags_undefined_risk_on_stale_naked_short():
+    """The badge must survive a stale cache — it is the risk marker."""
+    rows = st.strategy_rows([
+        {"id": "stale_short", "type": "SHORT_CALL", "max_profit": 198.7,
+         "max_loss": 9001.3, "unbounded": True},
+        {"id": "stale_long", "type": "LONG_CALL", "max_profit": None,
+         "max_loss": 201.3, "unbounded": True},
+        {"id": "unknown_credit", "type": "PCS", "max_profit": None,
+         "max_loss": 330.0, "unbounded": False},
+    ])
+    by_id = {r["id"]: r for r in rows}
+    assert by_id["stale_short"]["_undefined_risk"] is True
+    assert by_id["stale_short"]["max_loss"] == "∞"
+    assert by_id["stale_long"]["_undefined_risk"] is False
+    assert by_id["unknown_credit"]["_undefined_risk"] is False
+
+
 def test_strategy_rows_marks_undefined_risk_only_on_unbounded_loss():
     rows = st.strategy_rows([
         {"id": "a", "type": "SHORT_CALL", "max_profit": 198.7, "max_loss": 9001.3,
