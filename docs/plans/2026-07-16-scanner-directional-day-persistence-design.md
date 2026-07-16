@@ -250,6 +250,28 @@ so a **webgui restart re-marks everything New**. The day's *signals* survive a
 webgui restart — they are in Redis; only the read-marks do not. Pushing GUI
 read-state server-side is scope this does not earn.
 
+> **A better design exists, and it was visible only in hindsight (2026-07-16).**
+> The day envelope already carries per-entry lifecycle state (`live`,
+> `stale_since`) but no `first_seen`. A **server-side `first_seen`** would make
+> "New" a server-side *fact* ("arrived since scan N") rather than page-side
+> read-state. That would kill BOTH known wrinkles at once:
+> * the restart caveat above, and
+> * **first-open-of-day saturation** — open the page fresh at 3pm and all ~1,746
+>   rows badge New, at which point the badge distinguishes nothing, which is the
+>   opposite of what it's for.
+>
+> It would also remove page-side module state entirely.
+>
+> **The irony is worth recording.** Task 5 *deleted* a `first_seen` field —
+> correctly: that implementation was unconsumed, untested, and **lied on cold
+> start** (a service restart at noon stamped every 9am signal `first_seen=12:00`).
+> The field was right; that implementation of it was not. Reviving it means
+> stamping it honestly — omitted (→ "unknown") when the service can't know,
+> never fabricated as `now`.
+>
+> Not reworked: the shipped design does what the user asked for, and this is a
+> refinement, not a fix.
+
 ### Left alone deliberately
 
 The nav badge and chime keep firing on **credit spreads only**, off the live key.
