@@ -112,6 +112,12 @@ def _is_stale_open(command) -> bool:
 CACHE_SCAN = "cache:options:scan"
 EVENT_SCAN = "events:options:scan"
 
+# The day's accumulated signal union — read by the Scanner page ONLY. Deliberately
+# a SEPARATE key from CACHE_SCAN: the autonomous driver reads CACHE_SCAN and must
+# never be offered a signal that no longer qualifies, so that key stays live-only.
+CACHE_SCAN_DAY = "cache:options:scan_day"
+EVENT_SCAN_DAY = "events:options:scan_day"
+
 CACHE_HEADER = "cache:options:header"
 EVENT_HEADER = "events:options:header"
 
@@ -276,6 +282,20 @@ def rescan(bus) -> None:
     # One cache view holds the whole result (both signal lists + metadata).
     version = bus.cache_set(CACHE_SCAN, scan.model_dump())
     bus.publish(EVENT_SCAN, {"version": version})
+
+    # Day-persistent union for the Scanner page. A SEPARATE key on purpose:
+    # cache:options:scan stays live-only because the autonomous driver reads it
+    # and must never be offered a signal that no longer qualifies. Best-effort —
+    # a merge failure must not break the live publish above.
+    try:
+        today = _dt.datetime.now().strftime("%Y-%m-%d")
+        prev = bus.cache_get(CACHE_SCAN_DAY)
+        day = compute.merge_day_signals(
+            prev.payload if prev is not None else None, scan.model_dump(), today)
+        day_version = bus.cache_set(CACHE_SCAN_DAY, day)
+        bus.publish(EVENT_SCAN_DAY, {"version": day_version})
+    except Exception:  # noqa: BLE001
+        log.exception("scan day-union merge failed (non-fatal)")
 
     # Server-side phone push on genuinely-new signals (Telegram/Discord/Fi-SMS).
     # Best-effort; must never break the scan/publish path. First run after start

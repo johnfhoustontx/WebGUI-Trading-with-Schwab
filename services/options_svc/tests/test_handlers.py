@@ -1392,3 +1392,78 @@ def test_captured_reprice_calls_notify(monkeypatch):
     handlers.handle_command(bus, Command(type="captured_reprice"))
     assert got["n"] == 1 and got["kind"] == "captured"
     assert got["key"] == handlers.CACHE_NOTIFIED_CAPTURED
+
+
+# ── Day-persistent scan union (cache:options:scan_day) ──────────────────────
+# A SEPARATE key on purpose: cache:options:scan stays live-only because the
+# autonomous driver reads it and must never be offered a signal that no longer
+# qualifies.
+
+def _scan_with(sigs):
+    return {"signals_0dte": sigs, "signals_swing": [], "signals_directional": [],
+            "vix_term_structure": {}, "timestamp": "2026-07-16T10:00:00",
+            "errors": [], "warnings": []}
+
+
+def test_rescan_publishes_the_day_union(monkeypatch):
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "run_scan",
+                        lambda: _scan_with([{"id": "a", "symbol": "SPY", "credit": 1.0}]))
+
+    sub = bus.subscribe("events:options:scan_day")
+    handlers.rescan(bus)
+    msg = sub.get_message(timeout=1.0)
+    sub.close()
+
+    env = bus.cache_get("cache:options:scan_day")
+    assert env is not None
+    assert env.payload["date"]
+    assert [s["id"] for s in env.payload["signals_0dte"]] == ["a"]
+    assert env.payload["signals_0dte"][0]["live"] is True
+    assert msg is not None and msg["version"] == env.version
+
+
+def test_rescan_day_union_accumulates_across_scans(monkeypatch):
+    """The load-bearing separation: the live key is REPLACED, the day key ACCUMULATES.
+
+    If the union ever landed on cache:options:scan, the autonomous driver would
+    be offered "a" -- a signal that no longer qualifies. That is the regression
+    this test exists to catch.
+    """
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "run_scan",
+                        lambda: _scan_with([{"id": "a", "symbol": "SPY", "credit": 1.0}]))
+    handlers.rescan(bus)
+    monkeypatch.setattr(handlers.compute, "run_scan",
+                        lambda: _scan_with([{"id": "b", "symbol": "QQQ", "credit": 2.0}]))
+    handlers.rescan(bus)
+
+    live = bus.cache_get("cache:options:scan").payload
+    day = bus.cache_get("cache:options:scan_day").payload
+
+    # Live key: replaced, live-only -- exactly as before this feature.
+    assert [s["id"] for s in live["signals_0dte"]] == ["b"]
+    assert "live" not in live["signals_0dte"][0]      # untouched by the merge
+
+    # Day key: the union.
+    assert {s["id"] for s in day["signals_0dte"]} == {"a", "b"}
+    by_id = {s["id"]: s for s in day["signals_0dte"]}
+    assert by_id["a"]["live"] is False and by_id["a"]["stale_since"]
+    assert by_id["b"]["live"] is True
+
+
+def test_rescan_day_union_failure_does_not_break_the_live_publish(monkeypatch):
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "run_scan",
+                        lambda: _scan_with([{"id": "a", "symbol": "SPY"}]))
+
+    def _boom(*a, **k):
+        raise RuntimeError("merge exploded")
+    monkeypatch.setattr(handlers.compute, "merge_day_signals", _boom)
+
+    handlers.rescan(bus)   # must not raise
+
+    env = bus.cache_get("cache:options:scan")
+    assert env is not None
+    assert env.payload["signals_0dte"][0]["id"] == "a"
+    assert bus.cache_get("cache:options:scan_day") is None
