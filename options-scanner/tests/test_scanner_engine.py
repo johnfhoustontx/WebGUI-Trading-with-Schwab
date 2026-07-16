@@ -1578,27 +1578,62 @@ class _StubResponse:
         pass
 
 
+def _chain_at(spot, exp, dte):
+    """Spot-relative chain: a $1 strike ladder centred on `spot`.
+
+    Same delta/mark conventions as test_directional_screening's
+    `_make_chain_symmetric` (OTM = small |delta| + low mark; |delta| ~ 0.5 ATM),
+    but that builder hard-codes strikes 470-530, so it only serves spot=500 and
+    cannot supply a second symbol at a different price level.
+    """
+    puts, calls = {}, {}
+    for i in range(-30, 31):
+        k = float(round(spot + i))
+        put_delta = max(-0.99, min(-0.01, -0.5 - (k - spot) / 32.0))
+        call_delta = max(0.01, min(0.99, 0.5 - (k - spot) / 32.0))
+        put_mark = max(0.10, abs(put_delta) * 15.0 + 0.20)
+        call_mark = max(0.10, call_delta * 15.0 + 0.20)
+        common = {"totalVolume": 500, "openInterest": 1000, "volatility": 18.0,
+                  "theta": -0.05, "vega": 0.10, "gamma": 0.01}
+        puts[str(k)] = [{"delta": put_delta, "mark": put_mark,
+                         "bid": round(put_mark - 0.02, 4),
+                         "ask": round(put_mark + 0.02, 4), **common}]
+        calls[str(k)] = [{"delta": call_delta, "mark": call_mark,
+                          "bid": round(call_mark - 0.02, 4),
+                          "ask": round(call_mark + 0.02, 4), **common}]
+    return {"underlyingPrice": spot,
+            "putExpDateMap": {f"{exp}:{dte}": puts},
+            "callExpDateMap": {f"{exp}:{dte}": calls}}
+
+
+# Two symbols at different price levels with OPPOSITE price trends, so
+# `infer_market_view` reads a different direction for each and their candidates
+# score differently. That is what makes the post-loop cross-symbol sort
+# load-bearing: `score_all` returns each symbol's list already sorted, so with a
+# single symbol the accumulated list arrives pre-sorted and no sort can bind.
+_FAKE_SYMBOLS = {"SPY": (500.0, +1), "QQQ": (430.0, -1)}
+
+
 @pytest.fixture
 def fake_client(monkeypatch):
-    """Schwab client stub for `run_full_scan`, modelled on
-    test_directional_screening's `_stub_client`.
+    """Schwab client stub for `run_full_scan` (modelled on
+    test_directional_screening's `_stub_client`).
 
-    Reuses that module's `_make_chain_symmetric` (realistic OTM delta/mark
-    conventions on both sides) but anchors the expiration to a LIVE date --
-    `strategy_scanner._dte_for` parses the expiration STRING, so a hard-coded
-    past date would stamp dte=0 on every directional candidate.
+    Populates BOTH DTE windows -- 0-DTE (1 DTE) and swing (7 DTE) -- for both
+    symbols, so the directional builder's two-window loop, its concatenation,
+    and both sorts are all exercised.
 
-    The 0-DTE bucket gets a FAILED chain (as the sibling module does): its
-    single expiration is 7 DTE, and feeding that to the 0-4 DTE bucket trips a
-    pre-existing unbound-local in screen_spreads' "no matches" log path.
+    Expirations are anchored to LIVE dates: `strategy_scanner._dte_for` parses
+    the expiration STRING, so a hard-coded past date would stamp dte=0 on every
+    directional candidate.
     """
-    from tests.test_directional_screening import _make_chain_symmetric
-
-    price = 500.0
-    exp = (date.today() + timedelta(days=7)).isoformat()
-    swing_chain = _make_chain_symmetric(spot=price, exp=exp, dte=7)
-    failed_chain = {"underlyingPrice": price, "putExpDateMap": {},
-                    "callExpDateMap": {}, "status": "FAILED"}
+    today = date.today()
+    exp_0 = (today + timedelta(days=1)).isoformat()
+    exp_s = (today + timedelta(days=7)).isoformat()
+    chains = {sym: {"0dte": _chain_at(spot, exp_0, 1),
+                    "swing": _chain_at(spot, exp_s, 7)}
+              for sym, (spot, _trend) in _FAKE_SYMBOLS.items()}
+    failed_chain = {"putExpDateMap": {}, "callExpDateMap": {}, "status": "FAILED"}
 
     # Pin the regime so the scan never reads the live sentiment bridge file.
     import regime_filter
@@ -1623,23 +1658,32 @@ def fake_client(monkeypatch):
 
         def get_quotes(self, symbols):
             return _StubResponse({
-                s: {"quote": {"lastPrice": 18.0 if s.startswith("$VIX") else price}}
+                s: {"quote": {"lastPrice": 18.0 if s.startswith("$VIX")
+                              else _FAKE_SYMBOLS[s][0]}}
                 for s in symbols
             })
 
         def get_option_chain(self, symbol, **kwargs):
+            # Buckets are identified by the from_date run_full_scan asks with:
+            # 0-DTE = today, swing = today+5, IV analysis = today+20.
             from_date = kwargs.get("from_date")
-            today = date.today()
-            in_swing_window = (from_date is not None
-                               and today + timedelta(days=5) <= from_date
-                               <= today + timedelta(days=15))
-            return _StubResponse(swing_chain if in_swing_window else failed_chain)
+            sym_chains = chains.get(symbol)
+            if from_date is None or sym_chains is None:
+                return _StubResponse(failed_chain)
+            if from_date <= today + timedelta(days=4):
+                return _StubResponse(sym_chains["0dte"])
+            if from_date <= today + timedelta(days=15):
+                return _StubResponse(sym_chains["swing"])
+            return _StubResponse(failed_chain)   # IV-analysis window
 
         def get_price_history_every_day(self, symbol):
-            base = price - 30
+            spot, trend = _FAKE_SYMBOLS[symbol]
+            base = spot - trend * 30
             return _StubResponse({"candles": [
-                {"open": base + i * 0.5 - 0.5, "high": base + i * 0.5 + 1.0,
-                 "low": base + i * 0.5 - 1.0, "close": base + i * 0.5, "datetime": i}
+                {"open": base + trend * i * 0.5 - 0.5,
+                 "high": base + trend * i * 0.5 + 1.0,
+                 "low": base + trend * i * 0.5 - 1.0,
+                 "close": base + trend * i * 0.5, "datetime": i}
                 for i in range(60)
             ]})
 
@@ -1653,13 +1697,15 @@ class TestDirectionalSignals:
     spread — see test_directional_screening.py). Same word, different concept.
     """
 
+    SYMBOLS = ["SPY", "QQQ"]
+
     def test_run_full_scan_emits_signals_directional(self, fake_client):
-        results = scanner_engine.run_full_scan(fake_client, symbols=["SPY"])
+        results = scanner_engine.run_full_scan(fake_client, symbols=self.SYMBOLS)
         assert "signals_directional" in results
         assert isinstance(results["signals_directional"], list)
 
     def test_directional_signals_carry_strategy_shape(self, fake_client):
-        results = scanner_engine.run_full_scan(fake_client, symbols=["SPY"])
+        results = scanner_engine.run_full_scan(fake_client, symbols=self.SYMBOLS)
         sigs = results["signals_directional"]
         assert sigs, "expected directional candidates from the fake chain"
         for s in sigs:
@@ -1669,14 +1715,32 @@ class TestDirectionalSignals:
             assert s.get("id")
             assert s.get("composite_score") is not None
 
+    def test_directional_covers_both_dte_windows(self, fake_client):
+        """Both the 0-DTE and swing windows must contribute candidates.
+
+        Guards the two-window loop AND the non-vacuity of the sort test below:
+        a single populated window would leave the accumulated list pre-sorted by
+        `score_all`, so neither sort could ever bind.
+        """
+        sigs = scanner_engine.run_full_scan(
+            fake_client, symbols=self.SYMBOLS)["signals_directional"]
+        for symbol in self.SYMBOLS:
+            dtes = {s["dte"] for s in sigs if s["symbol"] == symbol}
+            assert 1 in dtes, f"{symbol}: no 0-DTE-window candidate (got {dtes})"
+            assert 7 in dtes, f"{symbol}: no swing-window candidate (got {dtes})"
+
     def test_directional_sorted_by_score_desc(self, fake_client):
-        sigs = scanner_engine.run_full_scan(fake_client, symbols=["SPY"])["signals_directional"]
+        sigs = scanner_engine.run_full_scan(
+            fake_client, symbols=self.SYMBOLS)["signals_directional"]
         scores = [s.get("composite_score") or 0 for s in sigs]
+        # Non-vacuity: `score_all` returns each symbol's slice already sorted, so
+        # only a list that is NOT sorted before the post-loop sort proves it runs.
+        assert len(set(scores)) > 1, "all scores equal — the ordering assertion is vacuous"
         assert scores == sorted(scores, reverse=True)
 
     def test_directional_never_leaks_into_the_credit_lists(self, fake_client):
         """The driver reads signals_0dte + signals_swing. Directional must not be there."""
-        results = scanner_engine.run_full_scan(fake_client, symbols=["SPY"])
+        results = scanner_engine.run_full_scan(fake_client, symbols=self.SYMBOLS)
         credit = results["signals_0dte"] + results["signals_swing"]
         # Non-vacuity: an empty credit list would pass the loop below for free.
         assert credit, "fixture produced no credit spreads — the assertion would be vacuous"
@@ -1688,6 +1752,6 @@ class TestDirectionalSignals:
         import strategy_scanner
         monkeypatch.setattr(strategy_scanner, "build_directional",
                             lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
-        results = scanner_engine.run_full_scan(fake_client, symbols=["SPY"])
+        results = scanner_engine.run_full_scan(fake_client, symbols=self.SYMBOLS)
         assert results["signals_directional"] == []
         assert isinstance(results["signals_0dte"], list)   # scan survived

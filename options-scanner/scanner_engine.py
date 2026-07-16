@@ -1386,15 +1386,29 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
                 win_sigs = _ssn.build_directional(_chain, symbol, price, atm_iv, _lo, _hi)
                 if not win_sigs:
                     continue
-                # 1-sigma $ move over THIS window's horizon (the breakeven-vs-EM
-                # quality factor). Scored PER WINDOW: a single em_1sd would size
-                # a 5-15 DTE candidate's breakeven against a 0-DTE move and
-                # systematically under-score the swing side of one shared list.
-                # Same formula compute.swing_scan uses (daily_em * sqrt(dte_min)).
+                # 1-sigma $ move over THIS window's horizon (feeds strategy_scoring's
+                # breakeven-vs-EM quality factor).
+                #
+                # DEVIATES FROM THE TASK SPEC, which called for ONE em_1sd across
+                # both windows (sqrt(max(zerodte_min_dte, 1)) == sqrt(1)). Scoring
+                # PER WINDOW instead: q_be is `clamp((1 - dist/em_1sd) * 100)`, so a
+                # 1-day em_1sd would size a 5-15 DTE candidate's breakeven against a
+                # 0-DTE move (~2.65x too small at 7 DTE), drive its q_be to ~0, and
+                # systematically under-score the swing side of one jointly-sorted
+                # list. This is exactly compute.swing_scan's formula
+                # (daily_em * sqrt(dte_min)) applied to each window, so the same
+                # candidate scores identically on the Scanner and the Swing page.
                 em_1sd = (daily_em or 0.0) * math.sqrt(max(_lo, 1))
                 dir_sigs += _ssc.score_all(win_sigs, view, atm_iv, em_1sd)
 
             if dir_sigs:
+                # CURRENTLY INERT: _DIRECTIONAL has 4 entries x 2 windows = 8 ==
+                # DIRECTIONAL_SINGLE_MAX_PER_SYMBOL, so the slice below can never
+                # truncate and this sort cannot change the result. Kept because the
+                # cap is what makes it load-bearing: the moment _DIRECTIONAL grows
+                # or the cap is lowered, an unsorted concatenation of two
+                # separately-sorted windows would truncate to an ARBITRARY 8 rather
+                # than the best 8. Sorting here keeps the cap meaning "the best".
                 dir_sigs.sort(key=lambda x: (x.get("composite_score") or 0), reverse=True)
                 results["signals_directional"].extend(
                     dir_sigs[:DIRECTIONAL_SINGLE_MAX_PER_SYMBOL])
