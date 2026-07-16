@@ -174,6 +174,59 @@ Per signal:
 
 Runs in `handlers.rescan`: read prev `cache:options:scan_day` → merge → `cache_set`.
 
+> **The day key is BOUNDED — the original growth estimate was wrong (2026-07-16).**
+> This design initially assumed the union was "bounded by watchlist × structures
+> (tens–low hundreds)". Measured, that is wrong by 1–2 orders of magnitude:
+> `watchlist.get_scan_symbols()` returns **45 symbols**; `autoscan_due` fires
+> **30 scans/day** (15-min slots, 08:00–15:15 CT); each symbol yields up to 24
+> signals/scan (`pcs[:3]+ccs[:3]+ics(≤2)` × 2 buckets + 8 directional) → a
+> **1,080/scan ceiling**. Critically, the `id` encodes **both strikes and the
+> expiration** (`scanner_engine.py:862`), so every strike drift as spot moves
+> mints a *permanent* new entry — the binding constraint is `scans × per-scan
+> cap`, not the id space.
+>
+> | yield | churn/scan | day-end signals | day-end payload |
+> |---|---|---|---|
+> | 35% | 10% (calm) | 1,474 | 1.5 MB |
+> | 50% | 30% (central) | **5,238** | **5.4 MB** |
+> | 100% | 50% (volatile) | 16,740 | **17.4 MB** |
+>
+> The volatile case meets/exceeds the **16 MB `cache:options:gamma` payload that
+> forced the documented P2 crop** — and the Scanner page version-polls and fetches
+> the whole payload on every change (the P5/P6 problem gamma already had to fix).
+> So the merge **caps each list, evicts oldest-stale-first, and NEVER evicts a
+> `live=True` signal** (that would break the feature's promise), logging what it
+> drops per the repo's no-silent-caps convention. Dead weight (`gex_walls`/
+> `dex_walls` — zero consumers outside options-scanner's own intra-scan scoring)
+> is stripped from day entries.
+
+> **Date basis: `_today_ct()` — NOT `active_session_date()` (2026-07-16).**
+> The union's date must be **CT-pinned**, matching `push_notify` (`_today_ct()`)
+> and the scheduler (`_market_now()`); a naive local date would be the only
+> local-time date in an otherwise CT-pinned pipeline.
+>
+> **`active_session_date()` is the obvious-looking helper and it is WRONG here.**
+> It flips to today at `_GEX_START = 08:30` CT, while scans start at
+> `_SCAN_START = 08:00`:
+>
+> ```
+> 08:00 CT  scan fires  →  active_session_date = YESTERDAY
+> 08:15 CT  scan fires  →  active_session_date = YESTERDAY
+> 08:30 CT  scan fires  →  flips to today → date change → WIPES both
+> ```
+>
+> It is tuned to the GEX collector's window for heatmap persistence. Using it
+> here would silently discard the first two scans of every day.
+
+> **`date` is load-bearing FOR THE CONSUMER, not just for the reset.**
+> `rescan`'s merge/publish is best-effort: on failure it leaves the key
+> **untouched**, which is correct (writing an empty envelope would destroy the
+> day's data) — but the consequence is **stale, not absent**. If it throws on the
+> first scan of a new day, the key still holds *yesterday's* envelope, including
+> signals stamped `live=True` from yesterday's 15:15 scan. **The page MUST gate
+> its render on `payload["date"] == today_ct`** or it will present day-old
+> signals as live.
+
 ### The New icon — and a bug this fixes
 
 **Existing bug.** `scanner.py:143` `_sig_key` reads `short_strike`/`long_strike`,

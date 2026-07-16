@@ -1084,6 +1084,19 @@ In `render()`:
 
 - Change the two cache reads from `"options:scan"` to `"options:scan_day"` (initial paint at line 366, and `_maybe_repaint` at line 375).
 
+> **OBLIGATION — gate the render on the envelope's date.** `rescan`'s merge is
+> best-effort: on failure it leaves `cache:options:scan_day` **untouched**, which
+> is correct (writing an empty envelope would destroy the day's data) — but the
+> consequence is **stale, not absent**. If it throws on the first scan of a new
+> day, the key still holds *yesterday's* envelope, **including signals stamped
+> `live=True` from yesterday's 15:15 scan**. A page that renders it blind will
+> present day-old signals as live and tradeable.
+>
+> So: read `payload["date"]` and **render nothing (or an explicit "waiting for
+> today's scan") unless it equals today in CT**. The envelope carries `date`
+> precisely so this is checkable. **Pin it with a test** — feed a yesterday-dated
+> envelope containing `live=True` signals and assert the table does not show them.
+
 > **Ordering is load-bearing.** `unseen_ids` must be snapshotted before `acknowledge_ids`. A test above pins it.
 
 > The `status_line(results)` bottom bar reads `timestamp`/`errors`/`warnings`, which the day envelope does **not** carry. Either add them to the envelope in `merge_day_signals` (pass through from `current`) or keep a cheap read of `options:scan` for the status line only. **Prefer the former** — one read, one version to poll.
