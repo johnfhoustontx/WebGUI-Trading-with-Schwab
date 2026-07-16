@@ -2910,3 +2910,44 @@ def test_day_cap_default_exceeds_the_live_ceiling_with_headroom():
         None, {"signals_0dte": [_sig("a"), _sig("b")]}, "2026-07-16")
     out = compute.merge_day_signals(prev, {"signals_0dte": []}, "2026-07-16")
     assert len(out["signals_0dte"]) == 2      # default cap does not bind here
+
+
+def test_merge_day_signals_reports_truncation_per_list():
+    """A server-side log the user never sees IS a silent cap. The envelope must
+    carry the drop counts so the page can say the day is incomplete."""
+    prev = compute.merge_day_signals(
+        None, {"signals_0dte": [_sig("a"), _sig("b"), _sig("c")],
+               "signals_swing": [_sig("s1"), _sig("s2")]}, "2026-07-16")
+    out = compute.merge_day_signals(prev, {"signals_0dte": [], "signals_swing": []},
+                                    "2026-07-16", max_per_list=1)
+    # 3 stale in 0dte -> 2 dropped; 2 stale in swing -> 1 dropped.
+    assert out["truncated"] == {"signals_0dte": 2, "signals_swing": 1}
+
+
+def test_merge_day_signals_omits_truncated_when_nothing_dropped():
+    """A flag that is always on is as useless as one that is always off."""
+    prev = compute.merge_day_signals(None, {"signals_0dte": [_sig("a")]}, "2026-07-16")
+    out = compute.merge_day_signals(prev, {"signals_0dte": [_sig("a")]}, "2026-07-16",
+                                    max_per_list=50)
+    assert "truncated" not in out
+
+
+def test_merge_day_signals_truncated_names_only_the_lists_that_dropped():
+    prev = compute.merge_day_signals(
+        None, {"signals_0dte": [_sig("a"), _sig("b")],
+               "signals_swing": [_sig("s1")]}, "2026-07-16")
+    out = compute.merge_day_signals(
+        prev, {"signals_0dte": [], "signals_swing": [_sig("s1")]}, "2026-07-16",
+        max_per_list=1)
+    assert out["truncated"] == {"signals_0dte": 1}      # swing untouched -> absent
+
+
+def test_merge_day_signals_truncated_counts_stale_dropped_under_live_overflow():
+    """Live is never evicted, but any stale dropped alongside it still counts."""
+    prev = compute.merge_day_signals(
+        None, {"signals_0dte": [_sig("old"), _sig("x"), _sig("y")]}, "2026-07-16")
+    out = compute.merge_day_signals(
+        prev, {"signals_0dte": [_sig("x"), _sig("y")]}, "2026-07-16", max_per_list=1)
+    # x,y live (kept, over cap); "old" stale -> evicted and reported.
+    assert [s["id"] for s in out["signals_0dte"]] == ["x", "y"]
+    assert out["truncated"] == {"signals_0dte": 1}

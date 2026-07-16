@@ -92,10 +92,14 @@ def _day_entry(signal):
 def _cap_day_list(merged, key, max_per_list):
     """Trim ``merged`` to ``max_per_list``, evicting OLDEST-STALE-FIRST. Never
     evicts a ``live`` signal: if live alone exceeds the cap, the cap yields (the
-    day's live set is the feature's core promise) and the overflow is logged."""
+    day's live set is the feature's core promise) and the overflow is logged.
+
+    Returns ``(kept, n_dropped)`` — the count rides out to the envelope so the
+    PAGE can say the day is incomplete. A server-side log the user never sees is
+    still a silent cap to them."""
     over = len(merged) - max_per_list
     if over <= 0:
-        return merged
+        return merged, 0
     kept, dropped = [], 0
     for s in merged:                      # list order is oldest-first
         if dropped < over and not s.get("live"):
@@ -110,7 +114,7 @@ def _cap_day_list(merged, key, max_per_list):
     else:
         log.warning("day union %s: evicted %d oldest stale signal(s) at the %d cap "
                     "— the day's coverage is truncated", key, dropped, max_per_list)
-    return kept
+    return kept, dropped
 
 
 def merge_day_signals(prev, current, today, now_iso=None, max_per_list=None):
@@ -139,6 +143,13 @@ def merge_day_signals(prev, current, today, now_iso=None, max_per_list=None):
     envelope -- including ``live=True`` entries. A consumer MUST gate on ``date``
     before trusting ``live``, or it will render day-old signals as live.
 
+    ``truncated`` -- ``{list_name: n_dropped}``, present ONLY when the cap evicted
+    something (absent = nothing dropped, and also what a pre-cap envelope looks
+    like; both render the same, so absence is unambiguously "no notice"). The page
+    SHOULD surface it: the cap does not bind on a calm or mid-churn day, so when
+    it fires it fires on a volatile one -- exactly the day a trader is watching --
+    and without this the day looks complete when it isn't.
+
     Signals with no ``id`` are dropped (they cannot be tracked across scans).
     Never mutates its inputs; never raises.
     """
@@ -149,6 +160,7 @@ def merge_day_signals(prev, current, today, now_iso=None, max_per_list=None):
         prev = {}
 
     out = {"date": today}
+    truncated = {}
     for key in _DAY_LISTS:
         cur_list = current.get(key) if isinstance(current, dict) else None
         cur_list = cur_list if isinstance(cur_list, list) else []
@@ -184,7 +196,11 @@ def merge_day_signals(prev, current, today, now_iso=None, max_per_list=None):
             fresh["live"] = True
             fresh["stale_since"] = None
             merged.append(fresh)
-        out[key] = _cap_day_list(merged, key, max_per_list)
+        out[key], dropped = _cap_day_list(merged, key, max_per_list)
+        if dropped:
+            truncated[key] = dropped
+    if truncated:
+        out["truncated"] = truncated
     return out
 
 
