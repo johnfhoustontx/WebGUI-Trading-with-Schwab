@@ -17,6 +17,7 @@ import datetime as _dt
 import logging
 
 from services.options_svc import compute
+from services.options_svc import flow_alerts
 from services.options_svc import push_notify
 from shared.notify.channels import _today_ct
 from shared.contracts.options import ScanResult
@@ -219,6 +220,15 @@ EVENT_GEX_STATUS = "events:options:gex_status"
 # tick right after collection (rides collect_gex_history).
 CACHE_FLOW_SKEW = "cache:options:flow_skew"
 EVENT_FLOW_SKEW = "events:options:flow_skew"
+
+# Options-flow alerts (premium crossover + unusual call/put activity). Detected on
+# each 1-min GEX tick over the collected universe, pushed to the phone (best-effort),
+# and published as a day-scoped rolling list for the webgui popup/badge. The cooldown
+# map is persisted in its own key so a signal doesn't re-fire every minute.
+CACHE_FLOW_ALERTS = "cache:options:flow_alerts"
+EVENT_FLOW_ALERTS = "events:options:flow_alerts"
+_FLOW_COOLDOWN_KEY = "cache:options:flow_alert_cooldowns"
+_FLOW_ALERTS_MAX = 50
 
 CACHE_EXPECTED_MOVE = "cache:options:expected_move"
 EVENT_EXPECTED_MOVE = "events:options:expected_move"
@@ -652,6 +662,10 @@ def collect_gex_history(bus=None) -> None:
             publish_flow_skew(bus)
         except Exception:
             log.exception("publish_flow_skew after collect degraded")
+        try:
+            run_flow_alerts(bus)
+        except Exception:
+            log.exception("run_flow_alerts after collect degraded")
 
 
 def publish_flow_skew(bus) -> None:
@@ -667,6 +681,81 @@ def publish_flow_skew(bus) -> None:
         bus.cache_set(CACHE_FLOW_SKEW, view, event=EVENT_FLOW_SKEW)
     except Exception:
         log.exception("publish_flow_skew degraded")
+
+
+def _flow_alert_symbols():
+    """The collected universe to run flow alerts over. Defensive → [].
+
+    ``gex_collector`` (options-scanner) is imported LAZILY — ``compute`` (imported
+    at module top) has already put OPTIONS_SCANNER on ``sys.path``, and the lazy
+    import avoids binding process-wide module names at handler-module import time
+    (the documented cross-app collision discipline)."""
+    try:
+        import gex_collector
+        return list(gex_collector.collection_symbols())
+    except Exception:
+        log.exception("flow-alert symbol list degraded")
+        return []
+
+
+def _load_flow_series_for(symbol):
+    """Today's flow series for one symbol from gex_history.db. Defensive → []."""
+    try:
+        import gex_history_db as gh
+        conn = gh.connect(read_only=True)
+        try:
+            return gh.load_flow_series(conn, symbol)
+        finally:
+            conn.close()
+    except Exception:
+        log.debug("load_flow_series degraded for %s", symbol, exc_info=True)
+        return []
+
+
+def _flow_now_ts():
+    import time
+    return int(time.time())
+
+
+def run_flow_alerts(bus) -> None:
+    """Detect + push + publish options-flow alerts (crossover + unusual activity) for
+    the whole collected universe. Rides the 1-min GEX poll; best-effort, never raises.
+
+    The cooldown map is persisted (day-scoped) in its own key so a fired signal
+    doesn't re-push every minute; fresh alerts are pushed to the phone (best-effort)
+    and appended to a day-scoped rolling list the webgui reads."""
+    try:
+        cfg = flow_alerts.load_thresholds()
+        if not cfg.get("enabled", True):
+            return
+        today = _today_ct()
+        cd_env = bus.cache_get(_FLOW_COOLDOWN_KEY)
+        cd_payload = cd_env.payload if (cd_env and isinstance(cd_env.payload, dict)) else {}
+        cooldowns = cd_payload.get("map", {}) if cd_payload.get("date") == today else {}
+        now_ts = _flow_now_ts()
+        push_cfg = push_notify.load_config()
+
+        fresh = []
+        for sym in _flow_alert_symbols():
+            series = _load_flow_series_for(sym)
+            for a in flow_alerts.detect_flow_alerts(sym, series, cfg, cooldowns, now_ts):
+                fresh.append(a)
+
+        if fresh:
+            for a in fresh:
+                try:
+                    push_notify.send_flow_alert(a, config=push_cfg)
+                except Exception:
+                    log.exception("send_flow_alert degraded")
+            env = bus.cache_get(CACHE_FLOW_ALERTS)
+            prior = (env.payload.get("alerts", []) if (env and isinstance(env.payload, dict)
+                     and env.payload.get("date") == today) else [])
+            alerts = (prior + fresh)[-_FLOW_ALERTS_MAX:]
+            bus.cache_set(CACHE_FLOW_ALERTS, {"date": today, "alerts": alerts},
+                          event=EVENT_FLOW_ALERTS)
+        bus.cache_set(_FLOW_COOLDOWN_KEY, {"date": today, "map": cooldowns})
+    except Exception:
+        log.exception("run_flow_alerts degraded")
 
 
 def publish_gex_status(bus) -> None:

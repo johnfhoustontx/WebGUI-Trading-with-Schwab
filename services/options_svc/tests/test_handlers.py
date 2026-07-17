@@ -1492,3 +1492,25 @@ def test_rescan_day_union_dates_in_ct_not_naive_local(monkeypatch):
     handlers.rescan(bus)
 
     assert bus.cache_get("cache:options:scan_day").payload["date"] == "2026-07-16"
+
+
+def test_run_flow_alerts_detects_pushes_publishes(monkeypatch):
+    from shared.bus import Bus
+    from services.options_svc import handlers
+    bus = Bus(fake=True)
+    # A 2-point series with a decisive, large-premium crossover (calls overtake puts).
+    series = [(60, 100.0, 0, 0, 100000.0, 200000.0),
+              (120, 100.0, 0, 0, 260000.0, 200000.0)]
+    monkeypatch.setattr(handlers, "_flow_alert_symbols", lambda: ["$SPX"])
+    monkeypatch.setattr(handlers, "_load_flow_series_for", lambda sym: series)
+    monkeypatch.setattr(handlers, "_flow_now_ts", lambda: 120)
+    sent = []
+    monkeypatch.setattr(handlers.push_notify, "send_flow_alert", lambda a, **k: sent.append(a))
+    handlers.run_flow_alerts(bus)
+    env = bus.cache_get("cache:options:flow_alerts")
+    assert env is not None
+    assert any(x["type"] == "crossover" for x in env.payload["alerts"])
+    assert len(sent) == 1
+    # Second identical tick within cooldown → no new push, no duplicate alert appended.
+    handlers.run_flow_alerts(bus)
+    assert len(sent) == 1
