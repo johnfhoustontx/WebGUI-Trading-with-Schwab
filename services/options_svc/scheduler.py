@@ -75,7 +75,7 @@ def _market_now():
 # START/STOP/POLL so the cadence + window stay aligned; defined locally (not
 # imported) to keep this module's import light, matching how the scan-window
 # constants above are ported verbatim rather than imported.
-_GEX_START = (8, 30)     # gex_collector.START_HOUR/START_MIN
+_GEX_START = (8, 0)      # gex_collector.START_HOUR/START_MIN
 _GEX_STOP = (15, 20)     # gex_collector.STOP_HOUR/STOP_MIN
 _GEX_INTERVAL_MIN = 1    # gex_collector.POLL_INTERVAL_MIN
 
@@ -84,14 +84,14 @@ def _in_gex_window(now):
     return _GEX_START <= (now.hour, now.minute) < _GEX_STOP
 
 
-# ── Gamma display persistence (after close → next trading day's midnight) ─────
-# The Gamma candles + heatmap should keep showing the LAST trading session's data
-# after market close / once the collector stops, then clear for the next session.
-# The display window for session date D is [D 00:00, next_trading_day(D) 00:00):
-#   • weekday after close → shows today until tonight's midnight;
-#   • Fri/holiday-eve → persists through the weekend/holiday until the midnight
-#     before the next trading day (e.g. Mon 00:00);
-#   • after that midnight, until the new session's data exists → cleared.
+# ── Gamma display persistence (the last session shows until the next one starts) ─
+# The Gamma charts show the most-recent-available session 24/7 — the by-strike
+# charts come from the live chain and the heatmap from the ACTIVE SESSION DATE, so
+# both stay visible PRE- and POST-market (there is no overnight blanking):
+#   • weekday after close → today's data persists through the night;
+#   • Fri/holiday-eve → persists through the weekend/holiday;
+#   • premarket (before the 08:00 CT collection start) → the PRIOR session shows,
+#     then today's data takes over once its first snapshots land.
 def _prev_trading_day(d):
     """Most recent trading day strictly before date ``d`` (skips weekends/holidays)."""
     import datetime as _dtmod
@@ -103,12 +103,12 @@ def _prev_trading_day(d):
 
 def active_session_date(now=None):
     """The trading day whose Gamma data should be displayed now: today once
-    collection has started (>= 08:30 CT on a trading day), else the most recent
+    collection has started (>= 08:00 CT on a trading day), else the most recent
     prior trading day.
 
     Drives heatmap persistence so the display shows the last completed session
     PRE- and POST-market: Friday's data stays shown all weekend, and on a trading
-    day BEFORE 08:30 CT (premarket) the prior session shows until today's snapshots
+    day BEFORE 08:00 CT (premarket) the prior session shows until today's snapshots
     begin — at which point today's data takes over."""
     now = now or _market_now()
     d = now.date()
@@ -124,8 +124,8 @@ def _gex_slot_key(now):
 
 def gex_due(now, last_slot):
     """(should_collect, slot): True at most once per 1-min slot, only on a
-    trading day within the 08:30–15:20 CT GEX-collection window. Mirrors
-    ``autoscan_due`` on the gex_collector cadence/window."""
+    trading day within the 08:00–15:20 CT GEX-collection window (starts 30 min
+    pre-open). Mirrors ``autoscan_due`` on the gex_collector cadence/window."""
     if not (_is_trading_day(now) and _in_gex_window(now)):
         return (False, last_slot)
     slot = _gex_slot_key(now)

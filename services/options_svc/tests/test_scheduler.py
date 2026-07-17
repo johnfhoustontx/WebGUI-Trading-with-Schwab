@@ -37,8 +37,11 @@ def test_gex_due_fires_on_next_1min_slot():
 
 
 def test_gex_due_before_window():
-    due, _ = scheduler.gex_due(_ct(2026, 6, 15, 8, 15), None)
+    # Collection starts 08:00 CT (30 min pre-open) → 07:45 is still outside.
+    due, _ = scheduler.gex_due(_ct(2026, 6, 15, 7, 45), None)
     assert due is False
+    due2, _ = scheduler.gex_due(_ct(2026, 6, 15, 8, 0), None)
+    assert due2 is True          # the window's first slot
 
 
 def test_gex_due_after_window():
@@ -259,12 +262,12 @@ def test_active_session_date_holds_prior_day_on_holiday():
 
 
 def test_active_session_date_premarket_holds_prior_session():
-    # PRE-market on a trading day (before 08:30 CT) → today has no snapshots yet, so
-    # the prior session is shown until today's collection starts. Tue 2026-06-23 07:00
-    # → Mon 2026-06-22. Once collection starts (08:30) it flips to today.
-    assert scheduler.active_session_date(_ct(2026, 6, 23, 7, 0)).isoformat() == "2026-06-22"
+    # PRE-market on a trading day (before collection starts at 08:00 CT) → today has
+    # no snapshots yet, so the prior session is shown. Tue 2026-06-23 07:00 → Mon
+    # 2026-06-22. At 08:00 (the window's first slot) it flips to today.
     assert scheduler.active_session_date(_ct(2026, 6, 23, 0, 0)).isoformat() == "2026-06-22"
-    assert scheduler.active_session_date(_ct(2026, 6, 23, 8, 30)).isoformat() == "2026-06-23"
+    assert scheduler.active_session_date(_ct(2026, 6, 23, 7, 59)).isoformat() == "2026-06-22"
+    assert scheduler.active_session_date(_ct(2026, 6, 23, 8, 0)).isoformat() == "2026-06-23"
 
 
 # ── Driver-account manage tick wiring (Phase 5 / Task 5.1) ──────────────────

@@ -26,7 +26,7 @@ import gex_history_db as db
 TZ = ZoneInfo("America/Chicago")
 SYMBOLS = ["$SPX", "$VIX", "SPY", "QQQ"]
 POLL_INTERVAL_MIN = 1
-START_HOUR, START_MIN = 8, 30
+START_HOUR, START_MIN = 8, 0
 STOP_HOUR, STOP_MIN = 15, 20
 
 log = logging.getLogger("gex_collector")

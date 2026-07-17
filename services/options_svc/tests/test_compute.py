@@ -2532,10 +2532,10 @@ def test_gex_next_scan_boundaries():
     def ct(h, m):
         return _dt.datetime(2026, 6, 15, h, m, tzinfo=CT)
 
-    # Before the window → the window-start slot (08:30) that day.
+    # Before the window → the window-start slot (08:00) that day.
     before = compute._gex_next_scan(ct(7, 0))
     assert before is not None
-    assert (before.hour, before.minute) == (8, 30)
+    assert (before.hour, before.minute) == (8, 0)
 
     # Inside the window → next 1-min boundary strictly after now.
     inside = compute._gex_next_scan(ct(10, 2))
