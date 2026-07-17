@@ -27,6 +27,11 @@ NOTIFICATIONS_CONFIG = SHARED / "notifications.json"
 # dark-navy defaults in webgui/pages/options/theme.py.
 THEME_TOML = REPO_ROOT / "config" / "theme.toml"
 
+# Options-flow alert thresholds (crossover + unusual-activity spike). Edit +
+# restart options_svc to tune. Missing file/keys fall back to the built-in
+# defaults in services/options_svc/flow_alerts.py.
+FLOW_ALERTS_TOML = REPO_ROOT / "config" / "flow_alerts.toml"
+
 # Dedicated paper-account DB for the autonomous Driver — a SEPARATE file from the
 # manual paper_account.db so the driver's book is fully isolated (zero schema change;
 # every paper_account_db/paper_engine fn already takes db_path).
