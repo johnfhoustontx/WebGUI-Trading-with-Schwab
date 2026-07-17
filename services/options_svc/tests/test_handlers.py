@@ -1502,7 +1502,7 @@ def test_run_flow_alerts_detects_pushes_publishes(monkeypatch):
     series = [(60, 100.0, 0, 0, 100000.0, 200000.0),
               (120, 100.0, 0, 0, 260000.0, 200000.0)]
     monkeypatch.setattr(handlers, "_flow_alert_symbols", lambda: ["$SPX"])
-    monkeypatch.setattr(handlers, "_load_flow_series_for", lambda sym: series)
+    monkeypatch.setattr(handlers, "_load_flow_series_for", lambda conn, sym: series)
     monkeypatch.setattr(handlers, "_flow_now_ts", lambda: 120)
     sent = []
     monkeypatch.setattr(handlers.push_notify, "send_flow_alert", lambda a, **k: sent.append(a))
@@ -1514,3 +1514,22 @@ def test_run_flow_alerts_detects_pushes_publishes(monkeypatch):
     # Second identical tick within cooldown → no new push, no duplicate alert appended.
     handlers.run_flow_alerts(bus)
     assert len(sent) == 1
+
+
+def test_run_flow_alerts_dedups_published_by_id(monkeypatch):
+    from shared.bus import Bus
+    from services.options_svc import handlers
+    bus = Bus(fake=True)
+    alert = {"id": "$SPX|crossover|calls_over|120", "type": "crossover",
+             "side": "calls_over", "symbol": "$SPX", "text": "x", "ts": 120}
+    monkeypatch.setattr(handlers, "_flow_alert_symbols", lambda: ["$SPX"])
+    monkeypatch.setattr(handlers, "_load_flow_series_for", lambda conn, sym: [(60, 1, 0, 0, 1, 1), (120, 1, 0, 0, 1, 1)])
+    monkeypatch.setattr(handlers, "_flow_now_ts", lambda: 120)
+    monkeypatch.setattr(handlers.flow_alerts, "detect_flow_alerts",
+                        lambda *a, **k: [dict(alert)])   # same alert every call (bypass cooldown)
+    monkeypatch.setattr(handlers.push_notify, "send_flow_alert", lambda a, **k: None)
+    handlers.run_flow_alerts(bus)
+    handlers.run_flow_alerts(bus)   # same id again
+    env = bus.cache_get("cache:options:flow_alerts")
+    ids = [a["id"] for a in env.payload["alerts"]]
+    assert ids.count("$SPX|crossover|calls_over|120") == 1

@@ -698,15 +698,12 @@ def _flow_alert_symbols():
         return []
 
 
-def _load_flow_series_for(symbol):
-    """Today's flow series for one symbol from gex_history.db. Defensive → []."""
+def _load_flow_series_for(conn, symbol):
+    """Today's flow series for one symbol over an already-open read-only connection.
+    Defensive → []. The caller owns the connection (opened once per run)."""
     try:
         import gex_history_db as gh
-        conn = gh.connect(read_only=True)
-        try:
-            return gh.load_flow_series(conn, symbol)
-        finally:
-            conn.close()
+        return gh.load_flow_series(conn, symbol)
     except Exception:
         log.debug("load_flow_series degraded for %s", symbol, exc_info=True)
         return []
@@ -735,11 +732,24 @@ def run_flow_alerts(bus) -> None:
         now_ts = _flow_now_ts()
         push_cfg = push_notify.load_config()
 
-        fresh = []
-        for sym in _flow_alert_symbols():
-            series = _load_flow_series_for(sym)
-            for a in flow_alerts.detect_flow_alerts(sym, series, cfg, cooldowns, now_ts):
-                fresh.append(a)
+        conn = None
+        try:
+            import gex_history_db as gh
+            conn = gh.connect(read_only=True)
+        except Exception:
+            log.debug("flow-alert history connect degraded", exc_info=True)
+        try:
+            fresh = []
+            for sym in _flow_alert_symbols():
+                series = _load_flow_series_for(conn, sym) if conn is not None else []
+                for a in flow_alerts.detect_flow_alerts(sym, series, cfg, cooldowns, now_ts):
+                    fresh.append(a)
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    log.debug("flow-alert history conn close failed", exc_info=True)
 
         if fresh:
             for a in fresh:
@@ -750,9 +760,12 @@ def run_flow_alerts(bus) -> None:
             env = bus.cache_get(CACHE_FLOW_ALERTS)
             prior = (env.payload.get("alerts", []) if (env and isinstance(env.payload, dict)
                      and env.payload.get("date") == today) else [])
-            alerts = (prior + fresh)[-_FLOW_ALERTS_MAX:]
-            bus.cache_set(CACHE_FLOW_ALERTS, {"date": today, "alerts": alerts},
-                          event=EVENT_FLOW_ALERTS)
+            seen_ids = {a.get("id") for a in prior}
+            deduped = [a for a in fresh if a.get("id") not in seen_ids]
+            if deduped:
+                alerts = (prior + deduped)[-_FLOW_ALERTS_MAX:]
+                bus.cache_set(CACHE_FLOW_ALERTS, {"date": today, "alerts": alerts},
+                              event=EVENT_FLOW_ALERTS)
         bus.cache_set(_FLOW_COOLDOWN_KEY, {"date": today, "map": cooldowns})
     except Exception:
         log.exception("run_flow_alerts degraded")
