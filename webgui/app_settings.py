@@ -13,6 +13,7 @@ DEFAULTS = {
     "alert_market_hours_only": True,
     "alert_min_score": 0,            # only alert on signals with score >= this
     "desktop_notifications": False,
+    "flow_alerts_enabled": True,     # put/call premium crossover + unusual-activity toasts
     "ticker_enabled": True,          # bottom market-summary marquee on every page
     "ticker_speed": 60,              # marquee duration seconds (higher = slower)
     "nav_pinned": False,             # nav drawer locked open (else a hover icon rail)

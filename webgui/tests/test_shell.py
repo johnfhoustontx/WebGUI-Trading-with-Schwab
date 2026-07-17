@@ -107,7 +107,8 @@ def test_recompute_badges_uses_passed_scan(monkeypatch):
 # ── Health / staleness watcher (R4b / R8 / R9) ───────────────────────────────
 def _reset_health_state(main):
     main._ALERT_STATE.update(
-        alerted=set(), alerted_init=None, health_alerted=set(), health_init=None)
+        alerted=set(), alerted_init=None, health_alerted=set(), health_init=None,
+        flow_acked=set(), flow_init=None)
     main._svc_health_cache.update(data={}, ts=0.0)
     main._bus_outage.update(logged=False)
     main._NAV_BADGES.clear()
@@ -219,6 +220,49 @@ def test_watcher_seeds_health_then_alerts_on_transition(monkeypatch):
     health["data"] = {"options": True}
     assert main._watcher_compute() is None
     assert main._NAV_BADGES["/status"] == 0
+
+
+def test_watcher_flow_alerts_seed_fire_and_toggle(monkeypatch):
+    """The flow-alert branch: seed absorbs the backlog (no fire), a new id fires
+    when enabled, and with the toggle off nothing fires but the acked set still
+    advances (so re-enabling doesn't dump the backlog)."""
+    import main
+
+    _reset_health_state(main)
+    monkeypatch.setattr(main, "_recompute_badges", lambda scan=None: None)
+    monkeypatch.setattr(main, "_freshness_facts", lambda now_utc: {})
+    monkeypatch.setattr(main, "_probe_services_health", lambda mono: {})
+
+    settings = {"data": {
+        "alert_enabled": True, "alert_market_hours_only": False,
+        "alert_min_score": 0, "alert_sound": "chime", "alert_volume": 0.6,
+        "desktop_notifications": False, "flow_alerts_enabled": True}}
+    monkeypatch.setattr(main.app_settings, "load", lambda: settings["data"])
+
+    flow = {"view": {"alerts": [{"id": "A", "type": "crossover", "side": "calls_over",
+                                 "text": "seeded"}]}}
+    monkeypatch.setattr(main.bus_client, "read",
+                        lambda v: flow["view"] if v == "options:flow_alerts" else {})
+
+    # Seed tick: the pre-existing alert "A" is absorbed, nothing fires.
+    assert main._watcher_compute() is None
+    assert main._ALERT_STATE["flow_acked"] == {"A"}
+
+    # A new alert id "B" arrives -> flow fires, carrying the new alert dict.
+    flow["view"] = {"alerts": [{"id": "A"}, {"id": "B", "type": "spike", "side": "put",
+                                            "text": "IWM puts spiking"}]}
+    d = main._watcher_compute()
+    assert d and d["flow"] is not None
+    _sound, _vol, _desk, new_flow = d["flow"]
+    assert [a["id"] for a in new_flow] == ["B"]
+    assert main._ALERT_STATE["flow_acked"] == {"A", "B"}
+
+    # Toggle off: a further new id does NOT fire, but the acked set still advances.
+    settings["data"]["flow_alerts_enabled"] = False
+    flow["view"] = {"alerts": [{"id": "B"}, {"id": "C", "text": "off"}]}
+    d2 = main._watcher_compute()
+    assert d2 is None or d2.get("flow") is None
+    assert "C" in main._ALERT_STATE["flow_acked"]
 
 
 def test_guarded_compute_logs_once_on_bus_outage(monkeypatch, caplog):

@@ -149,3 +149,15 @@ def test_new_health_alerts_respects_gate_but_still_tracks():
 def test_health_alert_text_singular_plural():
     assert alerts.health_alert_text(1) == "1 service alert — stale or down"
     assert alerts.health_alert_text(2) == "2 service alerts — stale or down"
+
+
+def test_new_flow_alerts():
+    from webgui import alerts
+    view = {"alerts": [{"id": "A"}, {"id": "B"}]}
+    new, acked = alerts.new_flow_alerts(view, set())
+    assert [a["id"] for a in new] == ["A", "B"] and acked == {"A", "B"}
+    new2, acked2 = alerts.new_flow_alerts(view, {"A", "B"})
+    assert new2 == [] and acked2 == {"A", "B"}
+    # Defensive: None / malformed view -> ([], acked unchanged).
+    assert alerts.new_flow_alerts(None, {"A"}) == ([], {"A"})
+    assert alerts.new_flow_alerts({"alerts": "nope"}, set()) == ([], set())

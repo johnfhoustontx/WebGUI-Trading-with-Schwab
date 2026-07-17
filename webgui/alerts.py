@@ -174,3 +174,21 @@ def new_health_alerts(freshness, health, alerted, settings, now):
 def health_alert_text(n):
     """In-app toast text for ``n`` newly stale/down components (singular/plural)."""
     return f"{n} service alert" + ("" if n == 1 else "s") + " — stale or down"
+
+
+# ── Options-flow alerts (crossover + unusual activity) ───────────────────────
+def new_flow_alerts(view, acked):
+    """``(new_alerts_in_order, updated_acked)`` from a flow-alerts view.
+
+    New = alert dicts whose ``id`` isn't already acked. The updated set carries
+    every id present so each alert fires once (fire-on-first-seen). Defensive:
+    a bad/None view → ``([], acked)`` unchanged.
+    """
+    lst = (view or {}).get("alerts") if isinstance(view, dict) else None
+    lst = lst if isinstance(lst, list) else []
+    new, all_ids = [], set(acked)
+    for a in lst:
+        if isinstance(a, dict) and a.get("id") and a["id"] not in all_ids:
+            new.append(a)
+            all_ids.add(a["id"])
+    return new, all_ids

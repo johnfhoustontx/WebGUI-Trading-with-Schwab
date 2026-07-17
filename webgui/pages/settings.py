@@ -112,6 +112,10 @@ def render():
             "no-caps").classes(BTN_3D).on_click(
             lambda: ui.run_javascript("Notification && Notification.requestPermission()"))
 
+        flowsw = ui.switch("Flow alerts (put/call premium crossover + unusual activity)",
+                           value=s.get("flow_alerts_enabled", True))
+        flowsw.on_value_change(lambda e: app_settings.set("flow_alerts_enabled", e.value))
+
     with ui.card().classes("w-full max-w-2xl"):
         ui.label("Market summary ticker").classes("text-subtitle1 font-bold")
         ui.label("Scrolling market-summary marquee at the bottom of every page "

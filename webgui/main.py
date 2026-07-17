@@ -379,6 +379,10 @@ _ALERT_STATE: dict = {
     # clear-on-heal). Seeded on the first tick so a service that's already stale/down
     # at launch doesn't chime immediately.
     "health_alerted": set(), "health_init": None,
+    # Options-flow alerts (put/call premium crossover + unusual activity): the set
+    # of alert ids already surfaced, so each fires once. Seeded on the first tick so
+    # a page load doesn't replay the day's backlog.
+    "flow_acked": set(), "flow_init": None,
 }
 _badge_refs: dict = {}
 _group_badge_refs: dict = {}
@@ -692,6 +696,7 @@ def _watcher_compute():
     chime gate.
     """
     scan = bus_client.read("options:scan") or {}   # read ONCE; passed to badges below
+    flow_view = bus_client.read("options:flow_alerts")
     keys = alerts.scanner_keys(scan)
     s = app_settings.load()                        # in-memory cached (no disk hit)
     now = _dt.datetime.now(tz=_CT)
@@ -711,6 +716,8 @@ def _watcher_compute():
         _ALERT_STATE["alerted_init"] = True
         _ALERT_STATE["health_alerted"] = alerts.unhealthy_keys(freshness, svc_health)
         _ALERT_STATE["health_init"] = True
+        _ALERT_STATE["flow_acked"] = alerts.new_flow_alerts(flow_view, set())[1]
+        _ALERT_STATE["flow_init"] = True
         _recompute_badges(scan)
         return None
     _recompute_badges(scan)
@@ -733,9 +740,19 @@ def _watcher_compute():
         health = (s["alert_sound"], s["alert_volume"],
                   bool(s.get("desktop_notifications")), len(fire))
 
-    if scanner is None and health is None:
+    # ── options-flow alert (crossover + unusual activity) ────────────────────
+    # ALWAYS advance the acked set (even when the toggle is off) so toggling the
+    # feature back on doesn't dump the day's backlog; only FIRE when enabled.
+    new_flow, _ALERT_STATE["flow_acked"] = alerts.new_flow_alerts(
+        flow_view, _ALERT_STATE["flow_acked"])
+    flow = None
+    if s.get("flow_alerts_enabled", True) and new_flow:
+        flow = (s["alert_sound"], s["alert_volume"],
+                bool(s.get("desktop_notifications")), new_flow)
+
+    if scanner is None and health is None and flow is None:
         return None
-    return {"scanner": scanner, "health": health}
+    return {"scanner": scanner, "health": health, "flow": flow}
 
 
 def _guarded_compute():
@@ -1010,6 +1027,17 @@ def _layout(active: str, title: str):
                 if desktop:
                     notify_desktop("Service alert",
                                    f"{n} component(s) stale or down — see System Status.")
+            flow = decision.get("flow")
+            if flow:
+                sound, volume, desktop, new_flow = flow
+                play_alert(sound, volume)   # one chime per tick, not per alert
+                for a in new_flow:
+                    bullish = (a.get("type") == "crossover" and a.get("side") == "calls_over") \
+                        or (a.get("type") == "spike" and a.get("side") == "call")
+                    ui.notify(a.get("text", ""), icon="insights",
+                              color="green-8" if bullish else "red-8")
+                if desktop and new_flow:
+                    notify_desktop("Options-flow alert", new_flow[0].get("text", ""))
         for route, badge in _badge_refs.items():
             _set_badge(badge, _NAV_BADGES.get(route, 0))
         for _label, (badge, paths) in _group_badge_refs.items():
