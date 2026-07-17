@@ -8,7 +8,39 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-07-16 (**Scanner: directional trades + day-persistent signals**: the Options Scanner (`/`)
+**Last updated:** 2026-07-17 (**Options-flow alerts — put/call premium crossover + unusual activity**:
+new **in-app popup (toast + chime) + Discord/Telegram** alerts on two events, detected server-side in
+`options_svc` riding the **1-min GEX poll** over the **whole collected universe** (~24 symbols). **(1)
+Crossover** — a symbol's daily-cumulative call **premium ($)** crosses its put premium (money-weighted
+sentiment flip; `detect_crossover` fires on a net-sign flip that clears a hysteresis **band** [2% of the
+larger side] AND a **`min_premium`** floor [$10k] so tiny open-session premiums don't chatter). **(2)
+Unusual activity** — a per-minute **volume** increment (this snapshot − last) spikes to **≥ K× the
+symbol's own trailing average** (`detect_spike`, K=4 over a 20-min window) AND clears an absolute
+**`floor`** (500 contracts); the relative test ALWAYS applies via `k × max(baseline, min_baseline)` so a
+dead-quiet name can't fire on the floor alone, plus a **warm-up** (`min_points`) for the first minutes.
+Data is **unsigned/cumulative** (Schwab has no tape) so alerts say "unusual activity", never "buying".
+**Architecture** (mirrors the existing signal/action pushes): pure detectors in
+`services/options_svc/flow_alerts.py`; a `handlers.run_flow_alerts(bus)` (wired into `collect_gex_history`
+after `publish_flow_skew`, best-effort/guarded — a flow-alert failure can NEVER break GEX collection)
+iterates the universe on **one reused read-only `gex_history_db` connection**, reads each symbol's day
+flow series (`load_flow_series`), detects with a **date-scoped Redis cooldown map**
+(`cache:options:flow_alert_cooldowns`, keys `{sym}|crossover` / `{sym}|spike|{side}`, 30/20-min cooldowns
+so a fired signal pings ONCE), pushes each fresh alert via `push_notify.send_flow_alert` (Telegram HTML +
+Discord embed, **green = bullish** [calls overtook / call surge] / **red = bearish**), and appends
+(deduped by `id`, capped 50, date-scoped) to **`cache:options:flow_alerts`**. The webgui's existing 2-s
+watcher (`main.py` `_watcher_compute`/`_tick`) reads that key, diffs new alert `id`s vs
+`_ALERT_STATE["flow_acked"]` (seeded on the first tick so a page load doesn't replay the day's backlog),
+and fires `play_alert` + a colored `ui.notify` toast (+ optional desktop notification) — reusing the
+alert-sound/volume/desktop settings, gated by a new **Settings → "Flow alerts"** toggle
+(`app_settings.flow_alerts_enabled`). **Three independent gates:** `flow_alerts.toml enabled`
+(whole-feature server kill-switch → nothing published → webgui silent), the notifications-config `enabled`
+(phone push), and the webgui toggle (popup only). **Thresholds live in `config/flow_alerts.toml`** (K /
+band / floor / min_baseline / min_premium / window / cooldowns — edit + restart to tune). Runs only in the
+08:00–15:20 CT poll window (automatic). **Restart `options_svc` + the webgui.** Built
+subagent-by-subagent, TDD per layer (spec + quality review each); options_svc **579** (+2 pre-existing
+date-relative `test_expected_move` fails) + webgui **844** green. Branch `Using_Highcharts`. Design/plan:
+[design](docs/plans/2026-07-17-flow-crossover-unusual-activity-alerts-design.md) /
+[plan](docs/plans/2026-07-17-flow-crossover-unusual-activity-alerts-plan.md). Prior — 2026-07-16 (**Scanner: directional trades + day-persistent signals**: the Options Scanner (`/`)
 gained a third sub-tab — **Directional** — and its tables now hold **the whole day's signals**, not just the last
 scan's. **(1) Directional.** `scanner_engine.run_full_scan` emits a NEW **`signals_directional`** list (single-leg
 `LONG_CALL`/`LONG_PUT`/`SHORT_CALL`/`SHORT_PUT`), built per symbol per DTE window by **reusing**
@@ -3324,6 +3356,12 @@ speedometer gauge face, the Sentiment/Rotation chart palette), loaded once at we
 startup by `webgui/pages/options/theme.py:load_theme()` — edit + restart the webgui to
 restyle without code changes; missing keys fall back to the built-in dark-navy defaults.
 See the "App theme — dark-navy 'dashboard'" section.
+
+`config/flow_alerts.toml` is the single source of truth for the **options-flow alert
+thresholds** (crossover `band`/`min_premium`/cooldown; spike `k`/`window`/`floor`/
+`min_baseline`/`min_points`/cooldown; the `enabled` server kill-switch), loaded by
+`services/options_svc/flow_alerts.py:load_thresholds()` (defaults if the file is missing) —
+edit + restart `options_svc` to tune. See the 2026-07-17 "Last updated" entry.
 
 ## Secrets
 

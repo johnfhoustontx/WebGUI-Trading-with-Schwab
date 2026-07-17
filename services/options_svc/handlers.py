@@ -653,7 +653,7 @@ def collect_gex_history(bus=None) -> None:
     itself defensive (per-symbol failures are logged, not raised).
 
     After collection, publishes the per-index flow-skew view
-    (``cache:options:flow_skew``) so it rides the SAME 2-min tick that just wrote
+    (``cache:options:flow_skew``) so it rides the SAME 1-min tick that just wrote
     the rows. That publish is best-effort — a failure must never affect the
     collection that already succeeded (and ``bus`` is None for legacy callers)."""
     compute.collect_gex_snapshots()
