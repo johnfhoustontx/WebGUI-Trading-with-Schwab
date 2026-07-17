@@ -437,3 +437,28 @@ def test_min_score_not_applied_to_captured(monkeypatch):
     pn.notify_signals(bus, [cap], kind="captured",
                       seen_key="cache:options:notified_captured", today="2026-07-05")
     assert len(tg) == 1
+
+
+# --- Task 3: Telegram/Discord push for options-flow alerts ---
+
+def test_flow_alert_telegram_and_discord_shape():
+    from services.options_svc import push_notify as pn
+    a = {"type": "crossover", "side": "calls_over", "symbol": "$SPX",
+         "text": "$SPX: call premium overtook puts — $260 vs $200 (bullish flip)"}
+    assert "$SPX" in pn.flow_alert_telegram_text(a)
+    e = pn.flow_alert_discord_embed(a)
+    assert e["color"] == 0x2ECC71 and "$SPX" in e["title"] + str(e.get("description", ""))
+    a2 = {"type": "spike", "side": "put", "symbol": "MU", "text": "MU: unusual put activity"}
+    assert pn.flow_alert_discord_embed(a2)["color"] == 0xE74C3C   # put/bearish → red
+
+
+def test_send_flow_alert_noop_when_disabled(monkeypatch):
+    from services.options_svc import push_notify as pn
+    calls = []
+    monkeypatch.setattr(pn, "send_telegram", lambda *a, **k: calls.append("tg"))
+    monkeypatch.setattr(pn, "send_discord", lambda *a, **k: calls.append("dc"))
+    a = {"type": "spike", "side": "call", "symbol": "SPY", "text": "x"}
+    assert pn.send_flow_alert(a, config={"enabled": False}) is False
+    assert calls == []
+    pn.send_flow_alert(a, config={"enabled": True, "telegram": {}, "discord": {}})
+    assert set(calls) == {"tg", "dc"}

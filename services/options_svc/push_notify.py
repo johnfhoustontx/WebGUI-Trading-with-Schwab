@@ -236,6 +236,44 @@ def send_action_digest(items: dict, *, slot_label: str = "", config: dict | None
     return True
 
 
+# ── Options-flow alerts (call/put premium crossover + unusual-activity spike) ──
+# An alert dict: {"type": "crossover"|"spike", "side": ..., "symbol": ..., "text": ...}
+# (built by flow_alerts.detect_flow_alerts). Green = bullish (calls overtook / call
+# spike); red = bearish (puts overtook / put spike).
+_FLOW_GREEN = 0x2ECC71
+_FLOW_RED = 0xE74C3C
+
+
+def _flow_is_bullish(a) -> bool:
+    return (a.get("type") == "crossover" and a.get("side") == "calls_over") or \
+           (a.get("type") == "spike" and a.get("side") == "call")
+
+
+def flow_alert_telegram_text(a) -> str:
+    icon = "🟢" if _flow_is_bullish(a) else "🔴"
+    return f"{icon} <b>Flow alert</b> — {a.get('text', '')}"
+
+
+def flow_alert_discord_embed(a) -> dict:
+    return {"title": "Options-flow alert",
+            "description": a.get("text", ""),
+            "color": _FLOW_GREEN if _flow_is_bullish(a) else _FLOW_RED}
+
+
+def send_flow_alert(a, *, config: dict | None = None) -> bool:
+    """Push one flow alert to Telegram + Discord. Best-effort, never raises.
+
+    Returns True if a send was attempted (config enabled)."""
+    cfg = config or load_config()
+    if not cfg.get("enabled", True):
+        return False
+    tg = cfg.get("telegram", {})
+    dc = cfg.get("discord", {})
+    send_telegram(tg.get("bot_token"), tg.get("chat_id"), flow_alert_telegram_text(a))
+    send_discord(dc.get("webhook_url"), flow_alert_discord_embed(a))
+    return True
+
+
 # ── Scheduled end-of-day summary (post-close push, ~15:10 CT) ────────────────
 # A once-daily push summarizing the day's result per paper book (manual + driver):
 # day P&L, today's closed W-L + realized, open count, and halt flag. Unlike the action
