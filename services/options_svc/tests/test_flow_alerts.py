@@ -29,7 +29,7 @@ def _row(ts, cv, pv, cp, pp):
 def test_crossover_calls_overtake_puts():
     # net = call_prem - put_prem flips - → + decisively.
     series = [_row(60, 0, 0, 100.0, 200.0), _row(120, 0, 0, 260.0, 200.0)]
-    a = flow_alerts.detect_crossover(series, band=0.02)
+    a = flow_alerts.detect_crossover(series, band=0.02, min_premium=0)
     assert a and a["side"] == "calls_over" and a["type"] == "crossover"
 
 
@@ -41,7 +41,7 @@ def test_crossover_none_when_no_flip():
 def test_crossover_band_rejects_graze():
     # Flips sign but only by a hair (< 2% of the larger side) → no alert.
     series = [_row(60, 0, 0, 199.0, 200.0), _row(120, 0, 0, 201.0, 200.0)]
-    assert flow_alerts.detect_crossover(series, band=0.02) is None
+    assert flow_alerts.detect_crossover(series, band=0.02, min_premium=0) is None
 
 
 def test_spike_fires_above_baseline_and_floor():
@@ -71,7 +71,8 @@ def test_spike_warmup_needs_min_points():
 
 
 def test_detect_flow_alerts_cooldown_suppresses_repeat():
-    series = [_row(60, 0, 0, 100.0, 200.0), _row(120, 0, 0, 260.0, 200.0)]
+    # Large premiums so the crossover clears the default min_premium floor.
+    series = [_row(60, 0, 0, 100000.0, 200000.0), _row(120, 0, 0, 260000.0, 200000.0)]
     cfg = flow_alerts.load_thresholds()
     cd = {}
     first = flow_alerts.detect_flow_alerts("$SPX", series, cfg, cd, now_ts=120)
@@ -79,3 +80,30 @@ def test_detect_flow_alerts_cooldown_suppresses_repeat():
     # Same tick again within cooldown → nothing new.
     second = flow_alerts.detect_flow_alerts("$SPX", series, cfg, cd, now_ts=180)
     assert second == []
+
+
+def test_spike_dead_quiet_name_needs_k_times_min_baseline():
+    # baseline 0 (all flat) then a burst that clears `floor` but is below k*min_baseline
+    # → NO alert (the relative test always applies now).
+    cum = 0
+    series = []
+    for inc in [0, 0, 0, 0, 0, 600]:   # floor 500 cleared, but 600 < 4*200
+        cum += inc
+        series.append(_row(len(series) * 60, cum, 0, 0.0, 0.0))
+    assert flow_alerts.detect_spike(series, "call", k=4.0, floor=500, window=20,
+                                    min_points=5, min_baseline=200) is None
+    # A bigger burst that clears k*min_baseline (>=800) AND floor → fires.
+    series[-1] = _row(series[-1][0], 900, 0, 0.0, 0.0)
+    a = flow_alerts.detect_spike(series, "call", k=4.0, floor=500, window=20,
+                                 min_points=5, min_baseline=200)
+    assert a and a["type"] == "spike"
+
+
+def test_crossover_skipped_when_premium_below_min():
+    # A decisive sign flip but both premiums tiny → skipped by min_premium.
+    series = [_row(60, 0, 0, 100.0, 200.0), _row(120, 0, 0, 260.0, 200.0)]
+    assert flow_alerts.detect_crossover(series, band=0.02, min_premium=10000) is None
+    # Same relative flip at large premiums → fires.
+    series = [_row(60, 0, 0, 100000.0, 200000.0), _row(120, 0, 0, 260000.0, 200000.0)]
+    a = flow_alerts.detect_crossover(series, band=0.02, min_premium=10000)
+    assert a and a["side"] == "calls_over"

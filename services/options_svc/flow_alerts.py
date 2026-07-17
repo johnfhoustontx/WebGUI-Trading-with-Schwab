@@ -13,9 +13,9 @@ _TOML_PATH = FLOW_ALERTS_TOML
 
 _DEFAULTS = {
     "enabled": True,
-    "crossover": {"band": 0.02, "cooldown_min": 30},
+    "crossover": {"band": 0.02, "cooldown_min": 30, "min_premium": 10000},
     "spike": {"k": 4.0, "window": 20, "floor": 500, "min_points": 5,
-              "cooldown_min": 20},
+              "cooldown_min": 20, "min_baseline": 100},
 }
 
 
@@ -51,9 +51,11 @@ def _norm(series):
     return out
 
 
-def detect_crossover(series, band):
+def detect_crossover(series, band, min_premium=10000):
     """Alert dict when net=call_prem-put_prem flips sign vs the prior snapshot and the
-    new lead clears `band` × the larger side; else None. side: calls_over | puts_over."""
+    new lead clears `band` × the larger side; else None. side: calls_over | puts_over.
+    Skipped entirely when the larger side is below `min_premium` ($) — tiny-premium
+    open-session noise."""
     rows = [r for r in _norm(series)
             if isinstance(r["call_prem"], (int, float)) and isinstance(r["put_prem"], (int, float))]
     if len(rows) < 2:
@@ -63,6 +65,8 @@ def detect_crossover(series, band):
     n1 = cur["call_prem"] - cur["put_prem"]
     crossed = (n0 < 0 < n1) or (n1 < 0 < n0)
     larger = max(cur["call_prem"], cur["put_prem"], 1.0)
+    if larger < min_premium:
+        return None
     if not crossed or abs(n1) < band * larger:
         return None
     side = "calls_over" if n1 > 0 else "puts_over"
@@ -78,9 +82,11 @@ def _increments(rows, field):
     return out
 
 
-def detect_spike(series, side, k, floor, window, min_points):
+def detect_spike(series, side, k, floor, window, min_points, min_baseline=100):
     """Alert dict when this-minute `side` volume increment ≥ k×trailing-avg AND ≥ floor
-    (after a warm-up of min_points increments); else None. side: call | put."""
+    (after a warm-up of min_points increments); else None. side: call | put.
+    The trailing average is floored at `min_baseline` so a dead-quiet name (baseline 0)
+    still has to clear k×min_baseline — the relative test ALWAYS applies."""
     field = "call_vol" if side == "call" else "put_vol"
     rows = _norm(series)
     incs = _increments(rows, field)
@@ -91,7 +97,7 @@ def detect_spike(series, side, k, floor, window, min_points):
     baseline = (sum(base_window) / len(base_window)) if base_window else 0.0
     if latest < floor:
         return None
-    if baseline > 0 and latest < k * baseline:
+    if latest < k * max(baseline, min_baseline):   # relative test ALWAYS applies
         return None
     return {"type": "spike", "side": side, "ts": rows[-1]["ts"],
             "increment": latest, "baseline": baseline,
@@ -110,7 +116,8 @@ def detect_flow_alerts(symbol, series, cfg, cooldowns, now_ts):
     xo = cfg.get("crossover", {})
     sp = cfg.get("spike", {})
 
-    a = detect_crossover(series, band=xo.get("band", 0.02))
+    a = detect_crossover(series, band=xo.get("band", 0.02),
+                         min_premium=xo.get("min_premium", 10000))
     if a:
         key = f"{symbol}|crossover"
         if not _on_cooldown(cooldowns, key, now_ts, xo.get("cooldown_min", 30) * 60):
@@ -119,7 +126,8 @@ def detect_flow_alerts(symbol, series, cfg, cooldowns, now_ts):
 
     for side in ("call", "put"):
         a = detect_spike(series, side, k=sp.get("k", 4.0), floor=sp.get("floor", 500),
-                         window=sp.get("window", 20), min_points=sp.get("min_points", 5))
+                         window=sp.get("window", 20), min_points=sp.get("min_points", 5),
+                         min_baseline=sp.get("min_baseline", 100))
         if a:
             key = f"{symbol}|spike|{side}"
             if not _on_cooldown(cooldowns, key, now_ts, sp.get("cooldown_min", 20) * 60):
