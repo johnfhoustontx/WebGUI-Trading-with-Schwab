@@ -105,3 +105,13 @@ def test_speed_class_used_in_ticker_css():
     # Each bucket class must be defined in the marquee CSS escape hatch.
     for cls in ("mkt-dur-slow", "mkt-dur-med", "mkt-dur-fast"):
         assert f".{cls}" in ticker._TICKER_CSS
+
+
+def test_poll_reads_payloads_off_the_event_loop():
+    """The ticker runs on EVERY page; its 4s poll must not deserialize the 3
+    payloads (dashboard+composite+summary) on the event loop. The poll is async
+    and routes _read through run.io_bound."""
+    import inspect
+    src = inspect.getsource(ticker.render_ticker)
+    assert "async def _poll" in src
+    assert "run.io_bound(_read)" in src

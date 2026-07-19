@@ -512,19 +512,22 @@ def refresh_driver_paper(bus) -> None:
     R1: the view carries ``last_open_results`` — the rolling per-trade open
     outcomes (opened/rejected/error, with reason) — so the /driver decision log
     can show WHY a driver open didn't land, instead of a bare "enqueued"."""
-    acct = compute.driver_account_view()
+    # Read the driver book's full positions + snapshot ONCE, shared by all three
+    # views below (was 3× fetch_all_positions + 2× account_snapshot per refresh).
+    positions, snapshot = compute.driver_shared_reads()
+    acct = compute.driver_account_view(all_positions=positions, snapshot=snapshot)
     if isinstance(acct, dict):
         # Surface a COPY so a later append can't mutate the cached snapshot.
         acct["last_open_results"] = list(_LAST_OPEN_RESULTS)
     va = bus.cache_set(CACHE_DRIVER_PAPER, acct)
     bus.publish(EVENT_DRIVER_PAPER, {"version": va})
-    perf = compute.driver_account_perf()
+    perf = compute.driver_account_perf(positions=positions, snapshot=snapshot)
     vp = bus.cache_set(CACHE_DRIVER_PERF, perf)
     bus.publish(EVENT_DRIVER_PERF, {"version": vp})
     # Performance analytics (equity curve / posture post-mortem / MAE-MFE). Defensive —
     # a bad payload can't block the account/perf republish above.
     try:
-        analytics = compute.driver_analytics()
+        analytics = compute.driver_analytics(positions=positions)
         va2 = bus.cache_set(CACHE_DRIVER_ANALYTICS, analytics)
         bus.publish(EVENT_DRIVER_ANALYTICS, {"version": va2})
     except Exception:
@@ -702,20 +705,23 @@ def _flow_alert_symbols():
     (the documented cross-app collision discipline)."""
     try:
         import gex_collector
-        return list(gex_collector.collection_symbols())
+        # $VIX-options premium crossovers are noise (mirrors the gamma symbol
+        # dropdown, which also drops $VIX) — exclude it from the flow universe.
+        return [s for s in gex_collector.collection_symbols() if s != "$VIX"]
     except Exception:
         log.exception("flow-alert symbol list degraded")
         return []
 
 
-def _load_flow_series_for(conn, symbol):
-    """Today's flow series for one symbol over an already-open read-only connection.
-    Defensive → []. The caller owns the connection (opened once per run)."""
+def _load_flow_series_for(conn, symbol, limit):
+    """The trailing ``limit`` flow rows for one symbol over an already-open
+    read-only connection (the caller owns it). Bounded — the detectors need only
+    the last ~22 rows, not the whole day. Defensive → []."""
     try:
         import gex_history_db as gh
-        return gh.load_flow_series(conn, symbol)
+        return gh.load_flow_tail(conn, symbol, limit)
     except Exception:
-        log.debug("load_flow_series degraded for %s", symbol, exc_info=True)
+        log.debug("load_flow_tail degraded for %s", symbol, exc_info=True)
         return []
 
 
@@ -741,6 +747,10 @@ def run_flow_alerts(bus) -> None:
         cooldowns = cd_payload.get("map", {}) if cd_payload.get("date") == today else {}
         now_ts = _flow_now_ts()
         push_cfg = push_notify.load_config()
+        # The detectors read only the tail: crossover the last 2 rows, spike the
+        # last window+1 increments (= window+2 rows). Load exactly that, not the
+        # whole day's ~440 rows/symbol every minute across the universe.
+        tail_limit = max(2, int(cfg.get("spike", {}).get("window", 20)) + 2)
 
         conn = None
         try:
@@ -751,7 +761,7 @@ def run_flow_alerts(bus) -> None:
         try:
             fresh = []
             for sym in _flow_alert_symbols():
-                series = _load_flow_series_for(conn, sym) if conn is not None else []
+                series = _load_flow_series_for(conn, sym, tail_limit) if conn is not None else []
                 for a in flow_alerts.detect_flow_alerts(sym, series, cfg, cooldowns, now_ts):
                     fresh.append(a)
         finally:
@@ -776,7 +786,10 @@ def run_flow_alerts(bus) -> None:
                 alerts = (prior + deduped)[-_FLOW_ALERTS_MAX:]
                 bus.cache_set(CACHE_FLOW_ALERTS, {"date": today, "alerts": alerts},
                               event=EVENT_FLOW_ALERTS)
-        bus.cache_set(_FLOW_COOLDOWN_KEY, {"date": today, "map": cooldowns})
+        # skip_unchanged: a quiet tick leaves the cooldown map identical, so don't
+        # bump the key's version (and wake version-pollers) every minute.
+        bus.cache_set(_FLOW_COOLDOWN_KEY, {"date": today, "map": cooldowns},
+                      skip_unchanged=True)
     except Exception:
         log.exception("run_flow_alerts degraded")
 

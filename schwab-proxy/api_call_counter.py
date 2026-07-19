@@ -40,6 +40,16 @@ def connect(path=None) -> sqlite3.Connection:
     if str(path) != ":memory:":
         pathlib.Path(path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path), check_same_thread=False)
+    # record() runs on the Schwab hot path (~60-70 calls/min RTH), each doing an
+    # INSERT+commit. WAL + synchronous=NORMAL drops the per-commit fsync (the
+    # dominant cost) so the lock is held only briefly — counts stay durable across
+    # the process, only an OS crash could lose the last few. WAL needs a file.
+    if str(path) != ":memory:":
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+        except Exception:  # noqa: BLE001 — pragmas are best-effort tuning.
+            pass
     conn.execute(_SCHEMA)
     conn.commit()
     return conn

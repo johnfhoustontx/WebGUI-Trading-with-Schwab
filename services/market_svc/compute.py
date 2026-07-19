@@ -42,15 +42,33 @@ def fetch_raw_quotes(syms, *, timeout=8.0):
         return {}
 
 
+# Version-gated memo: read_sector_pcr runs every ~2s poll but the composite it
+# reads changes only every ~120s. Deserialize the full payload only when the
+# composite's version moves; otherwise serve the cached float off a cheap :ver
+# probe (avoids a full JSON deserialize of the composite ~every poll).
+_PCR_CACHE = {"ver": None, "pcr": None}
+
+
+def reset_pcr_cache():
+    """Drop the version-gated sector-pcr memo (test helper)."""
+    _PCR_CACHE.update(ver=None, pcr=None)
+
+
 def read_sector_pcr(bus):
     """Cap-weighted sector put/call ratio from cache:sentiment:composite, or None."""
     try:
+        ver = bus.cache_version(CACHE_SENTIMENT)
+        if ver is not None and ver == _PCR_CACHE["ver"]:
+            return _PCR_CACHE["pcr"]
         env = bus.cache_get(CACHE_SENTIMENT)
         if not env:
+            _PCR_CACHE.update(ver=ver, pcr=None)
             return None
         live = (env.payload or {}).get("live") or {}
         pcr = live.get("sector_pcr")
-        return float(pcr) if pcr not in (None, "") else None
+        val = float(pcr) if pcr not in (None, "") else None
+        _PCR_CACHE.update(ver=ver, pcr=val)
+        return val
     except Exception:  # noqa: BLE001
         return None
 

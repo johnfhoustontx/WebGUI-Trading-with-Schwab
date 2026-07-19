@@ -18,6 +18,32 @@ def _cmd(t, **args):
     return type("C", (), {"type": t, "args": args})()
 
 
+def test_market_state_and_magnitude_reuse_injected_composite(fake_bus):
+    """Both readers pull from cache:sentiment:composite. When the caller injects a
+    pre-read payload they must NOT re-read the bus (the cycle reads it once)."""
+    payload = {"derived": {"trend": {"state": "bullish", "label": "Bull",
+                                     "evidence": ["e"]}},
+               "live": {"composite": {"total_score": 7.0, "bias": "bull"}}}
+    # A sentinel that explodes if the bus is touched.
+    class _Boom:
+        def cache_get(self, *a, **k):
+            raise AssertionError("must not read the bus when composite is injected")
+        cache_version = cache_get
+    ms = handlers._read_market_state(_Boom(), composite=payload)
+    sent = handlers._read_sentiment_magnitude(_Boom(), composite=payload)
+    assert ms["state"] == "bullish" and ms["label"] == "Bull"
+    assert sent["score"] == 7.0 and sent["bias"] == "bull"
+
+
+def test_run_autonomous_cycle_reads_composite_once():
+    """run_autonomous_cycle reads the composite ONCE and passes it to both the
+    market-state + sentiment-magnitude readers (was two full reads/cycle)."""
+    import inspect
+    src = inspect.getsource(handlers.run_autonomous_cycle)
+    assert "_read_market_state(bus, composite=" in src
+    assert "_read_sentiment_magnitude(bus, composite=" in src
+
+
 # ── 5.1: control read/write helpers ──────────────────────────────────────────
 
 

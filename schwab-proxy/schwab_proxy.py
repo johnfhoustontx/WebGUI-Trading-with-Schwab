@@ -184,6 +184,7 @@ class TokenManager:
         self.callback_url = self.config.get("CallbackUrl", "https://127.0.0.1:8182")
         self.tokens: Dict = {}
         self._lock = threading.Lock()
+        self._rate_lock = threading.Lock()   # serializes _rate_limit's spacing
         self._last_request_time = 0.0
         self.session = requests.Session()
         self._bootstrap_tokens()
@@ -314,14 +315,22 @@ class TokenManager:
         logger.info("OAuth authorization code exchanged — tokens saved")
 
     def _rate_limit(self):
-        now = time.monotonic()
-        elapsed = now - self._last_request_time
-        if elapsed < MIN_REQUEST_INTERVAL:
-            time.sleep(MIN_REQUEST_INTERVAL - elapsed)
-        self._last_request_time = time.monotonic()
+        # Hold _rate_lock across the read-modify-write AND the sleep so concurrent
+        # callers (the 8-thread parallel_map fan-outs) are genuinely SPACED
+        # ~MIN_REQUEST_INTERVAL apart. Unsynchronized, two threads read the same
+        # last-time, both compute a tiny elapsed, and both fire together → a burst
+        # that risks a 429. A dedicated lock (not self._lock) keeps this off the
+        # token-refresh path.
+        with self._rate_lock:
+            now = time.monotonic()
+            elapsed = now - self._last_request_time
+            if elapsed < MIN_REQUEST_INTERVAL:
+                time.sleep(MIN_REQUEST_INTERVAL - elapsed)
+            self._last_request_time = time.monotonic()
         # Every marketdata request passes through here (incl. retries + the
         # 401-refresh re-request), so this is the counting chokepoint for the
-        # Settings "API usage" stats. record() never raises.
+        # Settings "API usage" stats. record() never raises. Outside the rate lock
+        # (it has its own lock) so counting can't extend the critical section.
         api_call_counter.record()
 
     def api_request(self, endpoint: str, params: Optional[Dict] = None) -> Dict:
@@ -1209,8 +1218,12 @@ def _reconcile_loop():
                 except Exception:
                     logger.exception("reconcile: untrack %s failed", trade_id)
 
-            logger.info(
-                "reconcile: tracked=%d added=%d removed=%d",
+            # Log at INFO only when something CHANGED; a quiet reconcile (the
+            # common case, every 30s 24/7) logs at DEBUG to avoid ~2,880 noise
+            # lines/day.
+            level = logging.INFO if (added or removed) else logging.DEBUG
+            logger.log(
+                level, "reconcile: tracked=%d added=%d removed=%d",
                 len(tracked_ids) + added - removed, added, removed)
         except Exception:
             logger.exception("reconcile loop iteration failed")

@@ -15,9 +15,50 @@ def test_load_thresholds_reads_file(tmp_path, monkeypatch):
     p = tmp_path / "flow_alerts.toml"
     p.write_text("enabled = false\n[spike]\nk = 9.0\n", encoding="utf-8")
     monkeypatch.setattr(flow_alerts, "_TOML_PATH", p)
+    flow_alerts.reset_thresholds_cache()
     cfg = flow_alerts.load_thresholds()
     assert cfg["enabled"] is False and cfg["spike"]["k"] == 9.0
     assert cfg["crossover"]["band"] == 0.02   # unspecified keys fall back to defaults
+
+
+def test_load_thresholds_caches_by_mtime(tmp_path, monkeypatch):
+    """The TOML is re-parsed only when its mtime changes — it's read every minute
+    on the flow-alert tick, but the file rarely changes."""
+    p = tmp_path / "flow_alerts.toml"
+    p.write_text("[spike]\nk = 3.0\n", encoding="utf-8")
+    monkeypatch.setattr(flow_alerts, "_TOML_PATH", p)
+    flow_alerts.reset_thresholds_cache()
+
+    parses = {"n": 0}
+    real_load = flow_alerts.tomllib.load
+    monkeypatch.setattr(flow_alerts.tomllib, "load",
+                        lambda fh: (parses.__setitem__("n", parses["n"] + 1)
+                                    or real_load(fh)))
+    a = flow_alerts.load_thresholds()
+    b = flow_alerts.load_thresholds()
+    assert a["spike"]["k"] == 3.0 and b["spike"]["k"] == 3.0
+    assert parses["n"] == 1                       # second call served from cache
+    # A newer mtime forces a re-parse.
+    import os
+    st = p.stat()
+    os.utime(p, (st.st_atime, st.st_mtime + 5))
+    p.write_text("[spike]\nk = 7.0\n", encoding="utf-8")
+    os.utime(p, (st.st_atime, st.st_mtime + 5))
+    c = flow_alerts.load_thresholds()
+    assert c["spike"]["k"] == 7.0 and parses["n"] == 2
+
+
+def test_detect_flow_alerts_normalizes_series_once(monkeypatch):
+    """The three detector passes (crossover + spike×2) share ONE normalization of
+    the series instead of re-normalizing per pass."""
+    series = [_row(60, 0, 0, 100.0, 200.0), _row(120, 10, 5, 260.0, 200.0)]
+    calls = {"n": 0}
+    real = flow_alerts._norm
+    monkeypatch.setattr(flow_alerts, "_norm",
+                        lambda s: (calls.__setitem__("n", calls["n"] + 1) or real(s)))
+    cfg = flow_alerts.load_thresholds()
+    flow_alerts.detect_flow_alerts("SPY", series, cfg, {}, 1000)
+    assert calls["n"] == 1
 
 
 # --- Task 2: pure detectors ---

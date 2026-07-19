@@ -141,6 +141,47 @@ def test_recompute_badges_uses_passed_scan(monkeypatch):
     assert "options:scan" not in reads  # used the passed scan, no extra read
 
 
+def test_acknowledge_scanner_reads_scan_once(monkeypatch):
+    """Navigating to `/` (Scanner) must read the (large) options:scan payload ONCE
+    — _acknowledge reuses the read it already did for _recompute_badges instead of
+    each reading it (was 2-3 reads per navigation)."""
+    import main
+
+    reads = []
+    real_read = main.bus_client.read
+
+    def tracking_read(view):
+        reads.append(view)
+        return {} if view == "options:scan" else real_read(view)
+
+    monkeypatch.setattr(main.bus_client, "read", tracking_read)
+    monkeypatch.setattr(main.bus_client, "read_version", lambda v: None)
+    monkeypatch.setattr(main.bus_client, "read_full", lambda v: (None, None))
+
+    main._acknowledge("/")
+    assert reads.count("options:scan") == 1
+
+
+def test_acknowledge_reuses_injected_scan(monkeypatch):
+    """When _layout has already read options:scan, it passes it to _acknowledge,
+    which then does NOT re-read it."""
+    import main
+
+    reads = []
+    real_read = main.bus_client.read
+
+    def tracking_read(view):
+        reads.append(view)
+        return {} if view == "options:scan" else real_read(view)
+
+    monkeypatch.setattr(main.bus_client, "read", tracking_read)
+    monkeypatch.setattr(main.bus_client, "read_version", lambda v: None)
+    monkeypatch.setattr(main.bus_client, "read_full", lambda v: (None, None))
+
+    main._acknowledge("/", scan={"signals": []})
+    assert "options:scan" not in reads
+
+
 # ── Health / staleness watcher (R4b / R8 / R9) ───────────────────────────────
 def _reset_health_state(main):
     main._ALERT_STATE.update(

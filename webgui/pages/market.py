@@ -6,8 +6,8 @@ place on the ~2 s version bump. Tailwind-first: data-driven colors map from the
 finite color_state set to fixed background classes (no inline styling).
 """
 import bus_client
-from pages.ui_guard import guard
-from nicegui import ui
+from pages.ui_guard import guard, guard_async
+from nicegui import run, ui
 
 VIEW = "market:dashboard"
 
@@ -123,13 +123,16 @@ def render():
         else:
             _build(payload)
 
-    @guard
-    def _poll():
-        v = bus_client.read_version(VIEW)
+    @guard_async
+    async def _poll():
+        # The service publishes every ~2s during RTH, so the version gate passes
+        # nearly every poll → read the full ~48-tile payload OFF the event loop.
+        # The cheap :ver probe + the paint (UI, in-place tile diff) stay light.
+        v = await run.io_bound(bus_client.read_version, VIEW)
         if v is None:
             return
         if v != state["version"]:
-            payload = bus_client.read(VIEW)
+            payload = await run.io_bound(bus_client.read, VIEW)
             if payload:
                 state["version"] = v
                 _paint(payload)

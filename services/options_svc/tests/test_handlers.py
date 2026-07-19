@@ -1524,7 +1524,7 @@ def test_run_flow_alerts_detects_pushes_publishes(monkeypatch):
     series = [(60, 100.0, 0, 0, 100000.0, 200000.0),
               (120, 100.0, 0, 0, 260000.0, 200000.0)]
     monkeypatch.setattr(handlers, "_flow_alert_symbols", lambda: ["$SPX"])
-    monkeypatch.setattr(handlers, "_load_flow_series_for", lambda conn, sym: series)
+    monkeypatch.setattr(handlers, "_load_flow_series_for", lambda conn, sym, limit: series)
     monkeypatch.setattr(handlers, "_flow_now_ts", lambda: 120)
     sent = []
     monkeypatch.setattr(handlers.push_notify, "send_flow_alert", lambda a, **k: sent.append(a))
@@ -1538,6 +1538,50 @@ def test_run_flow_alerts_detects_pushes_publishes(monkeypatch):
     assert len(sent) == 1
 
 
+def test_run_flow_alerts_loads_bounded_tail_not_whole_day(monkeypatch):
+    """The detectors need only the trailing ~22 rows, so the handler loads a
+    bounded tail (spike window + 2), never the whole day's series per symbol."""
+    from shared.bus import Bus
+    from services.options_svc import handlers
+    bus = Bus(fake=True)
+    seen = {}
+    monkeypatch.setattr(handlers, "_flow_alert_symbols", lambda: ["$SPX"])
+    monkeypatch.setattr(handlers, "_load_flow_series_for",
+                        lambda conn, sym, limit: seen.setdefault("limit", limit) or [])
+    monkeypatch.setattr(handlers, "_flow_now_ts", lambda: 120)
+    handlers.run_flow_alerts(bus)
+    # default spike window 20 -> 22 rows.
+    assert seen["limit"] == 22
+
+
+def test_run_flow_alerts_excludes_vix(monkeypatch):
+    """$VIX-options premium crossovers are noise — exclude it from the flow-alert
+    universe (mirrors the gamma symbol dropdown, which also drops $VIX)."""
+    from shared.bus import Bus
+    from services.options_svc import handlers
+    bus = Bus(fake=True)
+    monkeypatch.setattr("gex_collector.collection_symbols",
+                        lambda: ["$SPX", "$VIX", "SPY"])
+    syms = handlers._flow_alert_symbols()
+    assert "$VIX" not in syms and "$SPX" in syms and "SPY" in syms
+
+
+def test_run_flow_alerts_cooldown_map_skips_unchanged_write(monkeypatch):
+    """The cooldown map is written skip_unchanged, so a quiet tick (nothing fired,
+    map unchanged) doesn't bump the key's version every minute."""
+    from shared.bus import Bus
+    from services.options_svc import handlers
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers, "_flow_alert_symbols", lambda: ["$SPX"])
+    monkeypatch.setattr(handlers, "_load_flow_series_for", lambda conn, sym, limit: [])
+    monkeypatch.setattr(handlers, "_flow_now_ts", lambda: 120)
+    handlers.run_flow_alerts(bus)
+    v1 = bus.cache_version(handlers._FLOW_COOLDOWN_KEY)
+    handlers.run_flow_alerts(bus)   # still quiet -> map unchanged
+    v2 = bus.cache_version(handlers._FLOW_COOLDOWN_KEY)
+    assert v1 == v2
+
+
 def test_run_flow_alerts_dedups_published_by_id(monkeypatch):
     from shared.bus import Bus
     from services.options_svc import handlers
@@ -1545,7 +1589,7 @@ def test_run_flow_alerts_dedups_published_by_id(monkeypatch):
     alert = {"id": "$SPX|crossover|calls_over|120", "type": "crossover",
              "side": "calls_over", "symbol": "$SPX", "text": "x", "ts": 120}
     monkeypatch.setattr(handlers, "_flow_alert_symbols", lambda: ["$SPX"])
-    monkeypatch.setattr(handlers, "_load_flow_series_for", lambda conn, sym: [(60, 1, 0, 0, 1, 1), (120, 1, 0, 0, 1, 1)])
+    monkeypatch.setattr(handlers, "_load_flow_series_for", lambda conn, sym, limit: [(60, 1, 0, 0, 1, 1), (120, 1, 0, 0, 1, 1)])
     monkeypatch.setattr(handlers, "_flow_now_ts", lambda: 120)
     monkeypatch.setattr(handlers.flow_alerts, "detect_flow_alerts",
                         lambda *a, **k: [dict(alert)])   # same alert every call (bypass cooldown)

@@ -54,3 +54,13 @@ def test_tile_text_basket_shows_avg_and_breadth():
     # a negative avg keeps the sign
     t2 = {"display": "MAG7", "basket": True, "avg_pct": -1.5, "breadth_text": "1/7 up"}
     assert market.tile_text(t2)["last"] == "-1.50%"
+
+
+def test_poll_reads_payload_off_the_event_loop():
+    """The dashboard service publishes every ~2s during RTH, so the version gate
+    passes nearly every poll → the full ~48-tile payload read must run OFF the
+    event loop (the poll is async, routing bus_client.read through run.io_bound)."""
+    import inspect
+    src = inspect.getsource(market.render)
+    assert "async def _poll" in src
+    assert "run.io_bound(bus_client.read" in src

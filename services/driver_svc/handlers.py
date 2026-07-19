@@ -104,8 +104,11 @@ def _read_payload(bus, key):
     return env.payload if env else None
 
 
-def _read_market_state(bus):
+def _read_market_state(bus, composite=None):
     """The five-state market state from ``cache:sentiment:composite`` ``derived.trend``.
+
+    ``composite`` — a pre-read composite payload (the cycle reads it once and
+    shares it with _read_sentiment_magnitude); when None it's read from the bus.
 
     Returns ``{state, label, evidence}`` (additive REASONING CONTEXT for the
     decider — ``regime_filter`` already hard-gates the scanner menu the driver
@@ -114,8 +117,8 @@ def _read_market_state(bus):
     down/slow sentiment service never blocks a cycle.
     """
     try:
-        trend = ((_read_payload(bus, CACHE_SENTIMENT_COMPOSITE) or {})
-                 .get("derived") or {}).get("trend") or {}
+        payload = composite if composite is not None else _read_payload(bus, CACHE_SENTIMENT_COMPOSITE)
+        trend = ((payload or {}).get("derived") or {}).get("trend") or {}
         state, label = trend.get("state"), trend.get("label")
         if not (state or label):
             return None
@@ -142,16 +145,17 @@ def _read_briefing(bus, today_ct):
         return None
 
 
-def _read_sentiment_magnitude(bus):
+def _read_sentiment_magnitude(bus, composite=None):
     """The sentiment 0-10 score + bias from ``cache:sentiment:composite`` live.composite.
 
     Complements ``_read_market_state`` (which reads the five-state ``derived.trend``) with
     the composite MAGNITUDE the driver otherwise never sees. Additive REASONING CONTEXT
     only. Defensive → ``None`` on any failure / missing composite / blank score+bias.
+    ``composite`` — a pre-read composite payload shared with ``_read_market_state``.
     """
     try:
-        comp = ((_read_payload(bus, CACHE_SENTIMENT_COMPOSITE) or {})
-                .get("live") or {}).get("composite") or {}
+        payload = composite if composite is not None else _read_payload(bus, CACHE_SENTIMENT_COMPOSITE)
+        comp = ((payload or {}).get("live") or {}).get("composite") or {}
         raw = comp.get("total_score")
         try:
             score = float(raw) if raw is not None else None
@@ -262,7 +266,10 @@ def run_autonomous_cycle(bus) -> None:
     market = compute.fetch_market_context()
     # Additive: fold the five-state market state into the decider's market context
     # (context only — no new hard rule; the menu is already regime-gated upstream).
-    ms = _read_market_state(bus)
+    # Read the composite ONCE and share it with both the five-state market-state
+    # reader and the sentiment-magnitude reader (was two full reads per cycle).
+    composite = _read_payload(bus, CACHE_SENTIMENT_COMPOSITE)
+    ms = _read_market_state(bus, composite=composite)
     if ms:
         market["market_state"] = ms
     # Additive market-read context (gamma briefing + dashboard breadth + sentiment
@@ -274,7 +281,7 @@ def run_autonomous_cycle(bus) -> None:
     dash = _read_payload(bus, CACHE_MARKET_DASHBOARD)
     if dash:
         market["dashboard"] = dash
-    sent = _read_sentiment_magnitude(bus)
+    sent = _read_sentiment_magnitude(bus, composite=composite)
     if sent:
         market["sentiment"] = sent
     # Cumulative MTD banking target: carry the $500/day deficit/excess forward (capped

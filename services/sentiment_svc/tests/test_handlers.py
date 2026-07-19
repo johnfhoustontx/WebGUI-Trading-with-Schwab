@@ -847,6 +847,30 @@ def test_recompute_notifies_on_committed_state_change(monkeypatch):
     _reset_trend()
 
 
+def test_recompute_sends_notify_outside_the_trend_lock(monkeypatch):
+    """send_state_transition does Telegram/Discord/SMTP (8-10s timeouts). It must
+    run AFTER _TREND_LOCK is released — otherwise a slow flip-day notify holds the
+    lock ~25s and blocks a concurrent manual refresh."""
+    _reset_trend()
+    handlers._TREND["committed"] = "bullish"
+    fresh = _stub_trend_recompute(monkeypatch, "bearish")
+
+    lock_free = {}
+
+    def _spy(old, new, trend, **k):
+        # If the lock is free, we can acquire it non-blocking → send is outside it.
+        got = handlers._TREND_LOCK.acquire(blocking=False)
+        lock_free["free"] = got
+        if got:
+            handlers._TREND_LOCK.release()
+        return True
+
+    monkeypatch.setattr(handlers.state_alert, "send_state_transition", _spy)
+    handlers._maybe_recompute_trend(Bus(fake=True))
+    assert lock_free.get("free") is True   # lock released before the notify ran
+    _reset_trend()
+
+
 def test_recompute_no_notify_when_state_unchanged(monkeypatch):
     _reset_trend()
     handlers._TREND["committed"] = "bullish"

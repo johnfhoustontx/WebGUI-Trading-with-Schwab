@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import time
 import pytest
@@ -12,10 +13,72 @@ def test_init_schema_creates_tables():
         "SELECT name FROM sqlite_master WHERE type='table' AND name='snapshots'"
     )
     assert cur.fetchone() is not None
+
+
+def test_init_schema_drops_redundant_idx_snap_today():
+    """idx_snap_today (symbol, view, ts) exactly duplicates the PRIMARY KEY
+    autoindex, so every insert maintained two identical b-trees. init_schema
+    must NOT create it and must drop it from a pre-existing DB."""
+    conn = sqlite3.connect(":memory:")
+    # Simulate an old DB that already carries the redundant index.
+    conn.execute("CREATE TABLE snapshots (symbol TEXT, view TEXT, ts INTEGER, "
+                 "PRIMARY KEY (symbol, view, ts))")
+    conn.execute("CREATE INDEX idx_snap_today ON snapshots(symbol, view, ts)")
+    db.init_schema(conn)
     cur = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_snap_today'"
-    )
-    assert cur.fetchone() is not None
+        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_snap_today'")
+    assert cur.fetchone() is None
+
+
+def test_gex_grid_stored_compressed_and_round_trips(tmp_path, monkeypatch):
+    """gex_json is stored zlib-compressed (BLOB) at insert — ~5x smaller on disk —
+    and reads back identically through load_date_with_grid."""
+    import zlib
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    grid = {str(5400.0 + i): {"net": float(i)} for i in range(200)}
+    now = int(time.time())
+    db.insert_snapshot(conn, "SPY", "gex", {"ts": now, "spot": 5400.0},
+                       grid, 1)
+    stored = conn.execute("SELECT gex_json FROM snapshots").fetchone()[0]
+    assert isinstance(stored, (bytes, bytearray))   # compressed, not raw JSON text
+    assert len(stored) < len(json.dumps(grid))       # actually smaller
+    assert json.loads(zlib.decompress(stored)) == {str(k): v for k, v in grid.items()}
+    rows = db.load_date_with_grid(conn, "SPY", "gex")
+    assert rows[0][6] == {5400.0 + i: {"net": float(i)} for i in range(200)}
+
+
+def test_load_decodes_legacy_uncompressed_rows(tmp_path, monkeypatch):
+    """A row written before compression (plain JSON TEXT) still decodes — the
+    reader is format-agnostic (bytes -> zlib, str -> json)."""
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    now = int(time.time())
+    conn.execute(
+        "INSERT INTO snapshots (symbol, view, ts, spot, gex_json) VALUES (?,?,?,?,?)",
+        ("SPY", "gex", now, 5400.0, json.dumps({"5400.0": {"net": 9}})))
+    conn.commit()
+    rows = db.load_date_with_grid(conn, "SPY", "gex")
+    assert rows[0][6] == {5400.0: {"net": 9}}
+
+
+def test_load_flow_tail_returns_last_n_chronological(tmp_path, monkeypatch):
+    """Flow-alert detectors need only the last ~22 rows, not the whole day.
+    load_flow_tail returns the last `limit` gex-view rows in ASC order."""
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    base = int(time.time()) - 300
+    for i in range(10):
+        db.insert_snapshot(
+            conn, "SPY", "gex",
+            {"ts": base + i * 60, "spot": float(i), "call_vol": i, "put_vol": 0},
+            {"1.0": {"net": 1}}, 1)
+    tail = db.load_flow_tail(conn, "SPY", limit=3)
+    assert [r[1] for r in tail] == [7.0, 8.0, 9.0]     # last 3, chronological
+    assert len(db.load_flow_tail(conn, "SPY", limit=100)) == 10  # fewer than limit
 
 
 def test_init_schema_is_idempotent():

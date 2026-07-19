@@ -418,16 +418,31 @@ def test_read_all_is_graceful_when_the_service_is_cold(fresh_bus):
 
 
 def test_render_reads_the_day_payload_off_the_event_loop():
-    """The day union serializes to ~4.5 MB by day's end (~880 B x ~5,238 entries).
-    Both read sites — the first paint and the on-change repaint — must go through
-    ``run.io_bound``; the 2 s poll itself stays on-loop (it reads only ``:ver``
-    ints). Pins what the pure row tests cannot see."""
+    """The day union serializes to ~4.5 MB by day's end (~880 B x ~5,238 entries),
+    and building its ~5,238 display rows is likewise heavy. Both read+build sites —
+    the first paint and the on-change repaint — must go through ``run.io_bound``
+    (via _read_and_build, which reads AND builds the rows off the loop); the 2 s
+    poll itself stays on-loop (it reads only ``:ver`` ints)."""
     import inspect
     src = inspect.getsource(scanner.render)
-    assert src.count("run.io_bound(_read_all)") == 2
+    assert src.count("run.io_bound(_read_and_build)") == 2
     # No un-wrapped payload read may remain in render (read_versions is the cheap
     # :ver probe and is deliberately allowed to stay on the loop).
     assert "bus_client.read(" not in src
+
+
+def test_read_and_build_builds_rows_off_loop(fresh_bus):
+    """_read_and_build reads BOTH payloads and constructs the display rows in one
+    off-thread call, so only the UI assignment is left for the event loop."""
+    bus = bus_client.bus()
+    bus.cache_set("cache:options:scan_day",
+                  {"date": scanner.today_ct(), "signals_0dte": [], "signals_swing": [],
+                   "signals_directional": []})
+    bus.cache_set("cache:options:scan", {"timestamp": "x", "signals_0dte": []})
+    built = scanner._read_and_build()
+    assert set(built["rows"]) == {"signals_0dte", "signals_swing", "signals_directional"}
+    assert built["live"]["timestamp"] == "x"
+    assert isinstance(built["by_id"], dict)
 
 
 # ── Directional tab (single-leg long/short calls+puts, Fit+Quality scored) ───

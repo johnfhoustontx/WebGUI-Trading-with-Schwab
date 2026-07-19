@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import zlib
 import sqlite3
 import time
 from pathlib import Path
@@ -60,9 +61,10 @@ CREATE TABLE IF NOT EXISTS snapshots (
     put_prem                  REAL,
     PRIMARY KEY (symbol, view, ts)
 );
-CREATE INDEX IF NOT EXISTS idx_snap_today
-    ON snapshots(symbol, view, ts);
 """
+# NOTE: the old ``idx_snap_today ON snapshots(symbol, view, ts)`` was DROPPED
+# (2026-07-18) — it exactly duplicated the PRIMARY KEY autoindex, so every insert
+# maintained two identical b-trees. init_schema drops it from pre-existing DBs.
 
 
 TERM_SCHEMA_SQL = """
@@ -84,9 +86,33 @@ CREATE INDEX IF NOT EXISTS idx_term_date ON gex_term_snapshots (substr(timestamp
 """
 
 
+def _encode_grid(grid) -> bytes | None:
+    """Serialize a per-strike grid dict → zlib-compressed JSON bytes (stored as a
+    BLOB in the TEXT ``gex_json`` column). ~5× smaller than raw JSON — the full
+    chain grid dominates on-disk size (×4 views × ~440 rows/day). None for an
+    empty grid."""
+    if not grid:
+        return None
+    return zlib.compress(json.dumps(grid).encode("utf-8"))
+
+
+def _decode_grid(raw) -> dict:
+    """Decode a stored ``gex_json`` value → per-strike dict with FLOAT keys.
+
+    Format-agnostic for back-compat: ``bytes`` = zlib-compressed JSON (current),
+    ``str`` = plain JSON (rows written before compression). None/empty → {}."""
+    if not raw:
+        return {}
+    if isinstance(raw, (bytes, bytearray)):
+        raw = zlib.decompress(raw).decode("utf-8")
+    return {float(k): v for k, v in json.loads(raw).items()}
+
+
 def init_schema(conn: sqlite3.Connection) -> None:
     """Idempotent schema creation."""
     conn.executescript(_SCHEMA)
+    # Drop the redundant duplicate-of-PK index from any pre-existing DB.
+    conn.execute("DROP INDEX IF EXISTS idx_snap_today")
     # Backfill columns on pre-existing DBs (SQLite lacks IF NOT EXISTS for columns).
     existing = {row[1] for row in conn.execute("PRAGMA table_info(snapshots)")}
     for col, col_type in (
@@ -204,7 +230,7 @@ def insert_snapshot(
             summary.get("top_neg_strike"),
             summary.get("net_total"),
             dte,
-            json.dumps(gex_grid) if gex_grid else None,
+            _encode_grid(gex_grid),
             summary.get("net_delta_0dte"),
             summary.get("projected_net_delta_close"),
             summary.get("hedge_pressure"),
@@ -280,14 +306,7 @@ def load_date_with_grid(
     )
     out = []
     for row in cur.fetchall():
-        if row[6]:
-            # JSON stringifies dict keys — cast back to float so downstream
-            # numeric grouping (GammaEngine.group_gex) works.
-            raw = json.loads(row[6])
-            grid = {float(k): v for k, v in raw.items()}
-        else:
-            grid = {}
-        out.append((*row[:6], grid))
+        out.append((*row[:6], _decode_grid(row[6])))
     return out
 
 
@@ -352,6 +371,34 @@ def load_flow_series(
         (symbol, start, end),
     )
     return cur.fetchall()
+
+
+def load_flow_tail(
+    conn: sqlite3.Connection,
+    symbol: str,
+    limit: int,
+    d=None,
+) -> list[tuple]:
+    """The last ``limit`` flow rows for ``symbol`` on local date ``d``, ASC.
+
+    Same shape as :func:`load_flow_series` but bounded — the flow-alert detectors
+    need only the trailing ~22 rows (crossover: 2; spike: window+2), not the whole
+    day (~440 rows/symbol by the close × the whole universe every minute). Uses
+    ``ORDER BY ts DESC LIMIT n`` on the PK then reverses to chronological."""
+    start, end = _local_unix_range(d)
+    cur = conn.execute(
+        """
+        SELECT ts, spot, call_vol, put_vol, call_prem, put_prem
+          FROM snapshots
+         WHERE symbol = ?
+           AND view   = 'gex'
+           AND ts >= ? AND ts < ?
+         ORDER BY ts DESC
+         LIMIT ?
+        """,
+        (symbol, start, end, int(limit)),
+    )
+    return list(reversed(cur.fetchall()))
 
 
 def purge_old(conn: sqlite3.Connection) -> int:
@@ -491,5 +538,4 @@ def first_snapshot_today(
     row = cur.fetchone()
     if not row or not row[0]:
         return {}
-    raw = json.loads(row[0])
-    return {float(k): v for k, v in raw.items()}
+    return _decode_grid(row[0])

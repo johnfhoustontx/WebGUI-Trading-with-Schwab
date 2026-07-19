@@ -29,14 +29,34 @@ def _merge(base, over):
     return out
 
 
+_TOML_CACHE = {"mtime": None, "cfg": None}
+
+
+def reset_thresholds_cache():
+    """Drop the mtime-cached thresholds (test helper)."""
+    _TOML_CACHE.update(mtime=None, cfg=None)
+
+
 def load_thresholds() -> dict:
-    """flow_alerts.toml merged over the built-in defaults. Never raises."""
+    """flow_alerts.toml merged over the built-in defaults. Never raises.
+
+    mtime-cached: this is read on every 1-min flow-alert tick, but the file
+    rarely changes — re-parse only when its mtime moves (or it's missing)."""
+    try:
+        import os
+        mtime = os.stat(_TOML_PATH).st_mtime
+    except Exception:
+        mtime = None
+    if _TOML_CACHE["cfg"] is not None and _TOML_CACHE["mtime"] == mtime:
+        return _TOML_CACHE["cfg"]
     try:
         with open(_TOML_PATH, "rb") as fh:
-            return _merge(_DEFAULTS, tomllib.load(fh))
+            cfg = _merge(_DEFAULTS, tomllib.load(fh))
     except Exception:
         log.debug("flow_alerts.toml load failed → defaults", exc_info=True)
-        return _merge(_DEFAULTS, {})
+        cfg = _merge(_DEFAULTS, {})
+    _TOML_CACHE.update(mtime=mtime, cfg=cfg)
+    return cfg
 
 
 def _norm(series):
@@ -56,7 +76,12 @@ def detect_crossover(series, band, min_premium=10000):
     new lead clears `band` × the larger side; else None. side: calls_over | puts_over.
     Skipped entirely when the larger side is below `min_premium` ($) — tiny-premium
     open-session noise."""
-    rows = [r for r in _norm(series)
+    return _crossover_rows(_norm(series), band, min_premium)
+
+
+def _crossover_rows(norm_rows, band, min_premium=10000):
+    """Crossover detection over ALREADY-normalized rows (see detect_crossover)."""
+    rows = [r for r in norm_rows
             if isinstance(r["call_prem"], (int, float)) and isinstance(r["put_prem"], (int, float))]
     if len(rows) < 2:
         return None
@@ -87,8 +112,12 @@ def detect_spike(series, side, k, floor, window, min_points, min_baseline=100):
     (after a warm-up of min_points increments); else None. side: call | put.
     The trailing average is floored at `min_baseline` so a dead-quiet name (baseline 0)
     still has to clear k×min_baseline — the relative test ALWAYS applies."""
+    return _spike_rows(_norm(series), side, k, floor, window, min_points, min_baseline)
+
+
+def _spike_rows(rows, side, k, floor, window, min_points, min_baseline=100):
+    """Spike detection over ALREADY-normalized rows (see detect_spike)."""
     field = "call_vol" if side == "call" else "put_vol"
-    rows = _norm(series)
     incs = _increments(rows, field)
     if len(incs) < min_points:
         return None
@@ -115,9 +144,10 @@ def detect_flow_alerts(symbol, series, cfg, cooldowns, now_ts):
     out = []
     xo = cfg.get("crossover", {})
     sp = cfg.get("spike", {})
+    norm_rows = _norm(series)   # normalize ONCE, shared by all three passes
 
-    a = detect_crossover(series, band=xo.get("band", 0.02),
-                         min_premium=xo.get("min_premium", 10000))
+    a = _crossover_rows(norm_rows, band=xo.get("band", 0.02),
+                        min_premium=xo.get("min_premium", 10000))
     if a:
         key = f"{symbol}|crossover"
         if not _on_cooldown(cooldowns, key, now_ts, xo.get("cooldown_min", 30) * 60):
@@ -125,9 +155,9 @@ def detect_flow_alerts(symbol, series, cfg, cooldowns, now_ts):
             out.append({**a, "symbol": symbol})
 
     for side in ("call", "put"):
-        a = detect_spike(series, side, k=sp.get("k", 4.0), floor=sp.get("floor", 500),
-                         window=sp.get("window", 20), min_points=sp.get("min_points", 5),
-                         min_baseline=sp.get("min_baseline", 100))
+        a = _spike_rows(norm_rows, side, k=sp.get("k", 4.0), floor=sp.get("floor", 500),
+                        window=sp.get("window", 20), min_points=sp.get("min_points", 5),
+                        min_baseline=sp.get("min_baseline", 100))
         if a:
             key = f"{symbol}|spike|{side}"
             if not _on_cooldown(cooldowns, key, now_ts, sp.get("cooldown_min", 20) * 60):

@@ -49,3 +49,12 @@ def test_connect_default_is_memory_under_pytest():
     conn = acc.connect()
     row = conn.execute("PRAGMA database_list").fetchall()[0]
     assert row[2] in ("", None)                      # in-memory has no file
+
+
+def test_file_connect_uses_wal_and_normal_sync(tmp_path):
+    """A file-backed counts DB uses WAL + synchronous=NORMAL so the per-call
+    record() commit doesn't fsync — record() runs on the Schwab hot path (~60-70
+    calls/min RTH) and the old default (FULL) synced to disk every call."""
+    conn = acc.connect(tmp_path / "counts.db")
+    assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+    assert conn.execute("PRAGMA synchronous").fetchone()[0] == 1   # NORMAL

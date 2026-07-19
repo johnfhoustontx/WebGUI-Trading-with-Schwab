@@ -90,7 +90,7 @@ def _patch_happy(monkeypatch, position=None, reprice=None):
     }
     monkeypatch.setattr(compute, "_load_position", lambda pid: position)
     monkeypatch.setattr(compute, "reprice_swing", lambda trade, client, today=None: reprice)
-    monkeypatch.setattr(compute, "gamma_snapshot",
+    monkeypatch.setattr(compute, "_light_gex_context",
                         lambda symbol: {"spot": 501.0, "views": {
                             "GEX": {"flip": 505.0, "walls": [490.0, 510.0]}}})
     monkeypatch.setattr(compute, "_rescue_regime", lambda: None)
@@ -124,7 +124,7 @@ def test_compute_rescue_defensive_on_reprice_raise(monkeypatch):
         raise RuntimeError("proxy down")
 
     monkeypatch.setattr(compute, "reprice_swing", _boom)
-    monkeypatch.setattr(compute, "gamma_snapshot", lambda symbol: None)
+    monkeypatch.setattr(compute, "_light_gex_context", lambda symbol: None)
     monkeypatch.setattr(compute, "_rescue_regime", lambda: None)
     monkeypatch.setattr(compute, "_make_leg_pricer", lambda symbol: (lambda *a, **k: None))
     result = compute.compute_rescue(7)
@@ -137,7 +137,7 @@ def test_compute_rescue_defensive_on_reprice_raise(monkeypatch):
 
 def test_compute_rescue_gamma_none_ok(monkeypatch):
     _patch_happy(monkeypatch)
-    monkeypatch.setattr(compute, "gamma_snapshot", lambda symbol: None)
+    monkeypatch.setattr(compute, "_light_gex_context", lambda symbol: None)
     result = compute.compute_rescue(7)
     assert result.get("error") is None
     RescueAdvisory(**result)
@@ -173,7 +173,7 @@ def test_compute_rescue_falls_back_to_snapshot_spot(monkeypatch):
         "current_underlying": 0.0, "current_short_delta": 0.35,
         "error": None,
     })
-    monkeypatch.setattr(compute, "gamma_snapshot",
+    monkeypatch.setattr(compute, "_light_gex_context",
                         lambda symbol: {"spot": 126.0, "views": {
                             "GEX": {"flip": 130.0, "walls": [120.0, 132.0]}}})
     result = compute.compute_rescue(7)
@@ -188,7 +188,7 @@ def test_compute_rescue_reprice_underlying_wins_over_snapshot(monkeypatch):
         "current_underlying": 501.0, "current_short_delta": 0.35,
         "error": None,
     })
-    monkeypatch.setattr(compute, "gamma_snapshot",
+    monkeypatch.setattr(compute, "_light_gex_context",
                         lambda symbol: {"spot": 126.0, "views": {
                             "GEX": {"flip": 130.0, "walls": [120.0, 132.0]}}})
     result = compute.compute_rescue(7)
@@ -219,7 +219,7 @@ def _patch_captured_happy(monkeypatch, signal=None, reprice=None):
     monkeypatch.setitem(_sys.modules, "signal_db",
                         _types.SimpleNamespace(get_signal=lambda sid: signal))
     monkeypatch.setattr(compute, "reprice_swing", lambda trade, client, today=None: reprice)
-    monkeypatch.setattr(compute, "gamma_snapshot",
+    monkeypatch.setattr(compute, "_light_gex_context",
                         lambda symbol: {"spot": 501.0, "views": {
                             "GEX": {"flip": 505.0, "walls": [490.0, 510.0]}}})
     monkeypatch.setattr(compute, "_rescue_regime", lambda: None)
@@ -282,7 +282,7 @@ def _patch_adhoc_happy(monkeypatch, reprice=None):
         "error": None,
     }
     monkeypatch.setattr(compute, "reprice_swing", lambda trade, client, today=None: reprice)
-    monkeypatch.setattr(compute, "gamma_snapshot",
+    monkeypatch.setattr(compute, "_light_gex_context",
                         lambda symbol: {"spot": 501.0, "views": {
                             "GEX": {"flip": 505.0, "walls": [490.0, 510.0]}}})
     monkeypatch.setattr(compute, "_rescue_regime", lambda: None)
@@ -374,7 +374,7 @@ def test_compute_rescue_adhoc_never_raises(monkeypatch):
     def _boom(*a, **k):
         raise RuntimeError("proxy down")
     monkeypatch.setattr(compute, "reprice_swing", _boom)
-    monkeypatch.setattr(compute, "gamma_snapshot", lambda symbol: None)
+    monkeypatch.setattr(compute, "_light_gex_context", lambda symbol: None)
     monkeypatch.setattr(compute, "_rescue_regime", lambda: None)
     monkeypatch.setattr(compute, "_make_leg_pricer", lambda symbol: (lambda *a, **k: None))
     result = compute.compute_rescue_adhoc(_adhoc_spec())
@@ -388,7 +388,7 @@ def test_compute_rescue_adhoc_never_raises(monkeypatch):
 def _patch_single_happy(monkeypatch, current_value=1.00, spot=100.0):
     monkeypatch.setattr(compute, "_make_leg_pricer",
                         lambda symbol: (lambda *a, **k: current_value))
-    monkeypatch.setattr(compute, "gamma_snapshot",
+    monkeypatch.setattr(compute, "_light_gex_context",
                         lambda symbol: {"spot": spot, "views": {
                             "GEX": {"flip": spot + 3, "walls": [spot - 5, spot + 5]}}})
     monkeypatch.setattr(compute, "_rescue_regime", lambda: None)
@@ -467,7 +467,7 @@ def test_compute_rescue_adhoc_single_missing_strike(monkeypatch):
 def test_compute_rescue_adhoc_single_never_raises(monkeypatch):
     monkeypatch.setattr(compute, "_make_leg_pricer",
                         lambda symbol: (lambda *a, **k: None))
-    monkeypatch.setattr(compute, "gamma_snapshot", lambda symbol: None)
+    monkeypatch.setattr(compute, "_light_gex_context", lambda symbol: None)
     monkeypatch.setattr(compute, "_rescue_regime", lambda: None)
     result = compute.compute_rescue_adhoc(_single_spec())
     assert isinstance(result, dict)
@@ -532,7 +532,7 @@ def test_compute_rescue_adhoc_debit_missing_long_strike(monkeypatch):
 def test_compute_rescue_adhoc_debit_never_raises(monkeypatch):
     monkeypatch.setattr(compute, "_make_leg_pricer",
                         lambda symbol: (lambda *a, **k: None))
-    monkeypatch.setattr(compute, "gamma_snapshot", lambda symbol: None)
+    monkeypatch.setattr(compute, "_light_gex_context", lambda symbol: None)
     monkeypatch.setattr(compute, "_rescue_regime", lambda: None)
     result = compute.compute_rescue_adhoc(_debit_spec())
     assert isinstance(result, dict)
@@ -594,7 +594,7 @@ def test_compute_rescue_adhoc_range_cv_is_positive_long_structure(monkeypatch):
     def _pricer(sym, exp, right, strike):
         return {95.0: 13.0, 100.0: 6.0, 105.0: 2.0, 110.0: 0.5}.get(float(strike))
     monkeypatch.setattr(compute, "_make_leg_pricer", lambda symbol: _pricer)
-    monkeypatch.setattr(compute, "gamma_snapshot",
+    monkeypatch.setattr(compute, "_light_gex_context",
                         lambda symbol: {"spot": 102.0, "views": {}})
     monkeypatch.setattr(compute, "_rescue_regime", lambda: None)
     result = compute.compute_rescue_adhoc(_condor_spec(quantity=1))
@@ -629,7 +629,7 @@ def test_compute_rescue_adhoc_range_missing_legs(monkeypatch):
 def test_compute_rescue_adhoc_range_never_raises(monkeypatch):
     monkeypatch.setattr(compute, "_make_leg_pricer",
                         lambda symbol: (lambda *a, **k: None))
-    monkeypatch.setattr(compute, "gamma_snapshot", lambda symbol: None)
+    monkeypatch.setattr(compute, "_light_gex_context", lambda symbol: None)
     monkeypatch.setattr(compute, "_rescue_regime", lambda: None)
     result = compute.compute_rescue_adhoc(_fly_spec())
     assert isinstance(result, dict)
@@ -673,7 +673,7 @@ def test_assess_open_positions_no_chain_fetch(monkeypatch):
     called = {"chain": False, "gamma": False}
     monkeypatch.setattr(compute, "_fetch_chain_for_expiry",
                         lambda *a, **k: called.__setitem__("chain", True))
-    monkeypatch.setattr(compute, "gamma_snapshot",
+    monkeypatch.setattr(compute, "_light_gex_context",
                         lambda *a, **k: called.__setitem__("gamma", True))
     monkeypatch.setattr(compute, "_load_open_positions", lambda: [_pos()])
     compute.assess_open_positions()

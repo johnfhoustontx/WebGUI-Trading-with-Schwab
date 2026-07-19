@@ -12,9 +12,9 @@ Tailwind text classes.
 """
 import app_settings
 import bus_client
-from nicegui import ui
+from nicegui import run, ui
 
-from pages.ui_guard import guard
+from pages.ui_guard import guard, guard_async
 
 # The ONE ui.add_css escape hatch for this component: a keyframe marquee animation
 # (not expressible as a Tailwind utility) + the three finite scroll-speed buckets
@@ -215,15 +215,18 @@ def render_ticker(active):
         # scrolling smoothly through the common no-visible-change RTH tick.
         return (narrative, tuple((i["text"], i["tone"]) for i in items))
 
-    @guard
-    def _poll():
+    @guard_async
+    async def _poll():
         # First gate (cheap): skip everything unless a watched version advanced.
-        vers = bus_client.read_versions(VIEWS)
+        # The :ver batch + the 3 payload reads are Redis round-trips → run them OFF
+        # the event loop (this timer fires on EVERY page). Only the paint (UI) runs
+        # back on the loop after the awaits.
+        vers = await run.io_bound(bus_client.read_versions, VIEWS)
         if vers == state["versions"]:
             return
         state["versions"] = vers
         # Second gate: only clear+rebuild when the displayed content actually changed.
-        narrative, items = _read()
+        narrative, items = await run.io_bound(_read)
         sig = _signature(narrative, items)
         if sig != state["sig"]:
             state["sig"] = sig

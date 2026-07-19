@@ -653,10 +653,15 @@ _TABLE_CSS = """
 """
 
 
-def _acknowledge(active: str) -> None:
-    """Clear the badge for the page being viewed."""
+def _acknowledge(active: str, scan=None) -> None:
+    """Clear the badge for the page being viewed.
+
+    ``scan`` — the ``options:scan`` payload, when the caller (``_layout``) already
+    read it this navigation, so the (large) scan payload isn't deserialized 2-3×
+    per page build (the ack + the badge recompute would each re-read it)."""
     if active == "/":                                   # Scanner
-        scan = bus_client.read("options:scan") or {}
+        if scan is None:
+            scan = bus_client.read("options:scan") or {}
         _ALERT_STATE["acked_scan"] = alerts.scanner_keys(scan)
     elif active == "/options/captured":
         _ALERT_STATE["captured_seen"] = bus_client.read_version("options:captured")
@@ -664,7 +669,7 @@ def _acknowledge(active: str) -> None:
         # Acknowledge the current rescue-summary version so the badge clears on
         # open and only re-appears when the manage cycle publishes a new summary.
         _ALERT_STATE["rescue_seen"] = bus_client.read_version("options:rescue_summary")
-    _recompute_badges()
+    _recompute_badges(scan)
 
 
 def _recompute_badges(scan=None) -> None:
@@ -897,7 +902,11 @@ def _layout(active: str, title: str):
     """
     _badge_refs.clear()
     _group_badge_refs.clear()
-    _recompute_badges()
+    # Read the (potentially large) options:scan payload ONCE per navigation and
+    # share it with both the initial badge recompute here and the _acknowledge
+    # below — each used to re-read it (2-3 deserializes of the day's scan per page).
+    _scan = bus_client.read("options:scan") or {}
+    _recompute_badges(_scan)
     ui.add_css(_NAV_CSS)
     ui.add_css(_TABLE_CSS)   # app-wide fixed (sticky) table headers
     # config/theme.toml [typography] + [menu] — app-wide text categories and menu
@@ -1001,7 +1010,8 @@ def _layout(active: str, title: str):
 
     # Acknowledge the badge for the page being opened, then run the app-wide
     # alert/badge watcher on every page so the chime fires regardless of route.
-    _acknowledge(active)
+    # Reuse the scan payload already read above (no second deserialize).
+    _acknowledge(active, scan=_scan)
 
     @guard_async
     async def _tick():

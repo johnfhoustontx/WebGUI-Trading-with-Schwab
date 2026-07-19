@@ -35,7 +35,7 @@ def _stale_command(cmd_type, args, seconds):
 def _stub_analytics(monkeypatch, payload=None):
     """Keep refresh_driver_paper's analytics call OFF the real driver DB in unit tests."""
     monkeypatch.setattr(handlers.compute, "driver_analytics",
-                        lambda: payload if payload is not None
+                        lambda **k: payload if payload is not None
                         else {"equity_curve": [], "postmortem": {}, "excursions": {}})
 
 
@@ -43,11 +43,11 @@ def test_refresh_driver_paper_publishes_both_views(monkeypatch):
     bus = Bus(fake=True)
     monkeypatch.setattr(
         handlers.compute, "driver_account_view",
-        lambda: {"snapshot": {"session_pnl": 12.0}, "positions": [],
-                 "has_account": True})
+        lambda **k: {"snapshot": {"session_pnl": 12.0}, "positions": [],
+                     "has_account": True})
     monkeypatch.setattr(
         handlers.compute, "driver_account_perf",
-        lambda: {"total_trades": 0, "win_rate": 0.0})
+        lambda **k: {"total_trades": 0, "win_rate": 0.0})
     _stub_analytics(monkeypatch)
 
     handlers.refresh_driver_paper(bus)
@@ -60,13 +60,44 @@ def test_refresh_driver_paper_publishes_both_views(monkeypatch):
     assert perf.payload["total_trades"] == 0
 
 
+def test_refresh_driver_paper_shares_one_positions_read(monkeypatch):
+    """The account view / perf / analytics all read the SAME driver book — the
+    5-min refresh reads it ONCE (compute.driver_shared_reads) and passes the
+    positions/snapshot to all three, instead of each re-fetching."""
+    bus = Bus(fake=True)
+    reads = {"n": 0}
+    shared_positions = [{"id": 1, "status": "CLOSED"}]
+    shared_snapshot = {"session_pnl": 5.0}
+
+    def _shared():
+        reads["n"] += 1
+        return shared_positions, shared_snapshot
+
+    got = {}
+    monkeypatch.setattr(handlers.compute, "driver_shared_reads", _shared)
+    monkeypatch.setattr(handlers.compute, "driver_account_view",
+                        lambda all_positions=None, snapshot=None:
+                        got.update(view=(all_positions, snapshot)) or {"has_account": True})
+    monkeypatch.setattr(handlers.compute, "driver_account_perf",
+                        lambda positions=None, snapshot=None:
+                        got.update(perf=(positions, snapshot)) or {"total_trades": 0})
+    monkeypatch.setattr(handlers.compute, "driver_analytics",
+                        lambda positions=None:
+                        got.update(analytics=positions) or {"equity_curve": []})
+    handlers.refresh_driver_paper(bus)
+    assert reads["n"] == 1                                  # ONE positions/snapshot read
+    assert got["view"] == (shared_positions, shared_snapshot)
+    assert got["perf"] == (shared_positions, shared_snapshot)
+    assert got["analytics"] is shared_positions
+
+
 def test_refresh_driver_paper_publishes_analytics_view(monkeypatch):
     """The analytics view (equity curve / posture post-mortem / MAE-MFE) is published
     alongside the account + perf views."""
     bus = Bus(fake=True)
     monkeypatch.setattr(handlers.compute, "driver_account_view",
-                        lambda: {"snapshot": {}, "positions": [], "has_account": True})
-    monkeypatch.setattr(handlers.compute, "driver_account_perf", lambda: {"total_trades": 0})
+                        lambda **k: {"snapshot": {}, "positions": [], "has_account": True})
+    monkeypatch.setattr(handlers.compute, "driver_account_perf", lambda **k: {"total_trades": 0})
     _stub_analytics(monkeypatch, {"equity_curve": [{"date": "d", "equity": 25100.0}],
                                   "postmortem": {"by_stance": {}}, "excursions": {"n": 0}})
     handlers.refresh_driver_paper(bus)
@@ -78,9 +109,9 @@ def test_refresh_driver_paper_publishes_events(monkeypatch):
     """Both views fire their change events with the cache_set version."""
     bus = Bus(fake=True)
     monkeypatch.setattr(handlers.compute, "driver_account_view",
-                        lambda: {"snapshot": {}, "positions": [], "has_account": True})
+                        lambda **k: {"snapshot": {}, "positions": [], "has_account": True})
     monkeypatch.setattr(handlers.compute, "driver_account_perf",
-                        lambda: {"total_trades": 0})
+                        lambda *a, **k: {"total_trades": 0})
     _stub_analytics(monkeypatch)
 
     sub_a = bus.subscribe("events:options:driver_paper_account")
@@ -105,10 +136,10 @@ def test_refresh_driver_paper_no_rescue_overlay(monkeypatch):
     bus = Bus(fake=True)
     monkeypatch.setattr(
         handlers.compute, "driver_account_view",
-        lambda: {"snapshot": {"session_pnl": 0.0},
+        lambda *a, **k: {"snapshot": {"session_pnl": 0.0},
                  "positions": [{"position_id": 7, "symbol": "MU"}],
                  "has_account": True})
-    monkeypatch.setattr(handlers.compute, "driver_account_perf", lambda: {})
+    monkeypatch.setattr(handlers.compute, "driver_account_perf", lambda *a, **k: {})
     _stub_analytics(monkeypatch)
 
     def _boom():
@@ -130,10 +161,10 @@ def test_run_driver_manage_and_refresh(monkeypatch):
     monkeypatch.setattr(handlers.compute, "run_driver_manage_cycle",
                         lambda: calls.append("manage"))
     monkeypatch.setattr(handlers.compute, "driver_account_view",
-                        lambda: {"snapshot": {"session_pnl": 5.0}, "positions": [],
+                        lambda *a, **k: {"snapshot": {"session_pnl": 5.0}, "positions": [],
                                  "has_account": True})
     monkeypatch.setattr(handlers.compute, "driver_account_perf",
-                        lambda: {"total_trades": 1})
+                        lambda *a, **k: {"total_trades": 1})
     _stub_analytics(monkeypatch)
 
     handlers.run_driver_manage_and_refresh(bus)
@@ -153,8 +184,8 @@ def test_driver_paper_create_opens_and_publishes(monkeypatch):
         lambda signal, qty, **k: opened.update(signal=signal, qty=qty)
         or {"status": "opened"})
     monkeypatch.setattr(handlers.compute, "driver_account_view",
-                        lambda: {"snapshot": {}, "positions": [], "has_account": True})
-    monkeypatch.setattr(handlers.compute, "driver_account_perf", lambda: {})
+                        lambda **k: {"snapshot": {}, "positions": [], "has_account": True})
+    monkeypatch.setattr(handlers.compute, "driver_account_perf", lambda *a, **k: {})
 
     handlers.handle_command(
         bus, Command(type="driver_paper_create",
@@ -173,8 +204,8 @@ def test_driver_paper_create_default_qty(monkeypatch):
         handlers.compute, "open_driver_position",
         lambda signal, qty, **k: opened.update(qty=qty) or {"status": "opened"})
     monkeypatch.setattr(handlers.compute, "driver_account_view",
-                        lambda: {"snapshot": {}, "positions": [], "has_account": True})
-    monkeypatch.setattr(handlers.compute, "driver_account_perf", lambda: {})
+                        lambda **k: {"snapshot": {}, "positions": [], "has_account": True})
+    monkeypatch.setattr(handlers.compute, "driver_account_perf", lambda *a, **k: {})
 
     handlers.handle_command(
         bus, Command(type="driver_paper_create", args={"signal": {"symbol": "MU"}}))
@@ -188,8 +219,8 @@ def test_driver_paper_manage_command(monkeypatch):
     monkeypatch.setattr(handlers.compute, "run_driver_manage_cycle",
                         lambda: calls.append("manage"))
     monkeypatch.setattr(handlers.compute, "driver_account_view",
-                        lambda: {"snapshot": {}, "positions": [], "has_account": True})
-    monkeypatch.setattr(handlers.compute, "driver_account_perf", lambda: {})
+                        lambda **k: {"snapshot": {}, "positions": [], "has_account": True})
+    monkeypatch.setattr(handlers.compute, "driver_account_perf", lambda *a, **k: {})
 
     handlers.handle_command(bus, Command(type="driver_paper_manage"))
 
@@ -203,8 +234,8 @@ def test_driver_paper_reset_command(monkeypatch):
     monkeypatch.setattr(handlers.compute, "ensure_driver_account",
                         lambda bal=25000.0: ensured.update(bal=bal))
     monkeypatch.setattr(handlers.compute, "driver_account_view",
-                        lambda: {"snapshot": {}, "positions": [], "has_account": True})
-    monkeypatch.setattr(handlers.compute, "driver_account_perf", lambda: {})
+                        lambda **k: {"snapshot": {}, "positions": [], "has_account": True})
+    monkeypatch.setattr(handlers.compute, "driver_account_perf", lambda *a, **k: {})
 
     handlers.handle_command(
         bus, Command(type="driver_paper_reset", args={"starting_balance": 30000.0}))
@@ -241,8 +272,8 @@ def test_r1_rejected_open_is_logged_and_surfaced(monkeypatch, caplog):
         handlers.compute, "open_driver_position",
         lambda signal, qty, **k: {"status": "rejected", "reason": "LOW_CREDIT"})
     monkeypatch.setattr(handlers.compute, "driver_account_view",
-                        lambda: {"snapshot": {}, "positions": [], "has_account": True})
-    monkeypatch.setattr(handlers.compute, "driver_account_perf", lambda: {})
+                        lambda **k: {"snapshot": {}, "positions": [], "has_account": True})
+    monkeypatch.setattr(handlers.compute, "driver_account_perf", lambda *a, **k: {})
 
     with caplog.at_level("WARNING"):
         handlers.handle_command(
@@ -267,8 +298,8 @@ def test_r1_error_open_is_logged_and_surfaced(monkeypatch, caplog):
         handlers.compute, "open_driver_position",
         lambda signal, qty, **k: {"status": "error", "error": "KeyError: 'width'"})
     monkeypatch.setattr(handlers.compute, "driver_account_view",
-                        lambda: {"snapshot": {}, "positions": [], "has_account": True})
-    monkeypatch.setattr(handlers.compute, "driver_account_perf", lambda: {})
+                        lambda **k: {"snapshot": {}, "positions": [], "has_account": True})
+    monkeypatch.setattr(handlers.compute, "driver_account_perf", lambda *a, **k: {})
 
     with caplog.at_level("WARNING"):
         handlers.handle_command(
@@ -290,8 +321,8 @@ def test_r1_opened_records_normally(monkeypatch):
         lambda signal, qty, **k: {"status": "opened", "symbol": "SPY",
                                   "qty": 1, "entry_credit": 0.42})
     monkeypatch.setattr(handlers.compute, "driver_account_view",
-                        lambda: {"snapshot": {}, "positions": [], "has_account": True})
-    monkeypatch.setattr(handlers.compute, "driver_account_perf", lambda: {})
+                        lambda **k: {"snapshot": {}, "positions": [], "has_account": True})
+    monkeypatch.setattr(handlers.compute, "driver_account_perf", lambda *a, **k: {})
 
     handlers.handle_command(
         bus, Command(type="driver_paper_create",
@@ -313,8 +344,8 @@ def test_r5_stale_driver_open_is_rejected(monkeypatch, caplog):
     monkeypatch.setattr(handlers.compute, "open_driver_position",
                         lambda signal, qty, **k: called.append(1) or {"status": "opened"})
     monkeypatch.setattr(handlers.compute, "driver_account_view",
-                        lambda: {"snapshot": {}, "positions": [], "has_account": True})
-    monkeypatch.setattr(handlers.compute, "driver_account_perf", lambda: {})
+                        lambda **k: {"snapshot": {}, "positions": [], "has_account": True})
+    monkeypatch.setattr(handlers.compute, "driver_account_perf", lambda *a, **k: {})
 
     cmd = _stale_command("driver_paper_create", {"signal": {"symbol": "MU"}, "qty": 1},
                          seconds=handlers.STALE_OPEN_MAX_AGE_SEC + 60)
@@ -336,8 +367,8 @@ def test_r5_fresh_driver_open_proceeds(monkeypatch):
     monkeypatch.setattr(handlers.compute, "open_driver_position",
                         lambda signal, qty, **k: called.append(1) or {"status": "opened"})
     monkeypatch.setattr(handlers.compute, "driver_account_view",
-                        lambda: {"snapshot": {}, "positions": [], "has_account": True})
-    monkeypatch.setattr(handlers.compute, "driver_account_perf", lambda: {})
+                        lambda **k: {"snapshot": {}, "positions": [], "has_account": True})
+    monkeypatch.setattr(handlers.compute, "driver_account_perf", lambda *a, **k: {})
 
     cmd = _stale_command("driver_paper_create", {"signal": {"symbol": "MU"}, "qty": 1},
                          seconds=5)  # 5s old → fresh
@@ -355,8 +386,8 @@ def test_r5_missing_ts_treated_as_fresh(monkeypatch):
     monkeypatch.setattr(handlers.compute, "open_driver_position",
                         lambda signal, qty, **k: called.append(1) or {"status": "opened"})
     monkeypatch.setattr(handlers.compute, "driver_account_view",
-                        lambda: {"snapshot": {}, "positions": [], "has_account": True})
-    monkeypatch.setattr(handlers.compute, "driver_account_perf", lambda: {})
+                        lambda **k: {"snapshot": {}, "positions": [], "has_account": True})
+    monkeypatch.setattr(handlers.compute, "driver_account_perf", lambda *a, **k: {})
 
     cmd = Command(type="driver_paper_create", args={"signal": {"symbol": "MU"}}, ts=None)
     handlers.handle_command(bus, cmd)

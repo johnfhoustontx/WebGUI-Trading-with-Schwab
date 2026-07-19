@@ -30,9 +30,9 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import bus_client
-from nicegui import ui
+from nicegui import run, ui
 
-from pages.ui_guard import guard
+from pages.ui_guard import guard, guard_async
 from pages.options.theme import BTN, BTN_DANGER, BTN_PRIMARY
 
 # Decision-log / cycle timestamps are stored in UTC; show the user's Central time.
@@ -952,33 +952,42 @@ def render():
     perf_btn.on_click(_refresh_perf)
 
     # ── version-poll repaint (fetch-free) ─────────────────────────────────────
-    @guard
-    def _poll():
+    _POLL_VIEWS = ["driver:autonomous", "driver:control",
+                   "options:driver_paper_account", "options:driver_paper_perf",
+                   "options:driver_paper_analytics"]
+
+    def _read_monitor_payloads():
+        return (bus_client.read("driver:autonomous") or None,
+                bus_client.read("driver:control") or None,
+                bus_client.read("options:driver_paper_account") or None,
+                bus_client.read("options:driver_paper_perf") or None)
+
+    @guard_async
+    async def _poll():
         # Monitor: repaint when the autonomous view, the control key, the live DRIVER
-        # paper account, OR the driver performance scorecard advances. The driver
-        # paper account drives the live P&L + positions (it updates even with the
-        # autonomous loop disabled, as the options service reprices the driver book);
-        # the perf view (cache:options:driver_paper_perf) drives the scorecard card.
-        avv = bus_client.read_version("driver:autonomous")
-        cvv = bus_client.read_version("driver:control")
-        ppv = bus_client.read_version("options:driver_paper_account")
-        dpv = bus_client.read_version("options:driver_paper_perf")
-        dav = bus_client.read_version("options:driver_paper_analytics")
+        # paper account, OR the driver performance scorecard advances. Batch the 5
+        # version probes into ONE pipelined read_versions (was 5 round-trips/tick)
+        # and read the changed payloads OFF the event loop.
+        vers = await run.io_bound(bus_client.read_versions, _POLL_VIEWS)
+        avv = vers.get("driver:autonomous")
+        cvv = vers.get("driver:control")
+        ppv = vers.get("options:driver_paper_account")
+        dpv = vers.get("options:driver_paper_perf")
+        dav = vers.get("options:driver_paper_analytics")
         if (avv != state["auto_ver"] or cvv != state["ctrl_ver"]
                 or ppv != state["paper_ver"] or dpv != state["dperf_ver"]):
             state["auto_ver"] = avv
             state["ctrl_ver"] = cvv
             state["paper_ver"] = ppv
             state["dperf_ver"] = dpv
-            state["auto"] = bus_client.read("driver:autonomous") or None
-            state["ctrl"] = bus_client.read("driver:control") or None
-            state["paper"] = bus_client.read("options:driver_paper_account") or None
-            state["dperf"] = bus_client.read("options:driver_paper_perf") or None
+            (state["auto"], state["ctrl"], state["paper"],
+             state["dperf"]) = await run.io_bound(_read_monitor_payloads)
             _render_monitor()
             _render_perf()          # the closed-trade table lives in the driver account
         if dav != state["analytics_ver"]:
             state["analytics_ver"] = dav
-            state["analytics"] = bus_client.read("options:driver_paper_analytics") or None
+            state["analytics"] = await run.io_bound(
+                bus_client.read, "options:driver_paper_analytics") or None
             _render_analytics()
         # Optimistic-toggle timeout: if the control state never catches up to the
         # user's pending toggle (command never consumed — e.g. driver_svc down),
@@ -994,15 +1003,15 @@ def render():
                 _render_monitor()
 
     # Initial paint (graceful-empty when the service is cold / nothing cached).
-    state["auto_ver"] = bus_client.read_version("driver:autonomous")
-    state["auto"] = bus_client.read("driver:autonomous") or None
-    state["ctrl_ver"] = bus_client.read_version("driver:control")
-    state["ctrl"] = bus_client.read("driver:control") or None
-    state["paper_ver"] = bus_client.read_version("options:driver_paper_account")
-    state["paper"] = bus_client.read("options:driver_paper_account") or None
-    state["dperf_ver"] = bus_client.read_version("options:driver_paper_perf")
-    state["dperf"] = bus_client.read("options:driver_paper_perf") or None
-    state["analytics_ver"] = bus_client.read_version("options:driver_paper_analytics")
+    # One pipelined version probe, mirroring the poll.
+    _seed_vers = bus_client.read_versions(_POLL_VIEWS)
+    state["auto_ver"] = _seed_vers.get("driver:autonomous")
+    state["ctrl_ver"] = _seed_vers.get("driver:control")
+    state["paper_ver"] = _seed_vers.get("options:driver_paper_account")
+    state["dperf_ver"] = _seed_vers.get("options:driver_paper_perf")
+    state["analytics_ver"] = _seed_vers.get("options:driver_paper_analytics")
+    (state["auto"], state["ctrl"], state["paper"],
+     state["dperf"]) = _read_monitor_payloads()
     state["analytics"] = bus_client.read("options:driver_paper_analytics") or None
     _render_monitor()
     _render_perf()

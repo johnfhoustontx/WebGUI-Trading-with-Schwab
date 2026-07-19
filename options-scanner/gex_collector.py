@@ -171,7 +171,8 @@ def _maybe_lock(lock):
     return lock if lock is not None else contextlib.nullcontext()
 
 
-def poll_once(client, engine, conn, lock=None, symbols=None, on_chain=None) -> None:
+def poll_once(client, engine, conn, lock=None, symbols=None, on_chain=None,
+              poll_term=None) -> None:
     """Fetch + store one snapshot per symbol. Per-symbol exceptions are logged,
     not propagated, so one bad symbol doesn't kill the whole poll.
 
@@ -292,11 +293,17 @@ def poll_once(client, engine, conn, lock=None, symbols=None, on_chain=None) -> N
         except Exception as e:
             log.error("Poll failed for %s: %s", symbol, e)
     # Term-structure snapshot for SPXW (additive; per-symbol failures isolated).
-    poll_term_once(
-        client, engine, conn,
-        ts_iso=datetime.fromtimestamp(ts_boundary, TZ).isoformat(),
-        lock=lock,
-    )
+    # The term chain is the widest SPX fetch in the system (Schwab has 502'd on
+    # it) and the display shows only 5 expirations — poll it every TERM cadence,
+    # not every 1-min slot. ``poll_term=None`` derives the gate from the snapped
+    # minute; an explicit bool forces it (tests / manual runs).
+    do_term = (snapped_min % TERM_POLL_INTERVAL_MIN == 0) if poll_term is None else poll_term
+    if do_term:
+        poll_term_once(
+            client, engine, conn,
+            ts_iso=datetime.fromtimestamp(ts_boundary, TZ).isoformat(),
+            lock=lock,
+        )
     conn.commit()
 
 
@@ -305,6 +312,9 @@ def poll_once(client, engine, conn, lock=None, symbols=None, on_chain=None) -> N
 # monthly third-Friday and weekly. We filter to the next 5 client-side.
 TERM_SYMBOL = "$SPX"
 TERM_TOP_N = 5
+# Term structure updates slowly (5-expiration display); poll it every 5 min, not
+# every 1-min slot — saves ~4/5 of the heaviest chain fetch + term-table writes.
+TERM_POLL_INTERVAL_MIN = 5
 # Cap how far out we ask for. Schwab 502s with "protocol.http.TooBigBody"
 # on wider SPX windows — 30 days returns too much data to serialize.
 # SPX has Mon/Wed/Fri weekly expirations + Fri monthly, so a 10-day

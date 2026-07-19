@@ -1001,6 +1001,29 @@ def test_reprice_captured_merges_marks_and_flags(monkeypatch):
     assert out["flags"] == [{"symbol": "QQQ", "code": "MONEY_STOP"}]
 
 
+def test_reprice_captured_clears_chain_cache_first(monkeypatch):
+    """reprice_captured must clear the repricer's per-(symbol,expiration) chain
+    cache before repricing — otherwise captured-signal marks (and the 3x/day
+    action-alert reprice that reuses this path) are priced off whichever chains
+    the last clearing caller fetched (up to ~5 min stale during RTH)."""
+    import sys as _sys
+    import types as _types
+
+    order = []
+    sigs = [{"signal_id": "X1", "symbol": "SPY", "recommendation": "HOLD"}]
+    monkeypatch.setitem(_sys.modules, "signal_db",
+                        _types.SimpleNamespace(get_open_signals_with_latest_mark=lambda: sigs))
+    monkeypatch.setitem(_sys.modules, "signal_repricer", _types.SimpleNamespace(
+        clear_chain_cache=lambda: order.append("clear"),
+        reprice_swing=lambda r, c: order.append("reprice") or {"rep": 1}))
+    monkeypatch.setitem(_sys.modules, "signal_recommender", _types.SimpleNamespace(
+        build_mark=lambda r, rep, now: {"unrealized_pnl": 0.0, "recommendation": "HOLD",
+                                        "recommendation_code": "HOLD"}))
+    compute.reprice_captured()
+    assert order and order[0] == "clear"      # cleared BEFORE the first reprice
+    assert "reprice" in order
+
+
 def test_reprice_captured_skips_failed_signal(monkeypatch):
     """A per-signal reprice failure is skipped (continue), not fatal."""
     import sys as _sys
@@ -1246,6 +1269,35 @@ def _patch_gamma(monkeypatch, *, chain=None, walls=None, history=None):
     import datetime as _dtm
     from services.options_svc import scheduler as _sched
     monkeypatch.setattr(_sched, "active_session_date", lambda now=None: _dtm.date(2026, 6, 18))
+
+
+def test_light_gex_context_is_gex_only(monkeypatch):
+    """Rescue advisories need only flip/walls/spot — _light_gex_context computes
+    a GEX-only context (single chain fetch + calc_all) WITHOUT the full
+    gamma_snapshot's projection band / term grid / flow series / history decode.
+    It's shaped like a snapshot so _gex_from_snapshot consumes it unchanged."""
+    _patch_gamma(monkeypatch, chain={"underlyingPrice": 5400.0},
+                 history=[(1, 5400.0, 3, 4, 5, 6, {5400.0: {"net": 1}})])
+    # If the heavy projection machinery runs, fail loudly.
+    monkeypatch.setattr(compute, "project_gex_grid",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            AssertionError("light context must not build projection")))
+    ctx = compute._light_gex_context("$SPX")
+    assert ctx["spot"] == 5400.0
+    assert "GEX" in ctx["views"] and "term" not in ctx
+    gex = compute._gex_from_snapshot(ctx)
+    assert gex is not None and gex["flip"] == 5399.5
+
+
+def test_rescue_advisories_use_light_gex_context():
+    """The four rescue-advisory builders must use the light GEX context, not the
+    full gamma_snapshot (which discards ~95% of its work here)."""
+    import inspect
+    for fn in (compute._advisory_from_position, compute._advisory_from_single,
+               compute._advisory_from_debit, compute._advisory_from_range):
+        src = inspect.getsource(fn)
+        assert "_light_gex_context(symbol)" in src
+        assert "gamma_snapshot(symbol)" not in src
 
 
 def test_gamma_snapshot_builds_views_and_term(monkeypatch):
@@ -2532,8 +2584,10 @@ def _fake_gex_modules(monkeypatch, *, lock_ok=True):
     monkeypatch.setitem(_sys.modules, "gex_collector", fake_gc)
     monkeypatch.setitem(_sys.modules, "gex_history_db", fake_gh)
     monkeypatch.setitem(_sys.modules, "gamma_tool", fake_gt)
-    # Reset the once-per-day purge latch so each test starts fresh.
+    # Reset the once-per-day purge latch + the once-per-process schema latch so
+    # each test starts fresh (module-level state otherwise leaks across tests).
     monkeypatch.setattr(compute, "_LAST_PURGE_DATE", None)
+    monkeypatch.setattr(compute, "_GEX_SCHEMA_READY", False)
     return calls
 
 
@@ -2546,6 +2600,21 @@ def test_collect_gex_snapshots_polls_with_proxy_client(monkeypatch):
     assert calls["closed"] is True                       # write conn always closed
     assert calls["touched"] is True                      # lock heartbeat refreshed
     assert n == 3                                         # len(collection_symbols())
+
+
+def test_collect_gex_snapshots_inits_schema_once_per_process(monkeypatch):
+    """init_schema is a per-DB-file property, not per-connection — running its
+    executescript + PRAGMA + commit on every 1-min collect is a needless
+    write-lock touch. It runs once per process (latched)."""
+    calls = _fake_gex_modules(monkeypatch, lock_ok=True)
+    inits = {"n": 0}
+    import sys as _sys
+    _sys.modules["gex_history_db"].init_schema = \
+        lambda conn: inits.__setitem__("n", inits["n"] + 1)
+    monkeypatch.setattr(compute, "_GEX_SCHEMA_READY", False)
+    compute.collect_gex_snapshots()
+    compute.collect_gex_snapshots()
+    assert inits["n"] == 1
 
 
 def test_collect_gex_snapshots_defers_when_lock_held(monkeypatch):

@@ -413,17 +413,41 @@ def has_driver_account() -> bool:
         return False
 
 
-def driver_account_view() -> dict:
-    """Driver account snapshot + open positions (mirrors ``paper_account_view`` on
-    the DRIVER db). No rescue overlay (that reads the manual account). Each
-    sub-read is defensively guarded so a partial failure still returns a view."""
+def driver_shared_reads():
+    """One read of the driver book's FULL positions + account snapshot, shared by
+    ``driver_account_view`` / ``driver_account_perf`` / ``driver_analytics`` so the
+    5-min refresh reads the (tiny) DB ONCE instead of three times. Defensive →
+    ``([], None)`` on failure."""
     import paper_account_db
     import paper_engine
 
     try:
+        positions = paper_account_db.fetch_all_positions(DRIVER_PAPER_DB)
+    except Exception:
+        positions = []
+    try:
         snapshot = paper_engine.account_snapshot(DRIVER_PAPER_DB)
     except Exception:
         snapshot = None
+    return positions, snapshot
+
+
+def driver_account_view(all_positions=None, snapshot=None) -> dict:
+    """Driver account snapshot + open positions (mirrors ``paper_account_view`` on
+    the DRIVER db). No rescue overlay (that reads the manual account). Each
+    sub-read is defensively guarded so a partial failure still returns a view.
+
+    ``all_positions``/``snapshot`` — pass the shared driver_shared_reads() result
+    to avoid re-fetching them (the 5-min refresh injects both); when omitted they
+    are fetched here so standalone callers still work."""
+    import paper_account_db
+    import paper_engine
+
+    if snapshot is None:
+        try:
+            snapshot = paper_engine.account_snapshot(DRIVER_PAPER_DB)
+        except Exception:
+            snapshot = None
     try:
         positions = paper_account_db.fetch_open_positions(DRIVER_PAPER_DB)
     except Exception:
@@ -433,7 +457,9 @@ def driver_account_view() -> dict:
     except Exception:
         orders = []
     try:
-        closed_positions = [p for p in paper_account_db.fetch_all_positions(DRIVER_PAPER_DB)
+        if all_positions is None:
+            all_positions = paper_account_db.fetch_all_positions(DRIVER_PAPER_DB)
+        closed_positions = [p for p in all_positions
                             if (p.get("status") or "").upper() != "OPEN"]
     except Exception:
         closed_positions = []
@@ -441,45 +467,50 @@ def driver_account_view() -> dict:
             "closed_positions": closed_positions, "has_account": has_driver_account()}
 
 
-def driver_account_perf() -> dict:
+def driver_account_perf(positions=None, snapshot=None) -> dict:
     """Performance scorecard over the driver account (driver_perf.build_scorecard).
-    Defensive → an empty scorecard on any failure."""
+    Defensive → an empty scorecard on any failure. ``positions``/``snapshot`` may
+    be injected (see driver_shared_reads) to avoid a re-fetch."""
     import paper_account_db
     import paper_engine
 
     from services.options_svc import driver_perf
 
-    try:
-        positions = paper_account_db.fetch_all_positions(DRIVER_PAPER_DB)
-    except Exception:
-        positions = []
-    try:
-        snapshot = paper_engine.account_snapshot(DRIVER_PAPER_DB)
-    except Exception:
-        snapshot = {}
-    return driver_perf.build_scorecard(positions, snapshot)
+    if positions is None:
+        try:
+            positions = paper_account_db.fetch_all_positions(DRIVER_PAPER_DB)
+        except Exception:
+            positions = []
+    if snapshot is None:
+        try:
+            snapshot = paper_engine.account_snapshot(DRIVER_PAPER_DB)
+        except Exception:
+            snapshot = {}
+    return driver_perf.build_scorecard(positions, snapshot or {})
 
 
-def _book_analytics(db_path, *, starting_balance=25000.0) -> dict:
+def _book_analytics(db_path, *, starting_balance=25000.0, positions=None) -> dict:
     """Performance analytics over ANY paper book — equity curve + posture post-mortem +
     MAE/MFE excursions (``perf_analytics.build_analytics``). Reads the book's full position
     history. The equity baseline is the fixed account seed ($25k — both books are seeded
     there); the curve is realized equity from that base. Defensive → an empty-shaped
-    payload on any failure."""
+    payload on any failure. ``positions`` may be injected to avoid a re-fetch."""
     import paper_account_db
 
     from services.options_svc import perf_analytics
 
-    try:
-        positions = paper_account_db.fetch_all_positions(db_path)
-    except Exception:
-        positions = []
+    if positions is None:
+        try:
+            positions = paper_account_db.fetch_all_positions(db_path)
+        except Exception:
+            positions = []
     return perf_analytics.build_analytics(positions, starting_balance=starting_balance)
 
 
-def driver_analytics() -> dict:
-    """Performance analytics over the DRIVER account (see ``_book_analytics``)."""
-    return _book_analytics(DRIVER_PAPER_DB)
+def driver_analytics(positions=None) -> dict:
+    """Performance analytics over the DRIVER account (see ``_book_analytics``).
+    ``positions`` may be injected (see driver_shared_reads) to avoid a re-fetch."""
+    return _book_analytics(DRIVER_PAPER_DB, positions=positions)
 
 
 def manual_analytics() -> dict:
@@ -1085,6 +1116,14 @@ def reprice_captured() -> dict:
     import signal_db
     import signal_recommender
     import signal_repricer
+
+    # Fresh marks each run: clear the repricer's per-(symbol,expiration) chain
+    # cache so captured-signal marks (+ the 3x/day action-alert reprice that
+    # reuses this path) aren't priced off another caller's minutes-old chains.
+    try:
+        signal_repricer.clear_chain_cache()
+    except Exception:
+        log.exception("clear_chain_cache before reprice_captured degraded")
 
     try:
         sigs = signal_db.get_open_signals_with_latest_mark()
@@ -1692,6 +1731,7 @@ def gamma_snapshot(symbol: str, chain=None) -> dict | None:
 # scan/DELETE). ``_LAST_PURGE_DATE`` tracks the last date we ran it.
 GEX_KEEP_SESSIONS = 5
 _LAST_PURGE_DATE = None
+_GEX_SCHEMA_READY = False   # init_schema latch (once per process, not per 1-min tick)
 
 
 def _maybe_purge_gex(gh, conn) -> None:
@@ -1752,7 +1792,13 @@ def collect_gex_snapshots(capture_symbols=None) -> int:
 
     conn = gh.connect()
     try:
-        gh.init_schema(conn)
+        # init_schema is a per-DB-file property (idempotent CREATE/ALTER/DROP), so
+        # run it ONCE per process, not on every 1-min collect (a needless
+        # executescript + PRAGMA + write-lock + commit each tick).
+        global _GEX_SCHEMA_READY
+        if not _GEX_SCHEMA_READY:
+            gh.init_schema(conn)
+            _GEX_SCHEMA_READY = True
         # Once-per-day retention at collection start (keeps growth bounded).
         _maybe_purge_gex(gh, conn)
         gc.log.info("Polling GEX history (options_svc)")
@@ -3813,6 +3859,38 @@ def _rescue_regime():
         return None
 
 
+def _light_gex_context(symbol):
+    """A LIGHT gamma context for rescue detection — spot + GEX flip/walls ONLY.
+
+    A single chain fetch + ``calc_all_from_chain`` (GEX view), NOT the full
+    ``gamma_snapshot`` (which also builds the forward projection band, the term
+    grid, the flow series and decodes the whole session's history — all discarded
+    here, since rescue only reads flip/walls/spot via ``_gex_from_snapshot``).
+    Shaped exactly like a gamma_snapshot GEX view so ``_gex_from_snapshot`` + the
+    spot fallback consume it unchanged. Defensive → None."""
+    import gamma_tool as gt
+
+    try:
+        chain = _gamma_fetch_chain(symbol)
+        if not chain:
+            return None
+        eng = gt.GammaEngine()
+        res = eng.calc_all_from_chain(chain)
+        if not res:
+            return None
+        gex = res[0] or {}
+        spot = gex.get("spot")
+        try:
+            summary = eng.snapshot_summary(gex, "gex")
+        except Exception:
+            summary = {}
+        return {"spot": spot,
+                "views": {"GEX": {"flip": (summary or {}).get("flip"),
+                                  "walls": gamma_walls("GEX", gex, spot)}}}
+    except Exception:
+        return None
+
+
 def _gex_from_snapshot(snap):
     """Extract {flip, put_wall, call_wall} from a gamma_snapshot() GEX view.
 
@@ -3936,7 +4014,7 @@ def _advisory_from_position(pos, *, source: str, force_advisory: bool,
         # engine's PRIMARY trigger is underlying-vs-short-strike proximity, so a
         # missing underlying would silently degrade detection.
         try:
-            snap = gamma_snapshot(symbol)
+            snap = _light_gex_context(symbol)
         except Exception:
             snap = None
         if not underlying and isinstance(snap, dict) and (snap.get("spot") or 0) > 0:
@@ -4062,7 +4140,7 @@ def _advisory_from_single(pos, *, source: str = "adhoc",
 
         # 2. gamma context (defensive → None); its live spot supplies the underlying.
         try:
-            snap = gamma_snapshot(symbol)
+            snap = _light_gex_context(symbol)
         except Exception:
             snap = None
         underlying = None
@@ -4234,7 +4312,7 @@ def _advisory_from_debit(pos, *, source: str = "adhoc",
 
         # 2. gamma context (defensive → None); its live spot supplies the underlying.
         try:
-            snap = gamma_snapshot(symbol)
+            snap = _light_gex_context(symbol)
         except Exception:
             snap = None
         underlying = None
@@ -4401,7 +4479,7 @@ def _advisory_from_range(pos, *, source: str = "adhoc",
 
         # 2. gamma context (defensive → None); its live spot supplies the underlying.
         try:
-            snap = gamma_snapshot(symbol)
+            snap = _light_gex_context(symbol)
         except Exception:
             snap = None
         underlying = None

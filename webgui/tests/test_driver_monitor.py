@@ -429,9 +429,23 @@ def test_monitor_reads_driver_paper_account_not_manual():
 
     src = inspect.getsource(driver.render)
     assert 'read("options:driver_paper_account")' in src
-    assert 'read_version("options:driver_paper_account")' in src
+    assert '"options:driver_paper_account"' in src   # version-gated on that view
     # The monitor path must no longer read the manual account.
     assert 'options:paper_account"' not in src
+
+
+def test_poll_pipelines_versions_and_reads_off_loop():
+    """The 2s driver poll must batch its version probes into ONE pipelined
+    read_versions call (was 5 sequential read_version round-trips) and read the
+    changed payloads OFF the event loop."""
+    import inspect
+
+    src = inspect.getsource(driver.render)
+    assert "async def _poll" in src
+    assert "read_versions(" in src
+    assert "run.io_bound" in src
+    # No single-view read_version round-trips left in the poll body.
+    assert "read_version(" not in src
 
 
 def test_page_imports_no_engine_or_services():

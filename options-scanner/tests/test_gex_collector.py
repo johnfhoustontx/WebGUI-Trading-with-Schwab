@@ -147,6 +147,31 @@ def test_poll_once_continues_on_symbol_failure(tmp_path, monkeypatch, caplog):
     assert any("$SPX" in rec.message for rec in caplog.records)
 
 
+def test_poll_once_gates_term_to_5min_cadence(tmp_path, monkeypatch):
+    """The term-structure chain is the widest SPX fetch in the system; nothing
+    needs it at 1-min granularity (the display shows 5 expirations). poll_once
+    polls term only on 5-min-boundary minutes (or when forced)."""
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    from gamma_tool import GammaEngine
+    monkeypatch.setattr(GammaEngine, "snapshot_summary",
+                        staticmethod(lambda r, view="gex": {
+                            "spot": r["spot"], "flip": r["flip"],
+                            "top_pos_strike": r["top_pos_strike"],
+                            "top_neg_strike": r["top_neg_strike"],
+                            "net_total": r["net_total"]}))
+    calls = {"n": 0}
+    monkeypatch.setattr(gc, "poll_term_once",
+                        lambda *a, **k: calls.__setitem__("n", calls["n"] + 1))
+    client = _make_client({s: {"sym": s} for s in gc.SYMBOLS})
+    engine = _make_engine()
+    gc.poll_once(client, engine, conn, symbols=["SPY"], poll_term=False)
+    assert calls["n"] == 0                      # off-cadence minute -> no term poll
+    gc.poll_once(client, engine, conn, symbols=["SPY"], poll_term=True)
+    assert calls["n"] == 1                      # forced -> term polled
+
+
 def test_poll_once_fetches_chains_concurrently(tmp_path, monkeypatch):
     """The per-symbol chain fetches are I/O-bound and must OVERLAP — the serial
     loop consumed 15-35s of the 60s collection slot and (measured) dropped ~37%

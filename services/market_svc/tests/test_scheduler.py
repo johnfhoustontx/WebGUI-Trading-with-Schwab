@@ -17,8 +17,10 @@ def test_slow_cadence_off_hours():
 
 
 def test_slow_cadence_on_weekend():
+    # Saturday: the futures are CLOSED (they don't reopen until Sun 17:00 CT), so
+    # nothing ticks — throttle harder than the normal off-hours pace.
     now = dt.datetime(2026, 7, 11, 10, 0, tzinfo=_CT)  # Sat
-    assert sch.poll_interval(now) == sch.OFFHOURS_INTERVAL_SEC
+    assert sch.poll_interval(now) == sch.WEEKEND_INTERVAL_SEC
 
 
 def test_slow_cadence_on_holiday():
@@ -63,3 +65,28 @@ def test_loop_gates_summary_on_the_enabled_flag():
     assert "summary_enabled" in src
     seg = src.split("summary_due", 1)[0]
     assert "handlers.summary_enabled(bus)" in seg
+
+
+def test_loop_runs_summary_as_background_task():
+    """The Claude summary (30s timeout, up to ~60s) must NOT be awaited inline in
+    the 2s poll loop — it launches as a background task so the dashboard cadence
+    never stalls once per ~40-min slot."""
+    import inspect
+
+    src = inspect.getsource(sch.loop)
+    assert "create_task" in src
+    # The blocking generate_summary is NOT directly awaited in the loop body.
+    assert "await loop_.run_in_executor(None, compute.generate_summary" not in src
+
+
+def test_poll_interval_throttles_deep_weekend():
+    import datetime as dt
+    # Saturday: futures closed all day -> slow throttle.
+    sat = dt.datetime(2026, 7, 18, 10, 0, tzinfo=sch._CT)
+    assert sch.poll_interval(sat) == sch.WEEKEND_INTERVAL_SEC
+    # Sunday morning: still closed (futures reopen 17:00 CT Sunday).
+    sun_am = dt.datetime(2026, 7, 19, 10, 0, tzinfo=sch._CT)
+    assert sch.poll_interval(sun_am) == sch.WEEKEND_INTERVAL_SEC
+    # Sunday evening after the futures reopen: back to the normal off-hours pace.
+    sun_pm = dt.datetime(2026, 7, 19, 18, 0, tzinfo=sch._CT)
+    assert sch.poll_interval(sun_pm) == sch.OFFHOURS_INTERVAL_SEC

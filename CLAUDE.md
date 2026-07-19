@@ -8,7 +8,22 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-07-18 (**efficiency re-audit → all Critical + High fixes**: a
+**Last updated:** 2026-07-19 (**efficiency re-audit → Medium + Low tier remediated**:
+the follow-up batch to the 2026-07-18 Critical/High fixes — TDD per item, all suites green
+(webgui **854**, options_svc **596** [2 pre-existing date-relative `test_expected_move`],
+sentiment_svc **144**, driver_svc **211**, market_svc **49**, proxy **98**, bus **24**).
+Flow alerts read only the trailing ~22 rows + normalize once + drop `$VIX` + mtime-cache the
+TOML + `skip_unchanged` the cooldown; `gex_json` grids **zlib-compressed at insert** (~5×) +
+redundant `idx_snap_today` dropped + `init_schema` once/process; **term chain polls 5-min**;
+rescue advisories use a **light GEX-only context** (no full `gamma_snapshot`);
+`reprice_captured` clears the chain cache first (freshness); proxy stats counter **WAL** +
+`_rate_limit` locked + reconcile log demoted; market_svc summary → **background task** +
+weekend throttle + version-gated pcr; sentiment push **outside `_TREND_LOCK`** +
+`sector_pc_delta` conn closed; driver reads the composite **once/cycle**; webgui ticker/market/
+driver reads moved **off the event loop** + driver version-probes pipelined + scanner rows built
+off-loop + page-build `options:scan` read once. Gamma `_render_view` left on-loop (crop already
+tamed it — poor risk/reward). See "Performance characteristics & known hotspots". Branch
+`Using_Highcharts`. Prior — 2026-07-18 (**efficiency re-audit → all Critical + High fixes**: a
 four-agent audit of the grown app found — and this session fixed, TDD per layer —
 (1) **~37% of 1-min GEX slots silently dropped** (serial 24-chain fetch + the
 scheduler gathering all branches before sleeping) → `poll_once` now fetches chains
@@ -3529,14 +3544,49 @@ real levers if a page feels sluggish or a service churns CPU/network. Audited
   ~daily-changing structural gauge — the self-fetching path is now cached hourly
   (`TREND_30D_TTL_SEC`; explicit-args calls bypass the cache).
 
-Open (Medium/Low, from the same 2026-07-18 audit — see the session notes): flow-alert
-full-day series reload (detectors need only the last ~22 rows), the duplicate
-`idx_snap_today` index, ~470 MB/day of uncompressed full-grid rows (×4 views),
-per-minute term-structure chain fetch, rescue advisories running a full
-`gamma_snapshot` for flip/walls, the proxy stats counter's per-call INSERT+COMMIT,
-market_svc awaiting the Claude summary inline in the 2 s poll loop, the
-unsynchronized `_rate_limit`, on-loop payload reads in ticker/market/driver, and the
-gamma page's now-redundant 120 s RTH refresh.
+**2026-07-19 — the Medium + Low tier from that audit was REMEDIATED (TDD per item):**
+- **Flow alerts** now load only the trailing ~22 rows per symbol
+  (`gex_history_db.load_flow_tail` + `handlers` `tail_limit = spike window + 2`) instead
+  of the whole day's series every minute, normalize the series **once** per symbol
+  (`flow_alerts._crossover_rows`/`_spike_rows` share one `_norm`), **exclude `$VIX`** (its
+  option premium crossovers are noise), `skip_unchanged` the cooldown-map write, and
+  mtime-cache the thresholds TOML (`load_thresholds` — was re-parsed every tick).
+- **Storage:** the redundant **`idx_snap_today`** index (an exact duplicate of the PK
+  autoindex) is dropped in `init_schema`, and **`gex_json` grids are zlib-compressed at
+  insert** (`_encode_grid`/`_decode_grid`, ~5× smaller — the ~470 MB/day dominant cost;
+  the reader is format-agnostic so legacy uncompressed rows still decode). `init_schema`
+  runs **once per process** (a `_GEX_SCHEMA_READY` latch), not every 1-min collect.
+- **Term structure** polls every **5 min** now, not every 1-min slot
+  (`gex_collector.TERM_POLL_INTERVAL_MIN`; it's the widest SPX chain in the system).
+- **Rescue advisories** read a **light GEX-only context** (`compute._light_gex_context` —
+  single chain fetch + `calc_all_from_chain` + walls) instead of a full `gamma_snapshot`
+  (which also builds the projection band / term grid / flow series / history decode, all
+  discarded).
+- **`reprice_captured`** now clears the repricer chain cache first (was pricing captured
+  marks + the 3×/day action-alert reprice off up-to-5-min-stale chains — a freshness fix).
+- **Proxy:** the stats counter uses **WAL + `synchronous=NORMAL`** (drops the per-call
+  fsync on the ~60-70 calls/min hot path), `_rate_limit` holds a dedicated **`_rate_lock`**
+  across its spacing (concurrent fan-outs no longer burst past 5 req/s → 429 risk), and the
+  30 s reconcile logs INFO only on an actual change (else DEBUG).
+- **market_svc:** the Claude summary runs as a **background task** (`asyncio.create_task`,
+  no longer stalls the 2 s poll up to ~60 s), the deep-weekend poll throttles to 60 s
+  (`WEEKEND_INTERVAL_SEC` — futures closed), and `read_sector_pcr` is **version-gated**
+  (deserializes the composite only when it changes, not every 2 s).
+- **sentiment_svc:** the state-transition phone push fires **outside `_TREND_LOCK`**
+  (was holding it ~25 s on a flip day) and `sector_pc_delta` **closes its connection**
+  (was leaking ~26 handles/day). **driver_svc** reads the composite **once per cycle**
+  (shared by the market-state + magnitude readers).
+- **webgui:** ticker / market / driver poll payloads now read **off the event loop**
+  (`run.io_bound`), the driver poll **pipelines** its 5 version probes into one
+  `read_versions`, the scanner builds its ~5,238 display rows **off the loop**
+  (`_read_and_build` → `_apply_populate`), and page-build reads `options:scan` **once**
+  per navigation (shared by `_recompute_badges` + `_acknowledge`, was 2-3×).
+
+Consciously **not** done: the gamma-page `_render_view` figure build stays on the loop —
+the server-side ±20-strike crop (C2/P2) already reduced it to ~11k entries (~10-30 ms once
+per 120 s), and splitting the entangled async render isn't worth the regression risk; the
+gamma page's now-redundant 120 s RTH refresh (with the server refreshing every minute) is
+also left as a minor duplicate.
 
 **Costing model (important, non-obvious):** the version is stored in a SEPARATE
 tiny Redis key (`{key}:ver`, `INCR`'d by `cache_set`), so version-polls are now

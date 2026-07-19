@@ -99,6 +99,7 @@ def _maybe_recompute_trend(bus):
     cached trend in place (never aborts refresh).
     """
     from services import _proxy
+    pending_alert = None   # (prev, new, trend) captured under the lock, SENT after
     with _TREND_LOCK:
         now = time.monotonic()
         if not scheduler.trend_due(now, _TREND["last_ts"]):
@@ -153,19 +154,24 @@ def _maybe_recompute_trend(bus):
                 _record_market_state(_TREND["trend"])
             except Exception:  # noqa: BLE001
                 log.exception("market state record failed (recompute)")
-            # Push a phone alert when the committed state FLIPS. The gate in
-            # ``send_state_transition`` handles enabled/market-hours/valid-vocab
-            # filtering (incl. the cold-start old→new-vocab first cycle) — the
-            # handler just detects "committed changed" and delegates. Best-effort:
-            # a notify failure must NOT abort the recompute.
+            # CAPTURE a committed-state FLIP here (under the lock), but SEND the
+            # phone alert AFTER releasing the lock — send_state_transition does
+            # Telegram/Discord/SMTP (8-10s timeouts each), which would otherwise
+            # hold _TREND_LOCK ~25s on a flip day and block a concurrent refresh.
             if new_committed != prev_committed:
-                try:
-                    state_alert.send_state_transition(
-                        prev_committed, new_committed, _TREND["trend"])
-                except Exception:  # noqa: BLE001
-                    log.exception("state transition notify failed")
+                pending_alert = (prev_committed, new_committed, _TREND["trend"])
         except Exception:  # noqa: BLE001 — recompute failure must not abort refresh.
             log.exception("intraday trend recompute failed")
+
+    # Outside the lock: fire the state-transition push. The gate in
+    # ``send_state_transition`` handles enabled/market-hours/valid-vocab filtering
+    # (incl. the cold-start old→new-vocab first cycle). Best-effort — a notify
+    # failure must never propagate.
+    if pending_alert is not None:
+        try:
+            state_alert.send_state_transition(*pending_alert)
+        except Exception:  # noqa: BLE001
+            log.exception("state transition notify failed")
 
 
 # Cross-service view (published by options_svc) feeding the aggression axis.

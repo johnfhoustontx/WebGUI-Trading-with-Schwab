@@ -582,6 +582,23 @@ def test_sector_pc_delta_none_on_empty_store(monkeypatch):
     assert compute.sector_pc_delta() is None
 
 
+def test_sector_pc_delta_closes_its_connection(monkeypatch):
+    """sector_pc_delta opens a fresh connection every 15-min trend recompute — it
+    must CLOSE it, or the service leaks ~26 SQLite handles/day."""
+    from services.sentiment_svc import sector_pcr_history_db as db
+
+    class _SpyConn:
+        closed = False
+
+        def close(self):
+            _SpyConn.closed = True
+
+    monkeypatch.setattr(db, "connect", lambda *a, **k: _SpyConn())
+    monkeypatch.setattr(db, "sector_pc_delta", lambda conn: 0.1)
+    assert compute.sector_pc_delta() == 0.1
+    assert _SpyConn.closed is True
+
+
 def test_sector_pc_delta_defensive_on_error(monkeypatch):
     """A store-open failure degrades to None, never raises."""
     from services.sentiment_svc import sector_pcr_history_db as db

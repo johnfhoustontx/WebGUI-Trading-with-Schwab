@@ -502,6 +502,37 @@ def _read_all():
     return (bus_client.read(_DAY_VIEW) or {}), (bus_client.read(_LIVE_VIEW) or {})
 
 
+def _build_populate(day_env, live):
+    """PURE, heavy row construction — the ~5,238 display-row dicts + the by-id map.
+
+    Runs OFF the event loop (via _read_and_build): only the New-marker stamps + the
+    UI assignment are left for the loop (see _apply_populate). Returns everything
+    _apply_populate needs."""
+    day_env, live = day_env or {}, live or {}
+    today = today_ct()
+    sigs = {key: day_signals(day_env, key, today) for key in DAY_LISTS}
+    by_id = {}
+    for signals in sigs.values():
+        for s in signals:
+            if s.get("id"):
+                by_id[s["id"]] = s
+    rows = {
+        "signals_0dte": signal_rows(sigs["signals_0dte"]),
+        "signals_swing": signal_rows(sigs["signals_swing"]),
+        "signals_directional": directional_rows(sigs["signals_directional"]),
+    }
+    return {"today": today, "sigs": sigs, "by_id": by_id, "rows": rows,
+            "have": day_is_today(day_env, today), "day_env": day_env, "live": live}
+
+
+def _read_and_build():
+    """Read both payloads AND build the rows in ONE off-thread call, so the event
+    loop is left only the UI assignment. **Blocking + heavy** — go through
+    ``run.io_bound``."""
+    day_env, live = _read_all()
+    return _build_populate(day_env, live)
+
+
 # Quasar reads ``rowsPerPage: 0`` as INFINITE, and NiceGUI's ui.table defaults to
 # exactly that. The old page rendered one scan (~40 rows/table); the day union
 # reaches ~1,746 per list, i.e. ~5,238 rows x 13-16 columns (~75k cells, many
@@ -652,28 +683,26 @@ def render():
     ''')
 
     def _populate(day_env, live, *, notify=True, acknowledge=False):
-        """Paint the tables + detail map + bottom status.
+        """Build (heavy) + paint the tables. Sync convenience wrapper used for the
+        instant empty paint; the async load paths build OFF the loop via
+        ``_read_and_build`` then call ``_apply_populate`` directly."""
+        _apply_populate(_build_populate(day_env, live), notify=notify,
+                        acknowledge=acknowledge)
 
-        ``day_env`` — the day union (drives every table; gated on its CT date).
-        ``live``    — the last-scan view (drives the status line + warnings only).
+    def _apply_populate(built, *, notify=True, acknowledge=False):
+        """Paint the tables + detail map + bottom status from the OFF-LOOP-built
+        ``built`` dict (see _build_populate). Only the New-marker stamps + the UI
+        assignment run here on the event loop.
+
         ``acknowledge`` — True only when the user is actually VIEWING the page (the
         initial paint), so a background repaint never clears their New markers.
         """
-        day_env, live = day_env or {}, live or {}
-        today = today_ct()
-        sigs = {key: day_signals(day_env, key, today) for key in DAY_LISTS}
+        today, sigs, rows = built["today"], built["sigs"], built["rows"]
+        live = built["live"]
 
         by_id.clear()
-        for signals in sigs.values():
-            for s in signals:
-                if s.get("id"):
-                    by_id[s["id"]] = s
+        by_id.update(built["by_id"])
 
-        rows = {
-            "signals_0dte": signal_rows(sigs["signals_0dte"]),
-            "signals_swing": signal_rows(sigs["signals_swing"]),
-            "signals_directional": directional_rows(sigs["signals_directional"]),
-        }
         new_ids = new_ids_for_paint(set(by_id), today, acknowledge)
         for key, table in (("signals_0dte", table_0dte), ("signals_swing", table_swing),
                            ("signals_directional", table_dir)):
@@ -685,7 +714,7 @@ def render():
         # Day counts in each tab header — None (no count) until a day union for
         # TODAY exists, so the tabs don't show a misleading "(0)" before the first
         # scan or while a stale-dated envelope is gated out.
-        have = day_is_today(day_env, today)
+        have = built["have"]
         for tab, base, key in ((tab_0dte, "0-DTE", "signals_0dte"),
                                (tab_swing, "Swing", "signals_swing"),
                                (tab_dir, "Directional", "signals_directional")):
@@ -693,7 +722,7 @@ def render():
             tab.update()
 
         status.text = status_line(live)
-        day_msg.text = day_note(day_env, today)
+        day_msg.text = day_note(built["day_env"], today)
         day_msg.set_visibility(bool(day_msg.text))
         if notify:
             for w in (live.get("warnings") or []):
@@ -715,10 +744,10 @@ def render():
             return
         state["fetching"] = True
         try:
-            day_env, live = await run.io_bound(_read_all)
+            built = await run.io_bound(_read_and_build)
         finally:
             state["fetching"] = False
-        _populate(day_env, live, notify=False, acknowledge=True)
+        _apply_populate(built, notify=False, acknowledge=True)
 
     @guard_async
     async def _maybe_repaint():
@@ -731,11 +760,11 @@ def render():
         seen.update(versions)          # latch BEFORE the await so we don't re-enter
         state["fetching"] = True
         try:
-            day_env, live = await run.io_bound(_read_all)
+            built = await run.io_bound(_read_and_build)
         finally:
             state["fetching"] = False
         # NOT a view — the user may be away, so their New markers must survive.
-        _populate(day_env, live, notify=False, acknowledge=False)
+        _apply_populate(built, notify=False, acknowledge=False)
 
     seen.update(bus_client.read_versions((_DAY_VIEW, _LIVE_VIEW)))
     _populate({}, {}, notify=False)             # instant empty paint

@@ -992,12 +992,21 @@ def sector_pc_delta():
     and returns ``latest - (5-trading-days-ago)``, or ``None`` if the store has
     too few dates / a None endpoint / any failure. This is the internal reader
     Phase 2's market-state classifier calls — there is no cache view."""
+    conn = None
     try:
         from services.sentiment_svc import sector_pcr_history_db as _db
         conn = _db.connect()
         return _db.sector_pc_delta(conn)
     except Exception:  # noqa: BLE001 — defensive: never raise into a caller.
         return None
+    finally:
+        # A fresh connection is opened every 15-min recompute — close it or the
+        # service leaks ~26 SQLite handles/day.
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001
+                pass
 
 
 def build_and_write_bridge(snaps, spy, live, sector, trend=None):

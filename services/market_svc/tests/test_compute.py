@@ -90,7 +90,32 @@ def test_read_sector_pcr():
     assert compute.read_sector_pcr(bus) == 0.97
 
 
+def test_read_sector_pcr_version_gated(monkeypatch):
+    """read_sector_pcr runs every ~2s poll but the composite changes every ~120s.
+    It deserializes the full composite payload ONLY when the version changes;
+    otherwise it serves the memoized float off a cheap :ver probe."""
+    compute.reset_pcr_cache()
+    bus = Bus()
+    bus.cache_set("cache:sentiment:composite", {"live": {"sector_pcr": 0.97}})
+    deserializes = {"n": 0}
+    real_get = bus.cache_get
+
+    def counting_get(key):
+        if key == compute.CACHE_SENTIMENT:
+            deserializes["n"] += 1
+        return real_get(key)
+
+    monkeypatch.setattr(bus, "cache_get", counting_get)
+    assert compute.read_sector_pcr(bus) == 0.97
+    assert compute.read_sector_pcr(bus) == 0.97   # unchanged version -> memoized
+    assert deserializes["n"] == 1                  # payload deserialized once
+    bus.cache_set("cache:sentiment:composite", {"live": {"sector_pcr": 0.80}})
+    assert compute.read_sector_pcr(bus) == 0.80    # version bumped -> re-read
+    assert deserializes["n"] == 2
+
+
 def test_read_sector_pcr_missing_key_is_none():
+    compute.reset_pcr_cache()
     bus = Bus()  # no cache:sentiment:composite seeded
     assert compute.read_sector_pcr(bus) is None
 
