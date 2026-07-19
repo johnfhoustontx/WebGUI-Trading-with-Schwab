@@ -1210,10 +1210,31 @@ def test_collect_gex_history_calls_compute(monkeypatch):
     """The handler delegates to compute.collect_gex_snapshots (a pure write to
     the on-disk history store; no Redis cache view to publish)."""
     called = {"v": False}
-    monkeypatch.setattr(handlers.compute, "collect_gex_snapshots",
-                        lambda: called.__setitem__("v", True))
+    monkeypatch.setattr(
+        handlers.compute, "collect_gex_snapshots",
+        lambda capture_symbols=None: called.__setitem__("v", True))
     handlers.collect_gex_history(bus=None)
     assert called["v"] is True
+
+
+def test_collect_gex_history_captures_viewed_symbol_chain(monkeypatch):
+    """The handler asks the collector to CAPTURE the currently-viewed gamma
+    symbol's chain (so the same tick's refresh_gamma_current reuses it instead
+    of refetching it seconds later). Falls back to $SPX when nothing is cached."""
+    bus = Bus(fake=True)
+    bus.cache_set(handlers.CACHE_GAMMA, {"symbol": "SPY", "views": {}})
+    seen = {}
+    monkeypatch.setattr(
+        handlers.compute, "collect_gex_snapshots",
+        lambda capture_symbols=None: seen.__setitem__("cap", capture_symbols))
+    monkeypatch.setattr(handlers, "publish_flow_skew", lambda b: None)
+    monkeypatch.setattr(handlers, "run_flow_alerts", lambda b: None)
+    handlers.collect_gex_history(bus=bus)
+    assert seen["cap"] == {"SPY"}
+
+    bus2 = Bus(fake=True)  # empty cache -> defaults to $SPX
+    handlers.collect_gex_history(bus=bus2)
+    assert seen["cap"] == {"$SPX"}
 
 
 def test_collect_gex_history_publishes_flow_skew_after_collect(monkeypatch):
@@ -1221,7 +1242,7 @@ def test_collect_gex_history_publishes_flow_skew_after_collect(monkeypatch):
     rides the same 2-min tick that just wrote the rows)."""
     order = []
     monkeypatch.setattr(handlers.compute, "collect_gex_snapshots",
-                        lambda: order.append("collect"))
+                        lambda capture_symbols=None: order.append("collect"))
     monkeypatch.setattr(handlers, "publish_flow_skew",
                         lambda bus: order.append("publish"))
     bus = Bus(fake=True)
@@ -1233,7 +1254,7 @@ def test_collect_gex_history_no_bus_skips_publish(monkeypatch):
     """A legacy caller passing bus=None still collects, but does not publish."""
     order = []
     monkeypatch.setattr(handlers.compute, "collect_gex_snapshots",
-                        lambda: order.append("collect"))
+                        lambda capture_symbols=None: order.append("collect"))
     monkeypatch.setattr(handlers, "publish_flow_skew",
                         lambda bus: order.append("publish"))
     handlers.collect_gex_history(bus=None)
@@ -1242,7 +1263,8 @@ def test_collect_gex_history_no_bus_skips_publish(monkeypatch):
 
 def test_collect_gex_history_publish_failure_does_not_raise(monkeypatch):
     """A publish_flow_skew failure must never abort the (already-done) collect."""
-    monkeypatch.setattr(handlers.compute, "collect_gex_snapshots", lambda: None)
+    monkeypatch.setattr(handlers.compute, "collect_gex_snapshots",
+                        lambda capture_symbols=None: None)
 
     def _boom(bus):
         raise RuntimeError("redis down")

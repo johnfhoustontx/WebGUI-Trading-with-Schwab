@@ -620,6 +620,17 @@ def refresh_gamma(bus, symbol="$SPX") -> None:
     bus.publish(EVENT_GAMMA, {"version": version})
 
 
+def _current_gamma_symbol(bus) -> str:
+    """The symbol currently in the cached Gamma snapshot ($SPX when nothing is
+    cached / on any read failure). Shared by the same-tick collect→refresh pair
+    so both agree on which symbol's chain to capture + refresh."""
+    try:
+        env = bus.cache_get(CACHE_GAMMA)
+        return ((env.payload if env else None) or {}).get("symbol") or "$SPX"
+    except Exception:  # noqa: BLE001
+        return "$SPX"
+
+
 def refresh_gamma_current(bus) -> None:
     """Refresh the Gamma snapshot for the symbol CURRENTLY in the cache, so the
     intraday heatmap + candles stay current server-side even when no Gamma page is
@@ -630,13 +641,7 @@ def refresh_gamma_current(bus) -> None:
     Reads the symbol from the cached snapshot so it NEVER forces a fixed $SPX (which
     would reintroduce the symbol-revert bug); falls back to $SPX only when nothing is
     cached. Defensive — ``refresh_gamma`` is itself guarded."""
-    sym = "$SPX"
-    try:
-        env = bus.cache_get(CACHE_GAMMA)
-        sym = ((env.payload if env else None) or {}).get("symbol") or "$SPX"
-    except Exception:  # noqa: BLE001
-        sym = "$SPX"
-    refresh_gamma(bus, sym)
+    refresh_gamma(bus, _current_gamma_symbol(bus))
 
 
 def collect_gex_history(bus=None) -> None:
@@ -655,8 +660,13 @@ def collect_gex_history(bus=None) -> None:
     After collection, publishes the per-index flow-skew view
     (``cache:options:flow_skew``) so it rides the SAME 1-min tick that just wrote
     the rows. That publish is best-effort — a failure must never affect the
-    collection that already succeeded (and ``bus`` is None for legacy callers)."""
-    compute.collect_gex_snapshots()
+    collection that already succeeded (and ``bus`` is None for legacy callers).
+
+    The currently-viewed gamma symbol's chain is CAPTURED during the poll (see
+    ``compute.collect_gex_snapshots(capture_symbols=…)``) so the same tick's
+    ``refresh_gamma_current`` reuses it instead of refetching it seconds later."""
+    capture = {_current_gamma_symbol(bus)} if bus is not None else None
+    compute.collect_gex_snapshots(capture_symbols=capture)
     if bus is not None:
         try:
             publish_flow_skew(bus)

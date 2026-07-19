@@ -131,6 +131,29 @@ def test_load_today_excludes_other_days(tmp_path, monkeypatch):
     assert len(grid_rows) == 1 and grid_rows[0][1] == 1.0
 
 
+def test_load_date_with_grid_since_returns_only_newer_rows(tmp_path, monkeypatch):
+    """since_ts makes the session reload incremental: only rows with ts >
+    since_ts come back (the gamma snapshot memo appends them instead of
+    re-decoding the whole day every minute)."""
+    dbpath = tmp_path / "t.db"
+    monkeypatch.setattr(db, "DB_PATH", dbpath)
+    conn = db.connect()
+    db.init_schema(conn)
+    now = int(time.time())
+    summary = lambda ts, spot: {
+        "ts": ts, "spot": spot, "flip": None,
+        "top_pos_strike": None, "top_neg_strike": None, "net_total": None,
+    }
+    db.insert_snapshot(conn, "SPY", "gex", summary(now - 120, 1.0), {"100.0": 5}, 1)
+    db.insert_snapshot(conn, "SPY", "gex", summary(now - 60, 2.0), {"100.0": 6}, 1)
+    db.insert_snapshot(conn, "SPY", "gex", summary(now, 3.0), {"100.0": 7}, 1)
+    full = db.load_date_with_grid(conn, "SPY", "gex")
+    assert [r[1] for r in full] == [1.0, 2.0, 3.0]
+    newer = db.load_date_with_grid(conn, "SPY", "gex", since_ts=now - 120)
+    assert [r[1] for r in newer] == [2.0, 3.0]     # strictly ts > since_ts
+    assert newer[0][6] == {100.0: 6}               # grid decoded, float keys
+
+
 def test_load_today_orders_by_ts(tmp_path, monkeypatch):
     dbpath = tmp_path / "t.db"
     monkeypatch.setattr(db, "DB_PATH", dbpath)

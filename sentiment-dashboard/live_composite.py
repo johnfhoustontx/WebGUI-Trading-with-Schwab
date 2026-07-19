@@ -7,6 +7,7 @@ history_backfill._score_one_day). No tk imports.
 from __future__ import annotations
 
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
@@ -175,6 +176,16 @@ def _last(qd):
     return None
 
 
+# Sector P/C TTL cache (see compute_live's P/C block for the why).
+PCR_TTL_SEC = 900  # 15 min — the P/C is a slow-moving cumulative volume ratio
+_PCR_CACHE = {"ts": 0.0, "pcr": None}
+
+
+def reset_pcr_cache():
+    """Drop the cached sector P/C so the next compute_live refetches (test helper)."""
+    _PCR_CACHE.update(ts=0.0, pcr=None)
+
+
 def _pcr_from_chain(chain):
     """Sum put vs call totalVolume from a Schwab /chains payload -> ratio.
     Returns None when no chain or zero call volume."""
@@ -262,20 +273,33 @@ def compute_live(schwab, sector_data, prior_vix1d=0.0, prior_sector_trends=None)
             last_quotes[etf] = {"change_pct": pct}
 
     # --- per-sector P/C from /chains -> put_call (fetched concurrently) ---
+    # TTL-cached: the composite refreshes every 120 s but the cap-weighted P/C is
+    # a slow-moving cumulative VOLUME ratio — refetching 11 NTM chains per refresh
+    # was ~3,300 Schwab calls/day for a value that barely moves in 15 minutes.
+    # An empty result (off-hours: no volume) is NOT cached, so the first refresh
+    # after the open picks up real volume immediately.
     from datetime import date, timedelta
-    today_iso = date.today().isoformat()
-    to_iso = (date.today() + timedelta(days=30)).isoformat()
+    now_mono = time.monotonic()
+    if (_PCR_CACHE["pcr"] is not None
+            and now_mono - _PCR_CACHE["ts"] < PCR_TTL_SEC):
+        pcr = dict(_PCR_CACHE["pcr"])
+    else:
+        today_iso = date.today().isoformat()
+        to_iso = (date.today() + timedelta(days=30)).isoformat()
 
-    def _chain(etf):
-        try:
-            chain = schwab._request("/chains", params={
-                "symbol": etf, "contractType": "ALL", "range": "NTM",
-                "strikeCount": 50, "fromDate": today_iso, "toDate": to_iso})
-        except Exception:
-            chain = None
-        return etf, _pcr_from_chain(chain)
+        def _chain(etf):
+            try:
+                chain = schwab._request("/chains", params={
+                    "symbol": etf, "contractType": "ALL", "range": "NTM",
+                    "strikeCount": 50, "fromDate": today_iso, "toDate": to_iso})
+            except Exception:
+                chain = None
+            return etf, _pcr_from_chain(chain)
 
-    pcr = {etf: v for etf, v in _pmap(_chain, sectors) if v is not None}
+        pcr = {etf: v for etf, v in _pmap(_chain, sectors) if v is not None}
+        if pcr:  # cache only a usable (non-empty) result
+            _PCR_CACHE["pcr"] = dict(pcr)
+            _PCR_CACHE["ts"] = now_mono
     pc_res = _pc.score_sector_weighted(pcr, sp_weights)
     # Additive: RAW cap-weighted cross-sector Put/Call ratio (options-flow
     # direction). Higher = more downside hedging. None when no usable sector.

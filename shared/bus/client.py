@@ -125,13 +125,17 @@ class Bus:
             ts=datetime.now(timezone.utc).isoformat(),
             payload=payload,
         )
+        # ``{key}:ts`` mirrors the envelope ts as a tiny side key (like ``:ver``)
+        # so freshness probes (cache_metas) never deserialize the payload. Written
+        # in the same pipeline as the SET; skipped when skip_unchanged skips — the
+        # side key always equals the LAST ACTUAL write's ts, exactly like the
+        # envelope's own ts.
+        pipe = self._r.pipeline()
+        pipe.set(key, env.to_json())
+        pipe.set(f"{key}:ts", env.ts)
         if event is not None:
-            pipe = self._r.pipeline()
-            pipe.set(key, env.to_json())
             pipe.publish(event, json.dumps({"version": version}))
-            pipe.execute()
-        else:
-            self._r.set(key, env.to_json())
+        pipe.execute()
         return version
 
     def cache_get(self, key: str) -> CacheEnvelope | None:
@@ -162,6 +166,27 @@ class Bus:
             pipe.get(f"{k}:ver")
         vals = pipe.execute()
         return {k: (int(v) if v is not None else None) for k, v in zip(keys, vals)}
+
+    def cache_metas(self, keys) -> dict:
+        """Pipelined ``(version, ts)`` probe for many keys → ``{key: (int|None, str|None)}``.
+
+        Reads only the tiny ``:ver`` + ``:ts`` side keys — NO payload deserialize.
+        One round-trip for the whole batch (e.g. the watcher's freshness views).
+        ``ts`` may be None for a key written before the ``:ts`` side key existed —
+        callers needing back-compat can fall back to ``cache_get`` for those."""
+        keys = list(keys)
+        if not keys:
+            return {}
+        pipe = self._r.pipeline()
+        for k in keys:
+            pipe.get(f"{k}:ver")
+            pipe.get(f"{k}:ts")
+        vals = pipe.execute()
+        out = {}
+        for i, k in enumerate(keys):
+            ver, ts = vals[2 * i], vals[2 * i + 1]
+            out[k] = (int(ver) if ver is not None else None, ts)
+        return out
 
     # --- pub/sub ---------------------------------------------------------
     def publish(self, channel: str, message: dict) -> None:

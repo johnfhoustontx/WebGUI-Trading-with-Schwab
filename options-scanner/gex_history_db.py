@@ -246,6 +246,7 @@ def load_date_with_grid(
     symbol: str,
     view: str,
     date=None,
+    since_ts: int | None = None,
 ) -> list[tuple]:
     """Like load_today_with_grid but for an explicit local calendar ``date``
     (default: today).
@@ -254,11 +255,18 @@ def load_date_with_grid(
     (e.g. Friday's) so the heatmap stays populated after close / over a weekend,
     then clears once a new trading day (with no rows yet) becomes the active date.
 
+    ``since_ts`` — when given, return only rows STRICTLY NEWER (``ts > since_ts``,
+    still date-bounded, sargable on the PK). The gamma-snapshot memo uses this to
+    append the last minute's rows instead of re-decoding the whole session's
+    grids every refresh.
+
     Returns list of (ts, spot, flip, top_pos_strike, top_neg_strike,
                      net_total, gex_grid) tuples. gex_grid is the decoded
     JSON dict or {} if NULL.
     """
     start, end = _local_unix_range(date)
+    if since_ts is not None:
+        start = max(start, int(since_ts) + 1)
     cur = conn.execute(
         """
         SELECT ts, spot, flip, top_pos_strike, top_neg_strike, net_total, gex_json

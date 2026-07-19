@@ -147,6 +147,100 @@ def test_poll_once_continues_on_symbol_failure(tmp_path, monkeypatch, caplog):
     assert any("$SPX" in rec.message for rec in caplog.records)
 
 
+def test_poll_once_fetches_chains_concurrently(tmp_path, monkeypatch):
+    """The per-symbol chain fetches are I/O-bound and must OVERLAP — the serial
+    loop consumed 15-35s of the 60s collection slot and (measured) dropped ~37%
+    of 1-min slots. Inserts stay on the calling thread (SQLite conn affinity)."""
+    import threading
+    import time as _time
+
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+
+    from gamma_tool import GammaEngine
+    monkeypatch.setattr(
+        GammaEngine, "snapshot_summary",
+        staticmethod(lambda r, view="gex": {
+            "spot": r["spot"], "flip": r["flip"],
+            "top_pos_strike": r["top_pos_strike"],
+            "top_neg_strike": r["top_neg_strike"],
+            "net_total": r["net_total"],
+            **({"net_delta_0dte": r.get("net_delta_0dte"),
+                "projected_net_delta_close": r.get("projected_net_delta_close"),
+                "hedge_pressure": r.get("hedge_pressure")}
+               if view == "dex" else {}),
+        }),
+    )
+
+    lock = threading.Lock()
+    state = {"cur": 0, "max": 0}
+    client = _make_client({s: {"sym": s} for s in gc.SYMBOLS})
+    inner = client.get_option_chain.side_effect
+
+    def tracking(symbol, **kwargs):
+        with lock:
+            state["cur"] += 1
+            state["max"] = max(state["max"], state["cur"])
+        _time.sleep(0.05)
+        try:
+            return inner(symbol, **kwargs)
+        finally:
+            with lock:
+                state["cur"] -= 1
+
+    client.get_option_chain.side_effect = tracking
+    engine = _make_engine()
+    gc.poll_once(client, engine, conn, symbols=gc.SYMBOLS)
+    assert state["max"] >= 2  # fetches genuinely overlapped
+    rows = conn.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0]
+    assert rows == 12         # all symbols still written (4 symbols x 3+ views)
+
+
+def test_poll_once_on_chain_callback_gets_successful_chains(tmp_path, monkeypatch):
+    """poll_once(on_chain=…) hands each successfully-fetched chain to the caller
+    (so the same 1-min tick can reuse the viewed symbol's chain for the gamma
+    snapshot instead of refetching it seconds later). Failed/empty fetches are
+    NOT reported; a raising callback must not break the poll."""
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+
+    from gamma_tool import GammaEngine
+    monkeypatch.setattr(
+        GammaEngine, "snapshot_summary",
+        staticmethod(lambda r, view="gex": {
+            "spot": r["spot"], "flip": r["flip"],
+            "top_pos_strike": r["top_pos_strike"],
+            "top_neg_strike": r["top_neg_strike"],
+            "net_total": r["net_total"],
+            **({"net_delta_0dte": r.get("net_delta_0dte"),
+                "projected_net_delta_close": r.get("projected_net_delta_close"),
+                "hedge_pressure": r.get("hedge_pressure")}
+               if view == "dex" else {}),
+        }),
+    )
+    chains = {s: {"sym": s} for s in gc.SYMBOLS}
+    chains["QQQ"] = None  # failed fetch -> no callback for QQQ
+    client = _make_client(chains)
+    engine = _make_engine()
+
+    seen = {}
+    gc.poll_once(client, engine, conn, symbols=gc.SYMBOLS,
+                 on_chain=lambda sym, ch: seen.__setitem__(sym, ch))
+    assert set(seen) == set(gc.SYMBOLS) - {"QQQ"}
+    assert seen["$SPX"] == {"sym": "$SPX"}
+
+    def _boom(sym, ch):
+        raise RuntimeError("callback exploded")
+
+    # A raising callback must not abort the poll (rows still written).
+    before = conn.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0]
+    gc.poll_once(client, engine, conn, symbols=["SPY"], on_chain=_boom)
+    after = conn.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0]
+    assert after >= before  # SPY re-write happened despite the callback raising
+
+
 def test_poll_once_skips_empty_chain(tmp_path, monkeypatch, caplog):
     monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
     conn = db.connect()

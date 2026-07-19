@@ -453,15 +453,24 @@ def _probe_services_health(now_mono: float) -> dict:
 
 
 def _freshness_facts(now_utc) -> dict:
-    """``{view: is_stale}`` for the representative scheduled views (never raises)."""
+    """``{view: is_stale}`` for the representative scheduled views (never raises).
+
+    ONE pipelined ``read_metas`` probe of the tiny ``:ver``/``:ts`` side keys —
+    this runs on every 2s watcher tick, so it must never deserialize the payload
+    envelopes (the old per-view ``read_meta`` loop re-parsed ~0.5–1 MB/tick,
+    including ``options:scan`` a second time)."""
+    try:
+        metas = bus_client.read_metas(_HEALTH_VIEWS)
+    except Exception:  # noqa: BLE001
+        # A read failure is a bus problem, handled by the tick guard — don't
+        # flag views stale off a transient read error.
+        return {view: False for view in _HEALTH_VIEWS}
     facts: dict = {}
     for view in _HEALTH_VIEWS:
         try:
-            _ver, ts = bus_client.read_meta(view)
+            _ver, ts = metas.get(view, (None, None))
             facts[view] = _is_view_stale(ts, now_utc, view)
         except Exception:  # noqa: BLE001
-            # A read failure is a bus problem, handled by the tick guard — don't
-            # flag the view stale off a transient read error.
             facts[view] = False
     return facts
 
@@ -1002,7 +1011,10 @@ def _layout(active: str, title: str):
         # traceback every 2s) → None; ``@guard_async`` swallows a client-disconnect
         # race after the await. Either way the tick is a clean no-op.
         decision = await run.io_bound(_guarded_compute)
-        await run.io_bound(_refresh_health)
+        # Re-warm the proxy-health memo through its TTL gate (cached_health), NOT
+        # _refresh_health directly — the unconditional call made every open tab
+        # issue a proxy HTTP GET every 2s, defeating the _HEALTH_TTL_SEC memo.
+        await run.io_bound(cached_health)
         if decision:
             scanner = decision.get("scanner")
             health = decision.get("health")

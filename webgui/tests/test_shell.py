@@ -85,6 +85,43 @@ def test_group_children_maps_routes_to_their_group():
     assert main._group_children("/driver") is None
 
 
+def test_watcher_tick_rewarns_health_through_ttl_cache():
+    """The 2s watcher must re-warm the proxy health via the TTL-gated
+    cached_health, NOT the unconditional _refresh_health — otherwise every open
+    tab makes a proxy HTTP GET every 2s, bypassing the memoization."""
+    import inspect
+    import main
+
+    src = inspect.getsource(main._layout)
+    assert "run.io_bound(cached_health)" in src
+    assert "run.io_bound(_refresh_health)" not in src
+
+
+def test_freshness_facts_uses_one_batched_meta_read(monkeypatch):
+    """_freshness_facts runs on every 2s watcher tick — it must probe all views in
+    ONE pipelined read_metas call (tiny :ver/:ts keys), never per-view read_meta
+    full-payload deserializes."""
+    import datetime as dt
+    import main
+
+    calls = {"metas": 0, "meta": 0}
+
+    def fake_read_metas(views):
+        calls["metas"] += 1
+        now = dt.datetime.now(dt.timezone.utc).isoformat()
+        return {v: (1, now) for v in views}
+
+    monkeypatch.setattr(main.bus_client, "read_metas", fake_read_metas)
+    monkeypatch.setattr(
+        main.bus_client, "read_meta",
+        lambda v: (_ for _ in ()).throw(AssertionError("read_meta must not be used")))
+
+    facts = main._freshness_facts(dt.datetime.now(dt.timezone.utc))
+    assert calls["metas"] == 1
+    assert set(facts) == set(main._HEALTH_VIEWS)
+    assert all(v is False for v in facts.values())  # fresh ts -> not stale
+
+
 def test_recompute_badges_uses_passed_scan(monkeypatch):
     """_recompute_badges(scan) must not re-read options:scan from the bus."""
     import main

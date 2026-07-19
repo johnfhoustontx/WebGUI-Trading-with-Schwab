@@ -515,6 +515,48 @@ def test_compute_30d_trend_insufficient_data():
     assert out["state"] == "range"
 
 
+def test_compute_30d_trend_self_fetch_cached_hourly(monkeypatch):
+    """The self-fetching (no-args) path — the one the 15-min trend recompute
+    calls — must NOT refetch ~12 histories every 15 min for a ~daily-changing
+    structural gauge: the result is TTL-cached ~1 hour."""
+    calls = {"spy": 0, "sectors": 0}
+
+    def fake_daily(schwab, symbol, months):
+        calls["spy"] += 1
+        return _bars(260, 400.0, 0.6)
+
+    def fake_sectors():
+        calls["sectors"] += 1
+        return {"XLK": 4.0, "XLF": 3.0, "XLP": -0.5}
+
+    monkeypatch.setattr(compute, "_safe_daily", fake_daily)
+    monkeypatch.setattr(compute, "_fetch_sector_month_pcts", fake_sectors)
+    compute.reset_trend_30d_cache()
+
+    first = compute.compute_30d_trend()
+    assert calls == {"spy": 1, "sectors": 1}   # cold: fetched
+    second = compute.compute_30d_trend()
+    assert calls == {"spy": 1, "sectors": 1}   # within TTL: no refetch
+    assert second == first                      # same cached result
+
+    compute._TREND_30D_CACHE["ts"] -= compute.TREND_30D_TTL_SEC + 1
+    compute.compute_30d_trend()
+    assert calls == {"spy": 2, "sectors": 2}   # TTL expired: refetched
+
+
+def test_compute_30d_trend_explicit_args_bypass_cache(monkeypatch):
+    """Passing explicit data (the offline/test path) neither reads nor pollutes
+    the self-fetch cache."""
+    monkeypatch.setattr(
+        compute, "_safe_daily",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not fetch")))
+    compute.reset_trend_30d_cache()
+    spy = _bars(260, 400.0, 0.6)
+    out = compute.compute_30d_trend(spy, {"XLK": 4.0})
+    assert out["score"] > 50.0
+    assert compute._TREND_30D_CACHE["result"] is None  # cache untouched
+
+
 def test_derive_composite_extras_passes_through_trend():
     trend = {"state": "bull_trend", "score": 88.0, "marker": "verbatim"}
     out = compute.derive_composite_extras(None, [], [], trend=trend)

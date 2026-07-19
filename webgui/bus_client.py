@@ -96,6 +96,27 @@ def read_meta(view):
     return (env.version, env.ts) if env else (None, None)
 
 
+def read_metas(views):
+    """Pipelined :func:`read_meta` for many views → ``{view: (version, ts)}``.
+
+    Reads only the tiny ``:ver``/``:ts`` side keys in ONE round-trip — no payload
+    deserialize — so the 2s watcher's freshness probe is cheap. Back-compat: a key
+    written before the ``:ts`` side key existed (version present, ts absent) falls
+    back to a full envelope read for that view only, so freshness stays correct
+    across the upgrade until every service has republished.
+    """
+    views = list(views)
+    raw = bus().cache_metas([f"cache:{v}" for v in views])
+    out = {}
+    for v in views:
+        ver, ts = raw.get(f"cache:{v}", (None, None))
+        if ver is not None and ts is None:  # pre-upgrade write — one-off fallback
+            out[v] = read_meta(v)
+        else:
+            out[v] = (ver, ts)
+    return out
+
+
 def ping():
     """Return True if the Redis/Memurai backbone answers a PING, else False.
 

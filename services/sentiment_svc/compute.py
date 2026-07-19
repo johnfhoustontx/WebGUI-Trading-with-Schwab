@@ -17,6 +17,7 @@ The engine-call functions are defensive (catch exceptions, return ``None`` /
 empty) exactly as in the page — that behavior is preserved verbatim.
 """
 import sys
+import time
 
 from repo_paths import SENTIMENT, SHARED
 from services._parallel import parallel_map
@@ -700,15 +701,36 @@ def _safe_daily(schwab, symbol, months):
         return None
 
 
+# Self-fetch cache for compute_30d_trend: the 15-min trend recompute calls it
+# every cycle, but a ~30-DAY structural gauge changes ~daily — refetching SPY
+# 12-mo + 11 sector histories 26×/day (~1,150 proxy calls) bought nothing.
+# Applies ONLY to the fully-self-fetching (no-args) path; explicit-args calls
+# (tests / offline) bypass it entirely.
+TREND_30D_TTL_SEC = 3600  # recompute at most hourly
+_TREND_30D_CACHE = {"ts": 0.0, "result": None}
+
+
+def reset_trend_30d_cache():
+    """Drop the cached 30d trend so the next self-fetch call recomputes (tests)."""
+    _TREND_30D_CACHE.update(ts=0.0, result=None)
+
+
 def compute_30d_trend(spy_daily_df=_FETCH, sector_month_pcts=_FETCH) -> dict:
     """~30-day *structural* directional trend (price structure + sector breadth).
 
     The daily-horizon analog of ``compute_intraday_trend`` for the GUI's "30-Day
     Avg" Market-Trend gauge: no intraday VWAP, no breadth/VIX, no smoothing or
     hysteresis. When an argument is OMITTED it is fetched internally (so the
-    function is self-contained); passing an explicit ``None`` / ``{}`` means the
-    caller has no data and the corresponding sub-score degrades to neutral.
-    Defensive: a catastrophic failure returns a neutral dict."""
+    function is self-contained) — and the self-fetching path is TTL-cached
+    ~hourly (see ``_TREND_30D_CACHE``); passing an explicit ``None`` / ``{}``
+    means the caller has no data and the corresponding sub-score degrades to
+    neutral. Defensive: a catastrophic failure returns a neutral dict."""
+    self_fetch = spy_daily_df is _FETCH and sector_month_pcts is _FETCH
+    if self_fetch:
+        cached = _TREND_30D_CACHE["result"]
+        if (cached is not None
+                and time.monotonic() - _TREND_30D_CACHE["ts"] < TREND_30D_TTL_SEC):
+            return dict(cached)
     try:
         if spy_daily_df is _FETCH:
             from services import _proxy
@@ -755,7 +777,7 @@ def compute_30d_trend(spy_daily_df=_FETCH, sector_month_pcts=_FETCH) -> dict:
         confs = {"price": price.confidence, "sector": sector.confidence}
         score, agg = intraday_trend.blend_trend(scores, confs)
         state = intraday_trend.score_to_state(score)
-        return {
+        result = {
             "score": score,
             "state": state,
             "label": trend_regime.STATE_LABELS[state],
@@ -763,6 +785,9 @@ def compute_30d_trend(spy_daily_df=_FETCH, sector_month_pcts=_FETCH) -> dict:
             "confidence": agg,
             "sub_scores": {"price": price.score, "sector": sector.score},
         }
+        if self_fetch:  # cache only the successful self-fetching path
+            _TREND_30D_CACHE.update(ts=time.monotonic(), result=dict(result))
+        return result
     except Exception:  # noqa: BLE001
         return {
             "score": 50.0,

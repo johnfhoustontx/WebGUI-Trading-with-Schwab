@@ -39,6 +39,25 @@ def test_read_versions_batches_views():
     assert out == {"options:gamma": 1, "options:gex_status": 2, "options:absent": None}
 
 
+def test_read_metas_batches_version_and_ts():
+    bus_client.bus().cache_set("cache:options:scan", {"signals": []})
+    env = bus_client.bus().cache_get("cache:options:scan")
+    out = bus_client.read_metas(["options:scan", "options:absent"])
+    assert out["options:scan"] == (1, env.ts)
+    assert out["options:absent"] == (None, None)
+
+
+def test_read_metas_falls_back_to_envelope_for_pre_upgrade_keys():
+    """A key written before the :ts side key existed has a version but no :ts —
+    read_metas must fall back to the envelope so freshness stays correct."""
+    b = bus_client.bus()
+    b.cache_set("cache:sentiment:composite", {"live": {}})
+    b._r.delete("cache:sentiment:composite:ts")  # simulate a pre-upgrade write
+    env = b.cache_get("cache:sentiment:composite")
+    out = bus_client.read_metas(["sentiment:composite"])
+    assert out["sentiment:composite"] == (1, env.ts)
+
+
 def test_request_enqueues_command():
     bus_client.request("sentiment", {"type": "refresh"})
 

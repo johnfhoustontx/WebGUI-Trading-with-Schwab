@@ -19,6 +19,7 @@ import datetime as _dt
 import json as _json
 import logging
 import sys
+import threading
 from zoneinfo import ZoneInfo
 
 from repo_paths import DRIVER_PAPER_DB, OPTIONS_SCANNER
@@ -1442,8 +1443,101 @@ def _crop_gamma_views(views, spot, n_side=GAMMA_N_SIDE):
     return views
 
 
-def gamma_snapshot(symbol: str) -> dict | None:
+# Session-history memo for gamma_snapshot: decoded heatmap rows per
+# (symbol, view), valid for ONE session date. gamma_snapshot runs every minute
+# during RTH (the 1-min collector branch + the page timer); re-loading and
+# json-decoding the WHOLE session's per-strike grids (4 views × ~440 rows by the
+# close) each run was the service's largest recurring CPU burn — the memo keeps
+# the decoded rows and appends only rows newer than the last seen ts (a sargable
+# ``ts > ?`` query). Guarded by a lock (scheduler branch + command handlers can
+# snapshot concurrently); rows are never mutated downstream (_crop_gamma_views
+# REBUILDS row tuples), so handing out a shallow list copy is safe.
+_HIST_MEMO: dict = {"date": None, "data": {}}
+_HIST_LOCK = threading.Lock()
+
+
+def reset_gamma_history_memo():
+    """Drop the memoized session history (test helper / manual reset)."""
+    with _HIST_LOCK:
+        _HIST_MEMO.update(date=None, data={})
+
+
+# Per-tick chain stash: the 1-min collector branch fetches the viewed symbol's
+# chain (poll_once) and then, seconds later, refresh_gamma_current used to fetch
+# THE SAME chain again for gamma_snapshot — two chain fetches + two engine passes
+# per tick for one symbol. The collector now stashes the fetched chain here and
+# gamma_snapshot CONSUMES it once (pop semantics): only the same-tick refresh
+# reuses it, every other caller (page-timer refresh, symbol switch) still
+# fetches fresh. The TTL guards a crash between stash and take.
+TICK_CHAIN_TTL_SEC = 45
+_TICK_CHAIN: dict = {"ts": 0.0, "symbol": None, "chain": None}
+_TICK_CHAIN_LOCK = threading.Lock()
+
+
+def reset_tick_chain():
+    """Drop any stashed tick chain (test helper)."""
+    with _TICK_CHAIN_LOCK:
+        _TICK_CHAIN.update(ts=0.0, symbol=None, chain=None)
+
+
+def _stash_tick_chain(symbol, chain):
+    """Stash a just-fetched chain for the same tick's gamma refresh."""
+    import time as _time
+    with _TICK_CHAIN_LOCK:
+        _TICK_CHAIN.update(ts=_time.monotonic(), symbol=symbol, chain=chain)
+
+
+def _take_tick_chain(symbol):
+    """Pop the stashed chain if it matches ``symbol`` and is fresh, else None."""
+    import time as _time
+    with _TICK_CHAIN_LOCK:
+        if (_TICK_CHAIN["chain"] is not None
+                and _TICK_CHAIN["symbol"] == symbol
+                and _time.monotonic() - _TICK_CHAIN["ts"] < TICK_CHAIN_TTL_SEC):
+            chain = _TICK_CHAIN["chain"]
+            _TICK_CHAIN.update(ts=0.0, symbol=None, chain=None)
+            return chain
+        return None
+
+
+def _history_rows_incremental(gh, conn, symbol, vstr, session_date):
+    """Memoized, append-only heatmap rows for (symbol, view) on session_date.
+
+    Cold (or on a session-date change): full ``load_date_with_grid``. Warm: load
+    only rows with ``ts > last-seen`` and append. Returns a shallow copy of the
+    accumulated row list (callers must not receive the memo's own list)."""
+    with _HIST_LOCK:
+        if _HIST_MEMO["date"] != session_date:
+            _HIST_MEMO.update(date=session_date, data={})
+        ent = _HIST_MEMO["data"].get((symbol, vstr))
+        since = ent["last_ts"] if ent else None
+    new_rows = gh.load_date_with_grid(conn, symbol, vstr, date=session_date,
+                                      since_ts=since)
+    with _HIST_LOCK:
+        # Re-check the date under the lock (another thread may have rolled it).
+        if _HIST_MEMO["date"] != session_date:
+            _HIST_MEMO.update(date=session_date, data={})
+        ent = _HIST_MEMO["data"].setdefault(
+            (symbol, vstr), {"last_ts": None, "rows": []})
+        if since is None and ent["rows"]:
+            # A concurrent cold load already populated the memo — keep it and
+            # ignore this duplicate full load (identical data).
+            pass
+        elif new_rows:
+            ent["rows"].extend(new_rows)
+            ent["last_ts"] = new_rows[-1][0]
+        elif since is None:
+            ent["rows"] = []
+            ent["last_ts"] = None
+        return list(ent["rows"])
+
+
+def gamma_snapshot(symbol: str, chain=None) -> dict | None:
     """Fetch + compute the full Gamma snapshot for ``symbol``.
+
+    ``chain`` — an optional already-fetched chain dict (same tick). When omitted,
+    the stashed tick chain (see ``_take_tick_chain``) is consumed if fresh, else
+    the chain is fetched via ``_gamma_fetch_chain``.
 
     Returns a JSON-serializable dict the GUI paints from:
 
@@ -1474,7 +1568,10 @@ def gamma_snapshot(symbol: str) -> dict | None:
     now = _sched._market_now()
     session_date = _sched.active_session_date(now)
 
-    chain = _gamma_fetch_chain(symbol)
+    if chain is None:
+        chain = _take_tick_chain(symbol)
+    if chain is None:
+        chain = _gamma_fetch_chain(symbol)
     if not chain:
         return None
 
@@ -1504,7 +1601,10 @@ def gamma_snapshot(symbol: str) -> dict | None:
         try:
             # Active session date (today live, or the last trading day off-hours/
             # weekends) so the heatmap persists after close + clears next session.
-            return gh.load_date_with_grid(hist_conn, symbol, vstr, session_date)
+            # Incremental: memoized decoded rows + append-only ts > last-seen loads
+            # (see _history_rows_incremental) instead of a full-session re-decode.
+            return _history_rows_incremental(gh, hist_conn, symbol, vstr,
+                                             session_date)
         except Exception:
             return []
 
@@ -1615,11 +1715,16 @@ def _maybe_purge_gex(gh, conn) -> None:
         pass
 
 
-def collect_gex_snapshots() -> int:
+def collect_gex_snapshots(capture_symbols=None) -> int:
     """Fetch + persist one snapshot round (GEX/Charm/DEX/Vanna + term) for the
     tracked symbols. Returns ``len(gex_collector.collection_symbols())`` (the
     dynamic collection universe), or ``0`` when a fresh foreign collector owns
     the advisory lock (we defer).
+
+    ``capture_symbols`` — optional set of symbols whose fetched chains should be
+    stashed for the SAME tick's gamma refresh (``_stash_tick_chain`` → consumed
+    once by ``gamma_snapshot``), so the currently-viewed symbol's chain isn't
+    fetched twice in one tick.
 
     Reuses options-scanner's ``gex_collector.poll_once`` (engine compute +
     ``gex_history_db.insert_snapshot``) VERBATIM so the snapshot schema + symbol
@@ -1651,7 +1756,16 @@ def collect_gex_snapshots() -> int:
         # Once-per-day retention at collection start (keeps growth bounded).
         _maybe_purge_gex(gh, conn)
         gc.log.info("Polling GEX history (options_svc)")
-        gc.poll_once(_proxy.schwab_py_client, gt.GammaEngine(), conn)
+        on_chain = None
+        if capture_symbols:
+            wanted = set(capture_symbols)
+
+            def on_chain(sym, chain):  # noqa: F811 — the callback poll_once calls
+                if sym in wanted:
+                    _stash_tick_chain(sym, chain)
+
+        gc.poll_once(_proxy.schwab_py_client, gt.GammaEngine(), conn,
+                     on_chain=on_chain)
         gc.touch_lock(gc.LOCK_PATH, source="options_svc", owner=owner,
                       now=int(time.time()))
     finally:

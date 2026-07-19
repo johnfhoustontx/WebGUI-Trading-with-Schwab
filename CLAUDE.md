@@ -8,7 +8,21 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-07-17 (**Options-flow alerts — put/call premium crossover + unusual activity**:
+**Last updated:** 2026-07-18 (**efficiency re-audit → all Critical + High fixes**: a
+four-agent audit of the grown app found — and this session fixed, TDD per layer —
+(1) **~37% of 1-min GEX slots silently dropped** (serial 24-chain fetch + the
+scheduler gathering all branches before sleeping) → `poll_once` now fetches chains
+in a pool + `scheduler.launch_branches` fires keyed non-blocking background tasks
+with a still-running skip (also un-distorts the flow-alert spike baselines);
+(2) `gamma_snapshot`'s **whole-session grid re-decode every minute** → incremental
+per-(symbol,view,date) memo + `load_date_with_grid(since_ts=…)`; (3) the same
+tick's **double chain fetch** for the viewed symbol → `poll_once(on_chain=…)` +
+a consume-once tick-chain stash; (4) webgui watcher regressions — `read_metas`
+(pipelined `:ver`+`:ts` probes; `cache_set` now writes a `{key}:ts` side key) +
+the TTL-bypassing health re-warm; (5) sentiment's **~4,400 Schwab calls/day** —
+sector P/C TTL-cached 15 min + `compute_30d_trend` self-fetch cached hourly. See
+"Performance characteristics & known hotspots" for the full record + the still-open
+Medium items. Branch `Using_Highcharts`. Prior — 2026-07-17 (**Options-flow alerts — put/call premium crossover + unusual activity**:
 new **in-app popup (toast + chime) + Discord/Telegram** alerts on two events, detected server-side in
 `options_svc` riding the **1-min GEX poll** over the **whole collected universe** (~24 symbols). **(1)
 Crossover** — a symbol's daily-cumulative call **premium ($)** crosses its put premium (money-weighted
@@ -3471,6 +3485,58 @@ python webgui\main.py      # serves http://127.0.0.1:8500
 Single-user, localhost Memurai — so most of these are *tolerable today* but are the
 real levers if a page feels sluggish or a service churns CPU/network. Audited
 2026-06-19; ranked by impact. Fix the High items first if optimizing.
+
+**2026-07-18 re-audit — all Critical + High findings FIXED (TDD, per-layer tests):**
+- **GEX collection was silently dropping ~37% of its 1-min slots** (measured in the
+  live DB: 151 exactly-2-min gaps on 2026-07-17) — the ~24 per-symbol chain fetches
+  ran SERIALLY (15–35 s of the 60 s budget) and the scheduler `await`-gathered ALL
+  branches before sleeping, so a 30–90 s rescan also swallowed following slots. Now:
+  `gex_collector.poll_once` fetches chains in a small pool (`POLL_FETCH_WORKERS=6`;
+  engine compute + SQLite inserts stay on the calling thread — conn affinity +
+  `engine._last_dte` mutation), and `scheduler.launch_branches` replaces
+  `_gather_due`: due branches launch as KEYED background tasks with a
+  still-running skip (a branch can only ever delay ITSELF), so the tick returns to
+  its 30 s sleep immediately. This also fixes the flow-alert spike detector
+  silently mixing 1-min and 2-min volume increments (a 2-min delta reads ~2×
+  baseline).
+- **`gamma_snapshot` re-decoded the WHOLE session's heatmap grids every minute**
+  (4 views × ~440 rows × full-chain JSON by the close — tens of MB/min, the
+  service's largest CPU burn). Now incremental: `compute._history_rows_incremental`
+  memoizes decoded rows per `(symbol, view, session-date)` (lock-guarded,
+  date-evicted) and appends only rows with `ts > last-seen` via
+  `gex_history_db.load_date_with_grid(since_ts=…)` (sargable on the PK). Safe to
+  share because `_crop_gamma_views` REBUILDS row tuples (never mutates memo rows).
+- **The same 1-min tick fetched the viewed symbol's chain TWICE** (poll_once, then
+  `refresh_gamma_current` seconds later). Now `poll_once(on_chain=…)` hands each
+  fetched chain to the caller; `collect_gex_history` captures the currently-viewed
+  symbol's chain (`_current_gamma_symbol`) into a CONSUME-ONCE stash
+  (`_stash_tick_chain`/`_take_tick_chain`, 45 s TTL) that `gamma_snapshot` pops —
+  only the same-tick refresh reuses it; every other caller still fetches fresh.
+- **The webgui watcher regressed twice as the app grew:** `_freshness_facts` was
+  full-deserializing 4 payload envelopes (incl. `options:scan` a SECOND time) every
+  2 s tick per tab — `cache_set` now writes a tiny `{key}:ts` side key (same
+  pipeline as the SET; skipped when `skip_unchanged` skips) and
+  `bus_client.read_metas` probes `:ver`+`:ts` for all views in ONE pipelined
+  round-trip (pre-upgrade keys fall back to the envelope once). And `_tick` called
+  `_refresh_health` unconditionally (a proxy HTTP GET every 2 s per tab, bypassing
+  the TTL memo) — it now re-warms via `cached_health`.
+- **Sentiment was the biggest background Schwab-API burner:** the 120 s composite
+  refresh fetched 11 NTM sector chains every cycle (~3,300 calls/day) for a
+  slow-moving cumulative P/C — now TTL-cached 15 min in `live_composite`
+  (`PCR_TTL_SEC`; an empty off-hours result is NOT cached so the first post-open
+  refresh picks up volume). And `compute_30d_trend` refetched SPY 12-mo + 11
+  sector histories on every 15-min trend recompute (~1,150 calls/day) for a
+  ~daily-changing structural gauge — the self-fetching path is now cached hourly
+  (`TREND_30D_TTL_SEC`; explicit-args calls bypass the cache).
+
+Open (Medium/Low, from the same 2026-07-18 audit — see the session notes): flow-alert
+full-day series reload (detectors need only the last ~22 rows), the duplicate
+`idx_snap_today` index, ~470 MB/day of uncompressed full-grid rows (×4 views),
+per-minute term-structure chain fetch, rescue advisories running a full
+`gamma_snapshot` for flip/walls, the proxy stats counter's per-call INSERT+COMMIT,
+market_svc awaiting the Claude summary inline in the 2 s poll loop, the
+unsynchronized `_rate_limit`, on-loop payload reads in ticker/market/driver, and the
+gamma page's now-redundant 120 s RTH refresh.
 
 **Costing model (important, non-obvious):** the version is stored in a SEPARATE
 tiny Redis key (`{key}:ver`, `INCR`'d by `cache_set`), so version-polls are now

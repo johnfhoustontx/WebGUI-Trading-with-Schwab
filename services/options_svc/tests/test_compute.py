@@ -1221,13 +1221,23 @@ def _patch_gamma(monkeypatch, *, chain=None, walls=None, history=None):
         _CountingConn.n_open += 1
         return _CountingConn()
 
+    def _load_date_with_grid(conn, symbol, view, date=None, since_ts=None):
+        rows = history or []
+        if since_ts is not None:  # emulate the DB's strict ts > since_ts filter
+            rows = [r for r in rows if r[0] > since_ts]
+        return list(rows)
+
     fake_gh = _types.SimpleNamespace(
         connect=_connect,
         _ConnCls=_CountingConn,
-        load_date_with_grid=lambda conn, symbol, view, date=None: (history or []),
+        load_date_with_grid=_load_date_with_grid,
         load_today_with_grid=lambda conn, symbol, view: (history or []))
     monkeypatch.setitem(_sys.modules, "gamma_tool", fake_gt)
     monkeypatch.setitem(_sys.modules, "gex_history_db", fake_gh)
+    # The session-history memo + tick-chain stash are module-level state — reset
+    # per test.
+    compute.reset_gamma_history_memo()
+    compute.reset_tick_chain()
     monkeypatch.setattr(compute._proxy.schwab_py_client, "get_option_chain",
                         lambda *a, **k: _FakeChainResp(
                             chain if chain is not None else {"underlyingPrice": 5400.0}))
@@ -1328,6 +1338,105 @@ def test_gamma_snapshot_crop_widens_for_history_spot_drift(monkeypatch):
     assert 5300.0 in gexv["history"][0][6]
 
 
+def test_tick_chain_stash_consume_once():
+    """The per-tick chain stash hands the poll's chain to the SAME tick's
+    gamma refresh exactly once — a second take (e.g. a page-timer refresh
+    moments later) fetches fresh."""
+    compute.reset_tick_chain()
+    compute._stash_tick_chain("$SPX", {"c": 1})
+    assert compute._take_tick_chain("$SPX") == {"c": 1}
+    assert compute._take_tick_chain("$SPX") is None      # consume-once
+    compute._stash_tick_chain("$SPX", {"c": 2})
+    assert compute._take_tick_chain("SPY") is None       # symbol mismatch
+    compute._stash_tick_chain("$SPX", {"c": 3})
+    compute._TICK_CHAIN["ts"] -= compute.TICK_CHAIN_TTL_SEC + 1
+    assert compute._take_tick_chain("$SPX") is None      # expired
+
+
+def test_gamma_snapshot_uses_stashed_tick_chain(monkeypatch):
+    """gamma_snapshot must consume the tick's stashed chain instead of paying a
+    second chain fetch for the symbol the collector fetched seconds earlier."""
+    chain = {"underlyingPrice": 5400.0}
+    _patch_gamma(monkeypatch, chain=chain,
+                 history=[(1, 5400.0, 3, 4, 5, 6, {5400.0: {"net": 1}})])
+    fetches = {"n": 0}
+    orig_fetch = compute._gamma_fetch_chain
+
+    def counting_fetch(symbol):
+        fetches["n"] += 1
+        return orig_fetch(symbol)
+
+    monkeypatch.setattr(compute, "_gamma_fetch_chain", counting_fetch)
+    compute.reset_tick_chain()
+    compute._stash_tick_chain("$SPX", chain)
+    snap = compute.gamma_snapshot("$SPX")
+    assert snap is not None and snap["spot"] == 5400.0
+    assert fetches["n"] == 0        # reused the stash — no refetch
+    compute.gamma_snapshot("$SPX")
+    assert fetches["n"] == 1        # stash consumed — next snapshot fetches
+
+
+def test_history_rows_incremental_appends_only_new_rows():
+    """The per-(symbol,view,date) memo full-loads once, then loads ONLY rows with
+    ts > last-seen and appends — the whole-session re-decode every minute was the
+    service's largest recurring CPU burn."""
+    import datetime as _dtm
+    compute.reset_gamma_history_memo()
+    calls = []
+    rows1 = [(100, 1.0, None, None, None, 6, {5400.0: {"net": 1}})]
+    rows2 = [(160, 2.0, None, None, None, 6, {5401.0: {"net": 2}})]
+
+    class FakeGh:
+        def load_date_with_grid(self, conn, symbol, view, date=None, since_ts=None):
+            calls.append(since_ts)
+            return list(rows1) if since_ts is None else list(rows2)
+
+    d = _dtm.date(2026, 6, 18)
+    out1 = compute._history_rows_incremental(FakeGh(), "conn", "$SPX", "gex", d)
+    assert out1 == rows1 and calls == [None]           # cold: full load
+    out2 = compute._history_rows_incremental(FakeGh(), "conn", "$SPX", "gex", d)
+    assert out2 == rows1 + rows2                        # appended, not reloaded
+    assert calls == [None, 100]                         # incremental: since last ts
+
+
+def test_history_rows_incremental_resets_on_new_session_date():
+    import datetime as _dtm
+    compute.reset_gamma_history_memo()
+    calls = []
+
+    class FakeGh:
+        def load_date_with_grid(self, conn, symbol, view, date=None, since_ts=None):
+            calls.append((date, since_ts))
+            return [(100, 1.0, None, None, None, 6, {})]
+
+    compute._history_rows_incremental(FakeGh(), "c", "$SPX", "gex", _dtm.date(2026, 6, 18))
+    compute._history_rows_incremental(FakeGh(), "c", "$SPX", "gex", _dtm.date(2026, 6, 19))
+    # A new session date invalidates the memo -> full load again (since_ts None).
+    assert calls == [(_dtm.date(2026, 6, 18), None), (_dtm.date(2026, 6, 19), None)]
+
+
+def test_gamma_snapshot_second_call_loads_history_incrementally(monkeypatch):
+    """End-to-end through gamma_snapshot: the second snapshot in the same session
+    must ask the DB only for rows NEWER than the memoized ones."""
+    _patch_gamma(monkeypatch, history=[(1, 5400.0, 3, 4, 5, 6, {5400.0: {"net": 1}})])
+    import sys as _sys
+    seen = []
+    fake_gh = _sys.modules["gex_history_db"]
+    orig = fake_gh.load_date_with_grid
+
+    def counting(conn, symbol, view, date=None, since_ts=None):
+        seen.append(since_ts)
+        return orig(conn, symbol, view, date=date, since_ts=since_ts)
+
+    fake_gh.load_date_with_grid = counting
+    compute.gamma_snapshot("$SPX")
+    assert set(seen) == {None}                     # cold: full loads (4 views)
+    seen.clear()
+    snap = compute.gamma_snapshot("$SPX")
+    assert seen and all(s == 1 for s in seen)      # warm: only ts > 1 requested
+    assert snap["views"]["GEX"]["history"]         # memoized rows still served
+
+
 def test_gamma_snapshot_reuses_one_history_connection(monkeypatch):
     """The four view history loads share ONE read-only connection (was 4 opens),
     closed after the snapshot is built."""
@@ -1360,7 +1469,7 @@ def test_gamma_snapshot_history_uses_active_session_date(monkeypatch):
     from services.options_svc import scheduler as _sched
     monkeypatch.setattr(_sched, "active_session_date", lambda now=None: _dtm.date(2026, 6, 26))
 
-    def _capture(conn, symbol, view, date=None):
+    def _capture(conn, symbol, view, date=None, since_ts=None):
         seen["date"] = date
         return [(1, 2, 3, 4, 5, 6, {5400.0: {"net": 1}})]
     _sys.modules["gex_history_db"].load_date_with_grid = _capture
@@ -2398,8 +2507,9 @@ def _fake_gex_modules(monkeypatch, *, lock_ok=True):
         def close(self):
             calls["closed"] = True
 
-    def _poll(client, engine, conn, lock=None):
-        calls.update(poll=True, client=client, engine=engine, conn=conn)
+    def _poll(client, engine, conn, lock=None, on_chain=None):
+        calls.update(poll=True, client=client, engine=engine, conn=conn,
+                     on_chain=on_chain)
 
     fake_gc = _types.SimpleNamespace(
         LOCK_PATH="LOCK", SYMBOLS=["$SPX", "SPY"],

@@ -15,6 +15,7 @@ import logging
 import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -28,6 +29,9 @@ SYMBOLS = ["$SPX", "$VIX", "SPY", "QQQ"]
 POLL_INTERVAL_MIN = 1
 START_HOUR, START_MIN = 8, 0
 STOP_HOUR, STOP_MIN = 15, 20
+# Chain-fetch pool for poll_once: modest, because the proxy still spaces upstream
+# calls ~0.2s apart — the pool's job is to overlap per-call LATENCY, not to burst.
+POLL_FETCH_WORKERS = 6
 
 log = logging.getLogger("gex_collector")
 
@@ -167,12 +171,19 @@ def _maybe_lock(lock):
     return lock if lock is not None else contextlib.nullcontext()
 
 
-def poll_once(client, engine, conn, lock=None, symbols=None) -> None:
+def poll_once(client, engine, conn, lock=None, symbols=None, on_chain=None) -> None:
     """Fetch + store one snapshot per symbol. Per-symbol exceptions are logged,
     not propagated, so one bad symbol doesn't kill the whole poll.
 
     ``symbols`` defaults to ``collection_symbols()`` (the index base unioned
-    with the scan watchlist)."""
+    with the scan watchlist).
+
+    ``on_chain(symbol, chain)`` — optional callback invoked with each
+    successfully-fetched chain (never for failed/empty fetches), so the caller
+    can reuse a chain this tick already paid for (e.g. the options service hands
+    the currently-viewed symbol's chain to ``gamma_snapshot`` instead of
+    refetching it seconds later). Best-effort: a raising callback is logged and
+    the poll continues."""
     if symbols is None:
         symbols = collection_symbols()
     now = datetime.now(TZ)
@@ -181,7 +192,9 @@ def poll_once(client, engine, conn, lock=None, symbols=None) -> None:
     snapped_min = (now.minute // POLL_INTERVAL_MIN) * POLL_INTERVAL_MIN
     ts_boundary = int(now.replace(minute=snapped_min, second=0, microsecond=0).timestamp())
     today = now.date()
-    for symbol in symbols:
+
+    def _fetch(symbol):
+        """(symbol, chain|None); fetch failures are logged here, never raised."""
         try:
             with _maybe_lock(lock):
                 r = client.get_option_chain(
@@ -193,7 +206,35 @@ def poll_once(client, engine, conn, lock=None, symbols=None) -> None:
             chain = r.json() if getattr(r, "status_code", 500) == 200 else None
             if not chain:
                 log.warning("No chain for %s", symbol)
-                continue
+            return symbol, chain
+        except Exception as e:  # noqa: BLE001 — one bad symbol can't kill the poll
+            log.error("Poll failed for %s: %s", symbol, e)
+            return symbol, None
+
+    # The per-symbol chain fetches are independent, I/O-bound round-trips —
+    # OVERLAP them in a small pool. Serially they consumed 15-35s of the 60s
+    # collection slot and (measured 2026-07-17) ~37% of 1-min slots were dropped.
+    # The proxy's rate limiter only SPACES upstream calls ~0.2s (no lock held
+    # across the Schwab round-trip), so concurrency genuinely overlaps latency.
+    # Engine compute + SQLite inserts stay on THIS thread below: the connection
+    # has thread affinity and the engine mutates _last_dte per calc.
+    if len(symbols) > 1:
+        with ThreadPoolExecutor(
+                max_workers=min(POLL_FETCH_WORKERS, len(symbols))) as ex:
+            fetched = list(ex.map(_fetch, symbols))
+    else:
+        fetched = [_fetch(s) for s in symbols]
+
+    for symbol, chain in fetched:
+        if not chain:
+            continue
+        try:
+            if on_chain is not None:
+                try:
+                    on_chain(symbol, chain)
+                except Exception:
+                    log.debug("on_chain callback failed for %s", symbol,
+                              exc_info=True)
             # Options-flow skew computed ONCE per symbol from the already-fetched
             # chain (NO extra get_option_chain call) and merged into EACH view's
             # summary so any view row persists the scalars. Fully defensive: a

@@ -399,54 +399,77 @@ def test_loop_wires_scheduled_analyze():
 import asyncio  # noqa: E402
 
 
-def test_gather_due_runs_branches_concurrently():
-    """Two due branches that each 'sleep' complete in ~max(t), not ~sum(t) —
-    proving they run concurrently rather than serially awaited."""
-    order = []
-
-    async def branch_slow():
-        order.append("slow_start")
-        await asyncio.sleep(0.05)
-        order.append("slow_end")
-
-    async def branch_fast():
-        order.append("fast_start")
-        await asyncio.sleep(0.01)
-        order.append("fast_end")
-
+def test_launch_branches_starts_all_when_idle():
+    """Idle tick: every due (key, coro) pair is launched as a background task."""
     async def _drive():
-        await scheduler._gather_due([branch_slow(), branch_fast()])
+        ran = []
+
+        async def mk(name):
+            ran.append(name)
+
+        running = {}
+        launched = scheduler.launch_branches(
+            running, [("a", mk("a")), ("b", mk("b"))], asyncio.create_task)
+        assert launched == ["a", "b"]
+        await asyncio.gather(*running.values())
+        assert sorted(ran) == ["a", "b"]
 
     asyncio.run(_drive())
-    # Both branches STARTED before either finished (interleaved) → concurrent.
-    assert order[:2] == ["slow_start", "fast_start"]
-    # The fast branch finished before the slow one (it wasn't blocked behind it).
-    assert order.index("fast_end") < order.index("slow_end")
 
 
-def test_gather_due_isolates_branch_failures():
-    """A branch that RAISES must not prevent the others from running (per-branch
-    isolation preserved through the concurrent gather)."""
-    ran = []
-
-    async def branch_boom():
-        ran.append("boom")
-        raise RuntimeError("branch failed")
-
-    async def branch_ok():
-        ran.append("ok")
-
+def test_launch_branches_skips_branch_still_running():
+    """A branch whose PREVIOUS instance is still running is skipped (no stacking)
+    — but OTHER branches still launch, so a slow rescan can never stall the
+    1-min GEX slot. This is the measured C1 fix: the old gather blocked the whole
+    tick until every branch finished, dropping ~37% of collection slots."""
     async def _drive():
-        # Must NOT raise despite branch_boom blowing up.
-        await scheduler._gather_due([branch_boom(), branch_ok()])
+        release = asyncio.Event()
+        ran = []
+
+        async def slow():
+            ran.append("slow")
+            await release.wait()
+
+        async def gex():
+            ran.append("gex")
+
+        running = {}
+        scheduler.launch_branches(running, [("rescan", slow())], asyncio.create_task)
+        await asyncio.sleep(0)  # let the slow branch start
+        launched = scheduler.launch_branches(
+            running, [("rescan", slow()), ("gex", gex())], asyncio.create_task)
+        assert launched == ["gex"]         # rescan skipped (still running), gex ran
+        release.set()
+        await asyncio.gather(*running.values())
+        assert ran.count("slow") == 1      # the skipped instance never ran
 
     asyncio.run(_drive())
-    assert "boom" in ran and "ok" in ran
 
 
-def test_loop_runs_due_branches_concurrently():
-    """The tick loop gathers its due branches (concurrent) rather than awaiting
-    each executor call serially in sequence."""
+def test_launch_branches_relaunches_after_done():
+    async def _drive():
+        n = {"runs": 0}
+
+        async def branch():
+            n["runs"] += 1
+
+        running = {}
+        scheduler.launch_branches(running, [("gex", branch())], asyncio.create_task)
+        await asyncio.gather(*running.values())
+        launched = scheduler.launch_branches(
+            running, [("gex", branch())], asyncio.create_task)
+        assert launched == ["gex"]
+        await asyncio.gather(*running.values())
+        assert n["runs"] == 2
+
+    asyncio.run(_drive())
+
+
+def test_loop_launches_branches_without_blocking_the_tick():
+    """The tick loop LAUNCHES its due branches as background tasks (keyed, with a
+    still-running skip) instead of gathering them — a slow branch must never
+    delay the next tick's slot gates."""
     import inspect
     src = inspect.getsource(scheduler.loop)
-    assert "_gather_due" in src
+    assert "launch_branches" in src
+    assert "_gather_due" not in src

@@ -315,21 +315,30 @@ def eod_summary_due(now, ran_slots):
 POLL_INTERVAL_SEC = 30  # check the slot every 30s (mirrors the page's autoscan loop cadence)
 
 
-async def _gather_due(coros):
-    """Run the tick's due-branch coroutines CONCURRENTLY and wait for all.
+def launch_branches(running, branches, create_task):
+    """Launch the tick's due (key, coro) branches as BACKGROUND tasks.
 
-    A4 fix: the due branches are independent (GEX collection writes
-    gex_history.db, manage writes the paper account, rescan writes the scan
-    cache), so a slow branch (e.g. the 15-min rescan) must not delay the START
-    of the time-critical ones (2-min GEX collect / 5-min manage). Each branch
-    carries its OWN try/except, so it never raises here; ``return_exceptions``
-    is set as a belt-and-suspenders guard so one branch's failure can't affect
-    the others. The set of branches per tick is small and fixed (a handful —
-    periodic/autoscan/gex/manage/analyze/action-alert/eod-summary, most mutually
-    exclusive by time), so this is bounded — no unbounded task spawning."""
-    if not coros:
-        return
-    await asyncio.gather(*coros, return_exceptions=True)
+    Supersedes the old ``_gather_due`` (A4): gathering ran the branches
+    concurrently but made the TICK wait for all of them — so a 30-90s rescan
+    stalled the next tick's slot gates, and (measured 2026-07-17) ~37% of 1-min
+    GEX-collection slots were silently dropped. Launching keyed tasks returns to
+    the sleep immediately; the 1-min gate keeps firing on time.
+
+    Anti-stacking: a branch whose PREVIOUS instance is still running is skipped
+    for this slot (its fresh coroutine is closed, a warning logged) — a branch
+    can only ever delay ITSELF, never the others. ``running`` maps key → last
+    task and is bounded by the fixed branch-key set (~7). Each branch carries
+    its own try/except, so a task never raises. Returns the launched keys."""
+    launched = []
+    for key, coro in branches:
+        prev = running.get(key)
+        if prev is not None and not prev.done():
+            log.warning("scheduler branch %r still running; skipping this slot", key)
+            coro.close()
+            continue
+        running[key] = create_task(coro)
+        launched.append(key)
+    return launched
 
 
 async def loop(bus):
@@ -420,15 +429,18 @@ async def loop(bus):
         await loop_.run_in_executor(None, handlers.publish_gamma_briefing_index, bus)
     except Exception:
         log.exception("startup publish_gamma_briefing_index degraded")
+    running = {}  # branch key → last launched task (see launch_branches)
     while True:
         now = _market_now()  # one clock read per tick, reused by every gate below
-        # A4: decide which branches are DUE this tick (synchronous slot-gating,
-        # unchanged), then run their blocking work CONCURRENTLY so a slow branch
-        # (e.g. the 15-min rescan) can't delay the START of the time-critical ones
-        # (2-min GEX collect / 5-min manage). The slot-DUE logic + last_*_slot
-        # bookkeeping stay serial here; only the executor-await work is gathered.
-        # Each branch is its OWN coroutine carrying its OWN try/except, so a
-        # failure/hang in one can't affect the others (per-branch isolation).
+        # Decide which branches are DUE this tick (synchronous slot-gating,
+        # unchanged), then LAUNCH their blocking work as keyed background tasks
+        # (launch_branches) — the tick returns to its 30s sleep immediately, so a
+        # slow branch (a 30-90s rescan, a slow Claude briefing) can never stall
+        # the next tick's slot gates (the old gather did, dropping ~37% of the
+        # 1-min GEX slots — measured 2026-07-17). A branch whose previous
+        # instance is still running is skipped for the slot, so it can only ever
+        # delay ITSELF. Each branch is its OWN coroutine carrying its OWN
+        # try/except, so a failure in one can't affect the others.
         branches = []
 
         # Header + GEX-status refresh: every tick during market hours (their natural
@@ -453,7 +465,7 @@ async def loop(bus):
                 log.exception("publish_gex_status branch degraded")
 
         if p_due:
-            branches.append(_periodic_branch())
+            branches.append(("periodic", _periodic_branch()))
 
         try:
             due, slot = autoscan_due(now, last_slot)
@@ -470,7 +482,7 @@ async def loop(bus):
                 log.exception("rescan branch degraded")  # never let the scheduler die
 
         if due:
-            branches.append(_rescan_branch())
+            branches.append(("rescan", _rescan_branch()))
 
         # Intraday GEX history collection — write a snapshot round on each 2-min
         # slot within market hours so the Gamma heatmap keeps populating all
@@ -500,7 +512,7 @@ async def loop(bus):
                 log.exception("refresh_gamma_current branch degraded")
 
         if g_due:
-            branches.append(_gex_branch())
+            branches.append(("gex", _gex_branch()))
 
         # DRIVER paper auto-manage — reprice + auto-close the ISOLATED driver
         # account's open positions on each 5-min slot within market hours. (The
@@ -526,7 +538,7 @@ async def loop(bus):
                 log.exception("run_driver_manage_and_refresh branch degraded")
 
         if m_due:
-            branches.append(_driver_manage_branch())
+            branches.append(("driver_manage", _driver_manage_branch()))
 
         # Manual Paper Portfolio hourly entry+manage — open new paper trades from
         # the current captured signals AND reprice/auto-close existing ones, once
@@ -551,7 +563,7 @@ async def loop(bus):
                 log.exception("run_paper_entry_and_manage branch degraded")
 
         if paper_h is not None:
-            branches.append(_paper_cycle_branch())
+            branches.append(("paper_cycle", _paper_cycle_branch()))
 
         # Scheduled $SPX/SPY/QQQ Gamma Analyze — auto-run the Analyze command at
         # premarket / ~18 min after the open / midday / close on each trading day
@@ -577,7 +589,7 @@ async def loop(bus):
                 log.exception("run_scheduled_gamma_analyze branch degraded")
 
         if a_slot:
-            branches.append(_analyze_branch(a_slot))
+            branches.append(("analyze", _analyze_branch(a_slot)))
 
         # Scheduled "trades needing action" digest — push a Telegram/Discord
         # summary at 10:00 / 13:00 / 15:00 CT on each trading day. The slot is
@@ -599,7 +611,7 @@ async def loop(bus):
                 log.exception("run_action_alert branch degraded")
 
         if aa_slot:
-            branches.append(_action_alert_branch(aa_slot))
+            branches.append(("action_alert", _action_alert_branch(aa_slot)))
 
         # Scheduled end-of-day summary — push a per-book day-P&L digest at ~15:10 CT on
         # each trading day. Latched in eod_summary_ran BEFORE the blocking collect+push so
@@ -620,10 +632,9 @@ async def loop(bus):
                 log.exception("run_eod_summary branch degraded")
 
         if eod_slot:
-            branches.append(_eod_summary_branch(eod_slot))
+            branches.append(("eod_summary", _eod_summary_branch(eod_slot)))
 
-        # Run all DUE branches concurrently (bounded, ≤5). A slow branch can't
-        # delay the start of the time-critical ones; per-branch try/except keeps
-        # each isolated.
-        await _gather_due(branches)
+        # Launch all DUE branches as keyed background tasks (bounded by the fixed
+        # key set). The tick does NOT wait for them — see launch_branches.
+        launch_branches(running, branches, asyncio.create_task)
         await asyncio.sleep(POLL_INTERVAL_SEC)

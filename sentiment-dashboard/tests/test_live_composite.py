@@ -137,7 +137,66 @@ class _FakeClient:
 def test_compute_live_smoke():
     import sectors_ref
     sd = sectors_ref.load_sectors_data()
+    L.reset_pcr_cache()
     snap = L.compute_live(_FakeClient(), sd)
     assert 0 <= float(snap["composite"]["total_score"]) <= 10
     assert set(["vix_complex","put_call","breadth","rotation","sector_perf"]) \
         <= set(snap["component_scores"])
+
+
+_CHAIN = {  # minimal Schwab /chains shape with real volume -> pcr 0.5
+    "putExpDateMap": {"e": {"100.0": [{"totalVolume": 50}]}},
+    "callExpDateMap": {"e": {"100.0": [{"totalVolume": 100}]}},
+}
+
+
+class _CountingClient(_FakeClient):
+    def __init__(self):
+        self.chain_calls = 0
+
+    def _request(self, ep, params=None):
+        if ep == "/chains":
+            self.chain_calls += 1
+            return dict(_CHAIN)
+        return None
+
+
+def test_sector_pcr_cached_across_refreshes():
+    """The per-sector P/C chain fan-out (11 NTM chains) must NOT refetch on every
+    120s composite refresh — the ratio moves slowly, so it is TTL-cached."""
+    import sectors_ref
+    sd = sectors_ref.load_sectors_data()
+    L.reset_pcr_cache()
+    c = _CountingClient()
+    L.compute_live(c, sd)
+    first = c.chain_calls
+    assert first >= 11  # cold: fetched every sector chain
+    snap2 = L.compute_live(c, sd)
+    assert c.chain_calls == first  # within TTL: zero additional chain calls
+    assert snap2["sector_pcr"] == 0.5  # cached pcr still feeds the composite
+
+
+def test_sector_pcr_refetches_after_ttl():
+    import sectors_ref
+    sd = sectors_ref.load_sectors_data()
+    L.reset_pcr_cache()
+    c = _CountingClient()
+    L.compute_live(c, sd)
+    first = c.chain_calls
+    L._PCR_CACHE["ts"] -= L.PCR_TTL_SEC + 1  # expire the TTL
+    L.compute_live(c, sd)
+    assert c.chain_calls == 2 * first
+
+
+def test_sector_pcr_empty_result_not_cached():
+    """Off-hours a chain has no volume -> pcr {}. That must NOT be cached, so the
+    first refresh after the open picks up real volume immediately."""
+    import sectors_ref
+    sd = sectors_ref.load_sectors_data()
+    L.reset_pcr_cache()
+    c = _CountingClient()
+
+    dead = _FakeClient()  # _request returns None -> pcr {}
+    L.compute_live(dead, sd)
+    L.compute_live(c, sd)  # next refresh must fetch, not reuse the empty {}
+    assert c.chain_calls >= 11

@@ -20,6 +20,38 @@ def test_cache_get_missing_returns_none():
     assert b.cache_get("cache:test:absent") is None
 
 
+def test_cache_set_writes_ts_side_key_matching_envelope():
+    b = Bus(fake=True)
+    b.cache_set("cache:test:m", {"n": 1})
+    env = b.cache_get("cache:test:m")
+    assert b._r.get("cache:test:m:ts") == env.ts  # tiny side key == envelope ts
+
+
+def test_cache_metas_pipelined_batch():
+    b = Bus(fake=True)
+    b.cache_set("cache:ma", {"x": 1})
+    b.cache_set("cache:mb", {"x": 1})
+    b.cache_set("cache:mb", {"x": 2})
+    out = b.cache_metas(["cache:ma", "cache:mb", "cache:absent"])
+    env_a = b.cache_get("cache:ma")
+    env_b = b.cache_get("cache:mb")
+    assert out["cache:ma"] == (1, env_a.ts)
+    assert out["cache:mb"] == (2, env_b.ts)
+    assert out["cache:absent"] == (None, None)
+
+
+def test_cache_metas_empty():
+    assert Bus(fake=True).cache_metas([]) == {}
+
+
+def test_cache_set_skip_unchanged_leaves_ts_untouched():
+    b = Bus(fake=True)
+    b.cache_set("cache:test:mt", {"n": 1})
+    ts1 = b._r.get("cache:test:mt:ts")
+    b.cache_set("cache:test:mt", {"n": 1}, skip_unchanged=True)
+    assert b._r.get("cache:test:mt:ts") == ts1  # skip -> no ts rewrite
+
+
 def test_cache_set_skip_unchanged_does_not_bump_version():
     b = Bus(fake=True)
     v1 = b.cache_set("cache:test:s", {"n": 1})

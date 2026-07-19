@@ -218,7 +218,7 @@ The tkinter UI is not unit-tested. Verify UI changes manually by launching `Laun
 |---|---|
 | `sentiment_dashboard.py` | UI shell. ~3500 lines after extraction. |
 | `bridge.py` | Bridge writer + schema version + paths. |
-| `live_composite.py` | **Live intraday composite** (`compute_live` — current quotes → the pure scoring modules, the live analog of `history_backfill._score_one_day`) + `signal_band` + `build_bridge_payload` + `publish_bridge`. Shared by the webgui page and the GEX collector. No tk. |
+| `live_composite.py` | **Live intraday composite** (`compute_live` — current quotes → the pure scoring modules, the live analog of `history_backfill._score_one_day`) + `signal_band` + `build_bridge_payload` + `publish_bridge`. Shared by the webgui page and the GEX collector. No tk. **The per-sector Put/Call chain fan-out (11 NTM `/chains`) is TTL-cached 15 min** (`PCR_TTL_SEC` / `_PCR_CACHE` / `reset_pcr_cache`; 2026-07-18) — the 120 s composite refresh was refetching all 11 every cycle (~3,300 Schwab calls/day) for a slow-moving cumulative ratio; an empty off-hours result is NOT cached, so the first post-open refresh still picks up real volume. |
 | `publish_bridge.py` | Standalone headless entry: `compute_live` → write `shared/sentiment_bridge.json`. Run by the GEX collector each cycle in a subprocess (sentiment dir on `sys.path[0]` so `import scoring` resolves to this package, not options-scanner's `scoring.py`). |
 | `scoring/` | All scoring logic. Pure functions. |
 | `tests/` | pytest suite. Includes `fixtures/bridge_v39_snapshot.json` regression oracle. |
