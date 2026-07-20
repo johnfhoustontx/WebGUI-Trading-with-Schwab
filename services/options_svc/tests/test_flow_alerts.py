@@ -171,3 +171,11 @@ def test_alert_text_crossover_shows_premiums():
     t = flow_alerts.alert_text(a)
     assert "$SPX" in t and ("2.1M" in t or "2.10M" in t) and ("1.9M" in t or "1.95M" in t)
     assert "bullish" in t.lower()
+
+
+def test_human_money_boundary_no_1000k():
+    assert flow_alerts._human_money(999_700) == "$1.00M"   # not "$1000k"
+    assert flow_alerts._human_money(1_520_000) == "$1.52M"
+    assert flow_alerts._human_money(250_000) == "$250k"
+    assert flow_alerts._human_money(999_000) == "$999k"
+    assert flow_alerts._human_money(0) == "$0" and flow_alerts._human_money(None) == "$0"

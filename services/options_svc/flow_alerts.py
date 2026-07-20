@@ -100,10 +100,9 @@ def _crossover_rows(norm_rows, band, min_premium=10000):
 
 def _mark(c):
     """Contract mark (mid) = mark field, else (bid+ask)/2. None if unusable."""
-    for key in ("mark",):
-        v = c.get(key)
-        if isinstance(v, (int, float)) and v > 0:
-            return float(v)
+    v = c.get("mark")
+    if isinstance(v, (int, float)) and v > 0:
+        return float(v)
     bid, ask = c.get("bid"), c.get("ask")
     if isinstance(bid, (int, float)) and isinstance(ask, (int, float)) and (bid + ask) > 0:
         return (bid + ask) / 2.0
@@ -137,19 +136,22 @@ def detect_uoa(symbol, chain, cfg):
                     except (TypeError, ValueError):
                         continue
                     for c in (contracts or []):
-                        vol = c.get("totalVolume") or 0
-                        oi = c.get("openInterest") or 0
-                        mark = _mark(c)
-                        if oi <= 0 or vol < vol_floor or mark is None:
+                        try:
+                            vol = c.get("totalVolume") or 0
+                            oi = c.get("openInterest") or 0
+                            mark = _mark(c)
+                            if oi <= 0 or vol < vol_floor or mark is None:
+                                continue
+                            ratio = vol / oi
+                            premium = mark * vol * 100
+                            if ratio < k or premium < prem_floor:
+                                continue
+                            out.append({"type": "uoa", "side": side, "symbol": symbol,
+                                        "strike": strike, "expiry": expiry, "dte": dte,
+                                        "cost": mark, "volume": int(vol), "oi": int(oi),
+                                        "vol_oi": ratio, "premium": premium})
+                        except Exception:
                             continue
-                        ratio = vol / oi
-                        premium = mark * vol * 100
-                        if ratio < k or premium < prem_floor:
-                            continue
-                        out.append({"type": "uoa", "side": side, "symbol": symbol,
-                                    "strike": strike, "expiry": expiry, "dte": dte,
-                                    "cost": mark, "volume": int(vol), "oi": int(oi),
-                                    "vol_oi": ratio, "premium": premium})
         out.sort(key=lambda a: a["premium"], reverse=True)
         return out[:top_n]
     except Exception:
@@ -163,7 +165,7 @@ def _human_money(v):
     except (TypeError, ValueError):
         return "$0"
     a = abs(v)
-    if a >= 1e6:
+    if a >= 999_500:            # rounds to >= $1.00M → use M form
         return f"${v/1e6:.2f}M"
     if a >= 1e3:
         return f"${v/1e3:.0f}k"
@@ -174,7 +176,7 @@ def _exp_short(expiry, dte):
     if dte == 0:
         return "0DTE"
     try:
-        y, m, d = str(expiry).split("-")
+        _, m, d = str(expiry).split("-")
         return f"{int(m):02d}/{int(d):02d}"
     except Exception:
         return str(expiry)
