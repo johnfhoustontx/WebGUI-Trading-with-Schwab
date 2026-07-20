@@ -115,6 +115,7 @@ def test_build_rows_assembles_one_row_per_symbol():
     assert r["gex_regime"] == "above"
     assert isinstance(r["hotness"], (int, float))
     assert r["day_pct"] is not None
+    assert "_open_spot" in r and r["_open_spot"] == 100.0
 
 def test_build_rows_degrades_symbol_with_no_series():
     rows = m.build_rows({"AAPL": {"series": [], "flip": None}},

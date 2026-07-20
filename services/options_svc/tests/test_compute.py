@@ -3294,43 +3294,51 @@ def test_build_matrix_degrades_when_db_unavailable(monkeypatch):
 
 # --- apply_live_spots overlay (Task 5) ---------------------------------------
 
-def test_apply_live_spots_updates_spot_and_daypct():
+def test_apply_live_spots_recomputes_daypct_from_open_spot():
     from services.options_svc import compute
-    view = {"rows": [{"symbol": "SPY", "spot": 100.0, "day_pct": 0.5, "signal": "buy",
-                      "n_signals": 2, "n_alerts": 1, "signal_strength": 1, "hotness": 9}]}
-    quotes = {"SPY": {"quote": {"lastPrice": 101.0, "netPercentChange": 1.2}}}
+    # open_spot 100.0, live last 101.0 → day% = +1.0 (vs session open), NOT netPercentChange
+    view = {"rows": [{"symbol": "SPY", "spot": 100.5, "day_pct": 0.5, "_open_spot": 100.0,
+                      "flip": 100.0, "gex_regime": "above", "signal": "buy", "n_signals": 2}]}
+    quotes = {"SPY": {"quote": {"lastPrice": 101.0, "netPercentChange": 9.9}}}  # netPct ignored now
     out = compute.apply_live_spots(view, quotes)
     r = out["rows"][0]
     assert r["spot"] == 101.0
-    assert r["day_pct"] == 1.2
-    # untouched fields preserved
-    assert r["signal"] == "buy" and r["n_signals"] == 2
+    assert r["day_pct"] == 1.0                 # (101-100)/100*100, NOT 9.9
+    assert r["gex_regime"] == "above"          # live 101.0 >= flip 100.0
+    assert r["signal"] == "buy" and r["n_signals"] == 2   # untouched fields preserved
+
+
+def test_apply_live_spots_recomputes_regime_on_flip_cross():
+    from services.options_svc import compute
+    view = {"rows": [{"symbol": "SPY", "spot": 101.0, "day_pct": 1.0, "_open_spot": 100.0,
+                      "flip": 100.0, "gex_regime": "above"}]}
+    quotes = {"SPY": {"quote": {"lastPrice": 99.0}}}   # live spot drops below flip
+    out = compute.apply_live_spots(view, quotes)
+    assert out["rows"][0]["gex_regime"] == "below"     # recomputed from live spot vs flip
+
+
+def test_apply_live_spots_missing_open_spot_keeps_daypct():
+    from services.options_svc import compute
+    view = {"rows": [{"symbol": "SPY", "spot": 100.0, "day_pct": 0.5}]}   # no _open_spot
+    out = compute.apply_live_spots(view, {"SPY": {"quote": {"lastPrice": 101.0}}})
+    assert out["rows"][0]["spot"] == 101.0
+    assert out["rows"][0]["day_pct"] == 0.5    # unchanged (no baseline to recompute from)
 
 
 def test_apply_live_spots_ignores_missing_symbol():
     from services.options_svc import compute
-    view = {"rows": [{"symbol": "SPY", "spot": 100.0, "day_pct": 0.5}]}
-    out = compute.apply_live_spots(view, {})     # no quote → unchanged
-    assert out["rows"][0]["spot"] == 100.0
-    assert out["rows"][0]["day_pct"] == 0.5
+    view = {"rows": [{"symbol": "SPY", "spot": 100.0, "day_pct": 0.5, "_open_spot": 100.0}]}
+    out = compute.apply_live_spots(view, {})
+    assert out["rows"][0]["spot"] == 100.0 and out["rows"][0]["day_pct"] == 0.5
 
 
 def test_apply_live_spots_missing_price_keeps_existing():
     """A quote present but with no lastPrice/pct must NOT null existing values."""
     from services.options_svc import compute
-    view = {"rows": [{"symbol": "SPY", "spot": 100.0, "day_pct": 0.5}]}
+    view = {"rows": [{"symbol": "SPY", "spot": 100.0, "day_pct": 0.5, "_open_spot": 100.0}]}
     out = compute.apply_live_spots(view, {"SPY": {"quote": {}}})
     assert out["rows"][0]["spot"] == 100.0
     assert out["rows"][0]["day_pct"] == 0.5
-
-
-def test_apply_live_spots_zero_daypct_is_valid():
-    """A flat day (netPercentChange 0.0) is a real value, not 'missing'."""
-    from services.options_svc import compute
-    view = {"rows": [{"symbol": "SPY", "spot": 100.0, "day_pct": 0.5}]}
-    out = compute.apply_live_spots(view, {"SPY": {"quote": {"lastPrice": 100.0,
-                                                            "netPercentChange": 0.0}}})
-    assert out["rows"][0]["day_pct"] == 0.0
 
 
 def test_apply_live_spots_defensive_on_junk():

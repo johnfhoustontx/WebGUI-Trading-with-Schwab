@@ -1255,30 +1255,18 @@ def quote_last(raw, symbol):
     return q.get("lastPrice") if isinstance(q, dict) else None
 
 
-def quote_pct(raw, symbol):
-    """Extract netPercentChange (day %) for a symbol from a proxy /quotes payload.
-
-    Mirrors ``quote_last``'s nesting resolution exactly (``quote`` → ``reference`` →
-    flat); returns None when absent so a missing symbol never overwrites an existing
-    value. ``netPercentChange`` is the same equities/index field the market service
-    normalizes on."""
-    if not isinstance(raw, dict):
-        return None
-    info = raw.get(symbol)
-    if not isinstance(info, dict):
-        return None
-    q = info.get("quote", info.get("reference", info))
-    return q.get("netPercentChange") if isinstance(q, dict) else None
-
-
 def apply_live_spots(view, quotes_raw):
-    """Overlay live spot + day% onto a matrix view (mutates + returns it).
+    """Overlay the live spot onto a matrix view (mutates + returns it).
 
-    Reuses the header's exact quote accessors (``quote_last`` for lastPrice +
-    ``quote_pct`` for netPercentChange). Defensive per-symbol: a missing/None quote
-    leaves that row's existing ``spot``/``day_pct`` untouched (never nulls a value),
-    and one bad row can't sink the overlay. ``day_pct`` of 0.0 is a real flat-day
-    value and IS applied — the None guard is only for genuinely-absent fields."""
+    ``day_pct`` and ``gex_regime`` are RECOMPUTED from the live spot against the SAME
+    session-open baseline (``_open_spot``) / gamma flip (``flip``) that
+    ``matrix.build_rows`` used, so the headline Day% keeps a single "vs session open"
+    baseline instead of flickering between it and the schwab ``netPercentChange`` (vs
+    prior close) that the 1-min rebuild and this ~30s overlay would otherwise disagree
+    on. Defensive per-symbol: a missing/None quote leaves that row's existing values
+    untouched (never nulls a value), and one bad row can't sink the overlay."""
+    import services.options_svc.matrix as mx  # lazy: pure helper reuse, avoid import cycle
+
     rows = (view or {}).get("rows") or []
     for r in rows:
         try:
@@ -1286,11 +1274,12 @@ def apply_live_spots(view, quotes_raw):
             if not sym:
                 continue
             last = quote_last(quotes_raw, sym)
-            pct = quote_pct(quotes_raw, sym)
             if last is not None:
                 r["spot"] = round(last, 2)
-            if pct is not None:
-                r["day_pct"] = round(pct, 2)
+                open_spot = r.get("_open_spot")
+                if open_spot:  # truthy (nonzero) → safe divisor
+                    r["day_pct"] = round((last - open_spot) / open_spot * 100.0, 2)
+                r["gex_regime"] = mx.gex_regime(last, r.get("flip"))
         except Exception:  # noqa: BLE001
             log.debug("apply_live_spots: skipping symbol", exc_info=True)
             continue
