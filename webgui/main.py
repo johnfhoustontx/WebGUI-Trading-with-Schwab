@@ -1055,7 +1055,7 @@ def _layout(active: str, title: str):
                 play_alert(sound, volume)   # one chime per tick, not per alert
                 for a in new_flow:
                     bullish = (a.get("type") == "crossover" and a.get("side") == "calls_over") \
-                        or (a.get("type") == "spike" and a.get("side") == "call")
+                        or (a.get("type") == "uoa" and a.get("side") == "call")
                     ui.notify(a.get("text", ""), icon="insights",
                               color="green-8" if bullish else "red-8")
                 if desktop and new_flow:

@@ -448,8 +448,16 @@ def test_flow_alert_telegram_and_discord_shape():
     assert "$SPX" in pn.flow_alert_telegram_text(a)
     e = pn.flow_alert_discord_embed(a)
     assert e["color"] == 0x2ECC71 and "$SPX" in e["title"] + str(e.get("description", ""))
-    a2 = {"type": "spike", "side": "put", "symbol": "MU", "text": "MU: unusual put activity"}
+    a2 = {"type": "uoa", "side": "put", "symbol": "MU", "text": "MU: unusual put activity"}
     assert pn.flow_alert_discord_embed(a2)["color"] == 0xE74C3C   # put/bearish → red
+
+
+def test_flow_alert_uoa_color_by_side():
+    from services.options_svc import push_notify as pn
+    call = {"type": "uoa", "side": "call", "symbol": "SPY", "text": "x"}
+    put = {"type": "uoa", "side": "put", "symbol": "SPY", "text": "y"}
+    assert pn.flow_alert_discord_embed(call)["color"] == 0x2ECC71   # green
+    assert pn.flow_alert_discord_embed(put)["color"] == 0xE74C3C    # red
 
 
 def test_send_flow_alert_noop_when_disabled(monkeypatch):
@@ -457,7 +465,7 @@ def test_send_flow_alert_noop_when_disabled(monkeypatch):
     calls = []
     monkeypatch.setattr(pn, "send_telegram", lambda *a, **k: calls.append("tg"))
     monkeypatch.setattr(pn, "send_discord", lambda *a, **k: calls.append("dc"))
-    a = {"type": "spike", "side": "call", "symbol": "SPY", "text": "x"}
+    a = {"type": "uoa", "side": "call", "symbol": "SPY", "text": "x"}
     assert pn.send_flow_alert(a, config={"enabled": False}) is False
     assert calls == []
     pn.send_flow_alert(a, config={"enabled": True, "telegram": {}, "discord": {}})

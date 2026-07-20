@@ -1539,6 +1539,29 @@ def _take_tick_chain(symbol):
         return None
 
 
+# Contract-level UOA (unusual options activity) computed during the poll's on_chain
+# hook (reusing each already-fetched chain — no re-fetch) and consumed ONCE by
+# handlers.run_flow_alerts on the same tick. Filled every collect, cleared at the
+# start of the next collect (and drained by take_uoa_stash), so it never accumulates.
+_UOA_STASH: dict = {}   # {symbol: [uoa contract dicts]} for the current tick
+
+
+def clear_uoa_stash():
+    _UOA_STASH.clear()
+
+
+def stash_uoa(symbol, contracts):
+    if contracts:
+        _UOA_STASH[symbol] = contracts
+
+
+def take_uoa_stash() -> dict:
+    """Return + clear the tick's UOA results (consumed once by run_flow_alerts)."""
+    out = dict(_UOA_STASH)
+    _UOA_STASH.clear()
+    return out
+
+
 def _history_rows_incremental(gh, conn, symbol, vstr, session_date):
     """Memoized, append-only heatmap rows for (symbol, view) on session_date.
 
@@ -1802,13 +1825,22 @@ def collect_gex_snapshots(capture_symbols=None) -> int:
         # Once-per-day retention at collection start (keeps growth bounded).
         _maybe_purge_gex(gh, conn)
         gc.log.info("Polling GEX history (options_svc)")
-        on_chain = None
-        if capture_symbols:
-            wanted = set(capture_symbols)
+        # Contract-level UOA rides the poll's on_chain hook (reusing each fetched
+        # chain — no re-fetch); results are stashed per symbol and consumed once by
+        # run_flow_alerts. flow_alerts is PURE (stdlib + repo_paths), imported lazily.
+        from services.options_svc import flow_alerts
+        clear_uoa_stash()
+        _uoa_cfg = flow_alerts.load_thresholds()
+        wanted = set(capture_symbols) if capture_symbols else set()
 
-            def on_chain(sym, chain):  # noqa: F811 — the callback poll_once calls
-                if sym in wanted:
-                    _stash_tick_chain(sym, chain)
+        def on_chain(sym, chain):  # noqa: F811 — the callback poll_once calls
+            if sym in wanted:
+                _stash_tick_chain(sym, chain)
+            # Best-effort — a UOA detect failure must NEVER break collection.
+            try:
+                stash_uoa(sym, flow_alerts.detect_uoa(sym, chain, _uoa_cfg))
+            except Exception:
+                gc.log.debug("UOA detect failed for %s", sym, exc_info=True)
 
         gc.poll_once(_proxy.schwab_py_client, gt.GammaEngine(), conn,
                      on_chain=on_chain)

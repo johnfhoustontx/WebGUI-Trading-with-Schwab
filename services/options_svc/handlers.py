@@ -229,6 +229,11 @@ CACHE_FLOW_ALERTS = "cache:options:flow_alerts"
 EVENT_FLOW_ALERTS = "events:options:flow_alerts"
 _FLOW_COOLDOWN_KEY = "cache:options:flow_alert_cooldowns"
 _FLOW_ALERTS_MAX = 50
+# Trailing flow rows the crossover detector needs (it compares the last two
+# premium-bearing rows; a couple extra guard against a forward-only NULL-premium
+# row). UOA no longer reads the series — it rides the poll's on_chain stash — so
+# this is small (the aggregate volume-spike detector that needed ~22 rows is gone).
+_FLOW_CROSSOVER_TAIL = 4
 
 CACHE_EXPECTED_MOVE = "cache:options:expected_move"
 EVENT_EXPECTED_MOVE = "events:options:expected_move"
@@ -747,10 +752,11 @@ def run_flow_alerts(bus) -> None:
         cooldowns = cd_payload.get("map", {}) if cd_payload.get("date") == today else {}
         now_ts = _flow_now_ts()
         push_cfg = push_notify.load_config()
-        # The detectors read only the tail: crossover the last 2 rows, spike the
-        # last window+1 increments (= window+2 rows). Load exactly that, not the
-        # whole day's ~440 rows/symbol every minute across the universe.
-        tail_limit = max(2, int(cfg.get("spike", {}).get("window", 20)) + 2)
+        # The crossover detector reads only the trailing rows (last-vs-prior premium);
+        # UOA now rides the poll's on_chain stash, not the series. Load a small bounded
+        # tail (a couple extra rows so a forward-only NULL-premium row can't hide the
+        # crossover), never the whole day's ~440 rows/symbol every minute.
+        tail_limit = _FLOW_CROSSOVER_TAIL
 
         conn = None
         try:
@@ -770,6 +776,20 @@ def run_flow_alerts(bus) -> None:
                     conn.close()
                 except Exception:
                     log.debug("flow-alert history conn close failed", exc_info=True)
+
+        # Contract-level UOA (from the poll's on_chain stash — no re-fetch). Once per
+        # contract per day: the cooldown map doubles as a date-scoped seen-set (vol/OI
+        # is monotonic, so a contract crosses K once and stays — alert it a single time).
+        for sym, contracts in compute.take_uoa_stash().items():
+            for c in contracts:
+                cid = f"{sym}|uoa|{c['side']}|{c['strike']:g}|{c['expiry']}"
+                if cid in cooldowns:
+                    continue
+                cooldowns[cid] = now_ts
+                a = dict(c)
+                a["id"] = cid
+                a["text"] = flow_alerts.alert_text(a)
+                fresh.append(a)
 
         if fresh:
             for a in fresh:

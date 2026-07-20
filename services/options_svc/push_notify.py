@@ -236,17 +236,17 @@ def send_action_digest(items: dict, *, slot_label: str = "", config: dict | None
     return True
 
 
-# ── Options-flow alerts (call/put premium crossover + unusual-activity spike) ──
-# An alert dict: {"type": "crossover"|"spike", "side": ..., "symbol": ..., "text": ...}
-# (built by flow_alerts.detect_flow_alerts). Green = bullish (calls overtook / call
-# spike); red = bearish (puts overtook / put spike).
+# ── Options-flow alerts (call/put premium crossover + contract-level UOA) ──────
+# An alert dict: {"type": "crossover"|"uoa", "side": ..., "symbol": ..., "text": ...}
+# (built by flow_alerts). Green = bullish (calls overtook / unusual call activity);
+# red = bearish (puts overtook / unusual put activity).
 _FLOW_GREEN = 0x2ECC71
 _FLOW_RED = 0xE74C3C
 
 
 def _flow_is_bullish(a) -> bool:
     return (a.get("type") == "crossover" and a.get("side") == "calls_over") or \
-           (a.get("type") == "spike" and a.get("side") == "call")
+           (a.get("type") == "uoa" and a.get("side") == "call")
 
 
 def flow_alert_telegram_text(a) -> str:

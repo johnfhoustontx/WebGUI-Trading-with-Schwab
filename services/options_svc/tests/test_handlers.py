@@ -1539,8 +1539,8 @@ def test_run_flow_alerts_detects_pushes_publishes(monkeypatch):
 
 
 def test_run_flow_alerts_loads_bounded_tail_not_whole_day(monkeypatch):
-    """The detectors need only the trailing ~22 rows, so the handler loads a
-    bounded tail (spike window + 2), never the whole day's series per symbol."""
+    """The crossover detector needs only the trailing few rows, so the handler
+    loads a small bounded tail, never the whole day's series per symbol."""
     from shared.bus import Bus
     from services.options_svc import handlers
     bus = Bus(fake=True)
@@ -1550,8 +1550,7 @@ def test_run_flow_alerts_loads_bounded_tail_not_whole_day(monkeypatch):
                         lambda conn, sym, limit: seen.setdefault("limit", limit) or [])
     monkeypatch.setattr(handlers, "_flow_now_ts", lambda: 120)
     handlers.run_flow_alerts(bus)
-    # default spike window 20 -> 22 rows.
-    assert seen["limit"] == 22
+    assert seen["limit"] == handlers._FLOW_CROSSOVER_TAIL
 
 
 def test_run_flow_alerts_excludes_vix(monkeypatch):
@@ -1599,3 +1598,26 @@ def test_run_flow_alerts_dedups_published_by_id(monkeypatch):
     env = bus.cache_get("cache:options:flow_alerts")
     ids = [a["id"] for a in env.payload["alerts"]]
     assert ids.count("$SPX|crossover|calls_over|120") == 1
+
+
+def test_run_flow_alerts_emits_uoa_from_stash(monkeypatch):
+    from shared.bus import Bus
+    from services.options_svc import handlers, compute
+    bus = Bus(fake=True)
+    contract = {"type": "uoa", "side": "call", "symbol": "SPY", "strike": 450.0,
+                "expiry": "2026-07-18", "dte": 2, "cost": 1.85, "volume": 8200,
+                "oi": 1300, "vol_oi": 6.3, "premium": 1517000.0}
+    monkeypatch.setattr(handlers, "_flow_alert_symbols", lambda: [])   # no crossover symbols
+    monkeypatch.setattr(compute, "take_uoa_stash", lambda: {"SPY": [dict(contract)]})
+    monkeypatch.setattr(handlers, "_flow_now_ts", lambda: 1000)
+    sent = []
+    monkeypatch.setattr(handlers.push_notify, "send_flow_alert", lambda a, **k: sent.append(a))
+    handlers.run_flow_alerts(bus)
+    env = bus.cache_get("cache:options:flow_alerts")
+    ids = [a["id"] for a in env.payload["alerts"]]
+    assert ids == ["SPY|uoa|call|450|2026-07-18"] and len(sent) == 1
+    assert "07/18" in env.payload["alerts"][0]["text"]
+    # Same contract next tick → once-per-day dedup, no re-push/re-append.
+    monkeypatch.setattr(compute, "take_uoa_stash", lambda: {"SPY": [dict(contract)]})
+    handlers.run_flow_alerts(bus)
+    assert len(sent) == 1 and len(bus.cache_get("cache:options:flow_alerts").payload["alerts"]) == 1
