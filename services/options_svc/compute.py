@@ -2126,13 +2126,22 @@ def build_matrix(scan_day, flow_alerts, today, session_date, now_ts):
     PURE ``matrix.build_rows``. No proxy calls. Fully defensive — a DB-connect
     failure degrades to an empty-rows payload with ``error`` set; a per-symbol
     read failure yields an empty blob for that symbol (never sinks the build)."""
+    # ``session_date`` arrives as a ``datetime.date`` OBJECT from
+    # ``scheduler.active_session_date()`` — the gex_history DB readers NEED that
+    # object (``_local_unix_range`` reads ``d.year/.month/.day``). But the count
+    # gate compares against the payloads' STRING ``date`` field, and the cached
+    # payload's ``session_date`` must be a JSON-clean string (the MatrixSnapshot
+    # contract). So normalize to an isoformat string ONLY for the gate + the
+    # returned field; keep the original object for the DB reads.
+    session_key = (session_date.isoformat()
+                   if hasattr(session_date, "isoformat") else session_date)
     # Gate the counts on ``session_date``, NOT ``today``: the flow series/flip are
     # read for ``session_date``, and off-hours those diverge (Saturday: today=Sat,
     # session_date=Fri, and the persisted scan_day/flow_alerts payloads are dated
     # Fri). Gating on session_date keeps the counts aligned with the displayed
     # session (during RTH today == session_date, so nothing changes).
-    scan_counts = _count_scan_signals(scan_day, session_date)
-    alert_counts = _count_flow_alerts(flow_alerts, session_date)
+    scan_counts = _count_scan_signals(scan_day, session_key)
+    alert_counts = _count_flow_alerts(flow_alerts, session_key)
     symbols = _matrix_symbols()
 
     raw: dict = {}
@@ -2141,7 +2150,7 @@ def build_matrix(scan_day, flow_alerts, today, session_date, now_ts):
         conn = gh.connect(read_only=True)
     except Exception:
         log.debug("build_matrix: DB unavailable", exc_info=True)
-        return {"date": today, "session_date": session_date, "ts": _now_iso(),
+        return {"date": today, "session_date": session_key, "ts": _now_iso(),
                 "rows": [], "error": "matrix unavailable"}
 
     try:
@@ -2165,9 +2174,9 @@ def build_matrix(scan_day, flow_alerts, today, session_date, now_ts):
         rows.sort(key=lambda r: r["hotness"], reverse=True)
     except Exception:
         log.debug("build_matrix: build failed", exc_info=True)
-        return {"date": today, "session_date": session_date, "ts": _now_iso(),
+        return {"date": today, "session_date": session_key, "ts": _now_iso(),
                 "rows": [], "error": "matrix build failed"}
-    return {"date": today, "session_date": session_date, "ts": _now_iso(),
+    return {"date": today, "session_date": session_key, "ts": _now_iso(),
             "rows": rows, "error": None}
 
 

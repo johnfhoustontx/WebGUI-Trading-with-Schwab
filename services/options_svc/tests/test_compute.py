@@ -3218,6 +3218,42 @@ def test_build_matrix_counts_gate_on_session_date(monkeypatch):
     assert r["n_signals"] == 1 and r["n_alerts"] == 1
 
 
+def test_build_matrix_counts_work_with_date_object_session_date(monkeypatch):
+    import datetime
+    from services.options_svc import compute
+    seen = {}
+    class FakeGH:
+        @staticmethod
+        def connect(read_only=False):
+            class C:
+                def close(self): pass
+            return C()
+        @staticmethod
+        def load_flow_series(conn, symbol, d=None):
+            seen["series_date_type"] = type(d).__name__
+            assert hasattr(d, "year")   # DB reader needs a date object, not a string
+            return [(0, 100.0, 10, 5, 1_000_000.0, 400_000.0),
+                    (900, 100.7, 30, 8, 3_000_000.0, 800_000.0)]
+        @staticmethod
+        def latest_flip(conn, symbol, view="gex", date=None):
+            assert hasattr(date, "year")
+            return 100.0
+    monkeypatch.setattr(compute, "_matrix_symbols", lambda: ["SPY"])
+    monkeypatch.setattr(compute, "_matrix_gh", lambda: FakeGH)
+    out = compute.build_matrix(
+        scan_day={"date": "2026-07-20", "signals_0dte": [{"id": "a", "symbol": "SPY"}],
+                  "signals_swing": [], "signals_directional": []},
+        flow_alerts={"date": "2026-07-20", "alerts": [{"id": "x", "symbol": "SPY"}]},
+        today="2026-07-20",
+        session_date=datetime.date(2026, 7, 20),   # the REAL active_session_date() return type
+        now_ts=900)
+    r = out["rows"][0]
+    assert r["n_signals"] == 1 and r["n_alerts"] == 1        # counts work despite date-object input
+    assert out["session_date"] == "2026-07-20"               # payload field normalized to string
+    assert isinstance(out["session_date"], str)
+    assert seen["series_date_type"] == "date"                # DB read still got the date object
+
+
 def test_build_matrix_one_bad_symbol_cannot_sink_build(monkeypatch):
     from services.options_svc import compute
 
