@@ -1607,7 +1607,9 @@ def test_run_flow_alerts_emits_uoa_from_stash(monkeypatch):
     contract = {"type": "uoa", "side": "call", "symbol": "SPY", "strike": 450.0,
                 "expiry": "2026-07-18", "dte": 2, "cost": 1.85, "volume": 8200,
                 "oi": 1300, "vol_oi": 6.3, "premium": 1517000.0}
-    monkeypatch.setattr(handlers, "_flow_alert_symbols", lambda: [])   # no crossover symbols
+    # SPY is in the universe (no crossover SERIES data, but a valid member); UOA
+    # shares the crossover universe, so the stash symbol must be in it to emit.
+    monkeypatch.setattr(handlers, "_flow_alert_symbols", lambda: ["SPY"])
     monkeypatch.setattr(compute, "take_uoa_stash", lambda: {"SPY": [dict(contract)]})
     monkeypatch.setattr(handlers, "_flow_now_ts", lambda: 1000)
     sent = []
@@ -1621,3 +1623,23 @@ def test_run_flow_alerts_emits_uoa_from_stash(monkeypatch):
     monkeypatch.setattr(compute, "take_uoa_stash", lambda: {"SPY": [dict(contract)]})
     handlers.run_flow_alerts(bus)
     assert len(sent) == 1 and len(bus.cache_get("cache:options:flow_alerts").payload["alerts"]) == 1
+
+
+def test_run_flow_alerts_uoa_excludes_vix(monkeypatch):
+    from shared.bus import Bus
+    from services.options_svc import handlers, compute
+    bus = Bus(fake=True)
+    def uoa(sym, strike):
+        return {"type": "uoa", "side": "call", "symbol": sym, "strike": strike,
+                "expiry": "2026-07-18", "dte": 2, "cost": 1.0, "volume": 8000,
+                "oi": 1000, "vol_oi": 8.0, "premium": 800000.0}
+    monkeypatch.setattr(handlers, "_flow_alert_symbols", lambda: ["SPY"])   # $VIX excluded
+    monkeypatch.setattr(compute, "take_uoa_stash",
+                        lambda: {"SPY": [uoa("SPY", 450.0)], "$VIX": [uoa("$VIX", 20.0)]})
+    monkeypatch.setattr(handlers, "_flow_now_ts", lambda: 1000)
+    sent = []
+    monkeypatch.setattr(handlers.push_notify, "send_flow_alert", lambda a, **k: sent.append(a))
+    handlers.run_flow_alerts(bus)
+    ids = [a["id"] for a in bus.cache_get("cache:options:flow_alerts").payload["alerts"]]
+    assert ids == ["SPY|uoa|call|450|2026-07-18"]   # $VIX dropped
+    assert all("$VIX" not in a["symbol"] for a in sent)

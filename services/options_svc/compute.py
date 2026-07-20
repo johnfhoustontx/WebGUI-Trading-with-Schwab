@@ -1831,16 +1831,20 @@ def collect_gex_snapshots(capture_symbols=None) -> int:
         from services.options_svc import flow_alerts
         clear_uoa_stash()
         _uoa_cfg = flow_alerts.load_thresholds()
+        # Kill-switch: when the feature is disabled, skip the per-symbol UOA compute
+        # entirely (nothing computed/published). The chain-capture stash stays on.
+        _uoa_on = _uoa_cfg.get("enabled", True)
         wanted = set(capture_symbols) if capture_symbols else set()
 
         def on_chain(sym, chain):  # noqa: F811 — the callback poll_once calls
             if sym in wanted:
                 _stash_tick_chain(sym, chain)
-            # Best-effort — a UOA detect failure must NEVER break collection.
-            try:
-                stash_uoa(sym, flow_alerts.detect_uoa(sym, chain, _uoa_cfg))
-            except Exception:
-                gc.log.debug("UOA detect failed for %s", sym, exc_info=True)
+            if _uoa_on:
+                # Best-effort — a UOA detect failure must NEVER break collection.
+                try:
+                    stash_uoa(sym, flow_alerts.detect_uoa(sym, chain, _uoa_cfg))
+                except Exception:
+                    gc.log.debug("UOA detect failed for %s", sym, exc_info=True)
 
         gc.poll_once(_proxy.schwab_py_client, gt.GammaEngine(), conn,
                      on_chain=on_chain)

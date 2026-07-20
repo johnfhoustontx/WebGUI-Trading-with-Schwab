@@ -758,6 +758,11 @@ def run_flow_alerts(bus) -> None:
         # crossover), never the whole day's ~440 rows/symbol every minute.
         tail_limit = _FLOW_CROSSOVER_TAIL
 
+        # Capture the flow universe ONCE (excludes $VIX) and reuse it for both the
+        # crossover loop and the UOA drain so both share the exact same universe.
+        symbols = _flow_alert_symbols()
+        allowed = set(symbols)
+
         conn = None
         try:
             import gex_history_db as gh
@@ -766,7 +771,7 @@ def run_flow_alerts(bus) -> None:
             log.debug("flow-alert history connect degraded", exc_info=True)
         try:
             fresh = []
-            for sym in _flow_alert_symbols():
+            for sym in symbols:
                 series = _load_flow_series_for(conn, sym, tail_limit) if conn is not None else []
                 for a in flow_alerts.detect_flow_alerts(sym, series, cfg, cooldowns, now_ts):
                     fresh.append(a)
@@ -781,6 +786,8 @@ def run_flow_alerts(bus) -> None:
         # contract per day: the cooldown map doubles as a date-scoped seen-set (vol/OI
         # is monotonic, so a contract crosses K once and stays — alert it a single time).
         for sym, contracts in compute.take_uoa_stash().items():
+            if sym not in allowed:      # same universe as crossover (excludes $VIX)
+                continue
             for c in contracts:
                 cid = f"{sym}|uoa|{c['side']}|{c['strike']:g}|{c['expiry']}"
                 if cid in cooldowns:
