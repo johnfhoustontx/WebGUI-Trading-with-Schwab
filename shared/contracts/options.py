@@ -95,3 +95,18 @@ class RescueAdvisory(_Base):
     priced_from_version: int | None = None
     ts: str | None = None
     error: str | None = None
+
+
+class MatrixSnapshot(_Base):
+    """cache:options:matrix — one row per watchlist symbol for the Matrix Display tab.
+
+    Rows are heterogeneous per-symbol dicts (see ``matrix.build_rows``); like the
+    other view models this contract validates only the envelope shape. Every field
+    carries a default so a payload cached before a field existed still validates
+    (Redis persists cache:options:matrix across a service restart).
+    """
+    date: str | None = None            # CT date the row counts are scoped to
+    session_date: str | None = None    # gex session date used for series/flip
+    ts: str | None = None
+    rows: list[dict] = []              # heterogeneous per-symbol row dicts (see matrix.build_rows)
+    error: str | None = None

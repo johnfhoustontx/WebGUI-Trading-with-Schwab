@@ -36,3 +36,15 @@ def test_scan_result_back_compat_without_signals_directional():
     """
     r = ScanResult(signals_0dte=[], signals_swing=[])
     assert r.signals_directional == []
+
+
+def test_matrix_snapshot_roundtrip_and_defaults():
+    from shared.contracts.options import MatrixSnapshot
+    m = MatrixSnapshot(date="2026-07-20", session_date="2026-07-20", ts="2026-07-20T09:15:00",
+                       rows=[{"symbol": "SPY", "signal": "buy"}])
+    assert m.rows[0]["symbol"] == "SPY"
+    # tolerant defaults so older Redis payloads still validate
+    assert MatrixSnapshot().rows == []
+    assert MatrixSnapshot().error is None
+    dumped = m.to_json()
+    assert MatrixSnapshot.from_json(dumped).rows == m.rows
