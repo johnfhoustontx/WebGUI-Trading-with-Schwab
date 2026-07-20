@@ -15,6 +15,7 @@ def test_shell_registers_all_pages():
         "/", "/options/paper", "/options/captured", "/options/portfolio",
         "/options/calculator", "/options/swing", "/options/gamma",
         "/options/simulator", "/options/expected-move", "/options/rescue",
+        "/options/matrix",
         "/sentiment", "/sentiment/sectors", "/sentiment/rotation", "/sentiment/rrg",
         "/trade", "/portfolio", "/driver", "/settings",
         "/eod", "/eod/detail", "/status", "/manuals", "/terminate",

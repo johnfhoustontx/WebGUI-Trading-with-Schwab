@@ -121,6 +121,19 @@ Flags credit spreads that are **in trouble** and offers ways to fix them.
 - **Apply** dispatches a (simulated) paper adjustment. The board refreshes itself
   as positions are re-priced.
 """,
+    "/options/matrix": """
+**Matrix — the simple version**
+
+One **at-a-glance grid** of every tracked symbol, so you can scan the whole board
+without opening each page.
+
+- **Each row** is a ticker: spot, **Day %**, a **trend** arrow, call/put
+  **acceleration**, put/call ratio, net premium ($M), the **GEX** regime
+  (above/below the flip), how many live **signals** and **flow** alerts it has, an
+  overall **Signal** (buy / neutral / sell), and a **hotness** score.
+- **Click any column header** to sort — e.g. hottest names or biggest movers first.
+- Green leans bullish, red leans bearish. Auto-refreshes as the data updates.
+""",
     "/options/paper": """
 **Paper Trades — the simple version**
 

@@ -214,6 +214,7 @@ def _serve_manual(name: str):
 # Options is an expandable group; each child is its own route. (route, label, icon)
 OPTIONS_CHILDREN = [
     ("/", "Scanner", "radar"),
+    ("/options/matrix", "Matrix", "grid_on"),
     ("/options/paper", "Paper Trades", "request_quote"),
     ("/options/captured", "Captured Signals", "bookmark"),
     ("/options/portfolio", "Paper Portfolio", "account_balance_wallet"),
@@ -327,6 +328,7 @@ _NAV_LABEL = {route: label for route, label, _icon in
 # One distinct color per route (the favicon fill). Material hues, all visually apart.
 _TAB_COLOR = {
     "/": "#42a5f5",                       # Scanner — blue
+    "/options/matrix": "#4dd0e1",         # Matrix — cyan
     "/options/paper": "#66bb6a",          # Paper Trades — green
     "/options/captured": "#ab47bc",       # Captured Signals — purple
     "/options/portfolio": "#26a69a",      # Paper Portfolio — teal
@@ -1155,6 +1157,13 @@ def options_rescue_page() -> None:
     with _layout("/options/rescue", "Options · Rescue"):
         from pages.options import rescue
         rescue.render()
+
+
+@ui.page("/options/matrix")
+def options_matrix_page() -> None:
+    with _layout("/options/matrix", "Options · Matrix"):
+        from pages.options import matrix
+        matrix.render()
 
 
 @ui.page("/sentiment")
