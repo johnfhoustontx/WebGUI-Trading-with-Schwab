@@ -15,6 +15,7 @@ Kept synchronous: the scaffold's consumer loop handles sync handlers.
 """
 import datetime as _dt
 import logging
+import time
 
 from services.options_svc import compute
 from services.options_svc import flow_alerts
@@ -220,6 +221,13 @@ EVENT_GEX_STATUS = "events:options:gex_status"
 # tick right after collection (rides collect_gex_history).
 CACHE_FLOW_SKEW = "cache:options:flow_skew"
 EVENT_FLOW_SKEW = "events:options:flow_skew"
+
+# Options Matrix — a per-symbol hotness roll-up (signal/alert counts + flip) built
+# from the just-written GEX rows. Published on each 1-min GEX tick right after the
+# flow-skew + flow-alert publishes (rides collect_gex_history). skip_unchanged so an
+# unchanged matrix doesn't wake GUI version-pollers.
+CACHE_MATRIX = "cache:options:matrix"
+EVENT_MATRIX = "events:options:matrix"
 
 # Options-flow alerts (premium crossover + unusual call/put activity). Detected on
 # each 1-min GEX tick over the collected universe, pushed to the phone (best-effort),
@@ -684,6 +692,10 @@ def collect_gex_history(bus=None) -> None:
             run_flow_alerts(bus)
         except Exception:
             log.exception("run_flow_alerts after collect degraded")
+        try:
+            publish_matrix(bus)
+        except Exception:
+            log.exception("publish_matrix after collect degraded")
 
 
 def publish_flow_skew(bus) -> None:
@@ -699,6 +711,38 @@ def publish_flow_skew(bus) -> None:
         bus.cache_set(CACHE_FLOW_SKEW, view, event=EVENT_FLOW_SKEW)
     except Exception:
         log.exception("publish_flow_skew degraded")
+
+
+def _cache_payload(bus, key):
+    """Unwrap ``bus.cache_get(key).payload`` → the raw payload (or None if absent)."""
+    env = bus.cache_get(key)
+    return env.payload if env is not None else None
+
+
+def publish_matrix(bus) -> None:
+    """Assemble the Options Matrix view and publish it to the bus.
+
+    Rides the 1-min GEX tick right after the flow-skew + flow-alert publishes,
+    reusing the rows ``collect_gex_snapshots`` just wrote to ``gex_history.db``.
+    Feeds ``compute.build_matrix`` the two cached inputs (scan_day + flow_alerts);
+    that builder is fully defensive (a DB-connect failure degrades to empty rows).
+    ``skip_unchanged`` so an unchanged matrix doesn't wake GUI version-pollers.
+    Guarded so a matrix failure never escapes into the caller (the 1-min GEX
+    collection + the flow-alert publish must be unaffected)."""
+    try:
+        # scheduler imports handlers at its module top, so import it lazily here to
+        # avoid a module-top import cycle.
+        from services.options_svc import scheduler
+        today = _today_ct()
+        session_date = scheduler.active_session_date()
+        now_ts = int(time.time())
+        scan_day = _cache_payload(bus, CACHE_SCAN_DAY)
+        flow_alerts_payload = _cache_payload(bus, CACHE_FLOW_ALERTS)
+        view = compute.build_matrix(
+            scan_day, flow_alerts_payload, today, session_date, now_ts)
+        bus.cache_set(CACHE_MATRIX, view, event=EVENT_MATRIX, skip_unchanged=True)
+    except Exception:
+        log.exception("publish_matrix degraded")
 
 
 def _flow_alert_symbols():

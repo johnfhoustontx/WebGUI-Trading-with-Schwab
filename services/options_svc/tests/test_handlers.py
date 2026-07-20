@@ -1643,3 +1643,85 @@ def test_run_flow_alerts_uoa_excludes_vix(monkeypatch):
     ids = [a["id"] for a in bus.cache_get("cache:options:flow_alerts").payload["alerts"]]
     assert ids == ["SPY|uoa|call|450|2026-07-18"]   # $VIX dropped
     assert all("$VIX" not in a["symbol"] for a in sent)
+
+
+def test_publish_matrix_caches_view(monkeypatch):
+    """publish_matrix calls compute.build_matrix and caches/publishes the result
+    under cache:options:matrix (skip_unchanged, so an unchanged matrix is silent)."""
+    bus = Bus(fake=True)
+
+    def fake_build(scan_day, flow_alerts, today, session_date, now_ts):
+        return {"date": today, "session_date": session_date, "ts": "t",
+                "rows": [{"symbol": "SPY", "n_signals": 1, "hotness": 5}],
+                "error": None}
+
+    monkeypatch.setattr(handlers.compute, "build_matrix", fake_build)
+
+    sub = bus.subscribe(handlers.EVENT_MATRIX)
+    handlers.publish_matrix(bus)
+    msg = sub.get_message(timeout=1.0)
+    sub.close()
+
+    env = bus.cache_get(handlers.CACHE_MATRIX)
+    assert env is not None
+    assert env.payload["rows"][0]["symbol"] == "SPY"
+    assert msg is not None and msg.get("version") == env.version
+
+
+def test_publish_matrix_reads_scan_day_and_flow_alert_keys(monkeypatch):
+    """publish_matrix feeds build_matrix the payloads from the scan_day + flow_alerts
+    cache keys (unwrapped from their envelopes)."""
+    bus = Bus(fake=True)
+    bus.cache_set(handlers.CACHE_SCAN_DAY, {"marker": "scan"})
+    bus.cache_set(handlers.CACHE_FLOW_ALERTS, {"marker": "alerts"})
+    seen = {}
+
+    def fake_build(scan_day, flow_alerts, today, session_date, now_ts):
+        seen["scan_day"] = scan_day
+        seen["flow_alerts"] = flow_alerts
+        return {"rows": [], "error": None}
+
+    monkeypatch.setattr(handlers.compute, "build_matrix", fake_build)
+    handlers.publish_matrix(bus)
+    assert seen["scan_day"] == {"marker": "scan"}
+    assert seen["flow_alerts"] == {"marker": "alerts"}
+
+
+def test_publish_matrix_failure_does_not_raise(monkeypatch):
+    """A build_matrix failure degrades (logged), never raises out of publish_matrix."""
+    def _boom(*a, **k):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(handlers.compute, "build_matrix", _boom)
+    handlers.publish_matrix(Bus(fake=True))  # must not raise
+
+
+def test_collect_gex_history_publishes_matrix_after_flow_alerts(monkeypatch):
+    """collect_gex_history publishes the matrix AFTER run_flow_alerts, as its own
+    best-effort block."""
+    order = []
+    monkeypatch.setattr(handlers.compute, "collect_gex_snapshots",
+                        lambda capture_symbols=None: order.append("collect"))
+    monkeypatch.setattr(handlers, "publish_flow_skew",
+                        lambda bus: order.append("flow_skew"))
+    monkeypatch.setattr(handlers, "run_flow_alerts",
+                        lambda bus: order.append("flow_alerts"))
+    monkeypatch.setattr(handlers, "publish_matrix",
+                        lambda bus: order.append("matrix"))
+    bus = Bus(fake=True)
+    handlers.collect_gex_history(bus=bus)
+    assert order == ["collect", "flow_skew", "flow_alerts", "matrix"]
+
+
+def test_collect_gex_history_matrix_failure_does_not_raise(monkeypatch):
+    """A publish_matrix failure must never abort the (already-done) collect."""
+    monkeypatch.setattr(handlers.compute, "collect_gex_snapshots",
+                        lambda capture_symbols=None: None)
+    monkeypatch.setattr(handlers, "publish_flow_skew", lambda bus: None)
+    monkeypatch.setattr(handlers, "run_flow_alerts", lambda bus: None)
+
+    def _boom(bus):
+        raise RuntimeError("matrix down")
+
+    monkeypatch.setattr(handlers, "publish_matrix", _boom)
+    handlers.collect_gex_history(bus=Bus(fake=True))  # must not raise
