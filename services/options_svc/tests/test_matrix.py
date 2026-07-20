@@ -30,6 +30,13 @@ def test_flow_acceleration_steady_and_flat_edges():
     assert m.flow_acceleration([], now_ts=0) == ("flat", 0.0)
     assert m.flow_acceleration([(0, 0.0), (900, 0.0)], now_ts=900) == ("flat", 0.0)
 
+def test_flow_acceleration_cool_when_recent_slope_below_average():
+    # Fast accrual early, then near-flat in the recent window -> cooling.
+    series = [(0, 0.0), (300, 800.0), (600, 1600.0), (1500, 1650.0), (1800, 1700.0)]
+    state, ratio = m.flow_acceleration(series, now_ts=1800, lookback_s=900)
+    assert state == "cool"
+    assert ratio <= m._ACCEL_COOL
+
 # ---- composite_signal ----
 def test_composite_buy_when_trend_up_and_calls_dominant():
     sig, strength = m.composite_signal(trend_dir=0.8, call_state="hot", put_state="steady",
@@ -52,11 +59,29 @@ def test_composite_neutral_on_no_data():
                                        call_prem=0.0, put_prem=0.0)
     assert sig == "neutral" and strength == 0
 
+def test_composite_strong_buy_has_strength_two():
+    sig, strength = m.composite_signal(trend_dir=1.0, call_state="hot", put_state="steady",
+                                       call_prem=900.0, put_prem=100.0)
+    assert sig == "buy"
+    assert strength == 2
+
+def test_composite_tolerates_none_premiums():
+    sig, strength = m.composite_signal(trend_dir=0.8, call_state="hot", put_state="steady",
+                                       call_prem=None, put_prem=None)
+    assert sig in ("buy", "neutral", "sell")
+
 # ---- pc_ratio / net_premium ----
 def test_pc_ratio_and_net_premium():
     assert m.pc_ratio(call_prem=200.0, put_prem=100.0) == 0.5
     assert m.pc_ratio(call_prem=0.0, put_prem=100.0) is None
     assert m.net_premium_m(call_prem=3_000_000.0, put_prem=1_000_000.0) == 2.0
+
+def test_pc_ratio_and_net_premium_tolerate_none():
+    # forward-only premium columns are None on early snapshots — never raise.
+    assert m.pc_ratio(call_prem=None, put_prem=100.0) is None
+    assert m.pc_ratio(call_prem=200.0, put_prem=None) == 0.0
+    assert m.net_premium_m(call_prem=None, put_prem=None) == 0.0
+    assert m.net_premium_m(call_prem=3_000_000.0, put_prem=None) == 3.0
 
 # ---- gex_regime ----
 def test_gex_regime_above_below_na():
@@ -64,6 +89,9 @@ def test_gex_regime_above_below_na():
     assert m.gex_regime(spot=95.0, flip=100.0) == "below"
     assert m.gex_regime(spot=None, flip=100.0) == "na"
     assert m.gex_regime(spot=100.0, flip=None) == "na"
+
+def test_gex_regime_boundary_is_above():
+    assert m.gex_regime(spot=100.0, flip=100.0) == "above"
 
 # ---- hotness ----
 def test_hotness_rewards_signals_alerts_and_conviction():
@@ -95,3 +123,30 @@ def test_build_rows_degrades_symbol_with_no_series():
     assert rows[0]["spot"] is None
     assert rows[0]["signal"] == "neutral"
     assert rows[0]["n_signals"] == 0
+
+def test_build_rows_tolerates_null_premium_on_latest_row():
+    # forward-only premium columns are None on early snapshots — one bad symbol
+    # must not zero the whole matrix.
+    raw = {
+        "SPY": {"series": [(0, 100.0, 10, 5, None, None),
+                           (900, 100.6, 30, 8, None, None)],
+                "flip": 100.0},
+        "QQQ": {"series": [(0, 400.0, 10, 5, 1_000_000.0, 400_000.0),
+                           (900, 401.0, 30, 8, 2_000_000.0, 800_000.0)],
+                "flip": 399.0},
+    }
+    rows = m.build_rows(raw, scan_counts={"SPY": 3}, alert_counts={"SPY": 1}, now_ts=900)
+    assert len(rows) == 2
+    spy = next(r for r in rows if r["symbol"] == "SPY")
+    assert spy["signal"] in ("buy", "neutral", "sell")
+    assert spy["net_prem_m"] == 0.0
+    assert spy["pc_ratio"] is None
+    assert spy["n_signals"] == 3 and spy["n_alerts"] == 1
+
+def test_build_rows_zero_spot_is_not_nulled():
+    raw = {"ZZZ": {"series": [(0, 0.0, 0, 0, 0.0, 0.0)], "flip": 0.0}}
+    rows = m.build_rows(raw, scan_counts={}, alert_counts={}, now_ts=0)
+    r = rows[0]
+    assert r["spot"] == 0.0
+    assert r["flip"] == 0.0
+    assert r["gex_regime"] == "above"

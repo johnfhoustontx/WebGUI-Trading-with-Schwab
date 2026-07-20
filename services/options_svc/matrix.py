@@ -90,14 +90,21 @@ def flow_acceleration(prem_series, now_ts, lookback_s=_ACCEL_LOOKBACK_S):
 
 
 def pc_ratio(call_prem, put_prem):
-    """Put/Call premium ratio; None when calls are zero (undefined)."""
+    """Put/Call premium ratio; None when calls are zero (undefined).
+
+    Premium columns are forward-only (None on early snapshots) — never raise.
+    """
+    call_prem = call_prem or 0.0
+    put_prem = put_prem or 0.0
     if not call_prem:
         return None
     return round(put_prem / call_prem, 2)
 
 
 def net_premium_m(call_prem, put_prem):
-    """(call - put) premium in $M."""
+    """(call - put) premium in $M; tolerates None (forward-only columns)."""
+    call_prem = call_prem or 0.0
+    put_prem = put_prem or 0.0
     return round((call_prem - put_prem) / 1_000_000.0, 2)
 
 
@@ -109,7 +116,9 @@ def gex_regime(spot, flip):
 
 def composite_signal(trend_dir, call_state, put_state, call_prem, put_prem):
     """Return (signal, strength). signal in {buy, neutral, sell}; strength in {0,1,2}."""
-    total = (call_prem or 0.0) + (put_prem or 0.0)
+    call_prem = call_prem or 0.0
+    put_prem = put_prem or 0.0
+    total = call_prem + put_prem
     flow_dir = ((call_prem - put_prem) / total) if total > 0 else 0.0
     accel_dir = 0.0
     if call_state == "hot" and put_state != "hot":
@@ -141,41 +150,65 @@ def build_rows(raw, scan_counts, alert_counts, now_ts):
     """
     rows = []
     for symbol, blob in raw.items():
-        series = blob.get("series") or []
-        flip = blob.get("flip")
-        spots = _spot_points(series)
-        spot = spots[-1][1] if spots else None
-        open_spot = spots[0][1] if spots else None
-        day_pct = ((spot - open_spot) / open_spot * 100.0) if (spot and open_spot) else None
-
-        t_state, t_dir = intraday_trend(spots, now_ts)
-        call_series = [(r[0], r[4]) for r in series]   # (ts, call_prem)
-        put_series = [(r[0], r[5]) for r in series]    # (ts, put_prem)
-        c_state, _ = flow_acceleration(call_series, now_ts)
-        p_state, _ = flow_acceleration(put_series, now_ts)
-        call_prem = series[-1][4] if series else 0.0
-        put_prem = series[-1][5] if series else 0.0
-
-        sig, strength = composite_signal(t_dir, c_state, p_state, call_prem, put_prem)
         n_sig = int(scan_counts.get(symbol, 0))
         n_alr = int(alert_counts.get(symbol, 0))
+        try:
+            series = blob.get("series") or []
+            flip = blob.get("flip")
+            spots = _spot_points(series)
+            spot = spots[-1][1] if spots else None
+            open_spot = spots[0][1] if spots else None
+            day_pct = (((spot - open_spot) / open_spot * 100.0)
+                       if (spot is not None and open_spot) else None)
 
-        rows.append({
-            "symbol": symbol,
-            "spot": round(spot, 2) if spot else None,
-            "day_pct": round(day_pct, 2) if day_pct is not None else None,
-            "trend_state": t_state,
-            "trend_dir": round(t_dir, 3),
-            "call_accel": c_state,
-            "put_accel": p_state,
-            "pc_ratio": pc_ratio(call_prem, put_prem),
-            "net_prem_m": net_premium_m(call_prem, put_prem),
-            "flip": round(flip, 2) if flip else None,
-            "gex_regime": gex_regime(spot, flip),
-            "n_signals": n_sig,
-            "n_alerts": n_alr,
-            "signal": sig,
-            "signal_strength": strength,
-            "hotness": hotness(n_sig, n_alr, strength),
-        })
+            t_state, t_dir = intraday_trend(spots, now_ts)
+            call_series = [(r[0], r[4]) for r in series]   # (ts, call_prem)
+            put_series = [(r[0], r[5]) for r in series]    # (ts, put_prem)
+            c_state, _ = flow_acceleration(call_series, now_ts)
+            p_state, _ = flow_acceleration(put_series, now_ts)
+            # forward-only premium columns are None on early snapshots.
+            call_prem = (series[-1][4] or 0.0) if series else 0.0
+            put_prem = (series[-1][5] or 0.0) if series else 0.0
+
+            sig, strength = composite_signal(t_dir, c_state, p_state, call_prem, put_prem)
+
+            rows.append({
+                "symbol": symbol,
+                "spot": round(spot, 2) if spot is not None else None,
+                "day_pct": round(day_pct, 2) if day_pct is not None else None,
+                "trend_state": t_state,
+                "trend_dir": round(t_dir, 3),
+                "call_accel": c_state,
+                "put_accel": p_state,
+                "pc_ratio": pc_ratio(call_prem, put_prem),
+                "net_prem_m": net_premium_m(call_prem, put_prem),
+                "flip": round(flip, 2) if flip is not None else None,
+                "gex_regime": gex_regime(spot, flip),
+                "n_signals": n_sig,
+                "n_alerts": n_alr,
+                "signal": sig,
+                "signal_strength": strength,
+                "hotness": hotness(n_sig, n_alr, strength),
+            })
+        except Exception:
+            # Per-item construction can't sink the batch: one bad symbol must
+            # never zero the whole matrix. Append a minimal degraded row.
+            rows.append({
+                "symbol": symbol,
+                "spot": None,
+                "day_pct": None,
+                "trend_state": "flat",
+                "trend_dir": 0.0,
+                "call_accel": "flat",
+                "put_accel": "flat",
+                "pc_ratio": None,
+                "net_prem_m": 0.0,
+                "flip": None,
+                "gex_regime": "na",
+                "n_signals": n_sig,
+                "n_alerts": n_alr,
+                "signal": "neutral",
+                "signal_strength": 0,
+                "hotness": hotness(n_sig, n_alr, 0),
+            })
     return rows
