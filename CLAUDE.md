@@ -8,7 +8,38 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-07-20 (**X/Twitter public-post notification channel + Swing Scanner liquidity
+**Last updated:** 2026-07-20 (**Options Matrix Display tab** (`/options/matrix`, a new main tab under the
+Options menu, second after Scanner) — an at-a-glance **sortable grid of EVERY watchlist stock** (the
+~45-symbol `gex_collector.collection_symbols()` universe minus `$VIX`), one row per name, to **spot
+opportunities** fast. Columns: Ticker · Spot · Day % · **Intraday trend** (▲/▬/▼ from the day's spot slope)
+· **Call/Put flow acceleration** (recent-slope-vs-day-average of cumulative call/put premium — "is
+call/put-buying heating up") · P/C ratio · Net premium ($M) · **GEX regime** (spot vs stored gamma flip) ·
+**# Signals** · **# Flow alerts** (today) · a **Buy/Neutral/Sell** options-flow composite · a **Hotness**
+sort key (default sort, hottest float up). **Architecture — a new aggregator in `options_svc`, page is a
+pure Tier-1 reader.** Pure derivation `services/options_svc/matrix.py` (`intraday_trend`/`flow_acceleration`/
+`composite_signal`/`pc_ratio`/`net_premium_m`/`gex_regime`/`hotness`/`build_rows` — no I/O, all thresholds
+named constants, per-symbol-guarded so one null-premium symbol can't zero the grid). `compute.build_matrix`
+(DB-only orchestration: per symbol reads the intraday flow series via `gex_history_db.load_flow_series` +
+the latest gamma flip via a NEW cheap **`gex_history_db.latest_flip`** [selects ONLY the `flip` column — no
+whole-session grid decode, avoiding the documented hotspot], counts signals from `cache:options:scan_day` +
+alerts from `cache:options:flow_alerts` grouped by `symbol`) → publishes **`cache:options:matrix`**
+(`MatrixSnapshot` contract) from **`handlers.collect_gex_history`** on the existing **1-min GEX branch** (no
+`scheduler.py`/`app.py` edit), plus a **~30 s live spot/day% overlay** (`compute.apply_live_spots` +
+`handlers.refresh_matrix_spots`, one batched `get_quotes`) on the `refresh_header` tick so Spot/Day% feel
+live. The webgui **`webgui/pages/options/matrix.py`** page is engine-free — version-polls `cache:options:matrix`
+every ~2 s and repaints a sortable `ui.table` in place (Tailwind-first, colored Buy/Sell + trend + regime
+cells; default order = server-sorted hotness-desc). **Counts + flow gate on `session_date`, not `today`**, so
+off-hours the grid shows the last session's flow with ITS own counts. **A date-type bug was caught by LIVE
+verification and fixed**: the count gate compared the string `scan_day["date"]` against the **`datetime.date`**
+returned by `active_session_date()` → all-zero counts on every row; fixed by normalizing `session_date` to an
+isoformat string for the gate + payload field while keeping the date object for the DB reads (a regression
+test now passes a real `datetime.date`). **Live-verified end-to-end** against the running stack (45 rows,
+counts populated — $NDX 135 sig → hotness 275, AMD 7 flow alerts — sorted hotness-desc, colored badges, the
+live-spot overlay updating spots off-window; no console errors). **Restart `options_svc` + the webgui.** TDD
+per layer (implementer + spec + code-quality review each): contracts 42, matrix pure **21**, options_svc
+**677**/2 baseline, gex_history_db **40**, webgui **861**; ruff clean. Branch `Using_Highcharts`. Design/plan:
+[design](docs/plans/2026-07-20-options-matrix-display-design.md) /
+[plan](docs/plans/2026-07-20-options-matrix-display-plan.md). Prior — 2026-07-20 (**X/Twitter public-post notification channel + Swing Scanner liquidity
 fixes** — two pieces. **(1) Twitter channel.** A fourth notification channel
 (`services/options_svc/push_notify.py`) posts new SCANNER (0-DTE + swing) signals to a public
 X/Twitter account, riding the SAME `notify_signals` fan-out as Telegram/Discord/Fi-SMS.
@@ -1622,6 +1653,7 @@ Routes:
 | Route | Page | Status |
 |-------|------|--------|
 | `/` | Options · Scanner (0-4 / 5-15 DTE, two-pane + detail panel; **THREE folder-style SUBTABS since 2026-07-16 — 0-DTE / Swing / Directional**. **Directional** renders the engine's `signals_directional` (single-leg LONG_CALL/LONG_PUT/SHORT_CALL/SHORT_PUT) via the SHARED `strategy_table` builders, scored on **Fit+Quality** (never beside a premium composite — see the Last-updated entry); naked shorts show `Max L = ∞` + an undefined-risk badge and no Paper button. **The tables read `cache:options:scan_day`** (the day union) not `cache:options:scan`, so the day's signals persist to EOD with dropped-out ones **dimmed + frozen + "Dropped HH:MM"** and **no Paper button** (frozen price + verbatim `entry_credit` = a fictional entry); the render is **gated on the envelope's CT date** and surfaces a `truncated` notice. The status bar still reads the LIVE key (the day envelope carries no timestamp/errors) and says "N live signals" so it can't be read as the day count. **"New" = unseen since you last VIEWED the page** (acknowledged only on initial paint), keyed on the engine's unique `id` — this fixed a real bug where the key collapsed to `SPY|PCS|None|None|07/17`; **a webgui restart re-marks everything New** (page-side state, deliberate). ⚠ the nav badge/chime still count credit spreads ONLY — a Fit+Quality score isn't commensurable with the premium composite the min-score alert threshold gates on;  under the main tab strip** (2026-07-11, `main.subtab_slot()` + `.compact-subtabs`; amber/blue tab text kept) with **live signal counts** (`tab_label`); **Run scan is right-aligned flush with the table** (`.scan-panels` drops the q-tab-panel padding); a new qualifying signal pops an **in-app toast** (`fiber_new`, blue-8 — matching the row "new" badge) alongside the chime/desktop notification; **Run scan** is the app's solid 3D button (`color=None` + `.scan-btn`); the per-row **Send to Calculator** now transfers correctly — `_prefill` stashes `pending_legs` + `load_symbol()` so legs apply AFTER the chain loads, instead of being wiped by strike-coercion against an empty chain (see [[calculator-leg-transfer-needs-chain-first]])) | built |
+| `/options/matrix` | Matrix (**NEW 2026-07-20** — main Options tab, second after Scanner: at-a-glance **sortable grid of every watchlist stock** (~45 symbols = `collection_symbols()` minus `$VIX`), one row/symbol — Ticker/Spot/Day %/**Intraday trend**/**Call+Put flow acceleration**/P/C ratio/Net premium $M/**GEX regime**/# Signals/# Flow alerts/**Buy-Neutral-Sell** flow composite/**Hotness** (default sort, hottest first). Pure Tier-1 reader of **`cache:options:matrix`** (`webgui/pages/options/matrix.py`, version-polls ~2 s, in-place sortable `ui.table`, Tailwind-first colored cells) published by a new `options_svc` aggregator — pure `services/options_svc/matrix.py` (trend/accel/composite/hotness) + `compute.build_matrix` over `gex_history.db` (`load_flow_series` + cheap `latest_flip`) + per-symbol counts from `scan_day`/`flow_alerts`; built on the 1-min GEX branch + a ~30 s live spot/day% overlay on the header tick. Counts gate on `session_date`. See the 2026-07-20 "Last updated" entry) | built |
 | `/options/paper` | Paper Trades (ledger table + shared detail panel. **Live unrealized P&L** — `compute.paper_trades_view(reprice=True)` reprices OPEN ledger trades via `signal_repricer` (per-spread × qty), **market-hours gated**, on reload + the 5-min manage tick; the **P&L** column shows realized (closed) or live unrealized (open), **2-decimals + green/red colored**; **Credit/Risk** show 2-decimals; headers are **Credit / Risk / P&L** (no `$`); **newest-first** default sort; **Delete / Delete-all-closed buttons are red** (needed `color=None` so `.pt-danger` beats Quasar's `bg-primary`); the **Analyze** button pops a **descriptive dialog** (verdict + rationale + unrealized P&L / % / current price / DTE / target / breakeven + close X) — `compute.analyze_paper` enriched with `rationale` + `metrics`; row-click analyses update the detail panel silently. Detail panel: the **speedometer falls back to PoP** for paper trades (was stuck at 0 — no stored composite score) and the "Underlying" label is now **"Current price"**) | built |
 | `/options/captured` | Captured Signals | built |
 | `/options/portfolio` | Paper Portfolio (paper account) | built |
