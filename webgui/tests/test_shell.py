@@ -473,18 +473,19 @@ def test_drawer_icons_are_present_and_distinct():
     """The drawer is a 64px icon rail (hover-to-expand) whose collapsed state shows
     ONLY icons (_NAV_CSS fades the labels to opacity:0) — so each drawer item needs
     a non-empty, distinct icon. ``_nav_link``/``_nav_group_link`` render the
-    ``icon`` arg; the dot is retired. Scope is the 7 drawer items (3 groups +
-    FLAT_NAV); child-page icons are not rail affordances (the tab strip renders
-    labels only)."""
+    ``icon`` arg; the dot is retired. Scope is the 8 drawer items (3 groups + the
+    Matrix rail item under Options + FLAT_NAV); child-page icons are not rail
+    affordances (the tab strip renders labels only)."""
     from collections import Counter
 
     import main
 
     items = ([(label, icon) for label, icon, _c in main._NAV_GROUPS]
+             + [(label, icon) for _p, label, icon in main.OPTIONS_RAIL]
              + [(label, icon) for _p, label, icon in main.FLAT_NAV])
     # Pinned count: all()/set-length are vacuously true on an empty list, so this
     # is the non-vacuity guard. A legitimate new drawer item should bump it.
-    assert len(items) == 7, f"expected 7 drawer items, got {len(items)}: {items}"
+    assert len(items) == 8, f"expected 8 drawer items, got {len(items)}: {items}"
     assert not [l for l, i in items if not i], \
         f"drawer items with no icon: {[l for l, i in items if not i]}"
     dupes = {i: [l for l, x in items if x == i]

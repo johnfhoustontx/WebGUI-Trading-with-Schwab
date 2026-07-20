@@ -214,7 +214,6 @@ def _serve_manual(name: str):
 # Options is an expandable group; each child is its own route. (route, label, icon)
 OPTIONS_CHILDREN = [
     ("/", "Scanner", "radar"),
-    ("/options/matrix", "Matrix", "grid_on"),
     ("/options/paper", "Paper Trades", "request_quote"),
     ("/options/captured", "Captured Signals", "bookmark"),
     ("/options/portfolio", "Paper Portfolio", "account_balance_wallet"),
@@ -232,6 +231,12 @@ SENTIMENT_CHILDREN = [
     ("/sentiment/sectors", "Sector & Industry", "table_chart"),
     ("/sentiment/rotation", "Sector Rotation", "donut_large"),
     ("/sentiment/rrg", "RRG", "scatter_plot"),
+]
+
+# Matrix is a top-level MAIN-MENU (rail) item shown directly UNDER the Options
+# group — its own standalone page, NOT an Options tab strip entry. (route, label, icon)
+OPTIONS_RAIL = [
+    ("/options/matrix", "Matrix", "grid_on"),
 ]
 
 # Flat top-level items (non-Options apps). (route, label, icon)
@@ -322,8 +327,8 @@ def drawer_width(pinned: bool) -> int:
 # tabs are tellable-apart at a glance. Applied per page in ``_layout`` via
 # ``ui.page_title`` + a tiny colored-square SVG ``<link rel=icon>``.
 _NAV_LABEL = {route: label for route, label, _icon in
-              OPTIONS_CHILDREN + SENTIMENT_CHILDREN + FLAT_NAV + MORE_CHILDREN
-              + SETTINGS_CHILDREN}
+              OPTIONS_CHILDREN + OPTIONS_RAIL + SENTIMENT_CHILDREN + FLAT_NAV
+              + MORE_CHILDREN + SETTINGS_CHILDREN}
 
 # One distinct color per route (the favicon fill). Material hues, all visually apart.
 _TAB_COLOR = {
@@ -951,6 +956,9 @@ def _layout(active: str, title: str):
             # tab strip) + the single-page apps. No expandable sub-menus.
             opts_label, opts_icon, opts_children = _NAV_GROUPS[0]
             _nav_group_link(opts_label, opts_icon, opts_children, active)
+            # Standalone rail pages that sit directly under the Options group.
+            for _rp, _rl, _ri in OPTIONS_RAIL:
+                _nav_link(_rp, _rl, _ri, active)
             sent_label, sent_icon, sent_children = _NAV_GROUPS[1]
             _nav_group_link(sent_label, sent_icon, sent_children, active)
             for path, label, icon in FLAT_NAV:
@@ -1161,7 +1169,7 @@ def options_rescue_page() -> None:
 
 @ui.page("/options/matrix")
 def options_matrix_page() -> None:
-    with _layout("/options/matrix", "Options · Matrix"):
+    with _layout("/options/matrix", "Matrix"):
         from pages.options import matrix
         matrix.render()
 

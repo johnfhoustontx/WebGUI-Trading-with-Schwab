@@ -8,6 +8,7 @@ def test_every_nav_route_has_a_guide():
     import main
 
     routes = {p for p, _, _ in main.OPTIONS_CHILDREN}
+    routes |= {p for p, _, _ in main.OPTIONS_RAIL}
     routes |= {p for p, _, _ in main.SENTIMENT_CHILDREN}
     routes |= {p for p, _, _ in main.FLAT_NAV}
     routes |= {p for p, _, _ in main.MORE_CHILDREN}
