@@ -352,6 +352,37 @@ def refresh_header(bus) -> None:
     # byte-identical to the last write, so an unchanged header doesn't wake the
     # GUI's version-poller into a needless repaint.
     bus.cache_set(CACHE_HEADER, data, event=EVENT_HEADER, skip_unchanged=True)
+    # Best-effort ~30s live spot/day% overlay onto the 1-min matrix. Guarded so a
+    # matrix/quote failure can NEVER break the header refresh.
+    try:
+        refresh_matrix_spots(bus)
+    except Exception:
+        log.exception("refresh_matrix_spots after header degraded")
+
+
+def refresh_matrix_spots(bus) -> None:
+    """Overlay live spot + day% onto the last-published matrix (best-effort).
+
+    Rides the ~30 s header tick: reads the last matrix, does ONE batched quote
+    fetch for its symbols, overlays live spot/day% via ``compute.apply_live_spots``,
+    and republishes with ``skip_unchanged`` so the Spot/Day% columns feel live
+    without re-decoding grids. Fully defensive — no matrix yet / empty rows / quote
+    failure / missing symbol → a no-op that never raises. Deep-copies each row
+    before overlay so the cached-read payload's dicts are never aliased/mutated."""
+    try:
+        env = bus.cache_get(CACHE_MATRIX)
+        if env is None or not (env.payload or {}).get("rows"):
+            return
+        payload = dict(env.payload)
+        payload["rows"] = [dict(r) for r in payload.get("rows", [])]
+        symbols = [r["symbol"] for r in payload["rows"] if r.get("symbol")]
+        if not symbols:
+            return
+        raw = compute.matrix_quotes(symbols)
+        view = compute.apply_live_spots(payload, raw)
+        bus.cache_set(CACHE_MATRIX, view, event=EVENT_MATRIX, skip_unchanged=True)
+    except Exception:
+        log.exception("refresh_matrix_spots degraded")
 
 
 def swing_scan(bus, args: dict) -> None:

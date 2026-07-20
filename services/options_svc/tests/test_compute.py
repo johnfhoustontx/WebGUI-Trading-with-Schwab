@@ -3254,3 +3254,81 @@ def test_build_matrix_degrades_when_db_unavailable(monkeypatch):
                                session_date="2026-07-20", now_ts=0)
     assert out["rows"] == []
     assert out["error"]
+
+
+# --- apply_live_spots overlay (Task 5) ---------------------------------------
+
+def test_apply_live_spots_updates_spot_and_daypct():
+    from services.options_svc import compute
+    view = {"rows": [{"symbol": "SPY", "spot": 100.0, "day_pct": 0.5, "signal": "buy",
+                      "n_signals": 2, "n_alerts": 1, "signal_strength": 1, "hotness": 9}]}
+    quotes = {"SPY": {"quote": {"lastPrice": 101.0, "netPercentChange": 1.2}}}
+    out = compute.apply_live_spots(view, quotes)
+    r = out["rows"][0]
+    assert r["spot"] == 101.0
+    assert r["day_pct"] == 1.2
+    # untouched fields preserved
+    assert r["signal"] == "buy" and r["n_signals"] == 2
+
+
+def test_apply_live_spots_ignores_missing_symbol():
+    from services.options_svc import compute
+    view = {"rows": [{"symbol": "SPY", "spot": 100.0, "day_pct": 0.5}]}
+    out = compute.apply_live_spots(view, {})     # no quote → unchanged
+    assert out["rows"][0]["spot"] == 100.0
+    assert out["rows"][0]["day_pct"] == 0.5
+
+
+def test_apply_live_spots_missing_price_keeps_existing():
+    """A quote present but with no lastPrice/pct must NOT null existing values."""
+    from services.options_svc import compute
+    view = {"rows": [{"symbol": "SPY", "spot": 100.0, "day_pct": 0.5}]}
+    out = compute.apply_live_spots(view, {"SPY": {"quote": {}}})
+    assert out["rows"][0]["spot"] == 100.0
+    assert out["rows"][0]["day_pct"] == 0.5
+
+
+def test_apply_live_spots_zero_daypct_is_valid():
+    """A flat day (netPercentChange 0.0) is a real value, not 'missing'."""
+    from services.options_svc import compute
+    view = {"rows": [{"symbol": "SPY", "spot": 100.0, "day_pct": 0.5}]}
+    out = compute.apply_live_spots(view, {"SPY": {"quote": {"lastPrice": 100.0,
+                                                            "netPercentChange": 0.0}}})
+    assert out["rows"][0]["day_pct"] == 0.0
+
+
+def test_apply_live_spots_defensive_on_junk():
+    from services.options_svc import compute
+    assert compute.apply_live_spots(None, {}) is None
+    assert compute.apply_live_spots({}, None) == {}
+
+
+def test_matrix_quotes_batched_fetch(monkeypatch):
+    from services.options_svc import compute
+
+    seen = {}
+
+    class _Resp:
+        def json(self):
+            return {"SPY": {"quote": {"lastPrice": 101.0}}}
+
+    class _Client:
+        def get_quotes(self, syms):
+            seen["syms"] = syms
+            return _Resp()
+
+    monkeypatch.setattr(compute._proxy, "schwab_py_client", _Client())
+    out = compute.matrix_quotes(["SPY", "QQQ"])
+    assert out == {"SPY": {"quote": {"lastPrice": 101.0}}}
+    assert seen["syms"] == ["SPY", "QQQ"]
+
+
+def test_matrix_quotes_degrades_to_empty(monkeypatch):
+    from services.options_svc import compute
+
+    class _Client:
+        def get_quotes(self, syms):
+            raise RuntimeError("proxy down")
+
+    monkeypatch.setattr(compute._proxy, "schwab_py_client", _Client())
+    assert compute.matrix_quotes(["SPY"]) == {}
