@@ -8,6 +8,7 @@ no engine/service imports.
 from __future__ import annotations
 
 import datetime as _dt
+from zoneinfo import ZoneInfo
 
 import bus_client
 from nicegui import run, ui
@@ -17,6 +18,10 @@ from pages.ui_guard import guard_async
 from .theme import CARD, EYEBROW, LABEL, PAGE, QUASAR_INTERNAL_CSS
 
 VIEW = "options:matrix"
+
+# The payload ``ts`` is emitted in UTC by the service; the app shows trading times
+# in Central (America/Chicago), matching the rest of the UI.
+_CT_TZ = ZoneInfo("America/Chicago")
 
 _SIGNAL_CLASS = {
     "buy": "bg-emerald-600/80 text-white",
@@ -94,11 +99,19 @@ def matrix_rows(payload):
 
 
 def _short_ts(iso):
-    """An ISO timestamp -> short clock like '1:32 PM'; '' on None/failure."""
+    """A UTC ISO timestamp -> short Central-time clock like '1:32 PM'; '' on None/failure.
+
+    The service emits ``ts`` in UTC (tz-aware); convert to Central before formatting so
+    the displayed 'updated' time matches the user's trading timezone. A naive timestamp
+    (no offset) is assumed to be UTC.
+    """
     if not iso:
         return ""
     try:
-        return _dt.datetime.fromisoformat(iso).strftime("%I:%M %p").lstrip("0")
+        dt = _dt.datetime.fromisoformat(iso)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=_dt.timezone.utc)
+        return dt.astimezone(_CT_TZ).strftime("%I:%M %p").lstrip("0")
     except Exception:
         return ""
 

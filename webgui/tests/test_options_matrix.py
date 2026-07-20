@@ -51,3 +51,21 @@ def test_matrix_rows_degraded_row_has_defaults():
     assert r["signal_label"] == "Neutral"
     assert r["gex_regime"] == "na"
     assert r["n_signals"] == 0
+
+
+def test_short_ts_converts_utc_to_central():
+    # 22:03 UTC on 2026-07-20 is CDT (UTC-5) → 5:03 PM Central, not 10:03 PM.
+    assert matrix._short_ts("2026-07-20T22:03:00+00:00") == "5:03 PM"
+    # a naive timestamp (no offset) is treated as UTC and still converted.
+    assert matrix._short_ts("2026-07-20T22:03:00") == "5:03 PM"
+    # winter date is CST (UTC-6): 22:03 UTC → 4:03 PM.
+    assert matrix._short_ts("2026-01-15T22:03:00+00:00") == "4:03 PM"
+    assert matrix._short_ts(None) == ""
+    assert matrix._short_ts("garbage") == ""
+
+
+def test_status_text_updated_clock_is_central():
+    text = matrix.status_text({"rows": [{}], "session_date": "2026-07-20",
+                               "ts": "2026-07-20T22:03:00+00:00"})
+    assert "updated 5:03 PM" in text          # Central, not UTC 10:03 PM
+    assert "session 2026-07-20" in text
