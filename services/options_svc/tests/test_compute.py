@@ -3130,3 +3130,70 @@ def test_merge_day_signals_truncated_counts_stale_dropped_under_live_overflow():
     # x,y live (kept, over cap); "old" stale -> evicted and reported.
     assert [s["id"] for s in out["signals_0dte"]] == ["x", "y"]
     assert out["truncated"] == {"signals_0dte": 1}
+
+
+# --- build_matrix orchestration + count helpers (Task 3) ---------------------
+
+def test_count_helpers_group_by_symbol():
+    from services.options_svc import compute
+    sc = compute._count_scan_signals({"date": "2026-07-20",
+            "signals_0dte": [{"id": 1, "symbol": "SPY"}, {"id": 2, "symbol": "SPY"}],
+            "signals_swing": [{"id": 3, "symbol": "QQQ"}], "signals_directional": []},
+            today="2026-07-20")
+    assert sc == {"SPY": 2, "QQQ": 1}
+    al = compute._count_flow_alerts({"date": "2026-07-20",
+            "alerts": [{"symbol": "SPY"}, {"symbol": "SPY"}, {"symbol": "QQQ"}]},
+            today="2026-07-20")
+    assert al == {"SPY": 2, "QQQ": 1}
+
+
+def test_count_scan_signals_gates_on_date():
+    from services.options_svc import compute
+    counts = compute._count_scan_signals({"date": "1999-01-01",
+                 "signals_0dte": [{"id": "a", "symbol": "SPY"}], "signals_swing": [],
+                 "signals_directional": []}, today="2026-07-20")
+    assert counts == {}
+
+
+def test_count_flow_alerts_gates_on_date():
+    from services.options_svc import compute
+    assert compute._count_flow_alerts({"date": "1999-01-01",
+                 "alerts": [{"symbol": "SPY"}]}, today="2026-07-20") == {}
+
+
+def test_build_matrix_assembles_rows(monkeypatch):
+    from services.options_svc import compute
+    class FakeGH:
+        @staticmethod
+        def connect(read_only=False): return object()
+        @staticmethod
+        def load_flow_series(conn, symbol, d=None):
+            return [(0, 100.0, 10, 5, 1_000_000.0, 400_000.0),
+                    (900, 100.7, 30, 8, 3_000_000.0, 800_000.0)]
+        @staticmethod
+        def load_date_with_grid(conn, symbol, view, date=None, since_ts=None):
+            return [(900, 100.7, 100.0, 0, 0, 0.0, {})]
+    monkeypatch.setattr(compute, "_matrix_symbols", lambda: ["SPY"])
+    monkeypatch.setattr(compute, "_matrix_gh", lambda: FakeGH)   # loader accessor
+    out = compute.build_matrix(
+        scan_day={"date": "2026-07-20", "signals_0dte": [{"id": "a", "symbol": "SPY"}],
+                  "signals_swing": [], "signals_directional": []},
+        flow_alerts={"date": "2026-07-20", "alerts": [{"id": "x", "symbol": "SPY"}]},
+        today="2026-07-20", session_date="2026-07-20", now_ts=900)
+    assert out["error"] is None
+    assert len(out["rows"]) == 1
+    r = out["rows"][0]
+    assert r["symbol"] == "SPY" and r["n_signals"] == 1 and r["n_alerts"] == 1
+    assert r["gex_regime"] == "above"
+
+
+def test_build_matrix_degrades_when_db_unavailable(monkeypatch):
+    from services.options_svc import compute
+    def boom():
+        raise RuntimeError("no db")
+    monkeypatch.setattr(compute, "_matrix_symbols", lambda: ["SPY"])
+    monkeypatch.setattr(compute, "_matrix_gh", boom)
+    out = compute.build_matrix(scan_day={}, flow_alerts={}, today="2026-07-20",
+                               session_date="2026-07-20", now_ts=0)
+    assert out["rows"] == []
+    assert out["error"]
