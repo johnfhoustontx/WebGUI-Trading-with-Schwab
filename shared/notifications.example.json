@@ -4,5 +4,19 @@
   "min_score": 0,
   "telegram": { "bot_token": "", "chat_id": 0 },
   "discord":  { "webhook_url": "", "flow_uoa_webhook_url": "", "flow_crossover_webhook_url": "" },
-  "sms":      { "fi_number": "", "smtp_user": "", "smtp_app_password": "" }
+  "sms":      { "fi_number": "", "smtp_user": "", "smtp_app_password": "" },
+  "twitter": {
+    "enabled": false,
+    "dry_run": true,
+    "min_score": 70,
+    "daily_cap": 40,
+    "api_key": "",
+    "api_secret": "",
+    "access_token": "",
+    "access_secret": "",
+    "hashtags": ["#options", "#0DTE", "#SPX"],
+    "discord_url": "",
+    "extra_text": "",
+    "disclaimer": "Not advice. Paper/educational."
+  }
 }

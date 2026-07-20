@@ -10,8 +10,11 @@ legacy options-scanner/notifier.py) to avoid its winsound/winotify baggage and
 the documented `notifier` cross-app module-name collision.
 """
 import html as _html
+import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
+
+log = logging.getLogger(__name__)
 
 # `import requests`/`import smtplib` are retained (unused directly here) so that
 # `push_notify.requests`/`push_notify.smtplib` resolve to the same module
@@ -79,13 +82,119 @@ def telegram_signal_text(s: dict) -> str:
     e = lambda v: _html.escape(str(v))
     rr = s.get("rr_pct", 0) or 0
     emoji = "🟢" if rr >= 25 else ("🟡" if rr >= 15 else "⚪")
+    grade = s.get("grade")
+    grade_part = f" • Grade <b>{e(grade)}</b>" if grade else ""
     return (
         f"{emoji} <b>{e(s.get('symbol'))} {e(s.get('type'))}</b> ({e(s.get('trade_type', ''))})\n"
         f"Exp <code>{e(s.get('expiration'))}</code> • {e(_strikes_str(s))}\n"
         f"Credit <b>${(s.get('credit') or 0):.2f}</b> "
         f"(${(s.get('credit') or 0) * _MULT:,.0f}/ct) • Max loss ${(s.get('max_loss') or 0):.2f}\n"
-        f"R:R <b>{rr:.1f}%</b> • PoP {s.get('pop_pct', 0):.0f}% • Δ {s.get('short_delta', 0):.3f}"
+        f"R:R <b>{rr:.1f}%</b> • PoP {s.get('pop_pct', 0):.0f}% • Δ {s.get('short_delta', 0):.3f}{grade_part}"
     )
+
+
+# ── Twitter / X public post ──────────────────────────────────────────────────
+# A tweet is capped at 280 chars, so this is a compact single-line variant of the
+# multi-line Telegram/Discord formatters, with a mandatory not-advice disclaimer
+# (a public post of a trade signal reads as advice without one). Deliberately
+# terse — see twitter_signal_text.
+_TWEET_MAX = 280
+_TWEET_DISCLAIMER = "Not advice. Paper/educational."
+
+
+def _tweet_footer(hashtags, discord_url, extra_text, disclaimer) -> str:
+    """Assemble the configurable static footer (all parts optional).
+
+    Order: extra text · Discord link · disclaimer · hashtags. Each on its own
+    block so the tweet stays readable. Empty pieces are dropped.
+    """
+    lines = []
+    promo = " ".join(p for p in (extra_text or "", discord_url or "") if p).strip()
+    if promo:
+        lines.append(promo)
+    if disclaimer:
+        lines.append(disclaimer)
+    tags = " ".join(h for h in (hashtags or []) if h).strip()
+    if tags:
+        lines.append(tags)
+    return ("\n\n" + "\n".join(lines)) if lines else ""
+
+
+def twitter_signal_text(s: dict, *, hashtags=None, discord_url=None,
+                        extra_text=None, disclaimer: str = _TWEET_DISCLAIMER) -> str:
+    """A ≤280-char public tweet for a scanner signal.
+
+    Compact single-line signal body (symbol/type/exp/strikes/credit/R:R/PoP)
+    followed by a configurable static footer — optional promo text + Discord
+    link, the not-advice disclaimer, and hashtags — all supplied from the
+    ``twitter`` config block so they change without a code edit.
+
+    Budget defense: the footer is what the user added for reach/compliance, so it
+    is preserved verbatim and the BODY is truncated (with an ellipsis) to fit
+    ``_TWEET_MAX``. A footer that alone exceeds the budget is still hard-capped to
+    280 (the API would otherwise reject the post) — keep the configured footer
+    comfortably short.
+
+    NOTE: X counts every URL as 23 chars via t.co wrapping; this measures the
+    URL's real length, so the budget check is conservative (safe), not exact.
+    """
+    rr = s.get("rr_pct", 0) or 0
+    emoji = "🟢" if rr >= 25 else ("🟡" if rr >= 15 else "⚪")
+    grade = s.get("grade")
+    grade_part = f" · {grade}" if grade else ""
+    body = (
+        f"{emoji} {s.get('symbol')} {s.get('type')} ({s.get('trade_type', '')}) "
+        f"exp {s.get('expiration')} {_strikes_str(s)}{grade_part} · "
+        f"Cr ${(s.get('credit') or 0):.2f} · R:R {rr:.0f}% · PoP {s.get('pop_pct', 0):.0f}%"
+    )
+    footer = _tweet_footer(hashtags, discord_url, extra_text, disclaimer)
+    # Truncate the BODY (never the footer) to fit the budget.
+    room = _TWEET_MAX - len(footer)
+    if len(body) > room:
+        body = body[: max(0, room - 1)].rstrip() + "…"
+    return (body + footer)[:_TWEET_MAX]
+
+
+_TWITTER_CRED_KEYS = ("api_key", "api_secret", "access_token", "access_secret")
+
+
+def _has_twitter_creds(creds: dict) -> bool:
+    return bool(creds) and all(creds.get(k) for k in _TWITTER_CRED_KEYS)
+
+
+def _twitter_client(creds: dict):
+    """Build a tweepy v2 Client with OAuth 1.0a user context (lazy import).
+
+    OAuth 1.0a (not app-only bearer) is required — posting a tweet is a
+    user-context write. tweepy is imported here, not at module load, so the
+    dependency is only needed when Twitter is actually enabled.
+    """
+    import tweepy  # lazy — only needed when the channel is live
+    return tweepy.Client(
+        consumer_key=creds["api_key"], consumer_secret=creds["api_secret"],
+        access_token=creds["access_token"], access_token_secret=creds["access_secret"],
+    )
+
+
+def send_twitter(creds: dict, text: str, *, dry_run: bool = False) -> bool:
+    """Post one tweet. Best-effort — never raises into the caller.
+
+    Returns True if a post was attempted (or dry-run logged), False if skipped
+    (missing creds) or the API call failed. A duplicate-content (187) or
+    rate-limit (429) error is caught here and reported False, so a rejected post
+    never breaks the scan/publish path that calls it.
+    """
+    if dry_run:
+        log.info("Twitter DRY-RUN (not posted): %s", text)
+        return True
+    if not _has_twitter_creds(creds):
+        return False
+    try:
+        _twitter_client(creds).create_tweet(text=text)
+        return True
+    except Exception as exc:  # noqa: BLE001 — best-effort (187/429/network/etc.)
+        log.warning("Twitter send failed: %s", exc)
+        return False
 
 
 def discord_signal_embed(s: dict) -> dict:
@@ -102,6 +211,7 @@ def discord_signal_embed(s: dict) -> dict:
             {"name": "PoP", "value": f"{s.get('pop_pct', 0):.0f}%", "inline": True},
             {"name": "Δ short", "value": f"{s.get('short_delta', 0):.3f}", "inline": True},
             {"name": "Score", "value": f"{s.get('composite_score', 0):.0f}", "inline": True},
+            {"name": "Grade", "value": f"{s.get('grade', '—')}", "inline": True},
         ],
         "timestamp": datetime.now(_TZ).isoformat(),
     }
@@ -427,6 +537,63 @@ def save_seen(bus, key: str, state: dict) -> None:
     bus.cache_set(key, state)
 
 
+def load_post_count(bus, key: str, today: str) -> int:
+    """Today's tweet count from the date-scoped counter (0 on a new day)."""
+    env = bus.cache_get(key)
+    p = env.payload if (env is not None and isinstance(env.payload, dict)) else None
+    return int(p.get("count") or 0) if (p and p.get("date") == today) else 0
+
+
+def save_post_count(bus, key: str, today: str, count: int) -> None:
+    bus.cache_set(key, {"date": today, "count": count})
+
+
+def notify_twitter(bus, deduped_new: list, *, today: str, count_key: str,
+                   cfg: dict | None = None, key_fn=signal_key) -> list:
+    """Post fresh scanner signals to X/Twitter, gated + capped. Returns posted keys.
+
+    Independent of the private channels' gates: applies the ``twitter`` block's
+    OWN ``min_score`` (so only your stronger signals go PUBLIC while weaker ones
+    still push to Telegram/Discord) and a persisted per-day ``daily_cap`` (a quota
+    guard against the free-tier monthly write cap + spam-flagging). ``dry_run``
+    formats + logs without posting. Best-effort — a per-tweet failure is skipped,
+    never raised. Off by default (``twitter.enabled`` absent/false → no-op).
+    """
+    cfg = cfg or load_config()
+    tw = (cfg.get("twitter") or {})
+    if not tw.get("enabled"):
+        return []
+
+    dry = bool(tw.get("dry_run"))
+    creds = {k: tw.get(k) for k in _TWITTER_CRED_KEYS}
+    if not dry and not _has_twitter_creds(creds):
+        return []
+
+    min_score = tw.get("min_score", 0) or 0
+    cands = ([s for s in deduped_new if (s.get("composite_score") or 0) >= min_score]
+             if min_score else list(deduped_new))
+    if not cands:
+        return []
+
+    count = load_post_count(bus, count_key, today)
+    cap = tw.get("daily_cap", 0) or 0
+    remaining = (cap - count) if cap else len(cands)
+    if remaining <= 0:
+        return []
+
+    disclaimer = tw.get("disclaimer", _TWEET_DISCLAIMER)
+    posted = []
+    for s in cands[:remaining]:
+        text = twitter_signal_text(s, hashtags=tw.get("hashtags"),
+                                   discord_url=tw.get("discord_url"),
+                                   extra_text=tw.get("extra_text"), disclaimer=disclaimer)
+        if send_twitter(creds, text, dry_run=dry):
+            posted.append(s)
+    if posted:
+        save_post_count(bus, count_key, today, count + len(posted))
+    return [key_fn(s) for s in posted]
+
+
 def notify_signals(bus, signals: list, *, kind: str, seen_key: str,
                    today: str | None = None, seed: bool = False,
                    config: dict | None = None) -> list:
@@ -459,12 +626,24 @@ def notify_signals(bus, signals: list, *, kind: str, seen_key: str,
     min_score = cfg.get("min_score", 0) or 0
     new_set = set(new)
     # dedup by key so two signals sharing a key notify only once (keep the first)
-    fresh, seen_fresh = [], set()
+    deduped, seen_fresh = [], set()
     for s, k in zip(signals, keys):
         if k in new_set and k not in seen_fresh:
             seen_fresh.add(k)
-            fresh.append(s)
+            deduped.append(s)
+
+    # Public X/Twitter post (scanner signals only) — its OWN gates (twitter.enabled
+    # / twitter.min_score / daily cap), independent of the private channels below.
+    # Guarded so a Twitter failure can NEVER break the private-channel sends.
+    if kind == "scanner":
+        try:
+            notify_twitter(bus, deduped, today=today,
+                           count_key=f"{seen_key}:twitter_count", cfg=cfg)
+        except Exception:  # noqa: BLE001 — best-effort, never break the base sends
+            log.exception("notify_twitter failed")
+
     # min_score is scanner-only: captured signals carry no composite_score.
+    fresh = deduped
     if kind == "scanner" and min_score:
         fresh = [s for s in fresh if (s.get("composite_score") or 0) >= min_score]
     if not fresh:

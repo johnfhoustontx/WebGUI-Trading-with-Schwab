@@ -34,6 +34,21 @@ _DEFAULTS = {
     "telegram": {"bot_token": "", "chat_id": 0},
     "discord": {"webhook_url": ""},
     "sms": {"fi_number": "", "smtp_user": "", "smtp_app_password": ""},
+    # X/Twitter public post channel (options scanner signals only). OFF by
+    # default; ships with dry_run ON so it formats+logs without posting until you
+    # add OAuth 1.0a keys AND flip enabled + dry_run. min_score is the PUBLIC
+    # gate (independent of the top-level min_score); daily_cap guards the
+    # free-tier monthly write cap. hashtags/discord_url/extra_text/disclaimer are
+    # the static footer.
+    "twitter": {
+        "enabled": False,
+        "dry_run": True,
+        "min_score": 70,
+        "daily_cap": 40,
+        "api_key": "", "api_secret": "", "access_token": "", "access_secret": "",
+        "hashtags": [], "discord_url": "", "extra_text": "",
+        "disclaimer": "Not advice. Paper/educational.",
+    },
 }
 
 
@@ -80,6 +95,16 @@ def load_config(path=None) -> dict:
         cfg["sms"]["smtp_app_password"] = os.environ["SMS_SMTP_APP_PASSWORD"]
     if os.environ.get("NOTIFY_ENABLED"):
         cfg["enabled"] = os.environ["NOTIFY_ENABLED"].lower() not in ("0", "false", "no")
+    # Twitter/X OAuth 1.0a keys (env wins over file), so secrets can stay out of
+    # the config file.
+    for env_name, key in (("TWITTER_API_KEY", "api_key"),
+                          ("TWITTER_API_SECRET", "api_secret"),
+                          ("TWITTER_ACCESS_TOKEN", "access_token"),
+                          ("TWITTER_ACCESS_SECRET", "access_secret")):
+        if os.environ.get(env_name):
+            cfg["twitter"][key] = os.environ[env_name]
+    if os.environ.get("TWITTER_ENABLED"):
+        cfg["twitter"]["enabled"] = os.environ["TWITTER_ENABLED"].lower() not in ("0", "false", "no")
     return cfg
 
 

@@ -73,5 +73,9 @@ redis==8.0.0              # pinned (was >=5.0) — Redis client (talks to a loca
 fakeredis>=2.20           # in-memory Redis for pytest (tests need no live server)
 pydantic>=2.0             # typed payload contracts shared between tiers (also pulled in transitively by fastapi; pinned explicitly here)
 
+# --- Notifications (NEW: Twitter/X signal push channel) ---
+tweepy>=4.14             # X/Twitter API v2 client — posts scanner signals to a public account
+                         #   (opt-in: twitter.enabled in shared/notifications.json; needs OAuth 1.0a keys).
+
 # --- Testing (P, O, S, D) ---
 pytest

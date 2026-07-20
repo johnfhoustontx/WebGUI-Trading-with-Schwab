@@ -189,7 +189,7 @@ def _sig():
             "expiration": "2026-07-10", "credit": 1.20, "max_loss": 3.80,
             "rr_pct": 31.6, "pop_pct": 72, "short_delta": -0.18,
             "net_theta": 0.05, "short_iv": 14.2, "breakeven": 498.8,
-            "composite_score": 80}
+            "composite_score": 80, "grade": "Strong"}
 
 
 def test_telegram_text_has_symbol_and_credit():
@@ -497,3 +497,279 @@ def test_send_flow_alert_uses_per_type_webhook(monkeypatch):
     pn.send_flow_alert({"type": "uoa", "side": "call", "symbol": "SPY", "text": "x"}, config=cfg)
     pn.send_flow_alert({"type": "crossover", "side": "calls_over", "symbol": "$SPX", "text": "y"}, config=cfg)
     assert urls == ["uoa", "xo"]
+
+
+#############################################
+# Twitter — public tweet formatter
+#############################################
+
+def _ic_sig():
+    return {"symbol": "SPX", "type": "IC", "trade_type": "0DTE",
+            "short_strike": 5500, "long_strike": 5490,
+            "call_short": 5600, "call_long": 5610,
+            "expiration": "2026-07-10", "credit": 2.40, "max_loss": 7.60,
+            "rr_pct": 31.6, "pop_pct": 68, "short_delta": -0.16,
+            "composite_score": 82}
+
+
+def test_twitter_text_within_tweet_char_budget():
+    """A tweet is hard-capped at 280 chars — the whole point of a separate
+    formatter vs. the multi-line Telegram/Discord versions."""
+    for s in (_sig(), _ic_sig()):
+        assert len(pn.twitter_signal_text(s)) <= 280, s["type"]
+
+
+def test_twitter_text_has_symbol_type_and_credit():
+    t = pn.twitter_signal_text(_sig())
+    assert "SPY" in t and "PCS" in t and "1.20" in t
+
+
+def test_twitter_text_carries_a_disclaimer():
+    """A public post of a trade signal must carry a not-advice disclaimer."""
+    t = pn.twitter_signal_text(_sig()).lower()
+    assert "not advice" in t
+
+
+def test_twitter_text_ic_shows_both_wings():
+    t = pn.twitter_signal_text(_ic_sig())
+    assert "5500" in t and "5600" in t     # put short + call short
+
+
+def test_twitter_text_never_exceeds_budget_even_with_long_fields():
+    """Adversarial: a long symbol + huge numbers must still be truncated to 280."""
+    s = dict(_sig(), symbol="TESTINGLONG", credit=12345.6789,
+             short_strike=999999, long_strike=888888)
+    assert len(pn.twitter_signal_text(s)) <= 280
+
+
+#############################################
+# Twitter — configurable static footer (hashtags / Discord link / extra text)
+#############################################
+
+def test_twitter_text_includes_configured_hashtags():
+    t = pn.twitter_signal_text(_sig(), hashtags=["#options", "#0DTE", "#SPX"])
+    assert "#options" in t and "#0DTE" in t and "#SPX" in t
+
+
+def test_twitter_text_includes_discord_link():
+    t = pn.twitter_signal_text(_sig(), discord_url="https://discord.gg/abc123")
+    assert "https://discord.gg/abc123" in t
+
+
+def test_twitter_text_includes_extra_static_text():
+    t = pn.twitter_signal_text(_sig(), extra_text="Join the room:")
+    assert "Join the room:" in t
+
+
+def test_twitter_text_with_full_footer_stays_within_budget():
+    t = pn.twitter_signal_text(
+        _sig(), hashtags=["#options", "#0DTE", "#SPX", "#trading", "#spy"],
+        discord_url="https://discord.gg/abcdefgh", extra_text="Join the community:")
+    assert len(t) <= 280
+
+
+def test_twitter_footer_preserved_when_body_would_overflow():
+    """The footer (link + hashtags + disclaimer) is what the user added for reach,
+    so an overflowing signal body is truncated and the footer survives intact."""
+    s = dict(_sig(), symbol="VERYLONGSYMBOL", short_strike=123456, long_strike=123400)
+    t = pn.twitter_signal_text(
+        s, hashtags=["#options", "#0DTE", "#SPX"],
+        discord_url="https://discord.gg/abc123", extra_text="Join the community:")
+    assert len(t) <= 280
+    assert "https://discord.gg/abc123" in t          # link survived
+    assert "#SPX" in t                                # hashtags survived
+    assert "not advice" in t.lower()                  # disclaimer survived
+
+
+def test_twitter_no_footer_config_matches_base_behavior():
+    """No hashtags/link/extra configured -> just body + disclaimer (unchanged)."""
+    t = pn.twitter_signal_text(_sig())
+    assert "#" not in t and "discord" not in t.lower()
+    assert "not advice" in t.lower()
+
+
+#############################################
+# Grade on the notification formatters
+#############################################
+
+def test_telegram_text_shows_grade():
+    assert "Strong" in pn.telegram_signal_text(_sig())
+
+
+def test_discord_embed_has_grade_field():
+    e = pn.discord_signal_embed(_sig())
+    fields = {f["name"]: f["value"] for f in e["fields"]}
+    assert "Grade" in fields and fields["Grade"] == "Strong"
+
+
+def test_twitter_text_shows_grade():
+    assert "Strong" in pn.twitter_signal_text(_sig())
+
+
+def test_formatters_tolerate_missing_grade():
+    """A signal without a grade must not crash any formatter."""
+    s = {k: v for k, v in _sig().items() if k != "grade"}
+    pn.telegram_signal_text(s)
+    pn.discord_signal_embed(s)
+    pn.twitter_signal_text(s)
+
+
+#############################################
+# Twitter sender — send_twitter (tweepy wrapper)
+#############################################
+
+class _FakeTweepyClient:
+    """Records create_tweet calls; optionally raises to simulate API errors."""
+    last = None
+
+    def __init__(self, *a, **k):
+        _FakeTweepyClient.last = self
+        self.posted = []
+        self.raise_exc = None
+
+    def create_tweet(self, *, text):
+        if self.raise_exc:
+            raise self.raise_exc
+        self.posted.append(text)
+        return {"data": {"id": "123", "text": text}}
+
+
+def _tw_creds():
+    return {"api_key": "K", "api_secret": "S",
+            "access_token": "AT", "access_secret": "ATS"}
+
+
+def test_send_twitter_posts_text(monkeypatch):
+    fake = {}
+    monkeypatch.setattr(pn, "_twitter_client",
+                        lambda creds: _FakeTweepyClient())
+    ok = pn.send_twitter(_tw_creds(), "hello world")
+    assert ok is True
+    assert _FakeTweepyClient.last.posted == ["hello world"]
+
+
+def test_send_twitter_noop_without_creds():
+    assert pn.send_twitter({}, "hi") is False
+    assert pn.send_twitter({"api_key": "K"}, "hi") is False   # partial creds
+
+
+def test_send_twitter_dry_run_does_not_post(monkeypatch):
+    called = {"n": 0}
+    monkeypatch.setattr(pn, "_twitter_client",
+                        lambda creds: called.__setitem__("n", called["n"] + 1))
+    ok = pn.send_twitter(_tw_creds(), "hi", dry_run=True)
+    assert ok is True            # attempted (logged), but
+    assert called["n"] == 0      # no client built, nothing posted
+
+
+def test_send_twitter_swallows_api_error(monkeypatch):
+    c = _FakeTweepyClient()
+    c.raise_exc = RuntimeError("duplicate content (187)")
+    monkeypatch.setattr(pn, "_twitter_client", lambda creds: c)
+    # best-effort: an API error must never raise into the caller
+    assert pn.send_twitter(_tw_creds(), "dup") is False
+
+
+#############################################
+# Twitter fan-out — notify_twitter (gating + daily cap)
+#############################################
+
+def _tw_cfg(**over):
+    cfg = {"enabled": True, "dry_run": True, "min_score": 70, "daily_cap": 3,
+           "api_key": "K", "api_secret": "S", "access_token": "AT", "access_secret": "ATS",
+           "hashtags": ["#options"], "discord_url": "https://discord.gg/x"}
+    cfg.update(over)
+    return cfg
+
+
+def test_notify_twitter_disabled_posts_nothing(monkeypatch):
+    from shared.bus import Bus
+    posts = []
+    monkeypatch.setattr(pn, "send_twitter", lambda *a, **k: posts.append(a) or True)
+    out = pn.notify_twitter(Bus(fake=True), [_sig()], today="2026-07-05",
+                            count_key="ck", cfg={"twitter": {"enabled": False}})
+    assert out == [] and posts == []
+
+
+def test_notify_twitter_applies_its_own_min_score(monkeypatch):
+    from shared.bus import Bus
+    posts = []
+    monkeypatch.setattr(pn, "send_twitter", lambda creds, text, **k: posts.append(text) or True)
+    weak = dict(_sig(), symbol="WK", composite_score=50)   # below twitter min_score 70
+    strong = dict(_sig(), symbol="STG", composite_score=85)
+    pn.notify_twitter(Bus(fake=True), [weak, strong], today="2026-07-05",
+                      count_key="ck", cfg={"twitter": _tw_cfg()})
+    assert len(posts) == 1 and "STG" in posts[0] and "WK" not in posts[0]
+
+
+def test_notify_twitter_respects_daily_cap_across_calls(monkeypatch):
+    from shared.bus import Bus
+    bus = Bus(fake=True)
+    posts = []
+    monkeypatch.setattr(pn, "send_twitter", lambda creds, text, **k: posts.append(text) or True)
+    sigs = [dict(_sig(), symbol=f"S{i}", short_strike=500 + i, composite_score=90)
+            for i in range(5)]
+    cfg = {"twitter": _tw_cfg(daily_cap=3)}
+    pn.notify_twitter(bus, sigs[:2], today="2026-07-05", count_key="ck", cfg=cfg)
+    pn.notify_twitter(bus, sigs[2:], today="2026-07-05", count_key="ck", cfg=cfg)
+    assert len(posts) == 3          # cap enforced across the two calls, not reset
+
+
+def test_notify_twitter_cap_resets_next_day(monkeypatch):
+    from shared.bus import Bus
+    bus = Bus(fake=True)
+    posts = []
+    monkeypatch.setattr(pn, "send_twitter", lambda creds, text, **k: posts.append(text) or True)
+    sigs = [dict(_sig(), symbol=f"S{i}", short_strike=500 + i, composite_score=90) for i in range(4)]
+    cfg = {"twitter": _tw_cfg(daily_cap=2)}
+    pn.notify_twitter(bus, sigs[:2], today="2026-07-05", count_key="ck", cfg=cfg)
+    pn.notify_twitter(bus, sigs[2:], today="2026-07-06", count_key="ck", cfg=cfg)   # new day
+    assert len(posts) == 4          # 2 + 2, cap reset on the date change
+
+
+def test_notify_twitter_passes_footer_config(monkeypatch):
+    from shared.bus import Bus
+    posts = []
+    monkeypatch.setattr(pn, "send_twitter", lambda creds, text, **k: posts.append(text) or True)
+    pn.notify_twitter(Bus(fake=True), [dict(_sig(), composite_score=90)],
+                      today="2026-07-05", count_key="ck",
+                      cfg={"twitter": _tw_cfg(hashtags=["#zzz"], discord_url="https://discord.gg/yyy")})
+    assert "#zzz" in posts[0] and "https://discord.gg/yyy" in posts[0]
+
+
+def test_notify_signals_also_posts_to_twitter_when_enabled(monkeypatch):
+    from shared.bus import Bus
+    bus = Bus(fake=True)
+    posts = []
+    monkeypatch.setattr(pn, "send_twitter", lambda creds, text, **k: posts.append(text) or True)
+    monkeypatch.setattr(pn, "send_telegram", lambda *a: None)
+    monkeypatch.setattr(pn, "send_discord", lambda *a: None)
+    monkeypatch.setattr(pn, "send_sms", lambda *a, **k: None)
+    cfg = {"enabled": True, "market_hours_only": False, "min_score": 0,
+           "telegram": {}, "discord": {}, "sms": {},
+           "twitter": {"enabled": True, "dry_run": True, "min_score": 0, "daily_cap": 10,
+                       "api_key": "K", "api_secret": "S", "access_token": "AT", "access_secret": "ATS"}}
+    monkeypatch.setattr(pn, "load_config", lambda: cfg)
+    pn.notify_signals(bus, [dict(_sig(), composite_score=90)], kind="scanner",
+                      seen_key="cache:options:notified_scan", today="2026-07-05")
+    assert len(posts) == 1 and "SPY" in posts[0]
+
+
+def test_notify_signals_captured_does_not_post_to_twitter(monkeypatch):
+    from shared.bus import Bus
+    bus = Bus(fake=True)
+    posts = []
+    monkeypatch.setattr(pn, "send_twitter", lambda *a, **k: posts.append(a) or True)
+    monkeypatch.setattr(pn, "send_telegram", lambda *a: None)
+    monkeypatch.setattr(pn, "send_discord", lambda *a: None)
+    monkeypatch.setattr(pn, "send_sms", lambda *a, **k: None)
+    cfg = {"enabled": True, "market_hours_only": False, "min_score": 0,
+           "telegram": {}, "discord": {}, "sms": {},
+           "twitter": {"enabled": True, "dry_run": True, "daily_cap": 10,
+                       "api_key": "K", "api_secret": "S", "access_token": "AT", "access_secret": "ATS"}}
+    monkeypatch.setattr(pn, "load_config", lambda: cfg)
+    cap = {"symbol": "MU", "type": "PCS", "signal_id": "sig-1", "short_strike": 100,
+           "long_strike": 95, "expiration": "2026-07-10", "credit": 1.0}
+    pn.notify_signals(bus, [cap], kind="captured",
+                      seen_key="cache:options:notified_captured", today="2026-07-05")
+    assert posts == []      # captured signals are never tweeted
