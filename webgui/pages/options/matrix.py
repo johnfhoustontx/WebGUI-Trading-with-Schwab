@@ -1,9 +1,20 @@
 """Options Matrix Display — Tier-1 reader of cache:options:matrix.
 
-Pure builders (columns/rows/color maps) are module-level and NiceGUI-free for testing.
-render() (a later task) mounts the sortable table and version-polls.
+Pure builders (columns/rows/color maps) are module-level and NiceGUI-free for
+testing. ``render()`` mounts the sortable table and version-polls the bus. This is
+a Tier-1 page: it imports ONLY ``nicegui`` + ``bus_client`` + ``pages.*`` helpers —
+no engine/service imports.
 """
 from __future__ import annotations
+
+import datetime as _dt
+
+import bus_client
+from nicegui import run, ui
+
+from pages.ui_guard import guard_async
+
+from .theme import CARD, EYEBROW, LABEL, PAGE, QUASAR_INTERNAL_CSS
 
 VIEW = "options:matrix"
 
@@ -80,3 +91,119 @@ def matrix_rows(payload):
             "hotness": r.get("hotness", 0),
         })
     return rows
+
+
+def _short_ts(iso):
+    """An ISO timestamp -> short clock like '1:32 PM'; '' on None/failure."""
+    if not iso:
+        return ""
+    try:
+        return _dt.datetime.fromisoformat(iso).strftime("%I:%M %p").lstrip("0")
+    except Exception:
+        return ""
+
+
+def status_text(payload):
+    """Status-bar text for a matrix payload: symbol count + session date + updated
+    clock, appending the ``error`` if the service degraded. Empty payload → the
+    waiting note."""
+    p = payload or {}
+    if not p:
+        return "Waiting for the options service…"
+    n = len(p.get("rows") or [])
+    parts = [f"{n} symbol" + ("" if n == 1 else "s")]
+    if p.get("session_date"):
+        parts.append(f"session {p['session_date']}")
+    ts = _short_ts(p.get("ts"))
+    if ts:
+        parts.append(f"updated {ts}")
+    text = " · ".join(parts)
+    if p.get("error"):
+        text += f" · {p['error']}"
+    return text
+
+
+# ── Colored-cell slots (Tailwind-first): each binds a stamped ``_*_class`` field
+# from ``matrix_rows`` via ``:class`` — no inline style. Raw ``<q-td>`` templates
+# (the scanner.py add_slot idiom).
+_SIGNAL_SLOT = r'''
+  <q-td :props="props">
+    <q-badge :class="props.row._signal_class + ' px-2 py-1'" :label="props.value"/>
+  </q-td>
+'''
+_DAYPCT_SLOT = r'''
+  <q-td :props="props">
+    <span :class="props.row._daypct_class">{{ props.value == null ? '—' : props.value + '%' }}</span>
+  </q-td>
+'''
+_TREND_SLOT = r'''
+  <q-td :props="props">
+    <span :class="props.row._trend_class">{{ props.value }}</span>
+  </q-td>
+'''
+_CALL_SLOT = r'''
+  <q-td :props="props">
+    <span :class="props.row._call_class">{{ props.value }}</span>
+  </q-td>
+'''
+_PUT_SLOT = r'''
+  <q-td :props="props">
+    <span :class="props.row._put_class">{{ props.value }}</span>
+  </q-td>
+'''
+_REGIME_SLOT = r'''
+  <q-td :props="props">
+    <span :class="props.row._regime_class">{{ props.value }}</span>
+  </q-td>
+'''
+
+
+def render():
+    """Build the Options Matrix page body: a sortable table of every watchlist
+    symbol, version-polling ``cache:options:matrix`` and repainting on change.
+
+    Tier-1 (engine-free). The service already sorts rows hotness-desc, so the
+    payload order leads with the hottest; column headers stay click-sortable.
+    Graceful-empty: a cold service leaves the "Waiting…" status until the first
+    publish.
+    """
+    ui.add_css(QUASAR_INTERNAL_CSS)
+    with ui.column().classes(f"calc-v2 {PAGE} w-full gap-4"):
+        with ui.column().classes(f"{CARD} w-full gap-2"):
+            ui.label("Matrix").classes(f"text-h6 {LABEL}")
+            ui.label("Every watchlist stock at a glance — sorted by hotness") \
+                .classes(EYEBROW)
+            status = ui.label("Waiting for the options service…").classes(EYEBROW)
+            table = ui.table(columns=matrix_columns(), rows=[], row_key="symbol",
+                             pagination={"rowsPerPage": 0}) \
+                .classes("w-full matrix-table").props("dense")
+            table.add_slot("body-cell-signal_label", _SIGNAL_SLOT)
+            table.add_slot("body-cell-day_pct", _DAYPCT_SLOT)
+            table.add_slot("body-cell-trend", _TREND_SLOT)
+            table.add_slot("body-cell-call_accel_disp", _CALL_SLOT)
+            table.add_slot("body-cell-put_accel_disp", _PUT_SLOT)
+            table.add_slot("body-cell-gex_regime", _REGIME_SLOT)
+
+    state = {"version": None}
+
+    def _paint(payload):
+        table.rows = matrix_rows(payload)
+        table.update()
+        status.text = status_text(payload)
+
+    @guard_async
+    async def _poll():
+        # Cheap :ver probe off the loop; the full payload read only on a change.
+        v = await run.io_bound(bus_client.read_version, VIEW)
+        if v is None or v == state["version"]:
+            return
+        payload = await run.io_bound(bus_client.read, VIEW)
+        if payload:
+            state["version"] = v
+            _paint(payload)
+
+    payload, version = bus_client.read_full(VIEW)
+    if payload:
+        state["version"] = version
+        _paint(payload)
+    ui.timer(2.0, _poll)
