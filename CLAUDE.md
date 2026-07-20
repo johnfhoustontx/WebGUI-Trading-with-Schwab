@@ -8,7 +8,33 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-07-19 (**efficiency re-audit → Medium + Low tier remediated**:
+**Last updated:** 2026-07-18 (**Flow alerts → contract-level Unusual Options Activity (strike/cost/
+expiry/premium)** — a follow-up to the 2026-07-17 flow alerts: the **"unusual activity"** alert is now a
+per-contract **vol/OI** detector that NAMES the specific option and carries the fields the user asked for.
+The aggregate per-minute volume-spike (`detect_spike`, rolling baseline) is **RETIRED**; the new pure
+**`flow_alerts.detect_uoa(symbol, chain, cfg)`** walks the live chain (all strikes/expiries, calls+puts),
+qualifies a contract when **volume/openInterest ≥ K** (default 3×) **AND** volume ≥ `vol_floor` (500)
+**AND** premium (`mark·vol·100`) ≥ `premium_floor` ($250k — real money only), **skips `oi ≤ 0`**, and
+returns the **top-N by premium per symbol** (default 3; 0-DTE stays in — the premium floor + cap tame it).
+Each alert reads e.g. **`SPY 07/18 450C — UNUSUAL: 8,200 vol vs 1,300 OI (6.3×) · $1.85 · $1.52M
+premium`** (Strike + C/P · Expiry [MM/DD, `0DTE` tag] · Cost [mark] · Premium [$, humanized] · vol/OI).
+**No re-fetch:** UOA is computed inside the 1-min GEX poll's existing **`on_chain`** hook
+(`compute.collect_gex_snapshots` → `stash_uoa` → consume-once `_UOA_STASH`), so it reuses the chain the
+poll already fetched; `handlers.run_flow_alerts` drains the stash and emits contract alerts **once per
+contract per day** (the cid `{sym}|uoa|{side}|{strike}|{expiry}` doubles as a date-scoped seen-set — vol/OI
+is monotonic, so a contract crosses K once and pings once). UOA shares the **crossover's `$VIX`-excluded
+universe** and is gated by the same `enabled` kill-switch (skipped in `on_chain` when off). The
+**crossover** alert is unchanged but now shows the explicit premiums (`$SPX — call premium overtook puts:
+$2.10M calls vs $1.95M puts (bullish flip)`). Delivery (Discord/Telegram push + webgui toast+chime) is
+unchanged — the richer `text` flows through both; `push_notify._flow_is_bullish` + the webgui `_tick`
+bullish check were repointed `spike`→`uoa` so a UOA **call** renders GREEN. **`config/flow_alerts.toml`**
+`[spike]`→`[uoa]` (`k`/`vol_floor`/`premium_floor`/`top_n`). **The Windows desktop-notification "not
+working" report was diagnosed as NOT a code bug** — the flow branch calls the same `notify_desktop` as the
+working scanner alerts; it needs `desktop_notifications` ON + browser permission granted + Windows allowing
+browser notifications + an alert actually firing (08:00–15:20 CT). **Restart `options_svc`.** TDD per layer
+(spec + quality review each); options_svc flow suites green. Branch `Using_Highcharts`. Design/plan:
+[design](docs/plans/2026-07-18-flow-uoa-contract-detail-design.md) /
+[plan](docs/plans/2026-07-18-flow-uoa-contract-detail-plan.md). Prior — 2026-07-19 (**efficiency re-audit → Medium + Low tier remediated**:
 the follow-up batch to the 2026-07-18 Critical/High fixes — TDD per item, all suites green
 (webgui **854**, options_svc **596** [2 pre-existing date-relative `test_expected_move`],
 sentiment_svc **144**, driver_svc **211**, market_svc **49**, proxy **98**, bus **24**).
@@ -3387,10 +3413,10 @@ restyle without code changes; missing keys fall back to the built-in dark-navy d
 See the "App theme — dark-navy 'dashboard'" section.
 
 `config/flow_alerts.toml` is the single source of truth for the **options-flow alert
-thresholds** (crossover `band`/`min_premium`/cooldown; spike `k`/`window`/`floor`/
-`min_baseline`/`min_points`/cooldown; the `enabled` server kill-switch), loaded by
+thresholds** (crossover `band`/`min_premium`/`cooldown_min`; UOA `k`/`vol_floor`/
+`premium_floor`/`top_n`; the `enabled` server kill-switch), loaded by
 `services/options_svc/flow_alerts.py:load_thresholds()` (defaults if the file is missing) —
-edit + restart `options_svc` to tune. See the 2026-07-17 "Last updated" entry.
+edit + restart `options_svc` to tune. See the 2026-07-18 "Last updated" entry.
 
 ## Secrets
 
