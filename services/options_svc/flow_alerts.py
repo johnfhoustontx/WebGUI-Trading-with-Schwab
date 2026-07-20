@@ -14,8 +14,7 @@ _TOML_PATH = FLOW_ALERTS_TOML
 _DEFAULTS = {
     "enabled": True,
     "crossover": {"band": 0.02, "cooldown_min": 30, "min_premium": 10000},
-    "spike": {"k": 4.0, "window": 20, "floor": 500, "min_points": 5,
-              "cooldown_min": 20, "min_baseline": 100},
+    "uoa": {"k": 3.0, "vol_floor": 500, "premium_floor": 250000, "top_n": 3},
 }
 
 
@@ -99,38 +98,86 @@ def _crossover_rows(norm_rows, band, min_premium=10000):
             "call_prem": cur["call_prem"], "put_prem": cur["put_prem"]}
 
 
-def _increments(rows, field):
+def _mark(c):
+    """Contract mark (mid) = mark field, else (bid+ask)/2. None if unusable."""
+    for key in ("mark",):
+        v = c.get(key)
+        if isinstance(v, (int, float)) and v > 0:
+            return float(v)
+    bid, ask = c.get("bid"), c.get("ask")
+    if isinstance(bid, (int, float)) and isinstance(ask, (int, float)) and (bid + ask) > 0:
+        return (bid + ask) / 2.0
+    return None
+
+
+def detect_uoa(symbol, chain, cfg):
+    """Contract-level unusual options activity for one symbol from a live chain.
+
+    Qualify a contract when volume/open-interest >= k AND volume >= vol_floor AND
+    premium ($ = mark*vol*100) >= premium_floor; skip oi <= 0 (ratio undefined).
+    Return the top_n qualifiers by premium (desc). Pure + defensive → []."""
+    u = (cfg or {}).get("uoa", {})
+    k = u.get("k", 3.0); vol_floor = u.get("vol_floor", 500)
+    prem_floor = u.get("premium_floor", 250000); top_n = u.get("top_n", 3)
     out = []
-    for i in range(1, len(rows)):
-        d = (rows[i][field] or 0) - (rows[i - 1][field] or 0)
-        out.append(d if d > 0 else 0.0)   # cumulative shouldn't drop; guard
-    return out
+    try:
+        for side, mapkey in (("call", "callExpDateMap"), ("put", "putExpDateMap")):
+            exp_map = (chain or {}).get(mapkey) or {}
+            if not isinstance(exp_map, dict):
+                continue
+            for exp_key, strike_map in exp_map.items():
+                expiry = str(exp_key).split(":")[0]
+                try:
+                    dte = int(str(exp_key).split(":")[1])
+                except (IndexError, ValueError):
+                    dte = None
+                for strike_str, contracts in (strike_map or {}).items():
+                    try:
+                        strike = float(strike_str)
+                    except (TypeError, ValueError):
+                        continue
+                    for c in (contracts or []):
+                        vol = c.get("totalVolume") or 0
+                        oi = c.get("openInterest") or 0
+                        mark = _mark(c)
+                        if oi <= 0 or vol < vol_floor or mark is None:
+                            continue
+                        ratio = vol / oi
+                        premium = mark * vol * 100
+                        if ratio < k or premium < prem_floor:
+                            continue
+                        out.append({"type": "uoa", "side": side, "symbol": symbol,
+                                    "strike": strike, "expiry": expiry, "dte": dte,
+                                    "cost": mark, "volume": int(vol), "oi": int(oi),
+                                    "vol_oi": ratio, "premium": premium})
+        out.sort(key=lambda a: a["premium"], reverse=True)
+        return out[:top_n]
+    except Exception:
+        log.debug("detect_uoa failed for %s", symbol, exc_info=True)
+        return []
 
 
-def detect_spike(series, side, k, floor, window, min_points, min_baseline=100):
-    """Alert dict when this-minute `side` volume increment ≥ k×trailing-avg AND ≥ floor
-    (after a warm-up of min_points increments); else None. side: call | put.
-    The trailing average is floored at `min_baseline` so a dead-quiet name (baseline 0)
-    still has to clear k×min_baseline — the relative test ALWAYS applies."""
-    return _spike_rows(_norm(series), side, k, floor, window, min_points, min_baseline)
+def _human_money(v):
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return "$0"
+    a = abs(v)
+    if a >= 1e6:
+        return f"${v/1e6:.2f}M"
+    if a >= 1e3:
+        return f"${v/1e3:.0f}k"
+    return f"${v:,.0f}"
 
 
-def _spike_rows(rows, side, k, floor, window, min_points, min_baseline=100):
-    """Spike detection over ALREADY-normalized rows (see detect_spike)."""
-    field = "call_vol" if side == "call" else "put_vol"
-    incs = _increments(rows, field)
-    if len(incs) < min_points:
-        return None
-    latest = incs[-1]
-    base_window = incs[-1 - window:-1] if window > 0 else incs[:-1]
-    baseline = (sum(base_window) / len(base_window)) if base_window else 0.0
-    if latest < floor:
-        return None
-    if latest < k * max(baseline, min_baseline):   # relative test ALWAYS applies
-        return None
-    return {"type": "spike", "side": side, "ts": rows[-1]["ts"],
-            "increment": latest, "baseline": baseline,
-            "mult": (latest / baseline) if baseline > 0 else None}
+def _exp_short(expiry, dte):
+    if dte == 0:
+        return "0DTE"
+    try:
+        y, m, d = str(expiry).split("-")
+        return f"{int(m):02d}/{int(d):02d}"
+    except Exception:
+        return str(expiry)
 
 
 def _on_cooldown(cooldowns, key, now_ts, cooldown_sec):
@@ -143,8 +190,7 @@ def detect_flow_alerts(symbol, series, cfg, cooldowns, now_ts):
     the caller persists it). Returns a list of alert dicts (each with symbol + id)."""
     out = []
     xo = cfg.get("crossover", {})
-    sp = cfg.get("spike", {})
-    norm_rows = _norm(series)   # normalize ONCE, shared by all three passes
+    norm_rows = _norm(series)   # normalize ONCE
 
     a = _crossover_rows(norm_rows, band=xo.get("band", 0.02),
                         min_premium=xo.get("min_premium", 10000))
@@ -153,16 +199,6 @@ def detect_flow_alerts(symbol, series, cfg, cooldowns, now_ts):
         if not _on_cooldown(cooldowns, key, now_ts, xo.get("cooldown_min", 30) * 60):
             cooldowns[key] = now_ts
             out.append({**a, "symbol": symbol})
-
-    for side in ("call", "put"):
-        a = _spike_rows(norm_rows, side, k=sp.get("k", 4.0), floor=sp.get("floor", 500),
-                        window=sp.get("window", 20), min_points=sp.get("min_points", 5),
-                        min_baseline=sp.get("min_baseline", 100))
-        if a:
-            key = f"{symbol}|spike|{side}"
-            if not _on_cooldown(cooldowns, key, now_ts, sp.get("cooldown_min", 20) * 60):
-                cooldowns[key] = now_ts
-                out.append({**a, "symbol": symbol})
 
     for a in out:
         a["id"] = f"{a['symbol']}|{a['type']}|{a.get('side')}|{int(a['ts'])}"
@@ -174,11 +210,13 @@ def alert_text(a) -> str:
     """One-line human-readable alert (reused by push + popup). No buy/sell claim."""
     s = a["symbol"]
     if a["type"] == "crossover":
+        cp, pp = _human_money(a.get("call_prem")), _human_money(a.get("put_prem"))
         if a["side"] == "calls_over":
-            return (f"{s}: call premium overtook puts — "
-                    f"${a['call_prem']:,.0f} vs ${a['put_prem']:,.0f} (bullish flip)")
-        return (f"{s}: put premium overtook calls — "
-                f"${a['put_prem']:,.0f} vs ${a['call_prem']:,.0f} (bearish flip)")
-    mult = f"{a['mult']:.1f}× avg" if a.get("mult") else "burst"
-    return (f"{s}: unusual {a['side']} activity — {int(a['increment']):,} contracts "
-            f"this minute ({mult})")
+            return f"{s} — call premium overtook puts: {cp} calls vs {pp} puts (bullish flip)"
+        return f"{s} — put premium overtook calls: {pp} puts vs {cp} calls (bearish flip)"
+    if a["type"] == "uoa":
+        cp = "C" if a["side"] == "call" else "P"
+        return (f"{s} {_exp_short(a.get('expiry'), a.get('dte'))} {a['strike']:g}{cp} — "
+                f"UNUSUAL: {a['volume']:,} vol vs {a['oi']:,} OI ({a['vol_oi']:.1f}×) · "
+                f"${a['cost']:.2f} · {_human_money(a['premium'])} premium")
+    return f"{s}: flow alert"

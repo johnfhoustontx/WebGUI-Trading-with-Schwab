@@ -8,16 +8,16 @@ def test_load_thresholds_defaults(tmp_path, monkeypatch):
     monkeypatch.setattr(flow_alerts, "_TOML_PATH", tmp_path / "nope.toml")
     cfg = flow_alerts.load_thresholds()
     assert cfg["enabled"] is True
-    assert cfg["spike"]["k"] == 4.0 and cfg["crossover"]["band"] == 0.02
+    assert cfg["uoa"]["k"] == 3.0 and cfg["crossover"]["band"] == 0.02
 
 
 def test_load_thresholds_reads_file(tmp_path, monkeypatch):
     p = tmp_path / "flow_alerts.toml"
-    p.write_text("enabled = false\n[spike]\nk = 9.0\n", encoding="utf-8")
+    p.write_text("enabled = false\n[uoa]\nk = 9.0\n", encoding="utf-8")
     monkeypatch.setattr(flow_alerts, "_TOML_PATH", p)
     flow_alerts.reset_thresholds_cache()
     cfg = flow_alerts.load_thresholds()
-    assert cfg["enabled"] is False and cfg["spike"]["k"] == 9.0
+    assert cfg["enabled"] is False and cfg["uoa"]["k"] == 9.0
     assert cfg["crossover"]["band"] == 0.02   # unspecified keys fall back to defaults
 
 
@@ -25,7 +25,7 @@ def test_load_thresholds_caches_by_mtime(tmp_path, monkeypatch):
     """The TOML is re-parsed only when its mtime changes — it's read every minute
     on the flow-alert tick, but the file rarely changes."""
     p = tmp_path / "flow_alerts.toml"
-    p.write_text("[spike]\nk = 3.0\n", encoding="utf-8")
+    p.write_text("[uoa]\nk = 3.0\n", encoding="utf-8")
     monkeypatch.setattr(flow_alerts, "_TOML_PATH", p)
     flow_alerts.reset_thresholds_cache()
 
@@ -36,21 +36,20 @@ def test_load_thresholds_caches_by_mtime(tmp_path, monkeypatch):
                                     or real_load(fh)))
     a = flow_alerts.load_thresholds()
     b = flow_alerts.load_thresholds()
-    assert a["spike"]["k"] == 3.0 and b["spike"]["k"] == 3.0
+    assert a["uoa"]["k"] == 3.0 and b["uoa"]["k"] == 3.0
     assert parses["n"] == 1                       # second call served from cache
     # A newer mtime forces a re-parse.
     import os
     st = p.stat()
     os.utime(p, (st.st_atime, st.st_mtime + 5))
-    p.write_text("[spike]\nk = 7.0\n", encoding="utf-8")
+    p.write_text("[uoa]\nk = 7.0\n", encoding="utf-8")
     os.utime(p, (st.st_atime, st.st_mtime + 5))
     c = flow_alerts.load_thresholds()
-    assert c["spike"]["k"] == 7.0 and parses["n"] == 2
+    assert c["uoa"]["k"] == 7.0 and parses["n"] == 2
 
 
 def test_detect_flow_alerts_normalizes_series_once(monkeypatch):
-    """The three detector passes (crossover + spike×2) share ONE normalization of
-    the series instead of re-normalizing per pass."""
+    """The crossover pass normalizes the series exactly ONCE per call."""
     series = [_row(60, 0, 0, 100.0, 200.0), _row(120, 10, 5, 260.0, 200.0)]
     calls = {"n": 0}
     real = flow_alerts._norm
@@ -85,32 +84,6 @@ def test_crossover_band_rejects_graze():
     assert flow_alerts.detect_crossover(series, band=0.02, min_premium=0) is None
 
 
-def test_spike_fires_above_baseline_and_floor():
-    # 5 quiet minutes (+100/min) then a +2000 burst → 20x baseline, over floor.
-    cum = 0
-    series = []
-    for i, inc in enumerate([100, 100, 100, 100, 100, 2000]):
-        cum += inc
-        series.append(_row((i + 1) * 60, cum, 0, 0.0, 0.0))
-    a = flow_alerts.detect_spike(series, "call", k=4.0, floor=500, window=20, min_points=5)
-    assert a and a["side"] == "call" and a["type"] == "spike"
-
-
-def test_spike_respects_floor():
-    # A relatively big jump but below the absolute floor → no alert.
-    cum = 0
-    series = []
-    for inc in [10, 10, 10, 10, 10, 100]:   # 100 < floor 500
-        cum += inc
-        series.append(_row(len(series) * 60, cum, 0, 0.0, 0.0))
-    assert flow_alerts.detect_spike(series, "call", k=4.0, floor=500, window=20, min_points=5) is None
-
-
-def test_spike_warmup_needs_min_points():
-    series = [_row(60, 100, 0, 0.0, 0.0), _row(120, 5000, 0, 0.0, 0.0)]  # 1 increment
-    assert flow_alerts.detect_spike(series, "call", k=4.0, floor=500, window=20, min_points=5) is None
-
-
 def test_detect_flow_alerts_cooldown_suppresses_repeat():
     # Large premiums so the crossover clears the default min_premium floor.
     series = [_row(60, 0, 0, 100000.0, 200000.0), _row(120, 0, 0, 260000.0, 200000.0)]
@@ -123,23 +96,6 @@ def test_detect_flow_alerts_cooldown_suppresses_repeat():
     assert second == []
 
 
-def test_spike_dead_quiet_name_needs_k_times_min_baseline():
-    # baseline 0 (all flat) then a burst that clears `floor` but is below k*min_baseline
-    # → NO alert (the relative test always applies now).
-    cum = 0
-    series = []
-    for inc in [0, 0, 0, 0, 0, 600]:   # floor 500 cleared, but 600 < 4*200
-        cum += inc
-        series.append(_row(len(series) * 60, cum, 0, 0.0, 0.0))
-    assert flow_alerts.detect_spike(series, "call", k=4.0, floor=500, window=20,
-                                    min_points=5, min_baseline=200) is None
-    # A bigger burst that clears k*min_baseline (>=800) AND floor → fires.
-    series[-1] = _row(series[-1][0], 900, 0, 0.0, 0.0)
-    a = flow_alerts.detect_spike(series, "call", k=4.0, floor=500, window=20,
-                                 min_points=5, min_baseline=200)
-    assert a and a["type"] == "spike"
-
-
 def test_crossover_skipped_when_premium_below_min():
     # A decisive sign flip but both premiums tiny → skipped by min_premium.
     series = [_row(60, 0, 0, 100.0, 200.0), _row(120, 0, 0, 260.0, 200.0)]
@@ -148,3 +104,70 @@ def test_crossover_skipped_when_premium_below_min():
     series = [_row(60, 0, 0, 100000.0, 200000.0), _row(120, 0, 0, 260000.0, 200000.0)]
     a = flow_alerts.detect_crossover(series, band=0.02, min_premium=10000)
     assert a and a["side"] == "calls_over"
+
+
+# --- Task 1: contract-level UOA ---
+
+def _chain_uoa():
+    exp = "2026-07-18:2"   # dated
+    z = "2026-07-15:0"     # 0DTE
+    def c(strike, vol, oi, mark):
+        return {"totalVolume": vol, "openInterest": oi, "mark": mark}
+    return {"underlyingPrice": 450.0,
+            "callExpDateMap": {
+                exp: {"450.0": [c(450.0, 8200, 1300, 1.85)],   # 6.3x OI, $1.52M — qualifies
+                      "460.0": [c(460.0, 100, 50, 0.20)]},     # tiny — below floors
+                z:   {"451.0": [c(451.0, 9000, 0, 0.50)]}},    # oi=0 → skipped
+            "putExpDateMap": {
+                exp: {"440.0": [c(440.0, 6000, 900, 2.10)]}}}  # 6.7x OI, $1.26M — qualifies
+
+
+def test_detect_uoa_qualifies_and_extracts_fields():
+    cfg = {"uoa": {"k": 3.0, "vol_floor": 500, "premium_floor": 250000, "top_n": 3}}
+    out = flow_alerts.detect_uoa("SPY", _chain_uoa(), cfg)
+    ids = {(a["side"], a["strike"], a["expiry"]) for a in out}
+    assert ("call", 450.0, "2026-07-18") in ids
+    assert ("put", 440.0, "2026-07-18") in ids
+    # the tiny 460 (below vol/premium floor) and the oi=0 451 are excluded
+    assert all(not (a["strike"] == 460.0 or a["oi"] == 0) for a in out)
+    a = next(a for a in out if a["strike"] == 450.0)
+    assert a["type"] == "uoa" and a["symbol"] == "SPY" and a["dte"] == 2
+    assert a["cost"] == 1.85 and a["volume"] == 8200 and a["oi"] == 1300
+    assert round(a["vol_oi"], 1) == 6.3 and round(a["premium"]) == 1517000
+
+
+def test_detect_uoa_top_n_by_premium():
+    # 4 qualifiers, top_n=2 → only the 2 richest by premium survive.
+    exp = "2026-07-18:2"
+    def c(v, oi, m): return {"totalVolume": v, "openInterest": oi, "mark": m}
+    chain = {"callExpDateMap": {exp: {
+        "1.0": [c(1000, 100, 1.0)], "2.0": [c(1000, 100, 2.0)],
+        "3.0": [c(1000, 100, 3.0)], "4.0": [c(1000, 100, 4.0)]}}, "putExpDateMap": {}}
+    cfg = {"uoa": {"k": 3.0, "vol_floor": 500, "premium_floor": 1, "top_n": 2}}
+    out = flow_alerts.detect_uoa("X", chain, cfg)
+    assert sorted(a["strike"] for a in out) == [3.0, 4.0]   # richest premiums
+
+
+def test_alert_text_uoa_has_all_fields():
+    a = {"type": "uoa", "side": "call", "symbol": "SPY", "strike": 450.0,
+         "expiry": "2026-07-18", "dte": 2, "cost": 1.85, "volume": 8200,
+         "oi": 1300, "vol_oi": 6.3, "premium": 1517000.0}
+    t = flow_alerts.alert_text(a)
+    assert "SPY" in t and "07/18" in t and "450" in t and "C" in t
+    assert "$1.85" in t and "8,200" in t and "1,300" in t and "6.3" in t
+    assert "1.5M" in t or "1.52M" in t   # premium humanized
+
+
+def test_alert_text_uoa_0dte_tag():
+    a = {"type": "uoa", "side": "put", "symbol": "SPY", "strike": 451.0,
+         "expiry": "2026-07-15", "dte": 0, "cost": 0.5, "volume": 9000,
+         "oi": 400, "vol_oi": 22.5, "premium": 450000.0}
+    assert "0DTE" in flow_alerts.alert_text(a)
+
+
+def test_alert_text_crossover_shows_premiums():
+    a = {"type": "crossover", "side": "calls_over", "symbol": "$SPX",
+         "call_prem": 2100000.0, "put_prem": 1950000.0}
+    t = flow_alerts.alert_text(a)
+    assert "$SPX" in t and ("2.1M" in t or "2.10M" in t) and ("1.9M" in t or "1.95M" in t)
+    assert "bullish" in t.lower()

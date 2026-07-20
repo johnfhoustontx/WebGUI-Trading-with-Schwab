@@ -6,10 +6,8 @@ band = 0.02             # the crossing side must lead by >= 2% of the larger sid
 cooldown_min = 30       # per-symbol re-fire cooldown
 min_premium = 10000     # skip crossover until the larger side clears this ($) — avoids tiny-premium open-session noise
 
-[spike]
-k = 4.0                 # fire when this-minute volume >= k x trailing average
-window = 20             # trailing-average window (minutes/increments)
-floor = 500             # absolute contract floor (ignore thinner bursts)
-min_baseline = 100      # floor the trailing average so a dead-quiet name still needs k×this
-min_points = 5          # warm-up: need this many increments before firing
-cooldown_min = 20       # per-symbol-per-side re-fire cooldown
+[uoa]
+k = 3.0                 # flag when volume >= k x open interest
+vol_floor = 500         # min contract volume
+premium_floor = 250000  # min $ premium (mark x vol x 100) — real money only
+top_n = 3               # most-significant contracts per symbol per tick (by premium)
