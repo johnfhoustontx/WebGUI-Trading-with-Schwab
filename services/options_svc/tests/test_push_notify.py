@@ -470,3 +470,30 @@ def test_send_flow_alert_noop_when_disabled(monkeypatch):
     assert calls == []
     pn.send_flow_alert(a, config={"enabled": True, "telegram": {}, "discord": {}})
     assert set(calls) == {"tg", "dc"}
+
+
+def test_flow_webhook_routes_by_type():
+    from services.options_svc import push_notify as pn
+    dc = {"webhook_url": "gen", "flow_uoa_webhook_url": "uoa",
+          "flow_crossover_webhook_url": "xo"}
+    assert pn.flow_webhook(dc, {"type": "uoa"}) == "uoa"
+    assert pn.flow_webhook(dc, {"type": "crossover"}) == "xo"
+    # Unknown type → general webhook; missing per-type key → fall back to general.
+    assert pn.flow_webhook(dc, {"type": "other"}) == "gen"
+    assert pn.flow_webhook({"webhook_url": "gen"}, {"type": "uoa"}) == "gen"
+    assert pn.flow_webhook({"webhook_url": "gen", "flow_uoa_webhook_url": ""},
+                           {"type": "uoa"}) == "gen"
+    assert pn.flow_webhook({}, {"type": "uoa"}) == ""
+
+
+def test_send_flow_alert_uses_per_type_webhook(monkeypatch):
+    from services.options_svc import push_notify as pn
+    urls = []
+    monkeypatch.setattr(pn, "send_telegram", lambda *a, **k: None)
+    monkeypatch.setattr(pn, "send_discord", lambda url, embed: urls.append(url))
+    cfg = {"enabled": True, "telegram": {},
+           "discord": {"webhook_url": "gen", "flow_uoa_webhook_url": "uoa",
+                       "flow_crossover_webhook_url": "xo"}}
+    pn.send_flow_alert({"type": "uoa", "side": "call", "symbol": "SPY", "text": "x"}, config=cfg)
+    pn.send_flow_alert({"type": "crossover", "side": "calls_over", "symbol": "$SPX", "text": "y"}, config=cfg)
+    assert urls == ["uoa", "xo"]

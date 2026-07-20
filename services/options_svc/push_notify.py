@@ -260,17 +260,33 @@ def flow_alert_discord_embed(a) -> dict:
             "color": _FLOW_GREEN if _flow_is_bullish(a) else _FLOW_RED}
 
 
+def flow_webhook(dc: dict, a) -> str:
+    """Per-alert-type Discord webhook, falling back to the general webhook_url.
+
+    UOA and crossover alerts can each be routed to their own channel via the
+    optional `discord.flow_uoa_webhook_url` / `discord.flow_crossover_webhook_url`
+    config keys; either missing/empty falls back to `discord.webhook_url`."""
+    dc = dc or {}
+    per_type = {"uoa": "flow_uoa_webhook_url",
+                "crossover": "flow_crossover_webhook_url"}.get(a.get("type"))
+    if per_type and dc.get(per_type):
+        return dc[per_type]
+    return dc.get("webhook_url", "")
+
+
 def send_flow_alert(a, *, config: dict | None = None) -> bool:
     """Push one flow alert to Telegram + Discord. Best-effort, never raises.
 
-    Returns True if a send was attempted (config enabled)."""
+    Discord routing is per alert type — UOA and crossover can each target their
+    own webhook (see flow_webhook). Returns True if a send was attempted (config
+    enabled)."""
     cfg = config or load_config()
     if not cfg.get("enabled", True):
         return False
     tg = cfg.get("telegram", {})
     dc = cfg.get("discord", {})
     send_telegram(tg.get("bot_token"), tg.get("chat_id"), flow_alert_telegram_text(a))
-    send_discord(dc.get("webhook_url"), flow_alert_discord_embed(a))
+    send_discord(flow_webhook(dc, a), flow_alert_discord_embed(a))
     return True
 
 
