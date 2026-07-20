@@ -3161,20 +3161,33 @@ def test_count_flow_alerts_gates_on_date():
                  "alerts": [{"symbol": "SPY"}]}, today="2026-07-20") == {}
 
 
-def test_build_matrix_assembles_rows(monkeypatch):
-    from services.options_svc import compute
+class _RecConn:
+    """A recording fake connection so the ``finally: conn.close()`` is actually
+    exercised (not swallowed as an AttributeError on a bare object())."""
+    def __init__(self): self.closed = False
+    def close(self): self.closed = True
+
+
+def _fake_gh(flow_series=None, flip=100.0, conn=None):
+    series = flow_series if flow_series is not None else [
+        (0, 100.0, 10, 5, 1_000_000.0, 400_000.0),
+        (900, 100.7, 30, 8, 3_000_000.0, 800_000.0)]
+
     class FakeGH:
         @staticmethod
-        def connect(read_only=False): return object()
+        def connect(read_only=False): return conn if conn is not None else object()
         @staticmethod
-        def load_flow_series(conn, symbol, d=None):
-            return [(0, 100.0, 10, 5, 1_000_000.0, 400_000.0),
-                    (900, 100.7, 30, 8, 3_000_000.0, 800_000.0)]
+        def load_flow_series(c, symbol, d=None): return series
         @staticmethod
-        def load_date_with_grid(conn, symbol, view, date=None, since_ts=None):
-            return [(900, 100.7, 100.0, 0, 0, 0.0, {})]
+        def latest_flip(c, symbol, view="gex", date=None): return flip
+    return FakeGH
+
+
+def test_build_matrix_assembles_rows(monkeypatch):
+    from services.options_svc import compute
+    conn = _RecConn()
     monkeypatch.setattr(compute, "_matrix_symbols", lambda: ["SPY"])
-    monkeypatch.setattr(compute, "_matrix_gh", lambda: FakeGH)   # loader accessor
+    monkeypatch.setattr(compute, "_matrix_gh", lambda: _fake_gh(conn=conn))
     out = compute.build_matrix(
         scan_day={"date": "2026-07-20", "signals_0dte": [{"id": "a", "symbol": "SPY"}],
                   "signals_swing": [], "signals_directional": []},
@@ -3185,6 +3198,50 @@ def test_build_matrix_assembles_rows(monkeypatch):
     r = out["rows"][0]
     assert r["symbol"] == "SPY" and r["n_signals"] == 1 and r["n_alerts"] == 1
     assert r["gex_regime"] == "above"
+    assert conn.closed is True   # the finally-close ran
+
+
+def test_build_matrix_counts_gate_on_session_date(monkeypatch):
+    # Off-hours: today != session_date, and the persisted scan_day/flow_alerts are
+    # dated to the DISPLAYED session — the counts must gate on session_date so they
+    # still show (not zero out). The payload's top-level ``date`` stays == today.
+    from services.options_svc import compute
+    monkeypatch.setattr(compute, "_matrix_symbols", lambda: ["SPY"])
+    monkeypatch.setattr(compute, "_matrix_gh", lambda: _fake_gh())
+    out = compute.build_matrix(
+        scan_day={"date": "2026-07-19", "signals_0dte": [{"id": "a", "symbol": "SPY"}],
+                  "signals_swing": [], "signals_directional": []},
+        flow_alerts={"date": "2026-07-19", "alerts": [{"id": "x", "symbol": "SPY"}]},
+        today="2026-07-20", session_date="2026-07-19", now_ts=900)
+    assert out["date"] == "2026-07-20"
+    r = out["rows"][0]
+    assert r["n_signals"] == 1 and r["n_alerts"] == 1
+
+
+def test_build_matrix_one_bad_symbol_cannot_sink_build(monkeypatch):
+    from services.options_svc import compute
+
+    class FakeGH:
+        @staticmethod
+        def connect(read_only=False): return object()
+        @staticmethod
+        def load_flow_series(c, symbol, d=None):
+            if symbol == "BAD":
+                raise RuntimeError("bad read")
+            return [(0, 100.0, 10, 5, 1_000_000.0, 400_000.0),
+                    (900, 100.7, 30, 8, 3_000_000.0, 800_000.0)]
+        @staticmethod
+        def latest_flip(c, symbol, view="gex", date=None): return 100.0
+    monkeypatch.setattr(compute, "_matrix_symbols", lambda: ["SPY", "BAD"])
+    monkeypatch.setattr(compute, "_matrix_gh", lambda: FakeGH)
+    out = compute.build_matrix(scan_day={}, flow_alerts={}, today="2026-07-20",
+                               session_date="2026-07-20", now_ts=900)
+    assert out["error"] is None
+    by_sym = {r["symbol"]: r for r in out["rows"]}
+    assert set(by_sym) == {"SPY", "BAD"}
+    assert by_sym["SPY"]["spot"] is not None            # real values
+    assert by_sym["BAD"]["spot"] is None                # degraded row
+    assert by_sym["BAD"]["signal"] == "neutral"
 
 
 def test_build_matrix_degrades_when_db_unavailable(monkeypatch):

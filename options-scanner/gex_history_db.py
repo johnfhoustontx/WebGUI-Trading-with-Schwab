@@ -319,6 +319,37 @@ def load_today_with_grid(
     return load_date_with_grid(conn, symbol, view, None)
 
 
+def latest_flip(
+    conn: sqlite3.Connection,
+    symbol: str,
+    view: str = "gex",
+    date=None,
+) -> float | None:
+    """The most-recent gamma-flip strike for (symbol, view) on LOCAL ``date``
+    (default today), or ``None`` when there is no row.
+
+    Selects ONLY the ``flip`` column — never ``gex_json`` — so a caller that
+    needs just the latest flip (e.g. the options matrix) avoids decoding the whole
+    session's grids the way ``load_date_with_grid`` does. Uses the same sargable
+    ``ts >= ? AND ts < ?`` date range as its siblings.
+    """
+    start, end = _local_unix_range(date)
+    cur = conn.execute(
+        """
+        SELECT flip
+          FROM snapshots
+         WHERE symbol = ?
+           AND view   = ?
+           AND ts >= ? AND ts < ?
+         ORDER BY ts DESC
+         LIMIT 1
+        """,
+        (symbol, view, start, end),
+    )
+    row = cur.fetchone()
+    return row[0] if row else None
+
+
 def latest_skew_by_symbol(
     conn: sqlite3.Connection,
     symbol: str,

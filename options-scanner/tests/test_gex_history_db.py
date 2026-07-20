@@ -138,6 +138,27 @@ def test_insert_snapshot_roundtrip(tmp_path, monkeypatch):
     assert row[2] == 4995.0
 
 
+def test_latest_flip_returns_most_recent_and_none_on_empty(tmp_path, monkeypatch):
+    dbpath = tmp_path / "t.db"
+    monkeypatch.setattr(db, "DB_PATH", dbpath)
+    conn = db.connect()
+    db.init_schema(conn)
+    now = int(time.time())
+
+    def summary(ts, flip):
+        return {"ts": ts, "spot": 100.0, "flip": flip,
+                "top_pos_strike": None, "top_neg_strike": None, "net_total": None}
+
+    # empty -> None
+    assert db.latest_flip(conn, "SPY", "gex") is None
+    db.insert_snapshot(conn, "SPY", "gex", summary(now - 120, 4990.0), {}, dte=1)
+    db.insert_snapshot(conn, "SPY", "gex", summary(now, 5001.0), {}, dte=1)
+    # most-recent row's flip wins
+    assert db.latest_flip(conn, "SPY", "gex") == 5001.0
+    # other symbol still empty
+    assert db.latest_flip(conn, "QQQ", "gex") is None
+
+
 def test_insert_replace_on_duplicate_ts(tmp_path, monkeypatch):
     dbpath = tmp_path / "t.db"
     monkeypatch.setattr(db, "DB_PATH", dbpath)

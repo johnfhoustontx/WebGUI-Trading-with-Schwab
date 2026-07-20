@@ -2031,7 +2031,7 @@ def _matrix_symbols():
         import gex_collector
         return [s for s in gex_collector.collection_symbols() if s != "$VIX"]
     except Exception:
-        log.exception("matrix symbol list degraded")
+        log.debug("matrix symbol list degraded", exc_info=True)
         return []
 
 
@@ -2072,8 +2072,13 @@ def build_matrix(scan_day, flow_alerts, today, session_date, now_ts):
     PURE ``matrix.build_rows``. No proxy calls. Fully defensive — a DB-connect
     failure degrades to an empty-rows payload with ``error`` set; a per-symbol
     read failure yields an empty blob for that symbol (never sinks the build)."""
-    scan_counts = _count_scan_signals(scan_day, today)
-    alert_counts = _count_flow_alerts(flow_alerts, today)
+    # Gate the counts on ``session_date``, NOT ``today``: the flow series/flip are
+    # read for ``session_date``, and off-hours those diverge (Saturday: today=Sat,
+    # session_date=Fri, and the persisted scan_day/flow_alerts payloads are dated
+    # Fri). Gating on session_date keeps the counts aligned with the displayed
+    # session (during RTH today == session_date, so nothing changes).
+    scan_counts = _count_scan_signals(scan_day, session_date)
+    alert_counts = _count_flow_alerts(flow_alerts, session_date)
     symbols = _matrix_symbols()
 
     raw: dict = {}
@@ -2081,7 +2086,7 @@ def build_matrix(scan_day, flow_alerts, today, session_date, now_ts):
         gh = _matrix_gh()
         conn = gh.connect(read_only=True)
     except Exception:
-        log.exception("build_matrix: DB unavailable")
+        log.debug("build_matrix: DB unavailable", exc_info=True)
         return {"date": today, "session_date": session_date, "ts": _now_iso(),
                 "rows": [], "error": "matrix unavailable"}
 
@@ -2089,8 +2094,7 @@ def build_matrix(scan_day, flow_alerts, today, session_date, now_ts):
         for sym in symbols:
             try:
                 series = gh.load_flow_series(conn, sym, session_date)
-                grid_rows = gh.load_date_with_grid(conn, sym, "gex", session_date)
-                flip = grid_rows[-1][2] if grid_rows else None
+                flip = gh.latest_flip(conn, sym, "gex", session_date)
                 raw[sym] = {"series": series, "flip": flip}
             except Exception:
                 log.debug("build_matrix: read failed for %s", sym, exc_info=True)
@@ -2101,9 +2105,14 @@ def build_matrix(scan_day, flow_alerts, today, session_date, now_ts):
         except Exception:
             log.debug("build_matrix conn close failed", exc_info=True)
 
-    import services.options_svc.matrix as mx
-    rows = mx.build_rows(raw, scan_counts, alert_counts, now_ts)
-    rows.sort(key=lambda r: r["hotness"], reverse=True)
+    try:
+        import services.options_svc.matrix as mx
+        rows = mx.build_rows(raw, scan_counts, alert_counts, now_ts)
+        rows.sort(key=lambda r: r["hotness"], reverse=True)
+    except Exception:
+        log.debug("build_matrix: build failed", exc_info=True)
+        return {"date": today, "session_date": session_date, "ts": _now_iso(),
+                "rows": [], "error": "matrix build failed"}
     return {"date": today, "session_date": session_date, "ts": _now_iso(),
             "rows": rows, "error": None}
 
