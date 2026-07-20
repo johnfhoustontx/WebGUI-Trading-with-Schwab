@@ -8,7 +8,46 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-07-18 (**Flow alerts → contract-level Unusual Options Activity (strike/cost/
+**Last updated:** 2026-07-20 (**X/Twitter public-post notification channel + Swing Scanner liquidity
+fixes** — two pieces. **(1) Twitter channel.** A fourth notification channel
+(`services/options_svc/push_notify.py`) posts new SCANNER (0-DTE + swing) signals to a public
+X/Twitter account, riding the SAME `notify_signals` fan-out as Telegram/Discord/Fi-SMS.
+`twitter_signal_text` builds a **≤280-char** tweet — compact signal body + a CONFIG-DRIVEN static
+footer (hashtags · Discord invite link · extra promo text · disclaimer); budget-defended so the
+footer always survives and only the body truncates. `send_twitter` is a **tweepy v2 / OAuth 1.0a**
+sender (lazy import; best-effort — a duplicate-content **187**, rate-limit **429**, or network error
+is caught, never raised into the scan/publish path). `notify_twitter` is a **scanner-only** fan-out
+with its OWN gates, independent of the private channels: a PUBLIC `min_score` (only your stronger
+signals go public while weaker ones still push privately) + a **persisted per-day `daily_cap`**
+(quota guard vs. the free-tier monthly write cap + spam-flagging), `dry_run` = format+log without
+posting. Wired into `notify_signals` (kind=="scanner" only), guarded so a Twitter failure can NEVER
+break the Telegram/Discord/SMS sends. **The signal GRADE** (Strong/Good/Marginal/Weak from the flat
+scanner's composite ≥80/≥60/≥40/else) is now shown on the tweet AND on `telegram_signal_text` +
+`discord_signal_embed` (new Grade field) — all three tolerant of a missing grade. Config: a `twitter`
+block in `shared/notifications.json` (+ `.example.json`) — `enabled`/`dry_run`/`min_score`/`daily_cap`
++ 4 OAuth keys + `hashtags`/`discord_url`/`extra_text`/`disclaimer` — with `TWITTER_*` env overrides.
+**Ships OFF** (`enabled:false` + `dry_run:true`) → inert until real keys are added AND both flags
+flipped; **nothing publishes by default** (X account creation + the go-live flip are the user's — a
+public-publish action). New dep **`tweepy>=4.14`** (installed 4.17.0, pinned). TDD; push_notify **73**
++ shared/notify **14** green, options_svc 629/2 (the documented pre-existing `test_expected_move`
+baseline), ruff clean; verified end-to-end in dry-run (strong signals formatted w/ grade+footer, weak
+one gated out of the public feed, nothing posted). **(2) Swing Scanner liquidity fixes**
+(`options-scanner/strategy_scoring.py`) — the Swing Scanner (`/options/swing`) graded EVERY candidate
+on non-index symbols (AAPL/MSFT/IWM) **Weak** with "Fails: liquidity" + `q_liq=0.0`. Root cause:
+`q_liq` delegated to the FLAT scanner's `scoring.norm_liquidity` — a percent-of-mark band (hard 0 at
+≥5%) calibrated on index options (`$SPX`/SPY/QQQ, penny-wide on high marks) and DESIGNED as a soft
+5/100 ranking factor, but the Swing Scanner promoted it to a HARD gate (a 0 caps composite at 39 →
+Weak). Fixed with a LOCAL, tick-aware `norm_liquidity_ticks` scoring the spread on percent-of-mark
+**or** quoting-ticks, whichever is more forgiving (mirrors the flat scanner's own
+`passes_liquidity_gate` hybrid). A SECOND fix: `q_liq` averaged a neutral-50 placeholder for unquoted
+legs into the real measurement, compressing every credit structure into [25,75] and making Strong
+unreachable for the CREDIT/NEUTRAL families — now unquoted legs are SKIPPED. **`scoring.norm_liquidity`
+is deliberately UNTOUCHED** (it feeds the flat scanner's `calc_composite_score`, which the driver
+sizes paper trades from — keeping the recalibration local confines the blast radius). Live-verified
+(IWM/AAPL/MSFT all-Weak → Good/Marginal; SPY/QQQ unchanged; genuinely-wide ZM still Weak). Green:
+strategy_scoring/scanner/scoring **125**, options_svc **629/2** baseline, ruff clean. Commits
+`be94c7a` (tick-aware) / `80617aa` (leg-dilution) / `800adf7` (Twitter). Branch `Using_Highcharts`.
+Prior — 2026-07-18 (**Flow alerts → contract-level Unusual Options Activity (strike/cost/
 expiry/premium)** — a follow-up to the 2026-07-17 flow alerts: the **"unusual activity"** alert is now a
 per-contract **vol/OI** detector that NAMES the specific option and carries the fields the user asked for.
 The aggregate per-minute volume-spike (`detect_spike`, rolling baseline) is **RETIRED**; the new pure
@@ -3359,6 +3398,20 @@ per-channel Settings-page toggles, and trade-executed/error notifications. push_
 spec+quality review). Branch `Using_Highcharts`. Design/plan:
 [design](docs/plans/2026-07-05-signal-push-notifications-design.md) /
 [plan](docs/plans/2026-07-05-signal-push-notifications-plan.md).
+
+**Twitter/X public-post channel + grade (2026-07-20).** A **fourth** channel on the SAME
+`notify_signals` fan-out posts new SCANNER (0-DTE + swing) signals to a **public** X account.
+Unlike the other three (which push to YOU), this PUBLISHES, so it is deliberately different:
+`notify_twitter` is **scanner-only** with its OWN gates (a public `min_score` + a persisted
+per-day `daily_cap`), `twitter_signal_text` is a **≤280-char** formatter (compact body + a
+config-driven footer: hashtags/Discord-link/extra-text/disclaimer, footer preserved on
+truncation), and `send_twitter` is a **tweepy OAuth 1.0a** sender (best-effort — 187/429/network
+errors caught). It is wired into `notify_signals` guarded so a Twitter failure can't break the
+private sends, and **ships OFF** (`twitter.enabled:false` + `dry_run:true`) — inert until OAuth
+keys are added + both flags flipped (account creation + the go-live flip are the USER's; nothing
+publishes by default). The signal **grade** was added to the tweet + `telegram_signal_text` +
+`discord_signal_embed` at the same time. Config: the `twitter` block in `shared/notifications.json`
+(+ `TWITTER_*` env). New dep `tweepy>=4.14`. **Restart `options_svc`.** push_notify **73** green.
 
 ## Paths and ports: `repo_paths.py` + `config/ports.toml`
 
