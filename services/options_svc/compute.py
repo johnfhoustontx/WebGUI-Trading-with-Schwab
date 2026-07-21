@@ -2093,28 +2093,36 @@ def _count_scan_signals(scan_day, today):
     return counts
 
 
-def _count_flow_alerts(flow_alerts, today):
-    """``{symbol: count}`` from a ``cache:options:flow_alerts`` payload. Gated on
-    date the same way; counts each alert by its ``symbol`` (skips missing)."""
-    if not flow_alerts or flow_alerts.get("date") != today:
+def _count_flow_alerts(flow_cooldowns, today):
+    """``{symbol: count}`` of today's DISTINCT flow-alert events per symbol, from the
+    ``cache:options:flow_alert_cooldowns`` seen-map (``{date, map: {cid: ts}}``).
+
+    Each ``cid`` (e.g. ``$SPX|crossover`` or ``QQQ|uoa|put|706|2026-07-21``) is one
+    distinct alert event; the prefix before the first ``|`` is the symbol. This
+    date-scoped seen-map is UNCAPPED and never pruned, so it is the true daily count —
+    unlike ``cache:options:flow_alerts`` (a rolling list capped at 50 total that
+    undercounts every symbol once the day fires >50 alerts). Gated on the map's date."""
+    if not flow_cooldowns or flow_cooldowns.get("date") != today:
         return {}
     counts: dict = {}
-    for alert in flow_alerts.get("alerts") or []:
-        sym = (alert or {}).get("symbol")
+    for cid in flow_cooldowns.get("map") or {}:
+        sym = cid.split("|", 1)[0] if isinstance(cid, str) and "|" in cid else None
         if sym:
             counts[sym] = counts.get(sym, 0) + 1
     return counts
 
 
-def build_matrix(scan_day, flow_alerts, today, session_date, now_ts):
+def build_matrix(scan_day, flow_cooldowns, today, session_date, now_ts):
     """Assemble the ``cache:options:matrix`` payload.
 
     Loads each watchlist symbol's intraday flow series + latest gamma flip from
     ``gex_history.db`` (one reused read-only connection, ALWAYS closed), counts
-    signals/alerts from the passed-in payloads, and hands the raw blobs to the
-    PURE ``matrix.build_rows``. No proxy calls. Fully defensive — a DB-connect
-    failure degrades to an empty-rows payload with ``error`` set; a per-symbol
-    read failure yields an empty blob for that symbol (never sinks the build)."""
+    signals from the ``scan_day`` payload + flow-alerts from the ``flow_cooldowns``
+    seen-map (``cache:options:flow_alert_cooldowns`` — the uncapped daily source,
+    NOT the 50-capped ``flow_alerts`` list), and hands the raw blobs to the PURE
+    ``matrix.build_rows``. No proxy calls. Fully defensive — a DB-connect failure
+    degrades to an empty-rows payload with ``error`` set; a per-symbol read failure
+    yields an empty blob for that symbol (never sinks the build)."""
     # ``session_date`` arrives as a ``datetime.date`` OBJECT from
     # ``scheduler.active_session_date()`` — the gex_history DB readers NEED that
     # object (``_local_unix_range`` reads ``d.year/.month/.day``). But the count
@@ -2130,7 +2138,7 @@ def build_matrix(scan_day, flow_alerts, today, session_date, now_ts):
     # Fri). Gating on session_date keeps the counts aligned with the displayed
     # session (during RTH today == session_date, so nothing changes).
     scan_counts = _count_scan_signals(scan_day, session_key)
-    alert_counts = _count_flow_alerts(flow_alerts, session_key)
+    alert_counts = _count_flow_alerts(flow_cooldowns, session_key)
     symbols = _matrix_symbols()
 
     raw: dict = {}

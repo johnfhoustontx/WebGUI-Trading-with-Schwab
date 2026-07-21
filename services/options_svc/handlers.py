@@ -755,8 +755,11 @@ def publish_matrix(bus) -> None:
 
     Rides the 1-min GEX tick right after the flow-skew + flow-alert publishes,
     reusing the rows ``collect_gex_snapshots`` just wrote to ``gex_history.db``.
-    Feeds ``compute.build_matrix`` the two cached inputs (scan_day + flow_alerts);
-    that builder is fully defensive (a DB-connect failure degrades to empty rows).
+    Feeds ``compute.build_matrix`` the scan_day day-union + the flow-alert cooldown
+    SEEN-MAP (``cache:options:flow_alert_cooldowns`` — the uncapped daily record of
+    distinct flow-alert events per symbol, so the Flow column reflects the true daily
+    count rather than the 50-capped ``cache:options:flow_alerts`` rolling list).
+    That builder is fully defensive (a DB-connect failure degrades to empty rows).
     ``skip_unchanged`` so an unchanged matrix doesn't wake GUI version-pollers.
     Guarded so a matrix failure never escapes into the caller (the 1-min GEX
     collection + the flow-alert publish must be unaffected)."""
@@ -768,9 +771,9 @@ def publish_matrix(bus) -> None:
         session_date = scheduler.active_session_date()
         now_ts = int(time.time())
         scan_day = _cache_payload(bus, CACHE_SCAN_DAY)
-        flow_alerts_payload = _cache_payload(bus, CACHE_FLOW_ALERTS)
+        flow_cooldowns = _cache_payload(bus, _FLOW_COOLDOWN_KEY)
         view = compute.build_matrix(
-            scan_day, flow_alerts_payload, today, session_date, now_ts)
+            scan_day, flow_cooldowns, today, session_date, now_ts)
         bus.cache_set(CACHE_MATRIX, view, event=EVENT_MATRIX, skip_unchanged=True)
     except Exception:
         log.exception("publish_matrix degraded")

@@ -3141,10 +3141,18 @@ def test_count_helpers_group_by_symbol():
             "signals_swing": [{"id": 3, "symbol": "QQQ"}], "signals_directional": []},
             today="2026-07-20")
     assert sc == {"SPY": 2, "QQQ": 1}
-    al = compute._count_flow_alerts({"date": "2026-07-20",
-            "alerts": [{"symbol": "SPY"}, {"symbol": "SPY"}, {"symbol": "QQQ"}]},
+    # Flow-alert counts come from the uncapped cooldown SEEN-MAP: each cid is one
+    # distinct event; the prefix before the first '|' is the symbol.
+    al = compute._count_flow_alerts({"date": "2026-07-20", "map": {
+            "SPY|crossover": 1, "SPY|uoa|call|450|2026-07-20": 1,
+            "QQQ|uoa|put|400|2026-07-20": 1}},
             today="2026-07-20")
     assert al == {"SPY": 2, "QQQ": 1}
+    # a $-prefixed index symbol splits correctly, and a malformed key is skipped.
+    al2 = compute._count_flow_alerts({"date": "2026-07-20", "map": {
+            "$SPX|crossover": 1, "$SPX|uoa|call|7500|2026-07-20": 1, "junk": 1}},
+            today="2026-07-20")
+    assert al2 == {"$SPX": 2}
 
 
 def test_count_scan_signals_gates_on_date():
@@ -3158,7 +3166,7 @@ def test_count_scan_signals_gates_on_date():
 def test_count_flow_alerts_gates_on_date():
     from services.options_svc import compute
     assert compute._count_flow_alerts({"date": "1999-01-01",
-                 "alerts": [{"symbol": "SPY"}]}, today="2026-07-20") == {}
+                 "map": {"SPY|crossover": 1}}, today="2026-07-20") == {}
 
 
 class _RecConn:
@@ -3191,7 +3199,7 @@ def test_build_matrix_assembles_rows(monkeypatch):
     out = compute.build_matrix(
         scan_day={"date": "2026-07-20", "signals_0dte": [{"id": "a", "symbol": "SPY"}],
                   "signals_swing": [], "signals_directional": []},
-        flow_alerts={"date": "2026-07-20", "alerts": [{"id": "x", "symbol": "SPY"}]},
+        flow_cooldowns={"date": "2026-07-20", "map": {"SPY|crossover": 1}},
         today="2026-07-20", session_date="2026-07-20", now_ts=900)
     assert out["error"] is None
     assert len(out["rows"]) == 1
@@ -3211,7 +3219,7 @@ def test_build_matrix_counts_gate_on_session_date(monkeypatch):
     out = compute.build_matrix(
         scan_day={"date": "2026-07-19", "signals_0dte": [{"id": "a", "symbol": "SPY"}],
                   "signals_swing": [], "signals_directional": []},
-        flow_alerts={"date": "2026-07-19", "alerts": [{"id": "x", "symbol": "SPY"}]},
+        flow_cooldowns={"date": "2026-07-19", "map": {"SPY|crossover": 1}},
         today="2026-07-20", session_date="2026-07-19", now_ts=900)
     assert out["date"] == "2026-07-20"
     r = out["rows"][0]
@@ -3243,7 +3251,7 @@ def test_build_matrix_counts_work_with_date_object_session_date(monkeypatch):
     out = compute.build_matrix(
         scan_day={"date": "2026-07-20", "signals_0dte": [{"id": "a", "symbol": "SPY"}],
                   "signals_swing": [], "signals_directional": []},
-        flow_alerts={"date": "2026-07-20", "alerts": [{"id": "x", "symbol": "SPY"}]},
+        flow_cooldowns={"date": "2026-07-20", "map": {"SPY|crossover": 1}},
         today="2026-07-20",
         session_date=datetime.date(2026, 7, 20),   # the REAL active_session_date() return type
         now_ts=900)
@@ -3270,7 +3278,7 @@ def test_build_matrix_one_bad_symbol_cannot_sink_build(monkeypatch):
         def latest_flip(c, symbol, view="gex", date=None): return 100.0
     monkeypatch.setattr(compute, "_matrix_symbols", lambda: ["SPY", "BAD"])
     monkeypatch.setattr(compute, "_matrix_gh", lambda: FakeGH)
-    out = compute.build_matrix(scan_day={}, flow_alerts={}, today="2026-07-20",
+    out = compute.build_matrix(scan_day={}, flow_cooldowns={}, today="2026-07-20",
                                session_date="2026-07-20", now_ts=900)
     assert out["error"] is None
     by_sym = {r["symbol"]: r for r in out["rows"]}
@@ -3286,7 +3294,7 @@ def test_build_matrix_degrades_when_db_unavailable(monkeypatch):
         raise RuntimeError("no db")
     monkeypatch.setattr(compute, "_matrix_symbols", lambda: ["SPY"])
     monkeypatch.setattr(compute, "_matrix_gh", boom)
-    out = compute.build_matrix(scan_day={}, flow_alerts={}, today="2026-07-20",
+    out = compute.build_matrix(scan_day={}, flow_cooldowns={}, today="2026-07-20",
                                session_date="2026-07-20", now_ts=0)
     assert out["rows"] == []
     assert out["error"]

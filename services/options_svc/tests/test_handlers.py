@@ -1668,23 +1668,24 @@ def test_publish_matrix_caches_view(monkeypatch):
     assert msg is not None and msg.get("version") == env.version
 
 
-def test_publish_matrix_reads_scan_day_and_flow_alert_keys(monkeypatch):
-    """publish_matrix feeds build_matrix the payloads from the scan_day + flow_alerts
-    cache keys (unwrapped from their envelopes)."""
+def test_publish_matrix_reads_scan_day_and_flow_cooldown_keys(monkeypatch):
+    """publish_matrix feeds build_matrix the scan_day payload + the flow-alert cooldown
+    SEEN-MAP (the uncapped daily source, NOT the 50-capped flow_alerts list),
+    unwrapped from their envelopes."""
     bus = Bus(fake=True)
     bus.cache_set(handlers.CACHE_SCAN_DAY, {"marker": "scan"})
-    bus.cache_set(handlers.CACHE_FLOW_ALERTS, {"marker": "alerts"})
+    bus.cache_set(handlers._FLOW_COOLDOWN_KEY, {"marker": "cooldowns"})
     seen = {}
 
-    def fake_build(scan_day, flow_alerts, today, session_date, now_ts):
+    def fake_build(scan_day, flow_cooldowns, today, session_date, now_ts):
         seen["scan_day"] = scan_day
-        seen["flow_alerts"] = flow_alerts
+        seen["flow_cooldowns"] = flow_cooldowns
         return {"rows": [], "error": None}
 
     monkeypatch.setattr(handlers.compute, "build_matrix", fake_build)
     handlers.publish_matrix(bus)
     assert seen["scan_day"] == {"marker": "scan"}
-    assert seen["flow_alerts"] == {"marker": "alerts"}
+    assert seen["flow_cooldowns"] == {"marker": "cooldowns"}
 
 
 def test_publish_matrix_failure_does_not_raise(monkeypatch):
