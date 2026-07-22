@@ -179,3 +179,74 @@ def test_human_money_boundary_no_1000k():
     assert flow_alerts._human_money(250_000) == "$250k"
     assert flow_alerts._human_money(999_000) == "$999k"
     assert flow_alerts._human_money(0) == "$0" and flow_alerts._human_money(None) == "$0"
+
+
+# --- Gamma-flip regime detector ---
+
+def test_gamma_regime_hard_classify_baseline():
+    # No prior regime → hard classify at the flip level.
+    assert flow_alerts.gamma_regime(spot=5510, flip=5500, prev=None, band_pct=0.0) == "positive"
+    assert flow_alerts.gamma_regime(spot=5490, flip=5500, prev=None, band_pct=0.0) == "negative"
+
+
+def test_gamma_regime_na_on_missing_data():
+    assert flow_alerts.gamma_regime(spot=None, flip=5500, prev=None) == "na"
+    assert flow_alerts.gamma_regime(spot=5500, flip=None, prev=None) == "na"
+
+
+def test_gamma_regime_hysteresis_holds_in_dead_zone():
+    # prev positive, spot dips just below flip but within the band → stays positive.
+    band = 0.002  # 0.2%
+    assert flow_alerts.gamma_regime(spot=5495, flip=5500, prev="positive", band_pct=band) == "positive"
+    # only once spot clears the lower band does it flip negative.
+    assert flow_alerts.gamma_regime(spot=5488, flip=5500, prev="positive", band_pct=band) == "negative"
+    # symmetric from negative.
+    assert flow_alerts.gamma_regime(spot=5505, flip=5500, prev="negative", band_pct=band) == "negative"
+    assert flow_alerts.gamma_regime(spot=5512, flip=5500, prev="negative", band_pct=band) == "positive"
+
+
+def test_detect_gamma_flip_baseline_no_alert():
+    alert, regime = flow_alerts.detect_gamma_flip("$SPX", spot=5510, flip=5500,
+                                                  prev_regime=None, band_pct=0.0, ts=120)
+    assert alert is None and regime == "positive"
+
+
+def test_detect_gamma_flip_no_change_no_alert():
+    alert, regime = flow_alerts.detect_gamma_flip("$SPX", spot=5510, flip=5500,
+                                                  prev_regime="positive", band_pct=0.0, ts=120)
+    assert alert is None and regime == "positive"
+
+
+def test_detect_gamma_flip_positive_to_negative():
+    alert, regime = flow_alerts.detect_gamma_flip("$SPX", spot=5480, flip=5500,
+                                                  prev_regime="positive", band_pct=0.0, ts=120)
+    assert regime == "negative"
+    assert alert["type"] == "gamma_flip" and alert["side"] == "to_negative"
+    assert alert["symbol"] == "$SPX" and alert["spot"] == 5480 and alert["flip"] == 5500
+
+
+def test_detect_gamma_flip_negative_to_positive():
+    alert, regime = flow_alerts.detect_gamma_flip("SPY", spot=560, flip=555,
+                                                  prev_regime="negative", band_pct=0.0, ts=99)
+    assert regime == "positive" and alert["side"] == "to_positive"
+
+
+def test_detect_gamma_flip_na_keeps_prev():
+    alert, regime = flow_alerts.detect_gamma_flip("SPY", spot=None, flip=555,
+                                                  prev_regime="positive", band_pct=0.0, ts=99)
+    assert alert is None and regime == "positive"   # unclassifiable → keep prior
+
+
+def test_alert_text_gamma_flip():
+    neg = flow_alerts.alert_text({"type": "gamma_flip", "side": "to_negative", "symbol": "$SPX",
+                                  "spot": 5480, "flip": 5500})
+    assert "$SPX" in neg and "NEGATIVE" in neg and "5480" in neg and "5500" in neg
+    pos = flow_alerts.alert_text({"type": "gamma_flip", "side": "to_positive", "symbol": "SPY",
+                                  "spot": 560, "flip": 555})
+    assert "POSITIVE" in pos
+
+
+def test_gamma_flip_config_defaults():
+    cfg = flow_alerts._DEFAULTS
+    assert cfg["gamma_flip"]["enabled"] is True
+    assert "$SPX" in cfg["gamma_flip"]["symbols"]

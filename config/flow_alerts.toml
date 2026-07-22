@@ -11,3 +11,9 @@ k = 3.0                 # flag when volume >= k x open interest
 vol_floor = 500         # min contract volume
 premium_floor = 250000  # min $ premium (mark x vol x 100) — real money only
 top_n = 3               # most-significant contracts per symbol per tick (by premium)
+
+[gamma_flip]
+enabled = true          # alert when spot crosses the dealer gamma flip level (positive<->negative regime)
+band_pct = 0.0015       # hysteresis dead-zone: spot must clear the flip by 0.15% to switch regime (anti-chatter)
+cooldown_min = 60       # per-symbol re-fire cooldown
+symbols = ["$SPX", "SPY", "QQQ", "IWM"]   # which names to watch; empty [] = the whole flow universe

@@ -350,6 +350,37 @@ def latest_flip(
     return row[0] if row else None
 
 
+def latest_spot_flip(
+    conn: sqlite3.Connection,
+    symbol: str,
+    view: str = "gex",
+    date=None,
+) -> tuple | None:
+    """The most-recent ``(ts, spot, flip)`` for (symbol, view) on LOCAL ``date``
+    (default today), or ``None`` when there is no row.
+
+    Reads spot + flip together so the gamma-flip alert can classify the dealer
+    gamma regime (spot vs flip) from one query. Selects only the three summary
+    columns — never ``gex_json`` — using the same sargable ts range as its
+    siblings.
+    """
+    start, end = _local_unix_range(date)
+    cur = conn.execute(
+        """
+        SELECT ts, spot, flip
+          FROM snapshots
+         WHERE symbol = ?
+           AND view   = ?
+           AND ts >= ? AND ts < ?
+         ORDER BY ts DESC
+         LIMIT 1
+        """,
+        (symbol, view, start, end),
+    )
+    row = cur.fetchone()
+    return (row[0], row[1], row[2]) if row else None
+
+
 def latest_skew_by_symbol(
     conn: sqlite3.Connection,
     symbol: str,

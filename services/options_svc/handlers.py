@@ -236,6 +236,9 @@ EVENT_MATRIX = "events:options:matrix"
 CACHE_FLOW_ALERTS = "cache:options:flow_alerts"
 EVENT_FLOW_ALERTS = "events:options:flow_alerts"
 _FLOW_COOLDOWN_KEY = "cache:options:flow_alert_cooldowns"
+# Per-symbol last-alerted gamma regime ('positive'/'negative'), date-scoped so the
+# first snapshot each day sets the baseline without firing an open-time alert.
+_GAMMA_REGIME_KEY = "cache:options:gamma_regime_state"
 _FLOW_ALERTS_MAX = 50
 # Trailing flow rows the crossover detector needs (it compares the last two
 # premium-bearing rows; a couple extra guard against a forward-only NULL-premium
@@ -808,6 +811,58 @@ def _load_flow_series_for(conn, symbol, limit):
         return []
 
 
+def _load_spot_flip_for(conn, symbol):
+    """The most-recent (ts, spot, flip) for a symbol's gex view over an already-open
+    read-only connection. Defensive → None."""
+    try:
+        import gex_history_db as gh
+        return gh.latest_spot_flip(conn, symbol)
+    except Exception:
+        log.debug("latest_spot_flip degraded for %s", symbol, exc_info=True)
+        return None
+
+
+def _run_gamma_flip(conn, cfg, bus, today, cooldowns, now_ts, universe):
+    """Detect dealer gamma-regime flips (spot crossing the flip level) for the
+    configured symbols and return a list of fresh alert dicts. Persists the
+    per-symbol regime state; honors a per-symbol cooldown. Best-effort → []."""
+    gf = cfg.get("gamma_flip", {})
+    if not gf.get("enabled", True) or conn is None:
+        return []
+    gf_symbols = gf.get("symbols") or list(universe)
+    band = gf.get("band_pct", 0.0015)
+    cd_sec = gf.get("cooldown_min", 60) * 60
+
+    env = bus.cache_get(_GAMMA_REGIME_KEY)
+    payload = env.payload if (env and isinstance(env.payload, dict)) else {}
+    state = payload.get("map", {}) if payload.get("date") == today else {}
+
+    out = []
+    for sym in gf_symbols:
+        row = _load_spot_flip_for(conn, sym)
+        if not row:
+            continue
+        ts, spot, flip = row
+        prev = state.get(sym)
+        alert, new_regime = flow_alerts.detect_gamma_flip(sym, spot, flip, prev, band, ts)
+        if alert:
+            key = f"{sym}|gamma_flip"
+            last = cooldowns.get(key)
+            on_cd = isinstance(last, (int, float)) and (now_ts - last) < cd_sec
+            if on_cd:
+                continue        # suppress; keep prior state so it can fire post-cooldown
+            cooldowns[key] = now_ts
+            state[sym] = new_regime
+            alert["id"] = f"{sym}|gamma_flip|{alert['side']}|{int(ts)}"
+            alert["text"] = flow_alerts.alert_text(alert)
+            out.append(alert)
+        else:
+            state[sym] = new_regime
+
+    bus.cache_set(_GAMMA_REGIME_KEY, {"date": today, "map": state}, skip_unchanged=True)
+    return out
+
+
 def _flow_now_ts():
     import time
     return int(time.time())
@@ -853,6 +908,9 @@ def run_flow_alerts(bus) -> None:
                 series = _load_flow_series_for(conn, sym, tail_limit) if conn is not None else []
                 for a in flow_alerts.detect_flow_alerts(sym, series, cfg, cooldowns, now_ts):
                     fresh.append(a)
+            # Dealer gamma-regime flips (spot crossing the flip level) — reuses the
+            # same open read-only connection + cooldown map.
+            fresh.extend(_run_gamma_flip(conn, cfg, bus, today, cooldowns, now_ts, allowed))
         finally:
             if conn is not None:
                 try:

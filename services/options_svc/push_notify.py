@@ -356,7 +356,8 @@ _FLOW_RED = 0xE74C3C
 
 def _flow_is_bullish(a) -> bool:
     return (a.get("type") == "crossover" and a.get("side") == "calls_over") or \
-           (a.get("type") == "uoa" and a.get("side") == "call")
+           (a.get("type") == "uoa" and a.get("side") == "call") or \
+           (a.get("type") == "gamma_flip" and a.get("side") == "to_positive")
 
 
 def flow_alert_telegram_text(a) -> str:
@@ -378,7 +379,8 @@ def flow_webhook(dc: dict, a) -> str:
     config keys; either missing/empty falls back to `discord.webhook_url`."""
     dc = dc or {}
     per_type = {"uoa": "flow_uoa_webhook_url",
-                "crossover": "flow_crossover_webhook_url"}.get(a.get("type"))
+                "crossover": "flow_crossover_webhook_url",
+                "gamma_flip": "flow_gamma_flip_webhook_url"}.get(a.get("type"))
     if per_type and dc.get(per_type):
         return dc[per_type]
     return dc.get("webhook_url", "")

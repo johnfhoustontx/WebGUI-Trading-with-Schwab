@@ -773,3 +773,19 @@ def test_notify_signals_captured_does_not_post_to_twitter(monkeypatch):
     pn.notify_signals(bus, [cap], kind="captured",
                       seen_key="cache:options:notified_captured", today="2026-07-05")
     assert posts == []      # captured signals are never tweeted
+
+
+def test_flow_alert_gamma_flip_color_by_side():
+    from services.options_svc import push_notify as pn
+    pos = {"type": "gamma_flip", "side": "to_positive", "symbol": "$SPX", "text": "x"}
+    neg = {"type": "gamma_flip", "side": "to_negative", "symbol": "$SPX", "text": "y"}
+    assert pn.flow_alert_discord_embed(pos)["color"] == 0x2ECC71   # positive gamma → green
+    assert pn.flow_alert_discord_embed(neg)["color"] == 0xE74C3C   # negative gamma → red
+
+
+def test_flow_webhook_routes_gamma_flip():
+    from services.options_svc import push_notify as pn
+    dc = {"webhook_url": "gen", "flow_gamma_flip_webhook_url": "gf"}
+    assert pn.flow_webhook(dc, {"type": "gamma_flip"}) == "gf"
+    # missing per-type key → general webhook.
+    assert pn.flow_webhook({"webhook_url": "gen"}, {"type": "gamma_flip"}) == "gen"

@@ -15,6 +15,13 @@ _DEFAULTS = {
     "enabled": True,
     "crossover": {"band": 0.02, "cooldown_min": 30, "min_premium": 10000},
     "uoa": {"k": 3.0, "vol_floor": 500, "premium_floor": 250000, "top_n": 3},
+    # Dealer gamma-regime flip (spot crossing the gamma flip level). band_pct is a
+    # hysteresis dead-zone (spot must clear the flip by this fraction to switch
+    # regime — stops chatter when spot hovers at the flip). symbols = which names
+    # to watch (empty → the whole flow universe); gamma flip is a clean read on
+    # heavily-optioned index/ETF names, noise on illiquid ones.
+    "gamma_flip": {"enabled": True, "band_pct": 0.0015, "cooldown_min": 60,
+                   "symbols": ["$SPX", "SPY", "QQQ", "IWM"]},
 }
 
 
@@ -182,6 +189,42 @@ def _exp_short(expiry, dte):
         return str(expiry)
 
 
+def gamma_regime(spot, flip, prev=None, band_pct=0.0):
+    """Dealer gamma regime for a symbol: 'positive' (spot above the flip → dealers
+    long gamma, vol dampened), 'negative' (spot below → short gamma, vol amplified),
+    or 'na' (missing data).
+
+    Hysteresis: given a prior regime, spot must clear the flip by ``band_pct`` (a
+    Schmitt trigger) to switch — so spot hovering at the flip holds the prior
+    regime instead of chattering. With no prior regime the classification is a
+    hard split at the flip (the day's baseline)."""
+    if spot is None or flip is None or flip <= 0:
+        return "na"
+    if prev == "positive":
+        return "negative" if spot <= flip * (1 - band_pct) else "positive"
+    if prev == "negative":
+        return "positive" if spot >= flip * (1 + band_pct) else "negative"
+    return "positive" if spot >= flip else "negative"
+
+
+def detect_gamma_flip(symbol, spot, flip, prev_regime, band_pct=0.0, ts=None):
+    """Detect a gamma-regime transition for one symbol vs its prior regime.
+
+    Returns ``(alert_or_None, new_regime)``. No alert on the baseline (no prior
+    regime), on no change, or when the data is unclassifiable (regime 'na' keeps
+    the prior). On a genuine transition the alert dict carries type/side/symbol/
+    spot/flip/ts (side: 'to_positive' | 'to_negative'); the caller adds id + text.
+    Pure — cooldown/state persistence is the handler's job."""
+    new = gamma_regime(spot, flip, prev_regime, band_pct)
+    if new == "na":
+        return None, prev_regime
+    if prev_regime in (None, "na") or new == prev_regime:
+        return None, new
+    side = "to_positive" if new == "positive" else "to_negative"
+    return ({"type": "gamma_flip", "side": side, "symbol": symbol,
+             "spot": spot, "flip": flip, "ts": ts}, new)
+
+
 def _on_cooldown(cooldowns, key, now_ts, cooldown_sec):
     last = cooldowns.get(key)
     return isinstance(last, (int, float)) and (now_ts - last) < cooldown_sec
@@ -221,4 +264,11 @@ def alert_text(a) -> str:
         return (f"{s} {_exp_short(a.get('expiry'), a.get('dte'))} {a['strike']:g}{cp} — "
                 f"UNUSUAL: {a['volume']:,} vol vs {a['oi']:,} OI ({a['vol_oi']:.1f}×) · "
                 f"${a['cost']:.2f} · {_human_money(a['premium'])} premium")
+    if a["type"] == "gamma_flip":
+        spot, flip = a.get("spot"), a.get("flip")
+        if a["side"] == "to_negative":
+            return (f"{s} — gamma flipped NEGATIVE: spot {spot:g} fell below the gamma flip "
+                    f"{flip:g} (dealers short gamma → volatility amplified)")
+        return (f"{s} — gamma flipped POSITIVE: spot {spot:g} rose above the gamma flip "
+                f"{flip:g} (dealers long gamma → volatility dampened)")
     return f"{s}: flow alert"

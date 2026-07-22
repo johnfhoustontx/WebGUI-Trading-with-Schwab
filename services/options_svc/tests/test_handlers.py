@@ -1816,3 +1816,40 @@ def test_refresh_header_survives_matrix_spots_failure(monkeypatch):
     monkeypatch.setattr(handlers, "refresh_matrix_spots", _boom)
     handlers.refresh_header(bus)  # must not raise
     assert bus.cache_get(handlers.CACHE_HEADER) is not None
+
+
+def test_run_flow_alerts_gamma_flip_baseline_then_transition(monkeypatch):
+    """First observation sets the baseline regime (no alert); a later spot that
+    crosses the flip level fires a gamma-flip alert pushed to Telegram/Discord."""
+    from shared.bus import Bus
+    from services.options_svc import handlers, flow_alerts
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers, "_flow_alert_symbols", lambda: ["$SPX"])
+    monkeypatch.setattr(handlers, "_load_flow_series_for", lambda conn, sym, limit: [])
+    monkeypatch.setattr(handlers, "_flow_now_ts", lambda: 1000)
+    # Make the conn non-None so the gamma branch runs (its DB read is stubbed).
+    monkeypatch.setattr(handlers, "_run_gamma_flip", handlers._run_gamma_flip)  # keep real
+    import gex_history_db as gh
+    # Force a small gamma-flip universe + no cooldown/hysteresis noise.
+    monkeypatch.setattr(flow_alerts, "load_thresholds", lambda: {
+        "enabled": True, "crossover": {"band": 0.02, "min_premium": 10000, "cooldown_min": 30},
+        "gamma_flip": {"enabled": True, "band_pct": 0.0, "cooldown_min": 0, "symbols": ["$SPX"]}})
+
+    class _FakeConn:
+        def close(self): pass
+    monkeypatch.setattr(gh, "connect", lambda **k: _FakeConn())
+    state = {"row": (1000, 5510.0, 5500.0)}   # spot ABOVE flip → positive
+    monkeypatch.setattr(handlers, "_load_spot_flip_for", lambda conn, sym: state["row"])
+    sent = []
+    monkeypatch.setattr(handlers.push_notify, "send_flow_alert", lambda a, **k: sent.append(a))
+
+    handlers.run_flow_alerts(bus)          # baseline → records 'positive', no alert
+    assert not any(a["type"] == "gamma_flip" for a in sent)
+
+    state["row"] = (2000, 5480.0, 5500.0)  # spot now BELOW flip → negative (a flip)
+    monkeypatch.setattr(handlers, "_flow_now_ts", lambda: 2000)
+    handlers.run_flow_alerts(bus)
+    gf = [a for a in sent if a["type"] == "gamma_flip"]
+    assert len(gf) == 1 and gf[0]["side"] == "to_negative" and gf[0]["symbol"] == "$SPX"
+    env = bus.cache_get("cache:options:flow_alerts")
+    assert any(a["type"] == "gamma_flip" for a in env.payload["alerts"])

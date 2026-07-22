@@ -728,3 +728,22 @@ def test_premium_columns_backfilled_on_existing_db(tmp_path, monkeypatch):
                         "call_prem": 9.0, "put_prem": 4.0},
                        {"x": {"net": 1}}, dte=1)
     assert db.load_flow_series(conn, "SPY")[0][4] == 9.0
+
+
+def test_latest_spot_flip_returns_ts_spot_flip(tmp_path, monkeypatch):
+    dbpath = tmp_path / "t.db"
+    monkeypatch.setattr(db, "DB_PATH", dbpath)
+    conn = db.connect()
+    db.init_schema(conn)
+    now = int(time.time())
+
+    def summary(ts, spot, flip):
+        return {"ts": ts, "spot": spot, "flip": flip,
+                "top_pos_strike": None, "top_neg_strike": None, "net_total": None}
+
+    assert db.latest_spot_flip(conn, "SPY", "gex") is None
+    db.insert_snapshot(conn, "SPY", "gex", summary(now - 120, 449.0, 450.0), {}, dte=1)
+    db.insert_snapshot(conn, "SPY", "gex", summary(now, 452.0, 450.0), {}, dte=1)
+    ts, spot, flip = db.latest_spot_flip(conn, "SPY", "gex")
+    assert ts == now and spot == 452.0 and flip == 450.0
+    assert db.latest_spot_flip(conn, "QQQ", "gex") is None
