@@ -58,6 +58,25 @@ def daypct_class(v):
     return "text-emerald-400" if v > 0 else "text-rose-400"
 
 
+# Summary-band stat chips (Buy / Neutral / Sell counts). Tailwind-first.
+_SUM_CHIP = "px-3 py-1.5 rounded-lg text-sm font-semibold"
+_SUM_BUY_CLASS = f"{_SUM_CHIP} bg-emerald-600/80 text-white"
+_SUM_NEUTRAL_CLASS = f"{_SUM_CHIP} bg-slate-600/40 text-slate-200"
+_SUM_SELL_CLASS = f"{_SUM_CHIP} bg-rose-600/80 text-white"
+
+
+def signal_summary(payload):
+    """Counts of rows by headline signal → ``{'buy': n, 'neutral': n, 'sell': n}``.
+
+    An unknown/missing signal falls into the ``neutral`` bucket so the three counts
+    always sum to the row total."""
+    counts = {"buy": 0, "neutral": 0, "sell": 0}
+    for r in (payload or {}).get("rows") or []:
+        s = r.get("signal")
+        counts[s if s in counts else "neutral"] += 1
+    return counts
+
+
 def matrix_columns():
     spec = [
         ("symbol", "Ticker"), ("spot", "Spot"), ("day_pct", "Day %"),
@@ -186,6 +205,12 @@ def render():
             ui.label("Matrix").classes(f"text-h6 {LABEL}")
             ui.label("Every watchlist stock at a glance — sorted by hotness") \
                 .classes(EYEBROW)
+            # Summary band: signal counts across the whole grid.
+            with ui.row().classes("items-center gap-2 flex-wrap pt-1"):
+                ui.label("Signals").classes(EYEBROW + " pr-1")
+                buy_chip = ui.label("Buy 0").classes(_SUM_BUY_CLASS)
+                neutral_chip = ui.label("Neutral 0").classes(_SUM_NEUTRAL_CLASS)
+                sell_chip = ui.label("Sell 0").classes(_SUM_SELL_CLASS)
             status = ui.label("Waiting for the options service…").classes(EYEBROW)
             table = ui.table(columns=matrix_columns(), rows=[], row_key="symbol",
                              pagination={"rowsPerPage": 0}) \
@@ -202,6 +227,10 @@ def render():
     def _paint(payload):
         table.rows = matrix_rows(payload)
         table.update()
+        summ = signal_summary(payload)
+        buy_chip.text = f"Buy {summ['buy']}"
+        neutral_chip.text = f"Neutral {summ['neutral']}"
+        sell_chip.text = f"Sell {summ['sell']}"
         status.text = status_text(payload)
 
     @guard_async

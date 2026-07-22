@@ -64,6 +64,21 @@ def test_short_ts_converts_utc_to_central():
     assert matrix._short_ts("garbage") == ""
 
 
+def test_signal_summary_counts_by_signal():
+    payload = {"rows": [
+        {"signal": "buy"}, {"signal": "buy"}, {"signal": "sell"},
+        {"signal": "neutral"}, {"signal": "neutral"}, {"signal": "neutral"}]}
+    assert matrix.signal_summary(payload) == {"buy": 2, "neutral": 3, "sell": 1}
+
+
+def test_signal_summary_empty_and_unknown_falls_to_neutral():
+    assert matrix.signal_summary({}) == {"buy": 0, "neutral": 0, "sell": 0}
+    assert matrix.signal_summary(None) == {"buy": 0, "neutral": 0, "sell": 0}
+    # unknown/missing signal is bucketed as neutral so the counts sum to the row total
+    assert matrix.signal_summary({"rows": [{"signal": "bogus"}, {}]}) \
+        == {"buy": 0, "neutral": 2, "sell": 0}
+
+
 def test_status_text_updated_clock_is_central():
     text = matrix.status_text({"rows": [{}], "session_date": "2026-07-20",
                                "ts": "2026-07-20T22:03:00+00:00"})
