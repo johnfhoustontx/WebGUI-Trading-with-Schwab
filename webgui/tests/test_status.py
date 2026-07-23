@@ -291,3 +291,16 @@ def test_auth_is_not_restartable():
     # The auth card's action is Authorize (a link), not a process restart.
     auth_target = {"key": "schwab_auth", "kind": "auth"}
     assert status.restart_spec(auth_target) is None
+
+
+def test_render_merges_auth_into_proxy_card_with_aligned_buttons():
+    # The Schwab Authorization probe renders merged into the schwab-proxy card
+    # (Authorize + Restart side by side); every card puts its buttons in the
+    # same fixed-width right-justified slot so they align in one column.
+    import inspect
+
+    src = inspect.getsource(status.render)
+    assert "merged into the schwab-proxy card" in src
+    assert "w-[280px]" in src and "justify-end" in src
+    # No stray ml-auto button placement remains (the old drift-prone layout).
+    assert "ml-auto {BTN_3D}" not in src

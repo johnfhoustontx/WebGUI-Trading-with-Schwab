@@ -384,35 +384,55 @@ def render():
                 ui.label(ov["text"]).classes("font-bold")
 
         comps.clear()
+        # The Schwab Authorization probe renders MERGED into the proxy card (one
+        # line, Authorize + Restart side by side) — it still counts as its own
+        # component in the overall banner above.
+        auth = next((r for r in results if r.get("kind") == "auth"), None)
         with comps:
             for r in results:
+                if r.get("kind") == "auth":
+                    continue  # merged into the schwab-proxy card
                 up = r.get("up")
+                merged_auth = auth if r.get("kind") == "proxy" else None
+                # The card icon folds a failed authorization into an otherwise-up
+                # proxy so the red flag is visible at a glance.
+                icon_up = up
+                if merged_auth is not None and up and merged_auth.get("up") is False:
+                    icon_up = False
                 with ui.card().classes("w-full"):
                     with ui.row().classes("items-center gap-3 w-full no-wrap"):
-                        ui.icon(status_icon(up)).props(
-                            f"color={status_color(up)}").classes("text-2xl")
-                        with ui.column().classes("gap-0"):
+                        ui.icon(status_icon(icon_up)).props(
+                            f"color={status_color(icon_up)}").classes("text-2xl")
+                        # Labels grow; the status column hugs its content; the
+                        # button slot is a FIXED width with right-justified
+                        # buttons, so every card's buttons line up in one column.
+                        with ui.column().classes("gap-0 flex-1 min-w-0"):
                             ui.label(r["label"]).classes("font-medium")
                             ui.label(f"{r['tier']} · {r['url']}").classes(
                                 "text-xs opacity-60")
-                        # Action button: Authorize (auth card, proxy reachable) or
-                        # Restart (every restartable component — always available,
-                        # so you can also restart a wedged-but-listening service).
-                        if r.get("kind") == "auth" and up is not None:
-                            ui.button(
-                                "Re-authorize" if up else "Authorize", icon="login",
-                                color=None,
-                                on_click=lambda: ui.navigate.to(AUTH_URL, new_tab=True)) \
-                                .props("no-caps").classes(f"ml-auto {BTN_3D}")
-                        elif restart_spec(r) is not None:
-                            ui.button("Restart", icon="restart_alt", color=None,
-                                      on_click=lambda t=r: _restart_clicked(t)) \
-                                .props("no-caps").classes(f"ml-auto {BTN_3D}")
-                        with ui.column().classes("gap-0 items-end ml-auto"):
+                        with ui.column().classes("gap-0 items-end shrink-0"):
                             ui.badge(status_word(up)).props(
                                 f"color={status_color(up)}")
                             ui.label(r.get("detail", "")).classes(
                                 "text-xs opacity-60")
+                            if merged_auth is not None:
+                                ui.label(f"Auth: {merged_auth.get('detail', '')}") \
+                                    .classes("text-xs " + (
+                                        "text-negative" if merged_auth.get("up") is False
+                                        else "opacity-60"))
+                        with ui.row().classes(
+                                "shrink-0 w-[280px] justify-end items-center "
+                                "gap-2 no-wrap"):
+                            if merged_auth is not None and merged_auth.get("up") is not None:
+                                ui.button(
+                                    "Re-authorize" if merged_auth.get("up") else "Authorize",
+                                    icon="login", color=None,
+                                    on_click=lambda: ui.navigate.to(AUTH_URL, new_tab=True)) \
+                                    .props("no-caps").classes(BTN_3D)
+                            if restart_spec(r) is not None:
+                                ui.button("Restart", icon="restart_alt", color=None,
+                                          on_click=lambda t=r: _restart_clicked(t)) \
+                                    .props("no-caps").classes(BTN_3D)
 
     def _paint_freshness():
         now = _dt.datetime.now(_dt.timezone.utc)
