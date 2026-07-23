@@ -37,9 +37,8 @@ def render():
     headline_lbl = ui.label("").classes("text-subtitle1 text-bold")
     detail_lbl = ui.label("").classes("opacity-70 text-sm")
     msg_lbl = ui.label("").classes("text-warning text-sm")
-    ui.label("Each sector's trail: top-right (Leading) → bottom-right (Weakening) → "
-             "bottom-left (Lagging) → top-left (Improving). The bright dot is now; "
-             "the faded trail is where it came from.").classes("opacity-50 text-xs q-mt-sm")
+    # The quadrant names render as faint corner labels INSIDE the chart
+    # (quadrant_label_bands in pages.sentiment_rotation) — no caption needed.
     rrg_box = ui.column().classes("w-full q-mt-sm")
 
     def _render(a, weights, risk_threshold):

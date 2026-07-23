@@ -131,6 +131,35 @@ def test_rrg_scatter_line_plus_single_head_dot():
     assert xlk.get("showInLegend") is False
 
 
+def test_rrg_scatter_quadrant_corner_labels():
+    """The four quadrant names render as faint in-chart corner labels: Leading
+    top-right, Weakening bottom-right, Lagging bottom-left, Improving top-left —
+    via transparent xAxis plotBands (label-only, band fill invisible)."""
+    fig = R.rrg_scatter_figure(_assessment())
+    bands = fig["xAxis"]["plotBands"]
+    labels = {b["label"]["text"]: b["label"] for b in bands}
+    assert set(labels) == {"Leading", "Weakening", "Lagging", "Improving"}
+    corners = {t: (lb["align"], lb["verticalAlign"]) for t, lb in labels.items()}
+    assert corners["Leading"] == ("right", "top")
+    assert corners["Weakening"] == ("right", "bottom")
+    assert corners["Lagging"] == ("left", "bottom")
+    assert corners["Improving"] == ("left", "top")
+    # Unobtrusive: invisible band fill, faint small text, under the series.
+    assert all(b["color"] == "rgba(0,0,0,0)" for b in bands)
+    assert all("rgba" in b["label"]["style"]["color"] for b in bands)
+    # The right-hand bands start at the 100 crosshair, the left-hand ones end there.
+    assert all(b["from"] == 100 for b in bands if b["label"]["align"] == "right")
+    assert all(b["to"] == 100 for b in bands if b["label"]["align"] == "left")
+
+
+def test_rrg_page_caption_removed():
+    import inspect
+
+    from pages import sentiment_rrg
+    src = inspect.getsource(sentiment_rrg.render)
+    assert "Each sector's trail" not in src
+
+
 def test_rrg_scatter_no_legend_leak():
     fig = R.rrg_scatter_figure(_assessment())
     assert all(t.get("showInLegend") is False for t in fig["series"])

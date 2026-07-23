@@ -160,11 +160,40 @@ def _sector_trace(sec):
     }
 
 
+# Corner labels naming the four RRG quadrants (replaces the old caption line on
+# the RRG page). Implemented as TRANSPARENT xAxis plotBands — one band left of
+# 100 and one right of 100, twice each — whose labels anchor to the four corners
+# of the plot area. Bands render UNDER the series and the text is faint, so the
+# labels are visible but unobtrusive.
+_QUAD_LABEL_STYLE = {"color": "rgba(255,255,255,0.30)", "fontSize": "11px",
+                     "fontWeight": "bold", "letterSpacing": "2px",
+                     "textTransform": "uppercase"}
+
+
+def quadrant_label_bands():
+    def band(right, top, text):
+        return {
+            "from": 100 if right else -1e9,
+            "to": 1e9 if right else 100,
+            "color": "rgba(0,0,0,0)",           # invisible band — label only
+            "zIndex": 0,
+            "label": {"text": text,
+                      "align": "right" if right else "left",
+                      "textAlign": "right" if right else "left",
+                      "verticalAlign": "top" if top else "bottom",
+                      "x": -10 if right else 10,
+                      "y": 18 if top else -12,
+                      "style": dict(_QUAD_LABEL_STYLE)},
+        }
+    return [band(True, True, "Leading"), band(True, False, "Weakening"),
+            band(False, False, "Lagging"), band(False, True, "Improving")]
+
+
 def rrg_scatter_figure(a):
     """Highcharts RRG: one spline series per sector (faded trail + single head
-    dot), 100/100 crosshair plotLines, and native hover-isolation (hovering one
-    sector dims the rest via ``states.inactive``). Series order matches the
-    sectors order."""
+    dot), 100/100 crosshair plotLines, faint corner labels naming each quadrant,
+    and native hover-isolation (hovering one sector dims the rest via
+    ``states.inactive``). Series order matches the sectors order."""
     secs = a.get("sectors") or []
     series = [t for t in (_sector_trace(s) for s in secs) if t is not None]
     cross = {"value": 100, "color": "rgba(255,255,255,0.25)", "width": 1, "zIndex": 1}
@@ -182,7 +211,7 @@ def rrg_scatter_figure(a):
         # Benign — splines render in data order, which is the temporal trail.
         "legend": {"enabled": False},
         "xAxis": {**axis, "title": {"text": "RS-Ratio", "style": {"color": "#bdbdbd"}},
-                  "plotLines": [cross]},
+                  "plotLines": [cross], "plotBands": quadrant_label_bands()},
         "yAxis": {**axis, "title": {"text": "RS-Momentum", "style": {"color": "#bdbdbd"}},
                   "plotLines": [cross]},
         # Native hover-isolation: hovering one series dims all others.
