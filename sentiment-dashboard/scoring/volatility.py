@@ -11,6 +11,8 @@ to seed, then each subsequent bar applies ``a = (a*(n-1) + tr) / n``.
 """
 from __future__ import annotations
 
+import math
+
 import numpy as np
 
 ATR_PERIOD = 14         # default ATR look-back (Wilder's standard)
@@ -25,13 +27,17 @@ def atr(highs, lows, closes, n=ATR_PERIOD):
     TR = max(h-l, |h-prev_close|, |l-prev_close|); the first bar's TR is
     h-l (no prior close). Seed = SMA of the first n TRs, then RMA
     ``a = (a*(n-1) + tr) / n`` across the remaining bars. Accepts lists
-    or ndarrays.
+    or ndarrays. Mismatched lengths are truncated to the common TAIL
+    (the last ``min_len`` bars of each). A non-finite result (e.g. a NaN
+    candle) degrades to None.
     """
     h = np.asarray(highs, dtype=float)
     lo = np.asarray(lows, dtype=float)
     c = np.asarray(closes, dtype=float)
-    if min(len(h), len(lo), len(c)) < n or n < 1:
+    m = min(len(h), len(lo), len(c))
+    if m < n or n < 1:
         return None
+    h, lo, c = h[-m:], lo[-m:], c[-m:]
     prev_c = c[:-1]
     tr = np.empty(len(c))
     tr[0] = h[0] - lo[0]
@@ -43,33 +49,36 @@ def atr(highs, lows, closes, n=ATR_PERIOD):
     a = float(tr[:n].mean())          # SMA seed (house Wilder convention)
     for t in tr[n:]:
         a = (a * (n - 1) + t) / n     # Wilder's RMA
-    return a
+    a = float(a)
+    return a if math.isfinite(a) else None
 
 
 def bollinger_width_pct(closes, n=BOLL_PERIOD, k=BOLL_K):
     """Bollinger band width as a fraction of the middle band.
 
     (upper - lower) / middle = ``2*k*std(ddof=0) / mean`` over the LAST n
-    closes. None when fewer than n bars or the mean is <= 0.
+    closes. None when fewer than n bars, the mean is <= 0, or the result
+    is non-finite (e.g. a NaN close in the window).
     """
     c = np.asarray(closes, dtype=float)
     if len(c) < n or n < 1:
         return None
     window = c[-n:]
     mid = float(window.mean())
-    if mid <= 0:
+    if not math.isfinite(mid) or mid <= 0:
         return None
-    return float(2.0 * k * window.std(ddof=0) / mid)
+    width = float(2.0 * k * window.std(ddof=0) / mid)
+    return width if math.isfinite(width) else None
 
 
 def percentile_of_last(values, min_n=PCTL_MIN_N):
     """Rank of the LAST value among the PRIOR values, as a fraction 0..1.
 
-    None entries are filtered out first; the rank is the fraction of prior
-    (present) values <= the last present value. None when fewer than
-    min_n present values.
+    None and non-finite (NaN/inf) entries are filtered out first; the rank
+    is the fraction of prior (present) values <= the last present value.
+    None when fewer than min_n present values.
     """
-    present = [float(v) for v in values if v is not None]
+    present = [float(v) for v in values if v is not None and math.isfinite(v)]
     if len(present) < min_n:
         return None
     last = present[-1]

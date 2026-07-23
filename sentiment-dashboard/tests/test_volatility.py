@@ -19,10 +19,25 @@ def test_atr_insufficient_bars_returns_none():
 
 
 def test_atr_accepts_ndarrays():
-    h = np.array([12, 12.5, 13, 12.8, 13.2])
-    l = np.array([11, 11.5, 12, 12.2, 12.6])  # noqa: E741
-    c = np.array([11.5, 12.2, 12.5, 12.6, 13.0])
-    assert V.atr(h, l, c, n=3) is not None
+    h = [12, 12.5, 13, 12.8, 13.2]
+    l = [11, 11.5, 12, 12.2, 12.6]  # noqa: E741
+    c = [11.5, 12.2, 12.5, 12.6, 13.0]
+    assert V.atr(np.array(h), np.array(l), np.array(c), n=3) == V.atr(h, l, c, n=3)
+
+
+def test_atr_nan_candle_returns_none():
+    h = [12, 12.5, float("nan"), 12.8, 13.2]
+    l = [11, 11.5, 12, 12.2, 12.6]  # noqa: E741
+    c = [11.5, 12.2, 12.5, 12.6, 13.0]
+    assert V.atr(h, l, c, n=3) is None
+
+
+def test_atr_mismatched_lengths_truncate_to_common_tail():
+    h = [12, 12.5, 13, 12.8, 13.2]
+    l = [11, 11.5, 12, 12.2, 12.6]  # noqa: E741
+    c = [11.5, 12.2, 12.5, 12.6, 13.0]
+    # An extra leading high must be ignored: arrays align on the common TAIL.
+    assert V.atr([99.0] + h, l, c, n=3) == V.atr(h, l, c, n=3)
 
 
 def test_bollinger_width_pct_zero_variance_is_zero():
@@ -38,11 +53,25 @@ def test_bollinger_width_pct_thin_returns_none():
     assert V.bollinger_width_pct([100.0] * 5, n=20) is None
 
 
+def test_bollinger_width_pct_nan_close_returns_none():
+    closes = [100.0] * 19 + [float("nan")]
+    assert V.bollinger_width_pct(closes, n=20) is None
+
+
 def test_percentile_of_last():
     hist = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10.0]
     assert V.percentile_of_last(hist + [10.5]) == 1.0
-    assert abs(V.percentile_of_last(hist + [5.5]) - 0.5) < 0.1
+    assert V.percentile_of_last(hist + [5.5]) == 0.5
     assert V.percentile_of_last([1.0]) is None
+
+
+def test_percentile_of_last_filters_nan():
+    hist = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10.0]
+    # A trailing NaN is absent, exactly like a trailing None: the last
+    # PRESENT value (10.0) is ranked.
+    p = V.percentile_of_last(hist + [float("nan")])
+    assert p == V.percentile_of_last(hist + [None])
+    assert p == 1.0
 
 
 def test_percentile_of_last_filters_none():
