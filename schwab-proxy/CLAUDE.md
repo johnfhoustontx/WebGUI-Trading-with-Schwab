@@ -17,6 +17,11 @@ sentiment-dashboard, and claude-driver all fetch market data through it.
 - Entry: `schwab_proxy.py` (also `Launch_Proxy.bat`).
 - Serves on `http://127.0.0.1:8100` (`PROXY_URL` / `PROXY_PORT` from
   `repo_paths.py`).
+- **Runs until explicitly stopped.** The legacy daily auto-shutdown (the proxy
+  self-terminated at 15:30 CT Mon–Fri via a `_shutdown_scheduler` thread) was
+  **REMOVED 2026-07-22** per the user — its 24/7 consumers (market_svc's
+  futures poll, off-hours pages) need the proxy up around the clock. Stop it
+  via `stop_all.bat` / the Terminate page / closing its window.
 - Key endpoints: `/health`, `/stats/api_calls` (per-day outbound Schwab API-call counts — today / last 7 / last 30 days; counted at the marketdata rate-limit chokepoint + the trader request loop into `data/api_call_counts.db`, best-effort/never-raises; feeds the webgui Settings "API usage" card), `/quote`, `/quotes`, `/chains`, `/pricehistory`,
   `/instruments` (fundamentals; `projection=fundamental` → P/E, growth, ROE,
   margins — used by trade_svc), `/accounts`, `/positions`, `/positions/{account_hash}`,

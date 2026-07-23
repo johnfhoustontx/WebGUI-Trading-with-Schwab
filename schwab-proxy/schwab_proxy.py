@@ -27,7 +27,6 @@ import json
 import os
 import sys
 import hmac
-import signal
 import time
 import base64
 import asyncio
@@ -143,32 +142,12 @@ def _is_retryable_status(status_code: int) -> bool:
     """
     return status_code >= 500
 
-# Daily auto-shutdown: 15:30 America/Chicago, Mon–Fri (handles DST automatically).
-SHUTDOWN_TZ = ZoneInfo("America/Chicago")
-SHUTDOWN_HOUR = 15
-SHUTDOWN_MINUTE = 30
-
-
-def _next_shutdown_dt(now: datetime) -> datetime:
-    target = now.replace(hour=SHUTDOWN_HOUR, minute=SHUTDOWN_MINUTE, second=0, microsecond=0)
-    if target <= now:
-        target += timedelta(days=1)
-    while target.weekday() >= 5:  # 5=Sat, 6=Sun
-        target += timedelta(days=1)
-    return target
-
-
-def _shutdown_scheduler():
-    while True:
-        now = datetime.now(SHUTDOWN_TZ)
-        target = _next_shutdown_dt(now)
-        sleep_s = (target - now).total_seconds()
-        logger.info(f"Auto-shutdown scheduled for {target.isoformat()} ({sleep_s/3600:.2f}h)")
-        time.sleep(max(sleep_s, 1))
-        logger.info("Auto-shutdown time reached — terminating proxy")
-        os.kill(os.getpid(), signal.SIGTERM if os.name != "nt" else signal.SIGINT)
-        time.sleep(5)
-        os._exit(0)
+# Local (Central) timezone for date helpers. NOTE: the legacy daily
+# auto-shutdown (the proxy self-terminated at 15:30 CT Mon–Fri) was REMOVED
+# 2026-07-22 per the user — the proxy now runs until explicitly stopped
+# (stop_all / the Terminate page / closing its window), matching its 24/7
+# consumers (market_svc's futures poll, off-hours pages).
+CENTRAL_TZ = ZoneInfo("America/Chicago")
 
 #############################################
 # TOKEN MANAGER (Thread-Safe)
@@ -462,7 +441,6 @@ def startup():
     token_mgr = TokenManager()
     has_token = bool(token_mgr.tokens.get("AccessToken"))
     logger.info(f"Schwab Proxy started on port {PROXY_PORT} | token loaded: {has_token}")
-    threading.Thread(target=_shutdown_scheduler, name="auto-shutdown", daemon=True).start()
 
     # Trade stream tracker — ensure perf tables exist, then start the reconcile
     # sweep and the asyncio stream worker. A failure to start streaming must NOT
@@ -1023,7 +1001,7 @@ _option_id_counter = itertools.count()  # monotonic option SSE subscriber ids
 
 
 def _now_iso() -> str:
-    return datetime.now(SHUTDOWN_TZ).isoformat()
+    return datetime.now(CENTRAL_TZ).isoformat()
 
 
 #############################################
@@ -1045,7 +1023,7 @@ def _track(body: dict) -> dict:
         # expiration, and reconcile would retry every cycle forever. Today's 0-DTE
         # (expiration == today) is still tracked. Stale OPEN rows just get skipped.
         try:
-            if datetime.fromisoformat(expiration).date() < datetime.now(SHUTDOWN_TZ).date():
+            if datetime.fromisoformat(expiration).date() < datetime.now(CENTRAL_TZ).date():
                 logger.info("track %s: skipping expired trade (exp %s)", trade_id, expiration)
                 return {"status": "skipped", "detail": "expired"}
         except (ValueError, TypeError):
