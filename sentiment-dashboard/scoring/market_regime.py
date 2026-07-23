@@ -359,9 +359,15 @@ def _normalize(vec):
 
 def alpha(dt_sec, half_life_min):
     """EMA update weight for a sample ``dt_sec`` after the previous one, such
-    that after exactly one half-life the OLD value's weight is 0.5."""
+    that after exactly one half-life the OLD value's weight is 0.5.
+
+    ``dt_sec`` <= 0 (or None) -> 0.0 (no update, retain the prior value). A
+    degenerate ``half_life_min`` <= 0 -> 1.0 (no smoothing, the sample fully
+    replaces)."""
     if dt_sec is None or dt_sec <= 0:
         return 0.0
+    if half_life_min <= 0:
+        return 1.0
     return 1.0 - 0.5 ** (float(dt_sec) / (float(half_life_min) * 60.0))
 
 
@@ -389,6 +395,9 @@ def detect_transition(fast, slow):
     ``from`` = the largest negative. Divergence below TRANSITION_FLOOR (or a
     degenerate from == to) -> None (stable). progress = divergence scaled to
     TRANSITION_FULL, clamped to [0, 1].
+
+    ``fast``/``slow`` must be full ``smooth``-produced membership vectors (all
+    REGIMES keys); only ``smooth``'s ``sample`` argument is untrusted/normalized.
     """
     if not fast or not slow:
         return None
@@ -404,30 +413,37 @@ def detect_transition(fast, slow):
 @dataclass
 class CommitState:
     committed: str | None = None   # the currently displayed label key (regime name)
-    streak: int = 0                # consecutive samples the challenger has led with margin
+    streak: int = 0                # consecutive margin reads by the SAME challenger
+    challenger: str | None = None  # the regime the current streak is being built for
 
 
 def commit_label(fast, state):
     """Hysteresis label commit over the fast-EMA memberships.
 
-    Cold start commits the dominant immediately. A challenger must lead the
-    runner-up by COMMIT_MARGIN for COMMIT_READS consecutive samples to flip
+    Cold start commits the dominant immediately. A SINGLE challenger must lead
+    the runner-up by COMMIT_MARGIN for COMMIT_READS consecutive samples to flip
     (first margin-clearing read -> streak 1, committed holds; the next
-    consecutive one flips). A no-margin read, or the committed label
-    re-dominating, resets the streak. Returns a NEW CommitState (no mutation).
+    consecutive read BY THE SAME CHALLENGER flips). A no-margin read, the
+    committed label re-dominating, or a DIFFERENT challenger taking the lead
+    restarts the streak. Returns a NEW CommitState (no mutation).
+
+    ``fast`` must be a full ``smooth``-produced membership vector (all REGIMES
+    keys). Ties resolve in REGIMES order (``sorted`` is stable).
     """
     ranked = sorted(REGIMES, key=lambda r: fast[r], reverse=True)
     dominant, runner_up = ranked[0], ranked[1]
     if state.committed is None:
-        return CommitState(committed=dominant, streak=0)
+        return CommitState(committed=dominant, streak=0, challenger=None)
     if dominant == state.committed:
-        return CommitState(committed=state.committed, streak=0)
+        return CommitState(committed=state.committed, streak=0, challenger=None)
     if fast[dominant] - fast[runner_up] >= COMMIT_MARGIN:
-        streak = state.streak + 1
+        # A challenger different from the one the streak was built for restarts it.
+        streak = state.streak + 1 if dominant == state.challenger else 1
         if streak >= COMMIT_READS:
-            return CommitState(committed=dominant, streak=0)
-        return CommitState(committed=state.committed, streak=streak)
-    return CommitState(committed=state.committed, streak=0)
+            return CommitState(committed=dominant, streak=0, challenger=None)
+        return CommitState(committed=state.committed, streak=streak,
+                           challenger=dominant)
+    return CommitState(committed=state.committed, streak=0, challenger=None)
 
 
 def apply_crisis_attack(fast, raw_crisis):
@@ -435,7 +451,10 @@ def apply_crisis_attack(fast, raw_crisis):
     CRISIS_ATTACK bypasses the EMAs — crisis membership jumps straight to
     ``max(fast["crisis"], raw_crisis)`` and the other regimes scale
     proportionally into the remainder (vector still sums to 1). Below the
-    threshold the fast vector is returned UNCHANGED (same object)."""
+    threshold the fast vector is returned UNCHANGED (same object).
+
+    ``fast`` must be a full ``smooth``-produced membership vector (all REGIMES
+    keys)."""
     if not crisis_attacked(raw_crisis):
         return fast
     crisis = _clamp(max(fast["crisis"], raw_crisis), 0.0, 1.0)

@@ -286,6 +286,16 @@ def test_alpha_scales_with_dt():
     assert abs((1 - a) - 0.25) < 1e-9
 
 
+def test_alpha_none_dt_is_zero():
+    assert MR.alpha(dt_sec=None, half_life_min=15) == 0.0
+
+
+def test_alpha_nonpositive_half_life_is_one():
+    # a degenerate half-life means no smoothing: the sample fully replaces
+    assert MR.alpha(dt_sec=300, half_life_min=0) == 1.0
+    assert MR.alpha(dt_sec=300, half_life_min=-5) == 1.0
+
+
 # -------- smooth
 
 
@@ -404,6 +414,20 @@ def test_commit_label_dominant_unchanged_resets_streak():
     assert st.committed == "mean_reversion" and st.streak == 0
 
 
+def test_commit_label_different_challenger_restarts_streak():
+    # Hysteresis is per-challenger: a streak built by one challenger must NOT be
+    # inherited by a different one leading the next read.
+    trend = _vec(trending=0.45, mean_reversion=0.25, breakout=0.1, choppy=0.1, crisis=0.1)
+    brk = _vec(breakout=0.45, mean_reversion=0.25, trending=0.1, choppy=0.1, crisis=0.1)
+    st = MR.CommitState(committed="mean_reversion", streak=0)
+    st = MR.commit_label(trend, st)            # trending leads by margin -> streak 1
+    assert st.committed == "mean_reversion" and st.streak == 1 and st.challenger == "trending"
+    st = MR.commit_label(brk, st)              # DIFFERENT challenger -> streak restarts, HOLDS
+    assert st.committed == "mean_reversion" and st.streak == 1 and st.challenger == "breakout"
+    st = MR.commit_label(brk, st)              # same challenger again -> flips
+    assert st.committed == "breakout" and st.streak == 0
+
+
 # -------- crisis attack
 
 
@@ -436,6 +460,16 @@ def test_crisis_attack_does_not_mutate_input():
     copy = dict(fast)
     MR.apply_crisis_attack(fast, raw_crisis=0.85)
     assert fast == copy
+
+
+def test_crisis_attack_degenerate_others_zero():
+    # No mass in the other regimes (or crisis already 1.0) -> a pure crisis vector,
+    # still valid and summing to 1.
+    fast = _vec(crisis=1.0, trending=0.0, mean_reversion=0.0, breakout=0.0, choppy=0.0)
+    out = MR.apply_crisis_attack(fast, raw_crisis=0.9)
+    assert out["crisis"] == 1.0
+    assert abs(sum(out.values()) - 1.0) < 1e-9
+    assert all(out[r] == 0.0 for r in MR.REGIMES if r != "crisis")
 
 
 def test_crisis_attacked_predicate():
