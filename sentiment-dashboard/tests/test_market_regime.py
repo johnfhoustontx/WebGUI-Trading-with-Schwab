@@ -184,3 +184,68 @@ def test_crisis_evidence_string():
     ev = _quiet_range_day() | {"vix1d_spike_pct": 40.0}
     s = MR.score_regimes(ev)
     assert any("VIX1D" in e for e in s.evidence)
+
+
+# ---------------------------------------------------------------- malformed inputs
+# NaN/bool-string/unknown-enum evidence must degrade to ABSENT, never fabricate
+# intensity (a NaN warm-up value is routine in upstream indicator series).
+
+
+def test_nan_input_drops_out():
+    ev = _quiet_range_day() | {"adx": float("nan")}
+    s = MR.score_regimes(ev)
+    # the ADX term drops out; the regime still scores from its remaining inputs
+    assert max(s.raw, key=s.raw.get) == "mean_reversion"
+    assert s.raw["mean_reversion"] > 0.5
+    # and matches the explicit-None behavior exactly
+    assert s.raw == MR.score_regimes(_quiet_range_day() | {"adx": None}).raw
+
+
+def test_all_nan_inputs_score_nothing():
+    ev = {k: float("nan") for k in _quiet_range_day()}
+    s = MR.score_regimes(ev)
+    assert all(v == 0.0 for v in s.raw.values())
+    assert s.unclear is True
+
+
+def test_inf_input_drops_out():
+    # on a breakout day an inf rel_vol would otherwise score the leg at 1.0
+    ev = _breakout_day() | {"rel_vol": float("inf")}
+    assert MR.score_regimes(ev).raw["breakout"] == 0.0
+
+
+def test_bool_string_is_absent():
+    # a string "false" is NOT truthy evidence — it must behave as absent
+    base = MR.score_regimes(_quiet_range_day() | {"above_flip": None}).raw
+    assert MR.score_regimes(_quiet_range_day() | {"above_flip": "false"}).raw == base
+    assert MR.score_regimes(_quiet_range_day() | {"gap_filled": "false",
+                                                  "gap_open_pct": 1.8}).raw["crisis"] == 0.0
+
+
+def test_or_break_state_unknown_is_absent():
+    # a typo'd enum value must be absent, not score as an active "failed" 0.0
+    base = MR.score_regimes(_trend_day() | {"or_break_state": None}).raw
+    assert MR.score_regimes(_trend_day() | {"or_break_state": "HELD"}).raw == base
+    # breakout requires ALL legs — an unknown OR state means the OR leg is MISSING
+    assert MR.score_regimes(_breakout_day() | {"or_break_state": "HELD"}).raw["breakout"] == 0.0
+
+
+# ---------------------------------------------------------------- branch pins
+
+
+def test_adx_rising_none_means_no_discount():
+    raw_none = MR.score_regimes(_trend_day() | {"adx_rising": None}).raw["trending"]
+    raw_false = MR.score_regimes(_trend_day() | {"adx_rising": False}).raw["trending"]
+    raw_true = MR.score_regimes(_trend_day()).raw["trending"]
+    assert raw_none == raw_true          # None -> multiplier 1.0
+    assert raw_false < raw_none          # False -> 0.7 discount visible in the raw
+    # discount magnitude: 0.3 of the (saturated) ADX term's 0.30 weight
+    assert abs((raw_none - raw_false) - 0.3 * 0.30) < 1e-9
+
+
+def test_breakout_or_none_factor():
+    held = MR.score_regimes(_breakout_day()).raw["breakout"]
+    none_ = MR.score_regimes(_breakout_day() | {"or_break_state": "none"}).raw["breakout"]
+    assert abs(none_ - MR.OR_NONE_FACTOR * held) < 1e-9
+    assert MR.score_regimes(_breakout_day() | {"or_break_state": "failed"}
+                            ).raw["breakout"] == 0.0

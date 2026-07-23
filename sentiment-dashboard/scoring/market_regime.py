@@ -14,6 +14,7 @@ Smoothing / transition / commit (the temporal layer) is deliberately NOT here �
 that is the next task on this module.
 """
 from __future__ import annotations
+import math
 from dataclasses import dataclass, field
 
 
@@ -108,13 +109,29 @@ def ramp(x, lo, hi):
 
 
 def _num(v):
-    """float(v) or None — a non-numeric / missing input is ABSENT, never a default."""
+    """Finite float(v) or None — a non-numeric / NaN / ±inf / missing input is
+    ABSENT, never a default (a NaN warm-up value must not score as intensity)."""
     if v is None:
         return None
     try:
-        return float(v)
+        f = float(v)
     except (TypeError, ValueError):
         return None
+    return f if math.isfinite(f) else None
+
+
+def _bool(v):
+    """A real bool or None — anything else (e.g. the string "false") is ABSENT."""
+    return v if isinstance(v, bool) else None
+
+
+_OR_STATES = frozenset({"held", "failed", "none"})
+
+
+def _or_state(v):
+    """A whitelisted or_break_state or None — an unknown value is ABSENT, not
+    an active "not held" 0.0."""
+    return v if v in _OR_STATES else None
 
 
 def _wavg(pairs):
@@ -143,7 +160,7 @@ def _mean_reversion(ev):
     wp = _num(ev.get("bb_width_pctile"))
     mid = None if wp is None else _clamp(1.0 - 2.0 * abs(wp - 0.5), 0.0, 1.0)
     bal = _num(ev.get("profile_balance"))
-    above = ev.get("above_flip")
+    above = _bool(ev.get("above_flip"))
     flip = None if above is None else (1.0 if above else 0.0)
 
     intensity = _wavg([(quiet, MR_W_ADX), (flat, MR_W_FLAT), (mid, MR_W_MIDBAND),
@@ -162,7 +179,7 @@ def _mean_reversion(ev):
 
 def _trending(ev):
     adx = _num(ev.get("adx"))
-    rising = ev.get("adx_rising")
+    rising = _bool(ev.get("adx_rising"))
     if adx is None:
         adx_term = None
     else:
@@ -174,7 +191,7 @@ def _trending(ev):
     hug = _num(ev.get("band_hug_frac"))
     vwap = _num(ev.get("vwap_hold_frac"))
     vwap_term = None if vwap is None else ramp(vwap, VWAP_HOLD_LO, VWAP_HOLD_HI)
-    orb = ev.get("or_break_state")
+    orb = _or_state(ev.get("or_break_state"))
     or_term = None if orb is None else (1.0 if orb == "held" else 0.0)
 
     intensity = _wavg([(adx_term, TR_W_ADX), (slope_term, TR_W_SLOPE), (hug, TR_W_HUG),
@@ -199,7 +216,7 @@ def _breakout(ev):
     wp = _num(ev.get("bb_width_pctile"))
     exp_ = _num(ev.get("bb_width_expansion"))
     rv = _num(ev.get("rel_vol"))
-    orb = ev.get("or_break_state")
+    orb = _or_state(ev.get("or_break_state"))
     if wp is None or exp_ is None or rv is None or orb is None:
         return 0.0, []
     squeeze = 1.0 - ramp(wp, SQUEEZE_PCTILE_LO, SQUEEZE_PCTILE_HI)
@@ -260,8 +277,8 @@ def _crisis(ev):
     if atr is not None:
         tells.append((ramp(atr, CRISIS_ATR_LO, CRISIS_ATR_HI), f"ATR pctile {atr:.2f}"))
     gap = _num(ev.get("gap_open_pct"))
-    filled = ev.get("gap_filled")
-    if gap is not None and filled is not None:   # gap_filled None -> factor absent
+    filled = _bool(ev.get("gap_filled"))
+    if gap is not None and filled is not None:   # gap_filled None/non-bool -> absent
         fired = abs(gap) > CRISIS_GAP_MIN_PCT and filled is False
         tells.append((1.0 if fired else 0.0, f"Unfilled gap {gap:+.1f}%"))
     deep = _num(ev.get("below_flip_deep"))
