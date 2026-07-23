@@ -10,8 +10,11 @@ only. Every evidence input is OPTIONAL — a missing (None) input DROPS OUT of i
 regime's confidence-weighted average (the ``blend_aggression`` idiom) rather than
 defaulting, so degradation trends toward "Unclear", never toward a fabricated read.
 
-Smoothing / transition / commit (the temporal layer) is deliberately NOT here —
-that is the next task on this module.
+The temporal layer lives here too (still pure — callers supply ``dt_sec``, never
+wall-clock reads): wall-clock half-life EMA smoothing over the membership vector
+(``alpha``/``smooth``), fast-vs-slow transition detection (``detect_transition``),
+the hysteresis label commit (``CommitState``/``commit_label``), and the crisis
+fast-attack bypass (``apply_crisis_attack``/``crisis_attacked``).
 """
 from __future__ import annotations
 import math
@@ -85,6 +88,16 @@ TR_W_ADX, TR_W_SLOPE, TR_W_HUG, TR_W_VWAP, TR_W_OR = 0.30, 0.20, 0.20, 0.15, 0.1
 CH_W_WICK, CH_W_ORFAIL, CH_W_WHIP, CH_W_EFFORT = 0.30, 0.25, 0.25, 0.20
 
 EVIDENCE_MATERIALITY = 0.5                # input intensity >= this -> worth a string
+
+# Temporal layer (smoothing / transition / commit / crisis attack)
+FAST_HALF_LIFE_MIN = 15.0    # fast EMA half-life (wall-clock minutes)
+SLOW_HALF_LIFE_MIN = 60.0    # slow EMA half-life
+TRANSITION_FLOOR = 0.05      # min fast-vs-slow divergence to report a transition
+TRANSITION_FULL = 0.25       # divergence at which progress reads 1.0
+COMMIT_MARGIN = 0.10         # dominant must beat runner-up by this to flip the label
+COMMIT_READS = 2             # ... for this many consecutive samples
+CRISIS_ATTACK = 0.7          # raw crisis at/above this bypasses smoothing entirely
+_FLOOR_EPS = 1e-9            # FP guard so a divergence exactly AT the floor reports
 
 
 @dataclass
@@ -326,3 +339,117 @@ def score_regimes(ev) -> RegimeScores:
     unclear = confidence < UNCLEAR_FLOOR
     return RegimeScores(raw=raw, memberships=memberships, confidence=confidence,
                         unclear=unclear, evidence=evidence)
+
+
+# ---------------------------------------------------------------- temporal layer
+
+
+def _normalize(vec):
+    """A defensively-renormalized COPY of a memberships dict: junk/NaN/negative
+    values read 0, the vector sums to 1.0, an all-zero vector -> uniform."""
+    clean = {}
+    for r in REGIMES:
+        v = _num(vec.get(r)) if isinstance(vec, dict) else None
+        clean[r] = v if v is not None and v > 0.0 else 0.0
+    total = sum(clean.values())
+    if total <= 0.0:
+        return {r: 1.0 / len(REGIMES) for r in REGIMES}
+    return {r: clean[r] / total for r in REGIMES}
+
+
+def alpha(dt_sec, half_life_min):
+    """EMA update weight for a sample ``dt_sec`` after the previous one, such
+    that after exactly one half-life the OLD value's weight is 0.5."""
+    if dt_sec is None or dt_sec <= 0:
+        return 0.0
+    return 1.0 - 0.5 ** (float(dt_sec) / (float(half_life_min) * 60.0))
+
+
+def smooth(fast, slow, sample, dt_sec):
+    """EMA the (renormalized) sample into the fast + slow membership vectors.
+
+    Cold start (either EMA is None) -> both initialize to the sample. Returns
+    NEW ``(fast, slow)`` dicts, each renormalized (an EMA of normalized vectors
+    can drift a hair numerically); inputs are never mutated.
+    """
+    s = _normalize(sample)
+    if fast is None or slow is None:
+        return dict(s), dict(s)
+    a_fast = alpha(dt_sec, FAST_HALF_LIFE_MIN)
+    a_slow = alpha(dt_sec, SLOW_HALF_LIFE_MIN)
+    new_fast = {r: (1.0 - a_fast) * fast[r] + a_fast * s[r] for r in REGIMES}
+    new_slow = {r: (1.0 - a_slow) * slow[r] + a_slow * s[r] for r in REGIMES}
+    return _normalize(new_fast), _normalize(new_slow)
+
+
+def detect_transition(fast, slow):
+    """Fast-vs-slow divergence read as an in-progress regime transition.
+
+    ``to`` = the regime with the largest positive (fast - slow) divergence,
+    ``from`` = the largest negative. Divergence below TRANSITION_FLOOR (or a
+    degenerate from == to) -> None (stable). progress = divergence scaled to
+    TRANSITION_FULL, clamped to [0, 1].
+    """
+    if not fast or not slow:
+        return None
+    d = {r: fast[r] - slow[r] for r in REGIMES}
+    to = max(d, key=d.get)
+    frm = min(d, key=d.get)
+    if to == frm or d[to] < TRANSITION_FLOOR - _FLOOR_EPS:
+        return None
+    return {"from": frm, "to": to,
+            "progress": _clamp(d[to] / TRANSITION_FULL, 0.0, 1.0)}
+
+
+@dataclass
+class CommitState:
+    committed: str | None = None   # the currently displayed label key (regime name)
+    streak: int = 0                # consecutive samples the challenger has led with margin
+
+
+def commit_label(fast, state):
+    """Hysteresis label commit over the fast-EMA memberships.
+
+    Cold start commits the dominant immediately. A challenger must lead the
+    runner-up by COMMIT_MARGIN for COMMIT_READS consecutive samples to flip
+    (first margin-clearing read -> streak 1, committed holds; the next
+    consecutive one flips). A no-margin read, or the committed label
+    re-dominating, resets the streak. Returns a NEW CommitState (no mutation).
+    """
+    ranked = sorted(REGIMES, key=lambda r: fast[r], reverse=True)
+    dominant, runner_up = ranked[0], ranked[1]
+    if state.committed is None:
+        return CommitState(committed=dominant, streak=0)
+    if dominant == state.committed:
+        return CommitState(committed=state.committed, streak=0)
+    if fast[dominant] - fast[runner_up] >= COMMIT_MARGIN:
+        streak = state.streak + 1
+        if streak >= COMMIT_READS:
+            return CommitState(committed=dominant, streak=0)
+        return CommitState(committed=state.committed, streak=streak)
+    return CommitState(committed=state.committed, streak=0)
+
+
+def apply_crisis_attack(fast, raw_crisis):
+    """The one exception to smoothness: a raw crisis intensity at/above
+    CRISIS_ATTACK bypasses the EMAs — crisis membership jumps straight to
+    ``max(fast["crisis"], raw_crisis)`` and the other regimes scale
+    proportionally into the remainder (vector still sums to 1). Below the
+    threshold the fast vector is returned UNCHANGED (same object)."""
+    if not crisis_attacked(raw_crisis):
+        return fast
+    crisis = _clamp(max(fast["crisis"], raw_crisis), 0.0, 1.0)
+    others_sum = sum(fast[r] for r in REGIMES if r != "crisis")
+    if others_sum <= 0.0 or crisis >= 1.0:
+        return {r: (1.0 if r == "crisis" else 0.0) for r in REGIMES}
+    scale = (1.0 - crisis) / others_sum
+    out = {r: fast[r] * scale for r in REGIMES}
+    out["crisis"] = crisis
+    return out
+
+
+def crisis_attacked(raw_crisis):
+    """True when the raw crisis intensity is at/above the fast-attack
+    threshold (the service layer also uses this to force-commit the label +
+    trigger the fast-path republish — one place holds the threshold)."""
+    return raw_crisis is not None and raw_crisis >= CRISIS_ATTACK
