@@ -43,6 +43,8 @@ CMD_OPTIONS = "cmd:options"
 # menu is ALREADY hard-gated by regime_filter, so this adds no hard rule; guardrails
 # are untouched).
 CACHE_SENTIMENT_COMPOSITE = "cache:sentiment:composite"
+# Blended structural regime (sentiment_svc, 5-min cadence) — reasoning context.
+CACHE_SENTIMENT_REGIME = "cache:sentiment:regime"
 # Additive market-read context (reasoning only, no hard rule): the market dashboard
 # (breadth + risk-on/off) and the four scheduled gamma_analyze briefing slot keys
 # (per-index flip/walls/what-if). The slot keys mirror options_svc's
@@ -284,6 +286,12 @@ def run_autonomous_cycle(bus) -> None:
     sent = _read_sentiment_magnitude(bus, composite=composite)
     if sent:
         market["sentiment"] = sent
+    # Structural market regime (mean-reversion / trending / breakout / choppy /
+    # crisis) published by sentiment_svc. CONTEXT ONLY — additive, defensive: a
+    # missing/stale view simply omits the key.
+    regime = _read_payload(bus, CACHE_SENTIMENT_REGIME)
+    if regime:
+        market["regime"] = regime
     # Cumulative MTD banking target: carry the $500/day deficit/excess forward (capped
     # [floor, cap]). The −$1,500 loss halt + per-trade caps are UNCHANGED — only the
     # bank/stop threshold moves. Any failure → the flat base target (never block a cycle).

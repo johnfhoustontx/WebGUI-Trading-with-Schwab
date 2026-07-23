@@ -317,9 +317,51 @@ def _as_of(briefing) -> str:
     return " ".join(x for x in (slot, (hhmm + " CT") if hhmm else "") if x).strip()
 
 
+_REGIME_TOP_N = 2      # how many memberships to surface (the mix, not all five)
+
+
+def _structural_regime(payload) -> dict:
+    """The blended structural market regime (``cache:sentiment:regime``) projected
+    for the decider — label, the top-N membership mix, and any in-progress
+    transition. ``{}`` when unusable.
+
+    Named ``market_regime`` in the read (NOT ``structure``): ``structure`` already
+    means the SPREAD structure (PCS/CCS/IC) everywhere in this service. PURE,
+    total over junk — this is reasoning context, never a gate.
+    """
+    try:
+        p = payload if isinstance(payload, dict) else {}
+        label = p.get("label")
+        if not label:
+            return {}
+        out = {"label": str(label), "unclear": bool(p.get("unclear"))}
+        conf = p.get("confidence")
+        if isinstance(conf, (int, float)) and not isinstance(conf, bool):
+            out["confidence"] = round(float(conf), 2)
+        mem = p.get("memberships")
+        if isinstance(mem, dict) and mem:
+            pairs = [(str(k), float(v)) for k, v in mem.items()
+                     if isinstance(v, (int, float)) and not isinstance(v, bool)]
+            pairs.sort(key=lambda kv: kv[1], reverse=True)
+            if pairs:
+                out["top"] = [(k, round(v, 2)) for k, v in pairs[:_REGIME_TOP_N]]
+        tr = p.get("transition")
+        if isinstance(tr, dict) and tr.get("from") and tr.get("to"):
+            prog = tr.get("progress")
+            pct = f" {round(float(prog) * 100):.0f}%" if isinstance(
+                prog, (int, float)) and not isinstance(prog, bool) else ""
+            out["transition"] = f"{tr['from']} -> {tr['to']}{pct}"
+        return out
+    except Exception:  # noqa: BLE001 — context is best-effort; never block a cycle.
+        return {}
+
+
 def _market_read_summary(read) -> str:
     """One-line summary for the /driver decision log (regime · bias · breadth · sent)."""
     parts = []
+    mr = read.get("market_regime") or {}
+    if mr.get("label"):
+        parts.append(str(mr["label"]))
     if read.get("regime"):
         parts.append(str(read["regime"]))
     if read.get("bias") is not None:
@@ -385,6 +427,11 @@ def _market_read(market) -> dict:
                 read["sentiment_score"] = sent["score"]
             if sent.get("bias"):
                 read["sentiment_bias"] = sent["bias"]
+        # Structural regime (mean-reversion / trending / breakout / choppy / crisis)
+        # — CONTEXT ONLY, additive: absent cache → no key → packet unchanged.
+        structural = _structural_regime(m.get("regime"))
+        if structural:
+            read["market_regime"] = structural
         if not read:
             return {}
         read["summary"] = _market_read_summary(read)

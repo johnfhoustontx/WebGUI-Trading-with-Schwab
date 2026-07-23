@@ -168,3 +168,52 @@ def test_autonomous_e2e_packet_carries_market_read(fake_bus, monkeypatch):
     # (c) the /driver decision log row shows the one-line summary.
     row = fake_bus.cache_get("cache:driver:autonomous").payload["decisions"][0]
     assert row["market_read"] and "risk_off" in row["market_read"]
+
+
+def test_autonomous_e2e_packet_carries_structural_regime(fake_bus, monkeypatch):
+    """The blended structural regime published by sentiment_svc reaches the
+    model-facing packet as CONTEXT (and the log line), via the real cache read."""
+    handlers.set_control(fake_bus, enabled=True)
+    _seed_scan(fake_bus, _QQQ_PCS)
+    _seed_paper(fake_bus, session_pnl=0.0)
+    fake_bus.cache_set("cache:sentiment:regime", {
+        "ts": "2026-07-23T10:05:00-05:00", "label": "Trending",
+        "committed_label": "trending", "confidence": 0.62, "unclear": False,
+        "memberships": {"trending": 0.52, "mean_reversion": 0.28, "breakout": 0.08,
+                        "choppy": 0.09, "crisis": 0.03},
+        "raw": {"trending": 0.7, "mean_reversion": 0.3, "breakout": 0.1,
+                "choppy": 0.1, "crisis": 0.0},
+        "transition": {"from": "mean_reversion", "to": "trending", "progress": 0.6}})
+    monkeypatch.setattr(handlers.compute, "fetch_market_context", lambda: {"vix": 14})
+    seen = {}
+    monkeypatch.setattr(
+        "services.driver_svc.decider.decide",
+        lambda packet, **kw: seen.setdefault("pkt", packet) or
+        {"stand_down": True, "trades": []})
+
+    handlers.run_autonomous_cycle(fake_bus)
+
+    mr = seen["pkt"]["market_read"]["market_regime"]
+    assert mr["label"] == "Trending" and mr["confidence"] == 0.62
+    assert mr["top"][0] == ("trending", 0.52)
+    assert mr["transition"] == "mean_reversion -> trending 60%"
+    row = fake_bus.cache_get("cache:driver:autonomous").payload["decisions"][0]
+    assert "Trending" in row["market_read"]
+
+
+def test_autonomous_e2e_no_regime_cache_omits_the_key(fake_bus, monkeypatch):
+    """No regime published (service down / cold) -> no key; the packet is
+    byte-identical to before this context was added."""
+    handlers.set_control(fake_bus, enabled=True)
+    _seed_scan(fake_bus, _QQQ_PCS)
+    _seed_paper(fake_bus, session_pnl=0.0)
+    monkeypatch.setattr(handlers.compute, "fetch_market_context", lambda: {"vix": 14})
+    seen = {}
+    monkeypatch.setattr(
+        "services.driver_svc.decider.decide",
+        lambda packet, **kw: seen.setdefault("pkt", packet) or
+        {"stand_down": True, "trades": []})
+
+    handlers.run_autonomous_cycle(fake_bus)
+
+    assert "market_regime" not in (seen["pkt"].get("market_read") or {})

@@ -510,6 +510,64 @@ def test_market_read_all_absent_is_empty():
         assert compute._market_read(m) == {}
 
 
+# --- structural market regime (cache:sentiment:regime) — CONTEXT ONLY ---------
+def _regime_payload(**over):
+    p = {"label": "Trending", "committed_label": "trending", "confidence": 0.62,
+         "unclear": False,
+         "memberships": {"trending": 0.52, "mean_reversion": 0.28, "breakout": 0.08,
+                         "choppy": 0.09, "crisis": 0.03},
+         "transition": {"from": "mean_reversion", "to": "trending", "progress": 0.6}}
+    p.update(over)
+    return p
+
+
+def test_market_read_carries_market_regime():
+    """The blended structural regime rides as its OWN key — `regime` is already
+    the gamma briefing's regime string, so it must not be clobbered."""
+    ctx = dict(_market_ctx(), regime=_regime_payload())
+    mr = compute._market_read(ctx)
+    assert mr["regime"] == "negative gamma below flip"      # gamma regime intact
+    st = mr["market_regime"]
+    assert st["label"] == "Trending" and st["confidence"] == 0.62
+    # top two memberships, strongest first, as (name, weight) pairs
+    assert st["top"][0] == ("trending", 0.52) and st["top"][1] == ("mean_reversion", 0.28)
+    assert st["transition"] == "mean_reversion -> trending 60%"
+    assert "Trending" in mr["summary"]                      # surfaced on the log line
+
+
+def test_market_read_regime_absent_when_no_regime():
+    """No regime cache -> no key at all (packet byte-identical to before)."""
+    assert "market_regime" not in compute._market_read(_market_ctx())
+    assert "market_regime" not in compute._market_read(dict(_market_ctx(), regime=None))
+
+
+def test_market_read_regime_unclear_and_no_transition():
+    mr = compute._market_read(dict(_market_ctx(), regime=_regime_payload(
+        label="Unclear", committed_label="", unclear=True, confidence=0.11,
+        transition=None)))
+    st = mr["market_regime"]
+    assert st["label"] == "Unclear" and st["unclear"] is True
+    assert st.get("transition") is None            # stable/unknown -> omitted
+
+
+def test_market_read_regime_survives_junk_payload():
+    for junk in ({"memberships": "nope"}, {"label": None}, {"memberships": {}}):
+        mr = compute._market_read(dict(_market_ctx(), regime=junk))
+        assert mr["regime"] == "negative gamma below flip"   # never breaks the read
+
+
+def test_guardrails_never_sees_the_market_regime():
+    """CONTEXT ONLY: the market regime must not reach guardrails.
+
+    (NB: guardrails uses "structure" for the SPREAD structure PCS/CCS/IC — an
+    unrelated concept, which is why the regime key is named `market_regime`.)"""
+    import inspect
+
+    from services.driver_svc import guardrails
+    src = inspect.getsource(guardrails)
+    assert "market_regime" not in src
+
+
 def test_build_packet_includes_market_read():
     pkt = compute.build_packet({}, {"snapshot": {}}, target=500.0, limits=_lim(),
                                market=_market_ctx())
