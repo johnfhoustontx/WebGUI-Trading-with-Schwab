@@ -741,15 +741,48 @@ def reset_spy_5m_cache():
     _SPY_5M_CACHE.update(ts=None, bars=None, daily=None)
 
 
+_SPY_5M_SESSIONS = 6   # ~5 trading sessions of 5-min bars (the pctile basis window)
+
+
 def _fetch_spy_5m(schwab, now_ts):
-    """(bars_5m, daily) for SPY, memoized for ``_SPY_5M_TTL_SEC`` off ``now_ts``."""
+    """(bars_5m, daily) for SPY, memoized for ``_SPY_5M_TTL_SEC`` off ``now_ts``.
+
+    ``bars_5m`` is the MULTI-session 5-min frame (~5 sessions) — the caller
+    splits out today's session and uses the trailing sessions as the Bollinger-
+    width percentile basis (same 5-min timescale as today's value). Cache is
+    written ONLY on a good fetch (``bars is not None``), so a transient proxy
+    blip can't poison the TTL window (mirrors ``compute_30d_trend``)."""
     cached_ts = _SPY_5M_CACHE["ts"]
     if cached_ts is not None and (now_ts - cached_ts) <= _SPY_5M_TTL_SEC:
         return _SPY_5M_CACHE["bars"], _SPY_5M_CACHE["daily"]
-    bars = _safe_intraday(schwab, "SPY", 5, 2)   # today + a little history
+    bars = _safe_intraday(schwab, "SPY", 5, _SPY_5M_SESSIONS)
     daily = _safe_daily(schwab, "SPY", 3)
-    _SPY_5M_CACHE.update(ts=now_ts, bars=bars, daily=daily)
+    if bars is not None:
+        _SPY_5M_CACHE.update(ts=now_ts, bars=bars, daily=daily)
     return bars, daily
+
+
+def _today_session(frame):
+    """The rows of a multi-session 5-min frame belonging to its LATEST local date
+    (today's session), reset-indexed. The session-scoped evidence helpers (opening
+    range, VWAP-hold, whipsaw, wicks) MUST see one session only, not ~5 days.
+
+    Falls back to the whole frame when the timestamps can't be grouped (defensive —
+    a degraded read is safer than raising)."""
+    if frame is None:
+        return None
+    try:
+        dates = frame["datetime"].dt.date
+    except Exception:  # noqa: BLE001 — no usable timestamps -> use the frame as-is.
+        return frame
+    try:
+        latest = dates.max()
+        session = frame[dates == latest]
+        if len(session) == 0:
+            return frame
+        return session.reset_index(drop=True)
+    except Exception:  # noqa: BLE001
+        return frame
 
 
 def _fetch_vix(schwab):
@@ -797,7 +830,9 @@ def _below_flip_depth(row):
         return None
     if not (math.isfinite(spot) and math.isfinite(flip)) or spot <= 0:
         return None
-    return min(1.0, ((flip - spot) / spot) / _BELOW_FLIP_FULL_FRAC)
+    # clamp at 0 too: a contradictory below-flip row (spot>flip from a racing
+    # matrix) must not emit a negative depth.
+    return max(0.0, min(1.0, ((flip - spot) / spot) / _BELOW_FLIP_FULL_FRAC))
 
 
 def _matrix_row(matrix, now_ts):
@@ -829,20 +864,27 @@ def _matrix_row(matrix, now_ts):
     return {"gex_regime": regime, "below_flip_deep": _below_flip_depth(row)}
 
 
-def _prior_widths(daily):
-    """Trailing per-session Bollinger widths (20, 2σ) from daily closes,
-    EXCLUDING today, as a plain list — the percentile basis for
-    ``bb_width_pctile``. None when the daily history is too thin."""
+_PRIOR_WIDTH_STRIDE = 6   # step ~30 min between rolling 20-close width samples
+
+
+def _prior_widths(frame_5m, exclude_last=0):
+    """Rolling 20-close Bollinger widths (20, 2σ) stepped across the MULTI-session
+    5-min frame — the SAME 5-min timescale as today's ``bb_width_pctile`` value,
+    so the percentile is meaningful (a daily-window basis would dwarf a ~100-min
+    intraday width, pinning every session at pctile ~0). ``exclude_last`` drops
+    today's session bars so today's value isn't ranked against itself. Returns a
+    plain list, or None when the trailing history is too thin."""
     try:
-        closes = daily["close"].astype(float).tolist()
+        closes = frame_5m["close"].astype(float).tolist()
     except Exception:  # noqa: BLE001
         return None
+    if exclude_last > 0:
+        closes = closes[:max(0, len(closes) - exclude_last)]
     n = _regime_vol.BOLL_PERIOD
-    if len(closes) < n + 2:
+    if len(closes) < n + _PRIOR_WIDTH_STRIDE:
         return None
     widths = []
-    # windows ending at each index up to (but not including) today's close.
-    for end in range(n, len(closes)):
+    for end in range(n, len(closes) + 1, _PRIOR_WIDTH_STRIDE):
         w = _regime_vol.bollinger_width_pct(closes[:end])
         if w is not None:
             widths.append(w)
@@ -909,16 +951,22 @@ def compute_market_regime(schwab, matrix=None, vix=None, prior=None,
     fully-shaped ``unclear`` dict, never raises."""
     now_ts = now if now is not None else time.time()
     try:
-        bars_5m, daily = _fetch_spy_5m(schwab, now_ts)
+        frame_5m, daily = _fetch_spy_5m(schwab, now_ts)
         # No usable bars (proxy down / premarket) -> the unclear shell, which
         # preserves the prior smoothing carry (a transient miss can't reset it).
+        if frame_5m is None or len(frame_5m) == 0:
+            return _unclear_shell(now_ts, prior)
+
+        # Today's session ONLY for the session-scoped evidence; the trailing
+        # sessions of the SAME 5-min frame are the Bollinger-width pctile basis.
+        bars_5m = _today_session(frame_5m)
         if bars_5m is None or len(bars_5m) == 0:
             return _unclear_shell(now_ts, prior)
 
         if vix is None:
             vix = _fetch_vix(schwab)
         matrix_row = _matrix_row(matrix, now_ts)
-        prior_widths = _prior_widths(daily)
+        prior_widths = _prior_widths(frame_5m, exclude_last=len(bars_5m))
 
         ev = regime_evidence.evidence_from_bars(
             bars_5m, daily, vix, matrix_row, prior_widths)
