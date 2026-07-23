@@ -10,10 +10,16 @@ function never raises, so one bad input can only blank its own key.
 
 Reuse map (kept clean — these map directly to evidence keys):
 - ``technical`` (shared/analysis_lib, imported standalone to dodge the package
-  ``__init__`` that eagerly loads a broken schwab_client): ADX, EMA, VWAP,
-  relative volume.
+  ``__init__`` that eagerly loads a broken schwab_client): ADX, EMA.
 - ``scoring.volatility``: ATR, Bollinger-width %, percentile-of-last.
 - ``scoring.profile_shape``: ``classify_profile_shape(...).balance_strength``.
+
+The ``vwap_hold_frac`` and ``rel_vol`` keys are computed as LOCAL, INTRADAY,
+single-session helpers (a running cumulative VWAP; a recent-vs-session volume
+ratio) rather than via ``technical.calculate_vwap`` / ``calculate_relative_volume``:
+the former returns a single end-of-session VWAP scalar (a clean trend would read
+~0.5), and the latter is a DAY-OVER-DAY ratio that is a constant 1.0 on one
+session's bars (zeroing the multiplicative breakout regime).
 
 Deliberately NOT reused: ``session_structure`` / ``rejection_defense`` — those
 return SIGNED BLENDED scores (resilience − rejection etc.) that don't map to the
@@ -50,7 +56,9 @@ except Exception:  # pragma: no cover
 _BOLL_N = _vol.BOLL_PERIOD          # 20
 _BOLL_K = _vol.BOLL_K               # 2.0
 _ADX_MIN = 28                       # calculate_adx returns a 20.0 DEFAULT below 2*period
-_RELVOL_N = 20                      # calculate_relative_volume default look-back
+_ADX_RISE_TOL = 1.0                 # ADX "falling" tolerance (below this drop -> not rising)
+_RELVOL_MIN = 10                    # min session bars for an intraday rel-vol read
+_RECENT_BARS = 3                    # "recent" surge window for intraday rel-vol
 _OR_BARS = 6                        # opening-range = first N 5-min bars (~30 min)
 _HUG_LAST = 12                      # band_hug over the last 12 closes
 _TERM_TOL = 0.1                     # or_break "held" cushion, fraction of OR height
@@ -86,13 +94,17 @@ def _adx(df):
 
 def _adx_rising(df):
     # ADX "now" vs ADX ~30 min (6 bars) earlier — both need the full ADX window.
+    # Semantics match the market_regime consumer, which only DISCOUNTS a trend
+    # when rising is False ("ADX strong but rolling over"): so True means rising
+    # OR holding (a clean trend pins ADX at its ceiling and stays flat — that is
+    # strength, not weakness), False means genuinely FALLING beyond a tolerance.
     if technical is None or df is None or len(df) < _ADX_MIN + _OR_BARS:
         return None
     now = _finite(technical.calculate_adx(df))
     prev = _finite(technical.calculate_adx(df.iloc[:-_OR_BARS]))
     if now is None or prev is None:
         return None
-    return bool(now > prev)
+    return bool(now >= prev - _ADX_RISE_TOL)
 
 
 # ---------------------------------------------------------------- EMA slope
@@ -164,7 +176,8 @@ def _band_hug_frac(df):
         window = arr[i - _BOLL_N + 1:i + 1]
         mid = float(window.mean())
         sd = float(window.std(ddof=0))
-        # |close - mid| > 0.5 * (k * std) == > k/2 * std (outer half of the band).
+        # In the outer BB quartile: |close - mid| > 0.5 * (k * std) (past the
+        # band midpoint toward the edge).
         if abs(arr[i] - mid) > 0.5 * _BOLL_K * sd:
             hits += 1
     return hits / _HUG_LAST
@@ -174,18 +187,38 @@ def _band_hug_frac(df):
 
 
 def _vwap_hold_frac(df):
-    if technical is None or df is None or len(df) < _VWAP_MIN:
+    # Each bar's close vs the RUNNING (cumulative) VWAP at THAT bar — not the
+    # single end-of-session VWAP scalar (which lags, collapsing a clean trend to
+    # ~0.5). max(frac_above, frac_below) over strictly-off-VWAP bars -> 0.5..1.
+    if df is None or len(df) < _VWAP_MIN:
         return None
-    vwap = technical.calculate_vwap(df)
-    if vwap is None:
+    cols = _cols(df)
+    if cols is None:
         return None
-    closes = _closes(df)
-    if not closes:
+    highs, lows, closes = cols
+    try:
+        vols = df["volume"].astype(float).tolist()
+    except Exception:
         return None
-    n = len(closes)
-    above = sum(1 for c in closes if c > vwap)
-    below = sum(1 for c in closes if c < vwap)
-    return max(above, below) / n
+    if len(vols) != len(closes):
+        return None
+    cum_pv = cum_v = 0.0
+    above = below = counted = 0
+    for h, lo, c, v in zip(highs, lows, closes, vols):
+        cum_pv += ((h + lo + c) / 3.0) * v
+        cum_v += v
+        if cum_v <= 0:
+            continue
+        counted += 1
+        vwap = cum_pv / cum_v
+        if c > vwap:
+            above += 1
+        elif c < vwap:
+            below += 1
+    if counted == 0:
+        return None
+    denom = above + below
+    return 0.5 if denom == 0 else max(above, below) / denom
 
 
 # ---------------------------------------------------------------- opening range
@@ -215,7 +248,9 @@ def _or_break_state(df):
     post = closes[_OR_BARS:]
     broke = any(c > or_high or c < or_low for c in post)
     last = closes[-1]
-    final = closes[-3:]
+    # "final few" post-OR bars — never reach back into the opening range itself
+    # (on a minimal 8-bar frame closes[-3:] would include the last OR bar).
+    final = closes[max(_OR_BARS, len(closes) - 3):]
     held_up = last > or_high + _TERM_TOL * height and all(c > or_high for c in final)
     held_down = last < or_low - _TERM_TOL * height and all(c < or_low for c in final)
     if held_up or held_down:
@@ -327,10 +362,24 @@ def _profile_balance(df):
 
 
 def _rel_vol(df):
-    if technical is None or df is None or len(df) < _RELVOL_N:
+    # INTRADAY relative volume within TODAY's single 5-min session: mean volume of
+    # the last few bars / mean volume of the whole session. (`technical.calculate_
+    # relative_volume` is a day-over-day ratio that is a constant 1.0 on one
+    # session's bars, which would zero the multiplicative breakout regime.)
+    if df is None or len(df) < _RELVOL_MIN:
         return None
-    ratio, _vol_today = technical.calculate_relative_volume(df)
-    return _finite(ratio)
+    try:
+        vols = [float(v) for v in df["volume"].tolist()]
+    except Exception:
+        return None
+    vols = [v for v in vols if math.isfinite(v)]
+    if len(vols) < _RELVOL_MIN:
+        return None
+    typical = sum(vols) / len(vols)
+    if typical <= 0:
+        return None
+    recent = vols[-_RECENT_BARS:]
+    return (sum(recent) / len(recent)) / typical
 
 
 # ---------------------------------------------------------------- daily-derived

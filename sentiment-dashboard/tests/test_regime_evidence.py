@@ -35,6 +35,21 @@ def _trend_bars(n=60, step=0.3):
     return _bars(base + 0.15, base - 0.15, base, opens=base - 0.05)
 
 
+def _chop_bars(n=48, center=100.0, amp=1.2):
+    # A sine that swings well beyond the opening range and re-crosses EMA20
+    # repeatedly: breaks out of the OR then closes back inside (failed breaks)
+    # and whipsaws around the moving average (chop).
+    t = np.arange(n)
+    close = center + amp * np.sin(t * 0.5)
+    return _bars(close + 0.1, close - 0.1, close, opens=center + amp * np.sin((t - 0.5) * 0.5))
+
+
+def _surge_vol_bars(n=30, base=1000, mult=3.0):
+    vols = [base] * (n - 3) + [int(base * mult)] * 3
+    base_px = np.full(n, 100.0)
+    return _bars(base_px + 0.1, base_px - 0.1, base_px, vols=vols)
+
+
 def _range_bars(n=90, center=100.0, seed=59):
     # Mean-reverting AR(1) (phi<0) around a center with gapless opens + tiny wicks:
     # oscillates without persistent direction (low ADX) and concentrates centrally
@@ -233,3 +248,99 @@ def test_wick_two_sided_high_when_both_tails():
     one_sided = _bars(highs1, lows1, close, opens=opens1)
     one = RE.evidence_from_bars(one_sided, None, None, None, None)["wick_two_sided"]
     assert one is not None and one < two_sided
+
+
+# ---------------------------------------------------------------- running VWAP hold
+
+
+def test_vwap_hold_high_on_rising_session():
+    # A clean rising session: the running (cumulative) VWAP lags below price, so
+    # nearly every close sits ABOVE it -> a strong one-sided hold (>0.8), NOT the
+    # ~0.5 the old end-of-session-scalar VWAP produced.
+    out = RE.evidence_from_bars(_trend_bars(), None, None, None, None)
+    assert out["vwap_hold_frac"] is not None and out["vwap_hold_frac"] > 0.8
+
+
+def test_running_vwap_hold_helper_directly():
+    rising = _trend_bars(n=40)
+    assert RE._vwap_hold_frac(rising) > 0.8
+    # A balanced V-shape (down then symmetric up) holds neither side strongly.
+    n = 40
+    close = np.concatenate([np.linspace(100, 96, n // 2), np.linspace(96, 100, n // 2)])
+    v = _bars(close + 0.1, close - 0.1, close)
+    held = RE._vwap_hold_frac(v)
+    assert held is not None and 0.5 <= held <= 1.0
+    assert RE._vwap_hold_frac(_trend_bars(n=3)) is None  # thin -> None
+
+
+# ---------------------------------------------------------------- intraday rel vol
+
+
+def test_rel_vol_surge_intraday():
+    out = RE.evidence_from_bars(_surge_vol_bars(), None, None, None, None)
+    assert out["rel_vol"] is not None and out["rel_vol"] > 1.5
+
+
+def test_rel_vol_flat_is_neutral():
+    out = RE.evidence_from_bars(_surge_vol_bars(mult=1.0), None, None, None, None)
+    assert out["rel_vol"] is not None and abs(out["rel_vol"] - 1.0) < 0.15
+
+
+def test_rel_vol_helper_directly():
+    assert RE._rel_vol(_surge_vol_bars(mult=3.0)) > 1.5
+    assert abs(RE._rel_vol(_surge_vol_bars(mult=1.0)) - 1.0) < 0.15
+    assert RE._rel_vol(_surge_vol_bars(n=4)) is None  # thin -> None
+
+
+# ---------------------------------------------------------------- positive-value coverage
+
+
+def test_trend_fixture_exercises_directional_legs():
+    out = RE.evidence_from_bars(_trend_bars(), None, None, None, None)
+    assert out["vwap_hold_frac"] > 0.8
+    assert out["adx_rising"] is True
+    assert out["whipsaw_count"] == 0          # a clean trend doesn't whipsaw the EMA
+    assert out["or_failed_count"] == 0        # ... nor fail its opening-range break
+
+
+def test_chop_fixture_exercises_churn_legs():
+    out = RE.evidence_from_bars(_chop_bars(), None, None, None, None)
+    assert out["or_failed_count"] is not None and out["or_failed_count"] > 0
+    assert out["whipsaw_count"] is not None and out["whipsaw_count"] > 0
+
+
+def test_bb_and_atr_pctiles_are_real_floats():
+    # multi-day 5-min frame (for bb_width_pctile) + a >=10-row daily (for atr_pctile).
+    bars = _trend_bars(n=40)
+    prior = [0.01 + 0.001 * i for i in range(15)]  # trailing BB-width history
+    daily = pd.DataFrame({
+        "open": np.arange(10) * 0.2 + 100.0,
+        "high": np.arange(10) * 0.2 + 100.5,
+        "low": np.arange(10) * 0.2 + 99.5,
+        "close": np.arange(10) * 0.2 + 100.1,
+        "volume": [1e6] * 10,
+    })
+    out = RE.evidence_from_bars(bars, daily, None, None, prior)
+    assert isinstance(out["bb_width_pctile"], float) and 0.0 <= out["bb_width_pctile"] <= 1.0
+    assert isinstance(out["atr_pctile"], float) and 0.0 <= out["atr_pctile"] <= 1.0
+    assert isinstance(out["bb_width_expansion"], float) and out["bb_width_expansion"] > 0
+
+
+def test_breakout_leg_fires_with_intraday_rel_vol():
+    # A squeeze -> expansion + volume surge + held OR break. The MULTIPLICATIVE
+    # breakout regime needs a rel_vol > 1; the OLD daily-ratio rel_vol was a
+    # constant 1.0 on one session -> ramp(1.0, 1.2, 2.0) == 0 -> breakout dead.
+    n = 40
+    tight = 100 + np.array([0.02 * (i % 2 * 2 - 1) for i in range(28)])
+    ramp = tight[-1] + np.arange(1, 13) * 0.25
+    close = np.concatenate([tight, ramp])
+    opens = np.concatenate([[100.0], close[:-1]])
+    highs = np.maximum(opens, close) + 0.05
+    lows = np.minimum(opens, close) - 0.05
+    vols = [1000] * (n - 3) + [3500] * 3
+    df = _bars(highs, lows, close, opens=opens, vols=vols)
+    prior = [0.05] * 12          # trailing BB widths (today's is far tighter)
+    ev = RE.evidence_from_bars(df, None, None, None, prior)
+    assert ev["rel_vol"] > 1.2 and ev["or_break_state"] == "held"
+    scores = MR.score_regimes(ev)
+    assert scores.raw["breakout"] > 0.5
