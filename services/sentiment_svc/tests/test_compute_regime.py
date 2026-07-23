@@ -405,6 +405,21 @@ def test_vix1d_prev_memoized_per_date():
     assert schwab.vix1d_daily_calls == 2
 
 
+def test_vix1d_daily_probe_is_once_per_date_even_when_it_fails(monkeypatch):
+    """Schwab serves NO $VIX1D history, so the daily source fails EVERY time.
+    It must be probed at most ONCE per local date, not retried on a timer â€”
+    a retry cadence over a known-dead endpoint burns ~100+ failing proxy calls
+    a day for a source the session latch already covers. The clock is advanced
+    past any plausible retry window so this pins the behavior, not the runtime."""
+    schwab = _FakeVix1dSchwab(daily_fails=True)
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(compute.time, "monotonic", lambda: clock["t"])
+    for _ in range(25):                      # a full session of crisis checks
+        compute._fetch_vix(schwab)
+        clock["t"] += 1800.0                 # +30 min between reads
+    assert schwab.vix1d_daily_calls == 1      # one probe, then it stops asking
+
+
 # Schwab serves NO $VIX1D price history (live-verified 2026-07-23: /pricehistory
 # returns {"empty": true} for it while $VIX/$VIX3M return candles), so the daily
 # source above is usually unavailable and the in-process session latch is what
@@ -437,6 +452,39 @@ def test_daily_history_wins_over_session_latch(monkeypatch):
     day["iso"] = "2026-07-23"
     out = compute._fetch_vix(schwab)
     assert out["vix1d_prev"] == 10.0     # the daily close, not the 18.0 latch
+
+
+def test_session_latch_expires_after_a_multi_day_gap(monkeypatch):
+    """A stale observation must NOT be served as 'yesterday's close'. If the
+    service was down for days, the last thing it saw is not a prior session â€”
+    treating it as one would manufacture a bogus day-over-day spike."""
+    schwab = _FakeVix1dSchwab(vix1d_now=12.0, daily_fails=True)
+    day = {"iso": "2026-07-13"}
+    monkeypatch.setattr(compute, "_local_date_iso", lambda: day["iso"])
+    compute._fetch_vix(schwab)               # latch 12.0 on 2026-07-13
+
+    day["iso"] = "2026-07-14"                # next day: the latch is valid
+    schwab.vix1d_now = 18.0
+    assert compute._fetch_vix(schwab)["vix1d_prev"] == 12.0
+
+    compute.reset_vix1d_prev_cache()
+    day["iso"] = "2026-07-13"
+    schwab.vix1d_now = 12.0
+    compute._fetch_vix(schwab)               # latch 12.0 again on 2026-07-13
+    day["iso"] = "2026-07-23"                # ...then a 10-day service gap
+    schwab.vix1d_now = 18.0
+    assert "vix1d_prev" not in compute._fetch_vix(schwab)
+
+
+def test_session_latch_spans_a_long_weekend(monkeypatch):
+    """The bound must tolerate a normal Friday->Tuesday gap (weekend + holiday)."""
+    schwab = _FakeVix1dSchwab(vix1d_now=12.0, daily_fails=True)
+    day = {"iso": "2026-07-17"}              # Friday
+    monkeypatch.setattr(compute, "_local_date_iso", lambda: day["iso"])
+    compute._fetch_vix(schwab)
+    day["iso"] = "2026-07-21"                # Tuesday (4 days later)
+    schwab.vix1d_now = 18.0
+    assert compute._fetch_vix(schwab)["vix1d_prev"] == 12.0
 
 
 def test_session_latch_ignores_same_day_observations(monkeypatch):

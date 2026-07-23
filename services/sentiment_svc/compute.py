@@ -786,13 +786,14 @@ def _today_session(frame):
 
 
 # $VIX1D prior-session close — the denominator of the day-over-day spike, the
-# most direct crisis tell. It changes ONCE per session, but the crisis fast path
-# re-reads the VIX every 120 s, so it is memoized per LOCAL DATE: at most one
-# daily-history fetch per session. A failed fetch is NOT latched for the day
-# (a premarket proxy hiccup would otherwise kill the tell until midnight) — it
-# is retried at most every _VIX1D_PREV_RETRY_SEC until it succeeds.
-_VIX1D_PREV_RETRY_SEC = 600
-_VIX1D_PREV_CACHE: dict = {"date": None, "close": None, "attempt": None}
+# most direct crisis tell. It changes ONCE per session, so it is memoized per
+# LOCAL DATE: at most ONE daily-history probe per session, success or failure.
+# A failed probe is deliberately NOT retried on a timer: Schwab serves no
+# $VIX1D history at all (see _VIX1D_OBS), so a retry cadence would burn ~144
+# guaranteed-failing proxy calls a day for a source the session latch already
+# covers. One probe per day still picks it up automatically if Schwab ever
+# starts serving it.
+_VIX1D_PREV_CACHE: dict = {"date": None, "close": None}
 
 
 # In-process session latch — the FALLBACK when the daily history is unavailable.
@@ -805,11 +806,16 @@ _VIX1D_PREV_CACHE: dict = {"date": None, "close": None, "attempt": None}
 # None (never a fabricated 0%) until the next session rollover.
 _VIX1D_OBS: dict = {"date": None, "last": None, "prev_date": None,
                     "prev_close": None}
+# ...and it EXPIRES. A latched observation is only a "prior session close" if it
+# is recent: 4 calendar days spans a Friday->Tuesday long weekend (weekend +
+# holiday), while a longer gap means the service was down and the last thing it
+# saw is NOT the prior session — serving that would manufacture a bogus spike.
+_VIX1D_OBS_MAX_AGE_DAYS = 4
 
 
 def reset_vix1d_prev_cache():
     """Drop the cached $VIX1D prior close + session latch (tests)."""
-    _VIX1D_PREV_CACHE.update(date=None, close=None, attempt=None)
+    _VIX1D_PREV_CACHE.update(date=None, close=None)
     _VIX1D_OBS.update(date=None, last=None, prev_date=None, prev_close=None)
 
 
@@ -830,7 +836,21 @@ def _observe_vix1d(value, today):
     prev_date, prev_close = obs["prev_date"], obs["prev_close"]
     if prev_date is None or prev_close is None or prev_date >= today:
         return None
+    if _date_gap_days(prev_date, today) > _VIX1D_OBS_MAX_AGE_DAYS:
+        return None      # stale (a service gap) — degrade to None, never guess.
     return prev_close
+
+
+def _date_gap_days(earlier_iso, later_iso):
+    """Calendar days between two ISO dates; a huge number when unparseable (so
+    an unreadable stamp fails CLOSED — treated as stale)."""
+    from datetime import date
+    try:
+        a = date.fromisoformat(str(earlier_iso))
+        b = date.fromisoformat(str(later_iso))
+    except (TypeError, ValueError):
+        return 10 ** 6
+    return (b - a).days
 
 
 def _local_date_iso():
@@ -872,12 +892,9 @@ def _vix1d_prev_close(schwab):
     today = _local_date_iso()
     cached = _VIX1D_PREV_CACHE
     if cached["date"] == today:
-        if cached["close"] is not None:
-            return cached["close"]
-        # A previously-failed fetch: retry, but not on every 120 s cycle.
-        last_try = cached["attempt"]
-        if last_try is not None and (time.monotonic() - last_try) < _VIX1D_PREV_RETRY_SEC:
-            return None
+        # Probed already today — return the result (a None means "Schwab didn't
+        # serve it", which is the normal case; the latch covers us).
+        return cached["close"]
     close = None
     try:
         frame = _safe_daily(schwab, "$VIX1D", 1)
@@ -885,7 +902,7 @@ def _vix1d_prev_close(schwab):
             close = _prior_daily_close(frame, today)
     except Exception:  # noqa: BLE001 — degrade to None, never raise.
         close = None
-    _VIX1D_PREV_CACHE.update(date=today, close=close, attempt=time.monotonic())
+    _VIX1D_PREV_CACHE.update(date=today, close=close)
     return close
 
 
