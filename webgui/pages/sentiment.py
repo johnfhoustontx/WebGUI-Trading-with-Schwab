@@ -323,6 +323,125 @@ def build_trend_intraday_figure(points):
                             y_title="Trend", zones=zones, scale=0.1)
 
 
+# --- Market Regime (blended structural regime, cache:sentiment:regime) -------
+# Display order + labels + colors for the five structural regimes. The order is
+# fixed so the stacked band keeps a stable reading position across repaints.
+REGIME_ORDER = ("mean_reversion", "trending", "breakout", "choppy", "crisis")
+REGIME_LABELS = {"mean_reversion": "Mean Reversion", "trending": "Trending",
+                 "breakout": "Breakout", "choppy": "Choppy", "crisis": "Crisis"}
+REGIME_COLORS = {"mean_reversion": CLR_CYAN, "trending": CLR_GREEN,
+                 "breakout": CLR_YELLOW, "choppy": CLR_FLAT, "crisis": CLR_RED}
+# Headline text color by committed regime — a finite map (Tailwind-first rule).
+_REGIME_TEXT = {"trending": "text-[#66bb6a]", "breakout": "text-[#ffd54f]",
+                "mean_reversion": "text-[#3fb6c7]", "choppy": "text-[#9e9e9e]",
+                "crisis": "text-[#ef5350]"}
+# Space-separated STRING (not a list) — that is what NiceGUI's
+# ``.classes(remove=...)`` splits on; a list raises AttributeError at render.
+REGIME_TEXT_CLASSES = " ".join(dict.fromkeys(list(_REGIME_TEXT.values())
+                                             + ["text-[#9e9e9e]"]))
+
+
+def regime_headline_parts(regime):
+    """(label, confidence_text, text_class) for the Market Regime headline.
+
+    An absent payload reads as a waiting placeholder; an ``unclear`` sample keeps
+    its "Unclear" label (the service never fabricates a regime it can't see)."""
+    r = regime if isinstance(regime, dict) else {}
+    label = r.get("label") or ("Waiting for regime…" if not r else "Unclear")
+    conf = r.get("confidence")
+    conf_txt = f"{float(conf) * 100:.0f}% confidence" if isinstance(
+        conf, (int, float)) and not isinstance(conf, bool) else ""
+    key = r.get("committed_label") or ""
+    cls = "text-[#9e9e9e]" if r.get("unclear") else _REGIME_TEXT.get(key, "text-[#9e9e9e]")
+    return label, conf_txt, cls
+
+
+def regime_transition_text(regime):
+    """'Mean Reversion → Trending · 60%' while a regime is handing over, else ''.
+
+    Blank when stable, so the row simply hides — the whole point of the blended
+    model is that this reads gradually instead of flipping."""
+    r = regime if isinstance(regime, dict) else {}
+    tr = r.get("transition")
+    if not isinstance(tr, dict) or not tr.get("from") or not tr.get("to"):
+        return ""
+    frm = REGIME_LABELS.get(tr["from"], str(tr["from"]))
+    to = REGIME_LABELS.get(tr["to"], str(tr["to"]))
+    prog = tr.get("progress")
+    pct = (f" · {float(prog) * 100:.0f}%"
+           if isinstance(prog, (int, float)) and not isinstance(prog, bool) else "")
+    return f"{frm} → {to}{pct}"
+
+
+def regime_evidence_rows(regime):
+    """The 'why' lines the classifier attached to this sample (may be empty)."""
+    r = regime if isinstance(regime, dict) else {}
+    return [str(e) for e in (r.get("evidence") or [])]
+
+
+def build_regime_mix_figure(points):
+    """Stacked-area membership mix over today's recorded regime samples.
+
+    Reads as "how much of each regime is in this tape, and which way is it
+    moving" — the blended model's whole premise. Percent-stacked so the bands
+    always fill the height and the eye tracks PROPORTION, not absolute scale.
+
+    Same synthetic contiguous category axis as ``_intraday_figure`` (and the same
+    reason: a stockChart's ``chart.update()`` throws, freezing an open page), with
+    a null slot breaking the bands between sessions."""
+    pts = points or []
+    series_data = {k: [] for k in REGIME_ORDER}
+    categories, tick_positions = [], []
+    idx, prev_ms, prev_date = 0, None, None
+    for p in pts:
+        ms = int(_safe_float(p.get("ts"))) * 1000
+        ct = datetime.fromtimestamp(ms / 1000, _CT)
+        day = ct.date()
+        if prev_ms is not None and (ms - prev_ms) > _INTRADAY_GAP_MS:
+            for k in REGIME_ORDER:                 # null slot → break every band
+                series_data[k].append({"x": idx, "y": None})
+            categories.append("")
+            idx += 1
+        if day != prev_date:
+            tick_positions.append(idx)
+            categories.append(f"{ct:%b} {ct.day}")
+            prev_date = day
+        else:
+            categories.append("")
+        mem = p.get("memberships") if isinstance(p.get("memberships"), dict) else {}
+        for k in REGIME_ORDER:
+            series_data[k].append({"x": idx, "y": _safe_float(mem.get(k)),
+                                   "name": f"{ct:%b} {ct.day}, {ct:%H:%M}"})
+        idx += 1
+        prev_ms = ms
+    axis_label = {"style": {"color": "#bdbdbd"}}
+    return {
+        "chart": {"type": "area", "backgroundColor": "transparent",
+                  "height": 220, "spacing": [8, 12, 8, 0]},
+        "title": {"text": None},
+        "credits": {"enabled": False},
+        "accessibility": {"enabled": False},
+        "legend": {"enabled": True, "itemStyle": {"color": "#bdbdbd",
+                                                  "fontWeight": "normal"}},
+        "xAxis": {"categories": categories, "tickPositions": tick_positions,
+                  "lineColor": "rgba(255,255,255,0.15)",
+                  "gridLineColor": "rgba(255,255,255,0.06)", "labels": axis_label,
+                  "crosshair": {"label": {"enabled": False}}},
+        "yAxis": {"min": 0, "max": 100, "title": {"text": "Regime mix",
+                                                  "style": {"color": "#bdbdbd"}},
+                  "gridLineColor": "rgba(255,255,255,0.06)",
+                  "labels": {**axis_label, "format": "{value}%"}},
+        "tooltip": {"shared": True, "valueDecimals": 0,
+                    "pointFormat": "{series.name}: <b>{point.percentage:.0f}%</b><br>"},
+        "plotOptions": {"area": {"stacking": "percent", "lineWidth": 1,
+                                 "marker": {"enabled": False},
+                                 "fillOpacity": 0.55}},
+        "series": [{"name": REGIME_LABELS[k], "type": "area",
+                    "color": REGIME_COLORS[k], "data": series_data[k]}
+                   for k in REGIME_ORDER],
+    }
+
+
 def pct_color(pct):
     """Green up / red down / gray flat (|pct| < 0.05)."""
     if pct is None or abs(float(pct)) < 0.05:
@@ -620,6 +739,11 @@ def render():
         # cycle, so _maybe_repaint's comp_ver poll already triggers a repaint.
         intraday = bus_client.read("sentiment:intraday_history") or {}
         state["intraday"] = intraday.get("points") or []
+        # Blended structural regime + today's recorded membership mix. Published
+        # on its own 5-min cadence, so _maybe_repaint polls its version too.
+        state["regime"] = bus_client.read("sentiment:regime") or {}
+        state["regime_points"] = (
+            (bus_client.read("sentiment:regime_history") or {}).get("points") or [])
         state["sector"] = sectors.get("sector")
         state["industries"] = sectors.get("industries") or {}
         state["sector_at"] = sectors.get("sector_at")
@@ -632,12 +756,14 @@ def render():
         "snaps": [], "spy": [], "intraday": [], "sector": None, "live": None,
         "industries": {}, "expanded": set(), "derived": {}, "sector_summary": {},
         "composite_at": None, "sector_at": None, "proxy_up": None,
+        "regime": {}, "regime_points": [],
         # last-seen bus cache versions for the fetch-free repaint timer
-        "comp_ver": None, "sec_ver": None,
+        "comp_ver": None, "sec_ver": None, "regime_ver": None,
     }
     _read_cache()
     state["comp_ver"] = bus_client.read_version("sentiment:composite")
     state["sec_ver"] = bus_client.read_version("sentiment:sectors")
+    state["regime_ver"] = bus_client.read_version("sentiment:regime")
 
     # Top bar: "as of …" date + a small 3D refresh button, right-aligned. The
     # section titles now live per-column (all the same h6 size) below.
@@ -703,6 +829,27 @@ def render():
                         ui.label(tlabel).classes("text-xs text-[#111]")
                         tile_lbls[tkey] = ui.label("—").classes("text-bold text-[#111]")
                     tile_cards[tkey] = c
+
+    ui.separator().classes("q-my-md")
+    # Market Regime — the blended STRUCTURAL read (how the tape is moving),
+    # complementary to the direction × aggression five-state above. Memberships
+    # are continuous, so a handover shows as a gradual band shift, not a flip.
+    with ui.expansion("Market Regime", icon="stacked_line_chart",
+                      value=True).classes("w-full") as regime_exp:
+        with ui.row().classes("items-baseline gap-3 w-full q-mt-sm"):
+            regime_lbl = ui.label("").classes("text-subtitle1 text-bold")
+            regime_conf_lbl = ui.label("").classes("opacity-60 text-sm")
+            regime_trans_lbl = ui.label("").classes("opacity-80 text-sm")
+        regime_why = ui.row().classes("items-center gap-2 flex-wrap")
+        # Plain chart (NOT a stockChart) — see _intraday_figure for why.
+        regime_plot = ui.highchart(build_regime_mix_figure([])).classes("w-full")
+
+    @guard
+    def _reflow_regime_chart():
+        ui.run_javascript(f"getElement({regime_plot.id})?.chart?.reflow()")
+
+    regime_exp.on_value_change(
+        lambda e: ui.timer(0.05, _reflow_regime_chart, once=True) if e.value else None)
 
     ui.separator().classes("q-my-md")
     # Daily Sentiment & Trend — two value-colorized 2-min intraday series
@@ -811,6 +958,22 @@ def render():
         sent_intraday_plot.update()
         trend_intraday_plot.options = build_trend_intraday_figure(pts)
         trend_intraday_plot.update()
+        # Market Regime — headline + transition + the stacked membership mix.
+        # Reactive labels swap classes via remove/add so repeated repaints can't
+        # stack conflicting text colors (the Tailwind-first house rule).
+        reg = state.get("regime") or {}
+        r_label, r_conf, r_cls = regime_headline_parts(reg)
+        regime_lbl.text = r_label
+        regime_lbl.classes(remove=REGIME_TEXT_CLASSES, add=r_cls)
+        regime_conf_lbl.text = r_conf
+        regime_trans_lbl.text = regime_transition_text(reg)
+        regime_why.clear()
+        with regime_why:
+            for line in regime_evidence_rows(reg):
+                ui.label(line).classes(
+                    "text-xs opacity-70 rounded px-2 py-[2px] bg-[#1b2233]")
+        regime_plot.options = build_regime_mix_figure(state.get("regime_points") or [])
+        regime_plot.update()
         trend = derived.get("trend")
         if trend:
             committed = trend.get("state")
@@ -890,10 +1053,15 @@ def render():
         # pattern but tracks the Redis bus version instead of an in-process cache.
         comp_ver = bus_client.read_version("sentiment:composite")
         sec_ver = bus_client.read_version("sentiment:sectors")
-        if comp_ver == state["comp_ver"] and sec_ver == state["sec_ver"]:
+        # The regime publishes on its OWN 5-min cadence (and can republish early
+        # on a crisis attack), so it needs its own version probe.
+        regime_ver = bus_client.read_version("sentiment:regime")
+        if (comp_ver == state["comp_ver"] and sec_ver == state["sec_ver"]
+                and regime_ver == state["regime_ver"]):
             return
         state["comp_ver"] = comp_ver
         state["sec_ver"] = sec_ver
+        state["regime_ver"] = regime_ver
         _read_cache()
         _apply()
         _refill_component_context()

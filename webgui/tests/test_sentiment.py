@@ -285,3 +285,89 @@ def test_intraday_figures_render_in_central_time():
     name = fig["series"][0]["data"][0]["name"]
     assert f"{ct:%H:%M}" in name          # CT time-of-day
     assert "12:00" not in name            # NOT the UTC time-of-day
+
+
+# --- Market Regime panel (blended structural regime) --------------------------
+def _regime(**over):
+    r = {"ts": "2026-07-23T10:05:00-05:00", "label": "Trending",
+         "committed_label": "trending", "confidence": 0.62, "unclear": False,
+         "memberships": {"mean_reversion": 0.28, "trending": 0.52, "breakout": 0.08,
+                         "choppy": 0.09, "crisis": 0.03},
+         "transition": {"from": "mean_reversion", "to": "trending", "progress": 0.6},
+         "evidence": ["ADX 32 rising", "VWAP held 95%"]}
+    r.update(over)
+    return r
+
+
+def _regime_points(n=3, base_ts=1_753_280_700):
+    return [{"ts": base_ts + i * 300, "confidence": 0.6, "label": "trending",
+             "memberships": {"mean_reversion": 0.3, "trending": 0.5, "breakout": 0.05,
+                             "choppy": 0.1, "crisis": 0.05}} for i in range(n)]
+
+
+def test_regime_headline_parts():
+    label, conf, cls = S.regime_headline_parts(_regime())
+    assert label == "Trending" and "62" in conf and cls
+    # NiceGUI .classes(remove=...) splits a STRING; a list raises at render
+    # (caught live, not by the builder tests) — and every class it may ADD
+    # must be in the remove-set or repaints stack conflicting colors.
+    assert isinstance(S.REGIME_TEXT_CLASSES, str)
+    removable = set(S.REGIME_TEXT_CLASSES.split())
+    for key in list(S.REGIME_ORDER) + ["", "bogus"]:
+        for unclear in (False, True):
+            _l, _c, c = S.regime_headline_parts(
+                _regime(committed_label=key, unclear=unclear))
+            assert c in removable
+
+
+def test_regime_headline_unclear_and_missing():
+    assert S.regime_headline_parts(_regime(label="Unclear", unclear=True))[0] == "Unclear"
+    # No payload at all -> a waiting placeholder, never a crash.
+    for empty in ({}, None):
+        label, conf, cls = S.regime_headline_parts(empty)
+        assert label and conf == "" and cls
+
+
+def test_regime_transition_text():
+    assert S.regime_transition_text(_regime()) == "Mean Reversion → Trending · 60%"
+    # Stable (no transition) / missing -> empty string, so the row hides.
+    assert S.regime_transition_text(_regime(transition=None)) == ""
+    assert S.regime_transition_text({}) == ""
+    assert S.regime_transition_text(None) == ""
+
+
+def test_regime_mix_figure_is_a_stacked_area_plain_chart():
+    fig = S.build_regime_mix_figure(_regime_points())
+    assert fig["chart"]["type"] == "area"
+    assert fig["plotOptions"]["area"]["stacking"] == "percent"
+    # one series per regime, in a stable order, each with the right point count
+    assert len(fig["series"]) == 5
+    assert [s["name"] for s in fig["series"]] == [
+        "Mean Reversion", "Trending", "Breakout", "Choppy", "Crisis"]
+    assert all(len(s["data"]) == 3 for s in fig["series"])
+    # a stockChart would freeze in-place updates (see _intraday_figure) -> plain chart
+    assert "stockChart" not in str(fig)
+    assert "categories" in fig["xAxis"]        # synthetic contiguous axis, no dead space
+    assert fig["accessibility"]["enabled"] is False
+
+
+def test_regime_mix_figure_values_and_empty():
+    fig = S.build_regime_mix_figure(_regime_points(1))
+    trending = next(s for s in fig["series"] if s["name"] == "Trending")
+    assert trending["data"][0]["y"] == 0.5
+    for empty in ([], None):
+        f = S.build_regime_mix_figure(empty)
+        assert len(f["series"]) == 5 and all(s["data"] == [] for s in f["series"])
+
+
+def test_regime_mix_figure_breaks_line_between_days():
+    day1 = 1_753_280_700                      # a session point
+    pts = _regime_points(2, day1) + _regime_points(1, day1 + 86_400)
+    fig = S.build_regime_mix_figure(pts)
+    ys = [p.get("y") for p in fig["series"][0]["data"]]
+    assert None in ys                          # a null slot separates the two days
+
+
+def test_regime_evidence_rows():
+    assert S.regime_evidence_rows(_regime()) == ["ADX 32 rising", "VWAP held 95%"]
+    assert S.regime_evidence_rows({}) == []
