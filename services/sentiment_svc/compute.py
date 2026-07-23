@@ -741,7 +741,15 @@ def reset_spy_5m_cache():
     _SPY_5M_CACHE.update(ts=None, bars=None, daily=None)
 
 
-_SPY_5M_SESSIONS = 6   # ~5 trading sessions of 5-min bars (the pctile basis window)
+# Lookback (CALENDAR days) for the multi-session 5-min frame that today's session
+# is sliced from and whose trailing sessions form the Bollinger-width percentile
+# basis. MUST be one of Schwab's allowed periodType=day values — the API rejects
+# anything else with a 400 ("valid values for period are: [1, 2, 3, 4, 5, 10]"),
+# which silently starved the whole classifier to "Unclear" (live-caught
+# 2026-07-23; every unit test used fakes and never saw the 400). 10 calendar days
+# ≈ 7 trading sessions — a comfortable basis for the percentile.
+_SPY_PERIOD_DAYS_ALLOWED = (1, 2, 3, 4, 5, 10)
+_SPY_5M_SESSIONS = 10
 
 
 def _fetch_spy_5m(schwab, now_ts):

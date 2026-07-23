@@ -496,3 +496,27 @@ def test_session_latch_ignores_same_day_observations(monkeypatch):
     schwab.vix1d_now = 30.0
     out = compute._fetch_vix(schwab)
     assert "vix1d_prev" not in out
+
+
+def test_spy_5m_lookback_is_an_allowed_schwab_period():
+    """Schwab rejects periodType=day with any period outside [1,2,3,4,5,10] (400),
+    and _safe_intraday swallows it -> bars None -> the classifier is permanently
+    'Unclear'. A fake client can't see that, so pin the constant itself."""
+    assert compute._SPY_5M_SESSIONS in compute._SPY_PERIOD_DAYS_ALLOWED
+
+
+def test_fetch_spy_5m_requests_an_allowed_period():
+    """...and pin the value actually passed to the client, not just the constant."""
+    seen = {}
+
+    class _Rec:
+        def get_intraday_history(self, symbol, minutes=5, days=1):
+            seen["days"] = days
+            return None
+
+        def get_daily_history(self, symbol, months=1):
+            return None
+
+    compute.reset_spy_5m_cache()
+    compute._fetch_spy_5m(_Rec(), 1_000.0)
+    assert seen["days"] in compute._SPY_PERIOD_DAYS_ALLOWED
