@@ -785,10 +785,120 @@ def _today_session(frame):
         return frame
 
 
+# $VIX1D prior-session close — the denominator of the day-over-day spike, the
+# most direct crisis tell. It changes ONCE per session, but the crisis fast path
+# re-reads the VIX every 120 s, so it is memoized per LOCAL DATE: at most one
+# daily-history fetch per session. A failed fetch is NOT latched for the day
+# (a premarket proxy hiccup would otherwise kill the tell until midnight) — it
+# is retried at most every _VIX1D_PREV_RETRY_SEC until it succeeds.
+_VIX1D_PREV_RETRY_SEC = 600
+_VIX1D_PREV_CACHE: dict = {"date": None, "close": None, "attempt": None}
+
+
+# In-process session latch — the FALLBACK when the daily history is unavailable.
+# LIVE-VERIFIED 2026-07-23: the proxy's /pricehistory returns ``{"empty": true,
+# "candles": []}`` for $VIX1D (and VIX1D) while $VIX and $VIX3M return candles —
+# Schwab simply does not serve 1-day-VIX history. The service already QUOTES
+# $VIX1D on every refresh, so the last value observed on the PREVIOUS local date
+# is the honest stand-in for its close, at zero extra fetches. It is process
+# state: after a restart there is no prior observation and the spike tell reads
+# None (never a fabricated 0%) until the next session rollover.
+_VIX1D_OBS: dict = {"date": None, "last": None, "prev_date": None,
+                    "prev_close": None}
+
+
+def reset_vix1d_prev_cache():
+    """Drop the cached $VIX1D prior close + session latch (tests)."""
+    _VIX1D_PREV_CACHE.update(date=None, close=None, attempt=None)
+    _VIX1D_OBS.update(date=None, last=None, prev_date=None, prev_close=None)
+
+
+def _observe_vix1d(value, today):
+    """Roll the in-process session latch; return the PRIOR session's last
+    observed $VIX1D, or None. See ``_VIX1D_OBS``. Never raises."""
+    obs = _VIX1D_OBS
+    if obs["date"] != today:
+        if obs["date"] is not None and obs["last"] is not None:
+            obs["prev_date"], obs["prev_close"] = obs["date"], obs["last"]
+        obs.update(date=today, last=None)
+    try:
+        v = float(value)
+        if math.isfinite(v) and v > 0:
+            obs["last"] = v
+    except (TypeError, ValueError):
+        pass
+    prev_date, prev_close = obs["prev_date"], obs["prev_close"]
+    if prev_date is None or prev_close is None or prev_date >= today:
+        return None
+    return prev_close
+
+
+def _local_date_iso():
+    from datetime import datetime
+    return datetime.now().date().isoformat()
+
+
+def _prior_daily_close(frame, today_iso):
+    """The most recent daily close STRICTLY BEFORE ``today_iso``, or None.
+
+    During RTH the last daily row is today's UNFINISHED bar, so the prior
+    session's close is the row before it; off-hours the frame may already end
+    on the prior session. Keying off the row DATE handles both without guessing.
+    Falls back to the second-to-last close when the frame carries no usable
+    ``datetime`` column. Never raises."""
+    try:
+        closes = [float(c) for c in frame["close"].tolist()]
+    except Exception:  # noqa: BLE001 — no usable frame.
+        return None
+    if len(closes) < 2:
+        return None
+    try:
+        dates = [str(d) for d in frame["datetime"].dt.date.tolist()]
+    except Exception:  # noqa: BLE001 — no date column; fall back below.
+        dates = None
+    if dates is not None and len(dates) == len(closes):
+        for close, day in zip(reversed(closes), reversed(dates)):
+            if day < today_iso:
+                return close if math.isfinite(close) and close > 0 else None
+        return None
+    close = closes[-2]
+    return close if math.isfinite(close) and close > 0 else None
+
+
+def _vix1d_prev_close(schwab):
+    """Prior session's $VIX1D close, memoized per local date, or None.
+    Fully defensive — any failure returns None (so ``vix1d_spike_pct`` degrades
+    to None rather than fabricating a spike)."""
+    today = _local_date_iso()
+    cached = _VIX1D_PREV_CACHE
+    if cached["date"] == today:
+        if cached["close"] is not None:
+            return cached["close"]
+        # A previously-failed fetch: retry, but not on every 120 s cycle.
+        last_try = cached["attempt"]
+        if last_try is not None and (time.monotonic() - last_try) < _VIX1D_PREV_RETRY_SEC:
+            return None
+    close = None
+    try:
+        frame = _safe_daily(schwab, "$VIX1D", 1)
+        if frame is not None and len(frame) >= 2:
+            close = _prior_daily_close(frame, today)
+    except Exception:  # noqa: BLE001 — degrade to None, never raise.
+        close = None
+    _VIX1D_PREV_CACHE.update(date=today, close=close, attempt=time.monotonic())
+    return close
+
+
 def _fetch_vix(schwab):
-    """{"vix","vix1d","vix3m"} from the proxy, or None. ``vix1d_prev`` is NOT
-    supplied here (so ``vix1d_spike`` degrades to None); Task 8 threads the
-    day-over-day previous close for the crisis spike tell."""
+    """{"vix","vix1d","vix3m"[,"vix1d_prev"]} from the proxy, or None.
+
+    ``vix1d_prev`` (the prior session's $VIX1D close) is what lets
+    ``regime_evidence._vix1d_spike_pct`` fire the day-over-day crisis tell — the
+    most direct crisis input. Two sources, in order: the daily history (memoized
+    per local date, so the 120 s crisis check costs only the quote call), then the
+    in-process session latch (Schwab serves no $VIX1D history — see
+    ``_VIX1D_OBS``). The key is OMITTED when neither has a value, so the spike
+    degrades to None rather than to a fabricated 0%."""
     try:
         q = schwab.get_quotes(["$VIX", "$VIX1D", "$VIX3M"]) or {}
         vix = _last(q.get("$VIX"))
@@ -796,7 +906,14 @@ def _fetch_vix(schwab):
         v3 = _last(q.get("$VIX3M"))
         if vix is None and v1 is None and v3 is None:
             return None
-        return {"vix": vix, "vix1d": v1, "vix3m": v3}
+        out = {"vix": vix, "vix1d": v1, "vix3m": v3}
+        prev = _vix1d_prev_close(schwab)
+        latched = _observe_vix1d(v1, _local_date_iso())
+        if prev is None:
+            prev = latched
+        if prev is not None:
+            out["vix1d_prev"] = prev
+        return out
     except Exception:  # noqa: BLE001
         return None
 

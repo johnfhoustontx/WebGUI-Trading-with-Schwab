@@ -5,7 +5,7 @@ smoothing/commit state off ``prior``, and returns a contract-shaped dict.
 Defensive throughout: any failure returns a fully-shaped ``unclear`` dict.
 Reuses the ``_bars`` / fake-schwab idiom from ``test_compute.py``.
 """
-from datetime import datetime, timezone
+from datetime import date as _date, datetime, timedelta as _timedelta, timezone
 
 import pandas as pd
 import pytest
@@ -23,11 +23,13 @@ _PUBLISH = ("ts", "as_of", "memberships", "raw", "confidence", "unclear",
 
 @pytest.fixture(autouse=True)
 def _clear_cache():
-    """The SPY 5-min fetch is memoized module-side; reset it between tests so a
-    cached bar-set can't leak across cases."""
+    """The SPY 5-min fetch and the $VIX1D prior close are memoized module-side;
+    reset both between tests so a cached bar-set / prior close can't leak."""
     compute.reset_spy_5m_cache()
+    compute.reset_vix1d_prev_cache()
     yield
     compute.reset_spy_5m_cache()
+    compute.reset_vix1d_prev_cache()
 
 
 def _bars(n, start, step, vol=1_000_000):
@@ -284,3 +286,165 @@ def test_unclear_shell_preserves_prior_carry():
     assert shell["_slow"] == good["_slow"]
     assert shell["_fast"] == good["_fast"]
     assert shell["unclear"] is True
+
+
+# --- VIX1D day-over-day spike (the most direct crisis tell) -------------------
+# ``_fetch_vix`` threads the PRIOR session's $VIX1D close as ``vix1d_prev`` so
+# ``regime_evidence._vix1d_spike_pct`` can fire. The daily history is memoized
+# per local date (the prior close only changes once a session) so the 120 s
+# crisis check never re-fetches it.
+
+
+def _vix1d_daily(closes, include_today=False):
+    """A $VIX1D daily frame ending YESTERDAY (or today when ``include_today``),
+    so the "prior session" row is unambiguous regardless of the run date."""
+    end = _date.today() - _timedelta(days=0 if include_today else 1)
+    return pd.DataFrame({
+        "open": list(closes),
+        "high": list(closes),
+        "low": list(closes),
+        "close": list(closes),
+        "volume": [0] * len(closes),
+        "datetime": pd.date_range(end=pd.Timestamp(end), periods=len(closes),
+                                  freq="1D"),
+    })
+
+
+class _FakeVix1dSchwab(_FakeBullSchwab):
+    """Bull bars, but $VIX1D quotes ``vix1d_now`` against a prior close of
+    ``vix1d_prev``. The term structure is deliberately in contango (no
+    inversion), so the ONLY crisis tell available is the day-over-day spike."""
+
+    def __init__(self, vix1d_prev=12.0, vix1d_now=18.0, daily_fails=False):
+        self.vix1d_prev = vix1d_prev
+        self.vix1d_now = vix1d_now
+        self.daily_fails = daily_fails
+        self.vix1d_daily_calls = 0
+
+    def get_daily_history(self, symbol, months=12):
+        if symbol == "$VIX1D":
+            self.vix1d_daily_calls += 1
+            if self.daily_fails:
+                raise RuntimeError("no vix1d history")
+            return _vix1d_daily([self.vix1d_prev] * 5)
+        return super().get_daily_history(symbol, months=months)
+
+    def get_quotes(self, symbols):
+        out = {}
+        for s in symbols:
+            if s == "$VIX1D":
+                out[s] = {"last": self.vix1d_now}
+            elif s == "$VIX3M":
+                out[s] = {"last": 22.0}   # contango: vix3m > vix -> no inversion
+            else:
+                out[s] = {"last": 20.0}
+        return out
+
+
+def test_prior_daily_close_skips_todays_forming_bar():
+    """During RTH the last daily row is today's UNFINISHED bar â€” the prior
+    SESSION's close is the one before it."""
+    today = _date.today().isoformat()
+    frame = _vix1d_daily([10.0, 11.0, 12.0, 99.0], include_today=True)
+    assert compute._prior_daily_close(frame, today) == 12.0
+    # Off-hours the frame may end yesterday â€” then its last row IS the prior close.
+    frame2 = _vix1d_daily([10.0, 11.0, 12.0])
+    assert compute._prior_daily_close(frame2, today) == 12.0
+
+
+def test_fetch_vix_threads_vix1d_prev():
+    schwab = _FakeVix1dSchwab(vix1d_prev=12.0, vix1d_now=18.0)
+    vix = compute._fetch_vix(schwab)
+    assert vix["vix1d_prev"] == 12.0
+    # ... and the pure evidence builder turns it into the spike percentage.
+    ev = compute.regime_evidence.evidence_from_bars(None, None, vix, None, None)
+    assert ev["vix1d_spike_pct"] == pytest.approx(50.0)
+
+
+def test_vix1d_spike_fires_crisis():
+    """12.0 -> 18.0 is a +50% VIX1D spike (>= the 35% full-ramp) -> raw crisis
+    1.0, which clears CRISIS_ATTACK and force-commits crisis."""
+    out = compute.compute_market_regime(
+        _FakeVix1dSchwab(vix1d_prev=12.0, vix1d_now=18.0), now=NOW)
+    assert out["raw"]["crisis"] >= 0.7
+    assert out["committed_label"] == "crisis"
+    assert out["label"] == "Crisis"
+    assert any("VIX1D" in e for e in out["evidence"])
+
+
+def test_vix1d_flat_no_crisis():
+    out = compute.compute_market_regime(
+        _FakeVix1dSchwab(vix1d_prev=18.0, vix1d_now=18.0), now=NOW)
+    assert out["raw"]["crisis"] < 0.7
+    assert out["committed_label"] != "crisis"
+
+
+def test_vix1d_prev_absent_when_daily_fetch_fails():
+    """A failing daily history degrades to NO key â€” the spike tell reads None
+    (exactly as before this was threaded), never a fabricated value, never a raise."""
+    schwab = _FakeVix1dSchwab(daily_fails=True)
+    vix = compute._fetch_vix(schwab)
+    assert vix is not None
+    assert "vix1d_prev" not in vix
+    ev = compute.regime_evidence.evidence_from_bars(None, None, vix, None, None)
+    assert ev["vix1d_spike_pct"] is None
+    out = compute.compute_market_regime(schwab, now=NOW)  # must not raise
+    assert out["raw"]["crisis"] < 0.7
+
+
+def test_vix1d_prev_memoized_per_date():
+    """The prior close changes once a session â€” the 120 s crisis check must NOT
+    re-fetch a daily history every cycle."""
+    schwab = _FakeVix1dSchwab()
+    for _ in range(3):
+        compute._fetch_vix(schwab)
+    assert schwab.vix1d_daily_calls == 1
+    # a new session day re-fetches.
+    compute.reset_vix1d_prev_cache()
+    compute._fetch_vix(schwab)
+    assert schwab.vix1d_daily_calls == 2
+
+
+# Schwab serves NO $VIX1D price history (live-verified 2026-07-23: /pricehistory
+# returns {"empty": true} for it while $VIX/$VIX3M return candles), so the daily
+# source above is usually unavailable and the in-process session latch is what
+# actually keeps the spike tell alive.
+
+
+def test_vix1d_prev_falls_back_to_prior_session_observation(monkeypatch):
+    schwab = _FakeVix1dSchwab(vix1d_now=12.0, daily_fails=True)
+    day = {"iso": "2026-07-22"}
+    monkeypatch.setattr(compute, "_local_date_iso", lambda: day["iso"])
+
+    v1 = compute._fetch_vix(schwab)
+    assert "vix1d_prev" not in v1        # nothing observed before today yet
+
+    day["iso"] = "2026-07-23"            # session rollover
+    schwab.vix1d_now = 18.0
+    v2 = compute._fetch_vix(schwab)
+
+    assert v2["vix1d_prev"] == 12.0      # yesterday's LAST observed VIX1D
+    ev = compute.regime_evidence.evidence_from_bars(None, None, v2, None, None)
+    assert ev["vix1d_spike_pct"] == pytest.approx(50.0)
+
+
+def test_daily_history_wins_over_session_latch(monkeypatch):
+    """When Schwab DOES serve the history, the real prior close is authoritative."""
+    schwab = _FakeVix1dSchwab(vix1d_prev=10.0, vix1d_now=18.0)
+    day = {"iso": "2026-07-22"}
+    monkeypatch.setattr(compute, "_local_date_iso", lambda: day["iso"])
+    compute._fetch_vix(schwab)           # latches 18.0 for 2026-07-22
+    day["iso"] = "2026-07-23"
+    out = compute._fetch_vix(schwab)
+    assert out["vix1d_prev"] == 10.0     # the daily close, not the 18.0 latch
+
+
+def test_session_latch_ignores_same_day_observations(monkeypatch):
+    """Repeated intraday reads must never become their own 'prior close' â€” that
+    would turn ordinary intraday drift into a fabricated day-over-day spike."""
+    schwab = _FakeVix1dSchwab(vix1d_now=12.0, daily_fails=True)
+    monkeypatch.setattr(compute, "_local_date_iso", lambda: "2026-07-23")
+    compute._fetch_vix(schwab)
+    schwab.vix1d_now = 30.0
+    out = compute._fetch_vix(schwab)
+    assert "vix1d_prev" not in out

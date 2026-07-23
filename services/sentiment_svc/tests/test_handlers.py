@@ -1155,3 +1155,27 @@ def test_refresh_survives_regime_failure(monkeypatch):
     handlers.refresh(bus, with_sectors=False)  # must not raise
 
     assert bus.cache_get("cache:sentiment:composite") is not None
+
+
+def test_crisis_check_fires_on_vix1d_spike(monkeypatch):
+    """The fast path's crisis evidence includes the day-over-day VIX1D spike
+    (``vix1d_prev``, threaded by ``compute._fetch_vix``). The term structure here
+    is in CONTANGO, so the spike is the only available tell â€” this pins that leg
+    alive in the <=2-min path, not just the 5-min one."""
+    bus = Bus(fake=True)
+    _reset_regime()
+    handlers._REGIME.update(slot="slot-1", state=_regime_state())
+    monkeypatch.setattr(handlers, "_is_rth_now", lambda: False)
+    monkeypatch.setattr(
+        handlers.compute, "_fetch_vix",
+        lambda *a, **k: {"vix": 20.0, "vix1d": 18.0, "vix3m": 22.0,
+                         "vix1d_prev": 12.0})   # +50% day over day
+
+    handlers.run_crisis_check(bus)
+
+    env = bus.cache_get("cache:sentiment:regime")
+    assert env is not None
+    assert env.payload["committed_label"] == "crisis"
+    assert env.payload["raw"]["crisis"] >= 0.7
+    assert any("VIX1D" in e for e in env.payload["evidence"])
+    _reset_regime()
