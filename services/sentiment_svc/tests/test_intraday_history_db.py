@@ -73,3 +73,53 @@ def test_connect_default_path_is_memory_under_pytest():
     rows = conn.execute("PRAGMA database_list").fetchall()
     # (seq, name, file) — an in-memory DB has an empty file column.
     assert rows[0][2] in ("", None)
+
+
+_VEC = {"mean_reversion": 0.5, "trending": 0.3, "breakout": 0.05,
+        "choppy": 0.1, "crisis": 0.05}
+
+
+def test_insert_and_load_regime_roundtrip():
+    c = db.connect(":memory:")
+    today = dt.date.today()
+    db.insert_regime_point(c, _ts(today, 10, 0), _VEC, 0.6, "Mean Reversion")
+    rows = db.load_regime_recent(c, n_days=1)
+    assert len(rows) == 1
+    ts, mem, conf, label = rows[0]
+    assert mem["mean_reversion"] == 0.5 and mem["trending"] == 0.3
+    assert conf == 0.6 and label == "Mean Reversion"
+
+
+def test_regime_point_is_idempotent_upsert():
+    c = db.connect(":memory:")
+    ts = _ts(dt.date.today())
+    db.insert_regime_point(c, ts, _VEC, 0.6, "Mean Reversion")
+    db.insert_regime_point(c, ts, dict(_VEC, trending=0.9), 0.9, "Trending")
+    rows = db.load_regime_recent(c, n_days=1)
+    assert len(rows) == 1 and rows[0][1]["trending"] == 0.9 and rows[0][3] == "Trending"
+
+
+def test_load_regime_recent_windows_by_date():
+    c = db.connect(":memory:")
+    base = dt.date.today() - dt.timedelta(days=40)
+    for i in range(40):
+        db.insert_regime_point(c, _ts(base + dt.timedelta(days=i)), _VEC, 0.5, "x")
+    assert len({db._local_date(r[0]) for r in db.load_regime_recent(c, n_days=3)}) == 3
+
+
+def test_prune_regime_keeps_30_sessions():
+    c = db.connect(":memory:")
+    base = dt.date.today() - dt.timedelta(days=45)
+    for i in range(45):
+        db.insert_regime_point(c, _ts(base + dt.timedelta(days=i)), _VEC, 0.5, "x")
+    db.prune_regime(c, n_days=30)
+    dates = {db._local_date(r[0]) for r in db.load_regime_recent(c, n_days=100)}
+    assert len(dates) == 30
+
+
+def test_regime_table_shares_pytest_memory_isolation():
+    # connect() with no path is :memory: under pytest — the regime table must
+    # obey the same guard as sentiment_intraday (defense-in-depth).
+    c = db.connect()
+    db.insert_regime_point(c, _ts(dt.date.today()), _VEC, 0.5, "x")
+    assert db.load_regime_recent(c, n_days=1)   # writes to the in-memory DB, not the file
