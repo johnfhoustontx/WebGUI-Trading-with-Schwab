@@ -16,6 +16,7 @@ stays bound.
 The engine-call functions are defensive (catch exceptions, return ``None`` /
 empty) exactly as in the page — that behavior is preserved verbatim.
 """
+import math
 import sys
 import time
 
@@ -46,6 +47,9 @@ from scoring import market_state  # noqa: E402
 from scoring import session_structure as session_structure_mod  # noqa: E402
 from scoring import rejection_defense as rejection_mod  # noqa: E402
 from scoring import profile_shape as profile_mod  # noqa: E402
+from scoring import market_regime  # noqa: E402
+from scoring import regime_evidence  # noqa: E402
+from scoring import volatility as _regime_vol  # noqa: E402
 import live_composite  # noqa: E402,F401  (eager: pins module; never lazy)
 from live_composite import (  # noqa: E402
     signal_band, compute_live, build_bridge_payload,
@@ -699,6 +703,264 @@ def _safe_daily(schwab, symbol, months):
         return schwab.get_daily_history(symbol, months=months)
     except Exception:  # noqa: BLE001
         return None
+
+
+# ---------------------------------------------------------------------------
+# Market-regime blended classifier (design:
+# docs/plans/2026-07-23-market-regime-blended-classifier-design.md). The service
+# function that fetches SPY bars + VIX + the options matrix, runs the pure
+# regime modules, threads the temporal smoothing/commit state off the previous
+# return, and returns a RegimeState-shaped dict. Never raises.
+# ---------------------------------------------------------------------------
+
+# Regime key -> display label (the "" / None fallbacks cover a cold-start /
+# unclear commit that has no committed regime yet).
+_REGIME_LABELS = {
+    "mean_reversion": "Mean Reversion",
+    "trending": "Trending",
+    "breakout": "Breakout",
+    "choppy": "Choppy",
+    "crisis": "Crisis",
+    "": "Unclear",
+    None: "Unclear",
+}
+
+_REGIME_MODEL = "regime-v1"
+_MATRIX_STALE_SEC = 300          # a matrix cache older than this is treated as absent
+_BELOW_FLIP_FULL_FRAC = 0.01     # spot 1%+ below flip = full below-flip depth (1.0)
+
+# TTL-shared SPY 5-min + daily fetch. The 15-min trend recompute (Task 8) reuses
+# this within the window instead of re-fetching. The TTL keys off the PASSED
+# ``now`` (tests supply a fixed ``now``), never wall-clock.
+_SPY_5M_TTL_SEC = 240
+_SPY_5M_CACHE: dict = {"ts": None, "bars": None, "daily": None}
+
+
+def reset_spy_5m_cache():
+    """Drop the cached SPY bars so the next fetch re-hits the proxy (tests)."""
+    _SPY_5M_CACHE.update(ts=None, bars=None, daily=None)
+
+
+def _fetch_spy_5m(schwab, now_ts):
+    """(bars_5m, daily) for SPY, memoized for ``_SPY_5M_TTL_SEC`` off ``now_ts``."""
+    cached_ts = _SPY_5M_CACHE["ts"]
+    if cached_ts is not None and (now_ts - cached_ts) <= _SPY_5M_TTL_SEC:
+        return _SPY_5M_CACHE["bars"], _SPY_5M_CACHE["daily"]
+    bars = _safe_intraday(schwab, "SPY", 5, 2)   # today + a little history
+    daily = _safe_daily(schwab, "SPY", 3)
+    _SPY_5M_CACHE.update(ts=now_ts, bars=bars, daily=daily)
+    return bars, daily
+
+
+def _fetch_vix(schwab):
+    """{"vix","vix1d","vix3m"} from the proxy, or None. ``vix1d_prev`` is NOT
+    supplied here (so ``vix1d_spike`` degrades to None); Task 8 threads the
+    day-over-day previous close for the crisis spike tell."""
+    try:
+        q = schwab.get_quotes(["$VIX", "$VIX1D", "$VIX3M"]) or {}
+        vix = _last(q.get("$VIX"))
+        v1 = _last(q.get("$VIX1D"))
+        v3 = _last(q.get("$VIX3M"))
+        if vix is None and v1 is None and v3 is None:
+            return None
+        return {"vix": vix, "vix1d": v1, "vix3m": v3}
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _parse_ts_unix(ts):
+    """Best-effort unix seconds from a matrix ``ts`` (ISO-8601 string or number),
+    else None."""
+    if isinstance(ts, bool):
+        return None
+    if isinstance(ts, (int, float)):
+        return float(ts)
+    if isinstance(ts, str):
+        try:
+            from datetime import datetime
+            return datetime.fromisoformat(ts).timestamp()
+        except (ValueError, TypeError):
+            return None
+    return None
+
+
+def _below_flip_depth(row):
+    """0..1 below-flip depth when the row is ``below`` its gamma flip with a
+    usable spot/flip, else None. A spot ``_BELOW_FLIP_FULL_FRAC`` (1%) or more
+    below flip reads full depth (1.0)."""
+    if not isinstance(row, dict) or row.get("gex_regime") != "below":
+        return None
+    try:
+        spot = float(row.get("spot"))
+        flip = float(row.get("flip"))
+    except (TypeError, ValueError):
+        return None
+    if not (math.isfinite(spot) and math.isfinite(flip)) or spot <= 0:
+        return None
+    return min(1.0, ((flip - spot) / spot) / _BELOW_FLIP_FULL_FRAC)
+
+
+def _matrix_row(matrix, now_ts):
+    """The SPY (fallback $SPX) row from the options matrix as an evidence-shaped
+    ``{gex_regime, below_flip_deep}``, or None. Staleness-gated: a matrix ``ts``
+    parsing older than ``_MATRIX_STALE_SEC`` (or unparseable/missing) is treated
+    as absent, as is a missing row or a ``gex_regime`` of ``na``."""
+    if not isinstance(matrix, dict):
+        return None
+    age_from = _parse_ts_unix(matrix.get("ts"))
+    if age_from is None or (now_ts - age_from) > _MATRIX_STALE_SEC:
+        return None
+    rows = matrix.get("rows")
+    if not isinstance(rows, list):
+        return None
+    row = None
+    for want in ("SPY", "$SPX"):
+        for r in rows:
+            if isinstance(r, dict) and r.get("symbol") == want:
+                row = r
+                break
+        if row is not None:
+            break
+    if row is None:
+        return None
+    regime = row.get("gex_regime")
+    if regime not in ("above", "below"):
+        return None
+    return {"gex_regime": regime, "below_flip_deep": _below_flip_depth(row)}
+
+
+def _prior_widths(daily):
+    """Trailing per-session Bollinger widths (20, 2σ) from daily closes,
+    EXCLUDING today, as a plain list — the percentile basis for
+    ``bb_width_pctile``. None when the daily history is too thin."""
+    try:
+        closes = daily["close"].astype(float).tolist()
+    except Exception:  # noqa: BLE001
+        return None
+    n = _regime_vol.BOLL_PERIOD
+    if len(closes) < n + 2:
+        return None
+    widths = []
+    # windows ending at each index up to (but not including) today's close.
+    for end in range(n, len(closes)):
+        w = _regime_vol.bollinger_width_pct(closes[:end])
+        if w is not None:
+            widths.append(w)
+    return widths or None
+
+
+def _regime_iso(now_ts):
+    from datetime import datetime, timezone
+    return datetime.fromtimestamp(float(now_ts), tz=timezone.utc).isoformat()
+
+
+def _regime_carry(prior):
+    """(fast, slow, commit, sample_ts) pulled from a previous return dict, or the
+    cold-start defaults when ``prior`` carries no smoothing state."""
+    if isinstance(prior, dict) and prior.get("_fast") is not None:
+        commit = prior.get("_commit")
+        if not isinstance(commit, market_regime.CommitState):
+            commit = market_regime.CommitState()
+        return prior.get("_fast"), prior.get("_slow"), commit, prior.get("_sample_ts")
+    return None, None, market_regime.CommitState(), None
+
+
+def _unclear_shell(now_ts, prior):
+    """A fully-shaped ``unclear`` RegimeState dict. Preserves the prior smoothing
+    carry when present so a transient fetch failure doesn't reset the EMAs."""
+    fast, slow, commit, sample_ts = _regime_carry(prior)
+    if sample_ts is None:
+        sample_ts = int(now_ts)
+    return {
+        "ts": _regime_iso(now_ts),
+        "as_of": _regime_iso(now_ts),
+        "memberships": {r: 1.0 / len(market_regime.REGIMES)
+                        for r in market_regime.REGIMES},
+        "raw": {r: 0.0 for r in market_regime.REGIMES},
+        "confidence": 0.0,
+        "unclear": True,
+        "label": "Unclear",
+        "committed_label": "",
+        "transition": None,
+        "evidence": [],
+        "version_info": {"model": _REGIME_MODEL},
+        "_fast": fast,
+        "_slow": slow,
+        "_commit": commit,
+        "_sample_ts": sample_ts,
+    }
+
+
+def compute_market_regime(schwab, matrix=None, vix=None, prior=None,
+                          now=None) -> dict:
+    """Assemble the blended market-regime state from live SPY bars + VIX + the
+    options matrix, threading the temporal smoothing/commit state off ``prior``.
+
+    ``schwab`` proxy client; ``matrix`` the ``cache:options:matrix`` payload
+    (``{"rows":[...], "ts":...}``) or None; ``vix`` a
+    ``{"vix","vix1d","vix3m"[,"vix1d_prev"]}`` dict or None (fetched via
+    ``get_quotes`` when None); ``prior`` the previous return dict (carries
+    ``_fast``/``_slow``/``_commit``/``_sample_ts``) or None on cold start;
+    ``now`` unix seconds (defaults to ``time.time()``).
+
+    Returns the publishable RegimeState fields PLUS the private carry fields
+    (``_fast``/``_slow``/``_commit``/``_sample_ts``, held by the handler and
+    passed back as ``prior`` — NOT cached). Defensive: any failure returns a
+    fully-shaped ``unclear`` dict, never raises."""
+    now_ts = now if now is not None else time.time()
+    try:
+        bars_5m, daily = _fetch_spy_5m(schwab, now_ts)
+        # No usable bars (proxy down / premarket) -> the unclear shell, which
+        # preserves the prior smoothing carry (a transient miss can't reset it).
+        if bars_5m is None or len(bars_5m) == 0:
+            return _unclear_shell(now_ts, prior)
+
+        if vix is None:
+            vix = _fetch_vix(schwab)
+        matrix_row = _matrix_row(matrix, now_ts)
+        prior_widths = _prior_widths(daily)
+
+        ev = regime_evidence.evidence_from_bars(
+            bars_5m, daily, vix, matrix_row, prior_widths)
+        scores = market_regime.score_regimes(ev)
+
+        # Thread the temporal state off the previous return.
+        pf, ps, pc, pts = _regime_carry(prior)
+        dt_sec = (now_ts - pts) if pts else 0
+        fast, slow = market_regime.smooth(pf, ps, scores.memberships, dt_sec)
+
+        raw_crisis = scores.raw["crisis"]
+        attacked = market_regime.crisis_attacked(raw_crisis)
+        if attacked:
+            fast = market_regime.apply_crisis_attack(fast, raw_crisis)
+
+        commit = market_regime.commit_label(fast, pc)
+        if attacked:
+            # Crisis force-commit — bypass the hysteresis streak entirely.
+            commit = market_regime.CommitState(committed="crisis", streak=0)
+
+        transition = market_regime.detect_transition(fast, slow)
+        committed = commit.committed
+
+        return {
+            "ts": _regime_iso(now_ts),
+            "as_of": _regime_iso(now_ts),
+            "memberships": fast,          # the smoothed (crisis-attacked) vector
+            "raw": scores.raw,
+            "confidence": scores.confidence,
+            "unclear": scores.unclear,
+            "label": _REGIME_LABELS.get(committed, "Unclear"),
+            "committed_label": committed or "",
+            "transition": transition,
+            "evidence": list(scores.evidence),
+            "version_info": {"model": _REGIME_MODEL},
+            "_fast": fast,
+            "_slow": slow,
+            "_commit": commit,
+            "_sample_ts": int(now_ts),
+        }
+    except Exception:  # noqa: BLE001 — never raise into the refresh path.
+        return _unclear_shell(now_ts, prior)
 
 
 # Self-fetch cache for compute_30d_trend: the 15-min trend recompute calls it
