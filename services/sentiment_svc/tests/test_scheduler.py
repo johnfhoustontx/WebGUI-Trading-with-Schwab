@@ -119,3 +119,35 @@ def test_sectors_due_not_off_hours_weekend_holiday():
     assert scheduler.sectors_due(_ct(2026, 7, 3, 10, 0), None)[0] is False
     # slot passes through unchanged when not due
     assert scheduler.sectors_due(_ct(2026, 6, 15, 7, 0), "prev")[1] == "prev"
+
+
+# --- market-regime 5-min slot (Task 8) ----------------------------------------
+# The blended regime classifier recomputes on its OWN 5-min RTH slot (5-min bars
+# only finalize every 5 min). Off-hours the last committed regime persists — its
+# ``as_of`` shows the age — rather than being recomputed on stale bars.
+
+
+def test_regime_interval_is_5_min():
+    assert scheduler.REGIME_INTERVAL_MIN == 5
+
+
+def test_regime_due_every_5_min_rth():
+    # 2026-06-15 is a Monday. Cold start fires, then once per 5-min slot.
+    due1, slot1 = scheduler.regime_due(_ct(2026, 6, 15, 10, 0), None)
+    assert due1 is True and slot1 is not None
+    # same 5-min slot -> not due again, slot unchanged.
+    due2, slot2 = scheduler.regime_due(_ct(2026, 6, 15, 10, 2), slot1)
+    assert due2 is False and slot2 == slot1
+    # next slot -> due.
+    due3, slot3 = scheduler.regime_due(_ct(2026, 6, 15, 10, 5), slot2)
+    assert due3 is True and slot3 != slot1
+    # ... and only once within it.
+    assert scheduler.regime_due(_ct(2026, 6, 15, 10, 7), slot3)[0] is False
+
+
+def test_regime_due_off_hours_never():
+    # premarket / after close on a trading day, a Saturday, and a holiday.
+    for when in (_ct(2026, 6, 15, 7, 0), _ct(2026, 6, 15, 16, 30),
+                 _ct(2026, 6, 13, 10, 0), _ct(2026, 7, 3, 10, 0)):
+        due, slot = scheduler.regime_due(when, "prev")
+        assert due is False and slot == "prev"

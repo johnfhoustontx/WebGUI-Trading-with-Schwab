@@ -20,6 +20,7 @@ log = logging.getLogger(__name__)
 
 REFRESH_INTERVAL_SEC = 120
 TREND_INTERVAL_SEC = 900   # 15 minutes — directional Market Trend recompute cadence
+REGIME_INTERVAL_MIN = 5    # 5 minutes — blended market-regime recompute cadence
 ORDER_FLOW_PUBLISH_SEC = 30   # publish cache:sentiment:order_flow at this cadence
 
 # ── Off-hours refresh gating (P4) ────────────────────────────────────────────
@@ -86,6 +87,26 @@ def sectors_due(now, last_slot):
     if not _is_rth(now):
         return (False, last_slot)
     slot = (now.date().isoformat(), now.hour)
+    return (slot != last_slot, slot)
+
+
+def regime_due(now, last_slot):
+    """(should_recompute, slot) — the 5-min RTH gate for the blended market regime.
+
+    Its OWN slot, deliberately NOT a speedup of the 15-min trend recompute: 5-min
+    bars only finalize every 5 minutes, so sampling faster just re-reads an
+    unfinished bar. RTH only — off-hours the last committed regime PERSISTS (its
+    ``as_of`` shows the age) rather than being recomputed on stale bars, so
+    ``last_slot`` passes through unchanged. Mirrors ``sectors_due``: pure, the
+    caller owns the clock and holds the slot.
+
+    The gate is polled from the 120 s refresh, so a 5-min slot actually fires
+    within <=2 min of its boundary — accepted in the design (the one place where
+    latency is expensive, crisis onset, has its own per-refresh fast path in
+    ``handlers.run_crisis_check``)."""
+    if not _is_rth(now):
+        return (False, last_slot)
+    slot = (now.date().isoformat(), now.hour, now.minute // REGIME_INTERVAL_MIN)
     return (slot != last_slot, slot)
 
 

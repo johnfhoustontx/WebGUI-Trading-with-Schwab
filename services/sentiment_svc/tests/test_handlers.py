@@ -64,6 +64,15 @@ def _patch_compute(monkeypatch, *, live, snaps, spy, sector=None,
     # stub it so tests never touch the real on-disk sector-P/C store.
     monkeypatch.setattr(handlers.compute, "sector_pc_delta", lambda: None)
 
+    # Same for the market-regime path (Task 8): ``refresh`` self-gates a 5-min
+    # regime recompute + a per-refresh crisis check, both of which would hit the
+    # live proxy during RTH. Stub the compute + reset the held carry so no test
+    # inherits another's regime state.
+    handlers._REGIME.update(slot=None, state=None)
+    monkeypatch.setattr(handlers.compute, "compute_market_regime",
+                        lambda *a, **k: None)
+    monkeypatch.setattr(handlers.compute, "_fetch_vix", lambda *a, **k: None)
+
     # Stub the scoring-derive helpers (real ones tested in test_compute.py).
     monkeypatch.setattr(handlers.compute, "derive_composite_extras",
                         lambda *a, **k: {
@@ -902,3 +911,247 @@ def test_recompute_notify_failure_non_fatal(monkeypatch):
     assert handlers._TREND["committed"] == "bearish"
     assert handlers._TREND["smoothed"] == 30.0
     _reset_trend()
+
+
+# --- market regime: 5-min slot, publish/record, crisis fast path (Task 8) -----
+
+
+def _regime_state(committed="trending", unclear=False, memberships=None):
+    """A canned ``compute.compute_market_regime`` return (publishable fields +
+    the private smoothing carry the handler threads back as ``prior``)."""
+    m = memberships or {"mean_reversion": 0.10, "trending": 0.60,
+                        "breakout": 0.10, "choppy": 0.15, "crisis": 0.05}
+    return {
+        "ts": "2026-07-23T15:00:00+00:00",
+        "as_of": "2026-07-23T15:00:00+00:00",
+        "memberships": dict(m),
+        "raw": {"mean_reversion": 0.2, "trending": 0.8, "breakout": 0.1,
+                "choppy": 0.3, "crisis": 0.0},
+        "confidence": 0.8,
+        "unclear": unclear,
+        "label": "Trending",
+        "committed_label": committed,
+        "transition": None,
+        "evidence": ["ADX 25 rising"],
+        "version_info": {"model": "regime-v1"},
+        "_fast": dict(m),
+        "_slow": dict(m),
+        "_commit": handlers.compute.market_regime.CommitState(committed=committed),
+        "_sample_ts": 1_753_000_000,
+    }
+
+
+def _reset_regime():
+    handlers._REGIME.update(slot=None, state=None)
+
+
+def _force_regime_due(monkeypatch, due=True):
+    """Open (or close) the 5-min slot gate without touching the wall clock."""
+    box = {"n": 0}
+
+    def _due(now, last):
+        if not due:
+            return (False, last)
+        box["n"] += 1
+        return (True, "slot-%d" % box["n"])
+
+    monkeypatch.setattr(handlers.scheduler, "regime_due", _due)
+
+
+def test_maybe_recompute_regime_publishes_and_records(monkeypatch):
+    bus = Bus(fake=True)
+    _reset_regime()
+    _force_regime_due(monkeypatch)
+    monkeypatch.setattr(handlers, "_is_rth_now", lambda: True)
+    state = _regime_state()
+    monkeypatch.setattr(handlers.compute, "compute_market_regime",
+                        lambda *a, **k: state)
+
+    handlers._maybe_recompute_regime(bus)
+
+    env = bus.cache_get("cache:sentiment:regime")
+    assert env is not None
+    # Exactly the publishable contract fields â€” the private smoothing carry
+    # (_fast/_slow/_commit/_sample_ts) must NEVER reach the cache.
+    assert set(env.payload) == set(handlers._REGIME_PUBLIC_KEYS)
+    assert not any(k.startswith("_") for k in env.payload)
+    assert env.payload["committed_label"] == "trending"
+
+    hist = bus.cache_get("cache:sentiment:regime_history")
+    assert hist is not None
+    points = hist.payload["points"]
+    assert len(points) == 1
+    assert points[0]["label"] == "trending"
+    assert points[0]["confidence"] == 0.8
+    assert set(points[0]["memberships"]) == set(
+        handlers.compute.market_regime.REGIMES)
+
+    # The carry is HELD in-process for the next sample's ``prior``.
+    assert handlers._REGIME["state"] is state
+    _reset_regime()
+
+
+def test_maybe_recompute_regime_threads_prior(monkeypatch):
+    bus = Bus(fake=True)
+    _reset_regime()
+    _force_regime_due(monkeypatch)
+    monkeypatch.setattr(handlers, "_is_rth_now", lambda: False)  # recording off
+    first = _regime_state()
+    second = _regime_state(committed="choppy")
+    results = iter([first, second])
+    seen = []
+
+    def _cmr(_schwab, **kw):
+        seen.append(kw.get("prior"))
+        return next(results)
+
+    monkeypatch.setattr(handlers.compute, "compute_market_regime", _cmr)
+
+    handlers._maybe_recompute_regime(bus)
+    handlers._maybe_recompute_regime(bus)
+
+    assert seen == [None, first]
+    assert handlers._REGIME["state"] is second
+    _reset_regime()
+
+
+def test_maybe_recompute_regime_skips_when_not_due(monkeypatch):
+    bus = Bus(fake=True)
+    _reset_regime()
+    _force_regime_due(monkeypatch, due=False)
+    calls = []
+    monkeypatch.setattr(handlers.compute, "compute_market_regime",
+                        lambda *a, **k: calls.append(1))
+
+    handlers._maybe_recompute_regime(bus)
+
+    assert calls == []
+    assert bus.cache_get("cache:sentiment:regime") is None
+    _reset_regime()
+
+
+def test_regime_publish_skips_invalid_payload(monkeypatch):
+    """A contract-invalid state is logged and dropped, never cached, never raised."""
+    bus = Bus(fake=True)
+    _reset_regime()
+    _force_regime_due(monkeypatch)
+    monkeypatch.setattr(handlers, "_is_rth_now", lambda: False)
+    bad = _regime_state()
+    bad["memberships"] = {"trending": 1.0, "choppy": 0.0, "crisis": 0.0}
+    monkeypatch.setattr(handlers.compute, "compute_market_regime",
+                        lambda *a, **k: bad)
+
+    handlers._maybe_recompute_regime(bus)  # must not raise
+
+    assert bus.cache_get("cache:sentiment:regime") is None
+    _reset_regime()
+
+
+def test_record_regime_skips_unclear(monkeypatch):
+    """A degraded (unclear) sample is not recorded â€” the history is tuning data."""
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers, "_is_rth_now", lambda: True)
+    inserted = []
+    monkeypatch.setattr(handlers.intraday_history_db, "insert_regime_point",
+                        lambda *a, **k: inserted.append(a))
+
+    handlers._record_regime(bus, _regime_state(unclear=True))
+
+    assert inserted == []
+    assert bus.cache_get("cache:sentiment:regime_history") is None
+
+
+def test_record_regime_skips_off_hours(monkeypatch):
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers, "_is_rth_now", lambda: False)
+    inserted = []
+    monkeypatch.setattr(handlers.intraday_history_db, "insert_regime_point",
+                        lambda *a, **k: inserted.append(a))
+
+    handlers._record_regime(bus, _regime_state())
+
+    assert inserted == []
+
+
+def test_crisis_check_republishes_on_attack(monkeypatch):
+    """A term-structure inversion deep enough to clear CRISIS_ATTACK force-commits
+    crisis and republishes immediately (<=2 min), bypassing the 5-min slot."""
+    bus = Bus(fake=True)
+    _reset_regime()
+    handlers._REGIME.update(slot="slot-1", state=_regime_state())
+    monkeypatch.setattr(handlers, "_is_rth_now", lambda: False)  # recording off
+    # vix1d 34 vs vix 20 -> front-month inversion depth 0.70 == CRISIS_ATTACK.
+    monkeypatch.setattr(handlers.compute, "_fetch_vix",
+                        lambda *a, **k: {"vix": 20.0, "vix1d": 34.0, "vix3m": 20.0})
+
+    handlers.run_crisis_check(bus)
+
+    env = bus.cache_get("cache:sentiment:regime")
+    assert env is not None
+    assert env.payload["committed_label"] == "crisis"
+    assert env.payload["label"] == "Crisis"
+    assert env.payload["memberships"]["crisis"] >= 0.7
+    assert set(env.payload) == set(handlers._REGIME_PUBLIC_KEYS)
+    held = handlers._REGIME["state"]
+    assert held["committed_label"] == "crisis"
+    assert held["_commit"].committed == "crisis"
+    # The smoothing clock stays owned by the 5-min slot.
+    assert held["_sample_ts"] == 1_753_000_000
+    _reset_regime()
+
+
+def test_crisis_check_no_write_when_quiet(monkeypatch):
+    bus = Bus(fake=True)
+    _reset_regime()
+    handlers._REGIME.update(slot="slot-1", state=_regime_state())
+    monkeypatch.setattr(handlers.compute, "_fetch_vix",
+                        lambda *a, **k: {"vix": 20.0, "vix1d": 18.0, "vix3m": 22.0})
+
+    handlers.run_crisis_check(bus)
+
+    assert bus.cache_get("cache:sentiment:regime") is None
+    assert handlers._REGIME["state"]["committed_label"] == "trending"
+    _reset_regime()
+
+
+def test_crisis_check_noop_without_held_state(monkeypatch):
+    """No 5-min sample yet -> nothing to attack; must not fetch or write."""
+    bus = Bus(fake=True)
+    _reset_regime()
+    calls = []
+    monkeypatch.setattr(handlers.compute, "_fetch_vix",
+                        lambda *a, **k: calls.append(1))
+
+    handlers.run_crisis_check(bus)
+
+    assert calls == []
+    assert bus.cache_get("cache:sentiment:regime") is None
+
+
+def test_crisis_check_noop_when_already_crisis(monkeypatch):
+    bus = Bus(fake=True)
+    _reset_regime()
+    handlers._REGIME.update(slot="slot-1", state=_regime_state(committed="crisis"))
+    monkeypatch.setattr(handlers.compute, "_fetch_vix",
+                        lambda *a, **k: {"vix": 20.0, "vix1d": 34.0, "vix3m": 20.0})
+
+    handlers.run_crisis_check(bus)
+
+    assert bus.cache_get("cache:sentiment:regime") is None
+    _reset_regime()
+
+
+def test_refresh_survives_regime_failure(monkeypatch):
+    """A regime failure can NEVER abort the composite refresh."""
+    bus = Bus(fake=True)
+    _patch_compute(monkeypatch, live=_fake_live(), snaps=[{"x": 1}], spy=[1.0])
+
+    def _boom(*a, **k):
+        raise RuntimeError("regime exploded")
+
+    monkeypatch.setattr(handlers, "_maybe_recompute_regime", _boom)
+    monkeypatch.setattr(handlers, "run_crisis_check", _boom)
+
+    handlers.refresh(bus, with_sectors=False)  # must not raise
+
+    assert bus.cache_get("cache:sentiment:composite") is not None

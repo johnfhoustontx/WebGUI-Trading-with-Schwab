@@ -28,7 +28,7 @@ from zoneinfo import ZoneInfo as _ZI
 from services.sentiment_svc import (
     compute, intraday_history_db, market_state_history_db, order_flow_consumer,
     scheduler, sector_pcr_history_db, state_alert)
-from shared.contracts.sentiment import CompositeSnapshot
+from shared.contracts.sentiment import CompositeSnapshot, RegimeState
 
 log = logging.getLogger(__name__)
 
@@ -174,19 +174,24 @@ def _maybe_recompute_trend(bus):
             log.exception("state transition notify failed")
 
 
-# Cross-service view (published by options_svc) feeding the aggression axis.
+# Cross-service views (published by options_svc) feeding the aggression axis /
+# the regime classifier's dealer-gamma evidence.
 CACHE_OPTIONS_FLOW_SKEW = "cache:options:flow_skew"
+CACHE_OPTIONS_MATRIX = "cache:options:matrix"
 
 CACHE_COMPOSITE = "cache:sentiment:composite"
 CACHE_HISTORY = "cache:sentiment:history"
 CACHE_SECTORS = "cache:sentiment:sectors"
 CACHE_ROTATION = "cache:sentiment:rotation"
 CACHE_INTRADAY = "cache:sentiment:intraday_history"
+CACHE_REGIME = "cache:sentiment:regime"
+CACHE_REGIME_HISTORY = "cache:sentiment:regime_history"
 
 EVENT_COMPOSITE = "events:sentiment:composite"
 EVENT_SECTORS = "events:sentiment:sectors"
 EVENT_ROTATION = "events:sentiment:rotation"
 EVENT_INTRADAY = "events:sentiment:intraday_history"
+EVENT_REGIME = "events:sentiment:regime"
 
 
 # --- 2-min intraday sentiment+trend series ------------------------------------
@@ -336,6 +341,199 @@ def _record_intraday(bus, live, trend):
         log.exception("intraday history record failed")
 
 
+# --- blended market regime (5-min slot + <=2-min crisis fast path) ------------
+# ``_REGIME`` holds the last sample's FULL return dict — the publishable fields
+# plus the private smoothing carry (``_fast``/``_slow``/``_commit``/
+# ``_sample_ts``) that ``compute.compute_market_regime`` threads forward as
+# ``prior``. It is process state, never cached (only the public subset is
+# published). ``refresh`` runs from two entry points across a multi-worker
+# executor, so the read-modify-write is serialized by ``_REGIME_LOCK`` — the same
+# reason ``_TREND`` has one.
+_REGIME = {"slot": None, "state": None}
+_REGIME_LOCK = threading.Lock()
+
+# The RegimeState contract fields — the ONLY keys that reach the cache. Anything
+# starting with "_" is in-process carry and must never be published.
+_REGIME_PUBLIC_KEYS = ("ts", "as_of", "memberships", "raw", "confidence",
+                       "unclear", "label", "committed_label", "transition",
+                       "evidence", "version_info")
+
+
+def _read_matrix(bus):
+    """The ``cache:options:matrix`` payload (dealer-gamma evidence), or None.
+    Defensive — a missing/locked/foreign-shaped cache degrades to None, which the
+    regime evidence treats as "no gamma read" rather than a fabricated one."""
+    try:
+        env = bus.cache_get(CACHE_OPTIONS_MATRIX)
+        if env is not None and isinstance(env.payload, dict):
+            return env.payload
+    except Exception:  # noqa: BLE001 — degrade to None.
+        log.debug("options matrix read failed", exc_info=True)
+    return None
+
+
+def _regime_payload(state):
+    """The publishable RegimeState subset of a compute return (carry stripped)."""
+    return {k: state[k] for k in _REGIME_PUBLIC_KEYS if k in state}
+
+
+def _publish_regime(bus, state):
+    """Validate + publish ``cache:sentiment:regime``.
+
+    ``skip_unchanged`` (with the event pipelined into the same write) so an
+    unchanged regime doesn't bump the version and wake every GUI poller. A
+    contract-invalid payload is logged and DROPPED rather than cached — the page
+    keeps showing the last good regime instead of a malformed one."""
+    if not isinstance(state, dict):
+        return
+    payload = _regime_payload(state)
+    try:
+        RegimeState(**payload)
+    except Exception:  # noqa: BLE001 — shape drift must not poison the cache.
+        log.exception("regime payload failed contract validation; not published")
+        return
+    bus.cache_set(CACHE_REGIME, payload, event=EVENT_REGIME, skip_unchanged=True)
+
+
+def _record_regime(bus, state):
+    """Record one regime sample (RTH-only), prune to ~30 sessions, publish today's
+    points on ``cache:sentiment:regime_history`` (both regime views share
+    ``EVENT_REGIME`` — one channel per domain view family, as the page re-reads
+    both). Skips an ``unclear`` sample — the history is tuning/validation data, so
+    a degraded read is worse than a gap. Defensive: never aborts the refresh.
+
+    Shares ``_INTRADAY_LOCK`` with the other on-disk recorders: one shared
+    ``check_same_thread=False`` connection touched from the multi-worker executor."""
+    try:
+        if not isinstance(state, dict) or state.get("unclear"):
+            return
+        if not _is_rth_now():
+            return
+        with _INTRADAY_LOCK:
+            conn = _get_intraday_conn()
+            ts = int(time.time())
+            intraday_history_db.insert_regime_point(
+                conn, ts, state["memberships"], state["confidence"],
+                state.get("committed_label") or "")
+            intraday_history_db.prune_regime(conn, n_days=30)
+            rows = intraday_history_db.load_regime_recent(conn, n_days=1)
+            points = [{"ts": r[0], "memberships": r[1], "confidence": r[2],
+                       "label": r[3]} for r in rows]
+            bus.cache_set(CACHE_REGIME_HISTORY, {"points": points},
+                          event=EVENT_REGIME, skip_unchanged=True)
+    except Exception:  # noqa: BLE001
+        log.exception("regime history record failed")
+
+
+def _maybe_recompute_regime(bus):
+    """Recompute the blended market regime if the 5-min RTH slot is due.
+
+    Self-gating (the ``_maybe_recompute_trend`` idiom) so the 120 s scheduler loop
+    needs no new plumbing. Threads the previous sample's smoothing/commit carry as
+    ``prior``; the publish + record run OUTSIDE ``_REGIME_LOCK`` (they do I/O) and
+    are independently guarded so one failing can't skip the other. Defensive
+    throughout — a failure logs and leaves the prior held state."""
+    from services import _proxy
+    state = None
+    try:
+        with _REGIME_LOCK:
+            due, slot = scheduler.regime_due(scheduler._market_now(),
+                                             _REGIME["slot"])
+            if not due:
+                return
+            state = compute.compute_market_regime(
+                _proxy.schwab_client, matrix=_read_matrix(bus),
+                prior=_REGIME["state"], now=time.time())
+            _REGIME.update(slot=slot, state=state)
+    except Exception:  # noqa: BLE001 — keep the last good regime.
+        log.exception("market regime recompute failed")
+        return
+
+    try:
+        _publish_regime(bus, state)
+    except Exception:  # noqa: BLE001
+        log.exception("regime publish failed")
+    try:
+        _record_regime(bus, state)
+    except Exception:  # noqa: BLE001
+        log.exception("regime record failed")
+
+
+def run_crisis_check(bus):
+    """The <=2-min crisis fast path — run on EVERY refresh, NOT the 5-min slot.
+
+    Crisis is the one regime where lag is expensive, and its decisive tells (VIX
+    term structure + the dealer-gamma row) are cheap: a quote fetch and a cache
+    read, no bar history. So they are re-evaluated every 120 s refresh and, when
+    the raw crisis intensity clears ``CRISIS_ATTACK``, the held membership vector
+    is crisis-attacked, the label force-committed, and the view republished
+    immediately — onset latency <=2 min instead of <=5, at no extra bar fetch.
+
+    Only the crisis evidence is supplied here, so the published ``raw`` is a
+    crisis-only re-evaluation; the next 5-min slot restores the full vector. The
+    smoothing clock (``_sample_ts``) and the slow EMA are deliberately NOT touched
+    — they stay owned by the 5-min slot, so decay follows the normal path.
+
+    No-ops without a held sample, or when crisis is already committed. Defensive:
+    never raises into the refresh path."""
+    from services import _proxy
+    try:
+        held = _REGIME["state"]
+        if not isinstance(held, dict) or not isinstance(held.get("_fast"), dict):
+            return
+        if held.get("committed_label") == "crisis":
+            return
+
+        mr = compute.market_regime
+        now_ts = time.time()
+        vix = compute._fetch_vix(_proxy.schwab_client)
+        matrix_row = compute._matrix_row(_read_matrix(bus), now_ts)
+
+        # Only the CRISIS-decisive keys. Feeding the full assembler's output
+        # would hand a lone ``above_flip`` to mean_reversion and publish a raw
+        # vector that looks confident off one bar-free input.
+        full = compute.regime_evidence.evidence_from_bars(
+            None, None, vix, matrix_row, None)
+        ev = dict.fromkeys(mr.EVIDENCE_KEYS)
+        for key in ("term_inversion", "vix1d_spike_pct", "below_flip_deep"):
+            ev[key] = full.get(key)
+        scores = mr.score_regimes(ev)
+        raw_crisis = scores.raw["crisis"]
+        if not mr.crisis_attacked(raw_crisis):
+            return
+
+        now_iso = compute._regime_iso(now_ts)
+        with _REGIME_LOCK:
+            # Re-read under the lock: a 5-min sample may have landed during the
+            # quote fetch, and attacking its predecessor's vector would clobber it.
+            held = _REGIME["state"]
+            if not isinstance(held, dict) or not isinstance(held.get("_fast"), dict):
+                return
+            if held.get("committed_label") == "crisis":
+                return
+            fast = mr.apply_crisis_attack(held["_fast"], raw_crisis)
+            slow = held.get("_slow")
+            state = dict(held)
+            state.update({
+                "ts": now_iso,
+                "as_of": now_iso,
+                "memberships": fast,
+                "raw": scores.raw,
+                "confidence": scores.confidence,
+                "unclear": scores.unclear,
+                "label": compute._REGIME_LABELS.get("crisis", "Crisis"),
+                "committed_label": "crisis",
+                "transition": mr.detect_transition(fast, slow) if slow else None,
+                "evidence": list(scores.evidence),
+                "_fast": fast,
+                "_commit": mr.CommitState(committed="crisis", streak=0),
+            })
+            _REGIME["state"] = state
+        _publish_regime(bus, state)
+    except Exception:  # noqa: BLE001 — must never abort the composite refresh.
+        log.exception("regime crisis check failed")
+
+
 def _sector_industry_etfs(sector_data, sector_name):
     """Industry ETF symbols under one sector — mirrors the GUI's
     ``webgui/pages/sentiment.py:sector_industry_etfs`` (kind=='industry',
@@ -417,6 +615,18 @@ def refresh(bus, with_sectors: bool = False) -> None:
 
     # 15-min directional Market-Trend recompute (gated + state persisted).
     _maybe_recompute_trend(bus)
+
+    # Blended market regime: its own 5-min RTH slot, plus the crisis fast path on
+    # EVERY refresh. Both self-gate; both are guarded HERE too so no regime
+    # failure can ever abort the composite refresh.
+    try:
+        _maybe_recompute_regime(bus)
+    except Exception:  # noqa: BLE001
+        log.exception("regime recompute failed")
+    try:
+        run_crisis_check(bus)
+    except Exception:  # noqa: BLE001
+        log.exception("regime crisis check failed")
 
     now_iso = datetime.now(timezone.utc).isoformat()
 
