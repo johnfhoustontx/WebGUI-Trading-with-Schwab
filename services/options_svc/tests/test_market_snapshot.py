@@ -41,6 +41,24 @@ def test_regime_mix_svg_stacks_membership_bands():
     assert out.startswith("<svg") and "<rect" in out
 
 
+def test_regime_mix_svg_tolerates_non_numeric_membership():
+    # a malformed membership value must degrade, not raise
+    pts = [{"memberships": {"mean_reversion": "oops", "trending": 0.6, "breakout": 0.1, "choppy": 0.05, "crisis": 0.05}}]
+    out = ms.regime_mix_svg(pts)
+    assert out.startswith("<svg")
+
+
+def test_regime_mix_svg_skips_non_dict_points():
+    pts = [None, {"memberships": {"mean_reversion": 0.6, "trending": 0.2, "breakout": 0.1, "choppy": 0.05, "crisis": 0.05}}]
+    out = ms.regime_mix_svg(pts)
+    assert out.startswith("<svg") and "<rect" in out
+
+
+def test_sparkline_svg_skips_non_dict_points():
+    out = ms.sparkline_svg([None, {"trend": 55}], key="trend", vmin=0, vmax=100, bands=[(100, "#3fb36b")])
+    assert out.startswith("<svg")
+
+
 # --- Task 3: dashboard tile-grid HTML ---
 
 def test_dashboard_grid_html_frames_and_tiles():
@@ -54,6 +72,13 @@ def test_dashboard_grid_html_frames_and_tiles():
 
 def test_dashboard_grid_html_empty():
     assert "no data" in ms.dashboard_grid_html([]).lower()
+
+
+def test_dashboard_grid_html_skips_non_dict_elements():
+    cats = [None, {"category": "Volatility", "tiles": [
+        None, {"display": "VIX", "last": 14.2, "change_pct": 3.6, "color_state": "risk_off_strong"}]}]
+    out = ms.dashboard_grid_html(cats)
+    assert "Volatility" in out and "VIX" in out
 
 
 # --- Task 4: panels + full doc ---

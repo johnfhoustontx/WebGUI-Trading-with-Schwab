@@ -79,7 +79,8 @@ def _band_color(v, bands):
 
 
 def sparkline_svg(points, *, key, vmin, vmax, bands, w=220, h=54):
-    vals = [p.get(key) for p in (points or []) if isinstance(p.get(key), (int, float))]
+    vals = [p.get(key) for p in (points or [])
+            if isinstance(p, dict) and isinstance(p.get(key), (int, float))]
     if not vals:
         return _empty_svg(w, h)
     span = (vmax - vmin) or 1.0
@@ -98,7 +99,7 @@ def sparkline_svg(points, *, key, vmin, vmax, bands, w=220, h=54):
 
 
 def regime_mix_svg(points, w=220, h=54):
-    pts = [p for p in (points or []) if isinstance(p.get("memberships"), dict)]
+    pts = [p for p in (points or []) if isinstance(p, dict) and isinstance(p.get("memberships"), dict)]
     if not pts:
         return _empty_svg(w, h)
     n = len(pts)
@@ -106,11 +107,15 @@ def regime_mix_svg(points, w=220, h=54):
     rects = []
     for i, p in enumerate(pts):
         m = p["memberships"]
-        total = sum(max(0.0, float(m.get(k, 0.0))) for k in _REGIME_ORDER) or 1.0
+
+        def _mv(key):
+            v = m.get(key, 0.0)
+            return max(0.0, float(v)) if isinstance(v, (int, float)) else 0.0
+        total = sum(_mv(k) for k in _REGIME_ORDER) or 1.0
         y = 4.0
         x = 4 + i * col_w
         for k in _REGIME_ORDER:
-            frac = max(0.0, float(m.get(k, 0.0))) / total
+            frac = _mv(k) / total
             bh = (h - 8) * frac
             rects.append(f'<rect x="{x:.1f}" y="{y:.1f}" width="{col_w:.1f}" '
                          f'height="{bh:.1f}" fill="{_REGIME_COLORS[k]}"/>')
@@ -140,13 +145,15 @@ def _fmt_change(tile):
 
 
 def dashboard_grid_html(categories):
-    cats = [c for c in (categories or []) if c.get("tiles")]
+    cats = [c for c in (categories or []) if isinstance(c, dict) and c.get("tiles")]
     if not cats:
         return '<div class="ms-empty">no data</div>'
     frames = []
     for c in cats:
         tiles = []
         for t in c["tiles"]:
+            if not isinstance(t, dict):
+                continue
             cs = t.get("color_state", "no_data")
             bg = _TILE_BG.get(cs, _TILE_BG["no_data"])
             fg = _TILE_FG.get(cs, _TILE_FG["no_data"])
