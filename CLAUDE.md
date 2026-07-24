@@ -8,7 +8,39 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-07-23 (**Market Regime — blended structural classifier (Phase 1, CONTEXT-ONLY)**:
+**Last updated:** 2026-07-24 (**Market Snapshot push — 30-min Discord/Telegram infographic**:
+a new scheduled push (in **`options_svc`**) fires **every :00 and :30 during the trading day**
+(08:30–15:00 CT, ~14/day) delivering **one server-composed PNG** to Telegram + Discord — the **Market
+Dashboard tile-grid** (all ~14 categories, risk-on/off colored, from `cache:market:dashboard`) plus a
+**"Market Read"** section of three **gauge + intraday-sparkline** panels with static explainer + live
+read: **Daily Market Trend** (`cache:sentiment:composite`→`derived.trend`), **Daily Market Sentiment**
+(→`live.composite`), **Daily Market Regime** (`cache:sentiment:regime` + `regime_history` membership
+mix). **Zero new deps, no Claude cost.** Reuses the existing rails: pure builder module
+`services/options_svc/market_snapshot.py` (inline-SVG gauge/sparkline/regime-mix + dashboard HTML +
+`market_snapshot_doc` — a self-contained dark doc reusing `compute._ANALYZE_CSS` via a LOCAL wrapper so
+it's titled "Market Snapshot", NOT "Gamma Analysis") → `briefing_image.render_html_png` (headless
+Chrome) → `push_notify.send_market_snapshot` (mirrors `send_gamma_briefing`: master `enabled` +
+`market_snapshot.enabled` gates, Discord routes to `discord.market_snapshot_webhook_url` →
+`webhook_url`, text fallback on render failure, size guard, no SMS). Scheduled via
+`scheduler.market_snapshot_due(now, ran_slots)` (constants `_MKT_SNAP_START/_END`, :00/:30 slots,
+10-min grace, trading-day gated) wired into `loop()` (non-blocking `launch_branches`, latch-before-work,
+mirrors the action-alert branch); `handlers.run_market_snapshot(bus, slot)` reads the six caches
+(**unwrapping `CacheEnvelope.payload`**), pushes, and caches inputs at **`cache:options:market_snapshot`**.
+Config: a `market_snapshot` block in gitignored `shared/notifications.json` (`enabled` + the real
+webhook) + placeholder in `.example.json`; the **window is scheduler constants, NOT config** (start/end
+keys were dropped as a false affordance). **Two bugs only LIVE verification caught** (all unit tests +
+two code reviews passed): (1) `sentiment_svc` publishes `total_score` as a formatted **STRING**
+(`"6.70"`), so an `isinstance(...,(int,float))` guard left the Sentiment gauge/caption dead → fixed with
+tolerant `float()` coercion; (2) `bus.cache_get` returns a **`CacheEnvelope`**, not a dict — the handler
+called `.get()` on the envelope → caught by its best-effort guard → the push **never fired** → fixed by
+unwrapping `.payload` (the unit test's fake bus now returns `SimpleNamespace(payload=…)` to match the
+real contract). **Restart `options_svc`** to schedule it. Built subagent-by-subagent (TDD, spec + quality
+review per unit + a final holistic integration review); green: market_snapshot **19**, push_notify **+3**,
+scheduler **+5**, handlers **+2**; full options_svc suite 789 pass (the 2 documented `test_expected_move`
+date-relative baseline fails aside); ruff clean. Live-verified end-to-end (real caches → PNG rendered +
+visually confirmed → real test push returned True). Design/plan:
+[design](docs/plans/2026-07-24-market-snapshot-push-design.md) /
+[plan](docs/plans/2026-07-24-market-snapshot-push-plan.md). Prior — 2026-07-23 (**Market Regime — blended structural classifier (Phase 1, CONTEXT-ONLY)**:
 a THIRD classification axis alongside the direction × aggression five-state — **market STRUCTURE**
 (*how* the tape is moving): **Mean Reversion / Trending / Breakout / Choppy / Crisis**. Built
 **soft-first**: the primary output is a **membership VECTOR** (each regime a continuous 0-1 weight),
