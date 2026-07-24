@@ -234,7 +234,10 @@ def test_defaults_include_gamma_briefing_block(tmp_path, monkeypatch):
     monkeypatch.delenv("GAMMA_BRIEFING_WEBHOOK_URL", raising=False)
     cfg = ch.load_config()
     gb = cfg["gamma_briefing"]
-    assert gb["enabled"] is True
+    # Ships OFF (opt-in). With it on and no dedicated webhook, an install that has
+    # only configured the SIGNAL webhook would start dropping four HTML attachments
+    # a day into the signal channel without anyone asking for it.
+    assert gb["enabled"] is False
     assert gb["slots"] == ["premarket", "open", "midday", "close"]
     assert gb["webhook_url"] == ""
 
@@ -290,3 +293,35 @@ def test_package_reexports_file_senders():
     import shared.notify as sn
     assert sn.send_telegram_document is ch.send_telegram_document
     assert sn.send_discord_file is ch.send_discord_file
+
+
+class _Resp:
+    def __init__(self, status_code, text=""):
+        self.status_code, self.text = status_code, text
+
+
+def test_file_senders_log_rejected_status(monkeypatch, caplog):
+    """requests does NOT raise on 4xx, so an API rejection would otherwise return
+    normally and vanish -- the file never arrives and nothing says why."""
+    monkeypatch.setattr(ch.requests, "post",
+                        lambda *a, **k: _Resp(400, '{"description":"chat not found"}'))
+    with caplog.at_level("WARNING"):
+        ch.send_telegram_document("TOK", 42, "b.html", b"x", "cap")
+        ch.send_discord_file("https://hook", "b.html", b"x", "cap")
+    text = caplog.text
+    assert "Telegram document rejected: HTTP 400" in text
+    assert "chat not found" in text
+    assert "Discord file rejected: HTTP 400" in text
+
+
+def test_file_senders_quiet_on_success(monkeypatch, caplog):
+    monkeypatch.setattr(ch.requests, "post", lambda *a, **k: _Resp(200, "ok"))
+    with caplog.at_level("WARNING"):
+        ch.send_telegram_document("TOK", 42, "b.html", b"x")
+        ch.send_discord_file("https://hook", "b.html", b"x")
+    assert caplog.text == ""
+
+
+def test_log_http_never_raises_on_odd_response(monkeypatch):
+    ch._log_http("X", None)          # no attributes at all
+    ch._log_http("X", object())      # no status_code

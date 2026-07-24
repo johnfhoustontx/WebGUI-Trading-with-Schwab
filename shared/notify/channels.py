@@ -38,8 +38,12 @@ _DEFAULTS = {
     # only). `slots` subsets which of the four push, so thinning the cadence needs
     # no code change. `webhook_url` is a DEDICATED Discord webhook (falls back to
     # discord.webhook_url when blank) so briefings stay out of the signal feed.
+    # Ships OFF, like `twitter` below: with `enabled` on and no dedicated webhook
+    # set, an install that has only configured the SIGNAL webhook would silently
+    # start dropping four HTML attachments a day into the signal channel — the very
+    # thing the dedicated webhook exists to prevent. Opt in explicitly.
     "gamma_briefing": {
-        "enabled": True,
+        "enabled": False,
         "slots": ["premarket", "open", "midday", "close"],
         "webhook_url": "",
     },
@@ -140,6 +144,26 @@ _TG_CAPTION_MAX = 1024      # Telegram sendDocument caption ceiling
 _DISCORD_CONTENT_MAX = 2000  # Discord webhook message content ceiling
 _SMTP_HOST, _SMTP_PORT = "smtp.gmail.com", 587
 _FI_GATEWAY = "@msg.fi.google.com"
+_HTTP_BODY_LOG_MAX = 300
+
+
+def _log_http(what: str, resp) -> None:
+    """Warn when a channel accepted the request but REJECTED the message.
+
+    ``requests`` does not raise on 4xx/5xx, so without this a rejected send returns
+    normally and vanishes — the file simply never arrives and nothing explains why.
+    That exact failure mode cost a live debugging session. Delivery still isn't
+    guaranteed (a 2xx only means the API accepted it), but a rejection is now
+    visible in the service log. Never raises — a malformed response object must not
+    turn a best-effort notification into an exception."""
+    try:
+        code = getattr(resp, "status_code", None)
+        if code is None or 200 <= code < 300:
+            return
+        body = (getattr(resp, "text", "") or "")[:_HTTP_BODY_LOG_MAX]
+        log.warning("%s rejected: HTTP %s %s", what, code, body)
+    except Exception:  # noqa: BLE001 — logging must never break a send
+        pass
 
 
 def send_telegram(token: str, chat_id, text: str) -> None:
@@ -170,12 +194,13 @@ def send_telegram_document(token: str, chat_id, filename: str, content: bytes,
     if not token or not chat_id or not content:
         return
     try:
-        requests.post(
+        resp = requests.post(
             _TELEGRAM_DOC_API.format(token=token),
             data={"chat_id": chat_id, "caption": (caption or "")[:_TG_CAPTION_MAX]},
             files={"document": (filename, content, "text/html")},
             timeout=20,   # longer than the 8s text timeout — this is an upload
         )
+        _log_http("Telegram document", resp)
     except Exception as exc:  # noqa: BLE001 — best-effort
         log.warning("Telegram document send failed: %s", exc)
 
@@ -201,13 +226,14 @@ def send_discord_file(webhook_url: str, filename: str, content: bytes,
     if not webhook_url or not content:
         return
     try:
-        requests.post(
+        resp = requests.post(
             webhook_url,
             data={"payload_json": json.dumps(
                 {"content": (caption or "")[:_DISCORD_CONTENT_MAX]})},
             files={"files[0]": (filename, content, "text/html")},
             timeout=20,
         )
+        _log_http("Discord file", resp)
     except Exception as exc:  # noqa: BLE001
         log.warning("Discord file send failed: %s", exc)
 
