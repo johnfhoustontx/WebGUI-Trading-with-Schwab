@@ -244,6 +244,9 @@ def test_gamma_briefing_file_values_override_defaults(tmp_path, monkeypatch):
     p.write_text(json.dumps({"gamma_briefing": {"enabled": False,
                                                 "webhook_url": "https://hook"}}))
     monkeypatch.setattr(ch, "_CONFIG_PATH", p)
+    # This asserts the FILE value wins, so a real GAMMA_BRIEFING_WEBHOOK_URL in the
+    # developer's environment (the override's whole purpose) would otherwise fail it.
+    monkeypatch.delenv("GAMMA_BRIEFING_WEBHOOK_URL", raising=False)
     cfg = ch.load_config()
     assert cfg["gamma_briefing"]["enabled"] is False
     assert cfg["gamma_briefing"]["webhook_url"] == "https://hook"
