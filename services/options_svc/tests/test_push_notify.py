@@ -828,18 +828,18 @@ def test_briefing_caption_truncates_headline_not_lead():
 
 def test_briefing_filename_uses_generated_at_date():
     res = {"generated_at": "2026-07-23T11:30:04-05:00"}
-    assert pn.briefing_filename(res, "midday") == "gamma-briefing-2026-07-23-midday.html"
+    assert pn.briefing_filename(res, "midday") == "gamma-briefing-2026-07-23-midday.png"
 
 
 def test_briefing_filename_falls_back_to_now():
     import datetime as dt
     now = dt.datetime(2026, 7, 23, 9, 0)
-    assert pn.briefing_filename({}, "open", now=now) == "gamma-briefing-2026-07-23-open.html"
+    assert pn.briefing_filename({}, "open", now=now) == "gamma-briefing-2026-07-23-open.png"
 
 
 def test_briefing_filename_sanitizes_slot():
     res = {"generated_at": "2026-07-23T09:00:00"}
-    assert pn.briefing_filename(res, "adhoc 18:42") == "gamma-briefing-2026-07-23-adhoc-18-42.html"
+    assert pn.briefing_filename(res, "adhoc 18:42") == "gamma-briefing-2026-07-23-adhoc-18-42.png"
 
 
 @pytest.fixture
@@ -859,26 +859,53 @@ def briefing_res():
             "generated_at": "2026-07-23T11:30:00"}
 
 
-def _capture(monkeypatch):
-    sent = {"tg": [], "dc": []}
-    monkeypatch.setattr(pn, "send_telegram_document",
-                        lambda *a, **k: sent["tg"].append(a))
-    monkeypatch.setattr(pn, "send_discord_file",
-                        lambda *a, **k: sent["dc"].append(a))
+_FAKE_PNG = b"\x89PNG\r\n\x1a\nrendered-briefing"
+
+
+def _capture(monkeypatch, png=_FAKE_PNG):
+    """Stub every send path + the renderer. `png=None` simulates a render failure."""
+    sent = {"photo": [], "file": [], "tg_text": [], "dc_embed": [], "rendered": []}
+
+    def _render(html, **kw):
+        sent["rendered"].append(html)
+        return png
+
+    monkeypatch.setattr(pn.briefing_image, "render_html_png", _render)
+    monkeypatch.setattr(pn, "send_telegram_photo", lambda *a, **k: sent["photo"].append(a))
+    monkeypatch.setattr(pn, "send_discord_file", lambda *a, **k: sent["file"].append((a, k)))
+    monkeypatch.setattr(pn, "send_telegram", lambda *a, **k: sent["tg_text"].append(a))
+    monkeypatch.setattr(pn, "send_discord", lambda *a, **k: sent["dc_embed"].append(a))
     return sent
 
 
 def test_send_gamma_briefing_happy_path(monkeypatch, briefing_cfg, briefing_res):
+    """The payload is a RENDERED PNG, not the HTML: Discord auto-previews an .html
+    attachment as syntax-highlighted raw source (a wall of CSS above the card)."""
     sent = _capture(monkeypatch)
     assert pn.send_gamma_briefing(briefing_res, slot="midday", config=briefing_cfg) is True
-    tok, chat, name, content, caption = sent["tg"][0]
+    assert sent["rendered"] == ["<html>doc</html>"]      # the doc is the render source
+    tok, chat, name, content, caption = sent["photo"][0]
     assert (tok, chat) == ("TOK", 7)
-    assert name == "gamma-briefing-2026-07-23-midday.html"
-    assert content == b"<html>doc</html>"
+    assert name == "gamma-briefing-2026-07-23-midday.png"
+    assert content == _FAKE_PNG
     assert caption.startswith("Gamma · Midday")
-    hook, dname, dcontent, dcaption = sent["dc"][0]
+    (hook, dname, dcontent, dcaption), kw = sent["file"][0]
     assert hook == "https://briefings"          # dedicated webhook wins
     assert (dname, dcontent) == (name, content)
+    assert kw["content_type"] == "image/png"    # or Discord previews it as source
+    # the image IS the briefing — no duplicate text push alongside it
+    assert sent["tg_text"] == [] and sent["dc_embed"] == []
+
+
+def test_send_gamma_briefing_never_sends_the_html_document(monkeypatch, briefing_cfg,
+                                                           briefing_res):
+    """The HTML payload was explicitly scrapped, so the document sender is no
+    longer even imported here — it cannot be reached by accident."""
+    assert not hasattr(pn, "send_telegram_document")
+    sent = _capture(monkeypatch)
+    assert pn.send_gamma_briefing(briefing_res, slot="midday", config=briefing_cfg) is True
+    assert sent["photo"][0][3] == _FAKE_PNG                 # not the html bytes
+    assert sent["file"][0][0][2] == _FAKE_PNG
 
 
 def test_send_gamma_briefing_falls_back_to_main_webhook(monkeypatch, briefing_cfg,
@@ -886,28 +913,65 @@ def test_send_gamma_briefing_falls_back_to_main_webhook(monkeypatch, briefing_cf
     sent = _capture(monkeypatch)
     briefing_cfg["gamma_briefing"]["webhook_url"] = ""
     pn.send_gamma_briefing(briefing_res, slot="midday", config=briefing_cfg)
-    assert sent["dc"][0][0] == "https://main"
+    assert sent["file"][0][0][0] == "https://main"
+
+
+def test_send_gamma_briefing_render_failure_sends_text(monkeypatch, briefing_cfg,
+                                                       briefing_res):
+    """No browser / a wedged render must not go silent — the read still arrives as
+    text. It must NOT fall back to the rejected HTML attachment."""
+    sent = _capture(monkeypatch, png=None)
+    assert pn.send_gamma_briefing(briefing_res, slot="midday", config=briefing_cfg) is True
+    assert sent["photo"] == [] and sent["file"] == []
+    tok, chat, text = sent["tg_text"][0]
+    assert (tok, chat) == ("TOK", 7)
+    assert text.startswith("Gamma · Midday")
+    hook, embed = sent["dc_embed"][0]
+    assert hook == "https://briefings"
+    assert "Gamma · Midday" in (embed.get("description") or "") + (embed.get("title") or "")
+
+
+def test_send_gamma_briefing_text_fallback_escapes_html(monkeypatch, briefing_cfg,
+                                                        briefing_res):
+    """send_telegram posts with parse_mode=HTML, and the caption carries a
+    MODEL-WRITTEN headline — a bare '<' or '&' would 400 the whole fallback."""
+    sent = _capture(monkeypatch, png=None)
+    briefing_res["analysis"]["headline"] = "SPX < 6400 & pinned"
+    pn.send_gamma_briefing(briefing_res, slot="midday", config=briefing_cfg)
+    text = sent["tg_text"][0][2]
+    assert "&lt; 6400 &amp; pinned" in text
+    assert "< 6400" not in text
+    # Discord renders plain text, so its embed keeps the readable original.
+    assert "< 6400 & pinned" in sent["dc_embed"][0][1]["description"]
+
+
+def test_send_gamma_briefing_render_failure_is_logged(monkeypatch, briefing_cfg,
+                                                      briefing_res, caplog):
+    _capture(monkeypatch, png=None)
+    with caplog.at_level("WARNING"):
+        pn.send_gamma_briefing(briefing_res, slot="midday", config=briefing_cfg)
+    assert "render" in caplog.text.lower() and "midday" in caplog.text
 
 
 def test_send_gamma_briefing_master_gate(monkeypatch, briefing_cfg, briefing_res):
     sent = _capture(monkeypatch)
     briefing_cfg["enabled"] = False
     assert pn.send_gamma_briefing(briefing_res, slot="midday", config=briefing_cfg) is False
-    assert sent["tg"] == [] and sent["dc"] == []
+    assert sent["photo"] == [] and sent["file"] == [] and sent["rendered"] == []
 
 
 def test_send_gamma_briefing_feature_gate(monkeypatch, briefing_cfg, briefing_res):
     sent = _capture(monkeypatch)
     briefing_cfg["gamma_briefing"]["enabled"] = False
     assert pn.send_gamma_briefing(briefing_res, slot="midday", config=briefing_cfg) is False
-    assert sent["tg"] == []
+    assert sent["photo"] == [] and sent["rendered"] == []
 
 
 def test_send_gamma_briefing_slot_not_selected(monkeypatch, briefing_cfg, briefing_res):
     sent = _capture(monkeypatch)
     briefing_cfg["gamma_briefing"]["slots"] = ["premarket", "close"]
     assert pn.send_gamma_briefing(briefing_res, slot="midday", config=briefing_cfg) is False
-    assert sent["tg"] == []
+    assert sent["photo"] == [] and sent["rendered"] == []
 
 
 def test_send_gamma_briefing_skips_degraded_run(monkeypatch, briefing_cfg):
@@ -916,20 +980,29 @@ def test_send_gamma_briefing_skips_degraded_run(monkeypatch, briefing_cfg):
     sent = _capture(monkeypatch)
     degraded = {"html": "<html>No chains available</html>", "analysis": None}
     assert pn.send_gamma_briefing(degraded, slot="midday", config=briefing_cfg) is False
-    assert sent["tg"] == [] and sent["dc"] == []
+    assert sent["photo"] == [] and sent["file"] == [] and sent["tg_text"] == []
 
 
 def test_send_gamma_briefing_skips_empty_html(monkeypatch, briefing_cfg, briefing_res):
     sent = _capture(monkeypatch)
     briefing_res["html"] = ""
     assert pn.send_gamma_briefing(briefing_res, slot="midday", config=briefing_cfg) is False
+    assert sent["rendered"] == []               # nothing to render
 
 
 def test_send_gamma_briefing_skips_oversize(monkeypatch, briefing_cfg, briefing_res):
+    """The size guard now measures the PNG — that is what gets uploaded."""
+    sent = _capture(monkeypatch, png=b"z" * (pn._BRIEFING_MAX_BYTES + 1))
+    assert pn.send_gamma_briefing(briefing_res, slot="midday", config=briefing_cfg) is False
+    assert sent["photo"] == [] and sent["file"] == []
+
+
+def test_send_gamma_briefing_large_html_is_fine(monkeypatch, briefing_cfg, briefing_res):
+    """A big DOC is irrelevant now — only the rendered image is uploaded."""
     sent = _capture(monkeypatch)
     briefing_res["html"] = "z" * (pn._BRIEFING_MAX_BYTES + 1)
-    assert pn.send_gamma_briefing(briefing_res, slot="midday", config=briefing_cfg) is False
-    assert sent["dc"] == []
+    assert pn.send_gamma_briefing(briefing_res, slot="midday", config=briefing_cfg) is True
+    assert sent["photo"][0][3] == _FAKE_PNG
 
 
 def test_send_gamma_briefing_missing_block_defaults_on(monkeypatch, briefing_cfg,
@@ -937,7 +1010,7 @@ def test_send_gamma_briefing_missing_block_defaults_on(monkeypatch, briefing_cfg
     sent = _capture(monkeypatch)
     briefing_cfg.pop("gamma_briefing")
     assert pn.send_gamma_briefing(briefing_res, slot="midday", config=briefing_cfg) is True
-    assert sent["dc"][0][0] == "https://main"
+    assert sent["file"][0][0][0] == "https://main"
 
 
 def test_send_gamma_briefing_empty_slots_mutes_every_slot(monkeypatch, briefing_cfg,
@@ -948,7 +1021,7 @@ def test_send_gamma_briefing_empty_slots_mutes_every_slot(monkeypatch, briefing_
     briefing_cfg["gamma_briefing"]["slots"] = []
     for slot in ("premarket", "open", "midday", "close"):
         assert pn.send_gamma_briefing(briefing_res, slot=slot, config=briefing_cfg) is False
-    assert sent["tg"] == [] and sent["dc"] == []
+    assert sent["photo"] == [] and sent["file"] == []
 
 
 def test_send_gamma_briefing_absent_slots_key_pushes_all(monkeypatch, briefing_cfg,
@@ -958,7 +1031,7 @@ def test_send_gamma_briefing_absent_slots_key_pushes_all(monkeypatch, briefing_c
     briefing_cfg["gamma_briefing"].pop("slots")
     for slot in ("premarket", "open", "midday", "close"):
         assert pn.send_gamma_briefing(briefing_res, slot=slot, config=briefing_cfg) is True
-    assert len(sent["tg"]) == 4
+    assert len(sent["photo"]) == 4
 
 
 def test_briefing_caption_bool_bias_dropped():

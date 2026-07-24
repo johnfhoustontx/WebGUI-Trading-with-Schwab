@@ -24,10 +24,11 @@ import requests  # noqa: F401 — module handle for test monkeypatching
 import smtplib  # noqa: F401 — module handle for test monkeypatching
 
 from repo_paths import NOTIFICATIONS_CONFIG
+from services.options_svc import briefing_image
 from shared.notify.channels import (
     load_config as _shared_load_config,
     send_telegram,
-    send_telegram_document,
+    send_telegram_photo,
     send_discord,
     send_discord_file,
     send_sms,
@@ -508,10 +509,17 @@ def send_eod_summary(summary: dict, *, config: dict | None = None) -> bool:
 
 
 # ---------------------------------------------------------------- gamma briefing
-# The 4x/day Gamma Analyze briefing ships as a self-contained HTML file (see
-# shared.notify.send_telegram_document / send_discord_file). Labels are duplicated
-# from handlers.ANALYZE_SLOT_TITLES deliberately — push_notify must not import
-# handlers (handlers imports THIS module; the reverse would be circular).
+# The 4x/day Gamma Analyze briefing ships as a RENDERED PNG of the self-contained
+# HTML doc (briefing_image.render_html_png → shared.notify.send_telegram_photo /
+# send_discord_file). It used to ship as the .html file itself, but **Discord
+# auto-previews an .html attachment as syntax-highlighted raw source** — the reader
+# got a wall of CSS above the file card, and the suppress-embeds flag does not
+# suppress attachment previews. An image renders inline in both platforms with no
+# tap and no preview problem. The HTML generation is UNCHANGED (it still powers the
+# in-app /options/analyze page); it is now the render SOURCE.
+# Labels are duplicated from handlers.ANALYZE_SLOT_TITLES deliberately —
+# push_notify must not import handlers (handlers imports THIS module; the reverse
+# would be circular).
 _BRIEFING_SLOT_LABELS = {
     "premarket": "Premarket",
     "open": "After open",
@@ -546,7 +554,7 @@ def briefing_caption(res: dict, slot: str = "") -> str:
 
 
 def briefing_filename(res: dict, slot: str = "", now=None) -> str:
-    """Stable, sortable attachment name: gamma-briefing-YYYY-MM-DD-{slot}.html.
+    """Stable, sortable attachment name: gamma-briefing-YYYY-MM-DD-{slot}.png.
 
     Prefers the run's own ``generated_at`` so the filename matches the briefing's
     session even if the push is retried later. Slot is sanitized because the ad-hoc
@@ -556,19 +564,29 @@ def briefing_filename(res: dict, slot: str = "", now=None) -> str:
     if not day:
         day = (now or datetime.now(_TZ)).date().isoformat()
     safe = "".join(c if (c.isalnum() or c in "-_") else "-" for c in (slot or "briefing"))
-    return f"gamma-briefing-{day}-{safe}.html"
+    return f"gamma-briefing-{day}-{safe}.png"
 
 
 _BRIEFING_MAX_BYTES = 7_500_000   # under Discord's 8 MB webhook ceiling
 
 
+def _briefing_text_embed(caption: str) -> dict:
+    """Minimal Discord embed for the render-failure text fallback."""
+    return {"title": "Gamma briefing", "description": caption, "color": _D_GRAY}
+
+
 def send_gamma_briefing(res: dict, *, slot: str, config: dict | None = None) -> bool:
-    """Push a scheduled Gamma briefing to Telegram + Discord as an HTML attachment.
+    """Push a scheduled Gamma briefing to Telegram + Discord as a rendered PNG.
 
     Returns True if a send was attempted. THREE independent gates: the master
     `enabled`, the `gamma_briefing.enabled`/`slots` block, and a content gate that
     requires a real `analysis` (a degraded page has HTML but no analysis).
-    No SMS — a file cannot ride SMS and a bare text line there is noise.
+    No SMS — an image cannot ride SMS and a bare text line there is noise.
+
+    If the headless render fails (no browser installed, timeout, …) this falls
+    back to a TEXT-only push — never to the HTML attachment, which is the payload
+    this feature deliberately moved away from. Going silent is worse than a plain
+    caption: the read still arrives, just without the infographic.
     Best-effort per channel (the primitives never raise)."""
     cfg = config or load_config()
     if not cfg.get("enabled", True):
@@ -588,19 +606,30 @@ def send_gamma_briefing(res: dict, *, slot: str, config: dict | None = None) -> 
     html = res.get("html") or ""
     if not html:
         return False
-    content = html.encode("utf-8")
-    if len(content) > _BRIEFING_MAX_BYTES:
-        # Not reachable in practice (~30-60 KB measured) but a silent 413 would be
-        # invisible, so fail loudly-in-the-log instead.
-        log.warning("gamma briefing %s too large to push (%d bytes)", slot, len(content))
-        return False
+
     caption = briefing_caption(res, slot)
-    filename = briefing_filename(res, slot)
     tg = cfg.get("telegram", {})
     webhook = gb.get("webhook_url") or (cfg.get("discord", {}) or {}).get("webhook_url")
-    send_telegram_document(tg.get("bot_token"), tg.get("chat_id"),
-                           filename, content, caption)
-    send_discord_file(webhook, filename, content, caption)
+
+    png = briefing_image.render_html_png(html)
+    if not png:
+        log.warning("gamma briefing %s: image render failed — pushing text only", slot)
+        # send_telegram posts with parse_mode=HTML and the caption carries a
+        # MODEL-WRITTEN headline, so a bare '<'/'&' would 400 the whole message.
+        # Discord renders plain text, so its embed keeps the unescaped original.
+        send_telegram(tg.get("bot_token"), tg.get("chat_id"), _html.escape(caption))
+        send_discord(webhook, _briefing_text_embed(caption))
+        return True
+
+    # The PNG is what gets uploaded, so the size guard measures IT (the source
+    # HTML's size is now irrelevant). ~530 KB measured; a silent 413 would be
+    # invisible, so fail loudly-in-the-log instead.
+    if len(png) > _BRIEFING_MAX_BYTES:
+        log.warning("gamma briefing %s too large to push (%d bytes)", slot, len(png))
+        return False
+    filename = briefing_filename(res, slot)
+    send_telegram_photo(tg.get("bot_token"), tg.get("chat_id"), filename, png, caption)
+    send_discord_file(webhook, filename, png, caption, content_type="image/png")
     return True
 
 
