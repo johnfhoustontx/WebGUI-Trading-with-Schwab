@@ -1124,14 +1124,18 @@ def run_market_snapshot(bus, slot):
     intraday histories), pushes via ``push_notify.send_market_snapshot``, and caches
     the inputs at ``cache:options:market_snapshot`` for inspection. Best-effort —
     ANY failure logs and returns, never raises into the scheduler."""
+    def _snap_payload(env):
+        # Bus.cache_get returns a CacheEnvelope (or None), never the bare payload.
+        return env.payload if env is not None else None
+
     try:
-        dashboard = bus.cache_get("cache:market:dashboard") or {}
-        comp = bus.cache_get("cache:sentiment:composite") or {}
+        dashboard = _snap_payload(bus.cache_get("cache:market:dashboard")) or {}
+        comp = _snap_payload(bus.cache_get("cache:sentiment:composite")) or {}
         trend = (comp.get("derived") or {}).get("trend") or {}
         sentiment = (comp.get("live") or {}).get("composite") or {}
-        regime = bus.cache_get("cache:sentiment:regime") or {}
-        intraday = bus.cache_get("cache:sentiment:intraday_history") or {}
-        regime_hist = bus.cache_get("cache:sentiment:regime_history") or {}
+        regime = _snap_payload(bus.cache_get("cache:sentiment:regime")) or {}
+        intraday = _snap_payload(bus.cache_get("cache:sentiment:intraday_history")) or {}
+        regime_hist = _snap_payload(bus.cache_get("cache:sentiment:regime_history")) or {}
     except Exception:  # noqa: BLE001 — a down bus must not break the tick.
         log.exception("market snapshot %s: cache read failed", slot)
         return

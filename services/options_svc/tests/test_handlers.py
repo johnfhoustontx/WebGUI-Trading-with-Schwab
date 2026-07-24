@@ -8,6 +8,8 @@ and swing signal lists, so one cache view holds the whole result), and publishes
 a change event. We monkeypatch ``handlers.compute.run_scan`` so nothing touches a
 live proxy, and use a fakeredis ``Bus(fake=True)``.
 """
+import types as _types
+
 from shared.bus import Bus
 from shared.contracts.envelope import Command
 from services.options_svc import handlers
@@ -1924,12 +1926,16 @@ def test_run_flow_alerts_gamma_flip_baseline_then_transition(monkeypatch):
 # --- Market Snapshot push (Task 7) --------------------------------------------
 
 class _MSFakeBus:
+    """cache_get returns a CacheEnvelope-shaped object (``.payload``), matching the
+    real ``Bus.cache_get`` contract — NOT a bare dict."""
+
     def __init__(self, data):
         self._d = data
         self.sets = {}
 
     def cache_get(self, k):
-        return self._d.get(k)
+        v = self._d.get(k)
+        return _types.SimpleNamespace(payload=v) if v is not None else None
 
     def cache_set(self, k, v, **kw):
         self.sets[k] = v
