@@ -644,14 +644,24 @@ def component_table_rows(snapshot, weights=None, rotation_value=None, sector_val
     scores = snapshot.get("component_scores") or {}
     confs = snapshot.get("component_confidence") or {}
     weights = weights or {}
+    # The Value column MUST read the SAME source as each component's score/conf
+    # (the composite snapshot), so a displayed value can never contradict its
+    # score. Two components had value/score-source mismatches (reported bug):
+    #  - Put/Call read the legacy `pc_equity` ($CPCE) field, RETIRED in v4.3 and
+    #    always blank — showing "—" beside a real score. Read the cap-weighted
+    #    sector-P/C interp (falling back to the sector_pcr ratio) instead.
+    #  - Rotation read the SEPARATE sectors-cache dual run (`rotation_value`),
+    #    which can say "no sector returns available" while the composite's OWN
+    #    dual run (which feeds the score) had data. Prefer the snapshot's interp.
+    opts = snapshot.get("options") or {}
+    pcr = _safe_float(snapshot.get("sector_pcr"))
+    pc_val = opts.get("interpretation") or (f"P/C {pcr:.2f}" if pcr else "")
+    rot_val = (snapshot.get("rotation") or {}).get("interpretation") or rotation_value
     value_src = {
         "vix_complex": (snapshot.get("volatility") or {}).get("interpretation"),
-        "put_call": (snapshot.get("options") or {}).get("pc_equity"),
+        "put_call": pc_val,
         "breadth": (snapshot.get("breadth") or {}).get("interpretation"),
-        # Rotation Value is the dual-momentum "Cyc rank …" string once the
-        # sector load completes; before that show "—" rather than the
-        # snapshot's raw-float interp ("Day 5.3064999… · …").
-        "rotation": rotation_value or "—",
+        "rotation": rot_val or "—",
         "sector_perf": sector_value,
     }
     rows = []

@@ -128,9 +128,13 @@ def _full_snap(total, **comp):
         "component_scores": base,
         "component_confidence": {k: 1.0 for k in base},
         "volatility": {"interpretation": "term backwardation"},
-        "options": {"pc_equity": "0.860"},
+        # Real v4.3 shape: pc_equity ($CPCE) was retired and is always blank; the
+        # cap-weighted sector P/C lives in interpretation + sector_pcr.
+        "options": {"pc_equity": "",
+                    "interpretation": "Cap-weighted sector P/C 0.77 (11/11) — call-dominated"},
+        "sector_pcr": 0.766,
         "breadth": {"interpretation": "Advancing"},
-        "rotation": {"interpretation": "Day 7 · 3d 6 · Wk 7"},
+        "rotation": {"interpretation": "Cyc rank 6.1 vs Def rank 5.8 (spread -0.4) — risk-off"},
     }
 
 
@@ -149,10 +153,36 @@ def test_component_table_rows_contrib():
     assert vix["score"] == 4 and vix["weight"] == "20%"
     assert abs(vix["contrib"] - 0.20 * 4 * 1.0) < 1e-9     # w*s*conf
     assert by["Sector Performance"]["value"] == "+0.70%"
-    assert by["Put/Call (sectors)"]["value"] == "0.860"
+    # Put/Call value reads the cap-weighted sector-P/C interp (NOT the dead
+    # pc_equity field), so the value is consistent with the score.
+    assert "0.77" in by["Put/Call (sectors)"]["value"]
+    assert by["Put/Call (sectors)"]["value"] != "—"
+    # Rotation value comes from the snapshot's OWN dual run (matches the score),
+    # NOT the separate sectors-cache string passed as rotation_value.
+    assert "Cyc rank" in by["Rotation"]["value"]
     rows2 = S.component_table_rows(_full_snap(6.81, sector_perf=7.6), _WEIGHTS,
                                    sector_value="+0.70%")
     assert next(r for r in rows2 if r["name"] == "Sector Performance")["score"] == 7.6
+
+
+def test_put_call_value_falls_back_to_sector_pcr():
+    # If the interp is blank but sector_pcr is present, show the ratio (never a
+    # blank value next to a real score — the reported bug).
+    snap = _full_snap(6.0)
+    snap["options"] = {"pc_equity": ""}          # no interp
+    rows = S.component_table_rows(snap, _WEIGHTS)
+    v = next(r for r in rows if r["name"] == "Put/Call (sectors)")["value"]
+    assert v != "—" and "0.77" in v
+
+
+def test_rotation_value_prefers_snapshot_over_stale_sectors_cache():
+    # The score comes from the snapshot's dual run; a stale sectors-cache string
+    # ("no sector returns available") must NOT be shown next to that score.
+    snap = _full_snap(6.0)
+    rows = S.component_table_rows(snap, _WEIGHTS,
+                                  rotation_value="no sector returns available")
+    v = next(r for r in rows if r["name"] == "Rotation")["value"]
+    assert v == "Cyc rank 6.1 vs Def rank 5.8 (spread -0.4) — risk-off"
 
 
 def test_component_table_rows_cold_cache_empty():
