@@ -168,6 +168,27 @@ def send_discord(webhook_url: str, embed: dict) -> None:
         log.warning("Discord send failed: %s", exc)
 
 
+def send_discord_file(webhook_url: str, filename: str, content: bytes,
+                      caption: str = "") -> None:
+    """Upload a file to a Discord webhook (multipart).
+
+    Discord accepts embeds, not HTML, so a rich document travels as an attachment
+    with an optional plain-text caption. Best-effort: no webhook → no-op, any
+    failure (incl. a 429 rate limit) → warn, never raises."""
+    if not webhook_url:
+        return
+    try:
+        requests.post(
+            webhook_url,
+            data={"payload_json": json.dumps(
+                {"content": (caption or "")[:_DISCORD_CONTENT_MAX]})},
+            files={"files[0]": (filename, content, "text/html")},
+            timeout=20,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Discord file send failed: %s", exc)
+
+
 def send_sms(fi_number: str, smtp_user: str, smtp_pw: str, body: str,
              subject: str = "") -> None:
     if not (fi_number and smtp_user and smtp_pw):

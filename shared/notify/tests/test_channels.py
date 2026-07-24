@@ -124,6 +124,31 @@ def test_send_discord_posts_embed(monkeypatch):
     assert calls["json"]["embeds"] == [{"title": "x"}]
 
 
+def test_send_discord_file_posts_multipart(monkeypatch):
+    calls = []
+    monkeypatch.setattr(ch.requests, "post",
+                        lambda url, **kw: calls.append((url, kw)))
+    ch.send_discord_file("https://hook", "b.html", b"<html>hi</html>", "cap")
+    url, kw = calls[0]
+    assert url == "https://hook"
+    assert json.loads(kw["data"]["payload_json"]) == {"content": "cap"}
+    assert kw["files"]["files[0]"] == ("b.html", b"<html>hi</html>", "text/html")
+
+
+def test_send_discord_file_noop_without_webhook(monkeypatch):
+    calls = []
+    monkeypatch.setattr(ch.requests, "post", lambda *a, **k: calls.append(a))
+    ch.send_discord_file("", "b.html", b"x")
+    assert calls == []
+
+
+def test_send_discord_file_swallows_errors(monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("429")
+    monkeypatch.setattr(ch.requests, "post", boom)
+    ch.send_discord_file("https://hook", "b.html", b"x")   # must not raise
+
+
 def test_send_sms_noop_without_creds(monkeypatch):
     class Boom:
         def __init__(self, *a, **k):
