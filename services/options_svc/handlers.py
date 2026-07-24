@@ -154,6 +154,8 @@ CACHE_NOTIFIED_CAPTURED = "cache:options:notified_captured"
 CACHE_ACTION_ALERT = "cache:options:action_alert"
 EVENT_ACTION_ALERT = "events:options:action_alert"
 
+CACHE_MARKET_SNAPSHOT = "cache:options:market_snapshot"
+
 CACHE_EOD_SUMMARY = "cache:options:eod_summary"
 EVENT_EOD_SUMMARY = "events:options:eod_summary"
 
@@ -1113,6 +1115,37 @@ def run_action_alert(bus, slot=None) -> None:
         bus.publish(EVENT_ACTION_ALERT, {"version": version})
     except Exception:
         log.exception("action_alert cache_set degraded")
+
+
+def run_market_snapshot(bus, slot):
+    """Build + push the 30-min Market Snapshot PNG (Telegram + Discord).
+
+    Reads six caches (market dashboard + sentiment composite/regime + the two
+    intraday histories), pushes via ``push_notify.send_market_snapshot``, and caches
+    the inputs at ``cache:options:market_snapshot`` for inspection. Best-effort —
+    ANY failure logs and returns, never raises into the scheduler."""
+    try:
+        dashboard = bus.cache_get("cache:market:dashboard") or {}
+        comp = bus.cache_get("cache:sentiment:composite") or {}
+        trend = (comp.get("derived") or {}).get("trend") or {}
+        sentiment = (comp.get("live") or {}).get("composite") or {}
+        regime = bus.cache_get("cache:sentiment:regime") or {}
+        intraday = bus.cache_get("cache:sentiment:intraday_history") or {}
+        regime_hist = bus.cache_get("cache:sentiment:regime_history") or {}
+    except Exception:  # noqa: BLE001 — a down bus must not break the tick.
+        log.exception("market snapshot %s: cache read failed", slot)
+        return
+    try:
+        push_notify.send_market_snapshot(dashboard, trend, sentiment, regime,
+                                         intraday, regime_hist, slot=slot)
+    except Exception:  # noqa: BLE001 — the push primitives shouldn't raise, belt+braces.
+        log.exception("market snapshot %s: push failed", slot)
+    try:
+        bus.cache_set(CACHE_MARKET_SNAPSHOT,
+                      {"slot": slot, "trend": trend, "sentiment": sentiment,
+                       "regime": regime})
+    except Exception:  # noqa: BLE001
+        log.exception("market snapshot %s: cache_set failed", slot)
 
 
 def run_eod_summary(bus, slot=None) -> None:

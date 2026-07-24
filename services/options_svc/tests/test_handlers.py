@@ -1919,3 +1919,51 @@ def test_run_flow_alerts_gamma_flip_baseline_then_transition(monkeypatch):
     assert len(gf) == 1 and gf[0]["side"] == "to_negative" and gf[0]["symbol"] == "$SPX"
     env = bus.cache_get("cache:options:flow_alerts")
     assert any(a["type"] == "gamma_flip" for a in env.payload["alerts"])
+
+
+# --- Market Snapshot push (Task 7) --------------------------------------------
+
+class _MSFakeBus:
+    def __init__(self, data):
+        self._d = data
+        self.sets = {}
+
+    def cache_get(self, k):
+        return self._d.get(k)
+
+    def cache_set(self, k, v, **kw):
+        self.sets[k] = v
+        return 1
+
+
+def test_run_market_snapshot_reads_caches_and_pushes(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(handlers.push_notify, "send_market_snapshot",
+                        lambda *a, **k: seen.setdefault("args", (a, k)) or True)
+    bus = _MSFakeBus({
+        "cache:market:dashboard": {"categories": []},
+        "cache:sentiment:composite": {"derived": {"trend": {"label": "Bull", "score": 64}},
+                                      "live": {"composite": {"total_score": 7.1, "bias": "Bullish"}}},
+        "cache:sentiment:regime": {"label": "Trending", "confidence": 0.6, "memberships": {}},
+        "cache:sentiment:intraday_history": {"points": [{"trend": 64, "sentiment": 7.1}]},
+        "cache:sentiment:regime_history": {"points": []},
+    })
+    handlers.run_market_snapshot(bus, "09:00")
+    a, k = seen["args"]
+    assert k["slot"] == "09:00"
+    assert a[1]["label"] == "Bull"                 # trend passed
+    assert a[2]["total_score"] == 7.1              # sentiment passed
+    assert "cache:options:market_snapshot" in bus.sets
+
+
+def test_run_market_snapshot_never_raises_on_bad_bus(monkeypatch):
+    monkeypatch.setattr(handlers.push_notify, "send_market_snapshot", lambda *a, **k: True)
+
+    class _Boom:
+        def cache_get(self, k):
+            raise RuntimeError("down")
+
+        def cache_set(self, *a, **k):
+            pass
+
+    handlers.run_market_snapshot(_Boom(), "09:00")   # must not raise
