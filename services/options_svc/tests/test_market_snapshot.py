@@ -119,3 +119,12 @@ def test_market_snapshot_doc_is_self_contained():
     doc = ms.market_snapshot_doc({"categories": []}, {}, {}, {}, {"points": []}, {"points": []}, subtitle="09:00 CT")
     assert doc.lstrip().lower().startswith("<!doctype") or "<html" in doc.lower()
     assert "Market Read" in doc and "09:00 CT" in doc
+
+
+def test_market_snapshot_doc_is_titled_market_snapshot_not_gamma():
+    # Regression: the doc reuses the gamma dark-doc CSS but must be titled
+    # "Market Snapshot", never "Gamma Analysis" (that header is gamma-specific).
+    doc = ms.market_snapshot_doc({"categories": []}, {}, {}, {}, {"points": []}, {"points": []}, subtitle="x")
+    assert "<title>Market Snapshot</title>" in doc
+    assert 'class="ga-title">Market Snapshot<' in doc
+    assert "Gamma Analysis" not in doc

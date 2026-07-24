@@ -270,12 +270,14 @@ _MS_CSS = """
 
 
 def market_snapshot_doc(dashboard, trend, sentiment, regime, intraday, regime_hist, *, subtitle=""):
-    from services.options_svc import compute  # lazy: reuse the dark doc wrapper
+    # Reuse the gamma-briefing dark aesthetic (_ANALYZE_CSS + .ga* structure) but
+    # wrap it locally so the doc is titled "Market Snapshot", NOT "Gamma Analysis"
+    # (compute._analyze_doc hardcodes the gamma title). Zero blast radius on gamma.
+    from services.options_svc import compute  # lazy: reuse the dark doc CSS
     ipts = (intraday or {}).get("points") or []
     rpts = (regime_hist or {}).get("points") or []
     body = (
         f'<style>{_MS_CSS}</style>'
-        f'<h1 style="color:#eaf0fb;font-size:18px;margin:0 0 10px">Market Snapshot</h1>'
         + dashboard_grid_html((dashboard or {}).get("categories") or [])
         + '<h2 style="color:#eaf0fb;font-size:15px;margin:16px 0 6px">Market Read</h2>'
         + '<div class="ms-read">'
@@ -284,4 +286,12 @@ def market_snapshot_doc(dashboard, trend, sentiment, regime, intraday, regime_hi
         + regime_panel_html(regime, rpts)
         + '</div>'
     )
-    return compute._analyze_doc(body, subtitle=subtitle)
+    return (
+        '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        '<title>Market Snapshot</title>'
+        f'<style>{compute._ANALYZE_CSS}</style></head><body><div class="ga">'
+        '<div class="ga-title">Market Snapshot</div>'
+        f'<div class="ga-sub">{_html.escape(subtitle)}</div>'
+        f'<div class="ga-body">{body}</div></div></body></html>'
+    )
