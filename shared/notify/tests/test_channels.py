@@ -118,6 +118,57 @@ def test_send_telegram_document_truncates_caption(monkeypatch):
     assert len(calls[0]["data"]["caption"]) == 1024
 
 
+def test_send_telegram_photo_posts_multipart(monkeypatch):
+    calls = []
+    monkeypatch.setattr(ch.requests, "post",
+                        lambda url, **kw: calls.append((url, kw)))
+    ch.send_telegram_photo("TOK", 42, "b.png", b"\x89PNG-bytes", "cap")
+    url, kw = calls[0]
+    assert url == "https://api.telegram.org/botTOK/sendPhoto"
+    assert kw["data"] == {"chat_id": 42, "caption": "cap"}
+    assert kw["files"]["photo"] == ("b.png", b"\x89PNG-bytes", "image/png")
+    assert "parse_mode" not in kw["data"]
+
+
+def test_send_telegram_photo_noop_without_creds(monkeypatch):
+    calls = []
+    monkeypatch.setattr(ch.requests, "post", lambda *a, **k: calls.append(a))
+    ch.send_telegram_photo("", 42, "b.png", b"x")
+    ch.send_telegram_photo("TOK", None, "b.png", b"x")
+    assert calls == []
+
+
+def test_send_telegram_photo_noop_without_content(monkeypatch):
+    calls = []
+    monkeypatch.setattr(ch.requests, "post", lambda *a, **k: calls.append(a))
+    ch.send_telegram_photo("TOK", 42, "b.png", None)
+    ch.send_telegram_photo("TOK", 42, "b.png", b"")
+    assert calls == []
+
+
+def test_send_telegram_photo_swallows_errors(monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("network down")
+    monkeypatch.setattr(ch.requests, "post", boom)
+    ch.send_telegram_photo("TOK", 42, "b.png", b"x")   # must not raise
+
+
+def test_send_telegram_photo_truncates_caption(monkeypatch):
+    calls = []
+    monkeypatch.setattr(ch.requests, "post", lambda url, **kw: calls.append(kw))
+    ch.send_telegram_photo("TOK", 42, "b.png", b"x", "z" * 2000)
+    assert len(calls[0]["data"]["caption"]) == 1024
+
+
+def test_send_telegram_photo_logs_rejected_status(monkeypatch, caplog):
+    monkeypatch.setattr(ch.requests, "post",
+                        lambda *a, **k: _Resp(400, '{"description":"PHOTO_INVALID"}'))
+    with caplog.at_level("WARNING"):
+        ch.send_telegram_photo("TOK", 42, "b.png", b"x", "cap")
+    assert "Telegram photo rejected: HTTP 400" in caplog.text
+    assert "PHOTO_INVALID" in caplog.text
+
+
 def test_send_discord_noop_without_url(monkeypatch):
     def boom(*a, **k):
         raise AssertionError("should not post without webhook")
@@ -143,6 +194,26 @@ def test_send_discord_file_posts_multipart(monkeypatch):
     assert url == "https://hook"
     assert json.loads(kw["data"]["payload_json"]) == {"content": "cap"}
     assert kw["files"]["files[0]"] == ("b.html", b"<html>hi</html>", "text/html")
+
+
+def test_send_discord_file_honors_content_type(monkeypatch):
+    """The briefing now uploads a PNG; Discord must be told so it renders inline
+    instead of treating the bytes as a text/html attachment."""
+    calls = []
+    monkeypatch.setattr(ch.requests, "post",
+                        lambda url, **kw: calls.append(kw))
+    ch.send_discord_file("https://hook", "b.png", b"\x89PNG", "cap",
+                         content_type="image/png")
+    assert calls[0]["files"]["files[0]"] == ("b.png", b"\x89PNG", "image/png")
+
+
+def test_send_discord_file_content_type_defaults_to_html(monkeypatch):
+    """Back-compatible: existing callers that pass no content_type are unchanged."""
+    calls = []
+    monkeypatch.setattr(ch.requests, "post",
+                        lambda url, **kw: calls.append(kw))
+    ch.send_discord_file("https://hook", "b.html", b"<html/>")
+    assert calls[0]["files"]["files[0]"][2] == "text/html"
 
 
 def test_send_discord_file_noop_without_webhook(monkeypatch):
@@ -293,6 +364,8 @@ def test_package_reexports_file_senders():
     import shared.notify as sn
     assert sn.send_telegram_document is ch.send_telegram_document
     assert sn.send_discord_file is ch.send_discord_file
+    assert sn.send_telegram_photo is ch.send_telegram_photo
+    assert "send_telegram_photo" in sn.__all__
 
 
 class _Resp:

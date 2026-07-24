@@ -140,7 +140,9 @@ def load_config(path=None) -> dict:
 
 _TELEGRAM_API = "https://api.telegram.org/bot{token}/sendMessage"
 _TELEGRAM_DOC_API = "https://api.telegram.org/bot{token}/sendDocument"
-_TG_CAPTION_MAX = 1024      # Telegram sendDocument caption ceiling
+_TELEGRAM_PHOTO_API = "https://api.telegram.org/bot{token}/sendPhoto"
+_TG_CAPTION_MAX = 1024      # Telegram sendDocument/sendPhoto caption ceiling
+_UPLOAD_TIMEOUT = 60        # images run larger than the ~14 KB HTML docs
 _DISCORD_CONTENT_MAX = 2000  # Discord webhook message content ceiling
 _SMTP_HOST, _SMTP_PORT = "smtp.gmail.com", 587
 _FI_GATEWAY = "@msg.fi.google.com"
@@ -205,6 +207,32 @@ def send_telegram_document(token: str, chat_id, filename: str, content: bytes,
         log.warning("Telegram document send failed: %s", exc)
 
 
+def send_telegram_photo(token: str, chat_id, filename: str, content: bytes,
+                        caption: str = "") -> None:
+    """Upload an image to Telegram via sendPhoto (multipart).
+
+    Preferred over ``send_telegram_document`` for a rendered briefing: a photo
+    renders INLINE in the chat (no tap to open, no download), where a document is
+    a file card. Telegram downscales large photos server-side, which is fine — the
+    source is rendered at a 2x device scale precisely so it survives that.
+
+    Caption is PLAIN text (no parse_mode) so nothing needs HTML-escaping.
+    Best-effort like every sender here: no creds/content → no-op, any failure →
+    warn, never raises."""
+    if not token or not chat_id or not content:
+        return
+    try:
+        resp = requests.post(
+            _TELEGRAM_PHOTO_API.format(token=token),
+            data={"chat_id": chat_id, "caption": (caption or "")[:_TG_CAPTION_MAX]},
+            files={"photo": (filename, content, "image/png")},
+            timeout=_UPLOAD_TIMEOUT,
+        )
+        _log_http("Telegram photo", resp)
+    except Exception as exc:  # noqa: BLE001 — best-effort
+        log.warning("Telegram photo send failed: %s", exc)
+
+
 def send_discord(webhook_url: str, embed: dict) -> None:
     if not webhook_url:
         return
@@ -215,14 +243,19 @@ def send_discord(webhook_url: str, embed: dict) -> None:
 
 
 def send_discord_file(webhook_url: str, filename: str, content: bytes,
-                      caption: str = "") -> None:
+                      caption: str = "", content_type: str = "text/html") -> None:
     """Upload a file to a Discord webhook (multipart).
 
     Discord accepts embeds, not HTML, so a rich document travels as an attachment
-    with an optional plain-text caption. Best-effort: no webhook → no-op, any
-    failure (incl. a 429 rate limit) → warn, never raises. Empty `content`
-    no-ops for the same reason as the Telegram sender — a missing file part
-    yields an empty-message 400 nobody would ever see."""
+    with an optional plain-text caption. `content_type` must match the payload —
+    an ``image/png`` attachment renders INLINE, while ``text/html`` gets
+    auto-previewed as syntax-highlighted raw source (the reason the gamma briefing
+    moved from HTML to a rendered PNG). Defaults to text/html for back-compat.
+
+    Best-effort: no webhook → no-op, any failure (incl. a 429 rate limit) → warn,
+    never raises. Empty `content` no-ops for the same reason as the Telegram
+    sender — a missing file part yields an empty-message 400 nobody would ever
+    see."""
     if not webhook_url or not content:
         return
     try:
@@ -230,8 +263,8 @@ def send_discord_file(webhook_url: str, filename: str, content: bytes,
             webhook_url,
             data={"payload_json": json.dumps(
                 {"content": (caption or "")[:_DISCORD_CONTENT_MAX]})},
-            files={"files[0]": (filename, content, "text/html")},
-            timeout=20,
+            files={"files[0]": (filename, content, content_type)},
+            timeout=_UPLOAD_TIMEOUT,
         )
         _log_http("Discord file", resp)
     except Exception as exc:  # noqa: BLE001
