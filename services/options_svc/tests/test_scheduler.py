@@ -473,3 +473,36 @@ def test_loop_launches_branches_without_blocking_the_tick():
     src = inspect.getsource(scheduler.loop)
     assert "launch_branches" in src
     assert "_gather_due" not in src
+
+
+# ── market_snapshot_due (:00 & :30, 08:30–15:00 CT) ──────────────────────────
+def _at(h, m):  # a trading day (Wed 2026-07-22)
+    return dt.datetime(2026, 7, 22, h, m, tzinfo=_CT)
+
+
+def test_market_snapshot_due_fires_on_the_half_hour():
+    assert scheduler.market_snapshot_due(_at(9, 0), set()) == "09:00"
+    assert scheduler.market_snapshot_due(_at(9, 30), set()) == "09:30"
+
+
+def test_market_snapshot_due_boundary_slots():
+    assert scheduler.market_snapshot_due(_at(8, 30), set()) == "08:30"   # start fires
+    assert scheduler.market_snapshot_due(_at(15, 0), set()) == "15:00"   # end fires
+
+
+def test_market_snapshot_due_once_per_slot():
+    ran = set()
+    slot = scheduler.market_snapshot_due(_at(9, 0), ran)
+    ran.add(("2026-07-22", slot))
+    assert scheduler.market_snapshot_due(_at(9, 2), ran) is None   # within grace, already ran
+
+
+def test_market_snapshot_due_outside_window_none():
+    assert scheduler.market_snapshot_due(_at(7, 0), set()) is None     # before start
+    assert scheduler.market_snapshot_due(_at(15, 30), set()) is None   # after end
+    assert scheduler.market_snapshot_due(_at(9, 15), set()) is None    # not a :00/:30 slot
+
+
+def test_market_snapshot_due_skips_weekend():
+    sat = dt.datetime(2026, 7, 25, 9, 0, tzinfo=_CT)
+    assert scheduler.market_snapshot_due(sat, set()) is None

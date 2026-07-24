@@ -311,6 +311,46 @@ def eod_summary_due(now, ran_slots):
     return None
 
 
+# ── 30-min Market Snapshot cadence (:00 & :30, 08:30–15:00 CT) ───────────────
+_MKT_SNAP_START = (8, 30)
+_MKT_SNAP_END = (15, 0)          # last slot fires at 15:00
+_MKT_SNAP_GRACE_MIN = 10         # < 30 so a slot can't bleed into the next
+
+
+def _market_snapshot_slots():
+    """The (h, m) :00/:30 slot targets within [start, end], inclusive."""
+    import datetime as _dt
+    out = []
+    cur = _dt.time(*_MKT_SNAP_START)
+    end = _dt.time(*_MKT_SNAP_END)
+    h, m = cur.hour, cur.minute
+    while (h, m) <= (end.hour, end.minute):
+        out.append((h, m))
+        m += 30
+        if m >= 60:
+            m -= 60
+            h += 1
+    return out
+
+
+def market_snapshot_due(now, ran_slots):
+    """The "HH:MM" market-snapshot slot due now, or None. Once per slot per trading
+    day within a 10-min grace (mirrors ``action_alert_due``). The caller records the
+    returned ``(date, "HH:MM")`` in ``ran_slots`` so it won't refire."""
+    if not _is_trading_day(now):
+        return None
+    import datetime as _dt
+    day = now.date().isoformat()
+    for h, m in _market_snapshot_slots():
+        name = f"{h:02d}:{m:02d}"
+        if (day, name) in ran_slots:
+            continue
+        target = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        if target <= now < target + _dt.timedelta(minutes=_MKT_SNAP_GRACE_MIN):
+            return name
+    return None
+
+
 # ── Scheduler loop ─────────────────────────────────────────────────────────
 POLL_INTERVAL_SEC = 30  # check the slot every 30s (mirrors the page's autoscan loop cadence)
 
