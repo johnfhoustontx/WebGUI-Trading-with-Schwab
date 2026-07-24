@@ -93,6 +93,16 @@ def test_send_telegram_document_noop_without_creds(monkeypatch):
     assert calls == []
 
 
+def test_send_telegram_document_noop_without_content(monkeypatch):
+    # requests skips a None file part rather than raising, so posting anyway would
+    # send a document-less request that 400s silently (this layer ignores status).
+    calls = []
+    monkeypatch.setattr(ch.requests, "post", lambda *a, **k: calls.append(a))
+    ch.send_telegram_document("TOK", 42, "b.html", None)
+    ch.send_telegram_document("TOK", 42, "b.html", b"")
+    assert calls == []
+
+
 def test_send_telegram_document_swallows_errors(monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("network down")
@@ -142,11 +152,28 @@ def test_send_discord_file_noop_without_webhook(monkeypatch):
     assert calls == []
 
 
+def test_send_discord_file_noop_without_content(monkeypatch):
+    calls = []
+    monkeypatch.setattr(ch.requests, "post", lambda *a, **k: calls.append(a))
+    ch.send_discord_file("https://hook", "b.html", None)
+    ch.send_discord_file("https://hook", "b.html", b"")
+    assert calls == []
+
+
 def test_send_discord_file_swallows_errors(monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("429")
     monkeypatch.setattr(ch.requests, "post", boom)
     ch.send_discord_file("https://hook", "b.html", b"x")   # must not raise
+
+
+def test_send_discord_file_truncates_caption(monkeypatch):
+    calls = []
+    monkeypatch.setattr(ch.requests, "post",
+                        lambda url, **kw: calls.append(kw))
+    ch.send_discord_file("https://hook", "b.html", b"x", "z" * 3000)
+    content = json.loads(calls[0]["data"]["payload_json"])["content"]
+    assert len(content) == 2000
 
 
 def test_send_sms_noop_without_creds(monkeypatch):
@@ -204,6 +231,7 @@ def test_defaults_include_gamma_briefing_block(tmp_path, monkeypatch):
     p = tmp_path / "notifications.json"
     p.write_text(json.dumps({"telegram": {"bot_token": "T", "chat_id": 1}}))
     monkeypatch.setattr(ch, "_CONFIG_PATH", p)
+    monkeypatch.delenv("GAMMA_BRIEFING_WEBHOOK_URL", raising=False)
     cfg = ch.load_config()
     gb = cfg["gamma_briefing"]
     assert gb["enabled"] is True
@@ -221,6 +249,29 @@ def test_gamma_briefing_file_values_override_defaults(tmp_path, monkeypatch):
     assert cfg["gamma_briefing"]["webhook_url"] == "https://hook"
     # unspecified key still falls back to the default (deep merge, not replace)
     assert cfg["gamma_briefing"]["slots"] == ["premarket", "open", "midday", "close"]
+
+
+def test_gamma_briefing_webhook_env_overrides_file(tmp_path, monkeypatch):
+    # A Discord webhook URL embeds its token, so it gets the same env escape hatch
+    # every other secret here has. enabled/slots stay file-only (not secrets).
+    p = tmp_path / "notifications.json"
+    p.write_text(json.dumps({"gamma_briefing": {"webhook_url": "https://file"}}))
+    monkeypatch.setattr(ch, "_CONFIG_PATH", p)
+    monkeypatch.setenv("GAMMA_BRIEFING_WEBHOOK_URL", "https://env")
+    cfg = ch.load_config()
+    assert cfg["gamma_briefing"]["webhook_url"] == "https://env"
+
+
+def test_default_lists_are_copied_not_shared(tmp_path, monkeypatch):
+    # _deep_merge copies nested dicts; nested LISTS must be copied too, or a
+    # consumer filtering slots in place poisons _DEFAULTS for the whole process.
+    monkeypatch.setattr(ch, "_CONFIG_PATH", tmp_path / "nope.json")
+    first = ch.load_config()["gamma_briefing"]["slots"]
+    assert first is not ch._DEFAULTS["gamma_briefing"]["slots"]
+    first.remove("open")
+    second = ch.load_config()["gamma_briefing"]["slots"]
+    assert second is not first
+    assert second == ["premarket", "open", "midday", "close"]
 
 
 def test_public_names_reexported_from_package():

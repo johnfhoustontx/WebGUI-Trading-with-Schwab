@@ -61,8 +61,21 @@ _DEFAULTS = {
 }
 
 
+def _copy_containers(v):
+    """Deep-copy the containers in a default value (dicts AND lists).
+
+    A shallow `dict(v)` leaves nested lists shared, so a caller filtering e.g.
+    gamma_briefing.slots or twitter.hashtags in place would poison _DEFAULTS for
+    the rest of the process."""
+    if isinstance(v, dict):
+        return {k: _copy_containers(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_copy_containers(x) for x in v]
+    return v
+
+
 def _deep_merge(base: dict, over: dict) -> dict:
-    out = {k: (dict(v) if isinstance(v, dict) else v) for k, v in base.items()}
+    out = {k: _copy_containers(v) for k, v in base.items()}
     for k, v in (over or {}).items():
         if isinstance(v, dict) and isinstance(out.get(k), dict):
             out[k] = _deep_merge(out[k], v)
@@ -104,6 +117,10 @@ def load_config(path=None) -> dict:
         cfg["sms"]["smtp_app_password"] = os.environ["SMS_SMTP_APP_PASSWORD"]
     if os.environ.get("NOTIFY_ENABLED"):
         cfg["enabled"] = os.environ["NOTIFY_ENABLED"].lower() not in ("0", "false", "no")
+    # The dedicated briefing webhook embeds a token — same env escape hatch as
+    # every other secret here (enabled/slots stay file-only; they aren't secrets).
+    if os.environ.get("GAMMA_BRIEFING_WEBHOOK_URL"):
+        cfg["gamma_briefing"]["webhook_url"] = os.environ["GAMMA_BRIEFING_WEBHOOK_URL"]
     # Twitter/X OAuth 1.0a keys (env wins over file), so secrets can stay out of
     # the config file.
     for env_name, key in (("TWITTER_API_KEY", "api_key"),
@@ -145,8 +162,12 @@ def send_telegram_document(token: str, chat_id, filename: str, content: bytes,
     accepts only a ~10-tag subset, so a full infographic must travel as a file the
     recipient opens in a browser. Caption is PLAIN text (no parse_mode), so no
     field needs HTML-escaping. Best-effort, like every sender here: no creds → no-op,
-    any failure → warn, never raises."""
-    if not token or not chat_id:
+    any failure → warn, never raises.
+
+    Empty `content` also no-ops: requests SKIPS a None file part rather than
+    raising, so posting anyway would send a document-less request that 400s —
+    and this layer ignores the response, so that failure would be silent."""
+    if not token or not chat_id or not content:
         return
     try:
         requests.post(
@@ -174,8 +195,10 @@ def send_discord_file(webhook_url: str, filename: str, content: bytes,
 
     Discord accepts embeds, not HTML, so a rich document travels as an attachment
     with an optional plain-text caption. Best-effort: no webhook → no-op, any
-    failure (incl. a 429 rate limit) → warn, never raises."""
-    if not webhook_url:
+    failure (incl. a 429 rate limit) → warn, never raises. Empty `content`
+    no-ops for the same reason as the Telegram sender — a missing file part
+    yields an empty-message 400 nobody would ever see."""
+    if not webhook_url or not content:
         return
     try:
         requests.post(
