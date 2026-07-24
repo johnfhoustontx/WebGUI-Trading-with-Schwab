@@ -5,6 +5,7 @@
   "telegram": { "bot_token": "", "chat_id": 0 },
   "discord":  { "webhook_url": "", "flow_uoa_webhook_url": "", "flow_crossover_webhook_url": "", "flow_gamma_flip_webhook_url": "" },
   "sms":      { "fi_number": "", "smtp_user": "", "smtp_app_password": "" },
+  "gamma_briefing": { "enabled": true, "slots": ["premarket", "open", "midday", "close"], "webhook_url": "" },
   "twitter": {
     "enabled": false,
     "dry_run": true,

@@ -34,6 +34,15 @@ _DEFAULTS = {
     "telegram": {"bot_token": "", "chat_id": 0},
     "discord": {"webhook_url": ""},
     "sms": {"fi_number": "", "smtp_user": "", "smtp_app_password": ""},
+    # Gamma Analyze briefing -> HTML file attachment (options_svc, scheduled slots
+    # only). `slots` subsets which of the four push, so thinning the cadence needs
+    # no code change. `webhook_url` is a DEDICATED Discord webhook (falls back to
+    # discord.webhook_url when blank) so briefings stay out of the signal feed.
+    "gamma_briefing": {
+        "enabled": True,
+        "slots": ["premarket", "open", "midday", "close"],
+        "webhook_url": "",
+    },
     # X/Twitter public post channel (options scanner signals only). OFF by
     # default; ships with dry_run ON so it formats+logs without posting until you
     # add OAuth 1.0a keys AND flip enabled + dry_run. min_score is the PUBLIC

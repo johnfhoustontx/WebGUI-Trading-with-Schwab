@@ -139,6 +139,29 @@ def test_today_ct_is_iso_date():
     assert isinstance(d, str) and len(d) == 10 and d[4] == "-"
 
 
+def test_defaults_include_gamma_briefing_block(tmp_path, monkeypatch):
+    p = tmp_path / "notifications.json"
+    p.write_text(json.dumps({"telegram": {"bot_token": "T", "chat_id": 1}}))
+    monkeypatch.setattr(ch, "_CONFIG_PATH", p)
+    cfg = ch.load_config()
+    gb = cfg["gamma_briefing"]
+    assert gb["enabled"] is True
+    assert gb["slots"] == ["premarket", "open", "midday", "close"]
+    assert gb["webhook_url"] == ""
+
+
+def test_gamma_briefing_file_values_override_defaults(tmp_path, monkeypatch):
+    p = tmp_path / "notifications.json"
+    p.write_text(json.dumps({"gamma_briefing": {"enabled": False,
+                                                "webhook_url": "https://hook"}}))
+    monkeypatch.setattr(ch, "_CONFIG_PATH", p)
+    cfg = ch.load_config()
+    assert cfg["gamma_briefing"]["enabled"] is False
+    assert cfg["gamma_briefing"]["webhook_url"] == "https://hook"
+    # unspecified key still falls back to the default (deep merge, not replace)
+    assert cfg["gamma_briefing"]["slots"] == ["premarket", "open", "midday", "close"]
+
+
 def test_public_names_reexported_from_package():
     from shared.notify import (load_config, send_telegram, send_discord,
                                send_sms, _in_market_hours, _today_ct)
