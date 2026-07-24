@@ -646,8 +646,13 @@ def _ms_webhook(dc: dict) -> str:
 
 def market_snapshot_caption(trend, sentiment, regime) -> str:
     t = (trend or {}).get("label") or "—"
-    s = (sentiment or {}).get("total_score")
-    s = f"{float(s):.1f}" if isinstance(s, (int, float)) and not isinstance(s, bool) else "—"
+    raw = (sentiment or {}).get("total_score")
+    # sentiment_svc publishes total_score as a formatted string (e.g. "7.80");
+    # accept int/float OR a numeric string, but never a bool.
+    try:
+        s = "—" if isinstance(raw, bool) else f"{float(raw):.1f}"
+    except (TypeError, ValueError):
+        s = "—"
     r = (regime or {}).get("label") or "—"
     return f"📊 Market Snapshot — Trend: {t} · Sentiment: {s}/10 · Regime: {r}"
 

@@ -1071,3 +1071,16 @@ def test_send_market_snapshot_pushes_png(monkeypatch):
     assert got["t"][1] == b"PNGDATA"
     assert got["d"][0] == "MS"                       # per-channel webhook wins
     assert got["d"][1].startswith("market-snapshot-")
+
+
+def test_market_snapshot_caption_coerces_numeric_string():
+    # sentiment_svc publishes total_score as a string like "7.80"
+    cap = pn.market_snapshot_caption({"label": "Bull"}, {"total_score": "7.80"}, {"label": "Trending"})
+    assert "7.8" in cap and "Sentiment: —/10" not in cap
+
+
+def test_market_snapshot_caption_bad_score_is_placeholder():
+    cap = pn.market_snapshot_caption({}, {"total_score": "n/a"}, {})
+    assert "Sentiment: —/10" in cap
+    # bool must not be treated as numeric
+    assert "Sentiment: —/10" in pn.market_snapshot_caption({}, {"total_score": True}, {})

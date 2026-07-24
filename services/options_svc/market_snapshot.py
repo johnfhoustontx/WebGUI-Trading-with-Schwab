@@ -27,6 +27,19 @@ def _arc(cx, cy, r, d0, d1):
     return f"M {x0:.1f} {y0:.1f} A {r} {r} 0 {large} {sweep} {x1:.1f} {y1:.1f}"
 
 
+def _num(x):
+    """``float(x)`` for an int/float OR a numeric string, else None (never raises).
+
+    ``bool`` is excluded — ``True``/``False`` are ints but never a real score.
+    (sentiment_svc publishes ``total_score`` as a formatted string, e.g. "7.80".)"""
+    if isinstance(x, bool):
+        return None
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return None
+
+
 def gauge_svg(value, *, vmin, vmax, bands, value_label, caption):
     """Semicircle gauge. ``bands`` = ascending [(upper_value, color), …] over
     [vmin,vmax]; the arc is drawn in colored segments and a needle points at
@@ -203,10 +216,10 @@ def trend_panel_html(trend, intraday_points):
 
 def sentiment_panel_html(sentiment, intraday_points):
     s = sentiment or {}
-    raw = s.get("total_score")
-    val = f"{float(raw):.1f}" if isinstance(raw, (int, float)) else "—"
+    sval = _num(s.get("total_score"))
+    val = f"{sval:.1f}" if sval is not None else "—"
     bias = s.get("bias") or "—"
-    gauge = gauge_svg(float(raw) if isinstance(raw, (int, float)) else 5.0,
+    gauge = gauge_svg(sval if sval is not None else 5.0,
                       vmin=0, vmax=10, bands=_SENT_BANDS, value_label=val, caption=bias)
     spark = sparkline_svg(intraday_points, key="sentiment", vmin=0, vmax=10, bands=_SENT_BANDS)
     live = f"Bias: {_html.escape(str(bias))}"

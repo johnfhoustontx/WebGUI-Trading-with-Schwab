@@ -94,6 +94,19 @@ def test_sentiment_panel_handles_missing():
     assert out.startswith("<div") and "Sentiment" in out
 
 
+def test_sentiment_panel_coerces_numeric_string_score():
+    # sentiment_svc publishes total_score as a formatted STRING (e.g. "7.80")
+    out = ms.sentiment_panel_html({"total_score": "7.80", "bias": "Bullish"}, [])
+    assert "7.8" in out and ">—<" not in out
+
+
+def test_sentiment_panel_bad_score_is_placeholder():
+    for bad in ("n/a", True, None):
+        out = ms.sentiment_panel_html({"total_score": bad}, [])
+        assert out.startswith("<div")  # no raise
+    assert "—" in ms.sentiment_panel_html({"total_score": "n/a"}, [])
+
+
 def test_regime_panel_shows_transition_when_present():
     out = ms.regime_panel_html(
         {"label": "Trending", "committed_label": "trending", "confidence": 0.6,
