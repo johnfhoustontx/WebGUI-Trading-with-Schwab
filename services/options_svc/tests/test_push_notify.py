@@ -1039,3 +1039,35 @@ def test_briefing_caption_bool_bias_dropped():
     malformed `"bias": true` renders a fabricated "Bias +1"."""
     assert "Bias" not in pn.briefing_caption({"analysis": {"bias": True}}, "open")
     assert "Bias" not in pn.briefing_caption({"analysis": {"bias": False}}, "open")
+
+
+# ── Market Snapshot push (send_market_snapshot) ──────────────────────────────
+def test_send_market_snapshot_disabled_master(monkeypatch):
+    calls = []
+    monkeypatch.setattr(pn.briefing_image, "render_html_png", lambda h: b"PNG")
+    monkeypatch.setattr(pn, "send_discord_file", lambda *a, **k: calls.append("d"))
+    monkeypatch.setattr(pn, "send_telegram_photo", lambda *a, **k: calls.append("t"))
+    assert pn.send_market_snapshot({}, {}, {}, {}, {}, {}, slot="09:00",
+        config={"enabled": False, "market_snapshot": {"enabled": True}}) is False
+    assert calls == []
+
+
+def test_send_market_snapshot_block_disabled(monkeypatch):
+    monkeypatch.setattr(pn.briefing_image, "render_html_png", lambda h: b"PNG")
+    assert pn.send_market_snapshot({}, {}, {}, {}, {}, {}, slot="09:00",
+        config={"enabled": True, "market_snapshot": {"enabled": False}}) is False
+
+
+def test_send_market_snapshot_pushes_png(monkeypatch):
+    got = {}
+    monkeypatch.setattr(pn.market_snapshot, "market_snapshot_doc", lambda *a, **k: "<html></html>")
+    monkeypatch.setattr(pn.briefing_image, "render_html_png", lambda h: b"PNGDATA")
+    monkeypatch.setattr(pn, "send_telegram_photo", lambda tok, cid, fn, png, cap: got.setdefault("t", (fn, png)))
+    monkeypatch.setattr(pn, "send_discord_file", lambda wh, fn, png, cap, content_type=None: got.setdefault("d", (wh, fn)))
+    cfg = {"enabled": True, "market_snapshot": {"enabled": True},
+           "telegram": {"bot_token": "b", "chat_id": 1},
+           "discord": {"webhook_url": "GEN", "market_snapshot_webhook_url": "MS"}}
+    assert pn.send_market_snapshot({"categories": []}, {}, {}, {}, {}, {}, slot="09:00", config=cfg) is True
+    assert got["t"][1] == b"PNGDATA"
+    assert got["d"][0] == "MS"                       # per-channel webhook wins
+    assert got["d"][1].startswith("market-snapshot-")

@@ -25,6 +25,7 @@ import smtplib  # noqa: F401 — module handle for test monkeypatching
 
 from repo_paths import NOTIFICATIONS_CONFIG
 from services.options_svc import briefing_image
+from services.options_svc import market_snapshot
 from shared.notify.channels import (
     load_config as _shared_load_config,
     send_telegram,
@@ -628,6 +629,56 @@ def send_gamma_briefing(res: dict, *, slot: str, config: dict | None = None) -> 
         log.warning("gamma briefing %s too large to push (%d bytes)", slot, len(png))
         return False
     filename = briefing_filename(res, slot)
+    send_telegram_photo(tg.get("bot_token"), tg.get("chat_id"), filename, png, caption)
+    send_discord_file(webhook, filename, png, caption, content_type="image/png")
+    return True
+
+
+_MS_MAX_BYTES = _BRIEFING_MAX_BYTES   # reuse the same size ceiling
+
+
+def _ms_webhook(dc: dict) -> str:
+    """Discord target for the market snapshot: the per-channel override if set,
+    else the general webhook."""
+    dc = dc or {}
+    return dc.get("market_snapshot_webhook_url") or dc.get("webhook_url", "")
+
+
+def market_snapshot_caption(trend, sentiment, regime) -> str:
+    t = (trend or {}).get("label") or "—"
+    s = (sentiment or {}).get("total_score")
+    s = f"{float(s):.1f}" if isinstance(s, (int, float)) and not isinstance(s, bool) else "—"
+    r = (regime or {}).get("label") or "—"
+    return f"📊 Market Snapshot — Trend: {t} · Sentiment: {s}/10 · Regime: {r}"
+
+
+def send_market_snapshot(dashboard, trend, sentiment, regime, intraday, regime_hist,
+                         *, slot: str, config: dict | None = None) -> bool:
+    """Push the 30-min market snapshot PNG to Telegram + Discord. Never raises.
+
+    Two gates: the master ``enabled`` and the ``market_snapshot.enabled`` block.
+    On render failure, falls back to a TEXT caption (never goes silent). No SMS."""
+    cfg = config or load_config()
+    if not cfg.get("enabled", True):
+        return False
+    block = cfg.get("market_snapshot") or {}
+    if not block.get("enabled", True):
+        return False
+    caption = market_snapshot_caption(trend, sentiment, regime)
+    tg = cfg.get("telegram", {})
+    webhook = _ms_webhook(cfg.get("discord", {}))
+    doc = market_snapshot.market_snapshot_doc(dashboard, trend, sentiment, regime,
+                                              intraday, regime_hist, subtitle=f"{slot} CT")
+    png = briefing_image.render_html_png(doc)
+    if not png:
+        log.warning("market snapshot %s: render failed — pushing text only", slot)
+        send_telegram(tg.get("bot_token"), tg.get("chat_id"), _html.escape(caption))
+        send_discord(webhook, {"description": caption})
+        return True
+    if len(png) > _MS_MAX_BYTES:
+        log.warning("market snapshot %s too large (%d bytes)", slot, len(png))
+        return False
+    filename = f"market-snapshot-{slot.replace(':', '')}.png"
     send_telegram_photo(tg.get("bot_token"), tg.get("chat_id"), filename, png, caption)
     send_discord_file(webhook, filename, png, caption, content_type="image/png")
     return True
