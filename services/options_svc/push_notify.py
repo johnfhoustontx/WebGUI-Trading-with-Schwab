@@ -505,6 +505,44 @@ def send_eod_summary(summary: dict, *, config: dict | None = None) -> bool:
     return True
 
 
+# ---------------------------------------------------------------- gamma briefing
+# The 4x/day Gamma Analyze briefing ships as a self-contained HTML file (see
+# shared.notify.send_telegram_document / send_discord_file). Labels are duplicated
+# from handlers.ANALYZE_SLOT_TITLES deliberately — push_notify must not import
+# handlers (handlers imports THIS module; the reverse would be circular).
+_BRIEFING_SLOT_LABELS = {
+    "premarket": "Premarket",
+    "open": "After open",
+    "midday": "Midday",
+    "close": "At close",
+}
+_CAPTION_MAX = 1024   # Telegram's sendDocument ceiling; Discord's 2000 is looser
+
+
+def briefing_caption(res: dict, slot: str = "") -> str:
+    """One scannable plain-text line to ride along with the attached briefing.
+
+    Budget-defended: the leading identifiers (slot / regime / bias) ALWAYS survive
+    and only the headline truncates, so a runaway model headline can never push the
+    slot label out of the caption."""
+    a = (res or {}).get("analysis") or {}
+    bits = [f"Gamma · {_BRIEFING_SLOT_LABELS.get(slot, slot or 'Briefing')}"]
+    regime = (a.get("regime") or "").strip()
+    if regime:
+        bits.append(regime)
+    bias = a.get("bias")
+    if isinstance(bias, (int, float)) and not isinstance(bias, bool):
+        bits.append(f"Bias {bias:+.0f}")
+    lead = " · ".join(bits)
+    headline = (a.get("headline") or "").strip()
+    room = _CAPTION_MAX - len(lead) - 1          # -1 for the newline
+    if not headline or room <= 0:
+        return lead[:_CAPTION_MAX]
+    if len(headline) > room:
+        headline = headline[:max(0, room - 1)].rstrip() + "…"
+    return f"{lead}\n{headline}"
+
+
 def new_keys(current: list, prev: dict | None, today: str):
     """Return (new_keys_in_order, next_state).
 
