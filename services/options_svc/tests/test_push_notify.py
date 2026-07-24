@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from services.options_svc import push_notify as pn
 
 
@@ -838,3 +840,101 @@ def test_briefing_filename_falls_back_to_now():
 def test_briefing_filename_sanitizes_slot():
     res = {"generated_at": "2026-07-23T09:00:00"}
     assert pn.briefing_filename(res, "adhoc 18:42") == "gamma-briefing-2026-07-23-adhoc-18-42.html"
+
+
+@pytest.fixture
+def briefing_cfg():
+    return {"enabled": True,
+            "telegram": {"bot_token": "TOK", "chat_id": 7},
+            "discord": {"webhook_url": "https://main"},
+            "gamma_briefing": {"enabled": True,
+                               "slots": ["premarket", "open", "midday", "close"],
+                               "webhook_url": "https://briefings"}}
+
+
+@pytest.fixture
+def briefing_res():
+    return {"html": "<html>doc</html>",
+            "analysis": {"regime": "Pinned", "bias": 10, "headline": "hi"},
+            "generated_at": "2026-07-23T11:30:00"}
+
+
+def _capture(monkeypatch):
+    sent = {"tg": [], "dc": []}
+    monkeypatch.setattr(pn, "send_telegram_document",
+                        lambda *a, **k: sent["tg"].append(a))
+    monkeypatch.setattr(pn, "send_discord_file",
+                        lambda *a, **k: sent["dc"].append(a))
+    return sent
+
+
+def test_send_gamma_briefing_happy_path(monkeypatch, briefing_cfg, briefing_res):
+    sent = _capture(monkeypatch)
+    assert pn.send_gamma_briefing(briefing_res, slot="midday", config=briefing_cfg) is True
+    tok, chat, name, content, caption = sent["tg"][0]
+    assert (tok, chat) == ("TOK", 7)
+    assert name == "gamma-briefing-2026-07-23-midday.html"
+    assert content == b"<html>doc</html>"
+    assert caption.startswith("Gamma · Midday")
+    hook, dname, dcontent, dcaption = sent["dc"][0]
+    assert hook == "https://briefings"          # dedicated webhook wins
+    assert (dname, dcontent) == (name, content)
+
+
+def test_send_gamma_briefing_falls_back_to_main_webhook(monkeypatch, briefing_cfg,
+                                                        briefing_res):
+    sent = _capture(monkeypatch)
+    briefing_cfg["gamma_briefing"]["webhook_url"] = ""
+    pn.send_gamma_briefing(briefing_res, slot="midday", config=briefing_cfg)
+    assert sent["dc"][0][0] == "https://main"
+
+
+def test_send_gamma_briefing_master_gate(monkeypatch, briefing_cfg, briefing_res):
+    sent = _capture(monkeypatch)
+    briefing_cfg["enabled"] = False
+    assert pn.send_gamma_briefing(briefing_res, slot="midday", config=briefing_cfg) is False
+    assert sent["tg"] == [] and sent["dc"] == []
+
+
+def test_send_gamma_briefing_feature_gate(monkeypatch, briefing_cfg, briefing_res):
+    sent = _capture(monkeypatch)
+    briefing_cfg["gamma_briefing"]["enabled"] = False
+    assert pn.send_gamma_briefing(briefing_res, slot="midday", config=briefing_cfg) is False
+    assert sent["tg"] == []
+
+
+def test_send_gamma_briefing_slot_not_selected(monkeypatch, briefing_cfg, briefing_res):
+    sent = _capture(monkeypatch)
+    briefing_cfg["gamma_briefing"]["slots"] = ["premarket", "close"]
+    assert pn.send_gamma_briefing(briefing_res, slot="midday", config=briefing_cfg) is False
+    assert sent["tg"] == []
+
+
+def test_send_gamma_briefing_skips_degraded_run(monkeypatch, briefing_cfg):
+    """A no-chains / no-API-key run still produces readable HTML but carries no
+    `analysis` — pushing 'no chains available' 4x/day is exactly the spam to avoid."""
+    sent = _capture(monkeypatch)
+    degraded = {"html": "<html>No chains available</html>", "analysis": None}
+    assert pn.send_gamma_briefing(degraded, slot="midday", config=briefing_cfg) is False
+    assert sent["tg"] == [] and sent["dc"] == []
+
+
+def test_send_gamma_briefing_skips_empty_html(monkeypatch, briefing_cfg, briefing_res):
+    sent = _capture(monkeypatch)
+    briefing_res["html"] = ""
+    assert pn.send_gamma_briefing(briefing_res, slot="midday", config=briefing_cfg) is False
+
+
+def test_send_gamma_briefing_skips_oversize(monkeypatch, briefing_cfg, briefing_res):
+    sent = _capture(monkeypatch)
+    briefing_res["html"] = "z" * (pn._BRIEFING_MAX_BYTES + 1)
+    assert pn.send_gamma_briefing(briefing_res, slot="midday", config=briefing_cfg) is False
+    assert sent["dc"] == []
+
+
+def test_send_gamma_briefing_missing_block_defaults_on(monkeypatch, briefing_cfg,
+                                                       briefing_res):
+    sent = _capture(monkeypatch)
+    briefing_cfg.pop("gamma_briefing")
+    assert pn.send_gamma_briefing(briefing_res, slot="midday", config=briefing_cfg) is True
+    assert sent["dc"][0][0] == "https://main"

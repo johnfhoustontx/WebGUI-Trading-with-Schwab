@@ -27,7 +27,9 @@ from repo_paths import NOTIFICATIONS_CONFIG
 from shared.notify.channels import (
     load_config as _shared_load_config,
     send_telegram,
+    send_telegram_document,
     send_discord,
+    send_discord_file,
     send_sms,
     _in_market_hours,
     _today_ct,
@@ -555,6 +557,48 @@ def briefing_filename(res: dict, slot: str = "", now=None) -> str:
         day = (now or datetime.now(_TZ)).date().isoformat()
     safe = "".join(c if (c.isalnum() or c in "-_") else "-" for c in (slot or "briefing"))
     return f"gamma-briefing-{day}-{safe}.html"
+
+
+_BRIEFING_MAX_BYTES = 7_500_000   # under Discord's 8 MB webhook ceiling
+
+
+def send_gamma_briefing(res: dict, *, slot: str, config: dict | None = None) -> bool:
+    """Push a scheduled Gamma briefing to Telegram + Discord as an HTML attachment.
+
+    Returns True if a send was attempted. THREE independent gates: the master
+    `enabled`, the `gamma_briefing.enabled`/`slots` block, and a content gate that
+    requires a real `analysis` (a degraded page has HTML but no analysis).
+    No SMS — a file cannot ride SMS and a bare text line there is noise.
+    Best-effort per channel (the primitives never raise)."""
+    cfg = config or load_config()
+    if not cfg.get("enabled", True):
+        return False
+    gb = cfg.get("gamma_briefing") or {}
+    if not gb.get("enabled", True):
+        return False
+    slots = gb.get("slots")
+    if slots and slot not in slots:
+        return False
+    res = res or {}
+    if not res.get("analysis"):        # degraded run — never push
+        return False
+    html = res.get("html") or ""
+    if not html:
+        return False
+    content = html.encode("utf-8")
+    if len(content) > _BRIEFING_MAX_BYTES:
+        # Not reachable in practice (~30-60 KB measured) but a silent 413 would be
+        # invisible, so fail loudly-in-the-log instead.
+        log.warning("gamma briefing %s too large to push (%d bytes)", slot, len(content))
+        return False
+    caption = briefing_caption(res, slot)
+    filename = briefing_filename(res, slot)
+    tg = cfg.get("telegram", {})
+    webhook = gb.get("webhook_url") or (cfg.get("discord", {}) or {}).get("webhook_url")
+    send_telegram_document(tg.get("bot_token"), tg.get("chat_id"),
+                           filename, content, caption)
+    send_discord_file(webhook, filename, content, caption)
+    return True
 
 
 def new_keys(current: list, prev: dict | None, today: str):
