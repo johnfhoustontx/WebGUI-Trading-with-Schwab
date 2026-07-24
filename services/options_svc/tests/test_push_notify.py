@@ -822,3 +822,19 @@ def test_briefing_caption_truncates_headline_not_lead():
     assert len(cap) <= 1024
     assert cap.startswith("Gamma · At close · Neg gamma · Bias +5")
     assert cap.endswith("…")
+
+
+def test_briefing_filename_uses_generated_at_date():
+    res = {"generated_at": "2026-07-23T11:30:04-05:00"}
+    assert pn.briefing_filename(res, "midday") == "gamma-briefing-2026-07-23-midday.html"
+
+
+def test_briefing_filename_falls_back_to_now():
+    import datetime as dt
+    now = dt.datetime(2026, 7, 23, 9, 0)
+    assert pn.briefing_filename({}, "open", now=now) == "gamma-briefing-2026-07-23-open.html"
+
+
+def test_briefing_filename_sanitizes_slot():
+    res = {"generated_at": "2026-07-23T09:00:00"}
+    assert pn.briefing_filename(res, "adhoc 18:42") == "gamma-briefing-2026-07-23-adhoc-18-42.html"

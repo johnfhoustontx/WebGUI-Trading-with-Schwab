@@ -543,6 +543,20 @@ def briefing_caption(res: dict, slot: str = "") -> str:
     return f"{lead}\n{headline}"
 
 
+def briefing_filename(res: dict, slot: str = "", now=None) -> str:
+    """Stable, sortable attachment name: gamma-briefing-YYYY-MM-DD-{slot}.html.
+
+    Prefers the run's own ``generated_at`` so the filename matches the briefing's
+    session even if the push is retried later. Slot is sanitized because the ad-hoc
+    label carries a colon, which is illegal in a Windows filename."""
+    ts = (res or {}).get("generated_at")
+    day = ts[:10] if isinstance(ts, str) and len(ts) >= 10 else ""
+    if not day:
+        day = (now or datetime.now(_TZ)).date().isoformat()
+    safe = "".join(c if (c.isalnum() or c in "-_") else "-" for c in (slot or "briefing"))
+    return f"gamma-briefing-{day}-{safe}.html"
+
+
 def new_keys(current: list, prev: dict | None, today: str):
     """Return (new_keys_in_order, next_state).
 
