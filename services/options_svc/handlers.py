@@ -1053,7 +1053,9 @@ def run_scheduled_gamma_analyze(bus, slot) -> None:
     The result persists in Redis under its slot key until the next day's run
     overwrites it; the Gamma page opens it on demand via ``/options/analyze?slot=``.
     Defensive: ``compute.gamma_analyze`` never raises (every failure → a readable
-    HTML page), so this only guards the slot-key lookup."""
+    HTML page), so this only guards the slot-key lookup. After caching + persisting,
+    the briefing is pushed to the phone (Telegram + Discord) as a self-contained HTML
+    attachment — last and guarded, so a channel outage can't cost us the briefing."""
     key = CACHE_GAMMA_ANALYZE_SCHED.get(slot)
     if not key:
         return
@@ -1069,6 +1071,14 @@ def run_scheduled_gamma_analyze(bus, slot) -> None:
     bus.publish(EVENT_GAMMA_ANALYZE_SCHED[slot], {"version": version})
     _persist_briefing(res, slot, now)      # record to history (best-effort)
     publish_gamma_briefing_index(bus)      # refresh the in-app history picker
+    # Phone push: ship the briefing as a self-contained HTML attachment (Telegram +
+    # Discord). LAST and guarded — publish/persist first, notify second (the house
+    # pattern from rescan/refresh_captured), so a channel outage can never cost us
+    # the cached briefing or its history row.
+    try:
+        push_notify.send_gamma_briefing(res, slot=slot)
+    except Exception:
+        log.exception("gamma briefing push degraded")
 
 
 def run_action_alert(bus, slot=None) -> None:

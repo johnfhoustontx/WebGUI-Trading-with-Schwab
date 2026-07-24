@@ -911,6 +911,72 @@ def test_run_scheduled_gamma_analyze_unknown_slot_noop(monkeypatch):
     assert bus.cache_get("cache:options:gamma_analyze_bogus") is None
 
 
+def _isolate_briefing_db(monkeypatch, tmp_path):
+    """Point the briefing-history store at a temp DB so a scheduled-analyze test
+    (whose payload carries a real ``analysis``) can't write the live store."""
+    import gamma_briefing_history_db as gbh
+    real = gbh.connect
+    monkeypatch.setattr(gbh, "connect", lambda db_path=None: real(tmp_path / "h.db"))
+
+
+def test_scheduled_analyze_pushes_briefing(monkeypatch, tmp_path):
+    _isolate_briefing_db(monkeypatch, tmp_path)
+    bus = Bus(fake=True)
+    pushed = []
+    monkeypatch.setattr(handlers.compute, "gamma_analyze",
+                        lambda **k: {"html": "<html>x</html>", "analysis": {"bias": 1}})
+    monkeypatch.setattr(handlers.push_notify, "send_gamma_briefing",
+                        lambda res, **kw: pushed.append((res, kw)))
+
+    handlers.run_scheduled_gamma_analyze(bus, "midday")
+
+    assert pushed and pushed[0][1]["slot"] == "midday"
+    # The push carries the SAME payload that was cached (slot/generated_at stamped).
+    assert pushed[0][0]["slot"] == "midday"
+    assert pushed[0][0]["html"] == "<html>x</html>"
+
+
+def test_scheduled_analyze_push_failure_does_not_break_handler(monkeypatch, tmp_path):
+    """The load-bearing guarantee: a push failure must never cost us the briefing.
+
+    Caching and history persistence run BEFORE the push and must still complete.
+    """
+    _isolate_briefing_db(monkeypatch, tmp_path)
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "gamma_analyze",
+                        lambda **k: {"html": "<html>x</html>", "analysis": {"bias": 1}})
+
+    def boom(*a, **k):
+        raise RuntimeError("telegram down")
+
+    monkeypatch.setattr(handlers.push_notify, "send_gamma_briefing", boom)
+
+    handlers.run_scheduled_gamma_analyze(bus, "midday")     # must not raise
+
+    env = bus.cache_get("cache:options:gamma_analyze_midday")
+    assert env is not None and env.payload["html"] == "<html>x</html>"
+    # The history row (persisted before the push) survives too.
+    import datetime
+    from zoneinfo import ZoneInfo
+    import gamma_briefing_history_db as gbh
+    today = datetime.datetime.now(ZoneInfo("America/Chicago")).date().isoformat()
+    rows = gbh.briefings_for_date(gbh.connect(), today)
+    assert any(r["slot"] == "midday" for r in rows)
+
+
+def test_scheduled_analyze_unknown_slot_does_not_push(monkeypatch):
+    bus = Bus(fake=True)
+    pushed = []
+    monkeypatch.setattr(handlers.compute, "gamma_analyze",
+                        lambda **k: {"html": "<html>x</html>", "analysis": {"bias": 1}})
+    monkeypatch.setattr(handlers.push_notify, "send_gamma_briefing",
+                        lambda *a, **k: pushed.append(a))
+
+    handlers.run_scheduled_gamma_analyze(bus, "nonsense")
+
+    assert pushed == []
+
+
 def test_persist_briefing_records_history(monkeypatch, tmp_path):
     import datetime
     from zoneinfo import ZoneInfo
