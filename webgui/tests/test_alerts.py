@@ -161,3 +161,45 @@ def test_new_flow_alerts():
     # Defensive: None / malformed view -> ([], acked unchanged).
     assert alerts.new_flow_alerts(None, {"A"}) == ([], {"A"})
     assert alerts.new_flow_alerts({"alerts": "nope"}, set()) == ([], set())
+
+
+# ── Flow alerts: market-hours gate + backlog-replay guard ────────────────────
+_RTH = dt.datetime(2026, 7, 23, 10, 0, tzinfo=CT)      # Thu 10:00 CT
+_AFTER = dt.datetime(2026, 7, 23, 21, 0, tzinfo=CT)    # Thu 21:00 CT
+_NEW = [{"id": "SPY|uoa|C|737|2026-07-23", "text": "SPY 737C UNUSUAL"}]
+
+
+def test_should_flow_alert_fires_during_market_hours():
+    s = {"flow_alerts_enabled": True, "alert_market_hours_only": True}
+    assert alerts.should_flow_alert(s, _NEW, _RTH) is True
+
+
+def test_should_flow_alert_silent_after_rth():
+    """The server stops publishing at 15:20 CT, but a GUI-side backlog replay can
+    surface alerts at any hour -- so the gate has to live here too."""
+    s = {"flow_alerts_enabled": True, "alert_market_hours_only": True}
+    assert alerts.should_flow_alert(s, _NEW, _AFTER) is False
+
+
+def test_should_flow_alert_after_rth_when_gate_disabled():
+    s = {"flow_alerts_enabled": True, "alert_market_hours_only": False}
+    assert alerts.should_flow_alert(s, _NEW, _AFTER) is True
+
+
+def test_should_flow_alert_respects_feature_toggle_and_emptiness():
+    on = {"flow_alerts_enabled": True, "alert_market_hours_only": True}
+    off = {"flow_alerts_enabled": False, "alert_market_hours_only": True}
+    assert alerts.should_flow_alert(off, _NEW, _RTH) is False
+    assert alerts.should_flow_alert(on, [], _RTH) is False
+
+
+def test_should_flow_alert_silent_on_weekend():
+    s = {"flow_alerts_enabled": True, "alert_market_hours_only": True}
+    sat = dt.datetime(2026, 7, 25, 10, 0, tzinfo=CT)
+    assert alerts.should_flow_alert(s, _NEW, sat) is False
+
+
+def test_new_flow_alerts_seeds_empty_from_unreadable_view():
+    """Pins the precondition of the replay bug: an unreadable (None) view yields an
+    EMPTY acked set, so main.py must not treat that as a completed seed."""
+    assert alerts.new_flow_alerts(None, set()) == ([], set())

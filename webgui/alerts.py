@@ -192,3 +192,18 @@ def new_flow_alerts(view, acked):
             new.append(a)
             all_ids.add(a["id"])
     return new, all_ids
+
+
+def should_flow_alert(settings, new_flow, now):
+    """Whether to fire options-flow alerts — enabled, something new, market hours.
+
+    Mirrors ``should_alert``. The flow branch previously had NO time gate while the
+    scanner and health branches both honored ``alert_market_hours_only``, so flow
+    alerts could chime long after the close (the server stops publishing at 15:20
+    CT, but a backlog replay on the GUI side fires whenever it happens).
+    """
+    if not settings.get("flow_alerts_enabled", True) or not new_flow:
+        return False
+    if settings.get("alert_market_hours_only") and not in_market_hours(now):
+        return False
+    return True

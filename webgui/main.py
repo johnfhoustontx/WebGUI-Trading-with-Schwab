@@ -738,7 +738,11 @@ def _watcher_compute():
         _ALERT_STATE["health_alerted"] = alerts.unhealthy_keys(freshness, svc_health)
         _ALERT_STATE["health_init"] = True
         _ALERT_STATE["flow_acked"] = alerts.new_flow_alerts(flow_view, set())[1]
-        _ALERT_STATE["flow_init"] = True
+        # Only count the seed as done if the view was actually READABLE. On a
+        # restart the first tick can hit a not-yet-ready bus and return None, which
+        # seeds an EMPTY acked set — then the next tick treats the whole day's
+        # backlog (up to the 50-alert cap) as new and replays it as toasts.
+        _ALERT_STATE["flow_init"] = flow_view is not None
         _recompute_badges(scan)
         return None
     _recompute_badges(scan)
@@ -767,7 +771,11 @@ def _watcher_compute():
     new_flow, _ALERT_STATE["flow_acked"] = alerts.new_flow_alerts(
         flow_view, _ALERT_STATE["flow_acked"])
     flow = None
-    if s.get("flow_alerts_enabled", True) and new_flow:
+    if not _ALERT_STATE["flow_init"]:
+        # The seeding tick couldn't read the view, so flow_acked started EMPTY.
+        # Adopt the current backlog SILENTLY rather than replaying the whole day.
+        _ALERT_STATE["flow_init"] = flow_view is not None
+    elif alerts.should_flow_alert(s, new_flow, now):
         flow = (s["alert_sound"], s["alert_volume"],
                 bool(s.get("desktop_notifications")), new_flow)
 

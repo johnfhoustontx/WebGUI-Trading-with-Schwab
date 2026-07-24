@@ -1071,10 +1071,12 @@ def run_scheduled_gamma_analyze(bus, slot) -> None:
     bus.publish(EVENT_GAMMA_ANALYZE_SCHED[slot], {"version": version})
     _persist_briefing(res, slot, now)      # record to history (best-effort)
     publish_gamma_briefing_index(bus)      # refresh the in-app history picker
-    # Phone push: ship the briefing as a self-contained HTML attachment (Telegram +
-    # Discord). LAST and guarded — publish/persist first, notify second (the house
-    # pattern from rescan/refresh_captured), so a channel outage can never cost us
-    # the cached briefing or its history row.
+    # Phone push: render the briefing to a PNG and send it inline (Telegram +
+    # Discord). An image, not the HTML doc — Discord auto-previews an .html
+    # attachment as raw syntax-highlighted source, which no flag suppresses.
+    # LAST and guarded — publish/persist first, notify second (the house pattern
+    # from rescan/refresh_captured), so a channel outage can never cost us the
+    # cached briefing or its history row.
     try:
         push_notify.send_gamma_briefing(res, slot=slot)
     except Exception:

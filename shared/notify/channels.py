@@ -34,14 +34,14 @@ _DEFAULTS = {
     "telegram": {"bot_token": "", "chat_id": 0},
     "discord": {"webhook_url": ""},
     "sms": {"fi_number": "", "smtp_user": "", "smtp_app_password": ""},
-    # Gamma Analyze briefing -> HTML file attachment (options_svc, scheduled slots
-    # only). `slots` subsets which of the four push, so thinning the cadence needs
-    # no code change. `webhook_url` is a DEDICATED Discord webhook (falls back to
-    # discord.webhook_url when blank) so briefings stay out of the signal feed.
+    # Gamma Analyze briefing -> rendered PNG, sent inline (options_svc, scheduled
+    # slots only). `slots` subsets which of the four push, so thinning the cadence
+    # needs no code change. `webhook_url` is a DEDICATED Discord webhook (falls back
+    # to discord.webhook_url when blank) so briefings stay out of the signal feed.
     # Ships OFF, like `twitter` below: with `enabled` on and no dedicated webhook
     # set, an install that has only configured the SIGNAL webhook would silently
-    # start dropping four HTML attachments a day into the signal channel — the very
-    # thing the dedicated webhook exists to prevent. Opt in explicitly.
+    # start dropping four briefings a day into the signal channel — the very thing
+    # the dedicated webhook exists to prevent. Opt in explicitly.
     "gamma_briefing": {
         "enabled": False,
         "slots": ["premarket", "open", "midday", "close"],
