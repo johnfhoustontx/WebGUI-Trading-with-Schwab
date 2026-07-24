@@ -328,6 +328,19 @@ def test_loop_wires_eod_summary_branch():
     assert "eod_summary_ran.add" in seg
 
 
+def test_loop_wires_market_snapshot_branch():
+    import inspect
+
+    src = inspect.getsource(scheduler.loop)
+    # The market-snapshot push is gated by market_snapshot_due, latched in
+    # market_snapshot_ran BEFORE the blocking branch, and invoked via
+    # run_market_snapshot in its own guarded branch.
+    assert "market_snapshot_due" in src and "run_market_snapshot" in src
+    assert "market_snapshot_ran" in src
+    seg = src.split("market_snapshot_due", 1)[1].split("run_market_snapshot", 1)[0]
+    assert "market_snapshot_ran.add" in seg
+
+
 # ── Cadence-mirror drift guard ──────────────────────────────────────────────
 # The GEX-collection cadence is intentionally mirrored (not imported) between the
 # standalone collector and this Tier-2 scheduler to keep the scheduler's import

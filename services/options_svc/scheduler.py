@@ -417,6 +417,7 @@ async def loop(bus):
     analyze_ran = set()  # (date, slot) of fired scheduled Gamma Analyze runs (see analyze_slot_due)
     action_alert_ran = set()  # (date, slot) of fired action-alert pushes (see action_alert_due)
     eod_summary_ran = set()  # (date, slot) of fired EOD-summary pushes (see eod_summary_due)
+    market_snapshot_ran = set()  # (date, "HH:MM") of fired market-snapshot pushes (see market_snapshot_due)
     # One-shot startup refresh so the Paper Portfolio page has data on first
     # load. The paper account only changes on user actions (entry/manage/reset
     # commands re-publish it), so it is NOT polled every tick. Guarded so a
@@ -673,6 +674,28 @@ async def loop(bus):
 
         if eod_slot:
             branches.append(("eod_summary", _eod_summary_branch(eod_slot)))
+
+        # Scheduled market-snapshot push — render + push the Market Snapshot PNG on the
+        # :00/:30 slots within the RTH window on each trading day. The slot is latched in
+        # market_snapshot_ran BEFORE the blocking render+push so a slow render can't
+        # double-fire on the next tick. Independently guarded.
+        try:
+            ms_slot = market_snapshot_due(now, market_snapshot_ran)
+            if ms_slot:
+                market_snapshot_ran.add((now.date().isoformat(), ms_slot))
+        except Exception:
+            log.exception("market_snapshot_due gate degraded")
+            ms_slot = None
+
+        async def _market_snapshot_branch(slot_name):
+            try:
+                await loop_.run_in_executor(
+                    None, handlers.run_market_snapshot, bus, slot_name)
+            except Exception:
+                log.exception("run_market_snapshot branch degraded")
+
+        if ms_slot:
+            branches.append(("market_snapshot", _market_snapshot_branch(ms_slot)))
 
         # Launch all DUE branches as keyed background tasks (bounded by the fixed
         # key set). The tick does NOT wait for them — see launch_branches.
