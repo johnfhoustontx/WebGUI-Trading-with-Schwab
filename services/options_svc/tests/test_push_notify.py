@@ -938,3 +938,31 @@ def test_send_gamma_briefing_missing_block_defaults_on(monkeypatch, briefing_cfg
     briefing_cfg.pop("gamma_briefing")
     assert pn.send_gamma_briefing(briefing_res, slot="midday", config=briefing_cfg) is True
     assert sent["dc"][0][0] == "https://main"
+
+
+def test_send_gamma_briefing_empty_slots_mutes_every_slot(monkeypatch, briefing_cfg,
+                                                          briefing_res):
+    """An operator who sets "slots": [] means "mute all four". A truthiness test
+    would skip the gate entirely and push every slot — the exact inverse."""
+    sent = _capture(monkeypatch)
+    briefing_cfg["gamma_briefing"]["slots"] = []
+    for slot in ("premarket", "open", "midday", "close"):
+        assert pn.send_gamma_briefing(briefing_res, slot=slot, config=briefing_cfg) is False
+    assert sent["tg"] == [] and sent["dc"] == []
+
+
+def test_send_gamma_briefing_absent_slots_key_pushes_all(monkeypatch, briefing_cfg,
+                                                         briefing_res):
+    """Distinct from []: no `slots` key at all means "no filter", so every slot pushes."""
+    sent = _capture(monkeypatch)
+    briefing_cfg["gamma_briefing"].pop("slots")
+    for slot in ("premarket", "open", "midday", "close"):
+        assert pn.send_gamma_briefing(briefing_res, slot=slot, config=briefing_cfg) is True
+    assert len(sent["tg"]) == 4
+
+
+def test_briefing_caption_bool_bias_dropped():
+    """`True` is an int in Python, so without the explicit bool exclusion a
+    malformed `"bias": true` renders a fabricated "Bias +1"."""
+    assert "Bias" not in pn.briefing_caption({"analysis": {"bias": True}}, "open")
+    assert "Bias" not in pn.briefing_caption({"analysis": {"bias": False}}, "open")

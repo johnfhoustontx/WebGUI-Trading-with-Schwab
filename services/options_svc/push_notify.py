@@ -577,7 +577,10 @@ def send_gamma_briefing(res: dict, *, slot: str, config: dict | None = None) -> 
     if not gb.get("enabled", True):
         return False
     slots = gb.get("slots")
-    if slots and slot not in slots:
+    # `is not None`, NOT truthiness: an operator who sets "slots": [] means "mute
+    # every slot", and a falsy test would skip the gate and push all four instead.
+    # Key absent -> None -> no slot filter (push all).
+    if slots is not None and slot not in slots:
         return False
     res = res or {}
     if not res.get("analysis"):        # degraded run — never push
