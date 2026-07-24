@@ -72,6 +72,42 @@ def test_send_telegram_posts_to_bot_api(monkeypatch):
     assert calls["json"]["chat_id"] == 42 and calls["json"]["parse_mode"] == "HTML"
 
 
+def test_send_telegram_document_posts_multipart(monkeypatch):
+    calls = []
+    monkeypatch.setattr(ch.requests, "post",
+                        lambda url, **kw: calls.append((url, kw)))
+    ch.send_telegram_document("TOK", 42, "b.html", b"<html>hi</html>", "cap")
+    url, kw = calls[0]
+    assert url == "https://api.telegram.org/botTOK/sendDocument"
+    assert kw["data"] == {"chat_id": 42, "caption": "cap"}
+    assert kw["files"]["document"] == ("b.html", b"<html>hi</html>", "text/html")
+    # plain-text caption: no parse_mode, so nothing needs HTML-escaping
+    assert "parse_mode" not in kw["data"]
+
+
+def test_send_telegram_document_noop_without_creds(monkeypatch):
+    calls = []
+    monkeypatch.setattr(ch.requests, "post", lambda *a, **k: calls.append(a))
+    ch.send_telegram_document("", 42, "b.html", b"x")
+    ch.send_telegram_document("TOK", None, "b.html", b"x")
+    assert calls == []
+
+
+def test_send_telegram_document_swallows_errors(monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("network down")
+    monkeypatch.setattr(ch.requests, "post", boom)
+    ch.send_telegram_document("TOK", 42, "b.html", b"x")   # must not raise
+
+
+def test_send_telegram_document_truncates_caption(monkeypatch):
+    calls = []
+    monkeypatch.setattr(ch.requests, "post",
+                        lambda url, **kw: calls.append(kw))
+    ch.send_telegram_document("TOK", 42, "b.html", b"x", "z" * 2000)
+    assert len(calls[0]["data"]["caption"]) == 1024
+
+
 def test_send_discord_noop_without_url(monkeypatch):
     def boom(*a, **k):
         raise AssertionError("should not post without webhook")

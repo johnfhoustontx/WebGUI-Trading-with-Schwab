@@ -118,6 +118,9 @@ def load_config(path=None) -> dict:
 
 
 _TELEGRAM_API = "https://api.telegram.org/bot{token}/sendMessage"
+_TELEGRAM_DOC_API = "https://api.telegram.org/bot{token}/sendDocument"
+_TG_CAPTION_MAX = 1024      # Telegram sendDocument caption ceiling
+_DISCORD_CONTENT_MAX = 2000  # Discord webhook message content ceiling
 _SMTP_HOST, _SMTP_PORT = "smtp.gmail.com", 587
 _FI_GATEWAY = "@msg.fi.google.com"
 
@@ -132,6 +135,28 @@ def send_telegram(token: str, chat_id, text: str) -> None:
         }, timeout=8)
     except Exception as exc:  # noqa: BLE001 — best-effort
         log.warning("Telegram send failed: %s", exc)
+
+
+def send_telegram_document(token: str, chat_id, filename: str, content: bytes,
+                           caption: str = "") -> None:
+    """Upload a file to Telegram via sendDocument (multipart).
+
+    Used for artifacts a chat message cannot express — Telegram's HTML parse mode
+    accepts only a ~10-tag subset, so a full infographic must travel as a file the
+    recipient opens in a browser. Caption is PLAIN text (no parse_mode), so no
+    field needs HTML-escaping. Best-effort, like every sender here: no creds → no-op,
+    any failure → warn, never raises."""
+    if not token or not chat_id:
+        return
+    try:
+        requests.post(
+            _TELEGRAM_DOC_API.format(token=token),
+            data={"chat_id": chat_id, "caption": (caption or "")[:_TG_CAPTION_MAX]},
+            files={"document": (filename, content, "text/html")},
+            timeout=20,   # longer than the 8s text timeout — this is an upload
+        )
+    except Exception as exc:  # noqa: BLE001 — best-effort
+        log.warning("Telegram document send failed: %s", exc)
 
 
 def send_discord(webhook_url: str, embed: dict) -> None:
