@@ -2,10 +2,32 @@
   "enabled": true,
   "market_hours_only": true,
   "min_score": 0,
-  "telegram": { "bot_token": "", "chat_id": 0 },
-  "discord":  { "webhook_url": "", "flow_uoa_webhook_url": "", "flow_crossover_webhook_url": "", "flow_gamma_flip_webhook_url": "" },
-  "sms":      { "fi_number": "", "smtp_user": "", "smtp_app_password": "" },
-  "gamma_briefing": { "enabled": false, "slots": ["premarket", "open", "midday", "close"], "webhook_url": "" },
+  "telegram": {
+    "bot_token": "",
+    "chat_id": 0
+  },
+  "discord": {
+    "webhook_url": "",
+    "flow_uoa_webhook_url": "",
+    "flow_crossover_webhook_url": "",
+    "flow_gamma_flip_webhook_url": "",
+    "market_snapshot_webhook_url": ""
+  },
+  "sms": {
+    "fi_number": "",
+    "smtp_user": "",
+    "smtp_app_password": ""
+  },
+  "gamma_briefing": {
+    "enabled": false,
+    "slots": [
+      "premarket",
+      "open",
+      "midday",
+      "close"
+    ],
+    "webhook_url": ""
+  },
   "twitter": {
     "enabled": false,
     "dry_run": true,
@@ -15,9 +37,18 @@
     "api_secret": "",
     "access_token": "",
     "access_secret": "",
-    "hashtags": ["#options", "#0DTE", "#SPX"],
+    "hashtags": [
+      "#options",
+      "#0DTE",
+      "#SPX"
+    ],
     "discord_url": "",
     "extra_text": "",
     "disclaimer": "Not advice. Paper/educational."
+  },
+  "market_snapshot": {
+    "enabled": true,
+    "start": "08:30",
+    "end": "15:00"
   }
 }
