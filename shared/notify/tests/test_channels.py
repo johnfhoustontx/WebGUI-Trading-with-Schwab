@@ -230,3 +230,9 @@ def test_public_names_reexported_from_package():
     assert send_telegram is ch.send_telegram
     assert _in_market_hours is ch._in_market_hours
     assert _today_ct is ch._today_ct
+
+
+def test_package_reexports_file_senders():
+    import shared.notify as sn
+    assert sn.send_telegram_document is ch.send_telegram_document
+    assert sn.send_discord_file is ch.send_discord_file

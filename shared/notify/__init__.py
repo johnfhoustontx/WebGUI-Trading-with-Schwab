@@ -8,7 +8,9 @@ options-domain `push_notify` (and its tests) reference them by those names.
 from .channels import (
     load_config,
     send_telegram,
+    send_telegram_document,
     send_discord,
+    send_discord_file,
     send_sms,
     _in_market_hours,
     _today_ct,
@@ -17,7 +19,9 @@ from .channels import (
 __all__ = [
     "load_config",
     "send_telegram",
+    "send_telegram_document",
     "send_discord",
+    "send_discord_file",
     "send_sms",
     "_in_market_hours",
     "_today_ct",
