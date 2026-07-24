@@ -80,7 +80,13 @@ CHOP_ADX_LO, CHOP_ADX_HI = 15.0, 25.0     # ... x (1 - ramp(adx)) low ADX
 # Crisis (max over tells — any single tell is sufficient)
 VIX1D_SPIKE_LO, VIX1D_SPIKE_HI = 10.0, 35.0   # day-over-day %
 CRISIS_ATR_LO, CRISIS_ATR_HI = 0.85, 0.97
-CRISIS_GAP_MIN_PCT = 1.0                  # unfilled gap larger than this fires
+# Unfilled-gap crisis tell — a RAMP over genuinely extreme gaps, NOT a binary
+# cliff. Routine 1-2% opening gaps happen weekly and are not crises; a
+# crisis-grade gap is a tail event (~3%+ unfilled, holding). A 2.5-5% ramp means
+# a 1.1% gap contributes 0, a ~3% gap a mild partial, and only a ~4.4%+ gap trips
+# the crisis-attack force-commit. (The old binary at 1% pinned every gappy day to
+# "Crisis" via max() + the force-commit — live-caught 2026-07-24.)
+CRISIS_GAP_LO_PCT, CRISIS_GAP_HI_PCT = 2.5, 5.0
 
 # Per-regime input weights (confidence weights for _wavg)
 MR_W_ADX, MR_W_FLAT, MR_W_MIDBAND, MR_W_PROFILE, MR_W_FLIP = 0.25, 0.20, 0.15, 0.25, 0.15
@@ -292,8 +298,11 @@ def _crisis(ev):
     gap = _num(ev.get("gap_open_pct"))
     filled = _bool(ev.get("gap_filled"))
     if gap is not None and filled is not None:   # gap_filled None/non-bool -> absent
-        fired = abs(gap) > CRISIS_GAP_MIN_PCT and filled is False
-        tells.append((1.0 if fired else 0.0, f"Unfilled gap {gap:+.1f}%"))
+        # Only an UNFILLED gap counts (a recovered gap isn't stress); its severity
+        # ramps over extreme magnitudes so routine gaps contribute ~0.
+        unfilled = 1.0 if filled is False else 0.0
+        mag = ramp(abs(gap), CRISIS_GAP_LO_PCT, CRISIS_GAP_HI_PCT) * unfilled
+        tells.append((mag, f"Unfilled gap {gap:+.1f}%"))
     deep = _num(ev.get("below_flip_deep"))
     if deep is not None:
         tells.append((_clamp(deep, 0.0, 1.0), "Deep below gamma flip"))

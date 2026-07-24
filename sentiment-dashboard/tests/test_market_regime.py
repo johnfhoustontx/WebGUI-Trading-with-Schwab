@@ -112,13 +112,33 @@ def test_crisis_is_max_not_average():
     assert s.raw["crisis"] >= 0.95
 
 
-def test_crisis_unfilled_gap():
-    ev = _quiet_range_day() | {"gap_open_pct": 1.8, "gap_filled": False}
+def test_crisis_extreme_unfilled_gap_fires():
+    # A genuinely crisis-grade unfilled gap (>= CRISIS_GAP_HI_PCT) → full crisis.
+    ev = _quiet_range_day() | {"gap_open_pct": -5.5, "gap_filled": False}
     assert MR.score_regimes(ev).raw["crisis"] == 1.0
 
 
+def test_crisis_routine_gap_does_not_fire():
+    # THE reported bug: a routine ~1% opening gap must NOT pin crisis. It sits
+    # below CRISIS_GAP_LO_PCT, so it contributes ZERO crisis intensity (the gap
+    # tell is a ramp over extreme gaps, not a binary cliff at 1%).
+    for g in (-1.1, 1.0, 1.8, 2.4):
+        ev = _quiet_range_day() | {"gap_open_pct": g, "gap_filled": False}
+        assert MR.score_regimes(ev).raw["crisis"] == 0.0, f"gap {g}% should not fire"
+
+
+def test_crisis_gap_is_a_ramp_not_a_cliff():
+    # Partial: a mid-range gap gives partial crisis, and NOT enough to trip the
+    # crisis-attack force-commit (0.7) — so a single moderate gap can't lock the day.
+    mid = (MR.CRISIS_GAP_LO_PCT + MR.CRISIS_GAP_HI_PCT) / 2.0
+    c = MR.score_regimes(_quiet_range_day()
+                         | {"gap_open_pct": -mid, "gap_filled": False}).raw["crisis"]
+    assert 0.0 < c < MR.CRISIS_ATTACK
+
+
 def test_crisis_filled_gap_does_not_fire():
-    ev = _quiet_range_day() | {"gap_open_pct": 1.8, "gap_filled": True}
+    # Even an extreme gap that has been FILLED (market recovered) is not crisis.
+    ev = _quiet_range_day() | {"gap_open_pct": -5.5, "gap_filled": True}
     assert MR.score_regimes(ev).raw["crisis"] == 0.0
 
 
