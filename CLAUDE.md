@@ -8,7 +8,113 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-07-20 (**Options Matrix Display tab** (`/options/matrix`, a **main-menu (left-rail)
+**Last updated:** 2026-07-23 (**Market Regime — blended structural classifier (Phase 1, CONTEXT-ONLY)**:
+a THIRD classification axis alongside the direction × aggression five-state — **market STRUCTURE**
+(*how* the tape is moving): **Mean Reversion / Trending / Breakout / Choppy / Crisis**. Built
+**soft-first**: the primary output is a **membership VECTOR** (each regime a continuous 0-1 weight),
+so a regime handover reads as a **gradual band shift + an explicit transition** ("Mean Reversion →
+Trending · 60%") instead of a threshold flip; the hard label is derived for display only and lags
+behind per-challenger hysteresis. **Pure core** (`sentiment-dashboard/scoring/`): `volatility.py`
+(Wilder ATR + Bollinger width + percentile), `market_regime.py` (20-key optional evidence contract →
+five per-regime scorers — weighted-average / **multiplicative** breakout / **max()** crisis — →
+normalized memberships + `confidence = max(raw)` + an honest **"Unclear"** floor; then the temporal
+layer: **wall-clock half-life** EMAs (fast 15 min / slow 60 min, so cadence and smoothing are
+independent knobs), `detect_transition`, challenger-aware `commit_label`, and `apply_crisis_attack`),
+`regime_evidence.py` (bar-derived assembly reusing `technical`/`profile_shape`/`volatility`; the
+signed `session_structure`/`rejection_defense` scorers were deliberately NOT reused — their blended
+output can't express a both-sided magnitude or an enum). **Service**: `compute.compute_market_regime`
+(TTL-memoized multi-session SPY 5-min fetch → today's session sliced out for the session-scoped
+evidence, trailing sessions as the **same-timescale** Bollinger-width percentile basis; VIX; a
+staleness-gated `cache:options:matrix` row for dealer-gamma; prior-threaded; degrades to an
+`unclear` shell that PRESERVES the smoothing carry) + a **5-min RTH slot** (`scheduler.regime_due`,
+polled on the existing 120 s tick → fires within ≤2 min; off-hours the last read persists) +
+`handlers._maybe_recompute_regime`/`_publish_regime`/`_record_regime` + a **≤2-min crisis fast path**
+(`run_crisis_check`, every refresh, crisis-only evidence, compare-and-set under the lock, writes only
+on an attack). Publishes **`cache:sentiment:regime`** (additive **`RegimeState`** contract; carry keys
+stripped) + **`cache:sentiment:regime_history`**, and records one row per sample into a new
+**`regime_intraday`** table (30-session window) so tuning/validation data accrues from day one.
+**Surfaced**: a **Market Regime** panel on `/sentiment` (headline + confidence + transition line +
+evidence chips + a **percent-stacked area chart** of today's membership mix, plain chart + synthetic
+contiguous axis per the stockChart-freeze gotcha) and an additive **`market_regime`** entry in the
+driver's `market_read` (**named that, NOT `structure`/`regime` — both are already taken in driver_svc
+for the spread structure and the gamma-briefing regime**). **CONTEXT ONLY — `guardrails.py` is
+untouched** (pinned by a test); no scanner tilt, no sizing change. **Phase 2 is offline validation**
+(extend `validate_market_state.py`; publish the honest result) and only THEN Phase 3 consumers.
+**Three bugs that only LIVE verification caught** (every unit test used fakes and passed): (1) the SPY
+lookback asked for `days=6`, which **Schwab rejects with a 400** (`periodType=day` allows only
+[1,2,3,4,5,10]) → bars always None → the classifier would have been **permanently "Unclear"** in
+production (now 10, with the allowed set pinned by two regression tests); (2) the Bollinger-width
+percentile ranked an intraday width against **daily** windows → pinned at ~0, silently distorting
+breakout + mean-reversion; (3) `REGIME_TEXT_CLASSES` was a list where NiceGUI's `.classes(remove=)`
+splits a **string** → every `/sentiment` load 500'd. Also: **Schwab serves NO `$VIX1D` price history**
+(live-probed: 0 candles, while `$VIX`/`$VIX3M` return them), so the VIX-spike crisis tell runs off an
+in-process session latch over the quote the service already fetches (probed once/day, 4-day staleness
+bound, degrades to None — never a fabricated spike). **Restart `sentiment_svc` + `driver_svc` + the
+webgui.** Green: sentiment-dashboard **408**, sentiment_svc **187**, driver_svc **218**, webgui **877**,
+contracts **46**; ruff clean. Live-verified end-to-end (real proxy → label "Trending", confidence 0.50,
+evidence "ADX 64 rising / Band-hug 67% / 2 failed OR breaks"; contract-valid with no carry leakage;
+RTH gate correctly silent off-hours). Design/plan:
+[design](docs/plans/2026-07-23-market-regime-blended-classifier-design.md) /
+[plan](docs/plans/2026-07-23-market-regime-blended-classifier-plan.md). Prior — 2026-07-21 (**Market Dashboard: "Magnificent 7" frame → "Top 10", MAG7 tile →
+BIG10**: renamed the mega-cap frame category **"Magnificent 7" → "Top 10"** (`symbols.py` `_MAG` +
+`CATEGORY_ORDER`) and the composite basket tile **"MAG7" → "BIG10"**; the composite already aggregates
+all **10** members (the Mag-7 + AVGO/PLTR/AMD — avg day-move, "N/10 up" breadth, dollar-weighted
+net-premium skew). The market ticker was repointed (`webgui/pages/ticker.py` reads the `"Top 10"`
+category → emits a `BIG10 …` item). All pure-data + a category-string read; `build_dashboard`/the page
+render generically. market_svc **61** + webgui **870** green; live-verified (frame header "TOP 10",
+composite "BIG10 −4.00% / 0/10 up / Put 30%", no "Magnificent 7" anywhere, no console errors). **Restart
+`market_svc` + the webgui.** Prior — 2026-07-21 (**Market Dashboard: MAG7 frame → 10 names + `$MGTN` index tile**:
+(1) added **AVGO, PLTR, AMD** as constituent tiles in the Magnificent 7 frame (each with a call/put
+premium subline like the other mega-caps), and **expanded the `MAG7` composite basket from 7 → 10
+members** so its avg day-move, breadth ("N/10 up") and net-premium skew now span all 10 (the tile keeps
+the `MAG7` label). (2) added an **`$MGTN`** quote tile ("MGTN") to the **Options Sentiment** panel — the
+**CBOE Magnificent Ten Index**, an index level colored by day %-move. The user knew it as the
+ThinkorSwim symbol **`IMGTN:CGI`**, which the Schwab market-data **API rejects** (`invalidSymbols`) — the
+`:CGI` suffix is a ToS index/internals feed the API doesn't serve; the API equivalent
+**`$MGTN`** was found via the proxy's `/instruments` **`symbol-regex`** search (`.*MGTN.*` →
+"CBOE MAGNIFICENT TEN INDEX", assetType INDEX) and quotes cleanly. All pure-data (`symbols.py`
+`_basket` members + `_q` tiles); `build_dashboard`/`_attach_prem`/the page render them unchanged
+(generic over basket members + prem tiles + index quotes). SYMBOL_MAP 64 → 68 tiles. market_svc **61**
+green; live-verified during RTH (all 10 mega-caps render with premium sublines; MAG7 composite spans 10;
+MGTN = 476.85 / −3.1% in Options Sentiment beside Put/Call + Net Prem; uniform 92px tiles; no console
+errors). **Restart `market_svc`.** Prior — 2026-07-21 (**Market Dashboard per-symbol premium sublines + equal-height tiles**:
+follow-up to the Net Prem tile — the **index (SPX/NDX)**, **broad-ETF (SPY/DIA/QQQ/IWM)** and
+**Magnificent-7** tiles now carry a small **per-symbol call/put PREMIUM skew subline** ("Call 37%" /
+"Put 11%" / "Even" / "—"), and the **MAG7 composite tile shows the dollar-weighted net of its 7
+members**. Data path: `matrix.build_rows` now exposes raw `call_prem`/`put_prem` per row (additive);
+`market_svc.compute.read_symbol_premiums(bus)` (version-gated, like `read_net_prem`) reads them into a
+`{symbol: (call, put)}` map; the tiles are flagged `prem=True` in `symbols.py`; `build_dashboard._attach_prem`
+sets `prem_skew_pct` per tile (a quote tile looks itself up by `quote_symbol`; the MAG7 basket
+Σcall/Σput-aggregates its members via the pure `symbol_premium_skew`); the page's `prem_line`/`tile_text`
+render it as a third label. **All dashboard tiles are now a fixed `min-h-[92px]`** so every tile in a
+frame is the **same height** whether or not it has a premium subline (measured: all 64 tiles = 92px).
+A name not in the collected universe → "—". TDD (matrix row 1, market_svc compute 6, webgui tile 2);
+options_svc matrix **25**, market_svc **60**, webgui **867** green; **live-verified during RTH** (SPX
+Call 51% / SPY Call 37% / AMZN Put 11% / MAG7 Call 33% = net of 7, RSP correctly no line, uniform 92px
+tiles, no console errors). **Restart `options_svc` + `market_svc` + the webgui.** Prior — 2026-07-21 (**Market Dashboard "Net Prem" tile — dollar-weighted call/put premium
+skew**: the **Market Dashboard** (`/market`) OPTIONS SENTIMENT frame gained a second tile beside
+**Put/Call** — **Net Prem**, the **money-weighted net call/put premium** across the ~45 already-collected
+symbols (index base + `Top 20.xlsx`) — "Call 46%" (call$ dominant, green) / "Put 22%" (red) / "Even" /
+"—", with a net-$ subline ("+$2.76B"). **No new data collection**: every 1-min GEX poll already stores
+per-symbol cumulative `call_prem`/`put_prem` in `gex_history.db`; a new PURE
+`options_svc.matrix.market_premium_aggregate(raw)` sums them dollar-weighted (so index/mega-cap premium
+dominates — a market-money read) → `{call_total, put_total, net_m, skew, skew_pct, symbols}` attached to
+**`cache:options:matrix` → `premium`** in `compute.build_matrix` (additive; `MatrixSnapshot` gained an
+optional `premium` field). `market_svc` reads it via a version-gated `compute.read_net_prem(bus)` (mirrors
+`read_sector_pcr`) → a new **`options_net_prem`** external tile in `symbols.py` (Options Sentiment,
+polarity `normal` = call-money → risk-on/green; value-only mild coloring, like the sibling Put/Call);
+`build_dashboard` branches the external kind on `e["source"]`, carrying the raw aggregate on the tile,
+and the page's `tile_text` formats "Call 46%"+subline (Tier-1). **Honest caveat (tile tooltip + help
+text):** premium is UNSIGNED cumulative (Schwab has no tape) so it's a **money-weighted Put/Call, NOT net
+buying**; dollar-weighting means indices/mega-caps dominate. **First attempt put the tile on the
+Sentiment page's Signals matrix; the user redirected it to the Market Dashboard, so the sentiment-side
+consumption was reverted** (the options_svc `premium` aggregate stayed — it now feeds the dashboard). TDD
+per layer (matrix aggregate 4, market_svc compute 6 + symbols, webgui tile_text 2); options_svc
+**723**/2-baseline, market_svc **55**, webgui **865** green; **live-verified during RTH** (Net Prem =
++46% net-call / +$2.76B / 44 symbols, green tile beside Put/Call, no console errors). **Restart
+`options_svc` + `market_svc` + the webgui.** Also this session — the **Market Trend & Sentiment section
+was split into 4 tabs** (Sentiment · Sector & Industry · Sector Rotation · RRG) and the Sentiment "as of …"
+line was dropped (see the "split into 4 tabs" Prior entry below). Branch `Using_Highcharts`. Prior — 2026-07-20 (**Options Matrix Display tab** (`/options/matrix`, a **main-menu (left-rail)
 item directly under the Options group** — its OWN standalone page via `main.OPTIONS_RAIL` [rendered by
 `_nav_link` right after the Options group entry], NOT an Options tab-strip entry; moved out of
 `OPTIONS_CHILDREN` per the user's request so it's a top-level menu item, not a subtab) — an at-a-glance
@@ -1669,7 +1775,7 @@ Routes:
 | `/options/simulator` | Simulator (**Replay / What-if / IV-shock as SUBTABS under the main strip** + **Controls+Strategy merged side-by-side in one card** (2026-07-11); **multi-leg strategy builder** — a Strategy dropdown over the shared **editable leg-editor** (`leg_editor.py`) replaces the old single-contract selector — driving all three legacy tabs: **Replay** (re-prices the **netted** position along the underlying's recent path → stacked price + 5-Greek panels over a gap-compressed integer x-axis w/ a client-side scrub cursor) + What-if (a **dollar profit/loss payoff from entry**: P/L = position value (×100 contract multiplier) minus the **entry mark** (`whatif_baseline` = value at spot *now*) — so profit caps at the net credit, loss floors at width−credit, **matching the Calculator** — with a green profit fill above / red loss fill below breakeven (area `threshold:0` + `color`/`negativeColor`) + faint Profit/Loss washes + labels; Δt is **elapsed** days from now, per-leg decay → **calendars** correct, theta visible as Δt slides) + IV-shock; **Copy to Calculator** button; **dark-navy dashboard theme** via shared `theme.py`; **persists full UI state across navigation** (symbol/strategy/legs/sliders/active tab) + **auto-refreshes on return** via a single-user module snapshot — `page_state.py`; the **Symbol** field **Fetches the snapshot on tab-out (`focusout`) / Enter** (deduped) with the same **centered wait overlay** (`overlay.py`) until the meta lands; **compact leg cells** + no "Actions" header (shared `leg_editor`)) | built |
 | `/options/expected-move` | Expected Move (candlestick price history (6-mo daily) + forward **ATM-IV expected-move cone** to the option's expiration (green/red dashed, √-time fan) + leg **strike lines** (short solid / long dashed, put/call colored) + axis **crosshair** w/ Date(X)+Price(Y) label boxes; opened in a **new browser tab** via stash-handoff from Scanner/Paper/Captured/Calculator, or standalone w/ symbol+expiry input) | built |
 | `/options/rescue` | Rescue (last tab of the Options strip; bare dense table, no wrapper cards since 2026-07-12; at-risk credit spreads (PCS/CCS/IC) → **at-risk table** (paper+captured, heat-colored) → select a position → ranked **commission-aware adjustment menu**: close / partial-close / narrow / convert-IC / butterfly / roll-down/out/down-out / broken-wing / inverted / futures-hedge; each card shows gross/commission/net + metrics + legs + rationale + strategic context + warnings + score; execute cards have **Apply → confirm → `rescue_apply`** behind a stale-price guard, advisory cards show "manual"; nav badge from `cache:options:rescue_summary`) | built |
-| `/sentiment` | Sentiment — nav group **Market Trend & Sentiment** since 2026-07-11 (two-column top: **dual** Sentiment gauges (Today + 30-Day Avg) + **dual** Market Trend gauges (Today live-intraday + 30-Day structural — directional 0–100 score, 15-min cadence). **The Today trend gauge's state label + regime badge now show the FIVE-STATE (direction × aggression) vocabulary** — short labels **Bull / Weak Bull / Neutral / Resilient / Bear**, badge label+description e.g. "Lack of Bearishness — Refuses to drop, puts cheap/undefended — favor PCS" — and the press-and-hold **TREND DETAIL popup gained a "Why" evidence section** (direction/effort/skew/flow/session/rejection/profile/order-flow/option-flow/aggression lines). The **0–100 needle is unchanged** (still the direction score); the **30-Day structural gauge deliberately KEEPS the old band vocabulary** (structural read = no aggression axis), so the panel carries both. See the root five-state entry above. / component table; traffic-light tiles; collapsed **"Daily Sentiment & Trend"** expander = two value-colorized (green/yellow/red) **2-min intraday graphs** (Daily Market Sentiment 0–10 + Daily Market Trend 0–100), rolling **last 5 trading days**, session gaps collapsed, **recorded going forward** by `sentiment_svc` (RTH-gated) into `SENTIMENT_INTRADAY_DB` → `cache:sentiment:intraday_history` (replaced the old 30-day-history line + rolling-avg/velocity/divergence text) — **expanded by default since 2026-07-12**; bottom status bar; **persists across navigation**; **server-side 120s auto-refresh + bridge publish, tab-independent**. **Since 2026-07-12** the Sector & Industry table, Sector Rotation, and the RRG chart are SEPARATE tabs (below) — this page still reads `cache:sentiment:sectors` only to fill the Components popup's Rotation/Sector-Value cells) | built |
+| `/sentiment` | Sentiment — nav group **Market Trend & Sentiment** since 2026-07-11 (two-column top: **dual** Sentiment gauges (Today + 30-Day Avg) + **dual** Market Trend gauges (Today live-intraday + 30-Day structural — directional 0–100 score, 15-min cadence). **The Today trend gauge's state label + regime badge now show the FIVE-STATE (direction × aggression) vocabulary** — short labels **Bull / Weak Bull / Neutral / Resilient / Bear**, badge label+description e.g. "Lack of Bearishness — Refuses to drop, puts cheap/undefended — favor PCS" — and the press-and-hold **TREND DETAIL popup gained a "Why" evidence section** (direction/effort/skew/flow/session/rejection/profile/order-flow/option-flow/aggression lines). The **0–100 needle is unchanged** (still the direction score); the **30-Day structural gauge deliberately KEEPS the old band vocabulary** (structural read = no aggression axis), so the panel carries both. See the root five-state entry above. / component table; traffic-light tiles; a **"Market Regime"** expander (2026-07-23) = the blended STRUCTURAL read — committed label + confidence, a **transition line** ("Mean Reversion → Trending · 60%", hidden when stable), the classifier's evidence chips, and a **percent-stacked area chart** of today's membership mix (one band per regime, fixed order, plain chart + synthetic contiguous axis; reads `cache:sentiment:regime` + `:regime_history` on their OWN 5-min-cadence version probe; "Waiting for regime…" when nothing is published, "Unclear" when the evidence is genuinely weak) — see the root Market Regime entry; collapsed **"Daily Sentiment & Trend"** expander = two value-colorized (green/yellow/red) **2-min intraday graphs** (Daily Market Sentiment 0–10 + Daily Market Trend 0–100), rolling **last 5 trading days**, session gaps collapsed, **recorded going forward** by `sentiment_svc` (RTH-gated) into `SENTIMENT_INTRADAY_DB` → `cache:sentiment:intraday_history` (replaced the old 30-day-history line + rolling-avg/velocity/divergence text) — **expanded by default since 2026-07-12**; bottom status bar; **persists across navigation**; **server-side 120s auto-refresh + bridge publish, tab-independent**. **Since 2026-07-12** the Sector & Industry table, Sector Rotation, and the RRG chart are SEPARATE tabs (below) — this page still reads `cache:sentiment:sectors` only to fill the Components popup's Rotation/Sector-Value cells) | built |
 | `/sentiment/sectors` | Sector & Industry (NEW tab 2026-07-12, `pages.sentiment_sectors`, inserted between Sentiment and Sector Rotation): the **Sector & Industry Performance** table lifted out of `/sentiment` — Day/Week/Month %, P/C, RRG quadrant, rotation banner, cap-weighted summary line, **expandable industries w/ P/C+RRG**; Refresh / Expand All / Collapse All. Tier-3 reader of `cache:sentiment:sectors`; **reuses the PURE builders from `pages.sentiment`** (`sector_table_rows`/`sector_summary`/`rotation_banner`/`industry_rows` + color helpers) so the display logic + its tests stay single-source) | built |
 | `/sentiment/rotation` | Sector Rotation (RRG-vs-SPY assessment: Risk-ON/OFF headline + spread; **top row** = quadrant-map table (left) + tight ROTATING FROM/INTO w/ S&P weights (right). **Since 2026-07-12 the RRG CHART moved to its own `/sentiment/rrg` tab** — this page is now the headline + quadrant map + rotating-from/into only; reuses `sector_rotation_assessment`; cached, **manual Refresh only**) | built |
 | `/sentiment/rrg` | RRG (NEW tab 2026-07-12, `pages.sentiment_rrg`, last tab after Sector Rotation): the **full-width RRG** chart lifted out of `/sentiment/rotation` — Risk-ON/OFF headline for context + per-sector "meteor tails" (engine `assess_sector` retains a `tail` of `TAIL_LENGTH=12` RS-Ratio/RS-Mom points sampled every `TAIL_STRIDE=2` days; **one spline series per sector** = faded trail line + single bright head dot) with native Highcharts hover-isolation (`plotOptions.series.states.inactive`). Tier-3 reader of `cache:sentiment:rotation`; **reuses `rrg_scatter_figure`/`headline_parts` from `pages.sentiment_rotation`**; cached, **manual Refresh only**) | built |
@@ -1683,7 +1789,7 @@ decision-log row) | built |
 | `/settings` | Settings (GUI prefs via `app_settings`: scanner **audio alert** on/off + sound + volume, only-during-market-hours, min-score-to-alert; desktop-notification toggle + permission grant + Test sound; ticker toggle/speed; **Appearance** — edits every `config/theme.toml` knob in-app (7 sections: palette / semantic / 3D buttons / gauge / charts / typography / menu; color pickers + text inputs, `theme.knob_label` humanized labels) with **Save** (comment-preserving `theme.save_theme_values`), **Save & restart web GUI** (reuses the Status page's windowless self-restart), and a confirm-gated **Reset to defaults**; **API usage** (2026-07-13) — outbound Schwab API-call counts Today / last 7 / last 30 days, read off-thread from the proxy's `GET /stats/api_calls`, **plus Claude (Anthropic) call counts** from the cross-tier `shared/anthropic_counter.py` store (`shared/data/anthropic_call_counts.db`, WAL — recorded immediately before every `messages.create` at the three call sites: driver decider / Gamma Analyze / market-ticker summary; services need a restart to start counting) (counted per actual HTTP request at the marketdata rate-limit chokepoint + the trader loop → per-day rows in `schwab-proxy/data/api_call_counts.db`, forward-only; requires a proxy restart to start counting); **Maintenance** (2026-07-13) — a confirm-gated **Vacuum GEX history DB** button (optional purge-first switch) that runs `tools/vacuum_gex.py` as a subprocess off-thread and prints the before→after size — the tool still refuses while the collector is active) | built |
 | `/portfolio` | Portfolio (3-tier, `services/portfolio_svc` :8212: **Holdings / Sectors / Performance** tabs over the portfolio model — sector breakdown, vs-sector RS, since-purchase excess, benchmark over/under-weight, tailwind; **Performance** scorecard (return/capital/risk/entry grades + composite + ann. return + drawdown) with a per-position **advisory suggestions** detail pane; **live-streaming P&L** via the service's proxy SSE consumer republishing each tick; proxy/stream status bar; persists across nav) | built |
 | `/eod` · `/eod/detail` | EOD Report (pure-webgui aggregator over `options:*` + `driver:*` caches. **Summary** = headline tiles + a **verbose Daily / Weekly(WTD) / MTD performance** block **per book** — the manual paper **ledger** (`options:paper_trades`) and the **Driver** account (`options:driver_paper_account`, incl. its new `closed_positions`) shown separately (realized P&L bucketed by **exit** date; opened/credit by **entry** date; a per-book now-line = equity/session-P&L/open-unrealized/open-count). **Detailed** = the same performance + **trade-type breakdowns** (by **strategy** PCS/CCS/IC, by **0-DTE/Swing**, by **status** Open/Closed/Expired) for each book + full trade/scanner/captured/driver tables. **Navigation**: a jump-link **TOC** + every section in a native **`<details>`** (collapsible, **no JS** — works in-app AND in the exported files). **Generate** snapshots the caches → standalone `summary.html` + `detail.html` archived under `webgui/data/eod/<date>/`; `/eod/file` serves them raw. Pure builders (`normalize_trades`/`period_buckets`/`breakdown_rows`/`performance_table_html`/`breakdown_table_html`/`toc`/`details_section`) unit-tested. Realized reads `$0`/`—` until trades close — by design, not a bug) | built |
-| `/market` | Market Dashboard (3-tier, `services/market_svc` :8215: a live grid of ~48 macro tickers from `symbol_categories.csv`, grouped into a **framed panel per category** laid out macro→tape→rotation (Volatility/Options-Sentiment/Internals/Currency · Cash-Index/Futures/Broad-ETF/**Magnificent-7** · Sector/Thematic/Factor/Fixed-Income/Crypto/Countries). Each **tile** shows symbol + description (hover tooltip) + last + net/%-change on a **semantic risk-on/off colored background** (green risk-on / red risk-off / grey no-data, intensity by magnitude) — **polarity-aware** (VIX/SKEW/put-call/TLT/UUP shade RED on up-moves). The **Magnificent 7** frame leads with a **composite `MAG7` tile** = the equal-weighted avg day %-move of NVDA/MSFT/GOOGL/AMZN/META/AAPL/TSLA + a breadth subline (e.g. "3/7 up"), colored by the avg (a new `kind="basket"` tile whose members are also its 7 constituent tiles). `market_svc` polls the proxy's raw `/quotes` on a **~2 s RTH cadence** (5 s off-hours — futures trade ~24h so off-hours stays snappy), normalizes change across INDEX/EQUITY/FUTURE, computes the `$ADVN-$DECN` breadth spread + the `MAG7` basket, and reads the app's own cap-weighted put/call from `cache:sentiment:composite` → publishes `cache:market:dashboard`; the page version-polls + **updates tiles in place** (no per-tick rebuild). **CSV→Schwab symbol map** handles the translations (`SPX`→`$SPX`, `VIX`→`$VIX`, `/ES[U26]`→`/ESU26`) + **equivalents for symbols Schwab can't quote** (`$DXY`→`UUP`; `$PCALL`/`$PCSP`→the sentiment cap-weighted P/C tile). See the "Market Dashboard" section below) | built |
+| `/market` | Market Dashboard (3-tier, `services/market_svc` :8215: a live grid of ~48 macro tickers from `symbol_categories.csv`, grouped into a **framed panel per category** laid out macro→tape→rotation (Volatility/Options-Sentiment/Internals/Currency · Cash-Index/Futures/Broad-ETF/**Top 10** · Sector/Thematic/Factor/Fixed-Income/Crypto/Countries). Each **tile** shows symbol + description (hover tooltip) + last + net/%-change on a **semantic risk-on/off colored background** (green risk-on / red risk-off / grey no-data, intensity by magnitude) — **polarity-aware** (VIX/SKEW/put-call/TLT/UUP shade RED on up-moves). The **Top 10** frame (renamed from "Magnificent 7" on 2026-07-21) leads with a **composite `BIG10` tile** = the equal-weighted avg day %-move of its **10 members** (NVDA/MSFT/GOOGL/AMZN/META/AAPL/TSLA + AVGO/PLTR/AMD) + a breadth subline (e.g. "8/10 up"), colored by the avg (a `kind="basket"` tile whose members are also its 10 constituent tiles). **Per-symbol premium sublines (2026-07-21):** the SPX/NDX, SPY/DIA/QQQ/IWM and Top-10 tiles carry a small **call/put PREMIUM skew** line ("Call 37%"/"Put 11%", from `cache:options:matrix` rows' `call_prem`/`put_prem`), the BIG10 tile shows the **dollar-weighted net of its 10**, and **every tile is a fixed `min-h-[92px]` so a frame's tiles are all the same height** whether or not they have the subline. `market_svc` polls the proxy's raw `/quotes` on a **~2 s RTH cadence** (5 s off-hours — futures trade ~24h so off-hours stays snappy), normalizes change across INDEX/EQUITY/FUTURE, computes the `$ADVN-$DECN` breadth spread + the `MAG7` basket, and reads the app's own cap-weighted put/call from `cache:sentiment:composite` **+ the dollar-weighted call/put PREMIUM skew ("Net Prem" tile) from `cache:options:matrix`→`premium`** (added 2026-07-21; "Call 46%"/"Put 22%" + a net-$ subline, a money-weighted P/C over the ~45 collected symbols, NOT net buying) → publishes `cache:market:dashboard`; the page version-polls + **updates tiles in place** (no per-tick rebuild). **CSV→Schwab symbol map** handles the translations (`SPX`→`$SPX`, `VIX`→`$VIX`, `/ES[U26]`→`/ESU26`) + **equivalents for symbols Schwab can't quote** (`$DXY`→`UUP`; `$PCALL`/`$PCSP`→the sentiment cap-weighted P/C tile). See the "Market Dashboard" section below) | built |
 | `/status` | System Status (pure-webgui health board: overall up/down banner + per-component cards probing **Memurai** PING, **schwab-proxy** `/health`, **Schwab Authorization** (OAuth token state, with an **Authorize** button → proxy `/auth`), the **six domain services** `/health` (incl. `market_svc` :8215), and **webgui** itself; plus a **published-data-freshness** table — each domain's cache version + age (incl. `market:dashboard`), flagging stale scheduled views; a **Restart button on every component card** (proxy + the six services + Memurai + the webgui itself, shown up or down) — proxy/services/webgui relaunch **windowlessly** via `tools\restart_one.bat` (`CREATE_NO_WINDOW` → hidden `pythonw`, logs to `logs\`), Memurai via `Restart-Service`; the auth card shows **Authorize** instead; off-thread sweep, auto-refresh 15 s + manual) | built |
 | `/terminate` | Terminate (guarded "stop the whole local stack" page: red **Stop all services** button behind a confirm dialog → spawns `stop_all.bat` detached via `cmd /c start`, which kills the proxy + 6 services + this web app by listening port; **Memurai is left running**; the page goes unresponsive after confirm, by design) | built |
 
@@ -1701,11 +1807,16 @@ condition**. Sixth Tier-2 service. Pieces:
   `color_state`, and publishes **`cache:market:dashboard`** (`skip_unchanged=True`, so no
   repaint on byte-identical ticks). No command handler — the page only reads.
 - **PURE modules.** `symbols.py` = the **CSV→Schwab symbol map** (single source of truth):
-  63 tiles with per-symbol **polarity** (`normal` up=risk-on / `inverted` up=risk-off) +
+  68 tiles with per-symbol **polarity** (`normal` up=risk-on / `inverted` up=risk-off) +
   `kind` (`quote`/`spread`/`external`), encoding the translations (`SPX`→`$SPX`, `VIX`→
-  `$VIX`, `SKEW`→`$SKEW`, `/ES[U26]`→`/ESU26`) and the **equivalents for symbols Schwab
+  `$VIX`, `SKEW`→`$SKEW`, `/ES[U26]`→`/ESU26`, ToS `IMGTN:CGI`→API **`$MGTN`** [CBOE
+  Magnificent Ten Index]) and the **equivalents for symbols Schwab
   can't quote** (`$DXY`→**`UUP`**; `$PCALL`+`$PCSP`→one **"Put/Call"** tile
-  fed from `cache:sentiment:composite` → `live.sector_pcr`). `classify.py` = pure
+  fed from `cache:sentiment:composite` → `live.sector_pcr`). Two `external` tiles now share
+  the **Options Sentiment** frame: **Put/Call** (`source="sentiment_pcr"`) and **Net Prem**
+  (`source="options_net_prem"`, added 2026-07-21) — the dollar-weighted call/put premium skew
+  fed from `cache:options:matrix`→`premium` via `compute.read_net_prem` (`build_dashboard`
+  branches the external kind on `e["source"]`). `classify.py` = pure
   `normalize_quote` (asset-type-aware % field), `spread_value` (`$ADVN-$DECN` = leg last
   diff, colored by SIGN not magnitude since a count isn't a %), and `color_state`
   (polarity × sign × intensity → 6 buckets +
@@ -2353,7 +2464,9 @@ not shown; credit_pulse excluded per v4.3 `WEIGHTS`) and the Trend detail are
 **press-and-hold popups** (`ui.menu().props("no-parent-event")`), not always-visible
 columns. The Signals column is a **2×2 four-tile matrix** (`TILE_DEFS` =
 **Bias/Signal/Yesterday/Change** — Modifier dropped per design) with a
-**traffic-light background** (`traffic_color(total)`). Below that, an **expanded-by-default**
+**traffic-light background** (`traffic_color(total)`). (A dollar-weighted call/put **premium**
+skew tile lives on the **Market Dashboard** OPTIONS SENTIMENT frame, NOT here — see the
+"Market Dashboard" section + the 2026-07-21 Last-updated entry.) Below that, an **expanded-by-default**
 (since 2026-07-12) `ui.expansion("Daily Sentiment & Trend")` holds **two stacked value-colorized 2-min
 intraday graphs** — Daily Market Sentiment (0–10) + Daily Market Trend (**shown 0–10**, stored
 0–100 ×0.1), each a Highcharts line colorized green/yellow/red by value via

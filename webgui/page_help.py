@@ -89,7 +89,8 @@ Re-prices a **multi-leg** option position under different what-ifs (Black-Schole
 - **Replay / What-if / IV shock** — the small tabs at the very top (under the
   page tabs) switch the three views below.
 - **Replay** — how the whole position would have behaved along recent price moves.
-- **What-if (ΔS / Δt)** — slide the underlying price or fast-forward **elapsed** days;
+- **What-if** — the **Price change** slider moves the underlying up or down, and the
+  **Days passed** slider fast-forwards time;
   each leg decays on its own clock, so calendars behave correctly. Watch the price
   and Greeks change.
 - **IV Shock** — multiply volatility to see vega risk. More time or volatility =
@@ -173,6 +174,13 @@ fear, which can mean opportunity.
 - **Sentiment gauges** — today vs the 30-day average.
 - **Market Trend gauges** — a 0–100 direction (50 = neutral, 100 = strong bull).
 - **Components** — press and hold to see what's driving the score.
+- **Market Regime** — *how* the market is moving, not which way: Mean Reversion,
+  Trending, Breakout, Choppy or Crisis. The stacked chart shows how much of each
+  is in today's tape, so a change of character shows up as the bands shifting
+  gradually. When one regime is taking over you'll see a line like
+  "Mean Reversion → Trending · 60%". Recomputes every 5 minutes during market
+  hours; outside them it holds the last read. Says "Unclear" when the evidence
+  is genuinely weak rather than guessing.
 - **Daily Sentiment & Trend** — the two color-coded intraday graphs (last 5 days).
 - **Sector & Industry**, **Sector Rotation** and **RRG** now have their own tabs
   along the top.
@@ -268,6 +276,15 @@ A live grid of macro tickers, grouped into framed panels by category.
 
 - **Colored tiles** — green means risk-on (up), red means risk-off, grey is flat
   or has no data. Fear gauges like VIX flip: up = red.
+- **Options Sentiment** — **Put/Call** (cap-weighted sector ratio) and **Net Prem**,
+  the dollar-weighted call-vs-put **premium** across the ~45 collected symbols
+  ("Call 46%" = more money through calls, green). It's a money-weighted Put/Call,
+  not net buying (Schwab has no tape).
+- **Premium sublines** — the index (SPX/NDX), broad-ETF (SPY/DIA/QQQ/IWM) and
+  mega-cap tiles show a small **call/put premium** line ("Call 37%"/"Put 11%")
+  for that name; the **BIG10** tile (in the Top 10 frame) shows the net of its 10
+  members (the Mag-7 plus AVGO/PLTR/AMD). A dash means that name isn't in the
+  collected universe.
 - **Auto-updates** roughly every 2 seconds during market hours.
 """,
     "/eod": """

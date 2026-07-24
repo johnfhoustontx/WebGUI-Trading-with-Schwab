@@ -24,6 +24,8 @@ outbound call per day (`Settings → API usage`, `GET /stats/api_calls`).
 | Sentiment composite refresh | sentiment_svc | every **120 s** RTH / once per **15 min** off-hours | `refresh_due` | breadth/VIX quotes + sector fetches (live composite) | `sentiment_svc/scheduler.py` `REFRESH_INTERVAL_SEC`, `_OFFHOURS_INTERVAL_MIN` |
 | Intraday Market Trend recompute | sentiment_svc | every **15 min** (inside the 120 s refresh) | RTH-weighted | SPY 5/15-min + daily history, breadth/sector/VIX quotes | `sentiment_svc/scheduler.py` `TREND_INTERVAL_SEC` |
 | Sector & Industry table (P/C) rebuild | sentiment_svc | **once per RTH hour** | `sectors_due` | ~24 calls incl. 11 `/chains` for sector P/C | `sentiment_svc/scheduler.py` `sectors_due` |
+| **Market-regime recompute** (structural classifier) | sentiment_svc | every **5 min**, RTH only (polled on the 120 s tick → fires within ≤2 min of the slot) | `regime_due`; off-hours the last committed regime persists | **~2** — SPY 5-min multi-session frame + daily, TTL-memoized 240 s (shared with the trend recompute); VIX quotes reuse the refresh's | `sentiment_svc/scheduler.py` `REGIME_INTERVAL_MIN`; `compute.compute_market_regime` |
+| **Market-regime crisis fast path** | sentiment_svc | every **120 s** (rides the composite refresh) | needs a held regime sample; writes only on a crisis attack | **0-1** — VIX quotes + a Redis matrix read; `$VIX1D` prior close probed at most **1×/day** (Schwab serves no VIX1D history — the session latch covers it) | `sentiment_svc/handlers.py` `run_crisis_check` |
 | Order-flow streams (equity SPY/QQQ + near-ATM options) | sentiment_svc | **continuous SSE**; near-ATM OSI set re-derived every **5 min**; cache publish every **30 s** | RTH-meaningful (streams run when connected) | 2 persistent `/stream/*` connections + a chain fetch per OSI refresh | `order_flow_consumer.py` `OPTION_OSI_REFRESH_SEC`, `ORDER_FLOW_PUBLISH_SEC` |
 | Portfolio live P&L stream | portfolio_svc | **continuous SSE**; republish every **2 s** when ticks pending | always on | 1 persistent `/stream/quotes` | `portfolio_svc/scheduler.py` `PUBLISH_INTERVAL_SEC` |
 | Portfolio full rebuild (baselines/sectors) | portfolio_svc | every **10 min** RTH / **hourly** off-hours (or on manual Refresh) | `rebuild_due`; baselines reused when signature unchanged | per-holding history fetches (cached) | `portfolio_svc/scheduler.py` `REBUILD_INTERVAL_SEC`, `OFFHOURS_REBUILD_INTERVAL_SEC` |
@@ -64,6 +66,7 @@ Steady state with the ticker on and the driver off: **~22 calls/day** (≈18 tic
 | Order-flow window prune | sentiment_svc | ≤ every 30 s inside the stream loop | 5-min rolling windows |
 | Gamma briefing index publish | options_svc | startup + after each persisted briefing | `cache:options:gamma_briefings` |
 | Five-state transition push | sentiment_svc | event-driven (committed-state flip) | market-hours gated |
+| Market-regime publish + record | sentiment_svc | per 5-min sample (+ an early republish on a crisis attack) | `cache:sentiment:regime` (contract-validated, carry state stripped) + `cache:sentiment:regime_history`; one row into `regime_intraday` (30-session window), `unclear` samples not recorded |
 | New-signal push (Telegram/Discord/Fi-SMS) | options_svc | event-driven at scan/captured publish | date-scoped seen-set; silent seed on restart. **Credit spreads only** — directional is excluded (its Fit+Quality score isn't commensurable with the premium composite the `min_score` gate uses) |
 | Scanner day-union merge + publish | options_svc | event-driven, every rescan | pure `merge_day_signals` → `cache:options:scan_day` (date-scoped, CT-pinned, capped 2000/list). No API calls; `cache:options:scan` stays live-only for the driver |
 | EOD digest push | options_svc | 1×/day ~15:10 CT | Telegram/Discord/SMS |
@@ -80,4 +83,5 @@ Version polls read the tiny `{key}:ver` counter (no payload) until it changes.
 | Ticker content poll | 4 s | version-gated; DOM rebuilt only when the content signature changes |
 | Status page sweep | 15 s (+ manual) | off-thread, 2.5 s per-probe timeout |
 | Sentiment page repaint | 120 s (fetch-free) | tracks the service cache |
+| Sentiment regime panel | 2 s version probe | own `cache:sentiment:regime` version (5-min cadence, independent of the composite) |
 | Stale-view alert thresholds | default 600 s; `options:scan` 20 min | `alerts.STALE_OVERRIDES` |
