@@ -236,17 +236,19 @@ verified facts. Do not re-derive or substitute your own strings:**
 | Tool `type` | `web_search_20260318` (latest; `web_search_20260209` / `web_search_20250305` also exist) |
 | Tool `name` | `web_search` |
 | Beta header / `betas=[…]` | **None required** — web search is GA |
-| Model support | **NOT documented per model.** All official examples use `claude-opus-5` / `claude-opus-4-8`. Support on **`claude-sonnet-5`** (our `_ANALYZE_MODEL`) is **undocumented — do not assume it.** |
+| Model support | Per-model support is not enumerated on the tool page, BUT the API reference's tool-version table documents **`web_search_20260209` on Claude Sonnet 4.6** (and Opus 4.8/4.7/4.6). Support on **`claude-sonnet-5`** (our `_ANALYZE_MODEL`) is **undocumented.** → **Use `claude-sonnet-4-6` + `web_search_20260209` for the news phase** (user directive: Sonnet 4.6, no Opus). |
 | Forced `tool_choice` + a client tool in one turn | **Impossible.** If the model calls web search and a client tool in the same parallel group, the API returns `stop_reason: "tool_use"` and **defers the search**. Two calls are required. |
 | Errors | Arrive **inside a 200 response** as a `web_search_tool_result` block whose `content` is a dict with `error_code` (`too_many_requests`, `max_uses_exceeded`, `query_too_long`, `unavailable`, …). A `try/except` alone will NOT catch them. |
 | Pricing | **$10 per 1,000 searches** + normal tokens; errors are not charged. At 4 briefings/day ≈ **$0.04/day**. |
 | Sources | `citations` on the text blocks: `{type: "web_search_result_location", url, title, cited_text}`. |
 
 **Two consequences for the code below:**
-1. **Use a separate `_NEWS_MODEL`** (default to the documented `claude-opus-5`) rather than
-   `_ANALYZE_MODEL` — the render phase keeps sonnet-5. Step 5's live probe is what promotes
-   or demotes this; if the probe shows sonnet-5 works, you may point `_NEWS_MODEL` at it and
-   note the live-verified date in a comment.
+1. **Use a separate `_NEWS_MODEL = "claude-sonnet-4-6"`** rather than `_ANALYZE_MODEL`
+   (`claude-sonnet-5`, whose web-search support is undocumented). Sonnet 4.6 + tool version
+   `web_search_20260209` is the documented pairing. **Do not use an Opus model here** — an
+   explicit user directive; ask before changing it. The existing `_ANALYZE_MODEL` (the render
+   phase) is **left untouched** — it is already a Sonnet and changing it would alter the three
+   intraday briefings' behavior, which is out of scope for this feature.
 2. **Detect the in-response error block**, not just exceptions — otherwise a rate-limited
    search silently yields the model's un-searched guesswork, which is *worse* than no news
    (fabricated headlines in a briefing). On an error block → return `[]`.
@@ -353,12 +355,12 @@ _NEWS_MAX_TOKENS = 700
 _NEWS_MAX_LINES = 6
 # Web search is GA — no beta header. `allowed_callers` is set EXPLICITLY because on
 # v20260209+ it defaults to code_execution, and we call the tool directly.
-_WEB_SEARCH_TOOL = {"type": "web_search_20260318", "name": "web_search",
+_WEB_SEARCH_TOOL = {"type": "web_search_20260209", "name": "web_search",
                     "max_uses": 3, "allowed_callers": ["direct"]}
-# Web-search support is NOT documented per model: the official examples use
-# claude-opus-5, while _ANALYZE_MODEL (the render phase) is claude-sonnet-5. Keep the
-# news phase on a documented model unless the live probe (Step 5) proves otherwise.
-_NEWS_MODEL = "claude-opus-5"
+# The news phase runs on Sonnet 4.6 — the documented pairing for web_search_20260209.
+# NOT _ANALYZE_MODEL (claude-sonnet-5), whose web-search support is undocumented, and
+# NOT an Opus model (explicit user directive — ask before changing).
+_NEWS_MODEL = "claude-sonnet-4-6"
 # Search-failure codes that arrive INSIDE a 200 response (see the spec table).
 _NEWS_ERROR_BLOCK = "web_search_tool_result"
 
@@ -464,10 +466,10 @@ print('PARSED     :', c._research_news('probe', 'SPX -0.8%', eod=True))
 2. No `web_search_tool_result_error`.
 3. `PARSED` is a non-empty list of real, dated-sounding headlines.
 
-**If the call 400s on the model**, `_NEWS_MODEL` doesn't support the tool — try the other
-documented model (`claude-opus-4-8`) and record what worked in the constant's comment. Also
-try `claude-sonnet-5`: if it works, point `_NEWS_MODEL` at it (one model for both phases is
-simpler and cheaper) and note the live-verified date.
+**If the call 400s on the model or the tool version**, try the adjacent documented
+combination (`web_search_20260318`, still on `claude-sonnet-4-6`) and record what actually
+worked in the constant's comment with the live-verified date. **Do NOT switch to an Opus
+model to make it work — stop and ask the user first** (explicit directive).
 
 **Step 6: Commit**
 

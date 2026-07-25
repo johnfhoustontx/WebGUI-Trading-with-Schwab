@@ -50,14 +50,14 @@ the **day's macro drivers** (live news).
   error** / empty result → `[]` (the briefing still renders app-data-only).
 
   **Verified spec** (researched against the claude-api reference): tool
-  `{"type": "web_search_20260318", "name": "web_search", "max_uses": 3,
+  `{"type": "web_search_20260209", "name": "web_search", "max_uses": 3,
   "allowed_callers": ["direct"]}` — GA, **no beta header**; `allowed_callers` must be set
   explicitly because v20260209+ defaults it to `code_execution`. **$10/1,000 searches**
   (≈$0.04/day at 4 briefings). Two consequences worth calling out:
-  - **Model support is not documented per model.** The official examples use
-    `claude-opus-5`; support on our `_ANALYZE_MODEL` (`claude-sonnet-5`) is undocumented.
-    So the news phase gets its **own `_NEWS_MODEL`** (a documented model), promoted to
-    sonnet-5 only if a live probe proves it.
+  - **The news phase runs on its own `_NEWS_MODEL = "claude-sonnet-4-6"`** — the documented
+    pairing for `web_search_20260209`. Web-search support on our `_ANALYZE_MODEL`
+    (`claude-sonnet-5`) is undocumented, so the render phase keeps sonnet-5 and the news
+    phase uses 4.6. **No Opus model** (explicit user directive).
   - **A failed search returns HTTP 200**, not an exception: an error block
     (`web_search_tool_result` → `content.error_code`) followed by the model answering from
     memory. Publishing that text would put **fabricated headlines** in a briefing — worse
