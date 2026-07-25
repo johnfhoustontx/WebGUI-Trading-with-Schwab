@@ -8,7 +8,36 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-07-25 (**`gamma_tool.py` split — legacy Tk window parked, engine goes headless**:
+**Last updated:** 2026-07-25 (**Per-category notification routing — move a channel without a code
+change**: every Discord webhook AND Telegram chat is now configurable **per notification category**
+via a new **`routes`** block in gitignored `shared/notifications.json` (+ blank placeholders in
+`.example.json`). **9 categories**: `signals` (scanner + captured merged) · `flow_uoa` ·
+`flow_crossover` · `flow_gamma_flip` · `action_alert` · `eod_summary` · `gamma_briefing` ·
+`market_snapshot` · `market_state`. Each is `{"discord": "", "telegram_chat_id": 0}` — **blank/0/missing
+= inherit the global** (`discord.webhook_url` / `telegram.chat_id`), so you fill in only what you want
+split out. **Why:** four categories (signals, action_alert, eod_summary, market_state) were HARDCODED to
+the global webhook, the existing overrides lived in **three inconsistent shapes**, and **Telegram had no
+per-category routing at all**. Two PURE resolvers in **`shared/notify/channels.py`** —
+**`discord_target(cfg, category) -> str`** and **`telegram_target(cfg, category) -> (bot_token,
+chat_id)`** (the **bot token stays global**; only the chat moves) — resolve **`routes.<category>` → the
+category's LEGACY key → the global**, first non-empty wins, where "unset" means `None`/`""`/`0` (so a
+blank template placeholder can never shadow the global). **The LEGACY step is the back-compat
+guarantee**: `discord.flow_{uoa,crossover,gamma_flip}_webhook_url`, `discord.market_snapshot_webhook_url`
+and — the odd one out, in its OWN block — `gamma_briefing.webhook_url` all still win over the global, so
+**existing installs behave identically with zero config edits** (live-verified: with `routes` all blank,
+all 9 categories resolve exactly as before). Shared by BOTH services, so `sentiment_svc`'s
+`state_alert.send_state_transition` (previously hardcoded) is routable too. The ad-hoc
+`push_notify.flow_webhook()` / `_ms_webhook()` helpers were **deleted** in favor of the resolver (+ a tiny
+`flow_category(a)` type→category mapper; an **unknown** flow type falls through to the GLOBAL webhook, NOT
+the signals feed — pinned by a test). **SMS is deliberately NOT routed** (single number) and there are **no
+per-route env vars** (18 new names for little gain; the existing `DISCORD_WEBHOOK_URL`/`TELEGRAM_CHAT_ID`
+env overrides still act on the globals). **To move a channel: edit `routes.<category>` in
+`shared/notifications.json`, then restart `options_svc` (+ `sentiment_svc` for `market_state`)**. Green:
+shared/notify **56**, push_notify **120** (was 105), state_alert **14**, sentiment_svc **189**, full
+options_svc **863** (+ the 2 documented `test_expected_move` date-relative baseline fails); ruff clean.
+Built subagent-by-subagent (TDD per unit). Design/plan:
+[design](docs/plans/2026-07-25-per-category-notification-routing-design.md) /
+[plan](docs/plans/2026-07-25-per-category-notification-routing-plan.md). Prior — 2026-07-25 (**`gamma_tool.py` split — legacy Tk window parked, engine goes headless**:
 `options-scanner/gamma_tool.py` was **7,203 lines, 43% of it a dead Tk GUI** — `class
 GammaWindow(tk.Toplevel)` (lines 4068→EOF) — with `import tkinter` / `import matplotlib` /
 **`matplotlib.use("TkAgg")` at MODULE scope**. Every headless importer of the engine paid for it:
