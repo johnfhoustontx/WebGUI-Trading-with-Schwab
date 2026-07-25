@@ -525,7 +525,7 @@ _BRIEFING_SLOT_LABELS = {
     "premarket": "Premarket",
     "open": "After open",
     "midday": "Midday",
-    "close": "At close",
+    "close": "EOD recap",
 }
 _CAPTION_MAX = 1024   # Telegram's sendDocument ceiling; Discord's 2000 is looser
 

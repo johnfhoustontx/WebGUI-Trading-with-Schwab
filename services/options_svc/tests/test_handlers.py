@@ -1973,3 +1973,23 @@ def test_run_market_snapshot_never_raises_on_bad_bus(monkeypatch):
             pass
 
     handlers.run_market_snapshot(_Boom(), "09:00")   # must not raise
+
+
+# ── EOD retrospective: the close slot routes to eod_briefing ────────────────
+def test_close_slot_routes_to_eod_briefing(monkeypatch):
+    from services.options_svc import handlers
+    calls = []
+    monkeypatch.setattr(handlers.compute, "eod_briefing",
+                        lambda **kw: calls.append("eod") or {"html": "h", "analysis": {"a": 1}})
+    monkeypatch.setattr(handlers.compute, "gamma_analyze",
+                        lambda **kw: calls.append("intraday") or {"html": "h"})
+    monkeypatch.setattr(handlers, "_persist_briefing", lambda *a, **k: None)
+    monkeypatch.setattr(handlers, "publish_gamma_briefing_index", lambda b: None)
+    monkeypatch.setattr(handlers.push_notify, "send_gamma_briefing", lambda *a, **k: True)
+
+    class _Bus:
+        def cache_set(self, *a, **k): return 1
+        def publish(self, *a, **k): pass
+    handlers.run_scheduled_gamma_analyze(_Bus(), "close")
+    handlers.run_scheduled_gamma_analyze(_Bus(), "midday")
+    assert calls == ["eod", "intraday"]

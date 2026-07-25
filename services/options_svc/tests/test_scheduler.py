@@ -363,7 +363,7 @@ def test_analyze_slot_fires_at_target():
     assert scheduler.analyze_slot_due(_ct(2026, 6, 15, 8, 0), set()) == "premarket"
     assert scheduler.analyze_slot_due(_ct(2026, 6, 15, 8, 48), set()) == "open"
     assert scheduler.analyze_slot_due(_ct(2026, 6, 15, 11, 30), set()) == "midday"
-    assert scheduler.analyze_slot_due(_ct(2026, 6, 15, 14, 58), set()) == "close"
+    assert scheduler.analyze_slot_due(_ct(2026, 6, 15, 15, 15), set()) == "close"
 
 
 def test_analyze_slot_fires_within_grace_window():
@@ -519,3 +519,19 @@ def test_market_snapshot_due_outside_window_none():
 def test_market_snapshot_due_skips_weekend():
     sat = dt.datetime(2026, 7, 25, 9, 0, tzinfo=_CT)
     assert scheduler.market_snapshot_due(sat, set()) is None
+
+
+# ── EOD retrospective: the close slot moved after the cash close ────────────
+def test_close_analyze_slot_is_after_the_cash_close():
+    from services.options_svc import scheduler as s
+    assert s._ANALYZE_SLOTS["close"] == (15, 15)   # was (14, 58) -- pre-close, useless
+
+
+def test_close_slot_fires_at_1515_not_1458():
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+    from services.options_svc import scheduler as s
+    ct = ZoneInfo("America/Chicago")
+    # A Tuesday.
+    assert s.analyze_slot_due(dt.datetime(2026, 7, 21, 14, 58, tzinfo=ct), set()) != "close"
+    assert s.analyze_slot_due(dt.datetime(2026, 7, 21, 15, 15, tzinfo=ct), set()) == "close"

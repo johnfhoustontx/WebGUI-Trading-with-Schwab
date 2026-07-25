@@ -914,7 +914,7 @@ def render():
             _briefings_menu = ui.menu()
             with _briefings_menu:
                 for _slot, _title in (("premarket", "Premarket"), ("open", "Open"),
-                                      ("midday", "Midday"), ("close", "Close")):
+                                      ("midday", "Midday"), ("close", "EOD recap")):
                     _mi = ui.menu_item(_title, on_click=lambda s=_slot: ui.navigate.to(
                         f"/options/analyze?slot={s}", new_tab=True))
                     _mi.classes(f"text-[#cdd8ee] {_SCHED_DIM}")
@@ -985,7 +985,7 @@ def render():
         hist_date = ui.select([], label="Date").props("dense options-dense").classes("w-40")
         hist_slot = ui.select(
             {"": "All slots", "premarket": "Premarket", "open": "Open",
-             "midday": "Midday", "close": "Close"}, value="") \
+             "midday": "Midday", "close": "EOD recap"}, value="") \
             .props("dense options-dense").classes("w-32")
         hist_open = ui.button("Open", icon="history").props("flat dense")
         hist_hint = ui.label("").classes("opacity-50 text-xs")

@@ -224,7 +224,7 @@ _ANALYZE_SLOTS = {
     "premarket": (8, 0),    # 09:00 ET — premarket
     "open":      (8, 48),   # 09:48 ET — ~18 min after the 09:30 open
     "midday":    (11, 30),  # 12:30 ET — midday
-    "close":     (14, 58),  # 15:58 ET — at the close
+    "close":     (15, 15),  # 16:15 ET — EOD retrospective (after the 15:00 CT cash close)
 }
 _ANALYZE_GRACE_MIN = 20  # fire within this many minutes of the target, else skip
 

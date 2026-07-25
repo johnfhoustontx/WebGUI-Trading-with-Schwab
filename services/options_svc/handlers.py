@@ -178,7 +178,7 @@ ANALYZE_SLOT_TITLES = {
     "premarket": "Premarket",
     "open": "After open",
     "midday": "Midday",
-    "close": "At close",
+    "close": "EOD recap",
 }
 CACHE_GAMMA_ANALYZE_SCHED = {
     slot: f"cache:options:gamma_analyze_{slot}" for slot in ANALYZE_SLOT_TITLES}
@@ -1052,6 +1052,10 @@ def run_scheduled_gamma_analyze(bus, slot) -> None:
 
     Driven by ``scheduler.analyze_slot_due`` at premarket / ~18 min after the open /
     midday / close on each trading day, in addition to the ad-hoc Analyze button.
+    The ``close`` slot (15:15 CT, after the cash close) is the EOD RETROSPECTIVE —
+    ``compute.eod_briefing``, not the intraday playbook. It returns the same
+    ``{"html", "analysis"}`` shape, so caching / history / the PNG push below are
+    identical for all four slots.
     The result persists in Redis under its slot key until the next day's run
     overwrites it; the Gamma page opens it on demand via ``/options/analyze?slot=``.
     Defensive: ``compute.gamma_analyze`` never raises (every failure → a readable
@@ -1067,7 +1071,8 @@ def run_scheduled_gamma_analyze(bus, slot) -> None:
     title = ANALYZE_SLOT_TITLES.get(slot, slot)
     hr = (now.strftime("%I").lstrip("0") or "12")  # portable 12-hour (no %-I on Windows)
     label = f"Auto · {title} · {now.strftime('%b %d')} {hr}:{now.strftime('%M %p')} CT"
-    res = compute.gamma_analyze(label=label)
+    res = (compute.eod_briefing(label=label) if slot == "close"
+           else compute.gamma_analyze(label=label))
     res = {**res, "slot": slot, "generated_at": now.isoformat()}
     version = bus.cache_set(CACHE_GAMMA_ANALYZE_SCHED[slot], res)
     bus.publish(EVENT_GAMMA_ANALYZE_SCHED[slot], {"version": version})

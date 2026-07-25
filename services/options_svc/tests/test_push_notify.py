@@ -804,7 +804,7 @@ def test_briefing_caption_full():
 
 def test_briefing_caption_missing_fields():
     assert pn.briefing_caption({"analysis": {}}, "open") == "Gamma · After open"
-    assert pn.briefing_caption({}, "close") == "Gamma · At close"
+    assert pn.briefing_caption({}, "close") == "Gamma · EOD recap"
     assert pn.briefing_caption({"analysis": {}}, "") == "Gamma · Briefing"
 
 
@@ -822,7 +822,7 @@ def test_briefing_caption_truncates_headline_not_lead():
     res = {"analysis": {"regime": "Neg gamma", "bias": 5, "headline": "z" * 4000}}
     cap = pn.briefing_caption(res, "close")
     assert len(cap) <= 1024
-    assert cap.startswith("Gamma · At close · Neg gamma · Bias +5")
+    assert cap.startswith("Gamma · EOD recap · Neg gamma · Bias +5")
     assert cap.endswith("…")
 
 
