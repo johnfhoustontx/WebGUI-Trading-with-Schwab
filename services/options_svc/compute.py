@@ -3832,6 +3832,13 @@ _EOD_MAX_TOKENS = 2600
 _EOD_SYSTEM = (
     "You are an options-market analyst writing an END-OF-DAY RETROSPECTIVE. The US "
     "cash session has CLOSED. Call the submit_eod tool exactly once.\n"
+    "MANDATORY FIELDS — your single tool call MUST include EVERY ONE of: regime, "
+    "bias, bias_label, headline, narrative, why, indices, next_session. 'indices' "
+    "MUST contain exactly three entries — $SPX, SPY and QQQ, in that order — each "
+    "with its levels and its 'recap'. 'next_session' MUST have all four of levels, "
+    "expected_move_note, catalysts and posture. Omitting any of these makes the "
+    "briefing unusable. Do not skip a field to save space: keep individual prose "
+    "SHORT if you need to, but emit them all.\n"
     "WRITE A RETROSPECTIVE, NOT A FORWARD INTRADAY PLAYBOOK. Never advise intraday "
     "entries, exits or management for the session that just ended — it is over. Use "
     "the PAST TENSE for everything about today.\n"
@@ -4027,6 +4034,69 @@ def _parse_eod(inp) -> dict | None:
     return out
 
 
+def _backfill_indices(data, levels_by_sym, em_by_sym, recap) -> dict:
+    """Guarantee the EOD briefing has per-index cards.
+
+    The model intermittently omits ``indices`` even though the tool marks it
+    required — measured at roughly one live run in three, and the API does not
+    hard-enforce required on tool input. Losing it costs the briefing every ladder
+    and tile, which is most of its value.
+
+    Every number on those cards is already code-computed (closing levels off the
+    chain, the session path off the flow series, the authoritative EM), so when the
+    model drops the array we rebuild it deterministically and synthesize a factual
+    recap sentence from the path + level verdicts. Only the model's prose is lost.
+    A populated reply is left untouched. Never raises."""
+    try:
+        if not isinstance(data, dict):
+            return {"indices": []}
+        if data.get("indices"):
+            return data
+        out = []
+        for sym, lv in (levels_by_sym or {}).items():
+            try:
+                r = (recap or {}).get(sym) or {}
+                path = r.get("path") or {}
+                lv = lv or {}
+                bits = []
+                if path:
+                    bits.append(
+                        f"Opened {path.get('open')}, high {path.get('high')}, "
+                        f"low {path.get('low')}, closed {path.get('close')} "
+                        f"({(path.get('day_pct') or 0):+.2f}%).")
+                    for key, name in (("flip", "gamma flip"), ("call_wall", "call wall"),
+                                      ("put_wall", "put wall")):
+                        v = _level_verdict(path, lv.get(key) if lv.get(key) is not None
+                                           else r.get(key), name)
+                        if v:
+                            bits.append(v[0].upper() + v[1:] + ".")
+                out.append({
+                    "symbol": sym,
+                    "spot": path.get("close"),
+                    "gamma_flip": lv.get("flip", r.get("flip")),
+                    "call_wall": lv.get("call_wall", r.get("call_wall")),
+                    "put_wall": lv.get("put_wall", r.get("put_wall")),
+                    "max_pain": None,
+                    "expected_move": (em_by_sym or {}).get(sym.lstrip("$").upper()),
+                    "pc_ratio": None,
+                    "recap": " ".join(bits),
+                })
+            except Exception:
+                continue
+        data["indices"] = out
+        if out:
+            log.warning("eod_briefing: model omitted `indices` — backfilled %d card(s) "
+                        "from code-computed levels", len(out))
+        return data
+    except Exception:
+        log.debug("_backfill_indices failed", exc_info=True)
+        try:
+            data.setdefault("indices", [])
+        except Exception:
+            return {"indices": []}
+        return data
+
+
 def _levels_from_blocks(block) -> dict:
     """Closing flip + call/put walls out of one symbol's GEX analysis block.
 
@@ -4130,7 +4200,9 @@ def eod_briefing(client=None, label: str | None = None) -> dict:
             "$SPX, SPY or QQQ. The data service may be unavailable. Try again "
             "later.</p>", subtitle)}
 
-    # Session path vs the CLOSING levels (code-computed truth the model must copy).
+    # Session path vs the CLOSING levels (code-computed truth the model must copy,
+    # and the source the index cards are rebuilt from if the model omits them).
+    levels_by_sym, recap = {}, {}
     try:
         levels_by_sym = {sym: _levels_from_blocks(blocks.get(key))
                          for key, sym in (("spx", "$SPX"), ("spy", "SPY"), ("qqq", "QQQ"))
@@ -4141,6 +4213,7 @@ def eod_briefing(client=None, label: str | None = None) -> dict:
             prompt = f"{prompt}\n\n{block}"
     except Exception:
         log.debug("eod recap context failed", exc_info=True)
+        levels_by_sym, recap = levels_by_sym or {}, {}
 
     # Notable individual stock moves (code-computed from the app's own caches).
     movers = []
@@ -4209,6 +4282,10 @@ def eod_briefing(client=None, label: str | None = None) -> dict:
         return {"html": _analyze_doc(
             "<p>The model returned no usable end-of-day recap.</p>", subtitle),
             "prompt": prompt}
+
+    # The model sometimes drops `indices` entirely — rebuild the cards from the
+    # code-computed levels so the briefing can never lose them (see the docstring).
+    data = _backfill_indices(data, levels_by_sym, em_by_sym, recap)
 
     # Code-authoritative overrides — same principle as the EM override in
     # gamma_analyze: where the app computed it, the app's number wins.

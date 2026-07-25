@@ -4132,3 +4132,41 @@ def test_gamma_analyze_logs_on_truncation(monkeypatch, caplog):
     with caplog.at_level(logging.WARNING):
         assert compute.gamma_analyze(client=_C()).get("analysis")
     assert any("max_tokens" in r.message for r in caplog.records)
+
+
+def test_backfill_indices_builds_cards_when_the_model_omits_them():
+    """The model intermittently omits `indices` despite it being required (observed
+    ~1 run in 3 live). Every number on those cards is already code-computed, so the
+    briefing must never lose them -- backfill deterministically, including a factual
+    recap sentence built from the session path."""
+    from services.options_svc import compute
+    data = {"indices": []}
+    out = compute._backfill_indices(
+        data,
+        levels_by_sym={"$SPX": {"flip": 101.0, "call_wall": 106.0, "put_wall": 98.0}},
+        em_by_sym={"SPX": 36.5},
+        recap={"$SPX": {"path": {"open": 100.0, "high": 105.0, "low": 99.0,
+                                 "close": 104.0, "day_pct": 4.0},
+                        "flip": 101.0, "call_wall": 106.0, "put_wall": 98.0}},
+    )
+    assert len(out["indices"]) == 1
+    idx = out["indices"][0]
+    assert idx["symbol"] == "$SPX"
+    assert idx["gamma_flip"] == 101.0 and idx["call_wall"] == 106.0
+    assert idx["expected_move"] == 36.5
+    assert idx["spot"] == 104.0                     # the session close
+    assert "104" in idx["recap"] and "reclaim" in idx["recap"].lower()
+
+
+def test_backfill_indices_leaves_a_populated_reply_alone():
+    from services.options_svc import compute
+    data = {"indices": [{"symbol": "$SPX", "recap": "model wrote this"}]}
+    out = compute._backfill_indices(data, {"$SPX": {"flip": 1.0}}, {"SPX": 2.0},
+                                    {"$SPX": {"path": {"close": 3.0}}})
+    assert out["indices"] == [{"symbol": "$SPX", "recap": "model wrote this"}]
+
+
+def test_backfill_indices_is_defensive():
+    from services.options_svc import compute
+    assert compute._backfill_indices({"indices": []}, {}, {}, {})["indices"] == []
+    assert compute._backfill_indices({}, None, None, None).get("indices") == []
