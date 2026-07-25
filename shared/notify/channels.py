@@ -62,6 +62,11 @@ _DEFAULTS = {
         "hashtags": [], "discord_url": "", "extra_text": "",
         "disclaimer": "Not advice. Paper/educational.",
     },
+    # Per-category channel routing (see `discord_target`/`telegram_target` below).
+    # Deliberately EMPTY: pre-populating the nine categories here would make an
+    # absent category indistinguishable from a blank one. `_deep_merge` folds the
+    # file's block in.
+    "routes": {},
 }
 
 
@@ -136,6 +141,69 @@ def load_config(path=None) -> dict:
     if os.environ.get("TWITTER_ENABLED"):
         cfg["twitter"]["enabled"] = os.environ["TWITTER_ENABLED"].lower() not in ("0", "false", "no")
     return cfg
+
+
+# ── per-category routing ─────────────────────────────────────────────────────
+# Every notification category can target its OWN Discord webhook + Telegram chat
+# via the `routes` config block, so moving a feed to another channel is a config
+# edit, not a code change. Resolution is route -> legacy key -> global, and the
+# LEGACY step is what keeps existing installs working untouched.
+ROUTE_CATEGORIES = (
+    "signals", "flow_uoa", "flow_crossover", "flow_gamma_flip", "action_alert",
+    "eod_summary", "gamma_briefing", "market_snapshot", "market_state",
+)
+
+# Category -> the pre-`routes` config key it used to read (back-compat only).
+# `gamma_briefing` is the odd one out: its legacy key lives in its OWN block.
+_LEGACY_DISCORD_KEYS = {
+    "flow_uoa": ("discord", "flow_uoa_webhook_url"),
+    "flow_crossover": ("discord", "flow_crossover_webhook_url"),
+    "flow_gamma_flip": ("discord", "flow_gamma_flip_webhook_url"),
+    "market_snapshot": ("discord", "market_snapshot_webhook_url"),
+    "gamma_briefing": ("gamma_briefing", "webhook_url"),
+}
+
+
+def _as_dict(v) -> dict:
+    """`v` if it is a dict, else {} — so a hand-edited/malformed config block
+    degrades to "not configured" instead of raising into a notification path."""
+    return v if isinstance(v, dict) else {}
+
+
+def _first_set(*vals):
+    """First value that is not None / "" / 0 (all three mean "not configured").
+
+    The blank placeholders the config template ships (`""`, `0`) must fall
+    through to the next level, never shadow it."""
+    for v in vals:
+        if v not in (None, "", 0):
+            return v
+    return None
+
+
+def _route(cfg, category) -> dict:
+    """The `routes.<category>` block, or {} when absent/malformed."""
+    return _as_dict(_as_dict(_as_dict(cfg).get("routes")).get(category))
+
+
+def discord_target(cfg, category) -> str:
+    """Discord webhook for `category`: route -> legacy key -> global. "" if none."""
+    cfg = _as_dict(cfg)
+    block, key = _LEGACY_DISCORD_KEYS.get(category, (None, None))
+    legacy = _as_dict(cfg.get(block)).get(key) if block else None
+    return _first_set(
+        _route(cfg, category).get("discord"),
+        legacy,
+        _as_dict(cfg.get("discord")).get("webhook_url"),
+    ) or ""
+
+
+def telegram_target(cfg, category) -> tuple:
+    """(bot_token, chat_id) for `category`. The bot token is always the global one;
+    only the chat can be overridden per category."""
+    tg = _as_dict(_as_dict(cfg).get("telegram"))
+    chat = _first_set(_route(cfg, category).get("telegram_chat_id"), tg.get("chat_id"))
+    return tg.get("bot_token", ""), (chat if chat is not None else "")
 
 
 _TELEGRAM_API = "https://api.telegram.org/bot{token}/sendMessage"

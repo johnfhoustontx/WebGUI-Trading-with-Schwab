@@ -398,3 +398,121 @@ def test_file_senders_quiet_on_success(monkeypatch, caplog):
 def test_log_http_never_raises_on_odd_response(monkeypatch):
     ch._log_http("X", None)          # no attributes at all
     ch._log_http("X", object())      # no status_code
+
+
+# ── per-category routing resolvers ───────────────────────────────────────────
+# Precedence is route -> legacy key -> global. The LEGACY step is the
+# back-compat guarantee: an install that never edits its config must keep
+# hitting exactly the webhooks/chats it hits today.
+
+
+def test_discord_target_prefers_route_over_legacy_and_global():
+    cfg = {"routes": {"flow_uoa": {"discord": "ROUTE"}},
+           "discord": {"flow_uoa_webhook_url": "LEGACY", "webhook_url": "GLOBAL"}}
+    assert ch.discord_target(cfg, "flow_uoa") == "ROUTE"
+
+
+def test_discord_target_falls_back_to_legacy_key():
+    cfg = {"discord": {"flow_uoa_webhook_url": "LEGACY", "webhook_url": "GLOBAL"}}
+    assert ch.discord_target(cfg, "flow_uoa") == "LEGACY"
+
+
+def test_discord_target_falls_back_to_global():
+    cfg = {"discord": {"webhook_url": "GLOBAL"}}
+    assert ch.discord_target(cfg, "signals") == "GLOBAL"
+    assert ch.discord_target(cfg, "eod_summary") == "GLOBAL"
+
+
+def test_discord_target_treats_blank_as_unset():
+    # The config template ships blank placeholders for all 9 categories; they must
+    # never shadow the global.
+    cfg = {"routes": {"signals": {"discord": ""}}, "discord": {"webhook_url": "GLOBAL"}}
+    assert ch.discord_target(cfg, "signals") == "GLOBAL"
+
+
+def test_discord_target_gamma_briefing_legacy_lives_in_its_own_block():
+    cfg = {"gamma_briefing": {"webhook_url": "GB"}, "discord": {"webhook_url": "GLOBAL"}}
+    assert ch.discord_target(cfg, "gamma_briefing") == "GB"
+
+
+def test_discord_target_unknown_category_uses_global():
+    assert ch.discord_target({"discord": {"webhook_url": "G"}}, "nope") == "G"
+
+
+def test_discord_target_missing_everything_is_empty_string():
+    # "" not None -- send_discord already no-ops on a falsy webhook.
+    assert ch.discord_target({}, "signals") == ""
+
+
+def test_discord_target_survives_malformed_config():
+    """A hand-edited config must degrade to the global / "", never raise."""
+    assert ch.discord_target(None, "signals") == ""
+    assert ch.discord_target({"routes": "nope"}, "signals") == ""
+    assert ch.discord_target({"routes": {"signals": "nope"},
+                              "discord": {"webhook_url": "G"}}, "signals") == "G"
+    assert ch.discord_target({"discord": "nope"}, "signals") == ""
+    assert ch.discord_target({"gamma_briefing": "nope"}, "gamma_briefing") == ""
+
+
+def test_telegram_target_prefers_route_chat_id():
+    cfg = {"routes": {"eod_summary": {"telegram_chat_id": 42}},
+           "telegram": {"bot_token": "BOT", "chat_id": 7}}
+    assert ch.telegram_target(cfg, "eod_summary") == ("BOT", 42)
+
+
+def test_telegram_target_falls_back_to_global_chat():
+    cfg = {"telegram": {"bot_token": "BOT", "chat_id": 7}}
+    assert ch.telegram_target(cfg, "signals") == ("BOT", 7)
+
+
+def test_telegram_target_treats_zero_and_blank_as_unset():
+    cfg = {"routes": {"signals": {"telegram_chat_id": 0}},
+           "telegram": {"bot_token": "BOT", "chat_id": 7}}
+    assert ch.telegram_target(cfg, "signals") == ("BOT", 7)
+    cfg["routes"]["signals"]["telegram_chat_id"] = ""
+    assert ch.telegram_target(cfg, "signals") == ("BOT", 7)
+
+
+def test_telegram_target_bot_token_is_always_global():
+    cfg = {"routes": {"signals": {"telegram_chat_id": 42}},
+           "telegram": {"bot_token": "BOT", "chat_id": 7}}
+    assert ch.telegram_target(cfg, "signals")[0] == "BOT"
+
+
+def test_telegram_target_survives_malformed_config():
+    assert ch.telegram_target(None, "signals") == ("", "")
+    assert ch.telegram_target({}, "signals") == ("", "")
+    assert ch.telegram_target({"telegram": "nope"}, "signals") == ("", "")
+
+
+def test_route_categories_cover_every_notification_category():
+    assert set(ch.ROUTE_CATEGORIES) == {
+        "signals", "flow_uoa", "flow_crossover", "flow_gamma_flip", "action_alert",
+        "eod_summary", "gamma_briefing", "market_snapshot", "market_state",
+    }
+    # Every legacy key belongs to a real category (no typo'd orphans).
+    assert set(ch._LEGACY_DISCORD_KEYS) <= set(ch.ROUTE_CATEGORIES)
+
+
+def test_defaults_routes_is_empty(tmp_path, monkeypatch):
+    """Deliberately EMPTY: pre-populating the 9 categories would make an absent
+    category indistinguishable from a blank one."""
+    monkeypatch.setattr(ch, "_CONFIG_PATH", tmp_path / "nope.json")
+    assert ch.load_config()["routes"] == {}
+
+
+def test_routes_block_from_file_merges_into_config(tmp_path, monkeypatch):
+    p = tmp_path / "notifications.json"
+    p.write_text(json.dumps({
+        "routes": {"signals": {"discord": "SIG", "telegram_chat_id": 99}},
+        "discord": {"webhook_url": "GLOBAL"},
+        "telegram": {"bot_token": "BOT", "chat_id": 7},
+    }))
+    monkeypatch.setattr(ch, "_CONFIG_PATH", p)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("DISCORD_WEBHOOK_URL", raising=False)
+    cfg = ch.load_config()
+    assert ch.discord_target(cfg, "signals") == "SIG"
+    assert ch.telegram_target(cfg, "signals") == ("BOT", 99)
+    assert ch.discord_target(cfg, "eod_summary") == "GLOBAL"
+    assert ch.telegram_target(cfg, "eod_summary") == ("BOT", 7)
