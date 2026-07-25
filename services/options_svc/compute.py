@@ -2627,6 +2627,122 @@ def _movers_prompt_block(movers) -> str:
         return ""
 
 
+# ── Live macro news research (Task 2) — phase 1 of a briefing ────────────────
+# A SEPARATE Claude call from the forced-tool render phase (gamma_analyze's
+# `submit_analysis`): the API cannot fire a server-side web search AND force a
+# client tool_choice in the same turn (see docstring below), so news research
+# happens first, in its own call, and its output is folded into the render
+# phase's prompt as plain text context by the caller (Task 4/6 — NOT this task).
+_NEWS_MAX_TOKENS = 700
+_NEWS_MAX_LINES = 6
+# Web search is GA (no beta header/`betas=[...]` needed). `allowed_callers` is
+# set EXPLICITLY to ["direct"] because on tool version 20260209+ it otherwise
+# defaults to "code_execution" — we call the tool directly from a plain chat
+# turn, not from code-execution, so leaving it unset can mean the search
+# silently never fires (the model would then answer from memory instead).
+_WEB_SEARCH_TOOL = {"type": "web_search_20260209", "name": "web_search",
+                    "max_uses": 3, "allowed_callers": ["direct"]}
+# The news phase runs on Sonnet 4.6 — the documented model pairing for the
+# web_search_20260209 tool version. Deliberately NOT `_ANALYZE_MODEL`
+# (claude-sonnet-5, whose web-search support is undocumented) and NOT an Opus
+# model (explicit user directive — ask before changing this).
+_NEWS_MODEL = "claude-sonnet-4-6"
+# A search that FAILS still returns an HTTP 200 — the error arrives as a block
+# of this type inside the response, and the model then goes on to answer from
+# its training memory. A bare try/except cannot catch this; it must be
+# detected by scanning the response blocks (see `_research_news`).
+_NEWS_ERROR_BLOCK = "web_search_tool_result"
+
+_NEWS_SYSTEM = (
+    "You are a market-news researcher. Search the web for the concrete macro and "
+    "earnings news that actually moved US equities TODAY (Fed/rates, CPI/PPI/jobs, "
+    "major earnings, geopolitics). Reply with a short plain list, one driver per line, "
+    "prefixed by '- ', each naming the event and its market effect in ONE clause. Cite "
+    "nothing else, add no preamble, no disclaimers. If asked for the next session, also "
+    "list tomorrow's scheduled economic releases and notable earnings."
+)
+
+
+def _research_news(label: str, context: str = "", client=None, eod: bool = False) -> list:
+    """Search the web for the day's macro drivers → a short list of driver lines.
+
+    Phase 1 of a briefing: a SEPARATE Claude call carrying the web-search server
+    tool. It must be separate from the render phase (``gamma_analyze``'s forced
+    ``submit_analysis`` tool_choice) because the API cannot fire a server-side
+    search AND force a client tool in the same turn — if the model tries both in
+    one parallel group, the API returns ``stop_reason: "tool_use"`` and defers the
+    search instead of running it. When ``eod`` is set, also asks for the NEXT
+    session's scheduled releases/earnings (for the end-of-day retrospective).
+
+    Fully guarded — returns ``[]`` on no key / unsupported tool / API error / an
+    in-response search error / an empty reply, so a briefing always renders on
+    app data alone. On a FAILED search the API still replies 200 and the model
+    answers from memory; publishing that text would put fabricated headlines into
+    an automated market briefing, which is strictly worse than no news at all —
+    so any ``web_search_tool_result`` error block anywhere in the reply aborts
+    the whole result to ``[]`` rather than returning the model's memory-text.
+
+    ``client`` is injected in tests; in production it is built from the resolved
+    API key via ``_make_analyze_client``."""
+    client = client or _make_analyze_client()
+    if client is None:
+        return []
+    ask = ("Today's US session just closed. " if eod else "The US session is in progress. ")
+    ask += "What news drove the tape today?"
+    if eod:
+        ask += (" Also list the scheduled economic releases and notable earnings for the "
+                "NEXT trading session.")
+    if context:
+        ask += f"\n\nMarket context (already computed, do not re-derive):\n{context}"
+    try:
+        _count_anthropic_call()
+        resp = client.messages.create(
+            model=_NEWS_MODEL,
+            max_tokens=_NEWS_MAX_TOKENS,
+            system=_NEWS_SYSTEM,
+            tools=[_WEB_SEARCH_TOOL],
+            messages=[{"role": "user", "content": ask}],
+        )
+    except Exception:
+        log.warning("news research (%s) failed — briefing degrades to app data only",
+                    label, exc_info=True)
+        return []
+    lines = []
+    try:
+        blocks = getattr(resp, "content", None) or []
+        # A FAILED search still returns HTTP 200: an error block, then the model
+        # answering from memory. Publishing that text would put fabricated headlines
+        # in the briefing — strictly worse than no news. Bail out entirely.
+        for b in blocks:
+            if getattr(b, "type", None) != _NEWS_ERROR_BLOCK:
+                continue
+            c = getattr(b, "content", None)
+            if isinstance(c, dict) and c.get("error_code"):
+                log.warning("news research (%s): web search errored (%s) — no news",
+                            label, c.get("error_code"))
+                return []
+        for b in blocks:
+            if getattr(b, "type", None) != "text":
+                continue          # skip server_tool_use / web_search_tool_result blocks
+            for raw in (getattr(b, "text", "") or "").splitlines():
+                s = raw.strip().lstrip("-•* ").strip()
+                if s:
+                    lines.append(s)
+    except Exception:
+        log.debug("news parse failed", exc_info=True)
+        return []
+    return lines[:_NEWS_MAX_LINES]
+
+
+def _news_prompt_block(news) -> str:
+    """Render researched news for the render-phase prompt, or '' when there's none
+    (a briefing must still render cleanly on app data alone)."""
+    if not news:
+        return ""
+    return ("MACRO DRIVERS / NEWS (searched live — attribute the tape to these):\n"
+            + "\n".join(f"- {n}" for n in news))
+
+
 def _gamma_blocks_for(symbol, chain):
     """Build the per-view analysis blocks for one symbol (ported from the page).
 

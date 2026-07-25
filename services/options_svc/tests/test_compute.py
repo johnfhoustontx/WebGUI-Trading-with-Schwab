@@ -3585,3 +3585,85 @@ def test_notable_movers_limit_guard_on_non_int():
     matrix = {"rows": [{"symbol": "MU", "day_pct": 1.0}, {"symbol": "AMD", "day_pct": 2.0}]}
     out = compute._notable_movers({}, matrix, {}, limit="not-a-number")
     assert len(out) == 2
+
+
+# ── _research_news — live macro drivers via the Claude web-search tool (Task 2) ──
+
+class _FakeBlock:
+    def __init__(self, **kw):
+        for k, v in kw.items():
+            setattr(self, k, v)
+
+
+class _FakeNewsClient:
+    """Minimal stand-in for anthropic.Anthropic for the news phase."""
+    def __init__(self, blocks=None, raise_exc=None):
+        self._blocks, self._raise = blocks or [], raise_exc
+        self.calls = []
+        outer = self
+
+        class _Messages:
+            def create(self, **kw):
+                outer.calls.append(kw)
+                if outer._raise:
+                    raise outer._raise
+                return _FakeBlock(content=outer._blocks)
+        self.messages = _Messages()
+
+
+def test_research_news_returns_headline_lines():
+    from services.options_svc import compute
+    client = _FakeNewsClient(blocks=[
+        _FakeBlock(type="text", text="- Fed held rates steady\n- CPI came in cool\n"),
+    ])
+    out = compute._research_news("close", "SPX closed -0.8%", client=client)
+    assert out and any("Fed" in line for line in out)
+    # The web-search tool must actually be offered to the model.
+    assert client.calls and client.calls[0].get("tools")
+
+
+def test_research_news_degrades_to_empty(monkeypatch):
+    from services.options_svc import compute
+    # No client (no API key) → [] and NO exception. Force the no-key path
+    # explicitly (this dev box has a real shared/anthropic_key.txt — without this
+    # monkeypatch, client=None falls through to _make_analyze_client() and would
+    # fire a REAL API call; mirrors test_gamma_analyze_no_key_returns_config_message).
+    monkeypatch.setattr(compute, "_make_analyze_client", lambda: None)
+    assert compute._research_news("close", "ctx", client=None) == []
+    # API error → []
+    assert compute._research_news(
+        "close", "ctx", client=_FakeNewsClient(raise_exc=RuntimeError("boom"))) == []
+    # No text blocks → []
+    assert compute._research_news("close", "ctx", client=_FakeNewsClient(blocks=[])) == []
+
+
+def test_research_news_drops_result_when_search_itself_errored():
+    """A failed search returns HTTP 200 with an error block — the model then answers
+    from memory. Returning that text would put FABRICATED headlines in a briefing,
+    which is worse than no news. Must yield []."""
+    from services.options_svc import compute
+    client = _FakeNewsClient(blocks=[
+        _FakeBlock(type="web_search_tool_result", tool_use_id="srvtoolu_1",
+                   content={"type": "web_search_tool_result_error",
+                            "error_code": "too_many_requests"}),
+        _FakeBlock(type="text", text="- Stocks probably moved on rate expectations"),
+    ])
+    assert compute._research_news("close", "ctx", client=client) == []
+
+
+def test_research_news_offers_tool_with_direct_caller():
+    from services.options_svc import compute
+    client = _FakeNewsClient(blocks=[_FakeBlock(type="text", text="- CPI cool")])
+    compute._research_news("close", "ctx", client=client)
+    tool = client.calls[0]["tools"][0]
+    assert tool["type"].startswith("web_search_")
+    assert tool["name"] == "web_search"
+    # allowed_callers defaults to code_execution on v20260209+ — we call directly.
+    assert tool["allowed_callers"] == ["direct"]
+    assert "betas" not in client.calls[0]        # web search is GA
+
+
+def test_news_prompt_block_empty_when_no_news():
+    from services.options_svc import compute
+    assert compute._news_prompt_block([]) == ""
+    assert "DRIVERS" in compute._news_prompt_block(["Fed held rates"]).upper()
