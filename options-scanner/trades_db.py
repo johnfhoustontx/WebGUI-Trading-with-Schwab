@@ -126,6 +126,28 @@ _initialised: set = set()
 
 
 def connect(db_path=None):
+    """Open a connection, initialising the schema once per path per process.
+
+    NOTE: ``PRAGMA journal_mode=WAL`` is deliberately NOT issued here. journal_mode
+    is a PERSISTENT property stored in the database file header — ``init_db`` sets it
+    at creation and every later connection inherits it (and ``init_db`` still runs
+    once per path per process below, so even a non-WAL file gets upgraded), which
+    makes re-issuing it on every connect pure redundancy.
+
+    Honest performance note (measured 2026-07-25, do not oversell this): dropping the
+    pragma makes ``connect()`` itself ~3x cheaper (1.78 ms -> 0.60 ms), but it does
+    NOT speed up real work. On a fresh connection the FIRST query pays a ~1.1 ms
+    WAL/shm attach (open+close 0.42 ms vs open+SELECT+close 1.54 ms). The pragma used
+    to BE that first query, so removing it just moves the cost to the next statement:
+    ``paper_trader.load_trades()`` measured 1.892 ms before and 1.856 ms after.
+
+    The only way to avoid the repeated attach is to reuse connections rather than
+    opening one per operation. That was evaluated and rejected: ledger ops run on the
+    hourly paper cycle, the 5-min manage tick and page loads — a few ms per tick in
+    total — which does not justify sharing a connection across the service's executor
+    threads (``check_same_thread=False`` + locking). Same conclusion the GEX history
+    layer reached. This change is a redundancy/hygiene fix, not a speedup.
+    """
     if db_path is None:
         db_path = DEFAULT_DB_PATH
     db_path = Path(db_path).resolve()
@@ -133,7 +155,6 @@ def connect(db_path=None):
         init_db(db_path)
         _initialised.add(db_path)
     conn = sqlite3.connect(db_path)
-    conn.execute("PRAGMA journal_mode=WAL")
     conn.row_factory = sqlite3.Row
     return conn
 

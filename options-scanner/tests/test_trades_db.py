@@ -432,3 +432,91 @@ def test_roundtrip_preserves_entry_greeks(sandbox):
     assert loaded["entry_theta"] == pytest.approx(0.05)
     assert loaded["entry_vega"] == pytest.approx(-0.04)
     assert loaded["entry_gamma"] == pytest.approx(-0.002)
+
+
+# --------------------------------------------------------------- connect cost ---
+# ``connect()`` used to run ``PRAGMA journal_mode=WAL`` on EVERY call. journal_mode
+# is a PERSISTENT property stored in the DB file header (init_db already sets it at
+# creation), so re-issuing it per connection is redundant.
+#
+# These tests pin the redundancy removal and — importantly — that WAL is STILL active
+# without it. They are NOT performance tests: measured 2026-07-25, dropping the pragma
+# makes connect() ~3x cheaper but does not speed up real work, because the ~1.1 ms
+# WAL/shm attach simply moves to the first real query. See connect()'s docstring.
+
+def _traced_sql(monkeypatch, tmp_path):
+    """Return the SQL statements connect() issues on an already-initialised DB."""
+    db = tmp_path / "trades.db"
+    monkeypatch.setattr(trades_db, "DEFAULT_DB_PATH", db)
+    trades_db._initialised.discard(db.resolve())
+    trades_db.connect().close()          # first call: creates + initialises
+
+    seen = []
+    conn = trades_db.connect()           # second call: the steady-state path
+    # set_trace_callback only fires for statements executed AFTER it is installed,
+    # so re-open with tracing to capture connect()'s own statements.
+    conn.close()
+
+    import sqlite3
+    real_connect = sqlite3.connect
+
+    def _tracing_connect(*a, **kw):
+        c = real_connect(*a, **kw)
+        c.set_trace_callback(seen.append)
+        return c
+
+    monkeypatch.setattr(sqlite3, "connect", _tracing_connect)
+    trades_db.connect().close()
+    return seen
+
+
+def test_connect_does_not_reissue_journal_mode(monkeypatch, tmp_path):
+    """The redundant per-connection pragma must be gone."""
+    seen = _traced_sql(monkeypatch, tmp_path)
+    assert not any("journal_mode" in s.lower() for s in seen), (
+        f"connect() still issues a journal_mode pragma: {seen}")
+
+
+def test_wal_mode_still_active_without_the_pragma(monkeypatch, tmp_path):
+    """Behaviour must be unchanged: the DB is still in WAL mode.
+
+    This is the property that makes dropping the pragma safe — WAL persists in the
+    file header, so every later connection inherits it.
+    """
+    db = tmp_path / "trades.db"
+    monkeypatch.setattr(trades_db, "DEFAULT_DB_PATH", db)
+    trades_db._initialised.discard(db.resolve())
+
+    conn = trades_db.connect()
+    try:
+        assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+    finally:
+        conn.close()
+
+    # A completely separate connection also inherits WAL from the file header.
+    conn2 = trades_db.connect()
+    try:
+        assert conn2.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+    finally:
+        conn2.close()
+
+
+def test_connect_still_round_trips_a_trade(monkeypatch, tmp_path):
+    """End-to-end guard: the cheaper connect must still read and write."""
+    db = tmp_path / "trades.db"
+    monkeypatch.setattr(trades_db, "DEFAULT_DB_PATH", db)
+    trades_db._initialised.discard(db.resolve())
+
+    conn = trades_db.connect()
+    try:
+        trades_db.insert_trade(conn, _seed_trade(tid="wal-1"))
+        conn.commit()
+    finally:
+        conn.close()
+
+    conn = trades_db.connect()
+    try:
+        rows = trades_db.fetch_all(conn)
+    finally:
+        conn.close()
+    assert [r["trade_id"] for r in rows] == ["wal-1"]
