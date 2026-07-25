@@ -3411,7 +3411,7 @@ def test_notable_movers_prefers_dashboard_pct_and_sorts_by_magnitude():
     nvda = next(m for m in out if m["symbol"] == "NVDA")
     assert nvda["day_pct"] == -4.0            # dashboard pct WINS over matrix day_pct
     assert nvda["basis"] == "prior_close"
-    assert nvda["flow_alerts"] == 1           # cross-referenced
+    assert nvda["flow_alert_count"] == 1      # cross-referenced
     mu = next(m for m in out if m["symbol"] == "MU")
     assert mu["basis"] == "session"           # matrix-only → intraday basis
 
@@ -3465,8 +3465,8 @@ def test_notable_movers_skips_basket_composite_tile():
 def test_movers_prompt_block_labels_basis_and_flow_alerts():
     from services.options_svc import compute
     movers = [
-        {"symbol": "MU", "day_pct": 6.5, "basis": "session", "flow_alerts": 0},
-        {"symbol": "NVDA", "day_pct": -4.0, "basis": "prior_close", "flow_alerts": 2},
+        {"symbol": "MU", "day_pct": 6.5, "basis": "session", "flow_alert_count": 0},
+        {"symbol": "NVDA", "day_pct": -4.0, "basis": "prior_close", "flow_alert_count": 2},
     ]
     text = compute._movers_prompt_block(movers)
     assert "MU +6.50% (since the open)" in text
@@ -3474,3 +3474,114 @@ def test_movers_prompt_block_labels_basis_and_flow_alerts():
     assert "2 unusual-flow alert(s)" in text
     assert compute._movers_prompt_block([]) == ""
     assert compute._movers_prompt_block(None) == ""
+
+
+# --- code-quality review follow-ups ------------------------------------
+
+
+def test_notable_movers_matrix_indices_excluded_via_dashboard_categories():
+    """CRITICAL fix: $SPX/SPY are in the options-matrix collection universe
+    (gex_collector's index base) but have no category of their own there — the
+    dashboard's OWN classification of them (Cash Index / Broad-Market ETF) must
+    also filter the matrix fallback path, or an index posting a big move gets
+    mislabeled as an "individual stock move" in the Claude prompt."""
+    from services.options_svc import compute
+    dashboard = {"categories": [
+        {"category": "Cash Index", "tiles": [
+            {"display": "$SPX", "change_pct": -2.5},
+        ]},
+        {"category": "Broad-Market ETF", "tiles": [
+            {"display": "SPY", "change_pct": -2.4},
+        ]},
+        {"category": "Top 10", "tiles": [
+            {"display": "AMD", "change_pct": -1.9},
+        ]},
+    ]}
+    matrix = {"rows": [
+        {"symbol": "$SPX", "spot": 5000.0, "day_pct": -9.9},   # would rank #1 by |move|
+        {"symbol": "SPY", "spot": 500.0, "day_pct": -9.8},     # would rank #2
+        {"symbol": "MU", "spot": 50.0, "day_pct": 6.5},
+    ]}
+    out = compute._notable_movers(dashboard, matrix, {})
+    syms = {m["symbol"] for m in out}
+    assert syms == {"AMD", "MU"}
+    assert "$SPX" not in syms and "SPX" not in syms
+    assert "SPY" not in syms
+
+
+def test_notable_movers_matrix_indices_excluded_by_floor_when_dashboard_empty():
+    """Same CRITICAL fix, backstop case: with the dashboard unavailable (proxy
+    down → {} or None), the hardcoded _MOVER_INDEX_FLOOR must still keep
+    $SPX/$VIX/SPY/QQQ out of the matrix-only fallback."""
+    from services.options_svc import compute
+    matrix = {"rows": [
+        {"symbol": "$SPX", "spot": 5000.0, "day_pct": -9.9},
+        {"symbol": "$VIX", "spot": 20.0, "day_pct": 9.9},
+        {"symbol": "SPY", "spot": 500.0, "day_pct": -9.8},
+        {"symbol": "QQQ", "spot": 400.0, "day_pct": -9.7},
+        {"symbol": "MU", "spot": 50.0, "day_pct": 6.5},
+    ]}
+    assert {m["symbol"] for m in compute._notable_movers({}, matrix, {})} == {"MU"}
+    assert {m["symbol"] for m in compute._notable_movers(None, matrix, {})} == {"MU"}
+
+
+def test_notable_movers_new_dashboard_category_excluded_by_default():
+    """The allow-list must fail CLOSED: a category market_svc has never used
+    before is excluded automatically, with no skip-list to update."""
+    from services.options_svc import compute
+    dashboard = {"categories": [
+        {"category": "Some Brand New Category", "tiles": [
+            {"display": "ZZZ", "change_pct": 9.9},
+        ]},
+    ]}
+    assert compute._notable_movers(dashboard, {}, {}) == []
+
+
+def test_notable_movers_alerts_loop_tolerates_non_dict_items():
+    """A non-dict element in the (untrusted) alerts list must not blow up the
+    whole computation via the outer except (this loop runs before `out` is
+    populated, so a crash here used to discard an otherwise-valid result)."""
+    from services.options_svc import compute
+    matrix = {"rows": [{"symbol": "MU", "spot": 50.0, "day_pct": 6.5}]}
+    alerts = {"alerts": ["garbage", None, 42, {"symbol": "MU"}]}
+    out = compute._notable_movers({}, matrix, alerts)
+    assert [m["symbol"] for m in out] == ["MU"]
+
+
+def test_notable_movers_prefers_row_n_alerts_over_capped_alerts_list():
+    """A matrix row's own n_alerts (uncapped cooldown-map count) must win over
+    the capped cache:options:flow_alerts list count for the SAME symbol."""
+    from services.options_svc import compute
+    matrix = {"rows": [{"symbol": "MU", "spot": 50.0, "day_pct": 6.5, "n_alerts": 5}]}
+    alerts = {"alerts": [{"symbol": "MU"}]}   # the capped list undercounts vs n_alerts
+    out = compute._notable_movers({}, matrix, alerts)
+    assert out[0]["flow_alert_count"] == 5
+
+
+def test_notable_movers_matrix_zero_n_alerts_is_not_treated_as_missing():
+    """n_alerts=0 is a real count, not "absent" — must NOT fall back to the
+    (possibly nonzero) capped alerts-list count."""
+    from services.options_svc import compute
+    matrix = {"rows": [{"symbol": "MU", "spot": 50.0, "day_pct": 6.5, "n_alerts": 0}]}
+    alerts = {"alerts": [{"symbol": "MU"}, {"symbol": "MU"}]}
+    out = compute._notable_movers({}, matrix, alerts)
+    assert out[0]["flow_alert_count"] == 0
+
+
+def test_notable_movers_alert_symbol_normalization_strips_before_dollar_strip():
+    """A ' $MU' alert entry must still dedup against a plain 'MU' matrix row —
+    .strip() must run BEFORE .lstrip('$') or the leading space hides the '$'."""
+    from services.options_svc import compute
+    matrix = {"rows": [{"symbol": "MU", "spot": 50.0, "day_pct": 6.5}]}
+    alerts = {"alerts": [{"symbol": " $MU"}]}
+    out = compute._notable_movers({}, matrix, alerts)
+    assert out[0]["flow_alert_count"] == 1
+
+
+def test_notable_movers_limit_guard_on_non_int():
+    """A non-int limit degrades to the default rather than silently discarding
+    already-computed work (e.g. slicing to [:0])."""
+    from services.options_svc import compute
+    matrix = {"rows": [{"symbol": "MU", "day_pct": 1.0}, {"symbol": "AMD", "day_pct": 2.0}]}
+    out = compute._notable_movers({}, matrix, {}, limit="not-a-number")
+    assert len(out) == 2

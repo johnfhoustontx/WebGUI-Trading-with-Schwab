@@ -2488,19 +2488,30 @@ def _projection_brief(eng, chain, spot, now):
         return ""
 
 
-# Dashboard categories that are NOT individual stocks (indices, futures, ETFs,
-# internals, macro) — verified against services/market_svc/symbols.py
-# CATEGORY_ORDER (2026-07-24). Of all 14 categories, only "Top 10" holds actual
-# single-name equities; everything else is an index/ETF/basket/macro read, so
-# it is excluded here even when it carries a legitimate change_pct (e.g. $SPX
-# in "Cash Index", SPY in "Broad-Market ETF").
-_MOVER_SKIP_CATEGORIES = frozenset({
-    "Volatility", "Options Sentiment", "Market Internals / Breadth", "Currency",
-    "Cash Index", "Equity Index Futures", "Broad-Market ETF", "Sector SPDR",
-    "Thematic / Industry ETF", "Factor / Momentum ETF", "Fixed Income / Credit ETF",
-    "Crypto / Alternatives", "Countries",
-})
+# The dashboard's ONE single-name-equity category (see services/market_svc/
+# symbols.py CATEGORY_ORDER) — everything else there is an index/ETF/currency/
+# basket/macro read. This is an ALLOW-list, deliberately: a tile's category
+# must equal this to ever be treated as "a stock". A renamed or newly added
+# market_svc category is therefore excluded BY DEFAULT (fails closed) — no
+# test needs updating to keep it that way, unlike a skip-list which fails open.
+_MOVER_STOCK_CATEGORY = "Top 10"
+
+# The options-matrix universe (gex_collector.collection_symbols() = the index
+# base + the watchlist) always includes these regardless of the watchlist —
+# they must never appear as "individual stock moves" even when the dashboard
+# itself is empty/unreachable (proxy down), so this is a hardcoded backstop
+# unioned into ``non_stock`` on top of whatever the dashboard classifies.
+# Normalized keys (see ``_mover_key``); mirrors gex_collector.SYMBOLS.
+_MOVER_INDEX_FLOOR = frozenset({"SPX", "VIX", "SPY", "QQQ"})
+
 _MOVER_LIMIT = 6
+
+
+def _mover_key(symbol) -> str:
+    """Normalize a display symbol to a dedup/lookup key: strip whitespace
+    BEFORE stripping a leading '$' (a '" $SPY"' entry would otherwise keep its
+    '$' and fail to match), then uppercase."""
+    return str(symbol or "").strip().lstrip("$").upper()
 
 
 def _notable_movers(dashboard, matrix, flow_alerts, limit: int = _MOVER_LIMIT) -> list:
@@ -2512,58 +2523,84 @@ def _notable_movers(dashboard, matrix, flow_alerts, limit: int = _MOVER_LIMIT) -
     ~08:00 CT session-collection start — an INTRADAY read, used as a fallback
     for the ~45 watchlist names not on the dashboard). Each row carries
     ``basis`` so the prompt can label which kind of move it is, honestly,
-    rather than implying every number means the same thing. Cross-references
-    today's flow alerts so a mover that also printed unusual options activity
-    is flagged.
+    rather than implying every number means the same thing.
 
-    Skips dashboard tiles that aren't individual stocks: ``value_only`` tiles
-    (indices/internals with no meaningful %, e.g. $ADVN-$DECN), composite
-    ``basket`` tiles (BIG10 is an aggregate, not one name's move), and every
-    category except "Top 10" (see ``_MOVER_SKIP_CATEGORIES``).
+    Individual-stock filtering is an ALLOW-list on ``_MOVER_STOCK_CATEGORY``
+    (the dashboard's one single-name-equity category — see its comment). Every
+    OTHER dashboard-classified symbol (indices, ETFs, currencies, crypto, …) is
+    collected into ``non_stock`` and ALSO excludes that symbol from the MATRIX
+    fallback below — the matrix carries no category of its own (it's just
+    gex_collector's collection universe: the index base + the watchlist), so
+    without this, ``$SPX``/``SPY``/``QQQ`` — dashboard-excluded but present in
+    the matrix — would sail through unfiltered the moment they're not also a
+    dashboard "Top 10" tile (which they never are). Because the dashboard can
+    itself be empty/down, ``_MOVER_INDEX_FLOOR`` is unioned in as a hardcoded
+    backstop so the matrix path is never left completely unfiltered.
+
+    Flow-alert counts mean ONE thing per row, never mixed: a matrix row's own
+    ``n_alerts`` (from the UNCAPPED per-symbol cooldown map — the accurate
+    count) is preferred when the row carries it; dashboard-only symbols (which
+    have no ``n_alerts``) fall back to counting ``cache:options:flow_alerts``'s
+    ``alerts`` list, which is documented elsewhere in this module as 50-capped
+    and can undercount on a busy day.
 
     Returns up to ``limit`` rows sorted by |move| desc. Pure over already-
     fetched cache payloads; fully defensive — any failure/garbage input → []."""
     out = {}
     try:
-        # Flow-alert counts per symbol (today's UOA + crossover events).
+        limit = limit if isinstance(limit, int) else _MOVER_LIMIT
+
+        # Flow-alert counts per symbol — the capped fallback source (see docstring).
         counts = {}
         for a in ((flow_alerts or {}).get("alerts") or []):
-            sym = str((a or {}).get("symbol") or "").lstrip("$").upper()
+            if not isinstance(a, dict):
+                continue
+            sym = _mover_key(a.get("symbol"))
             if sym:
                 counts[sym] = counts.get(sym, 0) + 1
 
+        non_stock = set(_MOVER_INDEX_FLOOR)
         for cat in ((dashboard or {}).get("categories") or []):
             if not isinstance(cat, dict):
                 continue
-            if str(cat.get("category") or "") in _MOVER_SKIP_CATEGORIES:
-                continue
+            cat_name = str(cat.get("category") or "")
             for t in (cat.get("tiles") or []):
-                if not isinstance(t, dict) or t.get("value_only") or t.get("basket"):
+                if not isinstance(t, dict):
                     continue
-                pct, sym = t.get("change_pct"), str(t.get("display") or "").strip()
-                if not sym or not isinstance(pct, (int, float)) or isinstance(pct, bool):
+                sym = str(t.get("display") or "").strip()
+                if not sym:
                     continue
-                key = sym.lstrip("$").upper()
+                key = _mover_key(sym)
+                if cat_name != _MOVER_STOCK_CATEGORY:
+                    non_stock.add(key)     # index/ETF/macro — also filters the matrix pass below
+                    continue
+                if t.get("value_only") or t.get("basket"):
+                    continue
+                pct = t.get("change_pct")
+                if not isinstance(pct, (int, float)) or isinstance(pct, bool):
+                    continue
                 out[key] = {"symbol": sym, "day_pct": round(float(pct), 2),
                             "last": t.get("last"), "basis": "prior_close",
-                            "flow_alerts": counts.get(key, 0)}
+                            "flow_alert_count": counts.get(key, 0)}
 
         for r in ((matrix or {}).get("rows") or []):
             if not isinstance(r, dict):
                 continue
             sym = str(r.get("symbol") or "").strip()
-            key = sym.lstrip("$").upper()
-            if not sym or key in out:      # dashboard's prior-close pct wins
+            key = _mover_key(sym)
+            if not sym or key in out or key in non_stock:
                 continue
             pct = r.get("day_pct")
             if not isinstance(pct, (int, float)) or isinstance(pct, bool):
                 continue
+            n_alerts = r.get("n_alerts")
+            has_n_alerts = isinstance(n_alerts, (int, float)) and not isinstance(n_alerts, bool)
             out[key] = {"symbol": sym, "day_pct": round(float(pct), 2),
                         "last": r.get("spot"), "basis": "session",
-                        "flow_alerts": counts.get(key, int(r.get("n_alerts") or 0))}
+                        "flow_alert_count": int(n_alerts) if has_n_alerts else counts.get(key, 0)}
 
         rows = sorted(out.values(), key=lambda m: abs(m["day_pct"]), reverse=True)
-        return rows[:max(0, int(limit))]
+        return rows[:max(0, limit)]
     except Exception:
         log.debug("_notable_movers failed", exc_info=True)
         return []
@@ -2579,8 +2616,9 @@ def _movers_prompt_block(movers) -> str:
         for m in movers:
             basis = "vs prior close" if m.get("basis") == "prior_close" else "since the open"
             bit = f"{m['symbol']} {m['day_pct']:+.2f}% ({basis})"
-            if m.get("flow_alerts"):
-                bit += f" — {m['flow_alerts']} unusual-flow alert(s) today"
+            n = m.get("flow_alert_count")
+            if n:
+                bit += f" — {n} unusual-flow alert(s) today"
             lines.append(bit)
         return "NOTABLE INDIVIDUAL STOCK MOVES (code-computed, use verbatim):\n" + \
                "\n".join(f"- {x}" for x in lines)
