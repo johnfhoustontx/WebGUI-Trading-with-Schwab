@@ -2169,12 +2169,15 @@ def build_matrix(scan_day, flow_cooldowns, today, session_date, now_ts):
         import services.options_svc.matrix as mx
         rows = mx.build_rows(raw, scan_counts, alert_counts, now_ts)
         rows.sort(key=lambda r: r["hotness"], reverse=True)
+        # Dollar-weighted market-wide net call/put PREMIUM skew over the same raw
+        # blobs — a market-money read consumed by the sentiment tiles. Additive.
+        premium = mx.market_premium_aggregate(raw)
     except Exception:
         log.debug("build_matrix: build failed", exc_info=True)
         return {"date": today, "session_date": session_key, "ts": _now_iso(),
                 "rows": [], "error": "matrix build failed"}
     return {"date": today, "session_date": session_key, "ts": _now_iso(),
-            "rows": rows, "error": None}
+            "rows": rows, "premium": premium, "error": None}
 
 
 def build_gamma_read(symbol, spot, gex_summary, charm_summary, dex_summary,
@@ -2485,6 +2488,107 @@ def _projection_brief(eng, chain, spot, now):
         return ": ".join([parts[0], "; ".join(parts[1:])]) + "." if len(parts) > 1 else parts[0] + "."
     except Exception:
         log.debug("_projection_brief failed", exc_info=True)
+        return ""
+
+
+# Dashboard categories that are NOT individual stocks (indices, futures, ETFs,
+# internals, macro) — verified against services/market_svc/symbols.py
+# CATEGORY_ORDER (2026-07-24). Of all 14 categories, only "Top 10" holds actual
+# single-name equities; everything else is an index/ETF/basket/macro read, so
+# it is excluded here even when it carries a legitimate change_pct (e.g. $SPX
+# in "Cash Index", SPY in "Broad-Market ETF").
+_MOVER_SKIP_CATEGORIES = frozenset({
+    "Volatility", "Options Sentiment", "Market Internals / Breadth", "Currency",
+    "Cash Index", "Equity Index Futures", "Broad-Market ETF", "Sector SPDR",
+    "Thematic / Industry ETF", "Factor / Momentum ETF", "Fixed Income / Credit ETF",
+    "Crypto / Alternatives", "Countries",
+})
+_MOVER_LIMIT = 6
+
+
+def _notable_movers(dashboard, matrix, flow_alerts, limit: int = _MOVER_LIMIT) -> list:
+    """The day's biggest individual-stock moves, for the briefing prompt.
+
+    Merges two sources with DIFFERENT day-% semantics: the market dashboard's
+    ``change_pct`` (true change vs the PRIOR CLOSE, from the quote — preferred
+    when available) and the options matrix's ``day_pct`` (move since the
+    ~08:00 CT session-collection start — an INTRADAY read, used as a fallback
+    for the ~45 watchlist names not on the dashboard). Each row carries
+    ``basis`` so the prompt can label which kind of move it is, honestly,
+    rather than implying every number means the same thing. Cross-references
+    today's flow alerts so a mover that also printed unusual options activity
+    is flagged.
+
+    Skips dashboard tiles that aren't individual stocks: ``value_only`` tiles
+    (indices/internals with no meaningful %, e.g. $ADVN-$DECN), composite
+    ``basket`` tiles (BIG10 is an aggregate, not one name's move), and every
+    category except "Top 10" (see ``_MOVER_SKIP_CATEGORIES``).
+
+    Returns up to ``limit`` rows sorted by |move| desc. Pure over already-
+    fetched cache payloads; fully defensive — any failure/garbage input → []."""
+    out = {}
+    try:
+        # Flow-alert counts per symbol (today's UOA + crossover events).
+        counts = {}
+        for a in ((flow_alerts or {}).get("alerts") or []):
+            sym = str((a or {}).get("symbol") or "").lstrip("$").upper()
+            if sym:
+                counts[sym] = counts.get(sym, 0) + 1
+
+        for cat in ((dashboard or {}).get("categories") or []):
+            if not isinstance(cat, dict):
+                continue
+            if str(cat.get("category") or "") in _MOVER_SKIP_CATEGORIES:
+                continue
+            for t in (cat.get("tiles") or []):
+                if not isinstance(t, dict) or t.get("value_only") or t.get("basket"):
+                    continue
+                pct, sym = t.get("change_pct"), str(t.get("display") or "").strip()
+                if not sym or not isinstance(pct, (int, float)) or isinstance(pct, bool):
+                    continue
+                key = sym.lstrip("$").upper()
+                out[key] = {"symbol": sym, "day_pct": round(float(pct), 2),
+                            "last": t.get("last"), "basis": "prior_close",
+                            "flow_alerts": counts.get(key, 0)}
+
+        for r in ((matrix or {}).get("rows") or []):
+            if not isinstance(r, dict):
+                continue
+            sym = str(r.get("symbol") or "").strip()
+            key = sym.lstrip("$").upper()
+            if not sym or key in out:      # dashboard's prior-close pct wins
+                continue
+            pct = r.get("day_pct")
+            if not isinstance(pct, (int, float)) or isinstance(pct, bool):
+                continue
+            out[key] = {"symbol": sym, "day_pct": round(float(pct), 2),
+                        "last": r.get("spot"), "basis": "session",
+                        "flow_alerts": counts.get(key, int(r.get("n_alerts") or 0))}
+
+        rows = sorted(out.values(), key=lambda m: abs(m["day_pct"]), reverse=True)
+        return rows[:max(0, int(limit))]
+    except Exception:
+        log.debug("_notable_movers failed", exc_info=True)
+        return []
+
+
+def _movers_prompt_block(movers) -> str:
+    """Render movers for the model prompt, labeling each move's basis honestly
+    (prior-close % vs since-the-open %) so the model never conflates the two."""
+    if not movers:
+        return ""
+    try:
+        lines = []
+        for m in movers:
+            basis = "vs prior close" if m.get("basis") == "prior_close" else "since the open"
+            bit = f"{m['symbol']} {m['day_pct']:+.2f}% ({basis})"
+            if m.get("flow_alerts"):
+                bit += f" — {m['flow_alerts']} unusual-flow alert(s) today"
+            lines.append(bit)
+        return "NOTABLE INDIVIDUAL STOCK MOVES (code-computed, use verbatim):\n" + \
+               "\n".join(f"- {x}" for x in lines)
+    except Exception:
+        log.debug("_movers_prompt_block failed", exc_info=True)
         return ""
 
 

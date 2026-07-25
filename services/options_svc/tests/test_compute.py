@@ -3384,3 +3384,93 @@ def test_matrix_quotes_degrades_to_empty(monkeypatch):
 
     monkeypatch.setattr(compute._proxy, "schwab_py_client", _Client())
     assert compute.matrix_quotes(["SPY"]) == {}
+
+
+def test_notable_movers_prefers_dashboard_pct_and_sorts_by_magnitude():
+    from services.options_svc import compute
+    dashboard = {"categories": [
+        {"category": "Top 10", "tiles": [
+            {"display": "NVDA", "last": 100.0, "change_pct": -4.0, "category": "Top 10"},
+            {"display": "AAPL", "last": 200.0, "change_pct": 1.0, "category": "Top 10"},
+        ]},
+        {"category": "Internals", "tiles": [
+            {"display": "ADVN-DECN", "last": -465, "change_pct": 0, "value_only": True,
+             "category": "Internals"},
+        ]},
+    ]}
+    matrix = {"rows": [
+        {"symbol": "NVDA", "spot": 100.0, "day_pct": -3.1, "n_alerts": 2},
+        {"symbol": "MU", "spot": 50.0, "day_pct": 6.5, "n_alerts": 0},
+    ]}
+    alerts = {"alerts": [{"symbol": "NVDA", "type": "uoa", "side": "put"}]}
+    out = compute._notable_movers(dashboard, matrix, alerts, limit=3)
+    syms = [m["symbol"] for m in out]
+    assert syms[0] == "MU"                    # |6.5| is the biggest move
+    assert "NVDA" in syms
+    assert "ADVN-DECN" not in syms            # value_only tile skipped
+    nvda = next(m for m in out if m["symbol"] == "NVDA")
+    assert nvda["day_pct"] == -4.0            # dashboard pct WINS over matrix day_pct
+    assert nvda["basis"] == "prior_close"
+    assert nvda["flow_alerts"] == 1           # cross-referenced
+    mu = next(m for m in out if m["symbol"] == "MU")
+    assert mu["basis"] == "session"           # matrix-only → intraday basis
+
+
+def test_notable_movers_defensive_on_garbage():
+    from services.options_svc import compute
+    assert compute._notable_movers(None, None, None) == []
+    assert compute._notable_movers({"categories": "nope"}, {"rows": None}, {}) == []
+    # a row with no usable pct is dropped, not raised on
+    assert compute._notable_movers({}, {"rows": [{"symbol": "X", "day_pct": None}]}, {}) == []
+
+
+def test_notable_movers_skips_macro_categories_even_with_a_real_pct():
+    """A Cash Index tile ($SPX) has a legit change_pct but is not an individual
+    stock — it must be excluded even though it isn't value_only. Uses the REAL
+    market_svc category strings (verified against symbols.py CATEGORY_ORDER),
+    not the design doc's placeholder names."""
+    from services.options_svc import compute
+    dashboard = {"categories": [
+        {"category": "Cash Index", "tiles": [
+            {"display": "$SPX", "last": 5000.0, "change_pct": -2.5, "category": "Cash Index"},
+        ]},
+        {"category": "Broad-Market ETF", "tiles": [
+            {"display": "SPY", "last": 500.0, "change_pct": -2.4, "category": "Broad-Market ETF"},
+        ]},
+        {"category": "Top 10", "tiles": [
+            {"display": "TSLA", "last": 300.0, "change_pct": 3.3, "category": "Top 10"},
+        ]},
+    ]}
+    out = compute._notable_movers(dashboard, {}, {})
+    syms = {m["symbol"] for m in out}
+    assert syms == {"TSLA"}
+
+
+def test_notable_movers_skips_basket_composite_tile():
+    """The BIG10 composite (kind='basket', flagged basket=True by market_svc's
+    build_dashboard) is an aggregate, not one stock's move — must be excluded
+    even though it lives in the "Top 10" category alongside its members."""
+    from services.options_svc import compute
+    dashboard = {"categories": [
+        {"category": "Top 10", "tiles": [
+            {"display": "BIG10", "change_pct": -1.2, "basket": True, "category": "Top 10"},
+            {"display": "AMD", "last": 80.0, "change_pct": -1.9, "category": "Top 10"},
+        ]},
+    ]}
+    out = compute._notable_movers(dashboard, {}, {})
+    syms = {m["symbol"] for m in out}
+    assert syms == {"AMD"}
+
+
+def test_movers_prompt_block_labels_basis_and_flow_alerts():
+    from services.options_svc import compute
+    movers = [
+        {"symbol": "MU", "day_pct": 6.5, "basis": "session", "flow_alerts": 0},
+        {"symbol": "NVDA", "day_pct": -4.0, "basis": "prior_close", "flow_alerts": 2},
+    ]
+    text = compute._movers_prompt_block(movers)
+    assert "MU +6.50% (since the open)" in text
+    assert "NVDA -4.00% (vs prior close)" in text
+    assert "2 unusual-flow alert(s)" in text
+    assert compute._movers_prompt_block([]) == ""
+    assert compute._movers_prompt_block(None) == ""
