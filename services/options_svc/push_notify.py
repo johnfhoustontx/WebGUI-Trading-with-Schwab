@@ -27,7 +27,9 @@ from repo_paths import NOTIFICATIONS_CONFIG
 from services.options_svc import briefing_image
 from services.options_svc import market_snapshot
 from shared.notify.channels import (
+    discord_target,
     load_config as _shared_load_config,
+    telegram_target,
     send_telegram,
     send_telegram_photo,
     send_discord,
@@ -339,12 +341,11 @@ def send_action_digest(items: dict, *, slot_label: str = "", config: dict | None
     cfg = config or load_config()
     if not cfg.get("enabled", True) or action_total(items) == 0:
         return False
-    tg = cfg.get("telegram", {})
-    dc = cfg.get("discord", {})
     sms = cfg.get("sms", {})
-    send_telegram(tg.get("bot_token"), tg.get("chat_id"),
-                  action_digest_text(items, slot_label))
-    send_discord(dc.get("webhook_url"), action_digest_embed(items, slot_label))
+    tok, chat = telegram_target(cfg, "action_alert")
+    send_telegram(tok, chat, action_digest_text(items, slot_label))
+    send_discord(discord_target(cfg, "action_alert"),
+                 action_digest_embed(items, slot_label))
     send_sms(sms.get("fi_number"), sms.get("smtp_user"), sms.get("smtp_app_password"),
              action_sms_text(items, slot_label), subject="Trades need action")
     return True
@@ -375,34 +376,35 @@ def flow_alert_discord_embed(a) -> dict:
             "color": _FLOW_GREEN if _flow_is_bullish(a) else _FLOW_RED}
 
 
-def flow_webhook(dc: dict, a) -> str:
-    """Per-alert-type Discord webhook, falling back to the general webhook_url.
+_FLOW_CATEGORIES = {"uoa": "flow_uoa",
+                    "crossover": "flow_crossover",
+                    "gamma_flip": "flow_gamma_flip"}
 
-    UOA and crossover alerts can each be routed to their own channel via the
-    optional `discord.flow_uoa_webhook_url` / `discord.flow_crossover_webhook_url`
-    config keys; either missing/empty falls back to `discord.webhook_url`."""
-    dc = dc or {}
-    per_type = {"uoa": "flow_uoa_webhook_url",
-                "crossover": "flow_crossover_webhook_url",
-                "gamma_flip": "flow_gamma_flip_webhook_url"}.get(a.get("type"))
-    if per_type and dc.get(per_type):
-        return dc[per_type]
-    return dc.get("webhook_url", "")
+
+def flow_category(a) -> str:
+    """Routing category for a flow alert — one per alert TYPE, so UOA / crossover
+    / gamma-flip can each land in their own channel.
+
+    An unrecognized type is passed through UNMAPPED on purpose: the resolvers know
+    no such category, so it falls all the way through to the GLOBAL webhook/chat
+    rather than being silently lumped onto another feed."""
+    t = (a or {}).get("type")
+    return _FLOW_CATEGORIES.get(t, t if isinstance(t, str) else "")
 
 
 def send_flow_alert(a, *, config: dict | None = None) -> bool:
     """Push one flow alert to Telegram + Discord. Best-effort, never raises.
 
-    Discord routing is per alert type — UOA and crossover can each target their
-    own webhook (see flow_webhook). Returns True if a send was attempted (config
-    enabled)."""
+    Routing is per alert type (see `flow_category`), resolved route -> legacy
+    `discord.flow_*_webhook_url` key -> global. Returns True if a send was
+    attempted (config enabled)."""
     cfg = config or load_config()
     if not cfg.get("enabled", True):
         return False
-    tg = cfg.get("telegram", {})
-    dc = cfg.get("discord", {})
-    send_telegram(tg.get("bot_token"), tg.get("chat_id"), flow_alert_telegram_text(a))
-    send_discord(flow_webhook(dc, a), flow_alert_discord_embed(a))
+    category = flow_category(a)
+    tok, chat = telegram_target(cfg, category)
+    send_telegram(tok, chat, flow_alert_telegram_text(a))
+    send_discord(discord_target(cfg, category), flow_alert_discord_embed(a))
     return True
 
 
@@ -499,11 +501,10 @@ def send_eod_summary(summary: dict, *, config: dict | None = None) -> bool:
     cfg = config or load_config()
     if not cfg.get("enabled", True) or eod_book_count(summary) == 0:
         return False
-    tg = cfg.get("telegram", {})
-    dc = cfg.get("discord", {})
     sms = cfg.get("sms", {})
-    send_telegram(tg.get("bot_token"), tg.get("chat_id"), eod_summary_text(summary))
-    send_discord(dc.get("webhook_url"), eod_summary_embed(summary))
+    tok, chat = telegram_target(cfg, "eod_summary")
+    send_telegram(tok, chat, eod_summary_text(summary))
+    send_discord(discord_target(cfg, "eod_summary"), eod_summary_embed(summary))
     send_sms(sms.get("fi_number"), sms.get("smtp_user"), sms.get("smtp_app_password"),
              eod_summary_sms(summary), subject="EOD summary")
     return True
@@ -609,8 +610,9 @@ def send_gamma_briefing(res: dict, *, slot: str, config: dict | None = None) -> 
         return False
 
     caption = briefing_caption(res, slot)
-    tg = cfg.get("telegram", {})
-    webhook = gb.get("webhook_url") or (cfg.get("discord", {}) or {}).get("webhook_url")
+    # route -> the legacy dedicated `gamma_briefing.webhook_url` -> global.
+    tok, chat = telegram_target(cfg, "gamma_briefing")
+    webhook = discord_target(cfg, "gamma_briefing")
 
     png = briefing_image.render_html_png(html)
     if not png:
@@ -618,7 +620,7 @@ def send_gamma_briefing(res: dict, *, slot: str, config: dict | None = None) -> 
         # send_telegram posts with parse_mode=HTML and the caption carries a
         # MODEL-WRITTEN headline, so a bare '<'/'&' would 400 the whole message.
         # Discord renders plain text, so its embed keeps the unescaped original.
-        send_telegram(tg.get("bot_token"), tg.get("chat_id"), _html.escape(caption))
+        send_telegram(tok, chat, _html.escape(caption))
         send_discord(webhook, _briefing_text_embed(caption))
         return True
 
@@ -629,19 +631,12 @@ def send_gamma_briefing(res: dict, *, slot: str, config: dict | None = None) -> 
         log.warning("gamma briefing %s too large to push (%d bytes)", slot, len(png))
         return False
     filename = briefing_filename(res, slot)
-    send_telegram_photo(tg.get("bot_token"), tg.get("chat_id"), filename, png, caption)
+    send_telegram_photo(tok, chat, filename, png, caption)
     send_discord_file(webhook, filename, png, caption, content_type="image/png")
     return True
 
 
 _MS_MAX_BYTES = _BRIEFING_MAX_BYTES   # reuse the same size ceiling
-
-
-def _ms_webhook(dc: dict) -> str:
-    """Discord target for the market snapshot: the per-channel override if set,
-    else the general webhook."""
-    dc = dc or {}
-    return dc.get("market_snapshot_webhook_url") or dc.get("webhook_url", "")
 
 
 def market_snapshot_caption(trend, sentiment, regime) -> str:
@@ -670,21 +665,22 @@ def send_market_snapshot(dashboard, trend, sentiment, regime, intraday, regime_h
     if not block.get("enabled", True):
         return False
     caption = market_snapshot_caption(trend, sentiment, regime)
-    tg = cfg.get("telegram", {})
-    webhook = _ms_webhook(cfg.get("discord", {}))
+    # route -> the legacy `discord.market_snapshot_webhook_url` -> global.
+    tok, chat = telegram_target(cfg, "market_snapshot")
+    webhook = discord_target(cfg, "market_snapshot")
     doc = market_snapshot.market_snapshot_doc(dashboard, trend, sentiment, regime,
                                               intraday, regime_hist, subtitle=f"{slot} CT")
     png = briefing_image.render_html_png(doc)
     if not png:
         log.warning("market snapshot %s: render failed — pushing text only", slot)
-        send_telegram(tg.get("bot_token"), tg.get("chat_id"), _html.escape(caption))
+        send_telegram(tok, chat, _html.escape(caption))
         send_discord(webhook, {"description": caption})
         return True
     if len(png) > _MS_MAX_BYTES:
         log.warning("market snapshot %s too large (%d bytes)", slot, len(png))
         return False
     filename = f"market-snapshot-{slot.replace(':', '')}.png"
-    send_telegram_photo(tg.get("bot_token"), tg.get("chat_id"), filename, png, caption)
+    send_telegram_photo(tok, chat, filename, png, caption)
     send_discord_file(webhook, filename, png, caption, content_type="image/png")
     return True
 
@@ -835,12 +831,13 @@ def notify_signals(bus, signals: list, *, kind: str, seen_key: str,
     if not fresh:
         return []
 
-    tg = cfg.get("telegram", {})
-    dc = cfg.get("discord", {})
     sms = cfg.get("sms", {})
+    # Both kinds (scanner + captured) share the one `signals` category.
+    tok, chat = telegram_target(cfg, "signals")
+    webhook = discord_target(cfg, "signals")
     for s in fresh:
-        send_telegram(tg.get("bot_token"), tg.get("chat_id"), telegram_signal_text(s))
-        send_discord(dc.get("webhook_url"), discord_signal_embed(s))
+        send_telegram(tok, chat, telegram_signal_text(s))
+        send_discord(webhook, discord_signal_embed(s))
     send_sms(sms.get("fi_number"), sms.get("smtp_user"), sms.get("smtp_app_password"),
              sms_summary_text(fresh, kind), subject=f"{len(fresh)} new {kind} signal(s)")
     return [key_fn(s) for s in fresh]

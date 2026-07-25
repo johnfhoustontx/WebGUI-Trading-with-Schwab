@@ -475,17 +475,24 @@ def test_send_flow_alert_noop_when_disabled(monkeypatch):
 
 
 def test_flow_webhook_routes_by_type():
+    """The per-type Discord target (formerly the `flow_webhook` helper, now the
+    `flow_category` mapper + the shared resolver)."""
     from services.options_svc import push_notify as pn
-    dc = {"webhook_url": "gen", "flow_uoa_webhook_url": "uoa",
-          "flow_crossover_webhook_url": "xo"}
-    assert pn.flow_webhook(dc, {"type": "uoa"}) == "uoa"
-    assert pn.flow_webhook(dc, {"type": "crossover"}) == "xo"
+    from shared.notify.channels import discord_target
+    cfg = {"discord": {"webhook_url": "gen", "flow_uoa_webhook_url": "uoa",
+                       "flow_crossover_webhook_url": "xo"}}
+
+    def hook(a, c=cfg):
+        return discord_target(c, pn.flow_category(a))
+
+    assert hook({"type": "uoa"}) == "uoa"
+    assert hook({"type": "crossover"}) == "xo"
     # Unknown type → general webhook; missing per-type key → fall back to general.
-    assert pn.flow_webhook(dc, {"type": "other"}) == "gen"
-    assert pn.flow_webhook({"webhook_url": "gen"}, {"type": "uoa"}) == "gen"
-    assert pn.flow_webhook({"webhook_url": "gen", "flow_uoa_webhook_url": ""},
-                           {"type": "uoa"}) == "gen"
-    assert pn.flow_webhook({}, {"type": "uoa"}) == ""
+    assert hook({"type": "other"}) == "gen"
+    assert hook({"type": "uoa"}, {"discord": {"webhook_url": "gen"}}) == "gen"
+    assert hook({"type": "uoa"},
+                {"discord": {"webhook_url": "gen", "flow_uoa_webhook_url": ""}}) == "gen"
+    assert hook({"type": "uoa"}, {}) == ""
 
 
 def test_send_flow_alert_uses_per_type_webhook(monkeypatch):
@@ -787,10 +794,12 @@ def test_flow_alert_gamma_flip_color_by_side():
 
 def test_flow_webhook_routes_gamma_flip():
     from services.options_svc import push_notify as pn
-    dc = {"webhook_url": "gen", "flow_gamma_flip_webhook_url": "gf"}
-    assert pn.flow_webhook(dc, {"type": "gamma_flip"}) == "gf"
+    from shared.notify.channels import discord_target
+    cat = pn.flow_category({"type": "gamma_flip"})
+    assert discord_target(
+        {"discord": {"webhook_url": "gen", "flow_gamma_flip_webhook_url": "gf"}}, cat) == "gf"
     # missing per-type key → general webhook.
-    assert pn.flow_webhook({"webhook_url": "gen"}, {"type": "gamma_flip"}) == "gen"
+    assert discord_target({"discord": {"webhook_url": "gen"}}, cat) == "gen"
 
 
 def test_briefing_caption_full():
@@ -1084,3 +1093,211 @@ def test_market_snapshot_caption_bad_score_is_placeholder():
     assert "Sentiment: —/10" in cap
     # bool must not be treated as numeric
     assert "Sentiment: —/10" in pn.market_snapshot_caption({}, {"total_score": True}, {})
+
+
+# ── Per-category routing (routes.<category> → legacy key → global) ────────────
+# Every push category can target its own Discord webhook + Telegram chat via the
+# `routes` config block. These tests pin BOTH halves of the contract: a route wins
+# over the global, and (for the categories that already had an ad-hoc override) a
+# LEGACY key with no route still wins over the global — the back-compat proof.
+
+def _route_cfg(category, **over):
+    """Config where `category` is routed away from an otherwise-global setup."""
+    cfg = {"enabled": True, "market_hours_only": False, "min_score": 0,
+           "telegram": {"bot_token": "TOK", "chat_id": 1},
+           "discord": {"webhook_url": "GLOBAL"},
+           "sms": {},
+           "routes": {category: {"discord": f"{category.upper()}_D",
+                                 "telegram_chat_id": 99}}}
+    cfg.update(over)
+    return cfg
+
+
+def test_notify_signals_uses_signals_route(monkeypatch):
+    from shared.bus import Bus
+    bus = Bus(fake=True)
+    got = {"d": [], "t": []}
+    monkeypatch.setattr(pn, "load_config", lambda: _route_cfg("signals"))
+    monkeypatch.setattr(pn, "send_discord", lambda wh, e: got["d"].append(wh))
+    monkeypatch.setattr(pn, "send_telegram", lambda tok, cid, t: got["t"].append((tok, cid)))
+    monkeypatch.setattr(pn, "send_sms", lambda *a, **k: None)
+    pn.notify_signals(bus, [_sig()], kind="scanner",
+                      seen_key="cache:options:notified_scan", today="2026-07-25")
+    assert got["d"] == ["SIGNALS_D"]
+    assert got["t"] == [("TOK", 99)]
+
+
+def test_notify_signals_captured_also_uses_signals_route(monkeypatch):
+    """Both kinds share the one `signals` category (no separate captured route)."""
+    from shared.bus import Bus
+    bus = Bus(fake=True)
+    got = {"d": [], "t": []}
+    monkeypatch.setattr(pn, "load_config", lambda: _route_cfg("signals"))
+    monkeypatch.setattr(pn, "send_discord", lambda wh, e: got["d"].append(wh))
+    monkeypatch.setattr(pn, "send_telegram", lambda tok, cid, t: got["t"].append((tok, cid)))
+    monkeypatch.setattr(pn, "send_sms", lambda *a, **k: None)
+    pn.notify_signals(bus, [_sig()], kind="captured",
+                      seen_key="cache:options:notified_captured", today="2026-07-25")
+    assert got["d"] == ["SIGNALS_D"] and got["t"] == [("TOK", 99)]
+
+
+def test_send_action_digest_uses_action_alert_route(monkeypatch):
+    got = {}
+    monkeypatch.setattr(pn, "send_discord", lambda wh, e: got.setdefault("d", wh))
+    monkeypatch.setattr(pn, "send_telegram", lambda tok, cid, t: got.setdefault("t", (tok, cid)))
+    monkeypatch.setattr(pn, "send_sms", lambda *a, **k: None)
+    assert pn.send_action_digest(_ITEMS, config=_route_cfg("action_alert")) is True
+    assert got["d"] == "ACTION_ALERT_D" and got["t"] == ("TOK", 99)
+
+
+def test_send_eod_summary_uses_eod_summary_route(monkeypatch):
+    got = {}
+    monkeypatch.setattr(pn, "send_discord", lambda wh, e: got.setdefault("d", wh))
+    monkeypatch.setattr(pn, "send_telegram", lambda tok, cid, t: got.setdefault("t", (tok, cid)))
+    monkeypatch.setattr(pn, "send_sms", lambda *a, **k: None)
+    assert pn.send_eod_summary(_EOD, config=_route_cfg("eod_summary")) is True
+    assert got["d"] == "EOD_SUMMARY_D" and got["t"] == ("TOK", 99)
+
+
+def _flow_capture(monkeypatch):
+    got = {"d": [], "t": []}
+    monkeypatch.setattr(pn, "send_discord", lambda wh, e: got["d"].append(wh))
+    monkeypatch.setattr(pn, "send_telegram", lambda tok, cid, t: got["t"].append((tok, cid)))
+    return got
+
+
+_FLOW_UOA = {"type": "uoa", "side": "call", "symbol": "SPY", "text": "x"}
+_FLOW_XO = {"type": "crossover", "side": "calls_over", "symbol": "$SPX", "text": "y"}
+_FLOW_GF = {"type": "gamma_flip", "side": "to_positive", "symbol": "$SPX", "text": "z"}
+
+
+def test_send_flow_alert_uses_per_type_route(monkeypatch):
+    got = _flow_capture(monkeypatch)
+    cfg = {"enabled": True, "telegram": {"bot_token": "TOK", "chat_id": 1},
+           # the legacy per-type key is present and must LOSE to the route
+           "discord": {"webhook_url": "GLOBAL", "flow_uoa_webhook_url": "LEGACY_UOA",
+                       "flow_crossover_webhook_url": "LEGACY_XO"},
+           "routes": {"flow_uoa": {"discord": "UOA_D", "telegram_chat_id": 55}}}
+    pn.send_flow_alert(_FLOW_UOA, config=cfg)
+    pn.send_flow_alert(_FLOW_XO, config=cfg)
+    # route wins for uoa; crossover has no route → its LEGACY key
+    assert got["d"] == ["UOA_D", "LEGACY_XO"]
+    assert got["t"] == [("TOK", 55), ("TOK", 1)]
+
+
+def test_send_flow_alert_legacy_keys_still_work(monkeypatch):
+    """Back-compat: with NO routes block at all, every per-type legacy key still
+    routes exactly as it did before per-category routing existed."""
+    got = _flow_capture(monkeypatch)
+    cfg = {"enabled": True, "telegram": {"bot_token": "TOK", "chat_id": 1},
+           "discord": {"webhook_url": "GLOBAL", "flow_uoa_webhook_url": "LEGACY_UOA",
+                       "flow_crossover_webhook_url": "LEGACY_XO",
+                       "flow_gamma_flip_webhook_url": "LEGACY_GF"}}
+    for a in (_FLOW_UOA, _FLOW_XO, _FLOW_GF):
+        pn.send_flow_alert(a, config=cfg)
+    assert got["d"] == ["LEGACY_UOA", "LEGACY_XO", "LEGACY_GF"]
+    assert got["t"] == [("TOK", 1)] * 3
+
+
+def test_send_flow_alert_gamma_flip_route(monkeypatch):
+    got = _flow_capture(monkeypatch)
+    cfg = {"enabled": True, "telegram": {"bot_token": "TOK", "chat_id": 1},
+           "discord": {"webhook_url": "GLOBAL", "flow_gamma_flip_webhook_url": "LEGACY_GF"},
+           "routes": {"flow_gamma_flip": {"discord": "GF_D", "telegram_chat_id": 77}}}
+    pn.send_flow_alert(_FLOW_GF, config=cfg)
+    assert got["d"] == ["GF_D"] and got["t"] == [("TOK", 77)]
+
+
+def test_send_flow_alert_unknown_type_uses_global(monkeypatch):
+    """An unrecognized alert type must fall through to the GLOBAL webhook — NOT
+    be lumped onto the `signals` route."""
+    got = _flow_capture(monkeypatch)
+    cfg = {"enabled": True, "telegram": {"bot_token": "TOK", "chat_id": 1},
+           "discord": {"webhook_url": "GLOBAL", "flow_uoa_webhook_url": "LEGACY_UOA"},
+           "routes": {"signals": {"discord": "SIG_D", "telegram_chat_id": 42}}}
+    pn.send_flow_alert({"type": "other", "side": "call", "symbol": "SPY", "text": "x"},
+                       config=cfg)
+    assert got["d"] == ["GLOBAL"] and got["t"] == [("TOK", 1)]
+
+
+def test_send_flow_alert_no_discord_config_sends_empty_webhook(monkeypatch):
+    got = _flow_capture(monkeypatch)
+    pn.send_flow_alert(_FLOW_UOA, config={"enabled": True, "telegram": {}, "discord": {}})
+    assert got["d"] == [""]      # send_discord no-ops on a blank webhook
+
+
+def test_send_gamma_briefing_uses_route(monkeypatch, briefing_cfg, briefing_res):
+    """`routes.gamma_briefing` beats the legacy `gamma_briefing.webhook_url`."""
+    sent = _capture(monkeypatch)
+    briefing_cfg["routes"] = {"gamma_briefing": {"discord": "GB_D",
+                                                 "telegram_chat_id": 88}}
+    assert pn.send_gamma_briefing(briefing_res, slot="midday", config=briefing_cfg) is True
+    tok, chat, _name, _content, _cap = sent["photo"][0]
+    assert (tok, chat) == ("TOK", 88)
+    assert sent["file"][0][0][0] == "GB_D"
+
+
+def test_send_gamma_briefing_route_applies_to_text_fallback(monkeypatch, briefing_cfg,
+                                                            briefing_res):
+    sent = _capture(monkeypatch, png=None)
+    briefing_cfg["routes"] = {"gamma_briefing": {"discord": "GB_D",
+                                                 "telegram_chat_id": 88}}
+    assert pn.send_gamma_briefing(briefing_res, slot="midday", config=briefing_cfg) is True
+    assert sent["tg_text"][0][:2] == ("TOK", 88)
+    assert sent["dc_embed"][0][0] == "GB_D"
+
+
+def test_send_gamma_briefing_legacy_webhook_still_wins_over_global(monkeypatch,
+                                                                   briefing_cfg,
+                                                                   briefing_res):
+    """Back-compat: no routes block → the dedicated `gamma_briefing.webhook_url`
+    still beats the global signal webhook, and Telegram stays on the global chat."""
+    sent = _capture(monkeypatch)
+    pn.send_gamma_briefing(briefing_res, slot="midday", config=briefing_cfg)
+    assert sent["file"][0][0][0] == "https://briefings"
+    assert sent["photo"][0][:2] == ("TOK", 7)
+
+
+def _ms_cfg(**over):
+    cfg = {"enabled": True, "market_snapshot": {"enabled": True},
+           "telegram": {"bot_token": "TOK", "chat_id": 1},
+           "discord": {"webhook_url": "GLOBAL", "market_snapshot_webhook_url": "LEGACY_MS"}}
+    cfg.update(over)
+    return cfg
+
+
+def _ms_capture(monkeypatch, png=b"PNGDATA"):
+    got = {"photo": [], "file": [], "tg_text": [], "dc_embed": []}
+    monkeypatch.setattr(pn.market_snapshot, "market_snapshot_doc",
+                        lambda *a, **k: "<html></html>")
+    monkeypatch.setattr(pn.briefing_image, "render_html_png", lambda h: png)
+    monkeypatch.setattr(pn, "send_telegram_photo", lambda *a, **k: got["photo"].append(a))
+    monkeypatch.setattr(pn, "send_discord_file", lambda *a, **k: got["file"].append(a))
+    monkeypatch.setattr(pn, "send_telegram", lambda *a, **k: got["tg_text"].append(a))
+    monkeypatch.setattr(pn, "send_discord", lambda *a, **k: got["dc_embed"].append(a))
+    return got
+
+
+def test_send_market_snapshot_uses_route(monkeypatch):
+    got = _ms_capture(monkeypatch)
+    cfg = _ms_cfg(routes={"market_snapshot": {"discord": "MS_D", "telegram_chat_id": 66}})
+    assert pn.send_market_snapshot({}, {}, {}, {}, {}, {}, slot="09:00", config=cfg) is True
+    assert got["photo"][0][:2] == ("TOK", 66)
+    assert got["file"][0][0] == "MS_D"
+
+
+def test_send_market_snapshot_route_applies_to_text_fallback(monkeypatch):
+    got = _ms_capture(monkeypatch, png=None)
+    cfg = _ms_cfg(routes={"market_snapshot": {"discord": "MS_D", "telegram_chat_id": 66}})
+    assert pn.send_market_snapshot({}, {}, {}, {}, {}, {}, slot="09:00", config=cfg) is True
+    assert got["tg_text"][0][:2] == ("TOK", 66)
+    assert got["dc_embed"][0][0] == "MS_D"
+
+
+def test_send_market_snapshot_legacy_key_still_works(monkeypatch):
+    """Back-compat: no routes block → `discord.market_snapshot_webhook_url` still
+    beats the global."""
+    got = _ms_capture(monkeypatch)
+    pn.send_market_snapshot({}, {}, {}, {}, {}, {}, slot="09:00", config=_ms_cfg())
+    assert got["file"][0][0] == "LEGACY_MS"
+    assert got["photo"][0][:2] == ("TOK", 1)
