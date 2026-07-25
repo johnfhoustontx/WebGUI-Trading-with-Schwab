@@ -48,5 +48,43 @@
   },
   "market_snapshot": {
     "enabled": true
+  },
+  "routes": {
+    "signals": {
+      "discord": "",
+      "telegram_chat_id": 0
+    },
+    "flow_uoa": {
+      "discord": "",
+      "telegram_chat_id": 0
+    },
+    "flow_crossover": {
+      "discord": "",
+      "telegram_chat_id": 0
+    },
+    "flow_gamma_flip": {
+      "discord": "",
+      "telegram_chat_id": 0
+    },
+    "action_alert": {
+      "discord": "",
+      "telegram_chat_id": 0
+    },
+    "eod_summary": {
+      "discord": "",
+      "telegram_chat_id": 0
+    },
+    "gamma_briefing": {
+      "discord": "",
+      "telegram_chat_id": 0
+    },
+    "market_snapshot": {
+      "discord": "",
+      "telegram_chat_id": 0
+    },
+    "market_state": {
+      "discord": "",
+      "telegram_chat_id": 0
+    }
   }
 }
