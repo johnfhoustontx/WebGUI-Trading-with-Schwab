@@ -2627,6 +2627,113 @@ def _movers_prompt_block(movers) -> str:
         return ""
 
 
+# ── EOD session recap — what the market actually did today ──────────────────
+def _session_path(series) -> dict:
+    """open/high/low/close + day % from a flow series' spot column. {} if unusable."""
+    try:
+        spots = [r[1] for r in (series or [])
+                 if len(r) > 1 and isinstance(r[1], (int, float))
+                 and not isinstance(r[1], bool) and r[1] > 0]
+        if not spots:
+            return {}
+        o, c = float(spots[0]), float(spots[-1])
+        return {"open": round(o, 2), "high": round(max(spots), 2),
+                "low": round(min(spots), 2), "close": round(c, 2),
+                "day_pct": round((c - o) / o * 100.0, 2) if o else None}
+    except Exception:
+        return {}
+
+
+def _level_verdict(path, level, name: str) -> str:
+    """Plain-English: did price hold / break / reclaim / never test this level?"""
+    try:
+        if not path or not isinstance(level, (int, float)) or isinstance(level, bool):
+            return ""
+        hi, lo, close = path.get("high"), path.get("low"), path.get("close")
+        if not all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                   for v in (hi, lo, close)):
+            return ""
+        if lo > level:
+            return f"stayed entirely above the {name} ({level:g}) — never tested"
+        if hi < level:
+            return f"did not reach the {name} ({level:g}) all session"
+        if close >= level:
+            return f"traded below then reclaimed the {name} ({level:g}), closing above"
+        return f"lost the {name} ({level:g}) and closed below it"
+    except Exception:
+        return ""
+
+
+def _eod_recap_prompt_block(recap) -> str:
+    """Render the per-index session recap for the model prompt. '' when empty."""
+    if not recap:
+        return ""
+    out = []
+    for sym, d in (recap or {}).items():
+        try:
+            p = (d or {}).get("path") or {}
+            if not p:
+                continue
+            bits = [f"{sym}: open {p.get('open')} / high {p.get('high')} / "
+                    f"low {p.get('low')} / close {p.get('close')} "
+                    f"({(p.get('day_pct') or 0):+.2f}%)"]
+            for key, name in (("flip", "gamma flip"), ("call_wall", "call wall"),
+                              ("put_wall", "put wall")):
+                v = _level_verdict(p, d.get(key), name)
+                if v:
+                    bits.append(f"  · {v}")
+            out.append("\n".join(bits))
+        except Exception:
+            continue
+    if not out:
+        return ""
+    return ("TODAY'S SESSION PATH + LEVELS (code-computed, use verbatim):\n"
+            + "\n".join(out))
+
+
+def _eod_session_recap(levels_by_sym) -> dict:
+    """Per-index session recap: today's spot path + the CLOSING key levels.
+
+    ``levels_by_sym`` = ``{symbol: {"flip", "call_wall", "put_wall"}}`` computed by the
+    caller off the live chain (do NOT re-read the grid — the whole-session grid decode is
+    a documented hotspot). The spot path comes from the cheap flow series. Defensive → {}.
+    """
+    try:
+        import gex_history_db as gh
+
+        from services.options_svc import scheduler as _sched
+        d = _sched.active_session_date()
+        out, conn = {}, None
+        try:
+            conn = gh.connect(read_only=True)
+            for sym, lv in (levels_by_sym or {}).items():
+                try:
+                    series = gh.load_flow_series(conn, sym, d)
+                    path = _session_path(series)
+                    if not path:
+                        continue
+                    row = {"path": path}
+                    row.update({k: (lv or {}).get(k)
+                                for k in ("flip", "call_wall", "put_wall")})
+                    if row.get("flip") is None:
+                        # NOTE: latest_flip is (conn, symbol, view="gex", date=None) —
+                        # the date MUST be a keyword or it silently lands in `view`.
+                        row["flip"] = gh.latest_flip(conn, sym, date=d)
+                    out[sym] = row
+                except Exception:
+                    continue
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+        return out
+    except Exception:
+        log.debug("_eod_session_recap failed", exc_info=True)
+        return {}
+
+
 # ── Live macro news research (Task 2) — phase 1 of a briefing ────────────────
 # A SEPARATE Claude call from the forced-tool render phase (gamma_analyze's
 # `submit_analysis`): the API cannot fire a server-side web search AND force a

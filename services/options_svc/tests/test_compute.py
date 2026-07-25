@@ -3761,3 +3761,60 @@ def test_research_news_end_to_end_filters_junk_before_truncation(monkeypatch):
     ])
     out = compute._research_news("close", "ctx", client=client)
     assert out == ["Iran rejects ceasefire — oil surged 4%", "Fed: held rates steady"]
+
+
+# ── Task 3: _eod_session_recap — today's path vs the key levels ──────────────
+def test_session_path_from_series():
+    from services.options_svc import compute
+    series = [(1, 100.0, 0, 0, 0, 0), (2, 104.0, 0, 0, 0, 0),
+              (3, 98.0, 0, 0, 0, 0), (4, 101.0, 0, 0, 0, 0)]
+    p = compute._session_path(series)
+    assert (p["open"], p["high"], p["low"], p["close"]) == (100.0, 104.0, 98.0, 101.0)
+    assert p["day_pct"] == 1.0        # 100 -> 101
+    assert compute._session_path([]) == {}
+    assert compute._session_path(None) == {}
+
+
+def test_level_verdict_held_vs_broke():
+    from services.options_svc import compute
+    # Closed above a flip it traded below at some point -> reclaimed.
+    assert "reclaim" in compute._level_verdict(
+        {"open": 99.0, "high": 105.0, "low": 98.0, "close": 104.0}, 100.0, "gamma flip").lower()
+    # Never reached the level -> untested.
+    assert "did not" in compute._level_verdict(
+        {"open": 90.0, "high": 95.0, "low": 89.0, "close": 94.0}, 120.0, "call wall").lower()
+    # Missing level -> empty string, no raise.
+    assert compute._level_verdict({"open": 1.0}, None, "flip") == ""
+
+
+def test_eod_recap_prompt_block_is_defensive():
+    from services.options_svc import compute
+    # No data at all -> empty string, never raises.
+    assert compute._eod_recap_prompt_block({}) == ""
+    block = compute._eod_recap_prompt_block({
+        "$SPX": {"path": {"open": 100.0, "high": 105.0, "low": 99.0, "close": 104.0,
+                          "day_pct": 4.0},
+                 "flip": 101.0, "call_wall": 106.0, "put_wall": 98.0},
+    })
+    assert "$SPX" in block and "104" in block
+
+
+def test_eod_session_recap_passes_date_as_keyword_to_latest_flip(monkeypatch):
+    """Regression: gex_history_db.latest_flip is (conn, symbol, view="gex", date=None).
+    Passing the date positionally would silently land in `view` and always return None."""
+    import sys, types
+    from services.options_svc import compute
+    seen = {}
+
+    fake = types.SimpleNamespace(
+        connect=lambda read_only=False: types.SimpleNamespace(close=lambda: None),
+        load_flow_series=lambda conn, sym, d: [(1, 10.0, 0, 0, 0, 0), (2, 12.0, 0, 0, 0, 0)],
+        latest_flip=lambda conn, sym, view="gex", date=None: seen.setdefault(
+            "call", {"view": view, "date": date}) and 11.0 or 11.0,
+    )
+    monkeypatch.setitem(sys.modules, "gex_history_db", fake)
+    out = compute._eod_session_recap({"$SPX": {"call_wall": 13.0, "put_wall": 9.0}})
+    assert out["$SPX"]["path"]["close"] == 12.0
+    assert out["$SPX"]["flip"] == 11.0
+    assert seen["call"]["view"] == "gex"        # NOT the date
+    assert seen["call"]["date"] is not None
