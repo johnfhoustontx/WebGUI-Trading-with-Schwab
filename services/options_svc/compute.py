@@ -2994,7 +2994,13 @@ def _gamma_blocks_for(symbol, chain):
 # / API error / empty reply) degrades to a readable HTML page so the tab always shows
 # something — never a silent no-op.
 _ANALYZE_MODEL = "claude-sonnet-5"
-_ANALYZE_MAX_TOKENS = 1500  # "typical" ~1-page briefing (user-approved cost point)
+# Raised 1500 -> 2600 when macro_drivers + movers were added to _ANALYZE_TOOL.
+# A live probe showed the enriched reply hitting the 1500 cap EXACTLY and
+# truncating `indices` away entirely (n=0) — the briefing silently lost every
+# ladder, tile, what_if and close_outlook, i.e. all of its per-index content.
+# This is a CAP, not a spend: billing is on actual output tokens, and a good run
+# measures ~1500-1800. Do not trim it back without re-running a live probe.
+_ANALYZE_MAX_TOKENS = 2600
 _ANALYZE_SYSTEM = (
     "You are an options-market analyst. From the structured GEX / Charm / DEX / Vanna "
     "data provided for $SPX, SPY and QQQ, call the submit_analysis tool exactly once. "
@@ -3768,6 +3774,13 @@ def gamma_analyze(client=None, label: str | None = None) -> dict:
             tool_choice={"type": "tool", "name": "submit_analysis"},
             messages=[{"role": "user", "content": prompt}],
         )
+        # See eod_briefing: a max_tokens stop truncates the tool input and drops
+        # trailing fields. Here that silently emptied `indices` — the whole
+        # per-index briefing — so this must be loud.
+        if getattr(resp, "stop_reason", None) == "max_tokens":
+            log.warning("gamma_analyze hit max_tokens (%s) — the reply was truncated "
+                        "and trailing fields (e.g. indices) may be missing",
+                        _ANALYZE_MAX_TOKENS)
         tool_input = None
         for b in (getattr(resp, "content", None) or []):
             if (getattr(b, "type", None) == "tool_use"
@@ -3809,7 +3822,13 @@ def gamma_analyze(client=None, label: str | None = None) -> dict:
 # macro drivers), which levels held or broke (code-computed session path), which
 # individual names moved, and what to carry into the NEXT session. Same failure
 # discipline as `gamma_analyze`: every surface degrades to a readable page.
-_EOD_MAX_TOKENS = 1800  # a touch above the intraday brief — recap + next_session
+# Comfortably above the intraday brief: the EOD reply carries strictly more —
+# per-index recap AND movers AND macro_drivers AND next_session. A live probe at
+# 1800 measured 1455 output tokens on a good run and intermittently truncated,
+# which silently dropped `next_session` (it is emitted LAST) and rendered the
+# briefing without its prepare-for-tomorrow block. Headroom is far cheaper than
+# a briefing that loses its point.
+_EOD_MAX_TOKENS = 2600
 _EOD_SYSTEM = (
     "You are an options-market analyst writing an END-OF-DAY RETROSPECTIVE. The US "
     "cash session has CLOSED. Call the submit_eod tool exactly once.\n"
@@ -3824,7 +3843,9 @@ _EOD_SYSTEM = (
     "Then fill 'next_session' with what to carry into TOMORROW: the levels that "
     "matter (today's closing walls and gamma flip persist overnight because open "
     "interest does), the expected-move band, tomorrow's scheduled catalysts, and the "
-    "posture to bring in. This is the only forward-looking part of the briefing.\n"
+    "posture to bring in. This is the only forward-looking part of the briefing, and "
+    "it is MANDATORY — fill all four of levels / expected_move_note / catalysts / "
+    "posture with substantive content; never leave one blank.\n"
     "Per index, 'recap' is what THAT index did today and where it closed relative to "
     "its levels — one or two terse sentences, past tense.\n"
     "Copy the EXACT computed levels from the data into each index entry — gamma flip, "
@@ -3925,9 +3946,15 @@ _EOD_TOOL = {
                     "posture": {"type": "string",
                                 "description": "The posture to bring into tomorrow."},
                 },
+                # All four REQUIRED. A live probe with these merely optional came
+                # back with next_session entirely absent, so the "prepare for the
+                # next session" block -- the reason this briefing exists -- silently
+                # rendered as nothing.
+                "required": ["levels", "expected_move_note", "catalysts", "posture"],
             },
         },
-        "required": ["regime", "bias", "headline", "narrative", "why", "indices"],
+        "required": ["regime", "bias", "headline", "narrative", "why", "indices",
+                     "next_session"],
     },
 }
 
@@ -4158,6 +4185,13 @@ def eod_briefing(client=None, label: str | None = None) -> dict:
             tool_choice={"type": "tool", "name": "submit_eod"},
             messages=[{"role": "user", "content": prompt}],
         )
+        # A max_tokens stop truncates the tool input, silently dropping whatever
+        # the model had not emitted yet (next_session is last). Log it — this
+        # exact failure looked identical to "the model chose to omit it".
+        if getattr(resp, "stop_reason", None) == "max_tokens":
+            log.warning("eod_briefing hit max_tokens (%s) — the reply was truncated "
+                        "and trailing fields (e.g. next_session) may be missing",
+                        _EOD_MAX_TOKENS)
         tool_input = None
         for b in (getattr(resp, "content", None) or []):
             if (getattr(b, "type", None) == "tool_use"

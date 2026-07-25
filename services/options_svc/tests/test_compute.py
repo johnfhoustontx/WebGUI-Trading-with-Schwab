@@ -4059,3 +4059,76 @@ def test_gamma_analyze_survives_news_and_movers_failure(monkeypatch):
                 return type("R", (), {"content": [blk]})()
     res = compute.gamma_analyze(client=_C())
     assert res.get("analysis")      # briefing still renders
+
+
+def test_eod_tool_requires_next_session():
+    """Live-probe regression: with next_session merely optional the model omitted
+    it entirely, so the 'prepare for the next session' block -- the whole point of
+    an EOD retrospective -- silently rendered as nothing."""
+    from services.options_svc import compute
+    schema = compute._EOD_TOOL["input_schema"]
+    assert "next_session" in schema["required"]
+    ns = schema["properties"]["next_session"]
+    for key in ("levels", "expected_move_note", "catalysts", "posture"):
+        assert key in ns["required"], f"{key} must be required inside next_session"
+
+
+def test_eod_briefing_logs_on_truncation(monkeypatch, caplog):
+    """A max_tokens stop drops trailing tool fields (next_session is emitted last).
+    That must be visible in the log, not silent -- it looked exactly like the model
+    choosing to omit the field during the live probe."""
+    import logging
+    from services.options_svc import compute
+    monkeypatch.setattr(compute, "_gamma_fetch_chain", lambda s: {"underlyingPrice": 100.0})
+    monkeypatch.setattr(compute, "_gamma_blocks_for", lambda s, c: {"sym": s})
+    monkeypatch.setattr(compute, "_session_expected_move", lambda c: 1.0)
+    monkeypatch.setattr(compute, "_eod_session_recap", lambda lv: {})
+    monkeypatch.setattr(compute, "_research_news", lambda *a, **k: [])
+    monkeypatch.setattr(compute, "_notable_movers", lambda *a, **k: [])
+
+    class _C:
+        class messages:
+            @staticmethod
+            def create(**kw):
+                blk = type("B", (), {"type": "tool_use", "name": "submit_eod",
+                                     "input": {"regime": "r", "bias": 0, "headline": "h",
+                                               "narrative": "n", "why": "w",
+                                               "indices": []}})()
+                return type("R", (), {"content": [blk], "stop_reason": "max_tokens"})()
+    with caplog.at_level(logging.WARNING):
+        assert compute.eod_briefing(client=_C()).get("analysis")
+    assert any("max_tokens" in r.message for r in caplog.records)
+
+
+def test_briefing_token_budgets_have_headroom_for_the_enriched_reply():
+    """Tripwire. Adding macro_drivers + movers to the tools pushed the intraday
+    reply past the old 1500 cap, truncating `indices` to nothing in a live probe.
+    Both budgets must keep real headroom over the ~1500-1800 a good run measures.
+    Raising a cap costs nothing (billing is on actual output tokens) -- trimming
+    one silently guts the briefing."""
+    from services.options_svc import compute
+    assert compute._ANALYZE_MAX_TOKENS >= 2400
+    assert compute._EOD_MAX_TOKENS >= 2400
+
+
+def test_gamma_analyze_logs_on_truncation(monkeypatch, caplog):
+    import logging
+    from services.options_svc import compute
+    monkeypatch.setattr(compute, "_gamma_fetch_chain", lambda s: {"underlyingPrice": 100.0})
+    monkeypatch.setattr(compute, "_gamma_blocks_for", lambda s, c: {"sym": s})
+    monkeypatch.setattr(compute, "_session_expected_move", lambda c: 1.0)
+    monkeypatch.setattr(compute, "_research_news", lambda *a, **k: [])
+    monkeypatch.setattr(compute, "_notable_movers", lambda *a, **k: [])
+
+    class _C:
+        class messages:
+            @staticmethod
+            def create(**kw):
+                blk = type("B", (), {"type": "tool_use", "name": "submit_analysis",
+                                     "input": {"regime": "r", "bias": 0, "headline": "h",
+                                               "narrative": "n", "why": "w",
+                                               "indices": []}})()
+                return type("R", (), {"content": [blk], "stop_reason": "max_tokens"})()
+    with caplog.at_level(logging.WARNING):
+        assert compute.gamma_analyze(client=_C()).get("analysis")
+    assert any("max_tokens" in r.message for r in caplog.records)
