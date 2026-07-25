@@ -28,8 +28,10 @@ the **day's macro drivers** (live news).
 3. **All four briefings** gain **notable individual stock moves** + **macro drivers**
    (shared helpers). The intraday three stay forward-looking; the close is retrospective.
 4. **Delivery**: the EOD recap renders as the infographic (reusing existing plumbing) AND
-   pushes a compact text recap to **Discord + Telegram**. The intraday briefings are
-   infographic-only (unchanged surface), just richer content.
+   reaches the phone. **Implementation note:** the phone push turned out to need **no new
+   code** — the scheduled-briefing handler already pushes every slot's infographic as a PNG
+   to Telegram + Discord, so the EOD briefing rides that path (see §E). The intraday
+   briefings keep the same surface, just richer content.
 
 ## Architecture
 
@@ -43,11 +45,28 @@ the **day's macro drivers** (live news).
 - **`_research_news(label, context)`** — **phase-1 Claude call** with the **web-search
   server tool** enabled (`tool_choice: auto`), prompting the model to find the day's
   macro drivers (Fed/CPI/jobs/earnings/geopolitics that moved the tape) and, for the EOD
-  slot, tomorrow's scheduled economic calendar. Returns a short list of headline strings
-  (with source URLs where available). Fully guarded: no API key / web-search unsupported /
-  API error / empty result → `[]` (the briefing still renders app-data-only). The
-  web-search **tool version + model support are verified against the claude-api reference
-  at implementation time**; the degrade path is the safety net.
+  slot, tomorrow's scheduled economic calendar. Returns a short list of headline strings.
+  Fully guarded: no API key / web-search unsupported / API error / **in-response search
+  error** / empty result → `[]` (the briefing still renders app-data-only).
+
+  **Verified spec** (researched against the claude-api reference): tool
+  `{"type": "web_search_20260318", "name": "web_search", "max_uses": 3,
+  "allowed_callers": ["direct"]}` — GA, **no beta header**; `allowed_callers` must be set
+  explicitly because v20260209+ defaults it to `code_execution`. **$10/1,000 searches**
+  (≈$0.04/day at 4 briefings). Two consequences worth calling out:
+  - **Model support is not documented per model.** The official examples use
+    `claude-opus-5`; support on our `_ANALYZE_MODEL` (`claude-sonnet-5`) is undocumented.
+    So the news phase gets its **own `_NEWS_MODEL`** (a documented model), promoted to
+    sonnet-5 only if a live probe proves it.
+  - **A failed search returns HTTP 200**, not an exception: an error block
+    (`web_search_tool_result` → `content.error_code`) followed by the model answering from
+    memory. Publishing that text would put **fabricated headlines** in a briefing — worse
+    than no news — so the parser detects the error block and returns `[]`.
+
+  The **two-phase split is a hard API constraint, not a preference**: if the model calls web
+  search and a client-side tool in the same parallel group the API returns
+  `stop_reason: "tool_use"` and defers the search, so a forced `submit_*` render cannot also
+  search.
 
 `_notable_movers()` + `_research_news()` are consumed by **both** the intraday and EOD
 paths. Movers are cheap (cache reads); the news phase is one extra Claude call per
@@ -100,17 +119,19 @@ Both phases reuse the lazy `anthropic` import + local key resolution already in
   macro-drivers sections, and a **"Prepare for next session"** block (key levels, EM band,
   calendar, posture). Reuses `_ANALYZE_CSS`.
 
-### E. Delivery
+### E. Delivery — **the push is already free**
 
 - **Infographic**: `eod_briefing` caches under the existing per-slot key
   `cache:options:gamma_analyze_close` and serves at `/options/analyze?slot=close`; the
   Gamma page "Auto briefings → Close" button is unchanged (now shows the EOD recap).
-- **Push** (EOD only): a compact text recap → Discord + Telegram via
-  `shared.notify.channels` (mirrors the market-snapshot text fallback / action digest),
-  fired from the handler after the infographic is cached, best-effort (never blocks the
-  render). New optional config `discord.eod_briefing_webhook_url` → falls back to
-  `discord.webhook_url` (same per-type routing pattern as the flow alerts). Pure
-  `eod_push_text(recap)` / `eod_push_embed(recap)` builders.
+- **Push**: **no new code.** `handlers.run_scheduled_gamma_analyze` already renders EVERY
+  slot's infographic to PNG and pushes it to Telegram + Discord via
+  `push_notify.send_gamma_briefing` (with a text fallback if the headless render fails, a
+  size guard, and a `gamma_briefing.webhook_url` override). The EOD result has the same
+  `{"html", "analysis"}` shape, so it flows through that path unchanged. **This supersedes
+  the originally-planned bespoke text push** (and the `discord.eod_briefing_webhook_url`
+  key) — an infographic PNG is a better payload than a text line, and reusing the proven
+  path removes a whole component.
 
 ### F. Scheduler & handler (`scheduler.py` / `handlers.py`)
 
@@ -140,10 +161,14 @@ provider hiccup degrades content, never breaks the briefing.
   news) each render a valid page.
 - **Scheduler**: the `close` slot time-change updates its existing tests; branch dispatch
   (`close` → EOD, others → gamma_analyze) covered.
-- **Handler**: `close` → infographic cached under `gamma_analyze_close` + EOD push fired;
-  push routes to `eod_briefing_webhook_url` when set, else the general webhook.
-- **Web-search tool version + model support** verified against the claude-api reference
-  during implementation (with the app-data-only degrade as the net).
+- **Handler**: branch dispatch — `close` → `eod_briefing` cached under `gamma_analyze_close`
+  (the existing PNG push then carries it), all other slots → `gamma_analyze`.
+- **Live probe (mandatory, not optional).** The unit tests all use fake clients, so the live
+  run is the only thing that answers: does `_NEWS_MODEL` actually support the tool, does a
+  search actually *fire* (a `server_tool_use` block must appear — otherwise the "news" is the
+  model's memory), and is the EOD prose genuinely retrospective? Three production bugs in this
+  codebase's history (the `days=6` Schwab 400, the string `total_score`, the `CacheEnvelope`
+  push that never fired) passed every unit test and were caught only here.
 
 ## Non-goals
 
