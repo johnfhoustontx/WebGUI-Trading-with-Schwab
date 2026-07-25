@@ -3,13 +3,21 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import logging
 import zlib
 import sqlite3
 import time
 from pathlib import Path
 from typing import Iterable, Tuple
 
+log = logging.getLogger("scanner")
+
 DB_PATH = Path(__file__).parent / "gex_history.db"
+
+# Max free pages returned to the filesystem per purge (see purge_keep_sessions).
+# 20k pages x 4 KiB ~= 80 MB per daily call: enough to walk the ~797 MB backlog
+# down over a couple of weeks while keeping each lock short.
+_VACUUM_MAX_PAGES = 20000
 
 
 def _local_unix_range(d=None) -> tuple[int, int]:
@@ -86,14 +94,46 @@ CREATE INDEX IF NOT EXISTS idx_term_date ON gex_term_snapshots (substr(timestamp
 """
 
 
+_GRID_SIG_FIGS = 6
+
+
+def _round_sig(value, sig: int = _GRID_SIG_FIGS):
+    """Round a float to ``sig`` significant figures; pass everything else through.
+
+    Recurses into dicts/lists so nested grid cells are covered. bools are left
+    alone (``isinstance(True, int)`` is True, and they are not measurements)."""
+    if isinstance(value, float):
+        if value == 0.0 or value != value or value in (float("inf"), float("-inf")):
+            return value
+        return float(f"%.{sig}g" % value)
+    if isinstance(value, dict):
+        return {k: _round_sig(v, sig) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_round_sig(v, sig) for v in value]
+    return value
+
+
 def _encode_grid(grid) -> bytes | None:
     """Serialize a per-strike grid dict → zlib-compressed JSON bytes (stored as a
     BLOB in the TEXT ``gex_json`` column). ~5× smaller than raw JSON — the full
     chain grid dominates on-disk size (×4 views × ~440 rows/day). None for an
-    empty grid."""
+    empty grid.
+
+    Floats are rounded to ``_GRID_SIG_FIGS`` significant figures FIRST. Measured
+    on the live DB (2026-07-25), grid size is driven by float ENTROPY rather than
+    strike count — all four views average ~114 strikes, but bytes/snapshot ran
+    gex 1,110 / dex 1,426 / charm 1,820 / vanna 2,172, because values serialize
+    as e.g. ``1.2345678901234e-05``. Rounding cuts the payload ~52%
+    (966 MB → 459 MB) and 6 s.f. is far more precision than dollar-denominated
+    GEX display needs.
+
+    FORWARD-ONLY: existing rows are untouched and still decode (see
+    ``_decode_grid``). Flip/wall values are stored in their own columns, computed
+    from the full chain, so they are unaffected by grid rounding.
+    """
     if not grid:
         return None
-    return zlib.compress(json.dumps(grid).encode("utf-8"))
+    return zlib.compress(json.dumps(_round_sig(grid)).encode("utf-8"))
 
 
 def _decode_grid(raw) -> dict:
@@ -509,16 +549,24 @@ def purge_keep_sessions(conn: sqlite3.Connection, keep_sessions: int = 5) -> int
     the most recent session(s). Keeping the last N (default 5) distinct
     session-dates covers weekends/holidays comfortably.
 
-    Retention alone (DELETE) reclaims free pages for reuse so the DB stops growing
-    without bound, but does NOT shrink the file on disk. To shrink the existing
-    ~3 GB file, run a ONE-TIME manual VACUUM (offline, it locks the DB for
-    minutes) — optionally first ``PRAGMA auto_vacuum=INCREMENTAL`` then ``VACUUM``
-    to enable incremental reclaim going forward:
+    Retention alone (DELETE) hands pages to the freelist for reuse but does NOT
+    shrink the file on disk. When the DB was created with
+    ``auto_vacuum=INCREMENTAL`` we therefore follow the DELETE with a BOUNDED
+    ``PRAGMA incremental_vacuum(_VACUUM_MAX_PAGES)``, which returns a capped
+    number of free pages to the filesystem per call and releases its lock
+    promptly — so the file shrinks gradually over successive daily purges instead
+    of growing forever.
 
-        sqlite3 gex_history.db "PRAGMA auto_vacuum=INCREMENTAL; VACUUM;"
+    This was added 2026-07-25: the live DB had reached 2.2 GB for 5 sessions of
+    data, of which 194,623 pages (~797 MB, 36%) were free. ``auto_vacuum`` was
+    already INCREMENTAL, but nothing in the repo had ever called
+    ``incremental_vacuum``, so those pages were never returned.
 
-    Never auto-run VACUUM here — a full VACUUM on the multi-GB file mid-collection
-    would lock it for minutes and risk collection failures.
+    Never auto-run a full ``VACUUM`` here — on the multi-GB file mid-collection it
+    would lock for minutes and risk collection failures. That remains a manual,
+    offline operation (``tools/vacuum_gex.py``, which refuses during market hours).
+    On a DB created without incremental auto-vacuum the pragma is a documented
+    no-op, so this is safe either way.
     """
     if keep_sessions < 1:
         keep_sessions = 1
@@ -546,6 +594,18 @@ def purge_keep_sessions(conn: sqlite3.Connection, keep_sessions: int = 5) -> int
     deleted += cur.rowcount or 0
 
     conn.commit()
+
+    if deleted:
+        # Bounded reclaim — returns at most _VACUUM_MAX_PAGES free pages to the
+        # filesystem and releases the lock promptly. No-op when the DB was not
+        # created with auto_vacuum=INCREMENTAL. Best-effort: a busy/locked DB must
+        # never turn a successful purge into a failure.
+        try:
+            conn.execute(f"PRAGMA incremental_vacuum({_VACUUM_MAX_PAGES})")
+            conn.commit()
+        except sqlite3.Error:
+            log.debug("purge_keep_sessions: incremental_vacuum skipped", exc_info=True)
+
     return deleted
 
 
