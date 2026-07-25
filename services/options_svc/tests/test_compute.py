@@ -3818,3 +3818,164 @@ def test_eod_session_recap_passes_date_as_keyword_to_latest_flip(monkeypatch):
     assert out["$SPX"]["flip"] == 11.0
     assert seen["call"]["view"] == "gex"        # NOT the date
     assert seen["call"]["date"] is not None
+
+
+# ── Task 4: submit_eod tool + _parse_eod + eod_briefing ─────────────────────
+def test_parse_eod_is_total_over_garbage():
+    from services.options_svc import compute
+    assert compute._parse_eod(None) is None
+    assert compute._parse_eod({}) is None
+    d = compute._parse_eod({
+        "regime": "Risk-off unwind", "bias": -30, "headline": "Sellers won the day",
+        "narrative": "n", "why": "w",
+        "macro_drivers": ["Fed held", 5],           # non-str dropped
+        "movers": [{"symbol": "MU", "move": "+6.5%", "note": "squeeze"}, "junk"],
+        "next_session": {"levels": "watch 5900", "posture": "cautious"},
+        "indices": [{"symbol": "$SPX", "recap": "faded from the open"}],
+    })
+    assert d["regime"] == "Risk-off unwind" and d["bias"] == -30
+    assert d["macro_drivers"] == ["Fed held"]
+    assert len(d["movers"]) == 1 and d["movers"][0]["symbol"] == "MU"
+    assert d["indices"][0]["symbol"] == "$SPX"
+    assert d["next_session"]["posture"] == "cautious"
+
+
+def test_eod_briefing_degrades_without_chains(monkeypatch):
+    from services.options_svc import compute
+    monkeypatch.setattr(compute, "_gamma_fetch_chain", lambda s: None)
+    res = compute.eod_briefing(client=object())
+    assert "html" in res and "analysis" not in res       # degraded -> no push
+    assert "could not fetch" in res["html"].lower() or "no " in res["html"].lower()
+
+
+def test_eod_briefing_renders_and_overrides_em(monkeypatch):
+    from services.options_svc import compute
+    monkeypatch.setattr(compute, "_gamma_fetch_chain",
+                        lambda s: {"underlyingPrice": 100.0})
+    monkeypatch.setattr(compute, "_gamma_blocks_for", lambda s, c: {"sym": s})
+    monkeypatch.setattr(compute, "_session_expected_move", lambda c: 4.2)
+    monkeypatch.setattr(compute, "_eod_session_recap", lambda lv: {})
+    monkeypatch.setattr(compute, "_research_news", lambda *a, **k: ["Fed held rates"])
+    monkeypatch.setattr(compute, "_notable_movers", lambda *a, **k: [])
+
+    class _C:
+        class messages:
+            @staticmethod
+            def create(**kw):
+                assert kw["tool_choice"]["name"] == "submit_eod"
+                blk = type("B", (), {"type": "tool_use", "name": "submit_eod",
+                                     "input": {"regime": "r", "bias": 0, "headline": "h",
+                                               "narrative": "n", "why": "w",
+                                               "indices": [{"symbol": "$SPX",
+                                                            "expected_move": 999}]}})()
+                return type("R", (), {"content": [blk]})()
+    res = compute.eod_briefing(client=_C())
+    assert res.get("analysis")
+    assert res["analysis"]["indices"][0]["expected_move"] == 4.2   # code-authoritative
+
+
+def test_eod_briefing_survives_recap_news_and_movers_failure(monkeypatch):
+    """Every enrichment source is best-effort: the retrospective must still render."""
+    from services.options_svc import compute
+
+    def _boom(*a, **k):
+        raise RuntimeError("source down")
+    monkeypatch.setattr(compute, "_gamma_fetch_chain",
+                        lambda s: {"underlyingPrice": 100.0})
+    monkeypatch.setattr(compute, "_gamma_blocks_for", lambda s, c: {"sym": s})
+    monkeypatch.setattr(compute, "_session_expected_move", lambda c: 1.0)
+    monkeypatch.setattr(compute, "_eod_session_recap", _boom)
+    monkeypatch.setattr(compute, "_research_news", _boom)
+    monkeypatch.setattr(compute, "_notable_movers", _boom)
+
+    class _C:
+        class messages:
+            @staticmethod
+            def create(**kw):
+                blk = type("B", (), {"type": "tool_use", "name": "submit_eod",
+                                     "input": {"regime": "r", "bias": 0, "headline": "h",
+                                               "narrative": "n", "why": "w",
+                                               "indices": []}})()
+                return type("R", (), {"content": [blk]})()
+    assert compute.eod_briefing(client=_C()).get("analysis")
+
+
+def test_levels_from_blocks_reads_flip_and_walls():
+    from services.options_svc import compute
+    lv = compute._levels_from_blocks({"gex": {
+        "flip_point": 101.0,
+        "walls": {"gex": {"call_wall": 106.0, "put_wall": 98.0}},
+    }})
+    assert lv == {"flip": 101.0, "call_wall": 106.0, "put_wall": 98.0}
+    # Defensive: a block shape without gex/walls must not raise.
+    assert compute._levels_from_blocks({"sym": "$SPX"}) == {
+        "flip": None, "call_wall": None, "put_wall": None}
+    assert compute._levels_from_blocks(None)["flip"] is None
+
+
+# ── Task 5: EOD infographic + shared movers/macro sections ──────────────────
+def test_shared_sections_render_and_are_omitted_when_empty():
+    from services.options_svc import compute
+    assert compute._movers_html([]) == ""
+    assert compute._macro_html([]) == ""
+    h = compute._movers_html([{"symbol": "MU", "day_pct": 6.5, "basis": "session",
+                               "flow_alerts": 2}])
+    assert "MU" in h and "6.5" in h
+    assert "Fed" in compute._macro_html(["Fed held rates"])
+
+
+def test_movers_html_escapes_and_colors():
+    from services.options_svc import compute
+    h = compute._movers_html([{"symbol": "<b>X</b>", "day_pct": -3.0, "basis": "prior_close"}])
+    assert "<b>X</b>" not in h and "&lt;b&gt;" in h      # escaped
+    assert "-3.0" in h or "-3.00" in h
+
+
+def test_movers_html_accepts_both_producer_and_model_shapes():
+    """_notable_movers emits day_pct/flow_alert_count; the model's submit_* tool
+    emits a `move` string. The renderer must handle both without raising."""
+    from services.options_svc import compute
+    h = compute._movers_html([
+        {"symbol": "MU", "day_pct": 6.5, "basis": "session", "flow_alert_count": 3},
+        {"symbol": "NVDA", "move": "+2.1%", "note": "earnings beat"},
+    ])
+    assert "MU" in h and "NVDA" in h and "+2.1%" in h and "earnings beat" in h
+
+
+def test_eod_infographic_includes_recap_and_next_session():
+    from services.options_svc import compute
+    html = compute.eod_infographic_html({
+        "regime": "Risk-off unwind", "bias": -40, "bias_label": "Bearish",
+        "headline": "Sellers controlled the tape", "narrative": "n", "why": "w",
+        "macro_drivers": ["Fed held rates"],
+        "movers": [{"symbol": "MU", "day_pct": 6.5, "basis": "session"}],
+        "indices": [{"symbol": "$SPX", "spot": 100.0, "gamma_flip": 101.0,
+                     "recap": "lost the flip and closed below"}],
+        "next_session": {"levels": "watch 5900", "posture": "cautious",
+                         "catalysts": "CPI 7:30 CT", "expected_move_note": "±35"},
+    }, "sub")
+    for needle in ("Sellers controlled", "$SPX", "lost the flip", "Fed held rates",
+                   "MU", "next session", "CPI"):
+        assert needle.lower() in html.lower()
+
+
+def test_eod_infographic_omits_intraday_playbook_fields():
+    """The EOD card must NOT render what_if / close_outlook -- advice for a session
+    that has already ended is the exact thing this briefing exists to remove."""
+    from services.options_svc import compute
+    html = compute.eod_infographic_html({
+        "regime": "r", "bias": 0, "headline": "h", "narrative": "n", "why": "w",
+        "indices": [{"symbol": "$SPX", "recap": "closed weak",
+                     "close_outlook": "BUY DIPS INTO THE CLOSE",
+                     "what_if": {"rally": "RIDE IT", "selloff": "s", "chop": "c"}}],
+    }, "sub")
+    assert "closed weak" in html
+    assert "BUY DIPS INTO THE CLOSE" not in html and "RIDE IT" not in html
+
+
+def test_analyze_infographic_still_renders_without_new_fields():
+    from services.options_svc import compute
+    html = compute.analyze_infographic_html(
+        {"regime": "r", "bias": 0, "headline": "h", "narrative": "n", "why": "w",
+         "indices": [{"symbol": "SPY"}]}, "sub")
+    assert "SPY" in html      # no regression when macro_drivers/movers are absent

@@ -3440,9 +3440,136 @@ def analyze_infographic_html(data, subtitle=None) -> str:
         parts.append(f'<div class="ga-narr">{_analyze_md_to_html(narrative)}</div>')
     for idx in d.get("indices") or []:
         parts.append(_index_card_html(idx))
+    # Additive enrichment — absent on an older/terser reply, so these render
+    # nothing and the intraday briefing is byte-identical to before.
+    parts.append(_movers_html(d.get("movers")))
+    parts.append(_macro_html(d.get("macro_drivers")))
     why = (d.get("why") or "").strip()
     if why:
         parts.append('<div class="ga-why"><div class="ga-why-h">Why is this happening</div>'
+                     f'<div class="ga-why-b">{_analyze_md_to_html(why)}</div></div>')
+    return "".join(parts)
+
+
+def _movers_html(movers) -> str:
+    """Notable-individual-stock-moves chip strip, green/red by sign. '' when empty.
+
+    Tolerates BOTH shapes: the code-computed producer (`_notable_movers` →
+    ``day_pct``/``basis``/``flow_alert_count``) and the model's tool reply
+    (``move`` string + ``note``). This is a raw-HTML document (the documented
+    out-of-scope path for the Tailwind-first rule), so inline styles are correct
+    here — matching ``_metric_tiles_html``. Every string is escaped."""
+    import html as _h
+    if not movers:
+        return ""
+    chips = []
+    for m in movers:
+        try:
+            if not isinstance(m, dict):
+                continue
+            sym = _h.escape(str(m.get("symbol") or "").strip())
+            if not sym:
+                continue
+            pct = _num(m.get("day_pct"))
+            if pct is not None:
+                move_txt = f"{pct:+.2f}%"
+                color = "#34d399" if pct > 0 else "#f87171" if pct < 0 else "#9aa3bd"
+            else:
+                move_txt = str(m.get("move") or "").strip()
+                color = ("#34d399" if move_txt.startswith("+")
+                         else "#f87171" if move_txt.startswith("-") else "#9aa3bd")
+            extra = []
+            basis = m.get("basis")
+            if basis:
+                extra.append("vs prior close" if basis == "prior_close" else "since open")
+            n = m.get("flow_alert_count", m.get("flow_alerts"))
+            if isinstance(n, (int, float)) and not isinstance(n, bool) and n:
+                extra.append(f"{int(n)} flow alert{'s' if int(n) != 1 else ''}")
+            note = str(m.get("note") or "").strip()
+            if note:
+                extra.append(note)
+            sub = (f'<div style="color:#8a93a3;font-size:.76rem">'
+                   f'{_h.escape(" · ".join(extra))}</div>') if extra else ""
+            chips.append(
+                '<div style="background:#101a30;border:1px solid #213152;border-radius:8px;'
+                'padding:8px 12px;min-width:104px">'
+                f'<div style="color:#cdd8ee;font-weight:600;font-size:.85rem">{sym}</div>'
+                f'<div style="color:{color};font-weight:700">{_h.escape(move_txt) or "—"}</div>'
+                f'{sub}</div>')
+        except Exception:
+            continue
+    if not chips:
+        return ""
+    return ('<div class="ga-why"><div class="ga-why-h">Notable moves</div>'
+            '<div style="display:flex;flex-wrap:wrap;gap:8px">'
+            + "".join(chips) + "</div></div>")
+
+
+def _macro_html(drivers) -> str:
+    """'What drove the tape' bullet list. '' when empty."""
+    import html as _h
+    lines = [str(x).strip() for x in (drivers or [])
+             if isinstance(x, str) and str(x).strip()]
+    if not lines:
+        return ""
+    items = "".join(f"<li>{_h.escape(x)}</li>" for x in lines)
+    return ('<div class="ga-why"><div class="ga-why-h">What drove the tape</div>'
+            '<ul style="margin:6px 0 0;padding-left:20px;color:#cdd8ee">'
+            f'{items}</ul></div>')
+
+
+def _eod_index_card_html(idx) -> str:
+    """Per-index EOD card — the ladder + tiles, with the past-tense ``recap`` where
+    the intraday card shows ``note``/``close_outlook``/``what_if``."""
+    import html as _h
+    sym = _h.escape(idx.get("symbol") or "")
+    recap = _h.escape(idx.get("recap") or "")
+    recap_html = f'<div class="idx-note">{recap}</div>' if recap else ""
+    return (f'<div class="idx-card"><div class="idx-head">{sym}</div>'
+            f'<div class="idx-body">{_ladder_svg(idx)}'
+            f'<div class="idx-right">{_metric_tiles_html(idx)}{recap_html}</div>'
+            f'</div></div>')
+
+
+def _next_session_html(ns) -> str:
+    """The 'Prepare for the next session' block. '' when there's nothing to say."""
+    import html as _h
+    if not isinstance(ns, dict):
+        return ""
+    rows = [("Levels", ns.get("levels")), ("Expected move", ns.get("expected_move_note")),
+            ("Catalysts", ns.get("catalysts")), ("Posture", ns.get("posture"))]
+    body = "".join(
+        f'<div class="ga-why-b"><b>{lbl}:</b> {_h.escape(str(val).strip())}</div>'
+        for lbl, val in rows if isinstance(val, str) and val.strip())
+    if not body:
+        return ""
+    return ('<div class="ga-why"><div class="ga-why-h">Prepare for the next session'
+            f'</div>{body}</div>')
+
+
+def eod_infographic_html(data, subtitle=None) -> str:
+    """Render the parsed EOD retrospective into the infographic BODY fragment:
+    regime banner + bias meter, headline/narrative, a per-index RECAP card, the
+    day's notable movers + macro drivers, a 'next session' block, then Why."""
+    import html as _h
+    d = data or {}
+    parts = ['<div class="ga-banner">'
+             f'<div class="ga-regime">{_h.escape(d.get("regime") or "—")}</div>'
+             f'{_bias_meter_html(d.get("bias"), d.get("bias_label"))}</div>']
+    headline = _h.escape(d.get("headline") or "")
+    if headline:
+        parts.append(f'<div class="ga-headline">{headline}</div>')
+    narrative = (d.get("narrative") or "").strip()
+    if narrative:
+        parts.append(f'<div class="ga-narr">{_analyze_md_to_html(narrative)}</div>')
+    for idx in d.get("indices") or []:
+        parts.append(_eod_index_card_html(idx))
+    parts.append(_movers_html(d.get("movers")))
+    parts.append(_macro_html(d.get("macro_drivers")))
+    parts.append(_next_session_html(d.get("next_session")))
+    why = (d.get("why") or "").strip()
+    if why:
+        parts.append('<div class="ga-why"><div class="ga-why-h">Why this happened</div>'
                      f'<div class="ga-why-b">{_analyze_md_to_html(why)}</div></div>')
     return "".join(parts)
 
@@ -3612,6 +3739,372 @@ def gamma_analyze(client=None, label: str | None = None) -> dict:
         if em_by_sym.get(k) is not None:
             idx["expected_move"] = em_by_sym[k]
     return {"html": _analyze_doc(analyze_infographic_html(data, subtitle), subtitle),
+            "prompt": prompt, "analysis": data}
+
+
+# ── EOD retrospective briefing (the 15:15 CT `close` slot) ──────────────────
+# The cash session is OVER by the time this runs, so it is deliberately NOT the
+# intraday playbook: no `what_if`/`close_outlook` (advice for a session that has
+# ended is worse than useless). Instead it reports what the market DID, WHY (live
+# macro drivers), which levels held or broke (code-computed session path), which
+# individual names moved, and what to carry into the NEXT session. Same failure
+# discipline as `gamma_analyze`: every surface degrades to a readable page.
+_EOD_MAX_TOKENS = 1800  # a touch above the intraday brief — recap + next_session
+_EOD_SYSTEM = (
+    "You are an options-market analyst writing an END-OF-DAY RETROSPECTIVE. The US "
+    "cash session has CLOSED. Call the submit_eod tool exactly once.\n"
+    "WRITE A RETROSPECTIVE, NOT A FORWARD INTRADAY PLAYBOOK. Never advise intraday "
+    "entries, exits or management for the session that just ended — it is over. Use "
+    "the PAST TENSE for everything about today.\n"
+    "Say what the market DID today, WHY it did it (use the supplied MACRO DRIVERS — "
+    "these are researched facts, prefer them over your own recollection), which key "
+    "levels held or broke (use the supplied SESSION PATH + LEVELS verbatim — it is "
+    "code-computed truth), and which individual names moved (use the supplied "
+    "NOTABLE INDIVIDUAL STOCK MOVES; copy the percentages exactly, never invent one).\n"
+    "Then fill 'next_session' with what to carry into TOMORROW: the levels that "
+    "matter (today's closing walls and gamma flip persist overnight because open "
+    "interest does), the expected-move band, tomorrow's scheduled catalysts, and the "
+    "posture to bring in. This is the only forward-looking part of the briefing.\n"
+    "Per index, 'recap' is what THAT index did today and where it closed relative to "
+    "its levels — one or two terse sentences, past tense.\n"
+    "Copy the EXACT computed levels from the data into each index entry — gamma flip, "
+    "call wall, put wall, max pain, expected move (in points), put/call ratio — do not "
+    "estimate or invent numbers, and omit a field only if it isn't present in the data. "
+    "Set bias from -100 (max bearish) to +100 (max bullish), 0 = neutral, describing "
+    "how the day RESOLVED.\n"
+    "FRAME EVERYTHING FROM THE TRADER'S PERSPECTIVE — prefer 'you' and concrete "
+    "observations over dealer-hedging mechanics; you may mention the mechanism "
+    "briefly, but lead with what it meant for the reader. Keep the headline terse and "
+    "the narrative to 2-3 sentences. Do NOT include any disclaimers, risk warnings, "
+    "'not financial advice' notes, or boilerplate — only the analysis."
+)
+
+_EOD_TOOL = {
+    "name": "submit_eod",
+    "description": ("Return the structured END-OF-DAY retrospective for $SPX, SPY and "
+                    "QQQ: what the market did today, why, which levels held or broke, "
+                    "which individual names moved, and what to carry into the next "
+                    "session. The app renders it as an infographic, so copy the exact "
+                    "computed levels from the provided data rather than estimating."),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "regime": {"type": "string",
+                       "description": "Short label for how the day RESOLVED, e.g. "
+                                      "'Risk-off unwind' or 'Grind-up trend day'."},
+            "bias": {"type": "number",
+                     "description": "How the day resolved, -100 (bearish) to +100 (bullish)."},
+            "bias_label": {"type": "string",
+                           "description": "Two-or-three-word label, e.g. 'Clearly bearish'."},
+            "headline": {"type": "string",
+                         "description": "One-sentence, PAST-TENSE headline of what "
+                                        "happened today."},
+            "narrative": {"type": "string",
+                          "description": "2-3 past-tense sentences on how the session "
+                                         "actually played out."},
+            "why": {"type": "string",
+                    "description": "1-2 plain sentences on WHY the tape did what it did, "
+                                   "grounded in the supplied macro drivers."},
+            "macro_drivers": {
+                "type": "array", "items": {"type": "string"},
+                "description": "The day's actual macro drivers, one short line each, "
+                               "taken from the supplied research.",
+            },
+            "movers": {
+                "type": "array",
+                "description": "Notable individual stock moves, from the supplied list.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "symbol": {"type": "string"},
+                        "move": {"type": "string",
+                                 "description": "The move, e.g. '+6.5%'. Copy exactly."},
+                        "note": {"type": "string",
+                                 "description": "A few words on why it moved."},
+                    },
+                    "required": ["symbol"],
+                },
+            },
+            "indices": {
+                "type": "array",
+                "description": "One entry per index, in order $SPX, SPY, QQQ.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "symbol": {"type": "string"},
+                        "spot": {"type": "number",
+                                 "description": "The CLOSING spot."},
+                        "gamma_flip": {"type": "number"},
+                        "call_wall": {"type": "number"},
+                        "put_wall": {"type": "number"},
+                        "max_pain": {"type": "number"},
+                        "expected_move": {"type": "number",
+                                          "description": "Expected move in points (1 std dev)."},
+                        "pc_ratio": {"type": "number", "description": "Put/call ratio."},
+                        "recap": {"type": "string",
+                                  "description": "PAST TENSE: what this index did today "
+                                                 "and where it closed versus its gamma "
+                                                 "flip and walls."},
+                    },
+                    "required": ["symbol"],
+                },
+            },
+            "next_session": {
+                "type": "object",
+                "description": "What to carry into the NEXT session — the only "
+                               "forward-looking part of this briefing.",
+                "properties": {
+                    "levels": {"type": "string",
+                               "description": "The levels that matter tomorrow (today's "
+                                              "closing walls/flip persist overnight)."},
+                    "expected_move_note": {"type": "string",
+                                           "description": "The expected-move band to expect."},
+                    "catalysts": {"type": "string",
+                                  "description": "Tomorrow's scheduled catalysts "
+                                                 "(data, earnings, events)."},
+                    "posture": {"type": "string",
+                                "description": "The posture to bring into tomorrow."},
+                },
+            },
+        },
+        "required": ["regime", "bias", "headline", "narrative", "why", "indices"],
+    },
+}
+
+
+def _coerce_drivers(v) -> list:
+    """Model-supplied macro drivers → a clean list of non-empty strings."""
+    out = []
+    for x in (v or []) if isinstance(v, (list, tuple)) else []:
+        if isinstance(x, str) and x.strip():
+            out.append(x.strip())
+    return out
+
+
+def _coerce_movers(v) -> list:
+    """Model-supplied movers → clean ``{symbol, move, note}`` dicts (junk dropped)."""
+    out = []
+    for x in (v or []) if isinstance(v, (list, tuple)) else []:
+        if not isinstance(x, dict):
+            continue
+        sym = str(x.get("symbol") or "").strip()
+        if not sym:
+            continue
+        out.append({"symbol": sym,
+                    "move": str(x.get("move") or "").strip(),
+                    "note": str(x.get("note") or "").strip()})
+    return out
+
+
+def _parse_eod(inp) -> dict | None:
+    """Normalize the model's ``submit_eod`` tool input → render-ready dict.
+
+    Total over adversarial input (mirrors ``_parse_analysis``). Returns None only
+    when there's nothing renderable, so the caller degrades to a message."""
+    if not isinstance(inp, dict):
+        return None
+    ns = inp.get("next_session") if isinstance(inp.get("next_session"), dict) else {}
+    out = {
+        "regime": str(inp.get("regime") or "").strip(),
+        "bias": _num(inp.get("bias")),
+        "bias_label": str(inp.get("bias_label") or "").strip(),
+        "headline": str(inp.get("headline") or "").strip(),
+        "narrative": str(inp.get("narrative") or "").strip(),
+        "why": str(inp.get("why") or "").strip(),
+        "macro_drivers": _coerce_drivers(inp.get("macro_drivers")),
+        "movers": _coerce_movers(inp.get("movers")),
+        "indices": [],
+        "next_session": {
+            "levels": str(ns.get("levels") or "").strip(),
+            "expected_move_note": str(ns.get("expected_move_note") or "").strip(),
+            "catalysts": str(ns.get("catalysts") or "").strip(),
+            "posture": str(ns.get("posture") or "").strip(),
+        },
+    }
+    for it in (inp.get("indices") or []):
+        if not isinstance(it, dict):
+            continue
+        out["indices"].append({
+            "symbol": str(it.get("symbol") or "").strip(),
+            "spot": _num(it.get("spot")),
+            "gamma_flip": _num(it.get("gamma_flip")),
+            "call_wall": _num(it.get("call_wall")),
+            "put_wall": _num(it.get("put_wall")),
+            "max_pain": _num(it.get("max_pain")),
+            "expected_move": _num(it.get("expected_move")),
+            "pc_ratio": _num(it.get("pc_ratio")),
+            "recap": str(it.get("recap") or "").strip(),
+        })
+    if not out["indices"] and not out["headline"] and not out["narrative"]:
+        return None
+    return out
+
+
+def _levels_from_blocks(block) -> dict:
+    """Closing flip + call/put walls out of one symbol's GEX analysis block.
+
+    Reads ``gex.flip_point`` and ``gex.walls.gex.{call_wall,put_wall}`` (see
+    ``gamma_tool.build_analysis_dict``). A wall may be a bare strike or a dict
+    carrying one. Defensive → all-None (never raises)."""
+    def _strike(v):
+        if isinstance(v, dict):
+            v = v.get("strike")
+        return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+    try:
+        g = ((block or {}).get("gex")) or {}
+        walls = ((g.get("walls") or {}).get("gex")) or {}
+        return {"flip": _strike(g.get("flip_point")),
+                "call_wall": _strike(walls.get("call_wall")),
+                "put_wall": _strike(walls.get("put_wall"))}
+    except Exception:
+        return {"flip": None, "call_wall": None, "put_wall": None}
+
+
+def _eod_cache_reads() -> tuple:
+    """The three caches `_notable_movers` consumes. Defensive → ({}, {}, {}).
+
+    NOTE: ``bus.cache_get`` returns a ``CacheEnvelope``, NOT a dict — always take
+    ``.payload`` (a bare ``.get()`` on the envelope once made a scheduled push
+    silently never fire)."""
+    def _payload(bus, key):
+        try:
+            env = bus.cache_get(key)
+            return (getattr(env, "payload", None) or {}) if env is not None else {}
+        except Exception:
+            return {}
+
+    try:
+        from shared.bus import Bus
+        bus = Bus()
+        return (_payload(bus, "cache:market:dashboard"),
+                _payload(bus, "cache:options:matrix"),
+                _payload(bus, "cache:options:flow_alerts"))
+    except Exception:
+        log.debug("_eod_cache_reads failed", exc_info=True)
+        return {}, {}, {}
+
+
+def eod_briefing(client=None, label: str | None = None) -> dict:
+    """End-of-day RETROSPECTIVE briefing → ``{"html", "prompt", "analysis"}``.
+
+    Serves the 15:15 CT ``close`` slot. Same shape and failure discipline as
+    ``gamma_analyze`` (so the existing PNG push path works unchanged), but a
+    retrospective: the forced tool is ``submit_eod``, the prompt carries the
+    code-computed session path + notable movers + researched macro drivers instead
+    of the forward projection, and the renderer is ``eod_infographic_html``.
+    Every enrichment source is best-effort — the briefing always renders."""
+    import gamma_tool as gt
+
+    subtitle = "End-of-day recap · $SPX / SPY / QQQ"
+    if label:
+        subtitle = f"{subtitle} · {label}"
+
+    blocks, em_by_sym, chains = {}, {}, {}
+    for key, sym in (("spx", "$SPX"), ("spy", "SPY"), ("qqq", "QQQ")):
+        try:
+            chain = _gamma_fetch_chain(sym)
+            if chain:
+                chains[sym] = chain
+                blocks[key] = _gamma_blocks_for(sym, chain)
+                em_by_sym[sym.lstrip("$").upper()] = _session_expected_move(chain)
+            else:
+                blocks[key] = None
+        except Exception:
+            blocks[key] = None
+    try:
+        prompt = gt.build_summary_prompt_bundled(blocks["spx"], blocks["spy"], blocks["qqq"])
+    except Exception:
+        return {"html": _analyze_doc(
+            "<p>No end-of-day recap available — could not fetch option chains for "
+            "$SPX, SPY or QQQ. The data service may be unavailable. Try again "
+            "later.</p>", subtitle)}
+
+    # Session path vs the CLOSING levels (code-computed truth the model must copy).
+    try:
+        levels_by_sym = {sym: _levels_from_blocks(blocks.get(key))
+                         for key, sym in (("spx", "$SPX"), ("spy", "SPY"), ("qqq", "QQQ"))
+                         if blocks.get(key)}
+        recap = _eod_session_recap(levels_by_sym)
+        block = _eod_recap_prompt_block(recap)
+        if block:
+            prompt = f"{prompt}\n\n{block}"
+    except Exception:
+        log.debug("eod recap context failed", exc_info=True)
+
+    # Notable individual stock moves (code-computed from the app's own caches).
+    movers = []
+    try:
+        dashboard, matrix, flow_alerts = _eod_cache_reads()
+        movers = _notable_movers(dashboard, matrix, flow_alerts) or []
+        block = _movers_prompt_block(movers)
+        if block:
+            prompt = f"{prompt}\n\n{block}"
+    except Exception:
+        log.debug("eod movers context failed", exc_info=True)
+        movers = []
+
+    # The day's macro drivers (phase-1 web-search call).
+    news = []
+    try:
+        ctx = ", ".join(f"{s} {(chains.get(s) or {}).get('underlyingPrice')}"
+                        for s in ("$SPX", "SPY", "QQQ") if chains.get(s))
+        news = _research_news(label or "close", context=ctx, eod=True) or []
+        block = _news_prompt_block(news)
+        if block:
+            prompt = f"{prompt}\n\n{block}"
+    except Exception:
+        log.debug("eod news context failed", exc_info=True)
+        news = []
+
+    client = client or _make_analyze_client()
+    if client is None:
+        return {"html": _analyze_doc(
+            "<p>AI analysis is not configured. Set the <code>ANTHROPIC_API_KEY</code> "
+            "environment variable (or place the key in <code>shared/anthropic_key.txt</code>) "
+            "on the options service.</p>", subtitle), "prompt": prompt}
+
+    try:
+        _count_anthropic_call()
+        resp = client.messages.create(
+            model=_ANALYZE_MODEL,
+            max_tokens=_EOD_MAX_TOKENS,
+            thinking={"type": "disabled"},
+            system=_EOD_SYSTEM,
+            tools=[_EOD_TOOL],
+            tool_choice={"type": "tool", "name": "submit_eod"},
+            messages=[{"role": "user", "content": prompt}],
+        )
+        tool_input = None
+        for b in (getattr(resp, "content", None) or []):
+            if (getattr(b, "type", None) == "tool_use"
+                    and getattr(b, "name", "") == "submit_eod"):
+                tool_input = getattr(b, "input", None)
+                break
+    except Exception as exc:  # noqa: BLE001 — surface the failure in the tab.
+        return {"html": _analyze_doc(
+            f"<p>End-of-day recap failed: <code>{exc}</code></p>"
+            "<p>Check the API key and the service log.</p>", subtitle),
+            "prompt": prompt}
+
+    data = _parse_eod(tool_input)
+    if not data:
+        return {"html": _analyze_doc(
+            "<p>The model returned no usable end-of-day recap.</p>", subtitle),
+            "prompt": prompt}
+
+    # Code-authoritative overrides — same principle as the EM override in
+    # gamma_analyze: where the app computed it, the app's number wins.
+    for idx in data.get("indices") or []:
+        k = (idx.get("symbol") or "").lstrip("$").upper()
+        if em_by_sym.get(k) is not None:
+            idx["expected_move"] = em_by_sym[k]
+    if movers:
+        data["movers"] = movers
+    if news:
+        data["macro_drivers"] = news
+
+    return {"html": _analyze_doc(eod_infographic_html(data, subtitle), subtitle),
             "prompt": prompt, "analysis": data}
 
 
