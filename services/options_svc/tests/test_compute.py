@@ -3979,3 +3979,83 @@ def test_analyze_infographic_still_renders_without_new_fields():
         {"regime": "r", "bias": 0, "headline": "h", "narrative": "n", "why": "w",
          "indices": [{"symbol": "SPY"}]}, "sub")
     assert "SPY" in html      # no regression when macro_drivers/movers are absent
+
+
+# ── Task 6: enrich the three intraday briefings ─────────────────────────────
+def test_analyze_tool_accepts_optional_macro_and_movers():
+    from services.options_svc import compute
+    props = compute._ANALYZE_TOOL["input_schema"]["properties"]
+    assert "macro_drivers" in props and "movers" in props
+    # still NOT required -- a model reply without them must parse
+    assert "macro_drivers" not in compute._ANALYZE_TOOL["input_schema"]["required"]
+    assert "movers" not in compute._ANALYZE_TOOL["input_schema"]["required"]
+    d = compute._parse_analysis({"regime": "r", "bias": 0, "headline": "h",
+                                 "narrative": "n", "why": "w", "indices": [],
+                                 "macro_drivers": ["CPI cool"], "movers": []})
+    assert d["macro_drivers"] == ["CPI cool"]
+
+
+def test_parse_analysis_keeps_intraday_playbook_intact():
+    """Regression: the enrichment must not disturb what_if / close_outlook."""
+    from services.options_svc import compute
+    d = compute._parse_analysis({
+        "regime": "r", "bias": 0, "headline": "h", "narrative": "n", "why": "w",
+        "indices": [{"symbol": "SPY", "close_outlook": "trim into 600",
+                     "what_if": {"rally": "ride", "selloff": "buy dip", "chop": "fade"}}],
+    })
+    idx = d["indices"][0]
+    assert idx["close_outlook"] == "trim into 600"
+    assert idx["what_if"] == {"rally": "ride", "selloff": "buy dip", "chop": "fade"}
+    assert d["macro_drivers"] == [] and d["movers"] == []
+
+
+def test_gamma_analyze_threads_news_and_movers_into_prompt(monkeypatch):
+    from services.options_svc import compute
+    monkeypatch.setattr(compute, "_gamma_fetch_chain",
+                        lambda s: {"underlyingPrice": 100.0})
+    monkeypatch.setattr(compute, "_gamma_blocks_for", lambda s, c: {"sym": s})
+    monkeypatch.setattr(compute, "_session_expected_move", lambda c: 1.0)
+    monkeypatch.setattr(compute, "_research_news", lambda *a, **k: ["Fed held rates"])
+    monkeypatch.setattr(compute, "_notable_movers",
+                        lambda *a, **k: [{"symbol": "MU", "day_pct": 6.5,
+                                          "basis": "session", "flow_alert_count": 0}])
+    seen = {}
+
+    class _C:
+        class messages:
+            @staticmethod
+            def create(**kw):
+                seen["prompt"] = kw["messages"][0]["content"]
+                blk = type("B", (), {"type": "tool_use", "name": "submit_analysis",
+                                     "input": {"regime": "r", "bias": 0, "headline": "h",
+                                               "narrative": "n", "why": "w",
+                                               "indices": []}})()
+                return type("R", (), {"content": [blk]})()
+    compute.gamma_analyze(client=_C())
+    assert "Fed held rates" in seen["prompt"]
+    assert "MU" in seen["prompt"]
+
+
+def test_gamma_analyze_survives_news_and_movers_failure(monkeypatch):
+    from services.options_svc import compute
+    monkeypatch.setattr(compute, "_gamma_fetch_chain",
+                        lambda s: {"underlyingPrice": 100.0})
+    monkeypatch.setattr(compute, "_gamma_blocks_for", lambda s, c: {"sym": s})
+    monkeypatch.setattr(compute, "_session_expected_move", lambda c: 1.0)
+
+    def _boom(*a, **k):
+        raise RuntimeError("news down")
+    monkeypatch.setattr(compute, "_research_news", _boom)
+    monkeypatch.setattr(compute, "_notable_movers", _boom)
+
+    class _C:
+        class messages:
+            @staticmethod
+            def create(**kw):
+                blk = type("B", (), {"type": "tool_use", "name": "submit_analysis",
+                                     "input": {"regime": "r", "bias": 0, "headline": "h",
+                                               "narrative": "n", "why": "w",
+                                               "indices": []}})()
+                return type("R", (), {"content": [blk]})()
+    res = compute.gamma_analyze(client=_C())
+    assert res.get("analysis")      # briefing still renders

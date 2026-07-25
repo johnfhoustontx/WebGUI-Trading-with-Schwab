@@ -3007,6 +3007,11 @@ _ANALYZE_SYSTEM = (
     "downside path) and 'chop' (a sideways/range path) — one sentence each. Fill 'why' "
     "with 1-2 plain sentences on why the tape is acting this way (macro context + the "
     "session's path so far). "
+    "When MACRO DRIVERS are supplied below, use them to ground 'why' in what is "
+    "actually moving the tape today (they are researched facts — prefer them over "
+    "your own recollection), and list them in 'macro_drivers'. When NOTABLE "
+    "INDIVIDUAL STOCK MOVES are supplied, surface them in 'movers', copying the "
+    "computed percentages exactly — never invent a move or a number. "
     "FRAME EVERYTHING FROM THE TRADER'S PERSPECTIVE — write what the READER should DO "
     "and expect, NOT what dealers are doing. Prefer 'you' and concrete actions ('fade "
     "the call wall', 'buy dips toward the put wall', 'lean long / stay long above the "
@@ -3050,6 +3055,29 @@ _ANALYZE_TOOL = {
             "why": {"type": "string",
                     "description": "1-2 plain sentences: why the tape is acting this way "
                                    "(macro context + the session's path so far)."},
+            # Optional enrichment — deliberately NOT in `required`, so a terser or
+            # older model reply still parses and renders exactly as before.
+            "macro_drivers": {
+                "type": "array", "items": {"type": "string"},
+                "description": "The day's macro drivers, one short line each, taken "
+                               "from the supplied research. Omit if none supplied.",
+            },
+            "movers": {
+                "type": "array",
+                "description": "Notable individual stock moves, from the supplied "
+                               "list. Omit if none supplied.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "symbol": {"type": "string"},
+                        "move": {"type": "string",
+                                 "description": "The move, e.g. '+6.5%'. Copy exactly."},
+                        "note": {"type": "string",
+                                 "description": "A few words on why it moved."},
+                    },
+                    "required": ["symbol"],
+                },
+            },
             "indices": {
                 "type": "array",
                 "description": "One entry per index, in order $SPX, SPY, QQQ.",
@@ -3255,6 +3283,9 @@ def _parse_analysis(inp) -> dict | None:
         "headline": str(inp.get("headline") or "").strip(),
         "narrative": str(inp.get("narrative") or "").strip(),
         "why": str(inp.get("why") or "").strip(),
+        # Additive enrichment; absent on an older reply → empty, rendered as nothing.
+        "macro_drivers": _coerce_drivers(inp.get("macro_drivers")),
+        "movers": _coerce_movers(inp.get("movers")),
         "indices": [],
     }
     for it in (inp.get("indices") or []):
@@ -3695,6 +3726,29 @@ def gamma_analyze(client=None, label: str | None = None) -> dict:
     except Exception:
         log.debug("analyze projection context failed", exc_info=True)
 
+    # Enrichment context, shared with the EOD briefing. Each source is in its OWN
+    # try/except: a cache read or a web-search failure must never cost us the
+    # briefing (pinned by test_gamma_analyze_survives_news_and_movers_failure).
+    movers = []
+    try:
+        _dash, _mtx, _fa = _eod_cache_reads()
+        movers = _notable_movers(_dash, _mtx, _fa) or []
+        _blk = _movers_prompt_block(movers)
+        if _blk:
+            prompt = f"{prompt}\n\n{_blk}"
+    except Exception:
+        log.debug("analyze movers context failed", exc_info=True)
+        movers = []
+    news = []
+    try:
+        news = _research_news(label or "intraday") or []
+        _blk = _news_prompt_block(news)
+        if _blk:
+            prompt = f"{prompt}\n\n{_blk}"
+    except Exception:
+        log.debug("analyze news context failed", exc_info=True)
+        news = []
+
     client = client or _make_analyze_client()
     if client is None:
         return {"html": _analyze_doc(
@@ -3738,6 +3792,12 @@ def gamma_analyze(client=None, label: str | None = None) -> dict:
         k = (idx.get("symbol") or "").lstrip("$").upper()
         if em_by_sym.get(k) is not None:
             idx["expected_move"] = em_by_sym[k]
+    # Same code-authoritative rule for the enrichment: where the app computed it,
+    # the app's value wins over the model's transcription.
+    if movers:
+        data["movers"] = movers
+    if news:
+        data["macro_drivers"] = news
     return {"html": _analyze_doc(analyze_infographic_html(data, subtitle), subtitle),
             "prompt": prompt, "analysis": data}
 
@@ -3961,6 +4021,28 @@ def _levels_from_blocks(block) -> dict:
         return {"flip": None, "call_wall": None, "put_wall": None}
 
 
+_BRIEFING_BUS = None
+
+
+def _briefing_bus():
+    """Lazily-created module-level Bus for the briefings' cache reads.
+
+    A handle, NOT a per-call construction: every ``Bus()`` opens its own
+    connection (and, under pytest, spins up a whole fresh in-memory fakeredis
+    server — measured at ~1.2 s per call, which showed up as an 8x slowdown of
+    the briefing tests). Reused across briefings; ``None`` if the bus is
+    unavailable, so the caller degrades to app-data-only."""
+    global _BRIEFING_BUS
+    if _BRIEFING_BUS is None:
+        try:
+            from shared.bus import Bus
+            _BRIEFING_BUS = Bus()
+        except Exception:
+            log.debug("_briefing_bus unavailable", exc_info=True)
+            return None
+    return _BRIEFING_BUS
+
+
 def _eod_cache_reads() -> tuple:
     """The three caches `_notable_movers` consumes. Defensive → ({}, {}, {}).
 
@@ -3975,8 +4057,9 @@ def _eod_cache_reads() -> tuple:
             return {}
 
     try:
-        from shared.bus import Bus
-        bus = Bus()
+        bus = _briefing_bus()
+        if bus is None:
+            return {}, {}, {}
         return (_payload(bus, "cache:market:dashboard"),
                 _payload(bus, "cache:options:matrix"),
                 _payload(bus, "cache:options:flow_alerts"))
