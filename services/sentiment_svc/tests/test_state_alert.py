@@ -143,6 +143,43 @@ def test_send_missing_creds_shared_senders_noop(monkeypatch):
         "bullish", "bearish", _trend(), config=cfg) is True
 
 
+def _capture_targets(monkeypatch):
+    """Capture the TARGETS the senders were handed (not just call counts)."""
+    got = {}
+    monkeypatch.setattr(state_alert, "send_telegram",
+                        lambda tok, chat, text: got.update(tok=tok, chat=chat))
+    monkeypatch.setattr(state_alert, "send_discord",
+                        lambda wh, embed: got.update(webhook=wh))
+    monkeypatch.setattr(state_alert, "send_sms", lambda *a, **k: None)
+    return got
+
+
+def test_state_transition_uses_market_state_route(monkeypatch):
+    """A routes.market_state override beats the global discord webhook / chat."""
+    got = _capture_targets(monkeypatch)
+    monkeypatch.setattr(state_alert, "_in_market_hours", lambda: True)
+    cfg = _cfg(telegram={"bot_token": "T", "chat_id": 1},
+               discord={"webhook_url": "GLOBAL"},
+               routes={"market_state": {"discord": "MS_D",
+                                        "telegram_chat_id": 77}})
+    assert state_alert.send_state_transition(
+        "bullish", "bearish", _trend(), config=cfg) is True
+    assert got["webhook"] == "MS_D"
+    assert got["chat"] == 77
+    assert got["tok"] == "T"      # bot token is always the global one
+
+
+def test_state_transition_without_routes_uses_global(monkeypatch):
+    """Back-compat: no `routes` block → the legacy global targets, unchanged."""
+    got = _capture_targets(monkeypatch)
+    monkeypatch.setattr(state_alert, "_in_market_hours", lambda: True)
+    assert state_alert.send_state_transition(
+        "bullish", "bearish", _trend(), config=_cfg()) is True
+    assert got["webhook"] == "https://d"
+    assert got["chat"] == 5
+    assert got["tok"] == "T"
+
+
 def test_send_never_raises_even_if_a_sender_raises(monkeypatch):
     monkeypatch.setattr(state_alert, "_in_market_hours", lambda: True)
 

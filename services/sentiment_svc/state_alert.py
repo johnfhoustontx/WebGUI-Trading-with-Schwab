@@ -32,6 +32,8 @@ from shared.notify.channels import (  # noqa: E402
     send_telegram,
     send_discord,
     send_sms,
+    discord_target,
+    telegram_target,
     _in_market_hours,
 )
 
@@ -112,12 +114,14 @@ def send_state_transition(old_state, new_state, trend, *, config=None) -> bool:
     description = t.get("description", "")
     evidence = t.get("evidence") or []
 
-    tg = cfg.get("telegram", {})
-    dc = cfg.get("discord", {})
+    # Discord webhook + Telegram chat come from the shared per-category resolver
+    # (route -> legacy key -> global), so this feed can be moved to its own
+    # channel by editing config alone. SMS is a single number — out of scope.
     sms = cfg.get("sms", {})
-    _safe(send_telegram, tg.get("bot_token"), tg.get("chat_id"),
+    tok, chat = telegram_target(cfg, "market_state")
+    _safe(send_telegram, tok, chat,
           transition_telegram(old_label, new_label, description, evidence))
-    _safe(send_discord, dc.get("webhook_url"),
+    _safe(send_discord, discord_target(cfg, "market_state"),
           transition_discord(old_label, new_label, new_state, description, evidence))
     _safe(send_sms, sms.get("fi_number"), sms.get("smtp_user"),
           sms.get("smtp_app_password"),
