@@ -4170,3 +4170,37 @@ def test_backfill_indices_is_defensive():
     from services.options_svc import compute
     assert compute._backfill_indices({"indices": []}, {}, {}, {})["indices"] == []
     assert compute._backfill_indices({}, None, None, None).get("indices") == []
+
+
+def test_eod_document_is_titled_as_a_recap_not_gamma_analysis():
+    """The EOD doc is what gets pushed and opened in a tab; titling it
+    'Gamma Analysis' misnames it (the same trap the Market Snapshot work hit)."""
+    from services.options_svc import compute
+    doc = compute._analyze_doc("<p>x</p>", "sub", title="End-of-Day Recap")
+    assert "<title>End-of-Day Recap" in doc
+    assert 'class="ga-title">End-of-Day Recap<' in doc
+    assert "Gamma Analysis" not in doc
+    # Default is unchanged for the three intraday briefings.
+    assert "Gamma Analysis" in compute._analyze_doc("<p>x</p>", "sub")
+
+
+def test_eod_briefing_document_title(monkeypatch):
+    from services.options_svc import compute
+    monkeypatch.setattr(compute, "_gamma_fetch_chain", lambda s: {"underlyingPrice": 100.0})
+    monkeypatch.setattr(compute, "_gamma_blocks_for", lambda s, c: {"sym": s})
+    monkeypatch.setattr(compute, "_session_expected_move", lambda c: 1.0)
+    monkeypatch.setattr(compute, "_eod_session_recap", lambda lv: {})
+    monkeypatch.setattr(compute, "_research_news", lambda *a, **k: [])
+    monkeypatch.setattr(compute, "_notable_movers", lambda *a, **k: [])
+
+    class _C:
+        class messages:
+            @staticmethod
+            def create(**kw):
+                blk = type("B", (), {"type": "tool_use", "name": "submit_eod",
+                                     "input": {"regime": "r", "bias": 0, "headline": "h",
+                                               "narrative": "n", "why": "w",
+                                               "indices": [{"symbol": "$SPX"}]}})()
+                return type("R", (), {"content": [blk]})()
+    html = compute.eod_briefing(client=_C())["html"]
+    assert "End-of-Day Recap" in html and "Gamma Analysis" not in html

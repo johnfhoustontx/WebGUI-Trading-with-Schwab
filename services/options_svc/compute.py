@@ -3245,13 +3245,21 @@ def _analyze_md_to_html(text: str) -> str:
 
 
 def _analyze_doc(body_html: str,
-                 subtitle: str = "Dealer-positioning briefing · $SPX / SPY / QQQ") -> str:
-    """Wrap an HTML body fragment in a standalone dark document (Explain aesthetic)."""
+                 subtitle: str = "Dealer-positioning briefing · $SPX / SPY / QQQ",
+                 title: str = "Gamma Analysis") -> str:
+    """Wrap an HTML body fragment in a standalone dark document (Explain aesthetic).
+
+    ``title`` defaults to the intraday briefing's name so the three intraday slots
+    are unchanged; the EOD retrospective passes its own, because a document headed
+    "Gamma Analysis" misnames what the reader is looking at (the same mistake the
+    Market Snapshot push had to correct)."""
+    import html as _h
+    t = _h.escape(title)
     return ("<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">"
             "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
-            "<title>Gamma Analysis — $SPX / SPY / QQQ</title>"
+            f"<title>{t} — $SPX / SPY / QQQ</title>"
             f"<style>{_ANALYZE_CSS}</style></head><body><div class=\"ga\">"
-            "<div class=\"ga-title\">Gamma Analysis</div>"
+            f"<div class=\"ga-title\">{t}</div>"
             f"<div class=\"ga-sub\">{subtitle}</div>"
             f"<div class=\"ga-body\">{body_html}</div></div></body></html>")
 
@@ -3829,6 +3837,7 @@ def gamma_analyze(client=None, label: str | None = None) -> dict:
 # briefing without its prepare-for-tomorrow block. Headroom is far cheaper than
 # a briefing that loses its point.
 _EOD_MAX_TOKENS = 2600
+_EOD_TITLE = "End-of-Day Recap"
 _EOD_SYSTEM = (
     "You are an options-market analyst writing an END-OF-DAY RETROSPECTIVE. The US "
     "cash session has CLOSED. Call the submit_eod tool exactly once.\n"
@@ -4198,7 +4207,7 @@ def eod_briefing(client=None, label: str | None = None) -> dict:
         return {"html": _analyze_doc(
             "<p>No end-of-day recap available — could not fetch option chains for "
             "$SPX, SPY or QQQ. The data service may be unavailable. Try again "
-            "later.</p>", subtitle)}
+            "later.</p>", subtitle, title=_EOD_TITLE)}
 
     # Session path vs the CLOSING levels (code-computed truth the model must copy,
     # and the source the index cards are rebuilt from if the model omits them).
@@ -4245,7 +4254,7 @@ def eod_briefing(client=None, label: str | None = None) -> dict:
         return {"html": _analyze_doc(
             "<p>AI analysis is not configured. Set the <code>ANTHROPIC_API_KEY</code> "
             "environment variable (or place the key in <code>shared/anthropic_key.txt</code>) "
-            "on the options service.</p>", subtitle), "prompt": prompt}
+            "on the options service.</p>", subtitle, title=_EOD_TITLE), "prompt": prompt}
 
     try:
         _count_anthropic_call()
@@ -4274,13 +4283,13 @@ def eod_briefing(client=None, label: str | None = None) -> dict:
     except Exception as exc:  # noqa: BLE001 — surface the failure in the tab.
         return {"html": _analyze_doc(
             f"<p>End-of-day recap failed: <code>{exc}</code></p>"
-            "<p>Check the API key and the service log.</p>", subtitle),
+            "<p>Check the API key and the service log.</p>", subtitle, title=_EOD_TITLE),
             "prompt": prompt}
 
     data = _parse_eod(tool_input)
     if not data:
         return {"html": _analyze_doc(
-            "<p>The model returned no usable end-of-day recap.</p>", subtitle),
+            "<p>The model returned no usable end-of-day recap.</p>", subtitle, title=_EOD_TITLE),
             "prompt": prompt}
 
     # The model sometimes drops `indices` entirely — rebuild the cards from the
@@ -4298,7 +4307,7 @@ def eod_briefing(client=None, label: str | None = None) -> dict:
     if news:
         data["macro_drivers"] = news
 
-    return {"html": _analyze_doc(eod_infographic_html(data, subtitle), subtitle),
+    return {"html": _analyze_doc(eod_infographic_html(data, subtitle), subtitle, title=_EOD_TITLE),
             "prompt": prompt, "analysis": data}
 
 
