@@ -8,7 +8,51 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-07-24 (**Market Snapshot push — 30-min Discord/Telegram infographic**:
+**Last updated:** 2026-07-25 (**EOD retrospective briefing + live macro news + notable movers**:
+the 4×/day Gamma briefings were reworked. **(1) The `close` slot moved 14:58 → 15:15 CT and became a
+RETROSPECTIVE.** It used to fire **two minutes before the cash close** and write an intraday playbook
+for a session with no session left. `scheduler._ANALYZE_SLOTS["close"] = (15, 15)` and
+`handlers.run_scheduled_gamma_analyze` now routes that slot to a new **`compute.eod_briefing()`** —
+its own forced **`submit_eod`** tool, its own past-tense system prompt (explicitly forbidden from
+advising entries into a session that has ended), and its own renderer **`eod_infographic_html`** whose
+per-index card shows a **`recap`** and deliberately **drops `what_if`/`close_outlook`** (pinned by a
+test). It returns the same `{"html","analysis"}` shape, so caching / history / the existing PNG push
+are unchanged. The document is titled **"End-of-Day Recap"** (`_analyze_doc` gained an optional
+`title`; the intraday default is untouched) — the same misnaming trap the Market Snapshot push had to
+correct. **(2) All four briefings gained macro drivers + notable movers.** `_notable_movers`
+(code-computed from `cache:options:matrix` + `cache:market:dashboard` + today's flow alerts) and
+`_research_news` (a **phase-1 Claude call carrying the web-search server tool** — separate from the
+render phase because the API cannot fire a server-side search AND force a client tool in one turn)
+feed both paths; `_ANALYZE_TOOL` gained **optional** `macro_drivers`/`movers` (NOT required, so a
+terser reply still parses) and the shared `_movers_html`/`_macro_html` sections render nothing when
+absent. **(3) `_eod_session_recap`** derives each index's open/high/low/close from the cheap flow
+series (no grid decode) and pairs it with the closing flip/walls into plain-English level verdicts
+("reclaimed the gamma flip, closing above" / "lost it and closed below") the model must copy verbatim.
+**Code-authoritative throughout** — EM, movers and macro_drivers all override the model's
+transcription, matching the existing EM rule. **FOUR bugs that ONLY live verification caught** (every
+unit test and two full-suite runs were green): (1) a **self-inflicted regression** — adding
+`macro_drivers`+`movers` pushed the intraday reply past `_ANALYZE_MAX_TOKENS=1500`, which stopped at
+*exactly* 1500 and truncated **`indices` to n=0**, silently costing the briefing every ladder, tile,
+`what_if` and `close_outlook` while still rendering a valid-looking page (both budgets → **2600**, a
+cap not a spend, with a `>=2400` tripwire test and a `max_tokens` **warning log** at both call sites);
+(2) `next_session` was optional so the model omitted it and the "prepare for tomorrow" block silently
+vanished (now `required`, all four sub-fields); (3) even when required, the model **drops `indices`
+about one run in three** (`stop_reason: tool_use`, ~1460 tokens — satisficing, not truncation; the API
+does not hard-enforce `required`), so **`_backfill_indices` rebuilds the cards deterministically** from
+the levels/path/EM the app already computed, synthesizing a factual recap sentence — only the model's
+prose is lost, and it logs when it fires; (4) `gex_history_db.latest_flip` is
+**`(conn, symbol, view="gex", date=None)`** — passing the date positionally lands it in `view` and
+returns None for every symbol (keyword + regression test). Also fixed: `_eod_cache_reads` built a fresh
+`Bus()` per call (each one opens a connection, and under pytest a whole new in-memory fakeredis server,
+~1.2 s) → a lazily-created **module-level handle**. **Restart `options_svc`** (+ the webgui for the
+relabelled "EOD recap" Auto-briefings / History entries). Cost: ~8 Claude calls + 4 web searches/day for
+briefings. Green: options_svc **848** (+ the 2 documented `test_expected_move` baseline fails), webgui
+**885**. **Live-verified end-to-end**: real web-search drivers (tariffs / Apple / Iran-oil), real movers
+(NBIS −14.1%, ALAB −11.7%, CRWV −11.1%), correct level verdicts off Friday's real session (QQQ −1.12%
+lost its flip; SPY reclaimed 738.49), code-authoritative EM, three complete runs, and a **real PNG push
+delivered to Telegram + Discord**. Design/plan:
+[design](docs/plans/2026-07-24-eod-briefing-news-movers-design.md) /
+[plan](docs/plans/2026-07-24-eod-briefing-news-movers-plan.md). Prior — 2026-07-24 (**Market Snapshot push — 30-min Discord/Telegram infographic**:
 a new scheduled push (in **`options_svc`**) fires **every :00 and :30 during the trading day**
 (08:30–15:00 CT, ~14/day) delivering **one server-composed PNG** to Telegram + Discord — the **Market
 Dashboard tile-grid** (all ~14 categories, risk-on/off colored, from `cache:market:dashboard`) plus a
