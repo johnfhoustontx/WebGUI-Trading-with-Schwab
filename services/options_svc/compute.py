@@ -2652,18 +2652,95 @@ _NEWS_MODEL = "claude-sonnet-4-6"
 # its training memory. A bare try/except cannot catch this; it must be
 # detected by scanning the response blocks (see `_research_news`).
 _NEWS_ERROR_BLOCK = "web_search_tool_result"
+# Genuine search-INFRASTRUCTURE failures — nothing useful came back, so the whole
+# result is discarded (see `_research_news` docstring). `max_uses_exceeded` is
+# deliberately EXCLUDED here: `_WEB_SEARCH_TOOL["max_uses"]` above is OUR OWN
+# configured cap, so hitting it means some searches already SUCCEEDED before the
+# cap bit — that is not a failure, and discarding the research already gathered
+# would be throwing away good news over our own self-imposed budget. Any other/
+# unknown error code also passes through un-aborted (this list is exhaustive per
+# the reviewed spec, not a "when in doubt" allowlist).
+_NEWS_ABORT_ERROR_CODES = frozenset({
+    "too_many_requests", "unavailable", "invalid_tool_input",
+    "query_too_long", "request_too_large",
+})
+
+# Small, deliberately narrow prefix blocklist for the preamble/summary sentences
+# the model sometimes emits despite being told not to — checked at the START of a
+# line only (see `_is_meta_line`), so a real driver mentioning e.g. "Fed: held
+# rates steady" is never dropped just for containing a colon.
+_NEWS_META_PREFIXES = ("note:", "summary:", "disclaimer:", "sources:")
 
 _NEWS_SYSTEM = (
     "You are a market-news researcher. Search the web for the concrete macro and "
     "earnings news that actually moved US equities TODAY (Fed/rates, CPI/PPI/jobs, "
-    "major earnings, geopolitics). Reply with a short plain list, one driver per line, "
-    "prefixed by '- ', each naming the event and its market effect in ONE clause. Cite "
-    "nothing else, add no preamble, no disclaimers. If asked for the next session, also "
-    "list tomorrow's scheduled economic releases and notable earnings."
+    "major earnings, geopolitics). The user message states today's date — treat it "
+    "as authoritative and IGNORE any search result that is not from that session. "
+    "Reply with a short plain list, one driver per line, prefixed by '- ', each "
+    "naming the event and its market effect in ONE clause. Do NOT include a preamble "
+    "sentence, a section header, a summary line, markdown emphasis (no **bold** or "
+    "__underline__), citations, or disclaimers — ONLY the bulleted driver lines. If "
+    "asked for the next session, also list tomorrow's scheduled economic releases and "
+    "notable earnings, each as its own bulleted line."
 )
 
 
-def _research_news(label: str, context: str = "", client=None, eod: bool = False) -> list:
+def _is_meta_line(line: str) -> bool:
+    """True for a preamble/summary sentence or a bare section header — junk that
+    sometimes slips past the system prompt and must not reach the briefing prompt
+    as if it were a driver (see `_research_news`).
+
+    Two checks, both anchored to the START of the line so a legitimate driver's
+    tail (which may itself contain a colon or an acronym) is never mistaken for
+    junk: (1) a small explicit prefix blocklist (`_NEWS_META_PREFIXES`,
+    case-insensitive), and (2) an ALL-CAPS section-header shape — its first three
+    alphabetic words are all uppercase (e.g. "TODAY'S TAPE DRIVERS — Friday July
+    25 ..."); a single leading all-caps ticker/acronym in an otherwise normal-case
+    sentence does not trip this (fewer than 3 leading uppercase words)."""
+    s = line.strip()
+    if not s:
+        return True
+    if s.lower().startswith(_NEWS_META_PREFIXES):
+        return True
+    lead = []
+    for w in s.split():
+        letters = "".join(c for c in w if c.isalpha())
+        if not letters:
+            break
+        lead.append(letters)
+        if len(lead) >= 3:
+            break
+    return len(lead) >= 3 and all(w.isupper() for w in lead)
+
+
+def _strip_markdown_emphasis(s: str) -> str:
+    """Drop markdown bold/underline emphasis markers — the model sometimes adds
+    them despite the system prompt banning them; only plain text should reach the
+    briefing prompt."""
+    return s.replace("**", "").replace("__", "")
+
+
+def _extract_driver_lines(text: str) -> list:
+    """One text block → the lines that are ACTUALLY bulleted driver lines.
+
+    A line only counts as a driver if it visibly BEGINS with a bullet marker
+    ('-'/'•'/'*') — the model's preamble/summary/header sentences are plain
+    paragraph text, not bulleted, so this alone filters most of them;
+    `_is_meta_line` is a second, independent pass for the rest (e.g. a
+    bulleted header). Markdown emphasis is stripped from what's kept."""
+    out = []
+    for raw in (text or "").splitlines():
+        s = raw.strip()
+        if not s or s[0] not in "-•*":
+            continue
+        s = _strip_markdown_emphasis(s.lstrip("-•* ").strip()).strip()
+        if s and not _is_meta_line(s):
+            out.append(s)
+    return out
+
+
+def _research_news(label: str, context: str = "", client=None, eod: bool = False,
+                   now=None) -> list:
     """Search the web for the day's macro drivers → a short list of driver lines.
 
     Phase 1 of a briefing: a SEPARATE Claude call carrying the web-search server
@@ -2674,20 +2751,45 @@ def _research_news(label: str, context: str = "", client=None, eod: bool = False
     search instead of running it. When ``eod`` is set, also asks for the NEXT
     session's scheduled releases/earnings (for the end-of-day retrospective).
 
-    Fully guarded — returns ``[]`` on no key / unsupported tool / API error / an
-    in-response search error / an empty reply, so a briefing always renders on
-    app data alone. On a FAILED search the API still replies 200 and the model
-    answers from memory; publishing that text would put fabricated headlines into
-    an automated market briefing, which is strictly worse than no news at all —
-    so any ``web_search_tool_result`` error block anywhere in the reply aborts
-    the whole result to ``[]`` rather than returning the model's memory-text.
+    ``now`` defaults (lazily, same idiom as ``gamma_analyze``'s forward-projection
+    context) to ``scheduler._market_now()`` — the CT-aware current time — and is
+    stated explicitly in the prompt. This is load-bearing, not decorative: a live
+    probe caught the model self-contradicting ("results through Friday July 24"
+    while writing "TODAY'S ... Friday July 25") when the date was left implicit,
+    which for an end-of-day retrospective can misdate the session or let stale
+    news pass as today's. Injectable for deterministic tests.
+
+    Fully guarded — returns ``[]`` on no key / unsupported tool / API error / a
+    GENUINE in-response search error (one of ``_NEWS_ABORT_ERROR_CODES`` — a search
+    infrastructure failure, meaning nothing useful came back) / an empty reply, so
+    a briefing always renders on app data alone. A search that hits our OWN
+    ``max_uses`` cap (``error_code == "max_uses_exceeded"``) is NOT one of those —
+    prior searches in the same call may have already succeeded, so whatever driver
+    lines were gathered are kept rather than discarded over our own budget.
+
+    On a genuinely FAILED search the API still replies 200 and the model answers
+    from memory; publishing that text would put fabricated headlines into an
+    automated market briefing, which is strictly worse than no news at all — so an
+    abort-worthy error block anywhere in the reply discards the WHOLE result
+    rather than returning the model's memory-text alongside/instead of it.
 
     ``client`` is injected in tests; in production it is built from the resolved
     API key via ``_make_analyze_client``."""
     client = client or _make_analyze_client()
     if client is None:
         return []
+    if now is None:
+        try:
+            from services.options_svc import scheduler as _sched
+            now = _sched._market_now()
+        except Exception:
+            now = None
     ask = ("Today's US session just closed. " if eod else "The US session is in progress. ")
+    if now is not None:
+        try:
+            ask += f"Today is {now:%A, %B %d, %Y} (US Central Time). "
+        except Exception:
+            log.debug("news research (%s): could not format `now`", label, exc_info=True)
     ask += "What news drove the tape today?"
     if eod:
         ask += (" Also list the scheduled economic releases and notable earnings for the "
@@ -2710,24 +2812,28 @@ def _research_news(label: str, context: str = "", client=None, eod: bool = False
     lines = []
     try:
         blocks = getattr(resp, "content", None) or []
-        # A FAILED search still returns HTTP 200: an error block, then the model
-        # answering from memory. Publishing that text would put fabricated headlines
-        # in the briefing — strictly worse than no news. Bail out entirely.
+        # A GENUINELY failed search still returns HTTP 200: an error block, then
+        # the model answering from memory. Publishing that text would put
+        # fabricated headlines in the briefing — strictly worse than no news — so
+        # abort the WHOLE result. `max_uses_exceeded` (hitting our own cap after
+        # some searches already succeeded) is deliberately NOT one of these; see
+        # `_NEWS_ABORT_ERROR_CODES`.
         for b in blocks:
             if getattr(b, "type", None) != _NEWS_ERROR_BLOCK:
                 continue
             c = getattr(b, "content", None)
-            if isinstance(c, dict) and c.get("error_code"):
+            code = c.get("error_code") if isinstance(c, dict) else None
+            if code in _NEWS_ABORT_ERROR_CODES:
                 log.warning("news research (%s): web search errored (%s) — no news",
-                            label, c.get("error_code"))
+                            label, code)
                 return []
+            if code:
+                log.debug("news research (%s): non-fatal search status (%s) — "
+                         "keeping whatever else was gathered", label, code)
         for b in blocks:
             if getattr(b, "type", None) != "text":
                 continue          # skip server_tool_use / web_search_tool_result blocks
-            for raw in (getattr(b, "text", "") or "").splitlines():
-                s = raw.strip().lstrip("-•* ").strip()
-                if s:
-                    lines.append(s)
+            lines.extend(_extract_driver_lines(getattr(b, "text", "") or ""))
     except Exception:
         log.debug("news parse failed", exc_info=True)
         return []

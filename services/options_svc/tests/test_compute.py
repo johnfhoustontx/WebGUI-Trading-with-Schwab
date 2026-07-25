@@ -3622,13 +3622,12 @@ def test_research_news_returns_headline_lines():
     assert client.calls and client.calls[0].get("tools")
 
 
-def test_research_news_degrades_to_empty(monkeypatch):
+def test_research_news_degrades_to_empty():
     from services.options_svc import compute
-    # No client (no API key) → [] and NO exception. Force the no-key path
-    # explicitly (this dev box has a real shared/anthropic_key.txt — without this
-    # monkeypatch, client=None falls through to _make_analyze_client() and would
-    # fire a REAL API call; mirrors test_gamma_analyze_no_key_returns_config_message).
-    monkeypatch.setattr(compute, "_make_analyze_client", lambda: None)
+    # No client (no API key) → [] and NO exception. The repo-wide autouse fixture
+    # in conftest.py neutralizes `_make_analyze_client` for the whole suite (this
+    # dev box has a real shared/anthropic_key.txt — without it, client=None would
+    # fall through to a REAL API call).
     assert compute._research_news("close", "ctx", client=None) == []
     # API error → []
     assert compute._research_news(
@@ -3638,9 +3637,9 @@ def test_research_news_degrades_to_empty(monkeypatch):
 
 
 def test_research_news_drops_result_when_search_itself_errored():
-    """A failed search returns HTTP 200 with an error block — the model then answers
-    from memory. Returning that text would put FABRICATED headlines in a briefing,
-    which is worse than no news. Must yield []."""
+    """A GENUINE search-infrastructure failure returns HTTP 200 with an error
+    block — the model then answers from memory. Returning that text would put
+    FABRICATED headlines in a briefing, which is worse than no news. Must yield []."""
     from services.options_svc import compute
     client = _FakeNewsClient(blocks=[
         _FakeBlock(type="web_search_tool_result", tool_use_id="srvtoolu_1",
@@ -3649,6 +3648,40 @@ def test_research_news_drops_result_when_search_itself_errored():
         _FakeBlock(type="text", text="- Stocks probably moved on rate expectations"),
     ])
     assert compute._research_news("close", "ctx", client=client) == []
+
+
+def test_research_news_keeps_gathered_text_when_only_max_uses_exceeded():
+    """`max_uses_exceeded` means WE hit our OWN configured `max_uses` cap — some
+    searches in the same call already SUCCEEDED before the cap bit. That is not a
+    search-infrastructure failure, so whatever driver text was already gathered
+    must be returned, not discarded (unlike a genuine failure — see the sibling
+    `..._drops_result_when_search_itself_errored` test above, still `too_many_requests`)."""
+    from services.options_svc import compute
+    client = _FakeNewsClient(blocks=[
+        _FakeBlock(type="web_search_tool_result", tool_use_id="srvtoolu_1",
+                   content={"type": "web_search_tool_result_error",
+                            "error_code": "max_uses_exceeded"}),
+        _FakeBlock(type="text", text="- Fed held rates steady\n- CPI came in cool"),
+    ])
+    out = compute._research_news("close", "ctx", client=client)
+    assert out and any("Fed" in line for line in out)
+
+
+def test_research_news_includes_todays_date_in_prompt():
+    """A live probe caught the model self-contradicting on the date when it was
+    left implicit ('results through Friday July 24' while writing 'TODAY'S ...
+    Friday July 25') — for an end-of-day retrospective that can misdate the
+    session or let stale news pass as today's. The date must be stated explicitly
+    and verifiably in the outgoing prompt."""
+    import datetime as _dt
+    from services.options_svc import compute
+    client = _FakeNewsClient(blocks=[_FakeBlock(type="text", text="- CPI cool")])
+    fixed_now = _dt.datetime(2026, 7, 24, 15, 5)   # a known Friday
+
+    compute._research_news("close", "ctx", client=client, now=fixed_now)
+
+    prompt = client.calls[0]["messages"][0]["content"]
+    assert "Friday, July 24, 2026" in prompt
 
 
 def test_research_news_offers_tool_with_direct_caller():
@@ -3667,3 +3700,64 @@ def test_news_prompt_block_empty_when_no_news():
     from services.options_svc import compute
     assert compute._news_prompt_block([]) == ""
     assert "DRIVERS" in compute._news_prompt_block(["Fed held rates"]).upper()
+
+
+# ── junk-line filtering — the live probe's real observed failure mode ────────
+# The probe returned 6 lines of which 2 were waste: a preamble "Note: ..." line
+# and a bare section header ("TODAY'S TAPE DRIVERS — ..."); with
+# `_NEWS_MAX_LINES = 6` that left only 4 real drivers, and the junk would have
+# gone verbatim into the briefing prompt. The system prompt already banned
+# preamble/headers/emphasis and the model ignored it, so filtering must NOT rely
+# on the prompt alone.
+
+def test_extract_driver_lines_requires_a_bullet_marker():
+    """A plain (non-bulleted) paragraph sentence is not a driver, even if it's
+    non-blank — this is what let the preamble/header sentences from the live
+    probe through before this fix (the old parser accepted any non-blank line)."""
+    from services.options_svc import compute
+    text = ("Here is a summary of today's tape.\n"
+            "- Fed held rates steady, calming the tape\n")
+    out = compute._extract_driver_lines(text)
+    assert out == ["Fed held rates steady, calming the tape"]
+
+
+def test_extract_driver_lines_drops_meta_lines_and_strips_emphasis():
+    """Covers each must-fix from the quality review, on lines that ARE bulleted
+    (so this proves the SECOND filter layer — not just the bullet requirement —
+    is doing real work, mirroring the actual probe output where the junk lines
+    were themselves list items)."""
+    from services.options_svc import compute
+    text = (
+        "- Note: results reflect the prior trading session.\n"
+        "- TODAY'S TAPE DRIVERS — Friday July 25\n"
+        "- **Iran rejects ceasefire** — oil surged 4% on the escalation\n"
+        "- Fed: held rates steady, cooling inflation expectations\n"
+    )
+    out = compute._extract_driver_lines(text)
+    # 'Note:' preamble dropped.
+    assert not any(line.lower().startswith("note:") for line in out)
+    # ALL-CAPS section header dropped.
+    assert not any("TODAY'S TAPE DRIVERS" in line for line in out)
+    # Markdown emphasis stripped from what's kept.
+    assert any("Iran rejects ceasefire" in line for line in out)
+    assert not any("**" in line for line in out)
+    # A real driver containing a colon is KEPT verbatim (not mistaken for meta).
+    assert "Fed: held rates steady, cooling inflation expectations" in out
+
+
+def test_research_news_end_to_end_filters_junk_before_truncation(monkeypatch):
+    """Integration check: with the live probe's actual junk shape reproduced,
+    `_research_news` returns only real drivers, and the junk can't crowd out
+    substance against `_NEWS_MAX_LINES`."""
+    from services.options_svc import compute
+    monkeypatch.setattr(compute, "_NEWS_MAX_LINES", 2)
+    client = _FakeNewsClient(blocks=[
+        _FakeBlock(type="text", text=(
+            "- Note: search results cover through the prior session.\n"
+            "- TODAY'S TAPE DRIVERS — Friday July 25\n"
+            "- **Iran rejects ceasefire** — oil surged 4%\n"
+            "- Fed: held rates steady\n"
+        )),
+    ])
+    out = compute._research_news("close", "ctx", client=client)
+    assert out == ["Iran rejects ceasefire — oil surged 4%", "Fed: held rates steady"]
