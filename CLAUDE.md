@@ -8,7 +8,34 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-07-25 (**EOD retrospective briefing + live macro news + notable movers**:
+**Last updated:** 2026-07-25 (**`gamma_tool.py` split — legacy Tk window parked, engine goes headless**:
+`options-scanner/gamma_tool.py` was **7,203 lines, 43% of it a dead Tk GUI** — `class
+GammaWindow(tk.Toplevel)` (lines 4068→EOF) — with `import tkinter` / `import matplotlib` /
+**`matplotlib.use("TkAgg")` at MODULE scope**. Every headless importer of the engine paid for it:
+`services/options_svc/compute.py` (~10 lazy `import gamma_tool` sites), `gex_collector.py`,
+`scanner_engine.py`, `tools/gex_term_one_shot.py` — **measured 0.69 s per import, pulling
+tkinter + matplotlib + PIL into server processes** and forcing the TkAgg backend process-wide.
+The window moved to **`options-scanner/gamma_window_legacy.py`** (parked, nothing constructs it —
+its `dashboard.py` entrypoint was never copied into this monorepo). **Result: 7,203 → 4,105 lines,
+import 0.69 s → 0.207 s, `sys.modules` 478 → 239, no GUI toolkit in any service.**
+**Three pure engine helpers were buried in the GUI class and had to be lifted out first** (each had
+tests, so each was a real API): `_calc_flip_point` → module-level **`calc_flip_point`** (pure engine
+code in `build_analysis_dict` had been reaching *forward* into the Tk class), and
+`_fetch_symbol_analysis_impl` → **`fetch_symbol_analysis`** (chain fetch + 4-view
+`build_analysis_dict`). The third, `_fetch_last_close`, is **GUI-only** (used solely by the window's
+render path) so it stayed with the window and `tests/test_heatmap.py` was repointed — it had been
+locating the class by *reflectively scanning `gamma_tool`'s namespace*, which is why moving the class
+broke it. `build_chart_style_vars` (needs a live Tk root) now imports `tkinter` **function-locally**;
+`draw_term_heatmap` already imported matplotlib locally. **`tests/test_gamma_tool_headless.py` pins
+this** with a **subprocess** import probe — an in-process `sys.modules` check is useless here because
+the rest of the suite imports tkinter for the legacy dashboard tests. Green: options-scanner
+**1286 passed / 17 failed** (baseline was 1283/16/1skip + my 3 new tests; the one moved failure is a
+`test_dashboard_*` case that previously *skipped* — all four fail `ModuleNotFoundError: No module
+named 'dashboard'` in isolation, pre-existing), options_svc **848 passed / 2 failed** (exactly the
+documented `test_expected_move` date-relative baseline); ruff clean. **No service restart needed** —
+behaviour is unchanged, this is import-graph surgery only. Part of a broader audit; the DB half
+(2.2 GB `gex_history.db`, of which 797 MB is unreclaimed free pages) is planned but NOT started —
+see [plan](docs/plans/2026-07-25-module-split-and-db-efficiency-plan.md). Prior — 2026-07-25 (**EOD retrospective briefing + live macro news + notable movers**:
 the 4×/day Gamma briefings were reworked. **(1) The `close` slot moved 14:58 → 15:15 CT and became a
 RETROSPECTIVE.** It used to fire **two minutes before the cash close** and write an intraday playbook
 for a session with no session left. `scheduler._ANALYZE_SLOTS["close"] = (15, 15)` and

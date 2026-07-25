@@ -412,7 +412,6 @@ def test_find_key_gamma_all_outside_1pct():
 def test_fetch_last_close_returns_last_candle_close(monkeypatch):
     """Mock fetch_price_history; verify the last candle's close is returned and cached."""
     from unittest.mock import MagicMock, patch
-    import gamma_tool as gt
 
     class _Stub:
         def __init__(self):
@@ -420,14 +419,10 @@ def test_fetch_last_close_returns_last_candle_close(monkeypatch):
             self._last_close_cache = {}
             self._last_close_attempted = set()
 
-    main_cls = None
-    for name in dir(gt):
-        obj = getattr(gt, name)
-        if isinstance(obj, type) and hasattr(obj, "_fetch_last_close"):
-            main_cls = obj
-            break
-    assert main_cls is not None, "Could not locate main window class with _fetch_last_close"
-    _Stub._fetch_last_close = main_cls._fetch_last_close
+    # _fetch_last_close is a GUI-only helper: it lives on the parked Tk window
+    # (gamma_window_legacy), not the headless gamma_tool engine.
+    from gamma_window_legacy import GammaWindow
+    _Stub._fetch_last_close = GammaWindow._fetch_last_close
 
     fake_hist = {"candles": [
         {"datetime": 1, "close": 100.0},
@@ -442,7 +437,6 @@ def test_fetch_last_close_returns_last_candle_close(monkeypatch):
 
 
 def test_fetch_last_close_empty_candles_returns_none(monkeypatch):
-    import gamma_tool as gt
     from unittest.mock import MagicMock, patch
 
     class _Stub:
@@ -450,13 +444,10 @@ def test_fetch_last_close_empty_candles_returns_none(monkeypatch):
             self._client = MagicMock()
             self._last_close_cache = {}
             self._last_close_attempted = set()
-    main_cls = None
-    for name in dir(gt):
-        obj = getattr(gt, name)
-        if isinstance(obj, type) and hasattr(obj, "_fetch_last_close"):
-            main_cls = obj
-            break
-    _Stub._fetch_last_close = main_cls._fetch_last_close
+    # _fetch_last_close is a GUI-only helper: it lives on the parked Tk window
+    # (gamma_window_legacy), not the headless gamma_tool engine.
+    from gamma_window_legacy import GammaWindow
+    _Stub._fetch_last_close = GammaWindow._fetch_last_close
 
     with patch("scanner_engine.fetch_price_history", return_value={"candles": []}):
         stub = _Stub()
@@ -464,7 +455,6 @@ def test_fetch_last_close_empty_candles_returns_none(monkeypatch):
 
 
 def test_fetch_last_close_failure_cached_as_none(monkeypatch):
-    import gamma_tool as gt
     from unittest.mock import MagicMock, patch
 
     class _Stub:
@@ -472,13 +462,10 @@ def test_fetch_last_close_failure_cached_as_none(monkeypatch):
             self._client = MagicMock()
             self._last_close_cache = {}
             self._last_close_attempted = set()
-    main_cls = None
-    for name in dir(gt):
-        obj = getattr(gt, name)
-        if isinstance(obj, type) and hasattr(obj, "_fetch_last_close"):
-            main_cls = obj
-            break
-    _Stub._fetch_last_close = main_cls._fetch_last_close
+    # _fetch_last_close is a GUI-only helper: it lives on the parked Tk window
+    # (gamma_window_legacy), not the headless gamma_tool engine.
+    from gamma_window_legacy import GammaWindow
+    _Stub._fetch_last_close = GammaWindow._fetch_last_close
 
     with patch("scanner_engine.fetch_price_history", side_effect=RuntimeError("boom")):
         stub = _Stub()

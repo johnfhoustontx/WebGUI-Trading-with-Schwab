@@ -1,7 +1,7 @@
 """Tests for the symbol-agnostic chain-fetch + analysis-build path used by
 the upcoming bundled SPX/SPY/QQQ prompt flow."""
 from unittest.mock import MagicMock
-from gamma_tool import GammaWindow, build_analysis_dict
+from gamma_tool import fetch_symbol_analysis, build_analysis_dict
 
 
 def _minimal_chain():
@@ -27,7 +27,7 @@ def _stub_client(chain, status_code=200):
 
 def test_fetch_returns_blocks_for_each_view():
     client = _stub_client(_minimal_chain())
-    blocks = GammaWindow._fetch_symbol_analysis_impl(client, "SPY")
+    blocks = fetch_symbol_analysis(client, "SPY")
     assert blocks is not None
     assert set(blocks.keys()) == {"gex", "charm", "dex", "vanna"}
     # At least one view should produce a non-None dict
@@ -40,20 +40,20 @@ def test_fetch_returns_blocks_for_each_view():
 
 def test_fetch_returns_none_on_http_failure():
     client = _stub_client(None, status_code=500)
-    assert GammaWindow._fetch_symbol_analysis_impl(client, "SPY") is None
+    assert fetch_symbol_analysis(client, "SPY") is None
 
 
 def test_fetch_returns_none_on_exception():
     client = MagicMock()
     client.get_option_chain.side_effect = RuntimeError("network down")
     client.Options.ContractType.ALL = "ALL"
-    assert GammaWindow._fetch_symbol_analysis_impl(client, "SPY") is None
+    assert fetch_symbol_analysis(client, "SPY") is None
 
 
 def test_fetch_propagates_use_volume_kwarg():
     """Confirms use_volume is accepted and doesn't break the fetch path."""
     client = _stub_client(_minimal_chain())
-    blocks = GammaWindow._fetch_symbol_analysis_impl(client, "SPY", use_volume=True)
+    blocks = fetch_symbol_analysis(client, "SPY", use_volume=True)
     # With totalVolume=0 in the minimal chain, vol-weighted may legitimately
     # produce None blocks — we just care that the kwarg threads through.
     if blocks is not None:
@@ -63,7 +63,7 @@ def test_fetch_propagates_use_volume_kwarg():
 def test_fetch_propagates_grouping_kwarg():
     """Confirms grouping is accepted and threaded into build_analysis_dict."""
     client = _stub_client(_minimal_chain())
-    blocks = GammaWindow._fetch_symbol_analysis_impl(client, "SPY", grouping=5)
+    blocks = fetch_symbol_analysis(client, "SPY", grouping=5)
     assert blocks is not None
     if blocks.get("gex"):
         assert blocks["gex"]["grouping"] == 5
