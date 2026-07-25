@@ -33,9 +33,28 @@ the rest of the suite imports tkinter for the legacy dashboard tests. Green: opt
 `test_dashboard_*` case that previously *skipped* — all four fail `ModuleNotFoundError: No module
 named 'dashboard'` in isolation, pre-existing), options_svc **848 passed / 2 failed** (exactly the
 documented `test_expected_move` date-relative baseline); ruff clean. **No service restart needed** —
-behaviour is unchanged, this is import-graph surgery only. Part of a broader audit; the DB half
-(2.2 GB `gex_history.db`, of which 797 MB is unreclaimed free pages) is planned but NOT started —
-see [plan](docs/plans/2026-07-25-module-split-and-db-efficiency-plan.md). Prior — 2026-07-25 (**EOD retrospective briefing + live macro news + notable movers**:
+behaviour is unchanged, this is import-graph surgery only.
+**The DB half of the same audit also shipped** (`02d4833`): (1) **grid floats are rounded to 6
+significant figures** before zlib in `gex_history_db._encode_grid` — measured on live rows, grid size
+is driven by float ENTROPY not strike count (all views ~114 strikes, but vanna serialized values like
+`1.2345678901234e-05`), so this cuts the payload **966 MB → 691 MB (29%)**, forward-only, and
+flip/walls are unaffected (own columns, computed from the full chain). **An insert-time strike crop
+was deliberately REJECTED**: the read-time `_crop_gamma_views` widens its window to span the intraday
+spot PATH, and at write time the session's range is unknown — over 239 symbol-sessions a ±20 crop
+holes the heatmap on 7, incl. **every `$NDX` session** (42–72 strikes of drift; a 2% day on a 28,000
+index with 10-wide strikes is ~56 strikes). (2) **`purge_keep_sessions` now runs a bounded
+`PRAGMA incremental_vacuum(20000)`** after a non-empty delete (~80 MB/day, short lock, best-effort,
+no-op without incremental auto-vacuum) — nothing in the repo had EVER called it, so retention only
+ever moved pages to the freelist. **Gotcha worth knowing:** the live DB *reported* `auto_vacuum=2`
+but `incremental_vacuum` reclaimed exactly **1 page** — setting that pragma on an existing DB updates
+the header WITHOUT building the pointer-map pages it needs, so the mode was nominally on and
+functionally dead. The one-time `tools/vacuum_gex.py` full VACUUM (weekend, services down) fixed it:
+**2.06 → 1.07 GiB, 1,007 MB reclaimed in 27 s**, freelist now 0 and ptrmap built, so the new bounded
+reclaim actually works going forward. A stale **3.04 GB `gex_history.db.bak`** (Jun 26–Jul 1, disjoint
+from live) was also deleted. **~4 GB reclaimed total.** `options_svc` picks up the new write path on
+next start. Still open from the audit: splitting `options_svc/compute.py` (6,243 lines) — blocked on a
+concurrent session's unlanded `market_premium_aggregate` pairing, see `f0861af`. Full findings:
+[plan](docs/plans/2026-07-25-module-split-and-db-efficiency-plan.md). Prior — 2026-07-25 (**EOD retrospective briefing + live macro news + notable movers**:
 the 4×/day Gamma briefings were reworked. **(1) The `close` slot moved 14:58 → 15:15 CT and became a
 RETROSPECTIVE.** It used to fire **two minutes before the cash close** and write an intraday playbook
 for a session with no session left. `scheduler._ANALYZE_SLOTS["close"] = (15, 15)` and
