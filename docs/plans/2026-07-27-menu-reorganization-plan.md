@@ -13,8 +13,9 @@ edits those lists and the user-facing text that names them. **No routes, cache
 keys, commands, page modules, or engine vocabulary change**, so every cross-page
 handoff keeps working untouched.
 
-**Tech Stack:** NiceGUI, pytest. Run everything from `webgui/` with
-`..\.venv\Scripts\python -m pytest`.
+**Tech Stack:** NiceGUI, pytest. NOTE: this is a git worktree — the venv lives in
+the MAIN checkout, so use the absolute
+`"D:/WebGUI Trading with Schwab/.venv/Scripts/python.exe"`, not `../.venv/...`.
 
 **Design:** `docs/plans/2026-07-27-menu-reorganization-design.md`
 
@@ -114,7 +115,7 @@ change the pinned count:
 **Step 4: Run the tests to verify they fail**
 
 ```bash
-cd webgui && ../.venv/Scripts/python -m pytest tests/test_shell.py -q
+cd webgui && "D:/WebGUI Trading with Schwab/.venv/Scripts/python.exe" -m pytest tests/test_shell.py -q
 ```
 
 Expected: FAIL — assertions reference labels (`Market Scanner`, `Dealer
@@ -232,7 +233,7 @@ leaving them stale misleads the next reader. Update these nine lines:
 **Step 4: Run the shell tests to verify they pass**
 
 ```bash
-cd webgui && ../.venv/Scripts/python -m pytest tests/test_shell.py -q
+cd webgui && "D:/WebGUI Trading with Schwab/.venv/Scripts/python.exe" -m pytest tests/test_shell.py -q
 ```
 
 Expected: PASS (all of `test_shell.py`).
@@ -313,7 +314,7 @@ Trades you sent by hand live on **Paper Ledger**.
 **Step 5: Run the help test**
 
 ```bash
-cd webgui && ../.venv/Scripts/python -m pytest tests/test_page_help.py -q
+cd webgui && "D:/WebGUI Trading with Schwab/.venv/Scripts/python.exe" -m pytest tests/test_page_help.py -q
 ```
 
 Expected: PASS — every nav route still resolves to a guide.
@@ -343,7 +344,7 @@ The page's own `<h5>` still says "Terminate":
 **Step 2: Run the terminate tests**
 
 ```bash
-cd webgui && ../.venv/Scripts/python -m pytest tests/test_terminate.py -q
+cd webgui && "D:/WebGUI Trading with Schwab/.venv/Scripts/python.exe" -m pytest tests/test_terminate.py -q
 ```
 
 Expected: PASS. If an assertion pins the old heading string, update it to
@@ -363,7 +364,7 @@ git commit -m "feat(webgui): rename the Terminate page heading to Stop All Servi
 **Step 1: Run the whole webgui suite**
 
 ```bash
-cd webgui && ../.venv/Scripts/python -m pytest -q
+cd webgui && "D:/WebGUI Trading with Schwab/.venv/Scripts/python.exe" -m pytest -q
 ```
 
 Expected: PASS, ~861 tests. If anything fails, it is a label assertion this plan
@@ -374,7 +375,7 @@ pass.
 **Step 2: Lint**
 
 ```bash
-cd "D:/WebGUI Trading with Schwab/.claude/worktrees/menu-reorganize-calculator-gamma-75d25a" && .venv/Scripts/python -m ruff check webgui
+cd "D:/WebGUI Trading with Schwab/.claude/worktrees/menu-reorganize-calculator-gamma-75d25a" && "D:/WebGUI Trading with Schwab/.venv/Scripts/python.exe" -m ruff check webgui
 ```
 
 Expected: clean.
@@ -438,7 +439,7 @@ and fix what remains.
 **Step 3: Rebuild the HTML**
 
 ```bash
-cd "D:/WebGUI Trading with Schwab/.claude/worktrees/menu-reorganize-calculator-gamma-75d25a" && .venv/Scripts/python docs/manuals/build_docs.py
+cd "D:/WebGUI Trading with Schwab/.claude/worktrees/menu-reorganize-calculator-gamma-75d25a" && "D:/WebGUI Trading with Schwab/.venv/Scripts/python.exe" docs/manuals/build_docs.py
 ```
 
 Expected: regenerates `docs/manuals/user-guide/user-guide.html`. If the script
