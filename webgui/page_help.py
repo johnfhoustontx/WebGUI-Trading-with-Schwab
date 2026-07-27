@@ -1,7 +1,8 @@
 """Per-page "idiot's guide" help text.
 
-Shown in a hover tooltip on the ``?`` button in the header (see ``main._layout``),
-keyed by the page's active route. Each value is Markdown — keep it short, plain,
+Shown in a 2-second hover tooltip on the nav drawer items and the top tab strip
+(``main._help_tooltip``), keyed by the page's active route. The old header ``?``
+button is retired. Each value is Markdown — keep it short, plain,
 and focused on (a) what the page is for and (b) how changing the key parameters
 changes the outcome. ``help_md(active)`` returns the guide for a route (or a
 sensible default).
@@ -9,7 +10,7 @@ sensible default).
 
 HELP_MD: dict[str, str] = {
     "/": """
-**Scanner — the simple version**
+**Market Scanner — the simple version**
 
 Finds option **credit spreads** (you sell risk and collect cash up front) and
 scores each one **0–100** for quality.
@@ -24,9 +25,10 @@ scores each one **0–100** for quality.
   forces a refresh.
 """,
     "/options/swing": """
-**Swing Scanner — the simple version**
+**Strategy Finder — the simple version**
 
-Like the Scanner, but you set the hunt parameters for one symbol over several days.
+Like the Market Scanner, but you pick one symbol and it ranks every strategy
+family for it — directional, spreads, and neutral.
 
 - **DTE min/max** — how many days to expiration to allow. Wider = more candidates.
 - **Put/Call Δ (delta)** — how far out-of-the-money the strikes sit. A smaller
@@ -53,7 +55,7 @@ Shows the profit/loss of an options trade **before** you place it — any
   credit you collect but also the max loss.
 """,
     "/options/gamma": """
-**Gamma — the simple version**
+**Dealer Positioning — the simple version**
 
 Shows where option **dealers** must buy or sell to stay hedged — which can pin or
 accelerate price.
@@ -122,7 +124,7 @@ Flags credit spreads that are **in trouble** and offers ways to fix them.
   as positions are re-priced.
 """,
     "/options/matrix": """
-**Matrix — the simple version**
+**Opportunity Board — the simple version**
 
 One **at-a-glance grid** of every tracked symbol, so you can scan the whole board
 without opening each page.
@@ -135,18 +137,21 @@ without opening each page.
 - Green leans bullish, red leans bearish. Auto-refreshes as the data updates.
 """,
     "/options/paper": """
-**Paper Trades — the simple version**
+**Paper Ledger — the simple version**
 
 A practice ledger of option trades — **no real money**.
 
+This is the **hand-kept ledger** — trades you sent here yourself. The automated
+engine's positions live on **Paper Account**.
+
 - **Each row** is a trade with its strikes, credit, max loss, and live P&L.
 - **Analyze** re-prices it now and shows current Greeks; **Close** records an exit.
-- Use it to test ideas from the Scanner without risk.
+- Use it to test ideas from the Market Scanner without risk.
 """,
     "/options/captured": """
 **Captured Signals — the simple version**
 
-Scanner signals you're **tracking over time** to see whether they're working.
+Market Scanner signals you're **tracking over time** to see whether they're working.
 
 - **Entry vs Current Score / Drift** — is the setup getting better or worse since
   you saved it?
@@ -155,9 +160,12 @@ Scanner signals you're **tracking over time** to see whether they're working.
   is hit.
 """,
     "/options/portfolio": """
-**Paper Portfolio — the simple version**
+**Paper Account — the simple version**
 
 The account behind the automated paper-trading engine.
+
+This is the **engine's own account** — it opens and closes positions on its own.
+Trades you sent by hand live on **Paper Ledger**.
 
 - **Cards** — equity, cash, P&L, open count, engine status.
 - **Run entry / manage cycle** — open new positions from captured signals, or
@@ -315,7 +323,7 @@ Links to the full documentation (each opens in a new tab).
 - **API / Developer Reference** — for developers extending the app.
 """,
     "/terminate": """
-**Terminate — the simple version**
+**Stop All Services — the simple version**
 
 A big red stop button for the whole local stack.
 
