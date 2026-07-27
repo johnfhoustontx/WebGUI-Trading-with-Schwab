@@ -82,15 +82,15 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </ul>
 </li>
 <li><a href="#options">Options</a><ul>
-<li><a href="#scanner">Scanner</a></li>
-<li><a href="#swing-scanner">Swing Scanner</a></li>
+<li><a href="#market-scanner">Market Scanner</a></li>
+<li><a href="#strategy-finder">Strategy Finder</a></li>
 <li><a href="#calculator">Calculator</a></li>
-<li><a href="#gamma">Gamma</a></li>
+<li><a href="#dealer-positioning">Dealer Positioning</a></li>
 <li><a href="#simulator">Simulator</a></li>
 <li><a href="#expected-move">Expected Move</a></li>
-<li><a href="#paper-trades">Paper Trades</a></li>
+<li><a href="#paper-ledger">Paper Ledger</a></li>
 <li><a href="#captured-signals">Captured Signals</a></li>
-<li><a href="#paper-portfolio">Paper Portfolio</a></li>
+<li><a href="#paper-account">Paper Account</a></li>
 <li><a href="#rescue">Rescue</a></li>
 <li><a href="#cross-page-actions">Cross-page actions</a></li>
 </ul>
@@ -108,7 +108,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#system-status">System Status</a></li>
 <li><a href="#settings">Settings</a></li>
 <li><a href="#user-manuals">User Manuals</a></li>
-<li><a href="#terminate">Terminate</a></li>
+<li><a href="#stop-all-services">Stop All Services</a></li>
 </ul>
 </li>
 <li><a href="#faq-troubleshooting">FAQ &amp; Troubleshooting</a></li>
@@ -186,7 +186,7 @@ restart components.</p>
 message, that service hasn't started or has stopped. Start the full stack with a
 launcher, or restart the specific service from the <strong>System Status</strong> page.</p>
 <h2 id="stopping-everything">Stopping everything</h2>
-<p>Use <strong>More → Terminate</strong> inside the app, or run <code>stop_all.bat</code>. This stops the
+<p>Use <strong>More → Stop All Services</strong> inside the app, or run <code>stop_all.bat</code>. This stops the
 gateway, the five services, and the web app. (Memurai is intentionally left
 running — it's a shared Windows service.)</p>
 <hr />
@@ -194,50 +194,66 @@ running — it's a shared Windows service.)</p>
 <h2 id="layout">Layout</h2>
 <p>Every page shares the same frame:</p>
 <ul>
-<li>A <strong>left navigation drawer</strong> with expandable groups and flat items.</li>
+<li>A <strong>left icon rail</strong> that widens on hover, with groups and standalone pages.</li>
 <li>A <strong>header</strong> at the top with a menu toggle and the current page title.</li>
-<li>A small blue <strong>"?" help button</strong> in the bottom-right corner of the header —
-  hover it for a plain-language "idiot's guide" to the page you're on (see
+<li><strong>Hover help</strong> on every menu item and tab — rest the mouse on one for two
+  seconds and a plain-language "idiot's guide" to that page pops up (see
   <em>Getting help on any page</em> below).</li>
 <li>The <strong>page content</strong> in the main area.</li>
 </ul>
 <h2 id="navigation-groups">Navigation groups</h2>
+<p>The left edge is a narrow <strong>icon rail</strong> that widens when you hover it. Clicking a
+<strong>group</strong> opens its first page and shows that group's pages as a <strong>tab strip</strong>
+across the top; the other rail entries are <strong>standalone pages</strong> with no tab strip.</p>
 <table>
 <thead>
 <tr>
-<th>Group</th>
+<th>Rail item</th>
 <th>Pages</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><strong>Options</strong> (expandable)</td>
-<td>Scanner · Paper Trades · Captured Signals · Paper Portfolio · Calculator · Swing Scanner · Gamma · Simulator · Expected Move · Rescue</td>
+<td><strong>Options</strong> (group)</td>
+<td>Market Scanner · Strategy Finder · Simulator · Expected Move · Captured Signals · Paper Ledger · Paper Account · Rescue</td>
 </tr>
 <tr>
-<td><strong>Sentiment</strong> (expandable)</td>
-<td>Sentiment · Sector Rotation</td>
+<td><strong>Calculator</strong> (standalone)</td>
+<td>—</td>
 </tr>
 <tr>
-<td><strong>Trade</strong> (flat)</td>
-<td>Trade</td>
+<td><strong>Dealer Positioning</strong> (standalone)</td>
+<td>—</td>
 </tr>
 <tr>
-<td><strong>Portfolio</strong> (flat)</td>
-<td>Portfolio</td>
+<td><strong>Opportunity Board</strong> (standalone)</td>
+<td>—</td>
 </tr>
 <tr>
-<td><strong>Driver</strong> (flat)</td>
-<td>Driver</td>
+<td><strong>Market Trend &amp; Sentiment</strong> (group)</td>
+<td>Market Dashboard · Sentiment · Sector &amp; Industry · Sector Rotation · RRG</td>
 </tr>
 <tr>
-<td><strong>More</strong> (expandable)</td>
-<td>EOD Report · System Status · Settings (→ User Manuals) · Terminate</td>
+<td><strong>Trade Analyzer</strong> (standalone)</td>
+<td>—</td>
+</tr>
+<tr>
+<td><strong>Portfolio</strong> (standalone)</td>
+<td>—</td>
+</tr>
+<tr>
+<td><strong>Claude Trades</strong> (standalone)</td>
+<td>—</td>
+</tr>
+<tr>
+<td><strong>More</strong> (group)</td>
+<td>EOD Report · System Status · Settings · Stop All Services · User Manuals</td>
 </tr>
 </tbody>
 </table>
-<p>The group containing the page you're on opens automatically, and the drawer
-remembers which groups you left open as you move around.</p>
+<p>The Options tabs run in trading order — find a trade, analyze it, track it, and
+repair it if it goes against you. The <strong>hamburger</strong> at the top left pins the rail
+open so it stops collapsing.</p>
 <h2 id="alert-badges-and-chimes">Alert badges and chimes</h2>
 <p>A small background watcher runs on <strong>every</strong> page. When new qualifying scanner
 signals appear it can:</p>
@@ -261,19 +277,19 @@ session.</p>
 <h2 id="getting-help-on-any-page">Getting help on any page</h2>
 <p>Two built-in help features are always within reach:</p>
 <ul>
-<li><strong>The "?" button</strong> — a small blue circle in the header's bottom-right corner, on
-  <strong>every</strong> page. Hover it and a short "idiot's guide" pops up explaining, in plain
-  language, what that page is for and how changing its settings changes the result.</li>
-<li><strong>User Manuals</strong> — a menu item <strong>nested under Settings</strong> (in the <strong>More</strong> group).
+<li><strong>Hover tooltips</strong> — rest the mouse for two seconds on any rail item or top
+  tab. A short "idiot's guide" pops up explaining, in plain language, what that
+  page is for and how changing its settings changes the result.</li>
+<li><strong>User Manuals</strong> — a tab in the <strong>More</strong> group.
   It opens this User Guide plus the Technical and API references in your browser.</li>
 </ul>
 <hr />
 <h1 id="options">Options</h1>
 <p>The Options section is the heart of the app. All Options pages share a common
 <strong>signal detail panel</strong> and a few cross-page action buttons.</p>
-<h2 id="scanner">Scanner</h2>
+<h2 id="market-scanner">Market Scanner</h2>
 <p><strong>Route:</strong> the home page (<code>/</code>).</p>
-<p>The Scanner continuously looks for credit-spread opportunities and lists them in a
+<p>The Market Scanner continuously looks for credit-spread opportunities and lists them in a
 two-pane layout.</p>
 <p><strong>Left pane — the signal list:</strong></p>
 <ul>
@@ -295,7 +311,7 @@ two-pane layout.</p>
 <li><strong>Expected Move</strong> — open the Expected Move chart for this trade in a new tab.</li>
 </ul>
 <p>The list refreshes itself automatically; you rarely need to press <strong>Scan</strong>.</p>
-<h2 id="swing-scanner">Swing Scanner</h2>
+<h2 id="strategy-finder">Strategy Finder</h2>
 <p><strong>Route:</strong> <code>/options/swing</code>.</p>
 <p>A focused, on-demand scan for one symbol over a swing horizon. Enter the
 parameters and press <strong>Scan</strong>:</p>
@@ -306,7 +322,7 @@ parameters and press <strong>Scan</strong>:</p>
 <li><strong>Min credit %</strong></li>
 </ul>
 <p>Results appear in the same signal table (with the same Score chip, Grade, and the
-three per-row action buttons) and detail panel as the Scanner.</p>
+three per-row action buttons) and detail panel as the Market Scanner.</p>
 <h2 id="calculator">Calculator</h2>
 <p><strong>Route:</strong> <code>/options/calculator</code>.</p>
 <p>An options P&amp;L calculator for <strong>any multi-leg structure</strong>, with a price/time heat map.</p>
@@ -344,7 +360,7 @@ pre-filled and the calculation runs automatically. <strong>Copy to Simulator</st
 current legs straight to the Simulator (and the Simulator's <strong>Copy to Calculator</strong>
 brings them back), so you can move a structure between P&amp;L tiles and the
 scenario/Greeks views without re-entering it.</p>
-<h2 id="gamma">Gamma</h2>
+<h2 id="dealer-positioning">Dealer Positioning</h2>
 <p><strong>Route:</strong> <code>/options/gamma</code>.</p>
 <p>A dealer-positioning view built from the options chain — gamma exposure (GEX) and
 related measures.</p>
@@ -409,7 +425,7 @@ put/call toggle, and a <strong>Look-back</strong> dropdown (Auto ≈ 3× DTE, or
 </ul>
 <p>You usually reach this page through the <strong>Expected Move</strong> button on a signal row
 (it opens in a new browser tab, pre-filled and drawn).</p>
-<h2 id="paper-trades">Paper Trades</h2>
+<h2 id="paper-ledger">Paper Ledger</h2>
 <p><strong>Route:</strong> <code>/options/paper</code>.</p>
 <p>A manual paper-trading ledger.</p>
 <ul>
@@ -435,7 +451,7 @@ put/call toggle, and a <strong>Look-back</strong> dropdown (Auto ≈ 3× DTE, or
   unrealized P&amp;L).</li>
 <li>When a tracked signal hits a stop or target, the page raises a notification.</li>
 </ul>
-<h2 id="paper-portfolio">Paper Portfolio</h2>
+<h2 id="paper-account">Paper Account</h2>
 <p><strong>Route:</strong> <code>/options/portfolio</code>.</p>
 <p>The account view for the automated paper-trading engine.</p>
 <ul>
@@ -518,17 +534,17 @@ Captured signals do <strong>not</strong> add to the Rescue nav badge (that count
 <tbody>
 <tr>
 <td><strong>Send to Calculator</strong></td>
-<td>Scanner, Swing Scanner</td>
+<td>Market Scanner, Strategy Finder</td>
 <td>Opens the Calculator pre-filled (strategy, symbol, expiry, strikes, premiums, IV) and runs it.</td>
 </tr>
 <tr>
 <td><strong>Send to Paper Trade</strong></td>
-<td>Scanner, Swing Scanner</td>
+<td>Market Scanner, Strategy Finder</td>
 <td>Asks for a quantity, then creates a paper trade. Stays on the current page.</td>
 </tr>
 <tr>
 <td><strong>Expected Move</strong></td>
-<td>Scanner, Swing, Paper Trades, Captured, Calculator</td>
+<td>Market Scanner, Strategy Finder, Paper Ledger, Captured, Calculator</td>
 <td>Opens the Expected Move chart in a new browser tab, pre-filled and drawn.</td>
 </tr>
 </tbody>
@@ -699,7 +715,7 @@ your browser.</p>
 <li><strong>API / Developer Reference</strong> — the integration surface for developers.</li>
 </ul>
 <p>The Word (<code>.docx</code>) copies live alongside the HTML under <code>docs/manuals/</code>.</p>
-<h2 id="terminate">Terminate</h2>
+<h2 id="stop-all-services">Stop All Services</h2>
 <p><strong>Route:</strong> <code>/terminate</code> (under <strong>More</strong>).</p>
 <p>A guarded "stop the whole local stack" page. The red <strong>Stop all services</strong> button
 (behind a confirmation) stops the gateway, the five services, and the web app.</p>
@@ -716,7 +732,7 @@ schwab-proxy card, and use its <strong>Restart</strong> button — or relaunch t
 <p><strong>A page says "Waiting for … service."</strong>
 That page's service isn't running. Restart it from <strong>System Status</strong>, or relaunch
 the stack.</p>
-<p><strong>Scans return nothing, or Gamma shows "no data."</strong>
+<p><strong>Scans return nothing, or Dealer Positioning shows "no data."</strong>
 On weekends and outside market hours, options data is sparse and 0-DTE scans
 legitimately return few or no signals. This is expected, not a failure.</p>
 <p><strong>No alert sound plays.</strong>

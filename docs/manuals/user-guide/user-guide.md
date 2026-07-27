@@ -74,7 +74,7 @@ launcher, or restart the specific service from the **System Status** page.
 
 ## Stopping everything
 
-Use **More → Terminate** inside the app, or run `stop_all.bat`. This stops the
+Use **More → Stop All Services** inside the app, or run `stop_all.bat`. This stops the
 gateway, the five services, and the web app. (Memurai is intentionally left
 running — it's a shared Windows service.)
 
@@ -86,26 +86,34 @@ running — it's a shared Windows service.)
 
 Every page shares the same frame:
 
-- A **left navigation drawer** with expandable groups and flat items.
+- A **left icon rail** that widens on hover, with groups and standalone pages.
 - A **header** at the top with a menu toggle and the current page title.
-- A small blue **"?" help button** in the bottom-right corner of the header —
-  hover it for a plain-language "idiot's guide" to the page you're on (see
+- **Hover help** on every menu item and tab — rest the mouse on one for two
+  seconds and a plain-language "idiot's guide" to that page pops up (see
   *Getting help on any page* below).
 - The **page content** in the main area.
 
 ## Navigation groups
 
-| Group | Pages |
-|-------|-------|
-| **Options** (expandable) | Scanner · Paper Trades · Captured Signals · Paper Portfolio · Calculator · Swing Scanner · Gamma · Simulator · Expected Move · Rescue |
-| **Sentiment** (expandable) | Sentiment · Sector Rotation |
-| **Trade** (flat) | Trade |
-| **Portfolio** (flat) | Portfolio |
-| **Driver** (flat) | Driver |
-| **More** (expandable) | EOD Report · System Status · Settings (→ User Manuals) · Terminate |
+The left edge is a narrow **icon rail** that widens when you hover it. Clicking a
+**group** opens its first page and shows that group's pages as a **tab strip**
+across the top; the other rail entries are **standalone pages** with no tab strip.
 
-The group containing the page you're on opens automatically, and the drawer
-remembers which groups you left open as you move around.
+| Rail item | Pages |
+|-----------|-------|
+| **Options** (group) | Market Scanner · Strategy Finder · Simulator · Expected Move · Captured Signals · Paper Ledger · Paper Account · Rescue |
+| **Calculator** (standalone) | — |
+| **Dealer Positioning** (standalone) | — |
+| **Opportunity Board** (standalone) | — |
+| **Market Trend & Sentiment** (group) | Market Dashboard · Sentiment · Sector & Industry · Sector Rotation · RRG |
+| **Trade Analyzer** (standalone) | — |
+| **Portfolio** (standalone) | — |
+| **Claude Trades** (standalone) | — |
+| **More** (group) | EOD Report · System Status · Settings · Stop All Services · User Manuals |
+
+The Options tabs run in trading order — find a trade, analyze it, track it, and
+repair it if it goes against you. The **hamburger** at the top left pins the rail
+open so it stops collapsing.
 
 ## Alert badges and chimes
 
@@ -133,10 +141,10 @@ You control all of this on the **Settings** page (see *Reports & System*).
 
 Two built-in help features are always within reach:
 
-- **The "?" button** — a small blue circle in the header's bottom-right corner, on
-  **every** page. Hover it and a short "idiot's guide" pops up explaining, in plain
-  language, what that page is for and how changing its settings changes the result.
-- **User Manuals** — a menu item **nested under Settings** (in the **More** group).
+- **Hover tooltips** — rest the mouse for two seconds on any rail item or top
+  tab. A short "idiot's guide" pops up explaining, in plain language, what that
+  page is for and how changing its settings changes the result.
+- **User Manuals** — a tab in the **More** group.
   It opens this User Guide plus the Technical and API references in your browser.
 
 ---
@@ -146,11 +154,11 @@ Two built-in help features are always within reach:
 The Options section is the heart of the app. All Options pages share a common
 **signal detail panel** and a few cross-page action buttons.
 
-## Scanner
+## Market Scanner
 
 **Route:** the home page (`/`).
 
-The Scanner continuously looks for credit-spread opportunities and lists them in a
+The Market Scanner continuously looks for credit-spread opportunities and lists them in a
 two-pane layout.
 
 **Left pane — the signal list:**
@@ -175,7 +183,7 @@ two-pane layout.
 
 The list refreshes itself automatically; you rarely need to press **Scan**.
 
-## Swing Scanner
+## Strategy Finder
 
 **Route:** `/options/swing`.
 
@@ -188,7 +196,7 @@ parameters and press **Scan**:
 - **Min credit %**
 
 Results appear in the same signal table (with the same Score chip, Grade, and the
-three per-row action buttons) and detail panel as the Scanner.
+three per-row action buttons) and detail panel as the Market Scanner.
 
 ## Calculator
 
@@ -231,7 +239,7 @@ current legs straight to the Simulator (and the Simulator's **Copy to Calculator
 brings them back), so you can move a structure between P&L tiles and the
 scenario/Greeks views without re-entering it.
 
-## Gamma
+## Dealer Positioning
 
 **Route:** `/options/gamma`.
 
@@ -309,7 +317,7 @@ put/call toggle, and a **Look-back** dropdown (Auto ≈ 3× DTE, or 1mo / 3mo / 
 You usually reach this page through the **Expected Move** button on a signal row
 (it opens in a new browser tab, pre-filled and drawn).
 
-## Paper Trades
+## Paper Ledger
 
 **Route:** `/options/paper`.
 
@@ -339,7 +347,7 @@ Signals the system has "captured" to track over time, with live re-pricing.
   unrealized P&L).
 - When a tracked signal hits a stop or target, the page raises a notification.
 
-## Paper Portfolio
+## Paper Account
 
 **Route:** `/options/portfolio`.
 
@@ -421,9 +429,9 @@ Three buttons appear on signal rows across the Options section:
 
 | Action | Available on | Effect |
 |--------|--------------|--------|
-| **Send to Calculator** | Scanner, Swing Scanner | Opens the Calculator pre-filled (strategy, symbol, expiry, strikes, premiums, IV) and runs it. |
-| **Send to Paper Trade** | Scanner, Swing Scanner | Asks for a quantity, then creates a paper trade. Stays on the current page. |
-| **Expected Move** | Scanner, Swing, Paper Trades, Captured, Calculator | Opens the Expected Move chart in a new browser tab, pre-filled and drawn. |
+| **Send to Calculator** | Market Scanner, Strategy Finder | Opens the Calculator pre-filled (strategy, symbol, expiry, strikes, premiums, IV) and runs it. |
+| **Send to Paper Trade** | Market Scanner, Strategy Finder | Asks for a quantity, then creates a paper trade. Stays on the current page. |
+| **Expected Move** | Market Scanner, Strategy Finder, Paper Ledger, Captured, Calculator | Opens the Expected Move chart in a new browser tab, pre-filled and drawn. |
 
 ---
 
@@ -622,7 +630,7 @@ A simple index that links the three manuals — each opens in a new browser tab:
 
 The Word (`.docx`) copies live alongside the HTML under `docs/manuals/`.
 
-## Terminate
+## Stop All Services
 
 **Route:** `/terminate` (under **More**).
 
@@ -645,7 +653,7 @@ schwab-proxy card, and use its **Restart** button — or relaunch the whole stac
 That page's service isn't running. Restart it from **System Status**, or relaunch
 the stack.
 
-**Scans return nothing, or Gamma shows "no data."**
+**Scans return nothing, or Dealer Positioning shows "no data."**
 On weekends and outside market hours, options data is sparse and 0-DTE scans
 legitimately return few or no signals. This is expected, not a failure.
 
