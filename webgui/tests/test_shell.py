@@ -75,15 +75,19 @@ def test_nav_css_carries_only_what_tailwind_cannot_express():
 
 
 def test_group_children_maps_routes_to_their_group():
-    """The top tab strip shows the active route's group; flat pages have none."""
+    """The top tab strip shows the active route's group; flat + rail pages have none."""
     import main
-    opts = main._group_children("/options/gamma")
-    assert ("/", "Scanner", "radar") in opts                       # Options group
+    opts = main._group_children("/options/rescue")
+    assert ("/", "Market Scanner", "radar") in opts                # Options group
     assert main._group_children("/sentiment/rotation") == main.SENTIMENT_CHILDREN
+    assert main._group_children("/market") == main.SENTIMENT_CHILDREN  # folded in
     more = main._group_children("/manuals")                        # Settings child
     assert ("/eod", "EOD Report", "summarize") in more             # merged into More
     assert main._group_children("/trade") is None                  # flat page — no strip
     assert main._group_children("/driver") is None
+    # Rail pages are standalone: promoted OUT of the Options tab strip.
+    for route, _label, _icon in main.OPTIONS_RAIL:
+        assert main._group_children(route) is None, route
 
 
 def test_watcher_tick_rewarns_health_through_ttl_cache():
@@ -378,14 +382,17 @@ def test_guarded_compute_logs_once_on_bus_outage(monkeypatch, caplog):
 def test_breadcrumb_parts_grouped_and_flat():
     import main
     # Grouped page → (group label, page label)
-    assert main.breadcrumb_parts("/") == ("Options", "Scanner")
-    assert main.breadcrumb_parts("/options/gamma") == ("Options", "Gamma")
+    assert main.breadcrumb_parts("/") == ("Options", "Market Scanner")
     assert main.breadcrumb_parts("/sentiment/rotation") == (
         "Market Trend & Sentiment", "Sector Rotation")
+    assert main.breadcrumb_parts("/market") == (
+        "Market Trend & Sentiment", "Market Dashboard")
     assert main.breadcrumb_parts("/status") == ("More", "System Status")
     # Flat single page → (page label, "") — no "· Tab"
     assert main.breadcrumb_parts("/trade") == ("Trade Analyzer", "")
-    assert main.breadcrumb_parts("/market") == ("Market Dashboard", "")
+    # Rail pages read as standalone sections, same as flat pages.
+    assert main.breadcrumb_parts("/options/gamma") == ("Dealer Positioning", "")
+    assert main.breadcrumb_parts("/options/calculator") == ("Calculator", "")
 
 
 def test_market_status_parts():
@@ -473,9 +480,9 @@ def test_drawer_icons_are_present_and_distinct():
     """The drawer is a 64px icon rail (hover-to-expand) whose collapsed state shows
     ONLY icons (_NAV_CSS fades the labels to opacity:0) — so each drawer item needs
     a non-empty, distinct icon. ``_nav_link``/``_nav_group_link`` render the
-    ``icon`` arg; the dot is retired. Scope is the 8 drawer items (3 groups + the
-    Matrix rail item under Options + FLAT_NAV); child-page icons are not rail
-    affordances (the tab strip renders labels only)."""
+    ``icon`` arg; the dot is retired. Scope is the 9 drawer items (3 groups + the
+    3 OPTIONS_RAIL pages under Options + the 3 FLAT_NAV pages); child-page icons
+    are not rail affordances (the tab strip renders labels only)."""
     from collections import Counter
 
     import main
@@ -485,7 +492,7 @@ def test_drawer_icons_are_present_and_distinct():
              + [(label, icon) for _p, label, icon in main.FLAT_NAV])
     # Pinned count: all()/set-length are vacuously true on an empty list, so this
     # is the non-vacuity guard. A legitimate new drawer item should bump it.
-    assert len(items) == 8, f"expected 8 drawer items, got {len(items)}: {items}"
+    assert len(items) == 9, f"expected 9 drawer items, got {len(items)}: {items}"
     assert not [l for l, i in items if not i], \
         f"drawer items with no icon: {[l for l, i in items if not i]}"
     dupes = {i: [l for l, x in items if x == i]

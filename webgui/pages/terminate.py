@@ -1,4 +1,4 @@
-"""Terminate page — stop the whole local stack from the web GUI.
+"""Stop All Services page (``/terminate``) — stop the whole local stack from the web GUI.
 
 A deliberately guarded action: a single red button behind a confirm dialog that
 spawns ``stop_all.bat`` (proxy + the six domain services + this web app; Memurai
@@ -35,7 +35,7 @@ def _spawn_stop():
 
 
 def render():
-    ui.label("Terminate").classes("text-h5")
+    ui.label("Stop All Services").classes("text-h5")
 
     with ui.card().classes("w-full max-w-2xl"):
         with ui.row().classes("items-center gap-2"):
