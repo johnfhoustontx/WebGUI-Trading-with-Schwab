@@ -1,5 +1,5 @@
 @echo off
-title Schwab Trading - stop all
+title NeuralStrike - stop all
 cd /d "%~dp0"
 set "PY=%~dp0.venv\Scripts\python.exe"
 

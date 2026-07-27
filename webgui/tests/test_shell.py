@@ -690,3 +690,102 @@ def test_nav_active_icon_accent_outspecifies_the_menu_text_override():
                                     "title": "", "text": "#98a1c0"}})
     assert ".nav-drawer .q-icon{color:#98a1c0!important;}" in rival, \
         "the rule our accent must out-specify — 2 classes, injected after _NAV_CSS"
+
+
+# ── Brand identity: the NeuralStrike header lockup (2026-07-27) ─────────────
+def test_brand_mark_src_requires_the_file_to_exist(tmp_path):
+    """A configured mark URL is used ONLY when the asset is really on disk, so a
+    missing file renders the wordmark alone instead of a broken-image icon."""
+    import main
+
+    (tmp_path / "img").mkdir()
+    # Configured + present → the URL is served.
+    (tmp_path / "img" / "neuralstrike-mark.png").write_bytes(b"\x89PNG\r\n")
+    assert main.brand_mark_src(tmp_path) == "/static/img/neuralstrike-mark.png"
+    # Configured + absent → no image (NOT a dangling src).
+    (tmp_path / "img" / "neuralstrike-mark.png").unlink()
+    assert main.brand_mark_src(tmp_path) == ""
+
+
+def test_brand_mark_src_rejects_paths_outside_static(monkeypatch, tmp_path):
+    """Only /static/ URLs map to disk; anything else degrades to no image."""
+    import main
+    from pages.options import theme
+
+    for bad in ("", "   ", "https://example.com/logo.png", "../../etc/passwd"):
+        monkeypatch.setattr(theme, "BRAND_MARK", bad)
+        assert main.brand_mark_src(tmp_path) == "", bad
+
+
+def test_brand_lockup_html_renders_both_wordmark_halves(monkeypatch, tmp_path):
+    """The lockup carries the two gradient halves as separate spans (each needs
+    its own background-clip:text gradient) and escapes the configured name."""
+    import main
+    from pages.options import theme
+
+    monkeypatch.setattr(theme, "BRAND_MARK", "")          # no image this time
+    monkeypatch.setattr(theme, "BRAND_NAME_A", "Neural")
+    monkeypatch.setattr(theme, "BRAND_NAME_B", "Strike")
+    out = main.brand_lockup_html(tmp_path)
+    assert '<span class="a">Neural</span>' in out
+    assert '<span class="b">Strike</span>' in out
+    assert "brand-word" in out
+    assert "<img" not in out                               # no mark configured
+
+    # A name from config is HTML-escaped, never injected raw.
+    monkeypatch.setattr(theme, "BRAND_NAME_A", "<script>x</script>")
+    assert "<script>" not in main.brand_lockup_html(tmp_path)
+
+
+def test_brand_lockup_includes_the_mark_when_present(tmp_path):
+    """With the asset on disk the lockup leads with the logo image."""
+    import main
+
+    (tmp_path / "img").mkdir()
+    (tmp_path / "img" / "neuralstrike-mark.png").write_bytes(b"\x89PNG\r\n")
+    out = main.brand_lockup_html(tmp_path)
+    assert 'class="brand-mark"' in out
+    assert 'src="/static/img/neuralstrike-mark.png"' in out
+
+
+def test_brand_assets_are_shipped():
+    """The header renders a real file, not a hopeful URL — so it must be in the
+    repo. Pins BOTH the mark the header uses and the source lockup it is cropped
+    from (regenerating the mark needs the source)."""
+    import main
+
+    assert (main._STATIC_DIR / "img" / "neuralstrike-mark.png").is_file()
+    assert (main._STATIC_DIR / "img" / "neuralstrike-logo.jpg").is_file()
+
+
+def test_app_name_comes_from_brand_config():
+    """Browser titles + the breadcrumb fallback derive from [brand], so renaming
+    the app is a config edit, not a code hunt."""
+    import inspect
+
+    import main
+    from pages.options import theme
+
+    assert theme.BRAND_NAME == "NeuralStrike"
+    assert main.breadcrumb_parts("/no/such/route") == ("NeuralStrike", "")
+    src = inspect.getsource(main)
+    assert "Schwab Trading" not in src, "stale app name left in main.py"
+
+
+def test_brand_css_clips_gradients_to_the_wordmark_text():
+    """Each half needs -webkit-background-clip:text FIRST (Chromium still wants
+    the prefix) plus a transparent fill, else the gradient paints a block."""
+    from pages.options.theme import build_brand_css
+
+    css = build_brand_css({"brand": {"font_family": "Montserrat", "font_weight": "800",
+                                     "a_from": "#C9A356", "a_to": "#FBEAA0",
+                                     "b_from": "#2C6FB4", "b_to": "#35A3F5"}})
+    assert "-webkit-background-clip: text" in css
+    assert "-webkit-text-fill-color: transparent" in css
+    assert "#C9A356" in css and "#35A3F5" in css
+    assert "'Montserrat'" in css
+    # A blank family must not emit a stray leading comma in the font stack.
+    bare = build_brand_css({"brand": {"font_family": "", "font_weight": "800",
+                                      "a_from": "#1", "a_to": "#2",
+                                      "b_from": "#3", "b_to": "#4"}})
+    assert "font-family: 'Segoe UI'" in bare

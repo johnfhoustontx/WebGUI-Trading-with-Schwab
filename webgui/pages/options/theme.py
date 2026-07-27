@@ -109,6 +109,28 @@ _DEFAULTS = {
         "body": "14px",      # base text
         "small": "12px",     # eyebrows / captions / status lines (.text-xs)
     },
+    "brand": {
+        # App identity: the header lockup (monogram + two-tone wordmark). The
+        # name is split into two halves so each can carry its own gradient, the
+        # way the logo artwork does. The gradients + font apply to the WORDMARK
+        # ONLY — the body/data font stays [typography].family, because a heavy
+        # display face hurts readability in the dense signal tables.
+        # Colors are sampled from webgui/static/img/neuralstrike-logo.jpg
+        # (p50→p95 of each wordmark band; lower percentiles are anti-aliasing
+        # against the black background and read too dark).
+        "name_a": "Neural",       # first half of the wordmark (gold)
+        "name_b": "Strike",       # second half (blue)
+        "font_family": "Montserrat",   # "" = use the app font for the wordmark
+        # Brand web font, loaded separately from [typography].font_url.
+        "font_url": ("https://fonts.googleapis.com/css2"
+                     "?family=Montserrat:wght@800&display=swap"),
+        "font_weight": "800",
+        "a_from": "#C9A356",      # "Neural" gradient — deep gold
+        "a_to": "#FBEAA0",        # "Neural" gradient — highlight gold
+        "b_from": "#2C6FB4",      # "Strike" gradient — deep blue
+        "b_to": "#35A3F5",        # "Strike" gradient — bright blue
+        "mark": "/static/img/neuralstrike-mark.png",  # "" = no logo, glyph tile
+    },
     "menu": {
         # Application menu (header bar + left nav drawer). Every knob defaults
         # "" = keep the stock Quasar look; a value emits an override.
@@ -439,6 +461,77 @@ def build_font_head_html(theme):
     )
 
 
+def build_brand_font_head_html(theme):
+    """A ``<link>`` for the BRAND web font (``[brand].font_url``), or ``""``.
+
+    Separate from ``build_font_head_html`` on purpose: the brand face styles the
+    header wordmark only, while ``[typography].font_url`` is the app-wide body
+    font. Either may be set without the other. Defensive: any problem → ``""``
+    (the wordmark then falls back down its font stack, still readable)."""
+    try:
+        url = str(theme["brand"].get("font_url", "")).strip()
+    except Exception:  # noqa: BLE001
+        url = ""
+    if not url:
+        return ""
+    return (
+        '<link rel="preconnect" href="https://fonts.googleapis.com">'
+        '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
+        f'<link rel="stylesheet" href="{url}">'
+    )
+
+
+def build_brand_css(theme):
+    """CSS for the header wordmark's two gradient halves.
+
+    RAW CSS, not Tailwind classes — deliberately. The wordmark needs
+    ``linear-gradient`` + ``background-clip:text``, and the bundled Tailwind JIT
+    does not reliably emit arbitrary classes containing gradients or ``rgba()``
+    (the documented trap that silently produced no rule for the old nav pill).
+
+    Falls back gracefully at every step: a missing/blank ``font_family`` just
+    leaves the inherited app font in front of the stack, and a malformed color
+    yields its default via ``_DEFAULTS``. Never raises."""
+    try:
+        b = theme["brand"]
+    except Exception:  # noqa: BLE001
+        b = _DEFAULTS["brand"]
+    fam = str(b.get("font_family", "")).strip()
+    stack = (f"'{fam}', " if fam else "") + "'Segoe UI', system-ui, sans-serif"
+    weight = str(b.get("font_weight", "800")).strip() or "800"
+    return f"""
+.brand-word {{
+  font-family: {stack};
+  font-weight: {weight};
+  font-size: 16px;
+  letter-spacing: .01em;
+  text-transform: uppercase;
+  line-height: 1;
+  white-space: nowrap;
+}}
+/* Two halves, each carrying its own gradient — the logo's gold/blue split.
+   -webkit- prefix first: Chromium/WebKit still need it for background-clip. */
+.brand-word .a, .brand-word .b {{
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}}
+.brand-word .a {{
+  background-image: linear-gradient(180deg,{b.get('a_to')} 0%,{b.get('a_from')} 100%);
+}}
+.brand-word .b {{
+  background-image: linear-gradient(180deg,{b.get('b_to')} 0%,{b.get('b_from')} 100%);
+}}
+/* The logo mark. Its artwork is on black, which sits naturally on the dark
+   header — so no plate/gradient behind it, unlike the old glyph tile. */
+.brand-mark {{
+  width: 28px; height: 28px; border-radius: 8px; flex: none;
+  object-fit: cover; display: block;
+}}
+"""
+
+
 def build_nav_css(theme):
     """Application-menu override CSS from ``[menu]`` (drawer bg / text / hover /
     caption). Emits a rule ONLY for a non-empty knob, so all-default config
@@ -507,3 +600,11 @@ TYPOGRAPHY_CSS = build_typography_css(THEME)   # injected app-wide by main._layo
 FONT_HEAD_HTML = build_font_head_html(THEME)   # "" when no [typography].font_url
 NAV_THEME_CSS = build_nav_css(THEME)           # "" when [menu] is all-default
 MENU_ACCENT = THEME["menu"]["accent"]          # "" = keep the stock Quasar primary
+
+# ── Brand identity (header lockup) ──────────────────────────────────────────
+BRAND_NAME_A = THEME["brand"]["name_a"]        # "Neural" — the gold half
+BRAND_NAME_B = THEME["brand"]["name_b"]        # "Strike" — the blue half
+BRAND_NAME = f"{BRAND_NAME_A}{BRAND_NAME_B}"   # plain text: browser titles, logs
+BRAND_MARK = THEME["brand"]["mark"]            # "" = no logo image
+BRAND_CSS = build_brand_css(THEME)
+BRAND_FONT_HEAD_HTML = build_brand_font_head_html(THEME)  # "" when no font_url

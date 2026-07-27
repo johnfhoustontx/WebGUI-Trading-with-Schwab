@@ -88,6 +88,39 @@ sections  = "13px"             # sub-section headings
 body      = "13px"             # base text / table cells
 small     = "11px"             # eyebrows / captions / status lines
 
+[brand]                        # ── app identity: the header lockup ──────────
+# The name is split in two so each half carries its own gradient, the way the
+# logo artwork does. These apply to the HEADER WORDMARK ONLY — the body/data
+# font stays [typography].family below, because a heavy display face hurts
+# readability in the dense signal tables.
+#
+# The colors are SAMPLED from webgui/static/img/neuralstrike-logo.jpg (the
+# p50→p95 range of each wordmark band; lower percentiles are anti-aliasing
+# against the black background and read too dark), so the header matches the
+# artwork rather than approximating it by eye.
+#
+# font_family is a CLOSE FREE MATCH for the logo's typeface, not a positive
+# identification — the exact face can't be read off a raster image. Montserrat
+# ExtraBold is a geometric sans with the same proportions. To try another,
+# change both font_family and font_url (any Google Fonts URL works), restart the
+# web GUI, and hard-refresh. Setting font_url = "" loads no web font and falls
+# back to the local stack (still readable, just not the logo face).
+#
+# mark = the monogram shown left of the wordmark, served from webgui/static/.
+# It is a square crop of the full logo (which is portrait and carries its own
+# wordmark + tagline — unreadable at the header's 28px). Set "" for no image:
+# the header then shows the name alone, no broken-image icon.
+name_a      = "Neural"
+name_b      = "Strike"
+font_family = "Montserrat"
+font_url    = "https://fonts.googleapis.com/css2?family=Montserrat:wght@800&display=swap"
+font_weight = "800"
+a_from      = "#C9A356"        # "Neural" — deep gold
+a_to        = "#FBEAA0"        # "Neural" — highlight gold
+b_from      = "#2C6FB4"        # "Strike" — deep blue
+b_to        = "#35A3F5"        # "Strike" — bright blue
+mark        = "/static/img/neuralstrike-mark.png"
+
 [menu]                         # ── application menu (header bar + left nav) ─
 # Deep Slate shell (Phase 2): dark header + rail with a blue accent on the active
 # pill/tab. Every knob "" = keep the stock look.

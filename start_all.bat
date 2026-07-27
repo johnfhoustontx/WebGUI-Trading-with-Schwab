@@ -1,5 +1,5 @@
 @echo off
-title Schwab Trading - start all
+title NeuralStrike - start all
 cd /d "%~dp0"
 set "PY=%~dp0.venv\Scripts\python.exe"
 
@@ -11,7 +11,7 @@ if not exist "%PY%" (
 )
 
 echo ============================================
-echo   Schwab Trading - launching services
+echo   NeuralStrike - launching services
 echo   memurai       redis://127.0.0.1:6379  (storage/comm backbone)
 echo   proxy         http://127.0.0.1:8100
 echo   sentiment_svc http://127.0.0.1:8210

@@ -7,6 +7,7 @@ schwab-proxy (:8100) is unreachable.
 
 Run order: start schwab-proxy first, then ``python webgui/main.py``.
 """
+import html
 import pathlib
 import sys
 from contextlib import contextmanager
@@ -295,7 +296,43 @@ def breadcrumb_parts(active: str):
     for label, _icon, children in _NAV_GROUPS:
         if any(path == active for path, _l, _i in children):
             return label, _NAV_LABEL.get(active, "")
-    return _NAV_LABEL.get(active, "Schwab Trading"), ""
+    return _NAV_LABEL.get(active, theme.BRAND_NAME), ""
+
+
+def brand_mark_src(static_dir=None):
+    """The header logo's URL, or ``""`` when there is no usable image.
+
+    ``[brand].mark`` is a URL under ``/static``; this maps it back to disk and
+    returns it ONLY if the file is actually there, so a missing asset renders the
+    wordmark alone instead of a broken-image icon. Any oddity (blank config, a
+    path outside /static, an unreadable directory) degrades to ``""``."""
+    url = str(getattr(theme, "BRAND_MARK", "") or "").strip()
+    if not url.startswith("/static/"):
+        return ""
+    root = pathlib.Path(static_dir) if static_dir else _STATIC_DIR
+    try:
+        if (root / url[len("/static/"):]).is_file():
+            return url
+    except Exception:  # noqa: BLE001 — chrome must never break a page render.
+        pass
+    return ""
+
+
+def brand_lockup_html(static_dir=None):
+    """The header lockup: the logo mark (when present) + the two-tone wordmark.
+
+    Raw HTML rather than NiceGUI elements because each wordmark half needs a
+    gradient clipped to its text (``theme.build_brand_css``), which Tailwind's
+    bundled JIT can't express. The name comes from ``[brand]`` config, so it is
+    HTML-escaped."""
+    mark = brand_mark_src(static_dir)
+    img = (f'<img src="{html.escape(mark)}" class="brand-mark" alt="">'
+           if mark else "")
+    return (f'<div style="display:flex;align-items:center;gap:9px">{img}'
+            f'<span class="brand-word">'
+            f'<span class="a">{html.escape(theme.BRAND_NAME_A)}</span>'
+            f'<span class="b">{html.escape(theme.BRAND_NAME_B)}</span>'
+            f'</span></div>')
 
 
 def market_status_parts(now=None):
@@ -627,14 +664,10 @@ _NAV_CSS = """
 .q-tooltip.help-tip ul { padding-left: 1.15em; margin: .35em 0; }
 .q-tooltip.help-tip li { margin: .2em 0; }
 /* ── Deep Slate shell chrome (Phase 2) ─────────────────────────────────────
-   Header brand mark + market-status pill. rgba lives in raw
-   CSS (not Tailwind classes) so the bundled JIT never has to emit rgba arbitraries. */
-.brand-tile {
-  width: 28px; height: 28px; border-radius: 9px; flex: none;
-  background: linear-gradient(135deg,#6b86ff,#4a5fd6);
-  display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 4px 14px -4px rgba(107,134,255,0.7);
-}
+   Market-status pill. rgba lives in raw CSS (not Tailwind classes) so the
+   bundled JIT never has to emit rgba arbitraries. The header brand lockup
+   (logo mark + two-tone wordmark) is themed separately in theme.BRAND_CSS,
+   built from the [brand] config block. */
 .mkt-pill { display: flex; align-items: center; gap: 7px; height: 28px;
   padding: 0 11px; border-radius: 8px; }
 .mkt-pill .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
@@ -940,6 +973,11 @@ def _layout(active: str, title: str):
         ui.add_css(theme.TYPOGRAPHY_CSS)
     if theme.NAV_THEME_CSS:
         ui.add_css(theme.NAV_THEME_CSS)
+    # Brand identity (header lockup). The font is loaded separately from the
+    # body font — it styles the wordmark only, never the data tables.
+    if theme.BRAND_FONT_HEAD_HTML:
+        ui.add_head_html(theme.BRAND_FONT_HEAD_HTML)
+    ui.add_css(theme.BRAND_CSS)
     if theme.MENU_ACCENT:
         # [menu].accent → the Quasar primary, which reaches ONLY Quasar-colored
         # controls (switches, sliders, color=primary buttons). The HEADER BAR is
@@ -949,7 +987,7 @@ def _layout(active: str, title: str):
         # rgba in _NAV_CSS (the JIT can't emit var()/rgba() arbitraries).
         ui.colors(primary=theme.MENU_ACCENT)
     # Browser tab: title = the selected menu item; favicon = this page's color.
-    ui.page_title(_NAV_LABEL.get(active, "Schwab Trading"))
+    ui.page_title(_NAV_LABEL.get(active, theme.BRAND_NAME))
     ui.add_head_html(_favicon_link(_TAB_COLOR.get(active, "#42a5f5")))
     # Icon rail: laid out at the rail width (or the open width when pinned); the
     # _NAV_CSS :hover rule expands only the ASIDE over the content (see the rail
@@ -983,11 +1021,7 @@ def _layout(active: str, title: str):
         with ui.row().classes("items-center gap-3 no-wrap"):
             ui.button(icon="menu", on_click=lambda: _toggle_pin(drawer)).props(
                 "flat round dense color=white size=sm").tooltip("Pin / unpin the menu")
-            with ui.element("div").classes("brand-tile"):
-                ui.html('<svg width="15" height="15" viewBox="0 0 16 16">'
-                        '<polyline points="1,11 5,6 8,9 15,2" fill="none" stroke="#0b1024" '
-                        'stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>')
-            ui.label("Schwab Trading").classes("text-[15px] font-semibold tracking-[.03em]")
+            ui.html(brand_lockup_html())
         with ui.row().classes("items-center gap-4 no-wrap"):
             _section, _tab = breadcrumb_parts(active)
             with ui.row().classes("items-center gap-2 no-wrap"):
@@ -1299,5 +1333,5 @@ if __name__ in {"__main__", "__mp_main__"}:
     # noisy `OSError [WinError 64] "network name is no longer available"` accept
     # tracebacks whenever a transient/virtual adapter (link-local 169.254.x, WSL/
     # Docker) dropped — and keeps the trading app off the LAN.
-    ui.run(host="127.0.0.1", port=NICEGUI_PORT, title="Schwab Trading",
+    ui.run(host="127.0.0.1", port=NICEGUI_PORT, title=theme.BRAND_NAME,
            dark=True, reload=False, show=False)

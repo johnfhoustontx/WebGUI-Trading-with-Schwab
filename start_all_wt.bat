@@ -1,5 +1,5 @@
 @echo off
-title Schwab Trading - start all (Windows Terminal, one window)
+title NeuralStrike - start all (Windows Terminal, one window)
 cd /d "%~dp0"
 set "PY=%~dp0.venv\Scripts\python.exe"
 set "PYW=%~dp0.venv\Scripts\pythonw.exe"
@@ -36,7 +36,7 @@ if errorlevel 1 (
 )
 
 echo ============================================
-echo   Schwab Trading - launching in ONE Windows
+echo   NeuralStrike - launching in ONE Windows
 echo   Terminal window with 8 tabs (live logs):
 echo     Proxy :8100  . Sentiment :8210 . Options :8211
 echo     Portfolio :8212 . Trade :8213 . Driver :8214
@@ -74,7 +74,7 @@ REM  NO-WINDOW MODE — every process hidden, output redirected to logs\
 REM =========================================================================
 :hidden
 echo ============================================
-echo   Schwab Trading - launching with NO WINDOWS.
+echo   NeuralStrike - launching with NO WINDOWS.
 echo   All 8 processes run hidden; output goes to
 echo     %~dp0logs\^<name^>.out.log  (and .err.log)
 echo   Stop them with stop_all.bat, or the web GUI
