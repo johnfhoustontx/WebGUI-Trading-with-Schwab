@@ -211,49 +211,54 @@ def _serve_manual(name: str):
 # Redis bus, and the GUI reads the cache + enqueues rescan commands. Sentiment
 # refresh likewise lives in services/sentiment_svc.
 
-# Options is an expandable group; each child is its own route. (route, label, icon)
+# Options is a menu GROUP; each child is a tab in the strip. Ordered by the
+# trading workflow: find → analyze → track → repair. (route, label, icon)
 OPTIONS_CHILDREN = [
-    ("/", "Scanner", "radar"),
-    ("/options/paper", "Paper Trades", "request_quote"),
-    ("/options/captured", "Captured Signals", "bookmark"),
-    ("/options/portfolio", "Paper Portfolio", "account_balance_wallet"),
-    ("/options/calculator", "Calculator", "calculate"),
-    ("/options/swing", "Swing Scanner", "swap_vert"),
-    ("/options/gamma", "Gamma", "stacked_line_chart"),
+    ("/", "Market Scanner", "radar"),
+    ("/options/swing", "Strategy Finder", "swap_vert"),
     ("/options/simulator", "Simulator", "science"),
     ("/options/expected-move", "Expected Move", "candlestick_chart"),
+    ("/options/captured", "Captured Signals", "bookmark"),
+    ("/options/paper", "Paper Ledger", "request_quote"),
+    ("/options/portfolio", "Paper Account", "account_balance_wallet"),
     ("/options/rescue", "Rescue", "healing"),
 ]
 
-# Sentiment is an expandable group; each child is its own route. (route, label, icon)
+# Market context is a menu GROUP: the macro tile board first (the broadest lens),
+# then the sentiment reads. NOTE ``_nav_group_link`` navigates to children[0], so
+# this group's RAIL item lands on /market. (route, label, icon)
 SENTIMENT_CHILDREN = [
+    ("/market", "Market Dashboard", "dashboard"),
     ("/sentiment", "Sentiment", "insights"),
     ("/sentiment/sectors", "Sector & Industry", "table_chart"),
     ("/sentiment/rotation", "Sector Rotation", "donut_large"),
     ("/sentiment/rrg", "RRG", "scatter_plot"),
 ]
 
-# Matrix is a top-level MAIN-MENU (rail) item shown directly UNDER the Options
-# group — its own standalone page, NOT an Options tab strip entry. (route, label, icon)
+# Standalone MAIN-MENU (rail) pages shown directly UNDER the Options group. Each
+# is its own page with NO tab strip — deliberately NOT Options tab-strip entries.
+# (route, label, icon)
 OPTIONS_RAIL = [
-    ("/options/matrix", "Matrix", "grid_on"),
+    ("/options/calculator", "Calculator", "calculate"),
+    ("/options/gamma", "Dealer Positioning", "stacked_line_chart"),
+    ("/options/matrix", "Opportunity Board", "grid_on"),
 ]
 
-# Flat top-level items (non-Options apps). (route, label, icon)
+# Flat top-level items (single-page apps). (route, label, icon)
 FLAT_NAV = [
-    ("/market", "Market Dashboard", "dashboard"),
     ("/trade", "Trade Analyzer", "query_stats"),
     ("/portfolio", "Portfolio", "account_balance"),
     ("/driver", "Claude Trades", "smart_toy"),
 ]
 
-# "More" is an expandable group for reports / diagnostics / config. (route, label, icon)
-# Settings is itself a nested sub-group (its children render indented beneath it).
+# "More" is a menu GROUP for reports / diagnostics / config. Its tab strip is
+# MORE_CHILDREN + SETTINGS_CHILDREN, so User Manuals renders as a flat PEER tab
+# of Settings — the old indented sub-group is retired. (route, label, icon)
 MORE_CHILDREN = [
     ("/eod", "EOD Report", "summarize"),
     ("/status", "System Status", "monitor_heart"),
     ("/settings", "Settings", "settings"),
-    ("/terminate", "Terminate", "power_settings_new"),
+    ("/terminate", "Stop All Services", "power_settings_new"),
 ]
 
 # Sub-menu items nested under the Settings entry. (route, label, icon)
@@ -332,14 +337,14 @@ _NAV_LABEL = {route: label for route, label, _icon in
 
 # One distinct color per route (the favicon fill). Material hues, all visually apart.
 _TAB_COLOR = {
-    "/": "#42a5f5",                       # Scanner — blue
-    "/options/matrix": "#4dd0e1",         # Matrix — cyan
-    "/options/paper": "#66bb6a",          # Paper Trades — green
+    "/": "#42a5f5",                       # Market Scanner — blue
+    "/options/matrix": "#4dd0e1",         # Opportunity Board — cyan
+    "/options/paper": "#66bb6a",          # Paper Ledger — green
     "/options/captured": "#ab47bc",       # Captured Signals — purple
-    "/options/portfolio": "#26a69a",      # Paper Portfolio — teal
+    "/options/portfolio": "#26a69a",      # Paper Account — teal
     "/options/calculator": "#ffa726",     # Calculator — amber
-    "/options/swing": "#ec407a",          # Swing Scanner — pink
-    "/options/gamma": "#7e57c2",          # Gamma — deep purple
+    "/options/swing": "#ec407a",          # Strategy Finder — pink
+    "/options/gamma": "#7e57c2",          # Dealer Positioning — deep purple
     "/options/simulator": "#29b6f6",      # Simulator — light blue
     "/options/expected-move": "#ffca28",  # Expected Move — yellow
     "/options/rescue": "#ef5350",         # Rescue — red
@@ -354,7 +359,7 @@ _TAB_COLOR = {
     "/eod": "#78909c",                   # EOD Report — blue grey
     "/status": "#d4e157",                # System Status — lime
     "/settings": "#90a4ae",              # Settings — blue grey light
-    "/terminate": "#b71c1c",             # Terminate — dark red
+    "/terminate": "#b71c1c",             # Stop All Services — dark red
     "/manuals": "#4db6ac",               # User Manuals — teal
 }
 
@@ -1099,14 +1104,14 @@ def _layout(active: str, title: str):
 
 @ui.page("/")
 def options_scanner_page() -> None:
-    with _layout("/", "Options · Scanner"):
+    with _layout("/", "Options · Market Scanner"):
         from pages.options import scanner
         scanner.render()
 
 
 @ui.page("/options/paper")
 def options_paper_page() -> None:
-    with _layout("/options/paper", "Options · Paper Trades"):
+    with _layout("/options/paper", "Options · Paper Ledger"):
         from pages.options import paper
         paper.render()
 
@@ -1120,28 +1125,28 @@ def options_captured_page() -> None:
 
 @ui.page("/options/portfolio")
 def options_portfolio_page() -> None:
-    with _layout("/options/portfolio", "Options · Paper Portfolio"):
+    with _layout("/options/portfolio", "Options · Paper Account"):
         from pages.options import portfolio
         portfolio.render()
 
 
 @ui.page("/options/calculator")
 def options_calculator_page() -> None:
-    with _layout("/options/calculator", "Options · Calculator"):
+    with _layout("/options/calculator", "Calculator"):
         from pages.options import calculator
         calculator.render()
 
 
 @ui.page("/options/swing")
 def options_swing_page() -> None:
-    with _layout("/options/swing", "Options · Swing Scanner"):
+    with _layout("/options/swing", "Options · Strategy Finder"):
         from pages.options import swing
         swing.render()
 
 
 @ui.page("/options/gamma")
 def options_gamma_page() -> None:
-    with _layout("/options/gamma", "Options · Gamma"):
+    with _layout("/options/gamma", "Dealer Positioning"):
         from pages.options import gamma
         gamma.render()
 
@@ -1169,7 +1174,7 @@ def options_rescue_page() -> None:
 
 @ui.page("/options/matrix")
 def options_matrix_page() -> None:
-    with _layout("/options/matrix", "Matrix"):
+    with _layout("/options/matrix", "Opportunity Board"):
         from pages.options import matrix
         matrix.render()
 
@@ -1239,7 +1244,7 @@ def eod_detail_page() -> None:
 
 @ui.page("/market")
 def market_page() -> None:
-    with _layout("/market", "Market Dashboard"):
+    with _layout("/market", "Market Trend & Sentiment · Market Dashboard"):
         from pages import market
         market.render()
 
@@ -1267,7 +1272,7 @@ def manuals_page() -> None:
 
 @ui.page("/terminate")
 def terminate_page() -> None:
-    with _layout("/terminate", "Terminate"):
+    with _layout("/terminate", "Stop All Services"):
         from pages import terminate
         terminate.render()
 
