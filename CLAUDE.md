@@ -8,7 +8,40 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-07-27 (**Menu reorganization — rail promotions, plain-language renames, workflow
+**Last updated:** 2026-07-27 (**Rebrand → NeuralStrike**: the app is renamed from "Schwab Trading" to
+**NeuralStrike** and the supplied logo is in the header. **Header lockup** = the **NS monogram** + a
+**two-tone wordmark** ("Neural" gold / "Strike" blue, **Montserrat ExtraBold**, uppercase) — replacing the
+old blue-gradient tile + chart-glyph SVG (`.brand-tile` deleted, dead). The gradient stops are **SAMPLED
+from the artwork** (p50→p95 of each wordmark band — the low percentiles are anti-aliasing against the
+black background and read too dark), so the header MATCHES the logo instead of approximating it:
+`#C9A356→#FBEAA0` gold, `#2C6FB4→#35A3F5` blue. **Assets** in a new **`webgui/static/img/`** (already
+served at `/static`): `neuralstrike-logo.jpg` (the supplied full lockup — brand source of truth) +
+**`neuralstrike-mark.png`** (a 256px SQUARE crop of the monogram ALONE, computed from the artwork's content
+bbox ABOVE the wordmark band — the full 832×1248 portrait lockup would be an unreadable smudge in the 28px
+header tile AND its own wordmark would compete with the rendered one; regenerate it from the .jpg). **All
+of it is config-driven** via a NEW **`[brand]`** block in `config/theme.toml` (`name_a`/`name_b`/
+`font_family`/`font_url`/`font_weight`/the 4 gradient stops/`mark`) → `theme.BRAND_NAME`/`BRAND_CSS`/
+`BRAND_FONT_HEAD_HTML` + `main.brand_lockup_html()`/`brand_mark_src()`, so renaming or restyling the app is
+a **config edit, not a code hunt** (the browser tab title, `ui.run` title, and breadcrumb fallback all
+derive from `theme.BRAND_NAME`; a test asserts no "Schwab Trading" survives in `main.py`). **The brand font
+is deliberately WORDMARK-ONLY** — loaded via its own `[brand].font_url` link, SEPARATE from
+`[typography].font_url`, because the body/data font must stay IBM Plex: a heavy display face hurts
+readability in the dense signal tables. **⚠ Montserrat ExtraBold is a CLOSE FREE MATCH for the logo's
+typeface, not a positive identification** (the exact face can't be read off a raster image) — swapping it
+is two config lines. The wordmark CSS is **RAW CSS, not Tailwind** (it needs `linear-gradient` +
+`background-clip:text`, which the bundled JIT won't reliably emit — the documented rgba/gradient-arbitrary
+trap). **Degrades safely**: a missing mark file renders the wordmark ALONE (never a broken-image icon,
+enforced by a file-exists check + test), a blank `font_url` falls back down the local stack, and
+`[brand].mark = ""` disables the image. **`[brand]` is deliberately NOT in Settings → Appearance** —
+`_THEME_SECTIONS` tags each section single-kind (all-color or all-text) and `[brand]` mixes both. Launchers
+renamed too (`start_all.bat`/`start_all_wt.bat`/`stop_all.bat` window titles + banners). **UNCHANGED by
+design**: the repo folder name + every path (renaming it would break `repo_paths`, the launchers, and the
+venv), the **per-route favicon colors** (each page keeps its own colored square so several open tabs stay
+tellable apart — a single logo favicon would make every tab identical), the Deep Slate palette everywhere
+else, and `webgui/static/sounds/`. **Restart the webgui.** webgui **888** green (6 new), ruff clean;
+live-verified (Montserrat 800 genuinely loads + applies — measured 130.8px vs 120.9px fallback — both
+gradients clip to text, the mark serves at 28px, no console errors). Design:
+[design](docs/plans/2026-07-27-neuralstrike-rebrand-design.md). Prior — 2026-07-27 (**Menu reorganization — rail promotions, plain-language renames, workflow
 ordering**: a webgui NAV-ONLY change (`webgui/main.py`'s five nav lists + the text that names them).
 **(1) Rail promotions.** **Calculator** and **Gamma** moved OUT of the Options tab strip into
 `main.OPTIONS_RAIL` as standalone main-menu pages, joining Matrix — rail order **Calculator · Dealer
@@ -2234,6 +2267,19 @@ the `leg-*` cells, the `q-tab*` chrome, the teleported `.strat-menu-navy` popup)
 **Calculator**, **Simulator**, and **Trade** pages all use this. **`DASHBOARD_CSS` is
 deleted** (Phase 4) — `theme.py` = tokens + `QUASAR_INTERNAL_CSS`. **This section +
 `theme.py` are the single source — look here to apply or change the theme.**
+- **App identity — `[brand]` in `config/theme.toml` (2026-07-27).** The app NAME and the
+  header lockup are config, not code: `name_a`/`name_b` (the wordmark's two halves, so
+  each carries its own gradient — "Neural" gold / "Strike" blue), `font_family`/`font_url`/
+  `font_weight` (the **wordmark-only** brand face — Montserrat ExtraBold, loaded SEPARATELY
+  from `[typography].font_url` so the body/data font stays IBM Plex), the four gradient
+  stops (**sampled from `webgui/static/img/neuralstrike-logo.jpg`**, not eyeballed), and
+  `mark` (the monogram URL under `/static`; `""` = wordmark only). Consumed via
+  `theme.BRAND_NAME`/`BRAND_CSS`/`BRAND_FONT_HEAD_HTML` + `main.brand_lockup_html()`/
+  `brand_mark_src()` (the latter renders the image ONLY if the file really exists — no
+  broken-image icon). Renaming the app = editing `name_a`/`name_b` + the launcher `.bat`
+  titles. **Not** in Settings → Appearance (that editor's sections are single-kind;
+  `[brand]` mixes colors with text). The wordmark rules are RAW CSS — gradients +
+  `background-clip:text` are exactly what the Tailwind JIT won't emit.
 - **Restyle WITHOUT code edits (2026-07-09): `config/theme.toml`.** Every color
   (`repo_paths.THEME_TOML`, all knobs commented in-file) — surfaces/cards/text,
   secondary+primary buttons, the **3D gradient buttons**, the semantic
