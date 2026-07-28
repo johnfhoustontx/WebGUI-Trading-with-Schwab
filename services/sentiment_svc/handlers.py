@@ -495,7 +495,8 @@ def run_crisis_check(bus):
         full = compute.regime_evidence.evidence_from_bars(
             None, None, vix, matrix_row, None)
         ev = dict.fromkeys(mr.EVIDENCE_KEYS)
-        for key in ("term_inversion", "vix1d_spike_pct", "below_flip_deep"):
+        for key in ("vix_level", "term_inversion", "vix1d_spike_pct",
+                    "below_flip_deep"):
             ev[key] = full.get(key)
         scores = mr.score_regimes(ev)
         raw_crisis = scores.raw["crisis"]
@@ -521,7 +522,7 @@ def run_crisis_check(bus):
                 "raw": scores.raw,
                 "confidence": scores.confidence,
                 "unclear": scores.unclear,
-                "label": compute._REGIME_LABELS.get("crisis", "Crisis"),
+                "label": compute._REGIME_LABELS.get("crisis", "Volatile"),
                 "committed_label": "crisis",
                 "transition": mr.detect_transition(fast, slow) if slow else None,
                 "evidence": list(scores.evidence),

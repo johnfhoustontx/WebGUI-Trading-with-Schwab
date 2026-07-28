@@ -1089,7 +1089,7 @@ def test_crisis_check_republishes_on_attack(monkeypatch):
     env = bus.cache_get("cache:sentiment:regime")
     assert env is not None
     assert env.payload["committed_label"] == "crisis"
-    assert env.payload["label"] == "Crisis"
+    assert env.payload["label"] == "Volatile"   # internal key "crisis" -> "Volatile"
     assert env.payload["memberships"]["crisis"] >= 0.7
     assert set(env.payload) == set(handlers._REGIME_PUBLIC_KEYS)
     held = handlers._REGIME["state"]

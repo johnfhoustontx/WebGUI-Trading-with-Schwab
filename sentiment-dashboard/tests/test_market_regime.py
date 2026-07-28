@@ -31,6 +31,7 @@ def _quiet_range_day():
             "band_hug_frac": 0.1, "vwap_hold_frac": 0.55, "or_break_state": "none",
             "or_failed_count": 0, "wick_two_sided": 0.1, "whipsaw_count": 2,
             "profile_balance": 0.9, "rel_vol": 0.9, "atr_pctile": 0.3,
+            "vix_level": 15.0,
             "vix1d_spike_pct": -2.0, "term_inversion": 0.0,
             "gap_open_pct": 0.1, "gap_filled": True,
             "above_flip": True, "below_flip_deep": 0.0}
@@ -59,6 +60,7 @@ def _weak_everything_day():
             "band_hug_frac": 0.2, "vwap_hold_frac": 0.55, "or_break_state": "none",
             "or_failed_count": 0, "wick_two_sided": 0.2, "whipsaw_count": 2,
             "profile_balance": 0.05, "rel_vol": 1.0, "atr_pctile": 0.5,
+            "vix_level": 16.0,
             "vix1d_spike_pct": 0.0, "term_inversion": 0.05,
             "gap_open_pct": 0.0, "gap_filled": True,
             "above_flip": False, "below_flip_deep": 0.1}
@@ -140,6 +142,40 @@ def test_crisis_filled_gap_does_not_fire():
     # Even an extreme gap that has been FILLED (market recovered) is not crisis.
     ev = _quiet_range_day() | {"gap_open_pct": -5.5, "gap_filled": True}
     assert MR.score_regimes(ev).raw["crisis"] == 0.0
+
+
+def test_volatile_vix_level_is_the_primary_tell():
+    # Absolute VIX drives the volatile/stress regime: a stressed VIX saturates it,
+    # a normal VIX contributes nothing.
+    assert MR.score_regimes(_quiet_range_day() | {"vix_level": 34.0}).raw["crisis"] == 1.0
+    assert MR.score_regimes(_quiet_range_day() | {"vix_level": 18.0}).raw["crisis"] == 0.0
+    mid = MR.score_regimes(_quiet_range_day() | {"vix_level": 28.0}).raw["crisis"]
+    assert 0.0 < mid < 1.0
+
+
+def test_high_vix_trips_the_force_commit():
+    # A genuinely stressed VIX (~30+) must clear the fast-attack threshold so the
+    # label can snap to Volatile.
+    assert MR.crisis_attacked(
+        MR.score_regimes(_quiet_range_day() | {"vix_level": 31.0}).raw["crisis"])
+
+
+def test_normal_volatile_day_no_longer_reads_crisis():
+    # THE reported bug: a wide-range but otherwise-calm session (VIX ~18, ATR at
+    # the ~91st pctile, contango, no gap) used to read ~34% crisis off the ATR
+    # tell alone. With VIX as primary + the raised ATR floor it now reads 0.
+    ev = _quiet_range_day() | {"vix_level": 18.0, "atr_pctile": 0.91,
+                               "adx": 30, "band_hug_frac": 0.67, "whipsaw_count": 9,
+                               "or_failed_count": 3}
+    s = MR.score_regimes(ev)
+    assert s.raw["crisis"] == 0.0
+    assert max(s.raw, key=s.raw.get) != "crisis"
+
+
+def test_atr_floor_raised_only_extreme_range_contributes():
+    # A merely-wide day (91st pctile) contributes 0; a near-record day (99th) fires.
+    assert MR.score_regimes(_quiet_range_day() | {"atr_pctile": 0.91}).raw["crisis"] == 0.0
+    assert MR.score_regimes(_quiet_range_day() | {"atr_pctile": 0.99}).raw["crisis"] >= 0.9
 
 
 # ---------------------------------------------------------------- missing inputs

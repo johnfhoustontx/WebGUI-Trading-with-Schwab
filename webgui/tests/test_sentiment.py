@@ -343,7 +343,7 @@ def test_regime_mix_figure_is_a_stacked_area_plain_chart():
     # one series per regime, in a stable order, each with the right point count
     assert len(fig["series"]) == 5
     assert [s["name"] for s in fig["series"]] == [
-        "Mean Reversion", "Trending", "Breakout", "Choppy", "Crisis"]
+        "Mean Reversion", "Trending", "Breakout", "Choppy", "Volatile"]
     assert all(len(s["data"]) == 3 for s in fig["series"])
     # a stockChart would freeze in-place updates (see _intraday_figure) -> plain chart
     assert "stockChart" not in str(fig)

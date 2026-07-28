@@ -195,8 +195,8 @@ def test_autonomous_e2e_packet_carries_structural_regime(fake_bus, monkeypatch):
 
     mr = seen["pkt"]["market_read"]["market_regime"]
     assert mr["label"] == "Trending" and mr["confidence"] == 0.62
-    assert mr["top"][0] == ("trending", 0.52)
-    assert mr["transition"] == "mean_reversion -> trending 60%"
+    assert mr["top"][0] == ("Trending", 0.52)       # display label, not the raw key
+    assert mr["transition"] == "Mean Reversion -> Trending 60%"
     row = fake_bus.cache_get("cache:driver:autonomous").payload["decisions"][0]
     assert "Trending" in row["market_read"]
 

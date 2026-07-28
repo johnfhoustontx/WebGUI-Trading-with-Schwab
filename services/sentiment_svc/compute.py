@@ -720,7 +720,7 @@ _REGIME_LABELS = {
     "trending": "Trending",
     "breakout": "Breakout",
     "choppy": "Choppy",
-    "crisis": "Crisis",
+    "crisis": "Volatile",   # internal key "crisis"; displayed as Volatile
     "": "Unclear",
     None: "Unclear",
 }
