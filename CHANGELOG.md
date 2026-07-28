@@ -8,6 +8,29 @@ reports are under [`docs/plans/`](docs/plans) and [`docs/audits/`](docs/audits).
 This is a single-user project on a long-lived `Using_Highcharts` branch; entries are dated
 rather than version-tagged.
 
+## 2026-07-28
+
+### Added
+- **Momentum cascade** — a regime-conditioned momentum score across three levels
+  (11 sectors, **70** industry ETFs, 311 stocks), sourced from the new **Stocks** tab in
+  `Sectors_Industries_ETFs.xlsx`. Pure math in `sentiment-dashboard/scoring/momentum.py`
+  (Clenow trend x R², relative strength, acceleration, path quality, participation) and
+  `scoring/momentum_regime.py` (dispersion + crash risk → favorable / neutral / suppressed).
+  Orchestrated by `services/sentiment_svc` on **one nightly slot at 16:20 CT** into a new
+  SQLite store (`momentum.db`) and published as **`cache:sentiment:momentum`**
+  (`MomentumSnapshot`). New webgui tab **`/sentiment/momentum`** — regime banner, quadrant
+  scatter, rank ribbon, and a decomposable top/bottom-15 leaderboard.
+  Design/plan: [docs/plans/2026-07-28-momentum-cascade-design.md](docs/plans/2026-07-28-momentum-cascade-design.md)
+  / [-plan.md](docs/plans/2026-07-28-momentum-cascade-plan.md).
+
+### Notes
+- Momentum is **context on its own cache key, NOT a sentiment component** —
+  `scoring/__init__.py:WEIGHTS`, the composite, and the bridge are untouched.
+- The industry level scores **70** ETFs, not the 74 industries on the Stocks tab: `MJ`,
+  `XRT`, `BETZ` and `VEGI` are each listed under two industries, and scoring one price
+  series twice would invent a "two industries agree" signal. Those four surface in
+  `excluded` with `reason: "duplicate_etf"`.
+
 ## 2026-07-02
 
 ### Added
