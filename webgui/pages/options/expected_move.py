@@ -193,6 +193,11 @@ def render():
             _enqueue(state["last"])
 
     draw_btn.on_click(_draw)
+    # Pressing Enter in Symbol OR Expiry draws (the form's load equivalent). No
+    # tab-out trigger: Draw needs BOTH a symbol and an expiry, so tabbing from the
+    # symbol into the expiry field must not fire a premature "expiry required" draw.
+    symbol_in.on("keydown.enter", lambda e: _draw())
+    expiry_in.on("keydown.enter", lambda e: _draw())
     lookback_sel.on_value_change(lambda e: _lookback_changed())
 
     @guard

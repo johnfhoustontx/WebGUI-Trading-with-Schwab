@@ -17,6 +17,7 @@ STRINGS. The pure builders (``bars_from_gex`` sorts + numeric-compares strikes;
 via ``_refloat_keys`` BEFORE feeding the builders. The builders stay unchanged.
 """
 from pages.ui_guard import guard, guard_async
+from .inputs import select_all_on_focus
 from .theme import BTN, BTN_PRIMARY
 
 POS_COLOR = "#66bb6a"
@@ -891,8 +892,9 @@ def render():
 
     with ui.row().classes("items-center gap-3 flex-wrap w-full"):
         _sym_opts = symbol_options(bus_client.read("options:gamma_symbols"))
-        symbol_in = ui.select(_sym_opts, value=_DEFAULT_SYMBOL,
-                              with_input=True, label="Symbol").classes("w-40")
+        symbol_in = select_all_on_focus(
+            ui.select(_sym_opts, value=_DEFAULT_SYMBOL,
+                      with_input=True, label="Symbol").classes("w-40"))
         fetch_btn = ui.button("Refresh now", icon="refresh", color=None).props("no-caps").classes(BTN_PRIMARY)
         # Explain / Analyze / Briefings push to the RIGHT of the frame (2026-07-11).
         ui.space()

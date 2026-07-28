@@ -22,7 +22,7 @@ from nicegui import ui
 
 from pages.ui_guard import guard
 
-from .inputs import select_all_on_focus
+from .inputs import bind_symbol_load, select_all_on_focus
 from .theme import BTN_3D
 
 from . import detail, handoff, strategy_table
@@ -47,7 +47,7 @@ def render():
         # + Scan all sit on one line (the detail panel no longer squeezes them).
         with ui.row().classes("items-end gap-3 flex-wrap"):
             symbol_in = select_all_on_focus(
-                ui.input("Symbol", value="SPY").props("autofocus").classes("w-28 uppercase"))
+                ui.input("Symbol", value="SPY").props("autofocus").classes("w-28"))
             dte_min = ui.number("DTE min", value=0, min=0).classes("w-24")
             dte_max = ui.number("DTE max", value=120, min=1).classes("w-24")
             with ui.column().classes("gap-0"):
@@ -152,8 +152,9 @@ def render():
         status.text = "Scanning…"
 
     scan_btn.on_click(_request_scan)
-    # Enter in the Symbol field triggers the scan (mirrors the Scan button).
-    symbol_in.on("keydown.enter", lambda: _request_scan())
+    # Enter OR tab/click-out of the Symbol field triggers the scan (mirrors the Scan
+    # button), deduped so tabbing through an unchanged symbol won't re-scan.
+    bind_symbol_load(symbol_in, _request_scan)
 
     # Initial paint from the bus cache (graceful-empty if the service is cold).
     seen["version"] = bus_client.read_version("options:swing")

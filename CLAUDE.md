@@ -8,7 +8,22 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-07-27 (**Simulator slider text → plain language, symbols dropped (all sub-tabs)**:
+**Last updated:** 2026-07-27 (**App-wide Symbol-field UX — uppercase / Tab+Enter load / click-to-select**:
+every Symbol entry field now behaves identically, driven by the shared `webgui/pages/options/inputs.py`
+helpers. **(1) All caps** — `select_all_on_focus` now also adds the `uppercase` class (`text-transform`,
+applied ONLY to the Symbol field; the load handlers still read `value.upper()`, which owns correctness).
+**(2) Tab/Enter = load** — a NEW `bind_symbol_load(inp, load, *, tab=True)` fires the page's load/fetch/scan
+on **Enter** and on **focusout** (tab/click-out), deduped via `should_load` (seeded from the initial value,
+so a default `SPY` doesn't auto-load on first blur; the Load BUTTON still force-loads). **(3) Click-to-
+highlight** — `select_all_on_focus` now DEFERS its `select()` one tick (`setTimeout`), because on a mouse
+click the browser's mouseup drops the caret and clears a synchronous selection — the old immediate select
+only survived tab-in, not a click. **Wiring**: Calc/Sim/Trade already had Enter+focusout+dedup (uppercase
++ the click fix come free via `select_all_on_focus`); **Swing** + **Rescue** gained focusout via
+`bind_symbol_load`; **Expected Move** gained Enter→Draw on Symbol+Expiry (NO focusout — it's a multi-field
+form needing an expiry, so tabbing symbol→expiry must not submit); **Gamma**'s select-with-input gained
+uppercase + focus-select (it already loads on change). **Restart the webgui.** webgui **939** green (+2
+inputs tests); ruff clean; live-verified with real keystrokes (Calc: type "aapl"→AAPL chain on Tab; Swing:
+"amd"→AMD scan on Tab, overwrote SPY on click, displays caps). Prior — 2026-07-27 (**Simulator slider text → plain language, symbols dropped (all sub-tabs)**:
 a webgui-only copy rewrite of `webgui/pages/options/simulator.py`'s user-facing text so the Replay /
 What-if / IV-shock controls read in plain English with no math notation. Slider labels + tooltips:
 `ΔS 0%`→**"Price change: 0%"**, `Δt 5d elapsed`→**"Days passed: 5"**, `IV ×1.5`→**"Volatility multiplier:
