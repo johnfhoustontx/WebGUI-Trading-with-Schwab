@@ -4681,11 +4681,11 @@ def sim_run(symbol, expiry=None, kind=None, strike=None, direction=None,
 
 
 _REPLAY_OVERRIDES = {
-    "1m_1d":   {"freq_type": "minute", "minutes": 1,  "days": 1,  "label": "1-min · 1d"},
-    "5m_3d":   {"freq_type": "minute", "minutes": 5,  "days": 3,  "label": "5-min · 3d"},
-    "5m_5d":   {"freq_type": "minute", "minutes": 5,  "days": 5,  "label": "5-min · 5d"},
-    "15m_10d": {"freq_type": "minute", "minutes": 15, "days": 10, "label": "15-min · 10d"},
-    "1d_20d":  {"freq_type": "daily",  "months": 1,   "bars": 20, "label": "daily · 20d"},
+    "1m_1d":   {"freq_type": "minute", "minutes": 1,  "days": 1,  "label": "1-minute bars, 1 day"},
+    "5m_3d":   {"freq_type": "minute", "minutes": 5,  "days": 3,  "label": "5-minute bars, 3 days"},
+    "5m_5d":   {"freq_type": "minute", "minutes": 5,  "days": 5,  "label": "5-minute bars, 5 days"},
+    "15m_10d": {"freq_type": "minute", "minutes": 15, "days": 10, "label": "15-minute bars, 10 days"},
+    "1d_20d":  {"freq_type": "daily",  "months": 1,   "bars": 20, "label": "daily bars, 20 days"},
 }
 
 
@@ -4706,15 +4706,15 @@ def replay_lookback_spec(dte, override="auto") -> dict:
     except (TypeError, ValueError):
         dte = 15
     if dte <= 0:
-        return {"freq_type": "minute", "minutes": 1, "days": 1, "label": "1-min · 1d"}
+        return {"freq_type": "minute", "minutes": 1, "days": 1, "label": "1-minute bars, 1 day"}
     if dte <= 5:
-        return {"freq_type": "minute", "minutes": 5, "days": 3, "label": "5-min · 3d"}
+        return {"freq_type": "minute", "minutes": 5, "days": 3, "label": "5-minute bars, 3 days"}
     if dte <= 15:
-        return {"freq_type": "minute", "minutes": 5, "days": 5, "label": "5-min · 5d"}
+        return {"freq_type": "minute", "minutes": 5, "days": 5, "label": "5-minute bars, 5 days"}
     bars = math.ceil(dte / 2)
     months = max(1, math.ceil(bars / 21))
     return {"freq_type": "daily", "months": months, "bars": bars,
-            "label": f"daily · {bars}d"}
+            "label": f"daily bars, {bars} days"}
 
 
 def sim_replay(symbol, expiry=None, kind=None, strike=None, direction=None,
@@ -4814,13 +4814,13 @@ def sim_replay(symbol, expiry=None, kind=None, strike=None, direction=None,
     sessions_n = len(gap_indices) + 1 if len(hist) else 0
     if len(hist) >= 2:
         if median_delta_s < 120:
-            resolution = f"{len(hist)} bars, 1-min × {sessions_n} sessions"
+            resolution = f"{len(hist)} bars, 1-minute, {sessions_n} sessions"
         elif median_delta_s < 3600:
-            resolution = (f"{len(hist)} bars, {int(round(median_delta_s/60))}-min "
-                          f"× {sessions_n} sessions")
+            resolution = (f"{len(hist)} bars, {int(round(median_delta_s/60))}-minute, "
+                          f"{sessions_n} sessions")
         else:
             span_days = (hist.index[-1] - hist.index[0]).days or 1
-            resolution = f"{len(hist)} bars, ~{span_days}d daily"
+            resolution = f"{len(hist)} bars, daily, ~{span_days} days"
     else:
         resolution = f"{len(hist)} bar"
 

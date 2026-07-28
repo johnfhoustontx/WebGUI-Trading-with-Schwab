@@ -2237,7 +2237,7 @@ def test_sim_replay_override_uses_fixed_window(monkeypatch):
                              lookback="15m_10d")
     assert calls["intraday"][1] == 15              # minutes from the override
     assert calls["intraday"][2] == 10              # days from the override
-    assert out["lookback"]["label"] == "15-min · 10d"
+    assert out["lookback"]["label"] == "15-minute bars, 10 days"
     assert out["lookback"]["key"] == "15m_10d"
 
 
