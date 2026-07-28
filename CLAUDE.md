@@ -8,7 +8,18 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-07-27 (**IV Rank column on the scanner/finder tables**: added an **IV Rank**
+**Last updated:** 2026-07-27 (**Simulator slider text → plain language, symbols dropped (all sub-tabs)**:
+a webgui-only copy rewrite of `webgui/pages/options/simulator.py`'s user-facing text so the Replay /
+What-if / IV-shock controls read in plain English with no math notation. Slider labels + tooltips:
+`ΔS 0%`→**"Price change: 0%"**, `Δt 5d elapsed`→**"Days passed: 5"**, `IV ×1.5`→**"Volatility multiplier:
+1.5"**, `Cursor —`→**"Drag the slider to step through time"** (cursor readout `Cursor {ts}`→"Showing
+{ts}"). Chart text: What-if axes `Underlying`/`P / L`→**"Underlying price"/"Profit / loss"** + tooltip
+`S {x} → P/L …`→**"Price {x}: profit / loss …"** (drops the `→`/`S`); IV-shock legend `base (×1.0)`/
+`shock (×N)`→**"Current volatility"/"Volatility multiplied by N"**, category `Gamma×100`→**"Gamma (times
+100)"**; Replay look-back menu `1-min · 1d`→**"1-minute bars, 1 day"** (etc.). Trader terms kept
+(Delta/Gamma/Theta/Vega/Rho, "IV"). No logic/figure-structure change — pure labels; the earlier RRG
+quadrant-label half of this request already shipped. **Restart the webgui.** webgui test_options_simulator
+**22** green; ruff clean; live figure-text verified symbol-free. Prior — 2026-07-27 (**IV Rank column on the scanner/finder tables**: added an **IV Rank**
 column to all four opportunity tables — **Market Scanner** 0-DTE / Swing / Directional and the **Strategy
 Finder** — so the dealer-cheap/rich IV context sits beside each candidate's score. **Data path**: the
 per-symbol `iv_rank` already lives in `run_iv_analysis` output. In `scanner_engine.run_full_scan` the
