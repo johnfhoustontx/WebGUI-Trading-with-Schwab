@@ -119,6 +119,14 @@ oracle both exist to make that deliberate.
 recomputing ~390 regressions every two minutes would be pure waste and would load
 the proxy during RTH for no signal.
 
+**Two liquidity floors, by role.** A STOCK must clear **$5M** 20d average dollar
+volume ("can I hold a position" — several small caps on the Stocks tab cannot,
+and would top the leaderboard on a thin-volume pop). An industry/sector **ETF**
+only has to clear **$250k** ("is this price series trustworthy enough to
+regress") — it is a measurement instrument and the trade is expressed through its
+constituents. Using the stock floor for both was measured on 2026-07-28 to delete
+**23 of 70 industry ETFs**, silently gutting a third of that cross-section.
+
 **The industry level scores 70 ETFs, not 74.** Four of the Stocks tab's 74
 industries name an ETF another industry already owns (`MJ`, `XRT`, `BETZ`, `VEGI`
 are each listed twice in the workbook, and `load_sectors_data` dedupes ETFs
