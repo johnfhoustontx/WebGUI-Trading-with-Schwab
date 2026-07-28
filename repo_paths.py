@@ -52,6 +52,11 @@ SENTIMENT_INTRADAY_DB = SENTIMENT / "data" / "sentiment_intraday.db"
 # sentiment_svc each RTH refresh.
 SECTOR_PCR_HISTORY_DB = SENTIMENT / "data" / "sector_pcr.db"
 
+# Daily bars + scored momentum levels for the Momentum Cascade. max_date() on the
+# bars table drives the nightly delta fetch; the scores table is what the webgui
+# page reads, so the page never calls the proxy. Written by sentiment_svc nightly.
+MOMENTUM_DB = SENTIMENT / "data" / "momentum.db"
+
 # Daily committed market-state (the five-state classifier's RTH output) recorded
 # for later validation/backtesting. One row per LOCAL calendar date (today's row
 # REPLACE-updates each RTH recompute); written by sentiment_svc.
