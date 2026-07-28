@@ -103,9 +103,17 @@ def test_quadrant_figure_labels_the_four_quadrants():
                for b in sm.quadrant_figure(_payload()["levels"]["industry"])
                ["yAxis"].get("plotBands", [])}
 
-    assert {"Extended", "Emerging", "Leading", "Lagging"} <= {
+    assert {"Weakening", "Improving", "Leading", "Lagging"} <= {
         q for q in sm.QUADRANTS.values()}
     assert labels or True     # bands are optional; the vocabulary is the contract
+
+
+def test_quadrant_vocabulary_matches_the_rrg_page():
+    # Both are 2x2 strength-vs-rate-of-change scatters in the same nav group;
+    # two charts sharing half a vocabulary reads as a bug, not a distinction.
+    from pages.sentiment_rotation import _QUAD_COLOR
+
+    assert set(sm.QUADRANTS.values()) == set(_QUAD_COLOR)
 
 
 def test_quadrant_figure_of_nothing_is_still_a_valid_chart():
@@ -116,8 +124,8 @@ def test_quadrant_figure_of_nothing_is_still_a_valid_chart():
 
 def test_quadrant_names_the_corner_by_score_and_acceleration():
     assert sm.quadrant_for(1.0, 1.0) == "Leading"
-    assert sm.quadrant_for(1.0, -1.0) == "Extended"
-    assert sm.quadrant_for(-1.0, 1.0) == "Emerging"
+    assert sm.quadrant_for(1.0, -1.0) == "Weakening"
+    assert sm.quadrant_for(-1.0, 1.0) == "Improving"
     assert sm.quadrant_for(-1.0, -1.0) == "Lagging"
 
 

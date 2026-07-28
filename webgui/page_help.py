@@ -239,9 +239,11 @@ current market pays for chasing them. Recomputed **once a night**, not live.
   momentum-crash risk (a volatile rebound off a low, where the biggest losers rip
   hardest) — the leaderboard below dims, and that is deliberate.
 - **The scatter** — right means strong, up means still accelerating. Top-right is
-  **Leading**, top-left **Emerging** (turning up early), bottom-right **Extended**
-  (strong but fading), bottom-left **Lagging**. Switch between industries and stocks
-  with the dropdown.
+  **Leading**, top-left **Improving** (turning up early), bottom-right **Weakening**
+  (strong but fading — late, don't chase), bottom-left **Lagging**. Same four names
+  as the **RRG** tab, though the axes differ: RRG measures strength purely against
+  the S&P, while this score blends five things of which relative strength is one.
+  Switch between industries and stocks with the dropdown.
 - **The ribbon** shows rank over recent sessions — steady climbers beat one-day pops.
 - **The tables** show every component behind the score (trend, relative strength,
   acceleration, path quality, participation) so you can see *why* something ranks.

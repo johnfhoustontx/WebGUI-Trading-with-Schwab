@@ -22,10 +22,16 @@ BANNER_CLASSES = {
     "suppressed": "text-[#ef5350] text-h6 text-bold",
 }
 
+# Deliberately the SAME four names the RRG page uses (pages.sentiment_rotation
+# _QUAD_COLOR). Both charts are 2x2 strength-vs-rate-of-change scatters sitting on
+# adjacent tabs in one nav group, so two vocabularies that agree on half the
+# corners read as a bug rather than a distinction. The axes still differ — RRG is
+# purely relative to SPY, this x is a five-component blend — and that nuance lives
+# in the tooltip and page help, not in a second set of names.
 QUADRANTS = {
     "leading": "Leading",       # strong and still accelerating
-    "emerging": "Emerging",     # weak but turning up — the early screen
-    "extended": "Extended",     # strong but decelerating — the late screen
+    "improving": "Improving",   # weak but turning up — the early screen
+    "weakening": "Weakening",   # strong but decelerating — late, do not chase
     "lagging": "Lagging",
 }
 
@@ -105,8 +111,8 @@ def quadrant_for(score, accel):
     if score is None or accel is None:
         return ""
     if score >= 0:
-        return QUADRANTS["leading"] if accel >= 0 else QUADRANTS["extended"]
-    return QUADRANTS["emerging"] if accel >= 0 else QUADRANTS["lagging"]
+        return QUADRANTS["leading"] if accel >= 0 else QUADRANTS["weakening"]
+    return QUADRANTS["improving"] if accel >= 0 else QUADRANTS["lagging"]
 
 
 def _accel(row):
