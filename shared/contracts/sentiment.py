@@ -1,6 +1,6 @@
 from numbers import Real
 
-from pydantic import field_validator
+from pydantic import ConfigDict, Field, field_validator
 
 from .envelope import _Base
 
@@ -55,4 +55,36 @@ class RegimeState(_Base):
         missing = {"from", "to", "progress"} - set(v)
         if missing:
             raise ValueError(f"transition missing keys {sorted(missing)}")
+        return v
+
+
+class MomentumSnapshot(_Base):
+    """The nightly momentum cascade — its OWN cache view.
+
+    Deliberately NOT part of the sentiment composite: scoring/__init__.WEIGHTS
+    is untouched and the bridge never sees these numbers. Momentum is context,
+    published on its own key. Fields are additive across minor versions, same
+    rule as the bridge.
+    """
+    model_config = ConfigDict(populate_by_name=True)
+
+    # The wire key is "schema" (the design's payload), but a field named
+    # `schema` shadows pydantic's BaseModel.schema and warns at class creation.
+    schema_version: int = Field(1, alias="schema")
+    computed_at: str = ""
+    session_date: str
+    regime: dict = {}
+    levels: dict                     # exactly sector / industry / stock
+    excluded: list = []              # [{"symbol", "reason"}] -> the page footer
+
+    @field_validator("levels")
+    @classmethod
+    def _exactly_three_levels(cls, v: dict) -> dict:
+        expected = {"sector", "industry", "stock"}
+        if set(v) != expected:
+            raise ValueError(
+                f"expected exactly the levels {sorted(expected)}, got {sorted(v)}")
+        for name, rows in v.items():
+            if not isinstance(rows, list):
+                raise ValueError(f"level {name!r} must be a list, got {type(rows)}")
         return v

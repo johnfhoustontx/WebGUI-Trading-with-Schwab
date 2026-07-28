@@ -186,12 +186,14 @@ CACHE_ROTATION = "cache:sentiment:rotation"
 CACHE_INTRADAY = "cache:sentiment:intraday_history"
 CACHE_REGIME = "cache:sentiment:regime"
 CACHE_REGIME_HISTORY = "cache:sentiment:regime_history"
+CACHE_MOMENTUM = "cache:sentiment:momentum"
 
 EVENT_COMPOSITE = "events:sentiment:composite"
 EVENT_SECTORS = "events:sentiment:sectors"
 EVENT_ROTATION = "events:sentiment:rotation"
 EVENT_INTRADAY = "events:sentiment:intraday_history"
 EVENT_REGIME = "events:sentiment:regime"
+EVENT_MOMENTUM = "events:sentiment:momentum"
 
 
 # --- 2-min intraday sentiment+trend series ------------------------------------
@@ -701,10 +703,49 @@ def refresh_rotation(bus) -> None:
     bus.publish(EVENT_ROTATION, {"version": version})
 
 
+# --- momentum cascade (nightly) ----------------------------------------------
+# A single lock + last-session sentinel so a manual refresh from the page racing
+# the scheduled run cannot start the ~390-symbol backfill twice.
+_MOMENTUM = {"session": None}
+_MOMENTUM_LOCK = threading.Lock()
+
+
+def reset_momentum_state():
+    """Forget the last-run session (test helper)."""
+    with _MOMENTUM_LOCK:
+        _MOMENTUM["session"] = None
+
+
+def refresh_momentum(bus, session_date=None, force=False) -> None:
+    """Run the nightly momentum cascade and publish ``cache:sentiment:momentum``.
+
+    A fourth view alongside composite / history / sectors — nothing existing
+    changes. Serialized on ``_MOMENTUM_LOCK`` and skipped when this session has
+    already been computed, so a manual refresh cannot double-run the backfill;
+    ``force`` is the manual override. Defensive: a compute failure logs and
+    leaves the previous view in place rather than caching a broken payload.
+    """
+    with _MOMENTUM_LOCK:
+        target = str(session_date or _session_date())
+        if not force and _MOMENTUM["session"] == target:
+            return
+        try:
+            payload = compute.compute_momentum(session_date=target)
+        except Exception:  # noqa: BLE001 — never let the nightly slot kill the loop.
+            log.exception("momentum refresh failed")
+            return
+        _MOMENTUM["session"] = target
+    version = bus.cache_set(CACHE_MOMENTUM, payload)
+    bus.publish(EVENT_MOMENTUM, {"version": version})
+
+
 def handle_command(bus, command) -> None:
     """Dispatch a ``cmd:sentiment`` command. ``refresh`` → full refresh,
-    ``refresh_rotation`` → rotation-only refresh; else no-op."""
+    ``refresh_rotation`` → rotation-only refresh, ``refresh_momentum`` → a
+    forced momentum recompute (the page's manual button); else no-op."""
     if command.type == "refresh":
         refresh(bus, with_sectors=True)
     elif command.type == "refresh_rotation":
         refresh_rotation(bus)
+    elif command.type == "refresh_momentum":
+        refresh_momentum(bus, force=True)
