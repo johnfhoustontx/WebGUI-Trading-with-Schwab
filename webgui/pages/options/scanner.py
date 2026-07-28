@@ -49,6 +49,12 @@ def _round(value, ndigits=2):
     return round(value, ndigits) if isinstance(value, (int, float)) else value
 
 
+def iv_rank_value(value):
+    """IV Rank cell value: the rank rounded to a whole number (0-100) for a clean,
+    numerically-sortable cell, or ``None`` (blank) when it's missing/non-numeric."""
+    return round(value) if isinstance(value, (int, float)) else None
+
+
 # Quality zones for the composite score (match the speedometer in svg.py /
 # the colors in detail.py): <40 RED, <55 AMBER, <75 BLUE, else GREEN.
 RED, AMBER, BLUE, GREEN = "#ef5350", "#ffa726", "#42a5f5", "#66bb6a"
@@ -131,6 +137,7 @@ def signal_columns():
         ("max_loss", "Max Loss"),
         ("rr_pct", "R/R %"),
         ("pop_pct", "PoP %"),
+        ("iv_rank", "IV Rank"),
         ("composite_score", "Score"),
         ("grade", "Grade"),
         _DROPPED_COL,
@@ -183,6 +190,7 @@ def signal_rows(signals):
             "max_loss": _round(s.get("max_loss")),
             "rr_pct": _round(s.get("rr_pct"), 1),
             "pop_pct": _round(s.get("pop_pct"), 1),
+            "iv_rank": iv_rank_value(s.get("iv_rank")),
             "composite_score": s.get("composite_score"),
             "_score_class": score_zone_class(s.get("composite_score")),
             "grade": s.get("grade", ""),

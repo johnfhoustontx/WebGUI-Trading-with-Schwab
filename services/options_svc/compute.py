@@ -331,6 +331,12 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
 
     signals = ssc.score_all(signals, view, atm_iv, em_1sd, market_state=market_state)
     assign_ids(signals, symbol)
+    # Surface the symbol's IV Rank onto every candidate for the table's IV Rank
+    # column. Single-symbol scan, so all candidates share the one value; None when
+    # the IV analysis couldn't compute a rank.
+    iv_rank = iv.get("iv_rank")
+    for s in signals:
+        s["iv_rank"] = iv_rank
     return {"signals": signals, "view": view}
 
 

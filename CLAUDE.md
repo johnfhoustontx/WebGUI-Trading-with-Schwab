@@ -8,7 +8,24 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-07-27 (**Rebrand → NeuralStrike**: the app is renamed from "Schwab Trading" to
+**Last updated:** 2026-07-27 (**IV Rank column on the scanner/finder tables**: added an **IV Rank**
+column to all four opportunity tables — **Market Scanner** 0-DTE / Swing / Directional and the **Strategy
+Finder** — so the dealer-cheap/rich IV context sits beside each candidate's score. **Data path**: the
+per-symbol `iv_rank` already lives in `run_iv_analysis` output. In `scanner_engine.run_full_scan` the
+iv_rank injection was **hoisted out of the `signal_recorder` try** (so an import failure there can't strip
+the column) and **extended to `signals_directional`** (previously only 0-DTE/Swing got it; missing IV → 0
+sentinel, unchanged); in `options_svc.compute.swing_scan` each candidate is stamped with the single
+symbol's `iv_rank` (None when the IV analysis can't compute a rank). **Display**: `scanner.signal_columns`/
+`signal_rows` + the shared `strategy_table.strategy_columns`/`strategy_rows` (which the Directional tab and
+the Strategy Finder both render) gained an `("iv_rank","IV Rank")` column placed before Score; the cell is
+`scanner.iv_rank_value` — the rank rounded to a whole number (numerically sortable) or blank when
+missing/non-numeric. Additive/back-compat (freeform signal dicts, `_DAY_STRIP` doesn't touch it, so the day
+union carries it through). **Restart `options_svc` + the webgui** — cached OLD-engine signals have no
+iv_rank until the next scan republishes. Live-verified end-to-end against the proxy (SPY swing 35 signals
+all iv_rank 65.2; directional SPY 65.2 / QQQ 71.8, all 16 carry it). webgui **903** + options_svc
+test_compute/handlers **331** green (+ the 2 documented `test_expected_move` baseline fails elsewhere);
+options-scanner scanner_engine/signal_recorder green (bar the 2 pre-existing `TestEarningsAvoidance`
+stale-fixture fails); ruff clean. Prior — 2026-07-27 (**Rebrand → NeuralStrike**: the app is renamed from "Schwab Trading" to
 **NeuralStrike** and the supplied logo is in the header. **Header lockup** = the **NS monogram** + a
 **two-tone wordmark** ("Neural" gold / "Strike" blue, **Montserrat ExtraBold**, uppercase) — replacing the
 old blue-gradient tile + chart-glyph SVG (`.brand-tile` deleted, dead). The gradient stops are **SAMPLED

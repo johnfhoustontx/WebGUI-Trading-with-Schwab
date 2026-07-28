@@ -188,6 +188,8 @@ def test_swing_scan_multistrategy_pipeline(monkeypatch):
     assert out["signals"] and all("composite_score" in s for s in out["signals"])
     # ids assigned.
     assert all(s.get("id") for s in out["signals"])
+    # The symbol's IV Rank is surfaced onto every candidate (for the table's column).
+    assert all(s.get("iv_rank") == 50.0 for s in out["signals"])
 
 
 def test_swing_scan_families_filter(monkeypatch):

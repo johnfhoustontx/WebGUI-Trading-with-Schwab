@@ -1610,13 +1610,19 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
         s["expected_pnl_target"] = calc_expected_pnl(cr, ml, pop, s["contracts_for_target"])
         s["max_profit_target"] = round(cr * s["contracts_for_target"] * 100, 2)
 
+    # Surface each symbol's IV Rank onto its signals so the scanner tables can show
+    # it (it lives in results["iv_data"], not on the signal dicts). Covers the
+    # DIRECTIONAL pass too, not just the credit spreads. Unconditional — hoisted OUT
+    # of the signal_recorder try below so an import failure there can't strip the
+    # column — and missing IV data falls back to 0 (the historically-cheap sentinel,
+    # matching the recorder's own prior default).
+    for key in ("signals_0dte", "signals_swing", "signals_directional"):
+        for s in results[key]:
+            s["iv_rank"] = results["iv_data"].get(s.get("symbol"), {}).get("iv_rank") or 0
+
     # Persist signals to the signal-tracking DB (score >= 50 dedup)
     try:
         import signal_recorder
-        # Inject per-symbol iv_rank (lives in results["iv_data"], not on signal dicts)
-        for sig_list in (results["signals_0dte"], results["signals_swing"]):
-            for s in sig_list:
-                s["iv_rank"] = results["iv_data"].get(s["symbol"], {}).get("iv_rank") or 0
         signal_recorder.record_signals(results["signals_0dte"], "0DTE")
         signal_recorder.record_signals(results["signals_swing"], "SWING")
     except Exception as e:

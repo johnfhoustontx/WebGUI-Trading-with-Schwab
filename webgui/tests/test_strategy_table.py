@@ -156,6 +156,22 @@ def test_strategy_columns_shape():
         assert expected in names
 
 
+def test_strategy_columns_include_iv_rank():
+    """The multi-strategy table (Strategy Finder + the Scanner's Directional tab)
+    carries an IV Rank column, sortable like the other data columns."""
+    cols = {c["field"]: c for c in st.strategy_columns()}
+    assert cols["iv_rank"]["label"] == "IV Rank"
+    assert cols["iv_rank"]["sortable"] is True
+
+
+def test_strategy_rows_carry_iv_rank_rounded():
+    """IV Rank from the signal shows as a whole number; absent → blank (None)."""
+    sig = _long_call()
+    sig["iv_rank"] = 63.2
+    assert st.strategy_rows([sig])[0]["iv_rank"] == 63
+    assert st.strategy_rows([_pcs()])[0]["iv_rank"] is None   # fixture has no iv_rank
+
+
 def test_strategy_columns_actions_centered_and_not_sortable():
     cols = st.strategy_columns()
     actions = next(c for c in cols if c["name"] == "actions")
