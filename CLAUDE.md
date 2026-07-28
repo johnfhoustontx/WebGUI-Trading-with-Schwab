@@ -227,7 +227,11 @@ visually confirmed → real test push returned True). Design/plan:
 [design](docs/plans/2026-07-24-market-snapshot-push-design.md) /
 [plan](docs/plans/2026-07-24-market-snapshot-push-plan.md). Prior — 2026-07-23 (**Market Regime — blended structural classifier (Phase 1, CONTEXT-ONLY)**:
 a THIRD classification axis alongside the direction × aggression five-state — **market STRUCTURE**
-(*how* the tape is moving): **Mean Reversion / Trending / Breakout / Choppy / Crisis**. Built
+(*how* the tape is moving): **Mean Reversion / Trending / Breakout / Choppy / Volatile**
+(the fifth regime was renamed **Crisis → Volatile** on 2026-07-24 — "Crisis" overstated what it
+detects; the internal membership key stays `crisis`). Its **primary tell is now the absolute VIX level**
+(`ramp(VIX, 22, 34)`); the ATR-percentile floor was raised 0.85→0.92 so a merely-wide day no longer
+reads ~34% — it now needs genuinely elevated implied/realized vol. Built
 **soft-first**: the primary output is a **membership VECTOR** (each regime a continuous 0-1 weight),
 so a regime handover reads as a **gradual band shift + an explicit transition** ("Mean Reversion →
 Trending · 60%") instead of a threshold flip; the hard label is derived for display only and lags
