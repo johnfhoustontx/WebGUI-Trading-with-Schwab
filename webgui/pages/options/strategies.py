@@ -75,12 +75,12 @@ STRATEGY_MENU = [
 
 
 def strategy_label(code):
-    """Display label for a strategy code: 'PCS' → 'Credit spread · put',
+    """Display label for a strategy code: 'PCS' → 'Credit spread — put',
     'LONG_CALL' → 'Long call'. Falls back to the code itself."""
     for family, variants in STRATEGY_MENU:
         for vlabel, vcode in variants:
             if vcode == code:
-                return vlabel if family == "Single" else f"{family} · {vlabel.lower()}"
+                return vlabel if family == "Single" else f"{family} — {vlabel.lower()}"
     return code
 
 
