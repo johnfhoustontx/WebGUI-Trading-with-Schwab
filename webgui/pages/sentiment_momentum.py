@@ -272,6 +272,28 @@ LEADERBOARD_COLUMNS = [
     {"name": "quadrant", "label": "Quadrant", "field": "quadrant", "align": "left"},
 ]
 
+# Columns that only mean anything at one level. Rendering a permanently empty
+# column reads as a broken page — which is exactly how the blank Align column
+# looked on the industry view.
+_LEVEL_ONLY = {"alignment": "stock", "participation": "industry"}
+
+
+def normalise_level(level):
+    """Coerce an untrusted level (e.g. a query param) to a known one."""
+    return level if level in LEVEL_OPTIONS else "industry"
+
+
+def section_heading(title, level):
+    """'Leaders — Stocks' — so which view you are on is never ambiguous."""
+    return f"{title} — {LEVEL_OPTIONS[normalise_level(level)]}"
+
+
+def leaderboard_columns(level):
+    """The column set for one level, minus the columns undefined there."""
+    level = normalise_level(level)
+    return [c for c in LEADERBOARD_COLUMNS
+            if _LEVEL_ONLY.get(c["field"], level) == level]
+
 
 # --- excluded footer --------------------------------------------------------
 
@@ -288,10 +310,10 @@ def excluded_tooltip(excluded):
 
 # --- page -------------------------------------------------------------------
 
-def render():
+def render(level="industry"):
     from nicegui import ui
 
-    state = {"ver": None, "level": "industry", "payload": None}
+    state = {"ver": None, "level": normalise_level(level), "payload": None}
 
     with ui.row().classes("items-center gap-3 w-full"):
         ui.label("Momentum").classes("text-h6")
@@ -299,7 +321,7 @@ def render():
             .classes("opacity-60 text-sm")
         status = ui.label("").classes("opacity-70 text-sm")
         ui.space()
-        level_sel = ui.select(LEVEL_OPTIONS, value="industry").props("dense outlined")
+        level_sel = ui.select(LEVEL_OPTIONS, value=state["level"]).props("dense outlined")
         ui.button("Refresh", icon="refresh", color=None,
                   on_click=lambda: _request_refresh()).props("no-caps").classes(BTN_3D)
 
@@ -313,11 +335,11 @@ def render():
 
     board = ui.column().classes("w-full q-mt-sm gap-2")
     with board:
-        ui.label("Leaders").classes("text-subtitle2 opacity-80")
-        top_table = ui.table(columns=LEADERBOARD_COLUMNS, rows=[],
+        top_head = ui.label("").classes("text-subtitle2 opacity-80")
+        top_table = ui.table(columns=leaderboard_columns(state["level"]), rows=[],
                              row_key="symbol").classes("w-full")
-        ui.label("Laggards").classes("text-subtitle2 opacity-80")
-        bottom_table = ui.table(columns=LEADERBOARD_COLUMNS, rows=[],
+        bottom_head = ui.label("").classes("text-subtitle2 opacity-80")
+        bottom_table = ui.table(columns=leaderboard_columns(state["level"]), rows=[],
                                 row_key="symbol").classes("w-full")
 
     footer = ui.label("").classes("opacity-60 text-xs")
@@ -340,10 +362,13 @@ def render():
         ribbon.update()
 
         top, bottom = leaderboard_rows(rows)
-        top_table.rows = top
-        top_table.update()
-        bottom_table.rows = bottom
-        bottom_table.update()
+        cols = leaderboard_columns(state["level"])
+        top_head.text = section_heading("Leaders", state["level"])
+        bottom_head.text = section_heading("Laggards", state["level"])
+        for table, data in ((top_table, top), (bottom_table, bottom)):
+            table.columns = cols
+            table.rows = data
+            table.update()
         # Muted beneath a suppressed banner — a leaderboard nobody should
         # trade must not read as the headline.
         board.classes(remove="opacity-40", add="opacity-40"

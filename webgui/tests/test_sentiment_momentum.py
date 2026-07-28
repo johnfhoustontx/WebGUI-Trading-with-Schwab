@@ -256,3 +256,48 @@ def test_rank_history_is_read_per_level():
 def test_rank_history_of_a_missing_payload_is_empty():
     assert sm.rank_history_for({}, "industry") == {}
     assert sm.rank_history_for(None, "stock") == {}
+
+
+# --- columns adapt to the level ---------------------------------------------
+
+def _fields(level):
+    return [c["field"] for c in sm.leaderboard_columns(level)]
+
+
+def test_industry_view_drops_the_stock_only_alignment_column():
+    # Alignment is a stock-level flag; a permanently blank column reads as broken.
+    assert "alignment" not in _fields("industry")
+    assert "participation" in _fields("industry")
+
+
+def test_stock_view_drops_the_undefined_participation_column():
+    # Participation is undefined at stock level — it would be all em-dashes.
+    assert "participation" not in _fields("stock")
+    assert "alignment" in _fields("stock")
+
+
+def test_both_levels_keep_the_component_columns():
+    for level in ("industry", "stock"):
+        assert {"trend", "rs", "accel", "path", "score"} <= set(_fields(level))
+
+
+def test_unknown_level_falls_back_to_the_full_column_set():
+    assert _fields("nonsense") == _fields("industry")
+
+
+# --- level is addressable ---------------------------------------------------
+
+def test_normalise_level_accepts_the_known_levels():
+    assert sm.normalise_level("stock") == "stock"
+    assert sm.normalise_level("industry") == "industry"
+
+
+def test_normalise_level_rejects_junk():
+    assert sm.normalise_level("../etc/passwd") == "industry"
+    assert sm.normalise_level(None) == "industry"
+    assert sm.normalise_level("") == "industry"
+
+
+def test_section_heading_names_the_level():
+    assert "Industries" in sm.section_heading("Leaders", "industry")
+    assert "Stocks" in sm.section_heading("Leaders", "stock")

@@ -1252,10 +1252,12 @@ def sentiment_rrg_page() -> None:
 
 
 @ui.page("/sentiment/momentum")
-def sentiment_momentum_page() -> None:
+def sentiment_momentum_page(level: str = "industry") -> None:
+    # ?level=stock deep-links the Stocks view (the dropdown still switches it
+    # in place); render() coerces anything unknown back to industry.
     with _layout("/sentiment/momentum", "Momentum"):
         from pages import sentiment_momentum
-        sentiment_momentum.render()
+        sentiment_momentum.render(level=level)
 
 
 @ui.page("/trade")
