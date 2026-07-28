@@ -658,7 +658,7 @@ def render():
         if meta:
             spot = meta.get("spot")
             spot_txt = f"{spot:,.2f}" if isinstance(spot, (int, float)) else "—"
-            status.text = (f"{meta.get('symbol')} spot {spot_txt} · "
+            status.text = (f"{meta.get('symbol')} spot {spot_txt} — "
                            f"{meta.get('n_contracts')} contracts")
             # Kick off the first sweep + replay for the current legs.
             _enqueue_run()
