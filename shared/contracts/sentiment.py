@@ -75,6 +75,7 @@ class MomentumSnapshot(_Base):
     session_date: str
     regime: dict = {}
     levels: dict                     # exactly sector / industry / stock
+    rank_history: dict = {}          # level -> {symbol: [(date, rank)]} (ribbon)
     excluded: list = []              # [{"symbol", "reason"}] -> the page footer
 
     @field_validator("levels")

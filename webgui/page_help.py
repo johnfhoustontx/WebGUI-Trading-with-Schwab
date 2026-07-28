@@ -228,6 +228,31 @@ The Relative Rotation Graph: each sector's momentum vs the S&P 500, over time.
   it came from. **Hover** one to dim the rest.
 - **Risk-ON / OFF headline** gives the one-line summary. **Refresh** only.
 """,
+    "/sentiment/momentum": """
+**Momentum — the simple version**
+
+Which sectors, industries and stocks are actually moving — and whether the
+current market pays for chasing them. Recomputed **once a night**, not live.
+
+- **The banner is the first thing to read.** *Favorable* = momentum's home turf.
+  *Neutral* = chop, so the score leans on a shorter lookback. **Suppressed** =
+  momentum-crash risk (a volatile rebound off a low, where the biggest losers rip
+  hardest) — the leaderboard below dims, and that is deliberate.
+- **The scatter** — right means strong, up means still accelerating. Top-right is
+  **Leading**, top-left **Emerging** (turning up early), bottom-right **Extended**
+  (strong but fading), bottom-left **Lagging**. Switch between industries and stocks
+  with the dropdown.
+- **The ribbon** shows rank over recent sessions — steady climbers beat one-day pops.
+- **The tables** show every component behind the score (trend, relative strength,
+  acceleration, path quality, participation) so you can see *why* something ranks.
+  **Align** shows three blocks — sector, industry, stock — filled when each is in
+  its top quartile. Three filled blocks is the highest-conviction row.
+- **Participation** is how many of an industry's five constituents are above their
+  own 50-day average. Leadership that its own members don't confirm is thin.
+- **Excluded count** at the bottom lists names that were dropped (too illiquid, too
+  little history, or no quote at all) — that is how a renamed or delisted ticker
+  becomes visible instead of silently vanishing.
+""",
     "/trade": """
 **Trade Analyzer — the simple version**
 

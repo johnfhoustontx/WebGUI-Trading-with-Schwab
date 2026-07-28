@@ -1765,7 +1765,7 @@ def compute_momentum(session_date=None, conn=None, client=None):
                "computed_at": datetime.now().astimezone().isoformat(),
                "session_date": session_date, "regime": {},
                "levels": {"sector": [], "industry": [], "stock": []},
-               "excluded": []}
+               "rank_history": {}, "excluded": []}
     owns_conn = conn is None
     try:
         if client is None:
@@ -1845,8 +1845,12 @@ def compute_momentum(session_date=None, conn=None, client=None):
         payload["levels"] = levels
         payload["excluded"] = excluded
         payload["regime"] = _momentum_regime_block(verdict, current)
+        # Persist BEFORE reading rank_history so the ribbon includes today's
+        # session — otherwise it is empty on the very first run.
         for level, rows in levels.items():
             momentum_db.write_scores(conn, session_date, level, rows)
+        payload["rank_history"] = {
+            level: momentum_db.rank_history(conn, level) for level in levels}
         momentum_db.prune(conn)
     except Exception:
         log.exception("momentum: compute failed")

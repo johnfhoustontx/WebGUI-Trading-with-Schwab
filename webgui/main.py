@@ -234,6 +234,7 @@ SENTIMENT_CHILDREN = [
     ("/sentiment/sectors", "Sector & Industry", "table_chart"),
     ("/sentiment/rotation", "Sector Rotation", "donut_large"),
     ("/sentiment/rrg", "RRG", "scatter_plot"),
+    ("/sentiment/momentum", "Momentum", "trending_up"),
 ]
 
 # Standalone MAIN-MENU (rail) pages shown directly UNDER the Options group. Each
@@ -389,6 +390,7 @@ _TAB_COLOR = {
     "/sentiment/sectors": "#7986cb",      # Sector & Industry — indigo light
     "/sentiment/rotation": "#8d6e63",     # Sector Rotation — brown
     "/sentiment/rrg": "#a1887f",          # RRG — brown light
+    "/sentiment/momentum": "#9ccc65",     # Momentum — light green
     "/market": "#00bfa5",                # Market Dashboard — teal-green
     "/trade": "#26c6da",                 # Trade — cyan
     "/portfolio": "#9ccc65",             # Portfolio — light green
@@ -1247,6 +1249,13 @@ def sentiment_rrg_page() -> None:
     with _layout("/sentiment/rrg", "RRG"):
         from pages import sentiment_rrg
         sentiment_rrg.render()
+
+
+@ui.page("/sentiment/momentum")
+def sentiment_momentum_page() -> None:
+    with _layout("/sentiment/momentum", "Momentum"):
+        from pages import sentiment_momentum
+        sentiment_momentum.render()
 
 
 @ui.page("/trade")

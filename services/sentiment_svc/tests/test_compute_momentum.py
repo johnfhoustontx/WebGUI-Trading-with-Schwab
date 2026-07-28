@@ -292,3 +292,25 @@ def test_compute_never_raises_when_the_proxy_is_dead(conn, tiny):
     assert payload["levels"]["stock"] == []
     assert payload["regime"]["state"] == "neutral"
     assert len(payload["excluded"]) >= 4
+
+
+# --- rank history (the ribbon's input) --------------------------------------
+
+def test_payload_carries_rank_history_per_level(conn, tiny):
+    payload = compute.compute_momentum(session_date="2026-07-28", conn=conn,
+                                       client=FakeClient())
+
+    hist = payload["rank_history"]
+    assert set(hist) == {"sector", "industry", "stock"}
+    # Today's own session is included, so the ribbon is never empty on day one.
+    assert hist["stock"]["AAA"][-1][0] == "2026-07-28"
+
+
+def test_rank_history_accumulates_across_sessions(conn, tiny):
+    compute.compute_momentum(session_date="2026-07-27", conn=conn,
+                             client=FakeClient(end="2026-07-27"))
+    payload = compute.compute_momentum(session_date="2026-07-28", conn=conn,
+                                       client=FakeClient(end="2026-07-28"))
+
+    assert [d for d, _ in payload["rank_history"]["stock"]["AAA"]] == \
+        ["2026-07-27", "2026-07-28"]
