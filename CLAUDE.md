@@ -8,7 +8,35 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-07-27 (**Rebrand → NeuralStrike**: the app is renamed from "Schwab Trading" to
+**Last updated:** 2026-07-27 (**Simulator slider text → plain language, symbols dropped (all sub-tabs)**:
+a webgui-only copy rewrite of `webgui/pages/options/simulator.py`'s user-facing text so the Replay /
+What-if / IV-shock controls read in plain English with no math notation. Slider labels + tooltips:
+`ΔS 0%`→**"Price change: 0%"**, `Δt 5d elapsed`→**"Days passed: 5"**, `IV ×1.5`→**"Volatility multiplier:
+1.5"**, `Cursor —`→**"Drag the slider to step through time"** (cursor readout `Cursor {ts}`→"Showing
+{ts}"). Chart text: What-if axes `Underlying`/`P / L`→**"Underlying price"/"Profit / loss"** + tooltip
+`S {x} → P/L …`→**"Price {x}: profit / loss …"** (drops the `→`/`S`); IV-shock legend `base (×1.0)`/
+`shock (×N)`→**"Current volatility"/"Volatility multiplied by N"**, category `Gamma×100`→**"Gamma (times
+100)"**; Replay look-back menu `1-min · 1d`→**"1-minute bars, 1 day"** (etc.). Trader terms kept
+(Delta/Gamma/Theta/Vega/Rho, "IV"). No logic/figure-structure change — pure labels; the earlier RRG
+quadrant-label half of this request already shipped. **Restart the webgui.** webgui test_options_simulator
+**22** green; ruff clean; live figure-text verified symbol-free. Prior — 2026-07-27 (**IV Rank column on the scanner/finder tables**: added an **IV Rank**
+column to all four opportunity tables — **Market Scanner** 0-DTE / Swing / Directional and the **Strategy
+Finder** — so the dealer-cheap/rich IV context sits beside each candidate's score. **Data path**: the
+per-symbol `iv_rank` already lives in `run_iv_analysis` output. In `scanner_engine.run_full_scan` the
+iv_rank injection was **hoisted out of the `signal_recorder` try** (so an import failure there can't strip
+the column) and **extended to `signals_directional`** (previously only 0-DTE/Swing got it; missing IV → 0
+sentinel, unchanged); in `options_svc.compute.swing_scan` each candidate is stamped with the single
+symbol's `iv_rank` (None when the IV analysis can't compute a rank). **Display**: `scanner.signal_columns`/
+`signal_rows` + the shared `strategy_table.strategy_columns`/`strategy_rows` (which the Directional tab and
+the Strategy Finder both render) gained an `("iv_rank","IV Rank")` column placed before Score; the cell is
+`scanner.iv_rank_value` — the rank rounded to a whole number (numerically sortable) or blank when
+missing/non-numeric. Additive/back-compat (freeform signal dicts, `_DAY_STRIP` doesn't touch it, so the day
+union carries it through). **Restart `options_svc` + the webgui** — cached OLD-engine signals have no
+iv_rank until the next scan republishes. Live-verified end-to-end against the proxy (SPY swing 35 signals
+all iv_rank 65.2; directional SPY 65.2 / QQQ 71.8, all 16 carry it). webgui **903** + options_svc
+test_compute/handlers **331** green (+ the 2 documented `test_expected_move` baseline fails elsewhere);
+options-scanner scanner_engine/signal_recorder green (bar the 2 pre-existing `TestEarningsAvoidance`
+stale-fixture fails); ruff clean. Prior — 2026-07-27 (**Rebrand → NeuralStrike**: the app is renamed from "Schwab Trading" to
 **NeuralStrike** and the supplied logo is in the header. **Header lockup** = the **NS monogram** + a
 **two-tone wordmark** ("Neural" gold / "Strike" blue, **Montserrat ExtraBold**, uppercase) — replacing the
 old blue-gradient tile + chart-glyph SVG (`.brand-tile` deleted, dead). The gradient stops are **SAMPLED
@@ -227,7 +255,11 @@ visually confirmed → real test push returned True). Design/plan:
 [design](docs/plans/2026-07-24-market-snapshot-push-design.md) /
 [plan](docs/plans/2026-07-24-market-snapshot-push-plan.md). Prior — 2026-07-23 (**Market Regime — blended structural classifier (Phase 1, CONTEXT-ONLY)**:
 a THIRD classification axis alongside the direction × aggression five-state — **market STRUCTURE**
-(*how* the tape is moving): **Mean Reversion / Trending / Breakout / Choppy / Crisis**. Built
+(*how* the tape is moving): **Mean Reversion / Trending / Breakout / Choppy / Volatile**
+(the fifth regime was renamed **Crisis → Volatile** on 2026-07-24 — "Crisis" overstated what it
+detects; the internal membership key stays `crisis`). Its **primary tell is now the absolute VIX level**
+(`ramp(VIX, 22, 34)`); the ATR-percentile floor was raised 0.85→0.92 so a merely-wide day no longer
+reads ~34% — it now needs genuinely elevated implied/realized vol. Built
 **soft-first**: the primary output is a **membership VECTOR** (each regime a continuous 0-1 weight),
 so a regime handover reads as a **gradual band shift + an explicit transition** ("Mean Reversion →
 Trending · 60%") instead of a threshold flip; the hard label is derived for display only and lags

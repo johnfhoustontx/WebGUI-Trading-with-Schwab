@@ -530,8 +530,10 @@ def test_market_read_carries_market_regime():
     st = mr["market_regime"]
     assert st["label"] == "Trending" and st["confidence"] == 0.62
     # top two memberships, strongest first, as (name, weight) pairs
-    assert st["top"][0] == ("trending", 0.52) and st["top"][1] == ("mean_reversion", 0.28)
-    assert st["transition"] == "mean_reversion -> trending 60%"
+    # Membership keys are shown to the decider as DISPLAY labels (the internal
+    # "crisis" key would read "Volatile"), consistent with the rest of the app.
+    assert st["top"][0] == ("Trending", 0.52) and st["top"][1] == ("Mean Reversion", 0.28)
+    assert st["transition"] == "Mean Reversion -> Trending 60%"
     assert "Trending" in mr["summary"]                      # surfaced on the log line
 
 

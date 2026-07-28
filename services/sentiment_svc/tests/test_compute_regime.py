@@ -262,7 +262,7 @@ def test_crisis_attack_forces_crisis_commit():
     vix = {"vix": 20.0, "vix1d": 40.0, "vix3m": 15.0}
     out = compute.compute_market_regime(_FakeBullSchwab(), vix=vix, now=NOW)
     assert out["committed_label"] == "crisis"
-    assert out["label"] == "Crisis"
+    assert out["label"] == "Volatile"   # internal key "crisis" -> displayed "Volatile"
     assert out["memberships"]["crisis"] >= 0.9
     assert out["raw"]["crisis"] >= 0.7
 
@@ -368,7 +368,7 @@ def test_vix1d_spike_fires_crisis():
         _FakeVix1dSchwab(vix1d_prev=12.0, vix1d_now=18.0), now=NOW)
     assert out["raw"]["crisis"] >= 0.7
     assert out["committed_label"] == "crisis"
-    assert out["label"] == "Crisis"
+    assert out["label"] == "Volatile"   # internal key "crisis" -> displayed "Volatile"
     assert any("VIX1D" in e for e in out["evidence"])
 
 

@@ -144,10 +144,10 @@ def whatif_figure(df, spot, target_s=None, baseline=None):
         "credits": {"enabled": False},
         "accessibility": {"enabled": False},
         "legend": {"enabled": False},
-        "xAxis": {**_DARK_AXIS, "title": {"text": "Underlying"}, "plotLines": xplotlines},
-        "yAxis": {**_DARK_AXIS, "title": {"text": "P / L"}, "plotLines": yplotlines,
+        "xAxis": {**_DARK_AXIS, "title": {"text": "Underlying price"}, "plotLines": xplotlines},
+        "yAxis": {**_DARK_AXIS, "title": {"text": "Profit / loss"}, "plotLines": yplotlines,
                   "plotBands": yplotbands},
-        "tooltip": {"pointFormat": "S {point.x:g} → P/L <b>${point.y:,.0f}</b>"},
+        "tooltip": {"pointFormat": "Price {point.x:g}: profit / loss <b>${point.y:,.0f}</b>"},
         # Smooth transition when the chart is updated in place on a slider change.
         "plotOptions": {"series": {"animation": {"duration": 500}}},
         # Area filled to the 0 threshold: the part above zero is green (profit), the
@@ -155,7 +155,7 @@ def whatif_figure(df, spot, target_s=None, baseline=None):
         # crossings via color/negativeColor. Setting an explicit base ``color`` +
         # ``fillColor`` stops Highcharts painting a default-blue base path under the
         # zones.
-        "series": [{"name": "P/L", "type": "area", "data": data,
+        "series": [{"name": "Profit / loss", "type": "area", "data": data,
                     "threshold": 0, "lineWidth": 2, "marker": {"enabled": False},
                     "color": PNL_GREEN, "fillColor": _PNL_GREEN_FILL,
                     "negativeColor": PNL_RED, "negativeFillColor": _PNL_RED_FILL}],
@@ -164,7 +164,7 @@ def whatif_figure(df, spot, target_s=None, baseline=None):
 
 def ivshock_figure(base, shock, mult=1.5):
     """Grouped base-vs-shock columns across the key metrics."""
-    cats = ["Price", "Delta", "Gamma×100", "Theta", "Vega"]
+    cats = ["Price", "Delta", "Gamma (times 100)", "Theta", "Vega"]
 
     def vals(row):
         return [row.get("theo_price", 0), row.get("delta", 0),
@@ -183,8 +183,9 @@ def ivshock_figure(base, shock, mult=1.5):
         "plotOptions": {"column": {"grouping": True, "borderWidth": 0},
                         "series": {"animation": {"duration": 500}}},
         "series": [
-            {"name": "base (×1.0)", "type": "column", "data": vals(base), "color": BASE_COLOR},
-            {"name": f"shock (×{mult:g})", "type": "column", "data": vals(shock), "color": SHOCK_COLOR},
+            {"name": "Current volatility", "type": "column", "data": vals(base), "color": BASE_COLOR},
+            {"name": f"Volatility multiplied by {mult:g}", "type": "column", "data": vals(shock),
+             "color": SHOCK_COLOR},
         ],
     }
 
@@ -199,11 +200,11 @@ GREEK_COLOR = "#42a5f5"
 # window from the selected contract's DTE; the rest force a fixed window.
 REPLAY_LOOKBACKS = [
     ("auto", "Auto (by DTE)"),
-    ("1m_1d", "1-min · 1d"),
-    ("5m_3d", "5-min · 3d"),
-    ("5m_5d", "5-min · 5d"),
-    ("15m_10d", "15-min · 10d"),
-    ("1d_20d", "Daily · 20d"),
+    ("1m_1d", "1-minute bars, 1 day"),
+    ("5m_3d", "5-minute bars, 3 days"),
+    ("5m_5d", "5-minute bars, 5 days"),
+    ("15m_10d", "15-minute bars, 10 days"),
+    ("1d_20d", "Daily bars, 20 days"),
 ]
 
 
@@ -352,7 +353,7 @@ def render():
                     with ui.row().classes("items-center gap-4 w-full"):
                         lookback_sel = ui.select(lookback_options(), value="auto",
                                                  label="Look-back").classes("w-44")
-                        scrub_lbl = ui.label("Cursor —")
+                        scrub_lbl = ui.label("Drag the slider to step through time")
                         scrub_slider = ui.slider(min=0, max=1, value=0).classes("w-80")
                     # Persistent chart built ONCE (present at first render for the ESM
                     # import map) and updated in place. Empty-state label toggled until
@@ -361,10 +362,11 @@ def render():
                     replay_chart = ui.highchart(replay_figure({}, None)).classes("w-full")
                 with ui.tab_panel(tab_whatif):
                     with ui.row().classes("items-center gap-4 w-full"):
-                        ds_lbl = ui.label("ΔS 0%")
+                        ds_lbl = ui.label("Price change: 0%").tooltip(
+                            "Move the stock or index price up or down by this percent")
                         ds_slider = ui.slider(min=-20, max=20, value=0).classes("w-48")
-                        dt_lbl = ui.label("Δt 5d elapsed").tooltip(
-                            "Calendar days elapsed from now (per-leg time decay)")
+                        dt_lbl = ui.label("Days passed: 5").tooltip(
+                            "Calendar days forward from today — each leg loses that much time value")
                         dt_slider = ui.slider(min=0, max=30, value=5).classes("w-48")
                     # Persistent charts built ONCE (present at first render for the ESM
                     # import map) and updated in place so slider changes ANIMATE instead
@@ -374,7 +376,8 @@ def render():
                     whatif_chart = ui.highchart(whatif_figure([], 0)).classes("w-full")
                 with ui.tab_panel(tab_ivshock):
                     with ui.row().classes("items-center gap-4 w-full"):
-                        mult_lbl = ui.label("IV ×1.5")
+                        mult_lbl = ui.label("Volatility multiplier: 1.5").tooltip(
+                            "Multiplies each leg's implied volatility — 1.5 means 50% higher")
                         mult_slider = ui.slider(min=0.5, max=3.0, step=0.1, value=1.5).classes("w-64")
                     ivshock_chart = ui.highchart(ivshock_figure({}, {}, 1.5)).classes("w-full")
 
@@ -443,10 +446,10 @@ def render():
 
     # ── render figures from the cached sweep result ──────────────────────────
     def _render_figures():
-        ds_lbl.text = f"ΔS {ds_slider.value:+g}%"
-        dt_lbl.text = f"Δt {dt_slider.value:g}d elapsed"
+        ds_lbl.text = f"Price change: {ds_slider.value:+g}%"
+        dt_lbl.text = f"Days passed: {dt_slider.value:g}"
         mult = float(mult_slider.value)
-        mult_lbl.text = f"IV ×{mult:g}"
+        mult_lbl.text = f"Volatility multiplier: {mult:g}"
 
         result = state["result"]
         if not result:
@@ -483,8 +486,9 @@ def render():
         cur = int(min(max(scrub_slider.value, 0), n - 1))
         ts = tr["timestamps"][cur] if cur < len(tr.get("timestamps") or []) else ""
         spec_lbl = (tr.get("lookback") or {}).get("label") or ""
-        cursor_txt = f"Cursor {ts.replace('T', ' ')}" if ts else "Cursor —"
-        scrub_lbl.text = f"{cursor_txt}   ·   {spec_lbl}" if spec_lbl else cursor_txt
+        cursor_txt = (f"Showing {ts.replace('T', ' ')}" if ts
+                      else "Drag the slider to step through time")
+        scrub_lbl.text = f"{cursor_txt}  ({spec_lbl})" if spec_lbl else cursor_txt
         # Update in place (chart already present for the ESM import map).
         replay_chart.options = replay_figure(tr, cursor=cur)
         replay_chart.update()
@@ -556,7 +560,7 @@ def render():
         if params is not None:
             state["pending"] = params
         # ΔS only moves the overlay; mult/dt labels update on the next repaint.
-        ds_lbl.text = f"ΔS {ds_slider.value:+g}%"
+        ds_lbl.text = f"Price change: {ds_slider.value:+g}%"
         _render_figures()
 
     @guard
@@ -654,7 +658,7 @@ def render():
         if meta:
             spot = meta.get("spot")
             spot_txt = f"{spot:,.2f}" if isinstance(spot, (int, float)) else "—"
-            status.text = (f"{meta.get('symbol')} spot {spot_txt} · "
+            status.text = (f"{meta.get('symbol')} spot {spot_txt} — "
                            f"{meta.get('n_contracts')} contracts")
             # Kick off the first sweep + replay for the current legs.
             _enqueue_run()

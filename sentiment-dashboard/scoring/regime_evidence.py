@@ -429,6 +429,13 @@ def _gap(daily):
 # ---------------------------------------------------------------- vix-derived
 
 
+def _vix_level(vix):
+    """Absolute VIX — the primary volatility/stress tell."""
+    if not isinstance(vix, dict):
+        return None
+    return _finite(vix.get("vix"))
+
+
 def _term_inversion(vix):
     if not isinstance(vix, dict):
         return None
@@ -508,6 +515,7 @@ def evidence_from_bars(bars_5m, daily, vix, matrix_row, prior_widths):
         "profile_balance": _safe(_profile_balance, bars_5m),
         "rel_vol": _safe(_rel_vol, bars_5m),
         "atr_pctile": _safe(_atr_pctile, daily),
+        "vix_level": _safe(_vix_level, vix),
         "vix1d_spike_pct": _safe(_vix1d_spike_pct, vix),
         "term_inversion": _safe(_term_inversion, vix),
         "gap_open_pct": gap_pct,

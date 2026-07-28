@@ -188,6 +188,8 @@ def test_swing_scan_multistrategy_pipeline(monkeypatch):
     assert out["signals"] and all("composite_score" in s for s in out["signals"])
     # ids assigned.
     assert all(s.get("id") for s in out["signals"])
+    # The symbol's IV Rank is surfaced onto every candidate (for the table's column).
+    assert all(s.get("iv_rank") == 50.0 for s in out["signals"])
 
 
 def test_swing_scan_families_filter(monkeypatch):
@@ -2235,7 +2237,7 @@ def test_sim_replay_override_uses_fixed_window(monkeypatch):
                              lookback="15m_10d")
     assert calls["intraday"][1] == 15              # minutes from the override
     assert calls["intraday"][2] == 10              # days from the override
-    assert out["lookback"]["label"] == "15-min · 10d"
+    assert out["lookback"]["label"] == "15-minute bars, 10 days"
     assert out["lookback"]["key"] == "15m_10d"
 
 

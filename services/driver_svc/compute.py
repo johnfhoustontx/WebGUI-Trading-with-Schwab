@@ -318,6 +318,14 @@ def _as_of(briefing) -> str:
 
 
 _REGIME_TOP_N = 2      # how many memberships to surface (the mix, not all five)
+# Display labels for the membership keys, so the decider sees "Volatile" (not the
+# internal "crisis" key) consistent with the rest of the app.
+_REGIME_LABELS = {"mean_reversion": "Mean Reversion", "trending": "Trending",
+                  "breakout": "Breakout", "choppy": "Choppy", "crisis": "Volatile"}
+
+
+def _regime_label(key) -> str:
+    return _REGIME_LABELS.get(str(key), str(key))
 
 
 def _structural_regime(payload) -> dict:
@@ -344,13 +352,15 @@ def _structural_regime(payload) -> dict:
                      if isinstance(v, (int, float)) and not isinstance(v, bool)]
             pairs.sort(key=lambda kv: kv[1], reverse=True)
             if pairs:
-                out["top"] = [(k, round(v, 2)) for k, v in pairs[:_REGIME_TOP_N]]
+                out["top"] = [(_regime_label(k), round(v, 2))
+                              for k, v in pairs[:_REGIME_TOP_N]]
         tr = p.get("transition")
         if isinstance(tr, dict) and tr.get("from") and tr.get("to"):
             prog = tr.get("progress")
             pct = f" {round(float(prog) * 100):.0f}%" if isinstance(
                 prog, (int, float)) and not isinstance(prog, bool) else ""
-            out["transition"] = f"{tr['from']} -> {tr['to']}{pct}"
+            out["transition"] = (f"{_regime_label(tr['from'])} -> "
+                                 f"{_regime_label(tr['to'])}{pct}")
         return out
     except Exception:  # noqa: BLE001 — context is best-effort; never block a cycle.
         return {}

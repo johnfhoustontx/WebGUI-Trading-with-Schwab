@@ -106,6 +106,7 @@ def strategy_columns():
         ("rr", "R:R"),
         ("pop_pct", "PoP"),
         ("breakevens", "BE"),
+        ("iv_rank", "IV Rank"),
         ("composite_score", "Score"),
         ("grade", "Grade"),
     ]
@@ -233,6 +234,7 @@ def strategy_rows(signals):
             "rr": _fmt_2(s.get("rr")),
             "pop_pct": _fmt_1(s.get("pop_pct")),
             "breakevens": breakeven_text(s),
+            "iv_rank": scanner.iv_rank_value(s.get("iv_rank")),
             "composite_score": score,
             "grade": s.get("grade", ""),
             "grade_reason": s.get("grade_reason", ""),
