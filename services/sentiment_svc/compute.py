@@ -16,12 +16,17 @@ stays bound.
 The engine-call functions are defensive (catch exceptions, return ``None`` /
 empty) exactly as in the page — that behavior is preserved verbatim.
 """
+import datetime as _dt
+import logging
 import math
 import sys
 import time
 
 from repo_paths import SENTIMENT, SHARED
 from services._parallel import parallel_map
+from services.sentiment_svc import momentum_db
+
+log = logging.getLogger(__name__)
 
 if str(SENTIMENT) not in sys.path:
     sys.path.insert(0, str(SENTIMENT))
@@ -50,6 +55,8 @@ from scoring import profile_shape as profile_mod  # noqa: E402
 from scoring import market_regime  # noqa: E402
 from scoring import regime_evidence  # noqa: E402
 from scoring import volatility as _regime_vol  # noqa: E402
+from scoring import momentum  # noqa: E402
+from scoring import momentum_regime  # noqa: E402
 import live_composite  # noqa: E402,F401  (eager: pins module; never lazy)
 from live_composite import (  # noqa: E402
     signal_band, compute_live, build_bridge_payload,
@@ -1481,3 +1488,374 @@ def build_and_write_bridge(snaps, spy, live, sector, trend=None):
         bridge.write_bridge(payload)
     except Exception:
         pass
+
+
+# ---------------------------------------------------------------------------
+# Momentum cascade — nightly, on its own cache key. NOT a sentiment component:
+# scoring/__init__.WEIGHTS is untouched and the bridge never sees any of this.
+# ---------------------------------------------------------------------------
+
+MOMENTUM_BENCHMARK = "SPY"
+MOMENTUM_BARS = 252
+MOMENTUM_MIN_BARS = 90                    # == scoring.momentum.TREND_WINDOW
+MOMENTUM_LIQUIDITY_WINDOW = 20
+MOMENTUM_MIN_DOLLAR_VOLUME = 5_000_000.0  # small caps cannot support a position
+MOMENTUM_TOP_QUARTILE = 75.0
+MOMENTUM_DISPERSION_WINDOW = 5
+MOMENTUM_FETCH_WORKERS = 6
+
+
+def _momentum_universe():
+    """The three levels, plus the industries that cannot have their own score.
+
+    Four of the Stocks tab's 74 industries name an ETF that another industry
+    already owns (MJ, XRT, BETZ and VEGI are each listed twice in the
+    workbook). Scoring one price series under two labels would put duplicate
+    rows in the cross-section and invent a "two industries agree" signal, so
+    those four are reported as orphans instead — their constituents still roll
+    up to the sector level and are still scored individually.
+    """
+    import sectors_ref
+
+    by_industry = sectors_ref.constituents_by_industry()
+    etf_by_key, sector_etf = {}, {}
+    for row in sectors_ref.load_sectors_data():
+        if row["kind"] == "industry":
+            etf_by_key[(row["sector"], row["label"])] = row["etf"]
+        elif row["etf"]:
+            sector_etf[row["sector"]] = row["etf"]
+
+    industries, orphans, members_by_sector = [], [], {}
+    for (sector, industry), members in by_industry.items():
+        members_by_sector.setdefault(sector, []).extend(members)
+        etf = etf_by_key.get((sector, industry))
+        if not etf:
+            orphans.append({"sector": sector, "industry": industry,
+                            "reason": "duplicate_etf"})
+            continue
+        industries.append({"sector": sector, "industry": industry,
+                           "etf": etf, "members": list(members)})
+
+    sectors = [{"sector": sector, "etf": sector_etf[sector],
+                "members": sorted(set(members))}
+               for sector, members in members_by_sector.items()
+               if sector_etf.get(sector)]
+    return {"stocks": sectors_ref.stock_symbols(), "industries": industries,
+            "sectors": sectors, "orphans": orphans}
+
+
+def _momentum_fetch_symbols(universe):
+    """Every symbol needing bars, deduped, benchmark included."""
+    out, seen = [], set()
+    for symbol in ([MOMENTUM_BENCHMARK] + list(universe["stocks"])
+                   + [i["etf"] for i in universe["industries"]]
+                   + [s["etf"] for s in universe["sectors"]]):
+        if symbol and symbol not in seen:
+            seen.add(symbol)
+            out.append(symbol)
+    return out
+
+
+def _momentum_history_months(stored_max, session_date):
+    """Smallest proxy window that still spans the gap.
+
+    get_daily_history takes a period, not a start date, so a delta fetch means
+    asking for the shortest period that covers what is missing.
+    """
+    if not stored_max:
+        return 12
+    try:
+        gap = (_dt.date.fromisoformat(str(session_date))
+               - _dt.date.fromisoformat(str(stored_max))).days
+    except (TypeError, ValueError):
+        return 12
+    if gap <= 0:
+        return 0                      # already current — no fetch at all
+    if gap <= 25:
+        return 1
+    if gap <= 80:
+        return 3
+    if gap <= 170:
+        return 6
+    return 12
+
+
+def _momentum_sync_bars(symbols, conn, session_date, client):
+    """Delta-fetch each symbol's missing bars into the store. Returns failures."""
+    def _one(symbol):
+        try:
+            months = _momentum_history_months(momentum_db.max_date(conn, symbol),
+                                              session_date)
+            if months == 0:
+                return symbol, None, True
+            df = client.get_daily_history(symbol, months=months)
+        except Exception:
+            log.exception("momentum: history fetch failed for %s", symbol)
+            return symbol, None, False
+        if df is None or getattr(df, "empty", True):
+            return symbol, None, False
+        rows = []
+        for rec in df.to_dict("records"):
+            stamp = rec.get("datetime")
+            date = stamp.date() if hasattr(stamp, "date") else None
+            if date is None:
+                continue
+            rows.append({"symbol": symbol, "date": date.isoformat(),
+                         "open": rec.get("open"), "high": rec.get("high"),
+                         "low": rec.get("low"), "close": rec.get("close"),
+                         "volume": rec.get("volume")})
+        return symbol, rows, bool(rows)
+
+    failed = []
+    for symbol, rows, ok in parallel_map(_one, symbols, MOMENTUM_FETCH_WORKERS):
+        if rows:
+            momentum_db.upsert_bars(conn, rows)
+        if not ok:
+            failed.append(symbol)
+    return failed
+
+
+def _momentum_series(conn, symbols):
+    """{symbol: (closes, dollar_volumes)} from the store."""
+    out = {}
+    for symbol in symbols:
+        rows = momentum_db.bars(conn, symbol, limit=MOMENTUM_BARS)
+        closes = [r["close"] for r in rows if r["close"]]
+        dollars = [(r["close"] or 0.0) * (r["volume"] or 0.0) for r in rows]
+        out[symbol] = (closes, dollars)
+    return out
+
+
+def _momentum_admit(symbol, series):
+    """(closes, reason) — reason is set when the symbol must be dropped.
+
+    A dropped symbol leaves the z-score population entirely; it must never
+    become a zero in the distribution.
+    """
+    closes, dollars = series.get(symbol, ([], []))
+    if not closes:
+        return None, "no_quote"
+    if len(closes) < MOMENTUM_MIN_BARS:
+        return None, "insufficient_bars"
+    window = dollars[-MOMENTUM_LIQUIDITY_WINDOW:]
+    if window and sum(window) / len(window) < MOMENTUM_MIN_DOLLAR_VOLUME:
+        return None, "liquidity"
+    return closes, None
+
+
+def _momentum_score_level(entries, bench_closes):
+    """PURE: raw components -> within-level z-scores -> blend -> rank.
+
+    ``entries`` is [{symbol, closes, participation, **passthrough}]. Every
+    component is z-scored within THIS level, so a stock is ranked against
+    stocks and an industry against industries.
+    """
+    raw = []
+    for entry in entries:
+        closes = entry["closes"]
+        excess, slope = momentum.relative_strength(closes, bench_closes)
+        raw.append({
+            "trend": momentum.trend_strength(closes),
+            "excess": excess,
+            "slope": slope,
+            "accel": momentum.acceleration(closes),
+            "path": momentum.path_quality(closes),
+            "participation": entry.get("participation"),
+        })
+
+    z = {key: momentum.zscore_within_level([r[key] for r in raw])
+         for key in ("trend", "excess", "slope", "accel", "path", "participation")}
+
+    rows = []
+    for i, entry in enumerate(entries):
+        # Excess return and RS slope live on different scales, so each is
+        # z-scored on its own and averaged into the single 'rs' component.
+        parts = [v for v in (z["excess"][i], z["slope"][i]) if v is not None]
+        rs = sum(parts) / len(parts) if parts else None
+        components = {"trend": z["trend"][i], "rs": rs,
+                      "accel": z["accel"][i], "path": z["path"][i]}
+        if raw[i]["participation"] is not None:
+            components["participation"] = z["participation"][i]
+        row = {k: v for k, v in entry.items() if k != "closes"}
+        row.update({
+            "score": momentum.blend(components),
+            "components": components,
+            "raw": {k: raw[i][k] for k in ("trend", "excess", "slope",
+                                           "accel", "path")},
+            "participation": raw[i]["participation"],
+        })
+        rows.append(row)
+
+    for row, pct in zip(rows, momentum.percentile_rank([r["score"] for r in rows])):
+        row["percentile"] = pct
+    rows.sort(key=lambda r: (r["score"] is None, -(r["score"] or 0.0), r["symbol"]))
+    for i, row in enumerate(rows, start=1):
+        row["rank"] = i
+    return rows
+
+
+def _momentum_dispersion(series, symbols, window=MOMENTUM_DISPERSION_WINDOW):
+    """(current dispersion, its own history) from the stored bars.
+
+    The history is recomputed from the bars already in hand rather than kept in
+    its own table — 252 bars yield far more than the 60 observations the
+    percentile needs, at no extra I/O.
+    """
+    aligned = [series[s][0] for s in symbols
+               if series.get(s) and len(series[s][0]) > window]
+    if len(aligned) < 2:
+        return None, []
+    depth = min(len(c) for c in aligned)
+    history = []
+    for offset in range(depth - window - 1, 0, -1):
+        rets = {}
+        for i, closes in enumerate(aligned):
+            base = closes[-offset - 1 - window]
+            if base:
+                rets[i] = closes[-offset - 1] / base - 1.0
+        value = momentum_regime.dispersion(rets)
+        if value is not None:
+            history.append(value)
+    current = {i: (c[-1] / c[-1 - window] - 1.0)
+               for i, c in enumerate(aligned) if c[-1 - window]}
+    return momentum_regime.dispersion(current), history
+
+
+def _momentum_vix_term(client):
+    """Near/far VIX ratio (VIX9D/VIX); below 1.0 is contango. None if absent."""
+    try:
+        quotes = client.get_quotes(["$VIX", "$VIX9D"]) or {}
+        near = _safe_float(_last(quotes.get("$VIX9D")), 0.0)
+        far = _safe_float(_last(quotes.get("$VIX")), 0.0)
+    except Exception:
+        return None
+    return near / far if near > 0 and far > 0 else None
+
+
+def _momentum_prior_session(conn, level, session_date):
+    """Most recent stored session for ``level`` before ``session_date``."""
+    try:
+        row = conn.execute(
+            "SELECT MAX(session_date) FROM momentum_scores "
+            "WHERE level = ? AND session_date < ?",
+            (str(level), str(session_date))).fetchone()
+    except Exception:
+        return None
+    return row[0] if row and row[0] else None
+
+
+def _momentum_regime_block(verdict, dispersion_value=None):
+    return {"state": verdict.state, "label": verdict.label,
+            "description": verdict.description, "lookback": verdict.lookback,
+            "crash_risk": verdict.crash_risk, "dispersion": dispersion_value,
+            "dispersion_pct": verdict.dispersion_pct, "vol_pct": verdict.vol_pct,
+            "reasons": list(verdict.reasons)}
+
+
+def compute_momentum(session_date=None, conn=None, client=None):
+    """Nightly momentum cascade -> the cache:sentiment:momentum payload.
+
+    Defensive throughout: a dead proxy yields empty levels and a neutral
+    regime, never a raise.
+    """
+    from datetime import datetime
+
+    session_date = str(session_date or _dt.date.today().isoformat())
+    payload = {"schema": 1,
+               "computed_at": datetime.now().astimezone().isoformat(),
+               "session_date": session_date, "regime": {},
+               "levels": {"sector": [], "industry": [], "stock": []},
+               "excluded": []}
+    owns_conn = conn is None
+    try:
+        if client is None:
+            from services import _proxy
+            client = _proxy.schwab_client
+        if conn is None:
+            conn = momentum_db.connect()
+
+        universe = _momentum_universe()
+        symbols = _momentum_fetch_symbols(universe)
+        _momentum_sync_bars(symbols, conn, session_date, client)
+        series = _momentum_series(conn, symbols)
+
+        excluded = [dict(o, symbol=o["industry"]) for o in universe["orphans"]]
+        admitted = {}
+        for symbol in symbols:
+            closes, reason = _momentum_admit(symbol, series)
+            if reason:
+                excluded.append({"symbol": symbol, "reason": reason})
+            else:
+                admitted[symbol] = closes
+        bench = admitted.get(MOMENTUM_BENCHMARK) or []
+
+        industry_of = {}
+        for ind in universe["industries"]:
+            for member in ind["members"]:
+                industry_of.setdefault(member, (ind["sector"], ind["industry"]))
+        stock_entries = []
+        for symbol in universe["stocks"]:
+            if symbol not in admitted:
+                continue
+            sector, industry = industry_of.get(symbol, ("", ""))
+            stock_entries.append({"symbol": symbol, "closes": admitted[symbol],
+                                  "sector": sector, "industry": industry})
+
+        def _participation(members):
+            return momentum.participation([admitted[m] for m in members
+                                           if m in admitted])
+
+        industry_entries = [
+            {"symbol": i["etf"], "label": i["industry"], "sector": i["sector"],
+             "closes": admitted[i["etf"]],
+             "participation": _participation(i["members"])}
+            for i in universe["industries"] if i["etf"] in admitted]
+        sector_entries = [
+            {"symbol": s["etf"], "label": s["sector"], "closes": admitted[s["etf"]],
+             "participation": _participation(s["members"])}
+            for s in universe["sectors"] if s["etf"] in admitted]
+
+        levels = {"sector": _momentum_score_level(sector_entries, bench),
+                  "industry": _momentum_score_level(industry_entries, bench),
+                  "stock": _momentum_score_level(stock_entries, bench)}
+
+        top = MOMENTUM_TOP_QUARTILE
+        sector_pct = {r["label"]: (r["percentile"] or 0.0) for r in levels["sector"]}
+        industry_pct = {r["label"]: (r["percentile"] or 0.0)
+                        for r in levels["industry"]}
+        for row in levels["stock"]:
+            row["alignment"] = [
+                sector_pct.get(row.get("sector"), 0.0) >= top,
+                industry_pct.get(row.get("industry"), 0.0) >= top,
+                (row["percentile"] or 0.0) >= top,
+            ]
+
+        for level, rows in levels.items():
+            prior = _momentum_prior_session(conn, level, session_date)
+            prev = {r["symbol"]: r["rank"]
+                    for r in momentum_db.scores(conn, prior, level)} if prior else {}
+            for row in rows:
+                row["rank_prev"] = prev.get(row["symbol"])
+
+        current, history = _momentum_dispersion(series, list(admitted))
+        verdict = momentum_regime.classify(
+            bench, vix_term=_momentum_vix_term(client),
+            dispersion_pct=momentum_regime.dispersion_percentile(current, history))
+
+        payload["levels"] = levels
+        payload["excluded"] = excluded
+        payload["regime"] = _momentum_regime_block(verdict, current)
+        for level, rows in levels.items():
+            momentum_db.write_scores(conn, session_date, level, rows)
+        momentum_db.prune(conn)
+    except Exception:
+        log.exception("momentum: compute failed")
+    finally:
+        if owns_conn and conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    if not payload["regime"]:
+        payload["regime"] = _momentum_regime_block(momentum_regime.classify([]))
+    return payload
