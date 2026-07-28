@@ -1499,7 +1499,15 @@ MOMENTUM_BENCHMARK = "SPY"
 MOMENTUM_BARS = 252
 MOMENTUM_MIN_BARS = 90                    # == scoring.momentum.TREND_WINDOW
 MOMENTUM_LIQUIDITY_WINDOW = 20
-MOMENTUM_MIN_DOLLAR_VOLUME = 5_000_000.0  # small caps cannot support a position
+# Two floors, because the question differs by role. For a STOCK it is "can I
+# hold a position" — several small caps on the Stocks tab cannot support one and
+# would otherwise top the leaderboard on a thin-volume pop. For an industry or
+# sector ETF it is only "is this price series trustworthy": the ETF is a
+# measurement instrument and the trade is expressed through its constituents, so
+# a position-sized floor there silently deletes a third of the cross-section
+# (measured: 23 of 70 industry ETFs on 2026-07-28).
+MOMENTUM_MIN_DOLLAR_VOLUME = 5_000_000.0
+MOMENTUM_MIN_ETF_DOLLAR_VOLUME = 250_000.0
 MOMENTUM_TOP_QUARTILE = 75.0
 MOMENTUM_DISPERSION_WINDOW = 5
 MOMENTUM_FETCH_WORKERS = 6
@@ -1626,7 +1634,7 @@ def _momentum_series(conn, symbols):
     return out
 
 
-def _momentum_admit(symbol, series):
+def _momentum_admit(symbol, series, floor=MOMENTUM_MIN_DOLLAR_VOLUME):
     """(closes, reason) — reason is set when the symbol must be dropped.
 
     A dropped symbol leaves the z-score population entirely; it must never
@@ -1638,7 +1646,7 @@ def _momentum_admit(symbol, series):
     if len(closes) < MOMENTUM_MIN_BARS:
         return None, "insufficient_bars"
     window = dollars[-MOMENTUM_LIQUIDITY_WINDOW:]
-    if window and sum(window) / len(window) < MOMENTUM_MIN_DOLLAR_VOLUME:
+    if window and sum(window) / len(window) < floor:
         return None, "liquidity"
     return closes, None
 
@@ -1780,9 +1788,13 @@ def compute_momentum(session_date=None, conn=None, client=None):
         series = _momentum_series(conn, symbols)
 
         excluded = [dict(o, symbol=o["industry"]) for o in universe["orphans"]]
+        etfs = ({i["etf"] for i in universe["industries"]}
+                | {s["etf"] for s in universe["sectors"]} | {MOMENTUM_BENCHMARK})
         admitted = {}
         for symbol in symbols:
-            closes, reason = _momentum_admit(symbol, series)
+            floor = (MOMENTUM_MIN_ETF_DOLLAR_VOLUME if symbol in etfs
+                     else MOMENTUM_MIN_DOLLAR_VOLUME)
+            closes, reason = _momentum_admit(symbol, series, floor)
             if reason:
                 excluded.append({"symbol": symbol, "reason": reason})
             else:

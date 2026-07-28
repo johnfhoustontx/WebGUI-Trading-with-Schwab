@@ -314,3 +314,46 @@ def test_rank_history_accumulates_across_sessions(conn, tiny):
 
     assert [d for d, _ in payload["rank_history"]["stock"]["AAA"]] == \
         ["2026-07-27", "2026-07-28"]
+
+
+# --- liquidity floors differ by role ----------------------------------------
+
+def test_a_thin_industry_etf_is_kept_but_a_thin_stock_is_not(conn, tiny):
+    # The $5M floor asks "can I hold a position" — right for a stock, wrong for
+    # an industry ETF, which is a measurement instrument for its constituents.
+    client = FakeClient()
+    thin = FakeClient(volume=400_000.0)
+    original = client.get_daily_history
+
+    def mixed(symbol, months=12):
+        return thin.get_daily_history(symbol, months) \
+            if symbol in {"SMH", "BBB"} else original(symbol, months)
+
+    client.get_daily_history = mixed
+
+    payload = compute.compute_momentum(session_date="2026-07-28", conn=conn,
+                                       client=client)
+
+    assert "SMH" in {r["symbol"] for r in payload["levels"]["industry"]}
+    assert "BBB" not in {r["symbol"] for r in payload["levels"]["stock"]}
+
+
+def test_an_untradeable_etf_price_series_is_still_dropped(conn, tiny):
+    client = FakeClient()
+    dead = FakeClient(volume=100.0)
+    original = client.get_daily_history
+
+    def mixed(symbol, months=12):
+        return dead.get_daily_history(symbol, months) if symbol == "SMH" \
+            else original(symbol, months)
+
+    client.get_daily_history = mixed
+
+    payload = compute.compute_momentum(session_date="2026-07-28", conn=conn,
+                                       client=client)
+
+    assert "SMH" not in {r["symbol"] for r in payload["levels"]["industry"]}
+
+
+def test_the_two_floors_are_separate_named_constants():
+    assert compute.MOMENTUM_MIN_DOLLAR_VOLUME > compute.MOMENTUM_MIN_ETF_DOLLAR_VOLUME
