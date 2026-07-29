@@ -573,10 +573,16 @@ def run_cycle(scan_view, paper_view, *, target, limits, market, client=None) -> 
         gate_on = _st.DIRECTIONAL_GATE_ENABLED
         decisive_posture = _directional_posture(packet.get("market_read"))
         posture = decisive_posture if gate_on else "neutral"
+        # One trade per symbol: the symbols already open in the driver book block any new
+        # trade on the same underlying (caps per-name concentration). Always enforced.
+        open_symbols = frozenset(
+            p.get("symbol") for p in packet.get("open_positions", [])
+            if isinstance(p, dict) and p.get("symbol"))
         guarded = _g.apply_guardrails(
             decision, packet["menu_by_id"], limits,
             open_count=packet["open_count"], day_pnl=packet["day_pnl"],
-            vix=packet["vix"], daily_max_loss=_daily_max_loss(), posture=posture)
+            vix=packet["vix"], daily_max_loss=_daily_max_loss(), posture=posture,
+            open_symbols=open_symbols)
         # Shadow gate (log-only): what a LIVE directional gate WOULD have blocked among the
         # trades that fired, evaluated at the decisive posture even while the gate is inert.
         # Empty when gate_on (wrong-side trades are already in `rejected`). Recorded on the

@@ -698,6 +698,19 @@ def test_run_cycle_gate_blocks_wrong_side_when_flag_on(monkeypatch):
     assert out["rejected"][0]["reason"]                      # blocked wrong-side
 
 
+def test_run_cycle_blocks_symbol_already_open(monkeypatch):
+    """run_cycle derives open_symbols from the driver book and blocks a dup-symbol trade."""
+    monkeypatch.setattr("services.driver_svc.decider.decide",
+        lambda p, **k: {"stand_down": False, "trades": [{"id": "m0", "quantity": 1}]})
+    scan = {"signals_0dte": [{"symbol": "$SPX", "type": "PCS", "max_loss": 2.0,
+                              "composite_score": 80}], "signals_swing": []}
+    paper = {"snapshot": {"session_pnl": 0.0},
+             "positions": [{"symbol": "$SPX", "source": "driver"}]}
+    out = compute.run_cycle(scan, paper, target=500.0, limits=_lim(), market={})
+    assert out["executable"] == []
+    assert out["rejected"][0]["reason"]                      # symbol already open
+
+
 # ---------------------------------------------------------------------------
 # Task 4 — the directional list is invisible to the driver
 # ---------------------------------------------------------------------------

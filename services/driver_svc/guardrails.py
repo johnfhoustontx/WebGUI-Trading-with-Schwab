@@ -111,6 +111,12 @@ def _max_loss_dollars(signal) -> float | None:
 # a down tape). Surfaced on the /driver decision log like the other reject reasons.
 WRONG_SIDE_REGIME = "wrong-side for the current regime (directional gate)"
 
+# Rejection reason for the one-position-per-symbol rule (2026-07-16) — the driver may
+# hold at most ONE open trade per underlying, so a proposed trade on a symbol that already
+# has an open position (or was already taken earlier in THIS cycle) is rejected. Caps the
+# per-name concentration that drove the $SPX-heavy losing book.
+SYMBOL_ALREADY_OPEN = "symbol already has an open position (one trade per symbol)"
+
 
 def _side_blocked(signal, posture) -> bool:
     """True iff this defined-risk spread's directional side is wrong for ``posture``.
@@ -229,7 +235,7 @@ def halt_state(day_pnl, target, daily_max_loss, vix, vix_max=25.0):
 
 
 def apply_guardrails(decision, menu_by_id, limits, *, open_count, day_pnl, vix=None,
-                     daily_max_loss=250.0, posture="neutral"):
+                     daily_max_loss=250.0, posture="neutral", open_symbols=frozenset()):
     """Turn a model decision into an executable, risk-clamped trade list.
 
     This is the single authority over what the autonomous driver executes. The
@@ -264,6 +270,10 @@ def apply_guardrails(decision, menu_by_id, limits, *, open_count, day_pnl, vix=N
     remaining = float(limits["daily_risk_budget"])
     slots = max(0, limits["max_concurrent"] - int(open_count))
     per_cycle = limits["max_trades_per_cycle"]
+    # One position per symbol: seed with the symbols already open in the book, then add
+    # each symbol taken THIS cycle — so neither the account nor a same-cycle duplicate can
+    # stack a second trade on the same underlying.
+    taken_symbols = set(open_symbols or ())
 
     for t in decision.get("trades", []):
         mid = t.get("id")
@@ -281,6 +291,12 @@ def apply_guardrails(decision, menu_by_id, limits, *, open_count, day_pnl, vix=N
         if _side_blocked(sig, posture):
             rejected.append({"id": mid, "reason": WRONG_SIDE_REGIME})
             continue
+        # One trade per symbol — before the capacity check so a duplicate-symbol block
+        # does NOT consume a concurrent slot (a following new-symbol trade can still run).
+        sym = sig.get("symbol")
+        if sym and sym in taken_symbols:
+            rejected.append({"id": mid, "reason": SYMBOL_ALREADY_OPEN})
+            continue
         if len(executable) >= per_cycle or slots <= 0:
             rejected.append({"id": mid, "reason": "max trades/concurrent reached"})
             continue
@@ -290,6 +306,8 @@ def apply_guardrails(decision, menu_by_id, limits, *, open_count, day_pnl, vix=N
             continue
         executable.append({"id": mid, "signal": sig, "qty": qty,
                            "rationale": t.get("rationale", "")})
+        if sym:
+            taken_symbols.add(sym)
         remaining -= qty * _max_loss_dollars(sig)   # dollars — keep the budget in per-contract $
         slots -= 1
 
