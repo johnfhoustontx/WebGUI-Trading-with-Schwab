@@ -133,24 +133,35 @@ def line_annotations(spot, flip, walls):
     return anns
 
 
-def wall_plot_lines(spot, walls):
-    """Call/Put wall levels as yAxis plotLines — horizontal, so they run ACROSS the
-    heatmap's full time axis.
+def _level_plot_line(value, text, color):
+    """One horizontal reference line (+ right-aligned label) for the strike axis."""
+    return {"value": value, "color": color, "width": 1, "dashStyle": "Dash",
+            "zIndex": 4,
+            "label": {"text": text, "align": "right", "x": -6, "y": -4,
+                      "style": {"color": color, "fontSize": "10px"}}}
+
+
+def _is_level(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def wall_plot_lines(spot, walls, flip=None):
+    """Gamma-flip + Call/Put wall levels as yAxis plotLines — horizontal, so they
+    run ACROSS the heatmap's full time axis.
 
     The bar chart already marks these levels on the shared strike axis; extending
-    them over the heatmap shows where price sat relative to the walls at every
-    point in the session, not just now. Side naming matches ``line_annotations``.
-    Non-numeric levels are skipped rather than raising."""
+    them over the heatmap shows where price sat relative to the flip and the walls
+    at every point in the session, not just now. Naming/colors match
+    ``line_annotations`` so the two panels read as one. Non-numeric levels are
+    skipped rather than raising."""
     out = []
+    if _is_level(flip):
+        out.append(_level_plot_line(flip, f"Gamma flip {flip:g}", FLIP_COLOR))
     for w in (walls or []):
-        if not isinstance(w, (int, float)) or isinstance(w, bool):
+        if not _is_level(w):
             continue
         side = "Call wall" if (spot is None or w >= spot) else "Put wall"
-        out.append({"value": w, "color": WALL_COLOR, "width": 1,
-                    "dashStyle": "Dash", "zIndex": 4,
-                    "label": {"text": f"{side} {w:g}", "align": "right", "x": -6,
-                              "y": -4, "style": {"color": WALL_COLOR,
-                                                 "fontSize": "10px"}}})
+        out.append(_level_plot_line(w, f"{side} {w:g}", WALL_COLOR))
     return out
 
 
@@ -420,7 +431,7 @@ def _coloraxis(zmax):
 
 
 def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
-                   walls=None, spot=None):
+                   walls=None, spot=None, flip=None):
     """Intraday strike×time Highcharts heatmap (dark, cell separators, concise
     hover) with the underlying spot-price line overlaid on the same (linear)
     strike axis. ``yrange`` (when given) sets the Strike axis range so it aligns
@@ -532,10 +543,10 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
     # left-axis gutter — the cells butt directly against the bars.
     yaxis = {**_dark_axis(), "startOnTick": False, "endOnTick": False,
              "title": {"text": None}, "labels": {"enabled": False},
-             # ALWAYS emit the key (empty when there are no walls): in-place
+             # ALWAYS emit the key (empty when there are no levels): in-place
              # chart.update() MERGES options, so omitting it would leave the
-             # previous view's wall lines painted over the new view.
-             "plotLines": wall_plot_lines(spot, walls)}
+             # previous view's flip/wall lines painted over the new view.
+             "plotLines": wall_plot_lines(spot, walls, flip)}
     if yrange is not None:
         yaxis["min"], yaxis["max"] = yrange[0], yrange[1]
     fig = _base_chart("heatmap", height)
@@ -1174,7 +1185,8 @@ def render():
                                   "spot": proj.get("spot")}
             _set_figure(heat_plot, heatmap_figure(rows, view, yrange=yr,
                                                   projection=projection,
-                                                  walls=walls, spot=view_spot))
+                                                  walls=walls, spot=view_spot,
+                                                  flip=flip))
             heat_plot.set_visibility(True)
             heat_msg.set_visibility(False)
         else:

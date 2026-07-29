@@ -715,3 +715,23 @@ def test_heatmap_wall_lines_are_defensive():
     # No spot → still drawn (side falls back to Call wall), never dropped.
     fig2 = gamma.heatmap_figure(_WALL_ROWS, "GEX", spot=None, walls=[455.0])
     assert len(fig2["yAxis"]["plotLines"]) == 1
+
+
+def test_heatmap_figure_draws_gamma_flip_line():
+    # The flip is the regime boundary — seeing where price sat relative to it all
+    # session is the point, so it spans the heatmap like the walls do.
+    fig = gamma.heatmap_figure(_WALL_ROWS, "GEX", spot=450.0, walls=[455.0],
+                               flip=449.5)
+    by_value = {pl["value"]: pl for pl in fig["yAxis"]["plotLines"]}
+    assert set(by_value) == {455.0, 449.5}
+    assert "Gamma flip" in by_value[449.5]["label"]["text"]
+    # Distinguishable from the walls at a glance.
+    assert by_value[449.5]["color"] == gamma.FLIP_COLOR
+    assert by_value[455.0]["color"] == gamma.WALL_COLOR
+
+
+def test_heatmap_flip_line_defensive_and_independent():
+    # Flip alone (no walls) still draws; a garbage flip is skipped, not raised on.
+    assert len(gamma.heatmap_figure(_WALL_ROWS, "GEX", flip=449.5)["yAxis"]["plotLines"]) == 1
+    assert gamma.heatmap_figure(_WALL_ROWS, "GEX", flip="x")["yAxis"]["plotLines"] == []
+    assert gamma.heatmap_figure(_WALL_ROWS, "GEX", flip=None)["yAxis"]["plotLines"] == []
