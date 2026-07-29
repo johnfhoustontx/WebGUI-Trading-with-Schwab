@@ -17,6 +17,7 @@ DEFAULTS = {
     "ticker_enabled": True,          # bottom market-summary marquee on every page
     "ticker_speed": 60,              # marquee duration seconds (higher = slower)
     "nav_pinned": False,             # nav drawer locked open (else a hover icon rail)
+    "gamma_level_tracks": False,     # heatmap overlay: intraday flip/wall movement
 }
 
 _PATH = pathlib.Path(__file__).resolve().parent / "data" / "settings.json"

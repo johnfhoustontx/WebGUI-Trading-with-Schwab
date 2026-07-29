@@ -651,16 +651,18 @@ def test_heatmap_no_projection_no_divider_empty_cone():
 
 
 def test_heatmap_series_count_constant_across_projection():
-    # A CONSTANT series count (heatmap + Spot + EM up + EM down = 4) is required so the
-    # in-place chart.update() maps series 1:1 when toggling GEX<->Charm/DELTA/Vanna. A
-    # varying count made Highcharts replace series (shifting colorIndex + leaving stray
-    # line paths) → the heatmap rendered as a mess of thin lines. Regression guard.
+    # A CONSTANT series count (heatmap + Spot + EM up + EM down + the 3 level tracks
+    # = 7) is required so the in-place chart.update() maps series 1:1 when toggling
+    # GEX<->Charm/DELTA/Vanna. A varying count made Highcharts replace series
+    # (shifting colorIndex + leaving stray line paths) → the heatmap rendered as a
+    # mess of thin lines. Regression guard: what matters is that the count is the
+    # SAME everywhere, whatever the optional blocks are doing.
     proj = {"times": ["13:15"], "spot": 100.0, "grid": {100.0: [5.0]},
             "cone": {"mid": [100.0], "up": [100.5], "down": [99.5]}}
     with_proj = gamma.heatmap_figure(_proj_rows(), "GEX", yrange=[95.0, 105.0], projection=proj)
     no_proj = gamma.heatmap_figure(_proj_rows(), "Charm", yrange=[95.0, 105.0], projection=None)
-    assert len(with_proj["series"]) == len(no_proj["series"]) == 4
-    assert [s["type"] for s in no_proj["series"]] == ["heatmap", "line", "line", "line"]
+    assert len(with_proj["series"]) == len(no_proj["series"]) == 7
+    assert [s["type"] for s in no_proj["series"]] == ["heatmap"] + ["line"] * 6
 
 
 def test_strike_heat_split_constant():
@@ -735,3 +737,57 @@ def test_heatmap_flip_line_defensive_and_independent():
     assert len(gamma.heatmap_figure(_WALL_ROWS, "GEX", flip=449.5)["yAxis"]["plotLines"]) == 1
     assert gamma.heatmap_figure(_WALL_ROWS, "GEX", flip="x")["yAxis"]["plotLines"] == []
     assert gamma.heatmap_figure(_WALL_ROWS, "GEX", flip=None)["yAxis"]["plotLines"] == []
+
+
+# --- Intraday level-movement tracks on the heatmap (toggleable) ---
+
+_LVL = {"flip": [449.5, 450.0], "call_wall": [455.0, 456.0],
+        "put_wall": [445.0, None]}
+
+
+def _series_by_name(fig):
+    return {s["name"]: s for s in fig["series"]}
+
+
+def test_heatmap_track_series_plot_level_movement_over_time():
+    fig = gamma.heatmap_figure(_WALL_ROWS, "GEX", levels=_LVL, show_tracks=True)
+    s = _series_by_name(fig)
+    # x is the time-category index, y the level at that snapshot.
+    assert s["Call wall track"]["data"] == [[0, 455.0], [1, 456.0]]
+    assert s["Flip track"]["data"] == [[0, 449.5], [1, 450.0]]
+    # A None level is a GAP, not a dropped point — the line must not slide left.
+    assert s["Put wall track"]["data"] == [[0, 445.0], [1, None]]
+    # Walls jump between discrete strikes; a smooth line would imply levels that
+    # never existed, so the tracks are drawn as steps.
+    assert s["Call wall track"]["step"] == "left"
+
+
+def test_heatmap_tracks_hidden_when_toggled_off_but_series_still_emitted():
+    # The series COUNT must not vary: Highcharts' in-place update replaces (not
+    # updates) series when the count changes, shifting colorIndex and leaving stray
+    # paths. So the tracks are always present — empty when off.
+    off = gamma.heatmap_figure(_WALL_ROWS, "GEX", levels=_LVL, show_tracks=False)
+    on = gamma.heatmap_figure(_WALL_ROWS, "GEX", levels=_LVL, show_tracks=True)
+    assert len(off["series"]) == len(on["series"])
+    s = _series_by_name(off)
+    assert s["Call wall track"]["data"] == []
+    assert s["Flip track"]["data"] == []
+
+
+def test_heatmap_series_count_is_constant_across_views_and_toggle():
+    variants = [
+        gamma.heatmap_figure(_WALL_ROWS, "GEX", levels=_LVL, show_tracks=True),
+        gamma.heatmap_figure(_WALL_ROWS, "Charm"),                    # no levels at all
+        gamma.heatmap_figure(_WALL_ROWS, "Vanna", levels=None, show_tracks=True),
+        gamma.heatmap_figure(_WALL_ROWS, "GEX", walls=[455.0], flip=449.5),
+    ]
+    assert len({len(f["series"]) for f in variants}) == 1
+
+
+def test_heatmap_tracks_keep_static_lines_visible():
+    # The user asked for BOTH: dashed static line = the level now, solid track =
+    # how it got there.
+    fig = gamma.heatmap_figure(_WALL_ROWS, "GEX", spot=450.0, walls=[455.0],
+                               flip=449.5, levels=_LVL, show_tracks=True)
+    assert len(fig["yAxis"]["plotLines"]) == 2          # static flip + call wall
+    assert _series_by_name(fig)["Call wall track"]["data"]

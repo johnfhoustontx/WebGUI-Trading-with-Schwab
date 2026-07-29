@@ -1447,6 +1447,52 @@ def gamma_walls(vname, data, spot):
     return [s for s in (w.get("put_wall"), w.get("call_wall")) if s is not None]
 
 
+# Views with directional walls (mirrors gamma_walls — Charm/Vanna have none).
+_WALL_VIEWS = frozenset({"GEX", "DEX"})
+
+
+def _level_track(rows, vname):
+    """Per-snapshot flip / call-wall / put-wall levels, parallel 1:1 with ``rows``.
+
+    Powers the heatmap's optional "level movement" overlay: where the walls and the
+    gamma flip sat at every point in the session, not just now. Positional
+    alignment matters — the page indexes these by the heatmap's time-category
+    index, which is the row index.
+
+    Flip is the STORED column (already the value the summary shows). The walls are
+    RECOMPUTED per row from that row's own per-strike grid via the engine's
+    directional picker, because the stored ``top_pos_strike``/``top_neg_strike``
+    are a DIFFERENT metric — the max/min NET strike anywhere in the chain, vs the
+    largest call ABOVE spot / most-negative put BELOW spot that the chart draws.
+    Measured on a live session, the two disagreed on 383 of 383 rows, so reusing
+    the stored columns would draw tracks that contradict the wall lines beside
+    them. Recomputing costs ~11 ms per view per session.
+
+    MUST run BEFORE ``_crop_gamma_views``: a wall can sit outside the ±N-strike
+    display window, and the crop would silently truncate the grid it's found in.
+
+    Missing/garbage rows yield ``None`` placeholders rather than dropping out, so
+    the arrays stay aligned with the time axis. Never raises."""
+    import gamma_tool as gt
+
+    out = {"flip": [], "call_wall": [], "put_wall": []}
+    walled = vname in _WALL_VIEWS
+    for r in (rows or []):
+        flip = call_w = put_w = None
+        try:
+            flip = r[2] if isinstance(r[2], (int, float)) else None
+            spot, grid = r[1], r[6]
+            if walled and grid and isinstance(spot, (int, float)) and spot > 0:
+                w = gt.get_directional_walls({"gex": grid}, spot) or {}
+                call_w, put_w = w.get("call_wall"), w.get("put_wall")
+        except Exception:
+            log.debug("_level_track row failed", exc_info=True)
+        out["flip"].append(flip)
+        out["call_wall"].append(call_w)
+        out["put_wall"].append(put_w)
+    return out
+
+
 # Strikes shown on each side of spot in the Gamma page's bar/heatmap window
 # (webgui/pages/options/gamma.py N_SIDE). The page crops the display to this
 # ±N_SIDE window; embedding the FULL per-strike chain history (all four views,
@@ -1787,12 +1833,17 @@ def gamma_snapshot(symbol: str, chain=None) -> dict | None:
                 summary = eng.snapshot_summary(data, vstr)
             except Exception:
                 summary = {}
+            _rows = _history(vstr)
             entry = {
                 "data": data,
                 "summary": summary,
                 "walls": _walls(vname, data),
                 "flip": (summary or {}).get("flip"),
-                "history": _history(vstr),
+                "history": _rows,
+                # Intraday movement of the flip + walls, parallel to `history`.
+                # Built HERE, before _crop_gamma_views, so the wall search sees each
+                # snapshot's FULL grid (a wall can sit outside the display window).
+                "levels": _level_track(_rows, vname),
             }
             if vname == "DEX":
                 entry["hedge"] = {

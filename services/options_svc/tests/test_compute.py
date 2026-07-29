@@ -4279,3 +4279,65 @@ def test_display_session_date_shows_prior_session_before_rth_open():
     # Off-hours/weekend: active_session_date already returned a PRIOR date — untouched.
     prior = _dt.date(2026, 7, 24)
     assert compute._display_session_date(_ct(2026, 7, 27, 7, 0), prior) == prior
+
+
+# --- Intraday level tracks (flip / call wall / put wall movement) ---
+
+def _lvl_row(ts, spot, flip, grid):
+    # (ts, spot, flip, top_pos_strike, top_neg_strike, net_total, grid) — the
+    # top_pos/top_neg columns are deliberately WRONG here to prove they're unused.
+    return (ts, spot, flip, 999.0, 111.0, 0.0, grid)
+
+
+_LVL_GRID = {
+    # below spot(=100): put wall is the MOST-NEGATIVE put
+    95.0: {"call": 1.0, "put": -9.0, "net": -8.0},
+    98.0: {"call": 1.0, "put": -2.0, "net": -1.0},
+    # above spot: call wall is the LARGEST call
+    105.0: {"call": 7.0, "put": -1.0, "net": 6.0},
+    110.0: {"call": 3.0, "put": -1.0, "net": 2.0},
+}
+
+
+def test_level_track_recomputes_walls_matching_the_displayed_definition():
+    from services.options_svc import compute
+    rows = [_lvl_row(1, 100.0, 99.5, _LVL_GRID)]
+    t = compute._level_track(rows, "GEX")
+    # Walls come from the row's OWN grid (largest call above spot / most-negative
+    # put below), NOT the stored top_pos/top_neg columns (999/111 above).
+    assert t["call_wall"] == [105.0]
+    assert t["put_wall"] == [95.0]
+    assert t["flip"] == [99.5]          # flip IS the stored column
+
+
+def test_level_track_is_parallel_to_rows_and_tracks_movement():
+    from services.options_svc import compute
+    moved = {**_LVL_GRID, 110.0: {"call": 20.0, "put": -1.0, "net": 19.0}}
+    rows = [_lvl_row(1, 100.0, 99.5, _LVL_GRID),
+            _lvl_row(2, 100.0, 100.5, moved)]
+    t = compute._level_track(rows, "GEX")
+    assert t["call_wall"] == [105.0, 110.0]      # the wall MOVED up
+    assert t["flip"] == [99.5, 100.5]
+    assert len(t["put_wall"]) == len(rows)       # 1:1 with rows (heatmap x-index)
+
+
+def test_level_track_only_walls_for_gex_and_dex():
+    from services.options_svc import compute
+    rows = [_lvl_row(1, 100.0, 99.5, _LVL_GRID)]
+    # Charm/Vanna have no directional walls (mirrors gamma_walls) — flip only.
+    charm = compute._level_track(rows, "Charm")
+    assert charm["call_wall"] == [None] and charm["put_wall"] == [None]
+    assert charm["flip"] == [99.5]
+    assert compute._level_track(rows, "DEX")["call_wall"] == [105.0]
+
+
+def test_level_track_is_defensive():
+    from services.options_svc import compute
+    empty = compute._level_track([], "GEX")
+    assert empty == {"flip": [], "call_wall": [], "put_wall": []}
+    # A row with no grid / no spot yields None placeholders, never an exception,
+    # and stays positionally aligned with the heatmap's time axis.
+    bad = compute._level_track([_lvl_row(1, None, None, {}), _lvl_row(2, 100.0, 99.5, _LVL_GRID)],
+                               "GEX")
+    assert bad["call_wall"] == [None, 105.0]
+    assert bad["flip"] == [None, 99.5]

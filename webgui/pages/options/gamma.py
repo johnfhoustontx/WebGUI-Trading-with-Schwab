@@ -16,6 +16,7 @@ STRINGS. The pure builders (``bars_from_gex`` sorts + numeric-compares strikes;
 ``heatmap_matrix`` sorts strikes) require float keys — so the page re-floats them
 via ``_refloat_keys`` BEFORE feeding the builders. The builders stay unchanged.
 """
+import app_settings
 from pages.ui_guard import guard, guard_async
 from .inputs import select_all_on_focus
 from .theme import BTN, BTN_PRIMARY
@@ -430,8 +431,18 @@ def _coloraxis(zmax):
     return ca
 
 
+def track_points(values):
+    """[[time_index, level], …] for a level track, keeping None as a GAP.
+
+    Nulls must be preserved rather than skipped: dropping them would shift every
+    later point one column to the left, silently mis-dating the movement."""
+    return [[i, v if isinstance(v, (int, float)) and not isinstance(v, bool) else None]
+            for i, v in enumerate(values or [])]
+
+
 def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
-                   walls=None, spot=None, flip=None):
+                   walls=None, spot=None, flip=None, levels=None,
+                   show_tracks=False):
     """Intraday strike×time Highcharts heatmap (dark, cell separators, concise
     hover) with the underlying spot-price line overlaid on the same (linear)
     strike axis. ``yrange`` (when given) sets the Strike axis range so it aligns
@@ -538,6 +549,19 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
                                dashStyle="ShortDash", enableMouseTracking=False))
     series.append(_line_series("EM down", em_down_pts, "#e79a9a", lineWidth=1,
                                dashStyle="ShortDash", enableMouseTracking=False))
+    # Level-movement tracks (toggleable): where the flip + walls sat at each
+    # snapshot. SOLID, against the dashed static plotLines of the same color — so
+    # the pair reads as "the level now" (dashed) and "how it got there" (solid).
+    # Stepped, because a wall holds a strike then JUMPS to the next one; a smooth
+    # line would imply levels that never existed. Emitted even when toggled off
+    # (empty data) to keep the series count fixed — see the note above.
+    lv = levels or {}
+    for name, key, color in (("Flip track", "flip", FLIP_COLOR),
+                             ("Call wall track", "call_wall", WALL_COLOR),
+                             ("Put wall track", "put_wall", WALL_COLOR)):
+        pts = track_points(lv.get(key)) if show_tracks else []
+        series.append(_line_series(name, pts, color, lineWidth=1, step="left",
+                                   enableMouseTracking=False))
     # The bar chart already labels the Strike axis and the heatmap shares its EXACT
     # y-range, so hide the heatmap's (duplicate) strike labels + title and drop its
     # left-axis gutter — the cells butt directly against the bars.
@@ -933,6 +957,14 @@ def render():
             ui.select(_sym_opts, value=_DEFAULT_SYMBOL,
                       with_input=True, label="Symbol").classes("w-40"))
         fetch_btn = ui.button("Refresh now", icon="refresh", color=None).props("no-caps").classes(BTN_PRIMARY)
+        # Overlay the intraday movement of the flip + walls on the heatmap. Off by
+        # default (it adds three lines to an already-dense chart); the choice is
+        # persisted so it survives navigation and restarts.
+        tracks_sw = ui.switch("Level movement",
+                              value=bool(app_settings.get("gamma_level_tracks")))
+        tracks_sw.props("dense").classes("text-xs")
+        tracks_sw.tooltip("Show where the gamma flip and the call/put walls sat "
+                          "through the session, not just now")
         # Explain / Analyze / Briefings push to the RIGHT of the frame (2026-07-11).
         ui.space()
         explain_btn = ui.button("Explain", icon="help", color=None).props("no-caps").classes(BTN)
@@ -1186,7 +1218,9 @@ def render():
             _set_figure(heat_plot, heatmap_figure(rows, view, yrange=yr,
                                                   projection=projection,
                                                   walls=walls, spot=view_spot,
-                                                  flip=flip))
+                                                  flip=flip,
+                                                  levels=entry.get("levels"),
+                                                  show_tracks=bool(tracks_sw.value)))
             heat_plot.set_visibility(True)
             heat_msg.set_visibility(False)
         else:
@@ -1418,6 +1452,15 @@ def render():
     explain_btn.on_click(_request_explain)
     analyze_btn.on_click(_request_analyze)
     view_toggle.on_value_change(lambda e: _render_view())
+
+    @guard
+    def _on_tracks_toggle(e):
+        # Persist the choice, then repaint from the cached snapshot — the tracks
+        # ride the snapshot the page already holds, so no refetch is needed.
+        app_settings.set("gamma_level_tracks", bool(e.value))
+        _render_view()
+
+    tracks_sw.on_value_change(_on_tracks_toggle)
 
     # Initial paint from the bus cache (graceful-empty if the service is cold).
     # The cheap :ver probes + the small gex_status/sched reads stay inline; the big
