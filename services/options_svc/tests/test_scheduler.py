@@ -74,15 +74,16 @@ def test_manage_due_first_tick_in_window():
     assert due is True and slot is not None
 
 
-def test_manage_due_not_repeated_within_same_5min_slot():
+def test_manage_due_not_repeated_within_same_minute():
     _, slot = scheduler.manage_due(_ct(2026, 6, 15, 9, 0), None)
-    due2, slot2 = scheduler.manage_due(_ct(2026, 6, 15, 9, 3), slot)
+    due2, slot2 = scheduler.manage_due(_ct(2026, 6, 15, 9, 0), slot)   # same 1-min slot
     assert due2 is False and slot2 == slot
 
 
-def test_manage_due_fires_on_next_5min_slot():
-    _, slot = scheduler.manage_due(_ct(2026, 6, 15, 9, 2), None)
-    due, slot2 = scheduler.manage_due(_ct(2026, 6, 15, 9, 6), slot)
+def test_manage_due_fires_every_minute():
+    """The driver auto-manage reprices the P&L every minute within market hours."""
+    _, slot = scheduler.manage_due(_ct(2026, 6, 15, 9, 0), None)
+    due, slot2 = scheduler.manage_due(_ct(2026, 6, 15, 9, 1), slot)    # next minute → fires
     assert due is True and slot2 != slot
 
 

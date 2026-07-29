@@ -138,7 +138,13 @@ def gex_due(now, last_slot):
 # service now runs that cycle automatically on a fixed cadence within market
 # hours so the paper account stays current (and hits close) with no page open —
 # mirrors gex_due/autoscan_due on its own interval/window (the trading window).
-_MANAGE_INTERVAL_MIN = 5    # auto-manage every 5 min within market hours
+# 1-min cadence (2026-07-16): the isolated DRIVER paper account reprices its open
+# positions every minute so its live P&L (and the −$1,500 loss-halt read) stays fresh and
+# stops react within the minute. run_manage_cycle clears the repricer chain cache at the
+# start of every run (paper_engine), so each 1-min tick fetches genuinely fresh marks — it
+# is NOT re-reading a stale cached chain. ~a handful of driver symbols/min, marginal vs the
+# 45-symbol GEX poll. (The MANUAL account is on the separate hourly paper_cycle_due.)
+_MANAGE_INTERVAL_MIN = 1    # auto-manage every 1 min within market hours
 
 
 def _manage_slot_key(now):
@@ -146,9 +152,9 @@ def _manage_slot_key(now):
 
 
 def manage_due(now, last_slot):
-    """(should_manage, slot): True at most once per 5-min slot, only on a
-    trading day within the 08:00–15:15 CT window. Drives the paper auto-manage
-    cycle so open paper positions are repriced + auto-closed unattended."""
+    """(should_manage, slot): True at most once per 1-min slot, only on a
+    trading day within the 08:00–15:15 CT window. Drives the DRIVER paper auto-manage
+    cycle so its open positions are repriced (fresh P&L) + auto-closed unattended."""
     if not (_is_trading_day(now) and _is_market_hours(now)):
         return (False, last_slot)
     slot = _manage_slot_key(now)
@@ -162,7 +168,7 @@ def manage_due(now, last_slot):
 # HOUR, 09:00–14:00 CT — the last run at 14:00 (2pm), with NO run at 15:00 (3pm)
 # when the regular session closes. Trading days only. This REPLACES the manual
 # account's former 5-min manage cadence (see manage_due); the isolated DRIVER
-# account stays on the manage_due 5-min slot. Each hour fires ONCE within a grace
+# account stays on the manage_due slot (now 1-min). Each hour fires ONCE within a grace
 # window (mirrors analyze_slot_due) so a missed 30 s tick / mid-window service
 # start still fires without backfilling a long-stale hour.
 _PAPER_HOURS = (9, 10, 11, 12, 13, 14)   # CT top-of-hour run hours (no 15:00)
@@ -411,7 +417,7 @@ async def loop(bus):
     except Exception:
         log.exception("startup buying-power reconcile degraded")
     last_gex_slot = None  # 2-min GEX history-collection slot (see gex_due)
-    last_manage_slot = None  # 5-min DRIVER paper auto-manage slot (see manage_due)
+    last_manage_slot = None  # 1-min DRIVER paper auto-manage slot (see manage_due)
     paper_ran = set()  # (date, hour) of fired hourly manual paper cycles (see paper_cycle_due)
     last_periodic_slot = None  # header + gex_status throttle slot (see periodic_refresh_due)
     analyze_ran = set()  # (date, slot) of fired scheduled Gamma Analyze runs (see analyze_slot_due)
