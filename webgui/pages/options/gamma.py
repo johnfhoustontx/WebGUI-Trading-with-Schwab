@@ -133,6 +133,27 @@ def line_annotations(spot, flip, walls):
     return anns
 
 
+def wall_plot_lines(spot, walls):
+    """Call/Put wall levels as yAxis plotLines — horizontal, so they run ACROSS the
+    heatmap's full time axis.
+
+    The bar chart already marks these levels on the shared strike axis; extending
+    them over the heatmap shows where price sat relative to the walls at every
+    point in the session, not just now. Side naming matches ``line_annotations``.
+    Non-numeric levels are skipped rather than raising."""
+    out = []
+    for w in (walls or []):
+        if not isinstance(w, (int, float)) or isinstance(w, bool):
+            continue
+        side = "Call wall" if (spot is None or w >= spot) else "Put wall"
+        out.append({"value": w, "color": WALL_COLOR, "width": 1,
+                    "dashStyle": "Dash", "zIndex": 4,
+                    "label": {"text": f"{side} {w:g}", "align": "right", "x": -6,
+                              "y": -4, "style": {"color": WALL_COLOR,
+                                                 "fontSize": "10px"}}})
+    return out
+
+
 def _robust_zmax(z, q=0.95):
     """Symmetric color clamp for a heatmap z-grid: the ``q`` percentile of |net|.
 
@@ -398,7 +419,8 @@ def _coloraxis(zmax):
     return ca
 
 
-def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None):
+def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
+                   walls=None, spot=None):
     """Intraday strike×time Highcharts heatmap (dark, cell separators, concise
     hover) with the underlying spot-price line overlaid on the same (linear)
     strike axis. ``yrange`` (when given) sets the Strike axis range so it aligns
@@ -509,7 +531,11 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None):
     # y-range, so hide the heatmap's (duplicate) strike labels + title and drop its
     # left-axis gutter — the cells butt directly against the bars.
     yaxis = {**_dark_axis(), "startOnTick": False, "endOnTick": False,
-             "title": {"text": None}, "labels": {"enabled": False}}
+             "title": {"text": None}, "labels": {"enabled": False},
+             # ALWAYS emit the key (empty when there are no walls): in-place
+             # chart.update() MERGES options, so omitting it would leave the
+             # previous view's wall lines painted over the new view.
+             "plotLines": wall_plot_lines(spot, walls)}
     if yrange is not None:
         yaxis["min"], yaxis["max"] = yrange[0], yrange[1]
     fig = _base_chart("heatmap", height)
@@ -1146,7 +1172,9 @@ def render():
                                   "grid": _refloat_keys(proj["grid"]),
                                   "cone": proj.get("cone") or {},
                                   "spot": proj.get("spot")}
-            _set_figure(heat_plot, heatmap_figure(rows, view, yrange=yr, projection=projection))
+            _set_figure(heat_plot, heatmap_figure(rows, view, yrange=yr,
+                                                  projection=projection,
+                                                  walls=walls, spot=view_spot))
             heat_plot.set_visibility(True)
             heat_msg.set_visibility(False)
         else:

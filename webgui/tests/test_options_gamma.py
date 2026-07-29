@@ -679,3 +679,39 @@ def test_status_strip_text_combines_sources():
 def test_status_strip_text_defensive():
     s = gamma.status_strip_text(None, "", 0)
     assert "Last scan —" in s and "Next scan —" in s and "Next refresh 0:00" in s
+
+
+# --- Call/Put wall lines extended across the heatmap ---
+
+_WALL_ROWS = [("09:30", 450.0, None, None, None, 0, {449.0: {"net": 5}}),
+              ("09:35", 451.5, None, None, None, 0, {449.0: {"net": 7}})]
+
+
+def test_heatmap_figure_draws_wall_lines_across_the_plot():
+    # Walls are horizontal yAxis plotLines, so they span the FULL time axis rather
+    # than being a per-column series — "across the heatmap".
+    fig = gamma.heatmap_figure(_WALL_ROWS, "GEX", spot=450.0, walls=[455.0, 445.0])
+    lines = fig["yAxis"]["plotLines"]
+    by_value = {pl["value"]: pl for pl in lines}
+    assert set(by_value) == {455.0, 445.0}
+    # Labeled by side relative to spot, matching the bar chart's vocabulary.
+    assert "Call wall" in by_value[455.0]["label"]["text"]
+    assert "Put wall" in by_value[445.0]["label"]["text"]
+
+
+def test_heatmap_figure_always_emits_plotlines_key():
+    # In-place chart.update() MERGES options: a figure that omits plotLines would
+    # leave the PREVIOUS view's wall lines painted on the new view. Always emit the
+    # key (empty when there are no walls) so an update replaces them deterministically.
+    fig = gamma.heatmap_figure(_WALL_ROWS, "Charm")
+    assert fig["yAxis"]["plotLines"] == []
+
+
+def test_heatmap_wall_lines_are_defensive():
+    # A None/garbage wall must not raise or emit a bogus line.
+    fig = gamma.heatmap_figure(_WALL_ROWS, "GEX", spot=450.0,
+                               walls=[None, "x", 455.0])
+    assert [pl["value"] for pl in fig["yAxis"]["plotLines"]] == [455.0]
+    # No spot → still drawn (side falls back to Call wall), never dropped.
+    fig2 = gamma.heatmap_figure(_WALL_ROWS, "GEX", spot=None, walls=[455.0])
+    assert len(fig2["yAxis"]["plotLines"]) == 1

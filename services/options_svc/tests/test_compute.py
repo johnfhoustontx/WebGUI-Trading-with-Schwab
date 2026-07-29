@@ -1216,9 +1216,21 @@ class _FakeEngine:
         return {"expirations": ["2026-06-18"], "cells": {}}
 
 
+# The session these gamma tests pin (see the active_session_date monkeypatch below).
+_GAMMA_TEST_SESSION = __import__("datetime").date(2026, 6, 18)
+
+
 def _patch_gamma(monkeypatch, *, chain=None, walls=None, history=None):
     import sys as _sys
     import types as _types
+
+    # Fixture history rows carry tiny ordinal timestamps (1, 2, …) purely for
+    # ordering. The Gamma charts now DISPLAY only RTH, so rebase those ordinals
+    # onto the pinned session's 08:30 CT open — otherwise every fixture row sits at
+    # the 1970 epoch and is (correctly) filtered out before the assertions run.
+    # Ordering and the strict ``ts > since_ts`` incremental semantics are preserved.
+    _t0 = compute._rth_bounds(_GAMMA_TEST_SESSION)[0]
+    history = [(_t0 + r[0], *r[1:]) for r in (history or [])]
 
     def _fake_directional_walls(gex_data, spot):
         grid = (gex_data or {}).get("gex") or {}
@@ -1487,7 +1499,10 @@ def test_gamma_snapshot_second_call_loads_history_incrementally(monkeypatch):
     assert set(seen) == {None}                     # cold: full loads (4 views)
     seen.clear()
     snap = compute.gamma_snapshot("$SPX")
-    assert seen and all(s == 1 for s in seen)      # warm: only ts > 1 requested
+    # Warm: only rows NEWER than the last-seen ts are requested. The fixture's
+    # ordinal ts=1 is rebased onto the session's RTH open (see _patch_gamma).
+    last_ts = compute._rth_bounds(_GAMMA_TEST_SESSION)[0] + 1
+    assert seen and all(s == last_ts for s in seen)
     assert snap["views"]["GEX"]["history"]         # memoized rows still served
 
 
@@ -4206,3 +4221,61 @@ def test_eod_briefing_document_title(monkeypatch):
                 return type("R", (), {"content": [blk]})()
     html = compute.eod_briefing(client=_C())["html"]
     assert "End-of-Day Recap" in html and "Gamma Analysis" not in html
+
+
+# --- RTH-only Gamma display window (heatmap + flow), collection unchanged ---
+
+def _ct(y, m, d, hh, mm):
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+    return _dt.datetime(y, m, d, hh, mm, tzinfo=ZoneInfo("America/Chicago"))
+
+
+def test_rth_bounds_spans_0830_to_1500_ct():
+    import datetime as _dt
+    from services.options_svc import compute
+    lo, hi = compute._rth_bounds(_dt.date(2026, 7, 27))
+    assert lo == _ct(2026, 7, 27, 8, 30).timestamp()
+    assert hi == _ct(2026, 7, 27, 15, 0).timestamp()
+
+
+def test_rth_only_drops_pre_and_post_market_rows():
+    import datetime as _dt
+    from services.options_svc import compute
+    d = _dt.date(2026, 7, 27)
+    bounds = compute._rth_bounds(d)
+    rows = [
+        (_ct(2026, 7, 27, 8, 0).timestamp(), "premarket"),    # collected, not RTH
+        (_ct(2026, 7, 27, 8, 29).timestamp(), "premarket"),
+        (_ct(2026, 7, 27, 8, 30).timestamp(), "open"),        # inclusive
+        (_ct(2026, 7, 27, 12, 0).timestamp(), "midday"),
+        (_ct(2026, 7, 27, 15, 0).timestamp(), "close"),       # inclusive
+        (_ct(2026, 7, 27, 15, 20).timestamp(), "postmarket"), # collected, not RTH
+    ]
+    kept = [r[1] for r in compute._rth_only(rows, bounds)]
+    assert kept == ["open", "midday", "close"]
+
+
+def test_rth_only_is_defensive():
+    from services.options_svc import compute
+    assert compute._rth_only(None, (0, 1)) == []
+    assert compute._rth_only([(None, "x")], (0, 1)) == []      # non-numeric ts dropped
+    # No bounds → unfiltered passthrough (never silently blanks the chart).
+    assert compute._rth_only([(1, "x")], None) == [(1, "x")]
+
+
+def test_display_session_date_shows_prior_session_before_rth_open():
+    import datetime as _dt
+    from services.options_svc import compute
+    today = _dt.date(2026, 7, 27)          # a Monday
+    # 08:00-08:30 CT: collection has started (active_session_date == today) but today
+    # has NO RTH rows yet → keep showing the prior session rather than a blank chart.
+    assert compute._display_session_date(_ct(2026, 7, 27, 8, 5), today) < today
+    # From the 08:30 open onward, today.
+    assert compute._display_session_date(_ct(2026, 7, 27, 8, 30), today) == today
+    assert compute._display_session_date(_ct(2026, 7, 27, 14, 0), today) == today
+    # Post-close today still has RTH rows → today (not the prior session).
+    assert compute._display_session_date(_ct(2026, 7, 27, 15, 10), today) == today
+    # Off-hours/weekend: active_session_date already returned a PRIOR date — untouched.
+    prior = _dt.date(2026, 7, 24)
+    assert compute._display_session_date(_ct(2026, 7, 27, 7, 0), prior) == prior

@@ -30,6 +30,15 @@ log = logging.getLogger(__name__)
 # helpers (_future_marks_ct / project_gex_grid).
 _PROJ_CT_TZ = ZoneInfo("America/Chicago")
 
+# Regular trading hours in CT (09:30–16:00 ET). COLLECTION deliberately runs wider
+# (08:00–15:20 CT, see scheduler._GEX_START / gex_due) so the pre/post-market chain is
+# captured and stored; the Gamma page's time-axis charts (strike×time heatmap + the
+# Flow series) DISPLAY only RTH. Off-hours snapshots are thin — the index doesn't tick
+# pre-open and OI is static — so they added ~50 near-flat columns that stretched the
+# session without informing it. Display-only: nothing here changes what is collected.
+_RTH_START = (8, 30)
+_RTH_END = (15, 0)
+
 if str(OPTIONS_SCANNER) not in sys.path:
     sys.path.insert(0, str(OPTIONS_SCANNER))
 
@@ -1611,6 +1620,50 @@ def take_uoa_stash() -> dict:
     return out
 
 
+def _rth_bounds(session_date):
+    """(start_ts, end_ts) unix seconds bounding RTH on ``session_date`` in CT.
+
+    Computed once per snapshot and compared numerically against each row's ts —
+    far cheaper than converting every row's timestamp to a local time."""
+    import datetime as _dtmod
+    start = _dtmod.datetime.combine(
+        session_date, _dtmod.time(*_RTH_START), tzinfo=_PROJ_CT_TZ)
+    end = _dtmod.datetime.combine(
+        session_date, _dtmod.time(*_RTH_END), tzinfo=_PROJ_CT_TZ)
+    return start.timestamp(), end.timestamp()
+
+
+def _rth_only(rows, bounds):
+    """Rows whose ts (index 0) falls inside ``bounds``, inclusive of both ends.
+
+    ``bounds`` None → passthrough: if the window can't be computed we show
+    everything rather than silently blanking the chart."""
+    if not bounds:
+        return list(rows or [])
+    lo, hi = bounds
+    return [r for r in (rows or [])
+            if isinstance(r[0], (int, float)) and not isinstance(r[0], bool)
+            and lo <= r[0] <= hi]
+
+
+def _display_session_date(now, session_date):
+    """The session whose RTH data the Gamma time-axis charts should show.
+
+    ``scheduler.active_session_date`` flips to today at the 08:00 CT COLLECTION
+    start, but these charts display RTH only — so between 08:00 and the 08:30 open
+    today has rows yet none that are displayable. Keep showing the prior session
+    until RTH actually opens, so the charts are never blank mid-morning. Off-hours
+    and weekends already hand us a prior date, which passes through untouched."""
+    try:
+        if session_date == now.date() and (now.hour, now.minute) < _RTH_START:
+            # Lazy, mirroring gamma_snapshot — scheduler is not a module-level import.
+            from services.options_svc import scheduler as _sch
+            return _sch._prev_trading_day(session_date)
+    except Exception:
+        log.debug("_display_session_date failed — using the active session", exc_info=True)
+    return session_date
+
+
 def _history_rows_incremental(gh, conn, symbol, vstr, session_date):
     """Memoized, append-only heatmap rows for (symbol, view) on session_date.
 
@@ -1677,7 +1730,10 @@ def gamma_snapshot(symbol: str, chain=None) -> dict | None:
     # SESSION DATE (today once collection starts at 08:00 CT, else the prior session),
     # so premarket it shows yesterday until today's snapshots begin.
     now = _sched._market_now()
-    session_date = _sched.active_session_date(now)
+    # The time-axis charts (heatmap + Flow) show RTH only, so before the 08:30 open
+    # fall back to the prior session — today has collected rows but none displayable.
+    session_date = _display_session_date(now, _sched.active_session_date(now))
+    rth = _rth_bounds(session_date)
 
     if chain is None:
         chain = _take_tick_chain(symbol)
@@ -1714,8 +1770,11 @@ def gamma_snapshot(symbol: str, chain=None) -> dict | None:
             # weekends) so the heatmap persists after close + clears next session.
             # Incremental: memoized decoded rows + append-only ts > last-seen loads
             # (see _history_rows_incremental) instead of a full-session re-decode.
-            return _history_rows_incremental(gh, hist_conn, symbol, vstr,
-                                             session_date)
+            # The memo holds EVERY collected row; RTH filtering happens after it, so
+            # the append-only load still works off the true last-collected ts.
+            return _rth_only(
+                _history_rows_incremental(gh, hist_conn, symbol, vstr, session_date),
+                rth)
         except Exception:
             return []
 
@@ -1755,7 +1814,8 @@ def gamma_snapshot(symbol: str, chain=None) -> dict | None:
         # view history loads (one open per snapshot). Same active-session date.
         if hist_conn is not None:
             try:
-                _frows = gh.load_flow_series(hist_conn, symbol, session_date)
+                _frows = _rth_only(
+                    gh.load_flow_series(hist_conn, symbol, session_date), rth)
                 flow = [{"ts": r[0], "spot": r[1], "call_vol": r[2], "put_vol": r[3],
                          "call_prem": r[4], "put_prem": r[5]} for r in _frows]
             except Exception:
