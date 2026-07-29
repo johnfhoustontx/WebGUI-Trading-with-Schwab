@@ -8,7 +8,28 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-07-28 (**Gamma heatmap — RTH-only window, level lines across the plot, and an
+**Last updated:** 2026-07-28 (**Nav — Calculator + Simulator paired under a new "Strategy Tools" group**:
+a webgui NAV-ONLY change. The two MODELLING tools are the app's most tightly coupled pages — they share
+`leg_editor.py` / `strategies.py` / `strategy_menu.py` / `page_state.py` and each has a **Copy to the
+other** button — yet they straddled two nav levels (**Calculator** a standalone `OPTIONS_RAIL` page with no
+tab strip, **Simulator** an `OPTIONS_CHILDREN` tab), so the copy button threw you between them. They are now
+one drawer item with two tabs: new **`STRATEGY_TOOLS_CHILDREN`** (Calculator · Simulator) + a
+`("Strategy Tools", "build", …)` entry **APPENDED** to `_NAV_GROUPS` (appended, not inserted, so the
+positional `_NAV_GROUPS[0..2]` reads in `_layout` stay valid; both consumers ITERATE, so lookup order is
+irrelevant). The drawer renders it via `_NAV_GROUPS[3]` **immediately after the Options group** — exactly
+where the Calculator rail item used to sit. Breadcrumbs change accordingly
+(`/options/calculator` → "Strategy Tools · Calculator", was "Calculator · "). **Deliberately NOT Options
+tabs:** that strip is the find → analyze → track → repair workflow over signals the app FINDS, whereas these
+two model legs you bring yourself. **Options strip 8 → 7 tabs; `OPTIONS_RAIL` 3 → 2** (Dealer Positioning ·
+Opportunity Board); drawer items stay **9** (4 groups + 2 rail + 3 flat), and the icon-distinctness guard
+still holds (`build` is new). **NOTHING ELSE CHANGED — routes, page modules, `_TAB_COLOR` (keyed by ROUTE,
+so favicon colors are unchanged), and `page_help` (also keyed by route, so both pages keep their guides)
+are untouched**; `_NAV_LABEL` gained the new list so tab titles + the 2 s hover guides follow automatically.
+TDD — the nav lists are pure data, so the `test_shell.py` assertions ARE the spec (red first, then green);
+the drawer-reachability test asserts one `_nav_group_link` call per `_NAV_GROUPS` entry, so a future group
+added to the data but never rendered fails loudly. **Restart the webgui.** webgui **951** green;
+live-verified (drawer `build` icon under Options, tab strip "Calculator · Simulator", breadcrumb "Strategy
+Tools · Calculator", Simulator gone from the Options strip, no console errors). Prior — 2026-07-28 (**Gamma heatmap — RTH-only window, level lines across the plot, and an
 optional intraday level-movement track**: three display-side changes to `/options/gamma`
 (commits `7533599` / `8b405ec` / `a741647`). **COLLECTION IS UNCHANGED throughout** — the GEX poll still
 runs 08:00–15:20 CT and stores every snapshot; all of this is what the page *draws*.
@@ -2008,10 +2029,11 @@ services → webgui. Full design: [3-tier design doc](docs/plans/2026-06-15-thre
 
 `webgui/main.py` is the server + nav shell (**sub-menus are TABS** since
 2026-07-11; the drawer became an **ICON RAIL** 2026-07-15; **reorganized
-2026-07-27**): the left drawer is a **FLAT main menu** of **9 items** — one per
-group (**Options**, **Market Trend & Sentiment**, **More**), the **three
-standalone `OPTIONS_RAIL` pages** that sit directly under the Options group
-(**Calculator**, **Dealer Positioning**, **Opportunity Board**), and the flat
+2026-07-27; **Strategy Tools group added 2026-07-28**): the left drawer is a
+**FLAT main menu** of **9 items** — one per group (**Options**, **Strategy
+Tools**, **Market Trend & Sentiment**, **More**), the **two standalone
+`OPTIONS_RAIL` pages** that sit directly under the Options group (**Dealer
+Positioning**, **Opportunity Board**), and the flat
 Trade Analyzer / Portfolio / Claude Trades items — and the active group's
 **child pages render as a compact TAB STRIP across the top of the page**
 (`_NAV_GROUPS` + `_group_children(active)`; a `ui.tabs` under the header with

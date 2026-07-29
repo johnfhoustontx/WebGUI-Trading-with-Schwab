@@ -217,7 +217,6 @@ def _serve_manual(name: str):
 OPTIONS_CHILDREN = [
     ("/", "Market Scanner", "radar"),
     ("/options/swing", "Strategy Finder", "swap_vert"),
-    ("/options/simulator", "Simulator", "science"),
     ("/options/expected-move", "Expected Move", "candlestick_chart"),
     ("/options/captured", "Captured Signals", "bookmark"),
     ("/options/paper", "Paper Ledger", "request_quote"),
@@ -241,9 +240,20 @@ SENTIMENT_CHILDREN = [
 # is its own page with NO tab strip — deliberately NOT Options tab-strip entries.
 # (route, label, icon)
 OPTIONS_RAIL = [
-    ("/options/calculator", "Calculator", "calculate"),
     ("/options/gamma", "Dealer Positioning", "stacked_line_chart"),
     ("/options/matrix", "Opportunity Board", "grid_on"),
+]
+
+# The two MODELLING tools, paired as their own group (2026-07-28). They are the
+# app's most tightly coupled pages — shared leg editor / strategy templates /
+# page-state snapshot, plus a Copy-to-each-other button — but used to straddle two
+# nav levels (Calculator a standalone rail page, Simulator an Options tab), so the
+# copy button threw you between them. They are deliberately NOT Options tabs: that
+# strip is the find → analyze → track → repair workflow over signals the app
+# FINDS, whereas these two model legs you bring yourself. (route, label, icon)
+STRATEGY_TOOLS_CHILDREN = [
+    ("/options/calculator", "Calculator", "calculate"),
+    ("/options/simulator", "Simulator", "science"),
 ]
 
 # Flat top-level items (single-page apps). (route, label, icon)
@@ -273,10 +283,14 @@ SETTINGS_CHILDREN = [
 # compact TAB STRIP across the top of the page (small padding), replacing the old
 # expandable sub-menus. A group's drawer badge is the SUM of its children's badge
 # counts; the per-page badges float on the tabs. (label, icon, children)
+# Lookup order is irrelevant here (routes are unique, and both consumers below
+# ITERATE) — the drawer decides where each group actually sits. Appended rather
+# than inserted so the positional _NAV_GROUPS[0..2] reads in _layout stay valid.
 _NAV_GROUPS = [
     ("Options", "candlestick_chart", OPTIONS_CHILDREN),
     ("Market Trend & Sentiment", "speed", SENTIMENT_CHILDREN),
     ("More", "more_horiz", MORE_CHILDREN + SETTINGS_CHILDREN),
+    ("Strategy Tools", "build", STRATEGY_TOOLS_CHILDREN),
 ]
 
 
@@ -370,7 +384,8 @@ def drawer_width(pinned: bool) -> int:
 # tabs are tellable-apart at a glance. Applied per page in ``_layout`` via
 # ``ui.page_title`` + a tiny colored-square SVG ``<link rel=icon>``.
 _NAV_LABEL = {route: label for route, label, _icon in
-              OPTIONS_CHILDREN + OPTIONS_RAIL + SENTIMENT_CHILDREN + FLAT_NAV
+              OPTIONS_CHILDREN + OPTIONS_RAIL + STRATEGY_TOOLS_CHILDREN
+              + SENTIMENT_CHILDREN + FLAT_NAV
               + MORE_CHILDREN + SETTINGS_CHILDREN}
 
 # One distinct color per route (the favicon fill). Material hues, all visually apart.
@@ -1009,6 +1024,10 @@ def _layout(active: str, title: str):
             # tab strip) + the single-page apps. No expandable sub-menus.
             opts_label, opts_icon, opts_children = _NAV_GROUPS[0]
             _nav_group_link(opts_label, opts_icon, opts_children, active)
+            # Modelling tools (Calculator + Simulator) — a group, so it gets a tab
+            # strip, sitting where the standalone Calculator rail item used to.
+            tools_label, tools_icon, tools_children = _NAV_GROUPS[3]
+            _nav_group_link(tools_label, tools_icon, tools_children, active)
             # Standalone rail pages that sit directly under the Options group.
             for _rp, _rl, _ri in OPTIONS_RAIL:
                 _nav_link(_rp, _rl, _ri, active)

@@ -393,7 +393,9 @@ def test_breadcrumb_parts_grouped_and_flat():
     assert main.breadcrumb_parts("/trade") == ("Trade Analyzer", "")
     # Rail pages read as standalone sections, same as flat pages.
     assert main.breadcrumb_parts("/options/gamma") == ("Dealer Positioning", "")
-    assert main.breadcrumb_parts("/options/calculator") == ("Calculator", "")
+    assert main.breadcrumb_parts("/options/matrix") == ("Opportunity Board", "")
+    # Calculator is no longer a standalone rail page — it's a Strategy Tools tab.
+    assert main.breadcrumb_parts("/options/calculator") == ("Strategy Tools", "Calculator")
 
 
 def test_market_status_parts():
@@ -790,3 +792,46 @@ def test_brand_css_clips_gradients_to_the_wordmark_text():
                                       "a_from": "#1", "a_to": "#2",
                                       "b_from": "#3", "b_to": "#4"}})
     assert "font-family: 'Segoe UI'" in bare
+
+
+def test_strategy_tools_group_pairs_calculator_with_simulator():
+    """Calculator + Simulator are the app's two modelling tools — they share the leg
+    editor, the strategy templates, the page-state snapshot and a Copy-to-each-other
+    button, so they live under ONE rail item with two tabs instead of straddling two
+    nav levels (Calculator was a standalone rail page, Simulator an Options tab)."""
+    import main
+    assert main.STRATEGY_TOOLS_CHILDREN == [
+        ("/options/calculator", "Calculator", "calculate"),
+        ("/options/simulator", "Simulator", "science"),
+    ]
+    # It is a GROUP, so both pages get the tab strip (rail pages get none).
+    for route, _l, _i in main.STRATEGY_TOOLS_CHILDREN:
+        assert main._group_children(route) == main.STRATEGY_TOOLS_CHILDREN, route
+    # ...and the breadcrumb reads "Strategy Tools · <page>".
+    assert main.breadcrumb_parts("/options/simulator") == ("Strategy Tools", "Simulator")
+
+
+def test_strategy_tools_moved_out_of_their_old_homes():
+    """Neither page may remain in its previous list, or it would render twice."""
+    import main
+    assert not [r for r, _l, _i in main.OPTIONS_CHILDREN if r == "/options/simulator"]
+    assert not [r for r, _l, _i in main.OPTIONS_RAIL if r == "/options/calculator"]
+    # The Options strip keeps its find -> analyze -> track -> repair workflow.
+    assert [r for r, _l, _i in main.OPTIONS_CHILDREN] == [
+        "/", "/options/swing", "/options/expected-move", "/options/captured",
+        "/options/paper", "/options/portfolio", "/options/rescue"]
+    # The rail keeps the two remaining standalone pages.
+    assert [r for r, _l, _i in main.OPTIONS_RAIL] == [
+        "/options/gamma", "/options/matrix"]
+
+
+def test_strategy_tools_group_is_reachable_from_the_drawer():
+    """A group only renders if _NAV_GROUPS carries it (that list drives
+    _group_children + breadcrumb_parts) AND the drawer actually builds it — a
+    group present in the data but never rendered is unreachable."""
+    import inspect
+    import main
+    assert any(label == "Strategy Tools" for label, _i, _c in main._NAV_GROUPS)
+    # Every group must get a drawer item: one _nav_group_link call per group.
+    src = inspect.getsource(main._layout)
+    assert src.count("_nav_group_link(") == len(main._NAV_GROUPS)
