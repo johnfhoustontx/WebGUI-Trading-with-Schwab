@@ -47,6 +47,49 @@ _SERIES_COLORS = [
 _ALIGN_FILLED = "▮"
 _ALIGN_HOLLOW = "▯"
 
+# The zero lines are this chart's frame of reference — which side of each you
+# are on IS the quadrant — so they read louder than the gridlines behind them.
+ZERO_LINE_COLOR = "rgba(255,255,255,0.55)"
+ZERO_LINE_WIDTH = 2
+_GRID_COLOR = "rgba(255,255,255,0.06)"
+
+# Matches the RRG page's corner-label treatment (same vocabulary, same look).
+_QUAD_LABEL_STYLE = {"color": "rgba(255,255,255,0.34)", "fontSize": "11px",
+                     "fontWeight": "bold", "letterSpacing": "2px",
+                     "textTransform": "uppercase"}
+
+
+def _zero_line():
+    return {"value": 0, "width": ZERO_LINE_WIDTH, "color": ZERO_LINE_COLOR,
+            "zIndex": 4}
+
+
+def quadrant_label_bands():
+    """Four invisible x-bands whose only job is to carry a corner label.
+
+    Split at 0, not the RRG's 100 — these axes are z-scores centred on zero.
+    The band gives left/right; the label's verticalAlign gives top/bottom.
+    """
+    def band(right, top, text):
+        return {
+            "from": 0 if right else -1e9,
+            "to": 1e9 if right else 0,
+            "color": "rgba(0,0,0,0)",          # invisible band — label only
+            "zIndex": 0,
+            "label": {"text": text,
+                      "align": "right" if right else "left",
+                      "textAlign": "right" if right else "left",
+                      "verticalAlign": "top" if top else "bottom",
+                      "x": -10 if right else 10,
+                      "y": 18 if top else -12,
+                      "style": dict(_QUAD_LABEL_STYLE)},
+        }
+    # Strong is to the right, accelerating is up.
+    return [band(True, True, QUADRANTS["leading"]),
+            band(True, False, QUADRANTS["weakening"]),
+            band(False, True, QUADRANTS["improving"]),
+            band(False, False, QUADRANTS["lagging"])]
+
 
 def _num(value, digits=2, dash="—"):
     if value is None:
@@ -152,14 +195,15 @@ def quadrant_figure(rows, title="Momentum vs acceleration"):
         "xAxis": {
             "title": {"text": "Momentum score (z)", "style": {"color": "#8794b4"}},
             "labels": {"style": {"color": "#8794b4"}},
-            "gridLineColor": "#213152", "lineColor": "#213152",
-            "plotLines": [{"value": 0, "width": 1, "color": "#3b5170"}],
+            "gridLineColor": _GRID_COLOR, "lineColor": "rgba(255,255,255,0.15)",
+            "plotLines": [_zero_line()],
+            "plotBands": quadrant_label_bands(),
         },
         "yAxis": {
             "title": {"text": "Acceleration (z)", "style": {"color": "#8794b4"}},
             "labels": {"style": {"color": "#8794b4"}},
-            "gridLineColor": "#213152",
-            "plotLines": [{"value": 0, "width": 1, "color": "#3b5170"}],
+            "gridLineColor": _GRID_COLOR,
+            "plotLines": [_zero_line()],
         },
         "tooltip": {
             "pointFormat": ("<b>{point.name}</b><br/>score {point.x:.2f} · "

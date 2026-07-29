@@ -301,3 +301,76 @@ def test_normalise_level_rejects_junk():
 def test_section_heading_names_the_level():
     assert "Industries" in sm.section_heading("Leaders", "industry")
     assert "Stocks" in sm.section_heading("Leaders", "stock")
+
+
+# --- zero lines + quadrant labels -------------------------------------------
+
+def _fig():
+    return sm.quadrant_figure(_payload()["levels"]["industry"])
+
+
+def test_both_axes_draw_an_emphasized_zero_line():
+    fig = _fig()
+
+    for axis in ("xAxis", "yAxis"):
+        lines = fig[axis]["plotLines"]
+        zero = next(pl for pl in lines if pl["value"] == 0)
+        # The zero lines are the chart's frame of reference — they must read
+        # louder than the gridlines behind them.
+        assert zero["width"] >= 2
+        assert zero["zIndex"] >= 3
+
+
+def test_zero_lines_are_brighter_than_the_gridlines():
+    fig = _fig()
+    grid = fig["xAxis"]["gridLineColor"]
+    zero = next(pl for pl in fig["xAxis"]["plotLines"] if pl["value"] == 0)
+
+    assert zero["color"] != grid
+    assert zero["color"] == sm.ZERO_LINE_COLOR
+
+
+def test_the_four_quadrants_are_labelled_on_the_chart():
+    bands = _fig()["xAxis"]["plotBands"]
+
+    labels = {b["label"]["text"] for b in bands}
+    assert labels == set(sm.QUADRANTS.values())
+
+
+def test_each_quadrant_label_sits_in_its_own_corner():
+    bands = _fig()["xAxis"]["plotBands"]
+
+    corners = {(b["label"]["align"], b["label"]["verticalAlign"]) for b in bands}
+    assert len(corners) == 4
+
+
+def test_quadrant_label_corners_match_their_meaning():
+    bands = {b["label"]["text"]: b["label"] for b in _fig()["xAxis"]["plotBands"]}
+
+    # Strong is to the right, accelerating is up.
+    assert (bands["Leading"]["align"], bands["Leading"]["verticalAlign"]) == ("right", "top")
+    assert (bands["Weakening"]["align"], bands["Weakening"]["verticalAlign"]) == ("right", "bottom")
+    assert (bands["Improving"]["align"], bands["Improving"]["verticalAlign"]) == ("left", "top")
+    assert (bands["Lagging"]["align"], bands["Lagging"]["verticalAlign"]) == ("left", "bottom")
+
+
+def test_quadrant_bands_split_at_zero_not_at_the_rrg_hundred():
+    # This chart's axes are z-scores centred on 0; the RRG's are centred on 100.
+    bands = _fig()["xAxis"]["plotBands"]
+    edges = {b["from"] for b in bands} | {b["to"] for b in bands}
+
+    assert 0 in edges
+    assert 100 not in edges
+
+
+def test_quadrant_bands_are_invisible_and_carry_only_a_label():
+    for b in _fig()["xAxis"]["plotBands"]:
+        assert b["color"] == "rgba(0,0,0,0)"
+        assert b["label"]["text"]
+
+
+def test_quadrant_labels_survive_an_empty_chart():
+    fig = sm.quadrant_figure([])
+
+    assert len(fig["xAxis"]["plotBands"]) == 4
+    assert fig["series"] == []
