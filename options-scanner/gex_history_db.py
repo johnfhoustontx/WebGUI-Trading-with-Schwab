@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS snapshots (
     put_vol                   INTEGER,
     call_prem                 REAL,
     put_prem                  REAL,
+    atm_iv                    REAL,
     PRIMARY KEY (symbol, view, ts)
 );
 """
@@ -164,6 +165,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
         ("put_vol", "INTEGER"),
         ("call_prem", "REAL"),
         ("put_prem", "REAL"),
+        ("atm_iv", "REAL"),
     ):
         if col not in existing:
             conn.execute(f"ALTER TABLE snapshots ADD COLUMN {col} {col_type}")
@@ -257,8 +259,8 @@ def insert_snapshot(
             (symbol, view, ts, spot, flip, top_pos_strike,
              top_neg_strike, net_total, dte, gex_json,
              net_delta_0dte, projected_net_delta_close, hedge_pressure,
-             rr_25d, call_vol, put_vol, call_prem, put_prem)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             rr_25d, call_vol, put_vol, call_prem, put_prem, atm_iv)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             symbol,
@@ -279,6 +281,7 @@ def insert_snapshot(
             summary.get("put_vol"),
             summary.get("call_prem"),
             summary.get("put_prem"),
+            summary.get("atm_iv"),
         ),
     )
 
@@ -464,6 +467,33 @@ def load_flow_series(
     cur = conn.execute(
         """
         SELECT ts, spot, call_vol, put_vol, call_prem, put_prem
+          FROM snapshots
+         WHERE symbol = ?
+           AND view   = 'gex'
+           AND ts >= ? AND ts < ?
+         ORDER BY ts
+        """,
+        (symbol, start, end),
+    )
+    return cur.fetchall()
+
+
+def load_atm_iv_series(
+    conn: sqlite3.Connection,
+    symbol: str,
+    d=None,
+) -> list[tuple]:
+    """Intraday ATM-IV LEVEL series for one symbol on LOCAL date ``d`` (default
+    today), from the ``gex`` view, chronological: ``(ts, atm_iv)`` per snapshot.
+
+    Feeds ``matrix.iv_regime`` (the IV-direction axis: collapsing vs spiking).
+    ``atm_iv`` is forward-only — NULL on rows written before the column existed,
+    so early/legacy rows come back as ``(ts, None)``. Uses the sargable
+    ``ts >= ? AND ts < ?`` range so the ``ts`` index applies."""
+    start, end = _local_unix_range(d)
+    cur = conn.execute(
+        """
+        SELECT ts, atm_iv
           FROM snapshots
          WHERE symbol = ?
            AND view   = 'gex'

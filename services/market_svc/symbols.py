@@ -21,16 +21,19 @@ Each entry:
 # Frame layout order (design §5): macro gauges → tape → rotation.
 CATEGORY_ORDER = [
     "Volatility", "Options Sentiment", "Market Internals / Breadth", "Currency",
-    "Cash Index", "Equity Index Futures", "Broad-Market ETF", "Magnificent 7",
+    "Cash Index", "Equity Index Futures", "Broad-Market ETF", "Top 10",
     "Sector SPDR", "Thematic / Industry ETF", "Factor / Momentum ETF",
     "Fixed Income / Credit ETF", "Crypto / Alternatives", "Countries",
 ]
 
 
-def _q(csv, quote, desc, cat, polarity="normal", value_only=False):
+def _q(csv, quote, desc, cat, polarity="normal", value_only=False, prem=False):
+    # ``prem=True`` → the tile also shows a per-symbol call/put PREMIUM skew subline
+    # (looked up in cache:options:matrix by ``quote``), for the collected-universe
+    # names the user wants an options-flow read on.
     return {"csv_symbol": csv, "display": csv, "description": desc, "category": cat,
             "polarity": polarity, "kind": "quote", "quote_symbol": quote,
-            "value_only": value_only, "spread": None, "source": None}
+            "value_only": value_only, "spread": None, "source": None, "prem": prem}
 
 
 def _spread(csv, leg_a, leg_b, mode, desc, cat, polarity="normal"):
@@ -45,12 +48,14 @@ def _external(csv, source, desc, cat, polarity, display):
             "value_only": False, "spread": None, "source": source}
 
 
-def _basket(display, members, desc, cat, polarity="normal"):
+def _basket(display, members, desc, cat, polarity="normal", prem=False):
     """A composite tile: equal-weighted avg day-move + breadth over ``members``
-    (each of which is also fetched as its own quote tile)."""
+    (each of which is also fetched as its own quote tile). ``prem=True`` → also
+    show a dollar-weighted call/put PREMIUM skew aggregated over the members."""
     return {"csv_symbol": display, "display": display, "description": desc, "category": cat,
             "polarity": polarity, "kind": "basket", "quote_symbol": None,
-            "value_only": False, "spread": None, "source": None, "basket": tuple(members)}
+            "value_only": False, "spread": None, "source": None,
+            "basket": tuple(members), "prem": prem}
 
 
 _INT = "Market Internals / Breadth"
@@ -58,7 +63,7 @@ _SEC = "Sector SPDR"
 _THM = "Thematic / Industry ETF"
 _BRD = "Broad-Market ETF"
 _CTY = "Countries"
-_MAG = "Magnificent 7"
+_MAG = "Top 10"
 
 SYMBOL_MAP = [
     # Volatility (inverted — fear up = risk-off)
@@ -71,6 +76,17 @@ SYMBOL_MAP = [
     # detail lives in the description (hover tooltip).
     _external("Put/Call", "sentiment_pcr", "Cap-weighted sector put/call ratio",
               "Options Sentiment", "inverted", "Put/Call"),
+    # Net Prem (external — dollar-weighted call-vs-put PREMIUM skew across the ~45
+    # collected symbols, from cache:options:matrix; "normal" polarity: more money
+    # through calls = risk-on/green. A money-weighted Put/Call, NOT net buying.
+    _external("Net Prem", "options_net_prem",
+              "Dollar-weighted call vs put premium across ~45 collected symbols "
+              "(money-weighted Put/Call, not net buying)",
+              "Options Sentiment", "normal", "Net Prem"),
+    # CBOE Magnificent Ten Index (Schwab API symbol $MGTN; the ThinkorSwim symbol
+    # is IMGTN:CGI, which the market-data API doesn't accept). An index level
+    # colored by day %-move (up = risk-on/green).
+    _q("MGTN", "$MGTN", "CBOE Magnificent Ten Index", "Options Sentiment"),
     # Market Internals / Breadth (value-only internals + a computed net spread)
     _q("$ADVN", "$ADVN", "NYSE advancing issues", _INT, "normal", value_only=True),
     _q("$DECN", "$DECN", "NYSE declining issues", _INT, "inverted", value_only=True),
@@ -79,30 +95,36 @@ SYMBOL_MAP = [
     _q("$TICK", "$TICK", "NYSE TICK", _INT, "normal", value_only=True),
     # Currency (equivalent: UUP; inverted — dollar strength = risk-off)
     _q("$DXY", "UUP", "US Dollar Index (via UUP proxy)", "Currency", "inverted"),
-    # Cash Index
-    _q("SPX", "$SPX", "S&P 500 Index", "Cash Index"),
-    _q("NDX", "$NDX", "Nasdaq 100 Index", "Cash Index"),
+    # Cash Index (prem: per-symbol call/put premium skew subline)
+    _q("SPX", "$SPX", "S&P 500 Index", "Cash Index", prem=True),
+    _q("NDX", "$NDX", "Nasdaq 100 Index", "Cash Index", prem=True),
     # Equity Index Futures
     _q("/ES[U26]", "/ESU26", "E-mini S&P 500 future, Sep 2026", "Equity Index Futures"),
     _q("/NQ[U26]", "/NQU26", "E-mini Nasdaq 100 future, Sep 2026", "Equity Index Futures"),
-    # Broad-Market ETF
-    _q("SPY", "SPY", "SPDR S&P 500 ETF", _BRD),
-    _q("DIA", "DIA", "SPDR Dow Jones Industrial Average ETF", _BRD),
-    _q("QQQ", "QQQ", "Invesco QQQ (Nasdaq 100) ETF", _BRD),
-    _q("IWM", "IWM", "iShares Russell 2000 ETF", _BRD),
+    # Broad-Market ETF (SPY/DIA/QQQ/IWM carry a premium skew subline)
+    _q("SPY", "SPY", "SPDR S&P 500 ETF", _BRD, prem=True),
+    _q("DIA", "DIA", "SPDR Dow Jones Industrial Average ETF", _BRD, prem=True),
+    _q("QQQ", "QQQ", "Invesco QQQ (Nasdaq 100) ETF", _BRD, prem=True),
+    _q("IWM", "IWM", "iShares Russell 2000 ETF", _BRD, prem=True),
     _q("RSP", "RSP", "Invesco S&P 500 Equal Weight ETF", _BRD),
     _q("QQEW", "QQEW", "First Trust Nasdaq-100 Equal Weight ETF", _BRD),
-    # Magnificent 7 — a leading equal-weighted composite (avg day-move + breadth)
-    # then the seven mega-cap constituents.
-    _basket("MAG7", ("NVDA", "MSFT", "GOOGL", "AMZN", "META", "AAPL", "TSLA"),
-            "Equal-weighted avg day move of the Magnificent 7 (+ N/7 advancing)", _MAG),
-    _q("NVDA", "NVDA", "NVIDIA", _MAG),
-    _q("MSFT", "MSFT", "Microsoft", _MAG),
-    _q("GOOGL", "GOOGL", "Alphabet (Google)", _MAG),
-    _q("AMZN", "AMZN", "Amazon", _MAG),
-    _q("META", "META", "Meta Platforms", _MAG),
-    _q("AAPL", "AAPL", "Apple", _MAG),
-    _q("TSLA", "TSLA", "Tesla", _MAG),
+    # Top 10 — a leading equal-weighted composite (avg day-move + breadth + the net
+    # call/put PREMIUM skew) over the 10 mega-cap names (the Mag-7 + AVGO/PLTR/AMD),
+    # then the constituents.
+    _basket("BIG10", ("NVDA", "MSFT", "GOOGL", "AMZN", "META", "AAPL", "TSLA",
+                      "AVGO", "PLTR", "AMD"),
+            "Equal-weighted avg day move of the 10 mega-caps (+ N/10 advancing) "
+            "and the net call/put premium skew of the 10", _MAG, prem=True),
+    _q("NVDA", "NVDA", "NVIDIA", _MAG, prem=True),
+    _q("MSFT", "MSFT", "Microsoft", _MAG, prem=True),
+    _q("GOOGL", "GOOGL", "Alphabet (Google)", _MAG, prem=True),
+    _q("AMZN", "AMZN", "Amazon", _MAG, prem=True),
+    _q("META", "META", "Meta Platforms", _MAG, prem=True),
+    _q("AAPL", "AAPL", "Apple", _MAG, prem=True),
+    _q("TSLA", "TSLA", "Tesla", _MAG, prem=True),
+    _q("AVGO", "AVGO", "Broadcom", _MAG, prem=True),
+    _q("PLTR", "PLTR", "Palantir Technologies", _MAG, prem=True),
+    _q("AMD", "AMD", "Advanced Micro Devices", _MAG, prem=True),
     # Factor / Momentum ETF
     _q("MTUM", "MTUM", "iShares MSCI USA Momentum Factor ETF", "Factor / Momentum ETF"),
     _q("SPMO", "SPMO", "Invesco S&P 500 Momentum ETF", "Factor / Momentum ETF"),

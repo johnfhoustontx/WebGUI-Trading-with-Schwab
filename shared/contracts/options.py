@@ -109,4 +109,5 @@ class MatrixSnapshot(_Base):
     session_date: str | None = None    # gex session date used for series/flip
     ts: str | None = None
     rows: list[dict] = []              # heterogeneous per-symbol row dicts (see matrix.build_rows)
+    premium: dict | None = None        # dollar-weighted net-premium skew (see matrix.market_premium_aggregate)
     error: str | None = None

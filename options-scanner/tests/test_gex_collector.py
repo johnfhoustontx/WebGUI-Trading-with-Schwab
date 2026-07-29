@@ -664,6 +664,50 @@ def test_poll_once_skew_none_when_no_skew(tmp_path, monkeypatch):
         assert summary["put_vol"] is None
 
 
+def test_poll_once_stores_atm_iv(tmp_path, monkeypatch):
+    """poll_once reads the ATM IV LEVEL once per symbol (iv_analysis.extract_atm_iv)
+    from the already-fetched chain and merges it into EACH view summary before
+    insert — the forward-only column that feeds the IV-direction regime."""
+    import iv_analysis
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    _patch_snapshot_summary(monkeypatch)
+    monkeypatch.setattr(gc, "poll_term_once", lambda *a, **k: None)
+    monkeypatch.setattr(iv_analysis, "extract_atm_iv", lambda chain: 21.5)
+
+    captured = []
+    monkeypatch.setattr(
+        db, "insert_snapshot",
+        lambda conn, symbol, view, summary, grid, dte: captured.append(dict(summary)))
+
+    client = _make_client({s: {"symbol": "X"} for s in gc.SYMBOLS})
+    engine = _make_engine()
+    gc.poll_once(client, engine, conn, symbols=gc.SYMBOLS)
+
+    assert captured
+    assert all(s["atm_iv"] == 21.5 for s in captured)   # merged into every view
+
+
+def test_poll_once_atm_iv_none_when_unavailable(tmp_path, monkeypatch):
+    """extract_atm_iv returning None -> atm_iv column is None, poll still succeeds."""
+    import iv_analysis
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    _patch_snapshot_summary(monkeypatch)
+    monkeypatch.setattr(gc, "poll_term_once", lambda *a, **k: None)
+    monkeypatch.setattr(iv_analysis, "extract_atm_iv", lambda chain: None)
+
+    captured = []
+    monkeypatch.setattr(
+        db, "insert_snapshot",
+        lambda conn, symbol, view, summary, grid, dte: captured.append(dict(summary)))
+    gc.poll_once(_make_client({s: {"symbol": "X"} for s in gc.SYMBOLS}),
+                 _make_engine(), conn, symbols=gc.SYMBOLS)
+    assert captured and all(s["atm_iv"] is None for s in captured)
+
+
 def test_sentiment_hook_never_raises(monkeypatch):
     import gex_collector as gc
     # Force the subprocess call to raise; the helper must swallow it.

@@ -23,6 +23,7 @@ from zoneinfo import ZoneInfo
 import flow_skew
 from gamma_tool import GammaEngine
 import gex_history_db as db
+import iv_analysis
 
 TZ = ZoneInfo("America/Chicago")
 SYMBOLS = ["$SPX", "$VIX", "SPY", "QQQ"]
@@ -244,17 +245,21 @@ def poll_once(client, engine, conn, lock=None, symbols=None, on_chain=None,
                 rr = flow_skew.risk_reversal_25d(chain)
                 vol = flow_skew.index_call_put_volume(chain)
                 prem = flow_skew.index_call_put_premium(chain)
+                # ATM IV LEVEL (percent, e.g. 25.5) — the forward-only column that
+                # feeds the IV-direction regime (collapsing vs spiking). Pure +
+                # defensive: extract_atm_iv returns None on a thin/absent chain.
                 skew_fields = {
                     "rr_25d": (rr or {}).get("rr"),
                     "call_vol": (vol or {}).get("call_vol"),
                     "put_vol": (vol or {}).get("put_vol"),
                     "call_prem": (prem or {}).get("call_prem"),
                     "put_prem": (prem or {}).get("put_prem"),
+                    "atm_iv": iv_analysis.extract_atm_iv(chain),
                 }
             except Exception:
                 log.debug("skew compute failed for %s", symbol, exc_info=True)
                 skew_fields = {"rr_25d": None, "call_vol": None, "put_vol": None,
-                               "call_prem": None, "put_prem": None}
+                               "call_prem": None, "put_prem": None, "atm_iv": None}
             # Single pass yields GEX, Charm, DEX, Vanna — all persisted below.
             gex, charm, dex, vanna = engine.calc_all_from_chain(chain, use_volume=False)
             dte = engine._last_dte

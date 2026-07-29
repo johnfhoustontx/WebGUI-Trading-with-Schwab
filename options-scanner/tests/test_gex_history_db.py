@@ -730,6 +730,55 @@ def test_premium_columns_backfilled_on_existing_db(tmp_path, monkeypatch):
     assert db.load_flow_series(conn, "SPY")[0][4] == 9.0
 
 
+def test_insert_and_load_atm_iv_series(tmp_path, monkeypatch):
+    """atm_iv (the ATM IV LEVEL) round-trips from the summary through
+    insert_snapshot, and load_atm_iv_series returns today's (ts, atm_iv) for the
+    gex view, chronological — feeds matrix.iv_regime (the IV-direction axis)."""
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    ts = int(time.time())
+    for i, iv in enumerate((25.5, 24.9)):
+        db.insert_snapshot(conn, "SPY", "gex",
+                           {"ts": ts + i * 120, "spot": 500.0 + i, "atm_iv": iv},
+                           {"500": {"net": 1.0}}, dte=1)
+    assert db.load_atm_iv_series(conn, "SPY") == [(ts, 25.5), (ts + 120, 24.9)]
+
+
+def test_load_atm_iv_series_missing_is_null(tmp_path, monkeypatch):
+    """A summary WITHOUT atm_iv -> the column is NULL (forward-only), no error."""
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    ts = int(time.time())
+    db.insert_snapshot(conn, "SPY", "gex", {"ts": ts, "spot": 500.0},
+                       {"500": {"net": 1.0}}, dte=1)
+    assert db.load_atm_iv_series(conn, "SPY") == [(ts, None)]
+
+
+def test_atm_iv_column_backfilled_on_existing_db(tmp_path, monkeypatch):
+    """A DB created before atm_iv existed (schema through put_prem) gets the column
+    via init_schema's ALTER migration, and inserts then round-trip it."""
+    dbpath = tmp_path / "old.db"
+    raw = sqlite3.connect(dbpath)
+    raw.execute(
+        "CREATE TABLE snapshots ("
+        "symbol TEXT, view TEXT, ts INTEGER, spot REAL, flip REAL, "
+        "top_pos_strike REAL, top_neg_strike REAL, net_total REAL, dte INTEGER, "
+        "gex_json TEXT, net_delta_0dte REAL, projected_net_delta_close REAL, "
+        "hedge_pressure REAL, rr_25d REAL, call_vol INTEGER, put_vol INTEGER, "
+        "call_prem REAL, put_prem REAL, PRIMARY KEY (symbol, view, ts))")
+    raw.commit(); raw.close()
+    monkeypatch.setattr(db, "DB_PATH", dbpath)
+    conn = db.connect()
+    db.init_schema(conn)
+    assert "atm_iv" in {r[1] for r in conn.execute("PRAGMA table_info(snapshots)")}
+    db.insert_snapshot(conn, "SPY", "gex",
+                       {"ts": int(time.time()), "spot": 1.0, "atm_iv": 19.2},
+                       {"x": {"net": 1}}, dte=1)
+    assert db.load_atm_iv_series(conn, "SPY")[0][1] == 19.2
+
+
 def test_latest_spot_flip_returns_ts_spot_flip(tmp_path, monkeypatch):
     dbpath = tmp_path / "t.db"
     monkeypatch.setattr(db, "DB_PATH", dbpath)

@@ -2286,12 +2286,15 @@ def build_matrix(scan_day, flow_cooldowns, today, session_date, now_ts):
         import services.options_svc.matrix as mx
         rows = mx.build_rows(raw, scan_counts, alert_counts, now_ts)
         rows.sort(key=lambda r: r["hotness"], reverse=True)
+        # Dollar-weighted market-wide net call/put PREMIUM skew over the same raw
+        # blobs — a market-money read consumed by the sentiment tiles. Additive.
+        premium = mx.market_premium_aggregate(raw)
     except Exception:
         log.debug("build_matrix: build failed", exc_info=True)
         return {"date": today, "session_date": session_key, "ts": _now_iso(),
                 "rows": [], "error": "matrix build failed"}
     return {"date": today, "session_date": session_key, "ts": _now_iso(),
-            "rows": rows, "error": None}
+            "rows": rows, "premium": premium, "error": None}
 
 
 def build_gamma_read(symbol, spot, gex_summary, charm_summary, dex_summary,

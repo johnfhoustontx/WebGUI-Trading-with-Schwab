@@ -41,29 +41,73 @@ def _fmt(v, nd=2):
         return "—"
 
 
+def _net_prem_sub(net_m):
+    """Compact net-$ subline: '+$2.98B' / '-$540M' from net_m (in $M)."""
+    try:
+        m = float(net_m)
+    except (TypeError, ValueError):
+        return ""
+    sign = "+" if m >= 0 else "-"
+    a = abs(m)
+    return f"{sign}${a / 1000:.2f}B" if a >= 1000 else f"{sign}${a:.0f}M"
+
+
+def _skew_word(pct):
+    """Signed skew % -> 'Call 31%' / 'Put 22%' / 'Even' / '—'."""
+    if pct is None:
+        return "—"
+    try:
+        p = float(pct)
+    except (TypeError, ValueError):
+        return "—"
+    if abs(p) < 1:
+        return "Even"
+    return f"Call {p:.0f}%" if p > 0 else f"Put {abs(p):.0f}%"
+
+
+def prem_line(t):
+    """Per-symbol premium subline for a ``prem``-flagged tile (``prem_skew_pct``):
+    'Call 31%' / 'Put 22%' / 'Even' / '—' (no data). '' when the tile has no
+    premium subline at all (so a min-height keeps every tile the same size)."""
+    if "prem_skew_pct" not in t:
+        return ""
+    return _skew_word(t.get("prem_skew_pct"))
+
+
 def tile_text(t):
-    """Display strings for a tile: {last, change}."""
-    if t.get("basket"):
-        # Composite tile (MAG7): headline = equal-weighted avg day %-move,
-        # subline = breadth (e.g. "3/7 up").
+    """Display strings for a tile: {last, change, prem}."""
+    if t.get("net_prem"):
+        # Dollar-weighted call/put premium skew (the standalone Net Prem tile):
+        # headline = "Call 49%"/"Put 22%"/"Even"/"—", subline = net-$ amount.
+        pct = t.get("skew_pct")
+        if pct is None:
+            base = {"last": "—", "change": ""}
+        else:
+            base = {"last": _skew_word(pct), "change": _net_prem_sub(t.get("net_m"))}
+    elif t.get("basket"):
+        # Composite tile (BIG10): headline = equal-weighted avg day %-move,
+        # subline = breadth (e.g. "3/7 up"). A premium subline (net of the members)
+        # is added below via prem_line when the tile is prem-flagged.
         try:
             head = f"{float(t.get('avg_pct')):+.2f}%"
         except (TypeError, ValueError):
             head = "—"
-        return {"last": head, "change": t.get("breadth_text", "")}
-    if t.get("last") is None:
-        return {"last": "—", "change": ""}
-    if t.get("value_only"):
-        return {"last": _fmt(t["last"], 0), "change": ""}
-    last = _fmt(t["last"])
-    pct = t.get("change_pct")
-    chg = t.get("change")
-    parts = []
-    if chg is not None:
-        parts.append(f"{'+' if chg >= 0 else ''}{_fmt(chg)}")
-    if pct is not None:
-        parts.append(f"{'+' if pct >= 0 else ''}{_fmt(pct)}%")
-    return {"last": last, "change": "  ".join(parts)}
+        base = {"last": head, "change": t.get("breadth_text", "")}
+    elif t.get("last") is None:
+        base = {"last": "—", "change": ""}
+    elif t.get("value_only"):
+        base = {"last": _fmt(t["last"], 0), "change": ""}
+    else:
+        last = _fmt(t["last"])
+        pct = t.get("change_pct")
+        chg = t.get("change")
+        parts = []
+        if chg is not None:
+            parts.append(f"{'+' if chg >= 0 else ''}{_fmt(chg)}")
+        if pct is not None:
+            parts.append(f"{'+' if pct >= 0 else ''}{_fmt(pct)}%")
+        base = {"last": last, "change": "  ".join(parts)}
+    return {**base, "prem": prem_line(t)}
 
 
 def render():
@@ -85,8 +129,10 @@ def render():
                     with ui.row().classes("flex-wrap gap-2"):
                         for t in cat.get("tiles", []):
                             txt = tile_text(t)
+                            # Fixed min-height so every tile in a frame is the same
+                            # height whether or not it carries a premium subline.
                             container = ui.column().classes(
-                                "rounded-md p-2 w-[120px] gap-0 "
+                                "rounded-md p-2 w-[120px] min-h-[92px] gap-0 "
                                 f"{bg_class(t.get('color_state'))}")
                             with container:
                                 ui.label(t.get("display", "")).classes(
@@ -94,10 +140,14 @@ def render():
                                 last_lbl = ui.label(txt["last"]).classes(
                                     "text-base font-bold")
                                 change_lbl = ui.label(txt["change"]).classes("text-xs")
+                                # Per-symbol call/put premium skew (prem-flagged tiles).
+                                prem_lbl = ui.label(txt["prem"]).classes(
+                                    "text-[11px] opacity-60")
                                 ui.tooltip(t.get("description", ""))
                             state["tiles"][t.get("display")] = {
                                 "container": container, "last": last_lbl,
-                                "change": change_lbl, "state": t.get("color_state")}
+                                "change": change_lbl, "prem": prem_lbl,
+                                "state": t.get("color_state")}
         state["built"] = True
 
     def _update(payload):
@@ -111,6 +161,8 @@ def render():
                 txt = tile_text(t)
                 h["last"].text = txt["last"]
                 h["change"].text = txt["change"]
+                if "prem" in h:
+                    h["prem"].text = txt["prem"]
                 new_state = t.get("color_state")
                 if new_state != h["state"]:
                     h["container"].classes(

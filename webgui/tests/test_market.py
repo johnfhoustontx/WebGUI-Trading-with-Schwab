@@ -45,14 +45,54 @@ def test_tile_text_no_data():
     assert txt["last"] == "—"
 
 
+def test_tile_text_net_prem_call_and_put_heavy():
+    call = {"display": "Net Prem", "net_prem": True, "skew_pct": 49.0, "net_m": 2983.3}
+    txt = market.tile_text(call)
+    assert txt["last"] == "Call 49%"
+    assert txt["change"] == "+$2.98B"       # net-$ subline (>= $1000M -> billions)
+    put = {"display": "Net Prem", "net_prem": True, "skew_pct": -22.0, "net_m": -540.0}
+    txt2 = market.tile_text(put)
+    assert txt2["last"] == "Put 22%"
+    assert txt2["change"] == "-$540M"
+
+
+def test_tile_text_net_prem_even_and_missing():
+    assert market.tile_text({"net_prem": True, "skew_pct": 0.4, "net_m": 5.0})["last"] == "Even"
+    assert market.tile_text({"net_prem": True, "skew_pct": None})["last"] == "—"
+
+
+def test_prem_line_per_symbol_subline():
+    # prem-flagged tile -> a "Call/Put x%" subline; missing data -> "—".
+    assert market.prem_line({"prem_skew_pct": 42.9}) == "Call 43%"
+    assert market.prem_line({"prem_skew_pct": -22.0}) == "Put 22%"
+    assert market.prem_line({"prem_skew_pct": 0.4}) == "Even"
+    assert market.prem_line({"prem_skew_pct": None}) == "—"     # flagged, no data
+    assert market.prem_line({"display": "XLB"}) == ""           # not a prem tile
+
+
+def test_tile_text_includes_prem_field():
+    # A normal quote tile that is prem-flagged shows price + change + a prem line.
+    t = {"display": "SPY", "last": 748.39, "change": 6.30, "change_pct": 0.85,
+         "value_only": False, "prem_skew_pct": 31.0}
+    txt = market.tile_text(t)
+    assert txt["last"] == "748.39"
+    assert txt["prem"] == "Call 31%"
+    # BIG10 basket carries its aggregate premium as the prem line
+    mag = {"display": "BIG10", "basket": True, "avg_pct": 0.34,
+           "breadth_text": "8/10 up", "prem_skew_pct": 42.0}
+    mtxt = market.tile_text(mag)
+    assert mtxt["last"] == "+0.34%" and mtxt["change"] == "8/10 up"
+    assert mtxt["prem"] == "Call 42%"
+
+
 def test_tile_text_basket_shows_avg_and_breadth():
-    t = {"display": "MAG7", "basket": True, "avg_pct": 0.32,
-         "breadth_text": "3/7 up", "change_pct": 0.32, "color_state": "risk_on_mild"}
+    t = {"display": "BIG10", "basket": True, "avg_pct": 0.32,
+         "breadth_text": "8/10 up", "change_pct": 0.32, "color_state": "risk_on_mild"}
     txt = market.tile_text(t)
     assert txt["last"] == "+0.32%"      # equal-weighted avg day move (headline)
-    assert txt["change"] == "3/7 up"    # breadth subline
+    assert txt["change"] == "8/10 up"   # breadth subline
     # a negative avg keeps the sign
-    t2 = {"display": "MAG7", "basket": True, "avg_pct": -1.5, "breadth_text": "1/7 up"}
+    t2 = {"display": "BIG10", "basket": True, "avg_pct": -1.5, "breadth_text": "2/10 up"}
     assert market.tile_text(t2)["last"] == "-1.50%"
 
 
