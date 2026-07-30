@@ -337,6 +337,18 @@ decode); `max(|net|)` can land on a strongly negative-net strike, which is an
 amplifier rather than an attractor and is arguably the wrong mean-reversion target.
 Compare which one price actually gravitates to.
 
+> **Shipped 2026-07-29.** `tools/nq_signal_log.py` — append-only CSV at
+> `options-scanner/data/nq_signals.csv` (gitignored), one row per **(regime, action)**
+> change rather than per poll, 23 columns including both pin candidates in NQ points.
+> CSV over SQLite deliberately: single writer, append-only, never read in a request
+> path, and the consumer is an offline pandas pass — no schema, no migration, and the
+> simplest possible write path for something that must never break the HUD. 25 tests.
+>
+> **First live sample already suggests an answer** (design §6): `pin_top_pos_nq`
+> came out *equal to* `call_wall_nq`, which looks structural. **First analysis to
+> run** on the accumulated log is therefore `pin_top_pos_nq == call_wall_nq` — if it
+> holds broadly, the pin question closes in favour of the current `max(|net|)`.
+
 Then log 20–30 sessions before increasing size, and evaluate **regime
 classification accuracy first**. If the regime call is under ~60%, the entry rules
 are not the problem and tuning them wastes time — fix the source symbol

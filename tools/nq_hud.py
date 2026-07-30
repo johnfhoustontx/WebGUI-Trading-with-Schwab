@@ -66,6 +66,9 @@ from tools.nq_signal import (  # noqa: E402
     to_nq,
 )
 
+# Append-only verdict-transition log (write-only; nothing reads it at runtime).
+from tools.nq_signal_log import SignalLogger  # noqa: E402
+
 # options-scanner on sys.path -> gamma_tool (pure wall picker) + gex_history_db.
 # Imported lazily inside _load_gamma so an import failure degrades the gamma
 # panel rather than preventing the window from opening at all.
@@ -288,6 +291,10 @@ def read_gamma(source_date=None):
                              key=lambda kv: abs(kv[1].get("net", 0.0) or 0.0))[0]
         except Exception:
             res["pin"] = top_pos
+        # The alternative candidate, carried alongside so the signal log can
+        # record BOTH and the §6 question can be settled on data. Display and
+        # the verdict still use res["pin"] only.
+        res["pin_top_pos"] = top_pos
 
         # ── Session spot range for the ATR stop — grid-free. ─────────────────
         # load_flow_series reads the same gex-view rows by date but selects no
@@ -341,6 +348,7 @@ class NQHud:
         self._state = None
         self._stop = threading.Event()
         self._labels = {}
+        self._logger = SignalLogger()
 
         self._build()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -456,8 +464,10 @@ class NQHud:
         if tape.get("nq") is not None and tape.get("ndx") is not None:
             basis = tape["nq"] - tape["ndx"]
 
+        # pin_top_pos rides along for the signal log only — build_verdict reads
+        # levels["pin"], so converting it changes no decision.
         levels = {k: to_nq(gamma.get(k), scale, basis)
-                  for k in ("flip", "call_wall", "put_wall", "pin")}
+                  for k in ("flip", "call_wall", "put_wall", "pin", "pin_top_pos")}
 
         # Session range proxy converted into NQ points for stop sizing.
         atr_nq = None
@@ -467,9 +477,16 @@ class NQHud:
         regime, dist = classify_regime(tape.get("nq"), levels.get("flip"))
         verdict = build_verdict(regime, phase, tape.get("nq"), levels, atr_nq)
 
-        return {"now": now, "phase": phase, "tape": tape, "gamma": gamma,
-                "scale": scale, "basis": basis, "levels": levels,
-                "regime": regime, "dist": dist, "verdict": verdict}
+        state = {"now": now, "phase": phase, "tape": tape, "gamma": gamma,
+                 "scale": scale, "basis": basis, "levels": levels,
+                 "atr_nq": atr_nq,
+                 "regime": regime, "dist": dist, "verdict": verdict}
+
+        # Record verdict TRANSITIONS for offline validation. Self-guarded and
+        # write-only — nothing in the HUD reads it back, so a logging failure
+        # can only cost a row.
+        self._logger.maybe_log(state)
+        return state
 
     # ── UI thread ───────────────────────────────────────────────────────
     def _tick_ui(self):

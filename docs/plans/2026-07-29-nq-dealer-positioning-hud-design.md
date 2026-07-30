@@ -188,6 +188,28 @@ implementation keeps `max(|net|)` and this question stays open in writing rather
 being settled silently. Note that the perf fix in §2 leaves one grid decode in place
 regardless (the walls need it), so keeping `max(|net|)` costs nothing extra today.
 
+**Early evidence (n=1, 2026-07-29) — it leans toward the CURRENT choice.** The first
+live sample after wiring the log showed the two candidates 310 points apart, and
+`top_pos_strike` landing *exactly on the call wall*:
+
+```
+pin  max(|net|)     = 27200.0        call_wall_nq   = 27629.0
+pin  top_pos_strike = 27510.0  ->NQ  27629.0        <- the same level
+```
+
+That looks structural rather than coincidental: `top_pos_strike` is the largest
+*positive*-net strike, and above spot calls dominate so net is positive there — the
+largest such strike will usually be the call wall itself. If that holds, using it as
+the fade target is **degenerate for the call-wall setup**: the trade would target the
+very level it is shorting from, i.e. zero expected move, and the Task 3 target-side
+guard would send it to WAIT every time.
+
+So the theoretical argument above (pinning comes from positive gamma) is real but
+appears to be outweighed by a mechanical one. **This is one snapshot — do not act on
+it.** Check whether `pin_top_pos_nq == call_wall_nq` across the logged sessions; if
+it holds broadly, the question is settled in favour of `max(|net|)` and this section
+can be closed.
+
 > An earlier revision of this document justified rejecting `top_pos_strike` by citing
 > a disagreement measured on "383 of 383 rows" of a live session, attributed to a
 > comment in `services/options_svc/compute.py`. **No such measurement or comment
