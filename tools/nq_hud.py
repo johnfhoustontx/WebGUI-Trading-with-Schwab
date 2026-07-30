@@ -364,6 +364,7 @@ class NQHud:
         self._state = None
         self._stop = threading.Event()
         self._labels = {}
+        self._poll_error = None
         self._logger = SignalLogger()
         self._state_writer = StateWriter(nq_contract=NQ_CONTRACT,
                                          stale_after_sec=STALE_AFTER_SEC)
@@ -476,7 +477,13 @@ class NQHud:
         while not self._stop.is_set():
             try:
                 self._state = self._collect()
-            except Exception:
+                self._poll_error = None
+            except Exception as exc:
+                # Surface it on the health line, not just in the log. Without
+                # this the window sits at its build-time "connecting…" forever
+                # while the console fills with tracebacks — the failure is
+                # invisible in the only place the trader is looking.
+                self._poll_error = "{0}: {1}".format(type(exc).__name__, exc)
                 log.exception("poll failed")
             self._stop.wait(REFRESH_SEC)
 
@@ -566,6 +573,15 @@ class NQHud:
     def _paint(self):
         st = self._state
         if st is None:
+            # No successful poll yet. If one FAILED, say why — otherwise the
+            # window reads "connecting…" indefinitely and the reason is only
+            # in the console.
+            if self._poll_error:
+                self._set("health", self._poll_error, RED)
+                self._set("reason",
+                          "The HUD cannot read its data. If a module is "
+                          "missing, run it with the repo venv rather than the "
+                          "system Python — see the console for details.")
             return
 
         tape, gamma, lv = st["tape"], st["gamma"], st["levels"]
@@ -661,11 +677,35 @@ def main():
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    try:
-        import customtkinter  # noqa: F401
-    except ImportError:
-        print("customtkinter is required:  pip install customtkinter")
+    # Pre-flight the dependencies BEFORE opening a window. Getting this wrong
+    # is easy and the symptom is misleading: the HUD opens, renders, and then
+    # logs the same traceback every 2s while the panel shows "connecting…".
+    #
+    # The specific trap is the interpreter. `python tools\nq_hud.py` picks up
+    # the SYSTEM python, which on this machine has customtkinter (from the ML
+    # trading GUI) but NOT redis — so the window opens and only the tape fails.
+    missing = []
+    for module, hint in (("customtkinter", "pip install customtkinter"),
+                         ("redis", "provided by the repo venv")):
+        try:
+            __import__(module)
+        except ImportError:
+            missing.append((module, hint))
+
+    if missing:
+        # ASCII only: this prints to a cp1252 Windows console, where an em dash
+        # renders as "?" and undermines the message it is meant to carry.
+        print("nq_hud cannot start - missing: "
+              + ", ".join(m for m, _ in missing))
+        for module, hint in missing:
+            print("    {0:16s} {1}".format(module, hint))
+        print()
+        print("Run it with the repo venv, which has all of them:")
+        print(r"    .venv\Scripts\python.exe tools\nq_hud.py")
+        print("or activate first:")
+        print(r"    .venv\Scripts\Activate.ps1   then   python tools\nq_hud.py")
         return 1
+
     NQHud().run()
     return 0
 
