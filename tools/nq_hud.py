@@ -1,24 +1,36 @@
 """
-nq_hud.py - NQ Dealer-Positioning Entry HUD
-Version: 1.0.0
-Last Updated: 2026-07-29
+nq_hud.py - Dealer-Positioning Entry HUD (NQ + ES, side by side)
+Version: 2.0.0
+Last Updated: 2026-07-30
 
-An always-on-top desktop HUD for MANUAL, RTH-only NQ futures day trading.
-Classifies the dealer-gamma regime from collected options data, converts the
-key levels into NQ points, and renders a LONG / SHORT / STAND DOWN verdict
-with risk-management levels.
+An always-on-top desktop HUD for MANUAL, RTH-only index-futures day trading.
+Classifies the dealer-gamma regime from collected options data, converts the key
+levels into futures points, and renders a LONG / SHORT / STAND DOWN verdict with
+risk-management levels — for NQ and ES simultaneously, in adjacent panes.
 
-Version 1.0.0 Changes:
-- Initial implementation
+Version 2.0.0 Changes:
+- ES pane added beside NQ. Both instruments run the same pure logic; everything
+  that differs between them is data on an Instrument spec (nq_instruments.py).
+- One tape read and one DB connection now serve BOTH panes, so the second
+  instrument costs no extra round-trips.
+- Per-instrument stop bands. NDX trades near 4x SPX, so sharing NQ's
+  point-denominated 15-45 clamp would have sized ES stops ~4x too wide.
+
+WHY BOTH AT ONCE: NQ and ES rarely disagree about direction, but they routinely
+disagree about STRUCTURE — one can sit mid-range in positive gamma while the
+other is pressed against a wall or has broken into negative gamma. Seeing the
+two maps together is what tells you whether a setup is an index-wide dealer
+effect or a single-index artifact. Because the level-vs-spot differentials are
+frame-independent, the two panes' numbers are directly comparable.
 
 ────────────────────────────────────────────────────────────────────────────
 ARCHITECTURE — this is a TIER-1 READER. It does not compute market data.
 
-  * Tape (NQ + NDX + VIX spot)  <- cache:market:dashboard via shared.bus.Bus
-                                   (market_svc already polls /quotes ~2s RTH)
-  * Gamma grids / flip / walls  <- options-scanner/gex_history.db, READ-ONLY
-                                   (options_svc collects 1-min snapshots
-                                    08:00-15:20 CT for the whole universe)
+  * Tape (futures + cash + VIX)  <- cache:market:dashboard via shared.bus.Bus
+                                    (market_svc already polls /quotes ~2s RTH)
+  * Gamma grids / flip / walls   <- options-scanner/gex_history.db, READ-ONLY
+                                    (options_svc collects 1-min snapshots
+                                     08:00-15:20 CT for the whole universe)
 
 It makes NO Schwab calls, imports NO engines except the pure wall picker in
 gamma_tool, opens the history DB read-only, and writes nothing anywhere. It
@@ -26,13 +38,14 @@ therefore cannot destabilise the running 8-process stack, and needs no port.
 
 WHY NOT cache:options:gamma? That key holds exactly ONE symbol — whichever the
 /options/gamma page currently has selected (handlers.refresh_gamma defaults to
-$SPX). Reading it would silently show SPX gamma under an NQ label. The history
-DB is per-symbol by construction, so it is the correct source.
+$SPX). Reading it would silently show one index's gamma under the other's label,
+which with two panes on screen is a mistake you would act on. The history DB is
+per-symbol by construction, so it is the correct source.
 
-SOURCE SYMBOL: prefers $NDX when it is being collected; falls back to QQQ.
-QQQ carries heavy structural call-overwriting flow, which can invert the
-apparent gamma sign, so the active source is always shown in the header. To
-upgrade, add "$NDX" to gex_collector.SYMBOLS and restart options_svc.
+SOURCE SYMBOL: each instrument prefers its cash index ($NDX / $SPX) and falls
+back to its ETF proxy (QQQ / SPY). The ETFs carry heavy structural
+call-overwriting flow, which can invert the apparent gamma sign, so the active
+source is always shown in that pane's header.
 ────────────────────────────────────────────────────────────────────────────
 """
 
@@ -46,7 +59,7 @@ import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-# Repo root on sys.path -> repo_paths / shared / nq_signal are importable (same
+# Repo root on sys.path -> repo_paths / shared / tools.* are importable (same
 # pattern as webgui/proxy.py and shared/bus/client.py).
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
@@ -54,20 +67,24 @@ if str(_REPO_ROOT) not in sys.path:
 
 from repo_paths import OPTIONS_SCANNER  # noqa: E402
 
+# Per-instrument specs — cash index, tape tiles, contract, point values and the
+# stop band. Everything that differs between NQ and ES lives there.
+from tools.nq_instruments import INSTRUMENTS  # noqa: E402
+
 # PURE signal logic — conversion / regime / session / stops / verdict. Kept in
 # its own module so the whole decision surface is testable without Redis,
 # SQLite or tkinter. See tools/nq_signal.py.
 from tools.nq_signal import (  # noqa: E402
     PHASE_NOTE,
     build_verdict,
+    cash_scale,
     cash_stale_reason,
     classify_regime,
-    ndx_scale,
     pick_flip,
     session_phase,
     shift_verdict_levels,
+    to_future,
     to_index,
-    to_nq,
 )
 
 # Append-only verdict-transition log (write-only; nothing reads it at runtime).
@@ -76,8 +93,8 @@ from tools.nq_signal_log import SignalLogger  # noqa: E402
 from tools.nq_state import StateWriter  # noqa: E402
 
 # options-scanner on sys.path -> gamma_tool (pure wall picker) + gex_history_db.
-# Imported lazily inside _load_gamma so an import failure degrades the gamma
-# panel rather than preventing the window from opening at all.
+# Imported lazily inside read_gamma_all so an import failure degrades the gamma
+# panes rather than preventing the window from opening at all.
 if str(OPTIONS_SCANNER) not in sys.path:
     sys.path.insert(0, str(OPTIONS_SCANNER))
 
@@ -89,44 +106,34 @@ log = logging.getLogger("nq_hud")
 
 CT = ZoneInfo("America/Chicago")
 
-# Source-symbol preference. $NDX is the correct underlying for NQ; QQQ is the
-# fallback because it is always collected. First one with data today wins.
-SOURCE_PREFERENCE = ("$NDX", "QQQ")
-
-# NQ contract multipliers ($/point).
-NQ_POINT_VALUE = 20.0
-MNQ_POINT_VALUE = 2.0
-
 # Snapshot staleness. The collector runs 1-min; >150s means it has stalled.
 STALE_AFTER_SEC = 150
 
 # Tape staleness. market_svc republishes cache:market:dashboard every ~2s during
 # RTH and ~5s off-hours, so a minute of silence means it is dead. This matters
-# more than it looks: the BASIS is derived from the tape, so a frozen NQ/NDX
-# pair silently shifts every converted level. Observed live — market_svc died
-# overnight and the cache sat 12 hours stale while the HUD showed it as fine.
+# more than it looks: the BASIS is derived from the tape, so a frozen
+# future/cash pair silently shifts every converted level. Observed live —
+# market_svc died overnight and the cache sat 12 hours stale while the HUD
+# showed it as fine.
 TAPE_STALE_AFTER_SEC = 60
 
 REFRESH_SEC = 2.0
 
-# Window geometry. Height is derived from the built widget tree at startup
-# (see NQHud.__init__); these are only the floor and the screen allowance.
-WIN_WIDTH = 430
+# Window geometry. One column per instrument. Height is derived from the built
+# widget tree at startup (see Hud.__init__); these are only the floor and the
+# screen allowance.
+PANE_WIDTH = 420
+WIN_WIDTH = PANE_WIDTH * len(INSTRUMENTS) + 30
 WIN_MIN_HEIGHT = 680
 WIN_SCREEN_MARGIN = 80   # taskbar + title bar
+WRAP = PANE_WIDTH - 40   # wraplength for the reason line
 
 # The regime / session-window / risk-sizing constants and the pure logic that
 # closes over them live in tools/nq_signal.py (imported above), so they can be
 # exercised without Redis, SQLite or tkinter.
 
-# Tape tile display names as written in services/market_svc/symbols.py.
-# NOTE: the tile DISPLAY name and the quote symbol differ, and BOTH are
-# hardcoded here and in services/market_svc/symbols.py. At the quarterly
-# roll they must change in lockstep, or the basis is measured against a
-# contract nobody is trading.
-TILE_NQ = "/NQ[U26]"
-NQ_CONTRACT = "/NQU26"
-TILE_NDX = "NDX"
+# VIX is shared by both panes, so unlike the per-instrument tiles it is not on
+# the Instrument spec. Name as written in services/market_svc/symbols.py.
 TILE_VIX = "VIX"
 
 CACHE_MARKET = "cache:market:dashboard"
@@ -158,6 +165,13 @@ ACTION_COLOR = {
     "STAND DOWN": GRAY,
 }
 
+REGIME_TEXT = {
+    "positive": ("POSITIVE GAMMA — mean reversion", BLUE),
+    "negative": ("NEGATIVE GAMMA — continuation", RED),
+    "flip_zone": ("FLIP ZONE — whipsaw", AMBER),
+    "unknown": ("REGIME UNKNOWN", GRAY),
+}
+
 
 #############################################
 # TIME / SESSION HELPERS
@@ -168,35 +182,54 @@ def market_now():
     return datetime.now(CT)
 
 
-
 #############################################
 # DATA READERS (Tier-1: Redis + read-only SQLite)
 #############################################
 
-def read_tape(bus):
-    """Pull NQ / NDX / VIX from cache:market:dashboard.
+def read_tape(bus, specs=INSTRUMENTS):
+    """Pull every instrument's future + cash price, plus VIX, in ONE cache read.
 
-    Returns {"nq": float|None, "ndx": float|None, "vix": float|None,
-             "nq_pct": float|None, "age_s": float|None, "ok": bool}.
+    Returns::
+
+        {"vix": float|None, "age_s": float|None, "ok": bool,
+         "<key>": {"fut": float|None, "fut_pct": float|None, "cash": float|None},
+         ...}
+
+    One read for all panes, deliberately: the dashboard payload is a single
+    document, so re-reading it per instrument would double the Redis traffic AND
+    let the two panes see different snapshots of the tape — exactly the kind of
+    inconsistency that makes two side-by-side readouts untrustworthy.
+
     Defensive: any failure degrades to an all-None dict so the HUD paints
     "no data" rather than dying.
     """
-    out = {"nq": None, "ndx": None, "vix": None, "nq_pct": None,
-           "age_s": None, "ok": False}
+    out = {"vix": None, "age_s": None, "ok": False}
+    for spec in specs:
+        out[spec.key] = {"fut": None, "fut_pct": None, "cash": None}
     try:
         env = bus.cache_get(CACHE_MARKET)
         if env is None:
             return out
         payload = env.payload or {}
-        wanted = {TILE_NQ: "nq", TILE_NDX: "ndx", TILE_VIX: "vix"}
+
+        # tile display name -> (instrument key or None for shared, slot)
+        wanted = {TILE_VIX: (None, "vix")}
+        for spec in specs:
+            wanted[spec.future_tile] = (spec.key, "fut")
+            wanted[spec.cash_tile] = (spec.key, "cash")
+
         for cat in payload.get("categories", []):
             for tile in cat.get("tiles", []):
-                slot = wanted.get(tile.get("display"))
-                if slot is None:
+                dest = wanted.get(tile.get("display"))
+                if dest is None:
                     continue
-                out[slot] = tile.get("last")
-                if slot == "nq":
-                    out["nq_pct"] = tile.get("change_pct")
+                key, slot = dest
+                if key is None:
+                    out[slot] = tile.get("last")
+                else:
+                    out[key][slot] = tile.get("last")
+                    if slot == "fut":
+                        out[key]["fut_pct"] = tile.get("change_pct")
         try:
             ts = datetime.fromisoformat(env.ts)
             out["age_s"] = (datetime.now(ts.tzinfo) - ts).total_seconds()
@@ -207,63 +240,102 @@ def read_tape(bus):
         # healthy while its last prices aged for hours — and since the basis
         # comes from those prices, every level was quietly built on them.
         # An age we cannot establish fails closed for the same reason.
-        out["ok"] = (out["nq"] is not None
-                     and out["age_s"] is not None
-                     and out["age_s"] <= TAPE_STALE_AFTER_SEC)
+        #
+        # This is the SHARED half of the check (is the publisher alive?).
+        # Whether a given pane actually has its own two prices is decided per
+        # pane by tape_usable, since one instrument's tile can be missing while
+        # the other's is fine.
+        out["ok"] = (out["age_s"] is not None
+                     and out["age_s"] <= TAPE_STALE_AFTER_SEC
+                     and any(out[s.key]["fut"] is not None for s in specs))
     except Exception:
         log.debug("tape read failed", exc_info=True)
     return out
 
 
-def pick_source_symbol(conn, gh, today):
-    """First symbol in SOURCE_PREFERENCE that has a GEX row for ``today``.
+def tape_usable(tape, spec):
+    """True when ``spec``'s pane has a fresh future AND cash price.
 
-    $NDX is the correct underlying for NQ but is not in the default collection
-    universe; QQQ always is. Returns (symbol, None) or (None, reason).
+    Both are required because the basis is their difference: with either one
+    missing or stale, every converted level in that pane is wrong.
     """
-    for sym in SOURCE_PREFERENCE:
+    if not tape.get("ok"):
+        return False
+    leg = tape.get(spec.key) or {}
+    return leg.get("fut") is not None and leg.get("cash") is not None
+
+
+def pick_source_symbol(conn, gh, today, sources):
+    """First symbol in ``sources`` that has a GEX row for ``today``.
+
+    The cash index is the correct underlying; the ETF is the always-collected
+    fallback. Returns (symbol, None) or (None, reason).
+    """
+    for sym in sources:
         try:
             if gh.latest_spot_flip(conn, sym, "gex", today) is not None:
                 return sym, None
         except Exception:
             continue
-    return None, "no GEX snapshots today for $NDX or QQQ"
+    return None, "no GEX snapshots today for " + " or ".join(sources)
 
 
-def read_gamma(source_date=None):
-    """Load the latest GEX snapshot for the best available source symbol.
+def _gamma_blank():
+    return {"ok": False, "reason": "", "symbol": None, "spot": None,
+            "flip": None, "call_wall": None, "put_wall": None,
+            "net_total": None, "pin": None, "snap_age_s": None,
+            "atr_proxy": None, "session_date": None,
+            "pin_top_pos": None, "flip_stored": None, "flip_computed": None}
 
-    Returns a dict with spot / flip / walls / net_total / pin / atr_proxy, or
-    {"ok": False, "reason": ...}. Opens the history DB READ-ONLY and closes it
-    every poll — the collector holds the write lock and must never be blocked.
+
+def read_gamma_all(specs=INSTRUMENTS, source_date=None):
+    """Load the latest GEX snapshot for every instrument. Returns {key: result}.
+
+    ONE read-only connection serves all panes and is closed on the way out —
+    the collector holds the write lock and must never be blocked. Opening the DB
+    per instrument would double that churn on every 2s poll for no benefit.
     """
-    res = {"ok": False, "reason": "", "symbol": None, "spot": None,
-           "flip": None, "call_wall": None, "put_wall": None,
-           "net_total": None, "pin": None, "snap_age_s": None,
-           "atr_proxy": None, "session_date": None,
-           "flip_stored": None, "flip_computed": None}
-    conn = None
+    blank = {spec.key: _gamma_blank() for spec in specs}
     try:
         import gamma_tool as gt
         import gex_history_db as gh
     except Exception as exc:
-        res["reason"] = f"engine import failed: {exc}"
-        return res
+        for res in blank.values():
+            res["reason"] = f"engine import failed: {exc}"
+        return blank
 
     try:
         conn = gh.connect(read_only=True)
     except Exception as exc:
-        res["reason"] = f"gex_history.db unavailable: {exc}"
-        return res
+        for res in blank.values():
+            res["reason"] = f"gex_history.db unavailable: {exc}"
+        return blank
 
     try:
         today = source_date or market_now().date()
-        symbol, why = pick_source_symbol(conn, gh, today)
+        return {spec.key: read_gamma(spec, conn, gt, gh, today) for spec in specs}
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def read_gamma(spec, conn, gt, gh, today):
+    """Load ``spec``'s latest GEX snapshot from an ALREADY-OPEN connection.
+
+    Returns a dict with spot / flip / walls / net_total / pin / atr_proxy, or
+    {"ok": False, "reason": ...}. Never raises: one instrument failing to read
+    must leave the other pane fully functional.
+    """
+    res = _gamma_blank()
+    try:
+        symbol, why = pick_source_symbol(conn, gh, today, spec.sources)
         if symbol is None:
             # Off-hours / pre-open: fall back to the prior collected session.
             for back in range(1, 6):
                 prior = _prior_day(today, back)
-                symbol, why = pick_source_symbol(conn, gh, prior)
+                symbol, why = pick_source_symbol(conn, gh, prior, spec.sources)
                 if symbol is not None:
                     today = prior
                     break
@@ -283,7 +355,7 @@ def read_gamma(source_date=None):
         res.update(spot=spot, flip=flip_stored, flip_stored=flip_stored)
         res["snap_age_s"] = max(0.0, time.time() - float(ts))
 
-        # ── EXACTLY ONE grid decode: the newest row. ─────────────────────────
+        # ── EXACTLY ONE grid decode per instrument: the newest row. ──────────
         # This poll runs every 2s. load_date_with_grid() over the whole session
         # zlib-decompresses + JSON-parses EVERY row's grid (~390 by the close,
         # ~114 strikes each) — the hotspot CLAUDE.md records being removed from
@@ -328,7 +400,7 @@ def read_gamma(source_date=None):
         # the stored top_pos_strike (= max(net) over POSITIVE strikes only) is
         # the better mean-reversion target is an OPEN question — pinning is
         # caused by positive dealer gamma, so a large negative-net strike is an
-        # amplifier, not an attractor. Task 8 logs both to settle it.
+        # amplifier, not an attractor. The signal log records both to settle it.
         try:
             res["pin"] = max(grid.items(),
                              key=lambda kv: abs(kv[1].get("net", 0.0) or 0.0))[0]
@@ -353,12 +425,6 @@ def read_gamma(source_date=None):
     except Exception as exc:
         res["reason"] = f"gamma read failed: {exc}"
         log.debug("gamma read failed", exc_info=True)
-    finally:
-        if conn is not None:
-            try:
-                conn.close()
-            except Exception:
-                pass
     return res
 
 
@@ -367,22 +433,93 @@ def _prior_day(d, back):
     return d - timedelta(days=back)
 
 
+#############################################
+# PANE ASSEMBLY (pure, given the two reads)
+#############################################
+
+# Level keys carried through BOTH frames. pin_top_pos and flip_stored are the
+# alternative-definition candidates: unused by the verdict, logged and exported
+# so the open questions can be settled on data rather than argument.
+LEVEL_KEYS = ("flip", "call_wall", "put_wall", "pin", "pin_top_pos",
+              "flip_stored")
+
+
+def build_pane(spec, tape, gamma, phase):
+    """Assemble one instrument's decision state. PURE — no I/O, no clock.
+
+    TWO FRAMES, deliberately (design §5).
+
+    Decisions are made in CASH (index) terms, because that is what they were
+    always really made in: basis is measured as future - cash, so a comparison
+    of the future against a future-converted level reduces algebraically to
+    cash-vs-level with the futures price cancelling out. Computing it in the
+    cash frame makes the code say what it does instead of hiding a
+    self-reference behind a conversion.
+
+    Futures points are for DISPLAY — the numbers you type into NinjaTrader. The
+    frames differ by an additive basis, so distances (ATR, stop size, wall
+    proximity) are identical in both and only levels are shifted.
+    """
+    leg = tape.get(spec.key) or {}
+    fut, cash = leg.get("fut"), leg.get("cash")
+
+    scale = cash_scale(gamma.get("symbol"), cash, gamma.get("spot"))
+    basis = None if fut is None or cash is None else fut - cash
+
+    levels_cash = {k: to_index(gamma.get(k), scale) for k in LEVEL_KEYS}
+    levels = {k: to_future(gamma.get(k), scale, basis) for k in LEVEL_KEYS}
+
+    # Session range proxy for stop sizing. Frame-invariant (a difference), so
+    # the same value serves both.
+    atr_pts = (gamma["atr_proxy"] * scale
+               if gamma.get("atr_proxy") and scale else None)
+
+    regime, dist = classify_regime(cash, levels_cash.get("flip"))
+
+    # Cash-freshness guard: the regime is anchored to an index that stops
+    # ticking outside 08:30-15:00 CT. Refuse to assert a band rather than
+    # showing a frozen one that looks live.
+    stale = cash_stale_reason(phase, gamma.get("snap_age_s"), STALE_AFTER_SEC)
+    # A frozen tape is a third way the regime becomes untrustworthy, and the
+    # clock-based check cannot see it: during RTH the phase says cash is live
+    # and the snapshot may be fresh, yet a dead market_svc leaves the basis
+    # anchored to hours-old prices.
+    if stale is None and not tape_usable(tape, spec):
+        stale = "tape not updating"
+    if stale:
+        regime, dist = "unknown", None
+
+    verdict_cash = build_verdict(regime, phase, cash, levels_cash, atr_pts, spec)
+    # Back into futures points for the trader. The CASH-frame original is kept
+    # so the state export can ship both: a NinjaTrader chart on a back-adjusted
+    # continuous contract has to rebase entry/stop/target exactly as it rebases
+    # the levels, or the two disagree by the adjustment offset.
+    verdict = shift_verdict_levels(verdict_cash, basis)
+
+    return {"spec": spec, "tape": leg, "gamma": gamma, "scale": scale,
+            "basis": basis, "levels": levels, "levels_cash": levels_cash,
+            "atr_pts": atr_pts, "regime": regime, "dist": dist,
+            "regime_stale": stale, "verdict": verdict,
+            "verdict_cash": verdict_cash}
 
 
 #############################################
 # GUI
 #############################################
 
-class NQHud:
+class Hud:
     """Always-on-top CustomTkinter HUD. All data work runs off the UI thread."""
 
-    def __init__(self):
+    def __init__(self, specs=INSTRUMENTS):
         import customtkinter as ctk
         self.ctk = ctk
         ctk.set_appearance_mode("dark")
 
+        self.specs = tuple(specs)
+
         self.root = ctk.CTk()
-        self.root.title("NQ Dealer-Positioning HUD")
+        self.root.title("Dealer-Positioning HUD  ·  "
+                        + " / ".join(s.label for s in self.specs))
         self.root.geometry(f"{WIN_WIDTH}x{WIN_MIN_HEIGHT}")
         self.root.attributes("-topmost", True)
         self.root.configure(fg_color=BG)
@@ -392,9 +529,16 @@ class NQHud:
         self._stop = threading.Event()
         self._labels = {}
         self._poll_error = None
-        self._logger = SignalLogger()
-        self._state_writer = StateWriter(nq_contract=NQ_CONTRACT,
-                                         stale_after_sec=STALE_AFTER_SEC)
+        # One logger per instrument, all appending to the SAME csv with an
+        # `instrument` column: the interesting offline question is how the two
+        # regimes relate, which a single file answers directly. Each tracks its
+        # own previous state, so one pane's transition never suppresses the
+        # other's.
+        self._loggers = {s.key: SignalLogger(instrument=s.label)
+                         for s in self.specs}
+        # ONE state file holding both panes, written atomically, so the
+        # NinjaTrader indicator can never render a half-updated pair.
+        self._state_writer = StateWriter(stale_after_sec=STALE_AFTER_SEC)
 
         self._build()
 
@@ -436,68 +580,97 @@ class NQHud:
     def _build(self):
         ctk = self.ctk
 
-        # Header — source symbol + staleness. Always visible so you know which
-        # gamma map you are reading.
+        # ── Shared header: publisher health, clock, VIX. These are one-per-app
+        # facts, so duplicating them per pane would be noise.
         head = self._panel(self.root, pady=(10, 8))
-        self._labels["source"] = ctk.CTkLabel(
-            head, text="source: —", text_color=FG_DIM, font=("Segoe UI", 11))
-        self._labels["source"].pack(anchor="w", padx=10, pady=(6, 0))
         self._labels["health"] = ctk.CTkLabel(
             head, text="connecting…", text_color=AMBER, font=("Segoe UI", 11))
-        self._labels["health"].pack(anchor="w", padx=10, pady=(0, 6))
+        self._labels["health"].pack(anchor="w", padx=10, pady=(6, 0))
+        self._labels["vix"] = ctk.CTkLabel(
+            head, text="VIX —", text_color=FG_DIM, font=("Segoe UI", 11))
+        self._labels["vix"].pack(anchor="w", padx=10, pady=(0, 6))
 
-        # Verdict — the headline.
-        vf = self._panel(self.root)
-        self._labels["action"] = ctk.CTkLabel(
-            vf, text="STAND DOWN", text_color=GRAY,
-            font=("Segoe UI", 30, "bold"))
-        self._labels["action"].pack(pady=(10, 2))
-        self._labels["regime"] = ctk.CTkLabel(
-            vf, text="—", text_color=FG_DIM, font=("Segoe UI", 12, "bold"))
-        self._labels["regime"].pack(pady=(0, 4))
-        self._labels["reason"] = ctk.CTkLabel(
-            vf, text="", text_color=FG, font=("Segoe UI", 11),
-            wraplength=380, justify="left")
-        self._labels["reason"].pack(padx=10, pady=(0, 10))
+        # ── One column per instrument, equal width.
+        cols = ctk.CTkFrame(self.root, fg_color="transparent")
+        cols.pack(fill="both", expand=True)
+        for spec in self.specs:
+            col = ctk.CTkFrame(cols, fg_color="transparent", width=PANE_WIDTH)
+            col.pack(side="left", fill="both", expand=True)
+            # Without this the column shrinks to its children's requested width
+            # and the two panes end up different sizes.
+            col.pack_propagate(False)
+            self._build_pane(col, spec)
 
-        # Tape.
-        tf = self._panel(self.root)
-        ctk.CTkLabel(tf, text="TAPE", text_color=BLUE,
-                     font=("Segoe UI", 10, "bold")).pack(anchor="w", padx=10, pady=(6, 2))
-        self._row(tf, "nq", "NQ", bold=True)
-        self._row(tf, "nq_pct", "Day %")
-        self._row(tf, "ndx", "NDX cash")
-        self._row(tf, "basis", "Basis (NQ−NDX)")
-        self._row(tf, "vix", "VIX")
-        ctk.CTkLabel(tf, text="", height=4).pack()
-
-        # Levels, in NQ points.
-        lf = self._panel(self.root)
-        ctk.CTkLabel(lf, text="LEVELS  (NQ points)", text_color=PURPLE,
-                     font=("Segoe UI", 10, "bold")).pack(anchor="w", padx=10, pady=(6, 2))
-        self._row(lf, "call_wall", "Call wall", vcolor=RED)
-        self._row(lf, "flip", "Gamma flip", vcolor=BLUE, bold=True)
-        self._row(lf, "put_wall", "Put wall", vcolor=GREEN)
-        self._row(lf, "pin", "Pin (max γ)", vcolor=AMBER)
-        ctk.CTkLabel(lf, text="", height=4).pack()
-
-        # Risk.
-        rf = self._panel(self.root)
-        ctk.CTkLabel(rf, text="RISK", text_color=AMBER,
-                     font=("Segoe UI", 10, "bold")).pack(anchor="w", padx=10, pady=(6, 2))
-        self._row(rf, "entry", "Entry")
-        self._row(rf, "stop", "Stop", vcolor=RED)
-        self._row(rf, "target", "Target", vcolor=GREEN)
-        self._row(rf, "risk_nq", "Risk / 1 NQ")
-        self._row(rf, "risk_mnq", "Risk / 1 MNQ")
-        ctk.CTkLabel(rf, text="", height=4).pack()
-
-        # Session note.
+        # ── Shared session note.
         sf = self._panel(self.root)
         self._labels["phase"] = ctk.CTkLabel(
             sf, text="—", text_color=FG_DIM, font=("Segoe UI", 11),
-            wraplength=380, justify="left")
+            wraplength=WIN_WIDTH - 60, justify="left")
         self._labels["phase"].pack(padx=10, pady=8)
+
+    def _build_pane(self, parent, spec):
+        ctk = self.ctk
+        k = spec.key
+
+        # Instrument banner + which gamma map is feeding it.
+        head = self._panel(parent, pady=(0, 8))
+        ctk.CTkLabel(head, text=spec.label, text_color=FG,
+                     font=("Segoe UI", 15, "bold")).pack(
+                         anchor="w", padx=10, pady=(6, 0))
+        self._labels[f"{k}.source"] = ctk.CTkLabel(
+            head, text="source: —", text_color=FG_DIM, font=("Segoe UI", 11),
+            wraplength=WRAP, justify="left")
+        self._labels[f"{k}.source"].pack(anchor="w", padx=10, pady=(0, 6))
+
+        # Verdict — the headline.
+        vf = self._panel(parent)
+        self._labels[f"{k}.action"] = ctk.CTkLabel(
+            vf, text="STAND DOWN", text_color=GRAY,
+            font=("Segoe UI", 26, "bold"))
+        self._labels[f"{k}.action"].pack(pady=(10, 2))
+        self._labels[f"{k}.regime"] = ctk.CTkLabel(
+            vf, text="—", text_color=FG_DIM, font=("Segoe UI", 11, "bold"),
+            wraplength=WRAP, justify="center")
+        self._labels[f"{k}.regime"].pack(pady=(0, 4))
+        self._labels[f"{k}.reason"] = ctk.CTkLabel(
+            vf, text="", text_color=FG, font=("Segoe UI", 11),
+            wraplength=WRAP, justify="left")
+        self._labels[f"{k}.reason"].pack(padx=10, pady=(0, 10))
+
+        # Tape.
+        tf = self._panel(parent)
+        ctk.CTkLabel(tf, text="TAPE", text_color=BLUE,
+                     font=("Segoe UI", 10, "bold")).pack(
+                         anchor="w", padx=10, pady=(6, 2))
+        self._row(tf, f"{k}.fut", spec.label, bold=True)
+        self._row(tf, f"{k}.fut_pct", "Day %")
+        self._row(tf, f"{k}.cash", f"{spec.cash_tile} cash")
+        self._row(tf, f"{k}.basis", f"Basis ({spec.label}−{spec.cash_tile})")
+        ctk.CTkLabel(tf, text="", height=4).pack()
+
+        # Levels, in this instrument's futures points.
+        lf = self._panel(parent)
+        ctk.CTkLabel(lf, text=f"LEVELS  ({spec.label} points)",
+                     text_color=PURPLE,
+                     font=("Segoe UI", 10, "bold")).pack(
+                         anchor="w", padx=10, pady=(6, 2))
+        self._row(lf, f"{k}.call_wall", "Call wall", vcolor=RED)
+        self._row(lf, f"{k}.flip", "Gamma flip", vcolor=BLUE, bold=True)
+        self._row(lf, f"{k}.put_wall", "Put wall", vcolor=GREEN)
+        self._row(lf, f"{k}.pin", "Pin (max γ)", vcolor=AMBER)
+        ctk.CTkLabel(lf, text="", height=4).pack()
+
+        # Risk.
+        rf = self._panel(parent)
+        ctk.CTkLabel(rf, text="RISK", text_color=AMBER,
+                     font=("Segoe UI", 10, "bold")).pack(
+                         anchor="w", padx=10, pady=(6, 2))
+        self._row(rf, f"{k}.entry", "Entry")
+        self._row(rf, f"{k}.stop", "Stop", vcolor=RED)
+        self._row(rf, f"{k}.target", "Target", vcolor=GREEN)
+        self._row(rf, f"{k}.risk_full", f"Risk / 1 {spec.label}")
+        self._row(rf, f"{k}.risk_micro", f"Risk / 1 {spec.micro_label}")
+        ctk.CTkLabel(rf, text="", height=4).pack()
 
     # ── data thread ─────────────────────────────────────────────────────
     def _poll_loop(self):
@@ -521,71 +694,23 @@ class NQHud:
 
         now = market_now()
         phase = session_phase(now)
-        tape = read_tape(self._bus)
-        gamma = read_gamma()
+        # One tape read and one DB connection for BOTH panes, so they always
+        # describe the same instant.
+        tape = read_tape(self._bus, self.specs)
+        gammas = read_gamma_all(self.specs)
 
-        scale = ndx_scale(gamma.get("symbol"), tape.get("ndx"), gamma.get("spot"))
-        basis = None
-        if tape.get("nq") is not None and tape.get("ndx") is not None:
-            basis = tape["nq"] - tape["ndx"]
+        panes = {spec.key: build_pane(spec, tape, gammas[spec.key], phase)
+                 for spec in self.specs}
 
-        _LEVEL_KEYS = ("flip", "call_wall", "put_wall", "pin", "pin_top_pos",
-                       "flip_stored")
-
-        # TWO FRAMES, deliberately (design §5).
-        #
-        # Decisions are made in CASH (index) terms, because that is what they
-        # were always really made in: basis is measured as NQ - NDX, so a
-        # comparison of NQ against an NQ-converted level reduces algebraically
-        # to cash-vs-level with the futures price cancelling out. Computing it
-        # in the cash frame makes the code say what it does instead of hiding
-        # a self-reference behind a conversion.
-        #
-        # NQ points are for DISPLAY — the numbers you type into NinjaTrader.
-        # The frames differ by an additive basis, so distances (ATR, stop size,
-        # wall proximity) are identical in both and only levels are shifted.
-        levels_cash = {k: to_index(gamma.get(k), scale) for k in _LEVEL_KEYS}
-        levels = {k: to_nq(gamma.get(k), scale, basis) for k in _LEVEL_KEYS}
-
-        # Session range proxy for stop sizing. Frame-invariant (a difference),
-        # so the same value serves both.
-        atr_pts = gamma["atr_proxy"] * scale if gamma.get("atr_proxy") and scale else None
-
-        regime, dist = classify_regime(tape.get("ndx"), levels_cash.get("flip"))
-
-        # Cash-freshness guard: the regime is anchored to an index that stops
-        # ticking outside 08:30-15:00 CT. Refuse to assert a band rather than
-        # showing a frozen one that looks live.
-        stale = cash_stale_reason(phase, gamma.get("snap_age_s"), STALE_AFTER_SEC)
-        # A frozen tape is a third way the regime becomes untrustworthy, and
-        # the clock-based check cannot see it: during RTH the phase says cash
-        # is live and the snapshot may be fresh, yet a dead market_svc leaves
-        # the basis anchored to hours-old prices.
-        if stale is None and not tape.get("ok"):
-            stale = "tape not updating"
-        if stale:
-            regime, dist = "unknown", None
-        verdict_cash = build_verdict(regime, phase, tape.get("ndx"), levels_cash, atr_pts)
-        # Back into NQ points for the trader. The CASH-frame original is kept
-        # so the state export can ship both: a NinjaTrader chart on a
-        # back-adjusted continuous contract has to rebase entry/stop/target
-        # exactly as it rebases the levels, or the two disagree by the
-        # adjustment offset.
-        verdict = shift_verdict_levels(verdict_cash, basis)
-
-        state = {"now": now, "phase": phase, "tape": tape, "gamma": gamma,
-                 "scale": scale, "basis": basis, "levels": levels,
-                 "atr_nq": atr_pts, "regime_stale": stale,
-                 "levels_cash": levels_cash,
-                 "verdict_cash": verdict_cash,
-                 "regime": regime, "dist": dist, "verdict": verdict}
+        state = {"now": now, "phase": phase, "tape": tape, "panes": panes}
 
         # Record verdict TRANSITIONS for offline validation. Self-guarded and
         # write-only — nothing in the HUD reads it back, so a logging failure
         # can only cost a row.
-        self._logger.maybe_log(state)
-        # Export current state for the NinjaTrader indicator. Every poll,
-        # so its timestamp doubles as a heartbeat.
+        for spec in self.specs:
+            self._loggers[spec.key].maybe_log(state, spec.key)
+        # Export current state for the NinjaTrader indicator. Every poll, so
+        # its timestamp doubles as a heartbeat.
         self._state_writer.write(state)
         return state
 
@@ -617,88 +742,102 @@ class NQHud:
             # in the console.
             if self._poll_error:
                 self._set("health", self._poll_error, RED)
-                self._set("reason",
-                          "The HUD cannot read its data. If a module is "
-                          "missing, run it with the repo venv rather than the "
-                          "system Python — see the console for details.")
+                for spec in self.specs:
+                    self._set(f"{spec.key}.reason",
+                              "The HUD cannot read its data. If a module is "
+                              "missing, run it with the repo venv rather than "
+                              "the system Python — see the console.")
             return
 
-        tape, gamma, lv = st["tape"], st["gamma"], st["levels"]
-        v = st["verdict"]
+        tape = st["tape"]
 
-        # Header.
-        sym = gamma.get("symbol") or "—"
-        note = "" if sym == "$NDX" else "  (QQQ proxy — overwrite-skewed)"
-        self._set("source", f"source: {sym}{note}", FG_DIM if sym == "$NDX" else AMBER)
-
+        # ── Shared header. The gamma-snapshot ages are per-instrument, so the
+        # WORST of them is what the shared health line reports — a stalled
+        # collector on one symbol must not be hidden by the other being fresh.
+        ages = [p["gamma"].get("snap_age_s") for p in st["panes"].values()
+                if p["gamma"].get("snap_age_s") is not None]
+        worst_age = max(ages) if ages else None
         problems = []
         if not tape.get("ok"):
             problems.append("tape stale")
-        if not gamma.get("ok"):
-            problems.append(gamma.get("reason") or "no gamma")
-        snap_age = gamma.get("snap_age_s")
-        if snap_age is not None and snap_age > STALE_AFTER_SEC:
-            problems.append(f"snapshot {int(snap_age)}s old")
+        if worst_age is not None and worst_age > STALE_AFTER_SEC:
+            problems.append(f"snapshot {int(worst_age)}s old")
         if problems:
             self._set("health", " · ".join(problems), RED)
         else:
             self._set("health",
-                      f"live · snapshot {int(snap_age or 0)}s · "
+                      f"live · snapshot {int(worst_age or 0)}s · "
                       f"{st['now'].strftime('%H:%M:%S')} CT", GREEN)
+        self._set("vix", f"VIX {self._fmt(tape.get('vix'))}")
+        self._set("phase", PHASE_NOTE.get(st["phase"], ""))
+
+        for spec in self.specs:
+            self._paint_pane(spec, st["panes"][spec.key])
+
+    def _paint_pane(self, spec, pane):
+        k = spec.key
+        gamma, lv, v = pane["gamma"], pane["levels"], pane["verdict"]
+
+        # Which gamma map is feeding this pane, and whether it is the good one.
+        sym = gamma.get("symbol") or "—"
+        preferred = sym == spec.sources[0]
+        note = "" if preferred else "  (ETF proxy — overwrite-skewed)"
+        detail = ""
+        if not gamma.get("ok") and gamma.get("reason"):
+            detail = "  ·  " + gamma["reason"]
+        self._set(f"{k}.source", f"source: {sym}{note}{detail}",
+                  FG_DIM if preferred and gamma.get("ok") else AMBER)
 
         # Verdict.
-        self._set("action", v["action"], ACTION_COLOR.get(v["action"], GRAY))
-        rmap = {"positive": ("POSITIVE GAMMA — mean reversion", BLUE),
-                "negative": ("NEGATIVE GAMMA — continuation", RED),
-                "flip_zone": ("FLIP ZONE — whipsaw", AMBER),
-                "unknown": ("REGIME UNKNOWN", GRAY)}
+        self._set(f"{k}.action", v["action"],
+                  ACTION_COLOR.get(v["action"], GRAY))
         # .get(), not [] — this runs on the UI thread inside the 2s repaint, and
         # a KeyError here kills the paint loop. classify_regime only emits these
         # four keys today, so this is purely defence against a fifth being added
         # later; the HUD's contract is that no read raises.
-        rtext, rcolor = rmap.get(st["regime"], ("REGIME UNKNOWN", GRAY))
-        if st["dist"] is not None:
-            rtext += f"   ({st['dist']:+,.0f} pts vs flip)"
+        rtext, rcolor = REGIME_TEXT.get(pane["regime"], ("REGIME UNKNOWN", GRAY))
+        if pane["dist"] is not None:
+            rtext += f"   ({pane['dist']:+,.0f} pts vs flip)"
         # Name WHY the regime is withheld, so "unknown" reads as a deliberate
         # refusal rather than a broken read.
-        if st.get("regime_stale"):
-            rtext += "   ·  " + st["regime_stale"]
-        self._set("regime", rtext, rcolor)
-        self._set("reason", v["reason"])
+        if pane.get("regime_stale"):
+            rtext += "   ·  " + pane["regime_stale"]
+        self._set(f"{k}.regime", rtext, rcolor)
+        self._set(f"{k}.reason", v["reason"])
 
         # Tape.
-        self._set("nq", self._fmt(tape.get("nq")))
-        pct = tape.get("nq_pct")
-        self._set("nq_pct", "—" if pct is None else f"{pct:+.2f}%",
+        self._set(f"{k}.fut", self._fmt(pane["tape"].get("fut")))
+        pct = pane["tape"].get("fut_pct")
+        self._set(f"{k}.fut_pct", "—" if pct is None else f"{pct:+.2f}%",
                   GREEN if (pct or 0) >= 0 else RED)
-        self._set("ndx", self._fmt(tape.get("ndx")))
-        self._set("basis", self._fmt(st.get("basis")))
-        self._set("vix", self._fmt(tape.get("vix")))
+        self._set(f"{k}.cash", self._fmt(pane["tape"].get("cash")))
+        self._set(f"{k}.basis", self._fmt(pane.get("basis")))
 
-        # Levels + distance from spot.
-        nq = tape.get("nq")
+        # Levels + distance from spot. The parenthesised differential is
+        # frame-independent, which is what makes the two panes comparable.
+        fut = pane["tape"].get("fut")
         for key in ("call_wall", "flip", "put_wall", "pin"):
             val = lv.get(key)
             if val is None:
-                self._set(key, "—")
-            elif nq:
-                self._set(key, f"{val:,.0f}   ({val - nq:+,.0f})")
+                self._set(f"{k}.{key}", "—")
+            elif fut:
+                self._set(f"{k}.{key}", f"{val:,.0f}   ({val - fut:+,.0f})")
             else:
-                self._set(key, f"{val:,.0f}")
+                self._set(f"{k}.{key}", f"{val:,.0f}")
 
-        # Risk.
-        self._set("entry", self._fmt(v.get("entry"), 0))
-        self._set("stop", self._fmt(v.get("stop"), 0))
-        self._set("target", self._fmt(v.get("target"), 0))
+        # Risk, in this instrument's dollars.
+        self._set(f"{k}.entry", self._fmt(v.get("entry"), 0))
+        self._set(f"{k}.stop", self._fmt(v.get("stop"), 0))
+        self._set(f"{k}.target", self._fmt(v.get("target"), 0))
         if v.get("entry") is not None and v.get("stop") is not None:
             pts = abs(v["entry"] - v["stop"])
-            self._set("risk_nq", f"{pts:,.0f} pts = ${pts * NQ_POINT_VALUE:,.0f}")
-            self._set("risk_mnq", f"{pts:,.0f} pts = ${pts * MNQ_POINT_VALUE:,.0f}")
+            self._set(f"{k}.risk_full",
+                      f"{pts:,.0f} pts = ${pts * spec.point_value:,.0f}")
+            self._set(f"{k}.risk_micro",
+                      f"{pts:,.0f} pts = ${pts * spec.micro_point_value:,.0f}")
         else:
-            self._set("risk_nq", "—")
-            self._set("risk_mnq", "—")
-
-        self._set("phase", PHASE_NOTE.get(st["phase"], ""))
+            self._set(f"{k}.risk_full", "—")
+            self._set(f"{k}.risk_micro", "—")
 
     def _on_close(self):
         self._stop.set()
@@ -706,6 +845,12 @@ class NQHud:
 
     def run(self):
         self.root.mainloop()
+
+
+# Kept as an alias: the launcher command, the docs and the NinjaScript header
+# all still say "nq_hud", and renaming the entry point would break those for a
+# cosmetic gain.
+NQHud = Hud
 
 
 #############################################
@@ -745,7 +890,7 @@ def main():
         print(r"    .venv\Scripts\Activate.ps1   then   python tools\nq_hud.py")
         return 1
 
-    NQHud().run()
+    Hud().run()
     return 0
 
 

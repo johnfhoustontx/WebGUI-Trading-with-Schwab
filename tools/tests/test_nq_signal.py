@@ -16,6 +16,7 @@ import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
+from tools import nq_instruments as ni  # noqa: E402
 from tools import nq_signal as ns  # noqa: E402
 
 from datetime import date, datetime  # noqa: E402
@@ -25,26 +26,26 @@ from datetime import date, datetime  # noqa: E402
 # CONVERSION
 #############################################
 
-def test_ndx_scale_is_exactly_one_for_ndx():
+def test_cash_scale_is_exactly_one_for_ndx():
     # $NDX needs no conversion, and must not depend on live quotes to say so.
-    assert ns.ndx_scale("$NDX", None, None) == 1.0
-    assert ns.ndx_scale("$NDX", 23000.0, 560.0) == 1.0
+    assert ns.cash_scale("$NDX", None, None) == 1.0
+    assert ns.cash_scale("$NDX", 23000.0, 560.0) == 1.0
 
 
-def test_ndx_scale_is_the_live_ratio_for_qqq():
-    assert ns.ndx_scale("QQQ", 23000.0, 560.0) == pytest.approx(23000.0 / 560.0)
+def test_cash_scale_is_the_live_ratio_for_qqq():
+    assert ns.cash_scale("QQQ", 23000.0, 560.0) == pytest.approx(23000.0 / 560.0)
 
 
 @pytest.mark.parametrize("ndx,src", [(None, 560.0), (23000.0, None),
                                      (23000.0, 0.0), (23000.0, -1.0)])
-def test_ndx_scale_degrades_to_none(ndx, src):
-    assert ns.ndx_scale("QQQ", ndx, src) is None
+def test_cash_scale_degrades_to_none(ndx, src):
+    assert ns.cash_scale("QQQ", ndx, src) is None
 
 
-def test_qqq_strike_converts_to_nq_points():
+def test_qqq_strike_converts_to_future_points():
     # The design's worked example: QQQ 560 at NDX 23000 with basis +120 -> NQ 23120.
-    scale = ns.ndx_scale("QQQ", 23000.0, 560.0)
-    assert ns.to_nq(560.0, scale, 120.0) == pytest.approx(23120.0)
+    scale = ns.cash_scale("QQQ", 23000.0, 560.0)
+    assert ns.to_future(560.0, scale, 120.0) == pytest.approx(23120.0)
 
 
 @pytest.mark.parametrize("level,scale,basis", [
@@ -52,9 +53,9 @@ def test_qqq_strike_converts_to_nq_points():
     (560.0, None, 120.0),
     (560.0, 41.0, None),
 ])
-def test_to_nq_returns_none_rather_than_a_wrong_number(level, scale, basis):
+def test_to_future_returns_none_rather_than_a_wrong_number(level, scale, basis):
     # A missing input must paint "—", never a plausible-looking bad level.
-    assert ns.to_nq(level, scale, basis) is None
+    assert ns.to_future(level, scale, basis) is None
 
 
 def test_to_index_converts_a_strike_to_cash_equivalent_points():
@@ -69,12 +70,12 @@ def test_to_index_returns_none_rather_than_a_wrong_number(level, scale):
     assert ns.to_index(level, scale) is None
 
 
-def test_to_nq_is_to_index_plus_basis():
+def test_to_future_is_to_index_plus_basis():
     """The two frames differ by an additive basis and nothing else — which is
     why distances (ATR, stop size, wall proximity) are frame-invariant and only
     LEVELS need shifting for display.
     """
-    assert ns.to_nq(560.0, 41.0, 120.0) == pytest.approx(ns.to_index(560.0, 41.0) + 120.0)
+    assert ns.to_future(560.0, 41.0, 120.0) == pytest.approx(ns.to_index(560.0, 41.0) + 120.0)
 
 
 def test_shift_verdict_levels_moves_only_the_price_fields():
@@ -183,18 +184,18 @@ def test_every_phase_has_a_note():
 #############################################
 
 def test_stop_from_a_150_point_session_range():
-    assert ns.stop_points(150.0) == pytest.approx(30.0)
+    assert ns.stop_points(150.0, ni.NQ) == pytest.approx(30.0)
 
 
 def test_stop_clamps_at_the_floor_and_ceiling():
-    assert ns.stop_points(10.0) == ns.MIN_STOP_POINTS     # 2.0 raw -> floor
-    assert ns.stop_points(300.0) == ns.MAX_STOP_POINTS    # 60.0 raw -> ceiling
+    assert ns.stop_points(10.0, ni.NQ) == ni.NQ.min_stop     # 2.0 raw -> floor
+    assert ns.stop_points(300.0, ni.NQ) == ni.NQ.max_stop    # 60.0 raw -> ceiling
 
 
 @pytest.mark.parametrize("atr", [None, 0.0, -5.0])
 def test_stop_falls_back_to_the_floor_on_a_missing_range(atr):
     # Early session / no snapshots yet: never return 0 or a negative stop.
-    assert ns.stop_points(atr) == ns.MIN_STOP_POINTS
+    assert ns.stop_points(atr, ni.NQ) == ni.NQ.min_stop
 
 
 #############################################
@@ -209,7 +210,7 @@ MID = {"call_wall": 23200.0, "put_wall": 22800.0, "pin": 23000.0}
 
 
 def test_positive_gamma_at_the_call_wall_shorts_with_the_stop_above_the_wall():
-    v = ns.build_verdict("positive", "pin", SPOT, AT_CALL, 150.0)
+    v = ns.build_verdict("positive", "pin", SPOT, AT_CALL, 150.0, ni.NQ)
     assert v["action"] == "SHORT"
     assert v["stop"] > AT_CALL["call_wall"]
     assert v["target"] == AT_CALL["pin"]
@@ -217,45 +218,45 @@ def test_positive_gamma_at_the_call_wall_shorts_with_the_stop_above_the_wall():
 
 
 def test_positive_gamma_at_the_put_wall_longs_with_the_stop_below_the_wall():
-    v = ns.build_verdict("positive", "pin", SPOT, AT_PUT, 150.0)
+    v = ns.build_verdict("positive", "pin", SPOT, AT_PUT, 150.0, ni.NQ)
     assert v["action"] == "LONG"
     assert v["stop"] < AT_PUT["put_wall"]
     assert v["target"] == AT_PUT["pin"]
 
 
 def test_positive_gamma_mid_range_waits():
-    v = ns.build_verdict("positive", "pin", SPOT, MID, 150.0)
+    v = ns.build_verdict("positive", "pin", SPOT, MID, 150.0, ni.NQ)
     assert v["action"] == "WAIT"
     assert v["entry"] is None
 
 
 def test_negative_gamma_inside_the_walls_waits():
-    v = ns.build_verdict("negative", "pin", SPOT, MID, 150.0)
+    v = ns.build_verdict("negative", "pin", SPOT, MID, 150.0, ni.NQ)
     assert v["action"] == "WAIT"
 
 
 def test_negative_gamma_broken_above_goes_long_with_no_fixed_target():
     lv = {"call_wall": 22900.0, "put_wall": 22700.0, "pin": 22800.0}
-    v = ns.build_verdict("negative", "pin", SPOT, lv, 150.0)
+    v = ns.build_verdict("negative", "pin", SPOT, lv, 150.0, ni.NQ)
     assert v["action"] == "LONG"
     assert v["target"] is None      # continuation: trail, do not cap
 
 
 def test_negative_gamma_broken_below_goes_short_with_no_fixed_target():
     lv = {"call_wall": 23300.0, "put_wall": 23100.0, "pin": 23200.0}
-    v = ns.build_verdict("negative", "pin", SPOT, lv, 150.0)
+    v = ns.build_verdict("negative", "pin", SPOT, lv, 150.0, ni.NQ)
     assert v["action"] == "SHORT"
     assert v["target"] is None
 
 
 def test_flip_zone_always_stands_down():
-    v = ns.build_verdict("flip_zone", "pin", SPOT, AT_CALL, 150.0)
+    v = ns.build_verdict("flip_zone", "pin", SPOT, AT_CALL, 150.0, ni.NQ)
     assert v["action"] == "STAND DOWN"
     assert v["entry"] is None
 
 
 def test_unknown_regime_stands_down():
-    v = ns.build_verdict("unknown", "pin", SPOT, AT_CALL, 150.0)
+    v = ns.build_verdict("unknown", "pin", SPOT, AT_CALL, 150.0, ni.NQ)
     assert v["action"] == "STAND DOWN"
 
 
@@ -266,7 +267,7 @@ def test_outside_the_window_the_phase_note_wins_over_unknown_regime(phase):
     note rather than a generic "no gamma map" — there IS a map, it is just
     yesterday's. Both mean don't trade; one explains why.
     """
-    v = ns.build_verdict("unknown", phase, SPOT, AT_CALL, 150.0)
+    v = ns.build_verdict("unknown", phase, SPOT, AT_CALL, 150.0, ni.NQ)
     assert v["action"] == "WAIT"
     assert v["reason"] == ns.PHASE_NOTE[phase]
 
@@ -274,7 +275,7 @@ def test_outside_the_window_the_phase_note_wins_over_unknown_regime(phase):
 @pytest.mark.parametrize("phase", ["premarket", "opening", "flatten", "closed"])
 def test_outside_the_trading_window_always_waits(phase):
     # Even sitting exactly on a wall with a textbook setup.
-    v = ns.build_verdict("positive", phase, SPOT, AT_CALL, 150.0)
+    v = ns.build_verdict("positive", phase, SPOT, AT_CALL, 150.0, ni.NQ)
     assert v["action"] == "WAIT"
     assert v["entry"] is None
 
@@ -285,14 +286,14 @@ def test_outside_the_trading_window_always_waits(phase):
 ])
 @pytest.mark.parametrize("regime", ["positive", "negative"])
 def test_missing_walls_never_raise(regime, levels):
-    v = ns.build_verdict(regime, "pin", SPOT, levels, 150.0)
+    v = ns.build_verdict(regime, "pin", SPOT, levels, 150.0, ni.NQ)
     assert v["action"] in ("LONG", "SHORT", "WAIT", "STAND DOWN")
 
 
 def test_verdict_carries_no_colour():
     # Presentation belongs to the HUD; a colour here would drag tkinter into
     # the pure module's contract.
-    assert "color" not in ns.build_verdict("positive", "pin", SPOT, AT_CALL, 150.0)
+    assert "color" not in ns.build_verdict("positive", "pin", SPOT, AT_CALL, 150.0, ni.NQ)
 
 
 #############################################
@@ -307,9 +308,9 @@ def test_risk_distance_stays_within_the_proximity_band_plus_the_stop(offset):
     """
     wall = SPOT + offset          # spot sits `-offset` from the wall, inside the band
     lv = {"call_wall": wall, "put_wall": 22000.0, "pin": 22900.0}
-    v = ns.build_verdict("positive", "pin", SPOT, lv, 150.0)
+    v = ns.build_verdict("positive", "pin", SPOT, lv, 150.0, ni.NQ)
     assert v["action"] == "SHORT", "fixture must stay inside the proximity band"
-    sp = ns.stop_points(150.0)
+    sp = ns.stop_points(150.0, ni.NQ)
     band = SPOT * ns.WALL_PROXIMITY_PCT
     assert abs(v["entry"] - v["stop"]) <= band + sp
 
@@ -387,13 +388,13 @@ def test_short_is_not_taken_when_the_pin_sits_above_the_entry():
     ABOVE its entry is not a trade.
     """
     lv = {"call_wall": 23020.0, "put_wall": 22000.0, "pin": 23150.0}
-    v = ns.build_verdict("positive", "pin", SPOT, lv, 150.0)
+    v = ns.build_verdict("positive", "pin", SPOT, lv, 150.0, ni.NQ)
     assert not (v["action"] == "SHORT" and v["target"] > v["entry"])
 
 
 def test_long_is_not_taken_when_the_pin_sits_below_the_entry():
     lv = {"call_wall": 24000.0, "put_wall": 22980.0, "pin": 22850.0}
-    v = ns.build_verdict("positive", "pin", SPOT, lv, 150.0)
+    v = ns.build_verdict("positive", "pin", SPOT, lv, 150.0, ni.NQ)
     assert not (v["action"] == "LONG" and v["target"] < v["entry"])
 
 
@@ -403,14 +404,14 @@ def test_short_stop_is_above_the_entry_even_when_spot_overshoots_the_wall():
     the entry — a short that is already stopped out the moment it is taken.
     """
     lv = {"call_wall": 22980.0, "put_wall": 22000.0, "pin": 22900.0}
-    v = ns.build_verdict("positive", "pin", SPOT, lv, 10.0)   # -> MIN stop
+    v = ns.build_verdict("positive", "pin", SPOT, lv, 10.0, ni.NQ)   # -> MIN stop
     if v["action"] == "SHORT":
         assert v["stop"] > v["entry"]
 
 
 def test_long_stop_is_below_the_entry_even_when_spot_undershoots_the_wall():
     lv = {"call_wall": 24000.0, "put_wall": 23020.0, "pin": 23100.0}
-    v = ns.build_verdict("positive", "pin", SPOT, lv, 10.0)
+    v = ns.build_verdict("positive", "pin", SPOT, lv, 10.0, ni.NQ)
     if v["action"] == "LONG":
         assert v["stop"] < v["entry"]
 
@@ -429,7 +430,7 @@ def test_any_signal_brackets_its_entry_correctly(regime, wall_offset, pin_offset
     for side in ("call", "put"):
         lv = {"call_wall": 24000.0, "put_wall": 22000.0, "pin": SPOT + pin_offset}
         lv[f"{side}_wall"] = SPOT + wall_offset
-        v = ns.build_verdict(regime, "pin", SPOT, lv, atr)
+        v = ns.build_verdict(regime, "pin", SPOT, lv, atr, ni.NQ)
         if v["action"] == "SHORT":
             assert v["stop"] > v["entry"]
             if v["target"] is not None:
@@ -469,8 +470,8 @@ def test_deciding_in_cash_terms_matches_deciding_in_futures_terms(basis, offset)
     assert cash_regime == fut_regime
     assert cash_dist == pytest.approx(fut_dist)
 
-    cash_v = ns.build_verdict(cash_regime, "pin", cash_spot, cash_levels, 150.0)
-    fut_v = ns.build_verdict(fut_regime, "pin", fut_spot, fut_levels, 150.0)
+    cash_v = ns.build_verdict(cash_regime, "pin", cash_spot, cash_levels, 150.0, ni.NQ)
+    fut_v = ns.build_verdict(fut_regime, "pin", fut_spot, fut_levels, 150.0, ni.NQ)
 
     assert cash_v["action"] == fut_v["action"]
     # Shifting the cash verdict for display must reproduce the futures verdict.
@@ -500,8 +501,94 @@ def test_negative_gamma_never_fades_anywhere_across_the_wall_range(spot):
     """
     call_wall, put_wall = 23100.0, 22900.0
     lv = {"call_wall": call_wall, "put_wall": put_wall, "pin": 23000.0}
-    v = ns.build_verdict("negative", "pin", spot, lv, 150.0)
+    v = ns.build_verdict("negative", "pin", spot, lv, 150.0, ni.NQ)
     if spot > call_wall:
         assert v["action"] != "SHORT", "shorting a break ABOVE the call wall is a fade"
     if spot < put_wall:
         assert v["action"] != "LONG", "longing a break BELOW the put wall is a fade"
+
+
+#############################################
+# INSTRUMENT-AGNOSTICISM (ES alongside NQ)
+#############################################
+
+def test_cash_scale_recognises_spx_as_a_cash_index():
+    """The "$" prefix rule has to hold for every cash index, not just $NDX."""
+    assert ns.cash_scale("$SPX", None, None) == 1.0
+    assert ns.cash_scale("$SPX", 6900.0, 690.0) == 1.0
+
+
+def test_spy_strike_scales_up_to_spx():
+    assert ns.cash_scale("SPY", 6900.0, 690.0) == pytest.approx(10.0)
+    scale = ns.cash_scale("SPY", 6900.0, 690.0)
+    assert ns.to_future(690.0, scale, 25.0) == pytest.approx(6925.0)
+
+
+def test_the_same_atr_sizes_differently_per_instrument():
+    """The whole point of putting the clamps on the spec. A shared band would
+    give ES a floor stop worth ~4x the intended risk."""
+    assert ns.stop_points(10.0, ni.ES) == ni.ES.min_stop
+    assert ns.stop_points(10.0, ni.NQ) == ni.NQ.min_stop
+    assert ns.stop_points(10.0, ni.ES) != ns.stop_points(10.0, ni.NQ)
+
+
+def test_es_stop_clamps_to_the_es_ceiling_not_nqs():
+    """A big ES session range must not be allowed to run to NQ's 45-point cap —
+    that is $2,250 of risk on a $50/pt contract."""
+    huge = 10_000.0
+    assert ns.stop_points(huge, ni.ES) == ni.ES.max_stop
+    assert ns.stop_points(huge, ni.ES) < ni.NQ.max_stop
+
+
+def test_stop_points_requires_a_spec():
+    """Defaulting would silently apply NQ sizing to ES. Fail loudly instead."""
+    with pytest.raises(TypeError):
+        ns.stop_points(150.0)
+
+
+def test_build_verdict_requires_a_spec():
+    with pytest.raises(TypeError):
+        ns.build_verdict("positive", "pin", 6900.0, {"call_wall": 6900.0}, 50.0)
+
+
+def test_es_verdict_uses_the_es_stop_band():
+    """End to end: an ES setup at the call wall must produce an ES-sized stop."""
+    spot = 6900.0
+    lv = {"call_wall": spot, "put_wall": 6800.0, "pin": 6850.0}
+    v = ns.build_verdict("positive", "pin", spot, lv, 10.0, ni.ES)
+    assert v["action"] == "SHORT"
+    assert abs(v["stop"] - v["entry"]) == pytest.approx(ni.ES.min_stop)
+
+
+# The SAME structural setup, expressed at NQ scale and at ES scale. Every
+# threshold in the module is a PERCENTAGE of spot, so the verdict must not
+# depend on the absolute price level.
+_SCALE = 4.0   # roughly NDX / SPX
+
+
+@pytest.mark.parametrize("offset_pct,expected", [
+    (0.0, "flip_zone"),      # exactly on the flip
+    (0.001, "flip_zone"),    # inside the +/-0.30% band
+    (-0.002, "flip_zone"),
+    (0.01, "positive"),      # clear of the band, above
+    (-0.01, "negative"),     # clear of the band, below
+])
+def test_regime_is_scale_free(offset_pct, expected):
+    nq_spot = 28000.0
+    es_spot = nq_spot / _SCALE
+    nq_regime, _ = ns.classify_regime(nq_spot, nq_spot / (1 + offset_pct))
+    es_regime, _ = ns.classify_regime(es_spot, es_spot / (1 + offset_pct))
+    assert nq_regime == expected
+    assert es_regime == nq_regime, "regime must not depend on the price level"
+
+
+def test_wall_proximity_is_scale_free():
+    """`near` is also percentage-based, so "at the wall" must mean the same
+    thing on a 6,900 index as on a 28,000 one."""
+    nq_spot = 28000.0
+    es_spot = nq_spot / _SCALE
+    inside = 0.001    # within the 0.15% band
+    outside = 0.005   # clearly outside it
+    for pct, want in ((inside, True), (outside, False)):
+        assert ns.near(nq_spot, nq_spot * (1 + pct), nq_spot) is want
+        assert ns.near(es_spot, es_spot * (1 + pct), es_spot) is want

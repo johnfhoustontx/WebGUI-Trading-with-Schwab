@@ -1,9 +1,18 @@
 """
-nq_signal.py - NQ Dealer-Positioning HUD, pure signal logic
-Version: 1.0.0
-Last Updated: 2026-07-29
+nq_signal.py - Dealer-Positioning HUD, pure signal logic
+Version: 1.1.0
+Last Updated: 2026-07-30
 
-The PURE half of the NQ HUD: level conversion, regime classification, session
+Version 1.1.0 Changes:
+- Instrument-agnostic: NQ and ES both flow through this module. Everything that
+  differs between them arrives as an ``Instrument`` spec (tools/nq_instruments.py)
+  rather than being a module constant.
+- ndx_scale -> cash_scale, to_nq -> to_future. The old names named ONE
+  instrument's cash index and future, which reads as a lie when the same call
+  converts an SPX strike into ES points — and frame confusion is the failure
+  mode this code has already had to be fixed for twice.
+
+The PURE half of the HUD: level conversion, regime classification, session
 gating, stop sizing, and the trade verdict. No I/O, no Redis, no SQLite, no
 tkinter — every function takes scalars/dicts and returns scalars/dicts, so the
 whole decision surface is unit-testable without the stack running.
@@ -56,10 +65,11 @@ PIN_WINDOW_END = _time(14, 0)
 FLATTEN_BY = _time(14, 55)
 RTH_CLOSE = _time(15, 0)
 
-# Risk sizing. Stops are ATR-scaled, never fixed — NQ needs more room than ES.
+# Risk sizing. Stops are ATR-scaled, never fixed. The MULTIPLIER is shared —
+# it converts a session range into a per-trade unit, which is a proportion and
+# so instrument-independent. The CLAMPS are not: they are denominated in points,
+# and NDX trades near 4x SPX, so they live on the Instrument spec.
 STOP_ATR_MULT = 1.2
-MIN_STOP_POINTS = 15.0
-MAX_STOP_POINTS = 45.0
 
 # Market holidays — kept in sync with services/*/scheduler.py _HOLIDAYS.
 HOLIDAYS = {
@@ -124,37 +134,43 @@ def tradeable(phase) -> bool:
 # CONVERSION
 #############################################
 
-def ndx_scale(source_symbol, ndx_spot, source_spot):
-    """Multiplier converting a SOURCE-symbol price into an NDX-equivalent price.
+def cash_scale(source_symbol, cash_spot, source_spot):
+    """Multiplier converting a SOURCE-symbol price into a CASH-index price.
 
-    $NDX -> 1.0. QQQ -> the live NDX/QQQ ratio (~41), recomputed every poll
-    because it drifts. Returns None when it cannot be established.
+    The cash index itself -> 1.0. An ETF proxy -> the live index/ETF ratio
+    (~41 for NDX/QQQ, ~10 for SPX/SPY), recomputed every poll because it drifts.
+    Returns None when it cannot be established.
+
+    The cash-index test is the "$" prefix rather than a literal "$NDX": that
+    prefix IS Schwab's symbology for a cash index ($SPX, $NDX, $VIX), while the
+    ETF fallbacks (QQQ, SPY) are plain tickers. So one rule serves every
+    instrument instead of needing a hardcoded symbol per pane.
     """
-    if source_symbol == "$NDX":
+    if source_symbol and source_symbol.startswith("$"):
         return 1.0
-    if not ndx_spot or not source_spot or source_spot <= 0:
+    if not cash_spot or not source_spot or source_spot <= 0:
         return None
-    return ndx_spot / source_spot
+    return cash_spot / source_spot
 
 
 def to_index(level, scale):
     """Convert a source-symbol strike into INDEX (cash-equivalent) points.
 
     This is the frame DECISIONS are made in — see the module docstring and
-    design §5. `$NDX` needs no conversion (scale 1.0); a QQQ strike is
-    multiplied up to its NDX equivalent.
+    design §5. A cash-index strike needs no conversion (scale 1.0); an ETF
+    strike is multiplied up to its index equivalent.
     """
     if level is None or scale is None:
         return None
     return level * scale
 
 
-def to_nq(level, scale, basis):
-    """Convert a source-symbol strike into NQ futures points, for DISPLAY.
+def to_future(level, scale, basis):
+    """Convert a source-symbol strike into FUTURES points, for DISPLAY.
 
-    level -> index-equivalent (x scale) -> NQ (+ basis). Basis is the live
-    NQ - NDX carry spread and jumps at the quarterly roll, so it is measured,
-    never assumed.
+    level -> index-equivalent (x scale) -> future (+ basis). Basis is the live
+    future - cash carry spread and jumps at the quarterly roll, so it is
+    measured, never assumed.
 
     The two frames differ by the additive basis and nothing else, so distances
     (ATR, stop size, wall proximity) are identical in both and only LEVELS need
@@ -167,7 +183,7 @@ def to_nq(level, scale, basis):
 
 
 def shift_verdict_levels(verdict, basis):
-    """Return a copy of ``verdict`` with its price fields moved into NQ points.
+    """Return a copy of ``verdict`` with its price fields moved into futures points.
 
     The verdict is computed in cash terms; entry/stop/target are the three
     fields a trader types into NinjaTrader, so they — and only they — get the
@@ -186,8 +202,8 @@ def shift_verdict_levels(verdict, basis):
 # REGIME
 #############################################
 
-def classify_regime(nq_spot, nq_flip):
-    """Dealer-gamma regime from NQ spot vs the NQ-converted flip.
+def classify_regime(spot, flip):
+    """Dealer-gamma regime from spot vs the flip, BOTH in the same frame.
 
     Returns (regime, distance_points). Regime is 'positive', 'negative',
     'flip_zone', or 'unknown'.
@@ -198,13 +214,13 @@ def classify_regime(nq_spot, nq_flip):
     bare ``spot >= flip``), so it cannot express this — but it does own the
     above/below call, which is delegated so the two never drift.
     """
-    if nq_spot is None or nq_flip is None:
+    if spot is None or flip is None:
         return "unknown", None
-    dist = nq_spot - nq_flip
-    band = nq_spot * FLIP_ZONE_PCT
+    dist = spot - flip
+    band = spot * FLIP_ZONE_PCT
     if abs(dist) <= band:
         return "flip_zone", dist
-    reg = mx.gex_regime(nq_spot, nq_flip)
+    reg = mx.gex_regime(spot, flip)
     if reg == "na":                      # defensive: unreachable given the guard
         return "unknown", dist
     return ("positive" if reg == "above" else "negative"), dist
@@ -278,18 +294,23 @@ def near(price, level, spot):
 # RISK
 #############################################
 
-def stop_points(atr_proxy_nq):
-    """ATR-scaled stop distance in NQ points, clamped to a sane band.
+def stop_points(atr_proxy, spec):
+    """ATR-scaled stop distance in ``spec``'s points, clamped to its band.
 
-    KNOWN ASYMMETRY (design §6): ``atr_proxy_nq`` is the session range SO FAR, so
-    early in the session it is near zero and this clamps to MIN_STOP_POINTS —
+    The clamps come from the Instrument spec and are REQUIRED, not defaulted:
+    they are denominated in points, and NDX trades near 4x SPX, so silently
+    falling back to NQ's band would size an ES stop at roughly four times the
+    intended risk. A missing argument should be a TypeError, not a bad fill.
+
+    KNOWN ASYMMETRY (design §6): ``atr_proxy`` is the session range SO FAR, so
+    early in the session it is near zero and this clamps to ``spec.min_stop`` —
     tightest exactly when the tape is most volatile. Seeding from the prior
     session is a deferred follow-up; it changes sizing, so it wants logged data.
     """
-    if not atr_proxy_nq or atr_proxy_nq <= 0:
-        return MIN_STOP_POINTS
-    raw = atr_proxy_nq * STOP_ATR_MULT / 6.0   # session range -> per-trade unit
-    return max(MIN_STOP_POINTS, min(MAX_STOP_POINTS, raw))
+    if not atr_proxy or atr_proxy <= 0:
+        return spec.min_stop
+    raw = atr_proxy * STOP_ATR_MULT / 6.0   # session range -> per-trade unit
+    return max(spec.min_stop, min(spec.max_stop, raw))
 
 
 #############################################
@@ -312,8 +333,12 @@ def _stop_below(entry, wall, sp):
     """Stop for a LONG: beyond the wall, but never at or above the entry."""
     return min(wall - sp, entry - sp)
 
-def build_verdict(regime, phase, nq_spot, levels, atr_nq):
-    """Produce the trade verdict.
+def build_verdict(regime, phase, spot, levels, atr_proxy, spec):
+    """Produce the trade verdict for one instrument.
+
+    ``spot``, ``levels`` and ``atr_proxy`` must all be in the SAME frame — the
+    HUD passes cash. ``spec`` supplies the stop band; see stop_points on why it
+    is required rather than defaulted.
 
     Returns {"action", "reason", "entry", "stop", "target"}. Action is
     LONG / SHORT / STAND DOWN / WAIT.
@@ -351,11 +376,11 @@ def build_verdict(regime, phase, nq_spot, levels, atr_nq):
     call_wall = levels.get("call_wall")
     put_wall = levels.get("put_wall")
     pin = levels.get("pin")
-    sp = stop_points(atr_nq)
+    sp = stop_points(atr_proxy, spec)
 
     if regime == "positive":
-        if near(nq_spot, call_wall, nq_spot):
-            if pin is None or pin >= nq_spot:
+        if near(spot, call_wall, spot):
+            if pin is None or pin >= spot:
                 # No mean-reversion target on the profitable side. The pin is
                 # the max-|net| strike ANYWHERE in the grid — nothing pins it
                 # between spot and the trade's direction — so this is simply
@@ -365,20 +390,20 @@ def build_verdict(regime, phase, nq_spot, levels, atr_nq):
                 out["reason"] = ("Positive gamma at the call wall, but the pin "
                                  "is not below spot — no fade target. Waiting.")
                 return out
-            out.update(action="SHORT", entry=nq_spot,
-                       stop=_stop_above(nq_spot, call_wall, sp), target=pin,
+            out.update(action="SHORT", entry=spot,
+                       stop=_stop_above(spot, call_wall, sp), target=pin,
                        reason=("Positive gamma at the call wall. Dealers sell "
                                "rallies — fade toward the pin. Wait for two "
                                "5-min closes failing above the wall."))
             return out
-        if near(nq_spot, put_wall, nq_spot):
-            if pin is None or pin <= nq_spot:
+        if near(spot, put_wall, spot):
+            if pin is None or pin <= spot:
                 out["action"] = "WAIT"
                 out["reason"] = ("Positive gamma at the put wall, but the pin "
                                  "is not above spot — no fade target. Waiting.")
                 return out
-            out.update(action="LONG", entry=nq_spot,
-                       stop=_stop_below(nq_spot, put_wall, sp), target=pin,
+            out.update(action="LONG", entry=spot,
+                       stop=_stop_below(spot, put_wall, sp), target=pin,
                        reason=("Positive gamma at the put wall. Dealers buy "
                                "dips — fade toward the pin. Wait for two "
                                "5-min closes holding above the wall."))
@@ -389,15 +414,15 @@ def build_verdict(regime, phase, nq_spot, levels, atr_nq):
         return out
 
     # Negative gamma — continuation only.
-    if call_wall is not None and nq_spot > call_wall:
-        out.update(action="LONG", entry=nq_spot,
+    if call_wall is not None and spot > call_wall:
+        out.update(action="LONG", entry=spot,
                    stop=call_wall - sp, target=None,
                    reason=("Negative gamma, broken ABOVE the call wall. Dealer "
                            "hedging amplifies — trade continuation, enter on "
                            "the retest that holds. Trail; do not fade."))
         return out
-    if put_wall is not None and nq_spot < put_wall:
-        out.update(action="SHORT", entry=nq_spot,
+    if put_wall is not None and spot < put_wall:
+        out.update(action="SHORT", entry=spot,
                    stop=put_wall + sp, target=None,
                    reason=("Negative gamma, broken BELOW the put wall. Dealer "
                            "hedging amplifies — trade continuation, enter on "

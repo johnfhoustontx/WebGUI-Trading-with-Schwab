@@ -19,10 +19,21 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 def test_nq_hud_imports_cleanly():
     import tools.nq_hud as hud
 
-    assert hud.WIN_WIDTH == 430
     assert callable(hud.read_gamma)
+    assert callable(hud.read_gamma_all)
     assert callable(hud.read_tape)
+    assert callable(hud.build_pane)
     assert hud.ACTION_COLOR["LONG"] != hud.ACTION_COLOR["SHORT"]
+
+
+def test_window_is_wide_enough_for_one_column_per_instrument():
+    """The panes are packed side by side at a fixed PANE_WIDTH; a window sized
+    for one would clip the second instrument entirely off the right edge — the
+    same class of defect as the RISK panel that was cut off at "Entry"."""
+    import tools.nq_hud as hud
+    from tools.nq_instruments import INSTRUMENTS
+
+    assert hud.WIN_WIDTH >= hud.PANE_WIDTH * len(INSTRUMENTS)
 
 
 def test_nq_hud_pulls_in_no_heavy_dependencies_at_module_scope():
