@@ -206,6 +206,22 @@ def stop_points(atr_proxy_nq):
 # VERDICT
 #############################################
 
+def _stop_above(entry, wall, sp):
+    """Stop for a SHORT: beyond the wall, but never at or below the entry.
+
+    Spot can sit ABOVE the call wall and still be "at" it — the proximity band
+    is ~35 NQ points at 23,000, which exceeds MIN_STOP_POINTS. The wall-derived
+    stop would then land below the entry, i.e. a short already stopped out the
+    moment it is taken. Floor it at ``sp`` beyond the entry so the ATR-derived
+    distance is always honoured.
+    """
+    return max(wall + sp, entry + sp)
+
+
+def _stop_below(entry, wall, sp):
+    """Stop for a LONG: beyond the wall, but never at or above the entry."""
+    return min(wall - sp, entry - sp)
+
 def build_verdict(regime, phase, nq_spot, levels, atr_nq):
     """Produce the trade verdict.
 
@@ -245,15 +261,30 @@ def build_verdict(regime, phase, nq_spot, levels, atr_nq):
 
     if regime == "positive":
         if near(nq_spot, call_wall, nq_spot):
+            if pin is None or pin >= nq_spot:
+                # No mean-reversion target on the profitable side. The pin is
+                # the max-|net| strike ANYWHERE in the grid — nothing pins it
+                # between spot and the trade's direction — so this is simply
+                # not a setup. Substituting a different level would silently
+                # change what the signal means.
+                out["action"] = "WAIT"
+                out["reason"] = ("Positive gamma at the call wall, but the pin "
+                                 "is not below spot — no fade target. Waiting.")
+                return out
             out.update(action="SHORT", entry=nq_spot,
-                       stop=call_wall + sp, target=pin,
+                       stop=_stop_above(nq_spot, call_wall, sp), target=pin,
                        reason=("Positive gamma at the call wall. Dealers sell "
                                "rallies — fade toward the pin. Wait for two "
                                "5-min closes failing above the wall."))
             return out
         if near(nq_spot, put_wall, nq_spot):
+            if pin is None or pin <= nq_spot:
+                out["action"] = "WAIT"
+                out["reason"] = ("Positive gamma at the put wall, but the pin "
+                                 "is not above spot — no fade target. Waiting.")
+                return out
             out.update(action="LONG", entry=nq_spot,
-                       stop=put_wall - sp, target=pin,
+                       stop=_stop_below(nq_spot, put_wall, sp), target=pin,
                        reason=("Positive gamma at the put wall. Dealers buy "
                                "dips — fade toward the pin. Wait for two "
                                "5-min closes holding above the wall."))

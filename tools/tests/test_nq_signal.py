@@ -264,6 +264,71 @@ def test_risk_distance_stays_within_the_proximity_band_plus_the_stop(offset):
 
 
 #############################################
+# LEVEL SIDEDNESS — stop and target must bracket the entry correctly
+#############################################
+
+def test_short_is_not_taken_when_the_pin_sits_above_the_entry():
+    """A fade needs a mean-reversion target on the profitable side.
+
+    The pin is the max-|net| strike anywhere in the grid — nothing constrains it
+    to lie between spot and the direction of the trade. A SHORT whose target is
+    ABOVE its entry is not a trade.
+    """
+    lv = {"call_wall": 23020.0, "put_wall": 22000.0, "pin": 23150.0}
+    v = ns.build_verdict("positive", "pin", SPOT, lv, 150.0)
+    assert not (v["action"] == "SHORT" and v["target"] > v["entry"])
+
+
+def test_long_is_not_taken_when_the_pin_sits_below_the_entry():
+    lv = {"call_wall": 24000.0, "put_wall": 22980.0, "pin": 22850.0}
+    v = ns.build_verdict("positive", "pin", SPOT, lv, 150.0)
+    assert not (v["action"] == "LONG" and v["target"] < v["entry"])
+
+
+def test_short_stop_is_above_the_entry_even_when_spot_overshoots_the_wall():
+    """Spot can sit ABOVE the call wall and still be "at" it (the band is ~35
+    points at 23,000). With a small ATR the wall-derived stop then lands BELOW
+    the entry — a short that is already stopped out the moment it is taken.
+    """
+    lv = {"call_wall": 22980.0, "put_wall": 22000.0, "pin": 22900.0}
+    v = ns.build_verdict("positive", "pin", SPOT, lv, 10.0)   # -> MIN stop
+    if v["action"] == "SHORT":
+        assert v["stop"] > v["entry"]
+
+
+def test_long_stop_is_below_the_entry_even_when_spot_undershoots_the_wall():
+    lv = {"call_wall": 24000.0, "put_wall": 23020.0, "pin": 23100.0}
+    v = ns.build_verdict("positive", "pin", SPOT, lv, 10.0)
+    if v["action"] == "LONG":
+        assert v["stop"] < v["entry"]
+
+
+@pytest.mark.parametrize("regime", ["positive", "negative"])
+@pytest.mark.parametrize("wall_offset", [-300.0, -34.0, -5.0, 0.0, 5.0, 34.0, 300.0])
+@pytest.mark.parametrize("pin_offset", [-300.0, -100.0, -1.0, 1.0, 100.0, 300.0])
+@pytest.mark.parametrize("atr", [10.0, 150.0, 400.0])
+def test_any_signal_brackets_its_entry_correctly(regime, wall_offset, pin_offset, atr):
+    """Sweep the whole space: whatever comes out, a SHORT's stop is above and
+    its target below the entry, and a LONG's are the other way round.
+
+    Both regimes, and wall offsets that reach beyond the proximity band so the
+    negative-gamma break branches are exercised too.
+    """
+    for side in ("call", "put"):
+        lv = {"call_wall": 24000.0, "put_wall": 22000.0, "pin": SPOT + pin_offset}
+        lv[f"{side}_wall"] = SPOT + wall_offset
+        v = ns.build_verdict(regime, "pin", SPOT, lv, atr)
+        if v["action"] == "SHORT":
+            assert v["stop"] > v["entry"]
+            if v["target"] is not None:
+                assert v["target"] < v["entry"]
+        elif v["action"] == "LONG":
+            assert v["stop"] < v["entry"]
+            if v["target"] is not None:
+                assert v["target"] > v["entry"]
+
+
+#############################################
 # THE INVARIANT — never fade a short-gamma tape
 #############################################
 
