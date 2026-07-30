@@ -26,7 +26,15 @@ import gex_history_db as db
 import iv_analysis
 
 TZ = ZoneInfo("America/Chicago")
-SYMBOLS = ["$SPX", "$VIX", "SPY", "QQQ"]
+# $NDX is in the BASE, not left to the watchlist. It was already being collected
+# — but only because it happens to sit in `Top 20.xlsx`, which is GITIGNORED. Drop
+# that row (or clone fresh) and the universe falls back to four symbols, at which
+# point tools/nq_hud.py silently degrades to its QQQ proxy, whose structural
+# call-overwriting flow can invert the apparent gamma sign. Costs nothing here:
+# collection_symbols() dedupes, so on a machine with the watchlist the universe is
+# byte-identical (verified: 82 symbols before and after) and no extra chain is
+# fetched.
+SYMBOLS = ["$SPX", "$VIX", "SPY", "QQQ", "$NDX"]
 POLL_INTERVAL_MIN = 1
 START_HOUR, START_MIN = 8, 0
 STOP_HOUR, STOP_MIN = 15, 20

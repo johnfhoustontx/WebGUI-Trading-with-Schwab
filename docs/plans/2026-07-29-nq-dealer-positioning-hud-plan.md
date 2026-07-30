@@ -252,29 +252,46 @@ Add `customtkinter` to `requirements.txt` (confirmed absent) and to
 SYMBOLS = ["$SPX", "$VIX", "SPY", "QQQ", "$NDX"]
 ```
 
+> **Amendment (2026-07-29, measured during execution). The premise was wrong, but
+> the task still stands — for the opposite reason.**
+>
+> `$NDX` was *already being collected*, and the HUD *already selected it*: 440
+> `$NDX` gex rows for 2026-07-29 in the live DB, `read_gamma()` returning
+> `symbol='$NDX'`. So the poll-cost question below is moot — `$NDX` was in every
+> poll already, and adding it to `SYMBOLS` fetches nothing new. Verified:
+> `collection_symbols()` is byte-identical before and after (82 symbols).
+>
+> It was collected only because it happens to sit in `Top 20.xlsx`, which is
+> **gitignored**. Simulate that file's absence and the universe collapses to the
+> four base symbols with no `$NDX` — the HUD then silently falls back to the QQQ
+> proxy, whose call-overwriting flow can invert the gamma sign. **That silent
+> degradation is the reason to make the edit**, not the throughput the plan
+> worried about. Zero cost, removes a failure mode, and puts the correct
+> underlying for an NQ tool in the guaranteed base where it belongs.
+>
+> Consequence: **no `options_svc` restart is required for the HUD to see `$NDX`** —
+> it already does. Restart only so the base list takes effect for a future run
+> without the watchlist.
+
 This is the only task that touches a running service, and it is late on purpose:
 by here the HUD is tested and correct, so a source-symbol switch changes one input
 rather than compounding with unknown logic.
 
-**Measure the poll cost before committing, out of band.** The original plan deferred
-this to "check the logs after a session" — a full trading day of latency for
-something you can measure in a minute. Time a single `$NDX` chain fetch directly
-against the proxy and compare it to the existing four index fetches. `poll_once`
-fetches concurrently (`POLL_FETCH_WORKERS = 6`, confirmed) and the proxy spaces
-upstream calls ~0.2 s, so a fifth index chain should fit inside the 1-minute slot —
-but `$NDX` is a wide chain and Schwab has 502'd on wide index windows before
+~~**Measure the poll cost before committing, out of band.**~~ Moot — see the
+amendment. Retained for the record: `poll_once` fetches concurrently
+(`POLL_FETCH_WORKERS = 6`, confirmed) and the proxy spaces upstream calls ~0.2 s,
+and `$NDX` is a wide chain on which Schwab has 502'd before
 (`protocol.http.TooBigBody` — see the `TERM_DTE_HORIZON_DAYS` comment in
-`gex_collector.py`). Verify, don't assume.
+`gex_collector.py`). None of that bites, because the fetch was already happening.
 
-The real risk here is the poll budget, not the edit — a one-line list append needs
-no worktree ceremony. If the measurement is marginal, stop and reconsider rather
-than committing and watching.
-
-Restart `options_svc`. History accrues from the next session; the HUD switches
-source automatically and its header stops showing the amber QQQ warning.
-
-**Verify:** `latest_spot_flip(conn, "$NDX", "gex", today)` returns a row, and a
-subsequent poll still completes inside its slot.
+**Verify:**
+1. `collection_symbols()` contains `$NDX` **with the watchlist absent** — the
+   actual point of the change.
+2. The universe is unchanged with the watchlist present (no duplicate, no new
+   fetch).
+3. `tests/test_gex_collector.py` shows no regression **against a measured
+   baseline** — that file is in the documented timing-dependent set, so compare
+   the failing SET, not a remembered count.
 
 ---
 

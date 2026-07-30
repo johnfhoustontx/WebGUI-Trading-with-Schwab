@@ -110,7 +110,7 @@ def test_poll_once_writes_all_symbols(tmp_path, monkeypatch):
     engine = _make_engine()
     gc.poll_once(client, engine, conn, symbols=gc.SYMBOLS)
     rows = conn.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0]
-    assert rows == 12
+    assert rows == len(gc.SYMBOLS) * 3   # 3 views per symbol
 
 
 def test_poll_once_continues_on_symbol_failure(tmp_path, monkeypatch, caplog):
@@ -143,7 +143,7 @@ def test_poll_once_continues_on_symbol_failure(tmp_path, monkeypatch, caplog):
         gc.poll_once(client, engine, conn, symbols=gc.SYMBOLS)
 
     rows = conn.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0]
-    assert rows == 9
+    assert rows == (len(gc.SYMBOLS) - 1) * 3   # the failing symbol writes nothing
     assert any("$SPX" in rec.message for rec in caplog.records)
 
 
@@ -219,7 +219,7 @@ def test_poll_once_fetches_chains_concurrently(tmp_path, monkeypatch):
     gc.poll_once(client, engine, conn, symbols=gc.SYMBOLS)
     assert state["max"] >= 2  # fetches genuinely overlapped
     rows = conn.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0]
-    assert rows == 12         # all symbols still written (4 symbols x 3+ views)
+    assert rows == len(gc.SYMBOLS) * 3   # all symbols still written
 
 
 def test_poll_once_on_chain_callback_gets_successful_chains(tmp_path, monkeypatch):
@@ -294,7 +294,7 @@ def test_poll_once_skips_empty_chain(tmp_path, monkeypatch, caplog):
         gc.poll_once(client, engine, conn, symbols=gc.SYMBOLS)
 
     rows = conn.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0]
-    assert rows == 9
+    assert rows == (len(gc.SYMBOLS) - 1) * 3   # the empty chain writes nothing
 
 
 def test_main_exits_past_stop_time(tmp_path, monkeypatch):
@@ -522,7 +522,7 @@ def test_poll_once_writes_dex_rows_with_0dte_fields(tmp_path, monkeypatch):
     dex_count = conn.execute(
         "SELECT COUNT(*) FROM snapshots WHERE view = 'dex'"
     ).fetchone()[0]
-    assert dex_count == 4  # one per symbol
+    assert dex_count == len(gc.SYMBOLS)  # one per symbol
 
     row = conn.execute(
         "SELECT net_delta_0dte, projected_net_delta_close, hedge_pressure "

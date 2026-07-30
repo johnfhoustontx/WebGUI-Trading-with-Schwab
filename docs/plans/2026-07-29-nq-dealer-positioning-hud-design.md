@@ -90,16 +90,37 @@ wall picker's `s > spot` comparison and the pin's `max()` both require.
 off-hours it walks back up to 5 calendar days to find the last collected session
 (enough to clear any weekend-plus-holiday closure).
 
-**`$NDX` is not currently collected.** `gex_collector.SYMBOLS` is
-`["$SPX", "$VIX", "SPY", "QQQ"]` plus the Top-20 watchlist. So today the HUD runs
-on QQQ.
+**Correction (2026-07-29, measured during execution).** An earlier revision of this
+section claimed `$NDX` "is not currently collected" and that "today the HUD runs on
+QQQ". Both were wrong. `$NDX` *was* being collected and the HUD *does* select it —
+verified against the live 1.33 GB history DB: 440 `$NDX` gex rows for 2026-07-29,
+`read_gamma()` returning `symbol='$NDX'` with spot 27192.31 / flip 27190.0 / walls
+27175–27510.
 
-That matters. QQQ carries heavy structural call-overwriting flow (buy-write funds,
-collar programs), which can **invert the apparent gamma sign** relative to the real
-NDX dealer position. The HUD therefore renders the active source symbol in the
-header and colours it **amber whenever it is QQQ**, so the read is never mistaken
-for the better one. Adding `"$NDX"` to `SYMBOLS` is a one-line change; the HUD
-picks it up with no code change.
+But it was being collected for a **fragile reason**: not from
+`gex_collector.SYMBOLS` (the guaranteed index base, which was
+`["$SPX", "$VIX", "SPY", "QQQ"]`) but incidentally, because `$NDX` happens to sit in
+`options-scanner/data/Top 20.xlsx` — a **gitignored** file. Measured: with the
+watchlist present the universe is 82 symbols including `$NDX`; simulate its absence
+(a fresh clone, or simply deleting that row) and the universe collapses to the four
+base symbols with **no `$NDX`**, at which point the HUD silently falls back to QQQ.
+
+That silent-degradation path is the real problem, so `$NDX` moved into the base:
+
+```python
+SYMBOLS = ["$SPX", "$VIX", "SPY", "QQQ", "$NDX"]
+```
+
+**This costs nothing.** `collection_symbols()` dedupes, so on a machine with the
+watchlist the universe is byte-identical before and after (82 symbols, verified) and
+no additional chain is fetched — the poll-budget concern the plan raised does not
+apply, because `$NDX` was already in every poll.
+
+QQQ remains the fallback and the amber header warning stays, because the fallback is
+now genuinely reachable only when something is wrong. It matters when it fires: QQQ
+carries heavy structural call-overwriting flow (buy-write funds, collar programs),
+which can **invert the apparent gamma sign** relative to the real NDX dealer
+position.
 
 Fragmentation is a residual limitation regardless: NDX-referencing flow spreads
 across NDX, QQQ, XND and NQ futures options, and mega-cap single-name gamma
