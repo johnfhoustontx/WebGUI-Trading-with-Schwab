@@ -57,6 +57,45 @@ def test_to_nq_returns_none_rather_than_a_wrong_number(level, scale, basis):
     assert ns.to_nq(level, scale, basis) is None
 
 
+def test_to_index_converts_a_strike_to_cash_equivalent_points():
+    # $NDX: scale 1.0, so a strike is already in index points.
+    assert ns.to_index(27190.0, 1.0) == pytest.approx(27190.0)
+    # QQQ: a 560 strike at NDX/QQQ ~41 is ~23,000 index points.
+    assert ns.to_index(560.0, 23000.0 / 560.0) == pytest.approx(23000.0)
+
+
+@pytest.mark.parametrize("level,scale", [(None, 1.0), (560.0, None), (None, None)])
+def test_to_index_returns_none_rather_than_a_wrong_number(level, scale):
+    assert ns.to_index(level, scale) is None
+
+
+def test_to_nq_is_to_index_plus_basis():
+    """The two frames differ by an additive basis and nothing else — which is
+    why distances (ATR, stop size, wall proximity) are frame-invariant and only
+    LEVELS need shifting for display.
+    """
+    assert ns.to_nq(560.0, 41.0, 120.0) == pytest.approx(ns.to_index(560.0, 41.0) + 120.0)
+
+
+def test_shift_verdict_levels_moves_only_the_price_fields():
+    v = {"action": "SHORT", "reason": "x", "entry": 23000.0,
+         "stop": 23050.0, "target": 22900.0}
+    out = ns.shift_verdict_levels(v, 120.0)
+    assert out["entry"] == pytest.approx(23120.0)
+    assert out["stop"] == pytest.approx(23170.0)
+    assert out["target"] == pytest.approx(23020.0)
+    assert out["action"] == "SHORT" and out["reason"] == "x"
+    assert v["entry"] == 23000.0, "must not mutate the verdict it is given"
+
+
+@pytest.mark.parametrize("basis", [None, 0.0])
+def test_shift_verdict_levels_is_a_noop_without_a_usable_basis(basis):
+    v = {"action": "SHORT", "entry": 23000.0, "stop": 23050.0, "target": None}
+    out = ns.shift_verdict_levels(v, basis)
+    assert out["entry"] == 23000.0 and out["stop"] == 23050.0
+    assert out["target"] is None
+
+
 #############################################
 # REGIME
 #############################################
@@ -375,6 +414,52 @@ def test_any_signal_brackets_its_entry_correctly(regime, wall_offset, pin_offset
             assert v["stop"] < v["entry"]
             if v["target"] is not None:
                 assert v["target"] > v["entry"]
+
+
+#############################################
+# FRAME INVARIANCE — deciding in cash terms must change nothing observable
+#############################################
+
+@pytest.mark.parametrize("basis", [-250.0, -1.0, 0.0, 1.0, 120.0, 362.0, 950.0])
+@pytest.mark.parametrize("offset", [-400.0, -34.0, 0.0, 34.0, 400.0])
+def test_deciding_in_cash_terms_matches_deciding_in_futures_terms(basis, offset):
+    """The whole justification for computing the regime and verdict in CASH
+    terms and shifting only for display.
+
+    Because basis is measured as (futures - cash), the two frames differ by a
+    constant: every level moves by +basis and so does spot. Distances are
+    therefore identical, and the verdict must be too — the futures price
+    genuinely carries no information the cash price does not.
+
+    If this test ever fails, the reframe stopped being a pure refactor.
+    """
+    cash_spot = 23000.0
+    cash_levels = {"call_wall": 23000.0 + offset, "put_wall": 22800.0,
+                   "pin": 22900.0}
+
+    fut_spot = cash_spot + basis
+    fut_levels = {k: v + basis for k, v in cash_levels.items()}
+
+    cash_regime, cash_dist = classify_in(cash_spot, 22950.0)
+    fut_regime, fut_dist = classify_in(fut_spot, 22950.0 + basis)
+    assert cash_regime == fut_regime
+    assert cash_dist == pytest.approx(fut_dist)
+
+    cash_v = ns.build_verdict(cash_regime, "pin", cash_spot, cash_levels, 150.0)
+    fut_v = ns.build_verdict(fut_regime, "pin", fut_spot, fut_levels, 150.0)
+
+    assert cash_v["action"] == fut_v["action"]
+    # Shifting the cash verdict for display must reproduce the futures verdict.
+    shifted = ns.shift_verdict_levels(cash_v, basis)
+    for field in ("entry", "stop", "target"):
+        if fut_v[field] is None:
+            assert shifted[field] is None
+        else:
+            assert shifted[field] == pytest.approx(fut_v[field])
+
+
+def classify_in(spot, flip):
+    return ns.classify_regime(spot, flip)
 
 
 #############################################

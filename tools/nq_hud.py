@@ -64,6 +64,8 @@ from tools.nq_signal import (  # noqa: E402
     classify_regime,
     ndx_scale,
     session_phase,
+    shift_verdict_levels,
+    to_index,
     to_nq,
 )
 
@@ -484,30 +486,42 @@ class NQHud:
         if tape.get("nq") is not None and tape.get("ndx") is not None:
             basis = tape["nq"] - tape["ndx"]
 
-        # pin_top_pos rides along for the signal log only — build_verdict reads
-        # levels["pin"], so converting it changes no decision.
-        levels = {k: to_nq(gamma.get(k), scale, basis)
-                  for k in ("flip", "call_wall", "put_wall", "pin", "pin_top_pos")}
+        _LEVEL_KEYS = ("flip", "call_wall", "put_wall", "pin", "pin_top_pos")
 
-        # Session range proxy converted into NQ points for stop sizing.
-        atr_nq = None
-        if gamma.get("atr_proxy") and scale:
-            atr_nq = gamma["atr_proxy"] * scale
+        # TWO FRAMES, deliberately (design §5).
+        #
+        # Decisions are made in CASH (index) terms, because that is what they
+        # were always really made in: basis is measured as NQ - NDX, so a
+        # comparison of NQ against an NQ-converted level reduces algebraically
+        # to cash-vs-level with the futures price cancelling out. Computing it
+        # in the cash frame makes the code say what it does instead of hiding
+        # a self-reference behind a conversion.
+        #
+        # NQ points are for DISPLAY — the numbers you type into NinjaTrader.
+        # The frames differ by an additive basis, so distances (ATR, stop size,
+        # wall proximity) are identical in both and only levels are shifted.
+        levels_cash = {k: to_index(gamma.get(k), scale) for k in _LEVEL_KEYS}
+        levels = {k: to_nq(gamma.get(k), scale, basis) for k in _LEVEL_KEYS}
 
-        regime, dist = classify_regime(tape.get("nq"), levels.get("flip"))
+        # Session range proxy for stop sizing. Frame-invariant (a difference),
+        # so the same value serves both.
+        atr_pts = gamma["atr_proxy"] * scale if gamma.get("atr_proxy") and scale else None
 
-        # Cash-freshness guard. The regime reduces algebraically to
-        # (NDX cash - flip) — the live NQ price cancels — so it is only
-        # meaningful while the cash index is actually ticking. Refuse to assert
-        # a band rather than showing a frozen one that looks live.
+        regime, dist = classify_regime(tape.get("ndx"), levels_cash.get("flip"))
+
+        # Cash-freshness guard: the regime is anchored to an index that stops
+        # ticking outside 08:30-15:00 CT. Refuse to assert a band rather than
+        # showing a frozen one that looks live.
         stale = cash_stale_reason(phase, gamma.get("snap_age_s"), STALE_AFTER_SEC)
         if stale:
             regime, dist = "unknown", None
-        verdict = build_verdict(regime, phase, tape.get("nq"), levels, atr_nq)
+        verdict = build_verdict(regime, phase, tape.get("ndx"), levels_cash, atr_pts)
+        # Back into NQ points for the trader.
+        verdict = shift_verdict_levels(verdict, basis)
 
         state = {"now": now, "phase": phase, "tape": tape, "gamma": gamma,
                  "scale": scale, "basis": basis, "levels": levels,
-                 "atr_nq": atr_nq, "regime_stale": stale,
+                 "atr_nq": atr_pts, "regime_stale": stale,
                  "regime": regime, "dist": dist, "verdict": verdict}
 
         # Record verdict TRANSITIONS for offline validation. Self-guarded and

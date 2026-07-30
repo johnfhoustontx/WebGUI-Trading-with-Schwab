@@ -173,9 +173,28 @@ other: the 08:00–08:30 collection window has *fresh* snapshots but *closed* ca
 an age check alone would pass it. Levels still render (they are the last session's
 and useful for planning); only the regime assertion is withheld.
 
-This is deliberately the guard, not the cure. Re-framing the comparison to be
-explicitly cash-vs-flip, with basis used purely for display, would remove the
-self-reference entirely — a later change, since it touches the regime call site.
+**Reframe (the cure, shipped alongside the guard).** `_collect` now keeps **two
+frames** explicitly:
+
+* `levels_cash` — `to_index(level, scale)`, the frame **decisions** are made in.
+  `classify_regime` and `build_verdict` both receive cash spot and cash levels.
+* `levels` — `to_nq(level, scale, basis)`, the frame **display** uses, because NQ
+  points are what you type into NinjaTrader. The verdict's `entry`/`stop`/`target`
+  are moved across by `shift_verdict_levels(verdict, basis)`.
+
+The two frames differ by an additive constant, so distances — ATR, stop size, wall
+proximity — are identical in both and only levels shift. That is what makes this a
+change of units rather than a change of answer, and it is pinned two ways: a
+parametrised frame-invariance test over 7 basis values × 5 wall offsets, and an
+empirical sweep of 360 scenarios against the live `$NDX` grid (4 basis values ×
+90 spot positions, exercising SHORT / STAND DOWN / WAIT) with **zero** divergence
+from the old NQ-frame computation. A live screenshot before and after is identical
+in 879 of 894 pixel rows — the only content difference being the staleness counter
+advancing between captures.
+
+The guard above is retained. The reframe removes the self-reference from the *code*;
+it does not make a frozen cash print informative, so the freshness check is still
+what stops the HUD asserting a regime it cannot know.
 
 ## 6. Regime and verdict rules
 

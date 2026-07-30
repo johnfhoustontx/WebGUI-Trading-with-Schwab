@@ -137,16 +137,49 @@ def ndx_scale(source_symbol, ndx_spot, source_spot):
     return ndx_spot / source_spot
 
 
-def to_nq(level, scale, basis):
-    """Convert a source-symbol strike into NQ futures points.
+def to_index(level, scale):
+    """Convert a source-symbol strike into INDEX (cash-equivalent) points.
 
-    level -> NDX-equivalent (x scale) -> NQ (+ basis). Basis is the live
+    This is the frame DECISIONS are made in — see the module docstring and
+    design §5. `$NDX` needs no conversion (scale 1.0); a QQQ strike is
+    multiplied up to its NDX equivalent.
+    """
+    if level is None or scale is None:
+        return None
+    return level * scale
+
+
+def to_nq(level, scale, basis):
+    """Convert a source-symbol strike into NQ futures points, for DISPLAY.
+
+    level -> index-equivalent (x scale) -> NQ (+ basis). Basis is the live
     NQ - NDX carry spread and jumps at the quarterly roll, so it is measured,
     never assumed.
+
+    The two frames differ by the additive basis and nothing else, so distances
+    (ATR, stop size, wall proximity) are identical in both and only LEVELS need
+    shifting. That is what makes deciding in cash terms and rendering in NQ
+    terms a pure change of units rather than a change of answer.
     """
     if level is None or scale is None or basis is None:
         return None
-    return level * scale + basis
+    return to_index(level, scale) + basis
+
+
+def shift_verdict_levels(verdict, basis):
+    """Return a copy of ``verdict`` with its price fields moved into NQ points.
+
+    The verdict is computed in cash terms; entry/stop/target are the three
+    fields a trader types into NinjaTrader, so they — and only they — get the
+    basis added. A missing or zero basis is a no-op, never a wrong number.
+    """
+    out = dict(verdict)
+    if not basis:
+        return out
+    for field in ("entry", "stop", "target"):
+        if out.get(field) is not None:
+            out[field] = out[field] + basis
+    return out
 
 
 #############################################
