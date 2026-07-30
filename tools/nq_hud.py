@@ -206,7 +206,7 @@ def read_gamma(source_date=None):
     res = {"ok": False, "reason": "", "symbol": None, "spot": None,
            "flip": None, "call_wall": None, "put_wall": None,
            "net_total": None, "pin": None, "snap_age_s": None,
-           "atr_proxy": None}
+           "atr_proxy": None, "session_date": None}
     conn = None
     try:
         import gamma_tool as gt
@@ -237,18 +237,39 @@ def read_gamma(source_date=None):
             return res
 
         res["symbol"] = symbol
-        rows = gh.load_date_with_grid(conn, symbol, "gex", today)
-        if not rows:
+        res["session_date"] = today
+
+        # ── Newest snapshot's SUMMARY — grid-free. ───────────────────────────
+        latest = gh.latest_spot_flip(conn, symbol, "gex", today)
+        if latest is None:
             res["reason"] = f"no rows for {symbol}"
             return res
-
-        ts, spot, flip, top_pos, top_neg, net_total, grid = rows[-1]
-        res.update(spot=spot, flip=flip, net_total=net_total)
+        ts, spot, flip = latest
+        res.update(spot=spot, flip=flip)
         res["snap_age_s"] = max(0.0, time.time() - float(ts))
 
+        # ── EXACTLY ONE grid decode: the newest row. ─────────────────────────
+        # This poll runs every 2s. load_date_with_grid() over the whole session
+        # zlib-decompresses + JSON-parses EVERY row's grid (~390 by the close,
+        # ~114 strikes each) — the hotspot CLAUDE.md records being removed from
+        # gamma_snapshot once already, at 1-min cadence. `since_ts` filters
+        # `ts > since_ts`, so ts-1 returns just the newest row.
+        grid, top_pos = {}, None
+        try:
+            newest = gh.load_date_with_grid(conn, symbol, "gex", today,
+                                            since_ts=int(ts) - 1)
+            if newest:
+                top_pos = newest[-1][3]
+                res["net_total"] = newest[-1][5]
+                grid = newest[-1][6] or {}
+        except Exception:
+            log.debug("grid read failed", exc_info=True)
+
         # get_directional_walls expects the VIEW dict, so wrap the stored grid
-        # under its "gex" key — the same wrapping services/options_svc/
-        # compute.py:_level_track uses when recomputing walls per snapshot.
+        # under its "gex" key — the same wrapping compute.py uses when it picks
+        # walls for the DEX view (services/options_svc/compute.py:1427).
+        # _decode_grid hands back FLOAT strike keys, which both the wall
+        # picker's `s > spot` and the pin's max() rely on.
         try:
             walls = gt.get_directional_walls({"gex": grid}, spot)
             res["call_wall"] = walls.get("call_wall")
@@ -257,21 +278,26 @@ def read_gamma(source_date=None):
             log.debug("wall picker failed", exc_info=True)
 
         # Pin = the largest ABSOLUTE net-gamma strike; price gravitates to it
-        # in a positive-gamma regime.
+        # in a positive-gamma regime. NOTE (design §6): whether max(|net|) or
+        # the stored top_pos_strike (= max(net) over POSITIVE strikes only) is
+        # the better mean-reversion target is an OPEN question — pinning is
+        # caused by positive dealer gamma, so a large negative-net strike is an
+        # amplifier, not an attractor. Task 8 logs both to settle it.
         try:
             res["pin"] = max(grid.items(),
                              key=lambda kv: abs(kv[1].get("net", 0.0) or 0.0))[0]
         except Exception:
             res["pin"] = top_pos
 
-        # Realized-range proxy for ATR-scaled stops: the session's spot range
-        # from the snapshot series, expressed in underlying points.
+        # ── Session spot range for the ATR stop — grid-free. ─────────────────
+        # load_flow_series reads the same gex-view rows by date but selects no
+        # gex_json, so the range costs zero decodes.
         try:
-            spots = [r[1] for r in rows if r[1]]
+            spots = [r[1] for r in gh.load_flow_series(conn, symbol, today) if r[1]]
             if len(spots) >= 2:
                 res["atr_proxy"] = max(spots) - min(spots)
         except Exception:
-            pass
+            log.debug("spot series read failed", exc_info=True)
 
         res["ok"] = True
     except Exception as exc:
