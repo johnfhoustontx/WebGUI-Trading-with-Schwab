@@ -143,6 +143,40 @@ Any missing input returns `None` and the row paints `—` rather than a wrong nu
 The session-range ATR proxy is scaled but **not** basis-adjusted — it is a
 difference, not a level, and basis cancels.
 
+### The regime is anchored to CASH, not to the futures price
+
+Measured 2026-07-30, and non-obvious enough to state plainly. Because `basis` is
+itself derived as `NQ − NDX`, the conversion is self-referential and the regime
+distance reduces algebraically:
+
+```
+dist = NQ − flip_NQ = NQ − (flip·scale + NQ − NDX) = NDX − flip·scale
+```
+
+**The live futures price cancels out.** Verified by sweeping NQ across 950 points
+with the cash print held fixed: the distance-from-flip stayed 2.31 at every value.
+So the basis conversion is a *display* transform — it puts levels in NQ points for
+a NinjaTrader chart — and the regime decision is really being made in NDX cash
+terms.
+
+That is harmless during RTH, when cash and futures track each other. It bites
+outside it: **`$NDX` cash does not tick outside 08:30–15:00 CT**, so premarket the
+HUD would show a confident band computed from yesterday's close while NQ has moved
+overnight — live-looking, actually frozen. Observed: cash reading 27,192.31,
+*exactly* the previous session's final snapshot spot, against NQ +0.78%, producing
+a 362-point "basis" that is ~99% overnight drift rather than carry.
+
+**Guard (`nq_signal.cash_stale_reason`).** The regime is forced to `unknown` — with
+the reason named on screen — whenever the cash index is not trading, or the gamma
+map has gone stale during RTH. Two independent tests, because neither subsumes the
+other: the 08:00–08:30 collection window has *fresh* snapshots but *closed* cash, so
+an age check alone would pass it. Levels still render (they are the last session's
+and useful for planning); only the regime assertion is withheld.
+
+This is deliberately the guard, not the cure. Re-framing the comparison to be
+explicitly cash-vs-flip, with basis used purely for display, would remove the
+self-reference entirely — a later change, since it touches the regime call site.
+
 ## 6. Regime and verdict rules
 
 Regime, from NQ spot vs the NQ-converted flip:

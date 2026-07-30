@@ -221,6 +221,18 @@ def test_unknown_regime_stands_down():
 
 
 @pytest.mark.parametrize("phase", ["premarket", "opening", "flatten", "closed"])
+def test_outside_the_window_the_phase_note_wins_over_unknown_regime(phase):
+    """When the cash-freshness guard forces the regime to unknown outside RTH,
+    the user should still get the specific "Pre-open, no signals before 08:30"
+    note rather than a generic "no gamma map" — there IS a map, it is just
+    yesterday's. Both mean don't trade; one explains why.
+    """
+    v = ns.build_verdict("unknown", phase, SPOT, AT_CALL, 150.0)
+    assert v["action"] == "WAIT"
+    assert v["reason"] == ns.PHASE_NOTE[phase]
+
+
+@pytest.mark.parametrize("phase", ["premarket", "opening", "flatten", "closed"])
 def test_outside_the_trading_window_always_waits(phase):
     # Even sitting exactly on a wall with a textbook setup.
     v = ns.build_verdict("positive", phase, SPOT, AT_CALL, 150.0)
@@ -261,6 +273,43 @@ def test_risk_distance_stays_within_the_proximity_band_plus_the_stop(offset):
     sp = ns.stop_points(150.0)
     band = SPOT * ns.WALL_PROXIMITY_PCT
     assert abs(v["entry"] - v["stop"]) <= band + sp
+
+
+#############################################
+# CASH FRESHNESS — the regime is anchored to a cash index that stops ticking
+#############################################
+
+def test_cash_is_live_during_rth_with_a_fresh_snapshot():
+    for phase in ("opening", "morning", "pin", "afternoon", "flatten"):
+        assert ns.cash_stale_reason(phase, 40.0, 150) is None
+
+
+@pytest.mark.parametrize("phase", ["premarket", "closed"])
+def test_cash_is_stale_when_the_index_is_not_trading(phase):
+    """$NDX cash does not tick outside 08:30-15:00 CT. Because basis is measured
+    as NQ - NDX, a frozen cash print makes the regime distance collapse to
+    (yesterday's close - flip) with the live NQ price cancelling out entirely —
+    so the HUD would show a confident band computed from stale data.
+    """
+    reason = ns.cash_stale_reason(phase, 40.0, 150)
+    assert reason and "closed" in reason.lower()
+
+
+def test_cash_is_stale_when_the_gamma_map_has_gone_stale():
+    reason = ns.cash_stale_reason("pin", 900.0, 150)
+    assert reason and "900" in reason
+
+
+def test_premarket_collection_window_is_caught():
+    """08:00-08:30 CT is the gap that a staleness check on snapshot age ALONE
+    would miss: the collector is running (snapshot fresh) but cash has not
+    opened, so the regime is still anchored to yesterday's close.
+    """
+    assert ns.cash_stale_reason("premarket", 5.0, 150) is not None
+
+
+def test_cash_staleness_tolerates_a_missing_age():
+    assert ns.cash_stale_reason("pin", None, 150) is None
 
 
 #############################################

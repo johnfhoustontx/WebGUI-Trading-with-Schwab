@@ -177,6 +177,41 @@ def classify_regime(nq_spot, nq_flip):
     return ("positive" if reg == "above" else "negative"), dist
 
 
+# Phases in which the $NDX CASH index is actually trading (08:30-15:00 CT).
+# "opening" and "flatten" are inside RTH — they are excluded from *trading* by
+# tradeable(), not from cash being live.
+CASH_LIVE_PHASES = ("opening", "morning", "pin", "afternoon", "flatten")
+
+
+def cash_stale_reason(phase, snap_age_s, stale_after):
+    """Why the regime cannot be trusted right now, or None when it can.
+
+    THE PROBLEM THIS GUARDS. Basis is measured as ``NQ - NDX``, so the regime
+    distance algebraically reduces to ``NDX - flip`` — the live futures price
+    cancels out completely (verified: moving NQ 950 points leaves the distance
+    unchanged). The regime is therefore anchored to the CASH index, which stops
+    ticking outside 08:30-15:00 CT. Premarket the HUD would otherwise show a
+    confident band computed from yesterday's close while NQ has moved overnight:
+    live-looking, actually frozen.
+
+    Two independent failure modes, because neither subsumes the other:
+
+    * cash not trading — covers the overnight/weekend case;
+    * gamma map stale — covers a dead collector during RTH.
+
+    The 08:00-08:30 collection window needs the first: snapshots are FRESH there
+    (the collector starts at 08:00) but cash has not opened, so an age check
+    alone would pass it.
+    """
+    # Kept SHORT: this is appended to the regime line, which has no wraplength,
+    # so a long reason would clip horizontally rather than wrap.
+    if phase not in CASH_LIVE_PHASES:
+        return "cash index closed"
+    if snap_age_s is not None and snap_age_s > stale_after:
+        return f"gamma map {int(snap_age_s)}s stale"
+    return None
+
+
 def near(price, level, spot):
     """True when ``price`` sits within WALL_PROXIMITY_PCT of ``level``."""
     if price is None or level is None or not spot:
@@ -240,13 +275,17 @@ def build_verdict(regime, phase, nq_spot, levels, atr_nq):
     out = {"action": "STAND DOWN", "reason": "",
            "entry": None, "stop": None, "target": None}
 
-    if regime == "unknown":
-        out["reason"] = "No gamma map — cannot classify regime."
-        return out
-
+    # Phase is checked FIRST so its specific note wins. The cash-freshness guard
+    # forces regime to "unknown" outside RTH, and "no gamma map" would be a lie
+    # there — there IS a map, it is just the last session's. Both outcomes mean
+    # don't trade; the phase note is the one that explains why.
     if not tradeable(phase):
         out["action"] = "WAIT"
         out["reason"] = PHASE_NOTE.get(phase, "Outside the trading window.")
+        return out
+
+    if regime == "unknown":
+        out["reason"] = "No gamma map — cannot classify regime."
         return out
 
     if regime == "flip_zone":

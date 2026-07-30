@@ -60,6 +60,7 @@ from repo_paths import OPTIONS_SCANNER  # noqa: E402
 from tools.nq_signal import (  # noqa: E402
     PHASE_NOTE,
     build_verdict,
+    cash_stale_reason,
     classify_regime,
     ndx_scale,
     session_phase,
@@ -494,11 +495,19 @@ class NQHud:
             atr_nq = gamma["atr_proxy"] * scale
 
         regime, dist = classify_regime(tape.get("nq"), levels.get("flip"))
+
+        # Cash-freshness guard. The regime reduces algebraically to
+        # (NDX cash - flip) — the live NQ price cancels — so it is only
+        # meaningful while the cash index is actually ticking. Refuse to assert
+        # a band rather than showing a frozen one that looks live.
+        stale = cash_stale_reason(phase, gamma.get("snap_age_s"), STALE_AFTER_SEC)
+        if stale:
+            regime, dist = "unknown", None
         verdict = build_verdict(regime, phase, tape.get("nq"), levels, atr_nq)
 
         state = {"now": now, "phase": phase, "tape": tape, "gamma": gamma,
                  "scale": scale, "basis": basis, "levels": levels,
-                 "atr_nq": atr_nq,
+                 "atr_nq": atr_nq, "regime_stale": stale,
                  "regime": regime, "dist": dist, "verdict": verdict}
 
         # Record verdict TRANSITIONS for offline validation. Self-guarded and
@@ -568,6 +577,10 @@ class NQHud:
         rtext, rcolor = rmap.get(st["regime"], ("REGIME UNKNOWN", GRAY))
         if st["dist"] is not None:
             rtext += f"   ({st['dist']:+,.0f} pts vs flip)"
+        # Name WHY the regime is withheld, so "unknown" reads as a deliberate
+        # refusal rather than a broken read.
+        if st.get("regime_stale"):
+            rtext += "   ·  " + st["regime_stale"]
         self._set("regime", rtext, rcolor)
         self._set("reason", v["reason"])
 
