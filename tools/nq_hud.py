@@ -96,6 +96,12 @@ STALE_AFTER_SEC = 150
 
 REFRESH_SEC = 2.0
 
+# Window geometry. Height is derived from the built widget tree at startup
+# (see NQHud.__init__); these are only the floor and the screen allowance.
+WIN_WIDTH = 430
+WIN_MIN_HEIGHT = 680
+WIN_SCREEN_MARGIN = 80   # taskbar + title bar
+
 # The regime / session-window / risk-sizing constants and the pure logic that
 # closes over them live in tools/nq_signal.py (imported above), so they can be
 # exercised without Redis, SQLite or tkinter.
@@ -340,7 +346,7 @@ class NQHud:
 
         self.root = ctk.CTk()
         self.root.title("NQ Dealer-Positioning HUD")
-        self.root.geometry("430x680")
+        self.root.geometry(f"{WIN_WIDTH}x{WIN_MIN_HEIGHT}")
         self.root.attributes("-topmost", True)
         self.root.configure(fg_color=BG)
 
@@ -351,6 +357,19 @@ class NQHud:
         self._logger = SignalLogger()
 
         self._build()
+
+        # Size to CONTENT, not to a literal. The panel stack needs ~894px at
+        # 100% DPI — the original hardcoded 680 clipped the RISK panel at
+        # "Entry", hiding the stop, target and dollar risk entirely (found by
+        # actually rendering the window; every unit test passed regardless).
+        # Measuring rather than bumping the constant keeps it correct under
+        # different DPI scaling and font metrics, where reqheight differs.
+        self.root.update_idletasks()
+        height = max(WIN_MIN_HEIGHT, self.root.winfo_reqheight())
+        # Never taller than the usable screen, or the bottom clips right back off.
+        height = min(height, self.root.winfo_screenheight() - WIN_SCREEN_MARGIN)
+        self.root.geometry(f"{WIN_WIDTH}x{height}")
+
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
         threading.Thread(target=self._poll_loop, daemon=True).start()
