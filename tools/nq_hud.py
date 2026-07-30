@@ -551,14 +551,19 @@ class NQHud:
             stale = "tape not updating"
         if stale:
             regime, dist = "unknown", None
-        verdict = build_verdict(regime, phase, tape.get("ndx"), levels_cash, atr_pts)
-        # Back into NQ points for the trader.
-        verdict = shift_verdict_levels(verdict, basis)
+        verdict_cash = build_verdict(regime, phase, tape.get("ndx"), levels_cash, atr_pts)
+        # Back into NQ points for the trader. The CASH-frame original is kept
+        # so the state export can ship both: a NinjaTrader chart on a
+        # back-adjusted continuous contract has to rebase entry/stop/target
+        # exactly as it rebases the levels, or the two disagree by the
+        # adjustment offset.
+        verdict = shift_verdict_levels(verdict_cash, basis)
 
         state = {"now": now, "phase": phase, "tape": tape, "gamma": gamma,
                  "scale": scale, "basis": basis, "levels": levels,
                  "atr_nq": atr_pts, "regime_stale": stale,
                  "levels_cash": levels_cash,
+                 "verdict_cash": verdict_cash,
                  "regime": regime, "dist": dist, "verdict": verdict}
 
         # Record verdict TRANSITIONS for offline validation. Self-guarded and

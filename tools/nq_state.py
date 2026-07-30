@@ -68,6 +68,7 @@ def build_state(state, *, nq_contract, stale_after_sec):
     cash = state.get("levels_cash") or {}
     nq = state.get("levels") or {}
     verdict = state.get("verdict") or {}
+    cash_verdict = state.get("verdict_cash") or {}
     now = state.get("now")
     snap_age = gamma.get("snap_age_s")
 
@@ -103,10 +104,17 @@ def build_state(state, *, nq_contract, stale_after_sec):
         "nq_put_wall": _num(nq.get("put_wall")),
         "nq_pin": _num(nq.get("pin")),
         "basis": _num(state.get("basis")),
-        # --- risk, already shifted into NQ points by the HUD.
+        # --- risk in the NQ frame (what the HUD panel shows).
         "entry": _num(verdict.get("entry")),
         "stop": _num(verdict.get("stop")),
         "target": _num(verdict.get("target")),
+        # --- risk in the CASH frame, so a consumer that rebases the LEVELS
+        # --- onto its own contract can rebase these identically. Without them
+        # --- a back-adjusted continuous chart would show levels in one frame
+        # --- and entry/stop/target in another, differing by the adjustment.
+        "cash_entry": _num(cash_verdict.get("entry")),
+        "cash_stop": _num(cash_verdict.get("stop")),
+        "cash_target": _num(cash_verdict.get("target")),
         "atr_pts": _num(state.get("atr_nq")),
         # --- health.
         "vix": _num(tape.get("vix")),
