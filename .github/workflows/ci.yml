@@ -111,6 +111,16 @@ jobs:
           - name: market_svc
             dir: "."
             cmd: python -m pytest services/market_svc -q
+          # tools/ is a utilities dir and was historically left out of CI. It is
+          # in now because tools/nq_signal.py is trading-signal logic carrying a
+          # money-losing invariant (never fade a short-gamma tape) — a silent
+          # regression there costs real money, which is not true of the
+          # check_env / db_admin / watchdog tests it rides along with. Those
+          # tests all sys.path-insert rather than relying on cwd, so they pass
+          # from the repo root as well as from inside tools/.
+          - name: tools
+            dir: "."
+            cmd: python -m pytest tools/tests -q
           # --- app folders (run FROM INSIDE the folder) ---
           - name: webgui
             dir: webgui
