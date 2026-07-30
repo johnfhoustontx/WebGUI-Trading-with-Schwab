@@ -331,3 +331,43 @@ def test_written_text_is_real_utf8_not_escaped(tmp_path):
     assert "\\u" not in raw, "non-ASCII must be written as UTF-8, not escaped"
     assert "—" in raw
     assert json.loads(raw)["nq_reason"] == reason
+
+
+def test_reward_risk_is_exported_per_instrument():
+    """The indicator shows it beside entry/stop/target, so it must travel with
+    them rather than being recomputed on the C# side from rounded prices."""
+    st = _state(nq_over={"verdict": {"action": "SHORT", "reason": "x", "rr": 2.5,
+                                     "entry": 100.0, "stop": 110.0, "target": 75.0}})
+    p = ns.build_state(st, **KW)
+    assert p["nq_rr"] == 2.5
+    # ES carries its own copy rather than inheriting NQ's block.
+    assert p["es_rr"] is None
+
+
+def test_the_minimum_travels_with_the_ratio():
+    """Shipping the threshold means the indicator colours against the SAME
+    number the HUD gated on, instead of a second copy that can drift."""
+    from tools.nq_signal import MIN_REWARD_RISK
+    p = ns.build_state(_state(), **KW)
+    assert p["nq_min_rr"] == MIN_REWARD_RISK
+    assert p["es_min_rr"] == MIN_REWARD_RISK
+
+
+def test_a_refused_setup_still_exports_its_ratio():
+    """A WAIT caused by a thin edge has to be able to show its own number —
+    otherwise the panel just withholds with no explanation."""
+    st = _state(nq_over={"verdict": {"action": "WAIT", "reason": "too thin",
+                                     "rr": 0.31, "entry": None, "stop": None,
+                                     "target": None}})
+    p = ns.build_state(st, **KW)
+    assert p["nq_action"] == "WAIT"
+    assert p["nq_rr"] == 0.31
+
+
+def test_a_trailed_continuation_exports_a_null_ratio():
+    """No target means no ratio. Null, never 0 — zero would render as a real
+    (and terrible) reward:risk."""
+    st = _state(nq_over={"verdict": {"action": "LONG", "reason": "break", "rr": None,
+                                     "entry": 100.0, "stop": 90.0, "target": None}})
+    p = ns.build_state(st, **KW)
+    assert p["nq_rr"] is None

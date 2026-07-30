@@ -71,6 +71,23 @@ RTH_CLOSE = _time(15, 0)
 # and NDX trades near 4x SPX, so they live on the Instrument spec.
 STOP_ATR_MULT = 1.2
 
+# Minimum reward-to-risk for a mean-reversion fade.
+#
+# MEASURED, not chosen by feel. Replaying a full live session through this
+# module, the fade setups are BIMODAL: either the pin sits almost on top of
+# spot — median reward 17.9 NQ points against a median 60-point stop, an R:R of
+# 0.31, with 85% of NQ signals below 1:1 — or it is genuinely far, median reward
+# 110 points. There is very little in between. Gating at 1.5 keeps 5 of 42 NQ
+# signals at a median 1.71, and 9 of 14 ES signals at a median 5.32.
+#
+# The gate only REFUSES setups. It does not move a stop or substitute a
+# different target, because both of those would change what the signal means;
+# this just declines to call a 0.31:1 trade a trade.
+#
+# It is a pure ratio, so unlike the stop clamps it is instrument-independent
+# and correctly lives here rather than on the Instrument spec.
+MIN_REWARD_RISK = 1.5
+
 # Market holidays — kept in sync with services/*/scheduler.py _HOLIDAYS.
 HOLIDAYS = {
     _date(2026, 1, 1), _date(2026, 1, 19), _date(2026, 2, 16), _date(2026, 4, 3),
@@ -317,6 +334,40 @@ def stop_points(atr_proxy, spec):
 # VERDICT
 #############################################
 
+def reward_risk(entry, stop, target):
+    """Reward-to-risk of a formed setup, or None when it cannot be computed.
+
+    None rather than 0 for an unbounded-target continuation trade: those are
+    trailed, so there is no target to divide by and "no ratio" is the honest
+    answer. A caller gating on a minimum must treat None as ungated, not as a
+    failure — see build_verdict, where the negative-gamma branches are
+    deliberately not gated.
+    """
+    if entry is None or stop is None or target is None:
+        return None
+    risk = abs(entry - stop)
+    if risk <= 0:
+        return None
+    return abs(target - entry) / risk
+
+
+def _thin_edge(out, rr, side):
+    """WAIT because the fade does not pay for its own stop.
+
+    The R:R is NAMED in the reason. "Waiting" with no number reads as the HUD
+    being coy; the whole point is that the setup exists but the pin is too close
+    to the wall to be worth the risk, and seeing 0.31:1 makes that obvious.
+    """
+    out["action"] = "WAIT"
+    out["rr"] = rr
+    ratio = "no target" if rr is None else f"{rr:.2f}:1"
+    out["reason"] = (
+        f"Positive gamma at the {side} wall, but the pin is too close to pay "
+        f"for the stop — {ratio} against a {MIN_REWARD_RISK:.1f}:1 minimum. "
+        f"Waiting for spot and the pin to separate.")
+    return out
+
+
 def _stop_above(entry, wall, sp):
     """Stop for a SHORT: beyond the wall, but never at or below the entry.
 
@@ -352,7 +403,7 @@ def build_verdict(regime, phase, spot, levels, atr_proxy, spec):
       * negative gamma -> only CONTINUATION on a wall break; never fade
       * flip zone      -> STAND DOWN, always
     """
-    out = {"action": "STAND DOWN", "reason": "",
+    out = {"action": "STAND DOWN", "reason": "", "rr": None,
            "entry": None, "stop": None, "target": None}
 
     # Phase is checked FIRST so its specific note wins. The cash-freshness guard
@@ -390,8 +441,11 @@ def build_verdict(regime, phase, spot, levels, atr_proxy, spec):
                 out["reason"] = ("Positive gamma at the call wall, but the pin "
                                  "is not below spot — no fade target. Waiting.")
                 return out
-            out.update(action="SHORT", entry=spot,
-                       stop=_stop_above(spot, call_wall, sp), target=pin,
+            stop = _stop_above(spot, call_wall, sp)
+            rr = reward_risk(spot, stop, pin)
+            if rr is None or rr < MIN_REWARD_RISK:
+                return _thin_edge(out, rr, "call")
+            out.update(action="SHORT", entry=spot, stop=stop, target=pin, rr=rr,
                        reason=("Positive gamma at the call wall. Dealers sell "
                                "rallies — fade toward the pin. Wait for two "
                                "5-min closes failing above the wall."))
@@ -402,8 +456,11 @@ def build_verdict(regime, phase, spot, levels, atr_proxy, spec):
                 out["reason"] = ("Positive gamma at the put wall, but the pin "
                                  "is not above spot — no fade target. Waiting.")
                 return out
-            out.update(action="LONG", entry=spot,
-                       stop=_stop_below(spot, put_wall, sp), target=pin,
+            stop = _stop_below(spot, put_wall, sp)
+            rr = reward_risk(spot, stop, pin)
+            if rr is None or rr < MIN_REWARD_RISK:
+                return _thin_edge(out, rr, "put")
+            out.update(action="LONG", entry=spot, stop=stop, target=pin, rr=rr,
                        reason=("Positive gamma at the put wall. Dealers buy "
                                "dips — fade toward the pin. Wait for two "
                                "5-min closes holding above the wall."))

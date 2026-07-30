@@ -592,3 +592,130 @@ def test_wall_proximity_is_scale_free():
     for pct, want in ((inside, True), (outside, False)):
         assert ns.near(nq_spot, nq_spot * (1 + pct), nq_spot) is want
         assert ns.near(es_spot, es_spot * (1 + pct), es_spot) is want
+
+
+#############################################
+# REWARD:RISK GATE — refuse fades that do not pay for their own stop
+#############################################
+
+def test_reward_risk_is_the_plain_ratio():
+    assert ns.reward_risk(100.0, 90.0, 130.0) == pytest.approx(3.0)
+    assert ns.reward_risk(100.0, 110.0, 70.0) == pytest.approx(3.0)  # short
+
+
+@pytest.mark.parametrize("entry,stop,target", [
+    (None, 90.0, 130.0), (100.0, None, 130.0), (100.0, 90.0, None),
+    (100.0, 100.0, 130.0),        # zero risk -> no ratio, not infinity
+])
+def test_reward_risk_returns_none_rather_than_a_misleading_number(entry, stop, target):
+    assert ns.reward_risk(entry, stop, target) is None
+
+
+def _fade(pin, spot=SPOT, call=23020.0, put=22800.0, atr=150.0, spec=None):
+    lv = {"call_wall": call, "put_wall": put, "pin": pin}
+    return ns.build_verdict("positive", "pin", spot, lv, atr, spec or ni.NQ)
+
+
+def test_a_fade_whose_pin_sits_on_top_of_spot_is_refused():
+    """The measured failure mode: at the call wall with the pin ~18 points
+    below spot against a ~60-point stop. That is a 0.31:1 trade, and 85% of a
+    live session's NQ signals looked like this.
+    """
+    v = _fade(pin=SPOT - 18.0)
+    assert v["action"] == "WAIT"
+    assert v["entry"] is None and v["stop"] is None and v["target"] is None
+
+
+def test_the_refusal_names_the_actual_ratio():
+    """"Waiting" with no number reads as the HUD being coy. Seeing 0.31:1 makes
+    it obvious that the setup exists but is not worth the risk."""
+    v = _fade(pin=SPOT - 18.0)
+    assert "%.2f:1" % v["rr"] in v["reason"]
+    assert "1.5:1" in v["reason"]          # the minimum it was measured against
+
+
+def test_a_fade_with_a_distant_pin_is_still_taken():
+    v = _fade(pin=SPOT - 400.0)
+    assert v["action"] == "SHORT"
+    assert v["rr"] >= ns.MIN_REWARD_RISK
+
+
+def test_the_gate_boundary_is_inclusive():
+    """A setup exactly at the minimum is taken; a hair below is not. Pinning the
+    boundary stops a future refactor silently turning >= into >."""
+    v = _fade(pin=SPOT - 18.0)
+    sp = ns.stop_points(150.0, ni.NQ)
+    risk = abs(SPOT - ns._stop_above(SPOT, 23020.0, sp))
+    at = _fade(pin=SPOT - risk * ns.MIN_REWARD_RISK)
+    below = _fade(pin=SPOT - risk * (ns.MIN_REWARD_RISK - 0.01))
+    assert at["action"] == "SHORT", "exactly at the minimum must be allowed"
+    assert below["action"] == "WAIT"
+    assert v["action"] == "WAIT"
+
+
+def test_the_long_side_is_gated_too():
+    lv = {"call_wall": 23200.0, "put_wall": 22980.0, "pin": SPOT + 18.0}
+    v = ns.build_verdict("positive", "pin", SPOT, lv, 150.0, ni.NQ)
+    assert v["action"] == "WAIT"
+    assert "put wall" in v["reason"]
+
+    lv["pin"] = SPOT + 400.0
+    assert ns.build_verdict("positive", "pin", SPOT, lv, 150.0, ni.NQ)["action"] == "LONG"
+
+
+def test_every_verdict_reports_its_reward_risk():
+    """The HUD, the state export and the log all read it off the verdict rather
+    than recomputing, so it must be present on taken AND refused setups."""
+    taken = _fade(pin=SPOT - 400.0)
+    refused = _fade(pin=SPOT - 18.0)
+    assert taken["rr"] > 0 and refused["rr"] > 0
+    assert taken["rr"] > refused["rr"]
+
+
+def test_continuation_trades_are_not_gated():
+    """A negative-gamma break is trailed, so it has no target and therefore no
+    ratio. Treating "no ratio" as a failed gate would silently delete the entire
+    continuation half of the strategy.
+    """
+    lv = {"call_wall": 23020.0, "put_wall": 22800.0, "pin": 23000.0}
+    v = ns.build_verdict("negative", "pin", 23100.0, lv, 150.0, ni.NQ)
+    assert v["action"] == "LONG"
+    assert v["target"] is None
+    assert v["rr"] is None
+
+
+def test_the_gate_is_scale_free():
+    """R:R is a ratio, so the same geometry must be judged identically on a
+    7,400 index and a 28,000 one — unlike the stop clamps, which are in points
+    and live on the Instrument spec."""
+    for pin_frac, expected in ((0.0008, "WAIT"), (0.02, "SHORT")):
+        nq = _fade(pin=SPOT * (1 - pin_frac), spot=SPOT,
+                   call=SPOT * 1.0009, put=SPOT * 0.99, spec=ni.NQ)
+        es_spot = SPOT / 4.0
+        es = _fade(pin=es_spot * (1 - pin_frac), spot=es_spot,
+                   call=es_spot * 1.0009, put=es_spot * 0.99,
+                   atr=150.0 / 4.0, spec=ni.ES)
+        assert nq["action"] == expected
+        assert es["action"] == nq["action"], (
+            "same geometry, different index level -> same decision")
+
+
+def test_the_gate_only_ever_removes_trades():
+    """It must never turn a WAIT into a trade, or flip a side. Swept across the
+    whole wall range so the property holds everywhere, not at one point."""
+    for i in range(60):
+        spot = 22700.0 + 10.0 * i
+        lv = {"call_wall": 23100.0, "put_wall": 22900.0, "pin": 23000.0}
+        v = ns.build_verdict("positive", "pin", spot, lv, 150.0, ni.NQ)
+        if v["action"] in ("LONG", "SHORT"):
+            assert v["rr"] >= ns.MIN_REWARD_RISK
+            # A taken fade always points at the pin.
+            assert v["target"] == 23000.0
+
+
+def test_minimum_is_a_ratio_not_a_point_count():
+    """If this ever became instrument-specific it would belong on the spec.
+    It is a pure ratio, so it correctly lives in the signal module."""
+    assert isinstance(ns.MIN_REWARD_RISK, float)
+    assert 1.0 <= ns.MIN_REWARD_RISK <= 3.0
+    assert not hasattr(ni.NQ, "min_reward_risk")

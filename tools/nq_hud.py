@@ -75,6 +75,7 @@ from tools.nq_instruments import INSTRUMENTS  # noqa: E402
 # its own module so the whole decision surface is testable without Redis,
 # SQLite or tkinter. See tools/nq_signal.py.
 from tools.nq_signal import (  # noqa: E402
+    MIN_REWARD_RISK,
     PHASE_NOTE,
     build_verdict,
     cash_scale,
@@ -768,6 +769,11 @@ class Hud:
         self._row(rf, f"{k}.entry", "Entry")
         self._row(rf, f"{k}.stop", "Stop", vcolor=RED)
         self._row(rf, f"{k}.target", "Target", vcolor=GREEN)
+        # Reward:risk sits directly under the three prices it is computed from,
+        # because it is the number that decides whether they are worth taking —
+        # and it is shown even when the setup was REFUSED for being too thin, so
+        # a WAIT explains itself instead of just withholding.
+        self._row(rf, f"{k}.rr", "Reward : risk", bold=True)
         self._row(rf, f"{k}.risk_full", f"Risk / 1 {spec.label}")
         self._row(rf, f"{k}.risk_micro", f"Risk / 1 {spec.micro_label}")
         ctk.CTkLabel(rf, text="", height=4).pack()
@@ -934,6 +940,16 @@ class Hud:
         self._set(f"{k}.entry", self._fmt(v.get("entry"), 0))
         self._set(f"{k}.stop", self._fmt(v.get("stop"), 0))
         self._set(f"{k}.target", self._fmt(v.get("target"), 0))
+        # Colour by whether it clears the minimum, so a thin setup reads as thin
+        # at a glance rather than needing the number to be interpreted.
+        rr = v.get("rr")
+        if rr is None:
+            self._set(f"{k}.rr", "— (trailed)" if v.get("action") in ("LONG", "SHORT")
+                      else "—", FG_DIM)
+        else:
+            self._set(f"{k}.rr", f"{rr:.2f} : 1",
+                      GREEN if rr >= MIN_REWARD_RISK else RED)
+
         if v.get("entry") is not None and v.get("stop") is not None:
             pts = abs(v["entry"] - v["stop"])
             self._set(f"{k}.risk_full",

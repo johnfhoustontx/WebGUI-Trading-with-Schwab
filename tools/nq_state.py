@@ -58,6 +58,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from repo_paths import OPTIONS_SCANNER  # noqa: E402
+from tools.nq_signal import MIN_REWARD_RISK  # noqa: E402  (pure, no I/O)
 
 log = logging.getLogger("nq_hud")
 
@@ -130,6 +131,12 @@ def _pane_keys(key, pane, stale_after_sec):
         p + "action": verdict.get("action"),
         p + "reason": verdict.get("reason"),
         p + "dist_pts": _num(pane.get("dist")),
+        # Reward:risk of the setup. Present on REFUSED setups too — a WAIT
+        # caused by a thin edge should be able to show its own number rather
+        # than only saying no. Null for a trailed continuation, which has no
+        # target and therefore no ratio.
+        p + "rr": _num(verdict.get("rr")),
+        p + "min_rr": MIN_REWARD_RISK,
         # --- cash frame: what decisions are made in, and what the indicator
         # --- rebases onto its own contract.
         p + "cash_spot": _num(tape.get("cash")),

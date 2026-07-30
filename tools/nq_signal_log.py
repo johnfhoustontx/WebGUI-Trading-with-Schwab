@@ -91,6 +91,10 @@ FIELDS = [
     "entry",
     "stop",
     "target",
+    # Reward:risk, recorded on REFUSED setups as well as taken ones — the whole
+    # question the gate raises is whether 1.5 is the right cut, and that can
+    # only be answered from the rows it turned away.
+    "rr",
     "atr_pts",          # session spot range, in futures points
     "snap_age_s",       # collector staleness at decision time
 ]
@@ -161,6 +165,7 @@ def build_row(state, key) -> dict:
         "entry": _r(v.get("entry"), 1),
         "stop": _r(v.get("stop"), 1),
         "target": _r(v.get("target"), 1),
+        "rr": _r(v.get("rr"), 3),
         "atr_pts": _r(pane.get("atr_pts"), 1),
         "snap_age_s": _r(gamma.get("snap_age_s"), 0),
     }
