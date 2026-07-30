@@ -71,6 +71,7 @@ FIELDS = [
     "put_wall_nq",
     "pin_nq",           # max(|net|)      <- the HUD's choice
     "pin_top_pos_nq",   # top_pos_strike  <- the free alternative
+    "flip_stored_nq",   # the nearest-to-spot flip rule, for comparison
     "entry",
     "stop",
     "target",
@@ -132,6 +133,7 @@ def build_row(state) -> dict:
         "put_wall_nq": _r(lv.get("put_wall"), 1),
         "pin_nq": _r(lv.get("pin"), 1),
         "pin_top_pos_nq": _r(lv.get("pin_top_pos"), 1),
+        "flip_stored_nq": _r(lv.get("flip_stored"), 1),
         "entry": _r(v.get("entry"), 1),
         "stop": _r(v.get("stop"), 1),
         "target": _r(v.get("target"), 1),

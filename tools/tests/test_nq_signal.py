@@ -315,6 +315,30 @@ def test_risk_distance_stays_within_the_proximity_band_plus_the_stop(offset):
 
 
 #############################################
+# FLIP SELECTION — which zero crossing is the regime boundary
+#############################################
+
+def test_prefers_the_recomputed_flip():
+    assert ns.pick_flip(27564.5, 28013.81) == 27564.5
+
+
+def test_falls_back_to_the_stored_flip():
+    """A grid with no crossing in the band yields no computed flip; the stored
+    column keeps the HUD producing a regime rather than going blank.
+    """
+    assert ns.pick_flip(None, 28013.81) == 28013.81
+
+
+def test_both_missing_is_none():
+    assert ns.pick_flip(None, None) is None
+
+
+def test_zero_is_not_treated_as_missing():
+    # `computed or stored` would silently discard a legitimate 0.0.
+    assert ns.pick_flip(0.0, 28013.81) == 0.0
+
+
+#############################################
 # CASH FRESHNESS — the regime is anchored to a cash index that stops ticking
 #############################################
 

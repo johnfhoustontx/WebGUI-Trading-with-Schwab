@@ -63,6 +63,7 @@ from tools.nq_signal import (  # noqa: E402
     cash_stale_reason,
     classify_regime,
     ndx_scale,
+    pick_flip,
     session_phase,
     shift_verdict_levels,
     to_index,
@@ -239,7 +240,8 @@ def read_gamma(source_date=None):
     res = {"ok": False, "reason": "", "symbol": None, "spot": None,
            "flip": None, "call_wall": None, "put_wall": None,
            "net_total": None, "pin": None, "snap_age_s": None,
-           "atr_proxy": None, "session_date": None}
+           "atr_proxy": None, "session_date": None,
+           "flip_stored": None, "flip_computed": None}
     conn = None
     try:
         import gamma_tool as gt
@@ -277,8 +279,8 @@ def read_gamma(source_date=None):
         if latest is None:
             res["reason"] = f"no rows for {symbol}"
             return res
-        ts, spot, flip = latest
-        res.update(spot=spot, flip=flip)
+        ts, spot, flip_stored = latest
+        res.update(spot=spot, flip=flip_stored, flip_stored=flip_stored)
         res["snap_age_s"] = max(0.0, time.time() - float(ts))
 
         # ── EXACTLY ONE grid decode: the newest row. ─────────────────────────
@@ -309,6 +311,17 @@ def read_gamma(source_date=None):
             res["put_wall"] = walls.get("put_wall")
         except Exception:
             log.debug("wall picker failed", exc_info=True)
+
+        # Recompute the FLIP from this snapshot's own grid rather than trusting
+        # the stored column — the same treatment the walls and pin already get.
+        # calc_flip_point takes the raw grid (it indexes gex[strike]["net"]),
+        # NOT the {"gex": ...} view wrapper the wall picker wants. See
+        # nq_signal.pick_flip for why the stored column is the wrong boundary.
+        try:
+            res["flip_computed"] = gt.calc_flip_point(grid, spot)
+        except Exception:
+            log.debug("flip recompute failed", exc_info=True)
+        res["flip"] = pick_flip(res.get("flip_computed"), flip_stored)
 
         # Pin = the largest ABSOLUTE net-gamma strike; price gravitates to it
         # in a positive-gamma regime. NOTE (design §6): whether max(|net|) or
@@ -516,7 +529,8 @@ class NQHud:
         if tape.get("nq") is not None and tape.get("ndx") is not None:
             basis = tape["nq"] - tape["ndx"]
 
-        _LEVEL_KEYS = ("flip", "call_wall", "put_wall", "pin", "pin_top_pos")
+        _LEVEL_KEYS = ("flip", "call_wall", "put_wall", "pin", "pin_top_pos",
+                       "flip_stored")
 
         # TWO FRAMES, deliberately (design §5).
         #

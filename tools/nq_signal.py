@@ -245,6 +245,28 @@ def cash_stale_reason(phase, snap_age_s, stale_after):
     return None
 
 
+def pick_flip(computed, stored):
+    """Choose the gamma flip: prefer the grid-recomputed value.
+
+    The stored ``flip`` column is ``snapshot_summary``'s rule — the zero
+    crossing NEAREST TO SPOT. As a regime boundary that is close to circular:
+    the nearest crossing is by definition near spot, so asking "is spot inside
+    the flip zone?" answers itself whenever the profile crosses zero anywhere
+    close. Measured over 55 live $NDX snapshots it read flip_zone on 54 of
+    them (98%), i.e. the HUD stood down by construction.
+
+    ``gamma_tool.calc_flip_point`` instead takes the lowest crossing in the
+    +/-3% band, which is a structural level rather than a spot-hugging one:
+    38% flip_zone over the same snapshots, median disagreement 297 points.
+
+    The stored value remains the fallback so a grid that yields no crossing
+    still produces a regime rather than going blank. This mirrors what the HUD
+    already does for the walls and the pin, which are likewise recomputed from
+    each snapshot's own grid rather than trusted from stored columns.
+    """
+    return computed if computed is not None else stored
+
+
 def near(price, level, spot):
     """True when ``price`` sits within WALL_PROXIMITY_PCT of ``level``."""
     if price is None or level is None or not spot:

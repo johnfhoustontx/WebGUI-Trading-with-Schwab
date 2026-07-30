@@ -95,6 +95,10 @@ def build_state(state, *, nq_contract, stale_after_sec):
         "cash_call_wall": _num(cash.get("call_wall")),
         "cash_put_wall": _num(cash.get("put_wall")),
         "cash_pin": _num(cash.get("pin")),
+        # The OTHER flip rule (snapshot_summary's nearest-to-spot column).
+        # Logged beside the one actually used so the engine-wide flip
+        # question can be settled on data rather than argument.
+        "cash_flip_stored": _num(cash.get("flip_stored")),
         # --- NQ frame: correct only for nq_contract.
         "nq_contract": nq_contract,
         "nq_spot": _num(tape.get("nq")),
