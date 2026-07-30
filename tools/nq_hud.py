@@ -99,6 +99,13 @@ MNQ_POINT_VALUE = 2.0
 # Snapshot staleness. The collector runs 1-min; >150s means it has stalled.
 STALE_AFTER_SEC = 150
 
+# Tape staleness. market_svc republishes cache:market:dashboard every ~2s during
+# RTH and ~5s off-hours, so a minute of silence means it is dead. This matters
+# more than it looks: the BASIS is derived from the tape, so a frozen NQ/NDX
+# pair silently shifts every converted level. Observed live — market_svc died
+# overnight and the cache sat 12 hours stale while the HUD showed it as fine.
+TAPE_STALE_AFTER_SEC = 60
+
 REFRESH_SEC = 2.0
 
 # Window geometry. Height is derived from the built widget tree at startup
@@ -194,7 +201,14 @@ def read_tape(bus):
             out["age_s"] = (datetime.now(ts.tzinfo) - ts).total_seconds()
         except Exception:
             out["age_s"] = None
-        out["ok"] = out["nq"] is not None
+        # ok means USABLE, not merely present. The age was already being
+        # computed here and then discarded, so a dead market_svc read as
+        # healthy while its last prices aged for hours — and since the basis
+        # comes from those prices, every level was quietly built on them.
+        # An age we cannot establish fails closed for the same reason.
+        out["ok"] = (out["nq"] is not None
+                     and out["age_s"] is not None
+                     and out["age_s"] <= TAPE_STALE_AFTER_SEC)
     except Exception:
         log.debug("tape read failed", exc_info=True)
     return out
@@ -529,6 +543,12 @@ class NQHud:
         # ticking outside 08:30-15:00 CT. Refuse to assert a band rather than
         # showing a frozen one that looks live.
         stale = cash_stale_reason(phase, gamma.get("snap_age_s"), STALE_AFTER_SEC)
+        # A frozen tape is a third way the regime becomes untrustworthy, and
+        # the clock-based check cannot see it: during RTH the phase says cash
+        # is live and the snapshot may be fresh, yet a dead market_svc leaves
+        # the basis anchored to hours-old prices.
+        if stale is None and not tape.get("ok"):
+            stale = "tape not updating"
         if stale:
             regime, dist = "unknown", None
         verdict = build_verdict(regime, phase, tape.get("ndx"), levels_cash, atr_pts)
