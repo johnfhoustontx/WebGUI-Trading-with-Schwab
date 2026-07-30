@@ -71,6 +71,8 @@ from tools.nq_signal import (  # noqa: E402
 
 # Append-only verdict-transition log (write-only; nothing reads it at runtime).
 from tools.nq_signal_log import SignalLogger  # noqa: E402
+# Current-state export for the NinjaTrader indicator (also write-only).
+from tools.nq_state import StateWriter  # noqa: E402
 
 # options-scanner on sys.path -> gamma_tool (pure wall picker) + gex_history_db.
 # Imported lazily inside _load_gamma so an import failure degrades the gamma
@@ -110,7 +112,12 @@ WIN_SCREEN_MARGIN = 80   # taskbar + title bar
 # exercised without Redis, SQLite or tkinter.
 
 # Tape tile display names as written in services/market_svc/symbols.py.
+# NOTE: the tile DISPLAY name and the quote symbol differ, and BOTH are
+# hardcoded here and in services/market_svc/symbols.py. At the quarterly
+# roll they must change in lockstep, or the basis is measured against a
+# contract nobody is trading.
 TILE_NQ = "/NQ[U26]"
+NQ_CONTRACT = "/NQU26"
 TILE_NDX = "NDX"
 TILE_VIX = "VIX"
 
@@ -358,6 +365,8 @@ class NQHud:
         self._stop = threading.Event()
         self._labels = {}
         self._logger = SignalLogger()
+        self._state_writer = StateWriter(nq_contract=NQ_CONTRACT,
+                                         stale_after_sec=STALE_AFTER_SEC)
 
         self._build()
 
@@ -522,12 +531,16 @@ class NQHud:
         state = {"now": now, "phase": phase, "tape": tape, "gamma": gamma,
                  "scale": scale, "basis": basis, "levels": levels,
                  "atr_nq": atr_pts, "regime_stale": stale,
+                 "levels_cash": levels_cash,
                  "regime": regime, "dist": dist, "verdict": verdict}
 
         # Record verdict TRANSITIONS for offline validation. Self-guarded and
         # write-only — nothing in the HUD reads it back, so a logging failure
         # can only cost a row.
         self._logger.maybe_log(state)
+        # Export current state for the NinjaTrader indicator. Every poll,
+        # so its timestamp doubles as a heartbeat.
+        self._state_writer.write(state)
         return state
 
     # ── UI thread ───────────────────────────────────────────────────────
