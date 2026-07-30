@@ -525,7 +525,11 @@ class NQHud:
                 "negative": ("NEGATIVE GAMMA — continuation", RED),
                 "flip_zone": ("FLIP ZONE — whipsaw", AMBER),
                 "unknown": ("REGIME UNKNOWN", GRAY)}
-        rtext, rcolor = rmap[st["regime"]]
+        # .get(), not [] — this runs on the UI thread inside the 2s repaint, and
+        # a KeyError here kills the paint loop. classify_regime only emits these
+        # four keys today, so this is purely defence against a fifth being added
+        # later; the HUD's contract is that no read raises.
+        rtext, rcolor = rmap.get(st["regime"], ("REGIME UNKNOWN", GRAY))
         if st["dist"] is not None:
             rtext += f"   ({st['dist']:+,.0f} pts vs flip)"
         self._set("regime", rtext, rcolor)
