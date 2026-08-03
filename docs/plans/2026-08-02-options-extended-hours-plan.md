@@ -46,6 +46,54 @@ Two findings:
 
 Consolidating the eight is therefore safe. Task A1 needs no re-run.
 
+## Two calendar bugs found during Phase A — FIX AFTER PHASE B (decided 2026-08-02)
+
+The consolidation surfaced two genuine correctness bugs. **Neither is a regression
+from this work** — both predate it. Both are scheduled to be fixed **after the
+Phase B migration lands**, each in its own clearly-labelled behavior-change commit,
+so the migration itself keeps its "identical output" guarantee and the fixes are
+visible as deliberate deltas rather than smuggled in.
+
+**Bug 1 — `options-scanner/scanner_engine.py:91` `HOLIDAYS_2026`.** A **tenth**
+holiday site, missed by the A1 gate because its name did not match the pattern
+searched. It holds **9 dates, 2026 only** — missing **Juneteenth 2026-06-19** and
+**all ten 2027 holidays**. It is load-bearing:
+
+```
+paper_engine.in_trading_window  ->  scanner_engine.is_market_hours
+                                ->  scanner_engine.is_trading_day  ->  HOLIDAYS_2026
+```
+
+So from **2027-01-01 the paper engine treats every market holiday as a trading
+day** and will run entry/manage cycles against a closed market. Juneteenth 2026
+already fired. Fix by repointing to `shared.market_calendar`.
+
+**Bug 2 — year-boundary holiday spill.** When 1 January falls on a Saturday the
+NYSE observes the holiday on the **prior** 31 December, so `nyse_holidays(2028)`
+contains `2027-12-31`. Because `is_holiday` looks up only `nyse_holidays(d.year)`:
+
+```
+Jan 1 2028 falls on: Saturday
+is_holiday(date(2027, 12, 31))     -> False     # NYSE is CLOSED that day
+is_trading_day(date(2027, 12, 31)) -> True      # wrong
+```
+
+The hardcoded sets being replaced have the **identical** gap, which is why fixing
+it is a behavior change rather than a refactor. First occurrence is **2027-12-31**,
+inside the calendar's live window. Fix:
+
+```python
+return d in nyse_holidays(d.year) or d in nyse_holidays(d.year + 1)
+```
+
+with a regression test pinning `2027-12-31`.
+
+**Also noted, unrelated and not absorbed:** `services/sentiment_svc` currently
+reports **1 failed, 188 passed** (`test_daily_history_wins_over_session_latch`, a
+VIX1D session-latch test), verified failing at the pre-work base commit. The root
+CLAUDE.md documents a 189-green baseline, so either that figure is stale or
+something regressed before this work began. Out of scope here.
+
 ---
 
 # Phase A — Single market calendar (holidays in 1 place, not 9)
