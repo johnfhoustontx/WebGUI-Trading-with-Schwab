@@ -11,10 +11,12 @@ loop+sleep here own the cadence.
 """
 import asyncio
 import logging
-from datetime import date as _date, time as _time
+from datetime import time as _time
 from zoneinfo import ZoneInfo
 
 from services.sentiment_svc import handlers, order_flow_consumer
+from shared.market_calendar import HOLIDAYS as _HOLIDAYS  # noqa: F401  (kept for callers/tests)
+from shared.market_calendar import is_trading_day as _cal_is_trading_day
 
 log = logging.getLogger(__name__)
 
@@ -35,24 +37,13 @@ _CT = ZoneInfo("America/Chicago")
 _RTH_START = (8, 30)   # 08:30 CT (mirrors handlers._is_rth_now open)
 _RTH_END = (15, 0)     # 15:00 CT (exclusive — mirrors handlers._is_rth_now close)
 _OFFHOURS_INTERVAL_MIN = 15  # off-hours throttle: refresh at most once per 15 min
-# US market holidays 2026–2027 (kept in sync with the other service schedulers,
-# options-scanner Config.HOLIDAYS, and webgui/alerts.py). Includes Juneteenth;
-# observed dates per NYSE (Sat→prior Fri, Sun→following Mon). Update yearly.
-_HOLIDAYS = {
-    # 2026
-    _date(2026, 1, 1), _date(2026, 1, 19), _date(2026, 2, 16), _date(2026, 4, 3),
-    _date(2026, 5, 25), _date(2026, 6, 19), _date(2026, 7, 3), _date(2026, 9, 7),
-    _date(2026, 11, 26), _date(2026, 12, 25),
-    # 2027
-    _date(2027, 1, 1), _date(2027, 1, 18), _date(2027, 2, 15), _date(2027, 3, 26),
-    _date(2027, 5, 31), _date(2027, 6, 18), _date(2027, 7, 5), _date(2027, 9, 6),
-    _date(2027, 11, 25), _date(2027, 12, 24),
-}
+# NYSE full-closure holidays come from shared/market_calendar.py (derived, not a
+# literal — no yearly edit). ``_HOLIDAYS`` stays bound as the local alias.
 
 
 def _is_rth(now):
     """Mon-Fri, not a holiday, 08:30 <= t < 15:00 CT (mirrors handlers._is_rth_now)."""
-    if now.weekday() >= 5 or now.date() in _HOLIDAYS:
+    if not _cal_is_trading_day(now.date()):
         return False
     t = now.time()
     return _time(*_RTH_START) <= t < _time(*_RTH_END)
