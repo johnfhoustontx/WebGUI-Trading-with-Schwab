@@ -1,0 +1,66 @@
+# Market session windows + the extended-hours activation date.
+#
+# All times are America/Chicago (CT). ET and CT observe DST together, so these
+# CT values are stable year-round and need no seasonal adjustment.
+#
+# Edit + restart the affected service to change a window. See
+# docs/plans/2026-08-02-options-extended-hours-design.md.
+
+[activation]
+# Cboe extended trading hours for select multi-listed equity options. Every ETH
+# branch in the codebase is INERT before this date: session_at() reports
+# "closed" for the ETH windows and all behavior is byte-identical to the
+# pre-ETH app. Confirmed in Cboe notice C2026061202, which records it as a
+# delay from 2026-07-13 pending regulatory approval.
+extended_hours_from = "2026-08-17"
+
+# -- Sessions (Cboe's own vocabulary: GTH and Curb, NOT "premarket") ---------
+[sessions.gth]
+start = "06:30"   # 07:30 ET
+end   = "08:25"   # 09:25 ET
+
+[sessions.regular]
+start = "08:30"   # 09:30 ET
+end   = "15:00"   # 16:00 ET
+
+[sessions.curb]
+start = "15:00"   # 16:00 ET
+end   = "15:15"   # 16:15 ET
+
+# -- Named operating windows (service cadence windows, NOT market sessions) --
+# These legitimately differ from each other and are kept distinct, not merged.
+[windows.scan]
+# options_svc auto-scan operating window (includes premarket by design).
+start = "08:00"
+end   = "15:15"
+
+[windows.collection]
+# GEX history collection. `start` is the full-universe start; `eth_start`
+# applies ONLY to ethOptionEligible symbols on/after the activation date.
+start     = "08:00"
+eth_start = "06:30"
+stop      = "15:20"
+
+[windows.session_flip]
+# When the Gamma display flips from the prior session to today. Held SEPARATE
+# from collection.start on purpose: widening GTH collection must not silently
+# move the display flip.
+at = "08:00"
+
+[windows.market_snapshot]
+start = "08:30"
+end   = "15:00"
+
+[windows.driver_entry]
+# Autonomous driver entry window, in ET (not CT) — matches the existing
+# constant it replaces. Skips the open's first ~15 min and takes no new
+# entries in the last 30 min before the close.
+tz    = "America/New_York"
+start = "09:45"
+end   = "15:30"
+
+[alerts]
+# Fire phone pushes / in-app toasts during extended sessions. Off by default:
+# a 06:30 CT push on a handful of thin GTH prints is noise, and the execution
+# posture is observe-only. Data still accrues either way.
+fire_in_extended_hours = false
