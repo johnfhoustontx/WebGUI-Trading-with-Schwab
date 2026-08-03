@@ -30,8 +30,13 @@ import logging
 import subprocess
 import math
 from pathlib import Path
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+
+import sys as _sys, pathlib as _pathlib
+
+_sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo root
+from shared.market_calendar import HOLIDAYS as _SHARED_HOLIDAYS  # noqa: E402
 
 from watchlist import get_scan_symbols
 import daily_trade_log
@@ -106,20 +111,9 @@ class Config:
     LOG_DIR = Path(__file__).parent / "logs"
     LOG_DIR.mkdir(exist_ok=True)
 
-    # Market holidays 2026–2027 (incl. Juneteenth; observed per NYSE Sat→prior Fri,
-    # Sun→following Mon; keep in sync with the service schedulers + webgui/alerts.py)
-    HOLIDAYS = {
-        # 2026
-        date(2026, 1, 1), date(2026, 1, 19), date(2026, 2, 16),
-        date(2026, 4, 3),  # Good Friday
-        date(2026, 5, 25), date(2026, 6, 19), date(2026, 7, 3), date(2026, 9, 7),
-        date(2026, 11, 26), date(2026, 12, 25),
-        # 2027
-        date(2027, 1, 1), date(2027, 1, 18), date(2027, 2, 15),
-        date(2027, 3, 26),  # Good Friday
-        date(2027, 5, 31), date(2027, 6, 18), date(2027, 7, 5), date(2027, 9, 6),
-        date(2027, 11, 25), date(2027, 12, 24),
-    }
+    # NYSE full-closure holidays from shared/market_calendar.py (derived, not a
+    # literal — no yearly edit). One calendar for the whole stack.
+    HOLIDAYS = _SHARED_HOLIDAYS
 
 #############################################
 # LOGGING SETUP
