@@ -1,11 +1,15 @@
 """Single source of truth for the market calendar and session windows.
 
-**Foundation only -- this module currently replaces nothing.** It WILL replace
-the ten duplicated holiday sets and the fourteen hardcoded window constants
-spread across the five Tier-2 services, the webgui and the options-scanner
-engines; that migration is Phase B. Of the ten holiday sites, eight are in
-scope, ``claude-driver/config.py`` is exempt, and
-``options-scanner/scanner_engine.py`` diverges from the common set.
+**Holidays are consolidated here (Phase A, done).** The eight duplicated holiday
+sets across the five Tier-2 services, the webgui and ``options-scanner/scanner.py``
+now read from this module. Two sites remain outside it, both deliberately:
+``claude-driver/config.py`` is exempt (legacy; its consumers were removed
+2026-07-08), and ``options-scanner/scanner_engine.py`` still holds a DIVERGENT
+9-date 2026-only set — a tracked follow-up, since correcting it is a behavior
+change rather than a refactor.
+
+**Session windows are NOT here yet.** The fourteen hardcoded window constants
+still live in their own modules; migrating them is Phase B.
 
 What ships today is the holiday calendar and the trading-day helpers below.
 Session windows, the ``Session`` vocabulary and ``config/sessions.toml``

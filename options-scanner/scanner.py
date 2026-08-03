@@ -33,9 +33,9 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-import sys as _sys, pathlib as _pathlib
+import pathlib as _pathlib
 
-_sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo root
+sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo root
 from shared.market_calendar import HOLIDAYS as _SHARED_HOLIDAYS  # noqa: E402
 
 from watchlist import get_scan_symbols

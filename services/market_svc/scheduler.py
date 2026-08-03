@@ -14,7 +14,7 @@ from datetime import time as _time
 from zoneinfo import ZoneInfo
 
 from services.market_svc import compute, handlers
-from shared.market_calendar import HOLIDAYS as _HOLIDAYS  # noqa: F401  (kept for callers/tests)
+from shared.market_calendar import HOLIDAYS as _HOLIDAYS  # noqa: F401  (uniform alias; no consumer here -- prefer is_holiday(): HOLIDAYS covers 2026-27 only)
 from shared.market_calendar import is_trading_day as _cal_is_trading_day
 
 _log = logging.getLogger("market_svc.scheduler")
