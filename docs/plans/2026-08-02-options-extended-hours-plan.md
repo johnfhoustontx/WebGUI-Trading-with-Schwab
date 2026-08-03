@@ -20,7 +20,31 @@
 - Run service suites **per folder** from the repo root. **Never** `pytest services` across all of them — it puts multiple hyphenated app dirs on `sys.path` at once and re-triggers the documented `config`/`scoring`/`notifier` module-name collisions.
 - Phases A and B are **refactors**. Do not change any holiday date, any window time, or any scheduling behavior. **Identical output is the acceptance bar.**
 - Small commits, conventional prefixes, touched suite green before each commit.
-- The venv python is `.venv\Scripts\python` from the repo root.
+- **The venv is NOT in the worktree.** It lives in the main repo:
+  `D:\WebGUI Trading with Schwab\.venv\Scripts\python.exe` (Python 3.11.9). Work
+  from the worktree root and invoke it by absolute path. Verified working:
+  `"D:/WebGUI Trading with Schwab/.venv/Scripts/python.exe" -m pytest shared/tests -q`
+  Every `.venv\Scripts\python` in this document means that absolute path.
+
+## Task A1 result — GATE PASSED (2026-08-02)
+
+Ran ahead of implementation. **All eight in-scope holiday sets are byte-identical
+at 20 dates**: `options_svc`, `sentiment_svc`, `portfolio_svc`, `market_svc`,
+`driver_svc`, `shared/notify/channels.py`, `webgui/alerts.py`,
+`options-scanner/scanner.py`.
+
+Two findings:
+
+1. **The `webgui/alerts.py:14-19` comment is false.** It claims the service copies
+   omit 2027 and Juneteenth. They do not — all eight carry both. Delete that
+   comment during Task A11, as the plan already specifies.
+2. **`claude-driver/config.py` `MARKET_HOLIDAYS` stores ISO strings**
+   (`"2026-01-01"`), not `date()` objects — which is why the extractor reported it
+   MISSING rather than divergent. Spot-checking confirms the same dates. It remains
+   **deliberately exempt** from Phase A (legacy module; its morning-agent consumers
+   were deleted 2026-07-08, only `RISK_LIMITS` is still read).
+
+Consolidating the eight is therefore safe. Task A1 needs no re-run.
 
 ---
 
