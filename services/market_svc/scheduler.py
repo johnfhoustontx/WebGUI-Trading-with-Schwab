@@ -14,8 +14,8 @@ from datetime import time as _time
 from zoneinfo import ZoneInfo
 
 from services.market_svc import compute, handlers
+from shared import market_calendar as mc
 from shared.market_calendar import HOLIDAYS as _HOLIDAYS  # noqa: F401  (uniform alias; no consumer here -- prefer is_holiday(): HOLIDAYS covers 2026-27 only)
-from shared.market_calendar import is_trading_day as _cal_is_trading_day
 
 _log = logging.getLogger("market_svc.scheduler")
 
@@ -24,16 +24,16 @@ OFFHOURS_INTERVAL_SEC = 5     # futures trade ~24h → keep off-hours snappy
 WEEKEND_INTERVAL_SEC = 60    # futures CLOSED (Sat all day, Sun before 17:00 CT)
 
 _CT = ZoneInfo("America/Chicago")
-_RTH_START = (8, 30)
-_RTH_END = (15, 0)
-# NYSE full-closure holidays come from shared/market_calendar.py (derived, not a
-# literal — no yearly edit). ``_HOLIDAYS`` stays bound as the local alias.
+# The 08:30-15:00 CT window and the NYSE holiday set both come from
+# shared/market_calendar.py now (config-driven + derived — no yearly edit).
+# ``_HOLIDAYS`` stays bound as the local alias. The 17:00 CT futures reopen in
+# ``_futures_closed`` below is deliberately NOT one of these: it is a futures
+# cadence boundary, not a named market window.
 
 
 def _is_rth(now):
-    if not _cal_is_trading_day(now.date()):
-        return False
-    return _time(*_RTH_START) <= now.time() <= _time(*_RTH_END)
+    """Mon-Fri 08:30-15:00 CT, holidays excluded — inclusive at both ends."""
+    return mc.is_regular_hours(now)
 
 
 def _futures_closed(now):
