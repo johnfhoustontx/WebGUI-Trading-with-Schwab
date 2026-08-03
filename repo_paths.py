@@ -32,6 +32,11 @@ THEME_TOML = REPO_ROOT / "config" / "theme.toml"
 # defaults in services/options_svc/flow_alerts.py.
 FLOW_ALERTS_TOML = REPO_ROOT / "config" / "flow_alerts.toml"
 
+# Market session windows + the extended-hours activation date. Read by
+# shared/market_calendar.py (mtime-cached). Edit + restart the affected service
+# to change a window.
+SESSIONS_TOML = REPO_ROOT / "config" / "sessions.toml"
+
 # Dedicated paper-account DB for the autonomous Driver — a SEPARATE file from the
 # manual paper_account.db so the driver's book is fully isolated (zero schema change;
 # every paper_account_db/paper_engine fn already takes db_path).
