@@ -651,8 +651,9 @@ def test_heatmap_no_projection_no_divider_empty_cone():
 
 
 def test_heatmap_series_count_constant_across_projection():
-    # A CONSTANT series count (heatmap + Spot + EM up + EM down + the 3 level tracks
-    # = 7) is required so the in-place chart.update() maps series 1:1 when toggling
+    # A CONSTANT series count (heatmap + the 3 spot-overlay series + EM up + EM down
+    # + the 3 level tracks = 9) is required so the in-place chart.update() maps
+    # series 1:1 when toggling
     # GEX<->Charm/DELTA/Vanna. A varying count made Highcharts replace series
     # (shifting colorIndex + leaving stray line paths) → the heatmap rendered as a
     # mess of thin lines. Regression guard: what matters is that the count is the
@@ -661,8 +662,9 @@ def test_heatmap_series_count_constant_across_projection():
             "cone": {"mid": [100.0], "up": [100.5], "down": [99.5]}}
     with_proj = gamma.heatmap_figure(_proj_rows(), "GEX", yrange=[95.0, 105.0], projection=proj)
     no_proj = gamma.heatmap_figure(_proj_rows(), "Charm", yrange=[95.0, 105.0], projection=None)
-    assert len(with_proj["series"]) == len(no_proj["series"]) == 7
-    assert [s["type"] for s in no_proj["series"]] == ["heatmap"] + ["line"] * 6
+    assert len(with_proj["series"]) == len(no_proj["series"]) == 9
+    assert [s["type"] for s in no_proj["series"]] == [
+        "heatmap", "line", "columnrange", "errorbar"] + ["line"] * 5
 
 
 def test_strike_heat_split_constant():
@@ -791,3 +793,73 @@ def test_heatmap_tracks_keep_static_lines_visible():
                                flip=449.5, levels=_LVL, show_tracks=True)
     assert len(fig["yAxis"]["plotLines"]) == 2          # static flip + call wall
     assert _series_by_name(fig)["Call wall track"]["data"]
+
+
+# --- Spot overlay style: line / candles / OHLC ---
+
+def test_ohlc_bars_buckets_samples_with_carried_open():
+    # Spot is a 1-min POINT SAMPLE, not a bar. Bars are built the standard way for a
+    # sampled series: open = the PREVIOUS bar's close, so bars are contiguous and a
+    # 1-min bar still has a body instead of a degenerate O==H==L==C dash.
+    bars = gamma.ohlc_bars([10.0, 12.0, 11.0, 9.0, 13.0, 14.0], 3)
+    assert bars[0] == [1, 10.0, 12.0, 10.0, 11.0]      # x = bucket centre column
+    assert bars[1] == [4, 11.0, 14.0, 9.0, 14.0]       # open carried; low spans it
+
+
+def test_ohlc_bars_one_minute_interval_still_has_a_body():
+    bars = gamma.ohlc_bars([10.0, 11.0, 10.5], 1)
+    assert [b[0] for b in bars] == [0, 1, 2]
+    assert bars[0] == [0, 10.0, 10.0, 10.0, 10.0]      # first bar has no prior close
+    assert bars[1] == [1, 10.0, 11.0, 10.0, 11.0]      # carried open -> real body
+
+
+def test_ohlc_bars_skips_gaps_and_is_defensive():
+    assert gamma.ohlc_bars([], 5) == []
+    assert gamma.ohlc_bars(None, 5) == []
+    assert gamma.ohlc_bars([1.0, 2.0], 0) == []        # no div-by-zero
+    # A None sample is skipped, not read as 0 (which would spike the low).
+    assert gamma.ohlc_bars([10.0, None, 12.0], 3) == [[1, 10.0, 12.0, 10.0, 12.0]]
+    assert gamma.ohlc_bars([None, None], 2) == []      # no usable sample -> no bar
+
+
+def test_candle_points_color_each_bar_by_direction():
+    body, wick = gamma.candle_points([[0, 10.0, 12.0, 9.0, 11.0],    # up   (c>o)
+                                      [1, 11.0, 11.5, 8.0, 9.0]])    # down (c<o)
+    # Body spans open->close (order-independent); wick spans low->high.
+    assert body[0] == {"x": 0, "low": 10.0, "high": 11.0, "color": gamma.UP_COLOR}
+    assert body[1] == {"x": 1, "low": 9.0, "high": 11.0, "color": gamma.DOWN_COLOR}
+    assert (wick[0]["low"], wick[0]["high"]) == (9.0, 12.0)
+    # Per-POINT color, so one series carries both up and down bars.
+    assert wick[0]["color"] == gamma.UP_COLOR and wick[1]["color"] == gamma.DOWN_COLOR
+    assert gamma.candle_points([]) == ([], [])
+
+
+def test_heatmap_spot_style_populates_only_the_selected_overlay():
+    for style, want, empty in (("line", "Spot", ("Spot candles", "Spot wicks")),
+                               ("candle", "Spot candles", ("Spot",)),
+                               ("ohlc", "Spot candles", ("Spot",))):
+        fig = gamma.heatmap_figure(_WALL_ROWS, "GEX", spot_style=style,
+                                   spot_interval=1)
+        s = {x["name"]: x for x in fig["series"]}
+        assert s[want]["data"], f"{style}: {want} should carry data"
+        for name in empty:
+            assert s[name]["data"] == [], f"{style}: {name} must be empty"
+
+
+def test_heatmap_bar_styles_avoid_the_stock_module():
+    # Candlestick/ohlc are STOCK series; loading that module breaks this chart's
+    # in-place update (live-verified). The bars are core columnrange + errorbar.
+    fig = gamma.heatmap_figure(_WALL_ROWS, "GEX", spot_style="candle")
+    types = {x["name"]: x["type"] for x in fig["series"]}
+    assert types["Spot candles"] == "columnrange"
+    assert types["Spot wicks"] == "errorbar"
+    assert "candlestick" not in types.values() and "ohlc" not in types.values()
+
+
+def test_heatmap_ohlc_draws_thinner_than_candles():
+    candle = {x["name"]: x for x in
+              gamma.heatmap_figure(_WALL_ROWS, "GEX", spot_style="candle")["series"]}
+    ohlc = {x["name"]: x for x in
+            gamma.heatmap_figure(_WALL_ROWS, "GEX", spot_style="ohlc")["series"]}
+    assert "pointWidth" not in candle["Spot candles"]      # full-width filled body
+    assert ohlc["Spot candles"]["pointWidth"] == 2         # thin -> reads as a bar

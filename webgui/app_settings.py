@@ -18,6 +18,8 @@ DEFAULTS = {
     "ticker_speed": 60,              # marquee duration seconds (higher = slower)
     "nav_pinned": False,             # nav drawer locked open (else a hover icon rail)
     "gamma_level_tracks": False,     # heatmap overlay: intraday flip/wall movement
+    "gamma_spot_style": "line",      # heatmap spot overlay: line | candle | ohlc
+    "gamma_spot_interval": 5,        # candle/OHLC bucket size in minutes (1|5|15)
 }
 
 _PATH = pathlib.Path(__file__).resolve().parent / "data" / "settings.json"

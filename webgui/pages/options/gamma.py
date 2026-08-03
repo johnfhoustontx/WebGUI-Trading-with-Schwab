@@ -431,6 +431,69 @@ def _coloraxis(zmax):
     return ca
 
 
+UP_COLOR, DOWN_COLOR = "#7fd1a3", "#e79a9a"   # candle/OHLC up / down
+
+
+def ohlc_bars(spots, interval):
+    """``[[x, open, high, low, close], …]`` from the per-snapshot spot samples.
+
+    Spot is stored as a 1-min POINT SAMPLE, not a bar, so bars are derived the way
+    any charting tool builds them from a sampled series: ``open`` is the PREVIOUS
+    bar's close (carried forward, so bars are contiguous and even a 1-min bar has a
+    body — that minute's move — instead of a degenerate O==H==L==C dash), and
+    high/low span that open plus this bucket's samples. ``x`` is the bucket's
+    CENTRE column so the bar sits over the heatmap cells it summarizes.
+
+    HONEST LIMIT: highs/lows are sampled once a minute, so wicks understate the
+    true intra-minute extremes — these are bars over the same series the spot line
+    draws, not exchange bars. Buckets with no usable sample emit no bar; a None
+    sample is skipped rather than read as 0 (which would spike the low). Never
+    raises."""
+    try:
+        step = int(interval)
+    except (TypeError, ValueError):
+        return []
+    if step <= 0:
+        return []
+    out, prev_close = [], None
+    spots = list(spots or [])
+    for start in range(0, len(spots), step):
+        chunk = spots[start:start + step]
+        vals = [v for v in chunk
+                if isinstance(v, (int, float)) and not isinstance(v, bool)]
+        if not vals:
+            continue
+        o = prev_close if prev_close is not None else vals[0]
+        c = vals[-1]
+        out.append([start + (len(chunk) - 1) // 2, o, max([o] + vals),
+                    min([o] + vals), c])
+        prev_close = c
+    return out
+
+
+def candle_points(bars):
+    """(body, wick) point lists for the candle/OHLC overlay.
+
+    Candlesticks are a Highcharts STOCK series, and loading the stock module
+    breaks this chart outright — it patches ``Chart.update``, which this heatmap
+    depends on for its flicker-free in-place refresh, leaving the chart with zero
+    series (live-verified). So the bars are drawn from two core series instead:
+    a ``columnrange`` body (open→close) and an ``errorbar`` wick (low→high), each
+    point carrying its OWN color so up and down bars are distinguishable within
+    one series."""
+    body, wick = [], []
+    for b in (bars or []):
+        try:
+            x, o, hi, lo, c = b[0], b[1], b[2], b[3], b[4]
+        except (TypeError, IndexError):
+            continue
+        color = UP_COLOR if c >= o else DOWN_COLOR
+        body.append({"x": x, "low": min(o, c), "high": max(o, c), "color": color})
+        wick.append({"x": x, "low": lo, "high": hi, "color": color,
+                     "stemColor": color, "whiskerColor": color})
+    return body, wick
+
+
 def track_points(values):
     """[[time_index, level], …] for a level track, keeping None as a GAP.
 
@@ -442,7 +505,7 @@ def track_points(values):
 
 def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
                    walls=None, spot=None, flip=None, levels=None,
-                   show_tracks=False):
+                   show_tracks=False, spot_style="line", spot_interval=5):
     """Intraday strike×time Highcharts heatmap (dark, cell separators, concise
     hover) with the underlying spot-price line overlaid on the same (linear)
     strike axis. ``yrange`` (when given) sets the Strike axis range so it aligns
@@ -543,8 +606,29 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
              "tooltip": {"headerFormat": "", "pointFormat": name + " {point.y:,.2f}"}}
         s.update(extra)
         return s
-    series.append(_line_series("Spot", spot_pts, PRICE_LINE, lineWidth=2,
-                               enableMouseTracking=True))
+    # Spot overlay: line, candles, or OHLC. All three series ALWAYS exist (empty
+    # when not selected) so the series count stays fixed — see the note above. The
+    # bar styles share one geometry: a columnrange BODY + an errorbar WICK. "OHLC"
+    # is the same bars drawn thin, so it reads as a bar rather than a filled candle
+    # (true left/right open-close ticks need the stock module, which breaks this
+    # chart's in-place update — see candle_points).
+    _bars = (ohlc_bars(spots, spot_interval)
+             if spot_style in ("candle", "ohlc") else [])
+    _body, _wick = candle_points(_bars)
+    series.append(_line_series("Spot", spot_pts if spot_style == "line" else [],
+                               PRICE_LINE, lineWidth=2, enableMouseTracking=True))
+    series.append({
+        "type": "columnrange", "name": "Spot candles", "data": _body,
+        "colorAxis": False, "states": no_fade, "borderWidth": 0,
+        "grouping": False, "enableMouseTracking": False,
+        **({"pointWidth": 2} if spot_style == "ohlc" else {}),
+    })
+    series.append({
+        "type": "errorbar", "name": "Spot wicks", "data": _wick,
+        "colorAxis": False, "states": no_fade, "grouping": False,
+        "whiskerLength": ("60%" if spot_style == "ohlc" else 0),
+        "enableMouseTracking": False,
+    })
     series.append(_line_series("EM up", em_up_pts, "#7fd1a3", lineWidth=1,
                                dashStyle="ShortDash", enableMouseTracking=False))
     series.append(_line_series("EM down", em_down_pts, "#e79a9a", lineWidth=1,
@@ -965,6 +1049,21 @@ def render():
         tracks_sw.props("dense").classes("text-xs")
         tracks_sw.tooltip("Show where the gamma flip and the call/put walls sat "
                           "through the session, not just now")
+        # Spot overlay style. Candles/OHLC are BUCKETED from the same 1-min spot
+        # samples the line draws (see ohlc_bars); the bar-size picker is hidden for
+        # the line, where it would mean nothing.
+        spot_style_sel = ui.select(
+            {"line": "Line", "candle": "Candles", "ohlc": "OHLC"},
+            value=app_settings.get("gamma_spot_style") or "line",
+            label="Spot").props("dense options-dense").classes("w-28")
+        spot_style_sel.tooltip("How to draw the spot price over the heatmap")
+        spot_int_sel = ui.select(
+            {1: "1 min", 5: "5 min", 15: "15 min"},
+            value=app_settings.get("gamma_spot_interval") or 5,
+            label="Bar").props("dense options-dense").classes("w-24")
+        spot_int_sel.tooltip("Bar size for candles / OHLC. Highs and lows are "
+                             "sampled once a minute, so wicks understate the true "
+                             "intra-minute range.")
         # Explain / Analyze / Briefings push to the RIGHT of the frame (2026-07-11).
         ui.space()
         explain_btn = ui.button("Explain", icon="help", color=None).props("no-caps").classes(BTN)
@@ -1220,7 +1319,9 @@ def render():
                                                   walls=walls, spot=view_spot,
                                                   flip=flip,
                                                   levels=entry.get("levels"),
-                                                  show_tracks=bool(tracks_sw.value)))
+                                                  show_tracks=bool(tracks_sw.value),
+                                                  spot_style=spot_style_sel.value,
+                                                  spot_interval=spot_int_sel.value))
             heat_plot.set_visibility(True)
             heat_msg.set_visibility(False)
         else:
@@ -1461,6 +1562,26 @@ def render():
         _render_view()
 
     tracks_sw.on_value_change(_on_tracks_toggle)
+
+    @guard
+    def _on_spot_style(e):
+        app_settings.set("gamma_spot_style", e.value)
+        _sync_spot_controls()
+        _render_view()
+
+    @guard
+    def _on_spot_interval(e):
+        app_settings.set("gamma_spot_interval", e.value)
+        _render_view()
+
+    def _sync_spot_controls():
+        # Bar size is meaningless for a line — hide it rather than leave a control
+        # that silently does nothing.
+        spot_int_sel.set_visibility(spot_style_sel.value != "line")
+
+    spot_style_sel.on_value_change(_on_spot_style)
+    spot_int_sel.on_value_change(_on_spot_interval)
+    _sync_spot_controls()
 
     # Initial paint from the bus cache (graceful-empty if the service is cold).
     # The cheap :ver probes + the small gex_status/sched reads stay inline; the big
