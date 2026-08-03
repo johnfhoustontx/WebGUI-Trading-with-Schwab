@@ -6,6 +6,15 @@ from services.market_svc import scheduler as sch
 _CT = ZoneInfo("America/Chicago")
 
 
+def test_poll_interval_values():
+    # A macro dashboard updates tiles in place, so a slightly slower cadence is
+    # imperceptible but roughly halves the Schwab /quotes volume (~24k → ~12k/day).
+    # Weekend stays hard-throttled (futures closed → nothing ticks).
+    assert sch.RTH_INTERVAL_SEC == 3
+    assert sch.OFFHOURS_INTERVAL_SEC == 15
+    assert sch.WEEKEND_INTERVAL_SEC == 60
+
+
 def test_fast_cadence_during_rth():
     now = dt.datetime(2026, 7, 7, 10, 0, tzinfo=_CT)  # Tue 10:00 CT
     assert sch.poll_interval(now) == sch.RTH_INTERVAL_SEC

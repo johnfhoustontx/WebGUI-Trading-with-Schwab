@@ -2140,9 +2140,13 @@ condition**. Sixth Tier-2 service. Pieces:
 - **New service `services/market_svc` (:8215, read-only).** A scheduler polls the proxy's
   **raw `/quotes`** endpoint (not `SchwabProxyClient.get_quotes`, which discards
   `assetMainType`/`futurePercentChange`) for all real symbols in ONE batched call on a
-  **~2 s RTH cadence** (`scheduler.poll_interval`, 5 s off-hours/weekends/holidays — NOT
-  throttled hard because the equity-index futures trade ~24h and are the main off-hours
-  mover; the shared `_HOLIDAYS` gate drives it), normalizes change across INDEX/EQUITY/FUTURE,
+  **~3 s RTH cadence** (`scheduler.poll_interval`, 15 s off-hours, 60 s deep-weekend when
+  futures are closed — Sat all day / Sun before the 17:00 CT reopen — NOT throttled harder
+  off-hours because the equity-index futures trade ~24h Sun-Fri and are the main off-hours
+  mover; the shared `_HOLIDAYS` gate drives it. **Cadence tuned 2026-08-02 from 2 s/5 s →
+  3 s/15 s** — the dashboard updates tiles in place so the slower poll is imperceptible, and
+  it roughly halved this service's Schwab `/quotes` volume, ~24k → ~12k calls/day, the stack's
+  #2 Schwab caller after GEX collection), normalizes change across INDEX/EQUITY/FUTURE,
   computes the `$ADVN-$DECN` breadth spread, reads the app's own cap-weighted put/call, derives a per-tile
   `color_state`, and publishes **`cache:market:dashboard`** (`skip_unchanged=True`, so no
   repaint on byte-identical ticks). No command handler — the page only reads.
@@ -4062,7 +4066,7 @@ python services\options_svc\app.py        # :8211  (scan/swing/header/gamma/pape
                                           #          + 1-min intraday GEX history collection, 08:00–15:20 CT)
 python services\portfolio_svc\app.py      # :8212  (sector breakdown + vs-sector perf + live-streaming P&L)
 python services\trade_svc\app.py          # :8213  (on-demand symbol analysis: MTF + Position/Investor verdicts)
-python services\market_svc\app.py         # :8215  (live macro-ticker Market Dashboard: ~2s RTH poll of /quotes → cache:market:dashboard)
+python services\market_svc\app.py         # :8215  (live macro-ticker Market Dashboard: ~3s RTH / 15s off-hours poll of /quotes → cache:market:dashboard)
 python services\driver_svc\app.py         # :8214  (morning-agent order-approval queue: 09:28-ET run + approve/skip;
                                           #          orders simulated — config.PAPER_TRADE=True)
 

@@ -17,8 +17,11 @@ from services.market_svc import compute, handlers
 
 _log = logging.getLogger("market_svc.scheduler")
 
-RTH_INTERVAL_SEC = 2
-OFFHOURS_INTERVAL_SEC = 5     # futures trade ~24h → keep off-hours snappy
+# Cadence tuned for Schwab /quotes volume: the dashboard updates tiles in place,
+# so 3 s vs 2 s is imperceptible but roughly halves the daily call count
+# (~24k → ~12k/day). Off-hours widened 5 s → 15 s (futures still tick visibly).
+RTH_INTERVAL_SEC = 3         # regular trading hours
+OFFHOURS_INTERVAL_SEC = 15   # futures trade ~24h Sun-Fri → keep visibly ticking
 WEEKEND_INTERVAL_SEC = 60    # futures CLOSED (Sat all day, Sun before 17:00 CT)
 
 _CT = ZoneInfo("America/Chicago")
