@@ -21,7 +21,7 @@ failure can't kill the loop or skip the others. Passed to the scaffold as
 
 **Catch-up semantics (single-user):** the autonomous ``last_slot`` is the
 in-memory once-per-slot de-dupe for checkpoints. The gate skips weekends AND NYSE
-market holidays (``_HOLIDAYS`` + ``_is_trading_day``), so no cycle — and no Claude
+market holidays (``_is_trading_day``), so no cycle — and no Claude
 API call — fires on a day the market is closed.
 """
 import asyncio
@@ -30,14 +30,13 @@ from zoneinfo import ZoneInfo
 
 from services.driver_svc import handlers, settings as _settings
 from shared import market_calendar as mc
-from shared.market_calendar import HOLIDAYS as _HOLIDAYS
 from shared.market_calendar import is_trading_day as _cal_is_trading_day
 
 _ET = ZoneInfo("America/New_York")
 
 # NYSE full-closure holidays come from shared/market_calendar.py (derived, not a
-# literal — no yearly edit). ``_HOLIDAYS`` stays bound as the local alias because
-# ``compute._mtd_trading_days`` imports it from here. The autonomous checkpoint
+# literal — no yearly edit). ``compute._mtd_trading_days`` reads that module
+# directly rather than borrowing an alias from here. The autonomous checkpoint
 # gate below treats a weekday holiday like a weekend so no cycle (and no Claude
 # API call) fires on a day the market is closed.
 

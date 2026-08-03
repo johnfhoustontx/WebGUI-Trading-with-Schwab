@@ -15,7 +15,6 @@ from zoneinfo import ZoneInfo
 
 from services.market_svc import compute, handlers
 from shared import market_calendar as mc
-from shared.market_calendar import HOLIDAYS as _HOLIDAYS  # noqa: F401  (uniform alias; no consumer here -- prefer is_holiday(): HOLIDAYS covers 2026-27 only)
 
 _log = logging.getLogger("market_svc.scheduler")
 
@@ -26,7 +25,7 @@ WEEKEND_INTERVAL_SEC = 60    # futures CLOSED (Sat all day, Sun before 17:00 CT)
 _CT = ZoneInfo("America/Chicago")
 # The 08:30-15:00 CT window and the NYSE holiday set both come from
 # shared/market_calendar.py now (config-driven + derived — no yearly edit).
-# ``_HOLIDAYS`` stays bound as the local alias. The 17:00 CT futures reopen in
+# The 17:00 CT futures reopen in
 # ``_futures_closed`` below is deliberately NOT one of these: it is a futures
 # cadence boundary, not a named market window.
 

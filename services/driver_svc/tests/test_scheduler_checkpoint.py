@@ -101,7 +101,7 @@ def test_checkpoint_not_due_on_market_holiday():
     """A weekday NYSE holiday must NOT fire a checkpoint (no Claude call on a day
     the market is closed) — 2026-07-03 (Fri, observed Independence Day) is a holiday
     mid-window, while 2026-07-02 (Thu, a trading day) at the same time IS due."""
-    assert _et(2026, 7, 3, 11, 0).date() in scheduler._HOLIDAYS
+    assert scheduler._is_trading_day(_et(2026, 7, 3, 11, 0)) is False
     assert scheduler.checkpoint_due(_et(2026, 7, 3, 11, 0), None)[0] is False
     # ...but the surrounding trading day at the same clock time is due.
     assert scheduler.checkpoint_due(_et(2026, 7, 2, 11, 0), None)[0] is True

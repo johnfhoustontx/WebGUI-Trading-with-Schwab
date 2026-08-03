@@ -24,7 +24,7 @@ def test_slow_cadence_on_weekend():
 
 
 def test_slow_cadence_on_holiday():
-    now = dt.datetime(2026, 7, 3, 10, 0, tzinfo=_CT)  # holiday in _HOLIDAYS
+    now = dt.datetime(2026, 7, 3, 10, 0, tzinfo=_CT)  # NYSE holiday
     assert sch.poll_interval(now) == sch.OFFHOURS_INTERVAL_SEC
 
 

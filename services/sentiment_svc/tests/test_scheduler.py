@@ -71,7 +71,7 @@ def test_refresh_due_weekend_throttles():
 
 
 def test_refresh_due_holiday_throttles():
-    # 2026-07-03 is an observed holiday (in _HOLIDAYS) -> off-hours -> throttled.
+    # 2026-07-03 is an observed NYSE holiday -> off-hours -> throttled.
     due1, slot1 = scheduler.refresh_due(_ct(2026, 7, 3, 10, 0), None)
     assert due1 is True
     due2, _ = scheduler.refresh_due(_ct(2026, 7, 3, 10, 1), slot1)

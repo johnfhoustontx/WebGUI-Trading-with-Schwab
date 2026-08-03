@@ -1,12 +1,12 @@
 """Single source of truth for the market calendar and session windows.
 
-**Holidays are consolidated here (Phase A, done).** The eight duplicated holiday
-sets across the five Tier-2 services, the webgui and ``options-scanner/scanner.py``
-now read from this module. Two sites remain outside it, both deliberately:
+**Holidays are consolidated here (Phase A, done).** The nine duplicated holiday
+sets across the five Tier-2 services, the webgui and ``options-scanner``
+(``scanner.py`` and ``scanner_engine.py``) now read from this module, and every
+one of them calls ``is_holiday``/``is_trading_day`` rather than testing
+membership against a bounded set. One site remains outside it deliberately:
 ``claude-driver/config.py`` is exempt (legacy; its consumers were removed
-2026-07-08), and ``options-scanner/scanner_engine.py`` still holds a DIVERGENT
-9-date 2026-only set — a tracked follow-up, since correcting it is a behavior
-change rather than a refactor.
+2026-07-08).
 
 **The session vocabulary now ships here too (Phase B, tasks B1-B2).** That is:
 the ``Session`` enum (``CLOSED``/``GTH``/``REGULAR``/``CURB`` -- Cboe's own
@@ -138,12 +138,14 @@ def nyse_holidays(year: int) -> frozenset:
     return frozenset(holidays)
 
 
-# The 2026-2027 union, kept as a name because the Phase B migrations bind it as
-# their local ``_HOLIDAYS`` alias. Derived, not a literal -- but the pinned test
-# in shared/tests/test_market_calendar.py asserts it still equals the exact 20
-# dates every live site contains, which is what keeps that migration
-# behavior-preserving.
-HOLIDAYS = nyse_holidays(2026) | nyse_holidays(2027)
+# NOTE: there is deliberately no ``HOLIDAYS`` constant here any more. It was the
+# 2026-2027 union, bound as a local ``_HOLIDAYS`` alias during the migration so
+# each site's ``d in _HOLIDAYS`` membership test kept working unchanged. But that
+# left the module answering two different ways -- ``is_holiday()`` was
+# year-general while the set stopped at 2027, so from 2028 a caller's answer
+# depended on which one it happened to touch. Every consumer now calls
+# ``is_holiday`` / ``is_trading_day``. If you need a set (e.g. to hand to code
+# that wants a container), build it explicitly for the years you actually cover.
 
 
 def is_holiday(d) -> bool:

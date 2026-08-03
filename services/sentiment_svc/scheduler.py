@@ -15,7 +15,6 @@ from zoneinfo import ZoneInfo
 
 from services.sentiment_svc import handlers, order_flow_consumer
 from shared import market_calendar as mc
-from shared.market_calendar import HOLIDAYS as _HOLIDAYS  # noqa: F401  (uniform alias; no consumer here -- prefer is_holiday(): HOLIDAYS covers 2026-27 only)
 
 log = logging.getLogger(__name__)
 
@@ -35,8 +34,8 @@ ORDER_FLOW_PUBLISH_SEC = 30   # publish cache:sentiment:order_flow at this caden
 _CT = ZoneInfo("America/Chicago")
 _OFFHOURS_INTERVAL_MIN = 15  # off-hours throttle: refresh at most once per 15 min
 # The window itself now comes from shared/market_calendar.py (config-driven, and
-# NYSE holidays are derived there — no yearly edit). ``_HOLIDAYS`` stays bound as
-# the local alias. The 15:00 CT close is read from the ``market_snapshot`` window,
+# NYSE holidays are derived there — no yearly edit).
+# The 15:00 CT close is read from the ``market_snapshot`` window,
 # whose end is the same regular-session close — so it is config, never a fresh
 # literal. ``config/sessions.toml`` drift is caught by
 # ``test_config_windows_still_match_the_legacy_constants``.

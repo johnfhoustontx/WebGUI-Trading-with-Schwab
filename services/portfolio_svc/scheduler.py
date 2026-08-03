@@ -23,7 +23,6 @@ from zoneinfo import ZoneInfo
 from services.portfolio_svc import compute, handlers
 from services.portfolio_svc.state import STATE
 from shared import market_calendar as mc
-from shared.market_calendar import HOLIDAYS as _HOLIDAYS  # noqa: F401  (uniform alias; no consumer here -- prefer is_holiday(): HOLIDAYS covers 2026-27 only)
 
 _log = logging.getLogger("portfolio_svc.scheduler")
 
@@ -43,7 +42,6 @@ RECONNECT_WAIT_MAX_SEC = 60.0  # cap on the exponential reconnect backoff
 _CT = ZoneInfo("America/Chicago")
 # The 08:30-15:00 CT window and the NYSE holiday set both come from
 # shared/market_calendar.py now (config-driven + derived — no yearly edit).
-# ``_HOLIDAYS`` stays bound as the local alias.
 
 
 def _is_rth(now):

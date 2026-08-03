@@ -112,15 +112,22 @@ def mtd_realized_before_today(closed_positions, today_ct) -> float:
 
 def _mtd_trading_days(today_ct) -> int:
     """Trading days from the 1st of ``today_ct``'s month through today inclusive
-    (weekdays − NYSE holidays). ``_HOLIDAYS`` imported lazily to avoid a
-    compute<->scheduler import cycle. Never raises."""
+    (weekdays − NYSE holidays). Never raises.
+
+    Reads ``shared.market_calendar`` directly — it used to borrow the scheduler's
+    ``_HOLIDAYS`` alias (lazily, to dodge a compute<->scheduler import cycle),
+    but that set stopped at 2027, so from 2028 this would have counted every
+    holiday as a trading day and inflated the cumulative MTD target's day count.
+    The shared calendar derives closures per year and imports nothing from this
+    service, so there is no cycle to dodge."""
     try:
-        from services.driver_svc.scheduler import _HOLIDAYS
+        from shared.market_calendar import is_trading_day as _is_td
     except Exception:  # noqa: BLE001 — degrade to weekdays-only.
-        _HOLIDAYS = set()
+        def _is_td(day):
+            return day.weekday() < 5
     d, n = today_ct.replace(day=1), 0
     while d <= today_ct:
-        if d.weekday() < 5 and d not in _HOLIDAYS:
+        if _is_td(d):
             n += 1
         d += _dt.timedelta(days=1)
     return n

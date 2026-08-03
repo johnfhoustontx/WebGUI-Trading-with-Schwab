@@ -7,7 +7,7 @@ import datetime as dt
 from zoneinfo import ZoneInfo
 
 from pages.options.scanner import _sig_key
-from shared.market_calendar import HOLIDAYS as _HOLIDAYS
+from shared.market_calendar import is_holiday as _cal_is_holiday
 from shared.market_calendar import is_trading_day as _cal_is_trading_day
 
 CT = ZoneInfo("America/Chicago")
@@ -15,12 +15,15 @@ _OPEN, _CLOSE = dt.time(8, 0), dt.time(15, 0)   # CT trading window
 
 # NYSE full-closure holidays come from shared/market_calendar.py — the one
 # calendar the whole stack now reads, derived algorithmically so there is no
-# yearly edit. ``_HOLIDAYS`` stays bound as the local alias.
+# yearly edit.
 
 
 def is_market_holiday(day):
-    """True if ``day`` (a ``date``) is an NYSE full-closure holiday."""
-    return day in _HOLIDAYS
+    """True if ``day`` (a ``date``) is an NYSE full-closure holiday.
+
+    Year-general: this used to test membership against a bounded 2026-27 set,
+    which would have called every holiday from 2028 an ordinary day."""
+    return _cal_is_holiday(day)
 
 
 def _signals(scan):

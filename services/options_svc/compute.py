@@ -4920,12 +4920,18 @@ def em_cone(spot, atm_iv, dte, start_ts_ms, holidays=None, trading_days_only=Fal
     Returns {"upper": [[ts_ms, v], ...], "lower": [...]} with one point per day
     t = 0..dte. width(t) = spot * atm_iv * sqrt(t/365) (calendar-day √-time, so
     the envelope is correct). When ``trading_days_only`` is set, **non-trading
-    days (weekends + any dates in ``holidays``) are omitted** so the cone lines up
-    with the candles on an ordinal (gap-collapsed) axis — the anchor t=0 is always
-    kept. Empty dict values on non-positive dte or missing spot/iv (defensive —
-    never raises)."""
+    days are omitted** so the cone lines up with the candles on an ordinal
+    (gap-collapsed) axis — the anchor t=0 is always kept. Empty dict values on
+    non-positive dte or missing spot/iv (defensive — never raises).
+
+    Non-trading days are decided by ``shared.market_calendar.is_trading_day``,
+    which derives the NYSE closures **per year** — so a cone running into a year
+    nobody enumerated is still correct. ``holidays`` is an OPTIONAL container of
+    EXTRA closures unioned on top (ad-hoc closures the calendar cannot derive:
+    days of mourning, weather); it is not the source of the holiday list."""
     import math
     import datetime as _dt
+    from shared import market_calendar as _mc
     if not isinstance(spot, (int, float)) or not isinstance(atm_iv, (int, float)):
         return {"upper": [], "lower": []}
     try:
@@ -4940,7 +4946,7 @@ def em_cone(spot, atm_iv, dte, start_ts_ms, holidays=None, trading_days_only=Fal
     for t in range(dte + 1):
         if trading_days_only and t > 0:
             d = start_date + _dt.timedelta(days=t)
-            if d.weekday() >= 5 or d in holidays:
+            if not _mc.is_trading_day(d) or d in holidays:
                 continue
         ts = int(start_ts_ms) + t * _DAY_MS
         width = spot * atm_iv * math.sqrt(t / 365.0)
@@ -5077,12 +5083,11 @@ def compute_expected_move(symbol, expiry, legs, lookback="auto") -> dict:
 
         # Trading-day-only cone (skip weekends/holidays) so it lines up with the
         # candles on the page's ordinal axis — no blank non-trading gaps.
-        try:
-            from services.options_svc.scheduler import _HOLIDAYS as _mkt_holidays
-        except Exception:
-            _mkt_holidays = set()
-        cone = em_cone(spot, atm_iv, dte, candles[-1][0],
-                       holidays=_mkt_holidays, trading_days_only=True)
+        # No holiday SET is passed: ``em_cone`` consults
+        # ``market_calendar.is_trading_day``, which derives the closures for
+        # whatever year the cone reaches. Handing it the old bounded 2026-27 set
+        # would have silently dropped every holiday from 2028 out of the cone.
+        cone = em_cone(spot, atm_iv, dte, candles[-1][0], trading_days_only=True)
         base["em_upper"] = cone["upper"]
         base["em_lower"] = cone["lower"]
         return base

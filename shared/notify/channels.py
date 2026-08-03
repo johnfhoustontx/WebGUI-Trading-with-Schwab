@@ -21,7 +21,6 @@ from zoneinfo import ZoneInfo
 import requests
 
 from repo_paths import NOTIFICATIONS_CONFIG
-from shared.market_calendar import HOLIDAYS as _HOLIDAYS  # noqa: F401  (uniform alias; no consumer here -- prefer is_holiday(): HOLIDAYS covers 2026-27 only)
 from shared.market_calendar import is_trading_day as _cal_is_trading_day
 
 log = logging.getLogger(__name__)

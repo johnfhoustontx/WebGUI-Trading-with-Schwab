@@ -64,6 +64,32 @@ def test_em_cone_skips_holidays_when_trading_only():
     assert dt.date(2026, 7, 6) in kept           # Monday kept
 
 
+def test_em_cone_derives_holidays_for_years_nobody_enumerated():
+    """Regression: the cone's holiday list used to be a bounded 2026-27 set
+    handed in by the caller, so a cone reaching 2028 kept every holiday as a
+    trading day. ``em_cone`` now asks the shared calendar, which derives them."""
+    import datetime as dt
+    # Friday 2028-01-14 anchor; Mon 2028-01-17 is MLK Day.
+    start = int(dt.datetime(2028, 1, 14).timestamp() * 1000)
+    cone = compute.em_cone(100.0, 0.20, 5, start, trading_days_only=True)
+    kept = [dt.datetime.fromtimestamp(ts / 1000).date() for ts, _ in cone["upper"]]
+    assert dt.date(2028, 1, 17) not in kept      # holiday dropped, no set passed
+    assert dt.date(2028, 1, 18) in kept          # non-vacuity: Tuesday kept
+
+
+def test_em_cone_extra_holidays_are_unioned_not_authoritative():
+    """A caller-supplied set is now EXTRA closures (ad-hoc: mourning, weather)
+    on top of the derived calendar, not a replacement for it."""
+    import datetime as dt
+    start = int(dt.datetime(2028, 1, 14).timestamp() * 1000)
+    cone = compute.em_cone(100.0, 0.20, 5, start,
+                           holidays={dt.date(2028, 1, 18)}, trading_days_only=True)
+    kept = [dt.datetime.fromtimestamp(ts / 1000).date() for ts, _ in cone["upper"]]
+    assert dt.date(2028, 1, 17) not in kept      # derived holiday still dropped
+    assert dt.date(2028, 1, 18) not in kept      # ...and the ad-hoc one too
+    assert dt.date(2028, 1, 19) in kept
+
+
 def test_em_cone_default_keeps_all_calendar_days():
     # Without trading_days_only, behaviour is unchanged (all calendar days).
     cone = compute.em_cone(100.0, 0.20, 5, 0)

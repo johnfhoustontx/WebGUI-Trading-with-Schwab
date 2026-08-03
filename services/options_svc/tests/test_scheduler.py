@@ -56,7 +56,7 @@ def test_gex_due_weekend():
 
 
 def test_gex_due_holiday():
-    # 2026-07-03 is in scheduler._HOLIDAYS.
+    # 2026-07-03 is an NYSE holiday (observed Independence Day).
     due, _ = scheduler.gex_due(_ct(2026, 7, 3, 9, 0), None)
     assert due is False
 
@@ -146,7 +146,7 @@ def test_paper_cycle_due_weekend_none():
 
 
 def test_paper_cycle_due_holiday_none():
-    # 2026-07-03 is in _HOLIDAYS.
+    # 2026-07-03 is an NYSE holiday (observed Independence Day).
     assert scheduler.paper_cycle_due(_ct(2026, 7, 3, 9, 0), set()) is None
 
 
@@ -259,6 +259,20 @@ def test_active_session_date_holds_friday_through_weekend():
 def test_active_session_date_holds_prior_day_on_holiday():
     # 2026-01-19 (MLK) is a Monday holiday → most recent trading day is Fri 2026-01-16.
     assert scheduler.active_session_date(_ct(2026, 1, 19, 12, 0)).isoformat() == "2026-01-16"
+
+
+def test_active_session_date_is_year_general_past_2027():
+    """Regression: ``active_session_date``/``_prev_trading_day`` used to test
+    membership against the shared calendar's bounded 2026-27 ``HOLIDAYS`` set
+    while ``_is_trading_day`` was year-general — so the SAME module disagreed
+    with itself about a 2028 holiday. MLK Day 2028-01-17 is a Monday: the
+    display must hold Friday 2028-01-14, not flip to the closed Monday."""
+    assert scheduler._is_trading_day(_ct(2028, 1, 17, 12, 0)) is False
+    assert scheduler.active_session_date(_ct(2028, 1, 17, 9, 0)).isoformat() == "2028-01-14"
+    # ...and the prior-day walk skips it from the following trading day too.
+    assert scheduler.active_session_date(_ct(2028, 1, 18, 7, 0)).isoformat() == "2028-01-14"
+    # Non-vacuity: an ordinary 2028 trading day still resolves to itself.
+    assert scheduler.active_session_date(_ct(2028, 1, 18, 9, 0)).isoformat() == "2028-01-18"
 
 
 def test_active_session_date_premarket_holds_prior_session():
@@ -412,7 +426,7 @@ def test_analyze_slot_skips_weekend():
 
 
 def test_analyze_slot_skips_holiday():
-    # 2026-12-25 is in _HOLIDAYS.
+    # 2026-12-25 is an NYSE holiday (Christmas).
     assert scheduler.analyze_slot_due(_ct(2026, 12, 25, 8, 0), set()) is None
 
 

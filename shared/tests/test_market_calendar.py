@@ -32,11 +32,12 @@ def test_sessions_toml_path_declared():
     assert repo_paths.SESSIONS_TOML.parent.name == "config"
 
 
-def test_holidays_is_frozenset_of_20_dates():
-    assert isinstance(mc.HOLIDAYS, frozenset)
-    assert len(mc.HOLIDAYS) == 20            # 10 per year, 2026 + 2027
-    assert date(2026, 6, 19) in mc.HOLIDAYS   # Juneteenth
-    assert date(2027, 12, 24) in mc.HOLIDAYS  # Christmas observed 2027
+def test_no_bounded_holidays_alias():
+    """The 2026-27 ``HOLIDAYS`` union is gone on purpose. While it existed the
+    module answered two different ways from 2028 on -- ``is_holiday()`` was
+    year-general, the set was not -- so a consumer's answer depended on which it
+    happened to touch. Every consumer now calls the predicates."""
+    assert not hasattr(mc, "HOLIDAYS")
 
 
 def test_is_holiday():

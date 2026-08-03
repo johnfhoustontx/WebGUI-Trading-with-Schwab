@@ -19,7 +19,6 @@ from zoneinfo import ZoneInfo
 
 from services.options_svc import compute, handlers
 from shared import market_calendar as mc
-from shared.market_calendar import HOLIDAYS as _HOLIDAYS
 from shared.market_calendar import is_trading_day as _cal_is_trading_day
 
 log = logging.getLogger(__name__)
@@ -30,9 +29,10 @@ _CT = ZoneInfo("America/Chicago")
 # named ``scan`` window (see shared/market_calendar.py); the former
 # ``_SCAN_START``/``_SCAN_END`` tuples are gone.
 # NYSE full-closure holidays come from shared/market_calendar.py (derived, not
-# a literal — no yearly edit). ``_HOLIDAYS`` stays bound as the local alias
-# because ``_prev_trading_day``/``active_session_date`` below and
-# ``compute.py`` test membership against it directly.
+# a literal — no yearly edit). Everything here goes through the year-general
+# ``is_trading_day`` predicate; the module's former bounded 2026-27 ``HOLIDAYS``
+# set is gone, so ``active_session_date`` can no longer disagree with
+# ``_is_trading_day`` about a 2028 holiday.
 
 
 def _is_trading_day(now):
@@ -109,7 +109,7 @@ def _prev_trading_day(d):
     """Most recent trading day strictly before date ``d`` (skips weekends/holidays)."""
     import datetime as _dtmod
     d = d - _dtmod.timedelta(days=1)
-    while d.weekday() >= 5 or d in _HOLIDAYS:
+    while not _cal_is_trading_day(d):
         d -= _dtmod.timedelta(days=1)
     return d
 
@@ -133,7 +133,7 @@ def active_session_date(now=None):
     ``test_session_flip_is_independent_of_collection_start``."""
     now = now or _market_now()
     d = now.date()
-    is_td = d.weekday() < 5 and d not in _HOLIDAYS
+    is_td = _cal_is_trading_day(d)
     flip = mc.session_flip_time()
     if is_td and (now.hour, now.minute) >= (flip.hour, flip.minute):
         return d

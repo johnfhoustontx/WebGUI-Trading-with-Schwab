@@ -36,7 +36,7 @@ from zoneinfo import ZoneInfo
 import pathlib as _pathlib
 
 sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo root
-from shared.market_calendar import HOLIDAYS as _SHARED_HOLIDAYS  # noqa: E402
+from shared.market_calendar import is_trading_day as _cal_is_trading_day  # noqa: E402
 
 from watchlist import get_scan_symbols
 import daily_trade_log
@@ -111,9 +111,10 @@ class Config:
     LOG_DIR = Path(__file__).parent / "logs"
     LOG_DIR.mkdir(exist_ok=True)
 
-    # NYSE full-closure holidays from shared/market_calendar.py (derived, not a
-    # literal — no yearly edit). One calendar for the whole stack.
-    HOLIDAYS = _SHARED_HOLIDAYS
+    # NYSE full-closure holidays come from shared/market_calendar.py (derived
+    # per year, not a literal — no yearly edit). ``is_trading_day`` below calls
+    # that predicate directly; there is deliberately no ``Config.HOLIDAYS`` set,
+    # because a bounded one would go stale the moment it ran past its last year.
 
 #############################################
 # LOGGING SETUP
@@ -168,11 +169,7 @@ def is_trading_day(dt=None):
     if dt is None:
         dt = datetime.now(Config.TZ)
     d = dt.date() if hasattr(dt, "date") else dt
-    if d.weekday() >= 5:
-        return False
-    if d in Config.HOLIDAYS:
-        return False
-    return True
+    return _cal_is_trading_day(d)
 
 
 def is_market_hours(dt=None):

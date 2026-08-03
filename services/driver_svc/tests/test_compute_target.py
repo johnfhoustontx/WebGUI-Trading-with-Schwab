@@ -61,6 +61,15 @@ def test_mtd_trading_days_counts_weekdays_minus_holidays():
     assert compute._mtd_trading_days(dt.date(2026, 7, 9)) == 6
 
 
+def test_mtd_trading_days_excludes_holidays_past_2027():
+    """Regression: this borrowed the scheduler's ``_HOLIDAYS`` alias, a bounded
+    2026-27 set, so from 2028 every holiday counted as a trading day and
+    inflated the cumulative MTD target's denominator. Jan 2028: weekdays through
+    Mon Jan 31 = 21, minus New Year's observed Fri 2027-12-31 (not in January)
+    and MLK Mon Jan 17 -> 20."""
+    assert compute._mtd_trading_days(dt.date(2028, 1, 31)) == 20
+
+
 def test_mtd_trading_days_first_of_month():
     # Jul 1 2026 (Wed) is a single trading day.
     assert compute._mtd_trading_days(dt.date(2026, 7, 1)) == 1
