@@ -248,6 +248,15 @@ _TOML_PATH = SESSIONS_TOML
 def _merge(base, over):
     out = {k: (dict(v) if isinstance(v, dict) else v) for k, v in base.items()}
     for k, v in (over or {}).items():
+        # A scalar where the default is a table (``sessions = "oops"``) would
+        # otherwise be stored verbatim and detonate later, on a scheduler tick
+        # rather than at load time. Reject it here -- this runs BEFORE the
+        # recursion, so it also catches the nested form ([windows] with
+        # scan = "oops"), where the bad value is one level down.
+        if isinstance(out.get(k), dict) and not isinstance(v, dict):
+            log.warning("sessions.toml: %r should be a table, got %r "
+                        "-- using default", k, v)
+            continue
         if isinstance(v, dict) and isinstance(out.get(k), dict):
             out[k] = _merge(out[k], v)
         else:
@@ -271,7 +280,13 @@ def load_config() -> dict:
     every scheduler tick and every session predicate, but the file changes
     approximately never -- so re-parse only when its mtime moves (or it is
     missing). A missing or corrupt file degrades to the defaults; a scheduler
-    must never die because someone fat-fingered a TOML.
+    must never die because someone fat-fingered a TOML. That covers bad
+    *shapes* as well as bad values -- a scalar where a table belongs is
+    rejected by ``_merge`` rather than stored to detonate downstream.
+
+    **Returns the CACHED dict -- treat it as read-only.** A caller that
+    mutates the result poisons the cache for every other caller in the
+    process, including the scheduler ticks in five services.
     """
     try:
         mtime = os.stat(_TOML_PATH).st_mtime

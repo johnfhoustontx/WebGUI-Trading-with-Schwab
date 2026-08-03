@@ -229,6 +229,51 @@ def test_malformed_activation_date_falls_back(monkeypatch, tmp_path):
     assert mc.activation_date() == dt.date(2026, 8, 17)
 
 
+def _write_cfg(monkeypatch, tmp_path, body):
+    bad = tmp_path / "sessions.toml"
+    bad.write_text(body, encoding="utf-8")
+    monkeypatch.setattr(mc, "_TOML_PATH", bad)
+    mc.reset_config_cache()
+
+
+@pytest.mark.parametrize("body", [
+    'sessions = "oops"',
+    'windows = "oops"',
+    '[windows]\nscan = "oops"',          # nested: bad value one level down
+    '[sessions]\ngth = "oops"',          # nested
+    'activation = "soon"',
+    'alerts = "yes"',
+])
+def test_malformed_shape_degrades_to_defaults(monkeypatch, tmp_path, body):
+    """A SCALAR where a table belongs is a different failure class from a bad
+    value: _merge would store it verbatim and it would then blow up on a
+    scheduler tick, not at load time. Every accessor must survive it."""
+    _write_cfg(monkeypatch, tmp_path, body)
+    now = _ct(2026, 8, 17, 10, 0)
+    assert mc.load_config() == mc._DEFAULTS
+    assert mc.session_at(now) is mc.Session.REGULAR
+    assert mc.in_window("scan", now) is True
+    assert mc.in_collection_window(now) is True
+    assert mc.session_flip_time() == dt.time(8, 0)
+    assert mc.window_bounds("scan") == (dt.time(8, 0), dt.time(15, 15))
+    assert mc.activation_date() == dt.date(2026, 8, 17)
+    assert mc.alerts_fire_in_extended_hours() is False
+
+
+def test_malformed_shape_does_not_disturb_a_sibling_key(monkeypatch, tmp_path):
+    """Rejecting one bad table must not discard the valid keys beside it."""
+    _write_cfg(monkeypatch, tmp_path,
+               '[windows]\nscan = "oops"\n\n[windows.collection]\nstop = "15:30"\n')
+    assert mc.window_bounds("scan") == (dt.time(8, 0), dt.time(15, 15))   # default
+    assert mc.window_bounds("collection")[1] == dt.time(15, 30)           # honoured
+
+
+def test_load_config_result_is_the_cached_object(monkeypatch, tmp_path):
+    """Documents why load_config's result must be treated as read-only: it is
+    the cached dict itself, so a mutating caller would poison every other."""
+    assert mc.load_config() is mc.load_config()
+
+
 # -- named operating windows ------------------------------------------------
 def test_in_window_scan():
     assert mc.in_window("scan", _ct(2026, 8, 17, 8, 0)) is True
