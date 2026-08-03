@@ -8,8 +8,12 @@ calls performed via the injected client. No tk imports.
 from __future__ import annotations
 
 import logging
+import sys
+import pathlib
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root
 
 from scoring import WEIGHTS
 from scoring import vix as vix_score
@@ -446,7 +450,7 @@ def backfill_history(
     # daily history already excludes holidays, but a stray candle with a
     # holiday timestamp would otherwise pollute the rolling 30-day view.
     try:
-        from market_calendar import is_trading_day
+        from shared.market_calendar import is_trading_day
     except ImportError:
         is_trading_day = lambda _d: True  # noqa: E731
     today = datetime.now().date()

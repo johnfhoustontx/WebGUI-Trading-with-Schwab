@@ -92,7 +92,7 @@ def _make_client():
 def main() -> int:
     sys.path.insert(0, str(HERE))
     from history_backfill import backfill_history
-    from market_calendar import is_trading_day
+    from shared.market_calendar import is_trading_day
     from sentiment_dashboard import load_sectors_data, SECTORS_XLSX  # type: ignore
     from datetime import date
 

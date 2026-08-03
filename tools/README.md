@@ -23,7 +23,7 @@ healthy (exit 0).
 
 **Market awareness:** the sentiment dashboard only republishes its bridge on
 NYSE trading days within market hours (08:00–16:00 CT, mirroring the dashboard's
-`AUTO_FETCH_START/END_HOUR` and reusing `market_calendar.is_trading_day`).
+`AUTO_FETCH_START/END_HOUR` and reusing `shared.market_calendar.is_trading_day`).
 Outside that window — weekends, holidays, overnight — a stale bridge is expected,
 so the check reports `IDLE` (healthy) rather than `STALE`. It only flags genuine
 `STALE` when the bridge is old *during* the hours it should be publishing.

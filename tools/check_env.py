@@ -18,9 +18,7 @@ import pathlib
 from dataclasses import dataclass
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root
-from repo_paths import PROXY_URL, BRIDGE_PATH, SENTIMENT  # noqa: E402
-
-sys.path.insert(0, str(SENTIMENT))  # for market_calendar.is_trading_day
+from repo_paths import PROXY_URL, BRIDGE_PATH  # noqa: E402
 
 # States
 UP = "UP"
@@ -87,7 +85,7 @@ def should_be_publishing(now_dt):
     """True iff the sentiment dashboard is expected to be refreshing the bridge
     right now: a trading day within the market-hours window. Off-hours,
     weekends, and NYSE holidays return False (bridge is idle by design)."""
-    from market_calendar import is_trading_day
+    from shared.market_calendar import is_trading_day
     if not is_trading_day(now_dt.date()):
         return False
     return MARKET_OPEN_HOUR <= now_dt.hour <= MARKET_CLOSE_HOUR
