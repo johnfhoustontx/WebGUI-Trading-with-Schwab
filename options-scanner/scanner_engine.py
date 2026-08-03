@@ -25,12 +25,17 @@ Version 1.0.0 Changes:
 
 import math
 import json
+import sys
+import pathlib as _pathlib
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 import logging
 from pathlib import Path
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+
+sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo root
+from shared.market_calendar import is_trading_day as _cal_is_trading_day  # noqa: E402
 
 # Cap per-scan concurrency to stay well below Schwab API rate limits while
 # still collapsing per-symbol round-trips from O(symbols) to ~O(1).
@@ -88,21 +93,24 @@ import fill_model
 
 TZ = ZoneInfo("America/Chicago")
 
-HOLIDAYS_2026 = {
-    date(2026, 1, 1), date(2026, 1, 19), date(2026, 2, 16),
-    date(2026, 4, 3), date(2026, 5, 25), date(2026, 7, 3),
-    date(2026, 9, 7), date(2026, 11, 26), date(2026, 12, 25),
-}
-
 #############################################
 # MARKET HOURS
 #############################################
+# NYSE full-closure holidays come from shared/market_calendar.py — derived
+# algorithmically per year, so there is no set to maintain. The former local
+# ``HOLIDAYS_2026`` literal was 2026-only AND was missing Juneteenth, which made
+# ``is_market_hours`` (and through it ``paper_engine.in_trading_window``) treat
+# every holiday from 2027 onward as a normal trading day.
+
 
 def is_trading_day(dt=None):
+    """True on a weekday that is not an NYSE full-closure holiday.
+
+    Accepts a ``datetime`` or a ``date`` (or None for "now", CT)."""
     if dt is None:
         dt = datetime.now(TZ)
     d = dt.date() if hasattr(dt, "date") else dt
-    return d.weekday() < 5 and d not in HOLIDAYS_2026
+    return _cal_is_trading_day(d)
 
 def is_market_hours(dt=None, start_h=8, start_m=0, end_h=15, end_m=15):
     if dt is None:

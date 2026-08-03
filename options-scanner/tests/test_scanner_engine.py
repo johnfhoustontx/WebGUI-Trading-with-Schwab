@@ -1803,3 +1803,41 @@ class TestDirectionalSignals:
         # would pass even if the handler wiped both buckets on the way out.
         assert results["signals_0dte"], "credit scan did not survive the directional failure"
         assert results["signals_swing"], "credit scan did not survive the directional failure"
+
+
+class TestTradingDayCalendar:
+    """``is_trading_day`` reads the shared NYSE calendar, not a local literal.
+
+    The retired local ``HOLIDAYS_2026`` set held 9 dates for 2026 only: it was
+    missing Juneteenth 2026-06-19, and from 2027-01-01 it made every market
+    holiday look like a trading day — which ``is_market_hours`` and, through it,
+    ``paper_engine.in_trading_window`` would have honoured.
+    """
+
+    def test_juneteenth_2026_is_not_a_trading_day(self):
+        assert scanner_engine.is_trading_day(date(2026, 6, 19)) is False
+
+    def test_2027_holidays_are_not_trading_days(self):
+        # MLK Day 2027-01-18 (Mon) and Thanksgiving 2027-11-25 (Thu).
+        assert scanner_engine.is_trading_day(date(2027, 1, 18)) is False
+        assert scanner_engine.is_trading_day(date(2027, 11, 25)) is False
+        # Good Friday 2027-03-26 and Christmas observed 2027-12-24 (Fri).
+        assert scanner_engine.is_trading_day(date(2027, 3, 26)) is False
+        assert scanner_engine.is_trading_day(date(2027, 12, 24)) is False
+
+    def test_ordinary_2027_weekday_is_a_trading_day(self):
+        # Non-vacuity: the assertions above would pass for a function that
+        # always returned False.
+        assert scanner_engine.is_trading_day(date(2027, 1, 19)) is True
+
+    def test_accepts_a_datetime_as_well_as_a_date(self):
+        from datetime import datetime as _datetime
+        assert scanner_engine.is_trading_day(
+            _datetime(2026, 6, 19, 10, 0, tzinfo=scanner_engine.TZ)) is False
+        assert scanner_engine.is_trading_day(
+            _datetime(2026, 6, 18, 10, 0, tzinfo=scanner_engine.TZ)) is True
+
+    def test_market_hours_closed_on_juneteenth(self):
+        from datetime import datetime as _datetime
+        assert scanner_engine.is_market_hours(
+            _datetime(2026, 6, 19, 10, 0, tzinfo=scanner_engine.TZ)) is False
