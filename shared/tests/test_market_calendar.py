@@ -106,6 +106,37 @@ def test_derivation_works_for_a_year_outside_2026_2027():
     assert date(2028, 11, 23) in h2028     # Thanksgiving
 
 
+def test_new_year_observed_on_31_dec_of_the_prior_year():
+    """The year-boundary spill: 1 Jan 2028 is a Saturday, so the NYSE observes
+    New Year's Day on Friday 2027-12-31 -- a date that lives in the *2028* set.
+    ``is_holiday`` consulted only ``nyse_holidays(d.year)``, so it read that
+    closure as an ordinary trading day."""
+    assert date(2028, 1, 1).weekday() == 5              # Saturday -- the trigger
+    assert date(2027, 12, 31) in mc.nyse_holidays(2028)
+    assert date(2027, 12, 31) not in mc.nyse_holidays(2027)   # not in its own year
+    assert mc.is_holiday(date(2027, 12, 31)) is True
+    assert mc.is_trading_day(date(2027, 12, 31)) is False
+
+
+def test_prev_trading_day_skips_the_spilled_new_year_holiday():
+    # Monday 2028-01-03 -> Thursday 2027-12-30 (Fri 12/31 is the observed
+    # New Year's closure, and 1-2 Jan are the weekend).
+    assert mc.prev_trading_day(date(2028, 1, 3)) == date(2027, 12, 30)
+
+
+def test_spill_lookup_does_not_disturb_any_other_year():
+    """The extra ``d.year + 1`` lookup must only ever add a 31 Dec date. Pin the
+    full 2026 and 2027 sets (10 each) and check no ordinary late-December day
+    became a holiday."""
+    assert len(mc.nyse_holidays(2026)) == 10
+    assert len(mc.nyse_holidays(2027)) == 10
+    # 2027-01-01 is a Friday, so nothing spills back into 2026.
+    assert mc.is_holiday(date(2026, 12, 31)) is False
+    assert mc.is_trading_day(date(2026, 12, 31)) is True
+    # And a normal 30 Dec in the spill year stays a trading day.
+    assert mc.is_trading_day(date(2027, 12, 30)) is True
+
+
 def test_juneteenth_absent_before_2022():
     """The derivation encodes today's rules; Juneteenth is the one historical
     change it models. Everything else pre-2022 is out of the documented

@@ -151,13 +151,16 @@ def is_holiday(d) -> bool:
 
     Derived per-year, so any year works -- there is no set to update.
 
-    Known limitation, deliberately matching the eight live holiday sets this
-    module replaces: the lookup consults ``nyse_holidays(d.year)`` only, so the
-    New-Year's-observed spill into 31 Dec of the prior year (when 1 Jan is a
-    Saturday, next on 2027-12-31) reads as a trading day. Changing that would
-    diverge from the sets currently in production, so it is left alone here.
+    **Both ``nyse_holidays(d.year)`` and ``nyse_holidays(d.year + 1)`` are
+    consulted**, which is what catches the year-boundary spill: when 1 Jan falls
+    on a Saturday the NYSE observes New Year's Day on the PRIOR 31 December, so
+    that closure lives in the *next* year's set (next occurrence 2027-12-31, for
+    New Year's 2028). Checking only the date's own year read those days as
+    trading days. No holiday spills the other way -- Christmas observed is the
+    latest in-year closure and never lands in January -- so the two lookups are
+    sufficient.
     """
-    return d in nyse_holidays(d.year)
+    return d in nyse_holidays(d.year) or d in nyse_holidays(d.year + 1)
 
 
 def is_trading_day(d) -> bool:

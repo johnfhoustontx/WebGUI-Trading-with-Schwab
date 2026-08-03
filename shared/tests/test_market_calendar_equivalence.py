@@ -165,12 +165,40 @@ def test_is_trading_day_matches_legacy():
         assert mc.is_trading_day(day) == _legacy_is_trading_day(day), day
 
 
+# The ONE date in 2026-2027 where the shared calendar deliberately DIVERGES from
+# the legacy sets: 1 Jan 2028 is a Saturday, so the NYSE observes New Year's Day
+# on Friday 2027-12-31. None of the legacy literals carried that spilled date, so
+# every one of them called it a trading day. ``is_holiday`` now consults the next
+# year's set too, which is a deliberate bug fix, not a derivation slip.
+_LEGACY_DIVERGENCE = frozenset({dt.date(2027, 12, 31)})
+
+
 def test_is_trading_day_matches_legacy_across_both_holiday_years():
-    """A wider sweep, so the four-day sample can't hide a derivation slip."""
+    """A wider sweep, so the four-day sample can't hide a derivation slip.
+
+    ``_LEGACY_DIVERGENCE`` is carved out because the legacy sets were WRONG
+    there -- see the constant. The companion test below pins that it is the only
+    difference, so the carve-out cannot mask a second one."""
     day = dt.date(2026, 1, 1)
     while day <= dt.date(2027, 12, 31):
-        assert mc.is_trading_day(day) == _legacy_is_trading_day(day), day
+        if day not in _LEGACY_DIVERGENCE:
+            assert mc.is_trading_day(day) == _legacy_is_trading_day(day), day
         day += dt.timedelta(days=1)
+
+
+def test_legacy_divergence_is_exactly_the_spilled_new_year_holiday():
+    """Bounds the carve-out above: enumerate every date in the two-year span
+    where the shared calendar and the legacy sets disagree, and assert the set
+    is exactly ``_LEGACY_DIVERGENCE`` -- and that the divergence goes the
+    intended way (legacy said "trade", the fixed calendar says "closed")."""
+    differing, day = set(), dt.date(2026, 1, 1)
+    while day <= dt.date(2027, 12, 31):
+        if mc.is_trading_day(day) != _legacy_is_trading_day(day):
+            differing.add(day)
+        day += dt.timedelta(days=1)
+    assert differing == set(_LEGACY_DIVERGENCE)
+    assert _legacy_is_trading_day(dt.date(2027, 12, 31)) is True
+    assert mc.is_trading_day(dt.date(2027, 12, 31)) is False
 
 
 # ---------------------------------------------------------------------------
