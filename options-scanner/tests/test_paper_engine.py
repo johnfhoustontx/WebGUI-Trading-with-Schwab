@@ -392,3 +392,49 @@ def test_entry_cycle_rejects_degenerate_fill(tmp_path):
     assert acct["cash"] == 25_000.0                 # not corrupted
     assert acct["buying_power_reserved"] == 0.0
     assert pdb.fetch_orders(db)[0]["reject_reason"] == "DEGENERATE_FILL"
+
+
+# ── Extended trading hours: the execution layer stays inert (B10) ─────────────
+
+
+def test_paper_trading_window_excludes_extended_hours():
+    """DELIBERATE: paper fills must never use extended-hours quotes.
+
+    The 08:30-15:00 CT window IS the observe-only posture from the 2026-08-02
+    extended-hours design doc (section 7, "What deliberately does not change").
+    Cboe's GTH (06:30-08:25 CT) and Curb (15:00-15:15 CT) sessions are thin and
+    wide; simulating fills there would book entries that could not have executed.
+
+    If this test fails because someone widened the window, that is a REGRESSION,
+    not an improvement.
+    """
+    # 2026-08-17 is the ETH activation date (a Monday, a trading day).
+    assert pe.in_trading_window(datetime(2026, 8, 17, 7, 0, tzinfo=_CT)) is False   # GTH
+    assert pe.in_trading_window(datetime(2026, 8, 17, 15, 5, tzinfo=_CT)) is False  # Curb
+    assert pe.in_trading_window(datetime(2026, 8, 17, 10, 0, tzinfo=_CT)) is True   # RTH
+
+
+def test_settlement_stays_at_1600_et_despite_curb_trading():
+    """DELIBERATE, and verified against Cboe's Equity Options ETH FAQ:
+
+        "Expiring equity single stock options will trade until 4:00 p.m. ET as
+         part of RTH and 4:15 p.m. ET in the Curb session on expiration day...
+         In all cases, OCC marks closing and/or settlement prices based on the
+         4:00 p.m. ET National Best Bid and Offer (NBBO). OCC also bases
+         in/out-of-the-money determination based on the 4:00 p.m. ET closing
+         price of the underlying equity security."
+
+    So eligible names DO trade the curb on expiration day, but that exists to let
+    holders close rather than take delivery -- settlement and the ITM
+    determination are BOTH struck at 16:00 ET. SETTLE_HOUR_CT = 15 (15:00 CT ==
+    16:00 ET) is therefore correct. Do NOT "extend" it to 15:15 CT.
+
+    See hazard H4 in docs/plans/2026-08-02-options-extended-hours-design.md.
+    """
+    assert pe.SETTLE_HOUR_CT == 15                     # 15:00 CT == 16:00 ET
+
+    exp = "2026-08-21"                                 # a Friday expiry
+    # 14:59 CT on expiry day: not yet settled.
+    assert pe.should_settle(exp, exp, datetime(2026, 8, 21, 14, 59, tzinfo=_CT)) is False
+    # 15:00 CT (== the 16:00 ET NBBO strike): settles, curb session notwithstanding.
+    assert pe.should_settle(exp, exp, datetime(2026, 8, 21, 15, 0, tzinfo=_CT)) is True

@@ -144,3 +144,22 @@ def test_should_rearm_missing_date_is_noop():
     """A halt with no recorded date can't be proven stale → don't re-arm."""
     assert scheduler.should_rearm({"halted": True, "halted_date": None}, "2026-06-24") is False
     assert scheduler.should_rearm({"halted": True}, "2026-06-24") is False
+
+
+# ── Extended trading hours: no entries outside RTH (B10) ─────────────────────
+
+
+def test_driver_takes_no_entries_in_extended_hours():
+    """DELIBERATE: the 09:45-15:30 ET entry window excludes BOTH Cboe extended
+    sessions -- GTH (07:30-09:25 ET) and Curb (16:00-16:15 ET).
+
+    Observe-only posture; see section 7 of the 2026-08-02 extended-hours design
+    doc. Widening this would let the decider open positions on thin ETH quotes.
+    """
+    # 2026-08-17 is the ETH activation date (a Monday, a trading day).
+    # 07:45 ET -- inside Cboe's GTH session
+    due, _ = scheduler.checkpoint_due(_et(2026, 8, 17, 7, 45), None)
+    assert due is False
+    # 16:05 ET -- inside Cboe's Curb session
+    due, _ = scheduler.checkpoint_due(_et(2026, 8, 17, 16, 5), None)
+    assert due is False

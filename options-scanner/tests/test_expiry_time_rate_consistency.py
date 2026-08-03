@@ -142,3 +142,32 @@ def test_calc_summary_generic_docstring_names_convention():
 def test_dividend_yield_assumption_documented():
     doc = oc.bs_price.__doc__ or ""
     assert "dividend" in doc.lower()
+
+
+# ── Extended trading hours: expiry T still settles at 16:00 ET (B10) ─────────
+
+def test_expiry_close_hour_stays_1600_et_despite_curb_trading():
+    """DELIBERATE, and verified against Cboe's Equity Options ETH FAQ:
+
+        "Expiring equity single stock options will trade until 4:00 p.m. ET as
+         part of RTH and 4:15 p.m. ET in the Curb session on expiration day...
+         In all cases, OCC marks closing and/or settlement prices based on the
+         4:00 p.m. ET National Best Bid and Offer (NBBO). OCC also bases
+         in/out-of-the-money determination based on the 4:00 p.m. ET closing
+         price of the underlying equity security."
+
+    Eligible names DO trade the curb on expiration day, but that exists to let
+    holders close rather than take delivery -- settlement and the ITM
+    determination are BOTH struck at 16:00 ET. So the time-to-expiry basis must
+    stay 16:00 ET; do NOT "extend" it to 16:15 to match curb trading, which would
+    leave every 0DTE option carrying 15 minutes of phantom time value at the close.
+
+    See hazard H4 in docs/plans/2026-08-02-options-extended-hours-design.md.
+    """
+    assert oc.EXPIRY_CLOSE_HOUR_ET == 16
+    # T is zero from the 16:00 ET close onward -- the curb window is NOT priced.
+    from zoneinfo import ZoneInfo
+    et = ZoneInfo("America/New_York")
+    exp = date(2026, 8, 21)                              # a Friday expiry
+    assert expiry_time_to_years(datetime(2026, 8, 21, 16, 0, tzinfo=et), exp) == 0.0
+    assert expiry_time_to_years(datetime(2026, 8, 21, 16, 10, tzinfo=et), exp) == 0.0
