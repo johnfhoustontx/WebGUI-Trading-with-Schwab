@@ -11,12 +11,11 @@ loop+sleep here own the cadence.
 """
 import asyncio
 import logging
-from datetime import time as _time
 from zoneinfo import ZoneInfo
 
 from services.sentiment_svc import handlers, order_flow_consumer
+from shared import market_calendar as mc
 from shared.market_calendar import HOLIDAYS as _HOLIDAYS  # noqa: F401  (uniform alias; no consumer here -- prefer is_holiday(): HOLIDAYS covers 2026-27 only)
-from shared.market_calendar import is_trading_day as _cal_is_trading_day
 
 log = logging.getLogger(__name__)
 
@@ -34,19 +33,28 @@ ORDER_FLOW_PUBLISH_SEC = 30   # publish cache:sentiment:order_flow at this caden
 # the intraday-recording window (handlers._is_rth_now) so the RTH-gated 2-min
 # recording keeps firing every cycle while the market is open.
 _CT = ZoneInfo("America/Chicago")
-_RTH_START = (8, 30)   # 08:30 CT (mirrors handlers._is_rth_now open)
-_RTH_END = (15, 0)     # 15:00 CT (exclusive — mirrors handlers._is_rth_now close)
 _OFFHOURS_INTERVAL_MIN = 15  # off-hours throttle: refresh at most once per 15 min
-# NYSE full-closure holidays come from shared/market_calendar.py (derived, not a
-# literal — no yearly edit). ``_HOLIDAYS`` stays bound as the local alias.
+# The window itself now comes from shared/market_calendar.py (config-driven, and
+# NYSE holidays are derived there — no yearly edit). ``_HOLIDAYS`` stays bound as
+# the local alias. The 15:00 CT close is read from the ``market_snapshot`` window,
+# whose end is the same regular-session close — so it is config, never a fresh
+# literal. ``config/sessions.toml`` drift is caught by
+# ``test_config_windows_still_match_the_legacy_constants``.
+_, _RTH_END_T = mc.window_bounds("market_snapshot")   # 15:00 CT
 
 
 def _is_rth(now):
-    """Mon-Fri, not a holiday, 08:30 <= t < 15:00 CT (mirrors handlers._is_rth_now)."""
-    if not _cal_is_trading_day(now.date()):
-        return False
-    t = now.time()
-    return _time(*_RTH_START) <= t < _time(*_RTH_END)
+    """Mon-Fri, not a holiday, 08:30 <= t < 15:00 CT (mirrors handlers._is_rth_now).
+
+    **The close is EXCLUSIVE, and that is deliberate** — do NOT simplify this to
+    a bare ``mc.is_regular_hours(now)``, which is INCLUSIVE at both ends and would
+    widen the gate by the 15:00:00 instant (one extra 2-min composite refresh +
+    intraday recording per day). The divergence is pinned minute-by-minute in
+    ``shared/tests/test_market_calendar_equivalence.py`` by
+    ``test_sentiment_rth_is_one_minute_narrower_than_is_regular_hours`` (and its
+    two siblings), which must keep passing after any change here.
+    """
+    return mc.is_regular_hours(now) and now.time() < _RTH_END_T
 
 
 def refresh_due(now, last_slot):
