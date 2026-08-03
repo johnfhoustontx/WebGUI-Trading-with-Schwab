@@ -1037,6 +1037,39 @@ git commit -m "test(shared): pin calendar equivalence with the legacy window pre
 
 ---
 
+## Phase B API notes — read before B4–B9
+
+Decisions made while building B1/B2 that the migration must respect:
+
+**Windows are evaluated in their OWN timezone.** `config/sessions.toml` declares
+`tz = "America/New_York"` on `[windows.driver_entry]`, and `in_window` honors it.
+The driver's 09:45–15:30 window is ET, not CT — evaluating it in CT would shift it
+by an hour. Every other window has no `tz` key and defaults to CT.
+
+**`in_window` raises `KeyError` on an unknown window name** — deliberately, and
+tested. A typo'd window name is a code error no fallback can make correct; silently
+returning `False` would produce a scheduler branch that never fires with zero
+signal. Note this surfaces at call time on a live tick, so get the names right:
+`scan`, `collection`, `session_flip`, `market_snapshot`, `driver_entry`.
+
+**`window_bounds` accepts `end` or `stop`** — `[windows.collection]` names its close
+`stop`, everything else uses `end`.
+
+**Boundary asymmetry is deliberate — do not unify.** `in_window` is INCLUSIVE at
+both ends (mirrors `_is_market_hours`'s `<=`); `in_collection_window`'s stop is
+EXCLUSIVE (mirrors `_in_gex_window`'s `<`). Both were verified against the legacy
+predicates they replace.
+
+**`session_at` accepts naive (treated as CT) and aware non-CT datetimes** (converted
+via `astimezone`). Consumers may safely pass UTC timestamps.
+
+**REGULAR wins the 15:00 overlap** with the curb window, so RTH-gated work keeps its
+final minute. Pinned by a mutation-tested assertion.
+
+**A malformed `sessions.toml` degrades to `_DEFAULTS`** rather than raising — for bad
+values *and* bad shapes (a scalar where a table belongs). `load_config()` returns the
+**cached** dict; callers must not mutate it.
+
 ## Tasks B4–B9: Migrate each window consumer
 
 One task each, same discipline as A5–A12: edit, run that folder's suite, confirm the **pass count is unchanged**, commit.
