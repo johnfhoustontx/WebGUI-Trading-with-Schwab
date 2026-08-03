@@ -227,3 +227,70 @@ def test_malformed_activation_date_falls_back(monkeypatch, tmp_path):
     monkeypatch.setattr(mc, "_TOML_PATH", bad)
     mc.reset_config_cache()
     assert mc.activation_date() == dt.date(2026, 8, 17)
+
+
+# -- named operating windows ------------------------------------------------
+def test_in_window_scan():
+    assert mc.in_window("scan", _ct(2026, 8, 17, 8, 0)) is True
+    assert mc.in_window("scan", _ct(2026, 8, 17, 7, 59)) is False
+    assert mc.in_window("scan", _ct(2026, 8, 17, 15, 15)) is True
+    assert mc.in_window("scan", _ct(2026, 8, 17, 15, 16)) is False
+
+
+def test_in_window_false_on_non_trading_day():
+    assert mc.in_window("scan", _ct(2026, 8, 22, 10, 0)) is False   # Saturday
+
+
+def test_window_bounds_reads_start_and_end():
+    assert mc.window_bounds("scan") == (dt.time(8, 0), dt.time(15, 15))
+    # collection names its close `stop`, not `end`.
+    assert mc.window_bounds("collection") == (dt.time(8, 0), dt.time(15, 20))
+
+
+def test_driver_entry_window_is_evaluated_in_eastern_time():
+    """driver_entry carries its own tz; 09:45 ET == 08:45 CT."""
+    assert mc.in_window("driver_entry", _ct(2026, 8, 17, 8, 45)) is True
+    assert mc.in_window("driver_entry", _ct(2026, 8, 17, 8, 44)) is False
+    assert mc.in_window("driver_entry", _ct(2026, 8, 17, 14, 30)) is True
+    assert mc.in_window("driver_entry", _ct(2026, 8, 17, 14, 31)) is False
+
+
+def test_collection_window_ineligible_symbol_starts_at_0800():
+    assert mc.in_collection_window(_ct(2026, 8, 17, 7, 0), eth_eligible=False) is False
+    assert mc.in_collection_window(_ct(2026, 8, 17, 8, 0), eth_eligible=False) is True
+
+
+def test_collection_window_eligible_symbol_starts_at_0630_after_activation():
+    assert mc.in_collection_window(_ct(2026, 8, 17, 6, 30), eth_eligible=True) is True
+    assert mc.in_collection_window(_ct(2026, 8, 17, 6, 29), eth_eligible=True) is False
+
+
+def test_collection_window_eligible_symbol_is_inert_before_activation():
+    """THE critical regression guard: pre-activation an eligible symbol must
+    behave exactly like today -- 08:00 start, no GTH collection."""
+    assert mc.in_collection_window(_ct(2026, 8, 14, 7, 0), eth_eligible=True) is False
+    assert mc.in_collection_window(_ct(2026, 8, 14, 8, 0), eth_eligible=True) is True
+
+
+def test_collection_window_defaults_to_ineligible():
+    assert mc.in_collection_window(_ct(2026, 8, 17, 7, 0)) is False
+
+
+def test_collection_window_stop_is_exclusive():
+    assert mc.in_collection_window(_ct(2026, 8, 17, 15, 19)) is True
+    assert mc.in_collection_window(_ct(2026, 8, 17, 15, 20)) is False
+
+
+def test_collection_window_false_on_non_trading_day():
+    assert mc.in_collection_window(_ct(2026, 8, 22, 10, 0), eth_eligible=True) is False
+
+
+def test_session_flip_time_is_independent_of_collection_start():
+    """Widening GTH collection to 06:30 must NOT move the Gamma display flip."""
+    assert mc.session_flip_time() == dt.time(8, 0)
+
+
+def test_unknown_window_name_raises():
+    """A typo'd window name is a programming error, not a config degrade."""
+    with pytest.raises(KeyError):
+        mc.in_window("nope", _ct(2026, 8, 17, 10, 0))

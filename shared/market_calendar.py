@@ -8,13 +8,24 @@ now read from this module. Two sites remain outside it, both deliberately:
 9-date 2026-only set — a tracked follow-up, since correcting it is a behavior
 change rather than a refactor.
 
-**Session windows are NOT here yet.** The fourteen hardcoded window constants
-still live in their own modules; migrating them is Phase B.
+**The session vocabulary now ships here too (Phase B, tasks B1-B2).** That is:
+the ``Session`` enum (``CLOSED``/``GTH``/``REGULAR``/``CURB`` -- Cboe's own
+naming, NOT "premarket"), the mtime-cached ``config/sessions.toml`` loader
+(mirroring ``services/options_svc/flow_alerts.load_thresholds``), the
+extended-hours activation gate, ``session_at`` and its predicates, and the
+named operating windows (``in_window``, ``window_bounds``,
+``in_collection_window``, ``session_flip_time``).
 
-What ships today is the holiday calendar and the trading-day helpers below.
-Session windows, the ``Session`` vocabulary and ``config/sessions.toml``
-loading (mtime-cached, mirroring
-``services/options_svc/flow_alerts.load_thresholds``) arrive in Phase B.
+**No consumer has been migrated yet.** The fourteen hardcoded window constants
+still live in their own modules and are still what the running services use;
+repointing them at the helpers below is a separate, still-pending Phase B task.
+Until then this half of the module has no live callers -- it is the target, not
+yet the source of truth in production.
+
+Every extended-hours branch is INERT before ``activation_date()``
+(2026-08-17): ``session_at`` reports ``CLOSED`` for both ETH windows and
+``in_collection_window`` ignores ``eth_eligible``, so behavior is
+byte-identical to the pre-ETH app.
 
 Everything here is a PURE function of its arguments -- no network, no
 database, no clock.
@@ -382,3 +393,96 @@ def alerts_fire_in_extended_hours() -> bool:
     if isinstance(val, bool):
         return val
     return bool(_DEFAULTS["alerts"]["fire_in_extended_hours"])
+
+
+# ---------------------------------------------------------------------------
+# Named operating windows
+# ---------------------------------------------------------------------------
+#
+# These are SERVICE CADENCE windows, not market sessions -- the scan window
+# opens 30 min before the regular session by design, collection runs 5 min past
+# the curb close, and so on. They legitimately differ from each other and from
+# the sessions above, so they are kept distinct rather than merged.
+
+
+def _window(name: str) -> dict:
+    """The config block for window ``name``, merged over its default.
+
+    Raises ``KeyError`` for an unknown name -- a typo'd window is a
+    programming error, not something to degrade quietly past.
+    """
+    dflt = _DEFAULTS["windows"][name]
+    return _merge(dflt, load_config().get("windows", {}).get(name, {}))
+
+
+def _window_tz(win: dict):
+    """A window's own timezone, defaulting to CT. Only ``driver_entry`` sets
+    one (it is specified in ET, matching the constant it replaces)."""
+    name = win.get("tz")
+    if not name:
+        return CT
+    try:
+        return ZoneInfo(str(name))
+    except Exception:
+        log.warning("sessions.toml: bad window tz %r → CT", name)
+        return CT
+
+
+def window_bounds(name: str):
+    """``(start, end)`` times for window ``name``, in the window's own tz.
+
+    The close is keyed ``end`` for most windows but ``stop`` for
+    ``collection`` -- both are read, matching what the file actually says.
+    """
+    win, dflt = _window(name), _DEFAULTS["windows"][name]
+    close_key = "end" if "end" in dflt else "stop"
+    return (_parse_time(win.get("start"), dflt["start"]),
+            _parse_time(win.get(close_key), dflt[close_key]))
+
+
+def in_window(name: str, now) -> bool:
+    """True when ``now`` falls inside named window ``name`` on a trading day.
+
+    **INCLUSIVE at both ends**, matching the ``_is_market_hours`` predicates
+    this replaces. Note the asymmetry with ``in_collection_window``, whose stop
+    is exclusive -- the two mirror different existing predicates and are NOT
+    unified on purpose.
+    """
+    win = _window(name)
+    local = now.replace(tzinfo=CT) if now.tzinfo is None else now
+    local = local.astimezone(_window_tz(win))
+    if not is_trading_day(local.date()):
+        return False
+    start, end = window_bounds(name)
+    return start <= local.time() <= end
+
+
+def session_flip_time() -> time:
+    """When the Gamma display flips from the prior session to today (08:00 CT).
+
+    Held SEPARATE from the collection start on purpose: widening GTH
+    collection to 06:30 must not silently move the display flip.
+    """
+    win = _window("session_flip")
+    return _parse_time(win.get("at"), _DEFAULTS["windows"]["session_flip"]["at"])
+
+
+def in_collection_window(now, *, eth_eligible: bool = False) -> bool:
+    """True when GEX history collection should run for a symbol right now.
+
+    ``eth_eligible`` symbols start at ``collection.eth_start`` (06:30) on and
+    after the activation date; everything else -- and everything before
+    activation -- starts at ``collection.start`` (08:00). The stop is EXCLUSIVE,
+    matching the ``_in_gex_window`` semantics this replaces.
+    """
+    ct = _ct_of(now)
+    d = ct.date()
+    if not is_trading_day(d):
+        return False
+    win, dflt = _window("collection"), _DEFAULTS["windows"]["collection"]
+    if eth_eligible and extended_hours_active(d):
+        start = _parse_time(win.get("eth_start"), dflt["eth_start"])
+    else:
+        start = _parse_time(win.get("start"), dflt["start"])
+    stop = _parse_time(win.get("stop"), dflt["stop"])
+    return start <= ct.time() < stop
