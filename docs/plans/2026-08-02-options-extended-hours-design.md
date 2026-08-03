@@ -6,24 +6,38 @@
 
 ## 1. What is changing in the market
 
-Cboe C1 is offering **extended trading hours on select multi-listed single-stock
-options**:
+Cboe C1 is adding a morning **Global Trading Hours (GTH)** session and an
+afternoon **Curb** session for select multi-listed equity options. Sources: Cboe
+notice [C2026061202](https://www.cboe.com/notices/content/?id=60500) and the
+[Equity Options ETH FAQ](https://www.cboe.com/document/tech-spec/document/technical-specifications/equity-options-extended-trading-hours-faq).
 
 | Session | ET | CT | Notes |
 |---|---|---|---|
-| Pre-market ETH | 07:30–09:25 | 06:30–08:25 | New — outside our current windows |
-| Regular | 09:30–16:00 | 08:30–15:00 | Unchanged |
-| Curb ETH | 16:00–16:15 | 15:00–15:15 | Already inside our 15:20 CT collection stop |
+| Order acceptance | 07:15 | 06:15 | Queuing only — no trading |
+| **GTH** | 07:30–09:25 | 06:30–08:25 | New — outside our current windows |
+| Regular (RTH) | 09:30–16:00 | 08:30–15:00 | Unchanged |
+| **Curb** | 16:00–16:15 | 15:00–15:15 | Already inside our 15:20 CT collection stop |
+
+We use Cboe's own vocabulary — **GTH** and **Curb** — rather than
+"pre-market"/"after-hours", because Cboe explicitly distinguishes the option GTH
+session from the equity pre-market. Note that GTH is also the name of the index
+options' 20:15–09:25 ET session; this design covers **only the equity GTH window**.
 
 Eligibility is ADV ≥ 150k contracts, underlying market cap ≥ $50B, and underlying
-ADV ≥ 10M shares, measured over the trailing six months. **The eligible list is
-refreshed semi-annually**, which is the single most important constraint on the
-design: any hardcoded symbol list is guaranteed to go stale twice a year.
+ADV ≥ 10M shares. The rule permits Cboe to designate **up to 100 equity option
+classes**, and the list is **re-balanced twice per year** (on Jul 1–Dec 31 and
+Jan 1–Jun 30 data), announced via Exchange Notice. This is the single most
+important constraint on the design: **any hardcoded symbol list is guaranteed to go
+stale twice a year, and the list is expected to grow from 21 toward 100.**
 
-Cboe's published launch date is 2026-07-13, "subject to SEC approval of a related
-rule filing." We are building to a **2026-08-17** activation per direction from the
-project owner. The date is configuration, not a constant, so a further slip is a
-one-line edit.
+**Launch date: 2026-08-17 — confirmed.** The notice records it as a delay:
+"Effective ~~July 13, 2026~~ **August 17, 2026** (delayed due to pending regulatory
+approval of a related rule filing)". The date is held in configuration, not a
+constant, so a further slip is a one-line edit.
+
+**The 21 anticipated launch symbols:** AAPL, AMD, AMZN, AVGO, BABA, BAC, GOOG,
+GOOGL, HOOD, INTC, META, MSFT, MU, NFLX, NOK, NVDA, ORCL, PFE, PLTR, TSLA, TSM.
+Recorded for reference only — **the app must never hardcode this list** (§2).
 
 Separately, `$SPX`, `$VIX`, `$XSP` and `$RUT` already trade Global Trading Hours
 (20:15–09:25 ET) plus a curb session (16:15–17:00 ET). **This design deliberately
@@ -40,11 +54,25 @@ SPY  False  QQQ  False  IWM  False  KO   False  XOM  False
 $SPX True   $VIX True
 ```
 
+**This cross-validates against Cboe's published launch list exactly.** All seven
+symbols the probe returned `True` for (NVDA, TSLA, AAPL, PLTR, AMD, AVGO, **MU**)
+appear in Cboe's 21-name list, and none of the five `False` symbols do. `MU` is the
+decisive case: press coverage described the launch set as "Mag 7 plus PLTR, AVGO,
+AMD," which would have excluded it. A hardcoded list built from that coverage would
+have been wrong on day one. **Schwab's field already reflects the real list.**
+
+Cboe's own authoritative source is the Options Underlying Reference Data file,
+which carries **separate `GTH Eligible` and `Curb Eligible` columns**. Schwab
+exposes a single boolean, so a symbol eligible for one session but not the other
+would be indistinguishable to us. The launch set is identical across both sessions,
+so this is latent, not active — recorded so it is not mistaken for a bug later.
+
 Three consequences:
 
 1. **We never maintain a symbol list.** Eligibility is read from a chain response
    we already fetch every minute for every collected symbol. Semi-annual list
-   refreshes are absorbed automatically, at zero additional API cost.
+   refreshes — and the expected growth from 21 toward the 100-class cap — are
+   absorbed automatically, at zero additional API cost.
 2. **SPY, QQQ and IWM are not eligible.** The program is single-stock; the ETF
    options are excluded. Since the scanner and driver trade predominantly
    SPY/QQQ/`$SPX` credit spreads, only `$SPX` of the usual instrument set is
@@ -257,13 +285,55 @@ clamps — but that is pre-existing post-close behavior, and
 1-day calculation for exactly this reason. **No change required**; documented so it
 is not "fixed" into a regression.
 
-**H4 — Expiration-day settlement.** `paper_engine.SETTLE_HOUR_CT = 15` and
-`options_calculator.EXPIRY_CLOSE_HOUR_ET = 16`. Whether eligible names trade the
-16:00–16:15 ET curb *on their expiration day* determines whether these remain
-correct. This could not be confirmed from Cboe's published material. **Both values
-stay unchanged** pending verification — see §9. Conservative: an option settled at
-the 16:00 ET close is right under today's rules and wrong by at most 15 minutes of
-time value under the other reading.
+**H4 — Expiration-day settlement. RESOLVED: no change required.** The ETH FAQ is
+explicit:
+
+> "Expiring equity single stock options will trade until 4:00 p.m. ET as part of
+> RTH and 4:15 p.m. ET in the Curb session on expiration day due to their
+> American-style physical settlement… **In all cases, OCC marks closing and/or
+> settlement prices based on the 4:00 p.m. ET National Best Bid and Offer (NBBO).
+> OCC also bases in/out-of-the-money determination based on the 4:00 p.m. ET
+> closing price of the underlying equity security.**"
+
+So eligible names *do* trade the curb on expiration day, but that trading exists to
+let holders close rather than take delivery — **settlement and the ITM
+determination are both struck at 16:00 ET**. `paper_engine.SETTLE_HOUR_CT = 15`
+(15:00 CT = 16:00 ET) and `options_calculator.EXPIRY_CLOSE_HOUR_ET = 16` are
+therefore **exactly correct and must not change**. Pinned by a test citing this
+FAQ answer, so a future session does not "extend" them to 16:15.
+
+**H6 — GTH and Curb trades are not last-sale eligible.** From the FAQ:
+
+> "GTH and Curb session trades are **not last trade eligible and do not count
+> toward the daily high/low**. Cboe will mark these trades with an Extended Hours
+> 'v' sale condition when reporting GTH and Curb trades to the OPRA RTH system."
+
+Consequence: a contract's **`last` may not update during GTH/Curb**, and any
+daily high/low derived from the tape will exclude extended-session prints. Our
+engine is mostly insulated — GEX, flow premium and the matrix all compute from
+**`mark`** (the bid/ask mid), which is live in these sessions, not from `last`.
+The genuinely uncertain field is **`totalVolume`**: whether Schwab's cumulative
+volume accrues GTH prints is not answerable from Cboe's material, since it depends
+on how Schwab aggregates the OPRA feed. This matters because the UOA detector keys
+on `vol/OI` and the premium crossover on `mark × totalVolume`. **Verification is
+the first live-session probe** (§9). Until confirmed, the alert gate from H1 keeps
+these detectors silent outside regular hours anyway, so a surprise here degrades to
+"we collected rows we don't alert on" rather than to false pushes.
+
+Quote and trade activity is disseminated over the **existing OPRA RTH channels**,
+so no new market-data plumbing is implied — the data should reach Schwab through
+the feed it already consumes.
+
+**H7 — A class does not necessarily open at 07:30 ET.** Per the notice, a class
+"will begin the GTH opening rotation upon receipt of the first round-lot print in
+the underlying from any exchange and observation of a two-sided bid/ask in the
+underlying" after 07:30 ET, and the FAQ notes underlying liquidity in GTH "may
+likely not be as liquid." So an eligible symbol may have **no quotes for part or
+all of the GTH session**. Collection must treat an absent or unquoted chain as
+normal, not as collector failure. `gex_collector.poll_once` already logs
+`"No chain for %s"` and continues, so no code change is needed — but the collector
+**status strip must not report "stale"** for a symbol that simply has not opened
+yet (folds into H5).
 
 **H5 — Mixed-universe rendering.** The Opportunity Board and gamma page must
 distinguish "not ETH-eligible" from "stale." `eth_eligible` is added to matrix rows
@@ -280,8 +350,11 @@ Recording these prevents a future session from "fixing" them:
   comment explaining why. Untouched.
 - **Driver entry window 09:45–15:30 ET** — already inert in ETH. Untouched.
 - **`guardrails.py`** — no new gate. Untouched.
-- **Overnight GTH for `$SPX`/`$VIX`** — out of scope by decision, not oversight.
-- **Settlement and expiry-close constants** — pending §9 verification.
+- **Overnight index GTH for `$SPX`/`$VIX`** (20:15–09:25 ET) — out of scope by
+  decision, not oversight. Distinct from the equity GTH window this design covers.
+- **`paper_engine.SETTLE_HOUR_CT = 15` and `EXPIRY_CLOSE_HOUR_ET = 16`** — verified
+  correct against the ETH FAQ (OCC settles on the 16:00 ET NBBO even though curb
+  trading continues to 16:15). Do not extend these to 16:15. See H4.
 - **The scanner's premium/liquidity scoring** — ETH marks never reach it, because
   scanning stays within the existing 08:00–15:15 operating window.
 
@@ -302,18 +375,40 @@ Recording these prevents a future session from "fixing" them:
 - Service suites run **per folder** from the repo root, never `pytest services`
   across all of them (module-name collisions).
 
-## 9. Open questions requiring verification
+## 9. Open questions
 
-1. **Does the curb session run on expiration day?** Determines H4. Cboe's notice
-   and FAQ pages are JS-rendered and returned no content to automated fetch;
-   resolve by reading the C1 notice directly in a browser or contacting Cboe.
-2. **Will Schwab accept option orders in ETH, and does the API serve option quotes
-   from 07:30 ET?** Not answerable until a live session on or after activation.
-   Immaterial to this design — the posture is observe-only and the app is
-   paper-only — but it determines whether a future "trade ETH" phase is possible at
-   all. **Verification: probe `securityStatus` and `quoteTimeInLong` on an eligible
-   name at ~07:00 CT on the first activated trading day.**
-3. **Confirm the 2026-08-17 date** against Cboe's final notice once published.
+**Resolved 2026-08-02** by reading Cboe notice C2026061202 and the ETH FAQ in a
+browser (both are JS-rendered and return nothing to automated fetch):
+
+- ~~Does the curb session run on expiration day?~~ **Yes, but OCC settles on the
+  16:00 ET NBBO** — H4 resolved, no code change.
+- ~~Confirm the 2026-08-17 date.~~ **Confirmed**, recorded as a delay from
+  2026-07-13 pending regulatory approval.
+
+**Still open — both resolve on the first activated trading day:**
+
+1. **Does Schwab's `totalVolume` accrue GTH/Curb prints?** Determines whether the
+   UOA (`vol/OI`) and premium-crossover detectors see extended-session activity.
+   Cboe marks these trades not-last-sale-eligible with a `"v"` condition, but how
+   Schwab aggregates that into cumulative volume is a Schwab implementation
+   detail. See H6.
+2. **Does Schwab serve fresh option quotes from 07:30 ET, and will it accept
+   option orders in these sessions?** The quote half determines whether Phase D
+   collects real marks or rows of stale ones. The order half is immaterial to this
+   design — the posture is observe-only and the app is paper-only — but gates any
+   future trading phase.
+
+**Single verification, ~07:00 CT on 2026-08-17:** probe `securityStatus` and
+`quoteTimeInLong` on an eligible name (NVDA), and compare a contract's
+`totalVolume` at 07:00 CT against its 15:20 CT value from the prior session. If
+quotes are stale, set `extended_hours_from` to a future date and reassess — the
+whole feature reverts to inert with that one edit.
+
+**Recorded for a future trading phase** (not needed for observe-only): only **limit
+orders** are accepted in GTH/Curb — market, stop and stop-limit are rejected.
+Complex (multi-leg) orders **are** supported in both sessions, so credit spreads
+would be tradeable, except that complex instruments containing a **stock leg** are
+barred from GTH.
 
 ## 10. Rollout
 
