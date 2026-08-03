@@ -334,17 +334,20 @@ def eod_summary_due(now, ran_slots):
 
 
 # ── 30-min Market Snapshot cadence (:00 & :30, 08:30–15:00 CT) ───────────────
-_MKT_SNAP_START = (8, 30)
-_MKT_SNAP_END = (15, 0)          # last slot fires at 15:00
+# The BOUNDS are the named ``market_snapshot`` window in config/sessions.toml
+# (see shared/market_calendar.py), resolved at import — a window edit needs a
+# service restart, as it always has. They are the *ends of the slot list*, not a
+# containment predicate, so ``_market_snapshot_slots`` still walks them rather
+# than calling ``mc.in_window``: the gate below fires on a slot TARGET plus a
+# grace, which is a different question from "is now inside the window".
+_MKT_SNAP_START, _MKT_SNAP_END = mc.window_bounds("market_snapshot")  # last slot fires at the end (15:00)
 _MKT_SNAP_GRACE_MIN = 10         # < 30 so a slot can't bleed into the next
 
 
 def _market_snapshot_slots():
     """The (h, m) :00/:30 slot targets within [start, end], inclusive."""
-    import datetime as _dt
     out = []
-    cur = _dt.time(*_MKT_SNAP_START)
-    end = _dt.time(*_MKT_SNAP_END)
+    cur, end = _MKT_SNAP_START, _MKT_SNAP_END
     h, m = cur.hour, cur.minute
     while (h, m) <= (end.hour, end.minute):
         out.append((h, m))
