@@ -122,11 +122,20 @@ def active_session_date(now=None):
     Drives heatmap persistence so the display shows the last completed session
     PRE- and POST-market: Friday's data stays shown all weekend, and on a trading
     day BEFORE 08:00 CT (premarket) the prior session shows until today's snapshots
-    begin — at which point today's data takes over."""
+    begin — at which point today's data takes over.
+
+    The pivot is ``mc.session_flip_time()`` (the named ``session_flip`` window),
+    NOT the collection start. They happen to be the same 08:00 CT today, but they
+    are held apart on purpose: widening GTH collection to 06:30 for ETH-eligible
+    symbols must NOT drag the display flip with it, or the Gamma page would swap
+    to a near-empty "today" two hours early for every symbol. See hazard H2 in
+    the ETH design doc, pinned by
+    ``test_session_flip_is_independent_of_collection_start``."""
     now = now or _market_now()
     d = now.date()
     is_td = d.weekday() < 5 and d not in _HOLIDAYS
-    if is_td and (now.hour, now.minute) >= _GEX_START:
+    flip = mc.session_flip_time()
+    if is_td and (now.hour, now.minute) >= (flip.hour, flip.minute):
         return d
     return _prev_trading_day(d)
 

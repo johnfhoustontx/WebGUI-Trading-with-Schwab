@@ -270,6 +270,27 @@ def test_active_session_date_premarket_holds_prior_session():
     assert scheduler.active_session_date(_ct(2026, 6, 23, 8, 0)).isoformat() == "2026-06-23"
 
 
+def test_session_flip_is_independent_of_collection_start():
+    """Widening GTH collection to 06:30 must NOT move the Gamma display flip.
+    The flip stays at 08:00 -- see hazard H2 in the ETH design doc."""
+    ct = ZoneInfo("America/Chicago")
+    # 07:00 CT on the ETH activation day: eligible symbols may be collecting,
+    # but the display still shows the prior session.
+    assert scheduler.active_session_date(dt.datetime(2026, 8, 17, 7, 0, tzinfo=ct)) == dt.date(2026, 8, 14)
+    assert scheduler.active_session_date(dt.datetime(2026, 8, 17, 8, 0, tzinfo=ct)) == dt.date(2026, 8, 17)
+
+
+def test_session_flip_is_not_vacuously_independent_of_collection():
+    """Power check for the test above: on the activation date collection really
+    HAS widened to 06:30 for an eligible symbol, so 07:00 CT is a moment when the
+    two genuinely disagree -- collecting, but still displaying yesterday."""
+    from shared import market_calendar as mc
+
+    now = dt.datetime(2026, 8, 17, 7, 0, tzinfo=ZoneInfo("America/Chicago"))
+    assert mc.in_collection_window(now, eth_eligible=True) is True
+    assert scheduler.active_session_date(now) == dt.date(2026, 8, 14)
+
+
 # ── Driver-account manage tick wiring (Phase 5 / Task 5.1) ──────────────────
 # The driver's ISOLATED paper account reprices on the SAME 5-min manage cadence
 # as the manual account (it reuses the ``manage_due`` gate — no new cadence). The
