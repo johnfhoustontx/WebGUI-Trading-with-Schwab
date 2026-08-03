@@ -89,12 +89,23 @@ _GEX_INTERVAL_MIN = 1    # gex_collector.POLL_INTERVAL_MIN
 
 
 def _in_gex_window(now):
-    """True inside the ``collection`` window (08:00–15:20 CT, stop EXCLUSIVE).
+    """True inside the WIDEST collection window a symbol could be due in.
+
+    ``eth_eligible=True`` because this is the service-wide SLOT gate: it decides
+    whether a tick fires at all, so it must not exclude the 06:30–08:00 CT GTH
+    stretch that ETH-eligible symbols collect in. Which SYMBOLS that tick
+    actually polls is decided in ``compute.collect_gex_snapshots`` — polling the
+    full ~45-name universe through GTH would burn ~4,050 calls/day on symbols
+    that are not quoting.
+
+    Inert before ``mc.activation_date()``: until then ``in_collection_window``
+    ignores ``eth_eligible`` entirely and this is the legacy 08:00–15:20 CT
+    window (stop EXCLUSIVE), byte-for-byte.
 
     ``mc.in_collection_window`` also gates on the trading day, which the bare
     tuple comparison did not — harmless, since ``gex_due`` already ANDs this
     with ``_is_trading_day``."""
-    return mc.in_collection_window(now)
+    return mc.in_collection_window(now, eth_eligible=True)
 
 
 # ── Gamma display persistence (the last session shows until the next one starts) ─
@@ -146,8 +157,13 @@ def _gex_slot_key(now):
 
 def gex_due(now, last_slot):
     """(should_collect, slot): True at most once per 1-min slot, only on a
-    trading day within the 08:00–15:20 CT GEX-collection window (starts 30 min
-    pre-open). Mirrors ``autoscan_due`` on the gex_collector cadence/window."""
+    trading day within the GEX-collection window (08:00–15:20 CT; from the
+    activation date the start widens to 06:30 so the GTH session can be
+    collected for ETH-eligible symbols). Mirrors ``autoscan_due`` on the
+    gex_collector cadence/window.
+
+    The widening is a SLOT gate only — the per-symbol restriction lives in
+    ``compute.collect_gex_snapshots``."""
     if not (_is_trading_day(now) and _in_gex_window(now)):
         return (False, last_slot)
     slot = _gex_slot_key(now)

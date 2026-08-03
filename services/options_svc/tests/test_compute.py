@@ -2562,15 +2562,16 @@ def _fake_gex_modules(monkeypatch, *, lock_ok=True, chains=None):
     import types as _types
 
     calls = {"poll": False, "touched": False, "closed": False,
-             "client": None, "engine": None, "conn": None, "poll_n": 0}
+             "client": None, "engine": None, "conn": None, "poll_n": 0,
+             "symbols": "unset"}
 
     class _Conn:
         def close(self):
             calls["closed"] = True
 
-    def _poll(client, engine, conn, lock=None, on_chain=None):
+    def _poll(client, engine, conn, lock=None, symbols=None, on_chain=None):
         calls.update(poll=True, client=client, engine=engine, conn=conn,
-                     on_chain=on_chain)
+                     on_chain=on_chain, symbols=symbols)
         calls["poll_n"] += 1
         for _sym, _chain in (chains or {}).items():
             if on_chain is not None:
@@ -2813,6 +2814,95 @@ def test_publish_eth_eligibility_swallows_a_bus_failure(monkeypatch):
 
     monkeypatch.setattr(compute, "_briefing_bus", lambda: _Bus())
     compute._publish_eth_eligibility({"NVDA": True})   # must not raise
+
+
+# ── GTH symbol restriction (Task D1) ────────────────────────────────────────
+# Polling the full ~45-name universe through the 90 GTH minutes would cost
+# ~4,050 calls/day for symbols that are not quoting. Only the ETH-eligible
+# subset is polled, and only from the activation date.
+
+def _gth_ct(h, m=0, day=17):
+    import datetime as _d
+    from zoneinfo import ZoneInfo as _Z
+    return _d.datetime(2026, 8, day, h, m, tzinfo=_Z("America/Chicago"))
+
+
+_GTH_NOW = _gth_ct(7)      # 2026-08-17 (activation Monday) 07:00 CT
+_RTH_NOW = _gth_ct(10)
+
+
+def test_gth_poll_restricts_to_the_eligible_subset(monkeypatch):
+    """Only the ETH-eligible names from the collection universe are polled."""
+    calls = _fake_gex_modules(monkeypatch, lock_ok=True)
+    _fake_eth_bus(monkeypatch,
+                  stored={"date": "2026-08-14",
+                          "symbols": {"NVDA": True, "SPY": False}})
+
+    n = compute.collect_gex_snapshots(now=_GTH_NOW)
+
+    # collection_symbols() is ["$SPX", "SPY", "NVDA"] in the fake.
+    assert calls["symbols"] == ["NVDA"]
+    assert n == 1
+
+
+def test_regular_hours_poll_uses_the_full_universe(monkeypatch):
+    """Inside 08:00-15:20 the universe is untouched -- symbols=None."""
+    calls = _fake_gex_modules(monkeypatch, lock_ok=True)
+    _fake_eth_bus(monkeypatch,
+                  stored={"date": "2026-08-17", "symbols": {"NVDA": True}})
+
+    n = compute.collect_gex_snapshots(now=_RTH_NOW)
+
+    assert calls["symbols"] is None
+    assert n == 3
+
+
+def test_gth_poll_is_skipped_on_a_cold_eligibility_cache(monkeypatch):
+    """Never guess the universe: with nothing cached, skip the GTH poll."""
+    calls = _fake_gex_modules(monkeypatch, lock_ok=True)
+    _fake_eth_bus(monkeypatch, stored=None)
+
+    n = compute.collect_gex_snapshots(now=_GTH_NOW)
+
+    assert n == 0
+    assert calls["poll"] is False        # and no fetch was made
+    assert calls["touched"] is False     # nor was the collector heartbeat
+
+
+def test_gth_poll_is_skipped_when_the_bus_is_down(monkeypatch):
+    """A bus outage reads as "no evidence", not "poll everything"."""
+    calls = _fake_gex_modules(monkeypatch, lock_ok=True)
+    monkeypatch.setattr(compute, "_briefing_bus", lambda: None)
+
+    assert compute.collect_gex_snapshots(now=_GTH_NOW) == 0
+    assert calls["poll"] is False
+
+
+def test_gth_poll_uses_the_prior_sessions_eligibility_map(monkeypatch):
+    """The eligibility read must NOT be staleness-gated.
+
+    ``active_session_date`` pivots at 08:00 CT, so at 07:00 the "current"
+    session date is still the PRIOR trading day and the cached map carries
+    THAT date. Gating on today's date would return an empty set and GTH
+    collection would silently never run."""
+    from services.options_svc import scheduler as _sched
+    calls = _fake_gex_modules(monkeypatch, lock_ok=True)
+    # Cache written during Friday's session; "now" is Monday 07:00 CT.
+    _fake_eth_bus(monkeypatch,
+                  stored={"date": "2026-08-14", "symbols": {"NVDA": True}})
+    assert _sched.active_session_date(_GTH_NOW).isoformat() == "2026-08-14"
+
+    assert compute.collect_gex_snapshots(now=_GTH_NOW) == 1
+    assert calls["symbols"] == ["NVDA"]
+
+
+def test_off_hours_poll_keeps_the_full_universe(monkeypatch):
+    """Outside the collection window entirely (a manual invocation) nothing is
+    narrowed -- the GTH restriction applies only to the GTH stretch."""
+    calls = _fake_gex_modules(monkeypatch, lock_ok=True)
+    _fake_eth_bus(monkeypatch, stored=None)
+    assert compute.collect_gex_snapshots(now=_gth_ct(22)) == 3
+    assert calls["symbols"] is None
 
 
 # ── GEX collector status view ───────────────────────────────────────────────

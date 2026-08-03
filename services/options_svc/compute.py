@@ -1858,16 +1858,89 @@ def _publish_eth_eligibility(seen) -> None:
         log.exception("_publish_eth_eligibility degraded")
 
 
-def collect_gex_snapshots(capture_symbols=None) -> int:
+def _read_eth_cache():
+    """The cached ETH-eligibility envelope (``{date, symbols}``), or ``{}``.
+
+    Best-effort: a bus outage yields ``{}``, which the GTH path reads as "no
+    evidence" and skips collecting rather than guessing at the universe.
+    ``bus.cache_get`` returns a ``CacheEnvelope``, NOT a dict — take
+    ``.payload``, never ``.get()``."""
+    try:
+        from services.options_svc import eth
+
+        bus = _briefing_bus()
+        if bus is None:
+            return {}
+        env = bus.cache_get(eth.CACHE_KEY)
+        return (getattr(env, "payload", None) or {}) if env is not None else {}
+    except Exception:
+        log.exception("_read_eth_cache degraded")
+        return {}
+
+
+def _gth_symbols(now=None):
+    """The symbols to poll during the GTH-only stretch, or ``None`` for "poll
+    the full universe" (i.e. we are not in that stretch).
+
+    ``None`` before the activation date, ALWAYS: the two window reads below are
+    identical until then, so the GTH branch is unreachable and behavior is
+    byte-identical to the pre-ETH app. It is also ``None`` outside the
+    collection window entirely (an off-hours manual invocation keeps the legacy
+    full-universe behavior rather than silently narrowing).
+
+    Otherwise — 06:30–08:00 CT on/after activation — only the ETH-eligible
+    subset. The full ~45-name universe over those 90 minutes would cost roughly
+    4,050 calls/day for ~38 symbols that are not quoting; the ~7 eligible names
+    cost ~630 (≈ +2% of the daily Schwab budget instead of +20%).
+
+    **The eligibility read is deliberately NOT staleness-gated.**
+    ``scheduler.active_session_date`` pivots at ``mc.session_flip_time()``
+    (08:00 CT), so at 06:30 the "current session date" is still the PRIOR
+    trading day — passing today's date to ``eligible_symbols`` would return an
+    empty set and GTH collection would silently never run. The previous
+    session's map is the correct basis anyway: Cboe re-balances the eligible
+    list twice a year, not overnight.
+
+    Returns an EMPTY list when eligibility is unknown (cold start), meaning
+    "skip this poll" — the design never guesses the universe. The three return
+    shapes are therefore ``None`` = full universe, ``[]`` = skip, non-empty =
+    the restricted subset."""
+    from services.options_svc import scheduler as _sched
+    from shared import market_calendar as _mc
+
+    now = now if now is not None else _sched._market_now()
+    if _mc.in_collection_window(now, eth_eligible=False):
+        return None                      # regular window → full universe
+    if not _mc.in_collection_window(now, eth_eligible=True):
+        return None                      # outside collection entirely → legacy
+    from services.options_svc import eth
+
+    eligible = eth.eligible_symbols(_read_eth_cache())   # no date_iso — see above
+    if not eligible:
+        return []
+    import gex_collector as gc
+
+    return [s for s in gc.collection_symbols() if s in eligible]
+
+
+def collect_gex_snapshots(capture_symbols=None, now=None) -> int:
     """Fetch + persist one snapshot round (GEX/Charm/DEX/Vanna + term) for the
-    tracked symbols. Returns ``len(gex_collector.collection_symbols())`` (the
-    dynamic collection universe), or ``0`` when a fresh foreign collector owns
-    the advisory lock (we defer).
+    tracked symbols. Returns the number of symbols polled — normally
+    ``len(gex_collector.collection_symbols())`` (the dynamic collection
+    universe), the eligible-subset size during GTH — or ``0`` when a fresh
+    foreign collector owns the advisory lock (we defer) or a GTH poll is
+    skipped for want of cached eligibility.
 
     ``capture_symbols`` — optional set of symbols whose fetched chains should be
     stashed for the SAME tick's gamma refresh (``_stash_tick_chain`` → consumed
     once by ``gamma_snapshot``), so the currently-viewed symbol's chain isn't
     fetched twice in one tick.
+
+    ``now`` — the CT market clock, injectable for tests. During the 06:30–08:00
+    CT GTH stretch (on/after the ETH activation date only) the poll is narrowed
+    to the ETH-eligible subset, and skipped outright when eligibility is unknown
+    — see ``_gth_symbols``. Before activation this is unreachable and the full
+    universe is polled exactly as before.
 
     Reuses options-scanner's ``gex_collector.poll_once`` (engine compute +
     ``gex_history_db.insert_snapshot``) VERBATIM so the snapshot schema + symbol
@@ -1884,6 +1957,12 @@ def collect_gex_snapshots(capture_symbols=None) -> int:
     import gex_collector as gc
 
     gc.ensure_file_logging()  # poll warnings/errors land in gex_collector.log
+    # Decided BEFORE taking the collector lock: a skipped GTH poll should not
+    # touch the lock's heartbeat (it did no work).
+    symbols = _gth_symbols(now)
+    if symbols is not None and not symbols:
+        gc.log.info("GTH poll skipped -- no cached ETH eligibility")
+        return 0
     owner = f"options_svc:pid:{os.getpid()}"
     if not gc.acquire_collector_lock(gc.LOCK_PATH, source="options_svc",
                                      owner=owner, now=int(time.time())):
@@ -1934,7 +2013,7 @@ def collect_gex_snapshots(capture_symbols=None) -> int:
                     gc.log.debug("UOA detect failed for %s", sym, exc_info=True)
 
         gc.poll_once(_proxy.schwab_py_client, gt.GammaEngine(), conn,
-                     on_chain=on_chain)
+                     symbols=symbols, on_chain=on_chain)
         gc.touch_lock(gc.LOCK_PATH, source="options_svc", owner=owner,
                       now=int(time.time()))
         try:
@@ -1945,7 +2024,7 @@ def collect_gex_snapshots(capture_symbols=None) -> int:
             log.exception("ETH eligibility publish after collect degraded")
     finally:
         conn.close()
-    return len(gc.collection_symbols())
+    return len(symbols) if symbols is not None else len(gc.collection_symbols())
 
 
 def _gex_next_scan(now):

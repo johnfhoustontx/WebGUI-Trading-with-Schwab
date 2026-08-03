@@ -61,6 +61,19 @@ def test_gex_due_holiday():
     assert due is False
 
 
+def test_gex_due_fires_in_gth_on_the_activation_date():
+    """From 2026-08-17 the slot gate opens at 06:30 so the GTH session can be
+    collected. WHICH symbols get polled is compute's decision, not the gate's."""
+    due, _ = scheduler.gex_due(_ct(2026, 8, 17, 7, 0), None)
+    assert due is True
+
+
+def test_gex_due_does_not_fire_in_gth_before_activation():
+    """2026-08-14 is the Friday before -- the widening must be inert."""
+    due, _ = scheduler.gex_due(_ct(2026, 8, 14, 7, 0), None)
+    assert due is False
+
+
 def test_gex_due_juneteenth():
     # Juneteenth is a full NYSE closure — 2026-06-19 and the next occurrence,
     # 2027-06-18 (observed, since 6/19/2027 is a Saturday), are both holidays.
