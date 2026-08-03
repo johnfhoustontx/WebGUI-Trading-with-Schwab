@@ -32,8 +32,14 @@ verbatim; see the note on ``prev_trading_day`` for the one semantic
 difference between the two.
 """
 import logging
-from datetime import date, timedelta
+import os
+import tomllib
+from datetime import date, datetime, time, timedelta
+from enum import Enum
 from functools import lru_cache
+from zoneinfo import ZoneInfo
+
+from repo_paths import SESSIONS_TOML
 
 log = logging.getLogger(__name__)
 
@@ -179,3 +185,200 @@ def next_trading_day(d):
         if is_trading_day(d):
             return d
     raise ValueError(f"no trading day within {_MAX_SPAN_DAYS} days after {d}")
+
+
+# ---------------------------------------------------------------------------
+# Sessions, config loading and the extended-hours activation gate
+# ---------------------------------------------------------------------------
+
+CT = ZoneInfo("America/Chicago")
+
+
+class Session(Enum):
+    """Which market session a moment falls in.
+
+    Cboe's own vocabulary -- ``GTH`` (Global Trading Hours, the morning
+    extended session) and ``CURB`` (the afternoon one). Deliberately NOT
+    "premarket"/"afterhours": Cboe distinguishes option GTH from the equity
+    pre-market, and conflating them invites wrong assumptions about which
+    symbols quote and when.
+    """
+
+    CLOSED = "closed"
+    GTH = "gth"
+    REGULAR = "regular"
+    CURB = "curb"
+
+
+# Mirrors config/sessions.toml exactly. The file is the knob; this is the
+# floor the loader falls back to when it is missing or unparseable, so the app
+# still has a coherent calendar rather than crashing on a scheduler tick.
+_DEFAULTS = {
+    "activation": {"extended_hours_from": "2026-08-17"},
+    "sessions": {
+        "gth": {"start": "06:30", "end": "08:25"},
+        "regular": {"start": "08:30", "end": "15:00"},
+        "curb": {"start": "15:00", "end": "15:15"},
+    },
+    "windows": {
+        "scan": {"start": "08:00", "end": "15:15"},
+        "collection": {"start": "08:00", "eth_start": "06:30", "stop": "15:20"},
+        "session_flip": {"at": "08:00"},
+        "market_snapshot": {"start": "08:30", "end": "15:00"},
+        "driver_entry": {"tz": "America/New_York", "start": "09:45",
+                         "end": "15:30"},
+    },
+    "alerts": {"fire_in_extended_hours": False},
+}
+
+_TOML_PATH = SESSIONS_TOML
+
+
+def _merge(base, over):
+    out = {k: (dict(v) if isinstance(v, dict) else v) for k, v in base.items()}
+    for k, v in (over or {}).items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = _merge(out[k], v)
+        else:
+            out[k] = v
+    return out
+
+
+_CACHE = {"mtime": None, "cfg": None}
+
+
+def reset_config_cache():
+    """Drop the mtime-cached config (test helper)."""
+    _CACHE.update(mtime=None, cfg=None)
+
+
+def load_config() -> dict:
+    """``config/sessions.toml`` merged over ``_DEFAULTS``. Never raises.
+
+    mtime-cached, mirroring
+    ``services/options_svc/flow_alerts.load_thresholds``: this is consulted on
+    every scheduler tick and every session predicate, but the file changes
+    approximately never -- so re-parse only when its mtime moves (or it is
+    missing). A missing or corrupt file degrades to the defaults; a scheduler
+    must never die because someone fat-fingered a TOML.
+    """
+    try:
+        mtime = os.stat(_TOML_PATH).st_mtime
+    except Exception:
+        mtime = None
+    if _CACHE["cfg"] is not None and _CACHE["mtime"] == mtime:
+        return _CACHE["cfg"]
+    try:
+        with open(_TOML_PATH, "rb") as fh:
+            cfg = _merge(_DEFAULTS, tomllib.load(fh))
+    except Exception:
+        log.debug("sessions.toml load failed → defaults", exc_info=True)
+        cfg = _merge(_DEFAULTS, {})
+    _CACHE.update(mtime=mtime, cfg=cfg)
+    return cfg
+
+
+def _parse_time(raw, fallback: str) -> time:
+    """``"HH:MM"`` -> ``time``. Malformed input warns and uses ``fallback``.
+
+    Falling back rather than raising is deliberate: a typo in one window's
+    start time should not take a service down, and the warning names the value
+    so the mistake is still visible in the log.
+    """
+    for candidate, is_fallback in ((raw, False), (fallback, True)):
+        if isinstance(candidate, time):
+            return candidate
+        try:
+            hh, mm = str(candidate).split(":")
+            return time(int(hh), int(mm))
+        except Exception:
+            if not is_fallback:
+                log.warning("sessions.toml: bad time %r → using %r",
+                            candidate, fallback)
+    # Both the configured value and the default are unusable -- can only
+    # happen if _DEFAULTS itself is edited wrongly.
+    raise ValueError(f"unparseable time fallback {fallback!r}")
+
+
+def _session_bounds(name: str):
+    """``(start, end)`` times for session ``name``, both inclusive."""
+    cfg = load_config().get("sessions", {}).get(name, {})
+    dflt = _DEFAULTS["sessions"][name]
+    return (_parse_time(cfg.get("start"), dflt["start"]),
+            _parse_time(cfg.get("end"), dflt["end"]))
+
+
+def activation_date() -> date:
+    """The date Cboe extended options hours go live (``2026-08-17``).
+
+    Every extended-hours branch in the app is gated on this, so a bad value
+    falls back to the default rather than raising -- an unparseable date must
+    not accidentally enable (or disable) ETH behavior.
+    """
+    raw = load_config().get("activation", {}).get("extended_hours_from")
+    for candidate in (raw, _DEFAULTS["activation"]["extended_hours_from"]):
+        if isinstance(candidate, date) and not isinstance(candidate, datetime):
+            return candidate
+        try:
+            return date.fromisoformat(str(candidate))
+        except Exception:
+            if candidate is raw:
+                log.warning("sessions.toml: bad extended_hours_from %r", raw)
+    raise ValueError("unparseable activation date default")
+
+
+def extended_hours_active(d: date) -> bool:
+    """True on and after the activation date. Before it, every ETH branch is
+    inert and the app behaves byte-identically to the pre-ETH build."""
+    return d >= activation_date()
+
+
+def _ct_of(now) -> datetime:
+    """``now`` as a CT-aware datetime. A NAIVE datetime is treated as CT --
+    the app's canonical zone -- not UTC."""
+    if now.tzinfo is None:
+        return now.replace(tzinfo=CT)
+    return now.astimezone(CT)
+
+
+def session_at(now) -> Session:
+    """Which session ``now`` (a datetime; naive is treated as CT) falls in.
+
+    Returns CLOSED on weekends, holidays, and -- before the activation date --
+    for both extended-hours windows. REGULAR wins the 15:00 overlap with the
+    curb window so RTH-gated work does not lose its final minute.
+    """
+    ct = _ct_of(now)
+    d, t = ct.date(), ct.time()
+    if not is_trading_day(d):
+        return Session.CLOSED
+    # Regular first: it owns the 15:00 minute it shares with the curb open.
+    reg_start, reg_end = _session_bounds("regular")
+    if reg_start <= t <= reg_end:
+        return Session.REGULAR
+    if not extended_hours_active(d):
+        return Session.CLOSED
+    for name, session in (("gth", Session.GTH), ("curb", Session.CURB)):
+        start, end = _session_bounds(name)
+        if start <= t <= end:
+            return session
+    return Session.CLOSED
+
+
+def is_regular_hours(now) -> bool:
+    """True during the regular 08:30-15:00 CT session only."""
+    return session_at(now) is Session.REGULAR
+
+
+def is_extended_hours(now) -> bool:
+    """True during GTH or Curb -- so always False before the activation date."""
+    return session_at(now) in (Session.GTH, Session.CURB)
+
+
+def alerts_fire_in_extended_hours() -> bool:
+    """Whether pushes/toasts should fire during GTH and Curb. Off by default:
+    a 06:30 CT push on a handful of thin GTH prints is noise."""
+    val = load_config().get("alerts", {}).get("fire_in_extended_hours")
+    if isinstance(val, bool):
+        return val
+    return bool(_DEFAULTS["alerts"]["fire_in_extended_hours"])

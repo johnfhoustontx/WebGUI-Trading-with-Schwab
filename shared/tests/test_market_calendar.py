@@ -1,7 +1,25 @@
+import datetime as dt
 from datetime import date
+from zoneinfo import ZoneInfo
+
+import pytest
 
 import repo_paths
 from shared import market_calendar as mc
+
+CT = ZoneInfo("America/Chicago")
+
+
+def _ct(y, m, d, hh, mm):
+    return dt.datetime(y, m, d, hh, mm, tzinfo=CT)
+
+
+@pytest.fixture(autouse=True)
+def _clean_config_cache():
+    """Every test starts from the real sessions.toml, not a neighbour's stub."""
+    mc.reset_config_cache()
+    yield
+    mc.reset_config_cache()
 
 
 def test_sessions_toml_path_declared():
@@ -89,3 +107,123 @@ def test_juneteenth_absent_before_2022():
     validity range."""
     assert date(2021, 6, 18) not in mc.nyse_holidays(2021)
     assert date(2022, 6, 20) in mc.nyse_holidays(2022)
+
+
+# -- activation gate --------------------------------------------------------
+def test_extended_hours_inactive_before_activation():
+    assert mc.extended_hours_active(dt.date(2026, 8, 14)) is False   # Friday
+    assert mc.extended_hours_active(dt.date(2026, 8, 16)) is False   # Sunday
+
+
+def test_extended_hours_active_on_and_after_activation():
+    assert mc.extended_hours_active(dt.date(2026, 8, 17)) is True    # Monday
+    assert mc.extended_hours_active(dt.date(2026, 9, 1)) is True
+
+
+# -- sessions BEFORE activation: ETH windows must read CLOSED ---------------
+def test_gth_is_closed_before_activation():
+    assert mc.session_at(_ct(2026, 8, 14, 7, 0)) is mc.Session.CLOSED
+
+
+def test_curb_is_closed_before_activation():
+    assert mc.session_at(_ct(2026, 8, 14, 15, 5)) is mc.Session.CLOSED
+
+
+def test_regular_session_unaffected_by_activation():
+    assert mc.session_at(_ct(2026, 8, 14, 10, 0)) is mc.Session.REGULAR
+
+
+# -- sessions ON/AFTER activation -------------------------------------------
+def test_gth_session_after_activation():
+    assert mc.session_at(_ct(2026, 8, 17, 7, 0)) is mc.Session.GTH
+
+
+def test_curb_session_after_activation():
+    assert mc.session_at(_ct(2026, 8, 17, 15, 5)) is mc.Session.CURB
+
+
+# -- boundaries -------------------------------------------------------------
+def test_session_boundaries_after_activation():
+    d = (2026, 8, 17)
+    assert mc.session_at(_ct(*d, 6, 29)) is mc.Session.CLOSED
+    assert mc.session_at(_ct(*d, 6, 30)) is mc.Session.GTH
+    assert mc.session_at(_ct(*d, 8, 25)) is mc.Session.GTH
+    assert mc.session_at(_ct(*d, 8, 26)) is mc.Session.CLOSED   # 5-min gap
+    assert mc.session_at(_ct(*d, 8, 30)) is mc.Session.REGULAR
+    assert mc.session_at(_ct(*d, 15, 0)) is mc.Session.REGULAR  # regular wins overlap
+    assert mc.session_at(_ct(*d, 15, 1)) is mc.Session.CURB
+    assert mc.session_at(_ct(*d, 15, 15)) is mc.Session.CURB
+    assert mc.session_at(_ct(*d, 15, 16)) is mc.Session.CLOSED
+
+
+def test_non_trading_day_is_always_closed():
+    assert mc.session_at(_ct(2026, 8, 22, 10, 0)) is mc.Session.CLOSED  # Saturday
+    assert mc.session_at(_ct(2026, 9, 7, 10, 0)) is mc.Session.CLOSED   # Labor Day
+
+
+def test_is_regular_hours_matches_session_at():
+    assert mc.is_regular_hours(_ct(2026, 8, 17, 10, 0)) is True
+    assert mc.is_regular_hours(_ct(2026, 8, 17, 7, 0)) is False
+
+
+def test_is_extended_hours_only_after_activation():
+    assert mc.is_extended_hours(_ct(2026, 8, 17, 7, 0)) is True
+    assert mc.is_extended_hours(_ct(2026, 8, 14, 7, 0)) is False
+    assert mc.is_extended_hours(_ct(2026, 8, 17, 10, 0)) is False
+
+
+def test_naive_datetime_is_treated_as_ct():
+    naive = dt.datetime(2026, 8, 17, 10, 0)
+    assert mc.session_at(naive) is mc.Session.REGULAR
+
+
+def test_aware_non_ct_datetime_is_converted():
+    """17:00 UTC on a summer weekday == 12:00 CT -> regular hours."""
+    utc_noon_ct = dt.datetime(2026, 8, 17, 17, 0, tzinfo=dt.timezone.utc)
+    assert mc.session_at(utc_noon_ct) is mc.Session.REGULAR
+
+
+# -- config loading ---------------------------------------------------------
+def test_load_config_reads_the_real_sessions_toml():
+    cfg = mc.load_config()
+    assert cfg["activation"]["extended_hours_from"] == "2026-08-17"
+    assert cfg["sessions"]["gth"]["start"] == "06:30"
+    assert cfg["windows"]["collection"]["eth_start"] == "06:30"
+
+
+def test_alerts_fire_in_extended_hours_defaults_off():
+    assert mc.alerts_fire_in_extended_hours() is False
+
+
+def test_missing_sessions_toml_falls_back_to_defaults(monkeypatch, tmp_path):
+    monkeypatch.setattr(mc, "_TOML_PATH", tmp_path / "nope.toml")
+    mc.reset_config_cache()
+    assert mc.load_config() == mc._DEFAULTS
+    assert mc.activation_date() == dt.date(2026, 8, 17)
+    assert mc.session_at(_ct(2026, 8, 17, 7, 0)) is mc.Session.GTH
+
+
+def test_corrupt_sessions_toml_falls_back_to_defaults(monkeypatch, tmp_path):
+    bad = tmp_path / "sessions.toml"
+    bad.write_text("this is not [ valid toml", encoding="utf-8")
+    monkeypatch.setattr(mc, "_TOML_PATH", bad)
+    mc.reset_config_cache()
+    assert mc.load_config() == mc._DEFAULTS
+    assert mc.session_at(_ct(2026, 8, 17, 10, 0)) is mc.Session.REGULAR
+
+
+def test_malformed_time_value_falls_back_to_the_default_time(monkeypatch, tmp_path):
+    bad = tmp_path / "sessions.toml"
+    bad.write_text('[sessions.gth]\nstart = "half past six"\n', encoding="utf-8")
+    monkeypatch.setattr(mc, "_TOML_PATH", bad)
+    mc.reset_config_cache()
+    # The bad start silently reverts to 06:30 rather than raising.
+    assert mc.session_at(_ct(2026, 8, 17, 6, 30)) is mc.Session.GTH
+
+
+def test_malformed_activation_date_falls_back(monkeypatch, tmp_path):
+    bad = tmp_path / "sessions.toml"
+    bad.write_text('[activation]\nextended_hours_from = "soon"\n', encoding="utf-8")
+    monkeypatch.setattr(mc, "_TOML_PATH", bad)
+    mc.reset_config_cache()
+    assert mc.activation_date() == dt.date(2026, 8, 17)
