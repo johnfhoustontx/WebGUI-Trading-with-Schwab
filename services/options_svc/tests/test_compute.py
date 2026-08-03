@@ -1267,6 +1267,7 @@ def _patch_gamma(monkeypatch, *, chain=None, walls=None, history=None):
     # Persistence is time-dependent — pin the active session date so tests are
     # deterministic (the display shows this session's data).
     import datetime as _dtm
+
     from services.options_svc import scheduler as _sched
     monkeypatch.setattr(_sched, "active_session_date", lambda now=None: _dtm.date(2026, 6, 18))
 
@@ -1518,6 +1519,7 @@ def test_gamma_snapshot_history_uses_active_session_date(monkeypatch):
     _patch_gamma(monkeypatch, history=[(1, 2, 3, 4, 5, 6, {5400.0: {"net": 1}})])
     import datetime as _dtm
     import sys as _sys
+
     from services.options_svc import scheduler as _sched
     monkeypatch.setattr(_sched, "active_session_date", lambda now=None: _dtm.date(2026, 6, 26))
 
@@ -2548,12 +2550,19 @@ def test_refresh_header_sentiment_failure_is_no_data(monkeypatch):
 # fake the lazily-imported gex_collector/gamma_tool/gex_history_db modules so
 # nothing touches a live proxy or the on-disk DB.
 
-def _fake_gex_modules(monkeypatch, *, lock_ok=True):
+def _fake_gex_modules(monkeypatch, *, lock_ok=True, chains=None):
+    """Fake the lazily-imported collector modules.
+
+    ``chains`` — optional ``{symbol: chain}`` the fake ``poll_once`` feeds through
+    the ``on_chain`` callback, so tests can exercise the hooks that ride it (the
+    tick-chain stash, the UOA stash, the ETH-eligibility harvest) WITHOUT any
+    extra fetch. ``calls["poll_n"]`` counts poll_once invocations, which is how a
+    test proves no second fetch was introduced."""
     import sys as _sys
     import types as _types
 
     calls = {"poll": False, "touched": False, "closed": False,
-             "client": None, "engine": None, "conn": None}
+             "client": None, "engine": None, "conn": None, "poll_n": 0}
 
     class _Conn:
         def close(self):
@@ -2562,6 +2571,10 @@ def _fake_gex_modules(monkeypatch, *, lock_ok=True):
     def _poll(client, engine, conn, lock=None, on_chain=None):
         calls.update(poll=True, client=client, engine=engine, conn=conn,
                      on_chain=on_chain)
+        calls["poll_n"] += 1
+        for _sym, _chain in (chains or {}).items():
+            if on_chain is not None:
+                on_chain(_sym, _chain)
 
     fake_gc = _types.SimpleNamespace(
         LOCK_PATH="LOCK", SYMBOLS=["$SPX", "SPY"],
@@ -2648,6 +2661,158 @@ def test_collect_gex_snapshots_purge_failure_is_swallowed(monkeypatch):
     n = compute.collect_gex_snapshots()
     assert calls["poll"] is True   # collection still happened
     assert n == 3
+
+
+# ── ETH-eligibility harvest (Task C2) ───────────────────────────────────────
+# Eligibility rides the EXISTING on_chain hook, so it must cost zero extra
+# fetches — that economy is the whole point of the design.
+
+_ETH_CHAINS = {"NVDA": {"symbol": "NVDA", "ethOptionEligible": True},
+               "SPY": {"symbol": "SPY", "ethOptionEligible": False},
+               "$SPX": {"symbol": "$SPX"}}   # field absent → not eligible
+
+
+def test_collect_gex_snapshots_harvests_eth_eligibility(monkeypatch):
+    """Every chain the poll fetches contributes one eligibility reading."""
+    _fake_gex_modules(monkeypatch, lock_ok=True, chains=_ETH_CHAINS)
+    seen = {}
+    monkeypatch.setattr(compute, "_publish_eth_eligibility", seen.update)
+
+    compute.collect_gex_snapshots()
+
+    assert seen == {"NVDA": True, "SPY": False, "$SPX": False}
+
+
+def test_collect_gex_snapshots_eth_harvest_makes_no_extra_fetch(monkeypatch):
+    """The harvest reuses the chain the 1-min poll already paid for — one
+    poll_once, no second fetch."""
+    calls = _fake_gex_modules(monkeypatch, lock_ok=True, chains=_ETH_CHAINS)
+    monkeypatch.setattr(compute, "_publish_eth_eligibility", lambda seen: None)
+
+    compute.collect_gex_snapshots()
+
+    assert calls["poll_n"] == 1
+
+
+def test_collect_gex_snapshots_eth_harvest_keeps_the_tick_chain_stash(monkeypatch):
+    """The harvest EXTENDS the existing hook; the capture stash still works."""
+    _fake_gex_modules(monkeypatch, lock_ok=True, chains=_ETH_CHAINS)
+    monkeypatch.setattr(compute, "_publish_eth_eligibility", lambda seen: None)
+    compute.reset_tick_chain()
+
+    compute.collect_gex_snapshots(capture_symbols={"SPY"})
+
+    assert compute._take_tick_chain("SPY") == _ETH_CHAINS["SPY"]
+
+
+def test_collect_gex_snapshots_eth_publish_failure_is_swallowed(monkeypatch):
+    """An eligibility-publish failure must NEVER break GEX collection."""
+    calls = _fake_gex_modules(monkeypatch, lock_ok=True, chains=_ETH_CHAINS)
+
+    def _boom(seen):
+        raise RuntimeError("redis down")
+
+    monkeypatch.setattr(compute, "_publish_eth_eligibility", _boom)
+
+    n = compute.collect_gex_snapshots()
+
+    assert calls["poll"] is True    # collection still happened
+    assert calls["closed"] is True  # write conn still closed
+    assert n == 3
+
+
+def _fake_eth_bus(monkeypatch, stored=None):
+    """A fake Bus whose cache_get returns a CacheEnvelope-LIKE object.
+
+    Deliberately NOT a bare dict: ``Bus.cache_get`` returns a ``CacheEnvelope``,
+    and reading it with ``.get()`` once made a scheduled push silently never
+    fire. A dict fake would hide exactly that bug."""
+    import types as _types
+
+    rec = {"set": None, "kwargs": None}
+
+    class _Bus:
+        def cache_get(self, key):
+            rec["get_key"] = key
+            return None if stored is None else _types.SimpleNamespace(payload=stored)
+
+        def cache_set(self, key, payload, **kw):
+            rec["set"] = (key, payload)
+            rec["kwargs"] = kw
+            return 1
+
+    monkeypatch.setattr(compute, "_briefing_bus", lambda: _Bus())
+    return rec
+
+
+def test_publish_eth_eligibility_writes_the_merged_envelope(monkeypatch):
+    import datetime as _dt
+
+    from services.options_svc import scheduler as _sched
+    monkeypatch.setattr(_sched, "active_session_date",
+                        lambda *a, **k: _dt.date(2026, 8, 17))
+    rec = _fake_eth_bus(monkeypatch, stored=None)
+
+    compute._publish_eth_eligibility({"NVDA": True, "SPY": False})
+
+    key, payload = rec["set"]
+    assert key == "cache:options:eth_eligible"
+    assert payload == {"date": "2026-08-17",
+                       "symbols": {"NVDA": True, "SPY": False}}
+    # Eligibility changes ~twice a year — an unchanged map must not bump the
+    # cache version and wake every GUI version-poller.
+    assert rec["kwargs"].get("skip_unchanged") is True
+
+
+def test_publish_eth_eligibility_folds_into_the_prior_envelope(monkeypatch):
+    """Reads the CacheEnvelope's .payload and accumulates onto it."""
+    import datetime as _dt
+
+    from services.options_svc import scheduler as _sched
+    monkeypatch.setattr(_sched, "active_session_date",
+                        lambda *a, **k: _dt.date(2026, 8, 17))
+    rec = _fake_eth_bus(monkeypatch,
+                        stored={"date": "2026-08-17", "symbols": {"MU": True}})
+
+    compute._publish_eth_eligibility({"NVDA": True})
+
+    _key, payload = rec["set"]
+    assert payload["symbols"] == {"MU": True, "NVDA": True}
+
+
+def test_publish_eth_eligibility_new_session_resets_the_map(monkeypatch):
+    import datetime as _dt
+
+    from services.options_svc import scheduler as _sched
+    monkeypatch.setattr(_sched, "active_session_date",
+                        lambda *a, **k: _dt.date(2026, 8, 18))
+    rec = _fake_eth_bus(monkeypatch,
+                        stored={"date": "2026-08-17", "symbols": {"MU": True}})
+
+    compute._publish_eth_eligibility({"NVDA": True})
+
+    _key, payload = rec["set"]
+    assert payload == {"date": "2026-08-18", "symbols": {"NVDA": True}}
+
+
+def test_publish_eth_eligibility_no_bus_is_a_noop(monkeypatch):
+    monkeypatch.setattr(compute, "_briefing_bus", lambda: None)
+    compute._publish_eth_eligibility({"NVDA": True})   # must not raise
+
+
+def test_publish_eth_eligibility_empty_harvest_writes_nothing(monkeypatch):
+    rec = _fake_eth_bus(monkeypatch, stored=None)
+    compute._publish_eth_eligibility({})
+    assert rec["set"] is None
+
+
+def test_publish_eth_eligibility_swallows_a_bus_failure(monkeypatch):
+    class _Bus:
+        def cache_get(self, key):
+            raise RuntimeError("redis down")
+
+    monkeypatch.setattr(compute, "_briefing_bus", lambda: _Bus())
+    compute._publish_eth_eligibility({"NVDA": True})   # must not raise
 
 
 # ── GEX collector status view ───────────────────────────────────────────────

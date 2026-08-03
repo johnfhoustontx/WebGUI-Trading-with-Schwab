@@ -1821,6 +1821,43 @@ def _maybe_purge_gex(gh, conn) -> None:
         pass
 
 
+def _publish_eth_eligibility(seen) -> None:
+    """Fold one tick's harvested ETH eligibility into ``cache:options:eth_eligible``.
+
+    ``seen`` is ``{symbol: bool}`` collected by ``collect_gex_snapshots``'s
+    ``on_chain`` hook from the chains the 1-min poll already fetched — so this
+    costs no extra API call (see the ETH design doc §5.3).
+
+    Date-scoped on ``scheduler.active_session_date()``, the same convention
+    ``handlers.publish_matrix`` uses: eligibility read from session X's chains is
+    labelled session X, matching the gex_history rows this very tick just wrote.
+    ``skip_unchanged`` because the eligible list only moves at Cboe's twice-yearly
+    re-balance — an unchanged map must not bump the version and wake GUI pollers.
+
+    Best-effort: a harvest/publish failure must NEVER break GEX collection
+    (same discipline as ``handlers.run_flow_alerts``). ``bus.cache_get`` returns a
+    ``CacheEnvelope``, NOT a dict — take ``.payload``, never ``.get()``."""
+    if not seen:
+        return
+    try:
+        # scheduler imports handlers → this module, so import it lazily (cycle).
+        from services.options_svc import eth
+        from services.options_svc import scheduler as _sched
+
+        bus = _briefing_bus()
+        if bus is None:
+            return
+        date_iso = _sched.active_session_date().isoformat()
+        env = bus.cache_get(eth.CACHE_KEY)
+        payload = (getattr(env, "payload", None) or {}) if env is not None else {}
+        for symbol, eligible in seen.items():
+            payload = eth.merge_eligibility(payload, symbol, eligible,
+                                            date_iso=date_iso)
+        bus.cache_set(eth.CACHE_KEY, payload, skip_unchanged=True)
+    except Exception:
+        log.exception("_publish_eth_eligibility degraded")
+
+
 def collect_gex_snapshots(capture_symbols=None) -> int:
     """Fetch + persist one snapshot round (GEX/Charm/DEX/Vanna + term) for the
     tracked symbols. Returns ``len(gex_collector.collection_symbols())`` (the
@@ -1871,6 +1908,9 @@ def collect_gex_snapshots(capture_symbols=None) -> int:
         # Contract-level UOA rides the poll's on_chain hook (reusing each fetched
         # chain — no re-fetch); results are stashed per symbol and consumed once by
         # run_flow_alerts. flow_alerts is PURE (stdlib + repo_paths), imported lazily.
+        # Per-symbol extended-trading-hours eligibility rides the SAME hook, for
+        # the same reason: the boolean is a root field of a chain we already have.
+        from services.options_svc import eth
         from services.options_svc import flow_alerts
         clear_uoa_stash()
         _uoa_cfg = flow_alerts.load_thresholds()
@@ -1878,10 +1918,14 @@ def collect_gex_snapshots(capture_symbols=None) -> int:
         # entirely (nothing computed/published). The chain-capture stash stays on.
         _uoa_on = _uoa_cfg.get("enabled", True)
         wanted = set(capture_symbols) if capture_symbols else set()
+        _eth_seen: dict = {}
 
         def on_chain(sym, chain):  # noqa: F811 — the callback poll_once calls
             if sym in wanted:
                 _stash_tick_chain(sym, chain)
+            # Ungated: a pure dict read, no compute, and the map must stay complete
+            # even when the UOA kill-switch is off.
+            _eth_seen[sym] = eth.chain_eth_eligible(chain)
             if _uoa_on:
                 # Best-effort — a UOA detect failure must NEVER break collection.
                 try:
@@ -1893,6 +1937,12 @@ def collect_gex_snapshots(capture_symbols=None) -> int:
                      on_chain=on_chain)
         gc.touch_lock(gc.LOCK_PATH, source="options_svc", owner=owner,
                       now=int(time.time()))
+        try:
+            _publish_eth_eligibility(_eth_seen)
+        except Exception:
+            # Belt-and-braces: the helper is itself guarded, but collection that
+            # already succeeded must never be undone by an eligibility publish.
+            log.exception("ETH eligibility publish after collect degraded")
     finally:
         conn.close()
     return len(gc.collection_symbols())
@@ -4137,7 +4187,10 @@ def _briefing_bus():
     connection (and, under pytest, spins up a whole fresh in-memory fakeredis
     server — measured at ~1.2 s per call, which showed up as an 8x slowdown of
     the briefing tests). Reused across briefings; ``None`` if the bus is
-    unavailable, so the caller degrades to app-data-only."""
+    unavailable, so the caller degrades to app-data-only.
+
+    Despite the name it is simply THE module-level Bus handle: the ETH
+    eligibility publish shares it rather than opening a second connection."""
     global _BRIEFING_BUS
     if _BRIEFING_BUS is None:
         try:
