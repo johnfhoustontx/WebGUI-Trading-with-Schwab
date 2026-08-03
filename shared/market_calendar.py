@@ -1,11 +1,19 @@
 """Single source of truth for the market calendar and session windows.
 
-Replaces nine duplicated holiday sets and fourteen hardcoded window constants
-across the five Tier-2 services, the webgui and the options-scanner engines.
+**Foundation only -- this module currently replaces nothing.** It WILL replace
+the ten duplicated holiday sets and the fourteen hardcoded window constants
+spread across the five Tier-2 services, the webgui and the options-scanner
+engines; that migration is Phase B. Of the ten holiday sites, eight are in
+scope, ``claude-driver/config.py`` is exempt, and
+``options-scanner/scanner_engine.py`` diverges from the common set.
 
-Everything here is a PURE function of its arguments plus ``config/sessions.toml``
-(mtime-cached, mirroring ``services/options_svc/flow_alerts.load_thresholds``).
-No network, no database, and no clock unless you omit an optional ``now``.
+What ships today is the holiday calendar and the trading-day helpers below.
+Session windows, the ``Session`` vocabulary and ``config/sessions.toml``
+loading (mtime-cached, mirroring
+``services/options_svc/flow_alerts.load_thresholds``) arrive in Phase B.
+
+Everything here is a PURE function of its arguments -- no network, no
+database, no clock.
 
 ``shared/`` is a namespace package (no ``__init__.py``), so
 ``from shared.market_calendar import ...`` resolves once the repo root is on

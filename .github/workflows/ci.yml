@@ -90,6 +90,9 @@ jobs:
           - name: shared-contracts
             dir: "."
             cmd: python -m pytest shared/contracts -q
+          - name: shared-tests
+            dir: "."
+            cmd: python -m pytest shared/tests -q
           - name: scaffold
             dir: "."
             cmd: python -m pytest services/tests -q
