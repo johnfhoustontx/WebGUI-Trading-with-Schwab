@@ -15,10 +15,10 @@ executor so the event loop stays responsive.
 """
 import asyncio
 import logging
-from datetime import time as _time
 from zoneinfo import ZoneInfo
 
 from services.options_svc import compute, handlers
+from shared import market_calendar as mc
 from shared.market_calendar import HOLIDAYS as _HOLIDAYS
 from shared.market_calendar import is_trading_day as _cal_is_trading_day
 
@@ -26,8 +26,9 @@ log = logging.getLogger(__name__)
 
 # ── Schedule logic (ported verbatim from scanner.py) ───────────────────────
 _CT = ZoneInfo("America/Chicago")
-_SCAN_START = (8, 0)    # 08:00 CT
-_SCAN_END = (15, 15)    # 15:15 CT
+# The 08:00–15:15 CT auto-scan window now lives in config/sessions.toml as the
+# named ``scan`` window (see shared/market_calendar.py); the former
+# ``_SCAN_START``/``_SCAN_END`` tuples are gone.
 # NYSE full-closure holidays come from shared/market_calendar.py (derived, not
 # a literal — no yearly edit). ``_HOLIDAYS`` stays bound as the local alias
 # because ``_prev_trading_day``/``active_session_date`` below and
@@ -39,8 +40,13 @@ def _is_trading_day(now):
 
 
 def _is_market_hours(now):
-    t = now.time()
-    return _time(*_SCAN_START) <= t <= _time(*_SCAN_END)
+    """True inside the ``scan`` window (08:00–15:15 CT, INCLUSIVE both ends).
+
+    ``mc.in_window`` also gates on the trading day, which the former literal
+    comparison did not — harmless, because every caller already ANDs this with
+    ``_is_trading_day``. The name and signature are kept: ``compute.py`` and
+    several call sites below reference it directly."""
+    return mc.in_window("scan", now)
 
 
 def _slot_key(now):
