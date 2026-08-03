@@ -21,6 +21,8 @@ from zoneinfo import ZoneInfo
 import requests
 
 from repo_paths import NOTIFICATIONS_CONFIG
+from shared.market_calendar import HOLIDAYS as _HOLIDAYS  # noqa: F401  (kept for callers/tests)
+from shared.market_calendar import is_trading_day as _cal_is_trading_day
 
 log = logging.getLogger(__name__)
 _CONFIG_PATH = NOTIFICATIONS_CONFIG
@@ -356,21 +358,11 @@ def send_sms(fi_number: str, smtp_user: str, smtp_pw: str, body: str,
         log.warning("Fi SMS send failed: %s", exc)
 
 
-# Local NYSE full-closure holidays + trading window, copied from webgui/alerts.py
-# so this gate agrees with the rest of the stack WITHOUT importing that module
-# (alerts.py pulls in pages.options.scanner → NiceGUI/engine deps we don't want
-# in the always-on service process). **Update yearly** alongside alerts._HOLIDAYS.
+# Trading window (CT). The NYSE full-closure holidays behind the gate come from
+# shared/market_calendar.py (derived, not a literal — no yearly edit), which is
+# import-light: it pulls in nothing NiceGUI- or engine-coupled, so the always-on
+# service process stays clean.
 _MKT_OPEN, _MKT_CLOSE = _dt.time(8, 0), _dt.time(15, 0)   # CT trading window
-_HOLIDAYS = frozenset({
-    # 2026
-    _dt.date(2026, 1, 1), _dt.date(2026, 1, 19), _dt.date(2026, 2, 16), _dt.date(2026, 4, 3),
-    _dt.date(2026, 5, 25), _dt.date(2026, 6, 19), _dt.date(2026, 7, 3), _dt.date(2026, 9, 7),
-    _dt.date(2026, 11, 26), _dt.date(2026, 12, 25),
-    # 2027
-    _dt.date(2027, 1, 1), _dt.date(2027, 1, 18), _dt.date(2027, 2, 15), _dt.date(2027, 3, 26),
-    _dt.date(2027, 5, 31), _dt.date(2027, 6, 18), _dt.date(2027, 7, 5), _dt.date(2027, 9, 6),
-    _dt.date(2027, 11, 25), _dt.date(2027, 12, 24),
-})
 
 
 def _today_ct() -> str:
@@ -378,13 +370,12 @@ def _today_ct() -> str:
 
 
 def _in_market_hours() -> bool:
-    """Trading-day 08:00–15:00 CT. Uses a local weekday + holiday check (a copy of
-    webgui/alerts.py's calendar) so the gate agrees with the rest of the stack
-    without importing that NiceGUI-coupled module. Defensive → True on any error
-    (fail-open: better a rare off-hours notify than silently dropping all)."""
+    """Trading-day 08:00–15:00 CT, on the shared NYSE calendar so the gate agrees
+    with the rest of the stack. Defensive → True on any error (fail-open: better a
+    rare off-hours notify than silently dropping all)."""
     try:
         ct = _dt.datetime.now(_TZ)
-        return (ct.weekday() < 5 and ct.date() not in _HOLIDAYS
+        return (_cal_is_trading_day(ct.date())
                 and _MKT_OPEN <= ct.time() <= _MKT_CLOSE)
     except Exception:
         return True
