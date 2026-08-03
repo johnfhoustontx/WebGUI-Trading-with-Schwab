@@ -18,13 +18,12 @@ import asyncio
 import datetime as _dt
 import logging
 import threading
-from datetime import time as _time
 from zoneinfo import ZoneInfo
 
 from services.portfolio_svc import compute, handlers
 from services.portfolio_svc.state import STATE
+from shared import market_calendar as mc
 from shared.market_calendar import HOLIDAYS as _HOLIDAYS  # noqa: F401  (uniform alias; no consumer here -- prefer is_holiday(): HOLIDAYS covers 2026-27 only)
-from shared.market_calendar import is_trading_day as _cal_is_trading_day
 
 _log = logging.getLogger("portfolio_svc.scheduler")
 
@@ -42,17 +41,17 @@ RECONNECT_WAIT_MAX_SEC = 60.0  # cap on the exponential reconnect backoff
 
 # ── Market-hours gate (mirrors options_svc/scheduler.py) ───────────────────
 _CT = ZoneInfo("America/Chicago")
-_RTH_START = (8, 30)    # 08:30 CT (09:30 ET open)
-_RTH_END = (15, 0)      # 15:00 CT (16:00 ET close)
-# NYSE full-closure holidays come from shared/market_calendar.py (derived, not a
-# literal — no yearly edit). ``_HOLIDAYS`` stays bound as the local alias.
+# The 08:30-15:00 CT window and the NYSE holiday set both come from
+# shared/market_calendar.py now (config-driven + derived — no yearly edit).
+# ``_HOLIDAYS`` stays bound as the local alias.
 
 
 def _is_rth(now):
-    """Whether ``now`` is within Mon–Fri regular trading hours (holidays excl.)."""
-    if not _cal_is_trading_day(now.date()):
-        return False
-    return _time(*_RTH_START) <= now.time() <= _time(*_RTH_END)
+    """Whether ``now`` is within Mon–Fri regular trading hours (holidays excl.).
+
+    INCLUSIVE at both ends, which is exactly ``mc.is_regular_hours`` — unlike
+    ``sentiment_svc``'s same-named gate, whose close is exclusive."""
+    return mc.is_regular_hours(now)
 
 
 def _market_now():
