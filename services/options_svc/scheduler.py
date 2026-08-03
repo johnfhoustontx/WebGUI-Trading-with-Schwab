@@ -70,17 +70,31 @@ def _market_now():
 # ── GEX history-collection cadence (mirrors options-scanner/gex_collector.py) ─
 # The options service is now the Tier-2 owner of intraday GEX history collection
 # (the standalone gex_collector.py window was fragile — when it died, the Gamma
-# heatmap froze at the first snapshots). These constants mirror gex_collector's
-# START/STOP/POLL so the cadence + window stay aligned; defined locally (not
-# imported) to keep this module's import light, matching how the scan-window
-# constants above are ported verbatim rather than imported.
-_GEX_START = (8, 0)      # gex_collector.START_HOUR/START_MIN
-_GEX_STOP = (15, 20)     # gex_collector.STOP_HOUR/STOP_MIN
+# heatmap froze at the first snapshots).
+#
+# The WINDOW is now the named ``collection`` window in config/sessions.toml (see
+# shared/market_calendar.py). ``_GEX_START``/``_GEX_STOP`` survive only as the
+# (hour, minute) form ``compute._gex_next_scan`` unpacks — DERIVED from that one
+# source rather than re-stated as literals, so the two can no longer drift.
+# They are resolved at import (a window edit needs a service restart, as it
+# always has). The ``eth_start`` widening is deliberately NOT applied here: it is
+# per-symbol, and this is the service-wide slot gate.
+#
+# The INTERVAL is a cadence, not a window, so it stays a local literal mirroring
+# gex_collector.POLL_INTERVAL_MIN (pinned by test_gex_interval_mirrors_collector).
+_gex_start_t, _gex_stop_t = mc.window_bounds("collection")
+_GEX_START = (_gex_start_t.hour, _gex_start_t.minute)
+_GEX_STOP = (_gex_stop_t.hour, _gex_stop_t.minute)
 _GEX_INTERVAL_MIN = 1    # gex_collector.POLL_INTERVAL_MIN
 
 
 def _in_gex_window(now):
-    return _GEX_START <= (now.hour, now.minute) < _GEX_STOP
+    """True inside the ``collection`` window (08:00–15:20 CT, stop EXCLUSIVE).
+
+    ``mc.in_collection_window`` also gates on the trading day, which the bare
+    tuple comparison did not — harmless, since ``gex_due`` already ANDs this
+    with ``_is_trading_day``."""
+    return mc.in_collection_window(now)
 
 
 # ── Gamma display persistence (the last session shows until the next one starts) ─
