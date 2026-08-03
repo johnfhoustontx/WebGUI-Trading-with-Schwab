@@ -58,6 +58,10 @@ end   = "15:00"
 tz    = "America/New_York"
 start = "09:45"
 end   = "15:30"
+# The legacy predicate is `hm < start or hm >= end` -- the END IS EXCLUSIVE, so
+# the whole 15:30 ET minute is outside the window. That enforces "no new entries
+# in the last 30 min before the close", so it must not drift to inclusive.
+end_exclusive = true
 
 [alerts]
 # Fire phone pushes / in-app toasts during extended sessions. Off by default:

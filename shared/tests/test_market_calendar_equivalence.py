@@ -13,9 +13,12 @@ than imported from its service module. The service modules already read their
 holiday set from ``shared.market_calendar``, so importing them would make this
 partly circular; transcribed literals keep the oracle independent.
 
-Two divergences are REAL and are pinned explicitly rather than glossed (see
-``test_sentiment_rth_...`` and ``test_driver_entry_...``): the migration must
-preserve each one deliberately.
+This gate found two REAL divergences. One is now CLOSED: ``driver_entry``'s end
+was inclusive here and exclusive in ``driver_svc``, so the window now declares
+``end_exclusive = true`` and the two agree at every minute (see
+``test_driver_entry_window_matches_legacy_at_every_minute``). The other is still
+open and pinned explicitly rather than glossed (``test_sentiment_rth_...``):
+sentiment's exclusivity will be handled locally during its migration.
 
 The sweep covers every minute of four days, each chosen for a reason:
 before activation, the activation date itself, a weekend, and a holiday.
@@ -268,35 +271,39 @@ def test_every_legacy_market_snapshot_slot_falls_inside_the_named_window():
 # ---------------------------------------------------------------------------
 
 
-def test_driver_entry_window_matches_legacy_except_the_1530_boundary_minute():
-    """**Divergence, pinned.** ``checkpoint_due`` excludes its end
-    (``hm >= RTH_END`` → not due) while ``in_window`` is INCLUSIVE at both ends.
+def test_driver_entry_window_matches_legacy_at_every_minute():
+    """**Divergence found by this gate, and now CLOSED.**
 
-    Sweeping ET minute boundaries, the two agree everywhere except the 15:30
-    stamp on a trading day. ``driver_svc``'s migration must therefore NOT simply
-    call ``in_window("driver_entry", ...)`` -- doing so would open a 16th entry
-    slot at 15:30 ET, exactly the "no new entries into the close" rule the
-    constant exists to enforce.
+    ``checkpoint_due`` excludes its end (``hm >= RTH_END`` → not due) while
+    ``in_window`` was INCLUSIVE at both ends, so the two disagreed on exactly the
+    15:30 ET stamp of every trading day. A naive migration would have opened a
+    16th entry slot at 15:30 -- a Claude call and possibly a position inside the
+    "no new entries into the close" zone the constant exists to enforce.
+
+    The fix made exclusivity a DECLARATIVE property of the window
+    (``end_exclusive = true`` in ``config/sessions.toml``, with the same key in
+    ``_DEFAULTS`` so a missing or corrupt file still degrades to the safe
+    behavior). ``driver_svc``'s migration is now a straight swap, and there are
+    NO remaining exclusions here: the sweep must be empty.
     """
     divergent = set()
     for day in DAYS:
         for now in _minutes(day, tz=ET):
-            legacy = _legacy_driver_entry(now)
-            if mc.in_window("driver_entry", now) != legacy:
+            if mc.in_window("driver_entry", now) != _legacy_driver_entry(now):
                 divergent.add((now.date(), now.time()))
-    expected = {(d, dt.time(15, 30)) for d in DAYS if _legacy_is_trading_day(d)}
-    assert divergent == expected
+    assert divergent == set()
 
 
-def test_driver_entry_agrees_with_legacy_outside_that_one_minute():
-    """The same sweep with the known boundary minute excluded -- everything else
-    must match exactly, so the pin above can't be hiding a second difference."""
-    for day in DAYS:
-        for now in _minutes(day, tz=ET):
-            if now.time() == dt.time(15, 30):
-                continue
-            assert mc.in_window("driver_entry", now) == \
-                _legacy_driver_entry(now), now
+def test_driver_entry_boundary_minutes_agree_and_are_not_vacuous():
+    """Keeps the sweep above from passing trivially (two predicates that are
+    always False would also "agree"): the window must genuinely be open at 15:29
+    ET and shut for the whole 15:30 minute, in BOTH implementations."""
+    day = dt.date(2026, 8, 17)
+    for hh, mm, expected in ((9, 44, False), (9, 45, True),
+                             (15, 29, True), (15, 30, False)):
+        now = dt.datetime(day.year, day.month, day.day, hh, mm, tzinfo=ET)
+        assert mc.in_window("driver_entry", now) is expected, (hh, mm)
+        assert _legacy_driver_entry(now) is expected, (hh, mm)
 
 
 def test_driver_entry_is_evaluated_in_eastern_time_not_central():

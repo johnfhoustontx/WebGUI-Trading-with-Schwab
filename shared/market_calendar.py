@@ -236,8 +236,11 @@ _DEFAULTS = {
         "collection": {"start": "08:00", "eth_start": "06:30", "stop": "15:20"},
         "session_flip": {"at": "08:00"},
         "market_snapshot": {"start": "08:30", "end": "15:00"},
+        # ``end_exclusive`` lives here, not only in the TOML, so a missing or
+        # corrupt file still degrades to the SAFE behavior: falling back to
+        # inclusive would silently re-open the 15:30 ET entry slot.
         "driver_entry": {"tz": "America/New_York", "start": "09:45",
-                         "end": "15:30"},
+                         "end": "15:30", "end_exclusive": True},
     },
     "alerts": {"fire_in_extended_hours": False},
 }
@@ -458,9 +461,21 @@ def window_bounds(name: str):
 def in_window(name: str, now) -> bool:
     """True when ``now`` falls inside named window ``name`` on a trading day.
 
-    **INCLUSIVE at both ends**, matching the ``_is_market_hours`` predicates
-    this replaces. Note the asymmetry with ``in_collection_window``, whose stop
-    is exclusive -- the two mirror different existing predicates and are NOT
+    **INCLUSIVE at both ends** by default, matching the ``_is_market_hours``
+    predicates this replaces -- UNLESS the window declares
+    ``end_exclusive = true``, in which case the close is exclusive
+    (``start <= t < end``).
+
+    Only ``driver_entry`` declares it: ``driver_svc``'s gate is
+    ``hm < start or hm >= end``, so the whole 15:30 ET minute is OUTSIDE the
+    window. That is what enforces "no new entries in the last 30 min before the
+    close" -- inclusive there would open a 16th checkpoint slot at 15:30, firing
+    a Claude call and possibly a position inside the no-entry zone. The flag
+    makes that a property of the window, so the migration is a straight swap
+    with nothing to special-case.
+
+    Note the asymmetry with ``in_collection_window``, whose stop is likewise
+    exclusive -- the two mirror different existing predicates and are NOT
     unified on purpose.
     """
     win = _window(name)
@@ -469,7 +484,10 @@ def in_window(name: str, now) -> bool:
     if not is_trading_day(local.date()):
         return False
     start, end = window_bounds(name)
-    return start <= local.time() <= end
+    t = local.time()
+    if win.get("end_exclusive") is True:
+        return start <= t < end
+    return start <= t <= end
 
 
 def session_flip_time() -> time:

@@ -8,10 +8,15 @@ import repo_paths
 from shared import market_calendar as mc
 
 CT = ZoneInfo("America/Chicago")
+ET = ZoneInfo("America/New_York")
 
 
 def _ct(y, m, d, hh, mm):
     return dt.datetime(y, m, d, hh, mm, tzinfo=CT)
+
+
+def _et(y, m, d, hh, mm):
+    return dt.datetime(y, m, d, hh, mm, tzinfo=ET)
 
 
 @pytest.fixture(autouse=True)
@@ -296,8 +301,37 @@ def test_driver_entry_window_is_evaluated_in_eastern_time():
     """driver_entry carries its own tz; 09:45 ET == 08:45 CT."""
     assert mc.in_window("driver_entry", _ct(2026, 8, 17, 8, 45)) is True
     assert mc.in_window("driver_entry", _ct(2026, 8, 17, 8, 44)) is False
-    assert mc.in_window("driver_entry", _ct(2026, 8, 17, 14, 30)) is True
+    assert mc.in_window("driver_entry", _ct(2026, 8, 17, 14, 29)) is True
     assert mc.in_window("driver_entry", _ct(2026, 8, 17, 14, 31)) is False
+
+
+def test_driver_entry_end_is_exclusive():
+    """15:29 ET is in, the whole 15:30 ET minute is OUT -- matching
+    ``driver_svc``'s ``hm >= RTH_END`` gate, which keeps the last 30 min before
+    the close free of NEW entries. Inclusive here would open a 16th checkpoint
+    slot at 15:30 ET."""
+    assert mc.in_window("driver_entry", _et(2026, 8, 17, 15, 29)) is True
+    assert mc.in_window("driver_entry", _et(2026, 8, 17, 15, 30)) is False
+    assert mc.in_window("driver_entry", _et(2026, 8, 17, 15, 31)) is False
+
+
+def test_end_exclusive_does_not_leak_to_other_windows():
+    """A window WITHOUT the flag keeps the default INCLUSIVE close."""
+    assert mc.in_window("scan", _ct(2026, 8, 17, 15, 15)) is True
+    assert mc.in_window("market_snapshot", _ct(2026, 8, 17, 15, 0)) is True
+
+
+def test_driver_entry_end_exclusive_survives_a_partial_user_toml(
+        monkeypatch, tmp_path):
+    """``end_exclusive`` lives in ``_DEFAULTS``, so a config that overrides only
+    ``start`` -- or omits the window entirely -- cannot silently lose
+    exclusivity and re-open the 15:30 ET slot."""
+    _write_cfg(monkeypatch, tmp_path,
+               '[windows.driver_entry]\ntz = "America/New_York"\n'
+               'start = "09:45"\n')
+    assert mc.window_bounds("driver_entry") == (dt.time(9, 45), dt.time(15, 30))
+    assert mc.in_window("driver_entry", _et(2026, 8, 17, 15, 29)) is True
+    assert mc.in_window("driver_entry", _et(2026, 8, 17, 15, 30)) is False
 
 
 def test_collection_window_ineligible_symbol_starts_at_0800():
