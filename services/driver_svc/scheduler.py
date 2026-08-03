@@ -29,6 +29,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from services.driver_svc import handlers, settings as _settings
+from shared import market_calendar as mc
 from shared.market_calendar import HOLIDAYS as _HOLIDAYS
 from shared.market_calendar import is_trading_day as _cal_is_trading_day
 
@@ -45,18 +46,22 @@ def _is_trading_day(now) -> bool:
     """True on a weekday that is not an NYSE full-closure holiday (``now`` is ET-aware)."""
     return _cal_is_trading_day(now.date())
 
-# Autonomous ENTRY-window bounds for the checkpoint clock (ET, h:m tuples).
+# Autonomous ENTRY window for the checkpoint clock: the named ``driver_entry``
+# window in config/sessions.toml (see shared/market_calendar.py), which is
+# specified in ET — the only window that is — and carries ``end_exclusive``.
 # Deliberately INSIDE regular trading hours, aligned to the daily playbook:
 #  * start 09:45 (not the 09:30 open) — skip the first ~15 min so the post-open
 #    structure is readable before the Driver opens risk (mirrors the user's
 #    08:48 CT post-open review); the open-bell slot never fires.
-#  * end 15:30 — no NEW entries in the last 30 min before the 16:00 close (pin /
-#    gamma risk into the bell for defined-risk + 0-DTE spreads). A slot at/after
-#    RTH_END never fires, so the last entry decision is the 15:00 ET slot (14:00 CT).
+#  * end 15:30 EXCLUSIVE — no NEW entries in the last 30 min before the 16:00
+#    close (pin / gamma risk into the bell for defined-risk + 0-DTE spreads). The
+#    whole 15:30 minute is OUT, so the last entry decision is the 15:00 ET slot
+#    (14:00 CT). That exclusivity is why the window declares
+#    ``end_exclusive = true``: inclusive would re-open a 15:30 checkpoint inside
+#    the no-entry zone, firing a Claude call and possibly a position.
 # Management/exits are UNAFFECTED — they run on options_svc's separate 5-min
 # manage cycle right into the close; this bound only gates NEW driver entries.
-RTH_START = (9, 45)
-RTH_END = (15, 30)
+RTH_START, RTH_END = mc.window_bounds("driver_entry")   # 09:45, 15:30 ET
 
 POLL_INTERVAL_SEC = 30        # check the run gate every 30 s
 
@@ -78,8 +83,13 @@ def checkpoint_due(now, last_slot):
     """
     if not _is_trading_day(now):  # weekend or market holiday
         return (False, last_slot)
-    hm = (now.hour, now.minute)
-    if hm < RTH_START or hm >= RTH_END:
+    # ``in_window`` re-checks the trading day, so the explicit gate above is
+    # redundant — kept deliberately (as in options_svc's ``_in_gex_window``)
+    # because this is the path that spends a Claude call and can open risk, and
+    # the holiday gate reads better stated at the call site. The window's close
+    # is EXCLUSIVE (``end_exclusive`` in config/sessions.toml), which is what
+    # keeps the whole 15:30 ET minute out of the entry zone.
+    if not mc.in_window("driver_entry", now):
         return (False, last_slot)
     slot = (now.hour * 60 + now.minute) // _settings.CHECKPOINT_MIN
     key = f"{now.date().isoformat()}:{slot}"

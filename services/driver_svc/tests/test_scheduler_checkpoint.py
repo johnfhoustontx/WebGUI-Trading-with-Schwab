@@ -62,6 +62,29 @@ def test_checkpoint_not_due_in_last_half_hour():
     assert scheduler.checkpoint_due(_et(2026, 6, 24, 16, 0), None)[0] is False
 
 
+def test_checkpoint_due_rejects_the_close_boundary():
+    """15:30 ET is OUT -- enforces 'no new entries in the last 30 min'.
+
+    Sharper than the minute-level test above, and pinned because the gate moved
+    from a truncating ``(hour, minute)`` tuple comparison to the shared
+    ``mc.in_window("driver_entry", ...)``, which compares full ``time`` objects
+    (seconds included). 15:29:59 must still be IN and 15:30:00 the first instant
+    OUT -- if ``end_exclusive`` were ever dropped from config/sessions.toml, this
+    fails rather than silently re-opening a checkpoint inside the no-entry zone.
+    """
+    inside = datetime(2026, 6, 24, 15, 29, 59, tzinfo=ET)
+    boundary = datetime(2026, 6, 24, 15, 30, 0, tzinfo=ET)
+    after = datetime(2026, 6, 24, 15, 30, 30, tzinfo=ET)
+    assert scheduler.checkpoint_due(inside, None)[0] is True
+    assert scheduler.checkpoint_due(boundary, None)[0] is False
+    assert scheduler.checkpoint_due(after, None)[0] is False
+    # The open boundary is INCLUSIVE, and likewise unaffected by seconds.
+    assert scheduler.checkpoint_due(
+        datetime(2026, 6, 24, 9, 44, 59, tzinfo=ET), None)[0] is False
+    assert scheduler.checkpoint_due(
+        datetime(2026, 6, 24, 9, 45, 0, tzinfo=ET), None)[0] is True
+
+
 def test_checkpoint_due_last_entry_slot():
     """The 15:00–15:29 ET slot is the final fire-able entry slot (14:00 CT)."""
     assert scheduler.checkpoint_due(_et(2026, 6, 24, 15, 0), None)[0] is True
