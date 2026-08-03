@@ -1,7 +1,7 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from gex_status import classify_collector_status
+from gex_status import MARKET_OPEN, classify_collector_status
 
 TZ = ZoneInfo("America/Chicago")
 
@@ -34,12 +34,27 @@ def test_no_data_after_first_poll_window():
 
 
 def test_premarket_shows_scheduled_start():
-    now = datetime(2026, 4, 13, 7, 0, tzinfo=TZ)
+    """The message names the CONFIGURED collection start, not a literal.
+
+    It asserted a hardcoded "8:30" until 2026-08-03, pinning a live misreport:
+    collection moved to 08:00 CT on 2026-07-11 but this classifier still said
+    "starts 8:30" for that half hour every morning.
+    """
+    now = datetime(2026, 4, 13, 5, 0, tzinfo=TZ)   # before any plausible open
     text, color = classify_collector_status(
         age_seconds=None, now_ct=now, has_data=False, last_ts=None,
     )
-    assert "8:30" in text
+    assert f"{MARKET_OPEN.hour}:{MARKET_OPEN.minute:02d}" in text
     assert color == "gray"
+
+
+def test_scheduled_start_matches_the_shared_collection_window():
+    """Drift guard: the classifier's open IS config/sessions.toml's collection
+    start (08:00 CT), so the status line can never diverge from what the
+    collector actually schedules on."""
+    from shared import market_calendar as mc
+    assert MARKET_OPEN == mc.window_bounds("collection")[0]
+    assert MARKET_OPEN == datetime(2026, 4, 13, 8, 0).time()
 
 
 def test_after_hours_with_last_run():
