@@ -10,10 +10,12 @@ nothing). The market-hours gate mirrors the other services.
 import asyncio
 import datetime as _dt
 import logging
-from datetime import date as _date, time as _time
+from datetime import time as _time
 from zoneinfo import ZoneInfo
 
 from services.market_svc import compute, handlers
+from shared.market_calendar import HOLIDAYS as _HOLIDAYS  # noqa: F401  (kept for callers/tests)
+from shared.market_calendar import is_trading_day as _cal_is_trading_day
 
 _log = logging.getLogger("market_svc.scheduler")
 
@@ -24,19 +26,12 @@ WEEKEND_INTERVAL_SEC = 60    # futures CLOSED (Sat all day, Sun before 17:00 CT)
 _CT = ZoneInfo("America/Chicago")
 _RTH_START = (8, 30)
 _RTH_END = (15, 0)
-# Keep in sync with the other service schedulers + webgui/alerts.py. Update yearly.
-_HOLIDAYS = {
-    _date(2026, 1, 1), _date(2026, 1, 19), _date(2026, 2, 16), _date(2026, 4, 3),
-    _date(2026, 5, 25), _date(2026, 6, 19), _date(2026, 7, 3), _date(2026, 9, 7),
-    _date(2026, 11, 26), _date(2026, 12, 25),
-    _date(2027, 1, 1), _date(2027, 1, 18), _date(2027, 2, 15), _date(2027, 3, 26),
-    _date(2027, 5, 31), _date(2027, 6, 18), _date(2027, 7, 5), _date(2027, 9, 6),
-    _date(2027, 11, 25), _date(2027, 12, 24),
-}
+# NYSE full-closure holidays come from shared/market_calendar.py (derived, not a
+# literal — no yearly edit). ``_HOLIDAYS`` stays bound as the local alias.
 
 
 def _is_rth(now):
-    if now.weekday() >= 5 or now.date() in _HOLIDAYS:
+    if not _cal_is_trading_day(now.date()):
         return False
     return _time(*_RTH_START) <= now.time() <= _time(*_RTH_END)
 
