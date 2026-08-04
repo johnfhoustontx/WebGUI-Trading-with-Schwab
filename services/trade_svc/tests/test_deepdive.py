@@ -47,3 +47,36 @@ def test_build_deep_dive_query_injects_digest(monkeypatch):
     assert "OKLO" in md                  # {{SYMBOL}} substituted
     assert "{{QUANT_DATA}}" not in md    # placeholder filled
     assert "<!--" not in md              # HOW-TO comment stripped
+
+
+class _FakeBus:
+    def __init__(self):
+        self.sets = {}
+        self.published = []
+
+    def cache_set(self, key, payload):
+        self.sets[key] = payload
+        return 1
+
+    def publish(self, event, msg):
+        self.published.append((event, msg))
+
+
+def test_handle_command_deepdive(monkeypatch):
+    from services.trade_svc import handlers
+    monkeypatch.setattr(compute, "run_deep_dive",
+                        lambda s: {"symbol": s.upper(), "html": "<h1>H</h1>", "ts": "t"})
+    bus = _FakeBus()
+    handlers.handle_command(bus, types.SimpleNamespace(type="deepdive", args={"symbol": "oklo"}))
+    assert "OKLO" in bus.sets["cache:trade:deepdive"]["symbol"]
+    assert bus.published and bus.published[0][0] == "events:trade:deepdive"
+
+
+def test_handle_command_deepdive_query(monkeypatch):
+    from services.trade_svc import handlers
+    monkeypatch.setattr(compute, "build_deep_dive_query",
+                        lambda s: {"symbol": s.upper(), "markdown": "PROMPT", "ts": "t"})
+    bus = _FakeBus()
+    handlers.handle_command(bus, types.SimpleNamespace(type="deepdive_query", args={"symbol": "oklo"}))
+    assert bus.sets["cache:trade:deepdive_query"]["markdown"] == "PROMPT"
+    assert bus.published and bus.published[0][0] == "events:trade:deepdive_query"
