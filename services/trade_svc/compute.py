@@ -804,3 +804,88 @@ def analyze(symbol):
         "timestamp": _now_iso(),
         "errors": [],
     }
+
+
+# ── EquityDeepDive (migrated) — on-demand quant deep dive + chat-prompt query ──
+# The engine + IV/RV store live in ``services/trade_svc/deepdive``; these thin
+# wrappers run one symbol through it and hand back a JSON-safe {html|markdown, …}
+# payload for the handlers to cache. No Anthropic API calls (the AI *note* is a
+# generated query, not an API result). All defensive — never raise.
+_DEEPDIVE_ARGS = dict(years=1, no_options=False, strikes=40,
+                      from_date=None, to_date=None, lookback=252)
+
+
+def _open_iv_conn():
+    """Open (creating if needed) the IV/RV history SQLite store. Isolated so tests
+    can stub it away."""
+    from repo_paths import IV_HISTORY_DB
+    from services.trade_svc.deepdive import iv_history as ivh
+    IV_HISTORY_DB.parent.mkdir(parents=True, exist_ok=True)
+    return ivh.init_db(IV_HISTORY_DB)
+
+
+def _deep_dive_result(symbol):
+    """Run the migrated EquityDeepDive engine for one symbol → (result dict | None,
+    normalized symbol). Records an IV/RV snapshot as a side effect. Never raises."""
+    from types import SimpleNamespace
+
+    from services.trade_svc.deepdive import engine
+    from services.trade_svc.deepdive import iv_history as ivh
+    symbol = engine.normalize_symbol((symbol or "").strip().upper())
+    if not symbol:
+        return None, "?"
+    args = SimpleNamespace(**_DEEPDIVE_ARGS)
+    conn = None
+    try:
+        client = engine.SchwabClient()  # proxy mode (repo_paths.PROXY_URL)
+        conn = _open_iv_conn()
+        result = engine.analyze_symbol(client, symbol, args, conn)
+    except Exception:
+        result = None
+    finally:
+        if conn is not None:
+            try:
+                ivh.close_db(conn)
+            except Exception:
+                pass
+    return result, symbol
+
+
+def run_deep_dive(symbol):
+    """→ ``{'symbol','html','ts'}``. Renders the deep-dive HTML report (or a
+    friendly error page). Never raises."""
+    from services.trade_svc.deepdive import engine
+    result, sym = _deep_dive_result(symbol)
+    if not result:
+        html = (f"<!DOCTYPE html><html><head><meta charset='utf-8'>"
+                f"<title>Deep Dive — {sym}</title></head>"
+                f"<body style='font-family:system-ui;background:#0c0f15;color:#e9edf3;padding:40px'>"
+                f"<h3>Could not run a deep dive for {sym}</h3>"
+                f"<p>Check the symbol, and that the Schwab proxy (:8100) is up and its "
+                f"token is valid (visit <code>http://127.0.0.1:8100/auth</code>).</p>"
+                f"</body></html>")
+        return {"symbol": sym, "html": html, "ts": _now_iso()}
+    try:
+        html = engine.render_html(
+            result["symbol"], result["quote"], result["technicals"],
+            result["fundamentals"], result["options"], result["takeaways"],
+            result["ranks"])
+    except Exception as exc:
+        html = f"<html><body><h3>Deep Dive render failed for {sym}: {exc}</h3></body></html>"
+    return {"symbol": sym, "html": html, "ts": _now_iso()}
+
+
+def build_deep_dive_query(symbol):
+    """→ ``{'symbol','markdown','ts'}``. Builds the chat prompt (digest injected,
+    HOW-TO stripped) for the user to paste into a chat. NO API call. Never raises."""
+    from services.trade_svc.deepdive import chat_prompt
+    result, sym = _deep_dive_result(symbol)
+    if not result:
+        return {"symbol": sym, "ts": _now_iso(),
+                "markdown": f"Could not build a query for {sym}. Is the proxy up?"}
+    try:
+        template_text = chat_prompt.find_template().read_text(encoding="utf-8")
+        md = chat_prompt.build_prompt(result, template_text)
+    except Exception as exc:
+        md = f"Query build failed for {sym}: {exc}"
+    return {"symbol": sym, "markdown": md, "ts": _now_iso()}
