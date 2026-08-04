@@ -799,6 +799,16 @@ def notify_signals(bus, signals: list, *, kind: str, seen_key: str,
     # to re-notify later.
     save_seen(bus, seen_key, nxt)
 
+    # Captured-signal notifications are OPT-IN (default OFF). Captured dicts use
+    # strategy/entry_credit/entry_max_loss/scanner_type/entry_short_delta (not
+    # type/credit/max_loss/trade_type/short_delta), so they render as garbage
+    # ("SYM None () · $0.00") through the scanner-shaped formatter, and they
+    # duplicate the scanner alerts. Set notify_captured:true to re-enable. The
+    # seen-set is already updated above so a later re-enable won't blast the day's
+    # backlog.
+    if kind == "captured" and not cfg.get("notify_captured", False):
+        return []
+
     if seed or not cfg.get("enabled", True) or not new:
         return new if seed else []
 

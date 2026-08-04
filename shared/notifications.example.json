@@ -2,6 +2,7 @@
   "enabled": true,
   "market_hours_only": true,
   "min_score": 60,
+  "notify_captured": false,
   "telegram": {
     "bot_token": "",
     "chat_id": 0

@@ -427,6 +427,7 @@ def test_min_score_not_applied_to_captured(monkeypatch):
     from shared.bus import Bus
     bus = Bus(fake=True)
     cfg = {"enabled": True, "market_hours_only": False, "min_score": 90,
+           "notify_captured": True,
            "telegram": {"bot_token": "T", "chat_id": 1}, "discord": {}, "sms": {}}
     monkeypatch.setattr(pn, "load_config", lambda: cfg)
     tg = []
@@ -435,6 +436,54 @@ def test_min_score_not_applied_to_captured(monkeypatch):
     monkeypatch.setattr(pn, "send_sms", lambda *a, **k: None)
     # captured signal with no composite_score still notifies despite min_score=90
     cap = {"signal_id": "cap1", "symbol": "SPY", "type": "PCS",
+           "short_strike": 500, "long_strike": 495, "expiration": "2026-07-10"}
+    pn.notify_signals(bus, [cap], kind="captured",
+                      seen_key="cache:options:notified_captured", today="2026-07-05")
+    assert len(tg) == 1
+
+
+# --- Captured notifications are opt-in (default OFF) ---
+
+def test_captured_disabled_by_default_sends_nothing(monkeypatch):
+    """A captured signal must NOT notify unless notify_captured is explicitly on.
+
+    Captured-signal dicts use strategy/entry_credit/... (not type/credit/...), so
+    they render as garbage through the scanner-shaped formatter, and they
+    duplicate the scanner alerts. Default OFF. The seen-set is still updated so a
+    later re-enable doesn't blast the backlog.
+    """
+    from shared.bus import Bus
+    bus = Bus(fake=True)
+    cfg = {"enabled": True, "market_hours_only": False, "min_score": 0,
+           "telegram": {"bot_token": "T", "chat_id": 1},
+           "discord": {"webhook_url": "https://h"}, "sms": {}}  # no notify_captured key
+    monkeypatch.setattr(pn, "load_config", lambda: cfg)
+    tg, dc = [], []
+    monkeypatch.setattr(pn, "send_telegram", lambda *a: tg.append(a))
+    monkeypatch.setattr(pn, "send_discord", lambda *a: dc.append(a))
+    monkeypatch.setattr(pn, "send_sms", lambda *a, **k: None)
+    cap = {"signal_id": "cap1", "symbol": "SPY", "strategy": "PCS",
+           "short_strike": 500, "long_strike": 495, "expiration": "2026-07-10"}
+    out = pn.notify_signals(bus, [cap], kind="captured",
+                            seen_key="cache:options:notified_captured", today="2026-07-05")
+    assert tg == [] and dc == [] and out == []
+    seen = pn.load_seen(bus, "cache:options:notified_captured")
+    assert "cap1" in (seen or {}).get("keys", [])   # seen-set still updated
+
+
+def test_captured_enabled_opt_in_sends(monkeypatch):
+    from shared.bus import Bus
+    bus = Bus(fake=True)
+    cfg = {"enabled": True, "market_hours_only": False, "min_score": 0,
+           "notify_captured": True,
+           "telegram": {"bot_token": "T", "chat_id": 1},
+           "discord": {"webhook_url": "https://h"}, "sms": {}}
+    monkeypatch.setattr(pn, "load_config", lambda: cfg)
+    tg = []
+    monkeypatch.setattr(pn, "send_telegram", lambda *a: tg.append(a))
+    monkeypatch.setattr(pn, "send_discord", lambda *a: None)
+    monkeypatch.setattr(pn, "send_sms", lambda *a, **k: None)
+    cap = {"signal_id": "cap2", "symbol": "SPY", "strategy": "PCS",
            "short_strike": 500, "long_strike": 495, "expiration": "2026-07-10"}
     pn.notify_signals(bus, [cap], kind="captured",
                       seen_key="cache:options:notified_captured", today="2026-07-05")
@@ -1132,7 +1181,7 @@ def test_notify_signals_captured_also_uses_signals_route(monkeypatch):
     from shared.bus import Bus
     bus = Bus(fake=True)
     got = {"d": [], "t": []}
-    monkeypatch.setattr(pn, "load_config", lambda: _route_cfg("signals"))
+    monkeypatch.setattr(pn, "load_config", lambda: {**_route_cfg("signals"), "notify_captured": True})
     monkeypatch.setattr(pn, "send_discord", lambda wh, e: got["d"].append(wh))
     monkeypatch.setattr(pn, "send_telegram", lambda tok, cid, t: got["t"].append((tok, cid)))
     monkeypatch.setattr(pn, "send_sms", lambda *a, **k: None)
