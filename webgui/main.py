@@ -172,6 +172,62 @@ def _serve_gamma_history():
     return HTMLResponse(analyze_html(bus_client.read("options:gamma_history")))
 
 
+# ── EquityDeepDive (Trade Analyzer) — Deep Dive report + AI Query serve routes ──
+_DEEPDIVE_EMPTY = (
+    "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'><title>Deep Dive</title></head>"
+    "<body style='font-family:system-ui,sans-serif;background:#0c0f15;color:#e9edf3;padding:40px'>"
+    "<h3>No Deep Dive generated yet</h3><p>Open the Trade Analyzer, enter a symbol, and click "
+    "<b>Deep Dive</b>.</p></body></html>")
+
+
+def deepdive_html(payload):
+    """Standalone deep-dive report HTML from the cached payload (or a placeholder)."""
+    html = (payload or {}).get("html")
+    return html if isinstance(html, str) and html.strip() else _DEEPDIVE_EMPTY
+
+
+def deepdive_query_html(payload):
+    """Wrap the cached chat-prompt markdown in a dark, copyable page (read-only
+    textarea + Copy button) so the user can paste it straight into a chat."""
+    import html as _h
+    md = (payload or {}).get("markdown")
+    sym = (payload or {}).get("symbol", "")
+    if not (isinstance(md, str) and md.strip()):
+        return ("<!DOCTYPE html><html><head><meta charset='utf-8'><title>AI Query</title></head>"
+                "<body style='font-family:system-ui;background:#0c0f15;color:#e9edf3;padding:40px'>"
+                "<h3>No query generated yet</h3><p>Click <b>AI Query</b> on the Trade Analyzer.</p>"
+                "</body></html>")
+    esc = _h.escape(md)
+    return (
+        "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
+        f"<title>AI Query — {_h.escape(sym)}</title>"
+        "<style>body{font-family:system-ui,sans-serif;background:#0c0f15;color:#e9edf3;margin:0;padding:24px}"
+        "h3{margin:0 0 12px}button{background:#2563eb;color:#fff;border:0;border-radius:8px;"
+        "padding:10px 16px;font-weight:600;cursor:pointer}button:hover{background:#1d4fd1}"
+        "textarea{width:100%;height:75vh;margin-top:12px;background:#101a30;color:#e7edf8;"
+        "border:1px solid #243353;border-radius:8px;padding:12px;font-family:ui-monospace,monospace;"
+        "font-size:12px;box-sizing:border-box}</style></head><body>"
+        f"<h3>AI Query — {_h.escape(sym)} "
+        "<button onclick=\"navigator.clipboard.writeText(document.getElementById('q').value)."
+        "then(()=>{this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1200)})\">Copy</button></h3>"
+        f"<textarea id='q' readonly>{esc}</textarea></body></html>")
+
+
+@app.get("/trade/deepdive")
+def _serve_deepdive():
+    """Serve the latest Deep Dive report as a raw standalone page (its own <style>
+    applies). Opened in a new browser tab from the Trade page."""
+    import bus_client
+    return HTMLResponse(deepdive_html(bus_client.read("trade:deepdive")))
+
+
+@app.get("/trade/deepdive-query")
+def _serve_deepdive_query():
+    """Serve the latest AI Query as a copyable page. Opened in a new tab."""
+    import bus_client
+    return HTMLResponse(deepdive_query_html(bus_client.read("trade:deepdive_query")))
+
+
 @app.get("/eod/file")
 def _serve_eod_file(date: str, which: str = "summary"):
     """Serve an archived EOD report file (summary.html / detail.html) raw, so its
