@@ -68,6 +68,12 @@ MARKET_STATE_HISTORY_DB = SENTIMENT / "data" / "market_state.db"
 MARKET_STATE_VALIDATION_REPORT = SENTIMENT / "data" / "market_state_validation.md"
 MARKET_STATE_VALIDATION_JSON   = SENTIMENT / "data" / "market_state_validation.json"
 
+# EquityDeepDive IV/RV history (migrated into services/trade_svc/deepdive). Schwab
+# serves no IV history, so IV rank accumulates forward from the first run; each
+# on-demand Deep Dive records a snapshot. On-demand only (no scheduled job yet).
+# services/trade_svc/data/ is gitignored (generated).
+IV_HISTORY_DB = REPO_ROOT / "services" / "trade_svc" / "data" / "iv_history.db"
+
 _ports = tomllib.loads((REPO_ROOT / "config" / "ports.toml").read_text())
 PROXY_PORT       = _ports["proxy"]
 PROXY_URL        = f"http://127.0.0.1:{PROXY_PORT}"

@@ -60,3 +60,4 @@ sentiment-dashboard/data/
 webgui/data/eod/
 schwab-proxy/data/
 shared/data/
+services/trade_svc/data/
