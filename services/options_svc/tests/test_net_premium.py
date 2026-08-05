@@ -77,3 +77,56 @@ def test_every_source_symbol_is_in_the_static_collection_base():
     missing = [s for s in np_mod.source_symbols()
                if s not in set(gex_collector.SYMBOLS)]
     assert not missing, f"not in gex_collector.SYMBOLS: {missing}"
+
+
+def _row(ts, call, put):
+    """A gex_history flow row: (ts, spot, call_vol, put_vol, call_prem, put_prem)."""
+    return (ts, 100.0, 0, 0, call, put)
+
+
+def test_build_series_projects_ts_call_put():
+    out = np_mod.build_series({"SPY": [_row(1, 10.0, 4.0), _row(2, 20.0, 5.0)]})
+    assert out["SPY"] == [[1, 10.0, 4.0], [2, 20.0, 5.0]]
+
+
+def test_build_series_skips_rows_with_no_premium_at_all():
+    out = np_mod.build_series({"SPY": [_row(1, None, None), _row(2, 20.0, 5.0)]})
+    assert out["SPY"] == [[2, 20.0, 5.0]]
+
+
+def test_build_series_treats_one_missing_side_as_zero():
+    out = np_mod.build_series({"SPY": [_row(1, 10.0, None)]})
+    assert out["SPY"] == [[1, 10.0, 0.0]]
+
+
+def test_build_series_sums_basket_members_by_timestamp():
+    out = np_mod.build_series({
+        "NVDA": [_row(1, 10.0, 1.0), _row(2, 30.0, 2.0)],
+        "MSFT": [_row(1, 5.0, 3.0), _row(2, 7.0, 4.0)],
+    })
+    assert out["BIG10"] == [[1, 15.0, 4.0], [2, 37.0, 6.0]]
+
+
+def test_basket_tolerates_partially_reported_timestamps():
+    # A member missing a snapshot contributes nothing at that ts rather than
+    # dropping the whole column.
+    out = np_mod.build_series({
+        "NVDA": [_row(1, 10.0, 1.0), _row(2, 30.0, 2.0)],
+        "MSFT": [_row(1, 5.0, 3.0)],
+    })
+    assert out["BIG10"] == [[1, 15.0, 4.0], [2, 30.0, 2.0]]
+
+
+def test_basket_absent_when_no_member_has_data():
+    out = np_mod.build_series({"NVDA": []})
+    assert "BIG10" not in out
+
+
+def test_symbols_with_no_rows_are_omitted():
+    out = np_mod.build_series({"XLK": [], "SPY": [_row(1, 1.0, 1.0)]})
+    assert "XLK" not in out and "SPY" in out
+
+
+def test_build_series_never_raises_on_junk():
+    out = np_mod.build_series({"SPY": [("x",), None, _row(1, 1.0, 1.0)]})
+    assert out["SPY"] == [[1, 1.0, 1.0]]
