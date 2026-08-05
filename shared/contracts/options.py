@@ -118,11 +118,12 @@ class NetPremiumSnapshot(_Base):
     Dealer Positioning "Net Prem" view.
 
     ``series`` maps a display symbol (including the composite ``BIG10``) to
-    ``[[ts, call_prem, put_prem], …]``, RTH-cropped, for ``session_date``. Like
-    the other view models this validates only the envelope shape. Every field
-    carries a default so a payload cached before a field existed still validates.
+    ``[[ts, call_prem, put_prem], …]`` for ``session_date``, as produced by
+    ``compute.build_net_premium``, which crops to RTH. Like the other view models
+    this validates only the envelope shape. Every field carries a default so a
+    payload cached before a field existed still validates.
     """
     session_date: str | None = None    # gex session date the series cover
-    ts: str | None = None
+    ts: str | None = None              # publish time (NOT the per-row ts inside series)
     series: dict = {}                  # {symbol: [[ts, call_prem, put_prem], …]}
     error: str | None = None

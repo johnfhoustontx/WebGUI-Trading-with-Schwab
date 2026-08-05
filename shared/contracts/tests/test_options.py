@@ -50,7 +50,7 @@ def test_matrix_snapshot_roundtrip_and_defaults():
     assert MatrixSnapshot.from_json(dumped).rows == m.rows
 
 
-def test_net_premium_snapshot_validates_envelope():
+def test_net_premium_snapshot_accepts_nested_series():
     from shared.contracts.options import NetPremiumSnapshot
 
     snap = NetPremiumSnapshot(
@@ -68,3 +68,25 @@ def test_net_premium_snapshot_defaults_every_field():
 
     snap = NetPremiumSnapshot()
     assert snap.series == {} and snap.session_date is None
+
+
+def test_net_premium_snapshot_survives_json_round_trip():
+    """Surviving Bus.cache_set's JSON encoding is this contract's whole job.
+
+    The round trip is deliberately NOT identity: JSON has no tuple type, so tuple
+    rows come back as lists. ``load_flow_series`` — which Task 5's
+    ``compute.build_net_premium`` reads — yields tuples, so this pins the
+    invariant the page depends on: whatever goes in, the page always receives
+    LISTS, which is what makes positional ``row[1]``/``row[2]`` access valid.
+    """
+    from shared.contracts.options import NetPremiumSnapshot
+
+    snap = NetPremiumSnapshot(
+        session_date="2026-08-05",
+        ts="2026-08-05T09:15:00",
+        series={"SPY": [[1, 10.0, 4.0]], "BIG10": [(2, 20.0, 8.0)]},
+    )
+    back = NetPremiumSnapshot.from_json(snap.to_json())
+    assert back.session_date == "2026-08-05"
+    assert back.series["SPY"] == [[1, 10.0, 4.0]]     # lists survive unchanged
+    assert back.series["BIG10"] == [[2, 20.0, 8.0]]   # tuples normalize to lists
