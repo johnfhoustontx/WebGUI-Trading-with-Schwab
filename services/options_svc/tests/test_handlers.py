@@ -1319,12 +1319,17 @@ def test_collect_gex_history_publishes_flow_skew_after_collect(monkeypatch):
 
 
 def test_collect_gex_history_no_bus_skips_publish(monkeypatch):
-    """A legacy caller passing bus=None still collects, but does not publish."""
+    """A legacy caller passing bus=None still collects, but does not publish —
+    none of them (flow-skew, matrix, net premium)."""
     order = []
     monkeypatch.setattr(handlers.compute, "collect_gex_snapshots",
                         lambda capture_symbols=None: order.append("collect"))
     monkeypatch.setattr(handlers, "publish_flow_skew",
                         lambda bus: order.append("publish"))
+    monkeypatch.setattr(handlers, "publish_matrix",
+                        lambda bus: order.append("matrix"))
+    monkeypatch.setattr(handlers, "publish_net_premium",
+                        lambda bus: order.append("netprem"))
     handlers.collect_gex_history(bus=None)
     assert order == ["collect"]
 
@@ -2052,15 +2057,8 @@ def test_collect_gex_history_publishes_net_premium_guarded(monkeypatch):
     assert calls == ["collect", "matrix", "netprem"]
 
 
-def test_collect_gex_history_no_bus_skips_net_premium(monkeypatch):
-    """The legacy bus-less caller collects only — no publish of any kind."""
-    calls = []
-    monkeypatch.setattr(handlers.compute, "collect_gex_snapshots",
-                        lambda **kw: calls.append("collect"))
-    monkeypatch.setattr(handlers, "publish_net_premium",
-                        lambda bus: calls.append("netprem"))
-    handlers.collect_gex_history(bus=None)
-    assert calls == ["collect"]
+# (The bus-less caller is covered by test_collect_gex_history_no_bus_skips_publish,
+# which patches all three publishers — same property, one test.)
 
 
 # --- the contract gate must be REAL, and must fail LOUDLY --------------------
@@ -2100,9 +2098,12 @@ def test_publish_net_premium_non_dict_payload_logs_the_contract(monkeypatch, cap
     assert any("NetPremiumSnapshot" in r.message for r in caplog.records)
 
 
-def test_publish_net_premium_projects_onto_contract_fields(monkeypatch):
-    """The cached payload is the VALIDATED projection: missing fields get the
-    contract default, engine extras are dropped."""
+def test_publish_net_premium_caches_only_the_contract_fields(monkeypatch):
+    """The cached payload is the VALIDATED model: missing fields get the contract
+    default, engine extras are dropped. Both come from NetPremiumSnapshot itself
+    (every field has a default; _Base inherits pydantic's extra="ignore"), so no
+    hand-maintained field list is needed at the call site — one that drifted from
+    the contract would pin a new field to its default forever."""
     bus = Bus(fake=True)
     monkeypatch.setattr(handlers.compute, "build_net_premium",
                         lambda session_date, **kw: {"series": {"SPY": []},

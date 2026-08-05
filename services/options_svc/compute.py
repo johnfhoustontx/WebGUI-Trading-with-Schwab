@@ -2306,12 +2306,9 @@ def build_net_premium(session_date, now=None):
     axes agree. One reused read-only connection, ALWAYS closed. No proxy calls.
 
     Rides the 1-min GEX branch, so this reads rows that were just written — it is
-    not new data collection. It opens its OWN read-only connection: ``build_matrix``
-    ran moments earlier over an overlapping symbol set, but its connection is long
-    closed by then, and its rows are read for ``session_date`` where these are read
-    for ``_display_session_date`` — which differ between 08:00 and 08:30. See
-    ``handlers.publish_net_premium`` for the full reasoning on why the two reads
-    stay independent.
+    not new data collection. It opens its OWN read-only connection rather than
+    reusing the one ``build_matrix`` held moments earlier; see
+    ``handlers.publish_net_premium`` for why the two reads stay independent.
 
     ``session_date`` MUST be a ``datetime.date`` (as ``scheduler.active_session_date``
     returns): both ``_rth_bounds`` and the gex_history readers require the object,

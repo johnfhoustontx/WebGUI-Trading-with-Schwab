@@ -797,17 +797,6 @@ def publish_matrix(bus) -> None:
         log.exception("publish_matrix degraded")
 
 
-# The fields NetPremiumSnapshot validates — the payload is projected onto exactly
-# these (mirrors _SCAN_DEFAULTS), so an engine extra can never reach the cache and
-# the page can never grow a dependence on an unvalidated field.
-_NET_PREMIUM_DEFAULTS = {
-    "session_date": None,
-    "ts": None,
-    "series": {},
-    "error": None,
-}
-
-
 def publish_net_premium(bus) -> None:
     """Assemble the Net Prem view and publish it to the bus.
 
@@ -817,24 +806,37 @@ def publish_net_premium(bus) -> None:
     ``error`` set). Guarded so a net-premium failure never escapes into the caller
     — the collection and the earlier publishes must be unaffected.
 
-    **Its own DB read, deliberately.** ``net_premium.source_symbols()`` is a strict
-    subset of ``compute._matrix_symbols()`` and ``build_matrix`` has just read the
-    same six flow columns for all of them, so it is tempting to hand those rows
-    over instead. Two reasons not to. (1) They are not the same rows: matrix reads
-    ``session_date`` while net premium reads ``_display_session_date(now, …)``, and
-    between the 08:00 collection start and the 08:30 RTH open those DIFFER by a
-    day — sharing would silently plot the wrong session in exactly the window this
-    view is most fragile in. (2) Independence: a matrix build failure returns early
-    with ``error`` and no rows, which would then take this view down with it. The
-    duplicated read is six narrow columns over an indexed range (no grid blob) for
-    28 symbols — cheap enough that correctness and isolation win.
+    **Its own DB read, deliberately.** ``build_matrix`` has just read the same six
+    flow columns over an overlapping symbol set, so it is tempting to hand those
+    rows over instead. Three reasons not to.
 
-    **No ``skip_unchanged``** (unlike ``publish_matrix``): the payload carries a
-    fresh ``ts`` from every build, so the comparison could never match — it would
-    only add a full cache read plus a deep compare of a many-thousand-point series
-    on every tick of a branch that has historically dropped slots under load. The
-    series also genuinely gains a row each minute inside the collection window, so
-    there is nothing to suppress.
+    1. **The universes are independently sourced and need not overlap.**
+       ``net_premium.GROUPS`` is a static hardcoded tuple, while
+       ``compute._matrix_symbols()`` derives from
+       ``gex_collector.collection_symbols()`` (the index base ∪ the *gitignored*
+       ``Top 20.xlsx``) and degrades to ``[]`` when that import fails. They happen
+       to be equal locally (27 each), but on a fresh clone — or any watchlist
+       edit — this view's symbols are a strict SUPERSET, so sharing would starve
+       it of most of its lines year-round.
+    2. **They are not the same rows.** Matrix reads ``session_date`` while net
+       premium reads ``_display_session_date(now, …)``, and between the 08:00
+       collection start and the 08:30 RTH open those DIFFER by a day — sharing
+       would silently plot the wrong session in exactly the window this view is
+       most fragile in.
+    3. **Independence.** A matrix build failure returns early with ``error`` and
+       no rows, which would then take this view down with it.
+
+    The duplicated read is six narrow columns over an indexed range (no grid blob)
+    for 27 symbols — cheap enough that correctness and isolation win.
+
+    **No ``skip_unchanged``** (unlike ``publish_matrix``): it could not fire, for two
+    independent reasons. The payload carries a fresh ``ts`` from every build, so the
+    comparison never matches; and even ignoring ``ts``, the sole caller is
+    ``collect_gex_history`` under ``scheduler.gex_due`` (08:00–15:20 CT), so this only
+    ever runs inside the window where the series gains a row every minute. There is
+    nothing to suppress — the flag would only add a full cache read plus a deep
+    compare of a many-thousand-point series on every tick of a branch that has
+    historically dropped slots under load.
 
     A payload that fails the ``NetPremiumSnapshot`` gate is logged as an ERROR
     naming the contract and NOT cached. That loudness is the point: this publish
@@ -852,16 +854,18 @@ def publish_net_premium(bus) -> None:
         # through untouched; build_net_premium raises TypeError on a string by design.
         now = scheduler._market_now()
         view = compute.build_net_premium(scheduler.active_session_date(now), now=now)
+        # The constructor IS the gate: every field carries a default (so a missing
+        # key validates) and _Base inherits pydantic's extra="ignore" (so an engine
+        # extra is dropped rather than cached). A non-dict return raises TypeError at
+        # the ** expansion and lands on the same handler. The write hangs off ``else``
+        # so "publish only on a clean payload" is structural, not inferred.
         try:
-            snap = NetPremiumSnapshot(**{k: view.get(k, default)
-                                         for k, default in _NET_PREMIUM_DEFAULTS.items()})
+            snap = NetPremiumSnapshot(**view)
         except Exception:
-            # The projection lives INSIDE this try so a wholly non-dict return lands
-            # here too, rather than on the generic degrade message below.
-            log.exception("net-premium payload failed the NetPremiumSnapshot gate "
-                          "— NOT publishing (shape regression)")
-            return
-        bus.cache_set(CACHE_NET_PREMIUM, snap.model_dump(), event=EVENT_NET_PREMIUM)
+            log.exception("net-premium payload could not be validated against "
+                          "NetPremiumSnapshot — NOT publishing (shape regression)")
+        else:
+            bus.cache_set(CACHE_NET_PREMIUM, snap.model_dump(), event=EVENT_NET_PREMIUM)
     except Exception:
         log.exception("publish_net_premium degraded")
 
