@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo
 import app_settings
 from pages.ui_guard import guard, guard_async
 from .inputs import select_all_on_focus
-from .theme import BTN, BTN_PRIMARY
+from .theme import BTN, BTN_PRIMARY, MUTED
 
 POS_COLOR = "#66bb6a"
 NEG_COLOR = "#ef5350"
@@ -1388,6 +1388,43 @@ def dex_hedge_suffix(hedge):
 # view name -> (tuple index from calc_all_from_chain, engine view string)
 _VIEWS = {"GEX": (0, "gex"), "Charm": (1, "charm"), "DEX": (2, "dex"), "Vanna": (3, "vanna")}
 
+# Subtab order. Net Prem sits beside Flow — they are the two options-FLOW views
+# (Flow is one symbol's call/put premium over the session; Net Prem is the net of
+# that across many symbols at once), so a reader comparing them doesn't cross Term.
+_VIEW_ORDER = list(_VIEWS) + ["Flow", "Net Prem", "Term"]
+
+
+def chart_kind(fig):
+    """Identity of a figure for the single full-width chart element.
+
+    ``_set_chart`` updates the element IN PLACE when the kind is unchanged (the
+    common flicker-free repaint) and RECREATES it when the kind changes, because
+    Highcharts' ``update()`` MERGES options and leaks the previous figure's
+    config through.
+
+    Keying on ``chart.type`` alone is not enough. Flow and Net Prem are BOTH
+    ``"line"`` charts, but Flow declares a LIST of three banded yAxes
+    (``top``/``height`` of "0%"/"62%" and "68%"/"32%") while Net Prem declares a
+    single unbanded dict. A merge drops that dict onto axis 0 and leaves axes 1
+    and 2 alive, so Net Prem renders squeezed into the top 62% with two orphaned
+    "Premium ($M)" / "Net premium ($M)" axes still painted. The axis TOPOLOGY is
+    precisely the merge surface, so it belongs in the identity — and deriving the
+    kind from the figure itself (rather than threading the view name in from the
+    caller) means a future view can't regress this by forgetting an argument.
+
+    The count is deliberately NOT part of the identity beyond list-vs-single: a
+    Net Prem repaint changes its SERIES count as symbols are ticked, and tearing
+    the element down on every checkbox would flash. Total over junk — it runs on
+    every repaint, so a malformed figure must not 500 the page.
+    """
+    fig = fig if isinstance(fig, dict) else {}
+    chart = fig.get("chart")
+    ctype = chart.get("type") if isinstance(chart, dict) else None
+    axes = fig.get("yAxis")
+    # 0 = a single axis dict (or none); N = a list of N banded axes.
+    return (ctype, len(axes) if isinstance(axes, list) else 0)
+
+
 _DEFAULT_SYMBOL = "$SPX"
 _FALLBACK_SYMBOLS = ["$SPX", "SPY", "QQQ"]
 
@@ -1435,9 +1472,14 @@ def render():
     # state["snap"] is the cached snapshot from the bus (None until first read).
     # ``fetching`` is an in-flight guard so a slow off-loop big-payload read
     # (cache:options:gamma is ~14 MB) can't pile up across 2 s poll ticks.
-    state: dict = {"snap": None, "countdown": 120, "fetching": False}
+    # state["netprem"] is the (separate, ~500 KB) cache:options:net_premium payload
+    # with its own in-flight guard — it is symbol-independent, so it is NOT part of
+    # the gamma snapshot and must not share the big snapshot's ``fetching`` latch.
+    state: dict = {"snap": None, "countdown": 120, "fetching": False,
+                   "netprem": None, "np_fetching": False, "np_bulk": False}
     # Last-seen bus cache versions for the fetch-free repaint/dialog timers.
-    seen = {"gamma": None, "explain": None, "analyze": None, "status": None}
+    seen = {"gamma": None, "explain": None, "analyze": None, "status": None,
+            "netprem": None}
 
     # View picker as SUBTABS directly under the main tab strip (2026-07-11 — was a
     # ui.toggle button group in the header row): a second tab level, styled by the
@@ -1451,7 +1493,7 @@ def render():
         tabs = ui.tabs(value="GEX").classes("compact-subtabs").props(
             "dense no-caps inline-label align=left")
         with tabs:
-            for v in list(_VIEWS) + ["Flow", "Term"]:
+            for v in _VIEW_ORDER:
                 ui.tab(v, label=_view_label(v))
         return tabs
 
@@ -1518,6 +1560,64 @@ def render():
                     _mi.tooltip(f"{_title} $SPX/SPY/QQQ briefing — not generated yet today")
                     sched_btns[_slot] = _mi
                     _sched_titles[_slot] = _title
+
+    # --- Net Prem controls (this view only) ---------------------------------
+    # Shown/hidden as one block by _sync_np_controls, the same way the Bar-size
+    # picker hides for the line spot style: a control that does nothing on the
+    # active view is worse than no control.
+    #
+    # The persisted selection only SEEDS the checkboxes. Everything downstream
+    # derives the plotted list from the checkbox map (_np_current), so a
+    # hand-edited settings.json naming a retired ticker simply matches no
+    # checkbox and self-heals — there is no `list.index()` to raise, which
+    # @guard would re-raise into a 500.
+    _np_seed = app_settings.get("gamma_netprem_symbols")
+    _np_seed = {s for s in (_np_seed if isinstance(_np_seed, (list, tuple)) else [])
+                if isinstance(s, str)}
+    _np_group_labels = {g["key"]: g["label"] for g in NET_PREM_GROUPS}
+    _np_group0 = app_settings.get("gamma_netprem_group")
+    if _np_group0 not in _np_group_labels:
+        _np_group0 = NET_PREM_GROUPS[0]["key"]
+    _np_mode0 = app_settings.get("gamma_netprem_mode")
+    if _np_mode0 not in NET_PREM_MODES:
+        _np_mode0 = "dollars"
+
+    np_boxes: dict = {}          # symbol -> ui.checkbox (built once, all groups)
+    with ui.column().classes("w-full gap-1") as np_box:
+        with ui.row().classes("items-center gap-3 flex-wrap w-full"):
+            np_group_tabs = ui.tabs(value=_np_group0).classes("compact-subtabs").props(
+                "dense no-caps inline-label align=left")
+            with np_group_tabs:
+                for _g in NET_PREM_GROUPS:
+                    ui.tab(_g["key"], label=_g["label"])
+            np_mode_sel = ui.select(dict(NET_PREM_MODES), value=_np_mode0,
+                                    label="Scale").props(
+                "dense options-dense").classes("w-36")
+            np_mode_sel.tooltip("Dollars compares SIZE across symbols; Skew % "
+                                "compares DIRECTION regardless of size")
+            ui.space()
+            np_count_lbl = ui.label("").classes(f"text-xs {MUTED}")
+            np_clear_btn = ui.button("Clear all", color=None).props(
+                "no-caps dense flat").classes(BTN)
+        # One checkbox per symbol, all built up front and toggled by VISIBILITY
+        # per group — so the group tab filters what you SEE without touching what
+        # is plotted (tick $SPX on Indices, switch to Sectors, tick XLK: both plot).
+        with ui.row().classes("items-center gap-x-3 gap-y-0 flex-wrap w-full"):
+            for _g in NET_PREM_GROUPS:
+                for _sym in _g["symbols"]:
+                    _cb = ui.checkbox(_sym, value=_sym in _np_seed)
+                    # One fixed hex per symbol from a 28-entry map = a finite
+                    # palette, so an arbitrary-value class is Tailwind-first legal.
+                    _cb.props("dense").classes(
+                        f"text-xs text-[{net_prem_color(_sym)}]")
+                    np_boxes[_sym] = _cb
+        # The publisher-health line lives HERE rather than in the shared bottom
+        # strip: it is about the SERVICE, not the chart, it is view-specific, and
+        # the strip already merges three sources into one tiny overlay.
+        np_status_lbl = ui.label("").classes(f"text-xs {MUTED}")
+
+    state["netprem_sel"] = [s for s in net_prem_symbols() if s in _np_seed]
+
     # The collector status + detail strip is rendered as a TINY overlay pinned to the
     # bottom-right of the heatmap panel (created inside the chart row below), so it no
     # longer takes a full row above the charts. status_lbl / detail_lbl are created
@@ -1554,7 +1654,9 @@ def render():
             chart_plot_box = ui.column().classes("w-full q-gutter-none")
             with chart_plot_box:
                 state["chart_el"] = ui.highchart(_empty_fig(), extras=["heatmap", "coloraxis"]).classes("w-full")
-            state["chart_kind"] = "bar"
+            # Seeded from the SAME figure the element was created with, so the
+            # first real paint can't spuriously recreate it.
+            state["chart_kind"] = chart_kind(_empty_fig())
             chart_msg = ui.label("Fetch a symbol… (no snapshot yet).") \
                 .classes("opacity-60 text-sm")
         heatmap_box = ui.column().classes(f"min-w-0 {_INIT_FLEX}")
@@ -1633,9 +1735,11 @@ def render():
     def _set_chart(fig):
         """Paint chart_plot: update in place when the chart KIND is unchanged
         (the common bar->bar repaint, flicker-free), but RECREATE the element when
-        the kind changes (bar <-> Term heatmap) so stale plotLines/colorAxis from
-        the previous type don't leak through Highcharts' merge-based update."""
-        kind = fig["chart"]["type"]
+        the kind changes (bar <-> Term heatmap, Flow <-> Net Prem) so stale
+        plotLines/colorAxis/yAxis config from the previous figure doesn't leak
+        through Highcharts' merge-based update. See ``chart_kind`` for why the
+        identity is NOT just ``chart.type``."""
+        kind = chart_kind(fig)
         if state.get("chart_kind") != kind:
             chart_plot_box.clear()
             with chart_plot_box:
@@ -1645,11 +1749,51 @@ def render():
             _set_figure(state["chart_el"], fig)
         return state["chart_el"]
 
+    def _np_current():
+        """The plotted symbols, in group order, derived from the checkboxes.
+
+        Total by construction — it filters a KNOWN symbol list rather than
+        ordering a caller-supplied one, so nothing here can raise on an
+        unrecognised name."""
+        return [s for s in net_prem_symbols() if np_boxes[s].value]
+
+    def _render_net_prem():
+        """Paint the Net Prem view: one full-width multi-symbol line chart."""
+        payload = state.get("netprem")
+        payload = payload if isinstance(payload, dict) else {}
+        series = payload.get("series")
+        series = series if isinstance(series, dict) else {}
+        sel = state["netprem_sel"]
+        mode = np_mode_sel.value
+
+        chart_msg.set_visibility(False)
+        _set_chart(net_prem_figure(series, sel, mode))
+        state["chart_el"].set_visibility(True)
+        heat_plot.set_visibility(False)
+        heat_msg.set_visibility(False)
+        _apply_flex(0, term=True)          # full width, no heatmap panel
+        # net_prem_summary_text already folds in the mode-aware "no data yet"
+        # names (it shares net_prem_missing's definition), so the header can
+        # never disagree with what the chart draws.
+        _set_summary(net_prem_summary_text(series, sel, mode))
+        # Publisher health (+ the payload's own error, rendered verbatim by the
+        # builder). Needs a TZ-AWARE now.
+        import datetime as _dt
+        np_status_lbl.text = net_prem_status_text(
+            payload or None, _dt.datetime.now(_dt.timezone.utc))
+        np_count_lbl.text = f"Selected: {len(sel)}"
+
     def _render_view():
         """Paint the active view from the cached snapshot (no fetch, no teardown).
 
         The Highcharts elements persist across repaints and are updated in place
         (via _set_figure / _set_chart) so the charts don't flicker."""
+        if view_toggle.value == "Net Prem":
+            # Handled BEFORE the no-snapshot early return: this view is
+            # symbol-INDEPENDENT (it reads its own cache key), so it must paint
+            # even when no gamma snapshot has been cached for the current symbol.
+            _render_net_prem()
+            return
         snap = state["snap"]
         if not snap:
             state["chart_el"].set_visibility(False)
@@ -1814,6 +1958,23 @@ def render():
         state["snap"] = snap
         _render_view()
 
+    @guard_async
+    async def _maybe_repaint_netprem(version):
+        # Same shape as _maybe_repaint: version-gated, with its OWN in-flight
+        # guard, and the payload (~500 KB) read OFF the event loop. Repaint only
+        # when this view is showing — the other views don't read it, and the
+        # cached payload is already up to date for when the user switches over.
+        if version == seen["netprem"] or state.get("np_fetching"):
+            return
+        seen["netprem"] = version
+        state["np_fetching"] = True
+        try:
+            state["netprem"] = await run.io_bound(bus_client.read, "options:net_premium")
+        finally:
+            state["np_fetching"] = False
+        if view_toggle.value == "Net Prem":
+            _render_view()
+
     def _paint_status(st):
         """Paint the collector status bar from a gex_status view dict (or None)."""
         st = st or {}
@@ -1947,8 +2108,10 @@ def render():
             "options:gamma", "options:gex_status",
             "options:gamma_explain", "options:gamma_analyze",
             "options:gamma_briefings", "options:gamma_history",
+            "options:net_premium",
             *_SCHED_VIEWS.values()])
         await _maybe_repaint(v["options:gamma"])
+        await _maybe_repaint_netprem(v["options:net_premium"])
         _maybe_repaint_status(v["options:gex_status"])
         _watch_explain(v["options:gamma_explain"])
         _watch_analyze(v["options:gamma_analyze"])
@@ -1978,7 +2141,16 @@ def render():
     fetch_btn.on_click(_request_refresh)
     explain_btn.on_click(_request_explain)
     analyze_btn.on_click(_request_analyze)
-    view_toggle.on_value_change(lambda e: _render_view())
+
+    @guard
+    def _on_view_change(e):
+        # _sync_np_controls FIRST so the Net Prem block is shown/hidden before the
+        # repaint (the checkbox visibility feeds nothing but the eye, but showing a
+        # stale block for a frame reads as a glitch).
+        _sync_np_controls()
+        _render_view()
+
+    view_toggle.on_value_change(_on_view_change)
 
     @guard
     def _on_tracks_toggle(e):
@@ -2009,6 +2181,59 @@ def render():
     spot_int_sel.on_value_change(_on_spot_interval)
     _sync_spot_controls()
 
+    def _sync_np_controls():
+        """Show the Net Prem block only on that view, and only the active group's
+        checkboxes within it (the selection itself is untouched — see np_boxes)."""
+        on = view_toggle.value == "Net Prem"
+        np_box.set_visibility(on)
+        active = np_group_tabs.value
+        for g in NET_PREM_GROUPS:
+            visible = on and g["key"] == active
+            for sym in g["symbols"]:
+                np_boxes[sym].set_visibility(visible)
+
+    @guard
+    def _on_np_group(e):
+        # Filters which checkboxes are SHOWN; the plotted set is unchanged, so
+        # there is nothing to repaint.
+        app_settings.set("gamma_netprem_group", e.value)
+        _sync_np_controls()
+
+    def _np_commit():
+        """Adopt the checkbox state as the plotted selection, persist, repaint."""
+        state["netprem_sel"] = _np_current()
+        app_settings.set("gamma_netprem_symbols", state["netprem_sel"])
+        _render_view()
+
+    @guard
+    def _on_np_symbol():
+        if state.get("np_bulk"):
+            return          # a bulk set (Clear all) commits once at the end
+        _np_commit()
+
+    @guard
+    def _on_np_mode(e):
+        app_settings.set("gamma_netprem_mode", e.value)
+        _render_view()
+
+    @guard
+    def _np_clear():
+        # Latched so 28 programmatic value sets don't fire 28 repaints.
+        state["np_bulk"] = True
+        try:
+            for cb in np_boxes.values():
+                cb.value = False
+        finally:
+            state["np_bulk"] = False
+        _np_commit()
+
+    np_group_tabs.on_value_change(_on_np_group)
+    np_mode_sel.on_value_change(_on_np_mode)
+    np_clear_btn.on_click(_np_clear)
+    for _cb in np_boxes.values():
+        _cb.on_value_change(lambda e: _on_np_symbol())
+    _sync_np_controls()
+
     # Initial paint from the bus cache (graceful-empty if the service is cold).
     # The cheap :ver probes + the small gex_status/sched reads stay inline; the big
     # gamma snapshot (~14 MB) is read OFF the event loop in _initial_load so the
@@ -2019,6 +2244,7 @@ def render():
     seen["status"] = bus_client.read_version("options:gex_status")
     seen["briefings"] = bus_client.read_version("options:gamma_briefings")
     seen["history"] = bus_client.read_version("options:gamma_history")
+    seen["netprem"] = bus_client.read_version("options:net_premium")
     _sync_sched_btns(bus_client.read_versions(list(_SCHED_VIEWS.values())))
     _paint_status(bus_client.read("options:gex_status"))
     _refresh_history_dates(bus_client.read("options:gamma_briefings"))
@@ -2036,6 +2262,15 @@ def render():
                 state["snap"] = await run.io_bound(bus_client.read, "options:gamma") or None
             finally:
                 state["fetching"] = False
+        # The Net Prem payload rides the same off-loop initial read (its own key,
+        # its own guard) so switching to that view paints immediately.
+        if not state.get("np_fetching"):
+            state["np_fetching"] = True
+            try:
+                state["netprem"] = await run.io_bound(
+                    bus_client.read, "options:net_premium")
+            finally:
+                state["np_fetching"] = False
         # Sync the dropdown to the symbol actually in the cache so a page (re)build
         # doesn't show $SPX while another symbol's data is displayed (which a later
         # refresh would then revert to $SPX). Done BEFORE wiring on_value_change.

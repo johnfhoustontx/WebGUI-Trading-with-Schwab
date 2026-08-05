@@ -1238,3 +1238,59 @@ def test_net_prem_status_text_tolerates_a_naive_now_and_a_non_dict_payload():
     for junk in ("notadict", [1, 2], 42):
         assert "never been published" in gamma.net_prem_status_text(
             junk, _ct(2026, 8, 5, 11, 0)), junk
+
+
+# --- view identity for the single full-width chart element -------------------
+
+def test_view_order_puts_net_prem_between_flow_and_term():
+    """Flow and Net Prem are the two options-FLOW views, so they sit together."""
+    order = gamma._VIEW_ORDER
+    assert order[-3:] == ["Flow", "Net Prem", "Term"]
+    for v in gamma._VIEWS:
+        assert v in order
+
+
+def test_chart_kind_separates_flow_from_net_prem():
+    """THE trap: both are ``chart.type == "line"``, so keying the recreate-vs-
+    update decision on the type alone would take the in-place path and merge
+    Net Prem's single yAxis dict onto Flow's 3 banded axes — leaving two
+    orphaned axes painted and the plot squeezed into the top 62%."""
+    flow = gamma.flow_figure([{"ts": 1, "spot": 1.0, "call_prem": 2.0, "put_prem": 1.0}])
+    netp = gamma.net_prem_figure({"SPY": [[1, 2.0, 1.0]]}, ["SPY"])
+    assert flow["chart"]["type"] == netp["chart"]["type"] == "line"   # the trap
+    assert isinstance(flow["yAxis"], list) and isinstance(netp["yAxis"], dict)
+    assert gamma.chart_kind(flow) != gamma.chart_kind(netp)
+
+
+def test_chart_kind_is_stable_across_same_view_repaints():
+    """A Net Prem repaint with a different SELECTION (so a different series
+    count) must stay the same kind — else every checkbox tick would tear the
+    element down and flash."""
+    series = {"SPY": [[1, 2.0, 1.0]], "QQQ": [[1, 3.0, 1.0]], "$SPX": [[1, 1.0, 4.0]]}
+    one = gamma.net_prem_figure(series, ["SPY"])
+    three = gamma.net_prem_figure(series, ["SPY", "QQQ", "$SPX"])
+    assert len(one["series"]) != len(three["series"])
+    assert gamma.chart_kind(one) == gamma.chart_kind(three)
+    # ...and Net Prem in the two modes is one kind too (only the axis title moves).
+    assert gamma.chart_kind(gamma.net_prem_figure(series, ["SPY"], "skew")) == \
+        gamma.chart_kind(one)
+
+
+def test_chart_kind_still_separates_the_pre_existing_kinds():
+    """The bar <-> Term recreate this already relied on must keep working, and
+    the first-paint empty figure must match the bar figure it is replaced by
+    (else the page recreates the element on its very first real render)."""
+    bar = gamma.bar_figure({"spot": 100.0, "gex": {100.0: {"net": 1.0}}}, 100.0)
+    term = gamma.term_heatmap({"expirations": ["2026-08-07"],
+                               "cells": {"100.0": {"2026-08-07": 1.0}}})
+    kinds = {gamma.chart_kind(bar), gamma.chart_kind(term),
+             gamma.chart_kind(gamma.flow_figure([])),
+             gamma.chart_kind(gamma.net_prem_figure({}, []))}
+    assert len(kinds) == 4                       # all four mutually distinct
+    assert gamma.chart_kind(gamma._empty_fig()) == gamma.chart_kind(bar)
+
+
+def test_chart_kind_is_total_over_junk():
+    """It runs on every repaint; a malformed figure must not 500 the page."""
+    for junk in (None, "nope", [], {}, {"chart": None}, {"chart": {}, "yAxis": "x"}):
+        gamma.chart_kind(junk)
