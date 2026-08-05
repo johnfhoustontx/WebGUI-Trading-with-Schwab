@@ -863,3 +863,260 @@ def test_heatmap_ohlc_draws_thinner_than_candles():
             gamma.heatmap_figure(_WALL_ROWS, "GEX", spot_style="ohlc")["series"]}
     assert "pointWidth" not in candle["Spot candles"]      # full-width filled body
     assert ohlc["Spot candles"]["pointWidth"] == 2         # thin -> reads as a bar
+
+
+# --- Net Prem view ---------------------------------------------------------
+# The payload is DELIBERATELY loose (NetPremiumSnapshot.series is typed `dict`),
+# so these builders must be TOTAL: a malformed row skips that point, a malformed
+# symbol skips that series, and everything else still renders. A bare row[1]
+# would raise IndexError and 500 the whole Dealer Positioning page.
+
+_T1, _T2, _T3 = 1_700_000_000, 1_700_000_060, 1_700_000_120
+
+
+def _np_series():
+    """Two symbols on a STAGGERED clock -- SPY starts a minute late, so the union
+    x-axis is the only thing that keeps them aligned."""
+    return {
+        "QQQ": [[_T1, 3.0e6, 1.0e6], [_T2, 4.0e6, 1.0e6], [_T3, 5.0e6, 1.0e6]],
+        "SPY": [[_T2, 1.0e6, 5.0e6], [_T3, 1.0e6, 9.0e6]],
+    }
+
+
+def test_net_prem_symbols_is_every_group_member_in_group_order():
+    syms = gamma.net_prem_symbols()
+    assert syms[:3] == ["$SPX", "$NDX", "BIG10"]
+    assert syms[-1] == "AMD"
+    assert len(syms) == len(set(syms)) == 28
+    # Flat list == the concatenation of the group tuples.
+    flat = [s for g in gamma.NET_PREM_GROUPS for s in g["symbols"]]
+    assert syms == flat
+
+
+def test_net_prem_every_group_symbol_has_a_distinct_color():
+    syms = gamma.net_prem_symbols()
+    colors = [gamma.net_prem_color(s) for s in syms]
+    # Coverage: nothing falls through to the grey fallback.
+    assert gamma.NET_PREM_FALLBACK not in colors
+    for s in syms:
+        assert s in gamma.NET_PREM_COLORS, f"{s} has no colour"
+    # Distinctness: two lines on one chart must never share a colour.
+    assert len(set(colors)) == len(colors)
+
+
+def test_net_prem_color_is_stable_across_selections():
+    # A symbol's colour is a property of the SYMBOL, never of the selection --
+    # SPY is the same line colour whether you plot 2 names or 20.
+    small = gamma.net_prem_figure(_np_series(), ["SPY"])
+    big = gamma.net_prem_figure(_np_series(), ["QQQ", "SPY"])
+    spy_small = [s for s in small["series"] if s["name"] == "SPY"][0]
+    spy_big = [s for s in big["series"] if s["name"] == "SPY"][0]
+    assert spy_small["color"] == spy_big["color"] == gamma.NET_PREM_COLORS["SPY"]
+
+
+def test_net_prem_color_falls_back_for_an_unknown_symbol():
+    assert gamma.net_prem_color("ZZZZ") == gamma.NET_PREM_FALLBACK
+
+
+def test_net_prem_value_dollars_is_millions_of_net_premium():
+    assert gamma.net_prem_value([_T1, 3.0e6, 1.0e6], "dollars") == 2.0
+    assert gamma.net_prem_value([_T1, 1.0e6, 5.0e6], "dollars") == -4.0
+    assert gamma.net_prem_value([_T1, 0.0, 0.0], "dollars") == 0.0   # real zero
+
+
+def test_net_prem_value_skew_is_a_signed_percent_of_total():
+    assert gamma.net_prem_value([_T1, 3.0e6, 1.0e6], "skew") == 50.0
+    assert gamma.net_prem_value([_T1, 1.0e6, 3.0e6], "skew") == -50.0
+    # Nothing traded either side -> nothing to report (and no div-by-zero).
+    assert gamma.net_prem_value([_T1, 0.0, 0.0], "skew") is None
+    assert gamma.net_prem_value([_T1, -1.0, 0.0], "skew") is None
+
+
+def test_net_prem_value_is_total_over_malformed_rows():
+    for bad in (None, [], [1], [1, 2], "notalist", "x", {"call": 1},
+                [1, "x", "y"], [1, None, 2.0], [1, True, 2.0],
+                [1, float("nan"), 2.0], [1, float("inf"), 2.0], 42):
+        assert gamma.net_prem_value(bad, "dollars") is None, bad
+        assert gamma.net_prem_value(bad, "skew") is None, bad
+
+
+def test_net_prem_figure_x_axis_is_the_union_of_selected_timestamps():
+    fig = gamma.net_prem_figure(_np_series(), ["QQQ", "SPY"])
+    assert fig["xAxis"]["categories"] == [gamma._fmt_ts(t)
+                                          for t in (_T1, _T2, _T3)]
+    by = {s["name"]: s for s in fig["series"]}
+    # QQQ spans the whole union; SPY started late, so it begins at index 1 --
+    # the union is what keeps the two lines on the same clock.
+    assert [p[0] for p in by["QQQ"]["data"]] == [0, 1, 2]
+    assert [p[0] for p in by["SPY"]["data"]] == [1, 2]
+    assert by["SPY"]["data"][0][1] == -4.0
+
+
+def test_net_prem_figure_tooltip_is_not_shared_and_legend_is_on():
+    fig = gamma.net_prem_figure(_np_series(), ["QQQ", "SPY"])
+    # 20+ series under one shared tooltip is an unreadable wall.
+    assert fig["tooltip"]["shared"] is False
+    assert fig["legend"]["enabled"] is True
+    assert fig["yAxis"]["plotLines"][0]["value"] == 0
+
+
+def test_net_prem_figure_y_axis_title_follows_the_mode():
+    assert "$M" in gamma.net_prem_figure(
+        _np_series(), ["QQQ"], "dollars")["yAxis"]["title"]["text"]
+    assert "%" in gamma.net_prem_figure(
+        _np_series(), ["QQQ"], "skew")["yAxis"]["title"]["text"]
+
+
+def test_net_prem_figure_skips_a_selected_symbol_with_no_data():
+    fig = gamma.net_prem_figure(_np_series(), ["QQQ", "XLE"])
+    assert [s["name"] for s in fig["series"]] == ["QQQ"]
+
+
+def test_net_prem_figure_empty_selection_renders_an_empty_chart():
+    for sel in ([], None):
+        fig = gamma.net_prem_figure(_np_series(), sel)
+        assert fig["series"] == [] and fig["xAxis"]["categories"] == []
+
+
+def test_net_prem_figure_dedupes_the_selection():
+    fig = gamma.net_prem_figure(_np_series(), ["SPY", "SPY", "QQQ"])
+    assert [s["name"] for s in fig["series"]] == ["SPY", "QQQ"]
+
+
+def test_net_prem_figure_survives_every_malformed_series_shape():
+    # Each of these PASSES NetPremiumSnapshot validation (verified), so the page
+    # really can receive them. The good symbol must still plot in every case.
+    for bad in ("notalist", [[1]], [None], [[1, "x", "y"]], 42, {}, None,
+                [[1, 2, 3], "junk"]):
+        series = {"QQQ": _np_series()["QQQ"], "SPY": bad}
+        fig = gamma.net_prem_figure(series, ["QQQ", "SPY"])
+        names = [s["name"] for s in fig["series"]]
+        assert "QQQ" in names, bad
+        assert gamma.net_prem_summary_text(series, ["QQQ", "SPY"])
+
+
+def test_net_prem_figure_skips_unreportable_skew_points():
+    # (0, 0) is a REAL observation in dollars (plots as 0) but has no skew.
+    series = {"SPY": [[_T1, 0.0, 0.0], [_T2, 3.0e6, 1.0e6]]}
+    assert len(gamma.net_prem_figure(
+        series, ["SPY"], "dollars")["series"][0]["data"]) == 2
+    skew = gamma.net_prem_figure(series, ["SPY"], "skew")["series"][0]["data"]
+    assert skew == [[1, 50.0]]
+
+
+def test_net_prem_missing_names_selected_symbols_without_rows():
+    series = _np_series()
+    assert gamma.net_prem_missing(series, ["QQQ", "XLE", "SPY", "XLB"]) == ["XLE", "XLB"]
+    assert gamma.net_prem_missing(series, ["QQQ", "SPY"]) == []
+    # Present-but-unusable counts as missing, exactly like absent.
+    assert gamma.net_prem_missing({"SPY": []}, ["SPY"]) == ["SPY"]
+    assert gamma.net_prem_missing({"SPY": "notalist"}, ["SPY"]) == ["SPY"]
+    assert gamma.net_prem_missing({"SPY": [None]}, ["SPY"]) == ["SPY"]
+    assert gamma.net_prem_missing(None, ["SPY"]) == ["SPY"]
+
+
+def test_net_prem_summary_text_names_the_extremes():
+    txt = gamma.net_prem_summary_text(_np_series(), ["QQQ", "SPY"])
+    assert "2 symbols" in txt
+    assert "QQQ" in txt and "+$4.0M" in txt      # most call-led (last point)
+    assert "SPY" in txt and "-$8.0M" in txt      # most put-led
+    skew = gamma.net_prem_summary_text(_np_series(), ["QQQ", "SPY"], "skew")
+    assert "+67%" in skew and "-80%" in skew
+
+
+def test_net_prem_summary_text_reports_missing_names():
+    txt = gamma.net_prem_summary_text(_np_series(), ["QQQ", "XLE", "XLB"])
+    assert "XLE" in txt and "XLB" in txt and "no data yet" in txt
+
+
+def test_net_prem_summary_text_handles_nothing_selected_and_nothing_plotted():
+    assert "Select" in gamma.net_prem_summary_text(_np_series(), [])
+    only_missing = gamma.net_prem_summary_text({}, ["XLE", "XLB"])
+    assert "no data yet" in only_missing and "XLE" in only_missing
+    # A single plotted symbol has no two extremes -- one reading, not a repeat.
+    one = gamma.net_prem_summary_text(_np_series(), ["QQQ"])
+    assert one.count("QQQ") == 1
+
+
+def _ct(y, m, d, hh, mm):
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+    return _dt.datetime(y, m, d, hh, mm, tzinfo=ZoneInfo("America/Chicago"))
+
+
+def _iso(when):
+    import datetime as _dt
+    return when.astimezone(_dt.timezone.utc).isoformat()
+
+
+def test_net_prem_status_text_never_published():
+    now = _ct(2026, 8, 5, 10, 0)          # Wednesday, mid-window
+    for payload in (None, {}):
+        assert "never been published" in gamma.net_prem_status_text(payload, now)
+
+
+def test_net_prem_status_text_fresh_but_empty_is_not_collected_yet():
+    now = _ct(2026, 8, 5, 8, 5)
+    payload = {"session_date": "2026-08-05", "ts": _iso(_ct(2026, 8, 5, 8, 4)),
+               "series": {}, "error": None}
+    txt = gamma.net_prem_status_text(payload, now)
+    assert "not collected yet" in txt
+    assert "stale" not in txt.lower()
+
+
+def test_net_prem_status_text_stale_inside_the_collection_window_is_an_error():
+    now = _ct(2026, 8, 5, 11, 0)          # Wednesday, inside 08:00-15:20 CT
+    payload = {"session_date": "2026-08-05", "ts": _iso(_ct(2026, 8, 5, 10, 50)),
+               "series": _np_series(), "error": None}
+    txt = gamma.net_prem_status_text(payload, now)
+    assert "stale" in txt.lower()
+
+
+def test_net_prem_status_text_stale_outside_the_window_is_not_an_error():
+    # Off-hours the key legitimately holds the last tick -- correct persistence,
+    # matching the heatmap/Flow views. Never flag it.
+    payload = {"session_date": "2026-08-05", "ts": _iso(_ct(2026, 8, 5, 15, 19)),
+               "series": _np_series(), "error": None}
+    for now in (_ct(2026, 8, 5, 19, 0),        # same evening
+                _ct(2026, 8, 8, 11, 0),        # Saturday, inside the clock window
+                _ct(2026, 8, 5, 7, 30)):       # weekday, before the window opens
+        txt = gamma.net_prem_status_text(payload, now)
+        assert "stale" not in txt.lower(), now
+
+
+def test_net_prem_status_text_not_stale_on_a_market_holiday():
+    # Jan 1 2027 is an NYSE full closure that falls on a Friday inside the clock
+    # window -- nothing collects, so a day-old payload is correct, not broken.
+    payload = {"session_date": "2026-12-31", "ts": _iso(_ct(2026, 12, 31, 15, 19)),
+               "series": _np_series(), "error": None}
+    txt = gamma.net_prem_status_text(payload, _ct(2027, 1, 1, 11, 0))
+    assert "stale" not in txt.lower()
+
+
+def test_net_prem_status_text_normal_publish_reports_the_symbol_count():
+    now = _ct(2026, 8, 5, 11, 0)
+    payload = {"session_date": "2026-08-05", "ts": _iso(_ct(2026, 8, 5, 10, 59)),
+               "series": _np_series(), "error": None}
+    txt = gamma.net_prem_status_text(payload, now)
+    assert "2 symbols" in txt and "2026-08-05" in txt and "stale" not in txt.lower()
+
+
+def test_net_prem_status_text_renders_the_service_error_verbatim():
+    # House pattern (matrix.status_text): the error string is user-facing UI copy
+    # rendered as-is -- never matched on.
+    now = _ct(2026, 8, 5, 11, 0)
+    payload = {"session_date": "2026-08-05", "ts": _iso(_ct(2026, 8, 5, 10, 59)),
+               "series": {}, "error": "net premium unavailable"}
+    assert "net premium unavailable" in gamma.net_prem_status_text(payload, now)
+
+
+def test_net_prem_status_text_tolerates_a_junk_timestamp():
+    now = _ct(2026, 8, 5, 11, 0)
+    for ts in (None, "", "not-a-date", 12345):
+        assert gamma.net_prem_status_text({"ts": ts, "series": {}}, now)
+
+
+def test_net_prem_modes_label_both_axes():
+    assert set(gamma.NET_PREM_MODES) == {"dollars", "skew"}
+    # An unknown mode degrades to dollars rather than raising.
+    assert gamma.net_prem_value([_T1, 3.0e6, 1.0e6], "bogus") == 2.0

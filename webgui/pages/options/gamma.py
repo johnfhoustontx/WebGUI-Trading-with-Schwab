@@ -16,6 +16,9 @@ STRINGS. The pure builders (``bars_from_gex`` sorts + numeric-compares strikes;
 ``heatmap_matrix`` sorts strikes) require float keys — so the page re-floats them
 via ``_refloat_keys`` BEFORE feeding the builders. The builders stay unchanged.
 """
+import math
+from zoneinfo import ZoneInfo
+
 import app_settings
 from pages.ui_guard import guard, guard_async
 from .inputs import select_all_on_focus
@@ -891,6 +894,369 @@ def flow_summary_text(rows):
     cv, pv = int(last.get("call_vol") or 0), int(last.get("put_vol") or 0)
     return (f"Today: call ${cp / 1e6:,.1f}M · put ${pp / 1e6:,.1f}M premium · "
             f"net ${(cp - pp) / 1e6:+,.1f}M · {cv:,} call / {pv:,} put contracts")
+
+
+# ── Net Prem view ───────────────────────────────────────────────────────────
+# Intraday net premium (cumulative call $ − cumulative put $) for any combination
+# of ~28 symbols, from ``cache:options:net_premium``.
+#
+# The group/colour tables below DUPLICATE ``services/options_svc/net_premium.GROUPS``
+# on purpose: Tier 1 may import only nicegui / bus_client / shared.contracts, never
+# ``services.*``. Tests pin the membership so the two copies cannot drift silently.
+#
+# Everything here is TOTAL over the payload. ``NetPremiumSnapshot.series`` is typed
+# as a bare ``dict``, so ``{'SPY': 'notalist'}``, ``{'SPY': [[1]]}``, ``{'SPY': [None]}``
+# and ``{'SPY': [[1, 'x', 'y']]}`` all pass validation and can really arrive here.
+# Positional row access is PARTIAL — unlike the ``.get()`` reads the matrix page uses,
+# a bare ``row[1]`` raises IndexError and 500s the WHOLE Dealer Positioning page. So a
+# malformed row skips that point, a malformed symbol skips that series, and the rest
+# of the chart still renders.
+#
+# Shape note: JSON round-trip is not identity. Tuples arrive as LISTS and dict keys
+# as STRINGS, so the page always sees ``list`` rows keyed by ``str`` — which is what
+# makes positional access viable at all. Nothing below may assume tuples.
+NET_PREM_GROUPS = (
+    {"key": "indices", "label": "Indices & Broad",
+     "symbols": ("$SPX", "$NDX", "BIG10", "SPY", "QQQ", "IWM", "DIA")},
+    {"key": "sectors", "label": "SPDR Sectors",
+     "symbols": ("XLB", "XLC", "XLE", "XLF", "XLI", "XLK",
+                 "XLP", "XLRE", "XLU", "XLV", "XLY")},
+    {"key": "megacaps", "label": "Mega-caps",
+     "symbols": ("NVDA", "AVGO", "AAPL", "META", "MSFT",
+                 "TSLA", "PLTR", "AMZN", "GOOGL", "AMD")},
+)
+
+# One fixed colour per symbol — keyed by SYMBOL, never by position in the
+# selection, so a line keeps its colour whether you plot 2 names or 20 (a
+# palette-by-index would recolour every line each time you tick a checkbox).
+# Mutually distinct + covering every group member; both pinned by tests.
+NET_PREM_COLORS = {
+    "$SPX": "#f5f5f5", "$NDX": "#8ab4ff", "BIG10": "#ffd166", "SPY": "#4dd0e1",
+    "QQQ": "#b388ff", "IWM": "#ff8a65", "DIA": "#9ccc65",
+    "XLB": "#a1887f", "XLC": "#4fc3f7", "XLE": "#ffb74d", "XLF": "#66bb6a",
+    "XLI": "#90a4ae", "XLK": "#7986cb", "XLP": "#f06292", "XLRE": "#26a69a",
+    "XLU": "#dce775", "XLV": "#ce93d8", "XLY": "#ff8a80",
+    "NVDA": "#76ff03", "AVGO": "#ff5252", "AAPL": "#eeeeee", "META": "#448aff",
+    "MSFT": "#00e5ff", "TSLA": "#ff4081", "PLTR": "#ffab40", "AMZN": "#ffd54f",
+    "GOOGL": "#69f0ae", "AMD": "#e57373",
+}
+NET_PREM_FALLBACK = "#9e9e9e"
+NET_PREM_MODES = {"dollars": "Dollars ($M)", "skew": "Skew %"}
+_NET_PREM_AXIS = {"dollars": "Net premium ($M)", "skew": "Net premium (%)"}
+
+_NP_CT = ZoneInfo("America/Chicago")
+# The service's collection window (options_svc/scheduler _GEX_START/_GEX_STOP) and
+# a staleness bound at 2× its 1-min publish cadence. Only INSIDE this window is a
+# stale publish evidence of a failure — see net_prem_status_text.
+_NP_WINDOW_OPEN, _NP_WINDOW_CLOSE = (8, 0), (15, 20)
+_NP_STALE_SEC = 120
+
+
+def net_prem_symbols():
+    """Every symbol the Net Prem view can plot, in group order (a flat list)."""
+    out = []
+    for group in NET_PREM_GROUPS:
+        for sym in group["symbols"]:
+            if sym not in out:
+                out.append(sym)
+    return out
+
+
+def net_prem_color(symbol):
+    """The fixed line colour for a symbol; grey for anything unrecognised."""
+    return NET_PREM_COLORS.get(symbol, NET_PREM_FALLBACK)
+
+
+def _np_num(value):
+    """A finite float, or None.
+
+    Rejects bools (``True`` is an ``int`` in Python, so an unguarded flag would
+    read as a premium of 1.0) and nan/inf, which Highcharts renders as a hole in
+    the line rather than an obvious error.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value) if math.isfinite(value) else None
+
+
+def _np_pair(row):
+    """``(call, put)`` from a ``[ts, call_prem, put_prem]`` row, or None.
+
+    Indexing is wrapped rather than type-gated so anything that indexes like the
+    published row works, while ``None``, truncated rows, mappings, strings and
+    bare numbers all degrade to None instead of raising.
+    """
+    try:
+        call, put = _np_num(row[1]), _np_num(row[2])
+    except (TypeError, IndexError, KeyError):
+        return None
+    if call is None or put is None:
+        return None
+    return call, put
+
+
+def net_prem_value(row, mode="dollars"):
+    """The plotted value for one ``[ts, call_prem, put_prem]`` row.
+
+    ``dollars`` → net premium in $M (call − put). ``skew`` → the signed share of
+    the session's total traded premium that the net represents, as a percent —
+    which is what makes a $30M index line comparable with a $2M sector one.
+
+    Skew returns None when nothing traded either side: there is no ratio to
+    report (and no divide-by-zero). A genuine ``(0, 0)`` therefore plots as 0.0
+    in dollars but is simply absent in skew — the same distinction the service's
+    ``_project`` preserves upstream. An unknown mode degrades to dollars.
+    """
+    pair = _np_pair(row)
+    if pair is None:
+        return None
+    call, put = pair
+    if mode == "skew":
+        total = call + put
+        if total <= 0:
+            return None
+        return (call - put) / total * 100.0
+    return (call - put) / 1e6
+
+
+def _np_rows(series, symbol):
+    """``[(ts, row), …]`` ts-ascending for one symbol; ``[]`` when it has nothing.
+
+    A symbol whose payload is not a readable list of rows yields ``[]`` — one bad
+    symbol must never take the rest of the chart down with it.
+    """
+    if not isinstance(series, dict):
+        return []
+    rows = series.get(symbol)
+    if not isinstance(rows, (list, tuple)):
+        return []
+    out = []
+    for row in rows:
+        try:
+            ts = _np_num(row[0])
+        except (TypeError, IndexError, KeyError):
+            continue
+        if ts is None or _np_pair(row) is None:
+            continue
+        out.append((ts, row))
+    out.sort(key=lambda pair: pair[0])   # Highcharts line data must be x-ascending
+    return out
+
+
+def _np_selected(symbols):
+    """The selection deduped, in the caller's order (the checkbox order)."""
+    out = []
+    for sym in symbols or ():
+        if sym not in out:
+            out.append(sym)
+    return out
+
+
+def net_prem_missing(series, symbols):
+    """The selected symbols with no usable rows, in selection order.
+
+    The service OMITS a symbol entirely when it collected nothing, so naming them
+    is the only way the UI can say "no data yet" instead of drawing an invisible
+    line. A present-but-malformed payload counts as missing too: same
+    user-visible outcome — nothing to plot.
+    """
+    out = []
+    for sym in _np_selected(symbols):
+        if not _np_rows(series, sym):
+            out.append(sym)
+    return out
+
+
+def net_prem_figure(series, symbols, mode="dollars", height=680):
+    """Intraday net-premium chart — one fixed-colour line per selected symbol.
+
+    The x-axis is a SYNTHETIC category axis of ``_fmt_ts`` labels over the sorted
+    UNION of timestamps across the selection, not a datetime axis — for two
+    reasons. First, the same one ``flow_figure`` has: a real datetime axis
+    stretches the session across the overnight/weekend gap. Second, and specific
+    to this view: the symbols do not share a clock. A name that started
+    collecting late has fewer rows, so plotting each series against its own row
+    index would shear the lines apart — SPY's 09:15 point would sit above QQQ's
+    08:30 one and the chart would silently lie about when a flow happened.
+    Indexing every series into the shared union keeps them on one timeline, and a
+    symbol that starts late simply begins further along the axis.
+    """
+    mode = mode if mode in NET_PREM_MODES else "dollars"
+    picked = _np_selected(symbols)
+    rows_by = {sym: _np_rows(series, sym) for sym in picked}
+    times = sorted({ts for rows in rows_by.values() for ts, _ in rows})
+    index = {ts: i for i, ts in enumerate(times)}
+
+    plots = []
+    for sym in picked:
+        # A point with no value in this mode is SKIPPED, not emitted as None: the
+        # only way that happens is an unreportable skew (nothing traded), which is
+        # a missing observation, not a break in the line.
+        data = [[index[ts], value] for ts, row in rows_by[sym]
+                if (value := net_prem_value(row, mode)) is not None]
+        if data:
+            plots.append({"type": "line", "name": sym, "data": data,
+                          "color": net_prem_color(sym), "lineWidth": 2,
+                          "marker": {"enabled": False}})
+
+    fig = _base_chart("line", height)
+    fig["chart"]["marginBottom"] = 64
+    fig["legend"] = {"enabled": True, "itemStyle": {"color": FONT},
+                     "itemHoverStyle": {"color": "#ffffff"}}
+    fig.update({
+        "title": {"text": f"Intraday net premium (call $ − put $) · "
+                          f"{NET_PREM_MODES[mode]}",
+                  "style": {"color": FONT}},
+        "xAxis": {**_dark_axis("Time"), "categories": [_fmt_ts(t) for t in times],
+                  "labels": {"rotation": -45, "style": {"color": FONT}}},
+        "yAxis": {**_dark_axis(_NET_PREM_AXIS[mode]),
+                  "plotLines": [{"value": 0, "color": "#777777", "width": 1,
+                                 "zIndex": 3}]},
+        # Deliberately NOT shared: with up to 28 selectable series a shared
+        # tooltip is a wall of rows taller than the chart. Hover reports the one
+        # line the cursor is on.
+        "tooltip": {"shared": False, "backgroundColor": "#222222",
+                    "borderColor": "#444444",
+                    "style": {"color": FONT, "fontSize": "11px"},
+                    "valueDecimals": 2},
+        "series": plots,
+    })
+    return fig
+
+
+def _np_fmt(value, mode):
+    """A reading in its mode: ``+$4.0M`` / ``-80%`` (sign leads, so it reads as
+    a direction rather than as ``$-4.0M``)."""
+    sign = "+" if value >= 0 else "-"
+    if mode == "skew":
+        return f"{sign}{abs(value):,.0f}%"
+    return f"{sign}${abs(value):,.1f}M"
+
+
+def net_prem_summary_text(series, symbols, mode="dollars"):
+    """One-line header for the Net Prem view: how many symbols are plotted, the
+    current extreme on each side, and any selected names with no data yet.
+
+    Each symbol's reading is its LAST reportable point, so the line answers
+    "where does the money sit right now" rather than describing the whole day.
+    """
+    mode = mode if mode in NET_PREM_MODES else "dollars"
+    picked = _np_selected(symbols)
+    if not picked:
+        return "Select symbols to plot intraday net premium (call $ − put $)."
+
+    latest = {}
+    for sym in picked:
+        for _ts, row in reversed(_np_rows(series, sym)):
+            value = net_prem_value(row, mode)
+            if value is not None:
+                latest[sym] = value
+                break
+    missing = [s for s in picked if s not in latest]
+    tail = f" · no data yet: {', '.join(missing)}" if missing else ""
+
+    n = len(latest)
+    if not n:
+        return (f"0 of {len(picked)} selected symbols plotted{tail} "
+                f"(collected going forward).")
+    parts = [f"{n} symbol{'' if n == 1 else 's'} plotted"]
+    top = max(latest, key=lambda s: latest[s])
+    bottom = min(latest, key=lambda s: latest[s])
+    if top == bottom:                       # one symbol — no two extremes to name
+        parts.append(f"{top} {_np_fmt(latest[top], mode)}")
+    else:
+        parts.append(f"most call-led {top} {_np_fmt(latest[top], mode)}")
+        parts.append(f"most put-led {bottom} {_np_fmt(latest[bottom], mode)}")
+    return " · ".join(parts) + tail
+
+
+def _np_parse_ts(iso):
+    """A UTC-aware datetime from the payload's ISO ``ts``; None if unparseable."""
+    import datetime as dt
+    if not isinstance(iso, str) or not iso:
+        return None
+    try:
+        when = dt.datetime.fromisoformat(iso.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return when if when.tzinfo else when.replace(tzinfo=dt.timezone.utc)
+
+
+def _np_in_window(now):
+    """True when ``now`` falls inside the service's 08:00–15:20 CT collection
+    window on a trading day — the only time a stale publish means a failure.
+
+    Weekend + NYSE-holiday gated (reusing ``alerts``' calendar, which the whole
+    app already shares) so a quiet Saturday or a Thanksgiving cannot be reported
+    as a broken publisher. Imported inside the function: ``alerts`` imports
+    ``pages.options.scanner``, so keeping it off this module's import line avoids
+    coupling the Gamma page's import order to it.
+    """
+    import alerts
+    ct = now.astimezone(_NP_CT)
+    if ct.weekday() >= 5 or alerts.is_market_holiday(ct.date()):
+        return False
+    return _NP_WINDOW_OPEN <= (ct.hour, ct.minute) < _NP_WINDOW_CLOSE
+
+
+def net_prem_status_text(payload, now=None):
+    """Status line for the Net Prem view, separating the three service outcomes
+    the page otherwise cannot tell apart.
+
+    ``publish_net_premium`` ends three ways: a valid publish; a contract-validation
+    failure; an outer failure. The latter two are LOGGED, not cached — so from
+    here they look exactly like "collection has not started yet": a stale or absent
+    key. Eleven sector lines will legitimately be empty for a while after ship, so
+    "the service is broken" must not be indistinguishable from "nothing collected".
+    The payload's own ``ts`` (already in the contract, already validated) separates
+    them:
+
+    - absent payload  → never published (service down, or first boot)
+    - fresh ts, empty series → published fine, nothing collected yet
+    - ts older than ~2 min while INSIDE the 08:00–15:20 CT collection window on a
+      trading day → the publisher is failing
+
+    A stale ``ts`` OUTSIDE that window is deliberately NOT flagged: off-hours the
+    key legitimately holds the last tick of the session, which is correct
+    persistence for this view and matches how the heatmap and Flow views behave.
+    Flagging it would cry wolf every evening and all weekend.
+
+    ``now`` is a parameter rather than read from the clock so this stays PURE and
+    testable; the page supplies it.
+    """
+    import datetime as dt
+    p = payload or {}
+    if not p:
+        return ("Net premium has never been published — is the options service "
+                "running?")
+
+    now = now or dt.datetime.now(dt.timezone.utc)
+    if now.tzinfo is None:                       # never crash on a naive caller
+        now = now.replace(tzinfo=dt.timezone.utc)
+    raw = p.get("series")
+    n = len(raw) if isinstance(raw, dict) else 0
+    when = _np_parse_ts(p.get("ts"))
+    age = (now - when).total_seconds() if when is not None else None
+
+    parts = []
+    if p.get("session_date"):
+        parts.append(f"session {p['session_date']}")
+    parts.append(f"{n} symbol{'' if n == 1 else 's'}")
+    if when is not None:
+        parts.append("updated "
+                     + when.astimezone(_NP_CT).strftime("%I:%M %p").lstrip("0"))
+    text = " · ".join(parts)
+
+    if age is not None and age > _NP_STALE_SEC and _np_in_window(now):
+        text += (f" · STALE — nothing published for {int(age // 60)} min inside "
+                 "the collection window; check the options service")
+    elif n == 0 and not p.get("error"):
+        text += " · not collected yet (fills from the next 1-min poll)"
+    if p.get("error"):
+        # Rendered VERBATIM, never matched on — the house pattern
+        # (matrix.status_text): these strings are user-facing UI copy.
+        text += f" · {p['error']}"
+    return text
 
 
 def term_heatmap(term_grid):
