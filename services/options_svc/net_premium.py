@@ -11,6 +11,8 @@ put/call read, NOT net buying. The UI must say so.
 """
 from __future__ import annotations
 
+import math
+
 # The three selectable groups, in display order. This is the single source of
 # truth for membership + ordering — the page builds its tabs from it.
 GROUPS = (
@@ -56,30 +58,57 @@ def source_symbols() -> list:
     return out
 
 
+# The row layout this module parses, from ``gex_history_db.load_flow_series()``:
+# (ts, spot, call_vol, put_vol, call_prem, put_prem). Named so the positional
+# coupling to that SELECT is greppable from BOTH sides. It matters because a
+# reordered SELECT would land call_vol/put_vol at 4/5 — contract counts in the
+# thousands where dollars in the millions belong — and both pass the numeric
+# guard below, so the chart would render a plausible-looking wrong answer and
+# skew mode a plausible-looking percentage. Task 5 pins the layout against a
+# real DB; that test needs I/O, so it cannot live here (this module is PURE).
+_IDX_TS, _IDX_CALL_PREM, _IDX_PUT_PREM = 0, 4, 5
+
+
 def _num(value):
-    """A finite number, or None. Rejects bools (``True`` is an int in Python)."""
+    """A finite number, or None.
+
+    Rejects bools (``True`` is an ``int`` in Python, so an unguarded flag would
+    silently read as ``ts=1``) and nan/inf: a nan propagates through the basket
+    sum and would blank the WHOLE BIG10 column rather than one point, and
+    ``json.dumps`` emits a bare ``NaN`` literal — invalid JSON on the way into
+    Redis."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    return value
+    return value if math.isfinite(value) else None
 
 
 def _project(rows):
     """``[(ts, spot, cvol, pvol, cprem, pprem), …]`` → ``[[ts, call, put], …]``.
 
-    Rows carrying NO premium on either side are skipped (premium is forward-only
-    — legacy rows predate the columns), so a series simply starts where premium
-    began collecting. One missing side counts as 0.0. Junk rows are skipped, not
-    raised on."""
+    A row with premium on NEITHER side is skipped: premium is forward-only, so
+    ``None`` on both means the columns did not exist yet, and a series simply
+    starts where premium began collecting. A collected ``0.0`` is the OPPOSITE —
+    a real observation that no premium traded that side — so it is kept, and one
+    absent side beside a real one counts as 0.0. That distinction is load-bearing
+    downstream: skew mode treats a genuine (0, 0) as unreportable while dollars
+    mode plots it as zero.
+
+    Anything that is not a 6+-field sequence (``None``, a dict from a
+    ``row_factory``, a truncated tuple) is skipped, not raised on — the same LBYL
+    shape as the sibling parser ``flow_alerts._norm``."""
     out = []
     for row in rows or []:
-        try:
-            ts, call, put = _num(row[0]), _num(row[4]), _num(row[5])
-        except (TypeError, IndexError):
+        if not isinstance(row, (tuple, list)) or len(row) < 6:
             continue
+        ts = _num(row[_IDX_TS])
+        call = _num(row[_IDX_CALL_PREM])
+        put = _num(row[_IDX_PUT_PREM])
         if ts is None or (call is None and put is None):
             continue
-        out.append([ts, call or 0.0, put or 0.0])
-    out.sort(key=lambda r: r[0])
+        out.append([ts,
+                    0.0 if call is None else float(call),
+                    0.0 if put is None else float(put)])
+    out.sort(key=lambda r: r[0])   # Highcharts line series REQUIRE x-ascending
     return out
 
 
@@ -92,10 +121,22 @@ def build_series(flow_by_symbol) -> dict:
     nothing at that timestamp rather than dropping the column. Dollar sum is the
     only sensible aggregation for money, so a basket's skew is
     ``Σnet ÷ Σ(call+put)`` — the same dollar-weighted convention
-    ``market_svc.symbol_premium_skew`` uses."""
+    ``market_svc.symbol_premium_skew`` uses.
+
+    The stored values are ALREADY daily-cumulative, so nothing here accumulates
+    over the session: every timestamp is summed independently of its neighbours.
+    That invariant is what keeps plain float summation safe (~10 values per
+    timestamp, worst-case relative error ~1e-15), and it is exactly what a future
+    "optimization" into a running total would break.
+
+    A basket key arriving in the INPUT is ignored — baskets are always derived
+    here, never passed through — so the output cannot depend on whether the
+    caller happened to include one. ``source_symbols()`` never emits one."""
     flow_by_symbol = flow_by_symbol or {}
     out = {}
     for sym, rows in flow_by_symbol.items():
+        if sym in BASKETS:          # derived below, never passed through
+            continue
         projected = _project(rows)
         if projected:
             out[sym] = projected

@@ -24,9 +24,16 @@ def test_big10_basket_matches_market_dashboard_membership():
     # hardcoded copy would stay green while the two pages silently diverged.
     # The cross-service import is TEST-ONLY (symbols.py is pure data, no
     # imports); net_premium.py itself stays free of it.
+    #
+    # Compared SORTED, not as sets: order differs by design (display vs
+    # market_svc-mirroring) so the comparison must stay order-insensitive, but a
+    # set() would also swallow a DUPLICATE ticker — and a duplicate is not
+    # cosmetic here, it double-counts that member into the BIG10 sum.
     mkt = next(e["basket"] for e in market_symbols.SYMBOL_MAP
                if e["kind"] == "basket" and e["display"] == "BIG10")
-    assert set(np_mod.BASKETS["BIG10"]) == set(mkt)
+    members = np_mod.BASKETS["BIG10"]
+    assert sorted(members) == sorted(mkt)
+    assert len(members) == len(set(members)), f"duplicate in BIG10: {members}"
 
 
 def test_big10_basket_covers_the_megacap_group():
@@ -34,8 +41,9 @@ def test_big10_basket_covers_the_megacap_group():
     # market_svc-mirroring). Nothing structural ties them, so pin it: adding an
     # 11th mega-cap to the group without the basket would make BIG10 quietly
     # under-sum while the new line rendered right beside it.
+    # sorted(), not set(), for the same duplicate-hiding reason as above.
     megacaps = next(g["symbols"] for g in np_mod.GROUPS if g["key"] == "megacaps")
-    assert set(megacaps) == set(np_mod.BASKETS["BIG10"])
+    assert sorted(megacaps) == sorted(np_mod.BASKETS["BIG10"])
 
 
 def test_display_symbols_are_every_group_member_deduped_in_order():
@@ -130,3 +138,69 @@ def test_symbols_with_no_rows_are_omitted():
 def test_build_series_never_raises_on_junk():
     out = np_mod.build_series({"SPY": [("x",), None, _row(1, 1.0, 1.0)]})
     assert out["SPY"] == [[1, 1.0, 1.0]]
+
+
+def test_dict_shaped_rows_are_skipped_not_raised_on():
+    """A row_factory set anywhere upstream (sqlite3.Row / dict) hands us mappings
+    instead of tuples. Indexing one by position raises KeyError, which would
+    break the stated "junk rows are skipped" contract from a change made in a
+    different file."""
+    out = np_mod.build_series({"SPY": [{"ts": 1, "call_prem": 9.0},
+                                       _row(2, 1.0, 1.0)]})
+    assert out["SPY"] == [[2, 1.0, 1.0]]
+
+
+def test_truncated_rows_are_skipped():
+    # Fewer than 6 fields: the premium columns aren't there to read.
+    out = np_mod.build_series({"SPY": [(1, 100.0, 0, 0), _row(2, 1.0, 1.0)]})
+    assert out["SPY"] == [[2, 1.0, 1.0]]
+
+
+def test_bools_are_not_numbers():
+    # True == 1 in Python, so an unguarded bool would smuggle in ts=1.
+    out = np_mod.build_series({"SPY": [_row(True, 1.0, 1.0)]})
+    assert "SPY" not in out
+
+
+def test_nan_and_inf_are_rejected():
+    """One nan would otherwise propagate through the basket sum and blank the
+    entire BIG10 column, and json.dumps would emit invalid JSON into Redis."""
+    out = np_mod.build_series({
+        "NVDA": [_row(1, float("nan"), 1.0), _row(2, float("inf"), 2.0),
+                 _row(3, 10.0, 3.0)],
+    })
+    assert out["NVDA"] == [[1, 0.0, 1.0], [2, 0.0, 2.0], [3, 10.0, 3.0]]
+    assert out["BIG10"] == [[1, 0.0, 1.0], [2, 0.0, 2.0], [3, 10.0, 3.0]]
+
+
+def test_zero_premium_row_is_kept_as_a_real_observation():
+    # 0.0 means "nothing traded that side" (real); None means "column absent".
+    out = np_mod.build_series({"SPY": [_row(1, 0.0, 0.0)]})
+    assert out["SPY"] == [[1, 0.0, 0.0]]
+
+
+def test_int_premiums_are_normalised_to_float():
+    out = np_mod.build_series({"SPY": [_row(1, 10, 4)]})
+    assert [type(v) for v in out["SPY"][0][1:]] == [float, float]
+
+
+def test_series_is_sorted_by_timestamp():
+    """Highcharts line series require x-ascending points; out-of-order data is a
+    documented error condition, not a cosmetic one. The basket path sorts
+    separately, so this covers the per-symbol path."""
+    out = np_mod.build_series({"SPY": [_row(3, 3.0, 0.0), _row(1, 1.0, 0.0),
+                                       _row(2, 2.0, 0.0)]})
+    assert [pt[0] for pt in out["SPY"]] == [1, 2, 3]
+
+
+def test_basket_key_in_the_input_is_ignored_not_passed_through():
+    """Baskets are always derived, never forwarded, so the result can't depend on
+    whether the caller happened to include one."""
+    out = np_mod.build_series({"BIG10": [_row(1, 999.0, 999.0)],
+                               "NVDA": [_row(1, 10.0, 1.0)]})
+    assert out["BIG10"] == [[1, 10.0, 1.0]]
+
+
+def test_basket_key_alone_in_the_input_yields_no_basket():
+    out = np_mod.build_series({"BIG10": [_row(1, 999.0, 999.0)]})
+    assert out == {}
