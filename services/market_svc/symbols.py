@@ -26,6 +26,20 @@ CATEGORY_ORDER = [
     "Fixed Income / Credit ETF", "Crypto / Alternatives", "Countries",
 ]
 
+# Frames rendered as a LEADERBOARD: their tiles are emitted ranked by day
+# %-change (descending), so the strongest name sits top-left and the rank is
+# readable at a glance. These are the peer-comparison frames — one sector/theme/
+# country against its siblings — where the curated order carries no meaning.
+#
+# Every OTHER frame keeps its symbol-map order, deliberately: Broad-Market ETF
+# reads SPY/DIA/QQQ/IWM then the equal-weights, Volatility reads VIX then its
+# tenors, Cash Index pairs with Futures. Ranking those would destroy a layout
+# that IS the information.
+#
+# A basket tile (BIG10) is pinned leftmost within its frame — see
+# compute.rank_tiles.
+SORTED_CATEGORIES = ("Top 10", "Sector SPDR", "Thematic / Industry ETF", "Countries")
+
 
 def _q(csv, quote, desc, cat, polarity="normal", value_only=False, prem=False):
     # ``prem=True`` → the tile also shows a per-symbol call/put PREMIUM skew subline

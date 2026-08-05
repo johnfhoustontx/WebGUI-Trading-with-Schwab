@@ -184,6 +184,31 @@ def _attach_prem(t, e, symbol_prem):
         t["prem_skew_pct"] = symbol_premium_skew(c, p)
 
 
+def rank_tiles(tiles):
+    """PURE: order one frame's tiles as a leaderboard — best day %-move first.
+
+    Three bands, in order: composite BASKET tiles (BIG10) pinned leftmost, then
+    quoted tiles descending by ``change_pct``, then tiles with no percentage to
+    rank on (no-data, or a value-only internal). ``sorted`` is stable, so within
+    a band the curated symbol-map order survives — equal movers don't jitter
+    between polls.
+
+    The basket is PINNED rather than sorted because it carries a ``change_pct``
+    of its own (its members' average), which would otherwise drop it into the
+    middle of the very constituents it summarizes.
+    """
+    def key(t):
+        if t.get("basket"):
+            return (0, 0.0)
+        pct = t.get("change_pct")
+        try:
+            return (1, -float(pct))
+        except (TypeError, ValueError):
+            return (2, 0.0)
+
+    return sorted(tiles, key=key)
+
+
 def build_dashboard(raw, *, sector_pcr, proxy_up, net_prem=None, symbol_prem=None):
     """Assemble the ordered categories→tiles payload (pure).
 
@@ -262,6 +287,9 @@ def build_dashboard(raw, *, sector_pcr, proxy_up, net_prem=None, symbol_prem=Non
             _attach_prem(t, e, symbol_prem)
         tiles_by_cat[e["category"]].append(t)
 
+    for c in symbols.SORTED_CATEGORIES:
+        if tiles_by_cat.get(c):
+            tiles_by_cat[c] = rank_tiles(tiles_by_cat[c])
     categories = [{"category": c, "tiles": tiles_by_cat[c]}
                   for c in symbols.CATEGORY_ORDER if tiles_by_cat[c]]
     return {"categories": categories, "proxy_up": proxy_up, "errors": []}

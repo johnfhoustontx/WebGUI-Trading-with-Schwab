@@ -33,6 +33,24 @@ def bg_class(state):
 _ALL_BG_CLASSES = " ".join(dict.fromkeys(" ".join(_BG.values()).split()))
 
 
+def order_class(i):
+    """Tailwind flex `order-N` class for a tile at payload position ``i``.
+
+    The service emits the leaderboard frames (Sector SPDR / Thematic / Countries
+    / Top 10) already ranked by day %-move, so the page only has to mirror that
+    rank onto the flex container. Doing it with an order class — rather than
+    re-inserting DOM nodes — means a re-rank on the ~2 s tick is a single class
+    swap, preserving the page's build-once / update-in-place property.
+
+    Tailwind's core scale covers order-1..order-12; past that we emit an
+    arbitrary value (the bundled JIT generates plain-value arbitraries reliably —
+    only var()/rgba() ones are unsafe), so a frame growing past 12 tiles still
+    ranks correctly.
+    """
+    n = i + 1
+    return f"order-{n}" if n <= 12 else f"order-[{n}]"
+
+
 def _fmt(v, nd=2):
     try:
         f = float(v)
@@ -127,13 +145,14 @@ def render():
                     ui.label(cat.get("category", "")).classes(
                         "text-xs uppercase tracking-wide text-slate-400")
                     with ui.row().classes("flex-wrap gap-2"):
-                        for t in cat.get("tiles", []):
+                        for i, t in enumerate(cat.get("tiles", [])):
                             txt = tile_text(t)
+                            oc = order_class(i)
                             # Fixed min-height so every tile in a frame is the same
                             # height whether or not it carries a premium subline.
                             container = ui.column().classes(
                                 "rounded-md p-2 w-[120px] min-h-[92px] gap-0 "
-                                f"{bg_class(t.get('color_state'))}")
+                                f"{oc} {bg_class(t.get('color_state'))}")
                             with container:
                                 ui.label(t.get("display", "")).classes(
                                     "text-sm font-semibold truncate")
@@ -147,17 +166,26 @@ def render():
                             state["tiles"][t.get("display")] = {
                                 "container": container, "last": last_lbl,
                                 "change": change_lbl, "prem": prem_lbl,
-                                "state": t.get("color_state")}
+                                "state": t.get("color_state"), "order": oc}
         state["built"] = True
 
     def _update(payload):
         """Subsequent paints: update label text + swap bg class IN PLACE."""
         for cat in payload.get("categories", []):
-            for t in cat.get("tiles", []):
+            for i, t in enumerate(cat.get("tiles", [])):
                 h = state["tiles"].get(t.get("display"))
                 if not h:  # a new tile appeared → structure changed; rebuild.
                     _build(payload)
                     return
+                # Re-rank in place: the ranked frames re-order as prices move,
+                # so mirror the payload position onto the flex order class.
+                # Remove the TRACKED PREVIOUS class (order indices are unbounded,
+                # so there is no fixed union to remove) — else they stack and the
+                # first one wins, freezing the board at its opening rank.
+                oc = order_class(i)
+                if oc != h["order"]:
+                    h["container"].classes(remove=h["order"], add=oc)
+                    h["order"] = oc
                 txt = tile_text(t)
                 h["last"].text = txt["last"]
                 h["change"].text = txt["change"]

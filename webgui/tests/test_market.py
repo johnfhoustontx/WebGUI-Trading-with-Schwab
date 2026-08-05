@@ -96,6 +96,34 @@ def test_tile_text_basket_shows_avg_and_breadth():
     assert market.tile_text(t2)["last"] == "-1.50%"
 
 
+def test_order_class_maps_payload_position_to_flex_order():
+    # The service emits ranked frames; the page mirrors that rank as a Tailwind
+    # flex `order-N` class so a re-rank is a class swap, NOT a DOM rebuild.
+    assert market.order_class(0) == "order-1"
+    assert market.order_class(11) == "order-12"
+    # Tailwind's core scale stops at 12 — beyond it, an arbitrary value (the JIT
+    # generates plain-value arbitraries fine; only var()/rgba() ones are unsafe).
+    assert market.order_class(12) == "order-[13]"
+
+
+def test_order_class_is_distinct_per_position():
+    # Two tiles must never share an order class, or their relative rank is
+    # left to DOM order and the leaderboard silently stops sorting.
+    assert len({market.order_class(i) for i in range(15)}) == 15
+
+
+def test_rerank_swaps_the_order_class_in_place():
+    """A re-rank must not rebuild the board: the ~2s tick would then blow away
+    and re-create ~48 tiles, losing the page's build-once/update-in-place
+    property. The update path swaps the tile's order class instead, removing
+    the TRACKED PREVIOUS one (order indices are unbounded, so no fixed union of
+    classes can be the remove-set) so order utilities never stack."""
+    import inspect
+    src = inspect.getsource(market.render)
+    assert "order_class(" in src
+    assert 'remove=h["order"]' in src
+
+
 def test_poll_reads_payload_off_the_event_loop():
     """The dashboard service publishes every ~2s during RTH, so the version gate
     passes nearly every poll → the full ~48-tile payload read must run OFF the

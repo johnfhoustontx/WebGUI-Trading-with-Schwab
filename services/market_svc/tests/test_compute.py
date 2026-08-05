@@ -244,3 +244,76 @@ def test_missing_symbol_is_no_data_not_a_crash():
     tiles = {t["display"]: t for c in d["categories"] for t in c["tiles"]}
     assert tiles["SPX"]["color_state"] == "no_data"
     assert tiles["Put/Call"]["color_state"] == "no_data"  # pcr None
+
+
+# ---------------------------------------------------------------------------
+# Leaderboard frames — the four categories in symbols.SORTED_CATEGORIES are
+# emitted ranked by day %-change (descending), so the strongest name sits
+# top-left. Everything else keeps its curated symbol-map order.
+# ---------------------------------------------------------------------------
+
+def _pct_raw(px):
+    return {s: {"assetMainType": "EQUITY", "quote": {"lastPrice": 100.0, "netPercentChange": p}}
+            for s, p in px.items()}
+
+
+def _frame(d, category):
+    return [t["display"] for c in d["categories"] if c["category"] == category
+            for t in c["tiles"]]
+
+
+def test_sector_frame_ranked_desc_by_day_pct():
+    d = compute.build_dashboard(_pct_raw({"XLB": -0.5, "XLE": 2.0, "XLK": 0.3}),
+                                sector_pcr=None, proxy_up=True)
+    assert _frame(d, "Sector SPDR")[:3] == ["XLE", "XLK", "XLB"]
+
+
+def test_thematic_frame_ranked_desc_by_day_pct():
+    d = compute.build_dashboard(_pct_raw({"SMH": 1.1, "XBI": -2.0, "IGV": 3.4}),
+                                sector_pcr=None, proxy_up=True)
+    assert _frame(d, "Thematic / Industry ETF")[:3] == ["IGV", "SMH", "XBI"]
+
+
+def test_countries_frame_ranked_desc_by_day_pct():
+    d = compute.build_dashboard(_pct_raw({"EWJ": 0.2, "EWZ": 1.9, "MCHI": -1.4}),
+                                sector_pcr=None, proxy_up=True)
+    assert _frame(d, "Countries")[:3] == ["EWZ", "EWJ", "MCHI"]
+
+
+def test_top10_frame_ranked_with_big10_pinned_leftmost():
+    # BIG10 carries its own change_pct (the members' average), which here lands
+    # BETWEEN two constituents — so it can only stay leftmost if it is PINNED,
+    # not merely sorted.
+    d = compute.build_dashboard(_pct_raw({"NVDA": 1.0, "MSFT": 3.0, "AAPL": -2.0}),
+                                sector_pcr=None, proxy_up=True)
+    frame = _frame(d, "Top 10")
+    big10 = {t["display"]: t for c in d["categories"] for t in c["tiles"]}["BIG10"]
+    assert 1.0 > big10["change_pct"] > -2.0        # would sort 2nd on value alone
+    assert frame[:4] == ["BIG10", "MSFT", "NVDA", "AAPL"]
+
+
+def test_ranked_frames_put_no_data_tiles_last():
+    d = compute.build_dashboard(_pct_raw({"XLU": -3.0}), sector_pcr=None, proxy_up=True)
+    frame = _frame(d, "Sector SPDR")
+    assert frame[0] == "XLU"                       # the only quoted tile leads
+    assert len(frame) == 11                        # every sector tile still present
+    # the 10 unquoted ones trail, in their curated symbol-map order
+    assert frame[1:] == ["XLB", "XLC", "XLE", "XLF", "XLI",
+                         "XLK", "XLP", "XLRE", "XLV", "XLY"]
+
+
+def test_unranked_frames_keep_symbol_map_order():
+    # Broad-Market ETF is deliberately NOT a leaderboard: its curated order
+    # (SPY/DIA/QQQ/IWM then the equal-weights) is meaningful, so a big QQQ move
+    # must not reshuffle it.
+    d = compute.build_dashboard(_pct_raw({"SPY": -1.0, "QQQ": 2.0}),
+                                sector_pcr=None, proxy_up=True)
+    assert _frame(d, "Broad-Market ETF") == ["SPY", "DIA", "QQQ", "IWM", "RSP", "QQEW"]
+
+
+def test_ranked_frames_are_exactly_the_four_requested():
+    from services.market_svc import symbols
+    assert symbols.SORTED_CATEGORIES == ("Top 10", "Sector SPDR",
+                                         "Thematic / Industry ETF", "Countries")
+    # every ranked category is a real frame (a typo would silently rank nothing)
+    assert set(symbols.SORTED_CATEGORIES) <= set(symbols.CATEGORY_ORDER)
