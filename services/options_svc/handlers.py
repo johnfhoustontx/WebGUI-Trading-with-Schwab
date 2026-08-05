@@ -876,7 +876,20 @@ def _flow_alert_symbols():
     ``gex_collector`` (options-scanner) is imported LAZILY — ``compute`` (imported
     at module top) has already put OPTIONS_SCANNER on ``sys.path``, and the lazy
     import avoids binding process-wide module names at handler-module import time
-    (the documented cross-app collision discipline)."""
+    (the documented cross-app collision discipline).
+
+    This derives from the SAME ``collection_symbols()`` the Net Prem view needs,
+    so the 2026-08-05 additions to ``gex_collector.SYMBOLS`` (the 11 SPDR sectors
+    + IWM/DIA + the ten mega-caps) also widened the UOA + crossover push to
+    Discord/Telegram. The user was asked and CHOSE to keep sector alerts — "a
+    large XLE or XLF sweep is a real rotation signal".
+
+    **If they ever prove too noisy, exclude them HERE — do NOT remove them from
+    ``gex_collector.SYMBOLS``.** The Net Prem view reads those same collected
+    rows, so dropping them from collection would silently empty its entire SPDR
+    Sectors group: eleven blank lines, no error, no log. This function is the
+    right cut point precisely because it is downstream of collection.
+    """
     try:
         import gex_collector
         # $VIX-options premium crossovers are noise (mirrors the gamma symbol

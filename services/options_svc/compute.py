@@ -2699,7 +2699,16 @@ _MOVER_STOCK_CATEGORY = "Top 10"
 # they must never appear as "individual stock moves" even when the dashboard
 # itself is empty/unreachable (proxy down), so this is a hardcoded backstop
 # unioned into ``non_stock`` on top of whatever the dashboard classifies.
-# Normalized keys (see ``_mover_key``); mirrors gex_collector.SYMBOLS.
+# Normalized keys (see ``_mover_key``).
+#
+# This is NOT a mirror of gex_collector.SYMBOLS and must never be "resynced" to
+# it. It is an EXCLUDE-list of names that are never an individual stock move —
+# broad index/ETF tickers only. gex_collector.SYMBOLS is a COLLECTION universe
+# that has always been a superset ($NDX was in it when this comment still
+# claimed a mirror) and since 2026-08-05 also holds 11 SPDR sectors and ten real
+# mega-caps for the Net Prem view. Syncing the two would suppress NVDA / AAPL /
+# TSLA from the briefing's notable movers — silently, since a suppressed mover
+# just doesn't appear. Add a symbol here only when it is genuinely not a stock.
 _MOVER_INDEX_FLOOR = frozenset({"SPX", "VIX", "SPY", "QQQ"})
 
 _MOVER_LIMIT = 6
