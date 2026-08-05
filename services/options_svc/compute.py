@@ -2309,25 +2309,29 @@ def build_net_premium(session_date, now=None):
     ``build_matrix``; this is a second cheap indexed read over the same open DB,
     not new data collection.
 
-    Fully defensive: a DB-connect failure degrades to an empty-series payload with
-    ``error`` set; a per-symbol read failure yields no series for that symbol
-    (the page names it as "no data yet")."""
-    from services.options_svc import net_premium as np_mod
+    ``session_date`` MUST be a ``datetime.date`` (as ``scheduler.active_session_date``
+    returns): both ``_rth_bounds`` and the gex_history readers require the object,
+    so a string raises rather than degrading. Deliberately unlike ``build_matrix``,
+    which ALSO carries an isoformat string — it needs one because its signal/alert
+    count gate compares against the cached payloads' string ``date`` field. There is
+    no such gate here, so only the returned field is stringified.
 
-    if now is None:
-        import datetime as _dtmod
-        now = _dtmod.datetime.now(_PROJ_CT_TZ)
-    # The time-axis charts show RTH only, so before the 08:30 open fall back to
-    # the prior session — today has collected rows but none displayable.
+    Fully defensive about DATA, not about caller bugs: a DB-connect failure degrades
+    to an empty-series payload with ``error`` set, and a per-symbol read failure
+    yields no series for that symbol (the page names it as "no data yet")."""
+    from services.options_svc import net_premium as np_mod
+    from services.options_svc import scheduler as _sched
+
+    now = now or _sched._market_now()
+    # The time-axis charts show RTH only, so before the 08:30 open fall back to the
+    # prior session — today has collected rows but none displayable. BOTH the read
+    # and the crop must use this date, never the argument: between 08:00 and 08:30
+    # they differ, and mixing them would read today's near-empty rows and crop them
+    # to yesterday's window — a silently blank chart, no error.
     display_date = _display_session_date(now, session_date)
     bounds = _rth_bounds(display_date)
-    # ``session_date`` arrives as a ``datetime.date`` OBJECT (the gex_history
-    # readers need ``.year/.month/.day``), but the cached payload's field must be
-    # a JSON-clean string per the NetPremiumSnapshot contract — so normalize for
-    # the payload only and keep the object for the DB reads. Same split as
-    # ``build_matrix``.
-    date_key = (display_date.isoformat()
-                if hasattr(display_date, "isoformat") else display_date)
+    # JSON-clean for the NetPremiumSnapshot contract.
+    date_key = display_date.isoformat()
 
     try:
         gh = _matrix_gh()
@@ -2340,6 +2344,13 @@ def build_net_premium(session_date, now=None):
     flow: dict = {}
     try:
         for sym in np_mod.source_symbols():
+            # NOTE: _rth_only indexes r[0] unguarded, so a malformed row drops this
+            # symbol's WHOLE series — unlike net_premium._project, which skips rows
+            # individually (its "unreadable rows are skipped" promise therefore does
+            # not hold for the composed pipeline: a dict-shaped row raises KeyError
+            # here, before _project ever sees it; sqlite3.Row survives both). Same
+            # behaviour the heatmap/Flow views already have; deliberately not changed
+            # here (shared helper, wider blast radius).
             try:
                 flow[sym] = _rth_only(
                     gh.load_flow_series(conn, sym, display_date), bounds)

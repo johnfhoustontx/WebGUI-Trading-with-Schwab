@@ -252,6 +252,7 @@ class _FakeGH:
         self.data = data
         self.fail_for = set(fail_for)
         self.asked = []
+        self.asked_dates = []
         self.closed = False
 
     def connect(self, read_only=False):
@@ -265,6 +266,7 @@ class _FakeGH:
 
     def load_flow_series(self, conn, symbol, d=None):
         self.asked.append(symbol)
+        self.asked_dates.append(d)   # pins WHICH session was read, not just which symbol
         if symbol in self.fail_for:
             raise RuntimeError("boom")
         return self.data.get(symbol, [])
@@ -291,10 +293,54 @@ def test_build_net_premium_reads_every_source_symbol(monkeypatch, _pin_session):
     out = compute.build_net_premium(_pin_session)
 
     assert set(gh.asked) == set(np_mod.source_symbols())
+    # Asked ONCE each, not merely "at least once": this runs on the 1-min GEX
+    # branch, and this codebase has twice paid for a duplicated read.
+    assert len(gh.asked) == len(np_mod.source_symbols())
     assert out["series"]["SPY"] == [[_rth_ts(10, 0), 10.0, 4.0]]
     assert out["session_date"] == "2026-08-05"
     assert out["error"] is None
     assert gh.closed is True
+
+
+def _ct_ts(year, month, day, hour, minute):
+    return datetime.datetime(year, month, day, hour, minute,
+                             tzinfo=compute._PROJ_CT_TZ).timestamp()
+
+
+def test_premarket_reads_and_crops_the_PRIOR_session(monkeypatch):
+    """08:00-08:30 CT: the display date must drive BOTH the read and the crop.
+
+    ``scheduler.active_session_date`` flips to today at the 08:00 COLLECTION start,
+    but these charts render RTH only — so for that half hour today has rows and none
+    of them displayable. Using ``session_date`` for either the read or the bounds
+    would fetch today's near-empty rows and crop them to yesterday's window (or vice
+    versa): an empty chart, no error, thirty minutes every trading morning, in the
+    one window nobody is watching.
+
+    The REAL ``_display_session_date`` runs here (deliberately NOT monkeypatched —
+    the other tests in this file pin it to the date they pass, so in those
+    ``display_date == session_date`` and this wiring is invisible). Two rows exactly
+    24h apart discriminate the bounds: only the PRIOR day's survives.
+
+    Passing ``now`` explicitly also exercises the tz-aware default's contract — a
+    naive ``now`` would blow up on the comparison inside ``_display_session_date``.
+    """
+    today = datetime.date(2026, 8, 5)     # a Wednesday, not a holiday
+    prior = datetime.date(2026, 8, 4)     # → the Tuesday
+    assert today.weekday() == 2 and prior == today - datetime.timedelta(days=1)
+
+    gh = _FakeGH({"SPY": [
+        (_ct_ts(2026, 8, 4, 10, 0), 1.0, 0, 0, 10.0, 4.0),   # prior RTH — kept
+        (_ct_ts(2026, 8, 5, 10, 0), 1.0, 0, 0, 99.0, 99.0),  # today's RTH — cropped out
+    ]})
+    monkeypatch.setattr(compute, "_matrix_gh", lambda: gh)
+
+    out = compute.build_net_premium(
+        today, now=datetime.datetime(2026, 8, 5, 8, 5, tzinfo=compute._PROJ_CT_TZ))
+
+    assert out["session_date"] == "2026-08-04"          # reported as the prior session
+    assert set(gh.asked_dates) == {prior}               # …and READ for it
+    assert out["series"]["SPY"] == [[_ct_ts(2026, 8, 4, 10, 0), 10.0, 4.0]]  # …and CROPPED to it
 
 
 def test_build_net_premium_crops_to_rth(monkeypatch, _pin_session):
