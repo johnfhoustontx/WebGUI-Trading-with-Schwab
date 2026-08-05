@@ -20,6 +20,10 @@ DEFAULTS = {
     "gamma_level_tracks": False,     # heatmap overlay: intraday flip/wall movement
     "gamma_spot_style": "line",      # heatmap spot overlay: line | candle | ohlc
     "gamma_spot_interval": 5,        # candle/OHLC bucket size in minutes (1|5|15)
+    "gamma_netprem_group": "indices",          # Net Prem picker: which group tab
+    "gamma_netprem_mode": "dollars",           # Net Prem y-axis: dollars | skew
+    # Comparable magnitudes in Dollars mode, so the three read as one chart.
+    "gamma_netprem_symbols": ["$SPX", "SPY", "QQQ"],   # plotted symbols
 }
 
 _PATH = pathlib.Path(__file__).resolve().parent / "data" / "settings.json"
