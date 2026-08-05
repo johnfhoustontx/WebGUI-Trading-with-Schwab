@@ -73,11 +73,23 @@ the surgical spot — `collection_symbols()` is `SYMBOLS ∪ Top 20.xlsx`, while
 
 Known consequences, all additive:
 
-- +11 chain fetches per 1-min poll ≈ **+4,300 Schwab calls/day** (~+14% on GEX
-  collection, the stack's #1 caller).
+- +11 chain fetches per 1-min poll ≈ **+4,800 Schwab calls/day** on the stack's
+  #1 Schwab caller. Measured: the universe goes **82 → 93** on a machine with
+  `Top 20.xlsx`; on a fresh clone without it, `SYMBOLS` *is* the whole universe,
+  so the delta is **5 → 28 (+23)**. Each added symbol also costs a **serial**
+  engine calc + a `gex_history.db` insert inside the 60 s poll budget
+  (`poll_once`'s pool overlaps the FETCH only), and one DB row per poll.
 - Sectors also enter the **Opportunity Board** (`build_matrix` iterates the same
   universe) and the **Dealer Positioning symbol dropdown**
   (`cache:options:gamma_symbols`).
+- **Sectors also enter the flow-alert universe** — `handlers._flow_alert_symbols()`
+  reads the same `collection_symbols()`, so the 11 sector ETFs now fire UOA +
+  crossover alerts to Discord/Telegram. **This was surfaced during review and the
+  user chose to keep it** (2026-08-05): a large XLE or XLF call sweep is a real
+  rotation signal worth pushing. Noted explicitly because it lands on the same
+  alert feed that `0d51930` and `7e1f2d1` had just been tuned to quieten — so if
+  sector alerts prove noisy, the fix is to exclude them from
+  `_flow_alert_symbols()`, not to stop collecting them.
 - Premium history for sectors starts the day this ships; earlier sessions stay
   empty for them.
 
