@@ -7,7 +7,7 @@ does the DB reading and hands the raw rows here.
 Net premium = cumulative call premium ($) − cumulative put premium ($) for a
 symbol, per intraday snapshot. Because Schwab serves no time-&-sales tape the
 premium is UNSIGNED cumulative traded dollars, so this is a money-weighted
-put/call read, NOT net buying. The UI says so.
+put/call read, NOT net buying. The UI must say so.
 """
 from __future__ import annotations
 
@@ -24,8 +24,10 @@ GROUPS = (
                  "TSLA", "PLTR", "AMZN", "GOOGL", "AMD")},
 )
 
-# Composite pseudo-symbols: summed server-side from real tickers. Membership is
-# identical to market_svc/symbols.py's BIG10 basket by design — a test pins it.
+# Composite pseudo-symbols: summed server-side from real tickers. BIG10 holds
+# the same set as the Mega-caps group above, in a different order (that one is
+# display order; this one mirrors market_svc/symbols.py's BIG10 basket, whose
+# membership this must match by design). Tests pin both relationships.
 BASKETS = {
     "BIG10": ("NVDA", "MSFT", "GOOGL", "AMZN", "META",
               "AAPL", "TSLA", "AVGO", "PLTR", "AMD"),
