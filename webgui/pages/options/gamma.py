@@ -1757,6 +1757,23 @@ def render():
         unrecognised name."""
         return [s for s in net_prem_symbols() if np_boxes[s].value]
 
+    def _paint_np_status():
+        """Recompute the publisher-health line from the cached payload.
+
+        Driven by the 1 s ``_tick`` as well as by repaints, because staleness is
+        a function of the CLOCK, not of any cache version — and the one failure
+        this line exists to report is exactly the one that stops every version
+        bump. If it were only recomputed on a repaint, a whole-service outage
+        would freeze it at "updated 5:20 PM" forever and the reader would never
+        see "check the options service". Pure over state the page already holds:
+        no bus read, no I/O."""
+        import datetime as _dt
+        payload = state.get("netprem")
+        payload = payload if isinstance(payload, dict) else None
+        # net_prem_status_text renders the payload's own error verbatim.
+        np_status_lbl.text = net_prem_status_text(
+            payload, _dt.datetime.now(_dt.timezone.utc))
+
     def _render_net_prem():
         """Paint the Net Prem view: one full-width multi-symbol line chart."""
         payload = state.get("netprem")
@@ -1776,11 +1793,7 @@ def render():
         # names (it shares net_prem_missing's definition), so the header can
         # never disagree with what the chart draws.
         _set_summary(net_prem_summary_text(series, sel, mode))
-        # Publisher health (+ the payload's own error, rendered verbatim by the
-        # builder). Needs a TZ-AWARE now.
-        import datetime as _dt
-        np_status_lbl.text = net_prem_status_text(
-            payload or None, _dt.datetime.now(_dt.timezone.utc))
+        _paint_np_status()
         np_count_lbl.text = f"Selected: {len(sel)}"
 
     def _render_view():
@@ -1920,6 +1933,14 @@ def render():
     def _auto_refresh():
         # Fetch-free on the page side: enqueue a refresh for the current symbol;
         # the service recomputes + republishes and the version-poll repaints.
+        # SKIPPED on Net Prem, which reads its own cache key and never touches
+        # the gamma snapshot — enqueueing there costs the options service a full
+        # option-chain fetch + GammaEngine compute for a result this view
+        # discards. (Safe only because _tick now owns the status refresh; this
+        # enqueue used to be its accidental driver.)
+        if view_toggle.value == "Net Prem":
+            state["countdown"] = 120
+            return
         sym = _current_symbol()
         if sym:
             bus_client.request("options", {"type": "gamma_refresh", "args": {"symbol": sym}})
@@ -1932,6 +1953,9 @@ def render():
             state["countdown"] = 120
         strip_state["countdown"] = state["countdown"]
         _repaint_strip()
+        if view_toggle.value == "Net Prem":
+            # Staleness is a clock function — see _paint_np_status.
+            _paint_np_status()
 
     @guard_async
     async def _maybe_repaint(version):

@@ -1276,21 +1276,107 @@ def test_chart_kind_is_stable_across_same_view_repaints():
         gamma.chart_kind(one)
 
 
-def test_chart_kind_still_separates_the_pre_existing_kinds():
-    """The bar <-> Term recreate this already relied on must keep working, and
-    the first-paint empty figure must match the bar figure it is replaced by
-    (else the page recreates the element on its very first real render)."""
-    bar = gamma.bar_figure({"spot": 100.0, "gex": {100.0: {"net": 1.0}}}, 100.0)
-    term = gamma.term_heatmap({"expirations": ["2026-08-07"],
-                               "cells": {"100.0": {"2026-08-07": 1.0}}})
-    kinds = {gamma.chart_kind(bar), gamma.chart_kind(term),
-             gamma.chart_kind(gamma.flow_figure([])),
-             gamma.chart_kind(gamma.net_prem_figure({}, []))}
-    assert len(kinds) == 4                       # all four mutually distinct
-    assert gamma.chart_kind(gamma._empty_fig()) == gamma.chart_kind(bar)
+# One representative figure builder per VIEW. Registered here rather than
+# hand-listed inside a single assertion so that adding a view to _VIEW_ORDER
+# without registering it FAILS — chart_kind is a structural proxy (a future
+# single-axis "line" view would compute ('line', 0) and silently collide with
+# Net Prem, reintroducing the merge-leak bug class), so the distinctness guard
+# has to be forget-proof rather than depend on someone remembering to extend it.
+_VIEW_FIGS = {
+    "GEX": lambda: gamma.bar_figure({"spot": 100.0, "gex": {100.0: {"net": 1.0}}}, 100.0,
+                                    view="GEX"),
+    "Charm": lambda: gamma.bar_figure({"spot": 100.0, "gex": {100.0: {"net": 1.0}}}, 100.0,
+                                      view="Charm"),
+    "DEX": lambda: gamma.bar_figure({"spot": 100.0, "gex": {100.0: {"net": 1.0}}}, 100.0,
+                                    view="DEX"),
+    "Vanna": lambda: gamma.bar_figure({"spot": 100.0, "gex": {100.0: {"net": 1.0}}}, 100.0,
+                                      view="Vanna"),
+    "Flow": lambda: gamma.flow_figure([]),
+    "Net Prem": lambda: gamma.net_prem_figure({}, []),
+    "Term": lambda: gamma.term_heatmap({"expirations": ["2026-08-07"],
+                                        "cells": {"100.0": {"2026-08-07": 1.0}}}),
+}
+
+# Views that SHARE a figure builder must share a kind (no needless recreate);
+# views with DIFFERENT builders must not collide (no merge leak).
+_VIEW_BUILDER = {"GEX": "bars", "Charm": "bars", "DEX": "bars", "Vanna": "bars",
+                 "Flow": "flow", "Net Prem": "netprem", "Term": "term"}
+
+
+def test_every_view_is_registered_for_the_chart_kind_guard():
+    """A new subtab must be registered here, so the guards below cover it."""
+    assert set(_VIEW_FIGS) == set(gamma._VIEW_ORDER)
+    assert set(_VIEW_BUILDER) == set(gamma._VIEW_ORDER)
+
+
+def test_chart_kind_is_distinct_across_every_pair_of_builders():
+    """Any two views drawn by DIFFERENT builders must be different kinds — else
+    _set_chart takes the in-place path and Highcharts merges one figure's config
+    onto the other's (the Flow/Net Prem orphaned-axis bug)."""
+    by_builder = {}
+    for view, make in _VIEW_FIGS.items():
+        by_builder.setdefault(_VIEW_BUILDER[view], gamma.chart_kind(make()))
+    assert len(set(by_builder.values())) == len(by_builder), by_builder
+
+
+def test_views_sharing_a_builder_share_a_kind():
+    """GEX/Charm/DEX/Vanna are all bar figures: switching between them must NOT
+    recreate the element (that would reintroduce flicker where there is none)."""
+    bars = {v: gamma.chart_kind(_VIEW_FIGS[v]())
+            for v, b in _VIEW_BUILDER.items() if b == "bars"}
+    assert len(set(bars.values())) == 1, bars
+    # ...and the first-paint empty figure matches them, so the very first real
+    # render updates in place instead of tearing the element down.
+    assert gamma.chart_kind(gamma._empty_fig()) == next(iter(bars.values()))
+
+
+def test_net_prem_groups_are_disjoint():
+    """np_boxes is keyed by SYMBOL, so a symbol in two groups would overwrite its
+    own checkbox — orphaning the first widget, which is then never wired to
+    on_value_change nor visibility-toggled and would sit visible on every view.
+    net_prem_symbols() already dedupes, so the two paths must not disagree."""
+    seen = {}
+    for group in gamma.NET_PREM_GROUPS:
+        for sym in group["symbols"]:
+            assert sym not in seen, f"{sym} in both {seen[sym]} and {group['key']}"
+            seen[sym] = group["key"]
+    assert len(seen) == len(gamma.net_prem_symbols())
 
 
 def test_chart_kind_is_total_over_junk():
     """It runs on every repaint; a malformed figure must not 500 the page."""
     for junk in (None, "nope", [], {}, {"chart": None}, {"chart": {}, "yAxis": "x"}):
         gamma.chart_kind(junk)
+
+
+# --- closure-bound wiring (guarded by source inspection, as test_driver_monitor
+# --- does: these live inside render()'s closure and cannot be called directly).
+
+def test_tick_refreshes_the_net_prem_status_line():
+    """Staleness is a CLOCK function, but np_status_lbl was only recomputed on a
+    repaint — whose drivers are all cache-version bumps. So the one failure the
+    line exists to report (the whole options service down, no key bumping at all)
+    would freeze it at its last-good "updated HH:MM" forever. The 1 s _tick, which
+    is already running, must recompute it."""
+    import inspect
+    src = inspect.getsource(gamma.render)
+    tick = src[src.index("def _tick("):]
+    tick = tick[:tick.index("\n    @guard_async")]
+    assert "_paint_np_status()" in tick, tick
+    # ...and it must be a pure recompute, not a bus read on a 1 s timer.
+    paint = src[src.index("def _paint_np_status("):]
+    paint = paint[:paint.index("\n    def _render_net_prem(")]
+    assert "bus_client" not in paint and "io_bound" not in paint, paint
+
+
+def test_auto_refresh_skips_the_chain_fetch_on_net_prem():
+    """Net Prem never reads the gamma snapshot, so the 120 s gamma_refresh would
+    cost the options service a full option-chain fetch + GammaEngine compute for
+    a result this view discards."""
+    import inspect
+    src = inspect.getsource(gamma.render)
+    fn = src[src.index("def _auto_refresh("):]
+    fn = fn[:fn.index("\n    @guard\n    def _tick(")]
+    assert 'view_toggle.value == "Net Prem"' in fn, fn
+    # The guard must precede the enqueue, or it does nothing.
+    assert fn.index('"Net Prem"') < fn.index("gamma_refresh"), fn
