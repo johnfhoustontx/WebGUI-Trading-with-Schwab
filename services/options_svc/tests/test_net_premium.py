@@ -1,5 +1,12 @@
-"""Pure group model + series builder for the Dealer Positioning Net Prem view."""
+"""Dealer Positioning "Net Prem" view: the PURE group model + series builder
+(``net_premium``) and the DB-only orchestration that feeds it
+(``compute.build_net_premium``)."""
+import datetime
+
+import pytest
+
 from services.market_svc import symbols as market_symbols
+from services.options_svc import compute
 from services.options_svc import net_premium as np_mod
 
 
@@ -233,3 +240,155 @@ def test_basket_key_in_the_input_is_ignored_not_passed_through():
 def test_basket_key_alone_in_the_input_yields_no_basket():
     out = np_mod.build_series({"BIG10": [_row(1, 999.0, 999.0)]})
     assert out == {}
+
+
+# --- compute.build_net_premium (DB-only orchestration) ------------------------
+
+
+class _FakeGH:
+    """Stands in for gex_history_db: records the symbols asked for."""
+
+    def __init__(self, data, fail_for=()):
+        self.data = data
+        self.fail_for = set(fail_for)
+        self.asked = []
+        self.closed = False
+
+    def connect(self, read_only=False):
+        gh = self
+
+        class _Conn:
+            def close(self):
+                gh.closed = True
+
+        return _Conn()
+
+    def load_flow_series(self, conn, symbol, d=None):
+        self.asked.append(symbol)
+        if symbol in self.fail_for:
+            raise RuntimeError("boom")
+        return self.data.get(symbol, [])
+
+
+@pytest.fixture
+def _pin_session(monkeypatch):
+    """Pin the display session date so RTH bounds are deterministic."""
+    monkeypatch.setattr(compute, "_display_session_date",
+                        lambda now, sd: datetime.date(2026, 8, 5))
+    return datetime.date(2026, 8, 5)
+
+
+def _rth_ts(hour, minute):
+    """Unix ts for a CT wall-clock time on the pinned session date."""
+    return datetime.datetime(2026, 8, 5, hour, minute,
+                             tzinfo=compute._PROJ_CT_TZ).timestamp()
+
+
+def test_build_net_premium_reads_every_source_symbol(monkeypatch, _pin_session):
+    gh = _FakeGH({"SPY": [(_rth_ts(10, 0), 1.0, 0, 0, 10.0, 4.0)]})
+    monkeypatch.setattr(compute, "_matrix_gh", lambda: gh)
+
+    out = compute.build_net_premium(_pin_session)
+
+    assert set(gh.asked) == set(np_mod.source_symbols())
+    assert out["series"]["SPY"] == [[_rth_ts(10, 0), 10.0, 4.0]]
+    assert out["session_date"] == "2026-08-05"
+    assert out["error"] is None
+    assert gh.closed is True
+
+
+def test_build_net_premium_crops_to_rth(monkeypatch, _pin_session):
+    gh = _FakeGH({"SPY": [
+        (_rth_ts(8, 5), 1.0, 0, 0, 1.0, 1.0),    # pre-open — dropped
+        (_rth_ts(10, 0), 1.0, 0, 0, 10.0, 4.0),  # RTH — kept
+        (_rth_ts(15, 10), 1.0, 0, 0, 9.0, 9.0),  # post-close — dropped
+    ]})
+    monkeypatch.setattr(compute, "_matrix_gh", lambda: gh)
+
+    out = compute.build_net_premium(_pin_session)
+    assert [r[0] for r in out["series"]["SPY"]] == [_rth_ts(10, 0)]
+
+
+def test_one_symbol_read_failure_does_not_sink_the_build(monkeypatch, _pin_session):
+    gh = _FakeGH({"SPY": [(_rth_ts(10, 0), 1.0, 0, 0, 10.0, 4.0)]},
+                 fail_for=["XLK"])
+    monkeypatch.setattr(compute, "_matrix_gh", lambda: gh)
+
+    out = compute.build_net_premium(_pin_session)
+    assert "SPY" in out["series"] and "XLK" not in out["series"]
+    assert out["error"] is None
+
+
+def test_db_unavailable_degrades_to_empty_series(monkeypatch, _pin_session):
+    def _boom():
+        raise RuntimeError("no db")
+
+    monkeypatch.setattr(compute, "_matrix_gh", _boom)
+
+    out = compute.build_net_premium(_pin_session)
+    assert out["series"] == {} and out["error"]
+
+
+def test_premium_lands_where_build_series_expects_it():
+    """Pins the positional contract with load_flow_series against a REAL DB.
+
+    ``net_premium._project`` reads premium at tuple indices 4/5. A reordered
+    SELECT in ``gex_history_db.load_flow_series`` would land call_vol/put_vol
+    there instead — contract counts in the thousands where dollars in the
+    millions belong. Both pass the numeric guard, so the chart would render a
+    plausible-looking wrong answer and skew mode a plausible-looking percentage:
+    completely silent. This cannot be pinned in the pure module without
+    circularity (a pure test would only re-read the same index constants), so it
+    lives here, where sqlite3 is already in scope.
+
+    The stored values are deliberately far apart in MAGNITUDE (thousands of
+    contracts vs millions of dollars) so a mis-index fails on VALUE rather than
+    passing by coincidence.
+
+    The second half pins ``sqlite3.Row``: the most ordinary row_factory there is,
+    not a tuple or list, but supported by the positional read. An earlier
+    iteration gated on ``isinstance(row, (tuple, list))`` and silently dropped
+    it — an empty series is indistinguishable from a symbol nobody collects yet.
+
+    Uses an in-memory connection built here, so ``gh.connect()`` (which opens the
+    real ``DB_PATH``) is never called and the live 1.5 GB store is never touched.
+    """
+    import sqlite3
+    import sys
+
+    from repo_paths import OPTIONS_SCANNER
+    if str(OPTIONS_SCANNER) not in sys.path:
+        sys.path.insert(0, str(OPTIONS_SCANNER))
+    import gex_history_db as gh
+
+    session = datetime.date(2026, 8, 5)
+    # A LOCAL-naive 10:00 → the machine's local tz, the same basis
+    # ``gex_history_db._local_unix_range`` uses. Mid-morning by design: that
+    # helper uses the CURRENT fixed UTC offset, so only rows near midnight could
+    # ever land in the wrong day.
+    ts = int(datetime.datetime(2026, 8, 5, 10, 0).timestamp())
+
+    conn = sqlite3.connect(":memory:")
+    try:
+        gh.init_schema(conn)
+        gh.insert_snapshot(conn, "SPY", "gex", {
+            "ts": ts,
+            "spot": 500.0,
+            "call_vol": 7_000,          # contracts — the wrong-index values
+            "put_vol": 8_000,
+            "call_prem": 10_000_000.0,  # dollars — what must be plotted
+            "put_prem": 4_000_000.0,
+        }, {}, 0)
+
+        rows = gh.load_flow_series(conn, "SPY", session)
+        assert rows, "fixture row not readable — check the view/date filter"
+        assert (np_mod.build_series({"SPY": rows})["SPY"]
+                == [[ts, 10_000_000.0, 4_000_000.0]])
+
+        conn.row_factory = sqlite3.Row
+        row_rows = gh.load_flow_series(conn, "SPY", session)
+        assert not isinstance(row_rows[0], (tuple, list))  # the exact trap
+        assert (np_mod.build_series({"SPY": row_rows})["SPY"]
+                == [[ts, 10_000_000.0, 4_000_000.0]])
+    finally:
+        conn.close()

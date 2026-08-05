@@ -2297,6 +2297,72 @@ def build_matrix(scan_day, flow_cooldowns, today, session_date, now_ts):
             "rows": rows, "premium": premium, "error": None}
 
 
+def build_net_premium(session_date, now=None):
+    """Assemble the ``cache:options:net_premium`` payload.
+
+    Intraday net-premium series for every symbol the Dealer Positioning "Net Prem"
+    view can plot (``net_premium.source_symbols()``), RTH-cropped to the displayed
+    session — the same window the heatmap and Flow views use, so the three time
+    axes agree. One reused read-only connection, ALWAYS closed. No proxy calls.
+
+    Rides the 1-min GEX branch, which has ALREADY read these same rows for
+    ``build_matrix``; this is a second cheap indexed read over the same open DB,
+    not new data collection.
+
+    Fully defensive: a DB-connect failure degrades to an empty-series payload with
+    ``error`` set; a per-symbol read failure yields no series for that symbol
+    (the page names it as "no data yet")."""
+    from services.options_svc import net_premium as np_mod
+
+    if now is None:
+        import datetime as _dtmod
+        now = _dtmod.datetime.now(_PROJ_CT_TZ)
+    # The time-axis charts show RTH only, so before the 08:30 open fall back to
+    # the prior session — today has collected rows but none displayable.
+    display_date = _display_session_date(now, session_date)
+    bounds = _rth_bounds(display_date)
+    # ``session_date`` arrives as a ``datetime.date`` OBJECT (the gex_history
+    # readers need ``.year/.month/.day``), but the cached payload's field must be
+    # a JSON-clean string per the NetPremiumSnapshot contract — so normalize for
+    # the payload only and keep the object for the DB reads. Same split as
+    # ``build_matrix``.
+    date_key = (display_date.isoformat()
+                if hasattr(display_date, "isoformat") else display_date)
+
+    try:
+        gh = _matrix_gh()
+        conn = gh.connect(read_only=True)
+    except Exception:
+        log.debug("build_net_premium: DB unavailable", exc_info=True)
+        return {"session_date": date_key, "ts": _now_iso(), "series": {},
+                "error": "net premium unavailable"}
+
+    flow: dict = {}
+    try:
+        for sym in np_mod.source_symbols():
+            try:
+                flow[sym] = _rth_only(
+                    gh.load_flow_series(conn, sym, display_date), bounds)
+            except Exception:
+                log.debug("build_net_premium: read failed for %s", sym,
+                          exc_info=True)
+                flow[sym] = []
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            log.debug("build_net_premium conn close failed", exc_info=True)
+
+    try:
+        series = np_mod.build_series(flow)
+    except Exception:
+        log.debug("build_net_premium: build failed", exc_info=True)
+        return {"session_date": date_key, "ts": _now_iso(), "series": {},
+                "error": "net premium build failed"}
+    return {"session_date": date_key, "ts": _now_iso(), "series": series,
+            "error": None}
+
+
 def build_gamma_read(symbol, spot, gex_summary, charm_summary, dex_summary,
                      vanna_summary, walls, regime):
     """Map the gamma-engine summaries + walls + sentiment → a GammaRead.
