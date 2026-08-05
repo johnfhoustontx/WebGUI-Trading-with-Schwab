@@ -9,6 +9,8 @@ code. The pure figure/transform builders below stay unchanged + unit-tested.
 import inspect
 import json
 
+import pytest
+
 import bus_client
 from pages.options import gamma
 
@@ -893,6 +895,25 @@ def test_net_prem_symbols_is_every_group_member_in_group_order():
     assert syms == flat
 
 
+def test_net_prem_groups_match_the_service():
+    """The page's group table DUPLICATES services/options_svc/net_premium.GROUPS
+    (Tier 1 may not import services.*). The tier rule forbids IMPORTING that
+    module, not READING the file — so parse it and compare, giving the two copies
+    a real pin instead of a one-off manual check. Zero runtime coupling; skips
+    cleanly if the layout ever moves."""
+    import ast
+    import pathlib
+    src = (pathlib.Path(__file__).parents[2]
+           / "services" / "options_svc" / "net_premium.py")
+    if not src.exists():
+        pytest.skip("service module not present")
+    tree = ast.parse(src.read_text(encoding="utf-8"))
+    groups = next(ast.literal_eval(n.value) for n in ast.walk(tree)
+                  if isinstance(n, ast.Assign)
+                  and getattr(n.targets[0], "id", None) == "GROUPS")
+    assert gamma.NET_PREM_GROUPS == groups
+
+
 def test_net_prem_every_group_symbol_has_a_distinct_color():
     syms = gamma.net_prem_symbols()
     colors = [gamma.net_prem_color(s) for s in syms]
@@ -1120,3 +1141,100 @@ def test_net_prem_modes_label_both_axes():
     assert set(gamma.NET_PREM_MODES) == {"dollars", "skew"}
     # An unknown mode degrades to dollars rather than raising.
     assert gamma.net_prem_value([_T1, 3.0e6, 1.0e6], "bogus") == 2.0
+
+
+def test_net_prem_rows_are_sorted_by_timestamp():
+    # Highcharts line data MUST be x-ascending. Losing the sort corrupts the
+    # chart SILENTLY rather than raising, and every other fixture here is already
+    # in order -- so this is the only thing holding it.
+    desc = {"SPY": [[_T3, 5.0e6, 1.0e6], [_T1, 1.0e6, 3.0e6], [_T2, 2.0e6, 2.0e6]]}
+    fig = gamma.net_prem_figure(desc, ["SPY"])
+    assert fig["xAxis"]["categories"] == [gamma._fmt_ts(t) for t in (_T1, _T2, _T3)]
+    data = fig["series"][0]["data"]
+    assert [p[0] for p in data] == [0, 1, 2]
+    assert [p[1] for p in data] == [-2.0, 0.0, 4.0]
+    # ...and "latest" must be the NEWEST point, not the last one listed.
+    assert "+$4.0M" in gamma.net_prem_summary_text(desc, ["SPY"])
+
+
+def test_net_prem_missing_is_mode_aware_and_agrees_with_the_summary():
+    # Parseable rows that draw NO skew line: (0, 0) has no ratio to report. A
+    # mode-blind "missing" would call SPY present while the chart showed nothing.
+    series = {"SPY": [[_T1, 0.0, 0.0]]}
+    assert gamma.net_prem_missing(series, ["SPY"], "dollars") == []
+    assert gamma.net_prem_missing(series, ["SPY"], "skew") == ["SPY"]
+    assert gamma.net_prem_figure(series, ["SPY"], "skew")["series"] == []
+    # ONE definition of missing -- the header cannot contradict the chart.
+    assert "no data yet: SPY" in gamma.net_prem_summary_text(series, ["SPY"], "skew")
+    assert "no data yet" not in gamma.net_prem_summary_text(series, ["SPY"], "dollars")
+
+
+def test_net_prem_summary_adjectives_never_contradict_the_sign():
+    # Whole selection put-led: the top of the range is the LEAST put-led one --
+    # "most call-led SPY -$4.0M" would read as a self-contradiction.
+    down = {"SPY": [[_T1, 1.0e6, 5.0e6]], "QQQ": [[_T1, 1.0e6, 9.0e6]]}
+    txt = gamma.net_prem_summary_text(down, ["SPY", "QQQ"])
+    assert "least put-led SPY -$4.0M" in txt and "most put-led QQQ -$8.0M" in txt
+    assert "most call-led" not in txt
+
+    up = {"SPY": [[_T1, 5.0e6, 1.0e6]], "QQQ": [[_T1, 3.0e6, 1.0e6]]}
+    txt = gamma.net_prem_summary_text(up, ["SPY", "QQQ"])
+    assert "most call-led SPY +$4.0M" in txt and "least call-led QQQ +$2.0M" in txt
+    assert "most put-led" not in txt
+
+    # Straddling zero keeps both plain superlatives.
+    mixed = gamma.net_prem_summary_text(_np_series(), ["QQQ", "SPY"])
+    assert "most call-led QQQ" in mixed and "most put-led SPY" in mixed
+
+
+def test_net_prem_selection_drops_junk_and_unknown_entries():
+    # The selection is PERSISTED to webgui/data/settings.json -- tracked,
+    # hand-editable, no type validation on read -- so it is untrusted input.
+    series = _np_series()
+    for junk in ([123, "SPY"], [None, "SPY"], [{"a": 1}, "SPY"], ["FB", "SPY"]):
+        assert gamma.net_prem_missing(series, junk) == [], junk
+        assert [s["name"] for s in
+                gamma.net_prem_figure(series, junk)["series"]] == ["SPY"], junk
+        # A non-str would raise TypeError at ", ".join(missing) and 500 the page.
+        assert gamma.net_prem_summary_text(series, junk), junk
+    # A stale saved ticker no longer in the groups is dropped too, so a caller's
+    # `key=order.index` sort cannot raise ValueError on it.
+    assert gamma.net_prem_missing(series, ["FB"]) == []
+    assert gamma.net_prem_summary_text(series, ["FB"]).startswith("Select")
+
+
+def test_net_prem_status_text_staleness_boundary_is_two_minutes():
+    import datetime as _dt
+    now = _ct(2026, 8, 5, 11, 0)
+
+    def at(age_sec):
+        payload = {"session_date": "2026-08-05", "series": _np_series(),
+                   "ts": _iso(now - _dt.timedelta(seconds=age_sec)), "error": None}
+        return gamma.net_prem_status_text(payload, now).lower()
+
+    assert "stale" not in at(119)      # inside 2x the 1-min publish cadence
+    assert "stale" in at(121)
+
+
+def test_net_prem_status_text_window_boundaries():
+    payload = {"session_date": "2026-08-05", "series": _np_series(),
+               "ts": _iso(_ct(2026, 8, 5, 5, 0)), "error": None}   # hours stale
+
+    def stale_at(hh, mm):
+        return "stale" in gamma.net_prem_status_text(
+            payload, _ct(2026, 8, 5, hh, mm)).lower()
+
+    assert not stale_at(7, 59)      # before the window opens
+    assert stale_at(8, 0)           # open is INCLUSIVE
+    assert stale_at(15, 19)         # last minute inside
+    assert not stale_at(15, 20)     # close is EXCLUSIVE
+
+
+def test_net_prem_status_text_tolerates_a_naive_now_and_a_non_dict_payload():
+    import datetime as _dt
+    payload = {"session_date": "2026-08-05", "series": _np_series(),
+               "ts": _iso(_ct(2026, 8, 5, 10, 59)), "error": None}
+    assert gamma.net_prem_status_text(payload, _dt.datetime(2026, 8, 5, 16, 0))
+    for junk in ("notadict", [1, 2], 42):
+        assert "never been published" in gamma.net_prem_status_text(
+            junk, _ct(2026, 8, 5, 11, 0)), junk

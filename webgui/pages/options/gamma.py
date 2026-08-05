@@ -962,6 +962,10 @@ def net_prem_symbols():
     return out
 
 
+# Membership set for the selection guard — see _np_selected.
+_NET_PREM_KNOWN = frozenset(net_prem_symbols())
+
+
 def net_prem_color(symbol):
     """The fixed line colour for a symbol; grey for anything unrecognised."""
     return NET_PREM_COLORS.get(symbol, NET_PREM_FALLBACK)
@@ -1044,27 +1048,64 @@ def _np_rows(series, symbol):
 
 
 def _np_selected(symbols):
-    """The selection deduped, in the caller's order (the checkbox order)."""
-    out = []
-    for sym in symbols or ():
-        if sym not in out:
-            out.append(sym)
-    return out
+    """The selection deduped, in the caller's order, restricted to KNOWN symbols.
 
+    The two filters are both load-bearing, because the selection is **persisted**
+    to ``webgui/data/settings.json`` — a tracked, hand-editable file with no type
+    validation on read — so it is untrusted input, not something the checkbox UI
+    fully controls:
 
-def net_prem_missing(series, symbols):
-    """The selected symbols with no usable rows, in selection order.
+    - **non-``str`` entries are dropped**, or a hand-edited ``[123]`` reaches
+      ``", ".join(missing)`` and raises TypeError, 500-ing the whole page;
+    - **unknown symbols are dropped**, so a stale saved ticker (one since removed
+      from ``NET_PREM_GROUPS``) cannot raise ValueError in the caller's
+      ``key=order.index`` sort. It is also unplottable by definition — the groups
+      ARE this view's universe.
 
-    The service OMITS a symbol entirely when it collected nothing, so naming them
-    is the only way the UI can say "no data yet" instead of drawing an invisible
-    line. A present-but-malformed payload counts as missing too: same
-    user-visible outcome — nothing to plot.
+    Guarding here rather than at each use site means every downstream builder can
+    assume the selection is a clean subset of ``net_prem_symbols()``.
     """
     out = []
-    for sym in _np_selected(symbols):
-        if not _np_rows(series, sym):
+    for sym in symbols or ():
+        if isinstance(sym, str) and sym in _NET_PREM_KNOWN and sym not in out:
             out.append(sym)
     return out
+
+
+def _np_latest(series, symbols, mode):
+    """``{symbol: last reportable value}`` over an ALREADY-selected symbol list.
+
+    The single definition of "this symbol has something to show in this mode",
+    shared by ``net_prem_missing`` and ``net_prem_summary_text`` so the header
+    cannot contradict the chart.
+    """
+    out = {}
+    for sym in symbols:
+        for _ts, row in reversed(_np_rows(series, sym)):
+            value = net_prem_value(row, mode)
+            if value is not None:
+                out[sym] = value
+                break
+    return out
+
+
+def net_prem_missing(series, symbols, mode="dollars"):
+    """The selected symbols with nothing to plot in ``mode``, in selection order.
+
+    The service OMITS a symbol entirely when it collected nothing, so naming them
+    is the only way the UI can say "no data yet" instead of leaving the reader to
+    wonder about an absent line. A present-but-malformed payload counts as
+    missing too: same user-visible outcome — nothing to plot.
+
+    **Mode-aware on purpose.** A symbol whose only rows are ``(0, 0)`` has
+    perfectly parseable data yet draws NO line in skew mode (there is no ratio to
+    report), so a mode-blind answer would call it present while the chart showed
+    nothing. "Missing" here means exactly what the chart does.
+    """
+    mode = mode if mode in NET_PREM_MODES else "dollars"
+    picked = _np_selected(symbols)
+    latest = _np_latest(series, picked, mode)
+    return [sym for sym in picked if sym not in latest]
 
 
 def net_prem_figure(series, symbols, mode="dollars", height=680):
@@ -1089,9 +1130,15 @@ def net_prem_figure(series, symbols, mode="dollars", height=680):
 
     plots = []
     for sym in picked:
-        # A point with no value in this mode is SKIPPED, not emitted as None: the
-        # only way that happens is an unreportable skew (nothing traded), which is
-        # a missing observation, not a break in the line.
+        # A point with no value in this mode is SKIPPED, not emitted as None —
+        # and that can never hide an interior gap. The stored premiums are
+        # daily-CUMULATIVE (the service's build_series accumulates nothing
+        # downstream), so call+put is monotonic non-decreasing: once it exceeds 0
+        # it stays there for the rest of the session. An unreportable skew point
+        # is therefore only ever possible in a LEADING run, before anything
+        # traded — skipping trims a meaningless prefix and cannot connect the line
+        # across a hole. A future "optimization" into a running total would break
+        # that invariant, and with it this reasoning.
         data = [[index[ts], value] for ts, row in rows_by[sym]
                 if (value := net_prem_value(row, mode)) is not None]
         if data:
@@ -1133,26 +1180,35 @@ def _np_fmt(value, mode):
     return f"{sign}${abs(value):,.1f}M"
 
 
+def _np_lead_label(value, high):
+    """The adjective for an extreme reading, never contradicting its own sign.
+
+    "most call-led" is nonsense on a NEGATIVE net: when the whole selection is
+    put-led, the top of the range is merely the *least* put-led of them. Reading
+    "most call-led SPY -$4.0M" beside "most put-led QQQ -$8.0M" would look to a
+    trader like the header disagreeing with itself.
+    """
+    if high:
+        return "most call-led" if value >= 0 else "least put-led"
+    return "most put-led" if value < 0 else "least call-led"
+
+
 def net_prem_summary_text(series, symbols, mode="dollars"):
     """One-line header for the Net Prem view: how many symbols are plotted, the
     current extreme on each side, and any selected names with no data yet.
 
     Each symbol's reading is its LAST reportable point, so the line answers
     "where does the money sit right now" rather than describing the whole day.
+    Shares ``net_prem_missing``'s definition of missing, so the header can never
+    name a symbol the chart is actually drawing (or vice versa).
     """
     mode = mode if mode in NET_PREM_MODES else "dollars"
     picked = _np_selected(symbols)
     if not picked:
         return "Select symbols to plot intraday net premium (call $ − put $)."
 
-    latest = {}
-    for sym in picked:
-        for _ts, row in reversed(_np_rows(series, sym)):
-            value = net_prem_value(row, mode)
-            if value is not None:
-                latest[sym] = value
-                break
-    missing = [s for s in picked if s not in latest]
+    latest = _np_latest(series, picked, mode)
+    missing = net_prem_missing(series, picked, mode)
     tail = f" · no data yet: {', '.join(missing)}" if missing else ""
 
     n = len(latest)
@@ -1165,8 +1221,10 @@ def net_prem_summary_text(series, symbols, mode="dollars"):
     if top == bottom:                       # one symbol — no two extremes to name
         parts.append(f"{top} {_np_fmt(latest[top], mode)}")
     else:
-        parts.append(f"most call-led {top} {_np_fmt(latest[top], mode)}")
-        parts.append(f"most put-led {bottom} {_np_fmt(latest[bottom], mode)}")
+        parts.append(f"{_np_lead_label(latest[top], True)} {top} "
+                     f"{_np_fmt(latest[top], mode)}")
+        parts.append(f"{_np_lead_label(latest[bottom], False)} {bottom} "
+                     f"{_np_fmt(latest[bottom], mode)}")
     return " · ".join(parts) + tail
 
 
@@ -1225,7 +1283,9 @@ def net_prem_status_text(payload, now=None):
     testable; the page supplies it.
     """
     import datetime as dt
-    p = payload or {}
+    # isinstance, not `payload or {}`: a non-dict payload would otherwise survive
+    # the guard and blow up on the first .get() — total intent, carried through.
+    p = payload if isinstance(payload, dict) else {}
     if not p:
         return ("Net premium has never been published — is the options service "
                 "running?")
