@@ -1993,3 +1993,166 @@ def test_close_slot_routes_to_eod_briefing(monkeypatch):
     handlers.run_scheduled_gamma_analyze(_Bus(), "close")
     handlers.run_scheduled_gamma_analyze(_Bus(), "midday")
     assert calls == ["eod", "intraday"]
+
+
+# ── Net Prem view: cache:options:net_premium (Task 6) ────────────────────────
+# The publisher rides the 1-min GEX branch right after publish_matrix. Unlike
+# publish_matrix (which caches a RAW dict and only mentions its contract in a
+# comment) this one gates the payload through NetPremiumSnapshot, and — because
+# the publish sits inside a try/except — a gate failure must LOG LOUDLY rather
+# than degrade into a silent no-publish. A silent no-publish would surface in the
+# UI as an empty chart, indistinguishable from "not collected yet", which is the
+# feature's expected steady state for a while after ship.
+
+def test_publish_net_premium_caches_the_view(monkeypatch):
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "build_net_premium",
+                        lambda session_date, **kw: {"series": {"SPY": [[1, 2.0, 1.0]]},
+                                                    "session_date": "2026-08-05",
+                                                    "ts": "t", "error": None})
+
+    sub = bus.subscribe(handlers.EVENT_NET_PREMIUM)
+    handlers.publish_net_premium(bus)
+    msg = sub.get_message(timeout=1.0)
+    sub.close()
+
+    env = bus.cache_get("cache:options:net_premium")
+    assert env is not None
+    assert env.payload["series"]["SPY"] == [[1, 2.0, 1.0]]
+    assert env.payload["session_date"] == "2026-08-05"
+    assert msg is not None and msg.get("version") == env.version
+
+
+def test_publish_net_premium_never_raises(monkeypatch):
+    def _boom(*a, **k):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(handlers.compute, "build_net_premium", _boom)
+    handlers.publish_net_premium(Bus(fake=True))      # must not raise
+
+
+def test_collect_gex_history_publishes_net_premium_guarded(monkeypatch):
+    """A net-premium failure must not break GEX collection or the other publishes."""
+    calls = []
+    monkeypatch.setattr(handlers.compute, "collect_gex_snapshots",
+                        lambda **kw: calls.append("collect"))
+    monkeypatch.setattr(handlers, "publish_flow_skew", lambda bus: None)
+    monkeypatch.setattr(handlers, "run_flow_alerts", lambda bus: None)
+    monkeypatch.setattr(handlers, "publish_matrix", lambda bus: calls.append("matrix"))
+    monkeypatch.setattr(handlers, "_current_gamma_symbol", lambda bus: "$SPX")
+
+    def _boom(bus):
+        calls.append("netprem")
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(handlers, "publish_net_premium", _boom)
+
+    handlers.collect_gex_history(Bus(fake=True))      # must not raise
+
+    assert calls == ["collect", "matrix", "netprem"]
+
+
+def test_collect_gex_history_no_bus_skips_net_premium(monkeypatch):
+    """The legacy bus-less caller collects only — no publish of any kind."""
+    calls = []
+    monkeypatch.setattr(handlers.compute, "collect_gex_snapshots",
+                        lambda **kw: calls.append("collect"))
+    monkeypatch.setattr(handlers, "publish_net_premium",
+                        lambda bus: calls.append("netprem"))
+    handlers.collect_gex_history(bus=None)
+    assert calls == ["collect"]
+
+
+# --- the contract gate must be REAL, and must fail LOUDLY --------------------
+
+def test_publish_net_premium_malformed_payload_logs_and_does_not_cache(monkeypatch,
+                                                                       caplog):
+    """A shape regression must be an OPS SIGNAL, not a silent empty chart.
+
+    ``series`` typed as a str fails NetPremiumSnapshot. The publisher must log an
+    error naming the contract and cache NOTHING (a half-valid payload is worse
+    than none — the page would render a broken chart)."""
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "build_net_premium",
+                        lambda session_date, **kw: {"series": "not-a-dict",
+                                                    "ts": "t", "error": None})
+
+    with caplog.at_level("ERROR"):
+        handlers.publish_net_premium(bus)      # must not raise
+
+    assert bus.cache_get("cache:options:net_premium") is None, "must not cache"
+    assert any("NetPremiumSnapshot" in r.message for r in caplog.records), \
+        "a gate failure must log loudly, naming the contract"
+
+
+def test_publish_net_premium_non_dict_payload_logs_the_contract(monkeypatch, caplog):
+    """Even a wholly non-dict return must land on the contract-naming log, not the
+    generic degrade message (the projection is inside the gate's try for that
+    reason)."""
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "build_net_premium",
+                        lambda session_date, **kw: ["not", "a", "dict"])
+
+    with caplog.at_level("ERROR"):
+        handlers.publish_net_premium(bus)
+
+    assert bus.cache_get("cache:options:net_premium") is None
+    assert any("NetPremiumSnapshot" in r.message for r in caplog.records)
+
+
+def test_publish_net_premium_projects_onto_contract_fields(monkeypatch):
+    """The cached payload is the VALIDATED projection: missing fields get the
+    contract default, engine extras are dropped."""
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "build_net_premium",
+                        lambda session_date, **kw: {"series": {"SPY": []},
+                                                    "debug_rows": 12345})
+
+    handlers.publish_net_premium(bus)
+
+    payload = bus.cache_get("cache:options:net_premium").payload
+    assert set(payload) == {"session_date", "ts", "series", "error"}
+    assert payload["session_date"] is None and payload["error"] is None
+
+
+# --- wiring: a real date object, and ONE clock read --------------------------
+
+def test_publish_net_premium_passes_a_real_date_object(monkeypatch):
+    """build_net_premium raises TypeError on a string session_date by design, so
+    the handler must hand it scheduler.active_session_date()'s date OBJECT."""
+    import datetime as _dt
+    seen = {}
+
+    def _capture(session_date, **kw):
+        seen["session_date"] = session_date
+        return {"series": {}, "ts": "t", "error": None}
+
+    monkeypatch.setattr(handlers.compute, "build_net_premium", _capture)
+    handlers.publish_net_premium(Bus(fake=True))
+
+    assert isinstance(seen["session_date"], _dt.date)
+    assert not isinstance(seen["session_date"], str)
+
+
+def test_publish_net_premium_reads_the_clock_once(monkeypatch):
+    """The 08:00/08:30 boundary reasoning only holds if active_session_date and
+    build_net_premium see the SAME instant — so ``now`` is read once and passed
+    to both (mirrors compute.gamma_snapshot)."""
+    from services.options_svc import scheduler
+    import datetime as _dt
+    seen = {}
+
+    def _capture_session(now=None):
+        seen["session_now"] = now
+        return _dt.date(2026, 8, 5)
+
+    def _capture_build(session_date, now=None):
+        seen["build_now"] = now
+        return {"series": {}, "ts": "t", "error": None}
+
+    monkeypatch.setattr(scheduler, "active_session_date", _capture_session)
+    monkeypatch.setattr(handlers.compute, "build_net_premium", _capture_build)
+    handlers.publish_net_premium(Bus(fake=True))
+
+    assert seen["session_now"] is not None, "active_session_date must be given now"
+    assert seen["build_now"] is seen["session_now"], "one clock read, passed to both"

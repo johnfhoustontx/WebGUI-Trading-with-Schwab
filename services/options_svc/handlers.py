@@ -21,7 +21,7 @@ from services.options_svc import compute
 from services.options_svc import flow_alerts
 from services.options_svc import push_notify
 from shared.notify.channels import _today_ct
-from shared.contracts.options import ScanResult
+from shared.contracts.options import NetPremiumSnapshot, ScanResult
 
 log = logging.getLogger(__name__)
 
@@ -230,6 +230,13 @@ EVENT_FLOW_SKEW = "events:options:flow_skew"
 # unchanged matrix doesn't wake GUI version-pollers.
 CACHE_MATRIX = "cache:options:matrix"
 EVENT_MATRIX = "events:options:matrix"
+
+# Net Prem — intraday net options premium per symbol for the Dealer Positioning
+# "Net Prem" view. Published on each 1-min GEX tick right after the matrix, over
+# the rows collect_gex_snapshots just wrote. Its own read (NOT a slice of the
+# matrix's) — see publish_net_premium's docstring for why they cannot share.
+CACHE_NET_PREMIUM = "cache:options:net_premium"
+EVENT_NET_PREMIUM = "events:options:net_premium"
 
 # Options-flow alerts (premium crossover + unusual call/put activity). Detected on
 # each 1-min GEX tick over the collected universe, pushed to the phone (best-effort),
@@ -709,10 +716,12 @@ def collect_gex_history(bus=None) -> None:
     refreshers. Guarded by the caller; ``compute.collect_gex_snapshots`` is
     itself defensive (per-symbol failures are logged, not raised).
 
-    After collection, publishes the per-index flow-skew view
-    (``cache:options:flow_skew``) so it rides the SAME 1-min tick that just wrote
-    the rows. That publish is best-effort — a failure must never affect the
-    collection that already succeeded (and ``bus`` is None for legacy callers).
+    After collection, publishes the views built FROM the rows just written, so they
+    ride the SAME 1-min tick: flow-skew (``cache:options:flow_skew``), the flow
+    alerts, the Options Matrix (``cache:options:matrix``) and the Net Prem series
+    (``cache:options:net_premium``). Each is its own best-effort block — a failure
+    must never affect the collection that already succeeded, nor the sibling
+    publishes (and ``bus`` is None for legacy callers, which skip all of them).
 
     The currently-viewed gamma symbol's chain is CAPTURED during the poll (see
     ``compute.collect_gex_snapshots(capture_symbols=…)``) so the same tick's
@@ -732,6 +741,10 @@ def collect_gex_history(bus=None) -> None:
             publish_matrix(bus)
         except Exception:
             log.exception("publish_matrix after collect degraded")
+        try:
+            publish_net_premium(bus)
+        except Exception:
+            log.exception("publish_net_premium after collect degraded")
 
 
 def publish_flow_skew(bus) -> None:
@@ -782,6 +795,75 @@ def publish_matrix(bus) -> None:
         bus.cache_set(CACHE_MATRIX, view, event=EVENT_MATRIX, skip_unchanged=True)
     except Exception:
         log.exception("publish_matrix degraded")
+
+
+# The fields NetPremiumSnapshot validates — the payload is projected onto exactly
+# these (mirrors _SCAN_DEFAULTS), so an engine extra can never reach the cache and
+# the page can never grow a dependence on an unvalidated field.
+_NET_PREMIUM_DEFAULTS = {
+    "session_date": None,
+    "ts": None,
+    "series": {},
+    "error": None,
+}
+
+
+def publish_net_premium(bus) -> None:
+    """Assemble the Net Prem view and publish it to the bus.
+
+    Rides the 1-min GEX tick right after ``publish_matrix``, over the rows
+    ``collect_gex_snapshots`` just wrote. ``compute.build_net_premium`` is fully
+    defensive about DATA (a DB failure degrades to an empty-series payload with
+    ``error`` set). Guarded so a net-premium failure never escapes into the caller
+    — the collection and the earlier publishes must be unaffected.
+
+    **Its own DB read, deliberately.** ``net_premium.source_symbols()`` is a strict
+    subset of ``compute._matrix_symbols()`` and ``build_matrix`` has just read the
+    same six flow columns for all of them, so it is tempting to hand those rows
+    over instead. Two reasons not to. (1) They are not the same rows: matrix reads
+    ``session_date`` while net premium reads ``_display_session_date(now, …)``, and
+    between the 08:00 collection start and the 08:30 RTH open those DIFFER by a
+    day — sharing would silently plot the wrong session in exactly the window this
+    view is most fragile in. (2) Independence: a matrix build failure returns early
+    with ``error`` and no rows, which would then take this view down with it. The
+    duplicated read is six narrow columns over an indexed range (no grid blob) for
+    28 symbols — cheap enough that correctness and isolation win.
+
+    **No ``skip_unchanged``** (unlike ``publish_matrix``): the payload carries a
+    fresh ``ts`` from every build, so the comparison could never match — it would
+    only add a full cache read plus a deep compare of a many-thousand-point series
+    on every tick of a branch that has historically dropped slots under load. The
+    series also genuinely gains a row each minute inside the collection window, so
+    there is nothing to suppress.
+
+    A payload that fails the ``NetPremiumSnapshot`` gate is logged as an ERROR
+    naming the contract and NOT cached. That loudness is the point: this publish
+    sits inside a try/except, so a quiet skip would reach the user as an empty
+    chart — indistinguishable from "not collected yet", which is the honest state
+    of several of these series for a while after ship."""
+    try:
+        # scheduler imports handlers at its module top, so import it lazily here to
+        # avoid a module-top import cycle.
+        from services.options_svc import scheduler
+        # ONE clock read, threaded into both consumers (mirrors compute.gamma_snapshot):
+        # active_session_date and build_net_premium's RTH crop straddle the 08:00 and
+        # 08:30 boundaries, and reasoning about those is only sound if they agree on
+        # the instant. active_session_date returns a datetime.date OBJECT — pass it
+        # through untouched; build_net_premium raises TypeError on a string by design.
+        now = scheduler._market_now()
+        view = compute.build_net_premium(scheduler.active_session_date(now), now=now)
+        try:
+            snap = NetPremiumSnapshot(**{k: view.get(k, default)
+                                         for k, default in _NET_PREMIUM_DEFAULTS.items()})
+        except Exception:
+            # The projection lives INSIDE this try so a wholly non-dict return lands
+            # here too, rather than on the generic degrade message below.
+            log.exception("net-premium payload failed the NetPremiumSnapshot gate "
+                          "— NOT publishing (shape regression)")
+            return
+        bus.cache_set(CACHE_NET_PREMIUM, snap.model_dump(), event=EVENT_NET_PREMIUM)
+    except Exception:
+        log.exception("publish_net_premium degraded")
 
 
 def _flow_alert_symbols():
