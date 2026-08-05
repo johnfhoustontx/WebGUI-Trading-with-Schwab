@@ -62,9 +62,9 @@ accelerate price.
 
 - **Symbol dropdown** — pick the index or stock. The page **remembers** your last
   symbol when you come back, and switching symbols refreshes automatically.
-- **GEX / Charm / DEX / Vanna / Flow / Term** — the small tabs at the very top
-  (under the page tabs): different lenses on dealer positioning; the **walls**
-  mark likely support/resistance.
+- **GEX / Charm / DEX / Vanna / Flow / Net Prem / Term** — the small tabs at the
+  very top (under the page tabs): different lenses on dealer positioning; the
+  **walls** mark likely support/resistance.
 - **Bars + heat map** — show ±20 strikes around spot, so the size stays steady as
   the day moves. **Press and hold** the left mouse button on the heat map to read a
   strike's value (it follows the cursor while held); plain hovering shows nothing.
@@ -72,6 +72,20 @@ accelerate price.
   moves get **amplified**. Auto-refreshes every 2 minutes.
 - After the close the **last session's** chart stays on screen until midnight
   (Friday's holds through the weekend), then clears for the next trading day.
+- **Net Prem** — the one tab that shows **many symbols at once**: the day's net
+  options premium (call dollars **minus** put dollars) as one line per name,
+  from a menu of 28. The group tabs (**Indices & Broad**, **SPDR Sectors**,
+  **Mega-caps**) only filter the tick-boxes — your picks **stay selected** when
+  you switch groups, so you can plot `$SPX` next to `XLK`. Each symbol keeps the
+  same colour whatever else is on the chart.
+- **Dollars ($M) / Skew %** — the sizes are wildly apart (SPY can run hundreds of
+  millions on a day DIA barely reaches one), so **Dollars** shows the real money
+  and **Skew %** rescales each line to net as a share of that symbol's own
+  premium — use it to compare a big name and a small one side by side. Premium is
+  **unsigned cumulative traded dollars** (Schwab serves no time-&-sales tape), so
+  this is a **money-weighted put/call read, NOT net buying**. Group, ticks and
+  scale are remembered. Sector history starts the day this shipped, so those
+  lines fill in from here on.
 - **Analyze** asks Claude to read the live $SPX / SPY / QQQ dealer positioning and
   opens an **infographic** in a new tab — a regime + bias gauge, a price-level
   ladder + key levels per index, a per-symbol **what-if** (rally / sell-off / chop),
