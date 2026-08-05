@@ -34,7 +34,17 @@ TZ = ZoneInfo("America/Chicago")
 # collection_symbols() dedupes, so on a machine with the watchlist the universe is
 # byte-identical (verified: 82 symbols before and after) and no extra chain is
 # fetched.
-SYMBOLS = ["$SPX", "$VIX", "SPY", "QQQ", "$NDX"]
+# Same reasoning extended to the Dealer Positioning "Net Prem" view: everything
+# that view groups lives HERE rather than being left to the watchlist, so an edit
+# to that gitignored workbook can't silently empty a named group in the UI.
+SYMBOLS = [
+    "$SPX", "$VIX", "SPY", "QQQ", "$NDX", "IWM", "DIA",
+    # SPDR sectors — NEW 2026-08-05. These were collected by nothing before, so
+    # they are the only genuinely additional fetches here (~+11/poll).
+    "XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU", "XLV", "XLY",
+    # BIG10 mega-caps (also the Net Prem "Mega-caps" group).
+    "NVDA", "MSFT", "GOOGL", "AMZN", "META", "AAPL", "TSLA", "AVGO", "PLTR", "AMD",
+]
 POLL_INTERVAL_MIN = 1
 START_HOUR, START_MIN = 8, 0
 STOP_HOUR, STOP_MIN = 15, 20

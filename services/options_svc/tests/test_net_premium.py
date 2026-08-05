@@ -52,3 +52,15 @@ def test_source_symbols_drop_baskets_and_add_their_members():
     # group entries, so the source set is exactly the display set less BIG10.
     assert set(out) == set(np_mod.display_symbols()) - {"BIG10"}
     assert len(out) == len(set(out))   # deduped
+
+
+def test_every_source_symbol_is_actually_collected():
+    """Drift guard: a group symbol that isn't in the GEX collection universe has
+    no premium history, so its line would be permanently empty. gex_collector is
+    reachable because importing compute puts OPTIONS_SCANNER on sys.path."""
+    from services.options_svc import compute  # noqa: F401  (sys.path side effect)
+    import gex_collector
+
+    collected = set(gex_collector.collection_symbols())
+    missing = [s for s in np_mod.source_symbols() if s not in collected]
+    assert not missing, f"not collected: {missing}"
