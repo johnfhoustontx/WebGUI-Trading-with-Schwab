@@ -895,23 +895,52 @@ def test_net_prem_symbols_is_every_group_member_in_group_order():
     assert syms == flat
 
 
-def test_net_prem_groups_match_the_service():
-    """The page's group table DUPLICATES services/options_svc/net_premium.GROUPS
-    (Tier 1 may not import services.*). The tier rule forbids IMPORTING that
-    module, not READING the file — so parse it and compare, giving the two copies
-    a real pin instead of a one-off manual check. Zero runtime coupling; skips
-    cleanly if the layout ever moves."""
+def _service_consts(module, *names):
+    """Module-level constants read out of a Tier-2 file WITHOUT importing it.
+
+    The Net Prem view duplicates two things across the tier boundary because the
+    webgui may not import ``services.*``. The tier rule forbids IMPORTING that
+    code, not READING the file — so parse it and compare, giving each duplicated
+    table a real pin instead of a reviewer's one-off check. Zero runtime coupling;
+    the tests skip cleanly if the service layout ever moves.
+    """
     import ast
     import pathlib
-    src = (pathlib.Path(__file__).parents[2]
-           / "services" / "options_svc" / "net_premium.py")
+    src = pathlib.Path(__file__).parents[2] / "services" / "options_svc" / module
     if not src.exists():
-        pytest.skip("service module not present")
+        pytest.skip(f"service module not present: {module}")
     tree = ast.parse(src.read_text(encoding="utf-8"))
-    groups = next(ast.literal_eval(n.value) for n in ast.walk(tree)
-                  if isinstance(n, ast.Assign)
-                  and getattr(n.targets[0], "id", None) == "GROUPS")
+    found = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        for target in node.targets:
+            if getattr(target, "id", None) in names:
+                found[target.id] = ast.literal_eval(node.value)
+    missing = [n for n in names if n not in found]
+    if missing:
+        pytest.skip(f"{module} no longer defines {', '.join(missing)}")
+    return found
+
+
+def test_net_prem_groups_match_the_service():
+    groups = _service_consts("net_premium.py", "GROUPS")["GROUPS"]
     assert gamma.NET_PREM_GROUPS == groups
+
+
+def test_net_prem_collection_window_matches_the_scheduler():
+    """The staleness gate's window duplicates the scheduler's GEX collection
+    window, and only agreement makes the gate honest.
+
+    If the service window ever NARROWS, the page raises a daily false STALE —
+    exactly the cry-wolf outcome net_prem_status_text exists to avoid, which
+    would poison the one diagnostic this view adds. If it WIDENS, the page goes
+    blind during the extra minutes instead. The GEX start has already moved once
+    (08:30 -> 08:00), so this is a live risk, not a hypothetical.
+    """
+    svc = _service_consts("scheduler.py", "_GEX_START", "_GEX_STOP")
+    assert gamma._NP_WINDOW_OPEN == svc["_GEX_START"]
+    assert gamma._NP_WINDOW_CLOSE == svc["_GEX_STOP"]
 
 
 def test_net_prem_every_group_symbol_has_a_distinct_color():
@@ -1119,7 +1148,10 @@ def test_net_prem_status_text_normal_publish_reports_the_symbol_count():
     payload = {"session_date": "2026-08-05", "ts": _iso(_ct(2026, 8, 5, 10, 59)),
                "series": _np_series(), "error": None}
     txt = gamma.net_prem_status_text(payload, now)
-    assert "2 symbols" in txt and "2026-08-05" in txt and "stale" not in txt.lower()
+    # "collected", not "symbols": the summary line beside this one counts the
+    # SELECTION ("N symbols plotted"), so the two must not look like one number.
+    assert "2 collected" in txt
+    assert "2026-08-05" in txt and "stale" not in txt.lower()
 
 
 def test_net_prem_status_text_renders_the_service_error_verbatim():

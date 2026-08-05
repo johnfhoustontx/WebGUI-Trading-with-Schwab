@@ -1287,8 +1287,10 @@ def net_prem_status_text(payload, now=None):
     # the guard and blow up on the first .get() — total intent, carried through.
     p = payload if isinstance(payload, dict) else {}
     if not p:
-        return ("Net premium has never been published — is the options service "
-                "running?")
+        # Neutral about the cause: an absent key means EITHER the options service
+        # never published OR Memurai is down, and this branch cannot tell which.
+        return ("Net premium has never been published — check the options "
+                "service and Memurai on /status")
 
     now = now or dt.datetime.now(dt.timezone.utc)
     if now.tzinfo is None:                       # never crash on a naive caller
@@ -1301,7 +1303,10 @@ def net_prem_status_text(payload, now=None):
     parts = []
     if p.get("session_date"):
         parts.append(f"session {p['session_date']}")
-    parts.append(f"{n} symbol{'' if n == 1 else 's'}")
+    # "collected", not a bare count: the summary line beside this one says
+    # "N symbols plotted" (the SELECTION), so an unqualified "27 symbols" here
+    # reads as a contradiction rather than as the published universe.
+    parts.append(f"{n} collected")
     if when is not None:
         parts.append("updated "
                      + when.astimezone(_NP_CT).strftime("%I:%M %p").lstrip("0"))
