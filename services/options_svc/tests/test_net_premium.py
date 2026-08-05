@@ -54,13 +54,26 @@ def test_source_symbols_drop_baskets_and_add_their_members():
     assert len(out) == len(set(out))   # deduped
 
 
-def test_every_source_symbol_is_actually_collected():
-    """Drift guard: a group symbol that isn't in the GEX collection universe has
-    no premium history, so its line would be permanently empty. gex_collector is
-    reachable because importing compute puts OPTIONS_SCANNER on sys.path."""
-    from services.options_svc import compute  # noqa: F401  (sys.path side effect)
+def test_every_source_symbol_is_in_the_static_collection_base():
+    """Drift guard: a group symbol that isn't collected has no premium history,
+    so its line would be permanently empty.
+
+    Asserts against the STATIC ``SYMBOLS`` base, deliberately NOT against
+    ``collection_symbols()`` (= base ∪ ``Top 20.xlsx``). That union is the weaker
+    claim and it fails open on exactly the machine this guard protects: the
+    workbook is GITIGNORED, and it already happens to carry IWM, DIA and all ten
+    mega-caps. So a union-based assertion stays GREEN on the dev box while a
+    fresh clone silently loses those twelve lines — the regression would surface
+    only for whoever clones next. ``SYMBOLS ⊆ collection_symbols()`` always, so
+    this is strictly stronger, and it pins the actual design intent: every symbol
+    a named UI group renders must be collected independently of that workbook."""
+    import sys
+
+    from repo_paths import OPTIONS_SCANNER
+    if str(OPTIONS_SCANNER) not in sys.path:
+        sys.path.insert(0, str(OPTIONS_SCANNER))
     import gex_collector
 
-    collected = set(gex_collector.collection_symbols())
-    missing = [s for s in np_mod.source_symbols() if s not in collected]
-    assert not missing, f"not collected: {missing}"
+    missing = [s for s in np_mod.source_symbols()
+               if s not in set(gex_collector.SYMBOLS)]
+    assert not missing, f"not in gex_collector.SYMBOLS: {missing}"

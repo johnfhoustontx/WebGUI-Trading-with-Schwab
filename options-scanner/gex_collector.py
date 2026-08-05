@@ -26,21 +26,41 @@ import gex_history_db as db
 import iv_analysis
 
 TZ = ZoneInfo("America/Chicago")
-# $NDX is in the BASE, not left to the watchlist. It was already being collected
-# — but only because it happens to sit in `Top 20.xlsx`, which is GITIGNORED. Drop
-# that row (or clone fresh) and the universe falls back to four symbols, at which
-# point tools/nq_hud.py silently degrades to its QQQ proxy, whose structural
-# call-overwriting flow can invert the apparent gamma sign. Costs nothing here:
-# collection_symbols() dedupes, so on a machine with the watchlist the universe is
-# byte-identical (verified: 82 symbols before and after) and no extra chain is
-# fetched.
-# Same reasoning extended to the Dealer Positioning "Net Prem" view: everything
-# that view groups lives HERE rather than being left to the watchlist, so an edit
-# to that gitignored workbook can't silently empty a named group in the UI.
+# POLICY: every symbol a named UI surface renders lives in this STATIC base, not
+# in `Top 20.xlsx`. That workbook is GITIGNORED, so anything load-bearing left to
+# it works on this box and silently degrades on a fresh clone (or the moment
+# someone edits a row). Two surfaces depend on that guarantee:
+#
+#   $NDX      — tools/nq_hud.py. It was already collected, but only because it
+#               happens to sit in the workbook; without it the HUD degrades to
+#               its QQQ proxy, whose structural call-overwriting flow can invert
+#               the apparent gamma sign. (When $NDX was added the universe was 82
+#               symbols before and after — it was already in the workbook, so
+#               that particular change fetched no extra chains.)
+#   Net Prem  — the Dealer Positioning group view (services/options_svc/
+#               net_premium.py). A symbol it groups but nobody collects has no
+#               premium history, so it renders as a permanently empty line.
+#               test_net_premium.py pins this against SYMBOLS, not against
+#               collection_symbols(), for exactly the fail-open reason above.
+#
+# COST of the 2026-08-05 Net Prem additions, which is NOT uniform — state both:
+# the 11 SPDR sectors were collected by nothing, while IWM/DIA and the ten
+# mega-caps merely happen to be in this box's workbook already. So
+# collection_symbols() goes 82 -> 93 (+11) WITH the workbook, but 5 -> 28 (+23)
+# on a fresh clone. Over the 440-min 1-min-poll window that is ~4.8k extra
+# /chains calls/day here, ~10.1k on a clone — quote BOTH, never just the local
+# one; which number applies depends on a file you cannot see in git.
+# Two further costs are easy to miss: poll_once's pool overlaps the FETCH only
+# (see its docstring on historically dropping ~37% of 1-min slots), so each added
+# symbol also costs a SERIAL engine calc + SQLite insert inside the 60s budget;
+# and each writes one gex_history.db row per poll, on a DB that has already
+# needed a manual ~1 GB VACUUM.
 SYMBOLS = [
-    "$SPX", "$VIX", "SPY", "QQQ", "$NDX", "IWM", "DIA",
-    # SPDR sectors — NEW 2026-08-05. These were collected by nothing before, so
-    # they are the only genuinely additional fetches here (~+11/poll).
+    "$SPX", "$VIX", "SPY", "QQQ", "$NDX",
+    # Everything below — NEW 2026-08-05, added for the Net Prem view.
+    # Broad ETFs and mega-caps are usually in the workbook already (so typically
+    # no extra fetch); the SPDR sectors are the genuinely new collection.
+    "IWM", "DIA",
     "XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU", "XLV", "XLY",
     # BIG10 mega-caps (also the Net Prem "Mega-caps" group).
     "NVDA", "MSFT", "GOOGL", "AMZN", "META", "AAPL", "TSLA", "AVGO", "PLTR", "AMD",
