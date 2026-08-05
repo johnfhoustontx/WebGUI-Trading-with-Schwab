@@ -111,3 +111,18 @@ class MatrixSnapshot(_Base):
     rows: list[dict] = []              # heterogeneous per-symbol row dicts (see matrix.build_rows)
     premium: dict | None = None        # dollar-weighted net-premium skew (see matrix.market_premium_aggregate)
     error: str | None = None
+
+
+class NetPremiumSnapshot(_Base):
+    """cache:options:net_premium — intraday net-premium series per symbol for the
+    Dealer Positioning "Net Prem" view.
+
+    ``series`` maps a display symbol (including the composite ``BIG10``) to
+    ``[[ts, call_prem, put_prem], …]``, RTH-cropped, for ``session_date``. Like
+    the other view models this validates only the envelope shape. Every field
+    carries a default so a payload cached before a field existed still validates.
+    """
+    session_date: str | None = None    # gex session date the series cover
+    ts: str | None = None
+    series: dict = {}                  # {symbol: [[ts, call_prem, put_prem], …]}
+    error: str | None = None

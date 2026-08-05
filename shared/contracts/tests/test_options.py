@@ -48,3 +48,23 @@ def test_matrix_snapshot_roundtrip_and_defaults():
     assert MatrixSnapshot().error is None
     dumped = m.to_json()
     assert MatrixSnapshot.from_json(dumped).rows == m.rows
+
+
+def test_net_premium_snapshot_validates_envelope():
+    from shared.contracts.options import NetPremiumSnapshot
+
+    snap = NetPremiumSnapshot(
+        session_date="2026-08-05",
+        series={"SPY": [[1, 10.0, 4.0]]},
+    )
+    assert snap.series["SPY"][0][2] == 4.0
+    assert snap.error is None
+
+
+def test_net_premium_snapshot_defaults_every_field():
+    """A payload cached before a field existed must still validate — Redis keeps
+    cache:options:net_premium across a service restart."""
+    from shared.contracts.options import NetPremiumSnapshot
+
+    snap = NetPremiumSnapshot()
+    assert snap.series == {} and snap.session_date is None
