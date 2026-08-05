@@ -88,8 +88,16 @@ def test_every_source_symbol_is_in_the_static_collection_base():
 
 
 def _row(ts, call, put):
-    """A gex_history flow row: (ts, spot, call_vol, put_vol, call_prem, put_prem)."""
-    return (ts, 100.0, 0, 0, call, put)
+    """A gex_history flow row: (ts, spot, call_vol, put_vol, call_prem, put_prem).
+
+    The volume slots carry DISTINCT non-zero sentinels (7, 8) on purpose. They are
+    never read, but they sit immediately before the premium columns, so if the
+    parser ever read 2/3 instead of 4/5 these values make every test in this file
+    fail on a wrong VALUE. Zeroes there would make the tests pass-by-luck: the row
+    would look premium-less and get dropped, so the suite would go red for the
+    wrong reason and stay silent about the real hazard (contract counts read as
+    dollars)."""
+    return (ts, 100.0, 7, 8, call, put)
 
 
 def test_build_series_projects_ts_call_put():
@@ -148,6 +156,27 @@ def test_dict_shaped_rows_are_skipped_not_raised_on():
     out = np_mod.build_series({"SPY": [{"ts": 1, "call_prem": 9.0},
                                        _row(2, 1.0, 1.0)]})
     assert out["SPY"] == [[2, 1.0, 1.0]]
+
+
+def test_sqlite3_row_shaped_rows_still_parse():
+    """``sqlite3.Row`` is the most ordinary row_factory there is, and it is NOT a
+    tuple or list — but it has ``len()`` and positional indexing, and every other
+    parser of these rows handles it. An isinstance-based gate would make this
+    module the sole silent casualty of someone setting that factory upstream,
+    failing in the worst mode: an empty series looks exactly like a symbol that
+    isn't collected yet."""
+    import sqlite3
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    row = conn.execute(
+        "SELECT 1 AS ts, 100.0 AS spot, 7 AS call_vol, 8 AS put_vol,"
+        "       10.0 AS call_prem, 4.0 AS put_prem"
+    ).fetchone()
+    conn.close()
+
+    assert not isinstance(row, (tuple, list))   # the exact trap being guarded
+    assert np_mod.build_series({"SPY": [row]})["SPY"] == [[1, 10.0, 4.0]]
 
 
 def test_truncated_rows_are_skipped():

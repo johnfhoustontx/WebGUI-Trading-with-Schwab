@@ -93,16 +93,21 @@ def _project(rows):
     downstream: skew mode treats a genuine (0, 0) as unreportable while dollars
     mode plots it as zero.
 
-    Anything that is not a 6+-field sequence (``None``, a dict from a
-    ``row_factory``, a truncated tuple) is skipped, not raised on — the same LBYL
-    shape as the sibling parser ``flow_alerts._norm``."""
+    Unreadable rows are skipped, not raised on. Reading positionally and
+    catching is deliberate rather than an ``isinstance`` gate: it accepts
+    anything that indexes like the query's row — ``tuple``, ``list`` and
+    ``sqlite3.Row`` alike — while still skipping ``None``, truncated rows, and
+    the mappings a ``dict``-style ``row_factory`` would hand back. A type gate
+    would drop ``sqlite3.Row`` (the most ordinary factory there is) silently, and
+    an empty series is indistinguishable from a symbol nobody collects yet."""
     out = []
     for row in rows or []:
-        if not isinstance(row, (tuple, list)) or len(row) < 6:
+        try:
+            ts = _num(row[_IDX_TS])
+            call = _num(row[_IDX_CALL_PREM])
+            put = _num(row[_IDX_PUT_PREM])
+        except (TypeError, IndexError, KeyError):   # None / truncated / mapping
             continue
-        ts = _num(row[_IDX_TS])
-        call = _num(row[_IDX_CALL_PREM])
-        put = _num(row[_IDX_PUT_PREM])
         if ts is None or (call is None and put is None):
             continue
         out.append([ts,
