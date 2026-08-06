@@ -9,7 +9,7 @@ min_premium = 10000     # skip crossover until the larger side clears this ($) �
 [uoa]
 k = 3.0                 # flag when volume >= k x open interest
 vol_floor = 500         # min contract volume
-premium_floor = 1000000 # min $ premium (mark x vol x 100) — $1M+, real money only
+premium_floor = 5000000 # min $ premium (mark x vol x 100) — $5M+, real money only
 top_n = 3               # most-significant contracts per symbol per tick (by premium)
 
 [gamma_flip]
