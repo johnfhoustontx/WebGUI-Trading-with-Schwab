@@ -8,7 +8,36 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-08-05 (**Dealer Positioning — "Net Prem" subtab: intraday net options
+**Last updated:** 2026-08-05 (**Projected EOD delta-flip line + a CORRECTED projection**: the Gamma
+heatmap gains a dashed amber **"Proj. flip"** level on **all four views** — where the DEX curve crosses
+zero once the 0-DTE book's deltas are advanced to the 15:00 CT close by **charm** at flat spot. It is a
+0-DTE DELTA concept, not each view's own metric, so it is computed ONCE (`compute.gamma_snapshot` →
+`projected_flip`) and drawn everywhere as a shared reference; the gap between it and the actual flip IS
+the hedging drift, expressed in price. **`None` whenever the nearest expiry isn't today** — i.e. most
+symbols, most of the time — in which case no line is drawn.
+**The engine calculation had to be fixed first, and that is the part worth remembering.**
+`gamma_tool.compute_projected_flip` spread the TOTAL `hedge_pressure` evenly across every strike
+(`hedge / n`). Charm drift is NOT uniform — it concentrates in near-the-money 0-DTE strikes — so
+averaging it over the whole chain (including deep wings holding no 0-DTE interest) lifted the entire
+curve: measured on live `$SPX`, it erased **56 of 57 negative strikes** and moved the crossing to
+**~9,600 with spot at 7,791**. New `gamma_tool.project_0dte_drift_by_strike(contracts, spot,
+hours_to_close)` attributes each contract's drift to ITS OWN strike (`OI × (delta_proj − delta) × 100 ×
+spot`, the same clamped charm projection `project_0dte_pressure` uses, so the TOTAL is unchanged — a
+REDISTRIBUTION, not a new number); `calc_dex_from_chain` + `calc_all_from_chain` expose it as
+**`hedge_drift_by_strike`** and `compute_projected_flip` now consumes it. It deliberately **does NOT fall
+back** to the flat average — without a per-strike map there is no honest projection, so it returns None.
+**This also fixes the Gamma briefings**, which were being fed the old numbers via `build_analysis_dict`.
+Two tests that encoded the flat-average contract were updated (intent preserved).
+**Collection for a future history track:** `hedge_pressure` / `net_delta_0dte` /
+`projected_net_delta_close` were **already being stored** (52,808 rows since 2026-07-30, `dex` rows only —
+only 0-DTE names such as `$SPX`/`$NDX`/`SPY`/`QQQ`/`IWM`/`AMD` ever populate them), so a hedge-pressure
+time series is available **RETROACTIVELY**. The per-strike drift map is grid-sized and deliberately NOT
+stored; instead the resulting level is persisted as one new REAL column **`projected_flip`** (idempotent
+ALTER, forward-only) so a projected-flip track is possible later. **Restart `options_svc` + the webgui.**
+options-scanner **1303 passed / 17 documented-baseline fails**; options_svc **914** (+2 documented
+`test_expected_move`); webgui **1046** green. Live-verified: the amber line renders on all four views,
+and is correctly absent off-hours when there is no 0-DTE book.
+Prior — 2026-08-05 (**Dealer Positioning — "Net Prem" subtab: intraday net options
 premium across 28 symbols, in three groups**: a new view on `/options/gamma`, **between Flow and
 Term** (they are the two options-FLOW lenses — Flow is one symbol's call/put premium over the
 session, Net Prem is the NET of that across many symbols at once — so a reader comparing them

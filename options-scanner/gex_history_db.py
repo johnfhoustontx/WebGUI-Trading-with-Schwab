@@ -166,6 +166,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
         ("call_prem", "REAL"),
         ("put_prem", "REAL"),
         ("atm_iv", "REAL"),
+        ("projected_flip", "REAL"),
     ):
         if col not in existing:
             conn.execute(f"ALTER TABLE snapshots ADD COLUMN {col} {col_type}")
@@ -259,8 +260,9 @@ def insert_snapshot(
             (symbol, view, ts, spot, flip, top_pos_strike,
              top_neg_strike, net_total, dte, gex_json,
              net_delta_0dte, projected_net_delta_close, hedge_pressure,
-             rr_25d, call_vol, put_vol, call_prem, put_prem, atm_iv)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             rr_25d, call_vol, put_vol, call_prem, put_prem, atm_iv,
+             projected_flip)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             symbol,
@@ -282,6 +284,7 @@ def insert_snapshot(
             summary.get("call_prem"),
             summary.get("put_prem"),
             summary.get("atm_iv"),
+            summary.get("projected_flip"),
         ),
     )
 

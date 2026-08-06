@@ -4341,3 +4341,28 @@ def test_level_track_is_defensive():
                                "GEX")
     assert bad["call_wall"] == [None, 105.0]
     assert bad["flip"] == [None, 99.5]
+
+
+def test_gamma_snapshot_exposes_projected_flip(monkeypatch):
+    """The projected EOD delta-flip (DEX curve shifted by 0-DTE charm drift) is
+    published ONCE at snapshot level, not per view — it is a single 0-DTE delta
+    level the page draws on every heatmap as a shared reference."""
+    import sys as _sys
+    from services.options_svc import compute
+    _patch_gamma(monkeypatch, history=[(1, 5400.0, 3, 4, 5, 6, {5400.0: {"net": 1}})])
+    _sys.modules["gamma_tool"].compute_projected_flip = lambda data, spot: 5412.5
+    snap = compute.gamma_snapshot("$SPX")
+    assert snap["projected_flip"] == 5412.5
+
+
+def test_gamma_snapshot_projected_flip_none_without_0dte(monkeypatch):
+    """Most symbols never have a 0-DTE expiry, so hedge_pressure — and therefore the
+    projected flip — is None. That must degrade to None, never raise."""
+    import sys as _sys
+    from services.options_svc import compute
+    _patch_gamma(monkeypatch, history=[(1, 5400.0, 3, 4, 5, 6, {5400.0: {"net": 1}})])
+
+    def _boom(data, spot):
+        raise RuntimeError("no hedge data")
+    _sys.modules["gamma_tool"].compute_projected_flip = _boom
+    assert compute.gamma_snapshot("$SPX")["projected_flip"] is None

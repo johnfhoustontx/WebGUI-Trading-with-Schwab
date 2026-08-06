@@ -3,6 +3,8 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import pytest
+
 from gamma_tool import calc_dex_from_chain, get_dex_walls
 
 
@@ -77,3 +79,61 @@ class TestGetDexWalls:
 
     def test_missing_dex_key_returns_empty_list(self):
         assert get_dex_walls({"spot": 5300}) == []
+
+
+# --- Per-strike 0-DTE charm drift + the projected flip built on it ---
+
+def _drift_contracts():
+    # Two 0-DTE strikes; charm pushes the call's delta up and the put's toward 0.
+    return [
+        ({"delta": 0.40, "charm": 8760.0, "openInterest": 10}, "call", 100.0),
+        ({"delta": -0.30, "charm": 8760.0, "openInterest": 20}, "put", 90.0),
+    ]
+
+
+def test_drift_by_strike_totals_match_hedge_pressure():
+    """The per-strike drift is a REDISTRIBUTION of hedge_pressure, not a new number:
+    its sum must equal what project_0dte_pressure reports."""
+    import gamma_tool as gt
+    spot, hours = 100.0, 8760.0 / 8760.0 * 24.0   # 24h -> dt_years = 1/365
+    trips = _drift_contracts()
+    by_strike = gt.project_0dte_drift_by_strike(trips, spot, hours)
+    _, _, pressure = gt.project_0dte_pressure([(c, t) for c, t, _ in trips], spot, hours)
+    assert set(by_strike) == {100.0, 90.0}
+    assert by_strike[100.0] + by_strike[90.0] == pytest.approx(pressure, rel=1e-9)
+
+
+def test_drift_by_strike_is_defensive():
+    import gamma_tool as gt
+    assert gt.project_0dte_drift_by_strike([], 100.0, 5.0) == {}
+    assert gt.project_0dte_drift_by_strike(None, 100.0, 5.0) == {}
+    # oi<=0 / delta==0 contribute nothing (mirrors project_0dte_pressure).
+    assert gt.project_0dte_drift_by_strike(
+        [({"delta": 0.0, "charm": 1.0, "openInterest": 5}, "call", 100.0)], 100.0, 5.0) == {}
+
+
+def test_projected_flip_uses_per_strike_drift_not_a_flat_average():
+    """REGRESSION: the old code added hedge/n_strikes to EVERY strike. On real $SPX
+    data that erased 56 of 57 negative strikes and threw the crossing ~1800 points
+    past spot. The drift must land on the strikes it actually belongs to."""
+    import gamma_tool as gt
+    # Curve crosses zero between 100 and 110. Drift is concentrated at 110 only,
+    # which pushes the crossing UP toward 110 — a flat average would also lift 90,
+    # 80 … and move the crossing somewhere unrelated.
+    grid = {80.0: {"net": -100.0}, 90.0: {"net": -60.0},
+            100.0: {"net": -20.0}, 110.0: {"net": 40.0}, 120.0: {"net": 90.0}}
+    data = {"gex": grid, "hedge_pressure": 30.0,
+            "hedge_drift_by_strike": {100.0: 30.0}}
+    pf = gt.compute_projected_flip(data, spot=105.0)
+    # 100 goes -20 -> +10, so the crossing moves BELOW 100 (between 90 and 100).
+    assert 90.0 < pf < 100.0
+
+
+def test_projected_flip_none_without_per_strike_drift():
+    """No 0-DTE book -> no projection. Returning None beats returning the old
+    flat-average guess, which was silently wrong."""
+    import gamma_tool as gt
+    grid = {100.0: {"net": -20.0}, 110.0: {"net": 40.0}}
+    assert gt.compute_projected_flip({"gex": grid, "hedge_pressure": 30.0}, 105.0) is None
+    assert gt.compute_projected_flip({"gex": grid, "hedge_drift_by_strike": {}}, 105.0) is None
+    assert gt.compute_projected_flip({}, 105.0) is None

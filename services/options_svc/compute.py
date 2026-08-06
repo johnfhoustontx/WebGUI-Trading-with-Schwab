@@ -1891,8 +1891,20 @@ def gamma_snapshot(symbol: str, chain=None) -> dict | None:
     except Exception:
         term = {}
 
+    # Projected EOD delta-flip: where the DEX curve crosses zero once the 0-DTE
+    # book's deltas are advanced to the 15:00 CT close by CHARM at flat spot. It's
+    # ONE level (a 0-DTE delta concept, not per view), so it's published at snapshot
+    # level and the page draws it on every heatmap as a shared reference. None
+    # whenever the nearest expiry isn't today — i.e. most symbols, most of the time.
+    try:
+        projected_flip = gt.compute_projected_flip(by_index.get(2) or {}, spot)
+    except Exception:
+        log.debug("projected flip failed", exc_info=True)
+        projected_flip = None
+
     return {"symbol": symbol, "spot": spot, "dte": dte,
-            "views": views, "term": term, "flow": flow}
+            "views": views, "term": term, "flow": flow,
+            "projected_flip": projected_flip}
 
 
 # ── Intraday GEX history collection (Tier-2 owner) ──────────────────────────

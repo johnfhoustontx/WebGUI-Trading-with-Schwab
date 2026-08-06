@@ -308,6 +308,42 @@ def project_0dte_pressure(
     return (total_now, total_proj, total_proj - total_now)
 
 
+def project_0dte_drift_by_strike(contracts, spot, hours_to_close):
+    """``{strike: dollar delta drift}`` for the 0-DTE book, kept PER STRIKE.
+
+    Same per-contract projection as ``project_0dte_pressure`` (delta advanced by
+    charm to the close, clamped), but attributed to the strike it came from instead
+    of summed. Its total equals that function's ``hedge_pressure`` by construction —
+    this is a REDISTRIBUTION, not a new number.
+
+    Why it exists: ``compute_projected_flip`` used to spread the TOTAL pressure
+    evenly over every strike (``hedge / n``). Charm drift is not uniform — it
+    concentrates in near-the-money 0-DTE strikes — so averaging it across the whole
+    chain (including deep wings holding no 0-DTE interest) lifted the entire DEX
+    curve. Measured on live $SPX: that erased 56 of 57 negative strikes and moved
+    the projected crossing to ~9,600 with spot at 7,791. Putting each strike's own
+    drift where it belongs fixes it.
+
+    ``contracts``: iterable of ``(contract_dict, option_type, strike)``. Strikes
+    with no usable contract are omitted (rather than mapped to 0.0), so callers can
+    tell "no 0-DTE interest here" from "drift happens to be zero". Never raises."""
+    out = {}
+    if not contracts:
+        return out
+    dt_years = max(0.0, hours_to_close) / (365.0 * 24.0)
+    for c, opt_type, strike in contracts:
+        delta = c.get("delta") or 0.0
+        charm = c.get("charm") or 0.0
+        oi = c.get("openInterest") or 0
+        if oi <= 0 or delta == 0.0:
+            continue
+        lo, hi = (0.0, 1.0) if opt_type == "call" else (-1.0, 0.0)
+        delta_proj = max(lo, min(hi, delta + charm * dt_years))
+        drift = oi * (delta_proj - delta) * 100.0 * spot
+        out[strike] = out.get(strike, 0.0) + drift
+    return out
+
+
 def iter_contracts(chain, dte=None):
     """Yield (contract_dict, option_type, strike_float) for every contract in a chain.
 
@@ -682,7 +718,9 @@ class GammaEngine:
         weight_field = "totalVolume" if use_volume else "openInterest"
 
         dex = {}
-        zero_dte_contracts = []  # list[tuple[dict, str]] for project_0dte_pressure
+        # (contract, option_type, strike) — the strike is carried so the drift can
+        # be attributed PER STRIKE, not just totalled.
+        zero_dte_contracts = []
 
         def _process(exp_key, exp_map, option_type):
             if not exp_key:
@@ -714,7 +752,7 @@ class GammaEngine:
                             charm_val = 0.0
                         zero_dte_contracts.append(
                             ({"delta": delta, "charm": charm_val, "openInterest": weight},
-                             option_type),
+                             option_type, strike),
                         )
 
         _process(call_exp_key, call_map, "call")
@@ -731,10 +769,14 @@ class GammaEngine:
                 (CLOSE_HOUR_CT - now.hour) + (CLOSE_MIN_CT - now.minute) / 60.0,
             )
             net_now, net_proj, pressure = project_0dte_pressure(
+                [(c, t) for c, t, _s in zero_dte_contracts], spot, hours_to_close,
+            )
+            drift_by_strike = project_0dte_drift_by_strike(
                 zero_dte_contracts, spot, hours_to_close,
             )
         else:
             net_now = net_proj = pressure = None
+            drift_by_strike = {}
 
         return {
             "spot": spot,
@@ -743,6 +785,8 @@ class GammaEngine:
             "net_delta_0dte": net_now,
             "projected_net_delta_close": net_proj,
             "hedge_pressure": pressure,
+            # Per-strike attribution of that same drift — powers the projected flip.
+            "hedge_drift_by_strike": drift_by_strike,
         }
 
     def calc_vanna_from_chain(self, chain, use_volume=False):
@@ -1013,7 +1057,7 @@ class GammaEngine:
                             charm_val = bs_charm(spot, strike, T, r, sigma, option_type) if iv_pct > 0 else 0.0
                         zero_dte_contracts.append(
                             ({"delta": delta, "charm": charm_val, "openInterest": weight},
-                             option_type),
+                             option_type, strike),
                         )
 
         _process(call_exp_key, call_map, "call")
@@ -1050,10 +1094,14 @@ class GammaEngine:
                 (CLOSE_HOUR_CT - now.hour) + (CLOSE_MIN_CT - now.minute) / 60.0,
             )
             net_now, net_proj, pressure = project_0dte_pressure(
+                [(c, t) for c, t, _s in zero_dte_contracts], spot, hours_to_close,
+            )
+            drift_by_strike = project_0dte_drift_by_strike(
                 zero_dte_contracts, spot, hours_to_close,
             )
         else:
             net_now = net_proj = pressure = None
+            drift_by_strike = {}
 
         dex_result = {
             "spot": spot,
@@ -1062,6 +1110,8 @@ class GammaEngine:
             "net_delta_0dte": net_now,
             "projected_net_delta_close": net_proj,
             "hedge_pressure": pressure,
+            # Per-strike attribution of that same drift — powers the projected flip.
+            "hedge_drift_by_strike": drift_by_strike,
         }
 
         return gex_result, charm_result, dex_result, vanna_result
@@ -1160,6 +1210,7 @@ class GammaEngine:
                 result["net_delta_0dte"] = data.get("net_delta_0dte")
                 result["projected_net_delta_close"] = data.get("projected_net_delta_close")
                 result["hedge_pressure"] = data.get("hedge_pressure")
+                result["projected_flip"] = None      # no grid -> no crossing
             return result
 
         net_total = sum(v["net"] for v in gex.values())
@@ -1191,6 +1242,7 @@ class GammaEngine:
             result["net_delta_0dte"] = data.get("net_delta_0dte")
             result["projected_net_delta_close"] = data.get("projected_net_delta_close")
             result["hedge_pressure"] = data.get("hedge_pressure")
+            result["projected_flip"] = compute_projected_flip(data, spot)
         return result
 
     # ── Internal helpers ──
@@ -1748,21 +1800,24 @@ def value_at_open_for_strikes(strikes, open_grid):
 
 
 def compute_projected_flip(data, spot):
-    """Return the strike where the DEX curve, uniformly shifted by hedge_pressure,
-    crosses zero — i.e. the projected EOD delta-flip.
+    """Return the strike where the DEX curve crosses zero once each strike's own
+    0-DTE charm drift is applied — i.e. the projected EOD delta-flip.
 
-    Same algorithm as the chart's dashed projected-flip line. Returns the
-    crossing closest to ``spot``, or None if no crossing or inputs missing.
+    Uses ``hedge_drift_by_strike`` (see ``project_0dte_drift_by_strike``). It does
+    NOT fall back to spreading the total ``hedge_pressure`` evenly across the chain:
+    that is what the old implementation did, and on live $SPX data it erased 56 of
+    57 negative strikes and returned a crossing ~1,800 points past spot. Without a
+    per-strike drift map there is no honest projection, so this returns None —
+    which is the normal case, since only symbols whose nearest expiry is TODAY have
+    a 0-DTE book at all.
+
+    Returns the crossing closest to ``spot``, or None if no crossing / no inputs.
     """
     grid = data.get("gex") or {} if data else {}
-    hedge = data.get("hedge_pressure") if data else None
-    if not grid or hedge is None:
+    drift = (data.get("hedge_drift_by_strike") or {}) if data else {}
+    if not grid or not drift:
         return None
-    n = len(grid)
-    if n == 0:
-        return None
-    per_strike_shift = hedge / n
-    shifted = {k: v["net"] + per_strike_shift for k, v in grid.items()}
+    shifted = {k: v["net"] + drift.get(k, 0.0) for k, v in grid.items()}
     strikes = sorted(shifted.keys())
     crossings = []
     for i in range(len(strikes) - 1):

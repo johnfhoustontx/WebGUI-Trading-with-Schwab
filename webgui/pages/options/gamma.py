@@ -31,6 +31,7 @@ PRICE_LINE = "#f5f5f5"          # off-white — spot track overlaid on the dark 
 HEATMAP_SEP = "#4d4d4d"         # softer (lighter) cell-separator mesh on the heatmap
 FLIP_COLOR = "#42a5f5"
 WALL_COLOR = "#b39ddb"
+PROJ_FLIP_COLOR = "#ffb74d"   # projected EOD delta-flip (0-DTE charm drift)
 
 # Dark theme for all charts (matches the app's dark shell).
 DARK_BG = "#1b1b1b"
@@ -149,18 +150,28 @@ def _is_level(v):
     return isinstance(v, (int, float)) and not isinstance(v, bool)
 
 
-def wall_plot_lines(spot, walls, flip=None):
-    """Gamma-flip + Call/Put wall levels as yAxis plotLines — horizontal, so they
-    run ACROSS the heatmap's full time axis.
+def wall_plot_lines(spot, walls, flip=None, projected_flip=None):
+    """Gamma-flip + Call/Put wall (+ projected EOD flip) levels as yAxis plotLines —
+    horizontal, so they run ACROSS the heatmap's full time axis.
 
     The bar chart already marks these levels on the shared strike axis; extending
     them over the heatmap shows where price sat relative to the flip and the walls
     at every point in the session, not just now. Naming/colors match
-    ``line_annotations`` so the two panels read as one. Non-numeric levels are
-    skipped rather than raising."""
+    ``line_annotations`` so the two panels read as one.
+
+    ``projected_flip`` is where the DEX curve crosses zero once the 0-DTE book's
+    deltas are advanced to the 15:00 CT close by CHARM at flat spot (engine
+    ``compute_projected_flip``). It is a 0-DTE DELTA concept, not this view's own
+    metric, so it is drawn on EVERY view as a shared reference and labeled
+    "Proj. flip" in its own color — the gap between it and the actual flip IS the
+    hedging drift, expressed in price. ``None`` on any symbol whose nearest expiry
+    isn't today (most of them). Non-numeric levels are skipped rather than raising."""
     out = []
     if _is_level(flip):
         out.append(_level_plot_line(flip, f"Gamma flip {flip:g}", FLIP_COLOR))
+    if _is_level(projected_flip):
+        out.append(_level_plot_line(
+            projected_flip, f"Proj. flip {projected_flip:g}", PROJ_FLIP_COLOR))
     for w in (walls or []):
         if not _is_level(w):
             continue
@@ -508,7 +519,8 @@ def track_points(values):
 
 def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
                    walls=None, spot=None, flip=None, levels=None,
-                   show_tracks=False, spot_style="line", spot_interval=5):
+                   show_tracks=False, spot_style="line", spot_interval=5,
+                   projected_flip=None):
     """Intraday strike×time Highcharts heatmap (dark, cell separators, concise
     hover) with the underlying spot-price line overlaid on the same (linear)
     strike axis. ``yrange`` (when given) sets the Strike axis range so it aligns
@@ -657,7 +669,7 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
              # ALWAYS emit the key (empty when there are no levels): in-place
              # chart.update() MERGES options, so omitting it would leave the
              # previous view's flip/wall lines painted over the new view.
-             "plotLines": wall_plot_lines(spot, walls, flip)}
+             "plotLines": wall_plot_lines(spot, walls, flip, projected_flip)}
     if yrange is not None:
         yaxis["min"], yaxis["max"] = yrange[0], yrange[1]
     fig = _base_chart("heatmap", height)
@@ -1965,7 +1977,8 @@ def render():
                                                   levels=entry.get("levels"),
                                                   show_tracks=bool(tracks_sw.value),
                                                   spot_style=spot_style_sel.value,
-                                                  spot_interval=spot_int_sel.value))
+                                                  spot_interval=spot_int_sel.value,
+                                                  projected_flip=snap.get("projected_flip")))
             heat_plot.set_visibility(True)
             heat_msg.set_visibility(False)
         else:

@@ -1533,3 +1533,35 @@ def test_auto_refresh_skips_the_chain_fetch_on_net_prem():
     assert 'view_toggle.value == "Net Prem"' in fn, fn
     # The guard must precede the enqueue, or it does nothing.
     assert fn.index('"Net Prem"') < fn.index("gamma_refresh"), fn
+
+
+# --- Projected EOD delta-flip line (0-DTE charm drift), on every view ---
+
+def test_wall_plot_lines_adds_projected_flip():
+    lines = gamma.wall_plot_lines(450.0, [455.0], flip=449.5, projected_flip=452.25)
+    by_val = {pl["value"]: pl for pl in lines}
+    assert set(by_val) == {455.0, 449.5, 452.25}
+    pf = by_val[452.25]
+    # Labeled so it can't be mistaken for the view's own (actual) flip.
+    assert "Proj" in pf["label"]["text"] and "452.25" in pf["label"]["text"]
+    # Its own color, distinct from the actual flip and the walls.
+    assert pf["color"] == gamma.PROJ_FLIP_COLOR
+    assert pf["color"] not in (gamma.FLIP_COLOR, gamma.WALL_COLOR)
+
+
+def test_projected_flip_is_optional_and_defensive():
+    # Absent (most symbols never have a 0-DTE expiry) -> no line, no raise.
+    base = gamma.wall_plot_lines(450.0, [], flip=449.5)
+    assert len(base) == 1
+    assert gamma.wall_plot_lines(450.0, [], flip=449.5, projected_flip=None) == base
+    assert gamma.wall_plot_lines(450.0, [], flip=449.5, projected_flip="x") == base
+
+
+def test_heatmap_figure_draws_projected_flip_on_any_view():
+    # The projected flip is a DEX 0-DTE concept but is drawn on EVERY view as a
+    # shared reference level, alongside that view's own flip.
+    for view in ("GEX", "Charm", "DEX", "Vanna"):
+        fig = gamma.heatmap_figure(_WALL_ROWS, view, spot=450.0, flip=449.5,
+                                   projected_flip=452.25)
+        vals = [pl["value"] for pl in fig["yAxis"]["plotLines"]]
+        assert 452.25 in vals, view
