@@ -4396,3 +4396,28 @@ def test_gamma_snapshot_hedge_history_degrades_to_empty(monkeypatch):
         raise RuntimeError("no such column")
     _sys.modules["gex_history_db"].load_hedge_series = _boom
     assert compute.gamma_snapshot("$SPX")["hedge_history"] == []
+
+
+def test_build_gamma_read_carries_the_0dte_hedge_fields():
+    """Explain must show the same 0-DTE drift the chart and the briefings do —
+    snapshot_summary already carries it, build_gamma_read just has to pass it on."""
+    from services.options_svc import compute
+    dex = {"flip": 7733.0, "net_total": 1.6e9, "hedge_pressure": 2.81e9,
+           "projected_flip": 7721.7}
+    read = compute.build_gamma_read(
+        "$SPX", 7723.0, {"flip": 7733.0}, {}, dex, {},
+        {"call_wall": 7770.0, "put_wall": 7700.0}, {})
+    assert read.hedge_pressure == 2.81e9
+    assert read.hedge_direction == "buy"          # derived from the sign
+    assert read.projected_flip == 7721.7
+
+
+def test_build_gamma_read_hedge_fields_none_without_0dte():
+    from services.options_svc import compute
+    read = compute.build_gamma_read("$SPX", 7723.0, {"flip": 7733.0}, {}, {}, {}, {}, {})
+    assert read.hedge_pressure is None and read.projected_flip is None
+    assert read.hedge_direction is None
+    # A negative drift reads as sell.
+    neg = compute.build_gamma_read("$SPX", 7723.0, {}, {}, {"hedge_pressure": -5e8},
+                                   {}, {}, {})
+    assert neg.hedge_direction == "sell"

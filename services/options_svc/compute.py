@@ -2399,6 +2399,16 @@ def build_net_premium(session_date, now=None):
             "error": None}
 
 
+def _hedge_direction(pressure):
+    """'buy' / 'sell' / None from a signed 0-DTE hedge pressure.
+
+    Mirrors the engine's own labeling: a positive drift means the projected delta
+    RISES, so a dealer short the book must BUY underlying to stay hedged."""
+    if not isinstance(pressure, (int, float)) or isinstance(pressure, bool):
+        return None
+    return "buy" if pressure >= 0 else "sell"
+
+
 def build_gamma_read(symbol, spot, gex_summary, charm_summary, dex_summary,
                      vanna_summary, walls, regime):
     """Map the gamma-engine summaries + walls + sentiment → a GammaRead.
@@ -2434,6 +2444,13 @@ def build_gamma_read(symbol, spot, gex_summary, charm_summary, dex_summary,
         charm_max_pos=_lvl(ch.get("top_pos_strike")),
         charm_max_neg=_lvl(ch.get("top_neg_strike")),
         dex_flow_usd=_num(dx.get("net_total"), 0.0),
+        # 0-DTE charm drift — already on the DEX snapshot_summary, so Explain shows
+        # the same numbers the chart and the briefings do. All None off a 0-DTE
+        # book, and the infographic then omits the sentence entirely.
+        hedge_pressure=_num(dx.get("hedge_pressure")),
+        hedge_direction=_hedge_direction(dx.get("hedge_pressure")),
+        projected_flip=_num(dx.get("projected_flip")),
+        delta_flip=_num(dx.get("flip")),
         vex_notional_usd=_num(vn.get("net_total")),
         sentiment_score=score,
         sentiment_trend=str(trend),

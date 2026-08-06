@@ -8,7 +8,28 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-08-05 (**Projected DEX bars — each strike's own 0-DTE charm drift**: the
+**Last updated:** 2026-08-05 (**Explain now carries the 0-DTE drift too — and a wrong-baseline bug
+caught in the process**: an audit of the three buttons found **Analyze** and the **scheduled briefings**
+already correct (`calc_all_from_chain` → `build_analysis_dict` → `format_pressure_panel` picks up
+`hedge_drift_by_strike`, so the CORRECTED projected flip flows through — live-checked at
+`projected_flip 7721.68` against the chart's `7721.66`), but **Explain** was not: its `GammaRead` had no
+hedge fields at all, so the infographic never mentioned the 0-DTE drift even though
+`snapshot_summary(dex)` already carried it. `GammaRead` gains optional `hedge_pressure` /
+`hedge_direction` / `projected_flip` / `delta_flip`, `build_gamma_read` populates them (direction via a
+new `_hedge_direction` mirroring the engine's sign rule), and `_derive` folds one sentence into
+**`dex_read`** so BOTH renderers pick it up with no template change. All four fields are None off a 0-DTE
+book and the sentence then vanishes entirely.
+**The bug worth remembering:** the first version read *"taking the flip to 7,722 (now 7,733)"* — pairing
+the projected DELTA flip with the **GAMMA** flip. Those are two different curves: measured live, gamma
+flip **7733.49**, delta flip **7720.24**, projected **7721.68**. So it implied an 11-point DOWNWARD move
+when the real drift is **+1.4 points UP**. Fixed by carrying `delta_flip` as the baseline and labeling it
+*"delta flip"* explicitly; a test now pins that the baseline is the DEX flip, because the two numbers look
+equally plausible side by side and only the label distinguishes them. **Restart `options_svc`.**
+Live-verified: *"0-DTE charm alone moves +$2.79B of delta — dealers must buy if spot holds, taking the
+delta flip to 7,722 (now 7,720)."* options-scanner **1309 passed / 11 documented-baseline fails**
+(Tk-dashboard files excluded — the documented intermittent access-violation crash); options_svc **918**
+(+2 documented `test_expected_move`); webgui **1055** green.
+Prior — 2026-08-05 (**Projected DEX bars — each strike's own 0-DTE charm drift**: the
 by-strike bar chart now overlays a **"Projected close"** outline showing where each strike's net delta
 lands once its OWN 0-DTE drift is applied (`net + hedge_drift_by_strike[strike]`). This is the WHERE to
 go with the projected-flip line's WHAT: the flip says the crossing moves, these bars say which strikes

@@ -61,6 +61,14 @@ class GammaRead:
     sentiment_confidence: int = 100   # 0-100
 
     symbol: str = "$SPX"
+    # 0-DTE charm drift (all None unless the nearest expiry is TODAY, which is most
+    # symbols most of the time — the renderer then omits the sentence entirely).
+    hedge_pressure: Optional[float] = None    # signed USD delta appearing by 15:00 CT
+    hedge_direction: Optional[str] = None     # "buy" | "sell" | "neutral"
+    projected_flip: Optional[float] = None    # DELTA flip after that drift is applied
+    delta_flip: Optional[float] = None        # the DEX curve's own flip (the baseline
+                                              # projected_flip moves FROM — NOT the
+                                              # gamma flip, a different curve)
     vix: Optional[float] = None       # None -> "unknown" / "n/a"
 
     # --- Vanna (VEX) --- leave None -> card shows "awaiting data"
@@ -171,6 +179,24 @@ def _derive(data: GammaRead) -> Dict:
                   f'{"up" if charm_up else "down"}</b>. Strongest in the last hour and on '
                   f'OPEX Thu\u2013Fri.')
 
+    # 0-DTE hedge pressure: how much dealer delta appears purely from time passing,
+    # and where that pushes the flip. Empty string when the symbol has no 0-DTE book.
+    hedge_read = ""
+    if isinstance(data.hedge_pressure, (int, float)):
+        _hd = (data.hedge_direction or "").lower()
+        _side = "buy" if _hd == "buy" else ("sell" if _hd == "sell" else None)
+        _amt = _fmt_signed_b(data.hedge_pressure)
+        hedge_read = (f'Into the close, 0-DTE charm alone moves <b>{_amt}</b> of delta'
+                      + (f' — dealers must <b>{_side}</b> if spot holds' if _side else ''))
+        if isinstance(data.projected_flip, (int, float)):
+            # Compare against the DELTA flip: projected_flip is where the DEX curve
+            # crosses zero, so pairing it with the GAMMA flip would compare two
+            # different curves and imply a move that never happens.
+            hedge_read += f', taking the <b>delta flip</b> to <b>{_fmt_px(data.projected_flip)}</b>'
+            if isinstance(data.delta_flip, (int, float)):
+                hedge_read += f' (now {_fmt_px(data.delta_flip)})'
+        hedge_read += '.'
+
     flow_amt = _fmt_flow(data.dex_flow_usd).split('$')[-1]
     if dex_buy:
         dex_read = (f'A standing <b>bid under</b> the tape (${flow_amt} of hedging) \u2014 '
@@ -178,6 +204,10 @@ def _derive(data: GammaRead) -> Dict:
     else:
         dex_read = (f'A standing <b>offer over</b> the tape (${flow_amt} of hedging) \u2014 '
                     f'respect the supply; sell rallies.')
+    # Fold the 0-DTE drift into the DEX narrative so BOTH renderers pick it
+    # up with no template change. Empty (invisible) when there's no 0-DTE book.
+    if hedge_read:
+        dex_read += ' ' + hedge_read
 
     net_read = (
         f'All three signals line up \u2014 trade it as a '
@@ -254,6 +284,7 @@ def _derive(data: GammaRead) -> Dict:
         axis_hi=_fmt_px(hi),
         flow=_fmt_flow(data.dex_flow_usd),
         flow_class="sup" if dex_buy else "res",
+        hedge_read=hedge_read,
         p_spot=pct(data.spot),
         p_call=pct(data.call_wall),
         p_put=pct(data.put_wall),
