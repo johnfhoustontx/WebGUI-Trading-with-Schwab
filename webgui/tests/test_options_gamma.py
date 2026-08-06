@@ -66,7 +66,8 @@ def test_bar_yrange_empty_falls_back_to_spot_band():
 #    spot=None → the near-spot band math must not raise NoneType*float) ─────────
 def test_bars_from_gex_none_spot_returns_empty():
     b = gamma.bars_from_gex(GEX, None)
-    assert b == {"strikes": [], "nets": [], "colors": [], "hovers": []}
+    assert b == {"strikes": [], "nets": [], "colors": [], "hovers": [],
+                 "projected": []}
 
 
 def test_bar_yrange_none_spot_does_not_raise():
@@ -1598,3 +1599,53 @@ def test_hedge_summary_text_reads_direction_and_size():
     assert gamma.hedge_summary_text([]) == ""
     down = gamma.hedge_summary_text([{"ts": 1, "hedge_pressure": -1.2e9}])
     assert "-$1.20B" in down and "sell" in down.lower()
+
+
+# --- Projected DEX bars (each strike's own 0-DTE charm drift) ---
+
+_DRIFT_DATA = {
+    "spot": 450.0,
+    "gex": {448.0: {"call": 100.0, "put": -40.0, "net": 60.0},
+            450.0: {"call": 200.0, "put": -250.0, "net": -50.0},
+            452.0: {"call": 30.0, "put": -10.0, "net": 20.0}},
+    # Only the 0-DTE strikes carry drift; 452 has none.
+    "hedge_drift_by_strike": {448.0: 15.0, 450.0: -30.0},
+}
+
+
+def test_bars_from_gex_adds_projected_where_drift_exists():
+    b = gamma.bars_from_gex(_DRIFT_DATA, 450.0)
+    assert b["nets"] == [60.0, -50.0, 20.0]
+    # projected = net + that strike's OWN drift; None where the strike has no
+    # 0-DTE interest, so the chart can skip drawing a coincident outline.
+    assert b["projected"] == [75.0, -80.0, None]
+
+
+def test_bars_from_gex_projected_absent_without_drift_map():
+    # Most symbols never have a 0-DTE book -> no drift map -> all None, no raise.
+    plain = {k: v for k, v in _DRIFT_DATA.items() if k != "hedge_drift_by_strike"}
+    assert gamma.bars_from_gex(plain, 450.0)["projected"] == [None, None, None]
+    assert gamma.bars_from_gex({}, None)["projected"] == []
+
+
+def test_bar_figure_overlays_a_projected_outline_series():
+    fig = gamma.bar_figure(_DRIFT_DATA, 450.0, view="DEX")
+    names = [s["name"] for s in fig["series"]]
+    assert "Projected close" in names
+    proj = next(s for s in fig["series"] if s["name"] == "Projected close")
+    # Only the two drifting strikes are drawn.
+    assert [p["x"] for p in proj["data"]] == [448.0, 450.0]
+    assert [p["y"] for p in proj["data"]] == [75.0, -80.0]
+    # Outline only (transparent fill) so it reads over the solid bar whether the
+    # projection EXTENDS past it or pulls back inside it.
+    assert proj["color"] == "transparent"
+    assert proj["borderColor"] == gamma.PROJ_FLIP_COLOR
+    # Drawn on TOP of the solid bars, and overlaid (not grouped beside them).
+    assert names.index("Projected close") > names.index(gamma._view_label("DEX"))
+    assert fig["plotOptions"]["bar"]["grouping"] is False
+
+
+def test_bar_figure_omits_projected_series_when_no_drift():
+    plain = {k: v for k, v in _DRIFT_DATA.items() if k != "hedge_drift_by_strike"}
+    fig = gamma.bar_figure(plain, 450.0, view="DEX")
+    assert [s["name"] for s in fig["series"]] == [gamma._view_label("DEX")]

@@ -242,9 +242,14 @@ def bars_from_gex(data, spot, n_side=N_SIDE):
     """
     gex = (data or {}).get("gex") or {}
     if not isinstance(spot, (int, float)):
-        return {"strikes": [], "nets": [], "colors": [], "hovers": []}
+        return {"strikes": [], "nets": [], "colors": [], "hovers": [], "projected": []}
+    # Each strike's OWN 0-DTE charm drift (the engine's per-strike drift map).
+    # Present only while the nearest expiry is today, and only on the strikes that
+    # actually hold 0-DTE interest — so `projected` is None elsewhere and the chart
+    # skips drawing an outline that would just sit on top of the solid bar.
+    drift = (data or {}).get("hedge_drift_by_strike") or {}
     window = set(strikes_around(gex.keys(), spot, n_side))
-    strikes, nets, colors, hovers = [], [], [], []
+    strikes, nets, colors, hovers, projected = [], [], [], [], []
     for strike in sorted(gex):
         if strike not in window:
             continue
@@ -253,9 +258,13 @@ def bars_from_gex(data, spot, n_side=N_SIDE):
         strikes.append(strike)
         nets.append(net)
         colors.append(POS_COLOR if net >= 0 else NEG_COLOR)
+        d = drift.get(strike)
+        projected.append(net + d if isinstance(d, (int, float))
+                         and not isinstance(d, bool) else None)
         hovers.append(f"{strike:g}: net {net:,.0f} "
                       f"(C {cell.get('call', 0):,.0f} / P {cell.get('put', 0):,.0f})")
-    return {"strikes": strikes, "nets": nets, "colors": colors, "hovers": hovers}
+    return {"strikes": strikes, "nets": nets, "colors": colors, "hovers": hovers,
+            "projected": projected}
 
 
 def union_range(yrange, values, pad_frac=0.01):
@@ -397,10 +406,29 @@ def bar_figure(data, spot, view="GEX", walls=None, flip=None, n_side=N_SIDE, hei
         "tooltip": {"backgroundColor": "#222222", "borderColor": "#444444",
                     "style": {"color": FONT, "fontSize": "11px"},
                     "headerFormat": "", "pointFormat": "{point.custom.hover}"},
+        # grouping False so the projected outline OVERLAYS its bar instead of being
+        # drawn beside it (which would halve the bar width and break the alignment
+        # with the heatmap).
         "plotOptions": {"bar": {"pointPadding": 0.04, "groupPadding": 0,
-                                "borderRadius": 0}},
+                                "borderRadius": 0, "grouping": False}},
         "series": [{"type": "bar", "name": label, "data": points, "colorByPoint": False}],
     })
+    # Projected close: each strike's net after ITS OWN 0-DTE charm drift. Drawn as an
+    # outline ON TOP of the solid bar (transparent fill) so it reads whether the
+    # projection EXTENDS past the current bar or pulls back INSIDE it — a filled bar
+    # behind would be invisible in the pull-back case. Amber, matching the projected
+    # flip line. Omitted entirely when the symbol has no 0-DTE book.
+    proj_pts = [{"x": s_, "y": pv,
+                 "custom": {"hover": f"{s_:g}: projected close {pv:,.0f}"}}
+                for s_, pv in zip(b["strikes"], b.get("projected") or [])
+                if isinstance(pv, (int, float)) and not isinstance(pv, bool)]
+    if proj_pts:
+        fig["series"].append({
+            "type": "bar", "name": "Projected close", "data": proj_pts,
+            "color": "transparent", "borderColor": PROJ_FLIP_COLOR, "borderWidth": 1,
+            "enableMouseTracking": True,
+            "states": {"inactive": {"enabled": False}, "hover": {"enabled": False}},
+        })
     return fig
 
 
@@ -1998,7 +2026,10 @@ def render():
         raw = entry.get("data") if isinstance(entry.get("data"), dict) else {}
         data = {"spot": raw.get("spot"),
                 "strike_count": raw.get("strike_count"),
-                "gex": _refloat_keys(raw.get("gex"))}
+                "gex": _refloat_keys(raw.get("gex")),
+                # Same float-key round-trip as the grid (Redis JSON stringifies them).
+                "hedge_drift_by_strike": _refloat_keys(
+                    raw.get("hedge_drift_by_strike"))}
         view_spot = data.get("spot") or spot
         if not isinstance(view_spot, (int, float)):
             # No usable underlying price (e.g. market closed / sparse off-hours

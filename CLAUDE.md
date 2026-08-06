@@ -8,7 +8,27 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-08-05 (**0-DTE hedge-pressure history panel**: a compact signed-column track of
+**Last updated:** 2026-08-05 (**Projected DEX bars — each strike's own 0-DTE charm drift**: the
+by-strike bar chart now overlays a **"Projected close"** outline showing where each strike's net delta
+lands once its OWN 0-DTE drift is applied (`net + hedge_drift_by_strike[strike]`). This is the WHERE to
+go with the projected-flip line's WHAT: the flip says the crossing moves, these bars say which strikes
+move it. Reuses the per-strike map built for the flip fix — **no new engine math, no new collection**.
+**Drawn as an OUTLINE ON TOP of the solid bar** (transparent fill + amber `PROJ_FLIP_COLOR` border,
+matching the projected-flip line) rather than a filled bar behind it: a bar behind is invisible whenever
+the projection pulls BACK inside the current bar, so only an outline reads in both directions —
+extension and contraction. `plotOptions.bar.grouping` is **False** so the outline OVERLAYS its bar
+instead of being drawn beside it, which would halve the bar width and break the pixel-alignment with the
+heatmap. **Only strikes that actually carry 0-DTE interest get an outline** (`bars_from_gex` returns
+`projected=None` elsewhere) — otherwise most outlines would sit exactly on their solid bar as noise —
+and the whole series is **omitted** when the symbol has no 0-DTE book, i.e. most symbols most of the
+time. The page re-floats the drift map's keys via `_refloat_keys` exactly as it does the grid (Redis
+JSON stringifies float keys). **Restart `options_svc` + the webgui.** Live-verified by injecting a
+realistic near-money drift map: 6 outlines drawn on the DELTA view, amber stroke over transparent fill,
+and for a strike whose current net is 0 the solid bar measured **0px** against a **297px** projected
+outline — the extension is unmistakable. A Tier-1 guard (`test_page_imports_no_engine_or_proxy`) caught
+a comment naming `gamma_tool` in webgui source and was left strict; the comment was reworded instead.
+webgui **1053** green.
+Prior — 2026-08-05 (**0-DTE hedge-pressure history panel**: a compact signed-column track of
 `hedge_pressure` across the session, mounted **directly under the heatmap** and sharing its time
 categories. It is its **OWN chart element, not a heatmap overlay** — pressure is in DOLLARS while the
 heatmap's y-axis is STRIKE *and* is pixel-aligned to the bar chart, so it cannot share that axis.
