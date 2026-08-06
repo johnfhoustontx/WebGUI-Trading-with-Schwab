@@ -2266,10 +2266,12 @@ def render():
         # its own cache key and has no spot overlay — so every one of them is a
         # dead knob there. Hide the cluster rather than leave controls that
         # silently do nothing, the same reasoning that hides Bar for a line spot.
-        # Explain / Analyze / Briefings deliberately STAY: they are about the
-        # gamma briefing, reachable from any view.
+        # Explain / Analyze / Briefings go too: all three report on the SYMBOL in
+        # the (now hidden) dropdown, so on Net Prem they would act on a symbol
+        # the reader can no longer see or change — worse than a dead knob.
         symbol_scoped = view_toggle.value != "Net Prem"
-        for el in (symbol_in, fetch_btn, tracks_sw, spot_style_sel):
+        for el in (symbol_in, fetch_btn, tracks_sw, spot_style_sel,
+                   explain_btn, analyze_btn, briefings_btn):
             el.set_visibility(symbol_scoped)
         # Bar size is meaningless for a line — hide it rather than leave a control
         # that silently does nothing.

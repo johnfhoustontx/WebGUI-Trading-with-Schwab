@@ -1095,7 +1095,11 @@ def test_symbol_scoped_controls_hide_on_net_prem():
     sync = src[src.index("def _sync_spot_controls("):]
     sync = sync[:sync.index("\n    spot_style_sel.on_value_change")]
     assert 'view_toggle.value != "Net Prem"' in sync, sync
-    for name in ("symbol_in", "fetch_btn", "tracks_sw", "spot_style_sel"):
+    for name in ("symbol_in", "fetch_btn", "tracks_sw", "spot_style_sel",
+                 # These three report on the symbol in the now-hidden dropdown,
+                 # so on Net Prem they would act on a symbol the reader can
+                 # neither see nor change.
+                 "explain_btn", "analyze_btn", "briefings_btn"):
         assert name in sync, f"{name} not hidden on Net Prem"
     # Bar stays subject to its own line-style rule as well as the view.
     assert "spot_style_sel.value != \"line\"" in sync, sync
