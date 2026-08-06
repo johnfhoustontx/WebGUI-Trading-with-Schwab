@@ -459,6 +459,20 @@ DIRECTIONAL_MIN_CREDIT_PCT = 0.20  # higher floor — these strikes pay more
 # 4 structures x 2 windows (0-DTE + swing) = 8.
 SINGLE_LEG_MAX_PER_SYMBOL = 8
 
+# Emission cut for single-leg directional candidates: a candidate must reach
+# SINGLE_LEG_MIN_SCORE on strategy_scoring's Fit+Quality composite AND not carry
+# an excluded grade. Everything else is dropped in run_full_scan rather than
+# published to the Scanner's Directional tab -- the tab is a shortlist of
+# tradeable ideas, not a dump of everything the builder can construct.
+#
+# NOTE the two cuts are redundant TODAY: a hard-gate failure pins the composite
+# at strategy_scoring.GATE_FAIL_CAP (39) and the post-grade state tilt adds at
+# most +6, so a Weak candidate tops out at 45 and can never clear 50. Both are
+# kept because they express DIFFERENT intents ("no low-scoring trades" vs "no
+# gate-failing trades") and either constant can move independently.
+SINGLE_LEG_MIN_SCORE = 50.0
+SINGLE_LEG_EXCLUDED_GRADES = ("Weak",)
+
 
 def get_min_credit_pct(regime, trade_type):
     """Return minimum credit-to-width ratio for the VIX regime and trade type."""
@@ -1400,6 +1414,16 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
                 # candidate scores identically on the Scanner and the Swing page.
                 em_1sd = (daily_em or 0.0) * math.sqrt(max(_lo, 1))
                 dir_sigs += _ssc.score_all(win_sigs, view, atm_iv, em_1sd)
+
+            # Drop everything that isn't worth showing, BEFORE the cap below --
+            # otherwise a symbol whose best candidates are Weak spends its cap
+            # slots on rows that are then dropped, emitting fewer than the cap's
+            # worth of tradeable ideas.
+            dir_sigs = [
+                s for s in dir_sigs
+                if (s.get("composite_score") or 0) >= SINGLE_LEG_MIN_SCORE
+                and s.get("grade") not in SINGLE_LEG_EXCLUDED_GRADES
+            ]
 
             if dir_sigs:
                 # CURRENTLY INERT: _DIRECTIONAL has 4 entries x 2 windows = 8 ==

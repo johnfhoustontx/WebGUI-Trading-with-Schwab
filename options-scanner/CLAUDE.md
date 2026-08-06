@@ -40,7 +40,7 @@ pytest tests/test_scoring.py -v                # single file
 pytest tests/test_scoring.py::test_name -v     # single test
 ```
 
-**Test baseline: 1286 passed, 17 failed** (measured 2026-07-25 with `-p no:randomly`; was 1283/16/1skip immediately before the `gamma_window_legacy` split, which added 3 headless-import tests). The failures are **pre-existing** and unrelated to current features — do not "fix" them as part of unrelated work; flag them only if a change is expected to touch them. They fall in four groups:
+**Test baseline: 1309 passed, 17 failed, 1 skipped** (re-measured 2026-08-06 with `-p no:randomly`; was 1286/17 on 2026-07-25 — the failing SET is unchanged, only the passing count grew with intervening work). The failures are **pre-existing** and unrelated to current features — do not "fix" them as part of unrelated work; flag them only if a change is expected to touch them. They fall in four groups:
 
 - `tests/test_scanner_engine.py::TestEarningsAvoidance` — stale fixtures
 - `tests/test_dashboard_*` — **`dashboard.py` was never copied into the webgui monorepo**, so these fail `ModuleNotFoundError: No module named 'dashboard'`. Diagnosed 2026-07-25; previously mis-filed as "intermittent". Whether a given one *fails* or *skips* still varies with ordering (the Tk-root guard), so the count moves even under `-p no:randomly`.

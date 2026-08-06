@@ -1705,6 +1705,20 @@ def fake_client(monkeypatch):
     return _Stub()
 
 
+@pytest.fixture
+def unfiltered_directional(monkeypatch):
+    """Drop the min-score cut for tests that are about the build/score pipeline.
+
+    Every directional candidate this fixture chain produces grades Weak (the
+    fake chain's liquidity/PoP fail the hard gates), so with the production
+    ``SINGLE_LEG_MIN_SCORE`` in force the emitted list is empty and every
+    assertion about shape, window coverage or ordering goes vacuous. These
+    tests predate the cut and are not about it — the cut has its own tests.
+    """
+    monkeypatch.setattr(scanner_engine, "SINGLE_LEG_MIN_SCORE", 0.0)
+    monkeypatch.setattr(scanner_engine, "SINGLE_LEG_EXCLUDED_GRADES", ())
+
+
 class TestDirectionalSignals:
     """Single-leg directional candidates (LONG/SHORT calls & puts).
 
@@ -1719,7 +1733,8 @@ class TestDirectionalSignals:
         assert "signals_directional" in results
         assert isinstance(results["signals_directional"], list)
 
-    def test_directional_signals_carry_strategy_shape(self, fake_client):
+    def test_directional_signals_carry_strategy_shape(self, fake_client,
+                                                      unfiltered_directional):
         results = scanner_engine.run_full_scan(fake_client, symbols=self.SYMBOLS)
         sigs = results["signals_directional"]
         assert sigs, "expected directional candidates from the fake chain"
@@ -1730,7 +1745,8 @@ class TestDirectionalSignals:
             assert s.get("id")
             assert s.get("composite_score") is not None
 
-    def test_directional_covers_both_dte_windows(self, fake_client):
+    def test_directional_covers_both_dte_windows(self, fake_client,
+                                                 unfiltered_directional):
         """Both the 0-DTE and swing windows must contribute candidates.
 
         Guards the two-window loop AND the non-vacuity of the sort test below:
@@ -1744,7 +1760,8 @@ class TestDirectionalSignals:
             assert 1 in dtes, f"{symbol}: no 0-DTE-window candidate (got {dtes})"
             assert 7 in dtes, f"{symbol}: no swing-window candidate (got {dtes})"
 
-    def test_directional_sorted_by_score_desc(self, fake_client):
+    def test_directional_sorted_by_score_desc(self, fake_client,
+                                              unfiltered_directional):
         sigs = scanner_engine.run_full_scan(
             fake_client, symbols=self.SYMBOLS)["signals_directional"]
         scores = [s.get("composite_score") or 0 for s in sigs]
@@ -1753,7 +1770,8 @@ class TestDirectionalSignals:
         assert len(set(scores)) > 1, "all scores equal — the ordering assertion is vacuous"
         assert scores == sorted(scores, reverse=True)
 
-    def test_swing_window_scored_against_its_own_em_not_a_one_day_em(self, fake_client):
+    def test_swing_window_scored_against_its_own_em_not_a_one_day_em(
+            self, fake_client, unfiltered_directional):
         """Each DTE window is scored against ITS OWN em_1sd.
 
         Pins the deliberate deviation from the task spec (see the comment in
@@ -1790,6 +1808,88 @@ class TestDirectionalSignals:
         assert credit, "fixture produced no credit spreads — the assertion would be vacuous"
         for s in credit:
             assert s["type"] in {"PCS", "CCS", "IC"}
+
+    # --- Minimum-score cut ---------------------------------------------------
+
+    def test_weak_directional_candidates_are_not_emitted(self, fake_client):
+        """Every candidate this fixture builds grades Weak (~23-39), so the
+        production cut must emit NOTHING — no Weak signal reaches the tab."""
+        results = scanner_engine.run_full_scan(fake_client, symbols=self.SYMBOLS)
+        assert results["signals_directional"] == []
+        # Non-vacuity: the builder must actually have produced candidates for
+        # the cut to have anything to drop, else this passes for free.
+        assert results["signals_0dte"], "fixture produced no scan at all"
+
+    def test_directional_emits_candidates_at_or_above_the_min_score(
+            self, fake_client, monkeypatch):
+        """The cut is a floor, not a blanket suppression: >= the threshold survives."""
+        import strategy_scoring
+
+        def _fake_score_all(signals, view, atm_iv, em_1sd, market_state=None):
+            out = []
+            for i, sig in enumerate(signals or []):
+                sig["composite_score"] = 49.9 if i % 2 else 50.0
+                sig["grade"] = "Marginal"
+                out.append(sig)
+            return out
+
+        monkeypatch.setattr(strategy_scoring, "score_all", _fake_score_all)
+        sigs = scanner_engine.run_full_scan(
+            fake_client, symbols=self.SYMBOLS)["signals_directional"]
+        assert sigs, "nothing survived — the cut is suppressing qualifying candidates"
+        # Boundary: 50.0 is IN, 49.9 is OUT.
+        assert {s["composite_score"] for s in sigs} == {50.0}
+
+    def test_directional_min_score_cut_runs_before_the_per_symbol_cap(
+            self, fake_client, monkeypatch):
+        """The cap must select the best QUALIFYING candidates.
+
+        Score alone cannot show this — the list is sorted descending, so a
+        score cut applied after the slice keeps the same rows. The GRADE half
+        can: two top-scoring Weak rows would eat both cap slots and then be
+        dropped, emitting nothing, if the cut ran after the slice.
+        """
+        import strategy_scoring
+        monkeypatch.setattr(scanner_engine, "SINGLE_LEG_MAX_PER_SYMBOL", 2)
+
+        def _fake_score_all(signals, view, atm_iv, em_1sd, market_state=None):
+            out = []
+            for i, sig in enumerate(signals or []):
+                sig["composite_score"] = 90.0 if i < 2 else 60.0
+                sig["grade"] = "Weak" if i < 2 else "Good"
+                out.append(sig)
+            return out
+
+        monkeypatch.setattr(strategy_scoring, "score_all", _fake_score_all)
+        sigs = scanner_engine.run_full_scan(
+            fake_client, symbols=self.SYMBOLS)["signals_directional"]
+        assert sigs, "the cap was spent on candidates the cut then dropped"
+        assert all(s["grade"] == "Good" and s["composite_score"] == 60.0
+                   for s in sigs)
+
+    def test_directional_drops_a_weak_grade_regardless_of_score(
+            self, fake_client, monkeypatch):
+        """Grade and score are checked independently.
+
+        A gate-failed candidate is capped at GATE_FAIL_CAP (39) + at most a +6
+        state tilt, so today no Weak signal can reach 50 and the two checks are
+        REDUNDANT — no realistic fixture can tell them apart. This synthetic
+        probe (grade Weak at score 90) pins the grade half so a future threshold
+        change cannot silently let a Weak trade through.
+        """
+        import strategy_scoring
+
+        def _fake_score_all(signals, view, atm_iv, em_1sd, market_state=None):
+            out = []
+            for sig in signals or []:
+                sig["composite_score"] = 90.0
+                sig["grade"] = "Weak"
+                out.append(sig)
+            return out
+
+        monkeypatch.setattr(strategy_scoring, "score_all", _fake_score_all)
+        results = scanner_engine.run_full_scan(fake_client, symbols=self.SYMBOLS)
+        assert results["signals_directional"] == []
 
     def test_directional_degrades_when_builder_raises(self, fake_client, monkeypatch):
         """A directional failure must never break the credit-spread scan."""

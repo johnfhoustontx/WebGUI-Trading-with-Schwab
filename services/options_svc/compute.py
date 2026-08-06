@@ -232,6 +232,34 @@ def assign_ids(signals, symbol):
 # Phase-1 candidate families. ``families=None`` ⇒ build all of these.
 _SWING_FAMILIES = ("DIRECTIONAL", "VERTICAL", "NEUTRAL")
 
+# Emission cut for the Strategy Finder: a candidate must reach SWING_MIN_SCORE on
+# strategy_scoring's Fit+Quality composite AND not carry an excluded grade, or it
+# is dropped before the page ever sees it.
+#
+# Applies to EVERY family (directional, debit + adapted credit verticals, iron
+# condors) because they land in ONE jointly-ranked table -- cutting only one
+# family would leave Weak iron condors ranked above directional rows that were
+# removed. The dropped count rides back on the result as ``filtered_out`` so an
+# empty table can say WHY (see the page's ``status_text``).
+#
+# Deliberately SEPARATE constants from scanner_engine.SINGLE_LEG_MIN_SCORE /
+# SINGLE_LEG_EXCLUDED_GRADES, which cut the Market Scanner's Directional tab:
+# same values today, but two pages with two independently tunable bars.
+#
+# NOTE the two cuts here are redundant TODAY: a hard-gate failure pins the
+# composite at strategy_scoring.GATE_FAIL_CAP (39) and the post-grade state tilt
+# adds at most +6, so a Weak candidate tops out at 45 and can never clear 50.
+# Both are kept because they express DIFFERENT intents ("no low-scoring trades"
+# vs "no gate-failing trades") and either constant can move independently.
+SWING_MIN_SCORE = 50.0
+SWING_EXCLUDED_GRADES = ("Weak",)
+
+
+def _passes_swing_cut(sig):
+    """True when a scored candidate is good enough to publish. Pure."""
+    return ((sig.get("composite_score") or 0) >= SWING_MIN_SCORE
+            and sig.get("grade") not in SWING_EXCLUDED_GRADES)
+
 
 def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
                call_d_min, call_d_max, min_cr_fraction, families=None,
@@ -289,7 +317,7 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     # below would AttributeError on chain.get(...)/extract_options(None). Degrade
     # to an explicit empty result so the handler still publishes a fresh view.
     if not chain:
-        return {"signals": [], "view": {}}
+        return {"signals": [], "view": {}, "filtered_out": 0}
     quote = _proxy.schwab_client.get_quote(symbol) or {}
     spot = quote.get("last") or chain.get("underlyingPrice")
     # Off-hours the quote can miss AND the chain dict can lack ``underlyingPrice``
@@ -299,7 +327,7 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     # write -> the page hangs on "Scanning…". Degrade to an explicit empty result
     # (matching the no-chain guard above) BEFORE any builder runs.
     if not spot:
-        return {"signals": [], "view": {}}
+        return {"signals": [], "view": {}, "filtered_out": 0}
     hist = se.fetch_price_history(client, symbol)
     tech = se.calc_technicals(hist) if hist is not None else {}
     iv = run_iv_analysis(client, symbol, price=spot, hist=hist, chain=chain) or {}
@@ -339,6 +367,13 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
         signals += [ssn.adapt_iron_condor(ic) for ic in se.build_iron_condors(spreads)]
 
     signals = ssc.score_all(signals, view, atm_iv, em_1sd, market_state=market_state)
+
+    # Quality cut, BEFORE ids are assigned so every emitted row is addressable
+    # and the detail-panel lookup can't miss one.
+    scored_n = len(signals)
+    signals = [s for s in signals if _passes_swing_cut(s)]
+    filtered_out = scored_n - len(signals)
+
     assign_ids(signals, symbol)
     # Surface the symbol's IV Rank onto every candidate for the table's IV Rank
     # column. Single-symbol scan, so all candidates share the one value; None when
@@ -346,7 +381,7 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     iv_rank = iv.get("iv_rank")
     for s in signals:
         s["iv_rank"] = iv_rank
-    return {"signals": signals, "view": view}
+    return {"signals": signals, "view": view, "filtered_out": filtered_out}
 
 
 # ── Paper account (ported from webgui/pages/options/portfolio.py) ───────────

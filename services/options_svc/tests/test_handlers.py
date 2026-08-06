@@ -1221,6 +1221,25 @@ def test_calc_iv_command_caches_implied_iv(monkeypatch):
     assert msg is not None and msg.get("version") == env.version
 
 
+def test_swing_scan_publishes_the_filtered_out_count(monkeypatch):
+    """The page needs the drop count to tell 'nothing cleared the quality bar'
+    apart from 'the scan found nothing', so the handler must carry it through."""
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "swing_scan",
+                        lambda **p: {"signals": [], "view": {}, "filtered_out": 7})
+    handlers.swing_scan(bus, {"symbol": "SPY"})
+    assert bus.cache_get("cache:options:swing").payload["filtered_out"] == 7
+
+
+def test_swing_scan_filtered_out_defaults_when_compute_omits_it(monkeypatch):
+    """A stale compute returning no ``filtered_out`` must not crash the handler."""
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "swing_scan",
+                        lambda **p: {"signals": [], "view": {}})
+    handlers.swing_scan(bus, {"symbol": "SPY"})
+    assert bus.cache_get("cache:options:swing").payload["filtered_out"] == 0
+
+
 def test_swing_scan_uses_defaults_for_missing_args(monkeypatch):
     bus = Bus(fake=True)
     seen = {"params": None}
@@ -1683,6 +1702,10 @@ def test_run_flow_alerts_emits_uoa_from_stash(monkeypatch):
     # SPY is in the universe (no crossover SERIES data, but a valid member); UOA
     # shares the crossover universe, so the stash symbol must be in it to emit.
     monkeypatch.setattr(handlers, "_flow_alert_symbols", lambda: ["SPY"])
+    # Stub the SERIES read (as the sibling tests do): unstubbed it hits the real
+    # gex_history.db, and a live SPY premium crossover in today's collected rows
+    # prepends a second alert that has nothing to do with the UOA path here.
+    monkeypatch.setattr(handlers, "_load_flow_series_for", lambda conn, sym, limit: [])
     monkeypatch.setattr(compute, "take_uoa_stash", lambda: {"SPY": [dict(contract)]})
     monkeypatch.setattr(handlers, "_flow_now_ts", lambda: 1000)
     sent = []
@@ -1707,6 +1730,9 @@ def test_run_flow_alerts_uoa_excludes_vix(monkeypatch):
                 "expiry": "2026-07-18", "dte": 2, "cost": 1.0, "volume": 8000,
                 "oi": 1000, "vol_oi": 8.0, "premium": 800000.0}
     monkeypatch.setattr(handlers, "_flow_alert_symbols", lambda: ["SPY"])   # $VIX excluded
+    # See the sibling test: stub the series read so a real crossover in today's
+    # collected gex_history.db rows can't inject an extra alert.
+    monkeypatch.setattr(handlers, "_load_flow_series_for", lambda conn, sym, limit: [])
     monkeypatch.setattr(compute, "take_uoa_stash",
                         lambda: {"SPY": [uoa("SPY", 450.0)], "$VIX": [uoa("$VIX", 20.0)]})
     monkeypatch.setattr(handlers, "_flow_now_ts", lambda: 1000)
