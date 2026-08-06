@@ -990,6 +990,17 @@ def net_prem_only_group(selected, group_key):
     return [s for s in _np_selected(selected) if s in active]
 
 
+def net_prem_with_group(selected, group_key):
+    """``selected`` plus every symbol of ``group_key``, in group order.
+
+    Backs "Select all", which is scoped to the ACTIVE group rather than all 28:
+    the tick-boxes on screen ARE that group, so ticking a hidden 28 would put
+    lines on the chart whose source the reader cannot see. Other groups' ticks
+    survive — pair it with "Only this group" to get exactly one whole group."""
+    keep = set(_np_selected(selected)) | set(net_prem_group_symbols(group_key))
+    return [s for s in net_prem_symbols() if s in keep]
+
+
 def net_prem_color(symbol):
     """The fixed line colour for a symbol; grey for anything unrecognised."""
     return NET_PREM_COLORS.get(symbol, NET_PREM_FALLBACK)
@@ -1635,6 +1646,12 @@ def render():
                                 "compares DIRECTION regardless of size")
             ui.space()
             np_count_lbl = ui.label("").classes(f"text-xs {MUTED}")
+            np_all_btn = ui.button("Select all", color=None).props(
+                "no-caps dense flat").classes(BTN)
+            np_all_btn.tooltip(
+                "Tick every symbol in the group you are on. Other groups' "
+                "selections are left alone — use \"Only this group\" to drop "
+                "them.")
             np_only_btn = ui.button("Only this group", color=None).props(
                 "no-caps dense flat").classes(BTN)
             np_only_btn.tooltip(
@@ -2216,6 +2233,8 @@ def render():
         # repaint (the checkbox visibility feeds nothing but the eye, but showing a
         # stale block for a frame reads as a glitch).
         _sync_np_controls()
+        # ...and the symbol-scoped cluster hides/shows with the same switch.
+        _sync_spot_controls()
         _render_view()
 
     view_toggle.on_value_change(_on_view_change)
@@ -2241,9 +2260,21 @@ def render():
         _render_view()
 
     def _sync_spot_controls():
+        # Symbol / Refresh now / Level movement / Spot / Bar all drive the
+        # SYMBOL-SCOPED views (the by-strike bars, the heatmap, Flow, Term). Net
+        # Prem is symbol-INDEPENDENT — it plots a fixed 28-symbol universe from
+        # its own cache key and has no spot overlay — so every one of them is a
+        # dead knob there. Hide the cluster rather than leave controls that
+        # silently do nothing, the same reasoning that hides Bar for a line spot.
+        # Explain / Analyze / Briefings deliberately STAY: they are about the
+        # gamma briefing, reachable from any view.
+        symbol_scoped = view_toggle.value != "Net Prem"
+        for el in (symbol_in, fetch_btn, tracks_sw, spot_style_sel):
+            el.set_visibility(symbol_scoped)
         # Bar size is meaningless for a line — hide it rather than leave a control
         # that silently does nothing.
-        spot_int_sel.set_visibility(spot_style_sel.value != "line")
+        spot_int_sel.set_visibility(
+            symbol_scoped and spot_style_sel.value != "line")
 
     spot_style_sel.on_value_change(_on_spot_style)
     spot_int_sel.on_value_change(_on_spot_interval)
@@ -2303,6 +2334,11 @@ def render():
         _np_bulk_set(lambda sym: False)
 
     @guard
+    def _np_select_all():
+        keep = set(net_prem_with_group(_np_current(), np_group_tabs.value))
+        _np_bulk_set(lambda sym: sym in keep)
+
+    @guard
     def _np_only_group():
         """Drop everything outside the active group; leave its own ticks alone.
 
@@ -2316,6 +2352,7 @@ def render():
 
     np_group_tabs.on_value_change(_on_np_group)
     np_mode_sel.on_value_change(_on_np_mode)
+    np_all_btn.on_click(_np_select_all)
     np_only_btn.on_click(_np_only_group)
     np_clear_btn.on_click(_np_clear)
     for _cb in np_boxes.values():

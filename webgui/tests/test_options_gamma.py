@@ -1053,6 +1053,56 @@ def test_only_this_group_is_total_over_junk():
     assert gamma.net_prem_only_group([123, None, "NVDA"], "megacaps") == ["NVDA"]
 
 
+def test_select_all_adds_the_active_group():
+    out = gamma.net_prem_with_group(["$SPX"], "megacaps")
+    assert out[0] == "$SPX"                      # other groups survive
+    assert set(gamma.net_prem_group_symbols("megacaps")) <= set(out)
+
+
+def test_select_all_is_group_scoped_not_all_28():
+    """The tick-boxes on screen ARE the active group, so ticking a hidden 28
+    would plot lines whose source the reader cannot see."""
+    out = gamma.net_prem_with_group([], "sectors")
+    assert set(out) == set(gamma.net_prem_group_symbols("sectors"))
+    assert "NVDA" not in out and "$SPX" not in out
+
+
+def test_select_all_returns_group_order_and_dedupes():
+    out = gamma.net_prem_with_group(["AMD", "AMD", "NVDA"], "megacaps")
+    assert out == gamma.net_prem_group_symbols("megacaps")   # order, no dupes
+
+
+def test_select_all_is_total_over_junk():
+    assert gamma.net_prem_with_group([123, None], "gone") == []
+    assert gamma.net_prem_with_group([123, None, "NVDA"], "gone") == ["NVDA"]
+
+
+def test_select_all_is_wired_to_the_button():
+    import inspect
+    src = inspect.getsource(gamma.render)
+    assert "np_all_btn.on_click(_np_select_all)" in src
+    sel = src[src.index("def _np_select_all("):]
+    sel = sel[:sel.index("\n    @guard\n    def _np_only_group(")]
+    assert "net_prem_with_group(_np_current(), np_group_tabs.value)" in sel, sel
+
+
+def test_symbol_scoped_controls_hide_on_net_prem():
+    """Symbol / Refresh now / Level movement / Spot / Bar drive the
+    symbol-scoped views. Net Prem plots a fixed universe from its own cache key
+    and has no spot overlay, so leaving them visible there is five dead knobs."""
+    import inspect
+    src = inspect.getsource(gamma.render)
+    sync = src[src.index("def _sync_spot_controls("):]
+    sync = sync[:sync.index("\n    spot_style_sel.on_value_change")]
+    assert 'view_toggle.value != "Net Prem"' in sync, sync
+    for name in ("symbol_in", "fetch_btn", "tracks_sw", "spot_style_sel"):
+        assert name in sync, f"{name} not hidden on Net Prem"
+    # Bar stays subject to its own line-style rule as well as the view.
+    assert "spot_style_sel.value != \"line\"" in sync, sync
+    # ...and the view switch must actually call it.
+    assert "_sync_spot_controls()" in src[src.index("def _on_view_change("):]
+
+
 def test_only_this_group_is_wired_to_the_button():
     import inspect
     src = inspect.getsource(gamma.render)
