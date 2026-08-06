@@ -1824,7 +1824,7 @@ def gamma_snapshot(symbol: str, chain=None) -> dict | None:
         except Exception:
             return []
 
-    flow = []
+    flow, hedge_history = [], []
     try:
         views = {}
         for vname, (idx, vstr) in _GAMMA_VIEWS.items():
@@ -1871,6 +1871,18 @@ def gamma_snapshot(symbol: str, chain=None) -> dict | None:
                          "call_prem": r[4], "put_prem": r[5]} for r in _frows]
             except Exception:
                 flow = []
+            # 0-DTE hedge-pressure track — same connection, same RTH window as the
+            # heatmap rows so the panel's time axis lines up with it. Empty for any
+            # symbol whose nearest expiry isn't today (the column is NULL there).
+            try:
+                _hrows = _rth_only(
+                    gh.load_hedge_series(hist_conn, symbol, session_date), rth)
+                hedge_history = [{"ts": r[0], "hedge_pressure": r[1],
+                                  "net_delta_0dte": r[2], "projected_flip": r[3]}
+                                 for r in _hrows]
+            except Exception:
+                log.debug("hedge history load failed", exc_info=True)
+                hedge_history = []
     finally:
         if hist_conn is not None:
             try:
@@ -1904,7 +1916,7 @@ def gamma_snapshot(symbol: str, chain=None) -> dict | None:
 
     return {"symbol": symbol, "spot": spot, "dte": dte,
             "views": views, "term": term, "flow": flow,
-            "projected_flip": projected_flip}
+            "projected_flip": projected_flip, "hedge_history": hedge_history}
 
 
 # ── Intraday GEX history collection (Tier-2 owner) ──────────────────────────

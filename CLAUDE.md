@@ -8,7 +8,30 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-08-05 (**Projected EOD delta-flip line + a CORRECTED projection**: the Gamma
+**Last updated:** 2026-08-05 (**0-DTE hedge-pressure history panel**: a compact signed-column track of
+`hedge_pressure` across the session, mounted **directly under the heatmap** and sharing its time
+categories. It is its **OWN chart element, not a heatmap overlay** — pressure is in DOLLARS while the
+heatmap's y-axis is STRIKE *and* is pixel-aligned to the bar chart, so it cannot share that axis.
+Values are plotted in **$B** (raw dollars run to 1e9+ and are unreadable) and colored **per point by
+sign** — green = dealers must BUY into the close, red = SELL — so the moment pressure flips side is
+visible at a glance; one series carries both. A one-line reader (`hedge_summary_text`) states the CURRENT
+value and direction. The panel + label are **hidden unless the symbol has a 0-DTE book**, and they hide
+wherever the heatmap does (all six `set_visibility(False)` sites), so they can never outlive it.
+**No new collection was needed** — `hedge_pressure` had been stored since 2026-07-30, so the track works
+**RETROACTIVELY** on ~391 rows/session for the 0-DTE names (`$SPX`/`$NDX`/`SPY`/`QQQ`/`IWM`/`AMD`). New
+`gex_history_db.load_hedge_series(conn, symbol, d=None)` reads the `dex` rows chronologically
+(`(ts, hedge_pressure, net_delta_0dte, projected_flip)`, sargable ts range) and **SKIPS NULL-pressure
+rows rather than returning them as zero** — the column is only populated while a symbol's nearest expiry
+is today, and a zero would read as "no drift" instead of "no 0-DTE book". `compute.gamma_snapshot`
+attaches it as **`hedge_history`** on the SAME read-only connection and through the SAME `_rth_only`
+window as the heatmap rows, so the panel's x-axis lines up with the heatmap above it. The
+`projected_flip` element of each row is **forward-only** (that column shipped 2026-07-28), so historical
+rows carry None there while still reporting pressure — a projected-flip track becomes possible as data
+accrues. **Restart `options_svc` + the webgui.** Live-verified on the real DB: 391 points,
+**349 green / 42 red**, peak **+3.37B**, trough **−0.21B**, rendering as 391 ~1px paths (the correct
+density for 1-min samples). webgui **1049** green; options-scanner **1306 passed / 16 documented-baseline
+fails**; options_svc **916** (+2 documented `test_expected_move`).
+Prior — 2026-08-05 (**Projected EOD delta-flip line + a CORRECTED projection**: the Gamma
 heatmap gains a dashed amber **"Proj. flip"** level on **all four views** — where the DEX curve crosses
 zero once the 0-DTE book's deltas are advanced to the 15:00 CT close by **charm** at flat spot. It is a
 0-DTE DELTA concept, not each view's own metric, so it is computed ONCE (`compute.gamma_snapshot` →

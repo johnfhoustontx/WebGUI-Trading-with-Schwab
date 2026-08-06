@@ -1565,3 +1565,36 @@ def test_heatmap_figure_draws_projected_flip_on_any_view():
                                    projected_flip=452.25)
         vals = [pl["value"] for pl in fig["yAxis"]["plotLines"]]
         assert 452.25 in vals, view
+
+
+# --- Hedge-pressure history panel (0-DTE charm drift over the session) ---
+
+_HEDGE = [{"ts": 1, "hedge_pressure": 1.5e9, "net_delta_0dte": 5e10, "projected_flip": 99.0},
+          {"ts": 2, "hedge_pressure": -2.5e9, "net_delta_0dte": 5e10, "projected_flip": 98.0},
+          {"ts": 3, "hedge_pressure": 3.0e9, "net_delta_0dte": 5e10, "projected_flip": 99.5}]
+
+
+def test_hedge_figure_plots_pressure_in_billions_signed():
+    pts = gamma.hedge_figure(_HEDGE, ["09:30", "09:31", "09:32"])["series"][0]["data"]
+    # Dollars are unreadable raw; the axis is $B and the sign is the whole point
+    # (positive = dealers must BUY into the close, negative = sell).
+    assert [p["y"] for p in pts] == [1.5, -2.5, 3.0]
+    assert [p["x"] for p in pts] == [0, 1, 2]          # shares the heatmap's x index
+    # Colored PER POINT by sign, so ONE series carries both and the flip from
+    # buy- to sell-pressure is visible at a glance.
+    assert pts[0]["color"] == gamma.UP_COLOR
+    assert pts[1]["color"] == gamma.DOWN_COLOR
+
+
+def test_hedge_figure_empty_is_safe():
+    for arg in ([], None):
+        fig = gamma.hedge_figure(arg, [])
+        assert fig["series"][0]["data"] == []
+
+
+def test_hedge_summary_text_reads_direction_and_size():
+    txt = gamma.hedge_summary_text(_HEDGE)
+    assert "+$3.00B" in txt and "buy" in txt.lower()      # last value drives the read
+    assert gamma.hedge_summary_text([]) == ""
+    down = gamma.hedge_summary_text([{"ts": 1, "hedge_pressure": -1.2e9}])
+    assert "-$1.20B" in down and "sell" in down.lower()

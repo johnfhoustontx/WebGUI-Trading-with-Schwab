@@ -4366,3 +4366,33 @@ def test_gamma_snapshot_projected_flip_none_without_0dte(monkeypatch):
         raise RuntimeError("no hedge data")
     _sys.modules["gamma_tool"].compute_projected_flip = _boom
     assert compute.gamma_snapshot("$SPX")["projected_flip"] is None
+
+
+def test_gamma_snapshot_attaches_rth_filtered_hedge_history(monkeypatch):
+    """The hedge-pressure track rides the SAME read-only connection + RTH window as
+    the heatmap rows, so the panel's time axis lines up with the heatmap's."""
+    import sys as _sys
+    from services.options_svc import compute
+    _patch_gamma(monkeypatch, history=[(1, 5400.0, 3, 4, 5, 6, {5400.0: {"net": 1}})])
+    t0 = compute._rth_bounds(_GAMMA_TEST_SESSION)[0]
+    rows = [(t0 - 600, 1.0e9, 5.0e9, 5399.0),   # pre-open: dropped
+            (t0 + 60, 2.0e9, 6.0e9, 5401.0),
+            (t0 + 120, 3.0e9, 7.0e9, 5402.0)]
+    _sys.modules["gex_history_db"].load_hedge_series = lambda conn, sym, d=None: rows
+    snap = compute.gamma_snapshot("$SPX")
+    got = snap["hedge_history"]
+    assert [r["ts"] for r in got] == [t0 + 60, t0 + 120]      # pre-open row filtered
+    assert got[0]["hedge_pressure"] == 2.0e9
+    assert got[0]["net_delta_0dte"] == 6.0e9
+    assert got[0]["projected_flip"] == 5401.0
+
+
+def test_gamma_snapshot_hedge_history_degrades_to_empty(monkeypatch):
+    import sys as _sys
+    from services.options_svc import compute
+    _patch_gamma(monkeypatch, history=[(1, 5400.0, 3, 4, 5, 6, {5400.0: {"net": 1}})])
+
+    def _boom(conn, sym, d=None):
+        raise RuntimeError("no such column")
+    _sys.modules["gex_history_db"].load_hedge_series = _boom
+    assert compute.gamma_snapshot("$SPX")["hedge_history"] == []

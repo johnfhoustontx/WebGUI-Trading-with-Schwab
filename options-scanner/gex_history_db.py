@@ -452,6 +452,39 @@ def latest_skew_by_symbol(
     return cur.fetchall()
 
 
+def load_hedge_series(
+    conn: sqlite3.Connection,
+    symbol: str,
+    d=None,
+) -> list[tuple]:
+    """0-DTE hedge-pressure series for one symbol on LOCAL date ``d`` (default today).
+
+    One row per snapshot from the ``dex`` view, chronological:
+    ``(ts, hedge_pressure, net_delta_0dte, projected_flip)``.
+
+    Rows with a NULL ``hedge_pressure`` are SKIPPED rather than returned as zero —
+    the column is only populated while a symbol's nearest expiry is TODAY, so most
+    symbols and most off-session rows have none, and a zero would read as "no drift"
+    instead of "no 0-DTE book". ``projected_flip`` is forward-only (the column was
+    added 2026-07-28), so older rows carry None there while still reporting pressure.
+
+    Uses the sargable ``ts >= ? AND ts < ?`` range so the ``ts`` index applies.
+    """
+    start, end = _local_unix_range(d)
+    cur = conn.execute(
+        """
+        SELECT ts, hedge_pressure, net_delta_0dte, projected_flip
+          FROM snapshots
+         WHERE symbol = ? AND view = 'dex'
+           AND ts >= ? AND ts < ?
+           AND hedge_pressure IS NOT NULL
+         ORDER BY ts ASC
+        """,
+        (symbol, start, end),
+    )
+    return [tuple(r) for r in cur.fetchall()]
+
+
 def load_flow_series(
     conn: sqlite3.Connection,
     symbol: str,

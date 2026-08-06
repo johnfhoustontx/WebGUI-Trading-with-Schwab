@@ -796,3 +796,49 @@ def test_latest_spot_flip_returns_ts_spot_flip(tmp_path, monkeypatch):
     ts, spot, flip = db.latest_spot_flip(conn, "SPY", "gex")
     assert ts == now and spot == 452.0 and flip == 450.0
     assert db.latest_spot_flip(conn, "QQQ", "gex") is None
+
+
+# --- Hedge-pressure history (0-DTE charm drift over the session) ---
+
+def test_load_hedge_series_reads_the_dex_rows_chronologically(tmp_path, monkeypatch):
+    import datetime as _dt
+    import gex_history_db as gh
+    monkeypatch.setattr(gh, "DB_PATH", tmp_path / "h.db")
+    conn = gh.connect(); gh.init_schema(conn)
+    base = int(_dt.datetime.now().replace(hour=9, minute=0, second=0,
+                                          microsecond=0).timestamp())
+    # Out of order on purpose — the loader must sort.
+    for off, hp in ((120, 3.0e9), (0, 1.0e9), (60, 2.0e9)):
+        gh.insert_snapshot(conn, "$SPX", "dex",
+                           {"ts": base + off, "spot": 100.0, "flip": 99.0,
+                            "hedge_pressure": hp, "net_delta_0dte": hp * 10,
+                            "projected_flip": 99.5},
+                           {100.0: {"net": 1}}, dte=0)
+    conn.commit()
+    rows = gh.load_hedge_series(conn, "$SPX")
+    assert [r[0] for r in rows] == [base, base + 60, base + 120]
+    assert [r[1] for r in rows] == [1.0e9, 2.0e9, 3.0e9]
+    assert rows[0][2] == 1.0e10 and rows[0][3] == 99.5
+    conn.close()
+
+
+def test_load_hedge_series_skips_rows_without_pressure(tmp_path, monkeypatch):
+    """Only 0-DTE names ever populate hedge_pressure, and only while the nearest
+    expiry is today — every other row is NULL and must not appear as a zero."""
+    import datetime as _dt
+    import gex_history_db as gh
+    monkeypatch.setattr(gh, "DB_PATH", tmp_path / "h2.db")
+    conn = gh.connect(); gh.init_schema(conn)
+    base = int(_dt.datetime.now().replace(hour=9, minute=0, second=0,
+                                          microsecond=0).timestamp())
+    gh.insert_snapshot(conn, "XLB", "dex", {"ts": base, "spot": 50.0, "flip": 49.0},
+                       {50.0: {"net": 1}}, dte=3)                      # no hedge fields
+    gh.insert_snapshot(conn, "XLB", "dex", {"ts": base + 60, "spot": 50.0,
+                                            "flip": 49.0, "hedge_pressure": 5.0},
+                       {50.0: {"net": 1}}, dte=0)
+    conn.commit()
+    rows = gh.load_hedge_series(conn, "XLB")
+    assert [r[0] for r in rows] == [base + 60]        # the NULL row is skipped
+    # A symbol that never has 0-DTE yields nothing at all, not an empty-looking zero.
+    assert gh.load_hedge_series(conn, "NOPE") == []
+    conn.close()

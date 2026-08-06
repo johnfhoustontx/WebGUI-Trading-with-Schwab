@@ -508,6 +508,68 @@ def candle_points(bars):
     return body, wick
 
 
+def hedge_points(hedge_rows):
+    """``[[x, $B, color], …]`` for the hedge-pressure panel.
+
+    x is the row INDEX so the panel shares the heatmap's time-category axis exactly.
+    Dollars are converted to BILLIONS (raw values run to 1e9+ and are unreadable),
+    and each point is colored by SIGN — positive means dealers must BUY into the
+    close, negative SELL — so a flip from one to the other is visible at a glance."""
+    out = []
+    for i, r in enumerate(hedge_rows or []):
+        v = (r or {}).get("hedge_pressure")
+        if not isinstance(v, (int, float)) or isinstance(v, bool):
+            continue
+        out.append([i, round(v / 1e9, 4), UP_COLOR if v >= 0 else DOWN_COLOR])
+    return out
+
+
+def hedge_summary_text(hedge_rows):
+    """One-line read of the CURRENT hedge pressure ('' when there is none)."""
+    pts = [r.get("hedge_pressure") for r in (hedge_rows or [])
+           if isinstance((r or {}).get("hedge_pressure"), (int, float))]
+    if not pts:
+        return ""
+    v = pts[-1]
+    side = "buy" if v >= 0 else "sell"
+    return (f"0-DTE hedge pressure {'+' if v >= 0 else '-'}${abs(v)/1e9:.2f}B — "
+            f"dealers must {side} into the close if spot holds")
+
+
+def hedge_figure(hedge_rows, times, height=150):
+    """Compact signed-column panel of 0-DTE hedge pressure over the session.
+
+    Its OWN element, below the heatmap: pressure is in DOLLARS while the heatmap's
+    y-axis is STRIKE (and is pixel-aligned to the bar chart), so it cannot share
+    that axis. The x axis reuses the heatmap's time categories, so the two read
+    together vertically."""
+    pts = hedge_points(hedge_rows)
+    fig = _base_chart("column", height)
+    fig["chart"]["backgroundColor"] = "transparent"
+    fig["chart"]["marginLeft"] = 0
+    fig["chart"]["marginRight"] = 0
+    fig.update({
+        "title": {"text": None},
+        "legend": {"enabled": False},
+        "xAxis": {**_dark_axis(), "categories": list(times or []),
+                  "labels": {"enabled": False}},
+        "yAxis": {**_dark_axis(), "title": {"text": None},
+                  "labels": {"enabled": False},
+                  "plotLines": [{"value": 0, "color": "#42506b", "width": 1,
+                                 "zIndex": 3}]},
+        "series": [{
+            "type": "column", "name": "Hedge pressure",
+            "data": [{"x": x, "y": y, "color": c} for x, y, c in pts],
+            "borderWidth": 0, "groupPadding": 0.02, "pointPadding": 0.0,
+            "states": {"inactive": {"enabled": False}, "hover": {"enabled": False}},
+            "enableMouseTracking": True,
+            "tooltip": {"headerFormat": "",
+                        "pointFormat": "Hedge {point.y:+,.2f}B"},
+        }],
+    })
+    return fig
+
+
 def track_points(values):
     """[[time_index, level], …] for a level track, keeping None as a GAP.
 
@@ -1737,6 +1799,14 @@ def render():
             # Created with the heatmap init fig so the press-and-hold-tooltip load
             # hook is installed at creation (load fires once); updated in place after.
             heat_plot = ui.highchart(_heat_init_fig(), extras=["heatmap", "coloraxis"]).classes("w-full")
+            # 0-DTE hedge-pressure track, directly UNDER the heatmap and sharing its
+            # time categories. Its own element because pressure is in DOLLARS while
+            # the heatmap's y-axis is STRIKE (and is pixel-aligned to the bar chart),
+            # so it cannot share that axis. Hidden unless the symbol has a 0-DTE book.
+            hedge_plot = ui.highchart(hedge_figure([], [])).classes("w-full")
+            hedge_plot.set_visibility(False)
+            hedge_lbl = ui.label("").classes("opacity-70 text-[10px] text-right w-full")
+            hedge_lbl.set_visibility(False)
             heat_msg = ui.label("").classes("opacity-60 text-sm")
 
     # Tiny status strip BELOW the charts, right-aligned: the collector status WORD
@@ -1860,6 +1930,8 @@ def render():
         _set_chart(net_prem_figure(series, sel, mode))
         state["chart_el"].set_visibility(True)
         heat_plot.set_visibility(False)
+        hedge_plot.set_visibility(False)
+        hedge_lbl.set_visibility(False)
         heat_msg.set_visibility(False)
         _apply_flex(0, term=True)          # full width, no heatmap panel
         # net_prem_summary_text already folds in the mode-aware "no data yet"
@@ -1884,6 +1956,8 @@ def render():
         if not snap:
             state["chart_el"].set_visibility(False)
             heat_plot.set_visibility(False)
+            hedge_plot.set_visibility(False)
+            hedge_lbl.set_visibility(False)
             heat_msg.set_visibility(False)
             chart_msg.text = "Fetch a symbol… (no snapshot yet)."
             chart_msg.set_visibility(True)
@@ -1897,6 +1971,8 @@ def render():
             _set_chart(term_heatmap(snap.get("term") or {}))
             state["chart_el"].set_visibility(True)
             heat_plot.set_visibility(False)
+            hedge_plot.set_visibility(False)
+            hedge_lbl.set_visibility(False)
             heat_msg.set_visibility(False)
             _apply_flex(0, term=True)
             _set_summary(summary_text({"spot": spot, "strike_count": None}, "Term"))
@@ -1907,6 +1983,8 @@ def render():
             _set_chart(flow_figure(snap.get("flow") or []))
             state["chart_el"].set_visibility(True)
             heat_plot.set_visibility(False)
+            hedge_plot.set_visibility(False)
+            hedge_lbl.set_visibility(False)
             heat_msg.set_visibility(False)
             _apply_flex(0, term=True)
             _set_summary(flow_summary_text(snap.get("flow")))
@@ -1928,6 +2006,8 @@ def render():
             # message instead of crashing on the spot*pct band math.
             state["chart_el"].set_visibility(False)
             heat_plot.set_visibility(False)
+            hedge_plot.set_visibility(False)
+            hedge_lbl.set_visibility(False)
             heat_msg.set_visibility(False)
             sym = snap.get("symbol") or _current_symbol()
             chart_msg.text = (f"No spot price for {sym} yet "
@@ -1979,10 +2059,20 @@ def render():
                                                   spot_style=spot_style_sel.value,
                                                   spot_interval=spot_int_sel.value,
                                                   projected_flip=snap.get("projected_flip")))
+            _hedge = snap.get("hedge_history") or []
+            _has_hedge = bool(hedge_points(_hedge))
+            if _has_hedge:
+                _set_figure(hedge_plot,
+                            hedge_figure(_hedge, heatmap_matrix(rows)["x"]))
+                hedge_lbl.set_text(hedge_summary_text(_hedge))
+            hedge_plot.set_visibility(_has_hedge)
+            hedge_lbl.set_visibility(_has_hedge)
             heat_plot.set_visibility(True)
             heat_msg.set_visibility(False)
         else:
             heat_plot.set_visibility(False)
+            hedge_plot.set_visibility(False)
+            hedge_lbl.set_visibility(False)
             heat_msg.text = "No intraday snapshots yet (history collector not running)."
             heat_msg.set_visibility(True)
         _apply_flex(len(rows))
