@@ -1010,6 +1010,59 @@ def test_net_prem_figure_tooltip_is_not_shared_and_legend_is_on():
     assert fig["yAxis"]["plotLines"][0]["value"] == 0
 
 
+def test_net_prem_group_symbols_returns_one_group():
+    assert gamma.net_prem_group_symbols("megacaps") == [
+        "NVDA", "AVGO", "AAPL", "META", "MSFT",
+        "TSLA", "PLTR", "AMZN", "GOOGL", "AMD"]
+    assert "$SPX" in gamma.net_prem_group_symbols("indices")
+    # Disjoint groups, so a mega-cap request can never carry an index back.
+    assert "$SPX" not in gamma.net_prem_group_symbols("megacaps")
+
+
+def test_net_prem_group_symbols_is_total_over_an_unknown_key():
+    """A persisted group key that no longer exists must degrade, not raise —
+    gamma_netprem_group lives in the hand-editable settings.json."""
+    for junk in ("gone", "", None, 7):
+        assert gamma.net_prem_group_symbols(junk) == []
+
+
+def test_only_this_group_drops_out_of_group_symbols():
+    """The one case where the group tab touches the CHART rather than visibility.
+
+    The tab filters which tick-boxes you see — that is what lets $SPX plot beside
+    XLK — so switching to Mega-caps leaves ticked indices on the chart. This
+    reduces the selection to the active group in one click.
+    """
+    out = gamma.net_prem_only_group(
+        ["$SPX", "$NDX", "SPY", "NVDA", "AAPL"], "megacaps")
+    assert out == ["NVDA", "AAPL"]
+
+
+def test_only_this_group_keeps_ticks_rather_than_selecting_the_whole_group():
+    """A narrowing, not a set-to-all: pressing it can only REMOVE lines. If it
+    selected the whole group it would silently add nine symbols you never asked
+    for whenever one mega-cap happened to be ticked."""
+    out = gamma.net_prem_only_group(["$SPX", "NVDA"], "megacaps")
+    assert out == ["NVDA"]
+
+
+def test_only_this_group_is_total_over_junk():
+    assert gamma.net_prem_only_group([], "megacaps") == []
+    assert gamma.net_prem_only_group(["NVDA"], "gone") == []
+    # Hostile persisted selections must not raise (settings.json is editable).
+    assert gamma.net_prem_only_group([123, None, "NVDA"], "megacaps") == ["NVDA"]
+
+
+def test_only_this_group_is_wired_to_the_button():
+    import inspect
+    src = inspect.getsource(gamma.render)
+    assert "np_only_btn.on_click(_np_only_group)" in src
+    only = src[src.index("def _np_only_group("):]
+    only = only[:only.index("\n    np_group_tabs.on_value_change")]
+    # It must read the ACTIVE tab, not a hardcoded group.
+    assert "net_prem_only_group(_np_current(), np_group_tabs.value)" in only, only
+
+
 def test_net_prem_figure_legend_sits_above_the_plot():
     """The legend must not share the bottom with the rotated time labels.
 

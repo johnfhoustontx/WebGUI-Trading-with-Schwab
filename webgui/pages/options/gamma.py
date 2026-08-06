@@ -966,6 +966,30 @@ def net_prem_symbols():
 _NET_PREM_KNOWN = frozenset(net_prem_symbols())
 
 
+def net_prem_group_symbols(group_key):
+    """The symbols belonging to one group, or ``[]`` for an unknown key.
+
+    Backs the "Only this group" button, which is the single place the group tab
+    is allowed to change what is PLOTTED rather than merely what is visible.
+    Total over junk so a persisted group key that no longer exists degrades to
+    "no group" instead of raising."""
+    for group in NET_PREM_GROUPS:
+        if group["key"] == group_key:
+            return list(group["symbols"])
+    return []
+
+
+def net_prem_only_group(selected, group_key):
+    """``selected`` reduced to the symbols of ``group_key``, order preserved.
+
+    Backs the "Only this group" button. It KEEPS that group's existing ticks
+    rather than selecting the whole group, so the button is a narrowing — the
+    chart can only lose lines by pressing it, never gain ones you didn't ask
+    for. Unknown group → ``[]`` (see net_prem_group_symbols)."""
+    active = set(net_prem_group_symbols(group_key))
+    return [s for s in _np_selected(selected) if s in active]
+
+
 def net_prem_color(symbol):
     """The fixed line colour for a symbol; grey for anything unrecognised."""
     return NET_PREM_COLORS.get(symbol, NET_PREM_FALLBACK)
@@ -1611,6 +1635,12 @@ def render():
                                 "compares DIRECTION regardless of size")
             ui.space()
             np_count_lbl = ui.label("").classes(f"text-xs {MUTED}")
+            np_only_btn = ui.button("Only this group", color=None).props(
+                "no-caps dense flat").classes(BTN)
+            np_only_btn.tooltip(
+                "Unplot everything outside the group tab you are on. The tab "
+                "filters the tick-boxes, not the chart — so symbols ticked in "
+                "another group keep plotting until you drop them here.")
             np_clear_btn = ui.button("Clear all", color=None).props(
                 "no-caps dense flat").classes(BTN)
         # One checkbox per symbol, all built up front and toggled by VISIBILITY
@@ -2254,19 +2284,39 @@ def render():
         app_settings.set("gamma_netprem_mode", e.value)
         _render_view()
 
-    @guard
-    def _np_clear():
-        # Latched so 28 programmatic value sets don't fire 28 repaints.
+    def _np_bulk_set(keep):
+        """Set every checkbox to ``keep(symbol)``, then commit ONCE.
+
+        Latched so 28 programmatic value sets don't fire 28 repaints. ``keep`` is
+        called for a symbol before that symbol is written, so it may read the
+        current value of the box it is deciding about."""
         state["np_bulk"] = True
         try:
-            for cb in np_boxes.values():
-                cb.value = False
+            for sym, cb in np_boxes.items():
+                cb.value = bool(keep(sym))
         finally:
             state["np_bulk"] = False
         _np_commit()
 
+    @guard
+    def _np_clear():
+        _np_bulk_set(lambda sym: False)
+
+    @guard
+    def _np_only_group():
+        """Drop everything outside the active group; leave its own ticks alone.
+
+        The group tab filters which checkboxes are VISIBLE, not what is plotted —
+        deliberately, so a cross-group selection ($SPX beside XLK) is possible at
+        all. The cost of that model is that "just show me this group" would
+        otherwise be a two-step (Clear all, then re-tick). This is that step in
+        one click, and it is the only place the tab affects the chart."""
+        keep = set(net_prem_only_group(_np_current(), np_group_tabs.value))
+        _np_bulk_set(lambda sym: sym in keep)
+
     np_group_tabs.on_value_change(_on_np_group)
     np_mode_sel.on_value_change(_on_np_mode)
+    np_only_btn.on_click(_np_only_group)
     np_clear_btn.on_click(_np_clear)
     for _cb in np_boxes.values():
         _cb.on_value_change(lambda e: _on_np_symbol())
