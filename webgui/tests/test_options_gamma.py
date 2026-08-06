@@ -1010,6 +1010,20 @@ def test_net_prem_figure_tooltip_is_not_shared_and_legend_is_on():
     assert fig["yAxis"]["plotLines"][0]["value"] == 0
 
 
+def test_net_prem_figure_legend_sits_above_the_plot():
+    """The legend must not share the bottom with the rotated time labels.
+
+    Series count here is user-driven (up to 28), so the legend wraps to several
+    rows. Highcharts reserves bottom space for the legend OR the axis labels, not
+    both — so a bottom legend plus a pinned marginBottom overruns the -45° time
+    labels and the axis title, which is what happened live at 15 symbols.
+    """
+    fig = gamma.net_prem_figure(_np_series(), ["QQQ", "SPY"])
+    assert fig["legend"]["verticalAlign"] == "top"
+    # A pinned bottom margin would re-break it however the legend is aligned.
+    assert "marginBottom" not in fig["chart"]
+
+
 def test_net_prem_figure_y_axis_title_follows_the_mode():
     assert "$M" in gamma.net_prem_figure(
         _np_series(), ["QQQ"], "dollars")["yAxis"]["title"]["text"]

@@ -1147,9 +1147,18 @@ def net_prem_figure(series, symbols, mode="dollars", height=680):
                           "marker": {"enabled": False}})
 
     fig = _base_chart("line", height)
-    fig["chart"]["marginBottom"] = 64
+    # Legend ABOVE the plot, and NO pinned marginBottom — unlike flow_figure,
+    # whose fixed 4 series always fit one legend row inside its marginBottom of
+    # 64. Here the count is user-driven (up to 28), so the legend wraps to
+    # several rows; pinned at the bottom those rows land on top of the rotated
+    # time labels and the axis title, because Highcharts reserves bottom space
+    # for the legend OR the labels, not both. Top-aligned it pushes the plot
+    # down instead of colliding, and dropping marginBottom lets the bottom
+    # auto-size to whatever the -45° labels actually need.
     fig["legend"] = {"enabled": True, "itemStyle": {"color": FONT},
-                     "itemHoverStyle": {"color": "#ffffff"}}
+                     "itemHoverStyle": {"color": "#ffffff"},
+                     "verticalAlign": "top", "align": "center",
+                     "padding": 6, "itemMarginBottom": 2}
     fig.update({
         "title": {"text": f"Intraday net premium (call $ − put $) · "
                           f"{NET_PREM_MODES[mode]}",
