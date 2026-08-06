@@ -20,6 +20,7 @@ import math
 from zoneinfo import ZoneInfo
 
 import app_settings
+import page_help as _page_help
 from pages.ui_guard import guard, guard_async
 from .inputs import select_all_on_focus
 from .theme import BTN, BTN_PRIMARY, MUTED
@@ -409,8 +410,14 @@ def bar_figure(data, spot, view="GEX", walls=None, flip=None, n_side=N_SIDE, hei
         # grouping False so the projected outline OVERLAYS its bar instead of being
         # drawn beside it (which would halve the bar width and break the alignment
         # with the heatmap).
+        # crisp False: with crisping ON, a bar whose value is exactly 0 gets its
+        # 1px border subtracted from a 0-height rect, so Highcharts emits
+        # height="-1" and the browser logs 'A negative value is not valid'. Purely
+        # a console warning (nothing renders wrong), but a zero-net strike is
+        # routine here, so silence it at the source rather than live with the noise.
         "plotOptions": {"bar": {"pointPadding": 0.04, "groupPadding": 0,
-                                "borderRadius": 0, "grouping": False}},
+                                "borderRadius": 0, "grouping": False,
+                                "crisp": False}},
         "series": [{"type": "bar", "name": label, "data": points, "colorByPoint": False}],
     })
     # Projected close: each strike's net after ITS OWN 0-DTE charm drift. Drawn as an
@@ -589,6 +596,9 @@ def hedge_figure(hedge_rows, times, height=150):
             "type": "column", "name": "Hedge pressure",
             "data": [{"x": x, "y": y, "color": c} for x, y, c in pts],
             "borderWidth": 0, "groupPadding": 0.02, "pointPadding": 0.0,
+            # Same zero-height crisping warning as the bar chart — and pressure
+            # legitimately decays to exactly 0 at the close, so it WILL happen daily.
+            "crisp": False,
             "states": {"inactive": {"enabled": False}, "hover": {"enabled": False}},
             "enableMouseTracking": True,
             "tooltip": {"headerFormat": "",
@@ -1645,7 +1655,11 @@ def render():
             "dense no-caps inline-label align=left")
         with tabs:
             for v in _VIEW_ORDER:
-                ui.tab(v, label=_view_label(v))
+                tab = ui.tab(v, label=_view_label(v))
+                _h = _page_help.subtab_help("/options/gamma", v)
+                if _h:
+                    with tab:
+                        ui.tooltip(_h).props("delay=350 max-width=340px")
         return tabs
 
     if _slot is not None:
@@ -1740,7 +1754,11 @@ def render():
                 "dense no-caps inline-label align=left")
             with np_group_tabs:
                 for _g in NET_PREM_GROUPS:
-                    ui.tab(_g["key"], label=_g["label"])
+                    _gtab = ui.tab(_g["key"], label=_g["label"])
+                    _gh = _page_help.subtab_help("/options/gamma", _g["key"])
+                    if _gh:
+                        with _gtab:
+                            ui.tooltip(_gh).props("delay=350 max-width=340px")
             np_mode_sel = ui.select(dict(NET_PREM_MODES), value=_np_mode0,
                                     label="Scale").props(
                 "dense options-dense").classes("w-36")

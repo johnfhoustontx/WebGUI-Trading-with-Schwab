@@ -1649,3 +1649,14 @@ def test_bar_figure_omits_projected_series_when_no_drift():
     plain = {k: v for k, v in _DRIFT_DATA.items() if k != "hedge_drift_by_strike"}
     fig = gamma.bar_figure(plain, 450.0, view="DEX")
     assert [s["name"] for s in fig["series"]] == [gamma._view_label("DEX")]
+
+
+def test_zero_value_bars_do_not_trip_the_crisping_warning():
+    """A bar whose value is exactly 0 (a zero-net strike; hedge pressure at the
+    close) gets its border subtracted from a 0-height rect when crisping is on, so
+    Highcharts emits height="-1" and the browser logs it. Nothing renders wrong,
+    but both cases are routine here, so crisp stays off."""
+    bars = gamma.bar_figure(GEX, 450.0, view="GEX")
+    assert bars["plotOptions"]["bar"]["crisp"] is False
+    hedge = gamma.hedge_figure([{"ts": 1, "hedge_pressure": 0.0}], ["09:30"])
+    assert hedge["series"][0]["crisp"] is False
