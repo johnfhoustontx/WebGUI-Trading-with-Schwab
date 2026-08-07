@@ -644,7 +644,36 @@ contracts **46**; ruff clean. Live-verified end-to-end (real proxy → label "Tr
 evidence "ADX 64 rising / Band-hug 67% / 2 failed OR breaks"; contract-valid with no carry leakage;
 RTH gate correctly silent off-hours). Design/plan:
 [design](docs/plans/2026-07-23-market-regime-blended-classifier-design.md) /
-[plan](docs/plans/2026-07-23-market-regime-blended-classifier-plan.md). Prior — 2026-07-21 (**Market Dashboard: "Magnificent 7" frame → "Top 10", MAG7 tile →
+[plan](docs/plans/2026-07-23-market-regime-blended-classifier-plan.md). Prior — 2026-07-22 (**Dealer
+gamma-regime flip alert → Telegram + Discord**: a new options-flow alert (commit `a4ad33f`) fires when
+spot crosses a symbol's dealer **gamma flip level** — the regime flips **POSITIVE** (spot ABOVE the flip
+→ dealers long gamma, volatility dampened) ↔ **NEGATIVE** (spot BELOW → dealers short gamma, volatility
+amplified). Rides the EXISTING 1-min flow-alert poll and pushes via the same `send_flow_alert` path
+(Telegram + a **dedicated** Discord webhook), so it is a third flow-alert type beside crossover + UOA.
+Pure detectors in `services/options_svc/flow_alerts.py`: **`gamma_regime(spot, flip, prev, band_pct)`**
+computes the regime from spot-vs-flip with a **Schmitt-trigger hysteresis band** (spot must clear the
+flip by `band_pct` to switch, so a spot hovering AT the flip does not chatter), and
+**`detect_gamma_flip(...)` → `(alert|None, new_regime)`** (pure; no alert on the day's baseline / on no
+change / on unclassifiable data; `alert_text` describes the mechanic with NO buy/sell claim). New
+**`gex_history_db.latest_spot_flip(conn, symbol, view, date)`** reads the latest `(ts, spot, flip)` in ONE
+query (summary columns only, never `gex_json`). The handler **`_run_gamma_flip`** (wired into
+`run_flow_alerts`, reusing the SAME open read-only connection + cooldown map) records the last-alerted
+regime per symbol in a **date-scoped state key `cache:options:gamma_regime_state`** — so the day's FIRST
+snapshot sets the baseline WITHOUT an open-time false alert and only genuine intraday crossings fire; a
+per-symbol cooldown caps re-fires (an on-cooldown flip keeps prior state so it can fire post-cooldown).
+It runs **regardless of the collector lock** (it reads whatever's in `gex_history.db`, written by
+whichever collector owns the lock). Push (`push_notify`): `to_positive` → **green**, `to_negative` →
+**red**, routed to a new **`discord.flow_gamma_flip_webhook_url`** (falls back to the general webhook).
+Config: a **`[gamma_flip]`** block in `config/flow_alerts.toml` — `enabled` / `band_pct` (0.15%) /
+`cooldown_min` (60) / **`symbols = ["$SPX","SPY","QQQ","IWM"]`** (empty `[]` = the whole flow universe;
+gamma flip is a clean read on heavily-optioned index/ETF names, noise on illiquid ones) — with the
+webhook itself in the gitignored `shared/notifications.json` (`.example.json` documents the key). Three
+gates as with the other flow alerts (`flow_alerts.toml enabled`, `gamma_flip.enabled`, notifications
+`enabled`). **Restart `options_svc`.** TDD per layer; green: flow_alerts + push_notify **100**, handlers
+flow/gamma **22**, gex_history_db **41**, options_svc **695 passed / 2** documented `test_expected_move`
+baseline; ruff clean. **Live-verified end-to-end**: the running service recorded the day's baseline
+regimes ($SPX/SPY positive, QQQ/IWM negative), and a marked test alert **delivered to both channels**
+(Telegram HTTP 200, Discord HTTP 204 on the dedicated webhook). Prior — 2026-07-21 (**Market Dashboard: "Magnificent 7" frame → "Top 10", MAG7 tile →
 BIG10**: renamed the mega-cap frame category **"Magnificent 7" → "Top 10"** (`symbols.py` `_MAG` +
 `CATEGORY_ORDER`) and the composite basket tile **"MAG7" → "BIG10"**; the composite already aggregates
 all **10** members (the Mag-7 + AVGO/PLTR/AMD — avg day-move, "N/10 up" breadth, dollar-weighted
@@ -4259,9 +4288,10 @@ See the "App theme — dark-navy 'dashboard'" section.
 
 `config/flow_alerts.toml` is the single source of truth for the **options-flow alert
 thresholds** (crossover `band`/`min_premium`/`cooldown_min`; UOA `k`/`vol_floor`/
-`premium_floor`/`top_n`; the `enabled` server kill-switch), loaded by
+`premium_floor`/`top_n`; **gamma_flip `enabled`/`band_pct`/`cooldown_min`/`symbols`** — the
+dealer gamma-regime flip alert; the `enabled` server kill-switch), loaded by
 `services/options_svc/flow_alerts.py:load_thresholds()` (defaults if the file is missing) —
-edit + restart `options_svc` to tune. See the 2026-07-18 "Last updated" entry.
+edit + restart `options_svc` to tune. See the 2026-07-18 + 2026-07-22 "Last updated" entries.
 
 ## Secrets
 
