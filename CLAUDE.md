@@ -8,7 +8,27 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-08-07 (**part B — the EM-BUFFER SCORING FACTOR now sizes to the trade's own
+**Last updated:** 2026-08-07 (**part C — `em` de-duplicated against `pop` in the scoring weights
+(12 → 6)**: `em` and `pop` are both monotone in how far OTM the short strike sits — `pop` via market
+delta (`pop_pct = (1 − |delta|)·100`), `em` via distance ÷ expected move — so at 12 + 10 they spent
+**22 of 100 on ONE axis, counted twice**. Measured on **2,190 real strike observations** (8 symbols ×
+11 DTEs, live chains): Spearman **ρ = +0.928 pooled**, **+0.892 within the traded |delta| ≤ 0.27 band**,
++0.93 to +0.99 per symbol. **DOWNWEIGHTED, NOT DROPPED** — `pop` carries skew (market delta) while `em`
+is skew-free (ATM IV), so ~11% of the rank variance is genuinely independent and dropping `em` would
+discard the geometric read. The distance axis goes **22 → 16**. **The redundancy is MEASURED; the
+redistribution target is NOT** — `signal_outcomes` is 95% `MANUAL_CLOSE`, so realized P&L reflects
+closing behaviour as much as entry quality and there is no basis for saying which factor earns the freed
+weight. The 6 points are therefore spread roughly proportionally across every factor EXCEPT `pop`
+(adding them there would leave the axis exactly where it started): rr 15→16, theta 10→11, iv 12→13,
+iv_hv 10→11, vega 8→9, trend 10→11. **⚠ This is the SECOND loosening change of the day** — `em` scores
+systematically LOW (29–44 on the live set vs 50–86 for the other factors), so cutting its weight lifts
+composites: measured **+0.3 to +2.6** on live signals, with one (SMCI) crossing INTO
+`signal_recorder.MIN_SCORE = 58`. Stacked on part B's +1.1 to +2.0, **the effective strictness of the 58
+capture floor has drifted materially today and MIN_SCORE was deliberately NOT retuned to compensate** —
+that needs its own decision once a day of post-change capture volume is observable. options-scanner
+**1328 passed / 16 failed** (documented baseline groups only, verified by comparing the failing SET);
+ruff clean. TDD.
+Prior — 2026-08-07 (**part B — the EM-BUFFER SCORING FACTOR now sizes to the trade's own
 horizon and the expiration's own IV**: `scoring.calc_composite_score` read
 `expected_moves["monthly"]` — a **30-day** EM — for **every** trade regardless of DTE. Two defects
 followed. **(1) The factor measured DTE, not strike placement:** a short sitting at exactly 1× its own

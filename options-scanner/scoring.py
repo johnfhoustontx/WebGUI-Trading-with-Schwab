@@ -24,20 +24,41 @@ log = logging.getLogger("scanner")
 # DEFAULT WEIGHTS (must sum to 100)
 #############################################
 
+# 2026-08-07 rebalance: `em` 12 -> 6, the freed 6 points spread across the
+# factors that measure something ELSE.
+#
+# `em` and `pop` are both monotone in how far OTM the short strike sits -- `pop`
+# via market delta, `em` via distance / expected move -- and are heavily
+# redundant. Measured on 2,190 real strike observations (8 symbols x 11 DTEs,
+# live chains): Spearman rho +0.928 pooled, +0.892 within the traded
+# |delta| <= 0.27 band, +0.93 to +0.99 per symbol. At 12 + 10 they spent 22 of
+# 100 on one axis, counted twice.
+#
+# DOWNWEIGHTED, NOT DROPPED: `pop` reads market delta (skew included) while
+# `em` reads ATM IV (skew-free), so ~11% of the rank variance is genuinely
+# independent -- dropping `em` would discard the skew-free geometric read.
+#
+# The redundancy is MEASURED; the redistribution target is NOT. There is no
+# outcome data to say which factor earns the freed weight (signal_outcomes is
+# 95% MANUAL_CLOSE, so realized P&L reflects closing behavior as much as entry
+# quality). The 6 points are therefore spread roughly in proportion to existing
+# weight across every factor EXCEPT `pop` -- adding them to `pop` would leave
+# the distance axis exactly where it was -- which changes no factor's relative
+# standing beyond `em`'s own reduction.
 DEFAULT_WEIGHTS = {
-    "rr":     15,   # R:R ratio              (Value)
-    "pop":    10,   # Probability of profit  (Value)
-    "theta":  10,   # Theta efficiency       (Value)
-    "iv":     12,   # IV Rank                (Context)
-    "iv_hv":  10,   # IV/HV ratio            (Context)
-    "vega":    8,   # Vega risk              (Context)
-    "em":     12,   # Expected move buffer   (Context)
+    "rr":     16,   # R:R ratio              (Value)     — 15 -> 16
+    "pop":    10,   # Probability of profit  (Value)     — held (see above)
+    "theta":  11,   # Theta efficiency       (Value)     — 10 -> 11
+    "iv":     13,   # IV Rank                (Context)   — 12 -> 13
+    "iv_hv":  11,   # IV/HV ratio            (Context)   — 10 -> 11
+    "vega":    9,   # Vega risk              (Context)   — 8 -> 9
+    "em":      6,   # Expected move buffer   (Context)   — 12 -> 6, de-duplicated
     "liq":     5,   # Liquidity              (Execution) — reduced 8 -> 5
-    "trend":  10,   # Trend alignment        (Execution) — reduced 15 -> 10
-    "gex":     4,   # GEX wall proximity     (Execution) — NEW
-    "dex":     4,   # DEX wall proximity     (Execution) — NEW
+    "trend":  11,   # Trend alignment        (Execution) — 10 -> 11
+    "gex":     4,   # GEX wall proximity     (Execution)
+    "dex":     4,   # DEX wall proximity     (Execution)
 }
-# Sum: 15+10+10+12+10+8+12+5+10+4+4 = 100
+# Sum: 16+10+11+13+11+9+6+5+11+4+4 = 100
 
 #############################################
 # NORMALIZATION FUNCTIONS (each returns 0-100)

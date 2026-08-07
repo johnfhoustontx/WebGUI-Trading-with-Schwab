@@ -320,3 +320,21 @@ def test_em_buffer_survives_missing_iv_entirely():
     """No expiry_iv, no current_iv, no monthly EM -> the neutral 50, not a crash."""
     sig = _em_signal(5, 95.0)
     assert _em_factor(sig, {"iv_rank": 50.0}) == 50.0
+
+
+def test_distance_axis_is_not_double_weighted():
+    """`em` and `pop` both measure how far OTM the short sits and are ~89%
+    rank-correlated in the traded band (measured 2026-08-07 on 2,190 real
+    strike observations, 8 symbols x 11 DTEs: pooled rho +0.928, <=0.27 delta
+    +0.892). Carrying 22 of 100 weight between them double-counted one axis.
+
+    `em` is downweighted rather than dropped: `pop` reads market delta (skew
+    included) while `em` reads ATM IV (skew-free), so ~11% of the variance is
+    genuinely independent.
+    """
+    assert sum(DEFAULT_WEIGHTS.values()) == 100
+    assert DEFAULT_WEIGHTS["em"] == 6, "em was rebalanced away from 12"
+    assert DEFAULT_WEIGHTS["em"] + DEFAULT_WEIGHTS["pop"] <= 16, (
+        "the distance-from-spot axis is over-weighted again")
+    # em must survive: dropping it entirely would discard the skew-free read.
+    assert DEFAULT_WEIGHTS["em"] > 0
