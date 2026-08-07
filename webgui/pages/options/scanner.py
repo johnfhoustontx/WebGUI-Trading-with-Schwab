@@ -37,6 +37,7 @@ import datetime as dt
 from zoneinfo import ZoneInfo
 
 import bus_client
+import page_help as _page_help
 from nicegui import run, ui
 
 from pages.ui_guard import guard, guard_async
@@ -597,6 +598,10 @@ def render():
             t0 = ui.tab("0-DTE").classes(f"tab-0dte text-[{TAB_0DTE_COLOR}]")
             ts = ui.tab("Swing").classes(f"tab-swing text-[{TAB_SWING_COLOR}]")
             td = ui.tab("Directional").classes(f"tab-dir text-[{TAB_DIR_COLOR}]")
+            for _tab, _key in ((t0, "0-DTE"), (ts, "Swing"), (td, "Directional")):
+                with _tab:
+                    ui.tooltip(_page_help.subtab_help("/", _key)
+                               ).props("delay=350 max-width=340px")
         return tabs, t0, ts, td
 
     if _slot is not None:

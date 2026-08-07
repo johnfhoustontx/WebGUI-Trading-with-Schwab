@@ -192,6 +192,63 @@ def test_heatmap_figure_rowsize_from_visible_window_median():
     assert hm["rowsize"] == 2.5
 
 
+def test_uniform_strike_grid_leaves_an_even_ladder_alone():
+    """The common case ($SPX/SPY/QQQ/IWM/AMD all quote one spacing): no resampling,
+    and the SAME objects back so an even chain pays nothing for the check."""
+    strikes = [100.0, 105.0, 110.0, 115.0]
+    z = [[1.0], [2.0], [3.0], [4.0]]
+    out_s, out_z = gamma.uniform_strike_grid(strikes, z)
+    assert out_s is strikes and out_z is z
+
+
+def test_uniform_strike_grid_fills_a_mixed_ladder():
+    """$NDX's shape: 5-wide near the money among 10-wide. The gap must be filled to
+    the FINEST spacing, real strikes must survive untouched, and the inserted row
+    must be the linear midpoint of its neighbours."""
+    strikes = [100.0, 105.0, 110.0, 120.0]      # 5, 5, then a 10 gap
+    z = [[10.0], [20.0], [30.0], [50.0]]
+    out_s, out_z = gamma.uniform_strike_grid(strikes, z)
+    assert out_s == [100.0, 105.0, 110.0, 115.0, 120.0]
+    assert [r[0] for r in out_z] == [10.0, 20.0, 30.0, 40.0, 50.0]
+
+
+def test_uniform_strike_grid_keeps_genuine_holes_as_holes():
+    """An inserted row bracketed by a missing sample stays None — the fill smooths
+    the LADDER, it must not invent data across a real gap in the series."""
+    strikes = [100.0, 105.0, 115.0]
+    z = [[1.0, 1.0], [2.0, None], [3.0, 3.0]]
+    out_s, out_z = gamma.uniform_strike_grid(strikes, z)
+    assert out_s == [100.0, 105.0, 110.0, 115.0]
+    assert out_z[2][0] == pytest.approx(2.5)   # interpolated where both sides exist
+    assert out_z[2][1] is None                 # neighbour missing → still missing
+
+
+def test_uniform_strike_grid_refuses_to_explode_the_row_count():
+    """One stray odd strike among round ones must not resample the window into
+    thousands of rows — past the cap the ladder is left alone."""
+    strikes = [0.0, 0.5] + [float(i) for i in range(100, 1000, 100)]
+    z = [[1.0] for _ in strikes]
+    out_s, out_z = gamma.uniform_strike_grid(strikes, z)
+    assert out_s is strikes and out_z is z
+
+
+def test_heatmap_figure_mixed_ladder_renders_a_gapless_grid():
+    """The regression this fixes: on a mixed ladder the interpolated raster left
+    unwritten cells that read as vertical stripes. Every ladder row must now carry a
+    value in every column, and rowsize must be the fine spacing that the filled
+    ladder actually uses."""
+    grid = {100.0: {"net": 5}, 105.0: {"net": -3}, 110.0: {"net": 4},
+            120.0: {"net": -2}, 130.0: {"net": 6}}
+    rows = [("09:30", 115.0, None, None, None, 0, grid),
+            ("09:31", 115.0, None, None, None, 0, grid)]
+    fig = gamma.heatmap_figure(rows, "GEX", yrange=[95.0, 135.0])
+    hm = next(s for s in fig["series"] if s["type"] == "heatmap")
+    assert hm["rowsize"] == 5.0
+    ys = sorted({p[1] for p in hm["data"]})
+    assert ys == [100.0, 105.0, 110.0, 115.0, 120.0, 125.0, 130.0]
+    assert len(hm["data"]) == len(ys) * 2, "every ladder row must fill every column"
+
+
 def test_heatmap_figure_no_yrange_keeps_all_strikes():
     rows = [("09:30", 450.0, None, None, None, 0, {100.0: {"net": 7}, 900.0: {"net": -9}})]
     fig = gamma.heatmap_figure(rows, "Charm")

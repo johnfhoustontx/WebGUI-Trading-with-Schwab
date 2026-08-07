@@ -216,37 +216,75 @@ def quadrant_figure(rows, title="Momentum vs acceleration"):
 
 # --- rank ribbon ------------------------------------------------------------
 
-def ribbon_figure(rank_history, title="Rank over the last sessions"):
-    """Bump chart of rank over time. Rank 1 sits at the top via a reversed axis.
+# A bump chart stops being readable somewhere around a dozen lines; drawing all
+# 68 industries produced solid spaghetti that conveyed nothing.
+RIBBON_MAX_SERIES = 12
 
-    Reversing the axis (rather than negating the data) keeps the tooltip
-    showing the real rank number.
+
+def _latest_rank(points):
+    return points[-1][1] if points and points[-1][1] is not None else 10**9
+
+
+def ribbon_subset(rank_history, n=RIBBON_MAX_SERIES):
+    """The n best CURRENTLY ranked symbols — chosen on the latest session.
+
+    Ranking on the latest session (not the first) is what lets a climber into
+    the chart; that movement is the whole point of a bump chart.
     """
-    series, categories = [], []
-    for symbol, points in sorted((rank_history or {}).items()):
-        if not points:
-            continue
-        for date, _rank in points:
-            if date not in categories:
-                categories.append(date)
-        series.append({"name": symbol,
-                       "data": [rank for _d, rank in points],
-                       "marker": {"enabled": False}})
-    categories.sort()
+    have = [(s, p) for s, p in (rank_history or {}).items() if p]
+    have.sort(key=lambda sp: (_latest_rank(sp[1]), sp[0]))
+    return have[:n]
+
+
+def ribbon_figure(rank_history, title="Rank over recent sessions",
+                  n=RIBBON_MAX_SERIES):
+    """Bump chart of rank over time for the current leaders.
+
+    Rank 1 sits at the top via a reversed axis rather than negated data, so the
+    tooltip still shows the real rank number.
+    """
+    chosen = ribbon_subset(rank_history, n)
+    total = len([p for p in (rank_history or {}).values() if p])
+
+    categories = sorted({d for _s, pts in chosen for d, _r in pts})
+    series = [{"name": symbol,
+               "data": [rank for _d, rank in points],
+               "marker": {"enabled": True, "radius": 3}}
+              for symbol, points in chosen]
+
+    sessions = len(categories)
+    if not chosen:
+        note = "No ranked history yet — the first nightly run seeds it."
+    elif sessions < 2:
+        note = (f"Only {sessions} session stored — movement appears once a "
+                "second nightly run lands.")
+    elif total > len(chosen):
+        note = f"Top {len(chosen)} of {total} by current rank · {sessions} sessions"
+    else:
+        note = f"{total} tracked · {sessions} sessions"
+
     return {
         "accessibility": {"enabled": False},
         "chart": {"type": "line", "backgroundColor": "transparent", "height": 380},
         "title": {"text": title, "style": {"color": "#cdd8ee"}},
+        "subtitle": {"text": note, "style": {"color": "#8794b4",
+                                             "fontSize": "11px"}},
         "credits": {"enabled": False},
-        "legend": {"enabled": False},
+        # A line you cannot name is a line you cannot use.
+        "legend": {"enabled": True, "itemStyle": {"color": "#8794b4",
+                                                  "fontWeight": "normal"}},
         "xAxis": {"categories": categories,
                   "labels": {"style": {"color": "#8794b4"}},
-                  "gridLineColor": "#213152"},
+                  "gridLineColor": _GRID_COLOR},
         "yAxis": {"reversed": True, "title": {"text": "Rank",
                                               "style": {"color": "#8794b4"}},
                   "labels": {"style": {"color": "#8794b4"}},
-                  "gridLineColor": "#213152"},
-        "plotOptions": {"series": {"states": {"inactive": {"enabled": False}}}},
+                  "gridLineColor": _GRID_COLOR},
+        "tooltip": {"shared": False,
+                    "pointFormat": "<b>{series.name}</b> — rank {point.y}"},
+        # Hover one line, dim the rest — the only way to follow a path in a
+        # chart with a dozen overlapping series.
+        "plotOptions": {"series": {"states": {"inactive": {"opacity": 0.12}}}},
         "series": series,
     }
 

@@ -66,6 +66,13 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
+<li><a href="#prerequisites">Prerequisites</a><ul>
+<li><a href="#the-essentials-required">The essentials (required)</a></li>
+<li><a href="#schwab-account-required-for-live-data">Schwab account (required for live data)</a></li>
+<li><a href="#nice-to-have-optional">Nice-to-have (optional)</a></li>
+<li><a href="#ports-the-app-uses">Ports the app uses</a></li>
+</ul>
+</li>
 <li><a href="#getting-started">Getting Started</a><ul>
 <li><a href="#starting-the-application">Starting the application</a></li>
 <li><a href="#what-runs-behind-the-scenes">What runs behind the scenes</a></li>
@@ -139,6 +146,64 @@ talks to Schwab through a local gateway. There are no accounts to log into in
 the web app itself.</p>
 </blockquote>
 <hr />
+<h1 id="prerequisites">Prerequisites</h1>
+<p>Before the app will run, a few things need to be in place on your machine. This is
+the plain-English checklist — the <em>Technical Reference</em> has the full detail
+(exact package versions, environment variables, etc.).</p>
+<h2 id="the-essentials-required">The essentials (required)</h2>
+<ul>
+<li><strong>Windows 10 or 11.</strong> The app is Windows-first — the launchers are <code>.bat</code> files,
+  the alert pop-ups use Windows notifications, and the data backbone (Memurai) is a
+  Windows service.</li>
+<li><strong>Python 3.11 or newer.</strong> Install it from python.org if you don't have it.</li>
+<li><strong>A one-time setup</strong> in the project folder, which creates the virtual environment
+  the launchers expect and installs everything:</li>
+</ul>
+<p><code>powershell
+  python -m venv .venv
+  .\.venv\Scripts\python -m pip install -r requirements.txt</code></p>
+<ul>
+<li><strong>Memurai running.</strong> Memurai is a Windows version of Redis — the local "backbone"
+  the app's parts talk through. It installs as a <strong>Windows service on port 6379</strong>;
+  start it from <strong>services.msc</strong> if it isn't already running. <strong>Nothing works
+  without it</strong> — every page will just say "Waiting for … service."</li>
+<li><strong>A modern web browser</strong> to open the app at <code>http://127.0.0.1:8500</code>.</li>
+</ul>
+<h2 id="schwab-account-required-for-live-data">Schwab account (required for live data)</h2>
+<p>The app reads market data and your positions from Schwab, so you need:</p>
+<ul>
+<li>A <strong>Schwab developer account</strong> with a registered app, which gives you an <strong>App
+  Key</strong> and <strong>App Secret</strong> (register the callback URL as <code>https://127.0.0.1:8182</code>).</li>
+<li>Those keys saved into <strong><code>shared/appsettings.json</code></strong> (copy the provided
+  <code>shared/appsettings.example.json</code> and fill in your keys).</li>
+<li>A <strong>one-time Schwab login</strong>: after starting the app, open <strong>System Status → Schwab
+  Authorization → Authorize</strong> (or <code>http://127.0.0.1:8100/auth</code>) and sign in. This
+  creates your token file.</li>
+</ul>
+<blockquote>
+<p><strong>Good to know:</strong> the app refreshes your Schwab login automatically most of the
+time. If live data stops and <strong>System Status</strong> shows the Schwab login expired,
+just click <strong>Authorize</strong> again.</p>
+</blockquote>
+<h2 id="nice-to-have-optional">Nice-to-have (optional)</h2>
+<ul>
+<li><strong>An Anthropic (Claude) API key</strong> — only needed for the AI features: the Gamma
+  <strong>Analyze</strong>/<strong>Explain</strong> infographics, the autonomous <strong>Claude Trades</strong> driver, and
+  the market-summary ticker. Set it as the <code>ANTHROPIC_API_KEY</code> environment variable
+  (or in a <code>shared/anthropic_key.txt</code> file). Without it, those features simply stay
+  quiet — nothing else is affected, and the auto-trader safely stands down.</li>
+<li><strong>Push notifications</strong> (Telegram / Discord / text message) — configured in
+  <code>shared/notifications.json</code> if you want alerts on your phone. Skip it and the app
+  is silent on those channels.</li>
+<li><strong>The watchlist workbook</strong> <code>options-scanner/data/Top 20.xlsx</code> — sets which stocks
+  the scanner watches. Without it, the app falls back to the core index symbols.</li>
+</ul>
+<h2 id="ports-the-app-uses">Ports the app uses</h2>
+<p>The app runs entirely on your own machine and needs these local ports free:
+<strong>6379</strong> (Memurai), <strong>8100</strong> (Schwab gateway), <strong>8210–8215</strong> (the six services),
+and <strong>8500</strong> (the web app). If another program is already using one of them, the
+matching piece won't start.</p>
+<hr />
 <h1 id="getting-started">Getting Started</h1>
 <h2 id="starting-the-application">Starting the application</h2>
 <p>The app is made of several background services plus the web interface. Start them
@@ -153,11 +218,11 @@ all together with one of the launcher scripts in the project root:</p>
 <tbody>
 <tr>
 <td><code>start_all.bat</code></td>
-<td>Opens the gateway, the five domain services, and the web app in <strong>seven separate console windows</strong>, then opens your browser.</td>
+<td>Opens the gateway, the six domain services, and the web app in <strong>eight separate console windows</strong>, then opens your browser.</td>
 </tr>
 <tr>
 <td><code>start_all_wt.bat</code></td>
-<td>Same seven processes, but as <strong>seven tabs in one Windows Terminal window</strong> (less desktop clutter; requires Windows Terminal).</td>
+<td>Same eight processes, but as <strong>eight tabs in one Windows Terminal window</strong> (less desktop clutter; requires Windows Terminal).</td>
 </tr>
 </tbody>
 </table>
@@ -172,8 +237,8 @@ yourself.</p>
 <li><strong>Schwab gateway (proxy)</strong> — handles the Schwab connection and market data.
   Everything else depends on it. <strong>It must be running first</strong> (the launcher
   handles ordering for you).</li>
-<li><strong>Five domain services</strong> — Sentiment, Options, Portfolio, Trade, and Driver.
-  Each one powers its matching page(s).</li>
+<li><strong>Six domain services</strong> — Sentiment, Options, Portfolio, Trade, Driver, and
+  Market. Each one powers its matching page(s).</li>
 <li><strong>Memurai (Redis)</strong> — a local data backbone the services and the web app share.</li>
 </ul>
 <h2 id="the-proxy-down-banner">The proxy-down banner</h2>
@@ -275,11 +340,17 @@ session.</p>
 </blockquote>
 <p>You control all of this on the <strong>Settings</strong> page (see <em>Reports &amp; System</em>).</p>
 <h2 id="getting-help-on-any-page">Getting help on any page</h2>
-<p>Two built-in help features are always within reach:</p>
+<p>Three built-in help features are always within reach:</p>
 <ul>
-<li><strong>Hover tooltips</strong> — rest the mouse for two seconds on any rail item or top
+<li><strong>Page hover tooltips</strong> — rest the mouse for two seconds on any rail item or top
   tab. A short "idiot's guide" pops up explaining, in plain language, what that
   page is for and how changing its settings changes the result.</li>
+<li><strong>Sub-tab hover tooltips</strong> — several pages have a second row of small <strong>view
+  tabs</strong> beneath the main strip (for example Dealer Positioning's <strong>GEX / Charm /
+  DEX / Vanna / Flow / Net Prem / Term</strong>, the Simulator's <strong>Replay / What-if / IV
+  shock</strong>, and the Scanner's <strong>0-DTE / Swing / Directional</strong>). Hover an individual
+  sub-tab and a one-line tip explains what that specific view shows — so you can
+  learn what "Charm" or "Vanna" means without leaving the page.</li>
 <li><strong>User Manuals</strong> — a tab in the <strong>More</strong> group.
   It opens this User Guide plus the Technical and API references in your browser.</li>
 </ul>

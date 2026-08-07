@@ -110,6 +110,68 @@ def _strike_step(strikes):
     return statistics.median(diffs) if diffs else 1.0
 
 
+# A resampled ladder past this many rows is refused — the raster gains nothing
+# beyond the panel's own pixel height (~570px), and a pathological chain (one
+# stray half-strike among round ones) would otherwise explode the row count.
+_MAX_UNIFORM_ROWS = 240
+
+
+def uniform_strike_grid(strikes, z):
+    """Resample ``(strikes, z)`` onto an EVENLY spaced strike ladder.
+
+    ``interpolation: True`` rasterizes the heatmap onto a canvas laid out on ONE
+    uniform row height (``_strike_step``, the median gap). That is fine for a chain
+    whose strikes are evenly spaced — every symbol here except **$NDX**, which
+    quotes 5-wide near the money among 10-wide elsewhere (measured live: 28 gaps of
+    5 among 56 of 10). Under a 10-row canvas the 5-wide strikes collide two-into-one
+    and the cells between them are never written, so the upscaled image reads as a
+    comb of vertical stripes instead of a smooth field.
+
+    Filling the ladder to the FINEST gap makes the data grid match the canvas grid.
+    The inserted rows are linearly interpolated between their bracketing real
+    strikes — which invents no information the chart wasn't already implying, since
+    an interpolated heatmap shades between samples regardless; it just does the
+    shading on a grid the rasterizer can represent. A column is left ``None``
+    wherever either bracketing strike is ``None``, so genuine holes stay holes.
+
+    Returns ``(strikes, z)`` UNCHANGED when the ladder is already uniform (the
+    common case — no cost), when there is nothing to resample, or when the result
+    would exceed ``_MAX_UNIFORM_ROWS``."""
+    if len(strikes) < 3:
+        return strikes, z
+    gaps = [b - a for a, b in zip(strikes, strikes[1:]) if b > a]
+    if not gaps:
+        return strikes, z
+    step = min(gaps)
+    # Uniform already? (fp tolerance — strikes arrive as floats off JSON.)
+    if max(gaps) - step <= step * 1e-6:
+        return strikes, z
+    span = strikes[-1] - strikes[0]
+    n = int(round(span / step)) + 1
+    if n > _MAX_UNIFORM_ROWS or n <= len(strikes):
+        return strikes, z
+    ncols = len(z[0]) if z else 0
+    ladder = [strikes[0] + i * step for i in range(n)]
+    tol = step * 1e-6
+    out = []
+    j = 0                        # index of the real strike at/below the ladder row
+    for y in ladder:
+        while j + 1 < len(strikes) and strikes[j + 1] <= y + tol:
+            j += 1
+        if abs(strikes[j] - y) <= tol:          # a real strike — take its row as-is
+            out.append(list(z[j]))
+            continue
+        if j + 1 >= len(strikes):               # past the last real strike
+            out.append([None] * ncols)
+            continue
+        lo, hi = strikes[j], strikes[j + 1]
+        w = (y - lo) / (hi - lo) if hi > lo else 0.0
+        a_row, b_row = z[j], z[j + 1]
+        out.append([None if (a is None or b is None) else a + (b - a) * w
+                    for a, b in zip(a_row, b_row)])
+    return ladder, out
+
+
 def _view_label(view):
     """Display label for a view (GEX→GAMMA, DEX→DELTA; others unchanged)."""
     return _VIEW_LABELS.get(view, view)
@@ -642,18 +704,27 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
         vis = [yi for yi in range(len(strikes)) if lo <= strikes[yi] <= hi]
     else:
         vis = list(range(len(strikes)))
+    # Fill an unevenly spaced ladder ($NDX quotes 5-wide near the money among
+    # 10-wide) so the data grid matches the uniform grid `interpolation: True`
+    # rasterizes onto — otherwise the finer strikes collide two-into-one row and
+    # the unwritten cells between them read as vertical stripes. No-op (same lists
+    # back) for every evenly spaced chain. MUST run on the VISIBLE strikes only:
+    # the full chain spans ~3000-9800 with wide wing gaps, which would resample to
+    # thousands of rows and be refused by the row cap.
+    vstrikes, vz = uniform_strike_grid([strikes[yi] for yi in vis],
+                                       [z[yi] for yi in vis])
     # Heatmap points [time_index, strike_value, net]: x is the time category index,
     # y is the ACTUAL strike (linear axis) so the continuous spot line overlays.
-    data = [[xi, strikes[yi], z[yi][xi]]
-            for yi in vis for xi in range(len(times))
-            if z[yi][xi] is not None]
+    data = [[xi, vstrikes[yi], vz[yi][xi]]
+            for yi in range(len(vstrikes)) for xi in range(len(times))
+            if vz[yi][xi] is not None]
     # Symmetric color clamp from the VISIBLE cells' 95th-percentile |net| (robust —
     # same as the Term heatmap) so a few extreme strikes don't wash the mid-range
     # colors to transparent on the flatter views (Charm / DEX / Vanna).
-    zmax = _robust_zmax([z[yi] for yi in vis]) or None
-    # Row height from the VISIBLE strikes' typical spacing (median gap) so cells
-    # tile the window densely regardless of off-window strike spacing.
-    rowsize = _strike_step([strikes[yi] for yi in vis])
+    zmax = _robust_zmax(vz) or None
+    # Row height = the (now uniform) ladder's spacing, so cells tile the window
+    # densely and every canvas row has a strike to fill it.
+    rowsize = _strike_step(vstrikes)
     # Blended look: interpolation renders one smooth image (no per-cell borders or
     # separator mesh); states.inactive disabled so nothing fades on hover/click.
     no_fade = {"inactive": {"enabled": False}, "hover": {"enabled": False}}
@@ -680,6 +751,7 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
         # Future heatmap cells on the SAME heatmap series/colorAxis, cropped to yrange.
         proj_rows_for_zmax = []
         heat_series = series[0]      # the heatmap series
+        pairs = []
         for strike, vals in pgrid.items():
             try:
                 sk = float(strike)
@@ -687,13 +759,22 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
                 continue
             if yrange is not None and not (yrange[0] <= sk <= yrange[1]):
                 continue
+            pairs.append((sk, list(vals)))
+        pairs.sort()                 # uniform_strike_grid needs an ordered ladder
+        pstrikes = [sk for sk, _ in pairs]
+        prows = [vals for _, vals in pairs]
+        # Same ladder fill as the collected cells — the projection sits on the
+        # chain's own strikes, so on a mixed ladder it would speckle the band with
+        # unwritten rows while the session behind it renders smooth.
+        pstrikes, prows = uniform_strike_grid(pstrikes, prows)
+        for sk, vals in zip(pstrikes, prows):
             proj_rows_for_zmax.append([v for v in vals if v is not None])
             for j, v in enumerate(vals):
                 if v is not None:
                     heat_series["data"].append([base + j, sk, v])
         # Re-clamp the color axis over collected + projected visible cells (robust
         # 95th-pct so a few extreme 0-DTE ATM close cells don't wash the scale).
-        zmax = _robust_zmax([z[yi] for yi in vis] + proj_rows_for_zmax) or None
+        zmax = _robust_zmax(vz + proj_rows_for_zmax) or None
         # 'now' divider between the last collected and first future column.
         xaxis_plotlines.append({"value": base - 0.5, "color": "#8a93a3", "width": 1,
                                 "dashStyle": "Dash", "zIndex": 4,
@@ -1862,6 +1943,16 @@ def render():
                           "leading-none opacity-90 -mt-1"):
         status_lbl = ui.label("").classes("font-medium")
         detail_lbl = ui.label("").classes("opacity-70")
+
+    # Long-form guide to the three 0-DTE projection overlays (outline bars, the
+    # Proj. flip line, the hedge-pressure panel) — collapsed, so it costs nothing
+    # until asked for. It lives ON the page rather than only in the nav hover
+    # tooltip because that tooltip is pointer-events:none and clips to the space
+    # under its nav item, which cuts a guide this long off mid-sentence with no way
+    # to scroll. Same text as the hover guide (one constant in page_help).
+    with ui.expansion("How to read the 0-DTE close projection") \
+            .classes("w-full text-xs opacity-80").props("dense"):
+        ui.markdown(_page_help.PROJECTION_HELP_MD).classes("text-xs text-left")
 
     # History picker (BELOW the charts): browse past stored briefings. Pick a date
     # (+ optional slot) and Open regenerates the report from the stored analysis (via

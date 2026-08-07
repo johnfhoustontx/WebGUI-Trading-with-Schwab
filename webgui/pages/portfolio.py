@@ -16,6 +16,7 @@ persists across navigation (single-user). The pure display builders
 unit-tested.
 """
 import bus_client
+import page_help as _page_help
 from nicegui import ui
 
 from pages.ui_guard import guard
@@ -141,9 +142,10 @@ def render():
     def _build_tabs():
         with ui.tabs().classes("compact-tabs").props(
                 "dense no-caps inline-label align=left") as t:
-            ui.tab("Holdings")
-            ui.tab("Sectors")
-            ui.tab("Performance")
+            for _key in ("Holdings", "Sectors", "Performance"):
+                with ui.tab(_key):
+                    ui.tooltip(_page_help.subtab_help("/portfolio", _key)
+                               ).props("delay=350 max-width=340px")
         return t
 
     _slot = _shell.subtab_slot()
