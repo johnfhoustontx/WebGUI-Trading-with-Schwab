@@ -124,7 +124,21 @@ def _swing_chain(exp_str="2026-07-15", dte=15):
     }
 
 
-def test_swing_scan_multistrategy_pipeline(monkeypatch):
+@pytest.fixture
+def unfiltered_swing(monkeypatch):
+    """Drop the min-score cut for tests that are about the build/score pipeline.
+
+    ``_swing_chain`` grades its DIRECTIONAL candidates, the adapted PCS and the
+    adapted IC all Weak (34.6-39.0) — only BULL_CALL/BEAR_PUT clear the bar — so
+    with the production cut in force the assertions below about family coverage
+    and the PCS tilt would bite an empty or truncated list. These tests predate
+    the cut and are not about it; the cut has its own tests.
+    """
+    monkeypatch.setattr(compute, "SWING_MIN_SCORE", 0.0)
+    monkeypatch.setattr(compute, "SWING_EXCLUDED_GRADES", ())
+
+
+def test_swing_scan_multistrategy_pipeline(monkeypatch, unfiltered_swing):
     """The new multi-strategy pipeline: infer a view, build DIRECTIONAL + VERTICAL
     (incl. adapted PCS) + NEUTRAL candidates from the REAL strategy_scanner, score
     them with the REAL strategy_scoring, and return ``{"signals", "view"}``."""
@@ -192,7 +206,7 @@ def test_swing_scan_multistrategy_pipeline(monkeypatch):
     assert all(s.get("iv_rank") == 50.0 for s in out["signals"])
 
 
-def test_swing_scan_families_filter(monkeypatch):
+def test_swing_scan_families_filter(monkeypatch, unfiltered_swing):
     """``families`` restricts which candidate families are built (NEUTRAL-only ->
     screen_spreads still runs for the IC feed, and ONLY a NEUTRAL signal results).
 
@@ -250,7 +264,10 @@ def test_swing_scan_empty_when_no_chain(monkeypatch):
                         lambda symbol: {"last": 540.0})
 
     out = compute.swing_scan("SPY", 5, 30, -0.20, -0.10, 0.10, 0.20, 0.10)
-    assert out == {"signals": [], "view": {}}
+    # ``filtered_out`` is 0, not absent: the degraded shape must match the normal
+    # one so the page never has to special-case a missing key (and "0 dropped"
+    # is the truthful reading — nothing was built, so nothing was cut).
+    assert out == {"signals": [], "view": {}, "filtered_out": 0}
 
 
 def test_swing_scan_empty_when_no_spot(monkeypatch):
@@ -265,7 +282,7 @@ def test_swing_scan_empty_when_no_spot(monkeypatch):
                         lambda symbol: {})
 
     out = compute.swing_scan("SPY", 5, 30, -0.20, -0.10, 0.10, 0.20, 0.10)
-    assert out == {"signals": [], "view": {}}
+    assert out == {"signals": [], "view": {}, "filtered_out": 0}
 
 
 def _swing_scan_market_state_env(monkeypatch):
@@ -294,7 +311,7 @@ def _swing_scan_market_state_env(monkeypatch):
     monkeypatch.setattr(compute.se, "build_iron_condors", lambda spreads: [])
 
 
-def test_swing_scan_threads_market_state_tilt(monkeypatch):
+def test_swing_scan_threads_market_state_tilt(monkeypatch, unfiltered_swing):
     """A live committed market state threads into score_all -> the PCS signal
     carries a non-zero family-tilt (`lack_of_bearishness` favors put credit)."""
     _swing_scan_market_state_env(monkeypatch)
@@ -304,12 +321,99 @@ def test_swing_scan_threads_market_state_tilt(monkeypatch):
     assert pcs and pcs[0]["state_tilt"] != 0.0
 
 
-def test_swing_scan_no_market_state_no_tilt(monkeypatch):
+def test_swing_scan_no_market_state_no_tilt(monkeypatch, unfiltered_swing):
     """Absent market state (default None) -> the PCS signal carries a 0.0 tilt."""
     _swing_scan_market_state_env(monkeypatch)
     out = compute.swing_scan("SPY", 5, 30, -0.20, -0.10, 0.10, 0.20, 0.10)
     pcs = [s for s in out["signals"] if s["type"] == "PCS"]
     assert pcs and pcs[0]["state_tilt"] == 0.0
+
+
+# ── Swing quality cut (score >= SWING_MIN_SCORE, no excluded grade) ─────────
+
+def test_swing_scan_drops_weak_candidates_across_every_family(monkeypatch):
+    """The cut spans ALL families, not just DIRECTIONAL.
+
+    ``_swing_chain`` grades its four DIRECTIONAL candidates and the adapted PCS
+    Weak (34.6-39.0) while BULL_CALL/BEAR_PUT grade Good (66.9-74.3) — so this
+    fixture proves BOTH halves at once: the Weak rows are gone (incl. a VERTICAL
+    one, which a directional-only cut would have kept) and the Good rows remain.
+    """
+    _swing_scan_market_state_env(monkeypatch)
+    out = compute.swing_scan("SPY", 5, 30, -0.20, -0.10, 0.10, 0.20, 0.10)
+
+    # Non-vacuity: something survived, so an "all Weak dropped" pass isn't free.
+    assert out["signals"], "the cut emptied a fixture that has Good candidates"
+    assert {s["type"] for s in out["signals"]} == {"BULL_CALL", "BEAR_PUT"}
+    for s in out["signals"]:
+        assert s["grade"] != "Weak"
+        assert s["composite_score"] >= compute.SWING_MIN_SCORE
+    # The dropped PCS is a VERTICAL — pins that the cut is not directional-only.
+    assert not any(s["type"] == "PCS" for s in out["signals"])
+
+
+def test_swing_scan_reports_how_many_it_dropped(monkeypatch):
+    """An empty/short table must be explainable: ``filtered_out`` separates
+    'nothing cleared the bar' from 'the scan found nothing at all'."""
+    _swing_scan_market_state_env(monkeypatch)
+    out = compute.swing_scan("SPY", 5, 30, -0.20, -0.10, 0.10, 0.20, 0.10)
+    # 4 directional + 1 adapted PCS graded Weak; BULL_CALL/BEAR_PUT survive.
+    assert out["filtered_out"] == 5
+    assert len(out["signals"]) == 2
+
+
+def test_swing_scan_cut_boundary_is_inclusive(monkeypatch):
+    """>= the floor survives; a hair below does not."""
+    _swing_scan_market_state_env(monkeypatch)
+
+    def _fake_score_all(signals, view, atm_iv, em_1sd, market_state=None):
+        out = []
+        for i, sig in enumerate(signals or []):
+            sig["composite_score"] = 49.9 if i % 2 else 50.0
+            sig["grade"] = "Marginal"
+            out.append(sig)
+        return out
+
+    import strategy_scoring
+    monkeypatch.setattr(strategy_scoring, "score_all", _fake_score_all)
+    out = compute.swing_scan("SPY", 5, 30, -0.20, -0.10, 0.10, 0.20, 0.10)
+    assert out["signals"], "nothing survived — the cut suppresses qualifying rows"
+    assert {s["composite_score"] for s in out["signals"]} == {50.0}
+
+
+def test_swing_scan_drops_an_excluded_grade_regardless_of_score(monkeypatch):
+    """Grade and score are checked independently.
+
+    Redundant today (a gate failure caps the composite at 39 and the state tilt
+    adds at most +6, so Weak tops out at 45), so no realistic fixture can tell
+    the two halves apart. This synthetic probe — grade Weak at score 90 — pins
+    the grade half against a future threshold change.
+    """
+    _swing_scan_market_state_env(monkeypatch)
+
+    def _fake_score_all(signals, view, atm_iv, em_1sd, market_state=None):
+        out = []
+        for sig in signals or []:
+            sig["composite_score"] = 90.0
+            sig["grade"] = "Weak"
+            out.append(sig)
+        return out
+
+    import strategy_scoring
+    monkeypatch.setattr(strategy_scoring, "score_all", _fake_score_all)
+    out = compute.swing_scan("SPY", 5, 30, -0.20, -0.10, 0.10, 0.20, 0.10)
+    assert out["signals"] == []
+    assert out["filtered_out"] > 0, "fixture built nothing — the assertion is vacuous"
+
+
+def test_swing_scan_ids_cover_only_the_emitted_signals(monkeypatch):
+    """ids are assigned AFTER the cut, so every emitted row has one and the
+    detail-panel lookup can't miss a row."""
+    _swing_scan_market_state_env(monkeypatch)
+    out = compute.swing_scan("SPY", 5, 30, -0.20, -0.10, 0.10, 0.20, 0.10)
+    assert out["signals"]
+    ids = [s.get("id") for s in out["signals"]]
+    assert all(ids) and len(set(ids)) == len(ids)
 
 
 # ── Paper account (moved from webgui/pages/options/portfolio.py) ────────────

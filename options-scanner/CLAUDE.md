@@ -40,7 +40,9 @@ pytest tests/test_scoring.py -v                # single file
 pytest tests/test_scoring.py::test_name -v     # single test
 ```
 
-**Test baseline: 1286 passed, 17 failed** (measured 2026-07-25 with `-p no:randomly`; was 1283/16/1skip immediately before the `gamma_window_legacy` split, which added 3 headless-import tests). The failures are **pre-existing** and unrelated to current features — do not "fix" them as part of unrelated work; flag them only if a change is expected to touch them. They fall in four groups:
+**Test baseline: 1319 passed, 15 failed, 2 skipped** (re-measured 2026-08-07 with `-p no:randomly`; was 1309/17/1 on 2026-08-06 and 1286/17 on 2026-07-25 — the failing SET is unchanged, only the passing count grew with intervening work; the 15-vs-17 swing is the order-varying `test_dashboard_captured_signals_drift` pair moving between failed and skipped).
+
+> **Compare the failing SET, not the count** — this bit for real on 2026-08-07: a change introduced two genuine `TestScreenSpreadsStrikeValidity` regressions while two order-varying `test_dashboard_*` cases happened to move to skipped, holding the total at 17 and making a real break look like a clean run. The failures are **pre-existing** and unrelated to current features — do not "fix" them as part of unrelated work; flag them only if a change is expected to touch them. They fall in four groups:
 
 - `tests/test_scanner_engine.py::TestEarningsAvoidance` — stale fixtures
 - `tests/test_dashboard_*` — **`dashboard.py` was never copied into the webgui monorepo**, so these fail `ModuleNotFoundError: No module named 'dashboard'`. Diagnosed 2026-07-25; previously mis-filed as "intermittent". Whether a given one *fails* or *skips* still varies with ordering (the Tk-root guard), so the count moves even under `-p no:randomly`.

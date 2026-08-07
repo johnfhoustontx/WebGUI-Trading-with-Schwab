@@ -36,6 +36,29 @@ def test_page_imports_no_engine_or_proxy():
         assert forbidden not in src, f"swing.py must not reference {forbidden!r}"
 
 
+def test_status_text_blank_before_the_first_scan():
+    assert swing.status_text(None, 0) == ""
+    assert swing.status_text({}, 0) == ""
+
+
+def test_status_text_counts_rows():
+    assert swing.status_text({"signals": [1, 2]}, 2) == "2 swing signals."
+
+
+def test_status_text_explains_what_the_quality_cut_dropped():
+    """An empty table must not read as a failed scan when the scan worked and
+    every candidate simply failed the quality bar."""
+    assert swing.status_text({"signals": [], "filtered_out": 12}, 0) == (
+        "0 swing signals. 12 below the quality bar.")
+    assert swing.status_text({"signals": [1], "filtered_out": 3}, 1) == (
+        "1 swing signals. 3 below the quality bar.")
+
+
+def test_status_text_omits_the_note_when_nothing_was_dropped():
+    """No drops -> no note, so the line stays quiet on a clean scan."""
+    assert swing.status_text({"signals": [1], "filtered_out": 0}, 1) == "1 swing signals."
+
+
 def test_render_graceful_empty_cache():
     """render() must paint without crashing when the bus cache is empty
     (options service cold) — the Tier-3 graceful-empty path. Mirrors the header
