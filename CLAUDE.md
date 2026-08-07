@@ -8,7 +8,46 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-08-06 (**Quality cut on BOTH finder pages — only non-Weak candidates scoring
+**Last updated:** 2026-08-07 (**EM strike window sized off the EXPIRATION's own IV, not a 30-day IV**:
+`screen_spreads` now sizes each expiration's expected-move strike window from **that expiration's ATM
+IV** instead of the symbol-level ~30-DTE IV `iv_analysis.extract_atm_iv` returns. New pure
+`iv_analysis.expiry_atm_iv(chain, exp_str, underlying)` (averages the ATM call+put IV for ONE
+expiration; None when absent) + `expiry_daily_em(price, iv_pct)`, consumed by
+`scanner_engine.effective_daily_em(chain, exp_str, underlying, fallback)`, which is called once per
+expiration inside `screen_spreads` and passed to `is_strike_in_expected_move_window` **in place of the
+caller's daily EM**. **The KEY design decision: only the VOL INPUT changes.** `effective_daily_em`
+returns a DAILY-equivalent EM, so the `√dte` period scaling, the 0-DTE hours-to-close decay, and every
+`ZERO_DTE_BUCKET_EM_CURVE`/`SWING_EM_CURVE` multiplier are byte-for-byte untouched — the blast radius is
+one number. Degrades to the caller's IV30-derived EM whenever the per-expiry IV is missing (**never to
+0**, which would disable the filter and silently accept every strike). Kill switch
+**`USE_EXPIRY_EM = True`** restores the old behavior exactly. **`daily_expected_move` is unchanged
+everywhere else** — `MOMENTUM_VETO`/`intraday_move_ratio`, the Expected Move page and the gamma
+briefings still use the symbol-level value by design. **Measured live on 4 symbols (2026-08-07):** the
+old path **UNDERSTATED 0-DTE EM by 33-56%** (SPY front IV 16.0 vs IV30 10.3) → 0-DTE shorts were sized
+too CLOSE and now move further OTM; it **OVERSTATED 3-DTE by 14-24%** → those shorts move closer and
+collect more credit; 4-7 DTE moves ≤5%. The 3-DTE case is largely the **weekend effect** — Fri→Mon is 3
+CALENDAR days but 1 trading day, and `√(calendar dte)` over-counts it, while the front expiry's own IV
+prices it correctly. This is a term-structure correction, **NOT a widening**: the direction flips with
+the curve. **Restart `options_svc`.** **Deliberately NOT changed: `scoring.calc_composite_score` still
+takes its EM-buffer factor from the MONTHLY (30-day) EM regardless of the trade's DTE** — a related
+defect, but moving it would shift every composite score and collide with the 58 capture floor and the
+50-point directional cut, so it needs its own decision. **Two existing `TestScreenSpreadsStrikeValidity`
+tests broke and were repaired at the FIXTURE, not the assertion:** their mock chain carried 25.0 vol
+while the tests passed `daily_expected_move=8.0`, and the short strike sat EXACTLY on the 2.50× boundary
+(distance 20 = 2.50 × 8.0), so the chain-derived 6.94 pushed it out. `_mock_chain` now defaults to
+**`_EM8_VOL = 28.84`**, which reproduces a daily EM of exactly 8.00 at underlying 530 — every window
+boundary those tests were written against is preserved. **Caught only because the failing SET was
+compared, not the count: the suite went 17 → 17 while two order-varying `test_dashboard_*` cases
+happened to move to skipped, masking two genuine regressions.** options-scanner **1319 passed / 15
+failed / 2 skipped** (the documented baseline groups only); ruff clean. TDD (red → green).
+**An audit of the `signals.db` credit units ran first and found NO bug** — `width = |K1−K2|`, `credit`
+per-share, and `max_loss = width − credit` hold exactly on every row. The apparent discrepancy that
+prompted the audit was an error in MY earlier analysis: converting delta→σ with a skewless lognormal,
+which is badly wrong for high-IV names where `σ√T` is large. Re-measured directly in ×EM terms across a
+17× IV range (SPY 8.7 / MU 71 / NBIS 153), the credit-gate boundary sits at **~1.0× EM at every IV
+level**, and 1.5–2× EM fails universally — NBIS at 2× EM prices *negative* credit. Recorded because the
+1.5–2× EM proposal was evaluated against it and **not** adopted.)
+Prior — 2026-08-06 (**Quality cut on BOTH finder pages — only non-Weak candidates scoring
 ≥ 50 are emitted.** Two independent cuts, one per page, sharing a value but not a constant.
 **(A) Strategy Finder (`/options/swing`)** — `compute.swing_scan` drops any scored candidate below
 **`SWING_MIN_SCORE = 50.0`** or carrying **`SWING_EXCLUDED_GRADES = ("Weak",)`**, applied to **EVERY

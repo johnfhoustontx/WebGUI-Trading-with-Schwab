@@ -2,7 +2,7 @@
 import pytest
 import sys
 import os
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -574,7 +574,18 @@ class TestDetectStrikeIncrement:
 class TestScreenSpreadsStrikeValidity:
     """Verify screen_spreads filters strikes outside expected move window."""
 
-    def _mock_chain(self, put_strikes, underlying=530.0, marks=None):
+    # The EM window is now sized off the EXPIRATION's own ATM IV (2026-08-07),
+    # so the chain's volatility -- not just the `daily_expected_move` argument --
+    # determines the window. 28.84 vol at underlying 530 reproduces exactly the
+    # daily EM of 8.0 these tests pass and were written against
+    # (530 * 0.2884 * sqrt(1/365) = 8.00), keeping every window boundary below
+    # identical. The old 25.0 implied 6.94, which moved the 2.50x outer bound
+    # from 20.0 to 17.35 and pushed the dist-20 short strike -- deliberately
+    # placed ON the boundary -- out of the window.
+    _EM8_VOL = 28.84
+
+    def _mock_chain(self, put_strikes, underlying=530.0, marks=None,
+                    volatility=_EM8_VOL):
         """Build a chain with given put strikes, all with good liquidity.
         marks: optional list of mark prices corresponding to put_strikes."""
         exp_key = "2026-04-14:1"
@@ -585,7 +596,7 @@ class TestScreenSpreadsStrikeValidity:
                 "strikePrice": float(s), "delta": -0.15,
                 "mark": mark, "bid": mark - 0.05, "ask": mark + 0.05,
                 "theta": -0.05, "vega": 0.10, "gamma": 0.01,
-                "volatility": 25.0,
+                "volatility": volatility,
                 "totalVolume": 200, "openInterest": 500,
             }]
         return {
@@ -1703,6 +1714,96 @@ def fake_client(monkeypatch):
             ]})
 
     return _Stub()
+
+
+class TestPerExpiryExpectedMove:
+    """The EM window must size against the EXPIRATION's own IV, not a 30-day IV
+    scaled by sqrt(dte). Only the vol INPUT changes — every downstream formula
+    (sqrt(dte) scaling, the 0-DTE hours decay, the multiplier curves) is
+    untouched, which is why these tests target the substituted daily EM.
+    """
+
+    def _chain(self, front_iv, back_iv, underlying=100.0):
+        """Put-only ladder 85-99 whose marks DECAY with distance from spot, so
+        every 1-wide spread carries a real 0.20 credit (cr/w 0.20, clearing both
+        min_cr_pct and the EDGE_MARGIN |delta|+0.02 gate at delta 0.10). An
+        equal-mark ladder would give every spread zero credit and the test would
+        pass vacuously on an empty result.
+        """
+        def leg(iv, k):
+            mark = 0.20 + (k - 85) * 0.20
+            return [{"volatility": iv, "delta": -0.10, "mark": mark,
+                     "bid": round(mark - 0.02, 2), "ask": round(mark + 0.02, 2),
+                     "theta": -0.02, "vega": 0.05, "gamma": 0.01,
+                     "totalVolume": 500, "openInterest": 500}]
+        return {
+            "underlyingPrice": underlying,
+            "callExpDateMap": {},
+            "putExpDateMap": {
+                "2026-08-10:3":  {f"{k}.0": leg(front_iv, k) for k in range(85, 100)},
+                "2026-09-05:30": {f"{k}.0": leg(back_iv, k) for k in range(85, 100)},
+            },
+        }
+
+    def test_effective_daily_em_uses_the_expirys_own_iv(self):
+        chain = self._chain(front_iv=30.0, back_iv=15.0)
+        eff = scanner_engine.effective_daily_em(chain, "2026-08-10", 100.0, fallback=1.0)
+        import iv_analysis
+        assert eff == iv_analysis.expiry_daily_em(100.0, 30.0)
+        # Non-vacuity: it must differ from the fallback AND from the 30d reading.
+        assert eff != 1.0
+        assert eff != iv_analysis.expiry_daily_em(100.0, 15.0)
+
+    def test_effective_daily_em_falls_back_when_the_expiry_has_no_iv(self):
+        """No usable per-expiry IV must degrade to the caller's daily EM, never
+        to None/0 — a 0 disables the EM filter entirely (accept-all)."""
+        chain = self._chain(front_iv=30.0, back_iv=15.0)
+        assert scanner_engine.effective_daily_em(
+            chain, "2099-01-01", 100.0, fallback=1.23) == 1.23
+        assert scanner_engine.effective_daily_em(None, "x", 100.0, fallback=1.23) == 1.23
+
+    def test_kill_switch_restores_the_legacy_thirty_day_em(self, monkeypatch):
+        chain = self._chain(front_iv=30.0, back_iv=15.0)
+        monkeypatch.setattr(scanner_engine, "USE_EXPIRY_EM", False)
+        assert scanner_engine.effective_daily_em(
+            chain, "2026-08-10", 100.0, fallback=1.23) == 1.23
+
+    def _short_strikes(self, chain, legacy_daily, monkeypatch=None, use_expiry=True):
+        import scanner_engine as se
+        orig = se.USE_EXPIRY_EM
+        try:
+            se.USE_EXPIRY_EM = use_expiry
+            got = se.screen_spreads(
+                chain, "TEST", 1, 5, -0.40, -0.01, 0.01, 0.40, 0.05, "SWING",
+                spot=100.0, daily_expected_move=legacy_daily,
+                now_ct=datetime(2026, 8, 7, 10, 0))
+        finally:
+            se.USE_EXPIRY_EM = orig
+        return sorted({s["short_strike"] for s in got})
+
+    def test_screen_spreads_sizes_the_window_off_the_expiry_iv(self):
+        """A front expiry priced RICHER than the 30-day widens ITS OWN EM, so
+        the window moves further OTM than the IV30-scaled one.
+
+        The two windows are disjoint by construction (60-vol front -> puts
+        88.0-93.2; 15-vol 30-day reading -> puts 97.0-98.3), so this asserts on
+        the STRIKE SETS. A count comparison would not distinguish them.
+        """
+        rich = self._chain(front_iv=60.0, back_iv=15.0)
+        import iv_analysis
+        legacy_daily = iv_analysis.expiry_daily_em(100.0, 15.0)
+
+        per_expiry = self._short_strikes(rich, legacy_daily, use_expiry=True)
+        legacy = self._short_strikes(rich, legacy_daily, use_expiry=False)
+
+        # Non-vacuity: BOTH paths must actually produce spreads.
+        assert per_expiry, "per-expiry path produced no spreads — fixture is broken"
+        assert legacy, "legacy path produced no spreads — fixture is broken"
+        # The richer front EM pushes the short strike strictly further OTM.
+        assert max(per_expiry) < min(legacy), (
+            f"per-expiry shorts {per_expiry} are not further OTM than legacy {legacy}")
+        assert all(88.0 <= k <= 93.5 for k in per_expiry), per_expiry
+        assert all(96.5 <= k <= 98.5 for k in legacy), legacy
 
 
 @pytest.fixture

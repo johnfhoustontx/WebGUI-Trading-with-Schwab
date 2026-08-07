@@ -296,6 +296,48 @@ NEG_GEX_MIN_SCORE = 62
 EDGE_MARGIN = 0.02
 
 
+# Size the EM strike window off the EXPIRATION's own ATM IV instead of the
+# symbol-level ~30-DTE IV that `iv_analysis.extract_atm_iv` returns.
+#
+# The old path computed daily_em from IV30 and scaled it by sqrt(dte), which
+# assumes a FLAT term structure. Measured live 2026-08-07: SPY's 3-DTE expiry
+# priced 8.1 vol against IV30 10.3, so the sqrt-scaled EM overstated that
+# expiration's own move by 27% (18% at 4 DTE, 6% at 5 DTE). In contango this
+# pushes short strikes further out than intended; on an event day, when the
+# front expiry's IV spikes above IV30, it pulls them in too close.
+#
+# ONLY the vol input changes. `effective_daily_em` returns a DAILY-equivalent
+# EM, so the sqrt(dte) period scaling, the 0-DTE hours-to-close decay and every
+# multiplier curve below are byte-for-byte unchanged.
+#
+# Kill switch: set False to restore the IV30-scaled behavior exactly.
+USE_EXPIRY_EM = True
+
+
+def effective_daily_em(chain, exp_str, underlying, fallback):
+    """Daily-equivalent EM for ONE expiration, falling back to the caller's.
+
+    Falls back to ``fallback`` (never None/0) whenever the per-expiry IV is
+    unavailable: a 0 would disable the EM filter entirely and silently accept
+    every strike, which is a far worse failure than using the old estimate.
+    """
+    if not USE_EXPIRY_EM:
+        return fallback
+    try:
+        # Lazy, matching run_full_scan's existing `from iv_analysis import ...`:
+        # keeps scanner_engine's module-level import graph unchanged for the
+        # services that import it.
+        import iv_analysis
+        iv = iv_analysis.expiry_atm_iv(chain, exp_str, underlying)
+        if not iv or iv <= 0:
+            return fallback
+        em = iv_analysis.expiry_daily_em(underlying, iv)
+        return em if em and em > 0 else fallback
+    except Exception:  # noqa: BLE001
+        log.exception(f"  per-expiry EM failed for {exp_str}; using the 30d estimate")
+        return fallback
+
+
 def _interp_em_curve(curve, dte):
     """Linear-interpolate (min_mult, max_mult) for a DTE against a curve.
 
@@ -795,6 +837,15 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
                     log.info(f"  [{trade_type}] Skipping {exp_str} — earnings conflict ({earnings_date})")
                     continue
 
+            # Size this expiration's EM window off ITS OWN ATM IV rather than
+            # the symbol-level ~30-DTE IV the caller's daily EM was built from.
+            # Returns a DAILY-equivalent EM, so every formula downstream is
+            # unchanged; degrades to the caller's value when unavailable.
+            exp_daily_em = daily_expected_move
+            if daily_expected_move is not None and daily_expected_move > 0:
+                exp_daily_em = effective_daily_em(
+                    chain, exp_str, underlying, daily_expected_move)
+
             opts = {}
             for sk, contracts in strikes_data.items():
                 k = float(sk)
@@ -848,9 +899,9 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
                 if mode != "DIRECTIONAL" and abs(d) > MAX_ENTRY_SHORT_DELTA:
                     continue
                 # --- Strike validity: only SHORT leg must be in expected move window ---
-                if spot is not None and daily_expected_move is not None and daily_expected_move > 0:
+                if spot is not None and exp_daily_em is not None and exp_daily_em > 0:
                     if not is_strike_in_expected_move_window(
-                            k, spot, daily_expected_move, dte, trade_type,
+                            k, spot, exp_daily_em, dte, trade_type,
                             now_ct=now_ct, mode=mode):
                         em_fail += 1
                         continue
