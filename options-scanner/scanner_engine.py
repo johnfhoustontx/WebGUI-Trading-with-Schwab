@@ -846,6 +846,19 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
                 exp_daily_em = effective_daily_em(
                     chain, exp_str, underlying, daily_expected_move)
 
+            # Stamped onto every signal so scoring's EM-buffer factor can size
+            # itself off the SAME vol this window used, instead of the 30-day
+            # EM it read for every trade regardless of DTE. None when the kill
+            # switch is off, so USE_EXPIRY_EM=False reverts BOTH halves and
+            # scoring falls back to the symbol-level IV.
+            exp_iv = None
+            if USE_EXPIRY_EM:
+                try:
+                    import iv_analysis
+                    exp_iv = iv_analysis.expiry_atm_iv(chain, exp_str, underlying)
+                except Exception:  # noqa: BLE001
+                    log.exception(f"  per-expiry IV stamp failed for {exp_str}")
+
             opts = {}
             for sk, contracts in strikes_data.items():
                 k = float(sk)
@@ -926,7 +939,7 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
                     results.append({
                         "id": f"{symbol}_{side}_{exp_str}_{k}_{long_k}",
                         "symbol": symbol, "type": side, "trade_type": trade_type,
-                        "expiration": exp_str, "dte": dte,
+                        "expiration": exp_str, "dte": dte, "expiry_iv": exp_iv,
                         "short_strike": k, "long_strike": long_k, "width": w,
                         "short_mark": round(short["mark"], 2),
                         "long_mark": round(lo["mark"], 2),
@@ -982,7 +995,7 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
                         results.append({
                             "id": f"{symbol}_{side}_{exp_str}_{k}_{long_k}",
                             "symbol": symbol, "type": side, "trade_type": trade_type,
-                            "expiration": exp_str, "dte": dte,
+                            "expiration": exp_str, "dte": dte, "expiry_iv": exp_iv,
                             "short_strike": k, "long_strike": long_k, "width": w,
                             "short_mark": round(short["mark"], 2),
                             "long_mark": round(lo["mark"], 2),
@@ -1030,6 +1043,11 @@ def build_iron_condors(spreads, max_n=3):
                     "id": f"{p['symbol']}_IC_{p['expiration']}_{p['short_strike']}_{c['short_strike']}",
                     "symbol": p["symbol"], "type": "IC", "trade_type": p["trade_type"],
                     "expiration": p["expiration"], "dte": p["dte"],
+                    # Both legs of an IC share one expiration, so the put side's
+                    # stamp is the IC's. Without it an IC would silently fall
+                    # back to the symbol-level IV while its component verticals
+                    # scored off the expiry's own.
+                    "expiry_iv": p.get("expiry_iv"),
                     "short_strike": p["short_strike"], "long_strike": p["long_strike"],
                     "call_short": c["short_strike"], "call_long": c["long_strike"],
                     "short_mark": p.get("short_mark"), "long_mark": p.get("long_mark"),

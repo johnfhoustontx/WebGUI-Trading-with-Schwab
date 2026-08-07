@@ -8,7 +8,35 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-08-07 (**EM strike window sized off the EXPIRATION's own IV, not a 30-day IV**:
+**Last updated:** 2026-08-07 (**part B — the EM-BUFFER SCORING FACTOR now sizes to the trade's own
+horizon and the expiration's own IV**: `scoring.calc_composite_score` read
+`expected_moves["monthly"]` — a **30-day** EM — for **every** trade regardless of DTE. Two defects
+followed. **(1) The factor measured DTE, not strike placement:** a short sitting at exactly 1× its own
+expiration's EM (the factor's stated 0-point) scored **9.1 at 1 DTE vs 50.0 at 30 DTE** — IV cancels out
+of that ratio, so it held at any vol. **(2) It went nearly inert at short DTE:** across a realistic
+0.5–2.5× strike sweep its usable spread collapsed from **75 points at 30 DTE to 18.3 at 1 DTE**, i.e. at
+weight 12 it could only move the composite ~2.2 points. **Within one DTE bucket the bias is monotone, so
+ranking there was already preserved** — the reason this was never visible on the Scanner's tabs. **The
+real victim is the DRIVER:** `driver_svc.compute.build_packet` merges `signals_0dte + signals_swing`
+into ONE composite-ranked menu, so the live autonomous decider was comparing 0-DTE against swing on a
+score that systematically penalised the short-dated side by up to ~5 points. `em_1sd` now comes from
+`calc_expected_move(underlying, iv, signal["dte"])`, preferring the expiration's own ATM IV — stamped as
+**`expiry_iv`** by `screen_spreads` at all THREE signal-construction sites (both verticals + the iron
+condor, which inherits its put side's stamp; missing it there would have left ICs scoring off the
+symbol IV while their component verticals used the expiry's) — then the symbol-level `current_iv`, then
+the legacy monthly EM so a stale or hand-built signal dict still scores rather than crashing or zeroing.
+**`USE_EXPIRY_EM = False` reverts BOTH halves**: it suppresses the stamp too, so scoring falls back to
+the symbol IV — the kill switch is a full revert, pinned by a test. **This moves scores UP at short DTE,
+the OPPOSITE direction from the 2026-08-06 quality cut**, so it loosens rather than tightens: more
+signals clear `signal_recorder.MIN_SCORE = 58` and `NEG_GEX_MIN_SCORE = 62`, and stored `entry_score`
+values in `signals.db` stop being comparable across the change. **The 50-point directional/Finder cut is
+NOT affected** — that runs on `strategy_scoring`, a separate model. **Measured on the live scan:** em
+factor **+9.1 to +16.4**, composite **+1.1 to +2.0**, and **0** signals newly crossing the 58 floor —
+but every live signal that moment was 14 DTE, so this **understates** the effect; the +4 to +5 shifts
+live at 0–3 DTE, where no signals existed to measure. options-scanner **1327 passed / 17 failed** (the
+documented baseline groups only — verified by comparing the failing SET, not the count); ruff clean.
+TDD (red → green).
+Prior — 2026-08-07 (**part A — EM strike window sized off the EXPIRATION's own IV, not a 30-day IV**:
 `screen_spreads` now sizes each expiration's expected-move strike window from **that expiration's ATM
 IV** instead of the symbol-level ~30-DTE IV `iv_analysis.extract_atm_iv` returns. New pure
 `iv_analysis.expiry_atm_iv(chain, exp_str, underlying)` (averages the ATM call+put IV for ONE

@@ -1,4 +1,5 @@
 """Tests for scoring.py — actual bid/ask in liquidity scoring."""
+import math
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -243,3 +244,79 @@ def test_norm_liquidity_falls_back_to_leg_bid_ask():
         f"Expected reasonable liquidity with tight leg-level bid/ask, "
         f"got {result['factor_scores']['liq']}"
     )
+
+
+#############################################
+# EM buffer sized to the trade's OWN horizon (B2, 2026-08-07)
+#############################################
+
+def _em_signal(dte, short_strike, underlying=100.0, expiry_iv=None):
+    """A minimal PCS whose only interesting axis is the EM buffer."""
+    sig = {"type": "PCS", "underlying_price": underlying,
+           "short_strike": short_strike, "dte": dte,
+           "rr_pct": 20.0, "pop_pct": 70.0, "net_theta": 1.0, "max_loss": 400.0}
+    if expiry_iv is not None:
+        sig["expiry_iv"] = expiry_iv
+    return sig
+
+
+def _iv_data(current_iv=30.0, underlying=100.0):
+    """iv_data carrying BOTH the legacy monthly EM and a symbol-level IV."""
+    em30 = underlying * (current_iv / 100.0) * math.sqrt(30 / 365.0)
+    return {"iv_rank": 50.0, "current_iv": current_iv, "hv_current": 30.0,
+            "expected_moves": {"monthly": {"move_dollars": round(em30, 2)}}}
+
+
+def _em_factor(sig, ivd):
+    return calc_composite_score(sig, iv_data=ivd)["factor_scores"]["em"]
+
+
+def test_em_buffer_is_measured_against_the_trades_own_horizon():
+    """A short at EXACTLY 1x its own expiration's EM must score the same at
+    every DTE. Under the 30-day EM it scored 9.1 at 1 DTE and 50.0 at 30 DTE --
+    the factor was reading DTE, not strike placement.
+    """
+    iv, underlying = 30.0, 100.0
+    ivd = _iv_data(iv, underlying)
+    scores = {}
+    for dte in (1, 3, 7, 14, 30):
+        em_dte = underlying * (iv / 100.0) * math.sqrt(max(dte, 0.25) / 365.0)
+        scores[dte] = _em_factor(
+            _em_signal(dte, underlying - em_dte, underlying, expiry_iv=iv), ivd)
+    assert max(scores.values()) - min(scores.values()) < 1.0, scores
+    # ...and that common value is the factor's stated 1-sigma zero-point.
+    assert all(abs(v - 50.0) < 1.0 for v in scores.values()), scores
+
+
+def test_em_buffer_prefers_the_expirys_own_iv_over_the_symbol_iv():
+    """expiry_iv (stamped by screen_spreads) wins over iv_data['current_iv'],
+    matching the strike window. A richer front expiry has a BIGGER EM, so the
+    same strike sits at fewer EM units and scores LOWER."""
+    underlying, dte = 100.0, 3
+    ivd = _iv_data(30.0, underlying)
+    em_at_30 = underlying * 0.30 * math.sqrt(dte / 365.0)
+    strike = underlying - em_at_30                      # exactly 1x at IV 30
+
+    at_symbol_iv = _em_factor(_em_signal(dte, strike, underlying), ivd)
+    at_rich_expiry = _em_factor(
+        _em_signal(dte, strike, underlying, expiry_iv=60.0), ivd)
+
+    assert abs(at_symbol_iv - 50.0) < 1.0, at_symbol_iv
+    assert at_rich_expiry < at_symbol_iv - 10, (at_rich_expiry, at_symbol_iv)
+
+
+def test_em_buffer_falls_back_to_the_monthly_em_without_dte():
+    """Back-compat: a signal carrying no dte (a stale/hand-built dict) must
+    still score off the legacy 30-day EM rather than crashing or zeroing."""
+    underlying = 100.0
+    ivd = _iv_data(30.0, underlying)
+    em30 = ivd["expected_moves"]["monthly"]["move_dollars"]
+    sig = _em_signal(30, underlying - em30, underlying)
+    sig.pop("dte")
+    assert abs(_em_factor(sig, ivd) - 50.0) < 1.0
+
+
+def test_em_buffer_survives_missing_iv_entirely():
+    """No expiry_iv, no current_iv, no monthly EM -> the neutral 50, not a crash."""
+    sig = _em_signal(5, 95.0)
+    assert _em_factor(sig, {"iv_rank": 50.0}) == 50.0

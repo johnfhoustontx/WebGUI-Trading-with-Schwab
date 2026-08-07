@@ -299,7 +299,32 @@ def calc_composite_score(signal, iv_data=None, technicals=None,
     iv_rank = iv_data.get("iv_rank") if iv_data else None
     em_data = iv_data.get("expected_moves", {}) if iv_data else {}
     em_monthly = em_data.get("monthly", {})
-    em_1sd = em_monthly.get("move_dollars", 0) if em_monthly else 0
+
+    # Expected move for the EM-buffer factor, sized to THIS trade's horizon.
+    #
+    # This used to read `expected_moves["monthly"]` -- a 30-day EM -- for every
+    # trade regardless of DTE, which made the factor measure DTE rather than
+    # strike placement: a short sitting at exactly 1x its own expiration's EM
+    # (the factor's stated 0-point) scored 9.1 at 1 DTE and 50.0 at 30 DTE, and
+    # its usable spread across a realistic strike range collapsed from 75 points
+    # at 30 DTE to 18 at 1 DTE. Within one DTE bucket the bias is monotone, so
+    # RANKING there was preserved -- but driver_svc.build_packet merges
+    # signals_0dte + signals_swing into ONE composite-ranked menu, so the live
+    # decider was comparing across horizons on a biased score.
+    #
+    # IV preference mirrors the strike window: the expiration's OWN ATM IV
+    # (stamped as `expiry_iv` by screen_spreads) first, then the symbol-level
+    # ~30-DTE IV, then the legacy monthly EM so a stale or hand-built signal
+    # dict still scores instead of crashing or zeroing.
+    em_1sd = 0
+    dte_for_em = signal.get("dte")
+    iv_for_em = signal.get("expiry_iv") or (iv_data.get("current_iv") if iv_data else None)
+    if underlying and iv_for_em and dte_for_em is not None:
+        from iv_analysis import calc_expected_move  # lazy: keeps scoring's import graph flat
+        em = calc_expected_move(underlying, iv_for_em, dte_for_em)
+        em_1sd = (em or {}).get("move_dollars") or 0
+    if not em_1sd:
+        em_1sd = em_monthly.get("move_dollars", 0) if em_monthly else 0
 
     # IV/HV ratio
     hv_current = iv_data.get("hv_current") if iv_data else None

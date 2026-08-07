@@ -1781,6 +1781,38 @@ class TestPerExpiryExpectedMove:
             se.USE_EXPIRY_EM = orig
         return sorted({s["short_strike"] for s in got})
 
+    def test_screen_spreads_stamps_the_expiry_iv_for_scoring(self):
+        """Each signal carries its expiration's ATM IV so scoring can size the
+        EM-buffer factor off the same vol the strike window used."""
+        chain = self._chain(front_iv=60.0, back_iv=15.0)
+        import iv_analysis
+        got = scanner_engine.screen_spreads(
+            chain, "TEST", 1, 5, -0.40, -0.01, 0.01, 0.40, 0.05, "SWING",
+            spot=100.0, daily_expected_move=iv_analysis.expiry_daily_em(100.0, 15.0),
+            now_ct=datetime(2026, 8, 7, 10, 0))
+        assert got, "fixture produced no spreads"
+        # 60.0 is the FRONT expiry's vol, not the 15.0 thirty-day reading.
+        assert all(s.get("expiry_iv") == 60.0 for s in got), \
+            [s.get("expiry_iv") for s in got]
+
+    def test_kill_switch_also_suppresses_the_expiry_iv_stamp(self):
+        """USE_EXPIRY_EM=False must revert BOTH halves: with no stamp, scoring
+        falls back to the symbol-level IV, so the switch is a full revert."""
+        chain = self._chain(front_iv=60.0, back_iv=15.0)
+        import iv_analysis
+        import scanner_engine as se
+        orig = se.USE_EXPIRY_EM
+        try:
+            se.USE_EXPIRY_EM = False
+            got = se.screen_spreads(
+                chain, "TEST", 1, 5, -0.40, -0.01, 0.01, 0.40, 0.05, "SWING",
+                spot=100.0, daily_expected_move=iv_analysis.expiry_daily_em(100.0, 15.0),
+                now_ct=datetime(2026, 8, 7, 10, 0))
+        finally:
+            se.USE_EXPIRY_EM = orig
+        assert got, "fixture produced no spreads"
+        assert all(s.get("expiry_iv") is None for s in got)
+
     def test_screen_spreads_sizes_the_window_off_the_expiry_iv(self):
         """A front expiry priced RICHER than the 30-day widens ITS OWN EM, so
         the window moves further OTM than the IV30-scaled one.
