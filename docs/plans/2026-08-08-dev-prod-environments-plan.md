@@ -144,7 +144,7 @@ def test_pytest_forces_suppression_but_keeps_prod_ports(tmp_path):
 def test_live_module_constants_exist():
     """The import-time resolution ran and exported the public names."""
     assert repo_paths.ENV_NAME in ("dev", "prod")
-    assert isinstance(repo_paths.ENV, dict)
+    assert isinstance(repo_paths.ENV_FLAGS, dict)
     assert repo_paths.IS_DEV == (repo_paths.ENV_NAME == "dev")
 ```
 
@@ -287,9 +287,9 @@ def _resolve_env(root):
     return name, flags, peer
 
 
-ENV_NAME, ENV, PEER_ROOT = _resolve_env(REPO_ROOT)
+ENV_NAME, ENV_FLAGS, PEER_ROOT = _resolve_env(REPO_ROOT)
 IS_DEV = ENV_NAME == "dev"
-OWNS_PROXY = bool(ENV.get("owns_proxy", True))
+OWNS_PROXY = bool(ENV_FLAGS.get("owns_proxy", True))
 ```
 
 **Step 5: Gitignore the marker**
@@ -410,7 +410,7 @@ def _derive_ports(ports: dict, flags: dict) -> dict:
     }
 
 
-_derived = _derive_ports(_ports, ENV)
+_derived = _derive_ports(_ports, ENV_FLAGS)
 
 PROXY_PORT       = _derived["proxy_port"]
 PROXY_URL        = f"http://127.0.0.1:{PROXY_PORT}"
@@ -480,7 +480,7 @@ def test_env_suppression_disables_every_channel(tmp_path, monkeypatch):
         "twitter": {"enabled": True, "dry_run": False},
         "market_snapshot": {"enabled": True},
     }), encoding="utf-8")
-    monkeypatch.setitem(channels.ENV, "allow_notifications", False)
+    monkeypatch.setitem(channels.ENV_FLAGS, "allow_notifications", False)
 
     cfg = channels.load_config(cfg_file)
 
@@ -500,7 +500,7 @@ def test_env_permissive_leaves_config_untouched(tmp_path, monkeypatch):
     cfg_file = tmp_path / "notifications.json"
     cfg_file.write_text(json.dumps({"enabled": True,
                                     "twitter": {"enabled": True}}), encoding="utf-8")
-    monkeypatch.setitem(channels.ENV, "allow_notifications", True)
+    monkeypatch.setitem(channels.ENV_FLAGS, "allow_notifications", True)
     cfg = channels.load_config(cfg_file)
     assert cfg["enabled"] is True
     assert cfg["twitter"]["enabled"] is True
@@ -514,14 +514,14 @@ Add `import json` to the test file if it isn't already imported.
 $PY -m pytest shared/notify -k env_ -v
 ```
 
-Expected: FAIL — `channels` has no attribute `ENV` (and, once that is added, the twitter flag stays True).
+Expected: FAIL — `channels` has no attribute `ENV_FLAGS` (and, once that is added, the twitter flag stays True).
 
 **Step 3: Implement**
 
 In `shared/notify/channels.py`, extend the existing repo_paths import (line ~23):
 
 ```python
-from repo_paths import ENV, NOTIFICATIONS_CONFIG
+from repo_paths import ENV_FLAGS, NOTIFICATIONS_CONFIG
 ```
 
 Then at the **end** of `load_config`, immediately before the `return cfg`:
@@ -532,7 +532,7 @@ Then at the **end** of `load_config`, immediately before the `return cfg`:
     # poster has its OWN gate that does not consult the master switch, and it is
     # the one channel that PUBLISHES. Recursive so a channel added later is
     # covered without anyone remembering to come back here.
-    if not ENV.get("allow_notifications", True):
+    if not ENV_FLAGS.get("allow_notifications", True):
         def _disable(node):
             for k, v in node.items():
                 if k == "enabled":
@@ -596,7 +596,7 @@ def test_claude_factory_returns_none_when_suppressed(mod_name, fn_name, monkeypa
     """A suppressed environment builds no Anthropic client, even with a real key
     present on the box — this machine HAS shared/anthropic_key.txt."""
     mod = importlib.import_module(mod_name)
-    monkeypatch.setitem(mod.ENV, "allow_claude", False)
+    monkeypatch.setitem(mod.ENV_FLAGS, "allow_claude", False)
     assert getattr(mod, fn_name)() is None
 ```
 
@@ -612,11 +612,11 @@ def test_claude_factory_returns_none_when_suppressed(mod_name, fn_name, monkeypa
 $PY -m pytest tests/test_env_guards.py -v
 ```
 
-Expected: FAIL — the modules have no `ENV` attribute.
+Expected: FAIL — the modules have no `ENV_FLAGS` attribute.
 
 **Step 3: Implement, one factory at a time**
 
-`services/options_svc/compute.py` — add `ENV` to its existing `repo_paths` import, then as the first line of `_make_analyze_client`:
+`services/options_svc/compute.py` — add `ENV_FLAGS` to its existing `repo_paths` import, then as the first line of `_make_analyze_client`:
 
 ```python
 def _make_analyze_client():
@@ -626,7 +626,7 @@ def _make_analyze_client():
     Returns None in a suppressed environment (dev), which drops into the SAME
     no-API-key path the caller already handles — the briefing renders its
     explanatory page rather than taking any new code path."""
-    if not ENV.get("allow_claude", True):
+    if not ENV_FLAGS.get("allow_claude", True):
         return None
     key = _anthropic_api_key()
     ...
@@ -634,7 +634,7 @@ def _make_analyze_client():
 
 `services/market_svc/compute.py` — same shape in `_make_summary_client`.
 
-`services/driver_svc/decider.py` — same shape in `_make_client`; the caller already treats `None` as stand-down. Import `ENV` from `repo_paths` alongside whatever that module already pulls.
+`services/driver_svc/decider.py` — same shape in `_make_client`; the caller already treats `None` as stand-down. Import `ENV_FLAGS` from `repo_paths` alongside whatever that module already pulls.
 
 **Step 4: Run the tests**
 
@@ -644,7 +644,7 @@ $PY -m pytest services/options_svc -q
 $PY -m pytest services/market_svc services/driver_svc -q
 ```
 
-Expected: 3 new passed; suites at their documented baselines. Watch `services/options_svc/tests/test_compute.py:3646` — it has a comment about the dev box having a real `anthropic_key.txt`; if it asserts a client *is* built, it now needs `monkeypatch.setitem(compute.ENV, "allow_claude", True)`.
+Expected: 3 new passed; suites at their documented baselines. Watch `services/options_svc/tests/test_compute.py:3646` — it has a comment about the dev box having a real `anthropic_key.txt`; if it asserts a client *is* built, it now needs `monkeypatch.setitem(compute.ENV_FLAGS, "allow_claude", True)`.
 
 **Step 5: Commit**
 
@@ -670,7 +670,7 @@ One guard in the shared scaffold covers all six services.
 ```python
 def test_schedulers_disabled_when_suppressed(monkeypatch):
     from services import _scaffold
-    monkeypatch.setitem(_scaffold.ENV, "schedulers", False)
+    monkeypatch.setitem(_scaffold.ENV_FLAGS, "schedulers", False)
     monkeypatch.delenv("TRADING_ENABLE_SCHEDULERS", raising=False)
     assert _scaffold._schedulers_enabled() is False
 
@@ -678,7 +678,7 @@ def test_schedulers_disabled_when_suppressed(monkeypatch):
 def test_env_var_overrides_suppression(monkeypatch):
     """The one dev case that needs collection: testing the collectors."""
     from services import _scaffold
-    monkeypatch.setitem(_scaffold.ENV, "schedulers", False)
+    monkeypatch.setitem(_scaffold.ENV_FLAGS, "schedulers", False)
     monkeypatch.setenv("TRADING_ENABLE_SCHEDULERS", "1")
     assert _scaffold._schedulers_enabled() is True
 
@@ -687,7 +687,7 @@ def test_health_reports_no_scheduler_rather_than_a_dead_one(monkeypatch):
     """A suppressed service must report `has_scheduler: false`, not a scheduler
     that looks crashed — otherwise the Status page shows dev as broken."""
     from services import _scaffold
-    monkeypatch.setitem(_scaffold.ENV, "schedulers", False)
+    monkeypatch.setitem(_scaffold.ENV_FLAGS, "schedulers", False)
     monkeypatch.delenv("TRADING_ENABLE_SCHEDULERS", raising=False)
     app = _scaffold.make_app("options", scheduler=lambda bus: None)
     with __import__("fastapi").testclient.TestClient(app) as c:
@@ -701,11 +701,11 @@ def test_health_reports_no_scheduler_rather_than_a_dead_one(monkeypatch):
 $PY -m pytest tests/test_env_guards.py -k schedul -v
 ```
 
-Expected: FAIL — `_scaffold` has no `ENV` / `_schedulers_enabled`.
+Expected: FAIL — `_scaffold` has no `ENV_FLAGS` / `_schedulers_enabled`.
 
 **Step 3: Implement**
 
-In `services/_scaffold.py`, add `from repo_paths import ENV` to the imports (and `import os` if absent), then add above `make_app`:
+In `services/_scaffold.py`, add `from repo_paths import ENV_FLAGS` to the imports (and `import os` if absent), then add above `make_app`:
 
 ```python
 def _schedulers_enabled() -> bool:
@@ -718,7 +718,7 @@ def _schedulers_enabled() -> bool:
     """
     if os.environ.get("TRADING_ENABLE_SCHEDULERS", "").strip().lower() in ("1", "true", "yes"):
         return True
-    return bool(ENV.get("schedulers", True))
+    return bool(ENV_FLAGS.get("schedulers", True))
 ```
 
 Inside `make_app`, replace:
@@ -746,7 +746,7 @@ $PY -m pytest tests/test_env_guards.py -v
 $PY -m pytest services/options_svc/tests/test_app.py services/driver_svc -q
 ```
 
-Expected: green. If any existing scaffold test asserts a scheduler runs, it must now set `TRADING_ENABLE_SCHEDULERS` or patch `ENV` — under pytest the flag is forced False by Task 1.
+Expected: green. If any existing scaffold test asserts a scheduler runs, it must now set `TRADING_ENABLE_SCHEDULERS` or patch `ENV_FLAGS` — under pytest the flag is forced False by Task 1.
 
 **Step 5: Commit**
 
@@ -775,7 +775,7 @@ def test_autonomous_cycle_is_inert_when_suppressed(monkeypatch):
     from services.driver_svc import handlers
     bus = FakeBus()                                  # the module's existing fake
     handlers.set_control(bus, enabled=True, halted=False)
-    monkeypatch.setitem(handlers.ENV, "autonomous_trading", False)
+    monkeypatch.setitem(handlers.ENV_FLAGS, "autonomous_trading", False)
     monkeypatch.setattr(handlers.compute, "fetch_market_context",
                         lambda *a, **k: pytest.fail("dev must not fetch market data"))
 
@@ -792,11 +792,11 @@ Match `FakeBus` / `bus.enqueued` to whatever that test module already uses.
 $PY -m pytest services/driver_svc/tests/test_handlers.py -k inert -v
 ```
 
-Expected: FAIL — either `handlers` has no `ENV`, or the `fetch_market_context` fail-fast fires.
+Expected: FAIL — either `handlers` has no `ENV_FLAGS`, or the `fetch_market_context` fail-fast fires.
 
 **Step 3: Implement**
 
-Add `ENV` to `handlers.py`'s `repo_paths` import, then make it the **first** statement of `run_autonomous_cycle`, before `read_control`:
+Add `ENV_FLAGS` to `handlers.py`'s `repo_paths` import, then make it the **first** statement of `run_autonomous_cycle`, before `read_control`:
 
 ```python
 def run_autonomous_cycle(bus) -> None:
@@ -807,7 +807,7 @@ def run_autonomous_cycle(bus) -> None:
     that arrived carrying an enabled ``cache:driver:control`` could otherwise
     start a trading loop in dev.
     """
-    if not ENV.get("autonomous_trading", True):
+    if not ENV_FLAGS.get("autonomous_trading", True):
         return
     control = read_control(bus)
     ...
@@ -1312,7 +1312,7 @@ _REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from repo_paths import ENV, ENV_NAME, MEMURAI_PORT, PEER_ROOT, REPO_ROOT, SERVICE_PORTS, NICEGUI_PORT  # noqa: E402
+from repo_paths import ENV_FLAGS, ENV_NAME, MEMURAI_PORT, PEER_ROOT, REPO_ROOT, SERVICE_PORTS, NICEGUI_PORT  # noqa: E402
 
 # Repo-relative stores, all gitignored, so a fresh checkout has none of them.
 GEX_STORE = "options-scanner/gex_history.db"
@@ -1464,7 +1464,7 @@ def main(argv=None):
 
     import redis
     src_db = int(_peer_redis_db(peer))
-    dst_db = int(ENV.get("redis_db") or 0)
+    dst_db = int(ENV_FLAGS.get("redis_db") or 0)
     print(f"  redis db {src_db} -> db {dst_db}"
           + ("  (dry run)" if args.dry_run else ""))
     if not args.dry_run:
