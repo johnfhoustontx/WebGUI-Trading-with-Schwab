@@ -114,13 +114,17 @@ def _read_env_marker(root):
     return name, (Path(str(peer)) if peer else None)
 
 
-def _resolve_env(root):
+def _resolve_env(root, under_pytest=None):
     """``(name, flags, peer_root)`` for a checkout root. Never raises.
 
-    Pure profile resolution — it reports what the marker + profile table SAY. The
-    pytest guard below is applied by the caller, at the module-constant site, so
-    this stays unit-testable against a tmp_path (this module is imported long
-    before any test runs, so reloading it is not a workable alternative).
+    Takes ``root`` explicitly so it is unit-testable against a tmp_path — this
+    module is imported long before any test runs, so reloading it is not a
+    workable alternative.
+
+    ``under_pytest`` defaults to detecting pytest. It is a parameter rather than
+    a bare ``sys.modules`` check inside the body so BOTH branches are testable
+    against a tmp_path — including the one that matters most, that a dev marker
+    still yields prod ports under pytest.
     """
     name, peer = _read_env_marker(root)
     try:
@@ -133,17 +137,20 @@ def _resolve_env(root):
     over = profiles.get(name)
     if isinstance(over, dict):
         flags.update(over)
+    # Under pytest: PROD PORTS regardless of the marker (tests are hermetic — the
+    # bus is already fakeredis — so ports are inert constants, and the existing
+    # suites keep passing unchanged inside a dev checkout), but every suppression
+    # forced ON so no test can reach Anthropic or a notification channel.
+    if under_pytest is None:
+        under_pytest = "pytest" in sys.modules
+    if under_pytest:
+        flags.update(port_offset=0, proxy_port=None, allow_claude=False,
+                     allow_notifications=False, schedulers=False,
+                     autonomous_trading=False)
     return name, flags, peer
 
 
 ENV_NAME, ENV, PEER_ROOT = _resolve_env(REPO_ROOT)
-# Under pytest: PROD PORTS regardless of the marker (tests are hermetic — the bus
-# is already fakeredis — so ports are inert constants, and the existing suites keep
-# passing unchanged inside a dev checkout), but every suppression forced ON so no
-# test can reach Anthropic or a notification channel.
-if "pytest" in sys.modules:
-    ENV.update(port_offset=0, proxy_port=None, allow_claude=False,
-               allow_notifications=False, schedulers=False, autonomous_trading=False)
 IS_DEV = ENV_NAME == "dev"
 OWNS_PROXY = bool(ENV.get("owns_proxy", True))
 
