@@ -247,6 +247,12 @@ NICEGUI_PORT     = _derived["nicegui_port"]
 NICEGUI_URL      = f"http://127.0.0.1:{NICEGUI_PORT}"
 ML_SERVER_URLS   = {k: f"http://127.0.0.1:{v}" for k, v in _ports["ml_servers"].items()}
 MEMURAI_PORT  = _derived["memurai_port"]
-MEMURAI_URL   = f"redis://127.0.0.1:{MEMURAI_PORT}/{_derived['redis_db']}"
+# The logical Redis DB index this environment owns. Exported as an int rather
+# than left for callers to parse back out of MEMURAI_URL or re-coerce from
+# ENV_FLAGS: tools/snapshot_from_prod.py compares it against PROD's index before
+# it FLUSHDBs, and that comparison must not hinge on a string that might be "1"
+# in one place and 1 in another. Already int()-coerced by _derive_ports.
+REDIS_DB      = _derived["redis_db"]
+MEMURAI_URL   = f"redis://127.0.0.1:{MEMURAI_PORT}/{REDIS_DB}"
 SERVICE_PORTS = dict(_derived["service_ports"])
 SERVICE_URLS  = {k: f"http://127.0.0.1:{v}" for k, v in SERVICE_PORTS.items()}
