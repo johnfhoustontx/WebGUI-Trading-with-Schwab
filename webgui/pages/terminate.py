@@ -1,9 +1,15 @@
 """Stop All Services page (``/terminate``) — stop the whole local stack from the web GUI.
 
 A deliberately guarded action: a single red button behind a confirm dialog that
-spawns ``stop_all.bat`` (proxy + the six domain services + this web app; Memurai
-is left running). Because it kills the web app too, the page goes unresponsive
-right after you confirm — by design.
+spawns ``stop_all.bat`` (the six domain services + this web app, and the
+schwab-proxy only in the environment that owns it; Memurai is left running).
+Because it kills the web app too, the page goes unresponsive right after you
+confirm — by design.
+
+The proxy caveat is not cosmetic: dev borrows prod's proxy on :8100, so
+``tools/stop_all.py`` drops it from the kill list unless ``OWNS_PROXY``. The copy
+below has to match that, or a dev operator either avoids a button they are
+entitled to press or mistrusts the result when the proxy survives.
 
 Honors the 3-tier rule: imports only ``nicegui`` + stdlib + ``repo_paths`` (host
 process control, not an app engine). The ``stop_command`` builder is pure and
@@ -42,9 +48,13 @@ def render():
             ui.icon("warning").classes("text-orange text-2xl")
             ui.label("Stop all local services").classes("text-subtitle1 font-bold")
         ui.label(
-            "Stops the schwab-proxy, all six domain services, and this web app "
-            "by killing whatever is listening on their ports. Memurai (the Redis "
-            "backbone) keeps running.").classes("opacity-80")
+            "Stops all six domain services and this web app by killing whatever "
+            "is listening on their ports. Memurai (the Redis backbone) keeps "
+            "running.").classes("opacity-80")
+        ui.label(
+            "The schwab-proxy is stopped only in the environment that owns it — "
+            "a dev checkout borrows prod's and leaves it up.").classes(
+                "opacity-80")
         ui.label(
             "⚠ This also stops THIS web app — the page will stop responding right "
             "after you confirm. That's expected. Re-launch with start_all_wt.bat "
@@ -56,8 +66,10 @@ def render():
 
         with ui.dialog() as dlg, ui.card():
             ui.label("Stop all services now?").classes("text-subtitle1 font-bold")
-            ui.label("The proxy, all services, and this web app will be "
-                     "terminated. Memurai stays up.").classes("opacity-80")
+            ui.label("All six domain services and this web app will be "
+                     "terminated. The schwab-proxy stops only in the "
+                     "environment that owns it; Memurai stays up.").classes(
+                         "opacity-80")
             with ui.row().classes("justify-end gap-2 w-full"):
                 ui.button("Cancel", on_click=dlg.close).props("flat")
 
