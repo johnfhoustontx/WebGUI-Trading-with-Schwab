@@ -1,15 +1,22 @@
-"""``start_dev.bat``'s port literals — see
+"""The launchers' port literals and environment guards — see
 docs/plans/2026-08-08-dev-prod-environments-design.md.
 
-A .bat file cannot be unit-tested the way a function can, but the thing about
-the dev launcher that CAN silently rot is worth pinning: its port numbers.
-Every process reads its own port from ``repo_paths``, so a wrong literal here
-misconfigures nothing — it misinforms, which is worse in the one situation the
-launcher exists for. A tab titled "9214" that is really 9314 sends you looking
-at the wrong service; a banner still naming 8500 sends you to PROD's web GUI
-while you debug dev. Deriving the expected numbers from ``config/ports.toml``
-plus the ``[dev]`` profile means changing the offset in one place fails here
-rather than drifting.
+A .bat file cannot be unit-tested the way a function can, but two things about
+these launchers CAN silently rot and are worth pinning.
+
+**The port numbers.** Every process reads its own port from ``repo_paths``, so a
+wrong literal in ``start_dev.bat`` misconfigures nothing — it misinforms, which
+is worse in the one situation the launcher exists for. A tab titled "9214" that
+is really 9314 sends you looking at the wrong service; a banner still naming
+8500 sends you to PROD's web GUI while you debug dev. Deriving the expected
+numbers from ``config/ports.toml`` plus the ``[dev]`` profile means changing the
+offset in one place fails here rather than drifting.
+
+**The guards.** ``start_dev.bat`` must refuse in prod and ``tools/promote.bat``
+must refuse in dev — genuinely inverse, not accidentally identical. Both were
+verified by execution, but the assertion is worth keeping: these are the two
+statements standing between "restart the dev stack" and "stop the live one,
+check out a different branch, and restart it".
 
 ``repo_paths`` reports PROD ports under pytest by design, so the expectations
 here come from the pure ``_derive_ports`` applied to the shipped ``[dev]``
@@ -26,6 +33,7 @@ import repo_paths  # noqa: E402
 
 ROOT = pathlib.Path(repo_paths.__file__).resolve().parent
 START_DEV = (ROOT / "start_dev.bat").read_text(encoding="utf-8")
+PROMOTE = (ROOT / "tools" / "promote.bat").read_text(encoding="utf-8")
 
 
 def _ports_for(profile_overrides):
@@ -81,11 +89,42 @@ def test_every_service_and_the_webgui_is_launched():
     assert "webgui\\main.py" in START_DEV
 
 
-def test_the_marker_guard_is_present_and_fails_closed():
-    """Refuses in prod, and `if errorlevel 1` (>= 1) means a python crash also
-    refuses rather than launching seven processes onto prod's ports."""
-    after = START_DEV.split("repo_paths.IS_DEV", 1)
-    assert len(after) == 2, "start_dev.bat lost its IS_DEV guard"
-    assert "sys.exit(0 if repo_paths.IS_DEV else 1)" in START_DEV
-    assert re.match(r'[^\n]*\n\s*if errorlevel 1 \(', after[1]), (
-        "the guard does not branch on errorlevel immediately after the probe")
+###############################################
+# The guards — inverse, and failing closed
+###############################################
+
+_GUARD = re.compile(r"sys\.exit\((\d) if repo_paths\.IS_DEV else (\d)\)")
+
+
+def test_the_two_guards_are_inverse():
+    """start_dev proceeds (0) in dev; promote proceeds (0) in prod."""
+    dev = _GUARD.search(START_DEV)
+    promote = _GUARD.search(PROMOTE)
+    assert dev, "start_dev.bat lost its IS_DEV guard"
+    assert promote, "promote.bat lost its IS_DEV guard"
+    assert dev.groups() == ("0", "1"), "start_dev.bat's guard is inverted"
+    assert promote.groups() == ("1", "0"), "promote.bat's guard is inverted"
+    assert dev.groups() == promote.groups()[::-1]
+
+
+def test_both_guards_fail_closed():
+    """`if errorlevel 1` is "1 or greater", so a python crash refuses too —
+    rather than launching onto prod's ports, or stopping the live stack."""
+    for text, name in ((START_DEV, "start_dev.bat"), (PROMOTE, "promote.bat")):
+        after = text.split("repo_paths.IS_DEV", 1)
+        assert len(after) == 2, f"{name} lost its guard"
+        assert re.match(r'[^\n]*\r?\n\s*if errorlevel 1 \(', after[1]), (
+            f"{name}'s guard does not branch on errorlevel right after the probe")
+
+
+def test_promote_does_not_read_head_at_1():
+    """Measured wrong twice over: a fresh clone (which the prod checkout is) has
+    one reflog entry so HEAD@{1} exits 128, and a pull that brings nothing new
+    leaves HEAD@{1} pointing at whatever `git checkout main` moved off — both
+    reporting a lockfile change the pull never made."""
+    code = "\n".join(ln for ln in PROMOTE.splitlines()
+                     if not ln.strip().upper().startswith("REM"))
+    assert "HEAD@{1}" not in code, (
+        "promote.bat is back to reading HEAD@{1} instead of capturing the "
+        "pre-pull commit")
+    assert "git rev-parse HEAD" in code
