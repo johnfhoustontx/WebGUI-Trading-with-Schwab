@@ -117,6 +117,26 @@ def test_both_guards_fail_closed():
             f"{name}'s guard does not branch on errorlevel right after the probe")
 
 
+def test_promote_refuses_a_dirty_tree_before_stopping_anything():
+    """Two claims, and the ORDER is the load-bearing one.
+
+    `git checkout main` fails loudly only on a CONFLICTING local change; a
+    non-conflicting one is carried along silently, leaving prod running
+    something that is not main — which defeats the premise that prod is pinned
+    and changes only when the operator says so. And the check has to precede
+    ``stop_all``, or a refusal hands you a stopped stack and a message.
+    """
+    code = [ln for ln in PROMOTE.splitlines()
+            if not ln.strip().upper().startswith("REM")]
+    joined = "\n".join(code)
+    assert "git status --porcelain" in joined, "promote.bat lost its dirty-tree check"
+    dirty_at = next(i for i, ln in enumerate(code) if "git status --porcelain" in ln)
+    stop_at = next(i for i, ln in enumerate(code) if "call stop_all.bat" in ln)
+    assert dirty_at < stop_at, (
+        "the dirty-tree check runs AFTER stop_all — a refusal would leave the "
+        "stack down")
+
+
 def test_promote_does_not_read_head_at_1():
     """Measured wrong twice over: a fresh clone (which the prod checkout is) has
     one reflog entry so HEAD@{1} exits 128, and a pull that brings nothing new

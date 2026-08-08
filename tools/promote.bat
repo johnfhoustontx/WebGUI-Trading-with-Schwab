@@ -31,6 +31,30 @@ if errorlevel 1 (
     exit /b 1
 )
 
+REM --- Refuse on a dirty tree, and refuse BEFORE stopping anything.
+REM     `git checkout main` fails loudly only on a CONFLICTING local change; a
+REM     non-conflicting one is carried along silently, leaving prod running
+REM     something that is not main. That defeats the premise this whole design
+REM     rests on - prod is pinned to main and changes only when you say so.
+REM     Refusing rather than stashing or cleaning is the point: an unexpected
+REM     edit in the prod checkout is for a human to look at, not for a restart
+REM     script to decide about. Ordered ahead of stop_all.bat so a refusal never
+REM     leaves the stack down.
+REM     Ignored paths (the venv, logs\, data\, the gitignored secrets and
+REM     env.local.toml) do not appear in --porcelain, so this stays quiet about
+REM     everything prod legitimately carries.
+set "DIRTY="
+for /f "delims=" %%i in ('git status --porcelain') do set "DIRTY=1"
+if defined DIRTY (
+    echo This checkout has local changes - refusing to promote.
+    echo Prod is pinned to main; commit, revert or move these aside first:
+    echo.
+    git status --short
+    echo.
+    pause
+    exit /b 1
+)
+
 echo Stopping the stack...
 call stop_all.bat
 

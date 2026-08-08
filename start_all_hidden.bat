@@ -48,9 +48,12 @@ REM :launch_hidden helper, for two reasons:
 REM   1. That helper passes -WindowStyle Hidden. The HUD is a desktop window
 REM      you are meant to look at, so hiding it would defeat the point. Here
 REM      pythonw suppresses only the CONSOLE and the GUI still appears.
-REM   2. It is not a service. It binds no port, so stop_all.bat cannot see it
-REM      and the web GUI's Status page cannot health-check it — grouping it
-REM      with the eight port-bound processes would imply otherwise.
+REM   2. It is not a service. It binds no port, so the web GUI's Status page
+REM      cannot health-check it, and stop_all.bat cannot find it the way it
+REM      finds everything else — by listening port. stop_all DOES stop it, but
+REM      only via a command-line match scoped to this checkout; needing that
+REM      exception is exactly why grouping it with the eight port-bound
+REM      processes would mislead.
 if not exist "%~dp0logs" mkdir "%~dp0logs"
 set "HUD_PY=%~dp0.venv\Scripts\pythonw.exe"
 if not exist "%HUD_PY%" set "HUD_PY=%~dp0.venv\Scripts\python.exe"
