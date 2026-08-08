@@ -775,6 +775,56 @@ def test_app_name_comes_from_brand_config():
     assert "Schwab Trading" not in src, "stale app name left in main.py"
 
 
+def test_dev_lockup_carries_a_dev_chip(monkeypatch, tmp_path):
+    """Two identical-looking tabs writing to different paper books is a mistake
+    waiting to happen — dev's header says DEV."""
+    import main
+    from pages.options import theme
+
+    monkeypatch.setattr(theme, "BRAND_MARK", "")
+    monkeypatch.setattr(main, "IS_DEV", True)
+    assert ">DEV<" in main.brand_lockup_html(tmp_path)
+
+
+def test_prod_lockup_has_no_dev_chip(monkeypatch, tmp_path):
+    """Non-vacuity partner: the chip is conditional, not always painted.
+    (Cannot fail if the chip is deleted — see the dev test above.)"""
+    import main
+    from pages.options import theme
+
+    monkeypatch.setattr(theme, "BRAND_MARK", "")
+    monkeypatch.setattr(main, "IS_DEV", False)
+    assert "DEV" not in main.brand_lockup_html(tmp_path)
+
+
+def test_window_title_is_prefixed_in_dev(monkeypatch):
+    """The browser tab title (and so the taskbar entry) names the environment."""
+    import main
+    from pages.options import theme
+
+    monkeypatch.setattr(main, "IS_DEV", True)
+    assert main.window_title() == f"DEV · {theme.BRAND_NAME}"
+
+
+def test_window_title_is_unchanged_in_prod(monkeypatch):
+    """Non-vacuity partner: prod's title is EXACTLY the brand name, unprefixed."""
+    import main
+    from pages.options import theme
+
+    monkeypatch.setattr(main, "IS_DEV", False)
+    assert main.window_title() == theme.BRAND_NAME
+
+
+def test_ui_run_takes_its_title_from_window_title():
+    """The chip is worthless if ui.run() still hard-codes the brand name."""
+    import inspect
+
+    import main
+
+    src = inspect.getsource(main)
+    assert "title=window_title()" in src
+
+
 def test_brand_css_clips_gradients_to_the_wordmark_text():
     """Each half needs -webkit-background-clip:text FIRST (Chromium still wants
     the prefix) plus a transparent fill, else the gradient paints a block."""

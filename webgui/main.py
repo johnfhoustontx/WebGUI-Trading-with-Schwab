@@ -34,7 +34,7 @@ import proxy  # noqa: E402
 from pages.options import theme  # noqa: E402  (config/theme.toml typography + menu)
 from pages.ui_guard import guard_async  # noqa: E402
 from pages.ui_guard import install_deleted_slot_log_filter  # noqa: E402
-from repo_paths import NICEGUI_PORT, SERVICE_URLS  # noqa: E402
+from repo_paths import IS_DEV, NICEGUI_PORT, SERVICE_URLS  # noqa: E402
 
 # Silence the benign NiceGUI timer-disconnect-race traceback ("The parent slot of
 # the element has been deleted.") — it escapes the ui_guard callback decorators
@@ -395,15 +395,32 @@ def brand_lockup_html(static_dir=None):
     Raw HTML rather than NiceGUI elements because each wordmark half needs a
     gradient clipped to its text (``theme.build_brand_css``), which Tailwind's
     bundled JIT can't express. The name comes from ``[brand]`` config, so it is
-    HTML-escaped."""
+    HTML-escaped.
+
+    In dev the lockup carries a DEV chip: two identical-looking tabs that write
+    to DIFFERENT paper books is a mistake waiting to happen. Inline style for the
+    same reason as the rest of this function — it is a raw HTML string, not a
+    NiceGUI element with ``.classes()``."""
     mark = brand_mark_src(static_dir)
     img = (f'<img src="{html.escape(mark)}" class="brand-mark" alt="">'
            if mark else "")
+    chip = ('<span style="margin-left:8px;padding:1px 7px;border-radius:4px;'
+            'background:#b45309;color:#fff;font-size:10px;font-weight:700;'
+            'letter-spacing:.06em">DEV</span>') if IS_DEV else ""
     return (f'<div style="display:flex;align-items:center;gap:9px">{img}'
             f'<span class="brand-word">'
             f'<span class="a">{html.escape(theme.BRAND_NAME_A)}</span>'
             f'<span class="b">{html.escape(theme.BRAND_NAME_B)}</span>'
-            f'</span></div>')
+            f'</span>{chip}</div>')
+
+
+def window_title():
+    """The browser-tab / taskbar title, environment-tagged.
+
+    Prefixed in dev so a tab is identifiable before it renders (and in the
+    taskbar, where the favicon is per-route and the title is the only tell).
+    Prod is EXACTLY ``theme.BRAND_NAME`` — unchanged from before environments."""
+    return f"DEV · {theme.BRAND_NAME}" if IS_DEV else theme.BRAND_NAME
 
 
 def market_status_parts(now=None):
@@ -1419,5 +1436,5 @@ if __name__ in {"__main__", "__mp_main__"}:
     # noisy `OSError [WinError 64] "network name is no longer available"` accept
     # tracebacks whenever a transient/virtual adapter (link-local 169.254.x, WSL/
     # Docker) dropped — and keeps the trading app off the LAN.
-    ui.run(host="127.0.0.1", port=NICEGUI_PORT, title=theme.BRAND_NAME,
+    ui.run(host="127.0.0.1", port=NICEGUI_PORT, title=window_title(),
            dark=True, reload=False, show=False)
