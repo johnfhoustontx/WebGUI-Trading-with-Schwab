@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from repo_paths import NOTIFICATIONS_CONFIG
+from repo_paths import ENV_FLAGS, NOTIFICATIONS_CONFIG
 
 log = logging.getLogger(__name__)
 _CONFIG_PATH = NOTIFICATIONS_CONFIG
@@ -140,7 +140,24 @@ def load_config(path=None) -> dict:
             cfg["twitter"][key] = os.environ[env_name]
     if os.environ.get("TWITTER_ENABLED"):
         cfg["twitter"]["enabled"] = os.environ["TWITTER_ENABLED"].lower() not in ("0", "false", "no")
+    # Environment gate — a non-prod checkout never talks to a real channel.
+    # LAST, so it also overrides the NOTIFY_ENABLED/TWITTER_ENABLED env escapes.
+    # Every `enabled` flag is zeroed, not just the master one: the X/Twitter
+    # poster has its OWN gate that does not consult the master switch, and it is
+    # the one channel that PUBLISHES. Recursive so a channel added later is
+    # covered without anyone remembering to come back here.
+    if not ENV_FLAGS.get("allow_notifications", True):
+        _disable_all(cfg)
     return cfg
+
+
+def _disable_all(node: dict) -> None:
+    """Recursively set every `enabled` key in `node` to False. Mutates in place."""
+    for k, v in node.items():
+        if k == "enabled":
+            node[k] = False
+        elif isinstance(v, dict):
+            _disable_all(v)
 
 
 # ── per-category routing ─────────────────────────────────────────────────────

@@ -34,9 +34,15 @@ def test_env_overrides_file(tmp_path, monkeypatch):
 
 
 def test_missing_file_returns_disabled_defaults(tmp_path, monkeypatch):
+    import repo_paths
+
     monkeypatch.setattr(pn, "_CONFIG_PATH", tmp_path / "nope.json")
     for k in ("TELEGRAM_BOT_TOKEN", "DISCORD_WEBHOOK_URL", "FI_SMS_NUMBER"):
         monkeypatch.delenv(k, raising=False)
+    # This test is about what the FILE (here, its absence) resolves to, not about
+    # what this environment permits. Under pytest `allow_notifications` is forced
+    # False, which would zero the master switch; opt in so the default is visible.
+    monkeypatch.setitem(repo_paths.ENV_FLAGS, "allow_notifications", True)
     cfg = pn.load_config()
     assert cfg["telegram"]["bot_token"] == ""
     assert cfg["enabled"] is True  # default-on; channels self-gate on creds
@@ -1350,3 +1356,35 @@ def test_send_market_snapshot_legacy_key_still_works(monkeypatch):
     pn.send_market_snapshot({}, {}, {}, {}, {}, {}, slot="09:00", config=_ms_cfg())
     assert got["file"][0][0] == "LEGACY_MS"
     assert got["photo"][0][:2] == ("TOK", 1)
+
+
+def test_env_suppression_reaches_the_options_domain_wrapper(tmp_path, monkeypatch):
+    """The hole this closes is in the OPTIONS domain: every scanner/flow-alert push
+    calls `push_notify.load_config()`, not the shared one. Delegation makes the gate
+    apply by construction today — pin it so a refactor that inlines the wrapper (or
+    reorders it past the gate) cannot silently reopen the public X/Twitter channel."""
+    import repo_paths
+
+    p = tmp_path / "notifications.json"
+    p.write_text(json.dumps({
+        "enabled": True,
+        "twitter": {"enabled": True, "dry_run": False},
+        "gamma_briefing": {"enabled": True},
+        "market_snapshot": {"enabled": True},
+    }))
+    monkeypatch.setattr(pn, "_CONFIG_PATH", p)
+    monkeypatch.delenv("TWITTER_ENABLED", raising=False)
+    monkeypatch.delenv("NOTIFY_ENABLED", raising=False)
+
+    monkeypatch.setitem(repo_paths.ENV_FLAGS, "allow_notifications", False)
+    cfg = pn.load_config()
+    assert cfg["enabled"] is False
+    assert cfg["twitter"]["enabled"] is False
+    assert cfg["gamma_briefing"]["enabled"] is False
+    assert cfg["market_snapshot"]["enabled"] is False
+
+    # Non-vacuity: the same file through the same wrapper is untouched in prod.
+    monkeypatch.setitem(repo_paths.ENV_FLAGS, "allow_notifications", True)
+    permissive = pn.load_config()
+    assert permissive["enabled"] is True
+    assert permissive["twitter"]["enabled"] is True
