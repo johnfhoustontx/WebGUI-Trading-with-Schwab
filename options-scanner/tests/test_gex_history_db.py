@@ -117,6 +117,24 @@ def test_connect_read_only_missing_file_raises(tmp_path, monkeypatch):
         db.connect(read_only=True)
 
 
+@pytest.mark.parametrize("read_only", [False, True])
+def test_connect_enables_mmap(tmp_path, monkeypatch, read_only):
+    """Reading one (symbol, view, session) touches ~437 SCATTERED pages (rows
+    for a key land 360 rowids apart, since the collector writes every symbol
+    each minute). mmap avoids a read() syscall + buffer copy per page; measured
+    4.5 -> 3.0 ms median warm, with more to gain on cold random reads."""
+    dbpath = tmp_path / "test.db"
+    monkeypatch.setattr(db, "DB_PATH", dbpath)
+    rw = db.connect()
+    db.init_schema(rw)
+    rw.close()
+
+    conn = db.connect(read_only=read_only)
+    assert conn.execute("PRAGMA mmap_size").fetchone()[0] == db._MMAP_BYTES
+    assert db._MMAP_BYTES > 0
+    conn.close()
+
+
 def test_insert_snapshot_roundtrip(tmp_path, monkeypatch):
     dbpath = tmp_path / "t.db"
     monkeypatch.setattr(db, "DB_PATH", dbpath)

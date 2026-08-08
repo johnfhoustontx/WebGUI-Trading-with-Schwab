@@ -21,10 +21,35 @@ name: CI
 # + tkinter-display failures documented in CLAUDE.md), so a red legacy suite surfaces
 # for review without wedging the clean-stack gate.
 
+# TRIGGERS — deliberately narrow, because this matrix is EXPENSIVE.
+# Measured on the last full green run (2026-08-07): 18 jobs, 3,085 job-seconds
+# = 51.4 wall-minutes, and every job is `windows-latest`, which GitHub bills at
+# a 2x multiplier => ~103 BILLABLE MINUTES PER RUN. Against the 2,000 min/month
+# free private-repo allowance that is ~19 runs; the previous config
+# (`push: branches: ["**"]` PLUS `pull_request`) fired the whole matrix on every
+# WIP commit on every branch AND again on the PR, roughly halving that to ~9-10.
+# The quota ran out on 2026-08-08 and every run since failed instantly at 0
+# steps — which looks exactly like a broken build but is GitHub declining to
+# schedule, so CI was silently DARK rather than red.
+#
+# Push runs are therefore limited to the two INTEGRATION branches. `main` is the
+# default branch, but the real trunk is `Using_Highcharts` — feature work merges
+# there (see the merge history), so omitting it would disable CI exactly where
+# the code actually lands. Feature branches get coverage via `pull_request`, or
+# on demand: `gh workflow run ci.yml --ref <branch>`.
+#
+# paths-ignore skips docs-only commits (a CLAUDE.md edit should not cost 103
+# minutes). It applies only when EVERY changed path matches, so the common
+# code+CLAUDE.md commit still runs the full matrix. Safe on `pull_request` here
+# because branch protection / required status checks are unavailable on this
+# plan — with required checks, a skipped workflow never reports and would block
+# the PR forever.
 on:
   push:
-    branches: ["**"]
+    branches: [main, Using_Highcharts]
+    paths-ignore: ["**.md", "docs/**"]
   pull_request:
+    paths-ignore: ["**.md", "docs/**"]
   workflow_dispatch:
 
 concurrency:
