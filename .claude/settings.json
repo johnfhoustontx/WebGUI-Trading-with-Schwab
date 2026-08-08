@@ -1,1 +1,37 @@
-{}
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/guard_secrets.py"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/ruff_fix.py"
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(.venv/Scripts/python -m pytest *)",
+      "Bash(../.venv/Scripts/python -m pytest *)",
+      "Bash(./.venv/Scripts/python.exe -m pytest *)",
+      "Bash(../.venv/Scripts/python.exe -m pytest *)",
+      "Bash(.venv/Scripts/python.exe -m pytest *)",
+      "Bash(.venv/Scripts/python -m ruff *)",
+      "Bash(.venv/Scripts/python.exe -m ruff *)"
+    ]
+  }
+}

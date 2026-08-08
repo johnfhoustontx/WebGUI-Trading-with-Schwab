@@ -374,3 +374,73 @@ def test_quadrant_labels_survive_an_empty_chart():
 
     assert len(fig["xAxis"]["plotBands"]) == 4
     assert fig["series"] == []
+
+
+# --- ribbon readability ------------------------------------------------------
+
+def _hist(n_symbols, n_sessions=5, start_rank=1):
+    return {f"S{i}": [(f"2026-07-{20+d:02d}", start_rank + i)
+                      for d in range(n_sessions)]
+            for i in range(n_symbols)}
+
+
+def test_ribbon_caps_the_number_of_lines():
+    # 68 industries drawn at once is unreadable spaghetti.
+    fig = sm.ribbon_figure(_hist(68))
+
+    assert len(fig["series"]) == sm.RIBBON_MAX_SERIES
+    assert sm.RIBBON_MAX_SERIES <= 15
+
+
+def test_ribbon_keeps_the_best_currently_ranked_symbols():
+    fig = sm.ribbon_figure(_hist(68))
+
+    names = {s["name"] for s in fig["series"]}
+    assert "S0" in names          # currently rank 1
+    assert "S67" not in names     # currently rank 68
+
+
+def test_ribbon_subset_is_chosen_on_the_latest_session_not_the_first():
+    hist = {"climber": [("2026-07-20", 60), ("2026-07-21", 1)],
+            "faller": [("2026-07-20", 1), ("2026-07-21", 60)]}
+
+    names = [s["name"] for s in sm.ribbon_figure(hist, n=1)["series"]]
+
+    assert names == ["climber"]
+
+
+def test_ribbon_shows_all_series_when_under_the_cap():
+    assert len(sm.ribbon_figure(_hist(5))["series"]) == 5
+
+
+def test_ribbon_says_which_subset_it_is_showing():
+    sub = sm.ribbon_figure(_hist(68))["subtitle"]["text"]
+
+    assert "12" in sub and "68" in sub
+
+
+def test_ribbon_lines_are_identifiable():
+    fig = sm.ribbon_figure(_hist(20))
+
+    # A line you cannot name is a line you cannot use.
+    assert fig["legend"]["enabled"] is True
+    assert all(s.get("name") for s in fig["series"])
+
+
+def test_ribbon_dims_the_others_on_hover():
+    fig = sm.ribbon_figure(_hist(20))
+
+    assert fig["plotOptions"]["series"]["states"]["inactive"]["opacity"] < 1
+
+
+def test_ribbon_warns_when_there_is_only_one_session():
+    fig = sm.ribbon_figure({"A": [("2026-07-28", 1)]})
+
+    assert "session" in fig["subtitle"]["text"].lower()
+
+
+def test_ribbon_of_nothing_still_explains_itself():
+    fig = sm.ribbon_figure({})
+
+    assert fig["series"] == []
+    assert fig["subtitle"]["text"]

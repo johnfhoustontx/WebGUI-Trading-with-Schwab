@@ -407,6 +407,11 @@ def swing_scan(bus, args: dict) -> None:
     ``view`` (plus the symbol + original args, for the page to display/debug)
     under ``cache:options:swing``.
 
+    ``filtered_out`` (how many scored candidates compute's quality cut dropped)
+    is carried through so the page can tell "nothing cleared the quality bar"
+    apart from "the scan found nothing"; it defaults to 0 rather than being
+    omitted, so the page never has to special-case a missing key.
+
     No ScanResult gate: this is a flat signal list (not the dual-list scan
     contract), and the page reads ``payload["signals"]`` directly.
 
@@ -425,6 +430,7 @@ def swing_scan(bus, args: dict) -> None:
     market_state = (((payload or {}).get("derived") or {}).get("trend") or {}).get("state")
     result = compute.swing_scan(**params, market_state=market_state)
     payload = {"signals": result["signals"], "view": result.get("view"),
+               "filtered_out": result.get("filtered_out") or 0,
                "symbol": params["symbol"], "params": args}
     version = bus.cache_set(CACHE_SWING, payload)
     bus.publish(EVENT_SWING, {"version": version})

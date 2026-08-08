@@ -66,7 +66,8 @@ def test_bar_yrange_empty_falls_back_to_spot_band():
 #    spot=None → the near-spot band math must not raise NoneType*float) ─────────
 def test_bars_from_gex_none_spot_returns_empty():
     b = gamma.bars_from_gex(GEX, None)
-    assert b == {"strikes": [], "nets": [], "colors": [], "hovers": []}
+    assert b == {"strikes": [], "nets": [], "colors": [], "hovers": [],
+                 "projected": []}
 
 
 def test_bar_yrange_none_spot_does_not_raise():
@@ -189,6 +190,63 @@ def test_heatmap_figure_rowsize_from_visible_window_median():
     fig = gamma.heatmap_figure(rows, "GEX", yrange=[198.0, 210.0])
     hm = next(s for s in fig["series"] if s["type"] == "heatmap")
     assert hm["rowsize"] == 2.5
+
+
+def test_uniform_strike_grid_leaves_an_even_ladder_alone():
+    """The common case ($SPX/SPY/QQQ/IWM/AMD all quote one spacing): no resampling,
+    and the SAME objects back so an even chain pays nothing for the check."""
+    strikes = [100.0, 105.0, 110.0, 115.0]
+    z = [[1.0], [2.0], [3.0], [4.0]]
+    out_s, out_z = gamma.uniform_strike_grid(strikes, z)
+    assert out_s is strikes and out_z is z
+
+
+def test_uniform_strike_grid_fills_a_mixed_ladder():
+    """$NDX's shape: 5-wide near the money among 10-wide. The gap must be filled to
+    the FINEST spacing, real strikes must survive untouched, and the inserted row
+    must be the linear midpoint of its neighbours."""
+    strikes = [100.0, 105.0, 110.0, 120.0]      # 5, 5, then a 10 gap
+    z = [[10.0], [20.0], [30.0], [50.0]]
+    out_s, out_z = gamma.uniform_strike_grid(strikes, z)
+    assert out_s == [100.0, 105.0, 110.0, 115.0, 120.0]
+    assert [r[0] for r in out_z] == [10.0, 20.0, 30.0, 40.0, 50.0]
+
+
+def test_uniform_strike_grid_keeps_genuine_holes_as_holes():
+    """An inserted row bracketed by a missing sample stays None — the fill smooths
+    the LADDER, it must not invent data across a real gap in the series."""
+    strikes = [100.0, 105.0, 115.0]
+    z = [[1.0, 1.0], [2.0, None], [3.0, 3.0]]
+    out_s, out_z = gamma.uniform_strike_grid(strikes, z)
+    assert out_s == [100.0, 105.0, 110.0, 115.0]
+    assert out_z[2][0] == pytest.approx(2.5)   # interpolated where both sides exist
+    assert out_z[2][1] is None                 # neighbour missing → still missing
+
+
+def test_uniform_strike_grid_refuses_to_explode_the_row_count():
+    """One stray odd strike among round ones must not resample the window into
+    thousands of rows — past the cap the ladder is left alone."""
+    strikes = [0.0, 0.5] + [float(i) for i in range(100, 1000, 100)]
+    z = [[1.0] for _ in strikes]
+    out_s, out_z = gamma.uniform_strike_grid(strikes, z)
+    assert out_s is strikes and out_z is z
+
+
+def test_heatmap_figure_mixed_ladder_renders_a_gapless_grid():
+    """The regression this fixes: on a mixed ladder the interpolated raster left
+    unwritten cells that read as vertical stripes. Every ladder row must now carry a
+    value in every column, and rowsize must be the fine spacing that the filled
+    ladder actually uses."""
+    grid = {100.0: {"net": 5}, 105.0: {"net": -3}, 110.0: {"net": 4},
+            120.0: {"net": -2}, 130.0: {"net": 6}}
+    rows = [("09:30", 115.0, None, None, None, 0, grid),
+            ("09:31", 115.0, None, None, None, 0, grid)]
+    fig = gamma.heatmap_figure(rows, "GEX", yrange=[95.0, 135.0])
+    hm = next(s for s in fig["series"] if s["type"] == "heatmap")
+    assert hm["rowsize"] == 5.0
+    ys = sorted({p[1] for p in hm["data"]})
+    assert ys == [100.0, 105.0, 110.0, 115.0, 120.0, 125.0, 130.0]
+    assert len(hm["data"]) == len(ys) * 2, "every ladder row must fill every column"
 
 
 def test_heatmap_figure_no_yrange_keeps_all_strikes():
@@ -1598,3 +1656,64 @@ def test_hedge_summary_text_reads_direction_and_size():
     assert gamma.hedge_summary_text([]) == ""
     down = gamma.hedge_summary_text([{"ts": 1, "hedge_pressure": -1.2e9}])
     assert "-$1.20B" in down and "sell" in down.lower()
+
+
+# --- Projected DEX bars (each strike's own 0-DTE charm drift) ---
+
+_DRIFT_DATA = {
+    "spot": 450.0,
+    "gex": {448.0: {"call": 100.0, "put": -40.0, "net": 60.0},
+            450.0: {"call": 200.0, "put": -250.0, "net": -50.0},
+            452.0: {"call": 30.0, "put": -10.0, "net": 20.0}},
+    # Only the 0-DTE strikes carry drift; 452 has none.
+    "hedge_drift_by_strike": {448.0: 15.0, 450.0: -30.0},
+}
+
+
+def test_bars_from_gex_adds_projected_where_drift_exists():
+    b = gamma.bars_from_gex(_DRIFT_DATA, 450.0)
+    assert b["nets"] == [60.0, -50.0, 20.0]
+    # projected = net + that strike's OWN drift; None where the strike has no
+    # 0-DTE interest, so the chart can skip drawing a coincident outline.
+    assert b["projected"] == [75.0, -80.0, None]
+
+
+def test_bars_from_gex_projected_absent_without_drift_map():
+    # Most symbols never have a 0-DTE book -> no drift map -> all None, no raise.
+    plain = {k: v for k, v in _DRIFT_DATA.items() if k != "hedge_drift_by_strike"}
+    assert gamma.bars_from_gex(plain, 450.0)["projected"] == [None, None, None]
+    assert gamma.bars_from_gex({}, None)["projected"] == []
+
+
+def test_bar_figure_overlays_a_projected_outline_series():
+    fig = gamma.bar_figure(_DRIFT_DATA, 450.0, view="DEX")
+    names = [s["name"] for s in fig["series"]]
+    assert "Projected close" in names
+    proj = next(s for s in fig["series"] if s["name"] == "Projected close")
+    # Only the two drifting strikes are drawn.
+    assert [p["x"] for p in proj["data"]] == [448.0, 450.0]
+    assert [p["y"] for p in proj["data"]] == [75.0, -80.0]
+    # Outline only (transparent fill) so it reads over the solid bar whether the
+    # projection EXTENDS past it or pulls back inside it.
+    assert proj["color"] == "transparent"
+    assert proj["borderColor"] == gamma.PROJ_FLIP_COLOR
+    # Drawn on TOP of the solid bars, and overlaid (not grouped beside them).
+    assert names.index("Projected close") > names.index(gamma._view_label("DEX"))
+    assert fig["plotOptions"]["bar"]["grouping"] is False
+
+
+def test_bar_figure_omits_projected_series_when_no_drift():
+    plain = {k: v for k, v in _DRIFT_DATA.items() if k != "hedge_drift_by_strike"}
+    fig = gamma.bar_figure(plain, 450.0, view="DEX")
+    assert [s["name"] for s in fig["series"]] == [gamma._view_label("DEX")]
+
+
+def test_zero_value_bars_do_not_trip_the_crisping_warning():
+    """A bar whose value is exactly 0 (a zero-net strike; hedge pressure at the
+    close) gets its border subtracted from a 0-height rect when crisping is on, so
+    Highcharts emits height="-1" and the browser logs it. Nothing renders wrong,
+    but both cases are routine here, so crisp stays off."""
+    bars = gamma.bar_figure(GEX, 450.0, view="GEX")
+    assert bars["plotOptions"]["bar"]["crisp"] is False
+    hedge = gamma.hedge_figure([{"ts": 1, "hedge_pressure": 0.0}], ["09:30"])
+    assert hedge["series"][0]["crisp"] is False

@@ -27,6 +27,70 @@ From this one interface you can:
 
 ---
 
+# Prerequisites
+
+Before the app will run, a few things need to be in place on your machine. This is
+the plain-English checklist — the *Technical Reference* has the full detail
+(exact package versions, environment variables, etc.).
+
+## The essentials (required)
+
+- **Windows 10 or 11.** The app is Windows-first — the launchers are `.bat` files,
+  the alert pop-ups use Windows notifications, and the data backbone (Memurai) is a
+  Windows service.
+- **Python 3.11 or newer.** Install it from python.org if you don't have it.
+- **A one-time setup** in the project folder, which creates the virtual environment
+  the launchers expect and installs everything:
+
+  ```powershell
+  python -m venv .venv
+  .\.venv\Scripts\python -m pip install -r requirements.txt
+  ```
+
+- **Memurai running.** Memurai is a Windows version of Redis — the local "backbone"
+  the app's parts talk through. It installs as a **Windows service on port 6379**;
+  start it from **services.msc** if it isn't already running. **Nothing works
+  without it** — every page will just say "Waiting for … service."
+- **A modern web browser** to open the app at `http://127.0.0.1:8500`.
+
+## Schwab account (required for live data)
+
+The app reads market data and your positions from Schwab, so you need:
+
+- A **Schwab developer account** with a registered app, which gives you an **App
+  Key** and **App Secret** (register the callback URL as `https://127.0.0.1:8182`).
+- Those keys saved into **`shared/appsettings.json`** (copy the provided
+  `shared/appsettings.example.json` and fill in your keys).
+- A **one-time Schwab login**: after starting the app, open **System Status → Schwab
+  Authorization → Authorize** (or `http://127.0.0.1:8100/auth`) and sign in. This
+  creates your token file.
+
+> **Good to know:** the app refreshes your Schwab login automatically most of the
+> time. If live data stops and **System Status** shows the Schwab login expired,
+> just click **Authorize** again.
+
+## Nice-to-have (optional)
+
+- **An Anthropic (Claude) API key** — only needed for the AI features: the Gamma
+  **Analyze**/**Explain** infographics, the autonomous **Claude Trades** driver, and
+  the market-summary ticker. Set it as the `ANTHROPIC_API_KEY` environment variable
+  (or in a `shared/anthropic_key.txt` file). Without it, those features simply stay
+  quiet — nothing else is affected, and the auto-trader safely stands down.
+- **Push notifications** (Telegram / Discord / text message) — configured in
+  `shared/notifications.json` if you want alerts on your phone. Skip it and the app
+  is silent on those channels.
+- **The watchlist workbook** `options-scanner/data/Top 20.xlsx` — sets which stocks
+  the scanner watches. Without it, the app falls back to the core index symbols.
+
+## Ports the app uses
+
+The app runs entirely on your own machine and needs these local ports free:
+**6379** (Memurai), **8100** (Schwab gateway), **8210–8215** (the six services),
+and **8500** (the web app). If another program is already using one of them, the
+matching piece won't start.
+
+---
+
 # Getting Started
 
 ## Starting the application
@@ -36,8 +100,8 @@ all together with one of the launcher scripts in the project root:
 
 | Launcher | What it does |
 |----------|--------------|
-| `start_all.bat` | Opens the gateway, the five domain services, and the web app in **seven separate console windows**, then opens your browser. |
-| `start_all_wt.bat` | Same seven processes, but as **seven tabs in one Windows Terminal window** (less desktop clutter; requires Windows Terminal). |
+| `start_all.bat` | Opens the gateway, the six domain services, and the web app in **eight separate console windows**, then opens your browser. |
+| `start_all_wt.bat` | Same eight processes, but as **eight tabs in one Windows Terminal window** (less desktop clutter; requires Windows Terminal). |
 
 After the windows finish loading, the app is available at:
 
@@ -55,8 +119,8 @@ You don't interact with these directly, but it helps to know they exist:
 - **Schwab gateway (proxy)** — handles the Schwab connection and market data.
   Everything else depends on it. **It must be running first** (the launcher
   handles ordering for you).
-- **Five domain services** — Sentiment, Options, Portfolio, Trade, and Driver.
-  Each one powers its matching page(s).
+- **Six domain services** — Sentiment, Options, Portfolio, Trade, Driver, and
+  Market. Each one powers its matching page(s).
 - **Memurai (Redis)** — a local data backbone the services and the web app share.
 
 ## The proxy-down banner
@@ -139,11 +203,17 @@ You control all of this on the **Settings** page (see *Reports & System*).
 
 ## Getting help on any page
 
-Two built-in help features are always within reach:
+Three built-in help features are always within reach:
 
-- **Hover tooltips** — rest the mouse for two seconds on any rail item or top
+- **Page hover tooltips** — rest the mouse for two seconds on any rail item or top
   tab. A short "idiot's guide" pops up explaining, in plain language, what that
   page is for and how changing its settings changes the result.
+- **Sub-tab hover tooltips** — several pages have a second row of small **view
+  tabs** beneath the main strip (for example Dealer Positioning's **GEX / Charm /
+  DEX / Vanna / Flow / Net Prem / Term**, the Simulator's **Replay / What-if / IV
+  shock**, and the Scanner's **0-DTE / Swing / Directional**). Hover an individual
+  sub-tab and a one-line tip explains what that specific view shows — so you can
+  learn what "Charm" or "Vanna" means without leaving the page.
 - **User Manuals** — a tab in the **More** group.
   It opens this User Guide plus the Technical and API references in your browser.
 

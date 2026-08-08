@@ -8,6 +8,42 @@ changes the outcome. ``help_md(active)`` returns the guide for a route (or a
 sensible default).
 """
 
+# The 0-DTE close projection explained. Its own constant because it is BOTH part
+# of the Gamma page's hover guide (below) AND rendered on the page itself, in a
+# collapsed "How to read the 0-DTE close projection" expander beside the charts —
+# the hover tooltip is ``pointer-events: none`` and clips to the space under its
+# nav item (measured: ~466px of a ~1400px guide), so long-form detail parked there
+# alone is unreachable. One constant, two surfaces, no drift.
+PROJECTION_HELP_MD = """
+**The 0-DTE close projection** (only on names with options expiring **today** —
+$SPX, $NDX, SPY, QQQ, IWM, AMD; absent everywhere else). Options expiring today
+lose delta just from the clock running out, even if price never moves. Three
+displays show that same drift three ways:
+
+- **"Projected close" outlines** (amber outline on the bars) — *which strikes
+  move.* Each outline is that strike's net **after** its own drift. Outline
+  **reaching past** the solid bar = hedging demand there **grows** into the
+  close; **pulled back inside** = it **fades**. A strike with no outline holds no
+  expiring-today interest at all (that's different from "no drift").
+- **Proj. flip** (amber dashed line, on all four views) — *where the crossing
+  ends up.* **The gap between it and the actual flip is the drift measured in
+  price** — that's why both are drawn. A small gap means the clock won't move the
+  battlefield today; a wide one means the level dealers defend is migrating.
+  It's a **delta** level, so compare it to the **delta** flip — the gamma flip is
+  a different curve and can sit ten-plus points away.
+- **0-DTE hedge pressure** (the small green/red panel under the heat map) — *how
+  big, and which side.* Green = dealers must **buy** the underlying into the
+  close to stay hedged; red = **sell**. Plotted in billions of dollars. The
+  moment worth watching is the bar flipping sides mid-session.
+- **What you're assuming:** spot stays put, open interest stands still, and only
+  time passes. It answers *"if nothing else happens, where does hedging demand
+  land at 3:00?"* — a **baseline, not a forecast**. Any real move rewrites it,
+  which is why it recomputes every minute. Read it as context (knowing dealers
+  owe $3B of buying tells you how a drift higher gets funded), not as a signal on
+  its own.
+"""
+
+
 HELP_MD: dict[str, str] = {
     "/": """
 **Market Scanner — the simple version**
@@ -93,7 +129,7 @@ accelerate price.
   **premarket, ~18 min after the open, midday, and the close** — the
   **Briefings** dropdown (top right, next to Explain and Analyze) opens each.
   **Explain** opens a one-symbol infographic.
-""",
+""" + PROJECTION_HELP_MD,
     "/options/simulator": """
 **Simulator — the simple version**
 
@@ -404,3 +440,78 @@ _DEFAULT = (
 def help_md(active: str) -> str:
     """Return the idiot's-guide Markdown for a route (falls back to a default)."""
     return HELP_MD.get(active, _DEFAULT)
+
+
+# ---------------------------------------------------------------------------
+# Per-sub-tab hover help.
+#
+# The pages that carry a second row of "view" tabs under the main strip
+# (Scanner, Dealer Positioning/Gamma, Simulator, Rescue, Portfolio) attach an
+# individual hover tooltip to each sub-tab so a reader can learn what GEX / Charm
+# / Replay / etc. mean without leaving the page. Keyed by route -> {tab value:
+# plain-text tooltip}. The tab *value* is what the page passes to ``ui.tab(...)``
+# (NOT the display label) — for Gamma that's the internal view key ("GEX",
+# "Charm", …) and the Net-Prem group keys ("indices", …).
+#
+# Keep these to ONE or TWO plain sentences (tooltips render as plain text, so no
+# Markdown), focused on what that view/tab shows and when to reach for it.
+# ---------------------------------------------------------------------------
+
+SUBTAB_HELP: dict[str, dict[str, str]] = {
+    "/": {  # Market Scanner
+        "0-DTE": "Credit spreads that expire TODAY — fastest decay, highest risk "
+                 "(zero days to expiration).",
+        "Swing": "Credit spreads days-to-weeks out — slower decay, more room to be "
+                 "right.",
+        "Directional": "Single-leg long or short calls/puts — a plain bullish or "
+                       "bearish bet, scored on fit + quality (not the premium model).",
+    },
+    "/options/gamma": {  # Dealer Positioning — the analytics lenses
+        "GEX": "Gamma exposure by strike — where dealers must hedge. Big positive "
+               "walls tend to pin price; negative gamma amplifies moves.",
+        "Charm": "Charm — how dealer delta drifts purely from time passing. Shows "
+                 "the hedging pull that builds into the close.",
+        "DEX": "Delta exposure by strike — the net directional hedge dealers carry. "
+               "Its zero-crossing is the gamma 'flip'.",
+        "Vanna": "Vanna — how dealer delta shifts when volatility (IV) changes. "
+                 "Matters most on big IV moves.",
+        "Flow": "Intraday options flow for this symbol — price plus cumulative call "
+                "vs put premium, and the net (call minus put).",
+        "Net Prem": "Net options premium (call $ minus put $) for many symbols at "
+                    "once — pick from 28 across indices, sectors and mega-caps.",
+        "Term": "Term structure — the same exposure across the next several "
+                "expirations, as a strike x expiry heat map.",
+        # Net Prem group sub-tabs (they filter the symbol picker):
+        "indices": "Filter the symbol list to indices & broad ETFs ($SPX, $NDX, "
+                   "BIG10, SPY, QQQ, IWM, DIA). Your ticked symbols stay selected.",
+        "sectors": "Filter the list to the 11 SPDR sector ETFs (XLB…XLY). Your "
+                   "ticked symbols stay selected across groups.",
+        "megacaps": "Filter the list to the ten mega-caps (NVDA, AAPL, MSFT…). "
+                    "Your ticked symbols stay selected across groups.",
+    },
+    "/options/simulator": {
+        "Replay": "Replay — how the whole position would have behaved along the "
+                  "underlying's recent price path, bar by bar.",
+        "What-if": "What-if — slide the price up/down and fast-forward days to watch "
+                   "the value and the Greeks change.",
+        "IV shock": "IV shock — multiply implied volatility to see vega risk (how "
+                    "much a volatility move helps or hurts the position).",
+    },
+    "/options/rescue": {
+        "At-Risk Board": "Your paper credit spreads that are tested or critical, "
+                         "ranked by heat, each with ranked fix-it options.",
+        "Ad-hoc Trade": "Paste in any credit spread (not from the paper book) to see "
+                        "advisory rescue ideas for it.",
+    },
+    "/portfolio": {
+        "Holdings": "Each position's live P&L and how it's doing versus its sector.",
+        "Sectors": "Your sector weights versus the S&P benchmark (over/under-weight).",
+        "Performance": "Per-position letter grades and a composite; click a row for "
+                       "advice.",
+    },
+}
+
+
+def subtab_help(route: str, tab_value: str) -> str:
+    """Return the plain-text hover tooltip for a page's sub-tab (or "" if none)."""
+    return SUBTAB_HELP.get(route, {}).get(tab_value, "")

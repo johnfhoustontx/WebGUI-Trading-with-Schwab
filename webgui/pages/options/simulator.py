@@ -31,6 +31,7 @@ discrete). The pure figure builders (``whatif_figure``/``ivshock_figure`` +
 (NOT ``option_type``) — the editor returns ``option_type``, so it is mapped.
 """
 import bus_client
+import page_help as _page_help
 from nicegui import ui
 
 from pages.ui_guard import guard
@@ -312,6 +313,11 @@ def render():
             t_replay = ui.tab("Replay")
             t_whatif = ui.tab("What-if")
             t_ivshock = ui.tab("IV shock")
+            for _tab, _key in ((t_replay, "Replay"), (t_whatif, "What-if"),
+                               (t_ivshock, "IV shock")):
+                with _tab:
+                    ui.tooltip(_page_help.subtab_help("/options/simulator", _key)
+                               ).props("delay=350 max-width=340px")
         return t, t_replay, t_whatif, t_ivshock
 
     if _slot is not None:

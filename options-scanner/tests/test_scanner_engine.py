@@ -2,7 +2,7 @@
 import pytest
 import sys
 import os
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -574,7 +574,18 @@ class TestDetectStrikeIncrement:
 class TestScreenSpreadsStrikeValidity:
     """Verify screen_spreads filters strikes outside expected move window."""
 
-    def _mock_chain(self, put_strikes, underlying=530.0, marks=None):
+    # The EM window is now sized off the EXPIRATION's own ATM IV (2026-08-07),
+    # so the chain's volatility -- not just the `daily_expected_move` argument --
+    # determines the window. 28.84 vol at underlying 530 reproduces exactly the
+    # daily EM of 8.0 these tests pass and were written against
+    # (530 * 0.2884 * sqrt(1/365) = 8.00), keeping every window boundary below
+    # identical. The old 25.0 implied 6.94, which moved the 2.50x outer bound
+    # from 20.0 to 17.35 and pushed the dist-20 short strike -- deliberately
+    # placed ON the boundary -- out of the window.
+    _EM8_VOL = 28.84
+
+    def _mock_chain(self, put_strikes, underlying=530.0, marks=None,
+                    volatility=_EM8_VOL):
         """Build a chain with given put strikes, all with good liquidity.
         marks: optional list of mark prices corresponding to put_strikes."""
         exp_key = "2026-04-14:1"
@@ -585,7 +596,7 @@ class TestScreenSpreadsStrikeValidity:
                 "strikePrice": float(s), "delta": -0.15,
                 "mark": mark, "bid": mark - 0.05, "ask": mark + 0.05,
                 "theta": -0.05, "vega": 0.10, "gamma": 0.01,
-                "volatility": 25.0,
+                "volatility": volatility,
                 "totalVolume": 200, "openInterest": 500,
             }]
         return {
@@ -1705,6 +1716,142 @@ def fake_client(monkeypatch):
     return _Stub()
 
 
+class TestPerExpiryExpectedMove:
+    """The EM window must size against the EXPIRATION's own IV, not a 30-day IV
+    scaled by sqrt(dte). Only the vol INPUT changes — every downstream formula
+    (sqrt(dte) scaling, the 0-DTE hours decay, the multiplier curves) is
+    untouched, which is why these tests target the substituted daily EM.
+    """
+
+    def _chain(self, front_iv, back_iv, underlying=100.0):
+        """Put-only ladder 85-99 whose marks DECAY with distance from spot, so
+        every 1-wide spread carries a real 0.20 credit (cr/w 0.20, clearing both
+        min_cr_pct and the EDGE_MARGIN |delta|+0.02 gate at delta 0.10). An
+        equal-mark ladder would give every spread zero credit and the test would
+        pass vacuously on an empty result.
+        """
+        def leg(iv, k):
+            mark = 0.20 + (k - 85) * 0.20
+            return [{"volatility": iv, "delta": -0.10, "mark": mark,
+                     "bid": round(mark - 0.02, 2), "ask": round(mark + 0.02, 2),
+                     "theta": -0.02, "vega": 0.05, "gamma": 0.01,
+                     "totalVolume": 500, "openInterest": 500}]
+        return {
+            "underlyingPrice": underlying,
+            "callExpDateMap": {},
+            "putExpDateMap": {
+                "2026-08-10:3":  {f"{k}.0": leg(front_iv, k) for k in range(85, 100)},
+                "2026-09-05:30": {f"{k}.0": leg(back_iv, k) for k in range(85, 100)},
+            },
+        }
+
+    def test_effective_daily_em_uses_the_expirys_own_iv(self):
+        chain = self._chain(front_iv=30.0, back_iv=15.0)
+        eff = scanner_engine.effective_daily_em(chain, "2026-08-10", 100.0, fallback=1.0)
+        import iv_analysis
+        assert eff == iv_analysis.expiry_daily_em(100.0, 30.0)
+        # Non-vacuity: it must differ from the fallback AND from the 30d reading.
+        assert eff != 1.0
+        assert eff != iv_analysis.expiry_daily_em(100.0, 15.0)
+
+    def test_effective_daily_em_falls_back_when_the_expiry_has_no_iv(self):
+        """No usable per-expiry IV must degrade to the caller's daily EM, never
+        to None/0 — a 0 disables the EM filter entirely (accept-all)."""
+        chain = self._chain(front_iv=30.0, back_iv=15.0)
+        assert scanner_engine.effective_daily_em(
+            chain, "2099-01-01", 100.0, fallback=1.23) == 1.23
+        assert scanner_engine.effective_daily_em(None, "x", 100.0, fallback=1.23) == 1.23
+
+    def test_kill_switch_restores_the_legacy_thirty_day_em(self, monkeypatch):
+        chain = self._chain(front_iv=30.0, back_iv=15.0)
+        monkeypatch.setattr(scanner_engine, "USE_EXPIRY_EM", False)
+        assert scanner_engine.effective_daily_em(
+            chain, "2026-08-10", 100.0, fallback=1.23) == 1.23
+
+    def _short_strikes(self, chain, legacy_daily, monkeypatch=None, use_expiry=True):
+        import scanner_engine as se
+        orig = se.USE_EXPIRY_EM
+        try:
+            se.USE_EXPIRY_EM = use_expiry
+            got = se.screen_spreads(
+                chain, "TEST", 1, 5, -0.40, -0.01, 0.01, 0.40, 0.05, "SWING",
+                spot=100.0, daily_expected_move=legacy_daily,
+                now_ct=datetime(2026, 8, 7, 10, 0))
+        finally:
+            se.USE_EXPIRY_EM = orig
+        return sorted({s["short_strike"] for s in got})
+
+    def test_screen_spreads_stamps_the_expiry_iv_for_scoring(self):
+        """Each signal carries its expiration's ATM IV so scoring can size the
+        EM-buffer factor off the same vol the strike window used."""
+        chain = self._chain(front_iv=60.0, back_iv=15.0)
+        import iv_analysis
+        got = scanner_engine.screen_spreads(
+            chain, "TEST", 1, 5, -0.40, -0.01, 0.01, 0.40, 0.05, "SWING",
+            spot=100.0, daily_expected_move=iv_analysis.expiry_daily_em(100.0, 15.0),
+            now_ct=datetime(2026, 8, 7, 10, 0))
+        assert got, "fixture produced no spreads"
+        # 60.0 is the FRONT expiry's vol, not the 15.0 thirty-day reading.
+        assert all(s.get("expiry_iv") == 60.0 for s in got), \
+            [s.get("expiry_iv") for s in got]
+
+    def test_kill_switch_also_suppresses_the_expiry_iv_stamp(self):
+        """USE_EXPIRY_EM=False must revert BOTH halves: with no stamp, scoring
+        falls back to the symbol-level IV, so the switch is a full revert."""
+        chain = self._chain(front_iv=60.0, back_iv=15.0)
+        import iv_analysis
+        import scanner_engine as se
+        orig = se.USE_EXPIRY_EM
+        try:
+            se.USE_EXPIRY_EM = False
+            got = se.screen_spreads(
+                chain, "TEST", 1, 5, -0.40, -0.01, 0.01, 0.40, 0.05, "SWING",
+                spot=100.0, daily_expected_move=iv_analysis.expiry_daily_em(100.0, 15.0),
+                now_ct=datetime(2026, 8, 7, 10, 0))
+        finally:
+            se.USE_EXPIRY_EM = orig
+        assert got, "fixture produced no spreads"
+        assert all(s.get("expiry_iv") is None for s in got)
+
+    def test_screen_spreads_sizes_the_window_off_the_expiry_iv(self):
+        """A front expiry priced RICHER than the 30-day widens ITS OWN EM, so
+        the window moves further OTM than the IV30-scaled one.
+
+        The two windows are disjoint by construction (60-vol front -> puts
+        88.0-93.2; 15-vol 30-day reading -> puts 97.0-98.3), so this asserts on
+        the STRIKE SETS. A count comparison would not distinguish them.
+        """
+        rich = self._chain(front_iv=60.0, back_iv=15.0)
+        import iv_analysis
+        legacy_daily = iv_analysis.expiry_daily_em(100.0, 15.0)
+
+        per_expiry = self._short_strikes(rich, legacy_daily, use_expiry=True)
+        legacy = self._short_strikes(rich, legacy_daily, use_expiry=False)
+
+        # Non-vacuity: BOTH paths must actually produce spreads.
+        assert per_expiry, "per-expiry path produced no spreads — fixture is broken"
+        assert legacy, "legacy path produced no spreads — fixture is broken"
+        # The richer front EM pushes the short strike strictly further OTM.
+        assert max(per_expiry) < min(legacy), (
+            f"per-expiry shorts {per_expiry} are not further OTM than legacy {legacy}")
+        assert all(88.0 <= k <= 93.5 for k in per_expiry), per_expiry
+        assert all(96.5 <= k <= 98.5 for k in legacy), legacy
+
+
+@pytest.fixture
+def unfiltered_directional(monkeypatch):
+    """Drop the min-score cut for tests that are about the build/score pipeline.
+
+    Every directional candidate this fixture chain produces grades Weak (the
+    fake chain's liquidity/PoP fail the hard gates), so with the production
+    ``SINGLE_LEG_MIN_SCORE`` in force the emitted list is empty and every
+    assertion about shape, window coverage or ordering goes vacuous. These
+    tests predate the cut and are not about it — the cut has its own tests.
+    """
+    monkeypatch.setattr(scanner_engine, "SINGLE_LEG_MIN_SCORE", 0.0)
+    monkeypatch.setattr(scanner_engine, "SINGLE_LEG_EXCLUDED_GRADES", ())
+
+
 class TestDirectionalSignals:
     """Single-leg directional candidates (LONG/SHORT calls & puts).
 
@@ -1719,7 +1866,8 @@ class TestDirectionalSignals:
         assert "signals_directional" in results
         assert isinstance(results["signals_directional"], list)
 
-    def test_directional_signals_carry_strategy_shape(self, fake_client):
+    def test_directional_signals_carry_strategy_shape(self, fake_client,
+                                                      unfiltered_directional):
         results = scanner_engine.run_full_scan(fake_client, symbols=self.SYMBOLS)
         sigs = results["signals_directional"]
         assert sigs, "expected directional candidates from the fake chain"
@@ -1730,7 +1878,8 @@ class TestDirectionalSignals:
             assert s.get("id")
             assert s.get("composite_score") is not None
 
-    def test_directional_covers_both_dte_windows(self, fake_client):
+    def test_directional_covers_both_dte_windows(self, fake_client,
+                                                 unfiltered_directional):
         """Both the 0-DTE and swing windows must contribute candidates.
 
         Guards the two-window loop AND the non-vacuity of the sort test below:
@@ -1744,7 +1893,8 @@ class TestDirectionalSignals:
             assert 1 in dtes, f"{symbol}: no 0-DTE-window candidate (got {dtes})"
             assert 7 in dtes, f"{symbol}: no swing-window candidate (got {dtes})"
 
-    def test_directional_sorted_by_score_desc(self, fake_client):
+    def test_directional_sorted_by_score_desc(self, fake_client,
+                                              unfiltered_directional):
         sigs = scanner_engine.run_full_scan(
             fake_client, symbols=self.SYMBOLS)["signals_directional"]
         scores = [s.get("composite_score") or 0 for s in sigs]
@@ -1753,7 +1903,8 @@ class TestDirectionalSignals:
         assert len(set(scores)) > 1, "all scores equal — the ordering assertion is vacuous"
         assert scores == sorted(scores, reverse=True)
 
-    def test_swing_window_scored_against_its_own_em_not_a_one_day_em(self, fake_client):
+    def test_swing_window_scored_against_its_own_em_not_a_one_day_em(
+            self, fake_client, unfiltered_directional):
         """Each DTE window is scored against ITS OWN em_1sd.
 
         Pins the deliberate deviation from the task spec (see the comment in
@@ -1790,6 +1941,88 @@ class TestDirectionalSignals:
         assert credit, "fixture produced no credit spreads — the assertion would be vacuous"
         for s in credit:
             assert s["type"] in {"PCS", "CCS", "IC"}
+
+    # --- Minimum-score cut ---------------------------------------------------
+
+    def test_weak_directional_candidates_are_not_emitted(self, fake_client):
+        """Every candidate this fixture builds grades Weak (~23-39), so the
+        production cut must emit NOTHING — no Weak signal reaches the tab."""
+        results = scanner_engine.run_full_scan(fake_client, symbols=self.SYMBOLS)
+        assert results["signals_directional"] == []
+        # Non-vacuity: the builder must actually have produced candidates for
+        # the cut to have anything to drop, else this passes for free.
+        assert results["signals_0dte"], "fixture produced no scan at all"
+
+    def test_directional_emits_candidates_at_or_above_the_min_score(
+            self, fake_client, monkeypatch):
+        """The cut is a floor, not a blanket suppression: >= the threshold survives."""
+        import strategy_scoring
+
+        def _fake_score_all(signals, view, atm_iv, em_1sd, market_state=None):
+            out = []
+            for i, sig in enumerate(signals or []):
+                sig["composite_score"] = 49.9 if i % 2 else 50.0
+                sig["grade"] = "Marginal"
+                out.append(sig)
+            return out
+
+        monkeypatch.setattr(strategy_scoring, "score_all", _fake_score_all)
+        sigs = scanner_engine.run_full_scan(
+            fake_client, symbols=self.SYMBOLS)["signals_directional"]
+        assert sigs, "nothing survived — the cut is suppressing qualifying candidates"
+        # Boundary: 50.0 is IN, 49.9 is OUT.
+        assert {s["composite_score"] for s in sigs} == {50.0}
+
+    def test_directional_min_score_cut_runs_before_the_per_symbol_cap(
+            self, fake_client, monkeypatch):
+        """The cap must select the best QUALIFYING candidates.
+
+        Score alone cannot show this — the list is sorted descending, so a
+        score cut applied after the slice keeps the same rows. The GRADE half
+        can: two top-scoring Weak rows would eat both cap slots and then be
+        dropped, emitting nothing, if the cut ran after the slice.
+        """
+        import strategy_scoring
+        monkeypatch.setattr(scanner_engine, "SINGLE_LEG_MAX_PER_SYMBOL", 2)
+
+        def _fake_score_all(signals, view, atm_iv, em_1sd, market_state=None):
+            out = []
+            for i, sig in enumerate(signals or []):
+                sig["composite_score"] = 90.0 if i < 2 else 60.0
+                sig["grade"] = "Weak" if i < 2 else "Good"
+                out.append(sig)
+            return out
+
+        monkeypatch.setattr(strategy_scoring, "score_all", _fake_score_all)
+        sigs = scanner_engine.run_full_scan(
+            fake_client, symbols=self.SYMBOLS)["signals_directional"]
+        assert sigs, "the cap was spent on candidates the cut then dropped"
+        assert all(s["grade"] == "Good" and s["composite_score"] == 60.0
+                   for s in sigs)
+
+    def test_directional_drops_a_weak_grade_regardless_of_score(
+            self, fake_client, monkeypatch):
+        """Grade and score are checked independently.
+
+        A gate-failed candidate is capped at GATE_FAIL_CAP (39) + at most a +6
+        state tilt, so today no Weak signal can reach 50 and the two checks are
+        REDUNDANT — no realistic fixture can tell them apart. This synthetic
+        probe (grade Weak at score 90) pins the grade half so a future threshold
+        change cannot silently let a Weak trade through.
+        """
+        import strategy_scoring
+
+        def _fake_score_all(signals, view, atm_iv, em_1sd, market_state=None):
+            out = []
+            for sig in signals or []:
+                sig["composite_score"] = 90.0
+                sig["grade"] = "Weak"
+                out.append(sig)
+            return out
+
+        monkeypatch.setattr(strategy_scoring, "score_all", _fake_score_all)
+        results = scanner_engine.run_full_scan(fake_client, symbols=self.SYMBOLS)
+        assert results["signals_directional"] == []
 
     def test_directional_degrades_when_builder_raises(self, fake_client, monkeypatch):
         """A directional failure must never break the credit-spread scan."""

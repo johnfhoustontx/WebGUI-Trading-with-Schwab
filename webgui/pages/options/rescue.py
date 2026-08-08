@@ -11,6 +11,7 @@ imported lazily inside ``render()`` only (mirrors ``expected_move.py`` /
 ``simulator.py``).
 """
 
+import page_help as _page_help
 from .inputs import bind_symbol_load, select_all_on_focus
 from .theme import BADGE_NEG, BADGE_POS, BADGE_WARN, BTN_3D
 
@@ -707,6 +708,10 @@ def render():
                 "dense no-caps inline-label align=left") as t:
             tb = ui.tab("At-Risk Board")
             ta = ui.tab("Ad-hoc Trade")
+            for _tab, _key in ((tb, "At-Risk Board"), (ta, "Ad-hoc Trade")):
+                with _tab:
+                    ui.tooltip(_page_help.subtab_help("/options/rescue", _key)
+                               ).props("delay=350 max-width=340px")
         return t, tb, ta
 
     if _slot is not None:
