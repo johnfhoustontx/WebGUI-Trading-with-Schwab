@@ -248,6 +248,12 @@ def main():
     # The HUD first: it polls Redis and the GEX history every 2s, so stopping it
     # before its sources means it never sees the stack disappear underneath it.
     killed = stop_hud()
+    if not OWNS_PROXY:
+        # SAY IT. The proxy is simply absent from _targets() here, and silence is
+        # indistinguishable from "forgot to kill it" — especially since the port
+        # printed is one the operator can see is still listening afterwards.
+        print(f"  - proxy (:{PROXY_PORT}): skipped — owned by the prod checkout, "
+              f"not this one")
     for label, port in _targets():
         pids = _listening_pids(port)
         if not pids:

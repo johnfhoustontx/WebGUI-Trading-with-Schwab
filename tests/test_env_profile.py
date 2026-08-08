@@ -143,7 +143,7 @@ def test_pytest_forces_suppression_but_keeps_prod_ports(tmp_path):
     existing suites keep passing inside a dev checkout — but no test may ever
     reach Anthropic or a notification channel.
 
-    Uses a DEV marker on purpose: against a prod marker the two port assertions
+    Uses a DEV marker on purpose: against a prod marker the topology assertions
     would pass even with no guard at all (prod's profile carries those values
     natively), so only a dev marker actually proves the documented decision.
     """
@@ -155,6 +155,11 @@ def test_pytest_forces_suppression_but_keeps_prod_ports(tmp_path):
     # tests/test_repo_paths_ports.py asserts that URL ends "/0". Without forcing it
     # here, that pre-existing test fails inside a dev checkout.
     assert flags["redis_db"] == 0
+    # owns_proxy likewise. It is not a port, but it says WHOSE the port is, and a
+    # consumer that branches on it (tools/stop_all.py drops the proxy from its
+    # kill list) would otherwise behave differently in a dev checkout than in a
+    # prod one — exactly the divergence this guard exists to rule out.
+    assert flags["owns_proxy"] is True
     assert flags["allow_claude"] is False
     assert flags["allow_notifications"] is False
     assert flags["schedulers"] is False

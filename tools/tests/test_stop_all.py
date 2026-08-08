@@ -195,6 +195,29 @@ def test_the_web_gui_is_killed_last_whether_or_not_we_own_the_proxy(monkeypatch,
     assert [label for label, _ in stop_all._targets()][-1] == "webgui"
 
 
+def test_the_operator_is_told_the_proxy_was_deliberately_skipped(monkeypatch, capsys):
+    """Silence is indistinguishable from "forgot to kill it". The docstring
+    serves the code reader; this line serves the person watching the output."""
+    monkeypatch.setattr(stop_all, "OWNS_PROXY", False)
+    monkeypatch.setattr(stop_all, "stop_hud", lambda: 0)
+    monkeypatch.setattr(stop_all, "_listening_pids", lambda port: set())
+    stop_all.main()
+    out = capsys.readouterr().out
+    assert "skipped" in out
+    assert "proxy" in out
+    assert str(stop_all.PROXY_PORT) in out   # WHICH proxy was left alone
+
+
+def test_no_skip_notice_when_we_do_own_the_proxy(monkeypatch, capsys):
+    """Non-vacuity partner: the notice must not appear in the prod checkout,
+    where the proxy is a normal target like everything else."""
+    monkeypatch.setattr(stop_all, "OWNS_PROXY", True)
+    monkeypatch.setattr(stop_all, "stop_hud", lambda: 0)
+    monkeypatch.setattr(stop_all, "_listening_pids", lambda port: set())
+    stop_all.main()
+    assert "skipped" not in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("owns", [True, False])
 def test_every_service_is_still_a_target_either_way(monkeypatch, owns):
     """Non-vacuity partner for the two tests above: skipping the proxy must skip

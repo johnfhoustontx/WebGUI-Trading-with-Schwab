@@ -158,18 +158,23 @@ def _resolve_env(root, under_pytest=None):
     over = profiles.get(name)
     if isinstance(over, dict):
         flags.update(over)
-    # Under pytest: PROD CONNECTION TOPOLOGY regardless of the marker — the ports
-    # AND the Redis DB index. Tests are hermetic (the bus is already fakeredis), so
-    # these are inert constants, and forcing them is what lets the existing suites
-    # pass unchanged inside a dev checkout: tests/test_repo_paths_ports.py asserts
-    # the literal 8210-8214 and a MEMURAI_URL ending "/0". Every suppression is
-    # forced ON so no test can reach Anthropic or a notification channel.
+    # Under pytest: PROD CONNECTION TOPOLOGY regardless of the marker — the ports,
+    # the Redis DB index, AND proxy ownership. Tests are hermetic (the bus is
+    # already fakeredis), so these are inert constants, and forcing them is what
+    # lets the existing suites pass unchanged inside a dev checkout:
+    # tests/test_repo_paths_ports.py asserts the literal 8210-8214 and a
+    # MEMURAI_URL ending "/0". `owns_proxy` belongs to that topology even though it
+    # is not a port — it says WHOSE the port is, and a consumer that branches on it
+    # (tools/stop_all.py drops the proxy from its kill list) would otherwise behave
+    # one way under a dev checkout's tests and another under prod's, which is the
+    # divergence this whole branch exists to rule out. Every suppression is forced
+    # ON so no test can reach Anthropic or a notification channel.
     if under_pytest is None:
         under_pytest = "pytest" in sys.modules
     if under_pytest:
-        flags.update(port_offset=0, proxy_port=None, redis_db=0, allow_claude=False,
-                     allow_notifications=False, schedulers=False,
-                     autonomous_trading=False)
+        flags.update(port_offset=0, proxy_port=None, redis_db=0, owns_proxy=True,
+                     allow_claude=False, allow_notifications=False,
+                     schedulers=False, autonomous_trading=False)
     return name, flags, peer
 
 
