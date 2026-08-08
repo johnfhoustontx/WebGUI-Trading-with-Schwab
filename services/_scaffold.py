@@ -52,6 +52,7 @@ _REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from repo_paths import ENV_FLAGS  # noqa: E402
 from shared.bus import Bus  # noqa: E402
 
 log = logging.getLogger(__name__)
@@ -280,6 +281,23 @@ async def _consume_loop(domain, bus, command_handler, poll_block_ms) -> None:
             log.exception("consume loop iteration failed")
 
 
+def _schedulers_enabled() -> bool:
+    """Whether this process should run its scheduler.
+
+    False in a suppressed environment (dev), where the stack works off a
+    snapshot and must issue no Schwab calls at rest. ``TRADING_ENABLE_SCHEDULERS=1``
+    is the escape hatch for the one dev case that genuinely needs collection:
+    testing the collectors themselves.
+    """
+    if os.environ.get("TRADING_ENABLE_SCHEDULERS", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        return True
+    return bool(ENV_FLAGS.get("schedulers", True))
+
+
 def make_app(
     domain: str,
     *,
@@ -304,7 +322,11 @@ def make_app(
     _install_file_logging(domain)
 
     # R2 — scheduler heartbeat shared between the supervisor task and /health.
-    health_state = _SchedulerHealth(has_scheduler=scheduler is not None)
+    # A suppressed environment reports "no scheduler", NOT "scheduler dead" —
+    # otherwise /health and the Status page would show a healthy dev stack as
+    # broken every time you looked at it.
+    run_scheduler = scheduler is not None and _schedulers_enabled()
+    health_state = _SchedulerHealth(has_scheduler=run_scheduler)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -312,7 +334,7 @@ def make_app(
         app.state.bus = b
         app.state.scheduler_health = health_state
         tasks: list[asyncio.Task] = []
-        if scheduler is not None:
+        if run_scheduler:
             tasks.append(
                 asyncio.create_task(
                     _supervise_scheduler(
