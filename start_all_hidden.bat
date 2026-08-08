@@ -20,8 +20,10 @@ REM  is left as-is; make sure it's running.
 REM
 REM  To STOP everything: run stop_all.bat, or open the web GUI and use
 REM  More > Terminate (Memurai stays up).
-REM  NOTE: stop_all.bat kills by LISTENING PORT, and the HUD has no port,
-REM  so it survives a stop — close its window to quit it.
+REM  NOTE: stop_all.bat DOES stop the HUD. Everything else it kills is found
+REM  by listening port; the HUD binds none, so it is matched on its command
+REM  line instead — scoped to THIS checkout's root, so a stop here never
+REM  reaches the other environment's HUD. See tools\stop_all.py:_is_hud.
 REM =====================================================================
 
 REM Second pass (relaunched hidden): do the actual work.
