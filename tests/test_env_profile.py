@@ -182,7 +182,14 @@ def test_live_module_constants_exist():
 # ------------------------------------------------------------- port derivation
 
 def test_port_derivation_prod():
-    """Prod must be byte-identical to the pre-environment numbers."""
+    """Under a prod profile the transform is the IDENTITY on every port.
+
+    Note what this does and does not establish: the table here is synthetic, so
+    this pins the transform, not the shipped numbers. Byte-identity of the exported
+    constants against the pre-environment repo is guarded by
+    tests/test_repo_paths_ports.py, which asserts the literal 8210-8214 and a
+    MEMURAI_URL ending "/0".
+    """
     ports = {"proxy": 8100, "nicegui": 8500, "memurai": 6379,
              "services": {"options": 8211, "market": 8215}}
     d = repo_paths._derive_ports(ports, {"port_offset": 0, "proxy_port": None,
@@ -190,7 +197,8 @@ def test_port_derivation_prod():
     assert d["proxy_port"] == 8100
     assert d["nicegui_port"] == 8500
     assert d["service_ports"] == {"options": 8211, "market": 8215}
-    assert d["memurai_url"] == "redis://127.0.0.1:6379/0"
+    assert d["memurai_port"] == 6379
+    assert d["redis_db"] == 0
 
 
 def test_port_derivation_dev_offsets_and_borrows_proxy():
@@ -202,7 +210,8 @@ def test_port_derivation_dev_offsets_and_borrows_proxy():
     assert d["nicegui_port"] == 9500
     assert d["service_ports"] == {"options": 9211, "market": 9215}
     # Memurai PORT is shared (one server); only the logical DB differs.
-    assert d["memurai_url"] == "redis://127.0.0.1:6379/1"
+    assert d["memurai_port"] == 6379
+    assert d["redis_db"] == 1
 
 
 def test_port_derivation_offsets_proxy_when_not_pinned():
@@ -214,6 +223,39 @@ def test_port_derivation_offsets_proxy_when_not_pinned():
     d = repo_paths._derive_ports(ports, {"port_offset": 1000, "proxy_port": None,
                                          "redis_db": 0})
     assert d["proxy_port"] == 9100
+
+
+def test_port_derivation_leaves_external_ports_alone():
+    """Fed the REAL ports.toml, the derivation must emit exactly these five keys.
+
+    The tests above pass synthetic tables that simply OMIT options_analytics /
+    approval / ml_servers, so to them "deliberately not offset" and "not in the
+    input" are indistinguishable — the decision is guarded by prose alone. Reading
+    the shipped file is the point: it is the only test here that notices a port
+    being ADDED to that file, which is exactly the case that silently goes
+    un-offset (right for an external process, a bug for one this repo starts).
+    """
+    ports = tomllib.loads(
+        (REPO / "config" / "ports.toml").read_text(encoding="utf-8-sig"))
+    assert {"options_analytics", "approval", "ml_servers"} <= set(ports)  # non-vacuous
+    d = repo_paths._derive_ports(ports, {"port_offset": 1000, "proxy_port": None,
+                                         "redis_db": 1})
+    assert set(d) == {"proxy_port", "nicegui_port", "service_ports",
+                      "memurai_port", "redis_db"}
+    # The assertion above pins the OUTPUT, which only moves when someone teaches
+    # _derive_ports a new port. The silent direction is the other one: a top-level
+    # port ADDED to ports.toml and not taught is simply never offset, and no output
+    # key changes. So pin the input's scalar keys too — this is a decision tripwire,
+    # not a value check. Adding a port here should fail once and make the author
+    # answer: does this repo START it (offset it, and extend _derive_ports) or not
+    # (external — leave it, and add it below)?
+    external = {"proxy", "options_analytics", "approval", "dashboard_frontend",
+                "nicegui", "memurai"}
+    scalars = {k for k, v in ports.items() if not isinstance(v, dict)}
+    assert scalars == external, (
+        f"ports.toml top-level keys changed: {scalars ^ external}. If this repo "
+        f"starts the new process, offset it in repo_paths._derive_ports; if it is "
+        f"external, list it here.")
 
 
 # --------------------------------------------------------------- shipped config
@@ -239,6 +281,21 @@ def test_shipped_profiles_match_the_flag_contract():
         assert not keys - expected, f"[{name}] has unknown key(s): {keys - expected}"
         missing = expected - keys - {"proxy_port"}
         assert not missing, f"[{name}] is missing key(s): {missing}"
+        # TYPES, not just names. The three numeric keys reach an unguarded int()
+        # in _derive_ports, which runs at IMPORT — so `redis_db = "one"` in this
+        # tracked file crashes every process in the stack, and nothing else in the
+        # suite can see it: the pytest guard overwrites exactly these three keys,
+        # so no test ever pushes a real profile value through the function.
+        # isinstance(..., int) also catches a float silently truncating
+        # (port_offset = 1000.7 -> 1000). bool is an int subclass, hence the
+        # explicit exclusion.
+        for key in ("port_offset", "redis_db"):
+            val = table[key]
+            assert isinstance(val, int) and not isinstance(val, bool), \
+                f"[{name}] {key} must be an integer, got {val!r}"
+        proxy_port = table.get("proxy_port", 0)
+        assert isinstance(proxy_port, int) and not isinstance(proxy_port, bool), \
+            f"[{name}] proxy_port must be an integer, got {proxy_port!r}"
 
 
 def test_shipped_dev_profile_suppresses_and_offsets():

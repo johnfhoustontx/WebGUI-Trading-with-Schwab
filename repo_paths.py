@@ -198,17 +198,26 @@ def _derive_ports(ports: dict, flags: dict) -> dict:
     ``proxy_port`` overrides the offset entirely, which is how dev borrows prod's
     proxy on :8100 rather than holding a second copy of the one rotating Schwab
     OAuth refresh token.
+
+    Returns bare numbers, ``redis_db`` among them — the URLs are assembled at the
+    constants block below, and the snapshot tooling wants the DB index as an int
+    rather than something to parse back out of a URL.
+
+    The ``int()`` coercions are deliberately unguarded: a non-numeric value in
+    config/environments.toml must fail loudly at import, because the plausible
+    fallback is worse — a malformed ``redis_db`` quietly becoming 0 would point a
+    dev checkout at prod's live cache. tests/test_env_profile.py type-checks the
+    shipped profiles so that crash cannot reach a running stack.
     """
     off = int(flags.get("port_offset") or 0)
     override = flags.get("proxy_port")
     proxy = int(override) if override else int(ports["proxy"]) + off
-    memurai_port = int(ports["memurai"])
     return {
         "proxy_port": proxy,
         "nicegui_port": int(ports["nicegui"]) + off,
         "service_ports": {k: int(v) + off for k, v in ports["services"].items()},
-        "memurai_port": memurai_port,
-        "memurai_url": f"redis://127.0.0.1:{memurai_port}/{int(flags.get('redis_db') or 0)}",
+        "memurai_port": int(ports["memurai"]),
+        "redis_db": int(flags.get("redis_db") or 0),
     }
 
 
@@ -222,6 +231,6 @@ NICEGUI_PORT     = _derived["nicegui_port"]
 NICEGUI_URL      = f"http://127.0.0.1:{NICEGUI_PORT}"
 ML_SERVER_URLS   = {k: f"http://127.0.0.1:{v}" for k, v in _ports["ml_servers"].items()}
 MEMURAI_PORT  = _derived["memurai_port"]
-MEMURAI_URL   = _derived["memurai_url"]
+MEMURAI_URL   = f"redis://127.0.0.1:{MEMURAI_PORT}/{_derived['redis_db']}"
 SERVICE_PORTS = dict(_derived["service_ports"])
 SERVICE_URLS  = {k: f"http://127.0.0.1:{v}" for k, v in SERVICE_PORTS.items()}
