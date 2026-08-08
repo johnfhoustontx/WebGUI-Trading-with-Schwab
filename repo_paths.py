@@ -158,20 +158,31 @@ def _resolve_env(root, under_pytest=None):
     over = profiles.get(name)
     if isinstance(over, dict):
         flags.update(over)
-    # Under pytest: PROD CONNECTION TOPOLOGY regardless of the marker — the ports,
-    # the Redis DB index, AND proxy ownership. Tests are hermetic (the bus is
-    # already fakeredis), so these are inert constants, and forcing them is what
-    # lets the existing suites pass unchanged inside a dev checkout:
-    # tests/test_repo_paths_ports.py asserts the literal 8210-8214 and a
-    # MEMURAI_URL ending "/0". `owns_proxy` belongs to that topology even though it
-    # is not a port — it says WHOSE the port is, and a consumer that branches on it
-    # (tools/stop_all.py drops the proxy from its kill list) would otherwise behave
-    # one way under a dev checkout's tests and another under prod's, which is the
-    # divergence this whole branch exists to rule out. Every suppression is forced
-    # ON so no test can reach Anthropic or a notification channel.
+    # Under pytest the process PRESENTS AS PROD regardless of the marker — the
+    # ports, the Redis DB index, proxy ownership, AND the environment's identity.
+    # Tests are hermetic (the bus is already fakeredis), so these are inert
+    # constants, and forcing them is what lets the existing suites pass unchanged
+    # inside a dev checkout: tests/test_repo_paths_ports.py asserts the literal
+    # 8210-8214 and a MEMURAI_URL ending "/0". `owns_proxy` belongs to that
+    # topology even though it is not a port — it says WHOSE the port is, and a
+    # consumer that branches on it (tools/stop_all.py drops the proxy from its
+    # kill list) would otherwise behave one way under a dev checkout's tests and
+    # another under prod's, which is the divergence this whole branch exists to
+    # rule out. `name` is pinned for exactly the same reason, one level up: it
+    # drives IS_DEV, so an unpinned name leaves every `if IS_DEV:` branch
+    # checkout-dependent — found the hard way, when webgui/pages/status.py began
+    # withholding the Memurai restart in dev and its "every card is restartable"
+    # test would have failed only inside a dev checkout. Pinning it here means an
+    # IS_DEV consumer needs no special handling; a test that wants the dev branch
+    # monkeypatches IS_DEV on the module that consumed it, as with OWNS_PROXY.
+    # The profile lookup above is deliberately left alone — every flag is
+    # explicitly overridden below, so where they came from no longer matters.
+    # Every suppression is forced ON so no test can reach Anthropic or a
+    # notification channel.
     if under_pytest is None:
         under_pytest = "pytest" in sys.modules
     if under_pytest:
+        name = "prod"
         flags.update(port_offset=0, proxy_port=None, redis_db=0, owns_proxy=True,
                      allow_claude=False, allow_notifications=False,
                      schedulers=False, autonomous_trading=False)

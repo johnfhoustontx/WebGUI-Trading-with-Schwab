@@ -192,10 +192,11 @@ def test_every_component_target_is_restartable_except_auth(monkeypatch):
     # itself). Only the auth card is excepted — its action is Authorize (a link
     # to /auth), not a process restart.
     #
-    # Pinned to PROD explicitly: the proxy and Memurai cards are withheld in a
-    # dev checkout (borrowed / shared — see below), and ENV_NAME is NOT forced
-    # under pytest the way the ports are, so this assertion would otherwise
-    # depend on which checkout the suite happens to be running in.
+    # Pinned to PROD explicitly. repo_paths now forces the whole prod identity
+    # under pytest (name included), so this holds without the patch — but the
+    # proxy and Memurai cards ARE withheld in a dev checkout (borrowed / shared
+    # — see below), and stating the environment beats depending on a guard two
+    # modules away for a test whose whole subject is environment ownership.
     monkeypatch.setattr(status, "IS_DEV", False)
     monkeypatch.setattr(status, "OWNS_PROXY", True)
     for t in status.component_targets():

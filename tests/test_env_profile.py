@@ -147,8 +147,16 @@ def test_pytest_forces_suppression_but_keeps_prod_ports(tmp_path):
     would pass even with no guard at all (prod's profile carries those values
     natively), so only a dev marker actually proves the documented decision.
     """
-    _, flags, _ = repo_paths._resolve_env(
+    name, flags, _ = repo_paths._resolve_env(
         _root(tmp_path, 'name = "dev"\n'), under_pytest=True)
+    # The sharpest statement of the rule: under pytest the process PRESENTS as
+    # prod, identity included. ENV_NAME drives IS_DEV, so leaving the name alone
+    # would let any `if IS_DEV:` branch behave one way in a dev checkout's test
+    # run and another in prod's — the exact divergence the rest of this guard
+    # rules out. Found the hard way: webgui/pages/status.py withholds the Memurai
+    # restart when IS_DEV, and its "every card is restartable" test would have
+    # started failing in a dev checkout only.
+    assert name == "prod"
     assert flags["port_offset"] == 0        # prod ports despite the dev marker
     assert flags["proxy_port"] is None
     # redis_db is part of the same connection topology: it feeds MEMURAI_URL, and
