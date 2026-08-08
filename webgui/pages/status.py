@@ -32,9 +32,11 @@ import bus_client
 import proxy
 from pages.options.theme import BTN_3D
 from repo_paths import (
+    IS_DEV,
     MEMURAI_PORT,
     NICEGUI_PORT,
     NICEGUI_URL,
+    OWNS_PROXY,
     PROXY_PORT,
     PROXY_URL,
     REPO_ROOT,
@@ -75,11 +77,17 @@ def component_targets():
     how the probe is performed: ``memurai`` (Redis ping), ``proxy`` /
     ``service`` (HTTP ``/health``), ``auth`` (Schwab OAuth token validity, read
     from the proxy ``/health``), ``self`` (the webgui, always up).
+
+    The proxy entry also carries ``owned`` and says so in its label: dev borrows
+    PROD's proxy on :8100, so its card has no Restart button (see
+    :func:`restart_spec`) and the label is what explains the absence.
     """
     targets = [
         {"key": "memurai", "label": "Memurai (Redis backbone)", "tier": "Tier 3",
          "kind": "memurai", "url": f"redis://127.0.0.1:{MEMURAI_PORT}"},
-        {"key": "proxy", "label": "schwab-proxy (market data / auth)",
+        {"key": "proxy", "owned": OWNS_PROXY,
+         "label": ("schwab-proxy (market data / auth)" if OWNS_PROXY
+                   else "schwab-proxy (shared — owned by prod)"),
          "tier": "Tier 1", "kind": "proxy", "url": PROXY_URL},
         {"key": "schwab_auth", "label": "Schwab Authorization (OAuth)",
          "tier": "Tier 1", "kind": "auth", "url": AUTH_URL},
@@ -233,10 +241,23 @@ def restart_spec(target):
     * **memurai** → a ``service`` spec: restart the Memurai Windows service.
     * **auth** / unknown → ``None`` — the auth card's action is Authorize, not a
       process restart (the proxy card restarts the proxy).
+    * **proxy when this environment does NOT own it** → ``None``. Dev runs no
+      proxy of its own (one rotating Schwab OAuth refresh token, so there can be
+      only one) and borrows prod's on :8100 — so a dev checkout's ``PROXY_PORT``
+      *is* prod's, and this button would bounce the LIVE stack's market data
+      mid-session. Same hazard ``tools/stop_all.py`` drops the proxy for.
+    * **memurai in dev** → ``None``. One Redis server serves both environments,
+      separated by logical DB index rather than by a second install, so
+      restarting the Windows service from dev takes prod's Redis down with it.
+
+    Everything dev genuinely owns — its six services on offset ports, and its
+    own web GUI — stays restartable.
     """
     kind = target.get("kind")
     key = target.get("key")
     if kind == "proxy":
+        if not OWNS_PROXY:
+            return None
         return {"kind": "script", "title": f"Schwab Proxy :{PROXY_PORT}",
                 "name": "proxy", "kill_port": PROXY_PORT, "wait_port": 0,
                 "script": r"schwab-proxy\schwab_proxy.py"}
@@ -255,6 +276,8 @@ def restart_spec(target):
                 "name": "webgui", "kill_port": NICEGUI_PORT, "wait_port": 0,
                 "script": r"webgui\main.py"}
     if kind == "memurai":
+        if IS_DEV:
+            return None
         return {"kind": "service", "title": "Memurai", "service": "Memurai"}
     return None
 
