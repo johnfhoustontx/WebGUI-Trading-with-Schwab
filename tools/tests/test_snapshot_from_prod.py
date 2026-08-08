@@ -149,6 +149,52 @@ def test_sqlite_copy_does_not_checkpoint_the_source_wal(tmp_path):
     assert sqlite3.connect(dst).execute("SELECT count(*) FROM t").fetchone()[0] == 201
 
 
+def test_sqlite_copy_stays_read_only_when_the_path_contains_a_hash(tmp_path):
+    """SQLite reads '#' in a URI filename as a fragment delimiter.
+
+    Built by concatenation and unquoted, a source under ``prod #2`` drops the
+    ``?mode=ro`` entirely and opens READ-WRITE — defeating the one guard
+    copy_sqlite's docstring calls load-bearing, in the one situation nobody is
+    watching for it. Demonstrated before the fix: CREATE TABLE succeeded on the
+    "read-only" handle.
+    """
+    peer = tmp_path / "prod #2"
+    peer.mkdir()
+    src, dst = peer / "a.db", tmp_path / "b.db"
+    con = sqlite3.connect(src)
+    con.execute("PRAGMA journal_mode=wal")
+    con.execute("CREATE TABLE t (x)")
+    con.execute("INSERT INTO t VALUES (1)")
+    con.commit()
+    con.close()
+
+    snap.copy_sqlite(src, dst)
+    assert sqlite3.connect(dst).execute("SELECT count(*) FROM t").fetchone()[0] == 1
+
+    # The connection copy_sqlite builds must reject writes. Rebuild it the same
+    # way rather than trusting the copy: this is about the OPEN MODE.
+    from urllib.parse import quote
+    con = sqlite3.connect(f"file:{quote(src.as_posix(), safe='/')}?mode=ro", uri=True)
+    with pytest.raises(sqlite3.OperationalError):
+        con.execute("CREATE TABLE injected (x)")
+    con.close()
+
+
+def test_sqlite_copy_handles_spaces_and_unicode_in_the_path(tmp_path):
+    """Percent-quoting must not break ordinary paths — 'WebGUI Trading Prod'
+    has a space in it, and the drive colon must survive too."""
+    peer = tmp_path / "WebGUI Trading Prod ünïcode"
+    peer.mkdir()
+    src, dst = peer / "a.db", tmp_path / "b.db"
+    con = sqlite3.connect(src)
+    con.execute("CREATE TABLE t (x)")
+    con.execute("INSERT INTO t VALUES (1)")
+    con.commit()
+    con.close()
+    snap.copy_sqlite(src, dst)
+    assert sqlite3.connect(dst).execute("SELECT count(*) FROM t").fetchone()[0] == 1
+
+
 def test_file_copy_creates_missing_destination_directories(tmp_path):
     src = tmp_path / "x.json"
     src.write_text('{"a": 1}')
@@ -268,6 +314,43 @@ def test_redis_copy_disarms_even_an_unparseable_control_value():
     from shared.contracts.envelope import CacheEnvelope
     env = CacheEnvelope.from_json(dst.get("cache:driver:control"))
     assert env.payload["enabled"] is False
+
+
+@pytest.mark.parametrize("broken", [
+    {"version": None, "ts": "2026-08-03T01:28:27+00:00"},
+    {"version": 32, "ts": None},
+    {"version": None, "ts": None},
+    {"version": True, "ts": "2026-08-03T01:28:27+00:00"},   # bool is an int subclass
+    {"ts": "2026-08-03T01:28:27+00:00"},                     # version absent
+    {"version": 32},                                          # ts absent
+])
+def test_redis_copy_repairs_a_malformed_control_envelope(broken):
+    """A null version/ts must be REPLACED, not passed through.
+
+    ``setdefault`` does not fire on a key present with value ``None``, so the
+    envelope would reach CacheEnvelope with a null required field and be
+    rejected — leaving driver_svc.read_control RAISING rather than reading
+    "off". This is the one function whose whole job is a disarmed dev.
+    """
+    src, dst = _fake_pair()
+    env = dict(broken)
+    env["payload"] = {"enabled": True, "halted": False}
+    src.set("cache:driver:control", json.dumps(env).encode())
+
+    snap.copy_redis(src, dst)
+
+    written = dst.get("cache:driver:control")
+    # Assert on the BYTES this function writes, not only on what survives the
+    # contract: pydantic coerces a JSON `true` version to 1, so a downstream-only
+    # assertion cannot tell a repaired envelope from an unrepaired one. Caught by
+    # mutation testing (removing the bool carve-out changed nothing observable).
+    fields = json.loads(written)
+    assert type(fields["version"]) is int, "version must be written as a real int"
+    assert type(fields["ts"]) is str, "ts must be written as a real string"
+
+    from shared.contracts.envelope import CacheEnvelope
+    got = CacheEnvelope.from_json(written)
+    assert got.payload["enabled"] is False
 
 
 #############################################

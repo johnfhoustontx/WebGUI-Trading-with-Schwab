@@ -16,10 +16,15 @@ during market hours.
 Three things could do real damage here, so each has a structural guard rather
 than a warning in the docs:
 
-1. **Running in the wrong direction.** The tool only ever writes into the
-   checkout it is *run from*, and :func:`assert_destination_is_dev` refuses
+1. **Running in the wrong direction.** Every byte of *copied data* lands in the
+   checkout this is run from, and :func:`assert_destination_is_dev` refuses
    unless that checkout resolves to ``dev``. There is no flag that makes prod a
    destination — ``--peer`` names the SOURCE only.
+
+   One honest caveat, because "writes nothing into prod" would be too strong a
+   claim: opening a WAL database read-only can CREATE its ``-shm``/``-wal``
+   sidecars. See :func:`copy_sqlite`. No prod *data* is ever modified, but the
+   tool is not literally write-free against prod's tree.
 2. **Flushing the wrong Redis DB.** Both environments share one Memurai server
    and are separated only by logical index, so a wrong index would destroy
    prod's entire published cache. Prod's index is read from PROD's own profile
@@ -39,6 +44,7 @@ import sqlite3
 import sys
 import time
 import tomllib
+from urllib.parse import quote
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
@@ -191,11 +197,31 @@ def copy_sqlite(src, dst):
 
     The source is opened READ-ONLY, and that is load-bearing rather than
     decorative. Measured on this repo's stores: a read-WRITE open of a WAL
-    database checkpoints it and deletes the ``-wal``/``-shm`` sidecars on close,
-    i.e. it mutates prod's WAL state. ``mode=ro`` leaves them alone. (It may
-    CREATE a ``-shm`` beside prod's database when none exists — a read-only
-    connection needs the shared-memory index to see WAL frames — but it never
-    touches the data, and prod's own services keep a ``-shm`` there anyway.)
+    database whose writer is gone CHECKPOINTS it and DELETES the ``-wal``/
+    ``-shm`` sidecars on close — it mutates prod's WAL state. ``mode=ro`` leaves
+    them alone.
+
+    ``PRAGMA query_only`` is NOT a substitute, and the difference was measured
+    rather than assumed: it blocks statements, but the connection is still
+    opened read-write, so closing it checkpoints the WAL and deletes the
+    sidecar exactly as an unguarded read-write open does.
+
+    The path is PERCENT-QUOTED because the URI is built by string
+    concatenation, and SQLite reads ``#`` in a URI filename as a fragment
+    delimiter: an unquoted source under a directory such as ``prod #2`` would
+    silently drop ``?mode=ro`` and open READ-WRITE — defeating the guard above
+    precisely when nobody is looking for it. ``safe="/"`` keeps the path
+    separators literal; SQLite decodes the rest.
+
+    **Side effect worth stating plainly:** a read-only connection needs the
+    ``-shm`` shared-memory index to see WAL frames, so when prod is STOPPED
+    CLEANLY (no sidecars on disk) this CREATES a ``-shm`` and a zero-byte
+    ``-wal`` beside prod's database, and both persist after close. Five of the
+    twelve stores are WAL, so a full run against a stopped prod leaves up to ten
+    such files. They are harmless — no prod data is touched, and prod recreates
+    and reuses them on next start — but they are files this tool put in prod's
+    tree. When prod is RUNNING (the normal case) the sidecars already exist and
+    are byte-identical before and after: a true no-op.
 
     ``backup()`` runs in a single step (``pages=-1``) on purpose. An incremental
     backup restarts whenever an external writer modifies the source, which
@@ -204,7 +230,8 @@ def copy_sqlite(src, dst):
     """
     dst = pathlib.Path(dst)
     dst.parent.mkdir(parents=True, exist_ok=True)
-    source = sqlite3.connect(f"file:{pathlib.Path(src).as_posix()}?mode=ro", uri=True)
+    uri = f"file:{quote(pathlib.Path(src).as_posix(), safe='/')}?mode=ro"
+    source = sqlite3.connect(uri, uri=True)
     try:
         target = sqlite3.connect(dst)
         try:
@@ -230,6 +257,15 @@ def _disabled_control_envelope(raw):
     ``driver_svc.handlers.read_control``. The envelope's ``version`` is preserved
     so it stays in lockstep with the ``:ver`` side key copied alongside it.
     Anything unparseable degrades to a minimal valid disabled envelope.
+
+    The ``version``/``ts`` repairs are isinstance checks, NOT ``setdefault``:
+    ``setdefault`` does not fire on a key that is present with value ``None``,
+    so a ``{"version": null}`` envelope would pass through here and then be
+    REJECTED by ``CacheEnvelope`` (both fields are required and typed) — leaving
+    ``read_control`` raising instead of reading "off". Unreachable while prod's
+    ``cache_set`` always writes an int, and it fails closed, but this function's
+    entire job is to guarantee dev comes up disarmed, so it should not depend on
+    the source being well-formed.
     """
     disabled = {"enabled": False, "halted": False, "reason": None,
                 "halted_date": None, "timestamp": None}
@@ -241,8 +277,11 @@ def _disabled_control_envelope(raw):
         payload["enabled"] = False
         env = dict(env)
         env["payload"] = payload
-        env.setdefault("version", 1)
-        env.setdefault("ts", "1970-01-01T00:00:00+00:00")
+        # bool is an int subclass; a JSON `true` here is not a usable version.
+        if not isinstance(env.get("version"), int) or isinstance(env.get("version"), bool):
+            env["version"] = 1
+        if not isinstance(env.get("ts"), str):
+            env["ts"] = "1970-01-01T00:00:00+00:00"
     except Exception:  # noqa: BLE001 — absent, non-JSON, or a foreign shape.
         env = {"version": 1, "ts": "1970-01-01T00:00:00+00:00", "payload": disabled}
     return json.dumps(env).encode()
