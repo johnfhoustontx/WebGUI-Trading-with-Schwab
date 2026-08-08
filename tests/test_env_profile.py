@@ -2,8 +2,10 @@
 docs/plans/2026-08-08-dev-prod-environments-design.md."""
 import pathlib
 import sys
+import tomllib
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+REPO = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO))
 
 import repo_paths  # noqa: E402
 
@@ -60,12 +62,66 @@ def test_dev_marker_selects_dev_profile(tmp_path):
     assert peer == pathlib.Path("D:/WebGUI Trading Prod")
 
 
-def test_garbage_marker_resolves_to_prod(tmp_path):
-    """A truncated or hand-mangled marker must not silently half-apply a profile."""
+def test_dev_marker_without_peer_root(tmp_path):
+    """peer_root is optional — only the snapshot tool needs it."""
+    name, _, peer = repo_paths._resolve_env(
+        _root(tmp_path, 'name = "dev"\n'), under_pytest=False)
+    assert name == "dev"
+    assert peer is None
+
+
+def test_marker_with_utf8_bom_is_honored(tmp_path):
+    """PowerShell's `>` and Out-File write UTF-8 WITH BOM on this box. tomllib
+    rejects a BOM, so without utf-8-sig this silently resolved to prod — a dev
+    checkout that binds prod's ports with every suppression off."""
+    root = _root(tmp_path)
+    (root / "config" / "env.local.toml").write_bytes(
+        '\ufeffname = "dev"\n'.encode("utf-8"))
+    name, flags, _ = repo_paths._resolve_env(root, under_pytest=False)
+    assert name == "dev"
+    assert flags["port_offset"] == 1000
+
+
+def test_garbage_marker_resolves_to_prod_but_warns(tmp_path, capsys):
+    """A truncated or hand-mangled marker must not silently half-apply a profile.
+
+    It still fails safe to prod, but a file that EXISTS and will not parse is
+    positive evidence someone meant a non-default environment, so it must not be
+    silent — the launchers capture stderr to logs/<name>.err.log.
+    """
     name, flags, _ = repo_paths._resolve_env(
         _root(tmp_path, "name = [broken"), under_pytest=False)
     assert name == "prod"
     assert flags["allow_notifications"] is True
+    assert "env.local.toml" in capsys.readouterr().err
+
+
+def test_backslash_peer_root_warns(tmp_path, capsys):
+    """The natural Windows path is an invalid \\W escape that discards the WHOLE
+    document, `name = "dev"` with it. Encoding cannot fix this, so the warning is
+    the mitigation (and the example marker uses a literal string to avoid it)."""
+    marker = 'name = "dev"\npeer_root = "D:\\WebGUI Trading Prod"\n'
+    name, _, _ = repo_paths._resolve_env(
+        _root(tmp_path, marker), under_pytest=False)
+    assert name == "prod"
+    assert "env.local.toml" in capsys.readouterr().err
+
+
+def test_literal_quoted_windows_peer_root_parses(tmp_path):
+    """The form config/env.local.example.toml ships: a TOML literal string takes
+    a backslash path verbatim."""
+    marker = "name = 'dev'\npeer_root = 'D:\\WebGUI Trading Prod'\n"
+    name, _, peer = repo_paths._resolve_env(
+        _root(tmp_path, marker), under_pytest=False)
+    assert name == "dev"
+    assert peer == pathlib.Path("D:\\WebGUI Trading Prod")
+
+
+def test_missing_marker_is_silent(tmp_path, capsys):
+    """Absent is the normal case (prod) — it must not warn, or every prod service
+    start would log a spurious line."""
+    repo_paths._resolve_env(_root(tmp_path), under_pytest=False)
+    assert capsys.readouterr().err == ""
 
 
 def test_unknown_env_name_resolves_to_prod(tmp_path):
@@ -113,7 +169,45 @@ def test_live_module_constants_exist():
     """The import-time resolution ran and exported the public names — and the
     real, unparameterized call took the suppressed path."""
     assert repo_paths.ENV_NAME in ("dev", "prod")
-    assert isinstance(repo_paths.ENV, dict)
+    assert isinstance(repo_paths.ENV_FLAGS, dict)
     assert repo_paths.IS_DEV == (repo_paths.ENV_NAME == "dev")
-    assert repo_paths.ENV["allow_claude"] is False
-    assert repo_paths.ENV["allow_notifications"] is False
+    assert repo_paths.ENV_FLAGS["allow_claude"] is False
+    assert repo_paths.ENV_FLAGS["allow_notifications"] is False
+
+
+# --------------------------------------------------------------- shipped config
+# The tests above all build their own PROFILES string, so none of them would
+# notice a typo in the file this repo actually ships. Because every default is
+# permissive, a misspelled or omitted key in [dev] does not error — it silently
+# resolves to the EMITTING behavior. These two read the real file.
+
+def _shipped_profiles():
+    return tomllib.loads(
+        (REPO / "config" / "environments.toml").read_text(encoding="utf-8-sig"))
+
+
+def test_shipped_profiles_match_the_flag_contract():
+    """Every profile's keys must correspond to _ENV_DEFAULTS — no unknown keys
+    (a typo) and none missing (an omission, or a flag added to the defaults later
+    and forgotten here). `proxy_port` may be absent: TOML cannot express None."""
+    profiles = _shipped_profiles()
+    assert set(profiles) == {"prod", "dev"}
+    expected = set(repo_paths._ENV_DEFAULTS)
+    for name, table in profiles.items():
+        keys = set(table)
+        assert not keys - expected, f"[{name}] has unknown key(s): {keys - expected}"
+        missing = expected - keys - {"proxy_port"}
+        assert not missing, f"[{name}] is missing key(s): {missing}"
+
+
+def test_shipped_dev_profile_suppresses_and_offsets():
+    """The shipped file's VALUES, not just its shape: dev must emit nothing and
+    move off prod's ports, prod must stay fully permissive."""
+    profiles = _shipped_profiles()
+    emitting = ("allow_claude", "allow_notifications", "schedulers",
+                "autonomous_trading")
+    assert all(profiles["prod"][k] is True for k in emitting)
+    assert not any(profiles["dev"][k] for k in emitting)
+    assert profiles["dev"]["port_offset"] > 0
+    assert profiles["dev"]["redis_db"] != profiles["prod"]["redis_db"]
+    assert profiles["dev"]["owns_proxy"] is False

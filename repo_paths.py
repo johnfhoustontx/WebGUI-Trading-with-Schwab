@@ -102,12 +102,25 @@ def _read_env_marker(root):
     ``("prod", None)`` — the behavior this repo had before environments existed.
     Failing safe matters more than reporting the error: a half-applied profile on
     a live trading stack is worse than no profile.
+
+    A marker that EXISTS but will not parse is different from one that is absent:
+    it is positive evidence someone meant to select a non-default environment, so
+    it warns on stderr (which the launchers already capture to logs/<name>.err.log)
+    before falling back. Two ways to get there are easy and silent otherwise:
+    PowerShell's ``>`` writes UTF-8 *with BOM*, and a Windows path typed the
+    natural way (``peer_root = "D:\\WebGUI Trading Prod"``) is an invalid ``\\W``
+    escape that discards the WHOLE document, ``name`` included. ``utf-8-sig``
+    handles the first; the warning surfaces the second. See
+    config/env.local.example.toml, which sidesteps the escape by construction.
     """
-    try:
-        raw = tomllib.loads((root / "config" / "env.local.toml").read_text())
-    except Exception:  # noqa: BLE001 — missing file, bad TOML, permissions.
+    path = root / "config" / "env.local.toml"
+    if not path.exists():
         return "prod", None
-    if not isinstance(raw, dict):
+    try:
+        raw = tomllib.loads(path.read_text(encoding="utf-8-sig"))
+    except Exception as exc:  # noqa: BLE001 — bad TOML, encoding, permissions.
+        print(f"repo_paths: {path} exists but could not be read ({exc}); "
+              f"resolving to prod", file=sys.stderr)
         return "prod", None
     name = str(raw.get("name") or "prod").strip().lower() or "prod"
     peer = raw.get("peer_root") or None
@@ -125,13 +138,21 @@ def _resolve_env(root, under_pytest=None):
     a bare ``sys.modules`` check inside the body so BOTH branches are testable
     against a tmp_path — including the one that matters most, that a dev marker
     still yields prod ports under pytest.
+
+    Downstream tests come in two shapes: patch a FLAG with
+    ``monkeypatch.setitem(repo_paths.ENV_FLAGS, "schedulers", True)`` (safe — the
+    dict is a fresh ``dict(_ENV_DEFAULTS)`` copy, so it never aliases the defaults,
+    and every value is an immutable scalar), but patch a by-value export like
+    ``OWNS_PROXY`` with ``monkeypatch.setattr`` **on the module that consumed it**,
+    since ``from repo_paths import OWNS_PROXY`` binds a copy.
     """
     name, peer = _read_env_marker(root)
     try:
-        profiles = tomllib.loads((root / "config" / "environments.toml").read_text())
-    except Exception:  # noqa: BLE001
+        profiles = tomllib.loads(
+            (root / "config" / "environments.toml").read_text(encoding="utf-8-sig"))
+    except Exception:  # noqa: BLE001 — missing file, bad TOML, encoding.
         profiles = {}
-    if not isinstance(profiles, dict) or name not in profiles:
+    if name not in profiles:
         name = "prod"
     flags = dict(_ENV_DEFAULTS)
     over = profiles.get(name)
@@ -150,9 +171,11 @@ def _resolve_env(root, under_pytest=None):
     return name, flags, peer
 
 
-ENV_NAME, ENV, PEER_ROOT = _resolve_env(REPO_ROOT)
+# ENV_FLAGS, not ENV: ENV_NAME is the string, so a bare `repo_paths.ENV` at a call
+# site invites `if ENV == "dev"` (silently always False) or `if ENV:` (always True).
+ENV_NAME, ENV_FLAGS, PEER_ROOT = _resolve_env(REPO_ROOT)
 IS_DEV = ENV_NAME == "dev"
-OWNS_PROXY = bool(ENV.get("owns_proxy", True))
+OWNS_PROXY = bool(ENV_FLAGS.get("owns_proxy", True))
 
 _ports = tomllib.loads((REPO_ROOT / "config" / "ports.toml").read_text())
 PROXY_PORT       = _ports["proxy"]

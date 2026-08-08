@@ -9,6 +9,11 @@
 # See docs/plans/2026-08-08-dev-prod-environments-design.md.
 
 [prod]
+# `proxy_port` is intentionally absent here and defaults to None, meaning
+# port_offset applies to ports.toml's proxy. Only [dev] pins it explicitly.
+# Every OTHER key in _ENV_DEFAULTS must appear in both tables — a missing or
+# misspelled key silently falls back to the permissive default (i.e. dev would
+# behave like prod), so tests/test_env_profile.py guards the key sets.
 port_offset        = 0
 redis_db           = 0
 owns_proxy         = true
