@@ -1860,6 +1860,32 @@ def test_gamma_analyze_no_key_returns_config_message(monkeypatch):
     del _FakeEngine.calc_expected_move_from_chain
 
 
+def test_gamma_analyze_degrades_when_claude_suppressed(monkeypatch):
+    """A suppressed environment must land on the EXISTING no-key page, not raise.
+
+    This is the end-to-end half of the Task 4 guard (the unit half lives in
+    test_env_claude_guard.py): with ``allow_claude`` False the REAL factory
+    returns None without touching the key, and ``gamma_analyze`` degrades
+    exactly as a keyless prod box does. ``_anthropic_api_key`` is booby-trapped
+    so a removed guard fails loudly instead of quietly billing an API call.
+    """
+    _patch_analyze_bundle(monkeypatch)
+
+    def _boom():
+        raise AssertionError("key looked up — the allow_claude guard did not fire")
+
+    from services.options_svc.tests.test_env_claude_guard import _REAL_MAKE_CLIENT
+    monkeypatch.setattr(compute, "_make_analyze_client", _REAL_MAKE_CLIENT)
+    monkeypatch.setattr(compute, "_anthropic_api_key", _boom)
+    monkeypatch.setitem(compute.ENV_FLAGS, "allow_claude", False)
+
+    out = compute.gamma_analyze()  # must not raise
+
+    assert out["html"].lstrip().startswith("<!DOCTYPE html>")
+    assert "ANTHROPIC_API_KEY" in out["html"]
+    del _FakeEngine.calc_expected_move_from_chain
+
+
 def test_gamma_analyze_api_error_returns_html(monkeypatch):
     _patch_analyze_bundle(monkeypatch)
 

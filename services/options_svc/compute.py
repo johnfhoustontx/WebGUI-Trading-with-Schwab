@@ -22,7 +22,7 @@ import sys
 import threading
 from zoneinfo import ZoneInfo
 
-from repo_paths import DRIVER_PAPER_DB, OPTIONS_SCANNER
+from repo_paths import DRIVER_PAPER_DB, ENV_FLAGS, OPTIONS_SCANNER
 
 log = logging.getLogger(__name__)
 
@@ -3454,7 +3454,15 @@ def _anthropic_api_key():
 
 def _make_analyze_client():
     """A real ``anthropic.Anthropic`` client, or ``None`` if no key / SDK (never
-    raises). LAZY import so the test suite + service import without the SDK."""
+    raises). LAZY import so the test suite + service import without the SDK.
+
+    Also ``None`` in an environment whose profile clears ``allow_claude`` (dev) —
+    checked FIRST, so a suppressed environment never even reads the key. That is
+    deliberately not a new code path: every caller already handles ``None``
+    because it is what a box with no configured key returns, so dev lands on the
+    same explanatory "no API key" briefing page production already renders."""
+    if not ENV_FLAGS.get("allow_claude", True):
+        return None
     key = _anthropic_api_key()
     if not key:
         return None

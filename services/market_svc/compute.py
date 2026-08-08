@@ -8,7 +8,7 @@ import logging
 
 import requests
 
-from repo_paths import PROXY_URL
+from repo_paths import ENV_FLAGS, PROXY_URL
 from services.market_svc import classify, symbols
 
 log = logging.getLogger("market_svc.compute")
@@ -338,6 +338,14 @@ def _anthropic_api_key():
 
 
 def _make_summary_client():
+    """A real ``anthropic.Anthropic`` client, or ``None`` (never raises).
+
+    ``None`` in an environment whose profile clears ``allow_claude`` (dev) —
+    checked FIRST, so a suppressed environment never even reads the key. Not a
+    new code path: ``generate_summary`` already returns the empty narrative when
+    no key is configured, so the dev ticker simply shows its live data items."""
+    if not ENV_FLAGS.get("allow_claude", True):
+        return None
     key = _anthropic_api_key()
     if not key:
         return None

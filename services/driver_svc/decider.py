@@ -31,6 +31,7 @@ tool-use surface this mirrors.
 import json
 import logging
 
+from repo_paths import ENV_FLAGS
 from services.driver_svc import api_keys, settings
 
 _log = logging.getLogger("driver_svc.decider")
@@ -223,7 +224,15 @@ def _make_client():
     can import this module and drive ``decide`` with an injected fake client
     without the SDK installed. Returns ``None`` when the API key is unset — the
     caller then stands down rather than calling a non-existent client.
+
+    Also ``None`` in an environment whose profile clears ``allow_claude`` (dev) —
+    checked FIRST, so a suppressed environment never even reads the key. That is
+    deliberately not a new code path: ``decide`` already treats a ``None`` client
+    as the ``no_key`` stand-down, the safe failure mode this module is built
+    around, so dev simply never trades.
     """
+    if not ENV_FLAGS.get("allow_claude", True):
+        return None
     key = api_keys.anthropic_api_key()
     if not key:
         return None
