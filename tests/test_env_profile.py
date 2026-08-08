@@ -151,6 +151,10 @@ def test_pytest_forces_suppression_but_keeps_prod_ports(tmp_path):
         _root(tmp_path, 'name = "dev"\n'), under_pytest=True)
     assert flags["port_offset"] == 0        # prod ports despite the dev marker
     assert flags["proxy_port"] is None
+    # redis_db is part of the same connection topology: it feeds MEMURAI_URL, and
+    # tests/test_repo_paths_ports.py asserts that URL ends "/0". Without forcing it
+    # here, that pre-existing test fails inside a dev checkout.
+    assert flags["redis_db"] == 0
     assert flags["allow_claude"] is False
     assert flags["allow_notifications"] is False
     assert flags["schedulers"] is False
@@ -173,6 +177,43 @@ def test_live_module_constants_exist():
     assert repo_paths.IS_DEV == (repo_paths.ENV_NAME == "dev")
     assert repo_paths.ENV_FLAGS["allow_claude"] is False
     assert repo_paths.ENV_FLAGS["allow_notifications"] is False
+
+
+# ------------------------------------------------------------- port derivation
+
+def test_port_derivation_prod():
+    """Prod must be byte-identical to the pre-environment numbers."""
+    ports = {"proxy": 8100, "nicegui": 8500, "memurai": 6379,
+             "services": {"options": 8211, "market": 8215}}
+    d = repo_paths._derive_ports(ports, {"port_offset": 0, "proxy_port": None,
+                                         "redis_db": 0})
+    assert d["proxy_port"] == 8100
+    assert d["nicegui_port"] == 8500
+    assert d["service_ports"] == {"options": 8211, "market": 8215}
+    assert d["memurai_url"] == "redis://127.0.0.1:6379/0"
+
+
+def test_port_derivation_dev_offsets_and_borrows_proxy():
+    ports = {"proxy": 8100, "nicegui": 8500, "memurai": 6379,
+             "services": {"options": 8211, "market": 8215}}
+    d = repo_paths._derive_ports(ports, {"port_offset": 1000, "proxy_port": 8100,
+                                         "redis_db": 1})
+    assert d["proxy_port"] == 8100          # borrowed, NOT offset
+    assert d["nicegui_port"] == 9500
+    assert d["service_ports"] == {"options": 9211, "market": 9215}
+    # Memurai PORT is shared (one server); only the logical DB differs.
+    assert d["memurai_url"] == "redis://127.0.0.1:6379/1"
+
+
+def test_port_derivation_offsets_proxy_when_not_pinned():
+    """Without an explicit proxy_port the offset applies to the proxy too — the
+    documented meaning of `proxy_port = None`. Pinning it is what makes dev BORROW
+    prod's proxy; the two derivation tests above share proxy 8100, so neither one
+    would notice the override being ignored."""
+    ports = {"proxy": 8100, "nicegui": 8500, "memurai": 6379, "services": {}}
+    d = repo_paths._derive_ports(ports, {"port_offset": 1000, "proxy_port": None,
+                                         "redis_db": 0})
+    assert d["proxy_port"] == 9100
 
 
 # --------------------------------------------------------------- shipped config

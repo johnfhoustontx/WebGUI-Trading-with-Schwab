@@ -158,14 +158,16 @@ def _resolve_env(root, under_pytest=None):
     over = profiles.get(name)
     if isinstance(over, dict):
         flags.update(over)
-    # Under pytest: PROD PORTS regardless of the marker (tests are hermetic — the
-    # bus is already fakeredis — so ports are inert constants, and the existing
-    # suites keep passing unchanged inside a dev checkout), but every suppression
+    # Under pytest: PROD CONNECTION TOPOLOGY regardless of the marker — the ports
+    # AND the Redis DB index. Tests are hermetic (the bus is already fakeredis), so
+    # these are inert constants, and forcing them is what lets the existing suites
+    # pass unchanged inside a dev checkout: tests/test_repo_paths_ports.py asserts
+    # the literal 8210-8214 and a MEMURAI_URL ending "/0". Every suppression is
     # forced ON so no test can reach Anthropic or a notification channel.
     if under_pytest is None:
         under_pytest = "pytest" in sys.modules
     if under_pytest:
-        flags.update(port_offset=0, proxy_port=None, allow_claude=False,
+        flags.update(port_offset=0, proxy_port=None, redis_db=0, allow_claude=False,
                      allow_notifications=False, schedulers=False,
                      autonomous_trading=False)
     return name, flags, peer
@@ -177,15 +179,49 @@ ENV_NAME, ENV_FLAGS, PEER_ROOT = _resolve_env(REPO_ROOT)
 IS_DEV = ENV_NAME == "dev"
 OWNS_PROXY = bool(ENV_FLAGS.get("owns_proxy", True))
 
-_ports = tomllib.loads((REPO_ROOT / "config" / "ports.toml").read_text())
-PROXY_PORT       = _ports["proxy"]
+_ports = tomllib.loads(
+    (REPO_ROOT / "config" / "ports.toml").read_text(encoding="utf-8-sig"))
+
+
+def _derive_ports(ports: dict, flags: dict) -> dict:
+    """Apply an environment profile to the base port table. PURE.
+
+    ``port_offset`` shifts the ports this repo OWNS (the six services and the
+    webgui). Two things are deliberately left alone:
+
+    * the **Memurai port** — both environments share one Redis server and are
+      separated by logical DB index instead, so there is no second service to
+      install or monitor;
+    * ``options_analytics`` / ``approval`` / the **ML servers** — external
+      processes this repo neither starts nor owns.
+
+    ``proxy_port`` overrides the offset entirely, which is how dev borrows prod's
+    proxy on :8100 rather than holding a second copy of the one rotating Schwab
+    OAuth refresh token.
+    """
+    off = int(flags.get("port_offset") or 0)
+    override = flags.get("proxy_port")
+    proxy = int(override) if override else int(ports["proxy"]) + off
+    memurai_port = int(ports["memurai"])
+    return {
+        "proxy_port": proxy,
+        "nicegui_port": int(ports["nicegui"]) + off,
+        "service_ports": {k: int(v) + off for k, v in ports["services"].items()},
+        "memurai_port": memurai_port,
+        "memurai_url": f"redis://127.0.0.1:{memurai_port}/{int(flags.get('redis_db') or 0)}",
+    }
+
+
+_derived = _derive_ports(_ports, ENV_FLAGS)
+
+PROXY_PORT       = _derived["proxy_port"]
 PROXY_URL        = f"http://127.0.0.1:{PROXY_PORT}"
 ANALYTICS_URL    = f"http://127.0.0.1:{_ports['options_analytics']}"
 APPROVAL_PORT    = _ports["approval"]
-NICEGUI_PORT     = _ports["nicegui"]
+NICEGUI_PORT     = _derived["nicegui_port"]
 NICEGUI_URL      = f"http://127.0.0.1:{NICEGUI_PORT}"
 ML_SERVER_URLS   = {k: f"http://127.0.0.1:{v}" for k, v in _ports["ml_servers"].items()}
-MEMURAI_PORT  = _ports["memurai"]
-MEMURAI_URL   = f"redis://127.0.0.1:{MEMURAI_PORT}/0"
-SERVICE_PORTS = dict(_ports["services"])
+MEMURAI_PORT  = _derived["memurai_port"]
+MEMURAI_URL   = _derived["memurai_url"]
+SERVICE_PORTS = dict(_derived["service_ports"])
 SERVICE_URLS  = {k: f"http://127.0.0.1:{v}" for k, v in SERVICE_PORTS.items()}
