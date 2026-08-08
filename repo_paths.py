@@ -2,6 +2,7 @@
 Trading With Schwab monorepo. Apps prepend the repo root to sys.path and
 import the constants they need from here."""
 from pathlib import Path
+import sys
 import tomllib
 
 REPO_ROOT       = Path(__file__).resolve().parent
@@ -73,6 +74,78 @@ MARKET_STATE_VALIDATION_JSON   = SENTIMENT / "data" / "market_state_validation.j
 # on-demand Deep Dive records a snapshot. On-demand only (no scheduled job yet).
 # services/trade_svc/data/ is gitignored (generated).
 IV_HISTORY_DB = REPO_ROOT / "services" / "trade_svc" / "data" / "iv_history.db"
+
+# ------------------------------------------------------------------ environment
+# Which environment this CHECKOUT is (dev or prod), and the behavior flags that
+# follow from it. Resolution lives here rather than in a new module because this
+# file already parses config TOML and is imported by ~40 others — adding a module
+# in front of it would create an import-order hazard for no gain.
+#
+# Design: docs/plans/2026-08-08-dev-prod-environments-design.md
+
+_ENV_DEFAULTS = {
+    "port_offset": 0,
+    "proxy_port": None,        # None -> port_offset applies to ports.toml's proxy
+    "redis_db": 0,
+    "owns_proxy": True,
+    "allow_claude": True,
+    "allow_notifications": True,
+    "schedulers": True,
+    "autonomous_trading": True,
+}
+
+
+def _read_env_marker(root):
+    """``(name, peer_root)`` from the gitignored ``config/env.local.toml``.
+
+    NEVER raises. A missing, unreadable or malformed marker resolves to
+    ``("prod", None)`` — the behavior this repo had before environments existed.
+    Failing safe matters more than reporting the error: a half-applied profile on
+    a live trading stack is worse than no profile.
+    """
+    try:
+        raw = tomllib.loads((root / "config" / "env.local.toml").read_text())
+    except Exception:  # noqa: BLE001 — missing file, bad TOML, permissions.
+        return "prod", None
+    if not isinstance(raw, dict):
+        return "prod", None
+    name = str(raw.get("name") or "prod").strip().lower() or "prod"
+    peer = raw.get("peer_root") or None
+    return name, (Path(str(peer)) if peer else None)
+
+
+def _resolve_env(root):
+    """``(name, flags, peer_root)`` for a checkout root. Never raises.
+
+    Pure profile resolution — it reports what the marker + profile table SAY. The
+    pytest guard below is applied by the caller, at the module-constant site, so
+    this stays unit-testable against a tmp_path (this module is imported long
+    before any test runs, so reloading it is not a workable alternative).
+    """
+    name, peer = _read_env_marker(root)
+    try:
+        profiles = tomllib.loads((root / "config" / "environments.toml").read_text())
+    except Exception:  # noqa: BLE001
+        profiles = {}
+    if not isinstance(profiles, dict) or name not in profiles:
+        name = "prod"
+    flags = dict(_ENV_DEFAULTS)
+    over = profiles.get(name)
+    if isinstance(over, dict):
+        flags.update(over)
+    return name, flags, peer
+
+
+ENV_NAME, ENV, PEER_ROOT = _resolve_env(REPO_ROOT)
+# Under pytest: PROD PORTS regardless of the marker (tests are hermetic — the bus
+# is already fakeredis — so ports are inert constants, and the existing suites keep
+# passing unchanged inside a dev checkout), but every suppression forced ON so no
+# test can reach Anthropic or a notification channel.
+if "pytest" in sys.modules:
+    ENV.update(port_offset=0, proxy_port=None, allow_claude=False,
+               allow_notifications=False, schedulers=False, autonomous_trading=False)
+IS_DEV = ENV_NAME == "dev"
+OWNS_PROXY = bool(ENV.get("owns_proxy", True))
 
 _ports = tomllib.loads((REPO_ROOT / "config" / "ports.toml").read_text())
 PROXY_PORT       = _ports["proxy"]

@@ -1,0 +1,35 @@
+# Environment profiles — TRACKED, so a profile change is reviewable in git.
+#
+# WHICH profile a checkout is comes from the GITIGNORED config/env.local.toml
+# (name = "dev" | "prod", plus an optional peer_root). A MISSING marker resolves
+# to "prod", so any checkout without one behaves exactly as this repo did before
+# environments existed. Because the marker is gitignored, `git pull` can never
+# carry an environment identity from one checkout into the other.
+#
+# See docs/plans/2026-08-08-dev-prod-environments-design.md.
+
+[prod]
+port_offset        = 0
+redis_db           = 0
+owns_proxy         = true
+allow_claude       = true
+allow_notifications = true
+schedulers         = true
+autonomous_trading = true
+
+[dev]
+# Services 9210-9215, webgui 9500. The proxy is NOT offset: dev borrows prod's
+# on :8100 rather than holding a second copy of the one rotating Schwab OAuth
+# refresh token. Consequence: dev's on-demand fetches need prod's proxy up.
+port_offset        = 1000
+proxy_port         = 8100
+# Same Memurai server, separate logical DB — complete key isolation, and
+# FLUSHDB on dev is a safe one-line reset.
+redis_db           = 1
+owns_proxy         = false
+# Dev emits nothing by default. TRADING_ENABLE_SCHEDULERS=1 turns collection on
+# for a session when the collectors themselves are what you're testing.
+allow_claude       = false
+allow_notifications = false
+schedulers         = false
+autonomous_trading = false

@@ -8,6 +8,10 @@ shared/sentiment_bridge.json
 shared/notifications.json
 shared/anthropic_key.txt
 shared/driver_model.txt
+# Which environment this checkout is (dev|prod). Gitignored ON PURPOSE: a git
+# pull must never be able to carry an environment identity between checkouts.
+# Absent = prod. See docs/plans/2026-08-08-dev-prod-environments-design.md.
+config/env.local.toml
 
 # Databases & runtime state
 *.db
