@@ -113,6 +113,29 @@ suppressed dev cannot take a code path prod never takes.
 
 Roughly six one-line guards.
 
+### Known gap in the notification gate — the legacy `notifier.py` modules
+
+The table above says `allow_notifications` kills every channel "in one stroke".
+That is true of every path a **service** can take, and it is **not** total.
+
+`options-scanner/notifier.py` and `sentiment-dashboard/notifier.py` are legacy
+desktop-era senders that read their own config and do **not** route through
+`shared/notify/channels.load_config`. They are knowingly left outside the gate.
+
+Reachability, verified 2026-08-08: `grep -rn "import notifier\|from notifier"`
+over the repo returns `options-scanner/tests/test_notifier.py`,
+`options-scanner/tests/test_notifier_channels.py`,
+`sentiment-dashboard/tests/test_notifier.py`, and one line inside
+`options-scanner/notifier.py`'s own module **docstring** (a usage example, not an
+import). **Nothing in `services/`, `webgui/` or any launcher imports either
+module** — they are dead from every running path,
+which is why gating them would be adding a guard to code that cannot execute.
+
+The residual risk is a human one: running one of them **by hand from a dev
+checkout** would push for real. Recorded in the runbook's known-limits section
+rather than fixed, because the honest fix is deleting them, and that is a separate
+decision from this branch.
+
 ## Cross-environment safety rails
 
 Two co-existing stacks create hazards that do not exist today. Three are already

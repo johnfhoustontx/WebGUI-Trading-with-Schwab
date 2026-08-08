@@ -8,7 +8,66 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-08-05 (**0-DTE hedge-pressure history panel**: a compact signed-column track of
+**Last updated:** 2026-08-08 (**Dev / prod environments — two checkouts, one machine, running at once**:
+the always-on stack moves to a new **prod** clone at `D:\WebGUI Trading Prod` pinned to `main`, and
+today's folder becomes **dev**. Prod keeps every current port (proxy `:8100`, services 8210-8215, webgui
+`:8500`, Redis db 0) so standing it up is a **relocation, not a reconfiguration**; dev shifts to
+9210-9215 / `:9500` / Redis **db 1** and **starts no proxy** — it BORROWS prod's, because the Schwab OAuth
+**refresh token is a single rotating credential** and two proxies holding it can invalidate each other's
+session. **Accepted consequence, stated up front: dev's on-demand fetches need prod's proxy up.**
+**Identity comes from a GITIGNORED `config/env.local.toml`** (`name`, optional `peer_root`) against the
+**tracked** `config/environments.toml` profiles — **absent ⇒ prod**, so a checkout without a marker
+behaves exactly as this repo did before, and because the marker is gitignored **`git pull` can never
+carry an identity between checkouts** (the deciding property over an env var, which anything launched
+another way would lack, and over folder-name detection, which would make renaming a folder change a live
+stack's behaviour). Resolution lives in **`repo_paths.py`**, not a new module — it already parses
+`ports.toml` and is imported by ~40 files — so every consumer (services, launchers, `tools/stop_all.py`,
+`tools/restart_one.bat`, the Status page) follows the environment with **no edit of its own**.
+**Four suppressions, ~six one-line guards, each reusing a degrade path the code ALREADY has** so a
+suppressed dev cannot take a code path prod never takes: `allow_notifications` →
+`shared/notify/channels.load_config` recursively zeroes **every** `enabled` key **LAST**, after the
+`NOTIFY_ENABLED`/`TWITTER_ENABLED` env escapes, because the **X/Twitter poster has its own gate that
+never consults the master switch and is the one channel that PUBLISHES**; `allow_claude` → the three
+client factories return `None` and fall into the existing no-API-key path; `schedulers` →
+`services/_scaffold.make_app` skips the wiring, **command handlers still run** so the UI is fully usable
+off a snapshot; `autonomous_trading` → `driver_svc.handlers.run_autonomous_cycle` early-returns —
+deliberately redundant with the scheduler skip, because `cycle` is **also a command** and the arm state
+lives in Redis, so a snapshot carrying an enabled `cache:driver:control` would otherwise have dev
+paper-trading. `TRADING_ENABLE_SCHEDULERS=1` is the one escape hatch (real Schwab calls; use it only when
+the collectors themselves are what you're testing). **Under pytest the process PRESENTS AS PROD** — ports,
+Redis DB, `owns_proxy` **and `ENV_NAME`** — with all four suppressions forced ON, which is what lets the
+existing suites pass unchanged inside a dev checkout; the cost is that **dev's own `IS_DEV` branches are
+only ever exercised by monkeypatch**, so confirming dev really withholds the restart buttons is a MANUAL
+check. **Cross-environment rails** close three hazards that were already latent: `stop_all` would have
+killed **prod's proxy** from dev (`PROXY_PORT` *is* 8100 there) and **prod's HUD** (it binds no port, so
+it is matched by command line — now root-scoped); and the Status page would have offered a restart that
+bounces prod's proxy or the shared Memurai service (proxy card now read-only "shared — owned by prod",
+Memurai restart hidden in dev). Dev's webgui carries a **`DEV` chip** + tab-title prefix — two
+identical-looking NeuralStrike tabs writing to different books is a mistake waiting to happen.
+**`tools/snapshot_from_prod.py`** (run FROM dev) copies prod's SQLite via the **online-backup API so prod
+keeps running and writing** through a ~1.4 GB `gex_history.db`, then `DUMP`s db 0 → db 1; it hard-refuses
+unless `ENV_NAME == "dev"`, refuses when both Redis DBs resolve equal (the copy FLUSHDBs first — equal
+indices would wipe prod's cache), refuses while dev is up, **excludes `cmd:*`** (a stream is a queue dev
+would drain and EXECUTE — a stranded `driver_paper_create` would double-open) and **rewrites
+`cache:driver:control` disabled**. `start_dev.bat` (7 processes, no proxy, refuses outside a dev-marked
+checkout) and `tools\promote.bat` (prod-only, **dirty-tree guard BEFORE it stops anything**, `git pull
+--ff-only`, reinstall only if `requirements.lock` moved, restart) are the two new launchers.
+**The cutover itself is a human checklist and has NOT been run** — no prod clone exists yet, and the
+first real snapshot is untested against a live prod. **Operator runbook:
+[`docs/dev-prod-environments.md`](docs/dev-prod-environments.md)**, which also carries the seven
+**known limits** — chiefly that dev is *quiet at rest, not incapable* (command handlers are ungated, so
+clicking Run scan in dev still reaches Schwab), that the legacy `notifier.py` modules sit outside the
+notification gate (dead from every service path, runnable by hand), and that restarting Memurai takes
+both environments down. Design/plan:
+[design](docs/plans/2026-08-08-dev-prod-environments-design.md) /
+[plan](docs/plans/2026-08-08-dev-prod-environments-plan.md).
+**Two stale test facts corrected on the way through, both re-measured:** the webgui suite is **1053**
+(it was **1040** at the pre-feature commit `7667920` — the previously recorded **1049** was simply
+wrong), and **`services/sentiment_svc` carries a PRE-EXISTING failing test**,
+`test_compute_regime.py::test_daily_history_wins_over_session_latch` (**250 passed / 1 failed**),
+reproduced at `7667920` so it predates this branch — documented under "Tests" alongside the two
+`test_expected_move` baseline fails so nobody mistakes it for a regression.)
+Prior — 2026-08-05 (**0-DTE hedge-pressure history panel**: a compact signed-column track of
 `hedge_pressure` across the session, mounted **directly under the heatmap** and sharing its time
 categories. It is its **OWN chart element, not a heatmap overlay** — pressure is in DOLLARS while the
 heatmap's y-axis is STRIKE *and* is pixel-aligned to the bar chart, so it cannot share that axis.
@@ -29,7 +88,8 @@ window as the heatmap rows, so the panel's x-axis lines up with the heatmap abov
 rows carry None there while still reporting pressure — a projected-flip track becomes possible as data
 accrues. **Restart `options_svc` + the webgui.** Live-verified on the real DB: 391 points,
 **349 green / 42 red**, peak **+3.37B**, trough **−0.21B**, rendering as 391 ~1px paths (the correct
-density for 1-min samples). webgui **1049** green; options-scanner **1306 passed / 16 documented-baseline
+density for 1-min samples). webgui **1040** green (recorded here as 1049 — **wrong**; re-measured
+2026-08-08 at that commit, `7667920`); options-scanner **1306 passed / 16 documented-baseline
 fails**; options_svc **916** (+2 documented `test_expected_move`).
 Prior — 2026-08-05 (**Projected EOD delta-flip line + a CORRECTED projection**: the Gamma
 heatmap gains a dashed amber **"Proj. flip"** level on **all four views** — where the DEX curve crosses
@@ -4327,6 +4387,102 @@ python webgui\main.py      # serves http://127.0.0.1:8500
 > `scoring`/`notifier` cross-app collision can no longer occur. See the "Planned 3-tier
 > architecture" section.
 
+## Environments (dev / prod)
+
+Two checkouts of this repo run **simultaneously on one machine**: an always-on
+**prod** stack pinned to `main`, and a **dev** checkout where code is edited.
+Operator runbook: [`docs/dev-prod-environments.md`](docs/dev-prod-environments.md).
+Rationale: [design](docs/plans/2026-08-08-dev-prod-environments-design.md).
+
+| | prod | dev |
+|---|---|---|
+| Folder | `D:\WebGUI Trading Prod` (clone, pinned to `main`) | `D:\WebGUI Trading with Schwab` |
+| schwab-proxy | **owns** it, `:8100` | **borrows** prod's — starts none |
+| sentiment / options / portfolio / trade / driver / market | 8210–8215 | 9210–9215 |
+| webgui | `:8500` | `:9500` |
+| Redis (Memurai `:6379`) | **db 0** | **db 1** |
+| SQLite, `logs\`, `webgui\data` | its own | its own |
+| Schedulers · Claude · notifications · autonomous driver | live | **off** |
+| Launcher | `start_all_wt.bat` | `start_dev.bat` (7 processes, no proxy) |
+
+Prod's ports are byte-identical to the pre-environment numbers, so prod is a
+relocation, not a reconfiguration. Dev borrows prod's proxy because the Schwab
+OAuth **refresh token is a single rotating credential** — two proxies holding it
+can invalidate each other's session. **Accepted consequence: dev's on-demand
+fetches need prod's proxy up.**
+
+**Two config files decide identity.** `config/environments.toml` is **tracked** —
+both profiles (`port_offset`, `proxy_port`, `redis_db`, `owns_proxy`, the four
+behaviour flags). `config/env.local.toml` is **gitignored** — `name = "dev" |
+"prod"` plus an optional machine-local `peer_root`. **A missing marker resolves to
+`prod`**, so any checkout without one behaves exactly as this repo did before
+environments existed, and because it is gitignored **`git pull` can never carry an
+identity between checkouts**. Template: `config/env.local.example.toml`. ⚠ a
+Windows `peer_root` must be a TOML **literal** string (`'D:\WebGUI Trading Prod'`)
+— in a basic string `\W` is an invalid escape that discards the WHOLE document,
+`name` included, and the checkout silently resolves to prod.
+
+**Resolution lives in `repo_paths.py`** (not a new module — it already parses
+`ports.toml` and is imported by ~40 files, so a module in front of it would be an
+import-order hazard). It exports `ENV_NAME` / `ENV_FLAGS` / `IS_DEV` /
+`OWNS_PROXY` / `REDIS_DB` / `PEER_ROOT`, and `SERVICE_PORTS` / `NICEGUI_PORT` /
+`PROXY_PORT` / `MEMURAI_URL` become profile-derived — so every existing consumer
+(services, launchers, `tools/stop_all.py`, `tools/restart_one.bat`, the Status
+page) follows the environment with no edit of its own. `[services]` in
+`ports.toml` is offset automatically; a **top-level** port is not, which is
+correct for a process this repo does not start and a bug for one it does.
+
+**The four suppressions, and where each is enforced** — each reuses a degrade path
+the code already has, so a suppressed dev cannot take a code path prod never takes:
+
+| Flag | Enforced in | Effect |
+|---|---|---|
+| `allow_notifications` | `shared/notify/channels.py:load_config` | recursively zeroes **every** `enabled` key, LAST so it also overrides the `NOTIFY_ENABLED`/`TWITTER_ENABLED` env escapes — kills Telegram, Discord, Fi-SMS, the public **X/Twitter** poster and the sentiment state-transition alert in one stroke. `options_svc/push_notify.load_config` delegates here, so this is the single chokepoint |
+| `allow_claude` | the three client factories — `options_svc/compute.py`, `market_svc/compute.py`, `driver_svc/decider.py` — return `None` | falls into the existing *no-API-key* path: the briefing renders its explanatory page, the ticker narrative is empty, the decider stands down |
+| `schedulers` | `services/_scaffold.py:_schedulers_enabled` (consumed by `make_app`) | all six services stop collecting and polling; **command handlers still run**, so the UI stays fully usable off the snapshot |
+| `autonomous_trading` | `driver_svc/handlers.py:run_autonomous_cycle` early-returns | belt-and-braces: `cycle` is also a *command* and the arm state lives in Redis, so the scheduler skip alone would not stop a snapshot that carried `cache:driver:control` enabled |
+
+**Escape hatch:** `set TRADING_ENABLE_SCHEDULERS=1` before launching turns
+schedulers on for that session — the one dev case that genuinely needs collection
+(testing the collectors themselves). It makes dev issue **real Schwab calls** on
+top of prod's ~68–76k/day; the other three suppressions stay on.
+
+**Under pytest the process PRESENTS AS PROD** regardless of the marker — ports,
+Redis DB, `owns_proxy` **and `ENV_NAME` itself** — with all four suppressions
+forced ON. Tests are hermetic (the bus is already fakeredis), so this keeps the
+existing suites passing unchanged inside a dev checkout while guaranteeing no test
+can reach Anthropic or a notification channel. **Consequence: dev's own `IS_DEV`
+branches are only ever exercised by monkeypatch** — patch a flag with
+`monkeypatch.setitem(repo_paths.ENV_FLAGS, …)`, but patch a by-value export like
+`IS_DEV`/`OWNS_PROXY` with `monkeypatch.setattr` **on the module that consumed
+it**. Verifying that dev really withholds the proxy/Memurai restart buttons is a
+**manual check with the app running**.
+
+**Cross-environment safety rails:** `tools/stop_all.py` drops the proxy from its
+kill list when `owns_proxy` is false and matches the HUD by **this checkout's root
+path** (so dev's Terminate stops only dev's seven processes); the Status page
+renders the proxy card read-only as *"shared — owned by prod"* and **hides the
+Memurai restart in dev** (one Redis server serves both); dev's webgui carries a
+`DEV` chip in the header lockup and a `DEV ·` tab-title prefix.
+
+**Data flows one way.** `tools/snapshot_from_prod.py`, run **from dev**, copies
+prod's SQLite stores (online-backup API — **prod keeps running**) and `DUMP`s db 0
+into db 1. It hard-refuses unless `ENV_NAME == "dev"`, refuses when the two Redis
+DBs resolve equal, and refuses while dev is up. It **excludes `cmd:*`** (a stream
+is a queue dev would drain and EXECUTE) and **rewrites `cache:driver:control`
+disabled**. **Promotion is explicit:** merge to `main` and push from dev, then run
+`tools\promote.bat` in prod (dev-checkout guard, dirty-tree guard *before*
+stopping anything, `git pull --ff-only`, reinstall only if `requirements.lock`
+moved, restart).
+
+**Known limits (not defects) are listed in the runbook** — chiefly that dev is
+*quiet at rest, not incapable* (command handlers are ungated, so clicking Run scan
+in dev still reaches Schwab through prod's proxy), that the legacy
+`options-scanner/notifier.py` + `sentiment-dashboard/notifier.py` sit outside the
+notification gate (dead from every service path — only their own tests import
+them — but runnable by hand), and that `options_svc`'s `driver_paper_create`
+handler is not env-guarded (its producer is, and the snapshot excludes `cmd:*`).
+
 ## Performance characteristics & known hotspots
 
 Single-user, localhost Memurai — so most of these are *tolerable today* but are the
@@ -4524,7 +4680,7 @@ cd sentiment-dashboard ; python -m pytest tests
 cd trade-analyzer      ; python -m pytest .
 cd portfolio-analyzer  ; python -m pytest tests
 cd claude-driver       ; python -m pytest .
-cd webgui              ; python -m pytest .   # 772 tests: transforms + shell smoke
+cd webgui              ; python -m pytest .   # 1053 tests: transforms + shell smoke
 ```
 
 The 3-tier services run per folder from the repo root (NOT `pytest services` over
@@ -4533,7 +4689,7 @@ re-triggers the documented `config`/`scoring`/`notifier` module-name collisions)
 
 ```powershell
 # from the repo root, one service at a time
-.venv\Scripts\python -m pytest services\sentiment_svc   # 140
+.venv\Scripts\python -m pytest services\sentiment_svc   # 250 passed / 1 documented-baseline fail
 .venv\Scripts\python -m pytest services\options_svc     # 432
 .venv\Scripts\python -m pytest services\portfolio_svc   # 27
 .venv\Scripts\python -m pytest services\trade_svc       # 56
@@ -4542,8 +4698,20 @@ re-triggers the documented `config`/`scoring`/`notifier` module-name collisions)
 .venv\Scripts\python -m pytest shared\contracts         # 37 (no app-dir imports — safe together)
 ```
 
-- **options-scanner** has ~2 known date-relative failing tests carried over from
-  the source repo — do not "fix" them as part of unrelated work.
+**Known baseline failures — do NOT "fix" them as part of unrelated work, and do not
+read them as a regression:**
+
+- **options-scanner** — ~2 known date-relative failing tests carried over from the
+  source repo.
+- **options_svc** — 2 date-relative `test_expected_move` failures.
+- **sentiment_svc** — `tests/test_compute_regime.py::test_daily_history_wins_over_session_latch`
+  (the `$VIX1D` session latch beats the daily close: `assert 18.0 == 10.0`). Suite
+  reads **250 passed / 1 failed**. Reproduced at `7667920`, so it **predates** the
+  dev/prod-environments branch; first documented 2026-08-08.
+
+The remaining per-service counts in the block above are indicative, not pinned —
+only the two figures re-measured on 2026-08-08 (webgui 1053, sentiment_svc 251
+collected) are current.
 
 ## External processes (not in this repo)
 
