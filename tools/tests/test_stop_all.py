@@ -166,3 +166,139 @@ def test_the_hud_is_not_a_port_target():
     """It binds no port. Giving it one here would make it look health-checkable
     on the Status page, which it is not."""
     assert not any("hud" in label.lower() for label, _ in stop_all._targets())
+
+
+#############################################
+# THE BORROWED PROXY — dev must not reach it
+#############################################
+
+def test_targets_skip_the_proxy_when_not_owned(monkeypatch):
+    """Dev's PROXY_PORT is 8100 — PROD'S, borrowed, because there is one
+    rotating Schwab OAuth refresh token and so only one proxy. Killing it from
+    dev's Terminate button takes the live stack's market data down mid-session.
+    """
+    monkeypatch.setattr(stop_all, "OWNS_PROXY", False)
+    assert "proxy" not in [label for label, _ in stop_all._targets()]
+
+
+def test_targets_include_the_proxy_first_when_owned(monkeypatch):
+    monkeypatch.setattr(stop_all, "OWNS_PROXY", True)
+    assert stop_all._targets()[0][0] == "proxy"
+
+
+@pytest.mark.parametrize("owns", [True, False])
+def test_the_web_gui_is_killed_last_whether_or_not_we_own_the_proxy(monkeypatch, owns):
+    """Dropping the proxy from the head of the list must not disturb the tail.
+    The GUI's Terminate button spawns this script, so the page that launched it
+    has to die after everything it was asked to stop."""
+    monkeypatch.setattr(stop_all, "OWNS_PROXY", owns)
+    assert [label for label, _ in stop_all._targets()][-1] == "webgui"
+
+
+@pytest.mark.parametrize("owns", [True, False])
+def test_every_service_is_still_a_target_either_way(monkeypatch, owns):
+    """Non-vacuity partner for the two tests above: skipping the proxy must skip
+    ONLY the proxy. Dev owns its own six services and must still stop them."""
+    monkeypatch.setattr(stop_all, "OWNS_PROXY", owns)
+    labels = [label for label, _ in stop_all._targets()]
+    for name in stop_all.SERVICE_PORTS:
+        assert f"{name}_svc" in labels
+
+
+#############################################
+# THE HUD, SCOPED TO THIS CHECKOUT
+#############################################
+
+MINE = r"D:\WebGUI Trading Dev"
+THEIRS = r"D:\WebGUI Trading Prod"
+
+
+def test_hud_match_is_scoped_to_this_checkout():
+    """The HUD binds no port, so it is matched by command line — and unlike a
+    port, that match cannot tell two checkouts apart. Prod's HUD has to survive
+    dev's stop_all."""
+    assert stop_all._is_hud("pythonw.exe", rf"{MINE}\.venv\Scripts\pythonw.exe tools\nq_hud.py",
+                            root=MINE)
+    assert not stop_all._is_hud("pythonw.exe",
+                                rf"{THEIRS}\.venv\Scripts\pythonw.exe tools\nq_hud.py",
+                                root=MINE)
+
+
+def test_hud_match_unscoped_keeps_legacy_behavior():
+    """root=None is the pre-environment behavior, so every existing two-arg
+    caller — and every test above — is unaffected."""
+    assert stop_all._is_hud("pythonw.exe", r"C:\anywhere\tools\nq_hud.py", root=None)
+    assert stop_all._is_hud("pythonw.exe", rf"{THEIRS}\tools\nq_hud.py")
+
+
+def test_hud_match_still_rejects_non_python_images_when_scoped():
+    """Condition 2 is untouched by the new scope. A PowerShell in OUR checkout
+    that merely mentions the script is still not the HUD — killing it would kill
+    your terminal."""
+    assert not stop_all._is_hud("powershell.exe", rf"{MINE}\tools\nq_hud.py", root=MINE)
+    assert not stop_all._is_hud("Code.exe", rf'"{MINE}\tools\nq_hud.py"', root=MINE)
+
+
+def test_hud_match_still_rejects_sibling_scripts_when_scoped():
+    """Condition 1 is untouched by the new scope. nq_signal.py sits beside the
+    HUD in OUR tools/ and is imported by it."""
+    assert not stop_all._is_hud("pythonw.exe", rf"{MINE}\tools\nq_signal.py", root=MINE)
+
+
+def test_a_checkout_whose_path_merely_starts_with_ours_is_not_matched():
+    """The one that makes a naive substring test wrong. "D:\\Trading" is a
+    PREFIX of "D:\\Trading Prod", so an unanchored `in` has dev matching prod and
+    the whole scope achieves nothing. The needle carries a trailing separator."""
+    assert not stop_all._is_hud("pythonw.exe",
+                                r"D:\Trading Prod\.venv\Scripts\pythonw.exe tools\nq_hud.py",
+                                root=r"D:\Trading")
+    assert stop_all._is_hud("pythonw.exe",
+                            r"D:\Trading\.venv\Scripts\pythonw.exe tools\nq_hud.py",
+                            root=r"D:\Trading")
+
+
+def test_the_scope_is_case_insensitive_and_separator_blind():
+    """Windows paths compare case-insensitively, and the same checkout can be
+    spelled with either slash depending on who launched it."""
+    assert stop_all._is_hud("pythonw.exe", rf"{MINE.upper()}\TOOLS\NQ_HUD.PY", root=MINE)
+    assert stop_all._is_hud("pythonw.exe", f"{MINE}/tools/nq_hud.py".replace("\\", "/"),
+                            root=MINE)
+    assert stop_all._is_hud("pythonw.exe", rf"{MINE}\tools\nq_hud.py",
+                            root=MINE.replace("\\", "/"))
+
+
+def test_a_hud_naming_no_checkout_at_all_is_left_running_when_scoped():
+    """THE JUDGEMENT CALL, pinned. `pythonw tools\\nq_hud.py` names no checkout,
+    so it cannot be attributed — and an unattributable HUD is treated as NOT
+    ours. Leaving a stale HUD window open is an annoyance; killing the live
+    stack's HUD is the thing this scope exists to prevent, and "kill anything
+    ambiguous" would hand that back.
+
+    In practice the launcher does not produce this: start_all_hidden.bat runs
+    %~dp0.venv\\Scripts\\pythonw.exe, an ABSOLUTE path that names the checkout,
+    and taskkill /T sweeps the redirector's child with it.
+    """
+    assert not stop_all._is_hud("pythonw.exe", r"pythonw.exe tools\nq_hud.py", root=MINE)
+    # ...and is still killed unscoped, which is what the legacy callers see.
+    assert stop_all._is_hud("pythonw.exe", r"pythonw.exe tools\nq_hud.py")
+
+
+def test_hud_root_pids_threads_the_scope_through():
+    """The scope is useless if the pure entry point drops it."""
+    ours = (8001, 900, "pythonw.exe", rf"{MINE}\.venv\Scripts\pythonw.exe tools\nq_hud.py")
+    theirs = (8002, 900, "pythonw.exe", rf"{THEIRS}\.venv\Scripts\pythonw.exe tools\nq_hud.py")
+    assert stop_all.hud_root_pids([ours, theirs], root=MINE) == [8001]
+    assert stop_all.hud_root_pids([ours, theirs]) == [8001, 8002]
+
+
+def test_the_real_call_site_scopes_to_this_checkout(monkeypatch):
+    """stop_hud() is where the scope has to actually be applied — passing
+    root=REPO_ROOT there is the whole point of threading it."""
+    root = str(stop_all.REPO_ROOT)
+    ours = (8101, 900, "pythonw.exe", rf"{root}\.venv\Scripts\pythonw.exe tools\nq_hud.py")
+    theirs = (8102, 900, "pythonw.exe", rf"{THEIRS}\.venv\Scripts\pythonw.exe tools\nq_hud.py")
+    killed = []
+    monkeypatch.setattr(stop_all, "_process_rows", lambda: [ours, theirs])
+    monkeypatch.setattr(stop_all, "_kill", lambda pid: killed.append(pid) or True)
+    stop_all.stop_hud()
+    assert killed == ["8101"]
