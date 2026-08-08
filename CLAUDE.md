@@ -8,7 +8,65 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-08-05 (**0-DTE hedge-pressure history panel**: a compact signed-column track of
+**Last updated:** 2026-08-08 (**GEX grid storage → columnar float32 + mmap (SQLite stays; Postgres measured
+SLOWER)**: a storage-efficiency change to `gex_history_db.py` driven by a measured profile of the live
+1.54 GB `gex_history.db`. **The finding that drove everything: SQLite is NOT the bottleneck** — decomposing
+the hot paths showed the engine is **4% of read time and 7% of write time**; `json.loads` alone was **68% of
+the read path** (7.0 ms SQLite fetch vs 114 ms JSON parse on a 437-row session). A **PostgreSQL migration was
+evaluated and rejected on measurements**: a local client/server round-trip costs ~0.2–0.3 ms (anchored on a
+measured 0.160 ms Memurai loopback PING) against SQLite's in-process microseconds, making the per-symbol reads
+that run 93×/min **4–5× SLOWER**, the big grid read ~10% slower, and writes roughly par only if batched — while
+leaving the 93–96% serialization cost untouched. Postgres' genuine wins here are operational (autovacuum), not
+speed. So: **keep SQLite, fix the serialization.**
+**The change.** The grid is a regular numeric table (`{strike: {call, put, net}}`, ~250–360 strikes) that was
+stored as JSON text inside zlib — the worst format for it. It is now a **columnar float32 blob**:
+`b"G1"` + zlib(`<I` count + n float32 strikes + n×3 float32 call/put/net), strikes **sorted** (which also
+compresses better). Measured on the heaviest real case (`$SPX`/gex, 437 rows × 362 strikes): **decode
+152.9 → 61.6 ms (2.5×)**, **encode 352.7 → 120.2 ms (2.9×)**, **blobs 726 → 527 KiB (1.38×)** — the live DB's
+**898 MiB of grid payload projects to ~652 MiB** as rows roll through the 5-session retention. `connect()` also
+sets **`PRAGMA mmap_size=1 GiB`** (`_MMAP_BYTES`, both read-only and read-write): one (symbol, view, session)
+read touches ~437 **scattered** pages — the collector writes every symbol each minute, so consecutive rows of a
+key land **360 rowids apart** and essentially every row sits on its own page — and mmap drops a syscall + buffer
+copy per page (4.5 → 3.0 ms median warm).
+**The columnar path is SHAPE-GATED, and that is load-bearing.** Grids are documented to carry
+ints/strings/None/nested dicts (pinned by `test_gex_history_efficiency.test_encode_grid_handles_non_float_and_nested_values`),
+which this layout cannot express — so `_pack_columnar` returns `None` for anything but three plain numbers per
+cell and `_encode_grid` **falls back to the JSON path**. `bool` is rejected explicitly (it is an `int` subclass
+and would silently flatten to 1.0/0.0). Measured across 1,500 random live snapshots, **100% of real cells are
+exactly `{call, net, put}` floats**, so the fast path covers all production data at zero cost to the flexible
+contract. **Forward-only** (like the 2026-07-25 zlib change): nothing is backfilled and `_decode_grid` now reads
+**three** formats — `b"G1"` columnar, other `bytes` = zlib JSON, `str` = plain JSON. `orjson` (~2× on that legacy
+JSON path) is used **with a stdlib fallback and is NOT a declared dependency** — it only rides in transitively via
+nicegui, which `options_svc` does not depend on.
+**float32 is safe, with ONE documented caveat you should know.** Values are ALREADY rounded to
+`_GRID_SIG_FIGS` = 6 significant figures and float32 carries ~7.2 — measured max relative error **5.96e-08**
+across 471,657 real cells, and strikes round-trip exactly (an off-by-epsilon strike would split a grid key and
+break the ±N crop). **BUT float32's smallest normal is 1.18e-38, and deep-OTM strikes carry BS gamma/vanna
+underflow like `3.77e-163` — 88.6% of cells in a real `$SPX`/gex snapshot (25.9% across a random sample) flush
+to 0.0.** This was **verified display-neutral, not assumed**: across 600 real snapshots there were **0 call/put
+wall disagreements**, **0 display-significant cells lost** (nothing above 1e-9 of the snapshot max), and a max
+8.85e-07 error on summed net_total — and `flip`/walls/`net_total` live in their OWN columns computed from the
+FULL chain, so grid encoding cannot touch them. If bit-exactness is ever required, float64 values + float32
+strikes still give ~9× decode at today's file size.
+**Decoded grids return plain Python floats (via `.tolist()`), NOT numpy scalars** — the grid is JSON-serialized
+into `cache:options:gamma`, and a numpy scalar would blow up `json.dumps`; pinned by a test.
+**Measured and REJECTED — don't retry these:** **`WITHOUT ROWID`** (the obvious fix for the page scatter) made a
+62,560-row DB **59% larger (114 → 181 MB) and 4× slower to write (1.7 → 7.3 s)** — SQLite's guidance is that it
+suits *small* rows, and 1.3 KB blobs are the documented anti-pattern; **window-sliced decode** (decoding only the
+±20 strikes the crop keeps) was **no faster** than a plain columnar decode because zlib dominates; **`cache_size=256MB`**
+measured as noise. **Still open (not done here):** the **cold-read** problem — first-touch reads of a session ran
+**1,755–2,746 ms vs 42–128 ms warm (14–42×)** because 564 KiB of data is spread across 22% of the file; the right
+fix is a **nightly clustered rebuild** (`INSERT … ORDER BY symbol, view, ts`, hooked onto the existing purge), NOT
+`WITHOUT ROWID`. Also open: preserving the dict contract costs most of the theoretical win — returning arrays
+instead of `{strike: {call, put, net}}` measured **5.7×** end-to-end vs the **2.5×** shipped, but that needs a
+consumer-contract change across `gamma_tool.get_directional_walls` / `_crop_gamma_views` / `_level_track`.
+**Restart `options_svc`** (new rows write the new format immediately; old rows keep decoding).
+options_svc **916** green (+ the 2 documented `test_expected_move` date-relative baseline fails); new
+`options-scanner/tests/test_gex_grid_columnar.py` (14 tests) + an mmap test; TDD throughout. **Pre-existing, NOT
+caused by this change:** `options-scanner/scripts/fix_gex_history_scale.py::_rescale_grid` does a bare
+`json.loads` on `gex_json`, so it has been unable to read grids since compression shipped 2026-07-25 (its tests
+pass only because they use uncompressed fixtures) — it is a one-time migration that already ran.
+Prior — 2026-08-05 (**0-DTE hedge-pressure history panel**: a compact signed-column track of
 `hedge_pressure` across the session, mounted **directly under the heatmap** and sharing its time
 categories. It is its **OWN chart element, not a heatmap overlay** — pressure is in DOLLARS while the
 heatmap's y-axis is STRIKE *and* is pixel-aligned to the bar chart, so it cannot share that axis.

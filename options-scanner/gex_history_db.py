@@ -4,15 +4,36 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import logging
+import struct
 import zlib
 import sqlite3
 import time
 from pathlib import Path
 from typing import Iterable, Tuple
 
+import numpy as np
+
+try:  # orjson rides in with nicegui; ~2x faster on the LEGACY json grid path.
+    import orjson as _fastjson
+
+    def _json_loads(b):
+        return _fastjson.loads(b)
+except ImportError:  # pragma: no cover - stdlib fallback, same semantics
+    def _json_loads(b):
+        return json.loads(b)
+
 log = logging.getLogger("scanner")
 
 DB_PATH = Path(__file__).parent / "gex_history.db"
+
+# Memory-map the DB rather than read()-ing page by page. A single
+# (symbol, view, session) read touches ~437 SCATTERED pages — the collector
+# writes every symbol each minute, so consecutive rows of one key land ~360
+# rowids apart and essentially every row sits on its own page. mmap drops a
+# syscall + buffer copy per page (measured 4.5 -> 3.0 ms median warm; the win
+# is larger on cold random reads). SQLite silently caps this at its
+# compile-time SQLITE_MAX_MMAP_SIZE, so treat it as a request, not a promise.
+_MMAP_BYTES = 1 << 30  # 1 GiB
 
 # Max free pages returned to the filesystem per purge (see purge_keep_sessions).
 # 20k pages x 4 KiB ~= 80 MB per daily call: enough to walk the ~797 MB backlog
@@ -114,39 +135,121 @@ def _round_sig(value, sig: int = _GRID_SIG_FIGS):
     return value
 
 
-def _encode_grid(grid) -> bytes | None:
-    """Serialize a per-strike grid dict → zlib-compressed JSON bytes (stored as a
-    BLOB in the TEXT ``gex_json`` column). ~5× smaller than raw JSON — the full
-    chain grid dominates on-disk size (×4 views × ~440 rows/day). None for an
-    empty grid.
+_GRID_MAGIC = b"G1"          # columnar float32 payload (zlib streams start 0x78)
+_GRID_FIELDS = ("call", "put", "net")
 
-    Floats are rounded to ``_GRID_SIG_FIGS`` significant figures FIRST. Measured
-    on the live DB (2026-07-25), grid size is driven by float ENTROPY rather than
-    strike count — all four views average ~114 strikes, but bytes/snapshot ran
-    gex 1,110 / dex 1,426 / charm 1,820 / vanna 2,172, because values serialize
-    as e.g. ``1.2345678901234e-05``. Rounding cuts the payload ~52%
-    (966 MB → 459 MB) and 6 s.f. is far more precision than dollar-denominated
-    GEX display needs.
+
+def _pack_columnar(grid) -> bytes | None:
+    """Pack a production-shaped grid into a columnar float32 blob, else ``None``.
+
+    Layout: ``b"G1"`` + zlib(``<I`` count + n float32 strikes + n*3 float32
+    ``call, put, net``). Strikes are sorted, which also compresses better.
+
+    SHAPE-GATED on purpose. Grids are documented to carry ints/strings/None/
+    nested dicts (see ``test_encode_grid_handles_non_float_and_nested_values``),
+    which this layout cannot express — anything but three plain numbers per cell
+    returns ``None`` so the caller falls back to JSON. Measured across 1,500
+    random live snapshots, 100% of real cells are exactly this shape, so the
+    fallback costs nothing in production.
+
+    ``bool`` is rejected explicitly: it is an ``int`` subclass and would
+    otherwise be silently flattened to 1.0/0.0.
+    """
+    rows = []
+    for key, cell in grid.items():
+        if cell.__class__ is not dict or len(cell) != len(_GRID_FIELDS):
+            return None
+        values = []
+        for field in _GRID_FIELDS:
+            value = cell.get(field)
+            if value.__class__ is not float and value.__class__ is not int:
+                return None  # bool / str / None / nested / missing field
+            values.append(value)
+        try:
+            rows.append((float(key), values))
+        except (TypeError, ValueError):
+            return None  # non-numeric strike key
+    if not rows:
+        return None
+    rows.sort(key=lambda r: r[0])
+    strikes = np.fromiter((r[0] for r in rows), np.float32, len(rows))
+    exact = np.array([r[1] for r in rows], dtype=np.float64)
+    with np.errstate(over="ignore"):
+        values = exact.astype(np.float32)
+    # A finite value that overflows to inf would be silent corruption in a
+    # money-adjacent store, so degrade to the lossless JSON path instead. Real
+    # GEX tops out ~4.6e13 against float32's 3.4e38, so this should never fire.
+    # UNDERflow is deliberate and NOT guarded: sub-1.18e-38 denormals (deep-OTM
+    # BS gamma/vanna noise) flush to 0.0, which is the physically correct value.
+    if not np.array_equal(np.isfinite(exact), np.isfinite(values)):
+        return None
+    payload = struct.pack("<I", len(rows)) + strikes.tobytes() + values.tobytes()
+    return _GRID_MAGIC + zlib.compress(payload, 1)
+
+
+def _unpack_columnar(raw) -> dict:
+    """Decode a ``_pack_columnar`` blob back to ``{strike: {call, put, net}}``.
+
+    Returns plain Python floats (via ``.tolist()``), NOT numpy scalars — the
+    decoded grid is JSON-serialized into ``cache:options:gamma``, and numpy
+    scalars are not JSON-serializable.
+    """
+    buf = zlib.decompress(bytes(raw)[len(_GRID_MAGIC):])
+    (count,) = struct.unpack_from("<I", buf, 0)
+    offset = struct.calcsize("<I")
+    strikes = np.frombuffer(buf, np.float32, count, offset).tolist()
+    values = np.frombuffer(buf, np.float32, count * 3, offset + 4 * count)
+    call, put, net = (values.reshape(count, 3).T).tolist()
+    return {
+        k: {"call": c, "put": p, "net": n}
+        for k, c, p, n in zip(strikes, call, put, net)
+    }
+
+
+def _encode_grid(grid) -> bytes | None:
+    """Serialize a per-strike grid dict → bytes for the ``gex_json`` column, or
+    ``None`` for an empty grid. The full chain grid dominates on-disk size
+    (×4 views × ~440 rows/day), so this is the hottest storage path in the app.
+
+    TWO formats, tried in order:
+
+    1. **Columnar float32** (``_pack_columnar``) — the production shape. Measured
+       on the live DB (2026-08-08) against the JSON path below: decode 2.5×
+       faster, encode 2.9×, blobs 1.38× smaller. ``json.loads`` had been **68% of
+       the whole read path** while SQLite itself was only 4%.
+    2. **zlib-compressed JSON** — the fallback for grids carrying
+       ints/strings/None/nested cells, which the columnar layout cannot express.
+       Floats are rounded to ``_GRID_SIG_FIGS`` significant figures FIRST:
+       measured 2026-07-25, grid size is driven by float ENTROPY rather than
+       strike count (values serialize as e.g. ``1.2345678901234e-05``), and
+       rounding cut the payload ~52% (966 MB → 459 MB).
 
     FORWARD-ONLY: existing rows are untouched and still decode (see
-    ``_decode_grid``). Flip/wall values are stored in their own columns, computed
-    from the full chain, so they are unaffected by grid rounding.
+    ``_decode_grid``, which reads all three historical formats). Flip/wall values
+    are stored in their own columns, computed from the FULL chain, so they are
+    unaffected by grid rounding OR float32 conversion.
     """
     if not grid:
         return None
+    packed = _pack_columnar(grid)
+    if packed is not None:
+        return packed
     return zlib.compress(json.dumps(_round_sig(grid)).encode("utf-8"))
 
 
 def _decode_grid(raw) -> dict:
     """Decode a stored ``gex_json`` value → per-strike dict with FLOAT keys.
 
-    Format-agnostic for back-compat: ``bytes`` = zlib-compressed JSON (current),
-    ``str`` = plain JSON (rows written before compression). None/empty → {}."""
+    Format-agnostic for back-compat — three formats, newest first:
+    ``b"G1"…`` = columnar float32 (current), other ``bytes`` = zlib-compressed
+    JSON, ``str`` = plain JSON (pre-compression rows). None/empty → {}."""
     if not raw:
         return {}
     if isinstance(raw, (bytes, bytearray)):
-        raw = zlib.decompress(raw).decode("utf-8")
-    return {float(k): v for k, v in json.loads(raw).items()}
+        if bytes(raw[:len(_GRID_MAGIC)]) == _GRID_MAGIC:
+            return _unpack_columnar(raw)
+        raw = zlib.decompress(raw)
+    return {float(k): v for k, v in _json_loads(raw).items()}
 
 
 def init_schema(conn: sqlite3.Connection) -> None:
@@ -239,9 +342,12 @@ def connect(read_only: bool = False) -> sqlite3.Connection:
     """Open the snapshots DB. read_only=True uses SQLite URI mode=ro."""
     if read_only:
         uri = f"file:{DB_PATH.as_posix()}?mode=ro"
-        return sqlite3.connect(uri, uri=True, isolation_level=None)
+        conn = sqlite3.connect(uri, uri=True, isolation_level=None)
+        conn.execute(f"PRAGMA mmap_size={_MMAP_BYTES}")
+        return conn
     conn = sqlite3.connect(str(DB_PATH))
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute(f"PRAGMA mmap_size={_MMAP_BYTES}")
     return conn
 
 
