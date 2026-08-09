@@ -16,7 +16,7 @@ import bus_client
 from .theme import BTN_3D
 
 _pending = {"calculator": None, "expected_move": None,
-            "simulator": None, "calculator_legs": None}
+            "simulator": None, "calculator_legs": None, "gamma": None}
 
 
 # Per signal-type: list of (field_name, option_type, side) for the strike legs.
@@ -139,6 +139,33 @@ def send_to_calculator_legs(payload):
         return
     set_pending_calculator_legs(payload)
     ui.navigate.to("/options/calculator")
+
+
+def set_pending_gamma(symbol):
+    _pending["gamma"] = symbol
+
+
+def take_pending_gamma():
+    """Return and clear the pending Dealer Positioning symbol (one-shot).
+
+    One-shot matters: a symbol left in the stash would silently re-hijack the
+    gamma dropdown the next time that page is built."""
+    s = _pending.get("gamma")
+    _pending["gamma"] = None
+    return s
+
+
+def send_to_gamma(symbol):
+    """Stash a symbol and open Dealer Positioning on it (same browser tab).
+
+    Used by the Flow Alerts tape: every alert type — a premium crossover, unusual
+    contract activity, a gamma-regime flip — is asking you to look at that
+    symbol's dealer positioning, which is one page away."""
+    if not symbol:
+        ui.notify("No symbol for dealer positioning.", type="warning")
+        return
+    set_pending_gamma(symbol)
+    ui.navigate.to("/options/gamma")
 
 
 def _signal_legs_payload(sig):
