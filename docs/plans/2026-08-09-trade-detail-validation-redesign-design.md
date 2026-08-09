@@ -186,12 +186,49 @@ on the signal, presence decides it: `bid`/`ask` for liquidity, `rr_pct` for R:R.
 A not-measured factor renders as a distinct amber "not measured" chip, and its
 bar shows "—" rather than a number.
 
-For `em`, `gex`, `dex` and `trend` the raw inputs are not on the signal, so
-page-side only the exact-50.0 sentinel is available — suggestive, not proof. The
-clean fix is an additive **`factors_unavailable`** list emitted from Tier 2,
+For `em`, `gex`, `dex` and `trend` the raw inputs are not on the signal. The
+original design inferred provenance from an exact-50.0 sentinel. **Implementation
+proved that unsound, and it was removed** — see the two findings below.
+
+The clean fix is an additive **`factors_unavailable`** list emitted from Tier 2,
 which the documented Tailwind-first exception explicitly permits ("refactor the
-Tier-2 source to emit one"). The panel consumes it when present and falls back to
-the sentinel when absent, so it is correct today and exact later.
+Tier-2 source to emit one"). The panel consumes it whenever it is present.
+
+### Two findings from implementation (2026-08-09)
+
+Both were found by driving the real `scoring.py` normalizers through the flag
+engine rather than reasoning from the code, and both were confirmed in source.
+
+**The 50.0 sentinel could not distinguish missing from measured.**
+`norm_trend` returns exactly `50.0` for a missing trend **and** for a genuine
+`"NEUTRAL"` reading (`scoring.py:250-251`) — and NEUTRAL is one of five routine
+trend values, not an edge case. Worse, `gex` and `dex` are 50.0 *by design* for
+swing trades, which have no walls. A realistic swing signal therefore raised
+**four** "not measured" chips, destroying the absent-when-clean property the
+layout depends on.
+
+*Decision:* only **liquidity** reports "unmeasured", because `bid`/`ask` presence
+is external proof rather than a sentinel guess. `em`, `trend`, `gex` and `dex`
+flag only when genuinely tripped. This accepts a silent gap for a truly missing
+`em`/`gex`/`dex` until Tier 2 emits provenance; for `trend` the silence is
+actually correct, since NEUTRAL means "not against the structure".
+
+**The flag engine was blind to iron condors.** IC signals carry
+`factor_scores = {pcs_leg, ccs_leg, delta_bonus}` (`scanner_engine.py:1654-1658`)
+— none of `em`/`liq`/`trend`/`gex`/`dex` exists. An iron condor with its short
+strike deep inside the expected move rendered a clean, flagless panel: a silent
+false negative across an entire first-class strategy the scanner emits. For a
+feature whose purpose is fast rejection, that is more dangerous than a spurious
+warning.
+
+*Decision:* detect the IC shape and emit one explicit note — "Dealbreaker checks
+unavailable for iron condors" — which **counts toward the collapsed-strip badge**,
+so a flagless IC can never be mistaken for a clean one. `rr_pct` IS present on IC
+signals (`scanner_engine.py:1065`), so the credit-vs-risk check stays active.
+
+The proper fix is deferred but tractable: the engine already computes full
+per-leg factor scores inside `_leg_score` and then discards everything but the
+composite. Preserving them would let both legs be flagged normally.
 
 ### Data contract
 
