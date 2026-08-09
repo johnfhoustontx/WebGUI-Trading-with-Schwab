@@ -367,6 +367,93 @@ def test_schema_migration_idempotent_on_legacy_db(tmp_path):
         conn.close()
 
 
+# ── be_armed column + closed-by-date query (captured-autoclose) ─────────────
+def test_be_armed_defaults_zero_and_survives_round_trip(tmp_path):
+    db = tmp_path / "s.db"
+    signal_db.insert_signal(_sample_signal_row(dedup_key="ba1"), db_path=db)
+    got = signal_db.get_signal("a1", db_path=db)
+    assert got["be_armed"] == 0
+
+
+def test_set_be_armed_flips_the_flag(tmp_path):
+    db = tmp_path / "s.db"
+    signal_db.insert_signal(_sample_signal_row(dedup_key="ba2"), db_path=db)
+    assert signal_db.get_signal("a1", db_path=db)["be_armed"] == 0
+    signal_db.set_be_armed("a1", db_path=db)
+    assert signal_db.get_signal("a1", db_path=db)["be_armed"] == 1
+    # idempotent — a second call keeps it armed
+    signal_db.set_be_armed("a1", db_path=db)
+    assert signal_db.get_signal("a1", db_path=db)["be_armed"] == 1
+
+
+def test_open_view_exposes_be_armed(tmp_path):
+    db = tmp_path / "s.db"
+    signal_db.insert_signal(_sample_signal_row(dedup_key="ba3"), db_path=db)
+    signal_db.set_be_armed("a1", db_path=db)
+    rows = signal_db.get_open_signals_with_latest_mark(db_path=db)
+    assert len(rows) == 1 and rows[0]["be_armed"] == 1
+
+
+def test_be_armed_migration_on_legacy_db(tmp_path):
+    """init_schema adds be_armed to a DB created without it (idempotent)."""
+    import sqlite3
+    db_path = str(tmp_path / "legacy.db")
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE signals (signal_id TEXT PRIMARY KEY, symbol TEXT)")
+    conn.commit()
+    conn.close()
+    signal_db.init_schema(db_path=db_path)
+    signal_db.init_schema(db_path=db_path)  # second pass must not raise
+    conn = sqlite3.connect(db_path)
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(signals)").fetchall()}
+        assert "be_armed" in cols
+    finally:
+        conn.close()
+
+
+def _seed_closed(db, signal_id, dedup_key, exit_value, exit_reason,
+                 close_date, close_ts, entry_credit=1.2):
+    signal_db.insert_signal(_sample_signal_row(
+        signal_id=signal_id, dedup_key=dedup_key), db_path=db)
+    # entry_credit override on the seeded row
+    conn = signal_db.connect(db)
+    conn.execute("UPDATE signals SET entry_credit=?, strategy='PCS' WHERE signal_id=?",
+                 (entry_credit, signal_id))
+    conn.commit(); conn.close()
+    realized = (entry_credit - exit_value) * 100.0
+    signal_db.insert_outcome({
+        "signal_id": signal_id, "close_ts": close_ts, "close_date": close_date,
+        "exit_value": exit_value, "realized_pnl": realized,
+        "exit_reason": exit_reason, "settlement_underlying": None,
+    }, new_status="CLOSED", db_path=db)
+
+
+def test_get_outcomes_for_date_returns_today_only(tmp_path):
+    db = tmp_path / "s.db"
+    _seed_closed(db, "cA", "kcA", 0.40, "BREAKEVEN_STOP",
+                 "2026-08-09", "2026-08-09T14:31:00-05:00")
+    _seed_closed(db, "cB", "kcB", 1.50, "MONEY_STOP",
+                 "2026-08-09", "2026-08-09T10:05:00-05:00")
+    _seed_closed(db, "cOld", "kcOld", 0.10, "EXPIRED",
+                 "2026-08-08", "2026-08-08T15:00:00-05:00")
+
+    rows = signal_db.get_outcomes_for_date("2026-08-09", db_path=db)
+    ids = [r["signal_id"] for r in rows]
+    assert ids == ["cA", "cB"]                 # newest close_ts first, other date excluded
+    a = rows[0]
+    assert a["symbol"] == "SPY" and a["strategy"] == "PCS"
+    assert a["exit_value"] == 0.40 and a["exit_reason"] == "BREAKEVEN_STOP"
+    assert abs(a["realized_pnl"] - (1.2 - 0.40) * 100.0) < 1e-6
+    assert a["entry_credit"] == 1.2 and a["close_ts"].startswith("2026-08-09")
+
+
+def test_get_outcomes_for_date_empty_when_none(tmp_path):
+    db = tmp_path / "s.db"
+    signal_db.init_db(db)
+    assert signal_db.get_outcomes_for_date("2026-08-09", db_path=db) == []
+
+
 def test_insert_mark_ignores_unknown_columns_without_mutating(tmp_path):
     db = str(tmp_path / "signals.db")
     signal_db.insert_signal({
