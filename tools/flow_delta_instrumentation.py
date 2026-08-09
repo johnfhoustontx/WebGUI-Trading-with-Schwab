@@ -78,6 +78,16 @@ REL_THRESHOLDS = [0.02, 0.05, 0.10, 0.20]
 # roll mechanics rather than directional bets. Measured both ways.
 DELTA_BAND = (0.05, 0.85)
 
+# Schwab returns **-999.0** as a "no value" SENTINEL for delta on contracts it
+# can't price (seen live 2026-08-09: 46 contracts across T/MU/IONQ/UAL). Taken at
+# face value that is not a small error — one 2,088-lot contract manufactured
+# $4.96B of phantom delta notional, and the sentinel rows together produced
+# $18.3B, enough to rank AT&T the 4th-largest name in the universe. Any absolute
+# threshold would fire on them EVERY day, on whatever illiquid contract happens
+# to lack a quote. |delta| > 1 is impossible for a vanilla option, so that is the
+# guard; a real detector needs this same check.
+DELTA_MAX = 1.0
+
 
 def flow_symbols():
     """The live flow-alert universe: collected symbols minus $VIX."""
@@ -106,11 +116,14 @@ def fetch_chain(client, symbol, today):
 
 
 def contracts_from(symbol, chain):
-    """Flatten a chain into per-contract measurement rows."""
+    """Flatten a chain into per-contract measurement rows.
+
+    Returns ``(rows, n_sentinel_delta)`` — the dropped count is reported rather
+    than silently swallowed (see DELTA_MAX)."""
     spot = (chain or {}).get("underlyingPrice")
     if not isinstance(spot, (int, float)) or spot <= 0:
-        return []
-    out = []
+        return [], 0
+    out, dropped = [], 0
     for mapkey, side in (("callExpDateMap", "call"), ("putExpDateMap", "put")):
         for ek, strike_map in ((chain.get(mapkey) or {})).items():
             exp = str(ek).split(":")[0]
@@ -130,6 +143,9 @@ def contracts_from(symbol, chain):
                     oi = c.get("openInterest") or 0
                     if not vol or not isinstance(delta, (int, float)):
                         continue
+                    if abs(delta) > DELTA_MAX:     # -999.0 sentinel / rounding past 1
+                        dropped += 1
+                        continue
                     out.append({
                         "symbol": symbol, "side": side, "strike": strike,
                         "expiry": exp, "dte": dte, "spot": spot,
@@ -139,7 +155,7 @@ def contracts_from(symbol, chain):
                         "delta_notional": abs(delta) * vol * 100 * spot,
                         "signed_delta_notional": delta * vol * 100 * spot,
                     })
-    return out
+    return out, dropped
 
 
 def passes_uoa(r, cfg):
@@ -165,7 +181,7 @@ def _fmt_money(v):
     return f"${v/1e3:,.0f}k"
 
 
-def build_report(rows, cfg, symbols, failed):
+def build_report(rows, cfg, symbols, failed, sentinel=0):
     """The markdown report. Pure over the collected rows."""
     L = []
     now = datetime.now(CT)
@@ -174,6 +190,12 @@ def build_report(rows, cfg, symbols, failed):
              f"({len(symbols) - len(failed)} fetched, {len(failed)} failed"
              + (f": {', '.join(failed)}" if failed else "") + ")\n")
     L.append(f"Contracts with volume + delta: **{len(rows):,}**\n")
+    if sentinel:
+        L.append(f"\n> Dropped **{sentinel}** contracts with an impossible "
+                 f"`|delta| > 1` — Schwab's `-999.0` no-value sentinel. Left in, "
+                 f"they manufacture billions in phantom exposure and would fire "
+                 f"on every absolute threshold, daily. **A real detector needs "
+                 f"this same guard.**\n")
 
     base = [r for r in rows if passes_uoa(r, cfg)]
     u = cfg.get("uoa", {})
@@ -265,20 +287,22 @@ def main():
     print(f"Flow universe: {len(symbols)} symbols; proxy {PROXY_URL}")
     client = SchwabPyProxyClient(PROXY_URL)
 
-    rows, failed = [], []
+    rows, failed, sentinel = [], [], 0
     with ThreadPoolExecutor(max_workers=FETCH_WORKERS) as ex:
         for sym, chain in zip(symbols, ex.map(lambda s: fetch_chain(client, s, today), symbols)):
             if not chain:
                 failed.append(sym)
                 continue
-            got = contracts_from(sym, chain)
+            got, bad = contracts_from(sym, chain)
             rows.extend(got)
-            print(f"  {sym:<6} {len(got):>5} contracts")
+            sentinel += bad
+            print(f"  {sym:<6} {len(got):>5} contracts"
+                  + (f"  ({bad} sentinel delta dropped)" if bad else ""))
 
     out_dir = OPTIONS_SCANNER / "data" / "flow_delta_instrumentation" / str(today)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    report = build_report(rows, cfg, symbols, failed)
+    report = build_report(rows, cfg, symbols, failed, sentinel)
     (out_dir / "report.md").write_text(report, encoding="utf-8")
 
     # Raw rows for any threshold question the report didn't anticipate.
