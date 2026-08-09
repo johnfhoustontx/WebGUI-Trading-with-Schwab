@@ -287,6 +287,51 @@ same displayed per-contract figure.
 
 `test_no_inline_style.py` continues to guard the page.
 
+## Outcome (2026-08-09)
+
+Delivered on `claude/trade-detail-validation-redesign-304691`. All seven defects
+fixed, the triage layout built, `webgui` at **1164 passed / 0 failed**,
+`options-scanner` failing set unchanged at 11 pre-existing.
+
+**Not verified live.** The work was built in a worktree that resolves as the
+`prod` environment (no `config/env.local.toml`, which is gitignored and so cannot
+be inherited), meaning a webgui started there would bind port 8500 and read Redis
+db 0 — the live stack. Per the project's own development rule, this must be run
+and confirmed in the **dev** checkout before promotion. Tests passing is not the
+same as verified.
+
+Implementation corrected the design or plan **seven** times, each caught by
+checking source rather than trusting prose: the overlooked `max_loss_per` column;
+the unsound 50.0 sentinel; the three-vocabulary problem; `contract_lines` reading
+strike keys that directional families never set; and three separate unit errors
+where a figure was already per-contract and would have been scaled by 100 again.
+The recurring lesson is narrow and worth keeping: **in this codebase, verify the
+units and the key names at the source before writing a formatter.**
+
+## Two pre-existing bugs found during validation (NOT fixed here)
+
+Both corrupt the paper ledger, both sit outside the detail panel, and both were
+found only because the panel's units were traced end to end.
+
+**1. Swing → Paper records max loss 100× too large.** `strategy_scanner._normalize_credit`
+overwrites `max_loss` with per-CONTRACT dollars (`max_loss * 100 + commission`,
+`strategy_scanner.py:321-341`) while `out = dict(sig)` preserves `credit` at
+per-share. `handoff.send_to_paper` passes that raw signal straight to
+`paper_create`, and `paper_trader.create_paper_trade:117` then computes
+`max_loss_total = signal["max_loss"] * quantity * 100` — scaling a
+already-scaled figure. A $345 spread opened from the Strategy Finder is recorded
+as $34,500 of risk. The scanner path is unaffected (its `max_loss` really is
+per-share).
+
+**2. Debit paper trades settle on the wrong path and fabricate realized P&L.**
+`trades_db.py` has no `legs` column and no `direction` column, so neither is
+persisted. `paper_trader.py:179` gates settlement on
+`trade.get("direction") == "DEBIT"`, which is therefore always absent once a trade
+is loaded from the database. Debit trades settle through the credit-spread branch,
+where `entry_credit` is stored negative by display convention
+(`paper_trader.py:71`) and the exit value falls to zero — yielding a realized loss
+computed from the premium paid rather than from settlement.
+
 ## Out of scope
 
 Widening the panel; moving thresholds into Settings; changing the composite
