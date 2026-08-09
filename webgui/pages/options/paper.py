@@ -247,7 +247,7 @@ def synth_from_trade(trade):
     """Detail-panel signal dict from a paper-trade dict.
 
     Maps the calculated fields the trade ALREADY stores (breakeven [stored as a
-    string], the entry greeks, underlying, width) — which the detail panel reads
+    string, passed through verbatim], the entry greeks, underlying, width) — which the detail panel reads
     — plus live DTE from the expiration and a delta-approximation PoP. Fields the
     trade never captured at entry (IV, composite score) stay absent, so the panel
     shows '—' rather than a fabricated value."""
@@ -269,7 +269,14 @@ def synth_from_trade(trade):
         "call_short": t.get("call_short"),
         "call_long": t.get("call_long"),
         "width": _num(t.get("width")),
-        "breakeven": _num(t.get("breakeven")),
+        # NOT coerced. An iron condor stores BOTH breakevens as the string
+        # "put_be/call_be" (scanner_engine.py:1069), and ``_num`` is a bare
+        # float() -- which raises on the slash and returns None, destroying the
+        # value before ``detail.breakeven_text`` (which parses exactly that
+        # shape) could see it. Passed through as stored so the slash-aware
+        # formatter decides; it handles a plain float, a numeric string and an
+        # unparseable one (-> em-dash) alike, so nothing downstream needs a float.
+        "breakeven": t.get("breakeven"),
         "dte": _dte_from_expiration(t.get("expiration")),
         "short_delta": delta,
         "net_theta": _num(t.get("net_theta")),

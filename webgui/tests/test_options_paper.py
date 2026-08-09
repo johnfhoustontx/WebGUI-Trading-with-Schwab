@@ -11,7 +11,7 @@ import inspect
 
 import bus_client
 import pytest
-from pages.options import paper
+from pages.options import detail, paper
 
 TRADE = {
     "trade_id": "T1", "symbol": "SPY", "strategy": "PCS", "status": "OPEN",
@@ -184,7 +184,10 @@ RICH_TRADE = {
 
 def test_synth_maps_stored_calculated_fields():
     s = paper.synth_from_trade(RICH_TRADE)
-    assert s["breakeven"] == 129.45          # coerced from the stored string
+    # The breakeven is passed through as STORED (a string) rather than coerced --
+    # see test_synth_preserves_iron_condor_breakeven_string. What matters is that
+    # it renders, so assert on the rendered text, which holds for either shape.
+    assert detail.breakeven_text(s["breakeven"]) == "$129.45"
     assert s["short_delta"] == -0.5
     assert s["net_theta"] == -0.016
     assert s["net_vega"] == -0.2             # reconstructed from -entry_vega
@@ -209,9 +212,33 @@ def test_synth_pop_none_when_delta_absent_or_zero():
     assert paper.synth_from_trade({"symbol": "X"})["pop_pct"] is None
 
 
-def test_synth_breakeven_non_numeric_is_none():
-    assert paper.synth_from_trade({"symbol": "X", "breakeven": ""})["breakeven"] is None
+def test_synth_breakeven_junk_renders_an_em_dash():
+    # Unparseable / absent breakevens must not fabricate a number. The adapter no
+    # longer coerces (see below), so the em-dash now comes from breakeven_text.
+    for stored in ("", "n/a", None):
+        s = paper.synth_from_trade({"symbol": "X", "breakeven": stored})
+        assert detail.breakeven_text(s["breakeven"]) == "—"
     assert paper.synth_from_trade({"symbol": "X"})["breakeven"] is None
+
+
+def test_synth_preserves_iron_condor_breakeven_string():
+    """An iron condor stores BOTH breakevens as "put/call" (scanner_engine.py:1069).
+
+    ``detail.breakevens`` parses that shape, but the adapter used to run the value
+    through a bare ``float()`` first -- which RAISES on the slash, so ``_num``
+    returned None and the value was destroyed before the slash-aware formatter ever
+    saw it. Every IC paper trade therefore showed "Breakeven: —" even after the
+    panel itself was fixed.
+    """
+    s = paper.synth_from_trade({"symbol": "SPX", "strategy": "IC",
+                                "breakeven": "5900.5/6010.2"})
+    assert detail.breakeven_text(s["breakeven"]) == "$5,900.50 / $6,010.20"
+
+
+def test_synth_preserves_plain_float_breakeven():
+    # The credit-spread shape (a real float, not a string) must be unaffected.
+    s = paper.synth_from_trade({"symbol": "SPY", "breakeven": 398.45})
+    assert detail.breakeven_text(s["breakeven"]) == "$398.45"
 
 
 def test_synth_max_loss_is_per_share_not_whole_position():
