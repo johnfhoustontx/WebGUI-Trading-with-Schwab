@@ -22,12 +22,19 @@ collapsed card. The panel is shaped for verification but used for triage.
 
 ## Validated defects
 
-**1 — Unit collision.** Scanner signals carry `credit` and `max_loss` **per
-share** (`scanner_engine.py:57`). Paper trades feed `entry_credit` and
-`max_loss_total`, which are **totals** (`paper.py:237`). Both land in the same
-tiles under the same labels, differing by 100×. `expected_pnl_10` sits in the
-same card and is itself a total (`× contracts × 100`), so one card mixes both
-scales with nothing on screen to distinguish them.
+**1 — Unit collision, including within a single row.** Scanner signals carry
+`credit` and `max_loss` **per share** (`scanner_engine.py:57`).
+
+The paper adapter is worse than a cross-source mismatch. `paper_trader.py:114-117`
+stores `entry_credit` as the **per-share** credit but `max_loss_total` as
+`max_loss × quantity × 100` — the **whole position**. The adapter takes `credit`
+from the first and `max_loss` from the second (`paper.py:237-238`), so one paper
+trade displays Credit $1.55 beside Max Loss $1,035. Because `quantity` is a
+factor, the discrepancy is not even a constant 100×.
+
+`expected_pnl_10` sits in the same card and is itself a total
+(`× contracts × 100`), so one card mixes three scales with nothing on screen to
+distinguish them.
 
 This class of bug has bitten this codebase twice already in the driver — see
 `driver-executed-but-rejected-risk-too-high`.
@@ -60,9 +67,10 @@ debits (`strategy_table.py:279-281`) so it is not mislabelled as a credit —
 correct, but nothing then renders the debit, so a long call's cost is simply
 absent.
 
-**8 — Paper flips vega's sign** (`-entry_vega`, `paper.py:249`). Convention to be
-verified against `paper_engine` before any change; listed for completeness, not
-yet confirmed as wrong.
+**8 — Paper's vega sign flip is CORRECT.** Verified: `paper_trader.py:123` stores
+`entry_vega = -signal["net_vega"]`, so `paper.py:249`'s `-entry_vega` is an exact
+round-trip. No change; a regression test pins the round-trip so a future edit to
+either side cannot silently break it.
 
 ### The deeper problem: missing data is indistinguishable from a score
 
