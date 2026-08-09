@@ -97,6 +97,95 @@ def factor_value_text(value, known):
     return f"{value:g}"
 
 
+#############################################
+# DEALBREAKER FLAGS
+#############################################
+# Triage is mostly fast rejection, so the four dealbreakers get their own
+# treatment above the fold rather than being four of eleven identical bars.
+#
+# Three bars fall out of scoring.py's own definitions and invent nothing:
+#   em    < 50  -- norm_em_buffer returns 0-50 ONLY inside 1 sigma (scoring.py:208)
+#   trend < 50  -- 25 = partially against, 0 = against    (scoring.py:248)
+#   liq   < 50  -- 50 => spread > 3% of mark, zero at 5%  (scoring.py:231)
+#
+# The two below are judgment calls. Tune in use; promote to Settings only if
+# they turn out to change often.
+MIN_RR_PCT = 20        # credit too thin: norm_rr reaches 100 at 50%
+WALL_FLAG_BAR = 30     # too close to a gamma wall: 100 = >=1% of spot away
+
+_SEMANTIC_BAR = 50     # the scorer's own neutral/boundary point
+
+
+def _score(fs, key):
+    v = fs.get(key)
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def flags_for(signal):
+    """Dealbreaker flags for a signal: [{key, label, state}, ...].
+
+    ``state`` is "tripped" (measured and beyond the bar) or "unmeasured" (the
+    inputs were never available). An unmeasured dealbreaker is surfaced rather
+    than hidden -- scoring.py renders missing data as a neutral-looking 50, so
+    silence would be false reassurance.
+
+    Total over adversarial input: never raises, always returns a list.
+    """
+    s = signal or {}
+    if not isinstance(s, dict):
+        return []
+    fs = s.get("factor_scores") or {}
+    if not isinstance(fs, dict):
+        fs = {}
+    unavailable = set(s.get("factors_unavailable") or ())
+    out = []
+
+    def add(key, label, tripped, measured):
+        if not measured:
+            out.append({"key": key, "label": f"{label} not measured",
+                        "state": "unmeasured"})
+        elif tripped:
+            out.append({"key": key, "label": label, "state": "tripped"})
+
+    # Liquidity -- bid/ask presence on the signal is direct proof of measurement.
+    liq = _score(fs, "liq")
+    liq_measured = (s.get("bid") is not None and s.get("ask") is not None
+                    and "liq" not in unavailable)
+    if liq is not None or not liq_measured:
+        add("liq", "Thin liquidity", liq is not None and liq < _SEMANTIC_BAR,
+            liq is not None and liq_measured)
+
+    # Credit vs risk -- rr_pct rides on the signal, so presence is proof.
+    rr = s.get("rr_pct")
+    rr_val = float(rr) if isinstance(rr, (int, float)) and not isinstance(rr, bool) else None
+    if rr_val is not None:
+        add("rr", "Credit thin for the risk", rr_val < MIN_RR_PCT, True)
+
+    # Expected move / trend / walls -- raw inputs are not on the signal, so an
+    # exact 50.0 is the only page-side hint of "never measured". Suggestive, not
+    # proof; factors_unavailable from Tier 2 makes it exact when present.
+    for key, label, bar in (("em", "Short strike inside 1σ move", _SEMANTIC_BAR),
+                            ("trend", "Trend against the structure", _SEMANTIC_BAR),
+                            ("gex", "Near a gamma wall", WALL_FLAG_BAR),
+                            ("dex", "Near a delta wall", WALL_FLAG_BAR)):
+        val = _score(fs, key)
+        if val is None:
+            continue
+        measured = key not in unavailable and val != float(_SEMANTIC_BAR)
+        add(key, label, val < bar, measured)
+    return out
+
+
+def flag_count(signal):
+    """How many flags a signal raises -- drives the collapsed-strip badge."""
+    return len(flags_for(signal))
+
+
+def flag_class(state):
+    """Finite state -> a fixed palette class (never build a class from a value)."""
+    return TXT_NEG if state == "tripped" else TXT_WARN
+
+
 def _money(v):
     return f"${v:,.2f}" if isinstance(v, (int, float)) else "—"
 

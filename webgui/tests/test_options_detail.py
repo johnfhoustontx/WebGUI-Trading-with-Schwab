@@ -81,6 +81,53 @@ def test_factor_value_text_shows_dash_for_unknown():
     assert detail.factor_value_text(None, False) == "—"
 
 
+def test_flag_inside_expected_move():
+    flags = detail.flags_for({"factor_scores": {"em": 30}})
+    assert any(f["key"] == "em" and f["state"] == "tripped" for f in flags)
+
+
+def test_no_em_flag_when_outside_the_move():
+    flags = detail.flags_for({"factor_scores": {"em": 70}})
+    assert not any(f["key"] == "em" for f in flags)
+
+
+def test_flag_thin_liquidity_only_when_measured():
+    sig = {"factor_scores": {"liq": 20}, "bid": 1.10, "ask": 1.20}
+    assert any(f["key"] == "liq" and f["state"] == "tripped"
+               for f in detail.flags_for(sig))
+
+
+def test_liquidity_unmeasured_when_bid_ask_absent():
+    flags = detail.flags_for({"factor_scores": {"liq": 50}})
+    liq = [f for f in flags if f["key"] == "liq"]
+    assert liq and liq[0]["state"] == "unmeasured"
+
+
+def test_flag_thin_credit_uses_rr_pct():
+    assert any(f["key"] == "rr" for f in detail.flags_for({"rr_pct": 12}))
+    assert not any(f["key"] == "rr" for f in detail.flags_for({"rr_pct": 35}))
+
+
+def test_flag_near_gamma_wall():
+    assert any(f["key"] == "gex" for f in detail.flags_for({"factor_scores": {"gex": 10}}))
+
+
+def test_clean_signal_has_no_flags():
+    sig = {"rr_pct": 40, "bid": 1.10, "ask": 1.12,
+           "factor_scores": {"em": 80, "liq": 95, "trend": 90, "gex": 90, "dex": 90}}
+    assert detail.flags_for(sig) == []
+
+
+def test_flags_never_raise_on_garbage():
+    for bad in (None, {}, {"factor_scores": None}, {"factor_scores": {"em": "x"}},
+                {"rr_pct": "n/a"}):
+        assert isinstance(detail.flags_for(bad), list)
+
+
+def test_flag_count_counts_only_tripped_and_unmeasured():
+    assert detail.flag_count({"factor_scores": {"em": 30, "gex": 10}}) >= 2
+
+
 def test_render_returns_handle_with_update():
     # render() needs a NiceGUI context; just assert the API surface exists.
     assert callable(detail.render)
