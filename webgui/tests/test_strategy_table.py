@@ -487,3 +487,37 @@ def test_rows_carry_exp_and_dte():
                              "dte": 120, "composite_score": 50}])[0]
     assert row["expiration"] == "10/28"
     assert row["dte"] == 120
+
+
+# --- signed net cost --------------------------------------------------------
+# UNITS: strategy_scanner.payoff_metrics emits net_debit/net_credit in
+# per-CONTRACT dollars (``net * _CONTRACT_MULT``, _CONTRACT_MULT = 100.0), always
+# POSITIVE, using None to mean "this structure is the other side". ``net_cost``
+# is normalized to PER-SHARE dollars — the scale the ``credit`` field and
+# detail.money_per_contract already use — so a $240 long call cannot render as
+# $24,000.
+
+def test_detail_signal_carries_debit_as_negative_net_cost():
+    out = st.detail_signal({"net_debit": 240.0})
+    assert out["credit"] is None          # still not mislabelled as a credit
+    assert out["net_cost"] == -2.40
+
+
+def test_detail_signal_credit_is_positive_net_cost():
+    out = st.detail_signal({"net_credit": 155.0})
+    assert out["net_cost"] == 1.55
+
+
+def test_detail_signal_net_cost_from_per_share_source_credit():
+    # A scanner credit spread carries the per-share ``credit`` and no net_*.
+    assert st.detail_signal({"credit": 1.55})["net_cost"] == 1.55
+
+
+def test_detail_signal_net_cost_absent_when_nothing_priced():
+    assert st.detail_signal({"type": "PCS"})["net_cost"] is None
+
+
+def test_detail_signal_does_not_mutate_its_input():
+    sig = {"net_debit": 240.0}
+    st.detail_signal(sig)
+    assert sig == {"net_debit": 240.0}

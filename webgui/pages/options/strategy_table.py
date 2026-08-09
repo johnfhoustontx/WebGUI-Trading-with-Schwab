@@ -285,4 +285,40 @@ def detail_signal(signal):
     if out.get("breakeven") is None:
         bes = out.get("breakevens") or []
         out["breakeven"] = bes[0] if bes else None
+    _fill_net_cost(out)
     return out
+
+
+# strategy_scanner.payoff_metrics emits net_debit/net_credit in per-CONTRACT
+# dollars (net * _CONTRACT_MULT); ``net_cost`` is per-SHARE, so they divide.
+_CONTRACT_MULT = 100.0
+
+
+def _num(v):
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def _fill_net_cost(out):
+    """Signed cost in PER-SHARE dollars: positive = credit in, negative = debit out.
+
+    ``credit`` deliberately stays None for a debit so the green Credit tile
+    cannot show a DEBIT mislabelled as a credit — but without this the cost
+    vanished entirely, so a long call showed no price at all.
+
+    UNITS: ``net_credit``/``net_debit`` arrive in per-CONTRACT dollars and are
+    both POSITIVE (the structure's side is carried by which one is None), while
+    the source ``credit`` is already per-share. They are reconciled onto the
+    per-share scale here — the one place all three units are known.
+    """
+    if out.get("net_cost") is not None:
+        return
+    credit_d, debit_d = _num(out.get("net_credit")), _num(out.get("net_debit"))
+    credit_s = _num(out.get("credit"))
+    if credit_d is not None:
+        out["net_cost"] = round(credit_d / _CONTRACT_MULT, 6)
+    elif debit_d is not None:
+        out["net_cost"] = round(-abs(debit_d) / _CONTRACT_MULT, 6)
+    elif credit_s is not None:
+        out["net_cost"] = credit_s
+    else:
+        out["net_cost"] = None

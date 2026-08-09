@@ -415,6 +415,21 @@ def test_contract_lines_ignores_legs_missing_a_strike():
     assert detail.contract_lines(sig) == []
 
 
+def test_cost_row_labels_credit_and_debit():
+    assert detail.cost_row({"net_cost": 1.55}) == ("Credit", "$155.00 per contract")
+    assert detail.cost_row({"net_cost": -2.40}) == ("Debit", "$240.00 per contract")
+    assert detail.cost_row({}) == ("Credit", "—")
+
+
+def test_cost_row_falls_back_to_credit_field():
+    assert detail.cost_row({"credit": 1.55}) == ("Credit", "$155.00 per contract")
+
+
+def test_cost_row_rejects_non_numeric_and_bools():
+    assert detail.cost_row({"net_cost": "2.40"}) == ("Credit", "—")
+    assert detail.cost_row({"net_cost": True}) == ("Credit", "—")
+
+
 def test_gauge_metric_prefers_composite_score():
     m = detail.gauge_metric({"composite_score": 72, "grade": "Good"})
     assert m == {"value": 72, "caption": "Composite score", "grade": "Good"}

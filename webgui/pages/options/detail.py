@@ -367,6 +367,24 @@ def money_per_contract(per_share):
     return "—" if v is None else f"${v:,.2f} per contract"
 
 
+def cost_row(signal):
+    """(label, text) for the money-in/out row — 'Credit' or 'Debit'.
+
+    Magnitude is always shown positive; the LABEL carries the direction, so a
+    debit can never read as a credit. Input is PER-SHARE dollars (see
+    strategy_table._fill_net_cost, which reconciles the per-contract
+    ``net_credit``/``net_debit`` onto this scale).
+    """
+    s = signal or {}
+    v = s.get("net_cost")
+    if v is None:
+        v = s.get("credit")
+    if not isinstance(v, (int, float)) or isinstance(v, bool):
+        return ("Credit", "—")
+    label = "Debit" if v < 0 else "Credit"
+    return (label, money_per_contract(abs(v)))
+
+
 def breakevens(raw):
     """Normalize a breakeven field to a list of floats.
 
