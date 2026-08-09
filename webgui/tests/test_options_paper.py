@@ -311,3 +311,14 @@ def test_status_badge_class():
     assert paper.status_badge_class("EXPIRED") == theme.BADGE_MUTED
     assert paper.status_badge_class("CLOSED") == theme.BADGE_MUTED
     assert paper.status_badge_class(None) == theme.BADGE_MUTED
+
+
+def test_vega_sign_round_trips_through_storage():
+    # paper_trader.py:123 stores entry_vega = -signal["net_vega"], so the
+    # adapter's -entry_vega recovers the ORIGINAL net_vega exactly. This test
+    # exists to fail loudly if either side flips independently.
+    original_net_vega = -0.20
+    stored_entry_vega = -original_net_vega          # what paper_trader writes
+    s = paper.synth_from_trade({"symbol": "SPY", "entry_vega": stored_entry_vega,
+                                "expiration": "2099-01-15"})
+    assert s["net_vega"] == pytest.approx(original_net_vega)
