@@ -146,6 +146,78 @@ _IC_NOTE = {"key": "ic", "label": "Dealbreaker checks unavailable for iron condo
             "state": "unavailable"}
 
 
+# THE THIRD VOCABULARY: swing / Strategy Finder.
+#
+# strategy_scoring.py:664 scores multi-family structures on a DIFFERENT factor
+# set -- {fit_dir, fit_vol, q_rr, q_be, q_pop, q_liq} -- reached from BOTH
+# /options/swing and the scanner's Directional subtab (both route through
+# strategy_table.detail_signal).
+#
+# Its numbers must NEVER be compared against the scanner bars above. q_be
+# (q_breakeven_vs_em, strategy_scoring.py:369) REWARDS a breakeven inside the
+# 1-sigma move -- "closer / inside EM = higher", because a directional debit
+# trade only needs a small move to win -- whereas norm_em_buffer rewards the
+# exact opposite. Same concept, inverted sign, because the payoff profiles are
+# opposite. A `q_be < 50` test would flag good trades as bad.
+#
+# So flags come from the engine's OWN per-family hard gates instead
+# (evaluate_gates, strategy_scoring.py:555), read off the `grade_reason` string
+# it stamps on the signal. That is family-aware (separate credit/debit/naked
+# bars), it is the engine's judgment rather than a second opinion, and it cannot
+# invert the semantics.
+#
+# KNOWN GAP, deliberately silent: breakeven-vs-EM is intentionally NOT a hard
+# gate ("a ranking quality factor, not a hard filter" -- evaluate_gates' own
+# docstring), so the swing path covers liquidity, R:R and PoP but NOT the
+# expected-move dealbreaker. No chip is emitted for that: it would appear on
+# every swing signal, which is exactly the wallpaper this engine avoids.
+_SWING_KEYS = frozenset(("fit_dir", "fit_vol", "q_rr", "q_be", "q_pop", "q_liq"))
+
+# evaluate_gates' reason vocabulary -> (flag key, readable label). Keys are
+# prefixed `gate_` to stay distinct from the scanner keys.
+_GATE_FLAGS = {
+    "liquidity": ("gate_liquidity", "Thin liquidity"),
+    "R:R": ("gate_rr", "Reward too thin for the risk"),
+    "PoP": ("gate_pop", "Low probability of profit"),
+}
+
+
+def _is_swing(factor_scores):
+    """True for the swing/Strategy-Finder factor shape.
+
+    Any overlap with the six q_*/fit_* names is proof: none of them appears in
+    the scanner's eleven or the IC's three, so this cannot false-positive, and
+    testing the whole set rather than one key survives a partial dict.
+    """
+    return bool(_SWING_KEYS & set(factor_scores))
+
+
+def _swing_flags(grade_reason):
+    """Flags for a swing signal, taken from the engine's own gate verdict.
+
+    ``grade_reason`` is one of: "Fails: <dims>", "Excellent on all quality
+    gates", "Passes all quality gates", "Fillable but middling quality", or
+    "unscored" (strategy_scoring.py:653-680). Only the first and last say
+    anything a trader must act on.
+    """
+    reason = (grade_reason or "").strip()
+    if reason == "unscored":
+        return [{"key": "unscored", "label": "Signal could not be scored",
+                 "state": "unavailable"}]
+    if not reason.startswith("Fails:"):
+        return []
+    out = []
+    for token in reason[len("Fails:"):].split(","):
+        dim = token.strip()
+        if not dim:
+            continue
+        # Unknown dimensions are forwarded rather than dropped, so a new gate
+        # added upstream surfaces instead of silently vanishing.
+        key, label = _GATE_FLAGS.get(dim, (f"gate_{dim}", f"Fails {dim} quality gate"))
+        out.append({"key": key, "label": label, "state": "tripped"})
+    return out
+
+
 def _is_iron_condor(signal, factor_scores):
     """True for an IC by EITHER its type or its leg-scored factor shape.
 
@@ -185,6 +257,7 @@ def flags_for(signal):
     if not isinstance(fs, dict):
         fs = {}
     unavailable = set(s.get("factors_unavailable") or ())
+    grade_reason = s.get("grade_reason")
     out = []
 
     def add(key, label, tripped, measured):
@@ -193,6 +266,19 @@ def flags_for(signal):
                         "state": "unmeasured"})
         elif tripped:
             out.append({"key": key, "label": label, "state": "tripped"})
+
+    # A row carrying NO scores at all is not triageable: synth_from_captured and
+    # synth_from_trade emit neither factor_scores nor grade_reason, because an
+    # already-open position has nothing left to reject. Silence, not a chip.
+    # This precedes the IC check on purpose -- both adapters set `type` from
+    # `strategy`, so a captured/paper iron condor would otherwise collect a lone
+    # IC note while a captured/paper credit spread collected nothing.
+    if not fs and not grade_reason:
+        return []
+
+    # Swing / Strategy Finder: the engine already decided, per family.
+    if _is_swing(fs):
+        return _swing_flags(grade_reason)
 
     is_ic = _is_iron_condor(s, fs)
     if is_ic:

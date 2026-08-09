@@ -104,8 +104,13 @@ def test_liquidity_unmeasured_when_bid_ask_absent():
 
 
 def test_flag_thin_credit_uses_rr_pct():
-    assert any(f["key"] == "rr" for f in detail.flags_for({"rr_pct": 12}))
-    assert not any(f["key"] == "rr" for f in detail.flags_for({"rr_pct": 35}))
+    # rr_pct always rides on a SCORED signal -- every scanner spread and IC
+    # carries factor_scores too -- so the fixture keeps a scanner-shaped score.
+    # A bare {"rr_pct": ...} is the score-less shape, which is silent by design.
+    def sig(rr):
+        return {"rr_pct": rr, "factor_scores": {"liq": 95}, "bid": 1.10, "ask": 1.12}
+    assert any(f["key"] == "rr" for f in detail.flags_for(sig(12)))
+    assert not any(f["key"] == "rr" for f in detail.flags_for(sig(35)))
 
 
 def test_flag_near_gamma_wall():
@@ -188,6 +193,74 @@ def test_iron_condor_still_checks_credit_vs_risk():
            "factor_scores": {"pcs_leg": 70, "ccs_leg": 65, "delta_bonus": -2}}
     keys = [f["key"] for f in detail.flags_for(sig)]
     assert "ic" in keys and "rr" in keys
+
+
+# --- swing / Strategy Finder shape ------------------------------------------
+# Third vocabulary: {fit_dir, fit_vol, q_rr, q_be, q_pop, q_liq}
+# (strategy_scoring.py:664). Its thresholds are NOT the scanner's -- q_be rewards
+# a breakeven INSIDE the expected move, the opposite of norm_em_buffer -- so
+# flags come from the engine's own per-family gates via grade_reason.
+
+_SWING_FS = {"fit_dir": 70.0, "fit_vol": 60.0, "q_rr": 55.0,
+             "q_be": 40.0, "q_pop": 65.0, "q_liq": 80.0}
+
+
+def test_swing_failed_gates_become_tripped_flags():
+    sig = {"type": "LONG_CALL", "factor_scores": dict(_SWING_FS),
+           "grade_reason": "Fails: liquidity, R:R"}
+    flags = detail.flags_for(sig)
+    keys = [f["key"] for f in flags]
+    assert keys == ["gate_liquidity", "gate_rr"]
+    assert all(f["state"] == "tripped" for f in flags)
+
+
+def test_swing_passing_gates_raise_no_flags():
+    for reason in ("Passes all quality gates", "Excellent on all quality gates",
+                   "Fillable but middling quality"):
+        sig = {"type": "BULL_CALL", "factor_scores": dict(_SWING_FS),
+               "grade_reason": reason}
+        assert detail.flags_for(sig) == [], reason
+
+
+def test_swing_unscored_reports_unavailable():
+    sig = {"type": "LONG_PUT", "factor_scores": dict(_SWING_FS),
+           "grade_reason": "unscored"}
+    flags = detail.flags_for(sig)
+    assert len(flags) == 1
+    assert flags[0]["key"] == "unscored" and flags[0]["state"] == "unavailable"
+
+
+def test_swing_pop_gate_flag():
+    sig = {"factor_scores": dict(_SWING_FS), "grade_reason": "Fails: PoP"}
+    assert [f["key"] for f in detail.flags_for(sig)] == ["gate_pop"]
+
+
+def test_swing_shape_never_uses_scanner_thresholds():
+    # q_be 40 would trip the scanner's `em < 50` bar, but q_be rewards a
+    # breakeven INSIDE the move -- inverted. A passing swing signal must stay
+    # silent no matter how low q_be is.
+    sig = {"factor_scores": dict(_SWING_FS, q_be=5.0, q_liq=1.0, q_rr=2.0),
+           "grade_reason": "Passes all quality gates"}
+    assert detail.flags_for(sig) == []
+
+
+# --- score-less rows (captured / paper) --------------------------------------
+# Fourth shape: synth_from_captured and synth_from_trade emit NO factor_scores
+# and NO grade_reason. There is nothing to triage on an already-open position.
+
+def test_paper_trade_shape_raises_no_flags():
+    sig = {"symbol": "SPY", "credit": 1.55, "max_loss": 3.45,
+           "short_strike": 480, "long_strike": 475, "dte": 7}
+    assert detail.flags_for(sig) == []
+    assert detail.flag_count(sig) == 0
+
+
+def test_scoreless_iron_condor_also_raises_no_flags():
+    # Both synth adapters set `type` from `strategy`, so a captured/paper IC
+    # carries type == "IC" with no factor_scores. The IC note is for a TRIAGEABLE
+    # signal whose checks vanished -- an open position has no checks either way.
+    sig = {"symbol": "SPX", "type": "IC", "credit": 2.10, "dte": 3}
+    assert detail.flags_for(sig) == []
 
 
 def test_flag_class_warns_for_unavailable_and_unmeasured():
