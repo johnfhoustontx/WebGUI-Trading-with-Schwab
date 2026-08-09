@@ -217,19 +217,25 @@ def _dte_from_expiration(exp):
 
 
 def _max_loss_per_share(t):
-    """Whole-position ``max_loss_total`` reduced to per-share dollars.
+    """The trade's max loss in PER-SHARE dollars, matching ``entry_credit``.
 
-    The ledger writer (``options-scanner``'s ``create_paper_trade``, line 117)
-    stores ``max_loss_total = max_loss * quantity * 100`` while the trade's
-    ``entry_credit`` is PER SHARE, so feeding both to the detail panel
-    displayed a per-share credit beside a whole-position max loss -- a mismatch
-    that scales with quantity. Prefer a stored per-share ``max_loss``; otherwise
-    divide the total back down. Returns None when quantity is unknown, since a
-    total cannot be reduced without it and a wrong number is worse than none.
+    The ledger writer (``options-scanner``'s ``create_paper_trade``) persists BOTH
+    ``max_loss_per`` (per share) and ``max_loss_total`` (``max_loss * quantity *
+    100``, the whole position). Reading the total while ``entry_credit`` is per
+    share displayed a per-share credit beside a whole-position max loss -- a
+    mismatch that scales with quantity.
+
+    ``max_loss_per`` is a real persisted column and is the EXACT value, so it is
+    the primary source; ``max_loss`` is honoured next for callers that synthesize
+    a trade-shaped dict by hand instead of loading a ledger row. Dividing the
+    total back down is only a fallback for a row carrying neither, and it needs
+    ``quantity`` -- absent that, return None rather than a figure wrong by a
+    factor of the position size.
     """
-    direct = _num(t.get("max_loss"))
-    if direct is not None:
-        return direct
+    for key in ("max_loss_per", "max_loss"):
+        direct = _num(t.get(key))
+        if direct is not None:
+            return direct
     total = _num(t.get("max_loss_total"))
     qty = _num(t.get("quantity"))
     if total is None or not qty:

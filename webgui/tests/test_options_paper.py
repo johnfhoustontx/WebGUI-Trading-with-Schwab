@@ -225,6 +225,24 @@ def test_synth_max_loss_is_per_share_not_whole_position():
     assert s["credit"] == pytest.approx(1.55)
 
 
+def test_synth_max_loss_prefers_stored_per_share_over_division():
+    # The ledger persists the exact per-share max loss as ``max_loss_per``
+    # (a real column). It must win over reconstructing the value from the
+    # whole-position total -- the totals here DISAGREE on purpose, so this
+    # fails loudly if the precedence is ever reversed.
+    trade = {"symbol": "SPY", "entry_credit": 1.55, "max_loss_per": 3.45,
+             "max_loss_total": 9999.0, "quantity": 3, "expiration": "2099-01-15"}
+    assert paper.synth_from_trade(trade)["max_loss"] == pytest.approx(3.45)
+
+
+def test_synth_max_loss_per_share_survives_missing_quantity():
+    # With the exact per-share value stored there is nothing to reconstruct,
+    # so a missing quantity must NOT degrade the row to None.
+    trade = {"symbol": "SPY", "entry_credit": 1.55, "max_loss_per": 3.45,
+             "max_loss_total": 1035.0, "expiration": "2099-01-15"}
+    assert paper.synth_from_trade(trade)["max_loss"] == pytest.approx(3.45)
+
+
 def test_synth_max_loss_none_when_quantity_missing():
     # Without quantity the total cannot be reduced to per-share. Better to show
     # nothing than a figure that is wrong by a factor of the position size.
