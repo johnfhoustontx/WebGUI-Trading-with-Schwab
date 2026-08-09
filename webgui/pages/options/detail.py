@@ -102,6 +102,37 @@ def money_per_contract(per_share):
     return "—" if v is None else f"${v:,.2f} per contract"
 
 
+def breakevens(raw):
+    """Normalize a breakeven field to a list of floats.
+
+    Iron condors store TWO breakevens as the string "put_be/call_be"
+    (scanner_engine.py:1069). The old code formatted with ``_money``, which
+    requires a number, so every IC rendered an em-dash. Credit spreads store a
+    plain float. Both shapes are handled; anything unparseable yields [].
+    """
+    if raw is None:
+        return []
+    if isinstance(raw, bool):
+        return []
+    if isinstance(raw, (int, float)):
+        return [float(raw)]
+    out = []
+    for part in str(raw).split("/"):
+        try:
+            out.append(float(part.strip()))
+        except (TypeError, ValueError):
+            return []
+    return out
+
+
+def breakeven_text(raw):
+    """Display string for one or two breakevens, or an em-dash when absent."""
+    vals = breakevens(raw)
+    if not vals:
+        return "—"
+    return " / ".join(f"${v:,.2f}" for v in vals)
+
+
 def _signal_title(s):
     return " · ".join(x for x in (s.get("symbol", ""), s.get("type", ""),
                                   s.get("trade_type", "")) if x) or "Signal"

@@ -79,3 +79,23 @@ def test_per_contract_passes_through_none_and_junk():
 def test_money_per_contract_labels_its_unit():
     assert detail.money_per_contract(1.55) == "$155.00 per contract"
     assert detail.money_per_contract(None) == "—"
+
+
+def test_breakevens_parses_iron_condor_string():
+    assert detail.breakevens("5900.5/6010.2") == [5900.5, 6010.2]
+
+
+def test_breakevens_accepts_a_plain_number():
+    assert detail.breakevens(398.45) == [398.45]
+
+
+def test_breakevens_returns_empty_for_missing_or_junk():
+    assert detail.breakevens(None) == []
+    assert detail.breakevens("") == []
+    assert detail.breakevens("not/a/number") == []
+
+
+def test_breakeven_text_formats_both_sides():
+    assert detail.breakeven_text("5900.5/6010.2") == "$5,900.50 / $6,010.20"
+    assert detail.breakeven_text(398.45) == "$398.45"
+    assert detail.breakeven_text(None) == "—"
