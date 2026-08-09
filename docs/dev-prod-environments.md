@@ -69,6 +69,22 @@ Template: `config/env.local.example.toml`.
 
 Do this once, with the market closed. Order matters.
 
+> **Why the order matters: until step 5 writes dev's marker, BOTH checkouts
+> resolve to `prod`.** A missing marker means prod, and prod's own marker says
+> prod — so for the whole middle of this checklist there are two prod
+> checkouts on one machine, both wanting `:8100`, `:8210`-`:8215`, `:8500` and
+> Redis db 0.
+>
+> Starting the new stack before the old one is stopped therefore collides on
+> every port. The failure is nastier than a clean refusal: whichever process
+> binds first wins, the rest die into log files, and the survivors are a mix of
+> the two checkouts' code — with a proxy that answers on `:8100` while being the
+> one you didn't mean to start. `/status` will look plausible.
+>
+> So: **stop the old stack (step 4) before starting prod (step 6)**, and don't
+> start dev until its marker exists. The overlap ends the moment step 5 writes
+> `name = "dev"`, which moves that checkout to 9210-9215 / `:9500` / db 1.
+
 **1. Clone prod and pin it to `main`.**
 
 ```powershell
