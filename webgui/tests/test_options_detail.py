@@ -315,3 +315,25 @@ def test_breakeven_text_formats_both_sides():
     assert detail.breakeven_text("5900.5/6010.2") == "$5,900.50 / $6,010.20"
     assert detail.breakeven_text(398.45) == "$398.45"
     assert detail.breakeven_text(None) == "—"
+
+
+def test_contract_lines_put_credit_spread():
+    sig = {"type": "PCS", "short_strike": 400, "long_strike": 395, "width": 5}
+    assert detail.contract_lines(sig) == ["Sell 400 P  /  Buy 395 P", "5 wide"]
+
+
+def test_contract_lines_call_credit_spread():
+    sig = {"type": "CCS", "short_strike": 420, "long_strike": 425, "width": 5}
+    assert detail.contract_lines(sig)[0] == "Sell 420 C  /  Buy 425 C"
+
+
+def test_contract_lines_iron_condor_has_two_legs():
+    sig = {"type": "IC", "short_strike": 390, "long_strike": 385,
+           "call_short": 420, "call_long": 425}
+    lines = detail.contract_lines(sig)
+    assert "Sell 390 P  /  Buy 385 P" in lines
+    assert "Sell 420 C  /  Buy 425 C" in lines
+
+
+def test_contract_lines_empty_when_no_strikes():
+    assert detail.contract_lines({"type": "PCS"}) == []

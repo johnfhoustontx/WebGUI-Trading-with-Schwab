@@ -398,6 +398,38 @@ def breakeven_text(raw):
     return " / ".join(f"${v:,.2f}" for v in vals)
 
 
+def _leg_pair(short_k, long_k, right):
+    """One 'Sell X / Buy Y' instruction line, or None when strikes are absent."""
+    if short_k is None or long_k is None:
+        return None
+    return f"Sell {short_k:g} {right}  /  Buy {long_k:g} {right}"
+
+
+def contract_lines(signal):
+    """The position as instructions rather than a range.
+
+    '$400 - $395 (5-wide)' read as a descending range and hid which leg was
+    short. An iron condor yields two lines, one per vertical.
+    """
+    s = signal or {}
+    lines = []
+    if s.get("type") == "IC":
+        for sk, lk, right in ((s.get("short_strike"), s.get("long_strike"), "P"),
+                              (s.get("call_short"), s.get("call_long"), "C")):
+            line = _leg_pair(sk, lk, right)
+            if line:
+                lines.append(line)
+        return lines
+    right = "C" if str(s.get("type", "")).upper().startswith("CC") else "P"
+    line = _leg_pair(s.get("short_strike"), s.get("long_strike"), right)
+    if line:
+        lines.append(line)
+    w = s.get("width")
+    if lines and isinstance(w, (int, float)) and not isinstance(w, bool):
+        lines.append(f"{w:g} wide")
+    return lines
+
+
 def _signal_title(s):
     return " · ".join(x for x in (s.get("symbol", ""), s.get("type", ""),
                                   s.get("trade_type", "")) if x) or "Signal"
