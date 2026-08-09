@@ -82,6 +82,74 @@ def test_factor_rows_keeps_a_genuine_zero_known():
     assert by_label["Liquidity"] == (0, True)   # a real wide-spread reading
 
 
+# ── factor_rows: the THIRD vocabulary (swing / Strategy Finder) ─────────────
+# strategy_scoring.py:664 scores every multi-family structure on
+# {fit_dir, fit_vol, q_rr, q_be, q_pop, q_liq} -- reached from /options/swing AND
+# the scanner's Directional subtab. factor_rows knew only the scanner's eleven and
+# the IC's three, so it looked up keys that do not exist and rendered an
+# all-em-dash card while six real, computed quality factors sat in the payload.
+SWING_FS = {"fit_dir": 72.0, "fit_vol": 41.5, "q_rr": 88.0,
+            "q_be": 55.0, "q_pop": 63.0, "q_liq": 90.0}
+
+
+def test_factor_rows_swing_vocabulary():
+    rows = detail.factor_rows(SWING_FS, "LONG_CALL")
+    assert len(rows) == 6
+    by_label = {label: (val, known) for label, val, known in rows}
+    assert by_label == {
+        "R:R": (88.0, True),
+        "Breakeven vs move": (55.0, True),
+        "PoP": (63.0, True),
+        "Liquidity": (90.0, True),
+        "Direction fit": (72.0, True),
+        "Volatility fit": (41.5, True),
+    }
+
+
+def test_factor_rows_swing_orders_quality_before_fit():
+    # Quality dominates the composite (0.7*quality + 0.3*fit) and within each
+    # group the rows follow that group's own weights, so the card reads in order
+    # of actual influence.
+    labels = [label for label, _v, _k in detail.factor_rows(SWING_FS, "LONG_CALL")]
+    assert labels == ["R:R", "Breakeven vs move", "PoP", "Liquidity",
+                      "Direction fit", "Volatility fit"]
+
+
+def test_factor_rows_swing_detected_by_shape_not_trade_type():
+    """The misroute the shape-based check exists to prevent.
+
+    A swing signal's ``type`` can be "PCS" or "IC" (adapt_credit_spread /
+    adapt_iron_condor re-score existing scanner structures on the swing model), so
+    branching on the type would send a swing-scored iron condor into the IC branch
+    and render three em-dashes for pcs_leg/ccs_leg/delta_bonus that it never had.
+    """
+    for trade_type in ("IC", "PCS", None, ""):
+        rows = detail.factor_rows(SWING_FS, trade_type)
+        labels = [label for label, _v, _k in rows]
+        assert labels[0] == "R:R" and len(rows) == 6, trade_type
+        assert "Put leg" not in labels
+
+
+def test_factor_rows_swing_partial_dict_still_routes_to_swing():
+    # One q_*/fit_* key is proof of the shape; the absent ones stay unknown rather
+    # than falling back to the scanner's eleven.
+    rows = detail.factor_rows({"q_liq": 70.0}, "PCS")
+    by_label = {label: (val, known) for label, val, known in rows}
+    assert len(rows) == 6
+    assert by_label["Liquidity"] == (70.0, True)
+    assert by_label["PoP"] == (None, False)      # absent -> unknown, NOT 0
+
+
+def test_factor_rows_swing_keeps_provenance_semantics():
+    # A present 0 is a real reading; an explicit factors_unavailable entry is not.
+    rows = detail.factor_rows({**SWING_FS, "q_liq": 0}, "LONG_PUT")
+    assert dict((l, k) for l, _v, k in rows)["Liquidity"] is True
+    assert dict((l, v) for l, v, _k in rows)["Liquidity"] == 0
+    rows = detail.factor_rows(SWING_FS, "LONG_PUT", unavailable=["q_liq"])
+    by_label = {label: (val, known) for label, val, known in rows}
+    assert by_label["Liquidity"] == (None, False)
+
+
 def test_factor_value_text_shows_dash_for_unknown():
     assert detail.factor_value_text(80, True) == "80"
     assert detail.factor_value_text(None, False) == "—"

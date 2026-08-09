@@ -42,6 +42,35 @@ FACTOR_LABELS = [
     ("liq", "Liquidity"), ("trend", "Trend"), ("gex", "GEX"), ("dex", "DEX"),
 ]
 
+# The swing / Strategy Finder vocabulary (strategy_scoring.py:664) — see the
+# block comment above ``_is_swing``, which detects it by SHAPE.
+#
+# ORDER = descending influence on the composite, so the card reads top-down in
+# order of what actually moved the score: quality first (0.7 of the composite vs
+# fit's 0.3), and within each group by that group's own weights — QUALITY_WEIGHTS
+# q_rr .30 > q_be .25 = q_pop .25 > q_liq .20, then FIT_DIR_W .6 > FIT_VOL_W .4.
+#
+# LABELS deliberately reuse the scanner's wording for the three concepts the two
+# vocabularies share ("R:R", "PoP", "Liquidity"). Two reasons: the same concept
+# should not read as two different things depending on which tab you came from,
+# and the economics rows directly above this card already spell out the RAW
+# figures as "Risk / reward" and "Probability" — so the spelled-out forms would
+# each appear TWICE in one card, on two different scales (a percentage above, a
+# 0-100 quality grade here). The scanner branch resolved that same collision the
+# same way, and both are genuine trader terms rather than casual shortenings.
+#
+# ``q_be`` gets whole words instead: the scanner's nearest label is "EM Buffer",
+# but the two are INVERTED (see the ``_is_swing`` comment) — reusing it would be
+# actively wrong, and "EM" is a shortening anyway. It is one label covering a
+# family-dependent measure (directional: breakeven within reach of the 1-sigma
+# move; neutral: a profit zone wide relative to it), so it names the comparison
+# rather than the direction.
+_SWING_FACTOR_LABELS = [
+    ("q_rr", "R:R"), ("q_be", "Breakeven vs move"), ("q_pop", "PoP"),
+    ("q_liq", "Liquidity"), ("fit_dir", "Direction fit"),
+    ("fit_vol", "Volatility fit"),
+]
+
 _PLACEHOLDER = "Select a signal to view details…"
 
 
@@ -70,10 +99,19 @@ def factor_rows(factor_scores, trade_type, unavailable=None):
     ``factors_unavailable`` list from Tier 2 when present -- exact rather than
     inferred. A value that IS present and is not listed is treated as real,
     including a genuine 0 (a real wide-spread liquidity reading).
+
+    THREE vocabularies, and the swing one is chosen by SHAPE, not ``trade_type``.
+    A swing signal's type can be "PCS" or "IC" (adapt_credit_spread /
+    adapt_iron_condor re-score existing scanner structures on the swing model), so
+    a type-keyed branch would send a swing-scored iron condor into the IC branch
+    and print three em-dashes for leg factors it never had. ``_is_swing`` is the
+    same predicate ``flags_for`` uses, so the two cannot drift apart.
     """
     fs = factor_scores or {}
     missing = set(unavailable or ())
-    if trade_type == "IC":
+    if _is_swing(fs):
+        keys = _SWING_FACTOR_LABELS
+    elif trade_type == "IC":
         keys = [("pcs_leg", "Put leg"), ("ccs_leg", "Call leg"),
                 ("delta_bonus", "Delta bonus")]
     else:
