@@ -1744,6 +1744,36 @@ def test_run_flow_alerts_uoa_excludes_vix(monkeypatch):
     assert all("$VIX" not in a["symbol"] for a in sent)
 
 
+def test_flow_alerts_cap_holds_a_full_day():
+    """The published list was capped at 50, which drops the morning's alerts before
+    anyone can look at them. A full session across ~45 symbols needs headroom."""
+    from services.options_svc import handlers
+    assert handlers._FLOW_ALERTS_MAX >= 300
+
+
+def test_run_flow_alerts_uoa_carries_a_timestamp(monkeypatch):
+    """Crossover and gamma_flip alerts carry ts; UOA did not, because detect_uoa
+    never emits one — so a chronological view had nothing to place a third of its
+    rows on a timeline with."""
+    from shared.bus import Bus
+    from services.options_svc import handlers, compute
+    bus = Bus(fake=True)
+    contract = {"type": "uoa", "side": "call", "symbol": "SPY", "strike": 450.0,
+                "expiry": "2026-07-18", "dte": 2, "cost": 1.85, "volume": 8200,
+                "oi": 1300, "vol_oi": 6.3, "premium": 1517000.0}
+    monkeypatch.setattr(handlers, "_flow_alert_symbols", lambda: ["SPY"])
+    monkeypatch.setattr(handlers, "_load_flow_series_for", lambda conn, sym, limit: [])
+    monkeypatch.setattr(compute, "take_uoa_stash", lambda: {"SPY": [dict(contract)]})
+    monkeypatch.setattr(handlers, "_flow_now_ts", lambda: 1754750000)
+    monkeypatch.setattr(handlers.push_notify, "send_flow_alert", lambda a, **k: None)
+
+    handlers.run_flow_alerts(bus)
+
+    alerts = bus.cache_get("cache:options:flow_alerts").payload["alerts"]
+    uoa = [a for a in alerts if a["type"] == "uoa"]
+    assert uoa and uoa[0]["ts"] == 1754750000
+
+
 def test_publish_matrix_caches_view(monkeypatch):
     """publish_matrix calls compute.build_matrix and caches/publishes the result
     under cache:options:matrix (skip_unchanged, so an unchanged matrix is silent)."""
