@@ -352,7 +352,10 @@ def test_start_webgui_derives_its_port_instead_of_hardcoding_it():
     existed — from dev it starts on :9500 while announcing prod's port."""
     src = "\n".join(l for l in _bat("start_webgui.bat").splitlines()
                     if not l.strip().upper().startswith("REM"))
-    assert "repo_paths.NICEGUI_PORT" in src
+    # Matched loosely on purpose: the probe imports `repo_paths as r`, so a
+    # literal "repo_paths.NICEGUI_PORT" match broke on the alias while the
+    # property it was checking still held. Assert the property, not the spelling.
+    assert "repo_paths" in src and "NICEGUI_PORT" in src
     assert "8500" not in src, "a literal web GUI port is back in start_webgui.bat"
 
 
