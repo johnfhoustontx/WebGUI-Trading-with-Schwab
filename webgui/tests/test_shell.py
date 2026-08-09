@@ -885,3 +885,37 @@ def test_strategy_tools_group_is_reachable_from_the_drawer():
     # Every group must get a drawer item: one _nav_group_link call per group.
     src = inspect.getsource(main._layout)
     assert src.count("_nav_group_link(") == len(main._NAV_GROUPS)
+
+
+def test_window_title_tags_the_PAGE_title_not_just_the_default(monkeypatch):
+    """The per-page title is what a browser tab actually shows.
+
+    `_layout` calls `ui.page_title` on every page, which OVERRIDES the
+    `ui.run(title=...)` default — so tagging only the ui.run title left every
+    real page reading "Market Scanner" in BOTH environments. Caught in a live
+    browser (document.title), not by the original test, which only checked that
+    `ui.run` was handed `window_title()`.
+    """
+    import main
+
+    monkeypatch.setattr(main, "IS_DEV", True)
+    assert main.window_title("Market Scanner") == "DEV · Market Scanner"
+    monkeypatch.setattr(main, "IS_DEV", False)
+    assert main.window_title("Market Scanner") == "Market Scanner"
+
+
+def test_layout_routes_the_page_title_through_window_title():
+    """Source inspection: `_layout` runs per-request and cannot execute here.
+
+    Without this, a future edit could set `ui.page_title(...)` directly again
+    and silently restore the untagged-tab bug.
+    """
+    import inspect
+
+    import main
+
+    src = inspect.getsource(main._layout)
+    assert "ui.page_title(window_title(" in src, (
+        "_layout must pass the page label through window_title(), or dev tabs "
+        "lose their prefix again"
+    )

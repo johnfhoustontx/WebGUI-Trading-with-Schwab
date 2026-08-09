@@ -414,13 +414,22 @@ def brand_lockup_html(static_dir=None):
             f'</span>{chip}</div>')
 
 
-def window_title():
+def window_title(page: str | None = None):
     """The browser-tab / taskbar title, environment-tagged.
 
     Prefixed in dev so a tab is identifiable before it renders (and in the
     taskbar, where the favicon is per-route and the title is the only tell).
-    Prod is EXACTLY ``theme.BRAND_NAME`` — unchanged from before environments."""
-    return f"DEV · {theme.BRAND_NAME}" if IS_DEV else theme.BRAND_NAME
+    Prod is EXACTLY the unprefixed title — unchanged from before environments.
+
+    ``page`` is the per-page label. It is a parameter because ``_layout`` calls
+    ``ui.page_title`` on EVERY page, and that OVERRIDES the ``ui.run(title=…)``
+    default — so tagging only the ``ui.run`` title left every real page reading
+    e.g. "Market Scanner" in both environments, which is precisely where the
+    distinction is needed: the chip is in the page, but the tab strip is what
+    you read when the tabs are narrow. Verified in a live browser, not inferred.
+    """
+    base = page or theme.BRAND_NAME
+    return f"DEV · {base}" if IS_DEV else base
 
 
 def market_status_parts(now=None):
@@ -1077,7 +1086,7 @@ def _layout(active: str, title: str):
         # rgba in _NAV_CSS (the JIT can't emit var()/rgba() arbitraries).
         ui.colors(primary=theme.MENU_ACCENT)
     # Browser tab: title = the selected menu item; favicon = this page's color.
-    ui.page_title(_NAV_LABEL.get(active, theme.BRAND_NAME))
+    ui.page_title(window_title(_NAV_LABEL.get(active, theme.BRAND_NAME)))
     ui.add_head_html(_favicon_link(_TAB_COLOR.get(active, "#42a5f5")))
     # Icon rail: laid out at the rail width (or the open width when pinned); the
     # _NAV_CSS :hover rule expands only the ASIDE over the content (see the rail
