@@ -230,6 +230,42 @@ The proper fix is deferred but tractable: the engine already computes full
 per-leg factor scores inside `_leg_score` and then discards everything but the
 composite. Preserving them would let both legs be flagged normally.
 
+### The root cause: `factor_scores` is three different vocabularies
+
+The iron-condor blindness was not a one-off. Chasing it revealed that
+`factor_scores` is not one schema but **three**, and the flag engine had been
+designed against only the first:
+
+| Source | Keys | Where |
+|---|---|---|
+| Scanner credit spreads | `rr, pop, theta, iv, iv_hv, vega, em, liq, trend, gex, dex` | `scoring.py:48-60` |
+| Scanner iron condors | `pcs_leg, ccs_leg, delta_bonus` | `scanner_engine.py:1654` |
+| Swing / Strategy Finder | `fit_dir, fit_vol, q_rr, q_be, q_pop, q_liq` | `strategy_scoring.py:664` |
+
+Any page-side logic that reads `factor_scores` by key name silently does nothing
+on two of the three. **Check all three before adding another.**
+
+**Mapping between them is unsafe.** `q_breakeven_vs_em` rewards a breakeven
+*inside* the expected move — "closer / inside EM = higher"
+(`strategy_scoring.py:369`) — because a directional debit trade profits from a
+small move. `norm_em_buffer` rewards the opposite, because a credit seller wants
+distance. Same concept, **inverted sign**, driven by opposite payoff profiles. A
+naive `q_be < 50` test would have flagged good swing trades as bad and passed bad
+ones.
+
+*Decision:* for swing signals, derive flags from the engine's OWN gate result
+rather than re-deriving thresholds. `evaluate_gates` (`strategy_scoring.py:555`)
+already returns a family-aware `reasons` list over `["liquidity", "R:R", "PoP"]`,
+with separate bars per family (credit / debit / naked), surfaced on the signal as
+`grade_reason`. Reading it is family-correct by construction and cannot invert
+semantics.
+
+The swing path therefore covers liquidity, R:R and PoP but **not** the
+expected-move dealbreaker, because breakeven-vs-EM is deliberately not a hard
+gate in that engine ("a ranking quality factor, not a hard filter"). That gap is
+left silent rather than chipped, on the same reasoning as `gex`/`dex` above: a
+warning present on every swing signal is noise, not information.
+
 ### Data contract
 
 Adapters stop emitting bare numbers whose units depend on their source. Each
