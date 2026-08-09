@@ -115,6 +115,50 @@ WALL_FLAG_BAR = 30     # too close to a gamma wall: 100 = >=1% of spot away
 
 _SEMANTIC_BAR = 50     # the scorer's own neutral/boundary point
 
+# WHY THERE IS NO "== 50.0 MEANS UNMEASURED" INFERENCE.
+#
+# An earlier cut treated an exact 50.0 on em/trend/gex/dex as proof the factor
+# was never measured. That inference is unsound, and measurably so: driving the
+# REAL scorer with an ordinary 7-DTE PCS returns em/gex/dex = 50.0 (no walls
+# supplied, no DTE-sized expected move) AND trend = 50.0 -- so a perfectly
+# normal signal raised four "not measured" chips. Flags that fire on every trade
+# are wallpaper, and the layout depends on their being ABSENT when a trade is
+# clean.
+#
+# trend is the case that proves the inference wrong rather than merely noisy:
+# norm_trend returns exactly 50.0 BOTH for a missing trend AND for a real
+# NEUTRAL reading (scoring.py:250-251). Those are opposite meanings collapsed
+# into one number upstream, so the page cannot tell them apart -- and for a
+# NEUTRAL trend the correct answer is silence anyway ("not against the
+# structure" is not a dealbreaker).
+#
+# So em/trend/gex/dex now emit ONLY "tripped". This knowingly accepts a silent
+# gap -- a genuinely-absent em/gex/dex says nothing. The real fix is Tier 2
+# emitting ``factors_unavailable``; that EXPLICIT path is still honored below,
+# only the inferred one is gone.
+
+# A real iron condor is scored leg-wise: scanner_engine.py:1654 sets
+# factor_scores to {pcs_leg, ccs_leg, delta_bonus} ONLY, so em/trend/gex/dex/liq
+# simply do not exist on it and every check below would silently find nothing.
+# Left alone an IC renders a clean, flagless panel -- a false negative in a
+# safety signal, worse than a spurious warning. It gets an explicit note instead.
+_IC_NOTE = {"key": "ic", "label": "Dealbreaker checks unavailable for iron condors",
+            "state": "unavailable"}
+
+
+def _is_iron_condor(signal, factor_scores):
+    """True for an IC by EITHER its type or its leg-scored factor shape.
+
+    Both, because each covers the other's blind spot: ``type`` is the app-wide
+    convention (``factor_rows``/``_strikes_text`` already branch on it) and is
+    the only evidence on an adapter-synthesized row that carries no
+    factor_scores at all, such as a paper trade; ``pcs_leg`` is direct proof of
+    the shape that causes the blindness, and survives a row whose type field was
+    renamed or dropped. Neither predicate can fire on a non-IC -- only
+    score_iron_condor emits pcs_leg -- so the union adds no false positives.
+    """
+    return signal.get("type") == "IC" or "pcs_leg" in factor_scores
+
 
 def _score(fs, key):
     v = fs.get(key)
@@ -124,10 +168,13 @@ def _score(fs, key):
 def flags_for(signal):
     """Dealbreaker flags for a signal: [{key, label, state}, ...].
 
-    ``state`` is "tripped" (measured and beyond the bar) or "unmeasured" (the
-    inputs were never available). An unmeasured dealbreaker is surfaced rather
-    than hidden -- scoring.py renders missing data as a neutral-looking 50, so
-    silence would be false reassurance.
+    ``state`` is "tripped" (measured and beyond the bar), "unmeasured" (Tier 2
+    said so, or bid/ask are absent), or "unavailable" (the iron-condor note --
+    the checks cannot run at all).
+
+    Flags are ABSENT for a clean trade. Only liquidity infers its own
+    provenance, from bid/ask presence; the other four report "tripped" only.
+    See the block comment above for why the 50.0 sentinel was removed.
 
     Total over adversarial input: never raises, always returns a list.
     """
@@ -147,23 +194,35 @@ def flags_for(signal):
         elif tripped:
             out.append({"key": key, "label": label, "state": "tripped"})
 
-    # Liquidity -- bid/ask presence on the signal is direct proof of measurement.
-    liq = _score(fs, "liq")
-    liq_measured = (s.get("bid") is not None and s.get("ask") is not None
-                    and "liq" not in unavailable)
-    if liq is not None or not liq_measured:
-        add("liq", "Thin liquidity", liq is not None and liq < _SEMANTIC_BAR,
-            liq is not None and liq_measured)
+    is_ic = _is_iron_condor(s, fs)
+    if is_ic:
+        # Say so outright, then skip the five checks whose keys an IC lacks.
+        out.append(dict(_IC_NOTE))
+    else:
+        # Liquidity -- bid/ask presence on the signal is direct proof of
+        # measurement, so this one keeps its "unmeasured" state.
+        liq = _score(fs, "liq")
+        liq_measured = (s.get("bid") is not None and s.get("ask") is not None
+                        and "liq" not in unavailable)
+        if liq is not None or not liq_measured:
+            add("liq", "Thin liquidity", liq is not None and liq < _SEMANTIC_BAR,
+                liq is not None and liq_measured)
 
-    # Credit vs risk -- rr_pct rides on the signal, so presence is proof.
+    # Credit vs risk -- rr_pct rides on the signal, so presence is proof. This is
+    # the ONE dealbreaker that also works for an iron condor
+    # (scanner_engine.py:1065 sets rr_pct on the IC itself), so it stays outside
+    # the branch above.
     rr = s.get("rr_pct")
     rr_val = float(rr) if isinstance(rr, (int, float)) and not isinstance(rr, bool) else None
     if rr_val is not None:
         add("rr", "Credit thin for the risk", rr_val < MIN_RR_PCT, True)
 
-    # Expected move / trend / walls -- raw inputs are not on the signal, so an
-    # exact 50.0 is the only page-side hint of "never measured". Suggestive, not
-    # proof; factors_unavailable from Tier 2 makes it exact when present.
+    if is_ic:
+        return out
+
+    # Expected move / trend / walls -- "tripped" only. An exact 50.0 is NOT
+    # treated as evidence of anything (see above); an explicit
+    # factors_unavailable entry from Tier 2 still is.
     for key, label, bar in (("em", "Short strike inside 1σ move", _SEMANTIC_BAR),
                             ("trend", "Trend against the structure", _SEMANTIC_BAR),
                             ("gex", "Near a gamma wall", WALL_FLAG_BAR),
@@ -171,18 +230,25 @@ def flags_for(signal):
         val = _score(fs, key)
         if val is None:
             continue
-        measured = key not in unavailable and val != float(_SEMANTIC_BAR)
-        add(key, label, val < bar, measured)
+        add(key, label, val < bar, key not in unavailable)
     return out
 
 
 def flag_count(signal):
-    """How many flags a signal raises -- drives the collapsed-strip badge."""
+    """How many flags a signal raises -- drives the collapsed-strip badge.
+
+    Counts the iron-condor note too: a zero badge on an IC would restore exactly
+    the false confidence that note exists to prevent.
+    """
     return len(flags_for(signal))
 
 
 def flag_class(state):
-    """Finite state -> a fixed palette class (never build a class from a value)."""
+    """Finite state -> a fixed palette class (never build a class from a value).
+
+    "unavailable" styles as a warning, not neutral: being unable to triage is
+    something to be told about, not a clean bill of health.
+    """
     return TXT_NEG if state == "tripped" else TXT_WARN
 
 

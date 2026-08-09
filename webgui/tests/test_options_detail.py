@@ -128,6 +128,74 @@ def test_flag_count_counts_only_tripped_and_unmeasured():
     assert detail.flag_count({"factor_scores": {"em": 30, "gex": 10}}) >= 2
 
 
+# --- flags fire only on REAL dealbreakers -----------------------------------
+# The inferred "== 50.0 means unmeasured" sentinel was removed: a realistic
+# swing signal lands on exactly 50.0 for em/gex/dex (no walls, no sized EM) AND
+# for trend (a genuine NEUTRAL reading), so it raised four "not measured" chips
+# on an ordinary trade -- flags became wallpaper.
+
+def test_realistic_swing_signal_raises_no_flags():
+    # Values taken verbatim from the REAL scoring.calc_composite_score output for
+    # an ordinary 7-DTE PCS, so this pins actual scorer behavior, not a guess.
+    sig = {"type": "PCS", "rr_pct": 30, "bid": 1.10, "ask": 1.13,
+           "factor_scores": {"rr": 60.0, "pop": 55.6, "theta": 100.0, "iv": 60,
+                             "iv_hv": 50.0, "vega": 84.0, "em": 50.0, "liq": 57.7,
+                             "trend": 50.0, "gex": 50.0, "dex": 50.0}}
+    assert detail.flags_for(sig) == []
+
+
+def test_neutral_trend_raises_no_trend_flag():
+    # norm_trend returns exactly 50.0 for a real NEUTRAL trend (scoring.py:250),
+    # which means "not against the structure" -- so silence is the right answer.
+    sig = {"factor_scores": {"trend": 50}, "bid": 1.1, "ask": 1.12}
+    assert not any(f["key"] == "trend" for f in detail.flags_for(sig))
+
+
+def test_explicit_unavailable_still_reports_unmeasured():
+    # The sentinel is gone but the EXACT Tier-2 path must survive. Value 80 would
+    # read as measured-and-fine on its own; factors_unavailable overrides it.
+    flags = detail.flags_for({"factor_scores": {"em": 80},
+                              "factors_unavailable": ["em"],
+                              "bid": 1.1, "ask": 1.12})
+    em = [f for f in flags if f["key"] == "em"]
+    assert em and em[0]["state"] == "unmeasured"
+
+
+# --- iron condors ------------------------------------------------------------
+# A real IC carries factor_scores {pcs_leg, ccs_leg, delta_bonus} only
+# (scanner_engine.py:1654), so em/trend/gex/dex/liq cannot be checked at all. A
+# flagless IC must never read as a clean IC.
+
+def test_iron_condor_reports_checks_unavailable():
+    sig = {"type": "IC", "rr_pct": 30, "bid": 1.10, "ask": 1.13,
+           "factor_scores": {"pcs_leg": 70, "ccs_leg": 65, "delta_bonus": -2}}
+    flags = detail.flags_for(sig)
+    assert len(flags) == 1
+    assert flags[0]["key"] == "ic" and flags[0]["state"] == "unavailable"
+    assert detail.flag_count(sig) >= 1
+
+
+def test_iron_condor_detected_without_a_type_field():
+    # pcs_leg in factor_scores is proof of the IC shape even if `type` is absent.
+    sig = {"factor_scores": {"pcs_leg": 70, "ccs_leg": 65, "delta_bonus": -2}}
+    assert any(f["key"] == "ic" for f in detail.flags_for(sig))
+
+
+def test_iron_condor_still_checks_credit_vs_risk():
+    # rr_pct IS present on IC signals (scanner_engine.py:1065), so it is the one
+    # dealbreaker that genuinely works for them.
+    sig = {"type": "IC", "rr_pct": 12,
+           "factor_scores": {"pcs_leg": 70, "ccs_leg": 65, "delta_bonus": -2}}
+    keys = [f["key"] for f in detail.flags_for(sig)]
+    assert "ic" in keys and "rr" in keys
+
+
+def test_flag_class_warns_for_unavailable_and_unmeasured():
+    assert detail.flag_class("tripped") == theme.TXT_NEG
+    assert detail.flag_class("unmeasured") == theme.TXT_WARN
+    assert detail.flag_class("unavailable") == theme.TXT_WARN
+
+
 def test_render_returns_handle_with_update():
     # render() needs a NiceGUI context; just assert the API surface exists.
     assert callable(detail.render)
