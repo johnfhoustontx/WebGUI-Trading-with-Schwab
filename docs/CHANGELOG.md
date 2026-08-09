@@ -4,7 +4,39 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-08-09 (**Dev / prod cutover PERFORMED, plus the launcher guards it exposed**:
+**Last updated:** 2026-08-09 (**Flow Alerts screen — the alerts finally have somewhere to live**:
+`options_svc` has detected options-flow alerts on every 1-min GEX tick for weeks — premium
+**crossover**, contract-level **unusual activity**, dealer **gamma flip** — pushed each to the phone and
+published a day-scoped list to `cache:options:flow_alerts`. The webgui read that list for exactly one
+purpose: chime and toast ids it hadn't acked. **Miss the toast and the alert was gone.** The only durable
+trace anywhere was the Opportunity Board's per-symbol *count*, which tells you a symbol fired without
+telling you what or when. New **`/options/flow`** is a pure Tier-1 reader of that same key — no new
+service, command, or cache key — mounted as a standalone **left-rail item under Options** beside
+Opportunity Board (a market-wide read, deliberately not a step in the Options strip's per-signal
+find→analyze→track→repair workflow). A chronological table, **newest first**: Time (CT) · **Age** ·
+Symbol · Type · Side · Detail · Alert, with per-type detail cells (`$1.20M calls vs $400k puts` /
+`0DTE 737C · 12,400 vol / 1,100 OI (11.3×) · $2.13M` / `spot 6412 vs flip 6400`) tinted green/red from a
+finite `(type, side)` → Tailwind class map. Kind + symbol filters run **client-side** over already-read
+rows so toggling is instant, and **one 2 s timer serves two cadences** — the payload is re-read only when
+the cache version moves, while the Age column recomputes against the rows already on screen, so age stays
+live without churning the table. **Click any row → Dealer Positioning on that symbol** (`handoff`'s new
+one-shot `gamma` stash, consumed at `gamma.render()`'s existing build-time symbol sync, where the dropdown
+is already set *before* `on_value_change` is wired — so the handed symbol beats the cached one without a
+spurious refresh, then one explicit refresh moves the snapshot to it). **Two Tier-2 defects surfaced while
+building it, both confirmed against the live key**: the published list was capped at **50** and the live
+payload held **exactly 50** — it had been silently dropping the morning's alerts (now **300**); and
+`flow_alerts.detect_uoa` **never emitted a `ts`** at all, so **only 18 of those 50 alerts carried a
+timestamp** (the 15 crossovers + 3 gamma flips) while all 32 unusual-activity alerts had none — nothing to
+place a third of the tape on a timeline with. The drain loop now stamps the detecting tick. **Restart
+`options_svc` + the webgui**; UOA timestamps appear only on alerts published *after* that restart, so
+pre-existing rows legitimately render a blank Time. Scope is deliberately **today only** — no history, no
+date picker, no nav badge, and the existing toast/chime/phone-push/Settings toggle are untouched. Also
+corrected: the drawer-icon test's docstring miscounted its own scope (claimed 3 groups + 3 rail pages when
+there were 4 and 2). webgui **1102** green; options_svc **932** green (its 2 date-relative
+`test_expected_move` failures are the documented baseline). Design/plan:
+[design](plans/2026-08-09-flow-alerts-screen-design.md) / [plan](plans/2026-08-09-flow-alerts-screen.md).)
+
+Prior — 2026-08-09 (**Dev / prod cutover PERFORMED, plus the launcher guards it exposed**:
 both environments now run simultaneously and were verified live — prod on 8100/8210-8215/8500 from
 `D:\WebGUI Trading Prod`, dev on 9210-9215/`:9500`/Redis db 1 with all four suppressions active, one
 shared Memurai, dev holding **no proxy of its own**. `IS_DEV=True` was confirmed for real outside pytest

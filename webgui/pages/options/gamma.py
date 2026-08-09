@@ -2644,9 +2644,15 @@ def render():
         # Sync the dropdown to the symbol actually in the cache so a page (re)build
         # doesn't show $SPX while another symbol's data is displayed (which a later
         # refresh would then revert to $SPX). Done BEFORE wiring on_value_change.
-        _set_symbol((state["snap"] or {}).get("symbol"))
+        # A symbol handed over from the Flow Alerts tape WINS over the cached one —
+        # it is an explicit request — and the refresh below moves the cache to it.
+        from .handoff import take_pending_gamma
+        handoff_sym = take_pending_gamma()
+        _set_symbol(handoff_sym or (state["snap"] or {}).get("symbol"))
         symbol_in.on_value_change(lambda e: _on_symbol_change())
         _render_view()
+        if handoff_sym:
+            _request_refresh()
 
     _render_view()                       # instant empty/placeholder paint
     ui.timer(0.05, _initial_load, once=True)  # big snapshot read off-loop

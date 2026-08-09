@@ -248,7 +248,10 @@ _FLOW_COOLDOWN_KEY = "cache:options:flow_alert_cooldowns"
 # Per-symbol last-alerted gamma regime ('positive'/'negative'), date-scoped so the
 # first snapshot each day sets the baseline without firing an open-time alert.
 _GAMMA_REGIME_KEY = "cache:options:gamma_regime_state"
-_FLOW_ALERTS_MAX = 50
+# Cap on the day's published list. 50 dropped the morning's alerts before anyone
+# could read them; ~45 symbols with a 30-min crossover cooldown, a $5M UOA floor
+# and 4 gamma-flip names fit comfortably in 300.
+_FLOW_ALERTS_MAX = 300
 # Trailing flow rows the crossover detector needs (it compares the last two
 # premium-bearing rows; a couple extra guard against a forward-only NULL-premium
 # row). UOA no longer reads the series — it rides the poll's on_chain stash — so
@@ -1038,6 +1041,9 @@ def run_flow_alerts(bus) -> None:
                 cooldowns[cid] = now_ts
                 a = dict(c)
                 a["id"] = cid
+                # detect_uoa emits no ts (crossover/gamma_flip do) — stamp the
+                # detecting tick so every alert can be placed on a timeline.
+                a["ts"] = now_ts
                 a["text"] = flow_alerts.alert_text(a)
                 fresh.append(a)
 

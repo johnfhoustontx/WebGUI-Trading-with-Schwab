@@ -15,7 +15,7 @@ def test_shell_registers_all_pages():
         "/", "/options/paper", "/options/captured", "/options/portfolio",
         "/options/calculator", "/options/swing", "/options/gamma",
         "/options/simulator", "/options/expected-move", "/options/rescue",
-        "/options/matrix",
+        "/options/matrix", "/options/flow",
         "/sentiment", "/sentiment/sectors", "/sentiment/rotation", "/sentiment/rrg",
         "/sentiment/momentum",
         "/trade", "/portfolio", "/driver", "/settings",
@@ -394,6 +394,7 @@ def test_breadcrumb_parts_grouped_and_flat():
     # Rail pages read as standalone sections, same as flat pages.
     assert main.breadcrumb_parts("/options/gamma") == ("Dealer Positioning", "")
     assert main.breadcrumb_parts("/options/matrix") == ("Opportunity Board", "")
+    assert main.breadcrumb_parts("/options/flow") == ("Flow Alerts", "")
     # Calculator is no longer a standalone rail page — it's a Strategy Tools tab.
     assert main.breadcrumb_parts("/options/calculator") == ("Strategy Tools", "Calculator")
 
@@ -483,9 +484,9 @@ def test_drawer_icons_are_present_and_distinct():
     """The drawer is a 64px icon rail (hover-to-expand) whose collapsed state shows
     ONLY icons (_NAV_CSS fades the labels to opacity:0) — so each drawer item needs
     a non-empty, distinct icon. ``_nav_link``/``_nav_group_link`` render the
-    ``icon`` arg; the dot is retired. Scope is the 9 drawer items (3 groups + the
-    3 OPTIONS_RAIL pages under Options + the 3 FLAT_NAV pages); child-page icons
-    are not rail affordances (the tab strip renders labels only)."""
+    ``icon`` arg; the dot is retired. Scope is the 10 drawer items (the 4
+    _NAV_GROUPS + the 3 OPTIONS_RAIL pages under Options + the 3 FLAT_NAV pages);
+    child-page icons are not rail affordances (the tab strip renders labels only)."""
     from collections import Counter
 
     import main
@@ -495,7 +496,7 @@ def test_drawer_icons_are_present_and_distinct():
              + [(label, icon) for _p, label, icon in main.FLAT_NAV])
     # Pinned count: all()/set-length are vacuously true on an empty list, so this
     # is the non-vacuity guard. A legitimate new drawer item should bump it.
-    assert len(items) == 9, f"expected 9 drawer items, got {len(items)}: {items}"
+    assert len(items) == 10, f"expected 10 drawer items, got {len(items)}: {items}"
     assert not [l for l, i in items if not i], \
         f"drawer items with no icon: {[l for l, i in items if not i]}"
     dupes = {i: [l for l, x in items if x == i]
@@ -870,9 +871,9 @@ def test_strategy_tools_moved_out_of_their_old_homes():
     assert [r for r, _l, _i in main.OPTIONS_CHILDREN] == [
         "/", "/options/swing", "/options/expected-move", "/options/captured",
         "/options/paper", "/options/portfolio", "/options/rescue"]
-    # The rail keeps the two remaining standalone pages.
+    # The rail keeps the standalone market-wide pages (Flow Alerts joined 2026-08-09).
     assert [r for r, _l, _i in main.OPTIONS_RAIL] == [
-        "/options/gamma", "/options/matrix"]
+        "/options/gamma", "/options/matrix", "/options/flow"]
 
 
 def test_strategy_tools_group_is_reachable_from_the_drawer():
