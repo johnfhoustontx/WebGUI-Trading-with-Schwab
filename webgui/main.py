@@ -298,6 +298,7 @@ SENTIMENT_CHILDREN = [
 OPTIONS_RAIL = [
     ("/options/gamma", "Dealer Positioning", "stacked_line_chart"),
     ("/options/matrix", "Opportunity Board", "grid_on"),
+    ("/options/flow", "Flow Alerts", "bolt"),
 ]
 
 # The two MODELLING tools, paired as their own group (2026-07-28). They are the
@@ -474,6 +475,7 @@ _NAV_LABEL = {route: label for route, label, _icon in
 _TAB_COLOR = {
     "/": "#42a5f5",                       # Market Scanner — blue
     "/options/matrix": "#4dd0e1",         # Opportunity Board — cyan
+    "/options/flow": "#d500f9",           # Flow Alerts — magenta
     "/options/paper": "#66bb6a",          # Paper Ledger — green
     "/options/captured": "#ab47bc",       # Captured Signals — purple
     "/options/portfolio": "#26a69a",      # Paper Account — teal
@@ -1322,6 +1324,13 @@ def options_matrix_page() -> None:
     with _layout("/options/matrix", "Opportunity Board"):
         from pages.options import matrix
         matrix.render()
+
+
+@ui.page("/options/flow")
+def options_flow_page() -> None:
+    with _layout("/options/flow", "Flow Alerts"):
+        from pages.options import flow
+        flow.render()
 
 
 @ui.page("/sentiment")

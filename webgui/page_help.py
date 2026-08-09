@@ -187,6 +187,22 @@ without opening each page.
 - **Click any column header** to sort — e.g. hottest names or biggest movers first.
 - Green leans bullish, red leans bearish. Auto-refreshes as the data updates.
 """,
+    "/options/flow": """
+**Flow Alerts — the simple version**
+
+Everything the options service flagged **today**, newest first — the same alerts
+that chime and hit your phone, kept somewhere you can actually read them.
+
+- **Crossover** — call premium overtook put premium on a symbol, or the reverse.
+- **Unusual activity** — one contract traded far more than its open interest.
+- **Gamma flip** — spot crossed the dealer gamma flip, so dealer hedging starts
+  damping the move instead of amplifying it (or the reverse).
+
+**Age** tells you whether this just happened or is this morning's news. Filter by
+type or symbol, and **click any row** to open Dealer Positioning for that symbol.
+
+Covers today only; the list resets overnight.
+""",
     "/options/paper": """
 **Paper Ledger — the simple version**
 

@@ -62,9 +62,9 @@ def test_phase3c_pages_have_no_inline_style():
         assert ":style=" not in src, f"{fn} still uses a Vue :style= slot binding"
 
 
-# Options Matrix: Tailwind tokens + colored-cell slots binding stamped `_*_class`
-# fields (no `.style(`, no Vue `:style=`).
-OPTIONS_MATRIX_FILES = ["matrix.py"]
+# Standalone Tier-1 reader pages: Tailwind tokens + colored-cell slots binding
+# stamped `_*_class` fields (no `.style(`, no Vue `:style=`).
+OPTIONS_MATRIX_FILES = ["matrix.py", "flow.py"]
 
 
 def test_options_matrix_page_has_no_inline_style():
