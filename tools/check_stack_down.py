@@ -112,9 +112,31 @@ def refusal_text(busy, env_name=None, root=None):
     return "\n".join(lines)
 
 
-def main():
+def _only_filter(argv):
+    """The ``--only LABEL`` argument, or ``None``. PURE.
+
+    Single-process launchers (``start_webgui.bat``) need to ask about their OWN
+    port, not the whole stack: starting the web GUI alone while the services run
+    is legitimate, so the unfiltered check would refuse something correct. The
+    filter keeps ``stop_all._targets()`` as the one definition of a port —
+    reproducing "the webgui is on NICEGUI_PORT" in a batch file is exactly the
+    drift this module exists to prevent.
+    """
+    argv = list(argv or ())
+    if "--only" in argv:
+        i = argv.index("--only")
+        if i + 1 < len(argv):
+            return argv[i + 1]
+    return None
+
+
+def main(argv=None):
+    only = _only_filter(sys.argv[1:] if argv is None else argv)
     try:
-        busy = busy_targets()
+        targets = _targets()
+        if only is not None:
+            targets = [t for t in targets if t and t[0] == only]
+        busy = busy_targets(targets)
     except Exception as exc:  # noqa: BLE001
         # Degrade to the pre-guard behavior. See the module docstring: refusing
         # on a check we could not run would be the more expensive mistake.

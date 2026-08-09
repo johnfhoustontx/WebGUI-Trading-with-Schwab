@@ -340,3 +340,31 @@ def test_the_check_exists_and_reads_its_ports_from_stop_all():
         "check_stack_down.py stopped sourcing its ports from stop_all._targets - "
         "the starter and the stopper can now disagree about what this "
         "environment owns")
+
+
+def _bat(name):
+    return (pathlib.Path(__file__).resolve().parents[1] / name).read_text(
+        encoding="utf-8", errors="surrogateescape")
+
+
+def test_start_webgui_derives_its_port_instead_of_hardcoding_it():
+    """It used to say :8500 everywhere. Correct until a second environment
+    existed — from dev it starts on :9500 while announcing prod's port."""
+    src = "\n".join(l for l in _bat("start_webgui.bat").splitlines()
+                    if not l.strip().upper().startswith("REM"))
+    assert "repo_paths.NICEGUI_PORT" in src
+    assert "8500" not in src, "a literal web GUI port is back in start_webgui.bat"
+
+
+def test_start_webgui_checks_only_its_own_component():
+    """Scoped: starting the web GUI while the services run is legitimate."""
+    src = "\n".join(l for l in _bat("start_webgui.bat").splitlines()
+                    if not l.strip().upper().startswith("REM"))
+    assert "check_stack_down.py --only webgui" in src
+
+
+def test_open_webgui_helper_takes_the_port_as_an_argument():
+    src = "\n".join(l for l in _bat("_open_webgui.bat").splitlines()
+                    if not l.strip().upper().startswith("REM"))
+    assert "%~1" in src
+    assert "%WEBPORT%" in src

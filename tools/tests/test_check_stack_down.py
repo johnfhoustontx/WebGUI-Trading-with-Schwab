@@ -204,3 +204,27 @@ def test_the_web_gui_is_probed_last_like_it_is_stopped_last():
     means a future reader comparing the two never finds them out of step."""
     assert csd.busy_targets is not None
     assert [label for label, _ in stop_all._targets()][-1] == "webgui"
+
+
+def test_only_filter_parses_the_label():
+    assert csd._only_filter(["--only", "webgui"]) == "webgui"
+    assert csd._only_filter([]) is None
+    assert csd._only_filter(["--only"]) is None          # missing value, not a crash
+
+
+def test_only_narrows_the_check_to_one_component(monkeypatch):
+    """start_webgui.bat starts ONE process. Refusing because a *service* is up
+    would block something legitimate, so --only must narrow to that label."""
+    monkeypatch.setattr(csd, "_targets", lambda: [("proxy", 1), ("webgui", 2)])
+    seen = {}
+    monkeypatch.setattr(csd, "busy_targets", lambda t: seen.setdefault("t", list(t)) or [])
+    csd.main(["--only", "webgui"])
+    assert seen["t"] == [("webgui", 2)]
+
+
+def test_no_only_checks_everything(monkeypatch):
+    monkeypatch.setattr(csd, "_targets", lambda: [("proxy", 1), ("webgui", 2)])
+    seen = {}
+    monkeypatch.setattr(csd, "busy_targets", lambda t: seen.setdefault("t", list(t)) or [])
+    csd.main([])
+    assert seen["t"] == [("proxy", 1), ("webgui", 2)]
