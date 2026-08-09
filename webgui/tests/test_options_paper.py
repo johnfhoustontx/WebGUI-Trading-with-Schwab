@@ -241,6 +241,50 @@ def test_synth_preserves_plain_float_breakeven():
     assert detail.breakeven_text(s["breakeven"]) == "$398.45"
 
 
+# ── DEBIT trades carry their strikes ONLY in ``legs`` ────────────────────────
+# paper_trader._create_debit_trade (paper_trader.py:80) stores short_strike /
+# long_strike / width as None and puts the real strikes in ``legs`` -- lowercase
+# {kind, side, strike, expiration, qty}, straight off strategy_scanner._leg_from.
+DEBIT_TRADE = {
+    "trade_id": "T7", "symbol": "SPY", "strategy": "BULL_CALL", "status": "OPEN",
+    "trade_type": "SWING", "direction": "DEBIT", "expiration": "2030-03-15",
+    "quantity": 1, "entry_credit": -3.20,
+    "short_strike": None, "long_strike": None, "width": None,
+    "legs": [{"kind": "call", "side": "long", "strike": 400.0,
+              "expiration": "2030-03-15", "qty": 1},
+             {"kind": "call", "side": "short", "strike": 410.0,
+              "expiration": "2030-03-15", "qty": 1}],
+}
+
+
+def test_synth_carries_legs_so_a_debit_trade_shows_its_contract():
+    """Without ``legs`` the contract card vanishes entirely for a debit trade.
+
+    ``contract_lines`` prefers ``legs`` and falls back to short_strike/long_strike
+    -- both of which a debit trade stores as None -- so an adapter that dropped
+    ``legs`` left it nothing to render, and the one card that answers "what am I
+    holding" disappeared for exactly the trades whose strikes live nowhere else.
+    """
+    s = paper.synth_from_trade(DEBIT_TRADE)
+    assert detail.contract_lines(s) == ["Buy 400 C  /  Sell 410 C"]
+
+
+def test_synth_long_put_single_leg():
+    s = paper.synth_from_trade({"symbol": "SPY", "strategy": "LONG_PUT",
+                                "direction": "DEBIT", "expiration": "2030-03-15",
+                                "short_strike": None, "long_strike": None,
+                                "legs": [{"kind": "put", "side": "long",
+                                          "strike": 231.0, "qty": 1}]})
+    assert detail.contract_lines(s) == ["Buy 231 P"]
+
+
+def test_synth_credit_spread_keeps_the_strike_key_fallback():
+    # A credit spread carries no legs at all; the strike-key path must be intact.
+    s = paper.synth_from_trade(TRADE)
+    assert not s.get("legs")
+    assert detail.contract_lines(s) == ["Sell 450 P  /  Buy 445 P"]
+
+
 def test_synth_max_loss_is_per_share_not_whole_position():
     # max_loss_total is max_loss * quantity * 100 (paper_trader.py:117).
     # With qty=3 and a $3.45/share max loss, the stored total is $1035.

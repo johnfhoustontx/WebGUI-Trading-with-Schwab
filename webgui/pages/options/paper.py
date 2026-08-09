@@ -268,6 +268,15 @@ def synth_from_trade(trade):
         "long_strike": t.get("long_strike"),
         "call_short": t.get("call_short"),
         "call_long": t.get("call_long"),
+        # A DEBIT trade (LONG_CALL/LONG_PUT/BULL_CALL/BEAR_PUT) stores
+        # short_strike/long_strike/width as None and its real strikes ONLY here
+        # (the ledger's debit-trade writer in ``options-scanner``), in the
+        # canonical {kind, side, strike, qty} shape that detail.contract_lines
+        # prefers. Dropping it left contract_lines nothing
+        # to fall back to, so the contract card vanished entirely for exactly the
+        # trades whose strikes live nowhere else. None for a credit spread, which
+        # keeps taking the strike-key path.
+        "legs": t.get("legs"),
         "width": _num(t.get("width")),
         # NOT coerced. An iron condor stores BOTH breakevens as the string
         # "put_be/call_be" (scanner_engine.py:1069), and ``_num`` is a bare
