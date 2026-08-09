@@ -339,6 +339,31 @@ with the app running**.
   caught it.
 - **The Status page's freshness table will look stale in dev**, because dev
   publishes nothing at rest. That is the snapshot ageing, not a broken service.
+- **A healthy stack is 16 python processes per environment, not 8.** The venv's
+  `python.exe` is a redirector that re-execs the base interpreter, so every
+  component is a **parent/child pair**: the parent's command line carries the
+  checkout path, the child holds the port and does the work. Two environments
+  running at once is therefore ~32 processes, which is normal.
+
+  This misleads process-hunting in three specific ways, all observed while
+  standing prod up:
+
+  | You do | You see | Reality |
+  |---|---|---|
+  | count processes per service | 2 of each | one component, not a duplicate |
+  | grep command lines for the checkout path | only ~half match | children are launched with a **relative** script path, so the checkout never appears |
+  | check a port's owning process | interpreter is the **system** python, not `.venv` | it is the re-exec'd base interpreter; the venv is still what resolved the imports |
+
+  So: match on the **script name**, not the checkout path or the interpreter,
+  and expect pairs. `tools/stop_all.py` already handles this — `hud_root_pids`
+  returns **roots only**, because `taskkill /T` sweeps the child. To tell a real
+  duplicate from a pair, check whether one PID is the other's parent; if they
+  are independent, you genuinely started twice.
+
+  A second launch is mostly harmless — the losers fail to bind the already-held
+  ports and exit within a minute or two — but they do complete their startup
+  work first, so expect one duplicate round of collection (a sentiment backfill
+  is ~10 Schwab calls) in the logs before they die.
 
 ---
 
