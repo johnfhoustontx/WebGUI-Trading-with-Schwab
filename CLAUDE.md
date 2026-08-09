@@ -2267,6 +2267,46 @@ renders the proxy card read-only as *"shared — owned by prod"* and **hides the
 Memurai restart in dev** (one Redis server serves both); dev's webgui carries a
 `DEV` chip in the header lockup and a `DEV ·` tab-title prefix.
 
+**Launcher guards (added 2026-08-09, after both bit in the first hour of use).**
+Two failures, one root: a launcher that starts the *wrong* stack, or a *second*
+copy of the right one, looks like success until you read the ports.
+
+- **A PROD launcher refuses in a dev checkout.** `start_all.bat`,
+  `start_all_wt.bat` and `start_all_hidden.bat` probe `repo_paths.IS_DEV` and
+  exit. This is the mirror of `start_dev.bat`'s existing guard and it is the one
+  that actually cost something: those launchers start a **proxy**, and dev's
+  `PROXY_PORT` *is* prod's `:8100`, so run from dev they bind prod's port while
+  prod never starts — the stack looks healthy while a dev-checkout process serves
+  its market data. In `start_all_hidden.bat` the guard sits ahead of the
+  `__hidden` dispatch, so it fires on the **visible** first pass, before the
+  self-relaunch and before the HUD.
+- **No launcher starts a stack that is already running.** All four call
+  `tools/check_stack_down.py`, which imports **`stop_all._targets()`** and carries
+  no port literal of its own — so the starter and the stopper cannot disagree
+  about what this environment owns. It names the busy ports and the checkout,
+  because with two stacks up "already running" is ambiguous. `--only LABEL`
+  narrows it for single-process launchers; a probe that cannot run degrades to
+  **allow** (its cost is a duplicate process, not a down stack).
+- **`start_webgui.bat` derives its port from `repo_paths`** instead of the `:8500`
+  it used to hardcode in its title, banner, proxy hint and browser helper — from
+  dev it started on `:9500` while announcing prod's port and opening a browser
+  there. `_open_webgui.bat` takes the port as an argument. ⚠ two batch
+  metacharacter traps live here and both were hit: `for /f "usebackq"` strips the
+  quotes around an interpreter path containing spaces, and **`%` in a `-c`
+  argument is eaten by cmd** (`'set X=%s' % v` → `'set X= v`). Emit `set` lines to
+  a temp batch and use concatenation, never `%`-formatting; a test rejects
+  `%s`/`%d` in any `-c` line of that file.
+- **`start_dev.bat`'s waits are bounded.** Its WT branch now calls
+  `:wait_prod_proxy` before opening seven tabs that would all sit blocked, and
+  `:wait_web` returns a failure instead of spinning forever — starting dev before
+  prod used to hang on a message naming the web GUI, one layer below the real
+  blocker.
+
+**The cutover has been performed (2026-08-09).** Both environments run
+simultaneously and were verified live: prod on 8100/8210-8215/8500 from
+`D:\WebGUI Trading Prod`, dev on 9210-9215/9500 with all four suppressions
+active, one shared Memurai, and dev holding **no proxy of its own**.
+
 **Data flows one way.** `tools/snapshot_from_prod.py`, run **from dev**, copies
 prod's SQLite stores (online-backup API — **prod keeps running**) and `DUMP`s db 0
 into db 1. It hard-refuses unless `ENV_NAME == "dev"`, refuses when the two Redis

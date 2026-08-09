@@ -315,9 +315,14 @@ is only ever exercised via monkeypatch. Confirming that dev really withholds the
 proxy and Memurai restart buttons, and shows the `DEV` chip, is a **manual check
 with the app running**.
 
-**7. The first real snapshot has never been run** — no prod clone exists yet. Run
-`--redis-only` first and check prod's `/status` is still green before letting the
-~1.4 GB SQLite half go.
+**7. The SQLite half of the snapshot has never been run for real.** The cutover
+was performed on **2026-08-09** and `--redis-only` has run successfully against
+the live stack (263 of 272 keys, the nine `cmd:*` streams excluded, prod's copy
+untouched, `cache:driver:control` arriving disabled). The **file** half has not:
+the dev checkout *is* the former prod, so it already had every database and never
+needed them copied. The first true `gex_history.db` transfer is therefore still
+ahead of you — keep running `--redis-only` first and confirm prod's `/status` is
+green before letting the ~1.4 GB go.
 
 ---
 

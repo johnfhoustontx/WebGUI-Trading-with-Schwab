@@ -4,7 +4,41 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-08-08 (**Dev / prod environments — two checkouts, one machine, running at once**:
+**Last updated:** 2026-08-09 (**Dev / prod cutover PERFORMED, plus the launcher guards it exposed**:
+both environments now run simultaneously and were verified live — prod on 8100/8210-8215/8500 from
+`D:\WebGUI Trading Prod`, dev on 9210-9215/`:9500`/Redis db 1 with all four suppressions active, one
+shared Memurai, dev holding **no proxy of its own**. `IS_DEV=True` was confirmed for real outside pytest
+(the `DEV` chip renders, the Status page withholds the proxy and Memurai restarts, everything dev owns
+stays restartable) — the check the suite structurally cannot do, since pytest pins identity to prod.
+**Four defects surfaced in the first hour of real use, all in launchers, all invisible as failures.**
+(1) A **PROD launcher run from the DEV checkout** starts a *proxy*, and dev's `PROXY_PORT` IS prod's
+`:8100` — so it bound prod's port while prod never started, and everything looked healthy while a
+dev-checkout process served prod's market data. `start_all{,_wt,_hidden}.bat` now probe
+`repo_paths.IS_DEV` and refuse; in `start_all_hidden.bat` the guard sits ahead of the `__hidden`
+dispatch so it fires on the VISIBLE pass, before the self-relaunch and before the HUD. (2) **Starting a
+stack twice** spawns duplicates that each complete a full startup — real Schwab calls, a sentiment
+backfill — before failing to bind and exiting; all four launchers now call new
+**`tools/check_stack_down.py`**, which imports **`stop_all._targets()`** so the starter and the stopper
+cannot disagree about what this environment owns, with `--only LABEL` for single-process launchers and a
+degrade-to-allow on a probe it cannot run. (3) **`start_dev.bat` hung** when dev was started before prod:
+every tab blocks on `wait_and_run 8100`, nothing binds `:9500`, and `:wait_web` looped forever on a
+message naming the web GUI rather than the proxy underneath it — the WT branch now calls the bounded
+`:wait_prod_proxy` first and `:wait_web` returns a failure with the real diagnosis. (4) **`start_webgui.bat`
+hardcoded `:8500`** in its title, banner, proxy hint and browser helper; from dev it started on `:9500`
+while announcing prod's port and opening a browser there. It now derives everything from `repo_paths`
+and `_open_webgui.bat` takes the port as an argument. ⚠ **Two batch metacharacter traps cost three
+rounds there and are worth knowing**: `for /f "usebackq"` STRIPS the quotes around an interpreter path
+containing spaces (`"D:\WebGUI Trading Prod\.venv\..."` dies as *'D:\WebGUI' is not recognized*), and
+**`%` inside a `-c` argument is eaten by cmd** (`'set X=%s' % v` → `'set X= v`, an unterminated string).
+Emit `set` lines into a temp batch and use CONCATENATION, never `%`-formatting; a test rejects `%s`/`%d`
+in any `-c` line. Also fixed: the **`DEV ·` tab-title prefix never applied** — `_layout` calls
+`ui.page_title()` on every page, overriding `ui.run(title=…)`, so `document.title` read "Market Scanner"
+in BOTH environments; `window_title()` now takes the page label. And **`snapshot_from_prod.py` imported
+`redis` AFTER the SQLite copy loop**, so a wrong interpreter would have written ~1.4 GB and then failed,
+leaving dev with fresh stores and stale Redis. Both caught by USING the thing, not by testing it.
+Operator runbook: [`docs/dev-prod-environments.md`](dev-prod-environments.md).)
+
+Prior — 2026-08-08 (**Dev / prod environments — two checkouts, one machine, running at once**:
 the always-on stack moves to a new **prod** clone at `D:\WebGUI Trading Prod` pinned to `main`, and
 today's folder becomes **dev**. Prod keeps every current port (proxy `:8100`, services 8210-8215, webgui
 `:8500`, Redis db 0) so standing it up is a **relocation, not a reconfiguration**; dev shifts to
