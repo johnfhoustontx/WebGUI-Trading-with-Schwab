@@ -165,6 +165,51 @@ def captured_rows(signals):
     return rows
 
 
+def _float(v):
+    """Coerce to float, or None — stored values arrive as strings often enough."""
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _breakeven_from(r):
+    """Breakeven(s) derived from the stored strikes and per-share entry credit.
+
+    The signals table has NO breakeven column, so the detail panel rendered an
+    em-dash for every captured signal. This is exact arithmetic rather than an
+    estimate: a put credit spread breaks even at ``short_strike - credit`` and a
+    call credit spread ABOVE its short at ``short_strike + credit``. An iron
+    condor has TWO, returned as the ``"put/call"`` string the panel's
+    ``breakevens()`` already parses — the same shape the scanner engine emits.
+    """
+    credit = _float(r.get("entry_credit"))
+    short = _float(r.get("short_strike"))
+    if credit is None or short is None:
+        return None
+    strategy = str(r.get("strategy") or "").upper()
+    if strategy == "IC":
+        call_short = _float(r.get("call_short"))
+        if call_short is None:
+            return None
+        return f"{round(short - credit, 2)}/{round(call_short + credit, 2)}"
+    if strategy == "CCS":
+        return round(short + credit, 2)
+    return round(short - credit, 2)
+
+
+def _pop_from(r):
+    """Probability of profit approximated as ``1 - |short delta|``.
+
+    The signals table stores no PoP. This is the same standard approximation the
+    paper adapter uses, so the two panels agree. ``signal_recorder`` writes
+    ``short_delta`` with a DEFAULT OF 0, so a falsy delta is treated as absent —
+    otherwise a signal that never carried a delta would report a false 100%.
+    """
+    delta = _float(r.get("entry_short_delta"))
+    return round((1.0 - abs(delta)) * 100, 1) if delta else None
+
+
 def synth_from_captured(row):
     """Build a detail-panel signal dict from a captured signal row."""
     r = row or {}
@@ -179,6 +224,9 @@ def synth_from_captured(row):
         "grade": r.get("entry_grade", ""),
         "credit": r.get("entry_credit"),
         "max_loss": r.get("entry_max_loss"),
+        # Neither is a stored column — both are derived. See the helpers above.
+        "breakeven": _breakeven_from(r),
+        "pop_pct": _pop_from(r),
         "dte": r.get("dte_at_entry"),
         "dte_is_entry": r.get("dte_at_entry") is not None,
         "expiration": r.get("expiration", ""),
