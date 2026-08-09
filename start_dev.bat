@@ -82,6 +82,13 @@ echo ============================================
 echo.
 
 call :memurai_check
+REM Check PROD's proxy BEFORE opening seven tabs that would all sit blocked on it.
+REM The hidden branch already did this; the tab branch did not, on the theory that a
+REM visible "waiting for dependency on :8100" tab was self-explanatory. It is not:
+REM the tabs are in a SEPARATE Windows Terminal window, while this window sits on a
+REM message about the web GUI — so starting dev before prod looked like "the dev
+REM launcher is broken". Observed, not hypothesised.
+call :wait_prod_proxy
 
 REM --- Launch all 7 processes as tabs in a SINGLE Windows Terminal window. ---
 REM     Every tab waits for :8100 first (tools\wait_and_run.bat). That is PROD'S
@@ -95,7 +102,7 @@ echo Opening Windows Terminal with the dev services...
 wt new-tab -d "%CD%" --title "DEV Sentiment :9210" cmd /k call tools\wait_and_run.bat 8100 services\sentiment_svc\app.py ; new-tab -d "%CD%" --title "DEV Options :9211" cmd /k call tools\wait_and_run.bat 8100 services\options_svc\app.py ; new-tab -d "%CD%" --title "DEV Portfolio :9212" cmd /k call tools\wait_and_run.bat 8100 services\portfolio_svc\app.py ; new-tab -d "%CD%" --title "DEV Trade :9213" cmd /k call tools\wait_and_run.bat 8100 services\trade_svc\app.py ; new-tab -d "%CD%" --title "DEV Driver :9214" cmd /k call tools\wait_and_run.bat 8100 services\driver_svc\app.py ; new-tab -d "%CD%" --title "DEV Market :9215" cmd /k call tools\wait_and_run.bat 8100 services\market_svc\app.py ; new-tab -d "%CD%" --title "DEV Web GUI :9500" cmd /k call tools\wait_and_run.bat 8100 webgui\main.py
 
 call :wait_web
-call :open_browser
+if errorlevel 1 (call :web_timeout_help) else (call :open_browser)
 
 echo.
 echo ============================================
@@ -135,7 +142,7 @@ call :launch_hidden market_svc    services\market_svc\app.py
 call :launch_hidden webgui        webgui\main.py
 
 call :wait_web
-call :open_browser
+if errorlevel 1 (call :web_timeout_help) else (call :open_browser)
 
 echo.
 echo ============================================
@@ -201,12 +208,38 @@ powershell -NoProfile -Command "Start-Process -FilePath '%H_PY%' -ArgumentList '
 goto :eof
 
 :wait_web
+REM BOUNDED, and it must be. Unbounded, this loop is where "start dev before prod"
+REM goes to die: every tab blocks on :8100, nothing ever binds :9500, and this
+REM window spins forever on a message naming the wrong component. Returns
+REM errorlevel 1 on timeout so the caller can explain instead of opening a dead
+REM page. Counted in ATTEMPTS like :wait_prod_proxy — each probe spawns a
+REM PowerShell, so this is minutes, not 60 seconds.
 echo Waiting for the dev web gui to bind :9500...
+set /a WEB_TRIES=0
 :waitweb
 timeout /t 1 /nobreak >nul
 powershell -NoProfile -Command "try{(New-Object Net.Sockets.TcpClient).Connect('127.0.0.1',9500);exit 0}catch{exit 1}" >nul 2>&1
-if errorlevel 1 goto waitweb
-echo Dev web gui is up.
+if not errorlevel 1 (
+    echo Dev web gui is up.
+    echo.
+    exit /b 0
+)
+set /a WEB_TRIES+=1
+if %WEB_TRIES% LSS 60 goto waitweb
+exit /b 1
+
+:web_timeout_help
+echo.
+echo   The dev web GUI never bound :9500.
+echo.
+echo   Most likely cause: the PROD checkout's proxy on :8100 is not running.
+echo   Every dev tab waits for that proxy before it starts, so nothing binds
+echo   :9500 and there is no page to open. Start prod first:
+echo       D:\WebGUI Trading Prod\start_all_wt.bat
+echo.
+echo   The dev tabs are still open and will start on their own once the proxy
+echo   appears - you do not need to re-run this. Then browse to:
+echo       http://127.0.0.1:9500
 echo.
 goto :eof
 
