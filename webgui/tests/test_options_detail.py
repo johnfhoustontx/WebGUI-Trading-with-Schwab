@@ -15,22 +15,15 @@ def test_pop_color_returns_state_class_tokens():
     assert detail.pop_color("n/a") == theme.TXT_NEUTRAL
 
 
-def test_tile_color_fns_only_return_state_token_classes():
-    # _set_color does remove=STATE_TEXT_CLASSES then add=color_fn(s). That only fully
-    # clears the prior tile color if EVERY color-fn output is a member of the 4-token
-    # set. Pin that invariant: across a representative input space, every tile color-fn
-    # must return a class in theme.STATE_TEXT_CLASSES.
+def test_flag_class_returns_state_token_classes():
+    # flag_class is now the only place the panel maps a state to a color on a
+    # PERSISTENT element (the header flag labels are rebuilt, but pop_color still
+    # colors a body row). Both must stay inside the finite token set so a class
+    # can never be built from a runtime value. The tile color-fns this replaces
+    # are gone with the 2x2 grid; pop_color's own coverage is the test above.
     allowed = set(theme.STATE_TEXT_CLASSES.split())
-    # Representative signals: vary the pop_pct that drives pop_color across its branches
-    # plus the non-numeric/missing fallback; the other color-fns are constant.
-    signals = [
-        {"pop_pct": 80}, {"pop_pct": 60}, {"pop_pct": 40},
-        {"pop_pct": None}, {"pop_pct": "n/a"}, {},
-    ]
-    for _key, _label, _value_fn, color_fn in detail._TILES:
-        for s in signals:
-            cls = color_fn(s)
-            assert cls in allowed, f"tile {_key!r} returned {cls!r} not in STATE_TEXT_CLASSES"
+    for state in ("tripped", "unmeasured", "unavailable", "", None):
+        assert detail.flag_class(state) in allowed
 
 
 def test_factor_rows_returns_11_for_non_ic():

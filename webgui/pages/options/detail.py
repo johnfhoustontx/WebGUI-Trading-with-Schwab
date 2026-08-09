@@ -1,13 +1,25 @@
 """Shared, persistent Trade detail panel.
 
 One panel, reused by every signal table (scanner, captured, paper, swing). Each
-table synthesizes a signal-like dict and calls ``handle.update(signal)``. The
-**header** (signal title + composite-score speedometer + 2x2 tiles) is built ONCE
-in ``render()`` and updated in place; the five cards (Trade Info, Greeks, Composite
-Score factor bars, IV Analysis, Expected Move) rebuild per selection. The
-speedometer is the shared Highcharts angular gauge (``gauge.py`` — painted
-rainbow face + needle); the factor/IV bars + range markers are SVG (``svg.py``).
-Robust to missing keys (fields vary by trade type / source).
+table synthesizes a signal-like dict and calls ``handle.update(signal)``.
+
+LAYOUT = REJECT -> VERIFY -> EXPLORE, top to bottom, because triage is mostly
+fast rejection. The **header** (title + gauge + its caption + the dealbreaker
+flags) is built ONCE in ``render()`` and updated in place; below it the body
+rebuilds per selection as the CONTRACT (what you would actually place), then the
+ECONOMICS (four figures, each carrying its unit), then four COLLAPSED
+expansions — score factors, greeks, implied volatility, expected move — for the
+minority of signals that survive far enough to be explored.
+
+Everything above the expansions answers "reject or not"; nothing that answers it
+is behind a click. The flags are the reason the header is not just a score: they
+are ABSENT for a clean trade, so their presence is the signal.
+
+The speedometer is the shared Highcharts angular gauge (``gauge.py`` — painted
+rainbow face + needle) and ALWAYS names its metric in the caption beneath, since
+it shows the composite score for some sources and PoP for others. The factor/IV
+bars + range markers are SVG (``svg.py``). Robust to missing keys (fields vary by
+trade type / source).
 
 The gauge is persistent (not recreated per selection) so the Highcharts ESM is
 registered at initial page render — a gauge added only on selection, on a page
@@ -17,19 +29,12 @@ from nicegui import ui
 
 from ..gauge import gauge_figure
 from . import svg
-from .theme import (TXT_POS, TXT_WARN, TXT_NEG, TXT_NEUTRAL, STATE_TEXT_CLASSES,
-                    TILE_3D, CARD)
+from .theme import (TXT_POS, TXT_WARN, TXT_NEG, TXT_NEUTRAL,
+                    TILE_3D, CARD, EYEBROW, MUTED)
 
 # Semantic state-color class tokens (Tailwind text-[...] arbitrary values). Names
 # kept (many refs) but the VALUES are now class strings applied via .classes().
 GREEN, AMBER, RED, NEUTRAL = TXT_POS, TXT_WARN, TXT_NEG, TXT_NEUTRAL
-
-
-def _set_color(lbl, cls):
-    """Reactively swap a label's state-color class. .classes() ACCUMULATES, so we
-    must remove the whole finite state set before adding, or repeated repaints
-    stack conflicting text-[...] classes (equal specificity → unpredictable)."""
-    lbl.classes(remove=STATE_TEXT_CLASSES, add=cls)
 
 FACTOR_LABELS = [
     ("rr", "R:R"), ("pop", "PoP"), ("theta", "Theta"), ("iv", "IV Rank"),
@@ -38,15 +43,6 @@ FACTOR_LABELS = [
 ]
 
 _PLACEHOLDER = "Select a signal to view details…"
-
-# 2x2 header tiles: (key, label, value-fn, color-fn).
-_TILES = [
-    ("credit", "Credit", lambda s: _money(s.get("credit")), lambda s: GREEN),
-    ("pop", "PoP", lambda s: _pct(s.get("pop_pct")), lambda s: pop_color(s.get("pop_pct"))),
-    ("breakeven", "Breakeven", lambda s: _money(s.get("breakeven")), lambda s: NEUTRAL),
-    ("dte", "DTE", lambda s: (f"{s.get('dte')} days" if s.get("dte") is not None else "—"),
-     lambda s: NEUTRAL),
-]
 
 
 def pop_color(pop):
@@ -222,7 +218,7 @@ def _is_iron_condor(signal, factor_scores):
     """True for an IC by EITHER its type or its leg-scored factor shape.
 
     Both, because each covers the other's blind spot: ``type`` is the app-wide
-    convention (``factor_rows``/``_strikes_text`` already branch on it) and is
+    convention (``factor_rows``/``contract_lines`` already branch on it) and is
     the only evidence on an adapter-synthesized row that carries no
     factor_scores at all, such as a paper trade; ``pcs_leg`` is direct proof of
     the shape that causes the blindness, and survives a row whose type field was
@@ -336,10 +332,6 @@ def flag_class(state):
     something to be told about, not a clean bill of health.
     """
     return TXT_NEG if state == "tripped" else TXT_WARN
-
-
-def _money(v):
-    return f"${v:,.2f}" if isinstance(v, (int, float)) else "—"
 
 
 def _pct(v):
@@ -558,17 +550,6 @@ def _signal_title(s):
                                   s.get("trade_type", "")) if x) or "Signal"
 
 
-def _tile_slot(label):
-    """A header tile (label + value); returns the value label to update in place.
-
-    ``min-w-0 w-full`` — the tile fills its grid cell and may SHRINK below its
-    content's natural width, so the 2×2 grid always fits the panel (at 290px the
-    old ``min-w-[92px]`` tiles + the gauge overflowed the panel edge)."""
-    with ui.card().classes(f"p-2 min-w-0 w-full {TILE_3D}"):
-        ui.label(label).classes("text-xs opacity-60")
-        return ui.label("—").classes("text-base font-bold")
-
-
 def _kv(label, value, color=None):
     with ui.row().classes("justify-between w-full"):
         ui.label(label).classes("opacity-70 text-sm")
@@ -577,46 +558,40 @@ def _kv(label, value, color=None):
             lbl.classes(add=color)
 
 
-def _strikes_text(s):
-    if s.get("type") == "IC":
-        return (f"P {s.get('short_strike','?')}/{s.get('long_strike','?')}  "
-                f"C {s.get('call_short','?')}/{s.get('call_long','?')}")
-    sk, lk, w = s.get("short_strike"), s.get("long_strike"), s.get("width")
-    if sk is None:
-        return "—"
-    wtxt = f" ({w}-wide)" if isinstance(w, (int, float)) else ""
-    return f"${sk} - ${lk}{wtxt}"
-
-
 def _build_cards(s):
-    """Build the five expansion cards (run inside the cleared body container)."""
-    # Card 1 — Trade Info
-    with ui.expansion("Trade Info", value=True).classes("w-full"):
-        _kv("Expiration", f"{s.get('expiration','—')} ({s.get('dte','?')} DTE)")
-        if isinstance(s.get("underlying_price"), (int, float)):
-            _kv("Current price", _money(s.get("underlying_price")))
-        _kv("Strikes", _strikes_text(s))
-        _kv("Max Loss", _money(s.get("max_loss")), RED)
+    """Contract, then economics, then collapsed detail — reject/verify/explore."""
+    # 1 — THE CONTRACT. What you would actually place, as instructions. This is
+    # first because a signal you cannot identify is one you cannot act on, and
+    # the old panel buried the strikes in a "Strikes" key/value row.
+    lines = contract_lines(s)
+    if lines:
+        with ui.column().classes(f"w-full gap-0 {CARD}"):
+            for line in lines:
+                ui.label(line).classes("text-sm font-bold")
+            exp = s.get("expiration")
+            if exp:
+                ui.label(f"Exp {exp}").classes(f"text-xs {MUTED}")
+
+    # 2 — THE ECONOMICS. Four figures, each carrying its unit: the two dollar
+    # rows say "per contract" outright, so a per-share number can never be read
+    # as a position total.
+    with ui.column().classes("w-full gap-1"):
+        cost_label, cost_text = cost_row(s)
+        _kv(cost_label, cost_text, GREEN if cost_label == "Credit" else NEUTRAL)
+        _kv("Max loss", money_per_contract(s.get("max_loss")), RED)
+        _kv("Breakeven", breakeven_text(s.get("breakeven")))
+        _kv("Probability", _pct(s.get("pop_pct")), pop_color(s.get("pop_pct")))
+
+    # 3 — EXPLORE. All four collapsed: the ladder above already answered
+    # reject-or-not, so nothing here competes with it for attention.
+    with ui.expansion("Score factors").classes("w-full"):
+        if s.get("rr_pct") is not None:
+            _kv("Risk / reward", _pct(s.get("rr_pct")))
         if s.get("max_contracts") is not None:
-            _kv("Max Contracts", str(s.get("max_contracts")))
+            _kv("Max contracts", str(s.get("max_contracts")))
         if isinstance(s.get("expected_pnl_10"), (int, float)):
             v = s["expected_pnl_10"]
-            _kv("E[P&L] (10ct)", f"${v:+,.0f}", GREEN if v >= 0 else RED)
-        if s.get("rr_pct") is not None:
-            _kv("R:R Ratio", _pct(s.get("rr_pct")))
-
-    # Card 2 — Greeks
-    with ui.expansion("Greeks", value=True).classes("w-full"):
-        with ui.grid(columns=4).classes("gap-2 w-full"):
-            _greek("Δ", s.get("short_delta"), fmt="{:+.4f}")
-            theta = s.get("net_theta")
-            _greek("Θ", theta, color=(GREEN if isinstance(theta, (int, float)) and theta > 0 else RED))
-            _greek("Vega", s.get("net_vega"), fmt="{:+.3f}")
-            _greek("IV", s.get("short_iv"), fmt="{:.1f}%")
-
-    # Card 3 — Composite Score (factor bars)
-    with ui.expansion(f"Composite Score: {s.get('composite_score','?')} "
-                      f"({s.get('grade','?')})").classes("w-full"):
+            _kv("Expected P&L (10 contracts)", f"${v:+,.0f}", GREEN if v >= 0 else RED)
         for label, val, known in factor_rows(s.get("factor_scores"), s.get("type"),
                                              s.get("factors_unavailable")):
             with ui.row().classes("items-center gap-2 w-full no-wrap"):
@@ -624,9 +599,17 @@ def _build_cards(s):
                 ui.html(svg.gradient_bar_svg(val if known else 0))
                 ui.label(factor_value_text(val, known)).classes("text-xs w-8 text-right")
 
-    # Card 4 — IV Analysis (best-effort from available keys)
+    with ui.expansion("Greeks").classes("w-full"):
+        with ui.grid(columns=4).classes("gap-2 w-full"):
+            _greek("Δ", s.get("short_delta"), fmt="{:+.4f}")
+            theta = s.get("net_theta")
+            _greek("Θ", theta, color=(GREEN if isinstance(theta, (int, float)) and theta > 0 else RED))
+            _greek("Vega", s.get("net_vega"), fmt="{:+.3f}")
+            _greek("IV", s.get("short_iv"), fmt="{:.1f}%")
+
+    # Implied volatility (best-effort from available keys)
     if any(s.get(k) is not None for k in ("current_iv", "iv_rank", "iv_percentile", "short_iv")):
-        with ui.expansion("IV Analysis").classes("w-full"):
+        with ui.expansion("Implied volatility").classes("w-full"):
             _kv("ATM IV", _pct(s.get("current_iv") if s.get("current_iv") is not None else s.get("short_iv")))
             marker = iv_marker_value(s)
             if (marker is not None
@@ -664,17 +647,21 @@ def _greek(label, value, fmt="{:.3f}", color=None):
 
 
 class _Handle:
-    def __init__(self, state, header, sig_title, gauge_el, tiles, body):
+    def __init__(self, state, header, sig_title, sig_sub, gauge_el, gauge_caption,
+                 flag_box, body):
         self._state = state          # shared with the collapse toggle
-        self._header = header        # persistent header (title + gauge + tiles)
+        self._header = header        # persistent header (title + gauge + flags)
         self._sig_title = sig_title
+        self._sig_sub = sig_sub
         self._gauge = gauge_el
-        self._tiles = tiles          # {key: value-label}
+        self._caption = gauge_caption
+        self._flag_box = flag_box    # rebuilt per selection; empty when clean
         self._body = body            # cleared + rebuilt per selection
 
     def clear(self):
         self._state["has_signal"] = False
         self._header.set_visibility(False)
+        self._flag_box.clear()
         self._body.clear()
         with self._body:
             ui.label(_PLACEHOLDER).classes("opacity-60")
@@ -687,18 +674,23 @@ class _Handle:
         self._state["has_signal"] = True
         self._header.set_visibility(self._state["open"])
         self._sig_title.text = _signal_title(s)
-        # Gauge value: the composite score when the signal has one (scanner/swing/
-        # captured); for a paper trade — which never stored a composite score, so
-        # the gauge used to sit at 0 — fall back to PoP, a real 0-100 quality read.
-        score = s.get("composite_score")
-        if score is None:
-            score = s.get("pop_pct")
-        self._gauge.options = gauge_figure(score or 0, s.get("grade", ""), height=104)
+        self._sig_sub.text = " · ".join(
+            x for x in (s.get("trade_type", ""), dte_text(s)) if x and x != "—")
+
+        # gauge_metric decides the value AND the caption together, so the face can
+        # never show PoP under a composite-score grade (they are different scales).
+        m = gauge_metric(s)
+        self._gauge.options = gauge_figure(m["value"] or 0, m["grade"], height=104)
         self._gauge.update()
-        for key, _label, value_fn, color_fn in _TILES:
-            lbl = self._tiles[key]
-            lbl.text = value_fn(s)
-            _set_color(lbl, color_fn(s))
+        self._caption.text = m["caption"]
+
+        flags = flags_for(s)
+        self._flag_box.clear()
+        with self._flag_box:
+            for f in flags:
+                ui.label(f"⚠ {f['label']}").classes(
+                    f"text-xs {flag_class(f['state'])}")
+
         self._body.clear()
         with self._body:
             _build_cards(s)
@@ -721,18 +713,20 @@ def render(width: int = 360):
                 .tooltip("Collapse panel")
         # Persistent signal header (built once → registers the Highcharts ESM at
         # page load; updated in place per selection). Hidden until a signal lands.
+        # The gauge MUST stay here rather than move into _build_cards: a
+        # ui.highchart created only on selection, on a page whose initial render
+        # had no chart, fails with "Failed to resolve module specifier
+        # nicegui-highcharts" (the ESM import map is fixed at first render).
         header = ui.column().classes("w-full gap-1")
-        tiles = {}
         with header:
             sig_title = ui.label("").classes("text-subtitle1 font-bold")
-            # Gauge STACKED above a full-width 2×2 tile grid: side-by-side the
-            # gauge (160px) + min-width tiles overflowed the 290px panel (tiles
-            # bled past the right edge). Stacking fits every panel width.
+            sig_sub = ui.label("").classes(f"text-xs {MUTED}")
             gauge_el = ui.highchart(gauge_figure(0, "", height=104)) \
                 .classes("self-center w-[160px] h-[104px]")
-            with ui.grid(columns=2).classes("gap-2 w-full"):
-                for key, label, _vf, _cf in _TILES:
-                    tiles[key] = _tile_slot(label)
+            gauge_caption = ui.label("").classes(f"text-xs self-center {EYEBROW}")
+            # Dealbreakers sit ABOVE the fold, directly under the score they
+            # qualify. Empty for a clean trade — absence is the all-clear.
+            flag_box = ui.column().classes("w-full gap-1")
         header.set_visibility(False)
         body = ui.column().classes("w-full gap-2")
         with body:
@@ -753,4 +747,5 @@ def render(width: int = 360):
             toggle_btn.props("icon=first_page").tooltip("Expand panel")
 
     toggle_btn.on_click(toggle)
-    return _Handle(state, header, sig_title, gauge_el, tiles, body)
+    return _Handle(state, header, sig_title, sig_sub, gauge_el, gauge_caption,
+                   flag_box, body)

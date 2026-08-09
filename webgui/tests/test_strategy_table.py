@@ -533,6 +533,21 @@ def test_detail_signal_credit_from_net_credit_is_per_share():
     assert out["net_cost"] == 1.55
 
 
+def test_detail_signal_max_loss_is_per_share():
+    # Same unit collision, second field. _normalize_credit scales the source
+    # max_loss to per-CONTRACT ("x100 here" — strategy_scanner.py:320) and
+    # payoff_metrics builds it that way natively, but the OTHER three detail-panel
+    # sources are per-share: the raw scanner signal (scanner_engine.py:57),
+    # paper's _max_loss_per_share, and captured's entry_max_loss (recorded
+    # straight off a scanner signal). The panel renders it via money_per_contract.
+    assert st.detail_signal(_pcs())["max_loss"] == 3.30
+    assert st.detail_signal(_long_call())["max_loss"] == 2.50
+
+
+def test_detail_signal_max_loss_absent_stays_absent():
+    assert st.detail_signal({"type": "PCS"}).get("max_loss") is None
+
+
 def test_detail_signal_does_not_mutate_its_input():
     sig = {"net_debit": 240.0}
     st.detail_signal(sig)

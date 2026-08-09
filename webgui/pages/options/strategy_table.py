@@ -292,6 +292,15 @@ def detail_signal(signal):
         credit_d = _num(out.get("net_credit"))
         out["credit"] = (round(credit_d / _CONTRACT_MULT, 6)
                          if credit_d is not None else None)
+    # ``max_loss`` is the SAME collision, and unlike credit it has no per-share
+    # source field to shadow it: _normalize_credit scales it x100 and
+    # payoff_metrics builds it per-contract natively, while the panel's other
+    # three feeds are all per-share (raw scanner signal, paper's
+    # _max_loss_per_share, captured's entry_max_loss). Normalize unconditionally
+    # — every value on this path is per-contract.
+    max_loss_d = _num(out.get("max_loss"))
+    if max_loss_d is not None:
+        out["max_loss"] = round(max_loss_d / _CONTRACT_MULT, 6)
     if out.get("breakeven") is None:
         bes = out.get("breakevens") or []
         out["breakeven"] = bes[0] if bes else None
