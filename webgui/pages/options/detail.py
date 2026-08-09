@@ -61,16 +61,40 @@ def pop_color(pop):
     return RED
 
 
-def factor_rows(factor_scores, trade_type):
-    """[(label, value), ...] for the Composite Score card."""
+def factor_rows(factor_scores, trade_type, unavailable=None):
+    """[(label, value, known), ...] for the Score factors card.
+
+    ``known`` is False when the factor was never measured. This matters because
+    scoring.py collapses "unavailable" into a real-looking number in BOTH
+    directions -- 0.0 for rr/pop/theta and 50.0 for the other eight -- and the
+    panel previously drew both as confident bars. A calm mid-grey 50 could mean
+    "never measured", which for triage is false reassurance.
+
+    Absence from the dict is proof. ``unavailable`` is the additive
+    ``factors_unavailable`` list from Tier 2 when present -- exact rather than
+    inferred. A value that IS present and is not listed is treated as real,
+    including a genuine 0 (a real wide-spread liquidity reading).
+    """
     fs = factor_scores or {}
+    missing = set(unavailable or ())
     if trade_type == "IC":
-        return [
-            ("Put leg", fs.get("pcs_leg", 0) or 0),
-            ("Call leg", fs.get("ccs_leg", 0) or 0),
-            ("Delta bonus", fs.get("delta_bonus", 0) or 0),
-        ]
-    return [(label, fs.get(key, 0) or 0) for key, label in FACTOR_LABELS]
+        keys = [("pcs_leg", "Put leg"), ("ccs_leg", "Call leg"),
+                ("delta_bonus", "Delta bonus")]
+    else:
+        keys = FACTOR_LABELS
+    rows = []
+    for key, label in keys:
+        raw = fs.get(key)
+        known = raw is not None and key not in missing
+        rows.append((label, raw if known else None, known))
+    return rows
+
+
+def factor_value_text(value, known):
+    """Numeric text for a factor bar, or an em-dash when it was never measured."""
+    if not known or not isinstance(value, (int, float)):
+        return "—"
+    return f"{value:g}"
 
 
 def _money(v):
@@ -197,11 +221,12 @@ def _build_cards(s):
     # Card 3 — Composite Score (factor bars)
     with ui.expansion(f"Composite Score: {s.get('composite_score','?')} "
                       f"({s.get('grade','?')})").classes("w-full"):
-        for label, val in factor_rows(s.get("factor_scores"), s.get("type")):
+        for label, val, known in factor_rows(s.get("factor_scores"), s.get("type"),
+                                             s.get("factors_unavailable")):
             with ui.row().classes("items-center gap-2 w-full no-wrap"):
                 ui.label(label).classes("text-xs w-20 opacity-80")
-                ui.html(svg.gradient_bar_svg(val))
-                ui.label(f"{val:g}").classes("text-xs w-8 text-right")
+                ui.html(svg.gradient_bar_svg(val if known else 0))
+                ui.label(factor_value_text(val, known)).classes("text-xs w-8 text-right")
 
     # Card 4 — IV Analysis (best-effort from available keys)
     if any(s.get(k) is not None for k in ("current_iv", "iv_rank", "iv_percentile", "short_iv")):

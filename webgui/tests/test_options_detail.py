@@ -37,20 +37,48 @@ def test_factor_rows_returns_11_for_non_ic():
     fs = {"rr": 80, "pop": 62, "theta": 60, "iv": 94, "iv_hv": 46, "vega": 75,
           "em": 19, "liq": 0, "trend": 75, "gex": 100, "dex": 83}
     rows = detail.factor_rows(fs, "PCS")
-    labels = [r[0] for r in rows]
+    labels = [label for label, _val, _known in rows]
     assert "R:R" in labels and "DEX" in labels
     assert len(rows) == 11
+    # every factor was supplied, so every row is a measured reading
+    assert all(known for _label, _val, known in rows)
 
 
 def test_factor_rows_ic_variant():
     rows = detail.factor_rows({"pcs_leg": 70, "ccs_leg": 65, "delta_bonus": -2}, "IC")
-    labels = [r[0] for r in rows]
+    labels = [label for label, _val, _known in rows]
     assert "Put leg" in labels and "Call leg" in labels
 
 
-def test_factor_rows_missing_values_default_zero():
+def test_factor_rows_missing_values_are_unknown_not_zero():
     rows = detail.factor_rows({}, "PCS")
-    assert all(isinstance(v, (int, float)) for _, v in rows)
+    assert all(known is False and val is None for _label, val, known in rows)
+
+
+def test_factor_rows_marks_absent_factor_as_unknown():
+    rows = detail.factor_rows({"rr": 80}, "PCS")
+    by_label = {label: (val, known) for label, val, known in rows}
+    assert by_label["R:R"] == (80, True)
+    assert by_label["PoP"][1] is False       # absent -> unknown, NOT 0
+
+
+def test_factor_rows_respects_explicit_unavailable_list():
+    # Tier 2 may emit factors_unavailable; a present-but-sentinel value is then
+    # known to be missing rather than merely suspected.
+    rows = detail.factor_rows({"liq": 50}, "PCS", unavailable=["liq"])
+    by_label = {label: known for label, _val, known in rows}
+    assert by_label["Liquidity"] is False
+
+
+def test_factor_rows_keeps_a_genuine_zero_known():
+    rows = detail.factor_rows({"liq": 0}, "PCS")
+    by_label = {label: (val, known) for label, val, known in rows}
+    assert by_label["Liquidity"] == (0, True)   # a real wide-spread reading
+
+
+def test_factor_value_text_shows_dash_for_unknown():
+    assert detail.factor_value_text(80, True) == "80"
+    assert detail.factor_value_text(None, False) == "—"
 
 
 def test_render_returns_handle_with_update():
