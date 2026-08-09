@@ -42,6 +42,20 @@ if errorlevel 1 (
     exit /b 1
 )
 
+REM --- Refuse if the dev stack is already up. Ports come from
+REM     tools\check_stack_down.py, which reads them from stop_all's target list,
+REM     so the starter and the stopper cannot disagree about what this
+REM     environment owns - including that PROD'S proxy on :8100 is not ours to
+REM     claim, and so is not a reason to refuse. Starting twice spawns
+REM     duplicates that each do a full startup - real Schwab API calls through
+REM     prod's proxy - before failing to bind and exiting. Checked BEFORE the
+REM     mode select so it applies to the windowless mode too.
+"%PY%" tools\check_stack_down.py
+if errorlevel 1 (
+    pause
+    exit /b 1
+)
+
 REM --- Mode select. Default = ONE Windows Terminal window with 7 live-log tabs.
 REM     Pass  nowindow  (aliases: -nowindow / /nowindow / hidden) to launch every
 REM     process with NO WINDOW at all — each runs hidden and its output is

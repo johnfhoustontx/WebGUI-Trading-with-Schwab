@@ -121,6 +121,21 @@ echo requirements.lock changed - reinstalling...
 :restart
 echo Restarting...
 call start_all_wt.bat nowindow
+REM --- The launcher now REFUSES to start onto occupied ports, so the restart can
+REM     legitimately decline - which means "Promoted." is no longer safe to print
+REM     unconditionally. The realistic cause is a process that survived stop_all:
+REM     :wait_port_free above waits on the proxy and the web GUI, and stop_all
+REM     kills the web GUI LAST, so the six service ports it killed earlier are
+REM     free by then unless one genuinely refused to die. Saying so beats leaving
+REM     prod down under a message claiming success.
+if errorlevel 1 (
+    echo.
+    echo The restart REFUSED - see the message above. Prod is now STOPPED.
+    echo Most likely something survived stop_all.bat and still holds a port.
+    echo Run  stop_all.bat  again, then  start_all_wt.bat  by hand.
+    pause
+    exit /b 1
+)
 echo Promoted. Check /status.
 goto :eof
 
