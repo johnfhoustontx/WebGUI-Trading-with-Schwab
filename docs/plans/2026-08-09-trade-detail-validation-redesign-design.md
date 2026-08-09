@@ -1,0 +1,214 @@
+# Trade detail panel — validation + triage redesign
+
+**Date:** 2026-08-09
+**Scope:** `webgui/pages/options/detail.py` and its four adapters
+**Status:** design approved, plan pending
+
+## Why
+
+The shared Trade detail panel is fed by four sources — Scanner, Swing, Paper,
+Captured — through adapters that map each source's dict onto one set of keys. An
+audit of those adapters against `options-scanner/scanner_engine.py` and
+`scoring.py` found eight defects, several of which corrupt the decision the panel
+exists to support.
+
+The panel's job, confirmed with the user, is **triage**: *is this trade worth
+taking?* Triage is mostly fast rejection, and rejection turns on four
+dealbreakers — thin liquidity, credit too thin for the risk, short strike inside
+the expected move, and wrong side of dealer gamma or trend.
+
+Today all four are buried as four of eleven identically-weighted bars inside a
+collapsed card. The panel is shaped for verification but used for triage.
+
+## Validated defects
+
+**1 — Unit collision.** Scanner signals carry `credit` and `max_loss` **per
+share** (`scanner_engine.py:57`). Paper trades feed `entry_credit` and
+`max_loss_total`, which are **totals** (`paper.py:237`). Both land in the same
+tiles under the same labels, differing by 100×. `expected_pnl_10` sits in the
+same card and is itself a total (`× contracts × 100`), so one card mixes both
+scales with nothing on screen to distinguish them.
+
+This class of bug has bitten this codebase twice already in the driver — see
+`driver-executed-but-rejected-risk-too-high`.
+
+**2 — Iron condor breakeven is permanently "—".** The engine stores it as a
+string, `f"{p['breakeven']}/{c['breakeven']}"` (`scanner_engine.py:1069`). The
+tile formats via `_money`, which requires `isinstance(v, (int, float))`
+(`detail.py:77`), so every IC falls through to the em-dash.
+
+**3 — A fabricated IV reading.** `range_marker_svg(low, high, current_iv or low)`
+(`detail.py:161`) draws the marker at the 52-week low when current IV is missing.
+That reads as "IV is dirt cheap" rather than "unknown".
+
+**4 — Missing factors render as scored zeros.** `fs.get(key, 0) or 0`
+(`detail.py:73`) draws an absent factor as the same red zero-bar as a genuine
+zero.
+
+**5 — The gauge silently changes scale.** It shows composite score, or falls back
+to PoP for paper trades (`detail.py:218-221`), while remaining captioned with
+`grade`. Two different 0–100 scales on one unlabelled face. The project already
+treats Fit+Quality and the premium composite as non-commensurable; this is the
+same error one layer down.
+
+**6 — "DTE" means two different things.** Live days-to-expiry for paper
+(`paper.py:246`) versus days-at-entry for captured (`captured.py:182`), under one
+label. An aged captured signal displays a DTE that has already elapsed.
+
+**7 — Debit structures show no cost.** `detail_signal` leaves `credit` unset for
+debits (`strategy_table.py:279-281`) so it is not mislabelled as a credit —
+correct, but nothing then renders the debit, so a long call's cost is simply
+absent.
+
+**8 — Paper flips vega's sign** (`-entry_vega`, `paper.py:249`). Convention to be
+verified against `paper_engine` before any change; listed for completeness, not
+yet confirmed as wrong.
+
+### The deeper problem: missing data is indistinguishable from a score
+
+The normalizers in `scoring.py` collapse "unavailable" into a real-looking value,
+in two directions:
+
+- **Missing → 0**, looking terrible: `rr`, `pop`, `theta`
+- **Missing → 50**, looking neutral: `iv`, `iv_hv`, `vega`, `em`, `liq`, `trend`,
+  `gex`, `dex`
+
+The panel renders both as confident coloured bars. The second group is the
+dangerous one: eight factors can appear as calm mid-grey when the truth is "never
+measured". That is false reassurance, which for triage is worse than false
+rejection.
+
+### A structural mismatch
+
+The user rejects on liquidity, but `DEFAULT_WEIGHTS` gives `liq` 5 points against
+`rr`'s 16 (`scoring.py:48-60`). A thin-liquidity trade can still post a strong
+composite. Meanwhile the panel draws all eleven bars at identical visual weight,
+so a 4-point `dex` reads as decisively as 16-point `rr`.
+
+Triage on the composite score alone will therefore pass trades the user would
+reject. The dealbreakers need their own treatment above the fold, not a bar in a
+list.
+
+## Design
+
+### Chosen approach
+
+Keep the existing 290–360px right-hand panel and restructure it into a strict
+priority ladder. Considered and rejected: a pinned-header/scrolling-body variant
+(same benefit, more layout risk against the persistent-Highcharts constraint, and
+reachable later without rework); and widening to ~520px two columns, which would
+take width from the Scanner table — the very thing being scanned.
+
+### Layout
+
+```
+┌────────────────────────────────┐
+│ Trade detail          [2] [>|] │  ← flag count badge, visible when collapsed
+├────────────────────────────────┤
+│ SPY · Put Credit Spread        │
+│ Swing · 12 DTE                 │
+│         ╭─────────╮            │
+│         │   72    │   Good     │
+│         ╰─────────╯            │
+│       Composite score          │  ← gauge always names its metric
+│                                │
+│ ⚠ Liquidity not measured       │  ← only when tripped; absent when clean
+│ ⚠ Short strike inside 1σ move  │
+├────────────────────────────────┤
+│ Sell 400 P  /  Buy 395 P       │
+│ 5 wide · Exp Fri 21 Aug        │
+├────────────────────────────────┤
+│ Credit       $155 per contract │  ← every number carries its unit
+│ Max loss     $345 per contract │
+│ Breakeven         $398.45      │
+│ Probability        72%         │
+├────────────────────────────────┤
+│ ▸ Score factors                │
+│ ▸ Greeks                       │
+│ ▸ Implied volatility           │
+│ ▸ Expected move                │
+└────────────────────────────────┘
+```
+
+The ladder runs **reject → verify → explore**. Flags sit above the contract
+because rejection should happen before strikes are read.
+
+**The gauge always names what it shows.** One named metric, caption always
+present. Paper trades have no stored composite, so the gauge shows PoP captioned
+"Probability of profit" rather than borrowing the composite's face and grade.
+
+**Strikes become an instruction.** `Sell 400 P / Buy 395 P` replaces
+`$400 - $395 (5-wide)`, which reads as a descending range and hides which leg is
+short. Iron condors get two such lines.
+
+**Per-contract is primary**, computed as the exact `per_share × 100`, with
+per-share available in the expanded detail.
+
+**Four cards, not five.** Trade Info dissolves upward into the contract and
+economics blocks. Nothing is dropped: `max_contracts` and `E[P&L]` move into
+economics, `R:R` into Score factors.
+
+**Collapsed state** carries a flag-count badge on the toggle, matching the
+existing nav badge idiom, so a flagged trade stays visible at 44px.
+
+Labels follow the whole-words rule: "Put Credit Spread" spelled out; `DTE` and
+`PoP` kept as genuine trader terms.
+
+### Flag rules
+
+Three thresholds fall out of the scorer's own definitions and invent nothing:
+
+| Flag | Rule | Basis |
+|---|---|---|
+| Inside expected move | `em < 50` | `norm_em_buffer` returns 0–50 only when the short strike is inside 1σ (`scoring.py:208-210`) |
+| Trend against | `trend < 50` | 25 = partially against, 0 = against (`scoring.py:248`) |
+| Thin liquidity | `liq < 50` | 50 ⇒ spread > 3% of mark; zeroes at 5% (`scoring.py:231-236`) |
+| Near a gamma wall | `gex` or `dex` < `WALL_FLAG_BAR` | 100 = ≥1% of spot away, linear to 0 on the wall |
+| Credit too thin | `rr_pct` < `MIN_RR_PCT` | `norm_rr` reaches 100 at 50% |
+
+The two judgment values live as documented constants at the top of `detail.py`,
+defaulting to `MIN_RR_PCT = 20` and `WALL_FLAG_BAR = 30`, to be tuned in use.
+They are deliberately not Settings knobs yet — promote them only if they turn out
+to change often.
+
+### Provenance
+
+Each flag carries a **measured / not measured** state. Where the raw inputs ride
+on the signal, presence decides it: `bid`/`ask` for liquidity, `rr_pct` for R:R.
+A not-measured factor renders as a distinct amber "not measured" chip, and its
+bar shows "—" rather than a number.
+
+For `em`, `gex`, `dex` and `trend` the raw inputs are not on the signal, so
+page-side only the exact-50.0 sentinel is available — suggestive, not proof. The
+clean fix is an additive **`factors_unavailable`** list emitted from Tier 2,
+which the documented Tailwind-first exception explicitly permits ("refactor the
+Tier-2 source to emit one"). The panel consumes it when present and falls back to
+the sentinel when absent, so it is correct today and exact later.
+
+### Data contract
+
+Adapters stop emitting bare numbers whose units depend on their source. Each
+declares units explicitly, and the panel renders per-contract. Debit structures
+emit a signed `net_cost` so the panel can label Credit or Debit rather than
+showing neither.
+
+## Testing
+
+Pure helpers — `flags_for`, `economics_rows`, `contract_lines`, `factor_rows`,
+`gauge_caption` — are unit-tested against fixtures captured from all four
+sources, including an iron condor (breakeven string), a debit vertical (no
+credit), a paper trade (no composite), and a signal with absent factors.
+
+Regression tests pin the specific defects: an IC must render a numeric
+breakeven; a signal without `current_iv` must render no IV marker; an absent
+factor must render "—" and never `0`; per-share and total inputs must produce the
+same displayed per-contract figure.
+
+`test_no_inline_style.py` continues to guard the page.
+
+## Out of scope
+
+Widening the panel; moving thresholds into Settings; changing the composite
+scoring model or its weights. The weight-versus-dealbreaker mismatch is recorded
+above as a finding, and addressed in the panel by surfacing flags independently
+of the score — not by re-weighting the scorer.
