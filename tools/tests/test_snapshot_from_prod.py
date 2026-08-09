@@ -20,6 +20,7 @@ test run. That is exactly right — the tool can never fire for real inside a te
 tools/tests/test_stop_all.py.
 """
 import json
+import inspect
 import pathlib
 import shutil
 import socket
@@ -525,3 +526,26 @@ def test_main_refuses_outside_dev_whatever_the_arguments(tmp_path, monkeypatch):
     with pytest.raises(SystemExit) as exc:
         snap.main(["--dry-run", "--redis-only", "--skip-gex", "--peer", str(peer)])
     assert "'dev'" in str(exc.value), "it must refuse for the ENVIRONMENT reason"
+
+
+def test_redis_import_precedes_any_copying():
+    """The redis dependency must be checked BEFORE the SQLite copy loop.
+
+    It is only *used* at the end of the run, so the natural place to import it
+    is where it is used — and that is wrong. A missing dependency (in practice:
+    running under the system interpreter rather than .venv) would then fail
+    after ~1.4 GB of stores had already landed, leaving dev with fresh SQLite
+    and stale Redis. That half-applied state is what every other guard in
+    ``main`` exists to prevent.
+
+    Source inspection rather than behaviour, because ``redis`` IS installed in
+    this venv, so the failure cannot be reproduced without faking the import
+    machinery — and the property worth pinning is the ORDERING, not the message.
+    """
+    src = inspect.getsource(snap.main)
+    import_at = src.index("import redis")
+    copy_at = src.index("snapshot_plan(")
+    assert import_at < copy_at, (
+        "import redis moved after the copy loop — a missing dependency would "
+        "now fail with a partially written snapshot"
+    )

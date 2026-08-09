@@ -383,6 +383,22 @@ def main(argv=None):
 
     if not args.dry_run:
         assert_dev_stack_is_down()
+        # Import redis HERE, before a single byte is copied. It is only needed
+        # at the end of the run, but importing it there means a missing
+        # dependency — overwhelmingly, running under the system interpreter
+        # instead of .venv — fails AFTER ~1.4 GB of SQLite has landed, leaving
+        # dev with fresh stores and stale Redis. That half-applied state is
+        # exactly what the guards above exist to prevent, so the dependency
+        # check belongs beside them.
+        try:
+            import redis  # noqa: F401
+        except ModuleNotFoundError:
+            sys.exit(
+                "redis is not installed for this interpreter:\n"
+                f"  {sys.executable}\n"
+                "Run it with the checkout's venv instead:\n"
+                r"  .venv\Scripts\python tools\snapshot_from_prod.py"
+            )
 
     print(f"snapshot  {peer}  ->  {REPO_ROOT}"
           # ASCII only in printed output: the launchers redirect stdout to
@@ -410,7 +426,6 @@ def main(argv=None):
     print(f"  redis       db {src_db} -> db {dst_db} on :{MEMURAI_PORT}"
           + ("  (dry run)" if args.dry_run else ""))
     if not args.dry_run:
-        import redis
         t0 = time.monotonic()
         copy_redis(redis.Redis(port=MEMURAI_PORT, db=src_db),
                    redis.Redis(port=MEMURAI_PORT, db=dst_db))
