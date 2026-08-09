@@ -64,3 +64,18 @@ def test_detail_header_uses_highcharts_gauge_not_svg_speedometer():
     # The composite-score header is the shared Highcharts solid-gauge now.
     assert "gauge_figure" in src
     assert "speedometer_svg" not in src
+
+
+def test_per_contract_multiplies_per_share_by_100():
+    assert detail.per_contract(1.55) == 155.0
+    assert detail.per_contract(3.45) == 345.0
+
+
+def test_per_contract_passes_through_none_and_junk():
+    assert detail.per_contract(None) is None
+    assert detail.per_contract("n/a") is None
+
+
+def test_money_per_contract_labels_its_unit():
+    assert detail.money_per_contract(1.55) == "$155.00 per contract"
+    assert detail.money_per_contract(None) == "—"

@@ -81,6 +81,27 @@ def _pct(v):
     return f"{v:.1f}%" if isinstance(v, (int, float)) else "—"
 
 
+# Every adapter emits PER-SHARE dollars; the panel displays per-contract. One
+# option contract covers 100 shares. Keeping the conversion in exactly one place
+# is the fix for the unit collision documented in the design doc -- the paper
+# adapter previously mixed per-share credit with whole-position max loss in the
+# same row.
+CONTRACT_MULTIPLIER = 100
+
+
+def per_contract(per_share):
+    """Per-share dollars -> per-contract dollars. None for anything non-numeric."""
+    if isinstance(per_share, bool) or not isinstance(per_share, (int, float)):
+        return None
+    return float(per_share) * CONTRACT_MULTIPLIER
+
+
+def money_per_contract(per_share):
+    """Formatted per-contract dollars carrying an explicit unit, or an em-dash."""
+    v = per_contract(per_share)
+    return "—" if v is None else f"${v:,.2f} per contract"
+
+
 def _signal_title(s):
     return " · ".join(x for x in (s.get("symbol", ""), s.get("type", ""),
                                   s.get("trade_type", "")) if x) or "Signal"
