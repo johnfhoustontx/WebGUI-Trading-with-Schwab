@@ -398,6 +398,35 @@ def breakeven_text(raw):
     return " / ".join(f"${v:,.2f}" for v in vals)
 
 
+def iv_marker_value(signal):
+    """Current IV for the 52-week range marker, or None to draw no marker.
+
+    The old default of ``current_iv or iv_low_52w`` planted the marker at the
+    52-week LOW whenever current IV was missing, which reads as a confident
+    "IV is cheap" rather than "unknown".
+    """
+    s = signal or {}
+    v = s.get("current_iv")
+    if v is None:
+        v = s.get("short_iv")
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return v
+    return None
+
+
+def dte_text(signal):
+    """Days to expiry, saying so when the figure is days-at-ENTRY.
+
+    Captured signals store ``dte_at_entry``; an aged signal was displaying a DTE
+    that had already elapsed under the same label as a live one.
+    """
+    s = signal or {}
+    dte = s.get("dte")
+    if not isinstance(dte, (int, float)) or isinstance(dte, bool):
+        return "—"
+    return f"{dte:g} DTE at entry" if s.get("dte_is_entry") else f"{dte:g} DTE"
+
+
 def gauge_metric(signal):
     """What the gauge shows, always with the caption naming it.
 
@@ -524,11 +553,13 @@ def _build_cards(s):
     if any(s.get(k) is not None for k in ("current_iv", "iv_rank", "iv_percentile", "short_iv")):
         with ui.expansion("IV Analysis").classes("w-full"):
             _kv("ATM IV", _pct(s.get("current_iv") if s.get("current_iv") is not None else s.get("short_iv")))
-            if isinstance(s.get("iv_low_52w"), (int, float)) and isinstance(s.get("iv_high_52w"), (int, float)):
+            marker = iv_marker_value(s)
+            if (marker is not None
+                    and isinstance(s.get("iv_low_52w"), (int, float))
+                    and isinstance(s.get("iv_high_52w"), (int, float))):
                 with ui.row().classes("items-center gap-2 w-full"):
                     ui.label("52w").classes("text-xs w-12 opacity-80")
-                    ui.html(svg.range_marker_svg(s["iv_low_52w"], s["iv_high_52w"],
-                                                 s.get("current_iv") or s["iv_low_52w"]))
+                    ui.html(svg.range_marker_svg(s["iv_low_52w"], s["iv_high_52w"], marker))
             if s.get("iv_rank") is not None:
                 with ui.row().classes("items-center gap-2 w-full"):
                     ui.label("Rank").classes("text-xs w-12 opacity-80")

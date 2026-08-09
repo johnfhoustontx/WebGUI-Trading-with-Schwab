@@ -356,3 +356,20 @@ def test_gauge_metric_when_nothing_is_available():
     assert m["value"] == 0
     assert m["caption"] == "No score available"
     assert m["grade"] == ""
+
+
+def test_iv_marker_suppressed_without_current_iv():
+    # Falling back to the 52w LOW drew the marker at the bottom of the range,
+    # reading as "IV is dirt cheap" when the truth was "unknown".
+    assert detail.iv_marker_value({"iv_low_52w": 10, "iv_high_52w": 40}) is None
+
+
+def test_iv_marker_uses_current_iv_when_present():
+    assert detail.iv_marker_value(
+        {"iv_low_52w": 10, "iv_high_52w": 40, "current_iv": 22}) == 22
+
+
+def test_dte_text_distinguishes_live_from_entry():
+    assert detail.dte_text({"dte": 12}) == "12 DTE"
+    assert detail.dte_text({"dte": 12, "dte_is_entry": True}) == "12 DTE at entry"
+    assert detail.dte_text({}) == "—"

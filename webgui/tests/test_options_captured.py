@@ -70,6 +70,11 @@ def test_synth_from_captured_for_detail_panel():
     assert s["id"] == "X1"
 
 
+def test_synth_marks_dte_as_entry_value():
+    s = captured.synth_from_captured({"symbol": "SPY", "dte_at_entry": 12})
+    assert s["dte_is_entry"] is True
+
+
 def test_synth_from_captured_falls_back_to_entry_score():
     s = captured.synth_from_captured({"signal_id": "Z", "entry_score": 55})
     assert s["composite_score"] == 55

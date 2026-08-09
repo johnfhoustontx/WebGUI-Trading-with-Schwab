@@ -180,6 +180,7 @@ def synth_from_captured(row):
         "credit": r.get("entry_credit"),
         "max_loss": r.get("entry_max_loss"),
         "dte": r.get("dte_at_entry"),
+        "dte_is_entry": r.get("dte_at_entry") is not None,
         "expiration": r.get("expiration", ""),
         "short_strike": r.get("short_strike"),
         "long_strike": r.get("long_strike"),
