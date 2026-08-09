@@ -453,14 +453,68 @@ def _leg_pair(short_k, long_k, right):
     return f"Sell {short_k:g} {right}  /  Buy {long_k:g} {right}"
 
 
+def _leg_instruction(leg):
+    """One leg as 'Sell 2x 410 C', or None when it carries no usable strike.
+
+    ``qty`` is shown ONLY when it is not 1 — a butterfly body trades at 2x, and
+    an invisible multiplier misstates the position. ``kind`` decides the right,
+    so a call can never be labelled as a put.
+    """
+    strike = leg.get("strike")
+    if not isinstance(strike, (int, float)) or isinstance(strike, bool):
+        return None
+    action = "Sell" if str(leg.get("side", "")).lower() == "short" else "Buy"
+    right = "C" if str(leg.get("kind", "")).lower() == "call" else "P"
+    qty = leg.get("qty", 1)
+    mult = f"{qty:g}x " if isinstance(qty, (int, float)) and not isinstance(
+        qty, bool) and qty != 1 else ""
+    return f"{action} {mult}{strike:g} {right}"
+
+
+def _lines_from_legs(legs):
+    """Group canonical legs by ``kind`` onto one line each, in emitted order.
+
+    The emitted order is already the trade-natural one in every family, so it is
+    PRESERVED rather than re-sorted: adapt_credit_spread emits [short, long]
+    ('Sell 400 P / Buy 395 P') while build_debit_verticals emits [long, short]
+    ('Buy 400 C / Sell 410 C') — in both cases the defining leg leads. Grouping
+    by kind keeps an iron condor's two verticals on separate lines.
+    """
+    groups, order = {}, []
+    for leg in legs:
+        if not isinstance(leg, dict):
+            continue
+        text = _leg_instruction(leg)
+        if text is None:
+            continue
+        kind = str(leg.get("kind", "")).lower()
+        if kind not in groups:
+            groups[kind] = []
+            order.append(kind)
+        groups[kind].append(text)
+    return ["  /  ".join(groups[k]) for k in order]
+
+
 def contract_lines(signal):
     """The position as instructions rather than a range.
 
     '$400 - $395 (5-wide)' read as a descending range and hid which leg was
     short. An iron condor yields two lines, one per vertical.
+
+    Prefers the canonical ``legs`` list when present: every natively-built swing
+    family (LONG_CALL/SHORT_PUT/BULL_CALL/…) carries legs and NO strike keys, so
+    the strike-key path below rendered nothing at all for them. Scanner credit
+    spreads and iron condors carry only the strike keys and still take it.
     """
     s = signal or {}
-    lines = []
+    lines = _lines_from_legs(s.get("legs") or [])
+    if lines:
+        # A single vertical may still name its width; two lines are an iron
+        # condor, whose two different widths one number could not describe.
+        w = s.get("width")
+        if len(lines) == 1 and isinstance(w, (int, float)) and not isinstance(w, bool):
+            lines.append(f"{w:g} wide")
+        return lines
     if s.get("type") == "IC":
         for sk, lk, right in ((s.get("short_strike"), s.get("long_strike"), "P"),
                               (s.get("call_short"), s.get("call_long"), "C")):
@@ -468,7 +522,10 @@ def contract_lines(signal):
             if line:
                 lines.append(line)
         return lines
-    right = "C" if str(s.get("type", "")).upper().startswith("CC") else "P"
+    # "CC" alone matched only CCS, so a legless LONG_CALL/BULL_CALL reaching this
+    # path would be labelled as PUTS. Match the call families by name too.
+    t = str(s.get("type", "")).upper()
+    right = "C" if (t.startswith("CC") or "CALL" in t) else "P"
     line = _leg_pair(s.get("short_strike"), s.get("long_strike"), right)
     if line:
         lines.append(line)

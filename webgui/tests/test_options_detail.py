@@ -339,6 +339,82 @@ def test_contract_lines_empty_when_no_strikes():
     assert detail.contract_lines({"type": "PCS"}) == []
 
 
+# --- the canonical ``legs`` path (every natively-built swing family) ----------
+# strategy_scanner._assemble emits ``legs`` and NO short_strike/long_strike, so
+# the strike-key path rendered NOTHING for LONG_CALL/BULL_CALL/... .
+
+def test_contract_lines_long_call_from_legs():
+    sig = {"type": "LONG_CALL",
+           "legs": [{"kind": "call", "side": "long", "strike": 420.0, "qty": 1}]}
+    assert detail.contract_lines(sig) == ["Buy 420 C"]
+
+
+def test_contract_lines_short_put_from_legs_names_the_right_side():
+    sig = {"type": "SHORT_PUT",
+           "legs": [{"kind": "put", "side": "short", "strike": 385.0, "qty": 1}]}
+    assert detail.contract_lines(sig) == ["Sell 385 P"]
+
+
+def test_contract_lines_bull_call_keeps_emitted_long_then_short_order():
+    # build_debit_verticals emits [long, short] -- "Buy the 400, sell the 410".
+    sig = {"type": "BULL_CALL", "legs": [
+        {"kind": "call", "side": "long", "strike": 400.0, "qty": 1},
+        {"kind": "call", "side": "short", "strike": 410.0, "qty": 1},
+    ]}
+    assert detail.contract_lines(sig) == ["Buy 400 C  /  Sell 410 C"]
+
+
+def test_contract_lines_bear_put_is_labelled_as_puts():
+    # The old `startswith("CC")` test mislabelled everything non-CCS as a put;
+    # here the legs' own ``kind`` must decide.
+    sig = {"type": "BEAR_PUT", "legs": [
+        {"kind": "put", "side": "long", "strike": 400.0, "qty": 1},
+        {"kind": "put", "side": "short", "strike": 390.0, "qty": 1},
+    ]}
+    assert detail.contract_lines(sig) == ["Buy 400 P  /  Sell 390 P"]
+
+
+def test_contract_lines_prefers_legs_when_both_shapes_are_present():
+    # An adapted swing PCS carries BOTH legs and the source strike keys.
+    sig = {"type": "PCS", "short_strike": 400, "long_strike": 395, "width": 5,
+           "legs": [{"kind": "put", "side": "short", "strike": 400.0, "qty": 1},
+                    {"kind": "put", "side": "long", "strike": 395.0, "qty": 1}]}
+    assert detail.contract_lines(sig) == ["Sell 400 P  /  Buy 395 P", "5 wide"]
+
+
+def test_contract_lines_iron_condor_legs_split_by_kind():
+    sig = {"type": "IC", "legs": [
+        {"kind": "put", "side": "short", "strike": 390.0, "qty": 1},
+        {"kind": "put", "side": "long", "strike": 385.0, "qty": 1},
+        {"kind": "call", "side": "short", "strike": 420.0, "qty": 1},
+        {"kind": "call", "side": "long", "strike": 425.0, "qty": 1},
+    ]}
+    assert detail.contract_lines(sig) == ["Sell 390 P  /  Buy 385 P",
+                                          "Sell 420 C  /  Buy 425 C"]
+
+
+def test_contract_lines_shows_quantity_above_one():
+    # A butterfly body trades at 2x -- invisible qty would misstate the position.
+    sig = {"type": "BUTTERFLY", "legs": [
+        {"kind": "call", "side": "long", "strike": 400.0, "qty": 1},
+        {"kind": "call", "side": "short", "strike": 410.0, "qty": 2},
+        {"kind": "call", "side": "long", "strike": 420.0, "qty": 1},
+    ]}
+    assert detail.contract_lines(sig) == [
+        "Buy 400 C  /  Sell 2x 410 C  /  Buy 420 C"]
+
+
+def test_contract_lines_empty_legs_falls_back_to_strike_keys():
+    sig = {"type": "PCS", "short_strike": 400, "long_strike": 395, "legs": []}
+    assert detail.contract_lines(sig) == ["Sell 400 P  /  Buy 395 P"]
+
+
+def test_contract_lines_ignores_legs_missing_a_strike():
+    sig = {"type": "LONG_CALL",
+           "legs": [{"kind": "call", "side": "long", "strike": None, "qty": 1}]}
+    assert detail.contract_lines(sig) == []
+
+
 def test_gauge_metric_prefers_composite_score():
     m = detail.gauge_metric({"composite_score": 72, "grade": "Good"})
     assert m == {"value": 72, "caption": "Composite score", "grade": "Good"}
