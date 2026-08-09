@@ -2036,3 +2036,145 @@ class TestDirectionalSignals:
         # would pass even if the handler wiped both buckets on the way out.
         assert results["signals_0dte"], "credit scan did not survive the directional failure"
         assert results["signals_swing"], "credit scan did not survive the directional failure"
+
+
+class TestIvSurfacedOntoSignals:
+    """The per-symbol IV block must be surfaced onto the signal dicts.
+
+    `run_iv_analysis` writes current_iv / iv_low_52w / iv_high_52w /
+    expected_moves into results["iv_data"][symbol]; nothing ever copied them
+    onto the signals, so the webgui Trade detail panel's Expected Move card and
+    its 52-week IV range marker (both keyed off the SIGNAL dict) had never
+    rendered. These pin the copy.
+
+    The fallback is deliberately None, NOT the `or 0` that `iv_rank` uses: a
+    fabricated 0 IV reads as "measured, and it's zero", which is exactly the
+    distinction the detail panel exists to make.
+    """
+
+    SYMBOLS = ["SPY", "QQQ"]
+    SIGNAL_KEYS = ("signals_0dte", "signals_swing", "signals_directional")
+    NEW_FIELDS = ("current_iv", "iv_low_52w", "iv_high_52w", "expected_moves")
+
+    _SPY_IV = {
+        "symbol": "SPY", "current_iv": 18.4,
+        "iv_rank": 42.0, "iv_percentile": 55.0,
+        "iv_high_52w": 31.7, "iv_low_52w": 9.2,
+        "hv_current": 15.0,
+        "expected_moves": {
+            "daily": {"dte": 1, "move_dollars": 4.82, "move_pct": 0.96,
+                      "upper_1sd": 504.82, "lower_1sd": 495.18,
+                      "upper_2sd": 509.64, "lower_2sd": 490.36},
+            "weekly": {"dte": 7, "move_dollars": 12.75, "move_pct": 2.55,
+                       "upper_1sd": 512.75, "lower_1sd": 487.25,
+                       "upper_2sd": 525.50, "lower_2sd": 474.50},
+            "monthly": None,
+        },
+    }
+
+    @pytest.fixture
+    def iv_stub(self, monkeypatch):
+        """SPY gets a fully-populated IV block; QQQ gets the all-None shape
+        `_empty_iv_data` produces when the IV window comes back empty.
+
+        Both halves are load-bearing — SPY proves the copy happens, QQQ proves
+        the missing case stays None instead of collapsing to 0.
+        """
+        import iv_analysis
+
+        def _fake(client, symbol, **kwargs):
+            if symbol == "SPY":
+                return dict(self._SPY_IV)
+            return {
+                "symbol": symbol, "current_iv": None,
+                "iv_rank": None, "iv_percentile": None,
+                "iv_high_52w": None, "iv_low_52w": None,
+                "expected_moves": {"daily": None, "weekly": None,
+                                   "monthly": None},
+            }
+
+        monkeypatch.setattr(iv_analysis, "run_iv_analysis", _fake)
+
+    def _signals(self, results, symbol):
+        return [s for key in self.SIGNAL_KEYS for s in results[key]
+                if s.get("symbol") == symbol]
+
+    def test_populated_iv_data_is_copied_onto_every_signal(
+            self, fake_client, iv_stub, unfiltered_directional):
+        results = scanner_engine.run_full_scan(fake_client, symbols=self.SYMBOLS)
+        spy = self._signals(results, "SPY")
+        assert spy, "fixture produced no SPY signals — assertions would be vacuous"
+        for s in spy:
+            assert s["current_iv"] == 18.4
+            assert s["iv_low_52w"] == 9.2
+            assert s["iv_high_52w"] == 31.7
+            assert s["expected_moves"] == self._SPY_IV["expected_moves"]
+
+    def test_expected_moves_keeps_its_nested_shape(
+            self, fake_client, iv_stub, unfiltered_directional):
+        """The detail panel reads em["daily"]["move_dollars"], so the nested
+        dict must arrive intact rather than flattened or stringified."""
+        results = scanner_engine.run_full_scan(fake_client, symbols=self.SYMBOLS)
+        spy = self._signals(results, "SPY")
+        assert spy
+        em = spy[0]["expected_moves"]
+        assert isinstance(em, dict)
+        assert em["daily"]["move_dollars"] == 4.82
+        assert em["monthly"] is None, "a None horizon must survive the copy"
+
+    def test_missing_iv_data_leaves_the_fields_none_not_zero(
+            self, fake_client, iv_stub, unfiltered_directional):
+        """QQQ has no IV reading. A 0 here would be a fabricated measurement."""
+        results = scanner_engine.run_full_scan(fake_client, symbols=self.SYMBOLS)
+        qqq = self._signals(results, "QQQ")
+        assert qqq, "fixture produced no QQQ signals — assertions would be vacuous"
+        for s in qqq:
+            for field in ("current_iv", "iv_low_52w", "iv_high_52w"):
+                assert s[field] is None, (
+                    f"{field} is {s[field]!r}; a missing IV must stay None, "
+                    "never collapse to 0")
+
+    def test_symbol_absent_from_iv_data_still_gets_none_fields(
+            self, fake_client, iv_stub, unfiltered_directional, monkeypatch):
+        """Not merely None VALUES — the symbol key missing entirely (an IV
+        fetch that never returned) must not KeyError and must not leave the
+        field absent, or the detail panel's `is not None` probe reads a stale
+        key from whatever dict preceded it."""
+        results = scanner_engine.run_full_scan(fake_client, symbols=self.SYMBOLS)
+        results["iv_data"].clear()
+        # Re-run the surfacing over an emptied iv_data by re-invoking the scan
+        # with iv_data suppressed at the source.
+        import iv_analysis
+        monkeypatch.setattr(iv_analysis, "run_iv_analysis",
+                            lambda *a, **k: {})
+        results = scanner_engine.run_full_scan(fake_client, symbols=self.SYMBOLS)
+        sigs = [s for key in self.SIGNAL_KEYS for s in results[key]]
+        assert sigs, "fixture produced no signals — assertions would be vacuous"
+        for s in sigs:
+            for field in self.NEW_FIELDS:
+                assert field in s, f"{field} missing from the signal dict"
+            assert s["current_iv"] is None
+            assert s["expected_moves"] is None
+
+    def test_iv_rank_fallback_is_unchanged(self, fake_client, iv_stub,
+                                           unfiltered_directional):
+        """iv_rank keeps its `or 0` sentinel — other code depends on it."""
+        results = scanner_engine.run_full_scan(fake_client, symbols=self.SYMBOLS)
+        qqq = self._signals(results, "QQQ")
+        assert qqq
+        assert all(s["iv_rank"] == 0 for s in qqq)
+        spy = self._signals(results, "SPY")
+        assert spy
+        assert all(s["iv_rank"] == 42.0 for s in spy)
+
+    def test_surfaced_fields_are_json_serializable(
+            self, fake_client, iv_stub, unfiltered_directional):
+        """Signals are JSON-serialized into the Redis cache envelope, so a
+        numpy scalar leaking out of the IV math would break publish, not this
+        loop — assert the real constraint here."""
+        import json
+        results = scanner_engine.run_full_scan(fake_client, symbols=self.SYMBOLS)
+        sigs = [s for key in self.SIGNAL_KEYS for s in results[key]]
+        assert sigs
+        for s in sigs:
+            json.dumps({k: s[k] for k in self.NEW_FIELDS})

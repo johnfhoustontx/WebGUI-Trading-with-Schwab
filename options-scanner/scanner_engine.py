@@ -1703,15 +1703,31 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
         s["expected_pnl_target"] = calc_expected_pnl(cr, ml, pop, s["contracts_for_target"])
         s["max_profit_target"] = round(cr * s["contracts_for_target"] * 100, 2)
 
-    # Surface each symbol's IV Rank onto its signals so the scanner tables can show
-    # it (it lives in results["iv_data"], not on the signal dicts). Covers the
+    # Surface each symbol's IV block onto its signals so the GUI can show it (it
+    # lives in results["iv_data"], not on the signal dicts). Covers the
     # DIRECTIONAL pass too, not just the credit spreads. Unconditional — hoisted OUT
     # of the signal_recorder try below so an import failure there can't strip the
-    # column — and missing IV data falls back to 0 (the historically-cheap sentinel,
-    # matching the recorder's own prior default).
+    # columns.
+    #
+    # Two DIFFERENT fallbacks, deliberately:
+    #   * iv_rank keeps `or 0` — the historically-cheap sentinel, matching the
+    #     recorder's own prior default. Other code depends on it; don't change it.
+    #   * current_iv / iv_low_52w / iv_high_52w / expected_moves fall back to
+    #     None. These feed the webgui Trade detail panel's 52-week IV range
+    #     marker and Expected Move card, which distinguish "not measured" from
+    #     "measured as zero" — a fabricated 0 IV would render as a real reading.
+    #     expected_moves is a nested {daily, weekly, monthly} dict whose values
+    #     may themselves be None; the reference is copied as-is (the panel
+    #     already handles that shape) and every value is a plain float/int, so
+    #     the signal stays JSON-serializable for the Redis cache envelope.
     for key in ("signals_0dte", "signals_swing", "signals_directional"):
         for s in results[key]:
-            s["iv_rank"] = results["iv_data"].get(s.get("symbol"), {}).get("iv_rank") or 0
+            iv_for_sym = results["iv_data"].get(s.get("symbol")) or {}
+            s["iv_rank"] = iv_for_sym.get("iv_rank") or 0
+            s["current_iv"] = iv_for_sym.get("current_iv")
+            s["iv_low_52w"] = iv_for_sym.get("iv_low_52w")
+            s["iv_high_52w"] = iv_for_sym.get("iv_high_52w")
+            s["expected_moves"] = iv_for_sym.get("expected_moves")
 
     # Persist signals to the signal-tracking DB (score >= 50 dedup)
     try:
