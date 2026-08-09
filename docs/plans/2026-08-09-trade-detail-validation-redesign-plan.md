@@ -16,13 +16,33 @@
 
 **Read the design doc first.** It records *why* each defect matters; this plan only says how to fix it.
 
+**Two environment constraints govern every command in this plan. Read them before running anything.**
+
+**1. There is no `.venv` in this worktree — use the absolute interpreter path.** This work happens in a git worktree under `.claude/worktrees/`, which does not carry its own virtualenv. The virtualenv lives in the main checkout at:
+
+```
+D:\WebGUI Trading with Schwab\.venv\Scripts\python.exe
+```
+
+A relative `../.venv/Scripts/python` **does not resolve here** and will fail. Every command below uses the absolute path.
+
+**2. The shell working directory must never leave the worktree root.** `.claude/settings.json` registers its hooks by RELATIVE path (`python .claude/hooks/guard_secrets.py`, `guard_prod_promote.py`, `ruff_fix.py`), matching `Edit|Write|MultiEdit` and `Bash|PowerShell`. Those paths only resolve while the shell's persistent working directory is the worktree root. If you `cd webgui` and leave it there, every subsequent Bash, PowerShell, Edit and Write call fails with a hook error and you cannot work.
+
+So **never use a bare `cd webgui && …`**. Always confine the `cd` to a subshell with parentheses:
+
+```bash
+(cd webgui && "D:\WebGUI Trading with Schwab\.venv\Scripts\python.exe" -m pytest -q)
+```
+
+The parentheses are load-bearing — they keep the persistent working directory at the worktree root.
+
 **Run the test suite and record the baseline:**
 
 ```bash
-cd webgui && ../.venv/Scripts/python -m pytest -q
+(cd webgui && "D:\WebGUI Trading with Schwab\.venv\Scripts\python.exe" -m pytest -q)
 ```
 
-Expected: **1053 passed**. If your number differs, that is your baseline — write it down and compare the *set* of failures, not the count. This repo has documented pre-existing failures elsewhere; `webgui` should be fully green.
+Measured baseline on this branch (2026-08-09, commit `47a316e`): **1082 passed**, 0 failed, 0 skipped — fully green in ~40s. If your number differs, that is your baseline — write it down and compare the *set* of failures, not the count. This repo has documented pre-existing failures elsewhere; `webgui` should be fully green.
 
 **Key project rules that bind this work:**
 
@@ -68,7 +88,7 @@ def test_money_per_contract_labels_its_unit():
 **Step 2: Run to verify they fail**
 
 ```bash
-cd webgui && ../.venv/Scripts/python -m pytest tests/test_options_detail.py -q -k per_contract
+(cd webgui && "D:\WebGUI Trading with Schwab\.venv\Scripts\python.exe" -m pytest tests/test_options_detail.py -q -k per_contract)
 ```
 
 Expected: FAIL — `AttributeError: module 'pages.options.detail' has no attribute 'per_contract'`.
@@ -104,7 +124,7 @@ def money_per_contract(per_share):
 **Step 4: Run to verify they pass**
 
 ```bash
-cd webgui && ../.venv/Scripts/python -m pytest tests/test_options_detail.py -q -k per_contract
+(cd webgui && "D:\WebGUI Trading with Schwab\.venv\Scripts\python.exe" -m pytest tests/test_options_detail.py -q -k per_contract)
 ```
 
 Expected: PASS.
@@ -152,7 +172,7 @@ Ensure `import pytest` is present at the top of the file.
 **Step 2: Run to verify it fails**
 
 ```bash
-cd webgui && ../.venv/Scripts/python -m pytest tests/test_options_paper.py -q -k per_share
+(cd webgui && "D:\WebGUI Trading with Schwab\.venv\Scripts\python.exe" -m pytest tests/test_options_paper.py -q -k per_share)
 ```
 
 Expected: FAIL — `max_loss` is `1035.0`.
@@ -197,7 +217,7 @@ to:
 **Step 4: Run the full paper suite**
 
 ```bash
-cd webgui && ../.venv/Scripts/python -m pytest tests/test_options_paper.py -q
+(cd webgui && "D:\WebGUI Trading with Schwab\.venv\Scripts\python.exe" -m pytest tests/test_options_paper.py -q)
 ```
 
 Expected: PASS. If an existing test asserted the old whole-position value, update it — the old value was the bug.
@@ -246,7 +266,7 @@ def test_breakeven_text_formats_both_sides():
 **Step 2: Run to verify they fail**
 
 ```bash
-cd webgui && ../.venv/Scripts/python -m pytest tests/test_options_detail.py -q -k breakeven
+(cd webgui && "D:\WebGUI Trading with Schwab\.venv\Scripts\python.exe" -m pytest tests/test_options_detail.py -q -k breakeven)
 ```
 
 Expected: FAIL — no attribute `breakevens`.
@@ -288,7 +308,7 @@ def breakeven_text(raw):
 **Step 4: Run to verify they pass**
 
 ```bash
-cd webgui && ../.venv/Scripts/python -m pytest tests/test_options_detail.py -q -k breakeven
+(cd webgui && "D:\WebGUI Trading with Schwab\.venv\Scripts\python.exe" -m pytest tests/test_options_detail.py -q -k breakeven)
 ```
 
 Expected: PASS.
@@ -343,7 +363,7 @@ def test_factor_value_text_shows_dash_for_unknown():
 **Step 2: Run to verify they fail**
 
 ```bash
-cd webgui && ../.venv/Scripts/python -m pytest tests/test_options_detail.py -q -k factor
+(cd webgui && "D:\WebGUI Trading with Schwab\.venv\Scripts\python.exe" -m pytest tests/test_options_detail.py -q -k factor)
 ```
 
 Expected: FAIL — `factor_rows` returns 2-tuples.
@@ -413,7 +433,7 @@ def test_factor_rows_missing_values_are_unknown_not_zero():
 **Step 5: Run the full detail suite**
 
 ```bash
-cd webgui && ../.venv/Scripts/python -m pytest tests/test_options_detail.py -q
+(cd webgui && "D:\WebGUI Trading with Schwab\.venv\Scripts\python.exe" -m pytest tests/test_options_detail.py -q)
 ```
 
 Expected: PASS.
@@ -487,7 +507,7 @@ def test_flag_count_counts_only_tripped_and_unmeasured():
 **Step 2: Run to verify they fail**
 
 ```bash
-cd webgui && ../.venv/Scripts/python -m pytest tests/test_options_detail.py -q -k flag
+(cd webgui && "D:\WebGUI Trading with Schwab\.venv\Scripts\python.exe" -m pytest tests/test_options_detail.py -q -k flag)
 ```
 
 Expected: FAIL — no attribute `flags_for`.
@@ -587,7 +607,7 @@ def flag_class(state):
 **Step 4: Run to verify they pass**
 
 ```bash
-cd webgui && ../.venv/Scripts/python -m pytest tests/test_options_detail.py -q -k flag
+(cd webgui && "D:\WebGUI Trading with Schwab\.venv\Scripts\python.exe" -m pytest tests/test_options_detail.py -q -k flag)
 ```
 
 Expected: PASS.
@@ -638,7 +658,7 @@ def test_contract_lines_empty_when_no_strikes():
 **Step 2: Run to verify they fail**
 
 ```bash
-cd webgui && ../.venv/Scripts/python -m pytest tests/test_options_detail.py -q -k contract_lines
+(cd webgui && "D:\WebGUI Trading with Schwab\.venv\Scripts\python.exe" -m pytest tests/test_options_detail.py -q -k contract_lines)
 ```
 
 Expected: FAIL.
@@ -683,7 +703,7 @@ def contract_lines(signal):
 **Step 4: Run to verify they pass**
 
 ```bash
-cd webgui && ../.venv/Scripts/python -m pytest tests/test_options_detail.py -q -k contract_lines
+(cd webgui && "D:\WebGUI Trading with Schwab\.venv\Scripts\python.exe" -m pytest tests/test_options_detail.py -q -k contract_lines)
 ```
 
 Expected: PASS.
@@ -733,7 +753,7 @@ def test_gauge_metric_when_nothing_is_available():
 **Step 2: Run to verify they fail**
 
 ```bash
-cd webgui && ../.venv/Scripts/python -m pytest tests/test_options_detail.py -q -k gauge_metric
+(cd webgui && "D:\WebGUI Trading with Schwab\.venv\Scripts\python.exe" -m pytest tests/test_options_detail.py -q -k gauge_metric)
 ```
 
 Expected: FAIL.
@@ -763,7 +783,7 @@ def gauge_metric(signal):
 **Step 4: Run to verify they pass**
 
 ```bash
-cd webgui && ../.venv/Scripts/python -m pytest tests/test_options_detail.py -q -k gauge_metric
+(cd webgui && "D:\WebGUI Trading with Schwab\.venv\Scripts\python.exe" -m pytest tests/test_options_detail.py -q -k gauge_metric)
 ```
 
 Expected: PASS.
@@ -809,7 +829,7 @@ def test_dte_text_distinguishes_live_from_entry():
 **Step 2: Run to verify they fail**
 
 ```bash
-cd webgui && ../.venv/Scripts/python -m pytest tests/test_options_detail.py -q -k "iv_marker or dte_text"
+(cd webgui && "D:\WebGUI Trading with Schwab\.venv\Scripts\python.exe" -m pytest tests/test_options_detail.py -q -k "iv_marker or dte_text")
 ```
 
 Expected: FAIL.
@@ -876,7 +896,7 @@ def test_synth_marks_dte_as_entry_value():
 **Step 4: Run both suites**
 
 ```bash
-cd webgui && ../.venv/Scripts/python -m pytest tests/test_options_detail.py tests/test_options_captured.py -q
+(cd webgui && "D:\WebGUI Trading with Schwab\.venv\Scripts\python.exe" -m pytest tests/test_options_detail.py tests/test_options_captured.py -q)
 ```
 
 Expected: PASS.
@@ -927,7 +947,7 @@ def test_cost_row_labels_credit_and_debit():
 **Step 2: Run to verify they fail**
 
 ```bash
-cd webgui && ../.venv/Scripts/python -m pytest tests/test_strategy_table.py tests/test_options_detail.py -q -k "net_cost or cost_row"
+(cd webgui && "D:\WebGUI Trading with Schwab\.venv\Scripts\python.exe" -m pytest tests/test_strategy_table.py tests/test_options_detail.py -q -k "net_cost or cost_row")
 ```
 
 Expected: FAIL.
@@ -971,7 +991,7 @@ def cost_row(signal):
 **Step 4: Run to verify they pass**
 
 ```bash
-cd webgui && ../.venv/Scripts/python -m pytest tests/test_strategy_table.py tests/test_options_detail.py -q
+(cd webgui && "D:\WebGUI Trading with Schwab\.venv\Scripts\python.exe" -m pytest tests/test_strategy_table.py tests/test_options_detail.py -q)
 ```
 
 Expected: PASS.
@@ -1010,7 +1030,7 @@ def test_vega_sign_round_trips_through_storage():
 **Step 2: Run — it should pass immediately**
 
 ```bash
-cd webgui && ../.venv/Scripts/python -m pytest tests/test_options_paper.py -q -k vega
+(cd webgui && "D:\WebGUI Trading with Schwab\.venv\Scripts\python.exe" -m pytest tests/test_options_paper.py -q -k vega)
 ```
 
 Expected: PASS. This is a characterization test, not a red-green cycle.
@@ -1132,7 +1152,7 @@ def _build_cards(s):
 **Step 4: Run the full webgui suite**
 
 ```bash
-cd webgui && ../.venv/Scripts/python -m pytest -q
+(cd webgui && "D:\WebGUI Trading with Schwab\.venv\Scripts\python.exe" -m pytest -q)
 ```
 
 Expected: your Step-0 baseline, all green. Remove any test that asserted the deleted `_TILES` grid.
@@ -1173,7 +1193,7 @@ def test_flag_badge_text_hides_zero():
 **Step 2: Run to verify it fails**
 
 ```bash
-cd webgui && ../.venv/Scripts/python -m pytest tests/test_options_detail.py -q -k flag_badge
+(cd webgui && "D:\WebGUI Trading with Schwab\.venv\Scripts\python.exe" -m pytest tests/test_options_detail.py -q -k flag_badge)
 ```
 
 Expected: FAIL.
@@ -1215,7 +1235,7 @@ The badge stays visible when collapsed — do **not** hide it in `toggle()`. Tha
 **Step 4: Run and verify collapse behavior in the browser**
 
 ```bash
-cd webgui && ../.venv/Scripts/python -m pytest -q
+(cd webgui && "D:\WebGUI Trading with Schwab\.venv\Scripts\python.exe" -m pytest -q)
 ```
 
 Then collapse the panel on a flagged signal and confirm the count is still visible.
@@ -1245,8 +1265,10 @@ Page-side, `em`/`trend`/`gex`/`dex` provenance rests on the exact-50.0 sentinel 
 **Test command** (note: run services one folder at a time; running `pytest services` over all of them re-triggers the documented `config`/`scoring` module-name collisions):
 
 ```bash
-.venv/Scripts/python -m pytest services/options_svc -q
+"D:\WebGUI Trading with Schwab\.venv\Scripts\python.exe" -m pytest services/options_svc -q
 ```
+
+(Run from the worktree root — no `cd`, so no subshell is needed here.)
 
 **Restart `options_svc`** for the change to reach the GUI.
 
@@ -1255,7 +1277,7 @@ Page-side, `em`/`trend`/`gex`/`dex` provenance rests on the exact-50.0 sentinel 
 ## Final verification
 
 ```bash
-cd webgui && ../.venv/Scripts/python -m pytest -q
+(cd webgui && "D:\WebGUI Trading with Schwab\.venv\Scripts\python.exe" -m pytest -q)
 ```
 
 Expected: baseline count, fully green, including `test_no_inline_style.py`.
