@@ -325,6 +325,20 @@ def flag_count(signal):
     return len(flags_for(signal))
 
 
+def flag_badge_text(n):
+    """Badge label for the collapse toggle; empty hides it. Caps at '9+'.
+
+    The badge floats on the toggle button rather than inside the header, so it
+    SURVIVES collapsing the panel — a user who has collapsed the detail strip to
+    reclaim table width still sees that the selected signal raised warnings. A
+    zero renders nothing at all: a "0" badge is visual noise on the clean trades,
+    which are the common case.
+    """
+    if not isinstance(n, int) or isinstance(n, bool) or n <= 0:
+        return ""
+    return "9+" if n > 9 else str(n)
+
+
 def flag_class(state):
     """Finite state -> a fixed palette class (never build a class from a value).
 
@@ -648,7 +662,7 @@ def _greek(label, value, fmt="{:.3f}", color=None):
 
 class _Handle:
     def __init__(self, state, header, sig_title, sig_sub, gauge_el, gauge_caption,
-                 flag_box, body):
+                 flag_box, flag_badge, body):
         self._state = state          # shared with the collapse toggle
         self._header = header        # persistent header (title + gauge + flags)
         self._sig_title = sig_title
@@ -656,12 +670,19 @@ class _Handle:
         self._gauge = gauge_el
         self._caption = gauge_caption
         self._flag_box = flag_box    # rebuilt per selection; empty when clean
+        self._flag_badge = flag_badge  # floats on the toggle; survives collapse
         self._body = body            # cleared + rebuilt per selection
+
+    def _set_flag_badge(self, n):
+        txt = flag_badge_text(n)
+        self._flag_badge.text = txt
+        self._flag_badge.set_visibility(bool(txt))
 
     def clear(self):
         self._state["has_signal"] = False
         self._header.set_visibility(False)
         self._flag_box.clear()
+        self._set_flag_badge(0)
         self._body.clear()
         with self._body:
             ui.label(_PLACEHOLDER).classes("opacity-60")
@@ -690,6 +711,7 @@ class _Handle:
             for f in flags:
                 ui.label(f"⚠ {f['label']}").classes(
                     f"text-xs {flag_class(f['state'])}")
+        self._set_flag_badge(len(flags))
 
         self._body.clear()
         with self._body:
@@ -709,8 +731,15 @@ def render(width: int = 360):
     with col:
         with ui.row().classes("items-center justify-between w-full no-wrap"):
             title = ui.label("Trade detail").classes("text-subtitle1 font-bold")
-            toggle_btn = ui.button(icon="last_page").props("flat round dense") \
-                .tooltip("Collapse panel")
+            # `relative` wrapper so Quasar's `floating` badge anchors to the
+            # button's top-right corner rather than the layout row.
+            with ui.element("div").classes("relative"):
+                toggle_btn = ui.button(icon="last_page").props("flat round dense") \
+                    .tooltip("Collapse panel")
+                with toggle_btn:
+                    flag_badge = ui.badge("", color="red").props("floating") \
+                        .classes("text-xs")
+                flag_badge.set_visibility(False)
         # Persistent signal header (built once → registers the Highcharts ESM at
         # page load; updated in place per selection). Hidden until a signal lands.
         # The gauge MUST stay here rather than move into _build_cards: a
@@ -748,4 +777,4 @@ def render(width: int = 360):
 
     toggle_btn.on_click(toggle)
     return _Handle(state, header, sig_title, sig_sub, gauge_el, gauge_caption,
-                   flag_box, body)
+                   flag_box, flag_badge, body)

@@ -26,6 +26,19 @@ def test_flag_class_returns_state_token_classes():
         assert detail.flag_class(state) in allowed
 
 
+def test_flag_badge_text_hides_zero():
+    assert detail.flag_badge_text(0) == ""
+    assert detail.flag_badge_text(2) == "2"
+    assert detail.flag_badge_text(12) == "9+"
+
+
+def test_flag_badge_text_rejects_non_counts():
+    # flag_count feeds this, but the badge must not render junk if it ever gets
+    # something else — and bool is an int subclass, so True must not read as "1".
+    for junk in (None, -1, "3", 1.5, True, False):
+        assert detail.flag_badge_text(junk) == ""
+
+
 def test_factor_rows_returns_11_for_non_ic():
     fs = {"rr": 80, "pop": 62, "theta": 60, "iv": 94, "iv_hv": 46, "vega": 75,
           "em": 19, "liq": 0, "trend": 75, "gex": 100, "dex": 83}
