@@ -9,6 +9,15 @@
             "command": "python .claude/hooks/guard_secrets.py"
           }
         ]
+      },
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/guard_prod_promote.py"
+          }
+        ]
       }
     ],
     "PostToolUse": [

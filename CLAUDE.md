@@ -2267,6 +2267,31 @@ renders the proxy card read-only as *"shared — owned by prod"* and **hides the
 Memurai restart in dev** (one Redis server serves both); dev's webgui carries a
 `DEV` chip in the header lockup and a `DEV ·` tab-title prefix.
 
+**THE DEVELOPMENT RULE (mandatory).** Work you are given lands in **dev**, is
+**verified running in dev**, and only then moves to prod — via `tools\promote.bat`
+and nothing else. Never `git pull`, `merge`, `checkout` or `reset` in the prod
+checkout: that skips the dirty-tree refusal, the stop, the conditional dependency
+reinstall and the restart, all of which exist because prod is a live trading
+stack pinned to `main`.
+
+The order is: commit in dev (or a worktree) → fast-forward `Using_Highcharts` and
+`main` → **run it in dev and confirm the change actually works** → then promote.
+"Tests pass" is not "verified in dev" for anything with a runtime surface; the
+DEV chip, the Status-page restart gating and the launcher guards were all
+green in tests and wrong in practice.
+
+**Enforced mechanically**, because knowing the rule was not enough: the whole
+environment split was built in a session that then bypassed `promote.bat` on
+every commit, since `git pull` in prod is one keystroke shorter.
+`.claude/hooks/guard_prod_promote.py` (PreToolUse on `Bash|PowerShell`, wired in
+`.claude/settings.json`) blocks a mutating git verb whose target is the prod
+checkout — by explicit leading `cd`, or by the Bash tool's persistent cwd, so a
+bare `git pull` is caught too. Read-only git in prod stays open (inspecting prod
+is how you decide to promote), as does everything in dev and worktrees. The `cd`
+match is **anchored at the start of the command**: an unanchored version also
+fired on commands that merely *wrote* the prod path into a file, which it did
+within a minute of going live.
+
 **Launcher guards (added 2026-08-09, after both bit in the first hour of use).**
 Two failures, one root: a launcher that starts the *wrong* stack, or a *second*
 copy of the right one, looks like success until you read the ports.
