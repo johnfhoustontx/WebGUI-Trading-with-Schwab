@@ -10,6 +10,7 @@ proxy / scoring code. The pure transforms (``paper_rows``/``synth_from_trade``/
 import inspect
 
 import bus_client
+import pytest
 from pages.options import paper
 
 TRADE = {
@@ -211,6 +212,25 @@ def test_synth_pop_none_when_delta_absent_or_zero():
 def test_synth_breakeven_non_numeric_is_none():
     assert paper.synth_from_trade({"symbol": "X", "breakeven": ""})["breakeven"] is None
     assert paper.synth_from_trade({"symbol": "X"})["breakeven"] is None
+
+
+def test_synth_max_loss_is_per_share_not_whole_position():
+    # max_loss_total is max_loss * quantity * 100 (paper_trader.py:117).
+    # With qty=3 and a $3.45/share max loss, the stored total is $1035.
+    trade = {"symbol": "SPY", "entry_credit": 1.55, "max_loss_total": 1035.0,
+             "quantity": 3, "expiration": "2099-01-15"}
+    s = paper.synth_from_trade(trade)
+    # credit is per-share, so max_loss must be per-share too.
+    assert s["max_loss"] == pytest.approx(3.45)
+    assert s["credit"] == pytest.approx(1.55)
+
+
+def test_synth_max_loss_none_when_quantity_missing():
+    # Without quantity the total cannot be reduced to per-share. Better to show
+    # nothing than a figure that is wrong by a factor of the position size.
+    trade = {"symbol": "SPY", "entry_credit": 1.55, "max_loss_total": 1035.0,
+             "expiration": "2099-01-15"}
+    assert paper.synth_from_trade(trade)["max_loss"] is None
 
 
 def test_merge_detail_overlays_non_none_only():
