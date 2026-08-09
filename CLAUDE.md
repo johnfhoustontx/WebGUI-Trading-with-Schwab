@@ -887,8 +887,10 @@ stale); the proxy's REST market data works even when `/health` shows
 `token_expired:true` (auto-refresh) — only a missing/expired **refresh** token is
 fatal.
 
-**Tests:** `cd webgui && ..\.venv\Scripts\python -m pytest -q` (772 green as of
-this writing). TDD pure functions; smoke-verify `render()` with a screenshot.
+**Tests:** `cd webgui && ..\.venv\Scripts\python -m pytest -q` (**1190 green**,
+measured 2026-08-09 — this line said 772 for a long time; see the Tests section
+for the standing warning about stale counts and for the worktree/subshell caveat).
+TDD pure functions; smoke-verify `render()` with a screenshot.
 `tests/test_no_inline_style.py` guards every migrated page against `.style(`/`:style=`
 (the Tailwind-first standard) — add any new page to it.
 
@@ -2550,8 +2552,15 @@ cd sentiment-dashboard ; python -m pytest tests
 cd trade-analyzer      ; python -m pytest .
 cd portfolio-analyzer  ; python -m pytest tests
 cd claude-driver       ; python -m pytest .
-cd webgui              ; python -m pytest .   # 1053 tests: transforms + shell smoke
+cd webgui              ; python -m pytest .   # 1190 green: transforms + shell smoke
 ```
+
+> **In a worktree** (`.claude/worktrees/…`) there is no `.venv` — use the absolute
+> `D:\WebGUI Trading with Schwab\.venv\Scripts\python.exe`, and confine the `cd` to
+> a **subshell** (`(cd webgui && …)`). A bare `cd` into a subdirectory leaves the
+> shell there, and the hooks in `.claude/settings.json` are registered by RELATIVE
+> path, so every subsequent Bash/PowerShell/Edit call then fails with a
+> hook error and cannot be recovered from that session.
 
 The 3-tier services run per folder from the repo root (NOT `pytest services` over
 all of them — that puts multiple hyphenated app dirs on `sys.path` at once and
@@ -2560,7 +2569,7 @@ re-triggers the documented `config`/`scoring`/`notifier` module-name collisions)
 ```powershell
 # from the repo root, one service at a time
 .venv\Scripts\python -m pytest services\sentiment_svc   # 250 passed / 1 documented-baseline fail
-.venv\Scripts\python -m pytest services\options_svc     # 432
+.venv\Scripts\python -m pytest services\options_svc     # 932 passed / 2 documented-baseline fail
 .venv\Scripts\python -m pytest services\portfolio_svc   # 27
 .venv\Scripts\python -m pytest services\trade_svc       # 56
 .venv\Scripts\python -m pytest services\driver_svc      # 162
@@ -2571,17 +2580,35 @@ re-triggers the documented `config`/`scoring`/`notifier` module-name collisions)
 **Known baseline failures — do NOT "fix" them as part of unrelated work, and do not
 read them as a regression:**
 
-- **options-scanner** — ~2 known date-relative failing tests carried over from the
-  source repo.
-- **options_svc** — 2 date-relative `test_expected_move` failures.
+- **options-scanner** — **11**, not the "~2" this line claimed until 2026-08-09.
+  Re-measured that day at **11 failed / 1370 passed / 3 skipped**. The set, which
+  is what you compare (never the count — see below):
+  `test_gex_collector.py` ×5 (`test_next_boundary_*` ×4, `test_main_skips_before_market_open`),
+  `test_gex_collector_lock.py::test_acquire_defers_when_fresh_other_owner`,
+  `test_key_levels_doc.py` ×3, and
+  `test_scanner_engine.py::TestEarningsAvoidance` ×2.
+- **options_svc** — 2 date-relative `test_expected_move` failures (932 passed).
 - **sentiment_svc** — `tests/test_compute_regime.py::test_daily_history_wins_over_session_latch`
   (the `$VIX1D` session latch beats the daily close: `assert 18.0 == 10.0`). Suite
   reads **250 passed / 1 failed**. Reproduced at `7667920`, so it **predates** the
   dev/prod-environments branch; first documented 2026-08-08.
 
-The remaining per-service counts in the block above are indicative, not pinned —
-only the two figures re-measured on 2026-08-08 (webgui 1053, sentiment_svc 251
-collected) are current.
+**Compare the failing SET, not the count.** A matching total is not evidence of a
+clean run: this repo has a documented incident where two real regressions hid
+behind two tests flipping to skipped while the total held steady. Run with `-rf`
+and diff the node IDs name-by-name. It nearly bit again on 2026-08-09, when
+options-scanner's passed/skipped drifted 1351/2 → 1370/3 across a change while the
+failure count sat unmoved at 11 — that drift lives in the `test_gex_collector*`
+group, which is timing-dependent.
+
+The remaining per-service counts in the block above are indicative, not pinned.
+Only these are current, re-measured **2026-08-09** on `Using_Highcharts` at
+`b4ef24b`: **webgui 1190** green, **options_svc 932 passed / 2 failed**,
+**options-scanner 1370 passed / 11 failed / 3 skipped**. `sentiment_svc` (251
+collected) was last measured 2026-08-08; portfolio_svc, trade_svc, driver_svc,
+`shared/bus` and `shared/contracts` have **not** been re-measured since they were
+first written down — treat those five as unverified and measure your own baseline
+before trusting them.
 
 ## External processes (not in this repo)
 
