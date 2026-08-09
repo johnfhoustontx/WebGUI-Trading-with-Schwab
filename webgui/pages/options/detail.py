@@ -398,6 +398,25 @@ def breakeven_text(raw):
     return " / ".join(f"${v:,.2f}" for v in vals)
 
 
+def gauge_metric(signal):
+    """What the gauge shows, always with the caption naming it.
+
+    The old code fell back from composite_score to pop_pct while keeping the
+    composite's grade caption -- two different 0-100 scales on one unlabelled
+    face. The grade belongs to the composite ONLY, so the PoP fallback carries
+    no grade.
+    """
+    s = signal or {}
+    score = s.get("composite_score")
+    if isinstance(score, (int, float)) and not isinstance(score, bool):
+        return {"value": score, "caption": "Composite score",
+                "grade": s.get("grade") or ""}
+    pop = s.get("pop_pct")
+    if isinstance(pop, (int, float)) and not isinstance(pop, bool):
+        return {"value": pop, "caption": "Probability of profit", "grade": ""}
+    return {"value": 0, "caption": "No score available", "grade": ""}
+
+
 def _leg_pair(short_k, long_k, right):
     """One 'Sell X / Buy Y' instruction line, or None when strikes are absent."""
     if short_k is None or long_k is None:

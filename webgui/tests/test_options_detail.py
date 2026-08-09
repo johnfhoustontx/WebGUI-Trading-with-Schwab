@@ -337,3 +337,22 @@ def test_contract_lines_iron_condor_has_two_legs():
 
 def test_contract_lines_empty_when_no_strikes():
     assert detail.contract_lines({"type": "PCS"}) == []
+
+
+def test_gauge_metric_prefers_composite_score():
+    m = detail.gauge_metric({"composite_score": 72, "grade": "Good"})
+    assert m == {"value": 72, "caption": "Composite score", "grade": "Good"}
+
+
+def test_gauge_metric_falls_back_to_pop_and_relabels():
+    m = detail.gauge_metric({"pop_pct": 68})
+    assert m["value"] == 68
+    assert m["caption"] == "Probability of profit"
+    assert m["grade"] == ""
+
+
+def test_gauge_metric_when_nothing_is_available():
+    m = detail.gauge_metric({})
+    assert m["value"] == 0
+    assert m["caption"] == "No score available"
+    assert m["grade"] == ""
