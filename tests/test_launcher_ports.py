@@ -371,3 +371,16 @@ def test_open_webgui_helper_takes_the_port_as_an_argument():
                     if not l.strip().upper().startswith("REM"))
     assert "%~1" in src
     assert "%WEBPORT%" in src
+
+
+def test_start_webgui_probe_uses_no_percent_formatting():
+    """`%` is a batch metacharacter. cmd rewrites `'set X=%s' % val` into
+    `'set X= val` - an unterminated Python string - before python -c sees it,
+    and the launcher then refuses in BOTH environments with "could not read the
+    port". Cost two live-test rounds; concatenation cannot regress this way."""
+    for line in _bat("start_webgui.bat").splitlines():
+        s = line.strip()
+        if s.upper().startswith("REM") or "-c " not in s:
+            continue
+        assert "%s" not in s and "%d" not in s, (
+            f"%-formatting inside a batch -c argument will be mangled by cmd: {s}")

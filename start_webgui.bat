@@ -22,8 +22,13 @@ REM     dies as: 'D:\WebGUI' is not recognized. Measured, not theorised. The
 REM     emitted `set` lines are deliberately UNQUOTED — a port and PROD/DEV have
 REM     no spaces, and quoting them would put a double quote inside the -c
 REM     argument, which walks straight back into the same trap.
+REM
+REM     The Python below uses CONCATENATION, never %-formatting: `%` is a batch
+REM     metacharacter, so cmd rewrites `'set X=%s' % val` into
+REM     `'set X= val` — an unterminated string — before Python ever sees it.
+REM     Measured. `%%` would escape it, but no-percent-at-all cannot regress.
 set "_NSENV=%TEMP%\_neuralstrike_env_%RANDOM%.bat"
-"%PY%" -c "import repo_paths as r; print('set WEBPORT=%s' % r.NICEGUI_PORT); print('set PROXYPORT=%s' % r.PROXY_PORT); print('set ENVNAME=%s' % r.ENV_NAME.upper())" > "%_NSENV%" 2>nul
+"%PY%" -c "import repo_paths as r; print('set WEBPORT=' + str(r.NICEGUI_PORT)); print('set PROXYPORT=' + str(r.PROXY_PORT)); print('set ENVNAME=' + r.ENV_NAME.upper())" > "%_NSENV%" 2>nul
 call "%_NSENV%" >nul 2>&1
 del "%_NSENV%" >nul 2>&1
 if not defined WEBPORT (
