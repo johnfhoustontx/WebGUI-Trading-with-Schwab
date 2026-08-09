@@ -42,6 +42,10 @@ DATA_DIR.mkdir(exist_ok=True)
 # Naked shorts (SHORT_CALL/SHORT_PUT) are deliberately EXCLUDED (undefined risk).
 PAPER_DEBIT_TYPES = {"LONG_CALL", "LONG_PUT", "BULL_CALL", "BEAR_PUT"}
 
+# Shares per option contract. Ledger rows store PER-SHARE prices (entry_credit,
+# max_loss_per) and PER-CONTRACT dollars (*_total); this is the factor between them.
+_CONTRACT_MULT = 100
+
 
 def _create_debit_trade(signal, quantity, mode, now):
     """Build a legs-based DEBIT paper trade (long option / debit vertical).
@@ -87,6 +91,44 @@ def _create_debit_trade(signal, quantity, mode, now):
     }
 
 
+def _is_normalized_signal(signal):
+    """True for a signal that has been through ``strategy_scanner`` normalization.
+
+    Keyed on ``legs``: ``_normalize_credit`` always attaches the reconstructed leg
+    list (2 for a vertical, 4 for an iron condor), and every natively-built family
+    carries one too. No raw ``scanner_engine`` signal has it — neither
+    ``screen_spreads`` nor ``build_iron_condors`` builds a ``legs`` key, and neither
+    does ``signal_db``/``signal_recorder`` on the way back out. It is also the key
+    ``_create_debit_trade`` already reads, so both scale-sensitive paths agree on
+    what "normalized" means.
+    """
+    return bool(signal.get("legs"))
+
+
+def _credit_max_loss_per_share(signal):
+    """Per-SHARE max loss for a credit spread, whichever scanner produced the signal.
+
+    A RAW ``scanner_engine`` signal carries ``max_loss`` in PER-SHARE dollars. A swing
+    signal normalized by ``strategy_scanner._normalize_credit`` carries it in
+    PER-CONTRACT dollars (x100) with round-trip commission folded IN. That asymmetry
+    is deliberate upstream — the Strategy Finder table renders ``max_loss`` as dollars
+    while ``credit`` stays per-share — but it MUST be undone here, or a $345 spread is
+    booked as $34,500 of risk.
+
+    Commission is stripped rather than kept, so the ledger stays GROSS throughout:
+    ``entry_credit`` is the gross per-share credit and ``close_paper_trade`` computes
+    realized P&L gross, so a commission-inclusive risk figure would be the only net
+    number in the row. Stripping it also makes ``entry_credit + max_loss_per``
+    reconcile exactly to ``width``, and makes the stored row identical for identical
+    economics regardless of which scanner produced the signal.
+    """
+    max_loss = signal["max_loss"]
+    if not _is_normalized_signal(signal):
+        return max_loss                                  # already per-share
+    commission = signal.get("commission") or 0.0         # absent -> keep it conservative
+    return round((max_loss - commission) / _CONTRACT_MULT, 4)
+
+
 def create_paper_trade(signal, quantity=1, mode="PAPER"):
     """Create a paper trade from a scanner signal.
 
@@ -97,6 +139,7 @@ def create_paper_trade(signal, quantity=1, mode="PAPER"):
     if signal.get("type") in PAPER_DEBIT_TYPES:
         return _create_debit_trade(signal, quantity, mode, now)
     multiplier = 100
+    max_loss_per = _credit_max_loss_per_share(signal)
 
     trade = {
         "trade_id": str(uuid.uuid4())[:8],
@@ -113,8 +156,8 @@ def create_paper_trade(signal, quantity=1, mode="PAPER"):
         "quantity": quantity,
         "entry_credit": signal["credit"],
         "entry_credit_total": round(signal["credit"] * quantity * multiplier, 2),
-        "max_loss_per": signal["max_loss"],
-        "max_loss_total": round(signal["max_loss"] * quantity * multiplier, 2),
+        "max_loss_per": max_loss_per,
+        "max_loss_total": round(max_loss_per * quantity * multiplier, 2),
         "breakeven": signal.get("breakeven", ""),
         "short_delta": signal.get("short_delta", 0),
         "net_theta": signal.get("net_theta", 0),
