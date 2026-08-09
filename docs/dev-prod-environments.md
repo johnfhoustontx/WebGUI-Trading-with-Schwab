@@ -344,6 +344,43 @@ green before letting the ~1.4 GB go.
   caught it.
 - **The Status page's freshness table will look stale in dev**, because dev
   publishes nothing at rest. That is the snapshot ageing, not a broken service.
+- **Two batch metacharacter traps, if you edit a launcher.** Both were hit while
+  making `start_webgui.bat` environment-aware, and neither announced itself — the
+  launcher just refused with *"could not read the web GUI port"*, in **both**
+  environments, which reads like a `repo_paths` problem rather than a quoting one.
+
+  **1. `for /f "usebackq"` strips the quotes around an interpreter path
+  containing spaces.** This looks correct and is not:
+
+  ```bat
+  for /f "usebackq delims=" %%p in (`"%PY%" -c "import repo_paths;print(repo_paths.NICEGUI_PORT)"`) do set "WEBPORT=%%p"
+  ```
+
+  With `PY=D:\WebGUI Trading Prod\.venv\Scripts\python.exe` that fails as
+  `'D:\WebGUI' is not recognized`. Both checkout paths contain spaces, so this
+  will bite every time.
+
+  **2. `%` inside a `-c` argument is consumed by cmd before Python sees it.**
+  `print('set X=%s' % v)` reaches Python as `print('set X= v)` — an unterminated
+  string literal.
+
+  **The shape that works:** have Python emit `set` lines into a temp batch, `call`
+  it, delete it — and build those lines with **concatenation, never
+  `%`-formatting**. Leave the emitted `set` unquoted (a port and `PROD`/`DEV` have
+  no spaces; quoting would put a double quote back inside the `-c` argument).
+
+  ```bat
+  set "_NSENV=%TEMP%\_neuralstrike_env_%RANDOM%.bat"
+  "%PY%" -c "import repo_paths as r; print('set WEBPORT=' + str(r.NICEGUI_PORT))" > "%_NSENV%" 2>nul
+  call "%_NSENV%" >nul 2>&1
+  del "%_NSENV%" >nul 2>&1
+  ```
+
+  `%%` would also escape trap 2, but no-percent-at-all cannot regress.
+  `tests/test_launcher_ports.py` rejects `%s`/`%d` in any `-c` line of that file.
+  Related, same family: in **Git Bash** `cmd /c` becomes `cmd C:\...` because `/c`
+  is path-mangled — use `cmd //c` there, or a full path from PowerShell.
+
 - **A healthy stack is 16 python processes per environment, not 8.** The venv's
   `python.exe` is a redirector that re-execs the base interpreter, so every
   component is a **parent/child pair**: the parent's command line carries the

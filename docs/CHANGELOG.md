@@ -26,12 +26,9 @@ message naming the web GUI rather than the proxy underneath it — the WT branch
 `:wait_prod_proxy` first and `:wait_web` returns a failure with the real diagnosis. (4) **`start_webgui.bat`
 hardcoded `:8500`** in its title, banner, proxy hint and browser helper; from dev it started on `:9500`
 while announcing prod's port and opening a browser there. It now derives everything from `repo_paths`
-and `_open_webgui.bat` takes the port as an argument. ⚠ **Two batch metacharacter traps cost three
-rounds there and are worth knowing**: `for /f "usebackq"` STRIPS the quotes around an interpreter path
-containing spaces (`"D:\WebGUI Trading Prod\.venv\..."` dies as *'D:\WebGUI' is not recognized*), and
-**`%` inside a `-c` argument is eaten by cmd** (`'set X=%s' % v` → `'set X= v`, an unterminated string).
-Emit `set` lines into a temp batch and use CONCATENATION, never `%`-formatting; a test rejects `%s`/`%d`
-in any `-c` line. Also fixed: the **`DEV ·` tab-title prefix never applied** — `_layout` calls
+and `_open_webgui.bat` takes the port as an argument. ⚠ two batch metacharacter traps cost three rounds there — `for /f "usebackq"` quote-stripping and
+`%` being eaten inside a `-c` argument — both written up with the working shape in the runbook's
+**Gotchas**, since that is where someone editing a launcher will look. Also fixed: the **`DEV ·` tab-title prefix never applied** — `_layout` calls
 `ui.page_title()` on every page, overriding `ui.run(title=…)`, so `document.title` read "Market Scanner"
 in BOTH environments; `window_title()` now takes the page label. And **`snapshot_from_prod.py` imported
 `redis` AFTER the SQLite copy loop**, so a wrong interpreter would have written ~1.4 GB and then failed,
