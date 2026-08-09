@@ -51,7 +51,10 @@ def _pcs():
                  {"kind": "put", "side": "long", "strike": 435,
                   "expiration": "2026-08-21", "qty": 1, "mark": 0.50}],
         "expiration": "2026-08-21", "dte": 20,
-        "net_debit": None, "net_credit": 1.70, "max_profit": 170.0,
+        # net_credit is per-CONTRACT, like max_profit/max_loss/capital beside it
+        # (payoff_metrics multiplies by 100). It read 1.70 — per-SHARE — which
+        # made the whole fixture self-inconsistent and masked the credit unit bug.
+        "net_debit": None, "net_credit": 170.0, "max_profit": 170.0,
         "max_loss": 330.0, "capital": 330.0, "breakevens": [438.30], "pop_pct": 68.0,
         "rr": 0.515, "composite_score": 88.0, "grade": "A",
         "underlying_price": 445.0, "unbounded": False,
@@ -118,7 +121,7 @@ def test_debit_credit_text_debit():
 
 
 def test_debit_credit_text_credit():
-    assert st.debit_credit_text(_pcs()) == "+1.70 credit"
+    assert st.debit_credit_text(_pcs()) == "+170.00 credit"
 
 
 def test_debit_credit_text_neither():
@@ -332,7 +335,7 @@ def test_strategy_rows_pcs_carries_fields():
     assert row["id"] == "p1"
     assert row["strategy_label"] == "Put Credit Spread"
     assert row["bias"] == "bullish"
-    assert row["debit_credit"] == "+1.70 credit"
+    assert row["debit_credit"] == "+170.00 credit"
     assert row["breakevens"] == "438.30"
     assert row["grade"] == "A"
     assert row["_allow_paper"] is True
@@ -515,6 +518,19 @@ def test_detail_signal_net_cost_from_per_share_source_credit():
 
 def test_detail_signal_net_cost_absent_when_nothing_priced():
     assert st.detail_signal({"type": "PCS"})["net_cost"] is None
+
+
+def test_detail_signal_credit_from_net_credit_is_per_share():
+    # A NATIVELY-built naked short carries no source ``credit`` (only the adapted
+    # credit families preserve one), so ``credit`` is filled from ``net_credit``
+    # — which payoff_metrics emits in per-CONTRACT dollars. detail.py's stated
+    # convention is that every adapter hands it PER-SHARE, and it renders credit
+    # through money_per_contract (x100), so an unnormalized fill double-scales.
+    out = st.detail_signal({"type": "SHORT_PUT", "net_credit": 155.0,
+                            "net_debit": None})
+    assert out["credit"] == 1.55
+    # and it stays consistent with the net_cost normalized alongside it
+    assert out["net_cost"] == 1.55
 
 
 def test_detail_signal_does_not_mutate_its_input():

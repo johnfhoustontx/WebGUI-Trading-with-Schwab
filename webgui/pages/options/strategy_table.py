@@ -278,10 +278,20 @@ def detail_signal(signal):
     fill ``credit`` from ``net_credit`` ONLY and ``breakeven`` (first breakeven) when
     absent. A debit structure (``net_credit`` None) deliberately leaves ``credit``
     unset → the panel's green "Credit" tile shows "—" rather than the DEBIT amount
-    mislabeled as a credit. The input is NOT mutated."""
+    mislabeled as a credit. The input is NOT mutated.
+
+    UNITS: ``net_credit`` is per-CONTRACT (payoff_metrics, x100) while ``credit``
+    is per-SHARE across every other adapter — detail.py's ``CONTRACT_MULTIPLIER``
+    comment states that convention and the panel multiplies by 100 to display. So
+    the fill DIVIDES, exactly as ``_fill_net_cost`` does below. This path is only
+    reachable for a NATIVELY-built structure (a naked SHORT_PUT/SHORT_CALL):
+    ``_normalize_credit`` copies the source dict, so an adapted PCS/CCS/IC keeps
+    its per-share source ``credit`` and never reaches the fallback."""
     out = dict(signal or {})
     if out.get("credit") is None:
-        out["credit"] = out.get("net_credit")
+        credit_d = _num(out.get("net_credit"))
+        out["credit"] = (round(credit_d / _CONTRACT_MULT, 6)
+                         if credit_d is not None else None)
     if out.get("breakeven") is None:
         bes = out.get("breakevens") or []
         out["breakeven"] = bes[0] if bes else None
