@@ -137,6 +137,55 @@ def captured_section(cache) -> str:
         rows, empty="No captured signals.")
 
 
+_CLOSED_COLS = ["Symbol", "Strategy", "Credit", "Exit", "Realized", "Reason", "Time (CT)"]
+
+
+def _closed_time(ts) -> str:
+    """HH:MM from an ISO ``close_ts`` (written in CT by close_signal_manually)."""
+    s = str(ts or "")
+    return s[11:16] if len(s) >= 16 else "—"
+
+
+def _dec2(v) -> str:
+    n = _num(v)
+    return f"{n:.2f}" if n is not None else "—"
+
+
+def captured_closed_rows(cache) -> list:
+    """Row HTML strings for today's closed captured outcomes."""
+    closed = cache.get("closed", []) if isinstance(cache, dict) else []
+    rows = []
+    for c in closed:
+        rows.append(
+            "<tr>"
+            + _cell(c.get("symbol"))
+            + _cell(c.get("strategy"))
+            + _cell(_dec2(c.get("entry_credit")))
+            + _cell(_dec2(c.get("exit_value")))
+            + f'<td class="{_pn_class(c.get("realized_pnl"))}">{_money(c.get("realized_pnl"))}</td>'
+            + _cell(c.get("exit_reason"))
+            + _cell(_closed_time(c.get("close_ts")))
+            + "</tr>"
+        )
+    return rows
+
+
+def captured_closed_section(cache) -> str:
+    """A table of today's auto/manually closed captured trades + a day realized total.
+
+    Graceful-empty ("No captured trades closed today."). Reads
+    ``cache:options:captured_closed`` = ``{"closed": [...], "total_realized": …}``."""
+    cache = cache if isinstance(cache, dict) else {}
+    table = _table(_CLOSED_COLS, captured_closed_rows(cache),
+                   empty="No captured trades closed today.")
+    total = cache.get("total_realized")
+    total_line = (
+        '<p class="summary-line">Day realized: '
+        f'<span class="{_pn_class(total)}">{_money(total)}</span></p>'
+    )
+    return table + total_line
+
+
 def paper_section(trades_cache, account_cache) -> str:
     account_cache = account_cache if isinstance(account_cache, dict) else {}
     snap = account_cache.get("snapshot") if account_cache.get("has_account") else None
@@ -450,6 +499,7 @@ def detail_fragment(snap: dict, today=None) -> str:
         ("trades", "Trades"),
         ("scanner", "Scanner"),
         ("captured", "Captured"),
+        ("captured-closed", "Captured closed"),
     ])
 
     parts = [
@@ -465,6 +515,8 @@ def detail_fragment(snap: dict, today=None) -> str:
         details_section("scanner", "Scanner Signals", scanner_section(snap.get("scan"))),
         details_section("captured", "Captured Signals",
                         captured_section(snap.get("captured"))),
+        details_section("captured-closed", "Captured — closed today",
+                        captured_closed_section(snap.get("captured_closed"))),
         "</div>",
     ]
     return "".join(parts)
@@ -510,7 +562,10 @@ def summary_fragment(snap: dict, detail_href: str, today=None) -> str:
         _tile("Driver trades", int(_num(dperf.get("total_trades"), 0))),
     ])
     perf_toc, perf_html = _performance_block(snap, today)
-    nav = toc(perf_toc)
+    nav = toc(perf_toc + [("captured-closed", "Captured closed")])
+    closed_html = details_section(
+        "captured-closed", "Captured — closed today",
+        captured_closed_section(snap.get("captured_closed")))
     return (
         '<div class="eod-report">'
         f"<h1>EOD Summary — {escape(str(snap.get('date', '')))}</h1>"
@@ -519,6 +574,7 @@ def summary_fragment(snap: dict, detail_href: str, today=None) -> str:
         "<h2>Performance</h2>"
         f'{nav}'
         f'{perf_html}'
+        f'{closed_html}'
         f'<p><a href="{escape(detail_href)}">View detailed report →</a></p>'
         "</div>"
     )
@@ -535,6 +591,7 @@ def read_snapshot() -> dict:
         "generated_at": now.strftime("%Y-%m-%d %H:%M CT"),
         "scan": bus_client.read("options:scan") or {},
         "captured": bus_client.read("options:captured") or {},
+        "captured_closed": bus_client.read("options:captured_closed") or {},
         "paper_trades": bus_client.read("options:paper_trades") or {},
         "paper_account": bus_client.read("options:paper_account") or {},
         "driver_paper_account": bus_client.read("options:driver_paper_account") or {},
