@@ -1318,8 +1318,9 @@ def _patch_manage_seams(monkeypatch, sigs, reprice):
     monkeypatch.setitem(_sys.modules, "signal_db", _types.SimpleNamespace(
         get_open_signals_with_latest_mark=lambda: sigs,
         set_be_armed=lambda sid, **kw: calls["armed"].append(sid),
-        close_signal_manually=lambda sid, exit_val, reason, **kw:
-            calls["closed"].append((sid, exit_val, reason)),
+        # Real signature: close_signal_manually(signal_id, exit_value, exit_reason, ...)
+        close_signal_manually=lambda sid, exit_value, exit_reason, **kw:
+            calls["closed"].append((sid, exit_value, exit_reason)),
         insert_mark=lambda mark, **kw: calls["marks"].append(mark)))
     monkeypatch.setitem(_sys.modules, "signal_repricer", _types.SimpleNamespace(
         reprice_swing=lambda r, c: reprice[r["signal_id"]],

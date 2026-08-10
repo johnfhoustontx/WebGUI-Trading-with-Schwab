@@ -1347,8 +1347,7 @@ def run_captured_manage_cycle() -> dict:
                         except Exception:
                             exit_val = None
                 if exit_val is not None:
-                    signal_db.close_signal_manually(sid, exit_val=exit_val,
-                                                    reason="EXPIRED")
+                    signal_db.close_signal_manually(sid, exit_val, "EXPIRED")
                     closed.append({"signal_id": sid, "symbol": r.get("symbol"),
                                    "reason": "EXPIRED", "exit_val": exit_val})
                 continue
@@ -1376,7 +1375,7 @@ def run_captured_manage_cycle() -> dict:
             if code in _CAPTURED_CLOSE_CODES:
                 exit_val = rep.get("current_value")
                 if exit_val is not None:
-                    signal_db.close_signal_manually(sid, exit_val=exit_val, reason=code)
+                    signal_db.close_signal_manually(sid, exit_val, code)
                     closed.append({"signal_id": sid, "symbol": r.get("symbol"),
                                    "reason": code, "exit_val": exit_val})
         except Exception:
