@@ -1092,7 +1092,7 @@ def test_reprice_captured_merges_marks_and_flags(monkeypatch):
                "recommendation": "CLOSE", "recommendation_code": "money_stop"},
     }
     monkeypatch.setitem(_sys.modules, "signal_recommender",
-                        _types.SimpleNamespace(build_mark=lambda r, rep, now: marks[r["signal_id"]]))
+                        _types.SimpleNamespace(build_mark=lambda r, rep, now, **kw: marks[r["signal_id"]]))
 
     out = compute.reprice_captured()
     by_id = {s["signal_id"]: s for s in out["signals"]}
@@ -1123,7 +1123,7 @@ def test_reprice_captured_clears_chain_cache_first(monkeypatch):
         clear_chain_cache=lambda: order.append("clear"),
         reprice_swing=lambda r, c: order.append("reprice") or {"rep": 1}))
     monkeypatch.setitem(_sys.modules, "signal_recommender", _types.SimpleNamespace(
-        build_mark=lambda r, rep, now: {"unrealized_pnl": 0.0, "recommendation": "HOLD",
+        build_mark=lambda r, rep, now, **kw: {"unrealized_pnl": 0.0, "recommendation": "HOLD",
                                         "recommendation_code": "HOLD"}))
     compute.reprice_captured()
     assert order and order[0] == "clear"      # cleared BEFORE the first reprice
@@ -1147,7 +1147,7 @@ def test_reprice_captured_skips_failed_signal(monkeypatch):
     monkeypatch.setitem(_sys.modules, "signal_repricer",
                         _types.SimpleNamespace(reprice_swing=_reprice))
     monkeypatch.setitem(_sys.modules, "signal_recommender",
-                        _types.SimpleNamespace(build_mark=lambda r, rep, now: {
+                        _types.SimpleNamespace(build_mark=lambda r, rep, now, **kw: {
                             "unrealized_pnl": 1.0, "recommendation_code": "TARGET_HIT"}))
 
     out = compute.reprice_captured()
@@ -1175,7 +1175,7 @@ def _patch_reprice_seams(monkeypatch, sigs, marks):
                             }))
     monkeypatch.setitem(_sys.modules, "signal_recommender",
                         _types.SimpleNamespace(
-                            build_mark=lambda r, rep, now: marks[r["signal_id"]]))
+                            build_mark=lambda r, rep, now, **kw: marks[r["signal_id"]]))
 
 
 def test_reprice_captured_tags_rescue_state_and_heat(monkeypatch):
@@ -1250,7 +1250,7 @@ def test_reprice_captured_hold_not_escalated(monkeypatch):
     monkeypatch.setitem(_sys.modules, "signal_repricer",
                         _types.SimpleNamespace(reprice_swing=_reprice))
     monkeypatch.setitem(_sys.modules, "signal_recommender",
-                        _types.SimpleNamespace(build_mark=lambda r, rep, now: marks[r["signal_id"]]))
+                        _types.SimpleNamespace(build_mark=lambda r, rep, now, **kw: marks[r["signal_id"]]))
     out = compute.reprice_captured()
     row = out["signals"][0]
     assert row["rescue_state"] != "tested"
@@ -1286,6 +1286,157 @@ def test_close_captured_calls_close_signal_manually(monkeypatch):
     compute.close_captured("X1", "0.45", "")
     # exit_val coerced to float; blank reason -> MANUAL_CLOSE default.
     assert seen["args"] == ("X1", 0.45, "MANUAL_CLOSE")
+
+
+# ── captured auto-manage cycle (Task 4) ─────────────────────────────────────
+def _manage_signal(**o):
+    """A captured-signal row shaped like get_open_signals_with_latest_mark()."""
+    base = {"signal_id": "M1", "symbol": "SPY", "strategy": "PCS",
+            "short_strike": 490.0, "long_strike": 485.0, "call_short": None,
+            "call_long": None, "width": 5.0, "expiration": "2099-01-15",
+            "entry_credit": 1.0, "entry_short_delta": -0.10, "entry_score": 60,
+            "entry_underlying": 500.0, "be_armed": 0}
+    base.update(o)
+    return base
+
+
+def _rep(**o):
+    base = {"current_value": 0.40, "unrealized_pnl": 60.0, "pnl_pct_of_credit": 60.0,
+            "current_underlying": 500.0, "current_short_delta": -0.10, "error": None}
+    base.update(o)
+    return base
+
+
+def _patch_manage_seams(monkeypatch, sigs, reprice):
+    """Stub signal_db + signal_repricer; keep signal_recommender REAL so the
+    lifecycle recommendation (arm / break-even stop / recovery) is genuinely
+    exercised. ``reprice`` maps signal_id → a reprice dict. Records
+    set_be_armed / close_signal_manually / insert_mark calls."""
+    import sys as _sys
+    import types as _types
+    calls = {"armed": [], "closed": [], "marks": []}
+    monkeypatch.setitem(_sys.modules, "signal_db", _types.SimpleNamespace(
+        get_open_signals_with_latest_mark=lambda: sigs,
+        set_be_armed=lambda sid, **kw: calls["armed"].append(sid),
+        # Real signature: close_signal_manually(signal_id, exit_value, exit_reason, ...)
+        close_signal_manually=lambda sid, exit_value, exit_reason, **kw:
+            calls["closed"].append((sid, exit_value, exit_reason)),
+        insert_mark=lambda mark, **kw: calls["marks"].append(mark)))
+    monkeypatch.setitem(_sys.modules, "signal_repricer", _types.SimpleNamespace(
+        reprice_swing=lambda r, c: reprice[r["signal_id"]],
+        intrinsic_value=lambda t, sp: (0.0, 0.0),
+        clear_chain_cache=lambda: None))
+    return calls
+
+
+def test_manage_arms_at_50pct_no_close(monkeypatch):
+    calls = _patch_manage_seams(monkeypatch, [_manage_signal(be_armed=0)],
+                                {"M1": _rep(unrealized_pnl=60.0, current_value=0.40)})
+    out = compute.run_captured_manage_cycle()
+    assert calls["armed"] == ["M1"]                     # be_armed persisted
+    assert calls["closed"] == []                        # NOT closed at +50%
+    assert out["armed"] and out["armed"][0]["signal_id"] == "M1"
+    assert out["closed"] == []
+
+
+def test_manage_armed_retrace_breakeven_closes(monkeypatch):
+    calls = _patch_manage_seams(monkeypatch, [_manage_signal(be_armed=1)],
+                                {"M1": _rep(unrealized_pnl=1.0, current_value=0.99)})
+    out = compute.run_captured_manage_cycle()
+    # armed + pnl retraced to <= round-trip commissions ($2.60) → BREAKEVEN_STOP.
+    assert calls["closed"] == [("M1", 0.99, "BREAKEVEN_STOP")]
+    assert out["closed"][0]["reason"] == "BREAKEVEN_STOP"
+
+
+def test_manage_delta_breach_recoverable_does_not_close(monkeypatch):
+    # delta breach but DTE far + cushion 2% (spot 500 vs short 490) → HOLD.
+    calls = _patch_manage_seams(
+        monkeypatch, [_manage_signal(be_armed=0)],
+        {"M1": _rep(unrealized_pnl=-3.0, current_value=1.05,
+                    current_short_delta=-0.40, current_underlying=500.0)})
+    compute.run_captured_manage_cycle()
+    assert calls["closed"] == []
+
+
+def test_manage_money_stop_closes(monkeypatch):
+    calls = _patch_manage_seams(
+        monkeypatch, [_manage_signal(be_armed=0)],
+        {"M1": _rep(unrealized_pnl=-250.0, current_value=3.0,
+                    current_short_delta=-0.10)})
+    compute.run_captured_manage_cycle()
+    assert calls["closed"] == [("M1", 3.0, "MONEY_STOP")]
+
+
+def test_manage_expiry_otm_closes_full_credit(monkeypatch):
+    import datetime as _d
+    today = _d.date.today().isoformat()
+    calls = _patch_manage_seams(
+        monkeypatch, [_manage_signal(be_armed=0, expiration=today)],
+        {"M1": _rep(unrealized_pnl=100.0, current_value=0.0)})
+    compute.run_captured_manage_cycle()
+    # DTE<=0 → settle EXPIRED at the repriced intrinsic (OTM → 0 → full credit).
+    assert calls["closed"] == [("M1", 0.0, "EXPIRED")]
+
+
+def test_manage_expiry_uses_intrinsic_when_no_chain(monkeypatch):
+    import datetime as _d
+    today = _d.date.today().isoformat()
+    # An expired reprice (no live chain) → settle at the engine intrinsic
+    # (stubbed to 0.0 = OTM full credit) via the current spot / entry underlying.
+    calls = _patch_manage_seams(
+        monkeypatch, [_manage_signal(be_armed=0, expiration=today)],
+        {"M1": _rep(error="expired", current_value=None,
+                    current_underlying=500.0)})
+    compute.run_captured_manage_cycle()
+    assert calls["closed"] == [("M1", 0.0, "EXPIRED")]
+
+
+def test_manage_stale_reprice_skips(monkeypatch):
+    calls = _patch_manage_seams(
+        monkeypatch, [_manage_signal(be_armed=1)],
+        {"M1": _rep(error="repricing failed", current_value=None,
+                    unrealized_pnl=None)})
+    out = compute.run_captured_manage_cycle()
+    assert calls["closed"] == [] and calls["armed"] == []
+    assert out == {"closed": [], "armed": []}
+
+
+def test_manage_cycle_defensive_on_read_failure(monkeypatch):
+    import sys as _sys
+    import types as _types
+
+    def _boom():
+        raise RuntimeError("db cold")
+
+    monkeypatch.setitem(_sys.modules, "signal_db", _types.SimpleNamespace(
+        get_open_signals_with_latest_mark=_boom))
+    monkeypatch.setitem(_sys.modules, "signal_repricer",
+                        _types.SimpleNamespace(clear_chain_cache=lambda: None))
+    assert compute.run_captured_manage_cycle() == {"closed": [], "armed": []}
+
+
+def test_captured_closed_today_sums_realized(monkeypatch):
+    import sys as _sys
+    import types as _types
+    closed = [{"signal_id": "a", "realized_pnl": 80.0, "symbol": "SPY"},
+              {"signal_id": "b", "realized_pnl": -30.0, "symbol": "QQQ"}]
+    monkeypatch.setitem(_sys.modules, "signal_db", _types.SimpleNamespace(
+        get_outcomes_for_date=lambda d: closed))
+    out = compute.captured_closed_today()
+    assert out["closed"] == closed
+    assert out["total_realized"] == 50.0
+
+
+def test_captured_closed_today_defensive(monkeypatch):
+    import sys as _sys
+    import types as _types
+
+    def _boom(d):
+        raise RuntimeError("cold")
+
+    monkeypatch.setitem(_sys.modules, "signal_db",
+                        _types.SimpleNamespace(get_outcomes_for_date=_boom))
+    assert compute.captured_closed_today() == {"closed": [], "total_realized": 0.0}
 
 
 # ── Gamma (moved from webgui/pages/options/gamma.py) ─────────────────────────

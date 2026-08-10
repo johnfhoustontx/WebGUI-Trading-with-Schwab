@@ -59,6 +59,11 @@ def test_nav_pinned_defaults_to_off():
     assert app_settings.DEFAULTS["nav_pinned"] is False
 
 
+def test_captured_autoclose_defaults_on():
+    """Captured-trade auto-management ships ON (opt-out via the Settings toggle)."""
+    assert app_settings.DEFAULTS["captured_autoclose_enabled"] is True
+
+
 def test_net_prem_defaults_exist():
     """The Net Prem view's group/mode/selection persist across page loads.
 

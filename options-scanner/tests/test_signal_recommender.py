@@ -14,9 +14,12 @@ def _ctx(credit=1.0, pnl=0.0, short_delta=0.10, dte_remaining=10,
     }
 
 
-def test_take_profit_at_50pct():
+def test_arms_at_50pct_does_not_close():
+    # +50% credit no longer takes profit — it arms break-even and HOLDs.
     r = rec.recommend(_ctx(credit=1.0, pnl=50.0))
-    assert r["action"] == "TAKE_PROFIT"
+    assert r["action"] == "HOLD"
+    assert "break-even armed" in r["reason"]
+    assert r["code"] != "TARGET_HIT"
 
 
 def test_take_profit_just_under_does_not_trigger():
@@ -24,9 +27,10 @@ def test_take_profit_just_under_does_not_trigger():
     assert r["action"] == "HOLD"
 
 
-def test_take_profit_beyond_threshold():
+def test_arms_beyond_threshold_still_holds():
     r = rec.recommend(_ctx(credit=1.0, pnl=80.0))
-    assert r["action"] == "TAKE_PROFIT"
+    assert r["action"] == "HOLD"
+    assert "break-even armed" in r["reason"]
 
 
 def test_cut_at_2x_credit_loss():
@@ -110,14 +114,19 @@ def test_hold_when_current_score_missing_still_works():
     assert r["action"] == "HOLD"
 
 
-def test_take_profit_beats_delta_breach():
+def test_delta_stop_precedes_arming():
+    # A delta breach (rule 4) is now checked BEFORE the +50% arming transition
+    # (rule 5); with no spot/strike, recovery is off so the delta stop fires.
     r = rec.recommend(_ctx(credit=1.0, pnl=60.0, short_delta=-0.40))
-    assert r["action"] == "TAKE_PROFIT"
+    assert r["action"] == "CUT" and r["code"] == "DELTA_STOP"
 
 
-def test_take_profit_beats_low_dte():
+def test_low_dte_profitable_arms_not_time_stops():
+    # An armed/profitable trade near expiry is NOT time-stopped (time-stop needs
+    # underwater); +50% profit arms break-even and HOLDs.
     r = rec.recommend(_ctx(credit=1.0, pnl=60.0, dte_remaining=1))
-    assert r["action"] == "TAKE_PROFIT"
+    assert r["action"] == "HOLD"
+    assert "break-even armed" in r["reason"]
 
 
 def test_short_delta_none_does_not_trigger_cut():
@@ -125,6 +134,102 @@ def test_short_delta_none_does_not_trigger_cut():
     ctx["current_short_delta"] = None
     r = rec.recommend(ctx)
     assert r["action"] == "HOLD"
+
+
+# ────────────────────────────────────────────────────────────────────────
+# Lifecycle: break-even arming + break-even stop + recovery-aware delta stop
+# ────────────────────────────────────────────────────────────────────────
+_CTX_KEYS = {"credit", "pnl", "short_delta", "dte_remaining", "current_score",
+             "entry_score", "entry_short_delta"}
+
+
+def _lctx(**over):
+    """A ctx with the lifecycle keys (be_armed/be_level/spot/strikes/strategy).
+
+    ``_ctx``-shaped params (short_delta → current_short_delta, etc.) are routed
+    through ``_ctx``; the remaining lifecycle keys are set directly."""
+    base = _ctx(**{k: v for k, v in over.items() if k in _CTX_KEYS})
+    base.update({"be_armed": False, "be_level": 2.60, "spot": None,
+                 "short_strike": None, "call_short": None, "strategy": "PCS"})
+    for k, v in over.items():
+        if k not in _CTX_KEYS:
+            base[k] = v
+    return base
+
+
+def test_armed_breakeven_stop_closes_at_be_level():
+    # armed, pnl retraced to <= be_level (commissions buffer) → BREAKEVEN_STOP CUT.
+    r = rec.recommend(_lctx(be_armed=True, be_level=2.60, pnl=1.0,
+                            short_delta=0.10, dte_remaining=10))
+    assert r["action"] == "CUT" and r["code"] == "BREAKEVEN_STOP"
+
+
+def test_armed_holds_while_above_be_level():
+    # armed, pnl still comfortably above be_level, no delta/time breach → HOLD.
+    r = rec.recommend(_lctx(be_armed=True, be_level=2.60, pnl=30.0,
+                            short_delta=0.10, dte_remaining=10))
+    assert r["action"] == "HOLD"
+
+
+def test_delta_stop_deferred_when_recoverable():
+    # delta breach but DTE>=5, short strike not breached, cushion 2% → HOLD (recovery).
+    r = rec.recommend(_lctx(strategy="PCS", short_delta=0.36, entry_short_delta=0.10,
+                            dte_remaining=10, spot=500.0, short_strike=490.0))
+    assert r["action"] == "HOLD"
+    assert "recovery" in r["reason"].lower()
+
+
+def test_delta_stop_fires_when_short_dte():
+    # delta breach + DTE=3 (< RECOVERY_DTE_MIN) → not recoverable → CUT.
+    r = rec.recommend(_lctx(strategy="PCS", short_delta=0.36, entry_short_delta=0.10,
+                            dte_remaining=3, spot=500.0, short_strike=490.0))
+    assert r["action"] == "CUT" and r["code"] == "DELTA_STOP"
+
+
+def test_delta_stop_fires_when_breached():
+    # delta breach + spot AT/through the short put strike → breached → CUT.
+    r = rec.recommend(_lctx(strategy="PCS", short_delta=0.36, entry_short_delta=0.10,
+                            dte_remaining=10, spot=489.0, short_strike=490.0))
+    assert r["action"] == "CUT" and r["code"] == "DELTA_STOP"
+
+
+def test_money_stop_is_hard_even_when_recoverable():
+    # pnl <= -2x credit is a HARD floor — fires regardless of DTE/cushion.
+    r = rec.recommend(_lctx(credit=1.0, pnl=-250.0, strategy="PCS", short_delta=0.36,
+                            entry_short_delta=0.10, dte_remaining=10, spot=500.0,
+                            short_strike=490.0))
+    assert r["action"] == "CUT" and r["code"] == "MONEY_STOP"
+
+
+def test_time_stop_hard_when_underwater():
+    # DTE<=2 and underwater is a HARD floor — fires before any recovery/BE logic.
+    r = rec.recommend(_lctx(pnl=-5.0, dte_remaining=2, short_delta=0.10,
+                            spot=500.0, short_strike=490.0))
+    assert r["action"] == "CUT" and r["code"] == "TIME_STOP"
+
+
+def test_ic_recovery_uses_both_sides():
+    # IC: put side safe but the CALL side is breached (spot >= call_short) →
+    # not recoverable → the delta stop fires.
+    r = rec.recommend(_lctx(strategy="IC", short_delta=0.36, entry_short_delta=0.10,
+                            dte_remaining=10, spot=511.0, short_strike=490.0,
+                            call_short=510.0))
+    assert r["action"] == "CUT" and r["code"] == "DELTA_STOP"
+
+
+def test_ic_recovery_holds_when_both_sides_safe():
+    # IC: both sides have cushion >= 1.5% and neither breached → recovery HOLDs.
+    r = rec.recommend(_lctx(strategy="IC", short_delta=0.36, entry_short_delta=0.10,
+                            dte_remaining=10, spot=500.0, short_strike=490.0,
+                            call_short=510.0))
+    assert r["action"] == "HOLD"
+    assert "recovery" in r["reason"].lower()
+
+
+def test_missing_lifecycle_keys_degrade_to_old_behavior():
+    # No be_armed / spot / strike → no arming close, recovery off (delta stop fires).
+    r = rec.recommend(_ctx(short_delta=0.36))
+    assert r["action"] == "CUT" and r["code"] == "DELTA_STOP"
 
 
 # ────────────────────────────────────────────────────────────────────────
@@ -203,11 +308,12 @@ def test_build_mark_populates_core_fields():
     assert mark["current_short_delta"] == -0.10
 
 
-def test_build_mark_take_profit_when_pnl_exceeds_50pct():
-    # entry_credit=1.0 → credit_total=100 → TP at >= 50
+def test_build_mark_arms_when_pnl_exceeds_50pct():
+    # entry_credit=1.0 → credit_total=100 → +50% arms break-even (HOLD), not TP.
     mark = rec.build_mark(_signal_row(), _repricer_ok(unrealized_pnl=60.0),
                           datetime.now(_TZ))
-    assert mark["recommendation"] == "TAKE_PROFIT"
+    assert mark["recommendation"] == "HOLD"
+    assert "break-even armed" in mark["recommendation_reason"]
 
 
 def test_build_mark_cut_on_delta_breach():
@@ -277,8 +383,10 @@ def test_auto_close_reason_unknown_or_none():
     assert rec.auto_close_reason(None) is None
 
 
-def test_recommend_code_target_hit():
-    assert rec.recommend(_ctx(credit=1.0, pnl=60.0))["code"] == "TARGET_HIT"
+def test_recommend_code_arms_hold_not_target_hit():
+    # +50% no longer emits TARGET_HIT — it arms break-even and stays HOLD.
+    r = rec.recommend(_ctx(credit=1.0, pnl=60.0))
+    assert r["action"] == "HOLD" and r["code"] == "HOLD"
 
 
 def test_recommend_code_money_stop():
@@ -327,10 +435,32 @@ def test_plan_auto_closes_empty():
     assert rec.plan_auto_closes([]) == []
 
 
-def test_build_mark_carries_target_hit_code():
+def test_build_mark_arms_carries_hold_code():
+    # +50% arms break-even; the mark's code is HOLD (no TARGET_HIT emitted).
     mark = rec.build_mark(_signal_row(), _repricer_ok(unrealized_pnl=60.0),
                           datetime.now(_TZ))
-    assert mark["recommendation_code"] == "TARGET_HIT"
+    assert mark["recommendation_code"] == "HOLD"
+
+
+def test_build_mark_armed_row_breakeven_stops_at_be_level():
+    # A row already armed (be_armed=1) whose pnl retraces to <= be_level →
+    # build_mark threads be_armed (from the row) + be_level → BREAKEVEN_STOP.
+    row = _signal_row(be_armed=1)
+    mark = rec.build_mark(row, _repricer_ok(unrealized_pnl=1.0,
+                                            current_short_delta=-0.10),
+                          datetime.now(_TZ), be_level=2.60)
+    assert mark["recommendation"] == "CUT"
+    assert mark["recommendation_code"] == "BREAKEVEN_STOP"
+
+
+def test_build_mark_unarmed_row_does_not_breakeven_stop():
+    # The SAME retrace on an UNARMED row does not break-even stop (no give-back
+    # protection until +50% has been seen).
+    row = _signal_row()  # no be_armed
+    mark = rec.build_mark(row, _repricer_ok(unrealized_pnl=1.0,
+                                            current_short_delta=-0.10),
+                          datetime.now(_TZ), be_level=2.60)
+    assert mark["recommendation_code"] != "BREAKEVEN_STOP"
 
 
 def test_build_mark_carries_delta_stop_code():

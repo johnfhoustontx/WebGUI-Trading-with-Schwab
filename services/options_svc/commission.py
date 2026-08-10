@@ -54,6 +54,23 @@ def commission_for(legs: int, symbol: str, qty: int) -> float:
     return round(legs * qty * _option_rate(symbol), 4)
 
 
+# Leg counts per defined-risk structure (unknown → 2, a vertical).
+_STRATEGY_LEGS = {"PCS": 2, "CCS": 2, "IC": 4}
+
+
+def round_trip_commission(strategy: str, symbol: str, qty: int = 1) -> float:
+    """Open+close option commission for a defined-risk structure, in dollars.
+
+    A round trip = open ALL legs + close ALL legs, so it is ``commission_for(legs,
+    symbol, qty)`` doubled. PCS/CCS = 2 legs (→ 4 leg-fills), IC = 4 legs (→ 8
+    leg-fills); an unknown structure conservatively assumes 2 legs. Returned in
+    DOLLARS, directly comparable to a position's unrealized P&L — this is the
+    break-even close floor for the captured-autoclose break-even stop.
+    """
+    legs = _STRATEGY_LEGS.get((strategy or "").upper(), 2)
+    return round(commission_for(legs, symbol, qty) * 2, 4)
+
+
 def futures_commission(qty: int) -> float:
     """Round-turn futures commission (per side x 2) + exchange passthrough."""
     fut = _RATES["futures"]

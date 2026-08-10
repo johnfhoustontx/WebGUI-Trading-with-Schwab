@@ -48,6 +48,7 @@ from regime_filter import evaluate_regime  # noqa: E402
 from iv_analysis import run_iv_analysis  # noqa: E402
 
 from services import _proxy  # noqa: E402
+from services.options_svc import commission  # noqa: E402  (round-trip $ for the break-even floor)
 
 
 def run_scan() -> dict:
@@ -1186,7 +1187,8 @@ def reprice_captured() -> dict:
     for r in sigs:
         try:
             rep = signal_repricer.reprice_swing(r, _proxy.schwab_py_client)
-            mark = signal_recommender.build_mark(r, rep, now)
+            mark = signal_recommender.build_mark(r, rep, now,
+                                                 be_level=_captured_be_level(r))
         except Exception:
             continue
         if not mark:
@@ -1266,6 +1268,138 @@ def close_captured(signal_id, exit_val: float, reason: str) -> None:
     import signal_db
 
     signal_db.close_signal_manually(signal_id, float(exit_val), reason or "MANUAL_CLOSE")
+
+
+# ── Captured auto-manage cycle (break-even trailing + auto-close) ─────────────
+# The close codes that auto-close an OPEN captured signal. TARGET_HIT is NOT
+# here: the recommender no longer emits it (a +50% winner now ARMS break-even
+# and rides on toward full credit, protected by the break-even stop).
+_CAPTURED_CLOSE_CODES = ("BREAKEVEN_STOP", "MONEY_STOP", "TIME_STOP", "DELTA_STOP")
+
+
+def _captured_be_level(row) -> float:
+    """Break-even close floor ($) for a captured signal = round-trip commissions
+    for its structure. Defensive → 0.0 on any failure (break-even stop at pnl<=$0)."""
+    try:
+        strat = row.get("strategy") or row.get("type")
+        return commission.round_trip_commission(strat, row.get("symbol"), 1)
+    except Exception:
+        return 0.0
+
+
+def run_captured_manage_cycle() -> dict:
+    """Reprice → arm break-even → auto-close the OPEN captured signals (paper-only).
+
+    Mirrors the driver/paper manage pattern; fully defensive (a per-signal failure
+    is skipped, never fatal). For each OPEN captured signal:
+      1. Reprice via ``signal_repricer.reprice_swing`` (stale/failed reprice is
+         skipped — never close on bad data — EXCEPT an expired signal, which
+         settles at intrinsic below).
+      2. **Expiry:** at ``DTE <= 0`` settle at the repriced intrinsic (OTM → ~0 →
+         full credit) with reason ``EXPIRED`` and move on.
+      3. Build a lifecycle mark (``build_mark`` threads be_armed/strategy/strikes/
+         spot + the be_level break-even floor) and persist it (``insert_mark``).
+      4. **Arm** break-even the first time pnl reaches +50% credit (``set_be_armed``).
+      5. **Auto-close** when the mark's recommendation code is a close code
+         (``_CAPTURED_CLOSE_CODES``) via ``close_signal_manually`` (writes an
+         outcome + realized P&L — NEVER a broker order).
+
+    Returns ``{"closed": [{signal_id, symbol, reason, exit_val}, ...],
+    "armed": [{signal_id, symbol}, ...]}`` for the handler to log/notify."""
+    import datetime as dt
+
+    import signal_db
+    import signal_recommender
+    import signal_repricer
+
+    try:
+        signal_repricer.clear_chain_cache()
+    except Exception:
+        log.exception("clear_chain_cache before captured manage degraded")
+
+    try:
+        sigs = signal_db.get_open_signals_with_latest_mark()
+    except Exception:
+        log.exception("captured manage signal read degraded → empty set")
+        return {"closed": [], "armed": []}
+
+    now = dt.datetime.now(_PROJ_CT_TZ)
+    tp_dollars = signal_recommender.TP_FRAC * signal_recommender.MULTIPLIER
+    closed, armed = [], []
+    for r in sigs:
+        sid = r.get("signal_id")
+        try:
+            rep = signal_repricer.reprice_swing(r, _proxy.schwab_py_client)
+            if rep is None:
+                continue
+
+            dte = _rescue_dte(r.get("expiration"))
+            if dte is not None and dte <= 0:
+                # Expiry settlement — settle at the repriced intrinsic; fall back
+                # to the engine intrinsic vs the current/entry spot when there is
+                # no live chain (an already-expired reprice returns no value).
+                exit_val = rep.get("current_value")
+                if exit_val is None:
+                    spot = rep.get("current_underlying") or r.get("entry_underlying")
+                    if spot is not None:
+                        try:
+                            exit_val, _pnl = signal_repricer.intrinsic_value(r, float(spot))
+                        except Exception:
+                            exit_val = None
+                if exit_val is not None:
+                    signal_db.close_signal_manually(sid, exit_val, "EXPIRED")
+                    closed.append({"signal_id": sid, "symbol": r.get("symbol"),
+                                   "reason": "EXPIRED", "exit_val": exit_val})
+                continue
+
+            # Not expired — a stale/failed reprice must NEVER close on bad data.
+            if rep.get("error"):
+                continue
+
+            mark = signal_recommender.build_mark(r, rep, now,
+                                                 be_level=_captured_be_level(r))
+            if not mark:
+                continue
+            signal_db.insert_mark(mark)
+
+            # Arm break-even the first time pnl reaches +50% of the credit.
+            pnl = mark.get("unrealized_pnl")
+            credit = r.get("entry_credit") or 0
+            if (pnl is not None and credit and not r.get("be_armed")
+                    and pnl >= tp_dollars * credit):
+                signal_db.set_be_armed(sid)
+                r["be_armed"] = 1
+                armed.append({"signal_id": sid, "symbol": r.get("symbol")})
+
+            code = (mark.get("recommendation_code") or "").upper()
+            if code in _CAPTURED_CLOSE_CODES:
+                exit_val = rep.get("current_value")
+                if exit_val is not None:
+                    signal_db.close_signal_manually(sid, exit_val, code)
+                    closed.append({"signal_id": sid, "symbol": r.get("symbol"),
+                                   "reason": code, "exit_val": exit_val})
+        except Exception:
+            log.exception("captured manage: signal %s degraded (skipped)", sid)
+            continue
+
+    return {"closed": closed, "armed": armed}
+
+
+def captured_closed_today() -> dict:
+    """Today's (CT) closed captured outcomes + a day realized total.
+
+    ``{"closed": [...], "total_realized": <sum realized_pnl>}`` — the Tier-1 EOD
+    page's "Captured — closed today" view. Defensive → empty on any failure."""
+    import signal_db
+
+    today = _dt.datetime.now(_PROJ_CT_TZ).date().isoformat()
+    try:
+        closed = signal_db.get_outcomes_for_date(today)
+    except Exception:
+        log.exception("captured_closed_today read degraded → empty")
+        closed = []
+    total = round(sum((c.get("realized_pnl") or 0.0) for c in closed), 2)
+    return {"closed": closed, "total_realized": total}
 
 
 # ── Header strip (ported from webgui/pages/options/header.py) ───────────────

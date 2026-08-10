@@ -33,7 +33,8 @@ CREATE TABLE IF NOT EXISTS signals (
     first_seen_date TEXT,
     dedup_key TEXT UNIQUE,
     status TEXT DEFAULT 'OPEN',
-    mode TEXT
+    mode TEXT,
+    be_armed INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_signals_first_seen_date ON signals(first_seen_date);
 CREATE INDEX IF NOT EXISTS idx_signals_status ON signals(status);
@@ -116,6 +117,10 @@ def _migrate_signals_table(conn):
                 "entry_spread_bid", "entry_spread_ask"):
         if col not in existing_cols:
             _add_column_if_missing(conn, col, "REAL")
+    # captured-autoclose (2026-08-09): break-even armed flag — set once when the
+    # trade first reaches +50% credit; drives the raised break-even stop.
+    if "be_armed" not in existing_cols:
+        _add_column_if_missing(conn, "be_armed", "INTEGER DEFAULT 0")
     # Older legacy DBs may also be missing these — keep executescript happy.
     legacy_backfill = {
         "scanner_type": "TEXT",
@@ -344,3 +349,43 @@ def close_signal_manually(signal_id, exit_value, exit_reason, db_path=DEFAULT_DB
         "settlement_underlying": None,
     }
     insert_outcome(outcome, new_status="CLOSED", db_path=db_path)
+
+
+def set_be_armed(signal_id, db_path=DEFAULT_DB_PATH):
+    """Mark a signal's break-even stop as ARMED (idempotent).
+
+    Set once the trade first reaches +50% credit; the manage cycle then raises the
+    stop to break-even + round-trip commissions (see the captured-autoclose design)."""
+    conn = connect(db_path)
+    try:
+        conn.execute("UPDATE signals SET be_armed=1 WHERE signal_id=?", (signal_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_outcomes_for_date(date_iso, db_path=DEFAULT_DB_PATH):
+    """Closed-signal outcomes for a given ``close_date`` (YYYY-MM-DD), newest first.
+
+    Joins ``signal_outcomes`` to ``signals`` → display rows for the EOD
+    "Captured — closed today" view: ``{signal_id, symbol, strategy, entry_credit,
+    exit_value, realized_pnl, exit_reason, close_ts}``, ordered by ``close_ts`` DESC."""
+    conn = connect(db_path)
+    try:
+        cur = conn.execute("""
+            SELECT o.signal_id       AS signal_id,
+                   s.symbol          AS symbol,
+                   s.strategy        AS strategy,
+                   s.entry_credit    AS entry_credit,
+                   o.exit_value      AS exit_value,
+                   o.realized_pnl    AS realized_pnl,
+                   o.exit_reason     AS exit_reason,
+                   o.close_ts        AS close_ts
+            FROM signal_outcomes o
+            JOIN signals s ON s.signal_id = o.signal_id
+            WHERE o.close_date = ?
+            ORDER BY o.close_ts DESC
+        """, (date_iso,))
+        return [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()

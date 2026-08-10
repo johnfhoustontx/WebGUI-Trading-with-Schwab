@@ -161,6 +161,31 @@ def manage_due(now, last_slot):
     return (slot != last_slot, slot)
 
 
+# ── Captured-signal auto-manage cadence ─────────────────────────────────────
+# The OPEN captured signals (signals.db) are repriced, break-even-armed, and
+# auto-closed every 5 min within market hours (trading days only), gated by the
+# Settings auto-close toggle (read in the loop, default ON). Coarser than the
+# 1-min driver manage — a captured signal's stops don't need sub-minute reaction
+# and the cycle fetches up to ~45 chains, so 5 min balances freshness vs Schwab-API
+# cost (``_CAPTURED_MANAGE_INTERVAL_MIN`` is the lever).
+_CAPTURED_MANAGE_INTERVAL_MIN = 5
+
+
+def _captured_manage_slot_key(now):
+    return (now.date().isoformat(), now.hour, now.minute // _CAPTURED_MANAGE_INTERVAL_MIN)
+
+
+def captured_manage_due(now, last_slot):
+    """(should_manage, slot): True at most once per 5-min slot, only on a trading
+    day within the 08:00–15:15 CT window. Drives the captured auto-manage cycle
+    (break-even trailing + auto-close); the loop ALSO gates it on the auto-close
+    toggle. Mirrors ``manage_due`` on its own 5-min interval."""
+    if not (_is_trading_day(now) and _is_market_hours(now)):
+        return (False, last_slot)
+    slot = _captured_manage_slot_key(now)
+    return (slot != last_slot, slot)
+
+
 # ── Manual Paper Portfolio hourly entry+manage cadence ──────────────────────
 # The MANUAL Paper Portfolio (the user's own paper account) runs its entry cycle
 # (open new paper trades from the current captured signals) + manage cycle
@@ -418,6 +443,7 @@ async def loop(bus):
         log.exception("startup buying-power reconcile degraded")
     last_gex_slot = None  # 2-min GEX history-collection slot (see gex_due)
     last_manage_slot = None  # 1-min DRIVER paper auto-manage slot (see manage_due)
+    last_captured_manage_slot = None  # 5-min captured auto-manage slot (see captured_manage_due)
     paper_ran = set()  # (date, hour) of fired hourly manual paper cycles (see paper_cycle_due)
     last_periodic_slot = None  # header + gex_status throttle slot (see periodic_refresh_due)
     analyze_ran = set()  # (date, slot) of fired scheduled Gamma Analyze runs (see analyze_slot_due)
@@ -448,6 +474,14 @@ async def loop(bus):
         await loop_.run_in_executor(None, handlers.refresh_captured, bus)
     except Exception:
         log.exception("startup refresh_captured degraded")
+    # One-shot startup publish of the closed-today captured view so the EOD page's
+    # "Captured — closed today" section has data on first load. Read-only (manual
+    # closes populate it too); the 5-min captured-manage tick republishes it.
+    # Guarded so a cold DB never stops the loop from starting.
+    try:
+        await loop_.run_in_executor(None, handlers.publish_captured_closed, bus)
+    except Exception:
+        log.exception("startup publish_captured_closed degraded")
     # One-shot startup refresh of the Gamma snapshot ($SPX default) so the Gamma
     # page has data on first load. The page drives subsequent refreshes by
     # enqueuing ``gamma_refresh`` with the current symbol (its own 120s timer), so
@@ -586,6 +620,33 @@ async def loop(bus):
 
         if m_due:
             branches.append(("driver_manage", _driver_manage_branch()))
+
+        # Captured-signal auto-manage — reprice + break-even-arm + auto-close the
+        # OPEN captured signals every 5 min within market hours, GATED by the
+        # Settings auto-close toggle (read off the loop inside the branch, default
+        # ON). Paper-only (writes signal outcomes, never a broker order). The
+        # blocking cycle (~45 chain reprices) runs in the executor; independently
+        # guarded so a failure never skips the work above or kills the loop.
+        cm_due = False
+        try:
+            cm_due, cm_slot = captured_manage_due(now, last_captured_manage_slot)
+            if cm_due:
+                last_captured_manage_slot = cm_slot
+        except Exception:
+            log.exception("captured_manage_due gate degraded")
+            cm_due = False
+
+        async def _captured_manage_branch():
+            try:
+                enabled = await loop_.run_in_executor(None, handlers.autoclose_enabled, bus)
+                if enabled:
+                    await loop_.run_in_executor(
+                        None, handlers.run_captured_manage_and_publish, bus)
+            except Exception:
+                log.exception("run_captured_manage_and_publish branch degraded")
+
+        if cm_due:
+            branches.append(("captured_manage", _captured_manage_branch()))
 
         # Manual Paper Portfolio hourly entry+manage — open new paper trades from
         # the current captured signals AND reprice/auto-close existing ones, once

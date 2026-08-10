@@ -69,6 +69,23 @@ def sync_ticker_setting() -> None:
         logging.getLogger("webgui").warning("ticker setting resync failed", exc_info=True)
 
 
+def sync_captured_autoclose_setting() -> None:
+    """Re-assert the captured auto-close toggle to options_svc at startup (best-effort).
+
+    ``captured_autoclose_enabled`` is a webgui setting that gates the service's
+    scheduled captured-manage cycle. The service defaults to ENABLED on a missing
+    key, so a wiped/restarted Memurai would silently resume auto-close while the GUI
+    showed it off — settings.json is the source of truth, so restate it every
+    startup. Never raises (a down bus must not stop the web GUI from booting)."""
+    try:
+        enabled = bool(app_settings.get("captured_autoclose_enabled"))
+        bus_client.request("options", {"type": "set_autoclose",
+                                       "args": {"enabled": enabled}})
+    except Exception:  # noqa: BLE001
+        logging.getLogger("webgui").warning(
+            "captured autoclose setting resync failed", exc_info=True)
+
+
 def play_alert(sound: str, volume: float) -> None:
     """Play a bundled alert WAV in the connected browser at the given volume."""
     sound = sound if sound in ("chime", "bell", "ping") else "chime"
@@ -1447,6 +1464,7 @@ if __name__ in {"__main__", "__mp_main__"}:
     # module object AFTER NiceGUI has started — where app.on_startup() raises and
     # 500s the page. Inside this guard it runs once, before ui.run().
     app.on_startup(sync_ticker_setting)
+    app.on_startup(sync_captured_autoclose_setting)
 
     # Bind to localhost only (single-user, localhost-first app): reachable at
     # http://localhost:8500 from this PC. This avoids listening on every network
