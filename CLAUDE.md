@@ -166,7 +166,13 @@ min-score in `app_settings`; view-staleness alerts use PER-VIEW thresholds — `
 signal keys), **Captured Signals**, and **Driver** (pending approval) nav items
 (`_NAV_BADGES`, single-user like `_NAV_OPEN`; cleared when you open that page).
 GUI prefs persist via `webgui/app_settings.py` → `webgui/data/settings.json`
-(tracked; missing keys regenerate from `DEFAULTS`). The **Settings** page (`/settings`,
+(**gitignored** since 2026-08-09; missing keys — and a missing file — regenerate
+from `DEFAULTS`, so each checkout carries its own preferences. It was tracked
+before that, which made `tools\promote.bat` refuse on a dirty tree every time
+anyone changed a setting in prod's GUI; the file is runtime state the app writes,
+so it can never be clean. Untracking it means a **pull deletes the existing copy**
+in any checkout that had it — back it up and restore it across that one promote).
+The **Settings** page (`/settings`,
 `pages/settings.py`) binds the alert toggles/sound/volume/market-hours/min-score +
 desktop-notification controls. The drawer is restyled (`.nav-drawer` CSS: active
 pill, hover, right-aligned badges, title block). Browsers block autoplay until a

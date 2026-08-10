@@ -62,6 +62,12 @@ trade-analyzer/data/
 *.db.bak
 sentiment-dashboard/data/
 webgui/data/eod/
+# Runtime GUI preferences, written by the app itself (app_settings.set). Tracked
+# until 2026-08-09, which made every prod promote refuse on a dirty tree the
+# moment anyone changed a setting in the GUI — tools\promote.bat guards on
+# `git status --porcelain` by design. app_settings._load_from_disk falls back to
+# DEFAULTS when the file is absent, so an untracked file costs nothing.
+webgui/data/settings.json
 schwab-proxy/data/
 shared/data/
 services/trade_svc/data/
