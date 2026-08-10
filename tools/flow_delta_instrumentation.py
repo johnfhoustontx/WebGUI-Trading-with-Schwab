@@ -34,6 +34,12 @@ USAGE
 Run AFTER the close (equity options 15:00 CT, index options 15:15 CT):
 
     .venv\\Scripts\\python.exe tools\\flow_delta_instrumentation.py
+    .venv\\Scripts\\python.exe tools\\flow_delta_instrumentation.py --force
+
+Skips with exit 0 and writes nothing on a weekend or NYSE holiday — its reports
+feed threshold calibration, and a non-session distribution would drag that
+calibration down (see ``is_trading_day``). ``--force`` measures anyway, for
+ad-hoc exploration; do not use it for a report the calibration will consume.
 
 Writes a markdown report + a CSV of qualifying contracts under
 ``options-scanner/data/flow_delta_instrumentation/<date>/``. Needs the proxy up
@@ -46,7 +52,7 @@ import csv
 import pathlib
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
+from datetime import date as _date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -87,6 +93,37 @@ DELTA_BAND = (0.05, 0.85)
 # to lack a quote. |delta| > 1 is impossible for a vanilla option, so that is the
 # guard; a real detector needs this same check.
 DELTA_MAX = 1.0
+
+# NYSE full-closure holidays 2026–2027, COPIED (not imported) from
+# services/options_svc/scheduler.py. Importing that module would drag `compute`
+# and `handlers` — the engine chain and the Redis bus — into a tool that
+# deliberately touches neither; shared/notify/channels.py keeps its own copy for
+# the same reason. Observed dates per NYSE (Sat->prior Fri, Sun->following Mon).
+# **Update yearly**, alongside webgui/alerts.py _HOLIDAYS.
+_HOLIDAYS = frozenset({
+    # 2026
+    _date(2026, 1, 1), _date(2026, 1, 19), _date(2026, 2, 16), _date(2026, 4, 3),
+    _date(2026, 5, 25), _date(2026, 6, 19), _date(2026, 7, 3), _date(2026, 9, 7),
+    _date(2026, 11, 26), _date(2026, 12, 25),
+    # 2027
+    _date(2027, 1, 1), _date(2027, 1, 18), _date(2027, 2, 15), _date(2027, 3, 26),
+    _date(2027, 5, 31), _date(2027, 6, 18), _date(2027, 7, 5), _date(2027, 9, 6),
+    _date(2027, 11, 25), _date(2027, 12, 24),
+})
+
+
+def is_trading_day(d) -> bool:
+    """True on a weekday that is not an NYSE full-closure holiday.
+
+    The gate matters because this script is now scheduled daily and its reports
+    feed threshold calibration. Run on a holiday it would happily write a
+    normal-looking session directory holding a near-empty distribution, and a
+    calibration window that absorbed it would read the closure as a genuine
+    quiet session. A weekend run is worse than empty: chains still return, but
+    open interest has already settled to include the prior session's trades, so
+    vol/OI is deflated throughout and index names can come back with OI 0 across
+    the board — the exact artifact that invalidated the 2026-08-09 baseline."""
+    return d.weekday() < 5 and d not in _HOLIDAYS
 
 
 def flow_symbols():
@@ -280,8 +317,16 @@ def build_report(rows, cfg, symbols, failed, sentinel=0):
     return "\n".join(L)
 
 
-def main():
+def main(argv=None):
+    argv = sys.argv[1:] if argv is None else list(argv)
+    force = "--force" in argv
     today = datetime.now(CT).date()
+    if not is_trading_day(today) and not force:
+        why = "weekend" if today.weekday() >= 5 else "market holiday"
+        print(f"Skipped: {today:%Y-%m-%d} is not a trading day ({why}). "
+              f"No report written — a non-session distribution would corrupt "
+              f"threshold calibration. Use --force to measure anyway.")
+        return 0        # a correct skip is not a failure; the wrapper logs exit=0
     symbols = flow_symbols()
     cfg = uoa_cfg()
     print(f"Flow universe: {len(symbols)} symbols; proxy {PROXY_URL}")
@@ -315,7 +360,8 @@ def main():
     print(f"\nWrote {out_dir / 'report.md'}")
     print(f"Wrote {out_dir / 'contracts.csv'}  ({len(rows):,} rows)")
     print("\n" + report.split("## Candidate RELATIVE")[0])
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
