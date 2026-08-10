@@ -38,6 +38,22 @@ def apply_ticker_enabled(value) -> None:
         pass
 
 
+def apply_captured_autoclose(value) -> None:
+    """Persist the captured auto-close toggle AND tell options_svc to gate the cycle.
+
+    The scheduled captured-manage cycle (break-even trailing + auto-close) runs in
+    options_svc, so the toggle has to reach the service — mirroring the ticker
+    write-through. Best-effort: the setting persists even with the bus down (the
+    service defaults to ON on a missing key and re-syncs at webgui startup)."""
+    enabled = bool(value)
+    app_settings.set("captured_autoclose_enabled", enabled)
+    try:
+        bus_client.request("options", {"type": "set_autoclose",
+                                       "args": {"enabled": enabled}})
+    except Exception:  # noqa: BLE001 — a bus outage must not break the toggle.
+        pass
+
+
 def api_stats_rows(stats):
     """(label, value-text) rows for the API-usage card — pure/testable.
 
@@ -115,6 +131,16 @@ def render():
         flowsw = ui.switch("Flow alerts (put/call premium crossover + unusual activity)",
                            value=s.get("flow_alerts_enabled", True))
         flowsw.on_value_change(lambda e: app_settings.set("flow_alerts_enabled", e.value))
+
+    with ui.card().classes("w-full max-w-2xl"):
+        ui.label("Captured trade auto-management").classes("text-subtitle1 font-bold")
+        ui.label("Auto-manage the captured signals (paper-only): raise the stop to "
+                 "break-even after +50%, defer delta-drift cuts on recoverable trades, "
+                 "and auto-close on the exit rules / expiry. Off leaves them advisory "
+                 "(you close manually).").classes("opacity-70 text-sm")
+        casw = ui.switch("Auto-manage captured signals",
+                         value=s.get("captured_autoclose_enabled", True))
+        casw.on_value_change(lambda e: apply_captured_autoclose(e.value))
 
     with ui.card().classes("w-full max-w-2xl"):
         ui.label("Market summary ticker").classes("text-subtitle1 font-bold")
