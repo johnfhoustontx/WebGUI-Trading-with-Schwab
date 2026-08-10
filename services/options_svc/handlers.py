@@ -146,6 +146,12 @@ EVENT_CAPTURED = "events:options:captured"
 CACHE_CAPTURED_FLAGS = "cache:options:captured_flags"
 EVENT_CAPTURED_FLAGS = "events:options:captured_flags"
 
+# Captured auto-manage: today's closed captured outcomes (EOD page) + the
+# Settings auto-close master toggle (default ON; only an explicit False disables).
+CACHE_CAPTURED_CLOSED = "cache:options:captured_closed"
+EVENT_CAPTURED_CLOSED = "events:options:captured_closed"
+CACHE_AUTOCLOSE_ENABLED = "cache:options:autoclose_enabled"
+
 # Date-scoped seen-sets for server-side phone push (Telegram/Discord/Fi-SMS).
 # See services/options_svc/push_notify.py.
 CACHE_NOTIFIED_SCAN = "cache:options:notified_scan"
@@ -650,6 +656,59 @@ def _notify_captured(bus, signals) -> None:
                                    seen_key=CACHE_NOTIFIED_CAPTURED, seed=seed)
     except Exception:  # noqa: BLE001
         log.exception("captured push-notify failed (non-fatal)")
+
+
+def publish_captured_closed(bus) -> None:
+    """Publish today's closed-captured outcomes view (``cache:options:captured_closed``).
+
+    Read-only — published regardless of the auto-close toggle, since MANUAL closes
+    land in ``signal_outcomes`` too (the EOD 'Captured — closed today' section reads
+    this). ``compute.captured_closed_today`` is fully defensive."""
+    data = compute.captured_closed_today()
+    version = bus.cache_set(CACHE_CAPTURED_CLOSED, data)
+    bus.publish(EVENT_CAPTURED_CLOSED, {"version": version})
+
+
+def autoclose_enabled(bus) -> bool:
+    """Whether captured auto-close is enabled. Defaults **True** on a missing /
+    unreadable key — so only an EXPLICIT ``{"enabled": False}`` (from the Settings
+    toggle write-through) disables the cycle; a wiped Memurai resumes auto-close."""
+    try:
+        env = bus.cache_get(CACHE_AUTOCLOSE_ENABLED)
+        if env is None:
+            return True
+        return bool((env.payload or {}).get("enabled", True))
+    except Exception:  # noqa: BLE001
+        return True
+
+
+def _notify_captured_closes(bus, closed) -> None:
+    """Best-effort record of the cycle's auto-closes (never fatal).
+
+    The refreshed open + closed views already repaint the GUI; this logs each close
+    (symbol / reason) so the server trace shows what the unattended cycle did."""
+    for c in closed or []:
+        log.info("captured auto-close: %s %s @ %s",
+                 c.get("symbol"), c.get("reason"), c.get("exit_val"))
+
+
+def run_captured_manage_and_publish(bus) -> None:
+    """Run the captured auto-manage cycle then republish the open + closed views.
+
+    Reprices/arms/auto-closes the OPEN captured signals
+    (``compute.run_captured_manage_cycle`` — paper-only, writes outcomes, never a
+    broker order), republishes the open-signals view (``refresh_captured`` — which
+    also phone-pushes any NEW signal) and the closed-today view
+    (``publish_captured_closed``). Shared by the ``captured_manage`` command (manual
+    'run now') and the scheduler's 5-min captured-manage tick. Each close is logged
+    best-effort; a notify failure never blocks the publishes."""
+    res = compute.run_captured_manage_cycle()
+    refresh_captured(bus)
+    publish_captured_closed(bus)
+    try:
+        _notify_captured_closes(bus, (res or {}).get("closed"))
+    except Exception:  # noqa: BLE001
+        log.exception("captured close notify degraded (non-fatal)")
 
 
 def remove_closed_from_captured(bus, signal_id) -> None:
@@ -1428,7 +1487,10 @@ def handle_command(bus, command) -> None:
     trade, cache the result + publish; ``captured_reload`` → re-read open signals;
     ``captured_reprice`` → reprice all open signals, cache the repriced list +
     flags (two views) + publish both; ``captured_close`` → manually close a signal
-    then refresh; ``gamma_refresh`` (args symbol, default ``$SPX``) → recompute the
+    then refresh; ``captured_manage`` → run the captured auto-manage cycle (reprice
+    → arm break-even → auto-close) then republish the open + closed views;
+    ``set_autoclose`` (args enabled) → write the auto-close master toggle;
+    ``gamma_refresh`` (args symbol, default ``$SPX``) → recompute the
     Gamma snapshot; ``gamma_explain`` (args symbol) → build the Explain body, cache
     + publish; ``gamma_analyze`` → build the bundled SPX/SPY/QQQ prompt, cache +
     publish; ``sim_fetch`` (args symbol) → fetch the simulator ChainSnapshot
@@ -1559,6 +1621,15 @@ def handle_command(bus, command) -> None:
         # Drop ONLY the closed signal from the cached view, preserving the live
         # marks on the remaining rows (don't revert to the persisted view).
         remove_closed_from_captured(bus, sid)
+    elif command.type == "captured_manage":
+        # Manual 'run now' of the captured auto-manage cycle (reprice → arm → close);
+        # runs regardless of the auto-close toggle (the toggle only gates the
+        # scheduled tick — an explicit click should always work).
+        run_captured_manage_and_publish(bus)
+    elif command.type == "set_autoclose":
+        # Settings toggle write-through: gate the SCHEDULED captured-manage cycle.
+        enabled = bool((command.args or {}).get("enabled", True))
+        bus.cache_set(CACHE_AUTOCLOSE_ENABLED, {"enabled": enabled})
     elif command.type == "gamma_refresh":
         refresh_gamma(bus, command.args.get("symbol", "$SPX"))
     elif command.type == "gamma_explain":

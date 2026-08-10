@@ -108,6 +108,34 @@ def test_manage_due_holiday():
     assert due is False
 
 
+# ── captured_manage_due (captured auto-manage cadence, 5-min) ────────────────
+def test_captured_manage_due_first_tick_in_window():
+    due, slot = scheduler.captured_manage_due(_ct(2026, 6, 15, 9, 0), None)
+    assert due is True and slot is not None
+
+
+def test_captured_manage_due_not_repeated_within_5min_slot():
+    _, slot = scheduler.captured_manage_due(_ct(2026, 6, 15, 9, 0), None)
+    due2, _ = scheduler.captured_manage_due(_ct(2026, 6, 15, 9, 3), slot)  # same 5-min slot
+    assert due2 is False
+
+
+def test_captured_manage_due_fires_next_5min_slot():
+    _, slot = scheduler.captured_manage_due(_ct(2026, 6, 15, 9, 0), None)
+    due, _ = scheduler.captured_manage_due(_ct(2026, 6, 15, 9, 5), slot)  # next slot
+    assert due is True
+
+
+def test_captured_manage_due_before_market_open():
+    due, _ = scheduler.captured_manage_due(_ct(2026, 6, 15, 7, 30), None)
+    assert due is False
+
+
+def test_captured_manage_due_weekend():
+    due, _ = scheduler.captured_manage_due(_ct(2026, 6, 13, 9, 0), None)  # Saturday
+    assert due is False
+
+
 # ── paper_cycle_due (manual Paper Portfolio hourly entry+manage) ────────────
 # The MANUAL Paper Portfolio runs entry + manage once at the TOP OF THE HOUR,
 # 09:00–14:00 CT (last run 14:00 / 2pm; NO 15:00 run at the regular-session

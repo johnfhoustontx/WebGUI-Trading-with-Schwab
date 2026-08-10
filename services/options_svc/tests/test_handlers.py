@@ -744,6 +744,68 @@ def test_captured_close_falls_back_to_persisted_when_cache_cold(monkeypatch):
     assert [s["signal_id"] for s in payload["signals"]] == ["X2"]
 
 
+# ── captured auto-manage: publish both views + toggle (Task 5) ──────────────
+def test_publish_captured_closed(monkeypatch):
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "captured_closed_today",
+                        lambda: {"closed": [], "total_realized": 0.0})
+    sub = bus.subscribe("events:options:captured_closed")
+    handlers.publish_captured_closed(bus)
+    msg = sub.get_message(timeout=1.0)
+    sub.close()
+    env = bus.cache_get("cache:options:captured_closed")
+    assert env is not None and env.payload == {"closed": [], "total_realized": 0.0}
+    assert msg is not None and msg.get("version") == env.version
+
+
+def test_run_captured_manage_and_publish_publishes_both_views(monkeypatch):
+    bus = Bus(fake=True)
+    ran = {"cycle": 0}
+    monkeypatch.setattr(handlers.compute, "run_captured_manage_cycle",
+                        lambda: ran.__setitem__("cycle", ran["cycle"] + 1) or
+                        {"closed": [{"signal_id": "M1", "symbol": "SPY",
+                                     "reason": "BREAKEVEN_STOP"}], "armed": []})
+    monkeypatch.setattr(handlers.compute, "captured_view",
+                        lambda: {"signals": [{"signal_id": "M2", "symbol": "QQQ"}]})
+    monkeypatch.setattr(handlers.compute, "captured_closed_today",
+                        lambda: {"closed": [{"signal_id": "M1", "realized_pnl": 3.0}],
+                                 "total_realized": 3.0})
+    handlers.run_captured_manage_and_publish(bus)
+
+    assert ran["cycle"] == 1                              # the cycle ran
+    opened = bus.cache_get("cache:options:captured")
+    assert opened is not None and opened.payload["signals"][0]["signal_id"] == "M2"
+    closed = bus.cache_get("cache:options:captured_closed")
+    assert closed is not None and closed.payload["total_realized"] == 3.0
+    assert closed.payload["closed"][0]["signal_id"] == "M1"
+
+
+def test_captured_manage_command_dispatch(monkeypatch):
+    bus = Bus(fake=True)
+    calls = {"n": 0}
+    monkeypatch.setattr(handlers, "run_captured_manage_and_publish",
+                        lambda b: calls.__setitem__("n", calls["n"] + 1))
+    handlers.handle_command(bus, Command(type="captured_manage"))
+    assert calls["n"] == 1
+
+
+def test_set_autoclose_command_writes_flag():
+    bus = Bus(fake=True)
+    handlers.handle_command(bus, Command(type="set_autoclose", args={"enabled": False}))
+    assert bus.cache_get("cache:options:autoclose_enabled").payload == {"enabled": False}
+    handlers.handle_command(bus, Command(type="set_autoclose", args={"enabled": True}))
+    assert bus.cache_get("cache:options:autoclose_enabled").payload == {"enabled": True}
+
+
+def test_autoclose_enabled_defaults_true_and_respects_false():
+    bus = Bus(fake=True)
+    assert handlers.autoclose_enabled(bus) is True         # missing key → default ON
+    bus.cache_set("cache:options:autoclose_enabled", {"enabled": False})
+    assert handlers.autoclose_enabled(bus) is False
+    bus.cache_set("cache:options:autoclose_enabled", {"enabled": True})
+    assert handlers.autoclose_enabled(bus) is True
+
+
 # ── Gamma (Task 2.6d) ────────────────────────────────────────────────────────
 def _fake_gamma_snapshot():
     return {
