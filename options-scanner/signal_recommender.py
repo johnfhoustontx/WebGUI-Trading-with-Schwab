@@ -19,6 +19,17 @@ CUT_DTE = 2               # cut when DTE <= this and underwater
 RECOVERY_DTE_MIN = 5      # min DTE to DEFER a soft delta stop (a recoverable trade)
 RECOVERY_MIN_CUSHION = 0.015  # min spot↔short-strike cushion (1.5%) to defer
 
+# Peak-driven profit-lock ladder for the armed break-even stop (Rule 3). Each rung
+# ``(peak_frac, lock_frac)``: once the trade's PEAK profit reaches ``peak_frac`` of
+# the credit, the stop ratchets up to lock in ``lock_frac`` of the credit. The
+# DEFAULT is a single break-even rung (lock 0.0) — i.e. exactly today's plain
+# break-even stop — so the ratchet is INERT until a caller passes a richer ladder
+# plus ``peak_pnl_frac`` in ctx.
+DEFAULT_TRAIL_LADDER = [(0.50, 0.0)]
+# The sensible default ratchet (OPT-IN, not wired to any caller yet — a later
+# activation step): lock +25% of credit once peak >= 65%, +50% once peak >= 80%.
+RATCHET_TRAIL_LADDER = [(0.50, 0.0), (0.65, 0.25), (0.80, 0.50)]
+
 
 def track_thresholds(entry_credit):
     """Mid-price levels for streaming target/stop detection, derived from the
@@ -71,6 +82,37 @@ def _recoverable(ctx):
     return min(cushions) >= RECOVERY_MIN_CUSHION
 
 
+def _locked_profit_level(ctx, credit_total):
+    """Dollar profit-lock floor from the peak-driven trailing ladder (the "ratchet").
+
+    ``ctx["trail_ladder"]`` is a list of ``(peak_frac, lock_frac)`` rungs (default
+    ``DEFAULT_TRAIL_LADDER``); once the trade's PEAK profit fraction
+    (``ctx["peak_pnl_frac"]`` = the best ``pnl/credit_total`` reached) clears a
+    rung's ``peak_frac``, the stop locks in ``lock_frac`` of the credit. Returns
+    ``lock_frac* * credit_total`` for the highest cleared rung, or 0.0 when nothing
+    clears / the peak or a rung is missing/malformed. The DEFAULT ladder (single
+    break-even rung, lock 0.0) always returns 0.0, so the break-even stop is
+    unchanged unless a richer ladder AND a peak are supplied — the ratchet is inert
+    by default."""
+    ladder = ctx.get("trail_ladder") or DEFAULT_TRAIL_LADDER
+    peak = ctx.get("peak_pnl_frac")
+    if peak is None:
+        return 0.0
+    try:
+        peak = float(peak)
+    except (TypeError, ValueError):
+        return 0.0
+    lock = 0.0
+    for rung in ladder:
+        try:
+            peak_frac, lock_frac = rung
+            if peak >= peak_frac:
+                lock = max(lock, float(lock_frac))
+        except (TypeError, ValueError):
+            continue
+    return lock * credit_total
+
+
 def recommend(ctx):
     """Return {'action', 'reason', 'code'}. action in HOLD/CUT; code in
     HOLD/BREAKEVEN_STOP/MONEY_STOP/DELTA_STOP/TIME_STOP.
@@ -108,12 +150,17 @@ def recommend(ctx):
         return {"action": "CUT", "reason": f"DTE <= {CUT_DTE} and underwater",
                 "code": "TIME_STOP"}
 
-    # Rule 3: break-even stop — only once +50% has been seen (``be_armed``). Cuts
-    # when the give-back reaches the break-even + round-trip-commissions floor, so
-    # the trade never returns a loss after having shown a real profit.
+    # Rule 3: profit-lock stop — only once +50% has been seen (``be_armed``). Cuts
+    # when the give-back reaches the locked floor, so the trade never returns a loss
+    # after having shown a real profit. The floor is the GREATER of the break-even +
+    # round-trip-commissions level and the peak-driven profit lock (the "ratchet",
+    # ``_locked_profit_level``). With the DEFAULT ladder the lock is $0, so this is
+    # exactly the plain break-even stop; a richer ``trail_ladder`` + ``peak_pnl_frac``
+    # ratchets the floor up to protect banked profit.
     if ctx.get("be_armed"):
         be_level = ctx.get("be_level") or 0.0
-        if pnl <= be_level:
+        stop_level = max(be_level, _locked_profit_level(ctx, credit_total))
+        if pnl <= stop_level:
             return {"action": "CUT",
                     "reason": "break-even stop (protecting the +50% give-back)",
                     "code": "BREAKEVEN_STOP"}
@@ -225,7 +272,7 @@ def _recompute_score(signal_row, repricer_result, iv_data, technicals):
 
 
 def build_mark(signal_row, repricer_result, now, iv_data=None, technicals=None,
-               *, be_level=None):
+               *, be_level=None, trail_ladder=None, peak_pnl_frac=None):
     """Compose a complete signal_marks row from a repricer result.
 
     Adds current_score (via scoring.calc_composite_score), score_drift, and the
@@ -250,6 +297,12 @@ def build_mark(signal_row, repricer_result, now, iv_data=None, technicals=None,
         iv_data: optional dict from iv_analysis.run_iv_analysis (improves score).
         technicals: optional dict from scanner_engine.calc_technicals.
         be_level: optional $ break-even close floor (round-trip commissions).
+        trail_ladder: optional peak-driven profit-lock ladder — a list of
+            ``(peak_frac, lock_frac)`` rungs. Default None → the plain break-even
+            stop (inert ratchet).
+        peak_pnl_frac: optional peak profit fraction (best ``pnl/credit_total``
+            reached), paired with ``trail_ladder`` to ratchet the stop up. Default
+            None → no profit lock beyond break-even.
 
     Returns:
         A mark dict ready for signal_db.insert_mark. If the repricer reported
@@ -285,6 +338,10 @@ def build_mark(signal_row, repricer_result, now, iv_data=None, technicals=None,
         "lifecycle": True,
         "be_armed": bool(signal_row.get("be_armed")),
         "be_level": be_level,
+        # Peak-driven profit-lock ladder (the "ratchet"). Default None → the plain
+        # break-even stop; a caller supplies both to ratchet the floor up with peak.
+        "trail_ladder": trail_ladder,
+        "peak_pnl_frac": peak_pnl_frac,
         "spot": repricer_result.get("current_underlying"),
         "short_strike": signal_row.get("short_strike"),
         "call_short": signal_row.get("call_short"),

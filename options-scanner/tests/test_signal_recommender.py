@@ -247,6 +247,85 @@ def test_missing_lifecycle_keys_degrade_to_old_behavior():
 
 
 # ────────────────────────────────────────────────────────────────────────
+# Peak-driven profit-lock ladder ("ratchet") — Rule 3 generalization. The
+# DEFAULT ladder is a single break-even rung (inert = today's plain break-even
+# stop); a richer ladder + peak_pnl_frac ratchets the floor up to lock a
+# fraction of the credit. Not wired to any caller yet (an inert placeholder).
+# ────────────────────────────────────────────────────────────────────────
+
+
+def test_default_ladder_is_plain_breakeven_stop():
+    # Armed, no trail_ladder, pnl retraced to <= be_level → BREAKEVEN_STOP at
+    # be_level regardless of peak (the default single rung locks $0).
+    r = rec.recommend(_lctx(be_armed=True, be_level=2.60, pnl=1.0,
+                            peak_pnl_frac=0.85, short_delta=0.10, dte_remaining=10))
+    assert r["action"] == "CUT" and r["code"] == "BREAKEVEN_STOP"
+
+
+def test_default_ladder_holds_above_be_level():
+    # Armed, pnl well above be_level, default ladder → HOLD (no extra lock).
+    r = rec.recommend(_lctx(be_armed=True, be_level=2.60, pnl=30.0,
+                            peak_pnl_frac=0.85, short_delta=0.10, dte_remaining=10))
+    assert r["action"] == "HOLD"
+
+
+def test_ratchet_locks_profit_after_high_peak():
+    # credit 1.0 → credit_total 100. RATCHET + peak 0.85 → locks +50% = $50; a
+    # retrace to $40 (< $50 locked) cuts.
+    r = rec.recommend(_lctx(credit=1.0, be_armed=True, be_level=2.60, pnl=40.0,
+                            peak_pnl_frac=0.85, trail_ladder=rec.RATCHET_TRAIL_LADDER,
+                            short_delta=0.10, dte_remaining=10))
+    assert r["action"] == "CUT" and r["code"] == "BREAKEVEN_STOP"
+
+
+def test_ratchet_holds_above_locked_level():
+    # Same ratchet/peak (lock $50) but pnl $60 (> $50) → HOLD.
+    r = rec.recommend(_lctx(credit=1.0, be_armed=True, be_level=2.60, pnl=60.0,
+                            peak_pnl_frac=0.85, trail_ladder=rec.RATCHET_TRAIL_LADDER,
+                            short_delta=0.10, dte_remaining=10))
+    assert r["action"] == "HOLD"
+
+
+def test_ratchet_lower_peak_locks_less():
+    # peak 0.70 clears only the 0.65 rung → locks +25% = $25. $40 holds; $20 cuts.
+    hold = rec.recommend(_lctx(credit=1.0, be_armed=True, be_level=2.60, pnl=40.0,
+                               peak_pnl_frac=0.70,
+                               trail_ladder=rec.RATCHET_TRAIL_LADDER,
+                               short_delta=0.10, dte_remaining=10))
+    assert hold["action"] == "HOLD"
+    cut = rec.recommend(_lctx(credit=1.0, be_armed=True, be_level=2.60, pnl=20.0,
+                              peak_pnl_frac=0.70,
+                              trail_ladder=rec.RATCHET_TRAIL_LADDER,
+                              short_delta=0.10, dte_remaining=10))
+    assert cut["action"] == "CUT" and cut["code"] == "BREAKEVEN_STOP"
+
+
+def test_ratchet_absent_peak_locks_nothing():
+    # RATCHET ladder but no peak → lock $0 → be_level only; pnl $30 holds.
+    r = rec.recommend(_lctx(credit=1.0, be_armed=True, be_level=2.60, pnl=30.0,
+                            trail_ladder=rec.RATCHET_TRAIL_LADDER, peak_pnl_frac=None,
+                            short_delta=0.10, dte_remaining=10))
+    assert r["action"] == "HOLD"
+
+
+def test_ratchet_inert_unless_armed():
+    # A ratchet ladder does nothing on an UNARMED trade (Rule 3 needs be_armed).
+    r = rec.recommend(_lctx(credit=1.0, be_armed=False, be_level=2.60, pnl=1.0,
+                            peak_pnl_frac=0.85, trail_ladder=rec.RATCHET_TRAIL_LADDER,
+                            short_delta=0.10, dte_remaining=10))
+    assert r["code"] != "BREAKEVEN_STOP"
+
+
+def test_locked_profit_level_helper():
+    R = rec.RATCHET_TRAIL_LADDER
+    assert rec._locked_profit_level({"trail_ladder": R, "peak_pnl_frac": 0.85}, 100) == 50.0
+    assert rec._locked_profit_level({"trail_ladder": R, "peak_pnl_frac": 0.70}, 100) == 25.0
+    assert rec._locked_profit_level({"trail_ladder": R, "peak_pnl_frac": 0.55}, 100) == 0.0
+    assert rec._locked_profit_level({"peak_pnl_frac": 0.85}, 100) == 0.0   # default ladder
+    assert rec._locked_profit_level({"trail_ladder": R}, 100) == 0.0       # no peak
+
+
+# ────────────────────────────────────────────────────────────────────────
 # build_mark — shared mark-row composer used by dashboard + EOD pipeline
 # ────────────────────────────────────────────────────────────────────────
 
@@ -483,3 +562,24 @@ def test_build_mark_carries_delta_stop_code():
                           datetime.now(_TZ))
     assert mark["recommendation"] == "CUT"
     assert mark["recommendation_code"] == "DELTA_STOP"
+
+
+def test_build_mark_threads_ratchet_ladder():
+    # An armed row (credit 1.0 → $100) + RATCHET + peak 0.85 locks +50% ($50); a
+    # retrace to $40 break-even-stops via the threaded ladder.
+    row = _signal_row(be_armed=1)
+    mark = rec.build_mark(row, _repricer_ok(unrealized_pnl=40.0,
+                                            current_short_delta=-0.10),
+                          datetime.now(_TZ), be_level=2.60,
+                          trail_ladder=rec.RATCHET_TRAIL_LADDER, peak_pnl_frac=0.85)
+    assert mark["recommendation_code"] == "BREAKEVEN_STOP"
+
+
+def test_build_mark_default_no_ratchet_unchanged():
+    # The SAME armed row + retrace but NO ladder → holds above be_level (the plain
+    # break-even stop is unchanged — the ratchet is inert by default).
+    row = _signal_row(be_armed=1)
+    mark = rec.build_mark(row, _repricer_ok(unrealized_pnl=40.0,
+                                            current_short_delta=-0.10),
+                          datetime.now(_TZ), be_level=2.60)
+    assert mark["recommendation_code"] != "BREAKEVEN_STOP"
