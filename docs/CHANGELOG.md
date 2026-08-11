@@ -4,7 +4,41 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-08-11 (**Gamma heatmap — the $NDX "comb", and Term day separators.**
+**Last updated:** 2026-08-11 (**Recommender lifecycle gate — the paper + driver books had silently
+stopped taking profit at +50%; plus two inert placeholders.** The 2026-08-09 captured-autoclose
+feature reworked the **SHARED** `signal_recommender.recommend()` into a lifecycle: at +50% credit it
+ARMS break-even and returns HOLD instead of the old TAKE_PROFIT/`TARGET_HIT`. That was scoped to
+captured signals — the design explicitly kept the manual paper account and the driver's isolated
+account OUT of scope ("they have their own managers") — but `recommend()` is shared, and
+`paper_engine.run_manage_cycle` (which BOTH those books run through) calls it directly with a minimal
+ctx and closes only on TAKE_PROFIT/CUT. So both paper books quietly **stopped banking winners at
++50%** and, never setting `be_armed`, got no break-even protection either. Live-confirmed
+(`recommend({entry_credit:1.0, unrealized_pnl:60}) → HOLD`) and it had **SHIPPED to prod**
+(paper-only, no real money, but it skews both books' P&L and fights the driver's press-and-bank
+mandate). The full suite stayed green because `test_paper_engine` **MOCKS** `recommend()`. **Fix:**
+gate the +50% arming on an explicit `ctx["lifecycle"]` opt-in — `build_mark` (the captured path)
+passes `lifecycle=True` and keeps arming; the paper/driver manage cycle keeps its minimal ctx and
+gets TAKE_PROFIT/`TARGET_HIT` back. Only Rule 5 is gated (a credit spread at +50% has a decayed short
+delta, so "+50% AND delta-breached" is economically contradictory → identical P&L). An **UNMOCKED**
+`test_manage_cycle_takes_profit_at_50pct_unmocked` now guards it (RED before, GREEN after). **Two
+inert placeholders came with it** (the deferred items from the captured-autoclose design, both ship
+OFF): a **peak-driven profit-lock ladder ("ratchet")** — Rule 3's break-even stop generalizes to
+`max(be_level, locked_profit)` from a `(peak_frac, lock_frac)` ladder; `DEFAULT_TRAIL_LADDER=[(0.50,
+0.0)]` = today's plain break-even (byte-identical), `RATCHET_TRAIL_LADDER=[(0.50,0.0),(0.65,0.25),
+(0.80,0.50)]` is defined but unwired — and a **flag-gated manual-paper lifecycle opt-in** —
+`paper_engine.run_manage_cycle(lifecycle=…)` + a `be_armed` column on `paper_positions` +
+`manual_paper_lifecycle_enabled` (default OFF, the INVERSE of `captured_autoclose_enabled`) threaded
+from the single `handlers.run_manage_and_refresh` chokepoint + a Settings toggle; the DRIVER's
+isolated account always passes `lifecycle=False` and never reads the flag. A final code review flagged
+one dormant edge — arming BEFORE `recommend()` could same-cycle break-even-stop a tiny-credit IC whose
+commissions exceed the +50% threshold — so the manual-paper cycle now **arms AFTER `recommend()`**,
+matching `compute.run_captured_manage_cycle` exactly (crossing cycle HOLDs via Rule 5, then Rule 3
+governs). Regression-clean across all three suites (options-scanner 1407/11-baseline, options_svc
+963/2-baseline, webgui 1207/0). Built + reviewed subagent-driven (per-unit TDD + a final holistic
+review). Design/plan: [design](plans/2026-08-11-recommender-lifecycle-gate-and-trailing-design.md).
+Commits `602528b` (fix) / `ad1ddab` (ratchet) / `321fd01` (manual-paper) / `9809e63` (arm-after).)
+
+Prior — 2026-08-11 (**Gamma heatmap — the $NDX "comb", and Term day separators.**
 The intraday heatmap rendered $NDX as a dense comb of vertical stripes instead of a smooth
 blended field. It was a **rasterization** bug, not data: `interpolation:True` lays the canvas
 out on ONE row height — `_strike_step`, the MEDIAN strike gap — and **$NDX is the only symbol
