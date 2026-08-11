@@ -124,7 +124,7 @@ def test_run_manage_and_refresh_publishes_summary(monkeypatch):
     calls = {"manage": 0, "refresh": 0, "summary": 0}
     monkeypatch.setattr(handlers.compute, "has_paper_account", lambda: True)
     monkeypatch.setattr(handlers.compute, "run_manage_cycle",
-                        lambda: calls.__setitem__("manage", calls["manage"] + 1))
+                        lambda **kw: calls.__setitem__("manage", calls["manage"] + 1))
     monkeypatch.setattr(handlers, "refresh_paper_account",
                         lambda b: calls.__setitem__("refresh", calls["refresh"] + 1))
     monkeypatch.setattr(handlers, "publish_rescue_summary",

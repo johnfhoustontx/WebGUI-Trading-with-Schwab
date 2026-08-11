@@ -488,13 +488,38 @@ def test_run_manage_cycle_calls_engine(monkeypatch):
 
     seen = {}
     fake_engine = _types.SimpleNamespace(
-        run_manage_cycle=lambda client, date_iso: seen.update(
-            client=client, date=date_iso))
+        run_manage_cycle=lambda client, date_iso, **kw: seen.update(
+            client=client, date=date_iso, **kw))
     monkeypatch.setitem(_sys.modules, "paper_engine", fake_engine)
 
     compute.run_manage_cycle()
     assert seen["client"] is compute._proxy.schwab_py_client
     assert isinstance(seen["date"], str) and len(seen["date"]) == 10
+    # Default (flag OFF): the manual paper account passes lifecycle=False and no
+    # be_level_fn — byte-identical to the pre-lifecycle call.
+    assert seen["lifecycle"] is False
+    assert seen["be_level_fn"] is None
+
+
+def test_run_manage_cycle_lifecycle_true_passes_be_level_fn(monkeypatch):
+    """With lifecycle=True, compute.run_manage_cycle threads lifecycle=True AND a
+    callable be_level_fn (the commission-based break-even floor) down to the
+    engine — mirroring the captured cycle's _captured_be_level."""
+    import sys as _sys
+    import types as _types
+
+    seen = {}
+    fake_engine = _types.SimpleNamespace(
+        run_manage_cycle=lambda client, date_iso, **kw: seen.update(
+            client=client, date=date_iso, **kw))
+    monkeypatch.setitem(_sys.modules, "paper_engine", fake_engine)
+
+    compute.run_manage_cycle(lifecycle=True)
+    assert seen["lifecycle"] is True
+    assert callable(seen["be_level_fn"])
+    # The callable is the real commission-based break-even floor — a PCS round
+    # trip on a non-index symbol is 4 leg-fills @ $0.65 = $2.60.
+    assert seen["be_level_fn"]({"strategy": "PCS", "symbol": "SPY"}) == 2.60
 
 
 def test_reset_and_has_account(monkeypatch):

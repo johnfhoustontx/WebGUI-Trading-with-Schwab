@@ -273,3 +273,39 @@ def test_reset_account_restores_and_clears(tmp_path):
     assert acct["realized_pnl"] == 0.0 and acct["session_date"] == "2026-06-04"
     assert acct["session_realized_pnl"] == 0.0 and acct["halted"] == 0
     assert pdb.fetch_all_positions(db) == [] and pdb.fetch_orders(db) == []
+
+
+# ── be_armed (manual-paper break-even lifecycle, Task 3) ────────────────────
+
+def test_new_position_defaults_be_armed_zero(tmp_path):
+    db = _db(tmp_path)
+    pdb.ensure_account(db, 25_000.0, "2026-06-03")
+    pid = _open_pos(db, "sigArm", 50.0)
+    pos = pdb.fetch_open_positions(db)[0]
+    assert pos["position_id"] == pid
+    assert pos["be_armed"] == 0
+
+
+def test_set_be_armed_flips_the_flag_and_persists(tmp_path):
+    db = _db(tmp_path)
+    pdb.ensure_account(db, 25_000.0, "2026-06-03")
+    pid = _open_pos(db, "sigArm2", 50.0)
+    pdb.set_be_armed(db, pid)
+    pos = pdb.fetch_open_positions(db)[0]
+    assert pos["be_armed"] == 1
+    # a second call is a harmless no-op (still armed)
+    pdb.set_be_armed(db, pid)
+    assert pdb.fetch_open_positions(db)[0]["be_armed"] == 1
+
+
+def test_be_armed_migration_is_idempotent(tmp_path):
+    """init_db can run twice against the same file without raising (the
+    idempotent ALTER-if-missing pattern), and the column is usable afterward."""
+    db = _db(tmp_path)
+    pdb.init_db(db)
+    pdb.init_db(db)   # must not raise (be_armed already added by the first call)
+    pdb.ensure_account(db, 25_000.0, "2026-06-03")
+    pid = _open_pos(db, "sigArm3", 50.0)
+    assert pdb.fetch_open_positions(db)[0]["be_armed"] == 0
+    pdb.set_be_armed(db, pid)
+    assert pdb.fetch_open_positions(db)[0]["be_armed"] == 1

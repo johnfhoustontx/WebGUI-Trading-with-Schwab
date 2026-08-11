@@ -314,9 +314,13 @@ def test_run_driver_manage_cycle_targets_driver_db(tmp_path, monkeypatch):
     compute.ensure_driver_account()          # so has_driver_account() is True
     seen = {}
     monkeypatch.setattr(paper_engine, "run_manage_cycle",
-                        lambda client, today, db_path=None: seen.update(db_path=db_path))
+                        lambda client, today, db_path=None, **kw: seen.update(
+                            db_path=db_path, **kw))
     compute.run_driver_manage_cycle()
     assert seen["db_path"] == compute.DRIVER_PAPER_DB
+    # The driver's isolated account is NEVER put on the opt-in lifecycle,
+    # regardless of the manual-paper Settings toggle (it has no wiring to read).
+    assert seen["lifecycle"] is False
 
 
 def test_run_driver_manage_cycle_noop_without_account(tmp_path, monkeypatch):

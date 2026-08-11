@@ -456,6 +456,54 @@ def test_sync_ticker_setting_registered_inside_the_main_guard():
     assert "app.on_startup(sync_ticker_setting)" in tail
 
 
+# ── manual-paper break-even lifecycle setting resync (Task 3) ───────────────
+# Mirrors the ticker/captured-autoclose resync pattern: options_svc defaults
+# this flag OFF on a missing key too, so a resync can't silently flip a user's
+# explicit OFF back to ON — but a wiped Memurai must still be told the GUI's
+# current (possibly ON) choice at startup.
+
+
+def test_sync_manual_paper_lifecycle_setting_reasserts_the_flag(monkeypatch):
+    import main
+
+    sent = []
+    monkeypatch.setattr(main.bus_client, "request",
+                        lambda domain, cmd: sent.append((domain, cmd)))
+    monkeypatch.setattr(main.app_settings, "get", lambda k: False)
+    main.sync_manual_paper_lifecycle_setting()
+    assert sent == [("options", {"type": "set_manual_paper_lifecycle",
+                                 "args": {"enabled": False}})]
+
+    sent.clear()
+    monkeypatch.setattr(main.app_settings, "get", lambda k: True)
+    main.sync_manual_paper_lifecycle_setting()
+    assert sent == [("options", {"type": "set_manual_paper_lifecycle",
+                                 "args": {"enabled": True}})]
+
+
+def test_sync_manual_paper_lifecycle_setting_survives_a_down_bus(monkeypatch):
+    import main
+
+    def _boom(domain, cmd):
+        raise RuntimeError("redis down")
+
+    monkeypatch.setattr(main.bus_client, "request", _boom)
+    monkeypatch.setattr(main.app_settings, "get", lambda k: True)
+    main.sync_manual_paper_lifecycle_setting()  # startup must not fail
+
+
+def test_sync_manual_paper_lifecycle_setting_registered_inside_the_main_guard():
+    import inspect
+
+    import main
+
+    src = inspect.getsource(main)
+    head, guard, tail = src.partition('if __name__ in {"__main__", "__mp_main__"}:')
+    assert guard, "the __main__ guard moved — this test needs updating"
+    assert "app.on_startup(" not in head
+    assert "app.on_startup(sync_manual_paper_lifecycle_setting)" in tail
+
+
 def test_reimporting_main_after_startup_does_not_raise():
     """Pages do `import main as _shell` (e.g. pages/options/scanner.py) at REQUEST
     time. The entry script runs as __main__, so that re-executes main.py as a

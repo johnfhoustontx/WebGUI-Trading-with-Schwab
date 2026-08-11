@@ -86,6 +86,25 @@ def sync_captured_autoclose_setting() -> None:
             "captured autoclose setting resync failed", exc_info=True)
 
 
+def sync_manual_paper_lifecycle_setting() -> None:
+    """Re-assert the manual-paper break-even-lifecycle toggle to options_svc at
+    startup (best-effort).
+
+    ``manual_paper_lifecycle_enabled`` is a webgui setting (default OFF) that
+    gates the manual paper account's opt-in captured-style lifecycle. Mirrors
+    ``sync_captured_autoclose_setting``: settings.json is the source of truth, so
+    restate it every startup — a wiped/restarted Memurai defaults the service's
+    own copy back OFF too, but an explicit user ON must still be re-asserted.
+    Never raises (a down bus must not stop the web GUI from booting)."""
+    try:
+        enabled = bool(app_settings.get("manual_paper_lifecycle_enabled"))
+        bus_client.request("options", {"type": "set_manual_paper_lifecycle",
+                                       "args": {"enabled": enabled}})
+    except Exception:  # noqa: BLE001
+        logging.getLogger("webgui").warning(
+            "manual paper lifecycle setting resync failed", exc_info=True)
+
+
 def play_alert(sound: str, volume: float) -> None:
     """Play a bundled alert WAV in the connected browser at the given volume."""
     sound = sound if sound in ("chime", "bell", "ping") else "chime"
@@ -1465,6 +1484,7 @@ if __name__ in {"__main__", "__mp_main__"}:
     # 500s the page. Inside this guard it runs once, before ui.run().
     app.on_startup(sync_ticker_setting)
     app.on_startup(sync_captured_autoclose_setting)
+    app.on_startup(sync_manual_paper_lifecycle_setting)
 
     # Bind to localhost only (single-user, localhost-first app): reachable at
     # http://localhost:8500 from this PC. This avoids listening on every network

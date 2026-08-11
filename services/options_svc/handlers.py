@@ -152,6 +152,11 @@ CACHE_CAPTURED_CLOSED = "cache:options:captured_closed"
 EVENT_CAPTURED_CLOSED = "events:options:captured_closed"
 CACHE_AUTOCLOSE_ENABLED = "cache:options:autoclose_enabled"
 
+# MANUAL paper account's opt-in break-even lifecycle toggle — the INVERSE
+# default of CACHE_AUTOCLOSE_ENABLED (default OFF; only an explicit True
+# enables). The DRIVER's isolated account never reads this key.
+CACHE_MANUAL_PAPER_LIFECYCLE = "cache:options:manual_paper_lifecycle"
+
 # Date-scoped seen-sets for server-side phone push (Telegram/Discord/Fi-SMS).
 # See services/options_svc/push_notify.py.
 CACHE_NOTIFIED_SCAN = "cache:options:notified_scan"
@@ -520,9 +525,16 @@ def run_manage_and_refresh(bus) -> None:
     (``compute.expire_ledger_trades`` — the Paper Trades tab otherwise never
     closes on expiration) and republishes the ledger view when any settled.
     Shared by the ``paper_manage`` command (manual button) and the scheduler's
-    auto-manage tick (``scheduler.manage_due``) so both run identical logic."""
+    auto-manage tick (``scheduler.manage_due``) so both run identical logic.
+
+    Threads ``manual_paper_lifecycle_enabled(bus)`` (the Settings toggle, default
+    OFF) into ``compute.run_manage_cycle(lifecycle=...)`` — this is the ONE
+    chokepoint both the manual button and the scheduler pass through, so the
+    manual paper account's opt-in break-even lifecycle needs no separate wiring
+    at either call site. The DRIVER's isolated account is untouched here (see
+    ``run_driver_manage_and_refresh``, which never reads this flag)."""
     if compute.has_paper_account():
-        compute.run_manage_cycle()
+        compute.run_manage_cycle(lifecycle=manual_paper_lifecycle_enabled(bus))
     # Auto-settle expired LEDGER trades (the Paper Trades tab otherwise never
     # closes on expiration). Defensive so a settlement hiccup never skips the
     # refreshes below; the piggyback ledger refresh further down republishes the
@@ -680,6 +692,24 @@ def autoclose_enabled(bus) -> bool:
         return bool((env.payload or {}).get("enabled", True))
     except Exception:  # noqa: BLE001
         return True
+
+
+def manual_paper_lifecycle_enabled(bus) -> bool:
+    """Whether the MANUAL paper account has opted into the captured-style
+    break-even lifecycle (arm at +50% credit, ride under a break-even stop).
+    Defaults **False** on a missing / unreadable key — the INVERSE of
+    ``autoclose_enabled`` — so only an EXPLICIT ``{"enabled": True}`` (from the
+    Settings toggle write-through) opts in; a wiped Memurai reverts to today's
+    plain TAKE_PROFIT-at-+50%. The DRIVER's isolated account never reads this
+    flag (see ``compute.run_driver_manage_cycle``, which always passes
+    ``lifecycle=False``)."""
+    try:
+        env = bus.cache_get(CACHE_MANUAL_PAPER_LIFECYCLE)
+        if env is None:
+            return False
+        return bool((env.payload or {}).get("enabled", False))
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _notify_captured_closes(bus, closed) -> None:
@@ -1490,6 +1520,9 @@ def handle_command(bus, command) -> None:
     then refresh; ``captured_manage`` → run the captured auto-manage cycle (reprice
     → arm break-even → auto-close) then republish the open + closed views;
     ``set_autoclose`` (args enabled) → write the auto-close master toggle;
+    ``set_manual_paper_lifecycle`` (args enabled) → write the MANUAL paper
+    account's opt-in break-even-lifecycle toggle (default OFF; the DRIVER
+    account never reads it);
     ``gamma_refresh`` (args symbol, default ``$SPX``) → recompute the
     Gamma snapshot; ``gamma_explain`` (args symbol) → build the Explain body, cache
     + publish; ``gamma_analyze`` → build the bundled SPX/SPY/QQQ prompt, cache +
@@ -1630,6 +1663,12 @@ def handle_command(bus, command) -> None:
         # Settings toggle write-through: gate the SCHEDULED captured-manage cycle.
         enabled = bool((command.args or {}).get("enabled", True))
         bus.cache_set(CACHE_AUTOCLOSE_ENABLED, {"enabled": enabled})
+    elif command.type == "set_manual_paper_lifecycle":
+        # Settings toggle write-through: gate the MANUAL paper account's opt-in
+        # break-even lifecycle. Defaults False — only an explicit enable turns it
+        # on; the DRIVER account is never affected.
+        enabled = bool((command.args or {}).get("enabled", False))
+        bus.cache_set(CACHE_MANUAL_PAPER_LIFECYCLE, {"enabled": enabled})
     elif command.type == "gamma_refresh":
         refresh_gamma(bus, command.args.get("symbol", "$SPX"))
     elif command.type == "gamma_explain":

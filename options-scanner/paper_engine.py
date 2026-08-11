@@ -354,7 +354,8 @@ def underlying_last(client, symbol):
         return None
 
 
-def run_manage_cycle(client, now_date, broker=None, db_path=None, now_ct=None):
+def run_manage_cycle(client, now_date, broker=None, db_path=None, now_ct=None,
+                     lifecycle=False, be_level_fn=None):
     """Re-price open positions, apply exit rules (target / CUT / expiration), and
     trip the session drawdown halt. RTH gating is the caller's responsibility.
 
@@ -362,7 +363,21 @@ def run_manage_cycle(client, now_date, broker=None, db_path=None, now_ct=None):
     later day) via ``should_settle`` — so a 0-DTE spread is held to the close, not
     force-settled at the open — and falls back to a direct underlying quote when
     the repricer can't supply one (a past expiration). ``now_ct`` defaults to the
-    live CT clock; inject it for deterministic tests."""
+    live CT clock; inject it for deterministic tests.
+
+    ``lifecycle`` (default False — today's plain TAKE_PROFIT-at-+50% behavior,
+    used by both the manual paper account and the driver's isolated account)
+    opts THIS call into the captured-style break-even lifecycle: the first time
+    a position's pnl reaches +50% of credit it ARMS break-even (persisted via
+    ``paper_account_db.set_be_armed``) and HOLDs instead of closing, riding
+    toward full credit under a break-even stop; a later give-back through
+    ``be_level_fn(pos)`` (or a hard money/time/delta stop) closes it. Mirrors
+    ``services/options_svc/compute.run_captured_manage_cycle``'s arming, except
+    the arm-check runs BEFORE ``recommend()`` so the SAME cycle that crosses
+    +50% already sees itself armed. ``be_level_fn`` is an optional ``pos ->
+    float`` callable supplying the break-even close floor in dollars (e.g.
+    round-trip commissions); ignored when ``lifecycle`` is False, defaults to
+    $0.0 when ``lifecycle`` is True but no ``be_level_fn`` is supplied."""
     broker = broker or _default_broker
     now_ct = now_ct or datetime.now(TZ)
     signal_repricer.clear_chain_cache()        # fresh quotes for every fill
@@ -410,6 +425,24 @@ def run_manage_cycle(client, now_date, broker=None, db_path=None, now_ct=None):
         ctx = {"entry_credit": pos["entry_credit"], "unrealized_pnl": per_contract,
                "current_short_delta": mark.get("current_short_delta"),
                "dte_remaining": dte}
+        if lifecycle:
+            credit_total = pos["entry_credit"] * MULTIPLIER
+            if (not pos.get("be_armed")
+                    and per_contract >= signal_recommender.TP_FRAC * credit_total):
+                # Arm BEFORE recommend() so THIS cycle's ctx already sees itself
+                # armed (Rule 3 takes over instead of Rule 5's HOLD-and-arm).
+                paper_account_db.set_be_armed(db_path, pos["position_id"])
+                pos["be_armed"] = 1
+            ctx["lifecycle"] = True
+            ctx["be_armed"] = bool(pos.get("be_armed"))
+            ctx["be_level"] = be_level_fn(pos) if be_level_fn else 0.0
+            ctx["spot"] = mark.get("current_underlying")
+            ctx["short_strike"] = pos.get("short_strike")
+            ctx["call_short"] = pos.get("call_short")
+            ctx["strategy"] = pos.get("strategy")
+            # paper_positions carries no entry_short_delta column — recommend()
+            # falls back to the absolute-breach delta stop when this is None.
+            ctx["entry_short_delta"] = pos.get("entry_short_delta")
         rec = signal_recommender.recommend(ctx)
         if rec["action"] in ("TAKE_PROFIT", "CUT"):
             order = {"signal_id": pos["signal_id"], "symbol": pos["symbol"],

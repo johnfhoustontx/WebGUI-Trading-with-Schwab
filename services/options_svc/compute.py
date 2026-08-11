@@ -763,7 +763,13 @@ def open_driver_position(signal: dict, qty: int, broker=None, context=None) -> d
 def run_driver_manage_cycle() -> None:
     """Reprice + auto-close the DRIVER account's open positions
     (``paper_engine.run_manage_cycle`` on ``DRIVER_PAPER_DB``). No-op-safe if the
-    driver account doesn't exist yet (gated on ``has_driver_account``)."""
+    driver account doesn't exist yet (gated on ``has_driver_account``).
+
+    The driver's isolated book is intentionally EXCLUDED from the manual paper
+    account's opt-in break-even lifecycle — ``lifecycle=False`` is passed
+    explicitly (never reads ``handlers.manual_paper_lifecycle_enabled``, the
+    Settings toggle), so the driver always keeps today's plain TAKE_PROFIT-at-
+    +50% regardless of what the manual account is configured to do."""
     import datetime as dt
 
     import paper_engine
@@ -772,7 +778,7 @@ def run_driver_manage_cycle() -> None:
         return
     try:
         paper_engine.run_manage_cycle(_proxy.schwab_py_client, dt.date.today().isoformat(),
-                                      db_path=DRIVER_PAPER_DB)
+                                      db_path=DRIVER_PAPER_DB, lifecycle=False)
     except Exception:  # noqa: BLE001 — a reprice/proxy failure must not propagate out of
         # the wrapper (the 5-min tick retries; matches the driver wrappers).
         log.exception("driver manage cycle degraded (retries on next tick)")
@@ -792,13 +798,35 @@ def run_entry_cycle() -> None:
     paper_engine.run_entry_cycle(_proxy.schwab_py_client, dt.date.today().isoformat(), signals)
 
 
-def run_manage_cycle() -> None:
-    """Run the paper auto-management cycle: reprice + auto-close hits. Mirrors the page."""
+def _manual_paper_be_level(pos: dict) -> float:
+    """Break-even close floor ($) for a MANUAL-paper lifecycle position = round-trip
+    commissions for its structure (mirrors ``_captured_be_level``, the captured-
+    signal analog). Defensive → 0.0 on any failure (break-even stop at pnl<=$0)."""
+    try:
+        strat = pos.get("strategy") or pos.get("type")
+        return commission.round_trip_commission(strat, pos.get("symbol"), 1)
+    except Exception:
+        return 0.0
+
+
+def run_manage_cycle(lifecycle: bool = False) -> None:
+    """Run the paper auto-management cycle: reprice + auto-close hits. Mirrors the page.
+
+    ``lifecycle`` (default False — unchanged plain TAKE_PROFIT-at-+50%) opts the
+    MANUAL paper account into the captured-style break-even lifecycle; see
+    ``paper_engine.run_manage_cycle``. Threaded from
+    ``handlers.run_manage_and_refresh`` via ``handlers.manual_paper_lifecycle_enabled``
+    (the Settings toggle, default OFF). When enabled, ``_manual_paper_be_level``
+    supplies the commission-based break-even close floor — the same model the
+    captured-signal cycle uses (``compute._captured_be_level``)."""
     import datetime as dt
 
     import paper_engine
 
-    paper_engine.run_manage_cycle(_proxy.schwab_py_client, dt.date.today().isoformat())
+    paper_engine.run_manage_cycle(
+        _proxy.schwab_py_client, dt.date.today().isoformat(),
+        lifecycle=lifecycle,
+        be_level_fn=_manual_paper_be_level if lifecycle else None)
 
 
 def reset_paper_account(starting_balance: float) -> None:

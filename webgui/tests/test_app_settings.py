@@ -64,6 +64,13 @@ def test_captured_autoclose_defaults_on():
     assert app_settings.DEFAULTS["captured_autoclose_enabled"] is True
 
 
+def test_manual_paper_lifecycle_defaults_off():
+    """The MANUAL paper account's break-even lifecycle is opt-IN (inert placeholder
+    until the Settings toggle is explicitly enabled) — the inverse default of
+    captured_autoclose_enabled."""
+    assert app_settings.DEFAULTS["manual_paper_lifecycle_enabled"] is False
+
+
 def test_net_prem_defaults_exist():
     """The Net Prem view's group/mode/selection persist across page loads.
 

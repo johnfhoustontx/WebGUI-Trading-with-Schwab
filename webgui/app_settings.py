@@ -15,6 +15,7 @@ DEFAULTS = {
     "desktop_notifications": False,
     "flow_alerts_enabled": True,     # put/call premium crossover + unusual-activity toasts
     "captured_autoclose_enabled": True,  # auto-manage captured signals (break-even trail + auto-close)
+    "manual_paper_lifecycle_enabled": False,  # opt-in: manual paper account break-even lifecycle (experimental)
     "ticker_enabled": True,          # bottom market-summary marquee on every page
     "ticker_speed": 60,              # marquee duration seconds (higher = slower)
     "nav_pinned": False,             # nav drawer locked open (else a hover icon rail)

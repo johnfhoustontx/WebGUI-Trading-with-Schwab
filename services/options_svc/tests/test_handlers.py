@@ -267,7 +267,7 @@ def test_paper_command_dispatch(monkeypatch):
     monkeypatch.setattr(handlers.compute, "run_entry_cycle",
                         lambda: calls.__setitem__("entry", calls["entry"] + 1))
     monkeypatch.setattr(handlers.compute, "run_manage_cycle",
-                        lambda: calls.__setitem__("manage", calls["manage"] + 1))
+                        lambda **kw: calls.__setitem__("manage", calls["manage"] + 1))
     monkeypatch.setattr(handlers.compute, "expire_ledger_trades", lambda: 0)
     monkeypatch.setattr(handlers.compute, "reset_paper_account",
                         lambda bal: calls.__setitem__("reset", bal))
@@ -306,7 +306,7 @@ def test_run_manage_and_refresh_runs_cycle_when_account_present(monkeypatch):
     calls = {"manage": 0, "refresh": 0}
     monkeypatch.setattr(handlers.compute, "has_paper_account", lambda: True)
     monkeypatch.setattr(handlers.compute, "run_manage_cycle",
-                        lambda: calls.__setitem__("manage", calls["manage"] + 1))
+                        lambda **kw: calls.__setitem__("manage", calls["manage"] + 1))
     monkeypatch.setattr(handlers.compute, "expire_ledger_trades", lambda: 0)
     monkeypatch.setattr(handlers, "refresh_paper_account",
                         lambda b: calls.__setitem__("refresh", calls["refresh"] + 1))
@@ -320,6 +320,41 @@ def test_run_manage_and_refresh_runs_cycle_when_account_present(monkeypatch):
     # The manage tick always piggybacks one ledger refresh (fresh P&L + any
     # expiration settlement).
     assert calls.get("trades", 0) == 1
+
+
+# ── Manual-paper lifecycle flag threads into the manage cycle (Task 3) ──────
+
+def test_run_manage_and_refresh_threads_lifecycle_flag_off_by_default(monkeypatch):
+    """With the Settings toggle unset (default OFF), run_manage_and_refresh calls
+    compute.run_manage_cycle(lifecycle=False) — unchanged plain TAKE_PROFIT."""
+    bus = Bus(fake=True)
+    seen = {}
+    monkeypatch.setattr(handlers.compute, "has_paper_account", lambda: True)
+    monkeypatch.setattr(handlers.compute, "run_manage_cycle",
+                        lambda **kw: seen.update(kw))
+    monkeypatch.setattr(handlers.compute, "expire_ledger_trades", lambda: 0)
+    monkeypatch.setattr(handlers, "refresh_paper_account", lambda b: None)
+    monkeypatch.setattr(handlers, "refresh_paper_trades", lambda b, **k: None)
+
+    handlers.run_manage_and_refresh(bus)
+    assert seen == {"lifecycle": False}
+
+
+def test_run_manage_and_refresh_threads_lifecycle_flag_on_when_enabled(monkeypatch):
+    """With the Settings toggle explicitly enabled, run_manage_and_refresh calls
+    compute.run_manage_cycle(lifecycle=True)."""
+    bus = Bus(fake=True)
+    bus.cache_set("cache:options:manual_paper_lifecycle", {"enabled": True})
+    seen = {}
+    monkeypatch.setattr(handlers.compute, "has_paper_account", lambda: True)
+    monkeypatch.setattr(handlers.compute, "run_manage_cycle",
+                        lambda **kw: seen.update(kw))
+    monkeypatch.setattr(handlers.compute, "expire_ledger_trades", lambda: 0)
+    monkeypatch.setattr(handlers, "refresh_paper_account", lambda b: None)
+    monkeypatch.setattr(handlers, "refresh_paper_trades", lambda b, **k: None)
+
+    handlers.run_manage_and_refresh(bus)
+    assert seen == {"lifecycle": True}
 
 
 def test_run_paper_entry_and_manage_runs_entry_then_manage(monkeypatch):
@@ -440,7 +475,7 @@ def test_run_manage_and_refresh_settles_ledger_then_refreshes(monkeypatch):
     bus = Bus(fake=True)
     calls = {"expire": 0, "trades": 0}
     monkeypatch.setattr(handlers.compute, "has_paper_account", lambda: True)
-    monkeypatch.setattr(handlers.compute, "run_manage_cycle", lambda: None)
+    monkeypatch.setattr(handlers.compute, "run_manage_cycle", lambda **kw: None)
     monkeypatch.setattr(handlers.compute, "expire_ledger_trades",
                         lambda: calls.__setitem__("expire", calls["expire"] + 1) or 2)
     monkeypatch.setattr(handlers, "refresh_paper_account", lambda b: None)
@@ -804,6 +839,28 @@ def test_autoclose_enabled_defaults_true_and_respects_false():
     assert handlers.autoclose_enabled(bus) is False
     bus.cache_set("cache:options:autoclose_enabled", {"enabled": True})
     assert handlers.autoclose_enabled(bus) is True
+
+
+# ── Manual-paper break-even lifecycle opt-in (Task 3, flag default OFF) ─────
+# The inverse of autoclose: only an EXPLICIT {"enabled": True} turns it on.
+
+def test_set_manual_paper_lifecycle_command_writes_flag():
+    bus = Bus(fake=True)
+    handlers.handle_command(bus, Command(type="set_manual_paper_lifecycle",
+                                         args={"enabled": True}))
+    assert bus.cache_get("cache:options:manual_paper_lifecycle").payload == {"enabled": True}
+    handlers.handle_command(bus, Command(type="set_manual_paper_lifecycle",
+                                         args={"enabled": False}))
+    assert bus.cache_get("cache:options:manual_paper_lifecycle").payload == {"enabled": False}
+
+
+def test_manual_paper_lifecycle_enabled_defaults_false_and_respects_true():
+    bus = Bus(fake=True)
+    assert handlers.manual_paper_lifecycle_enabled(bus) is False   # missing key → default OFF
+    bus.cache_set("cache:options:manual_paper_lifecycle", {"enabled": True})
+    assert handlers.manual_paper_lifecycle_enabled(bus) is True
+    bus.cache_set("cache:options:manual_paper_lifecycle", {"enabled": False})
+    assert handlers.manual_paper_lifecycle_enabled(bus) is False
 
 
 # ── Gamma (Task 2.6d) ────────────────────────────────────────────────────────

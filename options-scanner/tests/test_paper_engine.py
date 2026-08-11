@@ -398,6 +398,66 @@ def test_manage_cycle_takes_profit_at_50pct_unmocked(tmp_path, monkeypatch):
     assert pdb.get_account(db)["realized_pnl"] > 0          # took the profit
 
 
+# ── Opt-in manual-paper break-even lifecycle (Task 3) ───────────────────────
+# The MANUAL paper account can opt into the captured-style lifecycle (arm
+# break-even at +50%, ride under a break-even stop) via ``lifecycle=True``.
+# Default False keeps today's plain TAKE_PROFIT-at-+50% unchanged.
+
+def test_manage_cycle_lifecycle_false_still_takes_profit_at_50pct(tmp_path, monkeypatch):
+    """Explicit lifecycle=False (same as the default) still TAKE_PROFITs at +50%
+    using the REAL recommend() — proving the FLAG (not just its default) leaves
+    today's behavior untouched."""
+    db = str(tmp_path / "acct.db")
+    pdb.ensure_account(db, 25_000.0, "2026-06-03")
+    pe.run_entry_cycle(None, "2026-06-03", [_sig(width=1.0, entry_credit=0.50)],
+                       _FakeBroker(0.50), db)
+    monkeypatch.setattr(pe.signal_repricer, "reprice_swing",
+        lambda trade, client: {"current_value": 0.20, "unrealized_pnl": 30.0,
+            "pnl_pct_of_credit": 60.0, "current_underlying": 500.0,
+            "current_short_delta": -0.10, "error": None})
+    pe.run_manage_cycle(None, "2026-06-03", _FakeBroker(0.20), db, lifecycle=False)
+    assert pdb.fetch_open_positions(db) == []               # closed at +50%
+    assert pdb.get_account(db)["realized_pnl"] > 0          # took the profit
+
+
+def test_manage_cycle_lifecycle_true_arms_be_and_holds_at_50pct(tmp_path, monkeypatch):
+    """lifecycle=True: a +50% position is NOT closed — it ARMS break-even and
+    holds (persisted to the DB), riding toward full credit exactly like the
+    captured-signal lifecycle. recommend() is NOT mocked — the real logic runs."""
+    db = str(tmp_path / "acct.db")
+    pdb.ensure_account(db, 25_000.0, "2026-06-03")
+    pe.run_entry_cycle(None, "2026-06-03", [_sig(width=1.0, entry_credit=0.50)],
+                       _FakeBroker(0.50), db)
+    monkeypatch.setattr(pe.signal_repricer, "reprice_swing",
+        lambda trade, client: {"current_value": 0.20, "unrealized_pnl": 30.0,
+            "pnl_pct_of_credit": 60.0, "current_underlying": 500.0,
+            "current_short_delta": -0.10, "error": None})
+    pe.run_manage_cycle(None, "2026-06-03", _FakeBroker(0.20), db, lifecycle=True)
+    open_positions = pdb.fetch_open_positions(db)
+    assert len(open_positions) == 1                          # still open — HOLD
+    assert open_positions[0]["be_armed"] == 1                 # armed + persisted
+
+
+def test_manage_cycle_lifecycle_true_breakeven_stop_closes_when_armed(tmp_path, monkeypatch):
+    """lifecycle=True + already-armed: a retrace to/through be_level_fn's floor
+    closes the position with BREAKEVEN_STOP (protecting the give-back)."""
+    db = str(tmp_path / "acct.db")
+    pdb.ensure_account(db, 25_000.0, "2026-06-03")
+    pe.run_entry_cycle(None, "2026-06-03", [_sig(width=1.0, entry_credit=0.50)],
+                       _FakeBroker(0.50), db)
+    pos = pdb.fetch_open_positions(db)[0]
+    pdb.set_be_armed(db, pos["position_id"])
+    monkeypatch.setattr(pe.signal_repricer, "reprice_swing",
+        lambda trade, client: {"current_value": 0.49, "unrealized_pnl": 1.0,
+            "pnl_pct_of_credit": 2.0, "current_underlying": 500.0,
+            "current_short_delta": -0.10, "error": None})
+    pe.run_manage_cycle(None, "2026-06-03", _FakeBroker(0.49), db,
+                        lifecycle=True, be_level_fn=lambda p: 2.60)
+    assert pdb.fetch_open_positions(db) == []                 # closed
+    closed = pdb.fetch_all_positions(db)[0]
+    assert closed["exit_reason"] == "BREAKEVEN_STOP"
+
+
 def test_account_snapshot_reports_equity(tmp_path):
     db = str(tmp_path / "acct.db")
     pdb.ensure_account(db, 25_000.0, "2026-06-03")
