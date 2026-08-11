@@ -192,6 +192,48 @@ def test_heatmap_figure_rowsize_from_visible_window_median():
     assert hm["rowsize"] == 2.5
 
 
+def test_expiry_separators_sit_between_columns():
+    """One hairline per BOUNDARY (n-1 for n expiries), at the midpoint between
+    category centres — a line ON a centre would strike through a column."""
+    lines = gamma.expiry_separators(["08/07", "08/08", "08/11", "08/12"])
+    assert [ln["value"] for ln in lines] == [0.5, 1.5, 2.5]
+    assert all(ln["width"] == 1 for ln in lines), "must stay a hairline"
+    assert all(ln["zIndex"] > 0 for ln in lines), "must draw over the blended image"
+
+
+def test_expiry_separators_empty_when_there_is_no_boundary():
+    assert gamma.expiry_separators([]) == []
+    assert gamma.expiry_separators(["08/07"]) == []
+    assert gamma.expiry_separators(None) == []
+
+
+def test_term_heatmap_separates_the_expiry_columns():
+    """The Term view blends across DAYS, where nothing varies continuously — so the
+    day boundaries have to be drawn back in."""
+    grid = {"expirations": ["08/07", "08/08", "08/11"],
+            "cells": {"08/07": {100.0: {"net_gex_usd": 5}},
+                      "08/08": {100.0: {"net_gex_usd": -3}},
+                      "08/11": {100.0: {"net_gex_usd": 2}}}}
+    fig = gamma.term_heatmap(grid)
+    assert [ln["value"] for ln in fig["xAxis"]["plotLines"]] == [0.5, 1.5]
+
+
+def test_term_heatmap_is_immune_to_an_uneven_strike_ladder():
+    """Term indexes strikes as CATEGORIES, so the mixed-ladder collision that
+    striped the intraday heatmap cannot happen here — every strike gets its own row
+    and points are addressed by index, never by strike value."""
+    grid = {"expirations": ["08/07", "08/08"],
+            "cells": {"08/07": {100.0: {"net_gex_usd": 5}, 105.0: {"net_gex_usd": 4},
+                                115.0: {"net_gex_usd": 3}},
+                      "08/08": {100.0: {"net_gex_usd": -5}, 105.0: {"net_gex_usd": -4},
+                                115.0: {"net_gex_usd": -3}}}}
+    fig = gamma.term_heatmap(grid)
+    assert fig["yAxis"]["categories"] == ["100", "105", "115"]
+    hm = next(s for s in fig["series"] if s["type"] == "heatmap")
+    assert sorted({p[1] for p in hm["data"]}) == [0, 1, 2]   # row INDEX, not strike
+    assert "rowsize" not in hm, "a categorical axis needs no strike-derived rowsize"
+
+
 def test_uniform_strike_grid_leaves_an_even_ladder_alone():
     """The common case ($SPX/SPY/QQQ/IWM/AMD all quote one spacing): no resampling,
     and the SAME objects back so an even chain pays nothing for the check."""

@@ -1561,12 +1561,40 @@ def net_prem_status_text(payload, now=None):
     return text
 
 
+# Hairline between adjacent expiry columns on the Term heatmap. Width 1 is the
+# thinnest a crisp SVG stroke goes; the low alpha is what makes it read as a hair
+# rather than a rule, so it separates the columns without competing with the data.
+EXPIRY_SEP_COLOR, EXPIRY_SEP_WIDTH = "rgba(255,255,255,0.22)", 1
+
+
+def expiry_separators(expirations):
+    """xAxis plotLines splitting the Term heatmap between each expiration column.
+
+    ``interpolation: True`` blends the Term view into one continuous field exactly
+    as it does intraday — but here the x axis is DAYS, not minutes, so the blending
+    is misleading: it smears one expiration's exposure into the next when nothing
+    actually varies continuously between them. A hairline on each category boundary
+    (at ``i + 0.5``, the midpoint between category centres) restores the reading
+    that each column is its own expiry. Empty for 0 or 1 expirations — there is no
+    boundary to draw."""
+    exps = expirations or []
+    return [{"value": i + 0.5, "color": EXPIRY_SEP_COLOR, "width": EXPIRY_SEP_WIDTH,
+             "zIndex": 5, "className": "gamma-expiry-sep"}
+            for i in range(len(exps) - 1)]
+
+
 def term_heatmap(term_grid):
     """Highcharts heatmap options for the Term view (net GEX by expiry × strike).
 
     Strikes with all-zero net across expirations are dropped. Both axes are
     categorical (no overlay), and the color scale is clamped symmetrically to a
     robust max so a few extreme strikes don't wash out the mid-range cells.
+
+    Note the axes being CATEGORICAL is also why this view never showed the mixed
+    strike-ladder striping the intraday heatmap did (see ``uniform_strike_grid``):
+    every strike is its own row by index, so an uneven ladder cannot collide rows
+    here. The trade-off is that the y axis is ordinal, not proportional to price —
+    a 5-wide and a 10-wide gap occupy the same height.
     """
     grid = term_grid or {}
     exps = grid.get("expirations") or []
@@ -1591,7 +1619,8 @@ def term_heatmap(term_grid):
     fig.update({
         "title": {"text": "Term structure (net GEX by expiry × strike)",
                   "style": {"color": FONT}},
-        "xAxis": {**_dark_axis("Expiration"), "categories": exps},
+        "xAxis": {**_dark_axis("Expiration"), "categories": exps,
+                  "plotLines": expiry_separators(exps)},
         "yAxis": {**_dark_axis("Strike"), "categories": [f"{s:g}" for s in strikes]},
         "colorAxis": _coloraxis(_robust_zmax(z)),
         "series": [{"type": "heatmap", "name": "net", "data": data,
