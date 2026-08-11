@@ -4,7 +4,44 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-08-11 (**Recommender lifecycle gate — the paper + driver books had silently
+**Last updated:** 2026-08-11 (**`big_delta` — a fourth flow detector on directional EXPOSURE,
+shipped quiet-live.** The three live flow detectors (crossover / unusual-activity / gamma-flip) all
+measure DOLLARS, not directional exposure — a one-off SPY measurement found **$12.71B of
+delta-notional in cheap OTM contracts that fell below the $5M premium floor**, invisible today. The
+daily **15:30 `FlowDeltaInstrumentation`** post-close run (`tools/flow_delta_instrumentation.py`)
+calibrated the threshold over **three sessions** (Fri 08-07 / Mon / Tue): a **relative** trigger (a
+contract's share of its symbol's OWN gross delta-notional) beats an absolute $ floor — the absolute
+floor makes **$SPX the top symbol at every level, every session** (repeating the mega-cap bias the
+flat $5M premium floor has), while **~20% relative is stable at ~46–53 alerts across ~35–45
+symbols**, ~46 genuinely new. (Two findings recorded: the modelled baseline **overcounts real fires
+~2.4×** — closing delta ≠ intraday — and the "$SPX fires zero UOA" blind spot was a **Friday-only
+artifact**, 0→26→37 across the three sessions.) **The detector** `flow_alerts.detect_big_delta`: one
+walk of the poll's already-fetched chain (delta was sitting unused in the contract dict), a
+**`|delta|>1` sentinel guard** (Schwab's `−999`, else it fires daily on unpriced junk), a **delta
+band** (0.05–0.85, drops near-zero + deep-ITM), accumulate the symbol's IN-BAND gross, then flag
+contracts clearing `rel_threshold × gross` AND a `min_contract_notional` absolute floor (so a big
+share of a tiny name isn't noise). Runs in the 1-min GEX `on_chain` callback beside `detect_uoa` (ONE
+`load_thresholds()`, best-effort so it can never break collection), drains in `run_flow_alerts`.
+**Ships QUIET-LIVE** (`[big_delta].push=false`): real alerts land on the **Flow Alerts screen** (its
+own violet/fuchsia hue — unsigned exposure, not bull/bear) but do NOT chime/toast/phone-push; flipping
+`push=true` in `config/flow_alerts.toml` is the one-line go-live (the two suppressions — the
+`send_flow_alert` skip + the `new_flow_alerts` chime exclusion — gate on it). Fully config-driven
+(`[big_delta]` block: enabled/push/rel_threshold/min_contract_notional/delta band/top_n). The **15:30
+instrumentation stays running** as the tuning loop, now reading `[big_delta]` for a "Live config —
+what today's config would fire" line + a big_delta reconciliation vs what the live detector actually
+fired (`cache:options:flow_alerts` type-filtered), candidate ABS/REL exploration tables kept
+(`--rel`/`--abs` overridable). Tuning loop: read the 15:30 report → compare live-config-modelled vs
+actually-fired vs candidates → edit the toml → restart `options_svc` → flip `push=true` when the real
+rate is right. A code review caught one drift — the instrumentation's `gross_by_symbol` summed over
+ALL contracts while the detector's gross is IN-BAND-only, so the live-config line could miss an alert
+the detector fires; fixed to band-filter when given the config (the candidate tables keep the all-rows
+denominator for continuity). Design/plan:
+[design](plans/2026-08-11-big-delta-flow-detector-design.md) /
+[plan](plans/2026-08-11-big-delta-flow-detector.md). options_svc **975**/2-baseline, webgui
+**1216**/0, instrumentation **9**. Built subagent-driven (TDD) + a final holistic review. Commits
+`cd17f56`→`c17457f`.)
+
+Prior — 2026-08-11 (**Recommender lifecycle gate — the paper + driver books had silently
 stopped taking profit at +50%; plus two inert placeholders.** The 2026-08-09 captured-autoclose
 feature reworked the **SHARED** `signal_recommender.recommend()` into a lifecycle: at +50% credit it
 ARMS break-even and returns HOLD instead of the old TAKE_PROFIT/`TARGET_HIT`. That was scoped to
