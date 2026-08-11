@@ -188,6 +188,15 @@ def test_new_flow_alerts():
     assert alerts.new_flow_alerts({"alerts": "nope"}, set()) == ([], set())
 
 
+def test_new_flow_alerts_excludes_big_delta_from_chime():
+    """big_delta is quiet-live: it must never trigger the chime/toast, but its id
+    IS marked seen (so it can't later be "rediscovered" and chime after the fact)."""
+    view = {"alerts": [{"id": "a", "type": "uoa"}, {"id": "b", "type": "big_delta"}]}
+    new, acked = alerts.new_flow_alerts(view, set())
+    assert [a["id"] for a in new] == ["a"]        # only uoa chimes
+    assert acked == {"a", "b"}                    # both marked seen (b never re-considered)
+
+
 # ── Flow alerts: market-hours gate + backlog-replay guard ────────────────────
 _RTH = dt.datetime(2026, 7, 23, 10, 0, tzinfo=CT)      # Thu 10:00 CT
 _AFTER = dt.datetime(2026, 7, 23, 21, 0, tzinfo=CT)    # Thu 21:00 CT

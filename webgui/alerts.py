@@ -199,14 +199,20 @@ def new_flow_alerts(view, acked):
     New = alert dicts whose ``id`` isn't already acked. The updated set carries
     every id present so each alert fires once (fire-on-first-seen). Defensive:
     a bad/None view → ``([], acked)`` unchanged.
+
+    ``big_delta`` is quiet-live: it is excluded from the chime/toast trigger set
+    (the Flow Alerts screen still shows it — this only silences the audible/visual
+    nudge) but its id is still marked seen, so it's considered exactly once.
     """
     lst = (view or {}).get("alerts") if isinstance(view, dict) else None
     lst = lst if isinstance(lst, list) else []
     new, all_ids = [], set(acked)
     for a in lst:
         if isinstance(a, dict) and a.get("id") and a["id"] not in all_ids:
-            new.append(a)
             all_ids.add(a["id"])
+            if a.get("type") == "big_delta":
+                continue          # quiet-live: no chime/toast, still on the screen
+            new.append(a)
     return new, all_ids
 
 
