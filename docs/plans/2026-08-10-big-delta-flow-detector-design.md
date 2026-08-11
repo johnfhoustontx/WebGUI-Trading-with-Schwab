@@ -113,6 +113,35 @@ matching Monday's methodology; the floor is fixed after reading them.**
 
 Ship `min_share` as designed. Treat `min_notional` as the one number expected to move.
 
+## 4a. The measurement is snapshot-biased in both directions
+
+Added 2026-08-10 after the instrumentation was made to reconcile its modelled baseline
+against `cache:options:flow_alerts`. The result changes how every number above should be read.
+
+The live channel that day carried **175 alerts** — 92 crossover, 82 UOA, 1 gamma flip. The
+script's model claimed **119** UOA alerts against an actual **82**, and the disagreement was
+two-sided: 48 matched, **71 modelled that never fired**, **34 fired that the model cannot
+produce**.
+
+The 34 are the informative ones. **All 34** ended the day below the $5M premium floor — median
+closing premium **$0.45M**, and **32 of 34 were 0-DTE marked at $0.01–$0.03**. They were worth
+real money when they alerted and worthless when we measured them.
+
+So the script's founding premise — that a post-close snapshot suffices because volume is
+cumulative — holds only for a **volume-gated** rule. Premium (`mark × volume × 100`) and delta
+notional (`|delta| × volume × 100 × spot`) both depend on quantities that move all day and
+collapse into the close for 0-DTE.
+
+**What this means for the thresholds in §4:** they are calibrated on *closing* delta, which
+understates precisely those contracts that spent the session near the money and decayed. The
+bias is conservative — a live detector would fire on **more** contracts than these numbers
+imply, not fewer — so `min_notional` derived from this data is a **floor on the floor**. Do not
+treat the alerts-per-day figures as predictions of live behaviour; treat them as a lower bound,
+and let the reconciliation block in each run report the drift.
+
+This is also the strongest argument for §11.2: once `big_delta` ships, the detector samples
+every minute and its own output becomes the calibration source, which has none of this bias.
+
 ## 5. The unmeasured risk: the intraday ramp
 
 **The instrumentation measured a single end-of-day snapshot. The detector runs every minute

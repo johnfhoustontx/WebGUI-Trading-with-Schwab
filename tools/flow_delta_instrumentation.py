@@ -17,17 +17,36 @@ The real risk is not that a delta detector wouldn't fire. It is that it fires
 200x/day on SPY and drowns the flow-alert channel that currently works. That is
 what this measures.
 
-WHY A SINGLE POST-CLOSE SNAPSHOT IS SUFFICIENT
-----------------------------------------------
+WHAT A SINGLE POST-CLOSE SNAPSHOT CAN AND CANNOT TELL YOU
+---------------------------------------------------------
 ``totalVolume`` is CUMULATIVE for the session, and the UOA-style dedup fires at
 most once per contract per day (``handlers.run_flow_alerts`` uses the cooldown
-map as a date-scoped seen-set, valid because vol/OI is monotonic). So the number
-of alerts a threshold would have produced today EQUALS the number of contracts
-finishing the day above it — no intraday polling required.
+map as a date-scoped seen-set, valid because vol/OI is monotonic). So for a rule
+gated on VOLUME alone, the number of alerts today equals the number of contracts
+finishing the day above the threshold, and no intraday polling is required.
 
-One bias to keep in mind when reading the output: delta is the CLOSING delta,
-not the delta at the moment the contract crossed the threshold. For calibrating
-an order-of-magnitude threshold that is acceptable; for anything finer it is not.
+That reasoning does NOT extend to any rule gated on price or greeks, and this
+script's own reconciliation proves it. Premium is ``mark x volume x 100`` and
+delta notional is ``|delta| x volume x 100 x spot``; mark and delta both move
+all day and, for 0-DTE, collapse into the close. Measured 2026-08-10: 34 UOA
+alerts genuinely fired that this script's model cannot reproduce, and ALL 34
+ended the day under the $5M premium floor — median closing premium $0.45M,
+32 of them 0-DTE marked at $0.01-$0.03. They were worth real money when they
+alerted and worth nothing by the time we measured.
+
+Consequences, which the reconciliation section quantifies per run:
+
+  * the modelled baseline is approximate in BOTH directions -- it invents
+    alerts that never fired (final-state contracts that only crossed late) and
+    misses alerts that did (contracts that decayed below the floor);
+  * every delta-notional figure here carries the same bias. Closing delta
+    understates 0-DTE contracts that spent the session near the money, so the
+    thresholds this script recommends are calibrated on a conservative view of
+    exactly the contracts most likely to trip them.
+
+Order-of-magnitude calibration survives this. Anything finer needs intraday
+sampling -- which the live detector already does, and which is why the
+reconciliation against ``cache:options:flow_alerts`` is the honest check.
 
 USAGE
 -----
@@ -43,8 +62,12 @@ ad-hoc exploration; do not use it for a report the calibration will consume.
 
 Writes a markdown report + a CSV of qualifying contracts under
 ``options-scanner/data/flow_delta_instrumentation/<date>/``. Needs the proxy up
-(dev borrows prod's on :8100). Read-only: fetches chains, writes report files,
-touches no cache key, no DB, and no live alert path.
+(dev borrows prod's on :8100).
+
+Read-only, but no longer isolated: it READS ``cache:options:flow_alerts`` from
+production's Redis db to reconcile its modelled baseline against the alerts
+that actually fired (``--alerts-db N`` overrides the db). It still writes
+nothing but report files, and touches no live alert path.
 """
 from __future__ import annotations
 
@@ -93,6 +116,21 @@ DELTA_BAND = (0.05, 0.85)
 # to lack a quote. |delta| > 1 is impossible for a vanilla option, so that is the
 # guard; a real detector needs this same check.
 DELTA_MAX = 1.0
+
+# ── Baseline reconciliation ────────────────────────────────────────────────
+# The "baseline" column models the live UOA rule by applying it to every
+# contract. That model is NOT the live detector, and the difference is large:
+# on 2026-08-10 it claimed 119 UOA alerts while the channel actually carried 82.
+# Reconciling against what really fired is what keeps the threshold numbers
+# honest -- and it also supplies the real channel denominator, which is every
+# alert type, not just UOA (that day: 92 crossover + 82 uoa + 1 gamma_flip).
+FLOW_ALERTS_KEY = "cache:options:flow_alerts"
+# PRODUCTION's Redis db, deliberately not repo_paths.MEMURAI_URL. Prod owns the
+# always-on services that publish the channel; run from the dev checkout,
+# MEMURAI_URL resolves to dev's own db (1), which holds no live alerts -- the
+# reconciliation would then report "0 fired" and read as a total detector
+# outage rather than "wrong database". --alerts-db overrides.
+LIVE_ALERTS_DB = 0
 
 # NYSE full-closure holidays 2026–2027, COPIED (not imported) from
 # services/options_svc/scheduler.py. Importing that module would drag `compute`
@@ -210,6 +248,127 @@ def in_band(r):
     return lo <= abs(r["delta"]) <= hi
 
 
+def alert_uoa_id(r):
+    """The id the live handler stamps on a UOA alert for this contract.
+
+    Must stay byte-identical to handlers.run_flow_alerts:
+    ``f"{sym}|uoa|{c['side']}|{c['strike']:g}|{c['expiry']}"`` -- the whole
+    reconciliation is a set comparison on this string."""
+    return f"{r['symbol']}|uoa|{r['side']}|{r['strike']:g}|{r['expiry']}"
+
+
+def read_live_alerts(db=LIVE_ALERTS_DB, port=None):
+    """Today's published flow-alert payload, or None.
+
+    Returns ``(payload, note)``. ``payload`` is None whenever the channel
+    cannot be read or is not today's, with ``note`` saying which -- the report
+    prints that instead of a comparison, because a silent zero here is
+    indistinguishable from a real outage. Never raises: reconciliation is a
+    cross-check, and it must never cost us the measurement."""
+    try:
+        import redis
+    except Exception:
+        return None, "redis client not installed"
+    if port is None:
+        try:
+            from repo_paths import MEMURAI_PORT
+            port = MEMURAI_PORT
+        except Exception:
+            port = 6379
+    try:
+        r = redis.Redis(host="127.0.0.1", port=port, db=db, socket_timeout=5)
+        raw = r.get(FLOW_ALERTS_KEY)
+    except Exception as e:  # noqa: BLE001
+        return None, f"could not reach Redis on :{port} db{db} ({e})"
+    if not raw:
+        return None, f"{FLOW_ALERTS_KEY} is empty in db{db}"
+    try:
+        import json
+        env = json.loads(raw)
+    except Exception:
+        return None, f"{FLOW_ALERTS_KEY} did not decode as JSON"
+    payload = env.get("payload", env) if isinstance(env, dict) else {}
+    if not isinstance(payload, dict):
+        return None, "unexpected payload shape"
+    return payload, f"db{db}"
+
+
+def reconcile(rows, cfg, payload, today, note=""):
+    """Compare the MODELLED UOA baseline against what the channel really fired.
+
+    Pure. ``payload`` is read_live_alerts' dict (or None). Returns a dict the
+    report renders; ``ok`` False means we could not compare and ``note`` says
+    why."""
+    if not payload:
+        return {"ok": False, "note": note or "no live alert payload"}
+    if str(payload.get("date")) != str(today):
+        return {"ok": False,
+                "note": f"published channel is dated {payload.get('date')}, "
+                        f"not {today} -- not comparable"}
+    alerts = payload.get("alerts") or []
+    by_type = {}
+    for a in alerts:
+        t = a.get("type") or "unknown"
+        by_type[t] = by_type.get(t, 0) + 1
+
+    modelled = {alert_uoa_id(r) for r in rows if passes_uoa(r, cfg)}
+    actual = {a.get("id") for a in alerts if a.get("type") == "uoa" and a.get("id")}
+    return {
+        "ok": True, "note": note,
+        "by_type": by_type, "channel_total": len(alerts),
+        "modelled": len(modelled), "actual": len(actual),
+        "matched": len(modelled & actual),
+        "only_modelled": sorted(modelled - actual),
+        "only_actual": sorted(actual - modelled),
+    }
+
+
+def reconciliation_section(rec):
+    """Markdown for the reconciliation block. Pure."""
+    L = ["\n## Baseline reconciliation — modelled vs what actually fired\n"]
+    if not rec.get("ok"):
+        L.append(f"> Not reconciled: {rec.get('note')}. The baseline below is a "
+                 f"MODEL of the live rule, not a record of it.\n")
+        return L
+
+    total = rec["channel_total"]
+    L.append(f"The live channel carried **{total} alerts** today "
+             f"({', '.join(f'{k} {v}' for k, v in sorted(rec['by_type'].items()))}).\n")
+    L.append("\n**That total is the denominator** for 'would a new detector drown the "
+             "channel?' — not the UOA count alone.\n")
+
+    mod, act, mat = rec["modelled"], rec["actual"], rec["matched"]
+    delta = mod - act
+    sign = "over" if delta > 0 else ("under" if delta < 0 else "exactly")
+    L.append(f"\n| | contracts |\n|---|---:|\n")
+    L.append(f"| modelled by this script | {mod} |\n")
+    L.append(f"| actually fired (uoa) | {act} |\n")
+    L.append(f"| matched | {mat} |\n")
+    L.append(f"| modelled but never fired | {len(rec['only_modelled'])} |\n")
+    L.append(f"| fired but not modelled | {len(rec['only_actual'])} |\n")
+    if delta:
+        L.append(f"\nThe model **{sign}counts by {abs(delta)}** "
+                 f"({abs(delta) / act * 100:.0f}% of actual). "
+                 f"Treat every alerts-per-day figure derived from the model as "
+                 f"approximate until this closes.\n")
+    else:
+        L.append("\nThe model matches the channel exactly.\n")
+
+    for label, key in (("Modelled but never fired", "only_modelled"),
+                       ("Fired but not modelled", "only_actual")):
+        ids = rec[key]
+        if ids:
+            L.append(f"\n{label} (first 10 of {len(ids)}):\n\n")
+            for i in ids[:10]:
+                L.append(f"- `{i}`\n")
+    L.append("\nLikely sources of a gap, in order of expected size: the live "
+             "detector returns only `top_n` contracts per symbol per tick; it runs "
+             "only while the collector polls (08:00–15:20 CT) whereas this script "
+             "sees final settled volume; and it depends on the per-tick chain "
+             "stash, so a skipped symbol or a service restart drops alerts.\n")
+    return L
+
+
 def _fmt_money(v):
     if abs(v) >= 1e9:
         return f"${v/1e9:,.2f}B"
@@ -218,7 +377,7 @@ def _fmt_money(v):
     return f"${v/1e3:,.0f}k"
 
 
-def build_report(rows, cfg, symbols, failed, sentinel=0):
+def build_report(rows, cfg, symbols, failed, sentinel=0, rec=None):
     """The markdown report. Pure over the collected rows."""
     L = []
     now = datetime.now(CT)
@@ -246,6 +405,9 @@ def build_report(rows, cfg, symbols, failed, sentinel=0):
             by_sym[r["symbol"]] = by_sym.get(r["symbol"], 0) + 1
         top = sorted(by_sym.items(), key=lambda kv: -kv[1])[:10]
         L.append("\nMost alerts: " + ", ".join(f"{s} {n}" for s, n in top) + "\n")
+
+    if rec is not None:
+        L.extend(reconciliation_section(rec))
 
     # Per-symbol gross delta notional -> the relative thresholds.
     gross = {}
@@ -344,10 +506,24 @@ def main(argv=None):
             print(f"  {sym:<6} {len(got):>5} contracts"
                   + (f"  ({bad} sentinel delta dropped)" if bad else ""))
 
+    # Reconcile the modelled baseline against the channel that actually fired.
+    # Best-effort by construction: a failure here degrades to a "not reconciled"
+    # note in the report and never costs us the measurement we just paid ~91
+    # chain fetches for.
+    db = LIVE_ALERTS_DB
+    if "--alerts-db" in argv:
+        try:
+            db = int(argv[argv.index("--alerts-db") + 1])
+        except (IndexError, ValueError):
+            print("  ! --alerts-db needs an integer; using default")
+    payload, note = read_live_alerts(db)
+    rec = reconcile(rows, cfg, payload, today, note)
+    print(f"Reconciliation: {'ok' if rec.get('ok') else rec.get('note')}")
+
     out_dir = OPTIONS_SCANNER / "data" / "flow_delta_instrumentation" / str(today)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    report = build_report(rows, cfg, symbols, failed, sentinel)
+    report = build_report(rows, cfg, symbols, failed, sentinel, rec)
     (out_dir / "report.md").write_text(report, encoding="utf-8")
 
     # Raw rows for any threshold question the report didn't anticipate.
