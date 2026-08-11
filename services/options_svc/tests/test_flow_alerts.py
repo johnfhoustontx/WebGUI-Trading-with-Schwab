@@ -48,6 +48,19 @@ def test_load_thresholds_caches_by_mtime(tmp_path, monkeypatch):
     assert c["uoa"]["k"] == 7.0 and parses["n"] == 2
 
 
+def test_load_thresholds_has_big_delta_defaults(tmp_path, monkeypatch):
+    # With NO toml, defaults are present and sane.
+    monkeypatch.setattr(flow_alerts, "_TOML_PATH", tmp_path / "missing.toml")
+    flow_alerts.reset_thresholds_cache()
+    cfg = flow_alerts.load_thresholds()
+    bd = cfg["big_delta"]
+    assert bd["enabled"] is True and bd["push"] is False
+    assert bd["rel_threshold"] == 0.20
+    assert bd["min_contract_notional"] == 10_000_000
+    assert bd["delta_lo"] == 0.05 and bd["delta_hi"] == 0.85 and bd["delta_max"] == 1.0
+    assert bd["top_n"] == 3
+
+
 def test_detect_flow_alerts_normalizes_series_once(monkeypatch):
     """The crossover pass normalizes the series exactly ONCE per call."""
     series = [_row(60, 0, 0, 100.0, 200.0), _row(120, 10, 5, 260.0, 200.0)]

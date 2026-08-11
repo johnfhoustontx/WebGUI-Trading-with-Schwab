@@ -17,3 +17,14 @@ enabled = true          # alert when spot crosses the dealer gamma flip level (p
 band_pct = 0.0015       # hysteresis dead-zone: spot must clear the flip by 0.15% to switch regime (anti-chatter)
 cooldown_min = 60       # per-symbol re-fire cooldown
 symbols = ["$SPX", "SPY", "QQQ", "IWM"]   # which names to watch; empty [] = the whole flow universe
+
+[big_delta]
+enabled = true            # run the detector
+push    = false           # QUIET-LIVE: false = Flow screen only (no chime/toast/phone);
+                          #             true = full-live. The one-line go-live change.
+rel_threshold = 0.20      # fire when a contract's delta-notional >= this share of the symbol's OWN gross
+min_contract_notional = 10000000   # AND >= this absolute $ ($10M) — a big share of a tiny name isn't real
+delta_lo = 0.05           # delta band low  — drop near-zero delta (noise)
+delta_hi = 0.85           # delta band high — drop deep-ITM (stock-replacement / assignment)
+delta_max = 1.0           # sentinel guard  — drop |delta| > 1 (Schwab's -999 no-value)
+top_n = 3                 # most-significant contracts per symbol per tick (by delta-notional)

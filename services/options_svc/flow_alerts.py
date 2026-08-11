@@ -22,6 +22,12 @@ _DEFAULTS = {
     # heavily-optioned index/ETF names, noise on illiquid ones.
     "gamma_flip": {"enabled": True, "band_pct": 0.0015, "cooldown_min": 60,
                    "symbols": ["$SPX", "SPY", "QQQ", "IWM"]},
+    # Relative delta-notional flow: a contract carrying >= rel_threshold of its
+    # symbol's OWN gross delta-notional AND >= min_contract_notional absolute.
+    # enabled = whole detector; push = quiet-live gate (screen-only until true).
+    "big_delta": {"enabled": True, "push": False, "rel_threshold": 0.20,
+                  "min_contract_notional": 10_000_000, "delta_lo": 0.05,
+                  "delta_hi": 0.85, "delta_max": 1.0, "top_n": 3},
 }
 
 
