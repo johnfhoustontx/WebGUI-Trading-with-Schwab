@@ -4,7 +4,43 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-08-09 (**Flow Alerts screen — the alerts finally have somewhere to live**:
+**Last updated:** 2026-08-11 (**Gamma heatmap — the $NDX "comb", and Term day separators.**
+The intraday heatmap rendered $NDX as a dense comb of vertical stripes instead of a smooth
+blended field. It was a **rasterization** bug, not data: `interpolation:True` lays the canvas
+out on ONE row height — `_strike_step`, the MEDIAN strike gap — and **$NDX is the only symbol
+in the app with a mixed ladder**, quoting **5-wide near the money among 10-wide** (measured
+live: 28 gaps of 5 among 56 of 10; $SPX is uniformly 5, SPY/QQQ/IWM 1, AMD 2.5). At `rowsize`
+10 the 5-wide strikes collided two-into-one row and the cells between them were never written.
+Two plausible suspects were ruled out with measurements first — the **candle overlay** (hid the
+`columnrange`+`errorbar` groups in the DOM; stripes remained) and **missing snapshots** (the
+source grid is a *perfect* rectangle, 359 columns × 48 strikes, zero nulls, and the Redis
+payload matches `gex_history.db` across all 362 shared minutes). The tell that settled it:
+a strike whose stored values ran perfectly smooth (`−2.56, −2.56, −2.55, −2.55…`) while the
+pixels on that row went **transparent every 8th column** — smooth data under striped pixels can
+only be the rasterizer. Fix = the pure **`gamma.uniform_strike_grid`**: fill the visible ladder
+to its FINEST gap, linearly interpolating inserted rows between their bracketing real strikes
+(inventing nothing the chart wasn't already implying — an interpolated heatmap shades between
+samples regardless), real strikes untouched, a row bracketed by a missing sample left `None` so
+genuine holes stay holes, an already-even ladder returned as the SAME objects (every other
+symbol pays nothing), and a 240-row cap against a pathological chain. Applied to the collected
+cells and the projection band. **Live-verified**: $NDX went from 40 rows on mixed 5/10 spacing
+to a uniform 5.0 ladder of 65 rows and an exact rectangle (23,920 points = 368 × 65), canvas
+362×42 → 370×84, periodic alpha-zero stripes gone. **The Term view was never affected** — its
+axes are CATEGORICAL and points are addressed by row INDEX, so an uneven ladder cannot collide
+rows there (trade-off: its y axis is ordinal, not proportional to price); a test now pins that.
+Term did get **1px hairlines between expiry columns** (`expiry_separators` → xAxis plotLines at
+`i+0.5`, the midpoint between category centres, `rgba(255,255,255,0.22)`, `zIndex` 5): the same
+interpolation blends Term into one continuous field, but its x axis is **days**, so the blending
+actively misleads — it smears one expiration's exposure into the next when nothing varies
+continuously between them. Also on the page: a collapsed **"How to read the 0-DTE close
+projection"** expander rendering the shared `page_help.PROJECTION_HELP_MD` (outline bars /
+Proj. flip / hedge-pressure panel + the flat-spot caveat). It is mounted on the page and not
+only in the nav hover guide because that tooltip is **`pointer-events:none`** and Quasar sizes
+it to the space under its nav item — measured at ~466px of a ~1400px guide, so it clips to
+**33%** with no way to scroll; long-form help parked there alone is unreachable, not merely
+below the fold. webgui **1201** green. Commits `1098e60` + `b8672a8`.)
+
+Prior — 2026-08-09 (**Flow Alerts screen — the alerts finally have somewhere to live**:
 `options_svc` has detected options-flow alerts on every 1-min GEX tick for weeks — premium
 **crossover**, contract-level **unusual activity**, dealer **gamma flip** — pushed each to the phone and
 published a day-scoped list to `cache:options:flow_alerts`. The webgui read that list for exactly one
