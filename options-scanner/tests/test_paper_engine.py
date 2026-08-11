@@ -371,6 +371,33 @@ def test_manage_cycle_passes_per_contract_pnl_to_recommender(tmp_path, monkeypat
     assert captured["entry_credit"] == 0.50
 
 
+def test_manage_cycle_takes_profit_at_50pct_unmocked(tmp_path, monkeypatch):
+    """The manage cycle closes a +50% winner using the REAL recommend() — the
+    manual/driver paper books must TAKE_PROFIT at +50%, not arm-and-hold.
+
+    Regression guard: the captured-autoclose lifecycle rework reworked the SHARED
+    recommend() so +50% returns HOLD for every caller. This cycle passes a minimal
+    (non-lifecycle) ctx, so it must still get TAKE_PROFIT. The other manage tests
+    MOCK recommend(), so they never exercised the real function — this one does
+    NOT mock it. RED before the lifecycle gate, GREEN after."""
+    db = str(tmp_path / "acct.db")
+    pdb.ensure_account(db, 25_000.0, "2026-06-03")
+    # width 1.0, credit 0.50 -> credit_total $50; +50% = +$25 (use $30/contract).
+    pe.run_entry_cycle(None, "2026-06-03", [_sig(width=1.0, entry_credit=0.50)],
+                       _FakeBroker(0.50), db)
+    assert len(pdb.fetch_open_positions(db)) == 1
+    # Reprice to +$30/contract (>=+50% of the $50 credit) with a benign delta (no
+    # delta/time stop) — the ONLY exit rule that can fire is the +50% take-profit.
+    monkeypatch.setattr(pe.signal_repricer, "reprice_swing",
+        lambda trade, client: {"current_value": 0.20, "unrealized_pnl": 30.0,
+            "pnl_pct_of_credit": 60.0, "current_underlying": 500.0,
+            "current_short_delta": -0.10, "error": None})
+    # recommend() is NOT patched — the real lifecycle logic runs.
+    pe.run_manage_cycle(None, "2026-06-03", _FakeBroker(0.20), db)
+    assert pdb.fetch_open_positions(db) == []               # closed at +50%
+    assert pdb.get_account(db)["realized_pnl"] > 0          # took the profit
+
+
 def test_account_snapshot_reports_equity(tmp_path):
     db = str(tmp_path / "acct.db")
     pdb.ensure_account(db, 25_000.0, "2026-06-03")

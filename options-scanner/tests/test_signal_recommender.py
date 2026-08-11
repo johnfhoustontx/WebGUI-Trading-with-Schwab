@@ -15,11 +15,23 @@ def _ctx(credit=1.0, pnl=0.0, short_delta=0.10, dte_remaining=10,
 
 
 def test_arms_at_50pct_does_not_close():
-    # +50% credit no longer takes profit — it arms break-even and HOLDs.
-    r = rec.recommend(_ctx(credit=1.0, pnl=50.0))
+    # LIFECYCLE callers: +50% credit no longer takes profit — it arms break-even
+    # and HOLDs.
+    r = rec.recommend({**_ctx(credit=1.0, pnl=50.0), "lifecycle": True})
     assert r["action"] == "HOLD"
     assert "break-even armed" in r["reason"]
     assert r["code"] != "TARGET_HIT"
+
+
+def test_non_lifecycle_takes_profit_at_50pct():
+    # NON-lifecycle callers (the manual paper + driver manage cycles, which pass a
+    # minimal ctx with no "lifecycle" key) keep the pre-lifecycle behavior: +50%
+    # credit → TAKE_PROFIT / TARGET_HIT. Regression guard — the captured-autoclose
+    # lifecycle rework silently stopped both paper books taking profit at +50%.
+    r = rec.recommend(_ctx(credit=1.0, pnl=60.0))
+    assert r["action"] == "TAKE_PROFIT"
+    assert r["code"] == "TARGET_HIT"
+    assert "50% credit captured" in r["reason"]
 
 
 def test_take_profit_just_under_does_not_trigger():
@@ -28,7 +40,7 @@ def test_take_profit_just_under_does_not_trigger():
 
 
 def test_arms_beyond_threshold_still_holds():
-    r = rec.recommend(_ctx(credit=1.0, pnl=80.0))
+    r = rec.recommend({**_ctx(credit=1.0, pnl=80.0), "lifecycle": True})
     assert r["action"] == "HOLD"
     assert "break-even armed" in r["reason"]
 
@@ -122,9 +134,10 @@ def test_delta_stop_precedes_arming():
 
 
 def test_low_dte_profitable_arms_not_time_stops():
-    # An armed/profitable trade near expiry is NOT time-stopped (time-stop needs
-    # underwater); +50% profit arms break-even and HOLDs.
-    r = rec.recommend(_ctx(credit=1.0, pnl=60.0, dte_remaining=1))
+    # An armed/profitable LIFECYCLE trade near expiry is NOT time-stopped (time-stop
+    # needs underwater); +50% profit arms break-even and HOLDs.
+    r = rec.recommend({**_ctx(credit=1.0, pnl=60.0, dte_remaining=1),
+                       "lifecycle": True})
     assert r["action"] == "HOLD"
     assert "break-even armed" in r["reason"]
 
@@ -149,8 +162,9 @@ def _lctx(**over):
     ``_ctx``-shaped params (short_delta → current_short_delta, etc.) are routed
     through ``_ctx``; the remaining lifecycle keys are set directly."""
     base = _ctx(**{k: v for k, v in over.items() if k in _CTX_KEYS})
-    base.update({"be_armed": False, "be_level": 2.60, "spot": None,
-                 "short_strike": None, "call_short": None, "strategy": "PCS"})
+    base.update({"lifecycle": True, "be_armed": False, "be_level": 2.60,
+                 "spot": None, "short_strike": None, "call_short": None,
+                 "strategy": "PCS"})
     for k, v in over.items():
         if k not in _CTX_KEYS:
             base[k] = v
@@ -384,8 +398,8 @@ def test_auto_close_reason_unknown_or_none():
 
 
 def test_recommend_code_arms_hold_not_target_hit():
-    # +50% no longer emits TARGET_HIT — it arms break-even and stays HOLD.
-    r = rec.recommend(_ctx(credit=1.0, pnl=60.0))
+    # LIFECYCLE: +50% no longer emits TARGET_HIT — it arms break-even, stays HOLD.
+    r = rec.recommend({**_ctx(credit=1.0, pnl=60.0), "lifecycle": True})
     assert r["action"] == "HOLD" and r["code"] == "HOLD"
 
 

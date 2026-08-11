@@ -81,9 +81,14 @@ def recommend(ctx):
       3. Break-even stop (only when ``be_armed``): pnl <= ``be_level`` → CUT/BREAKEVEN_STOP.
       4. Delta-stop (SOFT): a delta drift/ceiling breach → CUT/DELTA_STOP, UNLESS
          ``_recoverable(ctx)`` (defers to HOLD).
-      5. Arming transition: pnl >= TP_FRAC*credit and not yet armed → HOLD
-         ("break-even armed"); the caller persists ``be_armed`` (this REPLACES the
-         old immediate TAKE_PROFIT).
+      5. +50% credit captured and not yet armed: LIFECYCLE callers
+         (``ctx["lifecycle"]`` — captured signals, via ``build_mark``) ARM
+         break-even and HOLD ("break-even armed"), riding to full credit under the
+         break-even stop; the caller persists ``be_armed``. NON-lifecycle callers
+         (the manual-paper + driver manage cycles, via
+         ``paper_engine.run_manage_cycle``) TAKE_PROFIT (``TARGET_HIT``) — the
+         pre-lifecycle behavior, so the captured-autoclose rework never changes how
+         those separate books exit.
       6. HOLD with the score-drift note.
     """
     credit_total = ctx["entry_credit"] * MULTIPLIER
@@ -139,12 +144,21 @@ def recommend(ctx):
                         "code": "HOLD"}
             return {"action": "CUT", "reason": reason, "code": "DELTA_STOP"}
 
-    # Rule 5: arming transition — +50% credit captured, not yet armed → HOLD (the
-    # caller persists be_armed = 1). Replaces the old immediate TAKE_PROFIT.
+    # Rule 5: +50% credit captured, not yet armed. LIFECYCLE callers (captured
+    # signals, via build_mark, which sets ctx["lifecycle"]) ARM break-even and HOLD,
+    # riding the trade to full credit under the break-even stop. NON-lifecycle
+    # callers — the manual paper account AND the driver's isolated account, both via
+    # paper_engine.run_manage_cycle with a minimal ctx — keep the pre-lifecycle
+    # TAKE_PROFIT: the captured-autoclose rework is scoped to captured signals and
+    # must not change how those separate books exit (they have their own managers).
     if pnl >= TP_FRAC * credit_total and not ctx.get("be_armed"):
-        return {"action": "HOLD",
-                "reason": f">={int(TP_FRAC*100)}% credit captured — break-even armed",
-                "code": "HOLD"}
+        if ctx.get("lifecycle"):
+            return {"action": "HOLD",
+                    "reason": f">={int(TP_FRAC*100)}% credit captured — break-even armed",
+                    "code": "HOLD"}
+        return {"action": "TAKE_PROFIT",
+                "reason": f">={int(TP_FRAC*100)}% credit captured",
+                "code": "TARGET_HIT"}
 
     # Rule 6: default HOLD with score-drift note when available
     es = ctx.get("entry_score")
@@ -265,6 +279,10 @@ def build_mark(signal_row, repricer_result, now, iv_data=None, technicals=None,
         "current_score": cur_score,
         "entry_score": entry_score,
         # Lifecycle inputs (threaded from the row + reprice + caller's be_level).
+        # build_mark is the captured-signal path, so it opts INTO the lifecycle:
+        # +50% arms break-even (HOLD) rather than the non-lifecycle TAKE_PROFIT that
+        # the manual-paper / driver manage cycles keep.
+        "lifecycle": True,
         "be_armed": bool(signal_row.get("be_armed")),
         "be_level": be_level,
         "spot": repricer_result.get("current_underlying"),
