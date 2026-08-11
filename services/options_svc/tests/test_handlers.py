@@ -1893,6 +1893,102 @@ def test_run_flow_alerts_uoa_carries_a_timestamp(monkeypatch):
     assert uoa and uoa[0]["ts"] == 1754750000
 
 
+# --- Task 4: big_delta drain + quiet-live push gate ---
+
+_BD_CONTRACT = {"type": "big_delta", "side": "call", "symbol": "SPY", "strike": 100.0,
+                "expiry": "2026-08-14", "dte": 3, "delta": 0.5, "volume": 5000,
+                "delta_notional": 3.1e8, "pct_of_gross": 0.24}
+
+
+def test_run_flow_alerts_big_delta_screen_only_when_push_false(monkeypatch):
+    """big_delta always lands on the Flow screen; push=false (the config default)
+    means it must NOT reach push_notify.send_flow_alert -- quiet-live."""
+    from shared.bus import Bus
+    from services.options_svc import handlers, compute
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers, "_flow_alert_symbols", lambda: ["SPY"])
+    monkeypatch.setattr(handlers, "_load_flow_series_for", lambda conn, sym, limit: [])
+    monkeypatch.setattr(compute, "take_uoa_stash", lambda: {})
+    monkeypatch.setattr(compute, "take_big_delta_stash", lambda: {"SPY": [dict(_BD_CONTRACT)]})
+    monkeypatch.setattr(handlers, "_flow_now_ts", lambda: 1000)
+    sent = []
+    monkeypatch.setattr(handlers.push_notify, "send_flow_alert", lambda a, **k: sent.append(a))
+    handlers.run_flow_alerts(bus)
+    alerts = bus.cache_get("cache:options:flow_alerts").payload["alerts"]
+    assert any(a["type"] == "big_delta" for a in alerts)          # on the screen
+    assert not any(a.get("type") == "big_delta" for a in sent)    # NOT phone-pushed
+
+
+def test_run_flow_alerts_big_delta_pushed_when_push_true(monkeypatch):
+    """Flipping [big_delta].push -> true removes the push suppression, no code change."""
+    from shared.bus import Bus
+    from services.options_svc import handlers, compute
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers, "_flow_alert_symbols", lambda: ["SPY"])
+    monkeypatch.setattr(handlers, "_load_flow_series_for", lambda conn, sym, limit: [])
+    monkeypatch.setattr(compute, "take_uoa_stash", lambda: {})
+    monkeypatch.setattr(compute, "take_big_delta_stash", lambda: {"SPY": [dict(_BD_CONTRACT)]})
+    monkeypatch.setattr(handlers, "_flow_now_ts", lambda: 1000)
+    real_cfg = handlers.flow_alerts.load_thresholds()
+    push_cfg = {**real_cfg, "big_delta": {**real_cfg["big_delta"], "push": True}}
+    monkeypatch.setattr(handlers.flow_alerts, "load_thresholds", lambda: push_cfg)
+    sent = []
+    monkeypatch.setattr(handlers.push_notify, "send_flow_alert", lambda a, **k: sent.append(a))
+    handlers.run_flow_alerts(bus)
+    assert any(a.get("type") == "big_delta" for a in sent)
+
+
+def test_run_flow_alerts_big_delta_id_format_ts_and_dedup(monkeypatch):
+    """Once-per-contract-per-day, like UOA: the SAME cooldown seen-set gates a
+    repeat next tick, and the alert carries the stamped id/ts/text."""
+    from shared.bus import Bus
+    from services.options_svc import handlers, compute
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers, "_flow_alert_symbols", lambda: ["SPY"])
+    monkeypatch.setattr(handlers, "_load_flow_series_for", lambda conn, sym, limit: [])
+    monkeypatch.setattr(compute, "take_uoa_stash", lambda: {})
+    monkeypatch.setattr(compute, "take_big_delta_stash", lambda: {"SPY": [dict(_BD_CONTRACT)]})
+    monkeypatch.setattr(handlers, "_flow_now_ts", lambda: 1754750000)
+    sent = []
+    monkeypatch.setattr(handlers.push_notify, "send_flow_alert", lambda a, **k: sent.append(a))
+
+    handlers.run_flow_alerts(bus)
+
+    alerts = bus.cache_get("cache:options:flow_alerts").payload["alerts"]
+    bd = [a for a in alerts if a["type"] == "big_delta"]
+    assert [a["id"] for a in bd] == ["SPY|big_delta|call|100|2026-08-14"]
+    assert bd[0]["ts"] == 1754750000 and bd[0]["text"]
+
+    # Same contract next tick -> once-per-day dedup, no re-push/re-append.
+    monkeypatch.setattr(compute, "take_big_delta_stash", lambda: {"SPY": [dict(_BD_CONTRACT)]})
+    handlers.run_flow_alerts(bus)
+    alerts2 = bus.cache_get("cache:options:flow_alerts").payload["alerts"]
+    bd2 = [a for a in alerts2 if a["type"] == "big_delta"]
+    assert len(bd2) == 1 and len(sent) == 0   # push=false default -> never pushed either tick
+
+
+def test_run_flow_alerts_big_delta_excludes_vix(monkeypatch):
+    """Shares the crossover/UOA universe (excludes $VIX)."""
+    from shared.bus import Bus
+    from services.options_svc import handlers, compute
+    bus = Bus(fake=True)
+
+    def bd(sym, strike):
+        return {**_BD_CONTRACT, "symbol": sym, "strike": strike}
+
+    monkeypatch.setattr(handlers, "_flow_alert_symbols", lambda: ["SPY"])   # $VIX excluded
+    monkeypatch.setattr(handlers, "_load_flow_series_for", lambda conn, sym, limit: [])
+    monkeypatch.setattr(compute, "take_uoa_stash", lambda: {})
+    monkeypatch.setattr(compute, "take_big_delta_stash",
+                        lambda: {"SPY": [bd("SPY", 100.0)], "$VIX": [bd("$VIX", 20.0)]})
+    monkeypatch.setattr(handlers, "_flow_now_ts", lambda: 1000)
+    monkeypatch.setattr(handlers.push_notify, "send_flow_alert", lambda a, **k: None)
+    handlers.run_flow_alerts(bus)
+    ids = [a["id"] for a in bus.cache_get("cache:options:flow_alerts").payload["alerts"]]
+    assert any(i.startswith("SPY|big_delta") for i in ids)
+    assert all("$VIX" not in i for i in ids)
+
+
 def test_publish_matrix_caches_view(monkeypatch):
     """publish_matrix calls compute.build_matrix and caches/publishes the result
     under cache:options:matrix (skip_unchanged, so an unchanged matrix is silent)."""

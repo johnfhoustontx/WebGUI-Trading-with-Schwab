@@ -1136,8 +1136,30 @@ def run_flow_alerts(bus) -> None:
                 a["text"] = flow_alerts.alert_text(a)
                 fresh.append(a)
 
+        # Contract-level big_delta (relative delta-notional) — same stash pattern,
+        # same shared cooldown seen-set (once per contract per day) as UOA above.
+        for sym, contracts in compute.take_big_delta_stash().items():
+            if sym not in allowed:      # same universe as crossover/UOA (excludes $VIX)
+                continue
+            for c in contracts:
+                cid = f"{sym}|big_delta|{c['side']}|{c['strike']:g}|{c['expiry']}"
+                if cid in cooldowns:
+                    continue
+                cooldowns[cid] = now_ts
+                a = dict(c)
+                a["id"] = cid
+                a["ts"] = now_ts
+                a["text"] = flow_alerts.alert_text(a)
+                fresh.append(a)
+
         if fresh:
+            # Quiet-live: big_delta always lands on the screen (below), but is
+            # phone-pushed only once [big_delta].push is flipped true — the
+            # documented go-live switch. Every other alert type is unaffected.
+            push_big_delta = bool(cfg.get("big_delta", {}).get("push", False))
             for a in fresh:
+                if a.get("type") == "big_delta" and not push_big_delta:
+                    continue
                 try:
                     push_notify.send_flow_alert(a, config=push_cfg)
                 except Exception:
