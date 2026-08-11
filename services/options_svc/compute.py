@@ -1863,6 +1863,28 @@ def take_uoa_stash() -> dict:
     return out
 
 
+# Same pattern as _UOA_STASH, for the big_delta (relative delta-notional) detector —
+# also computed during the poll's on_chain hook and consumed once by
+# handlers.run_flow_alerts on the same tick.
+_BIG_DELTA_STASH: dict = {}   # {symbol: [big_delta contract dicts]} for the current tick
+
+
+def clear_big_delta_stash():
+    _BIG_DELTA_STASH.clear()
+
+
+def stash_big_delta(symbol, contracts):
+    if contracts:
+        _BIG_DELTA_STASH[symbol] = contracts
+
+
+def take_big_delta_stash() -> dict:
+    """Return + clear the tick's big_delta results (consumed once by run_flow_alerts)."""
+    out = dict(_BIG_DELTA_STASH)
+    _BIG_DELTA_STASH.clear()
+    return out
+
+
 def _rth_bounds(session_date):
     """(start_ts, end_ts) unix seconds bounding RTH on ``session_date`` in CT.
 
@@ -2206,15 +2228,20 @@ def collect_gex_snapshots(capture_symbols=None) -> int:
         # Once-per-day retention at collection start (keeps growth bounded).
         _maybe_purge_gex(gh, conn)
         gc.log.info("Polling GEX history (options_svc)")
-        # Contract-level UOA rides the poll's on_chain hook (reusing each fetched
-        # chain — no re-fetch); results are stashed per symbol and consumed once by
-        # run_flow_alerts. flow_alerts is PURE (stdlib + repo_paths), imported lazily.
+        # Contract-level UOA + big_delta both ride the poll's on_chain hook (reusing
+        # each fetched chain — no re-fetch); results are stashed per symbol and
+        # consumed once by run_flow_alerts. flow_alerts is PURE (stdlib + repo_paths),
+        # imported lazily. ONE load_thresholds() call serves both detectors.
         from services.options_svc import flow_alerts
         clear_uoa_stash()
+        clear_big_delta_stash()
         _uoa_cfg = flow_alerts.load_thresholds()
         # Kill-switch: when the feature is disabled, skip the per-symbol UOA compute
         # entirely (nothing computed/published). The chain-capture stash stays on.
         _uoa_on = _uoa_cfg.get("enabled", True)
+        # big_delta has its OWN enabled flag (independent of the top-level UOA
+        # switch above) — the whole detector is inert when [big_delta].enabled=false.
+        _big_delta_on = _uoa_cfg.get("big_delta", {}).get("enabled", True)
         wanted = set(capture_symbols) if capture_symbols else set()
 
         def on_chain(sym, chain):  # noqa: F811 — the callback poll_once calls
@@ -2226,6 +2253,12 @@ def collect_gex_snapshots(capture_symbols=None) -> int:
                     stash_uoa(sym, flow_alerts.detect_uoa(sym, chain, _uoa_cfg))
                 except Exception:
                     gc.log.debug("UOA detect failed for %s", sym, exc_info=True)
+            if _big_delta_on:
+                # Best-effort — a big_delta detect failure must NEVER break collection.
+                try:
+                    stash_big_delta(sym, flow_alerts.detect_big_delta(sym, chain, _uoa_cfg))
+                except Exception:
+                    gc.log.debug("big_delta detect failed for %s", sym, exc_info=True)
 
         gc.poll_once(_proxy.schwab_py_client, gt.GammaEngine(), conn,
                      on_chain=on_chain)

@@ -2914,6 +2914,14 @@ def _fake_gex_modules(monkeypatch, *, lock_ok=True):
     return calls
 
 
+def test_big_delta_stash_roundtrips_and_clears():
+    compute.clear_big_delta_stash()
+    compute.stash_big_delta("SPY", [{"type": "big_delta", "strike": 100}])
+    got = compute.take_big_delta_stash()
+    assert got == {"SPY": [{"type": "big_delta", "strike": 100}]}
+    assert compute.take_big_delta_stash() == {}   # take clears
+
+
 def test_collect_gex_snapshots_polls_with_proxy_client(monkeypatch):
     calls = _fake_gex_modules(monkeypatch, lock_ok=True)
     n = compute.collect_gex_snapshots()
