@@ -17,6 +17,13 @@ _GF = {"type": "gamma_flip", "side": "to_negative", "symbol": "$SPX", "spot": 64
        "flip": 6400.0, "ts": 1754750400,
        "id": "$SPX|gamma_flip|to_negative|1754750400", "text": "$SPX — gamma flipped NEGATIVE"}
 _VIEW = {"date": "2026-08-09", "alerts": [_XO, _UOA, _GF]}
+# Kept OUT of _VIEW deliberately -- several tests above hardcode _VIEW's exact
+# symbol/count/order, and folding a 4th alert type in would force unrelated
+# edits across all of them for no benefit (big_delta gets its own tests below).
+_BD = {"type": "big_delta", "side": "call", "symbol": "SPY", "strike": 100.0,
+       "expiry": "2026-08-14", "dte": 3, "delta": 0.5, "volume": 5000,
+       "delta_notional": 312_000_000.0, "pct_of_gross": 0.24, "ts": 1754750500,
+       "id": "SPY|big_delta|call|100|2026-08-14", "text": "SPY big Δ: $312.00M"}
 
 
 # ── rows, labels, detail ─────────────────────────────────────────────────────
@@ -80,6 +87,7 @@ def test_detail_is_total_over_missing_fields():
     assert flow.alert_detail({"type": "uoa"}) == ""
     assert flow.alert_detail({"type": "crossover"}) == ""
     assert flow.alert_detail({"type": "gamma_flip"}) == ""
+    assert flow.alert_detail({"type": "big_delta"}) == ""
     assert flow.alert_detail(None) == ""
     assert flow.alert_detail({"type": "who_knows"}) == ""
 
@@ -96,6 +104,40 @@ def test_tone_class_maps_direction_to_a_fixed_palette_class():
     assert "rose" in flow.tone_class(_GF)
     assert flow.tone_class({}) == flow._TONE_NEUTRAL
     assert flow.tone_class(None) == flow._TONE_NEUTRAL
+
+
+# ── Task 6: big_delta on the Flow Alerts screen ──────────────────────────────
+def test_kind_filter_includes_big_delta():
+    """The Type multiselect is built off _KIND_LABEL -- big_delta must be a member
+    so the screen can filter on it (and shows a real word, not the generic 'Flow'
+    fallback that untyped rows get)."""
+    assert "big_delta" in flow._KIND_LABEL
+    assert flow.alert_kind_label(_BD) not in ("", "Flow")
+
+
+def test_tone_class_big_delta_is_a_distinct_hue():
+    """big_delta isn't bullish/bearish call-vs-put like UOA/crossover -- it gets
+    its own hue, distinct from both the pos/neg palette and the neutral fallback."""
+    call_cls = flow.tone_class(_BD)
+    put_cls = flow.tone_class({**_BD, "side": "put"})
+    assert call_cls != flow._TONE_NEUTRAL and put_cls != flow._TONE_NEUTRAL
+    assert call_cls != put_cls
+    assert "emerald" not in call_cls and "rose" not in call_cls
+    assert "emerald" not in put_cls and "rose" not in put_cls
+
+
+def test_detail_big_delta_shows_notional_and_pct_of_gross():
+    d = flow.alert_detail(_BD)
+    assert "of gross" in d and "24%" in d
+    assert "100" in d and "C" in d
+
+
+def test_alert_rows_build_end_to_end_for_big_delta():
+    row = flow.alert_rows({"alerts": [_BD]})[0]
+    assert row["_kind_key"] == "big_delta"
+    assert row["symbol"] == "SPY"
+    assert "of gross" in row["detail"]
+    assert row["_tone_class"] != flow._TONE_NEUTRAL
 
 
 # ── time + age ───────────────────────────────────────────────────────────────

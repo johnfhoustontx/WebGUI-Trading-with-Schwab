@@ -20,7 +20,7 @@ VIEW = "options:flow_alerts"
 _CT_TZ = ZoneInfo("America/Chicago")
 
 _KIND_LABEL = {"crossover": "Crossover", "uoa": "Unusual activity",
-               "gamma_flip": "Gamma flip"}
+               "gamma_flip": "Gamma flip", "big_delta": "Big delta"}
 _SIDE_LABEL = {"calls_over": "Calls over", "puts_over": "Puts over",
                "call": "Call", "put": "Put",
                "to_positive": "To positive", "to_negative": "To negative"}
@@ -30,6 +30,10 @@ _SIDE_LABEL = {"calls_over": "Calls over", "puts_over": "Puts over",
 _TONE_POS = "text-emerald-400"
 _TONE_NEG = "text-rose-400"
 _TONE_NEUTRAL = "text-slate-300"
+# big_delta measures exposure changing hands, not a bullish/bearish claim (option
+# volume is unsigned) — it gets its own hue rather than reusing pos/neg.
+_TONE_BIG_DELTA_CALL = "text-violet-400"
+_TONE_BIG_DELTA_PUT = "text-fuchsia-400"
 _TONE = {
     ("crossover", "calls_over"): _TONE_POS,
     ("crossover", "puts_over"): _TONE_NEG,
@@ -40,6 +44,8 @@ _TONE = {
     # but the same two colors carry it.
     ("gamma_flip", "to_positive"): _TONE_POS,
     ("gamma_flip", "to_negative"): _TONE_NEG,
+    ("big_delta", "call"): _TONE_BIG_DELTA_CALL,
+    ("big_delta", "put"): _TONE_BIG_DELTA_PUT,
 }
 
 # Colored cells bind the stamped ``_tone_class`` field via :class (Tailwind-first
@@ -110,6 +116,14 @@ def alert_detail(a):
             if spot is None or flip is None:
                 return ""
             return f"spot {float(spot):g} vs flip {float(flip):g}"
+        if t == "big_delta":
+            if d.get("strike") is None or d.get("delta_notional") is None:
+                return ""
+            cp = "C" if d.get("side") == "call" else "P"
+            pct = d.get("pct_of_gross")
+            pct_txt = f"{float(pct):.0%}" if isinstance(pct, (int, float)) else "—"
+            return (f"{_exp_short(d.get('expiry'), d.get('dte'))} {float(d['strike']):g}{cp} · "
+                    f"{_money(d.get('delta_notional'))} · {pct_txt} of gross")
     except (TypeError, ValueError):
         return ""
     return ""
