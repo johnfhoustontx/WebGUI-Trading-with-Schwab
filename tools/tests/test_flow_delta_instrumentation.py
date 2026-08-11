@@ -47,10 +47,28 @@ def test_live_config_selection_applies_big_delta_cfg():
     ])
     live = {a["strike"] for a in flow_alerts.detect_big_delta("SPY", ch, _CFG)}
     rows, dropped = instr.contracts_from("SPY", ch)
-    gross = instr.gross_by_symbol(rows)
+    gross = instr.gross_by_symbol(rows, _CFG)
     modelled = {r["strike"] for r in rows if instr.passes_big_delta(r, gross, _CFG)}
     assert live == modelled
     assert live == {100.0, 90.0}   # non-vacuous -- proves the equality means something
+
+
+def test_live_config_gross_excludes_out_of_band_contracts():
+    """The live-config gross DENOMINATOR must exclude out-of-band contracts exactly
+    like detect_big_delta — a large near-zero-delta contract must NOT inflate gross
+    and suppress a real in-band alert. The all-in-band fixture above can't catch
+    this; it was the drift the code review found (gross summed over ALL rows)."""
+    ch = _chain(100.0, [
+        ("call", 100, "2026-08-14", 3, 0.5, 15_000),      # in band, $75M -> the symbol's only real flow
+        ("call", 120, "2026-08-14", 3, 0.02, 5_000_000),  # OUT of band, $1B -> must NOT count toward gross
+    ])
+    live = {a["strike"] for a in flow_alerts.detect_big_delta("SPY", ch, _CFG)}
+    rows, _ = instr.contracts_from("SPY", ch)
+    gross = instr.gross_by_symbol(rows, _CFG)
+    modelled = {r["strike"] for r in rows if instr.passes_big_delta(r, gross, _CFG)}
+    # With the inflated all-rows gross ($1.075B) the $75M contract wouldn't clear
+    # 20% ($215M) and modelled would be empty; band-filtered gross ($75M) fires it.
+    assert live == modelled == {100.0}
 
 
 def test_gross_by_symbol_sums_delta_notional_per_symbol():

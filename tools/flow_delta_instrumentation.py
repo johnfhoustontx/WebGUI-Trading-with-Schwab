@@ -378,12 +378,25 @@ def reconciliation_section(rec):
 # ABS/REL exploration tables below keep the fixed constants on purpose (they are
 # for previewing a DIFFERENT threshold, not modelling the current one).
 
-def gross_by_symbol(rows):
-    """{symbol: summed delta_notional}. Pure; the same accumulation detect_big_delta
-    does per-symbol, generalized across every collected symbol at once."""
+def gross_by_symbol(rows, cfg=None):
+    """{symbol: summed delta_notional}.
+
+    With ``cfg`` (the LIVE-CONFIG path), sums only contracts INSIDE the
+    ``[delta_lo, delta_hi]`` band — matching ``flow_alerts.detect_big_delta``'s gross
+    accumulation EXACTLY (its band ``continue`` runs before ``gross += dn``), so a
+    large out-of-band contract (a near-zero-delta lottery ticket or a deep-ITM
+    stock-replacement) can't inflate the denominator and suppress a real in-band
+    alert. WITHOUT ``cfg`` (the candidate ABS/REL exploration tables), sums ALL rows
+    — those tables preview a *different* threshold over the whole measured set and
+    keep that all-rows denominator for continuity, so they are approximate vs the
+    live detector; the 'Live config' line (which passes ``cfg``) is the faithful one."""
+    if cfg is not None:
+        b = (cfg or {}).get("big_delta", {})
+        lo, hi = b.get("delta_lo", 0.05), b.get("delta_hi", 0.85)
+        rows = [r for r in rows if lo <= abs(r.get("delta") or 0.0) <= hi]
     gross = {}
     for r in rows:
-        gross[r["symbol"]] = gross.get(r["symbol"], 0.0) + r["delta_notional"]
+        gross[r["symbol"]] = gross.get(r["symbol"], 0.0) + (r.get("delta_notional") or 0.0)
     return gross
 
 
@@ -434,7 +447,7 @@ def reconcile_big_delta(rows, cfg, payload, today, note=""):
                 "note": f"published channel is dated {payload.get('date')}, "
                         f"not {today} -- not comparable"}
     alerts = payload.get("alerts") or []
-    gross = gross_by_symbol(rows)
+    gross = gross_by_symbol(rows, cfg)   # band-filtered → matches detect_big_delta
     modelled = {alert_big_delta_id(r) for r in rows if passes_big_delta(r, gross, cfg)}
     actual = live_big_delta_ids(alerts)
     return {
@@ -449,7 +462,7 @@ def reconcile_big_delta(rows, cfg, payload, today, note=""):
 def live_config_section(rows, cfg):
     """Markdown: what [big_delta] AS CURRENTLY CONFIGURED would fire today."""
     b = (cfg or {}).get("big_delta", {})
-    gross = gross_by_symbol(rows)
+    gross = gross_by_symbol(rows, cfg)   # band-filtered → matches detect_big_delta
     fired = [r for r in rows if passes_big_delta(r, gross, cfg)]
     L = ["\n## Live config — what `[big_delta]` would fire today\n"]
     L.append(f"`[big_delta]` as configured (rel_threshold="
