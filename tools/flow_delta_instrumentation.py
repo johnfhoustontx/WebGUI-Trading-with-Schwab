@@ -71,6 +71,7 @@ nothing but report files, and touches no live alert path.
 """
 from __future__ import annotations
 
+import argparse
 import csv
 import pathlib
 import sys
@@ -369,6 +370,142 @@ def reconciliation_section(rec):
     return L
 
 
+# ── big_delta: live-config selection + reconciliation ───────────────────────
+# Unlike the UOA baseline above (which hardcodes the rule DELTA_BAND/DELTA_MAX
+# candidate constants), this section reads the band + delta_max from the LIVE
+# [big_delta] config -- so it models exactly what today's toml would fire, and
+# can never silently drift from flow_alerts.detect_big_delta. The candidate
+# ABS/REL exploration tables below keep the fixed constants on purpose (they are
+# for previewing a DIFFERENT threshold, not modelling the current one).
+
+def gross_by_symbol(rows):
+    """{symbol: summed delta_notional}. Pure; the same accumulation detect_big_delta
+    does per-symbol, generalized across every collected symbol at once."""
+    gross = {}
+    for r in rows:
+        gross[r["symbol"]] = gross.get(r["symbol"], 0.0) + r["delta_notional"]
+    return gross
+
+
+def passes_big_delta(r, gross, cfg):
+    """The big_delta rule AS [big_delta] IS CURRENTLY CONFIGURED -- mirrors
+    flow_alerts.detect_big_delta's per-contract filter exactly, over a row already
+    built by contracts_from() (which already dropped the |delta| > 1 sentinel).
+    ``gross`` is this row's symbol's summed delta notional (see gross_by_symbol)."""
+    b = (cfg or {}).get("big_delta", {})
+    lo = b.get("delta_lo", 0.05)
+    hi = b.get("delta_hi", 0.85)
+    dmax = b.get("delta_max", 1.0)
+    ad = abs(r.get("delta") or 0.0)
+    if ad > dmax or ad < lo or ad > hi:
+        return False
+    g = gross.get(r["symbol"], 0.0)
+    if g <= 0:
+        return False
+    dn = r.get("delta_notional") or 0.0
+    if dn < b.get("rel_threshold", 0.20) * g:
+        return False
+    return dn >= b.get("min_contract_notional", 10_000_000)
+
+
+def alert_big_delta_id(r):
+    """The id the live handler stamps on a big_delta alert for this contract.
+
+    Must stay byte-identical to handlers.run_flow_alerts:
+    ``f"{sym}|big_delta|{c['side']}|{c['strike']:g}|{c['expiry']}"`` -- the whole
+    reconciliation is a set comparison on this string (mirrors alert_uoa_id)."""
+    return f"{r['symbol']}|big_delta|{r['side']}|{r['strike']:g}|{r['expiry']}"
+
+
+def live_big_delta_ids(alerts):
+    """Ids of type=='big_delta' from a live cache:options:flow_alerts alerts list."""
+    return {a.get("id") for a in (alerts or [])
+            if isinstance(a, dict) and a.get("type") == "big_delta" and a.get("id")}
+
+
+def reconcile_big_delta(rows, cfg, payload, today, note=""):
+    """Compare the LIVE-CONFIG-modelled big_delta selection against what the
+    channel really fired today. Pure; mirrors reconcile() above. ``ok`` False
+    means we could not compare and ``note`` says why."""
+    if not payload:
+        return {"ok": False, "note": note or "no live alert payload"}
+    if str(payload.get("date")) != str(today):
+        return {"ok": False,
+                "note": f"published channel is dated {payload.get('date')}, "
+                        f"not {today} -- not comparable"}
+    alerts = payload.get("alerts") or []
+    gross = gross_by_symbol(rows)
+    modelled = {alert_big_delta_id(r) for r in rows if passes_big_delta(r, gross, cfg)}
+    actual = live_big_delta_ids(alerts)
+    return {
+        "ok": True, "note": note,
+        "modelled": len(modelled), "actual": len(actual),
+        "matched": len(modelled & actual),
+        "only_modelled": sorted(modelled - actual),
+        "only_actual": sorted(actual - modelled),
+    }
+
+
+def live_config_section(rows, cfg):
+    """Markdown: what [big_delta] AS CURRENTLY CONFIGURED would fire today."""
+    b = (cfg or {}).get("big_delta", {})
+    gross = gross_by_symbol(rows)
+    fired = [r for r in rows if passes_big_delta(r, gross, cfg)]
+    L = ["\n## Live config — what `[big_delta]` would fire today\n"]
+    L.append(f"`[big_delta]` as configured (rel_threshold="
+             f"{b.get('rel_threshold', 0.20):.0%}, min_contract_notional="
+             f"{_fmt_money(b.get('min_contract_notional', 10_000_000))}, band "
+             f"{b.get('delta_lo', 0.05):.0%}–{b.get('delta_hi', 0.85):.0%}): "
+             f"**{len(fired)} alerts** across **{len({r['symbol'] for r in fired})}** "
+             f"symbols.\n")
+    if fired:
+        by_sym = {}
+        for r in fired:
+            by_sym[r["symbol"]] = by_sym.get(r["symbol"], 0) + 1
+        top = sorted(by_sym.items(), key=lambda kv: -kv[1])[:10]
+        L.append("\nMost alerts: " + ", ".join(f"{s} {n}" for s, n in top) + "\n")
+    L.append("\n> This is a MODEL of the rule applied to the day's closing snapshot, "
+             "not a record of the live detector's intraday fires -- the same "
+             "closing-delta caveat from the UOA baseline applies. See the "
+             "reconciliation directly below for the honest check.\n")
+    return "".join(L)
+
+
+def big_delta_reconciliation_section(rec):
+    """Markdown for the big_delta reconciliation block. Mirrors reconciliation_section."""
+    L = ["\n## big_delta reconciliation — modelled vs what actually fired\n"]
+    if not rec.get("ok"):
+        L.append(f"> Not reconciled: {rec.get('note')}. The live-config section above "
+                 f"is a MODEL of the rule, not a record of it.\n")
+        return "".join(L)
+    mod, act, mat = rec["modelled"], rec["actual"], rec["matched"]
+    delta = mod - act
+    sign = "over" if delta > 0 else ("under" if delta < 0 else "exactly")
+    L.append(f"\n| | contracts |\n|---|---:|\n")
+    L.append(f"| modelled by [big_delta] as configured | {mod} |\n")
+    L.append(f"| actually fired (big_delta) | {act} |\n")
+    L.append(f"| matched | {mat} |\n")
+    L.append(f"| modelled but never fired | {len(rec['only_modelled'])} |\n")
+    L.append(f"| fired but not modelled | {len(rec['only_actual'])} |\n")
+    if delta and act:
+        L.append(f"\nThe model **{sign}counts by {abs(delta)}** "
+                 f"({abs(delta) / act * 100:.0f}% of actual).\n")
+    elif not act and mod:
+        L.append(f"\nThe model claims {mod} but the channel fired **0** — the "
+                 f"detector is likely disabled, not yet restarted with this "
+                 f"config, or the day is genuinely quiet.\n")
+    else:
+        L.append("\nThe model matches the channel exactly.\n")
+    for label, key in (("Modelled but never fired", "only_modelled"),
+                       ("Fired but not modelled", "only_actual")):
+        ids = rec[key]
+        if ids:
+            L.append(f"\n{label} (first 10 of {len(ids)}):\n\n")
+            for i in ids[:10]:
+                L.append(f"- `{i}`\n")
+    return "".join(L)
+
+
 def _fmt_money(v):
     if abs(v) >= 1e9:
         return f"${v/1e9:,.2f}B"
@@ -377,8 +514,16 @@ def _fmt_money(v):
     return f"${v/1e3:,.0f}k"
 
 
-def build_report(rows, cfg, symbols, failed, sentinel=0, rec=None):
-    """The markdown report. Pure over the collected rows."""
+def build_report(rows, cfg, symbols, failed, sentinel=0, rec=None,
+                  big_delta_rec=None, rel_thresholds=None, abs_thresholds=None):
+    """The markdown report. Pure over the collected rows.
+
+    ``rel_thresholds``/``abs_thresholds`` override the module's candidate
+    exploration lists (``--rel``/``--abs`` on the CLI); ``None`` keeps the
+    defaults. ``big_delta_rec`` is reconcile_big_delta()'s result, or None to
+    skip that section (mirrors ``rec`` for the UOA reconciliation)."""
+    rel_thresholds = REL_THRESHOLDS if rel_thresholds is None else rel_thresholds
+    abs_thresholds = ABS_THRESHOLDS if abs_thresholds is None else abs_thresholds
     L = []
     now = datetime.now(CT)
     L.append(f"# Delta-notional flow-alert instrumentation — {now:%Y-%m-%d %H:%M} CT\n")
@@ -409,17 +554,19 @@ def build_report(rows, cfg, symbols, failed, sentinel=0, rec=None):
     if rec is not None:
         L.extend(reconciliation_section(rec))
 
+    L.append(live_config_section(rows, cfg))
+    if big_delta_rec is not None:
+        L.append(big_delta_reconciliation_section(big_delta_rec))
+
     # Per-symbol gross delta notional -> the relative thresholds.
-    gross = {}
-    for r in rows:
-        gross[r["symbol"]] = gross.get(r["symbol"], 0.0) + r["delta_notional"]
+    gross = gross_by_symbol(rows)
 
     L.append("\n## Candidate ABSOLUTE thresholds\n")
     L.append("`new` = would alert on delta but does NOT already alert on premium — "
              "the contracts a delta detector actually adds.\n")
     L.append("\n| threshold | alerts | new | symbols | in delta band | top symbol |")
     L.append("|---|---:|---:|---:|---:|---|")
-    for t in ABS_THRESHOLDS:
+    for t in abs_thresholds:
         q = [r for r in rows if r["delta_notional"] >= t]
         new = [r for r in q if not passes_uoa(r, cfg)]
         banded = [r for r in q if in_band(r)]
@@ -435,7 +582,7 @@ def build_report(rows, cfg, symbols, failed, sentinel=0, rec=None):
              "concentrating them in the index/mega-cap names?\n")
     L.append("\n| threshold | alerts | new | symbols | top symbol |")
     L.append("|---|---:|---:|---:|---|")
-    for t in REL_THRESHOLDS:
+    for t in rel_thresholds:
         q = [r for r in rows
              if gross.get(r["symbol"], 0) > 0
              and r["delta_notional"] / gross[r["symbol"]] >= t]
@@ -479,18 +626,44 @@ def build_report(rows, cfg, symbols, failed, sentinel=0, rec=None):
     return "\n".join(L)
 
 
+def _float_list(s):
+    """Comma-separated floats for --rel/--abs (scientific notation OK, e.g.
+    '5e7,1e8'). An argparse ``type=`` callable."""
+    return [float(x) for x in s.split(",") if x.strip()]
+
+
+def parse_args(argv):
+    """CLI arguments. Pure (no I/O) — a plain argparse.Namespace, easy to test."""
+    p = argparse.ArgumentParser(
+        description="Measure how flow-alert detectors would fire, before/after "
+                     "tuning their config.")
+    p.add_argument("--force", action="store_true",
+                    help="measure even on a non-trading day (exploration only — "
+                         "do not feed a real calibration window with this)")
+    p.add_argument("--alerts-db", dest="alerts_db", type=int, default=None,
+                    help=f"Redis db to read cache:options:flow_alerts from "
+                         f"(default {LIVE_ALERTS_DB} — production's)")
+    p.add_argument("--rel", type=_float_list, default=None,
+                    help="comma-separated relative thresholds to preview instead "
+                         "of the built-in candidate list, e.g. 0.10,0.15,0.30")
+    p.add_argument("--abs", dest="abs_", type=_float_list, default=None,
+                    help="comma-separated absolute $ thresholds to preview instead "
+                         "of the built-in candidate list, e.g. 5e7,1e8,5e8")
+    return p.parse_args(argv)
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else list(argv)
-    force = "--force" in argv
+    args = parse_args(argv)
     today = datetime.now(CT).date()
-    if not is_trading_day(today) and not force:
+    if not is_trading_day(today) and not args.force:
         why = "weekend" if today.weekday() >= 5 else "market holiday"
         print(f"Skipped: {today:%Y-%m-%d} is not a trading day ({why}). "
               f"No report written — a non-session distribution would corrupt "
               f"threshold calibration. Use --force to measure anyway.")
         return 0        # a correct skip is not a failure; the wrapper logs exit=0
     symbols = flow_symbols()
-    cfg = uoa_cfg()
+    cfg = uoa_cfg()   # merged config -- carries [uoa] AND [big_delta]
     print(f"Flow universe: {len(symbols)} symbols; proxy {PROXY_URL}")
     client = SchwabPyProxyClient(PROXY_URL)
 
@@ -506,24 +679,22 @@ def main(argv=None):
             print(f"  {sym:<6} {len(got):>5} contracts"
                   + (f"  ({bad} sentinel delta dropped)" if bad else ""))
 
-    # Reconcile the modelled baseline against the channel that actually fired.
+    # Reconcile the modelled baselines against the channel that actually fired.
     # Best-effort by construction: a failure here degrades to a "not reconciled"
     # note in the report and never costs us the measurement we just paid ~91
     # chain fetches for.
-    db = LIVE_ALERTS_DB
-    if "--alerts-db" in argv:
-        try:
-            db = int(argv[argv.index("--alerts-db") + 1])
-        except (IndexError, ValueError):
-            print("  ! --alerts-db needs an integer; using default")
+    db = args.alerts_db if args.alerts_db is not None else LIVE_ALERTS_DB
     payload, note = read_live_alerts(db)
     rec = reconcile(rows, cfg, payload, today, note)
+    big_delta_rec = reconcile_big_delta(rows, cfg, payload, today, note)
     print(f"Reconciliation: {'ok' if rec.get('ok') else rec.get('note')}")
 
     out_dir = OPTIONS_SCANNER / "data" / "flow_delta_instrumentation" / str(today)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    report = build_report(rows, cfg, symbols, failed, sentinel, rec)
+    report = build_report(rows, cfg, symbols, failed, sentinel, rec,
+                          big_delta_rec=big_delta_rec,
+                          rel_thresholds=args.rel, abs_thresholds=args.abs_)
     (out_dir / "report.md").write_text(report, encoding="utf-8")
 
     # Raw rows for any threshold question the report didn't anticipate.
