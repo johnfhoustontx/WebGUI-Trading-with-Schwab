@@ -168,6 +168,38 @@ def test_acknowledge_scanner_reads_scan_once(monkeypatch):
     assert reads.count("options:scan") == 1
 
 
+def test_captured_badge_survives_reprice_but_fires_on_new_signal(monkeypatch):
+    """After opening Captured, a reprice-republish (version bumps, SAME signal ids)
+    must NOT re-raise the badge — that was the "keeps showing" bug (the badge was
+    version-based, so every 5-min reprice re-fired it). Only a genuinely NEW
+    captured signal (a new signal_id) fires it again."""
+    import main
+
+    state = {"payload": {"signals": [{"signal_id": "s1"}, {"signal_id": "s2"}]},
+             "ver": 1}
+    monkeypatch.setattr(main.bus_client, "read",
+                        lambda v: state["payload"] if v == "options:captured" else {})
+    monkeypatch.setattr(main.bus_client, "read_version",
+                        lambda v: state["ver"] if v == "options:captured" else None)
+    monkeypatch.setattr(main.bus_client, "read_full", lambda v: (None, None))
+
+    # Open Captured -> acknowledge the current ids -> badge clears.
+    main._acknowledge("/options/captured", scan={"signals": []})
+    assert main._NAV_BADGES["/options/captured"] == 0
+
+    # A reprice: SAME ids, version bumps 1 -> 2. Badge must STAY cleared.
+    state["ver"] = 2
+    main._recompute_badges(scan={"signals": []})
+    assert main._NAV_BADGES["/options/captured"] == 0     # was 1 (the bug)
+
+    # A genuinely NEW capture: new id s3, version bumps -> badge re-raises.
+    state["payload"] = {"signals": [{"signal_id": "s1"}, {"signal_id": "s2"},
+                                    {"signal_id": "s3"}]}
+    state["ver"] = 3
+    main._recompute_badges(scan={"signals": []})
+    assert main._NAV_BADGES["/options/captured"] == 1
+
+
 def test_acknowledge_reuses_injected_scan(monkeypatch):
     """When _layout has already read options:scan, it passes it to _acknowledge,
     which then does NOT re-read it."""

@@ -44,6 +44,22 @@ def scanner_keys(scan):
     return {_sig_key(s) for s in _signals(scan)}
 
 
+def captured_keys(captured):
+    """Set of stable keys for the currently open captured signals — their
+    ``signal_id``s.
+
+    Immune to REPRICING: a mark update keeps the same id, so a captured badge built
+    on ``unread_count`` fires on a genuinely NEW captured signal, not on the
+    periodic reprice-republish that merely bumps the view's version (that
+    version-churn was the "captured badge keeps showing" bug). Defensive: a
+    bad/None view, or a signal missing its id, contributes nothing.
+    """
+    sigs = (captured or {}).get("signals") if isinstance(captured, dict) else None
+    sigs = sigs if isinstance(sigs, list) else []
+    return {s.get("signal_id") for s in sigs
+            if isinstance(s, dict) and s.get("signal_id")}
+
+
 def scanner_scores(scan):
     """{signal_key: composite_score} across both tables."""
     return {_sig_key(s): (s.get("composite_score") or 0) for s in _signals(scan)}

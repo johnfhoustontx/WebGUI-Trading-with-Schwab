@@ -559,7 +559,13 @@ def _favicon_link(color: str) -> str:
 _NAV_BADGES: dict[str, int] = {}
 _ALERT_STATE: dict = {
     "acked_scan": set(), "alerted": set(), "alerted_init": None,
-    "captured_seen": None, "rescue_seen": None,
+    # Captured badge: the SET of acknowledged captured signal ids (not a version),
+    # plus a version-gated cache of the current ids so the badge fires on a
+    # genuinely new capture rather than on every reprice-republish. captured_keys is
+    # recomputed only when captured_keys_ver moves (the cheap :ver probe gates the
+    # payload deserialize).
+    "captured_acked": set(), "captured_keys": set(), "captured_keys_ver": None,
+    "rescue_seen": None,
     # Health/staleness (R4b/R8): the set of currently stale/down component keys
     # already alerted, so we chime only on transition INTO bad (fire-on-transition,
     # clear-on-heal). Seeded on the first tick so a service that's already stale/down
@@ -846,7 +852,14 @@ def _acknowledge(active: str, scan=None) -> None:
             scan = bus_client.read("options:scan") or {}
         _ALERT_STATE["acked_scan"] = alerts.scanner_keys(scan)
     elif active == "/options/captured":
-        _ALERT_STATE["captured_seen"] = bus_client.read_version("options:captured")
+        # Acknowledge the current SET of captured signal ids (not the version), so
+        # the badge clears on open and only re-appears on a genuinely NEW capture —
+        # not on the 5-min reprice-republish, which keeps the same ids but bumps the
+        # version (that version-churn was the "badge keeps showing" bug).
+        _ALERT_STATE["captured_keys_ver"] = bus_client.read_version("options:captured")
+        _ALERT_STATE["captured_keys"] = alerts.captured_keys(
+            bus_client.read("options:captured") or {})
+        _ALERT_STATE["captured_acked"] = set(_ALERT_STATE["captured_keys"])
     elif active == "/options/rescue":
         # Acknowledge the current rescue-summary version so the badge clears on
         # open and only re-appears when the manage cycle publishes a new summary.
@@ -864,9 +877,16 @@ def _recompute_badges(scan=None) -> None:
         scan = bus_client.read("options:scan") or {}
     _NAV_BADGES["/"] = alerts.unread_count(
         alerts.scanner_keys(scan), _ALERT_STATE["acked_scan"])
-    cap_ver = bus_client.read_version("options:captured")  # cheap :ver probe
-    _NAV_BADGES["/options/captured"] = 1 if (
-        cap_ver is not None and cap_ver != _ALERT_STATE["captured_seen"]) else 0
+    # Captured: fire on a genuinely NEW captured signal (a new signal_id), NOT on
+    # the periodic reprice-republish (same ids, bumped version). Deserialize the
+    # payload only when the version actually moved — the cheap :ver probe gates it.
+    cap_ver = bus_client.read_version("options:captured")
+    if cap_ver != _ALERT_STATE["captured_keys_ver"]:
+        _ALERT_STATE["captured_keys"] = alerts.captured_keys(
+            bus_client.read("options:captured") or {})
+        _ALERT_STATE["captured_keys_ver"] = cap_ver
+    _NAV_BADGES["/options/captured"] = 1 if alerts.unread_count(
+        _ALERT_STATE["captured_keys"], _ALERT_STATE["captured_acked"]) else 0
     # Rescue: count of at-risk paper positions (tested + critical) from the small
     # rescue_summary view. Cleared on open (version acknowledged), so the count
     # only re-appears when the manage cycle republishes a changed summary.
