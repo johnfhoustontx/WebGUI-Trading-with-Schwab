@@ -12,7 +12,7 @@ _EXPECTED_DISPLAYS = {
     "BIG10", "NVDA", "MSFT", "GOOGL", "AMZN", "META", "AAPL", "TSLA",
     "AVGO", "PLTR", "AMD",
     "MTUM", "SPMO",
-    "SMH", "XSD", "IGV", "QTUM", "XBI", "XRT", "XME",
+    "SMH", "XSD", "IGV", "QTUM", "XBI", "XRT", "XME", "USO",
     "XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU", "XLV", "XLY",
     "TLT", "HYG", "LQD",
     "GDLC", "VCX",
@@ -21,14 +21,14 @@ _EXPECTED_DISPLAYS = {
 
 
 def test_every_csv_symbol_is_mapped():
-    # 68 tiles: base 55 + the Top 10 frame (a BIG10 composite + 10 constituents:
+    # 69 tiles: base 55 + the Top 10 frame (a BIG10 composite + 10 constituents:
     # the Mag-7 + AVGO/PLTR/AMD) + the Net Prem external tile + the $MGTN index tile
-    # (CBOE Magnificent Ten, added 2026-07-21).
+    # (CBOE Magnificent Ten, added 2026-07-21) + USO (added 2026-08-12).
     # (base 55 = $PCALL+$PCSP→ONE put/call tile; HYG-LQD dropped; $ADD/$ADSPD dropped;
     # XLB added; +10 country ETFs.)
-    assert len(S.SYMBOL_MAP) == 68
+    assert len(S.SYMBOL_MAP) == 69
     # A future mistyped ticker/display must fail: the full display set is pinned.
-    assert len(_EXPECTED_DISPLAYS) == 68
+    assert len(_EXPECTED_DISPLAYS) == 69
     assert {t["display"] for t in S.SYMBOL_MAP} == _EXPECTED_DISPLAYS
     # Every entry has a non-empty display; every quote tile has a real quote_symbol.
     for t in S.SYMBOL_MAP:

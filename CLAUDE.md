@@ -104,18 +104,28 @@ services → webgui. Full design: [3-tier design doc](docs/plans/2026-06-15-thre
 
 `webgui/main.py` is the server + nav shell (**sub-menus are TABS** since
 2026-07-11; the drawer became an **ICON RAIL** 2026-07-15; **reorganized
-2026-07-27; **Strategy Tools group added 2026-07-28**): the left drawer is a
-**FLAT main menu** of **9 items** — one per group (**Options**, **Strategy
-Tools**, **Market Trend & Sentiment**, **More**), the **two standalone
-`OPTIONS_RAIL` pages** that sit directly under the Options group (**Dealer
-Positioning**, **Opportunity Board**), and the flat
-Trade Analyzer / Portfolio / Claude Trades items — and the active group's
+2026-07-27; **Strategy Tools group added 2026-07-28**; **system pages moved to
+the drawer FOOT 2026-08-12**): the left drawer is a **FLAT main menu** of **13
+items** — one per group (**Options**, **Strategy Tools**, **Market Trend &
+Sentiment**, **More**), the **three standalone `OPTIONS_RAIL` pages** that sit
+directly under the Options group (**Dealer Positioning**, **Opportunity Board**,
+**Flow Alerts**), the flat Trade Analyzer / Portfolio / Claude Trades items, and
+a bottom-pinned **`SYSTEM_RAIL`** block (**System Status**, **Stop All
+Services**, **Settings**) — and the active group's
 **child pages render as a compact TAB STRIP across the top of the page**
 (`_NAV_GROUPS` + `_group_children(active)`; a `ui.tabs` under the header with
 `.compact-tabs` small padding — q-tab min-height 30px — clicking a tab
-navigates; More's strip includes the Settings children, e.g. User Manuals).
+navigates; More's strip is EOD Report + the Settings children, e.g. User Manuals).
 **A rail page has NO tab strip** (`_group_children` → None) and its breadcrumb is
-just the page name. **Market Dashboard is the FIRST tab of the Market Trend &
+just the page name. **`SYSTEM_RAIL` is those machine-level controls** — health,
+shutdown, configuration — lifted out of the More tab strip and given their own
+block at the foot of the rail (the conventional place for them, and they are not
+a step in any analysis workflow). They render like `OPTIONS_RAIL` (standalone
+`_nav_link`s, no tab strip) but after a hairline separator with **`mt-auto`**,
+which eats the leftover column height so the block sits on the bottom edge —
+note `mt-auto` + `my-*` on one element fight over `margin-top`, so the separator
+uses `mb-2`. **Settings therefore no longer owns User Manuals** as a sub-page;
+`SETTINGS_CHILDREN` survives as a More tab, a peer of EOD Report. **Market Dashboard is the FIRST tab of the Market Trend &
 Sentiment group** (it was a flat item until 2026-07-27), and since
 `_nav_group_link` navigates to `children[0]`, that group's rail item lands on
 `/market`.
@@ -244,7 +254,8 @@ condition**. Sixth Tier-2 service. Pieces:
   page applies the rank as a Tailwind flex `order-N` class rather than moving DOM nodes, preserving
   the build-once / update-in-place property (see the `/market` route-table entry).
 - **PURE modules.** `symbols.py` = the **CSV→Schwab symbol map** (single source of truth):
-  68 tiles with per-symbol **polarity** (`normal` up=risk-on / `inverted` up=risk-off) +
+  69 tiles (USO joined the Thematic / Industry ETF frame 2026-08-12) with per-symbol
+  **polarity** (`normal` up=risk-on / `inverted` up=risk-off) +
   `kind` (`quote`/`spread`/`external`), encoding the translations (`SPX`→`$SPX`, `VIX`→
   `$VIX`, `SKEW`→`$SKEW`, `/ES[U26]`→`/ESU26`, ToS `IMGTN:CGI`→API **`$MGTN`** [CBOE
   Magnificent Ten Index]) and the **equivalents for symbols Schwab

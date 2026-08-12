@@ -356,19 +356,29 @@ FLAT_NAV = [
     ("/driver", "Claude Trades", "smart_toy"),
 ]
 
-# "More" is a menu GROUP for reports / diagnostics / config. Its tab strip is
+# "More" is a menu GROUP for reports / documentation. Its tab strip is
 # MORE_CHILDREN + SETTINGS_CHILDREN, so User Manuals renders as a flat PEER tab
-# of Settings — the old indented sub-group is retired. (route, label, icon)
+# of EOD Report — the old indented sub-group is retired. (route, label, icon)
 MORE_CHILDREN = [
     ("/eod", "EOD Report", "summarize"),
-    ("/status", "System Status", "monitor_heart"),
-    ("/settings", "Settings", "settings"),
-    ("/terminate", "Stop All Services", "power_settings_new"),
 ]
 
-# Sub-menu items nested under the Settings entry. (route, label, icon)
+# Sub-menu items that used to nest under the Settings entry; Settings is now a
+# standalone rail page (SYSTEM_RAIL), so this renders as a More tab. (route, label, icon)
 SETTINGS_CHILDREN = [
     ("/manuals", "User Manuals", "menu_book"),
+]
+
+# Standalone MAIN-MENU (rail) pages pinned to the BOTTOM of the drawer (2026-08-12).
+# These are the machine-level controls — health, configuration, shutdown — not part
+# of any analysis workflow, so they were lifted out of the "More" tab strip and given
+# their own block at the foot of the rail (the conventional place for them). Like
+# OPTIONS_RAIL they are standalone: no tab strip, breadcrumb is just the page name.
+# (route, label, icon)
+SYSTEM_RAIL = [
+    ("/status", "System Status", "monitor_heart"),
+    ("/terminate", "Stop All Services", "power_settings_new"),
+    ("/settings", "Settings", "settings"),
 ]
 
 # ── Main-menu groups (2026-07-11 nav redesign) ───────────────────────────────
@@ -505,7 +515,7 @@ def drawer_width(pinned: bool) -> int:
 _NAV_LABEL = {route: label for route, label, _icon in
               OPTIONS_CHILDREN + OPTIONS_RAIL + STRATEGY_TOOLS_CHILDREN
               + SENTIMENT_CHILDREN + FLAT_NAV
-              + MORE_CHILDREN + SETTINGS_CHILDREN}
+              + MORE_CHILDREN + SETTINGS_CHILDREN + SYSTEM_RAIL}
 
 # One distinct color per route (the favicon fill). Material hues, all visually apart.
 _TAB_COLOR = {
@@ -1177,6 +1187,17 @@ def _layout(active: str, title: str):
                 _nav_link(path, label, icon, active)
             more_label, more_icon, more_children = _NAV_GROUPS[2]
             _nav_group_link(more_label, more_icon, more_children, active)
+            # Machine-level controls, pushed to the FOOT of the rail: mt-auto eats
+            # the leftover column height so they sit at the bottom edge (the column
+            # is h-full flex-col), while still reading as the last items when the
+            # menu is long enough to fill it. A hairline separates them from the
+            # workflow pages above.
+            # NB: mb-2 for the gap below, NOT my-2 — `my-*` also sets margin-top
+            # and would fight the mt-auto that does the pushing.
+            ui.element("div").classes(
+                "mt-auto mb-2 w-full h-px bg-white/[0.07] shrink-0")
+            for path, label, icon in SYSTEM_RAIL:
+                _nav_link(path, label, icon, active)
 
     with ui.header().classes("items-center justify-between px-4"):
         with ui.row().classes("items-center gap-3 no-wrap"):

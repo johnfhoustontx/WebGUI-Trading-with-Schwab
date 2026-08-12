@@ -420,13 +420,18 @@ def test_breadcrumb_parts_grouped_and_flat():
         "Market Trend & Sentiment", "Sector Rotation")
     assert main.breadcrumb_parts("/market") == (
         "Market Trend & Sentiment", "Market Dashboard")
-    assert main.breadcrumb_parts("/status") == ("More", "System Status")
+    assert main.breadcrumb_parts("/eod") == ("More", "EOD Report")
     # Flat single page → (page label, "") — no "· Tab"
     assert main.breadcrumb_parts("/trade") == ("Trade Analyzer", "")
     # Rail pages read as standalone sections, same as flat pages.
     assert main.breadcrumb_parts("/options/gamma") == ("Dealer Positioning", "")
     assert main.breadcrumb_parts("/options/matrix") == ("Opportunity Board", "")
     assert main.breadcrumb_parts("/options/flow") == ("Flow Alerts", "")
+    # The three machine-level pages moved to the drawer foot (2026-08-12), so they
+    # are standalone rail pages too — no tab strip, no group in the breadcrumb.
+    assert main.breadcrumb_parts("/status") == ("System Status", "")
+    assert main.breadcrumb_parts("/terminate") == ("Stop All Services", "")
+    assert main.breadcrumb_parts("/settings") == ("Settings", "")
     # Calculator is no longer a standalone rail page — it's a Strategy Tools tab.
     assert main.breadcrumb_parts("/options/calculator") == ("Strategy Tools", "Calculator")
 
@@ -564,19 +569,21 @@ def test_drawer_icons_are_present_and_distinct():
     """The drawer is a 64px icon rail (hover-to-expand) whose collapsed state shows
     ONLY icons (_NAV_CSS fades the labels to opacity:0) — so each drawer item needs
     a non-empty, distinct icon. ``_nav_link``/``_nav_group_link`` render the
-    ``icon`` arg; the dot is retired. Scope is the 10 drawer items (the 4
-    _NAV_GROUPS + the 3 OPTIONS_RAIL pages under Options + the 3 FLAT_NAV pages);
-    child-page icons are not rail affordances (the tab strip renders labels only)."""
+    ``icon`` arg; the dot is retired. Scope is the 13 drawer items (the 4
+    _NAV_GROUPS + the 3 OPTIONS_RAIL pages under Options + the 3 FLAT_NAV pages +
+    the 3 SYSTEM_RAIL pages at the foot); child-page icons are not rail
+    affordances (the tab strip renders labels only)."""
     from collections import Counter
 
     import main
 
     items = ([(label, icon) for label, icon, _c in main._NAV_GROUPS]
              + [(label, icon) for _p, label, icon in main.OPTIONS_RAIL]
-             + [(label, icon) for _p, label, icon in main.FLAT_NAV])
+             + [(label, icon) for _p, label, icon in main.FLAT_NAV]
+             + [(label, icon) for _p, label, icon in main.SYSTEM_RAIL])
     # Pinned count: all()/set-length are vacuously true on an empty list, so this
     # is the non-vacuity guard. A legitimate new drawer item should bump it.
-    assert len(items) == 10, f"expected 10 drawer items, got {len(items)}: {items}"
+    assert len(items) == 13, f"expected 13 drawer items, got {len(items)}: {items}"
     assert not [l for l, i in items if not i], \
         f"drawer items with no icon: {[l for l, i in items if not i]}"
     dupes = {i: [l for l, x in items if x == i]

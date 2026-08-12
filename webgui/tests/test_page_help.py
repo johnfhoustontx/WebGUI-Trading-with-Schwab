@@ -15,6 +15,7 @@ def test_every_nav_route_has_a_guide():
     routes |= {p for p, _, _ in main.FLAT_NAV}
     routes |= {p for p, _, _ in main.MORE_CHILDREN}
     routes |= {p for p, _, _ in main.SETTINGS_CHILDREN}
+    routes |= {p for p, _, _ in main.SYSTEM_RAIL}
 
     missing = [r for r in routes if r not in page_help.HELP_MD]
     assert not missing, f"routes without an idiot's guide: {sorted(missing)}"
