@@ -40,7 +40,7 @@ pytest tests/test_scoring.py -v                # single file
 pytest tests/test_scoring.py::test_name -v     # single test
 ```
 
-**Test baseline: 1286 passed, 17 failed** (measured 2026-07-25 with `-p no:randomly`; was 1283/16/1skip immediately before the `gamma_window_legacy` split, which added 3 headless-import tests). The failures are **pre-existing** and unrelated to current features — do not "fix" them as part of unrelated work; flag them only if a change is expected to touch them. They fall in four groups:
+**Test baseline: 1311 passed, 17 failed** (measured **2026-08-02** with `-p no:randomly`; was 1286/17 on 2026-07-25, +25 from the extended-trading-hours work — the shared-calendar migration, the `scanner_engine` holiday fix, and the execution-layer ETH tripwires). The failures are **pre-existing** and unrelated to current features — do not "fix" them as part of unrelated work; flag them only if a change is expected to touch them. They fall in four groups:
 
 - `tests/test_scanner_engine.py::TestEarningsAvoidance` — stale fixtures
 - `tests/test_dashboard_*` — **`dashboard.py` was never copied into the webgui monorepo**, so these fail `ModuleNotFoundError: No module named 'dashboard'`. Diagnosed 2026-07-25; previously mis-filed as "intermittent". Whether a given one *fails* or *skips* still varies with ordering (the Tk-root guard), so the count moves even under `-p no:randomly`.
@@ -138,7 +138,7 @@ docs/plans/YYYY-MM-DD-<topic>-plan.md      # how (TDD task list, exact files, te
 
 ## Commit conventions
 
-Small commits with conventional prefixes: `feat:`, `fix:`, `refactor:`, `chore:`, `test:`, `docs:`. Run `pytest tests/ -v --tb=no -q` before pushing — anything beyond the 246/7 baseline is a regression.
+Small commits with conventional prefixes: `feat:`, `fix:`, `refactor:`, `chore:`, `test:`, `docs:`. Run `pytest tests/ -q -p no:randomly` before pushing and compare against the **1311 passed / 17 failed** baseline at the top of this file — **comparing the failing SET, not the count**, since the `test_dashboard_*` tests wander between fail and skip. (This line previously cited a "246/7 baseline" that had not been true for a very long time.)
 
 ## Further reading
 

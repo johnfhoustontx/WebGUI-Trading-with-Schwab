@@ -8,7 +8,115 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 > standing requirement). After any structural change — new page, new dependency,
 > port change, copied/removed module — update the relevant section here.
 
-**Last updated:** 2026-07-27 (**Rebrand → NeuralStrike**: the app is renamed from "Schwab Trading" to
+**Last updated:** 2026-08-02 (**Options extended trading hours (Cboe GTH + Curb), effective 2026-08-17
+— plus the market-calendar consolidation it forced**. Cboe C1 adds a morning **GTH** session
+(07:30–09:25 ET = **06:30–08:25 CT**) and an afternoon **Curb** session (16:00–16:15 ET = **15:00–15:15
+CT**) for select multi-listed **single-stock** options. Confirmed date + spec: Cboe notice
+[C2026061202](https://www.cboe.com/notices/content/?id=60500), which records **2026-08-17 as a DELAY from
+2026-07-13** pending regulatory approval, and the
+[Equity Options ETH FAQ](https://www.cboe.com/document/tech-spec/document/technical-specifications/equity-options-extended-trading-hours-faq).
+**Use Cboe's vocabulary — GTH and Curb — NOT "pre-market"/"after-hours"**; Cboe explicitly distinguishes
+option GTH from the equity pre-market, and GTH is also the name of the index options' 20:15–09:25 ET
+session (**out of scope here** — this covers only the equity GTH window).
+**⭐ The design's keystone: Schwab already publishes eligibility.** The option-chain response carries a
+root-level **`ethOptionEligible`** boolean. Live-probed: `NVDA/TSLA/AAPL/PLTR/AMD/AVGO/MU` **True**,
+`SPY/QQQ/IWM/KO/XOM` **False**, `$SPX/$VIX` **True** — and all seven True names appear in Cboe's published
+21-symbol launch list while none of the False ones do. **`MU` is the decisive case**: press coverage
+described the set as "Mag 7 plus PLTR, AVGO, AMD", which excludes it — a hardcoded list would have been
+wrong on day one. Cboe re-balances the list **twice a year** and may grow it to a **100-class cap**, so
+**never hardcode it**; it is read from a chain the 1-min GEX poll already fetches (**zero extra API
+calls**), harvested on the existing `on_chain` hook into **`cache:options:eth_eligible`** via the new PURE
+`services/options_svc/eth.py`. Caveat: Cboe's reference data has **separate GTH-Eligible and Curb-Eligible
+columns** while Schwab exposes one boolean — identical for the launch set, latent otherwise.
+**Scope decisions (owner-approved):** cash-adjacent sessions only (**no overnight index GTH** — GEX
+collection is already ~36k of ~70k daily Schwab calls); **observe-only posture** — the execution layer
+stays inert in ETH, which was ALREADY the status quo and needed no change; and **everything gated on
+2026-08-17**, held in config so a further slip is a one-line edit.
+**What actually changes on 2026-08-17:** GEX collection starts **06:30 instead of 08:00 for eligible
+symbols only** (~7 of 45). Polling the full universe would cost ~4,050 calls/day for ~38 names that
+aren't quoting; the eligible subset costs **~630/day ≈ +0.9%**. Cold start with no cached eligibility
+**skips** the GTH poll — never guesses. **The Curb session changes nothing** (15:00–15:15 CT was already
+inside the 15:20 stop).
+**⚠ The bug this nearly shipped with — flow alerts.** `collect_gex_history` runs `run_flow_alerts` after
+EVERY collection tick, so from 08-17 detection would have started at 06:30 on thin GTH prints. Worse,
+`run_flow_alerts` marks the day-scoped cooldown/seen-set **at DETECTION** (`handlers.py` UOA loop;
+`flow_alerts.detect_flow_alerts` mutates the map in place). And contrary to a first reading,
+**`send_flow_alert` has NO market-hours gate** — the `market_hours_only`/`_in_market_hours` check lives in
+`notify_signals` (scanner/captured signals), a different path. So unfixed this meant **real 06:30 phone
+pushes**; and gating only the PUSH would have marked the signal seen and **destroyed it — it would never
+fire, not at 06:30 nor at the open**. Fixed by gating **DETECTION** on
+**`mc.in_collection_window(now)`** (08:00–15:20 CT — precisely the window `run_flow_alerts` is reachable
+in today, so **provably inert before activation** while closing exactly the new 90-minute GTH stretch).
+`[alerts].fire_in_extended_hours` (default **false**) opts back in. `publish_flow_skew` is gated the same
+way: `latest_skew_by_symbol` has **no date filter**, so during GTH it would emit `$SPX` fresh off thin
+prints beside `SPY`/`QQQ` frozen at yesterday's close as one "current" snapshot, and the consumer ignores
+`ts`.
+**NEW infrastructure — `shared/market_calendar.py` + `config/sessions.toml`.** Mapping the change exposed
+**10 duplicated NYSE holiday sets and 14 hardcoded window constants**. Rather than add a 15th, all of it
+consolidated onto one module first, as a **behavior-preserving refactor** (the never-shipped
+[2026-07-03 config-consolidation plan](docs/plans/2026-07-03-config-consolidation.md), finished and
+extended). It **absorbed `sentiment-dashboard/market_calendar.py`** (now DELETED — same module name, same
+three function names, but **inclusive** `prev/next_trading_day` vs our **exclusive**, an invisible
+one-day trap) and **adopted its algorithmic derivation** (Easter / nth-weekday / observed rules), so
+**there is no yearly holiday edit any more**. Public API: `nyse_holidays(year)` (lru_cached, valid
+2022-on, does NOT model ad-hoc closures), `is_holiday`, `is_trading_day`, `prev/next_trading_day`
+(**exclusive**), `Session` (`GTH`/`REGULAR`/`CURB`/`CLOSED`), `session_at`, `is_regular_hours`,
+`is_extended_hours`, `extended_hours_active`, `in_window(name, now)`, `window_bounds`,
+`in_collection_window(now, *, eth_eligible=False)`, `session_flip_time`, `alerts_fire_in_extended_hours`.
+**API gotchas worth knowing:** windows evaluate in **their own timezone** (`driver_entry` is **ET**);
+`in_window` **raises `KeyError`** on an unknown name (a typo is a code error, deliberately not degraded);
+`window_bounds` accepts `end` **or** `stop`; **`in_window` is inclusive both ends but
+`in_collection_window`'s stop is EXCLUSIVE** (each mirrors the legacy predicate it replaced — **do not
+unify**); **REGULAR wins the 15:00 overlap** with Curb; naive datetimes are treated as **CT**; a malformed
+`sessions.toml` degrades to defaults for bad **values AND bad shapes**, and `load_config()` returns the
+**cached** dict (don't mutate).
+**The equivalence gate paid for itself.** `shared/tests/test_market_calendar_equivalence.py` proves the
+shared helpers reproduce every legacy predicate **minute-by-minute over four representative days** —
+and caught a divergence nobody anticipated: `driver_svc`'s `hm >= RTH_END` makes its entry window's end
+**EXCLUSIVE**, so a straight migration would have opened a **16th checkpoint slot at 15:30 ET**, firing a
+Claude call and a possible entry inside the "no new entries in the last 30 min" zone. Closed
+declaratively via **`end_exclusive = true`** on that window (defaulted in `_DEFAULTS` too, so a corrupt
+TOML degrades to the SAFE behavior). **One divergence remains deliberately:** `sentiment_svc`'s RTH
+excludes the 15:00:00 instant while `is_regular_hours` includes it — pinned by three tests so its
+migration had to preserve exclusivity consciously.
+**THREE REAL BUGS the consolidation surfaced, each fixed in its own labelled behavior-change commit AFTER
+the refactor landed** (so the refactor kept its identical-output guarantee): (1)
+**`options-scanner/scanner_engine.py` `HOLIDAYS_2026`** was a **tenth** site holding **9 dates, 2026 only
+— missing Juneteenth and ALL of 2027** — and it feeds `paper_engine.in_trading_window`, so **from
+2027-01-01 the paper engine would have run entry/manage cycles on every market holiday**; (2)
+**year-boundary spill** — `is_holiday` consulted only `nyse_holidays(d.year)`, so `2027-12-31` (observed,
+because 1 Jan 2028 is a Saturday) read as a **trading day**; now also checks `d.year + 1`; (3) the
+**bounded `HOLIDAYS` alias** (2026-27 union) disagreed with the year-general predicates from 2028 — e.g.
+`active_session_date` would return MLK 2028-01-17 as its own session — so it was **RETIRED entirely**;
+`em_cone`'s `holidays=` param was **redefined** as "extra ad-hoc closures" over the derived calendar
+rather than being handed a bounded set.
+**FOUR tests were found ENCODING bugs** rather than catching them (a `driver_entry` boundary pinned at
+the wrong value, one pinning the bounded alias, one pinning the pre-fix legacy sweep, and
+`test_em_cone_skips_weekends` anchoring on Juneteenth while calling it "Friday"). Worth expecting more.
+**UI (display only):** an **`ETH` badge** on the Opportunity Board (`matrix.build_rows` gained an additive
+`eth_eligible`; at 07:00 the ~38 frozen rows must read *not eligible*, never *stale*) and the collector
+status strip now **names the session** (`GTH`/`Regular`/`Curb`/`Closed`). **Hazard H7:** a class opens GTH
+only once its underlying prints, so no data during GTH is **normal** — `classify_collector_status` returns
+*"awaiting GTH opens"*, but **only before 08:00**; from 08:00 the full universe is polled so a growing age
+is a real fault again. `gex_status`'s `MARKET_OPEN` (which had said **8:30 since collection moved to 8:00
+in July**) now derives from `window_bounds("collection")`.
+**Settlement deliberately UNCHANGED, and now verified rather than assumed:** eligible names DO trade the
+Curb on expiration day, but per the Cboe FAQ **OCC strikes settlement and the ITM determination on the
+16:00 ET NBBO** — so `paper_engine.SETTLE_HOUR_CT = 15` and `options_calculator.EXPIRY_CLOSE_HOUR_ET = 16`
+are correct. Pinned by a guard test quoting the FAQ. Likewise `paper_engine`'s 08:30–15:00 window and the
+driver's 09:45–15:30 ET entry window are **pinned inert in ETH** with a verified tripwire.
+**STILL OPEN — needs a live session on 2026-08-17 (~07:00 CT):** (a) does Schwab serve **fresh option
+quotes** from 07:30 ET (check `quoteTimeInLong`; if it reads the prior close, set `extended_hours_from`
+to a future date and the feature reverts to inert), and (b) does **`totalVolume` accrue GTH prints**?
+Cboe marks them not-last-sale-eligible with an Extended Hours `"v"` condition and they do **not** count
+toward the daily high/low, so `last` will be stale — every engine path here computes from **`mark`**,
+which stays live. **Record a contract's `totalVolume` at 15:20 CT on Fri 2026-08-14** so Monday's
+comparison is possible. **Restart `options_svc` + the webgui.** Green (all measured 2026-08-02): options_svc
+**915**/2-baseline, webgui **894**, driver_svc **221**, sentiment_svc **188**/1-pre-existing, market_svc
+**49**, portfolio_svc **32**, trade_svc **69**, shared/tests **80**, notify **56**, contracts **46**, bus
+**24**, proxy **98**, options-scanner **1311**/17-flaky; ruff clean. Design/plan:
+[design](docs/plans/2026-08-02-options-extended-hours-design.md) /
+[plan](docs/plans/2026-08-02-options-extended-hours-plan.md). Prior — 2026-07-27 (**Rebrand → NeuralStrike**: the app is renamed from "Schwab Trading" to
 **NeuralStrike** and the supplied logo is in the header. **Header lockup** = the **NS monogram** + a
 **two-tone wordmark** ("Neural" gold / "Strike" blue, **Montserrat ExtraBold**, uppercase) — replacing the
 old blue-gradient tile + chart-glyph SVG (`.brand-tile` deleted, dead). The gradient stops are **SAMPLED
@@ -1898,7 +2006,7 @@ services → webgui. Full design: [3-tier design doc](docs/plans/2026-06-15-thre
 |------------------------|------------------------------------------------------------|------------------|
 | `schwab-proxy/`        | Central Schwab API gateway / token manager. **Start FIRST.**| backend, :8100   |
 | `options-scanner/`     | GEX/options scanner engines, scoring, paper engine, simulator. | engines only (Dash UI dropped) |
-| `sentiment-dashboard/` | Market sentiment `scoring/` + `history_backfill` + `live_composite.py` (live intraday composite + bridge payload) + `publish_bridge.py` (headless bridge writer) + bridge + `sectors_ref.py`. | ported to NiceGUI `/sentiment` |
+| `sentiment-dashboard/` | Market sentiment `scoring/` + `history_backfill` + `live_composite.py` (live intraday composite + bridge payload) + `publish_bridge.py` (headless bridge writer) + bridge + `sectors_ref.py`. **Its `market_calendar.py` was absorbed into `shared/market_calendar.py` and DELETED (2026-08-02)** — same module name and same three function names, but *inclusive* `prev/next_trading_day` vs the shared module's *exclusive*, an invisible one-day trap. | ported to NiceGUI `/sentiment` |
 | `trade-analyzer/`      | `src/analysis` — fundamentals, recommendation, scoring, sector. | engines only (Tk UI dropped) |
 | `portfolio-analyzer/`  | `src/` — sector breakdown, vs-sector perf, live streaming.  | engines only (Tk UI dropped) |
 | `claude-driver/`       | Morning/intraday orchestration + order approval logic.      | engines only (approval UI to be NiceGUI) |
@@ -3859,6 +3967,37 @@ thresholds** (crossover `band`/`min_premium`/`cooldown_min`; UOA `k`/`vol_floor`
 `services/options_svc/flow_alerts.py:load_thresholds()` (defaults if the file is missing) —
 edit + restart `options_svc` to tune. See the 2026-07-18 "Last updated" entry.
 
+`config/sessions.toml` is the single source of truth for **market session windows +
+the extended-hours activation date** (2026-08-02). All times are **CT** (ET and CT
+shift together for DST, so the values are stable year-round). It holds
+`[activation] extended_hours_from` (**2026-08-17** — every ETH branch is inert
+before it, so a Cboe slip is a one-line edit), the three sessions
+(`[sessions.gth|regular|curb]`), five named operating windows
+(`[windows.scan|collection|session_flip|market_snapshot|driver_entry]`, each
+optionally carrying its own `tz` and `end_exclusive`), and
+`[alerts] fire_in_extended_hours`. Loaded by
+**`shared/market_calendar.py:load_config()`** (mtime-cached, mirroring
+`flow_alerts.load_thresholds`; a malformed file degrades to built-in defaults for
+bad **values and bad shapes** and never raises). **Edit + restart the affected
+service.** Two knobs are load-bearing and easy to get wrong:
+`[windows.session_flip].at` is held SEPARATE from `collection.start` so widening
+GTH collection can't silently move the Gamma display flip, and
+`[windows.driver_entry].end_exclusive` matches the driver's legacy `hm >= RTH_END`
+gate — flipping it to inclusive re-opens a checkpoint slot at 15:30 ET inside the
+no-new-entries window. See the 2026-08-02 "Last updated" entry.
+
+**`shared/market_calendar.py` is the single source of truth for the NYSE calendar**
+(holidays **derived algorithmically** — no yearly edit) **and session/window
+predicates**. Ten duplicated holiday sets and fourteen hardcoded window constants
+were consolidated onto it. **Do not add a new holiday literal or window constant
+anywhere** — add it here, or to `config/sessions.toml`. The one site left outside
+it is `claude-driver/config.py` (legacy; its morning-agent consumers were deleted
+2026-07-08, only `RISK_LIMITS` is still read), deliberately exempt.
+`shared/` is a namespace package, so
+`from shared.market_calendar import ...` resolves once the repo root is on
+`sys.path`; legacy app-dir callers (`options-scanner/scanner.py`,
+`scanner_engine.py`, `gex_status.py`) carry the three-line bootstrap.
+
 ## Secrets
 
 Live in `shared/` and are **all gitignored**. Real values were copied locally so
@@ -4154,31 +4293,61 @@ root to `sys.path` at runtime):
 
 ```powershell
 cd schwab-proxy        ; python -m pytest tests
-cd options-scanner     ; python -m pytest tests
+cd options-scanner     ; python -m pytest tests -p no:randomly
 cd sentiment-dashboard ; python -m pytest tests
 cd trade-analyzer      ; python -m pytest .
 cd portfolio-analyzer  ; python -m pytest tests
 cd claude-driver       ; python -m pytest .
-cd webgui              ; python -m pytest .   # 772 tests: transforms + shell smoke
+cd webgui              ; python -m pytest .
 ```
 
 The 3-tier services run per folder from the repo root (NOT `pytest services` over
 all of them — that puts multiple hyphenated app dirs on `sys.path` at once and
-re-triggers the documented `config`/`scoring`/`notifier` module-name collisions):
+re-triggers the documented `config`/`scoring`/`notifier` module-name collisions).
 
-```powershell
-# from the repo root, one service at a time
-.venv\Scripts\python -m pytest services\sentiment_svc   # 140
-.venv\Scripts\python -m pytest services\options_svc     # 432
-.venv\Scripts\python -m pytest services\portfolio_svc   # 27
-.venv\Scripts\python -m pytest services\trade_svc       # 56
-.venv\Scripts\python -m pytest services\driver_svc      # 162
-.venv\Scripts\python -m pytest shared\bus               # 15
-.venv\Scripts\python -m pytest shared\contracts         # 37 (no app-dir imports — safe together)
-```
+> **⚠ The venv is at the REPO ROOT, not inside a git worktree.** When working in
+> `.claude/worktrees/<name>/`, invoke it by absolute path:
+> `"D:/WebGUI Trading with Schwab/.venv/Scripts/python.exe" -m pytest …`
 
-- **options-scanner** has ~2 known date-relative failing tests carried over from
-  the source repo — do not "fix" them as part of unrelated work.
+### Current baselines — **all measured 2026-08-02**, not inherited
+
+| Suite | Command (from repo root) | Baseline |
+|---|---|---|
+| options_svc | `pytest services\options_svc` | **915 passed / 2 failed** ‡ (~4½ min) |
+| driver_svc | `pytest services\driver_svc` | **221** |
+| sentiment_svc | `pytest services\sentiment_svc` | **188 passed / 1 failed** † |
+| trade_svc | `pytest services\trade_svc` | **69** |
+| market_svc | `pytest services\market_svc` | **49** |
+| portfolio_svc | `pytest services\portfolio_svc` | **32** |
+| shared/tests | `pytest shared\tests` | **80** |
+| shared/notify | `pytest shared\notify` | **56** |
+| shared/contracts | `pytest shared\contracts` | **46** |
+| shared/bus | `pytest shared\bus` | **24** |
+| webgui | `cd webgui; pytest .` | **894** |
+| schwab-proxy | `cd schwab-proxy; pytest tests` | **98** |
+| options-scanner | `cd options-scanner; pytest tests -p no:randomly` | **1311 passed / 17 failed** ◊ |
+
+**‡ options_svc's 2 failures are the documented date-relative `test_expected_move`
+pair** (`'No price history for SPY.' is not None`) — pre-existing, do not "fix" as
+part of unrelated work.
+
+**† sentiment_svc's failure is `test_compute_regime.py::test_daily_history_wins_over_session_latch`**
+(`assert 18.0 == 10.0`, a VIX1D session-latch issue). It is **genuinely failing and
+predates 2026-08-02** — verified at an earlier base commit by two independent
+agents. This document previously claimed 189 green, which had not been true for
+some time. Unrelated to the calendar/session work; still open.
+
+**◊ options-scanner is FLAKY** — `test_dashboard_*` tests wander between fail and
+skip depending on Tk-root availability and ordering, so the **count moves run to
+run even under `-p no:randomly`**. **Compare the failing SET, not the count.** See
+`options-scanner/CLAUDE.md` for the four failure groups.
+
+> **These numbers went badly stale twice** (options-scanner's sat at "667/2" while
+> the truth was ~1260/15, and this table claimed options_svc 888 / market_svc 61 /
+> sentiment_svc 189-green). A stale baseline nearly let a real regression through
+> once already. **If you notice drift, measure and fix it here** — and when a
+> change is expected to touch a suite, measure your own before/after (`git stash`
+> → run → `git stash pop`) rather than trusting this table.
 
 ## External processes (not in this repo)
 
