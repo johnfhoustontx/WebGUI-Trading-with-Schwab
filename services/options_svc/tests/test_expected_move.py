@@ -209,7 +209,11 @@ def _quote(**over):
 
 
 def _ms(y, m, d):
-    return int(_dt.datetime(y, m, d).timestamp() * 1000)
+    # Pin the real convention (Schwab's daily-candle epoch is midnight CT) rather
+    # than the host's timezone — building this naively only passed by accident on
+    # a CT host.
+    from zoneinfo import ZoneInfo
+    return int(_dt.datetime(y, m, d, tzinfo=ZoneInfo("America/Chicago")).timestamp() * 1000)
 
 
 def test_today_candle_builds_bar_from_quote():
@@ -251,3 +255,6 @@ def test_today_candle_degrades_on_missing_or_zero_fields():
     assert compute.today_candle(_quote(lastPrice=0), last, now=now) is None
     assert compute.today_candle({}, last, now=now) is None
     assert compute.today_candle(None, last, now=now) is None
+    # isinstance(True, int) is True in Python — a bool must not slip through
+    # the numeric check as a truthy "price".
+    assert compute.today_candle(_quote(openPrice=True), last, now=now) is None

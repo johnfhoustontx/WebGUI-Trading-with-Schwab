@@ -5439,8 +5439,8 @@ def em_cone(spot, atm_iv, dte, start_ts_ms, holidays=None, trading_days_only=Fal
 # trading day — Schwab never returns the forming bar — so the current session is
 # missing from the Expected Move chart. The live quote does carry it, so
 # synthesize it. Gated at/after the open because premarket ``openPrice`` is still
-# the PRIOR session's open and would draw a false bar.
-_TODAY_CANDLE_OPEN = (8, 30)  # local CT market open
+# the PRIOR session's open and would draw a false bar. Reuses ``_RTH_START``
+# (defined above) rather than a second 08:30 constant.
 
 
 def today_candle(quote, last_ts_ms, now=None, holidays=None):
@@ -5449,23 +5449,27 @@ def today_candle(quote, last_ts_ms, now=None, holidays=None):
     ``quote`` is a RAW Schwab quote dict (``openPrice``/``highPrice``/
     ``lowPrice``/``lastPrice``) — the normalized ``SchwabProxyClient.get_quote``
     drops ``openPrice``. Returns None unless today is a trading day, local time
-    is at/after the 08:30 CT open, every OHLC field is numeric and > 0, and the
-    history's last candle predates today (so this is a no-op should Schwab ever
-    start returning the forming bar). Timestamp is today's local midnight in ms,
-    matching the daily candles' own convention. Never raises."""
+    is at/after the 08:30 CT open (``_RTH_START``), every OHLC field is numeric
+    and > 0, and the history's last candle predates today (so this is a no-op
+    should Schwab ever start returning the forming bar). Schwab's daily-candle
+    epoch is **midnight CT** (verified live), so both the history comparison and
+    the returned timestamp are computed on the ``_PROJ_CT_TZ`` basis — not host-
+    local time — to line up with the real candles on any host. A caller-supplied
+    ``now`` is used as-is (naive or aware); only the default reaches for CT.
+    Never raises."""
     import datetime as _dt
 
     if not isinstance(quote, dict):
         return None
-    now = now or _dt.datetime.now()
+    now = now or _dt.datetime.now(_PROJ_CT_TZ)
     holidays = holidays or set()
     today = now.date()
     if now.weekday() >= 5 or today in holidays:
         return None
-    if now.time() < _dt.time(*_TODAY_CANDLE_OPEN):
+    if now.time() < _dt.time(*_RTH_START):
         return None
     try:
-        last_date = _dt.datetime.fromtimestamp(int(last_ts_ms) / 1000).date()
+        last_date = _dt.datetime.fromtimestamp(int(last_ts_ms) / 1000, _PROJ_CT_TZ).date()
     except (TypeError, ValueError, OSError, OverflowError):
         return None
     if last_date >= today:
@@ -5476,7 +5480,7 @@ def today_candle(quote, last_ts_ms, now=None, holidays=None):
         if not isinstance(v, (int, float)) or isinstance(v, bool) or v <= 0:
             return None
         vals.append(float(v))
-    ts = int(_dt.datetime(today.year, today.month, today.day).timestamp() * 1000)
+    ts = int(_dt.datetime(today.year, today.month, today.day, tzinfo=_PROJ_CT_TZ).timestamp() * 1000)
     return [ts, *vals]
 
 
