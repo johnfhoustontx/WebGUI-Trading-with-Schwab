@@ -2911,12 +2911,13 @@ def test_off_hours_poll_keeps_the_full_universe(monkeypatch):
 # gex_status + gex_history_db modules so nothing touches the on-disk DB.
 
 def _fake_status_modules(monkeypatch, *, age=120, last_ts=1781530800,
-                         label="OK", color="green"):
+                         label="OK", color="green", session="Regular"):
     import sys as _sys
     import types as _types
 
     fake_status = _types.SimpleNamespace(
-        classify_collector_status=lambda a, now, has, lt: (label, color))
+        classify_collector_status=lambda a, now, has, lt: (label, color),
+        session_label=lambda now: session)
     fake_gh = _types.SimpleNamespace(
         connect=lambda read_only=False: object(),
         last_snapshot_age=lambda conn, symbol, view: (age, last_ts))
@@ -2935,7 +2936,7 @@ def test_gex_status_view_in_window(monkeypatch):
 
     out = compute.gex_status_view(now=now)
     assert set(out) == {"status_label", "status_color", "last_scan",
-                        "next_scan", "age_seconds"}
+                        "next_scan", "age_seconds", "session"}
     assert out["status_label"] == "OK"
     assert out["status_color"] == "green"
     assert out["age_seconds"] == 120
@@ -2955,6 +2956,29 @@ def test_gex_status_view_after_window_no_next(monkeypatch):
 
     out = compute.gex_status_view(now=now)
     assert out["next_scan"] is None
+
+
+def test_gex_status_view_carries_the_named_session(monkeypatch):
+    """E3: the view reports Cboe's session name so the Gamma strip can explain
+    sparse GTH data instead of leaving it looking broken."""
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+
+    _fake_status_modules(monkeypatch, label="Collector: awaiting GTH opens",
+                         color="gray", session="GTH")
+    now = _dt.datetime(2026, 8, 17, 7, 0, tzinfo=ZoneInfo("America/Chicago"))
+    assert compute.gex_status_view(now=now)["session"] == "GTH"
+
+
+def test_gex_status_view_degraded_shape_includes_session():
+    """The defensive fallback must carry every key the page reads."""
+    import sys as _sys
+
+    import pytest as _pytest
+    with _pytest.MonkeyPatch.context() as mp:
+        mp.setitem(_sys.modules, "gex_history_db", None)   # attribute access → boom
+        out = compute.gex_status_view(now=None)
+    assert "session" in out
 
 
 def test_gex_next_scan_boundaries():

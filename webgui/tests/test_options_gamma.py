@@ -679,3 +679,21 @@ def test_status_strip_text_combines_sources():
 def test_status_strip_text_defensive():
     s = gamma.status_strip_text(None, "", 0)
     assert "Last scan —" in s and "Next scan —" in s and "Next refresh 0:00" in s
+
+
+def test_status_strip_text_leads_with_the_named_session():
+    """E3: Cboe's vocabulary (GTH/Regular/Curb/Closed), so sparse 07:00 data has
+    a visible explanation instead of looking like a broken collector."""
+    s = gamma.status_strip_text({"session": "GTH", "last_scan": "3:20 PM",
+                                 "next_scan": "8:00 AM"}, "", None)
+    assert s.startswith("Session GTH")
+    assert "Last scan 3:20 PM" in s
+
+
+def test_status_strip_text_omits_an_unknown_session():
+    """A payload cached before the field existed (or a degraded view, which
+    reports "") must not render a bogus 'Session —'."""
+    for st in ({"last_scan": "1:00 PM"}, {"session": "", "last_scan": "1:00 PM"}):
+        s = gamma.status_strip_text(st, "", None)
+        assert "Session" not in s
+        assert s.startswith("Last scan 1:00 PM")

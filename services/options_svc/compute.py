@@ -2072,11 +2072,14 @@ def gex_status_view(now=None) -> dict:
     """Build the GEX-collector status view the Gamma page's status bar reads.
 
     Returns ``{"status_label", "status_color", "last_scan", "next_scan",
-    "age_seconds"}`` — all JSON-serializable. ``status_label``/``status_color``
-    come from options-scanner's ``gex_status.classify_collector_status`` over the
-    latest ``$SPX``/``gex`` snapshot age (read-only DB open). ``last_scan`` is the
-    last snapshot's local clock time (None if no data); ``next_scan`` is the next
-    5-min collection boundary within the 08:30–15:20 CT window (None outside it).
+    "age_seconds", "session"}`` — all JSON-serializable.
+    ``status_label``/``status_color`` come from options-scanner's
+    ``gex_status.classify_collector_status`` over the latest ``$SPX``/``gex``
+    snapshot age (read-only DB open). ``last_scan`` is the last snapshot's local
+    clock time (None if no data); ``next_scan`` is the next collection boundary
+    within the collection window (None outside it). ``session`` is Cboe's name
+    for the current session — GTH / Regular / Curb / Closed — so the Gamma strip
+    can explain sparse GTH data rather than leaving it looking broken.
 
     Fully defensive: any failure (DB locked/missing, import error) degrades to a
     safe default dict so the page's status bar never breaks."""
@@ -2111,11 +2114,11 @@ def gex_status_view(now=None) -> dict:
 
         return {"status_label": label, "status_color": color,
                 "last_scan": last_scan, "next_scan": next_scan,
-                "age_seconds": age}
+                "age_seconds": age, "session": gs.session_label(now)}
     except Exception:
         return {"status_label": "Collector status unknown",
                 "status_color": "#666666", "last_scan": None,
-                "next_scan": None, "age_seconds": None}
+                "next_scan": None, "age_seconds": None, "session": ""}
 
 
 # Index symbols the flow-skew view reports (the sentiment service reads this as an

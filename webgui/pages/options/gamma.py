@@ -279,12 +279,23 @@ def status_color_class(color):
 
 
 def status_strip_text(gex_status, summary, countdown):
-    """One-line '·'-separated status strip: last/next scan + next-refresh countdown +
-    the per-view summary. The collector STATUS WORD is rendered separately (colored),
-    so it's not included here. Defensive: missing fields → em-dashes."""
+    """One-line '·'-separated status strip: the named market session + last/next
+    scan + next-refresh countdown + the per-view summary. The collector STATUS
+    WORD is rendered separately (colored), so it's not included here.
+
+    The session leads with Cboe's own vocabulary (GTH / Regular / Curb / Closed).
+    It is the context for everything after it: during GTH only the ~7
+    ETH-eligible symbols are collected, so "Last scan" can legitimately point at
+    yesterday. Defensive: missing scan fields → em-dashes, and an absent or
+    empty session is OMITTED rather than rendered as a bogus 'Session —' (a view
+    cached before the field existed, or a degraded one, reports no session).
+    """
     st = gex_status or {}
-    parts = [f"Last scan {st.get('last_scan') or '—'}",
-             f"Next scan {st.get('next_scan') or '—'}"]
+    parts = []
+    if st.get("session"):
+        parts.append(f"Session {st['session']}")
+    parts += [f"Last scan {st.get('last_scan') or '—'}",
+              f"Next scan {st.get('next_scan') or '—'}"]
     if isinstance(countdown, int):
         parts.append(f"Next refresh {countdown // 60}:{countdown % 60:02d}")
     if summary:

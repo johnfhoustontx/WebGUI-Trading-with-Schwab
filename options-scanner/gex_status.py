@@ -34,6 +34,33 @@ def _plus_minutes(t: dtime, minutes: int) -> dtime:
 FIRST_POLL_GRACE = _plus_minutes(MARKET_OPEN, 3)
 
 
+# Cboe's own session vocabulary -- deliberately NOT "pre-market"/"after-hours",
+# which would invite wrong assumptions about which symbols quote and when.
+_SESSION_LABEL = {
+    mc.Session.GTH: "GTH",
+    mc.Session.REGULAR: "Regular",
+    mc.Session.CURB: "Curb",
+    mc.Session.CLOSED: "Closed",
+}
+
+
+def session_label(now_ct) -> str:
+    """The named market session at ``now_ct`` -- GTH / Regular / Curb / Closed.
+
+    Surfaced in the Gamma collector status strip so a user seeing sparse data at
+    07:00 CT can tell WHY: during GTH only the ~7 ETH-eligible symbols are
+    collected. Both extended sessions are inert before the activation date, so
+    this reads Regular/Closed exactly as it always did until 2026-08-17.
+
+    Returns ``""`` if the calendar is somehow unreadable -- the strip then omits
+    the session rather than asserting a wrong one.
+    """
+    try:
+        return _SESSION_LABEL.get(mc.session_at(now_ct), "")
+    except Exception:
+        return ""
+
+
 def _fmt_age(sec: int) -> str:
     if sec < 60:
         return f"{sec}s ago"
@@ -62,6 +89,26 @@ def classify_collector_status(
         return "Collector: idle (outside market hours)", "gray"
 
     if current_time < MARKET_OPEN:
+        if mc.session_at(now_ct) is mc.Session.GTH:
+            # A GROWING AGE IS NORMAL HERE -- never a fault. Two reasons stack:
+            # only the ~7 ETH-eligible symbols are collected during GTH (the
+            # probe symbol $SPX is not one of them, so its age always grows),
+            # and per Cboe a class begins its GTH opening rotation only "upon
+            # receipt of the first round-lot print in the underlying... and
+            # observation of a two-sided bid/ask", with GTH underlying liquidity
+            # that "may likely not be as liquid". So an eligible symbol can
+            # legitimately have no quotes for part or all of GTH, writing no
+            # rows. Reporting that as "stale"/"not running" would cry wolf every
+            # single morning.
+            #
+            # Note this branch is bounded by ``current_time < MARKET_OPEN``:
+            # 08:00-08:25 CT is inside BOTH the GTH session and the regular
+            # collection window, where the full universe IS polled -- there a
+            # growing age is a real fault and still reads as one.
+            if has_data and age_seconds is not None and age_seconds <= STALE_AFTER_SEC:
+                # Leniency is not blindness: if rows ARE landing, say so.
+                return f"● Collector: {_fmt_age(age_seconds)} (GTH)", "green"
+            return "Collector: awaiting GTH opens", "gray"
         # Formatted from the CONFIGURED open, never a hardcoded time.
         return f"Collector: starts {MARKET_OPEN.hour}:{MARKET_OPEN.minute:02d}", "gray"
 
