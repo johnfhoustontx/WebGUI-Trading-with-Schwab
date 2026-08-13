@@ -4,7 +4,30 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-08-13 — *work done 2026-08-02, merged to main 08-13* (**Options extended trading hours (Cboe GTH + Curb), effective 2026-08-17
+**Last updated:** 2026-08-13 (**`big_delta` PUSH go-live via a SEPARATE push bar + two tuning aids**
+(commit `6b1636c`, live in prod). The detector's single `rel_threshold` gated BOTH the screen and the
+phone push, so enabling push at 20% would be ~100 Telegram alerts/day. Fix: a distinct
+**`[big_delta].push_threshold`** (0.35) — the detector still FIRES to the **Flow screen at
+rel_threshold 20%** (comprehensive, ~100/day) but only fires whose share of gross **≥ push_threshold**
+earn a phone push (**~15–25/day**; 23 of 101 on 08/13). `flow_alerts.big_delta_should_push(alert, cfg)`
++ the `handlers.run_flow_alerts` gate replace the old blunt push flag; `push=true`. **Routing** (prod's
+gitignored `notifications.json`): big_delta → the **global Telegram chat** (the sibling flow types
+don't override it, so it lands with them) + a **dedicated Discord webhook** in `routes.big_delta.discord`
+— `flow_category` passes "big_delta" through as its own route key, so **no code change** was needed for
+routing; webhook delivery **live-verified (HTTP 204)**. **Two tuning aids shipped with it:** **#1** a
+**"live fires by rel_threshold"** table baked into the daily 15:30 `flow_delta_instrumentation` report
+(flags the FIRE + PUSH bars; live-verified reproducing 08/13's 20→101 / 25→49 / 30→34 / 35→23 / 40→15),
+and **#2** a sortable **Share %** column on the Flow Alerts screen (`flow._share_pct` stamps the numeric
+share so Quasar ranks by conviction — live-verified renders + numeric sort). Pushes fire only in RTH →
+first live pushes are the next session. Design decision (via AskUserQuestion): the separate push bar
+over a single-threshold-at-35% (keeps the comprehensive screen), built on the two-session finding that
+the 20% total is stable ~100/day while higher-threshold counts swing ~2× (25%: 25→49). Tests:
+flow_alerts +4 (push gate), handlers 2 rewritten, instrumentation +4, flow_page +2 & column test
+updated — **options_svc 1071 passed / 1 PRE-EXISTING baseline fail** (`captured_autoclose` full-suite
+pollution, confirmed on clean `1eeba6b`, flagged as a separate task), **webgui 1248 green**. Pushed to
+GitHub.)
+
+Prior — 2026-08-13 — *work done 2026-08-02, merged to main 08-13* (**Options extended trading hours (Cboe GTH + Curb), effective 2026-08-17
 — plus the market-calendar consolidation it forced**. Cboe C1 adds a morning **GTH** session
 (07:30–09:25 ET = **06:30–08:25 CT**) and an afternoon **Curb** session (16:00–16:15 ET = **15:00–15:15
 CT**) for select multi-listed **single-stock** options. Confirmed date + spec: Cboe notice
