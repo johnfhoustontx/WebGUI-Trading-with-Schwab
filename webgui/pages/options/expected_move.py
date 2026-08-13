@@ -181,8 +181,15 @@ def render():
     # "seeding" suppresses on_value_change while THIS code (not the user) is
     # writing expiry_sel.value, so a programmatic sync can never fire a spurious
     # _draw() — see the on_value_change re-entrancy note below.
+    # "drawn_symbol" is the symbol the chart was last actually drawn FOR (set at
+    # the _enqueue choke point) — used to force a redraw on a symbol switch that
+    # happens to keep the same expiry string (see _apply_chain).
+    # "strike_touched" is True once the user has picked (or explicitly cleared)
+    # a strike — distinct from strike_sel.value is None, which is ambiguous
+    # between "never touched" and "deliberately cleared" (see _strike_changed).
     state = {"ver": None, "chain_ver": None, "last": None,
-             "payload": None, "chain": {}, "seeding": False}
+             "payload": None, "chain": {}, "seeding": False,
+             "drawn_symbol": None, "strike_touched": False}
 
     with ui.row().classes("items-end gap-3 flex-wrap"):
         symbol_in = select_all_on_focus(ui.input("Symbol", value="SPY").classes("w-28"))
@@ -241,6 +248,11 @@ def render():
             return
         # Remember the query (sans look-back) so a look-back change can re-run it.
         state["last"] = {k: payload.get(k) for k in ("symbol", "expiry", "legs")}
+        # Single choke point for every draw (Draw button, expiry pick, look-back
+        # change, handoff) — records the symbol the chart is now FOR, so a later
+        # chain load can tell a real symbol switch apart from a same-symbol
+        # refresh even when the expiry string happens to survive unchanged.
+        state["drawn_symbol"] = payload["symbol"]
         args = {**payload, "lookback": lookback_sel.value}
         bus_client.request("options", {"type": "expected_move", "args": args})
         status.text = f"Computing expected move for {payload['symbol']}…"
@@ -252,8 +264,19 @@ def render():
 
     @guard
     def _lookback_changed():
-        if state.get("last"):
-            _enqueue(state["last"])
+        if not state.get("last"):
+            return
+        payload = state["last"]
+        if state.get("strike_touched"):
+            # The user has taken manual control of the leg overlay since this
+            # query was last enqueued (state["last"] only ever stores what was
+            # sent, never updated by a LOCAL-only strike/type repaint) — resend
+            # the CURRENT on-screen selection so a look-back change can't
+            # silently revert a picked strike back to the stale legs. Gated on
+            # strike_touched so an UNTOUCHED multi-leg handoff (PCS/IC/…) still
+            # re-sends its own multi-leg list, not an empty override.
+            payload = {**payload, "legs": _current_legs()}
+        _enqueue(payload)
 
     @guard
     def _load_chain():
@@ -267,6 +290,15 @@ def render():
     def _strike_changed():
         # Local-only: the strike is a plotLine, and the candles/cone do not
         # depend on it. No command, no chain refetch.
+        if strike_sel.value is not None:
+            # Only a REAL strike pick counts as "the user took control of the
+            # local override" — toggling put/call before ever picking a strike
+            # must not latch this, or a later look-back change would resend an
+            # empty override in place of a still-untouched handed multi-leg
+            # list (see _lookback_changed). Once latched it stays latched
+            # (including through an explicit clear back to None), since that
+            # too is a deliberate user action, not "never touched".
+            state["strike_touched"] = True
         _repaint_local()
 
     def _fill_strikes():
@@ -284,11 +316,10 @@ def render():
         if expiry_sel.value:
             _draw()
 
-    @guard
-    def _poll_chain():
-        version = bus_client.read_version("options:em_chain")
-        if version == state["chain_ver"]:
-            return
+    def _apply_chain(version):
+        """Apply a freshly-landed ``options:em_chain`` payload. Not decorated with
+        ``@guard`` itself — called only from the already-guarded coalesced
+        ``_poll`` tick."""
         state["chain_ver"] = version
         meta = bus_client.read("options:em_chain") or {}
         state["chain"] = meta
@@ -309,6 +340,20 @@ def render():
         finally:
             state["seeding"] = False
         _fill_strikes()
+        # A standard monthly expiry (e.g. "2026-09-18") is commonly listed for
+        # BOTH the old and the new symbol, so the reassignment above can be a
+        # value-unchanged no-op — on_value_change never fires, _expiry_changed
+        # never runs, and _draw() never runs FOR THE NEW SYMBOL. Left alone,
+        # the chart would keep showing the OLD symbol's candles/cone paired
+        # with the NEW symbol's strike ladder (silently mismatched data — the
+        # exact class of bug the chain-driven dropdowns exist to remove).
+        # Force the redraw here, independent of whether the expiry string
+        # moved, whenever the just-loaded chain names a different symbol than
+        # the one the chart is currently drawn for. No-op until an expiry is
+        # actually selected (nothing to draw yet).
+        chain_symbol = meta.get("symbol")
+        if chain_symbol and chain_symbol != state["drawn_symbol"] and expiry_sel.value:
+            _draw()
 
     draw_btn.on_click(_draw)
     bind_symbol_load(symbol_in, _load_chain)          # Enter OR tab-out
@@ -319,18 +364,22 @@ def render():
 
     @guard
     def _poll():
-        version = bus_client.read_version("options:expected_move")
-        if version == state["ver"]:
-            return
-        state["ver"] = version
-        _repaint(bus_client.read("options:expected_move"))
+        # One coalesced 1s tick: read both view versions in a single pipelined
+        # round-trip (cheap :ver counters, no payload deserialize) and dispatch
+        # only whichever changed — the house pattern (see pages/options/gamma.py).
+        v = bus_client.read_versions(["options:expected_move", "options:em_chain"])
+        if v["options:expected_move"] != state["ver"]:
+            state["ver"] = v["options:expected_move"]
+            _repaint(bus_client.read("options:expected_move"))
+        if v["options:em_chain"] != state["chain_ver"]:
+            _apply_chain(v["options:em_chain"])
 
     pending = handoff.take_pending_expected_move()
     if pending:
         symbol_in.value = pending.get("symbol") or symbol_in.value
         if pending.get("expiry"):
             # Seed the select with the handed expiry so it shows BEFORE the
-            # chain lands; _poll_chain keeps it if the real list contains it.
+            # chain lands; _apply_chain keeps it if the real list contains it.
             # Guarded (seeding=True) so this programmatic set can't fire
             # _expiry_changed -> a premature _draw() with the WRONG (empty
             # single-strike) legs, ahead of the _enqueue(pending) below which
@@ -352,4 +401,3 @@ def render():
         _load_chain()
 
     ui.timer(1.0, _poll)
-    ui.timer(1.0, _poll_chain)
