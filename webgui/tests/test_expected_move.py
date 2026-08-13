@@ -68,8 +68,11 @@ def test_expected_move_figure_series_and_crosshair():
     # Y crosshair shows a PRICE label box.
     assert fig["yAxis"]["crosshair"]["label"]["enabled"] is True
     assert "value" in fig["yAxis"]["crosshair"]["label"]["format"]
-    assert any(s.get("dashStyle") == "Dash" for s in fig["series"] if s["type"] == "spline")
+    # EM cone lines are SOLID (no dashStyle) — a dashed cone read as "broken".
+    assert all("dashStyle" not in s for s in fig["series"] if s["type"] == "spline")
     assert len(fig["yAxis"]["plotLines"]) == 2
+    # No hover-dimming of the non-hovered series (candles / EM lines).
+    assert fig["plotOptions"]["series"]["states"]["inactive"]["enabled"] is False
 
 
 def test_expected_move_figure_handles_empty_payload():
@@ -82,6 +85,98 @@ def test_em_lookback_options_has_auto_and_overrides():
     assert opts["auto"].startswith("Auto")
     for key in ("1mo", "3mo", "6mo", "1y"):
         assert key in opts
+
+
+# --- summary_text ---------------------------------------------------------
+
+def test_summary_text_full_payload():
+    payload = {
+        "spot": 772.49, "atm_iv": 0.1158, "expiry": "2026-09-18",
+        "em_upper": [[1, 780.0], [2, 781.41]],
+    }
+    assert em.summary_text(payload) == (
+        "Spot 772.49 · ATM IV 11.58% · Expected move ±8.92 (±1.15%) to 2026-09-18")
+
+
+def test_summary_text_uses_last_cone_point_not_recomputed():
+    """The dollar/percent move must be read off the LAST em_upper point (the
+    series actually plotted), not independently recomputed from atm_iv, so it
+    can never disagree with the drawn cone."""
+    payload = {"spot": 100.0, "atm_iv": 0.5, "expiry": "2026-07-18",
+               "em_upper": [[1, 101.0], [2, 103.0]]}
+    text = em.summary_text(payload)
+    assert "±3.00 (±3.00%)" in text
+
+
+def test_summary_text_missing_atm_iv_omits_that_clause_only():
+    payload = {"spot": 100.0, "atm_iv": None, "expiry": "2026-07-18",
+               "em_upper": [[1, 105.0]]}
+    text = em.summary_text(payload)
+    assert "ATM IV" not in text
+    assert "Spot 100.00" in text
+    assert "Expected move" in text
+
+
+def test_summary_text_empty_cone_omits_move_clause_only():
+    payload = {"spot": 100.0, "atm_iv": 0.2, "expiry": "2026-07-18", "em_upper": []}
+    text = em.summary_text(payload)
+    assert "Expected move" not in text
+    assert "Spot 100.00" in text and "ATM IV 20.00%" in text
+
+
+def test_summary_text_missing_spot_omits_spot_and_move():
+    payload = {"spot": None, "atm_iv": 0.2, "expiry": "2026-07-18",
+               "em_upper": [[1, 105.0]]}
+    text = em.summary_text(payload)
+    assert "Spot" not in text
+    assert "Expected move" not in text
+    assert "ATM IV 20.00%" in text
+
+
+def test_summary_text_no_expiry_drops_to_clause_only():
+    payload = {"spot": 100.0, "atm_iv": 0.2, "expiry": None, "em_upper": [[1, 105.0]]}
+    text = em.summary_text(payload)
+    assert "Expected move ±5.00 (±5.00%)" in text
+    assert " to " not in text
+
+
+def test_summary_text_empty_payload_returns_empty_string():
+    assert em.summary_text({}) == ""
+    assert em.summary_text(None) == ""
+
+
+def test_summary_text_total_over_junk_input():
+    """Never raises — wrong types, malformed cone points, garbage payload."""
+    assert em.summary_text("not a dict") == ""
+    assert em.summary_text({"spot": "oops", "atm_iv": float("nan"),
+                             "em_upper": [[1]], "expiry": 5}) == ""
+    assert em.summary_text({"spot": float("inf"), "em_upper": "nope"}) == ""
+
+
+# --- nearest_strike --------------------------------------------------------
+
+def test_nearest_strike_picks_closest():
+    assert em.nearest_strike([540.0, 545.0, 550.0], 546.0) == 545.0
+
+
+def test_nearest_strike_tie_breaks_to_lower():
+    assert em.nearest_strike([95.0, 105.0], 100.0) == 95.0
+
+
+def test_nearest_strike_empty_ladder_returns_none():
+    assert em.nearest_strike([], 100.0) is None
+    assert em.nearest_strike(None, 100.0) is None
+
+
+def test_nearest_strike_missing_spot_returns_none():
+    assert em.nearest_strike([95.0, 100.0], None) is None
+
+
+def test_nearest_strike_total_over_junk_input():
+    assert em.nearest_strike([95.0, 100.0], "oops") is None
+    assert em.nearest_strike([95.0, 100.0], float("nan")) is None
+    assert em.nearest_strike([95.0, 100.0], -1) == 95.0  # negative spot still resolves
+    assert em.nearest_strike(["junk", None, 105.0], 100.0) == 105.0
 
 
 def test_render_callable():
@@ -370,3 +465,98 @@ def test_lookback_change_untouched_keeps_handoff_legs(monkeypatch):
     assert len(redraws) == 2
     assert redraws[-1][1]["args"]["legs"] == handed_legs  # untouched -> preserved
     assert redraws[-1][1]["args"]["lookback"] == "1y"
+
+
+def test_strike_defaults_to_nearest_spot_no_handoff(monkeypatch):
+    """Standalone flow (no handoff): once a chain lands and the user picks
+    the expiry, the Strike dropdown should silently pre-select the strike
+    nearest spot — so the user isn't scrolling a 181-strike ladder."""
+    import nicegui.ui as ng_ui
+    from nicegui import ui
+
+    import bus_client
+
+    bus_client.reset()
+    handoff.take_pending_expected_move()  # clear any stray pending stash
+
+    monkeypatch.setattr(bus_client, "request", lambda domain, command: None)
+    captured_callbacks = []
+    monkeypatch.setattr(ng_ui, "timer", _make_capturing_timer(captured_callbacks))
+
+    with ui.card() as card:
+        em.render()
+
+    poll = captured_callbacks[0]
+    expiry_sel = _find(card, ui.select, "Expiry")
+    strike_sel = _find(card, ui.select, "Strike (optional)")
+
+    assert strike_sel.value is None  # nothing to default to before a chain loads
+
+    bus_client.bus().cache_set("cache:options:em_chain", {
+        "symbol": "SPY", "api": "SPY", "spot": 551.0,
+        "expirations": ["2026-09-18"],
+        "strikes": {"2026-09-18": [540.0, 550.0, 555.0]}, "error": None})
+    poll()
+    expiry_sel.value = "2026-09-18"  # real user pick -> populates the ladder
+
+    assert strike_sel.value == 550.0  # nearest to spot 551.0
+
+
+def test_handoff_multileg_survives_chain_auto_select_strike(monkeypatch):
+    """A multi-leg handoff (PCS/IC/…) must still show ALL its legs — and
+    strike_touched must stay False — after the chain loads and _fill_strikes
+    runs its nearest-to-spot default. Unlike the no-handoff case above, the
+    default must be SKIPPED entirely here (the Strike dropdown stays empty):
+    silently pre-filling it would make a later, unrelated put/call toggle
+    look like "the user already picked a strike" and clobber the handed
+    lines with a single-strike override (see _fill_strikes)."""
+    import nicegui.ui as ng_ui
+    from nicegui import ui
+
+    import bus_client
+
+    bus_client.reset()
+    handed_legs = [
+        {"strike": 540.0, "option_type": "put", "side": "short"},
+        {"strike": 535.0, "option_type": "put", "side": "long"},
+    ]
+    handoff.set_pending_expected_move(
+        {"symbol": "SPY", "expiry": "2026-09-18", "legs": handed_legs})
+
+    calls = []
+    monkeypatch.setattr(bus_client, "request",
+                        lambda domain, command: calls.append((domain, command)))
+    captured_callbacks = []
+    monkeypatch.setattr(ng_ui, "timer", _make_capturing_timer(captured_callbacks))
+
+    with ui.card() as card:
+        em.render()
+
+    poll = captured_callbacks[0]
+    strike_sel = _find(card, ui.select, "Strike (optional)")
+    lookback_sel = _find(card, ui.select, "Look-back")
+
+    handed_draws = [c for c in calls if c[1].get("type") == "expected_move"]
+    assert len(handed_draws) == 1
+    assert handed_draws[0][1]["args"]["legs"] == handed_legs
+
+    # The chain lands — a naive "nearest to spot" default would land on 550,
+    # which must NOT happen while the handoff's legs are unpreserved.
+    bus_client.bus().cache_set("cache:options:em_chain", {
+        "symbol": "SPY", "api": "SPY", "spot": 550.0,
+        "expirations": ["2026-09-18"],
+        "strikes": {"2026-09-18": [540.0, 545.0, 550.0]}, "error": None})
+    poll()
+
+    assert strike_sel.value is None  # the default was skipped, not just guarded
+
+    # No spurious redraw came from the chain landing (same symbol, no expiry
+    # string change), and — the strike_touched proof — a look-back change
+    # still resends the ORIGINAL handed legs, not a single-strike override.
+    draws_after_chain = [c for c in calls if c[1].get("type") == "expected_move"]
+    assert len(draws_after_chain) == 1
+
+    lookback_sel.value = "1y"
+    redraws = [c for c in calls if c[1].get("type") == "expected_move"]
+    assert len(redraws) == 2
+    assert redraws[-1][1]["args"]["legs"] == handed_legs

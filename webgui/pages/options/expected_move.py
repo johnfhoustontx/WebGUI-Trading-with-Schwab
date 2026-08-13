@@ -9,7 +9,9 @@ Scanner / Paper / Captured / Calculator pages, or standalone from the nav.
 Chart is Highcharts candlestick (extras=["stock"], which also provides the axis
 crosshair label boxes)."""
 
-from .theme import BTN_3D
+import math
+
+from .theme import BTN_3D, MUTED
 
 UP_COLOR = "#26a69a"
 DOWN_COLOR = "#ef5350"
@@ -51,6 +53,23 @@ def strike_options(strikes):
     return {float(s): f"{float(s):g}" for s in (strikes or [])}
 
 
+def nearest_strike(strikes, spot):
+    """The strike in ``strikes`` closest to ``spot`` — the pre-selection for
+    the Strike dropdown so the user isn't scrolling a 181-strike ladder.
+
+    ``None`` for an empty/all-junk ladder or a missing/non-finite spot. Ties
+    break toward the LOWER strike so the result is deterministic regardless
+    of input order. Total over junk input — never raises."""
+    if not isinstance(spot, (int, float)) or isinstance(spot, bool) or not math.isfinite(spot):
+        return None
+    candidates = [float(s) for s in (strikes or [])
+                  if isinstance(s, (int, float)) and not isinstance(s, bool)
+                  and math.isfinite(s)]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda s: (abs(s - spot), s))
+
+
 def expiry_options(expirations, today=None):
     """{expiry: "YYYY-MM-DD  (Nd)"} for the expiry ui.select.
 
@@ -88,6 +107,47 @@ def leg_lines(legs):
     return lines
 
 
+def summary_text(payload):
+    """A compact "Spot … · ATM IV …% · Expected move ±$ (±%) to <expiry>" line
+    shown above the chart. The move's half-width is read off the LAST point of
+    the payload's own ``em_upper`` cone (the series actually plotted) rather
+    than recomputed independently, so the number can never disagree with the
+    drawn cone. Each clause degrades independently — a missing/non-finite
+    ``atm_iv``, an empty cone, or a missing spot just omits that clause, not
+    the whole line. Returns "" when there is nothing to say. Total over junk
+    input (a non-dict payload, wrong-shaped cone points, etc.) — never
+    raises."""
+    p = payload if isinstance(payload, dict) else {}
+    parts = []
+
+    spot = p.get("spot")
+    spot_ok = (isinstance(spot, (int, float)) and not isinstance(spot, bool)
+               and math.isfinite(spot) and spot > 0)
+    if spot_ok:
+        parts.append(f"Spot {spot:.2f}")
+
+    atm_iv = p.get("atm_iv")
+    if (isinstance(atm_iv, (int, float)) and not isinstance(atm_iv, bool)
+            and math.isfinite(atm_iv)):
+        parts.append(f"ATM IV {atm_iv * 100:.2f}%")
+
+    em_upper = p.get("em_upper") or []
+    if spot_ok and em_upper:
+        last = em_upper[-1]
+        upper = last[1] if isinstance(last, (list, tuple)) and len(last) >= 2 else None
+        if (isinstance(upper, (int, float)) and not isinstance(upper, bool)
+                and math.isfinite(upper)):
+            dollar = upper - spot
+            pct = dollar / spot * 100
+            clause = f"Expected move ±{dollar:.2f} (±{pct:.2f}%)"
+            expiry = p.get("expiry")
+            if expiry:
+                clause += f" to {expiry}"
+            parts.append(clause)
+
+    return " · ".join(parts)
+
+
 def expected_move_figure(payload, timeframe="daily", legs=None):
     """Highcharts options for the candlestick + EM cone + leg lines.
 
@@ -109,15 +169,14 @@ def expected_move_figure(payload, timeframe="daily", legs=None):
         "lineColor": DOWN_COLOR, "upLineColor": UP_COLOR,
     }]
     # spline (not line) so the sqrt-time cone renders as a smooth parabola through
-    # the (sparse, trading-day) points instead of straight segments.
+    # the (sparse, trading-day) points instead of straight segments. Solid (no
+    # dashStyle) — a dashed cone read as visually "broken".
     if em_upper:
         series.append({"type": "spline", "name": "Upper EM", "data": em_upper,
-                       "color": EM_UP_COLOR, "dashStyle": "Dash",
-                       "marker": {"enabled": False}})
+                       "color": EM_UP_COLOR, "marker": {"enabled": False}})
     if em_lower:
         series.append({"type": "spline", "name": "Lower EM", "data": em_lower,
-                       "color": EM_DOWN_COLOR, "dashStyle": "Dash",
-                       "marker": {"enabled": False}})
+                       "color": EM_DOWN_COLOR, "marker": {"enabled": False}})
 
     return {
         "chart": {"backgroundColor": "transparent", "height": 540},
@@ -146,6 +205,10 @@ def expected_move_figure(payload, timeframe="daily", legs=None):
         # regardless of the underlying float precision.
         "tooltip": {"shared": True, "xDateFormat": "%a, %b %e, %Y",
                     "valueDecimals": 2},
+        # No hover-dim: without this Highcharts fades every non-hovered series
+        # (candles or EM lines) to ~0.2 opacity on hover (see the RRG chart in
+        # sentiment_rotation.py for the sibling opacity-based use of this hook).
+        "plotOptions": {"series": {"states": {"inactive": {"enabled": False}}}},
         "series": series,
     }
 
@@ -187,9 +250,17 @@ def render():
     # "strike_touched" is True once the user has picked (or explicitly cleared)
     # a strike — distinct from strike_sel.value is None, which is ambiguous
     # between "never touched" and "deliberately cleared" (see _strike_changed).
+    # "strike_seeding" is strike_sel's own analog of "seeding" — kept SEPARATE
+    # (not reused) so a strike default and an expiry sync can never be confused
+    # with each other; it suppresses on_value_change while THIS code (not the
+    # user) writes strike_sel.value in _fill_strikes.
+    # "preserve_handed_legs" is True while there is a handed (Scanner/Paper/
+    # Captured/Calculator) leg list on screen that a silent strike default must
+    # not be allowed to clobber — see _fill_strikes + the handoff block below.
     state = {"ver": None, "chain_ver": None, "last": None,
              "payload": None, "chain": {}, "seeding": False,
-             "drawn_symbol": None, "strike_touched": False}
+             "drawn_symbol": None, "strike_touched": False,
+             "strike_seeding": False, "preserve_handed_legs": False}
 
     with ui.row().classes("items-end gap-3 flex-wrap"):
         symbol_in = select_all_on_focus(ui.input("Symbol", value="SPY").classes("w-28"))
@@ -201,6 +272,8 @@ def render():
                                  label="Look-back").classes("w-40")
         draw_btn = ui.button("Draw", icon="show_chart", color=None).props("no-caps").classes(BTN_3D)
         status = ui.label("").classes("opacity-70 text-sm")
+
+    summary_lbl = ui.label("").classes(f"text-sm {MUTED}")
 
     # stockChart gives an ordinal x-axis (collapses non-trading-day gaps); the
     # stock module also provides candlestick + crosshair label boxes.
@@ -232,6 +305,7 @@ def render():
             status.text = err or (f"Look-back: {spec}" if spec else "")
         chart.options = expected_move_figure(state["payload"] or {})
         chart.update()
+        summary_lbl.text = summary_text(state["payload"])
 
     def _repaint_local():
         """Repaint with the CURRENT strike/type selection as a local override —
@@ -288,6 +362,8 @@ def render():
 
     @guard
     def _strike_changed():
+        if state["strike_seeding"]:
+            return  # programmatic default from _fill_strikes, not a user pick
         # Local-only: the strike is a plotLine, and the candles/cone do not
         # depend on it. No command, no chain refetch.
         if strike_sel.value is not None:
@@ -299,14 +375,43 @@ def render():
             # (including through an explicit clear back to None), since that
             # too is a deliberate user action, not "never touched".
             state["strike_touched"] = True
+            # The user has now demonstrably taken manual control, so a handed
+            # payload's legs no longer need silent-default protection either
+            # (see _fill_strikes) — a later symbol switch is free to re-default.
+            state["preserve_handed_legs"] = False
         _repaint_local()
 
     def _fill_strikes():
+        """Repopulate the strike ladder for the current expiry and, when
+        nothing is already kept, pre-select the strike nearest spot — so the
+        user isn't scrolling a 181-strike ladder.
+
+        The default is SKIPPED while ``state["preserve_handed_legs"]`` is set
+        (a Scanner/Paper/Captured/Calculator handoff's own multi-leg — or
+        single-leg — list is on screen and the user hasn't touched the strike
+        dropdown yet): silently pre-filling strike_sel.value there wouldn't
+        itself repaint the chart (that only happens via a REAL, unguarded
+        on_value_change), but it WOULD make a later put/call toggle look like
+        "the user already picked a strike" (``strike_sel.value is not None``
+        in ``_strike_changed``), latching strike_touched and replacing the
+        handed lines with a single-strike override the user never asked for.
+
+        The write itself is wrapped in ``state["strike_seeding"]`` (strike_sel's
+        own guard, kept separate from expiry_sel's ``state["seeding"]`` so the
+        two programmatic syncs can't be confused) so it can never fire
+        on_value_change -> _strike_changed on its own."""
         ladder = (state["chain"].get("strikes") or {}).get(expiry_sel.value) or []
         keep = strike_sel.value
         strike_sel.options = strike_options(ladder)
-        strike_sel.value = keep if keep in strike_sel.options else None
-        strike_sel.update()
+        new_value = keep if keep in strike_sel.options else None
+        if new_value is None and not state["preserve_handed_legs"]:
+            new_value = nearest_strike(ladder, state["chain"].get("spot"))
+        state["strike_seeding"] = True
+        try:
+            strike_sel.value = new_value
+            strike_sel.update()
+        finally:
+            state["strike_seeding"] = False
 
     @guard
     def _expiry_changed():
@@ -377,6 +482,11 @@ def render():
     pending = handoff.take_pending_expected_move()
     if pending:
         symbol_in.value = pending.get("symbol") or symbol_in.value
+        if pending.get("legs"):
+            # A handed leg list (single OR multi) must survive the chain load
+            # that's about to run (_load_chain -> _apply_chain -> _fill_strikes)
+            # untouched by the strike-nearest-spot default — see _fill_strikes.
+            state["preserve_handed_legs"] = True
         if pending.get("expiry"):
             # Seed the select with the handed expiry so it shows BEFORE the
             # chain lands; _apply_chain keeps it if the real list contains it.
