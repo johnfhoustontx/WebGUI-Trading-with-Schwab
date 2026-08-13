@@ -2428,3 +2428,29 @@ def test_publish_net_premium_reads_the_clock_once(monkeypatch):
 
     assert seen["session_now"] is not None, "active_session_date must be given now"
     assert seen["build_now"] is seen["session_now"], "one clock read, passed to both"
+
+
+# ── Expected Move chain metadata (Task 4) ────────────────────────────────────
+def test_em_chain_command_caches_ladders(monkeypatch):
+    bus = Bus(fake=True)
+    seen = {"symbol": None}
+    result = {"symbol": "SPY", "api": "SPY", "spot": 772.3,
+              "expirations": ["2026-08-14"], "strikes": {"2026-08-14": [770.0]},
+              "error": None}
+
+    def _rec(symbol):
+        seen["symbol"] = symbol
+        return result
+
+    monkeypatch.setattr(handlers.compute, "em_chain_meta", _rec)
+
+    sub = bus.subscribe("events:options:em_chain")
+    handlers.handle_command(bus, Command(type="em_chain", args={"symbol": "SPY"}))
+    msg = sub.get_message(timeout=1.0)
+    sub.close()
+
+    assert seen["symbol"] == "SPY"
+    env = bus.cache_get("cache:options:em_chain")
+    assert env is not None
+    assert env.payload == result
+    assert msg is not None and msg.get("version") == env.version

@@ -272,6 +272,9 @@ _FLOW_CROSSOVER_TAIL = 4
 CACHE_EXPECTED_MOVE = "cache:options:expected_move"
 EVENT_EXPECTED_MOVE = "events:options:expected_move"
 
+CACHE_EM_CHAIN = "cache:options:em_chain"
+EVENT_EM_CHAIN = "events:options:em_chain"
+
 CACHE_RESCUE = "cache:options:rescue"            # per-id: f"{CACHE_RESCUE}:{position_id}"
 CACHE_RESCUE_SUMMARY = "cache:options:rescue_summary"
 EVENT_RESCUE = "events:options:rescue"
@@ -1557,7 +1560,9 @@ def handle_command(bus, command) -> None:
     result + publish; ``calc_iv`` (args spot/strike/option_type/mark/expiry/rate) →
     imply IV from the option mark at the intraday time-to-expiry, cache + publish;
     ``expected_move`` (args symbol/expiry/legs) → build the
-    expected-move cone payload, cache the result + publish; ``rescue`` (args
+    expected-move cone payload, cache the result + publish; ``em_chain`` (args
+    symbol) → expirations + strike ladders for the Expected Move dropdowns;
+    ``rescue`` (args
     position_id) → compute the ranked rescue advisory for one paper position, cache
     per-id + publish; ``rescue_apply`` (args position_id, candidate) → execute the
     approved candidate against the paper position (stale-price guarded), refresh the
@@ -1752,6 +1757,10 @@ def handle_command(bus, command) -> None:
             a.get("lookback", "auto"))
         version = bus.cache_set(CACHE_EXPECTED_MOVE, res)
         bus.publish(EVENT_EXPECTED_MOVE, {"version": version})
+    elif command.type == "em_chain":
+        res = compute.em_chain_meta((command.args or {}).get("symbol", "SPY"))
+        version = bus.cache_set(CACHE_EM_CHAIN, res)
+        bus.publish(EVENT_EM_CHAIN, {"version": version})
     elif command.type == "rescue":
         # position_id may be a paper int OR a captured signal_id string. Coerce
         # to int only for the paper path (the paper loader expects an int id); a
