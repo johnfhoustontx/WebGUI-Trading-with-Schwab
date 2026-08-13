@@ -5435,6 +5435,51 @@ def em_cone(spot, atm_iv, dte, start_ts_ms, holidays=None, trading_days_only=Fal
     return {"upper": upper, "lower": lower}
 
 
+# The daily-history endpoint (periodType=year&period=1) ends at the PREVIOUS
+# trading day — Schwab never returns the forming bar — so the current session is
+# missing from the Expected Move chart. The live quote does carry it, so
+# synthesize it. Gated at/after the open because premarket ``openPrice`` is still
+# the PRIOR session's open and would draw a false bar.
+_TODAY_CANDLE_OPEN = (8, 30)  # local CT market open
+
+
+def today_candle(quote, last_ts_ms, now=None, holidays=None):
+    """``[ts_ms, o, h, l, c]`` for today's forming session bar, or ``None``.
+
+    ``quote`` is a RAW Schwab quote dict (``openPrice``/``highPrice``/
+    ``lowPrice``/``lastPrice``) — the normalized ``SchwabProxyClient.get_quote``
+    drops ``openPrice``. Returns None unless today is a trading day, local time
+    is at/after the 08:30 CT open, every OHLC field is numeric and > 0, and the
+    history's last candle predates today (so this is a no-op should Schwab ever
+    start returning the forming bar). Timestamp is today's local midnight in ms,
+    matching the daily candles' own convention. Never raises."""
+    import datetime as _dt
+
+    if not isinstance(quote, dict):
+        return None
+    now = now or _dt.datetime.now()
+    holidays = holidays or set()
+    today = now.date()
+    if now.weekday() >= 5 or today in holidays:
+        return None
+    if now.time() < _dt.time(*_TODAY_CANDLE_OPEN):
+        return None
+    try:
+        last_date = _dt.datetime.fromtimestamp(int(last_ts_ms) / 1000).date()
+    except (TypeError, ValueError, OSError, OverflowError):
+        return None
+    if last_date >= today:
+        return None
+    vals = []
+    for key in ("openPrice", "highPrice", "lowPrice", "lastPrice"):
+        v = quote.get(key)
+        if not isinstance(v, (int, float)) or isinstance(v, bool) or v <= 0:
+            return None
+        vals.append(float(v))
+    ts = int(_dt.datetime(today.year, today.month, today.day).timestamp() * 1000)
+    return [ts, *vals]
+
+
 def _now_iso():
     import datetime as dt
     return dt.datetime.now(dt.timezone.utc).isoformat()

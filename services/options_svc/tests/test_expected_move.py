@@ -196,3 +196,58 @@ def test_expected_move_command_caches_view(monkeypatch):
                             {"symbol": "SPY", "expiry": "2026-07-18", "legs": []}))
     env = bus.cache_get(handlers.CACHE_EXPECTED_MOVE)
     assert env.payload["symbol"] == "SPY"
+
+
+import datetime as _dt
+
+
+def _quote(**over):
+    q = {"openPrice": 774.71, "highPrice": 774.9, "lowPrice": 771.28,
+         "lastPrice": 772.30}
+    q.update(over)
+    return q
+
+
+def _ms(y, m, d):
+    return int(_dt.datetime(y, m, d).timestamp() * 1000)
+
+
+def test_today_candle_builds_bar_from_quote():
+    # Wed 2026-08-12 10:00 local, history ends Tue the 11th.
+    now = _dt.datetime(2026, 8, 12, 10, 0)
+    bar = compute.today_candle(_quote(), _ms(2026, 8, 11), now=now)
+    assert bar == [_ms(2026, 8, 12), 774.71, 774.9, 771.28, 772.30]
+
+
+def test_today_candle_drawn_after_the_close():
+    # "From the open onward" — still drawn at 19:58 local, not just during RTH.
+    now = _dt.datetime(2026, 8, 12, 19, 58)
+    assert compute.today_candle(_quote(), _ms(2026, 8, 11), now=now) is not None
+
+
+def test_today_candle_skipped_premarket():
+    # Before 08:30 CT the quote's openPrice is still the PRIOR session's open.
+    now = _dt.datetime(2026, 8, 12, 7, 15)
+    assert compute.today_candle(_quote(), _ms(2026, 8, 11), now=now) is None
+
+
+def test_today_candle_skipped_on_weekend_and_holiday():
+    sat = _dt.datetime(2026, 8, 15, 10, 0)
+    assert compute.today_candle(_quote(), _ms(2026, 8, 14), now=sat) is None
+    xmas = _dt.datetime(2026, 12, 25, 10, 0)
+    assert compute.today_candle(_quote(), _ms(2026, 12, 24), now=xmas,
+                                holidays={_dt.date(2026, 12, 25)}) is None
+
+
+def test_today_candle_no_op_when_history_already_has_today():
+    now = _dt.datetime(2026, 8, 12, 10, 0)
+    assert compute.today_candle(_quote(), _ms(2026, 8, 12), now=now) is None
+
+
+def test_today_candle_degrades_on_missing_or_zero_fields():
+    now = _dt.datetime(2026, 8, 12, 10, 0)
+    last = _ms(2026, 8, 11)
+    assert compute.today_candle(_quote(openPrice=None), last, now=now) is None
+    assert compute.today_candle(_quote(lastPrice=0), last, now=now) is None
+    assert compute.today_candle({}, last, now=now) is None
+    assert compute.today_candle(None, last, now=now) is None
