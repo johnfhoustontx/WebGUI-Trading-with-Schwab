@@ -84,3 +84,41 @@ def test_status_text_updated_clock_is_central():
                                "ts": "2026-07-20T22:03:00+00:00"})
     assert "updated 5:03 PM" in text          # Central, not UTC 10:03 PM
     assert "session 2026-07-20" in text
+
+
+# --- ETH-eligible badge (E2) -------------------------------------------------
+# The badge's job is to keep the ~38 non-eligible symbols from reading as
+# stale/broken at 07:00 CT, when only the ~7 eligible names have live rows.
+def test_matrix_rows_stamps_the_eth_flag_and_class():
+    rows = matrix.matrix_rows({"rows": [
+        {"symbol": "NVDA", "eth_eligible": True},
+        {"symbol": "KO", "eth_eligible": False},
+    ]})
+    by = {r["symbol"]: r for r in rows}
+    assert by["NVDA"]["_eth"] is True
+    assert by["NVDA"]["_eth_class"] == matrix.ETH_BADGE_CLASS
+    assert by["KO"]["_eth"] is False
+
+
+def test_matrix_rows_eth_absent_is_false():
+    """A payload cached before the field existed (Redis persists the view across a
+    service restart) must simply show no badge."""
+    rows = matrix.matrix_rows({"rows": [{"symbol": "SPY"}]})
+    assert rows[0]["_eth"] is False
+
+
+def test_eth_badge_class_is_a_muted_static_tailwind_class():
+    """Finite-set → fixed Tailwind class (the page's data-driven-color rule); and
+    it stays visually quiet, since most rows carry it on a post-activation day."""
+    cls = matrix.ETH_BADGE_CLASS
+    # No runtime-built colour: named palette classes only, never a hex/rgba/var
+    # arbitrary (the documented Tailwind JIT trap). A `text-[10px]` SIZE is fine.
+    assert "#" not in cls and "rgba(" not in cls and "var(" not in cls
+    assert "slate" in cls              # muted, not a loud accent colour
+
+
+def test_symbol_slot_renders_the_badge_conditionally():
+    slot = matrix._SYMBOL_SLOT
+    assert "props.row._eth" in slot            # v-if gate
+    assert "props.row._eth_class" in slot      # stamped :class, no inline style
+    assert ":style=" not in slot

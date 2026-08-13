@@ -151,3 +151,32 @@ def test_build_rows_zero_spot_is_not_nulled():
     assert r["spot"] == 0.0
     assert r["flip"] == 0.0
     assert r["gex_regime"] == "above"
+
+# ---- ETH eligibility badge (E2) ----------------------------------------
+# The eligible SET is threaded in as a parameter: build_rows stays PURE (the
+# cache read lives in compute.build_matrix). Absent/None reads as "no
+# eligibility known" -> every row False, which is the fail-safe direction for a
+# badge whose whole job is to explain why a row looks frozen during GTH.
+def test_build_rows_flags_eth_eligible_symbols():
+    raw = {"NVDA": {"series": [], "flip": None},
+           "KO": {"series": [], "flip": None}}
+    rows = m.build_rows(raw, scan_counts={}, alert_counts={}, now_ts=0,
+                        eth_symbols={"NVDA"})
+    by = {r["symbol"]: r for r in rows}
+    assert by["NVDA"]["eth_eligible"] is True
+    assert by["KO"]["eth_eligible"] is False
+
+
+def test_build_rows_eth_defaults_false_without_a_set():
+    rows = m.build_rows({"NVDA": {"series": [], "flip": None}},
+                        scan_counts={}, alert_counts={}, now_ts=0)
+    assert rows[0]["eth_eligible"] is False
+
+
+def test_build_rows_degraded_row_still_carries_eth_eligible():
+    """A symbol whose series blows up still gets the flag -- the badge must not
+    vanish on the exact rows most likely to look broken."""
+    raw = {"NVDA": {"series": "not-a-series", "flip": None}}
+    rows = m.build_rows(raw, scan_counts={}, alert_counts={}, now_ts=0,
+                        eth_symbols={"NVDA"})
+    assert rows[0]["eth_eligible"] is True

@@ -47,6 +47,14 @@ _ACCEL_CLASS = {"hot": "text-emerald-400", "cool": "text-rose-400",
 _ACCEL_ARROW = {"hot": "▲", "cool": "▼", "steady": "▬", "flat": "·"}
 _SIGNAL_LABEL = {"buy": "Buy", "neutral": "Neutral", "sell": "Sell"}
 
+# Cboe extended-hours (GTH/Curb) eligibility marker. Deliberately MUTED — on a
+# post-activation day only ~7 of ~45 rows carry it, and its job is quiet
+# explanation, not attention: at 07:00 CT the other ~38 symbols still show the
+# prior session, and without this marker that frozen majority reads as
+# stale/broken rather than as "not eligible to trade yet".
+ETH_BADGE_CLASS = ("bg-slate-700/50 text-slate-300 text-[10px] "
+                   "font-medium px-1 py-0 ml-1 align-middle")
+
 
 def signal_class(s):
     return _SIGNAL_CLASS.get(s, _SIGNAL_CLASS["neutral"])
@@ -95,6 +103,10 @@ def matrix_rows(payload):
         t_state = r.get("trend_state", "flat")
         rows.append({
             "symbol": r.get("symbol", ""),
+            # Absent on a payload cached before the field existed (Redis keeps
+            # the view across a service restart) → no badge.
+            "_eth": bool(r.get("eth_eligible")),
+            "_eth_class": ETH_BADGE_CLASS,
             "spot": r.get("spot"),
             "day_pct": r.get("day_pct"),
             "_daypct_class": daypct_class(r.get("day_pct")),
@@ -158,6 +170,14 @@ def status_text(payload):
 # ── Colored-cell slots (Tailwind-first): each binds a stamped ``_*_class`` field
 # from ``matrix_rows`` via ``:class`` — no inline style. Raw ``<q-td>`` templates
 # (the scanner.py add_slot idiom).
+_SYMBOL_SLOT = r'''
+  <q-td :props="props">
+    <span>{{ props.value }}</span>
+    <q-badge v-if="props.row._eth" :class="props.row._eth_class" label="ETH">
+      <q-tooltip>Trades in Cboe extended hours (GTH 06:30-08:25 / Curb 15:00-15:15 CT)</q-tooltip>
+    </q-badge>
+  </q-td>
+'''
 _SIGNAL_SLOT = r'''
   <q-td :props="props">
     <q-badge :class="props.row._signal_class + ' px-2 py-1'" :label="props.value"/>
@@ -215,6 +235,7 @@ def render():
             table = ui.table(columns=matrix_columns(), rows=[], row_key="symbol",
                              pagination={"rowsPerPage": 0}) \
                 .classes("w-full matrix-table").props("dense")
+            table.add_slot("body-cell-symbol", _SYMBOL_SLOT)
             table.add_slot("body-cell-signal_label", _SIGNAL_SLOT)
             table.add_slot("body-cell-day_pct", _DAYPCT_SLOT)
             table.add_slot("body-cell-trend", _TREND_SLOT)

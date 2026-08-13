@@ -143,15 +143,27 @@ def hotness(n_signals, n_alerts, signal_strength):
     return 2 * n_signals + 2 * n_alerts + 3 * signal_strength
 
 
-def build_rows(raw, scan_counts, alert_counts, now_ts):
+def build_rows(raw, scan_counts, alert_counts, now_ts, eth_symbols=None):
     """raw = {symbol: {"series": [flow-row tuples], "flip": float|None}}.
 
     Returns a list of per-symbol row dicts (order = raw insertion order).
+
+    ``eth_symbols`` is the set of Cboe extended-hours-eligible tickers, THREADED
+    IN rather than read from a cache here so this stays pure. It drives the
+    additive ``eth_eligible`` flag, which exists to explain the GTH picture: at
+    07:00 CT on a post-activation day only the ~7 eligible names have live rows
+    while the other ~38 still show the prior session, and without a marker the
+    frozen majority reads as stale/broken rather than as "not eligible".
+    ``None`` (no eligibility known) flags every row False -- the fail-safe
+    direction for a badge, since a false ETH badge on a genuinely stale row
+    would explain away a real fault.
     """
+    eth = eth_symbols or ()
     rows = []
     for symbol, blob in raw.items():
         n_sig = int(scan_counts.get(symbol, 0))
         n_alr = int(alert_counts.get(symbol, 0))
+        is_eth = symbol in eth
         try:
             series = blob.get("series") or []
             flip = blob.get("flip")
@@ -190,6 +202,7 @@ def build_rows(raw, scan_counts, alert_counts, now_ts):
                 "signal": sig,
                 "signal_strength": strength,
                 "hotness": hotness(n_sig, n_alr, strength),
+                "eth_eligible": is_eth,
             })
         except Exception:
             # Per-item construction can't sink the batch: one bad symbol must
@@ -212,5 +225,9 @@ def build_rows(raw, scan_counts, alert_counts, now_ts):
                 "signal": "neutral",
                 "signal_strength": 0,
                 "hotness": hotness(n_sig, n_alr, 0),
+                # Carried on the DEGRADED row too: these are the rows most
+                # likely to look broken, so the "not eligible" explanation
+                # matters here most.
+                "eth_eligible": is_eth,
             })
     return rows

@@ -2241,6 +2241,31 @@ def _count_flow_alerts(flow_cooldowns, today):
     return counts
 
 
+def _matrix_eth_symbols() -> set:
+    """The ETH-eligible symbol set for the matrix's ``eth_eligible`` badge.
+
+    The cache read lives HERE (the orchestrator) so ``matrix.build_rows`` stays
+    a pure function of its arguments.
+
+    **Deliberately NOT staleness-gated**, for the same reason as
+    ``_gth_symbols``: ``scheduler.active_session_date`` pivots at
+    ``mc.session_flip_time()`` (08:00 CT), so during GTH the current session
+    date is still the PRIOR trading day -- passing today's date to
+    ``eligible_symbols`` would blank every badge for exactly the 06:30-08:00
+    stretch the badge exists to explain. Cboe re-balances the list twice a year,
+    so the previous session's map is the right basis anyway.
+
+    Display-only and fully defensive: any failure yields an empty set, i.e. no
+    badges, never a broken matrix."""
+    try:
+        from services.options_svc import eth
+
+        return eth.eligible_symbols(_read_eth_cache())
+    except Exception:
+        log.debug("_matrix_eth_symbols degraded", exc_info=True)
+        return set()
+
+
 def build_matrix(scan_day, flow_cooldowns, today, session_date, now_ts):
     """Assemble the ``cache:options:matrix`` payload.
 
@@ -2249,9 +2274,12 @@ def build_matrix(scan_day, flow_cooldowns, today, session_date, now_ts):
     signals from the ``scan_day`` payload + flow-alerts from the ``flow_cooldowns``
     seen-map (``cache:options:flow_alert_cooldowns`` — the uncapped daily source,
     NOT the 50-capped ``flow_alerts`` list), and hands the raw blobs to the PURE
-    ``matrix.build_rows``. No proxy calls. Fully defensive — a DB-connect failure
-    degrades to an empty-rows payload with ``error`` set; a per-symbol read failure
-    yields an empty blob for that symbol (never sinks the build)."""
+    ``matrix.build_rows``. Also reads the ETH-eligibility cache
+    (``_matrix_eth_symbols``) and threads the set down so each row carries an
+    additive ``eth_eligible`` display flag. No proxy calls. Fully defensive — a
+    DB-connect failure degrades to an empty-rows payload with ``error`` set; a
+    per-symbol read failure yields an empty blob for that symbol (never sinks the
+    build)."""
     # ``session_date`` arrives as a ``datetime.date`` OBJECT from
     # ``scheduler.active_session_date()`` — the gex_history DB readers NEED that
     # object (``_local_unix_range`` reads ``d.year/.month/.day``). But the count
@@ -2296,7 +2324,8 @@ def build_matrix(scan_day, flow_cooldowns, today, session_date, now_ts):
 
     try:
         import services.options_svc.matrix as mx
-        rows = mx.build_rows(raw, scan_counts, alert_counts, now_ts)
+        rows = mx.build_rows(raw, scan_counts, alert_counts, now_ts,
+                             eth_symbols=_matrix_eth_symbols())
         rows.sort(key=lambda r: r["hotness"], reverse=True)
     except Exception:
         log.debug("build_matrix: build failed", exc_info=True)

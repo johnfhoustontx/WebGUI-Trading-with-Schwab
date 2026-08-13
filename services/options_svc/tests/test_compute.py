@@ -3555,6 +3555,54 @@ def test_build_matrix_degrades_when_db_unavailable(monkeypatch):
     assert out["error"]
 
 
+# --- ETH eligibility threaded into the matrix rows (E2) ----------------------
+
+def test_build_matrix_marks_eth_eligible_rows(monkeypatch):
+    """build_matrix is the orchestrator that owns the cache read; matrix.build_rows
+    stays pure and receives the set."""
+    from services.options_svc import compute
+    monkeypatch.setattr(compute, "_matrix_symbols", lambda: ["NVDA", "KO"])
+    monkeypatch.setattr(compute, "_matrix_gh", lambda: _fake_gh())
+    monkeypatch.setattr(compute, "_read_eth_cache",
+                        lambda: {"date": "2026-08-17",
+                                 "symbols": {"NVDA": True, "KO": False}})
+    out = compute.build_matrix(scan_day={}, flow_cooldowns={}, today="2026-08-17",
+                               session_date="2026-08-17", now_ts=900)
+    by = {r["symbol"]: r for r in out["rows"]}
+    assert by["NVDA"]["eth_eligible"] is True
+    assert by["KO"]["eth_eligible"] is False
+
+
+def test_build_matrix_eth_read_failure_degrades_to_no_badges(monkeypatch):
+    """A bus outage must not sink the matrix -- it just means no badges."""
+    from services.options_svc import compute
+    def boom():
+        raise RuntimeError("bus down")
+    monkeypatch.setattr(compute, "_matrix_symbols", lambda: ["NVDA"])
+    monkeypatch.setattr(compute, "_matrix_gh", lambda: _fake_gh())
+    monkeypatch.setattr(compute, "_read_eth_cache", boom)
+    out = compute.build_matrix(scan_day={}, flow_cooldowns={}, today="2026-08-17",
+                               session_date="2026-08-17", now_ts=900)
+    assert out["error"] is None
+    assert out["rows"][0]["eth_eligible"] is False
+
+
+def test_build_matrix_eth_read_is_not_staleness_gated(monkeypatch):
+    """Mirrors compute._gth_symbols: active_session_date pivots at 08:00 CT, so
+    during GTH the 'current' session date is still the PRIOR trading day. Gating
+    the eligibility read on it would blank every badge for exactly the 06:30-08:00
+    stretch the badge exists to explain."""
+    from services.options_svc import compute
+    monkeypatch.setattr(compute, "_matrix_symbols", lambda: ["NVDA"])
+    monkeypatch.setattr(compute, "_matrix_gh", lambda: _fake_gh())
+    # Envelope dated the PRIOR session while we build for today.
+    monkeypatch.setattr(compute, "_read_eth_cache",
+                        lambda: {"date": "2026-08-14", "symbols": {"NVDA": True}})
+    out = compute.build_matrix(scan_day={}, flow_cooldowns={}, today="2026-08-17",
+                               session_date="2026-08-17", now_ts=900)
+    assert out["rows"][0]["eth_eligible"] is True
+
+
 # --- apply_live_spots overlay (Task 5) ---------------------------------------
 
 def test_apply_live_spots_recomputes_daypct_from_open_spot():
