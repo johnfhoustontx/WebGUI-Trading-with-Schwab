@@ -5397,6 +5397,80 @@ def atm_iv_from_chain(chain, spot, expiry=None):
     return _scan(False)
 
 
+# Chain-ladder extraction for the Expected Move page's expiry/strike dropdowns.
+# Duplicated from webgui calculator.chain_expiries/chain_strikes ON PURPOSE: a
+# Tier-2 service must not import a Tier-1 page, and publishing the RAW chain (the
+# Calculator's pattern) would put megabytes on the bus for two short lists.
+def chain_expiries(chain):
+    """Sorted unique expiry strings (YYYY-MM-DD) from an option-chain payload."""
+    out = set()
+    for map_key in ("callExpDateMap", "putExpDateMap"):
+        for exp_key in ((chain or {}).get(map_key) or {}):
+            out.add(str(exp_key).split(":")[0])
+    return sorted(out)
+
+
+def chain_strikes(chain, expiry):
+    """Sorted strikes for one expiry, deduped across BOTH call and put maps.
+
+    Put-vs-call is the page toggle's job (it colors the line); the ladder itself
+    is one list so the dropdown does not change under the toggle."""
+    out = set()
+    for map_key in ("callExpDateMap", "putExpDateMap"):
+        for exp_key, strikes in ((chain or {}).get(map_key) or {}).items():
+            if str(exp_key).split(":")[0] != str(expiry):
+                continue
+            for s in (strikes or {}):
+                try:
+                    out.add(float(s))
+                except (ValueError, TypeError):
+                    continue
+    return sorted(out)
+
+
+_EM_CHAIN_DAYS = 90  # today→+90d: monthlies further out than the Calculator's 60d
+
+
+def em_chain_meta(symbol) -> dict:
+    """Expirations + per-expiry strike ladders for the Expected Move dropdowns.
+
+    Returns ``{"symbol", "api", "spot", "expirations", "strikes", "error"}`` —
+    JSON-safe and fully defensive (a failed fetch leaves the ladders empty and
+    the page's manual path working). Never raises."""
+    import datetime as dt
+
+    api = "$SPX" if (symbol or "").upper() == "SPX" else (symbol or "").upper()
+    base = {"symbol": symbol, "api": api, "spot": None,
+            "expirations": [], "strikes": {}, "error": None}
+    if not api:
+        base["error"] = "No symbol."
+        return base
+    try:
+        today = dt.date.today()
+        cresp = _proxy.schwab_py_client.get_option_chain(
+            api, contract_type="ALL", from_date=today,
+            to_date=today + dt.timedelta(days=_EM_CHAIN_DAYS))
+        chain = cresp.json() if getattr(cresp, "status_code", None) == 200 else None
+        if not chain:
+            base["error"] = f"No option chain for {api}."
+            return base
+        exps = chain_expiries(chain)
+        base["expirations"] = exps
+        base["strikes"] = {e: chain_strikes(chain, e) for e in exps}
+        try:
+            qresp = _proxy.schwab_py_client.get_quotes([api])
+            if getattr(qresp, "status_code", None) == 200:
+                info = (qresp.json() or {}).get(api) or {}
+                q = info.get("quote", info.get("reference", info)) or {}
+                base["spot"] = q.get("lastPrice")
+        except Exception:
+            pass
+        return base
+    except Exception as exc:
+        base["error"] = f"{type(exc).__name__}: {exc}"
+        return base
+
+
 _DAY_MS = 86_400_000
 
 

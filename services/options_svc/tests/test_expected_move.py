@@ -343,3 +343,55 @@ def test_compute_expected_move_skips_today_in_intraday_mode(monkeypatch):
     exp = (_dt.date.today() + _dt.timedelta(days=1)).isoformat()
     compute.compute_expected_move("SPY", exp, [])
     assert called == []
+
+
+_CHAIN = {
+    "callExpDateMap": {"2026-08-14:2": {"770.0": [{}], "775.0": [{}]},
+                       "2026-09-18:37": {"800.0": [{}]}},
+    "putExpDateMap": {"2026-08-14:2": {"765.0": [{}], "770.0": [{}]}},
+}
+
+
+def test_chain_expiries_and_strikes():
+    assert compute.chain_expiries(_CHAIN) == ["2026-08-14", "2026-09-18"]
+    # Deduped ACROSS call+put — one ladder per expiry.
+    assert compute.chain_strikes(_CHAIN, "2026-08-14") == [765.0, 770.0, 775.0]
+    assert compute.chain_strikes(_CHAIN, "2026-09-18") == [800.0]
+    assert compute.chain_strikes(_CHAIN, "2026-01-01") == []
+
+
+def test_chain_helpers_defensive_on_junk():
+    assert compute.chain_expiries(None) == []
+    assert compute.chain_expiries({}) == []
+    assert compute.chain_strikes({"callExpDateMap": {"x:1": {"nope": [{}]}}}, "x") == []
+
+
+def test_em_chain_meta_builds_payload(monkeypatch):
+    class _Resp:
+        status_code = 200
+        def __init__(self, d): self._d = d
+        def json(self): return self._d
+
+    monkeypatch.setattr(compute._proxy, "schwab_py_client", type("C", (), {
+        "get_quotes": staticmethod(
+            lambda syms: _Resp({"SPY": {"quote": {"lastPrice": 772.3}}})),
+        "get_option_chain": staticmethod(lambda *a, **k: _Resp(_CHAIN)),
+    })())
+    out = compute.em_chain_meta("SPY")
+    assert out["symbol"] == "SPY" and out["api"] == "SPY"
+    assert out["spot"] == 772.3
+    assert out["expirations"] == ["2026-08-14", "2026-09-18"]
+    assert out["strikes"]["2026-08-14"] == [765.0, 770.0, 775.0]
+    assert out["error"] is None
+
+
+def test_em_chain_meta_maps_spx_and_degrades(monkeypatch):
+    def _boom(*a, **k):
+        raise RuntimeError("proxy down")
+    monkeypatch.setattr(compute._proxy, "schwab_py_client",
+                        type("C", (), {"get_quotes": staticmethod(_boom),
+                                       "get_option_chain": staticmethod(_boom)})())
+    out = compute.em_chain_meta("SPX")
+    assert out["api"] == "$SPX"
+    assert out["expirations"] == [] and out["strikes"] == {}
+    assert out["error"]
