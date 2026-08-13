@@ -182,9 +182,19 @@ git commit -m "feat(options): today_candle synthesizes the forming daily bar fro
 - Test: `services/options_svc/tests/test_expected_move.py`
 
 The function currently fetches spot via `_proxy.schwab_client.get_quote`, whose
-normalization **drops `openPrice`**. Switch to the raw
+normalization **drops `openPrice`**. Prefer the raw
 `_proxy.schwab_py_client.get_quotes([api])` (the unwrap `calc_load_symbol`
-already performs) so one call yields both the spot and the candle's open.
+already performs) so one call yields both the spot and the candle's open, and
+**keep `schwab_client.get_quote` as a fallback**.
+
+⚠ The fallback is load-bearing, not belt-and-braces. Two existing tests in this
+file (`test_compute_expected_move_builds_payload`,
+`test_compute_expected_move_skips_partial_candle`, lines ~120-177) monkeypatch a
+`schwab_py_client` double that has **no `get_quotes` method** and supply spot via
+`schwab_client.get_quote`. Without the fallback those fixtures silently lose
+their spot. Both are already red for an unrelated date-relative reason (their
+hardcoded `2026-07-18` expiry is in the past, so `dte < 0`) — so they are **not**
+a usable regression signal here. Do not "fix" their dates; that is out of scope.
 
 **Step 1: Write the failing test**
 
@@ -220,6 +230,36 @@ def test_compute_expected_move_appends_todays_candle(monkeypatch):
     assert out["em_upper"][0][0] == _ms(2026, 8, 12)
 
 
+def test_compute_expected_move_spot_falls_back_to_normalized_quote(monkeypatch):
+    """A schwab_py_client without get_quotes must still yield a spot.
+
+    Guards the existing fixtures in this file, whose doubles predate the raw-quote
+    switch. Those fixtures are already red for a date-relative reason, so this is
+    the only live check of the fallback.
+    """
+    monkeypatch.setattr(compute, "_fetch_em_candles",
+                        lambda *a, **k: [[_ms(2026, 8, 11), 1, 1, 1, 99.0]])
+    monkeypatch.setattr(compute, "atm_iv_from_chain", lambda *a, **k: 0.15)
+    monkeypatch.setattr(compute, "today_candle", lambda *a, **k: None)
+
+    class _PY:  # no get_quotes — exactly like the older fixtures
+        def get_option_chain(self, *a, **k):
+            class _R:
+                status_code = 200
+                @staticmethod
+                def json(): return {}
+            return _R()
+
+    class _SC:
+        def get_quote(self, sym): return {"last": 123.0}
+
+    monkeypatch.setattr(compute._proxy, "schwab_py_client", _PY())
+    monkeypatch.setattr(compute._proxy, "schwab_client", _SC())
+    exp = (_dt.date.today() + _dt.timedelta(days=30)).isoformat()
+    out = compute.compute_expected_move("SPY", exp, [])
+    assert out["spot"] == 123.0          # normalized fallback, not the candle close
+
+
 def test_compute_expected_move_skips_today_in_intraday_mode(monkeypatch):
     """dte<=2 uses intraday candles, which already reach today."""
     called = []
@@ -246,8 +286,10 @@ Expected: FAIL — the last candle is still `2026-08-11`.
 Replace the spot block in `compute_expected_move` (currently lines ~5549-5555):
 
 ```python
-        # Raw quote (NOT schwab_client.get_quote — its normalization drops
-        # openPrice, which today's synthetic candle needs).
+        # Prefer the RAW quote: the normalized schwab_client.get_quote drops
+        # openPrice, which today's synthetic candle needs. Fall back to the
+        # normalized client when the raw one yields nothing, so the spot path
+        # degrades exactly as it did before.
         raw_q = {}
         try:
             qresp = _proxy.schwab_py_client.get_quotes([api])
@@ -257,6 +299,10 @@ Replace the spot block in `compute_expected_move` (currently lines ~5549-5555):
         except Exception:
             raw_q = {}
         spot = raw_q.get("lastPrice") if isinstance(raw_q, dict) else None
+        if not spot:
+            q = _proxy.schwab_client.get_quote(api) or {}
+            if isinstance(q, dict):
+                spot = q.get("last")
         if not spot:
             spot = candles[-1][4]
         base["spot"] = spot
