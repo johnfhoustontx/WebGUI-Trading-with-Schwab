@@ -37,6 +37,7 @@ EVIDENCE_KEYS = frozenset({
     "profile_balance",              # 0..1 (1 = balanced single-HVN profile)
     "rel_vol",                      # relative volume
     "atr_pctile",                   # 0..1
+    "vix_level",                    # absolute VIX (the primary volatility tell)
     "vix1d_spike_pct",              # day-over-day %
     "term_inversion",               # 0..1 inversion depth
     "gap_open_pct", "gap_filled",   # float, bool
@@ -77,9 +78,20 @@ WHIPSAW_LO, WHIPSAW_HI = 3.0, 8.0
 CHOP_ATR_LO, CHOP_ATR_HI = 0.5, 0.9       # effort-without-direction: high ATR ...
 CHOP_ADX_LO, CHOP_ADX_HI = 15.0, 25.0     # ... x (1 - ramp(adx)) low ADX
 
-# Crisis (max over tells — any single tell is sufficient)
+# Volatile / stress regime (internal key "crisis"; DISPLAYED as "Volatile").
+# max() over tells — any single tell is sufficient — so each tell must only fire
+# at a genuinely elevated level or the label overstates a normal day.
+# Absolute VIX is the PRIMARY tell (the most direct fear gauge): a VIX ~22 (just
+# above its long-run norm) starts contributing, a stressed ~34 saturates and, at
+# ~30, trips the fast-attack force-commit. Before this (2026-07-24) there was NO
+# absolute-VIX input — the regime leaned on ATR percentile (a noisy proxy) and
+# read ~34% on ordinary wide-range days.
+VIX_STRESS_LO, VIX_STRESS_HI = 22.0, 34.0
 VIX1D_SPIKE_LO, VIX1D_SPIKE_HI = 10.0, 35.0   # day-over-day %
-CRISIS_ATR_LO, CRISIS_ATR_HI = 0.85, 0.97
+# ATR percentile is now a CORROBORATING extreme-realized-vol tell, not a solo
+# driver: floor raised 0.85 -> 0.92 so only a near-record-range day contributes
+# (a merely-wide day at the ~90th pctile no longer pushes the regime up).
+CRISIS_ATR_LO, CRISIS_ATR_HI = 0.92, 0.99
 # Unfilled-gap crisis tell — a RAMP over genuinely extreme gaps, NOT a binary
 # cliff. Routine 1-2% opening gaps happen weekly and are not crises; a
 # crisis-grade gap is a tail event (~3%+ unfilled, holding). A 2.5-5% ramp means
@@ -286,6 +298,9 @@ def _crisis(ev):
     # max(), not average — any single crisis tell is sufficient; a missing input
     # simply doesn't contribute a candidate to the max.
     tells = []   # (value, string_or_None)
+    vlev = _num(ev.get("vix_level"))
+    if vlev is not None:
+        tells.append((ramp(vlev, VIX_STRESS_LO, VIX_STRESS_HI), f"VIX {vlev:.0f}"))
     spike = _num(ev.get("vix1d_spike_pct"))
     if spike is not None:
         tells.append((ramp(spike, VIX1D_SPIKE_LO, VIX1D_SPIKE_HI), f"VIX1D {spike:+.0f}%"))

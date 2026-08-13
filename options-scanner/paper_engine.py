@@ -354,7 +354,8 @@ def underlying_last(client, symbol):
         return None
 
 
-def run_manage_cycle(client, now_date, broker=None, db_path=None, now_ct=None):
+def run_manage_cycle(client, now_date, broker=None, db_path=None, now_ct=None,
+                     lifecycle=False, be_level_fn=None):
     """Re-price open positions, apply exit rules (target / CUT / expiration), and
     trip the session drawdown halt. RTH gating is the caller's responsibility.
 
@@ -362,7 +363,22 @@ def run_manage_cycle(client, now_date, broker=None, db_path=None, now_ct=None):
     later day) via ``should_settle`` — so a 0-DTE spread is held to the close, not
     force-settled at the open — and falls back to a direct underlying quote when
     the repricer can't supply one (a past expiration). ``now_ct`` defaults to the
-    live CT clock; inject it for deterministic tests."""
+    live CT clock; inject it for deterministic tests.
+
+    ``lifecycle`` (default False — today's plain TAKE_PROFIT-at-+50% behavior,
+    used by both the manual paper account and the driver's isolated account)
+    opts THIS call into the captured-style break-even lifecycle: the first time
+    a position's pnl reaches +50% of credit it ARMS break-even (persisted via
+    ``paper_account_db.set_be_armed``) and HOLDs instead of closing, riding
+    toward full credit under a break-even stop; a later give-back through
+    ``be_level_fn(pos)`` (or a hard money/time/delta stop) closes it. Mirrors
+    ``services/options_svc/compute.run_captured_manage_cycle``'s arming, INCLUDING
+    its arm-AFTER-``recommend()`` ordering, so the crossing cycle HOLDs (arm and
+    hold) via Rule 5 rather than risking a same-cycle break-even stop on a
+    tiny-credit structure. ``be_level_fn`` is an optional ``pos ->
+    float`` callable supplying the break-even close floor in dollars (e.g.
+    round-trip commissions); ignored when ``lifecycle`` is False, defaults to
+    $0.0 when ``lifecycle`` is True but no ``be_level_fn`` is supplied."""
     broker = broker or _default_broker
     now_ct = now_ct or datetime.now(TZ)
     signal_repricer.clear_chain_cache()        # fresh quotes for every fill
@@ -410,7 +426,28 @@ def run_manage_cycle(client, now_date, broker=None, db_path=None, now_ct=None):
         ctx = {"entry_credit": pos["entry_credit"], "unrealized_pnl": per_contract,
                "current_short_delta": mark.get("current_short_delta"),
                "dte_remaining": dte}
+        if lifecycle:
+            ctx["lifecycle"] = True
+            ctx["be_armed"] = bool(pos.get("be_armed"))
+            ctx["be_level"] = be_level_fn(pos) if be_level_fn else 0.0
+            ctx["spot"] = mark.get("current_underlying")
+            ctx["short_strike"] = pos.get("short_strike")
+            ctx["call_short"] = pos.get("call_short")
+            ctx["strategy"] = pos.get("strategy")
+            # paper_positions carries no entry_short_delta column — recommend()
+            # falls back to the absolute-breach delta stop when this is None.
+            ctx["entry_short_delta"] = pos.get("entry_short_delta")
         rec = signal_recommender.recommend(ctx)
+        if (lifecycle and not pos.get("be_armed") and per_contract
+                >= signal_recommender.TP_FRAC * (pos["entry_credit"] * MULTIPLIER)):
+            # Arm break-even AFTER recommend() — mirroring the captured cycle
+            # (compute.run_captured_manage_cycle), which arms once the mark shows
+            # +50%. The crossing cycle therefore HOLDs via Rule 5 (arm-and-hold);
+            # arming it BEFORE recommend() would instead let Rule 3's break-even
+            # stop fire the SAME cycle whenever round-trip commissions exceed the
+            # +50% threshold (a tiny-credit IC), closing at break-even rather than
+            # riding the winner. Rule 3 governs from the next cycle onward.
+            paper_account_db.set_be_armed(db_path, pos["position_id"])
         if rec["action"] in ("TAKE_PROFIT", "CUT"):
             order = {"signal_id": pos["signal_id"], "symbol": pos["symbol"],
                      "side": "BUY_TO_CLOSE", "strategy": pos["strategy"],

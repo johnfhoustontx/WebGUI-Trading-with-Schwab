@@ -12,10 +12,10 @@ def test_strategy_menu_value_and_change_interface():
         sm = SM.build_strategy_menu(value="PCS", classes="w-48")
         sm.on_value_change(lambda e: fired.append(e.value))
         assert sm.value == "PCS"
-        assert sm.button.text == "Credit spread · put"
+        assert sm.button.text == "Credit spread — put"
         sm.value = "CCS"          # assigning .value fires handlers (like a select)
     assert sm.value == "CCS"
-    assert sm.button.text == "Credit spread · call"
+    assert sm.button.text == "Credit spread — call"
     assert fired == ["CCS"]
 
 

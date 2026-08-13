@@ -122,10 +122,16 @@ class _Resp:
 
 
 def test_compute_expected_move_builds_payload(monkeypatch):
+    # Expiry computed relative to today (never a hardcoded past date) and kept
+    # comfortably beyond em_lookback_spec's dte<=2 intraday cutoff so this stays
+    # on the DAILY branch the test is actually exercising.
+    import datetime as dt
+    exp = (dt.date.today() + dt.timedelta(days=30)).isoformat()
+
     candles = [{"datetime": 1_700_000_000_000 + i * compute._DAY_MS,
                 "open": 100, "high": 101, "low": 99, "close": 100 + i}
                for i in range(200)]
-    chain = {"callExpDateMap": {"2026-07-18:28": {"100.0": [{"volatility": 20.0}]}}}
+    chain = {"callExpDateMap": {f"{exp}:28": {"100.0": [{"volatility": 20.0}]}}}
 
     class _PY:
         def get_price_history_every_day(self, sym):
@@ -140,9 +146,13 @@ def test_compute_expected_move_builds_payload(monkeypatch):
 
     monkeypatch.setattr(compute._proxy, "schwab_py_client", _PY())
     monkeypatch.setattr(compute._proxy, "schwab_client", _SC())
+    # Isolate this test from the synthetic today-candle append (a separate,
+    # already-covered behaviour) so it stays deterministic regardless of the
+    # weekday/time it runs.
+    monkeypatch.setattr(compute, "today_candle", lambda *a, **k: None)
 
     out = compute.compute_expected_move(
-        "SPY", "2026-07-18",
+        "SPY", exp,
         [{"strike": 100.0, "option_type": "put", "side": "short"}])
 
     assert out["error"] is None
@@ -174,13 +184,17 @@ def test_compute_expected_move_error_on_no_history(monkeypatch):
 
 
 def test_compute_expected_move_skips_partial_candle(monkeypatch):
+    # Same date-relative-expiry rationale as test_compute_expected_move_builds_payload.
+    import datetime as dt
+    exp = (dt.date.today() + dt.timedelta(days=30)).isoformat()
+
     good = [{"datetime": 1_700_000_000_000 + i * compute._DAY_MS,
              "open": 100, "high": 101, "low": 99, "close": 100 + i}
             for i in range(5)]
     partial = {"datetime": 1_700_000_000_000 + 99 * compute._DAY_MS,
                "close": 150}  # missing open/high/low
     raw = good + [partial]
-    chain = {"callExpDateMap": {"2026-07-18:28": {"100.0": [{"volatility": 20.0}]}}}
+    chain = {"callExpDateMap": {f"{exp}:28": {"100.0": [{"volatility": 20.0}]}}}
 
     class _PY:
         def get_price_history_every_day(self, sym):
@@ -195,8 +209,12 @@ def test_compute_expected_move_skips_partial_candle(monkeypatch):
 
     monkeypatch.setattr(compute._proxy, "schwab_py_client", _PY())
     monkeypatch.setattr(compute._proxy, "schwab_client", _SC())
+    # Isolate the partial-bar-filtering behaviour this test is actually about
+    # from the separate synthetic today-candle append, so len(candles) == 5
+    # holds regardless of the weekday/time the suite runs.
+    monkeypatch.setattr(compute, "today_candle", lambda *a, **k: None)
 
-    out = compute.compute_expected_move("SPY", "2026-07-18", [])
+    out = compute.compute_expected_move("SPY", exp, [])
     assert out["error"] is None
     assert len(out["candles"]) == 5            # the partial bar was skipped
     assert all(len(row) == 5 for row in out["candles"])
@@ -222,3 +240,224 @@ def test_expected_move_command_caches_view(monkeypatch):
                             {"symbol": "SPY", "expiry": "2026-07-18", "legs": []}))
     env = bus.cache_get(handlers.CACHE_EXPECTED_MOVE)
     assert env.payload["symbol"] == "SPY"
+
+
+import datetime as _dt
+
+
+def _quote(**over):
+    q = {"openPrice": 774.71, "highPrice": 774.9, "lowPrice": 771.28,
+         "lastPrice": 772.30}
+    q.update(over)
+    return q
+
+
+def _ms(y, m, d):
+    # Pin the real convention (Schwab's daily-candle epoch is midnight CT) rather
+    # than the host's timezone — building this naively only passed by accident on
+    # a CT host.
+    from zoneinfo import ZoneInfo
+    return int(_dt.datetime(y, m, d, tzinfo=ZoneInfo("America/Chicago")).timestamp() * 1000)
+
+
+def test_today_candle_builds_bar_from_quote():
+    # Wed 2026-08-12 10:00 local, history ends Tue the 11th.
+    now = _dt.datetime(2026, 8, 12, 10, 0)
+    bar = compute.today_candle(_quote(), _ms(2026, 8, 11), now=now)
+    assert bar == [_ms(2026, 8, 12), 774.71, 774.9, 771.28, 772.30]
+
+
+def test_today_candle_drawn_after_the_close():
+    # "From the open onward" — still drawn at 19:58 local, not just during RTH.
+    now = _dt.datetime(2026, 8, 12, 19, 58)
+    assert compute.today_candle(_quote(), _ms(2026, 8, 11), now=now) is not None
+
+
+def test_today_candle_skipped_premarket():
+    # Before 08:30 CT the quote's openPrice is still the PRIOR session's open.
+    now = _dt.datetime(2026, 8, 12, 7, 15)
+    assert compute.today_candle(_quote(), _ms(2026, 8, 11), now=now) is None
+
+
+def test_today_candle_skipped_on_weekend_and_holiday():
+    sat = _dt.datetime(2026, 8, 15, 10, 0)
+    assert compute.today_candle(_quote(), _ms(2026, 8, 14), now=sat) is None
+    xmas = _dt.datetime(2026, 12, 25, 10, 0)
+    assert compute.today_candle(_quote(), _ms(2026, 12, 24), now=xmas,
+                                holidays={_dt.date(2026, 12, 25)}) is None
+
+
+def test_today_candle_no_op_when_history_already_has_today():
+    now = _dt.datetime(2026, 8, 12, 10, 0)
+    assert compute.today_candle(_quote(), _ms(2026, 8, 12), now=now) is None
+
+
+def test_today_candle_degrades_on_missing_or_zero_fields():
+    now = _dt.datetime(2026, 8, 12, 10, 0)
+    last = _ms(2026, 8, 11)
+    assert compute.today_candle(_quote(openPrice=None), last, now=now) is None
+    assert compute.today_candle(_quote(lastPrice=0), last, now=now) is None
+    assert compute.today_candle({}, last, now=now) is None
+    assert compute.today_candle(None, last, now=now) is None
+    # isinstance(True, int) is True in Python — a bool must not slip through
+    # the numeric check as a truthy "price".
+    assert compute.today_candle(_quote(openPrice=True), last, now=now) is None
+
+
+def test_compute_expected_move_appends_todays_candle(monkeypatch):
+    """Daily mode appends the forming bar, and the cone anchors on IT."""
+    hist = [[_ms(2026, 8, 10), 772.6, 775.05, 771.62, 773.03],
+            [_ms(2026, 8, 11), 774.53, 774.61, 769.2, 770.56]]
+    monkeypatch.setattr(compute, "_fetch_em_candles", lambda *a, **k: list(hist))
+    monkeypatch.setattr(compute, "atm_iv_from_chain", lambda *a, **k: 0.15)
+
+    today_candle_calls = []
+
+    def _fake_today_candle(*args, **kwargs):
+        today_candle_calls.append((args, kwargs))
+        return [_ms(2026, 8, 12), 774.71, 774.9, 771.28, 772.3]
+
+    monkeypatch.setattr(compute, "today_candle", _fake_today_candle)
+
+    class _Resp:
+        status_code = 200
+        def __init__(self, d): self._d = d
+        def json(self): return self._d
+
+    monkeypatch.setattr(compute._proxy, "schwab_py_client", type("C", (), {
+        "get_quotes": staticmethod(
+            lambda syms: _Resp({"SPY": {"quote": {"lastPrice": 772.3,
+                                                  "openPrice": 774.71,
+                                                  "highPrice": 774.9,
+                                                  "lowPrice": 771.28}}})),
+        "get_option_chain": staticmethod(lambda *a, **k: _Resp({})),
+    })())
+
+    exp = (_dt.date.today() + _dt.timedelta(days=30)).isoformat()
+    out = compute.compute_expected_move("SPY", exp, [])
+    assert out["candles"][-1][0] == _ms(2026, 8, 12)
+    assert out["spot"] == 772.3
+    # The cone anchors at the LAST candle — today's, not yesterday's.
+    assert out["em_upper"][0][0] == _ms(2026, 8, 12)
+
+    # Pin the wiring: the raw quote and the PRE-append last candle ts (not the
+    # post-append one) reached today_candle.
+    assert len(today_candle_calls) == 1
+    call_args, call_kwargs = today_candle_calls[0]
+    assert call_args[0] == {"lastPrice": 772.3, "openPrice": 774.71,
+                            "highPrice": 774.9, "lowPrice": 771.28}
+    assert call_args[1] == _ms(2026, 8, 11)
+    # NO holidays kwarg is passed any more, deliberately. It used to carry a
+    # bounded 2026-27 set imported from ``scheduler._HOLIDAYS`` behind a bare
+    # ``except: set()``; that alias was retired in the calendar consolidation, so
+    # the import would have failed SILENTLY and handed today_candle an EMPTY set,
+    # making every market holiday look like a trading day. ``today_candle`` now
+    # consults ``market_calendar.is_trading_day`` itself (derived per year), and
+    # the kwarg survives only as optional EXTRA ad-hoc closures.
+    assert "holidays" not in call_kwargs
+
+
+def test_compute_expected_move_spot_falls_back_to_normalized_quote(monkeypatch):
+    """A schwab_py_client without get_quotes must still yield a spot.
+
+    Guards the existing fixtures in this file, whose doubles predate the raw-quote
+    switch. Those fixtures are already red for a date-relative reason, so this is
+    the only live check of the fallback.
+    """
+    monkeypatch.setattr(compute, "_fetch_em_candles",
+                        lambda *a, **k: [[_ms(2026, 8, 11), 1, 1, 1, 99.0]])
+    monkeypatch.setattr(compute, "atm_iv_from_chain", lambda *a, **k: 0.15)
+    monkeypatch.setattr(compute, "today_candle", lambda *a, **k: None)
+
+    class _PY:  # no get_quotes — exactly like the older fixtures
+        def get_option_chain(self, *a, **k):
+            class _R:
+                status_code = 200
+                @staticmethod
+                def json(): return {}
+            return _R()
+
+    class _SC:
+        def get_quote(self, sym): return {"last": 123.0}
+
+    monkeypatch.setattr(compute._proxy, "schwab_py_client", _PY())
+    monkeypatch.setattr(compute._proxy, "schwab_client", _SC())
+    exp = (_dt.date.today() + _dt.timedelta(days=30)).isoformat()
+    out = compute.compute_expected_move("SPY", exp, [])
+    assert out["spot"] == 123.0          # normalized fallback, not the candle close
+
+
+def test_compute_expected_move_skips_today_in_intraday_mode(monkeypatch):
+    """dte<=2 uses intraday candles, which already reach today."""
+    called = []
+    monkeypatch.setattr(compute, "today_candle",
+                        lambda *a, **k: called.append(1) or [0, 1, 1, 1, 1])
+    monkeypatch.setattr(compute, "_fetch_em_candles",
+                        lambda *a, **k: [[_ms(2026, 8, 11), 1, 1, 1, 1]])
+    monkeypatch.setattr(compute, "atm_iv_from_chain", lambda *a, **k: None)
+
+    class _PY:  # like its neighbours: no live proxy traffic
+        def get_option_chain(self, *a, **k): return _Resp({})
+        def get_quotes(self, *a, **k): return _Resp({})
+
+    class _SC:
+        def get_quote(self, sym): return {}
+
+    monkeypatch.setattr(compute._proxy, "schwab_py_client", _PY())
+    monkeypatch.setattr(compute._proxy, "schwab_client", _SC())
+
+    exp = (_dt.date.today() + _dt.timedelta(days=1)).isoformat()
+    compute.compute_expected_move("SPY", exp, [])
+    assert called == []
+
+
+_CHAIN = {
+    "callExpDateMap": {"2026-08-14:2": {"770.0": [{}], "775.0": [{}]},
+                       "2026-09-18:37": {"800.0": [{}]}},
+    "putExpDateMap": {"2026-08-14:2": {"765.0": [{}], "770.0": [{}]}},
+}
+
+
+def test_chain_expiries_and_strikes():
+    assert compute.chain_expiries(_CHAIN) == ["2026-08-14", "2026-09-18"]
+    # Deduped ACROSS call+put — one ladder per expiry.
+    assert compute.chain_strikes(_CHAIN, "2026-08-14") == [765.0, 770.0, 775.0]
+    assert compute.chain_strikes(_CHAIN, "2026-09-18") == [800.0]
+    assert compute.chain_strikes(_CHAIN, "2026-01-01") == []
+
+
+def test_chain_helpers_defensive_on_junk():
+    assert compute.chain_expiries(None) == []
+    assert compute.chain_expiries({}) == []
+    assert compute.chain_strikes({"callExpDateMap": {"x:1": {"nope": [{}]}}}, "x") == []
+
+
+def test_em_chain_meta_builds_payload(monkeypatch):
+    class _Resp:
+        status_code = 200
+        def __init__(self, d): self._d = d
+        def json(self): return self._d
+
+    monkeypatch.setattr(compute._proxy, "schwab_py_client", type("C", (), {
+        "get_quotes": staticmethod(
+            lambda syms: _Resp({"SPY": {"quote": {"lastPrice": 772.3}}})),
+        "get_option_chain": staticmethod(lambda *a, **k: _Resp(_CHAIN)),
+    })())
+    out = compute.em_chain_meta("SPY")
+    assert out["symbol"] == "SPY" and out["api"] == "SPY"
+    assert out["spot"] == 772.3
+    assert out["expirations"] == ["2026-08-14", "2026-09-18"]
+    assert out["strikes"]["2026-08-14"] == [765.0, 770.0, 775.0]
+    assert out["error"] is None
+
+
+def test_em_chain_meta_maps_spx_and_degrades(monkeypatch):
+    def _boom(*a, **k):
+        raise RuntimeError("proxy down")
+    monkeypatch.setattr(compute._proxy, "schwab_py_client",
+                        type("C", (), {"get_quotes": staticmethod(_boom),
+                                       "get_option_chain": staticmethod(_boom)})())
+    out = compute.em_chain_meta("SPX")
+    assert out["api"] == "$SPX"
+    assert out["expirations"] == [] and out["strikes"] == {}
+    assert out["error"]

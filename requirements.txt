@@ -77,5 +77,11 @@ pydantic>=2.0             # typed payload contracts shared between tiers (also p
 tweepy>=4.14             # X/Twitter API v2 client — posts scanner signals to a public account
                          #   (opt-in: twitter.enabled in shared/notifications.json; needs OAuth 1.0a keys).
 
+# --- Desktop HUD (NEW: tools/nq_hud.py) ---
+customtkinter>=5.2       # dark-themed Tk widgets for the always-on-top NQ dealer-positioning
+                         #   HUD. Imported lazily inside NQHud.__init__ / main(), so every other
+                         #   entrypoint — and the whole test suite — runs without it installed.
+                         #   Pulls in darkdetect. Tk itself ships with CPython.
+
 # --- Testing (P, O, S, D) ---
 pytest

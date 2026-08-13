@@ -16,8 +16,15 @@ STRINGS. The pure builders (``bars_from_gex`` sorts + numeric-compares strikes;
 ``heatmap_matrix`` sorts strikes) require float keys — so the page re-floats them
 via ``_refloat_keys`` BEFORE feeding the builders. The builders stay unchanged.
 """
+import math
+from zoneinfo import ZoneInfo
+
+import app_settings
+import page_help as _page_help
 from pages.ui_guard import guard, guard_async
-from .theme import BTN, BTN_PRIMARY
+from shared import market_calendar as _mc
+from .inputs import select_all_on_focus
+from .theme import BTN, BTN_PRIMARY, MUTED
 
 POS_COLOR = "#66bb6a"
 NEG_COLOR = "#ef5350"
@@ -26,6 +33,7 @@ PRICE_LINE = "#f5f5f5"          # off-white — spot track overlaid on the dark 
 HEATMAP_SEP = "#4d4d4d"         # softer (lighter) cell-separator mesh on the heatmap
 FLIP_COLOR = "#42a5f5"
 WALL_COLOR = "#b39ddb"
+PROJ_FLIP_COLOR = "#ffb74d"   # projected EOD delta-flip (0-DTE charm drift)
 
 # Dark theme for all charts (matches the app's dark shell).
 DARK_BG = "#1b1b1b"
@@ -103,6 +111,68 @@ def _strike_step(strikes):
     return statistics.median(diffs) if diffs else 1.0
 
 
+# A resampled ladder past this many rows is refused — the raster gains nothing
+# beyond the panel's own pixel height (~570px), and a pathological chain (one
+# stray half-strike among round ones) would otherwise explode the row count.
+_MAX_UNIFORM_ROWS = 240
+
+
+def uniform_strike_grid(strikes, z):
+    """Resample ``(strikes, z)`` onto an EVENLY spaced strike ladder.
+
+    ``interpolation: True`` rasterizes the heatmap onto a canvas laid out on ONE
+    uniform row height (``_strike_step``, the median gap). That is fine for a chain
+    whose strikes are evenly spaced — every symbol here except **$NDX**, which
+    quotes 5-wide near the money among 10-wide elsewhere (measured live: 28 gaps of
+    5 among 56 of 10). Under a 10-row canvas the 5-wide strikes collide two-into-one
+    and the cells between them are never written, so the upscaled image reads as a
+    comb of vertical stripes instead of a smooth field.
+
+    Filling the ladder to the FINEST gap makes the data grid match the canvas grid.
+    The inserted rows are linearly interpolated between their bracketing real
+    strikes — which invents no information the chart wasn't already implying, since
+    an interpolated heatmap shades between samples regardless; it just does the
+    shading on a grid the rasterizer can represent. A column is left ``None``
+    wherever either bracketing strike is ``None``, so genuine holes stay holes.
+
+    Returns ``(strikes, z)`` UNCHANGED when the ladder is already uniform (the
+    common case — no cost), when there is nothing to resample, or when the result
+    would exceed ``_MAX_UNIFORM_ROWS``."""
+    if len(strikes) < 3:
+        return strikes, z
+    gaps = [b - a for a, b in zip(strikes, strikes[1:]) if b > a]
+    if not gaps:
+        return strikes, z
+    step = min(gaps)
+    # Uniform already? (fp tolerance — strikes arrive as floats off JSON.)
+    if max(gaps) - step <= step * 1e-6:
+        return strikes, z
+    span = strikes[-1] - strikes[0]
+    n = int(round(span / step)) + 1
+    if n > _MAX_UNIFORM_ROWS or n <= len(strikes):
+        return strikes, z
+    ncols = len(z[0]) if z else 0
+    ladder = [strikes[0] + i * step for i in range(n)]
+    tol = step * 1e-6
+    out = []
+    j = 0                        # index of the real strike at/below the ladder row
+    for y in ladder:
+        while j + 1 < len(strikes) and strikes[j + 1] <= y + tol:
+            j += 1
+        if abs(strikes[j] - y) <= tol:          # a real strike — take its row as-is
+            out.append(list(z[j]))
+            continue
+        if j + 1 >= len(strikes):               # past the last real strike
+            out.append([None] * ncols)
+            continue
+        lo, hi = strikes[j], strikes[j + 1]
+        w = (y - lo) / (hi - lo) if hi > lo else 0.0
+        a_row, b_row = z[j], z[j + 1]
+        out.append([None if (a is None or b is None) else a + (b - a) * w
+                    for a, b in zip(a_row, b_row)])
+    return ladder, out
+
+
 def _view_label(view):
     """Display label for a view (GEX→GAMMA, DEX→DELTA; others unchanged)."""
     return _VIEW_LABELS.get(view, view)
@@ -130,6 +200,48 @@ def line_annotations(spot, flip, walls):
         side = "Call wall" if (spot is None or w >= spot) else "Put wall"
         anns.append({"value": w, "text": f"{side} {w:g}", "color": WALL_COLOR})
     return anns
+
+
+def _level_plot_line(value, text, color):
+    """One horizontal reference line (+ right-aligned label) for the strike axis."""
+    return {"value": value, "color": color, "width": 1, "dashStyle": "Dash",
+            "zIndex": 4,
+            "label": {"text": text, "align": "right", "x": -6, "y": -4,
+                      "style": {"color": color, "fontSize": "10px"}}}
+
+
+def _is_level(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def wall_plot_lines(spot, walls, flip=None, projected_flip=None):
+    """Gamma-flip + Call/Put wall (+ projected EOD flip) levels as yAxis plotLines —
+    horizontal, so they run ACROSS the heatmap's full time axis.
+
+    The bar chart already marks these levels on the shared strike axis; extending
+    them over the heatmap shows where price sat relative to the flip and the walls
+    at every point in the session, not just now. Naming/colors match
+    ``line_annotations`` so the two panels read as one.
+
+    ``projected_flip`` is where the DEX curve crosses zero once the 0-DTE book's
+    deltas are advanced to the 15:00 CT close by CHARM at flat spot (engine
+    ``compute_projected_flip``). It is a 0-DTE DELTA concept, not this view's own
+    metric, so it is drawn on EVERY view as a shared reference and labeled
+    "Proj. flip" in its own color — the gap between it and the actual flip IS the
+    hedging drift, expressed in price. ``None`` on any symbol whose nearest expiry
+    isn't today (most of them). Non-numeric levels are skipped rather than raising."""
+    out = []
+    if _is_level(flip):
+        out.append(_level_plot_line(flip, f"Gamma flip {flip:g}", FLIP_COLOR))
+    if _is_level(projected_flip):
+        out.append(_level_plot_line(
+            projected_flip, f"Proj. flip {projected_flip:g}", PROJ_FLIP_COLOR))
+    for w in (walls or []):
+        if not _is_level(w):
+            continue
+        side = "Call wall" if (spot is None or w >= spot) else "Put wall"
+        out.append(_level_plot_line(w, f"{side} {w:g}", WALL_COLOR))
+    return out
 
 
 def _robust_zmax(z, q=0.95):
@@ -194,9 +306,14 @@ def bars_from_gex(data, spot, n_side=N_SIDE):
     """
     gex = (data or {}).get("gex") or {}
     if not isinstance(spot, (int, float)):
-        return {"strikes": [], "nets": [], "colors": [], "hovers": []}
+        return {"strikes": [], "nets": [], "colors": [], "hovers": [], "projected": []}
+    # Each strike's OWN 0-DTE charm drift (the engine's per-strike drift map).
+    # Present only while the nearest expiry is today, and only on the strikes that
+    # actually hold 0-DTE interest — so `projected` is None elsewhere and the chart
+    # skips drawing an outline that would just sit on top of the solid bar.
+    drift = (data or {}).get("hedge_drift_by_strike") or {}
     window = set(strikes_around(gex.keys(), spot, n_side))
-    strikes, nets, colors, hovers = [], [], [], []
+    strikes, nets, colors, hovers, projected = [], [], [], [], []
     for strike in sorted(gex):
         if strike not in window:
             continue
@@ -205,9 +322,13 @@ def bars_from_gex(data, spot, n_side=N_SIDE):
         strikes.append(strike)
         nets.append(net)
         colors.append(POS_COLOR if net >= 0 else NEG_COLOR)
+        d = drift.get(strike)
+        projected.append(net + d if isinstance(d, (int, float))
+                         and not isinstance(d, bool) else None)
         hovers.append(f"{strike:g}: net {net:,.0f} "
                       f"(C {cell.get('call', 0):,.0f} / P {cell.get('put', 0):,.0f})")
-    return {"strikes": strikes, "nets": nets, "colors": colors, "hovers": hovers}
+    return {"strikes": strikes, "nets": nets, "colors": colors, "hovers": hovers,
+            "projected": projected}
 
 
 def union_range(yrange, values, pad_frac=0.01):
@@ -360,10 +481,35 @@ def bar_figure(data, spot, view="GEX", walls=None, flip=None, n_side=N_SIDE, hei
         "tooltip": {"backgroundColor": "#222222", "borderColor": "#444444",
                     "style": {"color": FONT, "fontSize": "11px"},
                     "headerFormat": "", "pointFormat": "{point.custom.hover}"},
+        # grouping False so the projected outline OVERLAYS its bar instead of being
+        # drawn beside it (which would halve the bar width and break the alignment
+        # with the heatmap).
+        # crisp False: with crisping ON, a bar whose value is exactly 0 gets its
+        # 1px border subtracted from a 0-height rect, so Highcharts emits
+        # height="-1" and the browser logs 'A negative value is not valid'. Purely
+        # a console warning (nothing renders wrong), but a zero-net strike is
+        # routine here, so silence it at the source rather than live with the noise.
         "plotOptions": {"bar": {"pointPadding": 0.04, "groupPadding": 0,
-                                "borderRadius": 0}},
+                                "borderRadius": 0, "grouping": False,
+                                "crisp": False}},
         "series": [{"type": "bar", "name": label, "data": points, "colorByPoint": False}],
     })
+    # Projected close: each strike's net after ITS OWN 0-DTE charm drift. Drawn as an
+    # outline ON TOP of the solid bar (transparent fill) so it reads whether the
+    # projection EXTENDS past the current bar or pulls back INSIDE it — a filled bar
+    # behind would be invisible in the pull-back case. Amber, matching the projected
+    # flip line. Omitted entirely when the symbol has no 0-DTE book.
+    proj_pts = [{"x": s_, "y": pv,
+                 "custom": {"hover": f"{s_:g}: projected close {pv:,.0f}"}}
+                for s_, pv in zip(b["strikes"], b.get("projected") or [])
+                if isinstance(pv, (int, float)) and not isinstance(pv, bool)]
+    if proj_pts:
+        fig["series"].append({
+            "type": "bar", "name": "Projected close", "data": proj_pts,
+            "color": "transparent", "borderColor": PROJ_FLIP_COLOR, "borderWidth": 1,
+            "enableMouseTracking": True,
+            "states": {"inactive": {"enabled": False}, "hover": {"enabled": False}},
+        })
     return fig
 
 
@@ -408,7 +554,147 @@ def _coloraxis(zmax):
     return ca
 
 
-def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None):
+UP_COLOR, DOWN_COLOR = "#7fd1a3", "#e79a9a"   # candle/OHLC up / down
+
+
+def ohlc_bars(spots, interval):
+    """``[[x, open, high, low, close], …]`` from the per-snapshot spot samples.
+
+    Spot is stored as a 1-min POINT SAMPLE, not a bar, so bars are derived the way
+    any charting tool builds them from a sampled series: ``open`` is the PREVIOUS
+    bar's close (carried forward, so bars are contiguous and even a 1-min bar has a
+    body — that minute's move — instead of a degenerate O==H==L==C dash), and
+    high/low span that open plus this bucket's samples. ``x`` is the bucket's
+    CENTRE column so the bar sits over the heatmap cells it summarizes.
+
+    HONEST LIMIT: highs/lows are sampled once a minute, so wicks understate the
+    true intra-minute extremes — these are bars over the same series the spot line
+    draws, not exchange bars. Buckets with no usable sample emit no bar; a None
+    sample is skipped rather than read as 0 (which would spike the low). Never
+    raises."""
+    try:
+        step = int(interval)
+    except (TypeError, ValueError):
+        return []
+    if step <= 0:
+        return []
+    out, prev_close = [], None
+    spots = list(spots or [])
+    for start in range(0, len(spots), step):
+        chunk = spots[start:start + step]
+        vals = [v for v in chunk
+                if isinstance(v, (int, float)) and not isinstance(v, bool)]
+        if not vals:
+            continue
+        o = prev_close if prev_close is not None else vals[0]
+        c = vals[-1]
+        out.append([start + (len(chunk) - 1) // 2, o, max([o] + vals),
+                    min([o] + vals), c])
+        prev_close = c
+    return out
+
+
+def candle_points(bars):
+    """(body, wick) point lists for the candle/OHLC overlay.
+
+    Candlesticks are a Highcharts STOCK series, and loading the stock module
+    breaks this chart outright — it patches ``Chart.update``, which this heatmap
+    depends on for its flicker-free in-place refresh, leaving the chart with zero
+    series (live-verified). So the bars are drawn from two core series instead:
+    a ``columnrange`` body (open→close) and an ``errorbar`` wick (low→high), each
+    point carrying its OWN color so up and down bars are distinguishable within
+    one series."""
+    body, wick = [], []
+    for b in (bars or []):
+        try:
+            x, o, hi, lo, c = b[0], b[1], b[2], b[3], b[4]
+        except (TypeError, IndexError):
+            continue
+        color = UP_COLOR if c >= o else DOWN_COLOR
+        body.append({"x": x, "low": min(o, c), "high": max(o, c), "color": color})
+        wick.append({"x": x, "low": lo, "high": hi, "color": color,
+                     "stemColor": color, "whiskerColor": color})
+    return body, wick
+
+
+def hedge_points(hedge_rows):
+    """``[[x, $B, color], …]`` for the hedge-pressure panel.
+
+    x is the row INDEX so the panel shares the heatmap's time-category axis exactly.
+    Dollars are converted to BILLIONS (raw values run to 1e9+ and are unreadable),
+    and each point is colored by SIGN — positive means dealers must BUY into the
+    close, negative SELL — so a flip from one to the other is visible at a glance."""
+    out = []
+    for i, r in enumerate(hedge_rows or []):
+        v = (r or {}).get("hedge_pressure")
+        if not isinstance(v, (int, float)) or isinstance(v, bool):
+            continue
+        out.append([i, round(v / 1e9, 4), UP_COLOR if v >= 0 else DOWN_COLOR])
+    return out
+
+
+def hedge_summary_text(hedge_rows):
+    """One-line read of the CURRENT hedge pressure ('' when there is none)."""
+    pts = [r.get("hedge_pressure") for r in (hedge_rows or [])
+           if isinstance((r or {}).get("hedge_pressure"), (int, float))]
+    if not pts:
+        return ""
+    v = pts[-1]
+    side = "buy" if v >= 0 else "sell"
+    return (f"0-DTE hedge pressure {'+' if v >= 0 else '-'}${abs(v)/1e9:.2f}B — "
+            f"dealers must {side} into the close if spot holds")
+
+
+def hedge_figure(hedge_rows, times, height=150):
+    """Compact signed-column panel of 0-DTE hedge pressure over the session.
+
+    Its OWN element, below the heatmap: pressure is in DOLLARS while the heatmap's
+    y-axis is STRIKE (and is pixel-aligned to the bar chart), so it cannot share
+    that axis. The x axis reuses the heatmap's time categories, so the two read
+    together vertically."""
+    pts = hedge_points(hedge_rows)
+    fig = _base_chart("column", height)
+    fig["chart"]["backgroundColor"] = "transparent"
+    fig["chart"]["marginLeft"] = 0
+    fig["chart"]["marginRight"] = 0
+    fig.update({
+        "title": {"text": None},
+        "legend": {"enabled": False},
+        "xAxis": {**_dark_axis(), "categories": list(times or []),
+                  "labels": {"enabled": False}},
+        "yAxis": {**_dark_axis(), "title": {"text": None},
+                  "labels": {"enabled": False},
+                  "plotLines": [{"value": 0, "color": "#42506b", "width": 1,
+                                 "zIndex": 3}]},
+        "series": [{
+            "type": "column", "name": "Hedge pressure",
+            "data": [{"x": x, "y": y, "color": c} for x, y, c in pts],
+            "borderWidth": 0, "groupPadding": 0.02, "pointPadding": 0.0,
+            # Same zero-height crisping warning as the bar chart — and pressure
+            # legitimately decays to exactly 0 at the close, so it WILL happen daily.
+            "crisp": False,
+            "states": {"inactive": {"enabled": False}, "hover": {"enabled": False}},
+            "enableMouseTracking": True,
+            "tooltip": {"headerFormat": "",
+                        "pointFormat": "Hedge {point.y:+,.2f}B"},
+        }],
+    })
+    return fig
+
+
+def track_points(values):
+    """[[time_index, level], …] for a level track, keeping None as a GAP.
+
+    Nulls must be preserved rather than skipped: dropping them would shift every
+    later point one column to the left, silently mis-dating the movement."""
+    return [[i, v if isinstance(v, (int, float)) and not isinstance(v, bool) else None]
+            for i, v in enumerate(values or [])]
+
+
+def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
+                   walls=None, spot=None, flip=None, levels=None,
+                   show_tracks=False, spot_style="line", spot_interval=5,
+                   projected_flip=None):
     """Intraday strike×time Highcharts heatmap (dark, cell separators, concise
     hover) with the underlying spot-price line overlaid on the same (linear)
     strike axis. ``yrange`` (when given) sets the Strike axis range so it aligns
@@ -430,18 +716,27 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None):
         vis = [yi for yi in range(len(strikes)) if lo <= strikes[yi] <= hi]
     else:
         vis = list(range(len(strikes)))
+    # Fill an unevenly spaced ladder ($NDX quotes 5-wide near the money among
+    # 10-wide) so the data grid matches the uniform grid `interpolation: True`
+    # rasterizes onto — otherwise the finer strikes collide two-into-one row and
+    # the unwritten cells between them read as vertical stripes. No-op (same lists
+    # back) for every evenly spaced chain. MUST run on the VISIBLE strikes only:
+    # the full chain spans ~3000-9800 with wide wing gaps, which would resample to
+    # thousands of rows and be refused by the row cap.
+    vstrikes, vz = uniform_strike_grid([strikes[yi] for yi in vis],
+                                       [z[yi] for yi in vis])
     # Heatmap points [time_index, strike_value, net]: x is the time category index,
     # y is the ACTUAL strike (linear axis) so the continuous spot line overlays.
-    data = [[xi, strikes[yi], z[yi][xi]]
-            for yi in vis for xi in range(len(times))
-            if z[yi][xi] is not None]
+    data = [[xi, vstrikes[yi], vz[yi][xi]]
+            for yi in range(len(vstrikes)) for xi in range(len(times))
+            if vz[yi][xi] is not None]
     # Symmetric color clamp from the VISIBLE cells' 95th-percentile |net| (robust —
     # same as the Term heatmap) so a few extreme strikes don't wash the mid-range
     # colors to transparent on the flatter views (Charm / DEX / Vanna).
-    zmax = _robust_zmax([z[yi] for yi in vis]) or None
-    # Row height from the VISIBLE strikes' typical spacing (median gap) so cells
-    # tile the window densely regardless of off-window strike spacing.
-    rowsize = _strike_step([strikes[yi] for yi in vis])
+    zmax = _robust_zmax(vz) or None
+    # Row height = the (now uniform) ladder's spacing, so cells tile the window
+    # densely and every canvas row has a strike to fill it.
+    rowsize = _strike_step(vstrikes)
     # Blended look: interpolation renders one smooth image (no per-cell borders or
     # separator mesh); states.inactive disabled so nothing fades on hover/click.
     no_fade = {"inactive": {"enabled": False}, "hover": {"enabled": False}}
@@ -468,6 +763,7 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None):
         # Future heatmap cells on the SAME heatmap series/colorAxis, cropped to yrange.
         proj_rows_for_zmax = []
         heat_series = series[0]      # the heatmap series
+        pairs = []
         for strike, vals in pgrid.items():
             try:
                 sk = float(strike)
@@ -475,13 +771,22 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None):
                 continue
             if yrange is not None and not (yrange[0] <= sk <= yrange[1]):
                 continue
+            pairs.append((sk, list(vals)))
+        pairs.sort()                 # uniform_strike_grid needs an ordered ladder
+        pstrikes = [sk for sk, _ in pairs]
+        prows = [vals for _, vals in pairs]
+        # Same ladder fill as the collected cells — the projection sits on the
+        # chain's own strikes, so on a mixed ladder it would speckle the band with
+        # unwritten rows while the session behind it renders smooth.
+        pstrikes, prows = uniform_strike_grid(pstrikes, prows)
+        for sk, vals in zip(pstrikes, prows):
             proj_rows_for_zmax.append([v for v in vals if v is not None])
             for j, v in enumerate(vals):
                 if v is not None:
                     heat_series["data"].append([base + j, sk, v])
         # Re-clamp the color axis over collected + projected visible cells (robust
         # 95th-pct so a few extreme 0-DTE ATM close cells don't wash the scale).
-        zmax = _robust_zmax([z[yi] for yi in vis] + proj_rows_for_zmax) or None
+        zmax = _robust_zmax(vz + proj_rows_for_zmax) or None
         # 'now' divider between the last collected and first future column.
         xaxis_plotlines.append({"value": base - 0.5, "color": "#8a93a3", "width": 1,
                                 "dashStyle": "Dash", "zIndex": 4,
@@ -509,17 +814,55 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None):
              "tooltip": {"headerFormat": "", "pointFormat": name + " {point.y:,.2f}"}}
         s.update(extra)
         return s
-    series.append(_line_series("Spot", spot_pts, PRICE_LINE, lineWidth=2,
-                               enableMouseTracking=True))
+    # Spot overlay: line, candles, or OHLC. All three series ALWAYS exist (empty
+    # when not selected) so the series count stays fixed — see the note above. The
+    # bar styles share one geometry: a columnrange BODY + an errorbar WICK. "OHLC"
+    # is the same bars drawn thin, so it reads as a bar rather than a filled candle
+    # (true left/right open-close ticks need the stock module, which breaks this
+    # chart's in-place update — see candle_points).
+    _bars = (ohlc_bars(spots, spot_interval)
+             if spot_style in ("candle", "ohlc") else [])
+    _body, _wick = candle_points(_bars)
+    series.append(_line_series("Spot", spot_pts if spot_style == "line" else [],
+                               PRICE_LINE, lineWidth=2, enableMouseTracking=True))
+    series.append({
+        "type": "columnrange", "name": "Spot candles", "data": _body,
+        "colorAxis": False, "states": no_fade, "borderWidth": 0,
+        "grouping": False, "enableMouseTracking": False,
+        **({"pointWidth": 2} if spot_style == "ohlc" else {}),
+    })
+    series.append({
+        "type": "errorbar", "name": "Spot wicks", "data": _wick,
+        "colorAxis": False, "states": no_fade, "grouping": False,
+        "whiskerLength": ("60%" if spot_style == "ohlc" else 0),
+        "enableMouseTracking": False,
+    })
     series.append(_line_series("EM up", em_up_pts, "#7fd1a3", lineWidth=1,
                                dashStyle="ShortDash", enableMouseTracking=False))
     series.append(_line_series("EM down", em_down_pts, "#e79a9a", lineWidth=1,
                                dashStyle="ShortDash", enableMouseTracking=False))
+    # Level-movement tracks (toggleable): where the flip + walls sat at each
+    # snapshot. SOLID, against the dashed static plotLines of the same color — so
+    # the pair reads as "the level now" (dashed) and "how it got there" (solid).
+    # Stepped, because a wall holds a strike then JUMPS to the next one; a smooth
+    # line would imply levels that never existed. Emitted even when toggled off
+    # (empty data) to keep the series count fixed — see the note above.
+    lv = levels or {}
+    for name, key, color in (("Flip track", "flip", FLIP_COLOR),
+                             ("Call wall track", "call_wall", WALL_COLOR),
+                             ("Put wall track", "put_wall", WALL_COLOR)):
+        pts = track_points(lv.get(key)) if show_tracks else []
+        series.append(_line_series(name, pts, color, lineWidth=1, step="left",
+                                   enableMouseTracking=False))
     # The bar chart already labels the Strike axis and the heatmap shares its EXACT
     # y-range, so hide the heatmap's (duplicate) strike labels + title and drop its
     # left-axis gutter — the cells butt directly against the bars.
     yaxis = {**_dark_axis(), "startOnTick": False, "endOnTick": False,
-             "title": {"text": None}, "labels": {"enabled": False}}
+             "title": {"text": None}, "labels": {"enabled": False},
+             # ALWAYS emit the key (empty when there are no levels): in-place
+             # chart.update() MERGES options, so omitting it would leave the
+             # previous view's flip/wall lines painted over the new view.
+             "plotLines": wall_plot_lines(spot, walls, flip, projected_flip)}
     if yrange is not None:
         yaxis["min"], yaxis["max"] = yrange[0], yrange[1]
     fig = _base_chart("heatmap", height)
@@ -758,12 +1101,521 @@ def flow_summary_text(rows):
             f"net ${(cp - pp) / 1e6:+,.1f}M · {cv:,} call / {pv:,} put contracts")
 
 
+# ── Net Prem view ───────────────────────────────────────────────────────────
+# Intraday net premium (cumulative call $ − cumulative put $) for any combination
+# of ~28 symbols, from ``cache:options:net_premium``.
+#
+# The group/colour tables below DUPLICATE ``services/options_svc/net_premium.GROUPS``
+# on purpose: Tier 1 may import only nicegui / bus_client / shared.contracts, never
+# ``services.*``. Tests pin the membership so the two copies cannot drift silently.
+#
+# Everything here is TOTAL over the payload. ``NetPremiumSnapshot.series`` is typed
+# as a bare ``dict``, so ``{'SPY': 'notalist'}``, ``{'SPY': [[1]]}``, ``{'SPY': [None]}``
+# and ``{'SPY': [[1, 'x', 'y']]}`` all pass validation and can really arrive here.
+# Positional row access is PARTIAL — unlike the ``.get()`` reads the matrix page uses,
+# a bare ``row[1]`` raises IndexError and 500s the WHOLE Dealer Positioning page. So a
+# malformed row skips that point, a malformed symbol skips that series, and the rest
+# of the chart still renders.
+#
+# Shape note: JSON round-trip is not identity. Tuples arrive as LISTS and dict keys
+# as STRINGS, so the page always sees ``list`` rows keyed by ``str`` — which is what
+# makes positional access viable at all. Nothing below may assume tuples.
+NET_PREM_GROUPS = (
+    {"key": "indices", "label": "Indices & Broad",
+     "symbols": ("$SPX", "$NDX", "BIG10", "SPY", "QQQ", "IWM", "DIA")},
+    {"key": "sectors", "label": "SPDR Sectors",
+     "symbols": ("XLB", "XLC", "XLE", "XLF", "XLI", "XLK",
+                 "XLP", "XLRE", "XLU", "XLV", "XLY")},
+    {"key": "megacaps", "label": "Mega-caps",
+     "symbols": ("NVDA", "AVGO", "AAPL", "META", "MSFT",
+                 "TSLA", "PLTR", "AMZN", "GOOGL", "AMD")},
+)
+
+# One fixed colour per symbol — keyed by SYMBOL, never by position in the
+# selection, so a line keeps its colour whether you plot 2 names or 20 (a
+# palette-by-index would recolour every line each time you tick a checkbox).
+# Mutually distinct + covering every group member; both pinned by tests.
+NET_PREM_COLORS = {
+    "$SPX": "#f5f5f5", "$NDX": "#8ab4ff", "BIG10": "#ffd166", "SPY": "#4dd0e1",
+    "QQQ": "#b388ff", "IWM": "#ff8a65", "DIA": "#9ccc65",
+    "XLB": "#a1887f", "XLC": "#4fc3f7", "XLE": "#ffb74d", "XLF": "#66bb6a",
+    "XLI": "#90a4ae", "XLK": "#7986cb", "XLP": "#f06292", "XLRE": "#26a69a",
+    "XLU": "#dce775", "XLV": "#ce93d8", "XLY": "#ff8a80",
+    "NVDA": "#76ff03", "AVGO": "#ff5252", "AAPL": "#eeeeee", "META": "#448aff",
+    "MSFT": "#00e5ff", "TSLA": "#ff4081", "PLTR": "#ffab40", "AMZN": "#ffd54f",
+    "GOOGL": "#69f0ae", "AMD": "#e57373",
+}
+NET_PREM_FALLBACK = "#9e9e9e"
+NET_PREM_MODES = {"dollars": "Dollars ($M)", "skew": "Skew %"}
+_NET_PREM_AXIS = {"dollars": "Net premium ($M)", "skew": "Net premium (%)"}
+
+_NP_CT = ZoneInfo("America/Chicago")
+# The service's GEX collection window + a staleness bound at 2× its 1-min publish
+# cadence. Only INSIDE this window is a stale publish evidence of a failure — see
+# net_prem_status_text.
+#
+# Read from ``shared.market_calendar`` (backed by ``config/sessions.toml``), which
+# is what options_svc's scheduler now gates on too — so the two CANNOT drift. This
+# used to be a hand-copied ``(8, 0), (15, 20)`` literal pinned by an AST test that
+# re-parsed the service file; the start had already moved once (08:30 → 08:00).
+# Importing ``shared.*`` is allowed under the 3-tier rule (only ``services.*`` is
+# off limits to the webgui).
+_np_open_t, _np_close_t = _mc.window_bounds("collection")
+_NP_WINDOW_OPEN = (_np_open_t.hour, _np_open_t.minute)
+_NP_WINDOW_CLOSE = (_np_close_t.hour, _np_close_t.minute)
+_NP_STALE_SEC = 120
+
+
+def net_prem_symbols():
+    """Every symbol the Net Prem view can plot, in group order (a flat list)."""
+    out = []
+    for group in NET_PREM_GROUPS:
+        for sym in group["symbols"]:
+            if sym not in out:
+                out.append(sym)
+    return out
+
+
+# Membership set for the selection guard — see _np_selected.
+_NET_PREM_KNOWN = frozenset(net_prem_symbols())
+
+
+def net_prem_group_symbols(group_key):
+    """The symbols belonging to one group, or ``[]`` for an unknown key.
+
+    Backs the "Only this group" button, which is the single place the group tab
+    is allowed to change what is PLOTTED rather than merely what is visible.
+    Total over junk so a persisted group key that no longer exists degrades to
+    "no group" instead of raising."""
+    for group in NET_PREM_GROUPS:
+        if group["key"] == group_key:
+            return list(group["symbols"])
+    return []
+
+
+def net_prem_only_group(selected, group_key):
+    """``selected`` reduced to the symbols of ``group_key``, order preserved.
+
+    Backs the "Only this group" button. It KEEPS that group's existing ticks
+    rather than selecting the whole group, so the button is a narrowing — the
+    chart can only lose lines by pressing it, never gain ones you didn't ask
+    for. Unknown group → ``[]`` (see net_prem_group_symbols)."""
+    active = set(net_prem_group_symbols(group_key))
+    return [s for s in _np_selected(selected) if s in active]
+
+
+def net_prem_with_group(selected, group_key):
+    """``selected`` plus every symbol of ``group_key``, in group order.
+
+    Backs "Select all", which is scoped to the ACTIVE group rather than all 28:
+    the tick-boxes on screen ARE that group, so ticking a hidden 28 would put
+    lines on the chart whose source the reader cannot see. Other groups' ticks
+    survive — pair it with "Only this group" to get exactly one whole group."""
+    keep = set(_np_selected(selected)) | set(net_prem_group_symbols(group_key))
+    return [s for s in net_prem_symbols() if s in keep]
+
+
+def net_prem_color(symbol):
+    """The fixed line colour for a symbol; grey for anything unrecognised."""
+    return NET_PREM_COLORS.get(symbol, NET_PREM_FALLBACK)
+
+
+def _np_num(value):
+    """A finite float, or None.
+
+    Rejects bools (``True`` is an ``int`` in Python, so an unguarded flag would
+    read as a premium of 1.0) and nan/inf, which Highcharts renders as a hole in
+    the line rather than an obvious error.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value) if math.isfinite(value) else None
+
+
+def _np_pair(row):
+    """``(call, put)`` from a ``[ts, call_prem, put_prem]`` row, or None.
+
+    Indexing is wrapped rather than type-gated so anything that indexes like the
+    published row works, while ``None``, truncated rows, mappings, strings and
+    bare numbers all degrade to None instead of raising.
+    """
+    try:
+        call, put = _np_num(row[1]), _np_num(row[2])
+    except (TypeError, IndexError, KeyError):
+        return None
+    if call is None or put is None:
+        return None
+    return call, put
+
+
+def net_prem_value(row, mode="dollars"):
+    """The plotted value for one ``[ts, call_prem, put_prem]`` row.
+
+    ``dollars`` → net premium in $M (call − put). ``skew`` → the signed share of
+    the session's total traded premium that the net represents, as a percent —
+    which is what makes a $30M index line comparable with a $2M sector one.
+
+    Skew returns None when nothing traded either side: there is no ratio to
+    report (and no divide-by-zero). A genuine ``(0, 0)`` therefore plots as 0.0
+    in dollars but is simply absent in skew — the same distinction the service's
+    ``_project`` preserves upstream. An unknown mode degrades to dollars.
+    """
+    pair = _np_pair(row)
+    if pair is None:
+        return None
+    call, put = pair
+    if mode == "skew":
+        total = call + put
+        if total <= 0:
+            return None
+        return (call - put) / total * 100.0
+    return (call - put) / 1e6
+
+
+def _np_rows(series, symbol):
+    """``[(ts, row), …]`` ts-ascending for one symbol; ``[]`` when it has nothing.
+
+    A symbol whose payload is not a readable list of rows yields ``[]`` — one bad
+    symbol must never take the rest of the chart down with it.
+    """
+    if not isinstance(series, dict):
+        return []
+    rows = series.get(symbol)
+    if not isinstance(rows, (list, tuple)):
+        return []
+    out = []
+    for row in rows:
+        try:
+            ts = _np_num(row[0])
+        except (TypeError, IndexError, KeyError):
+            continue
+        if ts is None or _np_pair(row) is None:
+            continue
+        out.append((ts, row))
+    out.sort(key=lambda pair: pair[0])   # Highcharts line data must be x-ascending
+    return out
+
+
+def _np_selected(symbols):
+    """The selection deduped, in the caller's order, restricted to KNOWN symbols.
+
+    The two filters are both load-bearing, because the selection is **persisted**
+    to ``webgui/data/settings.json`` — a tracked, hand-editable file with no type
+    validation on read — so it is untrusted input, not something the checkbox UI
+    fully controls:
+
+    - **non-``str`` entries are dropped**, or a hand-edited ``[123]`` reaches
+      ``", ".join(missing)`` and raises TypeError, 500-ing the whole page;
+    - **unknown symbols are dropped**, so a stale saved ticker (one since removed
+      from ``NET_PREM_GROUPS``) cannot raise ValueError in the caller's
+      ``key=order.index`` sort. It is also unplottable by definition — the groups
+      ARE this view's universe.
+
+    Guarding here rather than at each use site means every downstream builder can
+    assume the selection is a clean subset of ``net_prem_symbols()``.
+    """
+    out = []
+    for sym in symbols or ():
+        if isinstance(sym, str) and sym in _NET_PREM_KNOWN and sym not in out:
+            out.append(sym)
+    return out
+
+
+def _np_latest(series, symbols, mode):
+    """``{symbol: last reportable value}`` over an ALREADY-selected symbol list.
+
+    The single definition of "this symbol has something to show in this mode",
+    shared by ``net_prem_missing`` and ``net_prem_summary_text`` so the header
+    cannot contradict the chart.
+    """
+    out = {}
+    for sym in symbols:
+        for _ts, row in reversed(_np_rows(series, sym)):
+            value = net_prem_value(row, mode)
+            if value is not None:
+                out[sym] = value
+                break
+    return out
+
+
+def net_prem_missing(series, symbols, mode="dollars"):
+    """The selected symbols with nothing to plot in ``mode``, in selection order.
+
+    The service OMITS a symbol entirely when it collected nothing, so naming them
+    is the only way the UI can say "no data yet" instead of leaving the reader to
+    wonder about an absent line. A present-but-malformed payload counts as
+    missing too: same user-visible outcome — nothing to plot.
+
+    **Mode-aware on purpose.** A symbol whose only rows are ``(0, 0)`` has
+    perfectly parseable data yet draws NO line in skew mode (there is no ratio to
+    report), so a mode-blind answer would call it present while the chart showed
+    nothing. "Missing" here means exactly what the chart does.
+    """
+    mode = mode if mode in NET_PREM_MODES else "dollars"
+    picked = _np_selected(symbols)
+    latest = _np_latest(series, picked, mode)
+    return [sym for sym in picked if sym not in latest]
+
+
+def net_prem_figure(series, symbols, mode="dollars", height=680):
+    """Intraday net-premium chart — one fixed-colour line per selected symbol.
+
+    The x-axis is a SYNTHETIC category axis of ``_fmt_ts`` labels over the sorted
+    UNION of timestamps across the selection, not a datetime axis — for two
+    reasons. First, the same one ``flow_figure`` has: a real datetime axis
+    stretches the session across the overnight/weekend gap. Second, and specific
+    to this view: the symbols do not share a clock. A name that started
+    collecting late has fewer rows, so plotting each series against its own row
+    index would shear the lines apart — SPY's 09:15 point would sit above QQQ's
+    08:30 one and the chart would silently lie about when a flow happened.
+    Indexing every series into the shared union keeps them on one timeline, and a
+    symbol that starts late simply begins further along the axis.
+    """
+    mode = mode if mode in NET_PREM_MODES else "dollars"
+    picked = _np_selected(symbols)
+    rows_by = {sym: _np_rows(series, sym) for sym in picked}
+    times = sorted({ts for rows in rows_by.values() for ts, _ in rows})
+    index = {ts: i for i, ts in enumerate(times)}
+
+    plots = []
+    for sym in picked:
+        # A point with no value in this mode is SKIPPED, not emitted as None —
+        # and that can never hide an interior gap. The stored premiums are
+        # daily-CUMULATIVE (the service's build_series accumulates nothing
+        # downstream), so call+put is monotonic non-decreasing: once it exceeds 0
+        # it stays there for the rest of the session. An unreportable skew point
+        # is therefore only ever possible in a LEADING run, before anything
+        # traded — skipping trims a meaningless prefix and cannot connect the line
+        # across a hole. A future "optimization" into a running total would break
+        # that invariant, and with it this reasoning.
+        data = [[index[ts], value] for ts, row in rows_by[sym]
+                if (value := net_prem_value(row, mode)) is not None]
+        if data:
+            plots.append({"type": "line", "name": sym, "data": data,
+                          "color": net_prem_color(sym), "lineWidth": 2,
+                          "marker": {"enabled": False}})
+
+    fig = _base_chart("line", height)
+    # Legend ABOVE the plot, and NO pinned marginBottom — unlike flow_figure,
+    # whose fixed 4 series always fit one legend row inside its marginBottom of
+    # 64. Here the count is user-driven (up to 28), so the legend wraps to
+    # several rows; pinned at the bottom those rows land on top of the rotated
+    # time labels and the axis title, because Highcharts reserves bottom space
+    # for the legend OR the labels, not both. Top-aligned it pushes the plot
+    # down instead of colliding, and dropping marginBottom lets the bottom
+    # auto-size to whatever the -45° labels actually need.
+    fig["legend"] = {"enabled": True, "itemStyle": {"color": FONT},
+                     "itemHoverStyle": {"color": "#ffffff"},
+                     "verticalAlign": "top", "align": "center",
+                     "padding": 6, "itemMarginBottom": 2}
+    fig.update({
+        "title": {"text": f"Intraday net premium (call $ − put $) · "
+                          f"{NET_PREM_MODES[mode]}",
+                  "style": {"color": FONT}},
+        "xAxis": {**_dark_axis("Time"), "categories": [_fmt_ts(t) for t in times],
+                  "labels": {"rotation": -45, "style": {"color": FONT}}},
+        "yAxis": {**_dark_axis(_NET_PREM_AXIS[mode]),
+                  "plotLines": [{"value": 0, "color": "#777777", "width": 1,
+                                 "zIndex": 3}]},
+        # Deliberately NOT shared: with up to 28 selectable series a shared
+        # tooltip is a wall of rows taller than the chart. Hover reports the one
+        # line the cursor is on.
+        "tooltip": {"shared": False, "backgroundColor": "#222222",
+                    "borderColor": "#444444",
+                    "style": {"color": FONT, "fontSize": "11px"},
+                    "valueDecimals": 2},
+        "series": plots,
+    })
+    return fig
+
+
+def _np_fmt(value, mode):
+    """A reading in its mode: ``+$4.0M`` / ``-80%`` (sign leads, so it reads as
+    a direction rather than as ``$-4.0M``)."""
+    sign = "+" if value >= 0 else "-"
+    if mode == "skew":
+        return f"{sign}{abs(value):,.0f}%"
+    return f"{sign}${abs(value):,.1f}M"
+
+
+def _np_lead_label(value, high):
+    """The adjective for an extreme reading, never contradicting its own sign.
+
+    "most call-led" is nonsense on a NEGATIVE net: when the whole selection is
+    put-led, the top of the range is merely the *least* put-led of them. Reading
+    "most call-led SPY -$4.0M" beside "most put-led QQQ -$8.0M" would look to a
+    trader like the header disagreeing with itself.
+    """
+    if high:
+        return "most call-led" if value >= 0 else "least put-led"
+    return "most put-led" if value < 0 else "least call-led"
+
+
+def net_prem_summary_text(series, symbols, mode="dollars"):
+    """One-line header for the Net Prem view: how many symbols are plotted, the
+    current extreme on each side, and any selected names with no data yet.
+
+    Each symbol's reading is its LAST reportable point, so the line answers
+    "where does the money sit right now" rather than describing the whole day.
+    Shares ``net_prem_missing``'s definition of missing, so the header can never
+    name a symbol the chart is actually drawing (or vice versa).
+    """
+    mode = mode if mode in NET_PREM_MODES else "dollars"
+    picked = _np_selected(symbols)
+    if not picked:
+        return "Select symbols to plot intraday net premium (call $ − put $)."
+
+    latest = _np_latest(series, picked, mode)
+    missing = net_prem_missing(series, picked, mode)
+    tail = f" · no data yet: {', '.join(missing)}" if missing else ""
+
+    n = len(latest)
+    if not n:
+        return (f"0 of {len(picked)} selected symbols plotted{tail} "
+                f"(collected going forward).")
+    parts = [f"{n} symbol{'' if n == 1 else 's'} plotted"]
+    top = max(latest, key=lambda s: latest[s])
+    bottom = min(latest, key=lambda s: latest[s])
+    if top == bottom:                       # one symbol — no two extremes to name
+        parts.append(f"{top} {_np_fmt(latest[top], mode)}")
+    else:
+        parts.append(f"{_np_lead_label(latest[top], True)} {top} "
+                     f"{_np_fmt(latest[top], mode)}")
+        parts.append(f"{_np_lead_label(latest[bottom], False)} {bottom} "
+                     f"{_np_fmt(latest[bottom], mode)}")
+    return " · ".join(parts) + tail
+
+
+def _np_parse_ts(iso):
+    """A UTC-aware datetime from the payload's ISO ``ts``; None if unparseable."""
+    import datetime as dt
+    if not isinstance(iso, str) or not iso:
+        return None
+    try:
+        when = dt.datetime.fromisoformat(iso.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return when if when.tzinfo else when.replace(tzinfo=dt.timezone.utc)
+
+
+def _np_in_window(now):
+    """True when ``now`` falls inside the service's 08:00–15:20 CT collection
+    window on a trading day — the only time a stale publish means a failure.
+
+    Weekend + NYSE-holiday gated (reusing ``alerts``' calendar, which the whole
+    app already shares) so a quiet Saturday or a Thanksgiving cannot be reported
+    as a broken publisher. Imported inside the function: ``alerts`` imports
+    ``pages.options.scanner``, so keeping it off this module's import line avoids
+    coupling the Gamma page's import order to it.
+    """
+    import alerts
+    ct = now.astimezone(_NP_CT)
+    if ct.weekday() >= 5 or alerts.is_market_holiday(ct.date()):
+        return False
+    return _NP_WINDOW_OPEN <= (ct.hour, ct.minute) < _NP_WINDOW_CLOSE
+
+
+def net_prem_status_text(payload, now=None):
+    """Status line for the Net Prem view, separating the three service outcomes
+    the page otherwise cannot tell apart.
+
+    ``publish_net_premium`` ends three ways: a valid publish; a contract-validation
+    failure; an outer failure. The latter two are LOGGED, not cached — so from
+    here they look exactly like "collection has not started yet": a stale or absent
+    key. Eleven sector lines will legitimately be empty for a while after ship, so
+    "the service is broken" must not be indistinguishable from "nothing collected".
+    The payload's own ``ts`` (already in the contract, already validated) separates
+    them:
+
+    - absent payload  → never published (service down, or first boot)
+    - fresh ts, empty series → published fine, nothing collected yet
+    - ts older than ~2 min while INSIDE the 08:00–15:20 CT collection window on a
+      trading day → the publisher is failing
+
+    A stale ``ts`` OUTSIDE that window is deliberately NOT flagged: off-hours the
+    key legitimately holds the last tick of the session, which is correct
+    persistence for this view and matches how the heatmap and Flow views behave.
+    Flagging it would cry wolf every evening and all weekend.
+
+    ``now`` is a parameter rather than read from the clock so this stays PURE and
+    testable; the page supplies it.
+    """
+    import datetime as dt
+    # isinstance, not `payload or {}`: a non-dict payload would otherwise survive
+    # the guard and blow up on the first .get() — total intent, carried through.
+    p = payload if isinstance(payload, dict) else {}
+    if not p:
+        # Neutral about the cause: an absent key means EITHER the options service
+        # never published OR Memurai is down, and this branch cannot tell which.
+        return ("Net premium has never been published — check the options "
+                "service and Memurai on /status")
+
+    now = now or dt.datetime.now(dt.timezone.utc)
+    if now.tzinfo is None:                       # never crash on a naive caller
+        now = now.replace(tzinfo=dt.timezone.utc)
+    raw = p.get("series")
+    n = len(raw) if isinstance(raw, dict) else 0
+    when = _np_parse_ts(p.get("ts"))
+    age = (now - when).total_seconds() if when is not None else None
+
+    parts = []
+    if p.get("session_date"):
+        parts.append(f"session {p['session_date']}")
+    # "collected", not a bare count: the summary line beside this one says
+    # "N symbols plotted" (the SELECTION), so an unqualified "27 symbols" here
+    # reads as a contradiction rather than as the published universe.
+    parts.append(f"{n} collected")
+    if when is not None:
+        parts.append("updated "
+                     + when.astimezone(_NP_CT).strftime("%I:%M %p").lstrip("0"))
+    text = " · ".join(parts)
+
+    if age is not None and age > _NP_STALE_SEC and _np_in_window(now):
+        text += (f" · STALE — nothing published for {int(age // 60)} min inside "
+                 "the collection window; check the options service")
+    elif n == 0 and not p.get("error"):
+        text += " · not collected yet (fills from the next 1-min poll)"
+    if p.get("error"):
+        # Rendered VERBATIM, never matched on — the house pattern
+        # (matrix.status_text): these strings are user-facing UI copy.
+        text += f" · {p['error']}"
+    return text
+
+
+# Hairline between adjacent expiry columns on the Term heatmap. Width 1 is the
+# thinnest a crisp SVG stroke goes; the low alpha is what makes it read as a hair
+# rather than a rule, so it separates the columns without competing with the data.
+EXPIRY_SEP_COLOR, EXPIRY_SEP_WIDTH = "rgba(255,255,255,0.22)", 1
+
+
+def expiry_separators(expirations):
+    """xAxis plotLines splitting the Term heatmap between each expiration column.
+
+    ``interpolation: True`` blends the Term view into one continuous field exactly
+    as it does intraday — but here the x axis is DAYS, not minutes, so the blending
+    is misleading: it smears one expiration's exposure into the next when nothing
+    actually varies continuously between them. A hairline on each category boundary
+    (at ``i + 0.5``, the midpoint between category centres) restores the reading
+    that each column is its own expiry. Empty for 0 or 1 expirations — there is no
+    boundary to draw."""
+    exps = expirations or []
+    return [{"value": i + 0.5, "color": EXPIRY_SEP_COLOR, "width": EXPIRY_SEP_WIDTH,
+             "zIndex": 5, "className": "gamma-expiry-sep"}
+            for i in range(len(exps) - 1)]
+
+
 def term_heatmap(term_grid):
     """Highcharts heatmap options for the Term view (net GEX by expiry × strike).
 
     Strikes with all-zero net across expirations are dropped. Both axes are
     categorical (no overlay), and the color scale is clamped symmetrically to a
     robust max so a few extreme strikes don't wash out the mid-range cells.
+
+    Note the axes being CATEGORICAL is also why this view never showed the mixed
+    strike-ladder striping the intraday heatmap did (see ``uniform_strike_grid``):
+    every strike is its own row by index, so an uneven ladder cannot collide rows
+    here. The trade-off is that the y axis is ordinal, not proportional to price —
+    a 5-wide and a 10-wide gap occupy the same height.
     """
     grid = term_grid or {}
     exps = grid.get("expirations") or []
@@ -788,7 +1640,8 @@ def term_heatmap(term_grid):
     fig.update({
         "title": {"text": "Term structure (net GEX by expiry × strike)",
                   "style": {"color": FONT}},
-        "xAxis": {**_dark_axis("Expiration"), "categories": exps},
+        "xAxis": {**_dark_axis("Expiration"), "categories": exps,
+                  "plotLines": expiry_separators(exps)},
         "yAxis": {**_dark_axis("Strike"), "categories": [f"{s:g}" for s in strikes]},
         "colorAxis": _coloraxis(_robust_zmax(z)),
         "series": [{"type": "heatmap", "name": "net", "data": data,
@@ -826,6 +1679,43 @@ def dex_hedge_suffix(hedge):
 
 # view name -> (tuple index from calc_all_from_chain, engine view string)
 _VIEWS = {"GEX": (0, "gex"), "Charm": (1, "charm"), "DEX": (2, "dex"), "Vanna": (3, "vanna")}
+
+# Subtab order. Net Prem sits beside Flow — they are the two options-FLOW views
+# (Flow is one symbol's call/put premium over the session; Net Prem is the net of
+# that across many symbols at once), so a reader comparing them doesn't cross Term.
+_VIEW_ORDER = list(_VIEWS) + ["Flow", "Net Prem", "Term"]
+
+
+def chart_kind(fig):
+    """Identity of a figure for the single full-width chart element.
+
+    ``_set_chart`` updates the element IN PLACE when the kind is unchanged (the
+    common flicker-free repaint) and RECREATES it when the kind changes, because
+    Highcharts' ``update()`` MERGES options and leaks the previous figure's
+    config through.
+
+    Keying on ``chart.type`` alone is not enough. Flow and Net Prem are BOTH
+    ``"line"`` charts, but Flow declares a LIST of three banded yAxes
+    (``top``/``height`` of "0%"/"62%" and "68%"/"32%") while Net Prem declares a
+    single unbanded dict. A merge drops that dict onto axis 0 and leaves axes 1
+    and 2 alive, so Net Prem renders squeezed into the top 62% with two orphaned
+    "Premium ($M)" / "Net premium ($M)" axes still painted. The axis TOPOLOGY is
+    precisely the merge surface, so it belongs in the identity — and deriving the
+    kind from the figure itself (rather than threading the view name in from the
+    caller) means a future view can't regress this by forgetting an argument.
+
+    The count is deliberately NOT part of the identity beyond list-vs-single: a
+    Net Prem repaint changes its SERIES count as symbols are ticked, and tearing
+    the element down on every checkbox would flash. Total over junk — it runs on
+    every repaint, so a malformed figure must not 500 the page.
+    """
+    fig = fig if isinstance(fig, dict) else {}
+    chart = fig.get("chart")
+    ctype = chart.get("type") if isinstance(chart, dict) else None
+    axes = fig.get("yAxis")
+    # 0 = a single axis dict (or none); N = a list of N banded axes.
+    return (ctype, len(axes) if isinstance(axes, list) else 0)
+
 
 _DEFAULT_SYMBOL = "$SPX"
 _FALLBACK_SYMBOLS = ["$SPX", "SPY", "QQQ"]
@@ -874,9 +1764,14 @@ def render():
     # state["snap"] is the cached snapshot from the bus (None until first read).
     # ``fetching`` is an in-flight guard so a slow off-loop big-payload read
     # (cache:options:gamma is ~14 MB) can't pile up across 2 s poll ticks.
-    state: dict = {"snap": None, "countdown": 120, "fetching": False}
+    # state["netprem"] is the (separate, ~500 KB) cache:options:net_premium payload
+    # with its own in-flight guard — it is symbol-independent, so it is NOT part of
+    # the gamma snapshot and must not share the big snapshot's ``fetching`` latch.
+    state: dict = {"snap": None, "countdown": 120, "fetching": False,
+                   "netprem": None, "np_fetching": False, "np_bulk": False}
     # Last-seen bus cache versions for the fetch-free repaint/dialog timers.
-    seen = {"gamma": None, "explain": None, "analyze": None, "status": None}
+    seen = {"gamma": None, "explain": None, "analyze": None, "status": None,
+            "netprem": None}
 
     # View picker as SUBTABS directly under the main tab strip (2026-07-11 — was a
     # ui.toggle button group in the header row): a second tab level, styled by the
@@ -890,8 +1785,12 @@ def render():
         tabs = ui.tabs(value="GEX").classes("compact-subtabs").props(
             "dense no-caps inline-label align=left")
         with tabs:
-            for v in list(_VIEWS) + ["Flow", "Term"]:
-                ui.tab(v, label=_view_label(v))
+            for v in _VIEW_ORDER:
+                tab = ui.tab(v, label=_view_label(v))
+                _h = _page_help.subtab_help("/options/gamma", v)
+                if _h:
+                    with tab:
+                        ui.tooltip(_h).props("delay=350 max-width=340px")
         return tabs
 
     if _slot is not None:
@@ -902,9 +1801,33 @@ def render():
 
     with ui.row().classes("items-center gap-3 flex-wrap w-full"):
         _sym_opts = symbol_options(bus_client.read("options:gamma_symbols"))
-        symbol_in = ui.select(_sym_opts, value=_DEFAULT_SYMBOL,
-                              with_input=True, label="Symbol").classes("w-40")
+        symbol_in = select_all_on_focus(
+            ui.select(_sym_opts, value=_DEFAULT_SYMBOL,
+                      with_input=True, label="Symbol").classes("w-40"))
         fetch_btn = ui.button("Refresh now", icon="refresh", color=None).props("no-caps").classes(BTN_PRIMARY)
+        # Overlay the intraday movement of the flip + walls on the heatmap. Off by
+        # default (it adds three lines to an already-dense chart); the choice is
+        # persisted so it survives navigation and restarts.
+        tracks_sw = ui.switch("Level movement",
+                              value=bool(app_settings.get("gamma_level_tracks")))
+        tracks_sw.props("dense").classes("text-xs")
+        tracks_sw.tooltip("Show where the gamma flip and the call/put walls sat "
+                          "through the session, not just now")
+        # Spot overlay style. Candles/OHLC are BUCKETED from the same 1-min spot
+        # samples the line draws (see ohlc_bars); the bar-size picker is hidden for
+        # the line, where it would mean nothing.
+        spot_style_sel = ui.select(
+            {"line": "Line", "candle": "Candles", "ohlc": "OHLC"},
+            value=app_settings.get("gamma_spot_style") or "line",
+            label="Spot").props("dense options-dense").classes("w-28")
+        spot_style_sel.tooltip("How to draw the spot price over the heatmap")
+        spot_int_sel = ui.select(
+            {1: "1 min", 5: "5 min", 15: "15 min"},
+            value=app_settings.get("gamma_spot_interval") or 5,
+            label="Bar").props("dense options-dense").classes("w-24")
+        spot_int_sel.tooltip("Bar size for candles / OHLC. Highs and lows are "
+                             "sampled once a minute, so wicks understate the true "
+                             "intra-minute range.")
         # Explain / Analyze / Briefings push to the RIGHT of the frame (2026-07-11).
         ui.space()
         explain_btn = ui.button("Explain", icon="help", color=None).props("no-caps").classes(BTN)
@@ -933,6 +1856,80 @@ def render():
                     _mi.tooltip(f"{_title} $SPX/SPY/QQQ briefing — not generated yet today")
                     sched_btns[_slot] = _mi
                     _sched_titles[_slot] = _title
+
+    # --- Net Prem controls (this view only) ---------------------------------
+    # Shown/hidden as one block by _sync_np_controls, the same way the Bar-size
+    # picker hides for the line spot style: a control that does nothing on the
+    # active view is worse than no control.
+    #
+    # The persisted selection only SEEDS the checkboxes. Everything downstream
+    # derives the plotted list from the checkbox map (_np_current), so a
+    # hand-edited settings.json naming a retired ticker simply matches no
+    # checkbox and self-heals — there is no `list.index()` to raise, which
+    # @guard would re-raise into a 500.
+    _np_seed = app_settings.get("gamma_netprem_symbols")
+    _np_seed = {s for s in (_np_seed if isinstance(_np_seed, (list, tuple)) else [])
+                if isinstance(s, str)}
+    _np_group_labels = {g["key"]: g["label"] for g in NET_PREM_GROUPS}
+    _np_group0 = app_settings.get("gamma_netprem_group")
+    if _np_group0 not in _np_group_labels:
+        _np_group0 = NET_PREM_GROUPS[0]["key"]
+    _np_mode0 = app_settings.get("gamma_netprem_mode")
+    if _np_mode0 not in NET_PREM_MODES:
+        _np_mode0 = "dollars"
+
+    np_boxes: dict = {}          # symbol -> ui.checkbox (built once, all groups)
+    with ui.column().classes("w-full gap-1") as np_box:
+        with ui.row().classes("items-center gap-3 flex-wrap w-full"):
+            np_group_tabs = ui.tabs(value=_np_group0).classes("compact-subtabs").props(
+                "dense no-caps inline-label align=left")
+            with np_group_tabs:
+                for _g in NET_PREM_GROUPS:
+                    _gtab = ui.tab(_g["key"], label=_g["label"])
+                    _gh = _page_help.subtab_help("/options/gamma", _g["key"])
+                    if _gh:
+                        with _gtab:
+                            ui.tooltip(_gh).props("delay=350 max-width=340px")
+            np_mode_sel = ui.select(dict(NET_PREM_MODES), value=_np_mode0,
+                                    label="Scale").props(
+                "dense options-dense").classes("w-36")
+            np_mode_sel.tooltip("Dollars compares SIZE across symbols; Skew % "
+                                "compares DIRECTION regardless of size")
+            ui.space()
+            np_count_lbl = ui.label("").classes(f"text-xs {MUTED}")
+            np_all_btn = ui.button("Select all", color=None).props(
+                "no-caps dense flat").classes(BTN)
+            np_all_btn.tooltip(
+                "Tick every symbol in the group you are on. Other groups' "
+                "selections are left alone — use \"Only this group\" to drop "
+                "them.")
+            np_only_btn = ui.button("Only this group", color=None).props(
+                "no-caps dense flat").classes(BTN)
+            np_only_btn.tooltip(
+                "Unplot everything outside the group tab you are on. The tab "
+                "filters the tick-boxes, not the chart — so symbols ticked in "
+                "another group keep plotting until you drop them here.")
+            np_clear_btn = ui.button("Clear all", color=None).props(
+                "no-caps dense flat").classes(BTN)
+        # One checkbox per symbol, all built up front and toggled by VISIBILITY
+        # per group — so the group tab filters what you SEE without touching what
+        # is plotted (tick $SPX on Indices, switch to Sectors, tick XLK: both plot).
+        with ui.row().classes("items-center gap-x-3 gap-y-0 flex-wrap w-full"):
+            for _g in NET_PREM_GROUPS:
+                for _sym in _g["symbols"]:
+                    _cb = ui.checkbox(_sym, value=_sym in _np_seed)
+                    # One fixed hex per symbol from a 28-entry map = a finite
+                    # palette, so an arbitrary-value class is Tailwind-first legal.
+                    _cb.props("dense").classes(
+                        f"text-xs text-[{net_prem_color(_sym)}]")
+                    np_boxes[_sym] = _cb
+        # The publisher-health line lives HERE rather than in the shared bottom
+        # strip: it is about the SERVICE, not the chart, it is view-specific, and
+        # the strip already merges three sources into one tiny overlay.
+        np_status_lbl = ui.label("").classes(f"text-xs {MUTED}")
+
+    state["netprem_sel"] = [s for s in net_prem_symbols() if s in _np_seed]
+
     # The collector status + detail strip is rendered as a TINY overlay pinned to the
     # bottom-right of the heatmap panel (created inside the chart row below), so it no
     # longer takes a full row above the charts. status_lbl / detail_lbl are created
@@ -969,7 +1966,9 @@ def render():
             chart_plot_box = ui.column().classes("w-full q-gutter-none")
             with chart_plot_box:
                 state["chart_el"] = ui.highchart(_empty_fig(), extras=["heatmap", "coloraxis"]).classes("w-full")
-            state["chart_kind"] = "bar"
+            # Seeded from the SAME figure the element was created with, so the
+            # first real paint can't spuriously recreate it.
+            state["chart_kind"] = chart_kind(_empty_fig())
             chart_msg = ui.label("Fetch a symbol… (no snapshot yet).") \
                 .classes("opacity-60 text-sm")
         heatmap_box = ui.column().classes(f"min-w-0 {_INIT_FLEX}")
@@ -977,6 +1976,14 @@ def render():
             # Created with the heatmap init fig so the press-and-hold-tooltip load
             # hook is installed at creation (load fires once); updated in place after.
             heat_plot = ui.highchart(_heat_init_fig(), extras=["heatmap", "coloraxis"]).classes("w-full")
+            # 0-DTE hedge-pressure track, directly UNDER the heatmap and sharing its
+            # time categories. Its own element because pressure is in DOLLARS while
+            # the heatmap's y-axis is STRIKE (and is pixel-aligned to the bar chart),
+            # so it cannot share that axis. Hidden unless the symbol has a 0-DTE book.
+            hedge_plot = ui.highchart(hedge_figure([], [])).classes("w-full")
+            hedge_plot.set_visibility(False)
+            hedge_lbl = ui.label("").classes("opacity-70 text-[10px] text-right w-full")
+            hedge_lbl.set_visibility(False)
             heat_msg = ui.label("").classes("opacity-60 text-sm")
 
     # Tiny status strip BELOW the charts, right-aligned: the collector status WORD
@@ -986,6 +1993,16 @@ def render():
                           "leading-none opacity-90 -mt-1"):
         status_lbl = ui.label("").classes("font-medium")
         detail_lbl = ui.label("").classes("opacity-70")
+
+    # Long-form guide to the three 0-DTE projection overlays (outline bars, the
+    # Proj. flip line, the hedge-pressure panel) — collapsed, so it costs nothing
+    # until asked for. It lives ON the page rather than only in the nav hover
+    # tooltip because that tooltip is pointer-events:none and clips to the space
+    # under its nav item, which cuts a guide this long off mid-sentence with no way
+    # to scroll. Same text as the hover guide (one constant in page_help).
+    with ui.expansion("How to read the 0-DTE close projection") \
+            .classes("w-full text-xs opacity-80").props("dense"):
+        ui.markdown(_page_help.PROJECTION_HELP_MD).classes("text-xs text-left")
 
     # History picker (BELOW the charts): browse past stored briefings. Pick a date
     # (+ optional slot) and Open regenerates the report from the stored analysis (via
@@ -1048,9 +2065,11 @@ def render():
     def _set_chart(fig):
         """Paint chart_plot: update in place when the chart KIND is unchanged
         (the common bar->bar repaint, flicker-free), but RECREATE the element when
-        the kind changes (bar <-> Term heatmap) so stale plotLines/colorAxis from
-        the previous type don't leak through Highcharts' merge-based update."""
-        kind = fig["chart"]["type"]
+        the kind changes (bar <-> Term heatmap, Flow <-> Net Prem) so stale
+        plotLines/colorAxis/yAxis config from the previous figure doesn't leak
+        through Highcharts' merge-based update. See ``chart_kind`` for why the
+        identity is NOT just ``chart.type``."""
+        kind = chart_kind(fig)
         if state.get("chart_kind") != kind:
             chart_plot_box.clear()
             with chart_plot_box:
@@ -1060,15 +2079,72 @@ def render():
             _set_figure(state["chart_el"], fig)
         return state["chart_el"]
 
+    def _np_current():
+        """The plotted symbols, in group order, derived from the checkboxes.
+
+        Total by construction — it filters a KNOWN symbol list rather than
+        ordering a caller-supplied one, so nothing here can raise on an
+        unrecognised name."""
+        return [s for s in net_prem_symbols() if np_boxes[s].value]
+
+    def _paint_np_status():
+        """Recompute the publisher-health line from the cached payload.
+
+        Driven by the 1 s ``_tick`` as well as by repaints, because staleness is
+        a function of the CLOCK, not of any cache version — and the one failure
+        this line exists to report is exactly the one that stops every version
+        bump. If it were only recomputed on a repaint, a whole-service outage
+        would freeze it at "updated 5:20 PM" forever and the reader would never
+        see "check the options service". Pure over state the page already holds:
+        no bus read, no I/O."""
+        import datetime as _dt
+        payload = state.get("netprem")
+        payload = payload if isinstance(payload, dict) else None
+        # net_prem_status_text renders the payload's own error verbatim.
+        np_status_lbl.text = net_prem_status_text(
+            payload, _dt.datetime.now(_dt.timezone.utc))
+
+    def _render_net_prem():
+        """Paint the Net Prem view: one full-width multi-symbol line chart."""
+        payload = state.get("netprem")
+        payload = payload if isinstance(payload, dict) else {}
+        series = payload.get("series")
+        series = series if isinstance(series, dict) else {}
+        sel = state["netprem_sel"]
+        mode = np_mode_sel.value
+
+        chart_msg.set_visibility(False)
+        _set_chart(net_prem_figure(series, sel, mode))
+        state["chart_el"].set_visibility(True)
+        heat_plot.set_visibility(False)
+        hedge_plot.set_visibility(False)
+        hedge_lbl.set_visibility(False)
+        heat_msg.set_visibility(False)
+        _apply_flex(0, term=True)          # full width, no heatmap panel
+        # net_prem_summary_text already folds in the mode-aware "no data yet"
+        # names (it shares net_prem_missing's definition), so the header can
+        # never disagree with what the chart draws.
+        _set_summary(net_prem_summary_text(series, sel, mode))
+        _paint_np_status()
+        np_count_lbl.text = f"Selected: {len(sel)}"
+
     def _render_view():
         """Paint the active view from the cached snapshot (no fetch, no teardown).
 
         The Highcharts elements persist across repaints and are updated in place
         (via _set_figure / _set_chart) so the charts don't flicker."""
+        if view_toggle.value == "Net Prem":
+            # Handled BEFORE the no-snapshot early return: this view is
+            # symbol-INDEPENDENT (it reads its own cache key), so it must paint
+            # even when no gamma snapshot has been cached for the current symbol.
+            _render_net_prem()
+            return
         snap = state["snap"]
         if not snap:
             state["chart_el"].set_visibility(False)
             heat_plot.set_visibility(False)
+            hedge_plot.set_visibility(False)
+            hedge_lbl.set_visibility(False)
             heat_msg.set_visibility(False)
             chart_msg.text = "Fetch a symbol… (no snapshot yet)."
             chart_msg.set_visibility(True)
@@ -1082,6 +2158,8 @@ def render():
             _set_chart(term_heatmap(snap.get("term") or {}))
             state["chart_el"].set_visibility(True)
             heat_plot.set_visibility(False)
+            hedge_plot.set_visibility(False)
+            hedge_lbl.set_visibility(False)
             heat_msg.set_visibility(False)
             _apply_flex(0, term=True)
             _set_summary(summary_text({"spot": spot, "strike_count": None}, "Term"))
@@ -1092,6 +2170,8 @@ def render():
             _set_chart(flow_figure(snap.get("flow") or []))
             state["chart_el"].set_visibility(True)
             heat_plot.set_visibility(False)
+            hedge_plot.set_visibility(False)
+            hedge_lbl.set_visibility(False)
             heat_msg.set_visibility(False)
             _apply_flex(0, term=True)
             _set_summary(flow_summary_text(snap.get("flow")))
@@ -1105,7 +2185,10 @@ def render():
         raw = entry.get("data") if isinstance(entry.get("data"), dict) else {}
         data = {"spot": raw.get("spot"),
                 "strike_count": raw.get("strike_count"),
-                "gex": _refloat_keys(raw.get("gex"))}
+                "gex": _refloat_keys(raw.get("gex")),
+                # Same float-key round-trip as the grid (Redis JSON stringifies them).
+                "hedge_drift_by_strike": _refloat_keys(
+                    raw.get("hedge_drift_by_strike"))}
         view_spot = data.get("spot") or spot
         if not isinstance(view_spot, (int, float)):
             # No usable underlying price (e.g. market closed / sparse off-hours
@@ -1113,6 +2196,8 @@ def render():
             # message instead of crashing on the spot*pct band math.
             state["chart_el"].set_visibility(False)
             heat_plot.set_visibility(False)
+            hedge_plot.set_visibility(False)
+            hedge_lbl.set_visibility(False)
             heat_msg.set_visibility(False)
             sym = snap.get("symbol") or _current_symbol()
             chart_msg.text = (f"No spot price for {sym} yet "
@@ -1155,11 +2240,29 @@ def render():
                                   "grid": _refloat_keys(proj["grid"]),
                                   "cone": proj.get("cone") or {},
                                   "spot": proj.get("spot")}
-            _set_figure(heat_plot, heatmap_figure(rows, view, yrange=yr, projection=projection))
+            _set_figure(heat_plot, heatmap_figure(rows, view, yrange=yr,
+                                                  projection=projection,
+                                                  walls=walls, spot=view_spot,
+                                                  flip=flip,
+                                                  levels=entry.get("levels"),
+                                                  show_tracks=bool(tracks_sw.value),
+                                                  spot_style=spot_style_sel.value,
+                                                  spot_interval=spot_int_sel.value,
+                                                  projected_flip=snap.get("projected_flip")))
+            _hedge = snap.get("hedge_history") or []
+            _has_hedge = bool(hedge_points(_hedge))
+            if _has_hedge:
+                _set_figure(hedge_plot,
+                            hedge_figure(_hedge, heatmap_matrix(rows)["x"]))
+                hedge_lbl.set_text(hedge_summary_text(_hedge))
+            hedge_plot.set_visibility(_has_hedge)
+            hedge_lbl.set_visibility(_has_hedge)
             heat_plot.set_visibility(True)
             heat_msg.set_visibility(False)
         else:
             heat_plot.set_visibility(False)
+            hedge_plot.set_visibility(False)
+            hedge_lbl.set_visibility(False)
             heat_msg.text = "No intraday snapshots yet (history collector not running)."
             heat_msg.set_visibility(True)
         _apply_flex(len(rows))
@@ -1184,6 +2287,14 @@ def render():
     def _auto_refresh():
         # Fetch-free on the page side: enqueue a refresh for the current symbol;
         # the service recomputes + republishes and the version-poll repaints.
+        # SKIPPED on Net Prem, which reads its own cache key and never touches
+        # the gamma snapshot — enqueueing there costs the options service a full
+        # option-chain fetch + GammaEngine compute for a result this view
+        # discards. (Safe only because _tick now owns the status refresh; this
+        # enqueue used to be its accidental driver.)
+        if view_toggle.value == "Net Prem":
+            state["countdown"] = 120
+            return
         sym = _current_symbol()
         if sym:
             bus_client.request("options", {"type": "gamma_refresh", "args": {"symbol": sym}})
@@ -1196,6 +2307,9 @@ def render():
             state["countdown"] = 120
         strip_state["countdown"] = state["countdown"]
         _repaint_strip()
+        if view_toggle.value == "Net Prem":
+            # Staleness is a clock function — see _paint_np_status.
+            _paint_np_status()
 
     @guard_async
     async def _maybe_repaint(version):
@@ -1221,6 +2335,23 @@ def render():
             return
         state["snap"] = snap
         _render_view()
+
+    @guard_async
+    async def _maybe_repaint_netprem(version):
+        # Same shape as _maybe_repaint: version-gated, with its OWN in-flight
+        # guard, and the payload (~500 KB) read OFF the event loop. Repaint only
+        # when this view is showing — the other views don't read it, and the
+        # cached payload is already up to date for when the user switches over.
+        if version == seen["netprem"] or state.get("np_fetching"):
+            return
+        seen["netprem"] = version
+        state["np_fetching"] = True
+        try:
+            state["netprem"] = await run.io_bound(bus_client.read, "options:net_premium")
+        finally:
+            state["np_fetching"] = False
+        if view_toggle.value == "Net Prem":
+            _render_view()
 
     def _paint_status(st):
         """Paint the collector status bar from a gex_status view dict (or None)."""
@@ -1355,8 +2486,10 @@ def render():
             "options:gamma", "options:gex_status",
             "options:gamma_explain", "options:gamma_analyze",
             "options:gamma_briefings", "options:gamma_history",
+            "options:net_premium",
             *_SCHED_VIEWS.values()])
         await _maybe_repaint(v["options:gamma"])
+        await _maybe_repaint_netprem(v["options:net_premium"])
         _maybe_repaint_status(v["options:gex_status"])
         _watch_explain(v["options:gamma_explain"])
         _watch_analyze(v["options:gamma_analyze"])
@@ -1386,7 +2519,140 @@ def render():
     fetch_btn.on_click(_request_refresh)
     explain_btn.on_click(_request_explain)
     analyze_btn.on_click(_request_analyze)
-    view_toggle.on_value_change(lambda e: _render_view())
+
+    @guard
+    def _on_view_change(e):
+        # _sync_np_controls FIRST so the Net Prem block is shown/hidden before the
+        # repaint (the checkbox visibility feeds nothing but the eye, but showing a
+        # stale block for a frame reads as a glitch).
+        _sync_np_controls()
+        # ...and the symbol-scoped cluster hides/shows with the same switch.
+        _sync_spot_controls()
+        _render_view()
+
+    view_toggle.on_value_change(_on_view_change)
+
+    @guard
+    def _on_tracks_toggle(e):
+        # Persist the choice, then repaint from the cached snapshot — the tracks
+        # ride the snapshot the page already holds, so no refetch is needed.
+        app_settings.set("gamma_level_tracks", bool(e.value))
+        _render_view()
+
+    tracks_sw.on_value_change(_on_tracks_toggle)
+
+    @guard
+    def _on_spot_style(e):
+        app_settings.set("gamma_spot_style", e.value)
+        _sync_spot_controls()
+        _render_view()
+
+    @guard
+    def _on_spot_interval(e):
+        app_settings.set("gamma_spot_interval", e.value)
+        _render_view()
+
+    def _sync_spot_controls():
+        # Symbol / Refresh now / Level movement / Spot / Bar all drive the
+        # SYMBOL-SCOPED views (the by-strike bars, the heatmap, Flow, Term). Net
+        # Prem is symbol-INDEPENDENT — it plots a fixed 28-symbol universe from
+        # its own cache key and has no spot overlay — so every one of them is a
+        # dead knob there. Hide the cluster rather than leave controls that
+        # silently do nothing, the same reasoning that hides Bar for a line spot.
+        # Explain / Analyze / Briefings go too: all three report on the SYMBOL in
+        # the (now hidden) dropdown, so on Net Prem they would act on a symbol
+        # the reader can no longer see or change — worse than a dead knob.
+        symbol_scoped = view_toggle.value != "Net Prem"
+        for el in (symbol_in, fetch_btn, tracks_sw, spot_style_sel,
+                   explain_btn, analyze_btn, briefings_btn):
+            el.set_visibility(symbol_scoped)
+        # Bar size is meaningless for a line — hide it rather than leave a control
+        # that silently does nothing.
+        spot_int_sel.set_visibility(
+            symbol_scoped and spot_style_sel.value != "line")
+
+    spot_style_sel.on_value_change(_on_spot_style)
+    spot_int_sel.on_value_change(_on_spot_interval)
+    _sync_spot_controls()
+
+    def _sync_np_controls():
+        """Show the Net Prem block only on that view, and only the active group's
+        checkboxes within it (the selection itself is untouched — see np_boxes)."""
+        on = view_toggle.value == "Net Prem"
+        np_box.set_visibility(on)
+        active = np_group_tabs.value
+        for g in NET_PREM_GROUPS:
+            visible = on and g["key"] == active
+            for sym in g["symbols"]:
+                np_boxes[sym].set_visibility(visible)
+
+    @guard
+    def _on_np_group(e):
+        # Filters which checkboxes are SHOWN; the plotted set is unchanged, so
+        # there is nothing to repaint.
+        app_settings.set("gamma_netprem_group", e.value)
+        _sync_np_controls()
+
+    def _np_commit():
+        """Adopt the checkbox state as the plotted selection, persist, repaint."""
+        state["netprem_sel"] = _np_current()
+        app_settings.set("gamma_netprem_symbols", state["netprem_sel"])
+        _render_view()
+
+    @guard
+    def _on_np_symbol():
+        if state.get("np_bulk"):
+            return          # a bulk set (Clear all) commits once at the end
+        _np_commit()
+
+    @guard
+    def _on_np_mode(e):
+        app_settings.set("gamma_netprem_mode", e.value)
+        _render_view()
+
+    def _np_bulk_set(keep):
+        """Set every checkbox to ``keep(symbol)``, then commit ONCE.
+
+        Latched so 28 programmatic value sets don't fire 28 repaints. ``keep`` is
+        called for a symbol before that symbol is written, so it may read the
+        current value of the box it is deciding about."""
+        state["np_bulk"] = True
+        try:
+            for sym, cb in np_boxes.items():
+                cb.value = bool(keep(sym))
+        finally:
+            state["np_bulk"] = False
+        _np_commit()
+
+    @guard
+    def _np_clear():
+        _np_bulk_set(lambda sym: False)
+
+    @guard
+    def _np_select_all():
+        keep = set(net_prem_with_group(_np_current(), np_group_tabs.value))
+        _np_bulk_set(lambda sym: sym in keep)
+
+    @guard
+    def _np_only_group():
+        """Drop everything outside the active group; leave its own ticks alone.
+
+        The group tab filters which checkboxes are VISIBLE, not what is plotted —
+        deliberately, so a cross-group selection ($SPX beside XLK) is possible at
+        all. The cost of that model is that "just show me this group" would
+        otherwise be a two-step (Clear all, then re-tick). This is that step in
+        one click, and it is the only place the tab affects the chart."""
+        keep = set(net_prem_only_group(_np_current(), np_group_tabs.value))
+        _np_bulk_set(lambda sym: sym in keep)
+
+    np_group_tabs.on_value_change(_on_np_group)
+    np_mode_sel.on_value_change(_on_np_mode)
+    np_all_btn.on_click(_np_select_all)
+    np_only_btn.on_click(_np_only_group)
+    np_clear_btn.on_click(_np_clear)
+    for _cb in np_boxes.values():
+        _cb.on_value_change(lambda e: _on_np_symbol())
+    _sync_np_controls()
 
     # Initial paint from the bus cache (graceful-empty if the service is cold).
     # The cheap :ver probes + the small gex_status/sched reads stay inline; the big
@@ -1398,6 +2664,7 @@ def render():
     seen["status"] = bus_client.read_version("options:gex_status")
     seen["briefings"] = bus_client.read_version("options:gamma_briefings")
     seen["history"] = bus_client.read_version("options:gamma_history")
+    seen["netprem"] = bus_client.read_version("options:net_premium")
     _sync_sched_btns(bus_client.read_versions(list(_SCHED_VIEWS.values())))
     _paint_status(bus_client.read("options:gex_status"))
     _refresh_history_dates(bus_client.read("options:gamma_briefings"))
@@ -1415,12 +2682,27 @@ def render():
                 state["snap"] = await run.io_bound(bus_client.read, "options:gamma") or None
             finally:
                 state["fetching"] = False
+        # The Net Prem payload rides the same off-loop initial read (its own key,
+        # its own guard) so switching to that view paints immediately.
+        if not state.get("np_fetching"):
+            state["np_fetching"] = True
+            try:
+                state["netprem"] = await run.io_bound(
+                    bus_client.read, "options:net_premium")
+            finally:
+                state["np_fetching"] = False
         # Sync the dropdown to the symbol actually in the cache so a page (re)build
         # doesn't show $SPX while another symbol's data is displayed (which a later
         # refresh would then revert to $SPX). Done BEFORE wiring on_value_change.
-        _set_symbol((state["snap"] or {}).get("symbol"))
+        # A symbol handed over from the Flow Alerts tape WINS over the cached one —
+        # it is an explicit request — and the refresh below moves the cache to it.
+        from .handoff import take_pending_gamma
+        handoff_sym = take_pending_gamma()
+        _set_symbol(handoff_sym or (state["snap"] or {}).get("symbol"))
         symbol_in.on_value_change(lambda e: _on_symbol_change())
         _render_view()
+        if handoff_sym:
+            _request_refresh()
 
     _render_view()                       # instant empty/placeholder paint
     ui.timer(0.05, _initial_load, once=True)  # big snapshot read off-loop

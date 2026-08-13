@@ -23,9 +23,48 @@ from zoneinfo import ZoneInfo
 import flow_skew
 from gamma_tool import GammaEngine
 import gex_history_db as db
+import iv_analysis
 
 TZ = ZoneInfo("America/Chicago")
-SYMBOLS = ["$SPX", "$VIX", "SPY", "QQQ"]
+# POLICY: every symbol a named UI surface renders lives in this STATIC base, not
+# in `Top 20.xlsx`. That workbook is GITIGNORED, so anything load-bearing left to
+# it works on this box and silently degrades on a fresh clone (or the moment
+# someone edits a row). Two surfaces depend on that guarantee:
+#
+#   $NDX      — tools/nq_hud.py. It was already collected, but only because it
+#               happens to sit in the workbook; without it the HUD degrades to
+#               its QQQ proxy, whose structural call-overwriting flow can invert
+#               the apparent gamma sign. (When $NDX was added the universe was 82
+#               symbols before and after — it was already in the workbook, so
+#               that particular change fetched no extra chains.)
+#   Net Prem  — the Dealer Positioning group view (services/options_svc/
+#               net_premium.py). A symbol it groups but nobody collects has no
+#               premium history, so it renders as a permanently empty line.
+#               test_net_premium.py pins this against SYMBOLS, not against
+#               collection_symbols(), for exactly the fail-open reason above.
+#
+# COST of the 2026-08-05 Net Prem additions, which is NOT uniform — state both:
+# the 11 SPDR sectors were collected by nothing, while IWM/DIA and the ten
+# mega-caps merely happen to be in this box's workbook already. So
+# collection_symbols() goes 82 -> 93 (+11) WITH the workbook, but 5 -> 28 (+23)
+# on a fresh clone. Over the 440-min 1-min-poll window that is ~4.8k extra
+# /chains calls/day here, ~10.1k on a clone — quote BOTH, never just the local
+# one; which number applies depends on a file you cannot see in git.
+# Two further costs are easy to miss: poll_once's pool overlaps the FETCH only
+# (see its docstring on historically dropping ~37% of 1-min slots), so each added
+# symbol also costs a SERIAL engine calc + SQLite insert inside the 60s budget;
+# and each writes one gex_history.db row per poll, on a DB that has already
+# needed a manual ~1 GB VACUUM.
+SYMBOLS = [
+    "$SPX", "$VIX", "SPY", "QQQ", "$NDX",
+    # Everything below — NEW 2026-08-05, added for the Net Prem view.
+    # Broad ETFs and mega-caps are usually in the workbook already (so typically
+    # no extra fetch); the SPDR sectors are the genuinely new collection.
+    "IWM", "DIA",
+    "XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU", "XLV", "XLY",
+    # BIG10 mega-caps (also the Net Prem "Mega-caps" group).
+    "NVDA", "MSFT", "GOOGL", "AMZN", "META", "AAPL", "TSLA", "AVGO", "PLTR", "AMD",
+]
 POLL_INTERVAL_MIN = 1
 START_HOUR, START_MIN = 8, 0
 STOP_HOUR, STOP_MIN = 15, 20
@@ -244,17 +283,21 @@ def poll_once(client, engine, conn, lock=None, symbols=None, on_chain=None,
                 rr = flow_skew.risk_reversal_25d(chain)
                 vol = flow_skew.index_call_put_volume(chain)
                 prem = flow_skew.index_call_put_premium(chain)
+                # ATM IV LEVEL (percent, e.g. 25.5) — the forward-only column that
+                # feeds the IV-direction regime (collapsing vs spiking). Pure +
+                # defensive: extract_atm_iv returns None on a thin/absent chain.
                 skew_fields = {
                     "rr_25d": (rr or {}).get("rr"),
                     "call_vol": (vol or {}).get("call_vol"),
                     "put_vol": (vol or {}).get("put_vol"),
                     "call_prem": (prem or {}).get("call_prem"),
                     "put_prem": (prem or {}).get("put_prem"),
+                    "atm_iv": iv_analysis.extract_atm_iv(chain),
                 }
             except Exception:
                 log.debug("skew compute failed for %s", symbol, exc_info=True)
                 skew_fields = {"rr_25d": None, "call_vol": None, "put_vol": None,
-                               "call_prem": None, "put_prem": None}
+                               "call_prem": None, "put_prem": None, "atm_iv": None}
             # Single pass yields GEX, Charm, DEX, Vanna — all persisted below.
             gex, charm, dex, vanna = engine.calc_all_from_chain(chain, use_volume=False)
             dte = engine._last_dte

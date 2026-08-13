@@ -9,7 +9,8 @@ button enqueues a ``swing_scan`` command (with the user's inputs as args) onto
 the Redis bus; the service runs it and writes the result under
 ``cache:options:swing``; this page only **reads** that payload and formats it.
 
-Cache view read: ``options:swing`` → ``{signals:[...], view:{...}, symbol, params}``
+Cache view read: ``options:swing`` →
+``{signals:[...], view:{...}, filtered_out: int, symbol, params}``
 where each signal is the NORMALIZED multi-strategy shape (LONG_CALL/.../IRON_CONDOR
 with a ``legs`` list, ``family``, ``bias``, ``net_debit``/``net_credit``,
 ``breakevens``, …). Results render via the multi-strategy ``strategy_table`` columns/
@@ -22,7 +23,7 @@ from nicegui import ui
 
 from pages.ui_guard import guard
 
-from .inputs import select_all_on_focus
+from .inputs import bind_symbol_load, select_all_on_focus
 from .theme import BTN_3D
 
 from . import detail, handoff, strategy_table
@@ -31,6 +32,24 @@ from . import detail, handoff, strategy_table
 def pct_to_fraction(value):
     """Convert a percent UI value to a fraction (screen_spreads wants 0.10, not 10)."""
     return float(value) / 100.0
+
+
+def status_text(payload, n_rows):
+    """Status line under the table. Pure.
+
+    The service drops candidates that fail its quality cut (score below the bar
+    or an excluded grade), so a scan that worked perfectly can still render an
+    empty table. Naming the drop count separates that from "the scan found
+    nothing" — otherwise a bare "0 swing signals." reads as a broken scan. The
+    note is omitted when nothing was dropped, so a clean scan stays quiet.
+    """
+    if not payload:
+        return ""
+    line = f"{n_rows} swing signals."
+    dropped = (payload or {}).get("filtered_out") or 0
+    if dropped:
+        line += f" {dropped} below the quality bar."
+    return line
 
 
 # Strategy-family checkbox options (Diagonal is a later phase — omitted).
@@ -47,7 +66,7 @@ def render():
         # + Scan all sit on one line (the detail panel no longer squeezes them).
         with ui.row().classes("items-end gap-3 flex-wrap"):
             symbol_in = select_all_on_focus(
-                ui.input("Symbol", value="SPY").props("autofocus").classes("w-28 uppercase"))
+                ui.input("Symbol", value="SPY").props("autofocus").classes("w-28"))
             dte_min = ui.number("DTE min", value=0, min=0).classes("w-24")
             dte_max = ui.number("DTE max", value=120, min=1).classes("w-24")
             with ui.column().classes("gap-0"):
@@ -125,10 +144,7 @@ def render():
         table.rows = strategy_table.strategy_rows(signals)
         table.update()
         banner.text = strategy_table.view_banner_text(payload.get("view"))
-        if not payload:
-            status.text = ""
-        else:
-            status.text = f"{len(table.rows)} swing signals."
+        status.text = status_text(payload, len(table.rows))
 
     @guard
     def _request_scan():
@@ -152,8 +168,9 @@ def render():
         status.text = "Scanning…"
 
     scan_btn.on_click(_request_scan)
-    # Enter in the Symbol field triggers the scan (mirrors the Scan button).
-    symbol_in.on("keydown.enter", lambda: _request_scan())
+    # Enter OR tab/click-out of the Symbol field triggers the scan (mirrors the Scan
+    # button), deduped so tabbing through an unchanged symbol won't re-scan.
+    bind_symbol_load(symbol_in, _request_scan)
 
     # Initial paint from the bus cache (graceful-empty if the service is cold).
     seen["version"] = bus_client.read_version("options:swing")

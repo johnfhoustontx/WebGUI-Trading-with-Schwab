@@ -34,9 +34,15 @@ def test_env_overrides_file(tmp_path, monkeypatch):
 
 
 def test_missing_file_returns_disabled_defaults(tmp_path, monkeypatch):
+    import repo_paths
+
     monkeypatch.setattr(pn, "_CONFIG_PATH", tmp_path / "nope.json")
     for k in ("TELEGRAM_BOT_TOKEN", "DISCORD_WEBHOOK_URL", "FI_SMS_NUMBER"):
         monkeypatch.delenv(k, raising=False)
+    # This test is about what the FILE (here, its absence) resolves to, not about
+    # what this environment permits. Under pytest `allow_notifications` is forced
+    # False, which would zero the master switch; opt in so the default is visible.
+    monkeypatch.setitem(repo_paths.ENV_FLAGS, "allow_notifications", True)
     cfg = pn.load_config()
     assert cfg["telegram"]["bot_token"] == ""
     assert cfg["enabled"] is True  # default-on; channels self-gate on creds
@@ -427,6 +433,7 @@ def test_min_score_not_applied_to_captured(monkeypatch):
     from shared.bus import Bus
     bus = Bus(fake=True)
     cfg = {"enabled": True, "market_hours_only": False, "min_score": 90,
+           "notify_captured": True,
            "telegram": {"bot_token": "T", "chat_id": 1}, "discord": {}, "sms": {}}
     monkeypatch.setattr(pn, "load_config", lambda: cfg)
     tg = []
@@ -435,6 +442,54 @@ def test_min_score_not_applied_to_captured(monkeypatch):
     monkeypatch.setattr(pn, "send_sms", lambda *a, **k: None)
     # captured signal with no composite_score still notifies despite min_score=90
     cap = {"signal_id": "cap1", "symbol": "SPY", "type": "PCS",
+           "short_strike": 500, "long_strike": 495, "expiration": "2026-07-10"}
+    pn.notify_signals(bus, [cap], kind="captured",
+                      seen_key="cache:options:notified_captured", today="2026-07-05")
+    assert len(tg) == 1
+
+
+# --- Captured notifications are opt-in (default OFF) ---
+
+def test_captured_disabled_by_default_sends_nothing(monkeypatch):
+    """A captured signal must NOT notify unless notify_captured is explicitly on.
+
+    Captured-signal dicts use strategy/entry_credit/... (not type/credit/...), so
+    they render as garbage through the scanner-shaped formatter, and they
+    duplicate the scanner alerts. Default OFF. The seen-set is still updated so a
+    later re-enable doesn't blast the backlog.
+    """
+    from shared.bus import Bus
+    bus = Bus(fake=True)
+    cfg = {"enabled": True, "market_hours_only": False, "min_score": 0,
+           "telegram": {"bot_token": "T", "chat_id": 1},
+           "discord": {"webhook_url": "https://h"}, "sms": {}}  # no notify_captured key
+    monkeypatch.setattr(pn, "load_config", lambda: cfg)
+    tg, dc = [], []
+    monkeypatch.setattr(pn, "send_telegram", lambda *a: tg.append(a))
+    monkeypatch.setattr(pn, "send_discord", lambda *a: dc.append(a))
+    monkeypatch.setattr(pn, "send_sms", lambda *a, **k: None)
+    cap = {"signal_id": "cap1", "symbol": "SPY", "strategy": "PCS",
+           "short_strike": 500, "long_strike": 495, "expiration": "2026-07-10"}
+    out = pn.notify_signals(bus, [cap], kind="captured",
+                            seen_key="cache:options:notified_captured", today="2026-07-05")
+    assert tg == [] and dc == [] and out == []
+    seen = pn.load_seen(bus, "cache:options:notified_captured")
+    assert "cap1" in (seen or {}).get("keys", [])   # seen-set still updated
+
+
+def test_captured_enabled_opt_in_sends(monkeypatch):
+    from shared.bus import Bus
+    bus = Bus(fake=True)
+    cfg = {"enabled": True, "market_hours_only": False, "min_score": 0,
+           "notify_captured": True,
+           "telegram": {"bot_token": "T", "chat_id": 1},
+           "discord": {"webhook_url": "https://h"}, "sms": {}}
+    monkeypatch.setattr(pn, "load_config", lambda: cfg)
+    tg = []
+    monkeypatch.setattr(pn, "send_telegram", lambda *a: tg.append(a))
+    monkeypatch.setattr(pn, "send_discord", lambda *a: None)
+    monkeypatch.setattr(pn, "send_sms", lambda *a, **k: None)
+    cap = {"signal_id": "cap2", "symbol": "SPY", "strategy": "PCS",
            "short_strike": 500, "long_strike": 495, "expiration": "2026-07-10"}
     pn.notify_signals(bus, [cap], kind="captured",
                       seen_key="cache:options:notified_captured", today="2026-07-05")
@@ -1132,7 +1187,7 @@ def test_notify_signals_captured_also_uses_signals_route(monkeypatch):
     from shared.bus import Bus
     bus = Bus(fake=True)
     got = {"d": [], "t": []}
-    monkeypatch.setattr(pn, "load_config", lambda: _route_cfg("signals"))
+    monkeypatch.setattr(pn, "load_config", lambda: {**_route_cfg("signals"), "notify_captured": True})
     monkeypatch.setattr(pn, "send_discord", lambda wh, e: got["d"].append(wh))
     monkeypatch.setattr(pn, "send_telegram", lambda tok, cid, t: got["t"].append((tok, cid)))
     monkeypatch.setattr(pn, "send_sms", lambda *a, **k: None)
@@ -1301,3 +1356,35 @@ def test_send_market_snapshot_legacy_key_still_works(monkeypatch):
     pn.send_market_snapshot({}, {}, {}, {}, {}, {}, slot="09:00", config=_ms_cfg())
     assert got["file"][0][0] == "LEGACY_MS"
     assert got["photo"][0][:2] == ("TOK", 1)
+
+
+def test_env_suppression_reaches_the_options_domain_wrapper(tmp_path, monkeypatch):
+    """The hole this closes is in the OPTIONS domain: every scanner/flow-alert push
+    calls `push_notify.load_config()`, not the shared one. Delegation makes the gate
+    apply by construction today — pin it so a refactor that inlines the wrapper (or
+    reorders it past the gate) cannot silently reopen the public X/Twitter channel."""
+    import repo_paths
+
+    p = tmp_path / "notifications.json"
+    p.write_text(json.dumps({
+        "enabled": True,
+        "twitter": {"enabled": True, "dry_run": False},
+        "gamma_briefing": {"enabled": True},
+        "market_snapshot": {"enabled": True},
+    }))
+    monkeypatch.setattr(pn, "_CONFIG_PATH", p)
+    monkeypatch.delenv("TWITTER_ENABLED", raising=False)
+    monkeypatch.delenv("NOTIFY_ENABLED", raising=False)
+
+    monkeypatch.setitem(repo_paths.ENV_FLAGS, "allow_notifications", False)
+    cfg = pn.load_config()
+    assert cfg["enabled"] is False
+    assert cfg["twitter"]["enabled"] is False
+    assert cfg["gamma_briefing"]["enabled"] is False
+    assert cfg["market_snapshot"]["enabled"] is False
+
+    # Non-vacuity: the same file through the same wrapper is untouched in prod.
+    monkeypatch.setitem(repo_paths.ENV_FLAGS, "allow_notifications", True)
+    permissive = pn.load_config()
+    assert permissive["enabled"] is True
+    assert permissive["twitter"]["enabled"] is True

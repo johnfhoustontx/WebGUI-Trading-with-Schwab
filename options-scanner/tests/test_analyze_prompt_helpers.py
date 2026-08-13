@@ -91,11 +91,14 @@ class TestValueAtOpenForStrikes:
 
 
 class TestComputeProjectedFlip:
-    def test_uniform_shift_finds_zero_crossing(self):
-        # net values straddle zero; positive hedge shifts crossing higher.
+    def test_per_strike_drift_finds_zero_crossing(self):
+        # net values straddle zero; the drift is applied PER STRIKE (it used to be
+        # the total hedge_pressure spread evenly over every strike, which lifted the
+        # whole curve — see project_0dte_drift_by_strike for why that was wrong).
         dex_data = {
             "gex": _mk_grid({100: -2e6, 105: -1e6, 110: 1e6, 115: 2e6}),
-            "hedge_pressure": 0.0,  # no shift → flip near 107.5
+            "hedge_pressure": 0.0,
+            "hedge_drift_by_strike": {105.0: 0.0},   # no drift → flip stays near 107.5
         }
         out = compute_projected_flip(dex_data, spot=107.5)
         assert out is not None
@@ -111,13 +114,14 @@ class TestComputeProjectedFlip:
 
 class TestFormatPressurePanel:
     def test_includes_now_projected_and_hedge(self):
-        # hedge of -2e6 spread over 4 strikes → -5e5 per-strike shift, leaves
-        # a valid crossing between 100 and 105.
+        # The drift lands on the strike it belongs to (here 100), leaving a valid
+        # crossing between 100 and 105.
         dex_data = {
             "net_delta_0dte": 5.5e9,
             "projected_net_delta_close": 4.2e9,
             "hedge_pressure": -2e6,
             "gex": _mk_grid({95: -2e7, 100: -1e7, 105: 1e7, 110: 2e7}),
+            "hedge_drift_by_strike": {100.0: -2e6},
         }
         out = format_pressure_panel(dex_data, spot=102.5)
         assert out["delta_now"] == 5.5e9

@@ -85,9 +85,9 @@ def test_strategy_menu_covers_every_template_once():
 
 
 def test_strategy_label():
-    assert S.strategy_label("PCS") == "Credit spread · put"
-    assert S.strategy_label("CCS") == "Credit spread · call"
+    assert S.strategy_label("PCS") == "Credit spread — put"
+    assert S.strategy_label("CCS") == "Credit spread — call"
     assert S.strategy_label("LONG_CALL") == "Long call"
-    assert S.strategy_label("IC") == "Condor · iron"
-    assert S.strategy_label("DIAGONAL_PUT") == "Diagonal · put"
+    assert S.strategy_label("IC") == "Condor — iron"
+    assert S.strategy_label("DIAGONAL_PUT") == "Diagonal — put"
     assert S.strategy_label("WHat") == "WHat"   # unknown → itself

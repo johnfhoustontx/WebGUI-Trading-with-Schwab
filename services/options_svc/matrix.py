@@ -16,6 +16,17 @@ _SIG_BUY = 0.22                # composite score cut for buy/sell
 _SIG_STRONG = 0.55             # |score| for a strong tier
 _W_TREND, _W_FLOW, _W_ACCEL = 0.50, 0.35, 0.15
 
+# ---- IV-direction regime (the missing linchpin for the vol-crush / cascade setups) ----
+_IV_LOOKBACK_S = 900           # 15 min trailing window
+_IV_SPIKE = 0.04               # +4% relative IV change over the window -> spiking
+_IV_CRUSH = -0.04              # -4% -> collapsing
+
+# ---- fused dealer-flow regime (named playbook labels) ----
+_PIN_PROX_PCT = 0.4            # spot within 0.4% of a wall -> pin candidate
+_AFTERNOON_MINS = 180         # <=180 min to close = after ~1pm ET (charm grind)
+_LATE_MINS = 75               # <=75 min to close = last ~75 min (pin / MOC ramp)
+_TRENDING = ("strong_up", "strong_down")   # excluded from the range-bound grind
+
 
 def _spot_points(series):
     """[(ts, spot)] with non-null spots, from a flow series row tuple."""
@@ -114,6 +125,79 @@ def gex_regime(spot, flip):
     return "above" if spot >= flip else "below"
 
 
+def iv_regime(iv_series, now_ts, lookback_s=_IV_LOOKBACK_S):
+    """iv_series = [(ts, atm_iv)] where atm_iv is an IV *level* (decimal or
+    vol-points; unit-agnostic as long as it is positive).
+
+    Return (state, rel_change). state in {spiking, collapsing, stable, na};
+    rel_change = (iv_now - iv_ref) / iv_ref over the trailing lookback window
+    (ref = the last sample at/before the cutoff, else the first sample).
+
+    This is the axis the app does NOT yet emit: whether ATM IV is *rising* or
+    *falling*. The vol-crush squeeze (positive gamma + IV collapsing) and the
+    negative-gamma cascade (below flip + IV spiking) both hinge on it. Feed it a
+    per-snapshot ATM-IV series -- a new forward-only ``atm_iv`` column on the
+    ``snapshots`` table (the poll already computes ATM IV via the engine's
+    ``_get_atm_iv``; the DB stores only ``rr_25d`` skew, which is signed and can
+    cross zero, so it is NOT a substitute here). Never raises.
+    """
+    pts = [(t, s) for t, s in iv_series if s is not None]
+    if len(pts) < 2:
+        return ("na", 0.0)
+    cur = pts[-1][1]
+    ref = pts[0][1]
+    cutoff = pts[-1][0] - lookback_s
+    for t, s in pts:
+        if t <= cutoff:
+            ref = s
+    if ref is None or ref <= 0:
+        return ("na", 0.0)
+    rel = (cur - ref) / ref
+    if rel >= _IV_SPIKE:
+        state = "spiking"
+    elif rel <= _IV_CRUSH:
+        state = "collapsing"
+    else:
+        state = "stable"
+    return (state, rel)
+
+
+def dealer_regime(spot, flip, iv_state, trend_state, mins_to_close,
+                  wall_dist_pct=None):
+    """Fuse gamma regime x IV direction x time-of-day x wall proximity into ONE
+    named dealer-flow playbook label. Returns one of:
+
+      'gamma_cascade'  - below flip + IV spiking            (setup 3; dangerous)
+      'vanna_squeeze'  - above flip + IV collapsing         (setup 1)
+      'delta_wall_pin' - above flip + late + spot hugs a wall (setup 4)
+      'charm_grind'    - above flip + afternoon + range-bound (setup 2)
+      'neutral'        - positive/negative gamma, no setup active
+      'na'             - spot/flip unavailable
+
+    Context/label only -- it never sizes or places a trade (mirrors the driver's
+    ``market_read``). Precedence is by urgency: the negative-gamma cascade wins,
+    then the vol-crush, then the pin, then the grind. ``mins_to_close`` is minutes
+    until the 4pm-ET cash close (None off-hours -> the time-gated setups can't
+    fire). ``wall_dist_pct`` = |spot - nearest big net-delta strike| / spot * 100
+    (None when the DEX wall isn't loaded -> the pin can't fire). Never raises.
+    """
+    reg = gex_regime(spot, flip)
+    if reg == "na":
+        return "na"
+    if reg == "below":
+        return "gamma_cascade" if iv_state == "spiking" else "neutral"
+    # reg == "above" (positive gamma)
+    if iv_state == "collapsing":
+        return "vanna_squeeze"
+    late = mins_to_close is not None and mins_to_close <= _LATE_MINS
+    if late and wall_dist_pct is not None and wall_dist_pct <= _PIN_PROX_PCT:
+        return "delta_wall_pin"
+    afternoon = mins_to_close is not None and mins_to_close <= _AFTERNOON_MINS
+    if afternoon and trend_state not in _TRENDING:
+        return "charm_grind"
+    return "neutral"
+
+
 def composite_signal(trend_dir, call_state, put_state, call_prem, put_prem):
     """Return (signal, strength). signal in {buy, neutral, sell}; strength in {0,1,2}."""
     call_prem = call_prem or 0.0
@@ -141,6 +225,96 @@ def composite_signal(trend_dir, call_state, put_state, call_prem, put_prem):
 def hotness(n_signals, n_alerts, signal_strength):
     """Sort key so opportunities float to the top (higher = hotter)."""
     return 2 * n_signals + 2 * n_alerts + 3 * signal_strength
+
+
+def _nearest_wall_dist_pct(spot, top_pos, top_neg):
+    """|spot - nearest net-delta wall| / spot * 100; None when unavailable."""
+    if spot is None or spot <= 0:
+        return None
+    walls = [w for w in (top_pos, top_neg) if w is not None]
+    if not walls:
+        return None
+    return min(abs(spot - w) / spot * 100.0 for w in walls)
+
+
+def dealer_regime_from_rows(rows, atm_rows, now_ts, close_ts):
+    """Assemble the ``dealer_regime`` inputs from stored gex-view rows and label.
+
+    ``rows`` = ``load_today`` shape ``[(ts, spot, flip, top_pos_strike,
+    top_neg_strike, net_total)]`` (chronological). ``atm_rows`` =
+    ``load_atm_iv_series`` shape ``[(ts, atm_iv)]``. ``now_ts`` / ``close_ts`` =
+    unix seconds (``close_ts`` = the 4pm-ET cash close for the row's date).
+
+    Returns ``{spot, flip, trend_state, iv_state, wall_dist_pct, mins_to_close,
+    regime}``. Pure — the dry-run tool (and, if surfaced later, ``build_matrix``)
+    both call it. A close already in the past → ``mins_to_close`` None so the
+    time-gated setups (pin / grind) can't fire. Never raises.
+    """
+    if not rows:
+        return {"spot": None, "flip": None, "trend_state": "flat",
+                "iv_state": "na", "wall_dist_pct": None,
+                "mins_to_close": None, "regime": "na"}
+    last = rows[-1]
+    spot, flip, top_pos, top_neg = last[1], last[2], last[3], last[4]
+    t_state, _ = intraday_trend([(r[0], r[1]) for r in rows], now_ts)
+    iv_state, _ = iv_regime(atm_rows, now_ts)
+    wall_dist_pct = _nearest_wall_dist_pct(spot, top_pos, top_neg)
+    mins = (close_ts - now_ts) / 60.0 if close_ts is not None else None
+    if mins is not None and mins < 0:
+        mins = None
+    regime = dealer_regime(spot, flip, iv_state, t_state, mins, wall_dist_pct)
+    return {
+        "spot": round(spot, 2) if spot is not None else None,
+        "flip": round(flip, 2) if flip is not None else None,
+        "trend_state": t_state,
+        "iv_state": iv_state,
+        "wall_dist_pct": round(wall_dist_pct, 3) if wall_dist_pct is not None else None,
+        "mins_to_close": round(mins, 1) if mins is not None else None,
+        "regime": regime,
+    }
+
+
+def market_premium_aggregate(raw):
+    """Dollar-weighted call/put PREMIUM skew across the collected universe.
+
+    ``raw`` = ``{symbol: {"series": [flow-row tuples], ...}}`` (the same dict
+    ``build_matrix`` feeds ``build_rows``). For each symbol take its LATEST
+    snapshot's cumulative call/put premium (row cols 4/5, forward-only → may be
+    None), then sum the raw dollars across every symbol and reduce to a signed
+    skew ``(Σcall − Σput) / (Σcall + Σput)`` in ``[-1, 1]`` (>0 = more money
+    through calls). Dollar-weighted, so index/mega-cap premium dominates — this
+    is the market-money read, NOT an equal-weighted per-name average.
+
+    Because Schwab has no time-&-sales tape, premium is UNSIGNED cumulative
+    (total traded), so the skew is a money-weighted Put/Call, NOT net buying.
+
+    Returns ``{call_total, put_total, net_m, skew, skew_pct, symbols}``; ``skew``
+    / ``skew_pct`` are ``None`` when no premium has accrued yet (early session /
+    off-hours). Never raises.
+    """
+    call_total = put_total = 0.0
+    n = 0
+    for blob in (raw or {}).values():
+        series = (blob or {}).get("series") or []
+        if not series:
+            continue
+        last = series[-1]
+        c = last[4] or 0.0
+        p = last[5] or 0.0
+        if c <= 0 and p <= 0:          # forward-only None / genuinely no flow yet
+            continue
+        call_total += c
+        put_total += p
+        n += 1
+    total = call_total + put_total
+    if total <= 0:
+        return {"call_total": 0.0, "put_total": 0.0, "net_m": 0.0,
+                "skew": None, "skew_pct": None, "symbols": 0}
+    skew = (call_total - put_total) / total
+    return {"call_total": round(call_total, 2), "put_total": round(put_total, 2),
+            "net_m": round((call_total - put_total) / 1_000_000.0, 2),
+            "skew": round(skew, 4), "skew_pct": round(skew * 100, 1),
+            "symbols": n}
 
 
 def build_rows(raw, scan_counts, alert_counts, now_ts, eth_symbols=None):
@@ -194,6 +368,11 @@ def build_rows(raw, scan_counts, alert_counts, now_ts, eth_symbols=None):
                 "put_accel": p_state,
                 "pc_ratio": pc_ratio(call_prem, put_prem),
                 "net_prem_m": net_premium_m(call_prem, put_prem),
+                # Raw cumulative premium $ (forward-only → 0.0 on early snapshots),
+                # exposed so a cross-service reader (the market dashboard) can show a
+                # per-symbol call/put skew + dollar-weight-aggregate a basket (BIG10).
+                "call_prem": round(call_prem, 2),
+                "put_prem": round(put_prem, 2),
                 "flip": round(flip, 2) if flip is not None else None,
                 "gex_regime": gex_regime(spot, flip),
                 "_open_spot": round(open_spot, 2) if open_spot is not None else None,
@@ -217,6 +396,8 @@ def build_rows(raw, scan_counts, alert_counts, now_ts, eth_symbols=None):
                 "put_accel": "flat",
                 "pc_ratio": None,
                 "net_prem_m": 0.0,
+                "call_prem": 0.0,
+                "put_prem": 0.0,
                 "flip": None,
                 "gex_regime": "na",
                 "_open_spot": None,

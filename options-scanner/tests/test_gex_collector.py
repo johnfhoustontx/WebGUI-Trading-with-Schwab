@@ -110,7 +110,7 @@ def test_poll_once_writes_all_symbols(tmp_path, monkeypatch):
     engine = _make_engine()
     gc.poll_once(client, engine, conn, symbols=gc.SYMBOLS)
     rows = conn.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0]
-    assert rows == 12
+    assert rows == len(gc.SYMBOLS) * 3   # 3 views per symbol
 
 
 def test_poll_once_continues_on_symbol_failure(tmp_path, monkeypatch, caplog):
@@ -143,7 +143,7 @@ def test_poll_once_continues_on_symbol_failure(tmp_path, monkeypatch, caplog):
         gc.poll_once(client, engine, conn, symbols=gc.SYMBOLS)
 
     rows = conn.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0]
-    assert rows == 9
+    assert rows == (len(gc.SYMBOLS) - 1) * 3   # the failing symbol writes nothing
     assert any("$SPX" in rec.message for rec in caplog.records)
 
 
@@ -219,7 +219,7 @@ def test_poll_once_fetches_chains_concurrently(tmp_path, monkeypatch):
     gc.poll_once(client, engine, conn, symbols=gc.SYMBOLS)
     assert state["max"] >= 2  # fetches genuinely overlapped
     rows = conn.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0]
-    assert rows == 12         # all symbols still written (4 symbols x 3+ views)
+    assert rows == len(gc.SYMBOLS) * 3   # all symbols still written
 
 
 def test_poll_once_on_chain_callback_gets_successful_chains(tmp_path, monkeypatch):
@@ -294,7 +294,7 @@ def test_poll_once_skips_empty_chain(tmp_path, monkeypatch, caplog):
         gc.poll_once(client, engine, conn, symbols=gc.SYMBOLS)
 
     rows = conn.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0]
-    assert rows == 9
+    assert rows == (len(gc.SYMBOLS) - 1) * 3   # the empty chain writes nothing
 
 
 def test_main_exits_past_stop_time(tmp_path, monkeypatch):
@@ -522,7 +522,7 @@ def test_poll_once_writes_dex_rows_with_0dte_fields(tmp_path, monkeypatch):
     dex_count = conn.execute(
         "SELECT COUNT(*) FROM snapshots WHERE view = 'dex'"
     ).fetchone()[0]
-    assert dex_count == 4  # one per symbol
+    assert dex_count == len(gc.SYMBOLS)  # one per symbol
 
     row = conn.execute(
         "SELECT net_delta_0dte, projected_net_delta_close, hedge_pressure "
@@ -662,6 +662,50 @@ def test_poll_once_skew_none_when_no_skew(tmp_path, monkeypatch):
         assert summary["rr_25d"] is None
         assert summary["call_vol"] is None
         assert summary["put_vol"] is None
+
+
+def test_poll_once_stores_atm_iv(tmp_path, monkeypatch):
+    """poll_once reads the ATM IV LEVEL once per symbol (iv_analysis.extract_atm_iv)
+    from the already-fetched chain and merges it into EACH view summary before
+    insert — the forward-only column that feeds the IV-direction regime."""
+    import iv_analysis
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    _patch_snapshot_summary(monkeypatch)
+    monkeypatch.setattr(gc, "poll_term_once", lambda *a, **k: None)
+    monkeypatch.setattr(iv_analysis, "extract_atm_iv", lambda chain: 21.5)
+
+    captured = []
+    monkeypatch.setattr(
+        db, "insert_snapshot",
+        lambda conn, symbol, view, summary, grid, dte: captured.append(dict(summary)))
+
+    client = _make_client({s: {"symbol": "X"} for s in gc.SYMBOLS})
+    engine = _make_engine()
+    gc.poll_once(client, engine, conn, symbols=gc.SYMBOLS)
+
+    assert captured
+    assert all(s["atm_iv"] == 21.5 for s in captured)   # merged into every view
+
+
+def test_poll_once_atm_iv_none_when_unavailable(tmp_path, monkeypatch):
+    """extract_atm_iv returning None -> atm_iv column is None, poll still succeeds."""
+    import iv_analysis
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    _patch_snapshot_summary(monkeypatch)
+    monkeypatch.setattr(gc, "poll_term_once", lambda *a, **k: None)
+    monkeypatch.setattr(iv_analysis, "extract_atm_iv", lambda chain: None)
+
+    captured = []
+    monkeypatch.setattr(
+        db, "insert_snapshot",
+        lambda conn, symbol, view, summary, grid, dte: captured.append(dict(summary)))
+    gc.poll_once(_make_client({s: {"symbol": "X"} for s in gc.SYMBOLS}),
+                 _make_engine(), conn, symbols=gc.SYMBOLS)
+    assert captured and all(s["atm_iv"] is None for s in captured)
 
 
 def test_sentiment_hook_never_raises(monkeypatch):

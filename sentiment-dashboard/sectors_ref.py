@@ -44,6 +44,91 @@ def reset_cache():
     _cache.update(path=None, mtime=None, data=None)
 
 
+_stocks_cache = {"path": None, "mtime": None, "data": None}
+
+
+def reset_stocks_cache():
+    """Drop the cached Stocks rows so the next load re-reads (test helper)."""
+    _stocks_cache.update(path=None, mtime=None, data=None)
+
+
+def load_stocks_data(xlsx_path=SECTORS_XLSX):
+    """Load the Stocks tab — 5 constituents per (sector, industry) — mtime-cached.
+
+    Returns a list of dicts in workbook order:
+        {sector, industry, rank, symbol, company, etfs}
+    Returns [] if the workbook, the tab, or openpyxl is unavailable.
+    """
+    key = str(xlsx_path)
+    try:
+        mtime = Path(xlsx_path).stat().st_mtime
+    except OSError:
+        mtime = None
+    if (_stocks_cache["data"] is not None and _stocks_cache["path"] == key
+            and _stocks_cache["mtime"] == mtime and mtime is not None):
+        return _stocks_cache["data"]
+    data = _load_stocks_data_uncached(xlsx_path)
+    if mtime is not None:
+        _stocks_cache.update(path=key, mtime=mtime, data=data)
+    return data
+
+
+def _load_stocks_data_uncached(xlsx_path):
+    try:
+        import openpyxl
+    except ImportError:
+        return []
+    try:
+        wb = openpyxl.load_workbook(str(xlsx_path), data_only=True)
+    except Exception:
+        return []
+    if "Stocks" not in wb.sheetnames:
+        return []
+
+    rows = []
+    for i, row in enumerate(wb["Stocks"].iter_rows(values_only=True)):
+        if i == 0 or not row:
+            continue
+        symbol = (row[3] or "") if len(row) > 3 else ""
+        symbol = str(symbol).strip()
+        # A falsy symbol is the blank line before the trailing merged note
+        # block — guard on the data, not on a row number that moves.
+        if not symbol:
+            continue
+        etfs_raw = str(row[5]) if len(row) > 5 and row[5] else ""
+        rows.append({
+            "sector": (row[0] or "").strip() if row[0] else "",
+            "industry": (row[1] or "").strip() if len(row) > 1 and row[1] else "",
+            "rank": row[2] if len(row) > 2 else None,
+            "symbol": symbol,
+            "company": (str(row[4]).strip() if len(row) > 4 and row[4] else ""),
+            "etfs": [e.strip() for e in etfs_raw.split(",") if e.strip()],
+        })
+    return rows
+
+
+def stock_symbols(xlsx_path=SECTORS_XLSX):
+    """Deduped constituent symbols in workbook order.
+
+    A name legitimately appears under more than one industry, so the fetch
+    universe is the deduped list, not the row count.
+    """
+    seen, out = set(), []
+    for row in load_stocks_data(xlsx_path):
+        if row["symbol"] not in seen:
+            seen.add(row["symbol"])
+            out.append(row["symbol"])
+    return out
+
+
+def constituents_by_industry(xlsx_path=SECTORS_XLSX):
+    """{(sector, industry): [symbols]} — the participation input."""
+    out = {}
+    for row in load_stocks_data(xlsx_path):
+        out.setdefault((row["sector"], row["industry"]), []).append(row["symbol"])
+    return out
+
+
 def load_sectors_data(xlsx_path=SECTORS_XLSX):
     """Load sector / industry / ETF rows from the reference workbook (mtime-cached).
 

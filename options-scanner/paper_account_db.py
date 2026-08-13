@@ -81,7 +81,8 @@ CREATE TABLE IF NOT EXISTS paper_positions (
     parent_position_id INTEGER,
     mae REAL,               -- max adverse excursion (most-negative position-level unrealized $ seen)
     mfe REAL,               -- max favorable excursion (most-positive position-level unrealized $ seen)
-    entry_context TEXT      -- JSON: decision context at open (driver posture/market_read); NULL for manual
+    entry_context TEXT,     -- JSON: decision context at open (driver posture/market_read); NULL for manual
+    be_armed INTEGER DEFAULT 0  -- opt-in manual-paper lifecycle: 1 once +50% credit has armed break-even
 );
 CREATE INDEX IF NOT EXISTS idx_positions_status ON paper_positions(status);
 CREATE INDEX IF NOT EXISTS idx_positions_signal ON paper_positions(signal_id);
@@ -120,7 +121,8 @@ def init_db(db_path=None):
         # idempotent migration for older DBs — additive nullable columns only.
         cols = {r[1] for r in conn.execute("PRAGMA table_info(paper_positions)")}
         for name, decl in (("parent_position_id", "INTEGER"), ("mae", "REAL"),
-                           ("mfe", "REAL"), ("entry_context", "TEXT")):
+                           ("mfe", "REAL"), ("entry_context", "TEXT"),
+                           ("be_armed", "INTEGER DEFAULT 0")):
             if name not in cols:
                 conn.execute(f"ALTER TABLE paper_positions ADD COLUMN {name} {decl}")
         conn.commit()
@@ -435,6 +437,20 @@ def update_position_mark(db_path, position_id, **fields):
         sets = ", ".join(f"{k}=?" for k in fields)
         conn.execute(f"UPDATE paper_positions SET {sets} WHERE position_id=?",
                      tuple(fields.values()) + (position_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def set_be_armed(db_path, position_id):
+    """Arm the opt-in manual-paper break-even lifecycle stop for one position —
+    a one-way latch (never unarmed). Mirrors ``signal_db.set_be_armed`` for
+    captured signals; ``paper_engine.run_manage_cycle`` calls this the first time
+    a lifecycle-enabled position's pnl reaches +50% of credit."""
+    conn = connect(db_path)
+    try:
+        conn.execute("UPDATE paper_positions SET be_armed=1 WHERE position_id=?",
+                     (position_id,))
         conn.commit()
     finally:
         conn.close()

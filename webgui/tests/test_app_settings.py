@@ -57,3 +57,27 @@ def test_get_unknown_key_returns_none(tmp_path, monkeypatch):
 def test_nav_pinned_defaults_to_off():
     """Pinning the nav drawer open is opt-in; the hover rail is the default."""
     assert app_settings.DEFAULTS["nav_pinned"] is False
+
+
+def test_captured_autoclose_defaults_on():
+    """Captured-trade auto-management ships ON (opt-out via the Settings toggle)."""
+    assert app_settings.DEFAULTS["captured_autoclose_enabled"] is True
+
+
+def test_manual_paper_lifecycle_defaults_off():
+    """The MANUAL paper account's break-even lifecycle is opt-IN (inert placeholder
+    until the Settings toggle is explicitly enabled) — the inverse default of
+    captured_autoclose_enabled."""
+    assert app_settings.DEFAULTS["manual_paper_lifecycle_enabled"] is False
+
+
+def test_net_prem_defaults_exist():
+    """The Net Prem view's group/mode/selection persist across page loads.
+
+    The default trio is deliberate: $SPX/SPY/QQQ have comparable magnitudes in
+    Dollars mode (measured live: -$244M / -$375M / -$275M), so they read as one
+    chart — unlike DIA (+$0.1M), which would be a flat line beside them.
+    """
+    assert app_settings.DEFAULTS["gamma_netprem_group"] == "indices"
+    assert app_settings.DEFAULTS["gamma_netprem_mode"] == "dollars"
+    assert app_settings.DEFAULTS["gamma_netprem_symbols"] == ["$SPX", "SPY", "QQQ"]

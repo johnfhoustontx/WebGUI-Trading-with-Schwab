@@ -121,6 +121,15 @@ def test_should_request():
     assert trade.should_request("   ", "AAPL", 9.0) is False
 
 
+def test_should_open_tab():
+    # open only when a request is pending AND the cache version advanced past the
+    # baseline captured at click time (so a page-load with a stale result never opens).
+    assert trade.should_open_tab(pending=True, version=5, baseline=4) is True
+    assert trade.should_open_tab(pending=True, version=4, baseline=4) is False
+    assert trade.should_open_tab(pending=False, version=9, baseline=4) is False
+    assert trade.should_open_tab(pending=True, version=None, baseline=None) is False
+
+
 _SM = {
     "verdict": "BUY", "score": 0.636, "percentile": 90,
     "expected_fwd": 0.0135, "hit_rate": 0.523, "horizon_days": 20,

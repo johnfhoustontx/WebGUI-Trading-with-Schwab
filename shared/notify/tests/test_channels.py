@@ -50,6 +50,10 @@ def test_missing_file_returns_disabled_defaults(tmp_path, monkeypatch):
     monkeypatch.setattr(ch, "_CONFIG_PATH", tmp_path / "nope.json")
     for k in ("TELEGRAM_BOT_TOKEN", "DISCORD_WEBHOOK_URL", "FI_SMS_NUMBER"):
         monkeypatch.delenv(k, raising=False)
+    # This test is about what the FILE (here, its absence) resolves to, not about
+    # what this environment permits. Under pytest `allow_notifications` is forced
+    # False, which would zero the master switch; opt in so the default is visible.
+    monkeypatch.setitem(ch.ENV_FLAGS, "allow_notifications", True)
     cfg = ch.load_config()
     assert cfg["telegram"]["bot_token"] == ""
     assert cfg["enabled"] is True  # default-on; channels self-gate on creds
@@ -499,6 +503,59 @@ def test_defaults_routes_is_empty(tmp_path, monkeypatch):
     category indistinguishable from a blank one."""
     monkeypatch.setattr(ch, "_CONFIG_PATH", tmp_path / "nope.json")
     assert ch.load_config()["routes"] == {}
+
+
+def test_env_suppression_disables_every_channel(tmp_path, monkeypatch):
+    """In a suppressed environment NO channel may be enabled — including
+    twitter, whose gate is independent of the master `enabled` switch and which
+    posts PUBLICLY. Walks the whole config so a channel added later is covered."""
+    cfg_file = tmp_path / "notifications.json"
+    cfg_file.write_text(json.dumps({
+        "enabled": True,
+        "telegram": {"bot_token": "t", "chat_id": 1},
+        "discord": {"webhook_url": "https://example.invalid/hook"},
+        "twitter": {"enabled": True, "dry_run": False},
+        "market_snapshot": {"enabled": True},
+    }), encoding="utf-8")
+    monkeypatch.setitem(ch.ENV_FLAGS, "allow_notifications", False)
+
+    cfg = ch.load_config(cfg_file)
+
+    def enabled_flags(node):
+        for k, v in (node or {}).items():
+            if k == "enabled":
+                yield v
+            elif isinstance(v, dict):
+                yield from enabled_flags(v)
+
+    assert list(enabled_flags(cfg)), "sanity: the walk found no enabled keys"
+    assert not any(enabled_flags(cfg))
+
+
+def test_env_permissive_leaves_config_untouched(tmp_path, monkeypatch):
+    """Prod (and any checkout without a marker) is unaffected."""
+    cfg_file = tmp_path / "notifications.json"
+    cfg_file.write_text(json.dumps({"enabled": True,
+                                    "twitter": {"enabled": True}}), encoding="utf-8")
+    monkeypatch.setitem(ch.ENV_FLAGS, "allow_notifications", True)
+    cfg = ch.load_config(cfg_file)
+    assert cfg["enabled"] is True
+    assert cfg["twitter"]["enabled"] is True
+
+
+def test_env_suppression_beats_the_notify_enabled_env_var(tmp_path, monkeypatch):
+    """NOTIFY_ENABLED=1 must not re-open a suppressed environment.
+
+    The env override runs BEFORE the gate; pinning the order stops a future edit
+    that moves the gate earlier from handing a dev checkout a live master switch."""
+    cfg_file = tmp_path / "notifications.json"
+    cfg_file.write_text(json.dumps({"enabled": False}), encoding="utf-8")
+    monkeypatch.setenv("NOTIFY_ENABLED", "1")
+    monkeypatch.setenv("TWITTER_ENABLED", "1")
+    monkeypatch.setitem(ch.ENV_FLAGS, "allow_notifications", False)
+    cfg = ch.load_config(cfg_file)
+    assert cfg["enabled"] is False
+    assert cfg["twitter"]["enabled"] is False
 
 
 def test_routes_block_from_file_merges_into_config(tmp_path, monkeypatch):

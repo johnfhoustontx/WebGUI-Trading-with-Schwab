@@ -325,6 +325,14 @@ def _as_of(briefing) -> str:
 
 
 _REGIME_TOP_N = 2      # how many memberships to surface (the mix, not all five)
+# Display labels for the membership keys, so the decider sees "Volatile" (not the
+# internal "crisis" key) consistent with the rest of the app.
+_REGIME_LABELS = {"mean_reversion": "Mean Reversion", "trending": "Trending",
+                  "breakout": "Breakout", "choppy": "Choppy", "crisis": "Volatile"}
+
+
+def _regime_label(key) -> str:
+    return _REGIME_LABELS.get(str(key), str(key))
 
 
 def _structural_regime(payload) -> dict:
@@ -351,13 +359,15 @@ def _structural_regime(payload) -> dict:
                      if isinstance(v, (int, float)) and not isinstance(v, bool)]
             pairs.sort(key=lambda kv: kv[1], reverse=True)
             if pairs:
-                out["top"] = [(k, round(v, 2)) for k, v in pairs[:_REGIME_TOP_N]]
+                out["top"] = [(_regime_label(k), round(v, 2))
+                              for k, v in pairs[:_REGIME_TOP_N]]
         tr = p.get("transition")
         if isinstance(tr, dict) and tr.get("from") and tr.get("to"):
             prog = tr.get("progress")
             pct = f" {round(float(prog) * 100):.0f}%" if isinstance(
                 prog, (int, float)) and not isinstance(prog, bool) else ""
-            out["transition"] = f"{tr['from']} -> {tr['to']}{pct}"
+            out["transition"] = (f"{_regime_label(tr['from'])} -> "
+                                 f"{_regime_label(tr['to'])}{pct}")
         return out
     except Exception:  # noqa: BLE001 — context is best-effort; never block a cycle.
         return {}
@@ -570,10 +580,16 @@ def run_cycle(scan_view, paper_view, *, target, limits, market, client=None) -> 
         gate_on = _st.DIRECTIONAL_GATE_ENABLED
         decisive_posture = _directional_posture(packet.get("market_read"))
         posture = decisive_posture if gate_on else "neutral"
+        # One trade per symbol: the symbols already open in the driver book block any new
+        # trade on the same underlying (caps per-name concentration). Always enforced.
+        open_symbols = frozenset(
+            p.get("symbol") for p in packet.get("open_positions", [])
+            if isinstance(p, dict) and p.get("symbol"))
         guarded = _g.apply_guardrails(
             decision, packet["menu_by_id"], limits,
             open_count=packet["open_count"], day_pnl=packet["day_pnl"],
-            vix=packet["vix"], daily_max_loss=_daily_max_loss(), posture=posture)
+            vix=packet["vix"], daily_max_loss=_daily_max_loss(), posture=posture,
+            open_symbols=open_symbols)
         # Shadow gate (log-only): what a LIVE directional gate WOULD have blocked among the
         # trades that fired, evaluated at the decisive posture even while the gate is inert.
         # Empty when gate_on (wrong-side trades are already in `rejected`). Recorded on the

@@ -216,11 +216,38 @@ def _dte_from_expiration(exp):
         return None
 
 
+def _max_loss_per_share(t):
+    """The trade's max loss in PER-SHARE dollars, matching ``entry_credit``.
+
+    The ledger writer (``options-scanner``'s ``create_paper_trade``) persists BOTH
+    ``max_loss_per`` (per share) and ``max_loss_total`` (``max_loss * quantity *
+    100``, the whole position). Reading the total while ``entry_credit`` is per
+    share displayed a per-share credit beside a whole-position max loss -- a
+    mismatch that scales with quantity.
+
+    ``max_loss_per`` is a real persisted column and is the EXACT value, so it is
+    the primary source; ``max_loss`` is honoured next for callers that synthesize
+    a trade-shaped dict by hand instead of loading a ledger row. Dividing the
+    total back down is only a fallback for a row carrying neither, and it needs
+    ``quantity`` -- absent that, return None rather than a figure wrong by a
+    factor of the position size.
+    """
+    for key in ("max_loss_per", "max_loss"):
+        direct = _num(t.get(key))
+        if direct is not None:
+            return direct
+    total = _num(t.get("max_loss_total"))
+    qty = _num(t.get("quantity"))
+    if total is None or not qty:
+        return None
+    return round(total / (qty * 100.0), 4)
+
+
 def synth_from_trade(trade):
     """Detail-panel signal dict from a paper-trade dict.
 
     Maps the calculated fields the trade ALREADY stores (breakeven [stored as a
-    string], the entry greeks, underlying, width) — which the detail panel reads
+    string, passed through verbatim], the entry greeks, underlying, width) — which the detail panel reads
     — plus live DTE from the expiration and a delta-approximation PoP. Fields the
     trade never captured at entry (IV, composite score) stay absent, so the panel
     shows '—' rather than a fabricated value."""
@@ -235,14 +262,30 @@ def synth_from_trade(trade):
         "type": t.get("strategy", ""),
         "trade_type": t.get("trade_type", ""),
         "credit": _num(t.get("entry_credit")),
-        "max_loss": _num(t.get("max_loss_total")),
+        "max_loss": _max_loss_per_share(t),
         "expiration": t.get("expiration", ""),
         "short_strike": t.get("short_strike"),
         "long_strike": t.get("long_strike"),
         "call_short": t.get("call_short"),
         "call_long": t.get("call_long"),
+        # A DEBIT trade (LONG_CALL/LONG_PUT/BULL_CALL/BEAR_PUT) stores
+        # short_strike/long_strike/width as None and its real strikes ONLY here
+        # (the ledger's debit-trade writer in ``options-scanner``), in the
+        # canonical {kind, side, strike, qty} shape that detail.contract_lines
+        # prefers. Dropping it left contract_lines nothing
+        # to fall back to, so the contract card vanished entirely for exactly the
+        # trades whose strikes live nowhere else. None for a credit spread, which
+        # keeps taking the strike-key path.
+        "legs": t.get("legs"),
         "width": _num(t.get("width")),
-        "breakeven": _num(t.get("breakeven")),
+        # NOT coerced. An iron condor stores BOTH breakevens as the string
+        # "put_be/call_be" (scanner_engine.py:1069), and ``_num`` is a bare
+        # float() -- which raises on the slash and returns None, destroying the
+        # value before ``detail.breakeven_text`` (which parses exactly that
+        # shape) could see it. Passed through as stored so the slash-aware
+        # formatter decides; it handles a plain float, a numeric string and an
+        # unparseable one (-> em-dash) alike, so nothing downstream needs a float.
+        "breakeven": t.get("breakeven"),
         "dte": _dte_from_expiration(t.get("expiration")),
         "short_delta": delta,
         "net_theta": _num(t.get("net_theta")),

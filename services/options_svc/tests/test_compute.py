@@ -124,7 +124,21 @@ def _swing_chain(exp_str="2026-07-15", dte=15):
     }
 
 
-def test_swing_scan_multistrategy_pipeline(monkeypatch):
+@pytest.fixture
+def unfiltered_swing(monkeypatch):
+    """Drop the min-score cut for tests that are about the build/score pipeline.
+
+    ``_swing_chain`` grades its DIRECTIONAL candidates, the adapted PCS and the
+    adapted IC all Weak (34.6-39.0) — only BULL_CALL/BEAR_PUT clear the bar — so
+    with the production cut in force the assertions below about family coverage
+    and the PCS tilt would bite an empty or truncated list. These tests predate
+    the cut and are not about it; the cut has its own tests.
+    """
+    monkeypatch.setattr(compute, "SWING_MIN_SCORE", 0.0)
+    monkeypatch.setattr(compute, "SWING_EXCLUDED_GRADES", ())
+
+
+def test_swing_scan_multistrategy_pipeline(monkeypatch, unfiltered_swing):
     """The new multi-strategy pipeline: infer a view, build DIRECTIONAL + VERTICAL
     (incl. adapted PCS) + NEUTRAL candidates from the REAL strategy_scanner, score
     them with the REAL strategy_scoring, and return ``{"signals", "view"}``."""
@@ -188,9 +202,11 @@ def test_swing_scan_multistrategy_pipeline(monkeypatch):
     assert out["signals"] and all("composite_score" in s for s in out["signals"])
     # ids assigned.
     assert all(s.get("id") for s in out["signals"])
+    # The symbol's IV Rank is surfaced onto every candidate (for the table's column).
+    assert all(s.get("iv_rank") == 50.0 for s in out["signals"])
 
 
-def test_swing_scan_families_filter(monkeypatch):
+def test_swing_scan_families_filter(monkeypatch, unfiltered_swing):
     """``families`` restricts which candidate families are built (NEUTRAL-only ->
     screen_spreads still runs for the IC feed, and ONLY a NEUTRAL signal results).
 
@@ -248,7 +264,10 @@ def test_swing_scan_empty_when_no_chain(monkeypatch):
                         lambda symbol: {"last": 540.0})
 
     out = compute.swing_scan("SPY", 5, 30, -0.20, -0.10, 0.10, 0.20, 0.10)
-    assert out == {"signals": [], "view": {}}
+    # ``filtered_out`` is 0, not absent: the degraded shape must match the normal
+    # one so the page never has to special-case a missing key (and "0 dropped"
+    # is the truthful reading — nothing was built, so nothing was cut).
+    assert out == {"signals": [], "view": {}, "filtered_out": 0}
 
 
 def test_swing_scan_empty_when_no_spot(monkeypatch):
@@ -263,7 +282,7 @@ def test_swing_scan_empty_when_no_spot(monkeypatch):
                         lambda symbol: {})
 
     out = compute.swing_scan("SPY", 5, 30, -0.20, -0.10, 0.10, 0.20, 0.10)
-    assert out == {"signals": [], "view": {}}
+    assert out == {"signals": [], "view": {}, "filtered_out": 0}
 
 
 def _swing_scan_market_state_env(monkeypatch):
@@ -292,7 +311,7 @@ def _swing_scan_market_state_env(monkeypatch):
     monkeypatch.setattr(compute.se, "build_iron_condors", lambda spreads: [])
 
 
-def test_swing_scan_threads_market_state_tilt(monkeypatch):
+def test_swing_scan_threads_market_state_tilt(monkeypatch, unfiltered_swing):
     """A live committed market state threads into score_all -> the PCS signal
     carries a non-zero family-tilt (`lack_of_bearishness` favors put credit)."""
     _swing_scan_market_state_env(monkeypatch)
@@ -302,12 +321,99 @@ def test_swing_scan_threads_market_state_tilt(monkeypatch):
     assert pcs and pcs[0]["state_tilt"] != 0.0
 
 
-def test_swing_scan_no_market_state_no_tilt(monkeypatch):
+def test_swing_scan_no_market_state_no_tilt(monkeypatch, unfiltered_swing):
     """Absent market state (default None) -> the PCS signal carries a 0.0 tilt."""
     _swing_scan_market_state_env(monkeypatch)
     out = compute.swing_scan("SPY", 5, 30, -0.20, -0.10, 0.10, 0.20, 0.10)
     pcs = [s for s in out["signals"] if s["type"] == "PCS"]
     assert pcs and pcs[0]["state_tilt"] == 0.0
+
+
+# ── Swing quality cut (score >= SWING_MIN_SCORE, no excluded grade) ─────────
+
+def test_swing_scan_drops_weak_candidates_across_every_family(monkeypatch):
+    """The cut spans ALL families, not just DIRECTIONAL.
+
+    ``_swing_chain`` grades its four DIRECTIONAL candidates and the adapted PCS
+    Weak (34.6-39.0) while BULL_CALL/BEAR_PUT grade Good (66.9-74.3) — so this
+    fixture proves BOTH halves at once: the Weak rows are gone (incl. a VERTICAL
+    one, which a directional-only cut would have kept) and the Good rows remain.
+    """
+    _swing_scan_market_state_env(monkeypatch)
+    out = compute.swing_scan("SPY", 5, 30, -0.20, -0.10, 0.10, 0.20, 0.10)
+
+    # Non-vacuity: something survived, so an "all Weak dropped" pass isn't free.
+    assert out["signals"], "the cut emptied a fixture that has Good candidates"
+    assert {s["type"] for s in out["signals"]} == {"BULL_CALL", "BEAR_PUT"}
+    for s in out["signals"]:
+        assert s["grade"] != "Weak"
+        assert s["composite_score"] >= compute.SWING_MIN_SCORE
+    # The dropped PCS is a VERTICAL — pins that the cut is not directional-only.
+    assert not any(s["type"] == "PCS" for s in out["signals"])
+
+
+def test_swing_scan_reports_how_many_it_dropped(monkeypatch):
+    """An empty/short table must be explainable: ``filtered_out`` separates
+    'nothing cleared the bar' from 'the scan found nothing at all'."""
+    _swing_scan_market_state_env(monkeypatch)
+    out = compute.swing_scan("SPY", 5, 30, -0.20, -0.10, 0.10, 0.20, 0.10)
+    # 4 directional + 1 adapted PCS graded Weak; BULL_CALL/BEAR_PUT survive.
+    assert out["filtered_out"] == 5
+    assert len(out["signals"]) == 2
+
+
+def test_swing_scan_cut_boundary_is_inclusive(monkeypatch):
+    """>= the floor survives; a hair below does not."""
+    _swing_scan_market_state_env(monkeypatch)
+
+    def _fake_score_all(signals, view, atm_iv, em_1sd, market_state=None):
+        out = []
+        for i, sig in enumerate(signals or []):
+            sig["composite_score"] = 49.9 if i % 2 else 50.0
+            sig["grade"] = "Marginal"
+            out.append(sig)
+        return out
+
+    import strategy_scoring
+    monkeypatch.setattr(strategy_scoring, "score_all", _fake_score_all)
+    out = compute.swing_scan("SPY", 5, 30, -0.20, -0.10, 0.10, 0.20, 0.10)
+    assert out["signals"], "nothing survived — the cut suppresses qualifying rows"
+    assert {s["composite_score"] for s in out["signals"]} == {50.0}
+
+
+def test_swing_scan_drops_an_excluded_grade_regardless_of_score(monkeypatch):
+    """Grade and score are checked independently.
+
+    Redundant today (a gate failure caps the composite at 39 and the state tilt
+    adds at most +6, so Weak tops out at 45), so no realistic fixture can tell
+    the two halves apart. This synthetic probe — grade Weak at score 90 — pins
+    the grade half against a future threshold change.
+    """
+    _swing_scan_market_state_env(monkeypatch)
+
+    def _fake_score_all(signals, view, atm_iv, em_1sd, market_state=None):
+        out = []
+        for sig in signals or []:
+            sig["composite_score"] = 90.0
+            sig["grade"] = "Weak"
+            out.append(sig)
+        return out
+
+    import strategy_scoring
+    monkeypatch.setattr(strategy_scoring, "score_all", _fake_score_all)
+    out = compute.swing_scan("SPY", 5, 30, -0.20, -0.10, 0.10, 0.20, 0.10)
+    assert out["signals"] == []
+    assert out["filtered_out"] > 0, "fixture built nothing — the assertion is vacuous"
+
+
+def test_swing_scan_ids_cover_only_the_emitted_signals(monkeypatch):
+    """ids are assigned AFTER the cut, so every emitted row has one and the
+    detail-panel lookup can't miss a row."""
+    _swing_scan_market_state_env(monkeypatch)
+    out = compute.swing_scan("SPY", 5, 30, -0.20, -0.10, 0.10, 0.20, 0.10)
+    assert out["signals"]
+    ids = [s.get("id") for s in out["signals"]]
+    assert all(ids) and len(set(ids)) == len(ids)
 
 
 # ── Paper account (moved from webgui/pages/options/portfolio.py) ────────────
@@ -382,13 +488,38 @@ def test_run_manage_cycle_calls_engine(monkeypatch):
 
     seen = {}
     fake_engine = _types.SimpleNamespace(
-        run_manage_cycle=lambda client, date_iso: seen.update(
-            client=client, date=date_iso))
+        run_manage_cycle=lambda client, date_iso, **kw: seen.update(
+            client=client, date=date_iso, **kw))
     monkeypatch.setitem(_sys.modules, "paper_engine", fake_engine)
 
     compute.run_manage_cycle()
     assert seen["client"] is compute._proxy.schwab_py_client
     assert isinstance(seen["date"], str) and len(seen["date"]) == 10
+    # Default (flag OFF): the manual paper account passes lifecycle=False and no
+    # be_level_fn — byte-identical to the pre-lifecycle call.
+    assert seen["lifecycle"] is False
+    assert seen["be_level_fn"] is None
+
+
+def test_run_manage_cycle_lifecycle_true_passes_be_level_fn(monkeypatch):
+    """With lifecycle=True, compute.run_manage_cycle threads lifecycle=True AND a
+    callable be_level_fn (the commission-based break-even floor) down to the
+    engine — mirroring the captured cycle's _captured_be_level."""
+    import sys as _sys
+    import types as _types
+
+    seen = {}
+    fake_engine = _types.SimpleNamespace(
+        run_manage_cycle=lambda client, date_iso, **kw: seen.update(
+            client=client, date=date_iso, **kw))
+    monkeypatch.setitem(_sys.modules, "paper_engine", fake_engine)
+
+    compute.run_manage_cycle(lifecycle=True)
+    assert seen["lifecycle"] is True
+    assert callable(seen["be_level_fn"])
+    # The callable is the real commission-based break-even floor — a PCS round
+    # trip on a non-index symbol is 4 leg-fills @ $0.65 = $2.60.
+    assert seen["be_level_fn"]({"strategy": "PCS", "symbol": "SPY"}) == 2.60
 
 
 def test_reset_and_has_account(monkeypatch):
@@ -986,7 +1117,7 @@ def test_reprice_captured_merges_marks_and_flags(monkeypatch):
                "recommendation": "CLOSE", "recommendation_code": "money_stop"},
     }
     monkeypatch.setitem(_sys.modules, "signal_recommender",
-                        _types.SimpleNamespace(build_mark=lambda r, rep, now: marks[r["signal_id"]]))
+                        _types.SimpleNamespace(build_mark=lambda r, rep, now, **kw: marks[r["signal_id"]]))
 
     out = compute.reprice_captured()
     by_id = {s["signal_id"]: s for s in out["signals"]}
@@ -1017,7 +1148,7 @@ def test_reprice_captured_clears_chain_cache_first(monkeypatch):
         clear_chain_cache=lambda: order.append("clear"),
         reprice_swing=lambda r, c: order.append("reprice") or {"rep": 1}))
     monkeypatch.setitem(_sys.modules, "signal_recommender", _types.SimpleNamespace(
-        build_mark=lambda r, rep, now: {"unrealized_pnl": 0.0, "recommendation": "HOLD",
+        build_mark=lambda r, rep, now, **kw: {"unrealized_pnl": 0.0, "recommendation": "HOLD",
                                         "recommendation_code": "HOLD"}))
     compute.reprice_captured()
     assert order and order[0] == "clear"      # cleared BEFORE the first reprice
@@ -1041,7 +1172,7 @@ def test_reprice_captured_skips_failed_signal(monkeypatch):
     monkeypatch.setitem(_sys.modules, "signal_repricer",
                         _types.SimpleNamespace(reprice_swing=_reprice))
     monkeypatch.setitem(_sys.modules, "signal_recommender",
-                        _types.SimpleNamespace(build_mark=lambda r, rep, now: {
+                        _types.SimpleNamespace(build_mark=lambda r, rep, now, **kw: {
                             "unrealized_pnl": 1.0, "recommendation_code": "TARGET_HIT"}))
 
     out = compute.reprice_captured()
@@ -1069,7 +1200,7 @@ def _patch_reprice_seams(monkeypatch, sigs, marks):
                             }))
     monkeypatch.setitem(_sys.modules, "signal_recommender",
                         _types.SimpleNamespace(
-                            build_mark=lambda r, rep, now: marks[r["signal_id"]]))
+                            build_mark=lambda r, rep, now, **kw: marks[r["signal_id"]]))
 
 
 def test_reprice_captured_tags_rescue_state_and_heat(monkeypatch):
@@ -1144,7 +1275,7 @@ def test_reprice_captured_hold_not_escalated(monkeypatch):
     monkeypatch.setitem(_sys.modules, "signal_repricer",
                         _types.SimpleNamespace(reprice_swing=_reprice))
     monkeypatch.setitem(_sys.modules, "signal_recommender",
-                        _types.SimpleNamespace(build_mark=lambda r, rep, now: marks[r["signal_id"]]))
+                        _types.SimpleNamespace(build_mark=lambda r, rep, now, **kw: marks[r["signal_id"]]))
     out = compute.reprice_captured()
     row = out["signals"][0]
     assert row["rescue_state"] != "tested"
@@ -1182,6 +1313,157 @@ def test_close_captured_calls_close_signal_manually(monkeypatch):
     assert seen["args"] == ("X1", 0.45, "MANUAL_CLOSE")
 
 
+# ── captured auto-manage cycle (Task 4) ─────────────────────────────────────
+def _manage_signal(**o):
+    """A captured-signal row shaped like get_open_signals_with_latest_mark()."""
+    base = {"signal_id": "M1", "symbol": "SPY", "strategy": "PCS",
+            "short_strike": 490.0, "long_strike": 485.0, "call_short": None,
+            "call_long": None, "width": 5.0, "expiration": "2099-01-15",
+            "entry_credit": 1.0, "entry_short_delta": -0.10, "entry_score": 60,
+            "entry_underlying": 500.0, "be_armed": 0}
+    base.update(o)
+    return base
+
+
+def _rep(**o):
+    base = {"current_value": 0.40, "unrealized_pnl": 60.0, "pnl_pct_of_credit": 60.0,
+            "current_underlying": 500.0, "current_short_delta": -0.10, "error": None}
+    base.update(o)
+    return base
+
+
+def _patch_manage_seams(monkeypatch, sigs, reprice):
+    """Stub signal_db + signal_repricer; keep signal_recommender REAL so the
+    lifecycle recommendation (arm / break-even stop / recovery) is genuinely
+    exercised. ``reprice`` maps signal_id → a reprice dict. Records
+    set_be_armed / close_signal_manually / insert_mark calls."""
+    import sys as _sys
+    import types as _types
+    calls = {"armed": [], "closed": [], "marks": []}
+    monkeypatch.setitem(_sys.modules, "signal_db", _types.SimpleNamespace(
+        get_open_signals_with_latest_mark=lambda: sigs,
+        set_be_armed=lambda sid, **kw: calls["armed"].append(sid),
+        # Real signature: close_signal_manually(signal_id, exit_value, exit_reason, ...)
+        close_signal_manually=lambda sid, exit_value, exit_reason, **kw:
+            calls["closed"].append((sid, exit_value, exit_reason)),
+        insert_mark=lambda mark, **kw: calls["marks"].append(mark)))
+    monkeypatch.setitem(_sys.modules, "signal_repricer", _types.SimpleNamespace(
+        reprice_swing=lambda r, c: reprice[r["signal_id"]],
+        intrinsic_value=lambda t, sp: (0.0, 0.0),
+        clear_chain_cache=lambda: None))
+    return calls
+
+
+def test_manage_arms_at_50pct_no_close(monkeypatch):
+    calls = _patch_manage_seams(monkeypatch, [_manage_signal(be_armed=0)],
+                                {"M1": _rep(unrealized_pnl=60.0, current_value=0.40)})
+    out = compute.run_captured_manage_cycle()
+    assert calls["armed"] == ["M1"]                     # be_armed persisted
+    assert calls["closed"] == []                        # NOT closed at +50%
+    assert out["armed"] and out["armed"][0]["signal_id"] == "M1"
+    assert out["closed"] == []
+
+
+def test_manage_armed_retrace_breakeven_closes(monkeypatch):
+    calls = _patch_manage_seams(monkeypatch, [_manage_signal(be_armed=1)],
+                                {"M1": _rep(unrealized_pnl=1.0, current_value=0.99)})
+    out = compute.run_captured_manage_cycle()
+    # armed + pnl retraced to <= round-trip commissions ($2.60) → BREAKEVEN_STOP.
+    assert calls["closed"] == [("M1", 0.99, "BREAKEVEN_STOP")]
+    assert out["closed"][0]["reason"] == "BREAKEVEN_STOP"
+
+
+def test_manage_delta_breach_recoverable_does_not_close(monkeypatch):
+    # delta breach but DTE far + cushion 2% (spot 500 vs short 490) → HOLD.
+    calls = _patch_manage_seams(
+        monkeypatch, [_manage_signal(be_armed=0)],
+        {"M1": _rep(unrealized_pnl=-3.0, current_value=1.05,
+                    current_short_delta=-0.40, current_underlying=500.0)})
+    compute.run_captured_manage_cycle()
+    assert calls["closed"] == []
+
+
+def test_manage_money_stop_closes(monkeypatch):
+    calls = _patch_manage_seams(
+        monkeypatch, [_manage_signal(be_armed=0)],
+        {"M1": _rep(unrealized_pnl=-250.0, current_value=3.0,
+                    current_short_delta=-0.10)})
+    compute.run_captured_manage_cycle()
+    assert calls["closed"] == [("M1", 3.0, "MONEY_STOP")]
+
+
+def test_manage_expiry_otm_closes_full_credit(monkeypatch):
+    import datetime as _d
+    today = _d.date.today().isoformat()
+    calls = _patch_manage_seams(
+        monkeypatch, [_manage_signal(be_armed=0, expiration=today)],
+        {"M1": _rep(unrealized_pnl=100.0, current_value=0.0)})
+    compute.run_captured_manage_cycle()
+    # DTE<=0 → settle EXPIRED at the repriced intrinsic (OTM → 0 → full credit).
+    assert calls["closed"] == [("M1", 0.0, "EXPIRED")]
+
+
+def test_manage_expiry_uses_intrinsic_when_no_chain(monkeypatch):
+    import datetime as _d
+    today = _d.date.today().isoformat()
+    # An expired reprice (no live chain) → settle at the engine intrinsic
+    # (stubbed to 0.0 = OTM full credit) via the current spot / entry underlying.
+    calls = _patch_manage_seams(
+        monkeypatch, [_manage_signal(be_armed=0, expiration=today)],
+        {"M1": _rep(error="expired", current_value=None,
+                    current_underlying=500.0)})
+    compute.run_captured_manage_cycle()
+    assert calls["closed"] == [("M1", 0.0, "EXPIRED")]
+
+
+def test_manage_stale_reprice_skips(monkeypatch):
+    calls = _patch_manage_seams(
+        monkeypatch, [_manage_signal(be_armed=1)],
+        {"M1": _rep(error="repricing failed", current_value=None,
+                    unrealized_pnl=None)})
+    out = compute.run_captured_manage_cycle()
+    assert calls["closed"] == [] and calls["armed"] == []
+    assert out == {"closed": [], "armed": []}
+
+
+def test_manage_cycle_defensive_on_read_failure(monkeypatch):
+    import sys as _sys
+    import types as _types
+
+    def _boom():
+        raise RuntimeError("db cold")
+
+    monkeypatch.setitem(_sys.modules, "signal_db", _types.SimpleNamespace(
+        get_open_signals_with_latest_mark=_boom))
+    monkeypatch.setitem(_sys.modules, "signal_repricer",
+                        _types.SimpleNamespace(clear_chain_cache=lambda: None))
+    assert compute.run_captured_manage_cycle() == {"closed": [], "armed": []}
+
+
+def test_captured_closed_today_sums_realized(monkeypatch):
+    import sys as _sys
+    import types as _types
+    closed = [{"signal_id": "a", "realized_pnl": 80.0, "symbol": "SPY"},
+              {"signal_id": "b", "realized_pnl": -30.0, "symbol": "QQQ"}]
+    monkeypatch.setitem(_sys.modules, "signal_db", _types.SimpleNamespace(
+        get_outcomes_for_date=lambda d: closed))
+    out = compute.captured_closed_today()
+    assert out["closed"] == closed
+    assert out["total_realized"] == 50.0
+
+
+def test_captured_closed_today_defensive(monkeypatch):
+    import sys as _sys
+    import types as _types
+
+    def _boom(d):
+        raise RuntimeError("cold")
+
+    monkeypatch.setitem(_sys.modules, "signal_db",
+                        _types.SimpleNamespace(get_outcomes_for_date=_boom))
+    assert compute.captured_closed_today() == {"closed": [], "total_realized": 0.0}
+
+
 # ── Gamma (moved from webgui/pages/options/gamma.py) ─────────────────────────
 class _FakeChainResp:
     status_code = 200
@@ -1214,9 +1496,21 @@ class _FakeEngine:
         return {"expirations": ["2026-06-18"], "cells": {}}
 
 
+# The session these gamma tests pin (see the active_session_date monkeypatch below).
+_GAMMA_TEST_SESSION = __import__("datetime").date(2026, 6, 18)
+
+
 def _patch_gamma(monkeypatch, *, chain=None, walls=None, history=None):
     import sys as _sys
     import types as _types
+
+    # Fixture history rows carry tiny ordinal timestamps (1, 2, …) purely for
+    # ordering. The Gamma charts now DISPLAY only RTH, so rebase those ordinals
+    # onto the pinned session's 08:30 CT open — otherwise every fixture row sits at
+    # the 1970 epoch and is (correctly) filtered out before the assertions run.
+    # Ordering and the strict ``ts > since_ts`` incremental semantics are preserved.
+    _t0 = compute._rth_bounds(_GAMMA_TEST_SESSION)[0]
+    history = [(_t0 + r[0], *r[1:]) for r in (history or [])]
 
     def _fake_directional_walls(gex_data, spot):
         grid = (gex_data or {}).get("gex") or {}
@@ -1486,7 +1780,10 @@ def test_gamma_snapshot_second_call_loads_history_incrementally(monkeypatch):
     assert set(seen) == {None}                     # cold: full loads (4 views)
     seen.clear()
     snap = compute.gamma_snapshot("$SPX")
-    assert seen and all(s == 1 for s in seen)      # warm: only ts > 1 requested
+    # Warm: only rows NEWER than the last-seen ts are requested. The fixture's
+    # ordinal ts=1 is rebased onto the session's RTH open (see _patch_gamma).
+    last_ts = compute._rth_bounds(_GAMMA_TEST_SESSION)[0] + 1
+    assert seen and all(s == last_ts for s in seen)
     assert snap["views"]["GEX"]["history"]         # memoized rows still served
 
 
@@ -1839,6 +2136,32 @@ def test_gamma_analyze_no_key_returns_config_message(monkeypatch):
     monkeypatch.setattr(compute, "_make_analyze_client", lambda: None)
 
     out = compute.gamma_analyze()  # no injected client + no key → graceful HTML
+
+    assert out["html"].lstrip().startswith("<!DOCTYPE html>")
+    assert "ANTHROPIC_API_KEY" in out["html"]
+    del _FakeEngine.calc_expected_move_from_chain
+
+
+def test_gamma_analyze_degrades_when_claude_suppressed(monkeypatch):
+    """A suppressed environment must land on the EXISTING no-key page, not raise.
+
+    This is the end-to-end half of the Task 4 guard (the unit half lives in
+    test_env_claude_guard.py): with ``allow_claude`` False the REAL factory
+    returns None without touching the key, and ``gamma_analyze`` degrades
+    exactly as a keyless prod box does. ``_anthropic_api_key`` is booby-trapped
+    so a removed guard fails loudly instead of quietly billing an API call.
+    """
+    _patch_analyze_bundle(monkeypatch)
+
+    def _boom():
+        raise AssertionError("key looked up — the allow_claude guard did not fire")
+
+    from services.options_svc.tests.test_env_claude_guard import _REAL_MAKE_CLIENT
+    monkeypatch.setattr(compute, "_make_analyze_client", _REAL_MAKE_CLIENT)
+    monkeypatch.setattr(compute, "_anthropic_api_key", _boom)
+    monkeypatch.setitem(compute.ENV_FLAGS, "allow_claude", False)
+
+    out = compute.gamma_analyze()  # must not raise
 
     assert out["html"].lstrip().startswith("<!DOCTYPE html>")
     assert "ANTHROPIC_API_KEY" in out["html"]
@@ -2237,7 +2560,7 @@ def test_sim_replay_override_uses_fixed_window(monkeypatch):
                              lookback="15m_10d")
     assert calls["intraday"][1] == 15              # minutes from the override
     assert calls["intraday"][2] == 10              # days from the override
-    assert out["lookback"]["label"] == "15-min · 10d"
+    assert out["lookback"]["label"] == "15-minute bars, 10 days"
     assert out["lookback"]["key"] == "15m_10d"
 
 
@@ -2603,6 +2926,14 @@ def _fake_gex_modules(monkeypatch, *, lock_ok=True, chains=None):
     monkeypatch.setattr(compute, "_LAST_PURGE_DATE", None)
     monkeypatch.setattr(compute, "_GEX_SCHEMA_READY", False)
     return calls
+
+
+def test_big_delta_stash_roundtrips_and_clears():
+    compute.clear_big_delta_stash()
+    compute.stash_big_delta("SPY", [{"type": "big_delta", "strike": 100}])
+    got = compute.take_big_delta_stash()
+    assert got == {"SPY": [{"type": "big_delta", "strike": 100}]}
+    assert compute.take_big_delta_stash() == {}   # take clears
 
 
 def test_collect_gex_snapshots_polls_with_proxy_client(monkeypatch):
@@ -4531,3 +4862,203 @@ def test_eod_briefing_document_title(monkeypatch):
                 return type("R", (), {"content": [blk]})()
     html = compute.eod_briefing(client=_C())["html"]
     assert "End-of-Day Recap" in html and "Gamma Analysis" not in html
+
+
+# --- RTH-only Gamma display window (heatmap + flow), collection unchanged ---
+
+def _ct(y, m, d, hh, mm):
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+    return _dt.datetime(y, m, d, hh, mm, tzinfo=ZoneInfo("America/Chicago"))
+
+
+def test_rth_bounds_spans_0830_to_1500_ct():
+    import datetime as _dt
+    from services.options_svc import compute
+    lo, hi = compute._rth_bounds(_dt.date(2026, 7, 27))
+    assert lo == _ct(2026, 7, 27, 8, 30).timestamp()
+    assert hi == _ct(2026, 7, 27, 15, 0).timestamp()
+
+
+def test_rth_only_drops_pre_and_post_market_rows():
+    import datetime as _dt
+    from services.options_svc import compute
+    d = _dt.date(2026, 7, 27)
+    bounds = compute._rth_bounds(d)
+    rows = [
+        (_ct(2026, 7, 27, 8, 0).timestamp(), "premarket"),    # collected, not RTH
+        (_ct(2026, 7, 27, 8, 29).timestamp(), "premarket"),
+        (_ct(2026, 7, 27, 8, 30).timestamp(), "open"),        # inclusive
+        (_ct(2026, 7, 27, 12, 0).timestamp(), "midday"),
+        (_ct(2026, 7, 27, 15, 0).timestamp(), "close"),       # inclusive
+        (_ct(2026, 7, 27, 15, 20).timestamp(), "postmarket"), # collected, not RTH
+    ]
+    kept = [r[1] for r in compute._rth_only(rows, bounds)]
+    assert kept == ["open", "midday", "close"]
+
+
+def test_rth_only_is_defensive():
+    from services.options_svc import compute
+    assert compute._rth_only(None, (0, 1)) == []
+    assert compute._rth_only([(None, "x")], (0, 1)) == []      # non-numeric ts dropped
+    # No bounds → unfiltered passthrough (never silently blanks the chart).
+    assert compute._rth_only([(1, "x")], None) == [(1, "x")]
+
+
+def test_display_session_date_shows_prior_session_before_rth_open():
+    import datetime as _dt
+    from services.options_svc import compute
+    today = _dt.date(2026, 7, 27)          # a Monday
+    # 08:00-08:30 CT: collection has started (active_session_date == today) but today
+    # has NO RTH rows yet → keep showing the prior session rather than a blank chart.
+    assert compute._display_session_date(_ct(2026, 7, 27, 8, 5), today) < today
+    # From the 08:30 open onward, today.
+    assert compute._display_session_date(_ct(2026, 7, 27, 8, 30), today) == today
+    assert compute._display_session_date(_ct(2026, 7, 27, 14, 0), today) == today
+    # Post-close today still has RTH rows → today (not the prior session).
+    assert compute._display_session_date(_ct(2026, 7, 27, 15, 10), today) == today
+    # Off-hours/weekend: active_session_date already returned a PRIOR date — untouched.
+    prior = _dt.date(2026, 7, 24)
+    assert compute._display_session_date(_ct(2026, 7, 27, 7, 0), prior) == prior
+
+
+# --- Intraday level tracks (flip / call wall / put wall movement) ---
+
+def _lvl_row(ts, spot, flip, grid):
+    # (ts, spot, flip, top_pos_strike, top_neg_strike, net_total, grid) — the
+    # top_pos/top_neg columns are deliberately WRONG here to prove they're unused.
+    return (ts, spot, flip, 999.0, 111.0, 0.0, grid)
+
+
+_LVL_GRID = {
+    # below spot(=100): put wall is the MOST-NEGATIVE put
+    95.0: {"call": 1.0, "put": -9.0, "net": -8.0},
+    98.0: {"call": 1.0, "put": -2.0, "net": -1.0},
+    # above spot: call wall is the LARGEST call
+    105.0: {"call": 7.0, "put": -1.0, "net": 6.0},
+    110.0: {"call": 3.0, "put": -1.0, "net": 2.0},
+}
+
+
+def test_level_track_recomputes_walls_matching_the_displayed_definition():
+    from services.options_svc import compute
+    rows = [_lvl_row(1, 100.0, 99.5, _LVL_GRID)]
+    t = compute._level_track(rows, "GEX")
+    # Walls come from the row's OWN grid (largest call above spot / most-negative
+    # put below), NOT the stored top_pos/top_neg columns (999/111 above).
+    assert t["call_wall"] == [105.0]
+    assert t["put_wall"] == [95.0]
+    assert t["flip"] == [99.5]          # flip IS the stored column
+
+
+def test_level_track_is_parallel_to_rows_and_tracks_movement():
+    from services.options_svc import compute
+    moved = {**_LVL_GRID, 110.0: {"call": 20.0, "put": -1.0, "net": 19.0}}
+    rows = [_lvl_row(1, 100.0, 99.5, _LVL_GRID),
+            _lvl_row(2, 100.0, 100.5, moved)]
+    t = compute._level_track(rows, "GEX")
+    assert t["call_wall"] == [105.0, 110.0]      # the wall MOVED up
+    assert t["flip"] == [99.5, 100.5]
+    assert len(t["put_wall"]) == len(rows)       # 1:1 with rows (heatmap x-index)
+
+
+def test_level_track_only_walls_for_gex_and_dex():
+    from services.options_svc import compute
+    rows = [_lvl_row(1, 100.0, 99.5, _LVL_GRID)]
+    # Charm/Vanna have no directional walls (mirrors gamma_walls) — flip only.
+    charm = compute._level_track(rows, "Charm")
+    assert charm["call_wall"] == [None] and charm["put_wall"] == [None]
+    assert charm["flip"] == [99.5]
+    assert compute._level_track(rows, "DEX")["call_wall"] == [105.0]
+
+
+def test_level_track_is_defensive():
+    from services.options_svc import compute
+    empty = compute._level_track([], "GEX")
+    assert empty == {"flip": [], "call_wall": [], "put_wall": []}
+    # A row with no grid / no spot yields None placeholders, never an exception,
+    # and stays positionally aligned with the heatmap's time axis.
+    bad = compute._level_track([_lvl_row(1, None, None, {}), _lvl_row(2, 100.0, 99.5, _LVL_GRID)],
+                               "GEX")
+    assert bad["call_wall"] == [None, 105.0]
+    assert bad["flip"] == [None, 99.5]
+
+
+def test_gamma_snapshot_exposes_projected_flip(monkeypatch):
+    """The projected EOD delta-flip (DEX curve shifted by 0-DTE charm drift) is
+    published ONCE at snapshot level, not per view — it is a single 0-DTE delta
+    level the page draws on every heatmap as a shared reference."""
+    import sys as _sys
+    from services.options_svc import compute
+    _patch_gamma(monkeypatch, history=[(1, 5400.0, 3, 4, 5, 6, {5400.0: {"net": 1}})])
+    _sys.modules["gamma_tool"].compute_projected_flip = lambda data, spot: 5412.5
+    snap = compute.gamma_snapshot("$SPX")
+    assert snap["projected_flip"] == 5412.5
+
+
+def test_gamma_snapshot_projected_flip_none_without_0dte(monkeypatch):
+    """Most symbols never have a 0-DTE expiry, so hedge_pressure — and therefore the
+    projected flip — is None. That must degrade to None, never raise."""
+    import sys as _sys
+    from services.options_svc import compute
+    _patch_gamma(monkeypatch, history=[(1, 5400.0, 3, 4, 5, 6, {5400.0: {"net": 1}})])
+
+    def _boom(data, spot):
+        raise RuntimeError("no hedge data")
+    _sys.modules["gamma_tool"].compute_projected_flip = _boom
+    assert compute.gamma_snapshot("$SPX")["projected_flip"] is None
+
+
+def test_gamma_snapshot_attaches_rth_filtered_hedge_history(monkeypatch):
+    """The hedge-pressure track rides the SAME read-only connection + RTH window as
+    the heatmap rows, so the panel's time axis lines up with the heatmap's."""
+    import sys as _sys
+    from services.options_svc import compute
+    _patch_gamma(monkeypatch, history=[(1, 5400.0, 3, 4, 5, 6, {5400.0: {"net": 1}})])
+    t0 = compute._rth_bounds(_GAMMA_TEST_SESSION)[0]
+    rows = [(t0 - 600, 1.0e9, 5.0e9, 5399.0),   # pre-open: dropped
+            (t0 + 60, 2.0e9, 6.0e9, 5401.0),
+            (t0 + 120, 3.0e9, 7.0e9, 5402.0)]
+    _sys.modules["gex_history_db"].load_hedge_series = lambda conn, sym, d=None: rows
+    snap = compute.gamma_snapshot("$SPX")
+    got = snap["hedge_history"]
+    assert [r["ts"] for r in got] == [t0 + 60, t0 + 120]      # pre-open row filtered
+    assert got[0]["hedge_pressure"] == 2.0e9
+    assert got[0]["net_delta_0dte"] == 6.0e9
+    assert got[0]["projected_flip"] == 5401.0
+
+
+def test_gamma_snapshot_hedge_history_degrades_to_empty(monkeypatch):
+    import sys as _sys
+    from services.options_svc import compute
+    _patch_gamma(monkeypatch, history=[(1, 5400.0, 3, 4, 5, 6, {5400.0: {"net": 1}})])
+
+    def _boom(conn, sym, d=None):
+        raise RuntimeError("no such column")
+    _sys.modules["gex_history_db"].load_hedge_series = _boom
+    assert compute.gamma_snapshot("$SPX")["hedge_history"] == []
+
+
+def test_build_gamma_read_carries_the_0dte_hedge_fields():
+    """Explain must show the same 0-DTE drift the chart and the briefings do —
+    snapshot_summary already carries it, build_gamma_read just has to pass it on."""
+    from services.options_svc import compute
+    dex = {"flip": 7733.0, "net_total": 1.6e9, "hedge_pressure": 2.81e9,
+           "projected_flip": 7721.7}
+    read = compute.build_gamma_read(
+        "$SPX", 7723.0, {"flip": 7733.0}, {}, dex, {},
+        {"call_wall": 7770.0, "put_wall": 7700.0}, {})
+    assert read.hedge_pressure == 2.81e9
+    assert read.hedge_direction == "buy"          # derived from the sign
+    assert read.projected_flip == 7721.7
+
+
+def test_build_gamma_read_hedge_fields_none_without_0dte():
+    from services.options_svc import compute
+    read = compute.build_gamma_read("$SPX", 7723.0, {"flip": 7733.0}, {}, {}, {}, {}, {})
+    assert read.hedge_pressure is None and read.projected_flip is None
+    assert read.hedge_direction is None
+    # A negative drift reads as sell.
+    neg = compute.build_gamma_read("$SPX", 7723.0, {}, {}, {"hedge_pressure": -5e8},
+                                   {}, {}, {})
+    assert neg.hedge_direction == "sell"

@@ -1,9 +1,24 @@
 import logging
 import time
 
+import pytest
 from fastapi.testclient import TestClient
+from services import _scaffold
 from services._scaffold import make_app
 from shared.bus import Bus
+
+
+@pytest.fixture
+def schedulers_enabled(monkeypatch):
+    """Opt this test back in to running a scheduler.
+
+    ``repo_paths`` forces every suppression flag OFF under pytest, so by default
+    ``make_app`` wires no scheduler task at all. Tests that exist to exercise the
+    supervision machinery itself must therefore say so explicitly, rather than
+    the guard being weakened to accommodate them.
+    """
+    monkeypatch.setitem(_scaffold.ENV_FLAGS, "schedulers", True)
+    monkeypatch.delenv("TRADING_ENABLE_SCHEDULERS", raising=False)
 
 
 def test_health():
@@ -63,7 +78,7 @@ def test_bad_command_does_not_kill_loop():
     assert seen == ["ok"]
 
 
-def test_scheduler_exception_swallowed():
+def test_scheduler_exception_swallowed(schedulers_enabled):
     """A scheduler that raises must not crash app startup/shutdown."""
     bus = Bus(fake=True)
 
@@ -76,7 +91,7 @@ def test_scheduler_exception_swallowed():
         assert client.get("/health").status_code == 200
 
 
-def test_scheduler_runs():
+def test_scheduler_runs(schedulers_enabled):
     bus = Bus(fake=True)
     ran = []
 
@@ -281,7 +296,7 @@ def test_health_backward_compatible_keys_present():
         assert body["up"] is True
 
 
-def test_dead_scheduler_restarted_and_health_reflects_it():
+def test_dead_scheduler_restarted_and_health_reflects_it(schedulers_enabled):
     """(R2) A scheduler that raises on the first run is RESTARTED (not
     permanently dead) after a short backoff; /health shows it alive again."""
     bus = Bus(fake=True)
@@ -313,7 +328,7 @@ def test_dead_scheduler_restarted_and_health_reflects_it():
         assert body["scheduler_restarts"] >= 1
 
 
-def test_scheduler_permanently_dead_when_backoff_budget_exhausted():
+def test_scheduler_permanently_dead_when_backoff_budget_exhausted(schedulers_enabled):
     """(R2) A scheduler that ALWAYS raises exhausts the restart budget and is
     reported NOT alive, so an external probe can distinguish it from healthy."""
     bus = Bus(fake=True)
@@ -343,7 +358,7 @@ def test_scheduler_permanently_dead_when_backoff_budget_exhausted():
         assert body["scheduler_restarts"] == 3
 
 
-def test_healthy_scheduler_not_restarted_and_alive():
+def test_healthy_scheduler_not_restarted_and_alive(schedulers_enabled):
     """(R2) A healthy scheduler (internal infinite loop) is NOT restarted; it
     stays alive with zero restarts, and last_tick_age stays small."""
     import asyncio

@@ -24,20 +24,41 @@ log = logging.getLogger("scanner")
 # DEFAULT WEIGHTS (must sum to 100)
 #############################################
 
+# 2026-08-07 rebalance: `em` 12 -> 6, the freed 6 points spread across the
+# factors that measure something ELSE.
+#
+# `em` and `pop` are both monotone in how far OTM the short strike sits -- `pop`
+# via market delta, `em` via distance / expected move -- and are heavily
+# redundant. Measured on 2,190 real strike observations (8 symbols x 11 DTEs,
+# live chains): Spearman rho +0.928 pooled, +0.892 within the traded
+# |delta| <= 0.27 band, +0.93 to +0.99 per symbol. At 12 + 10 they spent 22 of
+# 100 on one axis, counted twice.
+#
+# DOWNWEIGHTED, NOT DROPPED: `pop` reads market delta (skew included) while
+# `em` reads ATM IV (skew-free), so ~11% of the rank variance is genuinely
+# independent -- dropping `em` would discard the skew-free geometric read.
+#
+# The redundancy is MEASURED; the redistribution target is NOT. There is no
+# outcome data to say which factor earns the freed weight (signal_outcomes is
+# 95% MANUAL_CLOSE, so realized P&L reflects closing behavior as much as entry
+# quality). The 6 points are therefore spread roughly in proportion to existing
+# weight across every factor EXCEPT `pop` -- adding them to `pop` would leave
+# the distance axis exactly where it was -- which changes no factor's relative
+# standing beyond `em`'s own reduction.
 DEFAULT_WEIGHTS = {
-    "rr":     15,   # R:R ratio              (Value)
-    "pop":    10,   # Probability of profit  (Value)
-    "theta":  10,   # Theta efficiency       (Value)
-    "iv":     12,   # IV Rank                (Context)
-    "iv_hv":  10,   # IV/HV ratio            (Context)
-    "vega":    8,   # Vega risk              (Context)
-    "em":     12,   # Expected move buffer   (Context)
+    "rr":     16,   # R:R ratio              (Value)     — 15 -> 16
+    "pop":    10,   # Probability of profit  (Value)     — held (see above)
+    "theta":  11,   # Theta efficiency       (Value)     — 10 -> 11
+    "iv":     13,   # IV Rank                (Context)   — 12 -> 13
+    "iv_hv":  11,   # IV/HV ratio            (Context)   — 10 -> 11
+    "vega":    9,   # Vega risk              (Context)   — 8 -> 9
+    "em":      6,   # Expected move buffer   (Context)   — 12 -> 6, de-duplicated
     "liq":     5,   # Liquidity              (Execution) — reduced 8 -> 5
-    "trend":  10,   # Trend alignment        (Execution) — reduced 15 -> 10
-    "gex":     4,   # GEX wall proximity     (Execution) — NEW
-    "dex":     4,   # DEX wall proximity     (Execution) — NEW
+    "trend":  11,   # Trend alignment        (Execution) — 10 -> 11
+    "gex":     4,   # GEX wall proximity     (Execution)
+    "dex":     4,   # DEX wall proximity     (Execution)
 }
-# Sum: 15+10+10+12+10+8+12+5+10+4+4 = 100
+# Sum: 16+10+11+13+11+9+6+5+11+4+4 = 100
 
 #############################################
 # NORMALIZATION FUNCTIONS (each returns 0-100)
@@ -299,7 +320,32 @@ def calc_composite_score(signal, iv_data=None, technicals=None,
     iv_rank = iv_data.get("iv_rank") if iv_data else None
     em_data = iv_data.get("expected_moves", {}) if iv_data else {}
     em_monthly = em_data.get("monthly", {})
-    em_1sd = em_monthly.get("move_dollars", 0) if em_monthly else 0
+
+    # Expected move for the EM-buffer factor, sized to THIS trade's horizon.
+    #
+    # This used to read `expected_moves["monthly"]` -- a 30-day EM -- for every
+    # trade regardless of DTE, which made the factor measure DTE rather than
+    # strike placement: a short sitting at exactly 1x its own expiration's EM
+    # (the factor's stated 0-point) scored 9.1 at 1 DTE and 50.0 at 30 DTE, and
+    # its usable spread across a realistic strike range collapsed from 75 points
+    # at 30 DTE to 18 at 1 DTE. Within one DTE bucket the bias is monotone, so
+    # RANKING there was preserved -- but driver_svc.build_packet merges
+    # signals_0dte + signals_swing into ONE composite-ranked menu, so the live
+    # decider was comparing across horizons on a biased score.
+    #
+    # IV preference mirrors the strike window: the expiration's OWN ATM IV
+    # (stamped as `expiry_iv` by screen_spreads) first, then the symbol-level
+    # ~30-DTE IV, then the legacy monthly EM so a stale or hand-built signal
+    # dict still scores instead of crashing or zeroing.
+    em_1sd = 0
+    dte_for_em = signal.get("dte")
+    iv_for_em = signal.get("expiry_iv") or (iv_data.get("current_iv") if iv_data else None)
+    if underlying and iv_for_em and dte_for_em is not None:
+        from iv_analysis import calc_expected_move  # lazy: keeps scoring's import graph flat
+        em = calc_expected_move(underlying, iv_for_em, dte_for_em)
+        em_1sd = (em or {}).get("move_dollars") or 0
+    if not em_1sd:
+        em_1sd = em_monthly.get("move_dollars", 0) if em_monthly else 0
 
     # IV/HV ratio
     hv_current = iv_data.get("hv_current") if iv_data else None

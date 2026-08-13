@@ -125,6 +125,13 @@ def test_below_flip_deep_passthrough():
 # ---------------------------------------------------------------- vix
 
 
+def test_vix_level_from_vix():
+    out = RE.evidence_from_bars(None, None, {"vix": 27.5, "vix1d": 25, "vix3m": 28},
+                                None, None)
+    assert out["vix_level"] == 27.5
+    assert RE.evidence_from_bars(None, None, None, None, None)["vix_level"] is None
+
+
 def test_term_inversion_from_vix():
     inv = RE.evidence_from_bars(None, None, {"vix": 25, "vix1d": 30, "vix3m": 20},
                                 None, None)["term_inversion"]

@@ -87,15 +87,16 @@ def test_manage_due_first_tick_in_window():
     assert due is True and slot is not None
 
 
-def test_manage_due_not_repeated_within_same_5min_slot():
+def test_manage_due_not_repeated_within_same_minute():
     _, slot = scheduler.manage_due(_ct(2026, 6, 15, 9, 0), None)
-    due2, slot2 = scheduler.manage_due(_ct(2026, 6, 15, 9, 3), slot)
+    due2, slot2 = scheduler.manage_due(_ct(2026, 6, 15, 9, 0), slot)   # same 1-min slot
     assert due2 is False and slot2 == slot
 
 
-def test_manage_due_fires_on_next_5min_slot():
-    _, slot = scheduler.manage_due(_ct(2026, 6, 15, 9, 2), None)
-    due, slot2 = scheduler.manage_due(_ct(2026, 6, 15, 9, 6), slot)
+def test_manage_due_fires_every_minute():
+    """The driver auto-manage reprices the P&L every minute within market hours."""
+    _, slot = scheduler.manage_due(_ct(2026, 6, 15, 9, 0), None)
+    due, slot2 = scheduler.manage_due(_ct(2026, 6, 15, 9, 1), slot)    # next minute → fires
     assert due is True and slot2 != slot
 
 
@@ -117,6 +118,34 @@ def test_manage_due_weekend():
 
 def test_manage_due_holiday():
     due, _ = scheduler.manage_due(_ct(2026, 7, 3, 9, 0), None)
+    assert due is False
+
+
+# ── captured_manage_due (captured auto-manage cadence, 5-min) ────────────────
+def test_captured_manage_due_first_tick_in_window():
+    due, slot = scheduler.captured_manage_due(_ct(2026, 6, 15, 9, 0), None)
+    assert due is True and slot is not None
+
+
+def test_captured_manage_due_not_repeated_within_5min_slot():
+    _, slot = scheduler.captured_manage_due(_ct(2026, 6, 15, 9, 0), None)
+    due2, _ = scheduler.captured_manage_due(_ct(2026, 6, 15, 9, 3), slot)  # same 5-min slot
+    assert due2 is False
+
+
+def test_captured_manage_due_fires_next_5min_slot():
+    _, slot = scheduler.captured_manage_due(_ct(2026, 6, 15, 9, 0), None)
+    due, _ = scheduler.captured_manage_due(_ct(2026, 6, 15, 9, 5), slot)  # next slot
+    assert due is True
+
+
+def test_captured_manage_due_before_market_open():
+    due, _ = scheduler.captured_manage_due(_ct(2026, 6, 15, 7, 30), None)
+    assert due is False
+
+
+def test_captured_manage_due_weekend():
+    due, _ = scheduler.captured_manage_due(_ct(2026, 6, 13, 9, 0), None)  # Saturday
     assert due is False
 
 

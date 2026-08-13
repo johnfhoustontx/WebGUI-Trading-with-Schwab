@@ -11,6 +11,7 @@ loop+sleep here own the cadence.
 """
 import asyncio
 import logging
+from datetime import time as _time
 from zoneinfo import ZoneInfo
 
 from services.sentiment_svc import handlers, order_flow_consumer
@@ -40,6 +41,10 @@ _OFFHOURS_INTERVAL_MIN = 15  # off-hours throttle: refresh at most once per 15 m
 # literal. ``config/sessions.toml`` drift is caught by
 # ``test_config_windows_still_match_the_legacy_constants``.
 _, _RTH_END_T = mc.window_bounds("market_snapshot")   # 15:00 CT
+
+# Momentum cascade: one nightly run, ~80 min after the 15:00 CT cash close so the
+# day's daily bars are settled at the proxy. See momentum_due.
+_MOMENTUM_AT = (16, 20)      # 16:20 CT
 
 
 def _is_rth(now):
@@ -86,6 +91,27 @@ def sectors_due(now, last_slot):
         return (False, last_slot)
     slot = (now.date().isoformat(), now.hour)
     return (slot != last_slot, slot)
+
+
+def momentum_due(now, last_session):
+    """(should_run, session) — the ONE nightly momentum slot.
+
+    Nightly, not on the 120 s tick: daily bars change once a day, so
+    recomputing ~390 regressions every two minutes would be pure waste and
+    would load the proxy during RTH for no signal. Fires at/after
+    _MOMENTUM_AT on a trading day, once per session date — ``last_session``
+    is the sentinel, so a late start still catches the day and a restart
+    cannot re-run it. Pure; the caller owns the clock.
+
+    The trading-day test comes from ``shared.market_calendar`` (holidays are
+    DERIVED there, so this stays correct past 2027 with no yearly edit) — it
+    replaced a local ``_HOLIDAYS`` copy during the calendar consolidation."""
+    if not mc.is_trading_day(now.date()):
+        return (False, last_session)
+    if now.time() < _time(*_MOMENTUM_AT):
+        return (False, last_session)
+    session = now.date().isoformat()
+    return (session != last_session, session)
 
 
 def regime_due(now, last_slot):
@@ -156,12 +182,22 @@ async def loop(bus):
     except Exception:  # noqa: BLE001 — order-flow is best-effort; refresh must go on.
         log.exception("order-flow consumer failed to start")
 
-    last_slot = None      # off-hours throttle slot (see refresh_due)
-    sectors_slot = None   # hourly RTH sector-recompute slot (see sectors_due)
+    last_slot = None       # off-hours throttle slot (see refresh_due)
+    sectors_slot = None    # hourly RTH sector-recompute slot (see sectors_due)
+    momentum_slot = None   # nightly momentum session sentinel (see momentum_due)
     try:
         while True:
             await asyncio.sleep(REFRESH_INTERVAL_SEC)
             now = _market_now()
+            # The nightly momentum slot is checked BEFORE the off-hours refresh
+            # throttle — it fires after the close, when refresh_due is mostly
+            # saying "not yet", and it must not be gated behind that.
+            momentum, momentum_slot = momentum_due(now, momentum_slot)
+            if momentum:
+                try:
+                    await loop_.run_in_executor(None, handlers.refresh_momentum, bus)
+                except Exception:  # noqa: BLE001 — never let the scheduler die.
+                    log.exception("momentum slot failed")
             due, last_slot = refresh_due(now, last_slot)
             if not due:
                 continue

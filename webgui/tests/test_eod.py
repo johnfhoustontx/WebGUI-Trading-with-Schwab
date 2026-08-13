@@ -336,3 +336,49 @@ def test_summary_fragment_back_compat_two_args():
 def test_detail_fragment_back_compat_one_arg():
     html = eod.detail_fragment({"date": "2026-06-27"})
     assert "EOD Detailed Report" in html
+
+
+# --- captured closed-today section (captured-autoclose) ----------------------
+CLOSED_SAMPLE = {"closed": [
+    {"signal_id": "s1", "symbol": "AAPL", "strategy": "PCS", "entry_credit": 1.20,
+     "exit_value": 0.40, "realized_pnl": 80.0, "exit_reason": "BREAKEVEN_STOP",
+     "close_ts": "2026-08-09T14:31:00-05:00"},
+    {"signal_id": "s2", "symbol": "MSFT", "strategy": "IC", "entry_credit": 2.00,
+     "exit_value": 3.50, "realized_pnl": -150.0, "exit_reason": "MONEY_STOP",
+     "close_ts": "2026-08-09T10:05:00-05:00"},
+], "total_realized": -70.0}
+
+
+def test_captured_closed_rows_map_fields():
+    rows = eod.captured_closed_rows(CLOSED_SAMPLE)
+    assert len(rows) == 2
+    joined = "".join(rows)
+    assert "AAPL" in joined and "PCS" in joined and "BREAKEVEN_STOP" in joined
+    assert "1.20" in joined and "0.40" in joined          # credit / exit @ 2dp
+    assert "$80.00" in joined                             # realized as money
+    assert "14:31" in joined                              # CT time from close_ts
+
+
+def test_captured_closed_section_shows_total_and_empty_note():
+    html = eod.captured_closed_section(CLOSED_SAMPLE)
+    assert "MSFT" in html
+    assert "-$70.00" in html                              # day realized total
+    empty = eod.captured_closed_section({"closed": [], "total_realized": 0.0})
+    assert 'class="none"' in empty                        # graceful empty
+    assert 'class="none"' in eod.captured_closed_section(None)
+
+
+def test_read_snapshot_includes_captured_closed(monkeypatch):
+    monkeypatch.setattr(eod.bus_client, "read", lambda k: {"_k": k})
+    snap = eod.read_snapshot()
+    assert "captured_closed" in snap
+
+
+def test_captured_closed_section_in_both_fragments():
+    snap = dict(SAMPLE)
+    snap["captured_closed"] = CLOSED_SAMPLE
+    det = eod.detail_fragment(snap)
+    summ = eod.summary_fragment(snap, "/eod/detail")
+    assert "Captured — closed today" in det
+    assert "Captured — closed today" in summ
+    assert "AAPL" in det                                  # rows rendered in detail

@@ -66,6 +66,20 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a></li>
+<li><a href="#prerequisites">Prerequisites</a><ul>
+<li><a href="#platform-and-runtime">Platform and runtime</a></li>
+<li><a href="#python-dependencies">Python dependencies</a></li>
+<li><a href="#memurai-the-redis-backbone">Memurai (the Redis backbone)</a></li>
+<li><a href="#schwab-api-credentials">Schwab API credentials</a></li>
+<li><a href="#anthropic-api-key-ai-features">Anthropic API key (AI features)</a></li>
+<li><a href="#data-files">Data files</a></li>
+<li><a href="#ports-that-must-be-free">Ports that must be free</a></li>
+<li><a href="#optional-integrations">Optional integrations</a></li>
+<li><a href="#startup-order">Startup order</a></li>
+<li><a href="#verifying-the-install">Verifying the install</a></li>
+<li><a href="#operational-notes">Operational notes</a></li>
+</ul>
+</li>
 <li><a href="#architecture-overview">Architecture Overview</a><ul>
 <li><a href="#the-three-tiers">The three tiers</a></li>
 <li><a href="#process-map-and-ports">Process map and ports</a></li>
@@ -145,6 +159,369 @@ place — e.g. <code>sentiment-dashboard/scoring/__init__.py:WEIGHTS</code> — 
 governs; if you change it there, update this document.</p>
 </blockquote>
 <hr />
+<h1 id="prerequisites">Prerequisites</h1>
+<p>Everything required to run the stack successfully. Items marked <strong>Required</strong> must
+be in place or the app will not start (or will start degraded in an obvious way);
+<strong>Optional</strong> items disable a specific feature when absent, by design — the code
+degrades rather than crashes.</p>
+<h2 id="platform-and-runtime">Platform and runtime</h2>
+<table>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Detail</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Operating system</strong></td>
+<td><strong>Windows 10 / 11.</strong> The stack is Windows-first: the launchers are <code>.bat</code>, desktop toasts use <code>winotify</code>, and the Redis backbone is Memurai (a Windows Redis).</td>
+<td>Required</td>
+</tr>
+<tr>
+<td><strong>Python</strong></td>
+<td><strong>3.11+</strong> (developed/tested on <strong>3.11.9</strong>; CI pins <strong>3.11</strong>; <code>ruff</code> targets <code>py311</code>).</td>
+<td>Required</td>
+</tr>
+<tr>
+<td><strong>Virtual environment</strong></td>
+<td>A venv at the repo root: <strong><code>.venv</code></strong>. The launchers resolve <code>\.venv\Scripts\python.exe</code> explicitly and abort if it's missing.</td>
+<td>Required</td>
+</tr>
+<tr>
+<td><strong>Browser</strong></td>
+<td>Any modern browser for the web GUI at <code>http://127.0.0.1:8500</code>.</td>
+<td>Required</td>
+</tr>
+<tr>
+<td><strong>Windows Terminal</strong></td>
+<td>Only for <code>start_all_wt.bat</code> (the one-window, tabbed launcher).</td>
+<td>Optional</td>
+</tr>
+</tbody>
+</table>
+<p>Create the environment:</p>
+<pre><code class="language-powershell">python -m venv .venv
+.\.venv\Scripts\python -m pip install -r requirements.txt
+</code></pre>
+<h2 id="python-dependencies">Python dependencies</h2>
+<p><code>requirements.txt</code> is the human-readable <strong>direct-dependency</strong> list (the union of
+all apps). <code>requirements.lock</code> is a fully-pinned, byte-identical environment
+(<code>pip freeze</code>) — install that for reproducibility. <code>requirements-dev.txt</code> holds
+tooling (<code>ruff</code>, <code>pre-commit</code>, <code>pip-audit</code>, <code>pytest-cov</code>) and is <strong>not needed to
+run</strong> the app.</p>
+<p>Load-bearing runtime packages:</p>
+<table>
+<thead>
+<tr>
+<th>Package</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nicegui[highcharts]&gt;=2.0.0</code></td>
+<td>The web GUI and every chart/gauge.</td>
+</tr>
+<tr>
+<td><code>fastapi==0.137.0</code>, <code>uvicorn==0.49.0</code>, <code>starlette==1.3.1</code></td>
+<td>The proxy + the six domain services.</td>
+</tr>
+<tr>
+<td><code>redis==8.0.0</code></td>
+<td>Client for the Memurai backbone. <code>fakeredis&gt;=2.20</code> backs the tests (no live server needed).</td>
+</tr>
+<tr>
+<td><code>pydantic&gt;=2.0</code></td>
+<td>The typed cross-tier contracts.</td>
+</tr>
+<tr>
+<td><code>schwab-py==1.5.1</code></td>
+<td>Schwab auth / market data / streaming.</td>
+</tr>
+<tr>
+<td><code>requests==2.34.2</code>, <code>httpx==0.28.1</code></td>
+<td>HTTP clients.</td>
+</tr>
+<tr>
+<td><code>pandas&gt;=2.0</code>, <code>numpy&gt;=1.24</code>, <code>scipy</code></td>
+<td>Analytics; <code>scipy.stats.norm</code> powers Black-Scholes.</td>
+</tr>
+<tr>
+<td><code>openpyxl</code></td>
+<td>Reads the sector/watchlist workbooks.</td>
+</tr>
+<tr>
+<td><code>apscheduler==3.10.4</code></td>
+<td>Driver scheduling.</td>
+</tr>
+<tr>
+<td><code>anthropic==0.112.0</code></td>
+<td>Claude tool-use calls (imported lazily — the suite runs without it configured).</td>
+</tr>
+<tr>
+<td><code>matplotlib</code>, <code>Pillow</code>, <code>winotify</code>, <code>yfinance</code></td>
+<td>Charts/imaging, Windows toasts, optional fallback data.</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>Licensing — read this.</strong> <code>nicegui[highcharts]</code> pulls in <strong>Highcharts</strong>, which is
+free for <strong>personal / non-commercial use only</strong>. Commercial use requires a paid
+Highcharts license. This is a licensing prerequisite, not a technical one.</p>
+</blockquote>
+<h2 id="memurai-the-redis-backbone">Memurai (the Redis backbone)</h2>
+<table>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Detail</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Memurai running on <code>:6379</code></strong></td>
+<td>Installs as a <strong>native Windows service</strong> (start it from <code>services.msc</code>). It is the Tier-3 cache, pub/sub, and command bus — <strong>without it none of the six services can publish and every page shows a "Waiting for … service" placeholder.</strong> The launchers check it but do <strong>not</strong> install or start it for you, and <code>stop_all.bat</code> deliberately leaves it running.</td>
+<td>Required</td>
+</tr>
+<tr>
+<td><code>MEMURAI_PASSWORD</code></td>
+<td>Optional AUTH. Unset = no AUTH (the default, unchanged behavior).</td>
+<td>Optional</td>
+</tr>
+</tbody>
+</table>
+<h2 id="schwab-api-credentials">Schwab API credentials</h2>
+<p>The proxy owns all Schwab authentication; no other process holds credentials.</p>
+<table>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Detail</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Schwab developer account + registered app</strong></td>
+<td>Yields an <strong>App Key</strong> and <strong>App Secret</strong>. Register the callback URL as <strong><code>https://127.0.0.1:8182</code></strong>.</td>
+<td>Required</td>
+</tr>
+<tr>
+<td><strong><code>shared/appsettings.json</code></strong></td>
+<td>Copy <code>shared/appsettings.example.json</code> and fill <code>Schwab.AppKey</code> / <code>Schwab.AppSecret</code> (both default to <code>REPLACE_ME</code>). <strong>Gitignored.</strong></td>
+<td>Required</td>
+</tr>
+<tr>
+<td><strong><code>shared/tokens.json</code></strong></td>
+<td>The OAuth tokens (<code>AccessToken</code> / <code>RefreshToken</code> / expiry). Created by the first authorization — copy <code>shared/tokens.example.json</code> if you need the shape. <strong>Gitignored.</strong></td>
+<td>Required</td>
+</tr>
+<tr>
+<td><strong>First-time authorization</strong></td>
+<td>Start the proxy, then open <strong><code>http://127.0.0.1:8100/auth</code></strong> (or the <strong>Authorize</strong> button on the app's <strong>System Status</strong> page) and complete the Schwab login.</td>
+<td>Required</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>Token lifetimes matter operationally.</strong> An <strong>expired access token is normal</strong> —
+the proxy refreshes it automatically. An <strong>expired refresh token is fatal</strong> to
+live data and requires re-authorizing via <code>/auth</code>. The proxy's <code>/health</code> reports
+<code>has_token</code>, <code>token_expired</code>, and <code>refresh_token_expired</code>, and the System Status
+page surfaces this as its own card.</p>
+</blockquote>
+<h2 id="anthropic-api-key-ai-features">Anthropic API key (AI features)</h2>
+<table>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Detail</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong><code>ANTHROPIC_API_KEY</code></strong></td>
+<td>Resolution order: the <strong>env var</strong> first, then a gitignored <strong><code>shared/anthropic_key.txt</code></strong>. Powers the Driver's Claude decision layer, the Gamma <strong>Analyze</strong>/<strong>Explain</strong> infographics + the 4×/day auto-briefings, and the market summary ticker.</td>
+<td>Optional</td>
+</tr>
+</tbody>
+</table>
+<p>Without a key those features <strong>degrade safely</strong> — most importantly the autonomous
+driver <strong>stands down rather than trading blind</strong>, and the Gamma infographics render
+a readable "no key" page.</p>
+<h2 id="data-files">Data files</h2>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Role</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sentiment-dashboard/Sectors_Industries_ETFs.xlsx</code></td>
+<td>The sector/industry ETF reference map, loaded once at startup by the sentiment engine.</td>
+<td>Required</td>
+</tr>
+<tr>
+<td><code>options-scanner/data/Top 20.xlsx</code></td>
+<td>The scanner watchlist (also the GEX collection universe). <strong>Gitignored</strong> — a fresh clone degrades to the base index symbols (<code>$SPX</code>/<code>$VIX</code>/<code>SPY</code>/<code>QQQ</code>).</td>
+<td>Optional</td>
+</tr>
+</tbody>
+</table>
+<p>The SQLite stores (paper-trading books, <code>gex_history.db</code>, signal DBs) are created
+automatically and start empty.</p>
+<h2 id="ports-that-must-be-free">Ports that must be free</h2>
+<p>Ports come from <code>config/ports.toml</code> via <code>repo_paths.py</code> — never hard-coded.</p>
+<table>
+<thead>
+<tr>
+<th>Port</th>
+<th>Process</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>6379</td>
+<td>Memurai (Redis)</td>
+<td>Required</td>
+</tr>
+<tr>
+<td>8100</td>
+<td>schwab-proxy — <strong>start first</strong>, everything depends on it</td>
+<td>Required</td>
+</tr>
+<tr>
+<td>8210</td>
+<td>sentiment_svc</td>
+<td>Required</td>
+</tr>
+<tr>
+<td>8211</td>
+<td>options_svc</td>
+<td>Required</td>
+</tr>
+<tr>
+<td>8212</td>
+<td>portfolio_svc</td>
+<td>Required</td>
+</tr>
+<tr>
+<td>8213</td>
+<td>trade_svc</td>
+<td>Required</td>
+</tr>
+<tr>
+<td>8214</td>
+<td>driver_svc</td>
+<td>Required</td>
+</tr>
+<tr>
+<td>8215</td>
+<td>market_svc</td>
+<td>Required</td>
+</tr>
+<tr>
+<td>8500</td>
+<td>webgui (NiceGUI)</td>
+<td>Required</td>
+</tr>
+</tbody>
+</table>
+<p><code>config/ports.toml</code> also lists <code>options_analytics = 8200</code>, <code>approval = 8300</code>,
+<code>dashboard_frontend = 5173</code>, and an <code>[ml_servers]</code> block (MES 8000 / MNQ 8001 /
+ES 8004 / NQ 8005). <strong>None of these are started by this repo</strong> — 5173 and 8300
+are legacy/retired, and the ML servers plus the 8200 analytics service are
+<strong>separate external processes</strong> that <code>claude-driver</code> addresses over HTTP. If they
+aren't running, those paths simply degrade.</p>
+<h2 id="optional-integrations">Optional integrations</h2>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Requirement</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Push notifications</strong></td>
+<td>Gitignored <code>shared/notifications.json</code> (template: <code>shared/notifications.example.json</code>). Telegram needs a bot token + chat id; Discord needs a channel webhook URL; Google Fi SMS needs your 10-digit Fi number plus a Gmail <strong>App Password</strong>. Each channel self-gates — missing creds are a silent no-op. Env vars override file values.</td>
+</tr>
+<tr>
+<td><strong>Proxy hardening</strong></td>
+<td><code>PROXY_SHARED_SECRET</code> (guards the trading endpoints; enforced only when set) and <code>PROXY_CORS_ORIGINS</code> (overrides the local allowlist). See <code>docs/SECURITY.md</code>.</td>
+</tr>
+<tr>
+<td><strong>Driver model override</strong></td>
+<td><code>DRIVER_MODEL</code> env var → gitignored <code>shared/driver_model.txt</code> (defaults to the built-in model id).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="startup-order">Startup order</h2>
+<p>The dependency chain is strict: <strong>Memurai → schwab-proxy → the six services → webgui.</strong>
+Services wait on the proxy because every one of them resolves market data through it.</p>
+<table>
+<thead>
+<tr>
+<th>Launcher</th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>start_all.bat</code></td>
+<td>Proxy + 6 services + webgui in <strong>8 separate console windows</strong>, then opens the browser.</td>
+</tr>
+<tr>
+<td><code>start_all_wt.bat</code></td>
+<td>The same 8 processes as <strong>tabs in one Windows Terminal window</strong>.</td>
+</tr>
+<tr>
+<td><code>start_all_wt.bat nowindow</code> / <code>start_all_hidden.bat</code></td>
+<td>Windowless (<code>pythonw</code>), logging to <code>logs\</code>.</td>
+</tr>
+<tr>
+<td><code>stop_all.bat</code></td>
+<td>Stops the proxy, services, and webgui by port. <strong>Leaves Memurai running.</strong></td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>The eight processes must stay <strong>separate OS processes</strong>. Merging services into one
+Python process would re-introduce the top-level module-name collisions
+(<code>config</code> / <code>scoring</code> / <code>notifier</code> / <code>src</code>) that the 3-tier split exists to prevent.</p>
+</blockquote>
+<h2 id="verifying-the-install">Verifying the install</h2>
+<ol>
+<li>Open <strong><code>http://127.0.0.1:8500/status</code></strong> — the System Status page probes Memurai,
+   the proxy, Schwab authorization, all six services, and the webgui, plus a
+   data-freshness table.</li>
+<li>Or probe directly: <code>GET http://127.0.0.1:8100/health</code> and
+   <code>GET http://127.0.0.1:82{10..15}/health</code> (each returns <code>{"domain": …, "up": true}</code>).</li>
+<li>Run the tests <strong>one folder at a time</strong> (never <code>pytest services</code> across all of
+   them — that re-triggers the module-name collisions):</li>
+</ol>
+<pre><code class="language-powershell">.venv\Scripts\python -m pytest services\options_svc
+cd webgui ; ..\.venv\Scripts\python -m pytest -q
+</code></pre>
+<h2 id="operational-notes">Operational notes</h2>
+<ul>
+<li><strong>Off-hours data is legitimately sparse.</strong> On weekends and outside market hours
+  0-DTE scans can return nothing and Gamma may show no fresh data. That is expected,
+  not a failure.</li>
+<li><strong><code>gex_history.db</code> grows.</strong> A daily retention purge keeps the last 5 sessions, but
+  <code>DELETE</code> reuses pages without shrinking the file — reclaim space with the offline
+  <code>tools/vacuum_gex.py</code> (or <strong>Settings → Maintenance → Vacuum GEX history DB</strong>), which
+  refuses to run while the collector is active.</li>
+</ul>
+<hr />
 <h1 id="architecture-overview">Architecture Overview</h1>
 <h2 id="the-three-tiers">The three tiers</h2>
 <p>The stack is split into three physically separate tiers communicating over a local
@@ -157,7 +534,7 @@ TIER 3  STORE+COMM  Memurai (:6379): cache:{domain}:{view}, events:{domain}:{vie
                     payloads) + shared/bus (redis wrapper).
    ▲ publish                               │ consume
 TIER 2  SERVICES    services/{domain}_svc FastAPI (sentiment/options/portfolio/
-                    trade/driver). Each imports only its engines, owns its
+                    trade/driver/market). Each imports only its engines, owns its
                     scheduler + command consumer, validates + caches + publishes.
                     Calls schwab-proxy (:8100) for market data.
 </code></pre>
@@ -205,6 +582,11 @@ TIER 2  SERVICES    services/{domain}_svc FastAPI (sentiment/options/portfolio/
 <td>driver_svc</td>
 <td>8214</td>
 <td>Morning order-approval pipeline.</td>
+</tr>
+<tr>
+<td>market_svc</td>
+<td>8215</td>
+<td>Live macro-ticker Market Dashboard (~2 s RTH poll).</td>
 </tr>
 <tr>
 <td>webgui</td>
@@ -264,7 +646,7 @@ TIER 2  SERVICES    services/{domain}_svc FastAPI (sentiment/options/portfolio/
 </tr>
 <tr>
 <td><code>services/</code></td>
-<td>The five Tier-2 domain services.</td>
+<td>The six Tier-2 domain services.</td>
 </tr>
 <tr>
 <td><code>webgui/</code></td>

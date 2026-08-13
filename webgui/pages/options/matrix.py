@@ -222,7 +222,7 @@ def render():
     ui.add_css(QUASAR_INTERNAL_CSS)
     with ui.column().classes(f"calc-v2 {PAGE} w-full gap-4"):
         with ui.column().classes(f"{CARD} w-full gap-2"):
-            ui.label("Matrix").classes(f"text-h6 {LABEL}")
+            ui.label("Opportunity Board").classes(f"text-h6 {LABEL}")
             ui.label("Every watchlist stock at a glance — sorted by hotness") \
                 .classes(EYEBROW)
             # Summary band: signal counts across the whole grid.

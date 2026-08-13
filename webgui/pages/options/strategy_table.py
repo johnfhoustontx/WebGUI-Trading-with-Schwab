@@ -106,6 +106,7 @@ def strategy_columns():
         ("rr", "R:R"),
         ("pop_pct", "PoP"),
         ("breakevens", "BE"),
+        ("iv_rank", "IV Rank"),
         ("composite_score", "Score"),
         ("grade", "Grade"),
     ]
@@ -233,6 +234,7 @@ def strategy_rows(signals):
             "rr": _fmt_2(s.get("rr")),
             "pop_pct": _fmt_1(s.get("pop_pct")),
             "breakevens": breakeven_text(s),
+            "iv_rank": scanner.iv_rank_value(s.get("iv_rank")),
             "composite_score": score,
             "grade": s.get("grade", ""),
             "grade_reason": s.get("grade_reason", ""),
@@ -276,11 +278,66 @@ def detail_signal(signal):
     fill ``credit`` from ``net_credit`` ONLY and ``breakeven`` (first breakeven) when
     absent. A debit structure (``net_credit`` None) deliberately leaves ``credit``
     unset → the panel's green "Credit" tile shows "—" rather than the DEBIT amount
-    mislabeled as a credit. The input is NOT mutated."""
+    mislabeled as a credit. The input is NOT mutated.
+
+    UNITS: ``net_credit`` is per-CONTRACT (payoff_metrics, x100) while ``credit``
+    is per-SHARE across every other adapter — detail.py's ``CONTRACT_MULTIPLIER``
+    comment states that convention and the panel multiplies by 100 to display. So
+    the fill DIVIDES, exactly as ``_fill_net_cost`` does below. This path is only
+    reachable for a NATIVELY-built structure (a naked SHORT_PUT/SHORT_CALL):
+    ``_normalize_credit`` copies the source dict, so an adapted PCS/CCS/IC keeps
+    its per-share source ``credit`` and never reaches the fallback."""
     out = dict(signal or {})
     if out.get("credit") is None:
-        out["credit"] = out.get("net_credit")
+        credit_d = _num(out.get("net_credit"))
+        out["credit"] = (round(credit_d / _CONTRACT_MULT, 6)
+                         if credit_d is not None else None)
+    # ``max_loss`` is the SAME collision, and unlike credit it has no per-share
+    # source field to shadow it: _normalize_credit scales it x100 and
+    # payoff_metrics builds it per-contract natively, while the panel's other
+    # three feeds are all per-share (raw scanner signal, paper's
+    # _max_loss_per_share, captured's entry_max_loss). Normalize unconditionally
+    # — every value on this path is per-contract.
+    max_loss_d = _num(out.get("max_loss"))
+    if max_loss_d is not None:
+        out["max_loss"] = round(max_loss_d / _CONTRACT_MULT, 6)
     if out.get("breakeven") is None:
         bes = out.get("breakevens") or []
         out["breakeven"] = bes[0] if bes else None
+    _fill_net_cost(out)
     return out
+
+
+# strategy_scanner.payoff_metrics emits net_debit/net_credit in per-CONTRACT
+# dollars (net * _CONTRACT_MULT); ``net_cost`` is per-SHARE, so they divide.
+_CONTRACT_MULT = 100.0
+
+
+def _num(v):
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def _fill_net_cost(out):
+    """Signed cost in PER-SHARE dollars: positive = credit in, negative = debit out.
+
+    ``credit`` deliberately stays None for a debit so the green Credit tile
+    cannot show a DEBIT mislabelled as a credit — but without this the cost
+    vanished entirely, so a long call showed no price at all.
+
+    UNITS: ``net_credit``/``net_debit`` arrive in per-CONTRACT dollars and are
+    both POSITIVE (the structure's side is carried by which one is None), while
+    the source ``credit`` is already per-share. They are reconciled onto the
+    per-share scale here — the one place all three units are known.
+    """
+    if out.get("net_cost") is not None:
+        return
+    credit_d, debit_d = _num(out.get("net_credit")), _num(out.get("net_debit"))
+    credit_s = _num(out.get("credit"))
+    if credit_d is not None:
+        out["net_cost"] = round(credit_d / _CONTRACT_MULT, 6)
+    elif debit_d is not None:
+        out["net_cost"] = round(-abs(debit_d) / _CONTRACT_MULT, 6)
+    elif credit_s is not None:
+        out["net_cost"] = credit_s
+    else:
+        out["net_cost"] = None

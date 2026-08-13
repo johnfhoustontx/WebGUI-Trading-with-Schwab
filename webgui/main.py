@@ -34,7 +34,7 @@ import proxy  # noqa: E402
 from pages.options import theme  # noqa: E402  (config/theme.toml typography + menu)
 from pages.ui_guard import guard_async  # noqa: E402
 from pages.ui_guard import install_deleted_slot_log_filter  # noqa: E402
-from repo_paths import NICEGUI_PORT, SERVICE_URLS  # noqa: E402
+from repo_paths import IS_DEV, NICEGUI_PORT, SERVICE_URLS  # noqa: E402
 
 # Silence the benign NiceGUI timer-disconnect-race traceback ("The parent slot of
 # the element has been deleted.") — it escapes the ui_guard callback decorators
@@ -67,6 +67,42 @@ def sync_ticker_setting() -> None:
             "market", {"type": "enable_summary" if enabled else "disable_summary"})
     except Exception:  # noqa: BLE001
         logging.getLogger("webgui").warning("ticker setting resync failed", exc_info=True)
+
+
+def sync_captured_autoclose_setting() -> None:
+    """Re-assert the captured auto-close toggle to options_svc at startup (best-effort).
+
+    ``captured_autoclose_enabled`` is a webgui setting that gates the service's
+    scheduled captured-manage cycle. The service defaults to ENABLED on a missing
+    key, so a wiped/restarted Memurai would silently resume auto-close while the GUI
+    showed it off — settings.json is the source of truth, so restate it every
+    startup. Never raises (a down bus must not stop the web GUI from booting)."""
+    try:
+        enabled = bool(app_settings.get("captured_autoclose_enabled"))
+        bus_client.request("options", {"type": "set_autoclose",
+                                       "args": {"enabled": enabled}})
+    except Exception:  # noqa: BLE001
+        logging.getLogger("webgui").warning(
+            "captured autoclose setting resync failed", exc_info=True)
+
+
+def sync_manual_paper_lifecycle_setting() -> None:
+    """Re-assert the manual-paper break-even-lifecycle toggle to options_svc at
+    startup (best-effort).
+
+    ``manual_paper_lifecycle_enabled`` is a webgui setting (default OFF) that
+    gates the manual paper account's opt-in captured-style lifecycle. Mirrors
+    ``sync_captured_autoclose_setting``: settings.json is the source of truth, so
+    restate it every startup — a wiped/restarted Memurai defaults the service's
+    own copy back OFF too, but an explicit user ON must still be re-asserted.
+    Never raises (a down bus must not stop the web GUI from booting)."""
+    try:
+        enabled = bool(app_settings.get("manual_paper_lifecycle_enabled"))
+        bus_client.request("options", {"type": "set_manual_paper_lifecycle",
+                                       "args": {"enabled": enabled}})
+    except Exception:  # noqa: BLE001
+        logging.getLogger("webgui").warning(
+            "manual paper lifecycle setting resync failed", exc_info=True)
 
 
 def play_alert(sound: str, volume: float) -> None:
@@ -172,6 +208,62 @@ def _serve_gamma_history():
     return HTMLResponse(analyze_html(bus_client.read("options:gamma_history")))
 
 
+# ── EquityDeepDive (Trade Analyzer) — Deep Dive report + AI Query serve routes ──
+_DEEPDIVE_EMPTY = (
+    "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'><title>Deep Dive</title></head>"
+    "<body style='font-family:system-ui,sans-serif;background:#0c0f15;color:#e9edf3;padding:40px'>"
+    "<h3>No Deep Dive generated yet</h3><p>Open the Trade Analyzer, enter a symbol, and click "
+    "<b>Deep Dive</b>.</p></body></html>")
+
+
+def deepdive_html(payload):
+    """Standalone deep-dive report HTML from the cached payload (or a placeholder)."""
+    html = (payload or {}).get("html")
+    return html if isinstance(html, str) and html.strip() else _DEEPDIVE_EMPTY
+
+
+def deepdive_query_html(payload):
+    """Wrap the cached chat-prompt markdown in a dark, copyable page (read-only
+    textarea + Copy button) so the user can paste it straight into a chat."""
+    import html as _h
+    md = (payload or {}).get("markdown")
+    sym = (payload or {}).get("symbol", "")
+    if not (isinstance(md, str) and md.strip()):
+        return ("<!DOCTYPE html><html><head><meta charset='utf-8'><title>AI Query</title></head>"
+                "<body style='font-family:system-ui;background:#0c0f15;color:#e9edf3;padding:40px'>"
+                "<h3>No query generated yet</h3><p>Click <b>AI Query</b> on the Trade Analyzer.</p>"
+                "</body></html>")
+    esc = _h.escape(md)
+    return (
+        "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
+        f"<title>AI Query — {_h.escape(sym)}</title>"
+        "<style>body{font-family:system-ui,sans-serif;background:#0c0f15;color:#e9edf3;margin:0;padding:24px}"
+        "h3{margin:0 0 12px}button{background:#2563eb;color:#fff;border:0;border-radius:8px;"
+        "padding:10px 16px;font-weight:600;cursor:pointer}button:hover{background:#1d4fd1}"
+        "textarea{width:100%;height:75vh;margin-top:12px;background:#101a30;color:#e7edf8;"
+        "border:1px solid #243353;border-radius:8px;padding:12px;font-family:ui-monospace,monospace;"
+        "font-size:12px;box-sizing:border-box}</style></head><body>"
+        f"<h3>AI Query — {_h.escape(sym)} "
+        "<button onclick=\"navigator.clipboard.writeText(document.getElementById('q').value)."
+        "then(()=>{this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1200)})\">Copy</button></h3>"
+        f"<textarea id='q' readonly>{esc}</textarea></body></html>")
+
+
+@app.get("/trade/deepdive")
+def _serve_deepdive():
+    """Serve the latest Deep Dive report as a raw standalone page (its own <style>
+    applies). Opened in a new browser tab from the Trade page."""
+    import bus_client
+    return HTMLResponse(deepdive_html(bus_client.read("trade:deepdive")))
+
+
+@app.get("/trade/deepdive-query")
+def _serve_deepdive_query():
+    """Serve the latest AI Query as a copyable page. Opened in a new tab."""
+    import bus_client
+    return HTMLResponse(deepdive_query_html(bus_client.read("trade:deepdive_query")))
+
+
 @app.get("/eod/file")
 def _serve_eod_file(date: str, which: str = "summary"):
     """Serve an archived EOD report file (summary.html / detail.html) raw, so its
@@ -217,7 +309,6 @@ def _serve_manual(name: str):
 OPTIONS_CHILDREN = [
     ("/", "Market Scanner", "radar"),
     ("/options/swing", "Strategy Finder", "swap_vert"),
-    ("/options/simulator", "Simulator", "science"),
     ("/options/expected-move", "Expected Move", "candlestick_chart"),
     ("/options/captured", "Captured Signals", "bookmark"),
     ("/options/paper", "Paper Ledger", "request_quote"),
@@ -234,15 +325,28 @@ SENTIMENT_CHILDREN = [
     ("/sentiment/sectors", "Sector & Industry", "table_chart"),
     ("/sentiment/rotation", "Sector Rotation", "donut_large"),
     ("/sentiment/rrg", "RRG", "scatter_plot"),
+    ("/sentiment/momentum", "Momentum", "trending_up"),
 ]
 
 # Standalone MAIN-MENU (rail) pages shown directly UNDER the Options group. Each
 # is its own page with NO tab strip — deliberately NOT Options tab-strip entries.
 # (route, label, icon)
 OPTIONS_RAIL = [
-    ("/options/calculator", "Calculator", "calculate"),
     ("/options/gamma", "Dealer Positioning", "stacked_line_chart"),
     ("/options/matrix", "Opportunity Board", "grid_on"),
+    ("/options/flow", "Flow Alerts", "bolt"),
+]
+
+# The two MODELLING tools, paired as their own group (2026-07-28). They are the
+# app's most tightly coupled pages — shared leg editor / strategy templates /
+# page-state snapshot, plus a Copy-to-each-other button — but used to straddle two
+# nav levels (Calculator a standalone rail page, Simulator an Options tab), so the
+# copy button threw you between them. They are deliberately NOT Options tabs: that
+# strip is the find → analyze → track → repair workflow over signals the app
+# FINDS, whereas these two model legs you bring yourself. (route, label, icon)
+STRATEGY_TOOLS_CHILDREN = [
+    ("/options/calculator", "Calculator", "calculate"),
+    ("/options/simulator", "Simulator", "science"),
 ]
 
 # Flat top-level items (single-page apps). (route, label, icon)
@@ -252,19 +356,29 @@ FLAT_NAV = [
     ("/driver", "Claude Trades", "smart_toy"),
 ]
 
-# "More" is a menu GROUP for reports / diagnostics / config. Its tab strip is
+# "More" is a menu GROUP for reports / documentation. Its tab strip is
 # MORE_CHILDREN + SETTINGS_CHILDREN, so User Manuals renders as a flat PEER tab
-# of Settings — the old indented sub-group is retired. (route, label, icon)
+# of EOD Report — the old indented sub-group is retired. (route, label, icon)
 MORE_CHILDREN = [
     ("/eod", "EOD Report", "summarize"),
-    ("/status", "System Status", "monitor_heart"),
-    ("/settings", "Settings", "settings"),
-    ("/terminate", "Stop All Services", "power_settings_new"),
 ]
 
-# Sub-menu items nested under the Settings entry. (route, label, icon)
+# Sub-menu items that used to nest under the Settings entry; Settings is now a
+# standalone rail page (SYSTEM_RAIL), so this renders as a More tab. (route, label, icon)
 SETTINGS_CHILDREN = [
     ("/manuals", "User Manuals", "menu_book"),
+]
+
+# Standalone MAIN-MENU (rail) pages pinned to the BOTTOM of the drawer (2026-08-12).
+# These are the machine-level controls — health, configuration, shutdown — not part
+# of any analysis workflow, so they were lifted out of the "More" tab strip and given
+# their own block at the foot of the rail (the conventional place for them). Like
+# OPTIONS_RAIL they are standalone: no tab strip, breadcrumb is just the page name.
+# (route, label, icon)
+SYSTEM_RAIL = [
+    ("/status", "System Status", "monitor_heart"),
+    ("/terminate", "Stop All Services", "power_settings_new"),
+    ("/settings", "Settings", "settings"),
 ]
 
 # ── Main-menu groups (2026-07-11 nav redesign) ───────────────────────────────
@@ -272,10 +386,14 @@ SETTINGS_CHILDREN = [
 # compact TAB STRIP across the top of the page (small padding), replacing the old
 # expandable sub-menus. A group's drawer badge is the SUM of its children's badge
 # counts; the per-page badges float on the tabs. (label, icon, children)
+# Lookup order is irrelevant here (routes are unique, and both consumers below
+# ITERATE) — the drawer decides where each group actually sits. Appended rather
+# than inserted so the positional _NAV_GROUPS[0..2] reads in _layout stay valid.
 _NAV_GROUPS = [
     ("Options", "candlestick_chart", OPTIONS_CHILDREN),
     ("Market Trend & Sentiment", "speed", SENTIMENT_CHILDREN),
     ("More", "more_horiz", MORE_CHILDREN + SETTINGS_CHILDREN),
+    ("Strategy Tools", "build", STRATEGY_TOOLS_CHILDREN),
 ]
 
 
@@ -324,15 +442,41 @@ def brand_lockup_html(static_dir=None):
     Raw HTML rather than NiceGUI elements because each wordmark half needs a
     gradient clipped to its text (``theme.build_brand_css``), which Tailwind's
     bundled JIT can't express. The name comes from ``[brand]`` config, so it is
-    HTML-escaped."""
+    HTML-escaped.
+
+    In dev the lockup carries a DEV chip: two identical-looking tabs that write
+    to DIFFERENT paper books is a mistake waiting to happen. Inline style for the
+    same reason as the rest of this function — it is a raw HTML string, not a
+    NiceGUI element with ``.classes()``."""
     mark = brand_mark_src(static_dir)
     img = (f'<img src="{html.escape(mark)}" class="brand-mark" alt="">'
            if mark else "")
+    chip = ('<span style="margin-left:8px;padding:1px 7px;border-radius:4px;'
+            'background:#b45309;color:#fff;font-size:10px;font-weight:700;'
+            'letter-spacing:.06em">DEV</span>') if IS_DEV else ""
     return (f'<div style="display:flex;align-items:center;gap:9px">{img}'
             f'<span class="brand-word">'
             f'<span class="a">{html.escape(theme.BRAND_NAME_A)}</span>'
             f'<span class="b">{html.escape(theme.BRAND_NAME_B)}</span>'
-            f'</span></div>')
+            f'</span>{chip}</div>')
+
+
+def window_title(page: str | None = None):
+    """The browser-tab / taskbar title, environment-tagged.
+
+    Prefixed in dev so a tab is identifiable before it renders (and in the
+    taskbar, where the favicon is per-route and the title is the only tell).
+    Prod is EXACTLY the unprefixed title — unchanged from before environments.
+
+    ``page`` is the per-page label. It is a parameter because ``_layout`` calls
+    ``ui.page_title`` on EVERY page, and that OVERRIDES the ``ui.run(title=…)``
+    default — so tagging only the ``ui.run`` title left every real page reading
+    e.g. "Market Scanner" in both environments, which is precisely where the
+    distinction is needed: the chip is in the page, but the tab strip is what
+    you read when the tabs are narrow. Verified in a live browser, not inferred.
+    """
+    base = page or theme.BRAND_NAME
+    return f"DEV · {base}" if IS_DEV else base
 
 
 def market_status_parts(now=None):
@@ -369,13 +513,15 @@ def drawer_width(pinned: bool) -> int:
 # tabs are tellable-apart at a glance. Applied per page in ``_layout`` via
 # ``ui.page_title`` + a tiny colored-square SVG ``<link rel=icon>``.
 _NAV_LABEL = {route: label for route, label, _icon in
-              OPTIONS_CHILDREN + OPTIONS_RAIL + SENTIMENT_CHILDREN + FLAT_NAV
-              + MORE_CHILDREN + SETTINGS_CHILDREN}
+              OPTIONS_CHILDREN + OPTIONS_RAIL + STRATEGY_TOOLS_CHILDREN
+              + SENTIMENT_CHILDREN + FLAT_NAV
+              + MORE_CHILDREN + SETTINGS_CHILDREN + SYSTEM_RAIL}
 
 # One distinct color per route (the favicon fill). Material hues, all visually apart.
 _TAB_COLOR = {
     "/": "#42a5f5",                       # Market Scanner — blue
     "/options/matrix": "#4dd0e1",         # Opportunity Board — cyan
+    "/options/flow": "#d500f9",           # Flow Alerts — magenta
     "/options/paper": "#66bb6a",          # Paper Ledger — green
     "/options/captured": "#ab47bc",       # Captured Signals — purple
     "/options/portfolio": "#26a69a",      # Paper Account — teal
@@ -389,6 +535,7 @@ _TAB_COLOR = {
     "/sentiment/sectors": "#7986cb",      # Sector & Industry — indigo light
     "/sentiment/rotation": "#8d6e63",     # Sector Rotation — brown
     "/sentiment/rrg": "#a1887f",          # RRG — brown light
+    "/sentiment/momentum": "#9ccc65",     # Momentum — light green
     "/market": "#00bfa5",                # Market Dashboard — teal-green
     "/trade": "#26c6da",                 # Trade — cyan
     "/portfolio": "#9ccc65",             # Portfolio — light green
@@ -422,7 +569,13 @@ def _favicon_link(color: str) -> str:
 _NAV_BADGES: dict[str, int] = {}
 _ALERT_STATE: dict = {
     "acked_scan": set(), "alerted": set(), "alerted_init": None,
-    "captured_seen": None, "rescue_seen": None,
+    # Captured badge: the SET of acknowledged captured signal ids (not a version),
+    # plus a version-gated cache of the current ids so the badge fires on a
+    # genuinely new capture rather than on every reprice-republish. captured_keys is
+    # recomputed only when captured_keys_ver moves (the cheap :ver probe gates the
+    # payload deserialize).
+    "captured_acked": set(), "captured_keys": set(), "captured_keys_ver": None,
+    "rescue_seen": None,
     # Health/staleness (R4b/R8): the set of currently stale/down component keys
     # already alerted, so we chime only on transition INTO bad (fire-on-transition,
     # clear-on-heal). Seeded on the first tick so a service that's already stale/down
@@ -709,7 +862,14 @@ def _acknowledge(active: str, scan=None) -> None:
             scan = bus_client.read("options:scan") or {}
         _ALERT_STATE["acked_scan"] = alerts.scanner_keys(scan)
     elif active == "/options/captured":
-        _ALERT_STATE["captured_seen"] = bus_client.read_version("options:captured")
+        # Acknowledge the current SET of captured signal ids (not the version), so
+        # the badge clears on open and only re-appears on a genuinely NEW capture —
+        # not on the 5-min reprice-republish, which keeps the same ids but bumps the
+        # version (that version-churn was the "badge keeps showing" bug).
+        _ALERT_STATE["captured_keys_ver"] = bus_client.read_version("options:captured")
+        _ALERT_STATE["captured_keys"] = alerts.captured_keys(
+            bus_client.read("options:captured") or {})
+        _ALERT_STATE["captured_acked"] = set(_ALERT_STATE["captured_keys"])
     elif active == "/options/rescue":
         # Acknowledge the current rescue-summary version so the badge clears on
         # open and only re-appears when the manage cycle publishes a new summary.
@@ -727,9 +887,16 @@ def _recompute_badges(scan=None) -> None:
         scan = bus_client.read("options:scan") or {}
     _NAV_BADGES["/"] = alerts.unread_count(
         alerts.scanner_keys(scan), _ALERT_STATE["acked_scan"])
-    cap_ver = bus_client.read_version("options:captured")  # cheap :ver probe
-    _NAV_BADGES["/options/captured"] = 1 if (
-        cap_ver is not None and cap_ver != _ALERT_STATE["captured_seen"]) else 0
+    # Captured: fire on a genuinely NEW captured signal (a new signal_id), NOT on
+    # the periodic reprice-republish (same ids, bumped version). Deserialize the
+    # payload only when the version actually moved — the cheap :ver probe gates it.
+    cap_ver = bus_client.read_version("options:captured")
+    if cap_ver != _ALERT_STATE["captured_keys_ver"]:
+        _ALERT_STATE["captured_keys"] = alerts.captured_keys(
+            bus_client.read("options:captured") or {})
+        _ALERT_STATE["captured_keys_ver"] = cap_ver
+    _NAV_BADGES["/options/captured"] = 1 if alerts.unread_count(
+        _ALERT_STATE["captured_keys"], _ALERT_STATE["captured_acked"]) else 0
     # Rescue: count of at-risk paper positions (tested + critical) from the small
     # rescue_summary view. Cleared on open (version acknowledged), so the count
     # only re-appears when the manage cycle republishes a changed summary.
@@ -987,7 +1154,7 @@ def _layout(active: str, title: str):
         # rgba in _NAV_CSS (the JIT can't emit var()/rgba() arbitraries).
         ui.colors(primary=theme.MENU_ACCENT)
     # Browser tab: title = the selected menu item; favicon = this page's color.
-    ui.page_title(_NAV_LABEL.get(active, theme.BRAND_NAME))
+    ui.page_title(window_title(_NAV_LABEL.get(active, theme.BRAND_NAME)))
     ui.add_head_html(_favicon_link(_TAB_COLOR.get(active, "#42a5f5")))
     # Icon rail: laid out at the rail width (or the open width when pinned); the
     # _NAV_CSS :hover rule expands only the ASIDE over the content (see the rail
@@ -1007,6 +1174,10 @@ def _layout(active: str, title: str):
             # tab strip) + the single-page apps. No expandable sub-menus.
             opts_label, opts_icon, opts_children = _NAV_GROUPS[0]
             _nav_group_link(opts_label, opts_icon, opts_children, active)
+            # Modelling tools (Calculator + Simulator) — a group, so it gets a tab
+            # strip, sitting where the standalone Calculator rail item used to.
+            tools_label, tools_icon, tools_children = _NAV_GROUPS[3]
+            _nav_group_link(tools_label, tools_icon, tools_children, active)
             # Standalone rail pages that sit directly under the Options group.
             for _rp, _rl, _ri in OPTIONS_RAIL:
                 _nav_link(_rp, _rl, _ri, active)
@@ -1016,6 +1187,17 @@ def _layout(active: str, title: str):
                 _nav_link(path, label, icon, active)
             more_label, more_icon, more_children = _NAV_GROUPS[2]
             _nav_group_link(more_label, more_icon, more_children, active)
+            # Machine-level controls, pushed to the FOOT of the rail: mt-auto eats
+            # the leftover column height so they sit at the bottom edge (the column
+            # is h-full flex-col), while still reading as the last items when the
+            # menu is long enough to fill it. A hairline separates them from the
+            # workflow pages above.
+            # NB: mb-2 for the gap below, NOT my-2 — `my-*` also sets margin-top
+            # and would fight the mt-auto that does the pushing.
+            ui.element("div").classes(
+                "mt-auto mb-2 w-full h-px bg-white/[0.07] shrink-0")
+            for path, label, icon in SYSTEM_RAIL:
+                _nav_link(path, label, icon, active)
 
     with ui.header().classes("items-center justify-between px-4"):
         with ui.row().classes("items-center gap-3 no-wrap"):
@@ -1221,6 +1403,13 @@ def options_matrix_page() -> None:
         matrix.render()
 
 
+@ui.page("/options/flow")
+def options_flow_page() -> None:
+    with _layout("/options/flow", "Flow Alerts"):
+        from pages.options import flow
+        flow.render()
+
+
 @ui.page("/sentiment")
 def sentiment_page() -> None:
     with _layout("/sentiment", "Sentiment"):
@@ -1247,6 +1436,15 @@ def sentiment_rrg_page() -> None:
     with _layout("/sentiment/rrg", "RRG"):
         from pages import sentiment_rrg
         sentiment_rrg.render()
+
+
+@ui.page("/sentiment/momentum")
+def sentiment_momentum_page(level: str = "industry") -> None:
+    # ?level=stock deep-links the Stocks view (the dropdown still switches it
+    # in place); render() coerces anything unknown back to industry.
+    with _layout("/sentiment/momentum", "Momentum"):
+        from pages import sentiment_momentum
+        sentiment_momentum.render(level=level)
 
 
 @ui.page("/trade")
@@ -1326,6 +1524,8 @@ if __name__ in {"__main__", "__mp_main__"}:
     # module object AFTER NiceGUI has started — where app.on_startup() raises and
     # 500s the page. Inside this guard it runs once, before ui.run().
     app.on_startup(sync_ticker_setting)
+    app.on_startup(sync_captured_autoclose_setting)
+    app.on_startup(sync_manual_paper_lifecycle_setting)
 
     # Bind to localhost only (single-user, localhost-first app): reachable at
     # http://localhost:8500 from this PC. This avoids listening on every network
@@ -1333,5 +1533,5 @@ if __name__ in {"__main__", "__mp_main__"}:
     # noisy `OSError [WinError 64] "network name is no longer available"` accept
     # tracebacks whenever a transient/virtual adapter (link-local 169.254.x, WSL/
     # Docker) dropped — and keeps the trading app off the LAN.
-    ui.run(host="127.0.0.1", port=NICEGUI_PORT, title=theme.BRAND_NAME,
+    ui.run(host="127.0.0.1", port=NICEGUI_PORT, title=window_title(),
            dark=True, reload=False, show=False)

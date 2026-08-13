@@ -315,9 +315,9 @@ def _heading_level(name: str) -> int:
 # user-guide/ folder. Images are NOT referenced from the Markdown, so the HTML
 # build stays image-free. Add a page's shot here to have it embedded.
 USER_GUIDE_SHOTS = {
-    "Scanner": "images/scanner.png",
+    "Market Scanner": "images/scanner.png",
     "Calculator": "images/calculator.png",
-    "Gamma": "images/gamma.png",
+    "Dealer Positioning": "images/gamma.png",
     "Simulator": "images/simulator.png",
     "Expected Move": "images/expected-move.png",
     "Sentiment dashboard": "images/sentiment.png",

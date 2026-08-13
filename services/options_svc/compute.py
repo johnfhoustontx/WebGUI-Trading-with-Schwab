@@ -22,13 +22,22 @@ import sys
 import threading
 from zoneinfo import ZoneInfo
 
-from repo_paths import DRIVER_PAPER_DB, OPTIONS_SCANNER
+from repo_paths import DRIVER_PAPER_DB, ENV_FLAGS, OPTIONS_SCANNER
 
 log = logging.getLogger(__name__)
 
 # Central time (4pm ET cash close = 15:00 CT) — shared by the forward-projection
 # helpers (_future_marks_ct / project_gex_grid).
 _PROJ_CT_TZ = ZoneInfo("America/Chicago")
+
+# Regular trading hours in CT (09:30–16:00 ET). COLLECTION deliberately runs wider
+# (08:00–15:20 CT, see scheduler._GEX_START / gex_due) so the pre/post-market chain is
+# captured and stored; the Gamma page's time-axis charts (strike×time heatmap + the
+# Flow series) DISPLAY only RTH. Off-hours snapshots are thin — the index doesn't tick
+# pre-open and OI is static — so they added ~50 near-flat columns that stretched the
+# session without informing it. Display-only: nothing here changes what is collected.
+_RTH_START = (8, 30)
+_RTH_END = (15, 0)
 
 if str(OPTIONS_SCANNER) not in sys.path:
     sys.path.insert(0, str(OPTIONS_SCANNER))
@@ -39,6 +48,7 @@ from regime_filter import evaluate_regime  # noqa: E402
 from iv_analysis import run_iv_analysis  # noqa: E402
 
 from services import _proxy  # noqa: E402
+from services.options_svc import commission  # noqa: E402  (round-trip $ for the break-even floor)
 
 
 def run_scan() -> dict:
@@ -223,6 +233,34 @@ def assign_ids(signals, symbol):
 # Phase-1 candidate families. ``families=None`` ⇒ build all of these.
 _SWING_FAMILIES = ("DIRECTIONAL", "VERTICAL", "NEUTRAL")
 
+# Emission cut for the Strategy Finder: a candidate must reach SWING_MIN_SCORE on
+# strategy_scoring's Fit+Quality composite AND not carry an excluded grade, or it
+# is dropped before the page ever sees it.
+#
+# Applies to EVERY family (directional, debit + adapted credit verticals, iron
+# condors) because they land in ONE jointly-ranked table -- cutting only one
+# family would leave Weak iron condors ranked above directional rows that were
+# removed. The dropped count rides back on the result as ``filtered_out`` so an
+# empty table can say WHY (see the page's ``status_text``).
+#
+# Deliberately SEPARATE constants from scanner_engine.SINGLE_LEG_MIN_SCORE /
+# SINGLE_LEG_EXCLUDED_GRADES, which cut the Market Scanner's Directional tab:
+# same values today, but two pages with two independently tunable bars.
+#
+# NOTE the two cuts here are redundant TODAY: a hard-gate failure pins the
+# composite at strategy_scoring.GATE_FAIL_CAP (39) and the post-grade state tilt
+# adds at most +6, so a Weak candidate tops out at 45 and can never clear 50.
+# Both are kept because they express DIFFERENT intents ("no low-scoring trades"
+# vs "no gate-failing trades") and either constant can move independently.
+SWING_MIN_SCORE = 50.0
+SWING_EXCLUDED_GRADES = ("Weak",)
+
+
+def _passes_swing_cut(sig):
+    """True when a scored candidate is good enough to publish. Pure."""
+    return ((sig.get("composite_score") or 0) >= SWING_MIN_SCORE
+            and sig.get("grade") not in SWING_EXCLUDED_GRADES)
+
 
 def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
                call_d_min, call_d_max, min_cr_fraction, families=None,
@@ -280,7 +318,7 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     # below would AttributeError on chain.get(...)/extract_options(None). Degrade
     # to an explicit empty result so the handler still publishes a fresh view.
     if not chain:
-        return {"signals": [], "view": {}}
+        return {"signals": [], "view": {}, "filtered_out": 0}
     quote = _proxy.schwab_client.get_quote(symbol) or {}
     spot = quote.get("last") or chain.get("underlyingPrice")
     # Off-hours the quote can miss AND the chain dict can lack ``underlyingPrice``
@@ -290,7 +328,7 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     # write -> the page hangs on "Scanning…". Degrade to an explicit empty result
     # (matching the no-chain guard above) BEFORE any builder runs.
     if not spot:
-        return {"signals": [], "view": {}}
+        return {"signals": [], "view": {}, "filtered_out": 0}
     hist = se.fetch_price_history(client, symbol)
     tech = se.calc_technicals(hist) if hist is not None else {}
     iv = run_iv_analysis(client, symbol, price=spot, hist=hist, chain=chain) or {}
@@ -330,8 +368,21 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
         signals += [ssn.adapt_iron_condor(ic) for ic in se.build_iron_condors(spreads)]
 
     signals = ssc.score_all(signals, view, atm_iv, em_1sd, market_state=market_state)
+
+    # Quality cut, BEFORE ids are assigned so every emitted row is addressable
+    # and the detail-panel lookup can't miss one.
+    scored_n = len(signals)
+    signals = [s for s in signals if _passes_swing_cut(s)]
+    filtered_out = scored_n - len(signals)
+
     assign_ids(signals, symbol)
-    return {"signals": signals, "view": view}
+    # Surface the symbol's IV Rank onto every candidate for the table's IV Rank
+    # column. Single-symbol scan, so all candidates share the one value; None when
+    # the IV analysis couldn't compute a rank.
+    iv_rank = iv.get("iv_rank")
+    for s in signals:
+        s["iv_rank"] = iv_rank
+    return {"signals": signals, "view": view, "filtered_out": filtered_out}
 
 
 # ── Paper account (ported from webgui/pages/options/portfolio.py) ───────────
@@ -712,7 +763,13 @@ def open_driver_position(signal: dict, qty: int, broker=None, context=None) -> d
 def run_driver_manage_cycle() -> None:
     """Reprice + auto-close the DRIVER account's open positions
     (``paper_engine.run_manage_cycle`` on ``DRIVER_PAPER_DB``). No-op-safe if the
-    driver account doesn't exist yet (gated on ``has_driver_account``)."""
+    driver account doesn't exist yet (gated on ``has_driver_account``).
+
+    The driver's isolated book is intentionally EXCLUDED from the manual paper
+    account's opt-in break-even lifecycle — ``lifecycle=False`` is passed
+    explicitly (never reads ``handlers.manual_paper_lifecycle_enabled``, the
+    Settings toggle), so the driver always keeps today's plain TAKE_PROFIT-at-
+    +50% regardless of what the manual account is configured to do."""
     import datetime as dt
 
     import paper_engine
@@ -721,7 +778,7 @@ def run_driver_manage_cycle() -> None:
         return
     try:
         paper_engine.run_manage_cycle(_proxy.schwab_py_client, dt.date.today().isoformat(),
-                                      db_path=DRIVER_PAPER_DB)
+                                      db_path=DRIVER_PAPER_DB, lifecycle=False)
     except Exception:  # noqa: BLE001 — a reprice/proxy failure must not propagate out of
         # the wrapper (the 5-min tick retries; matches the driver wrappers).
         log.exception("driver manage cycle degraded (retries on next tick)")
@@ -741,13 +798,35 @@ def run_entry_cycle() -> None:
     paper_engine.run_entry_cycle(_proxy.schwab_py_client, dt.date.today().isoformat(), signals)
 
 
-def run_manage_cycle() -> None:
-    """Run the paper auto-management cycle: reprice + auto-close hits. Mirrors the page."""
+def _manual_paper_be_level(pos: dict) -> float:
+    """Break-even close floor ($) for a MANUAL-paper lifecycle position = round-trip
+    commissions for its structure (mirrors ``_captured_be_level``, the captured-
+    signal analog). Defensive → 0.0 on any failure (break-even stop at pnl<=$0)."""
+    try:
+        strat = pos.get("strategy") or pos.get("type")
+        return commission.round_trip_commission(strat, pos.get("symbol"), 1)
+    except Exception:
+        return 0.0
+
+
+def run_manage_cycle(lifecycle: bool = False) -> None:
+    """Run the paper auto-management cycle: reprice + auto-close hits. Mirrors the page.
+
+    ``lifecycle`` (default False — unchanged plain TAKE_PROFIT-at-+50%) opts the
+    MANUAL paper account into the captured-style break-even lifecycle; see
+    ``paper_engine.run_manage_cycle``. Threaded from
+    ``handlers.run_manage_and_refresh`` via ``handlers.manual_paper_lifecycle_enabled``
+    (the Settings toggle, default OFF). When enabled, ``_manual_paper_be_level``
+    supplies the commission-based break-even close floor — the same model the
+    captured-signal cycle uses (``compute._captured_be_level``)."""
     import datetime as dt
 
     import paper_engine
 
-    paper_engine.run_manage_cycle(_proxy.schwab_py_client, dt.date.today().isoformat())
+    paper_engine.run_manage_cycle(
+        _proxy.schwab_py_client, dt.date.today().isoformat(),
+        lifecycle=lifecycle,
+        be_level_fn=_manual_paper_be_level if lifecycle else None)
 
 
 def reset_paper_account(starting_balance: float) -> None:
@@ -1136,7 +1215,8 @@ def reprice_captured() -> dict:
     for r in sigs:
         try:
             rep = signal_repricer.reprice_swing(r, _proxy.schwab_py_client)
-            mark = signal_recommender.build_mark(r, rep, now)
+            mark = signal_recommender.build_mark(r, rep, now,
+                                                 be_level=_captured_be_level(r))
         except Exception:
             continue
         if not mark:
@@ -1216,6 +1296,138 @@ def close_captured(signal_id, exit_val: float, reason: str) -> None:
     import signal_db
 
     signal_db.close_signal_manually(signal_id, float(exit_val), reason or "MANUAL_CLOSE")
+
+
+# ── Captured auto-manage cycle (break-even trailing + auto-close) ─────────────
+# The close codes that auto-close an OPEN captured signal. TARGET_HIT is NOT
+# here: the recommender no longer emits it (a +50% winner now ARMS break-even
+# and rides on toward full credit, protected by the break-even stop).
+_CAPTURED_CLOSE_CODES = ("BREAKEVEN_STOP", "MONEY_STOP", "TIME_STOP", "DELTA_STOP")
+
+
+def _captured_be_level(row) -> float:
+    """Break-even close floor ($) for a captured signal = round-trip commissions
+    for its structure. Defensive → 0.0 on any failure (break-even stop at pnl<=$0)."""
+    try:
+        strat = row.get("strategy") or row.get("type")
+        return commission.round_trip_commission(strat, row.get("symbol"), 1)
+    except Exception:
+        return 0.0
+
+
+def run_captured_manage_cycle() -> dict:
+    """Reprice → arm break-even → auto-close the OPEN captured signals (paper-only).
+
+    Mirrors the driver/paper manage pattern; fully defensive (a per-signal failure
+    is skipped, never fatal). For each OPEN captured signal:
+      1. Reprice via ``signal_repricer.reprice_swing`` (stale/failed reprice is
+         skipped — never close on bad data — EXCEPT an expired signal, which
+         settles at intrinsic below).
+      2. **Expiry:** at ``DTE <= 0`` settle at the repriced intrinsic (OTM → ~0 →
+         full credit) with reason ``EXPIRED`` and move on.
+      3. Build a lifecycle mark (``build_mark`` threads be_armed/strategy/strikes/
+         spot + the be_level break-even floor) and persist it (``insert_mark``).
+      4. **Arm** break-even the first time pnl reaches +50% credit (``set_be_armed``).
+      5. **Auto-close** when the mark's recommendation code is a close code
+         (``_CAPTURED_CLOSE_CODES``) via ``close_signal_manually`` (writes an
+         outcome + realized P&L — NEVER a broker order).
+
+    Returns ``{"closed": [{signal_id, symbol, reason, exit_val}, ...],
+    "armed": [{signal_id, symbol}, ...]}`` for the handler to log/notify."""
+    import datetime as dt
+
+    import signal_db
+    import signal_recommender
+    import signal_repricer
+
+    try:
+        signal_repricer.clear_chain_cache()
+    except Exception:
+        log.exception("clear_chain_cache before captured manage degraded")
+
+    try:
+        sigs = signal_db.get_open_signals_with_latest_mark()
+    except Exception:
+        log.exception("captured manage signal read degraded → empty set")
+        return {"closed": [], "armed": []}
+
+    now = dt.datetime.now(_PROJ_CT_TZ)
+    tp_dollars = signal_recommender.TP_FRAC * signal_recommender.MULTIPLIER
+    closed, armed = [], []
+    for r in sigs:
+        sid = r.get("signal_id")
+        try:
+            rep = signal_repricer.reprice_swing(r, _proxy.schwab_py_client)
+            if rep is None:
+                continue
+
+            dte = _rescue_dte(r.get("expiration"))
+            if dte is not None and dte <= 0:
+                # Expiry settlement — settle at the repriced intrinsic; fall back
+                # to the engine intrinsic vs the current/entry spot when there is
+                # no live chain (an already-expired reprice returns no value).
+                exit_val = rep.get("current_value")
+                if exit_val is None:
+                    spot = rep.get("current_underlying") or r.get("entry_underlying")
+                    if spot is not None:
+                        try:
+                            exit_val, _pnl = signal_repricer.intrinsic_value(r, float(spot))
+                        except Exception:
+                            exit_val = None
+                if exit_val is not None:
+                    signal_db.close_signal_manually(sid, exit_val, "EXPIRED")
+                    closed.append({"signal_id": sid, "symbol": r.get("symbol"),
+                                   "reason": "EXPIRED", "exit_val": exit_val})
+                continue
+
+            # Not expired — a stale/failed reprice must NEVER close on bad data.
+            if rep.get("error"):
+                continue
+
+            mark = signal_recommender.build_mark(r, rep, now,
+                                                 be_level=_captured_be_level(r))
+            if not mark:
+                continue
+            signal_db.insert_mark(mark)
+
+            # Arm break-even the first time pnl reaches +50% of the credit.
+            pnl = mark.get("unrealized_pnl")
+            credit = r.get("entry_credit") or 0
+            if (pnl is not None and credit and not r.get("be_armed")
+                    and pnl >= tp_dollars * credit):
+                signal_db.set_be_armed(sid)
+                r["be_armed"] = 1
+                armed.append({"signal_id": sid, "symbol": r.get("symbol")})
+
+            code = (mark.get("recommendation_code") or "").upper()
+            if code in _CAPTURED_CLOSE_CODES:
+                exit_val = rep.get("current_value")
+                if exit_val is not None:
+                    signal_db.close_signal_manually(sid, exit_val, code)
+                    closed.append({"signal_id": sid, "symbol": r.get("symbol"),
+                                   "reason": code, "exit_val": exit_val})
+        except Exception:
+            log.exception("captured manage: signal %s degraded (skipped)", sid)
+            continue
+
+    return {"closed": closed, "armed": armed}
+
+
+def captured_closed_today() -> dict:
+    """Today's (CT) closed captured outcomes + a day realized total.
+
+    ``{"closed": [...], "total_realized": <sum realized_pnl>}`` — the Tier-1 EOD
+    page's "Captured — closed today" view. Defensive → empty on any failure."""
+    import signal_db
+
+    today = _dt.datetime.now(_PROJ_CT_TZ).date().isoformat()
+    try:
+        closed = signal_db.get_outcomes_for_date(today)
+    except Exception:
+        log.exception("captured_closed_today read degraded → empty")
+        closed = []
+    total = round(sum((c.get("realized_pnl") or 0.0) for c in closed), 2)
+    return {"closed": closed, "total_realized": total}
 
 
 # ── Header strip (ported from webgui/pages/options/header.py) ───────────────
@@ -1432,6 +1644,52 @@ def gamma_walls(vname, data, spot):
     return [s for s in (w.get("put_wall"), w.get("call_wall")) if s is not None]
 
 
+# Views with directional walls (mirrors gamma_walls — Charm/Vanna have none).
+_WALL_VIEWS = frozenset({"GEX", "DEX"})
+
+
+def _level_track(rows, vname):
+    """Per-snapshot flip / call-wall / put-wall levels, parallel 1:1 with ``rows``.
+
+    Powers the heatmap's optional "level movement" overlay: where the walls and the
+    gamma flip sat at every point in the session, not just now. Positional
+    alignment matters — the page indexes these by the heatmap's time-category
+    index, which is the row index.
+
+    Flip is the STORED column (already the value the summary shows). The walls are
+    RECOMPUTED per row from that row's own per-strike grid via the engine's
+    directional picker, because the stored ``top_pos_strike``/``top_neg_strike``
+    are a DIFFERENT metric — the max/min NET strike anywhere in the chain, vs the
+    largest call ABOVE spot / most-negative put BELOW spot that the chart draws.
+    Measured on a live session, the two disagreed on 383 of 383 rows, so reusing
+    the stored columns would draw tracks that contradict the wall lines beside
+    them. Recomputing costs ~11 ms per view per session.
+
+    MUST run BEFORE ``_crop_gamma_views``: a wall can sit outside the ±N-strike
+    display window, and the crop would silently truncate the grid it's found in.
+
+    Missing/garbage rows yield ``None`` placeholders rather than dropping out, so
+    the arrays stay aligned with the time axis. Never raises."""
+    import gamma_tool as gt
+
+    out = {"flip": [], "call_wall": [], "put_wall": []}
+    walled = vname in _WALL_VIEWS
+    for r in (rows or []):
+        flip = call_w = put_w = None
+        try:
+            flip = r[2] if isinstance(r[2], (int, float)) else None
+            spot, grid = r[1], r[6]
+            if walled and grid and isinstance(spot, (int, float)) and spot > 0:
+                w = gt.get_directional_walls({"gex": grid}, spot) or {}
+                call_w, put_w = w.get("call_wall"), w.get("put_wall")
+        except Exception:
+            log.debug("_level_track row failed", exc_info=True)
+        out["flip"].append(flip)
+        out["call_wall"].append(call_w)
+        out["put_wall"].append(put_w)
+    return out
+
+
 # Strikes shown on each side of spot in the Gamma page's bar/heatmap window
 # (webgui/pages/options/gamma.py N_SIDE). The page crops the display to this
 # ±N_SIDE window; embedding the FULL per-strike chain history (all four views,
@@ -1605,6 +1863,72 @@ def take_uoa_stash() -> dict:
     return out
 
 
+# Same pattern as _UOA_STASH, for the big_delta (relative delta-notional) detector —
+# also computed during the poll's on_chain hook and consumed once by
+# handlers.run_flow_alerts on the same tick.
+_BIG_DELTA_STASH: dict = {}   # {symbol: [big_delta contract dicts]} for the current tick
+
+
+def clear_big_delta_stash():
+    _BIG_DELTA_STASH.clear()
+
+
+def stash_big_delta(symbol, contracts):
+    if contracts:
+        _BIG_DELTA_STASH[symbol] = contracts
+
+
+def take_big_delta_stash() -> dict:
+    """Return + clear the tick's big_delta results (consumed once by run_flow_alerts)."""
+    out = dict(_BIG_DELTA_STASH)
+    _BIG_DELTA_STASH.clear()
+    return out
+
+
+def _rth_bounds(session_date):
+    """(start_ts, end_ts) unix seconds bounding RTH on ``session_date`` in CT.
+
+    Computed once per snapshot and compared numerically against each row's ts —
+    far cheaper than converting every row's timestamp to a local time."""
+    import datetime as _dtmod
+    start = _dtmod.datetime.combine(
+        session_date, _dtmod.time(*_RTH_START), tzinfo=_PROJ_CT_TZ)
+    end = _dtmod.datetime.combine(
+        session_date, _dtmod.time(*_RTH_END), tzinfo=_PROJ_CT_TZ)
+    return start.timestamp(), end.timestamp()
+
+
+def _rth_only(rows, bounds):
+    """Rows whose ts (index 0) falls inside ``bounds``, inclusive of both ends.
+
+    ``bounds`` None → passthrough: if the window can't be computed we show
+    everything rather than silently blanking the chart."""
+    if not bounds:
+        return list(rows or [])
+    lo, hi = bounds
+    return [r for r in (rows or [])
+            if isinstance(r[0], (int, float)) and not isinstance(r[0], bool)
+            and lo <= r[0] <= hi]
+
+
+def _display_session_date(now, session_date):
+    """The session whose RTH data the Gamma time-axis charts should show.
+
+    ``scheduler.active_session_date`` flips to today at the 08:00 CT COLLECTION
+    start, but these charts display RTH only — so between 08:00 and the 08:30 open
+    today has rows yet none that are displayable. Keep showing the prior session
+    until RTH actually opens, so the charts are never blank mid-morning. Off-hours
+    and weekends already hand us a prior date, which passes through untouched."""
+    try:
+        if session_date == now.date() and (now.hour, now.minute) < _RTH_START:
+            # Lazy, mirroring gamma_snapshot — scheduler is not a module-level import.
+            from services.options_svc import scheduler as _sch
+            return _sch._prev_trading_day(session_date)
+    except Exception:
+        log.debug("_display_session_date failed — using the active session", exc_info=True)
+    return session_date
+
+
 def _history_rows_incremental(gh, conn, symbol, vstr, session_date):
     """Memoized, append-only heatmap rows for (symbol, view) on session_date.
 
@@ -1671,7 +1995,10 @@ def gamma_snapshot(symbol: str, chain=None) -> dict | None:
     # SESSION DATE (today once collection starts at 08:00 CT, else the prior session),
     # so premarket it shows yesterday until today's snapshots begin.
     now = _sched._market_now()
-    session_date = _sched.active_session_date(now)
+    # The time-axis charts (heatmap + Flow) show RTH only, so before the 08:30 open
+    # fall back to the prior session — today has collected rows but none displayable.
+    session_date = _display_session_date(now, _sched.active_session_date(now))
+    rth = _rth_bounds(session_date)
 
     if chain is None:
         chain = _take_tick_chain(symbol)
@@ -1708,12 +2035,15 @@ def gamma_snapshot(symbol: str, chain=None) -> dict | None:
             # weekends) so the heatmap persists after close + clears next session.
             # Incremental: memoized decoded rows + append-only ts > last-seen loads
             # (see _history_rows_incremental) instead of a full-session re-decode.
-            return _history_rows_incremental(gh, hist_conn, symbol, vstr,
-                                             session_date)
+            # The memo holds EVERY collected row; RTH filtering happens after it, so
+            # the append-only load still works off the true last-collected ts.
+            return _rth_only(
+                _history_rows_incremental(gh, hist_conn, symbol, vstr, session_date),
+                rth)
         except Exception:
             return []
 
-    flow = []
+    flow, hedge_history = [], []
     try:
         views = {}
         for vname, (idx, vstr) in _GAMMA_VIEWS.items():
@@ -1722,12 +2052,17 @@ def gamma_snapshot(symbol: str, chain=None) -> dict | None:
                 summary = eng.snapshot_summary(data, vstr)
             except Exception:
                 summary = {}
+            _rows = _history(vstr)
             entry = {
                 "data": data,
                 "summary": summary,
                 "walls": _walls(vname, data),
                 "flip": (summary or {}).get("flip"),
-                "history": _history(vstr),
+                "history": _rows,
+                # Intraday movement of the flip + walls, parallel to `history`.
+                # Built HERE, before _crop_gamma_views, so the wall search sees each
+                # snapshot's FULL grid (a wall can sit outside the display window).
+                "levels": _level_track(_rows, vname),
             }
             if vname == "DEX":
                 entry["hedge"] = {
@@ -1749,11 +2084,24 @@ def gamma_snapshot(symbol: str, chain=None) -> dict | None:
         # view history loads (one open per snapshot). Same active-session date.
         if hist_conn is not None:
             try:
-                _frows = gh.load_flow_series(hist_conn, symbol, session_date)
+                _frows = _rth_only(
+                    gh.load_flow_series(hist_conn, symbol, session_date), rth)
                 flow = [{"ts": r[0], "spot": r[1], "call_vol": r[2], "put_vol": r[3],
                          "call_prem": r[4], "put_prem": r[5]} for r in _frows]
             except Exception:
                 flow = []
+            # 0-DTE hedge-pressure track — same connection, same RTH window as the
+            # heatmap rows so the panel's time axis lines up with it. Empty for any
+            # symbol whose nearest expiry isn't today (the column is NULL there).
+            try:
+                _hrows = _rth_only(
+                    gh.load_hedge_series(hist_conn, symbol, session_date), rth)
+                hedge_history = [{"ts": r[0], "hedge_pressure": r[1],
+                                  "net_delta_0dte": r[2], "projected_flip": r[3]}
+                                 for r in _hrows]
+            except Exception:
+                log.debug("hedge history load failed", exc_info=True)
+                hedge_history = []
     finally:
         if hist_conn is not None:
             try:
@@ -1774,8 +2122,20 @@ def gamma_snapshot(symbol: str, chain=None) -> dict | None:
     except Exception:
         term = {}
 
+    # Projected EOD delta-flip: where the DEX curve crosses zero once the 0-DTE
+    # book's deltas are advanced to the 15:00 CT close by CHARM at flat spot. It's
+    # ONE level (a 0-DTE delta concept, not per view), so it's published at snapshot
+    # level and the page draws it on every heatmap as a shared reference. None
+    # whenever the nearest expiry isn't today — i.e. most symbols, most of the time.
+    try:
+        projected_flip = gt.compute_projected_flip(by_index.get(2) or {}, spot)
+    except Exception:
+        log.debug("projected flip failed", exc_info=True)
+        projected_flip = None
+
     return {"symbol": symbol, "spot": spot, "dte": dte,
-            "views": views, "term": term, "flow": flow}
+            "views": views, "term": term, "flow": flow,
+            "projected_flip": projected_flip, "hedge_history": hedge_history}
 
 
 # ── Intraday GEX history collection (Tier-2 owner) ──────────────────────────
@@ -1984,18 +2344,23 @@ def collect_gex_snapshots(capture_symbols=None, now=None) -> int:
         # Once-per-day retention at collection start (keeps growth bounded).
         _maybe_purge_gex(gh, conn)
         gc.log.info("Polling GEX history (options_svc)")
-        # Contract-level UOA rides the poll's on_chain hook (reusing each fetched
-        # chain — no re-fetch); results are stashed per symbol and consumed once by
-        # run_flow_alerts. flow_alerts is PURE (stdlib + repo_paths), imported lazily.
+        # Contract-level UOA + big_delta both ride the poll's on_chain hook (reusing
+        # each fetched chain — no re-fetch); results are stashed per symbol and
+        # consumed once by run_flow_alerts. flow_alerts is PURE (stdlib + repo_paths),
+        # imported lazily. ONE load_thresholds() call serves both detectors.
         # Per-symbol extended-trading-hours eligibility rides the SAME hook, for
         # the same reason: the boolean is a root field of a chain we already have.
         from services.options_svc import eth
         from services.options_svc import flow_alerts
         clear_uoa_stash()
+        clear_big_delta_stash()
         _uoa_cfg = flow_alerts.load_thresholds()
         # Kill-switch: when the feature is disabled, skip the per-symbol UOA compute
         # entirely (nothing computed/published). The chain-capture stash stays on.
         _uoa_on = _uoa_cfg.get("enabled", True)
+        # big_delta has its OWN enabled flag (independent of the top-level UOA
+        # switch above) — the whole detector is inert when [big_delta].enabled=false.
+        _big_delta_on = _uoa_cfg.get("big_delta", {}).get("enabled", True)
         wanted = set(capture_symbols) if capture_symbols else set()
         _eth_seen: dict = {}
 
@@ -2011,6 +2376,12 @@ def collect_gex_snapshots(capture_symbols=None, now=None) -> int:
                     stash_uoa(sym, flow_alerts.detect_uoa(sym, chain, _uoa_cfg))
                 except Exception:
                     gc.log.debug("UOA detect failed for %s", sym, exc_info=True)
+            if _big_delta_on:
+                # Best-effort — a big_delta detect failure must NEVER break collection.
+                try:
+                    stash_big_delta(sym, flow_alerts.detect_big_delta(sym, chain, _uoa_cfg))
+                except Exception:
+                    gc.log.debug("big_delta detect failed for %s", sym, exc_info=True)
 
         gc.poll_once(_proxy.schwab_py_client, gt.GammaEngine(), conn,
                      symbols=symbols, on_chain=on_chain)
@@ -2330,12 +2701,103 @@ def build_matrix(scan_day, flow_cooldowns, today, session_date, now_ts):
         rows = mx.build_rows(raw, scan_counts, alert_counts, now_ts,
                              eth_symbols=_matrix_eth_symbols())
         rows.sort(key=lambda r: r["hotness"], reverse=True)
+        # Dollar-weighted market-wide net call/put PREMIUM skew over the same raw
+        # blobs — a market-money read consumed by the sentiment tiles. Additive.
+        premium = mx.market_premium_aggregate(raw)
     except Exception:
         log.debug("build_matrix: build failed", exc_info=True)
         return {"date": today, "session_date": session_key, "ts": _now_iso(),
                 "rows": [], "error": "matrix build failed"}
     return {"date": today, "session_date": session_key, "ts": _now_iso(),
-            "rows": rows, "error": None}
+            "rows": rows, "premium": premium, "error": None}
+
+
+def build_net_premium(session_date, now=None):
+    """Assemble the ``cache:options:net_premium`` payload.
+
+    Intraday net-premium series for every symbol the Dealer Positioning "Net Prem"
+    view can plot (``net_premium.source_symbols()``), RTH-cropped to the displayed
+    session — the same window the heatmap and Flow views use, so the three time
+    axes agree. One reused read-only connection, ALWAYS closed. No proxy calls.
+
+    Rides the 1-min GEX branch, so this reads rows that were just written — it is
+    not new data collection. It opens its OWN read-only connection rather than
+    reusing the one ``build_matrix`` held moments earlier; see
+    ``handlers.publish_net_premium`` for why the two reads stay independent.
+
+    ``session_date`` MUST be a ``datetime.date`` (as ``scheduler.active_session_date``
+    returns): both ``_rth_bounds`` and the gex_history readers require the object,
+    so a string raises rather than degrading. Deliberately unlike ``build_matrix``,
+    which ALSO carries an isoformat string — it needs one because its signal/alert
+    count gate compares against the cached payloads' string ``date`` field. There is
+    no such gate here, so only the returned field is stringified.
+
+    Fully defensive about DATA, not about caller bugs: a DB-connect failure degrades
+    to an empty-series payload with ``error`` set, and a per-symbol read failure
+    yields no series for that symbol (the page names it as "no data yet")."""
+    from services.options_svc import net_premium as np_mod
+    from services.options_svc import scheduler as _sched
+
+    now = now or _sched._market_now()
+    # The time-axis charts show RTH only, so before the 08:30 open fall back to the
+    # prior session — today has collected rows but none displayable. BOTH the read
+    # and the crop must use this date, never the argument: between 08:00 and 08:30
+    # they differ, and mixing them would read today's near-empty rows and crop them
+    # to yesterday's window — a silently blank chart, no error.
+    display_date = _display_session_date(now, session_date)
+    bounds = _rth_bounds(display_date)
+    # JSON-clean for the NetPremiumSnapshot contract.
+    date_key = display_date.isoformat()
+
+    try:
+        gh = _matrix_gh()
+        conn = gh.connect(read_only=True)
+    except Exception:
+        log.debug("build_net_premium: DB unavailable", exc_info=True)
+        return {"session_date": date_key, "ts": _now_iso(), "series": {},
+                "error": "net premium unavailable"}
+
+    flow: dict = {}
+    try:
+        for sym in np_mod.source_symbols():
+            # NOTE: _rth_only indexes r[0] unguarded, so a malformed row drops this
+            # symbol's WHOLE series — unlike net_premium._project, which skips rows
+            # individually (its "unreadable rows are skipped" promise therefore does
+            # not hold for the composed pipeline: a dict-shaped row raises KeyError
+            # here, before _project ever sees it; sqlite3.Row survives both). Same
+            # behaviour the heatmap/Flow views already have; deliberately not changed
+            # here (shared helper, wider blast radius).
+            try:
+                flow[sym] = _rth_only(
+                    gh.load_flow_series(conn, sym, display_date), bounds)
+            except Exception:
+                log.debug("build_net_premium: read failed for %s", sym,
+                          exc_info=True)
+                flow[sym] = []
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            log.debug("build_net_premium conn close failed", exc_info=True)
+
+    try:
+        series = np_mod.build_series(flow)
+    except Exception:
+        log.debug("build_net_premium: build failed", exc_info=True)
+        return {"session_date": date_key, "ts": _now_iso(), "series": {},
+                "error": "net premium build failed"}
+    return {"session_date": date_key, "ts": _now_iso(), "series": series,
+            "error": None}
+
+
+def _hedge_direction(pressure):
+    """'buy' / 'sell' / None from a signed 0-DTE hedge pressure.
+
+    Mirrors the engine's own labeling: a positive drift means the projected delta
+    RISES, so a dealer short the book must BUY underlying to stay hedged."""
+    if not isinstance(pressure, (int, float)) or isinstance(pressure, bool):
+        return None
+    return "buy" if pressure >= 0 else "sell"
 
 
 def build_gamma_read(symbol, spot, gex_summary, charm_summary, dex_summary,
@@ -2373,6 +2835,13 @@ def build_gamma_read(symbol, spot, gex_summary, charm_summary, dex_summary,
         charm_max_pos=_lvl(ch.get("top_pos_strike")),
         charm_max_neg=_lvl(ch.get("top_neg_strike")),
         dex_flow_usd=_num(dx.get("net_total"), 0.0),
+        # 0-DTE charm drift — already on the DEX snapshot_summary, so Explain shows
+        # the same numbers the chart and the briefings do. All None off a 0-DTE
+        # book, and the infographic then omits the sentence entirely.
+        hedge_pressure=_num(dx.get("hedge_pressure")),
+        hedge_direction=_hedge_direction(dx.get("hedge_pressure")),
+        projected_flip=_num(dx.get("projected_flip")),
+        delta_flip=_num(dx.get("flip")),
         vex_notional_usd=_num(vn.get("net_total")),
         sentiment_score=score,
         sentiment_trend=str(trend),
@@ -2662,7 +3131,16 @@ _MOVER_STOCK_CATEGORY = "Top 10"
 # they must never appear as "individual stock moves" even when the dashboard
 # itself is empty/unreachable (proxy down), so this is a hardcoded backstop
 # unioned into ``non_stock`` on top of whatever the dashboard classifies.
-# Normalized keys (see ``_mover_key``); mirrors gex_collector.SYMBOLS.
+# Normalized keys (see ``_mover_key``).
+#
+# This is NOT a mirror of gex_collector.SYMBOLS and must never be "resynced" to
+# it. It is an EXCLUDE-list of names that are never an individual stock move —
+# broad index/ETF tickers only. gex_collector.SYMBOLS is a COLLECTION universe
+# that has always been a superset ($NDX was in it when this comment still
+# claimed a mirror) and since 2026-08-05 also holds 11 SPDR sectors and ten real
+# mega-caps for the Net Prem view. Syncing the two would suppress NVDA / AAPL /
+# TSLA from the briefing's notable movers — silently, since a suppressed mover
+# just doesn't appear. Add a symbol here only when it is genuinely not a stock.
 _MOVER_INDEX_FLOOR = frozenset({"SPX", "VIX", "SPY", "QQQ"})
 
 _MOVER_LIMIT = 6
@@ -3384,7 +3862,15 @@ def _anthropic_api_key():
 
 def _make_analyze_client():
     """A real ``anthropic.Anthropic`` client, or ``None`` if no key / SDK (never
-    raises). LAZY import so the test suite + service import without the SDK."""
+    raises). LAZY import so the test suite + service import without the SDK.
+
+    Also ``None`` in an environment whose profile clears ``allow_claude`` (dev) —
+    checked FIRST, so a suppressed environment never even reads the key. That is
+    deliberately not a new code path: every caller already handles ``None``
+    because it is what a box with no configured key returns, so dev lands on the
+    same explanatory "no API key" briefing page production already renders."""
+    if not ENV_FLAGS.get("allow_claude", True):
+        return None
     key = _anthropic_api_key()
     if not key:
         return None
@@ -4839,11 +5325,11 @@ def sim_run(symbol, expiry=None, kind=None, strike=None, direction=None,
 
 
 _REPLAY_OVERRIDES = {
-    "1m_1d":   {"freq_type": "minute", "minutes": 1,  "days": 1,  "label": "1-min · 1d"},
-    "5m_3d":   {"freq_type": "minute", "minutes": 5,  "days": 3,  "label": "5-min · 3d"},
-    "5m_5d":   {"freq_type": "minute", "minutes": 5,  "days": 5,  "label": "5-min · 5d"},
-    "15m_10d": {"freq_type": "minute", "minutes": 15, "days": 10, "label": "15-min · 10d"},
-    "1d_20d":  {"freq_type": "daily",  "months": 1,   "bars": 20, "label": "daily · 20d"},
+    "1m_1d":   {"freq_type": "minute", "minutes": 1,  "days": 1,  "label": "1-minute bars, 1 day"},
+    "5m_3d":   {"freq_type": "minute", "minutes": 5,  "days": 3,  "label": "5-minute bars, 3 days"},
+    "5m_5d":   {"freq_type": "minute", "minutes": 5,  "days": 5,  "label": "5-minute bars, 5 days"},
+    "15m_10d": {"freq_type": "minute", "minutes": 15, "days": 10, "label": "15-minute bars, 10 days"},
+    "1d_20d":  {"freq_type": "daily",  "months": 1,   "bars": 20, "label": "daily bars, 20 days"},
 }
 
 
@@ -4864,15 +5350,15 @@ def replay_lookback_spec(dte, override="auto") -> dict:
     except (TypeError, ValueError):
         dte = 15
     if dte <= 0:
-        return {"freq_type": "minute", "minutes": 1, "days": 1, "label": "1-min · 1d"}
+        return {"freq_type": "minute", "minutes": 1, "days": 1, "label": "1-minute bars, 1 day"}
     if dte <= 5:
-        return {"freq_type": "minute", "minutes": 5, "days": 3, "label": "5-min · 3d"}
+        return {"freq_type": "minute", "minutes": 5, "days": 3, "label": "5-minute bars, 3 days"}
     if dte <= 15:
-        return {"freq_type": "minute", "minutes": 5, "days": 5, "label": "5-min · 5d"}
+        return {"freq_type": "minute", "minutes": 5, "days": 5, "label": "5-minute bars, 5 days"}
     bars = math.ceil(dte / 2)
     months = max(1, math.ceil(bars / 21))
     return {"freq_type": "daily", "months": months, "bars": bars,
-            "label": f"daily · {bars}d"}
+            "label": f"daily bars, {bars} days"}
 
 
 def sim_replay(symbol, expiry=None, kind=None, strike=None, direction=None,
@@ -4972,13 +5458,13 @@ def sim_replay(symbol, expiry=None, kind=None, strike=None, direction=None,
     sessions_n = len(gap_indices) + 1 if len(hist) else 0
     if len(hist) >= 2:
         if median_delta_s < 120:
-            resolution = f"{len(hist)} bars, 1-min × {sessions_n} sessions"
+            resolution = f"{len(hist)} bars, 1-minute, {sessions_n} sessions"
         elif median_delta_s < 3600:
-            resolution = (f"{len(hist)} bars, {int(round(median_delta_s/60))}-min "
-                          f"× {sessions_n} sessions")
+            resolution = (f"{len(hist)} bars, {int(round(median_delta_s/60))}-minute, "
+                          f"{sessions_n} sessions")
         else:
             span_days = (hist.index[-1] - hist.index[0]).days or 1
-            resolution = f"{len(hist)} bars, ~{span_days}d daily"
+            resolution = f"{len(hist)} bars, daily, ~{span_days} days"
     else:
         resolution = f"{len(hist)} bar"
 
@@ -5075,6 +5561,80 @@ def atm_iv_from_chain(chain, spot, expiry=None):
     return _scan(False)
 
 
+# Chain-ladder extraction for the Expected Move page's expiry/strike dropdowns.
+# Duplicated from webgui calculator.chain_expiries/chain_strikes ON PURPOSE: a
+# Tier-2 service must not import a Tier-1 page, and publishing the RAW chain (the
+# Calculator's pattern) would put megabytes on the bus for two short lists.
+def chain_expiries(chain):
+    """Sorted unique expiry strings (YYYY-MM-DD) from an option-chain payload."""
+    out = set()
+    for map_key in ("callExpDateMap", "putExpDateMap"):
+        for exp_key in ((chain or {}).get(map_key) or {}):
+            out.add(str(exp_key).split(":")[0])
+    return sorted(out)
+
+
+def chain_strikes(chain, expiry):
+    """Sorted strikes for one expiry, deduped across BOTH call and put maps.
+
+    Put-vs-call is the page toggle's job (it colors the line); the ladder itself
+    is one list so the dropdown does not change under the toggle."""
+    out = set()
+    for map_key in ("callExpDateMap", "putExpDateMap"):
+        for exp_key, strikes in ((chain or {}).get(map_key) or {}).items():
+            if str(exp_key).split(":")[0] != str(expiry):
+                continue
+            for s in (strikes or {}):
+                try:
+                    out.add(float(s))
+                except (ValueError, TypeError):
+                    continue
+    return sorted(out)
+
+
+_EM_CHAIN_DAYS = 90  # today→+90d: monthlies further out than the Calculator's 60d
+
+
+def em_chain_meta(symbol) -> dict:
+    """Expirations + per-expiry strike ladders for the Expected Move dropdowns.
+
+    Returns ``{"symbol", "api", "spot", "expirations", "strikes", "error"}`` —
+    JSON-safe and fully defensive (a failed fetch leaves the ladders empty and
+    the page's manual path working). Never raises."""
+    import datetime as dt
+
+    api = "$SPX" if (symbol or "").upper() == "SPX" else (symbol or "").upper()
+    base = {"symbol": symbol, "api": api, "spot": None,
+            "expirations": [], "strikes": {}, "error": None}
+    if not api:
+        base["error"] = "No symbol."
+        return base
+    try:
+        today = dt.date.today()
+        cresp = _proxy.schwab_py_client.get_option_chain(
+            api, contract_type="ALL", from_date=today,
+            to_date=today + dt.timedelta(days=_EM_CHAIN_DAYS))
+        chain = cresp.json() if getattr(cresp, "status_code", None) == 200 else None
+        if not chain:
+            base["error"] = f"No option chain for {api}."
+            return base
+        exps = chain_expiries(chain)
+        base["expirations"] = exps
+        base["strikes"] = {e: chain_strikes(chain, e) for e in exps}
+        try:
+            qresp = _proxy.schwab_py_client.get_quotes([api])
+            if getattr(qresp, "status_code", None) == 200:
+                info = (qresp.json() or {}).get(api) or {}
+                q = info.get("quote", info.get("reference", info)) or {}
+                base["spot"] = q.get("lastPrice")
+        except Exception:
+            pass
+        return base
+    except Exception as exc:
+        base["error"] = f"{type(exc).__name__}: {exc}"
+        return base
+
+
 _DAY_MS = 86_400_000
 
 
@@ -5117,6 +5677,60 @@ def em_cone(spot, atm_iv, dte, start_ts_ms, holidays=None, trading_days_only=Fal
         upper.append([ts, round(spot + width, 2)])
         lower.append([ts, round(spot - width, 2)])
     return {"upper": upper, "lower": lower}
+
+
+# The daily-history endpoint (periodType=year&period=1) ends at the PREVIOUS
+# trading day — Schwab never returns the forming bar — so the current session is
+# missing from the Expected Move chart. The live quote does carry it, so
+# synthesize it. Gated at/after the open because premarket ``openPrice`` is still
+# the PRIOR session's open and would draw a false bar. Reuses ``_RTH_START``
+# (defined above) rather than a second 08:30 constant.
+
+
+def today_candle(quote, last_ts_ms, now=None, holidays=None):
+    """``[ts_ms, o, h, l, c]`` for today's forming session bar, or ``None``.
+
+    ``quote`` is a RAW Schwab quote dict (``openPrice``/``highPrice``/
+    ``lowPrice``/``lastPrice``) — the normalized ``SchwabProxyClient.get_quote``
+    drops ``openPrice``. Returns None unless today is a trading day, local time
+    is at/after the 08:30 CT open (``_RTH_START``), every OHLC field is numeric
+    and > 0, and the history's last candle predates today (so this is a no-op
+    should Schwab ever start returning the forming bar). Schwab's daily-candle
+    epoch is **midnight CT** (verified live), so both the history comparison and
+    the returned timestamp are computed on the ``_PROJ_CT_TZ`` basis — not host-
+    local time — to line up with the real candles on any host. A caller-supplied
+    ``now`` is used as-is (naive or aware); only the default reaches for CT.
+    Never raises."""
+    import datetime as _dt
+
+    if not isinstance(quote, dict):
+        return None
+    from shared import market_calendar as _mc   # local: scheduler imports this module
+    now = now or _dt.datetime.now(_PROJ_CT_TZ)
+    today = now.date()
+    # Trading-day gate from the shared calendar, which DERIVES closures per year.
+    # ``holidays`` is retained only as an optional set of EXTRA ad-hoc closures
+    # (days of mourning, weather) that no rule can derive — it is no longer THE
+    # holiday list. It used to be, fed from a bounded 2026-27 set; see em_cone,
+    # which was redefined the same way for the same reason.
+    if not _mc.is_trading_day(today) or today in (holidays or set()):
+        return None
+    if now.time() < _dt.time(*_RTH_START):
+        return None
+    try:
+        last_date = _dt.datetime.fromtimestamp(int(last_ts_ms) / 1000, _PROJ_CT_TZ).date()
+    except (TypeError, ValueError, OSError, OverflowError):
+        return None
+    if last_date >= today:
+        return None
+    vals = []
+    for key in ("openPrice", "highPrice", "lowPrice", "lastPrice"):
+        v = quote.get(key)
+        if not isinstance(v, (int, float)) or isinstance(v, bool) or v <= 0:
+            return None
+        vals.append(float(v))
+    ts = int(_dt.datetime(today.year, today.month, today.day, tzinfo=_PROJ_CT_TZ).timestamp() * 1000)
+    return [ts, *vals]
 
 
 def _now_iso():
@@ -5220,6 +5834,15 @@ def compute_expected_move(symbol, expiry, legs, lookback="auto") -> dict:
         spec = em_lookback_spec(dte, lookback)
         base["lookback"] = {"label": spec.get("label", ""), "key": lookback or "auto"}
 
+        # No holiday set is looked up here any more. This block used to do
+        # ``from ...scheduler import _HOLIDAYS`` behind a bare ``except: set()``
+        # — but that alias was RETIRED in the calendar consolidation, so the
+        # import would now fail SILENTLY and hand ``today_candle`` an EMPTY set,
+        # making every market holiday look like a trading day. Both consumers
+        # (``today_candle`` and ``em_cone``) now consult
+        # ``market_calendar.is_trading_day`` themselves, which derives closures
+        # for whatever year they reach.
+
         candles = _fetch_em_candles(api, spec)
         if not candles:
             base["error"] = f"No price history for {api}."
@@ -5230,13 +5853,36 @@ def compute_expected_move(symbol, expiry, legs, lookback="auto") -> dict:
             api, contract_type="ALL", from_date=today, to_date=exp_date)
         chain = oresp.json() if getattr(oresp, "status_code", None) == 200 else None
 
-        spot = None
-        q = _proxy.schwab_client.get_quote(api) or {}
-        if isinstance(q, dict):
-            spot = q.get("last")
+        # Prefer the RAW quote: the normalized schwab_client.get_quote drops
+        # openPrice, which today's synthetic candle needs. Fall back to the
+        # normalized client when the raw one yields nothing, so the spot path
+        # degrades exactly as it did before.
+        raw_q = {}
+        try:
+            qresp = _proxy.schwab_py_client.get_quotes([api])
+            if getattr(qresp, "status_code", None) == 200:
+                info = (qresp.json() or {}).get(api) or {}
+                raw_q = info.get("quote", info.get("reference", info)) or {}
+        except Exception:
+            raw_q = {}
+        spot = raw_q.get("lastPrice") if isinstance(raw_q, dict) else None
+        if not spot:
+            q = _proxy.schwab_client.get_quote(api) or {}
+            if isinstance(q, dict):
+                spot = q.get("last")
         if not spot:
             spot = candles[-1][4]
         base["spot"] = spot
+
+        # Schwab's daily history stops at the previous trading day; append the
+        # forming bar so the chart shows today AND the cone anchors on it (it is
+        # sized from today's spot, so anchoring at yesterday overshot the expiry
+        # by a day).
+        if spec.get("mode") != "intraday":
+            bar = today_candle(raw_q, candles[-1][0])
+            if bar:
+                candles = candles + [bar]
+                base["candles"] = candles
 
         atm_iv = atm_iv_from_chain(chain or {}, spot, expiry=str(expiry))
         base["atm_iv"] = atm_iv

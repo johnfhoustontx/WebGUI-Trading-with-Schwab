@@ -214,11 +214,12 @@ def test_apply_no_slots_when_concurrent_already_full():
 
 
 def test_apply_tracks_budget_across_trades():
-    """The remaining risk budget is decremented across surviving trades."""
-    lim = g_limits(); lim["daily_risk_budget"] = 350.0  # room for one $200 spread, not two
+    """The remaining risk budget is decremented across surviving trades (distinct symbols,
+    so the one-per-symbol rule doesn't pre-empt the affordability path being tested)."""
+    lim = g_limits(); lim["daily_risk_budget"] = 350.0  # room for the $200 QQQ, not the $300 SPX after
     decision = {"stand_down": False, "trades": [
-        {"id": "m0", "quantity": 1},   # takes $200 → leaves $150
-        {"id": "m0", "quantity": 1},   # floor(150/200)=0 → unaffordable
+        {"id": "m0", "quantity": 1},   # QQQ $200 → leaves $150
+        {"id": "m2", "quantity": 1},   # SPX IC $300 → floor(150/300)=0 → unaffordable
     ]}
     out = g.apply_guardrails(decision, _menu(), lim, open_count=0, day_pnl=0)
     assert len(out["executable"]) == 1 and out["executable"][0]["qty"] == 1
@@ -337,6 +338,51 @@ def test_wrong_side_block_does_not_consume_slot_or_budget():
                              vix=14, posture="up")
     assert [t["id"] for t in out["executable"]] == ["m1"]          # CCS blocked, PCS runs
     assert out["rejected"][0]["reason"] == g.WRONG_SIDE_REGIME
+
+
+# ── one-position-per-symbol (2026-07-16) ─────────────────────────────────────
+def test_open_symbols_blocks_already_open_symbol():
+    menu = {"m0": {"symbol": "$SPX", "type": "PCS", "max_loss": 2.0}}
+    out = g.apply_guardrails(_gdec("m0"), menu, g_limits(), open_count=1, day_pnl=0.0,
+                             vix=14, open_symbols=frozenset({"$SPX"}))
+    assert out["executable"] == []
+    assert out["rejected"][0]["reason"] == g.SYMBOL_ALREADY_OPEN
+
+
+def test_open_symbols_allows_a_different_symbol():
+    menu = {"m0": {"symbol": "QQQ", "type": "PCS", "max_loss": 2.0}}
+    out = g.apply_guardrails(_gdec("m0"), menu, g_limits(), open_count=1, day_pnl=0.0,
+                             vix=14, open_symbols=frozenset({"$SPX"}))
+    assert len(out["executable"]) == 1
+
+
+def test_one_position_per_symbol_within_a_cycle():
+    """Two proposed trades on the SAME symbol in one cycle → only the first executes."""
+    menu = {"m0": {"symbol": "$SPX", "type": "PCS", "max_loss": 2.0},
+            "m1": {"symbol": "$SPX", "type": "CCS", "max_loss": 2.0}}
+    dec = {"stand_down": False, "trades": [{"id": "m0", "quantity": 1},
+                                           {"id": "m1", "quantity": 1}]}
+    out = g.apply_guardrails(dec, menu, g_limits(), open_count=0, day_pnl=0.0, vix=14)
+    assert [t["id"] for t in out["executable"]] == ["m0"]          # second $SPX blocked
+    assert out["rejected"][0]["reason"] == g.SYMBOL_ALREADY_OPEN
+
+
+def test_symbol_dedup_does_not_consume_slot():
+    """A symbol-blocked trade must not eat a slot — a following NEW-symbol trade runs."""
+    menu = {"m0": {"symbol": "$SPX", "type": "PCS", "max_loss": 2.0},
+            "m1": {"symbol": "QQQ", "type": "PCS", "max_loss": 2.0}}
+    dec = {"stand_down": False, "trades": [{"id": "m0", "quantity": 1},
+                                           {"id": "m1", "quantity": 1}]}
+    out = g.apply_guardrails(dec, menu, g_limits(), open_count=0, day_pnl=0.0, vix=14,
+                             open_symbols=frozenset({"$SPX"}))
+    assert [t["id"] for t in out["executable"]] == ["m1"]          # SPX blocked, QQQ runs
+
+
+def test_open_symbols_default_is_backcompat():
+    """No open_symbols passed → a single trade still executes (no account dedup)."""
+    menu = {"m0": {"symbol": "$SPX", "type": "PCS", "max_loss": 2.0}}
+    out = g.apply_guardrails(_gdec("m0"), menu, g_limits(), open_count=0, day_pnl=0.0, vix=14)
+    assert len(out["executable"]) == 1
 
 
 # ---------------------------------------------------------------------------

@@ -16,11 +16,50 @@ REM     Pass  nowindow  (aliases: -nowindow / /nowindow / hidden) to launch ever
 REM     process with NO WINDOW at all — each runs hidden and its output is
 REM     redirected to logs\<name>.out.log / .err.log. Stop a windowless stack with
 REM     stop_all.bat or the web GUI's More > Terminate page (Memurai stays up).
+REM     Only the FLAG is read here; the branch is taken after the guards below,
+REM     which must cover the windowless mode too. Knowing the mode early is what
+REM     lets a refusal skip `pause`: a windowless launch may have no console to
+REM     read it, and an invisible pause is an invisible hang.
 set "HIDDEN="
 if /i "%~1"=="nowindow"  set "HIDDEN=1"
 if /i "%~1"=="-nowindow" set "HIDDEN=1"
 if /i "%~1"=="/nowindow" set "HIDDEN=1"
 if /i "%~1"=="hidden"    set "HIDDEN=1"
+
+REM --- Refuse to run in a DEV checkout. The mirror of start_dev.bat's guard, and
+REM     the one that actually caused harm: a desktop shortcut still pointing at
+REM     the old folder - now dev - ran a PROD launcher from the dev checkout.
+REM     This launcher starts a schwab-proxy, and dev's PROXY_PORT is 8100, which
+REM     is PROD'S port, borrowed. So the proxy bound :8100 from a dev checkout
+REM     while prod itself never started: the stack LOOKED up, and prod was
+REM     entirely down. No-op in prod, where IS_DEV is False.
+REM     `if errorlevel 1` is "1 or greater", so a python crash refuses too.
+"%PY%" -c "import sys,repo_paths; sys.exit(1 if repo_paths.IS_DEV else 0)"
+if errorlevel 1 (
+    echo This is the DEV checkout - refusing to start the PROD stack here.
+    echo.
+    echo This launcher starts a schwab-proxy, and dev borrows PROD's proxy port
+    echo :8100. Run from here it would bind :8100 while prod never starts, so
+    echo everything would look healthy while prod was down and a dev-checkout
+    echo process served its market data.
+    echo.
+    echo Use  start_dev.bat  instead. To start PROD, run its launcher from the
+    echo PROD checkout.
+    if not defined HIDDEN pause
+    exit /b 1
+)
+
+REM --- Refuse if this environment's stack is already up. Ports come from
+REM     tools\check_stack_down.py, which reads them from stop_all's target list
+REM     so the starter and the stopper cannot disagree. Starting twice spawns
+REM     duplicates that each do a full startup - real Schwab API calls - before
+REM     failing to bind and exiting.
+"%PY%" tools\check_stack_down.py
+if errorlevel 1 (
+    if not defined HIDDEN pause
+    exit /b 1
+)
+
 if defined HIDDEN goto hidden
 
 REM =========================================================================

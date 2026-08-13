@@ -40,3 +40,29 @@ def test_index_path_uses_real_config():
     # membership against committed config, not a monkeypatched table.
     assert c.commission_for(legs=2, symbol="$SPX", qty=1) == pytest.approx(1.30)
     assert c.commission_for(legs=2, symbol="$VIX", qty=1) == pytest.approx(1.30)
+
+
+# ── round_trip_commission (break-even close floor) ──────────────────────────
+def test_round_trip_pcs_is_four_leg_fills():
+    # PCS = 2 legs → open + close = 4 leg-fills × $0.65 = $2.60.
+    assert c.round_trip_commission("PCS", "SPY", 1) == pytest.approx(2.60)
+
+
+def test_round_trip_ccs_is_four_leg_fills():
+    assert c.round_trip_commission("CCS", "SPY", 1) == pytest.approx(2.60)
+
+
+def test_round_trip_ic_is_eight_leg_fills():
+    # IC = 4 legs → open + close = 8 leg-fills × $0.65 = $5.20.
+    assert c.round_trip_commission("IC", "SPY", 1) == pytest.approx(5.20)
+
+
+def test_round_trip_scales_with_qty():
+    assert c.round_trip_commission("PCS", "SPY", 3) == pytest.approx(2 * 3 * 0.65 * 2)
+
+
+def test_round_trip_case_insensitive_and_default_two_legs():
+    assert c.round_trip_commission("pcs", "SPY", 1) == pytest.approx(2.60)
+    # An unknown structure conservatively assumes 2 legs (a vertical).
+    assert c.round_trip_commission("WAT", "SPY", 1) == pytest.approx(2.60)
+    assert c.round_trip_commission(None, "SPY", 1) == pytest.approx(2.60)

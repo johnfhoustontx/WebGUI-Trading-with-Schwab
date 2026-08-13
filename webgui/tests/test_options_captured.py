@@ -9,8 +9,10 @@ scoring code. The pure transforms (``captured_columns``/``captured_rows``/
 """
 import inspect
 
+import pytest
+
 import bus_client
-from pages.options import captured
+from pages.options import captured, detail
 
 SAMPLE = {
     "signal_id": "X1", "symbol": "SPY", "strategy": "PCS", "mode": "PREMIUM",
@@ -68,6 +70,11 @@ def test_synth_from_captured_for_detail_panel():
     assert s["composite_score"] == 68          # prefers current over entry score
     assert s["short_strike"] == 450
     assert s["id"] == "X1"
+
+
+def test_synth_marks_dte_as_entry_value():
+    s = captured.synth_from_captured({"symbol": "SPY", "dte_at_entry": 12})
+    assert s["dte_is_entry"] is True
 
 
 def test_synth_from_captured_falls_back_to_entry_score():
@@ -240,3 +247,46 @@ def test_render_graceful_empty_cache():
     assert bus_client.read("options:captured") is None  # confirm empty
     with ui.card():
         captured.render()  # must not raise
+
+
+#############################################
+# Derived breakeven + PoP (the signals table stores NEITHER column)
+#############################################
+
+def test_synth_derives_breakeven_for_put_credit_spread():
+    # 202.5 short - 0.93 per-share credit. Exact arithmetic, not an estimate.
+    s = captured.synth_from_captured(
+        {"strategy": "PCS", "short_strike": 202.5, "long_strike": 200.0,
+         "entry_credit": 0.93})
+    assert s["breakeven"] == pytest.approx(201.57)
+
+
+def test_synth_derives_breakeven_for_call_credit_spread():
+    # A call spread breaks even ABOVE its short strike, so the sign flips.
+    s = captured.synth_from_captured(
+        {"strategy": "CCS", "short_strike": 420.0, "long_strike": 425.0,
+         "entry_credit": 1.10})
+    assert s["breakeven"] == pytest.approx(421.10)
+
+
+def test_synth_iron_condor_breakeven_carries_both_sides():
+    s = captured.synth_from_captured(
+        {"strategy": "IC", "short_strike": 390.0, "call_short": 420.0,
+         "entry_credit": 2.00})
+    assert detail.breakeven_text(s["breakeven"]) == "$388.00 / $422.00"
+
+
+def test_synth_breakeven_none_without_credit():
+    s = captured.synth_from_captured({"strategy": "PCS", "short_strike": 202.5})
+    assert s["breakeven"] is None
+
+
+def test_synth_derives_pop_from_short_delta():
+    s = captured.synth_from_captured({"entry_short_delta": -0.18})
+    assert s["pop_pct"] == pytest.approx(82.0)
+
+
+def test_synth_pop_none_when_delta_is_the_recorder_zero_default():
+    # signal_recorder.py stores short_delta with a DEFAULT OF 0, so a signal that
+    # never carried a delta must not be reported as a 100% probability of profit.
+    assert captured.synth_from_captured({"entry_short_delta": 0})["pop_pct"] is None

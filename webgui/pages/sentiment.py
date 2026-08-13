@@ -328,7 +328,7 @@ def build_trend_intraday_figure(points):
 # fixed so the stacked band keeps a stable reading position across repaints.
 REGIME_ORDER = ("mean_reversion", "trending", "breakout", "choppy", "crisis")
 REGIME_LABELS = {"mean_reversion": "Mean Reversion", "trending": "Trending",
-                 "breakout": "Breakout", "choppy": "Choppy", "crisis": "Crisis"}
+                 "breakout": "Breakout", "choppy": "Choppy", "crisis": "Volatile"}
 REGIME_COLORS = {"mean_reversion": CLR_CYAN, "trending": CLR_GREEN,
                  "breakout": CLR_YELLOW, "choppy": CLR_FLAT, "crisis": CLR_RED}
 # Headline text color by committed regime — a finite map (Tailwind-first rule).

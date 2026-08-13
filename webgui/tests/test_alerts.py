@@ -23,6 +23,31 @@ def test_scanner_keys_covers_both_tables():
     assert alerts.scanner_keys({}) == set()
 
 
+def _captured(ids, mark=0.4):
+    return {"signals": [{"signal_id": i, "symbol": "SPY", "current_value": mark}
+                        for i in ids]}
+
+
+def test_captured_keys_are_signal_ids():
+    assert alerts.captured_keys(_captured(["a", "b"])) == {"a", "b"}
+
+
+def test_captured_keys_immune_to_reprice():
+    # SAME signals, DIFFERENT marks (a reprice) -> identical key set. This is the
+    # whole point of the fix: the captured badge must not re-fire on the periodic
+    # reprice-republish, only on a genuinely new captured signal.
+    before = alerts.captured_keys(_captured(["a", "b"], mark=0.40))
+    after = alerts.captured_keys(_captured(["a", "b"], mark=0.31))
+    assert before == after == {"a", "b"}
+
+
+def test_captured_keys_defensive():
+    assert alerts.captured_keys(None) == set()
+    assert alerts.captured_keys({}) == set()
+    assert alerts.captured_keys({"signals": None}) == set()
+    assert alerts.captured_keys({"signals": [{"symbol": "SPY"}]}) == set()  # no id -> skipped
+
+
 def test_new_signal_text_singular_and_plural():
     assert alerts.new_signal_text(1) == "1 new scanner signal"
     assert alerts.new_signal_text(3) == "3 new scanner signals"
@@ -161,6 +186,15 @@ def test_new_flow_alerts():
     # Defensive: None / malformed view -> ([], acked unchanged).
     assert alerts.new_flow_alerts(None, {"A"}) == ([], {"A"})
     assert alerts.new_flow_alerts({"alerts": "nope"}, set()) == ([], set())
+
+
+def test_new_flow_alerts_excludes_big_delta_from_chime():
+    """big_delta is quiet-live: it must never trigger the chime/toast, but its id
+    IS marked seen (so it can't later be "rediscovered" and chime after the fact)."""
+    view = {"alerts": [{"id": "a", "type": "uoa"}, {"id": "b", "type": "big_delta"}]}
+    new, acked = alerts.new_flow_alerts(view, set())
+    assert [a["id"] for a in new] == ["a"]        # only uoa chimes
+    assert acked == {"a", "b"}                    # both marked seen (b never re-considered)
 
 
 # ── Flow alerts: market-hours gate + backlog-replay guard ────────────────────

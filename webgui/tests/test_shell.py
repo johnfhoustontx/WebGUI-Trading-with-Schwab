@@ -15,8 +15,9 @@ def test_shell_registers_all_pages():
         "/", "/options/paper", "/options/captured", "/options/portfolio",
         "/options/calculator", "/options/swing", "/options/gamma",
         "/options/simulator", "/options/expected-move", "/options/rescue",
-        "/options/matrix",
+        "/options/matrix", "/options/flow",
         "/sentiment", "/sentiment/sectors", "/sentiment/rotation", "/sentiment/rrg",
+        "/sentiment/momentum",
         "/trade", "/portfolio", "/driver", "/settings",
         "/eod", "/eod/detail", "/status", "/manuals", "/terminate",
         "/market",
@@ -165,6 +166,38 @@ def test_acknowledge_scanner_reads_scan_once(monkeypatch):
 
     main._acknowledge("/")
     assert reads.count("options:scan") == 1
+
+
+def test_captured_badge_survives_reprice_but_fires_on_new_signal(monkeypatch):
+    """After opening Captured, a reprice-republish (version bumps, SAME signal ids)
+    must NOT re-raise the badge — that was the "keeps showing" bug (the badge was
+    version-based, so every 5-min reprice re-fired it). Only a genuinely NEW
+    captured signal (a new signal_id) fires it again."""
+    import main
+
+    state = {"payload": {"signals": [{"signal_id": "s1"}, {"signal_id": "s2"}]},
+             "ver": 1}
+    monkeypatch.setattr(main.bus_client, "read",
+                        lambda v: state["payload"] if v == "options:captured" else {})
+    monkeypatch.setattr(main.bus_client, "read_version",
+                        lambda v: state["ver"] if v == "options:captured" else None)
+    monkeypatch.setattr(main.bus_client, "read_full", lambda v: (None, None))
+
+    # Open Captured -> acknowledge the current ids -> badge clears.
+    main._acknowledge("/options/captured", scan={"signals": []})
+    assert main._NAV_BADGES["/options/captured"] == 0
+
+    # A reprice: SAME ids, version bumps 1 -> 2. Badge must STAY cleared.
+    state["ver"] = 2
+    main._recompute_badges(scan={"signals": []})
+    assert main._NAV_BADGES["/options/captured"] == 0     # was 1 (the bug)
+
+    # A genuinely NEW capture: new id s3, version bumps -> badge re-raises.
+    state["payload"] = {"signals": [{"signal_id": "s1"}, {"signal_id": "s2"},
+                                    {"signal_id": "s3"}]}
+    state["ver"] = 3
+    main._recompute_badges(scan={"signals": []})
+    assert main._NAV_BADGES["/options/captured"] == 1
 
 
 def test_acknowledge_reuses_injected_scan(monkeypatch):
@@ -387,12 +420,20 @@ def test_breadcrumb_parts_grouped_and_flat():
         "Market Trend & Sentiment", "Sector Rotation")
     assert main.breadcrumb_parts("/market") == (
         "Market Trend & Sentiment", "Market Dashboard")
-    assert main.breadcrumb_parts("/status") == ("More", "System Status")
+    assert main.breadcrumb_parts("/eod") == ("More", "EOD Report")
     # Flat single page → (page label, "") — no "· Tab"
     assert main.breadcrumb_parts("/trade") == ("Trade Analyzer", "")
     # Rail pages read as standalone sections, same as flat pages.
     assert main.breadcrumb_parts("/options/gamma") == ("Dealer Positioning", "")
-    assert main.breadcrumb_parts("/options/calculator") == ("Calculator", "")
+    assert main.breadcrumb_parts("/options/matrix") == ("Opportunity Board", "")
+    assert main.breadcrumb_parts("/options/flow") == ("Flow Alerts", "")
+    # The three machine-level pages moved to the drawer foot (2026-08-12), so they
+    # are standalone rail pages too — no tab strip, no group in the breadcrumb.
+    assert main.breadcrumb_parts("/status") == ("System Status", "")
+    assert main.breadcrumb_parts("/terminate") == ("Stop All Services", "")
+    assert main.breadcrumb_parts("/settings") == ("Settings", "")
+    # Calculator is no longer a standalone rail page — it's a Strategy Tools tab.
+    assert main.breadcrumb_parts("/options/calculator") == ("Strategy Tools", "Calculator")
 
 
 def test_market_status_parts():
@@ -452,6 +493,54 @@ def test_sync_ticker_setting_registered_inside_the_main_guard():
     assert "app.on_startup(sync_ticker_setting)" in tail
 
 
+# ── manual-paper break-even lifecycle setting resync (Task 3) ───────────────
+# Mirrors the ticker/captured-autoclose resync pattern: options_svc defaults
+# this flag OFF on a missing key too, so a resync can't silently flip a user's
+# explicit OFF back to ON — but a wiped Memurai must still be told the GUI's
+# current (possibly ON) choice at startup.
+
+
+def test_sync_manual_paper_lifecycle_setting_reasserts_the_flag(monkeypatch):
+    import main
+
+    sent = []
+    monkeypatch.setattr(main.bus_client, "request",
+                        lambda domain, cmd: sent.append((domain, cmd)))
+    monkeypatch.setattr(main.app_settings, "get", lambda k: False)
+    main.sync_manual_paper_lifecycle_setting()
+    assert sent == [("options", {"type": "set_manual_paper_lifecycle",
+                                 "args": {"enabled": False}})]
+
+    sent.clear()
+    monkeypatch.setattr(main.app_settings, "get", lambda k: True)
+    main.sync_manual_paper_lifecycle_setting()
+    assert sent == [("options", {"type": "set_manual_paper_lifecycle",
+                                 "args": {"enabled": True}})]
+
+
+def test_sync_manual_paper_lifecycle_setting_survives_a_down_bus(monkeypatch):
+    import main
+
+    def _boom(domain, cmd):
+        raise RuntimeError("redis down")
+
+    monkeypatch.setattr(main.bus_client, "request", _boom)
+    monkeypatch.setattr(main.app_settings, "get", lambda k: True)
+    main.sync_manual_paper_lifecycle_setting()  # startup must not fail
+
+
+def test_sync_manual_paper_lifecycle_setting_registered_inside_the_main_guard():
+    import inspect
+
+    import main
+
+    src = inspect.getsource(main)
+    head, guard, tail = src.partition('if __name__ in {"__main__", "__mp_main__"}:')
+    assert guard, "the __main__ guard moved — this test needs updating"
+    assert "app.on_startup(" not in head
+    assert "app.on_startup(sync_manual_paper_lifecycle_setting)" in tail
+
+
 def test_reimporting_main_after_startup_does_not_raise():
     """Pages do `import main as _shell` (e.g. pages/options/scanner.py) at REQUEST
     time. The entry script runs as __main__, so that re-executes main.py as a
@@ -480,19 +569,21 @@ def test_drawer_icons_are_present_and_distinct():
     """The drawer is a 64px icon rail (hover-to-expand) whose collapsed state shows
     ONLY icons (_NAV_CSS fades the labels to opacity:0) — so each drawer item needs
     a non-empty, distinct icon. ``_nav_link``/``_nav_group_link`` render the
-    ``icon`` arg; the dot is retired. Scope is the 9 drawer items (3 groups + the
-    3 OPTIONS_RAIL pages under Options + the 3 FLAT_NAV pages); child-page icons
-    are not rail affordances (the tab strip renders labels only)."""
+    ``icon`` arg; the dot is retired. Scope is the 13 drawer items (the 4
+    _NAV_GROUPS + the 3 OPTIONS_RAIL pages under Options + the 3 FLAT_NAV pages +
+    the 3 SYSTEM_RAIL pages at the foot); child-page icons are not rail
+    affordances (the tab strip renders labels only)."""
     from collections import Counter
 
     import main
 
     items = ([(label, icon) for label, icon, _c in main._NAV_GROUPS]
              + [(label, icon) for _p, label, icon in main.OPTIONS_RAIL]
-             + [(label, icon) for _p, label, icon in main.FLAT_NAV])
+             + [(label, icon) for _p, label, icon in main.FLAT_NAV]
+             + [(label, icon) for _p, label, icon in main.SYSTEM_RAIL])
     # Pinned count: all()/set-length are vacuously true on an empty list, so this
     # is the non-vacuity guard. A legitimate new drawer item should bump it.
-    assert len(items) == 9, f"expected 9 drawer items, got {len(items)}: {items}"
+    assert len(items) == 13, f"expected 13 drawer items, got {len(items)}: {items}"
     assert not [l for l, i in items if not i], \
         f"drawer items with no icon: {[l for l, i in items if not i]}"
     dupes = {i: [l for l, x in items if x == i]
@@ -772,6 +863,56 @@ def test_app_name_comes_from_brand_config():
     assert "Schwab Trading" not in src, "stale app name left in main.py"
 
 
+def test_dev_lockup_carries_a_dev_chip(monkeypatch, tmp_path):
+    """Two identical-looking tabs writing to different paper books is a mistake
+    waiting to happen — dev's header says DEV."""
+    import main
+    from pages.options import theme
+
+    monkeypatch.setattr(theme, "BRAND_MARK", "")
+    monkeypatch.setattr(main, "IS_DEV", True)
+    assert ">DEV<" in main.brand_lockup_html(tmp_path)
+
+
+def test_prod_lockup_has_no_dev_chip(monkeypatch, tmp_path):
+    """Non-vacuity partner: the chip is conditional, not always painted.
+    (Cannot fail if the chip is deleted — see the dev test above.)"""
+    import main
+    from pages.options import theme
+
+    monkeypatch.setattr(theme, "BRAND_MARK", "")
+    monkeypatch.setattr(main, "IS_DEV", False)
+    assert "DEV" not in main.brand_lockup_html(tmp_path)
+
+
+def test_window_title_is_prefixed_in_dev(monkeypatch):
+    """The browser tab title (and so the taskbar entry) names the environment."""
+    import main
+    from pages.options import theme
+
+    monkeypatch.setattr(main, "IS_DEV", True)
+    assert main.window_title() == f"DEV · {theme.BRAND_NAME}"
+
+
+def test_window_title_is_unchanged_in_prod(monkeypatch):
+    """Non-vacuity partner: prod's title is EXACTLY the brand name, unprefixed."""
+    import main
+    from pages.options import theme
+
+    monkeypatch.setattr(main, "IS_DEV", False)
+    assert main.window_title() == theme.BRAND_NAME
+
+
+def test_ui_run_takes_its_title_from_window_title():
+    """The chip is worthless if ui.run() still hard-codes the brand name."""
+    import inspect
+
+    import main
+
+    src = inspect.getsource(main)
+    assert "title=window_title()" in src
+
+
 def test_brand_css_clips_gradients_to_the_wordmark_text():
     """Each half needs -webkit-background-clip:text FIRST (Chromium still wants
     the prefix) plus a transparent fill, else the gradient paints a block."""
@@ -789,3 +930,80 @@ def test_brand_css_clips_gradients_to_the_wordmark_text():
                                       "a_from": "#1", "a_to": "#2",
                                       "b_from": "#3", "b_to": "#4"}})
     assert "font-family: 'Segoe UI'" in bare
+
+
+def test_strategy_tools_group_pairs_calculator_with_simulator():
+    """Calculator + Simulator are the app's two modelling tools — they share the leg
+    editor, the strategy templates, the page-state snapshot and a Copy-to-each-other
+    button, so they live under ONE rail item with two tabs instead of straddling two
+    nav levels (Calculator was a standalone rail page, Simulator an Options tab)."""
+    import main
+    assert main.STRATEGY_TOOLS_CHILDREN == [
+        ("/options/calculator", "Calculator", "calculate"),
+        ("/options/simulator", "Simulator", "science"),
+    ]
+    # It is a GROUP, so both pages get the tab strip (rail pages get none).
+    for route, _l, _i in main.STRATEGY_TOOLS_CHILDREN:
+        assert main._group_children(route) == main.STRATEGY_TOOLS_CHILDREN, route
+    # ...and the breadcrumb reads "Strategy Tools · <page>".
+    assert main.breadcrumb_parts("/options/simulator") == ("Strategy Tools", "Simulator")
+
+
+def test_strategy_tools_moved_out_of_their_old_homes():
+    """Neither page may remain in its previous list, or it would render twice."""
+    import main
+    assert not [r for r, _l, _i in main.OPTIONS_CHILDREN if r == "/options/simulator"]
+    assert not [r for r, _l, _i in main.OPTIONS_RAIL if r == "/options/calculator"]
+    # The Options strip keeps its find -> analyze -> track -> repair workflow.
+    assert [r for r, _l, _i in main.OPTIONS_CHILDREN] == [
+        "/", "/options/swing", "/options/expected-move", "/options/captured",
+        "/options/paper", "/options/portfolio", "/options/rescue"]
+    # The rail keeps the standalone market-wide pages (Flow Alerts joined 2026-08-09).
+    assert [r for r, _l, _i in main.OPTIONS_RAIL] == [
+        "/options/gamma", "/options/matrix", "/options/flow"]
+
+
+def test_strategy_tools_group_is_reachable_from_the_drawer():
+    """A group only renders if _NAV_GROUPS carries it (that list drives
+    _group_children + breadcrumb_parts) AND the drawer actually builds it — a
+    group present in the data but never rendered is unreachable."""
+    import inspect
+    import main
+    assert any(label == "Strategy Tools" for label, _i, _c in main._NAV_GROUPS)
+    # Every group must get a drawer item: one _nav_group_link call per group.
+    src = inspect.getsource(main._layout)
+    assert src.count("_nav_group_link(") == len(main._NAV_GROUPS)
+
+
+def test_window_title_tags_the_PAGE_title_not_just_the_default(monkeypatch):
+    """The per-page title is what a browser tab actually shows.
+
+    `_layout` calls `ui.page_title` on every page, which OVERRIDES the
+    `ui.run(title=...)` default — so tagging only the ui.run title left every
+    real page reading "Market Scanner" in BOTH environments. Caught in a live
+    browser (document.title), not by the original test, which only checked that
+    `ui.run` was handed `window_title()`.
+    """
+    import main
+
+    monkeypatch.setattr(main, "IS_DEV", True)
+    assert main.window_title("Market Scanner") == "DEV · Market Scanner"
+    monkeypatch.setattr(main, "IS_DEV", False)
+    assert main.window_title("Market Scanner") == "Market Scanner"
+
+
+def test_layout_routes_the_page_title_through_window_title():
+    """Source inspection: `_layout` runs per-request and cannot execute here.
+
+    Without this, a future edit could set `ui.page_title(...)` directly again
+    and silently restore the untagged-tab bug.
+    """
+    import inspect
+
+    import main
+
+    src = inspect.getsource(main._layout)
+    assert "ui.page_title(window_title(" in src, (
+        "_layout must pass the page label through window_title(), or dev tabs "
+        "lose their prefix again"
+    )

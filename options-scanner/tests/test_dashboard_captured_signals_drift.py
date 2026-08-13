@@ -32,6 +32,20 @@ import pytest
 # Add project root so dashboard import resolves
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# ``dashboard.py`` (the legacy Tk desktop UI) was deliberately NOT copied into
+# this monorepo -- the NiceGUI webgui replaced it -- so the tests below exercise
+# code that does not exist here and cannot pass. They are kept rather than
+# deleted because they still document the invariant for the source repo, where
+# dashboard.py lives.
+#
+# The skip MUST be module-level. Each test called ``_tk_or_skip()`` first and
+# imported ``dashboard`` only inside the test body, so the outcome depended on
+# whether an earlier test had already built a Tk root: root fails -> skip, root
+# succeeds -> ModuleNotFoundError -> FAIL. That order-dependent flip made the
+# suite total swing 15<->17 and, on 2026-08-07, masked two genuine regressions
+# behind an unchanged failure COUNT. Skipping at collection is deterministic.
+pytest.importorskip("dashboard", reason="legacy Tk UI not present in this monorepo")
+
 
 def _tk_or_skip():
     """Return a fresh Tk root, or skip the test if no display."""

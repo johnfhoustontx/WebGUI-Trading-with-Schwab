@@ -14,9 +14,18 @@ DEFAULTS = {
     "alert_min_score": 0,            # only alert on signals with score >= this
     "desktop_notifications": False,
     "flow_alerts_enabled": True,     # put/call premium crossover + unusual-activity toasts
+    "captured_autoclose_enabled": True,  # auto-manage captured signals (break-even trail + auto-close)
+    "manual_paper_lifecycle_enabled": False,  # opt-in: manual paper account break-even lifecycle (experimental)
     "ticker_enabled": True,          # bottom market-summary marquee on every page
     "ticker_speed": 60,              # marquee duration seconds (higher = slower)
     "nav_pinned": False,             # nav drawer locked open (else a hover icon rail)
+    "gamma_level_tracks": False,     # heatmap overlay: intraday flip/wall movement
+    "gamma_spot_style": "line",      # heatmap spot overlay: line | candle | ohlc
+    "gamma_spot_interval": 5,        # candle/OHLC bucket size in minutes (1|5|15)
+    "gamma_netprem_group": "indices",          # Net Prem picker: which group tab
+    "gamma_netprem_mode": "dollars",           # Net Prem y-axis: dollars | skew
+    # Comparable magnitudes in Dollars mode, so the three read as one chart.
+    "gamma_netprem_symbols": ["$SPX", "SPY", "QQQ"],   # plotted symbols
 }
 
 _PATH = pathlib.Path(__file__).resolve().parent / "data" / "settings.json"

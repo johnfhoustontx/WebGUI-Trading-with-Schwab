@@ -17,6 +17,7 @@ consumer loop handles sync handlers.
 """
 from datetime import date, datetime, timezone
 
+from repo_paths import ENV_FLAGS
 from services.driver_svc import compute, settings
 from shared.contracts.driver import (
     AutonomousState,
@@ -259,7 +260,22 @@ def run_autonomous_cycle(bus) -> None:
     (``set_control(halted=True)``) so no further checkpoints run until the next-day
     re-arm. Finally publish the monitor view, attaching the driver-account
     performance scorecard (``cache:options:driver_paper_perf``).
+
+    **Hard-disabled in a suppressed environment** (dev), before anything else —
+    ahead of even the control-key read, so a suppressed checkout performs no bus
+    read, no market fetch, no decider call and no enqueue. This is deliberately
+    redundant with the scheduler skip, and the redundancy is the point: ``cycle``
+    is also a COMMAND on ``cmd:driver``, and the arm/disarm state lives in Redis
+    at ``cache:driver:control``. Dev runs off a SNAPSHOT of prod's Redis; a
+    snapshot taken while the driver was armed carries an enabled control key into
+    dev, and anything that then enqueued a ``cycle`` would have a dev checkout
+    paper-trading against a book it shares nothing with. Skipping the scheduler
+    cannot close that path. (The snapshot tool also rewrites the control key to
+    disabled on copy — two independent defences, which is the right number for
+    something that trades.)
     """
+    if not ENV_FLAGS.get("autonomous_trading", True):
+        return
     control = read_control(bus)
     if not control.get("enabled") or control.get("halted"):
         return

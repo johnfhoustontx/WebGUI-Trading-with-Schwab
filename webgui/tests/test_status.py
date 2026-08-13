@@ -187,16 +187,83 @@ def test_restart_spec_self_restarts_webgui():
     assert spec["wait_port"] == 0  # webgui doesn't need the proxy to start
 
 
-def test_every_component_target_is_restartable_except_auth():
+def test_every_component_target_is_restartable_except_auth(monkeypatch):
     # Every card has a Restart action now (incl. the webgui, which relaunches
     # itself). Only the auth card is excepted — its action is Authorize (a link
     # to /auth), not a process restart.
+    #
+    # Pinned to PROD explicitly. repo_paths now forces the whole prod identity
+    # under pytest (name included), so this holds without the patch — but the
+    # proxy and Memurai cards ARE withheld in a dev checkout (borrowed / shared
+    # — see below), and stating the environment beats depending on a guard two
+    # modules away for a test whose whole subject is environment ownership.
+    monkeypatch.setattr(status, "IS_DEV", False)
+    monkeypatch.setattr(status, "OWNS_PROXY", True)
     for t in status.component_targets():
         spec = status.restart_spec(t)
         if t["kind"] == "auth":
             assert spec is None
         else:
             assert spec is not None, f"{t['key']} should be restartable"
+
+
+# --- environment ownership: don't offer a restart this checkout doesn't own ---
+def test_proxy_restart_withheld_when_not_owned(monkeypatch):
+    # Dev borrows PROD's proxy on :8100 (one rotating OAuth refresh token, so
+    # only one proxy can exist) — restarting it from here bounces the LIVE
+    # stack's market data. Same hazard tools/stop_all.py guards against.
+    monkeypatch.setattr(status, "OWNS_PROXY", False)
+    assert status.restart_spec(_target("proxy", "proxy")) is None
+
+
+def test_proxy_restart_offered_when_owned(monkeypatch):
+    # Non-vacuity partner: pins that the guard is conditional, not a blanket
+    # removal. (Cannot fail if the guard is deleted — see the guard test above.)
+    monkeypatch.setattr(status, "OWNS_PROXY", True)
+    spec = status.restart_spec(_target("proxy", "proxy"))
+    assert spec is not None
+    assert spec["kill_port"] == status.PROXY_PORT
+
+
+def test_proxy_label_says_whether_this_checkout_owns_it(monkeypatch):
+    # A dev operator seeing no Restart button must be able to tell WHY.
+    monkeypatch.setattr(status, "OWNS_PROXY", True)
+    owned = {t["key"]: t for t in status.component_targets()}["proxy"]
+    assert owned["owned"] is True
+    assert "market data" in owned["label"]
+
+    monkeypatch.setattr(status, "OWNS_PROXY", False)
+    borrowed = {t["key"]: t for t in status.component_targets()}["proxy"]
+    assert borrowed["owned"] is False
+    assert "shared" in borrowed["label"] and "prod" in borrowed["label"]
+    assert borrowed["label"] != owned["label"]
+
+
+def test_memurai_restart_withheld_in_dev(monkeypatch):
+    # One Redis server serves both environments (separated by logical DB), so
+    # restarting the Windows service from dev takes prod's Redis down too.
+    monkeypatch.setattr(status, "IS_DEV", True)
+    assert status.restart_spec(_target("memurai", "memurai")) is None
+
+
+def test_memurai_restart_offered_in_prod(monkeypatch):
+    # Non-vacuity partner (cannot fail if the guard is deleted).
+    monkeypatch.setattr(status, "IS_DEV", False)
+    spec = status.restart_spec(_target("memurai", "memurai"))
+    assert spec is not None
+    assert spec["kind"] == "service"
+
+
+def test_dev_can_still_restart_everything_it_owns(monkeypatch):
+    # The guards must not over-fire. Dev owns its six services (offset ports)
+    # and its own web GUI; leaving an operator unable to restart ANYTHING would
+    # be a worse outcome than the cross-environment hazard being fixed.
+    monkeypatch.setattr(status, "IS_DEV", True)
+    monkeypatch.setattr(status, "OWNS_PROXY", False)
+    restartable = {t["key"] for t in status.component_targets()
+                   if status.restart_spec(t) is not None}
+    assert restartable == {"sentiment", "options", "portfolio", "trade",
+                           "driver", "market", "webgui"}
 
 
 # --- restart_command ----------------------------------------------------------

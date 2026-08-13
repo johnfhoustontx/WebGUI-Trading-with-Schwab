@@ -11,6 +11,8 @@ imported lazily inside ``render()`` only (mirrors ``expected_move.py`` /
 ``simulator.py``).
 """
 
+import page_help as _page_help
+from .inputs import bind_symbol_load, select_all_on_focus
 from .theme import BADGE_NEG, BADGE_POS, BADGE_WARN, BTN_3D
 
 # Heat zone colors (higher heat = closer to trouble): green → amber → orange →
@@ -706,6 +708,10 @@ def render():
                 "dense no-caps inline-label align=left") as t:
             tb = ui.tab("At-Risk Board")
             ta = ui.tab("Ad-hoc Trade")
+            for _tab, _key in ((tb, "At-Risk Board"), (ta, "Ad-hoc Trade")):
+                with _tab:
+                    ui.tooltip(_page_help.subtab_help("/options/rescue", _key)
+                               ).props("delay=350 max-width=340px")
         return t, tb, ta
 
     if _slot is not None:
@@ -762,7 +768,8 @@ def render():
                 with ui.column().classes("min-w-0 grow-[3] shrink basis-0 gap-3"):
                     with ui.row().classes("items-end gap-3 flex-wrap"):
                         adhoc_strat = build_strategy_menu(value="PCS", classes="w-52", boxed=True)
-                        adhoc_sym = ui.input("Symbol").props("dense").classes("w-40")
+                        adhoc_sym = select_all_on_focus(
+                            ui.input("Symbol").props("dense").classes("w-40"))
                         adhoc_load_btn = ui.button("Load", icon="cloud_upload").props("no-caps")
                     adhoc_status = ui.label(
                         "Pick a strategy, load a symbol, then set the legs.") \
@@ -967,7 +974,9 @@ def render():
         bus_client.request("options", {"type": "rescue_adhoc", "args": {"spec": spec}})
 
     adhoc_load_btn.on_click(_adhoc_load)
-    adhoc_sym.on("keydown.enter", lambda e: _adhoc_load())
+    # Enter OR tab/click-out of the Symbol field loads the chain (mirrors the Load
+    # button), deduped so tabbing through an unchanged symbol won't re-fetch.
+    bind_symbol_load(adhoc_sym, _adhoc_load)
     adhoc_compute_btn.on_click(_adhoc_compute)
     adhoc_strat.on_value_change(_adhoc_on_strategy)
     adhoc_exp_sel.on_value_change(lambda e: _adhoc_on_expiry())

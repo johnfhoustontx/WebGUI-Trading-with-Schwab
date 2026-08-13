@@ -272,6 +272,63 @@ def calc_expected_move(price, iv_pct, dte):
     }
 
 
+def expiry_atm_iv(chain_data, exp_str, underlying):
+    """ATM implied vol for ONE specific expiration, as a percentage.
+
+    ``extract_atm_iv`` deliberately reads the ~30-DTE expiration to get a stable
+    symbol-level IV. That is the right input for IV rank / IV-HV, but it is the
+    WRONG input for an expected move at any other horizon: scaling a 30-day IV
+    by sqrt(dte) assumes a flat term structure. Measured live on 2026-08-07,
+    SPY's 3-DTE expiry priced 8.1 vol against IV30 10.3 — the sqrt-scaled EM
+    overstated that expiration's own move by 27%. Event days invert it.
+
+    Averages the call and put IV at the strike nearest ``underlying`` (the same
+    balanced ATM reading ``extract_atm_iv`` takes). Returns None when the
+    expiration is absent or carries no usable IV, so callers fall back rather
+    than silently scoring off a fabricated number.
+    """
+    if not chain_data or not underlying or underlying <= 0 or not exp_str:
+        return None
+
+    ivs = []
+    for map_key in ("callExpDateMap", "putExpDateMap"):
+        exp_map = (chain_data.get(map_key) or {})
+        strikes = None
+        for key, val in exp_map.items():
+            if key.split(":")[0] == exp_str:
+                strikes = val
+                break
+        if not strikes:
+            continue
+        try:
+            best = min(strikes.keys(), key=lambda sk: abs(float(sk) - underlying))
+        except (TypeError, ValueError):
+            continue
+        contracts = strikes.get(best) or []
+        if not contracts:
+            continue
+        iv = contracts[0].get("volatility")
+        if iv and iv > 0:
+            ivs.append(iv)
+
+    if not ivs:
+        return None
+    return round(sum(ivs) / len(ivs), 2)
+
+
+def expiry_daily_em(price, iv_pct):
+    """One-DAY expected move computed at a specific expiration's own IV.
+
+    Deliberately returns a DAILY move, not that expiration's period move: every
+    consumer downstream (the sqrt(dte) period scaling, the 0-DTE hours-to-close
+    decay, all the EM-multiplier curves) already scales a daily EM. Substituting
+    this for the IV30-derived daily EM therefore changes ONLY the vol input and
+    leaves every one of those formulas untouched.
+    """
+    em = calc_expected_move(price, iv_pct, 1)
+    return em["move_dollars"] if em else None
+
+
 def calc_expected_moves(price, iv_pct):
     """Calculate expected moves for standard timeframes.
 

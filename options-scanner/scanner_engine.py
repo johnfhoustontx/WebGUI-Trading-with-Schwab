@@ -304,6 +304,48 @@ NEG_GEX_MIN_SCORE = 62
 EDGE_MARGIN = 0.02
 
 
+# Size the EM strike window off the EXPIRATION's own ATM IV instead of the
+# symbol-level ~30-DTE IV that `iv_analysis.extract_atm_iv` returns.
+#
+# The old path computed daily_em from IV30 and scaled it by sqrt(dte), which
+# assumes a FLAT term structure. Measured live 2026-08-07: SPY's 3-DTE expiry
+# priced 8.1 vol against IV30 10.3, so the sqrt-scaled EM overstated that
+# expiration's own move by 27% (18% at 4 DTE, 6% at 5 DTE). In contango this
+# pushes short strikes further out than intended; on an event day, when the
+# front expiry's IV spikes above IV30, it pulls them in too close.
+#
+# ONLY the vol input changes. `effective_daily_em` returns a DAILY-equivalent
+# EM, so the sqrt(dte) period scaling, the 0-DTE hours-to-close decay and every
+# multiplier curve below are byte-for-byte unchanged.
+#
+# Kill switch: set False to restore the IV30-scaled behavior exactly.
+USE_EXPIRY_EM = True
+
+
+def effective_daily_em(chain, exp_str, underlying, fallback):
+    """Daily-equivalent EM for ONE expiration, falling back to the caller's.
+
+    Falls back to ``fallback`` (never None/0) whenever the per-expiry IV is
+    unavailable: a 0 would disable the EM filter entirely and silently accept
+    every strike, which is a far worse failure than using the old estimate.
+    """
+    if not USE_EXPIRY_EM:
+        return fallback
+    try:
+        # Lazy, matching run_full_scan's existing `from iv_analysis import ...`:
+        # keeps scanner_engine's module-level import graph unchanged for the
+        # services that import it.
+        import iv_analysis
+        iv = iv_analysis.expiry_atm_iv(chain, exp_str, underlying)
+        if not iv or iv <= 0:
+            return fallback
+        em = iv_analysis.expiry_daily_em(underlying, iv)
+        return em if em and em > 0 else fallback
+    except Exception:  # noqa: BLE001
+        log.exception(f"  per-expiry EM failed for {exp_str}; using the 30d estimate")
+        return fallback
+
+
 def _interp_em_curve(curve, dte):
     """Linear-interpolate (min_mult, max_mult) for a DTE against a curve.
 
@@ -466,6 +508,20 @@ DIRECTIONAL_MIN_CREDIT_PCT = 0.20  # higher floor — these strikes pay more
 # cannot score a long call (it rewards positive theta and penalizes long vega).
 # 4 structures x 2 windows (0-DTE + swing) = 8.
 SINGLE_LEG_MAX_PER_SYMBOL = 8
+
+# Emission cut for single-leg directional candidates: a candidate must reach
+# SINGLE_LEG_MIN_SCORE on strategy_scoring's Fit+Quality composite AND not carry
+# an excluded grade. Everything else is dropped in run_full_scan rather than
+# published to the Scanner's Directional tab -- the tab is a shortlist of
+# tradeable ideas, not a dump of everything the builder can construct.
+#
+# NOTE the two cuts are redundant TODAY: a hard-gate failure pins the composite
+# at strategy_scoring.GATE_FAIL_CAP (39) and the post-grade state tilt adds at
+# most +6, so a Weak candidate tops out at 45 and can never clear 50. Both are
+# kept because they express DIFFERENT intents ("no low-scoring trades" vs "no
+# gate-failing trades") and either constant can move independently.
+SINGLE_LEG_MIN_SCORE = 50.0
+SINGLE_LEG_EXCLUDED_GRADES = ("Weak",)
 
 
 def get_min_credit_pct(regime, trade_type):
@@ -789,6 +845,28 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
                     log.info(f"  [{trade_type}] Skipping {exp_str} — earnings conflict ({earnings_date})")
                     continue
 
+            # Size this expiration's EM window off ITS OWN ATM IV rather than
+            # the symbol-level ~30-DTE IV the caller's daily EM was built from.
+            # Returns a DAILY-equivalent EM, so every formula downstream is
+            # unchanged; degrades to the caller's value when unavailable.
+            exp_daily_em = daily_expected_move
+            if daily_expected_move is not None and daily_expected_move > 0:
+                exp_daily_em = effective_daily_em(
+                    chain, exp_str, underlying, daily_expected_move)
+
+            # Stamped onto every signal so scoring's EM-buffer factor can size
+            # itself off the SAME vol this window used, instead of the 30-day
+            # EM it read for every trade regardless of DTE. None when the kill
+            # switch is off, so USE_EXPIRY_EM=False reverts BOTH halves and
+            # scoring falls back to the symbol-level IV.
+            exp_iv = None
+            if USE_EXPIRY_EM:
+                try:
+                    import iv_analysis
+                    exp_iv = iv_analysis.expiry_atm_iv(chain, exp_str, underlying)
+                except Exception:  # noqa: BLE001
+                    log.exception(f"  per-expiry IV stamp failed for {exp_str}")
+
             opts = {}
             for sk, contracts in strikes_data.items():
                 k = float(sk)
@@ -842,9 +920,9 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
                 if mode != "DIRECTIONAL" and abs(d) > MAX_ENTRY_SHORT_DELTA:
                     continue
                 # --- Strike validity: only SHORT leg must be in expected move window ---
-                if spot is not None and daily_expected_move is not None and daily_expected_move > 0:
+                if spot is not None and exp_daily_em is not None and exp_daily_em > 0:
                     if not is_strike_in_expected_move_window(
-                            k, spot, daily_expected_move, dte, trade_type,
+                            k, spot, exp_daily_em, dte, trade_type,
                             now_ct=now_ct, mode=mode):
                         em_fail += 1
                         continue
@@ -869,7 +947,7 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
                     results.append({
                         "id": f"{symbol}_{side}_{exp_str}_{k}_{long_k}",
                         "symbol": symbol, "type": side, "trade_type": trade_type,
-                        "expiration": exp_str, "dte": dte,
+                        "expiration": exp_str, "dte": dte, "expiry_iv": exp_iv,
                         "short_strike": k, "long_strike": long_k, "width": w,
                         "short_mark": round(short["mark"], 2),
                         "long_mark": round(lo["mark"], 2),
@@ -925,7 +1003,7 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
                         results.append({
                             "id": f"{symbol}_{side}_{exp_str}_{k}_{long_k}",
                             "symbol": symbol, "type": side, "trade_type": trade_type,
-                            "expiration": exp_str, "dte": dte,
+                            "expiration": exp_str, "dte": dte, "expiry_iv": exp_iv,
                             "short_strike": k, "long_strike": long_k, "width": w,
                             "short_mark": round(short["mark"], 2),
                             "long_mark": round(lo["mark"], 2),
@@ -973,6 +1051,11 @@ def build_iron_condors(spreads, max_n=3):
                     "id": f"{p['symbol']}_IC_{p['expiration']}_{p['short_strike']}_{c['short_strike']}",
                     "symbol": p["symbol"], "type": "IC", "trade_type": p["trade_type"],
                     "expiration": p["expiration"], "dte": p["dte"],
+                    # Both legs of an IC share one expiration, so the put side's
+                    # stamp is the IC's. Without it an IC would silently fall
+                    # back to the symbol-level IV while its component verticals
+                    # scored off the expiry's own.
+                    "expiry_iv": p.get("expiry_iv"),
                     "short_strike": p["short_strike"], "long_strike": p["long_strike"],
                     "call_short": c["short_strike"], "call_long": c["long_strike"],
                     "short_mark": p.get("short_mark"), "long_mark": p.get("long_mark"),
@@ -1409,6 +1492,16 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
                 em_1sd = (daily_em or 0.0) * math.sqrt(max(_lo, 1))
                 dir_sigs += _ssc.score_all(win_sigs, view, atm_iv, em_1sd)
 
+            # Drop everything that isn't worth showing, BEFORE the cap below --
+            # otherwise a symbol whose best candidates are Weak spends its cap
+            # slots on rows that are then dropped, emitting fewer than the cap's
+            # worth of tradeable ideas.
+            dir_sigs = [
+                s for s in dir_sigs
+                if (s.get("composite_score") or 0) >= SINGLE_LEG_MIN_SCORE
+                and s.get("grade") not in SINGLE_LEG_EXCLUDED_GRADES
+            ]
+
             if dir_sigs:
                 # CURRENTLY INERT: _DIRECTIONAL has 4 entries x 2 windows = 8 ==
                 # SINGLE_LEG_MAX_PER_SYMBOL, so the slice below can never
@@ -1618,13 +1711,35 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
         s["expected_pnl_target"] = calc_expected_pnl(cr, ml, pop, s["contracts_for_target"])
         s["max_profit_target"] = round(cr * s["contracts_for_target"] * 100, 2)
 
+    # Surface each symbol's IV block onto its signals so the GUI can show it (it
+    # lives in results["iv_data"], not on the signal dicts). Covers the
+    # DIRECTIONAL pass too, not just the credit spreads. Unconditional — hoisted OUT
+    # of the signal_recorder try below so an import failure there can't strip the
+    # columns.
+    #
+    # Two DIFFERENT fallbacks, deliberately:
+    #   * iv_rank keeps `or 0` — the historically-cheap sentinel, matching the
+    #     recorder's own prior default. Other code depends on it; don't change it.
+    #   * current_iv / iv_low_52w / iv_high_52w / expected_moves fall back to
+    #     None. These feed the webgui Trade detail panel's 52-week IV range
+    #     marker and Expected Move card, which distinguish "not measured" from
+    #     "measured as zero" — a fabricated 0 IV would render as a real reading.
+    #     expected_moves is a nested {daily, weekly, monthly} dict whose values
+    #     may themselves be None; the reference is copied as-is (the panel
+    #     already handles that shape) and every value is a plain float/int, so
+    #     the signal stays JSON-serializable for the Redis cache envelope.
+    for key in ("signals_0dte", "signals_swing", "signals_directional"):
+        for s in results[key]:
+            iv_for_sym = results["iv_data"].get(s.get("symbol")) or {}
+            s["iv_rank"] = iv_for_sym.get("iv_rank") or 0
+            s["current_iv"] = iv_for_sym.get("current_iv")
+            s["iv_low_52w"] = iv_for_sym.get("iv_low_52w")
+            s["iv_high_52w"] = iv_for_sym.get("iv_high_52w")
+            s["expected_moves"] = iv_for_sym.get("expected_moves")
+
     # Persist signals to the signal-tracking DB (score >= 50 dedup)
     try:
         import signal_recorder
-        # Inject per-symbol iv_rank (lives in results["iv_data"], not on signal dicts)
-        for sig_list in (results["signals_0dte"], results["signals_swing"]):
-            for s in sig_list:
-                s["iv_rank"] = results["iv_data"].get(s["symbol"], {}).get("iv_rank") or 0
         signal_recorder.record_signals(results["signals_0dte"], "0DTE")
         signal_recorder.record_signals(results["signals_swing"], "SWING")
     except Exception as e:

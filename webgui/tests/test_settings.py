@@ -53,3 +53,61 @@ def test_apply_ticker_enabled_persists_even_if_the_bus_is_down(tmp_path, monkeyp
     monkeypatch.setattr(S.bus_client, "request", _boom)
     S.apply_ticker_enabled(False)  # must not raise out of the click handler
     assert S.app_settings.load()["ticker_enabled"] is False
+
+
+# ── captured auto-close toggle → options_svc ────────────────────────────────
+def test_apply_captured_autoclose_persists_and_commands_the_service(tmp_path, monkeypatch):
+    monkeypatch.setattr(S.app_settings, "_PATH", tmp_path / "settings.json")
+    S.app_settings.reset_cache()
+    sent = _capture(monkeypatch)
+
+    S.apply_captured_autoclose(False)
+    assert S.app_settings.load()["captured_autoclose_enabled"] is False
+    assert sent == [("options", {"type": "set_autoclose", "args": {"enabled": False}})]
+
+    S.apply_captured_autoclose(True)
+    assert S.app_settings.load()["captured_autoclose_enabled"] is True
+    assert sent[-1] == ("options", {"type": "set_autoclose", "args": {"enabled": True}})
+
+
+def test_apply_captured_autoclose_persists_even_if_the_bus_is_down(tmp_path, monkeypatch):
+    monkeypatch.setattr(S.app_settings, "_PATH", tmp_path / "settings.json")
+    S.app_settings.reset_cache()
+
+    def _boom(domain, cmd):
+        raise RuntimeError("redis down")
+
+    monkeypatch.setattr(S.bus_client, "request", _boom)
+    S.apply_captured_autoclose(False)  # must not raise out of the click handler
+    assert S.app_settings.load()["captured_autoclose_enabled"] is False
+
+
+# ── manual-paper break-even lifecycle toggle → options_svc (Task 3) ─────────
+# Flag default OFF (the inverse of captured autoclose) — an inert placeholder
+# until explicitly enabled.
+def test_apply_manual_paper_lifecycle_persists_and_commands_the_service(tmp_path, monkeypatch):
+    monkeypatch.setattr(S.app_settings, "_PATH", tmp_path / "settings.json")
+    S.app_settings.reset_cache()
+    sent = _capture(monkeypatch)
+
+    S.apply_manual_paper_lifecycle(True)
+    assert S.app_settings.load()["manual_paper_lifecycle_enabled"] is True
+    assert sent == [("options", {"type": "set_manual_paper_lifecycle",
+                                 "args": {"enabled": True}})]
+
+    S.apply_manual_paper_lifecycle(False)
+    assert S.app_settings.load()["manual_paper_lifecycle_enabled"] is False
+    assert sent[-1] == ("options", {"type": "set_manual_paper_lifecycle",
+                                    "args": {"enabled": False}})
+
+
+def test_apply_manual_paper_lifecycle_persists_even_if_the_bus_is_down(tmp_path, monkeypatch):
+    monkeypatch.setattr(S.app_settings, "_PATH", tmp_path / "settings.json")
+    S.app_settings.reset_cache()
+
+    def _boom(domain, cmd):
+        raise RuntimeError("redis down")
+
+    monkeypatch.setattr(S.bus_client, "request", _boom)
+    S.apply_manual_paper_lifecycle(True)  # must not raise out of the click handler
+    assert S.app_settings.load()["manual_paper_lifecycle_enabled"] is True

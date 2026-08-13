@@ -22,7 +22,7 @@ from services.options_svc import flow_alerts
 from services.options_svc import push_notify
 from shared import market_calendar as mc
 from shared.notify.channels import _today_ct
-from shared.contracts.options import ScanResult
+from shared.contracts.options import NetPremiumSnapshot, ScanResult
 
 log = logging.getLogger(__name__)
 
@@ -147,6 +147,17 @@ EVENT_CAPTURED = "events:options:captured"
 CACHE_CAPTURED_FLAGS = "cache:options:captured_flags"
 EVENT_CAPTURED_FLAGS = "events:options:captured_flags"
 
+# Captured auto-manage: today's closed captured outcomes (EOD page) + the
+# Settings auto-close master toggle (default ON; only an explicit False disables).
+CACHE_CAPTURED_CLOSED = "cache:options:captured_closed"
+EVENT_CAPTURED_CLOSED = "events:options:captured_closed"
+CACHE_AUTOCLOSE_ENABLED = "cache:options:autoclose_enabled"
+
+# MANUAL paper account's opt-in break-even lifecycle toggle — the INVERSE
+# default of CACHE_AUTOCLOSE_ENABLED (default OFF; only an explicit True
+# enables). The DRIVER's isolated account never reads this key.
+CACHE_MANUAL_PAPER_LIFECYCLE = "cache:options:manual_paper_lifecycle"
+
 # Date-scoped seen-sets for server-side phone push (Telegram/Discord/Fi-SMS).
 # See services/options_svc/push_notify.py.
 CACHE_NOTIFIED_SCAN = "cache:options:notified_scan"
@@ -232,6 +243,13 @@ EVENT_FLOW_SKEW = "events:options:flow_skew"
 CACHE_MATRIX = "cache:options:matrix"
 EVENT_MATRIX = "events:options:matrix"
 
+# Net Prem — intraday net options premium per symbol for the Dealer Positioning
+# "Net Prem" view. Published on each 1-min GEX tick right after the matrix, over
+# the rows collect_gex_snapshots just wrote. Its own read (NOT a slice of the
+# matrix's) — see publish_net_premium's docstring for why they cannot share.
+CACHE_NET_PREMIUM = "cache:options:net_premium"
+EVENT_NET_PREMIUM = "events:options:net_premium"
+
 # Options-flow alerts (premium crossover + unusual call/put activity). Detected on
 # each 1-min GEX tick over the collected universe, pushed to the phone (best-effort),
 # and published as a day-scoped rolling list for the webgui popup/badge. The cooldown
@@ -242,7 +260,10 @@ _FLOW_COOLDOWN_KEY = "cache:options:flow_alert_cooldowns"
 # Per-symbol last-alerted gamma regime ('positive'/'negative'), date-scoped so the
 # first snapshot each day sets the baseline without firing an open-time alert.
 _GAMMA_REGIME_KEY = "cache:options:gamma_regime_state"
-_FLOW_ALERTS_MAX = 50
+# Cap on the day's published list. 50 dropped the morning's alerts before anyone
+# could read them; ~45 symbols with a 30-min crossover cooldown, a $5M UOA floor
+# and 4 gamma-flip names fit comfortably in 300.
+_FLOW_ALERTS_MAX = 300
 # Trailing flow rows the crossover detector needs (it compares the last two
 # premium-bearing rows; a couple extra guard against a forward-only NULL-premium
 # row). UOA no longer reads the series — it rides the poll's on_chain stash — so
@@ -251,6 +272,9 @@ _FLOW_CROSSOVER_TAIL = 4
 
 CACHE_EXPECTED_MOVE = "cache:options:expected_move"
 EVENT_EXPECTED_MOVE = "events:options:expected_move"
+
+CACHE_EM_CHAIN = "cache:options:em_chain"
+EVENT_EM_CHAIN = "events:options:em_chain"
 
 CACHE_RESCUE = "cache:options:rescue"            # per-id: f"{CACHE_RESCUE}:{position_id}"
 CACHE_RESCUE_SUMMARY = "cache:options:rescue_summary"
@@ -401,6 +425,11 @@ def swing_scan(bus, args: dict) -> None:
     ``view`` (plus the symbol + original args, for the page to display/debug)
     under ``cache:options:swing``.
 
+    ``filtered_out`` (how many scored candidates compute's quality cut dropped)
+    is carried through so the page can tell "nothing cleared the quality bar"
+    apart from "the scan found nothing"; it defaults to 0 rather than being
+    omitted, so the page never has to special-case a missing key.
+
     No ScanResult gate: this is a flat signal list (not the dual-list scan
     contract), and the page reads ``payload["signals"]`` directly.
 
@@ -419,6 +448,7 @@ def swing_scan(bus, args: dict) -> None:
     market_state = (((payload or {}).get("derived") or {}).get("trend") or {}).get("state")
     result = compute.swing_scan(**params, market_state=market_state)
     payload = {"signals": result["signals"], "view": result.get("view"),
+               "filtered_out": result.get("filtered_out") or 0,
                "symbol": params["symbol"], "params": args}
     version = bus.cache_set(CACHE_SWING, payload)
     bus.publish(EVENT_SWING, {"version": version})
@@ -499,9 +529,16 @@ def run_manage_and_refresh(bus) -> None:
     (``compute.expire_ledger_trades`` — the Paper Trades tab otherwise never
     closes on expiration) and republishes the ledger view when any settled.
     Shared by the ``paper_manage`` command (manual button) and the scheduler's
-    auto-manage tick (``scheduler.manage_due``) so both run identical logic."""
+    auto-manage tick (``scheduler.manage_due``) so both run identical logic.
+
+    Threads ``manual_paper_lifecycle_enabled(bus)`` (the Settings toggle, default
+    OFF) into ``compute.run_manage_cycle(lifecycle=...)`` — this is the ONE
+    chokepoint both the manual button and the scheduler pass through, so the
+    manual paper account's opt-in break-even lifecycle needs no separate wiring
+    at either call site. The DRIVER's isolated account is untouched here (see
+    ``run_driver_manage_and_refresh``, which never reads this flag)."""
     if compute.has_paper_account():
-        compute.run_manage_cycle()
+        compute.run_manage_cycle(lifecycle=manual_paper_lifecycle_enabled(bus))
     # Auto-settle expired LEDGER trades (the Paper Trades tab otherwise never
     # closes on expiration). Defensive so a settlement hiccup never skips the
     # refreshes below; the piggyback ledger refresh further down republishes the
@@ -637,6 +674,77 @@ def _notify_captured(bus, signals) -> None:
         log.exception("captured push-notify failed (non-fatal)")
 
 
+def publish_captured_closed(bus) -> None:
+    """Publish today's closed-captured outcomes view (``cache:options:captured_closed``).
+
+    Read-only — published regardless of the auto-close toggle, since MANUAL closes
+    land in ``signal_outcomes`` too (the EOD 'Captured — closed today' section reads
+    this). ``compute.captured_closed_today`` is fully defensive."""
+    data = compute.captured_closed_today()
+    version = bus.cache_set(CACHE_CAPTURED_CLOSED, data)
+    bus.publish(EVENT_CAPTURED_CLOSED, {"version": version})
+
+
+def autoclose_enabled(bus) -> bool:
+    """Whether captured auto-close is enabled. Defaults **True** on a missing /
+    unreadable key — so only an EXPLICIT ``{"enabled": False}`` (from the Settings
+    toggle write-through) disables the cycle; a wiped Memurai resumes auto-close."""
+    try:
+        env = bus.cache_get(CACHE_AUTOCLOSE_ENABLED)
+        if env is None:
+            return True
+        return bool((env.payload or {}).get("enabled", True))
+    except Exception:  # noqa: BLE001
+        return True
+
+
+def manual_paper_lifecycle_enabled(bus) -> bool:
+    """Whether the MANUAL paper account has opted into the captured-style
+    break-even lifecycle (arm at +50% credit, ride under a break-even stop).
+    Defaults **False** on a missing / unreadable key — the INVERSE of
+    ``autoclose_enabled`` — so only an EXPLICIT ``{"enabled": True}`` (from the
+    Settings toggle write-through) opts in; a wiped Memurai reverts to today's
+    plain TAKE_PROFIT-at-+50%. The DRIVER's isolated account never reads this
+    flag (see ``compute.run_driver_manage_cycle``, which always passes
+    ``lifecycle=False``)."""
+    try:
+        env = bus.cache_get(CACHE_MANUAL_PAPER_LIFECYCLE)
+        if env is None:
+            return False
+        return bool((env.payload or {}).get("enabled", False))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _notify_captured_closes(bus, closed) -> None:
+    """Best-effort record of the cycle's auto-closes (never fatal).
+
+    The refreshed open + closed views already repaint the GUI; this logs each close
+    (symbol / reason) so the server trace shows what the unattended cycle did."""
+    for c in closed or []:
+        log.info("captured auto-close: %s %s @ %s",
+                 c.get("symbol"), c.get("reason"), c.get("exit_val"))
+
+
+def run_captured_manage_and_publish(bus) -> None:
+    """Run the captured auto-manage cycle then republish the open + closed views.
+
+    Reprices/arms/auto-closes the OPEN captured signals
+    (``compute.run_captured_manage_cycle`` — paper-only, writes outcomes, never a
+    broker order), republishes the open-signals view (``refresh_captured`` — which
+    also phone-pushes any NEW signal) and the closed-today view
+    (``publish_captured_closed``). Shared by the ``captured_manage`` command (manual
+    'run now') and the scheduler's 5-min captured-manage tick. Each close is logged
+    best-effort; a notify failure never blocks the publishes."""
+    res = compute.run_captured_manage_cycle()
+    refresh_captured(bus)
+    publish_captured_closed(bus)
+    try:
+        _notify_captured_closes(bus, (res or {}).get("closed"))
+    except Exception:  # noqa: BLE001
+        log.exception("captured close notify degraded (non-fatal)")
+
+
 def remove_closed_from_captured(bus, signal_id) -> None:
     """Republish the captured view with one signal removed, PRESERVING live marks.
 
@@ -710,10 +818,12 @@ def collect_gex_history(bus=None) -> None:
     refreshers. Guarded by the caller; ``compute.collect_gex_snapshots`` is
     itself defensive (per-symbol failures are logged, not raised).
 
-    After collection, publishes the per-index flow-skew view
-    (``cache:options:flow_skew``) so it rides the SAME 1-min tick that just wrote
-    the rows. That publish is best-effort — a failure must never affect the
-    collection that already succeeded (and ``bus`` is None for legacy callers).
+    After collection, publishes the views built FROM the rows just written, so they
+    ride the SAME 1-min tick: flow-skew (``cache:options:flow_skew``), the flow
+    alerts, the Options Matrix (``cache:options:matrix``) and the Net Prem series
+    (``cache:options:net_premium``). Each is its own best-effort block — a failure
+    must never affect the collection that already succeeded, nor the sibling
+    publishes (and ``bus`` is None for legacy callers, which skip all of them).
 
     The currently-viewed gamma symbol's chain is CAPTURED during the poll (see
     ``compute.collect_gex_snapshots(capture_symbols=…)``) so the same tick's
@@ -733,6 +843,10 @@ def collect_gex_history(bus=None) -> None:
             publish_matrix(bus)
         except Exception:
             log.exception("publish_matrix after collect degraded")
+        try:
+            publish_net_premium(bus)
+        except Exception:
+            log.exception("publish_net_premium after collect degraded")
 
 
 def _alert_now():
@@ -841,13 +955,99 @@ def publish_matrix(bus) -> None:
         log.exception("publish_matrix degraded")
 
 
+def publish_net_premium(bus) -> None:
+    """Assemble the Net Prem view and publish it to the bus.
+
+    Rides the 1-min GEX tick right after ``publish_matrix``, over the rows
+    ``collect_gex_snapshots`` just wrote. ``compute.build_net_premium`` is fully
+    defensive about DATA (a DB failure degrades to an empty-series payload with
+    ``error`` set). Guarded so a net-premium failure never escapes into the caller
+    — the collection and the earlier publishes must be unaffected.
+
+    **Its own DB read, deliberately.** ``build_matrix`` has just read the same six
+    flow columns over an overlapping symbol set, so it is tempting to hand those
+    rows over instead. Three reasons not to.
+
+    1. **The universes are independently sourced and need not overlap.**
+       ``net_premium.GROUPS`` is a static hardcoded tuple, while
+       ``compute._matrix_symbols()`` derives from
+       ``gex_collector.collection_symbols()`` (the index base ∪ the *gitignored*
+       ``Top 20.xlsx``) and degrades to ``[]`` when that import fails. They happen
+       to be equal locally (27 each), but on a fresh clone — or any watchlist
+       edit — this view's symbols are a strict SUPERSET, so sharing would starve
+       it of most of its lines year-round.
+    2. **They are not the same rows.** Matrix reads ``session_date`` while net
+       premium reads ``_display_session_date(now, …)``, and between the 08:00
+       collection start and the 08:30 RTH open those DIFFER by a day — sharing
+       would silently plot the wrong session in exactly the window this view is
+       most fragile in.
+    3. **Independence.** A matrix build failure returns early with ``error`` and
+       no rows, which would then take this view down with it.
+
+    The duplicated read is six narrow columns over an indexed range (no grid blob)
+    for 27 symbols — cheap enough that correctness and isolation win.
+
+    **No ``skip_unchanged``** (unlike ``publish_matrix``): it could not fire, for two
+    independent reasons. The payload carries a fresh ``ts`` from every build, so the
+    comparison never matches; and even ignoring ``ts``, the sole caller is
+    ``collect_gex_history`` under ``scheduler.gex_due`` (08:00–15:20 CT), so this only
+    ever runs inside the window where the series gains a row every minute. There is
+    nothing to suppress — the flag would only add a full cache read plus a deep
+    compare of a many-thousand-point series on every tick of a branch that has
+    historically dropped slots under load.
+
+    A payload that fails the ``NetPremiumSnapshot`` gate is logged as an ERROR
+    naming the contract and NOT cached. That loudness is the point: this publish
+    sits inside a try/except, so a quiet skip would reach the user as an empty
+    chart — indistinguishable from "not collected yet", which is the honest state
+    of several of these series for a while after ship."""
+    try:
+        # scheduler imports handlers at its module top, so import it lazily here to
+        # avoid a module-top import cycle.
+        from services.options_svc import scheduler
+        # ONE clock read, threaded into both consumers (mirrors compute.gamma_snapshot):
+        # active_session_date and build_net_premium's RTH crop straddle the 08:00 and
+        # 08:30 boundaries, and reasoning about those is only sound if they agree on
+        # the instant. active_session_date returns a datetime.date OBJECT — pass it
+        # through untouched; build_net_premium raises TypeError on a string by design.
+        now = scheduler._market_now()
+        view = compute.build_net_premium(scheduler.active_session_date(now), now=now)
+        # The constructor IS the gate: every field carries a default (so a missing
+        # key validates) and _Base inherits pydantic's extra="ignore" (so an engine
+        # extra is dropped rather than cached). A non-dict return raises TypeError at
+        # the ** expansion and lands on the same handler. The write hangs off ``else``
+        # so "publish only on a clean payload" is structural, not inferred.
+        try:
+            snap = NetPremiumSnapshot(**view)
+        except Exception:
+            log.exception("net-premium payload could not be validated against "
+                          "NetPremiumSnapshot — NOT publishing (shape regression)")
+        else:
+            bus.cache_set(CACHE_NET_PREMIUM, snap.model_dump(), event=EVENT_NET_PREMIUM)
+    except Exception:
+        log.exception("publish_net_premium degraded")
+
+
 def _flow_alert_symbols():
     """The collected universe to run flow alerts over. Defensive → [].
 
     ``gex_collector`` (options-scanner) is imported LAZILY — ``compute`` (imported
     at module top) has already put OPTIONS_SCANNER on ``sys.path``, and the lazy
     import avoids binding process-wide module names at handler-module import time
-    (the documented cross-app collision discipline)."""
+    (the documented cross-app collision discipline).
+
+    This derives from the SAME ``collection_symbols()`` the Net Prem view needs,
+    so the 2026-08-05 additions to ``gex_collector.SYMBOLS`` (the 11 SPDR sectors
+    + IWM/DIA + the ten mega-caps) also widened the UOA + crossover push to
+    Discord/Telegram. The user was asked and CHOSE to keep sector alerts — "a
+    large XLE or XLF sweep is a real rotation signal".
+
+    **If they ever prove too noisy, exclude them HERE — do NOT remove them from
+    ``gex_collector.SYMBOLS``.** The Net Prem view reads those same collected
+    rows, so dropping them from collection would silently empty its entire SPDR
+    Sectors group: eleven blank lines, no error, no log. This function is the
+    right cut point precisely because it is downstream of collection.
+    """
     try:
         import gex_collector
         # $VIX-options premium crossovers are noise (mirrors the gamma symbol
@@ -998,11 +1198,36 @@ def run_flow_alerts(bus) -> None:
                 cooldowns[cid] = now_ts
                 a = dict(c)
                 a["id"] = cid
+                # detect_uoa emits no ts (crossover/gamma_flip do) — stamp the
+                # detecting tick so every alert can be placed on a timeline.
+                a["ts"] = now_ts
+                a["text"] = flow_alerts.alert_text(a)
+                fresh.append(a)
+
+        # Contract-level big_delta (relative delta-notional) — same stash pattern,
+        # same shared cooldown seen-set (once per contract per day) as UOA above.
+        for sym, contracts in compute.take_big_delta_stash().items():
+            if sym not in allowed:      # same universe as crossover/UOA (excludes $VIX)
+                continue
+            for c in contracts:
+                cid = f"{sym}|big_delta|{c['side']}|{c['strike']:g}|{c['expiry']}"
+                if cid in cooldowns:
+                    continue
+                cooldowns[cid] = now_ts
+                a = dict(c)
+                a["id"] = cid
+                a["ts"] = now_ts
                 a["text"] = flow_alerts.alert_text(a)
                 fresh.append(a)
 
         if fresh:
+            # Quiet-live: big_delta always lands on the screen (below), but is
+            # phone-pushed only once [big_delta].push is flipped true — the
+            # documented go-live switch. Every other alert type is unaffected.
+            push_big_delta = bool(cfg.get("big_delta", {}).get("push", False))
             for a in fresh:
+                if a.get("type") == "big_delta" and not push_big_delta:
+                    continue
                 try:
                     push_notify.send_flow_alert(a, config=push_cfg)
                 except Exception:
@@ -1382,7 +1607,13 @@ def handle_command(bus, command) -> None:
     trade, cache the result + publish; ``captured_reload`` → re-read open signals;
     ``captured_reprice`` → reprice all open signals, cache the repriced list +
     flags (two views) + publish both; ``captured_close`` → manually close a signal
-    then refresh; ``gamma_refresh`` (args symbol, default ``$SPX``) → recompute the
+    then refresh; ``captured_manage`` → run the captured auto-manage cycle (reprice
+    → arm break-even → auto-close) then republish the open + closed views;
+    ``set_autoclose`` (args enabled) → write the auto-close master toggle;
+    ``set_manual_paper_lifecycle`` (args enabled) → write the MANUAL paper
+    account's opt-in break-even-lifecycle toggle (default OFF; the DRIVER
+    account never reads it);
+    ``gamma_refresh`` (args symbol, default ``$SPX``) → recompute the
     Gamma snapshot; ``gamma_explain`` (args symbol) → build the Explain body, cache
     + publish; ``gamma_analyze`` → build the bundled SPX/SPY/QQQ prompt, cache +
     publish; ``sim_fetch`` (args symbol) → fetch the simulator ChainSnapshot
@@ -1394,7 +1625,9 @@ def handle_command(bus, command) -> None:
     result + publish; ``calc_iv`` (args spot/strike/option_type/mark/expiry/rate) →
     imply IV from the option mark at the intraday time-to-expiry, cache + publish;
     ``expected_move`` (args symbol/expiry/legs) → build the
-    expected-move cone payload, cache the result + publish; ``rescue`` (args
+    expected-move cone payload, cache the result + publish; ``em_chain`` (args
+    symbol) → expirations + strike ladders for the Expected Move dropdowns;
+    ``rescue`` (args
     position_id) → compute the ranked rescue advisory for one paper position, cache
     per-id + publish; ``rescue_apply`` (args position_id, candidate) → execute the
     approved candidate against the paper position (stale-price guarded), refresh the
@@ -1513,6 +1746,21 @@ def handle_command(bus, command) -> None:
         # Drop ONLY the closed signal from the cached view, preserving the live
         # marks on the remaining rows (don't revert to the persisted view).
         remove_closed_from_captured(bus, sid)
+    elif command.type == "captured_manage":
+        # Manual 'run now' of the captured auto-manage cycle (reprice → arm → close);
+        # runs regardless of the auto-close toggle (the toggle only gates the
+        # scheduled tick — an explicit click should always work).
+        run_captured_manage_and_publish(bus)
+    elif command.type == "set_autoclose":
+        # Settings toggle write-through: gate the SCHEDULED captured-manage cycle.
+        enabled = bool((command.args or {}).get("enabled", True))
+        bus.cache_set(CACHE_AUTOCLOSE_ENABLED, {"enabled": enabled})
+    elif command.type == "set_manual_paper_lifecycle":
+        # Settings toggle write-through: gate the MANUAL paper account's opt-in
+        # break-even lifecycle. Defaults False — only an explicit enable turns it
+        # on; the DRIVER account is never affected.
+        enabled = bool((command.args or {}).get("enabled", False))
+        bus.cache_set(CACHE_MANUAL_PAPER_LIFECYCLE, {"enabled": enabled})
     elif command.type == "gamma_refresh":
         refresh_gamma(bus, command.args.get("symbol", "$SPX"))
     elif command.type == "gamma_explain":
@@ -1574,6 +1822,10 @@ def handle_command(bus, command) -> None:
             a.get("lookback", "auto"))
         version = bus.cache_set(CACHE_EXPECTED_MOVE, res)
         bus.publish(EVENT_EXPECTED_MOVE, {"version": version})
+    elif command.type == "em_chain":
+        res = compute.em_chain_meta((command.args or {}).get("symbol", "SPY"))
+        version = bus.cache_set(CACHE_EM_CHAIN, res)
+        bus.publish(EVENT_EM_CHAIN, {"version": version})
     elif command.type == "rescue":
         # position_id may be a paper int OR a captured signal_id string. Coerce
         # to int only for the paper path (the paper loader expects an int id); a

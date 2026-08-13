@@ -168,11 +168,14 @@ def test_eod_auto_close_writes_granular_exit_reason(tmp_path, monkeypatch):
     import sqlite3
     c = sqlite3.connect(db)
     # Open SWING signal. entry_credit=0.30 => credit_total = 30.
+    # Far-future expiration so DTE > CUT_DTE: the delta breach is what should
+    # close this (a now-past expiration would trip the HARD time-stop floor,
+    # which since the captured-autoclose lifecycle precedes the SOFT delta stop).
     c.execute(
         """INSERT INTO signals(signal_id, scanner_type, symbol, strategy,
               short_strike, long_strike, expiration, entry_credit, entry_score,
               entry_grade, dedup_key, first_seen_date, status)
-           VALUES('sw1','SWING','SPY','PCS',690,688,'2026-06-30',0.30,60,
+           VALUES('sw1','SWING','SPY','PCS',690,688,'2030-06-30',0.30,60,
                   'Marginal','ksw1','2026-06-01','OPEN')""")
     c.commit(); c.close()
 

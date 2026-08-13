@@ -10,7 +10,8 @@ proxy / scoring code. The pure transforms (``paper_rows``/``synth_from_trade``/
 import inspect
 
 import bus_client
-from pages.options import paper
+import pytest
+from pages.options import detail, paper
 
 TRADE = {
     "trade_id": "T1", "symbol": "SPY", "strategy": "PCS", "status": "OPEN",
@@ -183,7 +184,10 @@ RICH_TRADE = {
 
 def test_synth_maps_stored_calculated_fields():
     s = paper.synth_from_trade(RICH_TRADE)
-    assert s["breakeven"] == 129.45          # coerced from the stored string
+    # The breakeven is passed through as STORED (a string) rather than coerced --
+    # see test_synth_preserves_iron_condor_breakeven_string. What matters is that
+    # it renders, so assert on the rendered text, which holds for either shape.
+    assert detail.breakeven_text(s["breakeven"]) == "$129.45"
     assert s["short_delta"] == -0.5
     assert s["net_theta"] == -0.016
     assert s["net_vega"] == -0.2             # reconstructed from -entry_vega
@@ -208,9 +212,114 @@ def test_synth_pop_none_when_delta_absent_or_zero():
     assert paper.synth_from_trade({"symbol": "X"})["pop_pct"] is None
 
 
-def test_synth_breakeven_non_numeric_is_none():
-    assert paper.synth_from_trade({"symbol": "X", "breakeven": ""})["breakeven"] is None
+def test_synth_breakeven_junk_renders_an_em_dash():
+    # Unparseable / absent breakevens must not fabricate a number. The adapter no
+    # longer coerces (see below), so the em-dash now comes from breakeven_text.
+    for stored in ("", "n/a", None):
+        s = paper.synth_from_trade({"symbol": "X", "breakeven": stored})
+        assert detail.breakeven_text(s["breakeven"]) == "—"
     assert paper.synth_from_trade({"symbol": "X"})["breakeven"] is None
+
+
+def test_synth_preserves_iron_condor_breakeven_string():
+    """An iron condor stores BOTH breakevens as "put/call" (scanner_engine.py:1069).
+
+    ``detail.breakevens`` parses that shape, but the adapter used to run the value
+    through a bare ``float()`` first -- which RAISES on the slash, so ``_num``
+    returned None and the value was destroyed before the slash-aware formatter ever
+    saw it. Every IC paper trade therefore showed "Breakeven: —" even after the
+    panel itself was fixed.
+    """
+    s = paper.synth_from_trade({"symbol": "SPX", "strategy": "IC",
+                                "breakeven": "5900.5/6010.2"})
+    assert detail.breakeven_text(s["breakeven"]) == "$5,900.50 / $6,010.20"
+
+
+def test_synth_preserves_plain_float_breakeven():
+    # The credit-spread shape (a real float, not a string) must be unaffected.
+    s = paper.synth_from_trade({"symbol": "SPY", "breakeven": 398.45})
+    assert detail.breakeven_text(s["breakeven"]) == "$398.45"
+
+
+# ── DEBIT trades carry their strikes ONLY in ``legs`` ────────────────────────
+# paper_trader._create_debit_trade (paper_trader.py:80) stores short_strike /
+# long_strike / width as None and puts the real strikes in ``legs`` -- lowercase
+# {kind, side, strike, expiration, qty}, straight off strategy_scanner._leg_from.
+DEBIT_TRADE = {
+    "trade_id": "T7", "symbol": "SPY", "strategy": "BULL_CALL", "status": "OPEN",
+    "trade_type": "SWING", "direction": "DEBIT", "expiration": "2030-03-15",
+    "quantity": 1, "entry_credit": -3.20,
+    "short_strike": None, "long_strike": None, "width": None,
+    "legs": [{"kind": "call", "side": "long", "strike": 400.0,
+              "expiration": "2030-03-15", "qty": 1},
+             {"kind": "call", "side": "short", "strike": 410.0,
+              "expiration": "2030-03-15", "qty": 1}],
+}
+
+
+def test_synth_carries_legs_so_a_debit_trade_shows_its_contract():
+    """Without ``legs`` the contract card vanishes entirely for a debit trade.
+
+    ``contract_lines`` prefers ``legs`` and falls back to short_strike/long_strike
+    -- both of which a debit trade stores as None -- so an adapter that dropped
+    ``legs`` left it nothing to render, and the one card that answers "what am I
+    holding" disappeared for exactly the trades whose strikes live nowhere else.
+    """
+    s = paper.synth_from_trade(DEBIT_TRADE)
+    assert detail.contract_lines(s) == ["Buy 400 C  /  Sell 410 C"]
+
+
+def test_synth_long_put_single_leg():
+    s = paper.synth_from_trade({"symbol": "SPY", "strategy": "LONG_PUT",
+                                "direction": "DEBIT", "expiration": "2030-03-15",
+                                "short_strike": None, "long_strike": None,
+                                "legs": [{"kind": "put", "side": "long",
+                                          "strike": 231.0, "qty": 1}]})
+    assert detail.contract_lines(s) == ["Buy 231 P"]
+
+
+def test_synth_credit_spread_keeps_the_strike_key_fallback():
+    # A credit spread carries no legs at all; the strike-key path must be intact.
+    s = paper.synth_from_trade(TRADE)
+    assert not s.get("legs")
+    assert detail.contract_lines(s) == ["Sell 450 P  /  Buy 445 P"]
+
+
+def test_synth_max_loss_is_per_share_not_whole_position():
+    # max_loss_total is max_loss * quantity * 100 (paper_trader.py:117).
+    # With qty=3 and a $3.45/share max loss, the stored total is $1035.
+    trade = {"symbol": "SPY", "entry_credit": 1.55, "max_loss_total": 1035.0,
+             "quantity": 3, "expiration": "2099-01-15"}
+    s = paper.synth_from_trade(trade)
+    # credit is per-share, so max_loss must be per-share too.
+    assert s["max_loss"] == pytest.approx(3.45)
+    assert s["credit"] == pytest.approx(1.55)
+
+
+def test_synth_max_loss_prefers_stored_per_share_over_division():
+    # The ledger persists the exact per-share max loss as ``max_loss_per``
+    # (a real column). It must win over reconstructing the value from the
+    # whole-position total -- the totals here DISAGREE on purpose, so this
+    # fails loudly if the precedence is ever reversed.
+    trade = {"symbol": "SPY", "entry_credit": 1.55, "max_loss_per": 3.45,
+             "max_loss_total": 9999.0, "quantity": 3, "expiration": "2099-01-15"}
+    assert paper.synth_from_trade(trade)["max_loss"] == pytest.approx(3.45)
+
+
+def test_synth_max_loss_per_share_survives_missing_quantity():
+    # With the exact per-share value stored there is nothing to reconstruct,
+    # so a missing quantity must NOT degrade the row to None.
+    trade = {"symbol": "SPY", "entry_credit": 1.55, "max_loss_per": 3.45,
+             "max_loss_total": 1035.0, "expiration": "2099-01-15"}
+    assert paper.synth_from_trade(trade)["max_loss"] == pytest.approx(3.45)
+
+
+def test_synth_max_loss_none_when_quantity_missing():
+    # Without quantity the total cannot be reduced to per-share. Better to show
+    # nothing than a figure that is wrong by a factor of the position size.
+    trade = {"symbol": "SPY", "entry_credit": 1.55, "max_loss_total": 1035.0,
+             "expiration": "2099-01-15"}
+    assert paper.synth_from_trade(trade)["max_loss"] is None
 
 
 def test_merge_detail_overlays_non_none_only():
@@ -273,3 +382,14 @@ def test_status_badge_class():
     assert paper.status_badge_class("EXPIRED") == theme.BADGE_MUTED
     assert paper.status_badge_class("CLOSED") == theme.BADGE_MUTED
     assert paper.status_badge_class(None) == theme.BADGE_MUTED
+
+
+def test_vega_sign_round_trips_through_storage():
+    # paper_trader.py:123 stores entry_vega = -signal["net_vega"], so the
+    # adapter's -entry_vega recovers the ORIGINAL net_vega exactly. This test
+    # exists to fail loudly if either side flips independently.
+    original_net_vega = -0.20
+    stored_entry_vega = -original_net_vega          # what paper_trader writes
+    s = paper.synth_from_trade({"symbol": "SPY", "entry_vega": stored_entry_vega,
+                                "expiration": "2099-01-15"})
+    assert s["net_vega"] == pytest.approx(original_net_vega)

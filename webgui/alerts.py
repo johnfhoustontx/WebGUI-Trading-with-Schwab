@@ -36,6 +36,22 @@ def scanner_keys(scan):
     return {_sig_key(s) for s in _signals(scan)}
 
 
+def captured_keys(captured):
+    """Set of stable keys for the currently open captured signals — their
+    ``signal_id``s.
+
+    Immune to REPRICING: a mark update keeps the same id, so a captured badge built
+    on ``unread_count`` fires on a genuinely NEW captured signal, not on the
+    periodic reprice-republish that merely bumps the view's version (that
+    version-churn was the "captured badge keeps showing" bug). Defensive: a
+    bad/None view, or a signal missing its id, contributes nothing.
+    """
+    sigs = (captured or {}).get("signals") if isinstance(captured, dict) else None
+    sigs = sigs if isinstance(sigs, list) else []
+    return {s.get("signal_id") for s in sigs
+            if isinstance(s, dict) and s.get("signal_id")}
+
+
 def scanner_scores(scan):
     """{signal_key: composite_score} across both tables."""
     return {_sig_key(s): (s.get("composite_score") or 0) for s in _signals(scan)}
@@ -175,14 +191,20 @@ def new_flow_alerts(view, acked):
     New = alert dicts whose ``id`` isn't already acked. The updated set carries
     every id present so each alert fires once (fire-on-first-seen). Defensive:
     a bad/None view → ``([], acked)`` unchanged.
+
+    ``big_delta`` is quiet-live: it is excluded from the chime/toast trigger set
+    (the Flow Alerts screen still shows it — this only silences the audible/visual
+    nudge) but its id is still marked seen, so it's considered exactly once.
     """
     lst = (view or {}).get("alerts") if isinstance(view, dict) else None
     lst = lst if isinstance(lst, list) else []
     new, all_ids = [], set(acked)
     for a in lst:
         if isinstance(a, dict) and a.get("id") and a["id"] not in all_ids:
-            new.append(a)
             all_ids.add(a["id"])
+            if a.get("type") == "big_delta":
+                continue          # quiet-live: no chime/toast, still on the screen
+            new.append(a)
     return new, all_ids
 
 

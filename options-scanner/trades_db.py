@@ -39,6 +39,15 @@ CREATE TABLE IF NOT EXISTS trades (
     entry_credit_total REAL,
     max_loss_per REAL,
     max_loss_total REAL,
+    -- DEBIT structures (long options / debit verticals). NULL on a credit spread.
+    -- `direction` routes expiration settlement; `legs` (JSON) and `entry_debit`
+    -- are what settling at intrinsic is computed FROM, so all three must persist.
+    direction TEXT,
+    legs TEXT,
+    entry_debit REAL,
+    entry_debit_total REAL,
+    max_profit_total REAL,
+    unbounded INTEGER,
     breakeven TEXT,
     short_delta REAL,
     net_theta REAL,
@@ -81,6 +90,8 @@ _TRADE_COLUMNS = [
     "expiration", "dte_at_entry", "short_strike", "long_strike",
     "call_short", "call_long", "width", "quantity",
     "entry_credit", "entry_credit_total", "max_loss_per", "max_loss_total",
+    "direction", "legs", "entry_debit", "entry_debit_total",
+    "max_profit_total", "unbounded",
     "breakeven", "short_delta", "net_theta",
     "entry_delta", "entry_theta", "entry_vega", "entry_gamma",
     "entry_bid", "entry_ask",
@@ -101,6 +112,45 @@ def _row_to_dict(row):
     return {k: row[k] for k in row.keys()}
 
 
+def _trade_to_row(trade):
+    """Bind a trade dict to the typed columns, encoding the non-scalar ones.
+
+    ``legs`` is a list[dict] -> JSON TEXT, matching how ``paper_account_db``
+    already stores its ``legs`` columns. ``unbounded`` is a bool -> INTEGER,
+    since SQLite has no boolean type. Both keep NULL as NULL so a credit spread
+    (which has neither) stays distinguishable from a debit trade that has an
+    empty list or an explicit ``False``.
+    """
+    values = {c: trade.get(c) for c in _TRADE_COLUMNS}
+    legs = values.get("legs")
+    if legs is not None and not isinstance(legs, str):
+        values["legs"] = json.dumps(legs)
+    unbounded = values.get("unbounded")
+    if unbounded is not None:
+        values["unbounded"] = int(bool(unbounded))
+    return values
+
+
+def _trade_row_to_dict(row):
+    """Decode a trades row, reversing ``_trade_to_row``.
+
+    Kept separate from ``_row_to_dict`` so the shared event-row decoder is
+    untouched. A malformed ``legs`` payload degrades to ``[]`` rather than
+    raising — the same tolerance ``paper_account_db.list_adjustments`` applies.
+    """
+    d = _row_to_dict(row)
+    if d is None:
+        return None
+    if d.get("legs") is not None:
+        try:
+            d["legs"] = json.loads(d["legs"])
+        except (TypeError, ValueError):
+            d["legs"] = []
+    if d.get("unbounded") is not None:
+        d["unbounded"] = bool(d["unbounded"])
+    return d
+
+
 def init_db(db_path=None):
     # Resolve at call time so tests can monkeypatch DEFAULT_DB_PATH.
     if db_path is None:
@@ -111,11 +161,19 @@ def init_db(db_path=None):
     try:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript(SCHEMA)
+        # Additive migrations for pre-existing DBs (SQLite has no ADD COLUMN IF NOT
+        # EXISTS). Existing rows keep NULL in every new column.
         existing_cols = {r[1] for r in conn.execute("PRAGMA table_info(trades)")}
-        for col in ("entry_delta", "entry_theta", "entry_vega", "entry_gamma",
-                    "entry_bid", "entry_ask"):
+        for col, col_type in (
+            ("entry_delta", "REAL"), ("entry_theta", "REAL"),
+            ("entry_vega", "REAL"), ("entry_gamma", "REAL"),
+            ("entry_bid", "REAL"), ("entry_ask", "REAL"),
+            ("direction", "TEXT"), ("legs", "TEXT"),
+            ("entry_debit", "REAL"), ("entry_debit_total", "REAL"),
+            ("max_profit_total", "REAL"), ("unbounded", "INTEGER"),
+        ):
             if col not in existing_cols:
-                conn.execute(f"ALTER TABLE trades ADD COLUMN {col} REAL")
+                conn.execute(f"ALTER TABLE trades ADD COLUMN {col} {col_type}")
         conn.commit()
         _maybe_migrate_from_json(conn, db_path)
     finally:
@@ -207,14 +265,14 @@ def insert_trade(conn, trade):
     """Insert a trade dict. Extra keys are ignored; missing keys become NULL."""
     placeholders = ", ".join(f":{c}" for c in _TRADE_COLUMNS)
     cols = ", ".join(_TRADE_COLUMNS)
-    values = {c: trade.get(c) for c in _TRADE_COLUMNS}
+    values = _trade_to_row(trade)
     conn.execute(f"INSERT OR REPLACE INTO trades ({cols}) VALUES ({placeholders})", values)
 
 
 def update_trade(conn, trade_id, trade):
     """Full-row update. Missing columns become NULL; match old save_trades semantics."""
     set_clause = ", ".join(f"{c}=:{c}" for c in _TRADE_COLUMNS if c != "trade_id")
-    values = {c: trade.get(c) for c in _TRADE_COLUMNS}
+    values = _trade_to_row(trade)
     values["trade_id"] = trade_id  # always bind the WHERE key
     conn.execute(
         f"UPDATE trades SET {set_clause} WHERE trade_id = :trade_id", values,
@@ -237,7 +295,7 @@ def fetch_all(conn):
     rows = conn.execute(
         "SELECT * FROM trades ORDER BY entry_time ASC, rowid ASC"
     ).fetchall()
-    return [_row_to_dict(r) for r in rows]
+    return [_trade_row_to_dict(r) for r in rows]
 
 
 def fetch_by_status(conn, status):
@@ -245,11 +303,11 @@ def fetch_by_status(conn, status):
         "SELECT * FROM trades WHERE status = ? ORDER BY entry_time ASC, rowid ASC",
         (status,),
     ).fetchall()
-    return [_row_to_dict(r) for r in rows]
+    return [_trade_row_to_dict(r) for r in rows]
 
 
 def fetch_one(conn, trade_id):
-    return _row_to_dict(
+    return _trade_row_to_dict(
         conn.execute("SELECT * FROM trades WHERE trade_id = ?", (trade_id,)).fetchone()
     )
 

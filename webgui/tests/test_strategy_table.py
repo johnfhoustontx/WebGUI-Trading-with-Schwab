@@ -51,7 +51,10 @@ def _pcs():
                  {"kind": "put", "side": "long", "strike": 435,
                   "expiration": "2026-08-21", "qty": 1, "mark": 0.50}],
         "expiration": "2026-08-21", "dte": 20,
-        "net_debit": None, "net_credit": 1.70, "max_profit": 170.0,
+        # net_credit is per-CONTRACT, like max_profit/max_loss/capital beside it
+        # (payoff_metrics multiplies by 100). It read 1.70 — per-SHARE — which
+        # made the whole fixture self-inconsistent and masked the credit unit bug.
+        "net_debit": None, "net_credit": 170.0, "max_profit": 170.0,
         "max_loss": 330.0, "capital": 330.0, "breakevens": [438.30], "pop_pct": 68.0,
         "rr": 0.515, "composite_score": 88.0, "grade": "A",
         "underlying_price": 445.0, "unbounded": False,
@@ -118,7 +121,7 @@ def test_debit_credit_text_debit():
 
 
 def test_debit_credit_text_credit():
-    assert st.debit_credit_text(_pcs()) == "+1.70 credit"
+    assert st.debit_credit_text(_pcs()) == "+170.00 credit"
 
 
 def test_debit_credit_text_neither():
@@ -154,6 +157,22 @@ def test_strategy_columns_shape():
                      "max_profit", "max_loss", "rr", "pop_pct", "breakevens",
                      "composite_score", "grade", "actions"]:
         assert expected in names
+
+
+def test_strategy_columns_include_iv_rank():
+    """The multi-strategy table (Strategy Finder + the Scanner's Directional tab)
+    carries an IV Rank column, sortable like the other data columns."""
+    cols = {c["field"]: c for c in st.strategy_columns()}
+    assert cols["iv_rank"]["label"] == "IV Rank"
+    assert cols["iv_rank"]["sortable"] is True
+
+
+def test_strategy_rows_carry_iv_rank_rounded():
+    """IV Rank from the signal shows as a whole number; absent → blank (None)."""
+    sig = _long_call()
+    sig["iv_rank"] = 63.2
+    assert st.strategy_rows([sig])[0]["iv_rank"] == 63
+    assert st.strategy_rows([_pcs()])[0]["iv_rank"] is None   # fixture has no iv_rank
 
 
 def test_strategy_columns_actions_centered_and_not_sortable():
@@ -316,7 +335,7 @@ def test_strategy_rows_pcs_carries_fields():
     assert row["id"] == "p1"
     assert row["strategy_label"] == "Put Credit Spread"
     assert row["bias"] == "bullish"
-    assert row["debit_credit"] == "+1.70 credit"
+    assert row["debit_credit"] == "+170.00 credit"
     assert row["breakevens"] == "438.30"
     assert row["grade"] == "A"
     assert row["_allow_paper"] is True
@@ -471,3 +490,65 @@ def test_rows_carry_exp_and_dte():
                              "dte": 120, "composite_score": 50}])[0]
     assert row["expiration"] == "10/28"
     assert row["dte"] == 120
+
+
+# --- signed net cost --------------------------------------------------------
+# UNITS: strategy_scanner.payoff_metrics emits net_debit/net_credit in
+# per-CONTRACT dollars (``net * _CONTRACT_MULT``, _CONTRACT_MULT = 100.0), always
+# POSITIVE, using None to mean "this structure is the other side". ``net_cost``
+# is normalized to PER-SHARE dollars — the scale the ``credit`` field and
+# detail.money_per_contract already use — so a $240 long call cannot render as
+# $24,000.
+
+def test_detail_signal_carries_debit_as_negative_net_cost():
+    out = st.detail_signal({"net_debit": 240.0})
+    assert out["credit"] is None          # still not mislabelled as a credit
+    assert out["net_cost"] == -2.40
+
+
+def test_detail_signal_credit_is_positive_net_cost():
+    out = st.detail_signal({"net_credit": 155.0})
+    assert out["net_cost"] == 1.55
+
+
+def test_detail_signal_net_cost_from_per_share_source_credit():
+    # A scanner credit spread carries the per-share ``credit`` and no net_*.
+    assert st.detail_signal({"credit": 1.55})["net_cost"] == 1.55
+
+
+def test_detail_signal_net_cost_absent_when_nothing_priced():
+    assert st.detail_signal({"type": "PCS"})["net_cost"] is None
+
+
+def test_detail_signal_credit_from_net_credit_is_per_share():
+    # A NATIVELY-built naked short carries no source ``credit`` (only the adapted
+    # credit families preserve one), so ``credit`` is filled from ``net_credit``
+    # — which payoff_metrics emits in per-CONTRACT dollars. detail.py's stated
+    # convention is that every adapter hands it PER-SHARE, and it renders credit
+    # through money_per_contract (x100), so an unnormalized fill double-scales.
+    out = st.detail_signal({"type": "SHORT_PUT", "net_credit": 155.0,
+                            "net_debit": None})
+    assert out["credit"] == 1.55
+    # and it stays consistent with the net_cost normalized alongside it
+    assert out["net_cost"] == 1.55
+
+
+def test_detail_signal_max_loss_is_per_share():
+    # Same unit collision, second field. _normalize_credit scales the source
+    # max_loss to per-CONTRACT ("x100 here" — strategy_scanner.py:320) and
+    # payoff_metrics builds it that way natively, but the OTHER three detail-panel
+    # sources are per-share: the raw scanner signal (scanner_engine.py:57),
+    # paper's _max_loss_per_share, and captured's entry_max_loss (recorded
+    # straight off a scanner signal). The panel renders it via money_per_contract.
+    assert st.detail_signal(_pcs())["max_loss"] == 3.30
+    assert st.detail_signal(_long_call())["max_loss"] == 2.50
+
+
+def test_detail_signal_max_loss_absent_stays_absent():
+    assert st.detail_signal({"type": "PCS"}).get("max_loss") is None
+
+
+def test_detail_signal_does_not_mutate_its_input():
+    sig = {"net_debit": 240.0}
+    st.detail_signal(sig)
+    assert sig == {"net_debit": 240.0}

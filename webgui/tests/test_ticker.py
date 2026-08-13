@@ -12,8 +12,8 @@ def _dash():
         {"category": "Sector SPDR", "tiles": [
             {"display": "XLK", "last": 181.0, "change_pct": 1.4, "color_state": "risk_on_strong"},
             {"display": "XLB", "last": 50.0, "change_pct": -2.6, "color_state": "risk_off_strong"}]},
-        {"category": "Magnificent 7", "tiles": [
-            {"display": "MAG7", "basket": True, "avg_pct": 0.25, "breadth_text": "3/7 up",
+        {"category": "Top 10", "tiles": [
+            {"display": "BIG10", "basket": True, "avg_pct": 0.25, "breadth_text": "8/10 up",
              "change_pct": 0.25, "color_state": "risk_on_mild"},
             {"display": "NVDA", "last": 201.0, "change_pct": -0.85, "color_state": "risk_off_mild"}]},
     ]}
@@ -38,12 +38,12 @@ def test_ticker_items_composes_expected_items():
     assert all(i["tone"] in {"risk_on", "risk_off", "neutral", "warn"} for i in items)
 
 
-def test_ticker_includes_mag7_composite():
+def test_ticker_includes_big10_composite():
     items = ticker.ticker_items(_dash(), _sent())
-    mag = [i for i in items if i["text"].startswith("MAG7")]
+    mag = [i for i in items if i["text"].startswith("BIG10")]
     assert len(mag) == 1
     # ticker uses 1-decimal %, consistent with the other items (e.g. "SPX -0.3%")
-    assert "+0.2%" in mag[0]["text"] and "3/7 up" in mag[0]["text"]
+    assert "+0.2%" in mag[0]["text"] and "8/10 up" in mag[0]["text"]
     assert mag[0]["tone"] == "risk_on"
 
 

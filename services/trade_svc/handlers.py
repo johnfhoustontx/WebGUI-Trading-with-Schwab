@@ -22,6 +22,13 @@ from shared.contracts.trade import TradeAnalysis
 CACHE_ANALYSIS = "cache:trade:analysis"
 EVENT_ANALYSIS = "events:trade:analysis"
 
+# EquityDeepDive on-demand views (loose {html|markdown, symbol, ts} dicts — NOT
+# projected onto TradeAnalysis; the webgui serves them raw / in a copyable page).
+CACHE_DEEPDIVE = "cache:trade:deepdive"
+EVENT_DEEPDIVE = "events:trade:deepdive"
+CACHE_DEEPDIVE_QUERY = "cache:trade:deepdive_query"
+EVENT_DEEPDIVE_QUERY = "events:trade:deepdive_query"
+
 # The TradeAnalysis fields we project the compute dict onto (dropping extras the
 # GUI ignores). ``.get`` with the field default keeps a partial/error result
 # (which omits most keys) from crashing, while construction validates the types
@@ -66,8 +73,27 @@ def analyze(bus, args) -> None:
     bus.publish(EVENT_ANALYSIS, {"version": version})
 
 
+def deepdive(bus, args) -> None:
+    """Run the EquityDeepDive quant report for the symbol; cache the HTML + publish."""
+    res = compute.run_deep_dive((args or {}).get("symbol", ""))
+    version = bus.cache_set(CACHE_DEEPDIVE, res)
+    bus.publish(EVENT_DEEPDIVE, {"version": version})
+
+
+def deepdive_query(bus, args) -> None:
+    """Build the chat-prompt query for the symbol; cache the markdown + publish."""
+    res = compute.build_deep_dive_query((args or {}).get("symbol", ""))
+    version = bus.cache_set(CACHE_DEEPDIVE_QUERY, res)
+    bus.publish(EVENT_DEEPDIVE_QUERY, {"version": version})
+
+
 def handle_command(bus, command) -> None:
     """Dispatch a ``cmd:trade`` command. ``analyze`` (args ``symbol``) → run the
-    single-symbol analysis, cache + publish; else no-op."""
+    single-symbol analysis; ``deepdive`` / ``deepdive_query`` → the EquityDeepDive
+    report / chat-prompt query; else no-op. All cache + publish."""
     if command.type == "analyze":
         analyze(bus, command.args)
+    elif command.type == "deepdive":
+        deepdive(bus, command.args)
+    elif command.type == "deepdive_query":
+        deepdive_query(bus, command.args)

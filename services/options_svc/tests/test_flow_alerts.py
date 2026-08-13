@@ -48,6 +48,19 @@ def test_load_thresholds_caches_by_mtime(tmp_path, monkeypatch):
     assert c["uoa"]["k"] == 7.0 and parses["n"] == 2
 
 
+def test_load_thresholds_has_big_delta_defaults(tmp_path, monkeypatch):
+    # With NO toml, defaults are present and sane.
+    monkeypatch.setattr(flow_alerts, "_TOML_PATH", tmp_path / "missing.toml")
+    flow_alerts.reset_thresholds_cache()
+    cfg = flow_alerts.load_thresholds()
+    bd = cfg["big_delta"]
+    assert bd["enabled"] is True and bd["push"] is False
+    assert bd["rel_threshold"] == 0.20
+    assert bd["min_contract_notional"] == 10_000_000
+    assert bd["delta_lo"] == 0.05 and bd["delta_hi"] == 0.85 and bd["delta_max"] == 1.0
+    assert bd["top_n"] == 3
+
+
 def test_detect_flow_alerts_normalizes_series_once(monkeypatch):
     """The crossover pass normalizes the series exactly ONCE per call."""
     series = [_row(60, 0, 0, 100.0, 200.0), _row(120, 10, 5, 260.0, 200.0)]
@@ -250,3 +263,73 @@ def test_gamma_flip_config_defaults():
     cfg = flow_alerts._DEFAULTS
     assert cfg["gamma_flip"]["enabled"] is True
     assert "$SPX" in cfg["gamma_flip"]["symbols"]
+
+
+# --- Task 2: detect_big_delta ---
+
+def _chain(spot, contracts):
+    # contracts: list of (side, strike, expiry, dte, delta, vol)
+    m = {"call": {}, "put": {}}
+    for side, strike, expiry, dte, delta, vol in contracts:
+        m[side].setdefault(f"{expiry}:{dte}", {}).setdefault(f"{strike}", []).append(
+            {"delta": delta, "totalVolume": vol, "mark": 1.0})
+    return {"underlyingPrice": spot, "callExpDateMap": m["call"], "putExpDateMap": m["put"]}
+
+
+_CFG = {"big_delta": {"enabled": True, "rel_threshold": 0.20,
+        "min_contract_notional": 10_000_000, "delta_lo": 0.05, "delta_hi": 0.85,
+        "delta_max": 1.0, "top_n": 3}}
+
+
+def test_big_delta_fires_top_share_not_sub_share():
+    # A carries 60% of gross (fires), B ~13% each of the rest (below 20% -> no).
+    # deltas 0.5; vols chosen so A dominates; spot 100 -> notional |d|*vol*100*spot.
+    ch = _chain(100.0, [
+        ("call", 100, "2026-08-14", 3, 0.5, 300_000),   # A: |0.5|*300k*100*100 = $1.5B
+        ("call", 101, "2026-08-14", 3, 0.5, 50_000),    # B: $250M
+        ("call", 102, "2026-08-14", 3, 0.5, 50_000),    # C: $250M
+    ])
+    out = flow_alerts.detect_big_delta("SPY", ch, _CFG)
+    fired = {a["strike"] for a in out}
+    assert 100 in fired               # 1.5B / 2.0B = 75% >= 20% and >= $10M
+    assert 101 not in fired and 102 not in fired  # 250M / 2.0B = 12.5% < 20%
+
+
+def test_big_delta_abs_floor_drops_tiny_name():
+    # One contract = 100% of a tiny gross but only $2M notional -> below the $10M floor.
+    ch = _chain(50.0, [("put", 20, "2026-08-14", 3, 0.4, 1000)])  # 0.4*1000*100*50 = $2M
+    assert flow_alerts.detect_big_delta("XLC", ch, _CFG) == []
+
+
+def test_big_delta_drops_sentinel_and_band():
+    ch = _chain(100.0, [
+        ("call", 100, "2026-08-14", 3, -999.0, 900_000),  # sentinel |d|>1 -> excluded from gross+fire
+        ("call", 101, "2026-08-14", 3, 0.95, 900_000),    # deep-ITM > delta_hi -> excluded
+        ("call", 102, "2026-08-14", 3, 0.01, 900_000),    # near-zero < delta_lo -> excluded
+        ("call", 103, "2026-08-14", 3, 0.5, 300_000),     # only real contract -> 100% of gross, $1.5B
+    ])
+    out = flow_alerts.detect_big_delta("SPY", ch, _CFG)
+    assert [a["strike"] for a in out] == [103]
+
+
+def test_big_delta_topn_and_pct_of_gross():
+    ch = _chain(100.0, [("call", 100 + i, "2026-08-14", 3, 0.5, 200_000) for i in range(5)])
+    out = flow_alerts.detect_big_delta("SPY", ch, {"big_delta": {**_CFG["big_delta"], "top_n": 2}})
+    assert len(out) == 2
+    assert all(a["type"] == "big_delta" for a in out)
+    assert 0 < out[0]["pct_of_gross"] <= 1.0 and out[0]["delta_notional"] >= out[1]["delta_notional"]
+
+
+def test_big_delta_defensive():
+    assert flow_alerts.detect_big_delta("SPY", None, _CFG) == []
+    assert flow_alerts.detect_big_delta("SPY", {}, _CFG) == []
+
+
+def test_alert_text_big_delta_has_all_fields():
+    a = {"type": "big_delta", "side": "call", "symbol": "SPY", "strike": 450.0,
+         "expiry": "2026-07-18", "dte": 2, "delta": 0.42, "volume": 12000,
+         "delta_notional": 312_000_000.0, "pct_of_gross": 0.24}
+    t = flow_alerts.alert_text(a)
+    assert "SPY" in t and "07/18" in t and "450" in t and "C" in t
+    assert "$312.00M" in t
+    assert "24%" in t

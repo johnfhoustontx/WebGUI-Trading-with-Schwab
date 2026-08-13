@@ -83,6 +83,31 @@ def test_signal_rows_strikes_strip_whole_number_decimals():
     assert rows[0]["strikes"] == "1085/1070"
 
 
+def test_signal_columns_include_iv_rank():
+    """0-DTE / Swing tables carry an IV Rank column (dealer-cheap/rich context)."""
+    cols = {c["field"]: c["label"] for c in scanner.signal_columns()}
+    assert cols.get("iv_rank") == "IV Rank"
+
+
+def test_signal_rows_carry_iv_rank_rounded():
+    """The per-symbol IV Rank injected by the engine shows as a whole number, and a
+    missing/non-numeric rank is blank (None), not a fabricated 0."""
+    rows = scanner.signal_rows([
+        {"symbol": "SPY", "type": "PCS", "iv_rank": 47.6},
+        {"symbol": "QQQ", "type": "PCS"},                       # no iv_rank key
+    ])
+    by_sym = {r["symbol"]: r for r in rows}
+    assert by_sym["SPY"]["iv_rank"] == 48
+    assert by_sym["QQQ"]["iv_rank"] is None
+
+
+def test_iv_rank_value_helper():
+    assert scanner.iv_rank_value(72.4) == 72
+    assert scanner.iv_rank_value(0) == 0
+    assert scanner.iv_rank_value(None) is None
+    assert scanner.iv_rank_value("x") is None
+
+
 def test_score_zone_class_maps_zones():
     assert scanner.score_zone_class(80) == "bg-[#66bb6a]"
     assert scanner.score_zone_class(60) == "bg-[#42a5f5]"
@@ -483,6 +508,16 @@ def test_directional_rows_carry_the_symbol():
     rows = scanner.directional_rows([_DIR_SIG])
     assert rows[0]["symbol"] == "SPY"
     assert rows[0]["strategy_label"] == "Long Call"
+
+
+def test_directional_columns_include_iv_rank():
+    fields = [c["field"] for c in scanner.directional_columns()]
+    assert "iv_rank" in fields
+
+
+def test_directional_rows_carry_iv_rank():
+    rows = scanner.directional_rows([dict(_DIR_SIG, iv_rank=58.0)])
+    assert rows[0]["iv_rank"] == 58
 
 
 def test_directional_rows_badge_a_naked_short_as_undefined_risk():

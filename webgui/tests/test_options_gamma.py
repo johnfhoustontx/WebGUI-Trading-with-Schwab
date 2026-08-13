@@ -9,6 +9,8 @@ code. The pure figure/transform builders below stay unchanged + unit-tested.
 import inspect
 import json
 
+import pytest
+
 import bus_client
 from pages.options import gamma
 
@@ -64,7 +66,8 @@ def test_bar_yrange_empty_falls_back_to_spot_band():
 #    spot=None → the near-spot band math must not raise NoneType*float) ─────────
 def test_bars_from_gex_none_spot_returns_empty():
     b = gamma.bars_from_gex(GEX, None)
-    assert b == {"strikes": [], "nets": [], "colors": [], "hovers": []}
+    assert b == {"strikes": [], "nets": [], "colors": [], "hovers": [],
+                 "projected": []}
 
 
 def test_bar_yrange_none_spot_does_not_raise():
@@ -187,6 +190,105 @@ def test_heatmap_figure_rowsize_from_visible_window_median():
     fig = gamma.heatmap_figure(rows, "GEX", yrange=[198.0, 210.0])
     hm = next(s for s in fig["series"] if s["type"] == "heatmap")
     assert hm["rowsize"] == 2.5
+
+
+def test_expiry_separators_sit_between_columns():
+    """One hairline per BOUNDARY (n-1 for n expiries), at the midpoint between
+    category centres — a line ON a centre would strike through a column."""
+    lines = gamma.expiry_separators(["08/07", "08/08", "08/11", "08/12"])
+    assert [ln["value"] for ln in lines] == [0.5, 1.5, 2.5]
+    assert all(ln["width"] == 1 for ln in lines), "must stay a hairline"
+    assert all(ln["zIndex"] > 0 for ln in lines), "must draw over the blended image"
+
+
+def test_expiry_separators_empty_when_there_is_no_boundary():
+    assert gamma.expiry_separators([]) == []
+    assert gamma.expiry_separators(["08/07"]) == []
+    assert gamma.expiry_separators(None) == []
+
+
+def test_term_heatmap_separates_the_expiry_columns():
+    """The Term view blends across DAYS, where nothing varies continuously — so the
+    day boundaries have to be drawn back in."""
+    grid = {"expirations": ["08/07", "08/08", "08/11"],
+            "cells": {"08/07": {100.0: {"net_gex_usd": 5}},
+                      "08/08": {100.0: {"net_gex_usd": -3}},
+                      "08/11": {100.0: {"net_gex_usd": 2}}}}
+    fig = gamma.term_heatmap(grid)
+    assert [ln["value"] for ln in fig["xAxis"]["plotLines"]] == [0.5, 1.5]
+
+
+def test_term_heatmap_is_immune_to_an_uneven_strike_ladder():
+    """Term indexes strikes as CATEGORIES, so the mixed-ladder collision that
+    striped the intraday heatmap cannot happen here — every strike gets its own row
+    and points are addressed by index, never by strike value."""
+    grid = {"expirations": ["08/07", "08/08"],
+            "cells": {"08/07": {100.0: {"net_gex_usd": 5}, 105.0: {"net_gex_usd": 4},
+                                115.0: {"net_gex_usd": 3}},
+                      "08/08": {100.0: {"net_gex_usd": -5}, 105.0: {"net_gex_usd": -4},
+                                115.0: {"net_gex_usd": -3}}}}
+    fig = gamma.term_heatmap(grid)
+    assert fig["yAxis"]["categories"] == ["100", "105", "115"]
+    hm = next(s for s in fig["series"] if s["type"] == "heatmap")
+    assert sorted({p[1] for p in hm["data"]}) == [0, 1, 2]   # row INDEX, not strike
+    assert "rowsize" not in hm, "a categorical axis needs no strike-derived rowsize"
+
+
+def test_uniform_strike_grid_leaves_an_even_ladder_alone():
+    """The common case ($SPX/SPY/QQQ/IWM/AMD all quote one spacing): no resampling,
+    and the SAME objects back so an even chain pays nothing for the check."""
+    strikes = [100.0, 105.0, 110.0, 115.0]
+    z = [[1.0], [2.0], [3.0], [4.0]]
+    out_s, out_z = gamma.uniform_strike_grid(strikes, z)
+    assert out_s is strikes and out_z is z
+
+
+def test_uniform_strike_grid_fills_a_mixed_ladder():
+    """$NDX's shape: 5-wide near the money among 10-wide. The gap must be filled to
+    the FINEST spacing, real strikes must survive untouched, and the inserted row
+    must be the linear midpoint of its neighbours."""
+    strikes = [100.0, 105.0, 110.0, 120.0]      # 5, 5, then a 10 gap
+    z = [[10.0], [20.0], [30.0], [50.0]]
+    out_s, out_z = gamma.uniform_strike_grid(strikes, z)
+    assert out_s == [100.0, 105.0, 110.0, 115.0, 120.0]
+    assert [r[0] for r in out_z] == [10.0, 20.0, 30.0, 40.0, 50.0]
+
+
+def test_uniform_strike_grid_keeps_genuine_holes_as_holes():
+    """An inserted row bracketed by a missing sample stays None — the fill smooths
+    the LADDER, it must not invent data across a real gap in the series."""
+    strikes = [100.0, 105.0, 115.0]
+    z = [[1.0, 1.0], [2.0, None], [3.0, 3.0]]
+    out_s, out_z = gamma.uniform_strike_grid(strikes, z)
+    assert out_s == [100.0, 105.0, 110.0, 115.0]
+    assert out_z[2][0] == pytest.approx(2.5)   # interpolated where both sides exist
+    assert out_z[2][1] is None                 # neighbour missing → still missing
+
+
+def test_uniform_strike_grid_refuses_to_explode_the_row_count():
+    """One stray odd strike among round ones must not resample the window into
+    thousands of rows — past the cap the ladder is left alone."""
+    strikes = [0.0, 0.5] + [float(i) for i in range(100, 1000, 100)]
+    z = [[1.0] for _ in strikes]
+    out_s, out_z = gamma.uniform_strike_grid(strikes, z)
+    assert out_s is strikes and out_z is z
+
+
+def test_heatmap_figure_mixed_ladder_renders_a_gapless_grid():
+    """The regression this fixes: on a mixed ladder the interpolated raster left
+    unwritten cells that read as vertical stripes. Every ladder row must now carry a
+    value in every column, and rowsize must be the fine spacing that the filled
+    ladder actually uses."""
+    grid = {100.0: {"net": 5}, 105.0: {"net": -3}, 110.0: {"net": 4},
+            120.0: {"net": -2}, 130.0: {"net": 6}}
+    rows = [("09:30", 115.0, None, None, None, 0, grid),
+            ("09:31", 115.0, None, None, None, 0, grid)]
+    fig = gamma.heatmap_figure(rows, "GEX", yrange=[95.0, 135.0])
+    hm = next(s for s in fig["series"] if s["type"] == "heatmap")
+    assert hm["rowsize"] == 5.0
+    ys = sorted({p[1] for p in hm["data"]})
+    assert ys == [100.0, 105.0, 110.0, 115.0, 120.0, 125.0, 130.0]
+    assert len(hm["data"]) == len(ys) * 2, "every ladder row must fill every column"
 
 
 def test_heatmap_figure_no_yrange_keeps_all_strikes():
@@ -651,16 +753,20 @@ def test_heatmap_no_projection_no_divider_empty_cone():
 
 
 def test_heatmap_series_count_constant_across_projection():
-    # A CONSTANT series count (heatmap + Spot + EM up + EM down = 4) is required so the
-    # in-place chart.update() maps series 1:1 when toggling GEX<->Charm/DELTA/Vanna. A
-    # varying count made Highcharts replace series (shifting colorIndex + leaving stray
-    # line paths) → the heatmap rendered as a mess of thin lines. Regression guard.
+    # A CONSTANT series count (heatmap + the 3 spot-overlay series + EM up + EM down
+    # + the 3 level tracks = 9) is required so the in-place chart.update() maps
+    # series 1:1 when toggling
+    # GEX<->Charm/DELTA/Vanna. A varying count made Highcharts replace series
+    # (shifting colorIndex + leaving stray line paths) → the heatmap rendered as a
+    # mess of thin lines. Regression guard: what matters is that the count is the
+    # SAME everywhere, whatever the optional blocks are doing.
     proj = {"times": ["13:15"], "spot": 100.0, "grid": {100.0: [5.0]},
             "cone": {"mid": [100.0], "up": [100.5], "down": [99.5]}}
     with_proj = gamma.heatmap_figure(_proj_rows(), "GEX", yrange=[95.0, 105.0], projection=proj)
     no_proj = gamma.heatmap_figure(_proj_rows(), "Charm", yrange=[95.0, 105.0], projection=None)
-    assert len(with_proj["series"]) == len(no_proj["series"]) == 4
-    assert [s["type"] for s in no_proj["series"]] == ["heatmap", "line", "line", "line"]
+    assert len(with_proj["series"]) == len(no_proj["series"]) == 9
+    assert [s["type"] for s in no_proj["series"]] == [
+        "heatmap", "line", "columnrange", "errorbar"] + ["line"] * 5
 
 
 def test_strike_heat_split_constant():
@@ -697,3 +803,985 @@ def test_status_strip_text_omits_an_unknown_session():
         s = gamma.status_strip_text(st, "", None)
         assert "Session" not in s
         assert s.startswith("Last scan 1:00 PM")
+# --- Call/Put wall lines extended across the heatmap ---
+
+_WALL_ROWS = [("09:30", 450.0, None, None, None, 0, {449.0: {"net": 5}}),
+              ("09:35", 451.5, None, None, None, 0, {449.0: {"net": 7}})]
+
+
+def test_heatmap_figure_draws_wall_lines_across_the_plot():
+    # Walls are horizontal yAxis plotLines, so they span the FULL time axis rather
+    # than being a per-column series — "across the heatmap".
+    fig = gamma.heatmap_figure(_WALL_ROWS, "GEX", spot=450.0, walls=[455.0, 445.0])
+    lines = fig["yAxis"]["plotLines"]
+    by_value = {pl["value"]: pl for pl in lines}
+    assert set(by_value) == {455.0, 445.0}
+    # Labeled by side relative to spot, matching the bar chart's vocabulary.
+    assert "Call wall" in by_value[455.0]["label"]["text"]
+    assert "Put wall" in by_value[445.0]["label"]["text"]
+
+
+def test_heatmap_figure_always_emits_plotlines_key():
+    # In-place chart.update() MERGES options: a figure that omits plotLines would
+    # leave the PREVIOUS view's wall lines painted on the new view. Always emit the
+    # key (empty when there are no walls) so an update replaces them deterministically.
+    fig = gamma.heatmap_figure(_WALL_ROWS, "Charm")
+    assert fig["yAxis"]["plotLines"] == []
+
+
+def test_heatmap_wall_lines_are_defensive():
+    # A None/garbage wall must not raise or emit a bogus line.
+    fig = gamma.heatmap_figure(_WALL_ROWS, "GEX", spot=450.0,
+                               walls=[None, "x", 455.0])
+    assert [pl["value"] for pl in fig["yAxis"]["plotLines"]] == [455.0]
+    # No spot → still drawn (side falls back to Call wall), never dropped.
+    fig2 = gamma.heatmap_figure(_WALL_ROWS, "GEX", spot=None, walls=[455.0])
+    assert len(fig2["yAxis"]["plotLines"]) == 1
+
+
+def test_heatmap_figure_draws_gamma_flip_line():
+    # The flip is the regime boundary — seeing where price sat relative to it all
+    # session is the point, so it spans the heatmap like the walls do.
+    fig = gamma.heatmap_figure(_WALL_ROWS, "GEX", spot=450.0, walls=[455.0],
+                               flip=449.5)
+    by_value = {pl["value"]: pl for pl in fig["yAxis"]["plotLines"]}
+    assert set(by_value) == {455.0, 449.5}
+    assert "Gamma flip" in by_value[449.5]["label"]["text"]
+    # Distinguishable from the walls at a glance.
+    assert by_value[449.5]["color"] == gamma.FLIP_COLOR
+    assert by_value[455.0]["color"] == gamma.WALL_COLOR
+
+
+def test_heatmap_flip_line_defensive_and_independent():
+    # Flip alone (no walls) still draws; a garbage flip is skipped, not raised on.
+    assert len(gamma.heatmap_figure(_WALL_ROWS, "GEX", flip=449.5)["yAxis"]["plotLines"]) == 1
+    assert gamma.heatmap_figure(_WALL_ROWS, "GEX", flip="x")["yAxis"]["plotLines"] == []
+    assert gamma.heatmap_figure(_WALL_ROWS, "GEX", flip=None)["yAxis"]["plotLines"] == []
+
+
+# --- Intraday level-movement tracks on the heatmap (toggleable) ---
+
+_LVL = {"flip": [449.5, 450.0], "call_wall": [455.0, 456.0],
+        "put_wall": [445.0, None]}
+
+
+def _series_by_name(fig):
+    return {s["name"]: s for s in fig["series"]}
+
+
+def test_heatmap_track_series_plot_level_movement_over_time():
+    fig = gamma.heatmap_figure(_WALL_ROWS, "GEX", levels=_LVL, show_tracks=True)
+    s = _series_by_name(fig)
+    # x is the time-category index, y the level at that snapshot.
+    assert s["Call wall track"]["data"] == [[0, 455.0], [1, 456.0]]
+    assert s["Flip track"]["data"] == [[0, 449.5], [1, 450.0]]
+    # A None level is a GAP, not a dropped point — the line must not slide left.
+    assert s["Put wall track"]["data"] == [[0, 445.0], [1, None]]
+    # Walls jump between discrete strikes; a smooth line would imply levels that
+    # never existed, so the tracks are drawn as steps.
+    assert s["Call wall track"]["step"] == "left"
+
+
+def test_heatmap_tracks_hidden_when_toggled_off_but_series_still_emitted():
+    # The series COUNT must not vary: Highcharts' in-place update replaces (not
+    # updates) series when the count changes, shifting colorIndex and leaving stray
+    # paths. So the tracks are always present — empty when off.
+    off = gamma.heatmap_figure(_WALL_ROWS, "GEX", levels=_LVL, show_tracks=False)
+    on = gamma.heatmap_figure(_WALL_ROWS, "GEX", levels=_LVL, show_tracks=True)
+    assert len(off["series"]) == len(on["series"])
+    s = _series_by_name(off)
+    assert s["Call wall track"]["data"] == []
+    assert s["Flip track"]["data"] == []
+
+
+def test_heatmap_series_count_is_constant_across_views_and_toggle():
+    variants = [
+        gamma.heatmap_figure(_WALL_ROWS, "GEX", levels=_LVL, show_tracks=True),
+        gamma.heatmap_figure(_WALL_ROWS, "Charm"),                    # no levels at all
+        gamma.heatmap_figure(_WALL_ROWS, "Vanna", levels=None, show_tracks=True),
+        gamma.heatmap_figure(_WALL_ROWS, "GEX", walls=[455.0], flip=449.5),
+    ]
+    assert len({len(f["series"]) for f in variants}) == 1
+
+
+def test_heatmap_tracks_keep_static_lines_visible():
+    # The user asked for BOTH: dashed static line = the level now, solid track =
+    # how it got there.
+    fig = gamma.heatmap_figure(_WALL_ROWS, "GEX", spot=450.0, walls=[455.0],
+                               flip=449.5, levels=_LVL, show_tracks=True)
+    assert len(fig["yAxis"]["plotLines"]) == 2          # static flip + call wall
+    assert _series_by_name(fig)["Call wall track"]["data"]
+
+
+# --- Spot overlay style: line / candles / OHLC ---
+
+def test_ohlc_bars_buckets_samples_with_carried_open():
+    # Spot is a 1-min POINT SAMPLE, not a bar. Bars are built the standard way for a
+    # sampled series: open = the PREVIOUS bar's close, so bars are contiguous and a
+    # 1-min bar still has a body instead of a degenerate O==H==L==C dash.
+    bars = gamma.ohlc_bars([10.0, 12.0, 11.0, 9.0, 13.0, 14.0], 3)
+    assert bars[0] == [1, 10.0, 12.0, 10.0, 11.0]      # x = bucket centre column
+    assert bars[1] == [4, 11.0, 14.0, 9.0, 14.0]       # open carried; low spans it
+
+
+def test_ohlc_bars_one_minute_interval_still_has_a_body():
+    bars = gamma.ohlc_bars([10.0, 11.0, 10.5], 1)
+    assert [b[0] for b in bars] == [0, 1, 2]
+    assert bars[0] == [0, 10.0, 10.0, 10.0, 10.0]      # first bar has no prior close
+    assert bars[1] == [1, 10.0, 11.0, 10.0, 11.0]      # carried open -> real body
+
+
+def test_ohlc_bars_skips_gaps_and_is_defensive():
+    assert gamma.ohlc_bars([], 5) == []
+    assert gamma.ohlc_bars(None, 5) == []
+    assert gamma.ohlc_bars([1.0, 2.0], 0) == []        # no div-by-zero
+    # A None sample is skipped, not read as 0 (which would spike the low).
+    assert gamma.ohlc_bars([10.0, None, 12.0], 3) == [[1, 10.0, 12.0, 10.0, 12.0]]
+    assert gamma.ohlc_bars([None, None], 2) == []      # no usable sample -> no bar
+
+
+def test_candle_points_color_each_bar_by_direction():
+    body, wick = gamma.candle_points([[0, 10.0, 12.0, 9.0, 11.0],    # up   (c>o)
+                                      [1, 11.0, 11.5, 8.0, 9.0]])    # down (c<o)
+    # Body spans open->close (order-independent); wick spans low->high.
+    assert body[0] == {"x": 0, "low": 10.0, "high": 11.0, "color": gamma.UP_COLOR}
+    assert body[1] == {"x": 1, "low": 9.0, "high": 11.0, "color": gamma.DOWN_COLOR}
+    assert (wick[0]["low"], wick[0]["high"]) == (9.0, 12.0)
+    # Per-POINT color, so one series carries both up and down bars.
+    assert wick[0]["color"] == gamma.UP_COLOR and wick[1]["color"] == gamma.DOWN_COLOR
+    assert gamma.candle_points([]) == ([], [])
+
+
+def test_heatmap_spot_style_populates_only_the_selected_overlay():
+    for style, want, empty in (("line", "Spot", ("Spot candles", "Spot wicks")),
+                               ("candle", "Spot candles", ("Spot",)),
+                               ("ohlc", "Spot candles", ("Spot",))):
+        fig = gamma.heatmap_figure(_WALL_ROWS, "GEX", spot_style=style,
+                                   spot_interval=1)
+        s = {x["name"]: x for x in fig["series"]}
+        assert s[want]["data"], f"{style}: {want} should carry data"
+        for name in empty:
+            assert s[name]["data"] == [], f"{style}: {name} must be empty"
+
+
+def test_heatmap_bar_styles_avoid_the_stock_module():
+    # Candlestick/ohlc are STOCK series; loading that module breaks this chart's
+    # in-place update (live-verified). The bars are core columnrange + errorbar.
+    fig = gamma.heatmap_figure(_WALL_ROWS, "GEX", spot_style="candle")
+    types = {x["name"]: x["type"] for x in fig["series"]}
+    assert types["Spot candles"] == "columnrange"
+    assert types["Spot wicks"] == "errorbar"
+    assert "candlestick" not in types.values() and "ohlc" not in types.values()
+
+
+def test_heatmap_ohlc_draws_thinner_than_candles():
+    candle = {x["name"]: x for x in
+              gamma.heatmap_figure(_WALL_ROWS, "GEX", spot_style="candle")["series"]}
+    ohlc = {x["name"]: x for x in
+            gamma.heatmap_figure(_WALL_ROWS, "GEX", spot_style="ohlc")["series"]}
+    assert "pointWidth" not in candle["Spot candles"]      # full-width filled body
+    assert ohlc["Spot candles"]["pointWidth"] == 2         # thin -> reads as a bar
+
+
+# --- Net Prem view ---------------------------------------------------------
+# The payload is DELIBERATELY loose (NetPremiumSnapshot.series is typed `dict`),
+# so these builders must be TOTAL: a malformed row skips that point, a malformed
+# symbol skips that series, and everything else still renders. A bare row[1]
+# would raise IndexError and 500 the whole Dealer Positioning page.
+
+_T1, _T2, _T3 = 1_700_000_000, 1_700_000_060, 1_700_000_120
+
+
+def _np_series():
+    """Two symbols on a STAGGERED clock -- SPY starts a minute late, so the union
+    x-axis is the only thing that keeps them aligned."""
+    return {
+        "QQQ": [[_T1, 3.0e6, 1.0e6], [_T2, 4.0e6, 1.0e6], [_T3, 5.0e6, 1.0e6]],
+        "SPY": [[_T2, 1.0e6, 5.0e6], [_T3, 1.0e6, 9.0e6]],
+    }
+
+
+def test_net_prem_symbols_is_every_group_member_in_group_order():
+    syms = gamma.net_prem_symbols()
+    assert syms[:3] == ["$SPX", "$NDX", "BIG10"]
+    assert syms[-1] == "AMD"
+    assert len(syms) == len(set(syms)) == 28
+    # Flat list == the concatenation of the group tuples.
+    flat = [s for g in gamma.NET_PREM_GROUPS for s in g["symbols"]]
+    assert syms == flat
+
+
+def _service_consts(module, *names):
+    """Module-level constants read out of a Tier-2 file WITHOUT importing it.
+
+    The Net Prem view duplicates two things across the tier boundary because the
+    webgui may not import ``services.*``. The tier rule forbids IMPORTING that
+    code, not READING the file — so parse it and compare, giving each duplicated
+    table a real pin instead of a reviewer's one-off check. Zero runtime coupling;
+    the tests skip cleanly if the service layout ever moves.
+    """
+    import ast
+    import pathlib
+    src = pathlib.Path(__file__).parents[2] / "services" / "options_svc" / module
+    if not src.exists():
+        pytest.skip(f"service module not present: {module}")
+    tree = ast.parse(src.read_text(encoding="utf-8"))
+    found = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        for target in node.targets:
+            if getattr(target, "id", None) in names:
+                found[target.id] = ast.literal_eval(node.value)
+    missing = [n for n in names if n not in found]
+    if missing:
+        pytest.skip(f"{module} no longer defines {', '.join(missing)}")
+    return found
+
+
+def test_net_prem_groups_match_the_service():
+    groups = _service_consts("net_premium.py", "GROUPS")["GROUPS"]
+    assert gamma.NET_PREM_GROUPS == groups
+
+
+def test_net_prem_collection_window_matches_the_scheduler():
+    """The staleness gate's window duplicates the scheduler's GEX collection
+    window, and only agreement makes the gate honest.
+
+    If the service window ever NARROWS, the page raises a daily false STALE —
+    exactly the cry-wolf outcome net_prem_status_text exists to avoid, which
+    would poison the one diagnostic this view adds. If it WIDENS, the page goes
+    blind during the extra minutes instead. The GEX start has already moved once
+    (08:30 -> 08:00), so this is a live risk, not a hypothetical.
+
+    The duplication is now GONE: both the page and options_svc's scheduler read
+    the window from ``shared.market_calendar`` (backed by ``config/sessions.toml``),
+    so they cannot drift. This test used to AST-parse ``_GEX_START``/``_GEX_STOP``
+    literals out of the service file; those constants no longer exist, and the
+    literal-parsing pin broke the moment the source of truth moved. Pin against
+    the shared calendar itself instead.
+    """
+    from shared import market_calendar as mc
+    open_t, close_t = mc.window_bounds("collection")
+    assert gamma._NP_WINDOW_OPEN == (open_t.hour, open_t.minute)
+    assert gamma._NP_WINDOW_CLOSE == (close_t.hour, close_t.minute)
+    # Non-vacuity: these are the real collection bounds, not an empty default.
+    assert gamma._NP_WINDOW_OPEN < gamma._NP_WINDOW_CLOSE
+
+
+def test_net_prem_every_group_symbol_has_a_distinct_color():
+    syms = gamma.net_prem_symbols()
+    colors = [gamma.net_prem_color(s) for s in syms]
+    # Coverage: nothing falls through to the grey fallback.
+    assert gamma.NET_PREM_FALLBACK not in colors
+    for s in syms:
+        assert s in gamma.NET_PREM_COLORS, f"{s} has no colour"
+    # Distinctness: two lines on one chart must never share a colour.
+    assert len(set(colors)) == len(colors)
+
+
+def test_net_prem_color_is_stable_across_selections():
+    # A symbol's colour is a property of the SYMBOL, never of the selection --
+    # SPY is the same line colour whether you plot 2 names or 20.
+    small = gamma.net_prem_figure(_np_series(), ["SPY"])
+    big = gamma.net_prem_figure(_np_series(), ["QQQ", "SPY"])
+    spy_small = [s for s in small["series"] if s["name"] == "SPY"][0]
+    spy_big = [s for s in big["series"] if s["name"] == "SPY"][0]
+    assert spy_small["color"] == spy_big["color"] == gamma.NET_PREM_COLORS["SPY"]
+
+
+def test_net_prem_color_falls_back_for_an_unknown_symbol():
+    assert gamma.net_prem_color("ZZZZ") == gamma.NET_PREM_FALLBACK
+
+
+def test_net_prem_value_dollars_is_millions_of_net_premium():
+    assert gamma.net_prem_value([_T1, 3.0e6, 1.0e6], "dollars") == 2.0
+    assert gamma.net_prem_value([_T1, 1.0e6, 5.0e6], "dollars") == -4.0
+    assert gamma.net_prem_value([_T1, 0.0, 0.0], "dollars") == 0.0   # real zero
+
+
+def test_net_prem_value_skew_is_a_signed_percent_of_total():
+    assert gamma.net_prem_value([_T1, 3.0e6, 1.0e6], "skew") == 50.0
+    assert gamma.net_prem_value([_T1, 1.0e6, 3.0e6], "skew") == -50.0
+    # Nothing traded either side -> nothing to report (and no div-by-zero).
+    assert gamma.net_prem_value([_T1, 0.0, 0.0], "skew") is None
+    assert gamma.net_prem_value([_T1, -1.0, 0.0], "skew") is None
+
+
+def test_net_prem_value_is_total_over_malformed_rows():
+    for bad in (None, [], [1], [1, 2], "notalist", "x", {"call": 1},
+                [1, "x", "y"], [1, None, 2.0], [1, True, 2.0],
+                [1, float("nan"), 2.0], [1, float("inf"), 2.0], 42):
+        assert gamma.net_prem_value(bad, "dollars") is None, bad
+        assert gamma.net_prem_value(bad, "skew") is None, bad
+
+
+def test_net_prem_figure_x_axis_is_the_union_of_selected_timestamps():
+    fig = gamma.net_prem_figure(_np_series(), ["QQQ", "SPY"])
+    assert fig["xAxis"]["categories"] == [gamma._fmt_ts(t)
+                                          for t in (_T1, _T2, _T3)]
+    by = {s["name"]: s for s in fig["series"]}
+    # QQQ spans the whole union; SPY started late, so it begins at index 1 --
+    # the union is what keeps the two lines on the same clock.
+    assert [p[0] for p in by["QQQ"]["data"]] == [0, 1, 2]
+    assert [p[0] for p in by["SPY"]["data"]] == [1, 2]
+    assert by["SPY"]["data"][0][1] == -4.0
+
+
+def test_net_prem_figure_tooltip_is_not_shared_and_legend_is_on():
+    fig = gamma.net_prem_figure(_np_series(), ["QQQ", "SPY"])
+    # 20+ series under one shared tooltip is an unreadable wall.
+    assert fig["tooltip"]["shared"] is False
+    assert fig["legend"]["enabled"] is True
+    assert fig["yAxis"]["plotLines"][0]["value"] == 0
+
+
+def test_net_prem_group_symbols_returns_one_group():
+    assert gamma.net_prem_group_symbols("megacaps") == [
+        "NVDA", "AVGO", "AAPL", "META", "MSFT",
+        "TSLA", "PLTR", "AMZN", "GOOGL", "AMD"]
+    assert "$SPX" in gamma.net_prem_group_symbols("indices")
+    # Disjoint groups, so a mega-cap request can never carry an index back.
+    assert "$SPX" not in gamma.net_prem_group_symbols("megacaps")
+
+
+def test_net_prem_group_symbols_is_total_over_an_unknown_key():
+    """A persisted group key that no longer exists must degrade, not raise —
+    gamma_netprem_group lives in the hand-editable settings.json."""
+    for junk in ("gone", "", None, 7):
+        assert gamma.net_prem_group_symbols(junk) == []
+
+
+def test_only_this_group_drops_out_of_group_symbols():
+    """The one case where the group tab touches the CHART rather than visibility.
+
+    The tab filters which tick-boxes you see — that is what lets $SPX plot beside
+    XLK — so switching to Mega-caps leaves ticked indices on the chart. This
+    reduces the selection to the active group in one click.
+    """
+    out = gamma.net_prem_only_group(
+        ["$SPX", "$NDX", "SPY", "NVDA", "AAPL"], "megacaps")
+    assert out == ["NVDA", "AAPL"]
+
+
+def test_only_this_group_keeps_ticks_rather_than_selecting_the_whole_group():
+    """A narrowing, not a set-to-all: pressing it can only REMOVE lines. If it
+    selected the whole group it would silently add nine symbols you never asked
+    for whenever one mega-cap happened to be ticked."""
+    out = gamma.net_prem_only_group(["$SPX", "NVDA"], "megacaps")
+    assert out == ["NVDA"]
+
+
+def test_only_this_group_is_total_over_junk():
+    assert gamma.net_prem_only_group([], "megacaps") == []
+    assert gamma.net_prem_only_group(["NVDA"], "gone") == []
+    # Hostile persisted selections must not raise (settings.json is editable).
+    assert gamma.net_prem_only_group([123, None, "NVDA"], "megacaps") == ["NVDA"]
+
+
+def test_select_all_adds_the_active_group():
+    out = gamma.net_prem_with_group(["$SPX"], "megacaps")
+    assert out[0] == "$SPX"                      # other groups survive
+    assert set(gamma.net_prem_group_symbols("megacaps")) <= set(out)
+
+
+def test_select_all_is_group_scoped_not_all_28():
+    """The tick-boxes on screen ARE the active group, so ticking a hidden 28
+    would plot lines whose source the reader cannot see."""
+    out = gamma.net_prem_with_group([], "sectors")
+    assert set(out) == set(gamma.net_prem_group_symbols("sectors"))
+    assert "NVDA" not in out and "$SPX" not in out
+
+
+def test_select_all_returns_group_order_and_dedupes():
+    out = gamma.net_prem_with_group(["AMD", "AMD", "NVDA"], "megacaps")
+    assert out == gamma.net_prem_group_symbols("megacaps")   # order, no dupes
+
+
+def test_select_all_is_total_over_junk():
+    assert gamma.net_prem_with_group([123, None], "gone") == []
+    assert gamma.net_prem_with_group([123, None, "NVDA"], "gone") == ["NVDA"]
+
+
+def test_select_all_is_wired_to_the_button():
+    import inspect
+    src = inspect.getsource(gamma.render)
+    assert "np_all_btn.on_click(_np_select_all)" in src
+    sel = src[src.index("def _np_select_all("):]
+    sel = sel[:sel.index("\n    @guard\n    def _np_only_group(")]
+    assert "net_prem_with_group(_np_current(), np_group_tabs.value)" in sel, sel
+
+
+def test_symbol_scoped_controls_hide_on_net_prem():
+    """Symbol / Refresh now / Level movement / Spot / Bar drive the
+    symbol-scoped views. Net Prem plots a fixed universe from its own cache key
+    and has no spot overlay, so leaving them visible there is five dead knobs."""
+    import inspect
+    src = inspect.getsource(gamma.render)
+    sync = src[src.index("def _sync_spot_controls("):]
+    sync = sync[:sync.index("\n    spot_style_sel.on_value_change")]
+    assert 'view_toggle.value != "Net Prem"' in sync, sync
+    for name in ("symbol_in", "fetch_btn", "tracks_sw", "spot_style_sel",
+                 # These three report on the symbol in the now-hidden dropdown,
+                 # so on Net Prem they would act on a symbol the reader can
+                 # neither see nor change.
+                 "explain_btn", "analyze_btn", "briefings_btn"):
+        assert name in sync, f"{name} not hidden on Net Prem"
+    # Bar stays subject to its own line-style rule as well as the view.
+    assert "spot_style_sel.value != \"line\"" in sync, sync
+    # ...and the view switch must actually call it.
+    assert "_sync_spot_controls()" in src[src.index("def _on_view_change("):]
+
+
+def test_only_this_group_is_wired_to_the_button():
+    import inspect
+    src = inspect.getsource(gamma.render)
+    assert "np_only_btn.on_click(_np_only_group)" in src
+    only = src[src.index("def _np_only_group("):]
+    only = only[:only.index("\n    np_group_tabs.on_value_change")]
+    # It must read the ACTIVE tab, not a hardcoded group.
+    assert "net_prem_only_group(_np_current(), np_group_tabs.value)" in only, only
+
+
+def test_net_prem_figure_legend_sits_above_the_plot():
+    """The legend must not share the bottom with the rotated time labels.
+
+    Series count here is user-driven (up to 28), so the legend wraps to several
+    rows. Highcharts reserves bottom space for the legend OR the axis labels, not
+    both — so a bottom legend plus a pinned marginBottom overruns the -45° time
+    labels and the axis title, which is what happened live at 15 symbols.
+    """
+    fig = gamma.net_prem_figure(_np_series(), ["QQQ", "SPY"])
+    assert fig["legend"]["verticalAlign"] == "top"
+    # A pinned bottom margin would re-break it however the legend is aligned.
+    assert "marginBottom" not in fig["chart"]
+
+
+def test_net_prem_figure_y_axis_title_follows_the_mode():
+    assert "$M" in gamma.net_prem_figure(
+        _np_series(), ["QQQ"], "dollars")["yAxis"]["title"]["text"]
+    assert "%" in gamma.net_prem_figure(
+        _np_series(), ["QQQ"], "skew")["yAxis"]["title"]["text"]
+
+
+def test_net_prem_figure_skips_a_selected_symbol_with_no_data():
+    fig = gamma.net_prem_figure(_np_series(), ["QQQ", "XLE"])
+    assert [s["name"] for s in fig["series"]] == ["QQQ"]
+
+
+def test_net_prem_figure_empty_selection_renders_an_empty_chart():
+    for sel in ([], None):
+        fig = gamma.net_prem_figure(_np_series(), sel)
+        assert fig["series"] == [] and fig["xAxis"]["categories"] == []
+
+
+def test_net_prem_figure_dedupes_the_selection():
+    fig = gamma.net_prem_figure(_np_series(), ["SPY", "SPY", "QQQ"])
+    assert [s["name"] for s in fig["series"]] == ["SPY", "QQQ"]
+
+
+def test_net_prem_figure_survives_every_malformed_series_shape():
+    # Each of these PASSES NetPremiumSnapshot validation (verified), so the page
+    # really can receive them. The good symbol must still plot in every case.
+    for bad in ("notalist", [[1]], [None], [[1, "x", "y"]], 42, {}, None,
+                [[1, 2, 3], "junk"]):
+        series = {"QQQ": _np_series()["QQQ"], "SPY": bad}
+        fig = gamma.net_prem_figure(series, ["QQQ", "SPY"])
+        names = [s["name"] for s in fig["series"]]
+        assert "QQQ" in names, bad
+        assert gamma.net_prem_summary_text(series, ["QQQ", "SPY"])
+
+
+def test_net_prem_figure_skips_unreportable_skew_points():
+    # (0, 0) is a REAL observation in dollars (plots as 0) but has no skew.
+    series = {"SPY": [[_T1, 0.0, 0.0], [_T2, 3.0e6, 1.0e6]]}
+    assert len(gamma.net_prem_figure(
+        series, ["SPY"], "dollars")["series"][0]["data"]) == 2
+    skew = gamma.net_prem_figure(series, ["SPY"], "skew")["series"][0]["data"]
+    assert skew == [[1, 50.0]]
+
+
+def test_net_prem_missing_names_selected_symbols_without_rows():
+    series = _np_series()
+    assert gamma.net_prem_missing(series, ["QQQ", "XLE", "SPY", "XLB"]) == ["XLE", "XLB"]
+    assert gamma.net_prem_missing(series, ["QQQ", "SPY"]) == []
+    # Present-but-unusable counts as missing, exactly like absent.
+    assert gamma.net_prem_missing({"SPY": []}, ["SPY"]) == ["SPY"]
+    assert gamma.net_prem_missing({"SPY": "notalist"}, ["SPY"]) == ["SPY"]
+    assert gamma.net_prem_missing({"SPY": [None]}, ["SPY"]) == ["SPY"]
+    assert gamma.net_prem_missing(None, ["SPY"]) == ["SPY"]
+
+
+def test_net_prem_summary_text_names_the_extremes():
+    txt = gamma.net_prem_summary_text(_np_series(), ["QQQ", "SPY"])
+    assert "2 symbols" in txt
+    assert "QQQ" in txt and "+$4.0M" in txt      # most call-led (last point)
+    assert "SPY" in txt and "-$8.0M" in txt      # most put-led
+    skew = gamma.net_prem_summary_text(_np_series(), ["QQQ", "SPY"], "skew")
+    assert "+67%" in skew and "-80%" in skew
+
+
+def test_net_prem_summary_text_reports_missing_names():
+    txt = gamma.net_prem_summary_text(_np_series(), ["QQQ", "XLE", "XLB"])
+    assert "XLE" in txt and "XLB" in txt and "no data yet" in txt
+
+
+def test_net_prem_summary_text_handles_nothing_selected_and_nothing_plotted():
+    assert "Select" in gamma.net_prem_summary_text(_np_series(), [])
+    only_missing = gamma.net_prem_summary_text({}, ["XLE", "XLB"])
+    assert "no data yet" in only_missing and "XLE" in only_missing
+    # A single plotted symbol has no two extremes -- one reading, not a repeat.
+    one = gamma.net_prem_summary_text(_np_series(), ["QQQ"])
+    assert one.count("QQQ") == 1
+
+
+def _ct(y, m, d, hh, mm):
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+    return _dt.datetime(y, m, d, hh, mm, tzinfo=ZoneInfo("America/Chicago"))
+
+
+def _iso(when):
+    import datetime as _dt
+    return when.astimezone(_dt.timezone.utc).isoformat()
+
+
+def test_net_prem_status_text_never_published():
+    now = _ct(2026, 8, 5, 10, 0)          # Wednesday, mid-window
+    for payload in (None, {}):
+        assert "never been published" in gamma.net_prem_status_text(payload, now)
+
+
+def test_net_prem_status_text_fresh_but_empty_is_not_collected_yet():
+    now = _ct(2026, 8, 5, 8, 5)
+    payload = {"session_date": "2026-08-05", "ts": _iso(_ct(2026, 8, 5, 8, 4)),
+               "series": {}, "error": None}
+    txt = gamma.net_prem_status_text(payload, now)
+    assert "not collected yet" in txt
+    assert "stale" not in txt.lower()
+
+
+def test_net_prem_status_text_stale_inside_the_collection_window_is_an_error():
+    now = _ct(2026, 8, 5, 11, 0)          # Wednesday, inside 08:00-15:20 CT
+    payload = {"session_date": "2026-08-05", "ts": _iso(_ct(2026, 8, 5, 10, 50)),
+               "series": _np_series(), "error": None}
+    txt = gamma.net_prem_status_text(payload, now)
+    assert "stale" in txt.lower()
+
+
+def test_net_prem_status_text_stale_outside_the_window_is_not_an_error():
+    # Off-hours the key legitimately holds the last tick -- correct persistence,
+    # matching the heatmap/Flow views. Never flag it.
+    payload = {"session_date": "2026-08-05", "ts": _iso(_ct(2026, 8, 5, 15, 19)),
+               "series": _np_series(), "error": None}
+    for now in (_ct(2026, 8, 5, 19, 0),        # same evening
+                _ct(2026, 8, 8, 11, 0),        # Saturday, inside the clock window
+                _ct(2026, 8, 5, 7, 30)):       # weekday, before the window opens
+        txt = gamma.net_prem_status_text(payload, now)
+        assert "stale" not in txt.lower(), now
+
+
+def test_net_prem_status_text_not_stale_on_a_market_holiday():
+    # Jan 1 2027 is an NYSE full closure that falls on a Friday inside the clock
+    # window -- nothing collects, so a day-old payload is correct, not broken.
+    payload = {"session_date": "2026-12-31", "ts": _iso(_ct(2026, 12, 31, 15, 19)),
+               "series": _np_series(), "error": None}
+    txt = gamma.net_prem_status_text(payload, _ct(2027, 1, 1, 11, 0))
+    assert "stale" not in txt.lower()
+
+
+def test_net_prem_status_text_normal_publish_reports_the_symbol_count():
+    now = _ct(2026, 8, 5, 11, 0)
+    payload = {"session_date": "2026-08-05", "ts": _iso(_ct(2026, 8, 5, 10, 59)),
+               "series": _np_series(), "error": None}
+    txt = gamma.net_prem_status_text(payload, now)
+    # "collected", not "symbols": the summary line beside this one counts the
+    # SELECTION ("N symbols plotted"), so the two must not look like one number.
+    assert "2 collected" in txt
+    assert "2026-08-05" in txt and "stale" not in txt.lower()
+
+
+def test_net_prem_status_text_renders_the_service_error_verbatim():
+    # House pattern (matrix.status_text): the error string is user-facing UI copy
+    # rendered as-is -- never matched on.
+    now = _ct(2026, 8, 5, 11, 0)
+    payload = {"session_date": "2026-08-05", "ts": _iso(_ct(2026, 8, 5, 10, 59)),
+               "series": {}, "error": "net premium unavailable"}
+    assert "net premium unavailable" in gamma.net_prem_status_text(payload, now)
+
+
+def test_net_prem_status_text_tolerates_a_junk_timestamp():
+    now = _ct(2026, 8, 5, 11, 0)
+    for ts in (None, "", "not-a-date", 12345):
+        assert gamma.net_prem_status_text({"ts": ts, "series": {}}, now)
+
+
+def test_net_prem_modes_label_both_axes():
+    assert set(gamma.NET_PREM_MODES) == {"dollars", "skew"}
+    # An unknown mode degrades to dollars rather than raising.
+    assert gamma.net_prem_value([_T1, 3.0e6, 1.0e6], "bogus") == 2.0
+
+
+def test_net_prem_rows_are_sorted_by_timestamp():
+    # Highcharts line data MUST be x-ascending. Losing the sort corrupts the
+    # chart SILENTLY rather than raising, and every other fixture here is already
+    # in order -- so this is the only thing holding it.
+    desc = {"SPY": [[_T3, 5.0e6, 1.0e6], [_T1, 1.0e6, 3.0e6], [_T2, 2.0e6, 2.0e6]]}
+    fig = gamma.net_prem_figure(desc, ["SPY"])
+    assert fig["xAxis"]["categories"] == [gamma._fmt_ts(t) for t in (_T1, _T2, _T3)]
+    data = fig["series"][0]["data"]
+    assert [p[0] for p in data] == [0, 1, 2]
+    assert [p[1] for p in data] == [-2.0, 0.0, 4.0]
+    # ...and "latest" must be the NEWEST point, not the last one listed.
+    assert "+$4.0M" in gamma.net_prem_summary_text(desc, ["SPY"])
+
+
+def test_net_prem_missing_is_mode_aware_and_agrees_with_the_summary():
+    # Parseable rows that draw NO skew line: (0, 0) has no ratio to report. A
+    # mode-blind "missing" would call SPY present while the chart showed nothing.
+    series = {"SPY": [[_T1, 0.0, 0.0]]}
+    assert gamma.net_prem_missing(series, ["SPY"], "dollars") == []
+    assert gamma.net_prem_missing(series, ["SPY"], "skew") == ["SPY"]
+    assert gamma.net_prem_figure(series, ["SPY"], "skew")["series"] == []
+    # ONE definition of missing -- the header cannot contradict the chart.
+    assert "no data yet: SPY" in gamma.net_prem_summary_text(series, ["SPY"], "skew")
+    assert "no data yet" not in gamma.net_prem_summary_text(series, ["SPY"], "dollars")
+
+
+def test_net_prem_summary_adjectives_never_contradict_the_sign():
+    # Whole selection put-led: the top of the range is the LEAST put-led one --
+    # "most call-led SPY -$4.0M" would read as a self-contradiction.
+    down = {"SPY": [[_T1, 1.0e6, 5.0e6]], "QQQ": [[_T1, 1.0e6, 9.0e6]]}
+    txt = gamma.net_prem_summary_text(down, ["SPY", "QQQ"])
+    assert "least put-led SPY -$4.0M" in txt and "most put-led QQQ -$8.0M" in txt
+    assert "most call-led" not in txt
+
+    up = {"SPY": [[_T1, 5.0e6, 1.0e6]], "QQQ": [[_T1, 3.0e6, 1.0e6]]}
+    txt = gamma.net_prem_summary_text(up, ["SPY", "QQQ"])
+    assert "most call-led SPY +$4.0M" in txt and "least call-led QQQ +$2.0M" in txt
+    assert "most put-led" not in txt
+
+    # Straddling zero keeps both plain superlatives.
+    mixed = gamma.net_prem_summary_text(_np_series(), ["QQQ", "SPY"])
+    assert "most call-led QQQ" in mixed and "most put-led SPY" in mixed
+
+
+def test_net_prem_selection_drops_junk_and_unknown_entries():
+    # The selection is PERSISTED to webgui/data/settings.json -- tracked,
+    # hand-editable, no type validation on read -- so it is untrusted input.
+    series = _np_series()
+    for junk in ([123, "SPY"], [None, "SPY"], [{"a": 1}, "SPY"], ["FB", "SPY"]):
+        assert gamma.net_prem_missing(series, junk) == [], junk
+        assert [s["name"] for s in
+                gamma.net_prem_figure(series, junk)["series"]] == ["SPY"], junk
+        # A non-str would raise TypeError at ", ".join(missing) and 500 the page.
+        assert gamma.net_prem_summary_text(series, junk), junk
+    # A stale saved ticker no longer in the groups is dropped too, so a caller's
+    # `key=order.index` sort cannot raise ValueError on it.
+    assert gamma.net_prem_missing(series, ["FB"]) == []
+    assert gamma.net_prem_summary_text(series, ["FB"]).startswith("Select")
+
+
+def test_net_prem_status_text_staleness_boundary_is_two_minutes():
+    import datetime as _dt
+    now = _ct(2026, 8, 5, 11, 0)
+
+    def at(age_sec):
+        payload = {"session_date": "2026-08-05", "series": _np_series(),
+                   "ts": _iso(now - _dt.timedelta(seconds=age_sec)), "error": None}
+        return gamma.net_prem_status_text(payload, now).lower()
+
+    assert "stale" not in at(119)      # inside 2x the 1-min publish cadence
+    assert "stale" in at(121)
+
+
+def test_net_prem_status_text_window_boundaries():
+    payload = {"session_date": "2026-08-05", "series": _np_series(),
+               "ts": _iso(_ct(2026, 8, 5, 5, 0)), "error": None}   # hours stale
+
+    def stale_at(hh, mm):
+        return "stale" in gamma.net_prem_status_text(
+            payload, _ct(2026, 8, 5, hh, mm)).lower()
+
+    assert not stale_at(7, 59)      # before the window opens
+    assert stale_at(8, 0)           # open is INCLUSIVE
+    assert stale_at(15, 19)         # last minute inside
+    assert not stale_at(15, 20)     # close is EXCLUSIVE
+
+
+def test_net_prem_status_text_tolerates_a_naive_now_and_a_non_dict_payload():
+    import datetime as _dt
+    payload = {"session_date": "2026-08-05", "series": _np_series(),
+               "ts": _iso(_ct(2026, 8, 5, 10, 59)), "error": None}
+    assert gamma.net_prem_status_text(payload, _dt.datetime(2026, 8, 5, 16, 0))
+    for junk in ("notadict", [1, 2], 42):
+        assert "never been published" in gamma.net_prem_status_text(
+            junk, _ct(2026, 8, 5, 11, 0)), junk
+
+
+# --- view identity for the single full-width chart element -------------------
+
+def test_view_order_puts_net_prem_between_flow_and_term():
+    """Flow and Net Prem are the two options-FLOW views, so they sit together."""
+    order = gamma._VIEW_ORDER
+    assert order[-3:] == ["Flow", "Net Prem", "Term"]
+    for v in gamma._VIEWS:
+        assert v in order
+
+
+def test_chart_kind_separates_flow_from_net_prem():
+    """THE trap: both are ``chart.type == "line"``, so keying the recreate-vs-
+    update decision on the type alone would take the in-place path and merge
+    Net Prem's single yAxis dict onto Flow's 3 banded axes — leaving two
+    orphaned axes painted and the plot squeezed into the top 62%."""
+    flow = gamma.flow_figure([{"ts": 1, "spot": 1.0, "call_prem": 2.0, "put_prem": 1.0}])
+    netp = gamma.net_prem_figure({"SPY": [[1, 2.0, 1.0]]}, ["SPY"])
+    assert flow["chart"]["type"] == netp["chart"]["type"] == "line"   # the trap
+    assert isinstance(flow["yAxis"], list) and isinstance(netp["yAxis"], dict)
+    assert gamma.chart_kind(flow) != gamma.chart_kind(netp)
+
+
+def test_chart_kind_is_stable_across_same_view_repaints():
+    """A Net Prem repaint with a different SELECTION (so a different series
+    count) must stay the same kind — else every checkbox tick would tear the
+    element down and flash."""
+    series = {"SPY": [[1, 2.0, 1.0]], "QQQ": [[1, 3.0, 1.0]], "$SPX": [[1, 1.0, 4.0]]}
+    one = gamma.net_prem_figure(series, ["SPY"])
+    three = gamma.net_prem_figure(series, ["SPY", "QQQ", "$SPX"])
+    assert len(one["series"]) != len(three["series"])
+    assert gamma.chart_kind(one) == gamma.chart_kind(three)
+    # ...and Net Prem in the two modes is one kind too (only the axis title moves).
+    assert gamma.chart_kind(gamma.net_prem_figure(series, ["SPY"], "skew")) == \
+        gamma.chart_kind(one)
+
+
+# One representative figure builder per VIEW. Registered here rather than
+# hand-listed inside a single assertion so that adding a view to _VIEW_ORDER
+# without registering it FAILS — chart_kind is a structural proxy (a future
+# single-axis "line" view would compute ('line', 0) and silently collide with
+# Net Prem, reintroducing the merge-leak bug class), so the distinctness guard
+# has to be forget-proof rather than depend on someone remembering to extend it.
+_VIEW_FIGS = {
+    "GEX": lambda: gamma.bar_figure({"spot": 100.0, "gex": {100.0: {"net": 1.0}}}, 100.0,
+                                    view="GEX"),
+    "Charm": lambda: gamma.bar_figure({"spot": 100.0, "gex": {100.0: {"net": 1.0}}}, 100.0,
+                                      view="Charm"),
+    "DEX": lambda: gamma.bar_figure({"spot": 100.0, "gex": {100.0: {"net": 1.0}}}, 100.0,
+                                    view="DEX"),
+    "Vanna": lambda: gamma.bar_figure({"spot": 100.0, "gex": {100.0: {"net": 1.0}}}, 100.0,
+                                      view="Vanna"),
+    "Flow": lambda: gamma.flow_figure([]),
+    "Net Prem": lambda: gamma.net_prem_figure({}, []),
+    "Term": lambda: gamma.term_heatmap({"expirations": ["2026-08-07"],
+                                        "cells": {"100.0": {"2026-08-07": 1.0}}}),
+}
+
+# Views that SHARE a figure builder must share a kind (no needless recreate);
+# views with DIFFERENT builders must not collide (no merge leak).
+_VIEW_BUILDER = {"GEX": "bars", "Charm": "bars", "DEX": "bars", "Vanna": "bars",
+                 "Flow": "flow", "Net Prem": "netprem", "Term": "term"}
+
+
+def test_every_view_is_registered_for_the_chart_kind_guard():
+    """A new subtab must be registered here, so the guards below cover it."""
+    assert set(_VIEW_FIGS) == set(gamma._VIEW_ORDER)
+    assert set(_VIEW_BUILDER) == set(gamma._VIEW_ORDER)
+
+
+def test_chart_kind_is_distinct_across_every_pair_of_builders():
+    """Any two views drawn by DIFFERENT builders must be different kinds — else
+    _set_chart takes the in-place path and Highcharts merges one figure's config
+    onto the other's (the Flow/Net Prem orphaned-axis bug)."""
+    by_builder = {}
+    for view, make in _VIEW_FIGS.items():
+        by_builder.setdefault(_VIEW_BUILDER[view], gamma.chart_kind(make()))
+    assert len(set(by_builder.values())) == len(by_builder), by_builder
+
+
+def test_views_sharing_a_builder_share_a_kind():
+    """GEX/Charm/DEX/Vanna are all bar figures: switching between them must NOT
+    recreate the element (that would reintroduce flicker where there is none)."""
+    bars = {v: gamma.chart_kind(_VIEW_FIGS[v]())
+            for v, b in _VIEW_BUILDER.items() if b == "bars"}
+    assert len(set(bars.values())) == 1, bars
+    # ...and the first-paint empty figure matches them, so the very first real
+    # render updates in place instead of tearing the element down.
+    assert gamma.chart_kind(gamma._empty_fig()) == next(iter(bars.values()))
+
+
+def test_net_prem_groups_are_disjoint():
+    """np_boxes is keyed by SYMBOL, so a symbol in two groups would overwrite its
+    own checkbox — orphaning the first widget, which is then never wired to
+    on_value_change nor visibility-toggled and would sit visible on every view.
+    net_prem_symbols() already dedupes, so the two paths must not disagree."""
+    seen = {}
+    for group in gamma.NET_PREM_GROUPS:
+        for sym in group["symbols"]:
+            assert sym not in seen, f"{sym} in both {seen[sym]} and {group['key']}"
+            seen[sym] = group["key"]
+    assert len(seen) == len(gamma.net_prem_symbols())
+
+
+def test_chart_kind_is_total_over_junk():
+    """It runs on every repaint; a malformed figure must not 500 the page."""
+    for junk in (None, "nope", [], {}, {"chart": None}, {"chart": {}, "yAxis": "x"}):
+        gamma.chart_kind(junk)
+
+
+# --- closure-bound wiring (guarded by source inspection, as test_driver_monitor
+# --- does: these live inside render()'s closure and cannot be called directly).
+
+def test_tick_refreshes_the_net_prem_status_line():
+    """Staleness is a CLOCK function, but np_status_lbl was only recomputed on a
+    repaint — whose drivers are all cache-version bumps. So the one failure the
+    line exists to report (the whole options service down, no key bumping at all)
+    would freeze it at its last-good "updated HH:MM" forever. The 1 s _tick, which
+    is already running, must recompute it."""
+    import inspect
+    src = inspect.getsource(gamma.render)
+    tick = src[src.index("def _tick("):]
+    tick = tick[:tick.index("\n    @guard_async")]
+    assert "_paint_np_status()" in tick, tick
+    # ...and it must be a pure recompute, not a bus read on a 1 s timer.
+    paint = src[src.index("def _paint_np_status("):]
+    paint = paint[:paint.index("\n    def _render_net_prem(")]
+    assert "bus_client" not in paint and "io_bound" not in paint, paint
+
+
+def test_auto_refresh_skips_the_chain_fetch_on_net_prem():
+    """Net Prem never reads the gamma snapshot, so the 120 s gamma_refresh would
+    cost the options service a full option-chain fetch + GammaEngine compute for
+    a result this view discards."""
+    import inspect
+    src = inspect.getsource(gamma.render)
+    fn = src[src.index("def _auto_refresh("):]
+    fn = fn[:fn.index("\n    @guard\n    def _tick(")]
+    assert 'view_toggle.value == "Net Prem"' in fn, fn
+    # The guard must precede the enqueue, or it does nothing.
+    assert fn.index('"Net Prem"') < fn.index("gamma_refresh"), fn
+
+
+# --- Projected EOD delta-flip line (0-DTE charm drift), on every view ---
+
+def test_wall_plot_lines_adds_projected_flip():
+    lines = gamma.wall_plot_lines(450.0, [455.0], flip=449.5, projected_flip=452.25)
+    by_val = {pl["value"]: pl for pl in lines}
+    assert set(by_val) == {455.0, 449.5, 452.25}
+    pf = by_val[452.25]
+    # Labeled so it can't be mistaken for the view's own (actual) flip.
+    assert "Proj" in pf["label"]["text"] and "452.25" in pf["label"]["text"]
+    # Its own color, distinct from the actual flip and the walls.
+    assert pf["color"] == gamma.PROJ_FLIP_COLOR
+    assert pf["color"] not in (gamma.FLIP_COLOR, gamma.WALL_COLOR)
+
+
+def test_projected_flip_is_optional_and_defensive():
+    # Absent (most symbols never have a 0-DTE expiry) -> no line, no raise.
+    base = gamma.wall_plot_lines(450.0, [], flip=449.5)
+    assert len(base) == 1
+    assert gamma.wall_plot_lines(450.0, [], flip=449.5, projected_flip=None) == base
+    assert gamma.wall_plot_lines(450.0, [], flip=449.5, projected_flip="x") == base
+
+
+def test_heatmap_figure_draws_projected_flip_on_any_view():
+    # The projected flip is a DEX 0-DTE concept but is drawn on EVERY view as a
+    # shared reference level, alongside that view's own flip.
+    for view in ("GEX", "Charm", "DEX", "Vanna"):
+        fig = gamma.heatmap_figure(_WALL_ROWS, view, spot=450.0, flip=449.5,
+                                   projected_flip=452.25)
+        vals = [pl["value"] for pl in fig["yAxis"]["plotLines"]]
+        assert 452.25 in vals, view
+
+
+# --- Hedge-pressure history panel (0-DTE charm drift over the session) ---
+
+_HEDGE = [{"ts": 1, "hedge_pressure": 1.5e9, "net_delta_0dte": 5e10, "projected_flip": 99.0},
+          {"ts": 2, "hedge_pressure": -2.5e9, "net_delta_0dte": 5e10, "projected_flip": 98.0},
+          {"ts": 3, "hedge_pressure": 3.0e9, "net_delta_0dte": 5e10, "projected_flip": 99.5}]
+
+
+def test_hedge_figure_plots_pressure_in_billions_signed():
+    pts = gamma.hedge_figure(_HEDGE, ["09:30", "09:31", "09:32"])["series"][0]["data"]
+    # Dollars are unreadable raw; the axis is $B and the sign is the whole point
+    # (positive = dealers must BUY into the close, negative = sell).
+    assert [p["y"] for p in pts] == [1.5, -2.5, 3.0]
+    assert [p["x"] for p in pts] == [0, 1, 2]          # shares the heatmap's x index
+    # Colored PER POINT by sign, so ONE series carries both and the flip from
+    # buy- to sell-pressure is visible at a glance.
+    assert pts[0]["color"] == gamma.UP_COLOR
+    assert pts[1]["color"] == gamma.DOWN_COLOR
+
+
+def test_hedge_figure_empty_is_safe():
+    for arg in ([], None):
+        fig = gamma.hedge_figure(arg, [])
+        assert fig["series"][0]["data"] == []
+
+
+def test_hedge_summary_text_reads_direction_and_size():
+    txt = gamma.hedge_summary_text(_HEDGE)
+    assert "+$3.00B" in txt and "buy" in txt.lower()      # last value drives the read
+    assert gamma.hedge_summary_text([]) == ""
+    down = gamma.hedge_summary_text([{"ts": 1, "hedge_pressure": -1.2e9}])
+    assert "-$1.20B" in down and "sell" in down.lower()
+
+
+# --- Projected DEX bars (each strike's own 0-DTE charm drift) ---
+
+_DRIFT_DATA = {
+    "spot": 450.0,
+    "gex": {448.0: {"call": 100.0, "put": -40.0, "net": 60.0},
+            450.0: {"call": 200.0, "put": -250.0, "net": -50.0},
+            452.0: {"call": 30.0, "put": -10.0, "net": 20.0}},
+    # Only the 0-DTE strikes carry drift; 452 has none.
+    "hedge_drift_by_strike": {448.0: 15.0, 450.0: -30.0},
+}
+
+
+def test_bars_from_gex_adds_projected_where_drift_exists():
+    b = gamma.bars_from_gex(_DRIFT_DATA, 450.0)
+    assert b["nets"] == [60.0, -50.0, 20.0]
+    # projected = net + that strike's OWN drift; None where the strike has no
+    # 0-DTE interest, so the chart can skip drawing a coincident outline.
+    assert b["projected"] == [75.0, -80.0, None]
+
+
+def test_bars_from_gex_projected_absent_without_drift_map():
+    # Most symbols never have a 0-DTE book -> no drift map -> all None, no raise.
+    plain = {k: v for k, v in _DRIFT_DATA.items() if k != "hedge_drift_by_strike"}
+    assert gamma.bars_from_gex(plain, 450.0)["projected"] == [None, None, None]
+    assert gamma.bars_from_gex({}, None)["projected"] == []
+
+
+def test_bar_figure_overlays_a_projected_outline_series():
+    fig = gamma.bar_figure(_DRIFT_DATA, 450.0, view="DEX")
+    names = [s["name"] for s in fig["series"]]
+    assert "Projected close" in names
+    proj = next(s for s in fig["series"] if s["name"] == "Projected close")
+    # Only the two drifting strikes are drawn.
+    assert [p["x"] for p in proj["data"]] == [448.0, 450.0]
+    assert [p["y"] for p in proj["data"]] == [75.0, -80.0]
+    # Outline only (transparent fill) so it reads over the solid bar whether the
+    # projection EXTENDS past it or pulls back inside it.
+    assert proj["color"] == "transparent"
+    assert proj["borderColor"] == gamma.PROJ_FLIP_COLOR
+    # Drawn on TOP of the solid bars, and overlaid (not grouped beside them).
+    assert names.index("Projected close") > names.index(gamma._view_label("DEX"))
+    assert fig["plotOptions"]["bar"]["grouping"] is False
+
+
+def test_bar_figure_omits_projected_series_when_no_drift():
+    plain = {k: v for k, v in _DRIFT_DATA.items() if k != "hedge_drift_by_strike"}
+    fig = gamma.bar_figure(plain, 450.0, view="DEX")
+    assert [s["name"] for s in fig["series"]] == [gamma._view_label("DEX")]
+
+
+def test_zero_value_bars_do_not_trip_the_crisping_warning():
+    """A bar whose value is exactly 0 (a zero-net strike; hedge pressure at the
+    close) gets its border subtracted from a 0-height rect when crisping is on, so
+    Highcharts emits height="-1" and the browser logs it. Nothing renders wrong,
+    but both cases are routine here, so crisp stays off."""
+    bars = gamma.bar_figure(GEX, 450.0, view="GEX")
+    assert bars["plotOptions"]["bar"]["crisp"] is False
+    hedge = gamma.hedge_figure([{"ts": 1, "hedge_pressure": 0.0}], ["09:30"])
+    assert hedge["series"][0]["crisp"] is False

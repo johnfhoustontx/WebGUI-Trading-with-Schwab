@@ -37,6 +37,7 @@ import datetime as dt
 from zoneinfo import ZoneInfo
 
 import bus_client
+import page_help as _page_help
 from nicegui import run, ui
 
 from pages.ui_guard import guard, guard_async
@@ -47,6 +48,12 @@ from .theme import BTN_3D
 
 def _round(value, ndigits=2):
     return round(value, ndigits) if isinstance(value, (int, float)) else value
+
+
+def iv_rank_value(value):
+    """IV Rank cell value: the rank rounded to a whole number (0-100) for a clean,
+    numerically-sortable cell, or ``None`` (blank) when it's missing/non-numeric."""
+    return round(value) if isinstance(value, (int, float)) else None
 
 
 # Quality zones for the composite score (match the speedometer in svg.py /
@@ -131,6 +138,7 @@ def signal_columns():
         ("max_loss", "Max Loss"),
         ("rr_pct", "R/R %"),
         ("pop_pct", "PoP %"),
+        ("iv_rank", "IV Rank"),
         ("composite_score", "Score"),
         ("grade", "Grade"),
         _DROPPED_COL,
@@ -183,6 +191,7 @@ def signal_rows(signals):
             "max_loss": _round(s.get("max_loss")),
             "rr_pct": _round(s.get("rr_pct"), 1),
             "pop_pct": _round(s.get("pop_pct"), 1),
+            "iv_rank": iv_rank_value(s.get("iv_rank")),
             "composite_score": s.get("composite_score"),
             "_score_class": score_zone_class(s.get("composite_score")),
             "grade": s.get("grade", ""),
@@ -589,6 +598,10 @@ def render():
             t0 = ui.tab("0-DTE").classes(f"tab-0dte text-[{TAB_0DTE_COLOR}]")
             ts = ui.tab("Swing").classes(f"tab-swing text-[{TAB_SWING_COLOR}]")
             td = ui.tab("Directional").classes(f"tab-dir text-[{TAB_DIR_COLOR}]")
+            for _tab, _key in ((t0, "0-DTE"), (ts, "Swing"), (td, "Directional")):
+                with _tab:
+                    ui.tooltip(_page_help.subtab_help("/", _key)
+                               ).props("delay=350 max-width=340px")
         return tabs, t0, ts, td
 
     if _slot is not None:

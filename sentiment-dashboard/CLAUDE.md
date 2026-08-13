@@ -85,6 +85,59 @@ Put/Call (15% → 20%). `scoring/credit_pulse.py` (HYG/IEI z-score 60% + HYG vs
 `credit_pulse` score for display/back-compat, but it is no longer in `WEIGHTS`
 and does not enter the confidence-weighted blend.
 
+## Momentum cascade (2026-07-28) — a SEPARATE subsystem, not a component
+
+**Momentum is NOT in the sentiment composite.** `scoring/__init__.py:WEIGHTS` is
+untouched, no component was added, and the bridge `component_scores` block does
+not change. Momentum is *context*, published on its own cache key
+(`cache:sentiment:momentum`), consumed by the webgui page. Anyone proposing to
+fold it into `WEIGHTS` is starting a different, coordinated change — the
+weights assert and the `tests/fixtures/bridge_v39_snapshot.json` regression
+oracle both exist to make that deliberate.
+
+**The pure modules live here:**
+
+| Module | Role |
+|---|---|
+| `scoring/momentum.py` | The five components — `trend_strength` (Clenow slope × R²), `relative_strength` (excess + RS-line slope), `acceleration` (r21 − r63/3), `path_quality`, `participation` — plus `zscore_within_level` / `blend` / `percentile_rank`. `MOMENTUM_WEIGHTS` asserts to 1.0 at import, same invariant style as `WEIGHTS`. |
+| `scoring/momentum_regime.py` | The gate — `dispersion`, `dispersion_percentile`, `classify` → a frozen `RegimeVerdict` (`favorable` / `neutral` / `suppressed` + the lookback that state implies). |
+| `sectors_ref.load_stocks_data()` | The **Stocks** tab — 370 rows, 5 constituents per (sector, industry), 311 unique symbols. Plus `stock_symbols()` and `constituents_by_industry()`. |
+
+**Two design points worth not re-litigating:**
+
+- **`blend` renormalizes over the components actually PRESENT.** Participation is
+  undefined at stock level; substituting a neutral 0 would bias every stock down
+  against its own peer group.
+- **`suppressed` is checked FIRST in `classify`.** A rebound off a low presents
+  as contango + high dispersion, which would otherwise talk the gate out of the
+  one warning that matters (there, the biggest losers rip hardest).
+
+**Orchestration lives in `services/sentiment_svc`, not here** — `momentum_db.py`
+(bars + scores), `compute.compute_momentum()`, `handlers.refresh_momentum`, and
+**one nightly scheduler slot at 16:20 CT** (`scheduler.momentum_due`).
+**Deliberately nightly, not on the 120 s tick:** daily bars change once a day, so
+recomputing ~390 regressions every two minutes would be pure waste and would load
+the proxy during RTH for no signal.
+
+**Two liquidity floors, by role.** A STOCK must clear **$5M** 20d average dollar
+volume ("can I hold a position" — several small caps on the Stocks tab cannot,
+and would top the leaderboard on a thin-volume pop). An industry/sector **ETF**
+only has to clear **$250k** ("is this price series trustworthy enough to
+regress") — it is a measurement instrument and the trade is expressed through its
+constituents. Using the stock floor for both was measured on 2026-07-28 to delete
+**23 of 70 industry ETFs**, silently gutting a third of that cross-section.
+
+**The industry level scores 70 ETFs, not 74.** Four of the Stocks tab's 74
+industries name an ETF another industry already owns (`MJ`, `XRT`, `BETZ`, `VEGI`
+are each listed twice in the workbook, and `load_sectors_data` dedupes ETFs
+globally). Scoring one price series under two labels would put duplicate rows in
+the cross-section and invent a "two industries agree" signal, so those four are
+reported in `excluded` with `reason: "duplicate_etf"`; their constituents still
+roll up to the sector level and are still scored individually.
+
+Full design + plan: [`docs/plans/2026-07-28-momentum-cascade-design.md`](../docs/plans/2026-07-28-momentum-cascade-design.md)
+/ [`-plan.md`](../docs/plans/2026-07-28-momentum-cascade-plan.md).
+
 ## Trend regime (v4.1)
 
 > **Superseded for the webgui/bridge by the intraday Market Trend model

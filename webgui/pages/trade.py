@@ -27,6 +27,7 @@ from pages.ui_guard import guard
 
 from .options.inputs import select_all_on_focus
 from .options.theme import (
+    BTN,
     BTN_PRIMARY,
     CARD,
     EYEBROW,
@@ -223,6 +224,13 @@ def should_request(symbol, last_requested, since_seconds):
     return s != (last_requested or "") or since_seconds >= 1.0
 
 
+def should_open_tab(pending, version, baseline):
+    """Open the report/query tab only when a click is pending AND the cache version
+    advanced past the baseline captured at click time (so a page-load with a stale
+    cached result never auto-opens a tab)."""
+    return bool(pending) and version is not None and version != baseline
+
+
 # Tone → text class for the validated swing TILT (reuses the verdict palette, but the
 # card renders it small/plain rather than a bold BUY — see swing_tilt on why).
 _TONE_TEXT = {"pos": _BUY_TEXT, "neg": _SELL_TEXT, "neutral": _HOLD_TEXT}
@@ -344,11 +352,14 @@ def render():
     # Page state (local closure, not module globals — built per request). Read any
     # prior cached analysis up-front so the symbol field can seed to the LAST
     # analyzed symbol (the result itself persists across navigation via the cache).
-    state = {"result": None, "ver": None, "last_requested": None, "last_ts": 0.0}
+    state = {"result": None, "ver": None, "last_requested": None, "last_ts": 0.0,
+             "dd_ver": None, "dd_pending": False, "q_ver": None, "q_pending": False}
     state["ver"] = bus_client.read_version("trade:analysis")
     state["result"] = bus_client.read("trade:analysis") or None
     seed = seed_symbol(state["result"])
     state["last_requested"] = seed
+    state["dd_ver"] = bus_client.read_version("trade:deepdive")
+    state["q_ver"] = bus_client.read_version("trade:deepdive_query")
 
     # Dark-navy "dashboard" shell (page-scoped, .calc-v2) — the SAME shared theme the
     # Calculator/Simulator inject, wrapping the controls + result areas.
@@ -359,6 +370,10 @@ def render():
             symbol_in = select_all_on_focus(ui.input("Symbol", value=seed).classes("w-32"))
             analyze_btn = ui.button("Analyze", icon="analytics", color=None) \
                 .props("no-caps").classes(BTN_PRIMARY)
+            deepdive_btn = ui.button("Deep Dive", icon="query_stats", color=None) \
+                .props("no-caps").classes(BTN)
+            query_btn = ui.button("AI Query", icon="content_copy", color=None) \
+                .props("no-caps").classes(BTN)
             status = ui.label("Enter a symbol and click Analyze.").classes(EYEBROW)
 
         # Layout: a top area (error banner + header), then a verdict ROW of two
@@ -569,6 +584,45 @@ def render():
     # the Quasar q-input's ROOT element, and the native `blur` event does not bubble
     # there — `focusout` bubbles (same reason select_all_on_focus uses `focusin`).
     symbol_in.on("focusout", lambda e: _request_analyze())
+
+    # ── EquityDeepDive: Deep Dive report + AI Query (open a new tab on result) ──
+    @guard
+    def _request_deepdive():
+        sym = (symbol_in.value or "").strip().upper()
+        if not sym:
+            return
+        state["dd_ver"] = bus_client.read_version("trade:deepdive")  # baseline @ click
+        state["dd_pending"] = True
+        bus_client.request("trade", {"type": "deepdive", "args": {"symbol": sym}})
+        status.text = f"Running Deep Dive for {sym}…"
+
+    @guard
+    def _request_query():
+        sym = (symbol_in.value or "").strip().upper()
+        if not sym:
+            return
+        state["q_ver"] = bus_client.read_version("trade:deepdive_query")
+        state["q_pending"] = True
+        bus_client.request("trade", {"type": "deepdive_query", "args": {"symbol": sym}})
+        status.text = f"Building AI Query for {sym}…"
+
+    deepdive_btn.on_click(_request_deepdive)
+    query_btn.on_click(_request_query)
+
+    @guard
+    def _watch_deepdive():
+        v = bus_client.read_version("trade:deepdive")
+        if should_open_tab(state["dd_pending"], v, state["dd_ver"]):
+            state["dd_pending"] = False
+            state["dd_ver"] = v
+            ui.navigate.to(f"/trade/deepdive?v={v}", new_tab=True)
+        qv = bus_client.read_version("trade:deepdive_query")
+        if should_open_tab(state["q_pending"], qv, state["q_ver"]):
+            state["q_pending"] = False
+            state["q_ver"] = qv
+            ui.navigate.to(f"/trade/deepdive-query?v={qv}", new_tab=True)
+
+    ui.timer(2.0, _watch_deepdive)
 
     # ── version-poll repaint (fetch-free) ─────────────────────────────────────
     @guard

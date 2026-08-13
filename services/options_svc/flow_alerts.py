@@ -22,6 +22,12 @@ _DEFAULTS = {
     # heavily-optioned index/ETF names, noise on illiquid ones.
     "gamma_flip": {"enabled": True, "band_pct": 0.0015, "cooldown_min": 60,
                    "symbols": ["$SPX", "SPY", "QQQ", "IWM"]},
+    # Relative delta-notional flow: a contract carrying >= rel_threshold of its
+    # symbol's OWN gross delta-notional AND >= min_contract_notional absolute.
+    # enabled = whole detector; push = quiet-live gate (screen-only until true).
+    "big_delta": {"enabled": True, "push": False, "rel_threshold": 0.20,
+                  "min_contract_notional": 10_000_000, "delta_lo": 0.05,
+                  "delta_hi": 0.85, "delta_max": 1.0, "top_n": 3},
 }
 
 
@@ -166,6 +172,66 @@ def detect_uoa(symbol, chain, cfg):
         return []
 
 
+def detect_big_delta(symbol, chain, cfg):
+    """Relative delta-notional flow: a contract carrying >= rel_threshold of its symbol's OWN
+    gross delta-notional AND >= min_contract_notional absolute. Pure + defensive → []."""
+    b = (cfg or {}).get("big_delta", {})
+    rel = b.get("rel_threshold", 0.20)
+    floor = b.get("min_contract_notional", 10_000_000)
+    lo = b.get("delta_lo", 0.05)
+    hi = b.get("delta_hi", 0.85)
+    dmax = b.get("delta_max", 1.0)
+    top_n = b.get("top_n", 3)
+    try:
+        spot = (chain or {}).get("underlyingPrice") or 0
+        cand, gross = [], 0.0
+        for side, mapkey in (("call", "callExpDateMap"), ("put", "putExpDateMap")):
+            exp_map = (chain or {}).get(mapkey) or {}
+            if not isinstance(exp_map, dict):
+                continue
+            for exp_key, strike_map in exp_map.items():
+                expiry = str(exp_key).split(":")[0]
+                try:
+                    dte = int(str(exp_key).split(":")[1])
+                except (IndexError, ValueError):
+                    dte = None
+                for strike_str, contracts in (strike_map or {}).items():
+                    try:
+                        strike = float(strike_str)
+                    except (TypeError, ValueError):
+                        continue
+                    for c in (contracts or []):
+                        try:
+                            d = c.get("delta")
+                            vol = c.get("totalVolume") or 0
+                            if d is None or vol <= 0:
+                                continue
+                            ad = abs(float(d))
+                            if ad > dmax or ad < lo or ad > hi:
+                                continue
+                            dn = ad * vol * 100 * (spot or 0)
+                            if dn <= 0:
+                                continue
+                            gross += dn
+                            cand.append({"type": "big_delta", "side": side, "symbol": symbol,
+                                         "strike": strike, "expiry": expiry, "dte": dte,
+                                         "delta": float(d), "volume": int(vol),
+                                         "delta_notional": dn, "cost": _mark(c)})
+                        except Exception:
+                            continue
+        if gross <= 0:
+            return []
+        thr = rel * gross
+        out = [a for a in cand if a["delta_notional"] >= thr and a["delta_notional"] >= floor]
+        for a in out:
+            a["pct_of_gross"] = a["delta_notional"] / gross
+        out.sort(key=lambda a: a["delta_notional"], reverse=True)
+        return out[:top_n]
+    except Exception:
+        log.debug("detect_big_delta failed for %s", symbol, exc_info=True)
+        return []
+
+
 def _human_money(v):
     try:
         v = float(v)
@@ -264,6 +330,12 @@ def alert_text(a) -> str:
         return (f"{s} {_exp_short(a.get('expiry'), a.get('dte'))} {a['strike']:g}{cp} — "
                 f"UNUSUAL: {a['volume']:,} vol vs {a['oi']:,} OI ({a['vol_oi']:.1f}×) · "
                 f"${a['cost']:.2f} · {_human_money(a['premium'])} premium")
+    if a["type"] == "big_delta":
+        cp = "C" if a["side"] == "call" else "P"
+        pct = a.get("pct_of_gross") or 0
+        return (f"{s} {_exp_short(a.get('expiry'), a.get('dte'))} {a['strike']:g}{cp} — "
+                f"BIG Δ: {_human_money(a['delta_notional'])} ({pct:.0%} of {s}'s gross) · "
+                f"Δ{a.get('delta', 0):.2f} · {a.get('volume', 0):,} vol")
     if a["type"] == "gamma_flip":
         spot, flip = a.get("spot"), a.get("flip")
         if a["side"] == "to_negative":

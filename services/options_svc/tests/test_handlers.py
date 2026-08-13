@@ -267,7 +267,7 @@ def test_paper_command_dispatch(monkeypatch):
     monkeypatch.setattr(handlers.compute, "run_entry_cycle",
                         lambda: calls.__setitem__("entry", calls["entry"] + 1))
     monkeypatch.setattr(handlers.compute, "run_manage_cycle",
-                        lambda: calls.__setitem__("manage", calls["manage"] + 1))
+                        lambda **kw: calls.__setitem__("manage", calls["manage"] + 1))
     monkeypatch.setattr(handlers.compute, "expire_ledger_trades", lambda: 0)
     monkeypatch.setattr(handlers.compute, "reset_paper_account",
                         lambda bal: calls.__setitem__("reset", bal))
@@ -306,7 +306,7 @@ def test_run_manage_and_refresh_runs_cycle_when_account_present(monkeypatch):
     calls = {"manage": 0, "refresh": 0}
     monkeypatch.setattr(handlers.compute, "has_paper_account", lambda: True)
     monkeypatch.setattr(handlers.compute, "run_manage_cycle",
-                        lambda: calls.__setitem__("manage", calls["manage"] + 1))
+                        lambda **kw: calls.__setitem__("manage", calls["manage"] + 1))
     monkeypatch.setattr(handlers.compute, "expire_ledger_trades", lambda: 0)
     monkeypatch.setattr(handlers, "refresh_paper_account",
                         lambda b: calls.__setitem__("refresh", calls["refresh"] + 1))
@@ -320,6 +320,41 @@ def test_run_manage_and_refresh_runs_cycle_when_account_present(monkeypatch):
     # The manage tick always piggybacks one ledger refresh (fresh P&L + any
     # expiration settlement).
     assert calls.get("trades", 0) == 1
+
+
+# ── Manual-paper lifecycle flag threads into the manage cycle (Task 3) ──────
+
+def test_run_manage_and_refresh_threads_lifecycle_flag_off_by_default(monkeypatch):
+    """With the Settings toggle unset (default OFF), run_manage_and_refresh calls
+    compute.run_manage_cycle(lifecycle=False) — unchanged plain TAKE_PROFIT."""
+    bus = Bus(fake=True)
+    seen = {}
+    monkeypatch.setattr(handlers.compute, "has_paper_account", lambda: True)
+    monkeypatch.setattr(handlers.compute, "run_manage_cycle",
+                        lambda **kw: seen.update(kw))
+    monkeypatch.setattr(handlers.compute, "expire_ledger_trades", lambda: 0)
+    monkeypatch.setattr(handlers, "refresh_paper_account", lambda b: None)
+    monkeypatch.setattr(handlers, "refresh_paper_trades", lambda b, **k: None)
+
+    handlers.run_manage_and_refresh(bus)
+    assert seen == {"lifecycle": False}
+
+
+def test_run_manage_and_refresh_threads_lifecycle_flag_on_when_enabled(monkeypatch):
+    """With the Settings toggle explicitly enabled, run_manage_and_refresh calls
+    compute.run_manage_cycle(lifecycle=True)."""
+    bus = Bus(fake=True)
+    bus.cache_set("cache:options:manual_paper_lifecycle", {"enabled": True})
+    seen = {}
+    monkeypatch.setattr(handlers.compute, "has_paper_account", lambda: True)
+    monkeypatch.setattr(handlers.compute, "run_manage_cycle",
+                        lambda **kw: seen.update(kw))
+    monkeypatch.setattr(handlers.compute, "expire_ledger_trades", lambda: 0)
+    monkeypatch.setattr(handlers, "refresh_paper_account", lambda b: None)
+    monkeypatch.setattr(handlers, "refresh_paper_trades", lambda b, **k: None)
+
+    handlers.run_manage_and_refresh(bus)
+    assert seen == {"lifecycle": True}
 
 
 def test_run_paper_entry_and_manage_runs_entry_then_manage(monkeypatch):
@@ -440,7 +475,7 @@ def test_run_manage_and_refresh_settles_ledger_then_refreshes(monkeypatch):
     bus = Bus(fake=True)
     calls = {"expire": 0, "trades": 0}
     monkeypatch.setattr(handlers.compute, "has_paper_account", lambda: True)
-    monkeypatch.setattr(handlers.compute, "run_manage_cycle", lambda: None)
+    monkeypatch.setattr(handlers.compute, "run_manage_cycle", lambda **kw: None)
     monkeypatch.setattr(handlers.compute, "expire_ledger_trades",
                         lambda: calls.__setitem__("expire", calls["expire"] + 1) or 2)
     monkeypatch.setattr(handlers, "refresh_paper_account", lambda b: None)
@@ -742,6 +777,90 @@ def test_captured_close_falls_back_to_persisted_when_cache_cold(monkeypatch):
 
     payload = bus.cache_get("cache:options:captured").payload
     assert [s["signal_id"] for s in payload["signals"]] == ["X2"]
+
+
+# ── captured auto-manage: publish both views + toggle (Task 5) ──────────────
+def test_publish_captured_closed(monkeypatch):
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "captured_closed_today",
+                        lambda: {"closed": [], "total_realized": 0.0})
+    sub = bus.subscribe("events:options:captured_closed")
+    handlers.publish_captured_closed(bus)
+    msg = sub.get_message(timeout=1.0)
+    sub.close()
+    env = bus.cache_get("cache:options:captured_closed")
+    assert env is not None and env.payload == {"closed": [], "total_realized": 0.0}
+    assert msg is not None and msg.get("version") == env.version
+
+
+def test_run_captured_manage_and_publish_publishes_both_views(monkeypatch):
+    bus = Bus(fake=True)
+    ran = {"cycle": 0}
+    monkeypatch.setattr(handlers.compute, "run_captured_manage_cycle",
+                        lambda: ran.__setitem__("cycle", ran["cycle"] + 1) or
+                        {"closed": [{"signal_id": "M1", "symbol": "SPY",
+                                     "reason": "BREAKEVEN_STOP"}], "armed": []})
+    monkeypatch.setattr(handlers.compute, "captured_view",
+                        lambda: {"signals": [{"signal_id": "M2", "symbol": "QQQ"}]})
+    monkeypatch.setattr(handlers.compute, "captured_closed_today",
+                        lambda: {"closed": [{"signal_id": "M1", "realized_pnl": 3.0}],
+                                 "total_realized": 3.0})
+    handlers.run_captured_manage_and_publish(bus)
+
+    assert ran["cycle"] == 1                              # the cycle ran
+    opened = bus.cache_get("cache:options:captured")
+    assert opened is not None and opened.payload["signals"][0]["signal_id"] == "M2"
+    closed = bus.cache_get("cache:options:captured_closed")
+    assert closed is not None and closed.payload["total_realized"] == 3.0
+    assert closed.payload["closed"][0]["signal_id"] == "M1"
+
+
+def test_captured_manage_command_dispatch(monkeypatch):
+    bus = Bus(fake=True)
+    calls = {"n": 0}
+    monkeypatch.setattr(handlers, "run_captured_manage_and_publish",
+                        lambda b: calls.__setitem__("n", calls["n"] + 1))
+    handlers.handle_command(bus, Command(type="captured_manage"))
+    assert calls["n"] == 1
+
+
+def test_set_autoclose_command_writes_flag():
+    bus = Bus(fake=True)
+    handlers.handle_command(bus, Command(type="set_autoclose", args={"enabled": False}))
+    assert bus.cache_get("cache:options:autoclose_enabled").payload == {"enabled": False}
+    handlers.handle_command(bus, Command(type="set_autoclose", args={"enabled": True}))
+    assert bus.cache_get("cache:options:autoclose_enabled").payload == {"enabled": True}
+
+
+def test_autoclose_enabled_defaults_true_and_respects_false():
+    bus = Bus(fake=True)
+    assert handlers.autoclose_enabled(bus) is True         # missing key → default ON
+    bus.cache_set("cache:options:autoclose_enabled", {"enabled": False})
+    assert handlers.autoclose_enabled(bus) is False
+    bus.cache_set("cache:options:autoclose_enabled", {"enabled": True})
+    assert handlers.autoclose_enabled(bus) is True
+
+
+# ── Manual-paper break-even lifecycle opt-in (Task 3, flag default OFF) ─────
+# The inverse of autoclose: only an EXPLICIT {"enabled": True} turns it on.
+
+def test_set_manual_paper_lifecycle_command_writes_flag():
+    bus = Bus(fake=True)
+    handlers.handle_command(bus, Command(type="set_manual_paper_lifecycle",
+                                         args={"enabled": True}))
+    assert bus.cache_get("cache:options:manual_paper_lifecycle").payload == {"enabled": True}
+    handlers.handle_command(bus, Command(type="set_manual_paper_lifecycle",
+                                         args={"enabled": False}))
+    assert bus.cache_get("cache:options:manual_paper_lifecycle").payload == {"enabled": False}
+
+
+def test_manual_paper_lifecycle_enabled_defaults_false_and_respects_true():
+    bus = Bus(fake=True)
+    assert handlers.manual_paper_lifecycle_enabled(bus) is False   # missing key → default OFF
+    bus.cache_set("cache:options:manual_paper_lifecycle", {"enabled": True})
+    assert handlers.manual_paper_lifecycle_enabled(bus) is True
+    bus.cache_set("cache:options:manual_paper_lifecycle", {"enabled": False})
+    assert handlers.manual_paper_lifecycle_enabled(bus) is False
 
 
 # ── Gamma (Task 2.6d) ────────────────────────────────────────────────────────
@@ -1221,6 +1340,25 @@ def test_calc_iv_command_caches_implied_iv(monkeypatch):
     assert msg is not None and msg.get("version") == env.version
 
 
+def test_swing_scan_publishes_the_filtered_out_count(monkeypatch):
+    """The page needs the drop count to tell 'nothing cleared the quality bar'
+    apart from 'the scan found nothing', so the handler must carry it through."""
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "swing_scan",
+                        lambda **p: {"signals": [], "view": {}, "filtered_out": 7})
+    handlers.swing_scan(bus, {"symbol": "SPY"})
+    assert bus.cache_get("cache:options:swing").payload["filtered_out"] == 7
+
+
+def test_swing_scan_filtered_out_defaults_when_compute_omits_it(monkeypatch):
+    """A stale compute returning no ``filtered_out`` must not crash the handler."""
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "swing_scan",
+                        lambda **p: {"signals": [], "view": {}})
+    handlers.swing_scan(bus, {"symbol": "SPY"})
+    assert bus.cache_get("cache:options:swing").payload["filtered_out"] == 0
+
+
 def test_swing_scan_uses_defaults_for_missing_args(monkeypatch):
     bus = Bus(fake=True)
     seen = {"params": None}
@@ -1319,12 +1457,17 @@ def test_collect_gex_history_publishes_flow_skew_after_collect(monkeypatch):
 
 
 def test_collect_gex_history_no_bus_skips_publish(monkeypatch):
-    """A legacy caller passing bus=None still collects, but does not publish."""
+    """A legacy caller passing bus=None still collects, but does not publish —
+    none of them (flow-skew, matrix, net premium)."""
     order = []
     monkeypatch.setattr(handlers.compute, "collect_gex_snapshots",
                         lambda capture_symbols=None: order.append("collect"))
     monkeypatch.setattr(handlers, "publish_flow_skew",
                         lambda bus: order.append("publish"))
+    monkeypatch.setattr(handlers, "publish_matrix",
+                        lambda bus: order.append("matrix"))
+    monkeypatch.setattr(handlers, "publish_net_premium",
+                        lambda bus: order.append("netprem"))
     handlers.collect_gex_history(bus=None)
     assert order == ["collect"]
 
@@ -1678,6 +1821,10 @@ def test_run_flow_alerts_emits_uoa_from_stash(monkeypatch):
     # SPY is in the universe (no crossover SERIES data, but a valid member); UOA
     # shares the crossover universe, so the stash symbol must be in it to emit.
     monkeypatch.setattr(handlers, "_flow_alert_symbols", lambda: ["SPY"])
+    # Stub the SERIES read (as the sibling tests do): unstubbed it hits the real
+    # gex_history.db, and a live SPY premium crossover in today's collected rows
+    # prepends a second alert that has nothing to do with the UOA path here.
+    monkeypatch.setattr(handlers, "_load_flow_series_for", lambda conn, sym, limit: [])
     monkeypatch.setattr(compute, "take_uoa_stash", lambda: {"SPY": [dict(contract)]})
     monkeypatch.setattr(handlers, "_flow_now_ts", lambda: 1000)
     sent = []
@@ -1702,6 +1849,9 @@ def test_run_flow_alerts_uoa_excludes_vix(monkeypatch):
                 "expiry": "2026-07-18", "dte": 2, "cost": 1.0, "volume": 8000,
                 "oi": 1000, "vol_oi": 8.0, "premium": 800000.0}
     monkeypatch.setattr(handlers, "_flow_alert_symbols", lambda: ["SPY"])   # $VIX excluded
+    # See the sibling test: stub the series read so a real crossover in today's
+    # collected gex_history.db rows can't inject an extra alert.
+    monkeypatch.setattr(handlers, "_load_flow_series_for", lambda conn, sym, limit: [])
     monkeypatch.setattr(compute, "take_uoa_stash",
                         lambda: {"SPY": [uoa("SPY", 450.0)], "$VIX": [uoa("$VIX", 20.0)]})
     monkeypatch.setattr(handlers, "_flow_now_ts", lambda: 1000)
@@ -1711,6 +1861,132 @@ def test_run_flow_alerts_uoa_excludes_vix(monkeypatch):
     ids = [a["id"] for a in bus.cache_get("cache:options:flow_alerts").payload["alerts"]]
     assert ids == ["SPY|uoa|call|450|2026-07-18"]   # $VIX dropped
     assert all("$VIX" not in a["symbol"] for a in sent)
+
+
+def test_flow_alerts_cap_holds_a_full_day():
+    """The published list was capped at 50, which drops the morning's alerts before
+    anyone can look at them. A full session across ~45 symbols needs headroom."""
+    from services.options_svc import handlers
+    assert handlers._FLOW_ALERTS_MAX >= 300
+
+
+def test_run_flow_alerts_uoa_carries_a_timestamp(monkeypatch):
+    """Crossover and gamma_flip alerts carry ts; UOA did not, because detect_uoa
+    never emits one — so a chronological view had nothing to place a third of its
+    rows on a timeline with."""
+    from shared.bus import Bus
+    from services.options_svc import handlers, compute
+    bus = Bus(fake=True)
+    contract = {"type": "uoa", "side": "call", "symbol": "SPY", "strike": 450.0,
+                "expiry": "2026-07-18", "dte": 2, "cost": 1.85, "volume": 8200,
+                "oi": 1300, "vol_oi": 6.3, "premium": 1517000.0}
+    monkeypatch.setattr(handlers, "_flow_alert_symbols", lambda: ["SPY"])
+    monkeypatch.setattr(handlers, "_load_flow_series_for", lambda conn, sym, limit: [])
+    monkeypatch.setattr(compute, "take_uoa_stash", lambda: {"SPY": [dict(contract)]})
+    monkeypatch.setattr(handlers, "_flow_now_ts", lambda: 1754750000)
+    monkeypatch.setattr(handlers.push_notify, "send_flow_alert", lambda a, **k: None)
+
+    handlers.run_flow_alerts(bus)
+
+    alerts = bus.cache_get("cache:options:flow_alerts").payload["alerts"]
+    uoa = [a for a in alerts if a["type"] == "uoa"]
+    assert uoa and uoa[0]["ts"] == 1754750000
+
+
+# --- Task 4: big_delta drain + quiet-live push gate ---
+
+_BD_CONTRACT = {"type": "big_delta", "side": "call", "symbol": "SPY", "strike": 100.0,
+                "expiry": "2026-08-14", "dte": 3, "delta": 0.5, "volume": 5000,
+                "delta_notional": 3.1e8, "pct_of_gross": 0.24}
+
+
+def test_run_flow_alerts_big_delta_screen_only_when_push_false(monkeypatch):
+    """big_delta always lands on the Flow screen; push=false (the config default)
+    means it must NOT reach push_notify.send_flow_alert -- quiet-live."""
+    from shared.bus import Bus
+    from services.options_svc import handlers, compute
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers, "_flow_alert_symbols", lambda: ["SPY"])
+    monkeypatch.setattr(handlers, "_load_flow_series_for", lambda conn, sym, limit: [])
+    monkeypatch.setattr(compute, "take_uoa_stash", lambda: {})
+    monkeypatch.setattr(compute, "take_big_delta_stash", lambda: {"SPY": [dict(_BD_CONTRACT)]})
+    monkeypatch.setattr(handlers, "_flow_now_ts", lambda: 1000)
+    sent = []
+    monkeypatch.setattr(handlers.push_notify, "send_flow_alert", lambda a, **k: sent.append(a))
+    handlers.run_flow_alerts(bus)
+    alerts = bus.cache_get("cache:options:flow_alerts").payload["alerts"]
+    assert any(a["type"] == "big_delta" for a in alerts)          # on the screen
+    assert not any(a.get("type") == "big_delta" for a in sent)    # NOT phone-pushed
+
+
+def test_run_flow_alerts_big_delta_pushed_when_push_true(monkeypatch):
+    """Flipping [big_delta].push -> true removes the push suppression, no code change."""
+    from shared.bus import Bus
+    from services.options_svc import handlers, compute
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers, "_flow_alert_symbols", lambda: ["SPY"])
+    monkeypatch.setattr(handlers, "_load_flow_series_for", lambda conn, sym, limit: [])
+    monkeypatch.setattr(compute, "take_uoa_stash", lambda: {})
+    monkeypatch.setattr(compute, "take_big_delta_stash", lambda: {"SPY": [dict(_BD_CONTRACT)]})
+    monkeypatch.setattr(handlers, "_flow_now_ts", lambda: 1000)
+    real_cfg = handlers.flow_alerts.load_thresholds()
+    push_cfg = {**real_cfg, "big_delta": {**real_cfg["big_delta"], "push": True}}
+    monkeypatch.setattr(handlers.flow_alerts, "load_thresholds", lambda: push_cfg)
+    sent = []
+    monkeypatch.setattr(handlers.push_notify, "send_flow_alert", lambda a, **k: sent.append(a))
+    handlers.run_flow_alerts(bus)
+    assert any(a.get("type") == "big_delta" for a in sent)
+
+
+def test_run_flow_alerts_big_delta_id_format_ts_and_dedup(monkeypatch):
+    """Once-per-contract-per-day, like UOA: the SAME cooldown seen-set gates a
+    repeat next tick, and the alert carries the stamped id/ts/text."""
+    from shared.bus import Bus
+    from services.options_svc import handlers, compute
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers, "_flow_alert_symbols", lambda: ["SPY"])
+    monkeypatch.setattr(handlers, "_load_flow_series_for", lambda conn, sym, limit: [])
+    monkeypatch.setattr(compute, "take_uoa_stash", lambda: {})
+    monkeypatch.setattr(compute, "take_big_delta_stash", lambda: {"SPY": [dict(_BD_CONTRACT)]})
+    monkeypatch.setattr(handlers, "_flow_now_ts", lambda: 1754750000)
+    sent = []
+    monkeypatch.setattr(handlers.push_notify, "send_flow_alert", lambda a, **k: sent.append(a))
+
+    handlers.run_flow_alerts(bus)
+
+    alerts = bus.cache_get("cache:options:flow_alerts").payload["alerts"]
+    bd = [a for a in alerts if a["type"] == "big_delta"]
+    assert [a["id"] for a in bd] == ["SPY|big_delta|call|100|2026-08-14"]
+    assert bd[0]["ts"] == 1754750000 and bd[0]["text"]
+
+    # Same contract next tick -> once-per-day dedup, no re-push/re-append.
+    monkeypatch.setattr(compute, "take_big_delta_stash", lambda: {"SPY": [dict(_BD_CONTRACT)]})
+    handlers.run_flow_alerts(bus)
+    alerts2 = bus.cache_get("cache:options:flow_alerts").payload["alerts"]
+    bd2 = [a for a in alerts2 if a["type"] == "big_delta"]
+    assert len(bd2) == 1 and len(sent) == 0   # push=false default -> never pushed either tick
+
+
+def test_run_flow_alerts_big_delta_excludes_vix(monkeypatch):
+    """Shares the crossover/UOA universe (excludes $VIX)."""
+    from shared.bus import Bus
+    from services.options_svc import handlers, compute
+    bus = Bus(fake=True)
+
+    def bd(sym, strike):
+        return {**_BD_CONTRACT, "symbol": sym, "strike": strike}
+
+    monkeypatch.setattr(handlers, "_flow_alert_symbols", lambda: ["SPY"])   # $VIX excluded
+    monkeypatch.setattr(handlers, "_load_flow_series_for", lambda conn, sym, limit: [])
+    monkeypatch.setattr(compute, "take_uoa_stash", lambda: {})
+    monkeypatch.setattr(compute, "take_big_delta_stash",
+                        lambda: {"SPY": [bd("SPY", 100.0)], "$VIX": [bd("$VIX", 20.0)]})
+    monkeypatch.setattr(handlers, "_flow_now_ts", lambda: 1000)
+    monkeypatch.setattr(handlers.push_notify, "send_flow_alert", lambda a, **k: None)
+    handlers.run_flow_alerts(bus)
+    ids = [a["id"] for a in bus.cache_get("cache:options:flow_alerts").payload["alerts"]]
+    assert any(i.startswith("SPY|big_delta") for i in ids)
+    assert all("$VIX" not in i for i in ids)
 
 
 def test_publish_matrix_caches_view(monkeypatch):
@@ -1993,3 +2269,188 @@ def test_close_slot_routes_to_eod_briefing(monkeypatch):
     handlers.run_scheduled_gamma_analyze(_Bus(), "close")
     handlers.run_scheduled_gamma_analyze(_Bus(), "midday")
     assert calls == ["eod", "intraday"]
+
+
+# ── Net Prem view: cache:options:net_premium (Task 6) ────────────────────────
+# The publisher rides the 1-min GEX branch right after publish_matrix. Unlike
+# publish_matrix (which caches a RAW dict and only mentions its contract in a
+# comment) this one gates the payload through NetPremiumSnapshot, and — because
+# the publish sits inside a try/except — a gate failure must LOG LOUDLY rather
+# than degrade into a silent no-publish. A silent no-publish would surface in the
+# UI as an empty chart, indistinguishable from "not collected yet", which is the
+# feature's expected steady state for a while after ship.
+
+def test_publish_net_premium_caches_the_view(monkeypatch):
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "build_net_premium",
+                        lambda session_date, **kw: {"series": {"SPY": [[1, 2.0, 1.0]]},
+                                                    "session_date": "2026-08-05",
+                                                    "ts": "t", "error": None})
+
+    sub = bus.subscribe(handlers.EVENT_NET_PREMIUM)
+    handlers.publish_net_premium(bus)
+    msg = sub.get_message(timeout=1.0)
+    sub.close()
+
+    env = bus.cache_get("cache:options:net_premium")
+    assert env is not None
+    assert env.payload["series"]["SPY"] == [[1, 2.0, 1.0]]
+    assert env.payload["session_date"] == "2026-08-05"
+    assert msg is not None and msg.get("version") == env.version
+
+
+def test_publish_net_premium_never_raises(monkeypatch):
+    def _boom(*a, **k):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(handlers.compute, "build_net_premium", _boom)
+    handlers.publish_net_premium(Bus(fake=True))      # must not raise
+
+
+def test_collect_gex_history_publishes_net_premium_guarded(monkeypatch):
+    """A net-premium failure must not break GEX collection or the other publishes."""
+    calls = []
+    monkeypatch.setattr(handlers.compute, "collect_gex_snapshots",
+                        lambda **kw: calls.append("collect"))
+    monkeypatch.setattr(handlers, "publish_flow_skew", lambda bus: None)
+    monkeypatch.setattr(handlers, "run_flow_alerts", lambda bus: None)
+    monkeypatch.setattr(handlers, "publish_matrix", lambda bus: calls.append("matrix"))
+    monkeypatch.setattr(handlers, "_current_gamma_symbol", lambda bus: "$SPX")
+
+    def _boom(bus):
+        calls.append("netprem")
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(handlers, "publish_net_premium", _boom)
+
+    handlers.collect_gex_history(Bus(fake=True))      # must not raise
+
+    assert calls == ["collect", "matrix", "netprem"]
+
+
+# (The bus-less caller is covered by test_collect_gex_history_no_bus_skips_publish,
+# which patches all three publishers — same property, one test.)
+
+
+# --- the contract gate must be REAL, and must fail LOUDLY --------------------
+
+def test_publish_net_premium_malformed_payload_logs_and_does_not_cache(monkeypatch,
+                                                                       caplog):
+    """A shape regression must be an OPS SIGNAL, not a silent empty chart.
+
+    ``series`` typed as a str fails NetPremiumSnapshot. The publisher must log an
+    error naming the contract and cache NOTHING (a half-valid payload is worse
+    than none — the page would render a broken chart)."""
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "build_net_premium",
+                        lambda session_date, **kw: {"series": "not-a-dict",
+                                                    "ts": "t", "error": None})
+
+    with caplog.at_level("ERROR"):
+        handlers.publish_net_premium(bus)      # must not raise
+
+    assert bus.cache_get("cache:options:net_premium") is None, "must not cache"
+    assert any("NetPremiumSnapshot" in r.message for r in caplog.records), \
+        "a gate failure must log loudly, naming the contract"
+
+
+def test_publish_net_premium_non_dict_payload_logs_the_contract(monkeypatch, caplog):
+    """Even a wholly non-dict return must land on the contract-naming log, not the
+    generic degrade message (the projection is inside the gate's try for that
+    reason)."""
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "build_net_premium",
+                        lambda session_date, **kw: ["not", "a", "dict"])
+
+    with caplog.at_level("ERROR"):
+        handlers.publish_net_premium(bus)
+
+    assert bus.cache_get("cache:options:net_premium") is None
+    assert any("NetPremiumSnapshot" in r.message for r in caplog.records)
+
+
+def test_publish_net_premium_caches_only_the_contract_fields(monkeypatch):
+    """The cached payload is the VALIDATED model: missing fields get the contract
+    default, engine extras are dropped. Both come from NetPremiumSnapshot itself
+    (every field has a default; _Base inherits pydantic's extra="ignore"), so no
+    hand-maintained field list is needed at the call site — one that drifted from
+    the contract would pin a new field to its default forever."""
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "build_net_premium",
+                        lambda session_date, **kw: {"series": {"SPY": []},
+                                                    "debug_rows": 12345})
+
+    handlers.publish_net_premium(bus)
+
+    payload = bus.cache_get("cache:options:net_premium").payload
+    assert set(payload) == {"session_date", "ts", "series", "error"}
+    assert payload["session_date"] is None and payload["error"] is None
+
+
+# --- wiring: a real date object, and ONE clock read --------------------------
+
+def test_publish_net_premium_passes_a_real_date_object(monkeypatch):
+    """build_net_premium raises TypeError on a string session_date by design, so
+    the handler must hand it scheduler.active_session_date()'s date OBJECT."""
+    import datetime as _dt
+    seen = {}
+
+    def _capture(session_date, **kw):
+        seen["session_date"] = session_date
+        return {"series": {}, "ts": "t", "error": None}
+
+    monkeypatch.setattr(handlers.compute, "build_net_premium", _capture)
+    handlers.publish_net_premium(Bus(fake=True))
+
+    assert isinstance(seen["session_date"], _dt.date)
+    assert not isinstance(seen["session_date"], str)
+
+
+def test_publish_net_premium_reads_the_clock_once(monkeypatch):
+    """The 08:00/08:30 boundary reasoning only holds if active_session_date and
+    build_net_premium see the SAME instant — so ``now`` is read once and passed
+    to both (mirrors compute.gamma_snapshot)."""
+    from services.options_svc import scheduler
+    import datetime as _dt
+    seen = {}
+
+    def _capture_session(now=None):
+        seen["session_now"] = now
+        return _dt.date(2026, 8, 5)
+
+    def _capture_build(session_date, now=None):
+        seen["build_now"] = now
+        return {"series": {}, "ts": "t", "error": None}
+
+    monkeypatch.setattr(scheduler, "active_session_date", _capture_session)
+    monkeypatch.setattr(handlers.compute, "build_net_premium", _capture_build)
+    handlers.publish_net_premium(Bus(fake=True))
+
+    assert seen["session_now"] is not None, "active_session_date must be given now"
+    assert seen["build_now"] is seen["session_now"], "one clock read, passed to both"
+
+
+# ── Expected Move chain metadata (Task 4) ────────────────────────────────────
+def test_em_chain_command_caches_ladders(monkeypatch):
+    bus = Bus(fake=True)
+    seen = {"symbol": None}
+    result = {"symbol": "SPY", "api": "SPY", "spot": 772.3,
+              "expirations": ["2026-08-14"], "strikes": {"2026-08-14": [770.0]},
+              "error": None}
+
+    def _rec(symbol):
+        seen["symbol"] = symbol
+        return result
+
+    monkeypatch.setattr(handlers.compute, "em_chain_meta", _rec)
+
+    sub = bus.subscribe("events:options:em_chain")
+    handlers.handle_command(bus, Command(type="em_chain", args={"symbol": "SPY"}))
+    msg = sub.get_message(timeout=1.0)
+    sub.close()
+
+    assert seen["symbol"] == "SPY"
+    env = bus.cache_get("cache:options:em_chain")
+    assert env is not None
+    assert env.payload == result
+    assert msg is not None and msg.get("version") == env.version

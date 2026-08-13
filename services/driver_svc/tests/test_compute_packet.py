@@ -530,8 +530,10 @@ def test_market_read_carries_market_regime():
     st = mr["market_regime"]
     assert st["label"] == "Trending" and st["confidence"] == 0.62
     # top two memberships, strongest first, as (name, weight) pairs
-    assert st["top"][0] == ("trending", 0.52) and st["top"][1] == ("mean_reversion", 0.28)
-    assert st["transition"] == "mean_reversion -> trending 60%"
+    # Membership keys are shown to the decider as DISPLAY labels (the internal
+    # "crisis" key would read "Volatile"), consistent with the rest of the app.
+    assert st["top"][0] == ("Trending", 0.52) and st["top"][1] == ("Mean Reversion", 0.28)
+    assert st["transition"] == "Mean Reversion -> Trending 60%"
     assert "Trending" in mr["summary"]                      # surfaced on the log line
 
 
@@ -694,6 +696,19 @@ def test_run_cycle_gate_blocks_wrong_side_when_flag_on(monkeypatch):
                             market=_up_market())
     assert out["executable"] == []
     assert out["rejected"][0]["reason"]                      # blocked wrong-side
+
+
+def test_run_cycle_blocks_symbol_already_open(monkeypatch):
+    """run_cycle derives open_symbols from the driver book and blocks a dup-symbol trade."""
+    monkeypatch.setattr("services.driver_svc.decider.decide",
+        lambda p, **k: {"stand_down": False, "trades": [{"id": "m0", "quantity": 1}]})
+    scan = {"signals_0dte": [{"symbol": "$SPX", "type": "PCS", "max_loss": 2.0,
+                              "composite_score": 80}], "signals_swing": []}
+    paper = {"snapshot": {"session_pnl": 0.0},
+             "positions": [{"symbol": "$SPX", "source": "driver"}]}
+    out = compute.run_cycle(scan, paper, target=500.0, limits=_lim(), market={})
+    assert out["executable"] == []
+    assert out["rejected"][0]["reason"]                      # symbol already open
 
 
 # ---------------------------------------------------------------------------

@@ -18,6 +18,176 @@ usage see the *User Guide*; for the inter-service integration surface see the
 
 ---
 
+# Prerequisites
+
+Everything required to run the stack successfully. Items marked **Required** must
+be in place or the app will not start (or will start degraded in an obvious way);
+**Optional** items disable a specific feature when absent, by design — the code
+degrades rather than crashes.
+
+## Platform and runtime
+
+| Requirement | Detail | Status |
+|-------------|--------|--------|
+| **Operating system** | **Windows 10 / 11.** The stack is Windows-first: the launchers are `.bat`, desktop toasts use `winotify`, and the Redis backbone is Memurai (a Windows Redis). | Required |
+| **Python** | **3.11+** (developed/tested on **3.11.9**; CI pins **3.11**; `ruff` targets `py311`). | Required |
+| **Virtual environment** | A venv at the repo root: **`.venv`**. The launchers resolve `\.venv\Scripts\python.exe` explicitly and abort if it's missing. | Required |
+| **Browser** | Any modern browser for the web GUI at `http://127.0.0.1:8500`. | Required |
+| **Windows Terminal** | Only for `start_all_wt.bat` (the one-window, tabbed launcher). | Optional |
+
+Create the environment:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python -m pip install -r requirements.txt
+```
+
+## Python dependencies
+
+`requirements.txt` is the human-readable **direct-dependency** list (the union of
+all apps). `requirements.lock` is a fully-pinned, byte-identical environment
+(`pip freeze`) — install that for reproducibility. `requirements-dev.txt` holds
+tooling (`ruff`, `pre-commit`, `pip-audit`, `pytest-cov`) and is **not needed to
+run** the app.
+
+Load-bearing runtime packages:
+
+| Package | Role |
+|---------|------|
+| `nicegui[highcharts]>=2.0.0` | The web GUI and every chart/gauge. |
+| `fastapi==0.137.0`, `uvicorn==0.49.0`, `starlette==1.3.1` | The proxy + the six domain services. |
+| `redis==8.0.0` | Client for the Memurai backbone. `fakeredis>=2.20` backs the tests (no live server needed). |
+| `pydantic>=2.0` | The typed cross-tier contracts. |
+| `schwab-py==1.5.1` | Schwab auth / market data / streaming. |
+| `requests==2.34.2`, `httpx==0.28.1` | HTTP clients. |
+| `pandas>=2.0`, `numpy>=1.24`, `scipy` | Analytics; `scipy.stats.norm` powers Black-Scholes. |
+| `openpyxl` | Reads the sector/watchlist workbooks. |
+| `apscheduler==3.10.4` | Driver scheduling. |
+| `anthropic==0.112.0` | Claude tool-use calls (imported lazily — the suite runs without it configured). |
+| `matplotlib`, `Pillow`, `winotify`, `yfinance` | Charts/imaging, Windows toasts, optional fallback data. |
+
+> **Licensing — read this.** `nicegui[highcharts]` pulls in **Highcharts**, which is
+> free for **personal / non-commercial use only**. Commercial use requires a paid
+> Highcharts license. This is a licensing prerequisite, not a technical one.
+
+## Memurai (the Redis backbone)
+
+| Requirement | Detail | Status |
+|-------------|--------|--------|
+| **Memurai running on `:6379`** | Installs as a **native Windows service** (start it from `services.msc`). It is the Tier-3 cache, pub/sub, and command bus — **without it none of the six services can publish and every page shows a "Waiting for … service" placeholder.** The launchers check it but do **not** install or start it for you, and `stop_all.bat` deliberately leaves it running. | Required |
+| `MEMURAI_PASSWORD` | Optional AUTH. Unset = no AUTH (the default, unchanged behavior). | Optional |
+
+## Schwab API credentials
+
+The proxy owns all Schwab authentication; no other process holds credentials.
+
+| Requirement | Detail | Status |
+|-------------|--------|--------|
+| **Schwab developer account + registered app** | Yields an **App Key** and **App Secret**. Register the callback URL as **`https://127.0.0.1:8182`**. | Required |
+| **`shared/appsettings.json`** | Copy `shared/appsettings.example.json` and fill `Schwab.AppKey` / `Schwab.AppSecret` (both default to `REPLACE_ME`). **Gitignored.** | Required |
+| **`shared/tokens.json`** | The OAuth tokens (`AccessToken` / `RefreshToken` / expiry). Created by the first authorization — copy `shared/tokens.example.json` if you need the shape. **Gitignored.** | Required |
+| **First-time authorization** | Start the proxy, then open **`http://127.0.0.1:8100/auth`** (or the **Authorize** button on the app's **System Status** page) and complete the Schwab login. | Required |
+
+> **Token lifetimes matter operationally.** An **expired access token is normal** —
+> the proxy refreshes it automatically. An **expired refresh token is fatal** to
+> live data and requires re-authorizing via `/auth`. The proxy's `/health` reports
+> `has_token`, `token_expired`, and `refresh_token_expired`, and the System Status
+> page surfaces this as its own card.
+
+## Anthropic API key (AI features)
+
+| Requirement | Detail | Status |
+|-------------|--------|--------|
+| **`ANTHROPIC_API_KEY`** | Resolution order: the **env var** first, then a gitignored **`shared/anthropic_key.txt`**. Powers the Driver's Claude decision layer, the Gamma **Analyze**/**Explain** infographics + the 4×/day auto-briefings, and the market summary ticker. | Optional |
+
+Without a key those features **degrade safely** — most importantly the autonomous
+driver **stands down rather than trading blind**, and the Gamma infographics render
+a readable "no key" page.
+
+## Data files
+
+| File | Role | Status |
+|------|------|--------|
+| `sentiment-dashboard/Sectors_Industries_ETFs.xlsx` | The sector/industry ETF reference map, loaded once at startup by the sentiment engine. | Required |
+| `options-scanner/data/Top 20.xlsx` | The scanner watchlist (also the GEX collection universe). **Gitignored** — a fresh clone degrades to the base index symbols (`$SPX`/`$VIX`/`SPY`/`QQQ`). | Optional |
+
+The SQLite stores (paper-trading books, `gex_history.db`, signal DBs) are created
+automatically and start empty.
+
+## Ports that must be free
+
+Ports come from `config/ports.toml` via `repo_paths.py` — never hard-coded.
+
+| Port | Process | Status |
+|------|---------|--------|
+| 6379 | Memurai (Redis) | Required |
+| 8100 | schwab-proxy — **start first**, everything depends on it | Required |
+| 8210 | sentiment_svc | Required |
+| 8211 | options_svc | Required |
+| 8212 | portfolio_svc | Required |
+| 8213 | trade_svc | Required |
+| 8214 | driver_svc | Required |
+| 8215 | market_svc | Required |
+| 8500 | webgui (NiceGUI) | Required |
+
+`config/ports.toml` also lists `options_analytics = 8200`, `approval = 8300`,
+`dashboard_frontend = 5173`, and an `[ml_servers]` block (MES 8000 / MNQ 8001 /
+ES 8004 / NQ 8005). **None of these are started by this repo** — 5173 and 8300
+are legacy/retired, and the ML servers plus the 8200 analytics service are
+**separate external processes** that `claude-driver` addresses over HTTP. If they
+aren't running, those paths simply degrade.
+
+## Optional integrations
+
+| Feature | Requirement |
+|---------|-------------|
+| **Push notifications** | Gitignored `shared/notifications.json` (template: `shared/notifications.example.json`). Telegram needs a bot token + chat id; Discord needs a channel webhook URL; Google Fi SMS needs your 10-digit Fi number plus a Gmail **App Password**. Each channel self-gates — missing creds are a silent no-op. Env vars override file values. |
+| **Proxy hardening** | `PROXY_SHARED_SECRET` (guards the trading endpoints; enforced only when set) and `PROXY_CORS_ORIGINS` (overrides the local allowlist). See `docs/SECURITY.md`. |
+| **Driver model override** | `DRIVER_MODEL` env var → gitignored `shared/driver_model.txt` (defaults to the built-in model id). |
+
+## Startup order
+
+The dependency chain is strict: **Memurai → schwab-proxy → the six services → webgui.**
+Services wait on the proxy because every one of them resolves market data through it.
+
+| Launcher | Behavior |
+|----------|----------|
+| `start_all.bat` | Proxy + 6 services + webgui in **8 separate console windows**, then opens the browser. |
+| `start_all_wt.bat` | The same 8 processes as **tabs in one Windows Terminal window**. |
+| `start_all_wt.bat nowindow` / `start_all_hidden.bat` | Windowless (`pythonw`), logging to `logs\`. |
+| `stop_all.bat` | Stops the proxy, services, and webgui by port. **Leaves Memurai running.** |
+
+> The eight processes must stay **separate OS processes**. Merging services into one
+> Python process would re-introduce the top-level module-name collisions
+> (`config` / `scoring` / `notifier` / `src`) that the 3-tier split exists to prevent.
+
+## Verifying the install
+
+1. Open **`http://127.0.0.1:8500/status`** — the System Status page probes Memurai,
+   the proxy, Schwab authorization, all six services, and the webgui, plus a
+   data-freshness table.
+2. Or probe directly: `GET http://127.0.0.1:8100/health` and
+   `GET http://127.0.0.1:82{10..15}/health` (each returns `{"domain": …, "up": true}`).
+3. Run the tests **one folder at a time** (never `pytest services` across all of
+   them — that re-triggers the module-name collisions):
+
+```powershell
+.venv\Scripts\python -m pytest services\options_svc
+cd webgui ; ..\.venv\Scripts\python -m pytest -q
+```
+
+## Operational notes
+
+- **Off-hours data is legitimately sparse.** On weekends and outside market hours
+  0-DTE scans can return nothing and Gamma may show no fresh data. That is expected,
+  not a failure.
+- **`gex_history.db` grows.** A daily retention purge keeps the last 5 sessions, but
+  `DELETE` reuses pages without shrinking the file — reclaim space with the offline
+  `tools/vacuum_gex.py` (or **Settings → Maintenance → Vacuum GEX history DB**), which
+  refuses to run while the collector is active.
+
+---
+
 # Architecture Overview
 
 ## The three tiers
@@ -34,7 +204,7 @@ TIER 3  STORE+COMM  Memurai (:6379): cache:{domain}:{view}, events:{domain}:{vie
                     payloads) + shared/bus (redis wrapper).
    ▲ publish                               │ consume
 TIER 2  SERVICES    services/{domain}_svc FastAPI (sentiment/options/portfolio/
-                    trade/driver). Each imports only its engines, owns its
+                    trade/driver/market). Each imports only its engines, owns its
                     scheduler + command consumer, validates + caches + publishes.
                     Calls schwab-proxy (:8100) for market data.
 ```
@@ -50,6 +220,7 @@ TIER 2  SERVICES    services/{domain}_svc FastAPI (sentiment/options/portfolio/
 | portfolio_svc | 8212 | Holdings, sectors, performance, live P&L stream. |
 | trade_svc | 8213 | On-demand single-symbol analysis. |
 | driver_svc | 8214 | Morning order-approval pipeline. |
+| market_svc | 8215 | Live macro-ticker Market Dashboard (~2 s RTH poll). |
 | webgui | 8500 | The web UI. |
 
 Ports come from `config/ports.toml` via `repo_paths.py` — never hard-coded.
@@ -76,7 +247,7 @@ Ports come from `config/ports.toml` via `repo_paths.py` — never hard-coded.
 | `portfolio-analyzer/` | `src/` — sector breakdown, comparisons, evaluation. |
 | `claude-driver/` | Morning orchestration + order approval logic. |
 | `shared/` | `analysis_lib/` (technical, market data), `contracts/`, `bus/`. |
-| `services/` | The five Tier-2 domain services. |
+| `services/` | The six Tier-2 domain services. |
 | `webgui/` | The NiceGUI front end. |
 
 ## Scoring conventions (shared idioms)

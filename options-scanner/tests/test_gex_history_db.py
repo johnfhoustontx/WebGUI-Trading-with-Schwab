@@ -117,6 +117,24 @@ def test_connect_read_only_missing_file_raises(tmp_path, monkeypatch):
         db.connect(read_only=True)
 
 
+@pytest.mark.parametrize("read_only", [False, True])
+def test_connect_enables_mmap(tmp_path, monkeypatch, read_only):
+    """Reading one (symbol, view, session) touches ~437 SCATTERED pages (rows
+    for a key land 360 rowids apart, since the collector writes every symbol
+    each minute). mmap avoids a read() syscall + buffer copy per page; measured
+    4.5 -> 3.0 ms median warm, with more to gain on cold random reads."""
+    dbpath = tmp_path / "test.db"
+    monkeypatch.setattr(db, "DB_PATH", dbpath)
+    rw = db.connect()
+    db.init_schema(rw)
+    rw.close()
+
+    conn = db.connect(read_only=read_only)
+    assert conn.execute("PRAGMA mmap_size").fetchone()[0] == db._MMAP_BYTES
+    assert db._MMAP_BYTES > 0
+    conn.close()
+
+
 def test_insert_snapshot_roundtrip(tmp_path, monkeypatch):
     dbpath = tmp_path / "t.db"
     monkeypatch.setattr(db, "DB_PATH", dbpath)
@@ -730,6 +748,55 @@ def test_premium_columns_backfilled_on_existing_db(tmp_path, monkeypatch):
     assert db.load_flow_series(conn, "SPY")[0][4] == 9.0
 
 
+def test_insert_and_load_atm_iv_series(tmp_path, monkeypatch):
+    """atm_iv (the ATM IV LEVEL) round-trips from the summary through
+    insert_snapshot, and load_atm_iv_series returns today's (ts, atm_iv) for the
+    gex view, chronological — feeds matrix.iv_regime (the IV-direction axis)."""
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    ts = int(time.time())
+    for i, iv in enumerate((25.5, 24.9)):
+        db.insert_snapshot(conn, "SPY", "gex",
+                           {"ts": ts + i * 120, "spot": 500.0 + i, "atm_iv": iv},
+                           {"500": {"net": 1.0}}, dte=1)
+    assert db.load_atm_iv_series(conn, "SPY") == [(ts, 25.5), (ts + 120, 24.9)]
+
+
+def test_load_atm_iv_series_missing_is_null(tmp_path, monkeypatch):
+    """A summary WITHOUT atm_iv -> the column is NULL (forward-only), no error."""
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    ts = int(time.time())
+    db.insert_snapshot(conn, "SPY", "gex", {"ts": ts, "spot": 500.0},
+                       {"500": {"net": 1.0}}, dte=1)
+    assert db.load_atm_iv_series(conn, "SPY") == [(ts, None)]
+
+
+def test_atm_iv_column_backfilled_on_existing_db(tmp_path, monkeypatch):
+    """A DB created before atm_iv existed (schema through put_prem) gets the column
+    via init_schema's ALTER migration, and inserts then round-trip it."""
+    dbpath = tmp_path / "old.db"
+    raw = sqlite3.connect(dbpath)
+    raw.execute(
+        "CREATE TABLE snapshots ("
+        "symbol TEXT, view TEXT, ts INTEGER, spot REAL, flip REAL, "
+        "top_pos_strike REAL, top_neg_strike REAL, net_total REAL, dte INTEGER, "
+        "gex_json TEXT, net_delta_0dte REAL, projected_net_delta_close REAL, "
+        "hedge_pressure REAL, rr_25d REAL, call_vol INTEGER, put_vol INTEGER, "
+        "call_prem REAL, put_prem REAL, PRIMARY KEY (symbol, view, ts))")
+    raw.commit(); raw.close()
+    monkeypatch.setattr(db, "DB_PATH", dbpath)
+    conn = db.connect()
+    db.init_schema(conn)
+    assert "atm_iv" in {r[1] for r in conn.execute("PRAGMA table_info(snapshots)")}
+    db.insert_snapshot(conn, "SPY", "gex",
+                       {"ts": int(time.time()), "spot": 1.0, "atm_iv": 19.2},
+                       {"x": {"net": 1}}, dte=1)
+    assert db.load_atm_iv_series(conn, "SPY")[0][1] == 19.2
+
+
 def test_latest_spot_flip_returns_ts_spot_flip(tmp_path, monkeypatch):
     dbpath = tmp_path / "t.db"
     monkeypatch.setattr(db, "DB_PATH", dbpath)
@@ -747,3 +814,49 @@ def test_latest_spot_flip_returns_ts_spot_flip(tmp_path, monkeypatch):
     ts, spot, flip = db.latest_spot_flip(conn, "SPY", "gex")
     assert ts == now and spot == 452.0 and flip == 450.0
     assert db.latest_spot_flip(conn, "QQQ", "gex") is None
+
+
+# --- Hedge-pressure history (0-DTE charm drift over the session) ---
+
+def test_load_hedge_series_reads_the_dex_rows_chronologically(tmp_path, monkeypatch):
+    import datetime as _dt
+    import gex_history_db as gh
+    monkeypatch.setattr(gh, "DB_PATH", tmp_path / "h.db")
+    conn = gh.connect(); gh.init_schema(conn)
+    base = int(_dt.datetime.now().replace(hour=9, minute=0, second=0,
+                                          microsecond=0).timestamp())
+    # Out of order on purpose — the loader must sort.
+    for off, hp in ((120, 3.0e9), (0, 1.0e9), (60, 2.0e9)):
+        gh.insert_snapshot(conn, "$SPX", "dex",
+                           {"ts": base + off, "spot": 100.0, "flip": 99.0,
+                            "hedge_pressure": hp, "net_delta_0dte": hp * 10,
+                            "projected_flip": 99.5},
+                           {100.0: {"net": 1}}, dte=0)
+    conn.commit()
+    rows = gh.load_hedge_series(conn, "$SPX")
+    assert [r[0] for r in rows] == [base, base + 60, base + 120]
+    assert [r[1] for r in rows] == [1.0e9, 2.0e9, 3.0e9]
+    assert rows[0][2] == 1.0e10 and rows[0][3] == 99.5
+    conn.close()
+
+
+def test_load_hedge_series_skips_rows_without_pressure(tmp_path, monkeypatch):
+    """Only 0-DTE names ever populate hedge_pressure, and only while the nearest
+    expiry is today — every other row is NULL and must not appear as a zero."""
+    import datetime as _dt
+    import gex_history_db as gh
+    monkeypatch.setattr(gh, "DB_PATH", tmp_path / "h2.db")
+    conn = gh.connect(); gh.init_schema(conn)
+    base = int(_dt.datetime.now().replace(hour=9, minute=0, second=0,
+                                          microsecond=0).timestamp())
+    gh.insert_snapshot(conn, "XLB", "dex", {"ts": base, "spot": 50.0, "flip": 49.0},
+                       {50.0: {"net": 1}}, dte=3)                      # no hedge fields
+    gh.insert_snapshot(conn, "XLB", "dex", {"ts": base + 60, "spot": 50.0,
+                                            "flip": 49.0, "hedge_pressure": 5.0},
+                       {50.0: {"net": 1}}, dte=0)
+    conn.commit()
+    rows = gh.load_hedge_series(conn, "XLB")
+    assert [r[0] for r in rows] == [base + 60]        # the NULL row is skipped
+    # A symbol that never has 0-DTE yields nothing at all, not an empty-looking zero.
+    assert gh.load_hedge_series(conn, "NOPE") == []
+    conn.close()

@@ -10,12 +10,25 @@ write structurally identical rows.
 from datetime import date
 
 MULTIPLIER = 100
-TP_FRAC = 0.50            # take profit at >= 50% credit captured
+TP_FRAC = 0.50            # >= 50% credit captured → ARM break-even (no longer an immediate close)
 STOP_MULT = 2.0           # cut at >= 2x credit loss
 DELTA_DRIFT = 0.12        # cut when short delta drifts this far past entry
 DELTA_HARD_CEILING = 0.45 # ...but never hold past this, regardless of entry
 DELTA_ABS_FALLBACK = 0.35 # absolute breach when entry delta is unknown
 CUT_DTE = 2               # cut when DTE <= this and underwater
+RECOVERY_DTE_MIN = 5      # min DTE to DEFER a soft delta stop (a recoverable trade)
+RECOVERY_MIN_CUSHION = 0.015  # min spot↔short-strike cushion (1.5%) to defer
+
+# Peak-driven profit-lock ladder for the armed break-even stop (Rule 3). Each rung
+# ``(peak_frac, lock_frac)``: once the trade's PEAK profit reaches ``peak_frac`` of
+# the credit, the stop ratchets up to lock in ``lock_frac`` of the credit. The
+# DEFAULT is a single break-even rung (lock 0.0) — i.e. exactly today's plain
+# break-even stop — so the ratchet is INERT until a caller passes a richer ladder
+# plus ``peak_pnl_frac`` in ctx.
+DEFAULT_TRAIL_LADDER = [(0.50, 0.0)]
+# The sensible default ratchet (OPT-IN, not wired to any caller yet — a later
+# activation step): lock +25% of credit once peak >= 65%, +50% once peak >= 80%.
+RATCHET_TRAIL_LADDER = [(0.50, 0.0), (0.65, 0.25), (0.80, 0.50)]
 
 
 def track_thresholds(entry_credit):
@@ -31,31 +44,135 @@ def track_thresholds(entry_credit):
     }
 
 
+def _recoverable(ctx):
+    """True when a SOFT delta stop should be DEFERRED (HOLD) for a recoverable trade.
+
+    Requires enough time (``dte_remaining >= RECOVERY_DTE_MIN``), the short strike
+    NOT breached, and spot at least ``RECOVERY_MIN_CUSHION`` away from the short
+    strike (per relevant side for an IC). Needs ``strategy`` + ``spot`` +
+    ``short_strike`` (+ ``call_short`` for IC) in ``ctx``; when those are absent
+    the trade is NOT recoverable (recovery off → the delta stop fires as before),
+    preserving back-compat for callers that don't supply them."""
+    dte = ctx.get("dte_remaining", 99)
+    if dte is None or dte < RECOVERY_DTE_MIN:
+        return False
+    strategy = (ctx.get("strategy") or "").upper()
+    spot = ctx.get("spot")
+    short = ctx.get("short_strike")
+    if spot is None or short is None or spot <= 0 or strategy not in ("PCS", "CCS", "IC"):
+        return False
+    cushions = []
+    # Put side: PCS short + the IC put short live in ``short_strike``. Breached
+    # (and NOT recoverable) once spot trades at/through it.
+    if strategy in ("PCS", "IC"):
+        if spot <= short:
+            return False
+        cushions.append(abs(spot - short) / spot)
+    # Call side: the CCS short call is ``short_strike``; the IC call short is
+    # ``call_short``. Breached once spot trades at/through it.
+    if strategy in ("CCS", "IC"):
+        call_short = ctx.get("call_short") if strategy == "IC" else short
+        if call_short is None:
+            return False
+        if spot >= call_short:
+            return False
+        cushions.append(abs(spot - call_short) / spot)
+    if not cushions:
+        return False
+    return min(cushions) >= RECOVERY_MIN_CUSHION
+
+
+def _locked_profit_level(ctx, credit_total):
+    """Dollar profit-lock floor from the peak-driven trailing ladder (the "ratchet").
+
+    ``ctx["trail_ladder"]`` is a list of ``(peak_frac, lock_frac)`` rungs (default
+    ``DEFAULT_TRAIL_LADDER``); once the trade's PEAK profit fraction
+    (``ctx["peak_pnl_frac"]`` = the best ``pnl/credit_total`` reached) clears a
+    rung's ``peak_frac``, the stop locks in ``lock_frac`` of the credit. Returns
+    ``lock_frac* * credit_total`` for the highest cleared rung, or 0.0 when nothing
+    clears / the peak or a rung is missing/malformed. The DEFAULT ladder (single
+    break-even rung, lock 0.0) always returns 0.0, so the break-even stop is
+    unchanged unless a richer ladder AND a peak are supplied — the ratchet is inert
+    by default."""
+    ladder = ctx.get("trail_ladder") or DEFAULT_TRAIL_LADDER
+    peak = ctx.get("peak_pnl_frac")
+    if peak is None:
+        return 0.0
+    try:
+        peak = float(peak)
+    except (TypeError, ValueError):
+        return 0.0
+    lock = 0.0
+    for rung in ladder:
+        try:
+            peak_frac, lock_frac = rung
+            if peak >= peak_frac:
+                lock = max(lock, float(lock_frac))
+        except (TypeError, ValueError):
+            continue
+    return lock * credit_total
+
+
 def recommend(ctx):
-    """Return {'action', 'reason', 'code'}. action in HOLD/TAKE_PROFIT/CUT; code in HOLD/TARGET_HIT/MONEY_STOP/DELTA_STOP/TIME_STOP."""
+    """Return {'action', 'reason', 'code'}. action in HOLD/CUT; code in
+    HOLD/BREAKEVEN_STOP/MONEY_STOP/DELTA_STOP/TIME_STOP.
+
+    Lifecycle (first match wins — see the captured-autoclose design):
+      1. Money-stop (HARD): pnl <= -STOP_MULT*credit → CUT/MONEY_STOP.
+      2. Time-stop (HARD): DTE <= CUT_DTE and underwater → CUT/TIME_STOP.
+      3. Break-even stop (only when ``be_armed``): pnl <= ``be_level`` → CUT/BREAKEVEN_STOP.
+      4. Delta-stop (SOFT): a delta drift/ceiling breach → CUT/DELTA_STOP, UNLESS
+         ``_recoverable(ctx)`` (defers to HOLD).
+      5. +50% credit captured and not yet armed: LIFECYCLE callers
+         (``ctx["lifecycle"]`` — captured signals, via ``build_mark``) ARM
+         break-even and HOLD ("break-even armed"), riding to full credit under the
+         break-even stop; the caller persists ``be_armed``. NON-lifecycle callers
+         (the manual-paper + driver manage cycles, via
+         ``paper_engine.run_manage_cycle``) TAKE_PROFIT (``TARGET_HIT``) — the
+         pre-lifecycle behavior, so the captured-autoclose rework never changes how
+         those separate books exit.
+      6. HOLD with the score-drift note.
+    """
     credit_total = ctx["entry_credit"] * MULTIPLIER
     pnl = ctx.get("unrealized_pnl") or 0
     short_delta = ctx.get("current_short_delta")
     dte = ctx.get("dte_remaining", 99)
 
-    # Rule 1: take profit (highest precedence)
-    if pnl >= TP_FRAC * credit_total:
-        return {"action": "TAKE_PROFIT",
-                "reason": f">={int(TP_FRAC*100)}% credit captured",
-                "code": "TARGET_HIT"}
-
-    # Rule 2: 2x credit stop
+    # Rule 1: 2x credit money-stop (HARD floor — always fires)
     if pnl <= -STOP_MULT * credit_total:
         return {"action": "CUT", "reason": f"{STOP_MULT:g}x credit stop",
                 "code": "MONEY_STOP"}
 
-    # Rule 3: delta drift from entry, with an absolute hard ceiling. Measures
+    # Rule 2: low DTE and underwater (HARD floor). An armed, PROFITABLE trade near
+    # expiry is NOT time-stopped (it rides to full credit, protected by the
+    # break-even stop below).
+    if dte <= CUT_DTE and pnl < 0:
+        return {"action": "CUT", "reason": f"DTE <= {CUT_DTE} and underwater",
+                "code": "TIME_STOP"}
+
+    # Rule 3: profit-lock stop — only once +50% has been seen (``be_armed``). Cuts
+    # when the give-back reaches the locked floor, so the trade never returns a loss
+    # after having shown a real profit. The floor is the GREATER of the break-even +
+    # round-trip-commissions level and the peak-driven profit lock (the "ratchet",
+    # ``_locked_profit_level``). With the DEFAULT ladder the lock is $0, so this is
+    # exactly the plain break-even stop; a richer ``trail_ladder`` + ``peak_pnl_frac``
+    # ratchets the floor up to protect banked profit.
+    if ctx.get("be_armed"):
+        be_level = ctx.get("be_level") or 0.0
+        stop_level = max(be_level, _locked_profit_level(ctx, credit_total))
+        if pnl <= stop_level:
+            return {"action": "CUT",
+                    "reason": "break-even stop (protecting the +50% give-back)",
+                    "code": "BREAKEVEN_STOP"}
+
+    # Rule 4: delta drift from entry, with an absolute hard ceiling. Measures
     # adverse movement relative to where the position was opened — a position
     # entered at 0.30 delta shouldn't be cut on noise the way an absolute 0.35
     # threshold would, but nothing rides past the hard ceiling. When the caller
     # cannot supply the entry delta (e.g. the paper engine, whose position store
     # doesn't record it), fall back to the prior absolute breach so behavior is
-    # unchanged for those callers.
+    # unchanged for those callers. A SOFT stop: deferred to HOLD when the trade is
+    # recoverable (ample time + no imminent strike breach).
     entry_delta = ctx.get("entry_short_delta")
     if short_delta is not None:
         if entry_delta is None:
@@ -68,14 +185,29 @@ def recommend(ctx):
             reason = (f"short delta {abs(short_delta):.2f} drifted from "
                       f"entry {abs(entry_delta):.2f}")
         if breached:
+            if _recoverable(ctx):
+                return {"action": "HOLD",
+                        "reason": f"recovery: {reason}, deferring delta stop",
+                        "code": "HOLD"}
             return {"action": "CUT", "reason": reason, "code": "DELTA_STOP"}
 
-    # Rule 4: low DTE and underwater
-    if dte <= CUT_DTE and pnl < 0:
-        return {"action": "CUT", "reason": f"DTE <= {CUT_DTE} and underwater",
-                "code": "TIME_STOP"}
+    # Rule 5: +50% credit captured, not yet armed. LIFECYCLE callers (captured
+    # signals, via build_mark, which sets ctx["lifecycle"]) ARM break-even and HOLD,
+    # riding the trade to full credit under the break-even stop. NON-lifecycle
+    # callers — the manual paper account AND the driver's isolated account, both via
+    # paper_engine.run_manage_cycle with a minimal ctx — keep the pre-lifecycle
+    # TAKE_PROFIT: the captured-autoclose rework is scoped to captured signals and
+    # must not change how those separate books exit (they have their own managers).
+    if pnl >= TP_FRAC * credit_total and not ctx.get("be_armed"):
+        if ctx.get("lifecycle"):
+            return {"action": "HOLD",
+                    "reason": f">={int(TP_FRAC*100)}% credit captured — break-even armed",
+                    "code": "HOLD"}
+        return {"action": "TAKE_PROFIT",
+                "reason": f">={int(TP_FRAC*100)}% credit captured",
+                "code": "TARGET_HIT"}
 
-    # Default: HOLD with score-drift note when available
+    # Rule 6: default HOLD with score-drift note when available
     es = ctx.get("entry_score")
     cs = ctx.get("current_score")
     if es is not None and cs is not None:
@@ -139,12 +271,23 @@ def _recompute_score(signal_row, repricer_result, iv_data, technicals):
         return None, None
 
 
-def build_mark(signal_row, repricer_result, now, iv_data=None, technicals=None):
+def build_mark(signal_row, repricer_result, now, iv_data=None, technicals=None,
+               *, be_level=None, trail_ladder=None, peak_pnl_frac=None):
     """Compose a complete signal_marks row from a repricer result.
 
-    Adds current_score (via scoring.calc_composite_score), score_drift, and
-    recommendation (via this module's recommend()). Caller persists with
+    Adds current_score (via scoring.calc_composite_score), score_drift, and the
+    LIFECYCLE recommendation (via this module's recommend()). Caller persists with
     signal_db.insert_mark.
+
+    The lifecycle inputs are threaded from the signal row + the reprice: the
+    stored ``be_armed`` flag, the ``strategy``, the ``short_strike``/``call_short``
+    legs, and the live ``current_underlying`` spot — plus the caller-supplied
+    ``be_level`` (the break-even + round-trip-commission close floor, in dollars;
+    computed by the options service, which owns the commission model). Absent
+    ``be_level`` degrades to 0 (break-even stop at pnl <= $0); absent
+    strategy/spot/strike degrades to recovery-off — so a caller that supplies none
+    of the new inputs keeps the pre-lifecycle behavior (minus the removed immediate
+    TAKE_PROFIT, which now arms break-even instead).
 
     Args:
         signal_row: dict from signal_db (must include signal_id, strategy,
@@ -153,6 +296,13 @@ def build_mark(signal_row, repricer_result, now, iv_data=None, technicals=None):
         now: datetime (tz-aware). Used for mark_ts/mark_date/dte_remaining.
         iv_data: optional dict from iv_analysis.run_iv_analysis (improves score).
         technicals: optional dict from scanner_engine.calc_technicals.
+        be_level: optional $ break-even close floor (round-trip commissions).
+        trail_ladder: optional peak-driven profit-lock ladder — a list of
+            ``(peak_frac, lock_frac)`` rungs. Default None → the plain break-even
+            stop (inert ratchet).
+        peak_pnl_frac: optional peak profit fraction (best ``pnl/credit_total``
+            reached), paired with ``trail_ladder`` to ratchet the stop up. Default
+            None → no profit lock beyond break-even.
 
     Returns:
         A mark dict ready for signal_db.insert_mark. If the repricer reported
@@ -181,6 +331,21 @@ def build_mark(signal_row, repricer_result, now, iv_data=None, technicals=None):
         "dte_remaining": dte_remaining,
         "current_score": cur_score,
         "entry_score": entry_score,
+        # Lifecycle inputs (threaded from the row + reprice + caller's be_level).
+        # build_mark is the captured-signal path, so it opts INTO the lifecycle:
+        # +50% arms break-even (HOLD) rather than the non-lifecycle TAKE_PROFIT that
+        # the manual-paper / driver manage cycles keep.
+        "lifecycle": True,
+        "be_armed": bool(signal_row.get("be_armed")),
+        "be_level": be_level,
+        # Peak-driven profit-lock ladder (the "ratchet"). Default None → the plain
+        # break-even stop; a caller supplies both to ratchet the floor up with peak.
+        "trail_ladder": trail_ladder,
+        "peak_pnl_frac": peak_pnl_frac,
+        "spot": repricer_result.get("current_underlying"),
+        "short_strike": signal_row.get("short_strike"),
+        "call_short": signal_row.get("call_short"),
+        "strategy": signal_row.get("strategy") or signal_row.get("type"),
     })
 
     return {
