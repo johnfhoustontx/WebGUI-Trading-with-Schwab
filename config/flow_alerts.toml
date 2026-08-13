@@ -20,9 +20,13 @@ symbols = ["$SPX", "SPY", "QQQ", "IWM"]   # which names to watch; empty [] = the
 
 [big_delta]
 enabled = true            # run the detector
-push    = false           # QUIET-LIVE: false = Flow screen only (no chime/toast/phone);
-                          #             true = full-live. The one-line go-live change.
-rel_threshold = 0.20      # fire when a contract's delta-notional >= this share of the symbol's OWN gross
+push    = true            # PHONE-PUSH master gate. false = Flow screen only (no phone).
+                          #             true = push the fires that ALSO clear push_threshold below.
+push_threshold = 0.35     # PHONE-PUSH share bar, SEPARATE from rel_threshold's fire bar: the screen
+                          #             still shows every rel_threshold fire, but only fires whose share
+                          #             of gross >= this get a Telegram push (~15-20/day at 0.35 vs
+                          #             ~100/day at 0.20). Raise to quiet the phone; lower to hear more.
+rel_threshold = 0.20      # FIRE bar (screen). contract's delta-notional >= this share of the symbol's OWN gross
 min_contract_notional = 10000000   # AND >= this absolute $ ($10M) — a big share of a tiny name isn't real
 delta_lo = 0.05           # delta band low  — drop near-zero delta (noise)
 delta_hi = 0.85           # delta band high — drop deep-ITM (stock-replacement / assignment)

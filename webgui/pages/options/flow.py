@@ -56,6 +56,15 @@ _TONE_SLOT = r'''
   </q-td>
 '''
 
+# Share cell: render the numeric share_pct as "35%" (big_delta), or a muted dash
+# for the other alert types (which carry no share).
+_SHARE_SLOT = r'''
+  <q-td :props="props" class="text-right">
+    <span v-if="props.value != null">{{ props.value }}%</span>
+    <span v-else class="text-grey-6">—</span>
+  </q-td>
+'''
+
 
 def alert_kind_label(a):
     return _KIND_LABEL.get((a or {}).get("type"), "Flow")
@@ -158,6 +167,18 @@ def age_text(ts, now):
     return f"{mins // 60}h {mins % 60}m ago"
 
 
+def _share_pct(a):
+    """big_delta's share of its symbol's gross delta-notional as a NUMBER (35.0 =
+    35%), for the sortable Share column. None for other alert types / a missing or
+    invalid share — so the column stays blank there and sorts them to one end."""
+    if not isinstance(a, dict) or a.get("type") != "big_delta":
+        return None
+    p = a.get("pct_of_gross")
+    if not isinstance(p, (int, float)) or isinstance(p, bool):
+        return None
+    return round(float(p) * 100, 1)
+
+
 def alert_rows(view):
     """Display rows, NEWEST FIRST. The service appends oldest-first.
 
@@ -183,6 +204,7 @@ def alert_rows(view):
             "_kind_key": a.get("type") or "",
             "side": side_label(a),
             "detail": alert_detail(a),
+            "share_pct": _share_pct(a),     # numeric % for the sortable Share column
             "text": a.get("text", ""),
             "_tone_class": tone_class(a),
         })
@@ -226,8 +248,14 @@ def flow_columns():
     spec = [("time", "Time"), ("age", "Age"), ("symbol", "Symbol"),
             ("kind", "Type"), ("side", "Side"), ("detail", "Detail"),
             ("text", "Alert")]
-    return [{"name": f, "label": l, "field": f, "sortable": True, "align": "left"}
+    cols = [{"name": f, "label": l, "field": f, "sortable": True, "align": "left"}
             for f, l in spec]
+    # Share = big_delta's % of its symbol's gross delta-notional (numeric, so the
+    # table sorts by conviction — click it to rank the day's fires biggest-first).
+    # Blank for the other alert types. Sits just before the Alert text.
+    cols.insert(6, {"name": "share", "label": "Share", "field": "share_pct",
+                    "sortable": True, "align": "right"})
+    return cols
 
 
 def render():
@@ -268,6 +296,7 @@ def render():
                 .classes("w-full flow-table").props("dense")
             table.add_slot("body-cell-side", _TONE_SLOT)
             table.add_slot("body-cell-text", _TONE_SLOT)
+            table.add_slot("body-cell-share", _SHARE_SLOT)
 
     def _apply_filters():
         table.rows = filter_rows(state["rows"], state["kinds"], state["symbol"])

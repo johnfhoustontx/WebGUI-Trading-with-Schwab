@@ -24,8 +24,12 @@ _DEFAULTS = {
                    "symbols": ["$SPX", "SPY", "QQQ", "IWM"]},
     # Relative delta-notional flow: a contract carrying >= rel_threshold of its
     # symbol's OWN gross delta-notional AND >= min_contract_notional absolute.
-    # enabled = whole detector; push = quiet-live gate (screen-only until true).
+    # enabled = whole detector. push gates PHONE delivery SEPARATELY from firing:
+    # the detector FIRES (→ screen) at rel_threshold, but only alerts whose share of
+    # gross clears the HIGHER push_threshold get pushed — the screen stays
+    # comprehensive while the phone sees only high-conviction fires.
     "big_delta": {"enabled": True, "push": False, "rel_threshold": 0.20,
+                  "push_threshold": 0.35,
                   "min_contract_notional": 10_000_000, "delta_lo": 0.05,
                   "delta_hi": 0.85, "delta_max": 1.0, "top_n": 3},
 }
@@ -69,6 +73,23 @@ def load_thresholds() -> dict:
         cfg = _merge(_DEFAULTS, {})
     _TOML_CACHE.update(mtime=mtime, cfg=cfg)
     return cfg
+
+
+def big_delta_should_push(alert, cfg) -> bool:
+    """Whether a big_delta alert should be PUSHED to the phone (vs screen-only).
+
+    Push is gated SEPARATELY from firing: every fire lands on the screen, but only
+    fires whose share of the symbol's gross delta-notional (``pct_of_gross``) clears
+    ``[big_delta].push_threshold`` earn a phone push — so the screen stays
+    comprehensive while the phone sees only the high-conviction ones. Requires
+    ``push=true``. Defensive: push off, a non-big_delta alert, or a missing/invalid
+    share → no push (never raises)."""
+    b = (cfg or {}).get("big_delta", {}) if isinstance(cfg, dict) else {}
+    if not b.get("push", False):
+        return False
+    thr = b.get("push_threshold", 0.35)
+    p = (alert or {}).get("pct_of_gross") if isinstance(alert, dict) else None
+    return isinstance(p, (int, float)) and not isinstance(p, bool) and float(p) >= thr
 
 
 def _norm(series):

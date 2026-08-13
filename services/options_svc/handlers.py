@@ -1221,12 +1221,12 @@ def run_flow_alerts(bus) -> None:
                 fresh.append(a)
 
         if fresh:
-            # Quiet-live: big_delta always lands on the screen (below), but is
-            # phone-pushed only once [big_delta].push is flipped true — the
-            # documented go-live switch. Every other alert type is unaffected.
-            push_big_delta = bool(cfg.get("big_delta", {}).get("push", False))
+            # big_delta pushes are gated SEPARATELY from firing: every fire still
+            # lands on the screen (cached below), but only a fire clearing
+            # [big_delta].push_threshold (with push=true) earns a phone push —
+            # flow_alerts.big_delta_should_push. Every other alert type is unaffected.
             for a in fresh:
-                if a.get("type") == "big_delta" and not push_big_delta:
+                if a.get("type") == "big_delta" and not flow_alerts.big_delta_should_push(a, cfg):
                     continue
                 try:
                     push_notify.send_flow_alert(a, config=push_cfg)

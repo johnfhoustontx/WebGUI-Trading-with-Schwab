@@ -170,3 +170,38 @@ def test_parse_args_rel_abs_overrides_and_defaults():
     assert ns2.force is True and ns2.alerts_db == 1
     assert ns2.rel == [0.10, 0.15]
     assert ns2.abs_ == [5e7, 1e8]
+
+
+# --- #1: live big_delta fires bucketed by rel_threshold ──────────────────────
+def test_big_delta_threshold_table_counts_fires_by_share():
+    fired = [{"pct_of_gross": 0.22}, {"pct_of_gross": 0.28}, {"pct_of_gross": 0.40},
+             {"pct_of_gross": None}, {}]              # last two carry no share -> ignored
+    t = dict(instr.big_delta_threshold_table(fired, thresholds=(0.20, 0.25, 0.35)))
+    assert t[0.20] == 3 and t[0.25] == 2 and t[0.35] == 1
+    assert instr.big_delta_threshold_table([]) == [(0.20, 0), (0.25, 0), (0.30, 0),
+                                                   (0.35, 0), (0.40, 0)]
+
+
+def test_big_delta_threshold_section_flags_fire_and_push_bars():
+    fired = [{"pct_of_gross": 0.22}, {"pct_of_gross": 0.40}]
+    cfg = {"big_delta": {"rel_threshold": 0.20, "push": True, "push_threshold": 0.35}}
+    md = instr.big_delta_threshold_section(fired, cfg)
+    assert "## big_delta — live fires by rel_threshold" in md
+    assert "FIRE bar" in md and "PUSH bar" in md
+    assert "**1** of today's **2** fires would push" in md   # only the 0.40 clears 0.35
+
+
+def test_big_delta_threshold_section_empty_and_push_off():
+    assert "No big_delta fires" in instr.big_delta_threshold_section([], {"big_delta": {}})
+    md = instr.big_delta_threshold_section([{"pct_of_gross": 0.40}],
+                                           {"big_delta": {"rel_threshold": 0.20, "push": False}})
+    assert "PUSH bar" not in md and "would push" not in md
+
+
+def test_build_report_includes_threshold_section_when_fired_given():
+    rows = [{"symbol": "SPY", "side": "call", "strike": 100.0, "expiry": "2026-08-14",
+             "dte": 3, "spot": 100.0, "volume": 300_000, "oi": 0, "delta": 0.5,
+             "mark": 1.0, "premium": 30_000_000.0, "delta_notional": 1_500_000_000.0,
+             "signed_delta_notional": 1_500_000_000.0}]
+    md = instr.build_report(rows, _CFG, ["SPY"], [], big_delta_fired=[{"pct_of_gross": 0.4}])
+    assert "## big_delta — live fires by rel_threshold" in md

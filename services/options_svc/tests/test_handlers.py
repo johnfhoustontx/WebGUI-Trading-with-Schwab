@@ -1901,16 +1901,21 @@ _BD_CONTRACT = {"type": "big_delta", "side": "call", "symbol": "SPY", "strike": 
 
 
 def test_run_flow_alerts_big_delta_screen_only_when_push_false(monkeypatch):
-    """big_delta always lands on the Flow screen; push=false (the config default)
-    means it must NOT reach push_notify.send_flow_alert -- quiet-live."""
+    """big_delta always lands on the Flow screen; with [big_delta].push=false it must
+    NOT reach push_notify.send_flow_alert -- and a HIGH-share contract proves the
+    screen-only guarantee comes from push=false, not from the share being sub-bar."""
     from shared.bus import Bus
     from services.options_svc import handlers, compute
     bus = Bus(fake=True)
     monkeypatch.setattr(handlers, "_flow_alert_symbols", lambda: ["SPY"])
     monkeypatch.setattr(handlers, "_load_flow_series_for", lambda conn, sym, limit: [])
     monkeypatch.setattr(compute, "take_uoa_stash", lambda: {})
-    monkeypatch.setattr(compute, "take_big_delta_stash", lambda: {"SPY": [dict(_BD_CONTRACT)]})
+    hi = {**_BD_CONTRACT, "pct_of_gross": 0.50}      # well over any push bar
+    monkeypatch.setattr(compute, "take_big_delta_stash", lambda: {"SPY": [hi]})
     monkeypatch.setattr(handlers, "_flow_now_ts", lambda: 1000)
+    real_cfg = handlers.flow_alerts.load_thresholds()
+    off_cfg = {**real_cfg, "big_delta": {**real_cfg["big_delta"], "push": False}}
+    monkeypatch.setattr(handlers.flow_alerts, "load_thresholds", lambda: off_cfg)
     sent = []
     monkeypatch.setattr(handlers.push_notify, "send_flow_alert", lambda a, **k: sent.append(a))
     handlers.run_flow_alerts(bus)
@@ -1919,23 +1924,31 @@ def test_run_flow_alerts_big_delta_screen_only_when_push_false(monkeypatch):
     assert not any(a.get("type") == "big_delta" for a in sent)    # NOT phone-pushed
 
 
-def test_run_flow_alerts_big_delta_pushed_when_push_true(monkeypatch):
-    """Flipping [big_delta].push -> true removes the push suppression, no code change."""
+def test_run_flow_alerts_big_delta_pushes_only_above_push_threshold(monkeypatch):
+    """With push=true, big_delta is PHONE-pushed only when its share of gross clears
+    push_threshold (the separate push bar). A sub-threshold fire still lands on the
+    Flow screen but stays off the phone — the whole point of the separate bar."""
     from shared.bus import Bus
     from services.options_svc import handlers, compute
     bus = Bus(fake=True)
     monkeypatch.setattr(handlers, "_flow_alert_symbols", lambda: ["SPY"])
     monkeypatch.setattr(handlers, "_load_flow_series_for", lambda conn, sym, limit: [])
     monkeypatch.setattr(compute, "take_uoa_stash", lambda: {})
-    monkeypatch.setattr(compute, "take_big_delta_stash", lambda: {"SPY": [dict(_BD_CONTRACT)]})
+    hi = {**_BD_CONTRACT, "strike": 110.0, "pct_of_gross": 0.40}     # over 0.35 -> pushes
+    lo = {**_BD_CONTRACT, "strike": 100.0, "pct_of_gross": 0.24}     # under 0.35 -> screen only
+    monkeypatch.setattr(compute, "take_big_delta_stash", lambda: {"SPY": [hi, lo]})
     monkeypatch.setattr(handlers, "_flow_now_ts", lambda: 1000)
     real_cfg = handlers.flow_alerts.load_thresholds()
-    push_cfg = {**real_cfg, "big_delta": {**real_cfg["big_delta"], "push": True}}
+    push_cfg = {**real_cfg, "big_delta": {**real_cfg["big_delta"], "push": True,
+                                          "push_threshold": 0.35}}
     monkeypatch.setattr(handlers.flow_alerts, "load_thresholds", lambda: push_cfg)
     sent = []
     monkeypatch.setattr(handlers.push_notify, "send_flow_alert", lambda a, **k: sent.append(a))
     handlers.run_flow_alerts(bus)
-    assert any(a.get("type") == "big_delta" for a in sent)
+    screen = bus.cache_get("cache:options:flow_alerts").payload["alerts"]
+    assert {a["strike"] for a in screen if a["type"] == "big_delta"} == {110.0, 100.0}
+    pushed = [a for a in sent if a.get("type") == "big_delta"]
+    assert [a["strike"] for a in pushed] == [110.0]     # only the >=35% share reached the phone
 
 
 def test_run_flow_alerts_big_delta_id_format_ts_and_dedup(monkeypatch):

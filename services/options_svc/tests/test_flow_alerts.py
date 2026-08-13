@@ -333,3 +333,32 @@ def test_alert_text_big_delta_has_all_fields():
     assert "SPY" in t and "07/18" in t and "450" in t and "C" in t
     assert "$312.00M" in t
     assert "24%" in t
+
+
+# ── big_delta_should_push: PHONE gate, separate from the screen fire bar ──────
+def test_big_delta_should_push_gates_on_flag_and_share():
+    cfg = {"big_delta": {"push": True, "push_threshold": 0.35}}
+    assert flow_alerts.big_delta_should_push({"pct_of_gross": 0.40}, cfg) is True
+    assert flow_alerts.big_delta_should_push({"pct_of_gross": 0.35}, cfg) is True   # boundary inclusive
+    # Fires (screen) but below the push bar -> NOT pushed. The whole point.
+    assert flow_alerts.big_delta_should_push({"pct_of_gross": 0.20}, cfg) is False
+
+
+def test_big_delta_should_push_off_never_pushes():
+    off = {"big_delta": {"push": False, "push_threshold": 0.35}}
+    assert flow_alerts.big_delta_should_push({"pct_of_gross": 0.99}, off) is False
+
+
+def test_big_delta_should_push_defaults_threshold_to_0_35():
+    cfg = {"big_delta": {"push": True}}                 # push_threshold absent
+    assert flow_alerts.big_delta_should_push({"pct_of_gross": 0.40}, cfg) is True
+    assert flow_alerts.big_delta_should_push({"pct_of_gross": 0.30}, cfg) is False
+
+
+def test_big_delta_should_push_defensive():
+    cfg = {"big_delta": {"push": True, "push_threshold": 0.35}}
+    assert flow_alerts.big_delta_should_push({}, cfg) is False                  # no share
+    assert flow_alerts.big_delta_should_push({"pct_of_gross": None}, cfg) is False
+    assert flow_alerts.big_delta_should_push(None, cfg) is False
+    assert flow_alerts.big_delta_should_push({"pct_of_gross": 0.5}, {}) is False    # no big_delta cfg
+    assert flow_alerts.big_delta_should_push({"pct_of_gross": 0.5}, None) is False

@@ -198,8 +198,10 @@ def test_status_text_distinguishes_quiet_from_cold():
 # ── table + handoff ──────────────────────────────────────────────────────────
 def test_flow_columns_are_sortable_and_ordered():
     names = [c["name"] for c in flow.flow_columns()]
-    assert names == ["time", "age", "symbol", "kind", "side", "detail", "text"]
+    assert names == ["time", "age", "symbol", "kind", "side", "detail", "share", "text"]
     assert all(c["sortable"] for c in flow.flow_columns())
+    share = next(c for c in flow.flow_columns() if c["name"] == "share")
+    assert share["field"] == "share_pct" and share["align"] == "right"
 
 
 def test_row_fields_cover_every_column():
@@ -216,3 +218,20 @@ def test_gamma_handoff_is_one_shot():
     handoff.set_pending_gamma("QQQ")
     assert handoff.take_pending_gamma() == "QQQ"
     assert handoff.take_pending_gamma() is None
+
+
+# ── big_delta Share column ───────────────────────────────────────────────────
+def test_share_pct_is_numeric_for_big_delta_only():
+    assert flow._share_pct(_BD) == 24.0                                  # 0.24 -> 24.0
+    assert flow._share_pct(_UOA) is None                                 # other types
+    assert flow._share_pct({"type": "big_delta"}) is None               # missing share
+    assert flow._share_pct({"type": "big_delta", "pct_of_gross": None}) is None
+    assert flow._share_pct(None) is None
+
+
+def test_alert_rows_stamp_share_for_big_delta():
+    """Share is stamped numeric for big_delta (so the column sorts by conviction)
+    and left None for the other types (renders blank / sorts to one end)."""
+    rows = {r["symbol"]: r for r in flow.alert_rows({"date": "d", "alerts": [_UOA, _BD]})}
+    assert rows["SPY"]["share_pct"] == 24.0
+    assert rows["QQQ"]["share_pct"] is None

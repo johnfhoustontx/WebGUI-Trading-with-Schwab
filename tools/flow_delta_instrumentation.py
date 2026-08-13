@@ -519,6 +519,52 @@ def big_delta_reconciliation_section(rec):
     return "".join(L)
 
 
+def big_delta_threshold_table(fired, thresholds=(0.20, 0.25, 0.30, 0.35, 0.40)):
+    """[(threshold, count)] — of the day's LIVE big_delta fires, how many carried a
+    share (`pct_of_gross`) >= each threshold. Real fires, NOT a re-model: raising the
+    bar keeps only the fires that already cleared it, so this is the honest
+    'fires/day at threshold X', same currency as the live count. Defensive → 0."""
+    def share(a):
+        p = (a or {}).get("pct_of_gross")
+        return float(p) if isinstance(p, (int, float)) and not isinstance(p, bool) else None
+    shares = [s for s in (share(a) for a in (fired or [])) if s is not None]
+    return [(thr, sum(1 for s in shares if s >= thr)) for thr in thresholds]
+
+
+def big_delta_threshold_section(fired, cfg):
+    """Markdown: the day's live big_delta fires bucketed by rel_threshold, flagging
+    the current fire bar and (if push is on) the push bar — so the report is a
+    standalone tuning aid without a side-script."""
+    b = (cfg or {}).get("big_delta", {})
+    fire_thr = b.get("rel_threshold", 0.20)
+    push_on = bool(b.get("push", False))
+    push_thr = b.get("push_threshold", 0.35)
+    L = ["\n## big_delta — live fires by rel_threshold\n"]
+    if not fired:
+        L.append("\nNo big_delta fires in the channel today — nothing to bucket "
+                 "(detector off, restarting, or a genuinely quiet session).\n")
+        return "".join(L)
+    L.append("\nOf today's live fires, how many carry a share of gross >= each bar "
+             "(real fires, not a re-model — raising the bar just drops the ones "
+             "that barely cleared it):\n")
+    L.append("\n| rel_threshold | fires | |\n|---:|---:|:--|\n")
+    for thr, n in big_delta_threshold_table(fired):
+        tags = []
+        if abs(thr - fire_thr) < 1e-9:
+            tags.append("← FIRE bar (screen)")
+        if push_on and abs(thr - push_thr) < 1e-9:
+            tags.append("← PUSH bar")
+        L.append(f"| {thr:.0%} | {n} | {' '.join(tags)} |\n")
+    if push_on:
+        def _sh(a):
+            p = (a or {}).get("pct_of_gross")
+            return isinstance(p, (int, float)) and not isinstance(p, bool) and float(p) >= push_thr
+        push_n = sum(1 for a in fired if _sh(a))
+        L.append(f"\nAt the current push bar ({push_thr:.0%}), **{push_n}** of today's "
+                 f"**{len(fired)}** fires would push to Telegram.\n")
+    return "".join(L)
+
+
 def _fmt_money(v):
     if abs(v) >= 1e9:
         return f"${v/1e9:,.2f}B"
@@ -528,7 +574,8 @@ def _fmt_money(v):
 
 
 def build_report(rows, cfg, symbols, failed, sentinel=0, rec=None,
-                  big_delta_rec=None, rel_thresholds=None, abs_thresholds=None):
+                  big_delta_rec=None, big_delta_fired=None,
+                  rel_thresholds=None, abs_thresholds=None):
     """The markdown report. Pure over the collected rows.
 
     ``rel_thresholds``/``abs_thresholds`` override the module's candidate
@@ -570,6 +617,8 @@ def build_report(rows, cfg, symbols, failed, sentinel=0, rec=None,
     L.append(live_config_section(rows, cfg))
     if big_delta_rec is not None:
         L.append(big_delta_reconciliation_section(big_delta_rec))
+    if big_delta_fired is not None:
+        L.append(big_delta_threshold_section(big_delta_fired, cfg))
 
     # Per-symbol gross delta notional -> the relative thresholds.
     gross = gross_by_symbol(rows)
@@ -700,13 +749,15 @@ def main(argv=None):
     payload, note = read_live_alerts(db)
     rec = reconcile(rows, cfg, payload, today, note)
     big_delta_rec = reconcile_big_delta(rows, cfg, payload, today, note)
+    big_delta_fired = [a for a in (payload or {}).get("alerts", [])
+                       if isinstance(a, dict) and a.get("type") == "big_delta"]
     print(f"Reconciliation: {'ok' if rec.get('ok') else rec.get('note')}")
 
     out_dir = OPTIONS_SCANNER / "data" / "flow_delta_instrumentation" / str(today)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     report = build_report(rows, cfg, symbols, failed, sentinel, rec,
-                          big_delta_rec=big_delta_rec,
+                          big_delta_rec=big_delta_rec, big_delta_fired=big_delta_fired,
                           rel_thresholds=args.rel, abs_thresholds=args.abs_)
     (out_dir / "report.md").write_text(report, encoding="utf-8")
 
