@@ -122,3 +122,46 @@ def test_explain_gex_shows_directional_walls():
     text = build_explain_text("gex", ctx)
     assert "Call wall" in text and "Put wall" in text
     assert "OI" in text  # OI-basis comparison line present
+
+
+# ── max_pct bound (tail-strike rejection) ──
+
+def test_directional_walls_unbounded_by_default_picks_tail_strike():
+    """The historical behaviour, kept: no bound means the extreme strike wins.
+
+    This is the production failure that motivated max_pct — a deep tail strike
+    carrying the largest put entry once the near-the-money rows dropped out.
+    """
+    data = _grid({
+        47.0:  (1.0, -900.0),    # deep tail — 53% below spot, biggest put
+        95.0:  (10.0, -500.0),
+        105.0: (400.0, -5.0),
+    })
+    assert get_directional_walls(data, 100.0)["put_wall"] == 47.0
+
+
+def test_directional_walls_max_pct_rejects_tail_strike():
+    data = _grid({
+        47.0:  (1.0, -900.0),    # 53% away — excluded
+        95.0:  (10.0, -500.0),   # 5% away — the real wall
+        105.0: (400.0, -5.0),
+    })
+    out = get_directional_walls(data, 100.0, max_pct=10.0)
+    assert out["put_wall"] == 95.0
+    assert out["call_wall"] == 105.0
+
+
+def test_directional_walls_max_pct_none_when_every_strike_is_far():
+    """Better no wall than a confident wrong one."""
+    data = _grid({47.0: (1.0, -900.0), 160.0: (400.0, -5.0)})
+    out = get_directional_walls(data, 100.0, max_pct=10.0)
+    assert out["put_wall"] is None
+    assert out["call_wall"] is None
+
+
+def test_directional_walls_max_pct_keeps_boundary_strike():
+    """The bound is inclusive — a strike exactly at the limit still counts."""
+    data = _grid({90.0: (1.0, -900.0), 110.0: (400.0, -5.0)})
+    out = get_directional_walls(data, 100.0, max_pct=10.0)
+    assert out["put_wall"] == 90.0
+    assert out["call_wall"] == 110.0

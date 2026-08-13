@@ -1400,13 +1400,24 @@ def get_dex_walls(dex_data, top_n=5):
 # Directional call/put walls (FlashAlpha quick win #2)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-def get_directional_walls(gex_data, spot):
+def get_directional_walls(gex_data, spot, max_pct=None):
     """Call wall (above spot) and put wall (below spot) by GEX magnitude.
 
     Call GEX is stored positive, put GEX negative. The call wall is the
     largest call-side strike above spot; the put wall is the largest put-side
     strike below spot (most-negative ``put`` entry). Either side is ``None``
     when no strike sits on the correct side of spot.
+
+    ``max_pct`` bounds the search to strikes within that percentage of spot.
+    Default ``None`` keeps the historical behaviour for every existing caller.
+
+    WHY THE BOUND EXISTS: this picks the EXTREME strike on each side with no
+    proximity constraint, which is correct on a full grid and badly wrong on a
+    thin or stale one. Observed in production — a put wall of 14,000 against a
+    spot of 29,722, because a deep tail strike carried the largest put entry
+    once the near-the-money rows dropped out. A "wall" 53% away from spot is
+    not a dealer barrier, it is an artifact, and it is indistinguishable from
+    a real level by the time it reaches a chart.
 
     Returns ``{"call_wall": strike|None, "put_wall": strike|None}``.
     """
@@ -1417,8 +1428,15 @@ def get_directional_walls(gex_data, spot):
     if not grid:
         return out
 
-    above = [(s, v.get("call", 0.0)) for s, v in grid.items() if s > spot]
-    below = [(s, v.get("put", 0.0)) for s, v in grid.items() if s < spot]
+    def near(strike):
+        if max_pct is None:
+            return True
+        return abs(strike - spot) / spot * 100.0 <= max_pct
+
+    above = [(s, v.get("call", 0.0))
+             for s, v in grid.items() if s > spot and near(s)]
+    below = [(s, v.get("put", 0.0))
+             for s, v in grid.items() if s < spot and near(s)]
     if above:
         out["call_wall"] = max(above, key=lambda sv: sv[1])[0]
     if below:

@@ -53,9 +53,11 @@ from __future__ import annotations
 
 import logging
 import pathlib
+import statistics
 import sys
 import threading
 import time
+from collections import defaultdict, deque
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -379,7 +381,12 @@ def read_gamma(spec, conn, gt, gh, today):
         # _decode_grid hands back FLOAT strike keys, which both the wall
         # picker's `s > spot` and the pin's max() rely on.
         try:
-            walls = gt.get_directional_walls({"gex": grid}, spot)
+            # Bounded to strikes within WALL_MAX_PCT of spot. Unbounded, the
+            # picker takes the extreme strike on each side, and on a thin or
+            # stale grid that lands on a deep tail strike — a put wall of
+            # 14,000 against a spot of 29,722, seen in production.
+            walls = gt.get_directional_walls({"gex": grid}, spot,
+                                             max_pct=WALL_MAX_PCT)
             res["call_wall"] = walls.get("call_wall")
             res["put_wall"] = walls.get("put_wall")
         except Exception:
@@ -445,7 +452,66 @@ LEVEL_KEYS = ("flip", "call_wall", "put_wall", "pin", "pin_top_pos",
               "flip_stored")
 
 
-def build_pane(spec, tape, gamma, phase):
+# A dealer wall further than this from spot is a tail-strike artifact, not a
+# barrier. Generous — a stressed put wall sits a few percent under spot — while
+# rejecting the 40-60% outliers a degraded grid produces.
+WALL_MAX_PCT = 10.0
+
+# Basis smoothing. ~30s at the 2s poll, and a jump larger than this many
+# points is a real move rather than noise.
+_BASIS_WINDOW = 15
+_BASIS_JUMP_PTS = 5.0
+
+
+class BasisSmoother:
+    """Median filter for the futures-cash basis, one history per instrument.
+
+    The basis is carry plus dividends: it drifts across a session. What moves
+    it five ticks every two seconds is MEASUREMENT noise — the future's
+    bid/ask bounce against the cash index's recalculation lag — and because
+    every displayed level is ``cash_level + basis``, that noise is added to
+    every wall. Measured live over 21 seconds:
+
+        cash_call_wall  29810.00  29810.00  29810.00  29810.00   <- static
+        fut_call_wall   29912.82  29913.57  29912.41  29913.12   <- wandering
+        basis             102.82    103.57    102.41    103.12   <- the culprit
+
+    The strike never moved. On a NinjaTrader chart that wander is a dashed
+    line that will not sit still.
+
+    MEDIAN, not mean: a single crossed, stale or one-sided quote should move
+    the basis by nothing at all, and the median discards it outright instead
+    of averaging a fraction of it in.
+
+    A jump beyond ``jump`` is a REAL move — a contract roll, or the tape
+    reconnecting to a different quote — and must not fade in over the window,
+    so it clears the history and is adopted whole. That keeps this a noise
+    filter rather than a lag.
+    """
+
+    def __init__(self, window=_BASIS_WINDOW, jump=_BASIS_JUMP_PTS):
+        self._window = window
+        self._jump = jump
+        self._hist = defaultdict(deque)
+
+    def smooth(self, key, value):
+        """Median of the recent readings for ``key``. ``None`` passes through.
+
+        A ``None`` is NOT recorded: a gap in the tape must not shorten the
+        window, and it must not be mistaken for a basis of zero.
+        """
+        if value is None:
+            return None
+        hist = self._hist[key]
+        if hist and abs(value - statistics.median(hist)) > self._jump:
+            hist.clear()
+        hist.append(value)
+        while len(hist) > self._window:
+            hist.popleft()
+        return statistics.median(hist)
+
+
+def build_pane(spec, tape, gamma, phase, basis=None):
     """Assemble one instrument's decision state. PURE — no I/O, no clock.
 
     TWO FRAMES, deliberately (design §5).
@@ -465,7 +531,11 @@ def build_pane(spec, tape, gamma, phase):
     fut, cash = leg.get("fut"), leg.get("cash")
 
     scale = cash_scale(gamma.get("symbol"), cash, gamma.get("spot"))
-    basis = None if fut is None or cash is None else fut - cash
+    # Caller-supplied when the poller is smoothing it (see BasisSmoother);
+    # computed here otherwise, which keeps this function pure and keeps every
+    # existing caller and test working unchanged.
+    if basis is None:
+        basis = None if fut is None or cash is None else fut - cash
 
     levels_cash = {k: to_index(gamma.get(k), scale) for k in LEVEL_KEYS}
     levels = {k: to_future(gamma.get(k), scale, basis) for k in LEVEL_KEYS}
@@ -545,6 +615,9 @@ class Hud:
         self.root.configure(fg_color=BG)
 
         self._bus = None
+        # Per-instrument basis history. Lives on the POLLER, not in build_pane,
+        # which is documented pure and must stay that way.
+        self._basis = BasisSmoother()
         self._state = None
         self._stop = threading.Event()
         self._labels = {}
@@ -805,8 +878,17 @@ class Hud:
         tape = read_tape(self._bus, self.specs)
         gammas = read_gamma_all(self.specs)
 
-        panes = {spec.key: build_pane(spec, tape, gammas[spec.key], phase)
-                 for spec in self.specs}
+        # Basis is smoothed HERE, once per poll, and handed to build_pane.
+        # Doing it inside build_pane would make that function stateful; doing
+        # it per render would sample far too fast to be a 30s median.
+        panes = {}
+        for spec in self.specs:
+            leg = tape.get(spec.key) or {}
+            f, c = leg.get("fut"), leg.get("cash")
+            raw = None if f is None or c is None else f - c
+            panes[spec.key] = build_pane(
+                spec, tape, gammas[spec.key], phase,
+                basis=self._basis.smooth(spec.key, raw))
 
         state = {"now": now, "phase": phase, "tape": tape, "panes": panes}
 
