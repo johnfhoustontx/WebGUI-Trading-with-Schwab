@@ -20,6 +20,7 @@ import time
 from services.options_svc import compute
 from services.options_svc import flow_alerts
 from services.options_svc import push_notify
+from shared import market_calendar as mc
 from shared.notify.channels import _today_ct
 from shared.contracts.options import ScanResult
 
@@ -734,6 +735,50 @@ def collect_gex_history(bus=None) -> None:
             log.exception("publish_matrix after collect degraded")
 
 
+def _alert_now():
+    """Now, in CT, for the flow-window gate. Its own hook so tests can pin it
+    (the options_svc conftest pins it suite-wide, so no test depends on the
+    wall clock)."""
+    return _dt.datetime.now(mc.CT)
+
+
+def _flow_window_open(now=None) -> bool:
+    """Whether flow DETECTION (and the flow-skew publish) may run right now.
+
+    The predicate is ``mc.in_collection_window(now)`` with ``eth_eligible``
+    left FALSE — i.e. 08:00–15:20 CT on a trading day, the collection window as
+    it stands *without* extended hours. That is exactly the set of moments
+    ``run_flow_alerts`` can be reached in today (its only caller is
+    ``collect_gex_history`` ← ``scheduler.gex_due`` ← ``in_collection_window(…,
+    eth_eligible=True)``), so this gate is **provably inert before the
+    activation date** and only ever closes over the newly-added GTH stretch
+    (06:30–08:00 CT).
+
+    **Why not the REGULAR session (08:30–15:00), and why not the push window?**
+    Both would be a live regression. ``send_flow_alert`` has NO market-hours
+    gate — the ``market_hours_only`` / ``_in_market_hours`` check lives in
+    ``push_notify.notify_signals`` (scanner + captured signals) and
+    ``sentiment_svc.state_alert``, neither of which is on the flow path. So
+    flow alerts detect AND push across the whole 08:00–15:20 window today;
+    narrowing to 08:30–15:00 would silently delete the first 30 and last 20
+    minutes of a working feature.
+
+    **Why gate DETECTION rather than emission.** The cooldown map doubles as a
+    day-scoped seen-set and is mutated the moment a signal is *detected*
+    (``flow_alerts.detect_flow_alerts`` writes ``cooldowns[key]`` in place; the
+    UOA loop writes ``cooldowns[cid]`` before pushing). A signal detected at
+    06:45 with only the push suppressed would be marked seen and would never
+    fire again — not during GTH, and not at the open. Gating emission alone
+    destroys the alert; gating detection defers it.
+
+    ``[alerts].fire_in_extended_hours = true`` (``config/sessions.toml``,
+    default false) opts back in for GTH and Curb."""
+    now = now if now is not None else _alert_now()
+    if mc.in_collection_window(now):
+        return True
+    return mc.alerts_fire_in_extended_hours() and mc.is_extended_hours(now)
+
+
 def publish_flow_skew(bus) -> None:
     """Compute the per-index flow-skew view and publish it to the bus.
 
@@ -741,7 +786,19 @@ def publish_flow_skew(bus) -> None:
     (``{symbol: {rr_25d, rr_delta, call_vol, put_vol, ts}}``) that the sentiment
     service consumes defensively, and ``compute.flow_skew_view`` is already fully
     defensive (any failure degrades to ``{}``). Guarded so a bus hiccup never
-    escapes into the caller."""
+    escapes into the caller.
+
+    Skipped outside ``_flow_window_open`` (i.e. during GTH). The view is built
+    from ``$SPX``/``SPY``/``QQQ``, but **only ``$SPX`` is ETH-eligible**, and
+    ``gex_history_db.latest_skew_by_symbol`` has no date filter — so a GTH
+    publish would emit a MIXED-FRESHNESS payload: a fresh ``rr_delta`` computed
+    off thin 06:30 GTH prints for ``$SPX`` beside ``SPY``/``QQQ`` frozen at
+    yesterday's 15:19 close, all presented as one current snapshot to the
+    five-state classifier's aggression axis. Skipping simply leaves yesterday's
+    value cached until the 08:00 tick republishes it fresh — exactly what
+    happens overnight today."""
+    if not _flow_window_open():
+        return
     try:
         view = compute.flow_skew_view()
         bus.cache_set(CACHE_FLOW_SKEW, view, event=EVENT_FLOW_SKEW)
@@ -876,10 +933,18 @@ def run_flow_alerts(bus) -> None:
 
     The cooldown map is persisted (day-scoped) in its own key so a fired signal
     doesn't re-push every minute; fresh alerts are pushed to the phone (best-effort)
-    and appended to a day-scoped rolling list the webgui reads."""
+    and appended to a day-scoped rolling list the webgui reads.
+
+    Gated on ``_flow_window_open`` — DETECTION, not just the push. That gate sits
+    ahead of the cooldown read for a reason: the cooldown map is the day-scoped
+    seen-set and is mutated at detection time, so suppressing only the push would
+    burn the signal instead of deferring it (see ``_flow_window_open``)."""
     try:
         cfg = flow_alerts.load_thresholds()
         if not cfg.get("enabled", True):
+            return
+        # Before ANY detection or cooldown mutation — see the docstring.
+        if not _flow_window_open():
             return
         today = _today_ct()
         cd_env = bus.cache_get(_FLOW_COOLDOWN_KEY)
