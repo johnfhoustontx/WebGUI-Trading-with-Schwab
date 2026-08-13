@@ -266,8 +266,14 @@ def test_compute_expected_move_appends_todays_candle(monkeypatch):
             [_ms(2026, 8, 11), 774.53, 774.61, 769.2, 770.56]]
     monkeypatch.setattr(compute, "_fetch_em_candles", lambda *a, **k: list(hist))
     monkeypatch.setattr(compute, "atm_iv_from_chain", lambda *a, **k: 0.15)
-    monkeypatch.setattr(compute, "today_candle",
-                        lambda *a, **k: [_ms(2026, 8, 12), 774.71, 774.9, 771.28, 772.3])
+
+    today_candle_calls = []
+
+    def _fake_today_candle(*args, **kwargs):
+        today_candle_calls.append((args, kwargs))
+        return [_ms(2026, 8, 12), 774.71, 774.9, 771.28, 772.3]
+
+    monkeypatch.setattr(compute, "today_candle", _fake_today_candle)
 
     class _Resp:
         status_code = 200
@@ -289,6 +295,15 @@ def test_compute_expected_move_appends_todays_candle(monkeypatch):
     assert out["spot"] == 772.3
     # The cone anchors at the LAST candle — today's, not yesterday's.
     assert out["em_upper"][0][0] == _ms(2026, 8, 12)
+
+    # Pin the wiring: the raw quote, the PRE-append last candle ts (not the
+    # post-append one), and a holidays kwarg all reached today_candle.
+    assert len(today_candle_calls) == 1
+    call_args, call_kwargs = today_candle_calls[0]
+    assert call_args[0] == {"lastPrice": 772.3, "openPrice": 774.71,
+                            "highPrice": 774.9, "lowPrice": 771.28}
+    assert call_args[1] == _ms(2026, 8, 11)
+    assert "holidays" in call_kwargs
 
 
 def test_compute_expected_move_spot_falls_back_to_normalized_quote(monkeypatch):

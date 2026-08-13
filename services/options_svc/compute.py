@@ -5659,6 +5659,14 @@ def compute_expected_move(symbol, expiry, legs, lookback="auto") -> dict:
         spec = em_lookback_spec(dte, lookback)
         base["lookback"] = {"label": spec.get("label", ""), "key": lookback or "auto"}
 
+        # Single lookup, reused below for both today_candle's holiday gate and
+        # the cone's trading-day-only walk (local import — scheduler.py imports
+        # this module at load time, so a module-level import here would cycle).
+        try:
+            from services.options_svc.scheduler import _HOLIDAYS as _mkt_holidays
+        except Exception:
+            _mkt_holidays = set()
+
         candles = _fetch_em_candles(api, spec)
         if not candles:
             base["error"] = f"No price history for {api}."
@@ -5695,11 +5703,7 @@ def compute_expected_move(symbol, expiry, legs, lookback="auto") -> dict:
         # sized from today's spot, so anchoring at yesterday overshot the expiry
         # by a day).
         if spec.get("mode") != "intraday":
-            try:
-                from services.options_svc.scheduler import _HOLIDAYS as _mkt_hols
-            except Exception:
-                _mkt_hols = set()
-            bar = today_candle(raw_q, candles[-1][0], holidays=_mkt_hols)
+            bar = today_candle(raw_q, candles[-1][0], holidays=_mkt_holidays)
             if bar:
                 candles = candles + [bar]
                 base["candles"] = candles
@@ -5713,10 +5717,6 @@ def compute_expected_move(symbol, expiry, legs, lookback="auto") -> dict:
 
         # Trading-day-only cone (skip weekends/holidays) so it lines up with the
         # candles on the page's ordinal axis — no blank non-trading gaps.
-        try:
-            from services.options_svc.scheduler import _HOLIDAYS as _mkt_holidays
-        except Exception:
-            _mkt_holidays = set()
         cone = em_cone(spot, atm_iv, dte, candles[-1][0],
                        holidays=_mkt_holidays, trading_days_only=True)
         base["em_upper"] = cone["upper"]
