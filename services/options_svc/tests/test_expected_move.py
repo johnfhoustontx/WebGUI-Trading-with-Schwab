@@ -329,6 +329,17 @@ def test_compute_expected_move_skips_today_in_intraday_mode(monkeypatch):
     monkeypatch.setattr(compute, "_fetch_em_candles",
                         lambda *a, **k: [[_ms(2026, 8, 11), 1, 1, 1, 1]])
     monkeypatch.setattr(compute, "atm_iv_from_chain", lambda *a, **k: None)
+
+    class _PY:  # like its neighbours: no live proxy traffic
+        def get_option_chain(self, *a, **k): return _Resp({})
+        def get_quotes(self, *a, **k): return _Resp({})
+
+    class _SC:
+        def get_quote(self, sym): return {}
+
+    monkeypatch.setattr(compute._proxy, "schwab_py_client", _PY())
+    monkeypatch.setattr(compute._proxy, "schwab_client", _SC())
+
     exp = (_dt.date.today() + _dt.timedelta(days=1)).isoformat()
     compute.compute_expected_move("SPY", exp, [])
     assert called == []
