@@ -143,3 +143,26 @@ def test_send_to_expected_move_no_symbol_does_not_navigate(monkeypatch):
     handoff.send_to_expected_move({"symbol": "", "legs": []})
     assert "to" not in calls  # warned, did not navigate
     handoff.take_pending_expected_move()  # clean up stash
+
+
+def test_expected_move_figure_legs_override_wins():
+    p = _payload()
+    p["legs"] = [{"strike": 100.0, "option_type": "put", "side": "short"}]
+    fig = em.expected_move_figure(
+        p, legs=[{"strike": 105.0, "option_type": "call", "side": "long"}])
+    lines = fig["yAxis"]["plotLines"]
+    assert [ln["value"] for ln in lines] == [105.0]
+    assert lines[0]["color"] == em.CALL_COLOR
+
+
+def test_expected_move_figure_legs_none_falls_back_to_payload():
+    p = _payload()
+    p["legs"] = [{"strike": 100.0, "option_type": "put", "side": "short"}]
+    fig = em.expected_move_figure(p)
+    assert [ln["value"] for ln in fig["yAxis"]["plotLines"]] == [100.0]
+
+
+def test_expected_move_figure_legs_empty_list_clears_lines():
+    p = _payload()
+    p["legs"] = [{"strike": 100.0, "option_type": "put", "side": "short"}]
+    assert em.expected_move_figure(p, legs=[])["yAxis"]["plotLines"] == []

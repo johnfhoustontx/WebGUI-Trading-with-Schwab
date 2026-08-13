@@ -65,10 +65,13 @@ def leg_lines(legs):
     return lines
 
 
-def expected_move_figure(payload, timeframe="daily"):
+def expected_move_figure(payload, timeframe="daily", legs=None):
     """Highcharts options for the candlestick + EM cone + leg lines.
 
-    ``timeframe`` is accepted for future intraday support (daily only for now)."""
+    ``legs`` overrides the payload's own legs when given (INCLUDING an empty
+    list, which clears the lines) — the page passes its current strike/type
+    selection so a strike change repaints locally instead of re-running the
+    service. ``timeframe`` is accepted for future intraday support."""
     p = payload or {}
     candles = p.get("candles") or []
     em_upper = p.get("em_upper") or []
@@ -114,7 +117,7 @@ def expected_move_figure(payload, timeframe="daily"):
                   "crosshair": {"label": {"enabled": True,
                                           "format": "{value:.2f}"},
                                 "snap": False},
-                  "plotLines": leg_lines(p.get("legs"))},
+                  "plotLines": leg_lines(p.get("legs") if legs is None else legs)},
         # Shared tooltip carries the DATE (header) + OHLC at the cursor on hover.
         # valueDecimals=2 limits the EM/price values to 2 decimals in the tooltip
         # regardless of the underlying float precision.
