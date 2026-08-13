@@ -96,10 +96,16 @@ class _Resp:
 
 
 def test_compute_expected_move_builds_payload(monkeypatch):
+    # Expiry computed relative to today (never a hardcoded past date) and kept
+    # comfortably beyond em_lookback_spec's dte<=2 intraday cutoff so this stays
+    # on the DAILY branch the test is actually exercising.
+    import datetime as dt
+    exp = (dt.date.today() + dt.timedelta(days=30)).isoformat()
+
     candles = [{"datetime": 1_700_000_000_000 + i * compute._DAY_MS,
                 "open": 100, "high": 101, "low": 99, "close": 100 + i}
                for i in range(200)]
-    chain = {"callExpDateMap": {"2026-07-18:28": {"100.0": [{"volatility": 20.0}]}}}
+    chain = {"callExpDateMap": {f"{exp}:28": {"100.0": [{"volatility": 20.0}]}}}
 
     class _PY:
         def get_price_history_every_day(self, sym):
@@ -114,9 +120,13 @@ def test_compute_expected_move_builds_payload(monkeypatch):
 
     monkeypatch.setattr(compute._proxy, "schwab_py_client", _PY())
     monkeypatch.setattr(compute._proxy, "schwab_client", _SC())
+    # Isolate this test from the synthetic today-candle append (a separate,
+    # already-covered behaviour) so it stays deterministic regardless of the
+    # weekday/time it runs.
+    monkeypatch.setattr(compute, "today_candle", lambda *a, **k: None)
 
     out = compute.compute_expected_move(
-        "SPY", "2026-07-18",
+        "SPY", exp,
         [{"strike": 100.0, "option_type": "put", "side": "short"}])
 
     assert out["error"] is None
@@ -148,13 +158,17 @@ def test_compute_expected_move_error_on_no_history(monkeypatch):
 
 
 def test_compute_expected_move_skips_partial_candle(monkeypatch):
+    # Same date-relative-expiry rationale as test_compute_expected_move_builds_payload.
+    import datetime as dt
+    exp = (dt.date.today() + dt.timedelta(days=30)).isoformat()
+
     good = [{"datetime": 1_700_000_000_000 + i * compute._DAY_MS,
              "open": 100, "high": 101, "low": 99, "close": 100 + i}
             for i in range(5)]
     partial = {"datetime": 1_700_000_000_000 + 99 * compute._DAY_MS,
                "close": 150}  # missing open/high/low
     raw = good + [partial]
-    chain = {"callExpDateMap": {"2026-07-18:28": {"100.0": [{"volatility": 20.0}]}}}
+    chain = {"callExpDateMap": {f"{exp}:28": {"100.0": [{"volatility": 20.0}]}}}
 
     class _PY:
         def get_price_history_every_day(self, sym):
@@ -169,8 +183,12 @@ def test_compute_expected_move_skips_partial_candle(monkeypatch):
 
     monkeypatch.setattr(compute._proxy, "schwab_py_client", _PY())
     monkeypatch.setattr(compute._proxy, "schwab_client", _SC())
+    # Isolate the partial-bar-filtering behaviour this test is actually about
+    # from the separate synthetic today-candle append, so len(candles) == 5
+    # holds regardless of the weekday/time the suite runs.
+    monkeypatch.setattr(compute, "today_candle", lambda *a, **k: None)
 
-    out = compute.compute_expected_move("SPY", "2026-07-18", [])
+    out = compute.compute_expected_move("SPY", exp, [])
     assert out["error"] is None
     assert len(out["candles"]) == 5            # the partial bar was skipped
     assert all(len(row) == 5 for row in out["candles"])
