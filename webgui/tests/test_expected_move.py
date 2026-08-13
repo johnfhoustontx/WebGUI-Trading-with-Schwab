@@ -166,3 +166,23 @@ def test_expected_move_figure_legs_empty_list_clears_lines():
     p = _payload()
     p["legs"] = [{"strike": 100.0, "option_type": "put", "side": "short"}]
     assert em.expected_move_figure(p, legs=[])["yAxis"]["plotLines"] == []
+
+
+def test_strike_options_labels_are_trimmed():
+    assert em.strike_options([765.0, 770.5]) == {765.0: "765", 770.5: "770.5"}
+    assert em.strike_options([]) == {}
+
+
+def test_expiry_options_labels_carry_dte():
+    import datetime as dt
+    today = dt.date(2026, 8, 12)
+    opts = em.expiry_options(["2026-08-14", "2026-09-18"], today=today)
+    assert opts["2026-08-14"] == "2026-08-14  (2d)"
+    assert opts["2026-09-18"] == "2026-09-18  (37d)"
+    assert em.expiry_options([], today=today) == {}
+
+
+def test_expiry_options_tolerates_junk():
+    import datetime as dt
+    opts = em.expiry_options(["nope"], today=dt.date(2026, 8, 12))
+    assert opts["nope"] == "nope"

@@ -46,6 +46,29 @@ def em_lookback_options():
     return {key: label for key, label in EM_LOOKBACKS}
 
 
+def strike_options(strikes):
+    """{strike_float: label} for the strike ui.select — trailing .0 trimmed."""
+    return {float(s): f"{float(s):g}" for s in (strikes or [])}
+
+
+def expiry_options(expirations, today=None):
+    """{expiry: "YYYY-MM-DD  (Nd)"} for the expiry ui.select.
+
+    The DTE suffix is what makes the list scannable — a bare date column of 50
+    weeklies does not tell you which one is the 0-DTE. Unparseable entries fall
+    back to the raw string rather than being dropped."""
+    import datetime as dt
+
+    today = today or dt.date.today()
+    out = {}
+    for e in expirations or []:
+        try:
+            out[e] = f"{e}  ({(dt.date.fromisoformat(str(e)) - today).days}d)"
+        except (ValueError, TypeError):
+            out[e] = str(e)
+    return out
+
+
 def leg_lines(legs):
     """yAxis plotLines for each leg: short solid / long dashed, put/call colored."""
     lines = []
@@ -130,11 +153,17 @@ def expected_move_figure(payload, timeframe="daily", legs=None):
 def render():
     """Build the Expected Move page: input row + persistent candlestick chart.
 
-    Handoff flow: a stashed payload (from Scanner/Paper/Captured/Calculator) is
-    consumed once on load and its command enqueued immediately. Standalone flow:
-    the user types a symbol + expiry (+ optional strike) and clicks Draw."""
-    import datetime as dt
+    Expiry and strike are now **chain-driven dropdowns**: typing a symbol loads
+    its live expirations (an ``em_chain`` command → ``cache:options:em_chain``),
+    picking an expiry populates that expiry's strike ladder and redraws, and
+    picking a strike/put-call is a **local-only** repaint (no round trip — the
+    strike is just a plotLine, see ``expected_move_figure``'s ``legs`` override).
 
+    Handoff flow: a stashed payload (from Scanner/Paper/Captured/Calculator) is
+    consumed once on load, its command enqueued immediately, and its chain
+    loaded so the dropdowns populate. Standalone flow: the user types a symbol
+    (chain loads on tab-out/Enter), picks an expiry (draws), and optionally
+    picks a strike + put/call (local repaint only)."""
     from nicegui import ui
 
     import bus_client
@@ -142,16 +171,24 @@ def render():
     from pages.ui_guard import guard
 
     from . import handoff
-    from .inputs import select_all_on_focus
+    from .inputs import bind_symbol_load, select_all_on_focus
 
     # No page title — the tab strip names the page (2026-07-11 cleanup).
 
-    state = {"ver": None, "last": None}
+    # "chain" holds the last-loaded ``cache:options:em_chain`` payload (expiries
+    # + per-expiry strike ladders); "payload" holds the last expected-move result
+    # (candles/cone/legs) — the two are polled + repainted independently.
+    # "seeding" suppresses on_value_change while THIS code (not the user) is
+    # writing expiry_sel.value, so a programmatic sync can never fire a spurious
+    # _draw() — see the on_value_change re-entrancy note below.
+    state = {"ver": None, "chain_ver": None, "last": None,
+             "payload": None, "chain": {}, "seeding": False}
 
     with ui.row().classes("items-end gap-3 flex-wrap"):
         symbol_in = select_all_on_focus(ui.input("Symbol", value="SPY").classes("w-28"))
-        expiry_in = ui.input("Expiry (YYYY-MM-DD)").classes("w-44")
-        strike_in = ui.number("Strike (optional)", format="%.2f").classes("w-36")
+        expiry_sel = ui.select({}, label="Expiry", with_input=True).classes("w-56")
+        strike_sel = ui.select({}, label="Strike (optional)",
+                               with_input=True, clearable=True).classes("w-40")
         type_tog = ui.toggle(["put", "call"], value="put")
         lookback_sel = ui.select(em_lookback_options(), value="auto",
                                  label="Look-back").classes("w-40")
@@ -163,11 +200,38 @@ def render():
     chart = ui.highchart(expected_move_figure({}), type="stockChart",
                          extras=["stock"]).classes("w-full")
 
-    def _repaint(payload):
-        err = (payload or {}).get("error")
-        spec = ((payload or {}).get("lookback") or {}).get("label") or ""
-        status.text = err or (f"Look-back: {spec}" if spec else "")
-        chart.options = expected_move_figure(payload or {})
+    def _current_legs():
+        """The leg list for the CURRENT strike/type selection (may be empty)."""
+        if strike_sel.value is None:
+            return []
+        return [{"strike": float(strike_sel.value),
+                 "option_type": type_tog.value, "side": "short"}]
+
+    def _repaint(payload=None):
+        """Repaint from the SERVICE's own legs (a poll landing a fresh result).
+
+        Deliberately does NOT apply the local strike/type override here: a
+        freshly-enqueued payload — including a multi-leg handoff (PCS/IC/…) —
+        already carries its own authoritative ``legs`` list, and the user has
+        not touched the strike dropdown for this result yet. Applying
+        ``_current_legs()`` unconditionally would replace those handed lines
+        with an empty single-strike selection the instant the result lands.
+        The local override only engages once the user picks a strike/type —
+        see ``_repaint_local``."""
+        if payload is not None:
+            state["payload"] = payload
+            err = (payload or {}).get("error")
+            spec = ((payload or {}).get("lookback") or {}).get("label") or ""
+            status.text = err or (f"Look-back: {spec}" if spec else "")
+        chart.options = expected_move_figure(state["payload"] or {})
+        chart.update()
+
+    def _repaint_local():
+        """Repaint with the CURRENT strike/type selection as a local override —
+        no service round trip (the plotline only needs the already-loaded
+        chain/spot, not a re-run of the cone/candle compute)."""
+        chart.options = expected_move_figure(state["payload"] or {},
+                                             legs=_current_legs())
         chart.update()
 
     @guard
@@ -183,24 +247,74 @@ def render():
 
     @guard
     def _draw():
-        legs = []
-        if strike_in.value:
-            legs = [{"strike": float(strike_in.value),
-                     "option_type": type_tog.value, "side": "short"}]
         _enqueue({"symbol": (symbol_in.value or "").replace("$", "").upper(),
-                  "expiry": (expiry_in.value or "").strip(), "legs": legs})
+                  "expiry": expiry_sel.value or "", "legs": _current_legs()})
 
     @guard
     def _lookback_changed():
         if state.get("last"):
             _enqueue(state["last"])
 
+    @guard
+    def _load_chain():
+        sym = (symbol_in.value or "").replace("$", "").upper()
+        if not sym:
+            return
+        bus_client.request("options", {"type": "em_chain", "args": {"symbol": sym}})
+        status.text = f"Loading {sym} expirations…"
+
+    @guard
+    def _strike_changed():
+        # Local-only: the strike is a plotLine, and the candles/cone do not
+        # depend on it. No command, no chain refetch.
+        _repaint_local()
+
+    def _fill_strikes():
+        ladder = (state["chain"].get("strikes") or {}).get(expiry_sel.value) or []
+        keep = strike_sel.value
+        strike_sel.options = strike_options(ladder)
+        strike_sel.value = keep if keep in strike_sel.options else None
+        strike_sel.update()
+
+    @guard
+    def _expiry_changed():
+        if state["seeding"]:
+            return  # programmatic sync (handoff seed / chain poll), not a user pick
+        _fill_strikes()
+        if expiry_sel.value:
+            _draw()
+
+    @guard
+    def _poll_chain():
+        version = bus_client.read_version("options:em_chain")
+        if version == state["chain_ver"]:
+            return
+        state["chain_ver"] = version
+        meta = bus_client.read("options:em_chain") or {}
+        state["chain"] = meta
+        if meta.get("error"):
+            status.text = meta["error"]
+            return
+        keep = expiry_sel.value
+        # Re-pointing the select at its OWN current value is a no-op in NiceGUI
+        # (on_value_change only fires on an actual change), so this seeding guard
+        # only matters the rare time the kept expiry drops out of a refreshed
+        # chain (value flips to None) — belt-and-braces against ever firing a
+        # spurious _draw() from a background poll.
+        state["seeding"] = True
+        try:
+            expiry_sel.options = expiry_options(meta.get("expirations") or [])
+            expiry_sel.value = keep if keep in expiry_sel.options else None
+            expiry_sel.update()
+        finally:
+            state["seeding"] = False
+        _fill_strikes()
+
     draw_btn.on_click(_draw)
-    # Pressing Enter in Symbol OR Expiry draws (the form's load equivalent). No
-    # tab-out trigger: Draw needs BOTH a symbol and an expiry, so tabbing from the
-    # symbol into the expiry field must not fire a premature "expiry required" draw.
-    symbol_in.on("keydown.enter", lambda e: _draw())
-    expiry_in.on("keydown.enter", lambda e: _draw())
+    bind_symbol_load(symbol_in, _load_chain)          # Enter OR tab-out
+    expiry_sel.on_value_change(lambda e: _expiry_changed())
+    strike_sel.on_value_change(lambda e: _strike_changed())
+    type_tog.on_value_change(lambda e: _strike_changed())
     lookback_sel.on_value_change(lambda e: _lookback_changed())
 
     @guard
@@ -215,12 +329,27 @@ def render():
     if pending:
         symbol_in.value = pending.get("symbol") or symbol_in.value
         if pending.get("expiry"):
-            expiry_in.value = pending["expiry"]
+            # Seed the select with the handed expiry so it shows BEFORE the
+            # chain lands; _poll_chain keeps it if the real list contains it.
+            # Guarded (seeding=True) so this programmatic set can't fire
+            # _expiry_changed -> a premature _draw() with the WRONG (empty
+            # single-strike) legs, ahead of the _enqueue(pending) below which
+            # carries the real (possibly multi-leg) payload.
+            state["seeding"] = True
+            try:
+                expiry_sel.options = expiry_options([pending["expiry"]])
+                expiry_sel.value = pending["expiry"]
+                expiry_sel.update()
+            finally:
+                state["seeding"] = False
         state["ver"] = bus_client.read_version("options:expected_move")
+        state["chain_ver"] = bus_client.read_version("options:em_chain")
         _enqueue(pending)
+        _load_chain()
     else:
-        if not expiry_in.value:
-            expiry_in.value = (dt.date.today() + dt.timedelta(days=30)).isoformat()
         state["ver"] = bus_client.read_version("options:expected_move")
+        state["chain_ver"] = bus_client.read_version("options:em_chain")
+        _load_chain()
 
     ui.timer(1.0, _poll)
+    ui.timer(1.0, _poll_chain)

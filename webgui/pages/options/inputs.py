@@ -43,10 +43,13 @@ def bind_symbol_load(inp, load, *, tab=True):
 
     ``focusout`` (NOT ``blur``): NiceGUI attaches the listener to the q-input ROOT,
     where ``blur`` does not bubble but ``focusout`` does (the same reason
-    ``select_all_on_focus`` uses ``focusin``). ``tab=False`` wires Enter only — used
-    on multi-field forms (e.g. Expected Move needs an expiry too, so tabbing OUT of
-    the symbol must not submit). The page's Load BUTTON should call ``load`` directly
-    to force a refresh even when the symbol is unchanged."""
+    ``select_all_on_focus`` uses ``focusin``). ``tab=False`` wires Enter only — for a
+    field whose tab-out must NOT itself submit (e.g. a symbol immediately followed by
+    a required sibling field that still needs filling in). Expected Move uses the
+    default ``tab=True``: tabbing out of its Symbol field loads that symbol's option
+    CHAIN (populating the Expiry/Strike dropdowns), not a draw — so a bare tab-out is
+    safe there. The page's Load BUTTON should call ``load`` directly to force a
+    refresh even when the symbol is unchanged."""
     last = {"sym": (inp.value or "").strip().upper()}
 
     def _fire(*_):
