@@ -258,3 +258,77 @@ def test_today_candle_degrades_on_missing_or_zero_fields():
     # isinstance(True, int) is True in Python — a bool must not slip through
     # the numeric check as a truthy "price".
     assert compute.today_candle(_quote(openPrice=True), last, now=now) is None
+
+
+def test_compute_expected_move_appends_todays_candle(monkeypatch):
+    """Daily mode appends the forming bar, and the cone anchors on IT."""
+    hist = [[_ms(2026, 8, 10), 772.6, 775.05, 771.62, 773.03],
+            [_ms(2026, 8, 11), 774.53, 774.61, 769.2, 770.56]]
+    monkeypatch.setattr(compute, "_fetch_em_candles", lambda *a, **k: list(hist))
+    monkeypatch.setattr(compute, "atm_iv_from_chain", lambda *a, **k: 0.15)
+    monkeypatch.setattr(compute, "today_candle",
+                        lambda *a, **k: [_ms(2026, 8, 12), 774.71, 774.9, 771.28, 772.3])
+
+    class _Resp:
+        status_code = 200
+        def __init__(self, d): self._d = d
+        def json(self): return self._d
+
+    monkeypatch.setattr(compute._proxy, "schwab_py_client", type("C", (), {
+        "get_quotes": staticmethod(
+            lambda syms: _Resp({"SPY": {"quote": {"lastPrice": 772.3,
+                                                  "openPrice": 774.71,
+                                                  "highPrice": 774.9,
+                                                  "lowPrice": 771.28}}})),
+        "get_option_chain": staticmethod(lambda *a, **k: _Resp({})),
+    })())
+
+    exp = (_dt.date.today() + _dt.timedelta(days=30)).isoformat()
+    out = compute.compute_expected_move("SPY", exp, [])
+    assert out["candles"][-1][0] == _ms(2026, 8, 12)
+    assert out["spot"] == 772.3
+    # The cone anchors at the LAST candle — today's, not yesterday's.
+    assert out["em_upper"][0][0] == _ms(2026, 8, 12)
+
+
+def test_compute_expected_move_spot_falls_back_to_normalized_quote(monkeypatch):
+    """A schwab_py_client without get_quotes must still yield a spot.
+
+    Guards the existing fixtures in this file, whose doubles predate the raw-quote
+    switch. Those fixtures are already red for a date-relative reason, so this is
+    the only live check of the fallback.
+    """
+    monkeypatch.setattr(compute, "_fetch_em_candles",
+                        lambda *a, **k: [[_ms(2026, 8, 11), 1, 1, 1, 99.0]])
+    monkeypatch.setattr(compute, "atm_iv_from_chain", lambda *a, **k: 0.15)
+    monkeypatch.setattr(compute, "today_candle", lambda *a, **k: None)
+
+    class _PY:  # no get_quotes — exactly like the older fixtures
+        def get_option_chain(self, *a, **k):
+            class _R:
+                status_code = 200
+                @staticmethod
+                def json(): return {}
+            return _R()
+
+    class _SC:
+        def get_quote(self, sym): return {"last": 123.0}
+
+    monkeypatch.setattr(compute._proxy, "schwab_py_client", _PY())
+    monkeypatch.setattr(compute._proxy, "schwab_client", _SC())
+    exp = (_dt.date.today() + _dt.timedelta(days=30)).isoformat()
+    out = compute.compute_expected_move("SPY", exp, [])
+    assert out["spot"] == 123.0          # normalized fallback, not the candle close
+
+
+def test_compute_expected_move_skips_today_in_intraday_mode(monkeypatch):
+    """dte<=2 uses intraday candles, which already reach today."""
+    called = []
+    monkeypatch.setattr(compute, "today_candle",
+                        lambda *a, **k: called.append(1) or [0, 1, 1, 1, 1])
+    monkeypatch.setattr(compute, "_fetch_em_candles",
+                        lambda *a, **k: [[_ms(2026, 8, 11), 1, 1, 1, 1]])
+    monkeypatch.setattr(compute, "atm_iv_from_chain", lambda *a, **k: None)
+    exp = (_dt.date.today() + _dt.timedelta(days=1)).isoformat()
+    compute.compute_expected_move("SPY", exp, [])
+    assert called == []

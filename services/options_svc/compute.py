@@ -5595,13 +5595,40 @@ def compute_expected_move(symbol, expiry, legs, lookback="auto") -> dict:
             api, contract_type="ALL", from_date=today, to_date=exp_date)
         chain = oresp.json() if getattr(oresp, "status_code", None) == 200 else None
 
-        spot = None
-        q = _proxy.schwab_client.get_quote(api) or {}
-        if isinstance(q, dict):
-            spot = q.get("last")
+        # Prefer the RAW quote: the normalized schwab_client.get_quote drops
+        # openPrice, which today's synthetic candle needs. Fall back to the
+        # normalized client when the raw one yields nothing, so the spot path
+        # degrades exactly as it did before.
+        raw_q = {}
+        try:
+            qresp = _proxy.schwab_py_client.get_quotes([api])
+            if getattr(qresp, "status_code", None) == 200:
+                info = (qresp.json() or {}).get(api) or {}
+                raw_q = info.get("quote", info.get("reference", info)) or {}
+        except Exception:
+            raw_q = {}
+        spot = raw_q.get("lastPrice") if isinstance(raw_q, dict) else None
+        if not spot:
+            q = _proxy.schwab_client.get_quote(api) or {}
+            if isinstance(q, dict):
+                spot = q.get("last")
         if not spot:
             spot = candles[-1][4]
         base["spot"] = spot
+
+        # Schwab's daily history stops at the previous trading day; append the
+        # forming bar so the chart shows today AND the cone anchors on it (it is
+        # sized from today's spot, so anchoring at yesterday overshot the expiry
+        # by a day).
+        if spec.get("mode") != "intraday":
+            try:
+                from services.options_svc.scheduler import _HOLIDAYS as _mkt_hols
+            except Exception:
+                _mkt_hols = set()
+            bar = today_candle(raw_q, candles[-1][0], holidays=_mkt_hols)
+            if bar:
+                candles = candles + [bar]
+                base["candles"] = candles
 
         atm_iv = atm_iv_from_chain(chain or {}, spot, expiry=str(expiry))
         base["atm_iv"] = atm_iv
