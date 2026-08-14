@@ -276,11 +276,17 @@ def _composite_arc_value(snapshot):
     Python's ``json`` both emits and accepts ``Infinity``/``NaN``, so a
     service-side division by zero round-trips intact into either the ``live``
     key or a history snapshot. Without this, one poisoned snapshot made a single
-    call contradict itself — DAY 100.0 beside WEEK/MONTH None, off the same row."""
+    call contradict itself — DAY 100.0 beside WEEK/MONTH None, off the same row.
+
+    An UNPARSEABLE score reads None for the same reason. ``_safe_float``'s 0.0
+    default would paint junk as a genuine maximally-BEARISH full arc — the mirror
+    of the NaN case above, and the same self-contradiction one input to the left
+    ('n/a' gave DAY 0.0 beside WEEK/MONTH None). This keeps Day symmetric with
+    ``_trend_arc_value``, which already passes ``None`` as its default."""
     if snapshot is None:
         return None
-    v = _safe_float((snapshot.get("composite") or {}).get("total_score"))
-    return gauge_score(v) if math.isfinite(v) else None
+    v = _safe_float((snapshot.get("composite") or {}).get("total_score"), None)
+    return gauge_score(v) if v is not None and math.isfinite(v) else None
 
 
 def sentiment_arcs(live, snaps):
@@ -1156,6 +1162,12 @@ def render():
                     for line in evidence:
                         ui.label(str(line)).classes("text-sm")
         else:
+            # These two clears are REPAINT-only semantics: on a fresh page the
+            # labels are already empty, so they matter solely when a repaint
+            # follows a paint that HAD a trend. derived.trend comes from a
+            # module-level holder in sentiment_svc and can go absent on a restart
+            # or a defensive compute failure, which would otherwise strand a
+            # stale trend label on screen indefinitely.
             regime_badge.text = ""
             regime_desc.text = ""
             trend_detail_box.clear()

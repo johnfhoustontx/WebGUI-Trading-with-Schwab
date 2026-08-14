@@ -340,6 +340,42 @@ def test_trend_panel_clears_and_dashes_when_no_trend_is_published():
     assert "Rallying" not in _label_texts(card)      # badge cleared, page-wide
 
 
+def _repaint(card):
+    """Drive the page's version-poll callback — i.e. the REPAINT path, as opposed
+    to a fresh build. Located by interval so it cannot grab a reflow timer."""
+    from nicegui import ui
+    timers = [e for e in card.descendants()
+              if isinstance(e, ui.timer) and e.interval == 2.0]
+    assert len(timers) == 1, f"expected one 2s poll timer, found {len(timers)}"
+    timers[0].callback()
+
+
+def test_trend_labels_clear_on_a_repaint_that_loses_the_trend():
+    """The ``else:`` branch's two ``.text = ""`` clears are REPAINT-only.
+
+    The test above renders a FRESH page, so those labels were never written and
+    "still empty" proves nothing about them — verified by mutation: keeping the
+    else-branch's dash but deleting only the two clears survives every other test
+    in this file. They matter solely when a repaint follows a paint that HAD a
+    trend, which is reachable: ``derived.trend`` comes from a module-level holder
+    in sentiment_svc and goes absent on a restart or a defensive compute failure.
+    Without the clears a stale trend label sits on screen indefinitely."""
+    bus_client.reset()
+    _seed_cache()
+    card = _render_card()
+    assert "Rallying" in _label_texts(card)        # precondition: something to go stale
+    assert "Broad participation, buyers in control" in _label_texts(card)
+
+    # Republish WITHOUT derived.trend — the version bump is what drives the poll.
+    bus_client.bus().cache_set("cache:sentiment:composite",
+                               {"live": _snap("2026-08-14", 7.2), "derived": {}})
+    _repaint(card)
+
+    assert "Rallying" not in _label_texts(card)
+    assert "Broad participation, buyers in control" not in _label_texts(card)
+    assert _trend_detail_texts(card) == ["—"]
+
+
 def test_render_fills_each_ring_from_its_own_payload():
     bus_client.reset()
     _seed_cache()
@@ -477,6 +513,23 @@ def test_sentiment_arcs_day_drops_a_non_finite_score_too():
     assert S.sentiment_arcs({"composite": {"total_score": "-inf"}}, [])[0]["value"] is None
     # A real reading still gets through, so this is not a blanket None.
     assert S.sentiment_arcs({"composite": {"total_score": 7.2}}, [])[0]["value"] == 72.0
+
+
+def test_sentiment_arcs_day_drops_an_unparseable_score_too():
+    """The MIRROR of the non-finite case, and the same contradiction one input
+    to the left. ``_safe_float``'s 0.0 default painted junk as a genuine
+    maximally-BEARISH full arc, so 'n/a' gave DAY 0.0 beside WEEK/MONTH None off
+    a single snapshot. Day now passes ``None`` as its default, matching
+    ``_trend_arc_value``, which already did."""
+    for bad in ("n/a", "", [], {}):
+        arcs = S.sentiment_arcs({"composite": {"total_score": bad}}, [])
+        assert arcs[0]["value"] is None, bad
+    assert [a["value"] for a in
+            S.sentiment_arcs(None, [{"composite": {"total_score": "n/a"}}])] \
+        == [None, None, None]
+    # A real 0.0 is still a READING, not missing data — the distinction the
+    # whole None contract exists to preserve.
+    assert S.sentiment_arcs({"composite": {"total_score": 0.0}}, [])[0]["value"] == 0.0
 
 
 def test_sentiment_arcs_cannot_contradict_itself_across_horizons():
