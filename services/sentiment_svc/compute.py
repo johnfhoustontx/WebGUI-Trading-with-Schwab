@@ -1280,18 +1280,58 @@ def compute_30d_trend(spy_daily_df=_FETCH, sector_month_pcts=_FETCH) -> dict:
         }
 
 
-def _fetch_sector_month_pcts():
-    """``{etf: month_pct}`` for the sector ETFs (used by compute_30d_trend when
-    no override is passed). Defensive: returns ``{}`` on any failure."""
+# One sector fan-out serves BOTH structural horizons. ``_fetch_closes`` already
+# derives week AND month %-moves from the same daily frames, so the weekly gauge
+# costs no extra Schwab calls — a second independent fetch would have doubled ~11
+# proxy calls for data already on the wire. TTL-cached because both self-fetching
+# gauges call this on the 15-min trend recompute while daily bars change ~daily.
+SECTOR_PCTS_TTL_SEC = 3600  # refetch at most hourly
+_SECTOR_PCTS_CACHE = {"ts": 0.0, "result": None}
+
+
+def reset_sector_pcts_cache():
+    """Drop the cached sector %-moves so the next call refetches (tests)."""
+    _SECTOR_PCTS_CACHE.update(ts=0.0, result=None)
+
+
+def _fetch_sector_pcts():
+    """``{"week": {etf: pct}, "month": {etf: pct}}`` for the sector ETFs.
+
+    Both horizons come off ONE ``_fetch_closes`` fan-out (see the note above) and
+    are TTL-cached for ``SECTOR_PCTS_TTL_SEC``. An EMPTY result is deliberately
+    not cached, so a transient proxy blip can't poison the window for an hour
+    (same rule as ``live_composite``'s P/C cache and ``_fetch_spy_5m``). Returns
+    copies, so a caller mutating its result can't corrupt the cache. Defensive:
+    ``{"week": {}, "month": {}}`` on any failure."""
+    cached = _SECTOR_PCTS_CACHE["result"]
+    if (cached is not None
+            and time.monotonic() - _SECTOR_PCTS_CACHE["ts"] < SECTOR_PCTS_TTL_SEC):
+        return {"week": dict(cached["week"]), "month": dict(cached["month"])}
     try:
         import sectors_ref
         sd = sectors_ref.load_sectors_data()
         etfs = [r["etf"] for r in sd
                 if r.get("kind") == "sector" and r.get("etf")]
         _closes, trends = _fetch_closes(etfs, months=3)
-        return {etf: t.get("month_pct") for etf, t in trends.items()}
+        result = {"week": {etf: t.get("week_pct") for etf, t in trends.items()},
+                  "month": {etf: t.get("month_pct") for etf, t in trends.items()}}
     except Exception:  # noqa: BLE001
-        return {}
+        return {"week": {}, "month": {}}
+    if result["month"] or result["week"]:  # cache only a real fetch
+        _SECTOR_PCTS_CACHE.update(ts=time.monotonic(), result=result)
+    return {"week": dict(result["week"]), "month": dict(result["month"])}
+
+
+def _fetch_sector_month_pcts():
+    """``{etf: month_pct}`` — the month view of the shared sector fetch (used by
+    ``compute_30d_trend`` when no override is passed)."""
+    return _fetch_sector_pcts()["month"]
+
+
+def _fetch_sector_week_pcts():
+    """``{etf: week_pct}`` — the week view of the shared sector fetch (used by
+    ``compute_7d_trend`` when no override is passed)."""
+    return _fetch_sector_pcts()["week"]
 
 
 def _divergence_named(snapshot):

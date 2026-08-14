@@ -557,6 +557,117 @@ def test_compute_30d_trend_explicit_args_bypass_cache(monkeypatch):
     assert compute._TREND_30D_CACHE["result"] is None  # cache untouched
 
 
+# --- shared sector %-move fetch (one fan-out serves both horizons) ------------
+
+def _stub_sector_fetch(monkeypatch, calls):
+    """Stub the workbook + the per-ETF history fan-out (no proxy), recording each
+    fan-out in ``calls`` so a test can prove how many actually happened."""
+    import sectors_ref
+
+    monkeypatch.setattr(sectors_ref, "load_sectors_data",
+                        lambda *a, **k: [{"kind": "sector", "etf": "XLK"},
+                                         {"kind": "sector", "etf": "XLP"},
+                                         {"kind": "industry", "etf": "SMH"}])
+
+    def fake_closes(etfs, months):
+        etfs = list(etfs)
+        calls.append(etfs)
+        return {}, {e: {"day3_pct": 0.1, "week_pct": 1.0 + i,
+                        "month_pct": 10.0 + i}
+                    for i, e in enumerate(etfs)}
+
+    monkeypatch.setattr(compute, "_fetch_closes", fake_closes)
+
+
+def test_fetch_sector_pcts_both_horizons_from_one_fetch(monkeypatch):
+    """``_fetch_closes`` already derives week AND month %-moves from the same
+    frames, so the weekly gauge must cost no extra Schwab calls."""
+    calls = []
+    _stub_sector_fetch(monkeypatch, calls)
+    compute.reset_sector_pcts_cache()
+
+    out = compute._fetch_sector_pcts()
+
+    assert len(calls) == 1                       # ONE fan-out, both horizons
+    assert calls[0] == ["XLK", "XLP"]            # sector rows only
+    assert out["week"] == {"XLK": 1.0, "XLP": 2.0}
+    assert out["month"] == {"XLK": 10.0, "XLP": 11.0}
+
+
+def test_fetch_sector_pcts_cached(monkeypatch):
+    calls = []
+    _stub_sector_fetch(monkeypatch, calls)
+    compute.reset_sector_pcts_cache()
+
+    compute._fetch_sector_pcts()
+    compute._fetch_sector_pcts()
+    assert len(calls) == 1                       # within TTL: no refetch
+
+    compute._SECTOR_PCTS_CACHE["ts"] -= compute.SECTOR_PCTS_TTL_SEC + 1
+    compute._fetch_sector_pcts()
+    assert len(calls) == 2                       # TTL expired: refetched
+
+
+def test_both_horizon_delegates_share_one_fetch(monkeypatch):
+    """The whole point of the refactor: the week and month gauges read the same
+    cached fan-out instead of pulling ~11 histories each."""
+    calls = []
+    _stub_sector_fetch(monkeypatch, calls)
+    compute.reset_sector_pcts_cache()
+
+    assert compute._fetch_sector_month_pcts() == {"XLK": 10.0, "XLP": 11.0}
+    assert compute._fetch_sector_week_pcts() == {"XLK": 1.0, "XLP": 2.0}
+    assert len(calls) == 1
+
+
+def test_fetch_sector_pcts_degrades_on_failure(monkeypatch):
+    import sectors_ref
+
+    def _raise(*a, **k):
+        raise RuntimeError("workbook gone")
+
+    monkeypatch.setattr(sectors_ref, "load_sectors_data", _raise)
+    compute.reset_sector_pcts_cache()
+
+    assert compute._fetch_sector_pcts() == {"week": {}, "month": {}}
+    assert compute._fetch_sector_month_pcts() == {}
+    assert compute._fetch_sector_week_pcts() == {}
+
+
+def test_fetch_sector_pcts_empty_result_not_cached(monkeypatch):
+    """A proxy blip returning nothing must not poison the TTL window for an hour
+    (same rule as live_composite's P/C cache and ``_fetch_spy_5m``)."""
+    calls = []
+    _stub_sector_fetch(monkeypatch, calls)
+
+    def empty_closes(etfs, months):
+        calls.append(list(etfs))
+        return {}, {}
+
+    monkeypatch.setattr(compute, "_fetch_closes", empty_closes)
+    compute.reset_sector_pcts_cache()
+
+    assert compute._fetch_sector_pcts() == {"week": {}, "month": {}}
+    compute._fetch_sector_pcts()
+    assert len(calls) == 2                       # retried, not served from cache
+
+
+def test_fetch_sector_pcts_returns_copies(monkeypatch):
+    """Callers get their own dicts — mutating a result can't corrupt the cache."""
+    calls = []
+    _stub_sector_fetch(monkeypatch, calls)
+    compute.reset_sector_pcts_cache()
+
+    first = compute._fetch_sector_pcts()
+    first["week"]["XLK"] = 999.0
+    first["month"].clear()
+
+    second = compute._fetch_sector_pcts()
+    assert second["week"]["XLK"] == 1.0
+    assert second["month"] == {"XLK": 10.0, "XLP": 11.0}
+    assert len(calls) == 1
+
+
 def test_derive_composite_extras_passes_through_trend():
     trend = {"state": "bull_trend", "score": 88.0, "marker": "verbatim"}
     out = compute.derive_composite_extras(None, [], [], trend=trend)
