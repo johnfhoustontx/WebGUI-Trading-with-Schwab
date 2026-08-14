@@ -21,6 +21,7 @@ widgets, a Refresh button that enqueues a ``cmd:sentiment`` command, and a
 fetch-free version-poll ``ui.timer`` that repaints when the bus cache version
 changes.
 """
+import math
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -229,8 +230,15 @@ def sentiment_avg_or_none(snaps, n=None):
     None), or None when the history holds no scored session at all. Pure.
 
     None is the ring's "no data" reading — distinct from a real 0.0, which the
-    ring would draw as a genuine (maximally bearish) value."""
-    scores = composite_series(snaps or [])[1]
+    ring would draw as a genuine (maximally bearish) value.
+
+    Non-finite scores are DROPPED rather than averaged. ``composite_series``
+    already loses NaN to its ``v > 0`` filter, but inf survives it — and inf
+    reaches a caller as a *clamped* 100.0, a confident full arc indistinguishable
+    from a real maximum. These payloads cross Redis as JSON and Python's ``json``
+    both emits and accepts ``Infinity``/``NaN``, so a service-side division by
+    zero round-trips intact."""
+    scores = [s for s in composite_series(snaps or [])[1] if math.isfinite(s)]
     if n is not None:
         scores = scores[-n:]
     return round(sum(scores) / len(scores), 2) if scores else None
@@ -270,12 +278,14 @@ def _trend_arc_value(trend):
     """A trend horizon's 0-100 arc value, or None when it carries no score.
 
     The invariant: this returns None in precisely the cases where
-    ``trend_gauge_value`` would fall back to its neutral 50.0 — an absent
-    horizon, an empty payload, or one published without a score. A gauge needs
-    a needle position and so must invent one; a ring can honestly say nothing."""
+    ``trend_gauge_value`` would invent a value — an absent horizon, an empty
+    payload, one published without a score, or one whose score is unparseable
+    (both of that function's 50.0 fallbacks) or non-finite (which ``_clamp``
+    silently turns into 100.0, since ``min(100.0, nan)`` is 100.0). A gauge
+    needs a needle position and so must invent one; a ring can say nothing."""
     t = trend or {}
-    raw = t.get("smoothed_score", t.get("score"))
-    return None if raw is None else trend_gauge_value(t)
+    v = _safe_float(t.get("smoothed_score", t.get("score")), None)
+    return None if v is None or not math.isfinite(v) else _clamp(v, 0.0, 100.0)
 
 
 def trend_arcs(derived):

@@ -1,4 +1,6 @@
 """Pure-transform tests for the Sentiment page."""
+import math
+
 import bus_client
 from pages import sentiment as S
 
@@ -238,21 +240,25 @@ def test_sentiment_avg_week_window_is_five_sessions():
     assert S.sentiment_avg(snaps, S.WEEK_SNAPS) == 9.0   # not mean(all) == 3.0
 
 
-def test_sentiment_avg_never_emits_nan_or_inf():
-    """A non-finite total_score must not poison the mean — composite_series'
-    ``v > 0`` filter drops NaN, and gauge_score clamps the inf case."""
-    import math
-    bad = [_snap("2026-08-01", 6.0)]
-    bad.append({"date": "2026-08-02", "composite": {"total_score": "nan"}})
-    v = S.sentiment_avg_or_none(bad)
-    assert v == 6.0 and math.isfinite(v)
-    inf_snaps = [{"date": "2026-08-01", "composite": {"total_score": "inf"}}]
-    assert S.gauge_score(S.sentiment_avg_or_none(inf_snaps)) == 100.0
+def test_sentiment_avg_drops_non_finite_scores():
+    """A non-finite total_score must be DROPPED, not averaged. NaN already
+    fails composite_series' ``v > 0`` filter; inf survives it, and inf would
+    reach the ring as a clamped 100.0 — a confident full arc built on garbage."""
+    good = _snap("2026-08-01", 6.0)
+    for bad in ("nan", "inf", "-inf"):
+        snaps = [good, {"date": "2026-08-02", "composite": {"total_score": bad}}]
+        v = S.sentiment_avg_or_none(snaps)
+        assert v == 6.0 and math.isfinite(v), bad
+    # A history of NOTHING BUT garbage is no reading at all, not a 100.0 arc.
+    assert S.sentiment_avg_or_none(
+        [{"date": "2026-08-01", "composite": {"total_score": "inf"}}]) is None
 
 
 def test_sentiment_30d_avg_still_averages_everything():
-    """Back-compat: the old name must keep its old behaviour."""
-    assert S.sentiment_30d_avg(_snaps(2.0, 4.0)) == 3.0
+    """Back-compat: the old name must keep its old behaviour — the whole
+    history, NOT the Week window. The fixture must be longer than that window
+    or the mutation ``sentiment_avg(snaps, WEEK_SNAPS)`` is unobservable."""
+    assert S.sentiment_30d_avg(_snaps(*([1.0] * 15 + [9.0] * 5))) == 3.0  # not 9.0
 
 
 # ── Day/Week/Month arc builders (the two concentric rings) ───────────────────
@@ -289,10 +295,14 @@ def test_sentiment_arcs_week_uses_the_five_session_window():
     assert arcs[2]["value"] == 30.0    # all 20
 
 
-def test_sentiment_arcs_values_stay_inside_0_100():
+def test_sentiment_arcs_clamps_a_real_reading_but_drops_a_non_finite_one():
+    """A genuine out-of-band composite clamps to the ring's maximum; a
+    non-finite one is NOT a reading and must not paint a full arc."""
     arcs = S.sentiment_arcs({"composite": {"total_score": 99.0}},
                             [{"composite": {"total_score": "inf"}}])
-    assert arcs[0]["value"] == 100.0 and arcs[1]["value"] == 100.0
+    assert arcs[0]["value"] == 100.0        # clamped real value
+    assert arcs[1]["value"] is None         # inf is no reading
+    assert arcs[2]["value"] is None
 
 
 def test_trend_arcs_reads_all_three_horizons():
@@ -324,6 +334,24 @@ def test_trend_arcs_scoreless_horizon_is_none_not_a_fabricated_50():
     arcs = S.trend_arcs({"trend": {"state": "neutral"}, "trend_7d": {}})
     assert arcs[0]["value"] is None
     assert arcs[1]["value"] is None
+
+
+def test_trend_arcs_unparseable_score_is_none_the_second_50_fallback():
+    """trend_gauge_value has TWO fallbacks: the explicit ``v is None`` and the
+    implicit ``_safe_float(v, 50.0)`` for a non-None non-numeric. Both must
+    read as "no data" on the ring."""
+    for junk in ("n/a", "", [], {}, None):
+        assert S.trend_gauge_value({"score": junk}) == 50.0        # the fallback
+        assert S.trend_arcs({"trend": {"score": junk}})[0]["value"] is None, junk
+
+
+def test_trend_arcs_non_finite_score_is_none_not_a_clamped_100():
+    """``_clamp(nan, 0, 100)`` is 100.0 — ``min(100.0, nan)`` returns 100.0
+    because the comparison is False — so an unguarded NaN paints a full,
+    maximally-bullish arc. JSON round-trips Infinity/NaN, so this is reachable."""
+    assert S.trend_gauge_value({"score": float("nan")}) == 100.0   # the trap
+    for junk in (float("nan"), float("inf"), float("-inf"), "nan", "inf"):
+        assert S.trend_arcs({"trend": {"score": junk}})[0]["value"] is None, junk
 
 
 def test_trend_arcs_keeps_a_real_zero_and_clamps():
