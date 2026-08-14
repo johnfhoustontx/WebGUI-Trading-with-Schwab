@@ -327,14 +327,48 @@ def build_trend_intraday_figure(points):
 # Display order + labels + colors for the five structural regimes. The order is
 # fixed so the stacked band keeps a stable reading position across repaints.
 REGIME_ORDER = ("mean_reversion", "trending", "breakout", "choppy", "crisis")
-REGIME_LABELS = {"mean_reversion": "Mean Reversion", "trending": "Trending",
-                 "breakout": "Breakout", "choppy": "Choppy", "crisis": "Volatile"}
+# The BASE names — deliberately the chart's series names too, because the fixed
+# order + stable names ARE the band's reading position. Direction adorns the
+# HEADLINE only (a legend that renames itself mid-session defeats the point).
+# Mirrors ``sentiment-dashboard/scoring/market_regime.REGIME_DISPLAY``, which the
+# webgui cannot import (Tier-1 takes no engine imports).
+REGIME_LABELS = {"mean_reversion": "Balanced", "trending": "Trending",
+                 "breakout": "Breakout", "choppy": "Whipsaw", "crisis": "Stressed"}
+_REGIME_DIRECTIONAL = {
+    "trending": {(1, True): "Rallying", (1, False): "Firming",
+                 (-1, True): "Retreating", (-1, False): "Softening"},
+    "breakout": {(-1, True): "Breakdown", (-1, False): "Breakdown"},
+}
 REGIME_COLORS = {"mean_reversion": CLR_CYAN, "trending": CLR_GREEN,
                  "breakout": CLR_YELLOW, "choppy": CLR_FLAT, "crisis": CLR_RED}
 # Headline text color by committed regime — a finite map (Tailwind-first rule).
 _REGIME_TEXT = {"trending": "text-[#66bb6a]", "breakout": "text-[#ffd54f]",
                 "mean_reversion": "text-[#3fb6c7]", "choppy": "text-[#9e9e9e]",
                 "crisis": "text-[#ef5350]"}
+# ... but a DIRECTIONAL regime takes its colour from the direction instead: the
+# fixed green would paint "Retreating" as though it were bullish.
+_DIRECTION_TEXT = {1: "text-[#66bb6a]", -1: "text-[#ef5350]"}
+
+
+def regime_direction(regime):
+    """(direction, strong) off a regime payload. Junk, or a payload predating the
+    field, reads neutral — the base label then renders exactly as before."""
+    r = regime if isinstance(regime, dict) else {}
+    d = r.get("direction")
+    d = d if d in (-1, 0, 1) and not isinstance(d, bool) else 0
+    return d, r.get("direction_strong") is True
+
+
+def regime_label(key, direction=0, strong=False):
+    """Display name for a regime key, adorned with the direction where one
+    applies (Balanced / Whipsaw / Stressed are directionless by construction)."""
+    base = REGIME_LABELS.get(key)
+    if base is None:
+        return ""
+    words = _REGIME_DIRECTIONAL.get(key)
+    if not words or direction not in (-1, 1):
+        return base
+    return words.get((direction, bool(strong)), base)
 # Space-separated STRING (not a list) — that is what NiceGUI's
 # ``.classes(remove=...)`` splits on; a list raises AttributeError at render.
 REGIME_TEXT_CLASSES = " ".join(dict.fromkeys(list(_REGIME_TEXT.values())
@@ -345,19 +379,30 @@ def regime_headline_parts(regime):
     """(label, confidence_text, text_class) for the Market Regime headline.
 
     An absent payload reads as a waiting placeholder; an ``unclear`` sample keeps
-    its "Unclear" label (the service never fabricates a regime it can't see)."""
+    its "Unclear" label (the service never fabricates a regime it can't see).
+
+    The label is re-derived here from ``(committed_label, direction)`` rather than
+    echoing the payload's ``label``, so a held/stale sample can never outlive a
+    rename; the payload's own word is the fallback for an unknown key."""
     r = regime if isinstance(regime, dict) else {}
-    label = r.get("label") or ("Waiting for regime…" if not r else "Unclear")
+    key = "" if r.get("unclear") else (r.get("committed_label") or "")
+    direction, strong = regime_direction(r)
+    label = (regime_label(key, direction, strong) or r.get("label")
+             or ("Waiting for regime…" if not r else "Unclear"))
     conf = r.get("confidence")
     conf_txt = f"{float(conf) * 100:.0f}% confidence" if isinstance(
         conf, (int, float)) and not isinstance(conf, bool) else ""
-    key = r.get("committed_label") or ""
-    cls = "text-[#9e9e9e]" if r.get("unclear") else _REGIME_TEXT.get(key, "text-[#9e9e9e]")
+    if r.get("unclear"):
+        cls = "text-[#9e9e9e]"
+    elif key in _REGIME_DIRECTIONAL and direction in _DIRECTION_TEXT:
+        cls = _DIRECTION_TEXT[direction]
+    else:
+        cls = _REGIME_TEXT.get(key, "text-[#9e9e9e]")
     return label, conf_txt, cls
 
 
 def regime_transition_text(regime):
-    """'Mean Reversion → Trending · 60%' while a regime is handing over, else ''.
+    """'Balanced → Rallying · 60%' while a regime is handing over, else ''.
 
     Blank when stable, so the row simply hides — the whole point of the blended
     model is that this reads gradually instead of flipping."""
@@ -365,8 +410,9 @@ def regime_transition_text(regime):
     tr = r.get("transition")
     if not isinstance(tr, dict) or not tr.get("from") or not tr.get("to"):
         return ""
-    frm = REGIME_LABELS.get(tr["from"], str(tr["from"]))
-    to = REGIME_LABELS.get(tr["to"], str(tr["to"]))
+    direction, strong = regime_direction(r)
+    frm = regime_label(tr["from"], direction, strong) or str(tr["from"])
+    to = regime_label(tr["to"], direction, strong) or str(tr["to"])
     prog = tr.get("progress")
     pct = (f" · {float(prog) * 100:.0f}%"
            if isinstance(prog, (int, float)) and not isinstance(prog, bool) else "")

@@ -4,7 +4,49 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-08-13 (**`big_delta` PUSH go-live via a SEPARATE push bar + two tuning aids**
+**Last updated:** 2026-08-14 (**Market Regime renamed + given a direction axis.** The five display
+names mixed three vocabularies — three tape-behaviour nouns, one *strategy* (Mean Reversion) and one
+market condition (Volatile) — and one of them misdescribed its own evidence. `mean_reversion`'s five
+inputs (low ADX, flat EMA, mid-band width, balanced profile, above the gamma flip) all say price is
+**AT** the mean; **nothing** in the evidence set measures distance from a mean or an extreme, so
+"Mean Reversion" promised a fade the model never tested. Renamed **display-only** (internal keys are
+the contract + DB columns + driver packet, so they are untouched): **Balanced** / Trending / Breakout
+/ **Whipsaw** / **Stressed**. Whipsaw vs Balanced now carries the distinction that actually separates
+them (energy: high ATR + low ADX vs quiet balance); "Stressed" replaces "Volatile" because
+`VIX_STRESS_LO` is 22 and the attack fires near VIX 30 — stress, not crisis — and because breakout and
+whipsaw days are volatile too.
+
+**Direction.** `trending`/`breakout` now read **Rallying / Firming / Retreating / Softening /
+Breakdown**. The sign was already computed and thrown away — `regime_evidence._ema_slope_atr` returns a
+SIGNED slope that `_trending` discarded via `abs()`. The intensity math stays sign-blind (a trend day
+is a trend day either way), so this is a label adornment on the same five-member simplex, **not** a
+sixth regime — splitting `trending` would need a DB column, a chart series and a contract change, and
+would tear the membership across two bins whenever the slope flips mid-session.
+
+**The contradiction risk was the real design problem.** Two independent direction reads exist (the
+regime's 5-min SPY slope vs the 15-min Market Trend composite over price+breadth+sector+VIX), and they
+diverge on a genuine condition — index up on narrow leadership with negative breadth. A word derived
+from either alone could contradict the other panel. `market_regime.direction_sign` therefore names a
+direction **only when both agree past their deadbands**, otherwise rendering the neutral base label —
+which is exactly the previous behaviour, so the neutral word is a floor, never a regression.
+`handlers._committed_trend_score()` reads the SAME `smoothed_score` the gauge renders, taken BEFORE
+`_REGIME_LOCK` so `_TREND_LOCK` is never nested inside it. `commit_direction` is asymmetric on purpose:
+**two** consecutive reads to claim a direction, **one** to drop back to neutral.
+
+**Rendering.** The stacked-area series names stay the BASE words (the fixed order + stable names ARE
+the reading position); direction adorns the headline + transition line only. The headline colour now
+follows the direction for the two directional regimes — the fixed green was painting a down-trend as
+though it were bullish. The page re-derives the label from `(committed_label, direction)` instead of
+echoing the payload's `label`, so a held sample can't outlive a rename, with `unclear` short-circuiting
+to "Unclear". The pushed market snapshot also stopped rendering RAW KEYS ("mean_reversion → trending")
+in its transition line. Additive `direction`/`direction_strong` on `RegimeState` + `_REGIME_PUBLIC_KEYS`
+(a new test pins that allowlist against the test-side duplicate). Words are duplicated across four
+tiers by necessity — `scoring/market_regime.REGIME_DISPLAY` is the source, webgui/driver_svc/
+options_svc mirror it, since none may import that package. **Restart `sentiment_svc` + `options_svc` +
+`driver_svc` + the webgui.** sentiment-dashboard **484** / webgui **1253** / options_svc + driver_svc +
+sentiment_svc + contracts **1618** green, against the documented baselines.)
+
+**Prior — 2026-08-13** (**`big_delta` PUSH go-live via a SEPARATE push bar + two tuning aids**
 (commit `6b1636c`, live in prod). The detector's single `rel_threshold` gated BOTH the screen and the
 phone push, so enabling push at 20% would be ~100 Telegram alerts/day. Fix: a distinct
 **`[big_delta].push_threshold`** (0.35) — the detector still FIRES to the **Flow screen at

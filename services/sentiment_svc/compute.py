@@ -720,17 +720,11 @@ def _safe_daily(schwab, symbol, months):
 # return, and returns a RegimeState-shaped dict. Never raises.
 # ---------------------------------------------------------------------------
 
-# Regime key -> display label (the "" / None fallbacks cover a cold-start /
-# unclear commit that has no committed regime yet).
-_REGIME_LABELS = {
-    "mean_reversion": "Mean Reversion",
-    "trending": "Trending",
-    "breakout": "Breakout",
-    "choppy": "Choppy",
-    "crisis": "Volatile",   # internal key "crisis"; displayed as Volatile
-    "": "Unclear",
-    None: "Unclear",
-}
+# Regime key -> display label. The words live in ``market_regime.REGIME_DISPLAY``
+# (one source, beside the evidence that earns them); an unknown / cold-start /
+# unclear commit with no committed regime reads "Unclear".
+def _regime_label(key, direction=0, strong=False):
+    return market_regime.regime_label(key, direction, strong)
 
 _REGIME_MODEL = "regime-v1"
 _MATRIX_STALE_SEC = 300          # a matrix cache older than this is treated as absent
@@ -1056,6 +1050,18 @@ def _regime_carry(prior):
     return None, None, market_regime.CommitState(), None
 
 
+def _direction_carry(prior):
+    """The direction hysteresis state off a previous return, or a cold-start
+    neutral. Carried independently of the smoothing carry so an ``unclear``
+    sample (which has no bars, hence no slope) can preserve it rather than
+    silently dropping a committed direction."""
+    if isinstance(prior, dict):
+        state = prior.get("_dir")
+        if isinstance(state, market_regime.DirectionState):
+            return state
+    return market_regime.DirectionState()
+
+
 def _unclear_shell(now_ts, prior):
     """A fully-shaped ``unclear`` RegimeState dict. Preserves the prior smoothing
     carry when present so a transient fetch failure doesn't reset the EMAs."""
@@ -1074,16 +1080,19 @@ def _unclear_shell(now_ts, prior):
         "committed_label": "",
         "transition": None,
         "evidence": [],
+        "direction": 0,
+        "direction_strong": False,
         "version_info": {"model": _REGIME_MODEL},
         "_fast": fast,
         "_slow": slow,
         "_commit": commit,
+        "_dir": _direction_carry(prior),
         "_sample_ts": sample_ts,
     }
 
 
 def compute_market_regime(schwab, matrix=None, vix=None, prior=None,
-                          now=None) -> dict:
+                          now=None, trend_score=None) -> dict:
     """Assemble the blended market-regime state from live SPY bars + VIX + the
     options matrix, threading the temporal smoothing/commit state off ``prior``.
 
@@ -1139,6 +1148,16 @@ def compute_market_regime(schwab, matrix=None, vix=None, prior=None,
         transition = market_regime.detect_transition(fast, slow)
         committed = commit.committed
 
+        # Direction is DISPLAY ONLY and is claimed only when this module's own
+        # signed slope agrees with the Market Trend composite — see
+        # ``market_regime.direction_sign``. ``trend_score`` absent (an older
+        # caller, or a trend recompute that hasn't landed yet) reads neutral.
+        slope = ev.get("ema_slope_atr")
+        dir_state = market_regime.commit_direction(
+            market_regime.direction_sign(slope, trend_score),
+            _direction_carry(prior))
+        strong = bool(dir_state.committed) and market_regime.direction_strong(slope)
+
         return {
             "ts": _regime_iso(now_ts),
             "as_of": _regime_iso(now_ts),
@@ -1146,14 +1165,17 @@ def compute_market_regime(schwab, matrix=None, vix=None, prior=None,
             "raw": scores.raw,
             "confidence": scores.confidence,
             "unclear": scores.unclear,
-            "label": _REGIME_LABELS.get(committed, "Unclear"),
+            "label": _regime_label(committed, dir_state.committed, strong),
             "committed_label": committed or "",
             "transition": transition,
             "evidence": list(scores.evidence),
+            "direction": dir_state.committed,
+            "direction_strong": strong,
             "version_info": {"model": _REGIME_MODEL},
             "_fast": fast,
             "_slow": slow,
             "_commit": commit,
+            "_dir": dir_state,
             "_sample_ts": int(now_ts),
         }
     except Exception:  # noqa: BLE001 — never raise into the refresh path.

@@ -19,7 +19,7 @@ def test_regime_state_roundtrip():
     from shared.contracts.sentiment import RegimeState
     s = RegimeState(ts="2026-07-23T10:05:00-05:00", as_of="2026-07-23 10:05 CT",
                     memberships=_valid_vec(), raw=_valid_vec(), confidence=0.6,
-                    unclear=False, label="Mean Reversion",
+                    unclear=False, label="Balanced",
                     committed_label="mean_reversion",
                     transition={"from": "mean_reversion", "to": "trending", "progress": 0.4},
                     evidence=["ADX 24", "VWAP held 78%"])

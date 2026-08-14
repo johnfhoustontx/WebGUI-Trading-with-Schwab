@@ -155,7 +155,7 @@ def test_volatile_vix_level_is_the_primary_tell():
 
 def test_high_vix_trips_the_force_commit():
     # A genuinely stressed VIX (~30+) must clear the fast-attack threshold so the
-    # label can snap to Volatile.
+    # label can snap to Stressed.
     assert MR.crisis_attacked(
         MR.score_regimes(_quiet_range_day() | {"vix_level": 31.0}).raw["crisis"])
 
@@ -533,3 +533,107 @@ def test_crisis_attacked_predicate():
     assert MR.crisis_attacked(0.69) is False
     assert MR.crisis_attacked(0.7) is True
     assert MR.crisis_attacked(0.95) is True
+
+
+# ------------------------------------------------- direction (display adornment)
+
+
+def test_direction_sign_requires_both_reads_to_agree():
+    # Slope up + composite direction up -> up. Slope up while the composite
+    # direction is DOWN -> neutral: the two reads disagree, so no word is claimed.
+    assert MR.direction_sign(0.20, 62.0) == 1
+    assert MR.direction_sign(-0.20, 38.0) == -1
+    assert MR.direction_sign(0.20, 38.0) == 0
+    assert MR.direction_sign(-0.20, 62.0) == 0
+
+
+def test_direction_sign_deadbands():
+    # Inside either deadband -> neutral, so a score hovering at 50 or a slope
+    # below the trending ramp's own floor cannot name a direction.
+    assert MR.direction_sign(0.20, 51.0) == 0
+    assert MR.direction_sign(0.01, 62.0) == 0
+    assert MR.direction_sign(MR.DIRECTION_SLOPE_DEADBAND,
+                             50.0 + MR.DIRECTION_TREND_DEADBAND) == 1
+
+
+def test_direction_sign_missing_inputs_are_neutral():
+    assert MR.direction_sign(None, 62.0) == 0
+    assert MR.direction_sign(0.20, None) == 0
+    assert MR.direction_sign(None, None) == 0
+    assert MR.direction_sign(float("nan"), 62.0) == 0
+    assert MR.direction_sign("up", 62.0) == 0
+
+
+def test_direction_strong_splits_rally_from_firming():
+    assert MR.direction_strong(0.30) is True
+    assert MR.direction_strong(-0.30) is True
+    assert MR.direction_strong(0.08) is False
+    assert MR.direction_strong(None) is False
+
+
+def test_commit_direction_needs_two_reads_to_claim_a_direction():
+    state = MR.DirectionState()
+    state = MR.commit_direction(1, state)
+    assert state.committed == 0      # first up read: not yet claimed
+    state = MR.commit_direction(1, state)
+    assert state.committed == 1      # second consecutive read commits
+
+
+def test_commit_direction_drops_to_neutral_immediately():
+    # Asymmetric by design: claiming a direction takes two reads, ABANDONING one
+    # takes a single read — never assert a direction the evidence stopped backing.
+    state = MR.DirectionState(committed=1)
+    state = MR.commit_direction(0, state)
+    assert state.committed == 0
+
+
+def test_commit_direction_flip_restarts_the_streak():
+    state = MR.DirectionState()
+    state = MR.commit_direction(1, state)
+    state = MR.commit_direction(-1, state)
+    assert state.committed == 0      # the up streak does not carry into down
+    state = MR.commit_direction(-1, state)
+    assert state.committed == -1
+
+
+def test_commit_direction_does_not_mutate_input():
+    state = MR.DirectionState(committed=0, streak=1, challenger=1)
+    MR.commit_direction(1, state)
+    assert (state.committed, state.streak, state.challenger) == (0, 1, 1)
+
+
+def test_regime_label_base_names():
+    assert MR.regime_label("mean_reversion") == "Balanced"
+    assert MR.regime_label("trending") == "Trending"
+    assert MR.regime_label("breakout") == "Breakout"
+    assert MR.regime_label("choppy") == "Whipsaw"
+    assert MR.regime_label("crisis") == "Stressed"
+
+
+def test_regime_label_trending_takes_a_direction():
+    assert MR.regime_label("trending", 1, strong=True) == "Rallying"
+    assert MR.regime_label("trending", 1, strong=False) == "Firming"
+    assert MR.regime_label("trending", -1, strong=True) == "Retreating"
+    assert MR.regime_label("trending", -1, strong=False) == "Softening"
+    assert MR.regime_label("trending", 0, strong=True) == "Trending"
+
+
+def test_regime_label_breakout_inverts_to_breakdown():
+    assert MR.regime_label("breakout", -1, strong=True) == "Breakdown"
+    assert MR.regime_label("breakout", 1, strong=True) == "Breakout"
+    assert MR.regime_label("breakout", 0) == "Breakout"
+
+
+def test_regime_label_directionless_regimes_ignore_the_sign():
+    # A balanced auction has no direction and a stress read is about fear, not
+    # sign — a stray direction must not reword either.
+    for key in ("mean_reversion", "choppy", "crisis"):
+        base = MR.regime_label(key)
+        assert MR.regime_label(key, 1, strong=True) == base
+        assert MR.regime_label(key, -1, strong=True) == base
+
+
+def test_regime_label_unknown_key_is_unclear():
+    assert MR.regime_label("") == "Unclear"
+    assert MR.regime_label(None) == "Unclear"
+    assert MR.regime_label("nonsense") == "Unclear"

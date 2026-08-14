@@ -358,7 +358,7 @@ _REGIME_LOCK = threading.Lock()
 # starting with "_" is in-process carry and must never be published.
 _REGIME_PUBLIC_KEYS = ("ts", "as_of", "memberships", "raw", "confidence",
                        "unclear", "label", "committed_label", "transition",
-                       "evidence", "version_info")
+                       "evidence", "version_info", "direction", "direction_strong")
 
 
 def _read_matrix(bus):
@@ -427,6 +427,24 @@ def _record_regime(bus, state):
         log.exception("regime history record failed")
 
 
+def _committed_trend_score():
+    """The Market Trend directional score (0..100) held by ``_TREND``, or None.
+
+    Read under ``_TREND_LOCK`` (a concurrent recompute swaps the payload) and
+    total over a missing/degraded trend — None simply means the regime claims no
+    direction this sample."""
+    try:
+        with _TREND_LOCK:
+            trend = _TREND.get("trend")
+        if not isinstance(trend, dict):
+            return None
+        score = trend.get("smoothed_score", trend.get("score"))
+        return float(score) if isinstance(score, (int, float)) and not isinstance(
+            score, bool) else None
+    except Exception:  # noqa: BLE001 — never block the regime recompute.
+        return None
+
+
 def _maybe_recompute_regime(bus):
     """Recompute the blended market regime if the 5-min RTH slot is due.
 
@@ -437,6 +455,12 @@ def _maybe_recompute_regime(bus):
     throughout — a failure logs and leaves the prior held state."""
     from services import _proxy
     state = None
+    # The Market Trend composite score gates the regime's direction word (see
+    # market_regime.direction_sign) — reading the SAME number the Trend gauge
+    # renders is what makes a contradiction between the two impossible. Taken
+    # BEFORE _REGIME_LOCK so _TREND_LOCK is never acquired inside it (no lock
+    # nesting, hence no ordering hazard); absent reads neutral.
+    trend_score = _committed_trend_score()
     try:
         with _REGIME_LOCK:
             due, slot = scheduler.regime_due(scheduler._market_now(),
@@ -445,7 +469,8 @@ def _maybe_recompute_regime(bus):
                 return
             state = compute.compute_market_regime(
                 _proxy.schwab_client, matrix=_read_matrix(bus),
-                prior=_REGIME["state"], now=time.time())
+                prior=_REGIME["state"], now=time.time(),
+                trend_score=trend_score)
             _REGIME.update(slot=slot, state=state)
     except Exception:  # noqa: BLE001 — keep the last good regime.
         log.exception("market regime recompute failed")
@@ -524,7 +549,7 @@ def run_crisis_check(bus):
                 "raw": scores.raw,
                 "confidence": scores.confidence,
                 "unclear": scores.unclear,
-                "label": compute._REGIME_LABELS.get("crisis", "Volatile"),
+                "label": compute._regime_label("crisis"),
                 "committed_label": "crisis",
                 "transition": mr.detect_transition(fast, slow) if slow else None,
                 "evidence": list(scores.evidence),

@@ -248,13 +248,20 @@ fear, which can mean opportunity.
 - **Sentiment gauges** — today vs the 30-day average.
 - **Market Trend gauges** — a 0–100 direction (50 = neutral, 100 = strong bull).
 - **Components** — press and hold to see what's driving the score.
-- **Market Regime** — *how* the market is moving, not which way: Mean Reversion,
-  Trending, Breakout, Choppy or Crisis. The stacked chart shows how much of each
-  is in today's tape, so a change of character shows up as the bands shifting
-  gradually. When one regime is taking over you'll see a line like
-  "Mean Reversion → Trending · 60%". Recomputes every 5 minutes during market
-  hours; outside them it holds the last read. Says "Unclear" when the evidence
-  is genuinely weak rather than guessing.
+- **Market Regime** — the *character* of the tape: **Balanced** (quiet, price
+  pinned near its mean), **Trending**, **Breakout**, **Whipsaw** (plenty of
+  movement, no progress) or **Stressed** (fear — high VIX, inverted term
+  structure). The stacked chart shows how much of each is in today's tape, so a
+  change of character shows up as the bands shifting gradually. When one regime
+  is taking over you'll see a line like "Balanced → Rallying · 60%".
+- **Direction on the regime** — Trending and Breakout also say *which way*:
+  **Rallying** or **Firming** up, **Retreating** or **Softening** down, and
+  **Breakdown** for a break to the downside. That word appears only when the
+  tape's own slope and the Market Trend gauge agree — when they don't it stays
+  the plain name, so this panel can never contradict the gauge above it.
+  Balanced, Whipsaw and Stressed have no direction by nature. Recomputes every
+  5 minutes during market hours; outside them it holds the last read. Says
+  "Unclear" when the evidence is genuinely weak rather than guessing.
 - **Daily Sentiment & Trend** — the two color-coded intraday graphs (last 5 days).
 - **Sector & Industry**, **Sector Rotation** and **RRG** now have their own tabs
   along the top.

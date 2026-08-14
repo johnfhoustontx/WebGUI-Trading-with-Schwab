@@ -531,9 +531,9 @@ def test_market_read_carries_market_regime():
     assert st["label"] == "Trending" and st["confidence"] == 0.62
     # top two memberships, strongest first, as (name, weight) pairs
     # Membership keys are shown to the decider as DISPLAY labels (the internal
-    # "crisis" key would read "Volatile"), consistent with the rest of the app.
-    assert st["top"][0] == ("Trending", 0.52) and st["top"][1] == ("Mean Reversion", 0.28)
-    assert st["transition"] == "Mean Reversion -> Trending 60%"
+    # "crisis" key would read "Stressed"), consistent with the rest of the app.
+    assert st["top"][0] == ("Trending", 0.52) and st["top"][1] == ("Balanced", 0.28)
+    assert st["transition"] == "Balanced -> Trending 60%"
     assert "Trending" in mr["summary"]                      # surfaced on the log line
 
 
@@ -776,3 +776,25 @@ def test_build_packet_never_reads_signals_directional_key():
 
     assert pkt["menu"] == []
     assert pkt["menu_by_id"] == {}
+
+
+def test_market_read_regime_labels_carry_the_direction():
+    """A committed direction rewords the membership mix for the decider — the
+    book's known failure mode was selling call spreads into a rising tape, so
+    "Rallying 52%" is materially more actionable than "Trending 52%"."""
+    payload = dict(_regime_payload(), direction=1, direction_strong=True)
+    st = compute._market_read(dict(_market_ctx(), regime=payload))["market_regime"]
+    assert st["top"][0] == ("Rallying", 0.52)
+    assert st["transition"] == "Balanced -> Rallying 60%"
+
+
+def test_market_read_regime_labels_neutral_without_a_direction():
+    payload = dict(_regime_payload(), direction=0, direction_strong=False)
+    st = compute._market_read(dict(_market_ctx(), regime=payload))["market_regime"]
+    assert st["top"][0] == ("Trending", 0.52)
+
+
+def test_market_read_regime_direction_junk_is_neutral():
+    payload = dict(_regime_payload(), direction="up", direction_strong="yes")
+    st = compute._market_read(dict(_market_ctx(), regime=payload))["market_regime"]
+    assert st["top"][0] == ("Trending", 0.52)

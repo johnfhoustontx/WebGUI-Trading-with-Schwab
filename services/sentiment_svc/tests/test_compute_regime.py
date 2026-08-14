@@ -18,7 +18,8 @@ NOW = 1_800_000_000  # fixed unix seconds so the TTL keys off the passed ``now``
 # The subset of the return dict that is the publishable RegimeState (the
 # ``_fast``/``_slow``/``_commit``/``_sample_ts`` carry fields are NOT cached).
 _PUBLISH = ("ts", "as_of", "memberships", "raw", "confidence", "unclear",
-            "label", "committed_label", "transition", "evidence", "version_info")
+            "label", "committed_label", "transition", "evidence", "version_info",
+            "direction", "direction_strong")
 
 
 @pytest.fixture(autouse=True)
@@ -262,7 +263,7 @@ def test_crisis_attack_forces_crisis_commit():
     vix = {"vix": 20.0, "vix1d": 40.0, "vix3m": 15.0}
     out = compute.compute_market_regime(_FakeBullSchwab(), vix=vix, now=NOW)
     assert out["committed_label"] == "crisis"
-    assert out["label"] == "Volatile"   # internal key "crisis" -> displayed "Volatile"
+    assert out["label"] == "Stressed"   # internal key "crisis" -> displayed "Stressed"
     assert out["memberships"]["crisis"] >= 0.9
     assert out["raw"]["crisis"] >= 0.7
 
@@ -368,7 +369,7 @@ def test_vix1d_spike_fires_crisis():
         _FakeVix1dSchwab(vix1d_prev=12.0, vix1d_now=18.0), now=NOW)
     assert out["raw"]["crisis"] >= 0.7
     assert out["committed_label"] == "crisis"
-    assert out["label"] == "Volatile"   # internal key "crisis" -> displayed "Volatile"
+    assert out["label"] == "Stressed"   # internal key "crisis" -> displayed "Stressed"
     assert any("VIX1D" in e for e in out["evidence"])
 
 
@@ -520,3 +521,72 @@ def test_fetch_spy_5m_requests_an_allowed_period():
     compute.reset_spy_5m_cache()
     compute._fetch_spy_5m(_Rec(), 1_000.0)
     assert seen["days"] in compute._SPY_PERIOD_DAYS_ALLOWED
+
+
+# ------------------------------------------------- direction (display adornment)
+
+
+def _commit_direction(schwab, trend_score, reads=2, now=NOW):
+    """Run the regime enough times to clear the direction hysteresis, threading
+    the carry the way the handler does."""
+    prior = None
+    for i in range(reads):
+        compute.reset_spy_5m_cache()
+        prior = compute.compute_market_regime(
+            schwab, prior=prior, trend_score=trend_score, now=now + i * 300)
+    return prior
+
+
+def test_public_key_list_matches_the_handler_allowlist():
+    # The handler filters the cache payload through its OWN tuple; this test's
+    # _PUBLISH duplicates it, so pin them together or a new field silently never
+    # reaches the cache.
+    from services.sentiment_svc import handlers
+    assert set(_PUBLISH) == set(handlers._REGIME_PUBLIC_KEYS)
+
+
+def test_agreeing_reads_commit_a_direction_and_reword_the_label():
+    out = _commit_direction(_FakeBullSchwab(), trend_score=65.0)
+    assert out["direction"] == 1
+    assert out["label"] in ("Rallying", "Firming")
+    RegimeState(**{k: out[k] for k in _PUBLISH})
+
+
+def test_disagreeing_reads_leave_the_label_neutral():
+    # SPY structure is rising but the composite direction says down -> no word.
+    out = _commit_direction(_FakeBullSchwab(), trend_score=35.0)
+    assert out["direction"] == 0
+    assert out["label"] == compute.market_regime.REGIME_DISPLAY[out["committed_label"]]
+
+
+def test_absent_trend_score_is_neutral_not_a_guess():
+    out = _commit_direction(_FakeBullSchwab(), trend_score=None)
+    assert out["direction"] == 0
+    assert out["direction_strong"] is False
+
+
+def test_direction_needs_two_reads():
+    compute.reset_spy_5m_cache()
+    first = compute.compute_market_regime(
+        _FakeBullSchwab(), prior=None, trend_score=65.0, now=NOW)
+    assert first["direction"] == 0     # claimed only on the second agreeing read
+
+
+def test_unclear_shell_carries_a_neutral_direction():
+    good = _commit_direction(_FakeBullSchwab(), trend_score=65.0)
+    compute.reset_spy_5m_cache()
+    shell = compute.compute_market_regime(
+        _FakeDeadSchwab(), prior=good, trend_score=65.0, now=NOW + 900)
+    assert shell["direction"] == 0
+    assert shell["label"] == "Unclear"
+    RegimeState(**{k: shell[k] for k in _PUBLISH})
+
+
+def test_direction_carry_survives_the_unclear_shell():
+    # A transient miss must not reset the direction streak, same rule the
+    # smoothing carry already follows.
+    good = _commit_direction(_FakeBullSchwab(), trend_score=65.0)
+    compute.reset_spy_5m_cache()
+    shell = compute.compute_market_regime(
+        _FakeDeadSchwab(), prior=good, trend_score=65.0, now=NOW + 900)
+    assert shell["_dir"] == good["_dir"]

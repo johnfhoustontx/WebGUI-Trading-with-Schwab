@@ -28,10 +28,16 @@ class RegimeState(_Base):
     raw: dict                        # exactly the 5 regime keys -> float
     confidence: float
     unclear: bool = False
-    label: str = ""                  # display label (e.g. "Mean Reversion")
+    label: str = ""                  # display label (e.g. "Balanced", "Rallying")
     committed_label: str = ""        # hysteresis-committed label key
     transition: dict | None = None   # {"from","to","progress"} or None
     evidence: list = []              # list[str] for the UI "why" popup
+    # Direction is a DISPLAY axis, additive and defaulting to neutral: -1/0/+1,
+    # claimed only when the regime's own slope and the Market Trend composite
+    # agree. Renderers word it per regime (Rallying/Firming vs Retreating/
+    # Softening, Breakout vs Breakdown); the membership vector stays sign-blind.
+    direction: int = 0
+    direction_strong: bool = False   # steep enough for Rallying vs Firming
     version_info: dict = {}          # optional provenance (model version etc.)
 
     @field_validator("memberships", "raw")

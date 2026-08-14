@@ -933,10 +933,13 @@ def _regime_state(committed="trending", unclear=False, memberships=None):
         "committed_label": committed,
         "transition": None,
         "evidence": ["ADX 25 rising"],
+        "direction": 0,
+        "direction_strong": False,
         "version_info": {"model": "regime-v1"},
         "_fast": dict(m),
         "_slow": dict(m),
         "_commit": handlers.compute.market_regime.CommitState(committed=committed),
+        "_dir": handlers.compute.market_regime.DirectionState(),
         "_sample_ts": 1_753_000_000,
     }
 
@@ -956,6 +959,43 @@ def _force_regime_due(monkeypatch, due=True):
         return (True, "slot-%d" % box["n"])
 
     monkeypatch.setattr(handlers.scheduler, "regime_due", _due)
+
+
+def test_regime_recompute_feeds_it_the_committed_trend_score(monkeypatch):
+    """The regime's direction word is gated on the SAME number the Market Trend
+    gauge renders — that is what makes the two panels unable to contradict each
+    other, so the handler must actually hand it over."""
+    bus = Bus(fake=True)
+    _reset_regime()
+    _force_regime_due(monkeypatch)
+    monkeypatch.setattr(handlers, "_is_rth_now", lambda: True)
+    seen = {}
+    monkeypatch.setattr(handlers.compute, "compute_market_regime",
+                        lambda *a, **k: seen.update(k) or _regime_state())
+    handlers._TREND.update(trend={"score": 71.0, "smoothed_score": 68.0})
+    try:
+        handlers._maybe_recompute_regime(bus)
+    finally:
+        handlers._TREND.update(trend=None)
+    assert seen["trend_score"] == 68.0     # the SMOOTHED score, as the gauge shows
+
+
+def test_committed_trend_score_is_none_when_the_trend_is_missing_or_junk():
+    for trend in (None, {}, {"smoothed_score": None}, {"smoothed_score": "up"},
+                  {"smoothed_score": True}, "nonsense"):
+        handlers._TREND.update(trend=trend)
+        try:
+            assert handlers._committed_trend_score() is None
+        finally:
+            handlers._TREND.update(trend=None)
+
+
+def test_committed_trend_score_falls_back_to_the_raw_score():
+    handlers._TREND.update(trend={"score": 62.0})
+    try:
+        assert handlers._committed_trend_score() == 62.0
+    finally:
+        handlers._TREND.update(trend=None)
 
 
 def test_maybe_recompute_regime_publishes_and_records(monkeypatch):
@@ -1089,7 +1129,7 @@ def test_crisis_check_republishes_on_attack(monkeypatch):
     env = bus.cache_get("cache:sentiment:regime")
     assert env is not None
     assert env.payload["committed_label"] == "crisis"
-    assert env.payload["label"] == "Volatile"   # internal key "crisis" -> "Volatile"
+    assert env.payload["label"] == "Stressed"   # internal key "crisis" -> "Stressed"
     assert env.payload["memberships"]["crisis"] >= 0.7
     assert set(env.payload) == set(handlers._REGIME_PUBLIC_KEYS)
     held = handlers._REGIME["state"]

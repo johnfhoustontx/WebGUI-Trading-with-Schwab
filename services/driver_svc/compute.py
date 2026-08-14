@@ -325,14 +325,37 @@ def _as_of(briefing) -> str:
 
 
 _REGIME_TOP_N = 2      # how many memberships to surface (the mix, not all five)
-# Display labels for the membership keys, so the decider sees "Volatile" (not the
-# internal "crisis" key) consistent with the rest of the app.
-_REGIME_LABELS = {"mean_reversion": "Mean Reversion", "trending": "Trending",
-                  "breakout": "Breakout", "choppy": "Choppy", "crisis": "Volatile"}
+# Display labels for the membership keys, so the decider sees "Stressed" (not the
+# internal "crisis" key) consistent with the rest of the app. DUPLICATED from
+# ``sentiment-dashboard/scoring/market_regime.REGIME_DISPLAY`` on purpose — this
+# service must not import that package (the documented cross-app ``scoring``
+# module-name collision); keep the words in step with it.
+_REGIME_LABELS = {"mean_reversion": "Balanced", "trending": "Trending",
+                  "breakout": "Breakout", "choppy": "Whipsaw", "crisis": "Stressed"}
+# Direction rewords the two regimes that HAVE one; balanced/whipsaw/stressed are
+# directionless by construction.
+_REGIME_DIRECTIONAL = {
+    "trending": {(1, True): "Rallying", (1, False): "Firming",
+                 (-1, True): "Retreating", (-1, False): "Softening"},
+    "breakout": {(-1, True): "Breakdown", (-1, False): "Breakdown"},
+}
 
 
-def _regime_label(key) -> str:
-    return _REGIME_LABELS.get(str(key), str(key))
+def _regime_label(key, direction=0, strong=False) -> str:
+    key = str(key)
+    base = _REGIME_LABELS.get(key, key)
+    words = _REGIME_DIRECTIONAL.get(key)
+    if not words or direction not in (-1, 1):
+        return base
+    return words.get((direction, bool(strong)), base)
+
+
+def _regime_direction(payload) -> tuple:
+    """(direction, strong) off a regime payload — junk or absent reads neutral,
+    so an older payload without the field simply renders the base labels."""
+    d = payload.get("direction")
+    d = d if d in (-1, 0, 1) and not isinstance(d, bool) else 0
+    return d, bool(payload.get("direction_strong") is True)
 
 
 def _structural_regime(payload) -> dict:
@@ -349,6 +372,7 @@ def _structural_regime(payload) -> dict:
         label = p.get("label")
         if not label:
             return {}
+        direction = _regime_direction(p)
         out = {"label": str(label), "unclear": bool(p.get("unclear"))}
         conf = p.get("confidence")
         if isinstance(conf, (int, float)) and not isinstance(conf, bool):
@@ -359,15 +383,15 @@ def _structural_regime(payload) -> dict:
                      if isinstance(v, (int, float)) and not isinstance(v, bool)]
             pairs.sort(key=lambda kv: kv[1], reverse=True)
             if pairs:
-                out["top"] = [(_regime_label(k), round(v, 2))
+                out["top"] = [(_regime_label(k, *direction), round(v, 2))
                               for k, v in pairs[:_REGIME_TOP_N]]
         tr = p.get("transition")
         if isinstance(tr, dict) and tr.get("from") and tr.get("to"):
             prog = tr.get("progress")
             pct = f" {round(float(prog) * 100):.0f}%" if isinstance(
                 prog, (int, float)) and not isinstance(prog, bool) else ""
-            out["transition"] = (f"{_regime_label(tr['from'])} -> "
-                                 f"{_regime_label(tr['to'])}{pct}")
+            out["transition"] = (f"{_regime_label(tr['from'], *direction)} -> "
+                                 f"{_regime_label(tr['to'], *direction)}{pct}")
         return out
     except Exception:  # noqa: BLE001 — context is best-effort; never block a cycle.
         return {}

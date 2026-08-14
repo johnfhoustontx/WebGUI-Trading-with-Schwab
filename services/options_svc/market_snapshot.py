@@ -76,6 +76,24 @@ def gauge_svg(value, *, vmin, vmax, bands, value_label, caption):
 _REGIME_ORDER = ["mean_reversion", "trending", "breakout", "choppy", "crisis"]
 _REGIME_COLORS = {"mean_reversion": "#3fb6c7", "trending": "#3fb36b",
                   "breakout": "#e0c452", "choppy": "#8794b4", "crisis": "#e05252"}
+# Display words, mirroring sentiment-dashboard/scoring/market_regime (this
+# service cannot import that package — cross-app ``scoring`` collision).
+_REGIME_LABELS = {"mean_reversion": "Balanced", "trending": "Trending",
+                  "breakout": "Breakout", "choppy": "Whipsaw", "crisis": "Stressed"}
+_REGIME_DIRECTIONAL = {
+    "trending": {(1, True): "Rallying", (1, False): "Firming",
+                 (-1, True): "Retreating", (-1, False): "Softening"},
+    "breakout": {(-1, True): "Breakdown", (-1, False): "Breakdown"},
+}
+
+
+def _regime_label(key, direction=0, strong=False):
+    key = str(key)
+    base = _REGIME_LABELS.get(key, key)
+    words = _REGIME_DIRECTIONAL.get(key)
+    if not words or direction not in (-1, 1):
+        return base
+    return words.get((direction, bool(strong)), base)
 
 
 def _empty_svg(w, h, msg="no data"):
@@ -243,9 +261,12 @@ def regime_panel_html(regime, regime_points):
     if isinstance(tr, dict) and tr.get("to"):
         prog = tr.get("progress")
         prog_s = f" · {float(prog)*100:.0f}%" if isinstance(prog, (int, float)) else ""
+        d = r.get("direction")
+        d = d if d in (-1, 0, 1) and not isinstance(d, bool) else 0
+        strong = r.get("direction_strong") is True
         live += (f'<br><span class="ms-ev">'
-                 f'{_html.escape(str(tr.get("from", "")))} → '
-                 f'{_html.escape(str(tr.get("to", "")))}{prog_s}</span>')
+                 f'{_html.escape(_regime_label(tr.get("from", ""), d, strong))} → '
+                 f'{_html.escape(_regime_label(tr.get("to", ""), d, strong))}{prog_s}</span>')
     return _panel("Daily Market Regime", gauge, spark, _REGIME_EXPLAIN, live)
 
 

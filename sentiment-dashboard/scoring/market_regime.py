@@ -78,7 +78,7 @@ WHIPSAW_LO, WHIPSAW_HI = 3.0, 8.0
 CHOP_ATR_LO, CHOP_ATR_HI = 0.5, 0.9       # effort-without-direction: high ATR ...
 CHOP_ADX_LO, CHOP_ADX_HI = 15.0, 25.0     # ... x (1 - ramp(adx)) low ADX
 
-# Volatile / stress regime (internal key "crisis"; DISPLAYED as "Volatile").
+# Volatility-stress regime (internal key "crisis"; DISPLAYED as "Stressed").
 # max() over tells — any single tell is sufficient — so each tell must only fire
 # at a genuinely elevated level or the label overstates a normal day.
 # Absolute VIX is the PRIMARY tell (the most direct fear gauge): a VIX ~22 (just
@@ -116,6 +116,23 @@ COMMIT_MARGIN = 0.10         # dominant must beat runner-up by this to flip the 
 COMMIT_READS = 2             # ... for this many consecutive samples
 CRISIS_ATTACK = 0.7          # raw crisis at/above this bypasses smoothing entirely
 _FLOOR_EPS = 1e-9            # FP guard so a divergence exactly AT the floor reports
+
+# Direction (DISPLAY ONLY — the intensity math above stays sign-blind, because
+# "is this a trend day" is answered identically up or down). The sign is a
+# separate axis, the same shape the five-state classifier uses (direction x
+# aggression), and it is applied to the LABEL, never to the membership vector.
+#
+# The gate: the app has TWO direction reads — this module's own signed EMA slope
+# (SPY price structure, 5-min cadence) and the Market Trend composite score
+# (price+breadth+sector+VIX, 15-min, hysteresis-committed). They diverge on a
+# real market condition (index up on narrow leadership while breadth is
+# negative), so a word derived from either alone can contradict the other panel.
+# ``direction_sign`` names a direction only when BOTH agree past their deadbands;
+# otherwise the neutral base label renders, which is exactly today's behaviour.
+DIRECTION_SLOPE_DEADBAND = EMA_TREND_LO    # below the trending ramp's own floor
+DIRECTION_TREND_DEADBAND = 3.0             # points either side of the 50 neutral
+DIRECTION_STRONG_SLOPE = 0.5 * (EMA_TREND_LO + EMA_TREND_HI)   # Rallying vs Firming
+DIRECTION_COMMIT_READS = 2                 # consecutive reads to CLAIM a direction
 
 
 @dataclass
@@ -489,6 +506,105 @@ def apply_crisis_attack(fast, raw_crisis):
     out = {r: fast[r] * scale for r in REGIMES}
     out["crisis"] = crisis
     return out
+
+
+# ---------------------------------------------------------------- direction layer
+
+
+# Base display names, keyed by the internal regime key. The KEYS are contract +
+# storage (``cache:sentiment:regime`` memberships, the ``regime_intraday``
+# columns), so they stay as they are; only these words are user-facing.
+REGIME_DISPLAY = {
+    "mean_reversion": "Balanced",   # the evidence is low ADX / flat EMA / mid-band
+                                    # width / balanced profile / positive dealer
+                                    # gamma — price AT the mean, not stretched from
+                                    # it. Nothing here measures an extreme, so the
+                                    # old "Mean Reversion" promised a fade the model
+                                    # never tested.
+    "trending": "Trending",
+    "breakout": "Breakout",
+    "choppy": "Whipsaw",            # vs Balanced: same "not trending" axis, but
+                                    # high effort with no result, not quiet balance.
+    "crisis": "Stressed",           # VIX_STRESS_LO is 22 and the attack fires near
+                                    # 30 — stress, not a crisis; and "Volatile"
+                                    # describes breakout/whipsaw days too.
+}
+
+# Only these regimes carry a direction. A balanced auction has none by
+# definition, whipsaw is directionless by construction, and a stress read is
+# about fear rather than sign.
+_DIRECTIONAL = {
+    "trending": {(1, True): "Rallying", (1, False): "Firming",
+                 (-1, True): "Retreating", (-1, False): "Softening"},
+    "breakout": {(-1, True): "Breakdown", (-1, False): "Breakdown"},
+}
+
+
+@dataclass
+class DirectionState:
+    committed: int = 0        # the displayed direction: -1 / 0 / +1
+    streak: int = 0           # consecutive reads by the SAME challenger
+    challenger: int = 0       # the direction the streak is being built for
+
+
+def direction_sign(slope_atr, trend_score):
+    """-1 / 0 / +1 — the direction word's sign, or 0 for "don't claim one".
+
+    Returns non-zero only when the regime's OWN signed EMA slope and the Market
+    Trend composite ``trend_score`` (0..100, 50 neutral) agree AND both clear
+    their deadbands. Disagreement is a real read, not an error — it means the
+    tape is trending while the composite can't say which way — so it renders the
+    neutral label rather than picking a winner and contradicting the gauge.
+    """
+    slope = _num(slope_atr)
+    score = _num(trend_score)
+    if slope is None or score is None:
+        return 0
+    if slope >= DIRECTION_SLOPE_DEADBAND and score >= 50.0 + DIRECTION_TREND_DEADBAND:
+        return 1
+    if slope <= -DIRECTION_SLOPE_DEADBAND and score <= 50.0 - DIRECTION_TREND_DEADBAND:
+        return -1
+    return 0
+
+
+def direction_strong(slope_atr):
+    """True when the slope is steep enough for Rallying/Retreating rather than
+    Firming/Softening. Read off |slope|, NOT the trending intensity: a slow grind
+    with textbook ADX/VWAP structure scores high trending and is precisely what
+    "Firming" should mean."""
+    slope = _num(slope_atr)
+    return slope is not None and abs(slope) >= DIRECTION_STRONG_SLOPE
+
+
+def commit_direction(sign, state):
+    """Hysteresis over the direction sign, so the word can't flicker at a
+    boundary. Deliberately ASYMMETRIC: claiming a direction needs
+    DIRECTION_COMMIT_READS consecutive reads, while dropping BACK to neutral
+    takes one — never keep asserting a direction the evidence stopped backing.
+    A flip to the opposite sign restarts the streak. Returns a NEW state.
+    """
+    sign = sign if sign in (-1, 0, 1) else 0
+    if sign == 0:
+        return DirectionState(committed=0, streak=0, challenger=0)
+    if sign == state.committed:
+        return DirectionState(committed=sign, streak=0, challenger=0)
+    streak = state.streak + 1 if sign == state.challenger else 1
+    if streak >= DIRECTION_COMMIT_READS:
+        return DirectionState(committed=sign, streak=0, challenger=0)
+    return DirectionState(committed=state.committed, streak=streak, challenger=sign)
+
+
+def regime_label(key, direction=0, strong=False):
+    """Display name for a regime key, adorned with the direction where one
+    applies. An unknown/empty key reads "Unclear" — the model never fabricates a
+    regime it can't see."""
+    base = REGIME_DISPLAY.get(key)
+    if base is None:
+        return "Unclear"
+    words = _DIRECTIONAL.get(key)
+    if not words or direction not in (-1, 1):
+        return base
+    return words.get((direction, bool(strong)), base)
 
 
 def crisis_attacked(raw_crisis):

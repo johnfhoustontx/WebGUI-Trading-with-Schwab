@@ -128,3 +128,28 @@ def test_market_snapshot_doc_is_titled_market_snapshot_not_gamma():
     assert "<title>Market Snapshot</title>" in doc
     assert 'class="ga-title">Market Snapshot<' in doc
     assert "Gamma Analysis" not in doc
+
+
+def test_regime_panel_transition_renders_display_labels_not_raw_keys():
+    """The pushed snapshot showed the internal keys ("mean_reversion -> trending")
+    where every other surface shows words."""
+    out = ms.regime_panel_html(
+        {"label": "Trending", "committed_label": "trending", "confidence": 0.6,
+         "transition": {"from": "mean_reversion", "to": "trending", "progress": 0.6}}, [])
+    assert "mean_reversion" not in out
+    assert "Balanced" in out
+
+
+def test_regime_panel_transition_carries_the_direction():
+    out = ms.regime_panel_html(
+        {"label": "Rallying", "committed_label": "trending", "confidence": 0.6,
+         "direction": 1, "direction_strong": True,
+         "transition": {"from": "mean_reversion", "to": "trending", "progress": 0.6}}, [])
+    assert "Balanced" in out and "Rallying" in out
+
+
+def test_regime_panel_unknown_transition_key_still_renders():
+    out = ms.regime_panel_html(
+        {"label": "Trending", "confidence": 0.6,
+         "transition": {"from": "nonsense", "to": "trending", "progress": 0.6}}, [])
+    assert "nonsense" in out and "Trending" in out

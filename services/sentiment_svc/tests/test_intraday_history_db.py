@@ -82,18 +82,18 @@ _VEC = {"mean_reversion": 0.5, "trending": 0.3, "breakout": 0.05,
 def test_insert_and_load_regime_roundtrip():
     c = db.connect(":memory:")
     today = dt.date.today()
-    db.insert_regime_point(c, _ts(today, 10, 0), _VEC, 0.6, "Mean Reversion")
+    db.insert_regime_point(c, _ts(today, 10, 0), _VEC, 0.6, "Balanced")
     rows = db.load_regime_recent(c, n_days=1)
     assert len(rows) == 1
     ts, mem, conf, label = rows[0]
     assert mem["mean_reversion"] == 0.5 and mem["trending"] == 0.3
-    assert conf == 0.6 and label == "Mean Reversion"
+    assert conf == 0.6 and label == "Balanced"
 
 
 def test_regime_point_is_idempotent_upsert():
     c = db.connect(":memory:")
     ts = _ts(dt.date.today())
-    db.insert_regime_point(c, ts, _VEC, 0.6, "Mean Reversion")
+    db.insert_regime_point(c, ts, _VEC, 0.6, "Balanced")
     db.insert_regime_point(c, ts, dict(_VEC, trending=0.9), 0.9, "Trending")
     rows = db.load_regime_recent(c, n_days=1)
     assert len(rows) == 1 and rows[0][1]["trending"] == 0.9 and rows[0][3] == "Trending"

@@ -329,7 +329,7 @@ def test_regime_headline_unclear_and_missing():
 
 
 def test_regime_transition_text():
-    assert S.regime_transition_text(_regime()) == "Mean Reversion → Trending · 60%"
+    assert S.regime_transition_text(_regime()) == "Balanced → Trending · 60%"
     # Stable (no transition) / missing -> empty string, so the row hides.
     assert S.regime_transition_text(_regime(transition=None)) == ""
     assert S.regime_transition_text({}) == ""
@@ -343,7 +343,7 @@ def test_regime_mix_figure_is_a_stacked_area_plain_chart():
     # one series per regime, in a stable order, each with the right point count
     assert len(fig["series"]) == 5
     assert [s["name"] for s in fig["series"]] == [
-        "Mean Reversion", "Trending", "Breakout", "Choppy", "Volatile"]
+        "Balanced", "Trending", "Breakout", "Whipsaw", "Stressed"]
     assert all(len(s["data"]) == 3 for s in fig["series"])
     # a stockChart would freeze in-place updates (see _intraday_figure) -> plain chart
     assert "stockChart" not in str(fig)
@@ -371,3 +371,51 @@ def test_regime_mix_figure_breaks_line_between_days():
 def test_regime_evidence_rows():
     assert S.regime_evidence_rows(_regime()) == ["ADX 32 rising", "VWAP held 95%"]
     assert S.regime_evidence_rows({}) == []
+
+
+def test_regime_transition_text_carries_the_direction():
+    r = _regime(direction=1, direction_strong=True)
+    assert S.regime_transition_text(r) == "Balanced → Rallying · 60%"
+    r = _regime(direction=-1, direction_strong=False)
+    assert S.regime_transition_text(r) == "Balanced → Softening · 60%"
+
+
+def test_regime_mix_series_names_never_take_the_direction():
+    """The stacked band's fixed order + names ARE the reading position — a legend
+    that renames itself intra-session defeats that. Direction belongs on the
+    headline, not the chart."""
+    pts = _regime_points()
+    fig = S.build_regime_mix_figure(pts)
+    assert [s["name"] for s in fig["series"]] == [
+        "Balanced", "Trending", "Breakout", "Whipsaw", "Stressed"]
+
+
+def test_regime_headline_color_follows_the_direction():
+    """Trending's band colour is fixed, but the HEADLINE must not paint a
+    down-trend green: green up, red down, neutral grey when no direction is
+    claimed."""
+    removable = set(S.REGIME_TEXT_CLASSES.split())
+    up = S.regime_headline_parts(
+        _regime(committed_label="trending", direction=1, direction_strong=True))
+    down = S.regime_headline_parts(
+        _regime(committed_label="trending", direction=-1, direction_strong=True))
+    flat = S.regime_headline_parts(_regime(committed_label="trending", direction=0))
+    assert up[0] == "Rallying" and down[0] == "Retreating" and flat[0] == "Trending"
+    assert up[2] != down[2]
+    assert {up[2], down[2], flat[2]} <= removable
+
+
+def test_regime_headline_direction_junk_is_neutral():
+    for bad in ("up", 2, None, True):
+        label, _c, cls = S.regime_headline_parts(
+            _regime(committed_label="trending", direction=bad))
+        assert label == "Trending"
+        assert cls in set(S.REGIME_TEXT_CLASSES.split())
+
+
+def test_regime_headline_prefers_a_locally_derived_label():
+    """The payload's own `label` is the service's word; the page re-derives it
+    from (committed_label, direction) so a stale/absent label can't outlive a
+    rename, and falls back to the payload when the key is unknown."""
+    r = _regime(committed_label="choppy", label="Choppy")
+    assert S.regime_headline_parts(r)[0] == "Whipsaw"
