@@ -255,6 +255,83 @@ def test_sentiment_30d_avg_still_averages_everything():
     assert S.sentiment_30d_avg(_snaps(2.0, 4.0)) == 3.0
 
 
+# ── Day/Week/Month arc builders (the two concentric rings) ───────────────────
+def test_sentiment_arcs_scales_composite_to_0_100():
+    live = {"composite": {"total_score": 7.2}}
+    arcs = S.sentiment_arcs(live, _snaps(5.0, 5.0))
+    assert [a["caption"] for a in arcs] == ["DAY", "WEEK", "MONTH"]
+    assert arcs[0]["value"] == 72.0
+    assert arcs[1]["value"] == 50.0
+
+
+def test_sentiment_arcs_falls_back_to_the_last_snap_when_live_is_absent():
+    arcs = S.sentiment_arcs(None, _snaps(4.0, 6.0))
+    assert arcs[0]["value"] == 60.0
+
+
+def test_sentiment_arcs_week_and_month_are_none_with_no_history():
+    arcs = S.sentiment_arcs({"composite": {"total_score": 7.0}}, [])
+    assert arcs[1]["value"] is None and arcs[2]["value"] is None
+
+
+def test_sentiment_arcs_day_is_none_with_neither_live_nor_history():
+    """Cold start: no payload at all is no reading, not a real 0 (which the
+    ring would draw as a genuine maximally-bearish arc)."""
+    arcs = S.sentiment_arcs(None, [])
+    assert [a["value"] for a in arcs] == [None, None, None]
+
+
+def test_sentiment_arcs_week_uses_the_five_session_window():
+    """Mutation guard: WEEK must not silently become MONTH."""
+    snaps = _snaps(*([1.0] * 15 + [9.0] * 5))
+    arcs = S.sentiment_arcs(None, snaps)
+    assert arcs[1]["value"] == 90.0    # last 5
+    assert arcs[2]["value"] == 30.0    # all 20
+
+
+def test_sentiment_arcs_values_stay_inside_0_100():
+    arcs = S.sentiment_arcs({"composite": {"total_score": 99.0}},
+                            [{"composite": {"total_score": "inf"}}])
+    assert arcs[0]["value"] == 100.0 and arcs[1]["value"] == 100.0
+
+
+def test_trend_arcs_reads_all_three_horizons():
+    derived = {"trend": {"smoothed_score": 71.0},
+               "trend_7d": {"score": 61.0},
+               "trend_30d_ago": {"score": 52.0}}
+    arcs = S.trend_arcs(derived)
+    assert [a["caption"] for a in arcs] == ["DAY", "WEEK", "MONTH"]
+    assert [a["value"] for a in arcs] == [71.0, 61.0, 52.0]
+
+
+def test_trend_arcs_week_is_none_before_the_service_publishes_it():
+    """trend_7d is absent until sentiment_svc is restarted -> track-only."""
+    arcs = S.trend_arcs({"trend": {"smoothed_score": 71.0}})
+    assert arcs[1]["value"] is None
+
+
+def test_trend_arcs_handles_an_empty_derived_block():
+    arcs = S.trend_arcs({})
+    assert all(a["value"] is None for a in arcs)
+    assert len(arcs) == 3
+    assert S.trend_arcs(None) == arcs
+
+
+def test_trend_arcs_scoreless_horizon_is_none_not_a_fabricated_50():
+    """A published-but-scoreless horizon is exactly where trend_gauge_value
+    falls back to its neutral 50.0 — the ring must say "no data" instead."""
+    assert S.trend_gauge_value({"state": "neutral"}) == 50.0   # the fallback
+    arcs = S.trend_arcs({"trend": {"state": "neutral"}, "trend_7d": {}})
+    assert arcs[0]["value"] is None
+    assert arcs[1]["value"] is None
+
+
+def test_trend_arcs_keeps_a_real_zero_and_clamps():
+    arcs = S.trend_arcs({"trend": {"score": 0.0}, "trend_7d": {"score": 150}})
+    assert arcs[0]["value"] == 0.0        # a real 0 is a reading, not "no data"
+    assert arcs[1]["value"] == 100.0      # clamped
+
+
 # ── Colorized intraday figures (Task 4) ──────────────────────────────────────
 _PTS = [{"ts": 1000, "sentiment": 3.0, "trend": 20.0},
         {"ts": 1120, "sentiment": 6.0, "trend": 55.0},

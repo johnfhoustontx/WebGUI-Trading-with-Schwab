@@ -247,6 +247,48 @@ def sentiment_30d_avg(snaps):
     return sentiment_avg(snaps)
 
 
+def sentiment_arcs(live, snaps):
+    """Day/Week/Month arcs for the Market Sentiment ring (composite 0-10 -> 0-100).
+
+    The Day reading picks live-over-backfill exactly as ``_apply`` does, so the
+    ring's outer arc always agrees with the headline. A horizon with no scored
+    session reads None — the ring then draws that arc's track only, rather than
+    a 0 it would paint as a genuine maximally-bearish value."""
+    latest = live or (snaps[-1] if snaps else None)
+    day = None if latest is None else gauge_score(
+        _safe_float((latest.get("composite") or {}).get("total_score")))
+    week = sentiment_avg_or_none(snaps, WEEK_SNAPS)
+    month = sentiment_avg_or_none(snaps)
+    return [
+        {"value": day, "caption": "DAY"},
+        {"value": None if week is None else gauge_score(week), "caption": "WEEK"},
+        {"value": None if month is None else gauge_score(month), "caption": "MONTH"},
+    ]
+
+
+def _trend_arc_value(trend):
+    """A trend horizon's 0-100 arc value, or None when it carries no score.
+
+    The invariant: this returns None in precisely the cases where
+    ``trend_gauge_value`` would fall back to its neutral 50.0 — an absent
+    horizon, an empty payload, or one published without a score. A gauge needs
+    a needle position and so must invent one; a ring can honestly say nothing."""
+    t = trend or {}
+    raw = t.get("smoothed_score", t.get("score"))
+    return None if raw is None else trend_gauge_value(t)
+
+
+def trend_arcs(derived):
+    """Day/Week/Month arcs for the Market Trend ring (already 0-100).
+
+    A horizon the service has not published yet (``trend_7d`` before an
+    options/sentiment service restart) reads None -> track-only."""
+    d = derived or {}
+    return [{"value": _trend_arc_value(d.get("trend")), "caption": "DAY"},
+            {"value": _trend_arc_value(d.get("trend_7d")), "caption": "WEEK"},
+            {"value": _trend_arc_value(d.get("trend_30d_ago")), "caption": "MONTH"}]
+
+
 # Break the intraday line where consecutive RTH points are more than this far
 # apart (ms) — i.e. across the overnight gap from the prior day's ~15:00 CT close
 # to the next day's ~08:30 CT open. 4h is safely above any intra-session recording
