@@ -14,7 +14,7 @@ defense-in-depth; this fixture additionally makes each test's DB fresh).
 """
 import pytest
 
-from services.sentiment_svc import handlers, intraday_history_db
+from services.sentiment_svc import compute, handlers, intraday_history_db
 
 
 @pytest.fixture(autouse=True)
@@ -23,3 +23,29 @@ def _isolate_intraday_db():
     handlers._intraday_conn = intraday_history_db.connect(":memory:")
     yield
     handlers._intraday_conn = old
+
+
+@pytest.fixture(autouse=True)
+def _reset_compute_ttl_caches():
+    """Empty compute's module-global TTL caches around every test.
+
+    Same class of leak as the intraday DB above, one layer up: any test that
+    stubs ``_fetch_closes`` (or ``_safe_daily``) leaves its FIXTURE values in
+    these globals, and a later test whose self-fetching call is NOT monkeypatched
+    silently consumes them — a probe ``compute_30d_trend()`` appended after the
+    delegate test scored its sector sub-score 73.33 off stale stub data with ZERO
+    fan-outs. The suite only stayed green because ``pytest-randomly`` isn't
+    installed and the ordering happened to be kind.
+
+    ``_SECTOR_PCTS_CACHE`` is the one that widened the blast radius (before it
+    existed, ``_fetch_sector_month_pcts`` refetched every call, so only a fully
+    populated ``_TREND_30D_CACHE`` could go stale). Clearing BEFORE as well as
+    after means a test can't inherit a leak from whatever ran ahead of it."""
+    def _clear():
+        compute.reset_sector_pcts_cache()
+        compute.reset_trend_7d_cache()
+        compute.reset_trend_30d_cache()
+
+    _clear()
+    yield
+    _clear()

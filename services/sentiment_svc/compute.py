@@ -343,8 +343,9 @@ PC_DELTA_SCALE = 0.3     # first-pass tunable: P/C change to saturate flow
 SESSION_BLEND = 0.20     # session structure's share of the price sub-score
 PROFILE_DAMP = 0.5       # max aggression damping from a fully-balanced profile
 
-# Sentinel so an OMITTED ``compute_30d_trend`` arg fetches internally, while an
-# explicit ``None`` (caller has no data) stays neutral rather than re-fetching.
+# Sentinel so an OMITTED structural-trend arg (``compute_7d_trend`` /
+# ``compute_30d_trend``) fetches internally, while an explicit ``None`` (caller
+# has no data) stays neutral rather than re-fetching.
 _FETCH = object()
 
 
@@ -1208,7 +1209,15 @@ def _finite_pcts(pcts):
     close (``float('nan')`` survives ``_fetch_closes``' conversion, and
     ``_pct_change_n`` propagates it) would render as MAXIMUM cyclical leadership
     at unchanged confidence. Dropping it lowers ``n_total``, and with it the
-    sub-score's confidence, which is what a missing sector should do."""
+    sub-score's confidence, which is what a missing sector should do.
+
+    This cannot change any FINITE-input result, which is why the pre-existing
+    ``compute_30d_trend`` tests stayed green unmodified. Two incidental
+    widenings, both unreachable from ``_fetch_closes`` (which emits floats or
+    ``None``) and named here because the claim is behaviour preservation: a
+    numeric STRING now coerces where the original raised, and a junk value now
+    degrades only the SECTOR sub-score where the original raised out to the
+    caller's neutral fallback and lost the price sub-score too."""
     out = {}
     for etf, p in (pcts or {}).items():
         try:

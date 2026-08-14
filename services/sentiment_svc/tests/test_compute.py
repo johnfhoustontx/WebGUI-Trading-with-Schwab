@@ -783,19 +783,38 @@ def test_fetch_sector_pcts_empty_result_not_cached(monkeypatch):
 
 
 def test_fetch_sector_pcts_returns_copies(monkeypatch):
-    """Callers get their own dicts — mutating a result can't corrupt the cache."""
+    """Callers get their own dicts — mutating a result can't corrupt the cache.
+
+    Both paths are covered deliberately: the MISS path builds the dicts, but the
+    HIT path is what a caller gets 59 minutes out of 60, and a mutation there
+    would poison every remaining read in the TTL window."""
     calls = []
     _stub_sector_fetch(monkeypatch, calls)
     compute.reset_sector_pcts_cache()
 
-    first = compute._fetch_sector_pcts()
+    first = compute._fetch_sector_pcts()          # miss path
     first["week"]["XLK"] = 999.0
     first["month"].clear()
 
-    second = compute._fetch_sector_pcts()
+    second = compute._fetch_sector_pcts()         # hit path
     assert second["week"]["XLK"] == 1.0
     assert second["month"] == {"XLK": 10.0, "XLP": 11.0}
-    assert len(calls) == 1
+    second["week"]["XLK"] = -999.0
+    second["month"].clear()
+
+    third = compute._fetch_sector_pcts()
+    assert third["week"]["XLK"] == 1.0
+    assert third["month"] == {"XLK": 10.0, "XLP": 11.0}
+    assert len(calls) == 1                        # all three served by one fetch
+
+
+def test_sector_and_trend_ttls_are_pinned():
+    """The cadences are the spec, not an accident: the sector fan-out is hourly
+    (daily bars change ~daily) and the week gauge recomputes twice as often as
+    the month because a weekly horizon moves faster."""
+    assert compute.SECTOR_PCTS_TTL_SEC == 3600
+    assert compute.TREND_7D_TTL_SEC == 1800
+    assert compute.TREND_30D_TTL_SEC == 3600
 
 
 def test_derive_composite_extras_passes_through_trend():
