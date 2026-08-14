@@ -1145,7 +1145,25 @@ git commit -m "feat(sentiment_svc): compute_7d_trend for the Week arc"
 Only if Task 0 recorded `FILTERS SURVIVE`. The layered halo already ships a
 working glow, so this is polish and may be skipped entirely.
 
-**Task 0 result:** _(record here)_
+**Task 0 result:** `FILTERS UNKNOWN — answerable only in a live browser.`
+
+NiceGUI 3.13.0's `elements/html.js` does **not** use DOMPurify. It calls the
+native **`Element.setHTML()`** (the browser HTML Sanitizer API) when
+`sanitize=True`, else plain `innerHTML`. So the allow-list is the browser's, not
+a library's, and it cannot be determined by reading NiceGUI source. That is also
+why `<style>` is stripped.
+
+Two consequences:
+- This stays non-blocking. The Task 2 layered halo uses only `<svg>`/`<path>`/
+  `<text>`, which certainly survive — `pages/options/svg.py` already ships SVG
+  through `ui.html` in production today.
+- **Escape hatch if filters are ever wanted:** `ui.html(content, sanitize=False)`
+  exists in this version. Our SVG is entirely self-generated with escaped
+  captions, so disabling sanitization would be defensible — but do not reach for
+  it without a reason, since it disables sanitization for that element wholesale.
+
+Check the filter question opportunistically during the Task 10 browser session;
+skip Task 8 entirely otherwise.
 
 If filters survive, add a `<defs><filter id="ring-glow-{uid}">` with
 `<feGaussianBlur stdDeviation="4"/>` + `<feMerge>` and apply it to the value arcs
