@@ -126,11 +126,40 @@ def _id_token(uid):
     return "".join(c for c in str(uid or "") if c.isalnum() or c in "_-")
 
 
+# Vertical centring offset, as a fraction of the node's own font-size.
+#
+# NOT ``dominant-baseline="middle"``, which is the obvious spelling and which
+# this used to emit: NiceGUI replaces ``Element.prototype.setHTML`` with
+# ``DOMPurify.sanitize()`` (templates/index.html), and DOMPurify's SVG allowlist
+# has ``alignment-baseline`` and ``baseline-shift`` but NOT
+# ``dominant-baseline`` — it was silently stripped on the client, dropping every
+# label to the default alphabetic baseline. The server-side string stayed
+# correct, so no test could see it (``test_ring_svg_emits_nothing_dompurify_
+# would_strip`` now guards the whole attribute surface). ``dy`` IS allowlisted,
+# and a ``dy`` shift is the pre-``dominant-baseline`` idiom anyway — universally
+# supported, and dependent on no allowlist detail that can change under us.
+#
+# ONE constant covers all FIVE text sizes on the dial (tick 11 / centre value 52
+# / centre caption 12 / legend value 22 / legend caption 10) because ``em``
+# resolves against each node's OWN font-size, so the shift scales with the
+# glyph — a fixed pixel offset would not. 0.35 is half the cap height of the app
+# font (IBM Plex Sans, capHeight 698/1000 -> 0.349em), so the emitted shift
+# tracks half-cap at every size to within 0.05px, worst case at 52. That is the
+# right centring for this dial's content: lining digits and all-caps captions.
+# It is deliberately NOT a reproduction of ``middle``, which centres on the
+# *x*-height (516/1000 -> 0.258em here) and so hung digits slightly low.
+#
+# The one glyph it does not centre exactly is the "no data" em-dash, which sits
+# on the math axis (~0.28em) rather than mid-cap — about 1px low at 22px, 4px at
+# 52px. Left alone: special-casing the placeholder is not worth a branch.
+_BASELINE_DY = "0.35em"
+
+
 def _text(x, y, body, size, fill, weight=None, spacing=None):
     extra = (f' font-weight="{weight}"' if weight else "") + \
             (f' letter-spacing="{spacing}"' if spacing else "")
     return (f'<text x="{x:.1f}" y="{y:.1f}" text-anchor="middle" '
-            f'dominant-baseline="middle" font-size="{size}"{extra} '
+            f'dy="{_BASELINE_DY}" font-size="{size}"{extra} '
             f'fill="{fill}">{body}</text>')
 
 

@@ -82,10 +82,79 @@ def test_ring_svg_size_sets_only_width_and_height():
 
 
 def test_ring_svg_emits_no_style_or_filter_elements():
-    """ui.html sanitizes via the browser's setHTML; the halo is layered strokes."""
+    """ui.html sanitizes via setHTML; the halo is layered strokes."""
     out = rings.ring_svg(_arcs(), uid="sent")
     assert "<style" not in out
     assert "<filter" not in out
+
+
+def _dompurify_allowlist():
+    """The tag/attribute names DOMPurify will keep, read out of the copy NiceGUI
+    actually ships.
+
+    NiceGUI's templates/index.html REPLACES ``Element.prototype.setHTML`` with
+    ``DOMPurify.sanitize(html)``, so ``ui.html``'s default sanitizing path is
+    DOMPurify's default allowlist — not the browser's native sanitizer, which is
+    a laxer thing entirely.
+
+    The bundle is minified, so the allowlists are recovered as the long
+    contiguous runs of quoted lowercase tokens (the frozen arrays). Matching on
+    run length rather than plain substring keeps an unrelated identifier
+    elsewhere in the file from reading as an allowed name; a run that is really
+    a different array only ever makes this check more permissive, never less.
+    Measured at DOMPurify 3.4.0: 8 runs, ~535 names."""
+    import pathlib
+    import re
+
+    from nicegui import ui
+    src = (pathlib.Path(ui.__file__).parent / "static" / "dompurify.mjs") \
+        .read_text(encoding="utf-8", errors="replace")
+    names = set()
+    for run in re.findall(r'(?:"[a-z][a-z0-9-]*",){19,}"[a-z][a-z0-9-]*"', src):
+        names |= set(re.findall(r'"([a-z][a-z0-9-]*)"', run))
+    assert len(names) > 300, "allowlist extraction found too little — bundle changed?"
+    return names
+
+
+def test_ring_svg_emits_nothing_dompurify_would_strip():
+    """Every tag and attribute the dial emits must survive the sanitizer.
+
+    This is the invariant, and it is only checkable here: a stripped attribute
+    changes NOTHING server-side, so the emitted string stays correct and the
+    page still renders — just wrong. It cost us one real defect already.
+    ``rings._text`` used ``dominant-baseline="middle"`` to centre every label
+    vertically; DOMPurify allowlists ``alignment-baseline`` and
+    ``baseline-shift`` but not ``dominant-baseline``, so on the client every
+    label silently dropped to the alphabetic baseline. Hence ``_BASELINE_DY``.
+
+    Guards the whole surface rather than that one attribute, so the next
+    hand-tuned SVG attribute Task 10 reaches for is checked too. DOMPurify
+    lowercases names before lookup (which is why camelCase ``viewBox`` is
+    allowed as ``viewbox``), so the comparison lowercases as well."""
+    import re
+
+    allow = _dompurify_allowlist()
+    out = rings.ring_svg(_arcs(), uid="sent")
+    tags = set(re.findall(r"<([a-zA-Z][\w-]*)", out))
+    attrs = set(re.findall(r'([a-zA-Z][\w-]*)="', out))
+    assert {"svg", "path", "text"} <= tags          # non-vacuous: we really parsed it
+    assert {"dy", "d", "font-size"} <= attrs
+    stripped = sorted(n for n in tags | attrs if n.lower() not in allow)
+    assert not stripped, f"DOMPurify would strip: {stripped}"
+
+
+def test_ring_labels_are_centred_by_a_dy_shift_not_dominant_baseline():
+    """Pins the FIX, not just the absence of the bug: every label carries the
+    ``dy`` offset, and one em-relative constant serves all five text sizes
+    because ``em`` resolves against each node's own font-size. A fixed pixel
+    offset would centre exactly one of them, so the unit is load-bearing."""
+    out = rings.ring_svg(_arcs(), uid="sent")
+    assert "dominant-baseline" not in out
+    assert out.count(f'dy="{rings._BASELINE_DY}"') == out.count("<text ")
+    assert rings._BASELINE_DY.endswith("em")        # not a fixed pixel count
+    # Five distinct sizes really are in play — the reason the unit matters.
+    assert len({rings.TICK_SIZE, rings.CENTER_VALUE_SIZE, rings.CENTER_CAPTION_SIZE,
+                rings.LEGEND_VALUE_SIZE, rings.LEGEND_CAPTION_SIZE}) == 5
 
 
 def test_ring_svg_draws_a_track_halo_and_value_arc_per_arc():

@@ -1,4 +1,4 @@
-"""Sentiment page — composite gauge + components + 30d history + trend regime.
+"""Sentiment page — Day/Week/Month rings + components + intraday + trend regime.
 
 Tier-3 reader: this page holds **no engine calls, no refresh loop, and no app
 ``scoring``/``live_composite`` imports**. All scoring-derived values (component
@@ -26,7 +26,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import bus_client
-from pages.gauge import gauge_figure  # noqa: F401  (re-export; used by render)
+from pages.rings import ring_svg
 from pages.options.theme import BTN_3D, THEME, TILE_3D
 from pages.ui_guard import guard
 
@@ -115,14 +115,18 @@ def _clamp(v, lo, hi):
     return max(lo, min(hi, v))
 
 
-# Short dial captions (the full label shows beneath the gauge). Covers BOTH the
-# new five-state (direction x aggression) vocab published for the Today gauge AND
-# the old trend-band vocab the 30-day structural gauge still uses.
+# Short state words, one per trend horizon. These used to caption the two trend
+# gauge faces; the rings carry only numbers, so the words now live on the Trend
+# Detail popup's per-horizon line (``_apply``). That line is the ONLY place the
+# Week/Month state word survives — the regime badge below the ring names the Day
+# horizon alone. Covers BOTH the five-state (direction x aggression) vocab the
+# intraday horizons publish AND the old trend-band vocab the 30-day structural
+# read still uses.
 _TREND_SHORT = {
-    # new five-state vocab (Today gauge)
+    # new five-state vocab (intraday horizons)
     "bullish": "Bull", "lack_of_bullishness": "Weak Bull", "neutral": "Neutral",
     "lack_of_bearishness": "Resilient", "bearish": "Bear",
-    # old trend-band vocab (30-day structural gauge)
+    # old trend-band vocab (30-day structural read)
     "bull_trend": "BULL", "pullback_in_bull": "PULLBACK",
     "range": "RANGE", "bear_rally": "BEAR RALLY", "bear_trend": "BEAR"}
 
@@ -248,11 +252,6 @@ def sentiment_avg(snaps, n=None):
     """``sentiment_avg_or_none`` with a 0.0 floor (the legacy gauge contract)."""
     v = sentiment_avg_or_none(snaps, n)
     return 0.0 if v is None else v
-
-
-def sentiment_30d_avg(snaps):
-    """Mean composite over the whole backfill history (0.0 if none). Pure."""
-    return sentiment_avg(snaps)
 
 
 def sentiment_arcs(live, snaps):
@@ -908,18 +907,17 @@ def render():
                  ("yesterday", "YESTERDAY"), ("change", "CHANGE")]
     # Three evenly-distributed, top-aligned columns with matching h6 headers.
     with ui.row().classes("w-full items-start justify-around gap-6 flex-wrap"):
-        # ① Market Sentiment — composite speedometer + press-and-hold Components popup
-        with ui.column().classes("items-center min-w-[210px]"):
+        # ① Market Sentiment — Day/Week/Month ring + press-and-hold Components popup
+        with ui.column().classes("items-center min-w-[300px]"):
             ui.label("Market Sentiment").classes("text-h6")
-            with ui.row().classes("items-end justify-center gap-4 no-wrap"):
-                with ui.column().classes("items-center"):
-                    ui.label("Today").classes("opacity-60 text-xs")
-                    gauge_box = ui.highchart(gauge_figure(50.0, "—")) \
-                        .classes("q-mt-xs w-[170px] h-[120px]")
-                with ui.column().classes("items-center"):
-                    ui.label("30-Day Avg").classes("opacity-60 text-xs")
-                    gauge_avg_box = ui.highchart(gauge_figure(50.0, "—")) \
-                        .classes("q-mt-xs w-[170px] h-[120px]")
+            # Built once with the empty-arc dial (all three tracks, em-dashes) and
+            # updated in place via ``.content`` — never rebuilt. The captions live
+            # inside the SVG, so there are no sibling caption labels any more.
+            # Sanitizing (the ui.html default) is fine: ring_svg emits only
+            # DOMPurify-allowlisted tags/attributes, which test_rings pins.
+            sent_ring = ui.html(
+                ring_svg(sentiment_arcs(None, []), uid="sent")
+            ).classes("w-[280px] h-[280px]")
             bias_lbl = ui.label("").classes("text-h6")
             sub_lbl = ui.label("").classes("opacity-80 text-sm")
             with ui.button("Components", icon="table_view").props("flat dense") as comp_btn:
@@ -929,18 +927,14 @@ def render():
             comp_btn.on("mousedown", lambda: comp_menu.open())
             comp_btn.on("mouseup", lambda: comp_menu.close())
             comp_btn.on("mouseleave", lambda: comp_menu.close())
-        # ② Market Trend — speedometer (hybrid needle) + label/desc + detail popup
-        with ui.column().classes("items-center min-w-[210px]"):
+        # ② Market Trend — Day/Week/Month ring + label/desc + detail popup
+        with ui.column().classes("items-center min-w-[300px]"):
             ui.label("Market Trend").classes("text-h6")
-            with ui.row().classes("items-end justify-center gap-4 no-wrap"):
-                with ui.column().classes("items-center"):
-                    ui.label("Today").classes("opacity-60 text-xs")
-                    trend_gauge_box = ui.highchart(gauge_figure(50.0, "—")) \
-                        .classes("q-mt-xs w-[170px] h-[120px]")
-                with ui.column().classes("items-center"):
-                    ui.label("30-Day").classes("opacity-60 text-xs")
-                    trend_gauge_30_box = ui.highchart(gauge_figure(50.0, "—")) \
-                        .classes("q-mt-xs w-[170px] h-[120px]")
+            # ``uid`` MUST differ from the Sentiment ring's: both SVGs live on this
+            # page and a shared id makes their DOM roots collide.
+            trend_ring = ui.html(
+                ring_svg(trend_arcs({}), uid="trend")
+            ).classes("w-[280px] h-[280px]")
             regime_badge = ui.label("").classes("text-subtitle1 text-bold")
             regime_desc = ui.label("").classes("opacity-80 text-sm text-center")
             with ui.button("Trend Detail", icon="insights").props("flat dense") as trend_btn:
@@ -1057,11 +1051,9 @@ def render():
         latest = live or snaps[-1]
         comp = latest.get("composite") or {}
         total = _safe_float(comp.get("total_score"))
-        gauge_box.options = gauge_figure(gauge_score(total), comp.get("bias", ""))
-        gauge_box.update()
-        avg = sentiment_30d_avg(state["snaps"])
-        gauge_avg_box.options = gauge_figure(gauge_score(avg), f"{avg:.2f}")
-        gauge_avg_box.update()
+        # Rings repaint by reassigning ``.content`` (a NiceGUI BindableProperty
+        # whose on_change pushes the new innerHTML) — no element rebuild.
+        sent_ring.content = ring_svg(sentiment_arcs(live, snaps), uid="sent")
         bias_lbl.text = f"{total:.2f} · {comp.get('bias', '')}"
         bias_lbl.classes(remove=SENT_TEXT_CLASSES, add=bias_text_class(comp.get('bias')))
         sub_lbl.text = f"Confidence {_safe_float(comp.get('aggregate_confidence')):.0%}"
@@ -1105,11 +1097,9 @@ def render():
         regime_plot.options = build_regime_mix_figure(state.get("regime_points") or [])
         regime_plot.update()
         trend = derived.get("trend")
+        trend_ring.content = ring_svg(trend_arcs(derived), uid="trend")
         if trend:
             committed = trend.get("state")
-            trend_gauge_box.options = gauge_figure(
-                trend_gauge_value(trend), _TREND_SHORT.get(committed, "—"))
-            trend_gauge_box.update()
             regime_badge.text = trend.get("label", "")
             regime_badge.classes(remove=SENT_TEXT_CLASSES, add=trend_text_class(committed))
             regime_desc.text = trend.get("description", "")
@@ -1119,6 +1109,15 @@ def render():
                     f"Trend score {trend_gauge_value(trend):.0f} · "
                     f"conf {_safe_float(trend.get('confidence')):.0%}"
                 ).classes("text-bold")
+                # Per-horizon state WORDS. The ring shows each horizon's number
+                # but has no room for its label, and the regime badge below names
+                # the Day horizon only — so this line is the only place the Week
+                # and Month state words appear at all.
+                horizons = [("Day", trend), ("Week", derived.get("trend_7d")),
+                            ("Month", derived.get("trend_30d_ago"))]
+                ui.label(" · ".join(
+                    f"{name} {_TREND_SHORT.get((h or {}).get('state'), '—')}"
+                    for name, h in horizons)).classes("text-sm opacity-80")
                 for r in trend_subscore_rows(trend):
                     ui.label(f"{r['name']} ({r['weight']}): {r['score']}  "
                              f"conf {r['conf']}").classes("text-sm")
@@ -1129,21 +1128,11 @@ def render():
                     for line in evidence:
                         ui.label(str(line)).classes("text-sm")
         else:
-            trend_gauge_box.options = gauge_figure(50.0, "—")
-            trend_gauge_box.update()
             regime_badge.text = ""
             regime_desc.text = ""
             trend_detail_box.clear()
             with trend_detail_box:
                 ui.label("—").classes("text-sm")
-        t30 = (state.get("derived") or {}).get("trend_30d_ago")
-        if t30:
-            trend_gauge_30_box.options = gauge_figure(
-                trend_gauge_value(t30), _TREND_SHORT.get(t30.get("state"), "—"))
-            trend_gauge_30_box.update()
-        else:
-            trend_gauge_30_box.options = gauge_figure(50.0, "—")
-            trend_gauge_30_box.update()
 
     def _refill_component_context():
         """Refill the Components popup's Rotation / Sector-Value cells once the

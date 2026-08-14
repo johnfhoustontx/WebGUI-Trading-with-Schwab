@@ -29,11 +29,11 @@ def test_gauge_score_scales_0_10_to_0_100():
     assert S.gauge_score("bad") == 0.0
 
 
-def test_gauge_figure_reexported_for_render():
-    # gauge_figure is the shared pages.gauge builder, re-exported here because
-    # render() uses the bare name; its behavior is covered by test_gauge.py.
-    from pages import gauge
-    assert S.gauge_figure is gauge.gauge_figure
+def test_gauge_figure_is_no_longer_imported():
+    """The four speedometers became two rings; nothing on this page draws a
+    gauge any more, so the re-export is gone (see test_rings.py / the ring
+    wiring tests below)."""
+    assert not hasattr(S, "gauge_figure")
 
 
 def test_bias_color_buckets():
@@ -199,13 +199,112 @@ def test_render_graceful_empty_cache():
         S.render()  # must not raise
 
 
-def test_sentiment_30d_avg():
-    from pages import sentiment as S
-    snaps = [{"composite": {"total_score": "6.0"}},
-             {"composite": {"total_score": "0.0"}},   # zero filtered out
-             {"composite": {"total_score": "8.0"}}]
-    assert S.sentiment_30d_avg(snaps) == 7.0          # mean(6,8)
-    assert S.sentiment_30d_avg([]) == 0.0
+# ── render() ring wiring ─────────────────────────────────────────────────────
+# The builders above are pure and covered on their own; these exercise the parts
+# only render() can get wrong — which element each ring's payload lands on, that
+# the two rings do not share a DOM id, and that the state words the deleted trend
+# gauges used to caption survive on the Trend Detail popup.
+def _render_card():
+    """Render the page inside a slot context and hand back the container."""
+    from nicegui import ui
+    with ui.card() as card:
+        S.render()
+    return card
+
+
+def _rings(card):
+    """The page's ring SVG elements, in build order (Sentiment, then Trend)."""
+    from nicegui import ui
+    return [e for e in card.descendants()
+            if isinstance(e, ui.html) and "<svg" in (e.content or "")]
+
+
+def _label_texts(card):
+    from nicegui import ui
+    return [e.text for e in card.descendants() if isinstance(e, ui.label)]
+
+
+def _center_value(svg):
+    """The outermost arc's reading — the big number in the middle of the dial.
+    Located by the size CONSTANT, so a Task-10 layout nudge cannot redden this."""
+    from pages import rings
+    chunk = [c for c in svg.split("<text ")
+             if f'font-size="{rings.CENTER_VALUE_SIZE}"' in c][0]
+    return chunk.split(">", 1)[1].split("<", 1)[0]
+
+
+def _seed_cache():
+    """A composite + history payload rich enough to drive both rings and the
+    Trend Detail popup. Distinct values per horizon so a ring wired to the wrong
+    payload (or both rings wired to the same one) fails rather than coincides."""
+    bus_client.bus().cache_set("cache:sentiment:composite", {
+        "live": _snap("2026-08-14", 7.2),
+        "derived": {
+            "trend": {"smoothed_score": 64.0, "state": "bullish",
+                      "label": "Rallying", "confidence": 0.8},
+            "trend_7d": {"score": 58.0, "state": "neutral"},
+            "trend_30d_ago": {"score": 41.0, "state": "bull_trend"},
+        },
+    })
+    bus_client.bus().cache_set("cache:sentiment:history",
+                               {"snaps": _snaps(*([3.0] * 5))})
+
+
+def test_render_mounts_exactly_two_rings_with_distinct_dom_ids():
+    """A shared uid is the documented ring collision failure: two SVGs with the
+    same root id on one page."""
+    bus_client.reset()
+    ids = [r.content.split('id="', 1)[1].split('"', 1)[0] for r in _rings(_render_card())]
+    assert ids == ["ring-sent", "ring-trend"]
+
+
+def test_rings_mount_with_sanitizing_on():
+    """The rings keep ui.html's default client-side sanitizing. What makes that
+    safe is a property of the SVG, not of this page — see test_rings.py's
+    ``test_ring_svg_emits_nothing_dompurify_would_strip``."""
+    bus_client.reset()
+    for r in _rings(_render_card()):
+        assert r._props["sanitize"] is True
+
+
+def test_render_with_an_empty_cache_paints_both_rings_track_only():
+    """The cold-start read: three tracks and no value arc per ring, and an
+    em-dash rather than a fabricated 0 in the middle."""
+    bus_client.reset()
+    rings_ = _rings(_render_card())
+    assert len(rings_) == 2
+    for r in rings_:
+        assert r.content.count("<path ") == 3     # tracks only — no halo/value arcs
+        assert _center_value(r.content) == "—"
+
+
+def test_render_fills_each_ring_from_its_own_payload():
+    bus_client.reset()
+    _seed_cache()
+    sent, trend = _rings(_render_card())
+    assert _center_value(sent.content) == "72"    # live composite 7.20 -> 0-100
+    assert _center_value(trend.content) == "64"   # derived.trend.smoothed_score
+
+
+def test_trend_detail_names_the_state_of_all_three_horizons():
+    """The deleted trend gauges captioned their faces with the state word. The
+    Day word survives on the regime badge, but Week/Month have no badge — so
+    losing this line loses those two readings outright."""
+    bus_client.reset()
+    _seed_cache()
+    assert ["Day Bull · Week Neutral · Month BULL"] == [
+        t for t in _label_texts(_render_card()) if t.startswith("Day ")]
+
+
+def test_trend_detail_dashes_a_horizon_the_service_has_not_published():
+    """``trend_7d`` is not published until sentiment_svc restarts — that horizon
+    must read as absent, not borrow another horizon's word."""
+    bus_client.reset()
+    bus_client.bus().cache_set("cache:sentiment:composite", {
+        "live": _snap("2026-08-14", 7.2),
+        "derived": {"trend": {"score": 64.0, "state": "bullish"}}})
+    assert ["Day Bull · Week — · Month —"] == [
+        t for t in _label_texts(_render_card()) if t.startswith("Day ")]
 
 
 # ── Windowed composite average (the ring's Week arc) ─────────────────────────
@@ -254,11 +353,10 @@ def test_sentiment_avg_drops_non_finite_scores():
         [{"date": "2026-08-01", "composite": {"total_score": "inf"}}]) is None
 
 
-def test_sentiment_30d_avg_still_averages_everything():
-    """Back-compat: the old name must keep its old behaviour — the whole
-    history, NOT the Week window. The fixture must be longer than that window
-    or the mutation ``sentiment_avg(snaps, WEEK_SNAPS)`` is unobservable."""
-    assert S.sentiment_30d_avg(_snaps(*([1.0] * 15 + [9.0] * 5))) == 3.0  # not 9.0
+def test_sentiment_30d_avg_is_gone():
+    """Deleted with the 30-Day-Avg speedometer it fed: it was a pure alias for
+    ``sentiment_avg(snaps)`` with no remaining caller."""
+    assert not hasattr(S, "sentiment_30d_avg")
 
 
 # ── Day/Week/Month arc builders (the two concentric rings) ───────────────────
