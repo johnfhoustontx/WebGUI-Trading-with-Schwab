@@ -249,9 +249,38 @@ def sentiment_avg_or_none(snaps, n=None):
 
 
 def sentiment_avg(snaps, n=None):
-    """``sentiment_avg_or_none`` with a 0.0 floor (the legacy gauge contract)."""
+    """``sentiment_avg_or_none`` with a 0.0 floor. Pure.
+
+    Currently called only by its own tests: its last production caller was the
+    30-Day-Avg speedometer, and the rings deliberately take the ``_or_none``
+    variant so a horizon with no scored session draws a bare track instead of a
+    0 they would paint as a genuine maximally-bearish reading. Kept anyway —
+    it is a distinct, tested contract (floored, not nullable) that the ring
+    horizons or a later tile may well want, and keeping one small function
+    costs less than deleting and restoring it."""
     v = sentiment_avg_or_none(snaps, n)
     return 0.0 if v is None else v
+
+
+def _composite_arc_value(snapshot):
+    """A composite snapshot's 0-100 arc value, or None when its score is
+    non-finite. Pure.
+
+    The Day arc needs the same non-finite guard ``sentiment_avg_or_none`` gives
+    Week and Month, and for the same reason: ``gauge_score`` ends in
+    ``min(100.0, x)``, and ``min(100.0, nan)`` is **100.0** — so a NaN or inf
+    total_score painted a confident FULL arc, indistinguishable from a real
+    maximum. inf reached it too (``inf * 10`` clamps to 100.0).
+
+    Reachable, not hypothetical: these payloads cross Redis as JSON, and
+    Python's ``json`` both emits and accepts ``Infinity``/``NaN``, so a
+    service-side division by zero round-trips intact into either the ``live``
+    key or a history snapshot. Without this, one poisoned snapshot made a single
+    call contradict itself — DAY 100.0 beside WEEK/MONTH None, off the same row."""
+    if snapshot is None:
+        return None
+    v = _safe_float((snapshot.get("composite") or {}).get("total_score"))
+    return gauge_score(v) if math.isfinite(v) else None
 
 
 def sentiment_arcs(live, snaps):
@@ -262,8 +291,7 @@ def sentiment_arcs(live, snaps):
     session reads None — the ring then draws that arc's track only, rather than
     a 0 it would paint as a genuine maximally-bearish value."""
     latest = live or (snaps[-1] if snaps else None)
-    day = None if latest is None else gauge_score(
-        _safe_float((latest.get("composite") or {}).get("total_score")))
+    day = _composite_arc_value(latest)
     week = sentiment_avg_or_none(snaps, WEEK_SNAPS)
     month = sentiment_avg_or_none(snaps)
     return [

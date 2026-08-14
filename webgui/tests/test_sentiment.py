@@ -213,15 +213,41 @@ def _render_card():
 
 
 def _rings(card):
-    """The page's ring SVG elements, in build order (Sentiment, then Trend)."""
+    """``(sentiment_ring, trend_ring)``, selected by DOM id rather than by
+    position: "the ui.html elements containing an <svg>, in build order" would
+    silently reorder if Task 10 mounts a third SVG fragment above them."""
     from nicegui import ui
-    return [e for e in card.descendants()
-            if isinstance(e, ui.html) and "<svg" in (e.content or "")]
+    found = {}
+    for e in card.descendants():
+        if not isinstance(e, ui.html):
+            continue
+        for uid in ("sent", "trend"):
+            if f'id="ring-{uid}"' in (e.content or ""):
+                assert uid not in found, f"two elements claim id ring-{uid}"
+                found[uid] = e
+    assert set(found) == {"sent", "trend"}, f"rings found: {sorted(found)}"
+    return found["sent"], found["trend"]
 
 
 def _label_texts(card):
     from nicegui import ui
     return [e.text for e in card.descendants() if isinstance(e, ui.label)]
+
+
+def _trend_detail_texts(card):
+    """Label texts inside the Trend Detail popup ONLY.
+
+    Scoped deliberately. Asserting over the whole page cannot see this popup's
+    em-dash placeholder: the four Signals tiles render "—" too, so a page-wide
+    ``"—" in texts`` passes whether or not the popup was filled — verified by
+    mutation, it let a gutted else-branch through. Located via the button's
+    label rather than by position, so adding a popup elsewhere cannot capture
+    the wrong subtree."""
+    from nicegui import ui
+    btns = [e for e in card.descendants()
+            if isinstance(e, ui.button) and e.text == "Trend Detail"]
+    assert len(btns) == 1, f"expected one Trend Detail button, found {len(btns)}"
+    return [e.text for e in btns[0].descendants() if isinstance(e, ui.label)]
 
 
 def _center_value(svg):
@@ -241,7 +267,8 @@ def _seed_cache():
         "live": _snap("2026-08-14", 7.2),
         "derived": {
             "trend": {"smoothed_score": 64.0, "state": "bullish",
-                      "label": "Rallying", "confidence": 0.8},
+                      "label": "Rallying", "confidence": 0.8,
+                      "description": "Broad participation, buyers in control"},
             "trend_7d": {"score": 58.0, "state": "neutral"},
             "trend_30d_ago": {"score": 41.0, "state": "bull_trend"},
         },
@@ -252,10 +279,21 @@ def _seed_cache():
 
 def test_render_mounts_exactly_two_rings_with_distinct_dom_ids():
     """A shared uid is the documented ring collision failure: two SVGs with the
-    same root id on one page."""
-    bus_client.reset()
-    ids = [r.content.split('id="', 1)[1].split('"', 1)[0] for r in _rings(_render_card())]
-    assert ids == ["ring-sent", "ring-trend"]
+    same root id on one page.
+
+    Covers BOTH uid sites. An empty cache makes ``_apply`` early-return, so it
+    only ever exercises the two BUILD-time strings — while the repaint is what
+    the live page shows for every frame after the first, and carries its own
+    literal. The seeded pass is the one that guards it."""
+    for seed in (False, True):
+        bus_client.reset()
+        if seed:
+            _seed_cache()
+        sent, trend = _rings(_render_card())         # asserts id uniqueness
+        assert 'id="ring-sent"' in sent.content, seed
+        assert 'id="ring-trend"' in trend.content, seed
+    # ...and the seeded pass really did repaint, or it proved nothing.
+    assert _center_value(sent.content) != "—"
 
 
 def test_rings_mount_with_sanitizing_on():
@@ -271,11 +309,35 @@ def test_render_with_an_empty_cache_paints_both_rings_track_only():
     """The cold-start read: three tracks and no value arc per ring, and an
     em-dash rather than a fabricated 0 in the middle."""
     bus_client.reset()
-    rings_ = _rings(_render_card())
-    assert len(rings_) == 2
-    for r in rings_:
+    for r in _rings(_render_card()):
         assert r.content.count("<path ") == 3     # tracks only — no halo/value arcs
         assert _center_value(r.content) == "—"
+
+
+def test_trend_panel_keeps_filling_the_regime_badge_and_description():
+    """The rings carry numbers only — the trend's LABEL and DESCRIPTION reach
+    the reader solely through these two elements, which sit in the same
+    ``if trend:`` branch the gauge writes were cut out of. Deleting either line
+    left the whole suite green before this test existed."""
+    bus_client.reset()
+    _seed_cache()
+    texts = _label_texts(_render_card())
+    assert "Rallying" in texts                                # regime_badge
+    assert "Broad participation, buyers in control" in texts  # regime_desc
+
+
+def test_trend_panel_clears_and_dashes_when_no_trend_is_published():
+    """The ``else:`` branch. Replacing its whole body with ``pass`` was also
+    green before this test: the labels start empty, so "still empty" only means
+    something once something could have written them."""
+    bus_client.reset()
+    bus_client.bus().cache_set(          # composite present, derived.trend absent
+        "cache:sentiment:composite", {"live": _snap("2026-08-14", 7.2)})
+    card = _render_card()
+    # Scoped to the popup: the Signals tiles also render "—", so a page-wide
+    # check here is vacuous (it let a gutted else-branch survive mutation).
+    assert _trend_detail_texts(card) == ["—"]
+    assert "Rallying" not in _label_texts(card)      # badge cleared, page-wide
 
 
 def test_render_fills_each_ring_from_its_own_payload():
@@ -293,7 +355,7 @@ def test_trend_detail_names_the_state_of_all_three_horizons():
     bus_client.reset()
     _seed_cache()
     assert ["Day Bull · Week Neutral · Month BULL"] == [
-        t for t in _label_texts(_render_card()) if t.startswith("Day ")]
+        t for t in _trend_detail_texts(_render_card()) if t.startswith("Day ")]
 
 
 def test_trend_detail_dashes_a_horizon_the_service_has_not_published():
@@ -304,7 +366,7 @@ def test_trend_detail_dashes_a_horizon_the_service_has_not_published():
         "live": _snap("2026-08-14", 7.2),
         "derived": {"trend": {"score": 64.0, "state": "bullish"}}})
     assert ["Day Bull · Week — · Month —"] == [
-        t for t in _label_texts(_render_card()) if t.startswith("Day ")]
+        t for t in _trend_detail_texts(_render_card()) if t.startswith("Day ")]
 
 
 # ── Windowed composite average (the ring's Week arc) ─────────────────────────
@@ -401,6 +463,28 @@ def test_sentiment_arcs_clamps_a_real_reading_but_drops_a_non_finite_one():
     assert arcs[0]["value"] == 100.0        # clamped real value
     assert arcs[1]["value"] is None         # inf is no reading
     assert arcs[2]["value"] is None
+
+
+def test_sentiment_arcs_day_drops_a_non_finite_score_too():
+    """The Day arc needs the same guard as Week/Month, and for the same reason:
+    ``gauge_score`` ends in ``min(100.0, x)`` and ``min(100.0, nan)`` is 100.0,
+    so a poisoned score painted a confident FULL outer arc. The test above only
+    ever fed Day a real 99.0, so this was unguarded as well as unfixed."""
+    for bad in ("inf", "nan", float("inf"), float("nan")):
+        arcs = S.sentiment_arcs({"composite": {"total_score": bad}}, [])
+        assert arcs[0]["value"] is None, bad
+    # -inf clamped to 0.0 rather than 100.0 — still a fabricated reading.
+    assert S.sentiment_arcs({"composite": {"total_score": "-inf"}}, [])[0]["value"] is None
+    # A real reading still gets through, so this is not a blanket None.
+    assert S.sentiment_arcs({"composite": {"total_score": 7.2}}, [])[0]["value"] == 72.0
+
+
+def test_sentiment_arcs_cannot_contradict_itself_across_horizons():
+    """The sharpest form of the bug, needing no ``live`` payload: ONE poisoned
+    snapshot is both the Day source and the whole history, so Day read 100.0
+    beside Week/Month None — a single call disagreeing with itself."""
+    arcs = S.sentiment_arcs(None, [{"composite": {"total_score": "inf"}}])
+    assert [a["value"] for a in arcs] == [None, None, None]
 
 
 def test_trend_arcs_reads_all_three_horizons():

@@ -97,12 +97,21 @@ def _dompurify_allowlist():
     DOMPurify's default allowlist — not the browser's native sanitizer, which is
     a laxer thing entirely.
 
-    The bundle is minified, so the allowlists are recovered as the long
-    contiguous runs of quoted lowercase tokens (the frozen arrays). Matching on
-    run length rather than plain substring keeps an unrelated identifier
-    elsewhere in the file from reading as an allowed name; a run that is really
-    a different array only ever makes this check more permissive, never less.
-    Measured at DOMPurify 3.4.0: 8 runs, ~535 names."""
+    The bundle is minified, so the arrays are recovered as the long contiguous
+    runs of quoted lowercase tokens. Matching on run length rather than plain
+    substring keeps an unrelated identifier elsewhere in the file from reading
+    as an allowed name.
+
+    But not every such array is an ALLOW list — DOMPurify also ships deny lists
+    (the SVG disallowed-elements array and FORBID_CONTENTS), and unioning those
+    in would bless the very names it strips. ``<use>`` is a plausible reach for
+    symbol reuse and was being waved through. Runs containing ``script`` are
+    therefore dropped: no allowlist in a sanitizer contains ``script``, and both
+    deny lists do, which makes it a reliable discriminator rather than an
+    index-based guess that would rot when the bundle is rebuilt.
+
+    Measured at DOMPurify 3.4.0: 8 runs, 2 dropped, 507 names over the six real
+    allowlists (html/svg/mathml tags + html/svg/mathml attributes)."""
     import pathlib
     import re
 
@@ -111,8 +120,13 @@ def _dompurify_allowlist():
         .read_text(encoding="utf-8", errors="replace")
     names = set()
     for run in re.findall(r'(?:"[a-z][a-z0-9-]*",){19,}"[a-z][a-z0-9-]*"', src):
-        names |= set(re.findall(r'"([a-z][a-z0-9-]*)"', run))
+        tokens = set(re.findall(r'"([a-z][a-z0-9-]*)"', run))
+        if "script" in tokens:          # a deny list, not an allowlist
+            continue
+        names |= tokens
     assert len(names) > 300, "allowlist extraction found too little — bundle changed?"
+    # The exclusion really fired: these are stripped, so they must NOT be here.
+    assert not ({"script", "foreignobject", "use", "animate"} & names)
     return names
 
 
@@ -137,10 +151,13 @@ def test_ring_svg_emits_nothing_dompurify_would_strip():
     out = rings.ring_svg(_arcs(), uid="sent")
     tags = set(re.findall(r"<([a-zA-Z][\w-]*)", out))
     attrs = set(re.findall(r'([a-zA-Z][\w-]*)="', out))
-    assert {"svg", "path", "text"} <= tags          # non-vacuous: we really parsed it
-    assert {"dy", "d", "font-size"} <= attrs
+    # The invariant first, so a real breach reports the offending name rather
+    # than tripping the vacuity canary below on some unrelated detail.
     stripped = sorted(n for n in tags | attrs if n.lower() not in allow)
     assert not stripped, f"DOMPurify would strip: {stripped}"
+    # Non-vacuity: we really did parse an SVG, and really did check attributes.
+    assert {"svg", "path", "text"} <= tags
+    assert {"d", "font-size", "stroke-width"} <= attrs
 
 
 def test_ring_labels_are_centred_by_a_dy_shift_not_dominant_baseline():

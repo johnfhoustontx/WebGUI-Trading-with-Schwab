@@ -147,7 +147,9 @@ def _id_token(uid):
 # tracks half-cap at every size to within 0.05px, worst case at 52. That is the
 # right centring for this dial's content: lining digits and all-caps captions.
 # It is deliberately NOT a reproduction of ``middle``, which centres on the
-# *x*-height (516/1000 -> 0.258em here) and so hung digits slightly low.
+# *x*-height: that puts the alphabetic baseline at y + 0.258em, so a cap-height
+# glyph's box centres at y - 0.091em — about 0.09em HIGH. This ``dy`` therefore
+# pushes the text DOWN relative to the old rendering, not up.
 #
 # The one glyph it does not centre exactly is the "no data" em-dash, which sits
 # on the math axis (~0.28em) rather than mid-cap — about 1px low at 22px, 4px at
