@@ -88,6 +88,105 @@ def test_pcr_text_class_and_rrg_text_class():
     assert S.rrg_text_class("???") == S.TXT_FLAT
 
 
+# ───────────────────────── Signals column (1x4 glowing tiles) ─────────────────
+def test_signal_tile_defs_carry_the_full_reference_anatomy():
+    defs = S.SIGNAL_TILE_DEFS
+    assert [d["key"] for d in defs] == ["bias", "signal", "yesterday", "change"]
+    assert [d["label"] for d in defs] == ["BIAS", "SIGNAL", "YESTERDAY", "CHANGE"]
+    assert [d["descriptor"] for d in defs] == [
+        "MARKET DIRECTION", "STRENGTH & MOMENTUM", "PREVIOUS CLOSE", "VS YESTERDAY"]
+    # every tile carries its header + footer icon
+    assert all(d["icon"] and d["foot_icon"] for d in defs)
+
+
+def test_tone_classes_cover_the_finite_set_and_carry_the_glow():
+    assert set(S.TONE_CLASSES) == {"pos", "neg", "warn", "flat"}
+    pos = S.TONE_CLASSES["pos"]
+    # the neon glow on the value + the colour-tinted shell/rule/dot
+    assert f"[text-shadow:0_0_12px_{S.CLR_GREEN}]" in pos["text"]
+    assert f"text-[{S.CLR_GREEN}]" in pos["text"]
+    assert "bg-gradient-to-b" in pos["tile"] and "to-[#0a0f14]" in pos["tile"]
+    assert f"border-[{S.CLR_GREEN}]/40" in pos["tile"]
+    # box-shadow arbitraries must use the rgba() form, and hold no spaces
+    assert "shadow-[0_0_18px_-6px_rgba(" in pos["tile"]
+    assert " " not in pos["tile"].split("shadow-[")[1].split("]")[0]
+    assert pos["dot"] == f"bg-[{S.CLR_GREEN}]"
+
+
+def test_tone_remove_sets_cover_every_class_each_element_can_apply():
+    # If a remove-set misses a class, that class stacks across the page's
+    # version-poll repaint (the documented failure mode for reactive recolors).
+    for attr, remove_set in (("text", S.TONE_TEXT_CLASSES),
+                             ("tile", S.TONE_TILE_CLASSES),
+                             ("rule", S.TONE_RULE_CLASSES),
+                             ("dot", S.TONE_DOT_CLASSES)):
+        present = set(remove_set.split())
+        for tone in S.TONE_CLASSES.values():
+            assert set(tone[attr].split()) <= present, attr
+
+
+def _tile_values(bias="Neutral", signal="Neutral", change="+0.10"):
+    return {"modifier": "1.00x", "bias": bias, "signal": signal,
+            "yesterday": "6.00", "change": change}
+
+
+def test_word_tone_covers_the_signal_band_vocabularies():
+    """BIAS and SIGNAL carry live_composite.signal_band's OWN words — the
+    positioning set and the strength set — not the composite's bias field. A
+    substring bull/bear test alone would paint 'Long' and 'Cautious' amber."""
+    for word in ("Long", "Bullish", "Strong Bull"):
+        assert S._word_tone(word) == "pos", word
+    for word in ("Short", "Bearish", "Strong Bear"):
+        assert S._word_tone(word) == "neg", word
+    for word in ("Neutral", "Cautious"):
+        assert S._word_tone(word) == "warn", word
+    # cold cache / unknown wording
+    assert S._word_tone("—") == "flat" and S._word_tone("") == "flat"
+    assert S._word_tone(None) == "flat"
+    assert S._word_tone("Wildly Bullish") == "pos"   # substring fallback
+    assert S._word_tone("Sideways") == "warn"        # unknown -> neutral tone
+
+
+def test_signal_tile_rows_tone_mapping():
+    rows = {r["key"]: r for r in
+            S.signal_tile_rows(_tile_values(bias="Long", signal="Bullish",
+                                            change="+0.42"), prev_total=4.0)}
+    assert rows["bias"]["tone"] == "pos"        # 'Long'
+    assert rows["signal"]["tone"] == "pos"      # 'Bullish'
+    assert rows["yesterday"]["tone"] == "neg"   # prior 4.0 -> red band
+    assert rows["change"]["tone"] == "pos"      # positive change
+    # values + static chrome ride along
+    assert rows["bias"]["value"] == "Long"
+    assert rows["change"]["descriptor"] == "VS YESTERDAY"
+    assert all(r["tone"] in S.TONE_CLASSES for r in rows.values())
+
+
+def test_signal_tile_rows_negative_and_neutral_tones():
+    rows = {r["key"]: r for r in
+            S.signal_tile_rows(_tile_values(bias="Short", signal="Strong Bear",
+                                            change="-0.30"), prev_total=5.5)}
+    assert rows["bias"]["tone"] == "neg"
+    assert rows["signal"]["tone"] == "neg"
+    assert rows["yesterday"]["tone"] == "warn"  # mid band
+    assert rows["change"]["tone"] == "neg"
+    # an exactly-flat change is 'flat', not a band colour
+    flat = {r["key"]: r for r in
+            S.signal_tile_rows(_tile_values(change="+0.00"), 5.5)}
+    assert flat["change"]["tone"] == "flat"
+
+
+def test_signal_tile_rows_cold_cache_is_flat_not_invented():
+    # No prior session -> YESTERDAY is flat rather than banded off a missing
+    # number; em-dash bias/signal/change are unknown -> flat.
+    rows = {r["key"]: r for r in
+            S.signal_tile_rows(_tile_values(bias="—", signal="—", change="—"),
+                               prev_total=None)}
+    assert rows["bias"]["tone"] == "flat"
+    assert rows["signal"]["tone"] == "flat"
+    assert rows["yesterday"]["tone"] == "flat"
+    assert rows["change"]["tone"] == "flat"
+
+
 def test_velocity_lines_recovers_the_published_fields():
     derived = {"velocity": {"text": "3d ROC: +0.42 | 5d ROC: -0.18 | 20d Z: +1.10",
                             "flag": "REGIME BREAK: +2.30σ from 20d mean"},
@@ -107,6 +206,30 @@ def test_velocity_lines_defensive_on_missing_or_malformed():
     out = S.velocity_lines({"velocity": {"text": "3d ROC: —", "flag": ""},
                             "divergence": ""})
     assert out["text"] == "3d ROC: —" and out["flag"] == "" and out["divergence"] == ""
+
+
+def test_tone_swap_does_not_accumulate_classes_across_repaints():
+    """Two successive tone applications must leave ONE tone's classes on each
+    element — the remove/add idiom, exercised through real NiceGUI elements."""
+    from nicegui import ui
+
+    with ui.card():
+        lbl = ui.label("—").classes(S.TONE_CLASSES["flat"]["text"])
+        card = ui.card().classes(S.TONE_CLASSES["flat"]["tile"])
+        dot = ui.element("div").classes(S.TONE_CLASSES["flat"]["dot"])
+    for tone in ("pos", "neg", "pos"):
+        t = S.TONE_CLASSES[tone]
+        lbl.classes(remove=S.TONE_TEXT_CLASSES, add=t["text"])
+        card.classes(remove=S.TONE_TILE_CLASSES, add=t["tile"])
+        dot.classes(remove=S.TONE_DOT_CLASSES, add=t["dot"])
+    # Compare within the tone vocabulary only (ui.card carries 'nicegui-card').
+    for el, attr, remove_set in ((lbl, "text", S.TONE_TEXT_CLASSES),
+                                 (card, "tile", S.TONE_TILE_CLASSES),
+                                 (dot, "dot", S.TONE_DOT_CLASSES)):
+        vocab = set(remove_set.split())
+        assert set(el._classes) & vocab == set(S.TONE_CLASSES["pos"][attr].split())
+    # and specifically: no other tone's colour survives
+    assert f"text-[{S.CLR_RED}]" not in lbl._classes
 
 
 def test_render_paints_velocity_and_divergence_from_cache():

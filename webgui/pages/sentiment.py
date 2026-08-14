@@ -27,7 +27,7 @@ from zoneinfo import ZoneInfo
 
 import bus_client
 from pages.rings import ring_svg
-from pages.options.theme import BTN_3D, THEME, TILE_3D
+from pages.options.theme import BTN_3D, THEME
 from pages.ui_guard import guard
 
 _CT = ZoneInfo("America/Chicago")  # trading session clock for the intraday graphs
@@ -875,6 +875,158 @@ def tiles(latest, prev_total, band=None):
             "yesterday": yest, "change": change}
 
 
+# ---------------------------------------------------------------------------
+# Signals column — tile anatomy, tone palette, and the two recovered lines.
+#
+# LAYOUT DEVIATION from the supplied design reference (which shows a 2x2): the
+# tiles are a 1x4 VERTICAL STACK. Two reasons, both measured:
+#   * the column's problem is HEIGHT. Its neighbours (the Sentiment and Trend
+#     Day/Week/Month rings) measure ~460px; a 2x2 of even generously-sized tiles
+#     tops out near ~300px, leaving the same void the flat 2x2 left. Four
+#     stacked ~95px tiles + the column header + the velocity/divergence block
+#     lands near the rings' height, so the row stops reading as truncated.
+#   * the column is ~300px wide. A 2x2 gives ~145px tiles — too narrow for the
+#     reference's footer descriptors ("STRENGTH & MOMENTUM" would wrap badly),
+#     while a full-width stacked tile fits the complete reference anatomy
+#     (icon+label / big glowing value / hairline+dot / circled-icon+descriptor).
+#
+# The tiles are also INVERTED relative to the old flat ones: the old design put
+# dark text on a light traffic-light fill, the reference puts a glowing coloured
+# value on a near-black tile. TRAFFIC_BG_CLASSES is therefore NOT the reactive
+# remove-set here — each element type gets its own remove-set below.
+# ---------------------------------------------------------------------------
+
+def _hex_rgb(value):
+    h = str(value).lstrip("#")
+    return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+
+def _rgba(value, alpha):
+    """'#66bb6a' -> 'rgba(102,187,106,0.5)'. No spaces: a Tailwind arbitrary
+    value cannot contain them (underscores are the escape, and rgba needs none)."""
+    r, g, b = _hex_rgb(value)
+    return f"rgba({r},{g},{b},{alpha})"
+
+
+def _mix(value, other, t):
+    """Blend two hexes; ``t`` = weight of ``other``. Used to derive each tile's
+    top gradient stop as its own colour barely lifted off the near-black base."""
+    a, b = _hex_rgb(value), _hex_rgb(other)
+    return "#%02x%02x%02x" % tuple(
+        int(round(a[i] + (b[i] - a[i]) * t)) for i in range(3))
+
+
+# Near-black tile floor (the reference's bottom gradient stop).
+_TILE_FLOOR = "#0a0f14"
+
+# The four TONE keys are the finite set every data-driven tile colour maps into
+# — nothing here is ever built from a runtime value. Each tone carries the FOUR
+# class strings its tile needs (value text + glow, tile shell, hairline rule,
+# end dot); the CLR_* hexes come from config/theme.toml, resolved once at import.
+_TONE_HEX = {"pos": CLR_GREEN, "neg": CLR_RED, "warn": CLR_YELLOW,
+             "flat": CLR_FLAT}
+
+
+def _tone_classes(hexv):
+    top = _mix(_TILE_FLOOR, hexv, 0.10)
+    return {
+        # The neon glow. `[text-shadow:...]` JIT-generates (verified live).
+        "text": f"text-[{hexv}] [text-shadow:0_0_12px_{hexv}]",
+        # Subtle vertical gradient + colour-tinted hairline border + soft outer
+        # glow. box-shadow arbitraries need the rgba() form, not a hex.
+        "tile": (f"bg-gradient-to-b from-[{top}] to-[{_TILE_FLOOR}] "
+                 f"border border-[{hexv}]/40 "
+                 f"shadow-[0_0_18px_-6px_{_rgba(hexv, 0.55)}]"),
+        "rule": f"bg-[{hexv}]/30",
+        "dot": f"bg-[{hexv}]",
+    }
+
+
+TONE_CLASSES = {k: _tone_classes(v) for k, v in _TONE_HEX.items()}
+# Reactive remove-sets — one per element type. These MUST cover every class the
+# element can apply or the classes stack across the page's version-poll repaint.
+TONE_TEXT_CLASSES = " ".join(t["text"] for t in TONE_CLASSES.values())
+TONE_TILE_CLASSES = " ".join(t["tile"] for t in TONE_CLASSES.values())
+TONE_RULE_CLASSES = " ".join(t["rule"] for t in TONE_CLASSES.values())
+TONE_DOT_CLASSES = " ".join(t["dot"] for t in TONE_CLASSES.values())
+
+# Per-tile static chrome: header icon + label, footer circled icon + descriptor.
+SIGNAL_TILE_DEFS = [
+    {"key": "bias", "label": "BIAS", "icon": "explore",
+     "foot_icon": "adjust", "descriptor": "MARKET DIRECTION"},
+    {"key": "signal", "label": "SIGNAL", "icon": "bolt",
+     "foot_icon": "radio_button_checked", "descriptor": "STRENGTH & MOMENTUM"},
+    {"key": "yesterday", "label": "YESTERDAY", "icon": "history",
+     "foot_icon": "schedule", "descriptor": "PREVIOUS CLOSE"},
+    {"key": "change", "label": "CHANGE", "icon": "swap_vert",
+     "foot_icon": "compare_arrows", "descriptor": "VS YESTERDAY"},
+]
+
+
+def _band_tone(total):
+    """Composite traffic band -> tone key (same >=6.5 / <=4.5 cuts as traffic_color)."""
+    return {CLR_GREEN: "pos", CLR_RED: "neg"}.get(traffic_color(total), "warn")
+
+
+# The BIAS and SIGNAL tiles carry ``live_composite.signal_band``'s OWN two
+# vocabularies — positioning (Long / Neutral / Cautious / Short) and strength
+# (Strong Bull / Bullish / Neutral / Bearish / Strong Bear). Neither is the
+# composite's ``bias`` field, so ``bias_color``'s bull/bear substring test does
+# not cover them ("Long" would read amber forever). Colour each tile from its
+# OWN word, so the colour can never contradict the text beside it.
+_WORD_TONE = {
+    "long": "pos", "bullish": "pos", "strong bull": "pos",
+    "neutral": "warn", "cautious": "warn",
+    "short": "neg", "bearish": "neg", "strong bear": "neg",
+}
+
+
+def _word_tone(word):
+    """A BIAS/SIGNAL band word -> tone key. '—' (cold cache) -> flat."""
+    w = str(word or "").strip().lower()
+    if not w or w == "—":
+        return "flat"
+    if w in _WORD_TONE:
+        return _WORD_TONE[w]
+    # Unknown wording (the vocabulary is service-side and could grow): fall back
+    # to the same substring read the rest of the page uses.
+    if "bull" in w or "long" in w:
+        return "pos"
+    if "bear" in w or "short" in w:
+        return "neg"
+    return "warn"
+
+
+def _change_tone(change):
+    """Signed change string -> tone. '—' / unparseable / exactly flat -> 'flat'."""
+    try:
+        v = float(str(change).replace("+", ""))
+    except (TypeError, ValueError):
+        return "flat"
+    if v > 0:
+        return "pos"
+    if v < 0:
+        return "neg"
+    return "flat"
+
+
+def signal_tile_rows(t, prev_total):
+    """Display rows for the Signals column: the static chrome from
+    ``SIGNAL_TILE_DEFS`` joined to each tile's value and its TONE key (one of
+    pos/neg/warn/flat — the finite set ``TONE_CLASSES`` is keyed by).
+
+    ``t`` is a ``tiles()`` result. YESTERDAY reads flat when there is no prior
+    session rather than inventing a band for a missing number."""
+    tones = {
+        "bias": _word_tone(t.get("bias")),
+        "signal": _word_tone(t.get("signal")),
+        "yesterday": "flat" if prev_total is None else _band_tone(prev_total),
+        "change": _change_tone(t.get("change")),
+    }
+    return [dict(d, value=t.get(d["key"], "—"), tone=tones[d["key"]])
+            for d in SIGNAL_TILE_DEFS]
+
+
 def velocity_lines(derived):
     """``derived`` -> ``{"text", "flag", "divergence"}`` for the foot of the
     Signals column.
@@ -978,10 +1130,9 @@ def render():
         ui.button("Refresh", icon="refresh", color=None,
                   on_click=lambda: _request_refresh()).props("no-caps").classes(BTN_3D)
 
-    tile_lbls, tile_cards = {}, {}
-    # 2x2 signal matrix (Modifier dropped per design).
-    TILE_DEFS = [("bias", "BIAS"), ("signal", "SIGNAL"),
-                 ("yesterday", "YESTERDAY"), ("change", "CHANGE")]
+    # Per-tile reactive element handles (value label, card shell, hairline rule,
+    # end dot) — everything the tone recolor has to swap in place.
+    tile_lbls, tile_cards, tile_rules, tile_dots = {}, {}, {}, {}
     # Three evenly-distributed, top-aligned columns with matching h6 headers.
     with ui.row().classes("w-full items-start justify-around gap-6 flex-wrap"):
         # ① Market Sentiment — Day/Week/Month ring + press-and-hold Components popup
@@ -1020,24 +1171,45 @@ def render():
             trend_btn.on("mousedown", lambda: trend_menu.open())
             trend_btn.on("mouseup", lambda: trend_menu.close())
             trend_btn.on("mouseleave", lambda: trend_menu.close())
-        # ③ Signals — 2x2 matrix
-        with ui.column().classes("items-center min-w-[210px]"):
+        # ③ Signals — 1x4 vertical stack of glowing tiles (see the layout note
+        # above SIGNAL_TILE_DEFS for why this deviates from the 2x2 reference),
+        # with the recovered velocity / divergence lines at its foot.
+        with ui.column().classes("items-center min-w-[300px] gap-2"):
             ui.label("Signals").classes("text-h6")
-            with ui.grid(columns=2).classes("gap-2 q-mt-sm"):
-                for tkey, tlabel in TILE_DEFS:
-                    c = ui.card().classes(f"q-pa-sm items-center min-w-[96px] {TILE_3D}")
+            with ui.column().classes("w-full gap-2 q-mt-sm"):
+                for d in SIGNAL_TILE_DEFS:
+                    tkey = d["key"]
+                    # Built with the neutral tone; _apply swaps the tone classes
+                    # in place (remove= the full finite set, so nothing stacks).
+                    tone = TONE_CLASSES["flat"]
+                    # p-2 (not q-pa-sm): nicegui-card's own p-4 wins over the
+                    # Quasar padding class, which made each tile 111px and
+                    # overshot the rings. bg-[#0a0f14] is the opaque floor under
+                    # the gradient — q-card's base background is WHITE.
+                    c = ui.card().classes(
+                        "p-2 w-full min-h-[88px] justify-between gap-1 "
+                        f"rounded-[12px] bg-[{_TILE_FLOOR}] {tone['tile']}")
                     with c:
-                        ui.label(tlabel).classes("text-xs text-[#111]")
-                        tile_lbls[tkey] = ui.label("—").classes("text-bold text-[#111]")
+                        with ui.row().classes("items-center gap-1 no-wrap"):
+                            ui.icon(d["icon"], size="14px").classes("opacity-50")
+                            ui.label(d["label"]).classes(
+                                "text-[10px] tracking-[0.18em] opacity-60")
+                        tile_lbls[tkey] = ui.label("—").classes(
+                            f"text-2xl text-bold leading-none {tone['text']}")
+                        with ui.row().classes("items-center gap-1 no-wrap w-full"):
+                            tile_rules[tkey] = ui.element("div").classes(
+                                f"flex-1 h-px {tone['rule']}")
+                            tile_dots[tkey] = ui.element("div").classes(
+                                f"w-[6px] h-[6px] rounded-full {tone['dot']}")
+                        with ui.row().classes("items-center gap-1 no-wrap"):
+                            ui.icon(d["foot_icon"], size="12px").classes("opacity-40")
+                            ui.label(d["descriptor"]).classes(
+                                "text-[9px] tracking-[0.12em] opacity-50")
                     tile_cards[tkey] = c
-            # Velocity / regime-break flag / divergence. The service publishes
-            # all three on EVERY refresh cycle, but they have rendered nowhere
-            # since the intraday graphs replaced the old rolling/velocity/
-            # divergence text block — a casualty of that layout change, not a
-            # decision. The flag and the divergence note are hidden when empty
-            # (empty = "none", not "unknown"), so a quiet tape shows the ROC
-            # line alone; the flag is styled as a warning because it means a
-            # regime break.
+            # Velocity / regime-break flag / divergence. Published on every
+            # refresh by the service but rendered nowhere until now; the flag and
+            # the divergence note are hidden when empty (empty = "none", not
+            # "unknown"), so a quiet tape shows the ROC line alone.
             vel_lbl = ui.label("").classes(
                 "text-[11px] opacity-70 w-full text-center leading-snug")
             vel_flag_lbl = ui.label("").classes(
@@ -1162,10 +1334,16 @@ def render():
             band_labels = (derived.get("size", "—"), derived.get("bias", "—"),
                            derived.get("signal", "—"))
         t = tiles(latest, prev_total, band_labels)
-        band_bg = traffic_bg_class(total)
-        for tkey, _tlabel in TILE_DEFS:
-            tile_lbls[tkey].text = t[tkey]
-            tile_cards[tkey].classes(remove=TRAFFIC_BG_CLASSES, add=band_bg)
+        # Per-tile tone swap. Each element type carries its OWN remove-set (the
+        # full finite tone vocabulary) so repeated repaints can never stack two
+        # conflicting colors on one element.
+        for row in signal_tile_rows(t, prev_total):
+            tkey, tone = row["key"], TONE_CLASSES[row["tone"]]
+            tile_lbls[tkey].text = row["value"]
+            tile_lbls[tkey].classes(remove=TONE_TEXT_CLASSES, add=tone["text"])
+            tile_cards[tkey].classes(remove=TONE_TILE_CLASSES, add=tone["tile"])
+            tile_rules[tkey].classes(remove=TONE_RULE_CLASSES, add=tone["rule"])
+            tile_dots[tkey].classes(remove=TONE_DOT_CLASSES, add=tone["dot"])
         vel = velocity_lines(derived)
         vel_lbl.text = vel["text"]
         vel_lbl.set_visibility(bool(vel["text"]))
