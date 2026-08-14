@@ -875,6 +875,27 @@ def tiles(latest, prev_total, band=None):
             "yesterday": yest, "change": change}
 
 
+def velocity_lines(derived):
+    """``derived`` -> ``{"text", "flag", "divergence"}`` for the foot of the
+    Signals column.
+
+    These three come from ``compute.derive_composite_extras`` (``derived
+    ["velocity"] = {"text", "flag"}`` and ``derived["divergence"]``, a string).
+    They are published on EVERY refresh but lost their on-screen home when the
+    intraday graphs replaced the old rolling/velocity/divergence text block —
+    an accident of that layout change, not a decision. Defensive: a missing or
+    wrongly-shaped payload yields empty strings, and the caller hides an empty
+    line (a blank flag means "no regime break", not "unknown")."""
+    d = derived or {}
+    vel = d.get("velocity")
+    if not isinstance(vel, dict):
+        vel = {}
+    div = d.get("divergence")
+    return {"text": str(vel.get("text") or ""),
+            "flag": str(vel.get("flag") or ""),
+            "divergence": str(div or "")}
+
+
 def _parse_iso(value):
     """Parse an ISO timestamp string -> datetime, or None. Tolerant of a
     trailing 'Z' and of already-datetime inputs (returns them unchanged)."""
@@ -1009,6 +1030,22 @@ def render():
                         ui.label(tlabel).classes("text-xs text-[#111]")
                         tile_lbls[tkey] = ui.label("—").classes("text-bold text-[#111]")
                     tile_cards[tkey] = c
+            # Velocity / regime-break flag / divergence. The service publishes
+            # all three on EVERY refresh cycle, but they have rendered nowhere
+            # since the intraday graphs replaced the old rolling/velocity/
+            # divergence text block — a casualty of that layout change, not a
+            # decision. The flag and the divergence note are hidden when empty
+            # (empty = "none", not "unknown"), so a quiet tape shows the ROC
+            # line alone; the flag is styled as a warning because it means a
+            # regime break.
+            vel_lbl = ui.label("").classes(
+                "text-[11px] opacity-70 w-full text-center leading-snug")
+            vel_flag_lbl = ui.label("").classes(
+                f"text-[11px] text-bold w-full text-center leading-snug {TXT_Y}")
+            div_lbl = ui.label("").classes(
+                "text-[11px] opacity-70 w-full text-center leading-snug")
+            for _el in (vel_flag_lbl, div_lbl):
+                _el.set_visibility(False)
 
     ui.separator().classes("q-my-md")
     # Market Regime — the blended STRUCTURAL read (how the tape is moving),
@@ -1129,6 +1166,13 @@ def render():
         for tkey, _tlabel in TILE_DEFS:
             tile_lbls[tkey].text = t[tkey]
             tile_cards[tkey].classes(remove=TRAFFIC_BG_CLASSES, add=band_bg)
+        vel = velocity_lines(derived)
+        vel_lbl.text = vel["text"]
+        vel_lbl.set_visibility(bool(vel["text"]))
+        vel_flag_lbl.text = vel["flag"]
+        vel_flag_lbl.set_visibility(bool(vel["flag"]))
+        div_lbl.text = vel["divergence"]
+        div_lbl.set_visibility(bool(vel["divergence"]))
         rotation_value, sector_value = _comp_context()
         _render_components(latest, rotation_value, sector_value)
         pts = state.get("intraday") or []

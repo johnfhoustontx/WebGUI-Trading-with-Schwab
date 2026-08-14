@@ -88,6 +88,48 @@ def test_pcr_text_class_and_rrg_text_class():
     assert S.rrg_text_class("???") == S.TXT_FLAT
 
 
+def test_velocity_lines_recovers_the_published_fields():
+    derived = {"velocity": {"text": "3d ROC: +0.42 | 5d ROC: -0.18 | 20d Z: +1.10",
+                            "flag": "REGIME BREAK: +2.30σ from 20d mean"},
+               "divergence": "VIX complex diverging from breadth"}
+    out = S.velocity_lines(derived)
+    assert out["text"].startswith("3d ROC: +0.42")
+    assert out["flag"].startswith("REGIME BREAK")
+    assert out["divergence"] == "VIX complex diverging from breadth"
+
+
+def test_velocity_lines_defensive_on_missing_or_malformed():
+    for bad in (None, {}, {"velocity": None, "divergence": None},
+                {"velocity": "not-a-dict"}):
+        out = S.velocity_lines(bad)
+        assert out == {"text": "", "flag": "", "divergence": ""}
+    # a quiet tape: text present, no regime break, no divergence
+    out = S.velocity_lines({"velocity": {"text": "3d ROC: —", "flag": ""},
+                            "divergence": ""})
+    assert out["text"] == "3d ROC: —" and out["flag"] == "" and out["divergence"] == ""
+
+
+def test_render_paints_velocity_and_divergence_from_cache():
+    """Smoke: a populated composite carrying velocity + divergence renders."""
+    from nicegui import ui
+
+    bus_client.reset()
+    bus_client.bus().cache_set("cache:sentiment:composite", {
+        "live": _snap("2026-08-14", 7.1),
+        "composite_at": "2026-08-14T09:30:00",
+        "proxy_up": True,
+        "derived": {"weights": {"vix_complex": 0.3}, "size": "1.10x",
+                    "bias": "Long", "signal": "Bullish",
+                    "velocity": {"text": "3d ROC: +0.42",
+                                 "flag": "REGIME BREAK: +2.30σ from 20d mean"},
+                    "divergence": "breadth lagging"},
+    })
+    bus_client.bus().cache_set("cache:sentiment:history",
+                               {"snaps": _snaps(5.0, 6.0), "spy": []})
+    with ui.card():
+        S.render()  # must not raise
+
+
 def test_sc_text_class():
     assert S.sc_text_class(7) == S.TXT_G
     assert S.sc_text_class(3) == S.TXT_R
