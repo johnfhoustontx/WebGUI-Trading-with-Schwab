@@ -70,6 +70,22 @@ def test_bias_text_class_buckets():
     assert S.bias_text_class("Neutral") == S.TXT_Y
 
 
+def test_bias_text_class_agrees_with_the_signals_tile_on_the_same_word():
+    """The headline under the Sentiment ring and the BIAS tile render the SAME
+    word from the same payload. bias_color only substring-matches bull/bear, so
+    'Long' read amber in the headline while the tile beside it read green.
+    Pin the agreement, not just the buckets."""
+    for word in ("Long", "Short", "Cautious", "Neutral", "Strong Bull",
+                 "Strong Bear", "Bullish", "Bearish"):
+        assert S.bias_text_class(word) == S._TONE_TXT[S._word_tone(word)], word
+    # and the specific regression: positioning words are no longer amber
+    assert S.bias_text_class("Long") == S.TXT_G
+    assert S.bias_text_class("Short") == S.TXT_R
+    # an absent bias reads flat rather than a fabricated amber "neutral"
+    assert S.bias_text_class("") == S.TXT_FLAT
+    assert S.bias_text_class(None) == S.TXT_FLAT
+
+
 def test_pct_text_class():
     assert S.pct_text_class(0.5) == S.TXT_G
     assert S.pct_text_class(-0.5) == S.TXT_R

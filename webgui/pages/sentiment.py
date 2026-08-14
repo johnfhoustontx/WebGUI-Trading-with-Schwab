@@ -170,8 +170,21 @@ def bias_color(bias):
     return CLR_YELLOW
 
 
+# Tone key -> plain text class. The Signals tiles add their own glow on top;
+# this is the un-glowed form, for running text like the headline under the ring.
+_TONE_TXT = {"pos": TXT_G, "neg": TXT_R, "warn": TXT_Y, "flat": TXT_FLAT}
+
+
 def bias_text_class(bias):
-    return _HEX_TO_TXT[bias_color(bias)]
+    """Text colour for a positioning/strength word.
+
+    Delegates to ``_word_tone`` rather than ``bias_color``: the headline under
+    the Sentiment ring shows the SAME word as the BIAS tile, and ``bias_color``
+    only substring-matches bull/bear — so "Long" and "Short" fell through to
+    amber while the tile beside them read green and red. Same word, same screen,
+    two colours. The bull/bear/neutral buckets its own tests pin are unchanged;
+    this only adds the positioning vocabulary ``signal_band`` actually emits."""
+    return _TONE_TXT[_word_tone(bias)]
 
 
 # State -> text-color class, covering BOTH the new five-state vocab (Today gauge)
