@@ -595,6 +595,36 @@ def test_trend_arcs_keeps_a_real_zero_and_clamps():
     assert arcs[1]["value"] == 100.0      # clamped
 
 
+def test_trend_arcs_zero_confidence_is_no_data_not_a_neutral_50():
+    """The failure path that actually fires in production.
+
+    The service does NOT omit a horizon it failed to compute — ``_neutral_trend``
+    and ``_neutral_structural_trend`` both return a fully shaped dict carrying
+    score 50.0 / confidence 0.0, and ``compute_7d_trend`` swallows its own
+    exceptions to return exactly that. So a proxy blip replaces a good reading
+    with a confident-looking 50, and every absent-key guard misses it."""
+    published_neutral = {"score": 50.0, "state": "range", "confidence": 0.0}
+    arcs = S.trend_arcs({"trend": published_neutral,
+                         "trend_7d": published_neutral,
+                         "trend_30d_ago": published_neutral})
+    assert [a["value"] for a in arcs] == [None, None, None]
+
+
+def test_trend_arcs_a_confident_neutral_reading_still_paints():
+    """The converse, and the reason this guard keys on CONFIDENCE not on the
+    score: a genuine 50 backed by evidence is a real reading and must survive.
+    Blanking it would trade one fabrication for a different lie."""
+    arcs = S.trend_arcs({"trend": {"score": 50.0, "confidence": 0.65}})
+    assert arcs[0]["value"] == 50.0
+
+
+def test_trend_arcs_a_missing_confidence_key_still_paints():
+    """Absent confidence must not read as zero — older payloads and the page's
+    own test fixtures omit it, and they carry real scores."""
+    arcs = S.trend_arcs({"trend": {"smoothed_score": 71.0}})
+    assert arcs[0]["value"] == 71.0
+
+
 # ── Colorized intraday figures (Task 4) ──────────────────────────────────────
 _PTS = [{"ts": 1000, "sentiment": 3.0, "trend": 20.0},
         {"ts": 1120, "sentiment": 6.0, "trend": 55.0},

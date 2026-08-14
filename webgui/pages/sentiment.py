@@ -315,8 +315,27 @@ def _trend_arc_value(trend):
     payload, one published without a score, or one whose score is unparseable
     (both of that function's 50.0 fallbacks) or non-finite (which ``_clamp``
     silently turns into 100.0, since ``min(100.0, nan)`` is 100.0). A gauge
-    needs a needle position and so must invent one; a ring can say nothing."""
+    needs a needle position and so must invent one; a ring can say nothing.
+
+    ZERO CONFIDENCE is the fourth case, and the one that actually fires in
+    production. The service's failure path does NOT omit the horizon — both
+    ``_neutral_trend`` and ``_neutral_structural_trend`` return a fully shaped
+    dict carrying **score 50.0, confidence 0.0**, and ``compute_7d_trend`` /
+    ``compute_30d_trend`` swallow their own exceptions to return exactly that.
+    So on any proxy blip a good reading is replaced by a confident-looking 50,
+    and the absent-key guards above never see it. Keying on confidence is what
+    catches it.
+
+    Confidence is a SOUND discriminator here, verified rather than assumed:
+    ``blend_trend`` weights each sub-score by its own confidence, so the
+    aggregate rounds to 0.0 only when there was no usable evidence at all — a
+    genuinely neutral but well-evidenced read (50/50 at full confidence) scores
+    agg 0.65 and passes straight through. Note it is "rounds to zero", not "all
+    sub-confidences are exactly zero": a lone 0.001 sub-confidence also lands on
+    0.0, which is the right call — a reading that confident is not one to paint."""
     t = trend or {}
+    if _safe_float(t.get("confidence"), None) == 0.0:
+        return None
     v = _safe_float(t.get("smoothed_score", t.get("score")), None)
     return None if v is None or not math.isfinite(v) else _clamp(v, 0.0, 100.0)
 
@@ -324,8 +343,11 @@ def _trend_arc_value(trend):
 def trend_arcs(derived):
     """Day/Week/Month arcs for the Market Trend ring (already 0-100).
 
-    A horizon the service has not published yet (``trend_7d`` before an
-    options/sentiment service restart) reads None -> track-only."""
+    A horizon with no usable reading draws its track only, rather than a
+    fabricated neutral 50. That covers an absent key (``trend_7d`` before a
+    sentiment_svc restart carrying it) AND — the case that actually recurs — a
+    horizon the service published as a zero-confidence neutral after a fetch
+    failure. See ``_trend_arc_value``."""
     d = derived or {}
     return [{"value": _trend_arc_value(d.get("trend")), "caption": "DAY"},
             {"value": _trend_arc_value(d.get("trend_7d")), "caption": "WEEK"},
