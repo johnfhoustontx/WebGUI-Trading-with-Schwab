@@ -323,8 +323,13 @@ _DEFENSIVE = {"XLP", "XLU", "XLV", "XLRE"}
 
 # %-spread that maps cyclical-vs-defensive leadership to the full ±1 of
 # ``cyc_def_spread``. Intraday day-moves are small (~1% = decisive); month-moves
-# are ~3× larger, so the structural gauge uses a wider scale.
+# are ~3× larger, so the structural gauge uses a wider scale. The week sits
+# between: 3.0·√(5/21) ≈ 1.46, i.e. the same random-walk √t scaling the 30d
+# constant already implies, rounded. UNMEASURED — anchoring off the intraday
+# constant instead (1.0·√5 ≈ 2.2) argues for a wider scale, so treat 1.5 as a
+# first-pass tunable, not a calibration.
 _CYC_DEF_SCALE_INTRADAY = 1.0
+_CYC_DEF_SCALE_7D = 1.5
 _CYC_DEF_SCALE_30D = 3.0
 
 # Aggression-axis normalization scales (first-pass tunables). SKEW is in 25-delta
@@ -1182,6 +1187,145 @@ def compute_market_regime(schwab, matrix=None, vix=None, prior=None,
         return _unclear_shell(now_ts, prior)
 
 
+def _neutral_structural_trend():
+    """Neutral structural-trend dict — the catastrophic-failure fallback shared by
+    both structural horizons, so the GUI always sees a valid, fully-shaped dict."""
+    return {
+        "score": 50.0,
+        "state": "range",
+        "label": trend_regime.STATE_LABELS["range"],
+        "description": trend_regime.STATE_DESCRIPTIONS["range"],
+        "confidence": 0.0,
+        "sub_scores": {"price": 50.0, "sector": 50.0},
+    }
+
+
+def _finite_pcts(pcts):
+    """Sector %-moves keyed by ETF, with missing / non-finite values DROPPED.
+
+    A NaN must not survive into the leadership spread: ``intraday_trend._clamp``
+    is ``max(lo, min(hi, v))``, which returns the HIGH bound for NaN — so one bad
+    close (``float('nan')`` survives ``_fetch_closes``' conversion, and
+    ``_pct_change_n`` propagates it) would render as MAXIMUM cyclical leadership
+    at unchanged confidence. Dropping it lowers ``n_total``, and with it the
+    sub-score's confidence, which is what a missing sector should do."""
+    out = {}
+    for etf, p in (pcts or {}).items():
+        try:
+            v = float(p)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(v):
+            out[etf] = v
+    return out
+
+
+def _structural_trend(spy_daily_df, sector_pcts, cyc_def_scale) -> dict:
+    """Structural directional trend from daily SPY bars + sector %-moves.
+
+    The shared body of ``compute_7d_trend`` and ``compute_30d_trend`` — they
+    differ ONLY in which horizon's sector %-moves they pass and in
+    ``cyc_def_scale``. Pure (no fetching, no caching) and it does NOT swallow
+    exceptions: the two callers own the fetch, the TTL cache and the neutral
+    fallback."""
+    # PRICE — daily structural alignment + RSI/ADX/MACD (no VWAP at this horizon).
+    if spy_daily_df is None or len(spy_daily_df) < 50:
+        price = intraday_trend.TrendSub(50.0, 0.0)
+    else:
+        frames = {"1day": spy_daily_df}
+        price_now = float(spy_daily_df["close"].iloc[-1])
+        align = technical.calculate_ema_alignment(frames, price_now)
+        align_pct = float(align.get("alignment_percentage", 0.0))
+        hist = technical.macd_histogram_series(spy_daily_df)
+        macd_hist = (float(hist.iloc[-1])
+                     if hist is not None and len(hist) else 0.0)
+        rsi = float(technical.calculate_rsi(spy_daily_df))
+        adx = float(technical.calculate_adx(spy_daily_df))
+        price = intraday_trend.score_price(
+            align_pct, 0.0, macd_hist, rsi, adx, n_timeframes=1)
+
+    # SECTOR — participation + cyc/def leadership from this horizon's %-moves.
+    pcts = _finite_pcts(sector_pcts)
+    if not pcts:
+        sector = intraday_trend.TrendSub(50.0, 0.0)
+    else:
+        n_green = sum(1 for p in pcts.values() if p > 0)
+        n_total = len(pcts)
+        cyc = [p for etf, p in pcts.items() if etf in _CYCLICAL]
+        dfn = [p for etf, p in pcts.items() if etf in _DEFENSIVE]
+        if cyc and dfn:
+            cyc_def_spread = intraday_trend._clamp(
+                (_mean(cyc) - _mean(dfn)) / cyc_def_scale, -1, 1)
+        else:
+            cyc_def_spread = None
+        sector = intraday_trend.score_sector_participation(
+            n_green, n_total, cyc_def_spread)
+
+    scores = {"price": price.score, "sector": sector.score}
+    confs = {"price": price.confidence, "sector": sector.confidence}
+    score, agg = intraday_trend.blend_trend(scores, confs)
+    state = intraday_trend.score_to_state(score)
+    return {
+        "score": score,
+        "state": state,
+        "label": trend_regime.STATE_LABELS[state],
+        "description": trend_regime.STATE_DESCRIPTIONS[state],
+        "confidence": agg,
+        "sub_scores": {"price": price.score, "sector": sector.score},
+    }
+
+
+# Self-fetch cache for compute_7d_trend. Shorter than the 30d window because a
+# WEEK horizon moves faster than a month — but the sector fan-out behind it is
+# shared and hourly (``SECTOR_PCTS_TTL_SEC``), so the only thing this cadence
+# actually re-pulls is SPY's daily frame. Applies ONLY to the fully-self-fetching
+# (no-args) path; explicit-args calls (tests / offline) bypass it entirely.
+TREND_7D_TTL_SEC = 1800  # recompute at most every 30 min
+_TREND_7D_CACHE = {"ts": 0.0, "result": None}
+
+
+def reset_trend_7d_cache():
+    """Drop the cached 7d trend so the next self-fetch call recomputes (tests)."""
+    _TREND_7D_CACHE.update(ts=0.0, result=None)
+
+
+def compute_7d_trend(spy_daily_df=_FETCH, sector_week_pcts=_FETCH) -> dict:
+    """~7-day *structural* directional trend (price structure + sector breadth).
+
+    The weekly-horizon sibling of ``compute_30d_trend``, feeding the Market Trend
+    ring's Week arc. Same argument semantics: an OMITTED argument is fetched
+    internally (and that path is TTL-cached, see ``_TREND_7D_CACHE``), while an
+    explicit ``None`` / ``{}`` means the caller has no data and that sub-score
+    degrades to neutral. Defensive: a catastrophic failure returns a neutral dict.
+
+    LIMITATION — the weekly and monthly structural trends share the SAME daily
+    price sub-score. ``technical.calculate_ema_alignment``'s EMA periods are
+    fixed, so handing it a shorter frame would not change the answer; the two
+    horizons differ ONLY in the sector %-move horizon and ``cyc_def_scale``.
+    Consequence: the Week and Month arcs track each other closely and diverge
+    mainly on sector rotation. A genuinely weekly price read needs
+    weekly-resampled SPY bars — a deliberate follow-up, not part of this change."""
+    self_fetch = spy_daily_df is _FETCH and sector_week_pcts is _FETCH
+    if self_fetch:
+        cached = _TREND_7D_CACHE["result"]
+        if (cached is not None
+                and time.monotonic() - _TREND_7D_CACHE["ts"] < TREND_7D_TTL_SEC):
+            return dict(cached)
+    try:
+        if spy_daily_df is _FETCH:
+            from services import _proxy
+            spy_daily_df = _safe_daily(_proxy.schwab_client, "SPY", 12)
+        if sector_week_pcts is _FETCH:
+            sector_week_pcts = _fetch_sector_week_pcts()
+        result = _structural_trend(spy_daily_df, sector_week_pcts,
+                                   _CYC_DEF_SCALE_7D)
+    except Exception:  # noqa: BLE001
+        return _neutral_structural_trend()
+    if self_fetch:  # cache only the successful self-fetching path
+        _TREND_7D_CACHE.update(ts=time.monotonic(), result=dict(result))
+    return result
+
+
 # Self-fetch cache for compute_30d_trend: the 15-min trend recompute calls it
 # every cycle, but a ~30-DAY structural gauge changes ~daily — refetching SPY
 # 12-mo + 11 sector histories 26×/day (~1,150 proxy calls) bought nothing.
@@ -1205,7 +1349,10 @@ def compute_30d_trend(spy_daily_df=_FETCH, sector_month_pcts=_FETCH) -> dict:
     function is self-contained) — and the self-fetching path is TTL-cached
     ~hourly (see ``_TREND_30D_CACHE``); passing an explicit ``None`` / ``{}``
     means the caller has no data and the corresponding sub-score degrades to
-    neutral. Defensive: a catastrophic failure returns a neutral dict."""
+    neutral. Defensive: a catastrophic failure returns a neutral dict.
+
+    NOTE the name is historical: this is a monthly-HORIZON structural read, not
+    the trend as it stood 30 days ago and not a 30-day average."""
     self_fetch = spy_daily_df is _FETCH and sector_month_pcts is _FETCH
     if self_fetch:
         cached = _TREND_30D_CACHE["result"]
@@ -1218,66 +1365,13 @@ def compute_30d_trend(spy_daily_df=_FETCH, sector_month_pcts=_FETCH) -> dict:
             spy_daily_df = _safe_daily(_proxy.schwab_client, "SPY", 12)
         if sector_month_pcts is _FETCH:
             sector_month_pcts = _fetch_sector_month_pcts()
-
-        # PRICE — daily structural alignment + RSI/ADX/MACD (no VWAP at this horizon).
-        if spy_daily_df is None or len(spy_daily_df) < 50:
-            price = intraday_trend.TrendSub(50.0, 0.0)
-        else:
-            frames = {"1day": spy_daily_df}
-            price_now = float(spy_daily_df["close"].iloc[-1])
-            align = technical.calculate_ema_alignment(frames, price_now)
-            align_pct = float(align.get("alignment_percentage", 0.0))
-            hist = technical.macd_histogram_series(spy_daily_df)
-            macd_hist = (float(hist.iloc[-1])
-                         if hist is not None and len(hist) else 0.0)
-            rsi = float(technical.calculate_rsi(spy_daily_df))
-            adx = float(technical.calculate_adx(spy_daily_df))
-            price = intraday_trend.score_price(
-                align_pct, 0.0, macd_hist, rsi, adx, n_timeframes=1)
-
-        # SECTOR — participation + cyc/def leadership from month-% moves.
-        pcts = sector_month_pcts or {}
-        if not pcts:
-            sector = intraday_trend.TrendSub(50.0, 0.0)
-        else:
-            n_green = sum(1 for p in pcts.values() if p is not None and p > 0)
-            n_total = sum(1 for p in pcts.values() if p is not None)
-            cyc = [p for etf, p in pcts.items()
-                   if etf in _CYCLICAL and p is not None]
-            dfn = [p for etf, p in pcts.items()
-                   if etf in _DEFENSIVE and p is not None]
-            if cyc and dfn:
-                cyc_def_spread = intraday_trend._clamp(
-                    (_mean(cyc) - _mean(dfn)) / _CYC_DEF_SCALE_30D, -1, 1)
-            else:
-                cyc_def_spread = None
-            sector = intraday_trend.score_sector_participation(
-                n_green, n_total, cyc_def_spread)
-
-        scores = {"price": price.score, "sector": sector.score}
-        confs = {"price": price.confidence, "sector": sector.confidence}
-        score, agg = intraday_trend.blend_trend(scores, confs)
-        state = intraday_trend.score_to_state(score)
-        result = {
-            "score": score,
-            "state": state,
-            "label": trend_regime.STATE_LABELS[state],
-            "description": trend_regime.STATE_DESCRIPTIONS[state],
-            "confidence": agg,
-            "sub_scores": {"price": price.score, "sector": sector.score},
-        }
-        if self_fetch:  # cache only the successful self-fetching path
-            _TREND_30D_CACHE.update(ts=time.monotonic(), result=dict(result))
-        return result
+        result = _structural_trend(spy_daily_df, sector_month_pcts,
+                                   _CYC_DEF_SCALE_30D)
     except Exception:  # noqa: BLE001
-        return {
-            "score": 50.0,
-            "state": "range",
-            "label": trend_regime.STATE_LABELS["range"],
-            "description": trend_regime.STATE_DESCRIPTIONS["range"],
-            "confidence": 0.0,
-            "sub_scores": {"price": 50.0, "sector": 50.0},
-        }
+        return _neutral_structural_trend()
+    if self_fetch:  # cache only the successful self-fetching path
+        _TREND_30D_CACHE.update(ts=time.monotonic(), result=dict(result))
+    return result
 
 
 # One sector fan-out serves BOTH structural horizons. ``_fetch_closes`` already

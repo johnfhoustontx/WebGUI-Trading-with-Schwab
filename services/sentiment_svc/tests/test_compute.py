@@ -557,6 +557,136 @@ def test_compute_30d_trend_explicit_args_bypass_cache(monkeypatch):
     assert compute._TREND_30D_CACHE["result"] is None  # cache untouched
 
 
+# --- 7-day structural trend (the Week arc) ------------------------------------
+
+def test_compute_7d_trend_shape():
+    spy = _bars(260, 400.0, 0.6)
+    weeks = {"XLK": 2.0, "XLF": 1.5, "XLY": 1.2, "XLP": -0.3, "XLU": -0.5}
+    out = compute.compute_7d_trend(spy, weeks)
+    for k in ("score", "state", "label", "description", "confidence",
+              "sub_scores"):
+        assert k in out
+    assert out["score"] > 60.0
+    assert set(out["sub_scores"]) == {"price", "sector"}
+
+
+def test_compute_7d_trend_neutral_without_data():
+    out = compute.compute_7d_trend(None, {})
+    assert out["score"] == 50.0
+    assert out["state"] == "range"
+
+
+def test_compute_7d_trend_tracks_sector_breadth():
+    """Broad green sectors must score above broad red ones, SPY held fixed."""
+    spy = _bars(260, 400.0, 0.6)
+    green = {"XLK": 2.0, "XLF": 1.5, "XLY": 1.2, "XLI": 0.8, "XLP": 0.3}
+    red = {"XLK": -2.0, "XLF": -1.5, "XLY": -1.2, "XLI": -0.8, "XLP": -0.3}
+    up = compute.compute_7d_trend(spy, green)
+    down = compute.compute_7d_trend(spy, red)
+    assert up["sub_scores"]["sector"] > 50.0 > down["sub_scores"]["sector"]
+    assert up["score"] > down["score"]
+
+
+def test_compute_7d_trend_never_raises_on_junk():
+    spy = _bars(260, 400.0, 0.6)
+    for pcts in ({"XLK": "wat"}, {"XLK": None}, {None: 1.0}, "not-a-dict", []):
+        out = compute.compute_7d_trend(spy, pcts)
+        assert out["score"] == out["score"]          # not NaN
+        assert 0.0 <= out["score"] <= 100.0
+    for frame in (None, "not-a-frame", 42):
+        out = compute.compute_7d_trend(frame, {"XLK": 1.0})
+        assert 0.0 <= out["score"] <= 100.0
+
+
+def test_compute_7d_trend_self_fetch_cached(monkeypatch):
+    """The self-fetching path (what the 15-min recompute calls) is TTL-cached."""
+    calls = {"spy": 0, "sectors": 0}
+
+    def fake_daily(schwab, symbol, months):
+        calls["spy"] += 1
+        return _bars(260, 400.0, 0.6)
+
+    def fake_weeks():
+        calls["sectors"] += 1
+        return {"XLK": 2.0, "XLF": 1.5, "XLP": -0.3}
+
+    monkeypatch.setattr(compute, "_safe_daily", fake_daily)
+    monkeypatch.setattr(compute, "_fetch_sector_week_pcts", fake_weeks)
+    compute.reset_trend_7d_cache()
+
+    first = compute.compute_7d_trend()
+    assert calls == {"spy": 1, "sectors": 1}
+    second = compute.compute_7d_trend()
+    assert calls == {"spy": 1, "sectors": 1}          # within TTL: no refetch
+    assert second == first
+
+    compute._TREND_7D_CACHE["ts"] -= compute.TREND_7D_TTL_SEC + 1
+    compute.compute_7d_trend()
+    assert calls == {"spy": 2, "sectors": 2}          # TTL expired: refetched
+
+
+def test_compute_7d_trend_explicit_args_bypass_cache(monkeypatch):
+    monkeypatch.setattr(
+        compute, "_safe_daily",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not fetch")))
+    compute.reset_trend_7d_cache()
+    out = compute.compute_7d_trend(_bars(260, 400.0, 0.6), {"XLK": 2.0})
+    assert out["score"] > 50.0
+    assert compute._TREND_7D_CACHE["result"] is None
+
+
+def test_week_and_month_gauges_read_their_own_horizon(monkeypatch):
+    """The two structural gauges must read DIFFERENT columns of the shared sector
+    fetch. Feed a tape that is green over the week and red over the month: the
+    Week arc has to come out bullish and the Month arc bearish. Swapping the two
+    horizons in either function flips both and fails here."""
+    monkeypatch.setattr(compute, "_safe_daily",
+                        lambda *a, **k: _bars(260, 400.0, 0.6))
+
+    import sectors_ref
+    monkeypatch.setattr(sectors_ref, "load_sectors_data",
+                        lambda *a, **k: [{"kind": "sector", "etf": e}
+                                         for e in ("XLK", "XLF", "XLY", "XLP")])
+    monkeypatch.setattr(
+        compute, "_fetch_closes",
+        lambda etfs, months: ({}, {e: {"day3_pct": 0.0, "week_pct": 2.0,
+                                       "month_pct": -2.0} for e in etfs}))
+    compute.reset_sector_pcts_cache()
+    compute.reset_trend_7d_cache()
+    compute.reset_trend_30d_cache()
+
+    week = compute.compute_7d_trend()
+    month = compute.compute_30d_trend()
+    assert week["sub_scores"]["sector"] > 50.0
+    assert month["sub_scores"]["sector"] < 50.0
+
+
+def test_week_horizon_uses_a_tighter_cyc_def_scale():
+    """A week's cyclical-vs-defensive spread is smaller than a month's, so the
+    same spread must read as STRONGER leadership at the weekly horizon."""
+    spy = _bars(260, 400.0, 0.6)
+    pcts = {"XLK": 1.0, "XLY": 1.0, "XLP": 0.0, "XLU": 0.0}
+    week = compute.compute_7d_trend(spy, pcts)
+    month = compute.compute_30d_trend(spy, pcts)
+    assert week["sub_scores"]["sector"] > month["sub_scores"]["sector"]
+
+
+def test_non_finite_sector_pct_is_treated_as_missing():
+    """A NaN %-move must NOT read as a real value. ``intraday_trend._clamp`` is
+    ``max(lo, min(hi, v))``, which returns the HIGH bound for NaN — so an
+    unguarded NaN renders as MAXIMUM cyclical leadership at full confidence.
+    Dropping it (lowering n_total, and so the sub-score's confidence) is what a
+    missing sector should do. Applies to both structural horizons."""
+    nan = float("nan")
+    spy = _bars(260, 400.0, 0.6)
+    with_nan = {"XLK": nan, "XLF": 1.5, "XLY": 1.2, "XLP": -0.3}
+    without = {"XLF": 1.5, "XLY": 1.2, "XLP": -0.3}
+    assert compute.compute_7d_trend(spy, with_nan) == \
+        compute.compute_7d_trend(spy, without)
+    assert compute.compute_30d_trend(spy, with_nan) == \
+        compute.compute_30d_trend(spy, without)
+
+
 # --- shared sector %-move fetch (one fan-out serves both horizons) ------------
 
 def _stub_sector_fetch(monkeypatch, calls):
