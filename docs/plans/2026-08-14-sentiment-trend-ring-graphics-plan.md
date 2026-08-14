@@ -42,7 +42,8 @@ call for the rest of the session and cannot be recovered. Always use a subshell:
 count — this repo has a documented incident where two real regressions hid behind
 two tests flipping to skipped while the total held steady):
 
-- `webgui` — 1190 passed
+- `webgui` — **1253 passed** (measured 2026-08-14 at `67c9a38`. CLAUDE.md says
+  1190; that figure is stale, measured 2026-08-09. Trust this one.)
 - `services/sentiment_svc` — 250 passed / **1 known failure**:
   `tests/test_compute_regime.py::test_daily_history_wins_over_session_latch`.
   That failure predates this work. Do not fix it here.
@@ -134,15 +135,41 @@ def test_arc_path_is_empty_at_zero():
 def test_arc_path_sets_large_arc_flag_past_180_degrees():
     short = rings._arc_path(140, 140, 100, 225.0, 315.0)   # 90 deg
     long_ = rings._arc_path(140, 140, 100, 225.0, 495.0)   # 270 deg
-    # path is "M x y A r r 0 <large> 1 x1 y1"
-    assert short.split()[6] == "0"
-    assert long_.split()[6] == "1"
+    # SVG arc syntax: A rx ry x-axis-rotation large-arc-flag sweep-flag x y
+    # tokens:         3  4  5   6                7             8         9 10
+    assert short.split()[7] == "0"
+    assert long_.split()[7] == "1"
 
 
 def test_arc_path_always_sweeps_clockwise():
     p = rings._arc_path(140, 140, 100, 225.0, 495.0)
-    assert p.split()[7] == "1"
+    assert p.split()[8] == "1"
+
+
+def test_arc_path_endpoints_sit_on_the_circle_at_the_requested_angles():
+    """Locks the start/end coords + radii — the tokens that decide where a value
+    arc visually stops. Without this, swapping end_deg for start_deg (or dropping
+    the value scaling) leaves the whole suite green."""
+    d = rings._arc_path(140, 140, 100, rings.START_DEG, rings._value_angle(50))
+    t = d.split()
+    assert (t[0], t[3]) == ("M", "A")
+    assert _close(float(t[1]), 69.29) and _close(float(t[2]), 210.71, 0.02)
+    assert _close(float(t[4]), 100.0) and _close(float(t[5]), 100.0)
+    assert _close(float(t[9]), 140.0) and _close(float(t[10]), 40.0)
 ```
+
+> **Token indices matter here and are easy to get wrong.** SVG's arc command is
+> `A rx ry x-axis-rotation large-arc-flag sweep-flag x y`, so in the emitted
+> `M x0 y0 A r r 0 <large> <sweep> x1 y1` the large-arc flag is token **7** and
+> the sweep flag is token **8**. Token 6 is the always-`"0"` x-axis-rotation —
+> asserting against it passes vacuously. An earlier draft of this plan had
+> exactly that bug.
+
+> **Why the endpoint test is not optional.** `_arc_path` emits 11 tokens; without
+> it the suite asserts only the 2 flag bits, leaving every coordinate that
+> *places* the arc unchecked (5 surviving mutants, measured). Nothing downstream
+> closes it — Task 2 asserts path counts and text presence, not coordinates — so
+> a silently wrong arc would survive to Task 10's screenshot.
 
 **Step 2: Run the tests to verify they fail**
 
@@ -345,7 +372,7 @@ Expected: `AttributeError: module 'pages.rings' has no attribute 'ring_svg'`.
 Append to `webgui/pages/rings.py`:
 
 ```python
-from pages.gauge import _ramp_color
+from pages.gauge import _esc, _ramp_color
 
 RADII = (112.0, 90.0, 68.0)   # outer -> inner, in the fixed 280 viewBox
 STROKE = 13.0
@@ -369,11 +396,6 @@ def _safe_value(v):
     if f != f:                       # NaN
         return None
     return max(0.0, min(100.0, f))
-
-
-def _esc(text):
-    return (str(text if text is not None else "")
-            .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
 
 
 def _fmt(v):
@@ -448,9 +470,18 @@ def ring_svg(arcs, uid, size=280):
     return "".join(parts)
 ```
 
-Note the `from pages.gauge import _ramp_color` import — `gauge.py` is otherwise
-untouched by this work, and reusing its ramp is what keeps
-`config/theme.toml [gauge]` in control of the palette.
+**On the `pages.gauge` import.** `gauge.py` is otherwise untouched by this work,
+and reusing its `_ramp_color` is what keeps `config/theme.toml [gauge]` in
+control of the palette. Once you are importing one helper from it, `_esc` comes
+free — do NOT redefine an identical escaper here.
+
+**But `_safe_value` stays local — it is NOT `gauge._safe_float`.** The contracts
+differ in exactly the way that matters: `_safe_float` coerces junk to a *default*
+(`0.0`), while `_safe_value` must return **None** so the ring can distinguish
+"this horizon has no data yet" (draw the track only, print `—`) from "this
+horizon genuinely reads zero". Substituting `_safe_float` would silently paint a
+missing `trend_7d` as a hard 0 — a fabricated reading, which is the one failure
+mode this design is most concerned with.
 
 **Step 4: Run to verify they pass**
 
