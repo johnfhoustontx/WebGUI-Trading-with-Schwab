@@ -34,15 +34,17 @@ log = logging.getLogger(__name__)
 
 # Persisted directional Market-Trend state. ``last_ts`` is a monotonic timestamp
 # gating the 15-min recompute; ``history`` / ``committed`` / ``smoothed`` thread
-# the hysteresis + EMA state across reads; ``trend`` / ``trend_30d`` are the latest
-# computed payloads reused on gated (non-recompute) refreshes so every composite
-# write carries a trend. ``refresh`` has two entry points (the scheduler loop and
+# the hysteresis + EMA state across reads; ``trend`` / ``trend_7d`` / ``trend_30d``
+# are the latest computed payloads reused on gated (non-recompute) refreshes so
+# every composite write carries all three Market-Trend-ring horizons — the two
+# structural ones carry no hysteresis of their own, they are simply HELD.
+# ``refresh`` has two entry points (the scheduler loop and
 # ``handle_command``) that the scaffold runs in a multi-worker executor, so the
 # read-modify-write below is serialized by ``_TREND_LOCK`` — without it a manual
 # Refresh racing the scheduled one could double-recompute or tear the hysteresis
 # thread.
 _TREND = {"last_ts": None, "history": [], "committed": None, "smoothed": None,
-          "trend": None, "trend_30d": None}
+          "trend": None, "trend_7d": None, "trend_30d": None}
 _TREND_LOCK = threading.Lock()
 
 # Cached 30-day backfill. ``compute.load_snapshots`` re-runs the full 35-day
@@ -139,6 +141,11 @@ def _maybe_recompute_trend(bus):
                 sector_pc_delta=pc_delta,
                 order_flow=order_flow)
             t30 = compute.compute_30d_trend()
+            # The Week arc's structural read. Both self-fetching gauges are
+            # TTL-cached (7d 30 min / 30d hourly) behind ONE shared hourly sector
+            # fan-out, so this 15-min gate mostly returns cached dicts and the
+            # only marginal cost is SPY's daily frame every other cycle.
+            t7 = compute.compute_7d_trend()
             prev_committed = _TREND["committed"]
             _TREND.update(
                 last_ts=now,
@@ -146,6 +153,7 @@ def _maybe_recompute_trend(bus):
                 committed=t.get("state"),
                 smoothed=t.get("smoothed_score"),
                 trend=t,
+                trend_7d=t7,
                 trend_30d=t30)
             new_committed = _TREND["committed"]
             # Record the freshly-committed market-state for later validation.
@@ -664,7 +672,8 @@ def refresh(bus, with_sectors: bool = False) -> None:
         "proxy_up": compute.proxy_up(),
         "derived": compute.derive_composite_extras(
             live, snaps, spy,
-            trend=_TREND["trend"], trend_30d=_TREND["trend_30d"]),
+            trend=_TREND["trend"], trend_30d=_TREND["trend_30d"],
+            trend_7d=_TREND["trend_7d"]),
     })
     bus.publish(EVENT_COMPOSITE, {"version": version})
 

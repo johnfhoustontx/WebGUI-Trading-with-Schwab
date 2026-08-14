@@ -60,6 +60,8 @@ def _patch_compute(monkeypatch, *, live, snaps, spy, sector=None,
                                          "state_history": [], "smoothed_score": 50.0})
     monkeypatch.setattr(handlers.compute, "compute_30d_trend",
                         lambda *a, **k: {"state": "neutral"})
+    monkeypatch.setattr(handlers.compute, "compute_7d_trend",
+                        lambda *a, **k: {"state": "neutral"})
     # sector_pc_delta is read inside _maybe_recompute_trend (aggression axis) —
     # stub it so tests never touch the real on-disk sector-P/C store.
     monkeypatch.setattr(handlers.compute, "sector_pc_delta", lambda: None)
@@ -363,7 +365,8 @@ def test_refresh_rotation_survives_compute_exception(monkeypatch):
 
 def _reset_trend():
     handlers._TREND.update(last_ts=None, history=[], committed=None,
-                           smoothed=None, trend=None, trend_30d=None)
+                           smoothed=None, trend=None, trend_30d=None,
+                           trend_7d=None)
 
 
 def test_refresh_recomputes_trend_first_call_then_gates(monkeypatch):
@@ -377,10 +380,10 @@ def test_refresh_recomputes_trend_first_call_then_gates(monkeypatch):
                            "composite": {"total_score": "7.80"}}], spy=[1.0])
 
     # Real derive (the stub above replaces it) — restore so trend threads through.
-    def _derive(live, snaps, spy, trend=None, trend_30d=None):
+    def _derive(live, snaps, spy, trend=None, trend_30d=None, trend_7d=None):
         return {"weights": {}, "size": "", "bias": "", "signal": "",
                 "velocity": {"text": "", "flag": ""}, "divergence": "",
-                "trend": trend, "trend_30d_ago": trend_30d}
+                "trend": trend, "trend_30d_ago": trend_30d, "trend_7d": trend_7d}
     monkeypatch.setattr(handlers.compute, "derive_composite_extras", _derive)
 
     calls = {"intraday": 0, "thirty": 0}
@@ -417,6 +420,52 @@ def test_refresh_recomputes_trend_first_call_then_gates(monkeypatch):
     assert calls["intraday"] == 1 and calls["thirty"] == 1  # still 1
     comp2 = bus.cache_get("cache:sentiment:composite")
     assert comp2.payload["derived"]["trend"] == sentinel
+    _reset_trend()
+
+
+def test_refresh_publishes_trend_7d_into_the_composite(monkeypatch):
+    """The Week horizon reaches the PUBLISHED ``cache:sentiment:composite``
+    payload (not merely ``derive_composite_extras``' return), carrying the 7d
+    value — the 7d and 30d sentinels differ so a swapped wiring fails here — and
+    it is held + reused on a gated (non-recompute) refresh, exactly like the 30d."""
+    _reset_trend()
+    bus = Bus(fake=True)
+    _patch_compute(monkeypatch, live=_fake_live(), snaps=[{"x": 1}], spy=[1.0])
+
+    def _derive(live, snaps, spy, trend=None, trend_30d=None, trend_7d=None):
+        return {"weights": {}, "size": "", "bias": "", "signal": "",
+                "velocity": {"text": "", "flag": ""}, "divergence": "",
+                "trend": trend, "trend_30d_ago": trend_30d, "trend_7d": trend_7d}
+    monkeypatch.setattr(handlers.compute, "derive_composite_extras", _derive)
+
+    calls = {"seven": 0}
+    sentinel7 = {"state": "bull_trend", "score": 71.0, "marker": "7d"}
+    sentinel30 = {"state": "bear_trend", "score": 22.0, "marker": "30d"}
+
+    def _seven(*a, **k):
+        calls["seven"] += 1
+        return sentinel7
+
+    monkeypatch.setattr(handlers.compute, "compute_intraday_trend",
+                        lambda *a, **k: {"state": "neutral", "state_history": [],
+                                         "smoothed_score": 50.0})
+    monkeypatch.setattr(handlers.compute, "compute_30d_trend",
+                        lambda *a, **k: sentinel30)
+    monkeypatch.setattr(handlers.compute, "compute_7d_trend", _seven)
+    monkeypatch.setattr(handlers.time, "monotonic", lambda: 33000.0)
+
+    handlers.refresh(bus, with_sectors=False)
+    assert calls["seven"] == 1
+    derived = bus.cache_get("cache:sentiment:composite").payload["derived"]
+    assert derived["trend_7d"] == sentinel7
+    assert derived["trend_30d_ago"] == sentinel30
+    assert handlers._TREND["trend_7d"] == sentinel7
+
+    # Gated second refresh: no recompute, but the held 7d still publishes.
+    handlers.refresh(bus, with_sectors=False)
+    assert calls["seven"] == 1
+    derived2 = bus.cache_get("cache:sentiment:composite").payload["derived"]
+    assert derived2["trend_7d"] == sentinel7
     _reset_trend()
 
 
@@ -484,10 +533,10 @@ def test_refresh_trend_recompute_failure_non_fatal(monkeypatch):
     bus = Bus(fake=True)
     _patch_compute(monkeypatch, live=_fake_live(), snaps=[{"x": 1}], spy=[1.0])
 
-    def _derive(live, snaps, spy, trend=None, trend_30d=None):
+    def _derive(live, snaps, spy, trend=None, trend_30d=None, trend_7d=None):
         return {"weights": {}, "size": "", "bias": "", "signal": "",
                 "velocity": {"text": "", "flag": ""}, "divergence": "",
-                "trend": trend, "trend_30d_ago": trend_30d}
+                "trend": trend, "trend_30d_ago": trend_30d, "trend_7d": trend_7d}
     monkeypatch.setattr(handlers.compute, "derive_composite_extras", _derive)
 
     def _boom(*a, **k):
@@ -808,6 +857,7 @@ def test_maybe_recompute_trend_records_market_state(monkeypatch):
     monkeypatch.setattr(handlers.compute, "compute_intraday_trend",
                         lambda *a, **k: fresh)
     monkeypatch.setattr(handlers.compute, "compute_30d_trend", lambda *a, **k: {})
+    monkeypatch.setattr(handlers.compute, "compute_7d_trend", lambda *a, **k: {})
     monkeypatch.setattr(handlers.compute, "sector_pc_delta", lambda: None)
     monkeypatch.setattr(handlers.time, "monotonic", lambda: 12000.0)
 
@@ -833,6 +883,7 @@ def _stub_trend_recompute(monkeypatch, new_state):
     monkeypatch.setattr(handlers.compute, "compute_intraday_trend",
                         lambda *a, **k: fresh)
     monkeypatch.setattr(handlers.compute, "compute_30d_trend", lambda *a, **k: {})
+    monkeypatch.setattr(handlers.compute, "compute_7d_trend", lambda *a, **k: {})
     monkeypatch.setattr(handlers.compute, "sector_pc_delta", lambda: None)
     monkeypatch.setattr(handlers.time, "monotonic", lambda: 21000.0)
     return fresh

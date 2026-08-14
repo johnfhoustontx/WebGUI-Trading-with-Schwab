@@ -56,8 +56,8 @@ def test_derive_composite_extras_shape_and_values():
     spy = [100.0 + i * 0.5 for i in range(260)]
     out = compute.derive_composite_extras(live, snaps, spy)
 
-    assert set(out) == {"weights", "size", "bias", "signal",
-                        "velocity", "divergence", "trend", "trend_30d_ago"}
+    assert set(out) == {"weights", "size", "bias", "signal", "velocity",
+                        "divergence", "trend", "trend_7d", "trend_30d_ago"}
     # weights = sentiment v4.3 WEIGHTS (credit_pulse excluded, sums to 1.0).
     assert abs(sum(out["weights"].values()) - 1.0) < 1e-9
     assert "credit_pulse" not in out["weights"]
@@ -173,6 +173,28 @@ def test_derive_composite_extras_trend_30d_passes_through():
     t30 = {"state": "bull_trend", "score": 90.0, "marker": "verbatim30"}
     out = compute.derive_composite_extras(live=None, snaps=[], spy=[],
                                           trend_30d=t30)
+    assert out["trend_30d_ago"] == t30
+
+
+def test_derive_composite_extras_includes_trend_7d():
+    """The Week horizon degrades to the same neutral placeholder the Month one
+    does, so the ring always sees a fully-shaped payload."""
+    out = compute.derive_composite_extras(live=None, snaps=[], spy=[])
+    t7 = out["trend_7d"]
+    assert t7 is not None and t7.get("state") in _TREND_STATES
+    assert t7.get("score") == 50.0
+    assert "sub_scores" in t7
+
+
+def test_derive_composite_extras_keeps_trend_7d_and_30d_distinct():
+    """Both structural horizons pass through VERBATIM and land on their OWN key
+    — a swap of the two arguments must be visible (the Week and Month arcs are
+    otherwise near-identical numbers, so a weak assertion would not notice)."""
+    t7 = {"state": "bull_trend", "score": 71.0, "marker": "verbatim7"}
+    t30 = {"state": "bear_trend", "score": 22.0, "marker": "verbatim30"}
+    out = compute.derive_composite_extras(live=None, snaps=[], spy=[],
+                                          trend=None, trend_30d=t30, trend_7d=t7)
+    assert out["trend_7d"] == t7
     assert out["trend_30d_ago"] == t30
 
 

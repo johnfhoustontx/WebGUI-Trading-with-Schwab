@@ -1450,17 +1450,20 @@ def _divergence_named(snapshot):
     return out
 
 
-def derive_composite_extras(live, snaps, spy, trend=None, trend_30d=None):
+def derive_composite_extras(live, snaps, spy, trend=None, trend_30d=None,
+                            trend_7d=None):
     """Scoring-derived values for the GUI's composite view.
 
     Computes weights / size-bias-signal / velocity / divergence from the same
     inputs the page used to derive inline (now centralized in this process where
-    ``scoring`` resolves to sentiment's package). The ``trend`` / ``trend_30d``
-    directional Market-Trend payloads are now computed on a 15-min cadence in
-    ``handlers.refresh`` and threaded in here; when absent (None) a neutral
-    placeholder is supplied so the GUI always has a fully-shaped trend. Defensive:
-    any sub-failure yields a safe default without raising, so a partial compute
-    never aborts the refresh.
+    ``scoring`` resolves to sentiment's package). The ``trend`` / ``trend_7d`` /
+    ``trend_30d`` directional Market-Trend payloads are now computed on a 15-min
+    cadence in ``handlers.refresh`` and threaded in here; when absent (None) a
+    neutral placeholder is supplied so the GUI always has a fully-shaped trend
+    for every horizon of the Market Trend ring. Defensive: any sub-failure yields
+    a safe default without raising, so a partial compute never aborts the refresh.
+
+    ``trend_7d`` is LAST so the existing positional call shape is unaffected.
     """
     latest = live or (snaps[-1] if snaps else None)
     total = _safe_float((latest or {}).get("composite", {}).get("total_score"))
@@ -1510,6 +1513,7 @@ def derive_composite_extras(live, snaps, spy, trend=None, trend_30d=None):
         "velocity": velocity,
         "divergence": divergence,
         "trend": trend if trend is not None else _neutral_trend(),
+        "trend_7d": trend_7d if trend_7d is not None else _neutral_trend(),
         "trend_30d_ago": trend_30d if trend_30d is not None else _neutral_trend(),
     }
 
