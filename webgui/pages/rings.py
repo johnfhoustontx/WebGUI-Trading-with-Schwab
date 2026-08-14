@@ -45,6 +45,8 @@ def _arc_path(cx, cy, r, start_deg, end_deg):
 
 
 # --------------------------------------------------------------------- dial
+VIEWBOX = 280                 # fixed internal coordinate space; ``size`` only
+                              # sets width/height, so the SVG scales itself
 RADII = (112.0, 90.0, 68.0)   # outer -> inner, in the fixed 280 viewBox
 STROKE = 13.0
 HALO_EXTRA = 9.0              # extra stroke-width for the translucent glow layer
@@ -54,9 +56,22 @@ CX = CY = 140.0
 TRACK = "#1b2233"             # dim unfilled track (matches the page's chip bg)
 TICK_FILL = "#7f8db0"
 _TICKS = (0, 25, 50, 75, 100)
+
+# --- text layout -----------------------------------------------------------
+# Kept together because these are the knobs a human tunes BY EYE, and hunting
+# them out of ring_svg's body is the slow part. Deliberately NOT pinned by
+# tests: a coordinate someone is about to nudge should not turn the suite red.
+# Tests that need to locate a text node select it by the size constant rather
+# than a literal, so a nudge here cannot break them.
+#
 # The bottom 90 deg gap is the Week/Month legend. x=104/176 keeps both clear of
 # the 0 and 100 ticks, which land at x~47 and x~233 on the r=132 rim.
 _LEGEND_X = (104.0, 176.0)
+TICK_SIZE = 11
+CENTER_VALUE_Y, CENTER_VALUE_SIZE = 146.0, 52     # the OUTERMOST arc's reading
+CENTER_CAPTION_Y, CENTER_CAPTION_SIZE = 170.0, 12
+LEGEND_VALUE_Y, LEGEND_VALUE_SIZE = 250.0, 22     # Week + Month, in the gap
+LEGEND_CAPTION_Y, LEGEND_CAPTION_SIZE = 267.0, 10
 
 
 def _safe_value(v):
@@ -90,6 +105,18 @@ def _fill(v):
     return TICK_FILL if v is None else _ramp_color(v / 100.0)
 
 
+def _px(size):
+    """``size`` as a bare pixel count. The only interpolated input that is not
+    otherwise sanitized, so it gets the same treatment as ``uid``/``caption``
+    for contract consistency; junk falls back to the viewBox edge (1:1)."""
+    try:
+        f = float(size)
+    except (TypeError, ValueError):
+        return str(VIEWBOX)
+    # The bound also rejects NaN and inf, for which every comparison is False.
+    return f"{f:.0f}" if 0.0 < f < 10000.0 else str(VIEWBOX)
+
+
 def _id_token(uid):
     """``uid`` reduced to characters legal in a DOM id. Not an escaper (that is
     ``gauge._esc``) — an id has no business carrying quotes or markup at all."""
@@ -121,9 +148,11 @@ def ring_svg(arcs, uid, size=280):
     caps = [_esc(a.get("caption")) for a in arcs]
     fills = [_fill(v) for v in vals]
 
+    px = _px(size)
     parts = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 280" '
-        f'width="{size}" height="{size}" id="ring-{_id_token(uid)}">'
+        f'<svg xmlns="http://www.w3.org/2000/svg" '
+        f'viewBox="0 0 {VIEWBOX} {VIEWBOX}" '
+        f'width="{px}" height="{px}" id="ring-{_id_token(uid)}">'
     ]
 
     # Tracks first, so every value arc paints over its own track.
@@ -135,8 +164,18 @@ def ring_svg(arcs, uid, size=280):
     # Halo + value arc per filled arc. The glow is a wide translucent copy of
     # the same path drawn UNDER a normal-width bright one — deliberately not an
     # SVG <filter>, which ui.html's setHTML sanitizer may not pass through.
-    # A value of 0 sweeps nothing and so draws neither; it stays distinguishable
-    # from "no data" by its centre text ("0" vs the em-dash).
+    #
+    # A value of 0 sweeps nothing and so draws neither path; it stays
+    # distinguishable from "no data" on TWO channels — the centre glyph ("0" vs
+    # the em-dash) and its colour (ramp vs muted).
+    #
+    # Small-value flat spot: the round linecap adds STROKE/2 at each end, so the
+    # drawn shape is a ~13px dot until the arc itself exceeds the cap diameter.
+    # Arc length is r·(3π/2)·v/100, so the dot stops growing only past v≈2.46 on
+    # the outer ring, 3.07 on Week and 4.06 on Month — WIDEST on the innermost
+    # arc, which is the one fed by a mean and so likeliest to sit low. Left as
+    # is: a blended 0-100 composite realistically never lands below ~4. Anyone
+    # reusing ring_svg for a metric that CAN live down there should revisit it.
     for i, v in enumerate(vals):
         if v is None:
             continue
@@ -152,19 +191,23 @@ def ring_svg(arcs, uid, size=280):
     # Scale ticks around the outer rim.
     for t in _TICKS:
         x, y = _point(CX, CY, TICK_R, _value_angle(t))
-        parts.append(_text(x, y, t, 11, TICK_FILL))
+        parts.append(_text(x, y, t, TICK_SIZE, TICK_FILL))
 
     # Centre — the OUTERMOST arc only.
     if vals:
-        parts.append(_text(CX, 146, _fmt(vals[0]), 52, fills[0], weight=700))
-        parts.append(_text(CX, 170, caps[0], 12, TICK_FILL, spacing=3))
+        parts.append(_text(CX, CENTER_VALUE_Y, _fmt(vals[0]),
+                           CENTER_VALUE_SIZE, fills[0], weight=700))
+        parts.append(_text(CX, CENTER_CAPTION_Y, caps[0],
+                           CENTER_CAPTION_SIZE, TICK_FILL, spacing=3))
 
     # Week + Month live in the 90 deg bottom gap.
     for i, x in enumerate(_LEGEND_X, start=1):
         if i >= len(vals):
             break
-        parts.append(_text(x, 250, _fmt(vals[i]), 22, fills[i], weight=600))
-        parts.append(_text(x, 267, caps[i], 10, TICK_FILL, spacing=2))
+        parts.append(_text(x, LEGEND_VALUE_Y, _fmt(vals[i]),
+                           LEGEND_VALUE_SIZE, fills[i], weight=600))
+        parts.append(_text(x, LEGEND_CAPTION_Y, caps[i],
+                           LEGEND_CAPTION_SIZE, TICK_FILL, spacing=2))
 
     parts.append("</svg>")
     return "".join(parts)

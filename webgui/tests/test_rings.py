@@ -172,11 +172,39 @@ def test_ring_svg_never_wraps_past_the_full_sweep():
     assert "A 112.00 112.00 0 1 1" in over.split("<path ")[_VALUE_ARC_0]
 
 
+def _text_node(out, size):
+    """The first <text> chunk rendered at ``size``. Selecting by the size
+    CONSTANT (not a literal) keeps these tests alive when Task 10 nudges the
+    text layout — the size is how we find the node, never what we assert."""
+    return [c for c in out.split("<text ") if f'font-size="{size}"' in c][0]
+
+
+def test_ring_svg_junk_and_nan_read_as_missing_not_zero():
+    """The clamp test only proves ring_svg does not raise. A junk/NaN value must
+    become the em-dash, NOT a fabricated hard 0 reading — Task 3's windowed mean
+    makes an empty-slice NaN a live possibility, not a hypothetical."""
+    for bad in ("abc", float("nan"), float("inf"), float("-inf")):
+        arcs = _arcs()
+        arcs[1]["value"] = bad
+        out = rings.ring_svg(arcs, uid="sent")
+        assert out.count("<path ") == 7, bad          # week arc drops out
+        assert ">—<" in _text_node(out, rings.LEGEND_VALUE_SIZE), bad
+
+
 def test_ring_svg_clamps_a_negative_to_the_zero_arc():
     under = rings.ring_svg(_arcs(a=-40.0), uid="sent")
     # 0 sweeps nothing, so arc 0 contributes no halo/value pair
     assert under.count("<path ") == 7
-    assert ">0<" in under
+    # the CENTRE text is the only place a 0 reading is distinguishable from the
+    # 0 scale tick, which renders ">0<" in every ring regardless.
+    assert ">0<" in _text_node(under, rings.CENTER_VALUE_SIZE)
+    assert "-40" not in under
+
+
+def test_ring_svg_draws_a_small_value_rather_than_swallowing_it():
+    """Guards _MIN_SWEEP_DEG against being widened into a threshold that
+    silently drops real low readings."""
+    assert rings.ring_svg(_arcs(a=5.0), uid="sent").count("<path ") == 9
 
 
 def test_ring_svg_draws_the_five_scale_ticks():
@@ -208,6 +236,15 @@ def test_ring_svg_each_arc_uses_its_own_radius_outermost_first():
         assert f"A {r} {r}" in path
     assert rings.RADII == (112.0, 90.0, 68.0)
     assert list(rings.RADII) == sorted(rings.RADII, reverse=True)
+
+
+def test_ring_svg_value_arcs_use_their_own_radius_not_the_outer_one():
+    """The track test above only pins the TRACK radii. Without this, drawing all
+    three VALUE arcs at r=112 (concentric arcs collapsed onto one ring) is green."""
+    out = rings.ring_svg(_arcs(), uid="sent")
+    value_arcs = out.split("<path ")[5::2]      # 5, 7, 9 -> the three value paths
+    for path, r in zip(value_arcs, ("112.00", "90.00", "68.00")):
+        assert f"A {r} {r}" in path
 
 
 def test_ring_svg_value_arc_stops_at_the_value_not_the_full_sweep():
