@@ -219,10 +219,32 @@ def composite_series(snapshots):
     return dates, scores
 
 
-def sentiment_30d_avg(snaps):
-    """Mean composite over the backfill history (0.0 if none). Pure."""
+# Trading days averaged into the concentric ring's "Week" arc. The backfill
+# history is one snapshot per COMPLETED session, so a week is 5 rows, not 7.
+WEEK_SNAPS = 5
+
+
+def sentiment_avg_or_none(snaps, n=None):
+    """Mean composite over the last ``n`` snapshots (all of them when ``n`` is
+    None), or None when the history holds no scored session at all. Pure.
+
+    None is the ring's "no data" reading — distinct from a real 0.0, which the
+    ring would draw as a genuine (maximally bearish) value."""
     scores = composite_series(snaps or [])[1]
-    return round(sum(scores) / len(scores), 2) if scores else 0.0
+    if n is not None:
+        scores = scores[-n:]
+    return round(sum(scores) / len(scores), 2) if scores else None
+
+
+def sentiment_avg(snaps, n=None):
+    """``sentiment_avg_or_none`` with a 0.0 floor (the legacy gauge contract)."""
+    v = sentiment_avg_or_none(snaps, n)
+    return 0.0 if v is None else v
+
+
+def sentiment_30d_avg(snaps):
+    """Mean composite over the whole backfill history (0.0 if none). Pure."""
+    return sentiment_avg(snaps)
 
 
 # Break the intraday line where consecutive RTH points are more than this far

@@ -16,6 +16,11 @@ def _snap(date, total, **comp):
     }
 
 
+def _snaps(*scores):
+    """Consecutive daily snapshots carrying the given composite totals."""
+    return [_snap(f"2026-08-{i + 1:02d}", s) for i, s in enumerate(scores)]
+
+
 def test_gauge_score_scales_0_10_to_0_100():
     assert S.gauge_score("7.5") == 75.0
     assert S.gauge_score(0) == 0.0
@@ -199,6 +204,55 @@ def test_sentiment_30d_avg():
              {"composite": {"total_score": "8.0"}}]
     assert S.sentiment_30d_avg(snaps) == 7.0          # mean(6,8)
     assert S.sentiment_30d_avg([]) == 0.0
+
+
+# ── Windowed composite average (the ring's Week arc) ─────────────────────────
+def test_sentiment_avg_windows_to_the_last_n():
+    snaps = _snaps(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0)
+    assert S.sentiment_avg(snaps, 5) == 5.0     # mean of 3..7
+
+
+def test_sentiment_avg_with_no_window_uses_every_snap():
+    assert S.sentiment_avg(_snaps(2.0, 4.0)) == 3.0
+
+
+def test_sentiment_avg_window_larger_than_history_uses_all():
+    assert S.sentiment_avg(_snaps(2.0, 4.0), 5) == 3.0
+
+
+def test_sentiment_avg_is_zero_with_no_snaps():
+    assert S.sentiment_avg([], 5) == 0.0
+    assert S.sentiment_avg(None) == 0.0
+
+
+def test_sentiment_avg_or_none_is_none_with_no_snaps():
+    assert S.sentiment_avg_or_none([], 5) is None
+    assert S.sentiment_avg_or_none(None) is None
+
+
+def test_sentiment_avg_week_window_is_five_sessions():
+    """WEEK_SNAPS pins the Week arc's window; a 20-day history must NOT average
+    everything (the mutation this guards: WEEK_SNAPS = None)."""
+    assert S.WEEK_SNAPS == 5
+    snaps = _snaps(*([1.0] * 15 + [9.0] * 5))
+    assert S.sentiment_avg(snaps, S.WEEK_SNAPS) == 9.0   # not mean(all) == 3.0
+
+
+def test_sentiment_avg_never_emits_nan_or_inf():
+    """A non-finite total_score must not poison the mean — composite_series'
+    ``v > 0`` filter drops NaN, and gauge_score clamps the inf case."""
+    import math
+    bad = [_snap("2026-08-01", 6.0)]
+    bad.append({"date": "2026-08-02", "composite": {"total_score": "nan"}})
+    v = S.sentiment_avg_or_none(bad)
+    assert v == 6.0 and math.isfinite(v)
+    inf_snaps = [{"date": "2026-08-01", "composite": {"total_score": "inf"}}]
+    assert S.gauge_score(S.sentiment_avg_or_none(inf_snaps)) == 100.0
+
+
+def test_sentiment_30d_avg_still_averages_everything():
+    """Back-compat: the old name must keep its old behaviour."""
+    assert S.sentiment_30d_avg(_snaps(2.0, 4.0)) == 3.0
 
 
 # ── Colorized intraday figures (Task 4) ──────────────────────────────────────
