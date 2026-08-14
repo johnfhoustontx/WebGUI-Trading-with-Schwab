@@ -27,6 +27,8 @@ from zoneinfo import ZoneInfo
 
 import bus_client
 from pages.rings import ring_svg
+from pages.regime_mix import (REGIME_COLORS, REGIME_LABELS, REGIME_ORDER,
+                              regime_mix_svg)
 from pages.options.theme import BTN_3D, THEME
 from pages.ui_guard import guard
 
@@ -466,23 +468,18 @@ def build_trend_intraday_figure(points):
 
 
 # --- Market Regime (blended structural regime, cache:sentiment:regime) -------
-# Display order + labels + colors for the five structural regimes. The order is
-# fixed so the stacked band keeps a stable reading position across repaints.
-REGIME_ORDER = ("mean_reversion", "trending", "breakout", "choppy", "crisis")
-# The BASE names — deliberately the chart's series names too, because the fixed
-# order + stable names ARE the band's reading position. Direction adorns the
-# HEADLINE only (a legend that renames itself mid-session defeats the point).
-# Mirrors ``sentiment-dashboard/scoring/market_regime.REGIME_DISPLAY``, which the
-# webgui cannot import (Tier-1 takes no engine imports).
-REGIME_LABELS = {"mean_reversion": "Balanced", "trending": "Trending",
-                 "breakout": "Breakout", "choppy": "Whipsaw", "crisis": "Stressed"}
+# The display order, labels and colours live in ``pages.regime_mix`` alongside
+# the builder that draws them, and are re-exported here because this module's
+# headline helpers (and their tests) have always read them off ``sentiment``.
+#
+# Those labels are the BASE names. Direction adorns the HEADLINE only — the
+# panel's row labels never take it, because a label that renames itself
+# mid-session makes a row impossible to track across repaints.
 _REGIME_DIRECTIONAL = {
     "trending": {(1, True): "Rallying", (1, False): "Firming",
                  (-1, True): "Retreating", (-1, False): "Softening"},
     "breakout": {(-1, True): "Breakdown", (-1, False): "Breakdown"},
 }
-REGIME_COLORS = {"mean_reversion": CLR_CYAN, "trending": CLR_GREEN,
-                 "breakout": CLR_YELLOW, "choppy": CLR_FLAT, "crisis": CLR_RED}
 # Headline text color by committed regime — a finite map (Tailwind-first rule).
 _REGIME_TEXT = {"trending": "text-[#66bb6a]", "breakout": "text-[#ffd54f]",
                 "mean_reversion": "text-[#3fb6c7]", "choppy": "text-[#9e9e9e]",
@@ -565,69 +562,6 @@ def regime_evidence_rows(regime):
     """The 'why' lines the classifier attached to this sample (may be empty)."""
     r = regime if isinstance(regime, dict) else {}
     return [str(e) for e in (r.get("evidence") or [])]
-
-
-def build_regime_mix_figure(points):
-    """Stacked-area membership mix over today's recorded regime samples.
-
-    Reads as "how much of each regime is in this tape, and which way is it
-    moving" — the blended model's whole premise. Percent-stacked so the bands
-    always fill the height and the eye tracks PROPORTION, not absolute scale.
-
-    Same synthetic contiguous category axis as ``_intraday_figure`` (and the same
-    reason: a stockChart's ``chart.update()`` throws, freezing an open page), with
-    a null slot breaking the bands between sessions."""
-    pts = points or []
-    series_data = {k: [] for k in REGIME_ORDER}
-    categories, tick_positions = [], []
-    idx, prev_ms, prev_date = 0, None, None
-    for p in pts:
-        ms = int(_safe_float(p.get("ts"))) * 1000
-        ct = datetime.fromtimestamp(ms / 1000, _CT)
-        day = ct.date()
-        if prev_ms is not None and (ms - prev_ms) > _INTRADAY_GAP_MS:
-            for k in REGIME_ORDER:                 # null slot → break every band
-                series_data[k].append({"x": idx, "y": None})
-            categories.append("")
-            idx += 1
-        if day != prev_date:
-            tick_positions.append(idx)
-            categories.append(f"{ct:%b} {ct.day}")
-            prev_date = day
-        else:
-            categories.append("")
-        mem = p.get("memberships") if isinstance(p.get("memberships"), dict) else {}
-        for k in REGIME_ORDER:
-            series_data[k].append({"x": idx, "y": _safe_float(mem.get(k)),
-                                   "name": f"{ct:%b} {ct.day}, {ct:%H:%M}"})
-        idx += 1
-        prev_ms = ms
-    axis_label = {"style": {"color": "#bdbdbd"}}
-    return {
-        "chart": {"type": "area", "backgroundColor": "transparent",
-                  "height": 220, "spacing": [8, 12, 8, 0]},
-        "title": {"text": None},
-        "credits": {"enabled": False},
-        "accessibility": {"enabled": False},
-        "legend": {"enabled": True, "itemStyle": {"color": "#bdbdbd",
-                                                  "fontWeight": "normal"}},
-        "xAxis": {"categories": categories, "tickPositions": tick_positions,
-                  "lineColor": "rgba(255,255,255,0.15)",
-                  "gridLineColor": "rgba(255,255,255,0.06)", "labels": axis_label,
-                  "crosshair": {"label": {"enabled": False}}},
-        "yAxis": {"min": 0, "max": 100, "title": {"text": "Regime mix",
-                                                  "style": {"color": "#bdbdbd"}},
-                  "gridLineColor": "rgba(255,255,255,0.06)",
-                  "labels": {**axis_label, "format": "{value}%"}},
-        "tooltip": {"shared": True, "valueDecimals": 0,
-                    "pointFormat": "{series.name}: <b>{point.percentage:.0f}%</b><br>"},
-        "plotOptions": {"area": {"stacking": "percent", "lineWidth": 1,
-                                 "marker": {"enabled": False},
-                                 "fillOpacity": 0.55}},
-        "series": [{"name": REGIME_LABELS[k], "type": "area",
-                    "color": REGIME_COLORS[k], "data": series_data[k]}
-                   for k in REGIME_ORDER],
-    }
 
 
 def pct_color(pct):
@@ -1235,23 +1169,24 @@ def render():
     ui.separator().classes("q-my-md")
     # Market Regime — the blended STRUCTURAL read (how the tape is moving),
     # complementary to the direction × aggression five-state above. Memberships
-    # are continuous, so a handover shows as a gradual band shift, not a flip.
-    with ui.expansion("Market Regime", icon="stacked_line_chart",
-                      value=True).classes("w-full") as regime_exp:
+    # are continuous, so a handover is gradual rather than a flip — which is why
+    # the panel ranks them and shows the leader's margin (see pages.regime_mix).
+    with ui.expansion("Market Regime", icon="leaderboard",
+                      value=True).classes("w-full"):
         with ui.row().classes("items-baseline gap-3 w-full q-mt-sm"):
             regime_lbl = ui.label("").classes("text-subtitle1 text-bold")
             regime_conf_lbl = ui.label("").classes("opacity-60 text-sm")
             regime_trans_lbl = ui.label("").classes("opacity-80 text-sm")
         regime_why = ui.row().classes("items-center gap-2 flex-wrap")
-        # Plain chart (NOT a stockChart) — see _intraday_figure for why.
-        regime_plot = ui.highchart(build_regime_mix_figure([])).classes("w-full")
-
-    @guard
-    def _reflow_regime_chart():
-        ui.run_javascript(f"getElement({regime_plot.id})?.chart?.reflow()")
-
-    regime_exp.on_value_change(
-        lambda e: ui.timer(0.05, _reflow_regime_chart, once=True) if e.value else None)
+        # An inline SVG, not a chart element — so unlike the intraday graphs it
+        # needs no reflow-on-expand (it has no measured container: the viewBox
+        # scales it), and a repaint is one `.content` assignment.
+        #
+        # CAPPED, because the viewBox scales the TEXT too: at the full ~1100px
+        # content width a 13px label renders at ~22px and dwarfs the rest of the
+        # page. At 720 the scale is ~1.13 and the rows sit at the page's own
+        # text size, which is what a dense table should do.
+        regime_plot = ui.html(regime_mix_svg([])).classes("w-full max-w-[720px]")
 
     ui.separator().classes("q-my-md")
     # Daily Sentiment & Trend — two value-colorized 2-min intraday series
@@ -1385,8 +1320,7 @@ def render():
             for line in regime_evidence_rows(reg):
                 ui.label(line).classes(
                     "text-xs opacity-70 rounded px-2 py-[2px] bg-[#1b2233]")
-        regime_plot.options = build_regime_mix_figure(state.get("regime_points") or [])
-        regime_plot.update()
+        regime_plot.content = regime_mix_svg(state.get("regime_points") or [])
         trend = derived.get("trend")
         trend_ring.content = ring_svg(trend_arcs(derived), uid="trend")
         if trend:

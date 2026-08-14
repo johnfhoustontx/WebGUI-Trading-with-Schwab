@@ -941,38 +941,6 @@ def test_regime_transition_text():
     assert S.regime_transition_text(None) == ""
 
 
-def test_regime_mix_figure_is_a_stacked_area_plain_chart():
-    fig = S.build_regime_mix_figure(_regime_points())
-    assert fig["chart"]["type"] == "area"
-    assert fig["plotOptions"]["area"]["stacking"] == "percent"
-    # one series per regime, in a stable order, each with the right point count
-    assert len(fig["series"]) == 5
-    assert [s["name"] for s in fig["series"]] == [
-        "Balanced", "Trending", "Breakout", "Whipsaw", "Stressed"]
-    assert all(len(s["data"]) == 3 for s in fig["series"])
-    # a stockChart would freeze in-place updates (see _intraday_figure) -> plain chart
-    assert "stockChart" not in str(fig)
-    assert "categories" in fig["xAxis"]        # synthetic contiguous axis, no dead space
-    assert fig["accessibility"]["enabled"] is False
-
-
-def test_regime_mix_figure_values_and_empty():
-    fig = S.build_regime_mix_figure(_regime_points(1))
-    trending = next(s for s in fig["series"] if s["name"] == "Trending")
-    assert trending["data"][0]["y"] == 0.5
-    for empty in ([], None):
-        f = S.build_regime_mix_figure(empty)
-        assert len(f["series"]) == 5 and all(s["data"] == [] for s in f["series"])
-
-
-def test_regime_mix_figure_breaks_line_between_days():
-    day1 = 1_753_280_700                      # a session point
-    pts = _regime_points(2, day1) + _regime_points(1, day1 + 86_400)
-    fig = S.build_regime_mix_figure(pts)
-    ys = [p.get("y") for p in fig["series"][0]["data"]]
-    assert None in ys                          # a null slot separates the two days
-
-
 def test_regime_evidence_rows():
     assert S.regime_evidence_rows(_regime()) == ["ADX 32 rising", "VWAP held 95%"]
     assert S.regime_evidence_rows({}) == []
@@ -985,14 +953,14 @@ def test_regime_transition_text_carries_the_direction():
     assert S.regime_transition_text(r) == "Balanced → Softening · 60%"
 
 
-def test_regime_mix_series_names_never_take_the_direction():
-    """The stacked band's fixed order + names ARE the reading position — a legend
-    that renames itself intra-session defeats that. Direction belongs on the
-    headline, not the chart."""
-    pts = _regime_points()
-    fig = S.build_regime_mix_figure(pts)
-    assert [s["name"] for s in fig["series"]] == [
-        "Balanced", "Trending", "Breakout", "Whipsaw", "Stressed"]
+def test_regime_row_labels_never_take_the_direction():
+    """A row label that renames itself intra-session cannot be tracked across
+    repaints. Direction belongs on the headline, not in the panel."""
+    svg = S.regime_mix_svg(_regime_points())
+    for base in ("Balanced", "Trending", "Breakout", "Whipsaw", "Stressed"):
+        assert base in svg
+    for adorned in ("Rallying", "Firming", "Retreating", "Softening", "Breakdown"):
+        assert adorned not in svg
 
 
 def test_regime_headline_color_follows_the_direction():

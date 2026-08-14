@@ -4,7 +4,54 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-08-14 (**`/sentiment`'s four semicircular gauges became two concentric
+**Last updated:** 2026-08-14 (**the Market Regime panel stopped spending all its ink on the part
+that never changes.** The `/sentiment` membership mix was a percent-stacked area chart; it is now
+a **ranked panel** — `webgui/pages/regime_mix.py:regime_mix_svg`, a pure SVG string mounted with
+`ui.html` and updated via `el.content`, the same idiom `rings.py` established the same day.
+
+**Why, measured rather than asserted.** Read against the live session (2026-08-14, 78 samples):
+the widest membership swing all day was **9pp** (Balanced), Trending moved 2pp, and **Breakout sat
+at exactly 0.000 from open to close** while still holding a fifth of the legend. Percent-stacking
+then *guarantees* the five bands fill the height, so the chart's whole area encoded the static
+part — and the two things that actually happened were invisible in it:
+
+* the lead **changed hands** at 09:31, out of a **0.2pp** gap at the open — a genuine coin-flip
+  rendered as a flat seam;
+* **Stressed rose from literally zero to 7.5pp** by 12:50 before easing to 4.9pp — the day's real
+  story, drawn as a sliver at the top of the stack.
+
+**What replaced it.** One row per regime, sorted by current share. The bar is scaled to **the
+leader** (so a row reads as "how close is this to winning" — the contest), while each sparkline is
+scaled to **its own** range (so a 2pp move is as legible as a 9pp one — the specific failure of a
+shared axis on data this static). A change-since-**session-open** column, split on the same 4h gap
+constant the intraday figures use, so a day boundary can never make it compare across sessions.
+
+**The footer is a new signal, not a restatement:** the leader's margin over the runner-up, plus
+the session's tightest. `unclear` measures *evidence strength*, not how close the top two are — so
+at 0.2pp the committed label was very nearly arbitrary and nothing on the page said so.
+
+**Two deliberate trade-offs.** (1) Ranking gives up the old fixed order's stable reading position.
+Kept anyway: with five rows a lead change is rare and is the most interesting event of the day, so
+the ORDER is signal — and ties break on `REGIME_ORDER`, so identical data can never jitter between
+repaints. (2) A dead-flat series draws a **dashed rule and an em-dash**, never an auto-scaled line:
+scaling Breakout to its own range would amplify floating-point dust into a plausible squiggle.
+
+**Two things that cost time and are worth knowing.** A viewBox scales the **text** too — uncapped
+at the full ~1100px content width a 13px label rendered at ~22px and dwarfed the page, hence
+`max-w-[720px]` (measured back at 14.6px against the page's own 14px subtitle). And the panel
+inherits `rings.py`'s sanitizer constraint: no `<style>`, no `<filter>`, `dy` not
+`dominant-baseline` — `test_regime_mix.py` mirrors the DOMPurify allowlist guard, because a
+stripped attribute changes nothing server-side and the page still renders, just wrong.
+
+`REGIME_ORDER`/`_LABELS`/`_COLORS` moved into the new module and are re-exported from `sentiment`
+for its headline helpers. Net **−98 lines** in `sentiment.py`. webgui **1364 green** (31 new);
+live-verified in dev against prod's real session — Whipsaw 38.8% leading Balanced 28.6% by 10.2pp,
+Stressed +4.9pp, Breakout dashed. **Known limit:** at phone width the SVG scales down to
+unreadable — the page was already desktop-only (its two intraday Highcharts render at a fixed
+1105px and overflow a 375px viewport regardless), and this panel is the only element there that
+scales at all.)
+
+**Prior — 2026-08-14** (**`/sentiment`'s four semicircular gauges became two concentric
 Day/Week/Month rings — and hunting the "no data" case turned up six instances of one defect.**
 Four Highcharts gauges could show two horizons between them; two SVG rings show six readings in
 less space. But the substantive reason is the one a needle structurally cannot do: **say
