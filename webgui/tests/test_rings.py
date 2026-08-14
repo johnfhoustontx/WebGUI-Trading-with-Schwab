@@ -113,6 +113,15 @@ def test_ring_svg_escapes_the_uid_and_captions():
     assert "<b>" not in out
 
 
+def test_ring_svg_size_cannot_inject_markup():
+    """uid and caption sanitization are pinned above; size is the third
+    interpolated input. Without this, dropping _px is a fully green refactor."""
+    out = rings.ring_svg(_arcs(), uid="sent",
+                         size='280"><script>alert(1)</script><i x="')
+    assert "<script>" not in out
+    assert 'width="280"' in out
+
+
 def test_ring_svg_puts_the_outermost_value_in_the_center():
     out = rings.ring_svg(_arcs(a=72.0), uid="sent")
     assert ">72<" in out and ">DAY<" in out

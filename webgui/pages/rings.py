@@ -62,7 +62,10 @@ _TICKS = (0, 25, 50, 75, 100)
 # them out of ring_svg's body is the slow part. Deliberately NOT pinned by
 # tests: a coordinate someone is about to nudge should not turn the suite red.
 # Tests that need to locate a text node select it by the size constant rather
-# than a literal, so a nudge here cannot break them.
+# than a literal, so a nudge here cannot break them — so long as the two VALUE
+# sizes stay distinct. ``_text_node`` matches the FIRST node of a given size, so
+# setting CENTER_VALUE_SIZE == LEGEND_VALUE_SIZE would make the centre shadow the
+# legend and redden a test for a non-correctness reason.
 #
 # The bottom 90 deg gap is the Week/Month legend. x=104/176 keeps both clear of
 # the 0 and 100 ticks, which land at x~47 and x~233 on the r=132 rim.
