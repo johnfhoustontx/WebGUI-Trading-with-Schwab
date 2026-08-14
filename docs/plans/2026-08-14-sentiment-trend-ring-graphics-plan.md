@@ -1176,25 +1176,52 @@ git commit -m "feat(sentiment_svc): compute_7d_trend for the Week arc"
 Only if Task 0 recorded `FILTERS SURVIVE`. The layered halo already ships a
 working glow, so this is polish and may be skipped entirely.
 
-**Task 0 result:** `FILTERS UNKNOWN — answerable only in a live browser.`
+**Task 0 result — CORRECTED during Task 5. The original finding below was WRONG.**
 
-NiceGUI 3.13.0's `elements/html.js` does **not** use DOMPurify. It calls the
-native **`Element.setHTML()`** (the browser HTML Sanitizer API) when
-`sanitize=True`, else plain `innerHTML`. So the allow-list is the browser's, not
-a library's, and it cannot be determined by reading NiceGUI source. That is also
-why `<style>` is stripped.
+**The truth: `ui.html` sanitizes through bundled DOMPurify 3.4.0, and its
+allow-list is READABLE — no browser required.** NiceGUI's
+`templates/index.html:144` monkeypatches `Element.prototype.setHTML` to
+`DOMPurify.sanitize(html)` (its own comment says native `setHTML` strips class
+attributes). So `html.js`'s `this.$el.setHTML(...)` is NOT the native call.
 
-Two consequences:
-- This stays non-blocking. The Task 2 layered halo uses only `<svg>`/`<path>`/
-  `<text>`, which certainly survive — `pages/options/svg.py` already ships SVG
-  through `ui.html` in production today.
-- **Escape hatch if filters are ever wanted:** `ui.html(content, sanitize=False)`
-  exists in this version. Our SVG is entirely self-generated with escaped
-  captions, so disabling sanitization would be defensible — but do not reach for
-  it without a reason, since it disables sanitization for that element wholesale.
+Verified against `nicegui/static/dompurify.mjs`:
 
-Check the filter question opportunistically during the Task 10 browser session;
-skip Task 8 entirely otherwise.
+| attribute | allow-listed |
+|---|---|
+| `dominant-baseline` | **NO** |
+| `alignment-baseline`, `baseline-shift` | yes |
+| `text-anchor`, `stroke-linecap`, `font-size`, `letter-spacing`, `viewbox` | yes |
+| `x`, `y`, `dx`, `dy`, `d`, `fill`, `stroke`, `opacity`, `font-weight` | yes |
+
+**This caused a real, silent bug.** `rings._text` put `dominant-baseline="middle"`
+on every label; sanitized away, all text falls back to the `alphabetic` baseline
+and sits ~half a cap-height low — the 52px centre reading drops out of the dial's
+middle. The server-side string stays correct, so **the entire suite was green**.
+Fixed by using `dy="0.35em"` (allow-listed, universally supported) and KEEPING
+sanitization on. `sanitize=False` was considered and rejected: disabling a
+security control to obtain a text baseline is disproportionate, and it leaves a
+standing exemption plus a test coupled to DOMPurify internals.
+
+**The lesson worth keeping:** the original finding was wrong because it read
+`html.js`, saw a native-looking `setHTML` call, and stopped — without checking
+whether `setHTML` was itself overridden. A test can never catch a sanitizer
+stripping an attribute, because the string the server emits is correct either
+way. `test_rings.py` now pins the real invariant: every attribute `ring_svg`
+emits must appear in the bundled allow-list.
+
+**Task 8 (SVG `<filter>` glow) is CANCELLED.** `<filter>`/`<feGaussianBlur>` were
+never checked against the allow-list, and the layered-halo glow already ships and
+needs no exemption. Do not revisit it.
+
+<details><summary>Original (incorrect) Task 0 finding, kept for the record</summary>
+
+> `FILTERS UNKNOWN — answerable only in a live browser.` NiceGUI 3.13.0's
+> `elements/html.js` does **not** use DOMPurify. It calls the native
+> `Element.setHTML()` (the browser HTML Sanitizer API) when `sanitize=True`, else
+> plain `innerHTML`. So the allow-list is the browser's, not a library's, and it
+> cannot be determined by reading NiceGUI source.
+
+</details>
 
 If filters survive, add a `<defs><filter id="ring-glow-{uid}">` with
 `<feGaussianBlur stdDeviation="4"/>` + `<feMerge>` and apply it to the value arcs
