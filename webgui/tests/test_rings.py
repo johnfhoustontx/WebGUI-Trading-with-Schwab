@@ -26,6 +26,18 @@ def test_value_angle_maps_endpoints_and_midpoint():
     assert _close(rings._value_angle(100), 495.0)     # lower-right
 
 
+def test_arc_path_endpoints_sit_on_the_circle_at_the_requested_angles():
+    """Locks the start/end coords + radii — the tokens that decide where a value
+    arc visually stops. Without this, swapping end_deg for start_deg (or dropping
+    the value scaling) leaves the whole suite green."""
+    d = rings._arc_path(140, 140, 100, rings.START_DEG, rings._value_angle(50))
+    t = d.split()
+    assert (t[0], t[3]) == ("M", "A")
+    assert _close(float(t[1]), 69.29) and _close(float(t[2]), 210.71, 0.02)  # 0 -> lower-left
+    assert _close(float(t[4]), 100.0) and _close(float(t[5]), 100.0)         # radii
+    assert _close(float(t[9]), 140.0) and _close(float(t[10]), 40.0)         # 50 -> top
+
+
 def test_arc_path_is_empty_at_zero():
     assert rings._arc_path(140, 140, 100, 225.0, 225.0) == ""
 

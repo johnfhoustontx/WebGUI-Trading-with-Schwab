@@ -8,8 +8,9 @@ import — mounted by the page via ``ui.html`` and updated with ``el.content``.
 """
 import math
 
-START_DEG = 225.0   # 0 on the scale — lower-left
-SWEEP_DEG = 270.0   # to 495 deg == 135 deg — lower-right
+START_DEG = 225.0       # 0 on the scale — lower-left
+SWEEP_DEG = 270.0       # to 495 deg == 135 deg — lower-right
+_MIN_SWEEP_DEG = 0.5    # below this an arc is under ~1px — draw nothing
 
 
 def _point(cx, cy, r, deg):
@@ -19,14 +20,20 @@ def _point(cx, cy, r, deg):
 
 
 def _value_angle(value):
-    """0-100 -> absolute sweep angle (225 .. 495)."""
+    """Scale value -> absolute sweep angle (225 .. 495).
+
+    ``value`` MUST already be clamped to 0-100 by the caller — that is a
+    precondition, not a description. Past 133 the sweep exceeds 360 deg and
+    wraps silently into a *short* arc, which reads as a LOW value.
+    """
     return START_DEG + SWEEP_DEG * (value / 100.0)
 
 
 def _arc_path(cx, cy, r, start_deg, end_deg):
-    """SVG ``d`` for a clockwise arc; "" for a degenerate (sub-pixel) sweep."""
+    """SVG ``d`` for a clockwise arc; "" when the sweep is non-positive,
+    reversed, or under ~1px of arc."""
     sweep = end_deg - start_deg
-    if sweep < 0.5:
+    if sweep < _MIN_SWEEP_DEG:
         return ""
     x0, y0 = _point(cx, cy, r, start_deg)
     x1, y1 = _point(cx, cy, r, end_deg)
