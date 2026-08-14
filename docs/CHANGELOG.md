@@ -4,7 +4,131 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-08-14 (**Market Regime renamed + given a direction axis.** The five display
+**Last updated:** 2026-08-14 (**`/sentiment`'s four semicircular gauges became two concentric
+Day/Week/Month rings — and hunting the "no data" case turned up six instances of one defect.**
+Four Highcharts gauges could show two horizons between them; two SVG rings show six readings in
+less space. But the substantive reason is the one a needle structurally cannot do: **say
+nothing**. Six horizons need a way to render "not published yet" / "the fetch failed" that is not
+a number, and a needle must always point somewhere.
+
+**Tier 1 — `webgui/pages/rings.py` (NEW).** `ring_svg(arcs, uid, size=280)` is a pure SVG-string
+builder, mounted with `ui.html` and updated via `el.content`. Chosen over a Highcharts
+`solidgauge` and over a CSS conic-gradient: **rounded arc caps are impossible in CSS**, and a
+plain string sidesteps both documented `ui.highchart` hazards at once — the ESM-import-map trap
+and the `chart.update()` merge/stock-module minefield. Precedent: `pages/options/svg.py`.
+Geometry: **270° sweep, start 225° / end 135°, clockwise from 12 o'clock** — 0 lower-left, 50
+top, 100 lower-right, with a 90° gap at the bottom that the Week/Month legend occupies. Radii
+112/90/68, stroke 13, ticks r=132, fixed `viewBox="0 0 280 280"` (`size` sets only width/height,
+so the dial scales itself). Per-arc colour comes from **that arc's own value** via
+`gauge._ramp_color`, so `config/theme.toml [gauge]` still drives the palette. The glow is a
+**layered halo** — a wide translucent copy of the path under a bright one — deliberately not an
+SVG `<filter>`, which the sanitizer would not pass. **`uid` is REQUIRED**: two rings share the
+page and a duplicate DOM id makes them collide. **`gauge.py` is untouched** and still serves the
+options detail-panel speedometer, so the app now carries **two gauge idioms** — needle for one
+value in a panel, ring for multi-horizon. New page builders `sentiment_avg_or_none` /
+`sentiment_avg` (`WEEK_SNAPS = 5` — the backfill is one row per COMPLETED session, so a week is
+5, not 7), `sentiment_arcs`, `trend_arcs`, `_composite_arc_value`, `_trend_arc_value`;
+`sentiment_30d_avg` DELETED (its only caller was a removed gauge).
+
+**Tier 2 — the Week arc's structural read.** `compute_7d_trend` mirrors `compute_30d_trend`
+(which is **misnamed** — a monthly-HORIZON structural read, not "30 days ago" and not an
+average), scored on sector `week_pct` with `_CYC_DEF_SCALE_7D = 1.5` and its own
+`TREND_7D_TTL_SEC = 1800`; the shared body was extracted as `_structural_trend` /
+`_neutral_structural_trend`. **The Week arc costs ZERO extra Schwab calls**: `_fetch_sector_pcts`
+is ONE TTL-cached fan-out serving both horizons, because `week_pct` already came off the same
+`_fetch_closes` call — worth being deliberate about on a stack audited at ~68–76k calls/day.
+`derive_composite_extras` gained `trend_7d` (LAST, so the positional call shape is unaffected),
+`handlers._TREND` gained the slot, and it publishes on the existing 15-min `trend_due` gate;
+the two structural horizons carry no hysteresis of their own and are simply HELD across gated
+refreshes. **KNOWN LIMITATION:** Week and Month share the SAME daily price sub-score —
+`calculate_ema_alignment`'s EMA periods are fixed, so a shorter frame changes nothing — so the
+two arcs track each other and diverge mainly on sector rotation. A genuinely weekly price read
+needs weekly-resampled SPY bars; deferred.
+
+**THE RECURRING DEFECT — six instances of one failure: a missing or garbage input rendering as a
+CONFIDENT reading.** A non-finite composite becoming a full 100 arc (`min(100.0, nan)` is
+`100.0`, and these payloads cross Redis as JSON, which both emits and accepts
+`NaN`/`Infinity`, so a service-side divide-by-zero round-trips intact); an unparseable score
+becoming a maximally-BEARISH 0 via `_safe_float`'s 0.0 default (the mirror of the same bug, one
+input to the left — `'n/a'` gave DAY 0.0 beside WEEK/MONTH None, off the same row); a NaN sector
+pct becoming **maximum cyclical leadership at full confidence** — measured,
+`score_sector_participation(5, 11, nan)` returns `TrendSub(67.27, confidence=1.0)`, because
+`intraday_trend._clamp` is `max(lo, min(hi, v))` and that yields the HIGH bound for NaN (fixed by
+`_finite_pcts`, which DROPS non-finite moves so the missing sector lowers `n_total` and with it
+the confidence, which is what a missing sector should do — pre-existing, but the Week arc would
+have doubled the exposure); and **the one that actually fires in production** —
+`compute_7d_trend`/`compute_30d_trend` swallowing their own exceptions to return a fully shaped
+**`score 50.0 / confidence 0.0`** dict, so on any proxy blip a good reading is replaced by a
+confident-looking neutral 50 and **every absent-key guard misses it**. That is why
+`_trend_arc_value` keys on **confidence**, not key presence — verified sound, not assumed:
+`blend_trend` weights each sub-score by its own confidence, so the aggregate rounds to 0.0 only
+when there was no usable evidence at all, while a genuinely neutral 50/50 read at full confidence
+scores agg 0.65 and passes straight through. **A needle cannot express "no data"; the ring's
+`None` → track-only + em-dash can, and that is the strongest single argument for the redesign.**
+⚠ **NOT fixed — the PRICE sub-score carries the same NaN exposure as the sector one.** Measured:
+an all-NaN structural price read (`macd_hist`/`rsi`/`adx`, `compute.py:1248-1253`) scores
+**82.50 — near-maximum bullish — at UNCHANGED confidence 0.333**, where a sane read scores 56.25;
+the same all-NaN read in `compute_intraday_trend`, **the live Day gauge** (`compute.py:439-443`),
+scores **92.50**. Deliberately deferred to its own task: the fix must cover both call sites with
+one shared filter.
+
+**The Signals column, rebuilt.** The two ring columns measure ~460/476px against a 232px 2×2 tile
+grid — ~225px of void. Now a **1×4 vertical stack** of glowing tiles at 487px, column widened
+210→300px; each tile is icon + letter-spaced label / big value with a neon `text-shadow` /
+hairline rule + dot / footer icon + descriptor. **`velocity` and `divergence` are rendered
+again** — the service had been computing and publishing both **every cycle with no renderer at
+all** since the intraday graphs replaced the old text block, a silent regression rather than a
+decision. **`_word_tone`:** BIAS and SIGNAL carry `live_composite.signal_band`'s OWN vocabularies
+(`Long/Neutral/Cautious/Short` and `Strong Bull…Strong Bear`), NOT the composite's `bias` field,
+and `bias_color` only substring-matches bull/bear — so "Long" and "Short" read amber. Each tile
+now colours from its own word and **`bias_text_class` delegates to `_word_tone`**, so the
+headline under the ring can no longer contradict the tile beside it (it was rendering "7.28 ·
+Long" in amber above a green "Long"). Styling stays Tailwind-first with **no `ui.add_css`**;
+`theme.TILE_3D` is deliberately flat ("NO bevel or drop shadow") and was NOT redefined, so the
+glow tokens are local to `sentiment.py` — flagged in CLAUDE.md that the page is therefore mixed,
+and that a third glowing element would mean the theme has moved in practice.
+
+**Traps worth keeping — all now in CLAUDE.md.** (1) **`ui.html` sanitizes through the BUNDLED
+DOMPurify, and its allow-list is READABLE.** `html.js` calls `setHTML`, but that is not the
+native API: NiceGUI monkeypatches it at `templates/index.html:144` to
+`this.innerHTML = DOMPurify.sanitize(html)` (its comment: native `setHTML` strips class
+attributes). **`dominant-baseline` is not allow-listed** (`alignment-baseline` and
+`baseline-shift` are), so every ring label silently dropped to the alphabetic baseline **on the
+client** while the server string stayed correct and the whole suite stayed green. Fixed with
+`dy="0.35em"`; `sanitize=False` was considered and rejected as disproportionate. `test_rings.py`
+now pins the **general property** — that `ring_svg` emits nothing DOMPurify would strip — by
+extracting the allow-list from the shipped `dompurify.mjs` and dropping any run containing
+`script` (DOMPurify ships DENY lists too, and unioning those in blessed `<use>`). (2)
+**CLAUDE.md's Tailwind JIT warning was overstated and is corrected in place**: probed live,
+`rgba()` inside a `shadow-[…]` arbitrary DOES generate (the Refresh button's shadow is a live
+example), as do `bg-gradient-to-b from-[#hex] to-[#hex]`, `[text-shadow:…]` and
+`drop-shadow-[…]`. The real limitation is **`var(...)`**. (3) **`getBBox()` on an SVG `<text>`
+returns the EM box, not the ink** — it reported the centre block 4.2px low where the true figure
+was **10.7px**, because an em box carries ascender/descender space digits and all-caps captions
+never fill; measure with canvas `actualBoundingBoxAscent`/`Descent`. (4) **A test suite can
+silently transact against the live proxy** — adding `compute_7d_trend` to the handlers without
+stubbing it in `_patch_compute` left **11 tests opening real connections to `127.0.0.1:8100`**
+while reporting green, and dev borrows prod's proxy. (5) **Renaming an autouse pytest fixture
+does not disable it** — the decorator still registers it, so a rename-based "disable" produces a
+false all-clear when you are verifying a leak fix; neuter the body instead. (6) **`git commit
+--amend` takes the WHOLE index**, so staging by explicit path does not protect against this
+repo's concurrent-session hazard and can orphan the other session's commit.
+
+**Test isolation the change forced:** an autouse `conftest` fixture now resets
+`_SECTOR_PCTS_CACHE` / `_TREND_7D_CACHE` / `_TREND_30D_CACHE` before AND after every
+sentiment_svc test — without it, any test stubbing `_fetch_closes` leaves its fixture values in
+those module globals and a later un-monkeypatched self-fetching call silently consumes them (a
+probe `compute_30d_trend()` scored its sector sub-score 73.33 off stale stub data with ZERO
+fan-outs). The suite only stayed green because `pytest-randomly` isn't installed and the ordering
+happened to be kind. **Restart `sentiment_svc` + the webgui.** **webgui 1336 passed / 0 failed**
+(was 1253 at branch point — the "1190" figure in CLAUDE.md was stale and is corrected);
+**sentiment_svc 279 passed / 1 failed**, the documented pre-existing
+`test_compute_regime.py::test_daily_history_wins_over_session_latch`. 25 commits, merged into
+`Using_Highcharts`. Design/plan:
+[design](plans/2026-08-14-sentiment-trend-ring-graphics-design.md) /
+[plan](plans/2026-08-14-sentiment-trend-ring-graphics-plan.md).)
+
+**Prior — 2026-08-14** (**Market Regime renamed + given a direction axis.** The five display
 names mixed three vocabularies — three tape-behaviour nouns, one *strategy* (Mean Reversion) and one
 market condition (Volatile) — and one of them misdescribed its own evidence. `mean_reversion`'s five
 inputs (low ADX, flat EMA, mid-band width, balanced profile, above the gamma flip) all say price is

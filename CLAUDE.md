@@ -206,7 +206,7 @@ Routes:
 | `/options/simulator` | Simulator (**Replay / What-if / IV-shock as SUBTABS under the main strip** + **Controls+Strategy merged side-by-side in one card** (2026-07-11); **multi-leg strategy builder** — a Strategy dropdown over the shared **editable leg-editor** (`leg_editor.py`) replaces the old single-contract selector — driving all three legacy tabs: **Replay** (re-prices the **netted** position along the underlying's recent path → stacked price + 5-Greek panels over a gap-compressed integer x-axis w/ a client-side scrub cursor) + What-if (a **dollar profit/loss payoff from entry**: P/L = position value (×100 contract multiplier) minus the **entry mark** (`whatif_baseline` = value at spot *now*) — so profit caps at the net credit, loss floors at width−credit, **matching the Calculator** — with a green profit fill above / red loss fill below breakeven (area `threshold:0` + `color`/`negativeColor`) + faint Profit/Loss washes + labels; Δt is **elapsed** days from now, per-leg decay → **calendars** correct, theta visible as Δt slides) + IV-shock; **Copy to Calculator** button; **dark-navy dashboard theme** via shared `theme.py`; **persists full UI state across navigation** (symbol/strategy/legs/sliders/active tab) + **auto-refreshes on return** via a single-user module snapshot — `page_state.py`; the **Symbol** field **Fetches the snapshot on tab-out (`focusout`) / Enter** (deduped) with the same **centered wait overlay** (`overlay.py`) until the meta lands; **compact leg cells** + no "Actions" header (shared `leg_editor`)) | built |
 | `/options/expected-move` | Expected Move (candlestick price history (6-mo daily) + forward **ATM-IV expected-move cone** to the option's expiration (green/red dashed, √-time fan) + leg **strike lines** (short solid / long dashed, put/call colored) + axis **crosshair** w/ Date(X)+Price(Y) label boxes; opened in a **new browser tab** via stash-handoff from Scanner/Paper/Captured/Calculator, or standalone. **Expiry + strike are chain-driven DROPDOWNS since 2026-08-12** (was free text, where a typo silently produced "No ATM IV for …"): typing a symbol (tab-out/Enter via the shared `bind_symbol_load`) enqueues a new **`em_chain`** command → **`cache:options:em_chain`** (`compute.em_chain_meta`, today→+90d chain reduced SERVICE-side to `{expirations, strikes{expiry: ladder}, spot}` — measured 10.5 MB raw for a 90-day SPY chain vs **28.8 KB** of ladders, which is why this does NOT publish the raw chain the way the Calculator's `calc_chain` does); the expiry list carries a **DTE suffix** (`2026-08-12  (0d)`) so weeklies stay scannable, and strikes are **deduped across call+put** (put-vs-call is the toggle's job, so the ladder doesn't change under it). Picking an expiry redraws; picking a strike/put-call is a **LOCAL-only** repaint via `expected_move_figure(..., legs=…)` — no round trip, since the strike is only a plotLine. **Also since 2026-08-12 the CURRENT-DAY candle is drawn**: Schwab's `periodType=year&period=1` daily history ends at the PREVIOUS trading day, so `compute.today_candle` synthesizes the forming bar from the RAW quote (`schwab_py_client.get_quotes` — the normalized `get_quote` drops `openPrice`; the normalized client stays as a spot FALLBACK), gated on a trading day at/after the 08:30 CT open (premarket `openPrice` is still the prior session's) and no-op'd if the history ever includes today. Schwab's daily-candle epoch is **midnight CT** (verified live), so `_RTH_START`/`_PROJ_CT_TZ` are reused rather than host-local time. This also fixed the cone, which anchored at `candles[-1][0]` (yesterday) while sized from TODAY's spot and so overshot the expiry by a day. ⚠ after 15:00 CT the bar's close is `lastPrice`, which includes post-market prints, and Schwab's high/low may include extended hours — sub-tick on a 6-month chart, documented not fixed. Three page-state traps are commented in `render()`: `state["drawn_symbol"]` forces a redraw on a symbol switch that KEEPS the same expiry string (a shared monthly makes the `.value` write a no-op, so `on_value_change` never fires and the chart would pair the old symbol's candles with the new symbol's ladder), `state["strike_touched"]` keeps a look-back change from reverting a locally-picked strike while still letting an UNTOUCHED multi-leg handoff resend its own legs, and `state["seeding"]` must wrap `.update()` (not just the `.value=` write) because `ChoiceElement._update_options` re-validates and can re-null the value). **⚠ This page's IV + Expected move DELIBERATELY do not match ThinkorSwim, and the difference was measured, not guessed (2026-08-12, PLTR 2026-10-16, 65 DTE) — do NOT "fix" either number to match ToS without first deciding which definition you want.** TWO independent differences that push OPPOSITE ways: (1) **IV source** — `atm_iv_from_chain` reads the single strike nearest spot, which on an equity smile is its **MINIMUM** (measured: 46.08% at K=165, **45.59% at K=170≈spot**, 49.03% at K=175, 48.79% at K=145), while ToS publishes a per-SERIES IV aggregated across strikes and so necessarily sits above the ATM trough (52.11%). Schwab reports the SAME `volatility` for the ATM call and put, so put/call skew is NOT a factor — that's a dead end, don't re-investigate it. (2) **Move definition** — ours is **1 standard deviation** `S·σ·√(t/365)` (a 68% containment band, the correct basis for a *cone*); ToS's chain-header parenthetical is the **expected ABSOLUTE move**, smaller by exactly **√(2/π) ≈ 0.798**, which is what an ATM straddle prices. Reconciliation: 1σ at our IV = **32.90** (what we show) · 1σ at ToS's IV = 37.61 · abs-move at ToS's IV = **30.01** vs ToS's displayed **30.433** (1.4% off, = spot drift between the two readings). **The trap:** the two differences NEARLY CANCEL here (32.90 vs 30.43, ~8%), which is luck, not calibration — on a symbol with a flatter smile our IV would approach ToS's and our move would then read ~25% LARGER. The same `atm_iv` also sizes the drawn cone, so changing the definition changes the chart, not just the text line. The actual ATM straddle mark was 27.25 (real market price, model-free) if a third reference is ever wanted | built |
 | `/options/rescue` | Rescue (last tab of the Options strip; bare dense table, no wrapper cards since 2026-07-12; at-risk credit spreads (PCS/CCS/IC) → **at-risk table** (paper+captured, heat-colored) → select a position → ranked **commission-aware adjustment menu**: close / partial-close / narrow / convert-IC / butterfly / roll-down/out/down-out / broken-wing / inverted / futures-hedge; each card shows gross/commission/net + metrics + legs + rationale + strategic context + warnings + score; execute cards have **Apply → confirm → `rescue_apply`** behind a stale-price guard, advisory cards show "manual"; nav badge from `cache:options:rescue_summary`) | built |
-| `/sentiment` | Sentiment — nav group **Market Trend & Sentiment** since 2026-07-11 (two-column top: **dual** Sentiment gauges (Today + 30-Day Avg) + **dual** Market Trend gauges (Today live-intraday + 30-Day structural — directional 0–100 score, 15-min cadence). **The Today trend gauge's state label + regime badge now show the FIVE-STATE (direction × aggression) vocabulary** — short labels **Bull / Weak Bull / Neutral / Resilient / Bear**, badge label+description e.g. "Lack of Bearishness — Refuses to drop, puts cheap/undefended — favor PCS" — and the press-and-hold **TREND DETAIL popup gained a "Why" evidence section** (direction/effort/skew/flow/session/rejection/profile/order-flow/option-flow/aggression lines). The **0–100 needle is unchanged** (still the direction score); the **30-Day structural gauge deliberately KEEPS the old band vocabulary** (structural read = no aggression axis), so the panel carries both. See the root five-state entry above. / component table; traffic-light tiles; a **"Market Regime"** expander (2026-07-23) = the blended STRUCTURAL read — committed label + confidence, a **transition line** ("Balanced → Rallying · 60%", hidden when stable), the classifier's evidence chips, and a **percent-stacked area chart** of today's membership mix (one band per regime, fixed order, plain chart + synthetic contiguous axis; reads `cache:sentiment:regime` + `:regime_history` on their OWN 5-min-cadence version probe; "Waiting for regime…" when nothing is published, "Unclear" when the evidence is genuinely weak) — see the root Market Regime entry; collapsed **"Daily Sentiment & Trend"** expander = two value-colorized (green/yellow/red) **2-min intraday graphs** (Daily Market Sentiment 0–10 + Daily Market Trend 0–100), rolling **last 5 trading days**, session gaps collapsed, **recorded going forward** by `sentiment_svc` (RTH-gated) into `SENTIMENT_INTRADAY_DB` → `cache:sentiment:intraday_history` (replaced the old 30-day-history line + rolling-avg/velocity/divergence text) — **expanded by default since 2026-07-12**; bottom status bar; **persists across navigation**; **server-side 120s auto-refresh + bridge publish, tab-independent**. **Since 2026-07-12** the Sector & Industry table, Sector Rotation, and the RRG chart are SEPARATE tabs (below) — this page still reads `cache:sentiment:sectors` only to fill the Components popup's Rotation/Sector-Value cells) | built |
+| `/sentiment` | Sentiment — nav group **Market Trend & Sentiment** since 2026-07-11 (three-column top: a **Market Sentiment ring** + a **Market Trend ring** + the **Signals** tile stack. **Since 2026-08-14 the four semicircular Highcharts gauges are TWO concentric SVG rings**, each carrying **Day / Week / Month** on one dial — `webgui/pages/rings.py:ring_svg`, mounted with `ui.html` and updated via `el.content`; the Sentiment ring's arcs are the live composite / 5-session mean / full-history mean (`sentiment_arcs`), the Trend ring's are `derived.trend` / `derived.trend_7d` / `derived.trend_30d_ago` (`trend_arcs`). **A horizon with no usable reading draws its track only + an em-dash** — the thing a needle structurally cannot say; see the ring-graphics section below for why that keys on CONFIDENCE, not key presence. **The Today trend reading's state label + regime badge show the FIVE-STATE (direction × aggression) vocabulary** — short labels **Bull / Weak Bull / Neutral / Resilient / Bear**, badge label+description e.g. "Lack of Bearishness — Refuses to drop, puts cheap/undefended — favor PCS" — and the press-and-hold **TREND DETAIL popup gained a "Why" evidence section** (direction/effort/skew/flow/session/rejection/profile/order-flow/option-flow/aggression lines). The **0–100 arc value is unchanged** (still the direction score); the **structural Week/Month arcs deliberately KEEP the old band vocabulary** (structural read = no aggression axis), so the panel carries both. See the root five-state entry above. / component table; the **Signals column is a 1×4 vertical stack of glowing tiles** (BIAS / SIGNAL / YESTERDAY / CHANGE, each icon + letter-spaced label + neon `text-shadow` value + hairline-and-dot rule + footer descriptor), with the service's **velocity + divergence lines restored beneath it**; a **"Market Regime"** expander (2026-07-23) = the blended STRUCTURAL read — committed label + confidence, a **transition line** ("Balanced → Rallying · 60%", hidden when stable), the classifier's evidence chips, and a **percent-stacked area chart** of today's membership mix (one band per regime, fixed order, plain chart + synthetic contiguous axis; reads `cache:sentiment:regime` + `:regime_history` on their OWN 5-min-cadence version probe; "Waiting for regime…" when nothing is published, "Unclear" when the evidence is genuinely weak) — see the root Market Regime entry; collapsed **"Daily Sentiment & Trend"** expander = two value-colorized (green/yellow/red) **2-min intraday graphs** (Daily Market Sentiment 0–10 + Daily Market Trend 0–100), rolling **last 5 trading days**, session gaps collapsed, **recorded going forward** by `sentiment_svc` (RTH-gated) into `SENTIMENT_INTRADAY_DB` → `cache:sentiment:intraday_history` (replaced the old 30-day-history line + rolling-avg/velocity/divergence text) — **expanded by default since 2026-07-12**; bottom status bar; **persists across navigation**; **server-side 120s auto-refresh + bridge publish, tab-independent**. **Since 2026-07-12** the Sector & Industry table, Sector Rotation, and the RRG chart are SEPARATE tabs (below) — this page still reads `cache:sentiment:sectors` only to fill the Components popup's Rotation/Sector-Value cells) | built |
 | `/sentiment/sectors` | Sector & Industry (NEW tab 2026-07-12, `pages.sentiment_sectors`, inserted between Sentiment and Sector Rotation): the **Sector & Industry Performance** table lifted out of `/sentiment` — Day/Week/Month %, P/C, RRG quadrant, rotation banner, cap-weighted summary line, **expandable industries w/ P/C+RRG**; Refresh / Expand All / Collapse All. Tier-3 reader of `cache:sentiment:sectors`; **reuses the PURE builders from `pages.sentiment`** (`sector_table_rows`/`sector_summary`/`rotation_banner`/`industry_rows` + color helpers) so the display logic + its tests stay single-source) | built |
 | `/sentiment/rotation` | Sector Rotation (RRG-vs-SPY assessment: Risk-ON/OFF headline + spread; **top row** = quadrant-map table (left) + tight ROTATING FROM/INTO w/ S&P weights (right). **Since 2026-07-12 the RRG CHART moved to its own `/sentiment/rrg` tab** — this page is now the headline + quadrant map + rotating-from/into only; reuses `sector_rotation_assessment`; cached, **manual Refresh only**) | built |
 | `/sentiment/rrg` | RRG (NEW tab 2026-07-12, `pages.sentiment_rrg`, last tab after Sector Rotation): the **full-width RRG** chart lifted out of `/sentiment/rotation` — Risk-ON/OFF headline for context + per-sector "meteor tails" (engine `assess_sector` retains a `tail` of `TAIL_LENGTH=12` RS-Ratio/RS-Mom points sampled every `TAIL_STRIDE=2` days; **one spline series per sector** = faded trail line + single bright head dot) with native Highcharts hover-isolation (`plotOptions.series.states.inactive`). Tier-3 reader of `cache:sentiment:rotation`; **reuses `rrg_scatter_figure`/`headline_parts` from `pages.sentiment_rotation`**; cached, **manual Refresh only**) | built |
@@ -529,13 +529,22 @@ deleted** (Phase 4) — `theme.py` = tokens + `QUASAR_INTERNAL_CSS`. **This sect
   TOML → restart the webgui → hard-refresh.** NOT config-driven (deliberate):
   per-chart Highcharts colorscales (e.g. the Gamma heatmap), data-driven
   table-cell zone maps (score/heat/P&L), and the standalone EOD/Analyze report
-  documents. **JIT gotcha (2026-07-09):** the bundled Tailwind browser JIT does
-  NOT reliably generate arbitrary classes containing `var(...)` **or `rgba(...)`**
-  (plain-hex arbitraries are fine) — the nav pill's old `bg-[var(--q-primary)]`
-  silently produced no rule; it is now a plain `.nav-active` rule in `_NAV_CSS`
-  with a **hardcoded rgba wash**, so it does **not** follow the `accent` knob (nor
-  do the tab-strip fills or the active icon accent). Changing `accent` moves the
-  Quasar controls only; to move the nav accents, edit `main._NAV_CSS` as well.
+  documents. **JIT gotcha (2026-07-09; NARROWED 2026-08-14):** the bundled
+  Tailwind browser JIT does NOT generate an arbitrary class containing
+  `var(...)` — the nav pill's old `bg-[var(--q-primary)]` silently produced no
+  rule; it is now a plain `.nav-active` rule in `_NAV_CSS` with a **hardcoded
+  rgba wash**, so it does **not** follow the `accent` knob (nor do the tab-strip
+  fills or the active icon accent). Changing `accent` moves the Quasar controls
+  only; to move the nav accents, edit `main._NAV_CSS` as well. **`rgba(...)` was
+  wrongly caught by that ban until 2026-08-14** — this line read "`var(...)`
+  **or `rgba(...)`**", which is overstated and cost a real workaround: probed
+  live while building the Signals tiles, `shadow-[0_0_18px_-6px_rgba(…)]`
+  generates fine (the Refresh button's shadow is a live example), as do
+  `bg-gradient-to-b from-[#hex] to-[#hex]`, `[text-shadow:0_0_12px_#hex]` and
+  `drop-shadow-[…]`. The limitation is **`var(...)`**, not parenthesized
+  functions generally. Note `rgba()` must be written with **no spaces** (a
+  Tailwind arbitrary value cannot contain them, and underscores are the escape),
+  and a `box-shadow` arbitrary needs the **rgba form, not a hex**.
 - **Apply to a new page:**
   ```python
   from pages.options.theme import QUASAR_INTERNAL_CSS, PAGE, CARD, EYEBROW, LABEL, BTN_PRIMARY
@@ -755,6 +764,37 @@ module-level functions (TDD them with sample dicts); keep `render()` thin
 - `ui.html(...)` **strips `<style>` and `<iframe>`**. For CSS use `ui.add_css(css)`
   (rules only, scope with a class); render HTML *fragments*, not full documents.
   See `pages/options/gamma.py` Explain (`EXPLAIN_CSS` + `wrap_explain`).
+- **`ui.html` sanitizes through the BUNDLED DOMPurify, and its allow-list is
+  READABLE — so a stripped attribute is a testable invariant, not a mystery
+  (cost: every label on the new /sentiment rings silently mis-positioned, with a
+  fully green suite).** `html.js` calls `setHTML`, but that is NOT the native
+  API: NiceGUI monkeypatches it at `templates/index.html:144` —
+  `Element.prototype.setHTML = function (html) { this.innerHTML =
+  DOMPurify.sanitize(html); }`, its own comment explaining that native `setHTML`
+  strips class attributes. So the effective allow-list is **DOMPurify's
+  default**, which is laxer in some places and stricter in others. It allows
+  `alignment-baseline` and `baseline-shift` but **NOT `dominant-baseline`** —
+  the obvious spelling for vertically centring SVG `<text>`, and the one
+  `rings._text` shipped with. Client-side every label dropped to the alphabetic
+  baseline while the **server-side string stayed correct**, so nothing in the
+  suite could see it. Fixed with the pre-`dominant-baseline` idiom, `dy="0.35em"`
+  (`rings._BASELINE_DY`), which is allow-listed and depends on no allow-list
+  detail that can change under us; `sanitize=False` was considered and rejected
+  as disproportionate for a dial. **The general fix is the test:**
+  `webgui/tests/test_rings.py::test_ring_svg_emits_nothing_dompurify_would_strip`
+  extracts the allow-list out of the shipped `nicegui/static/dompurify.mjs` (long
+  runs of quoted lowercase tokens, **dropping any run containing `script`** —
+  DOMPurify also ships DENY lists, and unioning those in blessed `<use>`) and
+  asserts every tag and attribute the builder emits survives it.
+- **`getBBox()` on an SVG `<text>` returns the EM box, not the ink — so it is the
+  wrong tool for optical centring.** Centring the ring's value/caption pair on
+  `getBBox()` left it visibly low: the box reported a 4.2px offset where the
+  measured INK offset was **10.7px**, because an em box carries ascender and
+  descender space that lining digits and all-caps captions never fill. Measure
+  with canvas `actualBoundingBoxAscent`/`actualBoundingBoxDescent` instead. (The
+  same reason `rings._BASELINE_DY` is 0.35em ≈ half the app font's cap height,
+  and deliberately not a reproduction of `dominant-baseline:middle`, which
+  centres on the *x*-height and so sits ~0.09em high for cap-height glyphs.)
 - **A drawer's `.nav-drawer` class is NOT the `<aside>` — you cannot size the drawer
   through it (cost: hours; the CSS silently did nothing).** NiceGUI puts the classes
   you pass to `ui.left_drawer(...).classes(...)` on Quasar's **inner**
@@ -928,9 +968,10 @@ stale); the proxy's REST market data works even when `/health` shows
 `token_expired:true` (auto-refresh) — only a missing/expired **refresh** token is
 fatal.
 
-**Tests:** `cd webgui && ..\.venv\Scripts\python -m pytest -q` (**1190 green**,
-measured 2026-08-09 — this line said 772 for a long time; see the Tests section
-for the standing warning about stale counts and for the worktree/subshell caveat).
+**Tests:** `cd webgui && ..\.venv\Scripts\python -m pytest -q` (**1336 green**,
+measured 2026-08-14 — this line said 772 for a long time, then 1190; see the
+Tests section for the standing warning about stale counts and for the
+worktree/subshell caveat).
 TDD pure functions; smoke-verify `render()` with a screenshot.
 `tests/test_no_inline_style.py` guards every migrated page against `.style(`/`:style=`
 (the Tailwind-first standard) — add any new page to it.
@@ -955,23 +996,24 @@ TDD pure functions; smoke-verify `render()` with a screenshot.
 copied `history_backfill.backfill_history(...)` engine (latest completed-session
 composite + 30d history) + `scoring` (`composite.velocity/divergence`,
 `trend_regime.classify/commit_state`) + the ported `sectors_ref.load_sectors_data`.
-**Layout:** a two-column top region — left: **two** Market Sentiment speedometers
-(**Today** `gauge_score(total)` + **30-Day Avg** `gauge_score(sentiment_30d_avg(snaps))`,
-the avg = page-side mean of the history composites) + bias + size/conf; right: **two**
-**Market Trend** speedometers (**Today** + **30-Day**, both via `trend_gauge_value`,
-which now returns the directional 0–100 trend **score directly** — no anchor/nudge).
-Both values come from `derived["trend"]` / `derived["trend_30d_ago"]` **published by
-`sentiment_svc`** via the new **intraday Market Trend model** (see the dedicated
-section below) — with the regime badge/desc beneath and a **TREND DETAIL**
-press-and-hold popup showing the four sub-scores (Price/Breadth/Sector/VIX) +
-confidences (`trend_subscore_rows`). The top region is now
-**three columns** (Market Sentiment / Market Trend / Signals); the component
-**table** (Value/Score[2dp]/Weight/Conf — Contrib computed for reconciliation but
-not shown; credit_pulse excluded per v4.3 `WEIGHTS`) and the Trend detail are
-**press-and-hold popups** (`ui.menu().props("no-parent-event")`), not always-visible
-columns. The Signals column is a **2×2 four-tile matrix** (`TILE_DEFS` =
-**Bias/Signal/Yesterday/Change** — Modifier dropped per design) with a
-**traffic-light background** (`traffic_color(total)`). (A dollar-weighted call/put **premium**
+**Layout:** a three-column top region — **Market Sentiment ring** / **Market Trend
+ring** / **Signals** — each column an equal-width `min-w-[300px]`. **Since
+2026-08-14 the four semicircular gauges are two concentric Day/Week/Month rings**
+(see "Sentiment Day/Week/Month rings" below); the Sentiment ring keeps bias +
+size/conf beneath it, the Trend ring keeps the regime badge/desc and the **TREND
+DETAIL** press-and-hold popup showing the four sub-scores (Price/Breadth/Sector/VIX)
++ confidences (`trend_subscore_rows`). Trend values come from `derived["trend"]` /
+`derived["trend_7d"]` / `derived["trend_30d_ago"]` **published by `sentiment_svc`**
+via the **intraday Market Trend model** (see the dedicated section below). The
+component **table** (Value/Score[2dp]/Weight/Conf — Contrib computed for
+reconciliation but not shown; credit_pulse excluded per v4.3 `WEIGHTS`) and the
+Trend detail are **press-and-hold popups** (`ui.menu().props("no-parent-event")`),
+not always-visible columns. The Signals column is a **1×4 vertical stack of glowing
+tiles** (`SIGNAL_TILE_DEFS` = **Bias/Signal/Yesterday/Change** — Modifier dropped per
+design), each tile icon + letter-spaced label / big neon-shadowed value / hairline
+rule + dot / footer icon + descriptor, tinted from a finite four-key `TONE_CLASSES`
+map (pos/neg/warn/flat), with the service's **velocity + divergence lines** beneath
+(`velocity_lines`). (A dollar-weighted call/put **premium**
 skew tile lives on the **Market Dashboard** OPTIONS SENTIMENT frame, NOT here — see the
 "Market Dashboard" section + the 2026-07-21 Last-updated entry.) Below that, an **expanded-by-default**
 (since 2026-07-12) `ui.expansion("Daily Sentiment & Trend")` holds **two stacked value-colorized 2-min
@@ -1040,13 +1082,38 @@ driven by a **directional 0–100 score** (50 = neutral, 100 = max bull) recompu
 - **Service compute** `services/sentiment_svc/compute.py`: `compute_intraday_trend`
   (fetches SPY intraday 5/15-min + daily via the proxy's new
   `get_intraday_history`, breadth/sector/VIX quotes — reuses `live_composite._BREADTH/_last/
-  _VIX_SYMS` and standalone `technical`) and `compute_30d_trend` (daily structural analog
-  for the **second gauge**, price + sector only). Both defensive → neutral on any failure.
+  _VIX_SYMS` and standalone `technical`) and **two structural horizons**,
+  `compute_30d_trend` and — added 2026-08-14 for the Trend ring's Week arc —
+  **`compute_7d_trend`**. Both structural functions are thin wrappers over the shared
+  **`_structural_trend(spy_daily_df, sector_pcts, cyc_def_scale)`** (price + sector only,
+  no VWAP/breadth/VIX, no smoothing or hysteresis) and differ ONLY in which horizon's
+  sector %-moves they pass (`week_pct` vs `month_pct`) and in `cyc_def_scale`
+  (`_CYC_DEF_SCALE_7D = 1.5` vs `_CYC_DEF_SCALE_30D = 3.0`). Each owns its own TTL cache
+  on the self-fetching path (`TREND_7D_TTL_SEC = 1800` / `TREND_30D_TTL_SEC = 3600`;
+  explicit-args calls bypass it). All three are defensive → neutral on any failure —
+  **and that neutral is a trap, see the ring section below.**
+  ⚠ **`compute_30d_trend` is MISNAMED** and always was: it is a monthly-HORIZON
+  *structural* read, not the trend as it stood 30 days ago and not a 30-day average.
+  ⚠ **KNOWN LIMITATION:** the Week and Month horizons **share the same daily price
+  sub-score** — `technical.calculate_ema_alignment`'s EMA periods are fixed, so handing
+  it a shorter frame changes nothing. The two arcs therefore track each other and diverge
+  mainly on **sector rotation**. A genuinely weekly price read needs weekly-resampled SPY
+  bars; deliberately deferred.
+  **One sector fan-out serves both horizons** — `_fetch_sector_pcts` (TTL
+  `SECTOR_PCTS_TTL_SEC = 3600`, an EMPTY result deliberately NOT cached so a proxy blip
+  can't poison the hour) returns `{"week": …, "month": …}` off ONE `_fetch_closes` call,
+  which already derived both, so **the Week arc costs ZERO extra Schwab calls** on a stack
+  measured at ~68–76k/day. `_fetch_sector_week_pcts`/`_fetch_sector_month_pcts` are views
+  on it.
 - **15-min cadence + persisted state** in `handlers.refresh` via the module-level
   `_TREND` holder (lock-guarded; `scheduler.trend_due`/`TREND_INTERVAL_SEC=900`): the
   EMA-smoothing + hysteresis state thread across reads; the held trend rides inside the
-  existing `cache:sentiment:composite` `derived.trend`/`derived.trend_30d_ago` (no new
-  Redis key).
+  existing `cache:sentiment:composite` as `derived.trend` / **`derived.trend_7d`** /
+  `derived.trend_30d_ago` (no new Redis key). The two structural horizons carry **no
+  hysteresis of their own — they are simply HELD** in `_TREND` and republished on gated
+  (non-recompute) refreshes, so every composite write carries all three ring arcs.
+  `derive_composite_extras` takes `trend_7d` **last** so the existing positional call
+  shape is unaffected.
 - **Bridge** (`live_composite.build_bridge_payload` + `compute._bridge_trend`): the
   intraday `state`/`confidence` + additive `trend_score`/`sub_scores` are merged onto the
   daily `classify` `sma_*`/`drawdown` (kept for the additive-only contract). `regime_filter`
@@ -1057,6 +1124,112 @@ driven by a **directional 0–100 score** (50 = neutral, 100 = max bull) recompu
   Redis → bridge → rendered gauges + popup). Design/plan:
   [design](docs/plans/2026-06-19-intraday-market-trend-redesign-design.md) /
   [plan](docs/plans/2026-06-19-intraday-market-trend-redesign-plan.md).
+
+**Sentiment Day/Week/Month rings (`webgui/pages/rings.py`) — 2026-08-14.** The
+four semicircular Highcharts gauges on `/sentiment` are now **two concentric SVG
+rings**, each showing **Day / Week / Month** on one dial. Four gauges could show
+two horizons; two rings show six readings in less space, and — the substantive
+reason — a ring can say **"no data"** where a needle cannot.
+- **`ring_svg(arcs, uid, size=280)`** is a pure SVG-string builder (no NiceGUI
+  import), mounted with `ui.html` and updated in place via `el.content`. Chosen
+  over a Highcharts `solidgauge` and over a CSS conic-gradient: **rounded arc
+  caps are impossible in CSS**, and a plain string sidesteps both documented
+  `ui.highchart` hazards at once — the ESM-import-map trap (a chart added to a
+  page that had none at first render fails `Failed to resolve module specifier
+  nicegui-highcharts`) and the `chart.update()` merge/stock-module minefield.
+  Precedent: `pages/options/svg.py`.
+- **Geometry.** 270° sweep, start 225° / end 135°, measured **clockwise from 12
+  o'clock** — so 0 is lower-left, 50 is top, 100 is lower-right, with a 90° gap
+  at the bottom that the Week/Month legend lives in. Radii 112/90/68 (outer =
+  Day), stroke 13, ticks at r=132, fixed `viewBox="0 0 280 280"`; **`size` sets
+  only width/height**, so the dial scales itself and every internal coordinate
+  stays in the 280-space. `_value_angle` REQUIRES a pre-clamped 0–100 — past 133
+  the sweep exceeds 360° and wraps into a *short* arc that reads as a LOW value.
+- Each arc's colour comes from **its own value** via `gauge._ramp_color`, so
+  `config/theme.toml [gauge]` still drives the palette. The glow is a **layered
+  halo** (a wide translucent copy of the path under a normal-width bright one),
+  deliberately **not** an SVG `<filter>` — see the DOMPurify gotcha.
+- **`uid` is REQUIRED**: both rings live on the same page and a duplicate DOM id
+  makes them collide.
+- **`pages/gauge.py` is UNCHANGED** and still serves the options detail-panel
+  speedometer (`pages/options/detail.py`), so **the app now carries two gauge
+  idioms** — Highcharts needle for a single value in a panel, SVG ring for
+  multi-horizon. `rings.py` reuses its `_esc`/`_ramp_color` rather than forking
+  them.
+- **Page builders** (`pages/sentiment.py`): `sentiment_avg_or_none(snaps, n)` /
+  `sentiment_avg` (`WEEK_SNAPS = 5` — the backfill is one snapshot per COMPLETED
+  session, so a week is 5 rows, not 7), `sentiment_arcs(live, snaps)`,
+  `trend_arcs(derived)`, `_composite_arc_value`, `_trend_arc_value`.
+  **`sentiment_30d_avg` was DELETED** (its only caller was a removed gauge; a
+  `hasattr` test pins that).
+- **The defect class this redesign exists to fix — six instances of ONE failure:
+  a missing or garbage input rendering as a CONFIDENT reading.** A non-finite
+  composite becoming a full 100 arc (`min(100.0, nan)` is `100.0`, and these
+  payloads cross Redis as JSON, which both emits and accepts `NaN`/`Infinity`, so
+  a service-side divide-by-zero round-trips intact); an unparseable score
+  becoming a maximally-BEARISH 0 via `_safe_float`'s 0.0 default; a NaN sector
+  pct becoming **maximum cyclical leadership at full confidence** (measured:
+  `score_sector_participation(5, 11, nan)` → `TrendSub(67.27, confidence=1.0)`,
+  because `intraday_trend._clamp` is `max(lo, min(hi, v))` and that returns the
+  HIGH bound for NaN — hence `compute._finite_pcts`, which DROPS non-finite
+  sector moves so the missing sector lowers `n_total` and with it the
+  sub-score's confidence, as it should); and **the one that actually fires in
+  production** — `compute_7d_trend`/`compute_30d_trend` swallowing their own
+  exceptions to return a fully shaped **`score 50.0 / confidence 0.0`** dict, so
+  on any proxy blip a good reading is replaced by a confident-looking neutral 50
+  and **every absent-key guard misses it**. That is why **`_trend_arc_value`
+  keys on CONFIDENCE, not on key presence**. Confidence is a sound
+  discriminator here and was verified rather than assumed: `blend_trend`
+  weights each sub-score by its own confidence, so the aggregate rounds to 0.0
+  only when there was no usable evidence at all — a genuinely neutral but
+  well-evidenced 50/50 read scores agg 0.65 and passes straight through.
+  `rings._safe_value` is deliberately NOT `gauge._safe_float` for the same
+  reason: `None` → track-only + em-dash is how the ring says nothing, and a
+  needle has no such state.
+- **⚠ OUTSTANDING FOLLOW-UP — the PRICE sub-score has the same NaN exposure as
+  the sector one, and it is NOT fixed.** `_finite_pcts` guards only the sector
+  input. Measured on the live scorer: an all-NaN read of the structural price
+  inputs (`macd_hist`/`rsi`/`adx` at `compute.py:1248-1253`, feeding
+  `score_price` with a hardcoded `vwap_pct=0.0`) scores **82.50 — near-maximum
+  bullish — at UNCHANGED confidence (0.333)**, where a sane read scores 56.25;
+  the same all-NaN read in **`compute_intraday_trend`, the LIVE Day gauge**
+  (`compute.py:439-443`) scores **92.50**. Deferred to its own task because the
+  fix must cover both call sites with one shared filter.
+- **Styling** stays Tailwind-first with **no `ui.add_css`** on the page. Note
+  `theme.TILE_3D` is deliberately FLAT (its own comment: "a hairline border +
+  12px radius, **NO bevel or drop shadow**", from the Deep Slate flattening) and
+  was **not** redefined — the Signals tiles' glow tokens are LOCAL to
+  `sentiment.py` (`_tone_classes`/`TONE_CLASSES`). The rings already carry a
+  halo, so **the page is now mixed**: two glowing elements against a token
+  vocabulary that says flat. A third would mean the theme has moved in practice
+  and `theme.py` should be changed to match rather than routed around again.
+  Reactive recolours swap via `.classes(remove=TONE_*_CLASSES, add=…)` — one
+  remove-set per element type (value text / tile shell / rule / dot), since a
+  partial set stacks across the version-poll repaint.
+- **`_word_tone` — BIAS and SIGNAL carry `live_composite.signal_band`'s OWN
+  vocabularies** (`Long / Neutral / Cautious / Short` and `Strong Bull … Strong
+  Bear`), which are **NOT** the composite's `bias` field. `bias_color` only
+  substring-matches bull/bear, so "Long" and "Short" read amber forever. Each
+  tile now colours from its own word, and **`bias_text_class` delegates to
+  `_word_tone`** so the headline under the ring can no longer contradict the tile
+  beside it — it was rendering "7.28 · Long" in amber directly above a green
+  "Long".
+- **`velocity` and `divergence` are rendered again.** The service had been
+  computing and publishing both on **every** refresh with **no renderer at all**
+  since the intraday graphs replaced the old text block — a silent regression, an
+  accident of that layout change, not a decision. `velocity_lines(derived)`
+  returns `{text, flag, divergence}`; the flag and the divergence note hide when
+  empty (empty means "no regime break", not "unknown").
+- **Test isolation the change forced.** An autouse `conftest` fixture now resets
+  `_SECTOR_PCTS_CACHE` / `_TREND_7D_CACHE` / `_TREND_30D_CACHE` **before and
+  after** every sentiment_svc test — without it, any test stubbing `_fetch_closes`
+  leaves its FIXTURE values in those module globals and a later un-monkeypatched
+  self-fetching call silently consumes them (a probe `compute_30d_trend()` scored
+  its sector sub-score 73.33 off stale stub data with ZERO fan-outs). The suite
+  only stayed green because `pytest-randomly` isn't installed and the ordering
+  happened to be kind. Design/plan:
+  [design](docs/plans/2026-08-14-sentiment-trend-ring-graphics-design.md) /
+  [plan](docs/plans/2026-08-14-sentiment-trend-ring-graphics-plan.md).
 
 **Market Regime — display names + the direction axis (2026-08-14).** The five
 regimes were renamed **for display only** and gained a direction word. **The
@@ -2678,7 +2851,7 @@ cd sentiment-dashboard ; python -m pytest tests
 cd trade-analyzer      ; python -m pytest .
 cd portfolio-analyzer  ; python -m pytest tests
 cd claude-driver       ; python -m pytest .
-cd webgui              ; python -m pytest .   # 1190 green: transforms + shell smoke
+cd webgui              ; python -m pytest .   # 1336 green: transforms + shell smoke
 ```
 
 > **In a worktree** (`.claude/worktrees/…`) there is no `.venv` — use the absolute
@@ -2698,7 +2871,7 @@ re-triggers the documented `config`/`scoring`/`notifier` module-name collisions)
 
 ```powershell
 # from the repo root, one service at a time
-.venv\Scripts\python -m pytest services\sentiment_svc   # 250 passed / 1 documented-baseline fail
+.venv\Scripts\python -m pytest services\sentiment_svc   # 279 passed / 1 documented-baseline fail
 .venv\Scripts\python -m pytest services\options_svc     # 932 passed / 2 documented-baseline fail
 .venv\Scripts\python -m pytest services\portfolio_svc   # 27
 .venv\Scripts\python -m pytest services\trade_svc       # 56
@@ -2720,8 +2893,8 @@ read them as a regression:**
 - **options_svc** — 2 date-relative `test_expected_move` failures (932 passed).
 - **sentiment_svc** — `tests/test_compute_regime.py::test_daily_history_wins_over_session_latch`
   (the `$VIX1D` session latch beats the daily close: `assert 18.0 == 10.0`). Suite
-  reads **250 passed / 1 failed**. Reproduced at `7667920`, so it **predates** the
-  dev/prod-environments branch; first documented 2026-08-08.
+  reads **279 passed / 1 failed** (2026-08-14; was 250/1). Reproduced at `7667920`,
+  so it **predates** the dev/prod-environments branch; first documented 2026-08-08.
 
 **Compare the failing SET, not the count.** A matching total is not evidence of a
 clean run: this repo has a documented incident where two real regressions hid
@@ -2732,13 +2905,14 @@ failure count sat unmoved at 11 — that drift lives in the `test_gex_collector*
 group, which is timing-dependent.
 
 The remaining per-service counts in the block above are indicative, not pinned.
-Only these are current, re-measured **2026-08-09** on `Using_Highcharts` at
-`b4ef24b`: **webgui 1190** green, **options_svc 932 passed / 2 failed**,
-**options-scanner 1370 passed / 11 failed / 3 skipped**. `sentiment_svc` (251
-collected) was last measured 2026-08-08; portfolio_svc, trade_svc, driver_svc,
-`shared/bus` and `shared/contracts` have **not** been re-measured since they were
-first written down — treat those five as unverified and measure your own baseline
-before trusting them.
+Current, re-measured **2026-08-14** on the ring-graphics branch: **webgui 1336**
+green and **sentiment_svc 279 passed / 1 failed** (the documented
+`test_daily_history_wins_over_session_latch`). Re-measured **2026-08-09** on
+`Using_Highcharts` at `b4ef24b`: **options_svc 932 passed / 2 failed**,
+**options-scanner 1370 passed / 11 failed / 3 skipped**. portfolio_svc,
+trade_svc, driver_svc, `shared/bus` and `shared/contracts` have **not** been
+re-measured since they were first written down — treat those five as unverified
+and measure your own baseline before trusting them.
 
 ## External processes (not in this repo)
 
@@ -2752,3 +2926,5 @@ claude-driver addresses them over HTTP; this repo does not contain or start them
 - [`docs/plans/2026-06-15-three-tier-architecture-plan.md`](docs/plans/2026-06-15-three-tier-architecture-plan.md) — bite-sized TDD implementation plan for the above
 - [`docs/plans/2026-06-14-nicegui-webgui-design.md`](docs/plans/2026-06-14-nicegui-webgui-design.md)
 - [`docs/plans/2026-06-14-nicegui-webgui-plan.md`](docs/plans/2026-06-14-nicegui-webgui-plan.md)
+- [`docs/plans/2026-08-14-sentiment-trend-ring-graphics-design.md`](docs/plans/2026-08-14-sentiment-trend-ring-graphics-design.md) — **`/sentiment` Day/Week/Month ring graphics** (four gauges → two concentric SVG rings; the Week structural horizon; the Signals tile stack)
+- [`docs/plans/2026-08-14-sentiment-trend-ring-graphics-plan.md`](docs/plans/2026-08-14-sentiment-trend-ring-graphics-plan.md) — bite-sized TDD implementation plan for the above
