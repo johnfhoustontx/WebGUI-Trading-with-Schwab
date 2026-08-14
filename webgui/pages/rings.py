@@ -71,8 +71,16 @@ _TICKS = (0, 25, 50, 75, 100)
 # the 0 and 100 ticks, which land at x~47 and x~233 on the r=132 rim.
 _LEGEND_X = (104.0, 176.0)
 TICK_SIZE = 11
-CENTER_VALUE_Y, CENTER_VALUE_SIZE = 146.0, 52     # the OUTERMOST arc's reading
-CENTER_CAPTION_Y, CENTER_CAPTION_SIZE = 170.0, 12
+# The centre pair is positioned so the INK of "73"+"DAY" centres on the dial's
+# middle (140), not so their em boxes do. Measured live via canvas
+# actualBoundingBoxAscent/Descent rather than derived: at the pre-nudge y's the
+# ink spanned 127.2..174.2, centre 150.7 — 10.7px low — while getBBox() reported
+# only 4.2px, because an em box carries ascender/descender space the glyphs do
+# not fill. Digits are lining figures of equal cap height, so this holds for
+# every value 0..100. (The "—" placeholder sits a little high under this
+# scheme; a no-data marker does not warrant its own optical case.)
+CENTER_VALUE_Y, CENTER_VALUE_SIZE = 135.0, 52     # the OUTERMOST arc's reading
+CENTER_CAPTION_Y, CENTER_CAPTION_SIZE = 159.0, 12
 LEGEND_VALUE_Y, LEGEND_VALUE_SIZE = 250.0, 22     # Week + Month, in the gap
 LEGEND_CAPTION_Y, LEGEND_CAPTION_SIZE = 267.0, 10
 
