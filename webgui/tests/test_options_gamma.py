@@ -993,13 +993,36 @@ def test_bevel_fill_bakes_the_designs_five_stops():
     assert all(s[1].startswith("#") and len(s[1]) == 7 for s in stops)
 
 
-def test_bevel_fill_orientation_matches_the_bar_axis():
-    # A horizontal BAR is lit across its thickness => vertical gradient.
+def test_bevel_runs_across_thickness_which_is_x_for_both_panels():
+    # MEASURED, not assumed — an earlier version of this test asserted the
+    # opposite and passed, because it pinned the assumption rather than reality.
+    # A Highcharts `bar` is a `column` whose series group is ROTATED 90deg (live:
+    # transform="translate(72,48) rotate(90 117 685) scale(-1 1)"), so its points
+    # are authored in the un-rotated frame just like a column's: local x is the
+    # bar's THICKNESS, local y its LENGTH. An objectBoundingBox gradient resolves
+    # in that local frame, so x is correct for BOTH panels — and using y would
+    # shade along the bar's length, i.e. a fade rather than a bevel.
     assert gamma.bevel_fill(gamma.POS_COLOR)["linearGradient"] == {
-        "x1": 0, "y1": 0, "x2": 0, "y2": 1}
-    # A vertical COLUMN (hedge panel) is lit across ITS thickness => horizontal.
-    assert gamma.bevel_fill(gamma.POS_COLOR, vertical=False)["linearGradient"] == {
         "x1": 0, "y1": 0, "x2": 1, "y2": 0}
+    # The bar group is additionally scale(-1 1) — local x is MIRRORED — so its
+    # gradient must run the other way or the white specular stop lands on the
+    # bar's BOTTOM edge and it reads as lit from underneath. Measured on a real
+    # 366x12 SPY bar: top-to-bottom screen luma 114->200 un-mirrored (wrong way
+    # up) vs a bright-to-dark ramp once mirrored.
+    assert gamma.bevel_fill(gamma.POS_COLOR, mirrored=True)["linearGradient"] == {
+        "x1": 1, "y1": 0, "x2": 0, "y2": 0}
+    # ...and the two differ ONLY in direction, never in the stops themselves.
+    assert (gamma.bevel_fill(gamma.POS_COLOR)["stops"]
+            == gamma.bevel_fill(gamma.POS_COLOR, mirrored=True)["stops"])
+
+
+def test_bar_panel_is_mirrored_and_hedge_panel_is_not():
+    bars = gamma.bar_figure(GEX, 450.0, view="GEX")
+    call = next(s for s in bars["series"] if s["name"] == "Call gamma")
+    assert call["data"][0]["color"]["linearGradient"]["x1"] == 1     # mirrored
+    hedge = gamma.hedge_figure([{"hedge_pressure": 1e9}], ["09:30"])
+    buy = next(s for s in hedge["series"] if s["name"] == "Hedge buy")
+    assert buy["data"][0]["color"]["linearGradient"]["x1"] == 0      # not mirrored
 
 
 def test_glow_is_a_zero_offset_shadow_in_the_bars_own_colour():
@@ -1055,7 +1078,7 @@ def test_hedge_panel_uses_the_plasma_scheme_not_green_red():
     assert gamma.HEDGE_BUY_COLOR == gamma.POS_COLOR
     assert gamma.HEDGE_SELL_COLOR == gamma.NEG_COLOR
     assert gamma.HEDGE_BUY_COLOR not in (gamma.UP_COLOR, gamma.DOWN_COLOR)
-    # Bevelled, and lit across the COLUMN's thickness (horizontal).
+    # Bevelled across the column's thickness — local x, same as the bar panel.
     for p in named["Hedge buy"]["data"]:
         assert p["color"]["linearGradient"] == {"x1": 0, "y1": 0, "x2": 1, "y2": 0}
 

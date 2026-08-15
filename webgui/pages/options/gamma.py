@@ -256,7 +256,7 @@ BEVEL_STOPS = [(0.00, 255, 0.85), (0.22, 255, 0.28), (0.46, 255, 0.04),
 GLOW_WIDTH = 12
 
 
-def bevel_fill(hexc, vertical=True):
+def bevel_fill(hexc, mirrored=False):
     """The design's glass bevel as a Highcharts gradient fill over ``hexc``.
 
     An SVG fill takes ONE paint, so the design's CSS overlay-on-top-of-a-colour is
@@ -266,13 +266,25 @@ def bevel_fill(hexc, vertical=True):
     what makes a short bar look like a short cylinder rather than a slice of a long
     one (verified live).
 
-    ``vertical`` lights the bar across its THICKNESS: a horizontal ``bar`` is thick
-    top-to-bottom (vertical gradient), a vertical ``column`` is thick left-to-right
-    (horizontal). Passing the wrong one shades along the bar's LENGTH, which reads
-    as a fade rather than a bevel."""
-    grad = ({"x1": 0, "y1": 0, "x2": 0, "y2": 1} if vertical
-            else {"x1": 0, "y1": 0, "x2": 1, "y2": 0})
-    return {"linearGradient": grad,
+    The gradient runs across the bar's THICKNESS, which is the **x** direction for
+    BOTH panels — the non-obvious half of this, and measured rather than assumed.
+    A Highcharts ``bar`` is a ``column`` whose SERIES GROUP is rotated (live:
+    ``transform="translate(72,48) rotate(90 117 685) scale(-1 1)"``), so its points
+    are authored in the un-rotated frame exactly like a column's: local x = the
+    bar's thickness, local y = its length, and the rotation is what lays it
+    horizontally on screen. An objectBoundingBox gradient is resolved in that LOCAL
+    frame, so ``x1:0→x2:1`` shades across the thickness in both cases. Using y
+    here instead shades along the bar's LENGTH, which reads as a fade rather than
+    a bevel.
+
+    ``mirrored`` is the second half of that transform and is easy to miss: the bar
+    group is ``rotate(90 …) scale(-1 1)``, and the **scale(-1 1) MIRRORS local x**,
+    so an un-mirrored gradient puts the design's white specular stop at the bar's
+    BOTTOM edge on screen and the dark stop on top — a bevel lit from underneath.
+    Pass ``mirrored=True`` for the rotated ``bar`` panel; the hedge ``column``
+    group carries no such flip, so it stays False and is lit from its left edge."""
+    x1, x2 = (1, 0) if mirrored else (0, 1)
+    return {"linearGradient": {"x1": x1, "y1": 0, "x2": x2, "y2": 0},
             "stops": [[pos, _composite(hexc, ov, a)] for pos, ov, a in BEVEL_STOPS]}
 
 
@@ -559,7 +571,7 @@ def bar_figure(data, spot, view="GEX", walls=None, flip=None, n_side=N_SIDE, hei
     pos_pts, neg_pts = [], []
     for s, n, c, h in zip(b["strikes"], b["nets"], b["colors"], b["hovers"]):
         (pos_pts if n >= 0 else neg_pts).append(
-            {"x": s, "y": n, "color": bevel_fill(c),
+            {"x": s, "y": n, "color": bevel_fill(c, mirrored=True),
              "borderColor": _darker(c), "borderWidth": 1,
              "custom": {"hover": h}})
     plotlines = [_strike_plotline(a["value"],
@@ -802,9 +814,7 @@ def hedge_figure(hedge_rows, times, height=150):
         # no pressure) so the count stays fixed at 2 across in-place updates.
         "series": [
             {"type": "column", "name": name,
-             # Columns are thick left-to-right, so the bevel runs HORIZONTALLY —
-             # vertical would shade along the bar's length and read as a fade.
-             "data": [{"x": x, "y": y, "color": bevel_fill(colour, vertical=False)}
+             "data": [{"x": x, "y": y, "color": bevel_fill(colour)}
                       for x, y, c in pts if (c == colour)],
              "borderWidth": 0, "groupPadding": 0.02, "pointPadding": 0.0,
              "shadow": glow(colour),
