@@ -880,7 +880,11 @@ def _tone_classes(hexv):
         # The neon glow. `[text-shadow:...]` JIT-generates (verified live).
         "text": f"text-[{hexv}] [text-shadow:0_0_12px_{hexv}]",
         # Subtle vertical gradient + colour-tinted hairline border + soft outer
-        # glow. box-shadow arbitraries need the rgba() form, not a hex.
+        # glow. The rgba() here is for the ALPHA, not because a hex fails —
+        # re-measured 2026-08-14 against this exact class shape, and
+        # `shadow-[0_0_18px_-6px_#35d68a]` JIT-generates perfectly well. It is
+        # simply opaque, which is not the look wanted. An 8-digit `#rrggbbaa`
+        # also works if you would rather not carry the _rgba() helper.
         "tile": (f"bg-gradient-to-b from-[{top}] to-[{_TILE_FLOOR}] "
                  f"border border-[{hexv}]/40 "
                  f"shadow-[0_0_18px_-6px_{_rgba(hexv, 0.55)}]"),

@@ -43,9 +43,14 @@ def order_class(i):
     swap, preserving the page's build-once / update-in-place property.
 
     Tailwind's core scale covers order-1..order-12; past that we emit an
-    arbitrary value (the bundled JIT generates plain-value arbitraries reliably —
-    only var()/rgba() ones are unsafe), so a frame growing past 12 tiles still
-    ranks correctly.
+    arbitrary value, so a frame growing past 12 tiles still ranks correctly.
+
+    (This used to add "only var()/rgba() ones are unsafe". The var() half stands
+    — that one really did silently produce no rule, which is why the nav pill is
+    hand-written CSS. The rgba() half was an over-generalisation from it and is
+    measured false: 2026-08-14 a live probe generated rgba() in both box-shadow
+    and text-shadow arbitraries, plus radial-/linear-/repeating-linear-gradient
+    backgrounds carrying rgba stops. Only var() is the trap.)
     """
     n = i + 1
     return f"order-{n}" if n <= 12 else f"order-[{n}]"
