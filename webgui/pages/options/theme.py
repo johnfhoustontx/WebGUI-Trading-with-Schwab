@@ -199,6 +199,22 @@ _DEFAULTS = {
         "font_url": ("https://fonts.googleapis.com/css2"
                      "?family=Rajdhani:wght@500;600;700&display=swap"),
     },
+    # ── The Macro Board redesign palette (/market only) ──────────────────────
+    # A dense notched "instrument" language scoped to ONE page. Source of truth:
+    # the approved macro-board redesign spec + reference prototype. HEX ONLY;
+    # alphas live in the token layer. Not surfaced in Settings → Appearance.
+    "macro": {
+        "void": "#03060D", "panel": "#080D18", "tile": "#0A1020",
+        "grid": "#0E1728", "edge": "#182741", "edge_hi": "#26405F",
+        "txt": "#DCE8F8", "dim": "#6B7F9E", "faint": "#3D4F6B",
+        "up": "#00E5A0", "dn": "#FF4D6D", "flat": "#5C6F8C", "cyan": "#35E0FF",
+        "wash_in": "#0A1830",
+        "sat_ceiling": 0.45,
+        "font_url": ("https://fonts.googleapis.com/css2"
+                     "?family=Rajdhani:wght@500;600;700"
+                     "&family=Chakra+Petch:wght@600;700"
+                     "&family=IBM+Plex+Mono:wght@400;500;600&display=swap"),
+    },
 }
 
 
@@ -708,6 +724,127 @@ CONSOLE_KEYFRAMES_CSS = """
 """
 
 
+# ── Macro Board (/market) redesign helpers ───────────────────────────────────
+# Page-scoped, mirroring the console pattern: raw hexes for computed values +
+# a Tailwind token vocabulary + ONE ``ui.add_css`` escape-hatch block (clip-path
+# notches, keyframes, the radial background, and per-tile custom-prop washes —
+# exactly the four things the house rule names as un-expressible in Tailwind).
+def macro_colors(theme):
+    """The macro board's raw hexes + the saturation ceiling, for the page's
+    computed values (heat/wash alphas, direction colours, breadth bar)."""
+    m = theme["macro"]
+    out = {k: m[k] for k in ("void", "panel", "tile", "grid", "edge", "edge_hi",
+                             "txt", "dim", "faint", "up", "dn", "flat", "cyan",
+                             "wash_in")}
+    try:
+        out["sat_ceiling"] = float(m.get("sat_ceiling", 0.45) or 0.45)
+    except (TypeError, ValueError):
+        out["sat_ceiling"] = 0.45
+    return out
+
+
+def build_macro_tokens(theme):
+    """Tailwind class-string vocabulary for the macro board (Tailwind-first).
+
+    Layout/spacing/flex/colour stay in ``.classes(...)``; only clip-path,
+    keyframes, the radial page ground and the per-tile custom-prop washes live in
+    ``build_macro_css``. Fonts use the ``font-[...]`` arbitrary (underscores =
+    the Tailwind space escape)."""
+    m = theme["macro"]
+    return {
+        "MB_TITLE": "font-['Chakra_Petch',system-ui,sans-serif]",
+        "MB_SYM": "font-['Rajdhani',system-ui,sans-serif]",
+        "MB_MONO": "font-['IBM_Plex_Mono',ui-monospace,monospace]",
+        "MB_TXT": f"text-[{m['txt']}]",
+        "MB_DIM": f"text-[{m['dim']}]",
+        "MB_FAINT": f"text-[{m['faint']}]",
+        "MB_UP": f"text-[{m['up']}]",
+        "MB_DN": f"text-[{m['dn']}]",
+        "MB_FLAT": f"text-[{m['flat']}]",
+        "MB_CYAN": f"text-[{m['cyan']}]",
+        "MB_PANEL_BG": f"bg-[{m['panel']}]",
+        "MB_TILE_BG": f"bg-[{m['tile']}]",
+        "MB_RAIL_BG": f"bg-[{m['panel']}]",
+        "MB_EDGE": f"border-[{m['edge']}]",
+        "MB_EDGE_HI": f"border-[{m['edge_hi']}]",
+        "MB_TRACK_BG": f"bg-[{m['grid']}]",
+    }
+
+
+def build_macro_font_head_html(theme):
+    """``<link>``s for the macro board's three faces (``[macro].font_url``), or ""
+    — Chakra Petch (title) / Rajdhani (symbols) / IBM Plex Mono (numbers), tuned
+    to their tracking. Injected only on the /market page."""
+    try:
+        url = str(theme["macro"].get("font_url", "")).strip()
+    except Exception:  # noqa: BLE001
+        return ""
+    if not url:
+        return ""
+    return (
+        '<link rel="preconnect" href="https://fonts.googleapis.com">'
+        '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
+        f'<link rel="stylesheet" href="{url}">'
+    )
+
+
+def build_macro_css(theme):
+    """The macro board's ONE ``ui.add_css`` escape-hatch block, scoped under
+    ``.macro-board``. Carries exactly what Tailwind cannot express: the radial
+    page ground, clip-path notches (panels + tiles), the flash keyframes
+    (ignition bar + price flare, and the Skin-B bloom), the per-tile custom-prop
+    washes, and the sheared breadth bar / pulsing live dot. Colours come from
+    ``[macro]`` so the palette stays config-driven."""
+    m = theme["macro"]
+    return f"""
+.macro-board{{
+  background:
+    radial-gradient(1400px 700px at 50% -12%, {m['wash_in']} 0%, transparent 62%),
+    {m['void']};
+}}
+/* notched top rail */
+.macro-board .mb-rail{{
+  clip-path:polygon(18px 0,100% 0,100% calc(100% - 18px),calc(100% - 18px) 100%,0 100%,0 18px);
+  background:linear-gradient(90deg,rgba(53,224,255,.07),transparent 42%),{m['panel']};
+}}
+/* notched group panels + left accent bar (per-panel --mb-acc) */
+.macro-board .mb-panel{{
+  position:relative;
+  clip-path:polygon(14px 0,100% 0,100% calc(100% - 14px),calc(100% - 14px) 100%,0 100%,0 14px);
+}}
+.macro-board .mb-panel::before{{
+  content:"";position:absolute;left:0;top:0;width:2px;height:100%;
+  background:linear-gradient(180deg,var(--mb-acc,{m['cyan']}),transparent 78%);opacity:.9;
+}}
+/* notched tiles */
+.macro-board .mb-tile{{
+  position:relative;overflow:hidden;
+  clip-path:polygon(0 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%);
+}}
+/* ignition bar + price flare — fire ONLY when .fl is (re)applied on change */
+.macro-board .mb-ig{{position:absolute;left:0;top:0;height:2px;width:100%;
+  transform:scaleX(0);transform-origin:left;opacity:0;background:var(--c,{m['flat']})}}
+.macro-board .mb-tile.fl .mb-ig{{animation:mbig .95s cubic-bezier(.2,.7,.3,1)}}
+@keyframes mbig{{0%{{transform:scaleX(0);opacity:1}}30%{{transform:scaleX(1);opacity:1}}100%{{transform:scaleX(1);opacity:0}}}}
+.macro-board .mb-tile.fl .mb-px{{animation:mbpx .95s ease-out}}
+@keyframes mbpx{{0%{{color:var(--c,{m['flat']});text-shadow:0 0 14px var(--c,{m['flat']})}}100%{{color:{m['txt']};text-shadow:none}}}}
+/* Skin A — Instrument: subtle magnitude-scaled wash over the tile fill */
+.macro-board.macro-a .mb-tile{{background-image:linear-gradient(160deg,var(--wash,transparent),transparent 62%)}}
+/* Skin B — Heat Lattice: no panel chrome, continuous heat fill, bloom on change */
+.macro-board.macro-b .mb-panel{{background:transparent !important;border-color:transparent !important;clip-path:none}}
+.macro-board.macro-b .mb-panel::before{{width:100%;height:1px;background:linear-gradient(90deg,var(--mb-acc,{m['cyan']}),transparent 55%)}}
+.macro-board.macro-b .mb-tile{{clip-path:none;background:var(--heat,{m['tile']}) !important;box-shadow:inset 0 0 0 1px rgba(255,255,255,.045)}}
+.macro-board.macro-b .mb-tile.fl{{animation:mblat .95s ease-out}}
+@keyframes mblat{{0%{{box-shadow:inset 0 0 0 1px var(--c,{m['flat']}),0 0 22px -4px var(--c,{m['flat']})}}100%{{box-shadow:inset 0 0 0 1px rgba(255,255,255,.045),0 0 0 0 transparent}}}}
+.macro-board.macro-b .mb-ig{{display:none}}
+/* breadth bar shear + pulsing live dot */
+.macro-board .mb-shear{{transform:skewX(-16deg)}}
+.macro-board .mb-dot{{animation:mbbp 2s ease-in-out infinite}}
+@keyframes mbbp{{0%,100%{{opacity:1;transform:scale(1)}}50%{{opacity:.3;transform:scale(.8)}}}}
+@media (prefers-reduced-motion:reduce){{.macro-board *{{animation:none !important}}}}
+"""
+
+
 def build_nav_css(theme):
     """Application-menu override CSS from ``[menu]`` (drawer bg / text / hover /
     caption). Emits a rule ONLY for a non-empty knob, so all-default config
@@ -809,3 +946,9 @@ CON_NEG = _CONSOLE_TOKENS["CON_NEG"]
 CON_WARN = _CONSOLE_TOKENS["CON_WARN"]
 CONSOLE_COLORS = console_colors(THEME)         # raw hexes for the SVG builders
 CONSOLE_FONT_HEAD_HTML = build_console_font_head_html(THEME)  # "" when no url
+
+# ── Macro Board (/market) page-scoped exports ────────────────────────────────
+MACRO_COLORS = macro_colors(THEME)             # raw hexes + sat_ceiling
+MACRO_TOKENS = build_macro_tokens(THEME)       # Tailwind class-string vocabulary
+MACRO_CSS = build_macro_css(THEME)             # the ONE ui.add_css escape-hatch
+MACRO_FONT_HEAD_HTML = build_macro_font_head_html(THEME)  # "" when no url

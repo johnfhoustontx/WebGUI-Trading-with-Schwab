@@ -191,3 +191,33 @@ regime_crisis         = "#f2646b"
 # headings reflow when the webfont arrives (display=swap). Don't pack them tight.
 font_family = "Rajdhani"
 font_url    = "https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&display=swap"
+
+[macro]                        # ── Macro Board redesign (/market ONLY) ──────
+# A dense "instrument panel" language scoped to ONE page: notched (clip-path)
+# panels + tiles, near-black ground, magnitude-scaled heat wash, flash-on-change.
+# Source of truth: the approved macro-board redesign spec + reference prototype.
+# Like [console] + [brand], this is page-scoped and NOT shown in Settings →
+# Appearance (that editor's sections are single-kind; this mixes colours + font +
+# a tuning number). HEX ONLY; alphas live in the token layer (Tailwind `/[…]`).
+void    = "#03060D"            # page background base
+panel   = "#080D18"            # group panel fill
+tile    = "#0A1020"            # tile fill (Skin A)
+grid    = "#0E1728"            # inert bar/meter tracks
+edge    = "#182741"            # default borders
+edge_hi = "#26405F"            # emphasis borders
+txt     = "#DCE8F8"            # primary values
+dim     = "#6B7F9E"            # symbols, labels
+faint   = "#3D4F6B"            # descriptors, flat-tile accents
+up      = "#00E5A0"            # positive / risk-on change
+dn      = "#FF4D6D"            # negative / risk-off change
+flat    = "#5C6F8C"            # zero change
+cyan    = "#35E0FF"            # rail accent, live indicator
+wash_in = "#0A1830"            # inner stop of the page radial gradient
+# Saturation ceiling (percent): the |%change| at which the heat wash maxes out.
+# The one number worth tuning per session volatility — lower it if flat days look
+# washed out, raise it if a busy tape saturates everything.
+sat_ceiling = 0.45
+# Three faces, loaded page-scoped (one combined request), matching the prototype:
+# Chakra Petch (board title), Rajdhani (ticker symbols), IBM Plex Mono (numbers).
+# Tracking values are tuned to these faces — system fallbacks reflow noticeably.
+font_url = "https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Chakra+Petch:wght@600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap"

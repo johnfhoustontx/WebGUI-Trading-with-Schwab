@@ -4,6 +4,50 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-08-15 (**Market Dashboard visual redesign — the "Macro Board"** — a
+presentation-only redesign of `/market` from an approved spec + reference prototype. Data,
+grouping, categories and the ~2 s cadence are UNCHANGED; this is skin + motion only.
+
+**Design principle: spend the intensity budget only on tiles that changed.** ~90 tiles on a 2 s
+cycle, so the flat majority stays recessed (dimmed, no accent) and colour/glow/motion are reserved
+for movers. Page-scoped exactly like the Market Regime Console: a `[macro]` section in
+`config/theme.toml` (+ `theme.py` `DEFAULTS["macro"]`, `macro_colors`/`build_macro_tokens`/
+`build_macro_css`/`build_macro_font_head_html`, exported as `MACRO_*`), and ONE `ui.add_css` block
+carrying exactly the four house-approved un-expressibles — clip-path notches, the flash keyframes,
+the radial page ground, and the per-tile custom-prop washes. Everything else is Tailwind.
+
+**What shipped:** notched (clip-path) category panels with a per-category left **accent bar**
+(`[--mb-acc:#hex]`), near-black tiles with a **magnitude-scaled wash** (Skin A) quantised to a
+finite `[--wash:rgba(...)]` palette; a **top rail** — Chakra Petch wordmark, pulsing live dot,
+`HH:MM:SS` clock (a 1 s `ui.timer`), a **breadth meter** (advancing vs declining across every tile,
+sheared split bar) and an A/B **skin toggle**; **flash-on-change** — an ignition bar sweep + price
+flare (`mbig`/`mbpx` keyframes) fired ONLY on tiles whose displayed value actually moved
+(server-side `tile_signature` diff → one batched `ui.run_javascript` reflow-retrigger), so a frozen
+feed produces zero flashes (verified) and a live change flashes just that tile (verified by injecting
+one changed value → exactly that tile flashed, not the board). **Skin B (Heat Lattice)** — a second
+skin (continuous heat fill, no panel chrome, bloom-on-change) toggled + **persisted** via
+`app_settings.macro_skin` (default "A"). Three faces load page-scoped (Chakra Petch / Rajdhani / IBM
+Plex Mono).
+
+**Three spec open-questions resolved (with the user):** the tile's third line = **skew where present
+(SPX/NDX/broad-ETFs/Top-10/BIG10), else the description** (uppercased, truncated) — preserves the
+option-skew line the spec requires; **sparklines dropped** (no Tier-1 data source — the board cache
+carries no per-tile history, and fabricating it is out); **both skins** built.
+
+**One correctness deviation from the prototype, deliberate:** tile direction (up/down/flat), flash
+colour and wash colour key on the service's **polarity-aware `color_state`**, NOT raw pct sign — so
+VIX-up stays red / risk-off. Only the wash MAGNITUDE scales with `|%change|`.
+
+TDD throughout (`test_market.py` rewritten for the new pure helpers — direction/magnitude/wash/heat/
+descriptor/breadth/signature; `test_theme.py`-adjacent smoke of the macro builders); webgui **1481**
+green. **Live-verified in DEV (`:9500`)** — notches, custom-prop arbitraries generate in the bundled
+JIT, Chakra Petch loads, Skin A↔B toggle + persistence, breadth 35/10, change→flash. Files:
+`webgui/pages/market.py` (rewrite), `webgui/pages/options/theme.py` (+macro helpers),
+`config/theme.toml` (`[macro]`), `webgui/app_settings.py` (`macro_skin`), `webgui/tests/test_market.py`.
+**Restart the webgui.**)
+
+---
+
 **Last updated:** 2026-08-14 (**`/sentiment`'s top became the Market Regime Console** — a
 single-screen dark console built from a supplied hi-fi handoff, now in the repo at
 `docs/design/2026-08-14-market-regime-console/`. Plan + every measured spike:

@@ -26,6 +26,7 @@ DEFAULTS = {
     "gamma_netprem_mode": "dollars",           # Net Prem y-axis: dollars | skew
     # Comparable magnitudes in Dollars mode, so the three read as one chart.
     "gamma_netprem_symbols": ["$SPX", "SPY", "QQQ"],   # plotted symbols
+    "macro_skin": "A",               # Macro Board skin: A (Instrument) | B (Heat Lattice)
 }
 
 _PATH = pathlib.Path(__file__).resolve().parent / "data" / "settings.json"

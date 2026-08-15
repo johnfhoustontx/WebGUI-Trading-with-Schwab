@@ -1,65 +1,149 @@
-"""Market Dashboard page (/market) — Tier-1, engine-free.
+"""Market Dashboard page (/market) — Tier-1, engine-free. Macro Board redesign.
 
-Reads cache:market:dashboard (published by market_svc), renders one framed
-panel per category with tiles colored by risk-on/off condition. Repaints in
-place on the ~2 s version bump. Tailwind-first: data-driven colors map from the
-finite color_state set to fixed background classes (no inline styling).
+Reads cache:market:dashboard (published by market_svc) and renders the "Macro
+Board": ~90 quote tiles in notched, accent-barred category panels under a top
+rail (title / live dot / clock / breadth meter / skin toggle). Repaints IN PLACE
+on the ~2 s version bump; only tiles whose displayed value actually changed
+flash (ignition bar + price flare). Two skins — A (Instrument, default) and B
+(Heat Lattice) — toggled by a segmented control and persisted in app_settings.
+
+Design principle: spend the intensity budget only on tiles that changed. The
+flat majority stays recessed; colour/glow/motion are reserved for movers.
+
+Tailwind-first per house rules: layout / spacing / colour tokens are Tailwind
+classes; the ONE ``ui.add_css`` block (``theme.MACRO_CSS``) carries only what
+Tailwind cannot express — clip-path notches, the flash keyframes, the radial
+page ground and the per-tile custom-prop washes. Colours come from
+``config/theme.toml [macro]``.
+
+IMPORTANT — colour semantics: direction (up/down/flat) keys on the service's
+``color_state``, NOT the raw sign of %change. This board is polarity-aware (VIX
+up = risk-off = red, TLT up = red, …), which the prototype's naïve pct-sign
+colouring would break. Wash MAGNITUDE still scales with |%change|.
 """
+import app_settings
 import bus_client
-from pages.ui_guard import guard, guard_async
 from nicegui import run, ui
+from pages.options.theme import (
+    MACRO_COLORS as _MC,
+    MACRO_CSS,
+    MACRO_FONT_HEAD_HTML,
+    MACRO_TOKENS as _T,
+)
+from pages.ui_guard import guard, guard_async
 
 VIEW = "market:dashboard"
 
-# color_state → fixed Tailwind background + text classes (finite map, Tailwind-first).
-_BG = {
-    "risk_on_strong": "bg-emerald-600/80 text-white",
-    "risk_on_mild": "bg-emerald-500/25 text-emerald-100",
-    "flat": "bg-slate-600/30 text-slate-200",
-    "risk_off_mild": "bg-rose-500/25 text-rose-100",
-    "risk_off_strong": "bg-rose-600/80 text-white",
-    "no_data": "bg-slate-700/40 text-slate-400",
+# category → left-accent hex (from the reference prototype's G array, keyed by
+# the REAL market_svc category names). Pure presentation; cyan fallback.
+_ACCENT = {
+    "Volatility": "#FFB627",
+    "Options Sentiment": "#C86BFF",
+    "Market Internals / Breadth": "#35E0FF",
+    "Currency": "#FF7A3D",
+    "Cash Index": "#A9C3E8",
+    "Equity Index Futures": "#A9C3E8",
+    "Broad-Market ETF": "#3D7BFF",
+    "Top 10": "#00E5A0",
+    "Sector SPDR": "#22D3EE",
+    "Thematic / Industry ETF": "#C86BFF",
+    "Factor / Momentum ETF": "#FFB627",
+    "Fixed Income / Credit ETF": "#6E82A3",
+    "Crypto / Alternatives": "#FF3DCB",
+    "Countries": "#35E0FF",
 }
 
 
-def bg_class(state):
-    """Fixed Tailwind bg/text classes for a color_state (neutral fallback)."""
-    return _BG.get(state, _BG["no_data"])
+def accent_of(cat):
+    return _ACCENT.get(cat, _MC["cyan"])
 
 
-# Union of every class token in _BG — removed before adding the current state's
-# class on an in-place recolor so bg/text utilities never stack (sentiment-page
-# idiom). dict.fromkeys dedups while preserving order.
-_ALL_BG_CLASSES = " ".join(dict.fromkeys(" ".join(_BG.values()).split()))
+# color_state → direction. Preserves the board's semantic polarity (a red VIX on
+# an up move is risk_off_* → "dn"), unlike a raw pct-sign read.
+_DIR = {
+    "risk_on_strong": "up", "risk_on_mild": "up",
+    "risk_off_strong": "dn", "risk_off_mild": "dn",
+    "flat": "flat", "no_data": "flat",
+}
+_RGB = {"up": "0,229,160", "dn": "255,77,109"}
+_HEAT_FLAT = "rgba(20,30,48,0.55)"
+_BUCKETS = 6  # magnitude quantisation levels (0..5) → a finite class palette
 
 
-def order_class(i):
-    """Tailwind flex `order-N` class for a tile at payload position ``i``.
+def tile_direction(t):
+    """up / dn / flat from the service's polarity-aware color_state."""
+    return _DIR.get(t.get("color_state"), "flat")
 
-    The service emits the leaderboard frames (Sector SPDR / Thematic / Countries
-    / Top 10) already ranked by day %-move, so the page only has to mirror that
-    rank onto the flex container. Doing it with an order class — rather than
-    re-inserting DOM nodes — means a re-rank on the ~2 s tick is a single class
-    swap, preserving the page's build-once / update-in-place property.
 
-    Tailwind's core scale covers order-1..order-12; past that we emit an
-    arbitrary value, so a frame growing past 12 tiles still ranks correctly.
+def _tile_pct(t):
+    """The tile's %-change (avg for the basket), or None (value-only / external)."""
+    v = t.get("avg_pct") if t.get("basket") else t.get("change_pct")
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
 
-    (This used to add "only var()/rgba() ones are unsafe". The var() half stands
-    — that one really did silently produce no rule, which is why the nav pill is
-    hand-written CSS. The rgba() half was an over-generalisation from it and is
-    measured false: 2026-08-14 a live probe generated rgba() in both box-shadow
-    and text-shadow arbitraries, plus radial-/linear-/repeating-linear-gradient
-    backgrounds carrying rgba stops. Only var() is the trap.)
-    """
-    n = i + 1
-    return f"order-{n}" if n <= 12 else f"order-[{n}]"
+
+def tile_magnitude(t):
+    """0..1 heat magnitude = |%change| / saturation-ceiling, capped. Tiles with no
+    numeric %change (internals, put/call, net-prem) fall back to the color_state
+    intensity tier so a 'strong' still reads hotter than a 'mild'."""
+    pct = _tile_pct(t)
+    if pct is not None:
+        return min(abs(pct) / _MC["sat_ceiling"], 1.0)
+    st = t.get("color_state") or ""
+    if st.endswith("strong"):
+        return 1.0
+    if st.endswith("mild"):
+        return 0.5
+    return 0.0
+
+
+def _bucket(mag):
+    return max(0, min(_BUCKETS - 1, int(round(mag * (_BUCKETS - 1)))))
+
+
+def dir_color_class(direction):
+    """`[--c:#hex]` — the direction colour the ignition bar + price flare use."""
+    hexs = {"up": _MC["up"], "dn": _MC["dn"], "flat": _MC["flat"]}
+    return f"[--c:{hexs.get(direction, _MC['flat'])}]"
+
+
+def wash_class(direction, mag):
+    """Skin-A magnitude wash `[--wash:rgba(...)]` (alpha 0.03 + m·0.11), or
+    transparent for flat. Quantised to a finite palette (Tailwind-first)."""
+    if direction == "flat" or mag <= 0:
+        return "[--wash:transparent]"
+    b = _bucket(mag)
+    alpha = round(0.03 + (b / (_BUCKETS - 1)) * 0.11, 3)
+    return f"[--wash:rgba({_RGB[direction]},{alpha})]"
+
+
+def heat_class(direction, mag):
+    """Skin-B heat fill `[--heat:rgba(...)]` (alpha 0.06 + m·0.30); a dim slate
+    for flat. Quantised to a finite palette."""
+    if direction == "flat" or mag <= 0:
+        return f"[--heat:{_HEAT_FLAT}]"
+    b = _bucket(mag)
+    alpha = round(0.06 + (b / (_BUCKETS - 1)) * 0.30, 3)
+    return f"[--heat:rgba({_RGB[direction]},{alpha})]"
+
+
+def border_class(direction):
+    return {
+        "up": "border-[rgba(0,229,160,0.26)]",
+        "dn": "border-[rgba(255,77,109,0.26)]",
+        "flat": f"border-[{_MC['edge']}]",
+    }[direction]
+
+
+def change_text_class(direction):
+    return {"up": _T["MB_UP"], "dn": _T["MB_DN"], "flat": _T["MB_FLAT"]}[direction]
 
 
 def _fmt(v, nd=2):
     try:
-        f = float(v)
-        return f"{f:.{nd}f}"
+        return f"{float(v):.{nd}f}"
     except (TypeError, ValueError):
         return "—"
 
@@ -88,145 +172,311 @@ def _skew_word(pct):
     return f"Call {p:.0f}%" if p > 0 else f"Put {abs(p):.0f}%"
 
 
-def prem_line(t):
-    """Per-symbol premium subline for a ``prem``-flagged tile (``prem_skew_pct``):
-    'Call 31%' / 'Put 22%' / 'Even' / '—' (no data). '' when the tile has no
-    premium subline at all (so a min-height keeps every tile the same size)."""
-    if "prem_skew_pct" not in t:
-        return ""
-    return _skew_word(t.get("prem_skew_pct"))
-
-
 def tile_text(t):
-    """Display strings for a tile: {last, change, prem}."""
+    """The tile's price + change strings: {last, change}."""
     if t.get("net_prem"):
-        # Dollar-weighted call/put premium skew (the standalone Net Prem tile):
-        # headline = "Call 49%"/"Put 22%"/"Even"/"—", subline = net-$ amount.
         pct = t.get("skew_pct")
         if pct is None:
-            base = {"last": "—", "change": ""}
-        else:
-            base = {"last": _skew_word(pct), "change": _net_prem_sub(t.get("net_m"))}
-    elif t.get("basket"):
-        # Composite tile (BIG10): headline = equal-weighted avg day %-move,
-        # subline = breadth (e.g. "3/7 up"). A premium subline (net of the members)
-        # is added below via prem_line when the tile is prem-flagged.
+            return {"last": "—", "change": ""}
+        return {"last": _skew_word(pct), "change": _net_prem_sub(t.get("net_m"))}
+    if t.get("basket"):
         try:
             head = f"{float(t.get('avg_pct')):+.2f}%"
         except (TypeError, ValueError):
             head = "—"
-        base = {"last": head, "change": t.get("breadth_text", "")}
-    elif t.get("last") is None:
-        base = {"last": "—", "change": ""}
-    elif t.get("value_only"):
-        base = {"last": _fmt(t["last"], 0), "change": ""}
-    else:
-        last = _fmt(t["last"])
-        pct = t.get("change_pct")
-        chg = t.get("change")
-        parts = []
-        if chg is not None:
-            parts.append(f"{'+' if chg >= 0 else ''}{_fmt(chg)}")
-        if pct is not None:
-            parts.append(f"{'+' if pct >= 0 else ''}{_fmt(pct)}%")
-        base = {"last": last, "change": "  ".join(parts)}
-    return {**base, "prem": prem_line(t)}
+        return {"last": head, "change": t.get("breadth_text", "")}
+    if t.get("last") is None:
+        return {"last": "—", "change": ""}
+    if t.get("value_only"):
+        return {"last": _fmt(t["last"], 0), "change": ""}
+    last = _fmt(t["last"])
+    pct = t.get("change_pct")
+    chg = t.get("change")
+    parts = []
+    if chg is not None:
+        parts.append(f"{'+' if chg >= 0 else ''}{_fmt(chg)}")
+    if pct is not None:
+        parts.append(f"{'+' if pct >= 0 else ''}{_fmt(pct)}%")
+    return {"last": last, "change": "  ".join(parts)}
+
+
+_DESC_MAX = 22
+
+
+def descriptor_line(t):
+    """The tile's third line: the option-skew where a tile has it (SPX/NDX/broad
+    ETFs / Top-10 / BIG10), else the symbol's description (uppercased, truncated).
+    Preserves the skew line the spec requires while giving every other tile a
+    glanceable descriptor."""
+    if "prem_skew_pct" in t:
+        return _skew_word(t.get("prem_skew_pct"))
+    d = (t.get("description") or "").strip().upper()
+    if len(d) <= _DESC_MAX:
+        return d
+    return d[:_DESC_MAX - 1] + "…"
+
+
+def order_class(i):
+    """Tailwind flex `order-N` mirroring the payload rank (leaderboard frames)."""
+    n = i + 1
+    return f"order-{n}" if n <= 12 else f"order-[{n}]"
+
+
+def tile_signature(t):
+    """A comparable value for change detection — the displayed price+change. A
+    repaint with an identical signature must NOT flash (else every tile strobes
+    every 2 s and the signal is worthless)."""
+    tx = tile_text(t)
+    return (tx["last"], tx["change"])
+
+
+def breadth_counts(payload):
+    """(advancing, declining) across every tile on the board, by direction."""
+    up = dn = 0
+    for cat in payload.get("categories", []):
+        for t in cat.get("tiles", []):
+            d = tile_direction(t)
+            if d == "up":
+                up += 1
+            elif d == "dn":
+                dn += 1
+    return up, dn
+
+
+def flex_class(weight):
+    """A proportional flex-grow class for the breadth bar (continuous value →
+    runtime arbitrary, the documented exception; reset via remove/add)."""
+    return f"flex-[{max(0, int(weight))}_1_0%]"
+
+
+def _reactive_classes(t):
+    """Every value-driven class a tile swaps on update, as a dict keyed by role
+    (so each can be diffed + removed/added individually — no stacking)."""
+    d = tile_direction(t)
+    mag = tile_magnitude(t)
+    return {
+        "cvar": dir_color_class(d),
+        "wash": wash_class(d, mag),
+        "heat": heat_class(d, mag),
+        "border": border_class(d),
+        "chtext": change_text_class(d),
+        "opacity": "opacity-[.62]" if d == "flat" else "opacity-100",
+    }
 
 
 def render():
-    # No page title — the drawer names the page (2026-07-11 dead-space cleanup).
-    board = ui.row().classes("w-full flex-wrap gap-4 items-start")
-    # tiles: display -> {"container", "last", "change", "state"} element handles.
-    state = {"version": None, "built": False, "tiles": {}}
+    from datetime import datetime
 
+    ui.add_head_html(MACRO_FONT_HEAD_HTML)
+    ui.add_css(MACRO_CSS)
+
+    skin = "B" if str(app_settings.get("macro_skin") or "A").upper() == "B" else "A"
+    state = {"version": None, "built": False, "tiles": {}, "skin": skin}
+
+    # ── shell ────────────────────────────────────────────────────────────────
+    wrap = ui.column().classes(
+        f"macro-board macro-{skin.lower()} w-full gap-[18px] pb-16")
+
+    with wrap:
+        # ---- top rail ----
+        with ui.row().classes(
+                f"mb-rail {_T['MB_EDGE']} border items-center gap-6 flex-wrap "
+                "w-full px-5 py-3.5"):
+            with ui.row().classes("items-baseline gap-3"):
+                ui.label("MACRO BOARD").classes(
+                    f"{_T['MB_TITLE']} {_T['MB_TXT']} text-[17px] font-bold "
+                    "tracking-[.18em]")
+                ui.label("LIVE TAPE").classes(
+                    f"{_T['MB_MONO']} {_T['MB_FAINT']} text-[10px] tracking-[.24em]")
+            with ui.row().classes("items-center gap-2"):
+                ui.element("div").classes(
+                    f"mb-dot w-[7px] h-[7px] {_T['MB_UP'].replace('text-', 'bg-')} "
+                    "shadow-[0_0_10px_#00E5A0]")
+                ui.label("STREAMING").classes(
+                    f"{_T['MB_MONO']} {_T['MB_UP']} text-[10.5px] tracking-[.2em]")
+            with ui.column().classes("gap-[3px]"):
+                ui.label("SESSION").classes(
+                    f"{_T['MB_MONO']} {_T['MB_FAINT']} text-[9px] tracking-[.2em]")
+                clock_lbl = ui.label("—").classes(
+                    f"{_T['MB_MONO']} {_T['MB_TXT']} text-[14px] tabular-nums")
+            # breadth meter
+            with ui.column().classes("gap-[5px] min-w-[190px]"):
+                with ui.row().classes(
+                        f"{_T['MB_MONO']} {_T['MB_FAINT']} text-[9.5px] "
+                        "tracking-[.14em] justify-between w-full"):
+                    ui.label("ADVANCING")
+                    ui.label("DECLINING")
+                with ui.row().classes("h-[7px] gap-[2px] w-full") as bbar:
+                    bar_up = ui.element("div").classes(
+                        f"mb-shear {_T['MB_UP'].replace('text-', 'bg-')} "
+                        "flex-[1_1_0%] shadow-[0_0_8px_rgba(0,229,160,0.5)]")
+                    bar_dn = ui.element("div").classes(
+                        f"mb-shear {_T['MB_DN'].replace('text-', 'bg-')} "
+                        "flex-[1_1_0%] shadow-[0_0_8px_rgba(255,77,109,0.5)]")
+                with ui.row().classes(
+                        f"{_T['MB_MONO']} text-[9.5px] tracking-[.14em] "
+                        "justify-between w-full"):
+                    bup_lbl = ui.label("0").classes(_T["MB_UP"])
+                    bdn_lbl = ui.label("0").classes(_T["MB_DN"])
+            ui.space()
+            # skin toggle (segmented)
+            with ui.row().classes(f"{_T['MB_EDGE']} border") as seg:
+                btn_a = ui.button("INSTRUMENT", on_click=lambda: _set_skin("A")) \
+                    .props("flat no-caps").classes(
+                        f"{_T['MB_SYM']} text-[11.5px] tracking-[.18em] rounded-none")
+                btn_b = ui.button("HEAT LATTICE", on_click=lambda: _set_skin("B")) \
+                    .props("flat no-caps").classes(
+                        f"{_T['MB_SYM']} text-[11.5px] tracking-[.18em] rounded-none")
+        board = ui.row().classes("flex-wrap gap-[13px] items-start w-full")
+
+    _SEG_ON = f"{_T['MB_CYAN']} bg-[rgba(53,224,255,0.13)]"
+    _SEG_OFF = _T["MB_DIM"]
+
+    def _paint_seg():
+        on, off = _SEG_ON.split(), _SEG_OFF.split()
+        btn_a.classes(remove=" ".join(on + off),
+                      add=_SEG_ON if state["skin"] == "A" else _SEG_OFF)
+        btn_b.classes(remove=" ".join(on + off),
+                      add=_SEG_ON if state["skin"] == "B" else _SEG_OFF)
+
+    @guard
+    def _set_skin(s):
+        state["skin"] = s
+        wrap.classes(remove="macro-a macro-b", add=f"macro-{s.lower()}")
+        app_settings.set("macro_skin", s)
+        _paint_seg()
+
+    # ── tiles ──────────────────────────────────────────────────────────────
     def _build(payload):
-        """First paint: build the framed board ONCE, stash per-tile handles."""
         board.clear()
         state["tiles"] = {}
         with board:
             for cat in payload.get("categories", []):
+                name = cat.get("category", "")
                 with ui.column().classes(
-                        "rounded-lg border border-slate-700 bg-slate-900/40 p-3 gap-2"):
-                    ui.label(cat.get("category", "")).classes(
-                        "text-xs uppercase tracking-wide text-slate-400")
-                    with ui.row().classes("flex-wrap gap-2"):
+                        f"mb-panel {_T['MB_PANEL_BG']} {_T['MB_EDGE']} border "
+                        f"[--mb-acc:{accent_of(name)}] px-[11px] pt-[10px] "
+                        "pb-[11px] gap-[9px]"):
+                    with ui.row().classes("items-center gap-[9px] w-full pl-[9px]"):
+                        ui.label(name.upper()).classes(
+                            f"{_T['MB_MONO']} {_T['MB_DIM']} text-[9.5px] "
+                            "tracking-[.24em]")
+                        ui.element("div").classes(
+                            f"flex-1 h-px bg-gradient-to-r from-[{_MC['edge']}] "
+                            "to-transparent")
+                    with ui.row().classes("flex-wrap gap-[7px]"):
                         for i, t in enumerate(cat.get("tiles", [])):
-                            txt = tile_text(t)
-                            oc = order_class(i)
-                            # Fixed min-height so every tile in a frame is the same
-                            # height whether or not it carries a premium subline.
-                            container = ui.column().classes(
-                                "rounded-md p-2 w-[120px] min-h-[92px] gap-0 "
-                                f"{oc} {bg_class(t.get('color_state'))}")
-                            with container:
-                                ui.label(t.get("display", "")).classes(
-                                    "text-sm font-semibold truncate")
-                                last_lbl = ui.label(txt["last"]).classes(
-                                    "text-base font-bold")
-                                change_lbl = ui.label(txt["change"]).classes("text-xs")
-                                # Per-symbol call/put premium skew (prem-flagged tiles).
-                                prem_lbl = ui.label(txt["prem"]).classes(
-                                    "text-[11px] opacity-60")
-                                ui.tooltip(t.get("description", ""))
-                            state["tiles"][t.get("display")] = {
-                                "container": container, "last": last_lbl,
-                                "change": change_lbl, "prem": prem_lbl,
-                                "state": t.get("color_state"), "order": oc}
+                            _build_tile(t, i)
         state["built"] = True
 
+    def _build_tile(t, i):
+        tx = tile_text(t)
+        rc = _reactive_classes(t)
+        oc = order_class(i)
+        container = ui.column().classes(
+            f"mb-tile {_T['MB_TILE_BG']} border {rc['border']} {rc['opacity']} "
+            f"{rc['cvar']} {rc['wash']} {rc['heat']} {oc} "
+            "min-w-[104px] px-[11px] pt-[9px] pb-[8px] gap-0")
+        with container:
+            ui.element("div").classes("mb-ig")
+            ui.label(t.get("display", "")).classes(
+                f"mb-sym {_T['MB_SYM']} {_T['MB_DIM']} text-[11px] font-bold "
+                "tracking-[.13em]")
+            px_lbl = ui.label(tx["last"]).classes(
+                f"mb-px {_T['MB_MONO']} {_T['MB_TXT']} text-[17px] font-medium "
+                "tabular-nums mt-[3px] leading-tight")
+            ch_lbl = ui.label(tx["change"]).classes(
+                f"{_T['MB_MONO']} {rc['chtext']} text-[10.5px] tabular-nums mt-[2px]")
+            ex_lbl = ui.label(descriptor_line(t)).classes(
+                f"{_T['MB_MONO']} {_T['MB_FAINT']} text-[9px] tracking-[.05em] "
+                "mt-[2px] truncate max-w-[128px]")
+            ui.tooltip(t.get("description", ""))
+        state["tiles"][t.get("display")] = {
+            "el": container, "px": px_lbl, "ch": ch_lbl, "ex": ex_lbl,
+            "rc": rc, "order": oc, "sig": tile_signature(t)}
+
     def _update(payload):
-        """Subsequent paints: update label text + swap bg class IN PLACE."""
+        flashed = []
         for cat in payload.get("categories", []):
             for i, t in enumerate(cat.get("tiles", [])):
                 h = state["tiles"].get(t.get("display"))
-                if not h:  # a new tile appeared → structure changed; rebuild.
+                if not h:  # structure changed → rebuild
                     _build(payload)
                     return
-                # Re-rank in place: the ranked frames re-order as prices move,
-                # so mirror the payload position onto the flex order class.
-                # Remove the TRACKED PREVIOUS class (order indices are unbounded,
-                # so there is no fixed union to remove) — else they stack and the
-                # first one wins, freezing the board at its opening rank.
                 oc = order_class(i)
                 if oc != h["order"]:
-                    h["container"].classes(remove=h["order"], add=oc)
+                    h["el"].classes(remove=h["order"], add=oc)
                     h["order"] = oc
-                txt = tile_text(t)
-                h["last"].text = txt["last"]
-                h["change"].text = txt["change"]
-                if "prem" in h:
-                    h["prem"].text = txt["prem"]
-                new_state = t.get("color_state")
-                if new_state != h["state"]:
-                    h["container"].classes(
-                        remove=_ALL_BG_CLASSES, add=bg_class(new_state))
-                    h["state"] = new_state
+                tx = tile_text(t)
+                h["px"].text = tx["last"]
+                h["ch"].text = tx["change"]
+                h["ex"].text = descriptor_line(t)
+                # diff the value-driven classes, swapping only what moved
+                new_rc = _reactive_classes(t)
+                for role, cls in new_rc.items():
+                    if cls != h["rc"].get(role):
+                        h["el"].classes(remove=h["rc"][role], add=cls)
+                        if role == "chtext":
+                            h["ch"].classes(remove=h["rc"][role], add=cls)
+                        h["rc"][role] = cls
+                # change detection → flash only actual movers
+                sig = tile_signature(t)
+                if sig != h["sig"]:
+                    h["sig"] = sig
+                    flashed.append(h["el"].id)
+        if flashed:
+            _flash(flashed)
+        _paint_breadth(payload)
+
+    def _flash(ids):
+        # Retrigger the CSS flash on changed tiles in ONE round-trip. Removing +
+        # re-adding the class in the same frame won't restart a CSS animation —
+        # force a reflow (void offsetWidth) between, per the spec.
+        js = ("for(const id of %s){const e=getElement(id);"
+              "if(e){e.classList.remove('fl');void e.offsetWidth;"
+              "e.classList.add('fl');}}" % ids)
+        ui.run_javascript(js)
+
+    def _paint_breadth(payload):
+        up, dn = breadth_counts(payload)
+        bup_lbl.text, bdn_lbl.text = str(up), str(dn)
+        nu, nd = flex_class(up or 1), flex_class(dn or 1)
+        if nu != state.get("bar_up"):
+            bar_up.classes(remove=state.get("bar_up", "flex-[1_1_0%]"), add=nu)
+            state["bar_up"] = nu
+        if nd != state.get("bar_dn"):
+            bar_dn.classes(remove=state.get("bar_dn", "flex-[1_1_0%]"), add=nd)
+            state["bar_dn"] = nd
 
     def _paint(payload):
         if state["built"]:
             _update(payload)
         else:
             _build(payload)
+            _paint_breadth(payload)
+
+    @guard
+    def _tick_clock():
+        clock_lbl.text = datetime.now().strftime("%H:%M:%S")
 
     @guard_async
     async def _poll():
-        # The service publishes every ~2s during RTH, so the version gate passes
-        # nearly every poll → read the full ~48-tile payload OFF the event loop.
-        # The cheap :ver probe + the paint (UI, in-place tile diff) stay light.
         v = await run.io_bound(bus_client.read_version, VIEW)
-        if v is None:
+        if v is None or v == state["version"]:
             return
-        if v != state["version"]:
-            payload = await run.io_bound(bus_client.read, VIEW)
-            if payload:
-                state["version"] = v
-                _paint(payload)
+        payload = await run.io_bound(bus_client.read, VIEW)
+        if payload:
+            state["version"] = v
+            _paint(payload)
 
+    _paint_seg()
+    _tick_clock()
     payload, version = bus_client.read_full(VIEW)
     if payload:
         state["version"] = version
         _paint(payload)
     else:
         with board:
-            ui.label("Waiting for the market service…").classes("text-slate-400")
+            ui.label("Waiting for the market service…").classes(_T["MB_DIM"])
+    ui.timer(1.0, _tick_clock)
     ui.timer(2.0, _poll)
