@@ -480,7 +480,10 @@ def test_heatmap_figure_blended_no_lines_no_fade():
     hm = next(s for s in fig["series"] if s["type"] == "heatmap")
     # Blended: interpolated image, no cell borders, no separator mesh.
     assert hm["interpolation"] is True and hm["borderWidth"] == 0
-    assert "plotBackgroundColor" not in fig["chart"]
+    # The plot background is the blue->magenta WASH (a gradient painted behind the
+    # one interpolated image), never again the flat HEATMAP_SEP grey that used to
+    # show through bordered cells as a separator mesh — see _wash_background.
+    assert "linearGradient" in fig["chart"]["plotBackgroundColor"]
     # No fade on hover/click.
     assert hm["states"]["inactive"]["enabled"] is False
     assert "pointFormat" in hm["tooltip"]                # value text (shown on click)
@@ -489,17 +492,85 @@ def test_heatmap_figure_blended_no_lines_no_fade():
     assert [fig["yAxis"]["min"], fig["yAxis"]["max"]] == [440.0, 460.0]   # aligned to bars
 
 
-def test_heat_colorscale_is_dark_with_transparent_zero():
-    # Diverging dark scale: zero (stop 0.50) fades to transparent so the dark page
-    # shows through; the extremes are red (neg) and green (pos).
+def test_heat_colorscale_is_plasma_with_transparent_zero():
+    # Diverging PLASMA scale: zero (stop 0.50) fades to transparent so the wash
+    # behind shows through; put-heavy (negative) runs magenta/pink, call-heavy
+    # (positive) runs cyan/ice.
     mid = next(s for s in gamma.HEAT_STOPS if s[0] == 0.50)
     assert mid[1] in ("rgba(0,0,0,0.0)", "rgba(0,0,0,0)")
-    assert "239,83,80" in gamma.HEAT_STOPS[0][1]          # most-negative → red
-    assert "102,187,106" in gamma.HEAT_STOPS[-1][1]       # most-positive → green
+    assert "255,186,220" in gamma.HEAT_STOPS[0][1]        # most-negative → pale pink
+    assert "190,248,255" in gamma.HEAT_STOPS[-1][1]       # most-positive → ice
+    # The design's "hot" pair must be present as the near-extreme stops.
+    assert any("255,77,141" in s[1] for s in gamma.HEAT_STOPS)    # put hot (magenta)
+    assert any("53,200,255" in s[1] for s in gamma.HEAT_STOPS)    # call hot (cyan)
+
+
+def test_heat_colorscale_stops_are_ordered_and_symmetric_about_zero():
+    pos = [s[0] for s in gamma.HEAT_STOPS]
+    assert pos == sorted(pos)                             # Highcharts requires ascending
+    assert pos[0] == 0.0 and pos[-1] == 1.0
+    # Symmetric: every stop has a mirror the same distance the other side of 0.50,
+    # so a net of +x and -x are equally saturated.
+    assert {round(1.0 - p, 6) for p in pos} == {round(p, 6) for p in pos}
+
+
+def test_heat_colorscale_saves_the_bright_hues_for_the_extremes():
+    # The design shapes colour position by pow(a, 1.7), so most of the field sits
+    # in the deep blue / aubergine and only the cores reach cyan and ice. Mirror
+    # that by keeping the two hot stops out past 0.85 / under 0.15.
+    hot_pos = [s[0] for s in gamma.HEAT_STOPS
+               if "53,200,255" in s[1] or "255,77,141" in s[1]]
+    assert hot_pos and all(p >= 0.85 or p <= 0.15 for p in hot_pos)
+
+
+def test_wash_background_is_a_vertical_blue_to_magenta_gradient():
+    wash = gamma._wash_background()
+    lg = wash["linearGradient"]
+    # Vertical: same x, top-to-bottom y.
+    assert lg["x1"] == lg["x2"] and lg["y1"] == 0 and lg["y2"] == 1
+    stops = wash["stops"]
+    assert stops[0][1].lower() == "#0a1626"               # blue at the top
+    assert stops[-1][1].lower() == "#170a12"              # magenta at the bottom
+    assert [s[0] for s in stops] == sorted(s[0] for s in stops)
+
+
+def test_heatmap_and_term_share_the_same_wash_and_panel_border():
+    rows = [("09:30", 450, None, None, None, 0, {448.0: 5, 450.0: -3})]
+    intraday = gamma.heatmap_figure(rows, "GEX", yrange=[440.0, 460.0])
+    tg = {"underlying_price": 450.0, "expirations": ["2026-06-18"],
+          "cells": {"2026-06-18": {450.0: {"net_gex_usd": 5},
+                                   460.0: {"net_gex_usd": -200}}}}
+    term = gamma.term_heatmap(tg)
+    for fig in (intraday, term):
+        assert fig["chart"]["plotBackgroundColor"] == gamma._wash_background()
+        assert fig["chart"]["plotBorderWidth"] == 1
+        assert fig["chart"]["plotBorderColor"] == gamma.PANEL_BORDER
+
+
+def test_all_four_intraday_views_get_the_plasma_axis_and_wash():
+    # GEX / Charm / DEX / Vanna all render through heatmap_figure, so the palette
+    # reaches every one of them through the shared _coloraxis.
+    rows = [("09:30", 450, None, None, None, 0, {448.0: 5, 450.0: -3})]
+    for view in ("GEX", "Charm", "DEX", "Vanna"):
+        fig = gamma.heatmap_figure(rows, view, yrange=[440.0, 460.0])
+        assert fig["colorAxis"]["stops"] == gamma.HEAT_STOPS
+        assert "linearGradient" in fig["chart"]["plotBackgroundColor"]
 
 
 def test_spot_line_is_off_white():
     assert gamma.PRICE_LINE.lower() in ("#f5f5f5", "#ffffff", "#fafafa")
+
+
+def test_spot_line_carries_a_dark_halo():
+    # The white track crosses bright cyan cores; the design draws a black polyline
+    # under it. A series shadow does that WITHOUT adding a series (the series count
+    # is load-bearing for the in-place chart.update()).
+    rows = [("09:30", 450.0, None, None, None, 0, {449.0: {"net": 5}}),
+            ("09:35", 451.5, None, None, None, 0, {449.0: {"net": 7}})]
+    fig = gamma.heatmap_figure(rows, "GEX")
+    spot = next(s for s in fig["series"] if s.get("name") == "Spot")
+    assert spot["shadow"]["width"] >= 3
+    assert "0,0,0" in spot["shadow"]["color"]
 
 
 def test_heatmap_figure_spot_line_not_faded():
@@ -539,7 +610,8 @@ def test_term_heatmap_blended_and_dark_contrast():
     assert hm["interpolation"] is True and hm["borderWidth"] == 0
     assert hm["states"]["inactive"]["enabled"] is False
     assert fig["chart"]["backgroundColor"] == "transparent"
-    assert "plotBackgroundColor" not in fig["chart"]
+    # Same wash as the intraday heatmap (and, as there, never the flat separator grey).
+    assert "linearGradient" in fig["chart"]["plotBackgroundColor"]
     # press-and-hold tooltip hook present (Term paints on the recreated chart_el)
     assert "'mousedown'" in fig["chart"]["events"][":load"]
     # symmetric contrast clamp present on the color axis
@@ -849,7 +921,45 @@ def test_heatmap_figure_draws_gamma_flip_line():
     assert "Gamma flip" in by_value[449.5]["label"]["text"]
     # Distinguishable from the walls at a glance.
     assert by_value[449.5]["color"] == gamma.FLIP_COLOR
-    assert by_value[455.0]["color"] == gamma.WALL_COLOR
+    assert by_value[455.0]["color"] == gamma.CALL_WALL_COLOR   # 455 >= spot
+
+
+def test_walls_are_coloured_by_side_and_match_the_field():
+    # The design colour-codes each wall to its side, so a wall line reads as the
+    # same thing as the cells it sits among: call-heavy cyan, put-heavy magenta.
+    fig = gamma.heatmap_figure(_WALL_ROWS, "GEX", spot=450.0, walls=[455.0, 445.0])
+    by_value = {pl["value"]: pl for pl in fig["yAxis"]["plotLines"]}
+    assert by_value[455.0]["color"] == gamma.CALL_WALL_COLOR
+    assert by_value[445.0]["color"] == gamma.PUT_WALL_COLOR
+    assert gamma.CALL_WALL_COLOR != gamma.PUT_WALL_COLOR
+    # Wall colours ARE the bar colours — one instrument, read two ways.
+    assert (gamma.CALL_WALL_COLOR, gamma.PUT_WALL_COLOR) == (gamma.POS_COLOR,
+                                                             gamma.NEG_COLOR)
+    # ...and the bar panel labels them the same way.
+    anns = {a["value"]: a["color"] for a in gamma.line_annotations(450.0, None,
+                                                                   [455.0, 445.0])}
+    assert anns[455.0] == gamma.CALL_WALL_COLOR
+    assert anns[445.0] == gamma.PUT_WALL_COLOR
+
+
+def test_the_four_level_colours_stay_mutually_distinct():
+    # Sided walls (cyan/magenta), gamma flip, projected flip. FLIP_COLOR moved off
+    # #42a5f5 precisely because it collided with the call ramp's #2a76e0 — so this
+    # also guards it from drifting back into the palette.
+    levels = {gamma.CALL_WALL_COLOR, gamma.PUT_WALL_COLOR, gamma.FLIP_COLOR,
+              gamma.PROJ_FLIP_COLOR}
+    assert len(levels) == 4
+    ramp = " ".join(s[1] for s in gamma.HEAT_STOPS)
+    for c in (gamma.FLIP_COLOR, gamma.PROJ_FLIP_COLOR):
+        r, g, b = (int(c.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4))
+        assert f"{r},{g},{b}" not in ramp
+
+
+def test_bars_are_plasma_cyan_and_magenta():
+    b = gamma.bars_from_gex(GEX, 450.0)
+    assert set(b["colors"]) <= {gamma.POS_COLOR, gamma.NEG_COLOR}
+    assert gamma.POS_COLOR.lower() == "#35c8ff"     # call hot
+    assert gamma.NEG_COLOR.lower() == "#ff4d8d"     # put hot
 
 
 def test_heatmap_flip_line_defensive_and_independent():
@@ -1672,7 +1782,8 @@ def test_wall_plot_lines_adds_projected_flip():
     assert "Proj" in pf["label"]["text"] and "452.25" in pf["label"]["text"]
     # Its own color, distinct from the actual flip and the walls.
     assert pf["color"] == gamma.PROJ_FLIP_COLOR
-    assert pf["color"] not in (gamma.FLIP_COLOR, gamma.WALL_COLOR)
+    assert pf["color"] not in (gamma.FLIP_COLOR, gamma.CALL_WALL_COLOR,
+                               gamma.PUT_WALL_COLOR)
 
 
 def test_projected_flip_is_optional_and_defensive():
