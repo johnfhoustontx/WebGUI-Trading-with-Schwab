@@ -4,7 +4,7 @@
 — the handoff bundle (README spec + `Regime Dashboard.dc.html` prototype + full-page screenshot),
 copied into the repo so this plan does not depend on a file in Downloads.
 
-**Status:** Phases 0–3 done (results in §4). Phases 4–7 not started.
+**Status:** ✅ **Phases 0–7 done.** The console is live on `/sentiment`. Results in §4.
 
 ---
 
@@ -344,34 +344,76 @@ in the running app — track alphas (0.09/0.14 exactly), the fill gradient's 8-d
 
 **Verified:** webgui **1437 passed** (55 new).
 
-### Phase 4 — The three top cards *(medium)*
-4.1 Sentiment card — hero, bias pill, delta, three meters, model-confidence footer, link.
-4.2 Trend card — hero, verdict block, the NO-READ week meter, link.
-4.3 Signals card — 2×2 readout matrix, the three ROC/z meters (Phase 1 data), divergence alert
-    with its two-bar mini chart.
+### Phase 4 — The three top cards — ✅ **DONE 2026-08-14**
 
-### Phase 5 — The regime block *(medium — most logic already exists)*
-5.1 Extend `regime_mix.py`: per-regime note copy, and `callouts()` for DOMINANT / BIGGEST MOVE /
-    EMERGING.
-5.2 Regime-share table in the design's four-column grid, reusing `rank_rows` and the existing
-    bar/sparkline/zero-state logic.
-5.3 Confidence-dial card + the LEAD / TIGHTEST stat pair (`lead_margin` already returns both).
-5.4 Diagnostic-tags card off `evidence_detail`, with the info/warn split.
-5.5 Callout strip.
+`console_cards.py`. Hero + bias pill + delta, the Day/Week/Month meter stack with its shared ruler,
+the model-confidence segments, the trend verdict block, and the 2×2 Signals matrix with the three
+signed ROC/z meters (Phase 1's numbers) and the divergence alert.
 
-### Phase 6 — Page assembly *(medium)*
-6.1 Header bar (live dot, title, session chip, data-as-of chip).
-6.2 Footer disclaimer bar.
-6.3 Compose the console at the top of `/sentiment`; **keep the intraday graphs, Components popup,
-    status bar and Refresh below it**, untouched.
-6.4 Wire every value into the existing `_apply()` repaint path — in place, no re-mount, so the
-    2-minute refresh does not rebuild rows.
+Two deliberate deviations, argued rather than inherited:
 
-### Phase 7 — States, cleanup, verification *(small)*
-7.1 Loading skeleton; stale-data header chip (amber + "STALE").
-7.2 Decide `rings.py`: delete, or keep as a reusable primitive with its tests.
-7.3 Full webgui suite; `test_no_inline_style.py` covers the new modules; DOMPurify guards mirrored.
-7.4 Live-verify in dev at several window widths; then CLAUDE.md + CHANGELOG.
+* **Signals cells are coloured by TONE, not by cell position.** The handoff hard-codes a hue per
+  cell (bias green, signal teal) which encodes nothing — and on live data bias and signal are both
+  *Neutral*, so fixed green/teal would paint a Neutral reading in the colours of Long/Bullish.
+* **The 2×2 matrix is restored.** The page's 1×4 stack existed because a 2×2 left a void beside the
+  460px-tall rings; the console replaces those rings with short meter stacks, so that reason is gone.
+
+### Phase 5 — The regime block — ✅ **DONE 2026-08-14**
+
+`console_regime.py` + additions to `regime_mix.py`. Most of the logic already existed: `rank_rows`
+(ranking, bars normalised to the leader, self-scaled sparklines, change-vs-open, the dormant state)
+and `lead_margin` — which already returned exactly the dial card's LEAD / TIGHTEST TODAY pair.
+
+**Callout rules are stated, not eyeballed.** `emerging` prefers a band waking from ~zero over a
+bigger riser, because a band waking from nothing is a change of **kind**, and it is invisible in a
+share ranking while it is still tiny (Stressed, 0 → +4.9pp). It falls back to the largest riser that
+is not already `biggest_move`, so the tile is rarely blank. `REGIME_NOTES` glosses each regime, with
+`DORMANT` overriding at zero — a band's usual gloss would otherwise describe something absent.
+
+### Phase 6 — Page assembly — ✅ **DONE 2026-08-14**
+
+`console_page.py`. Header (pulsing live dot, title, session + DATA AS OF chips) and the footer
+reading. The **stale chip** matters because every number on the page comes from one cache: if it
+stops publishing, the console keeps rendering confidently from the last snapshot and nothing else on
+screen would say so.
+
+The console repaints from **the same derived values** the rest of the page uses, so the two halves
+cannot disagree about a number. Contents are rebuilt wholesale rather than updated element-by-element
+— the handoff advises against re-mounting, but the page repaints every 120 s, the console holds no
+interactive state, and the alternative is ~40 element refs threaded through `_apply`.
+
+### Phase 7 — Cleanup and verification — ✅ **DONE 2026-08-14**
+
+**The duplicated blocks are gone.** Composing the console *above* the old content left every reading
+on the page twice (rings + meters, tile stack + matrix, regime expander + regime block). Removed:
+both Day/Week/Month rings, the 1×4 Signals stack, the velocity/divergence lines, and the Market
+Regime expander. **Kept, as decided:** the intraday graphs, the status bar, Refresh, and the
+Components / Trend Detail popups — those two have no room in the console (a 520px table and a
+per-horizon sub-score dump) and are what its "COMPONENTS →" / "TREND DETAIL →" captions refer to.
+Quasar uppercases their button labels, so they read as those captions already.
+
+**`rings.py` is kept, and is not dead.** `console_dial` imports its `_arc_path` / `_point` /
+`_id_token`, so the tested arc geometry has a live consumer and the two graphics cannot disagree
+about where 12 o'clock is. `ring_svg` itself now has no caller — kept deliberately rather than
+deleted: it shipped hours earlier the same day, it is fully tested, and reverting to it should stay
+cheap.
+
+**Eight page tests were retargeted, not deleted** — they pinned real behaviour (SVG id uniqueness,
+sanitizing, the cold-start no-fabricated-number rule, the verdict reaching the reader, a repaint
+dropping a stale trend) and now assert the same properties against the console. One found a genuine
+break during the cleanup: a `NameError` from an `else:` branch still clearing a removed label.
+
+`test_no_inline_style.py` now covers all six console modules.
+
+**Verified live in dev:** no ring SVGs remain, exactly one dial, each heading appears once, and the
+whole page renders from real data.
+
+> ⚠️ **Known limit — the console needs ~1084px of content width.** Below that the page scrolls
+> horizontally: the regime block's `minmax(340px,396px)` plus the share table's fixed columns cannot
+> compress further. Measured no overflow at a 1265px viewport and 168px of overflow at 916px. The
+> page was already desktop-only (its intraday Highcharts render at a fixed 1105px), so this narrows
+> an existing limit rather than introducing one — but it is a real floor, and the fix if it ever
+> matters is to drop the sparkline column first, as the handoff itself suggests.
 
 ---
 

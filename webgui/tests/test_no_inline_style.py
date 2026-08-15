@@ -94,7 +94,14 @@ def test_trade_page_has_no_inline_style():
 def test_sentiment_pages_have_no_inline_style():
     base = pathlib.Path(__file__).resolve().parents[1] / "pages"
     for fn in ["sentiment.py", "sentiment_sectors.py", "sentiment_rotation.py",
-               "sentiment_rrg.py", "sentiment_momentum.py"]:
+               "sentiment_rrg.py", "sentiment_momentum.py",
+               # The Market Regime Console. Its whole design is glows, hairline
+               # grids and gradients — the shapes most likely to reach for
+               # `.style()` — and a Phase 0/2 spike measured that every one of
+               # them generates as a Tailwind arbitrary, so there is no excuse.
+               "console.py", "console_cards.py", "console_regime.py",
+               "console_page.py", "console_dial.py", "regime_mix.py",
+               "rings.py"]:
         src = (base / fn).read_text(encoding="utf-8")
         assert ".style(" not in src, f"{fn} still uses .style()"
         assert ":style=" not in src, f"{fn} still uses a Vue :style= slot binding"

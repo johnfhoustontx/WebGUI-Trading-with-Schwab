@@ -4,7 +4,49 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-08-14 (**the Market Regime panel stopped spending all its ink on the part
+**Last updated:** 2026-08-14 (**`/sentiment`'s top became the Market Regime Console** — a
+single-screen dark console built from a supplied hi-fi handoff, now in the repo at
+`docs/design/2026-08-14-market-regime-console/`. Plan + every measured spike:
+[the plan](plans/2026-08-14-sentiment-console-redesign-plan.md), which is the detailed record; this
+entry is the summary.
+
+**It is an evolution of the page, not a foreign design.** The handoff's sample numbers ARE this
+app's live numbers (trend day 68 vs live 67.8, month 83 vs 82.7, the regime shares, "leads by
+10.2 pp"), and its Signals cells reuse this page's own descriptors verbatim. An audit of ~20 data
+points found only **three** gaps, all numbers the engine already computed and then formatted away.
+
+**Tier 2 (additive, needs a `sentiment_svc` restart):** `derived.velocity.values` (the ROC/z numbers
+behind the display string), `derived.divergence_detail` (the component pair, gated on the engine's
+own string so the two cannot disagree), and `regime.evidence_detail` — `score_regimes` already knew
+which regime produced each evidence line and was discarding it. Severity follows the **source
+regime**, and the live classifier validated that rule rather than fitting it: all six real evidence
+lines split exactly as the designer hand-coloured them.
+
+**Tier 1:** `[console]` in `config/theme.toml` (hex-only; alphas live in the token layer),
+`console.py` primitives, `console_dial.py`, `console_cards.py`, `console_regime.py`,
+`console_page.py`.
+
+**Everything was measured, not assumed.** A spike probed every class shape in the running app —
+glows, `radial-`/`linear-`/`repeating-linear-gradient`, arbitrary opacity, arbitrary grids, and a
+full font stack all generate, so the whole design is expressible under the Tailwind-first rule with
+no CSS beyond the `pulseDot` keyframes. Two stale comments were corrected as measured-false
+(box-shadow arbitraries accept a hex; only `var()` is the JIT trap), and
+`document.fonts.check()` was caught reporting a font present while it was demonstrably not loaded.
+
+**Three defects found by building it:** the dial's 100% case drew NOTHING (a 360° sweep's endpoints
+coincide, so SVG renders an empty path — now a `<circle>`); the confidence meter rounded halves to
+even, so its midpoint flipped on parity; and the handoff's own bipolar scale contradicts its stated
+widths (self-consistent at 2.5, not 5).
+
+**Deviations taken deliberately:** Signals cells are coloured by tone rather than by cell position
+(the handoff's fixed hues would paint today's Neutral reading in Long/Bullish colours); the 2×2
+matrix is restored because the 1×4 stack existed only to fill space beside the now-removed rings;
+and the layout is fluid-capped at 1440 rather than fixed.
+
+**Known limit:** the console needs ~1084px of content width; below that the page scrolls
+horizontally. It was already desktop-only. webgui **1479 green**.)
+
+**Prior — 2026-08-14** (**the Market Regime panel stopped spending all its ink on the part
 that never changes.** The `/sentiment` membership mix was a percent-stacked area chart; it is now
 a **ranked panel** — `webgui/pages/regime_mix.py:regime_mix_svg`, a pure SVG string mounted with
 `ui.html` and updated via `el.content`, the same idiom `rings.py` established the same day.
