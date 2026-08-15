@@ -242,6 +242,40 @@ def test_crisis_evidence_string():
     assert any("VIX1D" in e for e in s.evidence)
 
 
+def test_evidence_detail_mirrors_evidence_and_names_the_source_regime():
+    """The additive attribution: same strings, same order, each tagged with the
+    regime whose scorer produced it. ``evidence`` must be untouched."""
+    s = MR.score_regimes(_trend_day())
+    assert [d["text"] for d in s.evidence_detail] == s.evidence
+    assert all(d["regime"] in MR.REGIMES for d in s.evidence_detail)
+    # trending is what a trend day scores, so its ADX line is attributed there.
+    adx = [d for d in s.evidence_detail if "ADX" in d["text"]]
+    assert adx and adx[0]["regime"] == "trending"
+
+
+def test_evidence_detail_separates_adverse_lines_from_informational_ones():
+    """The reason this field exists: on one sample, lines from DIFFERENT regimes
+    are flattened into one list, and a renderer cannot tell them apart from the
+    copy alone. A chop day scores mean_reversion AND choppy at once."""
+    ev = _quiet_range_day() | {"or_failed_count": 3.0, "whipsaw_count": 11.0,
+                               "atr_pctile": 0.8, "adx": 18.0}
+    s = MR.score_regimes(ev)
+    by_regime = {}
+    for d in s.evidence_detail:
+        by_regime.setdefault(d["regime"], []).append(d["text"])
+    assert len(by_regime) >= 2, f"expected several contributors, got {by_regime}"
+    choppy = by_regime.get("choppy") or []
+    assert any("failed OR breaks" in t for t in choppy)
+    assert any("EMA whipsaws" in t for t in choppy)
+    # ... and those two are NOT attributed to the quiet-range regime.
+    assert not any("whipsaw" in t for t in by_regime.get("mean_reversion", []))
+
+
+def test_evidence_detail_is_empty_when_nothing_scores():
+    s = MR.score_regimes({})
+    assert s.evidence == [] and s.evidence_detail == []
+
+
 # ---------------------------------------------------------------- malformed inputs
 # NaN/bool-string/unknown-enum evidence must degrade to ABSENT, never fabricate
 # intensity (a NaN warm-up value is routine in upstream indicator series).

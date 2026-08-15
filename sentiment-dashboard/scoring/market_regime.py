@@ -143,6 +143,16 @@ class RegimeScores:
     confidence: float               # max(raw)
     unclear: bool                   # confidence < UNCLEAR_FLOOR
     evidence: list[str] = field(default_factory=list)  # human strings for the UI popup
+    # The SAME strings, each paired with the regime whose scorer produced it:
+    # ``[{"text": str, "regime": str}, ...]``, in the same order as ``evidence``.
+    # Additive and derived — ``score_regimes`` already knows the attribution and
+    # used to throw it away, flattening six lines from three different regimes
+    # into one undifferentiated list. A renderer that wants to tell "ADX 36
+    # rising" (trending, informational) from "11 EMA whipsaws" (choppy, adverse)
+    # cannot recover that from the text without pattern-matching the copy.
+    # ``evidence`` is left EXACTLY as it was — same strings, same order — so
+    # every existing reader is untouched.
+    evidence_detail: list[dict] = field(default_factory=list)
 
 
 def _clamp(v, lo, hi):
@@ -360,16 +370,20 @@ def score_regimes(ev) -> RegimeScores:
 
     Returns raw intensities, the raw-proportional membership vector (uniform 0.2
     only when every raw is 0), confidence = max(raw), the Unclear flag, and the
-    human-readable evidence strings from regimes that contributed.
+    human-readable evidence strings from regimes that contributed — both as the
+    flat ``evidence`` list and, additively, as ``evidence_detail`` pairing each
+    string with the regime that produced it.
     """
     ev = ev if isinstance(ev, dict) else {}
     raw: dict[str, float] = {}
     evidence: list[str] = []
+    detail: list[dict] = []
     for regime in REGIMES:
         intensity, strings = _SCORERS[regime](ev)
         raw[regime] = intensity
         if intensity > 0:
             evidence.extend(strings)
+            detail.extend({"text": s, "regime": regime} for s in strings)
 
     confidence = max(raw.values())
     total = sum(raw.values())
@@ -379,7 +393,8 @@ def score_regimes(ev) -> RegimeScores:
         memberships = {r: 1.0 / len(REGIMES) for r in REGIMES}
     unclear = confidence < UNCLEAR_FLOOR
     return RegimeScores(raw=raw, memberships=memberships, confidence=confidence,
-                        unclear=unclear, evidence=evidence)
+                        unclear=unclear, evidence=evidence,
+                        evidence_detail=detail)
 
 
 # ---------------------------------------------------------------- temporal layer

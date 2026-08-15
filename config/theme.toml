@@ -140,3 +140,84 @@ drawer_bg = "#0a0e1c"          # left nav rail background
 text      = "#98a1c0"          # menu item text + icons (inactive tone; active → light)
 hover_bg  = "rgba(107,134,255,0.08)"  # menu item hover wash
 title     = "#565f7d"          # the "WORKSPACE" drawer caption
+
+[console]                      # ── Market Regime Console (/sentiment ONLY) ──
+# A hard-edge "console" language, deliberately scoped to ONE page: square
+# corners, near-black ground, teal accent, glow-only shadows (no elevation).
+# Source of truth: docs/design/2026-08-14-market-regime-console/README.md.
+# Plan + spike results: docs/plans/2026-08-14-sentiment-console-redesign-plan.md.
+#
+# Nothing else in the app reads these — every other page keeps the Deep Slate
+# palette above. This section is NOT shown in Settings → Appearance, for the
+# same reason [brand] is not: that editor's sections are single-kind, and this
+# one mixes colours with font text.
+#
+# HEX ONLY, like every other section. The spec quotes several of these as
+# rgba(120,140,160,α); the ALPHA lives in the token layer instead (Tailwind's
+# `/[0.18]` modifier — measured to generate), so `line` below is ONE base
+# colour serving every hairline, border and meter track at its own opacity.
+page_bg     = "#05070b"        # the page ground
+wash        = "#0b1620"        # inner stop of the radial page wash
+card_from   = "#0e161e"        # card gradient (160deg); both stops rendered @95%
+card_to     = "#070a0f"
+cell_bg     = "#0a0e14"        # stat/readout cells inside a hairline grid
+line        = "#788ca0"        # every hairline / card border / meter track
+accent      = "#22e3d3"        # dial arc, links, header+footer rules
+# text ramp, lightest → faintest
+text_primary   = "#e7edf3"
+text_secondary = "#a9bac7"
+text_muted     = "#8fa1b0"
+text_label     = "#6b7d8d"
+text_dim       = "#5d6f7e"
+text_faint     = "#4b5a67"
+# data colours
+positive    = "#35d68a"        # bullish / positive change / high scores
+negative    = "#f2646b"        # stressed / negative change / divergence
+warning     = "#e0b74e"        # caution, previous close, mid-low scores
+olive       = "#b9cf6a"        # mid-high score band
+yellow      = "#d7d76a"        # trend day band
+# Regime hues — the CONSOLE's, which differ from [charts] used elsewhere
+# (balanced cyan→blue, whipsaw flat-grey→light grey, breakout yellow→amber).
+# The handoff is authoritative for this page.
+regime_mean_reversion = "#6f86ff"
+regime_trending       = "#35d68a"
+regime_breakout       = "#f0b83c"
+regime_breakout_zero  = "#6a5c33"   # the dormant / 0.0% muted state
+regime_choppy         = "#c3ccd6"
+regime_crisis         = "#f2646b"
+# Condensed display face for headings, regime names and hero numerals, loaded
+# separately from [typography] and [brand]. "" loads nothing and falls back to
+# the app font — which measures 21% WIDER than Rajdhani, so letter-spaced
+# headings reflow when the webfont arrives (display=swap). Don't pack them tight.
+font_family = "Rajdhani"
+font_url    = "https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&display=swap"
+
+[macro]                        # ── Macro Board redesign (/market ONLY) ──────
+# A dense "instrument panel" language scoped to ONE page: notched (clip-path)
+# panels + tiles, near-black ground, magnitude-scaled heat wash, flash-on-change.
+# Source of truth: the approved macro-board redesign spec + reference prototype.
+# Like [console] + [brand], this is page-scoped and NOT shown in Settings →
+# Appearance (that editor's sections are single-kind; this mixes colours + font +
+# a tuning number). HEX ONLY; alphas live in the token layer (Tailwind `/[…]`).
+void    = "#03060D"            # page background base
+panel   = "#080D18"            # group panel fill
+tile    = "#0A1020"            # tile fill (Skin A)
+grid    = "#0E1728"            # inert bar/meter tracks
+edge    = "#182741"            # default borders
+edge_hi = "#26405F"            # emphasis borders
+txt     = "#DCE8F8"            # primary values
+dim     = "#6B7F9E"            # symbols, labels
+faint   = "#3D4F6B"            # descriptors, flat-tile accents
+up      = "#00E5A0"            # positive / risk-on change
+dn      = "#FF4D6D"            # negative / risk-off change
+flat    = "#5C6F8C"            # zero change
+cyan    = "#35E0FF"            # rail accent, live indicator
+wash_in = "#0A1830"            # inner stop of the page radial gradient
+# Saturation ceiling (percent): the |%change| at which the heat wash maxes out.
+# The one number worth tuning per session volatility — lower it if flat days look
+# washed out, raise it if a busy tape saturates everything.
+sat_ceiling = 0.45
+# Three faces, loaded page-scoped (one combined request), matching the prototype:
+# Chakra Petch (board title), Rajdhani (ticker symbols), IBM Plex Mono (numbers).
+# Tracking values are tuned to these faces — system fallbacks reflow noticeably.
+font_url = "https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Chakra+Petch:wght@600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap"

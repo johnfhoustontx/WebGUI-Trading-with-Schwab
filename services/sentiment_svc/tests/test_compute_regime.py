@@ -18,8 +18,8 @@ NOW = 1_800_000_000  # fixed unix seconds so the TTL keys off the passed ``now``
 # The subset of the return dict that is the publishable RegimeState (the
 # ``_fast``/``_slow``/``_commit``/``_sample_ts`` carry fields are NOT cached).
 _PUBLISH = ("ts", "as_of", "memberships", "raw", "confidence", "unclear",
-            "label", "committed_label", "transition", "evidence", "version_info",
-            "direction", "direction_strong")
+            "label", "committed_label", "transition", "evidence",
+            "evidence_detail", "version_info", "direction", "direction_strong")
 
 
 @pytest.fixture(autouse=True)

@@ -393,21 +393,23 @@ def _render_card():
     return card
 
 
-def _rings(card):
-    """``(sentiment_ring, trend_ring)``, selected by DOM id rather than by
-    position: "the ui.html elements containing an <svg>, in build order" would
-    silently reorder if Task 10 mounts a third SVG fragment above them."""
+def _html_svgs(card):
+    """Every ``ui.html`` on the page whose content is an SVG fragment.
+
+    The two Day/Week/Month RINGS this used to select are gone — the console
+    renders those horizons as meters. What is left is the confidence dial plus
+    one sparkline per regime row."""
     from nicegui import ui
-    found = {}
-    for e in card.descendants():
-        if not isinstance(e, ui.html):
-            continue
-        for uid in ("sent", "trend"):
-            if f'id="ring-{uid}"' in (e.content or ""):
-                assert uid not in found, f"two elements claim id ring-{uid}"
-                found[uid] = e
-    assert set(found) == {"sent", "trend"}, f"rings found: {sorted(found)}"
-    return found["sent"], found["trend"]
+    return [e for e in card.descendants()
+            if isinstance(e, ui.html) and "<svg" in (e.content or "")]
+
+
+def _dial(card):
+    """The regime confidence dial, by DOM id rather than by position."""
+    found = [e for e in _html_svgs(card)
+             if 'id="regime-dial-' in (e.content or "")]
+    assert len(found) == 1, f"expected exactly one dial, found {len(found)}"
+    return found[0]
 
 
 def _label_texts(card):
@@ -431,12 +433,21 @@ def _trend_detail_texts(card):
     return [e.text for e in btns[0].descendants() if isinstance(e, ui.label)]
 
 
-def _center_value(svg):
-    """The outermost arc's reading — the big number in the middle of the dial.
-    Located by the size CONSTANT, so a Task-10 layout nudge cannot redden this."""
-    from pages import rings
+def _hero_values(card):
+    """The console's two hero numbers, located by the hero TYPE SIZE rather than
+    by position, so a layout nudge cannot redden these."""
+    from nicegui import ui
+    from pages import console_cards
+    size = console_cards.HERO_VALUE.split("text-[")[1].split("]")[0]
+    return [e.text for e in card.descendants()
+            if isinstance(e, ui.label) and f"text-[{size}]" in e._classes]
+
+
+def _dial_center(svg):
+    """The dial's confidence reading, by its size constant."""
+    from pages import console_dial
     chunk = [c for c in svg.split("<text ")
-             if f'font-size="{rings.CENTER_VALUE_SIZE}"' in c][0]
+             if f'font-size="{console_dial.VALUE_SIZE}"' in c][0]
     return chunk.split(">", 1)[1].split("<", 1)[0]
 
 
@@ -458,53 +469,49 @@ def _seed_cache():
                                {"snaps": _snaps(*([3.0] * 5))})
 
 
-def test_render_mounts_exactly_two_rings_with_distinct_dom_ids():
-    """A shared uid is the documented ring collision failure: two SVGs with the
-    same root id on one page.
-
-    Covers BOTH uid sites. An empty cache makes ``_apply`` early-return, so it
-    only ever exercises the two BUILD-time strings — while the repaint is what
-    the live page shows for every frame after the first, and carries its own
-    literal. The seeded pass is the one that guards it."""
+def test_the_old_rings_are_gone_and_the_dial_has_a_unique_id():
+    """The console replaced the two Day/Week/Month rings with meters, so a page
+    still mounting them would be rendering every horizon twice. A shared DOM id
+    remains the documented SVG collision failure, so the dial's is pinned too."""
     for seed in (False, True):
         bus_client.reset()
         if seed:
             _seed_cache()
-        sent, trend = _rings(_render_card())         # asserts id uniqueness
-        assert 'id="ring-sent"' in sent.content, seed
-        assert 'id="ring-trend"' in trend.content, seed
-    # ...and the seeded pass really did repaint, or it proved nothing.
-    assert _center_value(sent.content) != "—"
+        card = _render_card()
+        assert not [e for e in _html_svgs(card) if 'id="ring-' in e.content], seed
+        assert 'id="regime-dial-regime"' in _dial(card).content, seed
 
 
-def test_rings_mount_with_sanitizing_on():
-    """The rings keep ui.html's default client-side sanitizing. What makes that
-    safe is a property of the SVG, not of this page — see test_rings.py's
-    ``test_ring_svg_emits_nothing_dompurify_would_strip``."""
+def test_console_svgs_mount_with_sanitizing_on():
+    """The dial and sparklines keep ui.html's default client-side sanitizing.
+    What makes that safe is a property of the SVG, not of this page — see
+    ``test_console.test_dial_emits_nothing_the_sanitizer_would_strip``."""
     bus_client.reset()
-    for r in _rings(_render_card()):
-        assert r._props["sanitize"] is True
+    _seed_cache()
+    svgs = _html_svgs(_render_card())
+    assert svgs, "expected the dial and sparklines"
+    for s in svgs:
+        assert s._props["sanitize"] is True
 
 
-def test_render_with_an_empty_cache_paints_both_rings_track_only():
-    """The cold-start read: three tracks and no value arc per ring, and an
-    em-dash rather than a fabricated 0 in the middle."""
+def test_render_with_an_empty_cache_shows_the_waiting_state():
+    """The cold-start read: no fabricated numbers anywhere — the dial dashes and
+    the console says it is waiting rather than rendering an empty frame."""
     bus_client.reset()
-    for r in _rings(_render_card()):
-        assert r.content.count("<path ") == 3     # tracks only — no halo/value arcs
-        assert _center_value(r.content) == "—"
+    card = _render_card()
+    assert _dial_center(_dial(card).content) == "—"
+    assert any("Waiting for regime" in (t or "") for t in _label_texts(card))
 
 
-def test_trend_panel_keeps_filling_the_regime_badge_and_description():
-    """The rings carry numbers only — the trend's LABEL and DESCRIPTION reach
-    the reader solely through these two elements, which sit in the same
-    ``if trend:`` branch the gauge writes were cut out of. Deleting either line
-    left the whole suite green before this test existed."""
+def test_the_console_trend_card_carries_the_verdict_and_guidance():
+    """The meters carry numbers only — the trend's LABEL and DESCRIPTION reach
+    the reader solely through the verdict block, which sits in the same
+    ``if trend:`` data path the gauge writes were cut out of."""
     bus_client.reset()
     _seed_cache()
     texts = _label_texts(_render_card())
-    assert "Rallying" in texts                                # regime_badge
-    assert "Broad participation, buyers in control" in texts  # regime_desc
+    assert "RALLYING" in texts                                # verdict headline
+    assert "Broad participation, buyers in control" in texts  # guidance
 
 
 def test_trend_panel_clears_and_dashes_when_no_trend_is_published():
@@ -531,20 +538,18 @@ def _repaint(card):
     timers[0].callback()
 
 
-def test_trend_labels_clear_on_a_repaint_that_loses_the_trend():
-    """The ``else:`` branch's two ``.text = ""`` clears are REPAINT-only.
-
-    The test above renders a FRESH page, so those labels were never written and
-    "still empty" proves nothing about them — verified by mutation: keeping the
-    else-branch's dash but deleting only the two clears survives every other test
-    in this file. They matter solely when a repaint follows a paint that HAD a
-    trend, which is reachable: ``derived.trend`` comes from a module-level holder
-    in sentiment_svc and goes absent on a restart or a defensive compute failure.
-    Without the clears a stale trend label sits on screen indefinitely."""
+def test_a_repaint_that_loses_the_trend_drops_the_stale_verdict():
+    """REPAINT-only semantics. A fresh page never wrote these, so "still absent"
+    proves nothing there — this matters solely when a repaint follows a paint
+    that HAD a trend, which is reachable: ``derived.trend`` comes from a
+    module-level holder in sentiment_svc and goes absent on a restart or a
+    defensive compute failure. The console gets this for free by rebuilding
+    wholesale, where the old badge needed explicit ``.text = ""`` clears; this
+    test is what would catch a future move back to in-place updates."""
     bus_client.reset()
     _seed_cache()
     card = _render_card()
-    assert "Rallying" in _label_texts(card)        # precondition: something to go stale
+    assert "RALLYING" in _label_texts(card)        # precondition: something to go stale
     assert "Broad participation, buyers in control" in _label_texts(card)
 
     # Republish WITHOUT derived.trend — the version bump is what drives the poll.
@@ -552,17 +557,19 @@ def test_trend_labels_clear_on_a_repaint_that_loses_the_trend():
                                {"live": _snap("2026-08-14", 7.2), "derived": {}})
     _repaint(card)
 
-    assert "Rallying" not in _label_texts(card)
+    assert "RALLYING" not in _label_texts(card)
     assert "Broad participation, buyers in control" not in _label_texts(card)
     assert _trend_detail_texts(card) == ["—"]
 
 
-def test_render_fills_each_ring_from_its_own_payload():
+def test_each_console_hero_reads_from_its_own_payload():
+    """Distinct values per card, so a hero wired to the wrong payload (or both
+    wired to the same one) fails rather than coincides."""
     bus_client.reset()
     _seed_cache()
-    sent, trend = _rings(_render_card())
-    assert _center_value(sent.content) == "72"    # live composite 7.20 -> 0-100
-    assert _center_value(trend.content) == "64"   # derived.trend.smoothed_score
+    heroes = _hero_values(_render_card())
+    assert "72" in heroes    # live composite 7.20 -> 0-100
+    assert "64" in heroes    # derived.trend.smoothed_score
 
 
 def test_trend_detail_names_the_state_of_all_three_horizons():
@@ -941,38 +948,6 @@ def test_regime_transition_text():
     assert S.regime_transition_text(None) == ""
 
 
-def test_regime_mix_figure_is_a_stacked_area_plain_chart():
-    fig = S.build_regime_mix_figure(_regime_points())
-    assert fig["chart"]["type"] == "area"
-    assert fig["plotOptions"]["area"]["stacking"] == "percent"
-    # one series per regime, in a stable order, each with the right point count
-    assert len(fig["series"]) == 5
-    assert [s["name"] for s in fig["series"]] == [
-        "Balanced", "Trending", "Breakout", "Whipsaw", "Stressed"]
-    assert all(len(s["data"]) == 3 for s in fig["series"])
-    # a stockChart would freeze in-place updates (see _intraday_figure) -> plain chart
-    assert "stockChart" not in str(fig)
-    assert "categories" in fig["xAxis"]        # synthetic contiguous axis, no dead space
-    assert fig["accessibility"]["enabled"] is False
-
-
-def test_regime_mix_figure_values_and_empty():
-    fig = S.build_regime_mix_figure(_regime_points(1))
-    trending = next(s for s in fig["series"] if s["name"] == "Trending")
-    assert trending["data"][0]["y"] == 0.5
-    for empty in ([], None):
-        f = S.build_regime_mix_figure(empty)
-        assert len(f["series"]) == 5 and all(s["data"] == [] for s in f["series"])
-
-
-def test_regime_mix_figure_breaks_line_between_days():
-    day1 = 1_753_280_700                      # a session point
-    pts = _regime_points(2, day1) + _regime_points(1, day1 + 86_400)
-    fig = S.build_regime_mix_figure(pts)
-    ys = [p.get("y") for p in fig["series"][0]["data"]]
-    assert None in ys                          # a null slot separates the two days
-
-
 def test_regime_evidence_rows():
     assert S.regime_evidence_rows(_regime()) == ["ADX 32 rising", "VWAP held 95%"]
     assert S.regime_evidence_rows({}) == []
@@ -985,14 +960,14 @@ def test_regime_transition_text_carries_the_direction():
     assert S.regime_transition_text(r) == "Balanced → Softening · 60%"
 
 
-def test_regime_mix_series_names_never_take_the_direction():
-    """The stacked band's fixed order + names ARE the reading position — a legend
-    that renames itself intra-session defeats that. Direction belongs on the
-    headline, not the chart."""
-    pts = _regime_points()
-    fig = S.build_regime_mix_figure(pts)
-    assert [s["name"] for s in fig["series"]] == [
-        "Balanced", "Trending", "Breakout", "Whipsaw", "Stressed"]
+def test_regime_row_labels_never_take_the_direction():
+    """A row label that renames itself intra-session cannot be tracked across
+    repaints. Direction belongs on the headline, not in the panel."""
+    svg = S.regime_mix_svg(_regime_points())
+    for base in ("Balanced", "Trending", "Breakout", "Whipsaw", "Stressed"):
+        assert base in svg
+    for adorned in ("Rallying", "Firming", "Retreating", "Softening", "Breakdown"):
+        assert adorned not in svg
 
 
 def test_regime_headline_color_follows_the_direction():

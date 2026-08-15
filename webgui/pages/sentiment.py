@@ -27,6 +27,10 @@ from zoneinfo import ZoneInfo
 
 import bus_client
 from pages.rings import ring_svg
+from pages.regime_mix import (REGIME_COLORS, REGIME_LABELS, REGIME_ORDER,
+                              regime_mix_svg)
+from pages import console_page
+from pages.options import theme
 from pages.options.theme import BTN_3D, THEME
 from pages.ui_guard import guard
 
@@ -466,23 +470,18 @@ def build_trend_intraday_figure(points):
 
 
 # --- Market Regime (blended structural regime, cache:sentiment:regime) -------
-# Display order + labels + colors for the five structural regimes. The order is
-# fixed so the stacked band keeps a stable reading position across repaints.
-REGIME_ORDER = ("mean_reversion", "trending", "breakout", "choppy", "crisis")
-# The BASE names — deliberately the chart's series names too, because the fixed
-# order + stable names ARE the band's reading position. Direction adorns the
-# HEADLINE only (a legend that renames itself mid-session defeats the point).
-# Mirrors ``sentiment-dashboard/scoring/market_regime.REGIME_DISPLAY``, which the
-# webgui cannot import (Tier-1 takes no engine imports).
-REGIME_LABELS = {"mean_reversion": "Balanced", "trending": "Trending",
-                 "breakout": "Breakout", "choppy": "Whipsaw", "crisis": "Stressed"}
+# The display order, labels and colours live in ``pages.regime_mix`` alongside
+# the builder that draws them, and are re-exported here because this module's
+# headline helpers (and their tests) have always read them off ``sentiment``.
+#
+# Those labels are the BASE names. Direction adorns the HEADLINE only — the
+# panel's row labels never take it, because a label that renames itself
+# mid-session makes a row impossible to track across repaints.
 _REGIME_DIRECTIONAL = {
     "trending": {(1, True): "Rallying", (1, False): "Firming",
                  (-1, True): "Retreating", (-1, False): "Softening"},
     "breakout": {(-1, True): "Breakdown", (-1, False): "Breakdown"},
 }
-REGIME_COLORS = {"mean_reversion": CLR_CYAN, "trending": CLR_GREEN,
-                 "breakout": CLR_YELLOW, "choppy": CLR_FLAT, "crisis": CLR_RED}
 # Headline text color by committed regime — a finite map (Tailwind-first rule).
 _REGIME_TEXT = {"trending": "text-[#66bb6a]", "breakout": "text-[#ffd54f]",
                 "mean_reversion": "text-[#3fb6c7]", "choppy": "text-[#9e9e9e]",
@@ -565,69 +564,6 @@ def regime_evidence_rows(regime):
     """The 'why' lines the classifier attached to this sample (may be empty)."""
     r = regime if isinstance(regime, dict) else {}
     return [str(e) for e in (r.get("evidence") or [])]
-
-
-def build_regime_mix_figure(points):
-    """Stacked-area membership mix over today's recorded regime samples.
-
-    Reads as "how much of each regime is in this tape, and which way is it
-    moving" — the blended model's whole premise. Percent-stacked so the bands
-    always fill the height and the eye tracks PROPORTION, not absolute scale.
-
-    Same synthetic contiguous category axis as ``_intraday_figure`` (and the same
-    reason: a stockChart's ``chart.update()`` throws, freezing an open page), with
-    a null slot breaking the bands between sessions."""
-    pts = points or []
-    series_data = {k: [] for k in REGIME_ORDER}
-    categories, tick_positions = [], []
-    idx, prev_ms, prev_date = 0, None, None
-    for p in pts:
-        ms = int(_safe_float(p.get("ts"))) * 1000
-        ct = datetime.fromtimestamp(ms / 1000, _CT)
-        day = ct.date()
-        if prev_ms is not None and (ms - prev_ms) > _INTRADAY_GAP_MS:
-            for k in REGIME_ORDER:                 # null slot → break every band
-                series_data[k].append({"x": idx, "y": None})
-            categories.append("")
-            idx += 1
-        if day != prev_date:
-            tick_positions.append(idx)
-            categories.append(f"{ct:%b} {ct.day}")
-            prev_date = day
-        else:
-            categories.append("")
-        mem = p.get("memberships") if isinstance(p.get("memberships"), dict) else {}
-        for k in REGIME_ORDER:
-            series_data[k].append({"x": idx, "y": _safe_float(mem.get(k)),
-                                   "name": f"{ct:%b} {ct.day}, {ct:%H:%M}"})
-        idx += 1
-        prev_ms = ms
-    axis_label = {"style": {"color": "#bdbdbd"}}
-    return {
-        "chart": {"type": "area", "backgroundColor": "transparent",
-                  "height": 220, "spacing": [8, 12, 8, 0]},
-        "title": {"text": None},
-        "credits": {"enabled": False},
-        "accessibility": {"enabled": False},
-        "legend": {"enabled": True, "itemStyle": {"color": "#bdbdbd",
-                                                  "fontWeight": "normal"}},
-        "xAxis": {"categories": categories, "tickPositions": tick_positions,
-                  "lineColor": "rgba(255,255,255,0.15)",
-                  "gridLineColor": "rgba(255,255,255,0.06)", "labels": axis_label,
-                  "crosshair": {"label": {"enabled": False}}},
-        "yAxis": {"min": 0, "max": 100, "title": {"text": "Regime mix",
-                                                  "style": {"color": "#bdbdbd"}},
-                  "gridLineColor": "rgba(255,255,255,0.06)",
-                  "labels": {**axis_label, "format": "{value}%"}},
-        "tooltip": {"shared": True, "valueDecimals": 0,
-                    "pointFormat": "{series.name}: <b>{point.percentage:.0f}%</b><br>"},
-        "plotOptions": {"area": {"stacking": "percent", "lineWidth": 1,
-                                 "marker": {"enabled": False},
-                                 "fillOpacity": 0.55}},
-        "series": [{"name": REGIME_LABELS[k], "type": "area",
-                    "color": REGIME_COLORS[k], "data": series_data[k]}
-                   for k in REGIME_ORDER],
-    }
 
 
 def pct_color(pct):
@@ -946,7 +882,11 @@ def _tone_classes(hexv):
         # The neon glow. `[text-shadow:...]` JIT-generates (verified live).
         "text": f"text-[{hexv}] [text-shadow:0_0_12px_{hexv}]",
         # Subtle vertical gradient + colour-tinted hairline border + soft outer
-        # glow. box-shadow arbitraries need the rgba() form, not a hex.
+        # glow. The rgba() here is for the ALPHA, not because a hex fails —
+        # re-measured 2026-08-14 against this exact class shape, and
+        # `shadow-[0_0_18px_-6px_#35d68a]` JIT-generates perfectly well. It is
+        # simply opaque, which is not the look wanted. An 8-digit `#rrggbbaa`
+        # also works if you would rather not carry the _rgba() helper.
         "tile": (f"bg-gradient-to-b from-[{top}] to-[{_TILE_FLOOR}] "
                  f"border border-[{hexv}]/40 "
                  f"shadow-[0_0_18px_-6px_{_rgba(hexv, 0.55)}]"),
@@ -1091,6 +1031,17 @@ def _fmt_time(value):
 def render():
     from nicegui import ui
 
+    # Market Regime Console assets — scoped to THIS page, not the app shell.
+    # ``add_head_html`` during a page build is client-scoped, so the condensed
+    # display face is requested on /sentiment and nowhere else; every other page
+    # keeps the two fonts the shell already loads. "" when [console].font_url is
+    # blank, in which case the stack falls back to the app font.
+    if theme.CONSOLE_FONT_HEAD_HTML:
+        ui.add_head_html(theme.CONSOLE_FONT_HEAD_HTML)
+    # The console's ONE escape-hatch rule: a keyframes animation cannot be a
+    # utility class (same justification as the market ticker's marquee).
+    ui.add_css(theme.CONSOLE_KEYFRAMES_CSS)
+
     def _read_cache():
         """Pull the three sentiment cache views off the bus into ``state``.
         Graceful-empty: any missing view yields empty data (page renders a
@@ -1146,114 +1097,40 @@ def render():
     # Per-tile reactive element handles (value label, card shell, hairline rule,
     # end dot) — everything the tone recolor has to swap in place.
     tile_lbls, tile_cards, tile_rules, tile_dots = {}, {}, {}, {}
-    # Three evenly-distributed, top-aligned columns with matching h6 headers.
-    with ui.row().classes("w-full items-start justify-around gap-6 flex-wrap"):
-        # ① Market Sentiment — Day/Week/Month ring + press-and-hold Components popup
-        with ui.column().classes("items-center min-w-[300px]"):
-            ui.label("Market Sentiment").classes("text-h6")
-            # Built once with the empty-arc dial (all three tracks, em-dashes) and
-            # updated in place via ``.content`` — never rebuilt. The captions live
-            # inside the SVG, so there are no sibling caption labels any more.
-            # Sanitizing (the ui.html default) is fine: ring_svg emits only
-            # DOMPurify-allowlisted tags/attributes, which test_rings pins.
-            sent_ring = ui.html(
-                ring_svg(sentiment_arcs(None, []), uid="sent")
-            ).classes("w-[280px] h-[280px]")
-            bias_lbl = ui.label("").classes("text-h6")
-            sub_lbl = ui.label("").classes("opacity-80 text-sm")
-            with ui.button("Components", icon="table_view").props("flat dense") as comp_btn:
-                with ui.menu().props("no-parent-event") as comp_menu:
-                    comp_box = ui.column().classes("q-pa-md min-w-[520px]")
-            # Press-and-hold: shown while the mouse button is down, closed on release.
-            comp_btn.on("mousedown", lambda: comp_menu.open())
-            comp_btn.on("mouseup", lambda: comp_menu.close())
-            comp_btn.on("mouseleave", lambda: comp_menu.close())
-        # ② Market Trend — Day/Week/Month ring + label/desc + detail popup
-        with ui.column().classes("items-center min-w-[300px]"):
-            ui.label("Market Trend").classes("text-h6")
-            # ``uid`` MUST differ from the Sentiment ring's: both SVGs live on this
-            # page and a shared id makes their DOM roots collide.
-            trend_ring = ui.html(
-                ring_svg(trend_arcs({}), uid="trend")
-            ).classes("w-[280px] h-[280px]")
-            regime_badge = ui.label("").classes("text-subtitle1 text-bold")
-            regime_desc = ui.label("").classes("opacity-80 text-sm text-center")
-            with ui.button("Trend Detail", icon="insights").props("flat dense") as trend_btn:
-                with ui.menu().props("no-parent-event") as trend_menu:
-                    trend_detail_box = ui.column().classes("q-pa-md text-sm min-w-[240px]")
-            trend_btn.on("mousedown", lambda: trend_menu.open())
-            trend_btn.on("mouseup", lambda: trend_menu.close())
-            trend_btn.on("mouseleave", lambda: trend_menu.close())
-        # ③ Signals — 1x4 vertical stack of glowing tiles (see the layout note
-        # above SIGNAL_TILE_DEFS for why this deviates from the 2x2 reference),
-        # with the recovered velocity / divergence lines at its foot.
-        with ui.column().classes("items-center min-w-[300px] gap-2"):
-            ui.label("Signals").classes("text-h6")
-            with ui.column().classes("w-full gap-2 q-mt-sm"):
-                for d in SIGNAL_TILE_DEFS:
-                    tkey = d["key"]
-                    # Built with the neutral tone; _apply swaps the tone classes
-                    # in place (remove= the full finite set, so nothing stacks).
-                    tone = TONE_CLASSES["flat"]
-                    # p-2 (not q-pa-sm): nicegui-card's own p-4 wins over the
-                    # Quasar padding class, which made each tile 111px and
-                    # overshot the rings. bg-[#0a0f14] is the opaque floor under
-                    # the gradient — q-card's base background is WHITE.
-                    c = ui.card().classes(
-                        "p-2 w-full min-h-[88px] justify-between gap-1 "
-                        f"rounded-[12px] bg-[{_TILE_FLOOR}] {tone['tile']}")
-                    with c:
-                        with ui.row().classes("items-center gap-1 no-wrap"):
-                            ui.icon(d["icon"], size="14px").classes("opacity-50")
-                            ui.label(d["label"]).classes(
-                                "text-[10px] tracking-[0.18em] opacity-60")
-                        tile_lbls[tkey] = ui.label("—").classes(
-                            f"text-2xl text-bold leading-none {tone['text']}")
-                        with ui.row().classes("items-center gap-1 no-wrap w-full"):
-                            tile_rules[tkey] = ui.element("div").classes(
-                                f"flex-1 h-px {tone['rule']}")
-                            tile_dots[tkey] = ui.element("div").classes(
-                                f"w-[6px] h-[6px] rounded-full {tone['dot']}")
-                        with ui.row().classes("items-center gap-1 no-wrap"):
-                            ui.icon(d["foot_icon"], size="12px").classes("opacity-40")
-                            ui.label(d["descriptor"]).classes(
-                                "text-[9px] tracking-[0.12em] opacity-50")
-                    tile_cards[tkey] = c
-            # Velocity / regime-break flag / divergence. Published on every
-            # refresh by the service but rendered nowhere until now; the flag and
-            # the divergence note are hidden when empty (empty = "none", not
-            # "unknown"), so a quiet tape shows the ROC line alone.
-            vel_lbl = ui.label("").classes(
-                "text-[11px] opacity-70 w-full text-center leading-snug")
-            vel_flag_lbl = ui.label("").classes(
-                f"text-[11px] text-bold w-full text-center leading-snug {TXT_Y}")
-            div_lbl = ui.label("").classes(
-                "text-[11px] opacity-70 w-full text-center leading-snug")
-            for _el in (vel_flag_lbl, div_lbl):
-                _el.set_visibility(False)
 
-    ui.separator().classes("q-my-md")
-    # Market Regime — the blended STRUCTURAL read (how the tape is moving),
-    # complementary to the direction × aggression five-state above. Memberships
-    # are continuous, so a handover shows as a gradual band shift, not a flip.
-    with ui.expansion("Market Regime", icon="stacked_line_chart",
-                      value=True).classes("w-full") as regime_exp:
-        with ui.row().classes("items-baseline gap-3 w-full q-mt-sm"):
-            regime_lbl = ui.label("").classes("text-subtitle1 text-bold")
-            regime_conf_lbl = ui.label("").classes("opacity-60 text-sm")
-            regime_trans_lbl = ui.label("").classes("opacity-80 text-sm")
-        regime_why = ui.row().classes("items-center gap-2 flex-wrap")
-        # Plain chart (NOT a stockChart) — see _intraday_figure for why.
-        regime_plot = ui.highchart(build_regime_mix_figure([])).classes("w-full")
+    # ── Market Regime Console ────────────────────────────────────────────────
+    # The redesigned top of the page. Everything below it is unchanged and stays
+    # — the intraday graphs, the Components popup, the status bar and Refresh.
+    # One container, repainted by ``console_page.apply`` from ``_apply``.
+    console_root = console_page.render()
 
-    @guard
-    def _reflow_regime_chart():
-        ui.run_javascript(f"getElement({regime_plot.id})?.chart?.reflow()")
+    # The two press-and-hold popups the console's cards point at. Everything
+    # ELSE that used to sit here — the two Day/Week/Month rings, the 1x4 Signals
+    # stack, the velocity/divergence lines and the Market Regime expander — was
+    # REMOVED when the console landed, because the console renders all of it
+    # (meters for the rings, a 2x2 matrix for the tiles, signed meters for the
+    # velocity numbers, and the whole regime block). Keeping both would show
+    # every reading on this page twice.
+    #
+    # These two survive because the console has no room for them: the component
+    # breakdown is a 520px table and the trend detail is a per-horizon
+    # sub-score dump. They are what its "COMPONENTS →" and "TREND DETAIL →"
+    # captions refer to.
+    with ui.row().classes("w-full items-center gap-2 q-mt-sm"):
+        with ui.button("Components", icon="table_view").props("flat dense") as comp_btn:
+            with ui.menu().props("no-parent-event") as comp_menu:
+                comp_box = ui.column().classes("q-pa-md min-w-[520px]")
+        # Press-and-hold: shown while the mouse button is down, closed on release.
+        comp_btn.on("mousedown", lambda: comp_menu.open())
+        comp_btn.on("mouseup", lambda: comp_menu.close())
+        comp_btn.on("mouseleave", lambda: comp_menu.close())
+        with ui.button("Trend Detail", icon="insights").props("flat dense") as trend_btn:
+            with ui.menu().props("no-parent-event") as trend_menu:
+                trend_detail_box = ui.column().classes("q-pa-md text-sm min-w-[240px]")
+        trend_btn.on("mousedown", lambda: trend_menu.open())
+        trend_btn.on("mouseup", lambda: trend_menu.close())
+        trend_btn.on("mouseleave", lambda: trend_menu.close())
 
-    regime_exp.on_value_change(
-        lambda e: ui.timer(0.05, _reflow_regime_chart, once=True) if e.value else None)
-
-    ui.separator().classes("q-my-md")
     # Daily Sentiment & Trend — two value-colorized 2-min intraday series
     # (rolling last 5 trading days), expanded by default. Replaces the old
     # 30-Day History composite chart + rolling/velocity/divergence text.
@@ -1324,17 +1201,13 @@ def render():
         live = state.get("live")
         snaps = state["snaps"]
         if not live and not snaps:
-            bias_lbl.text = "Waiting for sentiment service…"
+            # Nothing published yet — the console renders its own waiting state
+            # rather than an empty frame.
+            console_page.apply(console_root, {})
             return
         latest = live or snaps[-1]
         comp = latest.get("composite") or {}
         total = _safe_float(comp.get("total_score"))
-        # Rings repaint by reassigning ``.content`` (a NiceGUI BindableProperty
-        # whose on_change pushes the new innerHTML) — no element rebuild.
-        sent_ring.content = ring_svg(sentiment_arcs(live, snaps), uid="sent")
-        bias_lbl.text = f"{total:.2f} · {comp.get('bias', '')}"
-        bias_lbl.classes(remove=SENT_TEXT_CLASSES, add=bias_text_class(comp.get('bias')))
-        sub_lbl.text = f"Confidence {_safe_float(comp.get('aggregate_confidence')):.0%}"
         # Prior series: when showing live, today=live and the prior series is
         # the full backfill (all completed sessions); when showing backfill,
         # exclude the last (it's "today").
@@ -1347,23 +1220,25 @@ def render():
             band_labels = (derived.get("size", "—"), derived.get("bias", "—"),
                            derived.get("signal", "—"))
         t = tiles(latest, prev_total, band_labels)
-        # Per-tile tone swap. Each element type carries its OWN remove-set (the
-        # full finite tone vocabulary) so repeated repaints can never stack two
-        # conflicting colors on one element.
-        for row in signal_tile_rows(t, prev_total):
-            tkey, tone = row["key"], TONE_CLASSES[row["tone"]]
-            tile_lbls[tkey].text = row["value"]
-            tile_lbls[tkey].classes(remove=TONE_TEXT_CLASSES, add=tone["text"])
-            tile_cards[tkey].classes(remove=TONE_TILE_CLASSES, add=tone["tile"])
-            tile_rules[tkey].classes(remove=TONE_RULE_CLASSES, add=tone["rule"])
-            tile_dots[tkey].classes(remove=TONE_DOT_CLASSES, add=tone["dot"])
-        vel = velocity_lines(derived)
-        vel_lbl.text = vel["text"]
-        vel_lbl.set_visibility(bool(vel["text"]))
-        vel_flag_lbl.text = vel["flag"]
-        vel_flag_lbl.set_visibility(bool(vel["flag"]))
-        div_lbl.text = vel["divergence"]
-        div_lbl.set_visibility(bool(vel["divergence"]))
+        # The console repaints from the SAME derived values the rest of the page
+        # uses, so the two halves can never disagree about a number.
+        _trend = derived.get("trend") or {}
+        console_page.apply(console_root, {
+            "sent_arcs": sentiment_arcs(live, snaps),
+            "trend_arcs": trend_arcs(derived),
+            "bias": comp.get("bias"),
+            "total": f"{total:.2f}",
+            "confidence": _safe_float(comp.get("aggregate_confidence"), None),
+            "trend_short": _TREND_SHORT.get(_trend.get("state"), ""),
+            "trend_verdict": _trend.get("label"),
+            "trend_guidance": _trend.get("description"),
+            "signal_rows": signal_tile_rows(t, prev_total),
+            "velocity_values": (derived.get("velocity") or {}).get("values"),
+            "divergence_detail": derived.get("divergence_detail"),
+            "regime": state.get("regime") or {},
+            "regime_points": state.get("regime_points") or [],
+            "as_of": state.get("composite_at"),
+        })
         rotation_value, sector_value = _comp_context()
         _render_components(latest, rotation_value, sector_value)
         pts = state.get("intraday") or []
@@ -1371,29 +1246,8 @@ def render():
         sent_intraday_plot.update()
         trend_intraday_plot.options = build_trend_intraday_figure(pts)
         trend_intraday_plot.update()
-        # Market Regime — headline + transition + the stacked membership mix.
-        # Reactive labels swap classes via remove/add so repeated repaints can't
-        # stack conflicting text colors (the Tailwind-first house rule).
-        reg = state.get("regime") or {}
-        r_label, r_conf, r_cls = regime_headline_parts(reg)
-        regime_lbl.text = r_label
-        regime_lbl.classes(remove=REGIME_TEXT_CLASSES, add=r_cls)
-        regime_conf_lbl.text = r_conf
-        regime_trans_lbl.text = regime_transition_text(reg)
-        regime_why.clear()
-        with regime_why:
-            for line in regime_evidence_rows(reg):
-                ui.label(line).classes(
-                    "text-xs opacity-70 rounded px-2 py-[2px] bg-[#1b2233]")
-        regime_plot.options = build_regime_mix_figure(state.get("regime_points") or [])
-        regime_plot.update()
         trend = derived.get("trend")
-        trend_ring.content = ring_svg(trend_arcs(derived), uid="trend")
         if trend:
-            committed = trend.get("state")
-            regime_badge.text = trend.get("label", "")
-            regime_badge.classes(remove=SENT_TEXT_CLASSES, add=trend_text_class(committed))
-            regime_desc.text = trend.get("description", "")
             trend_detail_box.clear()
             with trend_detail_box:
                 ui.label(
@@ -1419,14 +1273,14 @@ def render():
                     for line in evidence:
                         ui.label(str(line)).classes("text-sm")
         else:
-            # These two clears are REPAINT-only semantics: on a fresh page the
-            # labels are already empty, so they matter solely when a repaint
-            # follows a paint that HAD a trend. derived.trend comes from a
-            # module-level holder in sentiment_svc and can go absent on a restart
-            # or a defensive compute failure, which would otherwise strand a
-            # stale trend label on screen indefinitely.
-            regime_badge.text = ""
-            regime_desc.text = ""
+            # REPAINT-only semantics: on a fresh page the popup is already empty,
+            # so this matters solely when a repaint follows a paint that HAD a
+            # trend. derived.trend comes from a module-level holder in
+            # sentiment_svc and can go absent on a restart or a defensive compute
+            # failure, which would otherwise strand a stale detail dump on screen
+            # indefinitely. (The badge/description labels this used to clear are
+            # gone — the console's trend card carries the verdict now, and it is
+            # rebuilt wholesale on every repaint, so it cannot go stale.)
             trend_detail_box.clear()
             with trend_detail_box:
                 ui.label("—").classes("text-sm")
