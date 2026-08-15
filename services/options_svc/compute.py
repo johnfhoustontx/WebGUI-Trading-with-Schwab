@@ -18,6 +18,7 @@ import copy
 import datetime as _dt
 import json as _json
 import logging
+import math
 import sys
 import threading
 from zoneinfo import ZoneInfo
@@ -1783,6 +1784,90 @@ def _crop_gamma_views(views, spot, n_side=GAMMA_N_SIDE):
     return views
 
 
+# ── Premium Divergence strike ladder ────────────────────────────────────────
+# Half-width of the ladder: 5 below + spot + 5 above = the spec's 11 rows.
+PREM_LADDER_N_SIDE = 5
+
+
+def _finite(value):
+    """A finite float, or None. Rejects bools (``True`` is an ``int``, so an
+    unguarded flag would read as a premium of $1) and nan/inf, which survive the
+    JSON round-trip through Redis and would render as a blank or an infinitely
+    long bar rather than as an obvious error."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    value = float(value)
+    return value if math.isfinite(value) else None
+
+
+def _ladder_cells(grid):
+    """``{strike: cell}`` → ``{float strike: (call, put)}``, unusable entries dropped.
+
+    Strike keys are coerced because grids stored in the LEGACY JSON format
+    round-trip their float keys as STRINGS — the same trap ``_refloat_keys``
+    exists for on the Greek grids. A cell missing either side is skipped rather
+    than zero-filled: zero is a real reading here ("nothing traded this side"),
+    so a filled row would be indistinguishable from a genuine one.
+    """
+    out = {}
+    if not isinstance(grid, dict):
+        return out
+    for raw_strike, cell in grid.items():
+        try:
+            strike = float(raw_strike)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(strike) or not isinstance(cell, dict):
+            continue
+        call, put = _finite(cell.get("call")), _finite(cell.get("put"))
+        if call is None or put is None:
+            continue
+        out[strike] = (call, put)
+    return out
+
+
+def prem_ladder(rows, n_side=PREM_LADDER_N_SIDE):
+    """``load_date_with_grid(…, "prem")`` rows → the panel's scrubbable ladder.
+
+    ``[{"ts", "spot", "rows": [[strike, call_$, put_$], …]}, …]``, ts-ascending,
+    each entry cropped to the ±``n_side`` strikes around **that row's own spot**.
+
+    Centring per row rather than on the latest spot is the point: the ladder
+    answers "premium by strike where spot was THEN", so a session-wide centre
+    would slide every earlier ladder off the money on a trending day — the day
+    the panel is most worth reading. It also keeps the payload flat at
+    ~(2·n_side+1) rows per timestamp instead of the whole chain.
+
+    ``net`` is deliberately NOT transmitted: it is one subtraction in the
+    browser, and shipping it would grow the payload by a third for a value the
+    scrub recomputes anyway.
+
+    PURE and TOTAL — a malformed row, an unreadable grid or a row with no usable
+    spot is skipped, never raised on. A row with no centre is dropped outright:
+    an uncentred ladder would put arbitrary wing strikes under a header that
+    says "premium by strike @ <time>".
+    """
+    out = []
+    for row in rows or ():
+        try:
+            ts, spot, grid = row[0], row[1], row[6]
+        except (TypeError, IndexError, KeyError):
+            continue
+        ts = _finite(ts)
+        spot = _finite(spot)
+        if ts is None or spot is None:
+            continue
+        cells = _ladder_cells(grid)
+        if not cells:
+            continue
+        keep = _window_around(cells.keys(), spot, n_side)
+        picked = [[k, cells[k][0], cells[k][1]] for k in sorted(cells) if k in keep]
+        if picked:
+            out.append({"ts": int(ts), "spot": spot, "rows": picked})
+    out.sort(key=lambda e: e["ts"])
+    return out
+
+
 # Session-history memo for gamma_snapshot: decoded heatmap rows per
 # (symbol, view), valid for ONE session date. gamma_snapshot runs every minute
 # during RTH (the 1-min collector branch + the page timer); re-loading and
@@ -2043,7 +2128,7 @@ def gamma_snapshot(symbol: str, chain=None) -> dict | None:
         except Exception:
             return []
 
-    flow, hedge_history = [], []
+    flow, hedge_history, ladder = [], [], []
     try:
         views = {}
         for vname, (idx, vstr) in _GAMMA_VIEWS.items():
@@ -2102,6 +2187,24 @@ def gamma_snapshot(symbol: str, chain=None) -> dict | None:
             except Exception:
                 log.debug("hedge history load failed", exc_info=True)
                 hedge_history = []
+            # Per-strike premium ladder for the Premium Divergence panel — the
+            # "prem" view the collector writes alongside the four Greek views.
+            # Same connection, same RTH window and same session date as the flow
+            # series, so the ladder and the cursor share one clock.
+            #
+            # Routed through the SAME append-only memo as the four Greek views —
+            # it is generic in the view string, and this read has exactly the
+            # property the memo exists for: gamma_snapshot runs every minute, and
+            # a cold read re-decodes the whole session's grids each time. Rows
+            # are only ever read here (prem_ladder builds new lists), so the memo
+            # contract — callers must not mutate the rows they receive — holds.
+            try:
+                ladder = prem_ladder(_rth_only(
+                    _history_rows_incremental(gh, hist_conn, symbol, "prem",
+                                              session_date), rth))
+            except Exception:
+                log.debug("premium ladder load failed", exc_info=True)
+                ladder = []
     finally:
         if hist_conn is not None:
             try:
@@ -2135,7 +2238,8 @@ def gamma_snapshot(symbol: str, chain=None) -> dict | None:
 
     return {"symbol": symbol, "spot": spot, "dte": dte,
             "views": views, "term": term, "flow": flow,
-            "projected_flip": projected_flip, "hedge_history": hedge_history}
+            "projected_flip": projected_flip, "hedge_history": hedge_history,
+            "prem_ladder": ladder}
 
 
 # ── Intraday GEX history collection (Tier-2 owner) ──────────────────────────

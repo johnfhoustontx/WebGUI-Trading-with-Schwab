@@ -752,37 +752,6 @@ def test_history_dates_distinct_newest_first():
     assert g.history_dates({"briefings": []}) == []
 
 
-def test_flow_figure_builds_stacked_panels():
-    from pages.options import gamma as g
-    rows = [
-        {"ts": 1783000000, "spot": 500.0, "call_vol": 100, "put_vol": 80,
-         "call_prem": 2.0e6, "put_prem": 1.5e6},
-        {"ts": 1783000120, "spot": 501.0, "call_vol": 140, "put_vol": 130,
-         "call_prem": 3.0e6, "put_prem": 2.8e6},
-    ]
-    fig = g.flow_figure(rows)
-    names = [s["name"] for s in fig["series"]]
-    assert names == ["Price", "Call premium", "Put premium", "Net premium (call − put)"]
-    assert len(fig["yAxis"]) == 3                       # price / premium / net panels
-    call = next(s for s in fig["series"] if s["name"] == "Call premium")
-    assert call["data"][0] == [0, 2.0]                  # 2.0e6 -> 2.0 $M
-    net = next(s for s in fig["series"] if s["name"].startswith("Net"))
-    assert net["data"][0] == [0, 0.5] and net["type"] == "area"   # (2.0-1.5)/1e6
-
-
-def test_flow_figure_skips_missing_premium():
-    from pages.options import gamma as g
-    rows = [
-        {"ts": 1, "spot": 500.0, "call_prem": None, "put_prem": None},   # pre-Phase-1
-        {"ts": 2, "spot": 501.0, "call_prem": 1.0e6, "put_prem": 0.4e6},
-    ]
-    fig = g.flow_figure(rows)
-    call = next(s for s in fig["series"] if s["name"] == "Call premium")
-    assert call["data"] == [[1, 1.0]]                   # only the row that has premium
-    price = next(s for s in fig["series"] if s["name"] == "Price")
-    assert len(price["data"]) == 2                      # price present for both
-
-
 def test_flow_summary_text_variants():
     from pages.options import gamma as g
     assert "No flow data" in g.flow_summary_text([])
@@ -1329,12 +1298,12 @@ def test_net_prem_every_group_symbol_has_a_distinct_color():
 
 def test_net_prem_color_is_stable_across_selections():
     # A symbol's colour is a property of the SYMBOL, never of the selection --
-    # SPY is the same line colour whether you plot 2 names or 20.
-    small = gamma.net_prem_figure(_np_series(), ["SPY"])
-    big = gamma.net_prem_figure(_np_series(), ["QQQ", "SPY"])
-    spy_small = [s for s in small["series"] if s["name"] == "SPY"][0]
-    spy_big = [s for s in big["series"] if s["name"] == "SPY"][0]
-    assert spy_small["color"] == spy_big["color"] == gamma.NET_PREM_COLORS["SPY"]
+    # SPY is the same line colour whether you plot 2 names or 20. Keyed by
+    # symbol, so this holds by construction; asserted anyway because a
+    # palette-by-index would recolour every line on each checkbox tick.
+    assert gamma.net_prem_color("SPY") == gamma.NET_PREM_COLORS["SPY"]
+    assert gamma.net_prem_color("QQQ") != gamma.net_prem_color("SPY")
+    assert gamma.net_prem_color("NOTATICKER") == gamma.NET_PREM_FALLBACK
 
 
 def test_net_prem_color_falls_back_for_an_unknown_symbol():
@@ -1361,26 +1330,6 @@ def test_net_prem_value_is_total_over_malformed_rows():
                 [1, float("nan"), 2.0], [1, float("inf"), 2.0], 42):
         assert gamma.net_prem_value(bad, "dollars") is None, bad
         assert gamma.net_prem_value(bad, "skew") is None, bad
-
-
-def test_net_prem_figure_x_axis_is_the_union_of_selected_timestamps():
-    fig = gamma.net_prem_figure(_np_series(), ["QQQ", "SPY"])
-    assert fig["xAxis"]["categories"] == [gamma._fmt_ts(t)
-                                          for t in (_T1, _T2, _T3)]
-    by = {s["name"]: s for s in fig["series"]}
-    # QQQ spans the whole union; SPY started late, so it begins at index 1 --
-    # the union is what keeps the two lines on the same clock.
-    assert [p[0] for p in by["QQQ"]["data"]] == [0, 1, 2]
-    assert [p[0] for p in by["SPY"]["data"]] == [1, 2]
-    assert by["SPY"]["data"][0][1] == -4.0
-
-
-def test_net_prem_figure_tooltip_is_not_shared_and_legend_is_on():
-    fig = gamma.net_prem_figure(_np_series(), ["QQQ", "SPY"])
-    # 20+ series under one shared tooltip is an unreadable wall.
-    assert fig["tooltip"]["shared"] is False
-    assert fig["legend"]["enabled"] is True
-    assert fig["yAxis"]["plotLines"][0]["value"] == 0
 
 
 def test_net_prem_group_symbols_returns_one_group():
@@ -1488,64 +1437,6 @@ def test_only_this_group_is_wired_to_the_button():
     only = only[:only.index("\n    np_group_tabs.on_value_change")]
     # It must read the ACTIVE tab, not a hardcoded group.
     assert "net_prem_only_group(_np_current(), np_group_tabs.value)" in only, only
-
-
-def test_net_prem_figure_legend_sits_above_the_plot():
-    """The legend must not share the bottom with the rotated time labels.
-
-    Series count here is user-driven (up to 28), so the legend wraps to several
-    rows. Highcharts reserves bottom space for the legend OR the axis labels, not
-    both — so a bottom legend plus a pinned marginBottom overruns the -45° time
-    labels and the axis title, which is what happened live at 15 symbols.
-    """
-    fig = gamma.net_prem_figure(_np_series(), ["QQQ", "SPY"])
-    assert fig["legend"]["verticalAlign"] == "top"
-    # A pinned bottom margin would re-break it however the legend is aligned.
-    assert "marginBottom" not in fig["chart"]
-
-
-def test_net_prem_figure_y_axis_title_follows_the_mode():
-    assert "$M" in gamma.net_prem_figure(
-        _np_series(), ["QQQ"], "dollars")["yAxis"]["title"]["text"]
-    assert "%" in gamma.net_prem_figure(
-        _np_series(), ["QQQ"], "skew")["yAxis"]["title"]["text"]
-
-
-def test_net_prem_figure_skips_a_selected_symbol_with_no_data():
-    fig = gamma.net_prem_figure(_np_series(), ["QQQ", "XLE"])
-    assert [s["name"] for s in fig["series"]] == ["QQQ"]
-
-
-def test_net_prem_figure_empty_selection_renders_an_empty_chart():
-    for sel in ([], None):
-        fig = gamma.net_prem_figure(_np_series(), sel)
-        assert fig["series"] == [] and fig["xAxis"]["categories"] == []
-
-
-def test_net_prem_figure_dedupes_the_selection():
-    fig = gamma.net_prem_figure(_np_series(), ["SPY", "SPY", "QQQ"])
-    assert [s["name"] for s in fig["series"]] == ["SPY", "QQQ"]
-
-
-def test_net_prem_figure_survives_every_malformed_series_shape():
-    # Each of these PASSES NetPremiumSnapshot validation (verified), so the page
-    # really can receive them. The good symbol must still plot in every case.
-    for bad in ("notalist", [[1]], [None], [[1, "x", "y"]], 42, {}, None,
-                [[1, 2, 3], "junk"]):
-        series = {"QQQ": _np_series()["QQQ"], "SPY": bad}
-        fig = gamma.net_prem_figure(series, ["QQQ", "SPY"])
-        names = [s["name"] for s in fig["series"]]
-        assert "QQQ" in names, bad
-        assert gamma.net_prem_summary_text(series, ["QQQ", "SPY"])
-
-
-def test_net_prem_figure_skips_unreportable_skew_points():
-    # (0, 0) is a REAL observation in dollars (plots as 0) but has no skew.
-    series = {"SPY": [[_T1, 0.0, 0.0], [_T2, 3.0e6, 1.0e6]]}
-    assert len(gamma.net_prem_figure(
-        series, ["SPY"], "dollars")["series"][0]["data"]) == 2
-    skew = gamma.net_prem_figure(series, ["SPY"], "skew")["series"][0]["data"]
-    assert skew == [[1, 50.0]]
 
 
 def test_net_prem_missing_names_selected_symbols_without_rows():
@@ -1674,11 +1565,9 @@ def test_net_prem_rows_are_sorted_by_timestamp():
     # chart SILENTLY rather than raising, and every other fixture here is already
     # in order -- so this is the only thing holding it.
     desc = {"SPY": [[_T3, 5.0e6, 1.0e6], [_T1, 1.0e6, 3.0e6], [_T2, 2.0e6, 2.0e6]]}
-    fig = gamma.net_prem_figure(desc, ["SPY"])
-    assert fig["xAxis"]["categories"] == [gamma._fmt_ts(t) for t in (_T1, _T2, _T3)]
-    data = fig["series"][0]["data"]
-    assert [p[0] for p in data] == [0, 1, 2]
-    assert [p[1] for p in data] == [-2.0, 0.0, 4.0]
+    rows = gamma._np_rows(desc, "SPY")
+    assert [ts for ts, _ in rows] == [_T1, _T2, _T3]
+    assert [gamma.net_prem_value(row) for _ts, row in rows] == [-2.0, 0.0, 4.0]
     # ...and "latest" must be the NEWEST point, not the last one listed.
     assert "+$4.0M" in gamma.net_prem_summary_text(desc, ["SPY"])
 
@@ -1689,7 +1578,7 @@ def test_net_prem_missing_is_mode_aware_and_agrees_with_the_summary():
     series = {"SPY": [[_T1, 0.0, 0.0]]}
     assert gamma.net_prem_missing(series, ["SPY"], "dollars") == []
     assert gamma.net_prem_missing(series, ["SPY"], "skew") == ["SPY"]
-    assert gamma.net_prem_figure(series, ["SPY"], "skew")["series"] == []
+    assert gamma.net_prem_value(series["SPY"][0], "skew") is None
     # ONE definition of missing -- the header cannot contradict the chart.
     assert "no data yet: SPY" in gamma.net_prem_summary_text(series, ["SPY"], "skew")
     assert "no data yet" not in gamma.net_prem_summary_text(series, ["SPY"], "dollars")
@@ -1719,8 +1608,7 @@ def test_net_prem_selection_drops_junk_and_unknown_entries():
     series = _np_series()
     for junk in ([123, "SPY"], [None, "SPY"], [{"a": 1}, "SPY"], ["FB", "SPY"]):
         assert gamma.net_prem_missing(series, junk) == [], junk
-        assert [s["name"] for s in
-                gamma.net_prem_figure(series, junk)["series"]] == ["SPY"], junk
+        assert gamma._np_selected(junk) == ["SPY"], junk
         # A non-str would raise TypeError at ", ".join(missing) and 500 the page.
         assert gamma.net_prem_summary_text(series, junk), junk
     # A stale saved ticker no longer in the groups is dropped too, so a caller's
@@ -1776,30 +1664,14 @@ def test_view_order_puts_net_prem_between_flow_and_term():
         assert v in order
 
 
-def test_chart_kind_separates_flow_from_net_prem():
-    """THE trap: both are ``chart.type == "line"``, so keying the recreate-vs-
-    update decision on the type alone would take the in-place path and merge
-    Net Prem's single yAxis dict onto Flow's 3 banded axes — leaving two
-    orphaned axes painted and the plot squeezed into the top 62%."""
-    flow = gamma.flow_figure([{"ts": 1, "spot": 1.0, "call_prem": 2.0, "put_prem": 1.0}])
-    netp = gamma.net_prem_figure({"SPY": [[1, 2.0, 1.0]]}, ["SPY"])
-    assert flow["chart"]["type"] == netp["chart"]["type"] == "line"   # the trap
-    assert isinstance(flow["yAxis"], list) and isinstance(netp["yAxis"], dict)
-    assert gamma.chart_kind(flow) != gamma.chart_kind(netp)
-
-
 def test_chart_kind_is_stable_across_same_view_repaints():
-    """A Net Prem repaint with a different SELECTION (so a different series
-    count) must stay the same kind — else every checkbox tick would tear the
-    element down and flash."""
-    series = {"SPY": [[1, 2.0, 1.0]], "QQQ": [[1, 3.0, 1.0]], "$SPX": [[1, 1.0, 4.0]]}
-    one = gamma.net_prem_figure(series, ["SPY"])
-    three = gamma.net_prem_figure(series, ["SPY", "QQQ", "$SPX"])
-    assert len(one["series"]) != len(three["series"])
-    assert gamma.chart_kind(one) == gamma.chart_kind(three)
-    # ...and Net Prem in the two modes is one kind too (only the axis title moves).
-    assert gamma.chart_kind(gamma.net_prem_figure(series, ["SPY"], "skew")) == \
-        gamma.chart_kind(one)
+    """A repaint of the SAME view with different data must stay the same kind —
+    else every refresh would tear the element down and flash."""
+    thin = {"spot": 100.0, "gex": {100.0: {"net": 1.0}}}
+    wide = {"spot": 100.0, "gex": {99.0: {"net": 1.0}, 100.0: {"net": 2.0},
+                                   101.0: {"net": -1.0}}}
+    assert gamma.chart_kind(gamma.bar_figure(thin, 100.0, view="GEX")) == \
+        gamma.chart_kind(gamma.bar_figure(wide, 100.0, view="GEX"))
 
 
 # One representative figure builder per VIEW. Registered here rather than
@@ -1817,8 +1689,6 @@ _VIEW_FIGS = {
                                     view="DEX"),
     "Vanna": lambda: gamma.bar_figure({"spot": 100.0, "gex": {100.0: {"net": 1.0}}}, 100.0,
                                       view="Vanna"),
-    "Flow": lambda: gamma.flow_figure([]),
-    "Net Prem": lambda: gamma.net_prem_figure({}, []),
     "Term": lambda: gamma.term_heatmap({"expirations": ["2026-08-07"],
                                         "cells": {"100.0": {"2026-08-07": 1.0}}}),
 }
@@ -1826,13 +1696,20 @@ _VIEW_FIGS = {
 # Views that SHARE a figure builder must share a kind (no needless recreate);
 # views with DIFFERENT builders must not collide (no merge leak).
 _VIEW_BUILDER = {"GEX": "bars", "Charm": "bars", "DEX": "bars", "Vanna": "bars",
-                 "Flow": "flow", "Net Prem": "netprem", "Term": "term"}
+                 "Term": "term"}
+
+# Flow and Net Prem are NOT Highcharts views: they render as flow_panels console
+# fragments into a ui.html element, so chart_kind never sees them and _set_chart
+# is never called for them. Listed explicitly rather than simply omitted, so the
+# completeness guard below still fails on a NEW view that nobody registered.
+_PANEL_VIEWS = {"Flow", "Net Prem"}
 
 
 def test_every_view_is_registered_for_the_chart_kind_guard():
-    """A new subtab must be registered here, so the guards below cover it."""
-    assert set(_VIEW_FIGS) == set(gamma._VIEW_ORDER)
-    assert set(_VIEW_BUILDER) == set(gamma._VIEW_ORDER)
+    """A new subtab must be registered here (or declared a panel view), so the
+    guards below cover it."""
+    assert set(_VIEW_FIGS) | _PANEL_VIEWS == set(gamma._VIEW_ORDER)
+    assert set(_VIEW_BUILDER) | _PANEL_VIEWS == set(gamma._VIEW_ORDER)
 
 
 def test_chart_kind_is_distinct_across_every_pair_of_builders():

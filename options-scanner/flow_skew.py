@@ -238,3 +238,74 @@ def index_call_put_premium(chain):
         return None
 
     return {"call_prem": _sum_premium(call_map), "put_prem": _sum_premium(put_map)}
+
+
+def _accumulate_by_strike(exp_map, side, out):
+    """Add one side's ``Σ mark × totalVolume × 100`` into ``out`` per strike.
+
+    Keyed off the **map key**, not the contract's own ``strike`` field: the key
+    is authoritative and always present, while the field can be absent or (on a
+    malformed payload) disagree — which would scatter one strike's premium
+    across several ladder rows. An unparseable key skips that whole strike.
+    """
+    if not isinstance(exp_map, dict):
+        return
+    for strike_map in exp_map.values():
+        if not isinstance(strike_map, dict):
+            continue
+        for raw_strike, contracts in strike_map.items():
+            strike = _as_float(raw_strike)
+            if strike is None:
+                continue
+            if not isinstance(contracts, (list, tuple)):
+                continue
+            for c in contracts:
+                if not isinstance(c, dict):
+                    continue
+                vol = _as_float(c.get("totalVolume"))
+                mark = _contract_mark(c)
+                if vol and mark and vol > 0:
+                    cell = out.setdefault(strike, {"call": 0.0, "put": 0.0})
+                    cell[side] += mark * vol * _CONTRACT_MULTIPLIER
+
+
+def premium_by_strike(chain):
+    """Traded PREMIUM ($) split call vs put, **per strike**: ``{strike: cell}``.
+
+    The per-strike companion to ``index_call_put_premium`` — same inputs, same
+    ``Σ mark × totalVolume × 100`` estimate, same unsigned daily-cumulative
+    caveat (Schwab publishes no tape, so this is not a buy/sell split). It feeds
+    the Premium Divergence panel's strike ladder.
+
+    Strikes ACCUMULATE across expirations: the collector fetches today → +7d, so
+    one strike legitimately appears in several expiration maps, and the ladder is
+    a per-strike read.
+
+    **The return shape is not a free choice.** Each cell is exactly
+    ``{"call": float, "put": float, "net": float}`` because the result is stored
+    verbatim as a ``view="prem"`` grid in ``gex_history_db``, whose columnar
+    float32 packer gates on precisely that shape — anything else silently falls
+    back to the slower JSON path rather than failing.
+
+    A strike with volume but no usable price on either side is OMITTED rather
+    than emitted as an all-zero row: zero is a real reading here ("nothing traded
+    this side"), so a padded row would be indistinguishable from one.
+
+    Returns ``None`` when there is no chain at all (mirroring
+    ``index_call_put_premium``), ``{}`` when the maps are present but empty.
+    Never raises.
+    """
+    if not isinstance(chain, dict):
+        return None
+
+    call_map = chain.get(_CALL_MAP)
+    put_map = chain.get(_PUT_MAP)
+    if not isinstance(call_map, dict) and not isinstance(put_map, dict):
+        return None
+
+    acc = {}
+    _accumulate_by_strike(call_map, "call", acc)
+    _accumulate_by_strike(put_map, "put", acc)
+    return {strike: {"call": cell["call"], "put": cell["put"],
+                     "net": cell["call"] - cell["put"]}
+            for strike, cell in sorted(acc.items())}

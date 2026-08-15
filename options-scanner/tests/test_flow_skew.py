@@ -302,3 +302,121 @@ def test_premium_defensive_empty_and_none():
         "call_prem": 0.0, "put_prem": 0.0}
     assert flow_skew.index_call_put_premium(None) is None
     assert flow_skew.index_call_put_premium({}) is None
+
+
+#############################################
+# premium_by_strike
+#############################################
+# The per-strike companion to index_call_put_premium. Its return shape is not a
+# free choice: it is written straight into gex_history_db as a ``view="prem"``
+# grid, whose columnar float32 packer accepts EXACTLY three plain numbers per
+# cell ({call, put, net}). A test below pins that, because drifting off it would
+# not fail loudly — it would silently fall back to the slower JSON path.
+
+def _sc(strike, vol, mark=None, bid=None, ask=None):
+    """One contract at ``strike``; mirrors _pc but lets the strike vary."""
+    d = {"strike": strike, "totalVolume": vol}
+    if mark is not None:
+        d["mark"] = mark
+    if bid is not None:
+        d["bid"] = bid
+    if ask is not None:
+        d["ask"] = ask
+    return d
+
+
+def test_premium_by_strike_splits_call_and_put_per_strike():
+    chain = {
+        "callExpDateMap": {"2026-07-11:3": {
+            "100.0": [_sc(100.0, 10, mark=2.0)],
+            "105.0": [_sc(105.0, 5, mark=1.0)],
+        }},
+        "putExpDateMap": {"2026-07-11:3": {
+            "100.0": [_sc(100.0, 4, mark=3.0)],
+        }},
+    }
+    out = flow_skew.premium_by_strike(chain)
+    assert out[100.0] == {"call": 2000.0, "put": 1200.0, "net": 800.0}
+    # A strike traded on one side only still reports the other side as 0.0 —
+    # absent is not unknown here, it is "nothing traded".
+    assert out[105.0] == {"call": 500.0, "put": 0.0, "net": 500.0}
+
+
+def test_premium_by_strike_accumulates_across_expirations():
+    # The collector fetches today -> +7d, so one strike legitimately appears in
+    # several expiration maps. The ladder is a per-STRIKE read, so they sum.
+    chain = {
+        "callExpDateMap": {
+            "2026-07-11:0": {"100.0": [_sc(100.0, 10, mark=2.0)]},
+            "2026-07-18:7": {"100.0": [_sc(100.0, 3, mark=1.0)]},
+        },
+        "putExpDateMap": {},
+    }
+    assert flow_skew.premium_by_strike(chain)[100.0]["call"] == 10 * 2.0 * 100 + 3 * 1.0 * 100
+
+
+def test_premium_by_strike_totals_match_index_call_put_premium():
+    """The two functions must never disagree — the rail's session totals and the
+    ladder's columns are read side by side, and a reader would see it."""
+    chain = {
+        "callExpDateMap": {"e": {"100.0": [_sc(100.0, 10, mark=2.0)],
+                                 "105.0": [_sc(105.0, 5, bid=0.5, ask=1.5)]}},
+        "putExpDateMap": {"e": {"95.0": [_sc(95.0, 4, mark=3.0)],
+                                "100.0": [_sc(100.0, 1, mark=1.0)]}},
+    }
+    ladder = flow_skew.premium_by_strike(chain)
+    totals = flow_skew.index_call_put_premium(chain)
+    assert sum(c["call"] for c in ladder.values()) == totals["call_prem"]
+    assert sum(c["put"] for c in ladder.values()) == totals["put_prem"]
+
+
+def test_premium_by_strike_cells_are_packer_shaped():
+    chain = {"callExpDateMap": {"e": {"100.0": [_sc(100.0, 10, mark=2.0)]}},
+             "putExpDateMap": {}}
+    for strike, cell in flow_skew.premium_by_strike(chain).items():
+        assert isinstance(strike, float)
+        assert set(cell) == {"call", "put", "net"}
+        # bools are ints in Python and would sail through a bare isinstance
+        # check, so exclude them explicitly — the packer's own gate does too.
+        assert all(type(v) is float for v in cell.values())
+
+
+def test_premium_by_strike_prefers_map_key_over_contract_strike():
+    # The map key is the authoritative strike; a contract's own field can be
+    # absent or disagree. Keying off the contract would scatter one strike's
+    # premium across several ladder rows.
+    chain = {"callExpDateMap": {"e": {"100.0": [{"totalVolume": 10, "mark": 2.0}]}},
+             "putExpDateMap": {}}
+    assert list(flow_skew.premium_by_strike(chain)) == [100.0]
+
+
+def test_premium_by_strike_skips_unusable_rows():
+    chain = {
+        "callExpDateMap": {"e": {
+            "100.0": [_sc(100.0, 10, mark=2.0), _sc(100.0, 0, mark=5.0),  # zero vol
+                      {"strike": 100.0, "totalVolume": 7}],               # no price
+            "notastrike": [_sc(1.0, 10, mark=2.0)],                       # bad key
+        }},
+        "putExpDateMap": {},
+    }
+    out = flow_skew.premium_by_strike(chain)
+    assert out == {100.0: {"call": 2000.0, "put": 0.0, "net": 2000.0}}
+
+
+def test_premium_by_strike_omits_strikes_that_traded_nothing():
+    """A strike with volume but no usable price contributes no row at all —
+    an all-zero row is indistinguishable from a real 0.0 and would pad the
+    ladder with noise."""
+    chain = {"callExpDateMap": {"e": {"100.0": [{"strike": 100.0, "totalVolume": 7}]}},
+             "putExpDateMap": {}}
+    assert flow_skew.premium_by_strike(chain) == {}
+
+
+def test_premium_by_strike_defensive():
+    assert flow_skew.premium_by_strike(None) is None
+    assert flow_skew.premium_by_strike({}) is None
+    assert flow_skew.premium_by_strike("nope") is None
+    assert flow_skew.premium_by_strike({"callExpDateMap": {}, "putExpDateMap": {}}) == {}
+    # A malformed map must degrade, not raise.
+    assert flow_skew.premium_by_strike(
+        {"callExpDateMap": {"e": "notamap"}, "putExpDateMap": None}) == {}

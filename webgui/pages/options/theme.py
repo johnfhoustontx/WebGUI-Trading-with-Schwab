@@ -203,6 +203,32 @@ _DEFAULTS = {
     # A dense notched "instrument" language scoped to ONE page. Source of truth:
     # the approved macro-board redesign spec + reference prototype. HEX ONLY;
     # alphas live in the token layer. Not surfaced in Settings → Appearance.
+    # ── Options Flow panels (the /options/gamma Flow + Net Prem views only) ──
+    # The Premium Divergence + Flow Field redesign. Page-scoped like [console]
+    # and [macro], and not surfaced in Settings → Appearance for the same reason.
+    #
+    # The call/put pair is DELIBERATELY identical to gamma.POS_COLOR/NEG_COLOR:
+    # these panels sit behind the same subtab strip as the plasma heatmap, and a
+    # cyan that meant "call" on one tab and something else on the next would be
+    # worse than no colour coding at all. Source: the 2026-08-15 handoff spec.
+    "flow": {
+        "call": "#35C8FF",       # call premium — the plasma positive
+        "put": "#FF4D8D",        # put premium — the plasma negative
+        "spot": "#EAF6FF",       # underlying price. Was yellow, which read as a
+                                 # THIRD premium series beside the other two.
+        "call_line": "#7FDCFF",  # the hairline drawn over the call glow
+        "put_line": "#FF86B3",
+        "call_deep": "#2A76E0",  # far stop of the call ribbon gradient
+        "put_deep": "#96247A",
+        "live": "#5EF0B8",       # the streaming pill + its pulsing dot
+        "panel_from": "#0B1A2C",  # 150deg panel wash, three stops
+        "panel_mid": "#060E1A",
+        "panel_to": "#04080F",
+        "title": "#E8F7FF",
+        "label": "#AECDE8",      # every muted label, used at several alphas
+        "ice": "#BEF8FF",        # chip rings, the cursor, the FLAT rule
+        "grid": "#78AAD2",       # gridlines (rendered at ~6% — a hair, not a rule)
+    },
     "macro": {
         "void": "#03060D", "panel": "#080D18", "tile": "#0A1020",
         "grid": "#0E1728", "edge": "#182741", "edge_hi": "#26405F",
@@ -724,6 +750,50 @@ CONSOLE_KEYFRAMES_CSS = """
 """
 
 
+# ── Options Flow panels (/options/gamma Flow + Net Prem) helpers ─────────────
+# These two views are built as ONE ``ui.html`` fragment each (SVG chart + chrome)
+# rather than from NiceGUI components, so they consume RAW HEXES, not Tailwind
+# token strings — a raw HTML-string fragment is the documented out-of-scope case
+# for the Tailwind-first rule (the same exemption the Calculator's P&L heatmap
+# and the Gamma Explain block already use). Alphas are applied at the use site,
+# so this stays a plain hex vocabulary the Settings colour contract could accept.
+_FLOW_KEYS = ("call", "put", "spot", "call_line", "put_line", "call_deep",
+              "put_deep", "live", "panel_from", "panel_mid", "panel_to",
+              "title", "label", "ice", "grid")
+
+
+def flow_colors(theme):
+    """The Options Flow panels' raw hexes, defaults filling anything missing.
+
+    Total: a malformed ``[flow]`` section (or none at all) yields the built-in
+    palette rather than raising — styling must never break a page whose whole
+    job is showing where the money went."""
+    section = theme.get("flow") if isinstance(theme, dict) else None
+    section = section if isinstance(section, dict) else {}
+    out = {}
+    for key in _FLOW_KEYS:
+        value = section.get(key)
+        out[key] = value if isinstance(value, str) and value.strip() \
+            else _DEFAULTS["flow"][key]
+    return out
+
+
+# The Flow panels' ONE ``ui.add_css`` escape-hatch. A keyframes animation
+# genuinely cannot be a utility class or an inline style — the same
+# justification CONSOLE_KEYFRAMES_CSS and the market ticker's marquee use.
+# Everything else on these panels is an inline style inside the fragment.
+#
+# ``.fx-pulse`` rather than reusing ``.con-pulse``: that one is injected only on
+# /sentiment, and a shared name across two page-scoped blocks would make either
+# page's animation silently depend on the other having been visited.
+FLOW_KEYFRAMES_CSS = """
+@keyframes fxPulseDot { 0%,100% { opacity: 1; transform: scale(1); }
+                        50% { opacity: .35; transform: scale(.72); } }
+.fx-pulse { animation: fxPulseDot 1.7s ease-in-out infinite; }
+.fx-panel { cursor: crosshair; }
+"""
+
+
 # ── Macro Board (/market) redesign helpers ───────────────────────────────────
 # Page-scoped, mirroring the console pattern: raw hexes for computed values +
 # a Tailwind token vocabulary + ONE ``ui.add_css`` escape-hatch block (clip-path
@@ -946,6 +1016,9 @@ CON_NEG = _CONSOLE_TOKENS["CON_NEG"]
 CON_WARN = _CONSOLE_TOKENS["CON_WARN"]
 CONSOLE_COLORS = console_colors(THEME)         # raw hexes for the SVG builders
 CONSOLE_FONT_HEAD_HTML = build_console_font_head_html(THEME)  # "" when no url
+
+# ── Options Flow panels (/options/gamma Flow + Net Prem) ────────────────────
+FLOW_COLORS = flow_colors(THEME)               # raw hexes for the SVG builders
 
 # ── Macro Board (/market) page-scoped exports ────────────────────────────────
 MACRO_COLORS = macro_colors(THEME)             # raw hexes + sat_ceiling

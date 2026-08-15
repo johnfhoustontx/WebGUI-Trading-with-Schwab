@@ -192,6 +192,36 @@ regime_crisis         = "#f2646b"
 font_family = "Rajdhani"
 font_url    = "https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&display=swap"
 
+[flow]                         # ── Options Flow panels (/options/gamma ONLY) ─
+# The Premium Divergence (Flow view) + Flow Field (Net Prem view) redesign.
+# Page-scoped like [console] and [macro], and NOT surfaced in Settings →
+# Appearance for the same reason: that editor's sections are single-kind.
+#
+# call/put are DELIBERATELY the same pair as the plasma heatmap's POS/NEG
+# colours. These panels sit behind the same subtab strip, so a cyan that meant
+# "call" on one tab and something else on the next would be worse than no
+# colour coding at all — change them together or not at all.
+#
+# The per-symbol line colours on Flow Field are NOT here: they live in
+# gamma.NET_PREM_COLORS, one fixed hue per symbol across all 28, pinned by tests
+# for mutual distinctness. A 15-colour section could not cover them.
+call       = "#35C8FF"         # call premium (= gamma POS_COLOR)
+put        = "#FF4D8D"         # put premium  (= gamma NEG_COLOR)
+spot       = "#EAF6FF"         # underlying price — white, not yellow: yellow
+                               # read as a third premium series
+call_line  = "#7FDCFF"         # hairline drawn over the call glow
+put_line   = "#FF86B3"
+call_deep  = "#2A76E0"         # far stop of the call ribbon gradient
+put_deep   = "#96247A"
+live       = "#5EF0B8"         # streaming pill + its pulsing dot
+panel_from = "#0B1A2C"         # 150deg panel wash, three stops
+panel_mid  = "#060E1A"
+panel_to   = "#04080F"
+title      = "#E8F7FF"
+label      = "#AECDE8"         # every muted label, used at several alphas
+ice        = "#BEF8FF"         # chip rings, the cursor, the FLAT rule
+grid       = "#78AAD2"         # gridlines, rendered at ~6% — a hair, not a rule
+
 [macro]                        # ── Macro Board redesign (/market ONLY) ──────
 # A dense "instrument panel" language scoped to ONE page: notched (clip-path)
 # panels + tiles, near-black ground, magnitude-scaled heat wash, flash-on-change.

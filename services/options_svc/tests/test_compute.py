@@ -5039,6 +5039,52 @@ def test_gamma_snapshot_hedge_history_degrades_to_empty(monkeypatch):
     assert compute.gamma_snapshot("$SPX")["hedge_history"] == []
 
 
+def test_gamma_snapshot_publishes_the_prem_ladder(monkeypatch):
+    """The Premium Divergence panel's strike ladder rides the gamma snapshot,
+    read from the collector's fifth view string."""
+    import sys as _sys
+    from services.options_svc import compute
+    _patch_gamma(monkeypatch, history=[(1, 5400.0, 3, 4, 5, 6, {5400.0: {"net": 1}})])
+
+    t0 = compute._rth_bounds(_GAMMA_TEST_SESSION)[0]
+    prem = [(t0 + 1, 5400.0, None, None, None, None,
+             {5395.0: {"call": 1.0e6, "put": 4.0e6},
+              5400.0: {"call": 9.0e6, "put": 2.0e6}})]
+
+    orig = _sys.modules["gex_history_db"].load_date_with_grid
+
+    def _by_view(conn, symbol, view, date=None, since_ts=None):
+        if view != "prem":
+            return orig(conn, symbol, view, date=date, since_ts=since_ts)
+        return [r for r in prem if since_ts is None or r[0] > since_ts]
+    _sys.modules["gex_history_db"].load_date_with_grid = _by_view
+
+    ladder = compute.gamma_snapshot("$SPX")["prem_ladder"]
+    assert ladder == [{"ts": t0 + 1, "spot": 5400.0,
+                       "rows": [[5395.0, 1.0e6, 4.0e6],
+                                [5400.0, 9.0e6, 2.0e6]]}]
+
+
+def test_gamma_snapshot_prem_ladder_degrades_to_empty(monkeypatch):
+    """The ladder is one section of one view; the heatmap the page is built
+    around must survive its loss."""
+    import sys as _sys
+    from services.options_svc import compute
+    _patch_gamma(monkeypatch, history=[(1, 5400.0, 3, 4, 5, 6, {5400.0: {"net": 1}})])
+
+    orig = _sys.modules["gex_history_db"].load_date_with_grid
+
+    def _boom(conn, symbol, view, date=None, since_ts=None):
+        if view == "prem":
+            raise RuntimeError("no such view")
+        return orig(conn, symbol, view, date=date, since_ts=since_ts)
+    _sys.modules["gex_history_db"].load_date_with_grid = _boom
+
+    snap = compute.gamma_snapshot("$SPX")
+    assert snap["prem_ladder"] == []
+    assert snap["views"]                      # the Greek views still built
+
+
 def test_build_gamma_read_carries_the_0dte_hedge_fields():
     """Explain must show the same 0-DTE drift the chart and the briefings do —
     snapshot_summary already carries it, build_gamma_read just has to pass it on."""

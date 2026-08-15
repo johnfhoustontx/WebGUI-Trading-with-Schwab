@@ -4,7 +4,100 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-08-15 (**Market Dashboard visual redesign — the "Macro Board"** — a
+**Last updated:** 2026-08-15 (**Options Flow redesign — Premium Divergence + Flow Field.** The
+`/options/gamma` **Flow** and **Net Prem** views are replaced by two dark-console panels built to a
+supplied spec, in the same visual system as the plasma heatmap. Design/plan:
+[design](plans/2026-08-15-options-flow-redesign-design.md) /
+[plan](plans/2026-08-15-options-flow-redesign-plan.md).
+
+**What the spec removed, and why it was right.** The floating tooltip sat on top of the data it
+described (→ a fixed right rail); the bottom legend duplicated information and, on Net Prem, wrapped
+into rows that collided with the rotated time labels — a live bug `net_prem_figure` carried a comment
+about (→ status chips above the plot + terminus labels at each line's right end); and the yellow
+price line read as a THIRD premium series beside the green/pink pair (→ white `#EAF6FF`, on its own
+scale).
+
+**A new stored view: per-strike premium.** The strike ladder needs call/put premium BY STRIKE at the
+cursor's timestamp, and nothing held it — `index_call_put_premium` collapses the chain to two scalars,
+and `gex_history.db` stores per-strike GEX. New PURE `flow_skew.premium_by_strike(chain)`, written by
+`gex_collector.poll_once` as a **fifth view string, `"prem"`** — and that costs **no schema change**:
+`snapshots.view` is free-form and a premium cell is `{call, put, net}` floats, exactly the shape the
+columnar float32 packer gates on, so `insert_snapshot`/`_encode_grid`/`load_date_with_grid` all work
+unchanged. **Cost: +25% on `gex_history.db`** (four views become five). **Forward-only** — the ladder
+is empty until `options_svc` restarts and collects, and the panel SAYS so rather than drawing a blank
+frame that reads as a real reading. Its own try/except in the collector: a premium failure costs the
+ladder, never the four Greek rows the heatmap is built on.
+
+**Tier 2** — `compute.prem_ladder` crops each row to ±5 strikes around **that row's own spot** (a
+session-wide centre would slide every earlier ladder off the money on a trending day), published
+additively on the gamma snapshot as `prem_ladder`. Read through the SAME `_history_rows_incremental`
+memo as the Greek views — it is generic in the view string, and this read has exactly the property
+the memo exists for.
+
+**Tier 1 — the panels leave Highcharts.** Hand-rolled SVG strings mounted with `ui.html` and updated
+via `el.content` (the `rings.py` / `regime_mix.py` idiom), for three reasons: the spec IS SVG
+(hairline strokes over a translucent halo, a per-segment two-tone ribbon, decluttered terminus
+labels — each a fight in Highcharts and a straight string build in Python); the repo already has the
+idiom twice; and it sidesteps both documented `ui.highchart` hazards at once — the ESM-import-map
+trap and the `chart.update()` merge leakage that made `_set_chart` recreate the element on a Flow ↔
+Net Prem switch. **The whole panel — chart, chips, ladder, rail — is ONE raw HTML fragment**, the
+documented out-of-scope case for the Tailwind-first standard (as the Calculator's P&L heatmap and
+the Gamma Explain block already are), because everything moves together under one cursor and the
+scrub is client-side; the one thing that genuinely cannot be inlined (the pulse keyframes) is
+`theme.FLOW_KEYFRAMES_CSS`, this page's ONE `ui.add_css` addition.
+
+**The scrub is fully client-side** — mousemove over either plot updates the chips, rail, ladder and
+leaderboard with no server round-trip, and leaving returns to the session's latest reading.
+Coordinates are computed SERVER-side and shipped in the payload rather than re-derived in JS: two
+implementations of one mapping, and the first symptom of their drifting apart is a cursor dot sitting
+off its own line.
+
+**⚠ The sanitizer constraint is load-bearing and cost a real defect once already.** `ui.html`
+sanitizes through NiceGUI's bundled DOMPurify (it monkeypatches `Element.prototype.setHTML`), whose
+allowlist is NOT the native sanitizer's — `dominant-baseline` is STRIPPED, which silently
+mis-positioned every label on the sentiment rings while the server-side string stayed correct and the
+suite stayed green. So these panels use `dy="0.35em"`, no `foreignObject`, no `<filter>` (the glow is
+a layered halo, which the spec specifies anyway), and **no `data-*` attributes** — the allowlist
+extraction cannot see `ALLOW_DATA_ATTR`, so it could not vouch for them.
+`test_flow_panels.py::test_panels_emit_nothing_dompurify_would_strip` guards all four panel states
+against the allowlist read out of the shipped bundle (verified to have teeth: it correctly reports
+`dominant-baseline` and `vector-effect` as stripped).
+
+**A `[flow]` theme section** (15 hexes) follows the `[console]`/`[macro]` page-scoped precedent — not
+in Settings → Appearance, same reason. `call`/`put` are pinned to `gamma.POS_COLOR`/`NEG_COLOR`: the
+panels sit behind the same subtab strip as the heatmap, so a cyan meaning "call" on one tab and
+something else on the next would be worse than no colour coding. Rajdhani + IBM Plex Mono are already
+loaded app-wide, so the section carries no font URL.
+
+**Kept deliberately:** the 28-symbol Net Prem selector, its group tabs and persisted selection (the
+spec's 7 symbols are its sample data); Dollars/Skew % (rendered as a passive BADGE, not a second
+non-functional toggle — the real control stays the NiceGUI select above the panel); and
+`net_prem_status_text`, which reports a failure mode nothing else can see (a stale publish INSIDE the
+collection window) and is clock-driven for that reason.
+
+**Removed:** `flow_figure`, `net_prem_figure` and the `FLOW_PRICE/CALL/PUT` palette, plus the 12
+tests that only exercised them. Four tests whose invariants outlive the chart were **rewritten**
+against the underlying readers (`net_prem_color` stability, `_np_rows` ts sorting, mode-aware
+`net_prem_missing`, `_np_selected` junk guarding). The `chart_kind` registry gained an explicit
+`_PANEL_VIEWS` set so its completeness guard still FAILS on a new unregistered view.
+
+**Verified in a browser** against a standalone harness (real `ui.html` → real DOMPurify), because
+what can go wrong here is invisible server-side: both ribbon tones render, terminus declutter lands
+at exactly `min_gap`, the leaderboard reorders on scrub, nothing overflows either viewBox, and the
+cursor dot lands on its line to **0.00px** — measured against real SVG path geometry via
+`getPointAtLength`, not against the payload that placed it. Screenshots time out in this environment
+(the documented pane caveat), so verification was DOM-measured throughout.
+
+**Suites:** webgui **1557 green**; options_svc **1091 green**; options-scanner **1439 passed / 11
+failed / 2 skipped**, the failing SET byte-identical to the documented baseline (compare the set,
+never the count). ⚠ **`options_svc/tests/test_flow_alert_window.py::test_gth_signal_still_fires_at_the_open`
+is FLAKY** — it failed once in a full run, then passed in isolation and in two subsequent full runs.
+Unrelated to this work (nothing here touches flow alerts); noted so the next person does not spend
+the time attributing it twice.
+**Restart `options_svc` AND the webgui** — the collector must start writing the `prem` view before
+the ladder has anything to show.)
+
+**Prior —** 2026-08-15 (**Market Dashboard visual redesign — the "Macro Board"** — a
 presentation-only redesign of `/market` from an approved spec + reference prototype. Data,
 grouping, categories and the ~2 s cadence are UNCHANGED; this is skin + motion only.
 

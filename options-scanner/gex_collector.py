@@ -333,6 +333,36 @@ def poll_once(client, engine, conn, lock=None, symbols=None, on_chain=None,
                     conn, symbol, "vanna",
                     vanna_summary, vanna["gex"], dte,
                 )
+            # Per-strike traded PREMIUM, stored as a FIFTH view string ("prem")
+            # rather than a new table: ``snapshots.view`` is free-form and a
+            # premium cell is {call, put, net} floats — exactly the shape the
+            # columnar float32 packer accepts. So this reuses insert_snapshot,
+            # _encode_grid and load_date_with_grid with no schema change at all.
+            # It feeds the Premium Divergence panel's strike ladder, which needs
+            # premium BY STRIKE at each timestamp (index_call_put_premium above
+            # collapses the same chain to two scalars).
+            #
+            # Its own try/except, and additive by construction: the ladder is one
+            # section of one view, while the four Greek rows above back the
+            # heatmap the whole page is built around. A premium failure costs the
+            # ladder, never them. An empty/None grid writes NO row, so the panel
+            # can tell "not collected yet" from "collected, nothing traded".
+            try:
+                prem_grid = flow_skew.premium_by_strike(chain)
+                if prem_grid:
+                    db.insert_snapshot(
+                        conn, symbol, "prem",
+                        {"ts": ts_boundary,
+                         # Spot comes from the Greek pass so the ladder is drawn
+                         # against the SAME underlying the cursor reads; the
+                         # premium sums carry no spot of their own.
+                         "spot": (gex or {}).get("spot"),
+                         "net_total": sum(c["net"] for c in prem_grid.values()),
+                         **skew_fields},
+                        prem_grid, dte,
+                    )
+            except Exception:
+                log.debug("premium_by_strike failed for %s", symbol, exc_info=True)
         except Exception as e:
             log.error("Poll failed for %s: %s", symbol, e)
     # Term-structure snapshot for SPXW (additive; per-symbol failures isolated).

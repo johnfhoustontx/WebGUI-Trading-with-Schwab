@@ -23,8 +23,9 @@ import app_settings
 import page_help as _page_help
 from pages.ui_guard import guard, guard_async
 from shared import market_calendar as _mc
+from . import flow_panels as _fx
 from .inputs import select_all_on_focus
-from .theme import BTN, BTN_PRIMARY, MUTED
+from .theme import BTN, BTN_PRIMARY, FLOW_KEYFRAMES_CSS, MUTED
 
 # "Plasma" palette (see docs/plans/2026-08-15-gamma-plasma-palette-design.md): the
 # exposure field runs CYAN for call-heavy (positive net) and MAGENTA for put-heavy
@@ -1174,72 +1175,14 @@ def wrap_explain(symbol, body_html, full=False):
             f"</head><body>{inner}</body></html>")
 
 
-# Flow-view colors (price / call premium / put premium).
-FLOW_PRICE = "#e8d44d"   # yellow — underlying price
-FLOW_CALL = "#26c6a4"    # green — call premium
-FLOW_PUT = "#ef5f7a"     # pink — put premium
+# The Flow view is drawn by ``flow_panels.divergence_panel`` (an SVG console
+# panel), not by a Highcharts figure — see that module's docstring for why. The
+# old ``flow_figure`` and its FLOW_PRICE/FLOW_CALL/FLOW_PUT palette are gone with
+# it; the summary line below survives because it feeds the shared status strip.
 
 
 def _flow_num(v):
     return v if isinstance(v, (int, float)) else None
-
-
-def flow_figure(rows, height=680):
-    """Intraday options-flow chart for one symbol (dark, stacked panels).
-
-    ``rows`` = the snapshot's ``flow`` list ({ts, spot, call_vol, put_vol,
-    call_prem, put_prem}, one per 2-min snapshot). TOP panel: underlying **price**
-    (left axis) + daily-cumulative **call/put premium** in $M (right axis). BOTTOM
-    panel: **net premium (call − put)** in $M as a signed area (green call-lead /
-    red put-lead). Premium is None on rows that predate Phase-1 collection — those
-    points are skipped (the line just starts where premium began collecting)."""
-    rows = rows or []
-    times = [_fmt_ts(r.get("ts")) for r in rows]
-    spot = [[i, _flow_num(r.get("spot"))] for i, r in enumerate(rows)
-            if _flow_num(r.get("spot")) is not None]
-    callp = [[i, _flow_num(r.get("call_prem")) / 1e6] for i, r in enumerate(rows)
-             if _flow_num(r.get("call_prem")) is not None]
-    putp = [[i, _flow_num(r.get("put_prem")) / 1e6] for i, r in enumerate(rows)
-            if _flow_num(r.get("put_prem")) is not None]
-    net = []
-    for i, r in enumerate(rows):
-        cp, pp = _flow_num(r.get("call_prem")), _flow_num(r.get("put_prem"))
-        if cp is None and pp is None:
-            continue
-        net.append([i, ((cp or 0) - (pp or 0)) / 1e6])
-
-    fig = _base_chart("line", height)
-    fig["chart"]["marginBottom"] = 64
-    fig["legend"] = {"enabled": True, "itemStyle": {"color": FONT},
-                     "itemHoverStyle": {"color": "#ffffff"}}
-    fig.update({
-        "title": {"text": "Intraday options flow (price + call/put premium)",
-                  "style": {"color": FONT}},
-        "xAxis": {**_dark_axis("Time"), "categories": times,
-                  "labels": {"rotation": -45, "style": {"color": FONT}}},
-        "yAxis": [
-            {**_dark_axis("Price"), "top": "0%", "height": "62%"},
-            {**_dark_axis("Premium ($M)"), "top": "0%", "height": "62%", "opposite": True},
-            {**_dark_axis("Net premium ($M)"), "top": "68%", "height": "32%",
-             "offset": 0, "plotLines": [{"value": 0, "color": "#777777", "width": 1}]},
-        ],
-        "tooltip": {"shared": True, "backgroundColor": "#222222",
-                    "borderColor": "#444444", "style": {"color": FONT, "fontSize": "11px"},
-                    "valueDecimals": 2},
-        "series": [
-            {"type": "line", "name": "Price", "data": spot, "yAxis": 0,
-             "color": FLOW_PRICE, "lineWidth": 2, "marker": {"enabled": False}},
-            {"type": "line", "name": "Call premium", "data": callp, "yAxis": 1,
-             "color": FLOW_CALL, "lineWidth": 2, "marker": {"enabled": False}},
-            {"type": "line", "name": "Put premium", "data": putp, "yAxis": 1,
-             "color": FLOW_PUT, "lineWidth": 2, "marker": {"enabled": False}},
-            {"type": "area", "name": "Net premium (call − put)", "data": net, "yAxis": 2,
-             "threshold": 0, "color": FLOW_CALL, "negativeColor": FLOW_PUT,
-             "fillColor": "rgba(38,198,164,0.28)", "negativeFillColor": "rgba(239,95,122,0.28)",
-             "lineWidth": 1, "marker": {"enabled": False}},
-        ],
-    })
-    return fig
 
 
 def flow_summary_text(rows):
@@ -1513,76 +1456,11 @@ def net_prem_missing(series, symbols, mode="dollars"):
     return [sym for sym in picked if sym not in latest]
 
 
-def net_prem_figure(series, symbols, mode="dollars", height=680):
-    """Intraday net-premium chart — one fixed-colour line per selected symbol.
-
-    The x-axis is a SYNTHETIC category axis of ``_fmt_ts`` labels over the sorted
-    UNION of timestamps across the selection, not a datetime axis — for two
-    reasons. First, the same one ``flow_figure`` has: a real datetime axis
-    stretches the session across the overnight/weekend gap. Second, and specific
-    to this view: the symbols do not share a clock. A name that started
-    collecting late has fewer rows, so plotting each series against its own row
-    index would shear the lines apart — SPY's 09:15 point would sit above QQQ's
-    08:30 one and the chart would silently lie about when a flow happened.
-    Indexing every series into the shared union keeps them on one timeline, and a
-    symbol that starts late simply begins further along the axis.
-    """
-    mode = mode if mode in NET_PREM_MODES else "dollars"
-    picked = _np_selected(symbols)
-    rows_by = {sym: _np_rows(series, sym) for sym in picked}
-    times = sorted({ts for rows in rows_by.values() for ts, _ in rows})
-    index = {ts: i for i, ts in enumerate(times)}
-
-    plots = []
-    for sym in picked:
-        # A point with no value in this mode is SKIPPED, not emitted as None —
-        # and that can never hide an interior gap. The stored premiums are
-        # daily-CUMULATIVE (the service's build_series accumulates nothing
-        # downstream), so call+put is monotonic non-decreasing: once it exceeds 0
-        # it stays there for the rest of the session. An unreportable skew point
-        # is therefore only ever possible in a LEADING run, before anything
-        # traded — skipping trims a meaningless prefix and cannot connect the line
-        # across a hole. A future "optimization" into a running total would break
-        # that invariant, and with it this reasoning.
-        data = [[index[ts], value] for ts, row in rows_by[sym]
-                if (value := net_prem_value(row, mode)) is not None]
-        if data:
-            plots.append({"type": "line", "name": sym, "data": data,
-                          "color": net_prem_color(sym), "lineWidth": 2,
-                          "marker": {"enabled": False}})
-
-    fig = _base_chart("line", height)
-    # Legend ABOVE the plot, and NO pinned marginBottom — unlike flow_figure,
-    # whose fixed 4 series always fit one legend row inside its marginBottom of
-    # 64. Here the count is user-driven (up to 28), so the legend wraps to
-    # several rows; pinned at the bottom those rows land on top of the rotated
-    # time labels and the axis title, because Highcharts reserves bottom space
-    # for the legend OR the labels, not both. Top-aligned it pushes the plot
-    # down instead of colliding, and dropping marginBottom lets the bottom
-    # auto-size to whatever the -45° labels actually need.
-    fig["legend"] = {"enabled": True, "itemStyle": {"color": FONT},
-                     "itemHoverStyle": {"color": "#ffffff"},
-                     "verticalAlign": "top", "align": "center",
-                     "padding": 6, "itemMarginBottom": 2}
-    fig.update({
-        "title": {"text": f"Intraday net premium (call $ − put $) · "
-                          f"{NET_PREM_MODES[mode]}",
-                  "style": {"color": FONT}},
-        "xAxis": {**_dark_axis("Time"), "categories": [_fmt_ts(t) for t in times],
-                  "labels": {"rotation": -45, "style": {"color": FONT}}},
-        "yAxis": {**_dark_axis(_NET_PREM_AXIS[mode]),
-                  "plotLines": [{"value": 0, "color": "#777777", "width": 1,
-                                 "zIndex": 3}]},
-        # Deliberately NOT shared: with up to 28 selectable series a shared
-        # tooltip is a wall of rows taller than the chart. Hover reports the one
-        # line the cursor is on.
-        "tooltip": {"shared": False, "backgroundColor": "#222222",
-                    "borderColor": "#444444",
-                    "style": {"color": FONT, "fontSize": "11px"},
-                    "valueDecimals": 2},
-        "series": plots,
-    })
-    return fig
+# The Net Prem view is drawn by ``flow_panels.field_panel`` (an SVG console
+# panel), not by a Highcharts figure. ``net_prem_figure`` is gone with it; the
+# readers it stood on (``_np_selected`` / ``_np_rows`` / ``net_prem_value``) are
+# unchanged and now feed the panel directly, so the data path is the same one
+# the old chart used and its tests still cover it.
 
 
 def _np_fmt(value, mode):
@@ -1916,6 +1794,9 @@ def render():
     from nicegui import ui, run
 
     ui.add_css(EXPLAIN_CSS)  # scoped styles for the Explain dialog (ui.html strips <style>)
+    # The Flow/Net Prem console panels' ONE escape-hatch: a keyframes animation
+    # cannot be an inline style, and those panels are raw ui.html fragments.
+    ui.add_css(FLOW_KEYFRAMES_CSS)
     # No page title — the tab strip names the page (2026-07-11 dead-space cleanup).
 
     # state["snap"] is the cached snapshot from the bus (None until first read).
@@ -2126,6 +2007,12 @@ def render():
             # Seeded from the SAME figure the element was created with, so the
             # first real paint can't spuriously recreate it.
             state["chart_kind"] = chart_kind(_empty_fig())
+            # The Flow + Net Prem console panels. ONE persistent ui.html whose
+            # .content is swapped per repaint — the rings.py / regime_mix.py
+            # idiom. It lives inside chart_box because both views already run
+            # full width with the heatmap hidden (_apply_flex(term=True)).
+            panel_el = ui.html("").classes("w-full")
+            panel_el.set_visibility(False)
             chart_msg = ui.label("Fetch a symbol… (no snapshot yet).") \
                 .classes("opacity-60 text-sm")
         heatmap_box = ui.column().classes(f"min-w-0 {_INIT_FLEX}")
@@ -2261,23 +2148,68 @@ def render():
         np_status_lbl.text = net_prem_status_text(
             payload, _dt.datetime.now(_dt.timezone.utc))
 
+    def _show_panel(html, kind, payload, uid):
+        """Swap the console panel's markup in and (re)bind its client-side scrub.
+
+        The fragment is replaced wholesale, so the listeners bound by the script
+        go with the old DOM — there is nothing to unbind. The script is deferred
+        one tick because ``el.content`` is applied on the client asynchronously:
+        run immediately, it would bind to the PREVIOUS fragment's nodes (or to
+        none at all on the first paint) and the panel would sit inert.
+        """
+        panel_el.content = html
+        panel_el.set_visibility(True)
+        state["chart_el"].set_visibility(False)
+        heat_plot.set_visibility(False)
+        hedge_plot.set_visibility(False)
+        hedge_lbl.set_visibility(False)
+        heat_msg.set_visibility(False)
+        chart_msg.set_visibility(False)
+        _apply_flex(0, term=True)          # full width, no heatmap panel
+        js = _fx.scrub_js(uid, kind, payload)
+        if js:
+            @guard
+            def _bind():
+                ui.run_javascript(js)
+            ui.timer(0.05, _bind, once=True)
+
+    def _hide_panel():
+        """Return the row to the Highcharts elements (every non-panel view)."""
+        panel_el.set_visibility(False)
+
     def _render_net_prem():
-        """Paint the Net Prem view: one full-width multi-symbol line chart."""
+        """Paint the Net Prem view as the Flow Field console panel."""
         payload = state.get("netprem")
         payload = payload if isinstance(payload, dict) else {}
         series = payload.get("series")
         series = series if isinstance(series, dict) else {}
         sel = state["netprem_sel"]
         mode = np_mode_sel.value
+        mode = mode if mode in NET_PREM_MODES else "dollars"
 
-        chart_msg.set_visibility(False)
-        _set_chart(net_prem_figure(series, sel, mode))
-        state["chart_el"].set_visibility(True)
-        heat_plot.set_visibility(False)
-        hedge_plot.set_visibility(False)
-        hedge_lbl.set_visibility(False)
-        heat_msg.set_visibility(False)
-        _apply_flex(0, term=True)          # full width, no heatmap panel
+        # Reuse the existing, well-tested readers: _np_selected guards the
+        # persisted selection, _np_rows drops unreadable rows per symbol, and
+        # net_prem_value applies the mode. The panel only changes how this is
+        # DRAWN — the data path underneath is untouched.
+        picked = _np_selected(sel)
+        rows_by = {}
+        for sym in picked:
+            # A point with no value in this mode is SKIPPED, and that can never
+            # hide an interior gap. The stored premiums are daily-CUMULATIVE
+            # (the service's build_series accumulates nothing downstream), so
+            # call+put is monotonic non-decreasing: once it exceeds 0 it stays
+            # there for the rest of the session. An unreportable skew point is
+            # therefore only ever possible in a LEADING run, before anything
+            # traded — skipping trims a meaningless prefix and cannot connect a
+            # line across a hole. A future "optimization" into a running total
+            # would break that invariant, and with it this reasoning.
+            pairs = [(ts, value) for ts, row in _np_rows(series, sym)
+                     if (value := net_prem_value(row, mode)) is not None]
+            if pairs:
+                rows_by[sym] = pairs
+        html, scrub = _fx.field_panel(rows_by, picked, NET_PREM_COLORS,
+                                      NET_PREM_MODES[mode], "fxfield")
+        _show_panel(html, "field", scrub, "fxfield")
         # net_prem_summary_text already folds in the mode-aware "no data yet"
         # names (it shares net_prem_missing's definition), so the header can
         # never disagree with what the chart draws.
@@ -2296,6 +2228,7 @@ def render():
             # even when no gamma snapshot has been cached for the current symbol.
             _render_net_prem()
             return
+        _hide_panel()
         snap = state["snap"]
         if not snap:
             state["chart_el"].set_visibility(False)
@@ -2322,15 +2255,14 @@ def render():
             _set_summary(summary_text({"spot": spot, "strike_count": None}, "Term"))
             return
         if view == "Flow":
-            # Intraday options-flow: price + call/put premium + net panel, full width
-            # (no heatmap). Same single chart element as Term (recreated on kind change).
-            _set_chart(flow_figure(snap.get("flow") or []))
-            state["chart_el"].set_visibility(True)
-            heat_plot.set_visibility(False)
-            hedge_plot.set_visibility(False)
-            hedge_lbl.set_visibility(False)
-            heat_msg.set_visibility(False)
-            _apply_flex(0, term=True)
+            # Premium Divergence console panel — the call/put ribbon, the strike
+            # ladder and the readout rail, full width (no heatmap). A raw ui.html
+            # fragment rather than a Highcharts figure; see flow_panels.
+            html, scrub = _fx.divergence_panel(
+                snap.get("flow") or [], snap.get("prem_ladder") or [],
+                snap.get("symbol") or _current_symbol(),
+                _fx.dte_label(snap.get("dte")), "fxdiv")
+            _show_panel(html, "div", scrub, "fxdiv")
             _set_summary(flow_summary_text(snap.get("flow")))
             return
 
