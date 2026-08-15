@@ -29,6 +29,7 @@ import bus_client
 from pages.rings import ring_svg
 from pages.regime_mix import (REGIME_COLORS, REGIME_LABELS, REGIME_ORDER,
                               regime_mix_svg)
+from pages.options import theme
 from pages.options.theme import BTN_3D, THEME
 from pages.ui_guard import guard
 
@@ -1028,6 +1029,17 @@ def _fmt_time(value):
 
 def render():
     from nicegui import ui
+
+    # Market Regime Console assets — scoped to THIS page, not the app shell.
+    # ``add_head_html`` during a page build is client-scoped, so the condensed
+    # display face is requested on /sentiment and nowhere else; every other page
+    # keeps the two fonts the shell already loads. "" when [console].font_url is
+    # blank, in which case the stack falls back to the app font.
+    if theme.CONSOLE_FONT_HEAD_HTML:
+        ui.add_head_html(theme.CONSOLE_FONT_HEAD_HTML)
+    # The console's ONE escape-hatch rule: a keyframes animation cannot be a
+    # utility class (same justification as the market ticker's marquee).
+    ui.add_css(theme.CONSOLE_KEYFRAMES_CSS)
 
     def _read_cache():
         """Pull the three sentiment cache views off the bus into ``state``.

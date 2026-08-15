@@ -4,7 +4,7 @@
 — the handoff bundle (README spec + `Regime Dashboard.dc.html` prototype + full-page screenshot),
 copied into the repo so this plan does not depend on a file in Downloads.
 
-**Status:** Phases 0–1 done (results in §4). Phases 2–7 not started.
+**Status:** Phases 0–2 done (results in §4). Phases 3–7 not started.
 
 ---
 
@@ -252,11 +252,47 @@ silently drop a new field, and it fired during this work as intended.
 `compute_market_regime` against the live proxy **because the regime view is RTH-gated and will not
 republish outside market hours** — its publish filter is pinned by the guard test above.
 
-### Phase 2 — Theme tokens *(small)*
-2.1 New `config/theme.toml` section for the console palette (surfaces, hairlines, the six text
-    tints, the data colours, the regime hues incl. Breakout's muted `#6a5c33`).
-2.2 Token constants + the `.console` scope hook, following `pages/options/theme.py`'s pattern.
-2.3 The `pulseDot` keyframes in the page's single `ui.add_css`.
+### Phase 2 — Theme tokens — ✅ **DONE 2026-08-14**
+
+**2.1 `config/theme.toml` `[console]`** — 26 knobs: surfaces, the one `line` base, accent, the six
+text tints, the data colours, the five regime hues + Breakout's dormant `#6a5c33`, and the display
+font. **Hex only**, like every other section — the spec quotes several as `rgba(120,140,160,α)` and
+the **alpha lives in the token layer** via Tailwind's `/[0.18]` modifier, which a spike confirmed
+generates. That keeps the file inside the Settings colour-pickers' hex contract *and* hits the
+spec's exact alphas rather than the nearest step on Tailwind's core scale.
+
+> **Not** added to `_THEME_SECTIONS`, so it does not appear in Settings → Appearance — the same
+> exclusion `[brand]` already has, and for the same reason: that editor's sections are single-kind
+> and this one mixes colours with font text. Pinned by a test.
+
+> ⚠️ **The console's regime hues deliberately differ from `[charts]`**, which the old panel used:
+> balanced cyan→**blue** `#6f86ff`, whipsaw flat-grey→**light grey** `#c3ccd6`, breakout
+> yellow→**amber** `#f0b83c`. The handoff is authoritative for this page and nothing else moves.
+
+**2.2 Tokens** — `build_console_tokens` / `console_colors` / `console_glow` / `_alpha_hex` in
+`pages/options/theme.py`, exported as `CONSOLE_*` / `CON_*` (namespaced so a console token can
+never be mistaken for an app-wide dark-navy one; the two palettes coexist by design).
+`console_colors` hands raw hexes to the SVG builders, which take attributes rather than classes.
+
+Two mechanics worth keeping straight, both measured:
+* the `/[…]` opacity modifier **cannot reach a gradient stop**, so the card's 95% comes from an
+  **8-digit hex** (`#0e161ef2`) instead — hence `_alpha_hex`;
+* the display font is a **full stack as one class** —
+  `font-['Rajdhani',_'IBM_Plex_Sans',_system-ui,_sans-serif]` resolves correctly, so **no CSS
+  escape hatch is needed for typography**.
+
+**2.3 `pulseDot`** is the page's ONE `ui.add_css` rule (`CONSOLE_KEYFRAMES_CSS`) — an animation
+genuinely cannot be a utility class, the same justification the market ticker's marquee uses. A
+test asserts it contains exactly one `@keyframes` and no colour/background, so it cannot quietly
+grow into a stylesheet.
+
+**Scoped to the page, not the shell.** `ui.add_head_html` during a page build is client-scoped, so
+`sentiment.render()` requests the font and injects the keyframes — **verified live: `/sentiment`
+loads `IBM+Plex+Sans, Montserrat, Rajdhani` and has the `pulseDot` rule, while `/status` loads only
+the first two and has neither.** Rajdhani genuinely resolves (618.28px vs the 775.16px fallback),
+`.con-pulse` computes to `pulseDot 2.4s`, and the hairline token computes at exactly `0.18` alpha.
+
+**Verified:** webgui **1382 passed** (18 new).
 
 ### Phase 3 — Shared primitives *(medium — the bulk of the new pure code)*
 3.1 `timeframe_meter` — label · track · fill+glow · end marker · value; plus the **hatched

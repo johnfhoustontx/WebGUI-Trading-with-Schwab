@@ -144,6 +144,61 @@ _DEFAULTS = {
         "hover_bg": "",   # menu item hover wash
         "title": "",      # the drawer caption ("WORKSPACE")
     },
+    # ── The Market Regime Console palette (/sentiment only) ──────────────────
+    # A hard-edge "console" language deliberately scoped to ONE page: square
+    # corners, near-black ground, teal accent, glow-only shadows. Source of
+    # truth: docs/design/2026-08-14-market-regime-console/README.md.
+    #
+    # Colors are HEX ONLY, like every other section — the spec quotes several as
+    # rgba(120,140,160,α), and the ALPHA lives in the token layer instead
+    # (Tailwind's `/[0.18]` modifier, verified to generate). That keeps this file
+    # editable by the Settings colour pickers' hex contract.
+    #
+    # NOT surfaced in Settings → Appearance, for the same reason [brand] is not:
+    # that editor's sections are single-kind, and this one mixes colours with
+    # font text.
+    "console": {
+        # surfaces + lines
+        "page_bg": "#05070b",        # the page ground
+        "wash": "#0b1620",           # inner stop of the radial page wash
+        "card_from": "#0e161e",      # card gradient, 160deg, both stops at 95%
+        "card_to": "#070a0f",
+        "cell_bg": "#0a0e14",        # stat/readout cells inside a hairline grid
+        "line": "#788ca0",           # ONE base for every hairline/border/track;
+                                     # = the spec's rgba(120,140,160,·)
+        "accent": "#22e3d3",         # primary accent: dial arc, links, rules
+        # text ramp, lightest → faintest
+        "text_primary": "#e7edf3",
+        "text_secondary": "#a9bac7",
+        "text_muted": "#8fa1b0",
+        "text_label": "#6b7d8d",
+        "text_dim": "#5d6f7e",
+        "text_faint": "#4b5a67",
+        # data colours
+        "positive": "#35d68a",       # bullish / positive change / high scores
+        "negative": "#f2646b",       # stressed / negative change / divergence
+        "warning": "#e0b74e",        # caution, previous close, mid-low scores
+        "olive": "#b9cf6a",          # mid-high score band
+        "yellow": "#d7d76a",         # trend day band
+        # regime hues. NOTE these are the CONSOLE's, and they differ from the
+        # [charts] set the old panel used (balanced cyan→blue, whipsaw
+        # flat-grey→light grey, breakout yellow→amber). The handoff is
+        # authoritative for this page; nothing else moves.
+        "regime_mean_reversion": "#6f86ff",
+        "regime_trending": "#35d68a",
+        "regime_breakout": "#f0b83c",
+        "regime_breakout_zero": "#6a5c33",   # the dormant/0.0% muted state
+        "regime_choppy": "#c3ccd6",
+        "regime_crisis": "#f2646b",
+        # display face — condensed, for headings/names/hero numerals. Loaded
+        # separately from [typography] and [brand], the same way those two are
+        # separate from each other. "" loads nothing and falls back to the app
+        # font (measured 21% WIDER than Rajdhani, so letter-spaced headings
+        # reflow on swap — do not pack them to the Rajdhani metric).
+        "font_family": "Rajdhani",
+        "font_url": ("https://fonts.googleapis.com/css2"
+                     "?family=Rajdhani:wght@500;600;700&display=swap"),
+    },
 }
 
 
@@ -532,6 +587,127 @@ def build_brand_css(theme):
 """
 
 
+# --- Market Regime Console (/sentiment) -------------------------------------
+# The spec's alphas, kept as named constants so a hairline is never a magic
+# number scattered across builders. Applied as Tailwind's arbitrary opacity
+# modifier (`/[0.18]`), which was measured to generate — so these are the
+# spec's EXACT values, not the nearest step on Tailwind's core scale.
+CONSOLE_ALPHA = {"hairline": 0.18, "border": 0.2, "track": 0.09,
+                 "track_border": 0.14, "rule": 0.18, "card": 0.95}
+
+
+def _alpha_hex(value, alpha):
+    """'#0e161e' + 0.95 -> '#0e161ef2' — an 8-digit hex, which Tailwind accepts
+    inside a gradient arbitrary (measured). Used where the alpha belongs to a
+    gradient STOP, which the `/[…]` modifier cannot reach."""
+    a = max(0, min(255, int(round(float(alpha) * 255))))
+    return f"{value}{a:02x}"
+
+
+def console_glow(value, px=16, alpha=0.45, spread=None):
+    """A glow-only box-shadow class — the console has no elevation shadows.
+
+    rgba rather than a hex because the alpha is the point; both forms were
+    measured to generate (see the Phase 0 spike in the redesign plan)."""
+    r, g, b = hex_rgb(value, (255, 255, 255))
+    sp = f"_{spread}" if spread else ""
+    return f"shadow-[0_0_{px}px{sp}_rgba({r},{g},{b},{alpha})]"
+
+
+def build_console_tokens(theme):
+    """Tailwind token vocabulary for the console page.
+
+    Every value is a class string applied with ``.classes(...)`` — the page is
+    Tailwind-first like the rest of the app, and the ONE ``ui.add_css`` it
+    injects carries only the ``pulseDot`` keyframes (an animation cannot be
+    expressed as a utility)."""
+    c = theme["console"]
+    a = CONSOLE_ALPHA
+    line = c["line"]
+    fam = str(c.get("font_family", "")).strip()
+    # Underscores are Tailwind's space escape; the stack was measured to resolve
+    # as `Rajdhani, "IBM Plex Sans", system-ui, sans-serif`.
+    display = (f"font-['{fam}',_'IBM_Plex_Sans',_system-ui,_sans-serif]"
+               if fam else "font-['IBM_Plex_Sans',_system-ui,_sans-serif]")
+    return {
+        # surfaces
+        "CONSOLE_PAGE": (
+            f"bg-[{c['page_bg']}] "
+            f"bg-[radial-gradient(1200px_700px_at_22%_10%,{c['wash']},"
+            f"{c['page_bg']}_62%)]"),
+        "CONSOLE_CARD": (
+            f"bg-[linear-gradient(160deg,{_alpha_hex(c['card_from'], a['card'])},"
+            f"{_alpha_hex(c['card_to'], a['card'])})] "
+            f"border border-[{line}]/[{a['border']}]"),
+        "CONSOLE_CELL": f"bg-[{c['cell_bg']}]",
+        # A hairline GRID is `gap-px` over this background — the gap IS the rule,
+        # which is the handoff's own technique and avoids per-cell borders.
+        "CONSOLE_HAIRLINE": f"bg-[{line}]/[{a['hairline']}]",
+        "CONSOLE_TRACK": (f"bg-[{line}]/[{a['track']}] "
+                          f"border border-[{line}]/[{a['track_border']}]"),
+        "CONSOLE_RULE": f"border-[{c['accent']}]/[{a['rule']}]",
+        "CONSOLE_DIVIDER": f"border-[{line}]/[{a['border']}]",
+        # type
+        "CONSOLE_DISPLAY": display,
+        "CON_TXT": f"text-[{c['text_primary']}]",
+        "CON_TXT_SECONDARY": f"text-[{c['text_secondary']}]",
+        "CON_TXT_MUTED": f"text-[{c['text_muted']}]",
+        "CON_TXT_LABEL": f"text-[{c['text_label']}]",
+        "CON_TXT_DIM": f"text-[{c['text_dim']}]",
+        "CON_TXT_FAINT": f"text-[{c['text_faint']}]",
+        # data
+        "CON_ACCENT": f"text-[{c['accent']}]",
+        "CON_POS": f"text-[{c['positive']}]",
+        "CON_NEG": f"text-[{c['negative']}]",
+        "CON_WARN": f"text-[{c['warning']}]",
+    }
+
+
+def console_colors(theme):
+    """The console's raw hexes, for the SVG builders (which take attributes, not
+    classes) and for per-regime lookups."""
+    c = theme["console"]
+    return {
+        "accent": c["accent"], "line": c["line"], "cell": c["cell_bg"],
+        "positive": c["positive"], "negative": c["negative"],
+        "warning": c["warning"], "olive": c["olive"], "yellow": c["yellow"],
+        "text": c["text_primary"], "muted": c["text_muted"],
+        "label": c["text_label"], "dim": c["text_dim"],
+        "regimes": {k: c[f"regime_{k}"] for k in
+                    ("mean_reversion", "trending", "breakout", "choppy",
+                     "crisis")},
+        "regime_zero": c["regime_breakout_zero"],
+    }
+
+
+def build_console_font_head_html(theme):
+    """A ``<link>`` for the console DISPLAY font (``[console].font_url``), or "".
+
+    Separate from ``[typography]`` and ``[brand]`` for the same reason those two
+    are separate from each other: a condensed display face suits headings and
+    hero numerals, not the dense data tables the body font serves."""
+    try:
+        url = str(theme["console"].get("font_url", "")).strip()
+    except Exception:  # noqa: BLE001
+        return ""
+    if not url:
+        return ""
+    return (
+        '<link rel="preconnect" href="https://fonts.googleapis.com">'
+        '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
+        f'<link rel="stylesheet" href="{url}">'
+    )
+
+
+# The console's ONE escape-hatch rule. A keyframes animation genuinely cannot be
+# a utility class, which is the same justification the market ticker's marquee
+# uses. Everything else on the page is Tailwind.
+CONSOLE_KEYFRAMES_CSS = """
+@keyframes pulseDot { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
+.con-pulse { animation: pulseDot 2.4s ease-in-out infinite; }
+"""
+
+
 def build_nav_css(theme):
     """Application-menu override CSS from ``[menu]`` (drawer bg / text / hover /
     caption). Emits a rule ONLY for a non-empty knob, so all-default config
@@ -608,3 +784,28 @@ BRAND_NAME = f"{BRAND_NAME_A}{BRAND_NAME_B}"   # plain text: browser titles, log
 BRAND_MARK = THEME["brand"]["mark"]            # "" = no logo image
 BRAND_CSS = build_brand_css(THEME)
 BRAND_FONT_HEAD_HTML = build_brand_font_head_html(THEME)  # "" when no font_url
+
+# ── Market Regime Console (/sentiment only) ─────────────────────────────────
+# Namespaced CONSOLE_*/CON_* so a console token can never be mistaken for one of
+# the app-wide dark-navy tokens above — the two palettes coexist deliberately.
+_CONSOLE_TOKENS = build_console_tokens(THEME)
+CONSOLE_PAGE = _CONSOLE_TOKENS["CONSOLE_PAGE"]
+CONSOLE_CARD = _CONSOLE_TOKENS["CONSOLE_CARD"]
+CONSOLE_CELL = _CONSOLE_TOKENS["CONSOLE_CELL"]
+CONSOLE_HAIRLINE = _CONSOLE_TOKENS["CONSOLE_HAIRLINE"]
+CONSOLE_TRACK = _CONSOLE_TOKENS["CONSOLE_TRACK"]
+CONSOLE_RULE = _CONSOLE_TOKENS["CONSOLE_RULE"]
+CONSOLE_DIVIDER = _CONSOLE_TOKENS["CONSOLE_DIVIDER"]
+CONSOLE_DISPLAY = _CONSOLE_TOKENS["CONSOLE_DISPLAY"]
+CON_TXT = _CONSOLE_TOKENS["CON_TXT"]
+CON_TXT_SECONDARY = _CONSOLE_TOKENS["CON_TXT_SECONDARY"]
+CON_TXT_MUTED = _CONSOLE_TOKENS["CON_TXT_MUTED"]
+CON_TXT_LABEL = _CONSOLE_TOKENS["CON_TXT_LABEL"]
+CON_TXT_DIM = _CONSOLE_TOKENS["CON_TXT_DIM"]
+CON_TXT_FAINT = _CONSOLE_TOKENS["CON_TXT_FAINT"]
+CON_ACCENT = _CONSOLE_TOKENS["CON_ACCENT"]
+CON_POS = _CONSOLE_TOKENS["CON_POS"]
+CON_NEG = _CONSOLE_TOKENS["CON_NEG"]
+CON_WARN = _CONSOLE_TOKENS["CON_WARN"]
+CONSOLE_COLORS = console_colors(THEME)         # raw hexes for the SVG builders
+CONSOLE_FONT_HEAD_HTML = build_console_font_head_html(THEME)  # "" when no url
