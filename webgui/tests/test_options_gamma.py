@@ -20,6 +20,10 @@ GEX = {"spot": 450.0, "gex": {
     452.0: {"call": 30.0, "put": -10.0, "net": 20.0},
 }, "strike_count": 3}
 
+# Same book WITH a 0-DTE per-strike charm drift, so the "Projected close" outline
+# has points to draw (it is omitted entirely on a symbol with no 0-DTE interest).
+GEX_DRIFT = {**GEX, "hedge_drift_by_strike": {448.0: 5.0, 450.0: -7.5, 452.0: 1.0}}
+
 
 def test_bars_from_gex_filters_band_and_sorts():
     b = gamma.bars_from_gex(GEX, 450.0)
@@ -962,6 +966,116 @@ def test_bars_are_plasma_cyan_and_magenta():
     assert gamma.NEG_COLOR.lower() == "#ff4d8d"     # put hot
 
 
+# --- 3D bevel + glow (the reference design's rail bars) ---
+
+def test_composite_flattens_an_overlay_over_the_base():
+    # White at full alpha is white; black at full alpha is black; alpha 0 is a no-op.
+    assert gamma._composite("#35c8ff", 255, 1.0) == "#ffffff"
+    assert gamma._composite("#35c8ff", 0, 1.0) == "#000000"
+    assert gamma._composite("#35c8ff", 255, 0.0) == "#35c8ff"
+    # Half-white lightens every channel toward 255.
+    mid = gamma._composite("#35c8ff", 255, 0.5)
+    r, g, b = (int(mid.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4))
+    assert (r, g, b) > (0x35, 0xc8, 0xff - 1)
+
+
+def test_bevel_fill_bakes_the_designs_five_stops():
+    # SVG fill takes ONE paint, so the design's white->black overlay is composited
+    # into the base colour rather than layered over it.
+    f = gamma.bevel_fill(gamma.POS_COLOR)
+    stops = f["stops"]
+    assert [s[0] for s in stops] == [0.00, 0.22, 0.46, 0.74, 1.00]
+    # Top is a bright highlight, bottom a dark shade — that IS the 3D read.
+    top = int(stops[0][1].lstrip("#")[0:2], 16)
+    bottom = int(stops[-1][1].lstrip("#")[0:2], 16)
+    assert top > bottom
+    # Every stop is an opaque hex (no rgba — Highcharts gradient stops here are solid).
+    assert all(s[1].startswith("#") and len(s[1]) == 7 for s in stops)
+
+
+def test_bevel_fill_orientation_matches_the_bar_axis():
+    # A horizontal BAR is lit across its thickness => vertical gradient.
+    assert gamma.bevel_fill(gamma.POS_COLOR)["linearGradient"] == {
+        "x1": 0, "y1": 0, "x2": 0, "y2": 1}
+    # A vertical COLUMN (hedge panel) is lit across ITS thickness => horizontal.
+    assert gamma.bevel_fill(gamma.POS_COLOR, vertical=False)["linearGradient"] == {
+        "x1": 0, "y1": 0, "x2": 1, "y2": 0}
+
+
+def test_glow_is_a_zero_offset_shadow_in_the_bars_own_colour():
+    g = gamma.glow(gamma.NEG_COLOR)
+    assert g["color"] == gamma.NEG_COLOR
+    assert g["offsetX"] == 0 and g["offsetY"] == 0      # centred => a glow, not a shadow
+    assert g["width"] >= 8
+
+
+def test_bar_figure_splits_by_sign_so_each_side_glows_its_own_colour():
+    # Highcharts honours `shadow` per SERIES only (per-point is silently dropped —
+    # probed live), so one glow colour per series forces a sign split.
+    fig = gamma.bar_figure(GEX, 450.0, view="GEX")
+    named = {s["name"]: s for s in fig["series"]}
+    assert "Call gamma" in named and "Put gamma" in named
+    assert named["Call gamma"]["shadow"]["color"] == gamma.POS_COLOR
+    assert named["Put gamma"]["shadow"]["color"] == gamma.NEG_COLOR
+    # Bevelled fills, not flat colours.
+    for s in ("Call gamma", "Put gamma"):
+        for p in named[s]["data"]:
+            assert "linearGradient" in p["color"]
+
+
+def test_bar_figure_series_count_is_fixed():
+    # The bar element is updated IN PLACE, and Highcharts REPLACES rather than
+    # updates when the count moves — the same trap heatmap_figure documents. So
+    # both sign series and the projection series are ALWAYS emitted, empty or not.
+    with_proj = gamma.bar_figure(GEX_DRIFT, 450.0, view="GEX")
+    without = gamma.bar_figure(GEX, 450.0, view="GEX")
+    empty = gamma.bar_figure({}, 450.0, view="GEX")
+    assert len(with_proj["series"]) == len(without["series"]) == len(empty["series"]) == 3
+    # ...and every strike still lands in exactly one of the two sign series.
+    b = gamma.bars_from_gex(GEX, 450.0)
+    named = {s["name"]: s for s in without["series"]}
+    assert (len(named["Call gamma"]["data"]) + len(named["Put gamma"]["data"])
+            == len(b["strikes"]))
+
+
+def test_bar_sign_series_partition_by_sign():
+    fig = gamma.bar_figure(GEX, 450.0, view="GEX")
+    named = {s["name"]: s for s in fig["series"]}
+    assert all(p["y"] >= 0 for p in named["Call gamma"]["data"])
+    assert all(p["y"] < 0 for p in named["Put gamma"]["data"])
+
+
+def test_hedge_panel_uses_the_plasma_scheme_not_green_red():
+    rows = [{"hedge_pressure": 2e9}, {"hedge_pressure": -1e9}]
+    fig = gamma.hedge_figure(rows, ["09:30", "09:31"])
+    named = {s["name"]: s for s in fig["series"]}
+    assert named["Hedge buy"]["shadow"]["color"] == gamma.HEDGE_BUY_COLOR
+    assert named["Hedge sell"]["shadow"]["color"] == gamma.HEDGE_SELL_COLOR
+    # The scheme, not the old green/red pair.
+    assert gamma.HEDGE_BUY_COLOR == gamma.POS_COLOR
+    assert gamma.HEDGE_SELL_COLOR == gamma.NEG_COLOR
+    assert gamma.HEDGE_BUY_COLOR not in (gamma.UP_COLOR, gamma.DOWN_COLOR)
+    # Bevelled, and lit across the COLUMN's thickness (horizontal).
+    for p in named["Hedge buy"]["data"]:
+        assert p["color"]["linearGradient"] == {"x1": 0, "y1": 0, "x2": 1, "y2": 0}
+
+
+def test_hedge_figure_series_count_is_fixed():
+    both = gamma.hedge_figure([{"hedge_pressure": 1e9}, {"hedge_pressure": -1e9}], ["a", "b"])
+    one = gamma.hedge_figure([{"hedge_pressure": 1e9}], ["a"])
+    none_ = gamma.hedge_figure([], [])
+    assert len(both["series"]) == len(one["series"]) == len(none_["series"]) == 2
+
+
+def test_candles_keep_price_direction_colours():
+    # Deliberate: candle up/down encodes PRICE direction, not gamma sign, so it
+    # stays green/red even though the hedge panel moved to the plasma scheme.
+    body, _wick = gamma.candle_points([[0, 10, 12, 9, 11], [1, 11, 11, 8, 9]])
+    assert body[0]["color"] == gamma.UP_COLOR
+    assert body[1]["color"] == gamma.DOWN_COLOR
+    assert gamma.UP_COLOR not in (gamma.POS_COLOR, gamma.NEG_COLOR)
+
+
 def test_heatmap_flip_line_defensive_and_independent():
     # Flip alone (no walls) still draws; a garbage flip is skipped, not raised on.
     assert len(gamma.heatmap_figure(_WALL_ROWS, "GEX", flip=449.5)["yAxis"]["plotLines"]) == 1
@@ -1812,15 +1926,19 @@ _HEDGE = [{"ts": 1, "hedge_pressure": 1.5e9, "net_delta_0dte": 5e10, "projected_
 
 
 def test_hedge_figure_plots_pressure_in_billions_signed():
-    pts = gamma.hedge_figure(_HEDGE, ["09:30", "09:31", "09:32"])["series"][0]["data"]
+    named = {s["name"]: s for s in
+             gamma.hedge_figure(_HEDGE, ["09:30", "09:31", "09:32"])["series"]}
+    buy, sell = named["Hedge buy"]["data"], named["Hedge sell"]["data"]
     # Dollars are unreadable raw; the axis is $B and the sign is the whole point
     # (positive = dealers must BUY into the close, negative = sell).
-    assert [p["y"] for p in pts] == [1.5, -2.5, 3.0]
-    assert [p["x"] for p in pts] == [0, 1, 2]          # shares the heatmap's x index
-    # Colored PER POINT by sign, so ONE series carries both and the flip from
-    # buy- to sell-pressure is visible at a glance.
-    assert pts[0]["color"] == gamma.UP_COLOR
-    assert pts[1]["color"] == gamma.DOWN_COLOR
+    all_pts = sorted(buy + sell, key=lambda p: p["x"])
+    assert [p["y"] for p in all_pts] == [1.5, -2.5, 3.0]
+    assert [p["x"] for p in all_pts] == [0, 1, 2]      # shares the heatmap's x index
+    # Split into a series PER SIGN (the glow is a per-series shadow), each keeping
+    # its own x index — so the flip from buy- to sell-pressure is still visible at
+    # a glance and the columns stay on the heatmap's time axis.
+    assert [p["x"] for p in buy] == [0, 2]
+    assert [p["x"] for p in sell] == [1]
 
 
 def test_hedge_figure_empty_is_safe():
@@ -1877,14 +1995,21 @@ def test_bar_figure_overlays_a_projected_outline_series():
     assert proj["color"] == "transparent"
     assert proj["borderColor"] == gamma.PROJ_FLIP_COLOR
     # Drawn on TOP of the solid bars, and overlaid (not grouped beside them).
-    assert names.index("Projected close") > names.index(gamma._view_label("DEX"))
+    assert names[-1] == "Projected close"
+    assert names.index("Projected close") > names.index("Call gamma")
+    assert names.index("Projected close") > names.index("Put gamma")
     assert fig["plotOptions"]["bar"]["grouping"] is False
 
 
-def test_bar_figure_omits_projected_series_when_no_drift():
+def test_bar_figure_projected_series_is_empty_not_absent_when_no_drift():
+    # Was "omits the series". It is now ALWAYS emitted and merely EMPTY, because
+    # the element updates in place and Highcharts replaces (not updates) series
+    # when the COUNT changes. The visual intent is unchanged — an empty series
+    # draws nothing, so a symbol with no 0-DTE book still shows no outline.
     plain = {k: v for k, v in _DRIFT_DATA.items() if k != "hedge_drift_by_strike"}
     fig = gamma.bar_figure(plain, 450.0, view="DEX")
-    assert [s["name"] for s in fig["series"]] == [gamma._view_label("DEX")]
+    proj = next(s for s in fig["series"] if s["name"] == "Projected close")
+    assert proj["data"] == []
 
 
 def test_zero_value_bars_do_not_trip_the_crisping_warning():

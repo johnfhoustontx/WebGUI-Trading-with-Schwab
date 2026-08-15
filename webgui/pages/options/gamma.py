@@ -233,6 +233,59 @@ def _darker(hexc, factor=0.55):
     return "#%02x%02x%02x" % (int(r * factor), int(g * factor), int(b * factor))
 
 
+def _composite(hexc, overlay, alpha):
+    """Flatten an ``rgba(overlay, overlay, overlay, alpha)`` layer over an opaque base.
+
+    ``overlay`` is a single channel value (255 = white, 0 = black), since the
+    design's bevel is a pure white→black wash. Returns an opaque ``#rrggbb``."""
+    h = hexc.lstrip("#")
+    base = [int(h[i:i + 2], 16) for i in (0, 2, 4)]
+    return "#%02x%02x%02x" % tuple(
+        max(0, min(255, round(c * (1 - alpha) + overlay * alpha))) for c in base)
+
+
+# The reference design's glass bevel, as (position, overlay-channel, alpha):
+#   linear-gradient(180deg, rgba(255,255,255,.85) 0%, rgba(255,255,255,.28) 22%,
+#                   rgba(255,255,255,.04) 46%, rgba(0,0,0,.30) 74%, rgba(0,0,0,.55) 100%)
+# laid over the bar's own colour — a bright specular top rolling to a dark
+# underside, which is the whole of the "3D" read.
+BEVEL_STOPS = [(0.00, 255, 0.85), (0.22, 255, 0.28), (0.46, 255, 0.04),
+               (0.74, 0, 0.30), (1.00, 0, 0.55)]
+
+# Design: box-shadow 0 0 12px <bar colour>. Highcharts' shadow `width` is the blur.
+GLOW_WIDTH = 12
+
+
+def bevel_fill(hexc, vertical=True):
+    """The design's glass bevel as a Highcharts gradient fill over ``hexc``.
+
+    An SVG fill takes ONE paint, so the design's CSS overlay-on-top-of-a-colour is
+    BAKED into the stops via ``_composite`` rather than layered. Highcharts leaves
+    ``gradientUnits`` unset for 0–1 coordinates, so the gradient is
+    ``objectBoundingBox`` — each bar gets the bevel scaled to its own box, which is
+    what makes a short bar look like a short cylinder rather than a slice of a long
+    one (verified live).
+
+    ``vertical`` lights the bar across its THICKNESS: a horizontal ``bar`` is thick
+    top-to-bottom (vertical gradient), a vertical ``column`` is thick left-to-right
+    (horizontal). Passing the wrong one shades along the bar's LENGTH, which reads
+    as a fade rather than a bevel."""
+    grad = ({"x1": 0, "y1": 0, "x2": 0, "y2": 1} if vertical
+            else {"x1": 0, "y1": 0, "x2": 1, "y2": 0})
+    return {"linearGradient": grad,
+            "stops": [[pos, _composite(hexc, ov, a)] for pos, ov, a in BEVEL_STOPS]}
+
+
+def glow(hexc, width=GLOW_WIDTH):
+    """A centred (zero-offset) shadow in the bar's OWN colour — i.e. a glow.
+
+    Highcharts honours ``shadow`` per SERIES only; a per-POINT shadow is silently
+    dropped (probed live — the point carries no ``filter`` attribute at all). That
+    is why the bar and hedge panels split their data into one series per sign
+    instead of colouring points within a single series."""
+    return {"color": hexc, "width": width, "offsetX": 0, "offsetY": 0, "opacity": 1}
+
+
 def line_annotations(spot, flip, walls):
     """Reference-line labels (Spot / Gamma flip / walls) as ``{value, text, color}``.
 
@@ -499,10 +552,16 @@ def bar_figure(data, spot, view="GEX", walls=None, flip=None, n_side=N_SIDE, hei
     b = bars_from_gex(data, spot, n_side)
     label = _view_label(view)
     yr = yrange if yrange is not None else bar_yrange(b["strikes"], spot)
-    points = [{"x": s, "y": n, "color": c,
-               "borderColor": _darker(c), "borderWidth": 1,
-               "custom": {"hover": h}}
-              for s, n, c, h in zip(b["strikes"], b["nets"], b["colors"], b["hovers"])]
+    # Split by SIGN into two series. Highcharts applies `shadow` (the design's glow)
+    # per SERIES — a per-point shadow is silently dropped — so one glow colour per
+    # series is the only way each side can glow its own colour. Each point still
+    # carries its own bevelled gradient fill.
+    pos_pts, neg_pts = [], []
+    for s, n, c, h in zip(b["strikes"], b["nets"], b["colors"], b["hovers"]):
+        (pos_pts if n >= 0 else neg_pts).append(
+            {"x": s, "y": n, "color": bevel_fill(c),
+             "borderColor": _darker(c), "borderWidth": 1,
+             "custom": {"hover": h}})
     plotlines = [_strike_plotline(a["value"],
                                   a["color"],
                                   "Solid" if a["text"].startswith("Spot") else
@@ -542,7 +601,12 @@ def bar_figure(data, spot, view="GEX", walls=None, flip=None, n_side=N_SIDE, hei
         "plotOptions": {"bar": {"pointPadding": 0.04, "groupPadding": 0,
                                 "borderRadius": 0, "grouping": False,
                                 "crisp": False}},
-        "series": [{"type": "bar", "name": label, "data": points, "colorByPoint": False}],
+        "series": [
+            {"type": "bar", "name": "Call gamma", "data": pos_pts,
+             "colorByPoint": False, "shadow": glow(POS_COLOR)},
+            {"type": "bar", "name": "Put gamma", "data": neg_pts,
+             "colorByPoint": False, "shadow": glow(NEG_COLOR)},
+        ],
     })
     # Projected close: each strike's net after ITS OWN 0-DTE charm drift. Drawn as an
     # outline ON TOP of the solid bar (transparent fill) so it reads whether the
@@ -553,13 +617,17 @@ def bar_figure(data, spot, view="GEX", walls=None, flip=None, n_side=N_SIDE, hei
                  "custom": {"hover": f"{s_:g}: projected close {pv:,.0f}"}}
                 for s_, pv in zip(b["strikes"], b.get("projected") or [])
                 if isinstance(pv, (int, float)) and not isinstance(pv, bool)]
-    if proj_pts:
-        fig["series"].append({
-            "type": "bar", "name": "Projected close", "data": proj_pts,
-            "color": "transparent", "borderColor": PROJ_FLIP_COLOR, "borderWidth": 1,
-            "enableMouseTracking": True,
-            "states": {"inactive": {"enabled": False}, "hover": {"enabled": False}},
-        })
+    # ALWAYS emitted, empty when the symbol has no 0-DTE book. This element is
+    # updated IN PLACE and Highcharts REPLACES rather than updates series when the
+    # count changes — leaving stray paths and shifted colorIndexes, the same trap
+    # heatmap_figure documents. Appending this conditionally made the count swing
+    # 1↔2 between symbols; with the sign split it is now a fixed 3.
+    fig["series"].append({
+        "type": "bar", "name": "Projected close", "data": proj_pts,
+        "color": "transparent", "borderColor": PROJ_FLIP_COLOR, "borderWidth": 1,
+        "enableMouseTracking": True,
+        "states": {"inactive": {"enabled": False}, "hover": {"enabled": False}},
+    })
     return fig
 
 
@@ -604,7 +672,16 @@ def _coloraxis(zmax):
     return ca
 
 
-UP_COLOR, DOWN_COLOR = "#7fd1a3", "#e79a9a"   # candle/OHLC up / down
+# Candle/OHLC up / down. Deliberately NOT the plasma pair: these encode PRICE
+# direction, where green/red is the universal convention and cyan/magenta would
+# collide with the call/put meaning carried by every other mark on the panel.
+UP_COLOR, DOWN_COLOR = "#7fd1a3", "#e79a9a"
+
+# 0-DTE hedge pressure: dealers must BUY into the close / must SELL. Kept as its
+# own pair rather than reusing UP/DOWN_COLOR — that pair also serves the candles,
+# and the hedge panel moved to the plasma scheme while the candles did not.
+HEDGE_BUY_COLOR = POS_COLOR
+HEDGE_SELL_COLOR = NEG_COLOR
 
 
 def ohlc_bars(spots, interval):
@@ -673,13 +750,16 @@ def hedge_points(hedge_rows):
     x is the row INDEX so the panel shares the heatmap's time-category axis exactly.
     Dollars are converted to BILLIONS (raw values run to 1e9+ and are unreadable),
     and each point is colored by SIGN — positive means dealers must BUY into the
-    close, negative SELL — so a flip from one to the other is visible at a glance."""
+    close, negative SELL — so a flip from one to the other is visible at a glance.
+    The colours are the plasma pair (``HEDGE_*_COLOR``), which ``hedge_figure`` also
+    partitions its two series on."""
     out = []
     for i, r in enumerate(hedge_rows or []):
         v = (r or {}).get("hedge_pressure")
         if not isinstance(v, (int, float)) or isinstance(v, bool):
             continue
-        out.append([i, round(v / 1e9, 4), UP_COLOR if v >= 0 else DOWN_COLOR])
+        out.append([i, round(v / 1e9, 4),
+                    HEDGE_BUY_COLOR if v >= 0 else HEDGE_SELL_COLOR])
     return out
 
 
@@ -716,18 +796,28 @@ def hedge_figure(hedge_rows, times, height=150):
                   "labels": {"enabled": False},
                   "plotLines": [{"value": 0, "color": "#42506b", "width": 1,
                                  "zIndex": 3}]},
-        "series": [{
-            "type": "column", "name": "Hedge pressure",
-            "data": [{"x": x, "y": y, "color": c} for x, y, c in pts],
-            "borderWidth": 0, "groupPadding": 0.02, "pointPadding": 0.0,
-            # Same zero-height crisping warning as the bar chart — and pressure
-            # legitimately decays to exactly 0 at the close, so it WILL happen daily.
-            "crisp": False,
-            "states": {"inactive": {"enabled": False}, "hover": {"enabled": False}},
-            "enableMouseTracking": True,
-            "tooltip": {"headerFormat": "",
-                        "pointFormat": "Hedge {point.y:+,.2f}B"},
-        }],
+        # Split by SIGN for the same reason as the bar panel: the glow is a
+        # per-SERIES shadow, so buy-side and sell-side need their own series to
+        # glow their own colour. Both are ALWAYS emitted (empty when that side has
+        # no pressure) so the count stays fixed at 2 across in-place updates.
+        "series": [
+            {"type": "column", "name": name,
+             # Columns are thick left-to-right, so the bevel runs HORIZONTALLY —
+             # vertical would shade along the bar's length and read as a fade.
+             "data": [{"x": x, "y": y, "color": bevel_fill(colour, vertical=False)}
+                      for x, y, c in pts if (c == colour)],
+             "borderWidth": 0, "groupPadding": 0.02, "pointPadding": 0.0,
+             "shadow": glow(colour),
+             # Same zero-height crisping warning as the bar chart — and pressure
+             # legitimately decays to exactly 0 at the close, so it WILL happen daily.
+             "crisp": False,
+             "states": {"inactive": {"enabled": False}, "hover": {"enabled": False}},
+             "enableMouseTracking": True,
+             "tooltip": {"headerFormat": "",
+                         "pointFormat": "Hedge {point.y:+,.2f}B"}}
+            for name, colour in (("Hedge buy", HEDGE_BUY_COLOR),
+                                 ("Hedge sell", HEDGE_SELL_COLOR))
+        ],
     })
     return fig
 
