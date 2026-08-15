@@ -2,7 +2,7 @@
 REM restart_one.bat <kill_port|0> <wait_port|0> <name> <script_relpath_from_repo_root>
 REM
 REM   Windowless single-component (re)start used by the System Status page's
-REM   Restart buttons. Frees <kill_port> (taskkills whatever is LISTENING on it —
+REM   Restart buttons. Frees <kill_port> (taskkills whatever is LISTENING on it -
 REM   clears a wedged process), waits for <wait_port> (0 = skip), then launches the
 REM   venv python on <script> HIDDEN, with stdout/stderr redirected to
 REM   logs\<name>.out.log / .err.log.
@@ -10,6 +10,17 @@ REM
 REM   Meant to be spawned with CREATE_NO_WINDOW (see webgui/pages/status.py) so
 REM   nothing flashes. Uses `ping` for its sleeps (not `timeout`) so it works in a
 REM   hidden console with no interactive stdin.
+REM
+REM   KEEP THIS FILE CRLF AND ASCII-ONLY. Measured 2026-08-15: with LF-only
+REM   line endings AND a non-ASCII byte anywhere in the file AND a console
+REM   codepage of 65001 (UTF-8 - what PowerShell uses here; Git Bash is 437),
+REM   cmd.exe resumes parsing 2 bytes into the NEXT line. Line 2 then reads as
+REM   `M restart_one.bat <kill_port|0> ...`, the `<` is taken as a redirection,
+REM   and the whole script dies on line 2 with:
+REM       < was unexpected at this time.
+REM   Removing ANY ONE of the three conditions fixes it, so this file carries
+REM   two of the three: .gitattributes pins the CRLF, and the comments above
+REM   stay ASCII. Guarded by tools/tests/test_batch_line_endings.py.
 setlocal
 for %%I in ("%~dp0..") do set "ROOT=%%~fI"
 set "PY=%ROOT%\.venv\Scripts\python.exe"
