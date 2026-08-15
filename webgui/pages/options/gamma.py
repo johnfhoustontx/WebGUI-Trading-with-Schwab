@@ -26,14 +26,23 @@ from shared import market_calendar as _mc
 from .inputs import select_all_on_focus
 from .theme import BTN, BTN_PRIMARY, MUTED
 
-POS_COLOR = "#66bb6a"
-NEG_COLOR = "#ef5350"
+# "Plasma" palette (see docs/plans/2026-08-15-gamma-plasma-palette-design.md): the
+# exposure field runs CYAN for call-heavy (positive net) and MAGENTA for put-heavy
+# (negative). These two are the ramp's "hot" stops, and they do double duty — the
+# by-strike bars and the sided wall lines use them, so a bar, a wall and the cells
+# around them all read as the same instrument.
+POS_COLOR = "#35c8ff"
+NEG_COLOR = "#ff4d8d"
+CALL_WALL_COLOR = POS_COLOR
+PUT_WALL_COLOR = NEG_COLOR
 SPOT_COLOR = "#ffd54f"
 PRICE_LINE = "#f5f5f5"          # off-white — spot track overlaid on the dark heatmap
-HEATMAP_SEP = "#4d4d4d"         # softer (lighter) cell-separator mesh on the heatmap
-FLIP_COLOR = "#42a5f5"
-WALL_COLOR = "#b39ddb"
+# Level lines that are NOT call/put-sided need colors from OUTSIDE the ramp, or they
+# read as data. Lavender (which the walls vacated when they went sided) and amber
+# are the two the plasma ramp never reaches — pinned by a test.
+FLIP_COLOR = "#b39ddb"
 PROJ_FLIP_COLOR = "#ffb74d"   # projected EOD delta-flip (0-DTE charm drift)
+PANEL_BORDER = "rgba(120,140,160,0.16)"   # hairline framing the washed plot area
 
 # Dark theme for all charts (matches the app's dark shell).
 DARK_BG = "#1b1b1b"
@@ -54,19 +63,58 @@ _PLOT_HEIGHT = 680
 _PLOT_MARGIN_TOP = 48
 _PLOT_MARGIN_BOTTOM = 64
 
-# Dark diverging color-axis stops: the heatmap blends into the dark page (like the
-# candlestick chart) — net ≈ 0 fades to TRANSPARENT (the background shows through),
-# strong negative glows red, strong positive glows green. (rgba alpha is honored by
-# the interpolated heatmap image.) Replaces the old light RdYlGn (yellow-at-zero).
+# Diverging PLASMA color-axis stops. The axis is symmetric about zero (0.0 = most
+# negative … 0.50 = zero … 1.0 = most positive) while the reference design's ramps
+# are one-sided intensity ramps, so each ramp is MIRRORED outward from the centre:
+# put-heavy runs aubergine → magenta → pale pink, call-heavy runs deep blue → cyan
+# → ice. Net ≈ 0 stays TRANSPARENT so the wash behind shows through (rgba alpha is
+# honored by the interpolated heatmap image) — that is what lets the panel read as
+# depth rather than a box.
+#
+# Two properties here are deliberate, not incidental:
+#  • the ALPHA ramp (0 at the centre → ~1 at the extremes) is what blends the field
+#    into the page, and the design does the same (`0.10 + a^1.05 * 0.90`);
+#  • the BRIGHT stops sit out at 0.88/0.12 rather than spread evenly, so most of the
+#    field stays deep blue/aubergine and only the cores reach cyan and ice. That
+#    reproduces the design's `pow(a, 1.7)` colour-position shaping without needing a
+#    non-linear axis.
+# Shared by all four intraday views AND Term via ``_coloraxis``.
 HEAT_STOPS = [
-    [0.00, "rgba(239,83,80,0.95)"],   # most-negative net → strong red
-    [0.30, "rgba(239,83,80,0.45)"],
-    [0.48, "rgba(239,83,80,0.0)"],
-    [0.50, "rgba(0,0,0,0.0)"],         # zero → transparent (dark page shows through)
-    [0.52, "rgba(102,187,106,0.0)"],
-    [0.70, "rgba(102,187,106,0.45)"],
-    [1.00, "rgba(102,187,106,0.95)"],  # most-positive net → strong green
+    [0.00, "rgba(255,186,220,0.98)"],  # most-negative net → pale pink
+    [0.12, "rgba(255,77,141,0.92)"],   # put "hot" (magenta)
+    [0.28, "rgba(150,36,122,0.62)"],
+    [0.48, "rgba(52,10,44,0.0)"],      # put ramp base, faded out
+    [0.50, "rgba(0,0,0,0.0)"],         # zero → transparent (the wash shows through)
+    [0.52, "rgba(8,44,78,0.0)"],       # call ramp base, faded out
+    [0.72, "rgba(42,118,224,0.62)"],
+    [0.88, "rgba(53,200,255,0.92)"],   # call "hot" (cyan)
+    [1.00, "rgba(190,248,255,0.98)"],  # most-positive net → ice
 ]
+
+# The washed plot background, blue at the top fading to magenta at the bottom.
+#
+# This sets ``plotBackgroundColor``, which commit e6ef342 removed — read that
+# before "fixing" it back. There it held a FLAT grey (the old ``HEATMAP_SEP``)
+# which showed through the gaps between individually-bordered cells and read as a
+# separator mesh. The same commit turned on ``interpolation: True``, which renders
+# the heatmap as ONE continuous image with no cell gaps at all — so nothing can
+# show BETWEEN cells any more, and a gradient here is a wash painted behind that
+# image, not a mesh. Its job is to keep quiet strikes reading as dim colour instead
+# of empty space.
+def _wash_background():
+    return {
+        "linearGradient": {"x1": 0, "y1": 0, "x2": 0, "y2": 1},
+        "stops": [[0.00, "#0a1626"], [0.46, "#0b1420"],
+                  [0.62, "#140b16"], [1.00, "#170a12"]],
+    }
+
+
+def _apply_wash(fig):
+    """Paint the plasma wash behind a heatmap's plot area and frame it."""
+    fig["chart"]["plotBackgroundColor"] = _wash_background()
+    fig["chart"]["plotBorderWidth"] = 1
+    fig["chart"]["plotBorderColor"] = PANEL_BORDER
+    return fig
 
 
 def _dark_axis(title=None):
@@ -197,8 +245,9 @@ def line_annotations(spot, flip, walls):
     if flip is not None:
         anns.append({"value": flip, "text": f"Gamma flip {flip:g}", "color": FLIP_COLOR})
     for w in (walls or []):
-        side = "Call wall" if (spot is None or w >= spot) else "Put wall"
-        anns.append({"value": w, "text": f"{side} {w:g}", "color": WALL_COLOR})
+        call = spot is None or w >= spot
+        anns.append({"value": w, "text": f"{'Call' if call else 'Put'} wall {w:g}",
+                     "color": CALL_WALL_COLOR if call else PUT_WALL_COLOR})
     return anns
 
 
@@ -239,8 +288,9 @@ def wall_plot_lines(spot, walls, flip=None, projected_flip=None):
     for w in (walls or []):
         if not _is_level(w):
             continue
-        side = "Call wall" if (spot is None or w >= spot) else "Put wall"
-        out.append(_level_plot_line(w, f"{side} {w:g}", WALL_COLOR))
+        call = spot is None or w >= spot
+        out.append(_level_plot_line(w, f"{'Call' if call else 'Put'} wall {w:g}",
+                                    CALL_WALL_COLOR if call else PUT_WALL_COLOR))
     return out
 
 
@@ -823,8 +873,13 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
     _bars = (ohlc_bars(spots, spot_interval)
              if spot_style in ("candle", "ohlc") else [])
     _body, _wick = candle_points(_bars)
+    # The white track crosses bright cyan cores, so it carries the design's dark
+    # halo — a series ``shadow``, NOT a second underlaid line series, because the
+    # series COUNT is load-bearing for the in-place chart.update() (see above).
     series.append(_line_series("Spot", spot_pts if spot_style == "line" else [],
-                               PRICE_LINE, lineWidth=2, enableMouseTracking=True))
+                               PRICE_LINE, lineWidth=2, enableMouseTracking=True,
+                               shadow={"color": "rgba(0,0,0,0.85)", "width": 5,
+                                       "offsetX": 0, "offsetY": 0, "opacity": 1}))
     series.append({
         "type": "columnrange", "name": "Spot candles", "data": _body,
         "colorAxis": False, "states": no_fade, "borderWidth": 0,
@@ -849,8 +904,8 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
     # (empty data) to keep the series count fixed — see the note above.
     lv = levels or {}
     for name, key, color in (("Flip track", "flip", FLIP_COLOR),
-                             ("Call wall track", "call_wall", WALL_COLOR),
-                             ("Put wall track", "put_wall", WALL_COLOR)):
+                             ("Call wall track", "call_wall", CALL_WALL_COLOR),
+                             ("Put wall track", "put_wall", PUT_WALL_COLOR)):
         pts = track_points(lv.get(key)) if show_tracks else []
         series.append(_line_series(name, pts, color, lineWidth=1, step="left",
                                    enableMouseTracking=False))
@@ -867,6 +922,7 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
         yaxis["min"], yaxis["max"] = yrange[0], yrange[1]
     fig = _base_chart("heatmap", height)
     fig["chart"]["backgroundColor"] = "transparent"     # same as the candlestick graph
+    _apply_wash(fig)     # blue→magenta wash behind the cells; quiet strikes stay lit
     # Shared plot geometry so the Strike axis aligns pixel-for-pixel with the bars.
     fig["chart"]["marginTop"] = _PLOT_MARGIN_TOP
     fig["chart"]["marginBottom"] = _PLOT_MARGIN_BOTTOM   # room for rotated time labels
@@ -1633,6 +1689,7 @@ def term_heatmap(term_grid):
     no_fade = {"inactive": {"enabled": False}, "hover": {"enabled": False}}
     fig = _base_chart("heatmap", 680)
     fig["chart"]["backgroundColor"] = "transparent"     # same as the candlestick graph
+    _apply_wash(fig)                                    # same wash as intraday
     # Blended + press-and-hold tooltip, same as the intraday heatmap. The Term view
     # is painted on chart_el (recreated on the bar↔Term kind switch), so the load
     # hook rides this figure and fires on that recreation.
