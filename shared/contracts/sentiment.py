@@ -32,6 +32,12 @@ class RegimeState(_Base):
     committed_label: str = ""        # hysteresis-committed label key
     transition: dict | None = None   # {"from","to","progress"} or None
     evidence: list = []              # list[str] for the UI "why" popup
+    # The same evidence, structured: ``[{"text", "regime", "severity"}, ...]`` in
+    # the same order, where severity is "warn" for a line produced by an adverse
+    # regime (choppy/crisis) and "info" otherwise. Additive — ``evidence`` keeps
+    # its exact shape, so a reader that predates this field is unaffected, and a
+    # payload published before it simply carries an empty list.
+    evidence_detail: list = []
     # Direction is a DISPLAY axis, additive and defaulting to neutral: -1/0/+1,
     # claimed only when the regime's own slope and the Market Trend composite
     # agree. Renderers word it per regime (Rallying/Firming vs Retreating/

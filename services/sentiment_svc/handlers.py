@@ -366,7 +366,8 @@ _REGIME_LOCK = threading.Lock()
 # starting with "_" is in-process carry and must never be published.
 _REGIME_PUBLIC_KEYS = ("ts", "as_of", "memberships", "raw", "confidence",
                        "unclear", "label", "committed_label", "transition",
-                       "evidence", "version_info", "direction", "direction_strong")
+                       "evidence", "evidence_detail", "version_info",
+                       "direction", "direction_strong")
 
 
 def _read_matrix(bus):
@@ -561,6 +562,7 @@ def run_crisis_check(bus):
                 "committed_label": "crisis",
                 "transition": mr.detect_transition(fast, slow) if slow else None,
                 "evidence": list(scores.evidence),
+                "evidence_detail": compute.evidence_detail(scores),
                 "_fast": fast,
                 "_commit": mr.CommitState(committed="crisis", streak=0),
             })

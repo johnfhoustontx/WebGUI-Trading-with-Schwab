@@ -1086,6 +1086,7 @@ def _unclear_shell(now_ts, prior):
         "committed_label": "",
         "transition": None,
         "evidence": [],
+        "evidence_detail": [],
         "direction": 0,
         "direction_strong": False,
         "version_info": {"model": _REGIME_MODEL},
@@ -1175,6 +1176,7 @@ def compute_market_regime(schwab, matrix=None, vix=None, prior=None,
             "committed_label": committed or "",
             "transition": transition,
             "evidence": list(scores.evidence),
+            "evidence_detail": evidence_detail(scores),
             "direction": dir_state.committed,
             "direction_strong": strong,
             "version_info": {"model": _REGIME_MODEL},
@@ -1437,6 +1439,46 @@ def _fetch_sector_week_pcts():
     return _fetch_sector_pcts()["week"]
 
 
+# Shape of ``velocity.values`` when nothing could be computed — the three keys
+# are ALWAYS present so a renderer never has to distinguish "key absent" from
+# "value None"; only the latter means "not enough history".
+_EMPTY_VELOCITY_VALUES = {"roc_3d": None, "roc_5d": None, "z_20d": None}
+
+# Which regimes' evidence reads as ADVERSE. A line's severity is not a property
+# of its wording but of the regime that produced it: "11 EMA whipsaws" is a
+# choppy-scorer line and "ADX 36 rising" is a trending-scorer line, and no amount
+# of pattern-matching the copy recovers that reliably. Emitted here rather than
+# in the engine because severity is a display-facing semantic state — exactly the
+# kind of thing CLAUDE.md wants Tier 2 to hand Tier 1 pre-decided.
+_ADVERSE_REGIMES = frozenset({"choppy", "crisis"})
+
+
+def evidence_detail(scores):
+    """``[{"text", "regime", "severity"}, ...]`` from a ``RegimeScores``.
+
+    Tolerates a scores object predating ``evidence_detail`` (falls back to the
+    flat ``evidence`` list with an unknown regime and neutral severity), and any
+    malformed entry, so a classifier change can never abort a refresh."""
+    try:
+        detail = list(getattr(scores, "evidence_detail", None) or [])
+    except Exception:  # noqa: BLE001
+        detail = []
+    if not detail:
+        try:
+            return [{"text": str(t), "regime": "", "severity": "info"}
+                    for t in (getattr(scores, "evidence", None) or [])]
+        except Exception:  # noqa: BLE001
+            return []
+    out = []
+    for d in detail:
+        if not isinstance(d, dict):
+            continue
+        regime = str(d.get("regime") or "")
+        out.append({"text": str(d.get("text") or ""), "regime": regime,
+                    "severity": "warn" if regime in _ADVERSE_REGIMES else "info"})
+    return out
+
+
 def _divergence_named(snapshot):
     """[(display_name, score)] for confident, scored components — mirrors the
     page's ``divergence_named`` (in-composite + credit_pulse, name order)."""
@@ -1482,7 +1524,7 @@ def derive_composite_extras(live, snaps, spy, trend=None, trend_30d=None,
     except Exception:  # noqa: BLE001
         prior_scores = []
 
-    velocity = {"text": "", "flag": ""}
+    velocity = {"text": "", "flag": "", "values": _EMPTY_VELOCITY_VALUES.copy()}
     try:
         v = scoring_composite.velocity(list(prior_scores), total)
         roc3, roc5, z = v["roc_3d"], v["roc_5d"], v["z_20d"]
@@ -1495,15 +1537,31 @@ def derive_composite_extras(live, snaps, spy, trend=None, trend_30d=None,
             "text": " | ".join(parts),
             "flag": (f"REGIME BREAK: {z:+.2f}σ from 20d mean"
                      if v["regime_break"] else ""),
+            # The SAME three numbers the text above formats, published raw so a
+            # renderer can draw them (bipolar meters) without parsing prose.
+            # None where the history is too short — a meter must then render "no
+            # read", not a zero, which is a real position on a signed scale.
+            "values": {"roc_3d": roc3, "roc_5d": roc5, "z_20d": z},
         }
     except Exception:  # noqa: BLE001
-        velocity = {"text": "", "flag": ""}
+        velocity = {"text": "", "flag": "", "values": _EMPTY_VELOCITY_VALUES.copy()}
 
     divergence = ""
+    divergence_detail = None
     try:
-        divergence = scoring_composite.divergence(_divergence_named(latest)) or ""
+        named = _divergence_named(latest)
+        divergence = scoring_composite.divergence(named) or ""
+        # Structured form of the SAME finding. Deliberately gated on the engine's
+        # string being non-empty: the >=4-point rule stays the engine's to own,
+        # and this only names the two components it fired on. Sorting mirrors
+        # ``scoring.composite.divergence`` exactly (ascending; lo first, hi last).
+        if divergence and len(named) >= 2:
+            ordered = sorted(named, key=lambda pair: pair[1])
+            (lo_name, lo_s), (hi_name, hi_s) = ordered[0], ordered[-1]
+            divergence_detail = {"high": {"name": hi_name, "score": float(hi_s)},
+                                 "low": {"name": lo_name, "score": float(lo_s)}}
     except Exception:  # noqa: BLE001
-        divergence = ""
+        divergence, divergence_detail = "", None
 
     return {
         "weights": dict(WEIGHTS),
@@ -1512,6 +1570,7 @@ def derive_composite_extras(live, snaps, spy, trend=None, trend_30d=None,
         "signal": signal,
         "velocity": velocity,
         "divergence": divergence,
+        "divergence_detail": divergence_detail,
         "trend": trend if trend is not None else _neutral_trend(),
         "trend_7d": trend_7d if trend_7d is not None else _neutral_trend(),
         "trend_30d_ago": trend_30d if trend_30d is not None else _neutral_trend(),

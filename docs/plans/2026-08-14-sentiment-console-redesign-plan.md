@@ -4,7 +4,7 @@
 — the handoff bundle (README spec + `Regime Dashboard.dc.html` prototype + full-page screenshot),
 copied into the repo so this plan does not depend on a file in Downloads.
 
-**Status:** Phase 0 done (results in §4). Phases 1–7 not started.
+**Status:** Phases 0–1 done (results in §4). Phases 2–7 not started.
 
 ---
 
@@ -208,14 +208,49 @@ measures **324px against an expected 324px** — matching the handoff's own `str
 > sweep just below 360° or split it into two arcs. (`0.0` correctly draws track-only; `0.004`
 > upward draws.)
 
-### Phase 1 — Tier-2 additive fields *(small, `sentiment_svc`)*
-1.1 Publish `derived.velocity.values = {roc_3d, roc_5d, z_20d}` alongside the existing `text`.
-1.2 Publish `derived.divergence_detail = {high:{name,score}, low:{name,score}}` alongside the
-    existing string.
-1.3 Publish `regime.evidence_detail = [{label, value, severity}]` alongside `evidence`, severity
-    from the classifier (adverse evidence → `warn`).
-All three are **additive** — existing readers untouched, contracts extended optionally. Tests in
-`services/sentiment_svc/tests`. Requires a `sentiment_svc` restart to appear.
+### Phase 1 — Tier-2 additive fields — ✅ **DONE 2026-08-14**
+
+All three published additively; every existing reader untouched. **Requires a `sentiment_svc`
+restart to appear.**
+
+**1.1 `derived.velocity.values = {roc_3d, roc_5d, z_20d}`** beside the existing `text`. The engine
+already returned these numerically and the service was formatting them away. Live-verified:
+`{1.31, 0.16, 0.936}` against the text `"3d ROC: +1.31 | 5d ROC: +0.16 | 20d Z: +0.94"`. The three
+keys are **always present**, so a renderer never has to tell "key missing" from "value None" —
+only `None` means *not enough history*, which a signed meter must draw as "no read" rather than
+as a zero (zero is a real position on that scale).
+
+**1.2 `derived.divergence_detail = {high:{name,score}, low:{name,score}}`** beside the string.
+**Deliberately gated on the engine's string being non-empty** — the ≥4-point rule stays the
+engine's to own and this only *names* what it fired on, so the two can never disagree. Live:
+`high=Put/Call (sectors) 10.0, low=Sector Performance 4.87`.
+
+> Note the structured score is **4.87** where the string says **"4"** — `scoring.composite.
+> divergence` renders `int(lo_s)`. The structured field is the truer number; do not "fix" one to
+> match the other.
+
+**1.3 `regime.evidence_detail = [{text, regime, severity}]`** beside `evidence`.
+`scoring/market_regime.score_regimes` already knew which regime produced each string and threw the
+attribution away; it now returns it additively as `{text, regime}` (with `evidence` byte-identical
+— same strings, same order). The service adds `severity`: **`warn` for `choppy`/`crisis`, `info`
+otherwise**.
+
+> **Severity follows the SOURCE REGIME, not the wording** — and the live result validates the rule
+> rather than fitting it. Against the real classifier the six lines split exactly as the designer
+> hand-coloured them in the handoff: `EMA flat` · `Balanced profile 0.53` · `ADX 36 rising` ·
+> `Band-hug 50%` → **info** (teal), and `3 failed OR breaks` · `11 EMA whipsaws` → **warn** (red).
+> 6/6, with no pattern-matching of the copy.
+
+**Contract:** `RegimeState.evidence_detail: list = []` (additive; a payload predating it carries an
+empty list). `_REGIME_PUBLIC_KEYS` extended — the existing
+`test_public_key_list_matches_the_handler_allowlist` guard exists precisely because that filter can
+silently drop a new field, and it fired during this work as intended.
+
+**Verified:** sentiment_svc + contracts **335 passed** (1 documented pre-existing failure,
+`test_daily_history_wins_over_session_latch`); market_regime **74 passed**. Live in dev: 1.1 and
+1.2 read back off `cache:sentiment:composite` after a real `refresh` command; 1.3 exercised through
+`compute_market_regime` against the live proxy **because the regime view is RTH-gated and will not
+republish outside market hours** — its publish filter is pinned by the guard test above.
 
 ### Phase 2 — Theme tokens *(small)*
 2.1 New `config/theme.toml` section for the console palette (surfaces, hairlines, the six text

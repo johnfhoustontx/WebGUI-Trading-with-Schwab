@@ -984,6 +984,8 @@ def _regime_state(committed="trending", unclear=False, memberships=None):
         "committed_label": committed,
         "transition": None,
         "evidence": ["ADX 25 rising"],
+        "evidence_detail": [{"text": "ADX 25 rising", "regime": "trending",
+                             "severity": "info"}],
         "direction": 0,
         "direction_strong": False,
         "version_info": {"model": "regime-v1"},

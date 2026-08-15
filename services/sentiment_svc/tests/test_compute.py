@@ -6,6 +6,7 @@ monkeypatching the proxy accessor so nothing requires a live proxy.
 import sys
 
 import pandas as pd
+import pytest
 
 from services import _proxy
 from services.sentiment_svc import compute
@@ -57,7 +58,8 @@ def test_derive_composite_extras_shape_and_values():
     out = compute.derive_composite_extras(live, snaps, spy)
 
     assert set(out) == {"weights", "size", "bias", "signal", "velocity",
-                        "divergence", "trend", "trend_7d", "trend_30d_ago"}
+                        "divergence", "divergence_detail", "trend", "trend_7d",
+                        "trend_30d_ago"}
     # weights = sentiment v4.3 WEIGHTS (credit_pulse excluded, sums to 1.0).
     assert abs(sum(out["weights"].values()) - 1.0) < 1e-9
     assert "credit_pulse" not in out["weights"]
@@ -66,8 +68,18 @@ def test_derive_composite_extras_shape_and_values():
     assert out["size"] and out["bias"] and out["signal"]
     # velocity text built from the prior series (full backfill since live).
     assert "3d ROC" in out["velocity"]["text"] and "20d Z" in out["velocity"]["text"]
+    # ... and the SAME numbers published raw, so a renderer never parses prose.
+    vals = out["velocity"]["values"]
+    assert set(vals) == {"roc_3d", "roc_5d", "z_20d"}
+    assert f"{vals['roc_3d']:+.2f}" in out["velocity"]["text"]
+    assert f"{vals['z_20d']:+.2f}" in out["velocity"]["text"]
     # vix 9 vs sector_perf 2 -> >=4 spread -> a divergence label.
     assert "DIVERGENCE" in out["divergence"]
+    # ... and its structured twin names the same two components.
+    det = out["divergence_detail"]
+    assert det["high"]["name"] in out["divergence"]
+    assert det["low"]["name"] in out["divergence"]
+    assert det["high"]["score"] == 9.0 and det["low"]["score"] == 2.0
     # trend defaults to the neutral directional dict when none is threaded in.
     tr = out["trend"]
     assert tr is not None
@@ -85,6 +97,60 @@ def test_derive_composite_extras_defensive_no_spy():
     assert out["divergence"] == ""
     assert out["velocity"]["flag"] == ""
     assert isinstance(out["weights"], dict)
+    # The three value keys are ALWAYS present, so a renderer never has to tell
+    # "key missing" from "value None" — only None means "not enough history".
+    assert out["velocity"]["values"] == {"roc_3d": None, "roc_5d": None,
+                                         "z_20d": None}
+    assert out["divergence_detail"] is None
+
+
+def test_divergence_detail_stays_none_when_the_engine_does_not_fire():
+    """The >=4-point rule is the ENGINE's to own. The structured pair only ever
+    names the components of a divergence the engine already declared — it must
+    never re-decide, or the two can disagree."""
+    snaps = [_snap(f"2026-05-{d:02d}", 5.0) for d in range(1, 21)]
+    flat = _snap("2026-06-01", 5.0)          # every component 5.0 -> 0 spread
+    out = compute.derive_composite_extras(flat, snaps, [])
+    assert out["divergence"] == ""
+    assert out["divergence_detail"] is None
+
+
+def test_evidence_detail_marks_choppy_and_crisis_lines_as_adverse():
+    """Severity follows the SOURCE REGIME, not the wording."""
+    class _Scores:
+        evidence = ["ADX 36 rising", "11 EMA whipsaws", "VIX1D spike 40%"]
+        evidence_detail = [{"text": "ADX 36 rising", "regime": "trending"},
+                           {"text": "11 EMA whipsaws", "regime": "choppy"},
+                           {"text": "VIX1D spike 40%", "regime": "crisis"}]
+
+    out = compute.evidence_detail(_Scores())
+    assert [d["severity"] for d in out] == ["info", "warn", "warn"]
+    assert [d["text"] for d in out] == _Scores.evidence
+
+
+def test_evidence_detail_falls_back_to_the_flat_list():
+    """A scores object predating the engine field still yields usable chips
+    rather than an empty tags card."""
+    class _Old:
+        evidence = ["EMA flat", "Band-hug 50%"]
+
+    out = compute.evidence_detail(_Old())
+    assert [d["text"] for d in out] == ["EMA flat", "Band-hug 50%"]
+    assert all(d["severity"] == "info" and d["regime"] == "" for d in out)
+
+
+@pytest.mark.parametrize("scores", [None, object(), "x"])
+def test_evidence_detail_never_raises(scores):
+    assert compute.evidence_detail(scores) == []
+
+
+def test_evidence_detail_skips_malformed_entries():
+    class _Junk:
+        evidence = []
+        evidence_detail = [None, "x", {"text": "ok", "regime": "choppy"}]
+
+    out = compute.evidence_detail(_Junk())
+    assert out == [{"text": "ok", "regime": "choppy", "severity": "warn"}]
 
 
 def test_build_trend_dict_none_on_empty():

@@ -2891,6 +2891,13 @@ read them as a regression:**
   `test_key_levels_doc.py` ×3, and
   `test_scanner_engine.py::TestEarningsAvoidance` ×2.
 - **options_svc** — 2 date-relative `test_expected_move` failures (932 passed).
+- **sentiment-dashboard** — **2**, both in `tests/test_apply_sector_perf.py`
+  (`test_apply_sector_perf_merges_into_existing_quotes`,
+  `test_apply_sector_perf_renders_from_merged_map`), failing with
+  `ModuleNotFoundError: No module named 'sentiment_dashboard'`. They test the old
+  **Tk UI entrypoint, which this repo deliberately never copied** (see the folder
+  map), so they can never pass here. Suite reads **487 passed / 2 failed**;
+  first measured 2026-08-14.
 - **sentiment_svc** — `tests/test_compute_regime.py::test_daily_history_wins_over_session_latch`
   (the `$VIX1D` session latch beats the daily close: `assert 18.0 == 10.0`). Suite
   reads **279 passed / 1 failed** (2026-08-14; was 250/1). Reproduced at `7667920`,
