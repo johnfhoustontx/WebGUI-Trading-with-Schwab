@@ -4,7 +4,7 @@
 — the handoff bundle (README spec + `Regime Dashboard.dc.html` prototype + full-page screenshot),
 copied into the repo so this plan does not depend on a file in Downloads.
 
-**Status:** Phases 0–2 done (results in §4). Phases 3–7 not started.
+**Status:** Phases 0–3 done (results in §4). Phases 4–7 not started.
 
 ---
 
@@ -294,14 +294,55 @@ the first two and has neither.** Rajdhani genuinely resolves (618.28px vs the 77
 
 **Verified:** webgui **1382 passed** (18 new).
 
-### Phase 3 — Shared primitives *(medium — the bulk of the new pure code)*
-3.1 `timeframe_meter` — label · track · fill+glow · end marker · value; plus the **hatched
-    "NO READ"** state and the shared 0/25/50/75/100 ruler row.
-3.2 `segmented_meter` — N discrete cells (model confidence).
-3.3 `bipolar_meter` — centred zero line, fill extending either side (ROC / z).
-3.4 `confidence_dial` — SVG, reusing `rings._arc_path`; layered-stroke halo, centred label stack.
-3.5 `hairline_grid` / `card_shell` / `chip` / `stat_cell` — the repeated chrome.
-Each is a pure builder with unit tests, including its no-data state.
+### Phase 3 — Shared primitives — ✅ **DONE 2026-08-14**
+
+`webgui/pages/console.py` (Tailwind primitives) + `console_dial.py` (SVG). Split so every geometry
+and colour decision is a PURE function with tests, and the `mount_*` helpers are thin NiceGUI
+wrappers — the two score cards therefore cannot let their meters drift apart.
+
+**3.1 Timeframe meter.** `meter_row()` decides band, fill gradient, marker, glow and text. The
+**band thresholds are fitted to the handoff's own five readings** (73/83 green, 68 yellow, 60
+olive, 53 amber) and reproduce all five exactly; the bottom band is an **extrapolation** — the
+handoff's lowest sample is 53, and a bearish 20 should not read as the same "caution" as a 53, so
+below 35 goes red. A `None` horizon yields the **hatched "NO READ"** state, never a zero. Only a
+`positive` band glows, matching the handoff (day meter glows, week/month flat). The **end marker
+is DERIVED** as an 80% white tint (`#35d68a → #d7f7e8` vs the handoff's hand-picked `#d9fff0` —
+imperceptible on a 2px rule) so a new band colour cannot arrive without its marker.
+
+**3.2 Segmented meter.** 10 cells via flex+gap, which is what the handoff itself recommends over
+its prototype's `repeating-linear-gradient` hack.
+
+> Rounds **half-UP**, not with `round()`. Python rounds halves to even, so `round(4.5)==4` while
+> `round(5.5)==6` — a meter whose midpoint behaviour flips on the parity of the cell count. Found
+> by a test at 0.45; fixed in the code rather than the test.
+
+**3.3 Bipolar meter.** ⚠️ **The handoff's stated scale contradicts its own rendered widths.** It
+says *"right half = 0 → +5 for ROC and 0 → +2.5 for z"*, but at scale 5 the ROC values render
+**16.3%** and **4.8%** — while it states **32%** and **10%**. All three stated widths are
+self-consistent at **scale 2.5**, and the README calls the rendering the visual source of truth, so
+2.5 is used for both (verified 1.63→32.6%, 0.48→9.6%, 1.11→22.2%). A `None` reads as an em-dash,
+because **zero is a real position on a signed scale** and must not stand in for "not enough
+history" — which is exactly what Phase 1's `velocity.values` sends as `None`.
+
+**3.4 Confidence dial.** Reuses `rings._arc_path`, so the two graphics cannot disagree about where
+12 o'clock is, and both of the handoff's hacks drop out (no `-90deg` rotation, no
+sanitizer-stripped `drop-shadow` — a layered-stroke halo instead). **The Phase 0 edge case is
+fixed:** past `FULL_CIRCLE_EPS` the arc is drawn as a `<circle>`, because a 360° sweep's endpoints
+coincide and SVG draws nothing between them. Verified in the browser through the production
+`setHTML` path: 0.56 → **324px drawn against an expected 324**, 1.0 → **578px = the full
+circumference** (previously 0), and `font-family` + `letter-spacing` both survive the sanitizer.
+
+**3.5 Chrome.** `track_classes` / `NO_READ_HATCH` / `chip_classes` / `split_tag` / `width_class` /
+`left_class`. `split_tag` lifts a tag's number from **either end** ("3 failed OR breaks" vs
+"Band-hug 50%") so the design can colour it separately — a display concern, kept in Tier 1 rather
+than pushing more structure through Tier 2.
+
+**Every emitted class was measured to generate**, not assumed: the real builder output was probed
+in the running app — track alphas (0.09/0.14 exactly), the fill gradient's 8-digit hex resolving to
+0.22, the glow, the hatch, `w-[73.0%]`, `left-[73.0%]`, negative offsets, `w-px`, `left-1/2`,
+`gap-[3px]`, `text-[11.5px]`, `tracking-[.22em]`. All 20+ shapes resolved.
+
+**Verified:** webgui **1437 passed** (55 new).
 
 ### Phase 4 — The three top cards *(medium)*
 4.1 Sentiment card — hero, bias pill, delta, three meters, model-confidence footer, link.
