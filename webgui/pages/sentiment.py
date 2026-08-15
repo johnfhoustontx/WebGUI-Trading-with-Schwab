@@ -29,6 +29,7 @@ import bus_client
 from pages.rings import ring_svg
 from pages.regime_mix import (REGIME_COLORS, REGIME_LABELS, REGIME_ORDER,
                               regime_mix_svg)
+from pages import console_page
 from pages.options import theme
 from pages.options.theme import BTN_3D, THEME
 from pages.ui_guard import guard
@@ -1096,6 +1097,14 @@ def render():
     # Per-tile reactive element handles (value label, card shell, hairline rule,
     # end dot) — everything the tone recolor has to swap in place.
     tile_lbls, tile_cards, tile_rules, tile_dots = {}, {}, {}, {}
+
+    # ── Market Regime Console ────────────────────────────────────────────────
+    # The redesigned top of the page. Everything below it is unchanged and stays
+    # — the intraday graphs, the Components popup, the status bar and Refresh.
+    # One container, repainted by ``console_page.apply`` from ``_apply``.
+    console_root = console_page.render()
+    ui.separator().classes("q-my-md")
+
     # Three evenly-distributed, top-aligned columns with matching h6 headers.
     with ui.row().classes("w-full items-start justify-around gap-6 flex-wrap"):
         # ① Market Sentiment — Day/Week/Month ring + press-and-hold Components popup
@@ -1308,6 +1317,25 @@ def render():
             tile_cards[tkey].classes(remove=TONE_TILE_CLASSES, add=tone["tile"])
             tile_rules[tkey].classes(remove=TONE_RULE_CLASSES, add=tone["rule"])
             tile_dots[tkey].classes(remove=TONE_DOT_CLASSES, add=tone["dot"])
+        # The console repaints from the SAME derived values the rest of the page
+        # uses, so the two halves can never disagree about a number.
+        _trend = derived.get("trend") or {}
+        console_page.apply(console_root, {
+            "sent_arcs": sentiment_arcs(live, snaps),
+            "trend_arcs": trend_arcs(derived),
+            "bias": comp.get("bias"),
+            "total": f"{total:.2f}",
+            "confidence": _safe_float(comp.get("aggregate_confidence"), None),
+            "trend_short": _TREND_SHORT.get(_trend.get("state"), ""),
+            "trend_verdict": _trend.get("label"),
+            "trend_guidance": _trend.get("description"),
+            "signal_rows": signal_tile_rows(t, prev_total),
+            "velocity_values": (derived.get("velocity") or {}).get("values"),
+            "divergence_detail": derived.get("divergence_detail"),
+            "regime": state.get("regime") or {},
+            "regime_points": state.get("regime_points") or [],
+            "as_of": state.get("composite_at"),
+        })
         vel = velocity_lines(derived)
         vel_lbl.text = vel["text"]
         vel_lbl.set_visibility(bool(vel["text"]))

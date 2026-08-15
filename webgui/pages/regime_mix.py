@@ -50,6 +50,21 @@ REGIME_COLORS = {"mean_reversion": _CH["cyan"], "trending": _CH["green"],
                  "breakout": _CH["yellow"], "choppy": _CH["flat"],
                  "crisis": _CH["red"]}
 
+# A one-line gloss under each regime's name on the console's share table — what
+# the tape DOES in that regime, which the display word alone does not say
+# ("Whipsaw" names the state; "chop, no edge" says what it means for a trade).
+# Static copy, not data.
+REGIME_NOTES = {"mean_reversion": "TWO-SIDED FLOW",
+                "trending": "DIRECTIONAL PERSIST",
+                "breakout": "RANGE EXPANSION",
+                "choppy": "CHOP · NO EDGE",
+                "crisis": "VOL EXPANSION"}
+# What a regime at exactly zero says instead — it is not doing its thing at all,
+# so its usual gloss would be a description of something absent.
+ZERO_NOTE = "DORMANT"
+# Below this a share counts as "was at nothing" for the emerging callout.
+_EMERGING_FLOOR = 0.005
+
 # --- geometry (fixed 640-wide coordinate space; the SVG scales itself) -------
 VIEWBOX_W = 640
 ROW_H = 30
@@ -153,6 +168,47 @@ def rank_rows(points):
                      "series": ser, "flat": span < _FLAT_EPS})
     rows.sort(key=lambda r: (-r["now"], REGIME_ORDER.index(r["key"])))
     return rows
+
+
+def regime_note(row):
+    """The gloss for one ranked row — its dormant note when it holds nothing."""
+    if not isinstance(row, dict):
+        return ""
+    if _safe_frac(row.get("now")) <= 0.0:
+        return ZERO_NOTE
+    return REGIME_NOTES.get(row.get("key"), "")
+
+
+def callouts(points):
+    """``{dominant, biggest_move, emerging}`` — the console's 3-up summary strip.
+
+    Each is a ranked row (or None), picked by a stated rule rather than by eye:
+
+    * **dominant** — the largest current share.
+    * **biggest_move** — the largest ABSOLUTE change since the session open,
+      whichever way it went. The day's most-moved band is the news regardless of
+      sign; on 2026-08-14 that was Balanced at −8.4pp.
+    * **emerging** — a regime that started the session at ~nothing and is now
+      rising (Stressed, 0 → +4.9pp). This is the one worth its own tile: a band
+      waking from zero is a change of KIND, not of degree, and it is invisible
+      in a share ranking because it is still tiny. Falls back to the largest
+      riser that is not already the biggest_move, so the tile is not usually
+      blank; None when nothing is rising at all.
+    """
+    rows = rank_rows(points)
+    if not rows or not session_points(points):
+        return {"dominant": None, "biggest_move": None, "emerging": None}
+    dominant = rows[0]
+    biggest = max(rows, key=lambda r: abs(r["change"]))
+    risers = [r for r in rows if r["change"] > 0]
+    from_zero = [r for r in risers
+                 if (r["series"][0] if r["series"] else 0.0) <= _EMERGING_FLOOR]
+    if from_zero:
+        emerging = max(from_zero, key=lambda r: r["change"])
+    else:
+        others = [r for r in risers if r["key"] != biggest["key"]]
+        emerging = max(others, key=lambda r: r["change"]) if others else None
+    return {"dominant": dominant, "biggest_move": biggest, "emerging": emerging}
 
 
 def lead_margin(points):
