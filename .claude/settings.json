@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python .claude/hooks/guard_secrets.py"
+            "command": "python \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/guard_secrets.py\""
           }
         ]
       },
@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python .claude/hooks/guard_prod_promote.py"
+            "command": "python \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/guard_prod_promote.py\""
           }
         ]
       }
@@ -26,7 +26,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python .claude/hooks/ruff_fix.py"
+            "command": "python \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/ruff_fix.py\""
           }
         ]
       }
