@@ -15,6 +15,7 @@ Usage:
 """
 from __future__ import annotations
 
+import datetime as _dt
 import re
 import sys
 from pathlib import Path
@@ -424,7 +425,11 @@ def build_one(folder: str) -> None:
         print(f"  ! skip {folder}: {md_name} not found")
         return
     md_text = md_path.read_text(encoding="utf-8")
-    meta = "WebGUI Trading with Schwab · Generated 2026-07-02"
+    # Stamp the ACTUAL build date. This was a hardcoded "2026-07-02" literal, so
+    # every manual claimed that date no matter when it was rebuilt -- by 2026-08-16
+    # it was telling readers the docs were six weeks staler than they were, and it
+    # would never have corrected itself.
+    meta = f"WebGUI Trading with Schwab · Generated {_dt.date.today().isoformat()}"
     html_body = build_html(md_text, title, subtitle, meta, md_path.with_suffix(".html"))
     shots = USER_GUIDE_SHOTS if folder == "user-guide" else None
     build_docx(html_body, title, subtitle, meta, md_path.with_suffix(".docx"),
