@@ -30,6 +30,52 @@ def _read(p):
     return p.read_text(encoding="utf-8")
 
 
+_SEP = re.compile(r"^[\s/·,;:|_*`—–\-]+$")
+
+
+def _prose_words(s):
+    return [w for w in re.split(r"\s+", s.strip()) if w and not _SEP.match(w)]
+
+
+def _logical_lines(text):
+    """Markdown here is HARD-WRAPPED, so a term can sit near a line end with its
+    explanation continuing on the next. Join each block (paragraph / list item /
+    table row) into one logical line before looking at it."""
+    out = []
+    for block in re.split(r"\n\s*\n", text):
+        for chunk in re.split(r"\n(?=\s*(?:[-*]\s|\|))", block):
+            out.append(" ".join(chunk.split()))
+    return out
+
+
+def documents(text, term):
+    """True when `term` is EXPLAINED, not merely present.
+
+    ⚠ The obvious check -- ``term in text`` -- is what this replaces, and it is not
+    good enough. It passed the User Guide on Dealer Positioning's **Flow** sub-tab
+    because the token appeared in the unrelated page name "Flow Alerts", and it
+    passed **Net Prem** because the view was listed in a bare toggle line
+    ``Gamma / Charm / Delta / Vanna / Flow / Net Prem / Term`` that explained none
+    of them. Both shipped undocumented behind a green test.
+
+    The discriminator is whether the term is followed by a SENTENCE or sits inside a
+    run of peer names.
+    """
+    t = re.escape(term)
+    if re.search(rf"^#{{1,6}}\s.*\b{t}\b", text, re.M | re.I):          # own heading
+        return True
+    if re.search(rf"^\|\s*\**{t}\**\s*\|", text, re.M | re.I):          # table row label
+        return True
+    if re.search(rf"^\s*[-*]?\s*\**{t}\**\s*:?\**\s*$", text, re.M | re.I):
+        return True                                                     # label line
+    for line in _logical_lines(text):
+        m = re.search(rf"\b{t}\b", line, re.I)
+        if m and (len(_prose_words(line[m.end():])) >= 5
+                  or len(_prose_words(line[:m.start()])) >= 8):
+            return True
+    return False
+
+
 # Both are END-USER manuals: the User Guide says how to operate a thing, the
 # Reference Guide says what it is for. A user-facing surface belongs in both.
 def _both():
@@ -51,53 +97,79 @@ def _nav_labels():
 def test_every_nav_label_is_documented(label):
     """A rail item or tab a user can click must be named in BOTH end-user manuals."""
     for name, text in _both().items():
-        assert label in text, (
-            f"nav item {label!r} is not mentioned anywhere in the {name}. "
-            "Add it, or the page ships undocumented."
+        assert documents(text, label), (
+            f"nav item {label!r} is not EXPLAINED in the {name} (a bare mention in a "
+            "list of names does not count). Add it, or the page ships undocumented."
         )
 
 
-# Sub-tabs, and the buttons that open a SEPARATE screen (a new browser tab or a
-# dialog). These are the surfaces a reader cannot discover from the nav alone.
-# (label, regex that counts as covering it)
+def _section(text, page):
+    """The body of the ``## <page>`` section, up to the next same-or-higher heading.
+
+    Sub-tab coverage MUST be scoped to its own page. Searching the whole document
+    cannot tell "Net Prem is explained as a Dealer Positioning view" apart from "the
+    words Net Prem appear in the Market Dashboard tile list", and "Flow" matches the
+    unrelated Flow Alerts page on every line. Both of those false passes let real
+    gaps ship.
+    """
+    m = re.search(rf"^##\s+{re.escape(page)}\s*$", text, re.M)
+    if not m:
+        return None
+    nxt = re.search(r"^#{1,2}\s+\S", text[m.end():], re.M)
+    return text[m.end():m.end() + nxt.start()] if nxt else text[m.end():]
+
+
+# (owning page section, label for the test id, the term that section must EXPLAIN)
 SUBTABS_AND_SCREENS = [
-    ("Scanner 0-DTE", r"0-DTE"),
-    ("Scanner Directional", r"Directional"),
-    ("Gamma Charm", r"Charm"),
-    ("Gamma Vanna", r"Vanna"),
-    ("Gamma Flow", r"\bFlow\b"),
-    ("Gamma Net Prem", r"Net Prem"),
-    ("Gamma Term", r"\bTerm\b"),
-    ("Gamma Explain button", r"\bExplain\b"),
-    ("Gamma Analyze button", r"\bAnalyze\b"),
-    ("Gamma Briefings button", r"Briefings"),
-    ("Simulator Replay", r"\bReplay\b"),
-    ("Simulator What-if", r"What-if"),
-    ("Simulator IV shock", r"IV[- ]?shock"),
-    ("Portfolio Holdings", r"\bHoldings\b"),
-    ("Portfolio Sectors", r"\bSectors\b"),
-    ("Portfolio Performance", r"\bPerformance\b"),
-    ("Rescue At-Risk Board", r"At-Risk Board"),
-    ("Rescue Ad-hoc Trade", r"Ad-hoc Trade"),
-    ("EOD Detailed view", r"Detailed"),
-    ("Trade Deep Dive button", r"Deep Dive"),
-    ("Trade AI Query button", r"AI Query"),
-    ("Status Re-authorize button", r"Re-?authoriz"),
-    ("Settings Appearance", r"Appearance"),
-    ("Settings Vacuum action", r"Vacuum"),
-    ("Driver STOP control", r"\bSTOP\b"),
+    ("Market Scanner", "Scanner 0-DTE", "0-DTE"),
+    ("Market Scanner", "Scanner Swing", "Swing"),
+    ("Market Scanner", "Scanner Directional", "Directional"),
+    ("Dealer Positioning", "Gamma view", "Gamma"),
+    ("Dealer Positioning", "Charm view", "Charm"),
+    ("Dealer Positioning", "Delta view", "Delta"),
+    ("Dealer Positioning", "Vanna view", "Vanna"),
+    ("Dealer Positioning", "Flow view", "Flow"),
+    ("Dealer Positioning", "Net Prem view", "Net Prem"),
+    ("Dealer Positioning", "Term view", "Term"),
+    ("Dealer Positioning", "Explain button", "Explain"),
+    ("Dealer Positioning", "Analyze button", "Analyze"),
+    ("Dealer Positioning", "Briefings button", "Briefings"),
+    ("Simulator", "Replay", "Replay"),
+    ("Simulator", "What-if", "What-if"),
+    ("Simulator", "IV shock", "IV shock"),
+    ("Portfolio", "Holdings", "Holdings"),
+    ("Portfolio", "Sectors", "Sectors"),
+    ("Portfolio", "Performance", "Performance"),
+    ("Rescue", "At-Risk Board", "At-Risk Board"),
+    ("Rescue", "Ad-hoc Trade", "Ad-hoc Trade"),
+    ("Rescue", "Apply", "Apply"),
+    ("EOD Report", "Detailed view", "Detailed"),
+    ("EOD Report", "Generate button", "Generate"),
+    ("Trade Analyzer", "Deep Dive button", "Deep Dive"),
+    ("Trade Analyzer", "AI Query button", "AI Query"),
+    ("System Status", "Re-authorize button", "Re-authorize"),
+    ("System Status", "Restart button", "Restart"),
+    ("Settings", "Appearance editor", "Appearance"),
+    ("Settings", "Vacuum action", "Vacuum"),
+    ("Claude Trades", "STOP control", "STOP"),
+    ("Claude Trades", "Run now control", "Run now"),
+    ("Paper Account", "Reset dialog", "Reset"),
+    ("Captured Signals", "Refresh marks", "Refresh marks"),
 ]
 
 
-@pytest.mark.parametrize("label,pattern", SUBTABS_AND_SCREENS,
-                         ids=[lbl for lbl, _ in SUBTABS_AND_SCREENS])
-def test_every_subtab_and_alternate_screen_is_documented(label, pattern):
-    rx = re.compile(pattern, re.I)
+@pytest.mark.parametrize(
+    "page,label,term", SUBTABS_AND_SCREENS,
+    ids=[f"{pg}:{lbl}" for pg, lbl, _t in SUBTABS_AND_SCREENS])
+def test_every_subtab_and_alternate_screen_is_documented(page, label, term):
+    """Each sub-tab / alternate screen is explained INSIDE its own page's section."""
     for name, text in _both().items():
-        assert rx.search(text), (
-            f"{label!r} is not covered in the {name}. Sub-tabs and buttons that open "
-            "their own screen are invisible from the nav, so an undocumented one is "
-            "effectively hidden."
+        body = _section(text, page)
+        assert body is not None, f"{name} has no '## {page}' section"
+        assert documents(body, term), (
+            f"{label!r} is not explained in the {name}'s '{page}' section. "
+            "A mention elsewhere in the manual does not count -- a reader on that "
+            "page needs it there."
         )
 
 

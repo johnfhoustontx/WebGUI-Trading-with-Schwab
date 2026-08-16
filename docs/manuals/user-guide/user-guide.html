@@ -430,8 +430,82 @@ related measures.</p>
 <li>A <strong>Symbol</strong> dropdown (default <code>$SPX</code>; the list is the collected watchlist).</li>
 <li><strong>Refresh now</strong>, an <strong>Explain</strong> button, an <strong>Analyze</strong> button, and a <strong>Next
   refresh</strong> countdown.</li>
-<li>A <strong>view toggle</strong>: <strong>Gamma / Charm / Delta / Vanna / Flow / Net Prem / Term</strong>.</li>
+<li>A <strong>view toggle</strong> — seven sub-tabs, described below.</li>
 </ul>
+<p><strong>The seven views.</strong> The first four share the same bars-plus-heat-map layout; the
+last three are different screens with their own controls.</p>
+<table>
+<thead>
+<tr>
+<th>View</th>
+<th>What it shows</th>
+<th>When to use it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Gamma</strong></td>
+<td>How hard dealers must trade per point of price movement. The default, and the main read.</td>
+<td>Always.</td>
+</tr>
+<tr>
+<td><strong>Charm</strong></td>
+<td>How dealer hedges decay as <strong>time</strong> passes, price unchanged.</td>
+<td>Fridays and expiration days.</td>
+</tr>
+<tr>
+<td><strong>Delta</strong></td>
+<td>The dealers' <strong>directional</strong> exposure in dollars.</td>
+<td>Judging which way the aggregate hedge leans.</td>
+</tr>
+<tr>
+<td><strong>Vanna</strong></td>
+<td>How hedges change when <strong>volatility</strong> changes.</td>
+<td>CPI, Fed and earnings days.</td>
+</tr>
+<tr>
+<td><strong>Flow</strong></td>
+<td>Today's call premium vs put premium for this symbol, as a ribbon.</td>
+<td>Confirming a directional bias intraday.</td>
+</tr>
+<tr>
+<td><strong>Net Prem</strong></td>
+<td>Net premium (call dollars − put dollars) for <strong>many symbols at once</strong>.</td>
+<td>Comparing where money is going across names.</td>
+</tr>
+<tr>
+<td><strong>Term</strong></td>
+<td>The same exposure across the <strong>next five expirations</strong>.</td>
+<td>Choosing which expiry to trade.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Flow</strong> — the <strong>crossover</strong> is the read: the moment call dollars overtake put
+dollars, or the reverse. That is the same event the <strong>Flow Alerts</strong> page logs, shown
+here in context so you can tell a decisive break from a wobble. A strike ladder shows
+where in the chain the premium sits.</p>
+<p><strong>Net Prem</strong> — the only view showing more than one symbol, with a menu of <strong>28</strong> in
+three group tabs (<strong>Indices &amp; Broad</strong>, <strong>SPDR Sectors</strong>, <strong>Mega-caps</strong>). Two things
+are easy to get wrong:</p>
+<ul>
+<li>The group tabs filter the <strong>tick-boxes, not the chart</strong>, and your selection
+  <strong>persists across them</strong> — so you can plot <code>$SPX</code> next to <code>XLK</code>.</li>
+<li><strong>Dollars ($M) / Skew %</strong> in the panel header. The sizes differ enormously (SPY can
+  run hundreds of millions on a day DIA barely reaches one), so <strong>Dollars</strong> shows the
+  real money and <strong>Skew %</strong> rescales each line to that symbol's own premium, which is
+  what lets you compare a big name with a small one.</li>
+</ul>
+<p>Each symbol keeps the same colour, and your group, ticks and scale are remembered.</p>
+<p><strong>Term</strong> — its vertical axis is a <strong>list of expirations, not a time scale</strong>, so the
+gap between columns says nothing about how far apart the expiries are. The hairlines
+between columns matter: the smooth shading <em>across</em> a boundary is just drawing, not a
+measurement. Read the columns, not the gradient between them.</p>
+<blockquote>
+<p><strong>Premium is unsigned.</strong> Schwab publishes no options tape, so Flow and Net Prem
+show <strong>traded dollars through calls versus puts</strong> — a money-weighted put/call read,
+<strong>not</strong> net buying. A big call number is equally consistent with someone buying
+calls and someone selling covered calls.</p>
+</blockquote>
 <p><strong>Status row:</strong> a collector status dot, last-scan and next-scan times, and a one-
 line summary (spot, strike count, net exposure).</p>
 <p><strong>Panels:</strong></p>

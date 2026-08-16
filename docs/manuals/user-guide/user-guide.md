@@ -278,7 +278,48 @@ related measures.
 - A **Symbol** dropdown (default `$SPX`; the list is the collected watchlist).
 - **Refresh now**, an **Explain** button, an **Analyze** button, and a **Next
   refresh** countdown.
-- A **view toggle**: **Gamma / Charm / Delta / Vanna / Flow / Net Prem / Term**.
+- A **view toggle** — seven sub-tabs, described below.
+
+**The seven views.** The first four share the same bars-plus-heat-map layout; the
+last three are different screens with their own controls.
+
+| View | What it shows | When to use it |
+|------|---------------|----------------|
+| **Gamma** | How hard dealers must trade per point of price movement. The default, and the main read. | Always. |
+| **Charm** | How dealer hedges decay as **time** passes, price unchanged. | Fridays and expiration days. |
+| **Delta** | The dealers' **directional** exposure in dollars. | Judging which way the aggregate hedge leans. |
+| **Vanna** | How hedges change when **volatility** changes. | CPI, Fed and earnings days. |
+| **Flow** | Today's call premium vs put premium for this symbol, as a ribbon. | Confirming a directional bias intraday. |
+| **Net Prem** | Net premium (call dollars − put dollars) for **many symbols at once**. | Comparing where money is going across names. |
+| **Term** | The same exposure across the **next five expirations**. | Choosing which expiry to trade. |
+
+**Flow** — the **crossover** is the read: the moment call dollars overtake put
+dollars, or the reverse. That is the same event the **Flow Alerts** page logs, shown
+here in context so you can tell a decisive break from a wobble. A strike ladder shows
+where in the chain the premium sits.
+
+**Net Prem** — the only view showing more than one symbol, with a menu of **28** in
+three group tabs (**Indices & Broad**, **SPDR Sectors**, **Mega-caps**). Two things
+are easy to get wrong:
+
+- The group tabs filter the **tick-boxes, not the chart**, and your selection
+  **persists across them** — so you can plot `$SPX` next to `XLK`.
+- **Dollars ($M) / Skew %** in the panel header. The sizes differ enormously (SPY can
+  run hundreds of millions on a day DIA barely reaches one), so **Dollars** shows the
+  real money and **Skew %** rescales each line to that symbol's own premium, which is
+  what lets you compare a big name with a small one.
+
+Each symbol keeps the same colour, and your group, ticks and scale are remembered.
+
+**Term** — its vertical axis is a **list of expirations, not a time scale**, so the
+gap between columns says nothing about how far apart the expiries are. The hairlines
+between columns matter: the smooth shading *across* a boundary is just drawing, not a
+measurement. Read the columns, not the gradient between them.
+
+> **Premium is unsigned.** Schwab publishes no options tape, so Flow and Net Prem
+> show **traded dollars through calls versus puts** — a money-weighted put/call read,
+> **not** net buying. A big call number is equally consistent with someone buying
+> calls and someone selling covered calls.
 
 **Status row:** a collector status dot, last-scan and next-scan times, and a one-
 line summary (spot, strike count, net exposure).
