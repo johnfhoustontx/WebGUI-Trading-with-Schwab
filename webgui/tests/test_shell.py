@@ -1346,6 +1346,43 @@ def test_layout_routes_the_page_title_through_window_title():
 
 
 # ── Footer service-status card (2026-08-16) ─────────────────────────────────
+def test_scanner_is_not_stale_outside_the_trading_session():
+    """The weekend "Data feed degraded · 1". Measured in prod on a Sunday:
+    options:scan was 156619s (43.5h) old against a 1200s threshold, because the
+    autoscan only runs 08:00-15:15 CT on trading days. The age was real; treating
+    it as a fault was not."""
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+
+    import main
+    CT = ZoneInfo("America/Chicago")
+    ancient = (dt.datetime(2026, 7, 24, 15, 0, tzinfo=CT)).isoformat()   # Friday close
+
+    sunday = dt.datetime(2026, 7, 26, 12, 0, tzinfo=CT)
+    assert main._is_view_stale(ancient, sunday, "options:scan") is False
+
+    # ...but a wedged scanner DURING the session must still be caught.
+    wednesday = dt.datetime(2026, 7, 22, 12, 0, tzinfo=CT)
+    stale_in_session = (wednesday - dt.timedelta(hours=3)).isoformat()
+    assert main._is_view_stale(stale_in_session, wednesday, "options:scan") is True
+    fresh = (wednesday - dt.timedelta(minutes=2)).isoformat()
+    assert main._is_view_stale(fresh, wednesday, "options:scan") is False
+
+
+def test_round_the_clock_views_still_flag_stale_on_a_weekend():
+    """The coverage the narrow fix exists to keep. A blanket market-hours gate
+    would have hidden a sentiment service that died on Friday night until Monday."""
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+
+    import main
+    CT = ZoneInfo("America/Chicago")
+    sunday = dt.datetime(2026, 7, 26, 12, 0, tzinfo=CT)
+    dead = (sunday - dt.timedelta(hours=6)).isoformat()
+    for view in ("sentiment:composite", "options:gex_status", "portfolio:positions"):
+        assert main._is_view_stale(dead, sunday, view) is True, view
+
+
 def test_status_card_facts_reads_live_when_everything_is_up():
     import main
     f = main.status_card_facts(

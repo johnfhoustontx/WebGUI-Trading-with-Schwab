@@ -237,3 +237,60 @@ def test_new_flow_alerts_seeds_empty_from_unreadable_view():
     """Pins the precondition of the replay bug: an unreadable (None) view yields an
     EMPTY acked set, so main.py must not treat that as a completed seed."""
     assert alerts.new_flow_alerts(None, set()) == ([], set())
+
+
+# ── RTH-only views (2026-08-16) ─────────────────────────────────────────────
+_SAT = dt.datetime(2026, 7, 25, 10, 0, tzinfo=CT)          # Saturday
+_RTH_WED = dt.datetime(2026, 7, 22, 10, 0, tzinfo=CT)      # Wednesday, mid-session
+_AFTER_CLOSE = dt.datetime(2026, 7, 22, 18, 0, tzinfo=CT)  # Wednesday, after hours
+
+
+def test_options_scan_expects_updates_only_during_the_session():
+    """The scanner autoscans 08:00-15:15 CT on trading days, so by Sunday its
+    newest write is legitimately ~43h old (measured in prod). Any threshold at all
+    then reports a dead scanner every weekend."""
+    assert alerts.expects_updates("options:scan", _RTH_WED) is True
+    assert alerts.expects_updates("options:scan", _SAT) is False
+    assert alerts.expects_updates("options:scan", _AFTER_CLOSE) is False
+
+
+def test_round_the_clock_views_are_never_session_gated():
+    """The load-bearing half of the fix. These three publish 24/7 — measured on the
+    same Sunday at 20s, 50s and 23s of age — so gating them would blind the board
+    to a service that genuinely died over a weekend, which is precisely when
+    nobody is watching it."""
+    for view in ("sentiment:composite", "options:gex_status",
+                 "portfolio:positions", "market:dashboard"):
+        for when in (_RTH_WED, _SAT, _AFTER_CLOSE):
+            assert alerts.expects_updates(view, when) is True, (view, when)
+    # An unknown view defaults to "always expected" — the safe direction: it can
+    # raise a false alarm, never suppress a real one.
+    assert alerts.expects_updates("some:new_view", _SAT) is True
+
+
+def test_rth_only_views_stays_a_narrow_list():
+    """A guard on scope, not on content: this set SUPPRESSES health reporting, so
+    growing it silently is how the board goes quiet about a real outage."""
+    assert alerts.RTH_ONLY_VIEWS == {"options:scan"}
+
+
+def test_stale_after_relaxes_outside_the_session():
+    """Off-hours every publisher slows down — portfolio_svc loses its SSE ticks and
+    falls back to a ~10-min rebuild, options_svc throttles 30s to 5 min. Measured
+    on a Sunday, portfolio:positions was 620s old against a 600s threshold, so it
+    FLAPPED in and out of "stale" rather than being wrong just once."""
+    assert alerts.stale_after("portfolio:positions", _RTH_WED) == alerts.STALE_AFTER_SEC
+    assert alerts.stale_after("portfolio:positions", _SAT) == alerts.OFFHOURS_STALE_SEC
+    assert alerts.stale_after("portfolio:positions", _AFTER_CLOSE) == alerts.OFFHOURS_STALE_SEC
+    # max(), so a view whose in-session override is ALREADY longer keeps it.
+    assert alerts.STALE_OVERRIDES["options:scan"] > alerts.STALE_AFTER_SEC
+    assert alerts.stale_after("options:scan", _RTH_WED) == alerts.STALE_OVERRIDES["options:scan"]
+    # now is optional for back-compat: omitting it gives the in-session threshold.
+    assert alerts.stale_after("portfolio:positions") == alerts.STALE_AFTER_SEC
+
+
+def test_offhours_threshold_still_catches_a_service_that_died():
+    """The relaxation must not become an off-hours amnesty: 45 minutes of total
+    silence still surfaces before anyone needs the stack in the morning."""
+    assert alerts.OFFHOURS_STALE_SEC == 45 * 60
+    assert alerts.OFFHOURS_STALE_SEC < 3600, "a full hour of silence is too long to ignore"

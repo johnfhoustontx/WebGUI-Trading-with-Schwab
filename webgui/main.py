@@ -921,6 +921,12 @@ def _is_view_stale(ts, now_utc, view=None) -> bool:
     the page module + requests at webgui module load). A missing ts => stale. The
     threshold is per-view (alerts.stale_after) so a slow-cadence view like the 15-min
     ``options:scan`` isn't falsely flagged between its scans."""
+    # A view whose publisher only runs during the session says nothing about
+    # health outside it — the scanner's newest write is legitimately ~43 h old on
+    # a Sunday, which used to read as one degraded component all weekend. See
+    # alerts.RTH_ONLY_VIEWS for why this is a narrow list and not a blanket gate.
+    if view is not None and not alerts.expects_updates(view, now_utc):
+        return False
     if not ts:
         return True
     try:
@@ -929,7 +935,7 @@ def _is_view_stale(ts, now_utc, view=None) -> bool:
         return True
     if when.tzinfo is None:
         when = when.replace(tzinfo=_dt.timezone.utc)
-    return (now_utc - when).total_seconds() > alerts.stale_after(view)
+    return (now_utc - when).total_seconds() > alerts.stale_after(view, now_utc)
 
 # proxy.health() is shown as a down-banner on EVERY page build. The call is a
 # blocking HTTP GET with a 3s timeout — without caching, every navigation paid it

@@ -109,9 +109,55 @@ STALE_AFTER_SEC = 600
 STALE_OVERRIDES = {"options:scan": 20 * 60}
 
 
-def stale_after(view):
-    """Staleness threshold (seconds) for ``view`` — a per-view override or the default."""
-    return STALE_OVERRIDES.get(view, STALE_AFTER_SEC)
+# Outside the session every publisher slows down — portfolio_svc stops getting SSE
+# ticks and falls back to its ~10-min rebuild, options_svc throttles its 30 s tick
+# to 5 min. Both cadences sit at or past the 600 s default, so a threshold
+# calibrated for a live session reports a healthy stack as degraded all night and
+# all weekend (measured on a Sunday: portfolio:positions 620 s against 600 s, which
+# means it flaps in and out of "stale" rather than being wrong once).
+#
+# ONE relaxed number rather than a per-view off-hours table: every off-hours
+# cadence is slower for the same reason, and 45 minutes of total silence still
+# catches a service that genuinely died before anyone needs it in the morning.
+OFFHOURS_STALE_SEC = 45 * 60
+
+
+def stale_after(view, now=None):
+    """Staleness threshold (seconds) for ``view``.
+
+    A per-view override or the default, relaxed to ``OFFHOURS_STALE_SEC`` outside
+    the trading session (``max``, so a view whose in-session override is already
+    longer keeps it). ``now`` is optional for back-compat; omitting it gives the
+    in-session threshold."""
+    base = STALE_OVERRIDES.get(view, STALE_AFTER_SEC)
+    if now is not None and not in_market_hours(now):
+        return max(base, OFFHOURS_STALE_SEC)
+    return base
+
+
+# Views whose PUBLISHER only runs during the trading session. Their age carries no
+# information outside it: the options scanner autoscans 08:00–15:15 CT on trading
+# days, so by Sunday its newest write is legitimately ~43 h old (measured) and any
+# threshold at all reports a dead scanner every single weekend.
+#
+# Deliberately a NARROW set rather than a blanket market-hours gate on staleness.
+# The other probed views keep publishing round the clock — measured on that same
+# Sunday, sentiment:composite was 20 s old (120 s refresh), options:gex_status 50 s
+# (5 min off-hours) and portfolio:positions 23 s (2 s loop) — so gating them too
+# would blind the board to a service that genuinely died over a weekend, which is
+# exactly when nobody is watching it.
+RTH_ONLY_VIEWS = {"options:scan"}
+
+
+def expects_updates(view, now):
+    """Whether ``view``'s publisher is scheduled to be running at ``now``.
+
+    False means "no publish is due, so age says nothing" — NOT "healthy". Callers
+    skip the staleness test entirely rather than recording the view as fresh, so a
+    view that is genuinely never published still shows as having no data."""
+    if view in RTH_ONLY_VIEWS:
+        return in_market_hours(now)
+    return True
 
 
 def unhealthy_keys(freshness, health):

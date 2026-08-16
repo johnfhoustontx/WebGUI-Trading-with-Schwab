@@ -138,10 +138,38 @@ def test_freshness_row_absent():
 
 
 def test_freshness_row_stale_scheduled():
-    row = status.freshness_row("Options", "options:scan", 99, _iso(10_000),
-                               _NOW, scheduled=True)
+    # _NOW is 12:00 UTC = 07:00 CT, i.e. BEFORE the 08:00 open — and options:scan
+    # only publishes during the session, so its age says nothing at that hour.
+    # Use an in-session instant for the "a wedged scanner is caught" case.
+    # NB the 17th, not _NOW's 19th: 2026-06-19 is Juneteenth, an NYSE holiday, so
+    # the session gate correctly refuses it. (The first attempt used it and this
+    # test caught it — which is the calendar working.)
+    in_session = _dt.datetime(2026, 6, 17, 16, 0, 0, tzinfo=_dt.timezone.utc)  # Wed 11:00 CT
+    row = status.freshness_row(
+        "Options", "options:scan", 99,
+        (in_session - _dt.timedelta(seconds=10_000)).isoformat(),
+        in_session, scheduled=True)
     assert row["present"] is True
     assert row["stale"] is True
+
+
+def test_freshness_row_does_not_flag_the_scanner_outside_the_session():
+    """The weekend "degraded" report. The scanner autoscans 08:00-15:15 CT on
+    trading days, so on a Sunday its newest write is legitimately ~43h old
+    (measured in prod) — real age, not a fault. The board, the nav badge and the
+    drawer's status card all read it as one dead component until this landed."""
+    sunday = _dt.datetime(2026, 6, 21, 17, 0, 0, tzinfo=_dt.timezone.utc)  # 12:00 CT Sun
+    row = status.freshness_row(
+        "Options", "options:scan", 99,
+        (sunday - _dt.timedelta(days=2)).isoformat(), sunday, scheduled=True)
+    assert row["present"] is True
+    assert row["stale"] is False
+    # A view that publishes round the clock is STILL checked on that same Sunday —
+    # the gate is per-view, not a blanket off-hours amnesty.
+    other = status.freshness_row(
+        "Sentiment", "sentiment:composite", 5,
+        (sunday - _dt.timedelta(hours=6)).isoformat(), sunday, scheduled=True)
+    assert other["stale"] is True
 
 
 # --- restart_spec -------------------------------------------------------------

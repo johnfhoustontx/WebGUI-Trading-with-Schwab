@@ -204,7 +204,14 @@ def freshness_row(label, view, version, ts, now, scheduled):
         # Per-view threshold (alerts.stale_after) so a slow-cadence view like the
         # 15-min options:scan isn't flagged stale between its scans — matches the
         # app-wide toast watcher (main.py) so both surfaces agree.
-        "stale": present and is_stale(ts, now, scheduled, alerts.stale_after(view)),
+        # ``expects_updates`` folds into ``scheduled`` for the same reason: a view
+        # whose publisher only runs during the session is not "scheduled" right
+        # now, so outside the session its age is not evidence of anything. Without
+        # it this table, the nav badge and the drawer's status card all reported a
+        # dead scanner from Friday's close to Monday's open.
+        "stale": present and is_stale(
+            ts, now, scheduled and alerts.expects_updates(view, now),
+            alerts.stale_after(view, now)),
         "present": present,
     }
 
