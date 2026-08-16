@@ -81,16 +81,28 @@ The design shows an inline count pill (right-aligned, mono 10px, rose on
 `rgba(229,72,77,.16)`) when the rail is expanded, degrading to a 6px dot at the
 icon's top-right when collapsed.
 
-We keep the existing Quasar `floating` badge on the icon corner in BOTH states
-and adopt only the design's colour. Reasoning: that badge already works
+We keep the existing Quasar `floating` badge on the icon corner in BOTH states,
+unchanged in position **and** colour. Reasoning: that badge already works
 collapsed and expanded, it is the element the 2 s watcher updates through
 `_badge_refs`/`_group_badge_refs`, and four tests pin its position inside the
 `relative` wrapper (Quasar's `floating` is `position:absolute`, so it anchors to
 the nearest positioned ancestor). A second, state-dependent badge element per row
 would double the watcher's update surface for a purely cosmetic gain.
 
+The design's softer rose (`#ff8f92` on `rgba(229,72,77,.16)`) is also not
+adopted: `_count_badge` serves the tab strip as well as the rail, so recolouring
+it is an app-wide change, and a translucent 6px badge on a dark rail is harder to
+read than the solid one it would replace.
+
 The static **AI** pill on Claude Trades has no such cost — it is a fixed label,
-not watcher state — so it is ported as designed.
+not watcher state, so it is built once and never registered for the tick — and it
+is ported as designed.
+
+**Stop All Services becomes a danger-outlined button** rather than a third
+navigation row in the footer, and moves last in `SYSTEM_RAIL` (today it sits
+between System Status and Settings). It is the one item in the rail that does
+something irreversible to a running stack; it should not be reachable by aiming
+at Settings and missing.
 
 ## 4 · Footer status card
 

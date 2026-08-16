@@ -416,10 +416,12 @@ def test_breadcrumb_parts_grouped_and_flat():
     import main
     # Grouped page → (group label, page label)
     assert main.breadcrumb_parts("/") == ("Options", "Market Scanner")
+    # Renamed with the captioned-section redesign (2026-08-16): the MARKETS
+    # caption now carries the "Market" this label used to have to say itself.
     assert main.breadcrumb_parts("/sentiment/rotation") == (
-        "Market Trend & Sentiment", "Sector Rotation")
+        "Trend & Sentiment", "Sector Rotation")
     assert main.breadcrumb_parts("/market") == (
-        "Market Trend & Sentiment", "Market Dashboard")
+        "Trend & Sentiment", "Market Dashboard")
     assert main.breadcrumb_parts("/eod") == ("More", "EOD Report")
     # Flat single page → (page label, "") — no "· Tab"
     assert main.breadcrumb_parts("/trade") == ("Trade Analyzer", "")
@@ -565,22 +567,29 @@ def test_reimporting_main_after_startup_does_not_raise():
         ng_app._state = prev
 
 
+def _drawer_items():
+    """(label, icon) for every item the drawer actually renders — the NAV_SECTIONS
+    entries plus the SYSTEM_RAIL block at the foot."""
+    import main
+    items = []
+    for _caption, entries in main.NAV_SECTIONS:
+        for entry in entries:
+            # ("group", label, icon, children) | ("page", route, label, icon)
+            items.append((entry[1], entry[2]) if entry[0] == "group"
+                         else (entry[2], entry[3]))
+    return items + [(label, icon) for _p, label, icon in main.SYSTEM_RAIL]
+
+
 def test_drawer_icons_are_present_and_distinct():
-    """The drawer is a 64px icon rail (hover-to-expand) whose collapsed state shows
+    """The drawer is a 68px icon rail (hover-to-expand) whose collapsed state shows
     ONLY icons (_NAV_CSS fades the labels to opacity:0) — so each drawer item needs
     a non-empty, distinct icon. ``_nav_link``/``_nav_group_link`` render the
-    ``icon`` arg; the dot is retired. Scope is the 13 drawer items (the 4
-    _NAV_GROUPS + the 3 OPTIONS_RAIL pages under Options + the 3 FLAT_NAV pages +
-    the 3 SYSTEM_RAIL pages at the foot); child-page icons are not rail
-    affordances (the tab strip renders labels only)."""
+    ``icon`` arg; the dot is retired. Scope is the 13 drawer items (the 10
+    NAV_SECTIONS entries + the 3 SYSTEM_RAIL pages at the foot); child-page icons
+    are not rail affordances (the tab strip renders labels only)."""
     from collections import Counter
 
-    import main
-
-    items = ([(label, icon) for label, icon, _c in main._NAV_GROUPS]
-             + [(label, icon) for _p, label, icon in main.OPTIONS_RAIL]
-             + [(label, icon) for _p, label, icon in main.FLAT_NAV]
-             + [(label, icon) for _p, label, icon in main.SYSTEM_RAIL])
+    items = _drawer_items()
     # Pinned count: all()/set-length are vacuously true on an empty list, so this
     # is the non-vacuity guard. A legitimate new drawer item should bump it.
     assert len(items) == 13, f"expected 13 drawer items, got {len(items)}: {items}"
@@ -591,17 +600,21 @@ def test_drawer_icons_are_present_and_distinct():
     assert not dupes, f"drawer icons collide: {dupes}"
     by_label = dict(items)
     # The two curated changes (design doc 2026-07-15).
-    assert by_label["Market Trend & Sentiment"] == "speed"
+    assert by_label["Trend & Sentiment"] == "speed"
     assert by_label["Trade Analyzer"] == "query_stats"
 
 
 def test_drawer_width_pinned_vs_rail():
     """Pinned = the full menu (Quasar offsets content to match). Unpinned = the
-    64px icon rail; the CSS :hover rule widens it WITHOUT changing this number,
-    which is exactly why hovering overlays instead of reflowing the page."""
+    68px icon rail; the CSS :hover rule widens it WITHOUT changing this number,
+    which is exactly why hovering overlays instead of reflowing the page.
+
+    The literals are the point — they are the supplied design's measurements
+    (2026-08-16), so a silent drift in either constant should fail here rather
+    than only show up as a clipped menu in a browser."""
     import main
-    assert main.drawer_width(True) == main.NAV_WIDTH_OPEN == 248
-    assert main.drawer_width(False) == main.NAV_WIDTH_RAIL == 64
+    assert main.drawer_width(True) == main.NAV_WIDTH_OPEN == 264
+    assert main.drawer_width(False) == main.NAV_WIDTH_RAIL == 68
 
 
 def test_hamburger_pins_instead_of_toggling_the_drawer():
@@ -966,13 +979,88 @@ def test_strategy_tools_moved_out_of_their_old_homes():
 def test_strategy_tools_group_is_reachable_from_the_drawer():
     """A group only renders if _NAV_GROUPS carries it (that list drives
     _group_children + breadcrumb_parts) AND the drawer actually builds it — a
-    group present in the data but never rendered is unreachable."""
-    import inspect
+    group present in the data but never rendered is unreachable.
+
+    Until 2026-08-16 this counted ``_nav_group_link(`` calls in ``_layout``'s
+    source, which worked only while every group had its own hand-written call.
+    The drawer now LOOPS over NAV_SECTIONS, so reachability is a property of that
+    data instead: a group in _NAV_GROUPS but absent from NAV_SECTIONS is exactly
+    the unreachable case the old count was standing in for."""
     import main
     assert any(label == "Strategy Tools" for label, _i, _c in main._NAV_GROUPS)
-    # Every group must get a drawer item: one _nav_group_link call per group.
+    placed = {e[1] for _c, entries in main.NAV_SECTIONS
+              for e in entries if e[0] == "group"}
+    missing = [label for label, _i, _c in main._NAV_GROUPS if label not in placed]
+    assert not missing, f"groups never rendered in the drawer: {missing}"
+
+
+def test_nav_sections_partition_the_rail_with_nothing_lost_or_doubled():
+    """The regrouping's load-bearing guard.
+
+    Moving ten items into three captioned lists is exactly the kind of edit that
+    silently DROPS one (it renders nowhere and the page becomes reachable only by
+    typing its URL) or DOUBLES one (it renders in two sections). Neither shows up
+    in any other test, so assert the partition directly: NAV_SECTIONS covers every
+    group and every standalone rail page, each exactly once."""
+    import main
+
+    groups = [e[1] for _c, entries in main.NAV_SECTIONS
+              for e in entries if e[0] == "group"]
+    pages = [e[1] for _c, entries in main.NAV_SECTIONS
+             for e in entries if e[0] == "page"]
+
+    assert sorted(groups) == sorted(l for l, _i, _c in main._NAV_GROUPS)
+    assert sorted(pages) == sorted(
+        p for p, _l, _i in main.OPTIONS_RAIL + main.FLAT_NAV)
+    # ...each exactly once (sorted-equality above already implies it, but this
+    # names the failure when it happens).
+    assert len(set(groups)) == len(groups), f"a group is placed twice: {groups}"
+    assert len(set(pages)) == len(pages), f"a page is placed twice: {pages}"
+    # SYSTEM_RAIL is the footer block and must NOT also appear in a section.
+    assert not [p for p, _l, _i in main.SYSTEM_RAIL if p in pages]
+
+
+def test_nav_section_captions_and_their_derived_counts():
+    """The captions are the design's three, in its order, and each count is
+    DERIVED from the section's length rather than written down — a literal would
+    go stale the first time a page moved."""
+    import inspect
+    import main
+    assert [c for c, _e in main.NAV_SECTIONS] == ["MARKETS", "STRATEGY", "ACCOUNT"]
+    assert [len(e) for _c, e in main.NAV_SECTIONS] == [4, 4, 2]
+    # The renderer takes the count as an argument; the drawer passes len(entries).
     src = inspect.getsource(main._layout)
-    assert src.count("_nav_group_link(") == len(main._NAV_GROUPS)
+    assert "_nav_section_header(caption, len(entries))" in src
+
+
+def test_sec_helpers_refuse_an_unknown_group_or_route():
+    """NAV_SECTIONS references items by name, so a typo must fail at IMPORT rather
+    than quietly leave a page out of the menu."""
+    import pytest
+
+    import main
+    with pytest.raises(KeyError):
+        main._sec_group("No Such Group")
+    with pytest.raises(KeyError):
+        main._sec_page("/no/such/route")
+
+
+def test_stop_all_services_is_a_danger_button_and_sits_last():
+    """The one irreversible item in the rail must not look like — or sit among —
+    the navigation rows it neighbours."""
+    import inspect
+    import main
+    assert main.SYSTEM_RAIL[-1][0] == main.SYSTEM_DANGER_ROUTE == "/terminate"
+    # Settings must come BEFORE it: aiming for Settings and overshooting should
+    # not land on "stop the whole stack".
+    assert [p for p, _l, _i in main.SYSTEM_RAIL] == [
+        "/status", "/settings", "/terminate"]
+    src = inspect.getsource(main._layout)
+    assert "_nav_danger_link(" in src, "the danger route gets its own renderer"
+    # It claims no active state (a navy active wash under a rose outline reads as
+    # a rendering bug) and carries no count badge.
+    danger = inspect.getsource(main._nav_danger_link)
+    assert "nav-active" not in danger and "_count_badge" not in danger
 
 
 def test_window_title_tags_the_PAGE_title_not_just_the_default(monkeypatch):
@@ -1007,3 +1095,166 @@ def test_layout_routes_the_page_title_through_window_title():
         "_layout must pass the page label through window_title(), or dev tabs "
         "lose their prefix again"
     )
+
+
+# ── Footer service-status card (2026-08-16) ─────────────────────────────────
+def test_status_card_facts_reads_live_when_everything_is_up():
+    import main
+    f = main.status_card_facts(
+        {"options": True, "sentiment": True, "market": True}, 0, 42.4)
+    assert f["tone"] == "live"
+    assert f["title"] == "Data feed live"
+    assert f["detail"] == "3 services · 42 ms"
+    assert f["count"] == 0
+
+
+def test_status_card_facts_degrades_and_shows_the_up_fraction():
+    """A degraded feed says so in three places at once — tone, title and the
+    up/total fraction — because the dot is the only one of them a glance reads."""
+    import main
+    f = main.status_card_facts(
+        {"options": True, "sentiment": False, "market": None}, 2, 8.0)
+    assert f["tone"] == "warn"
+    assert f["title"] == "Data feed degraded"
+    assert f["detail"] == "1/3 services · 8 ms"
+    assert f["count"] == 2
+
+
+def test_status_card_reports_unknown_rather_than_live_without_a_probe():
+    """The defect class this card had to be designed around: a defensive default
+    that RENDERS as a confident measurement. No probe data must never come out as
+    'Data feed live' — nor as a reassuring zero-warning green dot."""
+    import main
+    for empty in ({}, None):
+        f = main.status_card_facts(empty, 0, 42.0)
+        assert f["tone"] == "unknown"
+        assert f["title"] == "Data feed unknown"
+        assert f["detail"] == "no probe yet", "no latency is claimed either"
+        assert f["count"] == 0
+    # The seeded module state must start there too — the first paint of a page
+    # happens before any tick has run.
+    assert main._STATUS_CARD["tone"] == "unknown"
+
+
+def test_status_card_omits_latency_it_could_not_measure():
+    """None (every probed service timed out, so nothing was timed) and a garbage
+    value both drop the figure rather than rendering 'None ms' or raising."""
+    import main
+    assert main.status_card_facts({"options": True}, 0, None)["detail"] == "1 services"
+    assert main.status_card_facts({"options": True}, 0, "nope")["detail"] == "1 services"
+
+
+def test_status_card_count_is_the_same_number_as_the_system_status_badge(monkeypatch):
+    """Not merely equal today — the SAME computation. Two independent counts of
+    'what is unhealthy' would eventually disagree, and the card would quietly
+    contradict the badge three rows below it."""
+    import main
+
+    _reset_health_state(main)
+    monkeypatch.setattr(main.bus_client, "read", lambda v: {})
+    monkeypatch.setattr(main, "_recompute_badges", lambda scan=None: None)
+    monkeypatch.setattr(main.app_settings, "load", lambda: {
+        "alert_enabled": False, "alert_market_hours_only": False,
+        "alert_min_score": 0, "alert_sound": "chime", "alert_volume": 0.6,
+        "desktop_notifications": False})
+    monkeypatch.setattr(main, "_freshness_facts", lambda now_utc: {})
+    health = {"data": {"options": True, "sentiment": True}}
+    monkeypatch.setattr(main, "_probe_services_health", lambda mono: health["data"])
+
+    main._watcher_compute()                       # seed
+    assert main._STATUS_CARD["count"] == main._NAV_BADGES["/status"] == 0
+    assert main._STATUS_CARD["tone"] == "live"
+
+    health["data"] = {"options": False, "sentiment": True}
+    main._watcher_compute()
+    assert main._STATUS_CARD["count"] == main._NAV_BADGES["/status"] == 1
+    assert main._STATUS_CARD["tone"] == "warn"
+
+
+def test_guarded_compute_drops_the_card_to_unknown_on_a_bus_outage(monkeypatch):
+    """When the tick dies the card must not keep displaying its last good
+    reading: 'Data feed live' over a dead backbone is the worst thing it could
+    say, and it would say it indefinitely."""
+    import main
+
+    main._STATUS_CARD.update(main.status_card_facts({"options": True}, 0, 5.0))
+    assert main._STATUS_CARD["tone"] == "live"
+
+    def boom():
+        raise RuntimeError("bus down")
+
+    monkeypatch.setattr(main, "_watcher_compute", boom)
+    assert main._guarded_compute() is None
+    assert main._STATUS_CARD["tone"] == "unknown"
+
+
+def test_probe_records_the_latency_of_services_that_answered(monkeypatch):
+    """A timed-out service contributes the full HTTP timeout, which would turn the
+    reported latency into a description of the failure rather than of the feed —
+    saying which service is down is the count badge's job."""
+    import main
+
+    class _Resp:
+        status_code = 200
+
+        def json(self):
+            return {"up": True}
+
+    calls = {"n": 0}
+
+    def fake_get(url, timeout=None):
+        calls["n"] += 1
+        if "8210" in url or calls["n"] % 2 == 0:
+            raise OSError("refused")
+        return _Resp()
+
+    monkeypatch.setitem(__import__("sys").modules, "requests",
+                        type("M", (), {"get": staticmethod(fake_get)}))
+    main._svc_health_cache.update({"data": {}, "ts": 0.0, "latency_ms": None})
+    main._probe_services_health(10_000.0)
+    lat = main._svc_health_cache["latency_ms"]
+    assert lat is None or lat < main._HEALTH_HTTP_TIMEOUT * 1000, \
+        "a refused/timed-out probe must not be counted into the mean"
+
+
+# ── Collapsed-rail section dividers + the static AI pill ────────────────────
+def test_section_captions_swap_for_hairlines_in_the_collapsed_rail():
+    """A caption is unreadable at 68px, so .nav-sep is the exact INVERSE of the
+    .nav-title fade — visible by default, hidden under the same three 'drawer is
+    open' selectors. Both rules must exist or the rail shows captions clipped to
+    four letters (only .nav-title present) or nothing at all (only .nav-sep)."""
+    import main
+    css = main._NAV_CSS
+    assert ".nav-drawer .nav-sep { opacity: 1;" in css
+    for sel in ("nav-drawer.nav-pinned .nav-sep", ".nav-drawer:hover .nav-sep",
+                ".nav-drawer:focus-within .nav-sep"):
+        assert sel in css, f"the collapsed-rail divider never hides for {sel}"
+
+
+def test_status_card_is_dropped_not_faded_in_the_rail():
+    """display, not opacity — an opacity:0 card would still reserve its height and
+    push the footer's three rows down in a 68px rail that has no room for it."""
+    import main
+    css = main._NAV_CSS
+    assert ".nav-drawer .nav-status-card { display: none; }" in css
+    assert ".nav-drawer:hover .nav-status-card," in css
+
+
+def test_claude_trades_carries_a_static_ai_pill_that_the_watcher_never_touches():
+    """The AI marker is a fixed label, not watcher state, so it must NOT be
+    registered in _badge_refs — the 2s tick would otherwise blank it on the first
+    pass (there is no _NAV_BADGES entry to write back)."""
+    from nicegui import ui
+
+    import main
+    assert main._NAV_PILLS == {"/driver": "AI"}
+    main._NAV_BADGES.clear()
+    main._badge_refs.clear()
+    with ui.card():
+        main._nav_link("/driver", "Claude Trades", "smart_toy", "/")
+
+    labels = [c for c in main._badge_refs["/driver"].parent_slot.parent
+              .parent_slot.parent.default_slot.children if isinstance(c, ui.label)]
+    assert [l.text for l in labels] == ["Claude Trades", "AI"]
+    # The pill rides the label fade, which is what keeps it out of the 68px rail.
+    assert "nav-label" in labels[1].classes

@@ -377,9 +377,14 @@ SETTINGS_CHILDREN = [
 # (route, label, icon)
 SYSTEM_RAIL = [
     ("/status", "System Status", "monitor_heart"),
-    ("/terminate", "Stop All Services", "power_settings_new"),
     ("/settings", "Settings", "settings"),
+    ("/terminate", "Stop All Services", "power_settings_new"),
 ]
+
+# The one DESTRUCTIVE item in the rail. It is rendered as a danger-outlined
+# button rather than a fourth navigation row (see ``_nav_danger_link``) and sits
+# last, so "stop everything" never sits mid-list where Settings is aimed for.
+SYSTEM_DANGER_ROUTE = "/terminate"
 
 # ── Main-menu groups (2026-07-11 nav redesign) ───────────────────────────────
 # The drawer shows ONE flat item per group; the group's child pages render as a
@@ -391,9 +396,63 @@ SYSTEM_RAIL = [
 # than inserted so the positional _NAV_GROUPS[0..2] reads in _layout stay valid.
 _NAV_GROUPS = [
     ("Options", "candlestick_chart", OPTIONS_CHILDREN),
-    ("Market Trend & Sentiment", "speed", SENTIMENT_CHILDREN),
+    ("Trend & Sentiment", "speed", SENTIMENT_CHILDREN),
     ("More", "more_horiz", MORE_CHILDREN + SETTINGS_CHILDREN),
     ("Strategy Tools", "build", STRATEGY_TOOLS_CHILDREN),
+]
+
+
+# ── Captioned rail sections (2026-08-16 nav redesign) ────────────────────────
+# The drawer's reading order used to be implicit in the SEQUENCE of render calls
+# inside ``_layout`` — the only way to reorder it was to edit render code. It is
+# now data: three captioned sections, each a list of entries that are either a
+# GROUP (rendered by ``_nav_group_link``, its children becoming the top tab
+# strip) or a standalone RAIL PAGE (``_nav_link``).
+#
+# Entries reference their group/page BY NAME rather than restating it, so
+# _NAV_GROUPS / OPTIONS_RAIL / FLAT_NAV stay the single source of each item's
+# label + icon (which is also what the icon-distinctness test iterates). A typo
+# raises at import — the module fails loudly instead of silently dropping a page
+# out of the menu.
+#
+# Note the deliberate split: Dealer Positioning / Opportunity Board / Flow Alerts
+# sit under MARKETS as market-WIDE reads, while the Options group under STRATEGY
+# is the per-signal find → analyze → track → repair workflow.
+def _sec_group(label: str):
+    """NAV_SECTIONS entry for the ``_NAV_GROUPS`` group called ``label``."""
+    for lbl, icon, children in _NAV_GROUPS:
+        if lbl == label:
+            return ("group", lbl, icon, children)
+    raise KeyError(f"no nav group named {label!r}")
+
+
+def _sec_page(route: str):
+    """NAV_SECTIONS entry for the standalone rail page at ``route``."""
+    for path, label, icon in OPTIONS_RAIL + FLAT_NAV:
+        if path == route:
+            return ("page", path, label, icon)
+    raise KeyError(f"no rail page at {route!r}")
+
+
+# (caption, entries). The caption's COUNT is derived from len(entries) at render
+# time — never written down, so it cannot go stale when a page is added.
+NAV_SECTIONS = [
+    ("MARKETS", [
+        _sec_page("/options/gamma"),      # Dealer Positioning
+        _sec_page("/options/matrix"),     # Opportunity Board
+        _sec_page("/options/flow"),       # Flow Alerts
+        _sec_group("Trend & Sentiment"),
+    ]),
+    ("STRATEGY", [
+        _sec_group("Strategy Tools"),
+        _sec_group("Options"),
+        _sec_page("/trade"),              # Trade Analyzer
+        _sec_page("/driver"),             # Claude Trades
+    ]),
+    ("ACCOUNT", [
+        _sec_page("/portfolio"),
+        _sec_group("More"),
+    ]),
 ]
 
 
@@ -495,10 +554,11 @@ def market_status_parts(now=None):
 # The drawer is an ICON RAIL that expands on hover. NAV_WIDTH_RAIL is the width
 # Quasar lays out with (so the page's left offset is always the rail width);
 # NAV_WIDTH_OPEN is what the ``_NAV_CSS`` hover rule widens the ASIDE to, and
-# what ``_layout`` lays the drawer out at when PINNED. The 248 is duplicated as a
-# literal in that CSS rule — a test pins the two together.
-NAV_WIDTH_RAIL = 64
-NAV_WIDTH_OPEN = 248
+# what ``_layout`` lays the drawer out at when PINNED. The open width is
+# interpolated into that CSS rule from this constant — a test pins the two
+# together, so changing it here is enough.
+NAV_WIDTH_RAIL = 68
+NAV_WIDTH_OPEN = 264
 
 
 def drawer_width(pinned: bool) -> int:
@@ -589,6 +649,19 @@ _ALERT_STATE: dict = {
 _badge_refs: dict = {}
 _group_badge_refs: dict = {}
 
+# Footer status-card state + element refs, in the same shape as the badge pair
+# above: _STATUS_CARD is what the (off-thread) watcher computes, _status_refs is
+# what the UI-thread tick writes it into. Seeded "unknown" so the very first
+# paint — before any probe has run — cannot claim a live feed.
+_STATUS_CARD: dict = {"tone": "unknown", "title": "Data feed unknown",
+                      "detail": "no probe yet", "count": 0}
+_status_refs: dict = {}
+
+# Static, non-numeric badges on rail items (route -> short label). Distinct from
+# _NAV_BADGES, which is live watcher state: these never change, so they are not
+# registered for the 2s tick to update.
+_NAV_PILLS = {"/driver": "AI"}
+
 # Per-page-build slot directly under the top tab strip, where a page can mount
 # its own view SUBTABS (see _layout; e.g. the Gamma GEX/Charm/... row). Rebuilt
 # on every _layout; None on pages without a strip.
@@ -618,7 +691,7 @@ _HEALTH_PROBE_INTERVAL_SEC = 30.0
 _HEALTH_HTTP_TIMEOUT = 2.0
 # Last successful service-health probe result + when (monotonic). Reused between
 # probes so the 2s watcher only pays the HTTP fan-out every ~30s.
-_svc_health_cache: dict = {"data": {}, "ts": 0.0}
+_svc_health_cache: dict = {"data": {}, "ts": 0.0, "latency_ms": None}
 
 # Log-once memo for a bus (Memurai) outage: True once "bus down" has been logged,
 # reset when the bus recovers so a later outage logs again. Prevents a full
@@ -639,19 +712,66 @@ def _probe_services_health(now_mono: float) -> dict:
             or now_mono - _svc_health_cache["ts"] >= _HEALTH_PROBE_INTERVAL_SEC):
         import requests  # local import — keep module load light
         out: dict = {}
+        took: list = []
         for svc in _HEALTH_SERVICES:
             url = SERVICE_URLS.get(svc)
             if not url:
                 out[svc] = None
                 continue
+            t0 = _time.monotonic()
             try:
                 r = requests.get(f"{url}/health", timeout=_HEALTH_HTTP_TIMEOUT)
                 out[svc] = (r.status_code == 200 and r.json().get("up") is True)
+                # Time only the calls that ANSWERED: a timed-out service
+                # contributes _HEALTH_HTTP_TIMEOUT and would drag the reported
+                # latency to a number describing the failure, not the feed. That
+                # a service is down is the count badge's job to say.
+                if out[svc]:
+                    took.append((_time.monotonic() - t0) * 1000.0)
             except Exception:  # noqa: BLE001 — a probe must never raise
                 out[svc] = False
         _svc_health_cache["data"] = out
+        _svc_health_cache["latency_ms"] = (sum(took) / len(took)) if took else None
         _svc_health_cache["ts"] = now_mono
     return dict(_svc_health_cache["data"])
+
+
+# One tone per state; swapped with .classes(remove=…, add=…) so repeated repaints
+# can't stack conflicting colours (the documented reactive-recolour idiom).
+_STATUS_TONE_CLASSES = "nav-status-live nav-status-warn nav-status-unknown"
+
+
+def status_card_facts(health, unhealthy_n, latency_ms=None):
+    """``{tone, title, detail, count}`` for the drawer's footer status card — PURE.
+
+    * ``health`` — ``_probe_services_health``'s ``{service: up|None}``.
+    * ``unhealthy_n`` — the count already driving ``_NAV_BADGES["/status"]``, so
+      the card and the System Status badge are the SAME number by construction
+      and cannot drift apart.
+    * ``latency_ms`` — the mean round-trip of the services that ANSWERED the last
+      probe (see ``_probe_services_health``), or None.
+
+    An empty/missing ``health`` map means the probe has not run or could not run,
+    and that renders as **unknown** — never "live". A defensive default that
+    reads as a confident measurement is the exact failure this app has been
+    bitten by before; a status card claiming a live feed over no data would be a
+    new instance of it.
+    """
+    if not health:
+        return {"tone": "unknown", "title": "Data feed unknown",
+                "detail": "no probe yet", "count": 0}
+    up = sum(1 for v in health.values() if v)
+    total = len(health)
+    n = max(0, int(unhealthy_n or 0))
+    detail = f"{total} services" if up == total else f"{up}/{total} services"
+    if latency_ms is not None:
+        try:
+            detail += f" · {int(round(float(latency_ms)))} ms"
+        except (TypeError, ValueError):
+            pass
+    return {"tone": "live" if n == 0 else "warn",
+            "title": "Data feed live" if n == 0 else "Data feed degraded",
+            "detail": detail, "count": n}
 
 
 def _freshness_facts(now_utc) -> dict:
@@ -751,11 +871,9 @@ _NAV_CSS = """
    a rail of unreadable opacity:0 labels. .nav-pinned opts out: the drawer is
    already laid out at the open width.
    The width prop + the .nav-pinned class are wired in _layout/_toggle_pin.
-   The 248px must equal NAV_WIDTH_OPEN; a test pins them together. */
+   The open width is interpolated from NAV_WIDTH_OPEN — see the f-string
+   appended after this block. */
 .q-drawer:has(> .nav-drawer:not(.nav-pinned)) { transition: width .18s ease; }
-.q-drawer:has(> .nav-drawer:not(.nav-pinned)):hover,
-.q-drawer:has(> .nav-drawer:not(.nav-pinned)):focus-within {
-    width: 248px !important; box-shadow: 0 12px 40px rgba(0,0,0,.5); }
 /* .nav-drawer IS the real scroller (Quasar's .scroll sets overflow:auto), so the
    clip belongs here: it stops the 248px of content from raising a horizontal
    scrollbar in the 64px rail. It cannot clip the corner count badges — they sit
@@ -772,10 +890,44 @@ _NAV_CSS = """
 .nav-drawer:hover .nav-title, .nav-drawer:hover .nav-label,
 .nav-drawer:focus-within .nav-title, .nav-drawer:focus-within .nav-label {
     opacity: 1; }
+/* Section captions (MARKETS / STRATEGY / ACCOUNT) are unreadable in a 68px rail,
+   so the collapsed state shows a hairline where the caption would be. .nav-sep is
+   the exact INVERSE of the .nav-title rule above — visible by default, faded out
+   under the same three "drawer is open" selectors. Both live inside one
+   fixed-height, position:relative header box (see _nav_section_header), so this
+   is a cross-fade in place: neither state reflows the rail. */
+.nav-drawer .nav-sep { opacity: 1; transition: opacity .14s ease; }
+.nav-drawer.nav-pinned .nav-sep,
+.nav-drawer:hover .nav-sep,
+.nav-drawer:focus-within .nav-sep { opacity: 0; }
+/* Footer service-status card. It is DROPPED in the rail rather than faded: at
+   68px there is no room for the text, and a lone dot would say less than the
+   count badge already riding the System Status icon two rows below. display
+   (not opacity) so it surrenders its height too — the footer must not reserve
+   space for a card that isn't there.
+   @keyframes is the one thing no Tailwind utility expresses, so it belongs in
+   this Quasar-internal block rather than being a new exception. */
+.nav-drawer .nav-status-card { display: none; }
+.nav-drawer.nav-pinned .nav-status-card,
+.nav-drawer:hover .nav-status-card,
+.nav-drawer:focus-within .nav-status-card { display: flex; }
+@keyframes ns-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: .35; transform: scale(.82); }
+}
+.nav-status-dot { animation: ns-pulse 2.4s ease-in-out infinite; }
+.nav-status-live { background: #3ddc97; box-shadow: 0 0 0 3px rgba(61,220,151,.15); }
+.nav-status-warn { background: #f5a524; box-shadow: 0 0 0 3px rgba(245,165,36,.15); }
+/* Unknown = the probe or the bus failed. Deliberately NOT animated: a pulse says
+   "live", and a card that cannot measure anything must not claim to be. */
+.nav-status-unknown { background: #6b7898; animation: none; }
 /* Active icon accent. MUST be !important AND 3 classes: theme.build_nav_css
    emits `.nav-drawer .q-icon{color:<[menu].text>!important}` (2 classes) and is
    injected AFTER this block, so equal-specificity would lose. */
 .nav-drawer .nav-active .nav-icon { color: #6b86ff !important; }
+/* Same specificity argument for the danger button's icon (see _nav_danger_link):
+   an inherited rose would lose to build_nav_css's 2-class !important override. */
+.nav-drawer .nav-danger .nav-icon { color: #ff8f92 !important; }
 /* Compact tab strip (the sub-menu tabs under the header): Deep Slate PILL tabs in
    a raised rounded container — no folder baseline. The active pill is a soft navy
    tint; inactive are plain. Quasar-internal (q-tab). */
@@ -830,6 +982,20 @@ _NAV_CSS = """
 .mkt-closed { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.09); }
 .mkt-closed .dot { background: #6d76a0; }
 .mkt-closed .lbl { color: #8891ab; }
+/* Header brand mark — theme.build_brand_css already sizes it (28px, radius 8);
+   this only adds the design's hairline so the logo doesn't float on the bar. */
+.brand-mark { border: 1px solid rgba(255,255,255,.1); }
+"""
+
+# The rail's open width is the ONE CSS value that must equal a Python constant —
+# Quasar lays the drawer out at the RAIL width and only this rule widens the
+# aside on hover, so a drift between the two would leave the expanded menu
+# clipped. Appended as its own f-string because the block above is a plain
+# literal (interpolating it would mean escaping every CSS brace in the file).
+_NAV_CSS += f"""
+.q-drawer:has(> .nav-drawer:not(.nav-pinned)):hover,
+.q-drawer:has(> .nav-drawer:not(.nav-pinned)):focus-within {{
+    width: {NAV_WIDTH_OPEN}px !important; box-shadow: 0 12px 40px rgba(0,0,0,.5); }}
 """
 
 # Global table chrome (app-wide standard): EVERY data table gets a fixed (sticky)
@@ -934,6 +1100,11 @@ def _watcher_compute():
     svc_health = _probe_services_health(now_mono)
     unhealthy_n = len(alerts.unhealthy_keys(freshness, svc_health))
     _NAV_BADGES["/status"] = unhealthy_n           # badge tracks count, ungated
+    # The footer card reads exactly these facts, so its count and the System
+    # Status badge are one computation. Done here, off the event loop, so the 2s
+    # UI tick only has labels to write.
+    _STATUS_CARD.update(status_card_facts(
+        svc_health, unhealthy_n, _svc_health_cache.get("latency_ms")))
 
     # Seed on the first tick so pre-existing signals / already-down services don't
     # alert on launch.
@@ -1002,6 +1173,11 @@ def _guarded_compute():
     try:
         result = _watcher_compute()
     except Exception as exc:  # noqa: BLE001 — a watcher outage must not spam logs
+        # The tick died before it could measure anything, so the footer card must
+        # fall back to UNKNOWN rather than keep displaying the last good reading.
+        # A card still saying "Data feed live" while the backbone is down is
+        # precisely the confident-looking stale value this design set out to avoid.
+        _STATUS_CARD.update(status_card_facts({}, 0))
         if not _bus_outage["logged"]:
             _LOG.warning("watcher: backbone/bus unavailable (%s) — alerts paused; "
                          "logging once until it recovers.", type(exc).__name__)
@@ -1080,6 +1256,15 @@ def _nav_link(path: str, label: str, icon: str, active: str) -> None:
         with ui.row().classes("items-center gap-3 w-full no-wrap"):
             _badge_refs[path] = _nav_icon(icon, _NAV_BADGES.get(path, 0))
             ui.label(label).classes("nav-label")
+            pill = _NAV_PILLS.get(path)
+            if pill:
+                # A fixed marker (e.g. "AI"), not watcher state — so it is built
+                # once and never registered for the tick. .nav-label rides the
+                # existing fade, which is what keeps it out of the 68px rail.
+                ui.label(pill).classes(
+                    "nav-label ml-auto font-mono text-[10px] leading-none "
+                    "px-[6px] py-[2px] rounded-[5px] "
+                    "bg-[#4da3ff]/[0.14] text-[#4da3ff]")
 
 
 def _nav_group_link(label: str, icon: str, children, active: str) -> None:
@@ -1098,6 +1283,106 @@ def _nav_group_link(label: str, icon: str, children, active: str) -> None:
             n = sum(_NAV_BADGES.get(p, 0) for p in paths)
             _group_badge_refs[label] = (_nav_icon(icon, n), paths)
             ui.label(label).classes("nav-label")
+
+
+def _nav_danger_link(path: str, label: str, icon: str) -> None:
+    """Stop All Services — drawn as a danger-outlined button, not a nav row.
+
+    It is the only item in the rail that does something irreversible to the
+    running stack, so it must not look like the two navigation rows above it.
+    Carries no badge (nothing counts toward shutting the stack down) and claims
+    no active state — the navy active wash under a rose outline reads as a
+    rendering bug, and the page it opens is a confirm gate you leave immediately.
+
+    The rose icon colour needs its own ``_NAV_CSS`` rule: ``theme.build_nav_css``
+    emits ``.nav-drawer .q-icon{color:…!important}`` for ``[menu].text``, so an
+    inherited colour here would silently lose to it.
+    """
+    with ui.link(target=path).classes(
+            "nav-danger w-full no-underline items-center justify-center gap-2 "
+            "mt-[6px] h-[34px] rounded-[8px] border border-[#e5484d]/[0.32] "
+            "text-[#ff8f92] transition-colors hover:bg-[#e5484d]/[0.14]"):
+        _help_tooltip(path)
+        ui.icon(icon).classes("nav-icon text-[16px] flex-none")
+        ui.label(label).classes("nav-label text-[12.5px] font-semibold")
+
+
+def _nav_section_header(caption: str, count: int) -> None:
+    """A rail section caption (MARKETS / STRATEGY / ACCOUNT) and its item count.
+
+    Two children of ONE fixed-height, position:relative box, each absolutely
+    placed so they overlap: the caption row (``.nav-title``, which the existing
+    rail rule fades IN as the drawer opens) and a hairline (``.nav-sep``, whose
+    rule is the exact inverse). The result is a cross-fade in place — the rail
+    shows dividers, the open menu shows captions, and neither state reflows the
+    other. Both rules live in ``_NAV_CSS`` because they key off an ANCESTOR's
+    hover/focus/pinned state, which no Tailwind utility can express.
+
+    ``count`` is passed in from ``len(entries)`` rather than written down, so a
+    section can never advertise a stale number after a page is added.
+    """
+    with ui.element("div").classes("relative w-full h-[26px] shrink-0"):
+        ui.element("div").classes(
+            "nav-sep absolute left-[10px] right-[10px] top-[12px] h-px "
+            "bg-white/[0.07]")
+        with ui.row().classes(
+                "nav-title absolute inset-0 items-center justify-between "
+                "px-3 no-wrap"):
+            ui.label(caption).classes(
+                "font-mono font-medium tracking-[.15em] text-[10px] "
+                "text-[#5d6a88] leading-none")
+            ui.label(f"{count:02d}").classes(
+                "font-mono text-[10px] text-[#3f4a66] leading-none")
+
+
+def _status_card() -> None:
+    """The drawer footer's live service-status card.
+
+    Registers its three mutable parts in ``_status_refs`` so the 2s tick can
+    repaint them from ``_STATUS_CARD`` without rebuilding the card. Painted at
+    build time from whatever the watcher last computed, so a navigation shows the
+    current state immediately rather than "unknown" for up to two seconds.
+
+    Hidden entirely in the 68px rail (``.nav-status-card``, display-toggled in
+    ``_NAV_CSS``) — the System Status icon two rows below already carries the
+    same count as a corner badge when collapsed.
+    """
+    facts = dict(_STATUS_CARD)
+    with ui.row().classes(
+            "nav-status-card w-full items-center gap-[10px] no-wrap "
+            "px-[10px] py-[9px] mb-1 rounded-[9px] "
+            "bg-white/[0.035] border border-white/[0.05]"):
+        _status_refs["dot"] = ui.element("div").classes(
+            f"nav-status-dot w-[7px] h-[7px] rounded-full flex-none "
+            f"nav-status-{facts['tone']}")
+        with ui.column().classes("gap-[2px] min-w-0"):
+            _status_refs["title"] = ui.label(facts["title"]).classes(
+                "text-[11.5px] font-semibold text-[#cdd7ec] whitespace-nowrap")
+            _status_refs["detail"] = ui.label(facts["detail"]).classes(
+                "font-mono text-[10px] text-[#6b7898] whitespace-nowrap")
+        _status_refs["count"] = ui.label(
+            str(facts["count"]) if facts["count"] else "").classes(
+            "ml-auto font-mono text-[10px] px-[6px] py-[2px] rounded-[5px] "
+            "bg-[#e5484d]/[0.16] text-[#ff8f92]")
+        _status_refs["count"].set_visibility(bool(facts["count"]))
+
+
+def _apply_status_card() -> None:
+    """Write ``_STATUS_CARD`` into the mounted card (UI thread; never raises).
+
+    The tone swap goes through ``remove=`` over the finite class set — repainting
+    every 2 s, an ``add``-only recolour would stack three conflicting tone
+    classes within a minute and the last one declared would win at random."""
+    refs = _status_refs
+    if not refs.get("dot"):
+        return
+    facts = _STATUS_CARD
+    refs["dot"].classes(remove=_STATUS_TONE_CLASSES,
+                        add=f"nav-status-{facts['tone']}")
+    refs["title"].text = facts["title"]
+    refs["detail"].text = facts["detail"]
+    refs["count"].text = str(facts["count"]) if facts["count"] else ""
+    refs["count"].set_visibility(bool(facts["count"]))
 
 
 def _toggle_pin(drawer) -> None:
@@ -1165,52 +1450,56 @@ def _layout(active: str, title: str):
               .classes("nav-drawer" + (" nav-pinned" if _pinned else ""))
               .props(f"behavior=desktop width={drawer_width(_pinned)}"))
     with drawer:
-        # Deep Slate rail: the "WORKSPACE" caption + the icon-per-item nav.
         with ui.column().classes("h-full w-full flex flex-col gap-[2px]"):
-            # nav-title = the [menu].title theme hook (build_nav_css sets its color).
-            ui.label("WORKSPACE").classes(
-                "nav-title font-semibold tracking-[.14em] text-[10.5px] px-3 pt-1 pb-2")
-            # Flat main menu: one item per GROUP (its child pages render as the top
-            # tab strip) + the single-page apps. No expandable sub-menus.
-            opts_label, opts_icon, opts_children = _NAV_GROUPS[0]
-            _nav_group_link(opts_label, opts_icon, opts_children, active)
-            # Modelling tools (Calculator + Simulator) — a group, so it gets a tab
-            # strip, sitting where the standalone Calculator rail item used to.
-            tools_label, tools_icon, tools_children = _NAV_GROUPS[3]
-            _nav_group_link(tools_label, tools_icon, tools_children, active)
-            # Standalone rail pages that sit directly under the Options group.
-            for _rp, _rl, _ri in OPTIONS_RAIL:
-                _nav_link(_rp, _rl, _ri, active)
-            sent_label, sent_icon, sent_children = _NAV_GROUPS[1]
-            _nav_group_link(sent_label, sent_icon, sent_children, active)
-            for path, label, icon in FLAT_NAV:
-                _nav_link(path, label, icon, active)
-            more_label, more_icon, more_children = _NAV_GROUPS[2]
-            _nav_group_link(more_label, more_icon, more_children, active)
+            # The rail's ORDER is data (NAV_SECTIONS), not the sequence of calls
+            # here — regrouping the menu is now a list edit, not a render edit.
+            # There is no lockup at the top: the brand lives once, in the header,
+            # so the rail opens straight onto its first section caption.
+            _status_refs.clear()
+            for caption, entries in NAV_SECTIONS:
+                _nav_section_header(caption, len(entries))
+                for entry in entries:
+                    if entry[0] == "group":
+                        _kind, _label, _icon, _children = entry
+                        _nav_group_link(_label, _icon, _children, active)
+                    else:
+                        _kind, _path, _label, _icon = entry
+                        _nav_link(_path, _label, _icon, active)
             # Machine-level controls, pushed to the FOOT of the rail: mt-auto eats
             # the leftover column height so they sit at the bottom edge (the column
             # is h-full flex-col), while still reading as the last items when the
-            # menu is long enough to fill it. A hairline separates them from the
-            # workflow pages above.
-            # NB: mb-2 for the gap below, NOT my-2 — `my-*` also sets margin-top
-            # and would fight the mt-auto that does the pushing.
-            ui.element("div").classes(
-                "mt-auto mb-2 w-full h-px bg-white/[0.07] shrink-0")
-            for path, label, icon in SYSTEM_RAIL:
-                _nav_link(path, label, icon, active)
+            # menu is long enough to fill it. The border-t hairline separates them
+            # from the workflow pages above.
+            with ui.column().classes(
+                    "mt-auto w-full gap-[2px] pt-2 shrink-0 "
+                    "border-t border-white/[0.06]"):
+                _status_card()
+                for path, label, icon in SYSTEM_RAIL:
+                    if path == SYSTEM_DANGER_ROUTE:
+                        _nav_danger_link(path, label, icon)
+                    else:
+                        _nav_link(path, label, icon, active)
 
     with ui.header().classes("items-center justify-between px-4"):
+        # LEFT: hamburger · brand lockup · hairline · breadcrumb. The breadcrumb
+        # reads as a continuation of the brand ("NeuralStrike ▸ Strategy ▸
+        # Strategy Tools"), which is why it moved off the right edge — over there
+        # it competed with the market pill for the eye and won neither.
         with ui.row().classes("items-center gap-3 no-wrap"):
             ui.button(icon="menu", on_click=lambda: _toggle_pin(drawer)).props(
                 "flat round dense color=white size=sm").tooltip("Pin / unpin the menu")
             ui.html(brand_lockup_html())
-        with ui.row().classes("items-center gap-4 no-wrap"):
+            ui.element("div").classes("w-px h-[22px] bg-white/[0.09] mx-1 flex-none")
             _section, _tab = breadcrumb_parts(active)
             with ui.row().classes("items-center gap-2 no-wrap"):
-                ui.label(_section).classes("text-[12.5px] text-[#8891ab]")
+                ui.label(_section).classes("text-[13px] text-[#5d6a88]")
                 if _tab:
-                    ui.element("div").classes("w-[4px] h-[4px] rounded-full bg-[#4a557a]")
-                    ui.label(_tab).classes("text-[12.5px] text-[#a9b6ff] font-medium")
+                    ui.icon("chevron_right").classes("text-[14px] text-[#3f4a66]")
+                    ui.label(_tab).classes("text-[13px] text-[#e6ecf9] font-semibold")
+        # RIGHT: the market-status pill alone. The design's search pill and
+        # notification bell are deliberately not ported — see the design doc's
+        # "Rejected" section.
+        with ui.row().classes("items-center gap-4 no-wrap"):
             _mkt_label, _mkt_open = market_status_parts()
             with ui.row().classes(
                     f"mkt-pill {'mkt-open' if _mkt_open else 'mkt-closed'} no-wrap"):
@@ -1303,6 +1592,9 @@ def _layout(active: str, title: str):
             _set_badge(badge, _NAV_BADGES.get(route, 0))
         for _label, (badge, paths) in _group_badge_refs.items():
             _set_badge(badge, sum(_NAV_BADGES.get(p, 0) for p in paths))
+        # Footer status card — repainted from the same tick, since _watcher_compute
+        # already produced its facts off the loop.
+        _apply_status_card()
 
     ui.timer(2.0, _tick)
 
