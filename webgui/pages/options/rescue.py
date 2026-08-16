@@ -719,6 +719,7 @@ def render():
             tabs, tab_board, tab_adhoc = _build_tabs()
     else:
         tabs, tab_board, tab_adhoc = _build_tabs()
+    _shell.bind_breadcrumb_leaf(tabs, initial="At-Risk Board")   # default on tab_panels
 
     with ui.tab_panels(tabs, value=tab_board).classes("w-full flush-panels"):
         # ── BOARD PANEL: at-risk table (left) + advisory cards (right) ─────────

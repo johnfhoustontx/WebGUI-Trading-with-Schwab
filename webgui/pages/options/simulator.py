@@ -325,6 +325,7 @@ def render():
             tabs, tab_replay, tab_whatif, tab_ivshock = _build_sim_tabs()
     else:
         tabs, tab_replay, tab_whatif, tab_ivshock = _build_sim_tabs()
+    _shell.bind_breadcrumb_leaf(tabs, initial="Replay")   # default set on tab_panels
 
     with ui.column().classes(f"calc-v2 {PAGE} w-full gap-3"):
         # No page title — the tab strip names the page (2026-07-11 cleanup).

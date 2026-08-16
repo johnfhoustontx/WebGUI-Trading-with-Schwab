@@ -1175,6 +1175,128 @@ def test_stop_all_services_lines_up_with_every_other_drawer_row():
     assert "text-[20px]" in _glyph(_icon_box(danger_link)).classes
 
 
+def _mount_breadcrumb(active="/options/gamma"):
+    """Build just the breadcrumb row the way ``_layout`` does, and return the
+    (leaf-label, leaf-caret, last-trail-crumb) triple it registers."""
+    from nicegui import ui
+
+    import main
+    trail = main.breadcrumb_trail(active)
+    last = None
+    with ui.card():
+        for i, crumb in enumerate(trail):
+            last = ui.label(crumb).classes(
+                main._CRUMB_LEAF if i == len(trail) - 1 else main._CRUMB_CONTEXT)
+        caret = ui.icon("chevron_right")
+        leaf = ui.label("").classes(main._CRUMB_LEAF)
+        caret.set_visibility(False)
+        leaf.set_visibility(False)
+    main._breadcrumb_leaf.clear()
+    main._breadcrumb_leaf.update({"caret": caret, "label": leaf, "parent": last})
+    return leaf, caret, last
+
+
+def test_breadcrumb_leaf_shows_the_active_view_and_demotes_the_page_crumb():
+    """A page's subtabs are a real level of the hierarchy: Dealer Positioning read
+    identically in the header whether you were on Gamma or on Net Prem."""
+    import main
+    leaf, caret, page_crumb = _mount_breadcrumb("/options/gamma")
+    # .classes is a LIST of individual names, so compare the distinguishing class
+    # of each style rather than the joined token string.
+    leaf_colour = "text-[#e6ecf9]"
+    context_colour = "text-[#5d6a88]"
+    assert leaf_colour in main._CRUMB_LEAF and context_colour in main._CRUMB_CONTEXT
+
+    assert not leaf.visible and not caret.visible, "no leaf until a page sets one"
+    assert leaf_colour in page_crumb.classes
+
+    main.set_breadcrumb_leaf("Gamma")
+    assert leaf.text == "Gamma" and leaf.visible and caret.visible
+    # The page name is now context, not the thing you are looking at.
+    assert context_colour in page_crumb.classes
+    assert leaf_colour not in page_crumb.classes
+    assert "font-semibold" not in page_crumb.classes
+
+    # ...and clearing it hands the emphasis back, without stacking either class.
+    main.set_breadcrumb_leaf("")
+    assert not leaf.visible and not caret.visible
+    assert leaf_colour in page_crumb.classes
+    assert context_colour not in page_crumb.classes
+    assert page_crumb.classes.count("font-semibold") == 1
+
+
+def test_set_breadcrumb_leaf_is_a_no_op_without_a_header():
+    """Pages call it unconditionally — standalone renders and tests have no
+    header mounted, and that must not raise."""
+    import main
+    main._breadcrumb_leaf.clear()
+    main.set_breadcrumb_leaf("Gamma")     # must not raise
+
+
+def test_bind_breadcrumb_leaf_paints_the_initial_view_and_follows_changes():
+    """Two failure modes at once: a crumb that only appears after the first click,
+    and one that never updates."""
+    from nicegui import ui
+
+    import main
+    leaf, _caret, _page = _mount_breadcrumb("/options/simulator")
+
+    with ui.card():
+        tabs = ui.tabs(value="Replay")
+    main.bind_breadcrumb_leaf(tabs)
+    assert leaf.text == "Replay", "the first render must already be correct"
+
+    tabs.value = "What-if"
+    assert leaf.text == "What-if"
+
+
+def test_bind_breadcrumb_leaf_takes_an_initial_for_bare_tabs():
+    """Four of the five subtab pages build a bare ui.tabs() and name the default on
+    the tab_panels, which reaches tabs.value through a BINDING that has not
+    propagated while the page is being built — so tabs.value is still None and the
+    crumb would sit blank until the first click."""
+    from nicegui import ui
+
+    import main
+    leaf, _caret, _page = _mount_breadcrumb("/portfolio")
+
+    with ui.card():
+        tabs = ui.tabs()
+    assert tabs.value is None
+    main.bind_breadcrumb_leaf(tabs, initial="Holdings")
+    assert leaf.text == "Holdings"
+
+
+def test_view_name_reads_a_tab_element_as_well_as_a_string():
+    """Rescue passes the tab OBJECT to ui.tab_panels, so the value can be the
+    element rather than its name."""
+    from nicegui import ui
+
+    import main
+    with ui.card():
+        tab = ui.tab("At-Risk Board")
+    assert main._view_name(tab) == "At-Risk Board"
+    assert main._view_name("Swing") == "Swing"
+    assert main._view_name(None) == ""
+
+
+def test_every_page_with_subtabs_binds_the_breadcrumb_leaf():
+    """The mechanism is only worth having if it is applied consistently — the ask
+    was explicitly "make this consistent for all menu items". Any page that mounts
+    into subtab_slot() owns a view level and must name it in the header, so a
+    sixth subtab page added later fails here rather than silently skipping it."""
+    import pathlib
+    import re
+
+    root = pathlib.Path(__file__).resolve().parents[1] / "pages"
+    users = [p for p in root.rglob("*.py")
+             if "subtab_slot()" in p.read_text(encoding="utf-8")]
+    assert len(users) == 5, f"expected 5 subtab pages, found {[p.name for p in users]}"
+    missing = [p.name for p in users
+               if not re.search(r"bind_breadcrumb_leaf\(", p.read_text(encoding="utf-8"))]
+    assert not missing, f"subtab pages that never name their view: {missing}"
+
+
 def test_the_nav_column_never_wraps():
     """A latent bug the section gaps finally tripped: NiceGUI's column wraps and
     `h-full` caps the height, so once the items are taller than the drawer the

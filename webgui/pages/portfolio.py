@@ -154,6 +154,7 @@ def render():
             tabs = _build_tabs()
     else:
         tabs = _build_tabs()
+    _shell.bind_breadcrumb_leaf(tabs, initial="Holdings")   # default set on tab_panels
     with ui.tab_panels(tabs, value="Holdings").classes("w-full flush-panels"):
         with ui.tab_panel("Holdings"):
             holdings_tbl = ui.table(columns=HOLDINGS_COLS, rows=[],

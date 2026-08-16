@@ -609,6 +609,9 @@ def render():
             tabs, tab_0dte, tab_swing, tab_dir = _build_scan_tabs()
     else:
         tabs, tab_0dte, tab_swing, tab_dir = _build_scan_tabs()
+    # initial= because the default lives on the tab_panels below, and that
+    # reaches tabs.value through a binding that has not propagated yet.
+    _shell.bind_breadcrumb_leaf(tabs, initial="0-DTE")
 
     def _table(columns):
         return ui.table(columns=columns, rows=[], row_key="id",

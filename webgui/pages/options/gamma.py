@@ -1836,6 +1836,11 @@ def render():
             view_toggle = _build_view_tabs()
     else:
         view_toggle = _build_view_tabs()
+    # "… › Dealer Positioning › Gamma". Needs a labeller: the tab VALUES are the
+    # engine keys (GEX/DEX), while the strip shows GAMMA/DELTA — the header should
+    # read what the tab reads, in sentence case rather than the strip's caps.
+    _shell.bind_breadcrumb_leaf(
+        view_toggle, lambda v: _view_label(_shell._view_name(v)).title())
 
     with ui.row().classes("items-center gap-3 flex-wrap w-full"):
         _sym_opts = symbol_options(bus_client.read("options:gamma_symbols"))

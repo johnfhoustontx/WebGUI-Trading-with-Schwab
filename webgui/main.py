@@ -32,6 +32,7 @@ import bus_client  # noqa: E402
 import page_help  # noqa: E402
 import proxy  # noqa: E402
 from pages.options import theme  # noqa: E402  (config/theme.toml typography + menu)
+from pages.ui_guard import guard  # noqa: E402
 from pages.ui_guard import guard_async  # noqa: E402
 from pages.ui_guard import install_deleted_slot_log_filter  # noqa: E402
 from repo_paths import IS_DEV, NICEGUI_PORT, SERVICE_URLS  # noqa: E402
@@ -507,6 +508,81 @@ def breadcrumb_trail(active: str):
         if path == active:
             return [SYSTEM_SECTION, label]
     return [_NAV_LABEL.get(active, theme.BRAND_NAME)]
+
+
+# Breadcrumb crumb styling — the trailing crumb is the thing you are looking at,
+# everything before it is context. Named because the LEAF swaps them at runtime.
+_CRUMB_LEAF = "text-[13px] text-[#e6ecf9] font-semibold"
+_CRUMB_CONTEXT = "text-[13px] text-[#5d6a88]"
+
+# The optional FOURTH crumb: a page's own active view (Dealer Positioning ›
+# Gamma, Simulator › Replay …). Single-user module state, rebuilt per layout like
+# the badge refs. "parent" is the last trail crumb, which has to be demoted to
+# context when a view is named after it.
+_breadcrumb_leaf: dict = {}
+
+
+def _view_name(value):
+    """A subtab's name from whatever a ``ui.tabs`` element holds.
+
+    Pages build their tabs either by NAME (``ui.tab("Replay")`` → the value is
+    the string) or by ELEMENT (Rescue passes the tab object to ``ui.tab_panels``,
+    so the value can be the element). Reading the element's ``name`` prop covers
+    both without every call site having to know which it is."""
+    if value is None:
+        return ""
+    props = getattr(value, "_props", None)
+    if isinstance(props, dict) and props.get("name"):
+        return str(props["name"])
+    return str(value)
+
+
+def set_breadcrumb_leaf(label) -> None:
+    """Show ``label`` as the last breadcrumb crumb, or hide the leaf when falsy.
+
+    Never raises and is a no-op before/without a mounted header, so a page may
+    call it unconditionally."""
+    refs = _breadcrumb_leaf
+    if not refs.get("label"):
+        return
+    text = str(label or "").strip()
+    refs["label"].text = text
+    refs["label"].set_visibility(bool(text))
+    refs["caret"].set_visibility(bool(text))
+    parent = refs.get("parent")
+    if parent is not None:
+        # The page name stops being the leaf the moment a view is named after it.
+        parent.classes(remove=f"{_CRUMB_LEAF} {_CRUMB_CONTEXT}",
+                       add=_CRUMB_CONTEXT if text else _CRUMB_LEAF)
+
+
+def bind_breadcrumb_leaf(tabs, labeller=None, initial=None) -> None:
+    """Track a page's own view tabs in the breadcrumb: ``… › Page › View``.
+
+    A page's subtabs ARE a level of the hierarchy — Dealer Positioning read the
+    same in the header whether you were on Gamma or on Net Prem — but they switch
+    CLIENT-side without rebuilding the layout, so the crumb has to ride the same
+    event that switches the view.
+
+    Registers an ADDITIONAL ``on_value_change`` handler (NiceGUI appends them), so
+    a page's existing handler is untouched, and paints the initial value at build
+    time so the first render is already correct rather than correcting itself on
+    the first click. ``labeller`` maps the raw tab value to what the header should
+    read — Gamma needs it, since its "GEX" tab is displayed as "Gamma".
+
+    ``initial`` is required by every page that builds a bare ``ui.tabs()`` and
+    names its default on the ``ui.tab_panels`` instead — four of the five do. That
+    default reaches the tabs element through NiceGUI's BINDING, which propagates
+    on a later cycle, so ``tabs.value`` is still None while the page is being
+    built and the crumb would sit blank until the first click."""
+    fmt = labeller or _view_name
+    set_breadcrumb_leaf(fmt(tabs.value if tabs.value is not None else initial))
+
+    @guard
+    def _sync(e) -> None:
+        set_breadcrumb_leaf(fmt(e.value))
+
+    tabs.on_value_change(_sync)
 
 
 def brand_mark_src(static_dir=None):
@@ -1672,15 +1748,28 @@ def _layout(active: str, title: str):
             ui.element("div").classes("w-px h-[22px] bg-white/[0.09] mx-1 flex-none")
             with ui.row().classes("items-center gap-2 no-wrap"):
                 _trail = breadcrumb_trail(active)
+                _last_crumb = None
                 for _i, _crumb in enumerate(_trail):
                     if _i:
                         ui.icon("chevron_right").classes(
                             "text-[14px] text-[#3f4a66]")
-                    # Only the last crumb is the page you are on; the ancestors
-                    # stay muted so the trail reads as context, not as a title.
-                    ui.label(_crumb).classes(
-                        "text-[13px] text-[#e6ecf9] font-semibold"
-                        if _i == len(_trail) - 1 else "text-[13px] text-[#5d6a88]")
+                    # Only the last crumb is the thing you are looking at; the
+                    # ancestors stay muted so the trail reads as context.
+                    _last_crumb = ui.label(_crumb).classes(
+                        _CRUMB_LEAF if _i == len(_trail) - 1 else _CRUMB_CONTEXT)
+                # A hidden slot for the page's own active view, filled by
+                # bind_breadcrumb_leaf when the page has subtabs (see the
+                # function). Built here, always, so a page never has to reach
+                # into the header to create one.
+                _leaf_caret = ui.icon("chevron_right").classes(
+                    "text-[14px] text-[#3f4a66]")
+                _leaf_label = ui.label("").classes(_CRUMB_LEAF)
+                _leaf_caret.set_visibility(False)
+                _leaf_label.set_visibility(False)
+                _breadcrumb_leaf.clear()
+                _breadcrumb_leaf.update({"caret": _leaf_caret,
+                                         "label": _leaf_label,
+                                         "parent": _last_crumb})
         # RIGHT: the market-status pill alone. The design's search pill and
         # notification bell are deliberately not ported — see the design doc's
         # "Rejected" section.
