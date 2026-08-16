@@ -925,9 +925,17 @@ _NAV_CSS = """
    emits `.nav-drawer .q-icon{color:<[menu].text>!important}` (2 classes) and is
    injected AFTER this block, so equal-specificity would lose. */
 .nav-drawer .nav-active .nav-icon { color: #6b86ff !important; }
-/* Same specificity argument for the danger button's icon (see _nav_danger_link):
-   an inherited rose would lose to build_nav_css's 2-class !important override. */
-.nav-drawer .nav-danger .nav-icon { color: #ff8f92 !important; }
+/* Same specificity argument for the danger button, and it applies to its LABEL as
+   well as its icon — measured in a live browser, where the label rendered
+   #98a1c0: build_nav_css's `.nav-drawer a{color:<[menu].text>!important}` paints
+   the <a>, and a label with no colour of its own simply inherits it. A Tailwind
+   text-[#ff8f92] on the link cannot win against an !important. */
+.nav-drawer .nav-danger .nav-icon,
+.nav-drawer .nav-danger .nav-label { color: #ff8f92 !important; }
+/* The static AI pill, for the third instance of the same problem: on the ACTIVE
+   row, `.nav-drawer .nav-active .nav-label` (3 classes) beat the pill's 1-class
+   Tailwind colour, so the pill turned white on exactly the one row it is on. */
+.nav-drawer .nav-pill { color: #4da3ff !important; }
 /* Compact tab strip (the sub-menu tabs under the header): Deep Slate PILL tabs in
    a raised rounded container — no folder baseline. The active pill is a soft navy
    tint; inactive are plain. Quasar-internal (q-tab). */
@@ -1260,11 +1268,13 @@ def _nav_link(path: str, label: str, icon: str, active: str) -> None:
             if pill:
                 # A fixed marker (e.g. "AI"), not watcher state — so it is built
                 # once and never registered for the tick. .nav-label rides the
-                # existing fade, which is what keeps it out of the 68px rail.
+                # existing fade, which is what keeps it out of the 68px rail;
+                # .nav-pill carries the colour, because .nav-label's own active
+                # rule would otherwise repaint it white on the active row.
                 ui.label(pill).classes(
-                    "nav-label ml-auto font-mono text-[10px] leading-none "
-                    "px-[6px] py-[2px] rounded-[5px] "
-                    "bg-[#4da3ff]/[0.14] text-[#4da3ff]")
+                    "nav-label nav-pill ml-auto font-mono text-[10px] "
+                    "leading-none px-[6px] py-[2px] rounded-[5px] "
+                    "bg-[#4da3ff]/[0.14]")
 
 
 def _nav_group_link(label: str, icon: str, children, active: str) -> None:

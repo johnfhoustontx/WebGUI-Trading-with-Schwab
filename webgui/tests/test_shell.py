@@ -1256,5 +1256,38 @@ def test_claude_trades_carries_a_static_ai_pill_that_the_watcher_never_touches()
     labels = [c for c in main._badge_refs["/driver"].parent_slot.parent
               .parent_slot.parent.default_slot.children if isinstance(c, ui.label)]
     assert [l.text for l in labels] == ["Claude Trades", "AI"]
-    # The pill rides the label fade, which is what keeps it out of the 68px rail.
-    assert "nav-label" in labels[1].classes
+    # The pill rides the label fade, which is what keeps it out of the 68px rail,
+    # but takes its COLOUR from .nav-pill — see the specificity test below.
+    assert "nav-label" in labels[1].classes and "nav-pill" in labels[1].classes
+
+
+def test_rail_colours_outspecify_the_menu_text_and_active_overrides():
+    """Three colours in the rail have to WIN a specificity fight, and all three
+    lost when first written — caught in a live browser, not by any test here.
+
+    ``theme.build_nav_css`` emits ``.nav-drawer a{color:<[menu].text>!important}``
+    and ``_NAV_CSS`` itself emits ``.nav-drawer .nav-active .nav-label`` (3
+    classes). A Tailwind ``text-[#…]`` utility is ONE class with no !important, so
+    it loses to both: the danger button rendered in menu grey rather than rose,
+    and the AI pill turned white on the one row it ever appears on — the active
+    one. Measured: rgb(152,161,192) and rgb(238,241,246) where rose and blue were
+    intended.
+
+    The fix is a rule per case, each !important and at least 3 classes. This test
+    pins the SHAPE, since the failure is invisible to a DOM-free assertion."""
+    import inspect
+    import re
+
+    import main
+    css = main._NAV_CSS
+    for sel in (".nav-drawer .nav-danger .nav-icon",
+                ".nav-drawer .nav-danger .nav-label",
+                ".nav-drawer .nav-pill"):
+        assert sel in css, f"{sel} has no colour rule and will inherit menu grey"
+    # Each of those rules must carry !important — without it the [menu].text
+    # override wins regardless of class count.
+    for block in re.findall(r"\.nav-drawer \.nav-(?:danger|pill)[^{]*\{([^}]*)\}", css):
+        assert "!important" in block, f"rule loses to [menu].text: {{{block}}}"
+    # And the pill must NOT be coloured by a Tailwind utility any more, or the
+    # active-row regression silently returns.
+    assert "text-[#4da3ff]" not in inspect.getsource(main._nav_link)
