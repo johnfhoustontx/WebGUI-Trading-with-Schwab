@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo
 
 import app_settings
 import page_help as _page_help
+from pages import busy as _busy
 from pages.ui_guard import guard, guard_async
 from shared import market_calendar as _mc
 from . import flow_panels as _fx
@@ -2004,7 +2005,9 @@ def render():
     # column's p-4 right padding — the heatmap's right edge then reaches the window edge.
     # (A negative right margin does NOT widen a full-width flex item, so calc-width is
     # used instead; the 1rem lands inside the parent's padding → never a horizontal scroll.)
-    with ui.row().classes("w-[calc(100%+1rem)] no-wrap gap-0 items-start relative gamma-xhair-row"):
+    chart_row = ui.row().classes(
+        "w-[calc(100%+1rem)] no-wrap gap-0 items-start relative gamma-xhair-row")
+    with chart_row:
         chart_box = ui.column().classes(f"min-w-0 {_INIT_FLEX}")
         with chart_box:
             # chart_plot switches kind (bar <-> Term heatmap). Highcharts'
@@ -2115,6 +2118,12 @@ def render():
         _set_flex_class(chart_box, "chart", flex_class(bar_w))
         _set_flex_class(heatmap_box, "heat", flex_class(heat_w))
         _reflow_charts()
+
+    # Inline wait for the chart region: a symbol change refetches a ~14 MB
+    # snapshot, and until it lands the panels still show the PREVIOUS symbol,
+    # which is worse than showing nothing — it looks like live data for a
+    # symbol you are no longer on.
+    chart_busy = _busy.build_busy(chart_row, "Loading…")
 
     def _set_chart(fig):
         """Paint chart_plot: update in place when the chart KIND is unchanged
@@ -2396,6 +2405,7 @@ def render():
             return
         bus_client.request("options", {"type": "gamma_refresh", "args": {"symbol": sym}})
         ui.notify(f"Gamma refresh requested for {sym}")
+        chart_busy.show(f"Loading {sym}…")
         state["countdown"] = 120
 
     @guard
@@ -2450,6 +2460,7 @@ def render():
             return
         state["snap"] = snap
         _render_view()
+        chart_busy.hide()
 
     @guard_async
     async def _maybe_repaint_netprem(version):

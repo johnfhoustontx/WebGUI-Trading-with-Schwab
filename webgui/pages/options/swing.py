@@ -19,6 +19,7 @@ row actions. A fetch-free version-poll ``ui.timer`` repaints when the bus cache
 version changes (graceful-empty when the service is cold).
 """
 import bus_client
+from pages import busy as _busy
 from nicegui import ui
 
 from pages.ui_guard import guard
@@ -88,10 +89,14 @@ def render():
                 mincr = ui.number("Min credit %", value=10.0, format="%.1f").classes("w-28")
         banner = ui.label(strategy_table.view_banner_text(None)).classes("opacity-80 text-sm")
         # Results table + shared detail panel side by side, below the controls.
-        with ui.row().classes("w-full no-wrap gap-4 items-start"):
+        results_row = ui.row().classes("w-full no-wrap gap-4 items-start")
+        with results_row:
             table = ui.table(columns=strategy_table.strategy_columns(), rows=[],
                              row_key="id").classes("flex-grow min-w-0")
             detail_panel = detail.render()
+    # A scan can take seconds; until it lands the table still shows the PREVIOUS
+    # symbol's candidates, which reads as a result rather than as stale data.
+    scan_busy = _busy.build_busy(results_row, "Scanning…")
 
     by_id: dict = {}
     # Last-seen bus cache version for the fetch-free repaint timer.
@@ -145,6 +150,7 @@ def render():
         table.update()
         banner.text = strategy_table.view_banner_text(payload.get("view"))
         status.text = status_text(payload, len(table.rows))
+        scan_busy.hide()
 
     @guard
     def _request_scan():
@@ -166,6 +172,7 @@ def render():
             ui.notify("No strategies selected — scanning all.", type="info")
         ui.notify("Swing scan requested")
         status.text = "Scanning…"
+        scan_busy.show(f"Scanning {params['symbol']}…")
 
     scan_btn.on_click(_request_scan)
     # Enter OR tab/click-out of the Symbol field triggers the scan (mirrors the Scan

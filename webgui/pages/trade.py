@@ -21,6 +21,7 @@ and degrades to "Insufficient fundamental data → HOLD" — a note flags this.
 import time
 
 import bus_client
+from pages import busy as _busy
 from nicegui import ui
 
 from pages.ui_guard import guard
@@ -383,13 +384,19 @@ def render():
         # items-stretch: both frames render at EQUAL height, so the row reads as even
         # frames. (The Markov Forecast card was REMOVED: it forecast the LEGACY
         # momentum score, which contradicted the validated Position read — see swing_tilt.)
-        results_top = ui.column().classes("w-full gap-2")
-        verdict_row = ui.row().classes("w-full gap-3 items-stretch flex-wrap")
-        with verdict_row:
-            position_card = ui.card().classes(f"{CARD} flex-1 min-w-[280px]")
-            investor_card = ui.card().classes(f"{CARD} flex-1 min-w-[280px]")
-        verdict_row.set_visibility(False)
-        results_bottom = ui.column().classes("w-full gap-2")
+        results_col = ui.column().classes("w-full gap-2")
+        with results_col:
+            results_top = ui.column().classes("w-full gap-2")
+            verdict_row = ui.row().classes("w-full gap-3 items-stretch flex-wrap")
+            with verdict_row:
+                position_card = ui.card().classes(f"{CARD} flex-1 min-w-[280px]")
+                investor_card = ui.card().classes(f"{CARD} flex-1 min-w-[280px]")
+            verdict_row.set_visibility(False)
+            results_bottom = ui.column().classes("w-full gap-2")
+    # One region for the whole result area: an analyze replaces every card on the
+    # page, so a spinner over just one of them would leave the others showing the
+    # PREVIOUS symbol's verdict beside the new symbol's name.
+    results_busy = _busy.build_busy(results_col, "Analyzing…")
 
     # ── card builders (widgets; pull from the pure transforms above) ──────────
     def _header(res):
@@ -577,6 +584,7 @@ def render():
         state["last_ts"] = time.monotonic()
         bus_client.request("trade", {"type": "analyze", "args": {"symbol": sym}})
         status.text = f"Analyzing {sym}…"
+        results_busy.show(f"Analyzing {sym}…")
 
     analyze_btn.on_click(_request_analyze)
     symbol_in.on("keydown.enter", lambda e: _request_analyze())
@@ -634,6 +642,7 @@ def render():
         state["result"] = bus_client.read("trade:analysis") or None
         _render_results()
         status.text = _status_for(state["result"])
+        results_busy.hide()
 
     # Initial paint (graceful-empty when the service is cold / no prior analysis).
     # The cache was already read up-front (to seed the symbol field), so just paint.
