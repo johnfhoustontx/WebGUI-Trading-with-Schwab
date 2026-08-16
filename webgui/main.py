@@ -649,6 +649,16 @@ _ALERT_STATE: dict = {
 _badge_refs: dict = {}
 _group_badge_refs: dict = {}
 
+# Drawer notification dots (2026-08-16). The RAIL shows counts nowhere — a number
+# is unreadable at 68px and was overlapping the icon — so a drawer row signals
+# "something here" with a plain red dot and the exact count stays on the tab
+# strip, which is where you go to act on it. Two dots per row, one per drawer
+# state (see _alert_dot): a corner dot while collapsed, a right-aligned dot once
+# the labels are visible. Keyed by route / group label, exactly like the badge
+# refs above, and driven from the same _NAV_BADGES numbers.
+_alert_refs: dict = {}
+_group_alert_refs: dict = {}
+
 # Footer status-card state + element refs, in the same shape as the badge pair
 # above: _STATUS_CARD is what the (off-thread) watcher computes, _status_refs is
 # what the UI-thread tick writes it into. Seeded "unknown" so the very first
@@ -900,6 +910,26 @@ _NAV_CSS = """
 .nav-drawer.nav-pinned .nav-sep,
 .nav-drawer:hover .nav-sep,
 .nav-drawer:focus-within .nav-sep { opacity: 0; }
+/* ── Notification dots ─────────────────────────────────────────────────────
+   A drawer row shows a plain red dot, never a number: at 68px a count is
+   unreadable and it sat ON the icon. Each row mounts TWO dots and this swaps
+   them, because their POSITION has to change with the drawer state and a single
+   element cannot be both. Collapsed → the corner of the icon, the only thing
+   visible. Open → the right end of the row, clear of the label (an ml-auto dot
+   in the rail would sit at x~250, i.e. clipped out of sight).
+   Both are hidden unless the row carries .nav-alert-on, which _alert_dot adds —
+   deliberately NOT set_visibility, whose single-class .hidden these rules would
+   out-specify, showing a dot on every row the moment the drawer opened.
+   The open-state rules need the extra pseudo-class to beat the 3-class rail rule
+   above them; that is why they repeat .nav-alert-on rather than relaxing it. */
+.nav-drawer .nav-alert-rail, .nav-drawer .nav-alert-open { display: none; }
+.nav-drawer .nav-alert-rail.nav-alert-on { display: block; }
+.nav-drawer.nav-pinned .nav-alert-rail.nav-alert-on,
+.nav-drawer:hover .nav-alert-rail.nav-alert-on,
+.nav-drawer:focus-within .nav-alert-rail.nav-alert-on { display: none; }
+.nav-drawer.nav-pinned .nav-alert-open.nav-alert-on,
+.nav-drawer:hover .nav-alert-open.nav-alert-on,
+.nav-drawer:focus-within .nav-alert-open.nav-alert-on { display: block; }
 /* Footer service-status card. It is DROPPED in the rail rather than faded: at
    68px there is no room for the text, and a lone dot would say less than the
    count badge already riding the System Status icon two rows below. display
@@ -1209,11 +1239,11 @@ def _help_tooltip(path: str) -> None:
 def _count_badge(n: int) -> ui.badge:
     """A red count badge floating on its parent's top-right corner, hidden at 0.
 
-    The drawer rail and the tab strip both mount one; the 2s watcher then keeps it
-    current via ``_set_badge``. ``floating`` is position:absolute, so the parent
-    must be POSITIONED: the rail's wrapper is explicitly ``relative`` (see
-    ``_nav_icon``), while the tab-strip call site relies on Quasar's ``.q-tab``
-    already being position:relative."""
+    Since 2026-08-16 this serves the TAB STRIP only — the drawer shows a plain dot
+    instead (``_alert_dot``), so the exact number lives on the tabs, which is
+    where you go to act on it. The 2s watcher keeps it current via ``_set_badge``.
+    ``floating`` is position:absolute, so the parent must be POSITIONED; the
+    tab-strip call site relies on Quasar's ``.q-tab`` already being relative."""
     badge = ui.badge(str(n) if n else "").props("color=red rounded floating")
     badge.set_visibility(bool(n))
     return badge
@@ -1226,12 +1256,41 @@ def _set_badge(badge: ui.badge, n: int) -> None:
     badge.set_visibility(bool(n))
 
 
-def _nav_icon(icon: str, count: int) -> ui.badge:
-    """The rail's icon plus its corner count badge.
+def _alert_dot(count: int, *, rail: bool):
+    """One of a nav row's two red notification dots — corner (rail) or right (open).
+
+    Visibility is a CLASS (``nav-alert-on``), not ``set_visibility``. NiceGUI's
+    set_visibility toggles Tailwind's single-class ``.hidden{display:none}``,
+    which the two-class state rules in ``_NAV_CSS`` would out-specify — a row with
+    zero alerts would show its dot the moment the drawer opened. Making "has
+    alerts" a class the state rules require instead means the two facts compose
+    rather than fight.
+    """
+    where = ("nav-alert-rail absolute top-0 right-0" if rail
+             else "nav-alert-open ml-2")
+    dot = ui.element("div").classes(
+        f"{where} w-[7px] h-[7px] rounded-full bg-[#e5484d] flex-none")
+    if count:
+        dot.classes(add="nav-alert-on")
+    return dot
+
+
+def _set_alert(dots, n: int) -> None:
+    """Point a row's dot pair at ``n`` — the update half of ``_alert_dot``."""
+    for dot in dots:
+        if n:
+            dot.classes(add="nav-alert-on")
+        else:
+            dot.classes(remove="nav-alert-on")
+
+
+def _nav_icon(icon: str, count: int):
+    """The rail's icon plus its COLLAPSED-state notification dot.
 
     The icon is the ONLY thing visible when the rail is collapsed, so it carries
-    the active state, and the badge rides its top-right corner in BOTH states.
-    Returns the badge so the caller can register it for the 2s watcher.
+    the active state, and the corner dot rides it there. Once the drawer opens the
+    dot moves out to the right of the row (``_alert_dot(rail=False)``) so it stops
+    sitting on top of the icon — the two swap by CSS, see _NAV_CSS.
 
     Takes no is_active: the accent is painted by _NAV_CSS's
     `.nav-drawer .nav-active .nav-icon`, keyed off the LINK's .nav-active, which
@@ -1239,14 +1298,14 @@ def _nav_icon(icon: str, count: int) -> ui.badge:
     out-specify theme.build_nav_css's `.nav-drawer .q-icon{...!important}`
     ([menu].text), injected after _NAV_CSS, so a 2-class marker on the icon
     itself would tie and lose."""
-    # ``relative`` is load-bearing, not layout garnish: Quasar's ``floating`` badge is
-    # position:absolute, so it anchors to the nearest POSITIONED ancestor. Drop this
-    # and the badge escapes up the tree instead of sitting on the icon corner.
+    # ``relative`` is load-bearing, not layout garnish: the corner dot is
+    # position:absolute, so it anchors to the nearest POSITIONED ancestor. Drop
+    # this and it escapes up the tree instead of sitting on the icon corner.
     with ui.element("div").classes(
             "relative flex items-center justify-center flex-none w-6 h-6"):
         ui.icon(icon).classes("nav-icon text-[20px]")
-        badge = _count_badge(count)
-    return badge
+        dot = _alert_dot(count, rail=True)
+    return dot
 
 
 def _nav_link(path: str, label: str, icon: str, active: str) -> None:
@@ -1259,10 +1318,11 @@ def _nav_link(path: str, label: str, icon: str, active: str) -> None:
     # decoupled from --q-primary on purpose — see the rule's comment in _NAV_CSS.
     is_active = path == active
     state = " nav-active" if is_active else ""
+    n = _NAV_BADGES.get(path, 0)
     with ui.link(target=path).classes(base + state):
         _help_tooltip(path)   # rest the mouse 2 s for this page's guide
         with ui.row().classes("items-center gap-3 w-full no-wrap"):
-            _badge_refs[path] = _nav_icon(icon, _NAV_BADGES.get(path, 0))
+            rail_dot = _nav_icon(icon, n)
             ui.label(label).classes("nav-label")
             pill = _NAV_PILLS.get(path)
             if pill:
@@ -1275,13 +1335,19 @@ def _nav_link(path: str, label: str, icon: str, active: str) -> None:
                     "nav-label nav-pill ml-auto font-mono text-[10px] "
                     "leading-none px-[6px] py-[2px] rounded-[5px] "
                     "bg-[#4da3ff]/[0.14]")
+            # ml-auto pushes the open-state dot to the row's right edge, clear of
+            # the label — mt-[1px] centres it optically against the cap height.
+            open_dot = _alert_dot(n, rail=False).classes(
+                "ml-auto mt-[1px]" if not pill else "")
+            _alert_refs[path] = (rail_dot, open_dot)
 
 
 def _nav_group_link(label: str, icon: str, children, active: str) -> None:
     """One flat drawer item for a GROUP: navigates to the group's first page,
-    highlights when the active route is any of its children, and carries a badge
-    with the SUM of the children's badge counts (updated by the watcher via
-    ``_group_badge_refs``). The children themselves render as the top tab strip."""
+    highlights when the active route is any of its children, and carries a dot
+    when ANY of its children has alerts (updated by the watcher via
+    ``_group_alert_refs``). The children themselves render as the top tab strip,
+    where the exact per-page counts live."""
     paths = [p for p, _l, _i in children]
     base = ("w-full no-underline items-center rounded-[10px] px-3 py-1 "
             "transition-colors hover:bg-white/[0.06]")
@@ -1291,33 +1357,51 @@ def _nav_group_link(label: str, icon: str, children, active: str) -> None:
         _help_tooltip(paths[0])   # the group's landing page's guide (2 s rest)
         with ui.row().classes("items-center gap-3 w-full no-wrap"):
             n = sum(_NAV_BADGES.get(p, 0) for p in paths)
-            _group_badge_refs[label] = (_nav_icon(icon, n), paths)
+            rail_dot = _nav_icon(icon, n)
             ui.label(label).classes("nav-label")
+            open_dot = _alert_dot(n, rail=False).classes("ml-auto mt-[1px]")
+            _group_alert_refs[label] = ((rail_dot, open_dot), paths)
 
 
 def _nav_danger_link(path: str, label: str, icon: str) -> None:
-    """Stop All Services — drawn as a danger-outlined button, not a nav row.
+    """Stop All Services — a nav row in LAYOUT, a danger button in COLOUR.
 
-    It is the only item in the rail that does something irreversible to the
-    running stack, so it must not look like the two navigation rows above it.
-    Carries no badge (nothing counts toward shutting the stack down) and claims
-    no active state — the navy active wash under a rose outline reads as a
-    rendering bug, and the page it opens is a confirm gate you leave immediately.
+    Its icon and label sit on exactly the same two columns as every other drawer
+    item (the ``px-3`` link padding, then the shared 24px ``_nav_icon``-sized
+    wrapper, then a ``gap-3``), because a footer whose three rows start at three
+    different x-positions reads as broken rather than as emphasis. The rose
+    outline alone carries the warning — it is the only item in the rail that does
+    something irreversible to the running stack.
 
-    The rose icon colour needs its own ``_NAV_CSS`` rule: ``theme.build_nav_css``
-    emits ``.nav-drawer .q-icon{color:…!important}`` for ``[menu].text``, so an
-    inherited colour here would silently lose to it.
+    Carries no dot (nothing counts toward shutting the stack down) and claims no
+    active state — the navy active wash under a rose outline reads as a rendering
+    bug, and the page it opens is a confirm gate you leave immediately.
+
+    The rose icon AND label colours each need their own ``_NAV_CSS`` rule:
+    ``theme.build_nav_css`` emits ``.nav-drawer a{color:…!important}`` for
+    ``[menu].text``, so anything inherited here silently loses to it.
     """
+    # px-[11px], not px-3: box-sizing is border-box, so the 1px outline eats into
+    # the padding box and would otherwise push this row's glyph 1px right of every
+    # other one. 11 + 1 = the 12px the plain rows use.
     with ui.link(target=path).classes(
-            "nav-danger w-full no-underline items-center justify-center gap-2 "
-            "mt-[6px] h-[34px] rounded-[8px] border border-[#e5484d]/[0.32] "
-            "text-[#ff8f92] transition-colors hover:bg-[#e5484d]/[0.14]"):
+            "nav-danger w-full no-underline items-center rounded-[10px] "
+            "px-[11px] py-1 mt-[6px] border border-[#e5484d]/[0.32] "
+            "transition-colors hover:bg-[#e5484d]/[0.14]"):
         _help_tooltip(path)
-        ui.icon(icon).classes("nav-icon text-[16px] flex-none")
-        ui.label(label).classes("nav-label text-[12.5px] font-semibold")
+        with ui.row().classes("items-center gap-3 w-full no-wrap"):
+            # Same 24px box _nav_icon uses, so the glyph lands on the shared
+            # column even though this row mounts no dot.
+            with ui.element("div").classes(
+                    "relative flex items-center justify-center flex-none w-6 h-6"):
+                # text-[20px] like every other rail icon: the box is already on the
+                # shared column, but a smaller glyph centres inside it 1px off, and
+                # at this size that reads as a misalignment rather than a weight.
+                ui.icon(icon).classes("nav-icon text-[20px]")
+            ui.label(label).classes("nav-label font-semibold")
 
 
-def _nav_section_header(caption: str, count: int) -> None:
+def _nav_section_header(caption: str, count: int, first: bool = False) -> None:
     """A rail section caption (MARKETS / STRATEGY / ACCOUNT) and its item count.
 
     Two children of ONE fixed-height, position:relative box, each absolutely
@@ -1330,8 +1414,15 @@ def _nav_section_header(caption: str, count: int) -> None:
 
     ``count`` is passed in from ``len(entries)`` rather than written down, so a
     section can never advertise a stale number after a page is added.
+
+    Every section but the ``first`` gets a wide top margin. With 2px between rows,
+    a 26px caption box alone did not separate the groups by enough to read as a
+    break — STRATEGY looked like an eleventh item rather than a new heading. The
+    gap does the grouping; the caption only names it. It applies in the collapsed
+    rail too, where it spaces the hairlines by the same amount.
     """
-    with ui.element("div").classes("relative w-full h-[26px] shrink-0"):
+    gap = "" if first else " mt-4"
+    with ui.element("div").classes(f"relative w-full h-[26px] shrink-0{gap}"):
         ui.element("div").classes(
             "nav-sep absolute left-[10px] right-[10px] top-[12px] h-px "
             "bg-white/[0.07]")
@@ -1417,6 +1508,8 @@ def _layout(active: str, title: str):
     """
     _badge_refs.clear()
     _group_badge_refs.clear()
+    _alert_refs.clear()
+    _group_alert_refs.clear()
     # Read the (potentially large) options:scan payload ONCE per navigation and
     # share it with both the initial badge recompute here and the _acknowledge
     # below — each used to re-read it (2-3 deserializes of the day's scan per page).
@@ -1460,14 +1553,23 @@ def _layout(active: str, title: str):
               .classes("nav-drawer" + (" nav-pinned" if _pinned else ""))
               .props(f"behavior=desktop width={drawer_width(_pinned)}"))
     with drawer:
-        with ui.column().classes("h-full w-full flex flex-col gap-[2px]"):
+        # flex-nowrap is load-bearing, and its absence was a LATENT bug this
+        # redesign's section gaps finally tripped. NiceGUI's column wraps, and
+        # `h-full` caps the height — so as soon as the items are taller than the
+        # drawer, the overflow wraps into a SECOND COLUMN at 16 + 35 + 2 = 53px
+        # instead of scrolling. Measured: Stop All Services alone jumped to x=53
+        # while every other row sat at 16, and in the collapsed rail its corner
+        # dot landed at x=82, outside the 68px viewport entirely. Nothing about
+        # the row itself was wrong, which is what made it hard to see.
+        with ui.column().classes(
+                "h-full w-full flex flex-col flex-nowrap gap-[2px]"):
             # The rail's ORDER is data (NAV_SECTIONS), not the sequence of calls
             # here — regrouping the menu is now a list edit, not a render edit.
             # There is no lockup at the top: the brand lives once, in the header,
             # so the rail opens straight onto its first section caption.
             _status_refs.clear()
-            for caption, entries in NAV_SECTIONS:
-                _nav_section_header(caption, len(entries))
+            for _i, (caption, entries) in enumerate(NAV_SECTIONS):
+                _nav_section_header(caption, len(entries), first=(_i == 0))
                 for entry in entries:
                     if entry[0] == "group":
                         _kind, _label, _icon, _children = entry
@@ -1478,17 +1580,23 @@ def _layout(active: str, title: str):
             # Machine-level controls, pushed to the FOOT of the rail: mt-auto eats
             # the leftover column height so they sit at the bottom edge (the column
             # is h-full flex-col), while still reading as the last items when the
-            # menu is long enough to fill it. The border-t hairline separates them
-            # from the workflow pages above.
-            with ui.column().classes(
-                    "mt-auto w-full gap-[2px] pt-2 shrink-0 "
-                    "border-t border-white/[0.06]"):
-                _status_card()
-                for path, label, icon in SYSTEM_RAIL:
-                    if path == SYSTEM_DANGER_ROUTE:
-                        _nav_danger_link(path, label, icon)
-                    else:
-                        _nav_link(path, label, icon, active)
+            # menu is long enough to fill it. A hairline separates them from the
+            # workflow pages above.
+            # NB: mb-2 for the gap below, NOT my-2 — `my-*` also sets margin-top
+            # and would fight the mt-auto that does the pushing.
+            # These stay DIRECT children of the column. Wrapping them in a nested
+            # ui.column was measured to shift the whole block 37px right of every
+            # other row and carry the footer's corner dots outside the 68px rail
+            # entirely — the rows are laid out against the drawer's own padding,
+            # and an extra flex parent breaks that shared column.
+            ui.element("div").classes(
+                "mt-auto mb-2 w-full h-px bg-white/[0.07] shrink-0")
+            _status_card()
+            for path, label, icon in SYSTEM_RAIL:
+                if path == SYSTEM_DANGER_ROUTE:
+                    _nav_danger_link(path, label, icon)
+                else:
+                    _nav_link(path, label, icon, active)
 
     with ui.header().classes("items-center justify-between px-4"):
         # LEFT: hamburger · brand lockup · hairline · breadcrumb. The breadcrumb
@@ -1600,8 +1708,11 @@ def _layout(active: str, title: str):
                     notify_desktop("Options-flow alert", new_flow[0].get("text", ""))
         for route, badge in _badge_refs.items():
             _set_badge(badge, _NAV_BADGES.get(route, 0))
-        for _label, (badge, paths) in _group_badge_refs.items():
-            _set_badge(badge, sum(_NAV_BADGES.get(p, 0) for p in paths))
+        # Drawer dots — same numbers, rendered as presence rather than a count.
+        for route, dots in _alert_refs.items():
+            _set_alert(dots, _NAV_BADGES.get(route, 0))
+        for _label, (dots, paths) in _group_alert_refs.items():
+            _set_alert(dots, sum(_NAV_BADGES.get(p, 0) for p in paths))
         # Footer status card — repainted from the same tick, since _watcher_compute
         # already produced its facts off the loop.
         _apply_status_card()

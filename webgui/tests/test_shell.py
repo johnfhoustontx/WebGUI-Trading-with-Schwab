@@ -682,72 +682,104 @@ def _nav_link_of(badge):
     return _nav_wrapper_of(badge).parent_slot.parent.parent_slot.parent
 
 
-def test_nav_link_badge_floats_on_the_icon_and_registers_per_route():
-    """The badge must sit INSIDE the relative wrapper (Quasar's floating badge is
-    position:absolute — it anchors to the nearest positioned ancestor), and the ref
-    the 2s watcher writes to must be registered under the item's route."""
+def test_nav_link_mounts_a_dot_pair_and_registers_it_per_route():
+    """A drawer row shows PRESENCE, not a count (2026-08-16): the number is
+    unreadable at 68px and used to sit on top of the icon. Two dots are mounted
+    because their POSITION differs by drawer state and one element cannot be
+    both — the corner of the icon when collapsed, the right end of the row when
+    open. Only the corner one may live inside the ``relative`` wrapper; it is
+    position:absolute, so it anchors to the nearest positioned ancestor."""
     from nicegui import ui
 
     import main
     main._NAV_BADGES.clear()
     main._NAV_BADGES["/trade"] = 3
-    main._badge_refs.clear()
+    main._alert_refs.clear()
     with ui.card():
         main._nav_link("/trade", "Trade Analyzer", "query_stats", "/trade")
 
-    badge = main._badge_refs["/trade"]          # registration, per route
-    assert badge.text == "3" and badge.visible
-    assert badge._props.get("floating") is True
+    rail_dot, open_dot = main._alert_refs["/trade"]     # registration, per route
+    assert "nav-alert-rail" in rail_dot.classes and "absolute" in rail_dot.classes
+    assert "nav-alert-open" in open_dot.classes
+    assert "ml-auto" in open_dot.classes, \
+        "the open dot must be pushed clear of the label, to the row's right edge"
+    # Presence is a CLASS, not set_visibility — the state rules in _NAV_CSS would
+    # out-specify Tailwind's single-class .hidden.
+    for dot in (rail_dot, open_dot):
+        assert "nav-alert-on" in dot.classes
+    # No number anywhere on the row: the exact count lives on the tab strip.
+    assert not [c for c in open_dot.classes if c.isdigit()]
 
-    wrapper = _nav_wrapper_of(badge)            # re-parenting guard
-    assert "relative" in wrapper.classes, \
-        "floating is position:absolute — it anchors to the nearest positioned " \
-        "ancestor, so the badge must stay inside the relative wrapper"
+    wrapper = _nav_wrapper_of(rail_dot)                 # re-parenting guard
+    assert "relative" in wrapper.classes
     icons = [c for c in wrapper.default_slot.children if isinstance(c, ui.icon)]
     assert [i._props["name"] for i in icons] == ["query_stats"], \
-        "the icon is the rail's affordance and shares the badge's wrapper"
-    assert "nav-active" in _nav_link_of(badge).classes, \
+        "the icon is the rail's affordance and shares the corner dot's wrapper"
+    assert "nav-active" in _nav_link_of(rail_dot).classes, \
         "the accent is keyed off the LINK (.nav-active .nav-icon) — it needs 3 " \
         "classes to out-specify theme's .nav-drawer .q-icon !important override"
 
 
-def test_nav_link_badge_hidden_at_zero_and_icon_idle_when_inactive():
-    """The 0/inactive complement of the test above — a count of 0 renders no badge
-    text AND is hidden, and a non-active item must NOT claim active state."""
+def test_nav_link_dots_stay_off_at_zero_and_icon_idle_when_inactive():
+    """The 0/inactive complement — neither dot may carry nav-alert-on, and a
+    non-active item must NOT claim active state."""
     from nicegui import ui
 
     import main
     main._NAV_BADGES.clear()
-    main._badge_refs.clear()
+    main._alert_refs.clear()
     with ui.card():
         main._nav_link("/trade", "Trade Analyzer", "query_stats", "/market")
 
-    badge = main._badge_refs["/trade"]
-    assert badge.text == "" and not badge.visible
-    icons = [c for c in _nav_wrapper_of(badge).default_slot.children
+    rail_dot, open_dot = main._alert_refs["/trade"]
+    for dot in (rail_dot, open_dot):
+        assert "nav-alert-on" not in dot.classes
+    icons = [c for c in _nav_wrapper_of(rail_dot).default_slot.children
              if isinstance(c, ui.icon)]
     assert [i._props["name"] for i in icons] == ["query_stats"]
-    assert "nav-active" not in _nav_link_of(badge).classes
+    assert "nav-active" not in _nav_link_of(rail_dot).classes
 
 
-def test_nav_group_link_badge_sums_across_the_groups_paths():
-    """A group item shows the SUM of its children's counts (the watcher recomputes
-    that same sum via _group_badge_refs' paths), on its own icon's corner."""
+def test_set_alert_toggles_both_dots_without_stacking_classes():
+    """The watcher repaints every 2 s, so the on/off write must be idempotent —
+    an add-only toggle would leave nav-alert-on stuck after the count cleared."""
+    from nicegui import ui
+
+    import main
+    main._NAV_BADGES.clear()
+    main._alert_refs.clear()
+    with ui.card():
+        main._nav_link("/trade", "Trade Analyzer", "query_stats", "/market")
+    dots = main._alert_refs["/trade"]
+
+    main._set_alert(dots, 4)
+    assert all("nav-alert-on" in d.classes for d in dots)
+    main._set_alert(dots, 4)                     # repaint, same state
+    assert all(d.classes.count("nav-alert-on") == 1 for d in dots)
+    main._set_alert(dots, 0)
+    assert all("nav-alert-on" not in d.classes for d in dots)
+
+
+def test_nav_group_link_dot_lights_when_any_child_has_alerts():
+    """A group row can only say 'something in here' — the per-page numbers are on
+    the tab strip. The watcher still sums over the group's paths, so the registered
+    shape stays (dots, paths)."""
     from nicegui import ui
 
     import main
     main._NAV_BADGES.clear()
     main._NAV_BADGES.update({"/": 2, "/options/captured": 5})
-    main._group_badge_refs.clear()
+    main._group_alert_refs.clear()
     children = [("/", "Scanner", "radar"), ("/options/captured", "Captured", "bookmark")]
     with ui.card():
         main._nav_group_link("Options", "insights", children, "/")
 
-    badge, paths = main._group_badge_refs["Options"]   # registered shape: (badge, paths)
+    dots, paths = main._group_alert_refs["Options"]
     assert paths == ["/", "/options/captured"]
-    assert badge.text == "7" and badge.visible, "2 + 5 across the group's paths"
+    assert all("nav-alert-on" in d.classes for d in dots), "2 + 5 across the paths"
 
-    wrapper = _nav_wrapper_of(badge)
+    rail_dot, _open = dots
+    wrapper = _nav_wrapper_of(rail_dot)
     assert "relative" in wrapper.classes
     icons = [c for c in wrapper.default_slot.children if isinstance(c, ui.icon)]
     assert [i._props["name"] for i in icons] == ["insights"]
@@ -1030,7 +1062,27 @@ def test_nav_section_captions_and_their_derived_counts():
     assert [len(e) for _c, e in main.NAV_SECTIONS] == [4, 4, 2]
     # The renderer takes the count as an argument; the drawer passes len(entries).
     src = inspect.getsource(main._layout)
-    assert "_nav_section_header(caption, len(entries))" in src
+    assert "_nav_section_header(caption, len(entries), first=(_i == 0))" in src
+
+
+def test_only_the_first_section_header_skips_the_separating_gap():
+    """The gap is what groups the rail — with 2px between rows, a 26px caption box
+    alone did not read as a break and STRATEGY looked like an eleventh item. It
+    must NOT be applied above the first caption, where it would just push the whole
+    menu down."""
+    from nicegui import ui
+
+    import main
+    with ui.card():
+        first = ui.element("div")
+        with first:
+            main._nav_section_header("MARKETS", 4, first=True)
+        later = ui.element("div")
+        with later:
+            main._nav_section_header("STRATEGY", 4)
+
+    assert "mt-4" not in first.default_slot.children[0].classes
+    assert "mt-4" in later.default_slot.children[0].classes
 
 
 def test_sec_helpers_refuse_an_unknown_group_or_route():
@@ -1058,9 +1110,71 @@ def test_stop_all_services_is_a_danger_button_and_sits_last():
     src = inspect.getsource(main._layout)
     assert "_nav_danger_link(" in src, "the danger route gets its own renderer"
     # It claims no active state (a navy active wash under a rose outline reads as
-    # a rendering bug) and carries no count badge.
+    # a rendering bug) and carries no dot.
     danger = inspect.getsource(main._nav_danger_link)
-    assert "nav-active" not in danger and "_count_badge" not in danger
+    assert "nav-active" not in danger and "_alert_dot" not in danger
+
+
+def test_stop_all_services_lines_up_with_every_other_drawer_row():
+    """It is a nav row in LAYOUT and a danger button only in COLOUR. A footer whose
+    three rows start at three different x-positions reads as broken rather than as
+    emphasis, so the icon and label must sit on the shared columns: the same px-3
+    link padding, the same 24px icon box, the same gap-3."""
+    from nicegui import ui
+
+    import main
+    main._NAV_BADGES.clear()
+    main._alert_refs.clear()
+    with ui.card():
+        plain = ui.element("div")
+        with plain:
+            main._nav_link("/settings", "Settings", "settings", "/")
+        danger = ui.element("div")
+        with danger:
+            main._nav_danger_link("/terminate", "Stop All Services", "power")
+
+    plain_link = plain.default_slot.children[0]
+    danger_link = danger.default_slot.children[0]
+    for cls in ("py-1", "rounded-[10px]", "items-center"):
+        assert cls in plain_link.classes and cls in danger_link.classes, cls
+    # box-sizing is border-box, so the 1px outline eats into the padding box —
+    # 11 + 1 lands the glyph on the same column as the plain rows' 12.
+    assert "px-3" in plain_link.classes
+    assert "px-[11px]" in danger_link.classes
+    # Centring is what threw the alignment off; it must not come back.
+    assert "justify-center" not in danger_link.classes
+
+    def _icon_box(link):
+        row = link.default_slot.children[-1]
+        return row.default_slot.children[0]
+
+    assert "gap-3" in plain_link.default_slot.children[-1].classes
+    assert "gap-3" in danger_link.default_slot.children[-1].classes
+    # Same 24px box, so the two glyphs land on the same column...
+    for cls in ("w-6", "h-6", "flex-none"):
+        assert cls in _icon_box(plain_link).classes and cls in _icon_box(danger_link).classes
+
+    # ...and the same glyph SIZE, or a smaller one centres inside that box 1px
+    # off, which at this scale reads as a misalignment rather than a weight.
+    def _glyph(box):
+        return [c for c in box.default_slot.children if isinstance(c, ui.icon)][0]
+
+    assert "text-[20px]" in _glyph(_icon_box(plain_link)).classes
+    assert "text-[20px]" in _glyph(_icon_box(danger_link)).classes
+
+
+def test_the_nav_column_never_wraps():
+    """A latent bug the section gaps finally tripped: NiceGUI's column wraps and
+    `h-full` caps the height, so once the items are taller than the drawer the
+    overflow forms a SECOND COLUMN at 16 + 35 + 2 = 53px rather than scrolling.
+    Measured: Stop All Services alone jumped to x=53 while every other row sat at
+    16, and collapsed, its corner dot landed at x=82 — outside the 68px rail.
+    Nothing about the row itself was wrong, which is what made it hard to find."""
+    import inspect
+    import main
+    src = inspect.getsource(main._layout)
+    assert "flex-nowrap" in src, \
+        "the nav column must not wrap, or a tall menu breaks into two columns"
 
 
 def test_window_title_tags_the_PAGE_title_not_just_the_default(monkeypatch):
@@ -1242,19 +1356,20 @@ def test_status_card_is_dropped_not_faded_in_the_rail():
 
 def test_claude_trades_carries_a_static_ai_pill_that_the_watcher_never_touches():
     """The AI marker is a fixed label, not watcher state, so it must NOT be
-    registered in _badge_refs — the 2s tick would otherwise blank it on the first
+    registered in _alert_refs — the 2s tick would otherwise blank it on the first
     pass (there is no _NAV_BADGES entry to write back)."""
     from nicegui import ui
 
     import main
     assert main._NAV_PILLS == {"/driver": "AI"}
     main._NAV_BADGES.clear()
-    main._badge_refs.clear()
+    main._alert_refs.clear()
     with ui.card():
         main._nav_link("/driver", "Claude Trades", "smart_toy", "/")
 
-    labels = [c for c in main._badge_refs["/driver"].parent_slot.parent
-              .parent_slot.parent.default_slot.children if isinstance(c, ui.label)]
+    rail_dot, _open = main._alert_refs["/driver"]
+    labels = [c for c in _nav_wrapper_of(rail_dot).parent_slot.parent
+              .default_slot.children if isinstance(c, ui.label)]
     assert [l.text for l in labels] == ["Claude Trades", "AI"]
     # The pill rides the label fade, which is what keeps it out of the 68px rail,
     # but takes its COLOUR from .nav-pill — see the specificity test below.
