@@ -12,7 +12,7 @@ then the per-app `CLAUDE.md` for the folder you are editing.
 
 This file is loaded **in full at the start of every session**, so its length is a
 per-session cost paid by every future conversation. It holds the **durable** record only.
-Four homes, and the test for each is what a future session needs to *act*:
+Five homes, and the test for each is what a future session needs to *act*:
 
 | Write it in | When |
 |---|---|
@@ -20,6 +20,14 @@ Four homes, and the test for each is what a future session needs to *act*:
 | **[docs/CHANGELOG.md](docs/CHANGELOG.md)** | Dated shipping narrative: what shipped, the pieces, commit SHAs, test counts at the time, live-verification logs |
 | **[docs/webgui-routes.md](docs/webgui-routes.md)** | Per-page behaviour detail — what a specific route renders, its cache keys, its own quirks |
 | **`docs/plans/<date>-<feature>-{design,plan}.md`** | The reasoning and step plan for a feature, written as you build it |
+| **[docs/manuals/](docs/manuals/README.md)** | Anything a **user** reads: the four built manuals. A user-visible behaviour change lands here too, not only in the CHANGELOG |
+
+⚠ **The manuals rot silently, because nothing fails when they go stale.** A
+2026-08-16 audit against the running stack found the User Guide still documenting
+the order-approval queue removed in July, three of four cadences wrong in the
+Technical Reference, and `driver_svc` commands in the API Reference that no longer
+exist. If a change moves a cadence, renames a page, or removes a control, fix the
+manual in the same commit — and remember `webgui/page_help.py` is a manual too.
 
 **Three rules that keep it that way:**
 
@@ -1403,11 +1411,18 @@ cd webgui              ; python -m pytest .   # 1564 green: transforms + shell s
 ```
 
 > **In a worktree** (`.claude/worktrees/…`) there is no `.venv` — use the absolute
-> `D:\WebGUI Trading with Schwab\.venv\Scripts\python.exe`, and confine the `cd` to
-> a **subshell** (`(cd webgui && …)`). A bare `cd` into a subdirectory leaves the
-> shell there, and the hooks in `.claude/settings.json` are registered by RELATIVE
-> path, so every subsequent Bash/PowerShell/Edit call then fails with a
-> hook error and cannot be recovered from that session.
+> `D:\WebGUI Trading with Schwab\.venv\Scripts\python.exe`. Confining the `cd` to a
+> **subshell** (`(cd webgui && …)`) is still the tidier habit, but it is **no longer
+> load-bearing**: the hooks in `.claude/settings.json` resolve their script from
+> **`${CLAUDE_PROJECT_DIR:-.}`** (fixed 2026-08-16), so a persistent `cd` out of the
+> repo root can no longer wedge the session. Before that fix the hook paths were
+> relative, and a single bare `cd` made every subsequent Bash/PowerShell/Edit call
+> fail with a hook error **that could not be recovered from** — the hook runs before
+> the command, so the shell could not `cd` back. Two facts about the hook
+> environment, both verified with a throwaway probe rather than assumed: it **does**
+> export `CLAUDE_PROJECT_DIR` (absent from an ordinary tool shell, so it cannot be
+> checked by echoing it), and hook commands run through a **POSIX shell, not
+> cmd.exe** — `${VAR:-default}` expands, `%VAR%` does not.
 
 The 3-tier services run per folder from the repo root (NOT `pytest services` over
 all of them — that puts multiple hyphenated app dirs on `sys.path` at once and
@@ -1490,3 +1505,27 @@ claude-driver addresses them over HTTP; this repo does not contain or start them
 - [`docs/plans/2026-08-14-sentiment-trend-ring-graphics-design.md`](docs/plans/2026-08-14-sentiment-trend-ring-graphics-design.md) — **`/sentiment` Day/Week/Month ring graphics** (four gauges → two concentric SVG rings; the Week structural horizon; the Signals tile stack)
 - [`docs/plans/2026-08-14-sentiment-trend-ring-graphics-plan.md`](docs/plans/2026-08-14-sentiment-trend-ring-graphics-plan.md) — bite-sized TDD implementation plan for the above
 - [`docs/plans/2026-08-15-gamma-plasma-palette-design.md`](docs/plans/2026-08-15-gamma-plasma-palette-design.md) — **Dealer Positioning plasma palette + wash** (GEX/Charm/DEX/Vanna + Term recoloured cyan/magenta; why the `plotBackgroundColor` ban was narrower than it read)
+- [`docs/plans/2026-08-16-app-reference-guide-design.md`](docs/plans/2026-08-16-app-reference-guide-design.md) — **the Reference Guide** (a fourth manual; the per-page template, and why the audience level drives the plain-language + external-citation rules)
+
+## User-facing manuals
+
+**Four** manuals under [`docs/manuals/`](docs/manuals/README.md), each authored once
+in Markdown and built by `build_docs.py` into HTML + `.docx`. They are surfaced
+in-app at **More → User Manuals** via `webgui/pages/manuals.py:MANUALS` — **a new
+manual must be added in BOTH places** (`build_docs.py:MANUALS` to build it,
+`pages/manuals.py:MANUALS` to serve it; the latter is also the path whitelist, so an
+unlisted file is refused rather than served).
+
+| Manual | Answers |
+|---|---|
+| **User Guide** | *How do I do this?* — task-oriented operation |
+| **Reference Guide** | *What is this tab for, and when do I open it?* — per-tab depth over a one-page orientation |
+| **Technical Reference** | *Where does this number come from?* — formulas, weights, cadences |
+| **API / Developer Reference** | *How do I integrate with this?* — contracts, bus, commands, proxy |
+
+⚠ **`webgui/page_help.py` is the fifth manual and the most-read prose in the app** —
+the per-page hover guides. It is the least likely thing to be touched when a feature
+moves, so it rots first: the 2026-08-16 audit found it claiming a 5-minute paper
+cycle that is hourly, a fixed $500 driver target that ratchets $250–$1,000, and
+three flow-alert detectors where there are four. Treat it as documentation with a
+test suite, not as code.
