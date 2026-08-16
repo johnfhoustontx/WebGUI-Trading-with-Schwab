@@ -313,9 +313,9 @@ The only view on this page that shows **more than one symbol**. It plots **net
 premium** — call dollars minus put dollars — as one line per name, from a menu of
 **28**.
 
-**The symbol picker** is grouped into three tabs: **Indices & Broad**, **SPDR
-Sectors**, and **Mega-caps**. Two behaviours are worth knowing because they are not
-obvious:
+**The symbol picker** is grouped into three tabs — **Indices & Broad**,
+**SPDR Sectors**, and **Mega-caps**. Two behaviours are worth knowing because they
+are not obvious:
 
 - **The group tab only filters the tick-boxes, it does not filter the chart.** Your
   selection **persists across tabs**, so you can plot `$SPX` next to `XLK` by

@@ -387,13 +387,29 @@ line summary (spot, strike count, net exposure).
 - **Left** — a horizontal bar chart of net exposure by strike near spot, with the
   spot line, a gamma-flip line, and call/put **wall** lines. (In **Term** view this
   becomes a full-width expiry × strike heat map.)
-- **Right** — an **intraday heat map** of strike × time, colored from red
-  (negative) through yellow to green (positive), with the spot price overlaid.
+- **Right** — an **intraday heat map** of strike × time. Call-heavy (positive)
+  strikes run deep blue → cyan; put-heavy (negative) run aubergine → magenta; near
+  zero fades to transparent so quiet strikes read as empty. The spot price is
+  overlaid. **Press and hold** the left mouse button to read a cell — plain hovering
+  shows nothing.
 
-**Explain** opens an infographic that interprets the current positioning;
-**Analyze** produces a copyable analysis prompt for the index symbols. The view
-refreshes automatically every two minutes; switching views is instant and doesn't
-re-fetch.
+**The buttons at the top right open separate screens, each in a new browser tab:**
+
+| Button | Opens |
+|--------|-------|
+| **Explain** | A plain-language infographic interpreting the **current symbol's** positioning. |
+| **Analyze** | Asks Claude to read the live `$SPX` / `SPY` / `QQQ` positioning and opens a report — a regime and bias gauge, a price-level ladder per index, a per-symbol what-if (rally / sell-off / chop), and a "why is this happening" section. |
+| **Briefings** | The four **automatic** Analyze runs — premarket, ~18 minutes after the open, midday, and the close. |
+| **History** | A date and slot picker that regenerates any earlier day's briefing. |
+
+Below the chart, a collapsed **"How to read the 0-DTE close projection"** panel
+explains the projected-close overlay and the projected-flip line.
+
+The view refreshes automatically every two minutes; switching views is instant and
+doesn't re-fetch.
+
+> **Analyze and the automatic briefings call the Claude API**, so they cost money per
+> run. The running count is on the **Settings** page under *API usage*.
 
 ## Simulator
 
@@ -499,6 +515,13 @@ An advisory **and** one-click-apply tool for **tested credit spreads** — put c
 spreads (PCS), call credit spreads (CCS), and iron condors (IC) — that have moved
 against you. It tells you whether a position is in trouble and offers a ranked menu
 of concrete ways to fix it, with the commission-adjusted cash and risk of each.
+
+**Two sub-tabs** sit under the page tabs:
+
+| Sub-tab | What it does |
+|---------|--------------|
+| **At-Risk Board** | The default. Scans your paper and captured positions and lists the ones in trouble. |
+| **Ad-hoc Trade** | Enter a position **by hand** and get the same ranked repair menu for it — use this to evaluate a spread the app is not tracking. |
 
 **The at-risk table** (top of the page) lists every paper position and captured
 signal the system has flagged as **tested** or **critical**, heat-colored and sorted
@@ -731,11 +754,23 @@ Use the dropdown to switch between industries and stocks.
 
 **Route:** `/trade`.
 
-On-demand analysis of a single symbol. Type a **Symbol** and press **Analyze**.
+On-demand analysis of a single symbol. Type a **Symbol** and press **Analyze**
+(tabbing out of the field does it too).
+
+**Two more buttons sit beside Analyze, and each opens a separate screen in a new
+browser tab:**
+
+| Button | Opens |
+|--------|-------|
+| **Deep Dive** | A full standalone report for the symbol — technicals, fundamentals and short interest, plus options analytics (at-the-money IV, implied move, max pain, 25-delta skew, IV term structure, 30-day constant-maturity IV, net GEX and flip, open-interest walls) and an IV/RV rank. |
+| **AI Query** | The same digest formatted as a **copyable chat prompt** you can paste into an AI assistant. It makes **no** API call itself, so it costs nothing. |
+
+> IV rank reads "building" until enough daily snapshots have accumulated for that
+> symbol. That is expected on a name you have just started analyzing.
 
 - A **header** with the symbol, price, bias, and volume.
-- **Three equal-width cards in one row** — **Position** (1–8 weeks), **Investor**
-  (months+), and **Markov Forecast**:
+- **Two verdict cards side by side** — **Position** (1–8 weeks) and **Investor**
+  (months+):
   - **Position (1–8 weeks)** is **backtested**. Rather than a hand-tuned score, it
     ranks the stock on a set of price/volume factors that were *validated against real
     forward returns* (which factors matter, and by how much, was learned from history —
@@ -753,18 +788,11 @@ On-demand analysis of a single symbol. Type a **Symbol** and press **Analyze**.
     history), so that card is unchanged.
   - **Investor (months+)** shows a Buy / Hold / Sell verdict (color-coded), a score,
     the top reasons, any hard "gates" that fired, and an expandable factor breakdown.
-  - **Markov Forecast** projects where the **legacy technical-momentum** Position score
-    is likely to head (it tracks that older score, *not* the new validated factor model —
-    they are two separate lenses on the same stock). It shows
-    the current **regime band** (Strong-Bear … Strong-Bull), a stacked-area chart of the
-    **probability of being in each band** at +5 / +10 / +20 trading days, the per-horizon
-    **P(BUY) / P(SELL) / expected score** and band **persistence**, and a **drift / tilt**
-    line. The tilt is a small, bounded adjustment (±12 points) applied to the **legacy**
-    heuristic score — shown as `base … · Markov …` inside the Position card's "Legacy
-    heuristic" section — so that score reflects the forecast while the **Buy / Hold /
-    Sell word never changes** (the tilt is advisory).
-    The card appears only when there is enough price history; otherwise the row falls back
-    to the two verdict cards.
+> **The Markov Forecast card was removed in June 2026** and no longer appears on
+> this page. It projected the *legacy* technical-momentum score, which contradicted
+> the validated Position read sitting beside it. The underlying forecast is still
+> computed and still reaches the data feed, but nothing on this screen renders it.
+
 - An **MTF EMA Alignment** card (per-timeframe trend agreement: Daily, 4H, 1H, 15m,
   5m, 1m).
 - A **Momentum** strip (RSI, ADX, MACD histogram, VWAP, relative volume).
@@ -850,31 +878,55 @@ Open positions are re-priced every minute during market hours regardless.
 
 **Route:** `/eod` (with a `/eod/detail` drill-down).
 
-An end-of-day rollup of the day's Options activity and the Driver.
+An end-of-day rollup of the day's Options activity and Claude Trades.
 
-- A **Summary** with per-domain one-liners (scanner counts, captured signals, paper
-  session P&L, Driver grade/status).
-- **Sections** for Scanner, Captured, Paper, and Driver with their tables.
-- A **Generate** button snapshots the current data into standalone HTML files
-  archived by date under `webgui/data/eod/<date>/`. Past dates are listed for
-  reopening, and archived files can be served raw.
+**Two views**, reached by the link at the foot of the summary:
+
+| View | Route | Contents |
+|------|-------|----------|
+| **Summary** | `/eod` | Headline tiles plus a Daily / Weekly (WTD) / MTD performance block **per book** — manual paper, the driver, and captured-closed. |
+| **Detailed** | `/eod/detail` | The same performance plus breakdowns by **strategy** (PCS / CCS / IC), by **0-DTE vs swing**, and by **status** (open / closed / expired), then the full trade, scanner, captured and driver tables. |
+
+Both views use a jump-link table of contents, and every section is collapsible —
+which keeps working in the exported file as well as in the app.
+
+**The buttons:**
+
+- **Generate** snapshots the current data into standalone `summary.html` and
+  `detail.html` archived by date under `webgui/data/eod/<date>/`.
+- **Open summary file** / **Open detail file** open those archived files in a new
+  browser tab.
+- The **Archive** list reopens any past date.
+
+> Realized P&L is bucketed by **exit** date, while opened trades and credit
+> collected are bucketed by **entry** date. They answer different questions and will
+> not reconcile to each other — that is correct, not a bug.
 
 ## System Status
 
-**Route:** `/status` (under **More**).
+**Route:** `/status` — a standalone item at the **foot of the rail**.
 
 A health board for the whole stack.
 
 - An **overall banner** — green (all up), red (naming what's down), or grey
   (checking).
-- A **component grid** — Memurai, the Schwab gateway, **Schwab Authorization**, the
-  six services, and the web app itself, each with Online/Offline and its tier.
-- A **Schwab Authorization** card with an **Authorize** button that opens the
-  gateway's OAuth login in a new tab (use this if your Schwab token has expired).
-- A **data-freshness** table showing each domain's latest update age, flagging
-  scheduled data that has gone stale.
-- **Offline** components show a **Restart** button. The board re-checks every few
-  seconds and on demand.
+- A **component grid** — Memurai, the Schwab gateway, the six services, and the web
+  app itself, each with Online/Offline and its tier. The gateway's card also shows
+  the **Schwab auth** state.
+- A **Re-authorize** button on the gateway card opens Schwab's OAuth login in a new
+  browser tab. Use it when the auth line says the login has expired.
+- A **data-freshness** table showing each domain's latest cache write and its age.
+  This is the more informative half: a service can be *online* and still not be
+  publishing, and only this table shows that.
+- Every component has a **Restart** button, which relaunches it windowless.
+- **Refresh** re-checks on demand; the board also re-checks on its own.
+
+> **`token_expired: true` on the gateway is routine** — it refreshes itself. Only a
+> missing or expired *refresh* token needs **Re-authorize**.
+
+> **Restart order matters:** Memurai first, then the gateway, then services, then the
+> web app. A service restarted while the gateway is down will start and then fail to
+> fetch anything.
 
 ## Settings
 
