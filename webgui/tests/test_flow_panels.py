@@ -424,7 +424,7 @@ def test_field_panel_carries_a_row_and_chip_per_symbol():
             "QQQ": [(_T0 + i, -float(i)) for i in range(1, 6)]}
     html, payload = fp.field_panel(rows, ["SPY", "QQQ"],
                                    {"SPY": "#4dd0e1", "QQQ": "#b388ff"},
-                                   "Dollars ($M)", "fxf")
+                                   "dollars", "fxf")
     for i in range(2):
         for node in (f"c{i}", f"v{i}", f"b{i}", f"row{i}", f"d{i}"):
             assert f'id="fxf-{node}"' in html, node
@@ -435,34 +435,102 @@ def test_field_panel_carries_a_row_and_chip_per_symbol():
 def test_field_panel_uses_the_per_symbol_colour_map():
     rows = {"SPY": [(_T0, 1.0), (_T0 + 60, 2.0)]}
     html, payload = fp.field_panel(rows, ["SPY"], {"SPY": "#4dd0e1"},
-                                   "Dollars ($M)", "fxf")
+                                   "dollars", "fxf")
     assert "#4dd0e1" in html
     assert payload["lines"][0]["c"] == "#4dd0e1"
 
 
 def test_field_panel_falls_back_for_an_unmapped_symbol():
     rows = {"ZZZ": [(_T0, 1.0), (_T0 + 60, 2.0)]}
-    _html, payload = fp.field_panel(rows, ["ZZZ"], {}, "Dollars ($M)", "fxf")
+    _html, payload = fp.field_panel(rows, ["ZZZ"], {}, "dollars", "fxf")
     assert payload["lines"][0]["c"] == fp.C["label"]
 
 
 def test_field_panel_pill_agrees_with_the_plotted_count():
     rows = {"SPY": [(_T0, 1.0), (_T0 + 60, 2.0)]}
-    html, _ = fp.field_panel(rows, ["SPY"], {}, "Dollars ($M)", "fxf")
+    html, _ = fp.field_panel(rows, ["SPY"], {}, "dollars", "fxf")
     assert "LIVE · 1 SYMBOL<" in html          # singular, no stray "S"
 
 
-def test_field_panel_scale_is_a_badge_not_a_toggle():
-    """The real control is the NiceGUI select above the panel; a second,
-    non-functional pair of buttons in here would read as clickable."""
+#############################################
+# SCALE TOGGLE
+#############################################
+
+def test_toggle_marks_the_active_segment_and_only_it():
+    html = fp.mode_toggle_html("fxf", "skew")
+    # The active segment is filled with the ice colour, the other is transparent.
+    skew = html.split('id="fxf-m-skew"')[1]
+    dollars = html.split('id="fxf-m-dollars"')[1].split("</span>")[0]
+    assert f"background:{fp.C['ice']}" in skew.split("</span>")[0]
+    assert "background:transparent" in dollars
+
+
+def test_toggle_is_present_in_both_modes_with_both_segments():
+    for mode in ("dollars", "skew"):
+        html = fp.mode_toggle_html("fxf", mode)
+        assert 'id="fxf-m-dollars"' in html and 'id="fxf-m-skew"' in html
+        assert "DOLLARS" in html and "SKEW %" in html
+
+
+def test_toggle_normalizes_an_unknown_mode_rather_than_rendering_none_active():
+    """A junk mode must still render a usable control — with dollars active,
+    matching what net_prem_value falls back to."""
+    html = fp.mode_toggle_html("fxf", "notamode")
+    dollars = html.split('id="fxf-m-dollars"')[1].split("</span>")[0]
+    assert f"background:{fp.C['ice']}" in dollars
+
+
+def test_normalize_mode_guards_untrusted_input():
+    """The click payload comes from the BROWSER and is persisted to
+    settings.json, so an arbitrary string must never reach app_settings."""
+    assert fp.normalize_mode("skew") == "skew"
+    assert fp.normalize_mode("dollars") == "dollars"
+    for junk in ("percentile", "", None, 3, ["skew"], {"m": "skew"}, True):
+        assert fp.normalize_mode(junk) == fp.DEFAULT_MODE
+
+
+def test_toggle_js_binds_every_segment_to_the_page_event():
+    js = fp.toggle_js("fxf")
+    assert '"fxf"' in js
+    assert f'"{fp.MODE_EVENT}"' in js
+    for key in fp.FIELD_MODE_KEYS:
+        assert f'"{key}"' in js
+    assert "addEventListener" in js and "emitEvent" in js
+
+
+def test_toggle_js_is_emitted_even_with_no_data():
+    """The toggle exists in the empty state, so its binder cannot be tied to the
+    scrub payload — otherwise a session with nothing collected yet would leave
+    the reader no way to change scale until data arrived."""
+    html, payload = fp.field_panel({}, [], {}, "skew", "fxf")
+    assert payload is None
+    assert 'id="fxf-m-dollars"' in html and 'id="fxf-m-skew"' in html
+    assert fp.toggle_js("fxf")          # independent of payload
+
+
+def test_field_panel_marks_the_requested_mode_active():
     rows = {"SPY": [(_T0, 1.0), (_T0 + 60, 2.0)]}
-    html, _ = fp.field_panel(rows, ["SPY"], {}, "Skew %", "fxf")
-    assert "SKEW %" in html
-    assert "PERCENTILE" not in html and "DOLLARS" not in html
+    html, _ = fp.field_panel(rows, ["SPY"], {}, "skew", "fxf")
+    skew = html.split('id="fxf-m-skew"')[1].split("</span>")[0]
+    assert f"background:{fp.C['ice']}" in skew
+
+
+def test_field_panel_footer_and_units_follow_the_mode():
+    """Both modes plot signed numbers of similar magnitude, so without the unit
+    a skew axis and a dollar axis are indistinguishable at a glance."""
+    rows = {"SPY": [(_T0, 1.0), (_T0 + 60, 2.0)]}
+    dollars, pl_d = fp.field_panel(rows, ["SPY"], {}, "dollars", "fxf")
+    skew, pl_s = fp.field_panel(rows, ["SPY"], {}, "skew", "fxf")
+    assert fp.FIELD_FOOTER["dollars"] in dollars
+    assert fp.FIELD_FOOTER["skew"] in skew
+    assert pl_d["unit"] == "" and pl_s["unit"] == "%"
+    # ...and the axis labels carry it too.
+    assert ">+0%<" in skew or "%<" in skew
+    assert "%<" not in dollars.split("<svg")[1]
 
 
 def test_field_panel_empty_state():
-    html, payload = fp.field_panel({}, [], {}, "Dollars ($M)", "fxf")
+    html, payload = fp.field_panel({}, [], {}, "dollars", "fxf")
     assert payload is None and "FLOW FIELD" in html
 
 
@@ -484,7 +552,7 @@ def test_scrub_js_is_empty_without_a_payload():
 
 def test_scrub_js_kind_is_one_of_two_known_values():
     _html, payload = fp.field_panel({"SPY": [(_T0, 1.0), (_T0 + 60, 2.0)]},
-                                    ["SPY"], {}, "Dollars ($M)", "fxf")
+                                    ["SPY"], {}, "dollars", "fxf")
     assert '"field"' in fp.scrub_js("fxf", "field", payload)
     assert '"div"' in fp.scrub_js("fxf", "anythingelse", payload)
 
@@ -529,8 +597,8 @@ def _dompurify_allowlist():
     lambda: fp.field_panel({"SPY": [(_T0, 1.0), (_T0 + 60, -2.0)],
                             "QQQ": [(_T0, -1.0), (_T0 + 60, 3.0)]},
                            ["SPY", "QQQ"], {"SPY": "#4dd0e1"},
-                           "Dollars ($M)", "fxf")[0],
-    lambda: fp.field_panel({}, [], {}, "Dollars ($M)", "fxf")[0],
+                           "dollars", "fxf")[0],
+    lambda: fp.field_panel({}, [], {}, "dollars", "fxf")[0],
 ])
 def test_panels_emit_nothing_dompurify_would_strip(build):
     """A stripped attribute changes NOTHING server-side, so the string stays
@@ -561,5 +629,5 @@ def test_panels_use_no_data_attributes():
     the guard above cannot vouch for a data-* attribute. Avoid them entirely."""
     for build in (lambda: fp.divergence_panel(_flow_rows(), [], "S", "0DTE", "d")[0],
                   lambda: fp.field_panel({"SPY": [(_T0, 1.0), (_T0 + 60, 2.0)]},
-                                         ["SPY"], {}, "Dollars ($M)", "f")[0]):
+                                         ["SPY"], {}, "dollars", "f")[0]):
         assert not re.search(r'\bdata-[\w-]+=', build())

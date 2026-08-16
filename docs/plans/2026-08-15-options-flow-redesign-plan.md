@@ -53,15 +53,19 @@ Bottom-up, one layer per step, TDD throughout. Status: **all steps done.**
      `divergence_session` / `align_ladder` / `divergence_svg` / `divergence_panel`
    - `field_series` / `field_geometry` / `declutter` / `field_svg` / `field_panel`
    - `_SCRUB_JS` + `scrub_js(uid, kind, payload)`
-   *Tests:* `webgui/tests/test_flow_panels.py` (new, 68), including the DOMPurify
+   - the scale toggle: `FIELD_MODES` / `normalize_mode` / `mode_toggle_html` /
+     `toggle_js` / `MODE_EVENT`, plus mode-aware `FIELD_FOOTER` and unit suffixes
+   *Tests:* `webgui/tests/test_flow_panels.py` (new, 75), including the DOMPurify
    allowlist guard over all four panel states.
 
 7. **`gamma.py` wiring** — one persistent `ui.html` (`panel_el`) inside
-   `chart_box`; `_show_panel` swaps `.content` and defers the scrub script one
-   tick (`el.content` applies asynchronously, so an immediate run would bind to
-   the previous fragment). `_hide_panel` restores the Highcharts path for every
-   other view. The Net Prem branch keeps `net_prem_summary_text`,
-   `net_prem_status_text` and the selection count.
+   `chart_box`; `_show_panel` swaps `.content` and defers the scripts one tick
+   (`el.content` applies asynchronously, so an immediate run would bind to the
+   previous fragment). `_hide_panel` restores the Highcharts path for every other
+   view. `ui.on(MODE_EVENT, …)` receives the toggle click and writes through the
+   now-hidden `np_mode_sel`, so the existing persist+repaint path is unchanged.
+   The Net Prem branch keeps `net_prem_summary_text`, `net_prem_status_text` and
+   the selection count.
 
 8. **Removed** `flow_figure` and `net_prem_figure` (+ the `FLOW_*` palette) and
    the 12 tests that only exercised them. Four tests whose invariants outlive the
@@ -72,8 +76,9 @@ Bottom-up, one layer per step, TDD throughout. Status: **all steps done.**
 
 ## Verification
 
-- Suites: webgui **1557**, options_svc **1090**, options-scanner (+12) — see the
-  CHANGELOG entry for the baselines.
+- Suites: webgui **1564**, options_svc **1091**, options-scanner **1439 passed /
+  11 failed** (failing set identical to the documented baseline) — see the
+  CHANGELOG entry.
 - Rendering + scrub verified in a browser against a standalone harness
   (`ui.html` → real DOMPurify), because the parts that can go wrong here are
   invisible server-side. Measured: both ribbon tones present, terminus declutter

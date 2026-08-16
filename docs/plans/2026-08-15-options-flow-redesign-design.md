@@ -126,9 +126,34 @@ of its own.
   selection. The spec's seven symbols are its sample data, not a reduction in
   scope.
 - **Dollars / Skew %.** The spec's `DOLLARS · PERCENTILE` toggle maps onto the
-  existing two modes; only the chrome changes. Skew % also answers the spec's
-  own "known trade-off" — that a dominant name compresses the small ones on a
-  shared dollar scale.
+  existing two modes, and is a **real control inside the panel**. Skew % also
+  answers the spec's own "known trade-off" — that a dominant name compresses the
+  small ones on a shared dollar scale.
+
+  The second segment is labelled **SKEW %**, not the spec's "PERCENTILE",
+  because that is what the mode computes (a signed share of session premium,
+  bounded ±100%) and what the rest of the app calls it. A label naming a
+  statistic the code does not compute would be a worse mismatch than the one
+  with the spec.
+
+  **How a raw fragment gets a working control.** DOMPurify strips inline `on*`
+  handlers, so the click cannot ride the markup. It is bound by the same script
+  channel the scrub uses (`addEventListener`) and reaches Python through
+  NiceGUI's global `emitEvent` / `ui.on` pair. `toggle_js` is emitted on every
+  paint **independently of the scrub payload**, because the toggle exists in the
+  empty state too — tying it to the payload would leave a session with nothing
+  collected yet unable to change scale until data arrived.
+
+  The existing `ui.select` is **kept but hidden**, as the state holder: every
+  reader already goes through `np_mode_sel.value` and the persist-and-repaint
+  path hangs off its `on_value_change`, so the toggle writes through it and one
+  code path still owns the change. Two *visible* controls for one setting would
+  be the actual problem.
+
+  The click payload is **untrusted input** — it is persisted to `settings.json`
+  and read back on the next page build — so `normalize_mode` guards it on both
+  sides, and the handler unwraps the bare-string / one-element-list shapes
+  `emitEvent` can produce rather than assuming one.
 - **`net_prem_status_text`**, the publisher-health line. It reports a failure
   mode no other element can see (a stale publish *inside* the collection
   window), and it is clock-driven rather than repaint-driven for that reason.

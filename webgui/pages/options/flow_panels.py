@@ -220,6 +220,90 @@ def net_color(value):
 
 
 #############################################
+# SCALE TOGGLE (Flow Field)
+#############################################
+# A real control inside a raw fragment. DOMPurify strips inline ``on*`` handlers,
+# so the click cannot ride the markup — it is bound by the same script channel the
+# scrub uses (``addEventListener``), and reaches Python through NiceGUI's global
+# ``emitEvent`` / ``ui.on`` pair.
+#
+# The KEYS are the ones ``gamma.NET_PREM_MODES`` already persists, so the toggle
+# writes exactly the values ``app_settings`` and ``net_prem_value`` expect and no
+# translation layer exists to drift. The spec called the second segment
+# "PERCENTILE"; it is labelled SKEW % here because that is what the mode actually
+# computes (a signed share of session premium) and what the rest of the app calls
+# it — a label naming a statistic the code does not compute would be worse than
+# the spec mismatch.
+FIELD_MODES = (("dollars", "DOLLARS"), ("skew", "SKEW %"))
+FIELD_MODE_KEYS = tuple(key for key, _label in FIELD_MODES)
+DEFAULT_MODE = "dollars"
+
+# The custom event name the panel emits and the page listens on.
+MODE_EVENT = "fx_net_prem_mode"
+
+
+def normalize_mode(mode):
+    """A known mode key, defaulting to dollars.
+
+    Applied on BOTH sides — when building the toggle and when handling the click
+    — because the click payload arrives from the browser and is therefore
+    untrusted: it is persisted to ``settings.json``, so an arbitrary string would
+    be written to disk and then read back on the next page build.
+    """
+    return mode if mode in FIELD_MODE_KEYS else DEFAULT_MODE
+
+
+def mode_toggle_html(uid, active):
+    """The two-segment scale toggle; the ACTIVE segment is filled.
+
+    Rendered as one control rather than the spec's pair of look-alike chips, so
+    it reads as a toggle with a current state rather than two buttons.
+    """
+    u = _id(uid)
+    active = normalize_mode(active)
+    segments = []
+    for key, label in FIELD_MODES:
+        on = key == active
+        fill = (f"color:{C['panel_to']};background:{C['ice']}" if on else
+                f"color:rgba(174,205,232,.5);background:transparent")
+        segments.append(
+            f'<span id="{u}-m-{key}" title="Scale: {_esc(label)}" '
+            f'style="padding:7px 13px;font:500 9px/1 {MONO};'
+            f'letter-spacing:.14em;cursor:pointer;user-select:none;{fill}">'
+            f'{_esc(label)}</span>')
+    return (f'<div style="display:flex;margin-left:auto;'
+            f'box-shadow:inset 0 0 0 1px rgba(190,248,255,.12)">'
+            f'{"".join(segments)}</div>')
+
+
+_TOGGLE_JS = r"""
+(function(){
+  var id=__ID__, keys=__KEYS__, ev=__EVENT__;
+  keys.forEach(function(k){
+    var el=document.getElementById(id+'-m-'+k);
+    if(!el) return;
+    el.addEventListener('click', function(){
+      if (typeof emitEvent === 'function') emitEvent(ev, k);
+    });
+  });
+})();
+"""
+
+
+def toggle_js(uid):
+    """Bind the scale toggle's segments to the page's ``ui.on`` handler.
+
+    Emitted on EVERY paint, independently of ``scrub_js`` — the toggle exists in
+    the empty state too, where there is no scrub payload to carry it.
+    """
+    import json
+    return (_TOGGLE_JS
+            .replace("__ID__", json.dumps(_id(uid)))
+            .replace("__KEYS__", json.dumps(list(FIELD_MODE_KEYS)))
+            .replace("__EVENT__", json.dumps(MODE_EVENT)))
+
+
+#############################################
 # PREMIUM DIVERGENCE — series
 #############################################
 
@@ -546,19 +630,34 @@ def field_geometry(model):
     return out
 
 
-def field_svg(geom, times, colors, uid):
+FIELD_FOOTER = {
+    "dollars": ("SHARED DOLLAR SCALE · NET PREMIUM $M · "
+                "CALL-LED ABOVE THE FLAT LINE"),
+    # Named for what it fixes: on a shared dollar scale a dominant name
+    # compresses the small ones toward zero (the spec's own "known trade-off"),
+    # and a share-of-premium scale is what makes them comparable.
+    "skew": ("SKEW SCALE · NET AS A SHARE OF SESSION PREMIUM · "
+             "COMPARABLE ACROSS SIZES"),
+}
+
+
+def field_svg(geom, times, colors, uid, mode=DEFAULT_MODE):
     """The Flow Field chart as one inline SVG string."""
     u = _id(uid)
+    mode = normalize_mode(mode)
     x0, y0, x1, y1 = FLD_PLOT
     w, h = FLD_VB
     parts = [f'<svg viewBox="0 0 {w} {h}" '
              f'style="display:block;width:100%;height:auto">']
 
+    # Both modes plot signed numbers of similar magnitude, so without the suffix
+    # a skew axis and a dollar axis are indistinguishable at a glance.
+    suffix = "%" if mode == "skew" else ""
     lo, hi = geom["range"]
     for value in _nice_ticks(lo, hi, XTICKS):
         y = _scale(value, lo, hi, y1, y0)
-        parts.append(_text(x0 - 8, y, fmt_signed(value, 0), 10, C["label"],
-                           anchor="end", opacity="0.42"))
+        parts.append(_text(x0 - 8, y, fmt_signed(value, 0) + suffix, 10,
+                           C["label"], anchor="end", opacity="0.42"))
     step = max(1, (geom["n"] - 1) // max(XTICKS - 1, 1)) if geom["n"] > 1 else 1
     for i in range(0, geom["n"], step):
         parts.append(_text(geom["xs"][i], FLD_XLABEL_Y, times[i], 10,
@@ -591,12 +690,10 @@ def field_svg(geom, times, colors, uid):
                      f'stroke-opacity="0.55"></line>')
         parts.append(_text(FLD_LABEL_X, y_lab, line["k"], 12, color,
                            anchor="start", weight="600", spacing="0.06em"))
-        parts.append(_text(FLD_VALUE_X, y_lab, fmt_signed(value), 11, C["label"],
-                           anchor="start", opacity="0.55"))
+        parts.append(_text(FLD_VALUE_X, y_lab, fmt_signed(value) + suffix, 11,
+                           C["label"], anchor="start", opacity="0.55"))
 
-    parts.append(_text(x0, FLD_FOOTER_Y,
-                       "SHARED DOLLAR SCALE · NET PREMIUM $M · "
-                       "CALL-LED ABOVE THE FLAT LINE", 9, C["label"],
+    parts.append(_text(x0, FLD_FOOTER_Y, FIELD_FOOTER[mode], 9, C["label"],
                        anchor="start", opacity="0.32", spacing="0.16em"))
 
     cx = geom["xs"][-1]
@@ -689,16 +786,21 @@ def _bipolar_bar(fill_id, height=6):
             f'height:{height}px;left:50%;width:0%"></div></div>')
 
 
-def _empty_panel(title, message):
+def _empty_panel(title, message, header_extra=""):
     """The panel's shell with a message where the chart would be.
 
     Not a bare label: keeping the frame means an empty view reads as "this panel
-    has nothing to show yet" rather than as a page that failed to render."""
+    has nothing to show yet" rather than as a page that failed to render.
+
+    ``header_extra`` carries any CONTROL that must survive the empty state — the
+    Flow Field's scale toggle does, or a session with nothing collected yet would
+    leave the reader no way to change scale until data arrived.
+    """
     return (f'<div class="fx-panel" style="width:100%;'
             f'background:{_PANEL_BG};box-shadow:{_PANEL_SHADOW}">'
             f'<div style="padding:20px 24px">'
             f'<div style="display:flex;align-items:center;gap:12px;'
-            f'margin-bottom:18px">{_title(title)}</div>'
+            f'margin-bottom:18px">{_title(title)}{header_extra}</div>'
             f'<div style="font:400 12px/1.7 {MONO};'
             f'color:rgba(174,205,232,.55);padding:26px 0 30px">'
             f'{_esc(message)}</div></div></div>')
@@ -847,19 +949,28 @@ def _ladder_placeholder():
 # FLOW FIELD — panel
 #############################################
 
-def field_panel(rows_by_symbol, order, colors, mode_label, uid):
-    """``(html, payload)`` for the Flow Field panel."""
+def field_panel(rows_by_symbol, order, colors, mode, uid):
+    """``(html, payload)`` for the Flow Field panel.
+
+    ``mode`` is a KEY from ``FIELD_MODES`` ("dollars" / "skew"), not a display
+    label — the panel owns the toggle, so it needs the value it will echo back.
+    """
     u = _id(uid)
+    mode = normalize_mode(mode)
+    toggle = mode_toggle_html(u, mode)
     model = field_series(rows_by_symbol, order)
     geom = field_geometry(model)
     if geom is None:
         return _empty_panel(
             "FLOW FIELD",
             "Nothing to plot yet — select symbols above, or wait for the "
-            "options service to collect this session's premium."), None
+            "options service to collect this session's premium.",
+            header_extra=toggle), None
 
     times = [fmt_time(ts) for ts in model["times"]]
-    unit = "%" if mode_label.startswith("Skew") else "M"
+    # Skew is a percentage of session premium; dollars carry their scale in the
+    # footer, so a bare number there would be ambiguous only in skew.
+    unit = "%" if mode == "skew" else ""
 
     chips = "".join(
         f'<span style="display:flex;align-items:center;gap:7px;'
@@ -927,13 +1038,8 @@ def field_panel(rows_by_symbol, order, colors, mode_label, uid):
         f'{_title("FLOW FIELD")}'
         f'<span style="display:flex;align-items:center;gap:7px;'
         f'flex-wrap:wrap">{chips}</span>'
-        # The scale is shown as a BADGE, not a toggle: the real control is the
-        # NiceGUI select above the panel, and a second, non-functional pair of
-        # buttons in here would read as clickable and do nothing.
-        f'<span style="margin-left:auto;padding:7px 13px;font:500 9px/1 {MONO};'
-        f'letter-spacing:.14em;color:{C["panel_to"]};background:{C["ice"]}">'
-        f'{_esc(mode_label.upper())}</span></div>'
-        f'{field_svg(geom, times, colors, u)}'
+        f'{toggle}</div>'
+        f'{field_svg(geom, times, colors, u, mode)}'
         f'</div>{rail}</div>')
 
     payload = {
@@ -977,7 +1083,9 @@ _SCRUB_JS = r"""
   }
   function sgn(v,d){
     if(v===null||v===undefined) return '—';
-    return (v>=0?'+':'−')+num(Math.abs(v),d);
+    // The unit suffix is empty in dollars (the footer states the scale) and '%'
+    // in skew, where the two modes' magnitudes are otherwise indistinguishable.
+    return (v>=0?'+':'−')+num(Math.abs(v),d)+(D.unit||'');
   }
   function dec(v){ v=Math.abs(v); return v>=100?0:(v>=10?1:2); }
   function txt(s,v){ var e=g(s); if(e) e.textContent=v; }

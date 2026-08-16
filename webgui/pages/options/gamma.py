@@ -1928,11 +1928,16 @@ def render():
                     if _gh:
                         with _gtab:
                             ui.tooltip(_gh).props("delay=350 max-width=340px")
+            # The scale control now lives IN the Flow Field panel (its DOLLARS /
+            # SKEW % toggle). This select is kept, hidden, as the state HOLDER:
+            # every reader already goes through np_mode_sel.value and the
+            # persist-and-repaint path hangs off its on_value_change, so the
+            # toggle sets this and one code path still owns the change. Two
+            # VISIBLE controls for one setting would be the real problem.
             np_mode_sel = ui.select(dict(NET_PREM_MODES), value=_np_mode0,
                                     label="Scale").props(
                 "dense options-dense").classes("w-36")
-            np_mode_sel.tooltip("Dollars compares SIZE across symbols; Skew % "
-                                "compares DIRECTION regardless of size")
+            np_mode_sel.set_visibility(False)
             ui.space()
             np_count_lbl = ui.label("").classes(f"text-xs {MUTED}")
             np_all_btn = ui.button("Select all", color=None).props(
@@ -2166,11 +2171,19 @@ def render():
         heat_msg.set_visibility(False)
         chart_msg.set_visibility(False)
         _apply_flex(0, term=True)          # full width, no heatmap panel
-        js = _fx.scrub_js(uid, kind, payload)
-        if js:
+        # Both scripts are deferred to the SAME tick: el.content is applied on
+        # the client asynchronously, so binding immediately would attach to the
+        # previous fragment's nodes (or to none at all on the first paint).
+        # toggle_js runs even without a scrub payload — the scale toggle exists
+        # in the empty state too, and must stay clickable there.
+        scripts = [s for s in (_fx.scrub_js(uid, kind, payload),
+                               _fx.toggle_js(uid) if kind == "field" else "")
+                   if s]
+        if scripts:
             @guard
             def _bind():
-                ui.run_javascript(js)
+                for script in scripts:
+                    ui.run_javascript(script)
             ui.timer(0.05, _bind, once=True)
 
     def _hide_panel():
@@ -2208,7 +2221,7 @@ def render():
             if pairs:
                 rows_by[sym] = pairs
         html, scrub = _fx.field_panel(rows_by, picked, NET_PREM_COLORS,
-                                      NET_PREM_MODES[mode], "fxfield")
+                                      mode, "fxfield")
         _show_panel(html, "field", scrub, "fxfield")
         # net_prem_summary_text already folds in the mode-aware "no data yet"
         # names (it shares net_prem_missing's definition), so the header can
@@ -2698,6 +2711,28 @@ def render():
     def _on_np_mode(e):
         app_settings.set("gamma_netprem_mode", e.value)
         _render_view()
+
+    @guard
+    def _on_panel_mode(e):
+        """The Flow Field panel's scale toggle, arriving via ``emitEvent``.
+
+        Writes through the hidden select so the persist + repaint path stays
+        single-source (``_on_np_mode`` fires on the value change).
+
+        ``e.args`` is BROWSER input — it is persisted to settings.json and read
+        back on the next page build, so it is normalized against the known keys
+        before it reaches ``app_settings``. It also arrives as a bare string or
+        as a one-element list depending on how emitEvent was called, so both
+        shapes are unwrapped rather than assumed.
+        """
+        raw = e.args
+        if isinstance(raw, (list, tuple)):
+            raw = raw[0] if raw else None
+        mode = _fx.normalize_mode(raw if isinstance(raw, str) else None)
+        if mode != np_mode_sel.value:
+            np_mode_sel.value = mode          # -> _on_np_mode -> persist+repaint
+
+    ui.on(_fx.MODE_EVENT, _on_panel_mode)
 
     def _np_bulk_set(keep):
         """Set every checkbox to ``keep(symbol)``, then commit ONCE.

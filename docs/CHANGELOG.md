@@ -69,11 +69,26 @@ panels sit behind the same subtab strip as the heatmap, so a cyan meaning "call"
 something else on the next would be worse than no colour coding. Rajdhani + IBM Plex Mono are already
 loaded app-wide, so the section carries no font URL.
 
+**The DOLLARS / SKEW % toggle is a REAL control inside the fragment.** DOMPurify strips inline `on*`
+handlers, so the click cannot ride the markup — it is bound by the same script channel as the scrub
+and reaches Python through NiceGUI's global **`emitEvent` / `ui.on`** pair. `toggle_js` is emitted on
+every paint independently of the scrub payload, because the toggle exists in the empty state too
+(tying it to the payload would leave a session with nothing collected yet unable to change scale
+until data arrived). The old `Scale` select is **kept but HIDDEN** as the state holder: every reader
+already goes through `np_mode_sel.value` and the persist+repaint path hangs off its
+`on_value_change`, so the toggle writes through it and one code path still owns the change — two
+VISIBLE controls for one setting would be the real problem. **The click payload is untrusted** (it is
+persisted to settings.json and read back on the next page build), so `normalize_mode` guards it on
+both sides and the handler unwraps the bare-string / one-element-list shapes `emitEvent` can produce.
+Labelled SKEW %, not the spec's "PERCENTILE", because that is what the mode computes — a signed share
+of session premium, bounded ±100% (verified over 20k random rows) — and what the rest of the app
+calls it. The footer line, the y-axis labels and the leaderboard/chip units all follow the mode;
+without the suffix a skew axis and a dollar axis are indistinguishable at a glance.
+
 **Kept deliberately:** the 28-symbol Net Prem selector, its group tabs and persisted selection (the
-spec's 7 symbols are its sample data); Dollars/Skew % (rendered as a passive BADGE, not a second
-non-functional toggle — the real control stays the NiceGUI select above the panel); and
-`net_prem_status_text`, which reports a failure mode nothing else can see (a stale publish INSIDE the
-collection window) and is clock-driven for that reason.
+spec's 7 symbols are its sample data); and `net_prem_status_text`, which reports a failure mode
+nothing else can see (a stale publish INSIDE the collection window) and is clock-driven for that
+reason.
 
 **Removed:** `flow_figure`, `net_prem_figure` and the `FLOW_PRICE/CALL/PUT` palette, plus the 12
 tests that only exercised them. Four tests whose invariants outlive the chart were **rewritten**
@@ -85,10 +100,13 @@ against the underlying readers (`net_prem_color` stability, `_np_rows` ts sortin
 what can go wrong here is invisible server-side: both ribbon tones render, terminus declutter lands
 at exactly `min_gap`, the leaderboard reorders on scrub, nothing overflows either viewBox, and the
 cursor dot lands on its line to **0.00px** — measured against real SVG path geometry via
-`getPointAtLength`, not against the payload that placed it. Screenshots time out in this environment
-(the documented pane caveat), so verification was DOM-measured throughout.
+`getPointAtLength`, not against the payload that placed it. The scale toggle was verified to
+round-trip **to Python** (a server-side click counter incremented, so the DOM repaint alone could not
+have produced it), in both directions, with the scrub still binding correctly after two full fragment
+swaps. Screenshots time out in this environment (the documented pane caveat), so verification was
+DOM-measured throughout.
 
-**Suites:** webgui **1557 green**; options_svc **1091 green**; options-scanner **1439 passed / 11
+**Suites:** webgui **1564 green**; options_svc **1091 green**; options-scanner **1439 passed / 11
 failed / 2 skipped**, the failing SET byte-identical to the documented baseline (compare the set,
 never the count). ⚠ **`options_svc/tests/test_flow_alert_window.py::test_gth_signal_still_fires_at_the_open`
 is FLAKY** — it failed once in a full run, then passed in isolation and in two subsequent full runs.
