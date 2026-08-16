@@ -8,7 +8,39 @@ published views, and the Schwab proxy's HTTP surface. It is aimed at developers
 extending the stack or wiring a new client to it.
 
 For the math behind the cached payloads, see the *Technical Reference*; for the
-end-user view, see the *User Guide*.
+end-user view, see the *User Guide* and the *Reference Guide*.
+
+## Finding the service behind a screen
+
+**This document is organised by tier and service, not by menu**, because a service
+is not a menu item: `options_svc` alone backs nine screens, and several screens read
+more than one domain. Use this map to get from a screen to the service and cache
+keys that feed it. Menu order matches the rail.
+
+| Menu page | Service | Primary cache key(s) |
+|---|---|---|
+| **Dealer Positioning** | `options_svc` :8211 | `cache:options:gamma`, `:gamma_symbols`, `:net_premium`, `:gamma_analyze*`, `:gamma_briefings` |
+| **Opportunity Board** | `options_svc` | `cache:options:matrix` |
+| **Flow Alerts** | `options_svc` | `cache:options:flow_alerts` |
+| **Market Dashboard** | `market_svc` :8215 | `cache:market:dashboard`, `:summary` |
+| **Sentiment** | `sentiment_svc` :8210 | `cache:sentiment:composite`, `:regime`, `:regime_history`, `:intraday_history` |
+| **Sector & Industry** | `sentiment_svc` | `cache:sentiment:sectors` |
+| **Sector Rotation** · **RRG** | `sentiment_svc` | `cache:sentiment:rotation` |
+| **Momentum** | `sentiment_svc` | `cache:sentiment:momentum` |
+| **Calculator** | `options_svc` | `cache:options:calc_chain`, `:calc_result`, `:calc_iv` |
+| **Simulator** | `options_svc` | `cache:options:sim_meta`, `:sim_result`, `:sim_replay` |
+| **Market Scanner** | `options_svc` | `cache:options:scan_day` (rendered), `:scan` (live counts) |
+| **Strategy Finder** | `options_svc` | `cache:options:swing` |
+| **Expected Move** | `options_svc` | `cache:options:em_chain`, `:expected_move` |
+| **Captured Signals** | `options_svc` | `cache:options:captured`, `:captured_flags`, `:captured_closed` |
+| **Paper Ledger** | `options_svc` | `cache:options:paper_trades`, `:paper_analyze` |
+| **Paper Account** | `options_svc` | `cache:options:paper_account`, `:paper_analytics` |
+| **Rescue** | `options_svc` | `cache:options:rescue:<position_id>`, `:rescue_summary` |
+| **Trade Analyzer** | `trade_svc` :8213 | `cache:trade:analysis`, `:deepdive`, `:deepdive_query` |
+| **Claude Trades** | `driver_svc` :8214 decides, `options_svc` executes | `cache:driver:autonomous`, `:control`, `cache:options:driver_paper_account`, `:driver_paper_perf` |
+| **Portfolio** | `portfolio_svc` :8212 | `cache:portfolio:positions` |
+| **EOD Report** | none — pure Tier-1 reader | aggregates the `options:*` and `driver:*` keys |
+| **System Status** | none — probes `/health` directly | reads every domain's `:ver` / `:ts` side keys |
 
 ---
 

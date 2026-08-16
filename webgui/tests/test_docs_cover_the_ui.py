@@ -113,6 +113,46 @@ def test_manuals_catalog_matches_the_built_files():
         )
 
 
+def _rail_page_order():
+    """Page labels in the order the rail presents them (NAV_SECTIONS, then SYSTEM)."""
+    order = []
+    for _caption, entries in main.NAV_SECTIONS:
+        for entry in entries:
+            if entry[0] == "group":
+                order.extend(lbl for _p, lbl, _i in entry[3])
+            else:
+                order.append(entry[2])
+    order.extend(lbl for _p, lbl, _i in main.SYSTEM_RAIL)
+    return order
+
+
+@pytest.mark.parametrize("manual", ["user-guide", "reference-guide"])
+def test_end_user_manuals_follow_the_rail_order(manual):
+    """Both end-user manuals present pages in the order the MENU presents them.
+
+    A manual whose chapters disagree with the rail makes a reader translate on every
+    lookup. The rail was reorganised into captioned sections on 2026-08-16 and the
+    User Guide kept its old Options/Trade/Reports chapters for a while, which is the
+    drift this pins.
+    """
+    path = USER_GUIDE if manual == "user-guide" else REFERENCE_GUIDE
+    headings = re.findall(r"^##\s+(.+?)\s*$", _read(path), re.M)
+    rail = _rail_page_order()
+    # Where a page has its own section, its position must not regress relative to
+    # the other pages. Compare the two sequences restricted to shared members.
+    seen, doc_order = set(), []
+    for h in headings:
+        name = "Trade Analyzer" if h == "Trade" else h
+        if name in rail and name not in seen:
+            seen.add(name)
+            doc_order.append(name)
+    expected = [p for p in rail if p in seen]
+    assert doc_order == expected, (
+        f"{manual} presents pages in a different order than the rail.\n"
+        f"  manual: {doc_order}\n  rail:   {expected}"
+    )
+
+
 def test_reference_guide_has_a_section_for_every_nav_page():
     """The Reference Guide's promise is per-page depth, so each page needs a heading
     of its own -- being mentioned in passing elsewhere is not coverage."""

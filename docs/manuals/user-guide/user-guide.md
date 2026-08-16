@@ -127,7 +127,7 @@ You don't interact with these directly, but it helps to know they exist:
 
 If you ever see a **red banner** across the top of every page saying the proxy is
 unreachable, the Schwab gateway isn't running or has stopped. Live data won't load
-until it's back. Use the **System Status** page (under **More**) to check and
+until it's back. Use the **System Status** page (at the foot of the rail) to check and
 restart components.
 
 ## "Waiting for … service" placeholders
@@ -138,7 +138,7 @@ launcher, or restart the specific service from the **System Status** page.
 
 ## Stopping everything
 
-Use **More → Stop All Services** inside the app, or run `stop_all.bat`. This stops the
+Use **Stop All Services** at the foot of the rail, or run `stop_all.bat`. This stops the
 gateway, the six services, and the web app. (Memurai is intentionally left
 running — it's a shared Windows service.)
 
@@ -261,109 +261,10 @@ Three built-in help features are always within reach:
 
 ---
 
-# Options
+# MARKETS — what is the market doing?
 
-The Options section is the heart of the app. All Options pages share a common
-**signal detail panel** and a few cross-page action buttons.
-
-## Market Scanner
-
-**Route:** the home page (`/`).
-
-The Market Scanner continuously looks for credit-spread opportunities and lists them in a
-two-pane layout.
-
-**Left pane — the signal list:**
-
-- A **Run scan** button (forces a refresh) and a status line ("N live signals").
-- Three tabs: **0-DTE**, **Swing** and **Directional**. Directional lists
-  single-leg long and short calls and puts, scored on a *different* scale from the
-  credit-spread tabs — do not compare their numbers.
-- A table of candidate signals. Columns include Symbol, Type, Expiration, DTE,
-  Short/Long strikes, Credit, Max Loss, Risk/Reward %, Probability of Profit %,
-  a color-coded **Score** chip, and a letter **Grade**.
-- A plain-English **VIX term** label (for example, *"VIX term: Contango (near-term
-  calm) · as of 1:32 PM"*).
-- Brand-new signals get a **NEW** badge.
-
-**Right pane — the detail panel:** click any row to see its full breakdown
-(credit, max loss, DTE, delta, theta, IV rank, and more).
-
-**Per-row action buttons** (also see *Cross-page actions* below):
-
-- **Send to Calculator** — open the P&L Calculator pre-filled with this trade.
-- **Send to Paper Trade** — create a paper trade from this signal.
-- **Expected Move** — open the Expected Move chart for this trade in a new tab.
-
-The list re-scans itself every 15 minutes between 08:00 and 15:15 CT on trading
-days; you rarely need to press **Run scan**.
-
-> **The table shows the whole day's signals, not just the current scan.** A signal
-> that has stopped qualifying stays visible but is **dimmed and frozen**, stamped
-> with the time it dropped out, and its **Paper** button is removed — its price is
-> stale, so a paper entry from it would be fictional. The status line's "N live
-> signals" counts only those still qualifying.
-
-> **An empty Directional tab is normal.** The engine only emits candidates scoring
-> 50 or better, so empty means nothing cleared the bar rather than something
-> failed. Index names (`$SPX`, `SPY`, `QQQ`) are also frequently absent, because
-> their implied volatility is usually too low to clear the credit floor.
-
-## Strategy Finder
-
-**Route:** `/options/swing`.
-
-A focused, on-demand scan for one symbol over a swing horizon. Enter the
-parameters and press **Scan**:
-
-- **Symbol**
-- **DTE** min / max (days to expiration)
-- **Put Δ** and **Call Δ** min / max (delta bands for strike selection)
-- **Min credit %**
-
-Results appear in the same signal table (with the same Score chip, Grade, and the
-three per-row action buttons) and detail panel as the Market Scanner.
-
-## Calculator
-
-**Route:** `/options/calculator`.
-
-An options P&L calculator for **any multi-leg structure**, with a price/time heat map.
-
-**Inputs:**
-
-- **Strategy** — a template menu grouped into **Singles** (long/naked call/put),
-  **Verticals** (PCS/CCS credit + call/put debit spreads), **Condors** (iron condor +
-  all-call/all-put condor), **Butterflies** (call/put long 1-2-1 + iron butterfly), and
-  **Calendars** (call/put calendar + diagonal). Picking one fills the leg editor with
-  sensible at-the-money strikes.
-- **Symbol** and **spot price**, plus a **Load** button that pulls the live chain,
-  current price, a price range, and the list of expirations.
-- **Expiry**, **Contracts**, **IV %** (with an **IV** button that reads the
-  at-the-money IV from the chain), an **IV Δ %** shock, and a **Rate %**.
-- An **editable leg editor** — one row per leg with **Type** (call/put), **Side**
-  (long/short), **Strike**, **Expiry**, and **Qty**, plus **Add leg** and a remove
-  button. Each leg carries its **own expiry** (so **calendars/diagonals** price each
-  leg on its own clock) and its own quantity (so a 1-2-1 butterfly body trades at 2×).
-  **Fetch Premiums** fills each leg's premium from the chain.
-- **Range min / max** and **Range %** controlling the heat map's price span.
-
-**Outputs (after pressing Calculate):**
-
-- **Summary tiles** — entry credit/debit, max risk, max return, return-on-risk %,
-  break-even(s), and probability of profit. The credit-spread/iron-condor metrics use
-  the exact closed-form formulas; **butterflies, calendars, and other structures** are
-  measured numerically off the value-at-expiration curve (max profit/loss + every
-  break-even crossing).
-- A **P&L heat map** — rows are price points, columns are evaluation dates, each
-  cell shows the dollar P&L and % return, shaded green (profit) to red (loss). The
-  current spot row is highlighted.
-
-If you arrived here via **Send to Calculator** from a signal table, the form is
-pre-filled and the calculation runs automatically. **Copy to Simulator** sends the
-current legs straight to the Simulator (and the Simulator's **Copy to Calculator**
-brings them back), so you can move a structure between P&L tiles and the
-scenario/Greeks views without re-entering it.
+The four rail entries in this section establish the conditions a trade would be
+taken in. Nothing here proposes a trade.
 
 ## Dealer Positioning
 
@@ -411,169 +312,6 @@ doesn't re-fetch.
 > **Analyze and the automatic briefings call the Claude API**, so they cost money per
 > run. The running count is on the **Settings** page under *API usage*.
 
-## Simulator
-
-**Route:** `/options/simulator`.
-
-Re-prices a **multi-leg** option position under different scenarios using
-Black-Scholes. Start by entering a **Symbol** and pressing **Fetch snapshot**, then
-pick a **Strategy** (the same template menu as the Calculator — singles, verticals,
-condors, butterflies, calendars/diagonals) and adjust the **legs** in the editor —
-each row has **Type** (call/put), **Side** (long/short), **Strike**, **Expiry**, and
-**Qty**, with **Add leg** / remove. Every tab below operates on the **netted**
-position (all legs summed). Three tabs:
-
-- **Replay** (default) — re-prices the position along the underlying's recent price
-  path and shows a **six-panel stack** (price plus Delta, Gamma, Theta, Vega, Rho).
-  A **scrub slider** moves a cursor through the trace; a **Look-back** dropdown
-  controls how far back the path runs (Auto by DTE, or fixed windows).
-- **What-if** — a **ΔS** slider (instant client-side price overlay) and a **Δt**
-  slider that fast-forwards **elapsed** days from now; each leg decays on its **own**
-  clock, so a **calendar's** back leg correctly keeps its time value while the front
-  leg expires. An IV-shock comparison bar chart appears below.
-- **IV Shock** — an **IV multiplier** slider compares the position at base IV vs
-  shocked IV across Price, Delta, Gamma, Theta, and Vega.
-
-**Copy to Calculator** sends the current legs to the Calculator for the P&L tiles +
-heat map (the Calculator's **Copy to Simulator** brings them back).
-
-## Expected Move
-
-**Route:** `/options/expected-move`.
-
-Charts a symbol's recent price action with a forward **expected-move cone** out to
-an option's expiration.
-
-**Inputs:** **Symbol**, **Expiry** (YYYY-MM-DD), an optional **Strike** with a
-put/call toggle, and a **Look-back** dropdown (Auto ≈ 3× DTE, or 1mo / 3mo / 6mo /
-1y). Press **Draw**.
-
-**The chart** is a daily candlestick with:
-
-- Dashed **upper/lower expected-move** bands fanning out to expiration.
-- **Leg strike lines** if you provided strikes (short = solid, long = dashed;
-  put = red, call = blue), each labeled.
-- A price crosshair and a date-aware tooltip. Non-trading days are collapsed so
-  there are no blank weekend gaps.
-
-You usually reach this page through the **Expected Move** button on a signal row
-(it opens in a new browser tab, pre-filled and drawn).
-
-## Paper Ledger
-
-**Route:** `/options/paper`.
-
-A manual paper-trading ledger.
-
-- **Action buttons:** Reload, **Close selected** (enter an exit debit), **Analyze
-  selected** (live Greeks + P&L overlay), **Delete selected**, **Delete all
-  closed**.
-- **Table:** Trade ID, Symbol, Strategy, Strikes, Expiration, Qty, Entry Credit,
-  Max Loss, P&L, Status, Entry Time.
-- Click a row to load its **detail panel**; the app automatically runs a live
-  analysis and overlays current Greeks and P&L.
-- Each row also has an **Expected Move** button.
-
-## Captured Signals
-
-**Route:** `/options/captured`.
-
-Signals the system has "captured" to track over time, with live re-pricing.
-
-- **Action buttons:** Reload, **Refresh marks (live)** (re-price all open
-  signals), **Close selected** (enter an exit value and reason).
-- **Table:** Symbol, Strategy, Mode, Opened, Expiration, DTE, Entry Credit, Entry
-  Risk, P&L (green/red), Entry Score, Current Score, **Score Drift**, Grade, and a
-  color-coded **Recommendation** (green TAKE_PROFIT / red CUT / amber HOLD).
-- Click a row for its detail panel (entry vs current score, recommendation,
-  unrealized P&L).
-- When a tracked signal hits a stop or target, the page raises a notification.
-
-## Paper Account
-
-**Route:** `/options/portfolio`.
-
-The account view for the automated paper-trading engine.
-
-- **Account cards:** Equity, Cash, Buying-power reserved, Session P&L, Total P&L,
-  Open count, and engine status (RUNNING / HALTED).
-- **Action buttons:** Reload, **Run entry cycle** (open positions for eligible
-  captured signals), **Run manage cycle** (re-price and auto-close), **Reset**
-  (set a new starting balance).
-- **Open Positions** table and a **Fills log** (last 100 orders).
-
-> The entry and manage cycles also run automatically **at the top of each hour,
-> 09:00–14:00 CT** on trading days — there is no 15:00 run. So a target hit at 09:15
-> is acted on at 10:00 unless you press **Run manage cycle** yourself. (The
-> autonomous driver's separate account re-prices every minute; this one does not.)
-
-## Rescue
-
-**Route:** `/options/rescue`.
-
-An advisory **and** one-click-apply tool for **tested credit spreads** — put credit
-spreads (PCS), call credit spreads (CCS), and iron condors (IC) — that have moved
-against you. It tells you whether a position is in trouble and offers a ranked menu
-of concrete ways to fix it, with the commission-adjusted cash and risk of each.
-
-**Two sub-tabs** sit under the page tabs:
-
-| Sub-tab | What it does |
-|---------|--------------|
-| **At-Risk Board** | The default. Scans your paper and captured positions and lists the ones in trouble. |
-| **Ad-hoc Trade** | Enter a position **by hand** and get the same ranked repair menu for it — use this to evaluate a spread the app is not tracking. |
-
-**The at-risk table** (top of the page) lists every paper position and captured
-signal the system has flagged as **tested** or **critical**, heat-colored and sorted
-by **heat** (a 0–100 danger score — higher is more urgent). A position earns its
-heat from how close the underlying is to the short strike, the short-leg delta, P&L
-versus the credit taken in, days to expiration, and dealer-gamma / market-regime
-context. Detection rides the paper engine's 5-minute manage cycle, so the table
-stays current on its own.
-
-**A red badge** on the **Rescue** nav item shows how many positions are currently
-tested or critical. Opening the page clears it.
-
-**Select a row** to load its **rescue candidate menu** — a ranked set of cards, each
-a different way to adjust the position:
-
-- **Close** or **partial-close** the spread.
-- **Narrow** it (roll the long leg in toward the short).
-- **Convert** a one-sided spread to an **Iron Condor** or **Iron Butterfly**.
-- **Roll** the spread **down**, **out** (later expiry), or **down-and-out**.
-- Advisory-only ideas: **broken-wing**, **inverted**, and a **futures hedge**.
-
-**Reading a candidate card:**
-
-- The **action label** and a **score** (higher = the engine likes it more).
-- **Gross / commission / net** cash — what the adjustment brings in or costs before
-  fees, the Schwab commission, and the net after fees. Commissions are real Schwab
-  rates and are built into the ranking, so an action that only works by paying a
-  debit is penalized.
-- New **max-loss**, **breakeven**, **short-delta**, **width**, and **expiry** for the
-  position after the adjustment.
-- The **option legs** the adjustment would trade.
-- A **rationale**, **strategic-context** notes (the dealer-gamma read — e.g. rolling
-  below the gamma flip is risky, resting on a put wall favors a bounce — how it fits
-  the current regime, and settlement mechanics: index spreads are European,
-  cash-settled with no early assignment; equity/futures spreads are American and
-  carry assignment risk when in-the-money), and any **warnings**.
-
-**Applying an adjustment.** Cards that the engine can execute show an **Apply**
-button (behind a confirmation). Advisory cards (broken-wing, inverted, futures hedge)
-instead say **"manual — place it yourself."** When you Apply, the app re-prices the
-candidate's legs live and **only proceeds if the economics still hold**; if prices
-have moved past tolerance, or the position is no longer open, it aborts without
-changing anything and tells you **"prices moved — re-review."** Rolls close the old
-position and open a new, linked one. Every applied adjustment is recorded in an audit
-log.
-
-> **Captured signals are advisory-only.** A captured signal that turns at-risk — for
-> example one showing a **CUT** recommendation (a money/delta/time stop) — appears in the
-> at-risk table and gets a full candidate menu, but it has **no Apply button** (there's no
-> paper position to mutate). Use the menu as guidance and place the adjustment yourself.
-> Captured signals do **not** add to the Rescue nav badge (that counts paper positions).
-
 ## Opportunity Board
 
 **Route:** `/options/matrix`. In the rail under **MARKETS**, not in the Options tab
@@ -615,22 +353,6 @@ for that symbol.
 > **No alert can tell a buy from a sell** — Schwab publishes no options tape. Read
 > every row as "something large happened here", then use price and gamma to decide
 > direction.
-
-## Cross-page actions
-
-Three buttons appear on signal rows across the Options section:
-
-| Action | Available on | Effect |
-|--------|--------------|--------|
-| **Send to Calculator** | Market Scanner, Strategy Finder | Opens the Calculator pre-filled (strategy, symbol, expiry, strikes, premiums, IV) and runs it. |
-| **Send to Paper Trade** | Market Scanner, Strategy Finder | Asks for a quantity, then creates a paper trade. Stays on the current page. |
-| **Expected Move** | Market Scanner, Strategy Finder, Paper Ledger, Captured, Calculator | Opens the Expected Move chart in a new browser tab, pre-filled and drawn. |
-
----
-
-# Trend & Sentiment
-
-Six tabs, running from the widest lens to the narrowest.
 
 ## Market Dashboard
 
@@ -750,7 +472,275 @@ Use the dropdown to switch between industries and stocks.
 
 ---
 
-# Trade
+# STRATEGY — what should I trade?
+
+**Strategy Tools** model legs you bring; the **Options** group works through
+signals the app finds; **Trade Analyzer** judges a single stock; **Claude Trades**
+watches the autonomous trader.
+
+## Calculator
+
+**Route:** `/options/calculator`.
+
+An options P&L calculator for **any multi-leg structure**, with a price/time heat map.
+
+**Inputs:**
+
+- **Strategy** — a template menu grouped into **Singles** (long/naked call/put),
+  **Verticals** (PCS/CCS credit + call/put debit spreads), **Condors** (iron condor +
+  all-call/all-put condor), **Butterflies** (call/put long 1-2-1 + iron butterfly), and
+  **Calendars** (call/put calendar + diagonal). Picking one fills the leg editor with
+  sensible at-the-money strikes.
+- **Symbol** and **spot price**, plus a **Load** button that pulls the live chain,
+  current price, a price range, and the list of expirations.
+- **Expiry**, **Contracts**, **IV %** (with an **IV** button that reads the
+  at-the-money IV from the chain), an **IV Δ %** shock, and a **Rate %**.
+- An **editable leg editor** — one row per leg with **Type** (call/put), **Side**
+  (long/short), **Strike**, **Expiry**, and **Qty**, plus **Add leg** and a remove
+  button. Each leg carries its **own expiry** (so **calendars/diagonals** price each
+  leg on its own clock) and its own quantity (so a 1-2-1 butterfly body trades at 2×).
+  **Fetch Premiums** fills each leg's premium from the chain.
+- **Range min / max** and **Range %** controlling the heat map's price span.
+
+**Outputs (after pressing Calculate):**
+
+- **Summary tiles** — entry credit/debit, max risk, max return, return-on-risk %,
+  break-even(s), and probability of profit. The credit-spread/iron-condor metrics use
+  the exact closed-form formulas; **butterflies, calendars, and other structures** are
+  measured numerically off the value-at-expiration curve (max profit/loss + every
+  break-even crossing).
+- A **P&L heat map** — rows are price points, columns are evaluation dates, each
+  cell shows the dollar P&L and % return, shaded green (profit) to red (loss). The
+  current spot row is highlighted.
+
+If you arrived here via **Send to Calculator** from a signal table, the form is
+pre-filled and the calculation runs automatically. **Copy to Simulator** sends the
+current legs straight to the Simulator (and the Simulator's **Copy to Calculator**
+brings them back), so you can move a structure between P&L tiles and the
+scenario/Greeks views without re-entering it.
+
+## Simulator
+
+**Route:** `/options/simulator`.
+
+Re-prices a **multi-leg** option position under different scenarios using
+Black-Scholes. Start by entering a **Symbol** and pressing **Fetch snapshot**, then
+pick a **Strategy** (the same template menu as the Calculator — singles, verticals,
+condors, butterflies, calendars/diagonals) and adjust the **legs** in the editor —
+each row has **Type** (call/put), **Side** (long/short), **Strike**, **Expiry**, and
+**Qty**, with **Add leg** / remove. Every tab below operates on the **netted**
+position (all legs summed). Three tabs:
+
+- **Replay** (default) — re-prices the position along the underlying's recent price
+  path and shows a **six-panel stack** (price plus Delta, Gamma, Theta, Vega, Rho).
+  A **scrub slider** moves a cursor through the trace; a **Look-back** dropdown
+  controls how far back the path runs (Auto by DTE, or fixed windows).
+- **What-if** — a **ΔS** slider (instant client-side price overlay) and a **Δt**
+  slider that fast-forwards **elapsed** days from now; each leg decays on its **own**
+  clock, so a **calendar's** back leg correctly keeps its time value while the front
+  leg expires. An IV-shock comparison bar chart appears below.
+- **IV Shock** — an **IV multiplier** slider compares the position at base IV vs
+  shocked IV across Price, Delta, Gamma, Theta, and Vega.
+
+**Copy to Calculator** sends the current legs to the Calculator for the P&L tiles +
+heat map (the Calculator's **Copy to Simulator** brings them back).
+
+## Market Scanner
+
+**Route:** the home page (`/`).
+
+The Market Scanner continuously looks for credit-spread opportunities and lists them in a
+two-pane layout.
+
+**Left pane — the signal list:**
+
+- A **Run scan** button (forces a refresh) and a status line ("N live signals").
+- Three tabs: **0-DTE**, **Swing** and **Directional**. Directional lists
+  single-leg long and short calls and puts, scored on a *different* scale from the
+  credit-spread tabs — do not compare their numbers.
+- A table of candidate signals. Columns include Symbol, Type, Expiration, DTE,
+  Short/Long strikes, Credit, Max Loss, Risk/Reward %, Probability of Profit %,
+  a color-coded **Score** chip, and a letter **Grade**.
+- A plain-English **VIX term** label (for example, *"VIX term: Contango (near-term
+  calm) · as of 1:32 PM"*).
+- Brand-new signals get a **NEW** badge.
+
+**Right pane — the detail panel:** click any row to see its full breakdown
+(credit, max loss, DTE, delta, theta, IV rank, and more).
+
+**Per-row action buttons** (also see *Cross-page actions* below):
+
+- **Send to Calculator** — open the P&L Calculator pre-filled with this trade.
+- **Send to Paper Trade** — create a paper trade from this signal.
+- **Expected Move** — open the Expected Move chart for this trade in a new tab.
+
+The list re-scans itself every 15 minutes between 08:00 and 15:15 CT on trading
+days; you rarely need to press **Run scan**.
+
+> **The table shows the whole day's signals, not just the current scan.** A signal
+> that has stopped qualifying stays visible but is **dimmed and frozen**, stamped
+> with the time it dropped out, and its **Paper** button is removed — its price is
+> stale, so a paper entry from it would be fictional. The status line's "N live
+> signals" counts only those still qualifying.
+
+> **An empty Directional tab is normal.** The engine only emits candidates scoring
+> 50 or better, so empty means nothing cleared the bar rather than something
+> failed. Index names (`$SPX`, `SPY`, `QQQ`) are also frequently absent, because
+> their implied volatility is usually too low to clear the credit floor.
+
+## Strategy Finder
+
+**Route:** `/options/swing`.
+
+A focused, on-demand scan for one symbol over a swing horizon. Enter the
+parameters and press **Scan**:
+
+- **Symbol**
+- **DTE** min / max (days to expiration)
+- **Put Δ** and **Call Δ** min / max (delta bands for strike selection)
+- **Min credit %**
+
+Results appear in the same signal table (with the same Score chip, Grade, and the
+three per-row action buttons) and detail panel as the Market Scanner.
+
+## Expected Move
+
+**Route:** `/options/expected-move`.
+
+Charts a symbol's recent price action with a forward **expected-move cone** out to
+an option's expiration.
+
+**Inputs:** **Symbol**, **Expiry** (YYYY-MM-DD), an optional **Strike** with a
+put/call toggle, and a **Look-back** dropdown (Auto ≈ 3× DTE, or 1mo / 3mo / 6mo /
+1y). Press **Draw**.
+
+**The chart** is a daily candlestick with:
+
+- Dashed **upper/lower expected-move** bands fanning out to expiration.
+- **Leg strike lines** if you provided strikes (short = solid, long = dashed;
+  put = red, call = blue), each labeled.
+- A price crosshair and a date-aware tooltip. Non-trading days are collapsed so
+  there are no blank weekend gaps.
+
+You usually reach this page through the **Expected Move** button on a signal row
+(it opens in a new browser tab, pre-filled and drawn).
+
+## Captured Signals
+
+**Route:** `/options/captured`.
+
+Signals the system has "captured" to track over time, with live re-pricing.
+
+- **Action buttons:** Reload, **Refresh marks (live)** (re-price all open
+  signals), **Close selected** (enter an exit value and reason).
+- **Table:** Symbol, Strategy, Mode, Opened, Expiration, DTE, Entry Credit, Entry
+  Risk, P&L (green/red), Entry Score, Current Score, **Score Drift**, Grade, and a
+  color-coded **Recommendation** (green TAKE_PROFIT / red CUT / amber HOLD).
+- Click a row for its detail panel (entry vs current score, recommendation,
+  unrealized P&L).
+- When a tracked signal hits a stop or target, the page raises a notification.
+
+## Paper Ledger
+
+**Route:** `/options/paper`.
+
+A manual paper-trading ledger.
+
+- **Action buttons:** Reload, **Close selected** (enter an exit debit), **Analyze
+  selected** (live Greeks + P&L overlay), **Delete selected**, **Delete all
+  closed**.
+- **Table:** Trade ID, Symbol, Strategy, Strikes, Expiration, Qty, Entry Credit,
+  Max Loss, P&L, Status, Entry Time.
+- Click a row to load its **detail panel**; the app automatically runs a live
+  analysis and overlays current Greeks and P&L.
+- Each row also has an **Expected Move** button.
+
+## Paper Account
+
+**Route:** `/options/portfolio`.
+
+The account view for the automated paper-trading engine.
+
+- **Account cards:** Equity, Cash, Buying-power reserved, Session P&L, Total P&L,
+  Open count, and engine status (RUNNING / HALTED).
+- **Action buttons:** Reload, **Run entry cycle** (open positions for eligible
+  captured signals), **Run manage cycle** (re-price and auto-close), **Reset**
+  (set a new starting balance).
+- **Open Positions** table and a **Fills log** (last 100 orders).
+
+> The entry and manage cycles also run automatically **at the top of each hour,
+> 09:00–14:00 CT** on trading days — there is no 15:00 run. So a target hit at 09:15
+> is acted on at 10:00 unless you press **Run manage cycle** yourself. (The
+> autonomous driver's separate account re-prices every minute; this one does not.)
+
+## Rescue
+
+**Route:** `/options/rescue`.
+
+An advisory **and** one-click-apply tool for **tested credit spreads** — put credit
+spreads (PCS), call credit spreads (CCS), and iron condors (IC) — that have moved
+against you. It tells you whether a position is in trouble and offers a ranked menu
+of concrete ways to fix it, with the commission-adjusted cash and risk of each.
+
+**Two sub-tabs** sit under the page tabs:
+
+| Sub-tab | What it does |
+|---------|--------------|
+| **At-Risk Board** | The default. Scans your paper and captured positions and lists the ones in trouble. |
+| **Ad-hoc Trade** | Enter a position **by hand** and get the same ranked repair menu for it — use this to evaluate a spread the app is not tracking. |
+
+**The at-risk table** (top of the page) lists every paper position and captured
+signal the system has flagged as **tested** or **critical**, heat-colored and sorted
+by **heat** (a 0–100 danger score — higher is more urgent). A position earns its
+heat from how close the underlying is to the short strike, the short-leg delta, P&L
+versus the credit taken in, days to expiration, and dealer-gamma / market-regime
+context. Detection rides the paper engine's 5-minute manage cycle, so the table
+stays current on its own.
+
+**A red badge** on the **Rescue** nav item shows how many positions are currently
+tested or critical. Opening the page clears it.
+
+**Select a row** to load its **rescue candidate menu** — a ranked set of cards, each
+a different way to adjust the position:
+
+- **Close** or **partial-close** the spread.
+- **Narrow** it (roll the long leg in toward the short).
+- **Convert** a one-sided spread to an **Iron Condor** or **Iron Butterfly**.
+- **Roll** the spread **down**, **out** (later expiry), or **down-and-out**.
+- Advisory-only ideas: **broken-wing**, **inverted**, and a **futures hedge**.
+
+**Reading a candidate card:**
+
+- The **action label** and a **score** (higher = the engine likes it more).
+- **Gross / commission / net** cash — what the adjustment brings in or costs before
+  fees, the Schwab commission, and the net after fees. Commissions are real Schwab
+  rates and are built into the ranking, so an action that only works by paying a
+  debit is penalized.
+- New **max-loss**, **breakeven**, **short-delta**, **width**, and **expiry** for the
+  position after the adjustment.
+- The **option legs** the adjustment would trade.
+- A **rationale**, **strategic-context** notes (the dealer-gamma read — e.g. rolling
+  below the gamma flip is risky, resting on a put wall favors a bounce — how it fits
+  the current regime, and settlement mechanics: index spreads are European,
+  cash-settled with no early assignment; equity/futures spreads are American and
+  carry assignment risk when in-the-money), and any **warnings**.
+
+**Applying an adjustment.** Cards that the engine can execute show an **Apply**
+button (behind a confirmation). Advisory cards (broken-wing, inverted, futures hedge)
+instead say **"manual — place it yourself."** When you Apply, the app re-prices the
+candidate's legs live and **only proceeds if the economics still hold**; if prices
+have moved past tolerance, or the position is no longer open, it aborts without
+changing anything and tells you **"prices moved — re-review."** Rolls close the old
+position and open a new, linked one. Every applied adjustment is recorded in an audit
+log.
+
+> **Captured signals are advisory-only.** A captured signal that turns at-risk — for
+> example one showing a **CUT** recommendation (a money/delta/time stop) — appears in the
+> at-risk table and gets a full candidate menu, but it has **no Apply button** (there's no
+> paper position to mutate). Use the menu as guidance and place the adjustment yourself.
+> Captured signals do **not** add to the Rescue nav badge (that counts paper positions).
+
+## Trade Analyzer
 
 **Route:** `/trade`.
 
@@ -803,27 +793,7 @@ The analysis persists as you navigate away and back.
 
 ---
 
-# Portfolio
-
-**Route:** `/portfolio`.
-
-Your live Schwab portfolio, with sector context and a performance scorecard.
-
-- A **status bar** — Refresh button, proxy up/down, live-stream on/off, holding
-  count.
-- **Holdings** tab — Symbol, Sector, Qty, Market Value, Day P/L, Total P/L,
-  vs-Sector relative strength, and since-purchase excess. P&L cells are color-coded
-  and update live.
-- **Sectors** tab — your sector weights vs the benchmark, plus a tailwind reading.
-- **Performance** tab — per-position letter grades (Return / Capital / Risk /
-  Entry), a composite, annualized return, vs-sector, and drawdown. Click a row to
-  see its **advisory suggestions** below the table.
-
-P&L streams live tick-by-tick; press **Refresh** to rebuild sectors and grades.
-
----
-
-# Claude Trades
+## Claude Trades
 
 **Route:** `/driver`.
 
@@ -872,7 +842,41 @@ Open positions are re-priced every minute during market hours regardless.
 
 ---
 
-# Reports & System
+## Cross-page actions
+
+Three buttons appear on signal rows across the Options section:
+
+| Action | Available on | Effect |
+|--------|--------------|--------|
+| **Send to Calculator** | Market Scanner, Strategy Finder | Opens the Calculator pre-filled (strategy, symbol, expiry, strikes, premiums, IV) and runs it. |
+| **Send to Paper Trade** | Market Scanner, Strategy Finder | Asks for a quantity, then creates a paper trade. Stays on the current page. |
+| **Expected Move** | Market Scanner, Strategy Finder, Paper Ledger, Captured, Calculator | Opens the Expected Move chart in a new browser tab, pre-filled and drawn. |
+
+---
+
+# ACCOUNT — what do I own?
+
+Your real holdings, and the day's results.
+
+## Portfolio
+
+**Route:** `/portfolio`.
+
+Your live Schwab portfolio, with sector context and a performance scorecard.
+
+- A **status bar** — Refresh button, proxy up/down, live-stream on/off, holding
+  count.
+- **Holdings** tab — Symbol, Sector, Qty, Market Value, Day P/L, Total P/L,
+  vs-Sector relative strength, and since-purchase excess. P&L cells are color-coded
+  and update live.
+- **Sectors** tab — your sector weights vs the benchmark, plus a tailwind reading.
+- **Performance** tab — per-position letter grades (Return / Capital / Risk /
+  Entry), a composite, annualized return, vs-sector, and drawdown. Click a row to
+  see its **advisory suggestions** below the table.
+
+P&L streams live tick-by-tick; press **Refresh** to rebuild sectors and grades.
+
+---
 
 ## EOD Report
 
@@ -901,6 +905,28 @@ which keeps working in the exported file as well as in the app.
 > Realized P&L is bucketed by **exit** date, while opened trades and credit
 > collected are bucketed by **entry** date. They answer different questions and will
 > not reconcile to each other — that is correct, not a bug.
+
+## User Manuals
+
+**Route:** `/manuals` — a tab in the **More** group, alongside EOD Report. (It used
+to be nested under Settings; it is now a peer tab.)
+
+A simple index that links the four manuals — each opens in a new browser tab:
+
+- **User Guide** — how to use the app (this document).
+- **Reference Guide** — what each tab and sub-tab is for, why it matters and when to
+  open it, starting from a one-page summary of the whole app.
+- **Technical Reference** — the math behind every number.
+- **API / Developer Reference** — the integration surface for developers.
+
+The Word (`.docx`) copies live alongside the HTML under `docs/manuals/`.
+
+---
+
+# SYSTEM
+
+The machine-level controls pinned to the foot of the rail. None of them is a step
+in a trading workflow, which is why they sit apart.
 
 ## System Status
 
@@ -968,24 +994,9 @@ Preferences, all saved on your machine (there is no login):
 **User Manuals** is no longer nested under Settings — it is a tab in the **More**
 group, next to EOD Report.
 
-## User Manuals
-
-**Route:** `/manuals` — a tab in the **More** group, alongside EOD Report. (It used
-to be nested under Settings; it is now a peer tab.)
-
-A simple index that links the four manuals — each opens in a new browser tab:
-
-- **User Guide** — how to use the app (this document).
-- **Reference Guide** — what each tab and sub-tab is for, why it matters and when to
-  open it, starting from a one-page summary of the whole app.
-- **Technical Reference** — the math behind every number.
-- **API / Developer Reference** — the integration surface for developers.
-
-The Word (`.docx`) copies live alongside the HTML under `docs/manuals/`.
-
 ## Stop All Services
 
-**Route:** `/terminate` (under **More**).
+**Route:** `/terminate` — the red button at the foot of the rail.
 
 A guarded "stop the whole local stack" page. The red **Stop all services** button
 (behind a confirmation) stops the gateway, the six services, and the web app.

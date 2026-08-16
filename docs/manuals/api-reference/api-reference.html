@@ -65,7 +65,10 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
   <div class="meta">WebGUI Trading with Schwab · Generated 2026-08-16</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
-<li><a href="#about-this-document">About this document</a></li>
+<li><a href="#about-this-document">About this document</a><ul>
+<li><a href="#finding-the-service-behind-a-screen">Finding the service behind a screen</a></li>
+</ul>
+</li>
 <li><a href="#3-tier-overview">3-Tier Overview</a></li>
 <li><a href="#bus-redis-api">Bus / Redis API</a><ul>
 <li><a href="#key-naming-conventions">Key naming conventions</a></li>
@@ -111,7 +114,133 @@ architecture: the contracts, the Redis bus API, each service's commands and
 published views, and the Schwab proxy's HTTP surface. It is aimed at developers
 extending the stack or wiring a new client to it.</p>
 <p>For the math behind the cached payloads, see the <em>Technical Reference</em>; for the
-end-user view, see the <em>User Guide</em>.</p>
+end-user view, see the <em>User Guide</em> and the <em>Reference Guide</em>.</p>
+<h2 id="finding-the-service-behind-a-screen">Finding the service behind a screen</h2>
+<p><strong>This document is organised by tier and service, not by menu</strong>, because a service
+is not a menu item: <code>options_svc</code> alone backs nine screens, and several screens read
+more than one domain. Use this map to get from a screen to the service and cache
+keys that feed it. Menu order matches the rail.</p>
+<table>
+<thead>
+<tr>
+<th>Menu page</th>
+<th>Service</th>
+<th>Primary cache key(s)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Dealer Positioning</strong></td>
+<td><code>options_svc</code> :8211</td>
+<td><code>cache:options:gamma</code>, <code>:gamma_symbols</code>, <code>:net_premium</code>, <code>:gamma_analyze*</code>, <code>:gamma_briefings</code></td>
+</tr>
+<tr>
+<td><strong>Opportunity Board</strong></td>
+<td><code>options_svc</code></td>
+<td><code>cache:options:matrix</code></td>
+</tr>
+<tr>
+<td><strong>Flow Alerts</strong></td>
+<td><code>options_svc</code></td>
+<td><code>cache:options:flow_alerts</code></td>
+</tr>
+<tr>
+<td><strong>Market Dashboard</strong></td>
+<td><code>market_svc</code> :8215</td>
+<td><code>cache:market:dashboard</code>, <code>:summary</code></td>
+</tr>
+<tr>
+<td><strong>Sentiment</strong></td>
+<td><code>sentiment_svc</code> :8210</td>
+<td><code>cache:sentiment:composite</code>, <code>:regime</code>, <code>:regime_history</code>, <code>:intraday_history</code></td>
+</tr>
+<tr>
+<td><strong>Sector &amp; Industry</strong></td>
+<td><code>sentiment_svc</code></td>
+<td><code>cache:sentiment:sectors</code></td>
+</tr>
+<tr>
+<td><strong>Sector Rotation</strong> · <strong>RRG</strong></td>
+<td><code>sentiment_svc</code></td>
+<td><code>cache:sentiment:rotation</code></td>
+</tr>
+<tr>
+<td><strong>Momentum</strong></td>
+<td><code>sentiment_svc</code></td>
+<td><code>cache:sentiment:momentum</code></td>
+</tr>
+<tr>
+<td><strong>Calculator</strong></td>
+<td><code>options_svc</code></td>
+<td><code>cache:options:calc_chain</code>, <code>:calc_result</code>, <code>:calc_iv</code></td>
+</tr>
+<tr>
+<td><strong>Simulator</strong></td>
+<td><code>options_svc</code></td>
+<td><code>cache:options:sim_meta</code>, <code>:sim_result</code>, <code>:sim_replay</code></td>
+</tr>
+<tr>
+<td><strong>Market Scanner</strong></td>
+<td><code>options_svc</code></td>
+<td><code>cache:options:scan_day</code> (rendered), <code>:scan</code> (live counts)</td>
+</tr>
+<tr>
+<td><strong>Strategy Finder</strong></td>
+<td><code>options_svc</code></td>
+<td><code>cache:options:swing</code></td>
+</tr>
+<tr>
+<td><strong>Expected Move</strong></td>
+<td><code>options_svc</code></td>
+<td><code>cache:options:em_chain</code>, <code>:expected_move</code></td>
+</tr>
+<tr>
+<td><strong>Captured Signals</strong></td>
+<td><code>options_svc</code></td>
+<td><code>cache:options:captured</code>, <code>:captured_flags</code>, <code>:captured_closed</code></td>
+</tr>
+<tr>
+<td><strong>Paper Ledger</strong></td>
+<td><code>options_svc</code></td>
+<td><code>cache:options:paper_trades</code>, <code>:paper_analyze</code></td>
+</tr>
+<tr>
+<td><strong>Paper Account</strong></td>
+<td><code>options_svc</code></td>
+<td><code>cache:options:paper_account</code>, <code>:paper_analytics</code></td>
+</tr>
+<tr>
+<td><strong>Rescue</strong></td>
+<td><code>options_svc</code></td>
+<td><code>cache:options:rescue:&lt;position_id&gt;</code>, <code>:rescue_summary</code></td>
+</tr>
+<tr>
+<td><strong>Trade Analyzer</strong></td>
+<td><code>trade_svc</code> :8213</td>
+<td><code>cache:trade:analysis</code>, <code>:deepdive</code>, <code>:deepdive_query</code></td>
+</tr>
+<tr>
+<td><strong>Claude Trades</strong></td>
+<td><code>driver_svc</code> :8214 decides, <code>options_svc</code> executes</td>
+<td><code>cache:driver:autonomous</code>, <code>:control</code>, <code>cache:options:driver_paper_account</code>, <code>:driver_paper_perf</code></td>
+</tr>
+<tr>
+<td><strong>Portfolio</strong></td>
+<td><code>portfolio_svc</code> :8212</td>
+<td><code>cache:portfolio:positions</code></td>
+</tr>
+<tr>
+<td><strong>EOD Report</strong></td>
+<td>none — pure Tier-1 reader</td>
+<td>aggregates the <code>options:*</code> and <code>driver:*</code> keys</td>
+</tr>
+<tr>
+<td><strong>System Status</strong></td>
+<td>none — probes <code>/health</code> directly</td>
+<td>reads every domain's <code>:ver</code> / <code>:ts</code> side keys</td>
+</tr>
+</tbody>
+</table>
 <hr />
 <h1 id="3-tier-overview">3-Tier Overview</h1>
 <pre><code>TIER 1  GUI (webgui, :8500)  ──enqueue command──▶  cmd:{domain}  (Redis Stream)

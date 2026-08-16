@@ -65,7 +65,10 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
   <div class="meta">WebGUI Trading with Schwab · Generated 2026-08-16</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
-<li><a href="#about-this-document">About this document</a></li>
+<li><a href="#about-this-document">About this document</a><ul>
+<li><a href="#finding-the-math-behind-a-screen">Finding the math behind a screen</a></li>
+</ul>
+</li>
 <li><a href="#prerequisites">Prerequisites</a><ul>
 <li><a href="#platform-and-runtime">Platform and runtime</a></li>
 <li><a href="#python-dependencies">Python dependencies</a></li>
@@ -168,6 +171,94 @@ usage see the <em>User Guide</em>; for the inter-service integration surface see
 place — e.g. <code>sentiment-dashboard/scoring/__init__.py:WEIGHTS</code> — that file
 governs; if you change it there, update this document.</p>
 </blockquote>
+<h2 id="finding-the-math-behind-a-screen">Finding the math behind a screen</h2>
+<p><strong>This document is organised by engine, not by menu</strong>, and deliberately so: one
+engine feeds several screens. The GEX chapter alone supplies Dealer Positioning,
+the Opportunity Board, Flow Alerts and Rescue's context reads — ordering by menu
+would mean writing the same formulas out four times and letting the copies drift.</p>
+<p>Use this map to get from a screen to its numbers. Menu order matches the rail.</p>
+<table>
+<thead>
+<tr>
+<th>Menu page</th>
+<th>Chapters that derive its numbers</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Dealer Positioning</strong></td>
+<td><em>GEX / Gamma</em> · <em>Black-Scholes &amp; the Simulator</em> (the Greeks behind charm and vanna)</td>
+</tr>
+<tr>
+<td><strong>Opportunity Board</strong></td>
+<td><em>GEX / Gamma</em> (the flip and flow series) · <em>Options Scoring</em> (its signal counts)</td>
+</tr>
+<tr>
+<td><strong>Flow Alerts</strong></td>
+<td><em>GEX / Gamma</em> (the premium series) · <em>Constants Appendix</em> (detector thresholds)</td>
+</tr>
+<tr>
+<td><strong>Market Dashboard</strong></td>
+<td><em>Architecture Overview</em> — the board normalizes and colours quotes rather than deriving anything</td>
+</tr>
+<tr>
+<td><strong>Sentiment</strong></td>
+<td><em>Sentiment Calculations</em>, including the composite blend, the intraday trend, and the blended market regime</td>
+</tr>
+<tr>
+<td><strong>Sector &amp; Industry</strong></td>
+<td><em>Sentiment Calculations</em> → <strong>Sector Performance</strong></td>
+</tr>
+<tr>
+<td><strong>Sector Rotation</strong> · <strong>RRG</strong></td>
+<td><em>Sentiment Calculations</em> → <strong>Rotation</strong></td>
+</tr>
+<tr>
+<td><strong>Momentum</strong></td>
+<td><em>Sentiment Calculations</em> (the nightly cascade; see also the cadence table)</td>
+</tr>
+<tr>
+<td><strong>Calculator</strong> · <strong>Simulator</strong></td>
+<td><em>Black-Scholes &amp; the Simulator</em></td>
+</tr>
+<tr>
+<td><strong>Market Scanner</strong></td>
+<td><em>Options Scoring</em> · <em>Technical Indicators</em></td>
+</tr>
+<tr>
+<td><strong>Strategy Finder</strong></td>
+<td><em>Options Scoring</em> (the Fit + Quality score)</td>
+</tr>
+<tr>
+<td><strong>Expected Move</strong></td>
+<td><em>Options Scoring</em> → <strong>Expected move and IV analysis</strong></td>
+</tr>
+<tr>
+<td><strong>Captured Signals</strong> · <strong>Paper Ledger</strong> · <strong>Paper Account</strong></td>
+<td><em>Options Scoring</em> (entry quality) · <em>Rescue Tested Trades</em> (the management rules)</td>
+</tr>
+<tr>
+<td><strong>Rescue</strong></td>
+<td><em>Rescue Tested Trades</em></td>
+</tr>
+<tr>
+<td><strong>Trade Analyzer</strong></td>
+<td><em>Trade Analyzer</em> · <em>Technical Indicators</em></td>
+</tr>
+<tr>
+<td><strong>Claude Trades</strong></td>
+<td>Its risk clamping is pure code, not a formula — see the <em>API / Developer Reference</em>, <strong>Driver service</strong></td>
+</tr>
+<tr>
+<td><strong>Portfolio</strong></td>
+<td><em>Portfolio Analytics</em></td>
+</tr>
+<tr>
+<td><strong>EOD Report</strong></td>
+<td>Aggregation only; it computes nothing of its own</td>
+</tr>
+</tbody>
+</table>
 <hr />
 <h1 id="prerequisites">Prerequisites</h1>
 <p>Everything required to run the stack successfully. Items marked <strong>Required</strong> must

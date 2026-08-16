@@ -16,6 +16,36 @@ usage see the *User Guide*; for the inter-service integration surface see the
 > place — e.g. `sentiment-dashboard/scoring/__init__.py:WEIGHTS` — that file
 > governs; if you change it there, update this document.
 
+## Finding the math behind a screen
+
+**This document is organised by engine, not by menu**, and deliberately so: one
+engine feeds several screens. The GEX chapter alone supplies Dealer Positioning,
+the Opportunity Board, Flow Alerts and Rescue's context reads — ordering by menu
+would mean writing the same formulas out four times and letting the copies drift.
+
+Use this map to get from a screen to its numbers. Menu order matches the rail.
+
+| Menu page | Chapters that derive its numbers |
+|---|---|
+| **Dealer Positioning** | *GEX / Gamma* · *Black-Scholes & the Simulator* (the Greeks behind charm and vanna) |
+| **Opportunity Board** | *GEX / Gamma* (the flip and flow series) · *Options Scoring* (its signal counts) |
+| **Flow Alerts** | *GEX / Gamma* (the premium series) · *Constants Appendix* (detector thresholds) |
+| **Market Dashboard** | *Architecture Overview* — the board normalizes and colours quotes rather than deriving anything |
+| **Sentiment** | *Sentiment Calculations*, including the composite blend, the intraday trend, and the blended market regime |
+| **Sector & Industry** | *Sentiment Calculations* → **Sector Performance** |
+| **Sector Rotation** · **RRG** | *Sentiment Calculations* → **Rotation** |
+| **Momentum** | *Sentiment Calculations* (the nightly cascade; see also the cadence table) |
+| **Calculator** · **Simulator** | *Black-Scholes & the Simulator* |
+| **Market Scanner** | *Options Scoring* · *Technical Indicators* |
+| **Strategy Finder** | *Options Scoring* (the Fit + Quality score) |
+| **Expected Move** | *Options Scoring* → **Expected move and IV analysis** |
+| **Captured Signals** · **Paper Ledger** · **Paper Account** | *Options Scoring* (entry quality) · *Rescue Tested Trades* (the management rules) |
+| **Rescue** | *Rescue Tested Trades* |
+| **Trade Analyzer** | *Trade Analyzer* · *Technical Indicators* |
+| **Claude Trades** | Its risk clamping is pure code, not a formula — see the *API / Developer Reference*, **Driver service** |
+| **Portfolio** | *Portfolio Analytics* |
+| **EOD Report** | Aggregation only; it computes nothing of its own |
+
 ---
 
 # Prerequisites
