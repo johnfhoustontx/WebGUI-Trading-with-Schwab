@@ -537,12 +537,21 @@ def _view_name(value):
     return str(value)
 
 
-def set_breadcrumb_leaf(label) -> None:
+def set_breadcrumb_leaf(label, refs=None) -> None:
     """Show ``label`` as the last breadcrumb crumb, or hide the leaf when falsy.
 
-    Never raises and is a no-op before/without a mounted header, so a page may
-    call it unconditionally."""
-    refs = _breadcrumb_leaf
+    ``refs`` targets a SPECIFIC header's elements instead of whichever page built
+    the layout most recently. That matters because ``_breadcrumb_leaf`` is
+    module-level, and unlike the badge refs — which every client rewrites with the
+    same numbers, so the sharing is invisible — each page writes a DIFFERENT view
+    name here. With two tabs open the second page's build reassigns the module
+    state and the first tab's tab-change handler then writes into the second
+    tab's header: caught in prod, where the promote script opens a tab on the
+    Scanner and Dealer Positioning's header went on to read "› 0-DTE".
+
+    Never raises and is a no-op without a mounted header, so a page may call it
+    unconditionally."""
+    refs = _breadcrumb_leaf if refs is None else refs
     if not refs.get("label"):
         return
     text = str(label or "").strip()
@@ -574,13 +583,19 @@ def bind_breadcrumb_leaf(tabs, labeller=None, initial=None) -> None:
     names its default on the ``ui.tab_panels`` instead — four of the five do. That
     default reaches the tabs element through NiceGUI's BINDING, which propagates
     on a later cycle, so ``tabs.value`` is still None while the page is being
-    built and the crumb would sit blank until the first click."""
+    built and the crumb would sit blank until the first click.
+
+    The header elements are CAPTURED here rather than looked up when the handler
+    fires: ``_breadcrumb_leaf`` is module-level, so a second tab's page build
+    reassigns it and this page's handler would otherwise write its view name into
+    the other tab's header (see ``set_breadcrumb_leaf``)."""
     fmt = labeller or _view_name
-    set_breadcrumb_leaf(fmt(tabs.value if tabs.value is not None else initial))
+    refs = dict(_breadcrumb_leaf)
+    set_breadcrumb_leaf(fmt(tabs.value if tabs.value is not None else initial), refs)
 
     @guard
     def _sync(e) -> None:
-        set_breadcrumb_leaf(fmt(e.value))
+        set_breadcrumb_leaf(fmt(e.value), refs)
 
     tabs.on_value_change(_sync)
 

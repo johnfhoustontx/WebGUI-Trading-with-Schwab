@@ -1267,6 +1267,44 @@ def test_bind_breadcrumb_leaf_takes_an_initial_for_bare_tabs():
     assert leaf.text == "Holdings"
 
 
+def test_two_open_tabs_do_not_write_into_each_others_breadcrumb():
+    """Caught in PROD, not by a test. `_breadcrumb_leaf` is module-level, so the
+    second page build reassigns it — and unlike the badge refs, where every client
+    writes the same numbers and the sharing is invisible, each page writes a
+    DIFFERENT view name here. The promote script opens a tab on the Scanner, and
+    Dealer Positioning's header then read "Markets > Dealer Positioning > 0-DTE".
+
+    So bind_breadcrumb_leaf must CAPTURE its own header elements rather than look
+    them up when the handler fires."""
+    from nicegui import ui
+
+    import main
+
+    # Tab A: Dealer Positioning, showing Gamma.
+    leaf_a, _c, _p = _mount_breadcrumb("/options/gamma")
+    with ui.card():
+        tabs_a = ui.tabs(value="GEX")
+    main.bind_breadcrumb_leaf(tabs_a, lambda v: {"GEX": "Gamma"}.get(v, str(v)))
+    assert leaf_a.text == "Gamma"
+
+    # Tab B builds later and takes over the module-level refs...
+    leaf_b, _c2, _p2 = _mount_breadcrumb("/")
+    with ui.card():
+        tabs_b = ui.tabs(value="0-DTE")
+    main.bind_breadcrumb_leaf(tabs_b)
+    assert leaf_b.text == "0-DTE"
+
+    # ...and now A switching view must still land on A's own header.
+    tabs_a.value = "Charm"
+    assert leaf_a.text == "Charm"
+    assert leaf_b.text == "0-DTE", "tab A wrote into tab B's breadcrumb"
+
+    # ...and B switching must not disturb A either.
+    tabs_b.value = "Swing"
+    assert leaf_b.text == "Swing"
+    assert leaf_a.text == "Charm"
+
+
 def test_view_name_reads_a_tab_element_as_well_as_a_string():
     """Rescue passes the tab OBJECT to ui.tab_panels, so the value can be the
     element rather than its name."""
