@@ -22,6 +22,13 @@ MANUALS = {
         "icon": "menu_book",
         "file": "user-guide/user-guide.html",
     },
+    "reference-guide": {
+        "title": "Reference Guide",
+        "desc": "What every tab and sub-tab does, why it matters and when to reach "
+                "for it — opening with a one-page orientation to the whole app.",
+        "icon": "explore",
+        "file": "reference-guide/reference-guide.html",
+    },
     "technical-reference": {
         "title": "Technical Reference",
         "desc": "How every number is derived — formulas, weights, thresholds, and "

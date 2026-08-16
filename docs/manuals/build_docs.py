@@ -35,6 +35,7 @@ HERE = Path(__file__).resolve().parent
 # Manual folder -> (markdown filename, doc title, doc subtitle)
 MANUALS = {
     "user-guide": ("user-guide.md", "WebGUI Trading with Schwab", "User Guide"),
+    "reference-guide": ("reference-guide.md", "WebGUI Trading with Schwab", "Reference Guide"),
     "technical-reference": ("technical-reference.md", "WebGUI Trading with Schwab", "Technical Reference"),
     "api-reference": ("api-reference.md", "WebGUI Trading with Schwab", "API / Developer Reference"),
 }

@@ -1,15 +1,22 @@
 # Manuals
 
-Generated documentation for the WebGUI Trading with Schwab stack. Three manuals,
+Generated documentation for the WebGUI Trading with Schwab stack. Four manuals,
 each authored once in Markdown and built into a styled **HTML** (online viewing,
 and opens cleanly in Word) plus a native **.docx** (with a Word table-of-contents
 field and page numbers).
 
 | Manual | Audience | Folder |
 |--------|----------|--------|
-| **User Guide** | End users operating the app | `user-guide/` |
+| **User Guide** | End users operating the app — task by task | `user-guide/` |
+| **Reference Guide** | End users — what each tab/sub-tab is for, why it matters, when to use it | `reference-guide/` |
 | **Technical Reference** | Maintainers — all calculations, formulas, weights, cadences | `technical-reference/` |
 | **API / Developer Reference** | Developers — contracts, bus API, service commands, proxy endpoints | `api-reference/` |
+
+The User Guide and the Reference Guide are deliberately different documents: the
+User Guide answers *how do I do this*, the Reference Guide answers *what is this
+for and when should I open it*. Both are written for a reader with moderate
+markets/options knowledge, and the Reference Guide cites external sources for the
+concepts the app assumes but never teaches.
 
 Each folder contains `<name>.md` (the source), `<name>.html`, and `<name>.docx`.
 

@@ -204,6 +204,11 @@ that chime and hit your phone, kept somewhere you can actually read them.
 - **Unusual activity** — one contract traded far more than its open interest.
 - **Gamma flip** — spot crossed the dealer gamma flip, so dealer hedging starts
   damping the move instead of amplifying it (or the reverse).
+- **Big delta** — one contract carries an outsized share of that symbol's whole
+  directional exposure; the **Share** column is how big a share.
+
+None of these can tell a **buy** from a **sell** — Schwab publishes no options
+tape — so read every row as "something large happened here", not as a direction.
 
 **Age** tells you whether this just happened or is this morning's news. Filter by
 type or symbol, and **click any row** to open Dealer Positioning for that symbol.
@@ -243,7 +248,9 @@ Trades you sent by hand live on **Paper Ledger**.
 
 - **Cards** — equity, cash, P&L, open count, engine status.
 - **Run entry / manage cycle** — open new positions from captured signals, or
-  re-price and auto-close existing ones (this also runs every 5 minutes on its own).
+  re-price and auto-close existing ones. This also runs on its own **at the top of
+  each hour, 09:00–14:00 CT** (there is no 15:00 run) — so a target hit at 09:15 is
+  acted on at 10:00 unless you press **Run manage cycle** yourself.
 - **Reset** sets a new starting balance.
 """,
     "/sentiment": """
@@ -385,7 +392,10 @@ spreads, code-enforced guardrails cap the risk. Nothing goes to a live account.
 - **Enable / Disable** — turn the autonomous trader on or off.
 - **STOP** — halt new trades for the rest of the day (open positions keep managing).
 - **Run now** — fire one decision checkpoint immediately.
-- **Day P&L** progresses toward the $500 target; the decision log shows what it did.
+- **Day P&L** progresses toward the day's target. That target is **not fixed**: the
+  base is $500, ratcheted against the month-to-date pace — up to $1,000 when behind,
+  down to $250 when ahead — so the number in the tile moves day to day. A $1,500
+  daily loss halts new entries. The decision log shows what it did and why.
 - **Performance** — the driver's closed trades and realized P&L (win rate, profit
   factor, P&L by symbol/strategy). **Refresh** reprices now.
 """,
@@ -463,6 +473,8 @@ Controls the alert chimes, notifications, the ticker, and the app's look.
 Links to the full documentation (each opens in a new tab).
 
 - **User Guide** — how to use everything.
+- **Reference Guide** — what each tab and sub-tab is *for*, why it matters and when
+  to open it. Start with its one-page summary.
 - **Technical Reference** — the math behind every number.
 - **API / Developer Reference** — for developers extending the app.
 """,
