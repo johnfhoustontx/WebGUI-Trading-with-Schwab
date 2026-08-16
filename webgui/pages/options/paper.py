@@ -15,6 +15,7 @@ result via ``ui.notify`` when it lands. Dialogs (the close debit input) stay
 client-side (input collection only). Graceful-empty when the service is cold.
 """
 import bus_client
+from pages import busy as _busy
 from nicegui import ui
 
 from pages.ui_guard import guard
@@ -319,7 +320,8 @@ def render():
     # Analyze-button popup (row-click analyses update the panel silently).
     state = {"sel_id": None, "live": {}, "analyze_popup_for": None}
 
-    with ui.row().classes("w-full no-wrap gap-4 items-start"):
+    ledger_row = ui.row().classes("w-full no-wrap gap-4 items-start")
+    with ledger_row:
         with ui.column().classes("flex-grow min-w-0"):
             # No selection checkbox — clicking a row selects it (drives the detail
             # panel + the action buttons below). dense + .paper-table = Scanner-like
@@ -396,8 +398,13 @@ def render():
                            {"type": "paper_analyze", "args": {"trade_id": trade_id}})
         status.text = f"Analyzing {symbol} live…" if symbol else "Analyzing live…"
 
+    # Reload / manage / delete all round-trip through the service; until the new
+    # payload lands the table still shows the pre-action state.
+    ledger_busy = _busy.build_busy(ledger_row, "Refreshing the ledger…")
+
     def _populate(pt):
         """Paint the ledger table from the cached paper-trades view."""
+        ledger_busy.hide()
         pt = pt or {}
         trades = pt.get("trades") or []
         raw_by_id.clear()
@@ -445,6 +452,7 @@ def render():
     @guard
     def _reload():
         bus_client.request("options", {"type": "paper_reload"})
+        ledger_busy.show()
         ui.notify("Reloading paper trades…")
         status.text = "Reloading…"
 

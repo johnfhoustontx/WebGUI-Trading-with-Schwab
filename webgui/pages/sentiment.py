@@ -26,6 +26,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import bus_client
+from pages import busy as _busy
 from pages.rings import ring_svg
 from pages.regime_mix import (REGIME_COLORS, REGIME_LABELS, REGIME_ORDER,
                               regime_mix_svg)
@@ -1103,6 +1104,8 @@ def render():
     # — the intraday graphs, the Components popup, the status bar and Refresh.
     # One container, repainted by ``console_page.apply`` from ``_apply``.
     console_root = console_page.render()
+    # Refresh refetches the composite (and, on the hour, ~24 sector calls).
+    console_busy = _busy.build_busy(console_root, "Refreshing sentiment…")
 
     # The two press-and-hold popups the console's cards point at. Everything
     # ELSE that used to sit here — the two Day/Week/Month rings, the 1x4 Signals
@@ -1198,6 +1201,7 @@ def render():
         return rotation_value, sector_value
 
     def _apply():
+        console_busy.hide()
         live = state.get("live")
         snaps = state["snaps"]
         if not live and not snaps:
@@ -1298,6 +1302,7 @@ def render():
     @guard
     def _request_refresh():
         bus_client.request("sentiment", {"type": "refresh"})
+        console_busy.show()
         ui.notify("Refresh requested")
 
     from datetime import timedelta

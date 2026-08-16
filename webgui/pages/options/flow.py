@@ -269,6 +269,7 @@ def render():
     import bus_client
     from nicegui import run, ui
 
+    from pages import busy as _busy
     from pages.ui_guard import guard, guard_async
 
     from .handoff import send_to_gamma
@@ -291,16 +292,23 @@ def render():
                     .classes("w-40").props("dense outlined")
 
             status = ui.label("Waiting for the options service…").classes(EYEBROW)
-            table = ui.table(columns=flow_columns(), rows=[], row_key="id",
-                             pagination={"rowsPerPage": 0}) \
-                .classes("w-full flow-table").props("dense")
+            table_box = ui.element("div").classes("w-full")
+            with table_box:
+                table = ui.table(columns=flow_columns(), rows=[], row_key="id",
+                                 pagination={"rowsPerPage": 0}) \
+                    .classes("w-full flow-table").props("dense")
             table.add_slot("body-cell-side", _TONE_SLOT)
             table.add_slot("body-cell-text", _TONE_SLOT)
             table.add_slot("body-cell-share", _SHARE_SLOT)
 
+    # Today's alerts arrive as one payload; until it lands an empty table reads as
+    # "a quiet session" rather than "not loaded yet".
+    table_busy = _busy.build_busy(table_box, "Loading today's alerts…")
+
     def _apply_filters():
         table.rows = filter_rows(state["rows"], state["kinds"], state["symbol"])
         table.update()
+        table_busy.hide()
 
     def _tick_age():
         now = _dt.datetime.now(tz=_CT_TZ)
@@ -357,4 +365,6 @@ def render():
     if payload:
         state["version"] = version
         _paint(payload)
+    else:
+        table_busy.show()
     ui.timer(2.0, _poll)

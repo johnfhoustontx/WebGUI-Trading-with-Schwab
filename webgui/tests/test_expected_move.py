@@ -311,6 +311,15 @@ def _find(card, cls, label):
     raise AssertionError(f"no {cls.__name__} labeled {label!r} in the built page")
 
 
+def _page_polls(callbacks):
+    """The PAGE's own timer callbacks, excluding the busy spinner's watchdog.
+
+    ``pages/busy.py`` mounts a 1s deadline watchdog per spinner; it is not a cache
+    poll and must not be mistaken for one when a test reaches for "the poll"."""
+    return [c for c in callbacks
+            if not getattr(c, "__qualname__", "").startswith("build_busy")]
+
+
 def _make_capturing_timer(sink):
     """Build a ``ui.timer`` stand-in that appends its callback to ``sink`` —
     the real ``Timer`` defers/never runs its callback under plain pytest (no
@@ -352,8 +361,12 @@ def test_symbol_switch_same_expiry_forces_redraw(monkeypatch):
     with ui.card() as card:
         em.render()
 
-    assert len(captured_callbacks) == 1, "expected exactly ONE coalesced poll timer"
-    poll = captured_callbacks[0]
+    # The invariant is one coalesced POLL, not one timer on the page: the inline
+    # busy spinner owns a watchdog timer of its own (pages/busy.py), which is
+    # unrelated to the cache polling this test is about.
+    polls = _page_polls(captured_callbacks)
+    assert len(polls) == 1, "expected exactly ONE coalesced poll timer"
+    poll = polls[0]
 
     symbol_in = _find(card, ui.input, "Symbol")
     expiry_sel = _find(card, ui.select, "Expiry")
@@ -486,7 +499,7 @@ def test_strike_defaults_to_nearest_spot_no_handoff(monkeypatch):
     with ui.card() as card:
         em.render()
 
-    poll = captured_callbacks[0]
+    poll = _page_polls(captured_callbacks)[0]
     expiry_sel = _find(card, ui.select, "Expiry")
     strike_sel = _find(card, ui.select, "Strike (optional)")
 
@@ -532,7 +545,7 @@ def test_handoff_multileg_survives_chain_auto_select_strike(monkeypatch):
     with ui.card() as card:
         em.render()
 
-    poll = captured_callbacks[0]
+    poll = _page_polls(captured_callbacks)[0]
     strike_sel = _find(card, ui.select, "Strike (optional)")
     lookback_sel = _find(card, ui.select, "Look-back")
 

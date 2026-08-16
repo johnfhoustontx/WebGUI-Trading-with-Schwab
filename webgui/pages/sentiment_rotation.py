@@ -17,6 +17,7 @@ command, and a fetch-free version-poll ``ui.timer`` that repaints when the bus
 cache version changes.
 """
 import bus_client
+from pages import busy as _busy
 from pages.options.theme import BTN_3D
 from pages.ui_guard import guard, guard_async  # noqa: F401
 
@@ -291,9 +292,12 @@ def render():
                     ui.label(f"{r.get('rs_momentum'):.2f}").classes(f"w-[{QCOL_W['rs_momentum']}px]")
                     ui.label(str(r.get("quadrant") or "")).classes(f"w-[{QCOL_W['quadrant']}px]")
                     ui.label(str(r.get("direction") or "")).classes(f"w-[{QCOL_W['direction']}px]")
+    rot_busy = _busy.build_busy(table_box, "Refreshing rotation…")
+
 
     @guard
     def _apply():
+        rot_busy.hide()
         rot = bus_client.read("sentiment:rotation") or {}
         a = rot.get("assessment")
         weights = rot.get("weights") or {}
@@ -316,6 +320,7 @@ def render():
     def _request_refresh():
         bus_client.request("sentiment", {"type": "refresh_rotation"})
         ui.notify("Refresh requested")
+        rot_busy.show()
 
     @guard
     def _maybe_repaint():

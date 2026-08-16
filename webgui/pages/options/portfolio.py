@@ -14,6 +14,7 @@ sentiment code; the page does no engine call). A fetch-free version-poll
 the service is cold / no account exists yet).
 """
 import bus_client
+from pages import busy as _busy
 from nicegui import ui
 
 from pages.ui_guard import guard
@@ -156,29 +157,31 @@ def render():
             .props("no-caps").classes(BTN_3D_DANGER) \
             .tooltip("Reset the paper account to a starting balance.")
 
-    cards_box = ui.row().classes("gap-3 flex-wrap")
-    ui.label("Open positions").classes("text-subtitle1 mt-2")
-    pos_table = ui.table(columns=position_columns(), rows=[], row_key="id").classes("w-full")
-    # Symbol cell gets a colored left-border + faint tint when the position is
-    # at-risk (rescue_state tested/critical, from the manage-cycle overlay).
-    pos_table.add_slot('body-cell-symbol', r'''
-      <q-td :props="props">
-        <span v-if="props.row._rescue_class" :class="props.row._rescue_class + ' pl-1.5'">
-          {{ props.value }}
-        </span>
-        <span v-else>{{ props.value }}</span>
-      </q-td>
-    ''')
-    ui.label("Fills log (last 100)").classes("text-subtitle1 mt-2")
-    ord_table = ui.table(columns=order_columns(), rows=[], row_key="order_id").classes("w-full")
-    # Side as a Deep Slate pill (SELL green / BUY red).
-    ord_table.add_slot('body-cell-side', r'''
-      <q-td :props="props">
-        <q-badge :class="props.row._side_class" :label="props.value"/>
-      </q-td>
-    ''')
-    with ui.row().classes("w-full justify-end"):
-        status = ui.label("").classes("opacity-60 text-xs")
+    account_box = ui.column().classes("w-full gap-0")
+    with account_box:
+        cards_box = ui.row().classes("gap-3 flex-wrap")
+        ui.label("Open positions").classes("text-subtitle1 mt-2")
+        pos_table = ui.table(columns=position_columns(), rows=[], row_key="id").classes("w-full")
+        # Symbol cell gets a colored left-border + faint tint when the position is
+        # at-risk (rescue_state tested/critical, from the manage-cycle overlay).
+        pos_table.add_slot('body-cell-symbol', r'''
+          <q-td :props="props">
+            <span v-if="props.row._rescue_class" :class="props.row._rescue_class + ' pl-1.5'">
+              {{ props.value }}
+            </span>
+            <span v-else>{{ props.value }}</span>
+          </q-td>
+        ''')
+        ui.label("Fills log (last 100)").classes("text-subtitle1 mt-2")
+        ord_table = ui.table(columns=order_columns(), rows=[], row_key="order_id").classes("w-full")
+        # Side as a Deep Slate pill (SELL green / BUY red).
+        ord_table.add_slot('body-cell-side', r'''
+          <q-td :props="props">
+            <q-badge :class="props.row._side_class" :label="props.value"/>
+          </q-td>
+        ''')
+        with ui.row().classes("w-full justify-end"):
+            status = ui.label("").classes("opacity-60 text-xs")
 
     # ── Analytics: realized equity curve + MAE/MFE (scanner-baseline book) ────
     # Same builders as the driver monitor, so this book (auto-trades every captured
@@ -206,8 +209,13 @@ def render():
     # Last-seen bus cache versions for the fetch-free repaint timers.
     seen = {"version": None, "analytics": None}
 
+    # Refresh / manage / reset all round-trip through the service; until the new
+    # payload lands the cards and tables show the pre-action account.
+    account_busy = _busy.build_busy(account_box, "Refreshing the account…")
+
     def _populate(pa):
         """Paint the cards + tables from the cached paper-account view."""
+        account_busy.hide()
         pa = pa or {}
         snap = pa.get("snapshot")
         has_account = pa.get("has_account")
@@ -233,6 +241,7 @@ def render():
     @guard
     def _reload():
         bus_client.request("options", {"type": "refresh_paper"})
+        account_busy.show()
         ui.notify("Reloading paper account…")
         status.text = "Reloading…"
 

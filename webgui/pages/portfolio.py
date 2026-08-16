@@ -16,6 +16,7 @@ persists across navigation (single-user). The pure display builders
 unit-tested.
 """
 import bus_client
+from pages import busy as _busy
 import page_help as _page_help
 from nicegui import ui
 
@@ -155,7 +156,8 @@ def render():
     else:
         tabs = _build_tabs()
     _shell.bind_breadcrumb_leaf(tabs, initial="Holdings")   # default set on tab_panels
-    with ui.tab_panels(tabs, value="Holdings").classes("w-full flush-panels"):
+    panels = ui.tab_panels(tabs, value="Holdings").classes("w-full flush-panels")
+    with panels:
         with ui.tab_panel("Holdings"):
             holdings_tbl = ui.table(columns=HOLDINGS_COLS, rows=[],
                                     row_key="symbol").classes("w-full").props("dense")
@@ -169,6 +171,10 @@ def render():
                 .classes("text-xs opacity-60 q-mt-sm")
             detail = ui.label(suggestion_text({}, None)) \
                 .classes("text-sm whitespace-pre-wrap")
+
+    # Refresh rebuilds the whole model service-side (holdings + baselines + the
+    # four comparisons), so all three tabs are stale until it lands.
+    tabs_busy = _busy.build_busy(panels, "Rebuilding the portfolio…")
 
     def _show_detail():
         detail.text = suggestion_text(
@@ -184,6 +190,7 @@ def render():
     perf_tbl.on("rowClick", _on_perf_click)
 
     def _repaint():
+        tabs_busy.hide()
         p = state["payload"] or {}
         holdings_tbl.rows = p.get("holdings_rows") or []
         holdings_tbl.update()
@@ -203,6 +210,7 @@ def render():
     @guard
     def _refresh():
         bus_client.request("portfolio", {"type": "refresh"})
+        tabs_busy.show()
         status_lbl.text = "Refreshing…"
 
     refresh_btn.on_click(_refresh)

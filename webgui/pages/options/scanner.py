@@ -37,6 +37,7 @@ import datetime as dt
 from zoneinfo import ZoneInfo
 
 import bus_client
+from pages import busy as _busy
 import page_help as _page_help
 from nicegui import run, ui
 
@@ -625,7 +626,8 @@ def render():
             with ui.row().classes("w-full justify-end"):
                 scan_btn = ui.button("Run scan", icon="play_arrow", color=None) \
                     .props("no-caps").classes(BTN_3D)
-            with ui.tab_panels(tabs, value=tab_0dte).classes("w-full scan-panels"):
+            scan_panels = ui.tab_panels(tabs, value=tab_0dte).classes("w-full scan-panels")
+            with scan_panels:
                 with ui.tab_panel(tab_0dte):
                     table_0dte = _table(signal_columns())
                 with ui.tab_panel(tab_swing):
@@ -636,6 +638,9 @@ def render():
             # something is off — the day-union note (stale date / day cap).
             status = ui.label("").classes("opacity-60 text-sm q-mt-sm")
             day_msg = ui.label("").classes("text-sm text-[#ffa726]")
+            # A rescan takes tens of seconds; the tables meanwhile show the
+            # PREVIOUS scan, which is indistinguishable from a finished one.
+            scan_busy = _busy.build_busy(scan_panels, "Scanning…")
         # Narrower detail panel here (vs the 360px default) so the compacted
         # signal table has room to show all columns without horizontal scroll.
         detail_panel = detail.render(width=290)
@@ -737,6 +742,7 @@ def render():
             tab.props(f'label="{tab_label(base, len(rows[key]) if have else None)}"')
             tab.update()
 
+        scan_busy.hide()
         status.text = status_line(live)
         day_msg.text = day_note(built["day_env"], today)
         day_msg.set_visibility(bool(day_msg.text))
@@ -748,6 +754,7 @@ def render():
     def _request_scan():
         bus_client.request("options", {"type": "rescan"})
         ui.notify("Scan requested")
+        scan_busy.show()
 
     scan_btn.on_click(_request_scan)
 

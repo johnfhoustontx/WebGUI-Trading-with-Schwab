@@ -9,6 +9,7 @@ stockChart — an in-place ``chart.update()`` throws in the stock module and
 silently freezes an open page.
 """
 import bus_client
+from pages import busy as _busy
 from pages.options.theme import BTN_3D
 from pages.ui_guard import guard
 
@@ -459,9 +460,12 @@ def render(level="industry"):
         excluded = (payload or {}).get("excluded") or []
         footer.text = excluded_text(excluded)
         footer.tooltip(excluded_tooltip(excluded))
+    mom_busy = _busy.build_busy(board, "Recomputing momentum…")
+
 
     @guard
     def _apply():
+        mom_busy.hide()
         state["payload"] = bus_client.read(VIEW) or {}
         _paint(state["payload"])
 
@@ -474,6 +478,7 @@ def render(level="industry"):
     def _request_refresh():
         bus_client.request("sentiment", {"type": "refresh_momentum"})
         ui.notify("Momentum refresh requested")
+        mom_busy.show()
 
     @guard
     def _maybe_repaint():

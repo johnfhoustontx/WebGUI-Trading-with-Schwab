@@ -14,6 +14,7 @@ enqueues a ``cmd:sentiment`` ``refresh_rotation`` command, and a fetch-free
 version-poll ``ui.timer``.
 """
 import bus_client
+from pages import busy as _busy
 from pages.options.theme import BTN_3D
 from pages.sentiment_rotation import (
     SENT_TEXT_CLASSES, headline_parts, regime_text_class, rrg_scatter_figure,
@@ -53,9 +54,12 @@ def render():
             # Hover-isolation is native (states.inactive in the figure) — no
             # client→server hover round-trip to wire.
             ui.highchart(rrg_scatter_figure(a)).classes("w-full")
+    rrg_busy = _busy.build_busy(rrg_box, "Refreshing rotation…")
+
 
     @guard
     def _apply():
+        rrg_busy.hide()
         rot = bus_client.read("sentiment:rotation") or {}
         a = rot.get("assessment")
         weights = rot.get("weights") or {}
@@ -80,6 +84,7 @@ def render():
     def _request_refresh():
         bus_client.request("sentiment", {"type": "refresh_rotation"})
         ui.notify("Refresh requested")
+        rrg_busy.show()
 
     @guard
     def _maybe_repaint():

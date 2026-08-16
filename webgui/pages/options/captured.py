@@ -16,6 +16,7 @@ hits via ``ui.notify`` when they land. The close dialog stays client-side (input
 collection only). Graceful-empty when the service is cold.
 """
 import bus_client
+from pages import busy as _busy
 from nicegui import ui
 
 from pages.ui_guard import guard
@@ -265,8 +266,10 @@ def render():
                           on_click=lambda: _reprice()).props("no-caps").classes(BTN_PRIMARY)
                 ui.button("Close selected", icon="check_circle", color=None,
                           on_click=lambda: _close()).props("no-caps").classes(BTN_3D_DANGER)
-            table = ui.table(columns=captured_columns(), rows=[],
-                             row_key="id").classes("w-full captured-table").props("dense")
+            table_box = ui.element("div").classes("w-full")
+            with table_box:
+                table = ui.table(columns=captured_columns(), rows=[],
+                                 row_key="id").classes("w-full captured-table").props("dense")
             status = ui.label("").classes("opacity-60 text-xs self-end")
             # No selection checkbox: clicking a row selects it (detail panel +
             # Close-selected) and the Rec cell shows a blue left-accent. The symbol
@@ -312,8 +315,13 @@ def render():
         for row in table.rows:
             row["_selected"] = (row.get("id") == sel)
 
+    # "Refresh marks (live)" reprices every captured signal against fresh chains —
+    # seconds of work, during which the table shows the OLD marks.
+    table_busy = _busy.build_busy(table_box, "Repricing…")
+
     def _populate(cap):
         """Paint the signals table from the cached captured view."""
+        table_busy.hide()
         cap = cap or {}
         sigs = cap.get("signals") or []
         raw_by_id.clear()
@@ -355,12 +363,14 @@ def render():
     @guard
     def _reload():
         bus_client.request("options", {"type": "captured_reload"})
+        table_busy.show()
         ui.notify("Reloading captured signals…")
         status.text = "Reloading…"
 
     @guard
     def _reprice():
         bus_client.request("options", {"type": "captured_reprice"})
+        table_busy.show()
         ui.notify("Repricing open signals…")
         status.text = "Repricing…"
 

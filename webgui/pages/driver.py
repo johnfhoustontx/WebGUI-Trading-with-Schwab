@@ -30,6 +30,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import bus_client
+from pages import busy as _busy
 from nicegui import run, ui
 
 from pages.ui_guard import guard, guard_async
@@ -664,6 +665,9 @@ def render():
 
     # ── Autonomous monitor + override ─────────────────────────────────────────
     monitor = ui.column().classes("w-full gap-3")
+    # A cycle runs the decider (a Claude call) and a manage reprices the book;
+    # both take seconds during which the monitor shows the previous state.
+    monitor_busy = _busy.build_busy(monitor, "Running…")
     # Busy-message line for the monitor's autonomous actions (enable/disable/stop/
     # cycle) + the performance Refresh below.
     status = ui.label("").classes("opacity-70 text-sm")
@@ -727,6 +731,7 @@ def render():
 
     # ── autonomous monitor render (rebuilt in place from cache:driver:*) ───────
     def _render_monitor():
+        monitor_busy.hide()
         monitor.clear()
         auto = state["auto"] or {}
         ctrl = state["ctrl"] or {}
@@ -927,6 +932,7 @@ def render():
     @guard
     def _do(cmd, busy_msg):
         bus_client.request("driver", {"type": cmd})
+        monitor_busy.show()
         status.text = busy_msg
 
     @guard
@@ -947,6 +953,7 @@ def render():
         # Force an immediate driver-account reprice + republish (options_svc) so the
         # closed-trade table refreshes now, not at the next 5-min manage tick.
         bus_client.request("options", {"type": "driver_paper_manage"})
+        monitor_busy.show("Repricing the driver book…")
         status.text = "Refreshing performance…"
 
     perf_btn.on_click(_refresh_perf)

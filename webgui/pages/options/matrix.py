@@ -11,6 +11,7 @@ import datetime as _dt
 from zoneinfo import ZoneInfo
 
 import bus_client
+from pages import busy as _busy
 from nicegui import run, ui
 
 from pages.ui_guard import guard_async
@@ -232,9 +233,11 @@ def render():
                 neutral_chip = ui.label("Neutral 0").classes(_SUM_NEUTRAL_CLASS)
                 sell_chip = ui.label("Sell 0").classes(_SUM_SELL_CLASS)
             status = ui.label("Waiting for the options service…").classes(EYEBROW)
-            table = ui.table(columns=matrix_columns(), rows=[], row_key="symbol",
-                             pagination={"rowsPerPage": 0}) \
-                .classes("w-full matrix-table").props("dense")
+            table_box = ui.element("div").classes("w-full")
+            with table_box:
+                table = ui.table(columns=matrix_columns(), rows=[], row_key="symbol",
+                                 pagination={"rowsPerPage": 0}) \
+                    .classes("w-full matrix-table").props("dense")
             table.add_slot("body-cell-symbol", _SYMBOL_SLOT)
             table.add_slot("body-cell-signal_label", _SIGNAL_SLOT)
             table.add_slot("body-cell-day_pct", _DAYPCT_SLOT)
@@ -242,6 +245,10 @@ def render():
             table.add_slot("body-cell-call_accel_disp", _CALL_SLOT)
             table.add_slot("body-cell-put_accel_disp", _PUT_SLOT)
             table.add_slot("body-cell-gex_regime", _REGIME_SLOT)
+
+    # A read-only board: the only wait is the FIRST payload, and until it lands an
+    # empty grid is indistinguishable from "every symbol is quiet".
+    board_busy = _busy.build_busy(table_box, "Loading the board…")
 
     state = {"version": None}
 
@@ -253,6 +260,7 @@ def render():
         neutral_chip.text = f"Neutral {summ['neutral']}"
         sell_chip.text = f"Sell {summ['sell']}"
         status.text = status_text(payload)
+        board_busy.hide()
 
     @guard_async
     async def _poll():
@@ -269,4 +277,6 @@ def render():
     if payload:
         state["version"] = version
         _paint(payload)
+    else:
+        board_busy.show()
     ui.timer(2.0, _poll)

@@ -17,6 +17,7 @@ a fetch-free version-poll ``ui.timer`` that repaints when the bus cache version
 changes.
 """
 import bus_client
+from pages import busy as _busy
 from pages.options.theme import BTN_3D
 from pages.sentiment import (
     BORDER_R, SENT_TEXT_CLASSES, industry_rows, pcr_text_class, pct_text_class,
@@ -157,7 +158,10 @@ def render():
         state["expanded"].clear()
         _render_sector_table()
 
+    sectors_busy = _busy.build_busy(sector_box, "Refreshing sectors…")
+
     def _apply():
+        sectors_busy.hide()
         sec = state["sector"]
         if not sec:
             summary_lbl.text = ""
@@ -175,6 +179,7 @@ def render():
     def _request_refresh():
         bus_client.request("sentiment", {"type": "refresh"})
         ui.notify("Refresh requested")
+        sectors_busy.show()
 
     @guard
     def _maybe_repaint():

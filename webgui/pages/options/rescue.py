@@ -578,6 +578,7 @@ def render():
     they never cross-wire. Mirrors ``calculator.py`` / ``simulator.py`` idioms
     (``bus_client.request`` / ``read`` / ``read_version`` + ``@guard``)."""
     import bus_client
+    from pages import busy as _busy
     from nicegui import run, ui
 
     from pages.ui_guard import guard, guard_async
@@ -762,6 +763,10 @@ def render():
                     payoff_chart = ui.highchart(_payoff_figure(None)).classes("w-full")
                     payoff_chart.set_visibility(False)
                     cards_col = ui.column().classes("w-full gap-3")
+                    # Computing an advisory reprices every leg against fresh
+                    # chains; until it lands the previous position's menu is
+                    # still on screen under the new selection.
+                    board_busy = _busy.build_busy(cards_col, "Building the rescue menu…")
 
         # ── AD-HOC PANEL: Calculator-style leg editor (left) + advisory (right) ─
         with ui.tab_panel(tab_adhoc):
@@ -792,6 +797,7 @@ def render():
                         adhoc_spinner = ui.spinner(size="sm")
                         adhoc_spinner.set_visibility(False)
                     adhoc_cards_col = ui.column().classes("w-full gap-3")
+                    adhoc_busy = _busy.build_busy(adhoc_cards_col, "Building the rescue menu…")
 
     # ── at-risk board ────────────────────────────────────────────────────────
     def _render_at_risk():
@@ -843,10 +849,12 @@ def render():
         state["board_source"] = src.get("source")
         advisory_head.text = f"Computing rescue options for {src.get('symbol') or rid}…"
         advisory_spinner.set_visibility(True)
+        board_busy.hide()
         cards_col.clear()
         # Enqueue the rescue command — args shape matches handlers'
         # command.args["position_id"]. ``source`` routes paper vs captured
         # (captured → advisory-only menu, no Apply).
+        board_busy.show()
         bus_client.request("options", {"type": "rescue",
                                        "args": {"position_id": rid,
                                                 "source": state["board_source"] or "paper"}})
@@ -971,7 +979,9 @@ def render():
         state["adhoc_advisory_ver"] = bus_client.read_version("options:rescue:adhoc")
         adhoc_head.text = f"Computing rescue options for {spec['symbol']}…"
         adhoc_spinner.set_visibility(True)
+        adhoc_busy.hide()
         adhoc_cards_col.clear()
+        adhoc_busy.show()
         bus_client.request("options", {"type": "rescue_adhoc", "args": {"spec": spec}})
 
     adhoc_load_btn.on_click(_adhoc_load)

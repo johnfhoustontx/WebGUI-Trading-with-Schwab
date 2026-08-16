@@ -231,6 +231,8 @@ def render():
 
     import bus_client
 
+    from pages import busy as _busy
+
     from pages.ui_guard import guard
 
     from . import handoff
@@ -277,8 +279,13 @@ def render():
 
     # stockChart gives an ordinal x-axis (collapses non-trading-day gaps); the
     # stock module also provides candlestick + crosshair label boxes.
-    chart = ui.highchart(expected_move_figure({}), type="stockChart",
-                         extras=["stock"]).classes("w-full")
+    chart_box = ui.element("div").classes("w-full")
+    with chart_box:
+        chart = ui.highchart(expected_move_figure({}), type="stockChart",
+                             extras=["stock"]).classes("w-full")
+    # Both waits land here: loading a symbol's expirations, and computing the move
+    # itself. Until either returns the chart still shows the previous symbol.
+    chart_busy = _busy.build_busy(chart_box, "Loading…")
 
     def _current_legs():
         """The leg list for the CURRENT strike/type selection (may be empty)."""
@@ -330,6 +337,7 @@ def render():
         args = {**payload, "lookback": lookback_sel.value}
         bus_client.request("options", {"type": "expected_move", "args": args})
         status.text = f"Computing expected move for {payload['symbol']}…"
+        chart_busy.show(f"Computing expected move for {payload['symbol']}…")
 
     @guard
     def _draw():
@@ -359,6 +367,7 @@ def render():
             return
         bus_client.request("options", {"type": "em_chain", "args": {"symbol": sym}})
         status.text = f"Loading {sym} expirations…"
+        chart_busy.show(f"Loading {sym} expirations…")
 
     @guard
     def _strike_changed():
@@ -476,8 +485,10 @@ def render():
         if v["options:expected_move"] != state["ver"]:
             state["ver"] = v["options:expected_move"]
             _repaint(bus_client.read("options:expected_move"))
+            chart_busy.hide()
         if v["options:em_chain"] != state["chain_ver"]:
             _apply_chain(v["options:em_chain"])
+            chart_busy.hide()
 
     pending = handoff.take_pending_expected_move()
     if pending:
