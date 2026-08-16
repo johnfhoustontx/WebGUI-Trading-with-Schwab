@@ -87,3 +87,53 @@ def test_subtab_help_texts_are_plain_nonempty():
     # subtab_help() returns "" for an unknown tab (so pages can skip empty tooltips).
     assert page_help.subtab_help("/options/gamma", "nope") == ""
     assert page_help.subtab_help("/nope", "GEX") == ""
+
+
+# ── Drift guard (2026-08-16) ────────────────────────────────────────────────
+# The long-form guides are the app's most-read prose and the least likely to be
+# touched when a feature moves, so they rot silently. Every entry below was found
+# describing something the app no longer does. Each check names the CURRENT truth,
+# so re-introducing the old wording fails here rather than in front of a user.
+_REMOVED_CLAIMS = [
+    # The Markov Forecast card was removed from /trade; the help still laid out
+    # "three equal cards" and explained a forecast nobody could see.
+    ("/trade", "Markov"),
+    # /sentiment's four gauges became two Day/Week/Month rings, and the
+    # percent-stacked regime chart became a ranked membership panel.
+    ("/sentiment", "stacked chart"),
+    ("/sentiment", "30-day average"),
+    # The Scanner grew a third tab; the help still listed two.
+    ("/", "**0-DTE / Swing** —"),
+]
+
+
+def test_guides_do_not_describe_removed_features():
+    import page_help
+    stale = [(route, phrase) for route, phrase in _REMOVED_CLAIMS
+             if phrase in page_help.HELP_MD.get(route, "")]
+    assert not stale, f"help text describes features that no longer exist: {stale}"
+
+
+def test_trade_guide_matches_the_cards_the_page_renders():
+    """The specific drift that prompted this: the guide promised a card the page
+    stopped rendering in 2026-06."""
+    import pathlib
+
+    import page_help
+    src = (pathlib.Path(__file__).resolve().parents[1]
+           / "pages" / "trade.py").read_text(encoding="utf-8")
+    # Look for the BUILDERS, not the word: the only "Markov" left in trade.py is
+    # the comment recording why the card went, which is worth keeping.
+    rendered = [name for name in ("markov_band_chip(", "markov_metric_rows(",
+                                  "markov_drift_row(", "markov_forecast_figure(")
+                if name in src]
+    assert not rendered, f"trade.py renders a Markov card again ({rendered}) — update the guide"
+    assert "Markov" not in page_help.HELP_MD["/trade"]
+
+
+def test_scanner_guide_lists_every_subtab_it_has_help_for():
+    """SUBTAB_HELP is the authority on which tabs exist; the prose must agree."""
+    import page_help
+    guide = page_help.HELP_MD["/"]
+    for tab in page_help.SUBTAB_HELP["/"]:
+        assert tab in guide, f"the Market Scanner guide never mentions the {tab} tab"

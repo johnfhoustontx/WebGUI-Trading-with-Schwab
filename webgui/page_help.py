@@ -48,11 +48,14 @@ HELP_MD: dict[str, str] = {
     "/": """
 **Market Scanner — the simple version**
 
-Finds option **credit spreads** (you sell risk and collect cash up front) and
-scores each one **0–100** for quality.
+Finds option trades across the watchlist and scores each one **0–100** for
+quality — mostly **credit spreads** (you sell risk and collect cash up front),
+plus single-leg directional trades on their own tab.
 
-- **0-DTE / Swing** — the small tabs at the very top (under the page tabs):
-  trades expiring today vs over several days.
+- **0-DTE / Swing / Directional** — the small tabs at the very top (under the page
+  tabs): expiring today, over several days, and single-leg long/short calls and
+  puts. Directional only lists trades that clear a quality bar, so an empty tab
+  means "nothing qualified today", not a failure.
 - **Score chip & Grade** — greener/higher means better reward-vs-risk, higher
   probability of profit, and better trend fit. Work from the top down.
 - **Click a row** for full details; the row buttons send it to the Calculator,
@@ -71,6 +74,9 @@ family for it — directional, spreads, and neutral.
   |delta| is safer but pays less credit.
 - **Min credit %** — throw out trades that don't pay enough premium for the risk.
 - Raising deltas/credit → fewer but richer trades; lowering → more but lower quality.
+- Only candidates that clear a **quality bar** are listed. The status line says how
+  many were cut, which is what tells "everything failed the bar" apart from
+  "nothing was found at all".
 """,
     "/options/calculator": """
 **Calculator — the simple version**
@@ -98,9 +104,10 @@ accelerate price.
 
 - **Symbol dropdown** — pick the index or stock. The page **remembers** your last
   symbol when you come back, and switching symbols refreshes automatically.
-- **GEX / Charm / DEX / Vanna / Flow / Net Prem / Term** — the small tabs at the
-  very top (under the page tabs): different lenses on dealer positioning; the
-  **walls** mark likely support/resistance.
+- **Gamma / Charm / Delta / Vanna / Flow / Net Prem / Term** — the small tabs at
+  the very top (under the page tabs): different lenses on dealer positioning; the
+  **walls** mark likely support/resistance. The header names the one you're on,
+  e.g. "Markets › Dealer Positioning › Gamma".
 - **Bars + heat map** — show ±20 strikes around spot, so the size stays steady as
   the day moves. **Press and hold** the left mouse button on the heat map to read a
   strike's value (it follows the cursor while held); plain hovering shows nothing.
@@ -245,15 +252,24 @@ Trades you sent by hand live on **Paper Ledger**.
 A **0–10** read on market mood. It's **contrarian**: a high score means lots of
 fear, which can mean opportunity.
 
-- **Sentiment gauges** — today vs the 30-day average.
-- **Market Trend gauges** — a 0–100 direction (50 = neutral, 100 = strong bull).
+- **Sentiment ring** — three arcs on one dial: **Day** (right now), **Week** (the
+  last 5 sessions' average) and **Month** (the full history's average), so you can
+  see today against its own recent normal.
+- **Market Trend ring** — the same three horizons for direction, 0–100
+  (50 = neutral, 100 = strong bull).
+- A horizon with **no usable reading** draws its track and an em-dash rather than
+  a number. That is deliberate: a missing input used to render as a confident
+  value, and an empty arc is the one thing a needle cannot say.
 - **Components** — press and hold to see what's driving the score.
 - **Market Regime** — the *character* of the tape: **Balanced** (quiet, price
   pinned near its mean), **Trending**, **Breakout**, **Whipsaw** (plenty of
   movement, no progress) or **Stressed** (fear — high VIX, inverted term
-  structure). The stacked chart shows how much of each is in today's tape, so a
-  change of character shows up as the bands shifting gradually. When one regime
-  is taking over you'll see a line like "Balanced → Rallying · 60%".
+  structure). The panel below **ranks** the five by how much of today's tape each
+  one holds — a bar against the leader, a sparkline of its own session, and how
+  far it has moved since the open. The footer names the leader's **margin over the
+  runner-up**, which is the number that says whether the headline was nearly a
+  coin toss. When one regime is taking over you'll see a line like
+  "Balanced → Rallying · 60%".
 - **Direction on the regime** — Trending and Breakout also say *which way*:
   **Rallying** or **Firming** up, **Retreating** or **Softening** down, and
   **Breakdown** for a break to the downside. That word appears only when the
@@ -333,8 +349,7 @@ current market pays for chasing them. Recomputed **once a night**, not live.
 
 A **Buy / Hold / Sell** read on a single stock, for two horizons.
 
-- **Position (1–8 weeks)** vs **Investor (months+)** verdicts. These sit
-  side-by-side with the **Markov Forecast** as three equal cards.
+- **Position (1–8 weeks)** vs **Investor (months+)** verdicts, side by side.
 - **Position is now backtested** — instead of a hand-tuned score, it ranks the
   stock on factors that were *tested against real forward returns*, then places it in
   a **calibrated band**. The headline shows what that band has historically meant:
@@ -344,14 +359,11 @@ A **Buy / Hold / Sell** read on a single stock, for two horizons.
   factor's pull and the model's own track record (its out-of-sample accuracy). The
   old hand-tuned verdict is still there under **"Legacy heuristic"**.
 - **Investor (months+)** still shows a verdict with a score and its top reasons.
-- **Markov Forecast** — looks at where the Position score has historically *travelled*
-  and forecasts where it's likely to head: the colored bars show the odds of drifting
-  toward **BUY** or **SELL** over the next 5 / 10 / 20 days, and a small **tilt** nudges
-  the Position score up or down (the Buy/Hold/Sell **word** itself never changes — the
-  tilt is advisory).
 - **Hard gates (⛔)** — deal-breakers that override the score.
 - **MTF alignment / Momentum / Fundamentals** — the evidence behind the verdict.
-- Type a symbol and press **Analyze**.
+- **Deep Dive** opens a full technical + fundamental + options report in a new tab;
+  **AI Query** opens the same digest as a chat prompt you can copy.
+- Type a symbol and press **Analyze** (tabbing out of the field does it too).
 """,
     "/portfolio": """
 **Portfolio — the simple version**
@@ -393,7 +405,15 @@ A live grid of macro tickers, grouped into framed panels by category.
   for that name; the **BIG10** tile (in the Top 10 frame) shows the net of its 10
   members (the Mag-7 plus AVGO/PLTR/AMD). A dash means that name isn't in the
   collected universe.
-- **Auto-updates** roughly every 2 seconds during market hours.
+- **Ranked frames** — **Top 10**, **Sector SPDR**, **Thematic / Industry** and
+  **Countries** re-order themselves by the day's move, biggest gainer first, so
+  the leaders and laggards are always at the ends. Every other frame keeps its
+  curated order (SPY/DIA/QQQ/IWM; VIX before its tenors) because that layout is
+  itself information.
+- **Skin toggle** (top right) switches between the two board looks; your choice
+  is remembered.
+- **Auto-updates** every ~3 seconds during market hours, ~15 outside them —
+  futures trade nearly around the clock, so off-hours stays live.
 """,
     "/eod": """
 **EOD Report — the simple version**
@@ -410,7 +430,11 @@ Shows whether each part of the app is alive.
 
 - **Green/red cards** — Memurai, the Schwab gateway, your Schwab login, the six
   services, and the web app.
-- **Data freshness** — flags data that's gone stale.
+- **Data freshness** — flags data that's gone stale. A view is only judged when
+  its publisher is actually due to run: the **scanner** only scans during the
+  session, so overnight and at weekends its age is left alone rather than
+  reported as a fault. Everything that publishes round the clock is still checked
+  round the clock, with a longer allowance outside market hours.
 - **Restart** brings an offline piece back; **Authorize** re-logs into Schwab.
 """,
     "/settings": """
@@ -421,6 +445,8 @@ Controls the alert chimes, notifications, the ticker, and the app's look.
 - **Audio alert / sound / volume** — what plays when new signals appear.
 - **Market-hours only / minimum score** — when the app is allowed to bother you.
 - **Ticker** — the scrolling market-summary bar at the bottom of every page.
+  Switching it off also stops the app paying for its Claude-written verdict, so
+  it is a cost control as well as a display one.
 - **Appearance** — every color, font, and menu style, editable in-app (tabs of
   clickable color swatches). **Save & restart web GUI** applies the change.
 - **API usage** — how many calls the app made to Schwab (counted at the
@@ -428,7 +454,8 @@ Controls the alert chimes, notifications, the ticker, and the app's look.
   this month.
 - **Maintenance** — **Vacuum GEX history DB** shrinks the intraday options
   database on disk (run it after hours; it locks the file for minutes).
-- **Test sound** also unlocks browser audio. The **User Manuals** live here too.
+- **Test sound** also unlocks browser audio (browsers block it until you click
+  something). The **User Manuals** are a tab under **More**, not here.
 """,
     "/manuals": """
 **User Manuals — the simple version**
