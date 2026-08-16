@@ -412,30 +412,41 @@ def test_guarded_compute_logs_once_on_bus_outage(monkeypatch, caplog):
 
 
 # ── Deep Slate shell helpers (Phase 2) ──────────────────────────────────────
-def test_breadcrumb_parts_grouped_and_flat():
+def test_breadcrumb_trail_starts_at_a_section_for_every_page():
+    """The whole point of the trail (2026-08-16): the FIRST crumb is always the
+    section, so the breadcrumb means the same thing wherever you are.
+
+    It previously did not. A rail page rendered as its own bare name while a
+    grouped page rendered "Group › Page", which put "Dealer Positioning" (a page)
+    and "Options" (a group) in the same slot."""
     import main
-    # Grouped page → (group label, page label)
-    assert main.breadcrumb_parts("/") == ("Options", "Market Scanner")
-    # Renamed with the captioned-section redesign (2026-08-16): the MARKETS
-    # caption now carries the "Market" this label used to have to say itself.
-    assert main.breadcrumb_parts("/sentiment/rotation") == (
-        "Trend & Sentiment", "Sector Rotation")
-    assert main.breadcrumb_parts("/market") == (
-        "Trend & Sentiment", "Market Dashboard")
-    assert main.breadcrumb_parts("/eod") == ("More", "EOD Report")
-    # Flat single page → (page label, "") — no "· Tab"
-    assert main.breadcrumb_parts("/trade") == ("Trade Analyzer", "")
-    # Rail pages read as standalone sections, same as flat pages.
-    assert main.breadcrumb_parts("/options/gamma") == ("Dealer Positioning", "")
-    assert main.breadcrumb_parts("/options/matrix") == ("Opportunity Board", "")
-    assert main.breadcrumb_parts("/options/flow") == ("Flow Alerts", "")
-    # The three machine-level pages moved to the drawer foot (2026-08-12), so they
-    # are standalone rail pages too — no tab strip, no group in the breadcrumb.
-    assert main.breadcrumb_parts("/status") == ("System Status", "")
-    assert main.breadcrumb_parts("/terminate") == ("Stop All Services", "")
-    assert main.breadcrumb_parts("/settings") == ("Settings", "")
-    # Calculator is no longer a standalone rail page — it's a Strategy Tools tab.
-    assert main.breadcrumb_parts("/options/calculator") == ("Strategy Tools", "Calculator")
+    # A page inside a group → three crumbs, the full path through the menu.
+    assert main.breadcrumb_trail("/") == ["Strategy", "Options", "Market Scanner"]
+    assert main.breadcrumb_trail("/sentiment/rotation") == [
+        "Markets", "Trend & Sentiment", "Sector Rotation"]
+    assert main.breadcrumb_trail("/market") == [
+        "Markets", "Trend & Sentiment", "Market Dashboard"]
+    assert main.breadcrumb_trail("/eod") == ["Account", "More", "EOD Report"]
+    assert main.breadcrumb_trail("/options/calculator") == [
+        "Strategy", "Strategy Tools", "Calculator"]
+    # A standalone rail page → two crumbs, NOT a bare page name.
+    assert main.breadcrumb_trail("/options/gamma") == ["Markets", "Dealer Positioning"]
+    assert main.breadcrumb_trail("/options/matrix") == ["Markets", "Opportunity Board"]
+    assert main.breadcrumb_trail("/options/flow") == ["Markets", "Flow Alerts"]
+    assert main.breadcrumb_trail("/trade") == ["Strategy", "Trade Analyzer"]
+    assert main.breadcrumb_trail("/driver") == ["Strategy", "Claude Trades"]
+    assert main.breadcrumb_trail("/portfolio") == ["Account", "Portfolio"]
+    # The bottom-pinned block is not a NAV_SECTIONS caption, so it names its own.
+    assert main.breadcrumb_trail("/status") == ["System", "System Status"]
+    assert main.breadcrumb_trail("/settings") == ["System", "Settings"]
+    assert main.breadcrumb_trail("/terminate") == ["System", "Stop All Services"]
+    # Non-vacuity: every single nav route must produce a trail that STARTS with a
+    # section, which is the invariant a future page is most likely to break.
+    sections = {c.title() for c, _e in main.NAV_SECTIONS} | {main.SYSTEM_SECTION}
+    for route in main._NAV_LABEL:
+        trail = main.breadcrumb_trail(route)
+        assert trail[0] in sections, f"{route} has no section: {trail}"
+        assert trail[-1] == main._NAV_LABEL[route], f"{route} ends wrong: {trail}"
 
 
 def test_market_status_parts():
@@ -903,7 +914,7 @@ def test_app_name_comes_from_brand_config():
     from pages.options import theme
 
     assert theme.BRAND_NAME == "NeuralStrike"
-    assert main.breadcrumb_parts("/no/such/route") == ("NeuralStrike", "")
+    assert main.breadcrumb_trail("/no/such/route") == ["NeuralStrike"]
     src = inspect.getsource(main)
     assert "Schwab Trading" not in src, "stale app name left in main.py"
 
@@ -990,8 +1001,9 @@ def test_strategy_tools_group_pairs_calculator_with_simulator():
     # It is a GROUP, so both pages get the tab strip (rail pages get none).
     for route, _l, _i in main.STRATEGY_TOOLS_CHILDREN:
         assert main._group_children(route) == main.STRATEGY_TOOLS_CHILDREN, route
-    # ...and the breadcrumb reads "Strategy Tools · <page>".
-    assert main.breadcrumb_parts("/options/simulator") == ("Strategy Tools", "Simulator")
+    # ...and the breadcrumb reads "Strategy › Strategy Tools › <page>".
+    assert main.breadcrumb_trail("/options/simulator") == [
+        "Strategy", "Strategy Tools", "Simulator"]
 
 
 def test_strategy_tools_moved_out_of_their_old_homes():
@@ -1345,13 +1357,43 @@ def test_section_captions_swap_for_hairlines_in_the_collapsed_rail():
         assert sel in css, f"the collapsed-rail divider never hides for {sel}"
 
 
-def test_status_card_is_dropped_not_faded_in_the_rail():
-    """display, not opacity — an opacity:0 card would still reserve its height and
-    push the footer's three rows down in a 68px rail that has no room for it."""
+def test_status_card_keeps_its_dot_when_the_rail_is_collapsed():
+    """The card survives the collapse — the feed's health is the one footer fact
+    worth seeing without opening anything — but only its DOT fits at 68px.
+
+    So the CARD itself is never display:none (an earlier build dropped the whole
+    thing and the rail said nothing about the feed at all); the text column and
+    the count are what disappear, via display so they surrender their width
+    rather than pushing the dot out of the rail."""
+    import inspect
+
     import main
     css = main._NAV_CSS
-    assert ".nav-drawer .nav-status-card { display: none; }" in css
-    assert ".nav-drawer:hover .nav-status-card," in css
+    assert ".nav-drawer .nav-status-card { display: none; }" not in css, \
+        "the card must stay visible in the rail; only its text collapses"
+    assert ".nav-drawer .nav-status-text, .nav-drawer .nav-status-count " \
+           "{ display: none; }" in css
+    assert ".nav-drawer:hover .nav-status-text," in css
+    # The dot rides the shared 24px icon box, so with the text gone it still
+    # lines up with the icons above rather than floating mid-rail.
+    src = inspect.getsource(main._status_card)
+    assert "flex-none w-6 h-6" in src and "px-[11px]" in src
+
+
+def test_status_count_presence_is_a_class_not_set_visibility():
+    """Same specificity trap as the alert dots: NiceGUI's set_visibility toggles
+    the single-class .hidden, which the two-class state rules out-specify — a zero
+    count would pop back into view the moment the drawer opened."""
+    import inspect
+
+    import main
+    css = main._NAV_CSS
+    assert ".nav-status-count.nav-status-count-on" in css
+    for fn in (main._status_card, main._apply_status_card):
+        # ".set_visibility(" — the CALL, so the comment explaining why we avoid it
+        # doesn't fail its own test.
+        assert ".set_visibility(" not in inspect.getsource(fn)
+    assert "nav-status-count-on" in inspect.getsource(main._apply_status_card)
 
 
 def test_claude_trades_carries_a_static_ai_pill_that_the_watcher_never_touches():

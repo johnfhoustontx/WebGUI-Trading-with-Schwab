@@ -465,15 +465,48 @@ def _group_children(active: str):
 
 
 # ── Deep Slate shell helpers (Phase 2) — pure, unit-tested in test_shell.py ──
-def breadcrumb_parts(active: str):
-    """(section, tab) for the header breadcrumb ``{Section} · {Tab}``.
+# The section the SYSTEM_RAIL pages belong to. They sit in their own bottom-pinned
+# block rather than under a NAV_SECTIONS caption, so the breadcrumb names it here —
+# leaving them section-less would reintroduce the very inconsistency the trail
+# below exists to remove.
+SYSTEM_SECTION = "System"
 
-    A grouped page → (group label, this page's label); a flat single page →
-    (page label, "") so the breadcrumb shows just the section (no "· Tab")."""
-    for label, _icon, children in _NAV_GROUPS:
-        if any(path == active for path, _l, _i in children):
-            return label, _NAV_LABEL.get(active, "")
-    return _NAV_LABEL.get(active, theme.BRAND_NAME), ""
+
+def breadcrumb_trail(active: str):
+    """The header breadcrumb as a LIST of labels, root first.
+
+    Every page reads the same way — the path you would take through the menu to
+    reach it::
+
+        Markets   ›  Dealer Positioning              (a standalone rail page)
+        Markets   ›  Trend & Sentiment  ›  RRG       (a page inside a group)
+        Strategy  ›  Options  ›  Market Scanner
+        System    ›  Settings                        (the footer block)
+
+    Until 2026-08-16 a rail page rendered as its own name with NO parent while a
+    grouped page rendered "Group › Page", so the first crumb meant a different
+    thing depending on where you happened to be — "Dealer Positioning" and
+    "Options" occupied the same slot despite being a page and a group. Captioned
+    sections make one scheme possible for every item.
+
+    Captions are stored upper-case for the rail's mono type; the header wants
+    them as words, hence ``.title()``. Empty labels are dropped so a route
+    missing from ``_NAV_LABEL`` degrades to its section rather than rendering a
+    trailing separator with nothing after it.
+    """
+    for caption, entries in NAV_SECTIONS:
+        for entry in entries:
+            if entry[0] == "group":
+                _kind, label, _icon, children = entry
+                if any(path == active for path, _l, _i in children):
+                    return [c for c in (caption.title(), label,
+                                        _NAV_LABEL.get(active, "")) if c]
+            elif entry[1] == active:
+                return [caption.title(), entry[2]]
+    for path, label, _icon in SYSTEM_RAIL:
+        if path == active:
+            return [SYSTEM_SECTION, label]
+    return [_NAV_LABEL.get(active, theme.BRAND_NAME)]
 
 
 def brand_mark_src(static_dir=None):
@@ -889,6 +922,17 @@ _NAV_CSS = """
    scrollbar in the 64px rail. It cannot clip the corner count badges — they sit
    ~40px from the drawer's left edge, well inside the rail. */
 .nav-drawer { overflow-x: hidden; }
+/* A thin scrollbar, because the rail cannot spare a default one. .nav-drawer IS
+   the scroller, and once the menu is taller than the window (measured: 637px of
+   content against 579px at a 720px-tall window — a laptop, not a contrived case)
+   a stock ~15px scrollbar takes a fifth of the 68px rail, squeezing every row and
+   the status card down to 24px. flex-nowrap makes that scroll happen instead of
+   wrapping, so this is the other half of that fix. */
+.nav-drawer { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.16) transparent; }
+.nav-drawer::-webkit-scrollbar { width: 6px; }
+.nav-drawer::-webkit-scrollbar-track { background: transparent; }
+.nav-drawer::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,.16); border-radius: 3px; }
 /* Labels + the group title clip (not wrap) in the rail and fade in as it opens.
    Only the rail's fade lives here: it keys off an ANCESTOR's hover/focus/pinned
    state, which no Tailwind utility can express (the rest of the nav's typography
@@ -930,17 +974,24 @@ _NAV_CSS = """
 .nav-drawer.nav-pinned .nav-alert-open.nav-alert-on,
 .nav-drawer:hover .nav-alert-open.nav-alert-on,
 .nav-drawer:focus-within .nav-alert-open.nav-alert-on { display: block; }
-/* Footer service-status card. It is DROPPED in the rail rather than faded: at
-   68px there is no room for the text, and a lone dot would say less than the
-   count badge already riding the System Status icon two rows below. display
-   (not opacity) so it surrenders its height too — the footer must not reserve
-   space for a card that isn't there.
+/* Footer service-status card. The CARD stays in both states — the feed's health
+   is the one thing in the footer you want visible without opening anything — but
+   at 68px only its DOT fits, so the text column and the count are dropped and the
+   dot sits on the shared icon column. display, not opacity, so the hidden parts
+   surrender their width instead of pushing the dot out of the rail.
+   The count needs the same .nav-status-count-on gate the alert dots use: NiceGUI's
+   set_visibility toggles the single-class .hidden, which these two-class state
+   rules would out-specify, so a zero count would reappear the moment the drawer
+   opened.
    @keyframes is the one thing no Tailwind utility expresses, so it belongs in
    this Quasar-internal block rather than being a new exception. */
-.nav-drawer .nav-status-card { display: none; }
-.nav-drawer.nav-pinned .nav-status-card,
-.nav-drawer:hover .nav-status-card,
-.nav-drawer:focus-within .nav-status-card { display: flex; }
+.nav-drawer .nav-status-text, .nav-drawer .nav-status-count { display: none; }
+.nav-drawer.nav-pinned .nav-status-text,
+.nav-drawer:hover .nav-status-text,
+.nav-drawer:focus-within .nav-status-text { display: flex; }
+.nav-drawer.nav-pinned .nav-status-count.nav-status-count-on,
+.nav-drawer:hover .nav-status-count.nav-status-count-on,
+.nav-drawer:focus-within .nav-status-count.nav-status-count-on { display: block; }
 @keyframes ns-pulse {
     0%, 100% { opacity: 1; transform: scale(1); }
     50% { opacity: .35; transform: scale(.82); }
@@ -1449,23 +1500,30 @@ def _status_card() -> None:
     same count as a corner badge when collapsed.
     """
     facts = dict(_STATUS_CARD)
+    # px-[11px] + the 24px dot box put the dot on the SAME column as every rail
+    # icon (border-box means the 1px outline eats into the padding). That is what
+    # lets the card survive the collapse: with the text gone, the dot still lines
+    # up with the icons above it instead of floating in the middle of the rail.
     with ui.row().classes(
-            "nav-status-card w-full items-center gap-[10px] no-wrap "
-            "px-[10px] py-[9px] mb-1 rounded-[9px] "
+            "nav-status-card w-full items-center gap-3 no-wrap "
+            "px-[11px] py-[7px] mb-1 rounded-[9px] "
             "bg-white/[0.035] border border-white/[0.05]"):
-        _status_refs["dot"] = ui.element("div").classes(
-            f"nav-status-dot w-[7px] h-[7px] rounded-full flex-none "
-            f"nav-status-{facts['tone']}")
-        with ui.column().classes("gap-[2px] min-w-0"):
+        with ui.element("div").classes(
+                "flex items-center justify-center flex-none w-6 h-6"):
+            _status_refs["dot"] = ui.element("div").classes(
+                f"nav-status-dot w-[7px] h-[7px] rounded-full flex-none "
+                f"nav-status-{facts['tone']}")
+        with ui.column().classes("nav-status-text gap-[2px] min-w-0"):
             _status_refs["title"] = ui.label(facts["title"]).classes(
                 "text-[11.5px] font-semibold text-[#cdd7ec] whitespace-nowrap")
             _status_refs["detail"] = ui.label(facts["detail"]).classes(
                 "font-mono text-[10px] text-[#6b7898] whitespace-nowrap")
-        _status_refs["count"] = ui.label(
-            str(facts["count"]) if facts["count"] else "").classes(
-            "ml-auto font-mono text-[10px] px-[6px] py-[2px] rounded-[5px] "
-            "bg-[#e5484d]/[0.16] text-[#ff8f92]")
-        _status_refs["count"].set_visibility(bool(facts["count"]))
+        count = ui.label(str(facts["count"]) if facts["count"] else "").classes(
+            "nav-status-count ml-auto font-mono text-[10px] px-[6px] py-[2px] "
+            "rounded-[5px] bg-[#e5484d]/[0.16] text-[#ff8f92]")
+        if facts["count"]:
+            count.classes(add="nav-status-count-on")
+        _status_refs["count"] = count
 
 
 def _apply_status_card() -> None:
@@ -1483,7 +1541,11 @@ def _apply_status_card() -> None:
     refs["title"].text = facts["title"]
     refs["detail"].text = facts["detail"]
     refs["count"].text = str(facts["count"]) if facts["count"] else ""
-    refs["count"].set_visibility(bool(facts["count"]))
+    # A class, not set_visibility — see the .nav-status-count rule in _NAV_CSS.
+    if facts["count"]:
+        refs["count"].classes(add="nav-status-count-on")
+    else:
+        refs["count"].classes(remove="nav-status-count-on")
 
 
 def _toggle_pin(drawer) -> None:
@@ -1608,12 +1670,17 @@ def _layout(active: str, title: str):
                 "flat round dense color=white size=sm").tooltip("Pin / unpin the menu")
             ui.html(brand_lockup_html())
             ui.element("div").classes("w-px h-[22px] bg-white/[0.09] mx-1 flex-none")
-            _section, _tab = breadcrumb_parts(active)
             with ui.row().classes("items-center gap-2 no-wrap"):
-                ui.label(_section).classes("text-[13px] text-[#5d6a88]")
-                if _tab:
-                    ui.icon("chevron_right").classes("text-[14px] text-[#3f4a66]")
-                    ui.label(_tab).classes("text-[13px] text-[#e6ecf9] font-semibold")
+                _trail = breadcrumb_trail(active)
+                for _i, _crumb in enumerate(_trail):
+                    if _i:
+                        ui.icon("chevron_right").classes(
+                            "text-[14px] text-[#3f4a66]")
+                    # Only the last crumb is the page you are on; the ancestors
+                    # stay muted so the trail reads as context, not as a title.
+                    ui.label(_crumb).classes(
+                        "text-[13px] text-[#e6ecf9] font-semibold"
+                        if _i == len(_trail) - 1 else "text-[13px] text-[#5d6a88]")
         # RIGHT: the market-status pill alone. The design's search pill and
         # notification bell are deliberately not ported — see the design doc's
         # "Rejected" section.
