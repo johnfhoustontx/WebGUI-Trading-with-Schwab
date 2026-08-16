@@ -895,6 +895,60 @@ def test_brand_lockup_includes_the_mark_when_present(tmp_path):
     assert 'src="/static/img/neuralstrike-mark.png"' in out
 
 
+def test_brand_lockup_can_omit_the_mark(tmp_path):
+    """_layout renders the wordmark only, because the logo became the menu's pin
+    control and has to be a real element with a handler — it cannot live inside an
+    inert HTML string."""
+    import main
+
+    (tmp_path / "img").mkdir()
+    (tmp_path / "img" / "neuralstrike-mark.png").write_bytes(b"\x89PNG\r\n")
+    out = main.brand_lockup_html(tmp_path, mark=False)
+    assert "<img" not in out
+    assert "brand-word" in out, "the wordmark must still be there"
+
+
+def test_the_logo_is_the_menu_control_and_the_hamburger_is_gone():
+    """The logo replaced the hamburger (2026-08-16). A button, not a clickable
+    div, so keyboard focus and activation come for free."""
+    import inspect
+    import main
+    src = inspect.getsource(main._layout)
+    assert "brand-mark-btn" in src
+    assert "_toggle_pin(drawer)" in src
+    assert 'brand_lockup_html(mark=False)' in src
+    # The hamburger survives ONLY as the no-logo fallback, so the icon may appear
+    # at most once and must sit in the else branch.
+    assert src.count('icon="menu"') == 1
+    before, after = src.split('icon="menu"', 1)
+    assert "else:" in before.rsplit("if _mark:", 1)[-1], \
+        "the hamburger must be the fallback, not the primary control"
+
+
+def test_a_missing_logo_still_leaves_a_way_to_pin_the_menu(monkeypatch):
+    """brand_mark_src returns "" for a missing asset — a real path, not a
+    defensive flourish — and without a fallback that would remove the ONLY
+    control for the nav rail."""
+    import inspect
+    import main
+    src = inspect.getsource(main._layout)
+    # Both branches wire the same handler.
+    assert src.count("_toggle_pin(drawer)") >= 2
+
+
+def test_header_padding_and_logo_size_keep_the_bar_at_its_measured_height():
+    """The bar measured 60px = 16px padding x2 + 28px content, so the PADDING was
+    what capped the logo. 8 + 44 + 8 is the same 60px with a 44px mark. Pinning
+    the arithmetic here because the two numbers live in different files and
+    drifting them silently either shrinks the logo or grows the bar."""
+    import main
+    from pages.options import theme
+
+    assert ".q-header { padding-top: 8px; padding-bottom: 8px; }" in main._NAV_CSS
+    assert "width: 44px; height: 44px" in theme.BRAND_CSS
+    assert 8 + 44 + 8 == 60
+
+
 def test_brand_assets_are_shipped():
     """The header renders a real file, not a hopeful URL — so it must be in the
     repo. Pins BOTH the mark the header uses and the source lockup it is cropped

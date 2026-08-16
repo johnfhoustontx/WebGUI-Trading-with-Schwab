@@ -102,10 +102,12 @@ class Bus:
 
         ``skip_unchanged`` — for periodic republishers (e.g. the options
         header / GEX-status ticks). When set, if the currently-stored payload is
-        byte-identical to ``payload`` the write is skipped entirely: no ``INCR``,
-        no ``SET``, and no event publish, returning the existing version. This
-        stops unchanged data from bumping the version and waking every GUI
-        version-poller into a needless repaint.
+        byte-identical to ``payload`` the payload write is skipped: no ``INCR``,
+        no envelope ``SET``, and no event publish, returning the existing version.
+        This stops unchanged data from bumping the version and waking every GUI
+        version-poller into a needless repaint. The ``{key}:ts`` freshness stamp
+        IS still refreshed — see the comment at the short-circuit for why a
+        publisher whose data legitimately stops moving must not look dead.
 
         ``event`` — when given, the change event ``{"version": …}`` is published
         on that channel **as part of the same write** (pipelined with the
@@ -118,6 +120,23 @@ class Bus:
         if skip_unchanged:
             current = self.cache_get(key)
             if current is not None and current.payload == payload:
+                # Refresh the freshness side key even though the payload write is
+                # skipped. This is the whole difference between the two stamps:
+                # ``{key}:ts`` answers "when did the publisher last CONFIRM this is
+                # current", which is what a freshness/health probe needs, while the
+                # envelope's own ``ts`` still answers "when did it last CHANGE".
+                #
+                # Without it a healthy publisher looks dead whenever its data
+                # legitimately stops moving: market_svc polls round the clock, but
+                # over a weekend the quotes are frozen, every poll produces a
+                # byte-identical payload, and cache:market:dashboard measured 18h
+                # "stale" on the System Status board while the service was fine.
+                # The bug is latent in EVERY skip_unchanged view, not just that one.
+                #
+                # Costs one SET per skipped publish and — deliberately — does NOT
+                # touch ``:ver``, so the version-pollers this flag exists to protect
+                # still see nothing and still do not repaint.
+                self._r.set(f"{key}:ts", datetime.now(timezone.utc).isoformat())
                 return current.version
         version = self._r.incr(f"{key}:ver")
         env = CacheEnvelope(
@@ -125,11 +144,11 @@ class Bus:
             ts=datetime.now(timezone.utc).isoformat(),
             payload=payload,
         )
-        # ``{key}:ts`` mirrors the envelope ts as a tiny side key (like ``:ver``)
-        # so freshness probes (cache_metas) never deserialize the payload. Written
-        # in the same pipeline as the SET; skipped when skip_unchanged skips — the
-        # side key always equals the LAST ACTUAL write's ts, exactly like the
-        # envelope's own ts.
+        # ``{key}:ts`` is a tiny side key (like ``:ver``) so freshness probes
+        # (cache_metas) never deserialize the payload. Written in the same pipeline
+        # as the SET. NOTE it is NOT simply a mirror of the envelope ts: a
+        # skip_unchanged short-circuit refreshes it too (see above), so ``:ts`` is
+        # "last confirmed current" while the envelope's ts is "last changed".
         pipe = self._r.pipeline()
         pipe.set(key, env.to_json())
         pipe.set(f"{key}:ts", env.ts)

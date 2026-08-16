@@ -619,7 +619,7 @@ def brand_mark_src(static_dir=None):
     return ""
 
 
-def brand_lockup_html(static_dir=None):
+def brand_lockup_html(static_dir=None, *, mark=True):
     """The header lockup: the logo mark (when present) + the two-tone wordmark.
 
     Raw HTML rather than NiceGUI elements because each wordmark half needs a
@@ -630,8 +630,13 @@ def brand_lockup_html(static_dir=None):
     In dev the lockup carries a DEV chip: two identical-looking tabs that write
     to DIFFERENT paper books is a mistake waiting to happen. Inline style for the
     same reason as the rest of this function — it is a raw HTML string, not a
-    NiceGUI element with ``.classes()``."""
-    mark = brand_mark_src(static_dir)
+    NiceGUI element with ``.classes()``.
+
+    ``mark=False`` emits the WORDMARK only. ``_layout`` uses that, because since
+    2026-08-16 the logo is the menu's pin control and therefore has to be a real
+    NiceGUI element with a click handler and a tooltip — it cannot live inside an
+    inert HTML string."""
+    mark = brand_mark_src(static_dir) if mark else ""
     img = (f'<img src="{html.escape(mark)}" class="brand-mark" alt="">'
            if mark else "")
     chip = ('<span style="margin-left:8px;padding:1px 7px;border-radius:4px;'
@@ -642,6 +647,19 @@ def brand_lockup_html(static_dir=None):
             f'<span class="a">{html.escape(theme.BRAND_NAME_A)}</span>'
             f'<span class="b">{html.escape(theme.BRAND_NAME_B)}</span>'
             f'</span>{chip}</div>')
+
+
+def nav_pin_tooltip():
+    """Hover text for the logo, which is the menu's pin control.
+
+    States BOTH directions rather than the current one. The tooltip is built once
+    per page render while ``_toggle_pin`` changes the state without rebuilding, so
+    a state-aware string ("Unpin the menu") would be wrong the moment you used it
+    — and storing a ref to correct it would reintroduce the cross-tab sharing bug
+    the breadcrumb leaf just had. The old wording, "Pin / unpin the menu", named
+    the control rather than the outcome and left you to work out which half
+    applied to the state you were in."""
+    return "Pin the menu open, or unpin it back to the icon rail"
 
 
 def window_title(page: str | None = None):
@@ -1168,9 +1186,22 @@ _NAV_CSS = """
 .mkt-closed { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.09); }
 .mkt-closed .dot { background: #6d76a0; }
 .mkt-closed .lbl { color: #8891ab; }
-/* Header brand mark — theme.build_brand_css already sizes it (28px, radius 8);
-   this only adds the design's hairline so the logo doesn't float on the bar. */
+/* Header brand mark — theme.build_brand_css sizes it; this adds the design's
+   hairline so the logo doesn't float on the bar. */
 .brand-mark { border: 1px solid rgba(255,255,255,.1); }
+/* The logo IS the menu's pin control (2026-08-16), so it is a q-btn — which
+   arrives with its own padding and min-height and would otherwise inflate the
+   bar. Stripping those lets the image alone define the button's box.
+   The header's own vertical padding is halved at the same time: the bar measured
+   60px = 16px padding x2 + 28px of content, so the padding is exactly what was
+   capping the logo. 8 + 44 + 8 is the same 60px with a 44px mark — the largest
+   that fits while keeping real clearance and not moving the bar by a pixel. */
+.q-header { padding-top: 8px; padding-bottom: 8px; }
+.brand-mark-btn.q-btn {
+  padding: 0; min-height: 0; min-width: 0; border-radius: 12px;
+}
+.brand-mark-btn .q-btn__content { padding: 0; }
+.brand-mark-btn:hover .brand-mark { border-color: rgba(255,255,255,.28); }
 """
 
 # The rail's open width is the ONE CSS value that must equal a Python constant —
@@ -1763,9 +1794,23 @@ def _layout(active: str, title: str):
         # Strategy Tools"), which is why it moved off the right edge — over there
         # it competed with the market pill for the eye and won neither.
         with ui.row().classes("items-center gap-3 no-wrap"):
-            ui.button(icon="menu", on_click=lambda: _toggle_pin(drawer)).props(
-                "flat round dense color=white size=sm").tooltip("Pin / unpin the menu")
-            ui.html(brand_lockup_html())
+            # The LOGO is the menu control (2026-08-16) — the hamburger is gone.
+            # It is a real button, not a clickable div, so it keeps keyboard focus
+            # and activation for free; the wordmark beside it stays inert.
+            _mark = brand_mark_src()
+            if _mark:
+                with ui.button(on_click=lambda: _toggle_pin(drawer)).props(
+                        "flat dense").classes("brand-mark-btn"):
+                    ui.html(f'<img src="{html.escape(_mark)}" '
+                            f'class="brand-mark" alt="">')
+                    ui.tooltip(nav_pin_tooltip()).props("delay=350")
+            else:
+                # No logo file → fall back to the hamburger rather than losing the
+                # ONLY way to pin the menu. brand_mark_src returns "" for a missing
+                # asset, so this is a real path, not a defensive flourish.
+                ui.button(icon="menu", on_click=lambda: _toggle_pin(drawer)).props(
+                    "flat round dense color=white size=sm").tooltip(nav_pin_tooltip())
+            ui.html(brand_lockup_html(mark=False))
             ui.element("div").classes("w-px h-[22px] bg-white/[0.09] mx-1 flex-none")
             with ui.row().classes("items-center gap-2 no-wrap"):
                 _trail = breadcrumb_trail(active)

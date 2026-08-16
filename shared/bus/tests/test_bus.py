@@ -44,12 +44,34 @@ def test_cache_metas_empty():
     assert Bus(fake=True).cache_metas([]) == {}
 
 
-def test_cache_set_skip_unchanged_leaves_ts_untouched():
+def test_cache_set_skip_unchanged_still_refreshes_the_freshness_stamp():
+    """A skipped write means "checked, nothing changed" — NOT "nothing happened".
+
+    This test previously asserted the opposite, which is how the bug shipped:
+    freshness read the frozen stamp and reported a healthy publisher as dead
+    whenever its data legitimately stopped moving. Measured in prod on a weekend,
+    cache:market:dashboard showed 18h stale while market_svc was polling fine, and
+    every skip_unchanged view has the same exposure.
+    """
     b = Bus(fake=True)
     b.cache_set("cache:test:mt", {"n": 1})
     ts1 = b._r.get("cache:test:mt:ts")
     b.cache_set("cache:test:mt", {"n": 1}, skip_unchanged=True)
-    assert b._r.get("cache:test:mt:ts") == ts1  # skip -> no ts rewrite
+    ts2 = b._r.get("cache:test:mt:ts")
+    assert ts2 is not None and ts2 >= ts1, "the stamp must move forward, not freeze"
+    # The ENVELOPE's own ts is the other question — "when did it last CHANGE" —
+    # and must NOT be rewritten, or the two stamps stop being distinguishable.
+    assert b.cache_get("cache:test:mt").ts == ts1
+
+
+def test_cache_set_skip_unchanged_leaves_the_version_alone_while_stamping():
+    """The stamp refresh must not defeat what skip_unchanged is FOR: the version
+    is what GUI pollers watch, and bumping it would repaint every open tab."""
+    b = Bus(fake=True)
+    b.cache_set("cache:test:mtv", {"n": 1})
+    ver_before = b._r.get("cache:test:mtv:ver")
+    b.cache_set("cache:test:mtv", {"n": 1}, skip_unchanged=True)
+    assert b._r.get("cache:test:mtv:ver") == ver_before
 
 
 def test_cache_set_skip_unchanged_does_not_bump_version():

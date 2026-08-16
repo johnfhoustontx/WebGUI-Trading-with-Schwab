@@ -623,7 +623,7 @@ def build_brand_css(theme):
 /* The logo mark. Its artwork is on black, which sits naturally on the dark
    header — so no plate/gradient behind it, unlike the old glyph tile. */
 .brand-mark {{
-  width: 28px; height: 28px; border-radius: 8px; flex: none;
+  width: 44px; height: 44px; border-radius: 12px; flex: none;
   object-fit: cover; display: block;
 }}
 """

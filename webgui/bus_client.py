@@ -85,15 +85,27 @@ def read_versions(views):
     return {v: raw.get(f"cache:{v}") for v in views}
 
 
+def _envelope_meta(view):
+    """``(version, ts)`` read from the full envelope — the pre-``:ts`` fallback."""
+    env = bus().cache_get(f"cache:{view}")
+    return (env.version, env.ts) if env else (None, None)
+
+
 def read_meta(view):
     """Return ``(version, ts)`` for a view, or ``(None, None)`` if absent.
 
-    ``ts`` is the ISO-8601 UTC timestamp the publishing service stamped on the
-    cache write (``CacheEnvelope.ts``). Used by the System Status page to show
-    how fresh each domain's published data is.
+    ``ts`` is the ``{key}:ts`` side key: the ISO-8601 UTC time the publishing
+    service last CONFIRMED this view current, which is not the same as when it
+    last changed (a ``skip_unchanged`` republish refreshes the stamp without
+    touching the payload — see ``Bus.cache_set``). That is the stamp a freshness
+    probe wants, and reading it here rather than the envelope keeps this in step
+    with :func:`read_metas`; a stale-data view would otherwise report one age on
+    the System Status table and another to the nav badge.
     """
-    env = bus().cache_get(f"cache:{view}")
-    return (env.version, env.ts) if env else (None, None)
+    ver, ts = bus().cache_metas([f"cache:{view}"]).get(f"cache:{view}", (None, None))
+    if ver is not None and ts is None:      # pre-upgrade write — one-off fallback
+        return _envelope_meta(view)
+    return (ver, ts)
 
 
 def read_metas(views):
@@ -111,7 +123,7 @@ def read_metas(views):
     for v in views:
         ver, ts = raw.get(f"cache:{v}", (None, None))
         if ver is not None and ts is None:  # pre-upgrade write — one-off fallback
-            out[v] = read_meta(v)
+            out[v] = _envelope_meta(v)
         else:
             out[v] = (ver, ts)
     return out
